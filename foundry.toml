@@ -6,15 +6,15 @@ test = "test"
 script = "script"
 optimizer = true
 optimizer_runs = 200
-solc_version = "0.8.20"
-evm_version = "paris"
+auto_detect_solc = true
+evm_version = "cancun"
 ffi = false
 fs_permissions = []
 
 # Remappings for installed dependencies
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-    "@chainlink/contracts/=lib/chainlink/contracts/",
+    "@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/",
     "@uniswap/v3-core/=lib/v3-core/",
     "@uniswap/v3-periphery/=lib/v3-periphery/",
 ]

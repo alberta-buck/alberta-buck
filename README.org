@@ -1,0 +1,96 @@
+#+title: Alberta Buck -- Ethereum Smart Contracts
+#+OPTIONS: ^:nil toc:nil
+
+* Overview
+
+Ethereum implementation of the [[https://perry.kundert.ca/range/finance/alberta-buck/][Alberta Buck]] -- citizen-issued, wealth-backed
+liquidity for Alberta.  Three interacting smart contracts:
+
+- *BuckCredit* (ERC-721) :: An NFT representing an insurer's offer of parametric insurance on a
+  real-world asset.  Supports deterministic depreciation (none, linear, declining balance) and
+  piecemeal client activation.
+
+- *Buck* (ERC-20) :: A fungible token minted against aggregated BuckCredit values.  Enforces
+  per-account credit limits (credit value * BUCK_K) and collects quadratically-scaled default
+  insurance premiums.
+
+- *BuckKController* :: An on-chain PID controller that computes a dynamic credit-limit multiplier
+  from commodity-basket oracle prices vs. BUCK market price, maintaining purchasing-power parity.
+
+Design document: [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][The Alberta Buck -- Ethereum Implementation]]
+
+* Getting Started
+
+** Prerequisites
+
+- [[https://nixos.org/download.html][Nix]] (with flakes enabled) -- provides Foundry, Solidity compiler, Python, Node.js
+- An Ethereum RPC endpoint for forked-network testing (Alchemy free tier, Infura, or a local node)
+
+** Setup
+
+#+BEGIN_SRC bash
+  git clone git@github.com:pjkundert/alberta-buck.git
+  cd alberta-buck
+  nix develop           # Enter dev shell
+  make install          # Install Solidity dependencies (OpenZeppelin, Chainlink, Uniswap)
+#+END_SRC
+
+** Build
+
+#+BEGIN_SRC bash
+  forge build
+#+END_SRC
+
+** Test
+
+#+BEGIN_SRC bash
+  forge test -vvv                          # All tests, verbose
+  forge test --match-test test_activate    # Specific test
+  forge snapshot                           # Gas usage report
+#+END_SRC
+
+** Forked Network Testing
+
+Copy =.env.example= to =.env= and set your RPC endpoint:
+
+#+BEGIN_SRC bash
+  cp .env.example .env
+  # Edit .env with your Alchemy/Infura key (or http://localhost:8545 for a local node)
+#+END_SRC
+
+Then:
+
+#+BEGIN_SRC bash
+  make fork-sepolia         # Start Anvil forking Sepolia (runs in foreground)
+  make test-fork-sepolia    # Run tests against forked Sepolia
+  make fork-mainnet         # Fork mainnet (for DeFi integration testing)
+#+END_SRC
+
+Pin a specific block for deterministic tests:
+
+#+BEGIN_SRC bash
+  FORK_BLOCK=12345678 make fork-sepolia
+#+END_SRC
+
+** Deploy (Local)
+
+#+BEGIN_SRC bash
+  make anvil &              # Start local Anvil node
+  make deploy-local         # Deploy all three contracts
+#+END_SRC
+
+* Project Structure
+
+| Path                   | Contents                                   |
+|------------------------+--------------------------------------------|
+| =src/BuckCredit.sol=   | ERC-721 insured asset NFT                  |
+| =src/Buck.sol=         | ERC-20 token with credit-limit minting     |
+| =src/BuckKController.sol= | PID value stabilization controller     |
+| =test/BuckCredit.t.sol= | Forge tests (depreciation, activation, updates) |
+| =script/Deploy.s.sol=  | Deployment script                          |
+| =flake.nix=            | Nix dev environment                        |
+| =foundry.toml=         | Forge configuration and remappings         |
+
+* License
+
+GPL-3.0-or-later

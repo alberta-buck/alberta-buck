@@ -93,7 +93,7 @@ deploy-sepolia:
 
 install:
 	forge install OpenZeppelin/openzeppelin-contracts --no-git
-	forge install smartcontractkit/chainlink --no-git
+	forge install smartcontractkit/chainlink-brownie-contracts --no-git
 	forge install Uniswap/v3-core --no-git
 	forge install Uniswap/v3-periphery --no-git
 

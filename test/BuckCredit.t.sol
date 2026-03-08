@@ -145,12 +145,15 @@ contract BuckCreditTest is Test {
         // Expected: 5K + 95K * exp(-0.15) ≈ 5K + 81,765 ≈ 86,765
         assertApproxEqRel(val1, 86_765e18, 0.01e18);  // within 1%
 
-        // After 30 years
-        vm.warp(block.timestamp + 365.25 days * 29);  // total 30 years
-        uint256 val30 = credit.currentValue(tokenId);
-        // Should be close to floor
-        assertGt(val30, 5_000e18);
-        assertLt(val30, 15_000e18);
+        // After 5 years total: exp(-0.75) ≈ 0.4724 → 5K + 95K*0.4724 ≈ 49,878
+        vm.warp(block.timestamp + 365.25 days * 4);  // total 5 years
+        uint256 val5 = credit.currentValue(tokenId);
+        assertApproxEqRel(val5, 49_878e18, 0.02e18);  // within 2%
+
+        // After 10 years total: exp(-1.5) ≈ 0.2231 → 5K + 95K*0.2231 ≈ 26,195
+        vm.warp(block.timestamp + 365.25 days * 5);  // total 10 years
+        uint256 val10 = credit.currentValue(tokenId);
+        assertApproxEqRel(val10, 26_195e18, 0.02e18);
     }
 
     function test_totalCurrentValue() public {
