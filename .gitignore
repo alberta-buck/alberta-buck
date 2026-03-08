@@ -1,0 +1,29 @@
+# Foundry build artifacts
+/out/
+/cache/
+/broadcast/
+
+# Dependency directories (installed via forge install)
+/lib/
+
+# Nix
+/result
+
+# Environment (may contain RPC API keys)
+.env
+
+# Editor temporaries
+*~
+.#*
+.DS_Store
+
+# Node (if used for tooling)
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Coverage
+lcov.info
