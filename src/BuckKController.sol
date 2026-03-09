@@ -47,7 +47,7 @@ contract BuckKController {
     constructor(
         int256 _Kp, int256 _Ki, int256 _Kd,
         uint256 _dT,
-        uint256 _buckKMin, uint256 _buckKMax,
+        uint256 _buckKMin, uint256 _buckKMax, uint256 _buckK,
         address _buckUsdcPool, uint32 _twapInterval,
         address _governance
     ) {
@@ -58,7 +58,7 @@ contract BuckKController {
         buckUsdcPool = _buckUsdcPool;
         twapInterval = _twapInterval;
         governance = _governance;
-        buckK = uint256(UNIT);  // Start at 1.0 (neutral)
+        buckK = _buckK;
         lastUpdate = block.timestamp;
     }
 
@@ -129,7 +129,7 @@ contract BuckKController {
 
     /// @dev BUCK/USDC price from Uniswap V3 TWAP oracle.
     ///      Placeholder — production uses OracleLibrary.consult().
-    function _getBuckPrice() internal view returns (int256) {
+    function _getBuckPrice() internal view virtual returns (int256) {
         // TODO: Implement with Uniswap V3 OracleLibrary
         // For testing, override this via a mock or vm.mockCall
         revert("_getBuckPrice: implement with OracleLibrary");

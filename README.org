@@ -31,22 +31,27 @@ Design document: [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/
 #+BEGIN_SRC bash
   git clone git@github.com:pjkundert/alberta-buck.git
   cd alberta-buck
-  nix develop           # Enter dev shell
-  make install          # Install Solidity dependencies (OpenZeppelin, Chainlink, Uniswap)
+  make nix-install          # Install Solidity dependencies (OpenZeppelin, Chainlink, Uniswap)
 #+END_SRC
 
-** Build
+** Build and Test
+
+The =nix-%= Makefile target runs any target inside the Nix flake shell, providing Foundry (forge,
+anvil, cast), Solidity compiler, Python and Node.js -- no manual =nix develop= required:
 
 #+BEGIN_SRC bash
-  forge build
+  make nix-build                           # Compile contracts
+  make nix-test                            # All tests, verbose
+  make nix-snapshot                        # Gas usage report
+  make nix-fmt                             # Format Solidity source
 #+END_SRC
 
-** Test
+Or enter the shell interactively for ad-hoc commands:
 
 #+BEGIN_SRC bash
-  forge test -vvv                          # All tests, verbose
+  nix develop                              # Enter dev shell
   forge test --match-test test_activate    # Specific test
-  forge snapshot                           # Gas usage report
+  forge test --match-contract BuckCredit   # All tests in a contract
 #+END_SRC
 
 ** Forked Network Testing
@@ -61,22 +66,22 @@ Copy =.env.example= to =.env= and set your RPC endpoint:
 Then:
 
 #+BEGIN_SRC bash
-  make fork-sepolia         # Start Anvil forking Sepolia (runs in foreground)
-  make test-fork-sepolia    # Run tests against forked Sepolia
-  make fork-mainnet         # Fork mainnet (for DeFi integration testing)
+  make nix-fork-sepolia         # Start Anvil forking Sepolia (runs in foreground)
+  make nix-test-fork-sepolia    # Run tests against forked Sepolia
+  make nix-fork-mainnet         # Fork mainnet (for DeFi integration testing)
 #+END_SRC
 
 Pin a specific block for deterministic tests:
 
 #+BEGIN_SRC bash
-  FORK_BLOCK=12345678 make fork-sepolia
+  FORK_BLOCK=12345678 make nix-fork-sepolia
 #+END_SRC
 
 ** Deploy (Local)
 
 #+BEGIN_SRC bash
-  make anvil &              # Start local Anvil node
-  make deploy-local         # Deploy all three contracts
+  make nix-anvil &              # Start local Anvil node
+  make nix-deploy-local         # Deploy all three contracts
 #+END_SRC
 
 * Project Structure

@@ -4,12 +4,15 @@
 # Foundry/Anvil-based build, test, and local fork environment.
 #
 
+SHELL		= /bin/bash
+
 # RPC endpoints for forking.  Override via environment or .env file.
 # Free tier: https://dashboard.alchemy.com/ or https://infura.io/
 # Local node: http://localhost:8545 (Reth, Geth, Erigon)
 -include .env
-SEPOLIA_RPC_URL		?= https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
-MAINNET_RPC_URL		?= https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+ALCHEMY_API_TOKEN	?=
+SEPOLIA_RPC_URL		?= https://eth-sepolia.g.alchemy.com/v2/$(ALCHEMY_API_TOKEN)
+MAINNET_RPC_URL		?= https://eth-mainnet.g.alchemy.com/v2/$(ALCHEMY_API_TOKEN)
 
 # Anvil defaults
 ANVIL_PORT		?= 8545
@@ -106,3 +109,28 @@ update:
 clean:
 	forge clean
 	rm -rf cache out broadcast
+
+#
+# nix-...:
+#
+# Use a Nix flake environment to execute the make target, eg.
+#
+#     nix-venv-activate
+#
+nix-%:
+	@if [ -n "$(TARGET)" ]; then \
+		nix develop .#$(TARGET) $(NIX_OPTS) --command make $*; \
+	else \
+		nix develop $(NIX_OPTS) --command make $*; \
+	fi
+
+#
+# Target to allow the printing of 'make' variables, eg:
+#
+#     make print-PY3
+#
+print-%:
+	@echo $* = "'$($*)'"
+	@echo $*\'s origin is $(origin $*)
+
+FORCE:

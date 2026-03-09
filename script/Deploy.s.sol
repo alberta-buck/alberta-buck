@@ -24,8 +24,9 @@ contract Deploy is Script {
             0.01e18,    // Ki: very conservative integral
             0.05e18,    // Kd: moderate damping
             3600,       // dT: 1 hour minimum between PID updates
-            0.5e18,     // buckKMin: 50% floor
-            2.0e18,     // buckKMax: 200% ceiling
+            0.50e18,    // buckKMin: 50% floor
+            0.95e18,    // buckKMax: 95% ceiling
+            1.0e18,     // buckK: initial value (neutral)
             address(0), // buckUsdcPool: not yet deployed
             1800,       // twapInterval: 30 minutes
             governance

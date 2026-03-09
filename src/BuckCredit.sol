@@ -47,7 +47,7 @@ contract BuckCredit is ERC721Enumerable {
     event CreditActivated(uint256 indexed tokenId, address indexed owner,
                           uint256 additionalValue, uint256 totalActivated);
 
-    constructor() ERC721("BuckCredit", "BCREDIT") {}
+    constructor() ERC721("BuckCredit", "BUCK_CREDIT") {}
 
     /// @notice Insurer creates a new BUCK_CREDIT NFT for a client.
     function createCredit(
