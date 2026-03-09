@@ -23,7 +23,14 @@ node_modules/
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
+
+# Generated plots
+*.png
 
 # Coverage
 lcov.info
+*.aux
+*.toc
+*.tex

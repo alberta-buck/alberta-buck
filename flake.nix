@@ -17,6 +17,8 @@
           web3               # Ethereum JSON-RPC client
           eth-abi             # ABI encoding/decoding
           eth-account         # Account/key management
+          matplotlib          # Plotting / visualization
+          python-dotenv       # Load .env files
           pyyaml
           requests
         ]);

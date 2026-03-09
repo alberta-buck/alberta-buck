@@ -34,6 +34,7 @@ endif
 .PHONY: fork-sepolia fork-mainnet anvil stop-anvil
 .PHONY: deploy-local deploy-sepolia
 .PHONY: install update
+.PHONY: test-python venv-activate
 
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -90,6 +91,15 @@ deploy-local:
 
 deploy-sepolia:
 	forge script script/Deploy.s.sol --broadcast --rpc-url $(SEPOLIA_RPC_URL) --verify -vvv
+
+
+# ── Python Tests ────────────────────────────────────────────────────
+
+test-python:
+	python -m pytest alberta_buck/test/ -v -s
+
+venv-activate:
+	pip install -e ".[tests]"
 
 
 # ── Dependencies ─────────────────────────────────────────────────────

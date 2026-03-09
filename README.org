@@ -77,6 +77,55 @@ Pin a specific block for deterministic tests:
   FORK_BLOCK=12345678 make nix-fork-sepolia
 #+END_SRC
 
+** Python: Oracle History and Visualization
+
+The =alberta_buck= Python module queries Chainlink price feed oracles on Ethereum mainnet to
+retrieve historical commodity prices.  This validates the on-chain data sources used by the
+BuckKController PID loop and provides visualization for analysis.
+
+*** How it works
+
+The test connects to an Ethereum mainnet RPC endpoint and reads Chainlink's [[https://docs.chain.link/data-feeds/price-feeds/addresses][AggregatorV3Interface]]
+price feeds for Gold (XAU/USD) and Silver (XAG/USD) -- the same oracle contracts used by the
+Solidity =BuckKControllerForkTest=:
+
+| Feed    | Mainnet Address                              |
+|---------+----------------------------------------------|
+| XAU/USD | =0x214eD9Da11D2fbe465a6fc601a91E62EbEc1a0D6= |
+| XAG/USD | =0x379589227b15F1a12195D3f2d90bBc9F31f95235= |
+
+For each of the past 365 days, the test estimates the Ethereum block number at that point in time
+(using the ~12.05s average post-merge block interval) and calls =latestRoundData()= with that block
+as the call context.  This returns the most recent oracle price update as of that block -- no
+archive node special features required beyond standard =eth_call= with a block parameter.
+
+The result is 366 data points per feed (today plus 365 days back), which are plotted with matplotlib
+and saved as a PNG.
+
+*** Running
+
+Requires =MAINNET_RPC_URL= (or =ETH_RPC_URL=) pointing to an Ethereum mainnet RPC endpoint.
+Alchemy and Infura free tiers support the required historical =eth_call= queries.
+
+#+BEGIN_SRC bash
+  export MAINNET_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+  make nix-test-python
+#+END_SRC
+
+The test takes roughly 10-15 minutes (732 RPC calls: 366 days x 2 feeds).  On completion it writes
+=alberta_buck/test/gold_silver_history.png=:
+
+#+ATTR_ORG: :width 800
+[[file:alberta_buck/test/gold_silver_history.png]]
+
+*** Future commodity oracles
+
+The =alberta_buck.oracle= module is designed to support additional feeds.  The BUCK commodity basket
+targets five components -- gold, silver, oil, natural gas, and copper -- with planned expansion to
+beef, lumber, electricity, and labour.  For commodities without existing Chainlink mainnet feeds,
+custom oracle contracts will be deployed and populated with historical trend data sourced from public
+commodity price datasets.
+
 ** Deploy (Local)
 
 #+BEGIN_SRC bash
@@ -86,15 +135,19 @@ Pin a specific block for deterministic tests:
 
 * Project Structure
 
-| Path                   | Contents                                   |
-|------------------------+--------------------------------------------|
-| =src/BuckCredit.sol=   | ERC-721 insured asset NFT                  |
-| =src/Buck.sol=         | ERC-20 token with credit-limit minting     |
-| =src/BuckKController.sol= | PID value stabilization controller     |
-| =test/BuckCredit.t.sol= | Forge tests (depreciation, activation, updates) |
-| =script/Deploy.s.sol=  | Deployment script                          |
-| =flake.nix=            | Nix dev environment                        |
-| =foundry.toml=         | Forge configuration and remappings         |
+| Path                         | Contents                                        |
+|------------------------------+-------------------------------------------------|
+| =src/BuckCredit.sol=         | ERC-721 insured asset NFT                       |
+| =src/Buck.sol=               | ERC-20 token with credit-limit minting          |
+| =src/BuckKController.sol=    | PID value stabilization controller              |
+| =test/BuckCredit.t.sol=      | Forge tests (depreciation, activation, updates) |
+| =test/BuckKController.t.sol= | PID controller unit + mainnet fork tests        |
+| =script/Deploy.s.sol=        | Deployment script                               |
+| =alberta_buck/oracle.py=     | Chainlink oracle historical price reader        |
+| =alberta_buck/test/=         | Python tests (oracle history, visualization)    |
+| =pyproject.toml=             | Python project configuration                    |
+| =flake.nix=                  | Nix dev environment                             |
+| =foundry.toml=               | Forge configuration and remappings              |
 
 * License
 
