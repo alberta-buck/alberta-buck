@@ -1,9 +1,16 @@
 """Test: query Chainlink Gold and Silver oracles on mainnet over the past year, plot results.
 
-Requires MAINNET_RPC_URL (or ETH_RPC_URL) environment variable pointing to an
-Ethereum archive-capable RPC endpoint (e.g. Alchemy, Infura).
+Two modes of operation:
 
-    pytest alberta_buck/test/test_oracle_history.py -v -s
+  Anvil (fast, cached):
+    Terminal 1:  make fork-mainnet-cache
+    Terminal 2:  ETH_RPC_URL=http://localhost:8545 make nix-test-python
+    First run fetches from remote and populates Anvil's disk cache.
+    Subsequent runs serve entirely from cache (~seconds).
+
+  Direct RPC (no Anvil):
+    MAINNET_RPC_URL=https://... make nix-test-python
+    Each run makes ~732 remote RPC calls (~10-15 min).
 
 The test produces alberta_buck/test/gold_silver_history.png.
 """
@@ -20,18 +27,31 @@ try:
 except ImportError:
     pass
 
-from alberta_buck.oracle import FEEDS, get_daily_prices, get_web3
+from alberta_buck.oracle import (
+    FEEDS, get_daily_prices, get_round_history, get_web3,
+    log_call_counts, rpc_call_summary,
+)
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 PLOT_DIR = Path(__file__).parent
-DAYS = 365
+DAYS = int(os.environ.get("DAYS", "365"))
 
 needs_rpc = pytest.mark.skipif(
     not (os.environ.get("MAINNET_RPC_URL") or os.environ.get("ETH_RPC_URL")),
     reason="MAINNET_RPC_URL not set -- skipping mainnet fork test",
 )
+
+
+def _is_anvil(w3):
+    """Detect whether we are connected to an Anvil node."""
+    try:
+        info = w3.provider.make_request("web3_clientVersion", [])
+        version = info.get("result", "")
+        return "anvil" in version.lower()
+    except Exception:
+        return False
 
 
 @needs_rpc
@@ -44,20 +64,30 @@ def test_gold_silver_history():
 
     w3 = get_web3()
     chain_id = w3.eth.chain_id
-    log.info("Connected to chain %d, block %d", chain_id, w3.eth.block_number)
+    anvil = _is_anvil(w3)
+    log.info(
+        "Connected to chain %d, block %d%s",
+        chain_id, w3.eth.block_number,
+        " (Anvil -- using round-based cache-friendly queries)" if anvil else "",
+    )
     assert chain_id == 1, f"Expected mainnet (chain 1), got {chain_id}"
 
-    # Query both feeds
+    # Choose query strategy: round-walk for Anvil (cache-friendly), block-based otherwise
+    query_fn = get_round_history if anvil else get_daily_prices
+
     series = {}
     for name, address in FEEDS.items():
-        desc, decimals, records = get_daily_prices(w3, address, days=DAYS)
+        desc, decimals, records = query_fn(w3, address, days=DAYS)
         log.info("%s: %d records, decimals=%d", desc, len(records), decimals)
-        assert len(records) > 300, f"Expected >300 daily records for {name}, got {len(records)}"
+        min_records = max(1, int(DAYS * 0.8))
+        assert len(records) >= min_records, (
+            f"Expected >={min_records} daily records for {name}, got {len(records)}"
+        )
         series[name] = (desc, records)
 
     # Plot
     fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
-    fig.suptitle("Chainlink Oracle Prices -- Ethereum Mainnet (1 Year)", fontsize=14)
+    fig.suptitle(f"Chainlink Oracle Prices -- Ethereum Mainnet ({DAYS} days)", fontsize=14)
 
     colors = {"XAU/USD": "#DAA520", "XAG/USD": "#C0C0C0"}
 
@@ -70,7 +100,6 @@ def test_gold_silver_history():
         ax.grid(True, alpha=0.3)
         ax.set_title(desc, fontsize=12)
 
-        # Annotate latest
         ax.annotate(
             f"${prices[-1]:,.2f}",
             xy=(dates[-1], prices[-1]),
@@ -88,6 +117,9 @@ def test_gold_silver_history():
     fig.savefig(out, dpi=150)
     plt.close(fig)
     log.info("Plot saved to %s", out)
+    log_call_counts(w3, label="total")
+    print(f"\nPlot saved to {out}")
+    print(rpc_call_summary(w3, label="total"))
 
     # Sanity checks
     for name, (desc, records) in series.items():

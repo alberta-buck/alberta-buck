@@ -31,7 +31,7 @@ endif
 
 
 .PHONY: all build test clean fmt snapshot
-.PHONY: fork-sepolia fork-mainnet anvil stop-anvil
+.PHONY: fork-sepolia fork-mainnet fork-mainnet-cache anvil stop-anvil
 .PHONY: deploy-local deploy-sepolia
 .PHONY: install update
 .PHONY: test-python venv-activate
@@ -79,6 +79,12 @@ fork-sepolia:
 # Fork mainnet locally
 fork-mainnet:
 	anvil --port $(ANVIL_PORT) --fork-url $(MAINNET_RPC_URL) $(ANVIL_FORK_OPTS)
+
+# Fork mainnet with persistent disk cache (for Python oracle history tests).
+# First run fetches from remote; subsequent runs serve from cache.
+ANVIL_CACHE		?= .anvil-cache
+fork-mainnet-cache:
+	anvil --port $(ANVIL_PORT) --fork-url $(MAINNET_RPC_URL) --cache-path $(ANVIL_CACHE) $(ANVIL_FORK_OPTS)
 
 stop-anvil:
 	-pkill -f "anvil --port $(ANVIL_PORT)" 2>/dev/null

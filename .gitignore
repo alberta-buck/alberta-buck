@@ -2,6 +2,7 @@
 /out/
 /cache/
 /broadcast/
+/.anvil-cache/
 
 # Dependency directories (installed via forge install)
 /lib/
