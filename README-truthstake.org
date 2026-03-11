@@ -575,7 +575,7 @@
    against two honest reporters.  At round 20, eight honest newcomers and a challenger
    arrive, attracted by the growing escrow honey pot.
 
-   #+ATTR_LATEX: :width 1.1\textwidth
+   #+ATTR_LATEX: :width 1.1\textwidth :center t
    [[file:alberta_buck/test/truthstake_honey_pot_collapse.png]]
 
 *** Play-by-play

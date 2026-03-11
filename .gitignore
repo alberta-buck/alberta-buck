@@ -27,8 +27,6 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# Generated plots
-*.png
 
 # Coverage
 lcov.info
