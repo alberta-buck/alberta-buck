@@ -1370,6 +1370,123 @@ class TestOscillationAttack:
 
 
 # ---------------------------------------------------------------------------
+# Late entry: new adversary joins mid-game against established reporters
+# ---------------------------------------------------------------------------
+
+class TestLateEntry:
+
+    def test_new_adversary_suppressed_by_established_honest(self):
+        """New adversary joining after 15 rounds is immediately suppressed.
+
+        Established honest reporters have very low R (high trust) while
+        the newcomer has R=1.0 (untrusted).  The Kalman gain for the
+        newcomer is negligible: K = P/(P+1.0) << P/(P+0.0001).
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append(r)
+
+        # Phase 1: establish reputation
+        for rid in range(15):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.005), stake=1.0)
+            oracle.settle(true_price=PRICE)
+
+        # Verify honest reporters have low R
+        for r in honest:
+            assert r.R < 0.01, f"{r.name} should be trusted: R={r.R:.6f}"
+
+        # New adversary joins
+        late_adv = Reporter("late_adv", stake=500)
+        oracle.register(late_adv)
+
+        # Phase 2: adversary attacks, honest reporters continue
+        attack_results = []
+        for rid in range(10):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.005), stake=1.0)
+            biased = late_adv.observe(PRICE, noise_std=0.001, bias=0.15)
+            oracle.submit(late_adv, biased, stake=1.0)
+            result = oracle.settle(true_price=PRICE)
+            attack_results.append(result)
+
+        # Estimate barely moves because new reporter has high R (and
+        # large bias is likely gated by the low-P sigma threshold)
+        peak_err = max(r["estimate_error"] for r in attack_results)
+        assert peak_err < 0.01, (
+            f"New adversary should have negligible impact: peak err {peak_err:.4f}")
+
+        # Adversary either: (a) gets gated and stake returned (zero cost,
+        # zero impact), or (b) gets through but classified dishonest.
+        # Either way, honest reporters are protected.
+        adv_net = late_adv.earnings - late_adv.losses
+        assert adv_net <= 0, (
+            f"Late adversary should not profit: net={adv_net:.1f}")
+
+        # Adversary's stake should be unchanged (gated) or reduced (dishonest)
+        assert late_adv.stake <= 500, (
+            f"Adversary stake should not increase: {late_adv.stake:.1f}")
+
+        log.info("Late entry: peak err=%.3f%%, adv stake=%s (started 500), "
+                 "gated=%s",
+                 peak_err * 100, f"{late_adv.stake:.1f}",
+                 "yes" if late_adv.stake == 500 else "no")
+
+    def test_new_honest_reporter_builds_trust_gradually(self):
+        """A new honest reporter joining mid-game earns trust over time.
+
+        The warmup penalty (high R for first 3 rounds) means the new
+        reporter's observations have less influence initially, but their
+        R decreases as they prove accurate.  By round 5-6 they are
+        contributing meaningfully to the estimate.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        established = []
+        for i in range(3):
+            r = Reporter(f"est_{i}", stake=1000)
+            oracle.register(r)
+            established.append(r)
+
+        # Build established trust
+        for rid in range(15):
+            oracle.open_round()
+            for r in established:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.005), stake=1.0)
+            oracle.settle(true_price=PRICE)
+
+        # New honest reporter joins
+        newcomer = Reporter("newcomer", stake=500)
+        oracle.register(newcomer)
+        assert newcomer.R == 1.0, "Newcomer should start untrusted"
+
+        # Track newcomer's R over rounds
+        r_history = [newcomer.R]
+        for rid in range(10):
+            oracle.open_round()
+            for r in established:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.005), stake=1.0)
+            oracle.submit(newcomer, newcomer.observe(PRICE, noise_std=0.005), stake=1.0)
+            oracle.settle(true_price=PRICE)
+            r_history.append(newcomer.R)
+
+        # R should decrease over time as newcomer proves accurate
+        assert r_history[-1] < r_history[0], (
+            f"Newcomer R should decrease: {r_history[0]:.4f} -> {r_history[-1]:.6f}")
+
+        # After 3+ settlements, R should drop below 1.0
+        assert newcomer.R < 0.5, (
+            f"After proving accuracy, R should be much lower: {newcomer.R:.6f}")
+
+        log.info("Late honest entry: R trajectory = %s",
+                 [f"{r:.4f}" for r in r_history])
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
