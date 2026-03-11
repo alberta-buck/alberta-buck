@@ -200,8 +200,9 @@
 
 * Simulation Results
 
-  The test suite (37 tests) validates these properties with deterministic simulations
-  covering 12 attack classes.
+  The test suite (57 tests across two files) validates these properties with deterministic
+  simulations covering 12 attack classes plus escrow, double-down, non-ergodic dynamics,
+  and consumer feed fee economics.
 
 ** Core Mechanism Tests
 
@@ -321,12 +322,12 @@
      opportunistic adversary has higher Kalman gain for 1--2 rounds.  But honest
      re-submissions dilute the effect and the filter recovers within 5 rounds.
 
-* Strengthening Challenges: Double-Down and Retroactive Escrow
+* Strengthening Challenges: Double-Down, Retroactive Escrow, and Progressive Escalation
 
   The current challenge mechanism resets Kalman uncertainty (doubling P) and adds the
   challenger's bond to the pool.  This is effective but has a structural weakness: it only
   affects the *current round*.  An adversary can absorb a single challenge loss and resume
-  manipulation in the next round at baseline stakes.  Two extensions would make challenges
+  manipulation in the next round at baseline stakes.  Three extensions make challenges
   significantly more powerful.
 
 ** Double-Down Requirement
@@ -403,6 +404,39 @@
      that re-evaluates their escrowed history.  The longer they maintain the false estimate,
      the more escrow they accumulate that is vulnerable to correction.
 
+** Progressive Challenge Escalation (P Floor)
+
+   The standard challenge doubles P (P *= 2^level), but from a potentially tiny base.
+   After 20 rounds of convergence, P might be 0.00006 -- doubling it to 0.00012 is still
+   negligible.  Newcomers with R=0.005 get K = 0.00012/(0.00012+0.005) = 0.023, meaning
+   their observations barely move the estimate.
+
+   The progressive P floor solves this by guaranteeing a minimum P on challenge:
+
+   #+begin_example
+   Level 1: P >= challenge_P_floor          (e.g. 0.01)
+   Level 2: P >= challenge_P_floor * 2      (e.g. 0.02)
+   Level 3: P >= challenge_P_floor * 4      (e.g. 0.04)
+   Level N: P >= challenge_P_floor * 2^(N-1)
+   #+end_example
+
+   With P=0.01 after a level-1 challenge, a newcomer's K = 0.01/(0.01+0.005) = 0.67 --
+   their observations have real influence.  Each successive challenge opens the filter wider,
+   reflecting increasing uncertainty about the entrenched estimate.
+
+   This is the key mechanism that breaks the *reputation circular dependency*: when liars
+   control the oracle for many rounds, their R drops to ~0.0001 (the filter trusts them)
+   while newcomers start at R=1.0.  Without the P floor, even a numeric majority of honest
+   newcomers cannot shift the estimate because K is negligible for everyone.  The P floor
+   resets the playing field so that accuracy, not incumbency, determines influence.
+
+   Simulation results confirm:
+   - Without P floor: 20-round liar control (6:2) followed by 10:6 honest influx -- liars
+     net +622, estimate stays biased at +7.7%.
+   - With P floor=0.01: same scenario -- liars go net negative, estimate corrects.
+   - Progressive escalation: 3 challenges produce P=0.04, giving newcomers K=0.89 and
+     near-complete correction in a single round.
+
 ** Combined Effect: The Conviction Curve
 
    With both mechanisms, the cost of sustained manipulation follows a "conviction curve":
@@ -455,6 +489,76 @@
    that a future challenge can confiscate.  The oracle's integrity guarantee becomes: *truth
    will be found whenever there exists a future round in which honest reporters + challengers
    can establish a majority, even briefly*.
+
+* Consumer Feed Fees: Demand-Side Revenue
+
+  The FeedOracle adds a demand-side revenue model: consumers (smart contracts, DeFi
+  protocols) pay a per-read fee that flows into the next round's reward pool.
+
+** Revenue Model
+
+   - *Base feed fee*: paid per read, accumulates until the next round opens, then flushed
+     into that round's reward pool.
+   - *Uncertainty premium*: when Kalman P exceeds a configurable threshold, the fee is
+     multiplied (default 3x).  Consumers pay more when the oracle is uncertain, which funds
+     the increased reporting effort needed to reduce uncertainty.
+   - *Consumer challenge bonds*: non-reporters can post bonds to trigger escalation without
+     having a reporter identity.  The bond enters the reward pool and doubles P, just like
+     a reporter challenge.
+
+** Positive Externality Loop
+
+   More consumers reading -> larger reward pool -> more reporters attracted by higher
+   rewards -> more accurate estimates -> more consumers trust the oracle -> more reads.
+
+   Simulation results (30 rounds):
+   - 2 consumers, 2 reporters: small pool, moderate accuracy
+   - 20 consumers, 6 reporters: 10x larger pool, better accuracy, 3x reporter earnings
+
+   The uncertainty premium creates a natural feedback: uncertain periods generate more
+   revenue, which funds the additional reporting effort needed to resolve the uncertainty.
+
+** Game-Theoretic Impact
+
+   Feed fees make honest reporting *strictly dominant* regardless of adversary count.
+   Without fees, a reporter's expected return depends on the number of dishonest reporters
+   present (honest reporters need dishonest ones to have positive P&L).  With feed fees,
+   honest reporters profit even in an all-honest scenario because consumer revenue
+   supplements the stake-based pool.
+
+   At moderate fee levels (2.0 per read, 5 reads/round):
+   - Honest ROI: positive and increasing with fee level
+   - Liar ROI: negative and unaffected by fee level
+   - The gap widens with higher fees, making manipulation increasingly irrational
+
+** Consumer-Funded Correction
+
+   During manipulation, consumers who detect bias (e.g., by comparing the oracle to
+   their own reference prices) can fund correction directly via consumer challenge bonds.
+   Three consumer challenges at escalating bonds (10, 20, 40) fund the P reset needed for
+   honest reporters to correct a 15-round bias -- the correction is funded by the consumers
+   who benefit from oracle accuracy, not just by competing reporters.
+
+** Non-Ergodic Dynamics: Simulation Summary
+
+   The EscrowOracle test suite (20 tests) validates the non-ergodic properties:
+
+   | Test class | Tests | Key finding |
+   |------------+-------+-------------|
+   | Escrow basics | 3 | 20% withholding, release after W rounds, zero-fraction noop |
+   | Double-down | 2 | Liars withdraw (revealing lack of conviction), honest double down |
+   | Retroactive confiscation | 2 | Liar escrow confiscated on challenge, honest escrow survives |
+   | Non-ergodic collapse | 7 | Honey pot grows, honest influx triggers collapse, progressive escalation |
+   | Feed fees | 6 | Fee-funded pool, uncertainty premium, consumer challenges, game theory |
+
+   The non-ergodic collapse tests confirm:
+   - Honey pot grows monotonically during liar control (20x over 20 rounds)
+   - P floor enables honest influx to correct biased estimate (liars go net negative)
+   - Longer liar control -> larger collapse (30 rounds confiscation > 10 rounds)
+   - Brief attacks (3 rounds) are unprofitable without honey pot buildup
+   - Liars deplete capital over 80 rounds; honest capital grows
+   - Single challenge with P floor flips outcome from biased to accurate
+   - Progressive escalation: each challenge level widens the filter further
 
 * Simulations on Real Gold Prices
 
@@ -836,9 +940,11 @@
 
   #+begin_example
   alberta_buck/
-      truthstake.py                 # Core: KalmanOracle, Reporter, Oracle, run_simulation
+      truthstake.py                 # Core: KalmanOracle, Reporter, Oracle, EscrowOracle,
+                                    #        FeedOracle, run_simulation
       test/
           test_truthstake.py        # 37 tests covering 12 attack classes
+          test_escrow_oracle.py     # 20 tests: escrow, double-down, non-ergodic, feed fees
           truthstake_simulation.png # Generated by test_plot_simulation
   #+end_example
 
