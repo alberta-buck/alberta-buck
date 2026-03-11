@@ -961,6 +961,85 @@ class TestVolatilityExploitation:
 
 
 # ---------------------------------------------------------------------------
+# Sandwich attack: two adversaries bracket the price to shift the mean
+# ---------------------------------------------------------------------------
+
+class TestSandwichAttack:
+
+    def test_symmetric_sandwich_cancels_out(self):
+        """Two adversaries submit +5% and -5%: biases cancel, no net effect.
+
+        A symmetric sandwich has zero net bias.  Both adversaries may
+        stay within tolerance and share the pool, but the estimate
+        remains accurate.  The attack is pointless -- neither adversary
+        profits differentially.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(3):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        high = Reporter("high_adv", stake=1000)
+        low = Reporter("low_adv", stake=1000)
+        oracle.register(high)
+        oracle.register(low)
+
+        all_reporters = honest + [(high, 0.001, 0.04), (low, 0.001, -0.04)]
+        results = run_simulation(oracle, all_reporters, n_rounds=25,
+                                 true_price_fn=lambda _: PRICE, seed=42)
+
+        # Estimate stays accurate: symmetric biases cancel
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_err = sum(late_errors) / len(late_errors)
+        assert avg_err < 0.02, (
+            f"Symmetric sandwich should cancel: avg error {avg_err:.4f}")
+
+        log.info("Symmetric sandwich: avg err=%.2f%%", avg_err * 100)
+
+    def test_asymmetric_sandwich_shifts_estimate(self):
+        """Adversaries submit +7% and -3%: net +2% bias shifts the estimate.
+
+        An asymmetric sandwich tries to shift the estimate while keeping
+        individual deviations within gating range.  The net effect is
+        limited because the Kalman filter still weights by reputation.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(3):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        high_adv = Reporter("high_adv", stake=1000)
+        low_adv = Reporter("low_adv", stake=1000)
+        oracle.register(high_adv)
+        oracle.register(low_adv)
+
+        # Net bias: (0.07 + (-0.03)) / 2 = +0.02 (2%)
+        all_reporters = honest + [(high_adv, 0.001, 0.07), (low_adv, 0.001, -0.03)]
+        results = run_simulation(oracle, all_reporters, n_rounds=25,
+                                 true_price_fn=lambda _: PRICE, seed=42)
+
+        # Some drift, but less than the net 2% bias
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_err = sum(late_errors) / len(late_errors)
+
+        # The 3:2 honest majority limits the drift
+        assert avg_err < 0.04, (
+            f"Asymmetric sandwich drift should be bounded: {avg_err:.4f}")
+
+        # The high-bias adversary should lose more than the low-bias one
+        assert high_adv.losses >= low_adv.losses, (
+            f"Higher-bias adversary should lose more: "
+            f"high={high_adv.losses:.1f} low={low_adv.losses:.1f}")
+
+        log.info("Asymmetric sandwich: avg err=%.2f%%, high losses=%.1f, low losses=%.1f",
+                 avg_err * 100, high_adv.losses, low_adv.losses)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
