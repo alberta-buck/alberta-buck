@@ -340,6 +340,108 @@ class TestFalseChallenge:
 
 
 # ---------------------------------------------------------------------------
+# Sybil attack: adversary creates many identities to overwhelm honest majority
+# ---------------------------------------------------------------------------
+
+class TestSybilAttack:
+
+    def test_sybil_overwhelms_without_challenge(self):
+        """10 sybil identities vs 3 honest: sybils drag the estimate.
+
+        Without challenges, sybils gradually build reputation and their
+        biased values eventually dominate.  The settled value drifts
+        toward the sybil bias -- a real vulnerability that demonstrates
+        why challenge escalation is essential.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=2.0)
+        honest = []
+        for i in range(3):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        sybils = []
+        for i in range(10):
+            r = Reporter(f"sybil_{i}", stake=200)
+            oracle.register(r)
+            sybils.append((r, 0.0, 0.08))  # +8% bias
+
+        all_reporters = honest + sybils
+        results = run_simulation(oracle, all_reporters, n_rounds=30,
+                                 true_price_fn=lambda _: PRICE, seed=101)
+
+        # The sybil attack SUCCEEDS without challenges: estimate drifts
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_err = sum(late_errors) / len(late_errors)
+        assert avg_err > 0.03, (
+            f"Expected sybil attack to drag estimate, but avg error only {avg_err:.4f}")
+
+        # Honest reporters become the "dishonest" ones relative to the biased
+        # settled value, so they actually LOSE money.  This is the core problem.
+        honest_net = sum(r.earnings - r.losses for r, _, _ in honest)
+        log.info("Sybil unchallenged: estimate drifted %.1f%%, honest net=%.1f",
+                 avg_err * 100, honest_net)
+
+    def test_sybil_defeated_by_challenge_at_moderate_ratio(self):
+        """5 sybils vs 4 honest + 1 challenger: challenges restore truth.
+
+        At a moderate sybil ratio (5:5 including challenger), challenge
+        escalation doubles Kalman P and allows honest re-submissions to
+        restore the estimate.  Sybils pay 5x the stake cost and lose.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=2.0, tolerance=0.05)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        sybils = []
+        for i in range(5):
+            r = Reporter(f"sybil_{i}", stake=500)
+            oracle.register(r)
+            sybils.append((r, 0.0, 0.08))  # +8% bias
+
+        challenger = Reporter("challenger", stake=1000)
+        oracle.register(challenger)
+        all_reporters = honest + sybils + [(challenger, 0.005, 0.0)]
+
+        def challenge_outlier_cluster(oracle_inst, round_id, submissions):
+            if round_id < 2:
+                return None
+            est = oracle_inst.kalman.x
+            P = oracle_inst.kalman.P
+            if P <= 0:
+                return None
+            sigma = math.sqrt(P)
+            outliers = sum(
+                1 for sub in submissions
+                if abs(oracle_inst._normalize(sub.value) - est) > 2 * sigma
+            )
+            if outliers >= 2:
+                return challenger
+            return None
+
+        results = run_simulation(oracle, all_reporters, n_rounds=30,
+                                 true_price_fn=lambda _: PRICE, seed=101,
+                                 challenge_fn=challenge_outlier_cluster)
+
+        # With challenge at moderate ratio, estimate stays closer to truth
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_err = sum(late_errors) / len(late_errors)
+        assert avg_err < 0.05, (
+            f"Challenge should contain sybil drift: avg error {avg_err:.4f}")
+
+        # Sybils collectively lose money
+        sybil_net = sum(r.earnings - r.losses for r, _, _ in sybils)
+        assert sybil_net < 0, f"Sybils should lose: net {sybil_net:.1f}"
+
+        honest_net = sum(r.earnings - r.losses for r, _, _ in honest)
+        log.info("Sybil moderate ratio: avg err=%.2f%%, sybil net=%.1f, honest net=%.1f",
+                 avg_err * 100, sybil_net, honest_net)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
