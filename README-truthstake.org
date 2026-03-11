@@ -1,5 +1,13 @@
 #+title: TruthStake -- Decentralized Oracle via Kalman Filtering
+#+author: Perry Kundert
+#+date: 2026-03-10 09:00:00
+#+draft: false
+
 #+OPTIONS: ^:nil toc:t
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+
+#+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
+
 
 * Design Philosophy
 
@@ -562,23 +570,94 @@
 
 ** Honey Pot Collapse Visualization
 
-   The most compelling scenario: 6 well-funded liars control the oracle for 20 rounds
-   against 2 honest reporters, drifting the estimate to $3121 (+7.6% above true $2900).
-   At round 20, the growing honey pot ($80 in escrowed liar payouts) attracts 8 honest
-   newcomers and a challenger.  Progressive challenges reset the Kalman P floor, giving
-   newcomers meaningful influence.  The estimate snaps back to $2900 within 5 rounds.
+   The chart below tracks the most compelling attack-and-recovery scenario across five
+   panels over 45 rounds.  Six well-funded liars ($10,000 each) submit +8% biased prices
+   against two honest reporters.  At round 20, eight honest newcomers and a challenger
+   arrive, attracted by the growing escrow honey pot.
 
-   | Phase | Rounds | Estimate | Error | Liar P&L | Honest P&L |
-   |-------+--------+----------+-------+----------+------------|
-   | Attack end | 0-19 | $3121 | 7.6% | +$5 | -$5 |
-   | Defense end | 20-44 | $2900 | 0.01% | -$116 | +$332 |
-
-   Five panels track the dynamics over 45 rounds: oracle estimate vs true price, Kalman
-   uncertainty P (log scale showing challenge resets), estimation error %, cumulative P&L
-   for attackers vs defenders, and the non-ergodic honey pot that grows during liar control
-   and funds the honest recovery.
-
+   #+ATTR_LATEX: :width 1.1\textwidth
    [[file:alberta_buck/test/truthstake_honey_pot_collapse.png]]
+
+*** Play-by-play
+
+    *Rounds 0--3: Warmup.*  All reporters start with R=1.0 (untrusted).  The Kalman filter
+    gives everyone roughly equal weight.  Even with 6:2 liar majority, the estimate moves
+    slowly because all K values are small (P=0.01, R=1.0, so K=0.01/1.01 ~= 0.01).  The
+    estimate begins to drift upward but error stays below 2%.  Liar and honest P&L are both
+    near zero -- stakes are small, and classification is noisy while R is still high.
+
+    *Rounds 4--10: Liars build trust.*  Liars' R drops rapidly (EMA alpha=0.5 during warmup,
+    then 0.3).  Because their biased values are consistent with each other and they control
+    the settled value, their squared relative error is tiny -- they look "honest" to the
+    reputation system.  By round 10, liar R ~= 0.001 vs honest R ~= 0.005.  The estimate
+    accelerates upward past $3000.  The two honest reporters are now classified "dishonest"
+    relative to the biased consensus and begin losing their stakes.  P collapses below
+    0.001 as the filter becomes confident in the wrong answer.
+
+    *Rounds 11--19: Full liar control.*  The estimate stabilizes near $3121 (+7.6% error).
+    P is tiny (~0.00006) -- the filter is maximally confident.  Liars collect payouts every
+    round (classified "honest" relative to the value they control); honest reporters lose
+    their stake every round.  But 25% of every payout is withheld in escrow.  The honey pot
+    grows monotonically: $10, $30, $50, $80...  The liars' cumulative P&L reaches +$5 while
+    honest reporters sit at -$5.  The system looks stable, but the escrow ledger is quietly
+    accumulating evidence of the liars' biased submissions alongside the true prices.
+
+    *Round 20: The tipping point.*  Eight newcomers and a challenger arrive, seeing the $80
+    honey pot and the +7.6% divergence from observable reality.  The challenger posts a bond,
+    triggering the first challenge.  The progressive P floor kicks in: P is reset from
+    0.00006 to at least 0.01 -- a 170x increase in uncertainty.  Suddenly the Kalman gain
+    for newcomers jumps from K=0.012 (negligible) to K=0.67 (dominant).  Their observations
+    of the true price at $2900 yank the estimate downward.
+
+    *Rounds 20--24: Rapid correction under sustained challenge.*  Challenges fire every
+    round during this phase, each one escalating the P floor further (0.01, 0.02, 0.04...).
+    The honest 10:6 majority now has real influence.  The estimate plunges from $3121 toward
+    $2900.  Error drops from 7.6% to below 1% within 5 rounds.  Meanwhile, retroactive
+    confiscation activates: the escrowed liar payouts from rounds 0--19 are re-evaluated
+    against the stored ground truth.  The liars' submissions ($3132) are now clearly wrong
+    relative to the true price ($2900).  Their escrow is confiscated and redistributed to
+    the current round's honest reporters.  The liar P&L line (red) plummets.
+
+    *Rounds 25--44: New equilibrium.*  The estimate settles at $2900 (0.01% error).  Liars
+    continue submitting +8% bias but are now classified "dishonest" every round, losing
+    their stakes to the honest majority.  Challenges fire periodically to maintain the P
+    floor.  The honey pot continues to grow (new escrow from ongoing rounds), now filled
+    primarily with honest reporters' escrowed payouts -- which will be released cleanly
+    because their submissions match ground truth.  Final standings:
+
+    | Phase       | Rounds | Estimate | Error | Liar P&L | Honest P&L | Honey pot |
+    |-------------+--------+----------+-------+----------+------------+-----------|
+    | Attack end  |   0-19 | $3121    |  7.6% | +$5      | -$5        | $80       |
+    | Defense end |  20-44 | $2900    | 0.01% | -$116    | +$332      | $416      |
+
+*** What the panels show
+
+    - *Panel 1 (Price)*: The blue estimate line tracks the black true-price line perfectly
+      during defense, after diverging +7.6% during the attack.  Purple verticals mark each
+      challenge -- the moments where the filter's certainty is forcibly reset.
+
+    - *Panel 2 (Uncertainty P, log scale)*: The orange P line collapses during liar control
+      as the filter becomes falsely confident.  Each challenge (purple line) spikes P back
+      to the floor.  The red dotted "P floor = 0.01" line shows the minimum -- without this
+      floor, even challenges would leave P negligible and newcomers powerless.
+
+    - *Panel 3 (Error %)*: Red filled area shows the attack's visible damage.  The 5%
+      tolerance line (orange dashed) is breached by round 8 and stays breached until round
+      23 -- 15 rounds of compromised oracle output.  After correction, error is invisible.
+
+    - *Panel 4 (Cumulative P&L)*: The liar line (red) rises slightly during control, then
+      drops sharply through retroactive confiscation.  The honest line (green) mirrors it:
+      losses during liar control, then rapid gains from harvested liar stakes plus
+      confiscated escrow.  The challenger line (blue) shows the cost of mounting the defense
+      -- a net negative because challenge bonds are consumed, but the challenger's economic
+      function is catalytic: their bonds unlock the honest majority's ability to correct the
+      estimate.
+
+    - *Panel 5 (Honey pot)*: The golden area grows steadily during liar control (escrowed
+      liar payouts accumulating) and then accelerates during defense (larger pools from
+      honest majority payouts).  The peak at $416 represents the total unreleased escrow --
+      the non-ergodic trap.  This pot is the economic signal that attracts honest
+      participation: the larger it grows, the more profitable it becomes to challenge.
 
 * Simulations on Real Gold Prices
 

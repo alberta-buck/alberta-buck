@@ -1405,14 +1405,14 @@ class TestVisualization:
         ax.set_title("Non-Ergodic Honey Pot Collapse: Attack and Recovery",
                      fontsize=14, fontweight="bold")
         ax.legend(loc="upper left", fontsize=9)
-        # Phase labels positioned using axis transforms
-        ax.text(ATTACK_PHASE / 2, 0.05, "ATTACK PHASE\n6 liars vs 2 honest",
-                ha="center", va="bottom", fontsize=9, color="#e65100",
-                fontweight="bold", alpha=0.8, transform=ax.get_xaxis_transform())
-        ax.text(ATTACK_PHASE + (TOTAL_ROUNDS - ATTACK_PHASE) / 2, 0.05,
+        # Phase labels positioned high in the panel (0.75 = 75% up the axes)
+        ax.text(ATTACK_PHASE / 2, 0.78, "ATTACK PHASE\n6 liars vs 2 honest",
+                ha="center", va="center", fontsize=10, color="#bf360c",
+                fontweight="bold", alpha=0.9, transform=ax.get_xaxis_transform())
+        ax.text(ATTACK_PHASE + (TOTAL_ROUNDS - ATTACK_PHASE) / 2, 0.78,
                 "DEFENSE PHASE\n10 honest + challenger vs 6 liars",
-                ha="center", va="bottom", fontsize=9, color="#2e7d32",
-                fontweight="bold", alpha=0.8, transform=ax.get_xaxis_transform())
+                ha="center", va="center", fontsize=10, color="#1b5e20",
+                fontweight="bold", alpha=0.9, transform=ax.get_xaxis_transform())
 
         # Panel 2: Kalman uncertainty P (log scale)
         ax = axes[1]
@@ -1463,14 +1463,14 @@ class TestVisualization:
         ax.set_ylabel("Honey pot ($)\n(escrowed)", fontsize=11)
         ax.set_xlabel("Round", fontsize=12)
 
-        # Annotate peak honey pot
+        # Annotate peak honey pot in black
         peak_idx = honey_pot_values.index(max(honey_pot_values))
         peak_val = honey_pot_values[peak_idx]
         ax.annotate(f"Peak: ${peak_val:.0f}",
                     xy=(peak_idx, peak_val),
-                    xytext=(peak_idx + 3, peak_val * 0.85),
-                    arrowprops=dict(arrowstyle="->", color="darkgoldenrod"),
-                    fontsize=9, color="darkgoldenrod", fontweight="bold")
+                    xytext=(peak_idx - 8, peak_val * 0.65),
+                    arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
+                    fontsize=10, color="black", fontweight="bold")
 
         fig.subplots_adjust(hspace=0.15, left=0.1, right=0.95, top=0.95, bottom=0.05)
         plot_path = Path(__file__).parent / "truthstake_honey_pot_collapse.png"
