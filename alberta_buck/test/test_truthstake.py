@@ -1040,6 +1040,97 @@ class TestSandwichAttack:
 
 
 # ---------------------------------------------------------------------------
+# Stake starvation: adversary drains honest reporters' capital via challenges
+# ---------------------------------------------------------------------------
+
+class TestStakeStarvation:
+
+    def test_challenge_griefing_costs_attacker_more(self):
+        """Adversary challenges every round to drain honest reporters' capital.
+
+        Each challenge escalation increases the minimum stake for ALL
+        subsequent submissions in that round.  But the challenger pays
+        an exponentially growing bond, so griefing costs the attacker
+        far more than the honest reporters.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=2.0)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=500)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        griefer = Reporter("griefer", stake=2000)
+        oracle.register(griefer)
+
+        # Griefer challenges every round but doesn't submit observations
+        def grief_challenge(oracle_inst, round_id, submissions):
+            return griefer
+
+        all_reporters = honest  # griefer only challenges, doesn't submit
+        results = run_simulation(oracle, all_reporters, n_rounds=15,
+                                 true_price_fn=lambda _: PRICE, seed=42,
+                                 challenge_fn=grief_challenge)
+
+        # Griefer should lose their bonds (they never submitted honestly)
+        assert griefer.losses > 0, f"Griefer should lose bonds: {griefer.losses:.1f}"
+
+        # Honest reporters should survive and profit from griefer bonds
+        honest_surviving = sum(1 for r, _, _ in honest if r.stake > 10)
+        assert honest_surviving >= 3, (
+            f"Most honest reporters should survive: {honest_surviving}/4")
+
+        # Griefer's total losses should exceed any individual honest reporter's losses
+        max_honest_loss = max(r.losses for r, _, _ in honest)
+        assert griefer.losses > max_honest_loss, (
+            f"Griefer losses ({griefer.losses:.1f}) should exceed "
+            f"max honest loss ({max_honest_loss:.1f})")
+
+        log.info("Griefing: griefer losses=%.1f stake=%.1f, honest surviving=%d",
+                 griefer.losses, griefer.stake, honest_surviving)
+
+    def test_honest_reporters_recover_from_capital_depletion(self):
+        """After an adversary depletes capital and stops, honest reporters rebuild.
+
+        Even if honest reporters lose some stake during an attack, they
+        recover as the adversary runs out of money and leaves.  The
+        positive-sum dynamics among honest reporters restore balances.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=200)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        drainer = Reporter("drainer", stake=300)
+        oracle.register(drainer)
+
+        # Drainer attacks for first 10 rounds, then goes bankrupt
+        def drainer_strategy(round_id):
+            if round_id < 10 and drainer.stake >= 1.0:
+                return (0.001, 0.15)  # +15% bias
+            return (0.005, 0.0)       # honest (or bankrupt)
+
+        all_reporters = honest + [(drainer, 0.005, 0.0)]
+        results = run_simulation(oracle, all_reporters, n_rounds=30,
+                                 true_price_fn=lambda _: PRICE, seed=42,
+                                 strategies={"drainer": drainer_strategy})
+
+        # Late rounds: estimate recovers
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_late_err = sum(late_errors) / len(late_errors)
+        assert avg_late_err < 0.02, (
+            f"Estimate should recover after attacker depletes: {avg_late_err:.4f}")
+
+        # Drainer should have significant losses
+        assert drainer.losses > 0, f"Drainer should lose: {drainer.losses:.1f}"
+
+        log.info("Starvation recovery: late err=%.2f%%, drainer losses=%.1f",
+                 avg_late_err * 100, drainer.losses)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
