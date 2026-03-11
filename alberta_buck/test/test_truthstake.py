@@ -1277,6 +1277,99 @@ class TestSleeperCartel:
 
 
 # ---------------------------------------------------------------------------
+# Oscillation attack: alternate +/- bias to destabilize without net drift
+# ---------------------------------------------------------------------------
+
+class TestOscillationAttack:
+
+    def test_alternating_bias_increases_variance(self):
+        """Adversary alternates +6% and -6% bias each round.
+
+        The adversary avoids consistent dishonesty detection by having
+        zero mean bias.  But the alternating submissions increase the
+        estimate's variance (jitter).  The Kalman filter partially
+        smooths this, and the adversary's ema_sq_error rises because
+        each submission deviates from the settled value.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        oscillator = Reporter("oscillator", stake=1000)
+        oracle.register(oscillator)
+
+        def osc_strategy(round_id):
+            bias = 0.06 if round_id % 2 == 0 else -0.06
+            return (0.001, bias)
+
+        all_reporters = honest + [(oscillator, 0.001, 0.0)]
+        results = run_simulation(oracle, all_reporters, n_rounds=30,
+                                 true_price_fn=lambda _: PRICE, seed=42,
+                                 strategies={"oscillator": osc_strategy})
+
+        # Estimate stays roughly accurate (zero-mean bias)
+        late_errors = [r["estimate_error"] for r in results[-10:]]
+        avg_err = sum(late_errors) / len(late_errors)
+        assert avg_err < 0.03, (
+            f"Zero-mean oscillation shouldn't bias estimate much: {avg_err:.4f}")
+
+        # But oscillator's R should increase (high variance in submissions)
+        assert oscillator.ema_sq_error > 0.001, (
+            f"Oscillator should have elevated error: {oscillator.ema_sq_error:.6f}")
+
+        # Oscillator should lose money (classified dishonest in most rounds
+        # because each submission deviates 6% from settled value)
+        assert oscillator.losses > oscillator.earnings, (
+            f"Oscillator should be net loser: earn={oscillator.earnings:.1f} "
+            f"loss={oscillator.losses:.1f}")
+
+        log.info("Oscillation: avg err=%.2f%%, osc R=%.6f, osc net=%.1f",
+                 avg_err * 100, oscillator.R,
+                 oscillator.earnings - oscillator.losses)
+
+    def test_small_oscillation_stays_within_tolerance(self):
+        """Adversary alternates +3% and -3%, staying within 5% tolerance.
+
+        Small oscillation within tolerance means the adversary is
+        classified "honest" every round.  They pay for increased
+        jitter but collect from the pool.  The attack's net cost
+        depends on the early-bonus dynamics.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0, tolerance=0.05)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.003, 0.0))
+
+        small_osc = Reporter("small_osc", stake=1000)
+        oracle.register(small_osc)
+
+        def small_osc_strategy(round_id):
+            bias = 0.03 if round_id % 2 == 0 else -0.03
+            return (0.001, bias)
+
+        all_reporters = honest + [(small_osc, 0.001, 0.0)]
+        results = run_simulation(oracle, all_reporters, n_rounds=30,
+                                 true_price_fn=lambda _: PRICE, seed=42,
+                                 strategies={"small_osc": small_osc_strategy})
+
+        # The small oscillator's accuracy_bonus is lower (further from
+        # settled value), so they get a smaller share of the pool per round
+        avg_honest_net = sum(r.earnings - r.losses for r, _, _ in honest) / len(honest)
+        osc_net = small_osc.earnings - small_osc.losses
+        assert osc_net < avg_honest_net, (
+            f"Oscillator ({osc_net:.3f}) should earn less than "
+            f"honest avg ({avg_honest_net:.3f})")
+
+        log.info("Small oscillation: osc net=%.3f, honest avg=%.3f",
+                 osc_net, avg_honest_net)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
