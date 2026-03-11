@@ -415,6 +415,229 @@ class Oracle:
 
 
 # ---------------------------------------------------------------------------
+# EscrowOracle: double-down + retroactive escrow for non-ergodic dynamics
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EscrowEntry:
+    """Per-round escrow record: holds back a fraction of payouts for W rounds."""
+    round_id: int
+    true_price: float
+    settled_value: float
+    holdings: dict = field(default_factory=dict)  # name -> {amount, submission_value}
+    released: bool = False
+
+
+class EscrowOracle(Oracle):
+    """Oracle with double-down and retroactive escrow.
+
+    Extends Oracle with two mechanisms that create non-ergodic dynamics:
+
+    1. Double-down: on challenge, all current-round submitters must double their
+       stake or withdraw.  Honest reporters double without hesitation; liars face
+       compounding exposure.
+
+    2. Retroactive escrow: a fraction of each payout is held for W rounds.  When
+       a challenge triggers, escrowed payouts from the past W rounds are
+       re-evaluated against ground truth.  Liars who were falsely classified as
+       "honest" (because they controlled the settled value) have their escrow
+       confiscated.
+
+    The combination creates a "honey pot": the longer liars maintain control, the
+    more escrow they accumulate, the larger the windfall when truth prevails.
+    This makes sustained manipulation non-ergodic -- eventually the accumulated
+    pot attracts enough honest participation to overwhelm the liars.
+    """
+
+    def __init__(
+        self,
+        *args,
+        escrow_fraction=0.20,
+        escrow_window=10,
+        doubledown_fn=None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.escrow_fraction = escrow_fraction
+        self.escrow_window = escrow_window
+        self.doubledown_fn = doubledown_fn  # callable(reporter, stake, round_id) -> bool
+        self.escrow_ledger = []             # list of EscrowEntry
+        self.total_escrowed = 0.0
+
+    @property
+    def honey_pot(self):
+        """Total unreleased escrow -- the non-ergodic trap for sustained liars."""
+        return self.total_escrowed
+
+    def challenge(self, challenger, bond=None):
+        """Override: standard challenge + double-down requirement."""
+        ch = super().challenge(challenger, bond=bond)
+
+        if self.doubledown_fn is None:
+            return ch
+
+        rnd = self.current_round
+        surviving = []
+        for sub in rnd.submissions:
+            # Challenger is exempt from doubledown
+            if sub.reporter.name == challenger.name:
+                surviving.append(sub)
+                continue
+
+            doubles_down = self.doubledown_fn(sub.reporter, sub.stake, rnd.round_id)
+            if doubles_down:
+                additional = sub.stake
+                if sub.reporter.stake < additional:
+                    # Cannot afford -- forced withdrawal
+                    sub.reporter.stake += sub.stake
+                    rnd.reward_pool -= sub.stake
+                    log.info("Double-down: %s forced withdrawal (insufficient funds)",
+                             sub.reporter.name)
+                else:
+                    sub.reporter.stake -= additional
+                    rnd.reward_pool += additional
+                    sub.stake += additional  # now 2x
+                    surviving.append(sub)
+                    log.debug("Double-down: %s doubled to %.1f", sub.reporter.name, sub.stake)
+            else:
+                # Voluntary withdrawal: stake returned, submission removed
+                sub.reporter.stake += sub.stake
+                rnd.reward_pool -= sub.stake
+                log.info("Double-down: %s withdrew", sub.reporter.name)
+
+        rnd.submissions = surviving
+        return ch
+
+    def settle(self, true_price=None):
+        """Override: standard settlement + escrow withholding + retroactive confiscation."""
+        rnd = self.current_round
+        was_challenged = bool(rnd.challenges) if rnd else False
+
+        result = super().settle(true_price=true_price)
+
+        # The round is now in self.rounds[-1]; rnd still references it
+        if self.escrow_fraction <= 0:
+            result.update(escrow_withheld=0.0, escrow_confiscated=0.0,
+                          escrow_released=0.0, total_escrowed=self.total_escrowed)
+            return result
+
+        # --- Escrow withholding: hold back fraction of each payout ---
+        holdings = {}
+        for sub in rnd.submissions:
+            name = sub.reporter.name
+            payout = result["payouts"].get(name, 0)
+            if payout <= 0:
+                continue
+            withheld = payout * self.escrow_fraction
+            reporter = self.reporters[name]
+            reporter.stake -= withheld  # claw back from just-credited balance
+            holdings[name] = {"amount": withheld, "submission_value": sub.value}
+            self.total_escrowed += withheld
+
+        self.escrow_ledger.append(EscrowEntry(
+            round_id=rnd.round_id,
+            true_price=true_price,
+            settled_value=rnd.settled_value,
+            holdings=holdings,
+        ))
+
+        # --- Retroactive confiscation (only on challenged rounds) ---
+        confiscated = 0.0
+        if was_challenged and true_price is not None:
+            confiscated = self._retroactive_confiscation()
+
+        # --- Release aged escrow ---
+        released = self._release_aged_escrow()
+
+        result["escrow_withheld"] = sum(h["amount"] for h in holdings.values())
+        result["escrow_confiscated"] = confiscated
+        result["escrow_released"] = released
+        result["total_escrowed"] = self.total_escrowed
+
+        return result
+
+    def _retroactive_confiscation(self):
+        """Re-evaluate unreleased escrow using stored ground truth.
+
+        Compares each escrowed submission against the *true price* at the time
+        of that submission.  Submissions that were actually inaccurate (but
+        classified "honest" because liars controlled the settled value) have
+        their escrow confiscated and redistributed to the current round's
+        honest reporters.
+        """
+        confiscated = 0.0
+        for entry in self.escrow_ledger:
+            if entry.released or not entry.holdings:
+                continue
+            stored_true = entry.true_price
+            if stored_true is None or stored_true == 0:
+                continue
+            to_remove = []
+            for name, esc in entry.holdings.items():
+                sub_val = esc["submission_value"]
+                if sub_val is None:
+                    continue
+                rel_error = abs(sub_val - stored_true) / abs(stored_true)
+                if rel_error > self.tolerance:
+                    confiscated += esc["amount"]
+                    self.total_escrowed -= esc["amount"]
+                    reporter = self.reporters.get(name)
+                    if reporter:
+                        reporter.losses += esc["amount"]
+                    to_remove.append(name)
+            for name in to_remove:
+                del entry.holdings[name]
+
+        if confiscated > 0:
+            self._distribute_confiscation(confiscated)
+
+        return confiscated
+
+    def _distribute_confiscation(self, amount):
+        """Redistribute confiscated escrow to current round's honest reporters."""
+        latest = self.rounds[-1]
+        settled_value = latest.settled_value
+        honest_subs = []
+        for sub in latest.submissions:
+            if settled_value and settled_value != 0:
+                rel_error = abs(sub.value - settled_value) / abs(settled_value)
+            else:
+                rel_error = 0
+            if rel_error <= self.tolerance:
+                early_bonus = 2.0 ** (-sub.index / self.early_halflife)
+                accuracy_bonus = 1.0 - (rel_error / self.tolerance) if self.tolerance > 0 else 1.0
+                share = (1.0 + early_bonus) * accuracy_bonus
+                honest_subs.append((sub, share))
+
+        if not honest_subs:
+            return
+
+        total_shares = sum(s for _, s in honest_subs)
+        for sub, share in honest_subs:
+            payout = (share / total_shares) * amount
+            sub.reporter.stake += payout
+            sub.reporter.earnings += payout
+
+    def _release_aged_escrow(self):
+        """Return escrow entries that have aged past the escrow window."""
+        current_rid = len(self.rounds) - 1
+        released = 0.0
+        for entry in self.escrow_ledger:
+            if entry.released:
+                continue
+            if current_rid - entry.round_id >= self.escrow_window:
+                for name, esc in entry.holdings.items():
+                    reporter = self.reporters.get(name)
+                    if reporter:
+                        reporter.stake += esc["amount"]
+                        released += esc["amount"]
+                        self.total_escrowed -= esc["amount"]
+                entry.holdings = {}
+                entry.released = True
+        return released
+
+
+# ---------------------------------------------------------------------------
 # Simulation helpers
 # ---------------------------------------------------------------------------
 
