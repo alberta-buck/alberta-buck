@@ -638,6 +638,108 @@ class EscrowOracle(Oracle):
 
 
 # ---------------------------------------------------------------------------
+# FeedOracle: consumer-funded oracle with paid feed access
+# ---------------------------------------------------------------------------
+
+class FeedOracle(EscrowOracle):
+    """Oracle where consumers pay to read the price feed.
+
+    Extends EscrowOracle with a demand-side revenue model: consumers (smart
+    contracts, DeFi protocols, anyone who reads the oracle) pay a per-read fee
+    that flows into the next round's reward pool.  This creates a positive
+    externality: more demand for accurate prices -> larger reward pool -> more
+    reporters attracted -> more accurate prices -> more demand.
+
+    Consumers can also pay for *consumer challenges*: when a consumer doubts
+    the current estimate (e.g., it diverges from their own reference), they can
+    post a consumer challenge bond that triggers the same escalation as a
+    reporter challenge.  This lets the demand side directly fund oracle
+    integrity during uncertain periods.
+
+    Revenue model:
+      - Base feed fee: paid per read, flows to next round's pool
+      - Consumer challenge: escalation bond from a non-reporter, added to pool
+      - Uncertainty premium: optional multiplier on feed fee when Kalman P
+        exceeds a threshold (consumers pay more when the oracle is uncertain,
+        funding the increased reporting effort needed to resolve uncertainty)
+    """
+
+    def __init__(
+        self,
+        *args,
+        feed_fee=1.0,
+        uncertainty_premium_threshold=0.005,
+        uncertainty_premium_multiplier=3.0,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.feed_fee = feed_fee
+        self.uncertainty_premium_threshold = uncertainty_premium_threshold
+        self.uncertainty_premium_multiplier = uncertainty_premium_multiplier
+        self.accumulated_fees = 0.0       # fees waiting to enter next round's pool
+        self.total_fees_collected = 0.0   # lifetime fee revenue
+        self.n_reads = 0                  # lifetime read count
+
+    def read_price(self, n_reads=1):
+        """Consumer reads the current oracle estimate, paying a fee per read.
+
+        The fee is adjusted by an uncertainty premium when Kalman P exceeds
+        the threshold -- consumers pay more for uncertain data, which funds
+        the additional reporting effort needed to reduce uncertainty.
+
+        Returns (estimate, fee_paid).
+        """
+        P = self.kalman.P
+        if P > self.uncertainty_premium_threshold:
+            effective_fee = self.feed_fee * self.uncertainty_premium_multiplier
+        else:
+            effective_fee = self.feed_fee
+
+        total_fee = effective_fee * n_reads
+        self.accumulated_fees += total_fee
+        self.total_fees_collected += total_fee
+        self.n_reads += n_reads
+
+        estimate = self._denormalize(self.kalman.x)
+        return estimate, total_fee
+
+    def consumer_challenge(self, bond):
+        """A consumer (non-reporter) posts a challenge bond.
+
+        Unlike a reporter challenge, the consumer doesn't submit a value --
+        they just put money on the line to demand better accuracy.  The bond
+        enters the reward pool and triggers escalation (doubles P).
+
+        Returns the Challenge object.
+        """
+        rnd = self.current_round
+        if rnd is None or rnd.settled:
+            raise RuntimeError("No open round to challenge")
+
+        level = len(rnd.challenges) + 1
+        ch = Challenge(challenger=None, bond=bond, level=level)
+        rnd.challenges.append(ch)
+        rnd.reward_pool += bond
+
+        # Increase Kalman uncertainty
+        self.kalman.P *= ch.stake_multiplier
+
+        log.info("Consumer challenge level %d: bond=%.1f, P reset to %.6f",
+                 level, bond, self.kalman.P)
+        return ch
+
+    def open_round(self):
+        """Override: flush accumulated feed fees into the new round's pool."""
+        rnd = super().open_round()
+        if self.accumulated_fees > 0:
+            rnd.reward_pool += self.accumulated_fees
+            log.debug("Flushed %.1f in feed fees to round %d pool",
+                      self.accumulated_fees, rnd.round_id)
+            self.accumulated_fees = 0.0
+        return rnd
+
+
+# ---------------------------------------------------------------------------
 # Simulation helpers
 # ---------------------------------------------------------------------------
 
