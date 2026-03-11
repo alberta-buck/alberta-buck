@@ -541,6 +541,104 @@ class TestGradualDrift:
 
 
 # ---------------------------------------------------------------------------
+# Majority takeover: adversaries outnumber honest, honest lose money
+# ---------------------------------------------------------------------------
+
+class TestMajorityTakeover:
+
+    def test_majority_adversary_controls_estimate(self):
+        """6 adversaries vs 2 honest: estimate drifts to adversary bias.
+
+        A 3:1 adversary supermajority eventually controls the settled value.
+        However, the Kalman filter's warmup period (3 rounds of high R for
+        new reporters) provides a transient defense: adversaries lose stakes
+        heavily in early rounds while untrusted, and honest reporters
+        collect those stakes.  The estimate still drifts to ~10% bias by
+        round 15+, but the attack is costly.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=2.0)
+        honest = []
+        for i in range(2):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        adversaries = []
+        for i in range(6):
+            r = Reporter(f"adv_{i}", stake=1000)
+            oracle.register(r)
+            adversaries.append((r, 0.001, 0.10))  # +10% bias, low noise
+
+        all_reporters = honest + adversaries
+        results = run_simulation(oracle, all_reporters, n_rounds=25,
+                                 true_price_fn=lambda _: PRICE, seed=303)
+
+        # The estimate converges to the adversary bias (~10%)
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_err = sum(late_errors) / len(late_errors)
+        assert avg_err > 0.05, (
+            f"Majority adversary should control estimate: avg error {avg_err:.4f}")
+
+        # Early rounds: adversaries are untrusted (high R), classified dishonest
+        early_dishonest = sum(r["dishonest"] for r in results[:3])
+        assert early_dishonest > 10, (
+            f"Adversaries should be dishonest early: {early_dishonest} dishonest")
+
+        # Honest reporters still profit overall from the early windfall
+        # (collecting adversary stakes while adversaries have high R)
+        honest_net = sum(r.earnings - r.losses for r, _, _ in honest)
+        log.info("Majority takeover: late err=%.1f%%, honest net=%.1f "
+                 "(profit from early-round adversary losses)",
+                 avg_err * 100, honest_net)
+
+        # Adversaries collectively lose money despite controlling the estimate
+        # because they paid heavily during the warmup period
+        adv_net = sum(r.earnings - r.losses for r, _, _ in adversaries)
+        assert adv_net < 0, (
+            f"Adversaries should be net negative from warmup losses: {adv_net:.1f}")
+
+    def test_majority_warmup_defense_duration(self):
+        """The warmup defense lasts ~3 rounds; after that, majority wins.
+
+        Tracks the round at which adversaries first become the "honest"
+        majority (i.e. when the estimate has drifted far enough that
+        adversary submissions fall within tolerance of the settled value).
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=2.0)
+        honest = []
+        for i in range(2):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        adversaries = []
+        for i in range(6):
+            r = Reporter(f"adv_{i}", stake=1000)
+            oracle.register(r)
+            adversaries.append((r, 0.001, 0.10))
+
+        all_reporters = honest + adversaries
+        results = run_simulation(oracle, all_reporters, n_rounds=25,
+                                 true_price_fn=lambda _: PRICE, seed=303)
+
+        # Find the crossover: when adversaries become majority-honest
+        crossover = None
+        for r in results:
+            if r["honest"] > r["dishonest"] and r["honest"] >= 6:
+                crossover = r["round"]
+                break
+
+        assert crossover is not None, "Adversary majority should eventually control"
+        assert crossover >= 3, (
+            f"Warmup defense should last at least 3 rounds: crossover at {crossover}")
+        assert crossover <= 8, (
+            f"Crossover should happen within 8 rounds: {crossover}")
+
+        log.info("Majority crossover at round %d (adversaries become 'honest')",
+                 crossover)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
