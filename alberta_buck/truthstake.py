@@ -372,8 +372,9 @@ class Oracle:
 
         # Challenge settlement: challenger who submitted honestly already
         # got paid above.  Challenger who didn't submit loses their bond.
+        # Consumer challenges (challenger=None) have no reporter to penalize.
         for ch in rnd.challenges:
-            if ch.challenger.name not in shares:
+            if ch.challenger is not None and ch.challenger.name not in shares:
                 ch.challenger.losses += ch.bond
 
         # Update reporter reputations (EMA of squared relative error)

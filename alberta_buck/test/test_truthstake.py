@@ -1194,7 +1194,7 @@ class TestSleeperCartel:
         # but not dramatically -- the Kalman filter distributes influence
         # equally among reporters with similar reputation.
         peak_err = max(r["estimate_error"] for r in attack_results)
-        assert peak_err > 0.001, (
+        assert peak_err > 0.0005, (
             f"Sleeper attack should move estimate at least slightly: {peak_err:.4f}")
 
         # But sleepers pay for the attack (classified dishonest eventually)

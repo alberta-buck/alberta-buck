@@ -919,3 +919,318 @@ class TestNonErgodicCollapse:
                  P_vals_1[-1], err_1 * 100,
                  P_vals_2[-1], err_2 * 100,
                  P_vals_3[-1], err_3 * 100)
+
+
+# ---------------------------------------------------------------------------
+# FeedOracle: consumer-funded dynamics
+# ---------------------------------------------------------------------------
+
+class TestFeedFees:
+
+    def test_feed_fees_increase_reward_pool(self):
+        """Consumer reads generate fees that flow into the next round's pool.
+
+        More consumers reading -> larger reward pool -> more attractive for
+        reporters.  This is the positive externality loop.
+        """
+        oracle = FeedOracle(
+            initial_estimate=PRICE, min_stake=1.0,
+            escrow_fraction=0.0, escrow_window=10,
+            feed_fee=2.0,
+        )
+        reporters = []
+        for i in range(4):
+            r = Reporter(f"h_{i}", stake=1000)
+            oracle.register(r)
+            reporters.append(r)
+
+        # Round 1: no reads beforehand
+        oracle.open_round()
+        pool_no_fees = oracle.current_round.reward_pool
+        for r in reporters:
+            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=1.0)
+        r1 = oracle.settle(true_price=PRICE)
+
+        # Simulate 10 consumer reads between rounds
+        for _ in range(10):
+            oracle.read_price()
+
+        # Round 2: fees should inflate the pool
+        oracle.open_round()
+        pool_with_fees = oracle.current_round.reward_pool
+        for r in reporters:
+            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=1.0)
+        r2 = oracle.settle(true_price=PRICE)
+
+        assert pool_with_fees > 0, "Fees should have been flushed into pool"
+        # P > threshold after 1 round, so uncertainty premium (3x) applies:
+        # 10 reads * 2.0 fee * 3.0 premium = 60.0
+        assert pool_with_fees == pytest.approx(60.0), (
+            f"10 reads * 2.0 * 3x premium = 60.0, got {pool_with_fees:.1f}")
+        assert r2["reward_pool"] > r1["reward_pool"], (
+            f"Pool with fees should be larger: {r2['reward_pool']:.1f} vs {r1['reward_pool']:.1f}")
+
+        log.info("Feed fees: pool without=%.1f, with 10 reads=%.1f",
+                 r1["reward_pool"], r2["reward_pool"])
+
+    def test_uncertainty_premium_increases_fees(self):
+        """When Kalman P exceeds threshold, consumers pay an uncertainty premium.
+
+        This naturally funds increased reporting effort during uncertain periods.
+        """
+        oracle = FeedOracle(
+            initial_estimate=PRICE, min_stake=1.0,
+            escrow_fraction=0.0, escrow_window=10,
+            feed_fee=1.0,
+            uncertainty_premium_threshold=0.005,
+            uncertainty_premium_multiplier=3.0,
+        )
+
+        # With default P=0.01 > threshold=0.005, premium applies
+        _, fee_high_P = oracle.read_price()
+        assert fee_high_P == pytest.approx(3.0), (
+            f"Premium should apply when P > threshold: fee={fee_high_P}")
+
+        # After convergence (many observations reduce P), fee drops
+        r = Reporter("alice", stake=1000)
+        oracle.register(r)
+        for _ in range(20):
+            oracle.open_round()
+            oracle.submit(r, r.observe(PRICE, noise_std=0.001), stake=1.0)
+            oracle.settle(true_price=PRICE)
+
+        _, fee_low_P = oracle.read_price()
+        assert fee_low_P < fee_high_P, (
+            f"Fee should drop after convergence: {fee_low_P} vs {fee_high_P}")
+
+        log.info("Uncertainty premium: high P fee=%.1f, low P fee=%.1f, "
+                 "P=%.6f threshold=%.4f",
+                 fee_high_P, fee_low_P, oracle.kalman.P,
+                 oracle.uncertainty_premium_threshold)
+
+    def test_consumer_challenge_triggers_escalation(self):
+        """Non-reporter consumer challenges increase P and add to pool."""
+        oracle = FeedOracle(
+            initial_estimate=PRICE, min_stake=1.0,
+            escrow_fraction=0.0, escrow_window=10,
+            feed_fee=1.0,
+        )
+        reporters = []
+        for i in range(4):
+            r = Reporter(f"h_{i}", stake=1000)
+            oracle.register(r)
+            reporters.append(r)
+
+        oracle.open_round()
+        for r in reporters:
+            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=1.0)
+
+        P_before = oracle.kalman.P
+        pool_before = oracle.current_round.reward_pool
+
+        # Consumer posts a challenge bond (not a reporter)
+        oracle.consumer_challenge(bond=10.0)
+
+        P_after = oracle.kalman.P
+        pool_after = oracle.current_round.reward_pool
+
+        assert P_after > P_before, "Consumer challenge should increase P"
+        assert pool_after == pool_before + 10.0, "Bond should enter pool"
+
+        result = oracle.settle(true_price=PRICE)
+        assert result["reward_pool"] >= 4.0 + 10.0, (
+            f"Pool should include bond: {result['reward_pool']}")
+
+        log.info("Consumer challenge: P %.6f -> %.6f, pool %.1f -> %.1f",
+                 P_before, P_after, pool_before, pool_after)
+
+    def test_feed_revenue_attracts_reporters(self):
+        """Simulate the demand-supply feedback loop.
+
+        Phase 1: few consumers, small pool -> only 2 reporters participate
+        Phase 2: many consumers, large pool -> 6 reporters attracted
+        The larger pool from feed fees should produce more accurate estimates
+        because more reporters compete for the rewards.
+        """
+        def run_phase(n_consumers, n_reporters):
+            oracle = FeedOracle(
+                initial_estimate=PRICE, min_stake=1.0,
+                escrow_fraction=0.0, escrow_window=10,
+                feed_fee=1.0,
+            )
+            reporters = []
+            for i in range(n_reporters):
+                r = Reporter(f"r_{i}", stake=1000)
+                oracle.register(r)
+                reporters.append(r)
+
+            results = []
+            for rid in range(15):
+                # Consumers read between rounds
+                for _ in range(n_consumers):
+                    oracle.read_price()
+                oracle.open_round()
+                for r in reporters:
+                    oracle.submit(r, r.observe(PRICE, noise_std=0.005), stake=1.0)
+                result = oracle.settle(true_price=PRICE)
+                results.append(result)
+
+            avg_err = sum(r["estimate_error"] for r in results[-5:]) / 5
+            avg_pool = sum(r["reward_pool"] for r in results[-5:]) / 5
+            total_reporter_earnings = sum(r.earnings for r in reporters)
+            return avg_err, avg_pool, total_reporter_earnings
+
+        err_few, pool_few, earn_few = run_phase(n_consumers=2, n_reporters=2)
+        err_many, pool_many, earn_many = run_phase(n_consumers=20, n_reporters=6)
+
+        # More consumers -> larger pool
+        assert pool_many > pool_few, (
+            f"More consumers should grow pool: {pool_many:.1f} vs {pool_few:.1f}")
+
+        # More reporters -> better accuracy (more observations for Kalman filter)
+        assert err_many <= err_few * 1.1, (
+            f"More reporters should maintain accuracy: {err_many:.4f} vs {err_few:.4f}")
+
+        # Reporters earn more from larger pool
+        assert earn_many > earn_few, (
+            f"Larger pool should increase reporter earnings: {earn_many:.1f} vs {earn_few:.1f}")
+
+        log.info("Demand-supply loop: few consumers pool=%.1f err=%.2f%% earn=%.1f; "
+                 "many consumers pool=%.1f err=%.2f%% earn=%.1f",
+                 pool_few, err_few * 100, earn_few,
+                 pool_many, err_many * 100, earn_many)
+
+    def test_consumer_challenge_during_manipulation(self):
+        """Consumers detect manipulation and fund correction via challenge bonds.
+
+        When consumers have a reference price (e.g., from another exchange),
+        they can detect oracle manipulation and post challenge bonds.  This
+        funds the P reset needed for honest reporters to correct the bias.
+        """
+        oracle = FeedOracle(
+            initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+            escrow_fraction=0.20, escrow_window=20,
+            challenge_P_floor=0.01,
+            feed_fee=1.0,
+        )
+        honest = [Reporter(f"h_{i}", stake=5000) for i in range(3)]
+        liars = [Reporter(f"liar_{i}", stake=5000) for i in range(5)]
+        for r in honest + liars:
+            oracle.register(r)
+
+        # 15 rounds of liar control
+        for rid in range(15):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+            oracle.settle(true_price=PRICE)
+
+        err_before = abs(oracle._denormalize(oracle.kalman.x) - PRICE) / PRICE
+
+        # Consumer detects bias and funds challenges
+        new_honest = [Reporter(f"new_{i}", stake=5000) for i in range(5)]
+        for r in new_honest:
+            oracle.register(r)
+
+        oracle.open_round()
+        for r in honest + new_honest:
+            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+        for r in liars:
+            oracle.submit(r, PRICE * 1.08, stake=2.0)
+
+        # Three consumer challenges at increasing bonds
+        oracle.consumer_challenge(bond=10.0)
+        oracle.consumer_challenge(bond=20.0)
+        oracle.consumer_challenge(bond=40.0)
+
+        # Honest re-submit after challenges widen the filter
+        for r in honest + new_honest:
+            try:
+                eff = oracle.min_stake * oracle._stake_multiplier()
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+            except ValueError:
+                pass
+
+        result = oracle.settle(true_price=PRICE)
+        err_after = result["estimate_error"]
+
+        assert err_after < err_before, (
+            f"Consumer challenges should reduce error: {err_after:.4f} vs {err_before:.4f}")
+
+        # Consumer bond money should be in the pool, enriching honest reporters
+        assert result["reward_pool"] > 70, (  # bonds alone = 70
+            f"Consumer bonds should inflate pool: {result['reward_pool']:.1f}")
+
+        log.info("Consumer-funded correction: err %.2f%% -> %.2f%%, pool=%.1f",
+                 err_before * 100, err_after * 100, result["reward_pool"])
+
+    def test_feed_fee_economics_game_theory(self):
+        """Game-theoretic analysis: feed fees make honesty strictly dominant.
+
+        Without feed fees: reporter's expected return = (honest share of pool).
+        With feed fees: reporter's expected return = (honest share of pool + fees).
+
+        The fee revenue makes honest reporting more profitable, attracting more
+        honest reporters, which makes the oracle more accurate, which attracts
+        more consumers, which increases fees -- a virtuous cycle.
+
+        This test quantifies: at what fee level does honest reporting become
+        profitable enough to attract reporters away from manipulation?
+        """
+        def reporter_economics(feed_fee, n_liars):
+            oracle = FeedOracle(
+                initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+                escrow_fraction=0.10, escrow_window=10,
+                challenge_P_floor=0.01,
+                feed_fee=feed_fee,
+            )
+            honest = [Reporter(f"h_{i}", stake=5000) for i in range(4)]
+            liars = [Reporter(f"liar_{i}", stake=5000) for i in range(n_liars)]
+            challenger = Reporter("ch", stake=5000)
+            for r in honest + liars + [challenger]:
+                oracle.register(r)
+
+            for rid in range(30):
+                # 5 consumer reads per round
+                for _ in range(5):
+                    oracle.read_price()
+                oracle.open_round()
+                for r in honest:
+                    oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+                for r in liars:
+                    if r.stake >= 2.0:
+                        oracle.submit(r, PRICE * 1.06, stake=2.0)
+                if rid % 5 == 0:
+                    try:
+                        oracle.challenge(challenger)
+                    except ValueError:
+                        pass
+                oracle.settle(true_price=PRICE)
+
+            honest_roi = sum(r.earnings - r.losses for r in honest) / (4 * 5000)
+            liar_roi = (sum(r.earnings - r.losses for r in liars) / (n_liars * 5000)
+                        if n_liars > 0 else 0)
+            return honest_roi, liar_roi
+
+        # No fees: baseline ROI
+        h_roi_0, l_roi_0 = reporter_economics(feed_fee=0.0, n_liars=2)
+        # Moderate fees
+        h_roi_1, l_roi_1 = reporter_economics(feed_fee=2.0, n_liars=2)
+        # High fees
+        h_roi_5, l_roi_5 = reporter_economics(feed_fee=5.0, n_liars=2)
+
+        # Higher fees -> better honest ROI
+        assert h_roi_5 > h_roi_0, (
+            f"Higher fees should improve honest ROI: {h_roi_5:.4f} vs {h_roi_0:.4f}")
+
+        # Honest ROI should always dominate liar ROI (honesty is strictly dominant)
+        assert h_roi_1 > l_roi_1, (
+            f"Honest ROI should exceed liar ROI: {h_roi_1:.4f} vs {l_roi_1:.4f}")
+
+        log.info("Feed fee economics: fee=0 h_roi=%.2f%% l_roi=%.2f%%; "
+                 "fee=2 h_roi=%.2f%% l_roi=%.2f%%; fee=5 h_roi=%.2f%% l_roi=%.2f%%",
+                 h_roi_0 * 100, l_roi_0 * 100,
+                 h_roi_1 * 100, l_roi_1 * 100,
+                 h_roi_5 * 100, l_roi_5 * 100)
