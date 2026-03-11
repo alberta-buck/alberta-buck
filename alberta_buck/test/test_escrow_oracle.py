@@ -1234,3 +1234,269 @@ class TestFeedFees:
                  h_roi_0 * 100, l_roi_0 * 100,
                  h_roi_1 * 100, l_roi_1 * 100,
                  h_roi_5 * 100, l_roi_5 * 100)
+
+
+# ---------------------------------------------------------------------------
+# Visualization: non-ergodic honey pot collapse
+# ---------------------------------------------------------------------------
+
+class TestVisualization:
+
+    def test_plot_honey_pot_collapse(self):
+        """Visualize the most compelling attack-and-recovery scenario.
+
+        A well-funded cartel (6 liars) controls the oracle against 2 honest
+        reporters for 20 rounds, drifting the estimate +8% while accumulating
+        escrow.  Then 8 honest newcomers arrive, mount challenges with
+        progressive P floor escalation, and trigger retroactive confiscation.
+
+        The chart shows five panels over 45 rounds:
+        1. Oracle estimate vs true price (with attack/defense phase markers)
+        2. Kalman uncertainty P (log scale) -- shows challenge resets
+        3. Estimation error % -- shows degradation then recovery
+        4. Cumulative P&L for attackers vs defenders
+        5. Honey pot (escrowed funds) -- the non-ergodic trap
+        """
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            from matplotlib.patches import FancyArrowPatch
+        except ImportError:
+            pytest.skip("matplotlib not available")
+
+        from pathlib import Path
+
+        oracle = EscrowOracle(
+            initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+            escrow_fraction=0.25, escrow_window=50,
+            gate_sigma=10.0,
+            challenge_P_floor=0.01,
+        )
+
+        # Phase setup: 2 honest vs 6 liars, then 8 newcomers join
+        honest_orig = []
+        for i in range(2):
+            r = Reporter(f"h_{i}", stake=10000)
+            oracle.register(r)
+            honest_orig.append(r)
+
+        liars = []
+        for i in range(6):
+            r = Reporter(f"liar_{i}", stake=10000)
+            oracle.register(r)
+            liars.append(r)
+
+        # Time series collectors
+        rounds_x = []
+        true_prices = []
+        estimates = []
+        errors_pct = []
+        P_values = []
+        liar_cum_pnl = []
+        honest_cum_pnl = []
+        challenger_cum_pnl = []
+        honey_pot_values = []
+        challenge_rounds = []
+        confiscation_rounds = []
+
+        liar_running = 0.0
+        honest_running = 0.0
+        challenger_running = 0.0
+
+        # Track per-reporter starting stakes for P&L
+        liar_start = {r.name: r.stake for r in liars}
+        honest_start = {}
+
+        ATTACK_PHASE = 20
+        TOTAL_ROUNDS = 45
+        newcomer_names = set()
+
+        for rid in range(TOTAL_ROUNDS):
+            # At round 20, newcomers + challenger arrive
+            if rid == ATTACK_PHASE:
+                new_honest = []
+                for i in range(8):
+                    r = Reporter(f"new_h_{i}", stake=10000)
+                    oracle.register(r)
+                    new_honest.append(r)
+                    newcomer_names.add(r.name)
+                challenger = Reporter("challenger", stake=10000)
+                oracle.register(challenger)
+                all_honest = honest_orig + new_honest
+            elif rid < ATTACK_PHASE:
+                all_honest = honest_orig
+            # else: all_honest already set
+
+            oracle.open_round()
+
+            for r in all_honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+
+            # Challenge logic: first 5 defense rounds + every 5th round
+            did_challenge = False
+            if rid >= ATTACK_PHASE:
+                defense_round = rid - ATTACK_PHASE
+                if defense_round < 5 or defense_round % 5 == 0:
+                    try:
+                        oracle.challenge(challenger)
+                        did_challenge = True
+                        # Honest re-submit after challenge widens filter
+                        for r in all_honest:
+                            try:
+                                eff = oracle.min_stake * oracle._stake_multiplier()
+                                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+                            except ValueError:
+                                pass
+                    except ValueError:
+                        pass
+
+            result = oracle.settle(true_price=PRICE)
+
+            # Collect time series
+            rounds_x.append(rid)
+            true_prices.append(PRICE)
+            estimates.append(result["settled_value"])
+            errors_pct.append(result["estimate_error"] * 100)
+            P_values.append(oracle.kalman.P)
+            honey_pot_values.append(oracle.honey_pot)
+
+            if did_challenge:
+                challenge_rounds.append(rid)
+            if result.get("escrow_confiscated", 0) > 0:
+                confiscation_rounds.append(rid)
+
+            # Cumulative P&L tracking via earnings/losses
+            liar_running = sum(r.earnings - r.losses for r in liars)
+            honest_running = sum(r.earnings - r.losses for r in all_honest)
+            if rid >= ATTACK_PHASE:
+                challenger_running = challenger.earnings - challenger.losses
+
+            liar_cum_pnl.append(liar_running)
+            honest_cum_pnl.append(honest_running)
+            challenger_cum_pnl.append(challenger_running)
+
+        # ---- Plot ----
+        fig, axes = plt.subplots(5, 1, figsize=(14, 16), sharex=True,
+                                 gridspec_kw={"hspace": 0.08})
+
+        phase_color = "#fff3e0"  # light orange for attack phase
+        defense_color = "#e8f5e9"  # light green for defense phase
+
+        for ax in axes:
+            ax.axvspan(-0.5, ATTACK_PHASE - 0.5, color=phase_color, alpha=0.5)
+            ax.axvspan(ATTACK_PHASE - 0.5, TOTAL_ROUNDS - 0.5,
+                       color=defense_color, alpha=0.4)
+            ax.axvline(x=ATTACK_PHASE, color="black", linewidth=1.5,
+                       linestyle="--", alpha=0.7)
+            ax.grid(True, alpha=0.3)
+
+        # Panel 1: Oracle estimate vs true price
+        ax = axes[0]
+        ax.plot(rounds_x, true_prices, "k-", label="True price ($2900)",
+                linewidth=2, zorder=3)
+        ax.plot(rounds_x, estimates, "b-", label="Oracle estimate",
+                linewidth=1.5, alpha=0.9, zorder=2)
+        for cr in challenge_rounds:
+            ax.axvline(x=cr, color="purple", alpha=0.3, linewidth=1)
+        ax.set_ylabel("Price ($)", fontsize=11)
+        ax.set_title("Non-Ergodic Honey Pot Collapse: Attack and Recovery",
+                     fontsize=14, fontweight="bold")
+        ax.legend(loc="upper left", fontsize=9)
+        # Phase labels positioned using axis transforms
+        ax.text(ATTACK_PHASE / 2, 0.05, "ATTACK PHASE\n6 liars vs 2 honest",
+                ha="center", va="bottom", fontsize=9, color="#e65100",
+                fontweight="bold", alpha=0.8, transform=ax.get_xaxis_transform())
+        ax.text(ATTACK_PHASE + (TOTAL_ROUNDS - ATTACK_PHASE) / 2, 0.05,
+                "DEFENSE PHASE\n10 honest + challenger vs 6 liars",
+                ha="center", va="bottom", fontsize=9, color="#2e7d32",
+                fontweight="bold", alpha=0.8, transform=ax.get_xaxis_transform())
+
+        # Panel 2: Kalman uncertainty P (log scale)
+        ax = axes[1]
+        ax.semilogy(rounds_x, P_values, "darkorange", linewidth=1.5)
+        for cr in challenge_rounds:
+            ax.axvline(x=cr, color="purple", alpha=0.4, linewidth=1.5,
+                       label="Challenge" if cr == challenge_rounds[0] else "")
+        ax.set_ylabel("Kalman P\n(uncertainty)", fontsize=11)
+        ax.legend(loc="upper right", fontsize=9)
+        # Annotate the P floor
+        ax.axhline(y=0.01, color="red", linestyle=":", alpha=0.5)
+        ax.text(TOTAL_ROUNDS - 1, 0.011, "P floor = 0.01",
+                ha="right", va="bottom", fontsize=8, color="red", alpha=0.7)
+
+        # Panel 3: Estimation error
+        ax = axes[2]
+        ax.fill_between(rounds_x, 0, errors_pct, alpha=0.3, color="red")
+        ax.plot(rounds_x, errors_pct, "r-", linewidth=1.2)
+        ax.axhline(y=5, color="orange", linestyle="--", alpha=0.5,
+                   label="5% tolerance")
+        ax.set_ylabel("Estimate error (%)", fontsize=11)
+        ax.legend(loc="upper right", fontsize=9)
+
+        # Panel 4: Cumulative P&L
+        ax = axes[3]
+        ax.plot(rounds_x, liar_cum_pnl, "r-", label="Liars (6 total)",
+                linewidth=2)
+        ax.plot(rounds_x, honest_cum_pnl, "g-", label="Honest (2+8 newcomers)",
+                linewidth=2)
+        ax.plot(rounds_x, challenger_cum_pnl, "b-", label="Challenger",
+                linewidth=1.5)
+        ax.axhline(y=0, color="black", linewidth=0.5)
+        ax.set_ylabel("Cumulative P&L ($)", fontsize=11)
+        ax.legend(loc="upper left", fontsize=9)
+        # Mark confiscation events
+        for cr in confiscation_rounds:
+            ax.axvline(x=cr, color="darkred", alpha=0.3, linewidth=2,
+                       linestyle=":",
+                       label="Confiscation" if cr == confiscation_rounds[0] else "")
+        if confiscation_rounds:
+            ax.legend(loc="upper left", fontsize=9)
+
+        # Panel 5: Honey pot (escrowed funds)
+        ax = axes[4]
+        ax.fill_between(rounds_x, 0, honey_pot_values, alpha=0.4,
+                        color="goldenrod")
+        ax.plot(rounds_x, honey_pot_values, color="darkgoldenrod", linewidth=1.5)
+        ax.set_ylabel("Honey pot ($)\n(escrowed)", fontsize=11)
+        ax.set_xlabel("Round", fontsize=12)
+
+        # Annotate peak honey pot
+        peak_idx = honey_pot_values.index(max(honey_pot_values))
+        peak_val = honey_pot_values[peak_idx]
+        ax.annotate(f"Peak: ${peak_val:.0f}",
+                    xy=(peak_idx, peak_val),
+                    xytext=(peak_idx + 3, peak_val * 0.85),
+                    arrowprops=dict(arrowstyle="->", color="darkgoldenrod"),
+                    fontsize=9, color="darkgoldenrod", fontweight="bold")
+
+        fig.subplots_adjust(hspace=0.15, left=0.1, right=0.95, top=0.95, bottom=0.05)
+        plot_path = Path(__file__).parent / "truthstake_honey_pot_collapse.png"
+        fig.savefig(str(plot_path), dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        log.info("Plot saved to %s", plot_path)
+
+        # Summary statistics
+        liar_final = sum(r.earnings - r.losses for r in liars)
+        honest_final = sum(r.earnings - r.losses for r in all_honest)
+        ch_final = challenger.earnings - challenger.losses
+
+        log.info("=== Honey Pot Collapse Summary ===")
+        log.info("Attack phase: 20 rounds, 6 liars at +8%% bias vs 2 honest")
+        log.info("Defense phase: 25 rounds, 10 honest + challenger vs 6 liars")
+        log.info("Liar final P&L:    $%.0f", liar_final)
+        log.info("Honest final P&L:  $%.0f", honest_final)
+        log.info("Challenger P&L:    $%.0f", ch_final)
+        log.info("Peak honey pot:    $%.0f", max(honey_pot_values))
+        log.info("Challenges fired:  %d", len(challenge_rounds))
+        log.info("Confiscation events: %d", len(confiscation_rounds))
+        log.info("Final estimate error: %.2f%%", errors_pct[-1])
+
+        # Assertions
+        assert liar_final < 0, f"Liars should be net negative: {liar_final:.1f}"
+        assert honest_final > 0 or honest_running > -100, (
+            f"Honest should recover: {honest_final:.1f}")
+        assert errors_pct[-1] < 2.0, (
+            f"Final error should be low: {errors_pct[-1]:.2f}%")

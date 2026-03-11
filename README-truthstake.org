@@ -219,24 +219,24 @@
 
 ** Attack Tests
 
-  | Attack class | Tests | Scenario | Key finding |
-  |--------------+-------+----------+-------------|
-  | Single manipulator | 1 | 4 honest + 1 adversary (+10%) | Adversary is net loser; estimate <3% error |
-  | Coordinated cartel | 1 | 3v3 + challenger | Cartel loses, challenge restores <5% error |
-  | Reputation turncoat | 1 | Honest 10 rounds then +12% bias | R rises, stake lost |
-  | False challenge | 1 | All honest + frivolous challenger | Challenger earns less than honest avg |
-  | Sybil attack | 2 | 10:3 unchallenged; 5:5 with challenge | 10:3 overwhelms oracle; 5:5 + challenge restores |
-  | Gradual drift | 2 | +0.3%/round ramp; velocity-based challenge | Evades gating; velocity challenge detects |
-  | Majority takeover | 2 | 6:2 adversary supermajority | Controls estimate but loses money (warmup cost) |
-  | Whale manipulation | 2 | 1 whale at 100x stake + bias | Kalman ignores stake size; whale loses massively |
-  | Front-running | 2 | Copy-and-submit-last; copy + 2% bias | Early-bonus penalty; biased copy loses |
-  | Volatility exploit | 2 | Attack during high-P window; Q sensitivity | Honest re-submissions restore; high Q amplifies bursts |
-  | Sandwich attack | 2 | Symmetric +/-4%; asymmetric +7%/-3% | Symmetric cancels; asymmetric bounded by majority |
-  | Stake starvation | 2 | Challenge griefing; capital depletion recovery | Griefer pays exponentially more; oracle recovers |
-  | Sleeper cartel | 2 | 3:3 with 20-round reputation; + challenge | Peak error only 0.37% at equal ratio; challenge makes net negative |
-  | Oscillation | 2 | Alternating +/-6%; small +/-3% | Large osc classified dishonest; small osc earns less |
-  | Late entry | 2 | New adversary joins after 15 honest rounds; new honest joins | Adversary gated by low P; honest builds trust gradually |
-  | Price discontinuity | 2 | -10% flash crash; stale-price adversary | Re-converges in ~5 rounds; stale adversary eventually exposed |
+  | Attack class        | Tests | Scenario                                          | Key finding                                                    |
+  |---------------------+-------+---------------------------------------------------+----------------------------------------------------------------|
+  | Single manipulator  |     1 | 4 honest + 1 adversary (+10%)                     | Adversary is net loser; estimate <3% error                     |
+  | Coordinated cartel  |     1 | 3v3 + challenger                                  | Cartel loses, challenge restores <5% error                     |
+  | Reputation turncoat |     1 | Honest 10 rounds then +12% bias                   | R rises, stake lost                                            |
+  | False challenge     |     1 | All honest + frivolous challenger                 | Challenger earns less than honest avg                          |
+  | Sybil attack        |     2 | 10:3 unchallenged; 5:5 with challenge             | 10:3 overwhelms oracle; 5:5 + challenge restores               |
+  | Gradual drift       |     2 | +0.3%/round ramp; velocity-based challenge        | Evades gating; velocity challenge detects                      |
+  | Majority takeover   |     2 | 6:2 adversary supermajority                       | Controls estimate but loses money (warmup cost)                |
+  | Whale manipulation  |     2 | 1 whale at 100x stake + bias                      | Kalman ignores stake size; whale loses massively               |
+  | Front-running       |     2 | Copy-and-submit-last; copy + 2% bias              | Early-bonus penalty; biased copy loses                         |
+  | Volatility exploit  |     2 | Attack during high-P window; Q sensitivity        | Honest re-submissions restore; high Q amplifies bursts         |
+  | Sandwich attack     |     2 | Symmetric +/-4%; asymmetric +7%/-3%               | Symmetric cancels; asymmetric bounded by majority              |
+  | Stake starvation    |     2 | Challenge griefing; capital depletion recovery    | Griefer pays exponentially more; oracle recovers               |
+  | Sleeper cartel      |     2 | 3:3 with 20-round reputation; + challenge         | Peak error only 0.37% at equal ratio; challenge makes net -'ve |
+  | Oscillation         |     2 | Alternating +/-6%; small +/-3%                    | Large osc classified dishonest; small osc earns less           |
+  | Late entry          |     2 | Adversary joins after 15 rounds; new honest joins | Adversary gated by low P; honest builds trust gradually        |
+  | Price discontinuity |     2 | -10% flash crash; stale-price adversary           | Re-converges in ~5 rounds; stale adversary eventually exposed  |
 
   The visualization test (=test_plot_simulation=) produces a three-panel chart showing
   price tracking, estimation error, and cumulative P&L for honest vs. adversarial
@@ -250,18 +250,18 @@
 
 ** Quantitative Summary
 
-   | Scenario | Honest:Adversary | Avg late error | Honest P&L | Adversary P&L | Verdict |
-   |----------+------------------+----------------+------------+---------------+---------|
-   | Honest baseline | 5:0 | 0.12% | $0 | --- | ACCURATE |
-   | 1 adversary | 4:1 | 0.16% | +$30 | -$30 | ACCURATE |
-   | 3v3 cartel | 3:3 | 2.17% | +$28 | -$88 | DEGRADED |
-   | 3v3 cartel + challenge | 3:3 | 0.95% | +$96 | -$96 | ACCURATE |
-   | Equal ratio 4:4 | 4:4 | 1.32% | +$125 | -$125 | ACCURATE |
-   | Equal + challenge | 4:4 | 0.07% | +$147 | -$146 | ACCURATE |
-   | 5 sybils (3:5) | 3:5 | 8.00% | -$1 | +$1 | COMPROMISED |
-   | 5 sybils + challenge | 4:5 | 0.96% | +$171 | -$134 | ACCURATE |
-   | 10 sybils (3:10) | 3:10 | 7.98% | +$6 | -$6 | COMPROMISED |
-   | Majority (2:6) | 2:6 | 10.00% | +$22 | -$22 | COMPROMISED |
+   | Scenario               | Honest:Adversary | Avg late error | Honest P&L | Adversary P&L | Verdict     |
+   |------------------------+------------------+----------------+------------+---------------+-------------|
+   | Honest baseline        |              5:0 |          0.12% | $0         | ---           | ACCURATE    |
+   | 1 adversary            |              4:1 |          0.16% | +$30       | -$30          | ACCURATE    |
+   | 3v3 cartel             |              3:3 |          2.17% | +$28       | -$88          | DEGRADED    |
+   | 3v3 cartel + challenge |              3:3 |          0.95% | +$96       | -$96          | ACCURATE    |
+   | Equal ratio 4:4        |              4:4 |          1.32% | +$125      | -$125         | ACCURATE    |
+   | Equal + challenge      |              4:4 |          0.07% | +$147      | -$146         | ACCURATE    |
+   | 5 sybils (3:5)         |              3:5 |          8.00% | -$1        | +$1           | COMPROMISED |
+   | 5 sybils + challenge   |              4:5 |          0.96% | +$171      | -$134         | ACCURATE    |
+   | 10 sybils (3:10)       |             3:10 |          7.98% | +$6        | -$6           | COMPROMISED |
+   | Majority (2:6)         |              2:6 |         10.00% | +$22       | -$22          | COMPROMISED |
 
    Verdicts: ACCURATE (<2%), DEGRADED (2--5%), COMPROMISED (>5%).
 
@@ -543,13 +543,13 @@
 
    The EscrowOracle test suite (20 tests) validates the non-ergodic properties:
 
-   | Test class | Tests | Key finding |
-   |------------+-------+-------------|
-   | Escrow basics | 3 | 20% withholding, release after W rounds, zero-fraction noop |
-   | Double-down | 2 | Liars withdraw (revealing lack of conviction), honest double down |
-   | Retroactive confiscation | 2 | Liar escrow confiscated on challenge, honest escrow survives |
-   | Non-ergodic collapse | 7 | Honey pot grows, honest influx triggers collapse, progressive escalation |
-   | Feed fees | 6 | Fee-funded pool, uncertainty premium, consumer challenges, game theory |
+   | Test class               | Tests | Key finding                                                              |
+   |--------------------------+-------+--------------------------------------------------------------------------|
+   | Escrow basics            |     3 | 20% withholding, release after W rounds, zero-fraction noop              |
+   | Double-down              |     2 | Liars withdraw (revealing lack of conviction), honest double down        |
+   | Retroactive confiscation |     2 | Liar escrow confiscated on challenge, honest escrow survives             |
+   | Non-ergodic collapse     |     7 | Honey pot grows, honest influx triggers collapse, progressive escalation |
+   | Feed fees                |     6 | Fee-funded pool, uncertainty premium, consumer challenges, game theory   |
 
    The non-ergodic collapse tests confirm:
    - Honey pot grows monotonically during liar control (20x over 20 rounds)
@@ -559,6 +559,26 @@
    - Liars deplete capital over 80 rounds; honest capital grows
    - Single challenge with P floor flips outcome from biased to accurate
    - Progressive escalation: each challenge level widens the filter further
+
+** Honey Pot Collapse Visualization
+
+   The most compelling scenario: 6 well-funded liars control the oracle for 20 rounds
+   against 2 honest reporters, drifting the estimate to $3121 (+7.6% above true $2900).
+   At round 20, the growing honey pot ($80 in escrowed liar payouts) attracts 8 honest
+   newcomers and a challenger.  Progressive challenges reset the Kalman P floor, giving
+   newcomers meaningful influence.  The estimate snaps back to $2900 within 5 rounds.
+
+   | Phase | Rounds | Estimate | Error | Liar P&L | Honest P&L |
+   |-------+--------+----------+-------+----------+------------|
+   | Attack end | 0-19 | $3121 | 7.6% | +$5 | -$5 |
+   | Defense end | 20-44 | $2900 | 0.01% | -$116 | +$332 |
+
+   Five panels track the dynamics over 45 rounds: oracle estimate vs true price, Kalman
+   uncertainty P (log scale showing challenge resets), estimation error %, cumulative P&L
+   for attackers vs defenders, and the non-ergodic honey pot that grows during liar control
+   and funds the honest recovery.
+
+   [[file:alberta_buck/test/truthstake_honey_pot_collapse.png]]
 
 * Simulations on Real Gold Prices
 
@@ -977,12 +997,12 @@
 
 * Comparison to Existing Oracles
 
-  | Property | Chainlink | UMA (Optimistic) | Tellor | TruthStake |
-  |----------+-----------+-------------------+--------+------------|
-  | Trust model | Trusted nodes | Propose-dispute | Stake-to-report | Reputation-weighted Kalman |
-  | Manipulation defense | Node selection | DVM vote | Dispute + slash | Challenge escalation |
-  | Signal extraction | Median | Single proposer | Median | Kalman filter |
-  | Early reporter reward | No | No | Tips | Exponential bonus |
-  | Uncertainty quantification | No | No | No | Yes (Kalman P) |
-  | Gas per read | ~5k | ~5k | ~5k | ~5k (stored estimate) |
-  | Gas per report | N/A (off-chain) | ~100k | ~50k | ~25k |
+  | Property                   | Chainlink       | UMA (Optimistic) | Tellor          | TruthStake                 |
+  |----------------------------+-----------------+------------------+-----------------+----------------------------|
+  | Trust model                | Trusted nodes   | Propose-dispute  | Stake-to-report | Reputation-weighted Kalman |
+  | Manipulation defense       | Node selection  | DVM vote         | Dispute + slash | Challenge escalation       |
+  | Signal extraction          | Median          | Single proposer  | Median          | Kalman filter              |
+  | Early reporter reward      | No              | No               | Tips            | Exponential bonus          |
+  | Uncertainty quantification | No              | No               | No              | Yes (Kalman P)             |
+  | Gas per read               | ~5k             | ~5k              | ~5k             | ~5k (stored estimate)      |
+  | Gas per report             | N/A (off-chain) | ~100k            | ~50k            | ~25k                       |
