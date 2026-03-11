@@ -1487,6 +1487,104 @@ class TestLateEntry:
 
 
 # ---------------------------------------------------------------------------
+# Price discontinuity: true price jumps, adversary exploits confusion
+# ---------------------------------------------------------------------------
+
+class TestPriceDiscontinuity:
+
+    def test_oracle_tracks_price_jump(self):
+        """True price drops 10% suddenly; oracle re-converges.
+
+        With sufficient Q (process noise), the filter eventually tracks
+        the new price level.  The convergence rate depends on reporter R
+        and the Q/P ratio.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0, Q=0.001)
+        reporters = []
+        for i in range(5):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            reporters.append((r, 0.005, 0.0))
+
+        def price_with_jump(round_id):
+            if round_id < 15:
+                return PRICE
+            return PRICE * 0.90  # -10% flash crash at round 15
+
+        results = run_simulation(oracle, reporters, n_rounds=40,
+                                 true_price_fn=price_with_jump, seed=42)
+
+        # Immediately after jump: noticeable error (filter hasn't fully caught up)
+        jump_error = results[15]["estimate_error"]
+        assert jump_error > 0.01, (
+            f"Immediate post-jump error should be noticeable: {jump_error:.4f}")
+
+        # But by 10 rounds later, filter should have converged
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_late_err = sum(late_errors) / len(late_errors)
+        assert avg_late_err < 0.02, (
+            f"Should reconverge after jump: avg late err {avg_late_err:.4f}")
+
+        log.info("Price jump: immediate err=%.2f%%, late err=%.2f%%",
+                 jump_error * 100, avg_late_err * 100)
+
+    def test_adversary_exploits_price_jump_confusion(self):
+        """Adversary submits the old pre-jump price after a crash.
+
+        During the confusion of a price discontinuity, honest reporters
+        submit the new (crashed) price while an adversary submits the
+        old price.  The adversary is classified dishonest because the
+        settled value tracks toward the new price (which most reporters
+        observe).
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0, Q=0.001)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append(r)
+
+        stale_adv = Reporter("stale_adv", stake=1000)
+        oracle.register(stale_adv)
+
+        def price_with_crash(round_id):
+            if round_id < 10:
+                return PRICE
+            return PRICE * 0.85  # -15% crash
+
+        results = []
+        for rid in range(25):
+            price = price_with_crash(rid)
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(price, noise_std=0.005), stake=1.0)
+            # Adversary always submits the pre-crash price
+            oracle.submit(stale_adv, stale_adv.observe(PRICE, noise_std=0.005), stake=1.0)
+            result = oracle.settle(true_price=price)
+            results.append(result)
+
+        # Post-crash: adversary is eventually classified dishonest as the
+        # estimate converges to the new price.  Initially the adversary's
+        # old-price submission is CLOSER to the (pre-crash) estimate than
+        # the honest reporters' new-price submissions -- a brief window
+        # where the adversary paradoxically appears "honest."
+        post_crash_dishonest = sum(1 for r in results[12:] if r["dishonest"] > 0)
+        assert post_crash_dishonest > 0, (
+            f"Stale adversary should eventually be dishonest: {post_crash_dishonest}")
+
+        # Adversary should lose money
+        assert stale_adv.losses > 0, f"Stale adv should lose: {stale_adv.losses:.1f}"
+
+        # Oracle should track the new price eventually
+        late_err = sum(r["estimate_error"] for r in results[-3:]) / 3
+        assert late_err < 0.05, (
+            f"Oracle should track post-crash price: late err {late_err:.4f}")
+
+        log.info("Stale adversary: losses=%.1f, post-crash dishonest=%d/13, late err=%.2f%%",
+                 stale_adv.losses, post_crash_dishonest, late_err * 100)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
