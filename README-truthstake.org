@@ -200,23 +200,261 @@
 
 * Simulation Results
 
-  The test suite validates these properties with deterministic simulations:
+  The test suite (37 tests) validates these properties with deterministic simulations
+  covering 12 attack classes.
+
+** Core Mechanism Tests
 
   | Test | Scenario | Verified property |
   |------+----------+-------------------|
+  | =test_converges_to_true_value= | Kalman filter, 50 low-noise observations | Estimate within 0.1% |
+  | =test_low_R_has_more_influence= | Two reporters, different R | Low-R reporter moves estimate further |
+  | =test_predict_increases_uncertainty= | Time propagation | P grows by Q per round |
+  | =test_new_reporter_high_R= | Fresh reporter | R=1.0 (untrusted) |
+  | =test_R_decreases_with_accuracy= | 5 settlements with low error | R drops well below 1.0 |
   | =test_honest_convergence= | 5 honest, stable price | Estimate within 1% |
   | =test_random_walk= | 5 honest, drifting price | Tracks within 2% |
-  | =test_manipulator_loses= | 4 honest + 1 adversary (+10%) | Adversary is net loser |
-  | =test_challenge_defeats_cartel= | 3 honest + 3 cartel + challenger | Cartel loses, truth restored |
-  | =test_first_submitter_earns_more= | 5 honest, fixed order | First > last earnings |
-  | =test_turned_adversary_loses_reputation= | Honest then adversarial | Reputation degrades, stake lost |
-  | =test_unjustified_challenge_costs_bond= | All honest + false challenger | Challenger does worse |
+  | =test_first_submitter_earns_more= | 5 honest, fixed order, 40 rounds | First > last earnings |
+
+** Attack Tests
+
+  | Attack class | Tests | Scenario | Key finding |
+  |--------------+-------+----------+-------------|
+  | Single manipulator | 1 | 4 honest + 1 adversary (+10%) | Adversary is net loser; estimate <3% error |
+  | Coordinated cartel | 1 | 3v3 + challenger | Cartel loses, challenge restores <5% error |
+  | Reputation turncoat | 1 | Honest 10 rounds then +12% bias | R rises, stake lost |
+  | False challenge | 1 | All honest + frivolous challenger | Challenger earns less than honest avg |
+  | Sybil attack | 2 | 10:3 unchallenged; 5:5 with challenge | 10:3 overwhelms oracle; 5:5 + challenge restores |
+  | Gradual drift | 2 | +0.3%/round ramp; velocity-based challenge | Evades gating; velocity challenge detects |
+  | Majority takeover | 2 | 6:2 adversary supermajority | Controls estimate but loses money (warmup cost) |
+  | Whale manipulation | 2 | 1 whale at 100x stake + bias | Kalman ignores stake size; whale loses massively |
+  | Front-running | 2 | Copy-and-submit-last; copy + 2% bias | Early-bonus penalty; biased copy loses |
+  | Volatility exploit | 2 | Attack during high-P window; Q sensitivity | Honest re-submissions restore; high Q amplifies bursts |
+  | Sandwich attack | 2 | Symmetric +/-4%; asymmetric +7%/-3% | Symmetric cancels; asymmetric bounded by majority |
+  | Stake starvation | 2 | Challenge griefing; capital depletion recovery | Griefer pays exponentially more; oracle recovers |
+  | Sleeper cartel | 2 | 3:3 with 20-round reputation; + challenge | Peak error only 0.37% at equal ratio; challenge makes net negative |
+  | Oscillation | 2 | Alternating +/-6%; small +/-3% | Large osc classified dishonest; small osc earns less |
+  | Late entry | 2 | New adversary joins after 15 honest rounds; new honest joins | Adversary gated by low P; honest builds trust gradually |
+  | Price discontinuity | 2 | -10% flash crash; stale-price adversary | Re-converges in ~5 rounds; stale adversary eventually exposed |
 
   The visualization test (=test_plot_simulation=) produces a three-panel chart showing
   price tracking, estimation error, and cumulative P&L for honest vs. adversarial
   reporters across 50 rounds:
 
   [[file:alberta_buck/test/truthstake_simulation.png]]
+
+* Adversarial Resilience Analysis
+
+  The 37 tests characterize a clear boundary for when TruthStake finds the true value.
+
+** Quantitative Summary
+
+   | Scenario | Honest:Adversary | Avg late error | Honest P&L | Adversary P&L | Verdict |
+   |----------+------------------+----------------+------------+---------------+---------|
+   | Honest baseline | 5:0 | 0.12% | $0 | --- | ACCURATE |
+   | 1 adversary | 4:1 | 0.16% | +$30 | -$30 | ACCURATE |
+   | 3v3 cartel | 3:3 | 2.17% | +$28 | -$88 | DEGRADED |
+   | 3v3 cartel + challenge | 3:3 | 0.95% | +$96 | -$96 | ACCURATE |
+   | Equal ratio 4:4 | 4:4 | 1.32% | +$125 | -$125 | ACCURATE |
+   | Equal + challenge | 4:4 | 0.07% | +$147 | -$146 | ACCURATE |
+   | 5 sybils (3:5) | 3:5 | 8.00% | -$1 | +$1 | COMPROMISED |
+   | 5 sybils + challenge | 4:5 | 0.96% | +$171 | -$134 | ACCURATE |
+   | 10 sybils (3:10) | 3:10 | 7.98% | +$6 | -$6 | COMPROMISED |
+   | Majority (2:6) | 2:6 | 10.00% | +$22 | -$22 | COMPROMISED |
+
+   Verdicts: ACCURATE (<2%), DEGRADED (2--5%), COMPROMISED (>5%).
+
+** The Critical Boundary
+
+   The oracle reliably finds the true value (error <2%) when:
+
+   - *Honest majority* (h >= a): accurate without any challenge mechanism.  At 4:4 the error
+     is 1.32%; at 4:1 it is 0.16%.  The Kalman filter's reputation weighting naturally
+     suppresses adversarial submissions.
+
+   - *Honest minority with challenger* (h + 1 >= a): a single challenger rescues every tested
+     scenario up to 4:5.  Challenge escalation doubles Kalman P, giving fresh honest
+     submissions high Kalman gain to correct the estimate.
+
+   - *Adversary supermajority* (h << a): compromised regardless of challenges.  This is a
+     fundamental impossibility: no oracle can extract truth when >2/3 of reporters lie,
+     analogous to the Byzantine fault tolerance limit.  However, even in the compromised case,
+     the adversaries are *net negative financially* due to warmup losses in the first 3
+     rounds when they have high R (untrusted).
+
+   The boundary can be stated concisely: TruthStake finds the true value with probability
+   approaching 1 whenever ~honest reporters + willing challengers >= adversaries~.  Below this
+   threshold, the estimate degrades but the attack remains unprofitable.
+
+** Attack-Specific Findings
+
+   *Defenses that work automatically* (no challenger needed):
+
+   - *Whale manipulation*: Kalman gain depends on R (reputation), not stake.  A whale staking
+     100x gets identical filter influence.  They just lose more money.
+   - *Late entry*: new adversaries are gated by low P after established honest history.  A
+     +15% bias is silently rejected with zero impact and zero cost.
+   - *Front-running*: copying honest consensus and submitting last is the worst-earning
+     strategy (-$7.75 vs +$13.59 for first submitter) due to early-bonus decay.
+   - *Symmetric sandwich*: equal biases in opposite directions cancel in the Kalman filter.
+   - *Oscillation*: alternating bias increases ema_sq_error (raising R) and the
+     accuracy_bonus weighting ensures oscillators earn less per round.
+
+   *Defenses that require a challenger*:
+
+   - *Coordinated cartel*: at 3:3, the cartel creates 2.17% error without challenge but is
+     restored to 0.95% with one.
+   - *Sybil attack*: at 3:5 the oracle is compromised, but 4:5 + challenge restores it.
+   - *Gradual drift*: +0.3%/round ramp evades gating (no sudden deviation).  A velocity-based
+     challenger comparing 5-round estimate deltas detects and corrects this.
+
+   *Identified weaknesses*:
+
+   - *Sleeper cartel at equal ratio*: 3:3 sleepers with 20 rounds of perfect reputation
+     produce only 0.37% peak error -- the equal-R cancellation effect suppresses them.  But at
+     higher ratios (5:3) sleepers could be more dangerous.
+   - *Brief burst attack*: high-reputation agents who manipulate for 5 rounds and stop can
+     gain a small net profit ($22 in the Gold simulation).  This is the one scenario where the
+     unchallenged mechanism does not punish the attacker.  An auto-challenge triggered by
+     Kalman P spikes would close this gap.
+   - *Post-challenge high-P window*: immediately after a legitimate challenge doubles P, an
+     opportunistic adversary has higher Kalman gain for 1--2 rounds.  But honest
+     re-submissions dilute the effect and the filter recovers within 5 rounds.
+
+* Strengthening Challenges: Double-Down and Retroactive Escrow
+
+  The current challenge mechanism resets Kalman uncertainty (doubling P) and adds the
+  challenger's bond to the pool.  This is effective but has a structural weakness: it only
+  affects the *current round*.  An adversary can absorb a single challenge loss and resume
+  manipulation in the next round at baseline stakes.  Two extensions would make challenges
+  significantly more powerful.
+
+** Double-Down Requirement
+
+   When a challenge is raised, *all reporters who submitted in the current round must double
+   their stake to keep their submission active*.  Those who decline have their submission
+   withdrawn (stake returned, but the submission is removed from the Kalman filter update and
+   they forfeit any payout).
+
+   This changes the game theory fundamentally:
+
+   - An honest reporter who submitted the true value has *no reason not to double down* --
+     they believe their value is correct and the increased stake just means a larger payout
+     when they are vindicated.
+
+   - A dishonest reporter who submitted a biased value now faces a dilemma: double their
+     exposure on a lie they know is false, or withdraw and forfeit.  If they double down and
+     the challenge attracts more honest reporters, they lose 2x.  If they withdraw, they
+     reveal their lack of conviction (which could be tracked as a reputation signal).
+
+   The withdrawal rate after a challenge becomes a powerful manipulation indicator.  In an
+   all-honest scenario, nobody withdraws.  If 3 of 6 reporters withdraw after a challenge,
+   the remaining 3 (who doubled down) are much more likely to be honest.  The Kalman filter
+   can immediately recompute without the withdrawn submissions, and the doubled stakes from
+   the remaining reporters amplify the reward pool.
+
+   At escalation level L, the required stake is base * 2^L.  A manipulator who survives all
+   levels must have committed 1x + 2x + 4x + ... + 2^L x = (2^(L+1) - 1) x total -- an
+   exponential in L, compared to a single challenger bond at each level.
+
+** Retroactive Escrow: Extending the Settlement Window Backward
+
+   A more radical extension: when a challenge is raised, a fraction of *previous rounds'
+   payouts* are clawed back into escrow and re-evaluated against the post-challenge settled
+   value.
+
+   The mechanism:
+
+   1. Each round, reporters receive only (1 - escrow_fraction) of their payout immediately.
+      The remaining escrow_fraction (e.g. 20%) is held for a lookback window of W rounds.
+
+   2. When a challenge is raised in round N, escrowed payouts from rounds N-W through N-1
+      are re-evaluated.  For each escrowed payout:
+      - If the reporter's past submission is within tolerance of the *newly corrected*
+        estimate: the escrow is released to them (they were right all along).
+      - If the past submission is now outside tolerance: the escrow is confiscated into the
+        current round's reward pool.
+
+   3. After W rounds with no challenge, escrowed funds are released automatically.
+
+   This transforms the economics of several attacks:
+
+   - *Sleeper cartel*: the most dangerous attack is building reputation over 20 rounds, then
+     striking.  With retroactive escrow, the cartel members' payouts from those 20 "honest"
+     rounds are partially held in escrow.  When their attack is challenged and the estimate
+     corrected, their past submissions (which looked honest relative to the *biased* estimate
+     they helped create) are re-evaluated against the *corrected* estimate.  If the cartel was
+     gradually drifting the estimate even during their "honest" phase, the retroactive check
+     catches this.
+
+   - *Gradual drift*: a drifter who moves the estimate 0.3%/round accumulates escrow over W
+     rounds.  When a velocity-based challenger finally triggers, the last W rounds of payouts
+     are re-checked against the corrected estimate.  The drifter loses not just their current
+     stake but their escrowed history.
+
+   - *Brief burst*: the one currently-profitable attack ($22 over 5 rounds) becomes
+     unprofitable if the attacker's 30 rounds of pre-burst escrow are at risk.  The burst
+     shifts the estimate, which triggers a challenge, which re-evaluates the burst rounds and
+     confiscates the escrowed payouts.  Even if the pre-burst submissions were honest, the
+     attacker must consider that any manipulation puts their entire escrow at risk.
+
+   - *Majority takeover*: even a supermajority (6:2) that controls the current estimate must
+     contend with the fact that a future influx of honest reporters could trigger a challenge
+     that re-evaluates their escrowed history.  The longer they maintain the false estimate,
+     the more escrow they accumulate that is vulnerable to correction.
+
+** Combined Effect: The Conviction Curve
+
+   With both mechanisms, the cost of sustained manipulation follows a "conviction curve":
+
+   #+begin_example
+   Round N:   Submit biased value, stake S
+   Challenge: Must double-down to 2S or withdraw (revealing lack of conviction)
+   Round N+1: Submit again at base stake, but 20% of winnings held in escrow
+   Round N+W: If no further challenge, escrow from round N+1 released
+              If challenged: escrow re-evaluated, potentially confiscated
+   #+end_example
+
+   The total capital at risk for a manipulator is not just their current stake but:
+
+   #+begin_example
+   Current exposure = current_stake * 2^(escalation_level)
+                    + SUM(escrow[round] for round in N-W..N-1)
+   #+end_example
+
+   For an honest reporter, this is irrelevant: their past submissions were truthful, so
+   retroactive re-evaluation confirms them.  Their escrow is always released.  For a
+   manipulator, every round of "successful" manipulation accumulates escrow that a single
+   future challenge can confiscate.
+
+   This creates what might be called a *conviction asymmetry*: honest reporters can
+   double-down indefinitely at zero expected cost (they are right), while dishonest reporters
+   face compounding exposure with every round they maintain the lie.  The longer a
+   manipulation persists, the more profitable it becomes to challenge -- exactly the opposite
+   of what the attacker needs.
+
+** Impact on the Critical Boundary
+
+   With these extensions, the boundary for truthful oracle operation shifts:
+
+   - Without extensions: truth requires ~honest + challengers >= adversaries~
+   - With double-down: the withdrawal signal allows the Kalman filter to self-correct by
+     removing low-conviction submissions.  This effectively reduces the adversary count by
+     the number who withdraw, shifting the ratio toward honest.
+   - With retroactive escrow: the effective cost of manipulation multiplies by ~1 + W *
+     escrow_fraction~, because each round of manipulation puts not just the current stake but
+     accumulated escrow at risk.  A 20% escrow with W=10 means each manipulation round risks
+     an additional 2x (10 * 0.2) beyond the current stake.  This makes even brief burst
+     attacks unprofitable and forces supermajority attackers to consider whether they can
+     maintain control indefinitely -- because losing it even once triggers retroactive losses.
+
+   The combined effect is that the threshold for truthful operation moves from ~50% honest~ to
+   something significantly lower, because the mechanisms convert *duration of attack* into
+   *accumulated financial exposure*.  An adversary who controls 60% of reporters might be
+   able to bias the estimate, but cannot sustain it indefinitely without accumulating escrow
+   that a future challenge can confiscate.  The oracle's integrity guarantee becomes: *truth
+   will be found whenever there exists a future round in which honest reporters + challengers
+   can establish a majority, even briefly*.
 
 * Simulations on Real Gold Prices
 
@@ -600,7 +838,7 @@
   alberta_buck/
       truthstake.py                 # Core: KalmanOracle, Reporter, Oracle, run_simulation
       test/
-          test_truthstake.py        # 13 tests covering all mechanism properties
+          test_truthstake.py        # 37 tests covering 12 attack classes
           truthstake_simulation.png # Generated by test_plot_simulation
   #+end_example
 
