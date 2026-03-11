@@ -442,6 +442,105 @@ class TestSybilAttack:
 
 
 # ---------------------------------------------------------------------------
+# Gradual drift: adversary slowly increases bias to avoid gating
+# ---------------------------------------------------------------------------
+
+class TestGradualDrift:
+
+    def test_slow_drift_evades_gating(self):
+        """Adversary increases bias by 0.3%/round, staying under gate threshold.
+
+        The bias ramps from 0% to ~9% over 30 rounds.  Because each step
+        is small relative to the current estimate, the gating check never
+        triggers.  The estimate slowly drifts -- a subtle attack.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=2.0)
+        honest = []
+        for i in range(3):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        drifter = Reporter("drifter", stake=1000)
+        oracle.register(drifter)
+
+        def drift_strategy(round_id):
+            bias = 0.003 * round_id  # +0.3% per round
+            return (0.001, bias)
+
+        all_reporters = honest + [(drifter, 0.001, 0.0)]
+        results = run_simulation(oracle, all_reporters, n_rounds=30,
+                                 true_price_fn=lambda _: PRICE, seed=200,
+                                 strategies={"drifter": drift_strategy})
+
+        # Early rounds: estimate is fine
+        early_err = sum(r["estimate_error"] for r in results[:5]) / 5
+        assert early_err < 0.01, f"Early error should be small: {early_err:.4f}"
+
+        # Late rounds: estimate has drifted measurably
+        late_err = sum(r["estimate_error"] for r in results[-5:]) / 5
+        assert late_err > early_err, (
+            f"Gradual drift should increase error over time: "
+            f"early={early_err:.4f} late={late_err:.4f}")
+
+        # But the drifter eventually gets classified dishonest and loses stake
+        assert drifter.losses > 0, f"Drifter should eventually lose stake: {drifter.losses:.1f}"
+        log.info("Gradual drift: early_err=%.2f%% late_err=%.2f%% drifter_losses=%.1f",
+                 early_err * 100, late_err * 100, drifter.losses)
+
+    def test_slow_drift_detected_by_challenge(self):
+        """Challenger who tracks estimate velocity detects gradual drift.
+
+        By comparing the current estimate to a trailing average, a
+        vigilant challenger can detect systematic drift and escalate.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=2.0, tolerance=0.05)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        drifter = Reporter("drifter", stake=1000)
+        oracle.register(drifter)
+        challenger = Reporter("challenger", stake=1000)
+        oracle.register(challenger)
+
+        def drift_strategy(round_id):
+            return (0.001, 0.003 * round_id)
+
+        # Track estimate history for drift detection
+        estimate_history = []
+
+        def challenge_on_drift(oracle_inst, round_id, submissions):
+            estimate_history.append(oracle_inst.kalman.x)
+            if round_id < 8:
+                return None
+            # Compare current estimate to 5-round-ago estimate
+            if len(estimate_history) > 5:
+                drift = abs(estimate_history[-1] - estimate_history[-6])
+                if drift > 0.01:  # >1% drift over 5 rounds
+                    return challenger
+            return None
+
+        all_reporters = honest + [(drifter, 0.001, 0.0), (challenger, 0.005, 0.0)]
+        results = run_simulation(oracle, all_reporters, n_rounds=30,
+                                 true_price_fn=lambda _: PRICE, seed=200,
+                                 strategies={"drifter": drift_strategy},
+                                 challenge_fn=challenge_on_drift)
+
+        # Drifter should lose more than in the unchallenged case
+        assert drifter.losses > 0, f"Drifter should lose: {drifter.losses:.1f}"
+
+        # Honest should profit
+        honest_net = sum(r.earnings - r.losses for r, _, _ in honest)
+        assert honest_net > 0, f"Honest should profit: {honest_net:.1f}"
+
+        log.info("Drift + challenge: drifter losses=%.1f, honest net=%.1f",
+                 drifter.losses, honest_net)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
