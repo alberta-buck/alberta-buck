@@ -922,8 +922,10 @@ class TestVolatilityExploitation:
         filter "forgets" past observations quickly, making a 3-round
         burst attack produce a larger spike than with low Q.
         """
+        import random as _rand
         spike_by_Q = {}
         for Q in [0.0001, 0.001, 0.01]:
+            rng = _rand.Random(42)  # deterministic per Q iteration
             oracle = Oracle(initial_estimate=PRICE, min_stake=1.0, Q=Q)
             reporters = []
             for i in range(4):
@@ -938,11 +940,13 @@ class TestVolatilityExploitation:
             for rid in range(20):
                 oracle.open_round()
                 for r in reporters:
-                    v = r.observe(PRICE, noise_std=0.005, bias=0.0)
+                    noise = rng.gauss(0, 0.005)
+                    v = PRICE * (1.0 + noise)
                     oracle.submit(r, v, stake=1.0)
                 # Burst attack rounds 8-10 only
                 if 8 <= rid <= 10:
-                    av = adv.observe(PRICE, noise_std=0.001, bias=0.10)
+                    noise = rng.gauss(0, 0.001)
+                    av = PRICE * (1.0 + noise + 0.10)
                     oracle.submit(adv, av, stake=1.0)
                 result = oracle.settle(true_price=PRICE)
                 results.append(result)
