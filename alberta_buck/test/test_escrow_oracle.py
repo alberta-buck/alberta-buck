@@ -828,3 +828,94 @@ class TestNonErgodicCollapse:
 
         log.info("Tipping point: no challenge err=%.2f%%, with challenge err=%.2f%%",
                  err_no_challenge * 100, err_with_challenge * 100)
+
+    def test_progressive_challenge_escalation(self):
+        """Successive challenges open the Kalman filter progressively wider.
+
+        Level 1: P floor = 0.01
+        Level 2: P floor = 0.02
+        Level 3: P floor = 0.04
+
+        Each escalation increases both the P floor (more receptivity to new
+        observations) and the uncertainty of the current estimate.  This means
+        a deeply entrenched bias requires multiple challenge levels to fully
+        correct, but each level makes correction progressively easier.
+        """
+        def run_with_n_challenges(n_challenges):
+            oracle = EscrowOracle(
+                initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+                escrow_fraction=0.25, escrow_window=30,
+                challenge_P_floor=0.01,
+            )
+            honest = [Reporter(f"h_{i}", stake=10000) for i in range(2)]
+            liars = [Reporter(f"liar_{i}", stake=10000) for i in range(6)]
+            for r in honest + liars:
+                oracle.register(r)
+
+            # 20 rounds of liar control
+            for rid in range(20):
+                oracle.open_round()
+                for r in honest:
+                    oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+                for r in liars:
+                    oracle.submit(r, PRICE * 1.08, stake=2.0)
+                oracle.settle(true_price=PRICE)
+
+            P_before = oracle.kalman.P
+
+            # Correction round with N challenges
+            new_honest = [Reporter(f"new_{i}", stake=10000) for i in range(8)]
+            challengers = [Reporter(f"ch_{i}", stake=10000) for i in range(n_challenges)]
+            for r in new_honest + challengers:
+                oracle.register(r)
+
+            oracle.open_round()
+            for r in honest + new_honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+
+            P_values = []
+            for i, ch in enumerate(challengers):
+                oracle.challenge(ch)
+                P_values.append(oracle.kalman.P)
+                # More honest submissions after each challenge
+                for r in new_honest:
+                    try:
+                        eff = oracle.min_stake * oracle._stake_multiplier()
+                        oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+                    except ValueError:
+                        pass
+
+            result = oracle.settle(true_price=PRICE)
+            return P_before, P_values, result["estimate_error"]
+
+        P_before_1, P_vals_1, err_1 = run_with_n_challenges(1)
+        P_before_2, P_vals_2, err_2 = run_with_n_challenges(2)
+        P_before_3, P_vals_3, err_3 = run_with_n_challenges(3)
+
+        # Each successive challenge should produce a higher P
+        assert P_vals_2[-1] > P_vals_1[-1], (
+            f"2 challenges should produce higher P than 1: {P_vals_2[-1]:.6f} vs {P_vals_1[-1]:.6f}")
+        assert P_vals_3[-1] > P_vals_2[-1], (
+            f"3 challenges should produce higher P than 2: {P_vals_3[-1]:.6f} vs {P_vals_2[-1]:.6f}")
+
+        # More challenges should produce lower estimate error (more correction)
+        assert err_2 <= err_1, (
+            f"2 challenges should correct at least as well as 1: {err_2:.4f} vs {err_1:.4f}")
+
+        # Within a multi-challenge sequence, P should increase monotonically
+        if len(P_vals_2) >= 2:
+            assert P_vals_2[1] > P_vals_2[0], (
+                f"P should increase with each challenge: {P_vals_2}")
+        if len(P_vals_3) >= 3:
+            assert P_vals_3[1] > P_vals_3[0], (
+                f"P should increase: {P_vals_3}")
+            assert P_vals_3[2] > P_vals_3[1], (
+                f"P should increase: {P_vals_3}")
+
+        log.info("Progressive escalation: 1ch P=%.6f err=%.2f%%, "
+                 "2ch P=%.6f err=%.2f%%, 3ch P=%.6f err=%.2f%%",
+                 P_vals_1[-1], err_1 * 100,
+                 P_vals_2[-1], err_2 * 100,
+                 P_vals_3[-1], err_3 * 100)

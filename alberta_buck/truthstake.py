@@ -476,14 +476,28 @@ class EscrowOracle(Oracle):
         return self.total_escrowed
 
     def challenge(self, challenger, bond=None):
-        """Override: standard challenge + P floor + double-down requirement."""
+        """Override: standard challenge + progressive P escalation + double-down.
+
+        Each successive challenge opens the Kalman filter wider:
+        - Level 1: P floor = challenge_P_floor
+        - Level 2: P floor = challenge_P_floor * 2
+        - Level N: P floor = challenge_P_floor * 2^(N-1)
+
+        This progressive escalation means persistent challenges force the filter
+        to increasingly distrust the current estimate.  Newcomers gain more
+        influence with each challenge level, and the settled value reflects
+        greater uncertainty about past consensus.
+        """
         ch = super().challenge(challenger, bond=bond)
 
-        # Enforce P floor: after the standard 2x doubling, ensure P is at
-        # least challenge_P_floor.  This forces the Kalman filter to give
-        # newcomers meaningful influence (K = P/(P+R) is large when P is large).
+        # Progressive P floor: escalates with each challenge level.
+        # The base Oracle already does P *= 2^level, but from a potentially
+        # tiny base (e.g., P=0.00006 * 2 = 0.00012 -- still negligible).
+        # The floor ensures P reaches at least challenge_P_floor * 2^(level-1),
+        # so each successive challenge forces the filter progressively wider.
         if self.challenge_P_floor is not None:
-            self.kalman.P = max(self.kalman.P, self.challenge_P_floor)
+            escalated_floor = self.challenge_P_floor * (2.0 ** (ch.level - 1))
+            self.kalman.P = max(self.kalman.P, escalated_floor)
 
         if self.doubledown_fn is None:
             return ch
