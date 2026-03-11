@@ -838,6 +838,129 @@ class TestFrontRunning:
 
 
 # ---------------------------------------------------------------------------
+# Volatility exploitation: adversary attacks when Kalman P is high
+# ---------------------------------------------------------------------------
+
+class TestVolatilityExploitation:
+
+    def test_adversary_exploits_high_P_after_challenge(self):
+        """Adversary idles until a challenge doubles P, then submits biased value.
+
+        After a legitimate challenge increases Kalman uncertainty, the
+        filter is more susceptible to new observations (higher K).  An
+        adversary who times their attack for this window can have more
+        influence than normal.  The defense: honest reporters also
+        re-submit post-challenge, diluting the adversary's impact.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=2.0, Q=0.001)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append(r)
+
+        # Adversary who waits for high-P
+        opportunist = Reporter("opportunist", stake=1000)
+        oracle.register(opportunist)
+
+        # Innocent challenger (creates the high-P window)
+        challenger = Reporter("challenger", stake=1000)
+        oracle.register(challenger)
+
+        results = []
+        for rid in range(30):
+            oracle.open_round()
+
+            # Honest reporters always submit
+            for r in honest:
+                v = r.observe(PRICE, noise_std=0.005, bias=0.0)
+                oracle.submit(r, v, stake=2.0)
+
+            # At round 10, challenger files a legitimate challenge
+            if rid == 10:
+                oracle.challenge(challenger)
+                eff_stake = oracle.min_stake * oracle._stake_multiplier()
+                # Opportunist immediately submits biased value while P is high
+                biased_v = opportunist.observe(PRICE, noise_std=0.001, bias=0.10)
+                oracle.submit(opportunist, biased_v, stake=eff_stake)
+                # Honest reporters also re-submit post-challenge
+                for r in honest:
+                    v = r.observe(PRICE, noise_std=0.005, bias=0.0)
+                    try:
+                        oracle.submit(r, v, stake=eff_stake)
+                    except ValueError:
+                        pass
+            elif rid > 10 and rid < 15:
+                # Opportunist continues attacking in the high-P window
+                biased_v = opportunist.observe(PRICE, noise_std=0.001, bias=0.10)
+                oracle.submit(opportunist, biased_v, stake=2.0)
+
+            result = oracle.settle(true_price=PRICE)
+            results.append(result)
+
+        # Round 10-14: estimate may spike briefly
+        spike_errors = [r["estimate_error"] for r in results[10:15]]
+        max_spike = max(spike_errors)
+
+        # But it recovers: late rounds should be back to low error
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_late_err = sum(late_errors) / len(late_errors)
+        assert avg_late_err < 0.02, (
+            f"Should recover from volatility attack: late err {avg_late_err:.4f}")
+
+        # Opportunist should lose money overall
+        opp_net = opportunist.earnings - opportunist.losses
+        assert opp_net < 0, f"Opportunist should lose: net {opp_net:.1f}"
+
+        log.info("Volatility exploit: max spike=%.2f%%, late err=%.2f%%, opp net=%.1f",
+                 max_spike * 100, avg_late_err * 100, opp_net)
+
+    def test_high_Q_amplifies_burst_attack(self):
+        """Higher Q makes the filter forget faster, amplifying brief attacks.
+
+        Q controls how fast P grows between rounds.  With high Q, the
+        filter "forgets" past observations quickly, making a 3-round
+        burst attack produce a larger spike than with low Q.
+        """
+        spike_by_Q = {}
+        for Q in [0.0001, 0.001, 0.01]:
+            oracle = Oracle(initial_estimate=PRICE, min_stake=1.0, Q=Q)
+            reporters = []
+            for i in range(4):
+                r = Reporter(f"h_{i}", stake=1000)
+                oracle.register(r)
+                reporters.append(r)
+
+            adv = Reporter("adv", stake=1000)
+            oracle.register(adv)
+
+            results = []
+            for rid in range(20):
+                oracle.open_round()
+                for r in reporters:
+                    v = r.observe(PRICE, noise_std=0.005, bias=0.0)
+                    oracle.submit(r, v, stake=1.0)
+                # Burst attack rounds 8-10 only
+                if 8 <= rid <= 10:
+                    av = adv.observe(PRICE, noise_std=0.001, bias=0.10)
+                    oracle.submit(adv, av, stake=1.0)
+                result = oracle.settle(true_price=PRICE)
+                results.append(result)
+
+            # Peak error during burst
+            burst_errors = [r["estimate_error"] for r in results[8:12]]
+            spike_by_Q[Q] = max(burst_errors) if burst_errors else 0
+
+        # Higher Q should produce a larger spike from the same burst
+        assert spike_by_Q[0.01] > spike_by_Q[0.0001], (
+            f"Higher Q should amplify burst: Q=0.01 spike={spike_by_Q[0.01]:.4f} "
+            f"vs Q=0.0001 spike={spike_by_Q[0.0001]:.4f}")
+
+        for Q, spike in sorted(spike_by_Q.items()):
+            log.info("  Q=%.4f -> burst peak error=%.4f%%", Q, spike * 100)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
