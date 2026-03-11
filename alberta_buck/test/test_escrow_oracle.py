@@ -227,3 +227,144 @@ class TestDoubleDown:
 
         log.info("Doubledown conviction: avg err=%.2f%%, liar net=%.1f",
                  avg_err * 100, liar_net)
+
+
+# ---------------------------------------------------------------------------
+# Retroactive confiscation: liars' escrow confiscated when truth prevails
+# ---------------------------------------------------------------------------
+
+class TestRetroactiveConfiscation:
+
+    def test_liar_escrow_confiscated_on_challenge(self):
+        """Liars control oracle for 10 rounds, accumulating escrow.
+
+        Then a challenge in round 11 triggers retroactive confiscation:
+        the liars' escrowed payouts from the past 10 rounds are re-evaluated
+        against ground truth and confiscated because the submissions were
+        actually inaccurate (despite being classified "honest" under the
+        corrupted settled value).
+        """
+        oracle = EscrowOracle(
+            initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+            escrow_fraction=0.20, escrow_window=15,
+        )
+        honest = []
+        for i in range(2):
+            r = Reporter(f"h_{i}", stake=5000)
+            oracle.register(r)
+            honest.append(r)
+        liars = []
+        for i in range(6):
+            r = Reporter(f"liar_{i}", stake=5000)
+            oracle.register(r)
+            liars.append(r)
+
+        # Phase 1: liars control oracle for 10 rounds, escrow accumulates
+        rng = _rand.Random(42)
+        for rid in range(10):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+            oracle.settle(true_price=PRICE)
+
+        # Record escrow before challenge
+        pre_challenge_escrow = oracle.total_escrowed
+        assert pre_challenge_escrow > 0, "Escrow should have accumulated"
+        log.info("Pre-challenge escrow: %.1f", pre_challenge_escrow)
+
+        # Phase 2: honest challenger with honest influx
+        challenger = Reporter("challenger", stake=5000)
+        oracle.register(challenger)
+        # Add more honest reporters to establish majority
+        new_honest = []
+        for i in range(6):
+            r = Reporter(f"new_h_{i}", stake=5000)
+            oracle.register(r)
+            new_honest.append(r)
+
+        oracle.open_round()
+        for r in honest + new_honest:
+            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+        for r in liars:
+            oracle.submit(r, PRICE * 1.08, stake=2.0)
+        oracle.challenge(challenger)
+        # Honest re-submit post-challenge
+        for r in honest + new_honest:
+            try:
+                eff = oracle.min_stake * oracle._stake_multiplier()
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+            except ValueError:
+                pass
+
+        result = oracle.settle(true_price=PRICE)
+
+        # Retroactive confiscation should have captured liar escrow
+        assert result["escrow_confiscated"] > 0, (
+            f"Challenge should trigger confiscation: {result['escrow_confiscated']}")
+
+        post_challenge_escrow = oracle.total_escrowed
+        assert post_challenge_escrow < pre_challenge_escrow, (
+            f"Confiscation should reduce escrow: {post_challenge_escrow:.1f} >= {pre_challenge_escrow:.1f}")
+
+        log.info("Confiscated: %.1f, escrow %.1f -> %.1f",
+                 result["escrow_confiscated"], pre_challenge_escrow, post_challenge_escrow)
+
+    def test_honest_escrow_survives_challenge(self):
+        """Honest reporters' escrow is NOT confiscated during challenge.
+
+        When a challenge triggers retroactive confiscation, only submissions
+        that were actually inaccurate (relative to ground truth) lose escrow.
+        Honest submissions retain their escrow.
+        """
+        oracle = EscrowOracle(
+            initial_estimate=PRICE, min_stake=1.0, tolerance=0.05,
+            escrow_fraction=0.20, escrow_window=15,
+        )
+        honest = []
+        for i in range(4):
+            r = Reporter(f"h_{i}", stake=5000)
+            oracle.register(r)
+            honest.append(r)
+        liar = Reporter("liar", stake=5000)
+        oracle.register(liar)
+
+        # 10 rounds: liar submits +8% bias, honest reporters submit truth
+        for rid in range(10):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=1.0)
+            oracle.submit(liar, PRICE * 1.08, stake=1.0)
+            oracle.settle(true_price=PRICE)
+
+        # Challenge round
+        challenger = Reporter("ch", stake=5000)
+        oracle.register(challenger)
+        oracle.open_round()
+        for r in honest:
+            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=1.0)
+        oracle.submit(liar, PRICE * 1.08, stake=1.0)
+        oracle.challenge(challenger)
+        for r in honest:
+            try:
+                eff = oracle.min_stake * oracle._stake_multiplier()
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+            except ValueError:
+                pass
+        result = oracle.settle(true_price=PRICE)
+
+        # Check that honest escrow entries are still present (not confiscated)
+        honest_escrow_remaining = 0
+        for entry in oracle.escrow_ledger:
+            if entry.released:
+                continue
+            for name, esc in entry.holdings.items():
+                if name.startswith("h_"):
+                    honest_escrow_remaining += esc["amount"]
+
+        assert honest_escrow_remaining > 0, (
+            f"Honest reporters' escrow should survive: {honest_escrow_remaining:.1f}")
+
+        log.info("Honest escrow preserved: %.1f, confiscated: %.1f",
+                 honest_escrow_remaining, result["escrow_confiscated"])
