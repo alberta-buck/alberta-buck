@@ -737,6 +737,107 @@ class TestWhaleManipulation:
 
 
 # ---------------------------------------------------------------------------
+# Front-running: adversary observes all submissions, then submits last
+# ---------------------------------------------------------------------------
+
+class TestFrontRunning:
+
+    def test_last_mover_pays_early_bonus_penalty(self):
+        """Adversary always submits last to observe the consensus, but earns less.
+
+        Even if the adversary copies the honest consensus perfectly by
+        submitting last, they pay the early-bonus penalty: later submitters
+        get a smaller share of the reward pool.  This makes front-running
+        strictly inferior to honest early submission.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0, early_halflife=2.0)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append(r)
+
+        frontrunner = Reporter("frontrunner", stake=1000)
+        oracle.register(frontrunner)
+
+        import random as _rand
+        rng = _rand.Random(42)
+
+        for rid in range(40):
+            oracle.open_round()
+            # Honest reporters submit first (indices 0-3)
+            honest_values = []
+            for r in honest:
+                v = r.observe(PRICE, noise_std=0.003, bias=0.0)
+                oracle.submit(r, v, stake=1.0)
+                honest_values.append(v)
+            # Front-runner submits last, copying the median of honest values
+            median_v = sorted(honest_values)[len(honest_values) // 2]
+            oracle.submit(frontrunner, median_v, stake=1.0)
+            oracle.settle(true_price=PRICE)
+
+        # Front-runner is perfectly accurate (copies honest consensus)
+        # but earns LESS than the first honest reporter due to early bonus
+        first_net = honest[0].earnings - honest[0].losses
+        fr_net = frontrunner.earnings - frontrunner.losses
+        assert fr_net < first_net, (
+            f"Front-runner ({fr_net:.3f}) should earn less than "
+            f"first submitter ({first_net:.3f})")
+
+        # Front-runner should earn less than the AVERAGE honest reporter
+        avg_honest_net = sum(r.earnings - r.losses for r in honest) / len(honest)
+        assert fr_net < avg_honest_net, (
+            f"Front-runner ({fr_net:.3f}) should earn less than "
+            f"honest avg ({avg_honest_net:.3f})")
+
+        log.info("Front-running: fr_net=%.3f, first_net=%.3f, avg_honest=%.3f",
+                 fr_net, first_net, avg_honest_net)
+
+    def test_frontrunner_with_bias_loses(self):
+        """Front-runner observes consensus then adds a small bias (+2%).
+
+        Even a small adversarial adjustment after front-running honest
+        consensus leads to losses as the submissions deviate from the
+        settled value.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append(r)
+
+        biased_fr = Reporter("biased_fr", stake=1000)
+        oracle.register(biased_fr)
+
+        import random as _rand
+        rng = _rand.Random(42)
+
+        for rid in range(30):
+            oracle.open_round()
+            honest_values = []
+            for r in honest:
+                v = r.observe(PRICE, noise_std=0.003, bias=0.0)
+                oracle.submit(r, v, stake=1.0)
+                honest_values.append(v)
+            # Front-runner copies consensus + adds 2% bias
+            median_v = sorted(honest_values)[len(honest_values) // 2]
+            biased_v = median_v * 1.02
+            oracle.submit(biased_fr, biased_v, stake=1.0)
+            oracle.settle(true_price=PRICE)
+
+        # Biased front-runner should lose money
+        fr_net = biased_fr.earnings - biased_fr.losses
+        honest_net = sum(r.earnings - r.losses for r in honest) / len(honest)
+        assert fr_net < honest_net, (
+            f"Biased front-runner ({fr_net:.3f}) should earn less "
+            f"than honest avg ({honest_net:.3f})")
+
+        log.info("Biased front-runner: net=%.3f, honest avg=%.3f",
+                 fr_net, honest_net)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
