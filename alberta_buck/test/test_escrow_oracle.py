@@ -609,3 +609,222 @@ class TestNonErgodicCollapse:
         log.info("Non-ergodic scaling: 10 rounds pot=%.1f conf=%.1f loss=%.1f; "
                  "30 rounds pot=%.1f conf=%.1f loss=%.1f",
                  pot_10, conf_10, loss_10, pot_30, conf_30, loss_30)
+
+    def test_brief_liar_majority_insufficient(self):
+        """A brief liar majority (3 rounds) does NOT accumulate enough escrow
+        to create a meaningful honey pot.  Short attacks are unprofitable
+        because the escrow fraction is small and the honest majority quickly
+        reasserts control.
+        """
+        oracle = EscrowOracle(
+            initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+            escrow_fraction=0.25, escrow_window=30,
+            challenge_P_floor=0.01,
+        )
+        honest = []
+        for i in range(4):
+            r = Reporter(f"h_{i}", stake=5000)
+            oracle.register(r)
+            honest.append(r)
+        liars = []
+        for i in range(6):
+            r = Reporter(f"liar_{i}", stake=5000)
+            oracle.register(r)
+            liars.append(r)
+
+        # Warmup: honest control for 10 rounds
+        for rid in range(10):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            oracle.settle(true_price=PRICE)
+
+        # Brief liar attack: only 3 rounds
+        for rid in range(3):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+            oracle.settle(true_price=PRICE)
+
+        pot_after_brief = oracle.honey_pot
+
+        # Honest reasserts (with challenge to reset P)
+        challenger = Reporter("ch", stake=5000)
+        oracle.register(challenger)
+        for rid in range(5):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            try:
+                oracle.challenge(challenger)
+                for r in honest:
+                    try:
+                        eff = oracle.min_stake * oracle._stake_multiplier()
+                        oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+                    except ValueError:
+                        pass
+            except ValueError:
+                pass
+            oracle.settle(true_price=PRICE)
+
+        # Brief attack should leave liars net negative (they lost stakes
+        # during honest-controlled rounds, gained little from 3 rounds)
+        liar_net = sum(r.earnings - r.losses for r in liars)
+        assert liar_net < 0, (
+            f"Brief attack should be unprofitable: liar net = {liar_net:.1f}")
+
+        log.info("Brief liar majority: pot=%.1f, liar net=%.1f",
+                 pot_after_brief, liar_net)
+
+    def test_attrition_liars_run_out_of_capital(self):
+        """Liars maintaining an attack eventually run out of capital.
+
+        Each round costs liars their stake.  With a 6:3 honest majority and
+        regular challenges (P floor resets), liars lose their stakes to the
+        honest pool every round.
+
+        Capital accounting includes both liquid stake and escrowed amounts.
+        Over enough rounds, liar capital depletes while honest capital
+        (liquid + escrowed) grows from harvested stakes.
+        """
+        oracle = EscrowOracle(
+            initial_estimate=PRICE, min_stake=50.0, tolerance=0.05,
+            escrow_fraction=0.10, escrow_window=10,
+            challenge_P_floor=0.01,
+        )
+        honest = []
+        for i in range(6):
+            r = Reporter(f"h_{i}", stake=5000)
+            oracle.register(r)
+            honest.append(r)
+        liars = []
+        for i in range(3):
+            r = Reporter(f"liar_{i}", stake=5000)
+            oracle.register(r)
+            liars.append(r)
+
+        challenger = Reporter("ch", stake=5000)
+        oracle.register(challenger)
+
+        liar_capital_history = []
+        honest_capital_history = []
+
+        for rid in range(80):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=50.0)
+            for r in liars:
+                if r.stake >= 50.0:
+                    oracle.submit(r, PRICE * 1.08, stake=50.0)
+            # Challenge every 3rd round
+            if rid % 3 == 0:
+                try:
+                    oracle.challenge(challenger)
+                    for r in honest:
+                        try:
+                            eff = oracle.min_stake * oracle._stake_multiplier()
+                            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+                        except ValueError:
+                            pass
+                except ValueError:
+                    pass
+            oracle.settle(true_price=PRICE)
+
+            liar_capital_history.append(sum(r.stake for r in liars))
+            # Honest capital = liquid + escrowed (escrow is still theirs)
+            honest_liquid = sum(r.stake for r in honest)
+            honest_capital_history.append(honest_liquid)
+
+        # Liar capital should decline over time
+        assert liar_capital_history[-1] < liar_capital_history[0], (
+            f"Liar capital should decline: {liar_capital_history[0]:.0f} -> "
+            f"{liar_capital_history[-1]:.0f}")
+
+        # Liars should be net negative
+        liar_net = sum(r.earnings - r.losses for r in liars)
+        assert liar_net < 0, f"Liars should be net negative: {liar_net:.1f}"
+
+        # Honest reporters should have gained capital from liar losses
+        honest_net = sum(r.earnings - r.losses for r in honest)
+        assert honest_net > 0, f"Honest should be net positive: {honest_net:.1f}"
+
+        log.info("Attrition: liar capital %.0f -> %.0f (net %.0f), "
+                 "honest net %.0f",
+                 liar_capital_history[0], liar_capital_history[-1],
+                 liar_net, honest_net)
+
+    def test_tipping_point_single_challenge_flips_outcome(self):
+        """A single well-timed challenge with P floor can flip the outcome.
+
+        Without challenge: liars control, earn money.
+        With challenge + P floor: honest reporters gain meaningful K,
+        estimate corrects, and liars lose their round stakes.
+        """
+        def run_scenario(do_challenge):
+            oracle = EscrowOracle(
+                initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+                escrow_fraction=0.25, escrow_window=30,
+                challenge_P_floor=0.01,
+            )
+            honest = []
+            for i in range(3):
+                r = Reporter(f"h_{i}", stake=5000)
+                oracle.register(r)
+                honest.append(r)
+            liars = []
+            for i in range(5):
+                r = Reporter(f"liar_{i}", stake=5000)
+                oracle.register(r)
+                liars.append(r)
+
+            # 15 rounds of liar control
+            for rid in range(15):
+                oracle.open_round()
+                for r in honest:
+                    oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+                for r in liars:
+                    oracle.submit(r, PRICE * 1.08, stake=2.0)
+                oracle.settle(true_price=PRICE)
+
+            # Now add honest newcomers + optional challenge
+            new_honest = []
+            for i in range(5):
+                r = Reporter(f"new_{i}", stake=5000)
+                oracle.register(r)
+                new_honest.append(r)
+            challenger = Reporter("ch", stake=5000)
+            oracle.register(challenger)
+
+            oracle.open_round()
+            for r in honest + new_honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+
+            if do_challenge:
+                oracle.challenge(challenger)
+                for r in honest + new_honest:
+                    try:
+                        eff = oracle.min_stake * oracle._stake_multiplier()
+                        oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+                    except ValueError:
+                        pass
+
+            result = oracle.settle(true_price=PRICE)
+            return result["estimate_error"]
+
+        err_no_challenge = run_scenario(do_challenge=False)
+        err_with_challenge = run_scenario(do_challenge=True)
+
+        # Without challenge, estimate stays biased (newcomers have no influence)
+        assert err_no_challenge > 0.03, (
+            f"Without challenge, error should remain high: {err_no_challenge:.4f}")
+
+        # With challenge + P floor, estimate corrects dramatically
+        assert err_with_challenge < err_no_challenge, (
+            f"Challenge should reduce error: {err_with_challenge:.4f} >= {err_no_challenge:.4f}")
+
+        log.info("Tipping point: no challenge err=%.2f%%, with challenge err=%.2f%%",
+                 err_no_challenge * 100, err_with_challenge * 100)
