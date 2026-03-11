@@ -639,6 +639,104 @@ class TestMajorityTakeover:
 
 
 # ---------------------------------------------------------------------------
+# Whale manipulation: one high-stake adversary vs many small honest reporters
+# ---------------------------------------------------------------------------
+
+class TestWhaleManipulation:
+
+    def test_whale_stake_does_not_amplify_kalman_influence(self):
+        """A single whale staking 100x cannot move the estimate more than anyone else.
+
+        The Kalman filter weights observations by reporter R (reputation),
+        NOT by stake amount.  A whale's single observation has identical
+        influence to any other reporter with the same track record.  Their
+        large stake is simply more money at risk.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(5):
+            r = Reporter(f"honest_{i}", stake=500)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        whale = Reporter("whale", stake=10000)
+        oracle.register(whale)
+
+        # Run manually to control whale stake amount
+        import random as _rand
+        rng = _rand.Random(42)
+
+        results = []
+        for rid in range(30):
+            oracle.open_round()
+            for r, ns, _ in honest:
+                v = r.observe(PRICE, noise_std=ns, bias=0.0)
+                oracle.submit(r, v, stake=1.0)
+            # Whale submits with 100x stake but +8% bias
+            wv = whale.observe(PRICE, noise_std=0.001, bias=0.08)
+            oracle.submit(whale, wv, stake=100.0)
+            results.append(oracle.settle(true_price=PRICE))
+
+        # Estimate should NOT be dragged toward whale's bias
+        # because Kalman gain depends on R, not stake
+        late_errors = [r["estimate_error"] for r in results[-5:]]
+        avg_err = sum(late_errors) / len(late_errors)
+        assert avg_err < 0.03, (
+            f"Whale stake should not amplify Kalman influence: err {avg_err:.4f}")
+
+        # But the whale loses their massive stakes
+        assert whale.losses > 500, (
+            f"Whale should have large absolute losses: {whale.losses:.1f}")
+
+        # Honest reporters profit from the whale's lost stakes
+        honest_net = sum(r.earnings - r.losses for r, _, _ in honest)
+        assert honest_net > 0, f"Honest should profit from whale: {honest_net:.1f}"
+
+        log.info("Whale: losses=%.1f, honest net=%.1f, avg_err=%.2f%%",
+                 whale.losses, honest_net, avg_err * 100)
+
+    def test_whale_pool_distortion(self):
+        """Whale's large stake distorts the reward pool in honest reporters' favor.
+
+        When the whale is classified dishonest, their entire large stake
+        enters the reward pool.  Honest reporters divide this windfall,
+        earning far more per round than normal.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(4):
+            r = Reporter(f"honest_{i}", stake=500)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        whale = Reporter("whale", stake=5000)
+        oracle.register(whale)
+
+        # Run with whale always staking big
+        for rid in range(15):
+            oracle.open_round()
+            for r, ns, _ in honest:
+                v = r.observe(PRICE, noise_std=ns, bias=0.0)
+                oracle.submit(r, v, stake=1.0)
+            wv = whale.observe(PRICE, noise_std=0.001, bias=0.10)
+            oracle.submit(whale, wv, stake=50.0)
+            oracle.settle(true_price=PRICE)
+
+        # Whale should have lost most of their stakes
+        whale_loss_rate = whale.losses / (50.0 * 15)
+        assert whale_loss_rate > 0.5, (
+            f"Whale should lose majority of stakes: {whale_loss_rate:.1%}")
+
+        # Average honest earning per round should be elevated by whale stakes
+        avg_honest_earnings = sum(r.earnings for r, _, _ in honest) / (len(honest) * 15)
+        assert avg_honest_earnings > 1.0, (
+            f"Honest per-round earnings should be elevated: {avg_honest_earnings:.2f}")
+
+        log.info("Whale lost %.0f%% of stakes; honest avg earn/round=%.2f",
+                 whale_loss_rate * 100, avg_honest_earnings)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
