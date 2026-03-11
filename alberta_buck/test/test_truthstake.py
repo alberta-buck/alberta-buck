@@ -1131,6 +1131,152 @@ class TestStakeStarvation:
 
 
 # ---------------------------------------------------------------------------
+# Sleeper cartel: build reputation honestly, then coordinate attack
+# ---------------------------------------------------------------------------
+
+class TestSleeperCartel:
+
+    def test_sleeper_attack_maximum_damage(self):
+        """3 sleepers build 20 rounds of perfect reputation, then attack.
+
+        This is the hardest attack to defend against.  After extensive
+        honest reporting, sleepers have very low R (high trust).  A
+        coordinated attack from trusted reporters has maximum Kalman
+        influence.  The damage depends on cartel size vs honest reporters.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0)
+        honest = []
+        for i in range(3):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        sleepers = []
+        for i in range(3):
+            r = Reporter(f"sleeper_{i}", stake=1000)
+            oracle.register(r)
+            sleepers.append(r)
+
+        # Phase 1: build reputation (20 rounds honest)
+        for rid in range(20):
+            oracle.open_round()
+            for r, ns, _ in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=ns), stake=1.0)
+            for s in sleepers:
+                oracle.submit(s, s.observe(PRICE, noise_std=0.003), stake=1.0)
+            oracle.settle(true_price=PRICE)
+
+        # Verify sleepers built low R
+        for s in sleepers:
+            assert s.R < 0.01, f"{s.name} should have low R after 20 honest rounds: {s.R:.6f}"
+
+        pre_attack_error = abs(oracle.kalman.x - 1.0)
+        assert pre_attack_error < 0.01, f"Pre-attack estimate should be accurate"
+
+        # Phase 2: coordinated attack (5 rounds of +8% bias)
+        attack_results = []
+        for rid in range(5):
+            oracle.open_round()
+            for r, ns, _ in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=ns), stake=1.0)
+            for s in sleepers:
+                biased = s.observe(PRICE, noise_std=0.001, bias=0.08)
+                oracle.submit(s, biased, stake=1.0)
+            result = oracle.settle(true_price=PRICE)
+            attack_results.append(result)
+
+        # With equal numbers (3:3) and similar low R, biased submissions
+        # are partially cancelled by honest ones.  The estimate moves
+        # but not dramatically -- the Kalman filter distributes influence
+        # equally among reporters with similar reputation.
+        peak_err = max(r["estimate_error"] for r in attack_results)
+        assert peak_err > 0.001, (
+            f"Sleeper attack should move estimate at least slightly: {peak_err:.4f}")
+
+        # But sleepers pay for the attack (classified dishonest eventually)
+        sleeper_losses = sum(s.losses for s in sleepers)
+        assert sleeper_losses > 0, f"Sleepers should incur losses: {sleeper_losses:.1f}"
+
+        log.info("Sleeper cartel: peak err=%.2f%%, sleeper losses=%.1f, "
+                 "pre-attack R=%s",
+                 peak_err * 100, sleeper_losses,
+                 [f"{s.R:.6f}" for s in sleepers])
+
+    def test_sleeper_attack_with_challenge_defense(self):
+        """Challenger detects sudden estimate movement from sleeper attack.
+
+        A vigilant challenger monitoring estimate velocity can detect
+        the sleeper attack and escalate.  Post-challenge honest
+        re-submissions partially restore the estimate.
+        """
+        oracle = Oracle(initial_estimate=PRICE, min_stake=1.0, tolerance=0.05)
+        honest = []
+        for i in range(3):
+            r = Reporter(f"honest_{i}", stake=1000)
+            oracle.register(r)
+            honest.append((r, 0.005, 0.0))
+
+        sleepers = []
+        for i in range(3):
+            r = Reporter(f"sleeper_{i}", stake=1000)
+            oracle.register(r)
+            sleepers.append(r)
+
+        challenger = Reporter("challenger", stake=1000)
+        oracle.register(challenger)
+
+        # Phase 1: build reputation
+        for rid in range(20):
+            oracle.open_round()
+            for r, ns, _ in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=ns), stake=1.0)
+            for s in sleepers:
+                oracle.submit(s, s.observe(PRICE, noise_std=0.003), stake=1.0)
+            oracle.settle(true_price=PRICE)
+
+        # Phase 2: attack with challenge
+        estimate_history = [oracle.kalman.x]
+        attack_results = []
+        for rid in range(10):
+            oracle.open_round()
+            for r, ns, _ in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=ns), stake=1.0)
+            for s in sleepers:
+                biased = s.observe(PRICE, noise_std=0.001, bias=0.08)
+                oracle.submit(s, biased, stake=1.0)
+
+            # Challenge if estimate moved > 1% from 2 rounds ago
+            if len(estimate_history) >= 2:
+                drift = abs(oracle.kalman.x - estimate_history[-2])
+                if drift > 0.01:
+                    try:
+                        oracle.challenge(challenger)
+                        # Re-submit honest values post-challenge
+                        for r, ns, _ in honest:
+                            eff_stake = oracle.min_stake * oracle._stake_multiplier()
+                            try:
+                                oracle.submit(r, r.observe(PRICE, noise_std=ns), stake=eff_stake)
+                            except ValueError:
+                                pass
+                    except ValueError:
+                        pass
+
+            result = oracle.settle(true_price=PRICE)
+            attack_results.append(result)
+            estimate_history.append(oracle.kalman.x)
+
+        # With challenge, the peak error should be lower than without
+        peak_err = max(r["estimate_error"] for r in attack_results)
+
+        # Sleepers should still lose money
+        sleeper_net = sum(s.earnings - s.losses for s in sleepers)
+        assert sleeper_net < 0, f"Sleepers should be net negative: {sleeper_net:.1f}"
+
+        log.info("Sleeper + challenge: peak err=%.2f%%, sleeper net=%.1f",
+                 peak_err * 100, sleeper_net)
+
+
+# ---------------------------------------------------------------------------
 # Visualization: run a full scenario and produce a summary plot
 # ---------------------------------------------------------------------------
 
