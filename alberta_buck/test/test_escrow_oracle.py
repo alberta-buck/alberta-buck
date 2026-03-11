@@ -368,3 +368,244 @@ class TestRetroactiveConfiscation:
 
         log.info("Honest escrow preserved: %.1f, confiscated: %.1f",
                  honest_escrow_remaining, result["escrow_confiscated"])
+
+
+# ---------------------------------------------------------------------------
+# Non-ergodic honey pot: liars accumulate, then lose everything
+# ---------------------------------------------------------------------------
+
+class TestNonErgodicCollapse:
+
+    def test_honey_pot_grows_during_liar_control(self):
+        """Escrow accumulates monotonically while liars control the oracle.
+
+        The "honey pot" is the total unreleased escrow.  During liar control,
+        liars are classified "honest" (relative to the biased settled value)
+        and accumulate escrowed payouts.  The pot grows every round, creating
+        the non-ergodic trap.
+        """
+        oracle = EscrowOracle(
+            initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+            escrow_fraction=0.20, escrow_window=30,  # long window to prevent release
+        )
+        honest = []
+        for i in range(2):
+            r = Reporter(f"h_{i}", stake=5000)
+            oracle.register(r)
+            honest.append(r)
+        liars = []
+        for i in range(6):
+            r = Reporter(f"liar_{i}", stake=5000)
+            oracle.register(r)
+            liars.append(r)
+
+        pot_history = []
+        for rid in range(20):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+            oracle.settle(true_price=PRICE)
+            pot_history.append(oracle.honey_pot)
+
+        # Honey pot should be monotonically increasing
+        for i in range(1, len(pot_history)):
+            assert pot_history[i] >= pot_history[i - 1], (
+                f"Pot should grow: round {i} pot={pot_history[i]:.1f} "
+                f"< round {i-1} pot={pot_history[i-1]:.1f}")
+
+        assert pot_history[-1] > pot_history[0] * 5, (
+            f"Pot should grow substantially: {pot_history[0]:.1f} -> {pot_history[-1]:.1f}")
+
+        log.info("Honey pot growth: %.1f -> %.1f over 20 rounds",
+                 pot_history[0], pot_history[-1])
+
+    def test_liar_collapse_on_honest_influx(self):
+        """Liars control for 20 rounds, then honest influx triggers collapse.
+
+        This is the central non-ergodic dynamic:
+        1. Liars hold 6:2 majority for 20 rounds, accumulating escrow
+        2. The visible honey pot attracts 8 new honest reporters
+        3. Honest majority + multiple challenge escalations widen the gate
+           so honest submissions can enter despite the biased estimate
+        4. Retroactive confiscation captures liars' accumulated escrow
+
+        The gate_sigma is set wide enough that a challenge can restore
+        honest access even when the estimate has drifted significantly.
+        """
+        oracle = EscrowOracle(
+            initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+            escrow_fraction=0.25, escrow_window=30,
+            gate_sigma=10.0,  # wider gate: honest can enter after challenge
+            challenge_P_floor=0.01,  # reset P on challenge: break liar trust monopoly
+        )
+        honest = []
+        for i in range(2):
+            r = Reporter(f"h_{i}", stake=10000)
+            oracle.register(r)
+            honest.append(r)
+        liars = []
+        for i in range(6):
+            r = Reporter(f"liar_{i}", stake=10000)
+            oracle.register(r)
+            liars.append(r)
+
+        # Phase 1: liar control, 20 rounds
+        for rid in range(20):
+            oracle.open_round()
+            for r in honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+            oracle.settle(true_price=PRICE)
+
+        liar_stake_before = sum(r.stake for r in liars)
+        pot_before_influx = oracle.honey_pot
+        log.info("Pre-influx: liar stakes=%.0f, honey pot=%.1f",
+                 liar_stake_before, pot_before_influx)
+
+        # Phase 2: honest influx (attracted by the honey pot)
+        # The newcomers need ~5 rounds to build R and shift the estimate.
+        # During the transition, both sides lose money.  After correction,
+        # liars are classified dishonest and honest reporters harvest their
+        # stakes plus confiscated escrow.
+        new_honest = []
+        for i in range(8):
+            r = Reporter(f"new_h_{i}", stake=10000)
+            oracle.register(r)
+            new_honest.append(r)
+
+        challenger = Reporter("challenger", stake=10000)
+        oracle.register(challenger)
+
+        # Run 25 rounds: enough for newcomers to build R and correct estimate
+        confiscated_total = 0.0
+        for rid in range(25):
+            oracle.open_round()
+            for r in honest + new_honest:
+                oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+            for r in liars:
+                oracle.submit(r, PRICE * 1.08, stake=2.0)
+            # Challenge periodically during correction
+            if rid < 5 or rid % 5 == 0:
+                try:
+                    oracle.challenge(challenger)
+                    for r in honest + new_honest:
+                        try:
+                            eff = oracle.min_stake * oracle._stake_multiplier()
+                            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+                        except ValueError:
+                            pass
+                except ValueError:
+                    pass
+            result = oracle.settle(true_price=PRICE)
+            confiscated_total += result.get("escrow_confiscated", 0)
+
+        # The confiscated amount should be significant
+        assert confiscated_total > 0, (
+            f"Retroactive confiscation should capture liar escrow: {confiscated_total:.1f}")
+
+        # Liars should have substantial losses from BOTH mechanisms:
+        # normal settlement (losing current stakes) + confiscated escrow
+        liar_total_losses = sum(r.losses for r in liars)
+        assert liar_total_losses > 100, (
+            f"Liars should have large cumulative losses: {liar_total_losses:.1f}")
+
+        # The key non-ergodic property: liars' losses should EXCEED
+        # what they accumulated during their period of control.
+        # Their 20 rounds of control earned them some payouts, but the
+        # escrow confiscation + ongoing settlement losses eat those gains.
+        liar_net = sum(r.earnings - r.losses for r in liars)
+        assert liar_net < 0, (
+            f"Liars should be net negative despite 20 rounds of control: {liar_net:.1f}")
+
+        log.info("Liar collapse: confiscated=%.1f, liar net=%.1f, "
+                 "pot before=%.1f",
+                 confiscated_total, liar_net, pot_before_influx)
+
+    def test_longer_liar_control_means_larger_collapse(self):
+        """The longer liars maintain control, the more they lose when caught.
+
+        Compare two scenarios: liars control for 10 rounds vs 30 rounds.
+        The 30-round scenario should produce larger confiscation because
+        more escrow accumulated.  This is the non-ergodic property: the
+        attack cannot be sustained -- it becomes MORE costly over time,
+        not less.
+        """
+        def run_liar_control(n_liar_rounds):
+            oracle = EscrowOracle(
+                initial_estimate=PRICE, min_stake=2.0, tolerance=0.05,
+                escrow_fraction=0.25, escrow_window=50,
+            )
+            honest = []
+            for i in range(2):
+                r = Reporter(f"h_{i}", stake=20000)
+                oracle.register(r)
+                honest.append(r)
+            liars = []
+            for i in range(6):
+                r = Reporter(f"liar_{i}", stake=20000)
+                oracle.register(r)
+                liars.append(r)
+
+            for rid in range(n_liar_rounds):
+                oracle.open_round()
+                for r in honest:
+                    oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+                for r in liars:
+                    oracle.submit(r, PRICE * 1.08, stake=2.0)
+                oracle.settle(true_price=PRICE)
+
+            pot = oracle.honey_pot
+
+            # Honest influx + challenge
+            new_honest = []
+            for i in range(8):
+                r = Reporter(f"new_{i}", stake=20000)
+                oracle.register(r)
+                new_honest.append(r)
+            challenger = Reporter("ch", stake=20000)
+            oracle.register(challenger)
+
+            confiscated = 0
+            for rid in range(5):
+                oracle.open_round()
+                for r in honest + new_honest:
+                    oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=2.0)
+                for r in liars:
+                    oracle.submit(r, PRICE * 1.08, stake=2.0)
+                try:
+                    oracle.challenge(challenger)
+                    for r in honest + new_honest:
+                        try:
+                            eff = oracle.min_stake * oracle._stake_multiplier()
+                            oracle.submit(r, r.observe(PRICE, noise_std=0.003), stake=eff)
+                        except ValueError:
+                            pass
+                except ValueError:
+                    pass
+                result = oracle.settle(true_price=PRICE)
+                confiscated += result.get("escrow_confiscated", 0)
+
+            liar_losses = sum(r.losses for r in liars)
+            return pot, confiscated, liar_losses
+
+        pot_10, conf_10, loss_10 = run_liar_control(10)
+        pot_30, conf_30, loss_30 = run_liar_control(30)
+
+        # 30 rounds should accumulate more escrow
+        assert pot_30 > pot_10, (
+            f"30-round pot ({pot_30:.1f}) should exceed 10-round ({pot_10:.1f})")
+
+        # 30 rounds should produce larger confiscation
+        assert conf_30 > conf_10, (
+            f"30-round confiscation ({conf_30:.1f}) should exceed 10-round ({conf_10:.1f})")
+
+        # 30 rounds should produce larger total liar losses
+        assert loss_30 > loss_10, (
+            f"30-round losses ({loss_30:.1f}) should exceed 10-round ({loss_10:.1f})")
+
+        log.info("Non-ergodic scaling: 10 rounds pot=%.1f conf=%.1f loss=%.1f; "
+                 "30 rounds pot=%.1f conf=%.1f loss=%.1f",
+                 pot_10, conf_10, loss_10, pot_30, conf_30, loss_30)

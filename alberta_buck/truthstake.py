@@ -455,12 +455,18 @@ class EscrowOracle(Oracle):
         escrow_fraction=0.20,
         escrow_window=10,
         doubledown_fn=None,
+        challenge_P_floor=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.escrow_fraction = escrow_fraction
         self.escrow_window = escrow_window
         self.doubledown_fn = doubledown_fn  # callable(reporter, stake, round_id) -> bool
+        # On challenge, reset P to at least this value.  When None, uses the
+        # standard 2x doubling.  Setting this to initial_P forces the filter
+        # to re-establish trust from scratch after a challenge -- breaking the
+        # reputation circular dependency where entrenched liars have R << newcomers.
+        self.challenge_P_floor = challenge_P_floor
         self.escrow_ledger = []             # list of EscrowEntry
         self.total_escrowed = 0.0
 
@@ -470,8 +476,14 @@ class EscrowOracle(Oracle):
         return self.total_escrowed
 
     def challenge(self, challenger, bond=None):
-        """Override: standard challenge + double-down requirement."""
+        """Override: standard challenge + P floor + double-down requirement."""
         ch = super().challenge(challenger, bond=bond)
+
+        # Enforce P floor: after the standard 2x doubling, ensure P is at
+        # least challenge_P_floor.  This forces the Kalman filter to give
+        # newcomers meaningful influence (K = P/(P+R) is large when P is large).
+        if self.challenge_P_floor is not None:
+            self.kalman.P = max(self.kalman.P, self.challenge_P_floor)
 
         if self.doubledown_fn is None:
             return ch
