@@ -1085,3 +1085,456 @@
   | Uncertainty quantification | No              | No               | No              | Yes (Kalman P)             |
   | Gas per read               | ~5k             | ~5k              | ~5k             | ~5k (stored estimate)      |
   | Gas per report             | N/A (off-chain) | ~100k            | ~50k            | ~25k                       |
+
+* Research: How Oracles Handle Truth, Time, and Lies
+
+  A survey of every major deployed oracle reveals a universal limitation: *none allows
+  retroactive correction of historical values once confirmed*.  Every system treats
+  published data as immutable after a short finality window.  This section summarizes the
+  landscape and identifies what TruthStake can do differently.
+
+** Oracle Categories
+
+   Every oracle falls into one of three categories:
+
+   1. *Market-derived* (trustless, no reporters): Uniswap TWAP, Curve, Balancer.  Data comes
+      from on-chain trades.  No reporters means no liars -- but also no way to price assets
+      without active trading pools (commodities, off-chain assets).
+
+   2. *Trusted operators* (permissioned reporters): Chainlink, Chronicle, API3.  A whitelisted
+      set of node operators publishes data.  Trust is in operator selection, not economic
+      incentives.
+
+   3. *Open participation* (permissionless reporters): Tellor, UMA, Flare FTSO, Pyth, and
+      what TruthStake proposes.  Anyone can report, and economic mechanisms must distinguish
+      truth from lies.
+
+** Uniswap V3/V4 TWAP
+
+   The only deployed oracle with genuine time-series data.  A ring buffer of up to 65,535
+   observations stores ~tick * time_elapsed~ accumulators, enabling geometric-mean TWAP
+   computation over any window within the buffer.  One observation per block, deterministic
+   from swap state.
+
+   - *Strengths*: Trustless, manipulation-resistant over long windows, real temporal curve.
+   - *Liar detection*: N/A -- observations are deterministic from trades.
+   - *Correction*: Impossible.  Append-only ring buffer.  A manipulated price stays until
+     overwritten.
+   - *Limitation*: Only prices assets with active on-chain pools.  Cannot price Gold, Silver,
+     agricultural products, or any off-chain commodity.  Post-Merge multi-block MEV (validator
+     controlling consecutive slots) can corrupt observations with zero arbitrage risk during
+     their slots.
+
+** Chainlink
+
+   Permissioned set of up to 31 whitelisted nodes aggregate off-chain via OCR (Off-Chain
+   Reporting), publishing a median answer on-chain.  Historical data accessible via
+   ~getRoundData(roundId)~ -- but this is a log of publications, not a curated time-series.
+
+   - *Liar detection*: Off-chain and opaque.  Deviant nodes identified by Chainlink's
+     centralized monitoring.  ~Flags.sol~ provides a permissioned circuit-breaker.
+   - *Correction*: None.  Published answers are immutable.  During the LUNA crash, Chainlink
+     froze the feed at $0.10 rather than publish the true ~$0.00001 price.  Consumer
+     protocols must implement their own staleness checks.
+   - *Limitation*: Trust is in node selection by Chainlink Labs.  No on-chain penalty for
+     incorrect values.  Deviation-threshold + heartbeat update model means on-chain price can
+     be stale between updates.
+
+** UMA (Optimistic Oracle)
+
+   Closest to TruthStake's challenge model.  A proposer stakes a bond and asserts an answer.
+   During a ~2-hour dispute window, anyone can dispute by posting a matching bond.  Disputes
+   escalate to the DVM (Data Verification Mechanism) -- a Schelling-point vote by UMA token
+   holders.
+
+   - *Liar detection*: Dispute window + DVM vote.  Proposer loses bond if dispute succeeds.
+   - *Correction*: Only during the dispute window.  Once the window closes, the value is final
+     and immutable.  No retroactive correction, no forward propagation.
+   - *Limitation*: Resolves individual price requests, not time-series.  The DVM vote is a
+     Schelling point (incentivized to vote with majority, not with truth).  No accuracy
+     weighting or reputation -- influence is proportional to token holdings.
+
+** Tellor
+
+   Permissionless stake-to-report model.  Reporters stake TRB tokens and submit values.
+   Anyone can dispute within a 12-hour window, triggering a 2-day token-holder vote.
+
+   - *Liar detection*: Dispute + slash.  If dispute succeeds, reporter's stake is slashed
+     (half to disputer, half burned).  Multiple voting rounds with escalating thresholds.
+   - *Correction*: Only during the dispute window.  Disputed values are marked and skipped,
+     not corrected in place.  No propagation of corrections through subsequent values.
+   - *Limitation*: In 2023, Tellor was exploited on Polygon because the dispute window was
+     shorter than the L1-L2 bridge delay -- an attacker submitted a false value and used it
+     before anyone could dispute cross-chain.  Fundamental fragility of fixed dispute windows.
+
+** Pyth Network
+
+   ~80 first-party publishers (exchanges, market makers) submit ~(price, confidence)~ pairs.
+   Aggregated via weighted median.  Full history stored off-chain on Pythnet; only the latest
+   attested price is stored on-chain.
+
+   - *Liar detection*: Implicit.  Publishers that disagree widen the aggregate confidence
+     interval.  Off-chain weight reduction by governance.
+   - *Correction*: None.
+   - *Innovation*: The confidence interval is the closest any production oracle comes to
+     Kalman P.  But it is a static aggregation metric (how much publishers disagree right
+     now), not a dynamically evolving uncertainty estimate.
+
+** Flare FTSO (Time Series Oracle)
+
+   Despite the name, does not maintain a time-series.  Produces a single price per 3-minute
+   epoch via commit-reveal + weighted median.  Providers within the IQR reward band receive
+   inflationary rewards; those outside receive nothing (but are not slashed).
+
+   - *Liar detection*: Reward exclusion only.  No slashing, no dispute.
+   - *Correction*: None.  Each epoch is final.
+   - *Limitation*: The reward band creates a Schelling-point vulnerability -- providers are
+     incentivized to submit near the median of *other providers*, not near the true value.
+     A majority cartel shifts the band center.
+
+** Prediction Markets (Augur, Polymarket)
+
+   Resolve discrete events (not continuous price feeds).  Augur has the most sophisticated
+   dispute mechanism: multi-round escalation with doubling bonds, ending in a fork of the
+   REP token at the maximum dispute level.
+
+   - *Correction*: Yes, but only for event outcomes, and only before final settlement.
+     Not applicable to continuous time-series.
+   - *Relevance*: The dispute escalation model (exponentially increasing bonds) is a direct
+     precedent for TruthStake's challenge mechanism.
+
+** The Universal Gap
+
+   | Capability                      | Uniswap | Chainlink | UMA    | Tellor | Pyth  | FTSO | Augur  |
+   |---------------------------------+---------+-----------+--------+--------+-------+------+--------|
+   | Time-series data                | Ring buf | Round log | No     | Log    | Off-chain | No | No     |
+   | Retroactive correction          | No      | No        | Window | Window | No    | No   | Window |
+   | Accuracy-weighted aggregation   | N/A     | Median    | Vote   | Vote   | Wt med | Wt med | Vote |
+   | Uncertainty quantification      | No      | No        | No     | No     | Conf  | No   | No     |
+   | Correction propagates forward   | No      | No        | No     | No     | No    | No   | No     |
+   | Liar P&L consequence            | N/A     | Removal   | Bond   | Slash  | Wt red | Reward excl | Bond |
+   | Deferred settlement             | N/A     | No        | 2 hr   | 12 hr  | No    | No   | Weeks  |
+
+   No deployed oracle:
+   - Allows retroactive correction of historical values after the dispute window closes
+   - Propagates corrections forward through subsequent values when history is revised
+   - Uses accuracy-weighted signal extraction (all use median or Schelling-point voting)
+   - Models uncertainty dynamically (Pyth's confidence interval is the closest attempt)
+   - Creates non-ergodic economics where the cost of sustained lying compounds over time
+
+* TruthStake V2: Time-Series Oracle with Deferred Settlement
+
+  The research above reveals that what is needed -- a time-series oracle where historical
+  values can be challenged, corrections propagate forward, and reporters are paid against the
+  *final* consensus curve -- does not exist.  This section proposes an architecture.
+
+** What the Oracle Represents
+
+   An accurate time-value curve ~f(t)~ for a tracked variable (Gold price, exchange rate,
+   temperature).  Not just "what is the price now" but "what was the price at every past
+   moment, and how confident are we in each point."
+
+   This matters because financial products depend on *derivatives* of the curve: rate of
+   return, volatility, moving averages.  An oracle that gets the instantaneous price right
+   but distorts the shape of the curve (e.g., smoothing over a flash crash, or introducing a
+   phantom spike) corrupts every product that computes on the history.
+
+** Core Data Model
+
+   The oracle maintains a *time-indexed curve* rather than a single scalar estimate:
+
+   #+begin_example
+   TimeSlot {
+       timestamp:       uint64        -- epoch seconds (e.g., 1741798800 = 2025-03-12 15:00 MT)
+       estimate:        int256        -- Kalman-smoothed best estimate at this timestamp
+       P:               uint256       -- uncertainty (variance) at this timestamp
+       submissions:     Submission[]  -- all (reporter, value, stake) for this slot
+       challenges:      Challenge[]   -- any challenges targeting this slot
+       finalized:       bool          -- true once the challenge window has expired
+       finalized_at:    uint64        -- block timestamp when finalization occurred
+   }
+   #+end_example
+
+   Slots are indexed by ~(asset_id, timestamp)~.  A Gold oracle with hourly resolution has
+   one slot per hour; daily resolution has one per day.  The resolution is a parameter of the
+   oracle instance.
+
+** Submission Lifecycle: Three Phases
+
+*** Phase 1: Open Submission Window
+
+    For each time slot, there is a window during which reporters can submit observations at
+    base stake.  For an hourly oracle:
+
+    #+begin_example
+    Slot timestamp:     2026-03-12 15:00 MT
+    Submission window:  15:00 -- 15:30 MT (30 minutes after the slot)
+    #+end_example
+
+    During this window, reporters submit ~(timestamp, value, stake)~ tuples.  Each submission
+    updates the Kalman filter for that slot, weighted by the reporter's R (reputation).  The
+    early-submission bonus rewards speed and conviction -- the first reporter to submit an
+    accurate value for a slot earns the most.
+
+    Submissions for the *current* slot are cheap (base stake).  Submissions for *recent past*
+    slots (within a lookback window) are allowed at higher cost -- the further back, the more
+    expensive, because late submissions signal either tardiness or attempted manipulation.
+
+*** Phase 2: Challenge Window
+
+    After the submission window closes, the slot enters a challenge window:
+
+    #+begin_example
+    Challenge window:   15:30 -- 16:30 MT (1 hour after submission closes)
+    #+end_example
+
+    During this window, anyone (reporters, consumers, automated monitors) can challenge the
+    slot's estimate by posting a bond.  A challenge:
+
+    1. Resets Kalman P for the challenged slot to at least the P floor (progressive
+       escalation: each successive challenge level doubles the floor).
+    2. Reopens the slot for new submissions at escalated stake.
+    3. Triggers *forward re-projection*: if the challenged slot's estimate changes
+       materially, all subsequent slots' estimates are recomputed using the corrected
+       history (see "Kalman Smoother" below).
+
+    Challenging an *older* slot (one that has already passed through its normal challenge
+    window but has not yet been finalized due to a downstream challenge) costs more:
+
+    #+begin_example
+    Challenge bond = base_bond * 2^level * age_multiplier(slot_age)
+    age_multiplier = 1 + (slot_age / resolution)
+    #+end_example
+
+    A challenge at the current slot costs base_bond * 2.  A challenge targeting a slot 6
+    hours old (6 slots back on an hourly oracle) costs base_bond * 2 * 7 = 14x base.
+
+*** Phase 3: Finalization and Settlement
+
+    A slot is finalized when its challenge window expires *and* no active challenge has
+    propagated corrections through it.  At finalization:
+
+    1. The slot's estimate becomes the official value for that ~(asset, timestamp)~ pair.
+    2. Reporters are classified honest/dishonest against the *finalized* estimate -- not the
+       instantaneous estimate at submission time.
+    3. The reward pool (all stakes + all challenge bonds + accumulated feed fees) is
+       redistributed to honest reporters, weighted by accuracy and submission order.
+    4. Dishonest reporters lose their stakes and have their R (reputation) inflated.
+    5. A fraction of payouts is held in escrow for W additional slots.
+
+    This deferred settlement eliminates the circular dependency in the current implementation:
+    reporters are never judged against a value that liars control.  The finalized value
+    incorporates all evidence from the submission window, the challenge window, and any
+    re-projections from corrections to earlier slots.
+
+** Kalman Smoother: Forward-Backward Estimation
+
+   The current implementation uses a forward-only Kalman filter: each ~update()~ incorporates
+   one observation and moves on.  A time-series oracle needs a *smoother* that incorporates
+   evidence from both directions.
+
+*** Why Forward-Only Fails
+
+    In a forward-only filter, the estimate at slot T uses only observations from slots
+    0..T.  If slot T+5 reveals that slot T was wrong (via a challenge), there is no mechanism
+    to propagate that information backward.
+
+*** Rauch-Tung-Striebel (RTS) Smoother
+
+    The standard solution: run the Kalman filter forward to accumulate all observations (the
+    "forward pass"), then run backward from the final slot to propagate future evidence into
+    past estimates (the "backward pass").  This gives the maximum-likelihood estimate at
+    every timestamp given *all* observations, not just past ones.
+
+    #+begin_example
+    Forward pass (standard Kalman):
+        For each slot t = 0, 1, ..., N:
+            predict: x_pred(t) = x(t-1), P_pred(t) = P(t-1) + Q
+            For each submission z at slot t:
+                K = P_pred / (P_pred + R_reporter)
+                x(t) = x_pred + K * (z - x_pred)
+                P(t) = (1 - K) * P_pred
+
+    Backward pass (RTS smoother):
+        For each slot t = N-1, N-2, ..., 0:
+            G(t) = P(t) / P_pred(t+1)
+            x_smooth(t) = x(t) + G * (x_smooth(t+1) - x_pred(t+1))
+            P_smooth(t) = P(t) + G * (P_smooth(t+1) - P_pred(t+1)) * G
+    #+end_example
+
+    The backward pass is O(N) in the number of slots and requires only the forward-pass
+    state at each slot (stored in the TimeSlot structs).  It does not need to re-process
+    individual submissions.
+
+*** When to Re-Smooth
+
+    Re-smoothing is triggered by any event that materially changes a slot's evidence:
+    - A new submission during a reopened challenge window
+    - A challenge that resets P for a historical slot
+    - Finalization of a challenged slot (freezes its estimate, triggering a final re-smooth
+      of downstream slots)
+
+    Re-smoothing only needs to run from the modified slot forward to the latest slot.  It
+    does not need to re-run the entire history.
+
+*** On-Chain Feasibility
+
+    The RTS smoother requires storing ~(x, P, x_pred, P_pred)~ per slot.  For an hourly
+    oracle with 30-day lookback: 720 slots * 4 uint256 = 2,880 storage words.  This is
+    practical on-chain.
+
+    The backward pass is O(N) multiplications per re-smooth.  For N=720, this is ~2,880
+    multiplications -- well within a single transaction's gas budget.  Challenge-triggered
+    re-smoothing can be bounded by only re-projecting forward from the challenged slot to
+    the current slot.
+
+** Challenge Economics: Age-Scaled Non-Ergodic Costs
+
+*** Why Age Matters
+
+    Challenging a recent slot is cheap because the disruption is local: only a few
+    downstream slots need re-projection.  Challenging an old slot is expensive because:
+
+    1. Many downstream slots must be re-projected (gas cost).
+    2. Many settlements may need to be reversed or adjusted (economic disruption).
+    3. The evidence for old slots should be strong (many reporters have already confirmed it).
+
+    But this cost must be balanced: if challenging old slots is *too* expensive, liars can
+    corrupt early slots and escape correction.  The non-ergodic property requires that
+    the *reward* for successfully challenging an old corrupted slot also scales with age.
+
+*** The Honey Pot Mechanism (Preserved from V1)
+
+    Escrow from all unsettled slots since the corrupted one becomes the challenge reward.
+    If liars controlled slots T through T+20, there are 21 slots' worth of escrow at stake.
+    The longer the corruption persists, the larger the honey pot, and the more attractive it
+    becomes to mount an expensive historical challenge.
+
+    #+begin_example
+    Challenge cost:   base_bond * 2^level * (1 + age_in_slots)
+    Challenge reward: escrow from all slots in [challenged_slot, current_slot]
+                      that are re-evaluated and found to contain liar payouts
+    #+end_example
+
+    For a 20-slot corruption: the challenger pays ~21x base bond.  If successful, they
+    receive confiscated escrow from 21 slots' worth of liar payouts.  With 25% escrow
+    fraction and 8 reporters per slot at $2 stake: 21 * 0.25 * 8 * $2 = $84 in confiscable
+    escrow.  The challenge bond of 21 * $4 = $84 is roughly break-even -- which means the
+    challenge is free when it succeeds.  Any additional escrow from inflated pools (due to
+    challenge bonds and feed fees entering the pool) makes the challenge profitable.
+
+*** Non-Ergodic Dynamics (Preserved and Strengthened)
+
+    The V1 honey-pot dynamics carry over directly:
+
+    1. Liars controlling the oracle accumulate escrow that is vulnerable to correction.
+    2. The longer they maintain control, the larger the honey pot.
+    3. The honey pot attracts challengers and honest reporters.
+    4. A single successful challenge triggers retroactive confiscation across all corrupted
+       slots, not just the challenged one.
+    5. The RTS smoother propagates the correction forward, causing liars in downstream slots
+       to be reclassified as dishonest.
+
+    The new element: because the smoother propagates corrections *forward*, a successful
+    challenge at slot T can cause reclassification of reporters in slots T+1, T+2, ..., up
+    to the current slot.  This means the total confiscation from a single challenge can be
+    vastly larger than the challenge bond -- the non-ergodic trap is even more severe than
+    in V1.
+
+** Consumer Feed Fees (Preserved from V1)
+
+   Consumers pay per-read fees that flow into the next slot's reward pool.  The uncertainty
+   premium (higher fees when P is large) is now richer: P varies across the time-series, so
+   consumers pay more to read uncertain slots and less for well-established ones.
+
+   Consumer challenges are unchanged: a non-reporter posts a bond targeting a specific
+   ~(asset, timestamp)~ slot, triggering escalation and re-smoothing.
+
+** Reporter Experience
+
+*** Normal Operation
+
+    A reporter observes the Gold price at 15:00 MT, submits ~(Gold, 1500MT, $2905, $2 stake)~
+    within the 30-minute window.  If their value agrees with the finalized estimate (after
+    all challenges expire), they receive their stake back plus a share of dishonest reporters'
+    stakes and feed fees.  They are paid ~1 hour after submission (submission window +
+    challenge window).
+
+*** Late Submission
+
+    The reporter missed the 15:00 MT window but has evidence that the published value is
+    wrong.  They submit for the 15:00 slot during the challenge window at elevated cost (the
+    slot must be challenged first, or their submission arrives as part of a challenge).  If
+    they are right, they earn the challenger's reward.
+
+*** Historical Correction
+
+    The reporter notices that the 11:00 MT value (4 hours ago, 4 slots back) appears
+    incorrect.  They fund a challenge targeting the 11:00 slot, paying ~5x base bond (age
+    multiplier).  The challenge reopens the slot, resets its P to the floor, and the reporter
+    submits their corrected value.  If the re-smoothed estimate shifts materially, all
+    downstream slots are re-projected.  If the correction is validated by finalization, the
+    reporter earns confiscated escrow from the corrupted slots.
+
+** Comparison: V1 (Current) vs. V2 (Time-Series)
+
+   | Aspect                   | V1 (implemented)                       | V2 (proposed)                              |
+   |--------------------------+----------------------------------------+--------------------------------------------|
+   | Data model               | Single scalar ~(x, P)~                 | Time-indexed curve ~x(t), P(t)~            |
+   | Submission               | ~(reporter, value, stake)~             | ~(reporter, timestamp, value, stake)~       |
+   | Settlement timing        | Immediate per-round                    | Deferred until challenge window expires     |
+   | Accuracy reference       | Current round's Kalman estimate        | Finalized post-challenge consensus curve    |
+   | Late observations        | Not possible                           | Submit for any slot within lookback         |
+   | Historical correction    | Escrow clawback (needs ~true_price~)   | Challenge reopens slot, RTS re-projects     |
+   | Forward propagation      | No                                     | Smoother propagates corrections forward     |
+   | Reputation basis         | Error vs. per-round settled value      | Error vs. finalized curve                   |
+   | Circular dependency      | Yes (hacked with P floor)              | No (settlement against final consensus)     |
+   | Challenge target         | "This round"                           | Specific ~(asset, timestamp)~ slot          |
+   | Challenge cost           | Fixed escalation schedule               | Escalates with age of targeted slot         |
+   | Consumer pricing         | Flat fee + uncertainty premium          | Per-slot fee scaled by ~P(t)~ at that slot  |
+   | Derivative support       | Meaningless (no time structure)         | Rate of return, volatility from curve shape |
+
+** What Carries Forward
+
+   The V1 simulation validated the core mechanisms:
+   - Kalman filtering with reputation-weighted R extracts truth from adversarial noise
+   - Challenge escalation makes sustained manipulation exponentially expensive
+   - Early-submission bonus rewards speed and conviction
+   - Escrow + retroactive confiscation creates non-ergodic dynamics
+   - Feed fees create a demand-side revenue loop
+
+   These all transfer directly to V2.  The change is structural: *when* settlement occurs
+   (deferred, not immediate), *against what* accuracy is measured (finalized curve, not
+   instantaneous estimate), and the addition of the RTS smoother for temporal consistency.
+
+** What is New
+
+   1. *Timestamped submissions*: reporters target specific slots, not anonymous rounds.
+   2. *Deferred settlement*: nobody is paid until the challenge window expires.
+   3. *RTS smoother*: corrections propagate forward through the time-series.
+   4. *Age-scaled challenges*: historical correction is possible but expensive.
+   5. *Per-slot uncertainty*: P(t) varies across the curve, enabling slot-specific pricing.
+   6. *Curve-shape integrity*: the oracle guarantees the shape of the history, not just the
+      latest point.  Derivatives (rate of return, volatility) computed from the curve are
+      trustworthy.
+
+** Implementation Path
+
+   1. Implement ~TimeSeriesOracle~ in Python simulation (~truthstake.py~):
+      - ~TimeSlot~ dataclass with timestamp, submissions, challenges, finalized flag
+      - Forward Kalman pass over all slots
+      - RTS backward smoother
+      - Deferred settlement: finalize slots when challenge window expires
+      - Age-scaled challenge bonds
+
+   2. Port attack tests from V1 to V2 time-series structure:
+      - Verify that the honey-pot collapse still works with deferred settlement
+      - Test forward propagation: corrupting slot T and challenging it corrects T+1..T+N
+      - Test age-scaled challenges: historical correction costs more but rewards more
+      - Test curve-shape attacks: adversary distorts rate-of-return, challenge corrects it
+
+   3. Solidity implementation:
+      - ~TimeSlot~ struct with packed storage (estimate, P, finalization state)
+      - On-chain RTS smoother bounded to re-project from challenged slot to current
+      - Gas-efficient batch finalization (finalize all expired slots in one tx)
+      - Consumer ~read(asset, timestamp)~ with per-slot fee and uncertainty premium
