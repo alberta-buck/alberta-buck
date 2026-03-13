@@ -1205,15 +1205,15 @@
 
 ** The Universal Gap
 
-   | Capability                      | Uniswap | Chainlink | UMA    | Tellor | Pyth  | FTSO | Augur  |
-   |---------------------------------+---------+-----------+--------+--------+-------+------+--------|
-   | Time-series data                | Ring buf | Round log | No     | Log    | Off-chain | No | No     |
-   | Retroactive correction          | No      | No        | Window | Window | No    | No   | Window |
-   | Accuracy-weighted aggregation   | N/A     | Median    | Vote   | Vote   | Wt med | Wt med | Vote |
-   | Uncertainty quantification      | No      | No        | No     | No     | Conf  | No   | No     |
-   | Correction propagates forward   | No      | No        | No     | No     | No    | No   | No     |
-   | Liar P&L consequence            | N/A     | Removal   | Bond   | Slash  | Wt red | Reward excl | Bond |
-   | Deferred settlement             | N/A     | No        | 2 hr   | 12 hr  | No    | No   | Weeks  |
+   | Capability                    | Uniswap  | Chainlink | UMA    | Tellor | Pyth      | FTSO        | Augur  |
+   |-------------------------------+----------+-----------+--------+--------+-----------+-------------+--------|
+   | Time-series data              | Ring buf | Round log | No     | Log    | Off-chain | No          | No     |
+   | Retroactive correction        | No       | No        | Window | Window | No        | No          | Window |
+   | Accuracy-weighted aggregation | N/A      | Median    | Vote   | Vote   | Wt med    | Wt med      | Vote   |
+   | Uncertainty quantification    | No       | No        | No     | No     | Conf      | No          | No     |
+   | Correction propagates forward | No       | No        | No     | No     | No        | No          | No     |
+   | Liar P&L consequence          | N/A      | Removal   | Bond   | Slash  | Wt red    | Reward excl | Bond   |
+   | Deferred settlement           | N/A      | No        | 2 hr   | 12 hr  | No        | No          | Weeks  |
 
    No deployed oracle:
    - Allows retroactive correction of historical values after the dispute window closes

@@ -33,3 +33,5 @@ lcov.info
 *.aux
 *.toc
 *.tex
+*.fls
+*.log
