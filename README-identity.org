@@ -1,0 +1,553 @@
+#+title: Alberta Buck -- Identity Requirements and Cryptographic Receipts
+#+author: Perry Kundert
+#+date: 2026-03-14
+#+draft: false
+
+#+OPTIONS: ^:nil toc:t
+
+#+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
+
+
+* Overview
+
+  Every operation in the Alberta Buck ecosystem has identity requirements.  Some
+  operations require fully public identity (oracle claims, governance votes).
+  Others require only that the participant is a verified identity, without
+  disclosing who they are (BUCK transfers).  DeFi integrations (Uniswap pools,
+  lending protocols) introduce contract addresses as counterparties, which also
+  need identities associated with their deployers.
+
+  This document tabulates the identity requirements for every operation, then
+  walks through the cryptography of a DeFi swap transaction as a concrete
+  example.
+
+
+* Identity Visibility Modes
+
+  | Mode           | What on-chain reveals        | What off-chain reveals                    |
+  |----------------+------------------------------+-------------------------------------------|
+  | Anonymous-valid| Address is verified (bit)     | Encrypted receipt: identities of both     |
+  |                | isVerified(addr) == true      | parties, decryptable only by participants |
+  |                |                              | + optional regulatory escrow key          |
+  | Public         | Address is verified + public  | Full name, jurisdiction, credentials,     |
+  |                | identity claim on ONCHAINID   | track record -- world-readable            |
+  | Contract       | Contract address is verified; | Deployer's identity is the contract's     |
+  |                | linked to deployer's identity | identity; receipts encrypted to deployer  |
+  | Permissionless | No identity check             | N/A                                       |
+
+
+* Operations Table
+
+** Core BUCK (ERC-20) Operations
+
+   | Operation         | Caller identity       | Counterparty identity  | Receipt     | Notes                                      |
+   |-------------------+-----------------------+------------------------+-------------+--------------------------------------------|
+   | ~mint~            | Anonymous-valid       | N/A (self-mint)        | Event log   | Caller must hold BuckCredits; identity     |
+   |                   | KYC (topic 1)         |                        |             | verified but not disclosed on-chain        |
+   | ~burn~            | Anonymous-valid       | N/A (self-burn)        | Event log   | Reduces outstanding balance                |
+   |                   | KYC (topic 1)         |                        |             |                                            |
+   | ~transfer~        | Anonymous-valid       | Anonymous-valid        | Encrypted   | Both parties verified; receipt encrypted   |
+   |                   | KYC (topic 1)         | KYC (topic 1)          | 3-party     | to sender + receiver + escrow              |
+   | ~transferFrom~    | Anonymous-valid       | Anonymous-valid        | Encrypted   | Spender verified; owner and recipient      |
+   |                   | KYC (topic 1)         | KYC (topic 1)          | 3-party     | identities in encrypted receipt            |
+   | ~approve~         | Anonymous-valid       | Anonymous-valid        | Event log   | Approving a spender for transferFrom       |
+   |                   | KYC (topic 1)         | KYC (topic 1)          |             |                                            |
+
+** BuckCredit (ERC-721) Operations
+
+   | Operation         | Caller identity       | Counterparty identity  | Receipt     | Notes                                      |
+   |-------------------+-----------------------+------------------------+-------------+--------------------------------------------|
+   | ~createCredit~    | Public                | Anonymous-valid        | Encrypted   | Insurer MUST be publicly identified        |
+   |                   | KYC + insurer (42)    | KYC (topic 1)          | to parties  | (their reputation backs the credit).       |
+   |                   |                       |                        |             | Client may be anonymous-valid.             |
+   | ~activate~        | Anonymous-valid       | N/A (self)             | Event log   | Credit owner activates portion of value    |
+   |                   | KYC (topic 1)         |                        |             |                                            |
+   | ~updateCredit~    | Public                | N/A                    | Event log   | Insurer updates params; must be public     |
+   |                   | KYC + insurer (42)    |                        |             | (reappraisal is a public commitment)       |
+   | ~transfer~ (NFT)  | Anonymous-valid       | Anonymous-valid        | Encrypted   | Transferring insurance NFT; new owner      |
+   |                   | KYC (topic 1)         | KYC (topic 1)          | 3-party     | inherits the credit                        |
+
+** BuckKController (PID Stabilization)
+
+   | Operation              | Caller identity    | Receipt     | Notes                                     |
+   |------------------------+--------------------+-------------+-------------------------------------------|
+   | ~compute~              | Permissionless     | Event log   | Anyone can trigger PID update; minter      |
+   |                        |                    |             | pays gas.  No identity needed.             |
+   | ~setGains~             | Governance         | Event log   | Governance multisig or vote result.        |
+   |                        |                    |             | Governance members publicly identified.    |
+   | ~addBasketComponent~   | Governance         | Event log   | Adding a new commodity to the basket.      |
+   | ~setDT~                | Governance         | Event log   | Changing the PID update interval.          |
+
+** Oracle Operations
+
+   | Operation              | Caller identity    | Receipt     | Notes                                     |
+   |------------------------+--------------------+-------------+-------------------------------------------|
+   | Submit claim           | Public             | Public log  | "I, Perry Kundert, claim Gold was $2905    |
+   |                        | KYC + reporter (43)|             | at block 19400000."  Public identity is    |
+   |                        |                    |             | the entire point: reputation accrues.      |
+   | Commit value (L1)      | Public             | Event log   | Authorized reporters sign the commitment.  |
+   |                        | KYC + reporter (43)|             | Signatures are publicly verifiable.        |
+   | Challenge/dispute      | Anonymous-valid    | Evidence    | Challenger need not be public; the         |
+   |                        | KYC (topic 1)      | on-chain    | evidence speaks for itself.                |
+   | Governance vote        | Anonymous-valid    | Vote record | Stake-weighted vote on oracle selection.   |
+   |  (oracle selection)    | KYC (topic 1)      |             | Vote weight from Buck holdings is public;  |
+   |                        |                    |             | voter identity may be private.             |
+
+** DeFi Integration (Uniswap, Lending, etc.)
+
+   | Operation              | Caller identity    | Contract identity      | Receipt     | Notes                                     |
+   |------------------------+--------------------+------------------------+-------------+-------------------------------------------|
+   | Create pool            | Public             | Contract registered    | Event log   | Pool deployer is publicly identified.     |
+   |  (BUCK/USDT)           | KYC (topic 1)      | to deployer's identity |             | Contract address linked to deployer's     |
+   |                        |                    |                        |             | ONCHAINID in IdentityRegistry.            |
+   | Swap BUCK -> USDT      | Anonymous-valid    | Contract (deployer)    | Encrypted   | User sends BUCK to pool via transferFrom. |
+   |                        | KYC (topic 1)      |                        | 3-party     | Receipt: user + deployer + escrow.        |
+   | Swap USDT -> BUCK      | Anonymous-valid    | Contract (deployer)    | Encrypted   | Pool sends BUCK to user.  Receipt same.   |
+   |                        | KYC (topic 1)      |                        | 3-party     |                                           |
+   | Add liquidity          | Anonymous-valid    | Contract (deployer)    | Encrypted   | User transfers BUCK to pool.              |
+   |                        | KYC (topic 1)      |                        | 3-party     |                                           |
+   | Remove liquidity       | Anonymous-valid    | Contract (deployer)    | Encrypted   | Pool transfers BUCK to user.              |
+   |                        | KYC (topic 1)      |                        | 3-party     |                                           |
+
+** Identity Management
+
+   | Operation              | Caller identity    | Issuer identity        | Receipt     | Notes                                     |
+   |------------------------+--------------------+------------------------+-------------+-------------------------------------------|
+   | KYC ceremony           | Self               | Trusted issuer         | Off-chain   | Participant submits docs to issuer;       |
+   |                        | (no claims yet)    | (publicly identified)  | encrypted   | issuer verifies, signs claim.             |
+   | Register in registry   | Registry agent     | N/A                    | Event log   | Links wallet address to ONCHAINID.        |
+   | Add public identity    | Self               | Trusted issuer         | On-chain    | Opts in to public identification for      |
+   |  claim                 | KYC (topic 1)      | (publicly identified)  | claim       | oracle/governance participation.          |
+   | Revoke claim           | Issuer or self     | N/A                    | Event log   | Removes a claim (e.g., expired license).  |
+   | N/M recovery           | N-of-M parties     | N/A                    | On-chain    | Transfers identity to new address after   |
+   |                        | (all identified)   |                        | + off-chain | N of M designated parties agree.          |
+
+
+* Contract Identity: How DeFi Pools Become BUCK Counterparties
+
+  A Uniswap pool contract is just an address.  For BUCK transfers to/from that
+  address to pass ~isVerified~, the contract must have an identity in the
+  IdentityRegistry.  But a contract can't do KYC.  The solution:
+
+  *The pool deployer's identity becomes the contract's identity.*
+
+  When someone creates a BUCK/USDT Uniswap pool:
+
+  1. Deployer (a verified BUCK participant) calls the Uniswap factory to create
+     the pool.  The factory deploys a new contract at a deterministic address.
+
+  2. Deployer (or a registry agent) calls:
+     ~identityRegistry.registerIdentity(poolAddress, deployer.onchainId, country)~
+
+     This links the pool contract's address to the deployer's ONCHAINID.  The
+     pool inherits the deployer's identity claims.
+
+  3. Now ~isVerified(poolAddress)~ returns true.  BUCK transfers to/from the
+     pool pass the identity check.
+
+  4. Encrypted receipts for pool transactions list the deployer's identity as
+     the counterparty, because the deployer is the legal operator of the pool.
+
+  This means: if you deploy a BUCK DeFi pool, you are the identified legal
+  operator.  Your identity is on the line for every transaction through that
+  pool.  If a court subpoenas you, you can be compelled to decrypt the receipts
+  (because your key is one of the encryption parties).
+
+
+* Cryptographic Receipts: 3-Party ECDH
+
+  Every BUCK transfer produces an encrypted receipt stored as an Ethereum log
+  event.  The receipt contains the identities of both parties and the transaction
+  details.  Only the participants (and optionally a regulatory escrow) can
+  decrypt it.
+
+** The Three Keys
+
+   For a transfer from Alice to a DeFi pool operated by Bob:
+
+   | Key               | Held by        | Purpose                                        |
+   |-------------------+----------------+------------------------------------------------|
+   | ~k_s~ (sender)    | Alice          | Sender's persistent signing/encryption key     |
+   | ~k_e~ (ephemeral) | Deterministic  | Derived from hash of receipt plaintext;        |
+   |                   |                | reproducible by anyone who knows the plaintext |
+   | ~K_r~ (receiver)  | Bob (deployer) | Pool operator's persistent public key          |
+
+   The ephemeral key ~k_e~ is derived deterministically from the receipt content:
+
+   #+begin_example
+   receipt_plaintext = abi.encode(
+       sender_onchainid,
+       receiver_onchainid,
+       amount,
+       block.number,
+       block.timestamp,
+       purpose_hash
+   )
+   k_e = keccak256(receipt_plaintext)    // deterministic "private key"
+   // This is NOT a secure private key in isolation -- it becomes secure
+   // only as part of the 3-party ECDH construction below.
+   #+end_example
+
+** Encryption Scheme
+
+   The shared encryption key is derived via ECDH between all three key pairs:
+
+   #+begin_example
+   // Sender computes (knows k_s, k_e, K_r):
+   shared_1 = ECDH(k_s, K_r)          // sender-receiver shared secret
+   shared_2 = ECDH(k_e, K_r)          // ephemeral-receiver shared secret
+   encryption_key = keccak256(shared_1 || shared_2)
+
+   // Encrypt:
+   ciphertext = AES-GCM(encryption_key, receipt_plaintext)
+   #+end_example
+
+   The encrypted receipt and the ephemeral public key ~G * k_e~ are emitted
+   as an Ethereum log event:
+
+   #+begin_example
+   event BuckReceipt(
+       address indexed from,
+       address indexed to,
+       uint256 amount,
+       bytes32 ephemeralPubKeyX,    // x-coordinate of G * k_e
+       bytes   encryptedReceipt     // AES-GCM ciphertext
+   );
+   #+end_example
+
+** Who Can Decrypt
+
+*** Sender (Alice)
+
+    Alice has ~k_s~ and knows the receipt plaintext (she created it), so she
+    can recompute ~k_e = keccak256(plaintext)~ and derive both shared secrets.
+
+    #+begin_example
+    shared_1 = ECDH(k_s, K_r)       // she has k_s and K_r (public)
+    shared_2 = ECDH(k_e, K_r)       // she can recompute k_e
+    encryption_key = keccak256(shared_1 || shared_2)
+    receipt = AES-GCM-decrypt(encryption_key, ciphertext)
+    #+end_example
+
+*** Receiver / Pool Operator (Bob)
+
+    Bob has ~k_r~ (his private key) and can read the ephemeral public key
+    from the log event.
+
+    #+begin_example
+    shared_1 = ECDH(k_r, K_s)       // he has k_r, K_s is public (sender)
+    shared_2 = ECDH(k_r, K_e)       // he has k_r, K_e from event log
+    encryption_key = keccak256(shared_1 || shared_2)
+    receipt = AES-GCM-decrypt(encryption_key, ciphertext)
+    #+end_example
+
+*** Court-Compelled Decryption (Subpoena of Pool Operator)
+
+    A court subpoenas Bob (the pool operator) to decrypt a specific
+    transaction.  The court provides:
+
+    - The transaction hash (identifies the log event with the ciphertext)
+    - The sender's public key ~K_s~ (from the event's ~from~ address)
+
+    Bob uses his private key ~k_r~ plus the information from the log:
+
+    #+begin_example
+    // From the event log:
+    K_s = sender's public key (looked up from from-address)
+    K_e = ephemeralPubKeyX from the event
+
+    // Bob computes:
+    shared_1 = ECDH(k_r, K_s)
+    shared_2 = ECDH(k_r, K_e)
+    encryption_key = keccak256(shared_1 || shared_2)
+    receipt = AES-GCM-decrypt(encryption_key, ciphertext)
+    #+end_example
+
+    Bob never reveals his private key to the court.  He reveals only the
+    decrypted receipt for the specific transaction requested.  He cannot
+    decrypt transactions where he is not a party (different pool, different
+    operator).
+
+*** Regulatory Escrow (Optional)
+
+    For regulatory compliance, a fourth key can be added: a regulatory
+    authority's public key ~K_reg~.  The encryption key becomes:
+
+    #+begin_example
+    shared_3 = ECDH(k_e, K_reg)     // ephemeral-regulator shared secret
+    encryption_key = keccak256(shared_1 || shared_2 || shared_3)
+    #+end_example
+
+    The regulator, given the ephemeral public key from the event log and
+    their own private key, can compute ~shared_3~.  But they still need
+    ~shared_1~ or ~shared_2~ to derive the full encryption key -- so the
+    regulator alone cannot decrypt.  They need cooperation from either
+    the sender or the receiver (or a court order compelling one of them).
+
+    This is a deliberate design choice: no single party can surveil all
+    transactions.  Decryption requires the regulator PLUS one transaction
+    participant.
+
+
+* Play-by-Play: BUCK/USDT Swap on Uniswap
+
+  Alice holds 1000 BUCK and wants to swap 500 BUCK for USDT.  Bob has deployed
+  a BUCK/USDT Uniswap V3 pool.
+
+** Prerequisites (One-Time Setup)
+
+   #+begin_example
+   Alice:
+     1. Completed KYC with trusted issuer (off-chain)
+     2. Trusted issuer signed claim (topic 1: KYC) on Alice's ONCHAINID
+     3. Registry agent called identityRegistry.registerIdentity(
+            alice_wallet, alice_onchainid, country_code)
+     4. identityRegistry.isVerified(alice_wallet) == true
+
+   Bob (pool deployer):
+     1. Completed KYC (off-chain)
+     2. Has KYC claim on his ONCHAINID
+     3. Is registered in IdentityRegistry
+     4. Created BUCK/USDT pool via Uniswap factory
+        -> pool deployed at address 0xPOOL
+     5. Registered pool in IdentityRegistry:
+        identityRegistry.registerIdentity(
+            0xPOOL, bob_onchainid, country_code)
+     6. identityRegistry.isVerified(0xPOOL) == true
+   #+end_example
+
+** The Swap Transaction
+
+*** Step 1: Alice Approves the Router
+
+    #+begin_example
+    // Alice approves Uniswap router to spend her BUCK
+    buck.approve(uniswapRouter, 500e18)
+    #+end_example
+
+    Identity check: ~isVerified(alice)~ and ~isVerified(uniswapRouter)~.
+    The router contract must also be registered (its deployer is Uniswap Labs
+    or a governance-approved entity).
+
+*** Step 2: Alice Calls the Router
+
+    #+begin_example
+    // Alice initiates the swap
+    uniswapRouter.exactInputSingle(
+        tokenIn:  BUCK,
+        tokenOut: USDT,
+        fee:      3000,        // 0.3% fee tier
+        recipient: alice,
+        amountIn: 500e18,
+        amountOutMinimum: 490e6,  // slippage protection
+        sqrtPriceLimitX96: 0
+    )
+    #+end_example
+
+*** Step 3: Router Calls BUCK.transferFrom
+
+    Inside the router, the swap triggers:
+
+    #+begin_example
+    buck.transferFrom(alice, 0xPOOL, 500e18)
+    #+end_example
+
+    The BUCK contract executes:
+
+    #+begin_example
+    function transferFrom(address from, address to, uint256 amount)
+        public override returns (bool)
+    {
+        // 1. Standard ERC-20 allowance check
+        _spendAllowance(from, msg.sender, amount);
+
+        // 2. ERC-3643 identity checks
+        require(identityRegistry.isVerified(from), "Sender not verified");
+        require(identityRegistry.isVerified(to),   "Receiver not verified");
+        require(compliance.canTransfer(from, to, amount), "Compliance");
+
+        // 3. Execute transfer
+        _transfer(from, to, amount);
+
+        // 4. Update compliance state
+        compliance.transferred(from, to, amount);
+
+        // 5. Emit encrypted receipt (computed off-chain, submitted as calldata
+        //    or emitted by a companion receipt contract)
+        return true;
+    }
+    #+end_example
+
+    At step 2, the contract checks:
+    - ~isVerified(alice)~ -- Alice has a valid KYC claim.  True.
+    - ~isVerified(0xPOOL)~ -- The pool is registered to Bob's identity.  True.
+    - ~canTransfer(alice, 0xPOOL, 500e18)~ -- No compliance violations.  True.
+
+*** Step 4: Receipt Generation (Off-Chain or Companion Contract)
+
+    The encrypted receipt is generated.  This can happen in two ways:
+
+    *Option A: Off-chain (Holochain)*
+
+    Alice's wallet software constructs the receipt, encrypts it with the
+    3-party ECDH scheme, and posts:
+    - The ciphertext to Holochain (her source chain + Bob's source chain)
+    - A receipt commitment hash to an Ethereum event log
+
+    *Option B: On-chain companion contract*
+
+    A ~BuckReceiptEmitter~ contract is called (by Alice or the router) to emit
+    the encrypted receipt as an Ethereum log event:
+
+    #+begin_example
+    receiptEmitter.emitReceipt(
+        from:             alice,
+        to:               0xPOOL,
+        amount:           500e18,
+        ephemeralPubKeyX: G_ke_x,     // x-coordinate of ephemeral public key
+        encryptedReceipt: ciphertext  // AES-GCM encrypted receipt
+    );
+
+    // Emits:
+    event BuckReceipt(
+        address indexed from,
+        address indexed to,
+        uint256 amount,
+        bytes32 ephemeralPubKeyX,
+        bytes   encryptedReceipt
+    );
+    #+end_example
+
+    The receipt plaintext contains:
+
+    #+begin_example
+    {
+      sender_onchainid:   "0xAliceONCHAINID"
+      sender_name:        "Alice Johnson"         // from private KYC claim
+      receiver_onchainid: "0xBobONCHAINID"        // pool deployer
+      receiver_name:      "Bob Smith, DeFi Ops Inc."
+      amount:             "500.000000000000000000 BUCK"
+      operation:          "Uniswap V3 swap BUCK -> USDT"
+      pool:               "0xPOOL"
+      block:              19400042
+      timestamp:          "2026-03-14T15:32:12Z"
+    }
+    #+end_example
+
+*** Step 5: Pool Executes the Swap
+
+    The Uniswap pool sends USDT to Alice.  Since USDT is not an Alberta Buck
+    token, the USDT transfer has no BUCK identity requirements (it follows
+    whatever rules USDT imposes, which is typically none).
+
+*** Step 6: Completed State
+
+    #+begin_example
+    On-chain (public):
+      - Transfer event: alice -> 0xPOOL, 500 BUCK
+      - Swap event: BUCK/USDT pool, 500 BUCK in, ~495 USDT out
+      - BuckReceipt event: encrypted ciphertext + ephemeral public key
+
+    What anyone can see:
+      - Two addresses transacted
+      - Both are verified BUCK participants
+      - 500 BUCK moved into the pool
+      - The pool is operated by a verified identity (but WHICH identity
+        requires either being a party to the transaction or a court order)
+
+    What Alice can see:
+      - Full decrypted receipt (she is a party)
+      - Bob's identity as pool operator
+
+    What Bob can see:
+      - Full decrypted receipt (he is a party)
+      - Alice's identity as the swapper
+
+    What a regulator can see (with escrow key + court cooperation):
+      - Full decrypted receipt (requires cooperation from Alice or Bob)
+
+    What the public cannot see:
+      - Alice's real name
+      - Bob's real name (as pool operator)
+      - The purpose of the transaction
+    #+end_example
+
+
+* Edge Cases and Design Considerations
+
+** Flash Loans and Atomic Transactions
+
+   A flash loan borrows and repays in a single transaction.  The borrower's
+   address must be verified, and the lending contract must be registered.
+   The receipt covers the full borrow-repay cycle as a single atomic event.
+
+** Multi-Hop Swaps
+
+   A swap routed through BUCK -> WETH -> USDT involves two BUCK transfers
+   (BUCK -> pool1, pool1 -> pool2 if intermediate).  Each BUCK transfer
+   generates its own encrypted receipt.  The router contract must also be
+   registered if it holds BUCK transiently.
+
+** Contract-to-Contract Transfers
+
+   When one DeFi contract sends BUCK to another (e.g., a yield aggregator
+   moving BUCK between pools), both contracts must be registered.  The
+   receipt identifies both contracts' deployers as the parties.  This creates
+   a clear chain of custody: every BUCK movement has an identified legal
+   operator at each end.
+
+** Wrapping and Bridging
+
+   If BUCK is wrapped (WBUCK) for use on another chain, the wrapping
+   contract must be registered.  The wrap/unwrap generates receipts.
+   On the destination chain, the bridged BUCK may operate under different
+   identity rules (or no identity rules if the destination chain doesn't
+   enforce ERC-3643).  This is a known limitation -- the Alberta Buck's
+   identity guarantees only hold on chains where the IdentityRegistry is
+   deployed.
+
+** Gas Costs of Receipt Emission
+
+   Emitting encrypted receipts as Ethereum log events costs gas.  The
+   ~encryptedReceipt~ bytes field is the dominant cost.  Estimates:
+
+   | Receipt size | Log cost (~gas)  | At 30 gwei, ETH=$3000 |
+   |--------------+------------------+------------------------|
+   | 256 bytes    | ~8,000 gas       | ~$0.72                 |
+   | 512 bytes    | ~16,000 gas      | ~$1.44                 |
+   | 1024 bytes   | ~32,000 gas      | ~$2.88                 |
+
+   For high-frequency DeFi operations, this may be prohibitive.  Options:
+   - Emit only a receipt commitment hash on-chain (~200 gas), store full
+     encrypted receipt on Holochain
+   - Batch receipts into a Merkle tree, commit root periodically
+   - Use an L2 for receipt emission (much cheaper gas)
+
+** Privacy of Pool Deployer Identity
+
+   The pool deployer's identity is linked to the pool contract in the
+   IdentityRegistry, but this mapping is on-chain and public.  Anyone can
+   look up ~identityRegistry.identity(0xPOOL)~ and find Bob's ONCHAINID.
+
+   If Bob's ONCHAINID has only private claims (KYC but not public identity),
+   then the public knows "0xPOOL is operated by a verified entity" but not
+   WHO that entity is.  Bob's identity is revealed only in encrypted receipts.
+
+   If Bob has a public identity claim (e.g., "DeFi Ops Inc., Alberta"),
+   then anyone can see who operates the pool.  This is likely the expected
+   case for commercial DeFi operators -- public identity builds trust and
+   attracts liquidity.
+
+
+* Summary: Identity Requirement by Risk Level
+
+  | Risk level | Operations                          | Identity mode   | Receipt           |
+  |------------+-------------------------------------+-----------------+-------------------|
+  | Highest    | BuckCredit creation/update,         | Public          | On-chain event +  |
+  |            | oracle claims, governance           |                 | public record     |
+  | High       | Pool deployment, compliance changes | Public          | On-chain event    |
+  | Medium     | BUCK transfer, DeFi swap,           | Anonymous-valid | Encrypted 3-party |
+  |            | add/remove liquidity                |                 | ECDH receipt      |
+  | Low        | BUCK burn, credit activation        | Anonymous-valid | On-chain event    |
+  | None       | BuckK compute, read oracle,         | Permissionless  | On-chain event    |
+  |            | view balances                       |                 |                   |
