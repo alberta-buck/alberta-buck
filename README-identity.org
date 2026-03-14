@@ -154,12 +154,273 @@
   (because your key is one of the encryption parties).
 
 
+* The Receipt Problem: Who Constructs What, and When
+
+  The fundamental constraint: the BUCK ERC-20 contract is *trusted code* -- when
+  it emits a receipt, the fields (from, to, amount, ONBCHAINIDs) are reliable
+  because the contract itself is executing the transfer.  But the contract needs
+  counterparty identity information to include in the receipt, and this
+  information may not be naturally available at the moment of transfer.
+
+  There are three sub-problems:
+
+  1. *The ECDH problem*: Solidity cannot practically perform ECDH on-chain
+     (ecMul is expensive, ~6000 gas per scalar multiplication, and the full
+     scheme requires multiple).  The contract constructs the receipt *plaintext*;
+     the wallet layer encrypts it off-chain.
+
+  2. *The counterparty discovery problem*: in a ~transferFrom~ call triggered by
+     a DeFi pool, the contract knows the from/to addresses but needs the
+     counterparty's ECDH public key to include in the receipt event so the
+     wallet can later encrypt.  For public-identity accounts this is trivially
+     readable from the ONCHAINID.  For private-identity accounts it is not.
+
+  3. *The timing problem*: in DeFi, ~transferFrom~ is called by a router
+     contract -- there is no standard way to pass additional receipt data
+     through the AMM's call stack.  The identity exchange must happen *before*
+     the transfer, at a point where the account holder is directly interacting
+     with the BUCK contract.
+
+** Two Account Visibility Tiers
+
+   The solution splits accounts into two tiers based on how their ECDH public
+   key is published:
+
+*** Public-Key Accounts (Default for Most Participants)
+
+    The account's ECDH public key ~K~ is stored on their ONCHAINID as a
+    public claim (ERC-734 key type).  Anyone can look it up:
+
+    #+begin_example
+    K = identity.getKey(ECDH_KEY_PURPOSE)  // readable by anyone
+    #+end_example
+
+    For these accounts, the BUCK contract can include the public key in any
+    receipt event, and any counterparty's wallet can compute the ECDH shared
+    secret to encrypt/decrypt the receipt.
+
+    This is the expected default: your ECDH *public key* is public (it
+    reveals nothing about your identity), and your *identity data* is
+    encrypted behind it.  Anyone can encrypt *to* you, but only you can
+    decrypt.
+
+*** Private-Key Accounts (Opt-In for High-Privacy Participants)
+
+    The account does NOT publish an ECDH public key on their ONCHAINID.
+    The ~isVerified~ check still passes (the KYC claim exists), but there
+    is no public key for counterparties to encrypt to.
+
+    For these accounts, identity exchange must happen explicitly before any
+    transfer can produce a proper receipt.  The mechanism: ~approve~.
+
+** The ~approve~ Function as Identity Handshake
+
+   The ERC-20 ~approve~ function is already the moment when an account holder
+   explicitly designates a counterparty.  This is the natural point for
+   identity exchange:
+
+   #+begin_example
+   // Standard ERC-20:
+   approve(address spender, uint256 amount)
+
+   // Extended for BUCK:
+   approve(address spender, uint256 amount)  // + identity exchange side-effect
+   #+end_example
+
+   When Alice calls ~buck.approve(spender, amount)~, the BUCK contract:
+
+   1. Sets the standard ERC-20 allowance
+   2. Looks up Alice's ONCHAINID from the IdentityRegistry
+   3. Looks up the spender's ONCHAINID from the IdentityRegistry
+   4. Reads both parties' ECDH public keys (from ONCHAINID or from stored
+      per-counterparty fragments)
+   5. Stores a *counterparty identity record* for this pair
+   6. Emits an ~IdentityExchange~ event
+
+   #+begin_example
+   struct CounterpartyRecord {
+       address identity_a;      // ONCHAINID address of party A
+       address identity_b;      // ONCHAINID address of party B
+       bytes32 pubkey_a;        // ECDH public key (x-coordinate) of A
+       bytes32 pubkey_b;        // ECDH public key (x-coordinate) of B
+   }
+
+   // Stored per (owner, spender) pair alongside the allowance
+   mapping(address => mapping(address => CounterpartyRecord))
+       public counterpartyRecords;
+   #+end_example
+
+   For *private-key accounts*, the ~approve~ call includes an additional
+   parameter: the caller's ECDH public key, encrypted specifically for this
+   counterparty.  Since the caller is directly invoking the BUCK contract,
+   they can provide this calldata:
+
+   #+begin_example
+   function approve(
+       address spender,
+       uint256 amount,
+       bytes32 callerPubKey     // caller's ECDH public key for this pair
+   ) public returns (bool) {
+       _approve(msg.sender, spender, amount);
+
+       // Look up counterparty ONCHAINID
+       IIdentity spenderIdentity = identityRegistry.identity(spender);
+
+       // Read spender's public key (from ONCHAINID or from their prior
+       // approve-to-us, if they're also a private-key account)
+       bytes32 spenderPubKey = _resolvePublicKey(spender);
+
+       // Store the counterparty record
+       counterpartyRecords[msg.sender][spender] = CounterpartyRecord({
+           identity_a: address(identityRegistry.identity(msg.sender)),
+           identity_b: address(spenderIdentity),
+           pubkey_a:   callerPubKey,
+           pubkey_b:   spenderPubKey
+       });
+
+       emit IdentityExchange(msg.sender, spender, callerPubKey, spenderPubKey);
+       return true;
+   }
+   #+end_example
+
+*** Private-Key Accounts Receiving Incoming Transfers
+
+    For an account with a private ECDH key that wants to *receive* transfers
+    from a specific counterparty, the flow uses ~approve~ with amount 0:
+
+    #+begin_example
+    // Alice (private-key) wants to receive BUCK from Bob:
+    buck.approve(bob, 0, alice_ecdh_pubkey)
+    #+end_example
+
+    This does NOT authorize Bob to spend Alice's tokens (amount = 0).  It
+    establishes an identity handshake: Alice's public key is stored in
+    ~counterpartyRecords[alice][bob]~, allowing Bob's wallet to encrypt
+    receipts for Alice when sending her BUCK.
+
+    When Bob later calls ~buck.transfer(alice, amount)~, the BUCK contract
+    looks up the counterparty record and includes both public keys in the
+    receipt event.
+
+** Receipt Construction: What the Contract Emits
+
+   The BUCK contract emits a *receipt event* containing the trusted plaintext
+   fields.  The wallet layer then encrypts this into the final receipt.
+
+   #+begin_example
+   event BuckTransferReceipt(
+       address indexed from,
+       address indexed to,
+       uint256 amount,
+       address fromIdentity,       // ONCHAINID of sender
+       address toIdentity,         // ONCHAINID of receiver
+       bytes32 fromPubKey,         // sender's ECDH public key (x-coord)
+       bytes32 toPubKey            // receiver's ECDH public key (x-coord)
+   );
+   #+end_example
+
+   This event is emitted by the BUCK contract during every ~transfer~ and
+   ~transferFrom~.  It is *trusted* because the contract itself determined
+   all fields:
+
+   - ~from~ / ~to~: from the transfer itself (cannot be forged)
+   - ~fromIdentity~ / ~toIdentity~: looked up from IdentityRegistry
+   - ~fromPubKey~ / ~toPubKey~: looked up from ONBCHAINIDs (public-key
+     accounts) or from stored counterpartyRecords (private-key accounts)
+
+   The wallet layer then:
+
+   1. Reads this event from the transaction receipt
+   2. Augments it with off-chain identity data (names, credentials -- from
+      Holochain/ONCHAINID private claims)
+   3. Encrypts the full receipt using the 3-party ECDH scheme
+   4. Stores the encrypted receipt on Holochain (both parties' source chains)
+   5. Optionally emits a receipt commitment hash via a companion contract
+
+** Where Public Keys Come From: Resolution Order
+
+   The contract resolves an account's ECDH public key in this order:
+
+   #+begin_example
+   function _resolvePublicKey(address account) internal view returns (bytes32) {
+       // 1. Check stored counterparty record (private-key account that
+       //    previously called approve with their pubkey)
+       // ... checked per-pair in the calling context
+
+       // 2. Read from ONCHAINID (public-key account)
+       IIdentity id = identityRegistry.identity(account);
+       if (address(id) != address(0)) {
+           bytes32 pubKey = id.getKey(ECDH_KEY_PURPOSE);
+           if (pubKey != bytes32(0)) return pubKey;
+       }
+
+       // 3. No public key available -- transfer allowed but no encrypted
+       //    receipt can be constructed.  Event emits zero pubkey; wallet
+       //    stores unencrypted receipt locally only.
+       return bytes32(0);
+   }
+   #+end_example
+
+** The Complete ~transfer~ and ~transferFrom~ Flow
+
+   #+begin_example
+   function transfer(address to, uint256 amount) public override returns (bool) {
+       require(identityRegistry.isVerified(msg.sender), "Sender not verified");
+       require(identityRegistry.isVerified(to),         "Receiver not verified");
+       require(compliance.canTransfer(msg.sender, to, amount), "Compliance");
+
+       _transfer(msg.sender, to, amount);
+       compliance.transferred(msg.sender, to, amount);
+
+       // Emit trusted receipt event
+       _emitReceipt(msg.sender, to, amount);
+
+       return true;
+   }
+
+   function transferFrom(address from, address to, uint256 amount)
+       public override returns (bool)
+   {
+       _spendAllowance(from, msg.sender, amount);
+       require(identityRegistry.isVerified(from), "Sender not verified");
+       require(identityRegistry.isVerified(to),   "Receiver not verified");
+       require(compliance.canTransfer(from, to, amount), "Compliance");
+
+       _transfer(from, to, amount);
+       compliance.transferred(from, to, amount);
+
+       // Emit trusted receipt event -- uses counterparty record from approve
+       _emitReceipt(from, to, amount);
+
+       return true;
+   }
+
+   function _emitReceipt(address from, address to, uint256 amount) internal {
+       // Resolve public keys: from counterparty records or ONBCHAINIDs
+       bytes32 fromPubKey = counterpartyRecords[from][to].pubkey_a;
+       if (fromPubKey == bytes32(0)) fromPubKey = _resolvePublicKey(from);
+       bytes32 toPubKey = counterpartyRecords[from][to].pubkey_b;
+       if (toPubKey == bytes32(0)) toPubKey = _resolvePublicKey(to);
+
+       emit BuckTransferReceipt(
+           from, to, amount,
+           address(identityRegistry.identity(from)),
+           address(identityRegistry.identity(to)),
+           fromPubKey, toPubKey
+       );
+   }
+   #+end_example
+
+   Key point: the ~transferFrom~ path uses the counterparty record that was
+   established during the ~approve~ call.  The DeFi router never needs to
+   pass receipt data -- it was already stored.
+
+
 * Cryptographic Receipts: 3-Party ECDH
 
-  Every BUCK transfer produces an encrypted receipt stored as an Ethereum log
-  event.  The receipt contains the identities of both parties and the transaction
-  details.  Only the participants (and optionally a regulatory escrow) can
-  decrypt it.
+  The BUCK contract emits trusted plaintext receipt events (previous section).
+  The wallet layer encrypts these into 3-party ECDH receipts that only the
+  participants can decrypt.
 
 ** The Three Keys
 
@@ -168,50 +429,53 @@
    | Key               | Held by        | Purpose                                        |
    |-------------------+----------------+------------------------------------------------|
    | ~k_s~ (sender)    | Alice          | Sender's persistent signing/encryption key     |
-   | ~k_e~ (ephemeral) | Deterministic  | Derived from hash of receipt plaintext;        |
-   |                   |                | reproducible by anyone who knows the plaintext |
+   | ~k_e~ (ephemeral) | Deterministic  | Derived from hash of trusted receipt event;    |
+   |                   |                | reproducible by anyone who knows the event     |
    | ~K_r~ (receiver)  | Bob (deployer) | Pool operator's persistent public key          |
 
-   The ephemeral key ~k_e~ is derived deterministically from the receipt content:
+   The ephemeral key ~k_e~ is derived deterministically from the trusted
+   receipt event (which is on-chain and immutable):
 
    #+begin_example
-   receipt_plaintext = abi.encode(
-       sender_onchainid,
-       receiver_onchainid,
-       amount,
-       block.number,
-       block.timestamp,
-       purpose_hash
+   // The receipt event fields are all on-chain, all trusted:
+   receipt_data = abi.encode(
+       from, to, amount,
+       fromIdentity, toIdentity,
+       fromPubKey, toPubKey,
+       block.number
    )
-   k_e = keccak256(receipt_plaintext)    // deterministic "private key"
-   // This is NOT a secure private key in isolation -- it becomes secure
-   // only as part of the 3-party ECDH construction below.
+   k_e = keccak256(receipt_data)    // deterministic "private key"
    #+end_example
 
 ** Encryption Scheme
 
-   The shared encryption key is derived via ECDH between all three key pairs:
+   The wallet computes the encryption key via ECDH:
 
    #+begin_example
-   // Sender computes (knows k_s, k_e, K_r):
+   // Alice's wallet computes (knows k_s, k_e, K_r):
    shared_1 = ECDH(k_s, K_r)          // sender-receiver shared secret
    shared_2 = ECDH(k_e, K_r)          // ephemeral-receiver shared secret
    encryption_key = keccak256(shared_1 || shared_2)
 
+   // Augment the trusted receipt with off-chain identity data:
+   full_receipt = {
+       ...receipt_data,                 // from the on-chain event (trusted)
+       sender_name: "Alice Johnson",    // from ONCHAINID private claim
+       receiver_name: "Bob Smith",      // from ONCHAINID claim (via Holochain)
+       purpose: "Uniswap V3 BUCK->USDT swap"
+   }
+
    // Encrypt:
-   ciphertext = AES-GCM(encryption_key, receipt_plaintext)
+   ciphertext = AES-GCM(encryption_key, encode(full_receipt))
    #+end_example
 
-   The encrypted receipt and the ephemeral public key ~G * k_e~ are emitted
-   as an Ethereum log event:
+   The encrypted receipt is stored on Holochain (both parties' source chains).
+   A commitment hash can optionally be emitted on-chain:
 
    #+begin_example
-   event BuckReceipt(
-       address indexed from,
-       address indexed to,
-       uint256 amount,
-       bytes32 ephemeralPubKeyX,    // x-coordinate of G * k_e
-       bytes   encryptedReceipt     // AES-GCM ciphertext
+   event ReceiptCommitment(
+       bytes32 indexed transferHash,    // hash of the BuckTransferReceipt event
+       bytes32 receiptHash              // hash of the encrypted receipt
    );
    #+end_example
 
@@ -219,74 +483,57 @@
 
 *** Sender (Alice)
 
-    Alice has ~k_s~ and knows the receipt plaintext (she created it), so she
-    can recompute ~k_e = keccak256(plaintext)~ and derive both shared secrets.
+    Alice has ~k_s~ and can recompute ~k_e~ from the on-chain receipt event:
 
     #+begin_example
-    shared_1 = ECDH(k_s, K_r)       // she has k_s and K_r (public)
-    shared_2 = ECDH(k_e, K_r)       // she can recompute k_e
+    k_e = keccak256(receipt_event_data)   // deterministic from on-chain data
+    shared_1 = ECDH(k_s, K_r)            // she has k_s, K_r from event
+    shared_2 = ECDH(k_e, K_r)            // she has k_e, K_r from event
     encryption_key = keccak256(shared_1 || shared_2)
-    receipt = AES-GCM-decrypt(encryption_key, ciphertext)
     #+end_example
 
 *** Receiver / Pool Operator (Bob)
 
-    Bob has ~k_r~ (his private key) and can read the ephemeral public key
-    from the log event.
+    Bob has ~k_r~ (private key) and reads the sender's public key and the
+    ephemeral public key from the on-chain event:
 
     #+begin_example
-    shared_1 = ECDH(k_r, K_s)       // he has k_r, K_s is public (sender)
-    shared_2 = ECDH(k_r, K_e)       // he has k_r, K_e from event log
+    K_e = G * k_e                         // computable from event data
+    shared_1 = ECDH(k_r, K_s)            // K_s = fromPubKey from event
+    shared_2 = ECDH(k_r, K_e)            // K_e from event data
     encryption_key = keccak256(shared_1 || shared_2)
-    receipt = AES-GCM-decrypt(encryption_key, ciphertext)
     #+end_example
 
 *** Court-Compelled Decryption (Subpoena of Pool Operator)
 
-    A court subpoenas Bob (the pool operator) to decrypt a specific
-    transaction.  The court provides:
-
-    - The transaction hash (identifies the log event with the ciphertext)
-    - The sender's public key ~K_s~ (from the event's ~from~ address)
-
-    Bob uses his private key ~k_r~ plus the information from the log:
+    A court subpoenas Bob to decrypt a specific transaction receipt:
 
     #+begin_example
-    // From the event log:
-    K_s = sender's public key (looked up from from-address)
-    K_e = ephemeralPubKeyX from the event
-
-    // Bob computes:
-    shared_1 = ECDH(k_r, K_s)
-    shared_2 = ECDH(k_r, K_e)
+    // Court provides: the transaction hash
+    // Bob looks up: the BuckTransferReceipt event from that transaction
+    // Bob computes (using his private key k_r):
+    shared_1 = ECDH(k_r, K_s)            // K_s from event
+    shared_2 = ECDH(k_r, K_e)            // K_e from event
     encryption_key = keccak256(shared_1 || shared_2)
-    receipt = AES-GCM-decrypt(encryption_key, ciphertext)
+    receipt = AES-GCM-decrypt(encryption_key, ciphertext_from_holochain)
     #+end_example
 
-    Bob never reveals his private key to the court.  He reveals only the
-    decrypted receipt for the specific transaction requested.  He cannot
-    decrypt transactions where he is not a party (different pool, different
-    operator).
+    Bob reveals only the decrypted receipt.  He never reveals ~k_r~.  He
+    cannot decrypt receipts where he is not a party.
 
 *** Regulatory Escrow (Optional)
 
-    For regulatory compliance, a fourth key can be added: a regulatory
-    authority's public key ~K_reg~.  The encryption key becomes:
+    A regulatory authority's public key ~K_reg~ adds a third shared secret:
 
     #+begin_example
-    shared_3 = ECDH(k_e, K_reg)     // ephemeral-regulator shared secret
+    shared_3 = ECDH(k_e, K_reg)
     encryption_key = keccak256(shared_1 || shared_2 || shared_3)
     #+end_example
 
-    The regulator, given the ephemeral public key from the event log and
-    their own private key, can compute ~shared_3~.  But they still need
-    ~shared_1~ or ~shared_2~ to derive the full encryption key -- so the
-    regulator alone cannot decrypt.  They need cooperation from either
-    the sender or the receiver (or a court order compelling one of them).
-
-    This is a deliberate design choice: no single party can surveil all
-    transactions.  Decryption requires the regulator PLUS one transaction
-    participant.
+    The regulator can compute ~shared_3~ (they have ~k_reg~, and ~K_e~ is
+    deterministic from the on-chain event).  But they still need ~shared_1~
+    or ~shared_2~ -- requiring cooperation from a transaction participant.
+    No unilateral surveillance.
 
 
 * Play-by-Play: BUCK/USDT Swap on Uniswap
@@ -318,21 +565,49 @@
 
 ** The Swap Transaction
 
-*** Step 1: Alice Approves the Router
+*** Step 1: Alice Approves the Router (Identity Handshake)
+
+    Alice calls ~approve~ on the BUCK contract.  This serves double duty:
+    standard ERC-20 allowance AND identity exchange.
 
     #+begin_example
-    // Alice approves Uniswap router to spend her BUCK
-    buck.approve(uniswapRouter, 500e18)
+    // Alice approves Uniswap router to spend her BUCK.
+    // Her wallet includes her ECDH public key (if private-key account).
+    buck.approve(uniswapRouter, 500e18, alice_ecdh_pubkey)
     #+end_example
 
-    Identity check: ~isVerified(alice)~ and ~isVerified(uniswapRouter)~.
-    The router contract must also be registered (its deployer is Uniswap Labs
-    or a governance-approved entity).
+    The BUCK contract:
+
+    #+begin_example
+    1. Sets allowance[alice][uniswapRouter] = 500e18
+    2. Looks up alice's ONCHAINID from IdentityRegistry
+    3. Looks up uniswapRouter's ONCHAINID from IdentityRegistry
+       (router is registered to Uniswap Labs / governance entity)
+    4. Reads uniswapRouter's ECDH public key from its ONCHAINID
+    5. Stores counterpartyRecords[alice][uniswapRouter] = {
+           identity_a: alice_onchainid,
+           identity_b: router_onchainid,
+           pubkey_a:   alice_ecdh_pubkey,
+           pubkey_b:   router_ecdh_pubkey
+       }
+    6. Emits IdentityExchange(alice, uniswapRouter, pubkeys...)
+    #+end_example
+
+    *This is the critical moment.*  Alice is directly calling the BUCK
+    contract, so she can provide her public key.  By the time
+    ~transferFrom~ is called later (by the router), the identity data is
+    already stored.
+
+    Note: the router routes to the pool, so the actual ~transferFrom~
+    destination is ~0xPOOL~, not the router.  Alice should also approve
+    the pool contract, or the BUCK contract should fall back to resolving
+    the pool's public key from its ONCHAINID (public-key accounts don't
+    need a prior approve for identity resolution).
 
 *** Step 2: Alice Calls the Router
 
     #+begin_example
-    // Alice initiates the swap
+    // Alice initiates the swap (standard Uniswap call -- no BUCK-specific data)
     uniswapRouter.exactInputSingle(
         tokenIn:  BUCK,
         tokenOut: USDT,
@@ -344,7 +619,10 @@
     )
     #+end_example
 
-*** Step 3: Router Calls BUCK.transferFrom
+    No identity data passes through this call.  The router is a standard
+    Uniswap contract that knows nothing about BUCK identity.
+
+*** Step 3: Router Calls BUCK.transferFrom (Trusted Receipt Emission)
 
     Inside the router, the swap triggers:
 
@@ -372,66 +650,73 @@
         // 4. Update compliance state
         compliance.transferred(from, to, amount);
 
-        // 5. Emit encrypted receipt (computed off-chain, submitted as calldata
-        //    or emitted by a companion receipt contract)
+        // 5. Emit TRUSTED receipt event (all fields from contract state)
+        _emitReceipt(from, to, amount);
+
         return true;
     }
     #+end_example
 
-    At step 2, the contract checks:
-    - ~isVerified(alice)~ -- Alice has a valid KYC claim.  True.
-    - ~isVerified(0xPOOL)~ -- The pool is registered to Bob's identity.  True.
-    - ~canTransfer(alice, 0xPOOL, 500e18)~ -- No compliance violations.  True.
-
-*** Step 4: Receipt Generation (Off-Chain or Companion Contract)
-
-    The encrypted receipt is generated.  This can happen in two ways:
-
-    *Option A: Off-chain (Holochain)*
-
-    Alice's wallet software constructs the receipt, encrypts it with the
-    3-party ECDH scheme, and posts:
-    - The ciphertext to Holochain (her source chain + Bob's source chain)
-    - A receipt commitment hash to an Ethereum event log
-
-    *Option B: On-chain companion contract*
-
-    A ~BuckReceiptEmitter~ contract is called (by Alice or the router) to emit
-    the encrypted receipt as an Ethereum log event:
+    The ~_emitReceipt~ function resolves public keys from the stored
+    counterparty records (set during ~approve~) or from the ONBCHAINIDs:
 
     #+begin_example
-    receiptEmitter.emitReceipt(
-        from:             alice,
-        to:               0xPOOL,
-        amount:           500e18,
-        ephemeralPubKeyX: G_ke_x,     // x-coordinate of ephemeral public key
-        encryptedReceipt: ciphertext  // AES-GCM encrypted receipt
-    );
+    _emitReceipt(alice, 0xPOOL, 500e18) emits:
 
-    // Emits:
-    event BuckReceipt(
-        address indexed from,
-        address indexed to,
-        uint256 amount,
-        bytes32 ephemeralPubKeyX,
-        bytes   encryptedReceipt
-    );
+    BuckTransferReceipt(
+        from:         alice,
+        to:           0xPOOL,
+        amount:       500e18,
+        fromIdentity: alice_onchainid,      // from IdentityRegistry
+        toIdentity:   bob_onchainid,        // pool registered to Bob
+        fromPubKey:   alice_ecdh_pubkey,     // from counterpartyRecord (approve)
+        toPubKey:     bob_ecdh_pubkey        // from Bob's ONCHAINID (public)
+    )
     #+end_example
 
-    The receipt plaintext contains:
+    *This event is trusted.*  Every field comes from the BUCK contract's own
+    state: the IdentityRegistry, the counterpartyRecords, the transfer
+    parameters.  No external caller provided these values for this specific
+    transfer -- they were established during the ~approve~ handshake or read
+    from on-chain identity contracts.
+
+*** Step 4: Wallet Encrypts the Receipt (Off-Chain)
+
+    Alice's wallet software observes the ~BuckTransferReceipt~ event in the
+    transaction receipt and constructs the encrypted receipt:
 
     #+begin_example
-    {
-      sender_onchainid:   "0xAliceONCHAINID"
-      sender_name:        "Alice Johnson"         // from private KYC claim
-      receiver_onchainid: "0xBobONCHAINID"        // pool deployer
-      receiver_name:      "Bob Smith, DeFi Ops Inc."
-      amount:             "500.000000000000000000 BUCK"
-      operation:          "Uniswap V3 swap BUCK -> USDT"
-      pool:               "0xPOOL"
-      block:              19400042
-      timestamp:          "2026-03-14T15:32:12Z"
+    // 1. Read trusted fields from the on-chain event
+    receipt_data = event.{from, to, amount, fromIdentity, toIdentity,
+                          fromPubKey, toPubKey, block.number}
+
+    // 2. Derive ephemeral key deterministically from the event
+    k_e = keccak256(abi.encode(receipt_data))
+
+    // 3. Compute ECDH shared secrets
+    shared_1 = ECDH(alice_private_key, toPubKey)
+    shared_2 = ECDH(k_e, toPubKey)
+    encryption_key = keccak256(shared_1 || shared_2)
+
+    // 4. Augment with off-chain identity data
+    full_receipt = {
+        ...receipt_data,
+        sender_name:   "Alice Johnson",           // from private KYC claim
+        receiver_name: "Bob Smith, DeFi Ops Inc.", // from ONCHAINID (Holochain)
+        operation:     "Uniswap V3 swap BUCK -> USDT",
+        pool:          "0xPOOL",
+        timestamp:     "2026-03-14T15:32:12Z"
     }
+
+    // 5. Encrypt
+    ciphertext = AES-GCM(encryption_key, encode(full_receipt))
+
+    // 6. Store on Holochain (both parties' source chains)
+    holochain.store(alice_chain, ciphertext)
+    holochain.store(bob_chain,   ciphertext)
+
+    // 7. Optionally emit commitment hash on-chain
+    receiptCommitter.commit(keccak256(event), keccak256(ciphertext))
     #+end_example
 
 *** Step 5: Pool Executes the Swap
@@ -443,33 +728,39 @@
 *** Step 6: Completed State
 
     #+begin_example
-    On-chain (public):
-      - Transfer event: alice -> 0xPOOL, 500 BUCK
+    On-chain (public, trusted):
+      - ERC-20 Transfer event: alice -> 0xPOOL, 500 BUCK
+      - BuckTransferReceipt event: from/to addresses, ONCHAINID addresses,
+        ECDH public keys -- all set by the BUCK contract itself
       - Swap event: BUCK/USDT pool, 500 BUCK in, ~495 USDT out
-      - BuckReceipt event: encrypted ciphertext + ephemeral public key
+      - (optional) ReceiptCommitment: hash of encrypted receipt
+
+    Off-chain (Holochain, encrypted):
+      - Full encrypted receipt on Alice's and Bob's source chains
+      - Contains real names, transaction purpose, full details
+      - Decryptable only by Alice, Bob, or regulator+participant
 
     What anyone can see:
-      - Two addresses transacted
-      - Both are verified BUCK participants
-      - 500 BUCK moved into the pool
-      - The pool is operated by a verified identity (but WHICH identity
-        requires either being a party to the transaction or a court order)
+      - Two verified addresses transacted 500 BUCK
+      - The pool is operated by a verified identity
+      - The public keys used for receipt encryption (but not the receipt)
 
     What Alice can see:
-      - Full decrypted receipt (she is a party)
+      - Full decrypted receipt (she has k_s)
       - Bob's identity as pool operator
 
     What Bob can see:
-      - Full decrypted receipt (he is a party)
+      - Full decrypted receipt (he has k_r)
       - Alice's identity as the swapper
 
-    What a regulator can see (with escrow key + court cooperation):
+    What a regulator can see (with escrow key + participant cooperation):
       - Full decrypted receipt (requires cooperation from Alice or Bob)
 
-    What the public cannot see:
+    What the public CANNOT see:
       - Alice's real name
       - Bob's real name (as pool operator)
       - The purpose of the transaction
+      - The off-chain identity data in the encrypted receipt
     #+end_example
 
 
