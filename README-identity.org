@@ -154,214 +154,239 @@
   (because your key is one of the encryption parties).
 
 
-* The Receipt Problem: Who Constructs What, and When
+* The Receipt Problem: What Can Be Public, What Cannot
 
-  The fundamental constraint: the BUCK ERC-20 contract is *trusted code* -- when
-  it emits a receipt, the fields (from, to, amount, ONBCHAINIDs) are reliable
-  because the contract itself is executing the transfer.  But the contract needs
-  counterparty identity information to include in the receipt, and this
-  information may not be naturally available at the moment of transfer.
+  *Events are public.*  Every ~emit~ on Ethereum is readable by every node.
+  The previous design emitted ONCHAINID addresses and ECDH public keys in
+  receipt events -- this would create a permanent, public, linkable identity
+  graph of every BUCK transfer.  That defeats the entire privacy model.
 
-  There are three sub-problems:
+  The core constraints:
 
-  1. *The ECDH problem*: Solidity cannot practically perform ECDH on-chain
-     (ecMul is expensive, ~6000 gas per scalar multiplication, and the full
-     scheme requires multiple).  The contract constructs the receipt *plaintext*;
-     the wallet layer encrypts it off-chain.
+  1. *The EVM is transparent*: every contract execution, every storage slot,
+     every emitted event is publicly reconstructible.  The BUCK contract
+     cannot hold decrypted identity data, even transiently.
 
-  2. *The counterparty discovery problem*: in a ~transferFrom~ call triggered by
-     a DeFi pool, the contract knows the from/to addresses but needs the
-     counterparty's ECDH public key to include in the receipt event so the
-     wallet can later encrypt.  For public-identity accounts this is trivially
-     readable from the ONCHAINID.  For private-identity accounts it is not.
+  2. *The contract is trusted*: the BUCK contract enforces ~isVerified~ and
+     can verify proofs.  What it cannot do is learn secrets.
 
-  3. *The timing problem*: in DeFi, ~transferFrom~ is called by a router
-     contract -- there is no standard way to pass additional receipt data
-     through the AMM's call stack.  The identity exchange must happen *before*
-     the transfer, at a point where the account holder is directly interacting
-     with the BUCK contract.
+  3. *The identity must be re-encrypted*: when Alice wants to share her
+     identity with Bob (for a receipt), she must produce a ciphertext that
+     Bob can decrypt but nobody else can -- and the BUCK contract must be
+     confident this ciphertext contains Alice's *real* identity, not garbage.
 
-** Two Account Visibility Tiers
+  4. *DeFi timing*: in a ~transferFrom~ call, the router cannot pass receipt
+     data.  Identity exchange must happen earlier (at ~approve~ time).
 
-   The solution splits accounts into two tiers based on how their ECDH public
-   key is published:
+** The Fundamental Challenge: Proving Re-Encryption Correctness
 
-*** Public-Key Accounts (Default for Most Participants)
+   Alice's identity ~I~ is stored encrypted on Holochain, committed on-chain
+   as ~C = hash(I, salt)~ (a Pedersen commitment or similar).  When she wants
+   to share her identity with Bob for a transfer receipt, she must:
 
-    The account's ECDH public key ~K~ is stored on their ONCHAINID as a
-    public claim (ERC-734 key type).  Anyone can look it up:
+   1. Decrypt ~I~ (she has her private key)
+   2. Re-encrypt ~I~ under Bob's public key: ~E_bob = Encrypt(I, ECDH(k_alice, K_bob))~
+   3. Prove to the BUCK contract that ~E_bob~ encrypts the *same* ~I~ that
+      ~C~ commits to -- *without revealing ~I~ to the contract*
+
+   This is a *zero-knowledge proof of correct re-encryption*.
+
+*** What the ZK Proof States
 
     #+begin_example
-    K = identity.getKey(ECDH_KEY_PURPOSE)  // readable by anyone
+    Public inputs  (visible to contract and everyone):
+        C          -- Alice's identity commitment (on-chain, from ONCHAINID)
+        E_bob      -- Alice's identity re-encrypted for Bob
+        K_bob      -- Bob's public key (from his ONCHAINID or from approve)
+
+    Private inputs (known only to Alice):
+        I          -- Alice's plaintext identity
+        salt       -- commitment randomness
+        k_alice    -- Alice's private key
+
+    Proof statement:
+        C == Commit(I, salt)
+        AND  E_bob == Encrypt(I, ECDH(k_alice, K_bob))
     #+end_example
 
-    For these accounts, the BUCK contract can include the public key in any
-    receipt event, and any counterparty's wallet can compute the ECDH shared
-    secret to encrypt/decrypt the receipt.
+    The contract verifies the ZK proof (~200K-300K gas for Groth16 SNARK
+    verification).  If valid, the contract knows ~E_bob~ is a correct
+    re-encryption of the committed identity.  The contract never learns ~I~.
 
-    This is the expected default: your ECDH *public key* is public (it
-    reveals nothing about your identity), and your *identity data* is
-    encrypted behind it.  Anyone can encrypt *to* you, but only you can
-    decrypt.
+*** Proxy Re-Encryption (PRE): An Alternative
 
-*** Private-Key Accounts (Opt-In for High-Privacy Participants)
+    NuCypher's Umbral scheme[fn:5] provides threshold proxy re-encryption
+    where a proxy transforms a ciphertext from Alice's key to Bob's key
+    without decrypting.  Umbral includes non-interactive zero-knowledge
+    (NIZK) proofs of re-encryption correctness.
 
-    The account does NOT publish an ECDH public key on their ONCHAINID.
-    The ~isVerified~ check still passes (the KYC claim exists), but there
-    is no public key for counterparties to encrypt to.
+    In the Alberta Buck context:
 
-    For these accounts, identity exchange must happen explicitly before any
-    transfer can produce a proper receipt.  The mechanism: ~approve~.
+    #+begin_example
+    1. Alice's identity is encrypted under her key: E_alice = Encrypt(I, K_alice)
+    2. Alice computes a re-encryption key: rk_{A->B} = ReKeyGen(k_alice, K_bob)
+    3. The Holochain hApp (acting as proxy) applies:
+       E_bob = ReEncrypt(rk_{A->B}, E_alice)
+    4. The hApp produces a NIZK proof that re-encryption was correct
+    5. Alice submits (E_bob, proof) to the BUCK contract
+    6. Contract verifies the proof against E_alice (committed on-chain)
+    #+end_example
+
+    The proxy (Holochain hApp) never sees ~I~.  It transforms one ciphertext
+    into another without decrypting.  The NIZK proof lets the contract verify
+    correctness.
+
+*** Why Holochain for Proof Generation
+
+    ZK proof generation is computationally expensive (seconds to minutes for
+    complex circuits).  Holochain provides:
+
+    - *Trusted code*: the hApp DNA is identified by hash; anyone can verify
+      the exact code that generated the proof.  Unlike a random off-chain
+      service, the hApp code is deterministic and auditable.
+    - *No gas cost*: proof generation runs on the participant's Holochain
+      node, not on Ethereum.  The only on-chain cost is proof verification.
+    - *Agent-centric storage*: Alice's identity data lives on her own source
+      chain, encrypted.  The hApp decrypts locally, re-encrypts for Bob,
+      generates the proof -- all within Alice's node.  Nothing leaves her
+      node except ~E_bob~ and the proof.
+
+    However, Holochain is NOT sufficient alone for trust.  Alice runs her
+    own node and could theoretically run modified hApp code.  The ZK proof
+    is the trust anchor: it is mathematically verifiable on-chain regardless
+    of what software generated it.  Holochain provides the execution
+    environment; the ZK proof provides the guarantee.
+
+** Homomorphic Equality Check Without Decryption
+
+   Perry's question: "Is there a homomorphic encryption process by which we
+   can compare an encrypted value as equal, but the party checking for
+   equality cannot decrypt the data?"
+
+   Yes.  Several approaches:
+
+*** Pedersen Commitments
+
+    ~Commit(v, r) = v*G + r*H~ where G, H are generator points.  The
+    commitment hides ~v~ (information-theoretically) but binds to it
+    (computationally, under discrete log assumption).
+
+    To prove two commitments ~C_1 = Commit(v, r_1)~ and ~C_2 = Commit(v, r_2)~
+    contain the same value:
+
+    #+begin_example
+    Proof: reveal delta_r = r_1 - r_2
+    Verifier checks: C_1 - C_2 == delta_r * H
+    #+end_example
+
+    The verifier learns nothing about ~v~, only that both commitments
+    bind to the same value.  This is efficient (~1 EC point addition).
+
+*** Pedersen + ZK Range Proof (Bulletproofs)
+
+    If the identity is a structured value (not just a scalar), Bulletproofs[fn:6]
+    can prove properties of committed values without revealing them:
+    range proofs, equality proofs, membership proofs.  Verification is
+    ~O(log n)~ and practical on-chain.
+
+*** Application to Re-Encryption Verification
+
+    The BUCK contract stores Alice's identity commitment:
+    ~C_alice = Commit(I, r_alice)~
+
+    Alice provides a re-encrypted blob ~E_bob~ and a ZK proof that the
+    plaintext of ~E_bob~ is the same ~I~ committed in ~C_alice~.
+
+    The contract verifies the proof.  It never learns ~I~.  It learns only
+    that ~E_bob~ contains the correct identity, re-encrypted for Bob.
 
 ** The ~approve~ Function as Identity Handshake
 
-   The ERC-20 ~approve~ function is already the moment when an account holder
-   explicitly designates a counterparty.  This is the natural point for
-   identity exchange:
-
-   #+begin_example
-   // Standard ERC-20:
-   approve(address spender, uint256 amount)
-
-   // Extended for BUCK:
-   approve(address spender, uint256 amount)  // + identity exchange side-effect
-   #+end_example
-
-   When Alice calls ~buck.approve(spender, amount)~, the BUCK contract:
-
-   1. Sets the standard ERC-20 allowance
-   2. Looks up Alice's ONCHAINID from the IdentityRegistry
-   3. Looks up the spender's ONCHAINID from the IdentityRegistry
-   4. Reads both parties' ECDH public keys (from ONCHAINID or from stored
-      per-counterparty fragments)
-   5. Stores a *counterparty identity record* for this pair
-   6. Emits an ~IdentityExchange~ event
-
-   #+begin_example
-   struct CounterpartyRecord {
-       address identity_a;      // ONCHAINID address of party A
-       address identity_b;      // ONCHAINID address of party B
-       bytes32 pubkey_a;        // ECDH public key (x-coordinate) of A
-       bytes32 pubkey_b;        // ECDH public key (x-coordinate) of B
-   }
-
-   // Stored per (owner, spender) pair alongside the allowance
-   mapping(address => mapping(address => CounterpartyRecord))
-       public counterpartyRecords;
-   #+end_example
-
-   For *private-key accounts*, the ~approve~ call includes an additional
-   parameter: the caller's ECDH public key, encrypted specifically for this
-   counterparty.  Since the caller is directly invoking the BUCK contract,
-   they can provide this calldata:
+   The ERC-20 ~approve~ function is the natural point for identity exchange.
+   Alice is directly calling the BUCK contract -- she can provide the
+   re-encrypted identity blob and the ZK proof:
 
    #+begin_example
    function approve(
        address spender,
        uint256 amount,
-       bytes32 callerPubKey     // caller's ECDH public key for this pair
+       bytes   calldata reEncryptedIdentity,   // E_bob: her identity for spender
+       bytes   calldata reEncryptionProof       // ZK proof of correct re-encryption
    ) public returns (bool) {
        _approve(msg.sender, spender, amount);
 
-       // Look up counterparty ONCHAINID
-       IIdentity spenderIdentity = identityRegistry.identity(spender);
+       // Verify the re-encryption proof against the caller's on-chain commitment
+       bytes32 identityCommitment = identityRegistry.identityCommitment(msg.sender);
+       require(
+           _verifyReEncryption(identityCommitment, reEncryptedIdentity, reEncryptionProof),
+           "Invalid re-encryption proof"
+       );
 
-       // Read spender's public key (from ONCHAINID or from their prior
-       // approve-to-us, if they're also a private-key account)
-       bytes32 spenderPubKey = _resolvePublicKey(spender);
+       // Store the verified re-encrypted identity for this pair
+       _receiptFragments[msg.sender][spender] = keccak256(reEncryptedIdentity);
 
-       // Store the counterparty record
-       counterpartyRecords[msg.sender][spender] = CounterpartyRecord({
-           identity_a: address(identityRegistry.identity(msg.sender)),
-           identity_b: address(spenderIdentity),
-           pubkey_a:   callerPubKey,
-           pubkey_b:   spenderPubKey
-       });
-
-       emit IdentityExchange(msg.sender, spender, callerPubKey, spenderPubKey);
+       // Emit ONLY the re-encrypted blob (opaque to everyone except spender)
+       emit IdentityExchange(msg.sender, spender, reEncryptedIdentity);
        return true;
    }
    #+end_example
 
-*** Private-Key Accounts Receiving Incoming Transfers
+   What the public sees in the ~IdentityExchange~ event:
+   - Alice's address approved a spender
+   - An opaque blob (~reEncryptedIdentity~) that only the spender can decrypt
+   - *No* ONCHAINID address, *no* public key, *no* linkable identifier
 
-    For an account with a private ECDH key that wants to *receive* transfers
-    from a specific counterparty, the flow uses ~approve~ with amount 0:
+   What the contract verified:
+   - The blob contains Alice's real identity (ZK proof passed)
+   - The identity matches her on-chain commitment
+
+   What the spender (Bob / pool operator) can do:
+   - Decrypt the blob using ~ECDH(k_bob, K_alice)~ to learn Alice's identity
+   - Store it for receipt construction
+
+*** Receiving Transfers: ~approve(sender, 0)~ Handshake
+
+    For an account that wants to *receive* from a specific counterparty:
 
     #+begin_example
-    // Alice (private-key) wants to receive BUCK from Bob:
-    buck.approve(bob, 0, alice_ecdh_pubkey)
+    // Alice wants to receive BUCK from Bob (Alice is private-identity):
+    buck.approve(bob, 0, reEncryptedIdentityForBob, proof)
     #+end_example
 
-    This does NOT authorize Bob to spend Alice's tokens (amount = 0).  It
-    establishes an identity handshake: Alice's public key is stored in
-    ~counterpartyRecords[alice][bob]~, allowing Bob's wallet to encrypt
-    receipts for Alice when sending her BUCK.
-
-    When Bob later calls ~buck.transfer(alice, amount)~, the BUCK contract
-    looks up the counterparty record and includes both public keys in the
-    receipt event.
+    Amount = 0 means no spending authorization.  The side-effect: Alice's
+    re-encrypted identity is now stored and verified for Bob.  When Bob
+    later calls ~transfer(alice, amount)~, the BUCK contract knows Alice's
+    identity fragment exists and is verified.
 
 ** Receipt Construction: What the Contract Emits
 
-   The BUCK contract emits a *receipt event* containing the trusted plaintext
-   fields.  The wallet layer then encrypts this into the final receipt.
+   With the corrected design, the BUCK contract emits a *minimal* event that
+   reveals only pseudonymous addresses (which the ERC-20 Transfer event
+   already reveals) plus a reference to the pre-stored identity fragments:
 
    #+begin_example
    event BuckTransferReceipt(
        address indexed from,
        address indexed to,
        uint256 amount,
-       address fromIdentity,       // ONCHAINID of sender
-       address toIdentity,         // ONCHAINID of receiver
-       bytes32 fromPubKey,         // sender's ECDH public key (x-coord)
-       bytes32 toPubKey            // receiver's ECDH public key (x-coord)
+       bytes32 fromIdentityHash,    // hash of from's re-encrypted identity
+       bytes32 toIdentityHash       // hash of to's re-encrypted identity
    );
    #+end_example
 
-   This event is emitted by the BUCK contract during every ~transfer~ and
-   ~transferFrom~.  It is *trusted* because the contract itself determined
-   all fields:
+   The ~fromIdentityHash~ and ~toIdentityHash~ are hashes of the opaque
+   re-encrypted blobs stored during ~approve~.  They add *no linkability*
+   beyond what the Transfer event already provides (the addresses themselves
+   are the same).
 
-   - ~from~ / ~to~: from the transfer itself (cannot be forged)
-   - ~fromIdentity~ / ~toIdentity~: looked up from IdentityRegistry
-   - ~fromPubKey~ / ~toPubKey~: looked up from ONBCHAINIDs (public-key
-     accounts) or from stored counterpartyRecords (private-key accounts)
+   The actual re-encrypted identity blobs are retrievable:
+   - From the ~IdentityExchange~ events (emitted during ~approve~)
+   - From Holochain (stored on the participants' source chains)
 
-   The wallet layer then:
+   Only the counterparty (who has the private key to decrypt the blob)
+   can reconstruct the full receipt with real identities.
 
-   1. Reads this event from the transaction receipt
-   2. Augments it with off-chain identity data (names, credentials -- from
-      Holochain/ONCHAINID private claims)
-   3. Encrypts the full receipt using the 3-party ECDH scheme
-   4. Stores the encrypted receipt on Holochain (both parties' source chains)
-   5. Optionally emits a receipt commitment hash via a companion contract
-
-** Where Public Keys Come From: Resolution Order
-
-   The contract resolves an account's ECDH public key in this order:
-
-   #+begin_example
-   function _resolvePublicKey(address account) internal view returns (bytes32) {
-       // 1. Check stored counterparty record (private-key account that
-       //    previously called approve with their pubkey)
-       // ... checked per-pair in the calling context
-
-       // 2. Read from ONCHAINID (public-key account)
-       IIdentity id = identityRegistry.identity(account);
-       if (address(id) != address(0)) {
-           bytes32 pubKey = id.getKey(ECDH_KEY_PURPOSE);
-           if (pubKey != bytes32(0)) return pubKey;
-       }
-
-       // 3. No public key available -- transfer allowed but no encrypted
-       //    receipt can be constructed.  Event emits zero pubkey; wallet
-       //    stores unencrypted receipt locally only.
-       return bytes32(0);
-   }
-   #+end_example
-
-** The Complete ~transfer~ and ~transferFrom~ Flow
+** The Complete Flow
 
    #+begin_example
    function transfer(address to, uint256 amount) public override returns (bool) {
@@ -372,48 +397,43 @@
        _transfer(msg.sender, to, amount);
        compliance.transferred(msg.sender, to, amount);
 
-       // Emit trusted receipt event
-       _emitReceipt(msg.sender, to, amount);
-
-       return true;
-   }
-
-   function transferFrom(address from, address to, uint256 amount)
-       public override returns (bool)
-   {
-       _spendAllowance(from, msg.sender, amount);
-       require(identityRegistry.isVerified(from), "Sender not verified");
-       require(identityRegistry.isVerified(to),   "Receiver not verified");
-       require(compliance.canTransfer(from, to, amount), "Compliance");
-
-       _transfer(from, to, amount);
-       compliance.transferred(from, to, amount);
-
-       // Emit trusted receipt event -- uses counterparty record from approve
-       _emitReceipt(from, to, amount);
-
-       return true;
-   }
-
-   function _emitReceipt(address from, address to, uint256 amount) internal {
-       // Resolve public keys: from counterparty records or ONBCHAINIDs
-       bytes32 fromPubKey = counterpartyRecords[from][to].pubkey_a;
-       if (fromPubKey == bytes32(0)) fromPubKey = _resolvePublicKey(from);
-       bytes32 toPubKey = counterpartyRecords[from][to].pubkey_b;
-       if (toPubKey == bytes32(0)) toPubKey = _resolvePublicKey(to);
-
+       // Emit minimal receipt -- no identity data, just hashes of
+       // pre-stored re-encrypted blobs
        emit BuckTransferReceipt(
-           from, to, amount,
-           address(identityRegistry.identity(from)),
-           address(identityRegistry.identity(to)),
-           fromPubKey, toPubKey
+           msg.sender, to, amount,
+           _receiptFragments[msg.sender][to],
+           _receiptFragments[to][msg.sender]
        );
+
+       return true;
    }
    #+end_example
 
-   Key point: the ~transferFrom~ path uses the counterparty record that was
-   established during the ~approve~ call.  The DeFi router never needs to
-   pass receipt data -- it was already stored.
+   The ~transferFrom~ path is identical: the receipt fragment hashes were
+   stored during ~approve~, so no additional data passes through the DeFi
+   router.
+
+** Summary: What Each Layer Sees
+
+   | Layer                | What it sees                                            |
+   |----------------------+---------------------------------------------------------|
+   | Ethereum (everyone)  | Transfer(from, to, amount) -- pseudonymous addresses    |
+   |                      | BuckTransferReceipt -- same addresses + opaque hashes   |
+   |                      | IdentityExchange -- address + opaque encrypted blob     |
+   |                      | ZK proof verified (pass/fail) -- no identity content    |
+   | BUCK contract        | isVerified(from) == true, isVerified(to) == true        |
+   |                      | ZK proof of re-encryption correctness (verified)        |
+   |                      | Hash of re-encrypted identity blob (stored)             |
+   |                      | *Never sees plaintext identity*                         |
+   | Counterparty (Bob)   | Decrypts re-encrypted blob -> learns Alice's identity   |
+   |                      | Constructs full receipt (names, details)                 |
+   | Sender (Alice)       | Knows her own identity, knows Bob's (from his approve)  |
+   |                      | Constructs full receipt                                  |
+   | Holochain hApp       | Generates re-encrypted blob + ZK proof locally          |
+   |                      | Stores encrypted receipts on source chains              |
+   |                      | Code identified by DNA hash (auditable)                 |
+   | Court (with subpoena)| Compels Bob to decrypt his copy of Alice's identity     |
+   |                      | Bob reveals receipt without revealing private key        |
 
 
 * Cryptographic Receipts: 3-Party ECDH
@@ -567,42 +587,41 @@
 
 *** Step 1: Alice Approves the Router (Identity Handshake)
 
-    Alice calls ~approve~ on the BUCK contract.  This serves double duty:
-    standard ERC-20 allowance AND identity exchange.
+    Alice's wallet invokes the Holochain hApp to prepare the identity
+    exchange, then calls ~approve~ on the BUCK contract:
 
     #+begin_example
-    // Alice approves Uniswap router to spend her BUCK.
-    // Her wallet includes her ECDH public key (if private-key account).
-    buck.approve(uniswapRouter, 500e18, alice_ecdh_pubkey)
+    // 1. Off-chain (Holochain hApp on Alice's node):
+    //    - Decrypt Alice's identity I from her source chain
+    //    - Look up the pool operator's (Bob's) public key K_bob
+    //    - Re-encrypt: E_bob = Encrypt(I, ECDH(k_alice, K_bob))
+    //    - Generate ZK proof: "E_bob encrypts the same I committed on-chain"
+
+    // 2. On-chain:
+    buck.approve(
+        uniswapRouter,      // spender (the router, which calls transferFrom)
+        500e18,              // amount
+        E_bob,               // Alice's identity re-encrypted for Bob
+        proof                // ZK proof of correct re-encryption
+    )
     #+end_example
 
     The BUCK contract:
 
     #+begin_example
     1. Sets allowance[alice][uniswapRouter] = 500e18
-    2. Looks up alice's ONCHAINID from IdentityRegistry
-    3. Looks up uniswapRouter's ONCHAINID from IdentityRegistry
-       (router is registered to Uniswap Labs / governance entity)
-    4. Reads uniswapRouter's ECDH public key from its ONCHAINID
-    5. Stores counterpartyRecords[alice][uniswapRouter] = {
-           identity_a: alice_onchainid,
-           identity_b: router_onchainid,
-           pubkey_a:   alice_ecdh_pubkey,
-           pubkey_b:   router_ecdh_pubkey
-       }
-    6. Emits IdentityExchange(alice, uniswapRouter, pubkeys...)
+    2. Reads Alice's identity commitment from IdentityRegistry
+    3. Verifies the ZK proof: E_bob correctly re-encrypts the committed I
+    4. Stores hash(E_bob) in _receiptFragments[alice][0xPOOL]
+    5. Emits IdentityExchange(alice, 0xPOOL, E_bob)
+       -- the event contains ONLY the opaque encrypted blob
+       -- no ONCHAINID address, no public key, no linkable identifier
     #+end_example
 
     *This is the critical moment.*  Alice is directly calling the BUCK
-    contract, so she can provide her public key.  By the time
-    ~transferFrom~ is called later (by the router), the identity data is
-    already stored.
-
-    Note: the router routes to the pool, so the actual ~transferFrom~
-    destination is ~0xPOOL~, not the router.  Alice should also approve
-    the pool contract, or the BUCK contract should fall back to resolving
-    the pool's public key from its ONCHAINID (public-key accounts don't
-    need a prior approve for identity resolution).
+    contract, so she can provide the re-encrypted identity and ZK proof.
+    By the time ~transferFrom~ is called later (by the router), the
+    verified identity fragment is already stored.
 
 *** Step 2: Alice Calls the Router
 
@@ -622,7 +641,7 @@
     No identity data passes through this call.  The router is a standard
     Uniswap contract that knows nothing about BUCK identity.
 
-*** Step 3: Router Calls BUCK.transferFrom (Trusted Receipt Emission)
+*** Step 3: Router Calls BUCK.transferFrom (Minimal Receipt Emission)
 
     Inside the router, the swap triggers:
 
@@ -630,93 +649,78 @@
     buck.transferFrom(alice, 0xPOOL, 500e18)
     #+end_example
 
-    The BUCK contract executes:
+    The BUCK contract executes (no identity data passes through the router):
 
     #+begin_example
-    function transferFrom(address from, address to, uint256 amount)
-        public override returns (bool)
+    function transferFrom(address from, address to, uint256 amount) ...
     {
-        // 1. Standard ERC-20 allowance check
         _spendAllowance(from, msg.sender, amount);
-
-        // 2. ERC-3643 identity checks
         require(identityRegistry.isVerified(from), "Sender not verified");
         require(identityRegistry.isVerified(to),   "Receiver not verified");
         require(compliance.canTransfer(from, to, amount), "Compliance");
 
-        // 3. Execute transfer
         _transfer(from, to, amount);
-
-        // 4. Update compliance state
         compliance.transferred(from, to, amount);
 
-        // 5. Emit TRUSTED receipt event (all fields from contract state)
-        _emitReceipt(from, to, amount);
+        // Emit minimal receipt -- ONLY hashes of pre-stored opaque blobs
+        emit BuckTransferReceipt(
+            from, to, amount,
+            _receiptFragments[from][to],     // hash of Alice's E_bob
+            _receiptFragments[to][from]       // hash of Bob's E_alice (if exists)
+        );
 
         return true;
     }
     #+end_example
 
-    The ~_emitReceipt~ function resolves public keys from the stored
-    counterparty records (set during ~approve~) or from the ONBCHAINIDs:
+    *What the public sees*: the same from/to/amount as the standard ERC-20
+    Transfer event, plus two opaque hashes.  No ONCHAINID addresses.  No
+    public keys.  No linkable identity information beyond the pseudonymous
+    Ethereum addresses.
+
+    *What the contract verified* (during ~approve~, earlier): the ZK proof
+    that Alice's re-encrypted identity blob is a correct re-encryption of
+    her committed identity.
+
+*** Step 4: Wallet Constructs the Full Receipt (Off-Chain)
+
+    Alice's wallet (Holochain hApp) observes the ~BuckTransferReceipt~
+    event and the ~IdentityExchange~ events to construct the full receipt:
 
     #+begin_example
-    _emitReceipt(alice, 0xPOOL, 500e18) emits:
+    // 1. From on-chain events (trusted, immutable):
+    transfer_data = {from, to, amount, block.number, tx_hash}
 
-    BuckTransferReceipt(
-        from:         alice,
-        to:           0xPOOL,
-        amount:       500e18,
-        fromIdentity: alice_onchainid,      // from IdentityRegistry
-        toIdentity:   bob_onchainid,        // pool registered to Bob
-        fromPubKey:   alice_ecdh_pubkey,     // from counterpartyRecord (approve)
-        toPubKey:     bob_ecdh_pubkey        // from Bob's ONCHAINID (public)
-    )
-    #+end_example
+    // 2. From IdentityExchange event (emitted during approve):
+    E_bob = Alice's re-encrypted identity for Bob (opaque blob)
 
-    *This event is trusted.*  Every field comes from the BUCK contract's own
-    state: the IdentityRegistry, the counterpartyRecords, the transfer
-    parameters.  No external caller provided these values for this specific
-    transfer -- they were established during the ~approve~ handshake or read
-    from on-chain identity contracts.
+    // 3. From Holochain (Alice's source chain):
+    alice_identity = decrypt(alice_encrypted_identity, k_alice)
 
-*** Step 4: Wallet Encrypts the Receipt (Off-Chain)
+    // 4. From Bob's IdentityExchange (if Bob also did approve for Alice):
+    E_alice = Bob's re-encrypted identity for Alice
+    bob_identity = decrypt(E_alice, k_alice)  // Alice can decrypt this
 
-    Alice's wallet software observes the ~BuckTransferReceipt~ event in the
-    transaction receipt and constructs the encrypted receipt:
-
-    #+begin_example
-    // 1. Read trusted fields from the on-chain event
-    receipt_data = event.{from, to, amount, fromIdentity, toIdentity,
-                          fromPubKey, toPubKey, block.number}
-
-    // 2. Derive ephemeral key deterministically from the event
-    k_e = keccak256(abi.encode(receipt_data))
-
-    // 3. Compute ECDH shared secrets
-    shared_1 = ECDH(alice_private_key, toPubKey)
-    shared_2 = ECDH(k_e, toPubKey)
-    encryption_key = keccak256(shared_1 || shared_2)
-
-    // 4. Augment with off-chain identity data
+    // 5. Construct full receipt
     full_receipt = {
-        ...receipt_data,
-        sender_name:   "Alice Johnson",           // from private KYC claim
-        receiver_name: "Bob Smith, DeFi Ops Inc.", // from ONCHAINID (Holochain)
+        transfer:      transfer_data,
+        sender_name:   alice_identity.name,      // "Alice Johnson"
+        receiver_name: bob_identity.name,         // "Bob Smith, DeFi Ops Inc."
         operation:     "Uniswap V3 swap BUCK -> USDT",
         pool:          "0xPOOL",
-        timestamp:     "2026-03-14T15:32:12Z"
+        timestamp:     block.timestamp
     }
 
-    // 5. Encrypt
+    // 6. Encrypt the full receipt with 3-party ECDH (see next section)
+    k_e = keccak256(abi.encode(transfer_data))
+    shared_1 = ECDH(k_alice, K_bob)
+    shared_2 = ECDH(k_e, K_bob)
+    encryption_key = keccak256(shared_1 || shared_2)
     ciphertext = AES-GCM(encryption_key, encode(full_receipt))
 
-    // 6. Store on Holochain (both parties' source chains)
+    // 7. Store on Holochain (both parties' source chains)
     holochain.store(alice_chain, ciphertext)
     holochain.store(bob_chain,   ciphertext)
-
-    // 7. Optionally emit commitment hash on-chain
-    receiptCommitter.commit(keccak256(event), keccak256(ciphertext))
     #+end_example
 
 *** Step 5: Pool Executes the Swap
@@ -728,39 +732,44 @@
 *** Step 6: Completed State
 
     #+begin_example
-    On-chain (public, trusted):
-      - ERC-20 Transfer event: alice -> 0xPOOL, 500 BUCK
-      - BuckTransferReceipt event: from/to addresses, ONCHAINID addresses,
-        ECDH public keys -- all set by the BUCK contract itself
+    On-chain (public):
+      - ERC-20 Transfer event: alice_addr -> 0xPOOL, 500 BUCK
+      - BuckTransferReceipt: same addresses + two opaque bytes32 hashes
+      - IdentityExchange (from approve): alice_addr + opaque encrypted blob
       - Swap event: BUCK/USDT pool, 500 BUCK in, ~495 USDT out
-      - (optional) ReceiptCommitment: hash of encrypted receipt
+      - ZK proof verification result: pass (no identity content leaked)
 
     Off-chain (Holochain, encrypted):
       - Full encrypted receipt on Alice's and Bob's source chains
-      - Contains real names, transaction purpose, full details
-      - Decryptable only by Alice, Bob, or regulator+participant
+      - Alice's re-encrypted identity blob (decryptable only by Bob)
+      - Bob's re-encrypted identity blob (decryptable only by Alice)
 
     What anyone can see:
-      - Two verified addresses transacted 500 BUCK
-      - The pool is operated by a verified identity
-      - The public keys used for receipt encryption (but not the receipt)
+      - Two pseudonymous addresses transacted 500 BUCK
+      - Both addresses pass isVerified (they are KYC'd participants)
+      - Opaque blobs and hashes that reveal nothing without private keys
+      - A ZK proof was verified (the identity blobs are genuine)
 
     What Alice can see:
-      - Full decrypted receipt (she has k_s)
-      - Bob's identity as pool operator
+      - Her own identity (trivially)
+      - Bob's identity (decrypt his re-encrypted blob with her key)
+      - Full receipt with names, amounts, purpose
 
     What Bob can see:
-      - Full decrypted receipt (he has k_r)
-      - Alice's identity as the swapper
+      - His own identity (trivially)
+      - Alice's identity (decrypt her re-encrypted blob with his key)
+      - Full receipt with names, amounts, purpose
 
-    What a regulator can see (with escrow key + participant cooperation):
-      - Full decrypted receipt (requires cooperation from Alice or Bob)
+    What a court can compel (via subpoena of Bob):
+      - Bob decrypts Alice's blob for the specific transaction
+      - Reveals Alice's identity for that one receipt
+      - Bob never reveals his private key
 
     What the public CANNOT see:
-      - Alice's real name
+      - Alice's real name or ONCHAINID
       - Bob's real name (as pool operator)
-      - The purpose of the transaction
-      - The off-chain identity data in the encrypted receipt
+      - Any linkable identity across transactions
+      - The purpose or terms of the transaction
     #+end_example
 
 
@@ -797,22 +806,22 @@
    identity guarantees only hold on chains where the IdentityRegistry is
    deployed.
 
-** Gas Costs of Receipt Emission
+** Gas Costs
 
-   Emitting encrypted receipts as Ethereum log events costs gas.  The
-   ~encryptedReceipt~ bytes field is the dominant cost.  Estimates:
+   The corrected design has two gas-consuming operations:
 
-   | Receipt size | Log cost (~gas)  | At 30 gwei, ETH=$3000 |
-   |--------------+------------------+------------------------|
-   | 256 bytes    | ~8,000 gas       | ~$0.72                 |
-   | 512 bytes    | ~16,000 gas      | ~$1.44                 |
-   | 1024 bytes   | ~32,000 gas      | ~$2.88                 |
+   | Operation                         | Cost (~gas)     | When          |
+   |-----------------------------------+-----------------+---------------|
+   | ~approve~ with ZK proof verify    | ~200K-300K gas  | Once per pair |
+   | ~BuckTransferReceipt~ event       | ~2,000 gas      | Per transfer  |
+   | (2 indexed addresses + 3 uint256) |                 |               |
 
-   For high-frequency DeFi operations, this may be prohibitive.  Options:
-   - Emit only a receipt commitment hash on-chain (~200 gas), store full
-     encrypted receipt on Holochain
-   - Batch receipts into a Merkle tree, commit root periodically
-   - Use an L2 for receipt emission (much cheaper gas)
+   The ZK proof verification (~approve~) is expensive but happens once per
+   counterparty pair.  Subsequent transfers between the same pair emit only
+   the minimal receipt event (addresses + hashes), which is cheap.
+
+   The encrypted receipt itself is stored on Holochain, not on-chain.
+   No encrypted blobs are emitted as Ethereum events.
 
 ** Privacy of Pool Deployer Identity
 
@@ -842,3 +851,15 @@
   | Low        | BUCK burn, credit activation        | Anonymous-valid | On-chain event    |
   | None       | BuckK compute, read oracle,         | Permissionless  | On-chain event    |
   |            | view balances                       |                 |                   |
+
+* Footnotes
+
+[fn:5] Umbral: A Threshold Proxy Re-Encryption Scheme.  NuCypher.
+Reference implementation: https://github.com/nucypher/pyUmbral
+Whitepaper: https://raw.githubusercontent.com/nucypher/umbral-doc/master/umbral-doc.pdf
+
+[fn:6] Bulletproofs: Short Proofs for Confidential Transactions and More.
+Bunz, Bootle, Boneh, Poelstra, Wuille, Maxwell.
+Overview: https://tlu.tarilabs.com/cryptography/the-bulletproof-protocols
+Applied to Pedersen commitments:
+https://www.nccgroup.com/research/on-the-use-of-pedersen-commitments-for-confidential-payments/
