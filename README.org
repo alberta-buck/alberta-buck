@@ -54,20 +54,36 @@ Or enter the shell interactively for ad-hoc commands:
   forge test --match-contract BuckCredit   # All tests in a contract
 #+END_SRC
 
-** Forked Network Testing
+** RPC Configuration
 
-Copy =.env.example= to =.env= and set your RPC endpoint:
+Two environment variables control how tools connect to Ethereum:
+
+- =MAINNET_RPC_URL= :: The remote archive RPC endpoint (Alchemy, Infura, or a local Reth/Geth node).
+  Used by Foundry (=forge --fork-url=) and Anvil (=--fork-url=) to access Ethereum mainnet state.
+  Also used by the Python tests when connecting directly without Anvil.
+
+- =ETH_RPC_URL= :: Where the Python tests send their queries.  Override this to
+  =http://localhost:8545= when running against a local Anvil fork.  If unset, the Python code falls
+  back to =MAINNET_RPC_URL=.
+
+When running via Anvil, both variables are in play simultaneously: Anvil reads from the remote
+(=MAINNET_RPC_URL=) and the Python tests read from Anvil (=ETH_RPC_URL=http://localhost:8545=).
+
+Copy =.env.example= to =.env= and fill in your API key:
 
 #+BEGIN_SRC bash
   cp .env.example .env
-  # Edit .env with your Alchemy/Infura key (or http://localhost:8545 for a local node)
+  # Edit .env: set MAINNET_RPC_URL to your Alchemy/Infura endpoint
 #+END_SRC
 
-Then:
+The Makefile loads =.env= automatically.  The =MAINNET_RPC_URL= can also be composed from
+=ALCHEMY_API_TOKEN= if you prefer to keep just the key in your environment.
+
+** Forked Network Testing (Solidity)
 
 #+BEGIN_SRC bash
   make nix-fork-sepolia         # Start Anvil forking Sepolia (runs in foreground)
-  make nix-test-fork-sepolia    # Run tests against forked Sepolia
+  make nix-test-fork-sepolia    # Run Solidity tests against forked Sepolia
   make nix-fork-mainnet         # Fork mainnet (for DeFi integration testing)
 #+END_SRC
 
@@ -76,6 +92,83 @@ Pin a specific block for deterministic tests:
 #+BEGIN_SRC bash
   FORK_BLOCK=12345678 make nix-fork-sepolia
 #+END_SRC
+
+** Python: Oracle History and Visualization
+
+The =alberta_buck= Python module queries Chainlink price feed oracles on Ethereum mainnet to
+retrieve historical commodity prices.  This validates the on-chain data sources used by the
+BuckKController PID loop and provides visualization for analysis.
+
+*** Chainlink feeds
+
+The test reads Chainlink's [[https://docs.chain.link/data-feeds/price-feeds/addresses][AggregatorV3Interface]] price feeds for Gold (XAU/USD) and Silver
+(XAG/USD) -- the same oracle contracts used by the Solidity =BuckKControllerForkTest=:
+
+| Feed    | Mainnet Address                              |
+|---------+----------------------------------------------|
+| XAU/USD | =0x214eD9Da11D2fbe465a6fc601a91E62EbEc1a0D6= |
+| XAG/USD | =0x379589227b15F1a12195D3f2d90bBc9F31f95235= |
+
+*** Running directly against a remote RPC
+
+Python queries Alchemy (or Infura) directly -- no Anvil needed:
+
+#+BEGIN_SRC bash
+  make nix-test-python                         # uses MAINNET_RPC_URL from .env
+#+END_SRC
+
+Uses =get_daily_prices=: calls =latestRoundData()= at 366 estimated block numbers (one per day, ~732
+total calls across both feeds).  Takes roughly 10-15 minutes.
+
+*** Running via Anvil (cached)
+
+Anvil forks mainnet and caches Ethereum storage reads in memory.  Two terminals:
+
+#+BEGIN_SRC bash
+  # Terminal 1 -- Anvil connects to remote RPC via MAINNET_RPC_URL from .env
+  make nix-fork-mainnet
+
+  # Terminal 2 -- Python connects to Anvil on localhost
+  ETH_RPC_URL=http://localhost:8545 make nix-test-python
+#+END_SRC
+
+Uses =get_round_history=: calls =getRoundData(roundId)= walking backwards through every Chainlink
+round at the fork block.  Subsequent runs within the same Anvil session serve entirely from cache.
+
+*** Query strategies
+
+Both functions retrieve the same daily price history.  The test auto-detects Anvil and selects the
+appropriate one.
+
+=get_daily_prices= (block-based) calls =latestRoundData()= at 366 different block heights.  Fewer
+API calls, but Anvil must cache storage separately for each block, so there is little reuse across
+runs.
+
+=get_round_history= (round-based) calls =getRoundData(roundId)= at the single fork block, walking
+backwards through every Chainlink round (~8,000-9,000 per feed for a year of hourly updates).  More
+total calls, but all against one block height -- Anvil caches the storage slots once and serves
+repeated runs from memory.
+
+|                         | =get_daily_prices= | =get_round_history= |
+|-------------------------+--------------------+---------------------|
+| Calls per feed (1 year) | ~366               | ~8,000-9,000        |
+| Block heights touched   | 366 different      | 1 (fork block)      |
+| Anvil cache reuse       | Low                | High                |
+| Best for                | Direct RPC         | Anvil fork          |
+
+*** Output
+
+On completion the test writes =alberta_buck/test/gold_silver_history.png=:
+
+#+ATTR_ORG: :width 800
+[[file:alberta_buck/test/gold_silver_history.png]]
+
+*** Future commodity oracles
+
+The =alberta_buck.oracle= module is designed to support additional feeds.  The BUCK commodity basket
+will expand to include oil, natural gas, copper, beef, lumber, electricity, and labour.  For
+commodities without existing Chainlink mainnet feeds, custom oracle contracts will be deployed and
+populated with historical trend data sourced from public commodity price datasets.
 
 ** Deploy (Local)
 
@@ -86,15 +179,19 @@ Pin a specific block for deterministic tests:
 
 * Project Structure
 
-| Path                   | Contents                                   |
-|------------------------+--------------------------------------------|
-| =src/BuckCredit.sol=   | ERC-721 insured asset NFT                  |
-| =src/Buck.sol=         | ERC-20 token with credit-limit minting     |
-| =src/BuckKController.sol= | PID value stabilization controller     |
-| =test/BuckCredit.t.sol= | Forge tests (depreciation, activation, updates) |
-| =script/Deploy.s.sol=  | Deployment script                          |
-| =flake.nix=            | Nix dev environment                        |
-| =foundry.toml=         | Forge configuration and remappings         |
+| Path                         | Contents                                        |
+|------------------------------+-------------------------------------------------|
+| =src/BuckCredit.sol=         | ERC-721 insured asset NFT                       |
+| =src/Buck.sol=               | ERC-20 token with credit-limit minting          |
+| =src/BuckKController.sol=    | PID value stabilization controller              |
+| =test/BuckCredit.t.sol=      | Forge tests (depreciation, activation, updates) |
+| =test/BuckKController.t.sol= | PID controller unit + mainnet fork tests        |
+| =script/Deploy.s.sol=        | Deployment script                               |
+| =alberta_buck/oracle.py=     | Chainlink oracle historical price reader        |
+| =alberta_buck/test/=         | Python tests (oracle history, visualization)    |
+| =pyproject.toml=             | Python project configuration                    |
+| =flake.nix=                  | Nix dev environment                             |
+| =foundry.toml=               | Forge configuration and remappings              |
 
 * License
 

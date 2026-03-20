@@ -2,6 +2,7 @@
 /out/
 /cache/
 /broadcast/
+/.anvil-cache/
 
 # Dependency directories (installed via forge install)
 /lib/
@@ -23,7 +24,14 @@ node_modules/
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
+
 
 # Coverage
 lcov.info
+*.aux
+*.toc
+*.tex
+*.fls
+*.log

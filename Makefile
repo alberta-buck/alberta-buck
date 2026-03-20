@@ -31,9 +31,10 @@ endif
 
 
 .PHONY: all build test clean fmt snapshot
-.PHONY: fork-sepolia fork-mainnet anvil stop-anvil
+.PHONY: fork-sepolia fork-mainnet fork-mainnet-cache anvil stop-anvil
 .PHONY: deploy-local deploy-sepolia
 .PHONY: install update
+.PHONY: test-python venv-activate
 
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -79,6 +80,12 @@ fork-sepolia:
 fork-mainnet:
 	anvil --port $(ANVIL_PORT) --fork-url $(MAINNET_RPC_URL) $(ANVIL_FORK_OPTS)
 
+# Fork mainnet with persistent disk cache (for Python oracle history tests).
+# First run fetches from remote; subsequent runs serve from cache.
+ANVIL_CACHE		?= .anvil-cache
+fork-mainnet-cache:
+	anvil --port $(ANVIL_PORT) --fork-url $(MAINNET_RPC_URL) --cache-path $(ANVIL_CACHE) $(ANVIL_FORK_OPTS)
+
 stop-anvil:
 	-pkill -f "anvil --port $(ANVIL_PORT)" 2>/dev/null
 
@@ -90,6 +97,15 @@ deploy-local:
 
 deploy-sepolia:
 	forge script script/Deploy.s.sol --broadcast --rpc-url $(SEPOLIA_RPC_URL) --verify -vvv
+
+
+# ── Python Tests ────────────────────────────────────────────────────
+
+test-python:
+	python -m pytest alberta_buck/test/ -v -s
+
+venv-activate:
+	pip install -e ".[tests]"
 
 
 # ── Dependencies ─────────────────────────────────────────────────────

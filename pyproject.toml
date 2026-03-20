@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools >= 40.9.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name			= "alberta-buck"
+version			= "0.1.0"
+description		= "Alberta Buck commodity-basket stablecoin: oracle tools, historical analysis, and PID simulation"
+requires-python		= ">=3.10"
+license			= "GPL-3.0-or-later"
+authors = [
+    { name = "Perry Kundert", email = "perry@dominionrnd.com" }
+]
+
+dependencies = [
+    "web3			>=7,<8",
+    "matplotlib		>=3.8",
+    "python-dotenv		>=1.0,<2",
+]
+
+[project.optional-dependencies]
+tests = [
+    "pytest",
+    "pytest-cov",
+]
+
+dev = [
+    "build",
+    "setuptools",
+    "wheel",
+]
+
+[tool.setuptools]
+zip-safe		= true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["alberta_buck*"]
+
+[tool.pytest.ini_options]
+testpaths = ["alberta_buck/test"]
