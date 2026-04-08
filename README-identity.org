@@ -25,9 +25,23 @@
   lending protocols) introduce contract addresses as counterparties, which also
   need identities associated with their deployers.
 
-  This document tabulates the identity requirements for every operation, then
-  walks through the cryptography of a DeFi swap transaction as a concrete
-  example.
+  Identity credentials are ElGamal ciphertexts encrypted under the participant's
+  public key, signed by the issuing authority's private key, and published to the
+  issuer's Holochain source chain -- immutable, auditable, and verifiable against
+  the issuer's well-known public key.  All participants use ElGamal over the same
+  elliptic curve group (alt_bn128), enabling Chaum-Pedersen proofs of correct
+  re-encryption: when Alice must share her identity with counterparty Bob, she
+  re-encrypts her credential under Bob's public key and produces a proof --
+  verifiable by anyone -- that the re-encrypted ciphertext contains the same
+  identity as her issuer-signed credential, without revealing the identity
+  itself.  On-chain verification costs ~27,000 gas (3-4 elliptic curve scalar
+  multiplications via Ethereum precompiles), compared to ~200,000+ gas for
+  SNARK-based alternatives.
+
+  This document tabulates the identity requirements for every operation, details
+  the ElGamal Chaum-Pedersen cryptographic architecture, and demonstrates through
+  attack scenarios that the scheme defeats identity forgery, substitution, and
+  collusion attacks while maintaining very low on-chain costs.
 #+END_ABSTRACT
 
 #+TOC: headlines 2
@@ -58,11 +72,16 @@
    transaction counterparties!  They can only vouch for my (decrypted) identity, just as I can vouch for
    my daughter's.
 
-   Only the participants in a transaction can authorize the decryption of the transaction receipt
-   containing the identity of counterparties and details of the transaction.  Thus, the receipt must
-   be encrypted with threshold encryption, such that any /one/ of N parties can use their private
-   key to obtain the key to decrypt it [fn::For Ethereum transactions, N is always 2, but Alberta
-   Buck supports other systems like Holochain so N may be arbitrarily large.]
+   Only the participants in a transaction can decrypt the re-encrypted identity
+   blobs exchanged during that transaction.  Each re-encrypted identity is an
+   ElGamal ciphertext under the specific counterparty's public key -- only that
+   counterparty's private key can recover the plaintext.  The identity issuer
+   cannot decrypt it (they encrypted under Alice's public key, not their own).
+   The government cannot decrypt it.  No registry operator or Holochain node
+   can decrypt it.  A court must compel a /specific participant/ to decrypt a
+   /specific transaction's/ identity data.  The attack cost is O(N): each
+   individual's credential must be attacked separately, rather than compromising
+   a single custodian.
 
 
 ** Accounts Belong to Someone
@@ -98,18 +117,589 @@
 
 ** Counterparties Exchange Identities
 
-   Each transaction is between parties identified to each other by provably untampered copies of
-   their identity, encrypted by each party specifically for that counterparty.
+   Each transaction is between parties identified to each other by provably
+   untampered copies of their identity, encrypted by each party specifically for
+   that counterparty.
 
-   There is no need for PRE (Proxy Re-Encryption), because every party with an encrypted identity
-   must actively disclose their identity specifically to each recipient counterparty -- they must
-   specifically decrypt and re-encrypt their identity in a provably correct fashion, for each
-   recipient counterparty.  
+   The identity credential lifecycle:
 
-   An ephemeral key is generated for the pair Alice and ; the ECDH derived secret hashed 
-   
+   1. *Issuance*: A trusted issuer (the Alberta government, ATB Financial, etc.)
+      verifies Alice's identity through a KYC ceremony.  The issuer encrypts
+      Alice's identity data ~I~ under Alice's public key using ElGamal over
+      alt_bn128:
+
+      ~E_alice = (r * G,  r * pk_alice + I * G)~
+
+      The issuer signs this ciphertext with their well-known private key:
+
+      ~sigma = Sign(sk_issuer, E_alice)~
+
+      The signed credential ~(E_alice, sigma)~ is published to the issuer's
+      Holochain source chain, where it is immutable, auditable by anyone, and
+      verifiable against the issuer's well-known public key.  A reference (hash
+      of ~E_alice~) is registered in the on-chain IdentityRegistry alongside
+      Alice's Ethereum address.
+
+   2. *Re-encryption*: When Alice must identify herself to counterparty Bob
+      (e.g., during an ~approve~ call on the BUCK contract), she decrypts her
+      credential locally (she knows ~sk_alice~) and re-encrypts the identity
+      under Bob's public key with fresh randomness:
+
+      ~E_bob = (r' * G,  r' * pk_bob + I * G)~
+
+      She produces a Chaum-Pedersen proof ~pi~ that ~E_bob~ encrypts the same
+      point ~I * G~ as her issuer-signed ~E_alice~ -- without revealing ~I~.
+
+   3. *Verification*: Anyone (including the BUCK smart contract) can verify:
+      - ~sigma~ is a valid signature from the issuer on ~E_alice~
+        (the credential is genuine, not self-issued)
+      - ~pi~ proves ~E_bob~ encrypts the same plaintext as ~E_alice~
+        (Alice did not substitute false data)
+
+      Verification requires only 3-4 elliptic curve scalar multiplications
+      (~27,000 gas on Ethereum via the alt_bn128 precompiles).  No SNARK
+      circuits, no trusted setup, no pairing operations.
+
+   4. *Decryption*: Only Bob can decrypt ~E_bob~ (he has ~sk_bob~).  Only Alice
+      can decrypt ~E_alice~ (she has ~sk_alice~).  The issuer cannot decrypt
+      either (they encrypted under Alice's public key, not their own).  No third
+      party can decrypt any re-encrypted copy.
+
+   There is no need for Proxy Re-Encryption (PRE), because Alice is online when
+   she calls ~approve~ and can perform the re-encryption directly.  The
+   Chaum-Pedersen proof is the trust anchor: it is a mathematical guarantee --
+   unforgeable under the discrete logarithm assumption -- that Alice
+   re-encrypted her genuine, issuer-signed identity and not a substitute.
 
 
+** ElGamal Over a Mandated Curve Group
+
+   Alberta Buck mandates that all identity credentials, all participant key
+   pairs, and all re-encryption operations use ElGamal over the alt_bn128
+   elliptic curve -- the curve supported by Ethereum's ~ecAdd~ / ~ecMul~
+   precompiles at addresses 0x06 and 0x07.  This mandate is a design strength,
+   not a limitation:
+
+   - *Uniform proof verification*: every Chaum-Pedersen proof uses the same
+     group, so a single on-chain verifier handles all identity proofs.
+   - *Precompile efficiency*: alt_bn128 scalar multiplication costs 6,000 gas
+     via the EVM precompile, vs. ~100,000+ gas for in-contract EC math.
+   - *No cross-group compatibility issues*: since all participants use the same
+     curve, re-encryption between any two participants is always algebraically
+     compatible.
+
+   Participant key pairs for identity purposes are distinct from their Ethereum
+   signing keys (which use secp256k1).  The identity key pair is generated
+   during the KYC ceremony and the public key is registered in the
+   IdentityRegistry alongside the participant's Ethereum address.
+
+   When Alice re-encrypts for N different counterparties, each re-encryption
+   uses independent randomness.  The resulting ciphertexts are IND-CPA secure:
+   computationally indistinguishable from random curve points.  An observer
+   who collects all N ciphertexts cannot determine that they encrypt the same
+   plaintext (without access to a counterparty's private key).
+
+
+** Chaum-Pedersen Proof of Re-Encryption Correctness
+
+   The Chaum-Pedersen protocol is a sigma protocol (Schnorr family) that proves
+   two ElGamal ciphertexts encrypt the same message point, without revealing the
+   message.  Made non-interactive via the Fiat-Shamir heuristic, the proof is
+   compact (~128 bytes: two scalars and two curve points) and verification
+   requires only 3-4 multi-scalar multiplications.
+
+*** Setup
+
+    #+begin_example
+    Issuer-signed credential (public, on issuer's Holochain source chain):
+      E_alice = (R_a, C_a) = (r_a * G,  r_a * pk_alice + M)
+      where M = I * G  (identity encoded as a curve point)
+      sigma = Sign(sk_issuer, E_alice)
+
+    Alice's re-encryption for Bob:
+      E_bob = (R_b, C_b) = (r_b * G,  r_b * pk_bob + M)
+      using the SAME message point M
+    #+end_example
+
+*** What Alice Proves (Non-Interactively)
+
+    #+begin_example
+    "I know (sk_alice, r_b) such that:
+      1. pk_alice = sk_alice * G                    -- I own this public key
+      2. R_b = r_b * G                              -- I know E_bob's randomness
+      3. C_a - sk_alice * R_a = C_b - r_b * pk_bob  -- same message point M"
+    #+end_example
+
+    Statement 3 is the core.  The left side decrypts ~E_alice~ (only Alice can
+    compute this, since she knows ~sk_alice~), yielding the message point ~M~.
+    The right side extracts ~M~ from ~E_bob~ (only Bob could alternatively
+    compute this with ~sk_bob~).  If Alice encrypted different data ~I_fake~,
+    then ~I * G != I_fake * G~ and no valid proof exists -- it is not merely hard
+    to compute, it is mathematically impossible under the discrete logarithm
+    assumption.
+
+*** Verification (What the Contract Computes)
+
+    #+begin_example
+    Given public inputs:
+      E_alice = (R_a, C_a)    -- from IdentityRegistry (issuer-signed, read
+                                  from storage -- NOT supplied by Alice)
+      E_bob   = (R_b, C_b)    -- from Alice's approve() calldata
+      pk_alice                 -- from IdentityRegistry
+      pk_bob                   -- from IdentityRegistry
+      proof   = (e, s1, s2)   -- Fiat-Shamir challenge and responses
+
+    Verify:
+      Recompute challenge e from commitments
+      Check consistency of s1, s2 against e, the public keys, and ciphertexts
+      3-4 ecMul + 3-4 ecAdd operations
+    #+end_example
+
+    Critical implementation requirement: ~E_alice~ is *read from on-chain
+    storage* (the IdentityRegistry), not supplied by Alice as calldata.  This
+    anchors the proof to the issuer-signed credential.  If Alice could supply
+    her own ~E_alice~, she could substitute a fake credential and produce a
+    valid proof against it.
+
+*** Gas Cost
+
+    | Operation               | Count | Gas each | Total  |
+    |-------------------------+-------+----------+--------|
+    | ~ecMul~ (precompile)    |     4 |    6,000 | 24,000 |
+    | ~ecAdd~ (precompile)    |     4 |      150 |    600 |
+    | ~keccak256~ (Fiat-Shamir) | 1   |       36 |     36 |
+    | Calldata (128 bytes)    |       |          |  2,048 |
+    | Storage read (~E_alice~) |   1  |    2,100 |  2,100 |
+    | *Total*                 |       |          | *~29,000 gas* |
+
+    Compare: Groth16 SNARK verification requires a pairing check (~113,000 gas
+    for the ~ecPairing~ precompile alone) plus additional EC operations, totaling
+    ~200,000-300,000 gas.  The Chaum-Pedersen approach is *7-10x cheaper*.
+
+    The ~approve~ call (which includes the proof verification) costs ~29,000 gas
+    for the identity proof plus the standard ERC-20 approve cost (~46,000 gas),
+    totaling ~75,000 gas.  This is paid once per counterparty pair.  Subsequent
+    ~transfer~ and ~transferFrom~ calls emit only minimal receipt events
+    (addresses + opaque hashes, ~2,000 gas) with no additional proof work.
+
+
+* Attacks and Defenses
+
+  The following scenarios demonstrate that the ElGamal Chaum-Pedersen proof
+  scheme defeats identity fraud, even when participants are actively criminal.
+  In each scenario we show what the attacker attempts, why it fails
+  mathematically, and what the on-chain verifier sees.
+
+  The trust chain in every scenario is:
+
+  #+begin_example
+  Issuer signs E_alice           --> credential is genuine
+  E_alice stored in registry     --> contract reads the genuine credential
+  Chaum-Pedersen proof verified  --> E_bob encrypts same identity as E_alice
+  Only Bob can decrypt E_bob     --> identity revealed only to counterparty
+  #+end_example
+
+  Breaking any link requires breaking either ECDSA signature unforgeability or
+  the discrete logarithm assumption on alt_bn128 -- both are standard hardness
+  assumptions underpinning all of Ethereum's security.
+
+
+** Attack 1: Alice Substitutes a False Identity for Bob
+
+*** Scenario
+
+    Alice is a sanctioned individual.  She completed KYC under her real identity
+    and received a legitimate issuer-signed credential ~E_alice~ containing her
+    true identity ~I~.  She now wants to transact with Bob but wants Bob (and
+    any future court) to believe she is someone else -- say, her clean associate
+    Carol.
+
+    Alice constructs a fake re-encryption using Carol's identity ~I_fake~:
+
+    #+begin_example
+    E_bob_fake = (r' * G,  r' * pk_bob + I_fake * G)
+    #+end_example
+
+    She submits ~E_bob_fake~ to ~approve()~ and attempts to produce a
+    Chaum-Pedersen proof tying it to her registry credential.
+
+*** Why It Fails
+
+    The Chaum-Pedersen verification checks:
+
+    #+begin_example
+    C_a - sk_alice * R_a  ==  C_b - r' * pk_bob
+    #+end_example
+
+    Expanding the left side (from the issuer-signed ~E_alice~ in the registry):
+
+    #+begin_example
+    (r_a * pk_alice + I * G) - sk_alice * (r_a * G)
+      = r_a * sk_alice * G + I * G - sk_alice * r_a * G
+      = I * G
+    #+end_example
+
+    Expanding the right side (from Alice's fake ~E_bob~):
+
+    #+begin_example
+    (r' * pk_bob + I_fake * G) - r' * pk_bob
+      = I_fake * G
+    #+end_example
+
+    The proof requires ~I * G == I_fake * G~, which requires ~I == I_fake~.
+    Since ~I != I_fake~ (Alice is not Carol), these are distinct curve points.
+    Under the discrete logarithm assumption, Alice *cannot produce valid proof
+    scalars (s1, s2)* that satisfy the verification equations.  The proof does
+    not exist -- not "hard to find," but mathematically non-existent.
+
+*** What the Contract Sees
+
+    ~approve()~ reverts: "Re-encryption proof invalid."  The transaction fails
+    on-chain.  Alice cannot complete the identity handshake with false data.
+    The revert is indistinguishable from a malformed transaction -- no
+    information about Alice's intent leaks.
+
+*** Cost to Alice
+
+    She wasted gas on a failed transaction.  Her address is still associated with
+    her real issuer-signed credential in the registry.  Nothing has changed.
+
+
+** Attack 2: Alice Forges an Issuer Credential
+
+*** Scenario
+
+    Alice never completed KYC, or completed KYC but wants a credential with
+    different identity data.  She generates her own ElGamal key pair, encrypts a
+    fabricated identity ~I_fake~ under her public key, and signs it herself:
+
+    #+begin_example
+    E_alice_fake = (r * G,  r * pk_alice + I_fake * G)
+    sigma_fake   = Sign(sk_alice, E_alice_fake)
+    #+end_example
+
+    She attempts to register this credential in the IdentityRegistry and publish
+    it to a Holochain source chain.
+
+*** Why It Fails
+
+    The IdentityRegistry accepts credentials only from *trusted issuers* --
+    public keys registered in the TrustedIssuersRegistry (part of the ERC-3643
+    framework).  Registration verifies:
+
+    #+begin_example
+    SigVerify(pk_trusted_issuer, E_alice, sigma) == true
+    #+end_example
+
+    Alice's ~sigma_fake~ was signed with ~sk_alice~, not with any trusted
+    issuer's key.  The signature check fails.  Her credential is rejected at
+    registration, long before any ~approve~ call.
+
+    Even if Alice publishes ~(E_alice_fake, sigma_fake)~ to a Holochain source
+    chain, the on-chain registry will not accept it.  Holochain provides
+    immutability and auditability of the /issuer's/ source chain; it does not
+    confer trust on self-issued credentials.  The trust anchor is the issuer's
+    signature, verified on-chain.
+
+*** What the Contract Sees
+
+    ~registerIdentity()~ reverts: "Invalid issuer signature."  Alice is not
+    registered; ~isVerified(alice) == false~.  She cannot participate in any
+    BUCK operation requiring identity.
+
+
+** Attack 3: Alice and Complicit Bob Launder With False Identities
+
+*** Scenario
+
+    Alice and Bob are both criminals.  Both have legitimate issuer-signed
+    credentials (they passed KYC under their real identities).  They want to
+    transact with each other, but want the encrypted identity records to show
+    /different/ people -- so that if a court later compels Bob to decrypt
+    Alice's identity blob, it points to an innocent third party.
+
+    They agree: Alice will encrypt a false identity ~I_fake~ for Bob and submit
+    it.  Bob will claim (if asked) that the decrypted identity is genuine.
+
+*** Why It Fails
+
+    Alice's ~approve()~ call must pass Chaum-Pedersen verification.  The
+    contract reads ~E_alice~ from the IdentityRegistry -- not from Alice's
+    calldata.
+
+    #+begin_example
+    // Inside approve():
+    (E_alice, sigma) = identityRegistry.getCredential(msg.sender);
+    require(chaumPedersenVerify(E_alice, E_bob_submitted, proof));
+    #+end_example
+
+    Alice cannot substitute a different ~E_alice~ because the contract reads it
+    from storage.  She cannot produce a valid Chaum-Pedersen proof linking her
+    fake ~E_bob~ to the real ~E_alice~ because the message points differ (same
+    math as Attack 1).
+
+    *Bob's willingness to accept false data is irrelevant.*  The proof was
+    verified against the issuer-signed credential /before/ ~E_bob~ was stored.
+    If ~approve()~ succeeded, ~E_bob~ necessarily contains Alice's real identity.
+    When a court later compels Bob to decrypt, he produces Alice's true identity
+    -- regardless of any prior agreement between them.
+
+    Bob cannot produce a /different/ plaintext from the same ~E_bob~ (ElGamal
+    decryption is deterministic given the private key).  Bob cannot claim the
+    ~E_bob~ is unrelated to Alice (the on-chain ~IdentityExchange~ event records
+    that Alice submitted it during ~approve~, and the proof verification
+    succeeded).
+
+*** What the Contract Sees
+
+    If Alice submits false data: ~approve()~ reverts ("Re-encryption proof
+    invalid") -- same as Attack 1.
+
+    If Alice submits real data (because she has no choice): ~approve()~ succeeds,
+    and ~E_bob~ provably contains her real identity.  The laundering scheme
+    fails silently -- Alice and Bob transacted, but the identity trail is
+    genuine and court-recoverable.
+
+
+** Attack 4: Alice Repudiates a Transaction She Made
+
+*** Scenario
+
+    Alice transacted legitimately with Bob (a law-abiding merchant).  Later,
+    Alice is investigated.  She claims she never transacted with Bob, or that the
+    identity Bob received was fabricated by Bob.  Alice hopes that because the
+    re-encrypted blob is opaque to everyone except Bob, a court cannot verify
+    its authenticity without trusting Bob's word.
+
+*** Why It Fails
+
+    The on-chain record contains everything needed to verify, without trusting
+    Bob:
+
+    1. The ~IdentityExchange(alice, bob, E_bob)~ event is on-chain, emitted
+       during Alice's ~approve()~ call.  It was sent from Alice's address
+       (verified by ~msg.sender~).
+
+    2. The ~approve()~ transaction succeeded on-chain, which means the
+       Chaum-Pedersen proof verified against Alice's issuer-signed ~E_alice~
+       from the registry.  This is an immutable execution fact.
+
+    3. Therefore ~E_bob~ provably encrypts the same identity as ~E_alice~.
+       This follows from the soundness of the Chaum-Pedersen protocol -- it is a
+       mathematical fact, not testimony.
+
+    4. When the court compels Bob to decrypt ~E_bob~, the resulting plaintext ~I~
+       is provably Alice's issuer-certified identity.  The chain of trust:
+
+    #+begin_example
+    Issuer signed E_alice                        (verified: sigma)
+    E_alice stored in IdentityRegistry           (on-chain, immutable)
+    Alice called approve() with E_bob + proof    (on-chain tx, msg.sender = alice)
+    Chaum-Pedersen proof verified on-chain        (execution succeeded)
+    ==> E_bob encrypts Alice's real identity      (mathematical fact)
+    Bob decrypts E_bob --> I                      (compelled, deterministic)
+    I is Alice's issuer-certified identity        (proven)
+    #+end_example
+
+*** What the Court Sees
+
+    An unbroken, cryptographically verified chain from issuer to decrypted
+    identity.  Alice's repudiation is contradicted by on-chain proof
+    verification records that she cannot alter or dispute.
+
+
+** Attack 5: Criminal Bob Denies Receiving Alice's Identity
+
+*** Scenario
+
+    Bob is a criminal merchant.  Alice (law-abiding) transacted with Bob.
+    Authorities investigate Bob.  Bob claims he never received Alice's identity
+    and cannot produce it -- hoping to deny knowledge of his counterparties,
+    or to shield Alice from being identified as his customer.
+
+*** Why It Fails
+
+    The ~IdentityExchange(alice, bob, E_bob)~ event is on-chain and immutable.
+    The court retrieves ~E_bob~ directly from the blockchain -- Bob's cooperation
+    is not needed to find the ciphertext.
+
+    Bob is compelled to decrypt:
+
+    #+begin_example
+    M = C_b - sk_bob * R_b
+    #+end_example
+
+    If Bob claims he "lost" his private key:
+
+    - The court observes that Bob's address continues to transact on Ethereum
+      (signing transactions requires the corresponding private key).
+    - The court holds Bob in contempt, as it would for any refusal to produce
+      subpoenaed records.
+    - Even without Bob's cooperation, the court can establish from the on-chain
+      proof verification that ~E_bob~ /does/ contain a genuine identity.
+      Bob's refusal to decrypt is itself evidence of obstruction.
+
+    Bob cannot claim ~E_bob~ is meaningless or fabricated: the successful
+    Chaum-Pedersen proof verification is an on-chain fact.
+
+*** What the Court Sees
+
+    ~E_bob~ is on-chain.  The proof that it contains Alice's real identity is
+    on-chain.  Bob decrypts or faces contempt.  The cryptographic record is
+    self-authenticating.
+
+
+** Attack 6: Eve Links Alice's Identities Across Counterparties
+
+*** Scenario
+
+    Eve is a surveillance actor (competitor, stalker, rogue state).  She observes
+    that Alice's address called ~approve~ for multiple counterparties: Bob,
+    Carol, and Dave.  Eve collects the ~IdentityExchange~ events:
+
+    #+begin_example
+    IdentityExchange(alice_addr, bob_addr,   E_bob)
+    IdentityExchange(alice_addr, carol_addr, E_carol)
+    IdentityExchange(alice_addr, dave_addr,  E_dave)
+    #+end_example
+
+    Eve wants to learn Alice's real identity, or to determine whether these
+    transactions reveal a pattern (e.g., Alice's spending habits).
+
+*** Why It Fails (Content Privacy Holds)
+
+    Each re-encryption uses independent randomness:
+
+    #+begin_example
+    E_bob   = (r_1 * G,  r_1 * pk_bob   + I * G)
+    E_carol = (r_2 * G,  r_2 * pk_carol + I * G)
+    E_dave  = (r_3 * G,  r_3 * pk_dave  + I * G)
+    #+end_example
+
+    The ciphertexts are IND-CPA secure (semantic security of ElGamal): each is
+    computationally indistinguishable from a random pair of curve points.  Eve
+    cannot decrypt any of them without the counterparty's private key.  She
+    cannot determine from the ciphertexts alone what identity they encode, nor
+    can she compare them to determine if they encode the same identity.
+
+    *What Eve does know*: all three events originate from ~alice_addr~.  But
+    this is exactly the information already visible in standard ERC-20 ~Approval~
+    events.  The encrypted identity blobs add *zero additional linkability*
+    beyond Ethereum's inherent pseudonymous address model.
+
+    *What Eve does not know*: Alice's name, jurisdiction, ID number, or any
+    attribute of her identity.  She sees an address; she does not see a person.
+
+*** What Eve Sees
+
+    Pseudonymous Ethereum addresses and opaque ciphertexts that are
+    computationally indistinguishable from random.  The same view she has of any
+    ERC-20 token, plus meaningless (to her) encrypted blobs.
+
+
+** Attack 7: Alice Uses a Revoked or Expired Credential
+
+*** Scenario
+
+    Alice's identity credential was revoked by the issuer (e.g., her Alberta
+    residency expired, fraud was detected in her original KYC documents, or she
+    is subject to new sanctions).  Alice still holds her old ~E_alice~ and
+    ~sigma~ and attempts to continue transacting.
+
+*** Why It Fails
+
+    The IdentityRegistry tracks credential validity.  When the issuer revokes
+    Alice's credential:
+
+    #+begin_example
+    identityRegistry.revokeIdentity(alice_address)
+    #+end_example
+
+    Subsequent calls to ~isVerified(alice)~ return false.  Alice's ~approve~
+    call -- and any ~transfer~ or ~transferFrom~ -- reverts at the identity
+    check, before the Chaum-Pedersen proof is even evaluated.
+
+    Alice's old credential and proofs remain mathematically valid (the
+    cryptography is eternal), but the contract refuses to accept them because
+    her registration is no longer active.  The revocation is a separate on-chain
+    state, controlled by the trusted issuer.
+
+*** What the Contract Sees
+
+    ~isVerified(alice) == false~.  Transaction reverts immediately.  The
+    still-valid-but-revoked credential is never consulted.
+
+
+** Attack 8: Unwitting Bob Receives a Transaction From Criminal Alice
+
+*** Scenario
+
+    Bob is a law-abiding merchant running a BUCK-accepting storefront.  Alice is
+    a criminal who passed KYC (perhaps before she was sanctioned, or under a
+    jurisdiction that has not yet flagged her).  Alice sends BUCK to Bob through
+    a normal transaction.  Bob has no way to know Alice is a criminal at the
+    time of the transaction.
+
+    Later, authorities investigate Alice.  Bob is concerned: did he unknowingly
+    participate in money laundering?  Can Alice's identity in the receipt
+    exonerate him?
+
+*** Why the Scheme Protects Bob
+
+    Bob received Alice's re-encrypted identity ~E_bob~ during the ~approve~
+    handshake (or Bob pre-approved Alice via ~approve(alice, 0, ...)~ to
+    receive from her).  The Chaum-Pedersen proof verified on-chain, so ~E_bob~
+    provably contains Alice's real, issuer-certified identity.
+
+    When authorities investigate:
+
+    1. Bob decrypts ~E_bob~ and produces Alice's identity ~I~.
+    2. The on-chain proof record establishes that ~I~ is genuine (not something
+       Bob fabricated to frame Alice, and not something Alice fabricated to
+       deceive Bob).
+    3. Bob can demonstrate he had no way to know Alice was a criminal: the
+       identity he received was a valid, issuer-signed credential at the time
+       of the transaction.  The revocation (if any) came later.
+    4. Bob's good faith is supported by the cryptographic record: he accepted a
+       transaction from a verified participant and holds a court-presentable
+       receipt.
+
+    The system protects honest participants by creating a tamper-proof record
+    of who they transacted with.  Bob is not liable for Alice's criminality;
+    he is protected by the same cryptographic chain that convicts Alice.
+
+*** What the Court Sees
+
+    Bob holds a provably genuine receipt.  Alice's identity was valid at
+    transaction time.  Bob acted in good faith.  The receipt is evidence of
+    Bob's compliance, not his complicity.
+
+
+** Summary: Why Chaum-Pedersen Defeats All Substitution Attacks
+
+   Every attack that involves substituting false identity data fails for the
+   same fundamental reason: the Chaum-Pedersen proof is *sound*.  A valid proof
+   for a false statement does not exist.
+
+   #+begin_example
+   The proof asserts:  E_bob encrypts the same M as E_alice
+   The contract reads: E_alice from the registry (issuer-signed, immutable)
+   Therefore:          E_bob must encrypt Alice's real identity
+   Alice cannot:       supply a different E_alice (contract reads from storage)
+   Alice cannot:       produce a valid proof for different M (soundness)
+   Alice cannot:       forge the issuer's signature (ECDSA unforgeability)
+   Bob cannot:         produce a different plaintext (ElGamal decryption is deterministic)
+   Eve cannot:         decrypt E_bob (she lacks sk_bob)
+   #+end_example
+
+   Two independent hardness assumptions protect the system:
+   1. *Signature unforgeability* (ECDSA): prevents forged credentials
+   2. *Discrete logarithm hardness* (alt_bn128): prevents false proofs and
+      unauthorized decryption
+
+   Both assumptions also underpin Ethereum itself.  If either breaks, Ethereum's
+   own security fails first -- the Alberta Buck identity system does not
+   introduce any novel cryptographic assumptions.
 
 
 * Identity Visibility Modes
