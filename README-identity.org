@@ -7,9 +7,17 @@
 
 #+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
 
+#+EXPORT_FILE_NAME: README-identity
+#+STARTUP: org-startup-with-inline-images inlineimages
+#+STARTUP: org-latex-tables-centered nil
+#+OPTIONS: toc:nil
 
-* Overview
+#+PROPERTY: header-args :exports both :results output
 
+#+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
+#+PROPERTY: header-args:python :session dhke :results output table
+
+#+BEGIN_ABSTRACT
   Every operation in the Alberta Buck ecosystem has identity requirements.  Some
   operations require fully public identity (oracle claims, governance votes).
   Others require only that the participant is a verified identity, without
@@ -20,6 +28,88 @@
   This document tabulates the identity requirements for every operation, then
   walks through the cryptography of a DeFi swap transaction as a concrete
   example.
+#+END_ABSTRACT
+
+#+TOC: headlines 2
+
+* Identity with Anonymity
+
+  The expectation to be able to transact in complete freedom (no one else can prevent it) and
+  anonymity (no one else can identify the parties) is paramount.  This is consistent with the
+  expectation that one is innocent until proven guilty.  Asking permission from anyone before we can
+  buy, sell or trade is unacceptable to any free people.  Anything less turns a free citizen into a
+  serf.  If the government can lock your account and freeze you on a park bench at will, how free
+  are you?
+
+  However, the expectation that I can trust that my counterparty's identity is /at least/ as
+  reliable as the group(s) it is part of is also critical.  Allowing arbitrary hostile groups to
+  ravage a community under the cover of darkness has been used throughout history to subjugate free
+  people.  If the government can issue identity documents to whomever they wish, and you are forced
+  to trust them, how free are you?
+
+  The Alberta Buck enforces these principles.
+
+** Revealing Identity
+
+   If I am suspected of a crime, an Alberta court can compel me to decrypt transactions they suspect
+   are related to that crime, and reveal the identity of counterparties I've transacted with.  I may
+   resist doing so, and face the consequences: the organization that the Alberta government tasks
+   with overseeing the authenticity of my Alberta identity cannot simply authorize decryption of my
+   transaction counterparties!  They can only vouch for my (decrypted) identity, just as I can vouch for
+   my daughter's.
+
+   Only the participants in a transaction can authorize the decryption of the transaction receipt
+   containing the identity of counterparties and details of the transaction.  Thus, the receipt must
+   be encrypted with threshold encryption, such that any /one/ of N parties can use their private
+   key to obtain the key to decrypt it [fn::For Ethereum transactions, N is always 2, but Alberta
+   Buck supports other systems like Holochain so N may be arbitrarily large.]
+
+
+** Accounts Belong to Someone
+
+   I may be a citizen of Alberta and have a minor child.  My child's identity is vouched by me, and
+   I am vouched by Alberta.  I have several accounts associated with encrypted copies of my identity
+   (income, savings, etc) and several unencrypted (walking around money).  I can transfer money from
+   my savings to my walking around account (anonymously, via my BUCK account at ATB).
+
+   My encrypted savings account Identity has been authorized by ATB to send funds.  My walking
+   around money account has a plaintext Identity, so Starbucks' BUCK account doesn't need to
+   pre-authorize incoming transactions -- it accepts BUCK transfers from any BUCK account with a
+   public identity.
+
+   This just cuts out the middleman, and gives every citizen what government and institutions
+   already have: knowledge of the participants in transactions with public accounts.  If I prefer, I
+   can set up a Starbucks account, and ask them to authorize me to send money to them.  Again,
+   allowing with BUCKs what is already allowed with a pre-loaded Starbucks card -- private
+   transactions with a public account.  Starbucks and Visa both know who paid to fund the Starbucks
+   card, and who funded their Starbucks account with that card.  Now, citizens can set up similar
+   arrangements and retain that knowledge amongst themselves.
+
+   If a court compels one of the participants (for example, as the result of an arrest in a sting
+   operation against some members of a group performing some illicit activity), then that persons
+   transactions with other members of the group can be discovered.  Otherwise: /financial activity
+   remains confidential, at the sole choice the participants/.
+
+   An expectation that any government or bank functionary (or any random attacker, due to government
+   or bank incompetence) can know the details of a citizens financial activities is unacceptable.
+   The attack cost is O(N) vs. O(1); every individual's credential must be attacked, instead of just
+   being able to attack or compel one disgruntled government or bank employee.
+   
+
+** Counterparties Exchange Identities
+
+   Each transaction is between parties identified to each other by provably untampered copies of
+   their identity, encrypted by each party specifically for that counterparty.
+
+   There is no need for PRE (Proxy Re-Encryption), because every party with an encrypted identity
+   must actively disclose their identity specifically to each recipient counterparty -- they must
+   specifically decrypt and re-encrypt their identity in a provably correct fashion, for each
+   recipient counterparty.  
+
+   An ephemeral key is generated for the pair Alice and ; the ECDH derived secret hashed 
+   
+
+
 
 
 * Identity Visibility Modes
