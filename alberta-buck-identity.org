@@ -3,85 +3,101 @@
 #+date: 2026-03-14
 #+draft: false
 
-#+OPTIONS: ^:nil toc:t
-
 #+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
 
 #+EXPORT_FILE_NAME: alberta-buck-identity
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+#+OPTIONS: toc:nil
 
 #+PROPERTY: header-args :exports both :results output
 #+PROPERTY: header-args:python :session dhke :results output table
 
 #+BEGIN_ABSTRACT
-  Alberta Buck transactions carry provably authentic identity -- without
-  exposing it.  Every participant holds an ElGamal ciphertext[fn:9] of their
-  identity, encrypted under their own public key, signed by the issuing
-  authority, and published to the issuer's Holochain source chain.  When a
-  transaction requires identity exchange, the participant re-encrypts under the
-  counterparty's key and produces a Chaum-Pedersen proof[fn:7]: a compact,
-  unforgeable mathematical guarantee that the re-encrypted ciphertext contains
-  the same identity as the issuer-signed original.  No one -- not the contract,
-  not the network, not the government -- sees the plaintext.
+Alberta Buck transactions carry provably authentic identity -- without
+exposing it.  Every participant holds an ElGamal ciphertext[fn:9] of their
+identity, encrypted under their own public key, signed by the issuing
+authority, and published to the issuer's Holochain source chain.  When a
+transaction requires identity exchange, the participant re-encrypts under the
+counterparty's key and produces a Chaum-Pedersen proof[fn:7]: a compact,
+unforgeable mathematical guarantee that the re-encrypted ciphertext contains
+the same identity as the issuer-signed original.  No one -- not the contract,
+not the network, not the government -- sees the plaintext.
 
-  On-chain verification costs ~29,000 gas via Ethereum's alt_bn128
-  precompiles[fn:9], compared to ~200,000+ for SNARK-based alternatives.  Proof
-  generation is instantaneous.  No trusted setup.  No pairing operations.  The
-  same discrete-logarithm hardness assumption that secures Ethereum itself
-  secures every identity proof in the system.
+On-chain verification costs ~29,000 gas via Ethereum's alt_bn128
+precompiles[fn:9], compared to ~200,000+ for SNARK-based alternatives.  Proof
+generation is instantaneous.  No trusted setup.  No pairing operations.  The
+same discrete-logarithm hardness assumption that secures Ethereum itself
+secures every identity proof in the system.
 
-  This document specifies identity requirements for every Alberta Buck
-  operation, details the ElGamal Chaum-Pedersen architecture, and demonstrates
-  through adversarial scenarios that the scheme defeats forgery, substitution,
-  and collusion while keeping on-chain costs minimal.
+This document specifies identity requirements for every Alberta Buck
+operation, details the ElGamal Chaum-Pedersen architecture, and demonstrates
+through adversarial scenarios that the scheme defeats forgery, substitution,
+and collusion while keeping on-chain costs minimal.
 #+END_ABSTRACT
 
+#+LATEX: \clearpage
 #+TOC: headlines 2
 
+#+LATEX: \clearpage
 * Identity with Anonymity
 
-  The expectation to be able to transact in complete freedom (no one else can prevent it) and
-  anonymity (no one else can identify the parties) is paramount.  This is consistent with the
-  expectation that one is innocent until proven guilty.  Asking permission from anyone before we can
-  buy, sell or trade is unacceptable to any free people.  Anything less turns a free citizen into a
-  serf.  If the government can lock your account and freeze you on a park bench at will, how free
-  are you?
+  The expectation to be able to transact Alberta BUCKs in complete freedom (no one else can prevent
+  it) and anonymity (no one else can identify the parties) is paramount.  This is consistent with
+  the expectation that one is innocent until proven guilty.  Asking permission from anyone before we
+  can buy, sell or trade is unacceptable to any free people.  Anything less turns a free citizen
+  into a serf.  If the government or some regulator can lock your account and freeze you on a park
+  bench at will, how free are you?
 
-  However, the expectation that I can trust that my counterparty's identity is /at least/ as
-  reliable as the group(s) it is part of is also critical.  Allowing arbitrary hostile groups to
-  ravage a community under the cover of darkness has been used throughout history to subjugate free
-  people.  If the government can issue identity documents to whomever they wish, and you are forced
-  to trust them, how free are you?
+  The expectation that I can be certain of my counterparty's identity, and that it is /at least/ as
+  reliable as the group(s) issuing it is also critical.  Millions of financial fraud phone calls
+  flood Albertans' phones daily, pillaging our neighbours and grand-parents, each carrying the
+  government issued identity of the Canadian phone number it "originates" from -- under the cover of
+  regulators.  /Everyone/ involved knows where the call is coming from (the termination contract
+  with the VoIP carrier), who is carrying it into our phone system (the VoIP carrier's contract with
+  phone system providers), and who they are calling - except for /you/.  Allowing arbitrary hostile
+  groups to ravage a community under the cover of darkness has been used throughout history to
+  subjugate free people.  If the government can issue identity documents to whomever they wish, and
+  you are forced to trust them, how free are you?
 
-  The Alberta Buck enforces these principles.
+  The Alberta Buck enforces these principles: the freedom to /transact in privacy and peace/, and
+  the confidence that your counterparty /is who they say they are/.
 
-** Revealing Identity
+** Revealing Identity while Preserving Privacy
 
-   If I am suspected of a crime, an Alberta court can compel me to decrypt
-   transactions they suspect are related to that crime, and reveal the identity
-   of counterparties I've transacted with.  I may resist, and face the
-   consequences.  But the organization that Alberta tasks with overseeing the
-   authenticity of my identity cannot simply authorize decryption of my
-   counterparties!  They can only vouch for my identity, just as I can vouch for
-   my daughter's.
+   If I am suspected of a crime, an Alberta court can compel me to decrypt the participants in BUCK
+   transactions they suspect are related to that crime, and reveal the identity of counterparties
+   I've transacted with.  I may resist, and face the consequences.  But the organizations that
+   Alberta tasks with overseeing the authenticity of my Alberta issued identity must not be able to
+   simply authorize decryption of my counterpartys' identities!  They can only vouch for and reveal
+   the identities they've directly issued, just as I can vouch for my daughter's -- they can't
+   decrypt arbitrary participants in each transaction.
 
-   This is how the cryptography enforces it: each re-encrypted identity is an
-   ElGamal ciphertext under the specific counterparty's public key.  Only that
-   counterparty's private key can recover the plaintext.  The identity issuer
-   cannot decrypt it -- they encrypted under my public key, not their own.  The
-   government cannot decrypt it.  No registry operator, no Holochain node, no
-   subpoena served on anyone other than a direct participant can break this.  A
-   court must compel a /specific participant/ to decrypt a /specific
-   transaction's/ identity data.  Every individual's credential must be attacked
-   separately.  The cost to surveil is O(N), not O(1).
+   This is how the cryptography enforces it: each re-encrypted identity is an ElGamal ciphertext
+   under the specific counterparty's public key.  Only that counterparty's private key can recover
+   the plaintext.  The identity issuer cannot decrypt it -- they encrypted under my public key, not
+   their own.  The government cannot decrypt it.  No registry operator, no Holochain node, no
+   subpoena served on anyone other than a direct participant can break this.  A court must compel a
+   /specific participant/ to decrypt a /specific transaction's counterparty's/ identity data.  Every
+   individual's credential must be attacked separately.  The cost to surveil is O(N), not O(1).
+
+*** The Identity Fountain
+
+    This is accomplished by empowering each Alberta Buck account holder to issue encrypted copies of
+    their identity unique to each counterparty, in a way that preserves privacy but allows
+    verification of the copies back to a root identity signed by the issuer.
+
+    The key to maintaining Privacy (nobody can determine /which/ identity an account is associated
+    with) while ensuring Validity (was a true re-encryption of a signed identity), is to have
+    available a continuous fountain of fresh copies of every identity.
 
 
 ** Accounts Belong to Someone
 
    I may be a citizen of Alberta and have a minor child.  My child's identity is vouched by me, and
-   I am vouched by Alberta.  I have several accounts associated with encrypted copies of my identity
-   (income, savings, etc) and several unencrypted (walking-around money).  I can transfer money from
+   my identity is vouched by Alberta.  I have several accounts associated with encrypted copies of my identity
+   (income, savings, etc) and several unencrypted accounts (walking-around money).  I can transfer money from
    my savings to my walking-around account (anonymously, via my BUCK account at ATB).
 
    My encrypted savings account identity has been authorized by ATB to send funds.  My walking-around
@@ -93,7 +109,7 @@
    already have: knowledge of the participants in transactions with public accounts.  If I prefer, I
    can set up a Starbucks account, and ask them to authorize me to send money to them.  Again,
    allowing with BUCKs what is already allowed with a pre-loaded Starbucks card -- private
-   transactions with a public account.  Starbucks and Visa both know who paid to fund the Starbucks
+   transactions with a public account.  Starbucks and Visa both know who paid to fund the Visa
    card, and who funded their Starbucks account with that card.  Now, citizens can set up similar
    arrangements and retain that knowledge amongst themselves.
 

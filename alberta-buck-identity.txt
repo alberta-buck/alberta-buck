@@ -9,105 +9,6 @@
                                2026-03-14
 
 
-Table of Contents
-─────────────────
-
-1. Identity with Anonymity
-.. 1. Revealing Identity
-.. 2. Accounts Belong to Someone
-.. 3. Counterparties Exchange Identities
-.. 4. ElGamal Over a Mandated Curve Group
-.. 5. Chaum-Pedersen Proof of Re-Encryption Correctness
-..... 1. Setup
-..... 2. What Alice Proves (Non-Interactively)
-..... 3. Verification (What the Contract Computes)
-..... 4. Gas Cost
-2. Attacks and Defenses
-.. 1. Attack 1: Alice Substitutes a False Identity for Bob
-..... 1. Scenario
-..... 2. Why It Fails
-..... 3. What the Contract Sees
-..... 4. Cost to Alice
-.. 2. Attack 2: Alice Forges an Issuer Credential
-..... 1. Scenario
-..... 2. Why It Fails
-..... 3. What the Contract Sees
-.. 3. Attack 3: Alice and Complicit Bob Launder With False Identities
-..... 1. Scenario
-..... 2. Why It Fails
-..... 3. What the Contract Sees
-.. 4. Attack 4: Alice Repudiates a Transaction She Made
-..... 1. Scenario
-..... 2. Why It Fails
-..... 3. What the Court Sees
-.. 5. Attack 5: Criminal Bob Denies Receiving Alice's Identity
-..... 1. Scenario
-..... 2. Why It Fails
-..... 3. What the Court Sees
-.. 6. Attack 6: Eve Links Alice's Identities Across Counterparties
-..... 1. Scenario
-..... 2. Why It Fails (Content Privacy Holds)
-..... 3. What Eve Sees
-.. 7. Attack 7: Alice Uses a Revoked or Expired Credential
-..... 1. Scenario
-..... 2. Why It Fails
-..... 3. What the Contract Sees
-.. 8. Attack 8: Unwitting Bob Receives a Transaction From Criminal Alice
-..... 1. Scenario
-..... 2. Why the Scheme Protects Bob
-..... 3. What the Court Sees
-.. 9. Summary: Why Chaum-Pedersen Defeats All Substitution Attacks
-3. Identity Visibility Modes
-4. Operations Table
-.. 1. Core BUCK (ERC-20) Operations
-.. 2. BuckCredit (ERC-721) Operations
-.. 3. BuckKController (PID Stabilization)
-.. 4. Oracle Operations
-.. 5. DeFi Integration (Uniswap, Lending, etc.)
-.. 6. Identity Management
-5. Contract Identity: How DeFi Pools Become BUCK Counterparties
-6. On-Chain Integration: Receipts and Transfer Flow
-.. 1. The Receipt Constraint
-.. 2. The `approve' Function as Identity Handshake
-..... 1. Receiving Transfers: `approve(sender, 0)' Handshake
-.. 3. Receipt Construction: What the Contract Emits
-.. 4. The Complete `transfer' / `transferFrom' Flow
-.. 5. Holochain: Off-Chain Computation and Storage
-.. 6. Summary: What Each Layer Sees
-7. Cryptographic Receipts: 3-Party ECDH
-.. 1. The Three Keys
-.. 2. Encryption Scheme
-.. 3. Who Can Decrypt
-..... 1. Sender (Alice)
-..... 2. Receiver / Pool Operator (Bob)
-..... 3. Court-Compelled Decryption (Subpoena of Pool Operator)
-..... 4. Regulatory Escrow (Optional)
-8. Play-by-Play: BUCK/USDT Swap on Uniswap
-.. 1. Prerequisites (One-Time Setup)
-.. 2. The Swap Transaction
-..... 1. Step 1: Alice Approves the Router (Identity Handshake)
-..... 2. Step 2: Alice Calls the Router
-..... 3. Step 3: Router Calls BUCK.transferFrom (Minimal Receipt Emission)
-..... 4. Step 4: Wallet Constructs the Full Receipt (Off-Chain)
-..... 5. Step 5: Pool Executes the Swap
-..... 6. Step 6: Completed State
-9. Edge Cases and Design Considerations
-.. 1. Flash Loans and Atomic Transactions
-.. 2. Multi-Hop Swaps
-.. 3. Contract-to-Contract Transfers
-.. 4. Wrapping and Bridging
-.. 5. Gas Costs
-.. 6. Privacy of Pool Deployer Identity
-10. Alternative Approaches Considered
-.. 1. Pedersen Commitments + Groth16 ZK Proofs
-.. 2. Proxy Re-Encryption (NuCypher Umbral)[4]
-.. 3. BBS+ Signatures with Selective Disclosure
-.. 4. Camenisch-Shoup Verifiable Encryption
-.. 5. Pedersen Equality Proofs (Homomorphic Comparison)[5]
-.. 6. Comparison Summary
-11. Summary: Identity Requirement by Risk Level
-
-
 Alberta Buck transactions carry provably authentic identity – without
 exposing it.  Every participant holds an ElGamal ciphertext[1] of their
 identity, encrypted under their own public key, signed by the issuing
@@ -135,7 +36,7 @@ Table of Contents
 ─────────────────
 
 1. Identity with Anonymity
-.. 1. Revealing Identity
+.. 1. Revealing Identity while Preserving Privacy
 .. 2. Accounts Belong to Someone
 .. 3. Counterparties Exchange Identities
 .. 4. ElGamal Over a Mandated Curve Group
@@ -193,36 +94,48 @@ Table of Contents
 1 Identity with Anonymity
 ═════════════════════════
 
-  The expectation to be able to transact in complete freedom (no one
-  else can prevent it) and anonymity (no one else can identify the
-  parties) is paramount.  This is consistent with the expectation that
-  one is innocent until proven guilty.  Asking permission from anyone
-  before we can buy, sell or trade is unacceptable to any free people.
-  Anything less turns a free citizen into a serf.  If the government can
-  lock your account and freeze you on a park bench at will, how free are
-  you?
+  The expectation to be able to transact Alberta BUCKs in complete
+  freedom (no one else can prevent it) and anonymity (no one else can
+  identify the parties) is paramount.  This is consistent with the
+  expectation that one is innocent until proven guilty.  Asking
+  permission from anyone before we can buy, sell or trade is
+  unacceptable to any free people.  Anything less turns a free citizen
+  into a serf.  If the government or some regulator can lock your
+  account and freeze you on a park bench at will, how free are you?
 
-  However, the expectation that I can trust that my counterparty's
-  identity is /at least/ as reliable as the group(s) it is part of is
-  also critical.  Allowing arbitrary hostile groups to ravage a
-  community under the cover of darkness has been used throughout history
-  to subjugate free people.  If the government can issue identity
-  documents to whomever they wish, and you are forced to trust them, how
-  free are you?
+  The expectation that I can be certain of my counterparty's identity,
+  and that it is /at least/ as reliable as the group(s) issuing it is
+  also critical.  Millions of financial fraud phone calls flood
+  Albertans' phones daily, pillaging our neighbours and grand-parents,
+  each carrying the government issued identity of the Canadian phone
+  number it "originates" from – under the cover of regulators.
+  /Everyone/ involved knows where the call is coming from (the
+  termination contract with the VoIP carrier), who is carrying it into
+  our phone system (the VoIP carrier's contract with phone system
+  providers), and who they are calling - except for /you/.  Allowing
+  arbitrary hostile groups to ravage a community under the cover of
+  darkness has been used throughout history to subjugate free people.
+  If the government can issue identity documents to whomever they wish,
+  and you are forced to trust them, how free are you?
 
-  The Alberta Buck enforces these principles.
+  The Alberta Buck enforces these principles: the freedom to /transact
+  in privacy and peace/, and the confidence that your counterparty /is
+  who they say they are/.
 
 
-1.1 Revealing Identity
-──────────────────────
+1.1 Revealing Identity while Preserving Privacy
+───────────────────────────────────────────────
 
   If I am suspected of a crime, an Alberta court can compel me to
-  decrypt transactions they suspect are related to that crime, and
-  reveal the identity of counterparties I've transacted with.  I may
-  resist, and face the consequences.  But the organization that Alberta
-  tasks with overseeing the authenticity of my identity cannot simply
-  authorize decryption of my counterparties!  They can only vouch for my
-  identity, just as I can vouch for my daughter's.
+  decrypt the participants in BUCK transactions they suspect are related
+  to that crime, and reveal the identity of counterparties I've
+  transacted with.  I may resist, and face the consequences.  But the
+  organizations that Alberta tasks with overseeing the authenticity of
+  my Alberta issued identity must not be able to simply authorize
+  decryption of my counterpartys' identities!  They can only vouch for
+  and reveal the identities they've directly issued, just as I can vouch
+  for my daughter's – they can't decrypt arbitrary participants in each
+  transaction.
 
   This is how the cryptography enforces it: each re-encrypted identity
   is an ElGamal ciphertext under the specific counterparty's public key.
@@ -231,20 +144,34 @@ Table of Contents
   key, not their own.  The government cannot decrypt it.  No registry
   operator, no Holochain node, no subpoena served on anyone other than a
   direct participant can break this.  A court must compel a /specific
-  participant/ to decrypt a /specific transaction's/ identity data.
-  Every individual's credential must be attacked separately.  The cost
-  to surveil is O(N), not O(1).
+  participant/ to decrypt a /specific transaction's counterparty's/
+  identity data.  Every individual's credential must be attacked
+  separately.  The cost to surveil is O(N), not O(1).
+
+
+1.1.1 The Identity Fountain
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  This is accomplished by empowering each Alberta Buck account holder to
+  issue encrypted copies of their identity unique to each counterparty,
+  in a way that preserves privacy but allows verification of the copies
+  back to a root identity signed by the issuer.
+
+  The key to maintaining Privacy (nobody can determine /which/ identity
+  an account is associated with) while ensuring Validity (was a true
+  re-encryption of a signed identity), is to have available a continuous
+  fountain of fresh copies of every identity.
 
 
 1.2 Accounts Belong to Someone
 ──────────────────────────────
 
   I may be a citizen of Alberta and have a minor child.  My child's
-  identity is vouched by me, and I am vouched by Alberta.  I have
-  several accounts associated with encrypted copies of my identity
-  (income, savings, etc) and several unencrypted (walking-around money).
-  I can transfer money from my savings to my walking-around account
-  (anonymously, via my BUCK account at ATB).
+  identity is vouched by me, and my identity is vouched by Alberta.  I
+  have several accounts associated with encrypted copies of my identity
+  (income, savings, etc) and several unencrypted accounts
+  (walking-around money).  I can transfer money from my savings to my
+  walking-around account (anonymously, via my BUCK account at ATB).
 
   My encrypted savings account identity has been authorized by ATB to
   send funds.  My walking-around money account has a plaintext identity,
@@ -258,10 +185,10 @@ Table of Contents
   set up a Starbucks account, and ask them to authorize me to send money
   to them.  Again, allowing with BUCKs what is already allowed with a
   pre-loaded Starbucks card – private transactions with a public
-  account.  Starbucks and Visa both know who paid to fund the Starbucks
-  card, and who funded their Starbucks account with that card.  Now,
-  citizens can set up similar arrangements and retain that knowledge
-  amongst themselves.
+  account.  Starbucks and Visa both know who paid to fund the Visa card,
+  and who funded their Starbucks account with that card.  Now, citizens
+  can set up similar arrangements and retain that knowledge amongst
+  themselves.
 
   If a court compels one of the participants (for example, as the result
   of an arrest in a sting operation against some members of a group
