@@ -10,38 +10,31 @@
 #+EXPORT_FILE_NAME: alberta-buck-identity
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
-#+OPTIONS: toc:nil
 
 #+PROPERTY: header-args :exports both :results output
-
-#+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
 #+PROPERTY: header-args:python :session dhke :results output table
 
 #+BEGIN_ABSTRACT
-  Every operation in the Alberta Buck ecosystem has identity requirements.  Some
-  operations require fully public identity (oracle claims, governance votes).
-  Others require only that the participant is a verified identity, without
-  disclosing who they are (BUCK transfers).  DeFi integrations (Uniswap pools,
-  lending protocols) introduce contract addresses as counterparties, which also
-  need identities associated with their deployers.
+  Alberta Buck transactions carry provably authentic identity -- without
+  exposing it.  Every participant holds an ElGamal ciphertext[fn:9] of their
+  identity, encrypted under their own public key, signed by the issuing
+  authority, and published to the issuer's Holochain source chain.  When a
+  transaction requires identity exchange, the participant re-encrypts under the
+  counterparty's key and produces a Chaum-Pedersen proof[fn:7]: a compact,
+  unforgeable mathematical guarantee that the re-encrypted ciphertext contains
+  the same identity as the issuer-signed original.  No one -- not the contract,
+  not the network, not the government -- sees the plaintext.
 
-  Identity credentials are ElGamal ciphertexts encrypted under the participant's
-  public key, signed by the issuing authority's private key, and published to the
-  issuer's Holochain source chain -- immutable, auditable, and verifiable against
-  the issuer's well-known public key.  All participants use ElGamal over the same
-  elliptic curve group (alt_bn128), enabling Chaum-Pedersen proofs of correct
-  re-encryption: when Alice must share her identity with counterparty Bob, she
-  re-encrypts her credential under Bob's public key and produces a proof --
-  verifiable by anyone -- that the re-encrypted ciphertext contains the same
-  identity as her issuer-signed credential, without revealing the identity
-  itself.  On-chain verification costs ~27,000 gas (3-4 elliptic curve scalar
-  multiplications via Ethereum precompiles), compared to ~200,000+ gas for
-  SNARK-based alternatives.
+  On-chain verification costs ~29,000 gas via Ethereum's alt_bn128
+  precompiles[fn:9], compared to ~200,000+ for SNARK-based alternatives.  Proof
+  generation is instantaneous.  No trusted setup.  No pairing operations.  The
+  same discrete-logarithm hardness assumption that secures Ethereum itself
+  secures every identity proof in the system.
 
-  This document tabulates the identity requirements for every operation, details
-  the ElGamal Chaum-Pedersen cryptographic architecture, and demonstrates through
-  attack scenarios that the scheme defeats identity forgery, substitution, and
-  collusion attacks while maintaining very low on-chain costs.
+  This document specifies identity requirements for every Alberta Buck
+  operation, details the ElGamal Chaum-Pedersen architecture, and demonstrates
+  through adversarial scenarios that the scheme defeats forgery, substitution,
+  and collusion while keeping on-chain costs minimal.
 #+END_ABSTRACT
 
 #+TOC: headlines 2
@@ -65,34 +58,34 @@
 
 ** Revealing Identity
 
-   If I am suspected of a crime, an Alberta court can compel me to decrypt transactions they suspect
-   are related to that crime, and reveal the identity of counterparties I've transacted with.  I may
-   resist doing so, and face the consequences: the organization that the Alberta government tasks
-   with overseeing the authenticity of my Alberta identity cannot simply authorize decryption of my
-   transaction counterparties!  They can only vouch for my (decrypted) identity, just as I can vouch for
+   If I am suspected of a crime, an Alberta court can compel me to decrypt
+   transactions they suspect are related to that crime, and reveal the identity
+   of counterparties I've transacted with.  I may resist, and face the
+   consequences.  But the organization that Alberta tasks with overseeing the
+   authenticity of my identity cannot simply authorize decryption of my
+   counterparties!  They can only vouch for my identity, just as I can vouch for
    my daughter's.
 
-   Only the participants in a transaction can decrypt the re-encrypted identity
-   blobs exchanged during that transaction.  Each re-encrypted identity is an
-   ElGamal ciphertext under the specific counterparty's public key -- only that
+   This is how the cryptography enforces it: each re-encrypted identity is an
+   ElGamal ciphertext under the specific counterparty's public key.  Only that
    counterparty's private key can recover the plaintext.  The identity issuer
-   cannot decrypt it (they encrypted under Alice's public key, not their own).
-   The government cannot decrypt it.  No registry operator or Holochain node
-   can decrypt it.  A court must compel a /specific participant/ to decrypt a
-   /specific transaction's/ identity data.  The attack cost is O(N): each
-   individual's credential must be attacked separately, rather than compromising
-   a single custodian.
+   cannot decrypt it -- they encrypted under my public key, not their own.  The
+   government cannot decrypt it.  No registry operator, no Holochain node, no
+   subpoena served on anyone other than a direct participant can break this.  A
+   court must compel a /specific participant/ to decrypt a /specific
+   transaction's/ identity data.  Every individual's credential must be attacked
+   separately.  The cost to surveil is O(N), not O(1).
 
 
 ** Accounts Belong to Someone
 
    I may be a citizen of Alberta and have a minor child.  My child's identity is vouched by me, and
    I am vouched by Alberta.  I have several accounts associated with encrypted copies of my identity
-   (income, savings, etc) and several unencrypted (walking around money).  I can transfer money from
-   my savings to my walking around account (anonymously, via my BUCK account at ATB).
+   (income, savings, etc) and several unencrypted (walking-around money).  I can transfer money from
+   my savings to my walking-around account (anonymously, via my BUCK account at ATB).
 
-   My encrypted savings account Identity has been authorized by ATB to send funds.  My walking
-   around money account has a plaintext Identity, so Starbucks' BUCK account doesn't need to
+   My encrypted savings account identity has been authorized by ATB to send funds.  My walking-around
+   money account has a plaintext identity, so Starbucks' BUCK account doesn't need to
    pre-authorize incoming transactions -- it accepts BUCK transfers from any BUCK account with a
    public identity.
 
@@ -105,15 +98,14 @@
    arrangements and retain that knowledge amongst themselves.
 
    If a court compels one of the participants (for example, as the result of an arrest in a sting
-   operation against some members of a group performing some illicit activity), then that persons
+   operation against some members of a group performing some illicit activity), then that person's
    transactions with other members of the group can be discovered.  Otherwise: /financial activity
-   remains confidential, at the sole choice the participants/.
+   remains confidential, at the sole choice of the participants/.
 
-   An expectation that any government or bank functionary (or any random attacker, due to government
-   or bank incompetence) can know the details of a citizens financial activities is unacceptable.
-   The attack cost is O(N) vs. O(1); every individual's credential must be attacked, instead of just
-   being able to attack or compel one disgruntled government or bank employee.
-   
+   The expectation that any government or bank functionary -- or any random attacker exploiting
+   government or bank incompetence -- can know the details of a citizen's financial activities is
+   unacceptable.  The attack cost must be O(N), not O(1): every individual's credential must be
+   attacked separately, not extracted from one compromised custodian.
 
 ** Counterparties Exchange Identities
 
@@ -157,7 +149,7 @@
         (Alice did not substitute false data)
 
       Verification requires only 3-4 elliptic curve scalar multiplications
-      (~27,000 gas on Ethereum via the alt_bn128 precompiles).  No SNARK
+      (~29,000 gas on Ethereum via the alt_bn128 precompiles).  No SNARK
       circuits, no trusted setup, no pairing operations.
 
    4. *Decryption*: Only Bob can decrypt ~E_bob~ (he has ~sk_bob~).  Only Alice
@@ -175,7 +167,7 @@
 ** ElGamal Over a Mandated Curve Group
 
    Alberta Buck mandates that all identity credentials, all participant key
-   pairs, and all re-encryption operations use ElGamal over the alt_bn128
+   pairs, and all re-encryption operations use ElGamal[fn:9] over the alt_bn128
    elliptic curve -- the curve supported by Ethereum's ~ecAdd~ / ~ecMul~
    precompiles at addresses 0x06 and 0x07.  This mandate is a design strength,
    not a limitation:
@@ -202,9 +194,9 @@
 
 ** Chaum-Pedersen Proof of Re-Encryption Correctness
 
-   The Chaum-Pedersen protocol is a sigma protocol (Schnorr family) that proves
-   two ElGamal ciphertexts encrypt the same message point, without revealing the
-   message.  Made non-interactive via the Fiat-Shamir heuristic, the proof is
+   The Chaum-Pedersen protocol[fn:7] is a sigma protocol (Schnorr family) that
+   proves two ElGamal ciphertexts encrypt the same message point, without
+   revealing the message.  Made non-interactive via the Fiat-Shamir heuristic, the proof is
    compact (~128 bytes: two scalars and two curve points) and verification
    requires only 3-4 multi-scalar multiplications.
 
@@ -385,7 +377,7 @@
 
     The IdentityRegistry accepts credentials only from *trusted issuers* --
     public keys registered in the TrustedIssuersRegistry (part of the ERC-3643
-    framework).  Registration verifies:
+    framework[fn:8]).  Registration verifies:
 
     #+begin_example
     SigVerify(pk_trusted_issuer, E_alice, sigma) == true
@@ -529,12 +521,14 @@
     M = C_b - sk_bob * R_b
     #+end_example
 
-    If Bob claims he "lost" his private key:
+    If Bob claims he "lost" his identity private key (the alt_bn128 key, which
+    is distinct from his Ethereum signing key):
 
-    - The court observes that Bob's address continues to transact on Ethereum
-      (signing transactions requires the corresponding private key).
     - The court holds Bob in contempt, as it would for any refusal to produce
-      subpoenaed records.
+      subpoenaed records.  "I lost the key" is no more credible for a
+      cryptographic key than for a filing cabinet -- particularly when the key
+      was generated during a KYC ceremony and Bob accepted transactions
+      requiring its use.
     - Even without Bob's cooperation, the court can establish from the on-chain
       proof verification that ~E_bob~ /does/ contain a genuine identity.
       Bob's refusal to decrypt is itself evidence of obstruction.
@@ -710,7 +704,7 @@
   |                | isVerified(addr) == true      | parties, decryptable only by participants |
   |                |                              | + optional regulatory escrow key          |
   | Public         | Address is verified + public  | Full name, jurisdiction, credentials,     |
-  |                | identity claim on ONCHAINID   | track record -- world-readable            |
+  |                | identity claim (plaintext)    | track record -- world-readable            |
   | Contract       | Contract address is verified; | Deployer's identity is the contract's     |
   |                | linked to deployer's identity | identity; receipts encrypted to deployer  |
   | Permissionless | No identity check             | N/A                                       |
@@ -840,14 +834,13 @@
 
 * On-Chain Integration: Receipts and Transfer Flow
 
-  The ElGamal Chaum-Pedersen architecture resolves the fundamental tension
-  between blockchain transparency and identity privacy.  This section details
-  how those cryptographic primitives integrate with the ERC-20 contract.
+  The cryptography is sound.  The question is where it meets the EVM -- a
+  machine that hides nothing.
 
 ** The Receipt Constraint
 
    *Events are public.*  Every ~emit~ on Ethereum is readable by every node.
-   A naive design that emits ONCHAINID addresses or public keys in receipt
+   A naive design that emits identity addresses or public keys in receipt
    events creates a permanent, public, linkable identity graph of every BUCK
    transfer -- defeating the entire privacy model.
 
@@ -915,7 +908,7 @@
    - Alice's address approved a spender (same as standard ERC-20 Approval)
    - Four ~uint256~ values encoding an ElGamal ciphertext -- opaque curve
      point coordinates that only the spender can decrypt
-   - *No* ONCHAINID address, *no* identity public key, *no* linkable identifier
+   - *No* identity address, *no* public key, *no* linkable identifier
 
    What the contract verified (in ~29,000 gas):
    - The ciphertext contains Alice's real identity (Chaum-Pedersen proof passed
@@ -1252,7 +1245,7 @@
     4. Stores keccak256(E_bob) in _receiptFragments[alice][0xPOOL]
     5. Emits IdentityExchange(alice, 0xPOOL, E_bob)
        -- the event contains ONLY the opaque ElGamal ciphertext
-       -- no ONCHAINID address, no identity key, no linkable identifier
+       -- no identity address, no public key, no linkable identifier
     #+end_example
 
     *This is the critical moment.*  Alice is directly calling the BUCK
@@ -1311,9 +1304,9 @@
     #+end_example
 
     *What the public sees*: the same from/to/amount as the standard ERC-20
-    Transfer event, plus two opaque hashes.  No ONCHAINID addresses.  No
-    public keys.  No linkable identity information beyond the pseudonymous
-    Ethereum addresses.
+    Transfer event, plus two opaque hashes.  No identity addresses.  No public
+    keys.  No linkable identity information beyond the pseudonymous Ethereum
+    addresses.
 
     *What the contract verified* (during ~approve~, earlier): the
     Chaum-Pedersen proof that Alice's re-encrypted ElGamal ciphertext
