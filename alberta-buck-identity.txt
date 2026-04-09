@@ -1,36 +1,39 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                ALBERTA BUCK – IDENTITY AND CRYPTOGRAPHIC
-                                RECEIPTS
+                            RECEIPTS (V0.1)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-                               2026-03-14
+                               2026-04-08
 
 
 Alberta Buck transactions carry provably authentic identity – without
 exposing it.  Every participant holds an ElGamal ciphertext[1] of their
-identity, encrypted under their own public key, signed by the issuing
-authority, and published to the issuer's Holochain source chain.  When a
-transaction requires identity exchange, the participant re-encrypts
-under the counterparty's key and produces a Chaum-Pedersen proof[2]: a
-compact, unforgeable mathematical guarantee that the re-encrypted
-ciphertext contains the same identity as the issuer-signed original.  No
-one – not the contract, not the network, not the government – sees the
-plaintext.
+identity, encrypted under their own public key, backed by a
+Pointcheval-Sanders rerandomizable signature[2] from the issuing
+authority.  A citizen with multiple accounts derives an independent,
+unlinkable credential for each – rerandomizing the signature offline –
+yet every credential is independently verifiable as issued by the same
+authority.  When a transaction requires identity exchange, the
+participant re-encrypts under the counterparty's key and produces a
+Chaum-Pedersen proof[3]: a compact, unforgeable guarantee that the
+re-encrypted ciphertext contains the same identity as the registered
+credential.  No one – not the contract, not the network, not the
+government – sees the plaintext.
 
-On-chain verification costs ~29,000 gas via Ethereum's alt_bn128
-precompiles[1], compared to ~200,000+ for SNARK-based alternatives.
-Proof generation is instantaneous.  No trusted setup.  No pairing
-operations.  The same discrete-logarithm hardness assumption that
-secures Ethereum itself secures every identity proof in the system.
+Per-transaction identity verification costs ~29,000 gas via Ethereum's
+alt_bn128 scalar multiplication precompiles – no pairing operations at
+transaction time.  Credential registration costs ~200,000 gas (a
+one-time pairing-based verification of the Pointcheval-Sanders
+signature).  No trusted setup.  Proof generation is instantaneous.
 
 This document specifies identity requirements for every Alberta Buck
-operation, details the ElGamal Chaum-Pedersen architecture, and
-demonstrates through adversarial scenarios that the scheme defeats
-forgery, substitution, and collusion while keeping on-chain costs
-minimal.
+operation, details the ElGamal + Pointcheval-Sanders + Chaum-Pedersen
+architecture, and demonstrates through adversarial scenarios that the
+scheme defeats forgery, substitution, and collusion while keeping
+on-chain costs minimal. ([PDF], [Text])
 
 Table of Contents
 ─────────────────
@@ -39,7 +42,7 @@ Table of Contents
 .. 1. Revealing Identity while Preserving Privacy
 .. 2. Accounts Belong to Someone
 .. 3. Counterparties Exchange Identities
-.. 4. ElGamal Over a Mandated Curve Group
+.. 4. ElGamal and Pointcheval-Sanders Over a Mandated Curve Group
 .. 5. Chaum-Pedersen Proof of Re-Encryption Correctness
 2. Attacks and Defenses
 .. 1. Attack 1: Alice Substitutes a False Identity for Bob
@@ -50,7 +53,7 @@ Table of Contents
 .. 6. Attack 6: Eve Links Alice's Identities Across Counterparties
 .. 7. Attack 7: Alice Uses a Revoked or Expired Credential
 .. 8. Attack 8: Unwitting Bob Receives a Transaction From Criminal Alice
-.. 9. Summary: Why Chaum-Pedersen Defeats All Substitution Attacks
+.. 9. Summary: Why the Scheme Defeats All Attacks
 3. Identity Visibility Modes
 4. Operations Table
 .. 1. Core BUCK (ERC-20) Operations
@@ -83,12 +86,17 @@ Table of Contents
 .. 6. Privacy of Pool Deployer Identity
 10. Alternative Approaches Considered
 .. 1. Pedersen Commitments + Groth16 ZK Proofs
-.. 2. Proxy Re-Encryption (NuCypher Umbral)[4]
+.. 2. Proxy Re-Encryption (NuCypher Umbral)[5]
 .. 3. BBS+ Signatures with Selective Disclosure
 .. 4. Camenisch-Shoup Verifiable Encryption
-.. 5. Pedersen Equality Proofs (Homomorphic Comparison)[5]
+.. 5. Pedersen Equality Proofs (Homomorphic Comparison)[6]
 .. 6. Comparison Summary
 11. Summary: Identity Requirement by Risk Level
+
+
+[PDF] <https://perry.kundert.ca/images/alberta-buck-identity.pdf>
+
+[Text] <https://perry.kundert.ca/images/alberta-buck-identity.txt>
 
 
 1 Identity with Anonymity
@@ -152,15 +160,137 @@ Table of Contents
 1.1.1 The Identity Fountain
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  This is accomplished by empowering each Alberta Buck account holder to
-  issue encrypted copies of their identity unique to each counterparty,
-  in a way that preserves privacy but allows verification of the copies
-  back to a root identity signed by the issuer.
+  A citizen with income, savings, inheritance, and walking-around-money
+  accounts should not have those accounts linkable to each other by any
+  outside observer.  Ethereum balances are public; if all of Alice's
+  accounts trace back to the same identity credential, her entire
+  financial life is exposed to anyone who notices the link.
 
-  The key to maintaining Privacy (nobody can determine /which/ identity
-  an account is associated with) while ensuring Validity (was a true
-  re-encryption of a signed identity), is to have available a continuous
-  fountain of fresh copies of every identity.
+  The identity fountain solves this.  It gives every citizen the ability
+  to derive unlimited, unlinkable identity credentials – each
+  independently verifiable as issued by the same authority – from a
+  single KYC ceremony.  The construction uses Pointcheval-Sanders (PS)
+  rerandomizable signatures[2] over the alt_bn128 curve.
+
+
+◊ 1.1.1.1 Issuance: The Issuer Signs Once
+
+  During the KYC ceremony, the issuer:
+
+  1. Verifies Alice's identity (documents, biometrics, whatever the
+     jurisdiction requires).
+  2. Computes the identity scalar `m = H(identity_data)'.
+  3. Picks a random point `h' in `G_1' and computes the PS signature:
+
+     `sigma = (h, (x + m * y) * h)'
+
+     where `(x, y)' is the issuer's secret key.
+  4. Gives Alice the identity scalar `m' and signature `(sigma_1,
+     sigma_2)'.
+  5. Publishes the issuance event to the issuer's Holochain source
+     chain.
+
+  The issuer's public key `(X, Y) = (x * g_2, y * g_2)' in `G_2' is
+  registered in the TrustedIssuersRegistry on Ethereum.  The issuer is
+  now done – permanently, if desired.
+
+
+◊ 1.1.1.2 Derivation: Alice Generates Credentials Offline
+
+  For each new Ethereum account, Alice's Holochain wallet:
+
+  1. Picks a random scalar `t' and rerandomizes the PS signature:
+
+     `sigma' = (t * sigma_1, t * sigma_2)'
+
+     This `sigma'' is a valid PS signature on the same `m' under the
+     same issuer public key – but is /statistically unlinkable/ to
+     `sigma' or to any other rerandomization.  No algorithm can
+     correlate `sigma'' back to `sigma'.
+
+  2. Generates a fresh identity key pair `(sk_new, pk_new)' on
+     alt_bn128.
+
+  3. Encrypts the identity under the new key using ElGamal:
+
+     `E_new = (r * G, m * G + r * pk_new)'
+
+  4. Computes a non-interactive zero-knowledge proof `pi' that `E_new'
+     encrypts the same `m' that `sigma'' signs:
+
+     ┌────
+     │ "I know (m, t, r) such that:
+     │   a) e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)   -- valid PS signature
+     │   b) C = m * G + r * pk_new                       -- ElGamal encryption of m
+     │   c) R = r * G                                    -- consistent randomness"
+     └────
+
+  5. Packages `(pk_new, E_new, sigma', pi)' for registration.
+
+  This derivation runs entirely on Alice's device.  She can pre-generate
+  a hundred credentials in a batch and store them in her Holochain
+  wallet, pulling one out whenever she creates a new account.
+
+
+◊ 1.1.1.3 Registration: One-Time On-Chain Verification
+
+  Alice registers the derived credential in the IdentityRegistry:
+
+  ┌────
+  │ identityRegistry.registerCredential(
+  │     alice_new_address,
+  │     pk_new,          // identity public key
+  │     E_new,           // ElGamal ciphertext (4 uint256)
+  │     sigma_prime,     // rerandomized PS signature (2 G_1 points)
+  │     pi               // NIZK proof linking sigma' to E_new
+  │ )
+  └────
+
+  The contract verifies the PS signature and NIZK proof using the
+  `ecPairing' precompile (address `0x08'), `ecMul', and `ecAdd'.  Gas
+  cost: ~200,000 gas, paid once per account.
+
+  After registration, `isVerified(alice_new_address) == true'.  The
+  credential is stored on-chain as an ElGamal ciphertext and an identity
+  public key.  No subsequent operation consults the PS signature again;
+  per-transaction verification is pure Chaum-Pedersen (~29,000 gas).
+
+
+◊ 1.1.1.4 What the World Sees
+
+  Alice creates five accounts over two years.  Each registers a
+  credential `(pk_i, E_i, sigma'_i, pi_i)'.  An observer can verify:
+
+  • Each `sigma'_i' was produced by the known issuer – the pairing check
+    passes.
+  • Each `E_i' encrypts the identity that `sigma'_i' signs – the proof
+    `pi_i' confirms it.
+  • Whether any two credentials belong to the same person – *no*.
+
+  PS rerandomization is /statistically/ unlinkable – not merely
+  computationally hard to correlate, but information-theoretically
+  impossible.  The credentials contain zero bits of mutual information.
+  Alice's inheritance account, her walking-around-money account, her
+  savings account – each carries the issuer's stamp of authenticity,
+  each is cryptographically invisible to the others.
+
+
+◊ 1.1.1.5 Epoch-Based Credential Renewal
+
+  If the issuer revokes Alice's identity (fraud, death, court order),
+  all her derived credentials must be invalidated – without linking
+  them.
+
+  Credentials carry an expiry epoch (e.g., one year).  The issuer
+  publishes epoch keys; credential derivation requires the current epoch
+  key.  Revocation means the issuer refuses to provide Alice's next
+  epoch key.  Expired credentials are rejected at `isVerified' time.
+  Alice must periodically re-derive from a fresh issuance – giving the
+  issuer a natural checkpoint for continued eligibility.
+
+  This fits Alberta Buck's model: the issuer remains the trust anchor
+  for "is this person still in good standing," which is the real-world
+  question regardless of the cryptography.
 
 
 1.2 Accounts Belong to Someone
@@ -214,82 +344,98 @@ Table of Contents
   The identity credential lifecycle:
 
   1. *Issuance*: A trusted issuer (the Alberta government, ATB
-     Financial, etc.)  verifies Alice's identity through a KYC ceremony.
-     The issuer encrypts Alice's identity data `I' under Alice's public
-     key using ElGamal over alt_bn128:
+     Financial, etc.)  verifies Alice's identity through a KYC ceremony
+     and produces a Pointcheval-Sanders signature on her identity scalar
+     `m = H(identity_data)'.  Alice receives `(m, sigma)' and stores it
+     in her Holochain wallet.  (See [The Identity Fountain] for the full
+     PS construction.)
 
-     `E_alice = (r * G, r * pk_alice + I * G)'
+  2. *Derivation*: For each Ethereum account, Alice's wallet
+     rerandomizes the PS signature, generates a fresh identity key pair,
+     encrypts her identity under the new key using ElGamal, and produces
+     a NIZK proof linking the rerandomized signature to the ciphertext.
+     This runs entirely offline.
 
-     The issuer signs this ciphertext with their well-known private key:
+  3. *Registration*: Alice registers the derived credential `(pk,
+     E_alice, sigma', pi)' in the on-chain IdentityRegistry.  The
+     contract verifies the PS signature and NIZK proof via the
+     `ecPairing' precompile (`200,000 gas, one-time).  After
+     registration, ~isVerified(alice) == true'.
 
-     `sigma = Sign(sk_issuer, E_alice)'
-
-     The signed credential `(E_alice, sigma)' is published to the
-     issuer's Holochain source chain, where it is immutable, auditable
-     by anyone, and verifiable against the issuer's well-known public
-     key.  A reference (hash of `E_alice') is registered in the on-chain
-     IdentityRegistry alongside Alice's Ethereum address.
-
-  2. *Re-encryption*: When Alice must identify herself to counterparty
+  4. *Re-encryption*: When Alice must identify herself to counterparty
      Bob (e.g., during an `approve' call on the BUCK contract), she
      decrypts her credential locally (she knows `sk_alice') and
      re-encrypts the identity under Bob's public key with fresh
      randomness:
 
-     `E_bob = (r' * G, r' * pk_bob + I * G)'
+     `E_bob = (r' * G, r' * pk_bob + M)'
 
-     She produces a Chaum-Pedersen proof `pi' that `E_bob' encrypts the
-     same point `I * G' as her issuer-signed `E_alice' – without
-     revealing `I'.
+     where `M = m * G' is the identity message point.  She produces a
+     Chaum-Pedersen proof[3] `pi' that `E_bob' encrypts the same point
+     `M' as her registered `E_alice' – without revealing `m'.
 
-  3. *Verification*: Anyone (including the BUCK smart contract) can
-      verify:
-     • `sigma' is a valid signature from the issuer on `E_alice' (the
-       credential is genuine, not self-issued)
+  5. *Verification*: The BUCK smart contract verifies:
+     • `E_alice' is read from the IdentityRegistry (not from Alice's
+       calldata)
      • `pi' proves `E_bob' encrypts the same plaintext as `E_alice'
-       (Alice did not substitute false data)
 
      Verification requires only 3-4 elliptic curve scalar
-     multiplications (~29,000 gas on Ethereum via the alt_bn128
-     precompiles).  No SNARK circuits, no trusted setup, no pairing
-     operations.
+     multiplications (~29,000 gas via the alt_bn128 precompiles).  No
+     pairing operations at transaction time.  The PS signature was
+     verified once, at registration, and is never consulted again.
 
-  4. *Decryption*: Only Bob can decrypt `E_bob' (he has `sk_bob').  Only
+  6. *Decryption*: Only Bob can decrypt `E_bob' (he has `sk_bob').  Only
      Alice can decrypt `E_alice' (she has `sk_alice').  The issuer
-     cannot decrypt either (they encrypted under Alice's public key, not
-     their own).  No third party can decrypt any re-encrypted copy.
+     cannot decrypt either – they signed Alice's identity scalar, they
+     never encrypted under any key.  No third party can decrypt any
+     re-encrypted copy.
 
   There is no need for Proxy Re-Encryption (PRE), because Alice is
   online when she calls `approve' and can perform the re-encryption
-  directly.  The Chaum-Pedersen proof is the trust anchor: it is a
-  mathematical guarantee – unforgeable under the discrete logarithm
-  assumption – that Alice re-encrypted her genuine, issuer-signed
-  identity and not a substitute.
+  directly.  The Chaum-Pedersen proof is the trust anchor at transaction
+  time: it is a mathematical guarantee – unforgeable under the discrete
+  logarithm assumption – that Alice re-encrypted her genuine, registered
+  identity and not a substitute.  The PS signature is the trust anchor
+  at registration time: it guarantees the credential was issued by an
+  authorized issuer.
 
 
-1.4 ElGamal Over a Mandated Curve Group
-───────────────────────────────────────
+[The Identity Fountain] See section 1.1.1
+
+
+1.4 ElGamal and Pointcheval-Sanders Over a Mandated Curve Group
+───────────────────────────────────────────────────────────────
 
   Alberta Buck mandates that all identity credentials, all participant
-  key pairs, and all re-encryption operations use ElGamal[1] over the
-  alt_bn128 elliptic curve – the curve supported by Ethereum's `ecAdd' /
-  `ecMul' precompiles at addresses 0x06 and 0x07.  This mandate is a
-  design strength, not a limitation:
+  key pairs, all re-encryption operations, and all issuer signatures use
+  the alt_bn128 elliptic curve (BN254)[1] – the curve supported by
+  Ethereum's precompiled contracts:
 
-  • *Uniform proof verification*: every Chaum-Pedersen proof uses the
-    same group, so a single on-chain verifier handles all identity
-    proofs.
-  • *Precompile efficiency*: alt_bn128 scalar multiplication costs 6,000
-    gas via the EVM precompile, vs. ~100,000+ gas for in-contract EC
-    math.
-  • *No cross-group compatibility issues*: since all participants use
-    the same curve, re-encryption between any two participants is always
-    algebraically compatible.
+  • `ecAdd' (address `0x06'): point addition, 150 gas
+  • `ecMul' (address `0x07'): scalar multiplication, 6,000 gas
+  • `ecPairing' (address `0x08'): bilinear pairing check, 34,000 gas per
+    pair + 45,000 base
+
+  This mandate is a design strength, not a limitation:
+
+  • *Uniform proof verification*: every Chaum-Pedersen proof and every
+    Pointcheval-Sanders signature verification uses the same curve
+    group, so a single on-chain verifier handles all identity
+    operations.
+  • *Precompile efficiency*: per-transaction Chaum-Pedersen verification
+    uses `ecMul' / `ecAdd' (`29,000 gas).  One-time credential
+    registration uses ~ecPairing' for PS signature verification
+    (~200,000 gas).
+  • *No cross-group compatibility issues*: since all participants,
+    issuers, and credentials use the same curve, re-encryption between
+    any two participants is always algebraically compatible.
 
   Participant key pairs for identity purposes are distinct from their
   Ethereum signing keys (which use secp256k1).  The identity key pair is
-  generated during the KYC ceremony and the public key is registered in
-  the IdentityRegistry alongside the participant's Ethereum address.
+  generated during credential derivation (not during the KYC ceremony –
+  the KYC ceremony produces only the PS signature).  The public key is
+  registered in the IdentityRegistry alongside the participant's
+  Ethereum address.
 
   When Alice re-encrypts for N different counterparties, each
   re-encryption uses independent randomness.  The resulting ciphertexts
@@ -302,7 +448,7 @@ Table of Contents
 1.5 Chaum-Pedersen Proof of Re-Encryption Correctness
 ─────────────────────────────────────────────────────
 
-  The Chaum-Pedersen protocol[2] is a sigma protocol (Schnorr family)
+  The Chaum-Pedersen protocol[3] is a sigma protocol (Schnorr family)
   that proves two ElGamal ciphertexts encrypt the same message point,
   without revealing the message.  Made non-interactive via the
   Fiat-Shamir heuristic, the proof is compact (~128 bytes: two scalars
@@ -314,10 +460,10 @@ Table of Contents
 ╌╌╌╌╌╌╌╌╌╌╌
 
   ┌────
-  │ Issuer-signed credential (public, on issuer's Holochain source chain):
+  │ Registered credential (verified at registration via PS signature + NIZK):
   │   E_alice = (R_a, C_a) = (r_a * G,  r_a * pk_alice + M)
-  │   where M = I * G  (identity encoded as a curve point)
-  │   sigma = Sign(sk_issuer, E_alice)
+  │   where M = m * G  (identity encoded as a curve point, m = H(identity_data))
+  │   Rerandomized PS signature sigma' verified at registration (not consulted again)
   │ 
   │ Alice's re-encryption for Bob:
   │   E_bob = (R_b, C_b) = (r_b * G,  r_b * pk_bob + M)
@@ -349,12 +495,13 @@ Table of Contents
 
   ┌────
   │ Given public inputs:
-  │   E_alice = (R_a, C_a)    -- from IdentityRegistry (issuer-signed, read
-  │                               from storage -- NOT supplied by Alice)
-  │   E_bob   = (R_b, C_b)    -- from Alice's approve() calldata
+  │   E_alice = (R_a, C_a)     -- from IdentityRegistry (PS-verified at
+  │                               registration, read from storage -- NOT
+  │                               supplied by Alice)
+  │   E_bob   = (R_b, C_b)     -- from Alice's approve() calldata
   │   pk_alice                 -- from IdentityRegistry
   │   pk_bob                   -- from IdentityRegistry
-  │   proof   = (e, s1, s2)   -- Fiat-Shamir challenge and responses
+  │   proof   = (e, s1, s2)    -- Fiat-Shamir challenge and responses
   │ 
   │ Verify:
   │   Recompute challenge e from commitments
@@ -364,13 +511,15 @@ Table of Contents
 
   Critical implementation requirement: `E_alice' is *read from on-chain
   storage* (the IdentityRegistry), not supplied by Alice as calldata.
-  This anchors the proof to the issuer-signed credential.  If Alice
-  could supply her own `E_alice', she could substitute a fake credential
-  and produce a valid proof against it.
+  This anchors the proof to the registered credential.  If Alice could
+  supply her own `E_alice', she could substitute a fake credential and
+  produce a valid proof against it.
 
 
 1.5.4 Gas Cost
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+◊ 1.5.4.1 Per-Transaction (Chaum-Pedersen Verification at `approve')
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Operation                  Count  Gas each  Total         
@@ -383,17 +532,31 @@ Table of Contents
    *Total*                                     *~29,000 gas* 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Compare: Groth16 SNARK verification requires a pairing check (`113,000
-      gas for the ~ecPairing' precompile alone) plus additional EC
-      operations, totaling ~200,000-300,000 gas.  The Chaum-Pedersen
-      approach is *7-10x cheaper*.
+  The `approve' call costs `29,000 gas for the identity proof plus the
+       standard ERC-20 approve cost (~46,000 gas), totaling ~75,000 gas.
+       This is paid once per counterparty pair.  Subsequent ~transfer'
+       and `transferFrom' calls emit only minimal receipt events
+       (addresses + opaque hashes, ~2,000 gas) with no additional proof
+       work.
 
-  The `approve' call (which includes the proof verification) costs
-      `29,000 gas for the identity proof plus the standard ERC-20
-      approve cost (~46,000 gas), totaling ~75,000 gas.  This is paid
-      once per counterparty pair.  Subsequent ~transfer' and
-      `transferFrom' calls emit only minimal receipt events (addresses +
-      opaque hashes, ~2,000 gas) with no additional proof work.
+
+◊ 1.5.4.2 One-Time (PS Signature + NIZK Verification at Registration)
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Operation                    Count  Gas each  Total          
+  ──────────────────────────────────────────────────────────────
+   `ecPairing' (precompile)       3-4  34,000    147,000        
+   `ecPairing' base cost            1  45,000    45,000         
+   `ecMul' (NIZK verification)    3-4  6,000     24,000         
+   `ecAdd' (NIZK verification)    3-4  150       600            
+   *Total*                                       *~200,000 gas* 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  This one-time registration cost is comparable to deploying a small
+  contract.  For an account that will hold meaningful value and transact
+  many times, it is negligible.  Compare: Groth16 SNARK verification
+  requires similar pairing operations (~200,000-300,000 gas) but must be
+  performed /per transaction/ if used for re-encryption proofs.
 
 
 2 Attacks and Defenses
@@ -408,16 +571,19 @@ Table of Contents
   The trust chain in every scenario is:
 
   ┌────
-  │ Issuer signs E_alice           --> credential is genuine
-  │ E_alice stored in registry     --> contract reads the genuine credential
-  │ Chaum-Pedersen proof verified  --> E_bob encrypts same identity as E_alice
-  │ Only Bob can decrypt E_bob     --> identity revealed only to counterparty
+  │ Issuer PS-signs identity m              --> identity is genuine
+  │ Alice derives (E_alice, sigma', pi)     --> credential is unlinkable
+  │ PS + NIZK verified at registration      --> credential is issuer-authorized
+  │ E_alice stored in registry              --> contract reads the genuine credential
+  │ Chaum-Pedersen proof verified           --> E_bob encrypts same identity as E_alice
+  │ Only Bob can decrypt E_bob              --> identity revealed only to counterparty
   └────
 
-  Breaking any link requires breaking either ECDSA signature
-  unforgeability or the discrete logarithm assumption on alt_bn128 –
-  both are standard hardness assumptions underpinning all of Ethereum's
-  security.
+  Breaking any link requires breaking either the q-SDH assumption (PS
+  signature unforgeability), the discrete logarithm assumption on
+  alt_bn128 (Chaum-Pedersen soundness, ElGamal security), or ECDSA
+  (Ethereum transaction authenticity) – all standard hardness
+  assumptions underpinning Ethereum's own security.
 
 
 2.1 Attack 1: Alice Substitutes a False Identity for Bob
@@ -427,7 +593,7 @@ Table of Contents
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice is a sanctioned individual.  She completed KYC under her real
-  identity and received a legitimate issuer-signed credential `E_alice'
+  identity and received a legitimate PS-verified credential `E_alice'
   containing her true identity `I'.  She now wants to transact with Bob
   but wants Bob (and any future court) to believe she is someone else –
   say, her clean associate Carol.
@@ -451,7 +617,7 @@ Table of Contents
   │ C_a - sk_alice * R_a  ==  C_b - r' * pk_bob
   └────
 
-  Expanding the left side (from the issuer-signed `E_alice' in the
+  Expanding the left side (from the registered `E_alice' in the
   registry):
 
   ┌────
@@ -488,7 +654,7 @@ Table of Contents
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   She wasted gas on a failed transaction.  Her address is still
-  associated with her real issuer-signed credential in the registry.
+  associated with her real registered credential in the registry.
   Nothing has changed.
 
 
@@ -499,45 +665,50 @@ Table of Contents
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice never completed KYC, or completed KYC but wants a credential
-  with different identity data.  She generates her own ElGamal key pair,
-  encrypts a fabricated identity `I_fake' under her public key, and
-  signs it herself:
+  with different identity data.  She picks a fabricated identity scalar
+  `m_fake = H(fake_data)', generates a random PS-like signature, creates
+  an ElGamal ciphertext, and fabricates a NIZK proof:
 
   ┌────
-  │ E_alice_fake = (r * G,  r * pk_alice + I_fake * G)
-  │ sigma_fake   = Sign(sk_alice, E_alice_fake)
+  │ m_fake       = H("Carol Smith, Alberta, ...")
+  │ sigma_fake   = (random_h, random_s)         -- not a valid PS signature
+  │ E_alice_fake = (r * G,  m_fake * G + r * pk_alice)
+  │ pi_fake      = ...                          -- fabricated NIZK
   └────
 
-  She attempts to register this credential in the IdentityRegistry and
-  publish it to a Holochain source chain.
+  She attempts to register this credential in the IdentityRegistry.
 
 
 2.2.2 Why It Fails
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  The IdentityRegistry accepts credentials only from *trusted issuers* –
-  public keys registered in the TrustedIssuersRegistry (part of the
-  ERC-3643 framework[3]).  Registration verifies:
+  The IdentityRegistry verifies the Pointcheval-Sanders signature
+  against trusted issuer public keys registered in the
+  TrustedIssuersRegistry (part of the ERC-3643 framework[4]).
+  Registration checks the pairing equation:
 
   ┌────
-  │ SigVerify(pk_trusted_issuer, E_alice, sigma) == true
+  │ e(sigma'_1, X + m * Y) == e(sigma'_2, g_2)
   └────
 
-  Alice's `sigma_fake' was signed with `sk_alice', not with any trusted
-  issuer's key.  The signature check fails.  Her credential is rejected
-  at registration, long before any `approve' call.
+  where `(X, Y)' is the trusted issuer's public key in `G_2'.  Alice
+  does not know the issuer's secret key `(x, y)', so she cannot produce
+  a `sigma'' that satisfies this equation for any `m' – let alone for
+  `m_fake'.  The PS signature is unforgeable under the q-SDH assumption.
 
-  Even if Alice publishes `(E_alice_fake, sigma_fake)' to a Holochain
-  source chain, the on-chain registry will not accept it.  Holochain
-  provides immutability and auditability of the /issuer's/ source chain;
-  it does not confer trust on self-issued credentials.  The trust anchor
-  is the issuer's signature, verified on-chain.
+  Even if Alice could somehow produce a valid-looking PS signature (she
+  cannot), the NIZK proof `pi' must prove that the ElGamal ciphertext
+  `E_alice' encrypts the same `m' that the PS signature covers.  Forging
+  the proof requires breaking the discrete logarithm assumption.
+
+  Two independent barriers must both be broken.  Neither has been broken
+  in the history of elliptic curve cryptography.
 
 
 2.2.3 What the Contract Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  `registerIdentity()' reverts: "Invalid issuer signature."  Alice is
+  `registerCredential()' reverts: "Invalid issuer signature."  Alice is
   not registered; `isVerified(alice) == false'.  She cannot participate
   in any BUCK operation requiring identity.
 
@@ -548,7 +719,7 @@ Table of Contents
 2.3.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  Alice and Bob are both criminals.  Both have legitimate issuer-signed
+  Alice and Bob are both criminals.  Both have legitimate PS-verified
   credentials (they passed KYC under their real identities).  They want
   to transact with each other, but want the encrypted identity records
   to show /different/ people – so that if a court later compels Bob to
@@ -568,7 +739,7 @@ Table of Contents
 
   ┌────
   │ // Inside approve():
-  │ (E_alice, sigma) = identityRegistry.getCredential(msg.sender);
+  │ E_alice = identityRegistry.getCredential(msg.sender);
   │ require(chaumPedersenVerify(E_alice, E_bob_submitted, proof));
   └────
 
@@ -578,7 +749,7 @@ Table of Contents
   message points differ (same math as Attack 1).
 
   *Bob's willingness to accept false data is irrelevant.* The proof was
-  verified against the issuer-signed credential /before/ `E_bob' was
+  verified against the registered credential /before/ `E_bob' was
   stored.  If `approve()' succeeded, `E_bob' necessarily contains
   Alice's real identity.  When a court later compels Bob to decrypt, he
   produces Alice's true identity – regardless of any prior agreement
@@ -628,8 +799,8 @@ Table of Contents
      address (verified by `msg.sender').
 
   2. The `approve()' transaction succeeded on-chain, which means the
-     Chaum-Pedersen proof verified against Alice's issuer-signed
-     `E_alice' from the registry.  This is an immutable execution fact.
+     Chaum-Pedersen proof verified against Alice's registered `E_alice'
+     from the registry.  This is an immutable execution fact.
 
   3. Therefore `E_bob' provably encrypts the same identity as `E_alice'.
      This follows from the soundness of the Chaum-Pedersen protocol – it
@@ -640,13 +811,13 @@ Table of Contents
      chain of trust:
 
   ┌────
-  │ Issuer signed E_alice                        (verified: sigma)
-  │ E_alice stored in IdentityRegistry           (on-chain, immutable)
-  │ Alice called approve() with E_bob + proof    (on-chain tx, msg.sender = alice)
-  │ Chaum-Pedersen proof verified on-chain        (execution succeeded)
-  │ ==> E_bob encrypts Alice's real identity      (mathematical fact)
-  │ Bob decrypts E_bob --> I                      (compelled, deterministic)
-  │ I is Alice's issuer-certified identity        (proven)
+  │ Issuer PS-signed Alice's identity m           (verified at registration)
+  │ E_alice stored in IdentityRegistry            (on-chain, immutable)
+  │ Alice called approve() with E_bob + proof     (on-chain tx, msg.sender = alice)
+  │ Chaum-Pedersen proof verified on-chain         (execution succeeded)
+  │ ==> E_bob encrypts Alice's real identity       (mathematical fact)
+  │ Bob decrypts E_bob --> I                       (compelled, deterministic)
+  │ I is Alice's issuer-certified identity         (proven)
   └────
 
 
@@ -766,6 +937,25 @@ Table of Contents
   of any ERC-20 token, plus meaningless (to her) encrypted blobs.
 
 
+2.6.4 Cross-Account Unlinkability
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  A stronger version of this attack: Eve suspects that addresses
+  `addr_1', `addr_2', and `addr_3' all belong to Alice.  She examines
+  each address's registered credential in the IdentityRegistry.
+
+  Each credential was derived independently through the Identity
+  Fountain: different rerandomized PS signatures, different identity key
+  pairs, different ElGamal ciphertexts with independent randomness.  PS
+  rerandomization is /statistically/ unlinkable – not merely
+  computationally hard to correlate, but information-theoretically
+  impossible.  The credentials contain zero bits of mutual information.
+
+  Eve's only path to linking accounts is off-chain analysis: timing,
+  amounts, behavioral patterns.  The cryptographic identity layer gives
+  her nothing.
+
+
 2.7 Attack 7: Alice Uses a Revoked or Expired Credential
 ────────────────────────────────────────────────────────
 
@@ -838,7 +1028,7 @@ Table of Contents
      something Bob fabricated to frame Alice, and not something Alice
      fabricated to deceive Bob).
   3. Bob can demonstrate he had no way to know Alice was a criminal: the
-     identity he received was a valid, issuer-signed credential at the
+     identity he received was a valid, PS-verified credential at the
      time of the transaction.  The revocation (if any) came later.
   4. Bob's good faith is supported by the cryptographic record: he
      accepted a transaction from a verified participant and holds a
@@ -858,8 +1048,8 @@ Table of Contents
   of Bob's compliance, not his complicity.
 
 
-2.9 Summary: Why Chaum-Pedersen Defeats All Substitution Attacks
-────────────────────────────────────────────────────────────────
+2.9 Summary: Why the Scheme Defeats All Attacks
+───────────────────────────────────────────────
 
   Every attack that involves substituting false identity data fails for
   the same fundamental reason: the Chaum-Pedersen proof is *sound*.  A
@@ -867,21 +1057,26 @@ Table of Contents
 
   ┌────
   │ The proof asserts:  E_bob encrypts the same M as E_alice
-  │ The contract reads: E_alice from the registry (issuer-signed, immutable)
+  │ The contract reads: E_alice from the registry (PS-verified, immutable)
   │ Therefore:          E_bob must encrypt Alice's real identity
   │ Alice cannot:       supply a different E_alice (contract reads from storage)
   │ Alice cannot:       produce a valid proof for different M (soundness)
-  │ Alice cannot:       forge the issuer's signature (ECDSA unforgeability)
+  │ Alice cannot:       forge the issuer's PS signature (q-SDH unforgeability)
+  │ Alice cannot:       link her accounts to each other (PS rerandomization)
   │ Bob cannot:         produce a different plaintext (ElGamal decryption is deterministic)
   │ Eve cannot:         decrypt E_bob (she lacks sk_bob)
+  │ Eve cannot:         link Alice's accounts (statistical unlinkability)
   └────
 
-  Two independent hardness assumptions protect the system:
-  1. *Signature unforgeability* (ECDSA): prevents forged credentials
-  2. *Discrete logarithm hardness* (alt_bn128): prevents false proofs
-     and unauthorized decryption
+  Three independent hardness assumptions protect the system:
+  1. *PS signature unforgeability* (q-SDH assumption): prevents forged
+     credentials
+  2. *Discrete logarithm hardness* (alt_bn128): prevents false
+     Chaum-Pedersen proofs and unauthorized ElGamal decryption
+  3. *ECDSA unforgeability* (secp256k1): authenticates Ethereum
+      transactions
 
-  Both assumptions also underpin Ethereum itself.  If either breaks,
+  All three assumptions also underpin Ethereum itself.  If any breaks,
   Ethereum's own security fails first – the Alberta Buck identity system
   does not introduce any novel cryptographic assumptions.
 
@@ -1004,8 +1199,9 @@ Table of Contents
    Operation             Caller identity   Issuer identity        Receipt      Notes                                    
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
    KYC ceremony          Self              Trusted issuer         Off-chain    Participant submits docs to issuer;      
-                         (no claims yet)   (publicly identified)  encrypted    issuer encrypts + signs ElGamal cred.    
-   Register in registry  Registry agent    N/A                    Event log    Links wallet to ElGamal credential.      
+                         (no claims yet)   (publicly identified)  PS sig       issuer PS-signs identity scalar.         
+   Register in registry  Self              N/A                    Event log    Derives credential offline; registers    
+                                                                               with PS signature + NIZK proof.          
    Add public identity   Self              Trusted issuer         On-chain     Opts in to public identification for     
    claim                 KYC (topic 1)     (publicly identified)  claim        oracle/governance participation.         
    Revoke claim          Issuer or self    N/A                    Event log    Removes a claim (e.g., expired license). 
@@ -1030,10 +1226,10 @@ Table of Contents
      create the pool.  The factory deploys a new contract at a
      deterministic address.
 
-  2. Deployer (or a registry agent) registers the pool contract using
-     the deployer's issuer-signed ElGamal credential:
-     `identityRegistry.registerIdentity(poolAddress, E_deployer, sigma,
-     pk_deployer, country)'
+  2. Deployer derives a separate credential for the pool contract (from
+     the same PS-signed identity, via the Identity Fountain) and
+     registers it: `identityRegistry.registerCredential(poolAddress,
+     pk_deployer, E_deployer, sigma', pi)'
 
      This links the pool contract's address to the deployer's
      credential.  The pool inherits the deployer's verified identity.
@@ -1107,7 +1303,7 @@ Table of Contents
   │ ) public returns (bool) {
   │     _approve(msg.sender, spender, amount);
   │ 
-  │     // Read the caller's issuer-signed credential from the registry
+  │     // Read the caller's registered credential from the registry
   │     // CRITICAL: read from storage, never from calldata
   │     uint256[4] memory E_caller = identityRegistry.getCredential(msg.sender);
   │     uint256[2] memory pk_caller = identityRegistry.getIdentityKey(msg.sender);
@@ -1141,7 +1337,7 @@ Table of Contents
 
   What the contract verified (in ~29,000 gas):
   • The ciphertext contains Alice's real identity (Chaum-Pedersen proof
-    passed against the issuer-signed credential read from the registry)
+    passed against the registered credential read from the registry)
 
   What the spender (Bob / pool operator) can do:
   • Decrypt `E_bob' using `sk_bob': `M = C_b - sk_bob * R_b'
@@ -1229,14 +1425,21 @@ Table of Contents
 6.5 Holochain: Off-Chain Computation and Storage
 ────────────────────────────────────────────────
 
-  Alice's wallet (a Holochain hApp) performs all preparation before the
-  on-chain `approve' call:
+  Alice's wallet (a Holochain hApp) performs all credential derivation
+  and transaction preparation:
 
-  • *Credential storage*: Alice's issuer-signed credential `(E_alice,
-    sigma)' lives on her Holochain source chain, encrypted with her
-    private key.  The full identity data (name, jurisdiction, ID number,
-    KYC documents) is encoded in the ElGamal ciphertext, not stored
-    separately on Ethereum.
+  • *Credential derivation*: Alice's PS-signed identity `(m, sigma)'
+    lives on her Holochain source chain.  For each new account, the hApp
+    rerandomizes the PS signature, generates a fresh key pair, creates
+    an ElGamal encryption, and computes the NIZK proof.  This runs
+    entirely offline and can be batched – Alice can pre-generate
+    credentials for future accounts.
+
+  • *Credential storage*: Each derived credential `(pk, E_alice, sigma',
+    pi)' is stored on Alice's Holochain source chain.  The full identity
+    data (name, jurisdiction, ID number, KYC documents) is encoded in
+    the identity scalar `m' and encrypted in the ElGamal ciphertext, not
+    stored separately on Ethereum.
 
   • *Re-encryption*: The hApp decrypts `E_alice' locally (Alice has
     `sk_alice'), extracts the message point `M', and re-encrypts for
@@ -1258,10 +1461,11 @@ Table of Contents
   the hApp DNA is identified by hash, so anyone can verify the exact
   code that runs on each participant's node.  However, Holochain is
   *not* the trust anchor: Alice runs her own node and could run modified
-  code.  The Chaum-Pedersen proof is the trust anchor – it is
-  mathematically verifiable on-chain regardless of what software
-  generated it.  Holochain provides the execution environment; the proof
-  provides the guarantee.
+  code.  The on-chain verifications are the trust anchors – PS signature
+  verification at registration and Chaum-Pedersen proof verification at
+  transaction time are mathematically verifiable on-chain regardless of
+  what software generated them.  Holochain provides the execution
+  environment; the proofs provide the guarantees.
 
 
 6.6 Summary: What Each Layer Sees
@@ -1282,7 +1486,8 @@ Table of Contents
                           Constructs full receipt on Holochain                     
    Sender (Alice)         Knows her own identity, knows Bob's (from his approve)   
                           Constructs full receipt on Holochain                     
-   Holochain hApp         Re-encrypts credential + generates proof locally         
+   Holochain hApp         Derives credentials (PS rerandomization + NIZK)          
+                          Re-encrypts credential + generates proof locally         
                           Stores encrypted receipts on source chains               
                           Code identified by DNA hash (auditable)                  
    Court (with subpoena)  Compels Bob to decrypt his ElGamal ciphertext            
@@ -1452,24 +1657,29 @@ Table of Contents
   ┌────
   │ Alice:
   │   1. Completed KYC with trusted issuer (off-chain ceremony)
-  │   2. Issuer encrypts Alice's identity under her public key (ElGamal):
-  │      E_alice = (r * G,  r * pk_alice + I * G)
-  │   3. Issuer signs the ciphertext: sigma = Sign(sk_issuer, E_alice)
-  │   4. Credential (E_alice, sigma) published to issuer's Holochain source chain
-  │   5. Registry agent registers on-chain:
-  │      identityRegistry.registerIdentity(
-  │          alice_wallet, E_alice, sigma, pk_alice, country_code)
+  │   2. Issuer PS-signs Alice's identity: sigma = PS.Sign(sk_issuer, m)
+  │      where m = H(identity_data)
+  │   3. Alice receives (m, sigma) and stores in Holochain wallet
+  │   4. Alice's wallet derives a credential for this account (offline):
+  │      - Rerandomizes PS signature: sigma' = (t * sigma_1, t * sigma_2)
+  │      - Generates fresh identity key pair (sk_alice, pk_alice)
+  │      - Encrypts: E_alice = (r * G,  m * G + r * pk_alice)
+  │      - Computes NIZK proof pi linking sigma' to E_alice
+  │   5. Registers on-chain (~200K gas):
+  │      identityRegistry.registerCredential(
+  │          alice_wallet, pk_alice, E_alice, sigma', pi)
   │   6. identityRegistry.isVerified(alice_wallet) == true
   │ 
   │ Bob (pool deployer):
   │   1. Completed KYC (same ceremony as Alice)
-  │   2. Has issuer-signed ElGamal credential (E_bob_cred, sigma_bob)
-  │   3. Credential on Holochain; registered in IdentityRegistry
+  │   2. Derived credential for his account (same offline process)
+  │   3. Credential registered in IdentityRegistry (~200K gas)
   │   4. Created BUCK/USDT pool via Uniswap factory
   │      -> pool deployed at address 0xPOOL
-  │   5. Registered pool in IdentityRegistry (deployer's credential):
-  │      identityRegistry.registerIdentity(
-  │          0xPOOL, E_bob_cred, sigma_bob, pk_bob, country_code)
+  │   5. Derived and registered a separate credential for the pool
+  │      (from same PS-signed identity, via the Identity Fountain):
+  │      identityRegistry.registerCredential(
+  │          0xPOOL, pk_bob_pool, E_bob_pool, sigma'_pool, pi_pool)
   │   6. identityRegistry.isVerified(0xPOOL) == true
   └────
 
@@ -1506,7 +1716,7 @@ Table of Contents
 
   ┌────
   │ 1. Sets allowance[alice][uniswapRouter] = 500e18
-  │ 2. Reads E_alice from IdentityRegistry (issuer-signed, immutable)
+  │ 2. Reads E_alice from IdentityRegistry (PS-verified, immutable)
   │ 3. Verifies Chaum-Pedersen proof: E_bob encrypts same M as E_alice
   │    (4 ecMul + 4 ecAdd + 1 keccak256 = ~29,000 gas)
   │ 4. Stores keccak256(E_bob) in _receiptFragments[alice][0xPOOL]
@@ -1582,7 +1792,7 @@ Table of Contents
 
   *What the contract verified* (during `approve', earlier): the
   Chaum-Pedersen proof that Alice's re-encrypted ElGamal ciphertext
-  encrypts the same identity as her issuer-signed credential.
+  encrypts the same identity as her registered credential.
 
 
 8.2.4 Step 4: Wallet Constructs the Full Receipt (Off-Chain)
@@ -1657,7 +1867,7 @@ Table of Contents
   │   - Full encrypted receipt on Alice's and Bob's source chains
   │   - Alice's re-encrypted identity (ElGamal ciphertext, only Bob can decrypt)
   │   - Bob's re-encrypted identity (ElGamal ciphertext, only Alice can decrypt)
-  │   - Issuer-signed credentials on issuer's source chain (audit trail)
+  │   - PS-signed identity on issuer's source chain (audit trail)
   │ 
   │ What anyone can see:
   │   - Two pseudonymous addresses transacted 500 BUCK
@@ -1735,23 +1945,25 @@ Table of Contents
 9.5 Gas Costs
 ─────────────
 
-  The design has two gas-consuming identity operations:
+  The design has three gas-consuming identity operations:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Operation                                 Cost (~gas)  When          
-  ──────────────────────────────────────────────────────────────────────
-   `approve' with Chaum-Pedersen verify      ~75,000 gas  Once per pair 
-   (proof verify: ~29K + std approve: ~46K)                             
-   `BuckTransferReceipt' event               ~2,000 gas   Per transfer  
-   (2 indexed addresses + 3 uint256)                                    
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Operation                                 Cost (~gas)   When             
+  ──────────────────────────────────────────────────────────────────────────
+   `registerCredential' with PS verify       ~200,000 gas  Once per account 
+   (PS pairing: ~147K + NIZK: ~53K)                                         
+   `approve' with Chaum-Pedersen verify      ~75,000 gas   Once per pair    
+   (proof verify: ~29K + std approve: ~46K)                                 
+   `BuckTransferReceipt' event               ~2,000 gas    Per transfer     
+   (2 indexed addresses + 3 uint256)                                        
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  The Chaum-Pedersen proof verification uses Ethereum's alt_bn128
-  precompiles (`29,000 gas for 4 ~ecMul' + 4 `ecAdd' + Fiat-Shamir
-  hashing).  Combined with the standard ERC-20 approve cost (~46,000
-  gas), the identity handshake totals ~75,000 gas – paid once per
-  counterparty pair.  Subsequent transfers emit only the minimal receipt
-  event (~2,000 gas) with no additional proof work.
+  Credential registration uses the `ecPairing' precompile to verify the
+  Pointcheval-Sanders signature and NIZK proof (`200,000 gas, once per
+  account).  The Chaum-Pedersen proof verification uses ~ecMul' /
+  `ecAdd' (~29,000 gas per counterparty pair).  Subsequent transfers
+  emit only the minimal receipt event (~2,000 gas) with no additional
+  proof work.
 
   All encrypted identity data and full receipts are stored on Holochain,
   not on Ethereum.  The only identity-related data emitted on-chain is
@@ -1830,7 +2042,7 @@ Table of Contents
     only adds attack surface.
 
 
-10.2 Proxy Re-Encryption (NuCypher Umbral)[4]
+10.2 Proxy Re-Encryption (NuCypher Umbral)[5]
 ─────────────────────────────────────────────
 
   In PRE, Alice generates a re-encryption key `rk_{A->B}' that allows an
@@ -1878,8 +2090,7 @@ Table of Contents
   • Attribute-level granularity: prove "jurisdiction = Alberta" without
     revealing name or ID number
   • Unlinkable presentations (different proofs from the same credential
-    cannot be correlated, unlike ElGamal re-encryptions which share a
-    common sender address)
+    cannot be correlated)
   • Ecosystem alignment with W3C VC / DID standards
 
   *Why Chaum-Pedersen is superior for Alberta Buck*:
@@ -1895,6 +2106,11 @@ Table of Contents
     these properties."  Alberta Buck needs "this ciphertext contains my
     specific issuer-certified identity."  The latter is a re-encryption
     correctness proof, not a selective disclosure proof.
+  • *Cross-account unlinkability is already solved*: Pointcheval-Sanders
+    rerandomizable signatures provide unlinkable credential derivation
+    for different accounts.  Within a single account, re-encryptions
+    share a common Ethereum address regardless of the credential scheme,
+    so BBS+ presentation unlinkability adds nothing.
   • BBS+ could complement Chaum-Pedersen in the future – e.g., for
     compliance checks that verify jurisdiction eligibility without full
     identity disclosure.  But it does not replace the core re-encryption
@@ -1922,7 +2138,7 @@ Table of Contents
     efficient.
 
 
-10.5 Pedersen Equality Proofs (Homomorphic Comparison)[5]
+10.5 Pedersen Equality Proofs (Homomorphic Comparison)[6]
 ─────────────────────────────────────────────────────────
 
   Pedersen commitments support homomorphic equality checking: given `C_1
@@ -1963,10 +2179,14 @@ Table of Contents
    Pedersen equality         ~7K           ms         none     no           no           
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  ElGamal Chaum-Pedersen wins on gas cost, has zero setup requirements,
-  generates proofs instantly, supports targeted decryption, and requires
-  minimal implementation.  Its only limitation – it proves exactly "same
-  plaintext" and nothing else – is exactly what Alberta Buck requires.
+  ElGamal Chaum-Pedersen wins on per-transaction gas cost, has zero
+  setup requirements, generates proofs instantly, supports targeted
+  decryption, and requires minimal implementation.  Combined with
+  Pointcheval-Sanders rerandomizable signatures for credential
+  derivation (one-time ~200K gas at registration), the system achieves
+  both cross-account unlinkability and per-transaction re-encryption
+  correctness – without the gas burden or trusted setup of SNARK-based
+  alternatives.
 
 
 11 Summary: Identity Requirement by Risk Level
@@ -1997,24 +2217,32 @@ Decisional Diffie-Hellman assumption.  Alberta Buck uses ElGamal over
 the alt_bn128 curve (BN254), which is supported by Ethereum's
 EIP-196/197 precompiled contracts for efficient on-chain verification.
 
-[2] Chaum-Pedersen Protocol.  Chaum, D. and Pedersen, T.P. "Wallet
+[2] Pointcheval-Sanders Signatures.  Pointcheval, D. and Sanders,
+O. "Short Randomizable Signatures."  CT-RSA 2016, LNCS 9610,
+pp. 111-126.  Rerandomizable signatures: given a valid signature sigma
+on message m, anyone can compute sigma' = (t * sigma_1, t * sigma_2)
+that is a valid, statistically unlinkable signature on the same m.
+Verification uses a bilinear pairing equation, compatible with
+Ethereum's alt_bn128 (BN254) ecPairing precompile.
+
+[3] Chaum-Pedersen Protocol.  Chaum, D. and Pedersen, T.P. "Wallet
 Databases with Observers."  CRYPTO 1992, LNCS 740, pp. 89-105.  The
 Chaum-Pedersen protocol proves equality of discrete logarithms
 (equivalently, that two ElGamal ciphertexts encrypt the same message)
 in zero knowledge.  Made non-interactive via the Fiat-Shamir
 heuristic.
 
-[3] ERC-3643 (T-REX): Token for Regulated EXchanges.  The on-chain
+[4] ERC-3643 (T-REX): Token for Regulated EXchanges.  The on-chain
 identity framework (IdentityRegistry, TrustedIssuersRegistry,
 ClaimTopicsRegistry) used by Alberta Buck for credential management.
 <https://eips.ethereum.org/EIPS/eip-3643>
 
-[4] Umbral: A Threshold Proxy Re-Encryption Scheme.  NuCypher.
+[5] Umbral: A Threshold Proxy Re-Encryption Scheme.  NuCypher.
 Reference implementation: <https://github.com/nucypher/pyUmbral>
 Whitepaper:
 <https://raw.githubusercontent.com/nucypher/umbral-doc/master/umbral-doc.pdf>
 
-[5] Pedersen Commitments and Bulletproofs.  Bulletproofs: Short Proofs
+[6] Pedersen Commitments and Bulletproofs.  Bulletproofs: Short Proofs
 for Confidential Transactions and More.  Bunz, Bootle, Boneh,
 Poelstra, Wuille, Maxwell.  Overview:
 <https://tlu.tarilabs.com/cryptography/the-bulletproof-protocols>
