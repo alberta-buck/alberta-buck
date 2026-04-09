@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-               ALBERTA BUCK – IDENTITY AND CRYPTOGRAPHIC
-                            RECEIPTS (V0.1)
+               ALBERTA BUCK - IDENTITY AND CRYPTOGRAPHIC
+                         RECEIPTS (DRAFT V0.1)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -53,7 +53,8 @@ Table of Contents
 .. 6. Attack 6: Eve Links Alice's Identities Across Counterparties
 .. 7. Attack 7: Alice Uses a Revoked or Expired Credential
 .. 8. Attack 8: Unwitting Bob Receives a Transaction From Criminal Alice
-.. 9. Summary: Why the Scheme Defeats All Attacks
+.. 9. Attack 9: Systematic Forgery – Alice Attacks the Trust Chain
+.. 10. Summary: Why the Scheme Defeats All Attacks
 3. Identity Visibility Modes
 4. Operations Table
 .. 1. Core BUCK (ERC-20) Operations
@@ -140,7 +141,7 @@ Table of Contents
   transacted with.  I may resist, and face the consequences.  But the
   organizations that Alberta tasks with overseeing the authenticity of
   my Alberta issued identity must not be able to simply authorize
-  decryption of my counterpartys' identities!  They can only vouch for
+  decryption of my counterparties' identities!  They can only vouch for
   and reveal the identities they've directly issued, just as I can vouch
   for my daughter's – they can't decrypt arbitrary participants in each
   transaction.
@@ -148,13 +149,14 @@ Table of Contents
   This is how the cryptography enforces it: each re-encrypted identity
   is an ElGamal ciphertext under the specific counterparty's public key.
   Only that counterparty's private key can recover the plaintext.  The
-  identity issuer cannot decrypt it – they encrypted under my public
-  key, not their own.  The government cannot decrypt it.  No registry
-  operator, no Holochain node, no subpoena served on anyone other than a
-  direct participant can break this.  A court must compel a /specific
-  participant/ to decrypt a /specific transaction's counterparty's/
-  identity data.  Every individual's credential must be attacked
-  separately.  The cost to surveil is O(N), not O(1).
+  identity issuer cannot decrypt it – they signed the identity, not the
+  ciphertext; the encryption is mine alone.  The government cannot
+  decrypt it.  No registry operator, no Holochain node, no subpoena
+  served on anyone other than a direct participant can break this.  A
+  court must compel a /specific participant/ to decrypt a /specific
+  transaction's counterparties'/ identity data.  Every individual's
+  credential must be attacked separately.  The cost to surveil is O(N),
+  not O(1).
 
 
 1.1.1 The Identity Fountain
@@ -1048,8 +1050,170 @@ Table of Contents
   of Bob's compliance, not his complicity.
 
 
-2.9 Summary: Why the Scheme Defeats All Attacks
-───────────────────────────────────────────────
+2.9 Attack 9: Systematic Forgery – Alice Attacks the Trust Chain
+────────────────────────────────────────────────────────────────
+
+  The previous attacks target individual operations.  This attack
+  assumes Alice is willing to lie about /every/ artifact she produces –
+  hashes, proofs, signatures, ciphertexts – and asks whether she can
+  deceive anyone about the validity or content of her identity.
+
+  The trust chain has three links.  We attack each one.
+
+
+2.9.1 Link 1: PS Signature (Issuer Authority)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Alice has `(m, sigma_1, sigma_2)' from the issuer.  She produces
+  `sigma' = (t * sigma_1, t * sigma_2)'.
+
+  *Can she produce a `sigma'' that signs a different `m_fake'?*
+
+  PS verification checks:
+
+  ┌────
+  │ e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)
+  └────
+
+  Rearranging:
+
+  ┌────
+  │ e(sigma'_1, Y)^m  =  e(sigma'_2, g_2) * e(sigma'_1, X)^(-1)
+  └────
+
+  The right side is fixed by `sigma'' (which Alice chose).  The left
+  side is determined by `m'.  For `sigma'' derived from the issuer's
+  signature on `m', this equation holds only for the real `m'.  Alice
+  cannot produce a valid PS signature on any `m_fake' without the
+  issuer's secret key `(x, y)'.  *Blocked by q-SDH unforgeability.*
+
+
+2.9.2 Link 2: NIZK Proof (Binding PS Signature to ElGamal Ciphertext)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Alice provides `(sigma', E_new, pk_new, pi)'.  The NIZK proof proves
+  knowledge of `(m, r)' satisfying:
+
+  ┌────
+  │ a) e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)   -- sigma' signs m
+  │ b) C = m * G + r * pk_new                       -- E_new encrypts m
+  │ c) R = r * G                                    -- consistent randomness
+  └────
+
+  *Can she use a valid `sigma'' (signing `m') but create `E_new'
+  encrypting `m_fake'?*
+
+  The sigma protocol uses a single response scalar `s_m' that must
+  simultaneously satisfy conditions (a) and (b):
+
+  • For condition (a): `s_m' encodes the real `m' (the value `sigma''
+    signs)
+  • For condition (b): `s_m' encodes whatever is in `E_new'
+
+  If `E_new' encrypts `m_fake != m', no single `s_m' satisfies both
+  checks.  *Blocked by sigma protocol soundness.*
+
+  *Can she forge the Fiat-Shamir challenge?* The challenge `e =
+  H(sigma', E_new, pk_new, commitments)' depends on all public inputs.
+  Finding inputs that yield a favorable challenge requires a keccak256
+  preimage attack.  *Blocked by random oracle assumption.*
+
+
+2.9.3 Link 3: Chaum-Pedersen Proof (Binding Re-encryption to Registered Credential)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  At `approve()' time, Alice provides `E_bob' and a Chaum-Pedersen
+  proof.  The contract reads `E_alice' from storage.
+
+  *Can she re-encrypt a different identity?* The proof requires:
+
+  ┌────
+  │ C_a - sk_alice * R_a  =  C_b - r_b * pk_bob
+  └────
+
+  Both sides must equal the same message point `M = m * G'.  If Alice
+  encrypts `M_fake != M', the equation is unsatisfiable.  *Blocked by
+  DLog hardness.* (Same mathematics as Attack 1.)
+
+  *Can she supply a different `E_alice'?* No – read from storage, not
+  from calldata.
+
+
+2.9.4 Critical Edge Case: The Trivial Signature
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  If Alice sets `sigma' = (O, O)' where `O' is the point at infinity:
+
+  ┌────
+  │ e(O, X + m * Y) = 1   (pairing with identity is trivial)
+  │ e(O, g_2)       = 1   (same)
+  └────
+
+  The pairing equation `1 = 1' holds *for any `m'*.  Alice could
+  register a credential encrypting any `m_fake' she wants, produce a
+  valid-looking NIZK proof (because condition (a) is trivially
+  satisfied), and the verification would pass.
+
+  She achieves this by picking `t = 0' in the rerandomization: `sigma' =
+  (0 * sigma_1, 0 * sigma_2) = (O, O)'.
+
+  *The fix is standard*: the PS signature specification requires
+  `sigma'_1 != O'.  The registration contract must check this before
+  evaluating the pairing:
+
+  ┌────
+  │ require(sigma_prime[0] != 0 || sigma_prime[1] != 0, "Degenerate signature");
+  └────
+
+  On BN254, `G_1' has prime order (cofactor 1), so there are no
+  small-order points.  The identity check `sigma'_1 != O' is the /only/
+  degenerate case.
+
+  *Without this check, the entire fountain is broken.  With it, the
+  system is sound.*
+
+
+2.9.5 Additional Attack Surfaces
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  *Off-curve points*: post-Istanbul, the `ecPairing' precompile
+  validates that inputs lie on alt_bn128 and reverts otherwise.  Alice
+  cannot use off-curve points to confuse the pairing computation.
+
+  *Subgroup attacks on `G_2'*: the `ecPairing' precompile validates
+  `G_2' subgroup membership (EIP-197).  Alice cannot exploit small
+  subgroups in the twist curve.
+
+  *Eve copies Alice's registered credential*: Eve can read `(pk, E,
+  sigma', pi)' from the chain and re-register it for her own address.
+  But Eve cannot /use/ it – the Chaum-Pedersen proof requires knowledge
+  of `sk_alice' (condition 1: `pk_alice = sk_alice * G').  A stolen
+  credential is useless without the corresponding secret key.
+
+  *Alice shares raw credential material*: Alice can give `(m, sigma)' to
+  an accomplice, who can then derive valid credentials containing
+  Alice's identity.  But the decrypted identity is always Alice's – the
+  consequences fall on her.  This is inherent in any bearer credential
+  system; it is no different from handing someone your driver's license.
+
+
+2.9.6 Verdict
+╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  The system is sound against an untrustworthy Alice who is willing to
+  lie about every artifact she produces.  She cannot forge any artifact
+  that would cause a verifier to accept a false identity.  The three
+  layers – PS unforgeability, NIZK soundness, Chaum-Pedersen soundness –
+  chain together so that breaking any link requires breaking a standard
+  hardness assumption.
+
+  One critical implementation requirement: `sigma'_1 != O' must be
+  checked at credential registration.  This is a standard requirement of
+  the Pointcheval-Sanders scheme and costs negligible gas.
+
+
+2.10 Summary: Why the Scheme Defeats All Attacks
+────────────────────────────────────────────────
 
   Every attack that involves substituting false identity data fails for
   the same fundamental reason: the Chaum-Pedersen proof is *sound*.  A
