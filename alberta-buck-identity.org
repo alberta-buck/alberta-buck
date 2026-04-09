@@ -1,4 +1,4 @@
-#+title: Alberta Buck - Identity and Cryptographic Receipts (DRAFT v0.1)
+#+title: Alberta Buck - Identity and Cryptographic Receipts (DRAFT v0.2)
 #+author: Perry Kundert
 #+date: 2026-04-08
 #+category: Alberta Buck
@@ -37,7 +37,7 @@ network, not the government -- sees the plaintext.
 
 Per-transaction identity verification costs ~29,000 gas via Ethereum's
 alt_bn128 scalar multiplication precompiles -- no pairing operations at
-transaction time.  Credential registration costs ~200,000 gas (a one-time
+transaction time.  Credential registration costs ~235,000 gas (a one-time
 pairing-based verification of the Pointcheval-Sanders signature).  No trusted
 setup.  Proof generation is instantaneous.
 
@@ -127,6 +127,44 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
      registered in the TrustedIssuersRegistry on Ethereum.  The issuer is now
      done -- permanently, if desired.
 
+**** What ~identity_data~ Contains
+
+     ~identity_data~ is a canonical (deterministically serialized)
+     structure containing Alice's verified identity claims:
+
+     #+begin_example
+     identity_data = canonical_encode({
+         given_name:    "Alice",
+         family_name:   "Johnson",
+         jurisdiction:  "Alberta, Canada",
+         id_type:       "Alberta Identity Card",
+         id_number:     "AIC-2026-4839201",
+         date_of_birth: "1992-03-15",
+         issuer_id:     "atb-financial-ca",
+         issued_at:     "2026-01-20T14:30:00Z",
+         epoch:         42
+     })
+     #+end_example
+
+     The identity scalar is ~m = H(identity_data)~ where ~H~ is
+     keccak256 over the canonical encoding.  The canonical encoding is
+     deterministic: field order, encoding format, and whitespace are
+     fixed by the hApp DNA, so any party who holds the same
+     ~identity_data~ computes the same ~m~.
+
+     The issuer verifies these claims during the KYC ceremony and
+     computes ~m~.  Alice receives both ~m~ (the scalar) and
+     ~identity_data~ (the plaintext).  The plaintext never touches
+     Ethereum -- it is the /content/ that the on-chain proof chain
+     guarantees.  Alice stores ~identity_data~ as a Private entry on
+     her Holochain source chain, encrypted with her agent key and never
+     published to the DHT.
+
+     Different issuers may define different schemas (a province vs. a
+     bank), but all schemas produce a single scalar ~m~ via the same
+     hash function.  The ~epoch~ field binds the credential to a
+     renewal period (see Epoch-Based Credential Renewal below).
+
 **** Derivation: Alice Generates Credentials Offline
 
      For each new Ethereum account, Alice's Holochain wallet:
@@ -162,6 +200,19 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
      hundred credentials in a batch and store them in her Holochain wallet,
      pulling one out whenever she creates a new account.
 
+     Each credential derivation corresponds to a *separate Holochain
+     agent*.  Alice's wallet spawns a new Holochain agent -- a fresh
+     Ed25519 key pair and an independent source chain -- for each
+     Ethereum account.  From the perspective of both Ethereum and
+     Holochain, these agents are entirely distinct identities: separate
+     addresses, separate agent IDs, separate source chains.  The one
+     artifact shared across agents is Alice's ~identity_data~ (and
+     therefore ~m = H(identity_data)~), which is copied into each new
+     agent's Private entry store.  Since ~m~ is committed only inside
+     ElGamal ciphertexts (IND-CPA secure) and PS signatures
+     (statistically rerandomized), no observer on either network can
+     detect that two agents share the same ~m~.
+
 **** Registration: One-Time On-Chain Verification
 
      Alice registers the derived credential in the IdentityRegistry:
@@ -178,7 +229,7 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
 
      The contract verifies the PS signature and NIZK proof using the
      ~ecPairing~ precompile (address ~0x08~), ~ecMul~, and ~ecAdd~.  Gas
-     cost: ~200,000 gas, paid once per account.
+     cost: ~235,000 gas, paid once per account.
 
      After registration, ~isVerified(alice_new_address) == true~.  The
      credential is stored on-chain as an ElGamal ciphertext and an identity
@@ -273,7 +324,7 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
    3. *Registration*: Alice registers the derived credential
       ~(pk, E_alice, sigma', pi)~ in the on-chain IdentityRegistry.  The
       contract verifies the PS signature and NIZK proof via the ~ecPairing~
-      precompile (~200,000 gas, one-time).  After registration,
+      precompile (~235,000 gas, one-time).  After registration,
       ~isVerified(alice) == true~.
 
    4. *Re-encryption*: When Alice must identify herself to counterparty Bob
@@ -300,6 +351,26 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
       can decrypt ~E_alice~ (she has ~sk_alice~).  The issuer cannot decrypt
       either -- they signed Alice's identity scalar, they never encrypted under
       any key.  No third party can decrypt any re-encrypted copy.
+
+   This is a *two-channel design*.  The on-chain ElGamal ciphertexts and
+   Chaum-Pedersen proofs form the /proof chain/: they bind Alice's registered
+   identity to the re-encrypted ciphertext Bob receives, without revealing
+   content.  The actual ~identity_data~ (name, jurisdiction, ID number)
+   travels via the /data channel/: Alice's Holochain hApp sends it to Bob's
+   hApp, encrypted end-to-end.  Bob verifies the binding:
+
+   #+begin_example
+   M = C_b - sk_bob * R_b              // decrypt ElGamal ciphertext
+   assert H(identity_data) * G == M    // bind off-chain data to proof chain
+   #+end_example
+
+   EC-ElGamal decryption yields a curve point ~M~, not the scalar ~m~.
+   Recovering ~m~ from ~M = m * G~ is the discrete logarithm problem.  The
+   proof chain never carries plaintext -- it proves /which/ identity was sent.
+   The data channel delivers /what/ that identity contains.  The hash
+   commitment ~H(identity_data) * G == M~ binds them cryptographically: Bob
+   can verify the ~identity_data~ he received via Holochain is exactly the
+   identity the issuer certified and Alice registered on-chain.
 
    There is no need for Proxy Re-Encryption (PRE), because Alice is online when
    she calls ~approve~ and can perform the re-encryption directly.  The
@@ -328,7 +399,7 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
      a single on-chain verifier handles all identity operations.
    - *Precompile efficiency*: per-transaction Chaum-Pedersen verification
      uses ~ecMul~ / ~ecAdd~ (~29,000 gas).  One-time credential registration
-     uses ~ecPairing~ for PS signature verification (~200,000 gas).
+     uses ~ecPairing~ for PS signature verification (~235,000 gas).
    - *No cross-group compatibility issues*: since all participants, issuers,
      and credentials use the same curve, re-encryption between any two
      participants is always algebraically compatible.
@@ -408,6 +479,23 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
     her own ~E_alice~, she could substitute a fake credential and produce a
     valid proof against it.
 
+    The Fiat-Shamir challenge must bind all public inputs and context to
+    prevent replay and malleability:
+
+    #+begin_example
+    e = H(G, pk_alice, pk_bob, R_a, C_a, R_b, C_b, T1, T2,
+          msg.sender, spender, block.chainid)
+    #+end_example
+
+    Including ~msg.sender~ and ~spender~ (Ethereum addresses) binds the
+    proof to the specific transaction context.  Including ~block.chainid~
+    prevents cross-chain replay.  On-chain, ~msg.sender~ is authenticated
+    by ECDSA and ~spender~ is a calldata argument to ~approve()~, but
+    including them in the hash explicitly prevents a proof generated for
+    one ~(sender, spender)~ pair from being replayed in another context.
+    This is standard Fiat-Shamir domain separation, not an additional
+    cryptographic assumption.
+
 *** Gas Cost
 
 **** Per-Transaction (Chaum-Pedersen Verification at ~approve~)
@@ -435,7 +523,18 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
      | ~ecPairing~ base cost       |     1 | 45,000   | 45,000         |
      | ~ecMul~ (NIZK verification) |   3-4 | 6,000    | 24,000         |
      | ~ecAdd~ (NIZK verification) |   3-4 | 150      | 600            |
-     | *Total*                     |       |          | *~200,000 gas* |
+     | Calldata + SSTORE overhead  |       |          | ~10,000        |
+     | *Total*                     |       |          | *~235,000 gas* |
+
+     The NIZK proof linking the PS signature to the ElGamal ciphertext is
+     a standard Schnorr-family sigma protocol -- /not/ a Groth-Sahai proof.
+     The PS verification relation ~e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)~
+     is /linear/ in ~m~: the public inputs ~sigma'_1, sigma'_2, X, Y, g_2~
+     are fixed curve points, and the secret ~m~ enters linearly via ~m * Y~.
+     A single challenge-response pair binds ~m~ to both the pairing equation
+     and the ElGamal ciphertext.  The pairing is computed by the /verifier/
+     on public inputs; the prover demonstrates knowledge of ~m~ via scalar
+     responses.  No bilinear-map proof system is needed.
 
      This one-time registration cost is comparable to deploying a small
      contract.  For an account that will hold meaningful value and transact
@@ -785,6 +884,27 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
     Eve's only path to linking accounts is off-chain analysis: timing, amounts,
     behavioral patterns.  The cryptographic identity layer gives her nothing.
 
+*** Scope of Unlinkability
+
+    Alberta Buck provides /identity privacy/ (no observer can determine
+    who owns an address from the credential) and /credential
+    unlinkability/ (no observer can cryptographically link two
+    credentials to the same person).  It does /not/ provide /transaction
+    graph privacy/: Ethereum balances and transfer events are public,
+    and standard chain-analysis techniques -- timing correlation, amount
+    matching, funding-source tracing -- apply to BUCK as they do to any
+    ERC-20 token.
+
+    Transaction graph privacy is a distinct problem solved by different
+    primitives (confidential transactions, mixing protocols, or fully
+    shielded transfers as in Zcash).  These are orthogonal to the
+    identity layer and could complement it in the future.  The identity
+    system's guarantee is narrower but sufficient: even if Eve links
+    Alice's addresses through behavioral analysis, she cannot learn
+    Alice's /name/ or /identity data/ from any on-chain artifact.  The
+    cryptographic identity layer ensures that linking addresses reveals
+    spending patterns, not people.
+
 
 ** Attack 7: Alice Uses a Revoked or Expired Credential
 
@@ -1066,7 +1186,7 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
    | ~burn~         | Anonymous-valid | N/A (self-burn)       | Event log | Reduces outstanding balance              |
    |                | KYC (topic 1)   |                       |           |                                          |
    | ~transfer~     | Anonymous-valid | Anonymous-valid       | Encrypted | Both parties verified; receipt encrypted |
-   |                | KYC (topic 1)   | KYC (topic 1)         | 3-party   | to sender + receiver + escrow            |
+   |                | KYC (topic 1)   | KYC (topic 1)         | 3-party   | 3-party ECDH (no unilateral decryption)  |
    | ~transferFrom~ | Anonymous-valid | Anonymous-valid       | Encrypted | Spender verified; owner and recipient    |
    |                | KYC (topic 1)   | KYC (topic 1)         | 3-party   | identities in encrypted receipt          |
    | ~approve~      | Anonymous-valid | Anonymous-valid       | Event log | Approving a spender for transferFrom     |
@@ -1262,8 +1382,10 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
 
    What the spender (Bob / pool operator) can do:
    - Decrypt ~E_bob~ using ~sk_bob~: ~M = C_b - sk_bob * R_b~
-   - Decode the identity from the message point ~M = I * G~
-   - Store it for receipt construction on Holochain
+   - Receive ~identity_data~ from Alice via Holochain (encrypted for Bob)
+   - Verify authenticity: ~H(identity_data) * G == M~ (binds off-chain
+     data to the on-chain proof chain)
+   - Store verified identity for receipt construction on Holochain
 
 *** Receiving Transfers: ~approve(sender, 0)~ Handshake
 
@@ -1347,11 +1469,27 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
      encryption, and computes the NIZK proof.  This runs entirely offline and
      can be batched -- Alice can pre-generate credentials for future accounts.
 
-   - *Credential storage*: Each derived credential ~(pk, E_alice, sigma', pi)~
-     is stored on Alice's Holochain source chain.  The full identity data
-     (name, jurisdiction, ID number, KYC documents) is encoded in the identity
-     scalar ~m~ and encrypted in the ElGamal ciphertext, not stored separately
-     on Ethereum.
+   - *Identity data storage*: Alice's plaintext ~identity_data~ is stored as
+     a *Private entry* on her Holochain source chain, encrypted with her
+     agent key and never published to the DHT.  Only Alice's own agent can
+     read it.  This is the master copy from which ~m = H(identity_data)~ can
+     always be recomputed.
+
+   - *Credential storage*: Each derived credential ~(pk, E_alice, sigma', pi,
+     sk)~ is also stored as a Private entry on the agent's source chain.  The
+     identity private key ~sk~ (an alt_bn128 scalar) is stored alongside the
+     credential.  The ElGamal ciphertext binds ~m~ to the credential; the
+     plaintext ~identity_data~ that gives ~m~ meaning lives only in the
+     Private entry, never on Ethereum.
+
+   - *Identity data delivery* (the data channel): When Alice re-encrypts her
+     identity for Bob, her hApp also sends ~identity_data~ to Bob's hApp via
+     Holochain, encrypted under Bob's Holochain agent public key.  Bob's hApp
+     decrypts it, computes ~H(identity_data) * G~, and checks equality with
+     ~M~ recovered from the on-chain ElGamal ciphertext.  This verification
+     binds the off-chain plaintext to the on-chain proof chain.  The Holochain
+     data channel carries the content; the Ethereum proof chain guarantees its
+     authenticity.
 
    - *Re-encryption*: The hApp decrypts ~E_alice~ locally (Alice has
      ~sk_alice~), extracts the message point ~M~, and re-encrypts for Bob:
@@ -1368,6 +1506,44 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
      details, transaction metadata, purpose) are stored on both parties'
      Holochain source chains.  The on-chain ~BuckTransferReceipt~ event
      provides only an anchor hash.
+
+*** Agent Isolation Model
+
+    Alice does not reuse a single Holochain agent across multiple BUCK
+    accounts.  For each Ethereum address she creates, her wallet application
+    spawns a new Holochain agent:
+
+    - A fresh Holochain key pair (Ed25519) is generated.
+    - A new source chain is initialized.
+    - The hApp DNA is the same (same code, same hash), but the agent
+      identity is distinct.
+    - Alice copies her ~identity_data~ into the new agent's Private store
+      and derives a credential from it (rerandomizing her PS signature,
+      generating a fresh alt_bn128 key pair, encrypting via ElGamal,
+      computing the NIZK proof).
+
+    *Why agent isolation matters*: Holochain's DHT uses agent public keys
+    as identifiers.  If Alice used a single Holochain agent for all her
+    BUCK accounts, a DHT observer could correlate them: "agent X stored
+    credentials for addresses addr_1, addr_2, addr_3."  With separate
+    agents, each agent's DHT presence is independent.  No Holochain
+    observer can link Alice_1 to Alice_2, just as no Ethereum observer can
+    link addr_1 to addr_2.
+
+    *Practical operation*: Alice's wallet application (a Holochain Launcher
+    or custom conductor) manages multiple agent instances internally.  From
+    Alice's perspective, she sees a unified wallet with multiple accounts.
+    Under the hood, each account is a separate Holochain agent with its own
+    source chain.  The wallet stores a master seed (protected by Alice's
+    passphrase or biometrics) from which all agent keys are deterministically
+    derived, allowing backup and recovery without storing raw keys.
+
+    *What is NOT shared across agents*: Holochain key pairs, source chain
+    entries, Ethereum addresses, alt_bn128 identity key pairs, ElGamal
+    ciphertexts, PS signature rerandomizations, NIZK proofs.  *What IS
+    shared* (locally, within Alice's wallet, never on any network): Alice's
+    plaintext ~identity_data~ and the master PS signature ~(m, sigma)~ from
+    the issuer.
 
    Holochain provides agent-centric, cryptographically auditable storage: the
    hApp DNA is identified by hash, so anyone can verify the exact code that
@@ -1529,9 +1705,21 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
     #+end_example
 
     The regulator can compute ~shared_3~ (they have ~k_reg~, and ~K_e~ is
-    deterministic from the on-chain event).  But they still need ~shared_1~
-    or ~shared_2~ -- requiring cooperation from a transaction participant.
-    No unilateral surveillance.
+    deterministic from the on-chain event).  They can also compute
+    ~shared_2 = ECDH(k_e, K_r)~ since the ephemeral key ~k_e~ is
+    deterministic from public on-chain data.  But they cannot compute
+    ~shared_1 = ECDH(sk_sender, K_receiver)~ -- this requires the
+    sender's or receiver's private key.  Without a participant's
+    cooperation, the regulator holds two of three ECDH components and
+    cannot reconstruct the encryption key.  No unilateral surveillance.
+
+    This is the deliberate design: a court compels a /participant/ to
+    decrypt; the escrow key merely lets the regulator /verify/ the
+    decryption (by independently recomputing the same key once a
+    participant cooperates).  Contrast with custodial key escrow, where
+    the authority holds a master decryption key and can surveil at O(1)
+    cost.  Here the cost is O(N) -- one subpoena per participant, per
+    transaction.
 
 
 * Play-by-Play: BUCK/USDT Swap on Uniswap
@@ -1552,7 +1740,7 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
         - Generates fresh identity key pair (sk_alice, pk_alice)
         - Encrypts: E_alice = (r * G,  m * G + r * pk_alice)
         - Computes NIZK proof pi linking sigma' to E_alice
-     5. Registers on-chain (~200K gas):
+     5. Registers on-chain (~235K gas):
         identityRegistry.registerCredential(
             alice_wallet, pk_alice, E_alice, sigma', pi)
      6. identityRegistry.isVerified(alice_wallet) == true
@@ -1560,7 +1748,7 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
    Bob (pool deployer):
      1. Completed KYC (same ceremony as Alice)
      2. Derived credential for his account (same offline process)
-     3. Credential registered in IdentityRegistry (~200K gas)
+     3. Credential registered in IdentityRegistry (~235K gas)
      4. Created BUCK/USDT pool via Uniswap factory
         -> pool deployed at address 0xPOOL
      5. Derived and registered a separate credential for the pool
@@ -1686,14 +1874,14 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
     // 2. From IdentityExchange event (emitted during approve):
     E_bob = Alice's re-encrypted identity for Bob (ElGamal ciphertext)
 
-    // 3. Alice decrypts her own credential locally:
-    M_alice = C_a - sk_alice * R_a     // extract message point from E_alice
-    alice_identity = decode(M_alice)    // recover identity data
+    // 3. Alice already knows her own identity (she submitted it at KYC):
+    alice_identity = alice_identity_data   // local, never on-chain
 
     // 4. From Bob's IdentityExchange (if Bob also did approve for Alice):
     E_alice_from_bob = Bob's re-encrypted identity for Alice
     M_bob = C_b' - sk_alice * R_b'    // Alice decrypts with her key
-    bob_identity = decode(M_bob)
+    bob_identity_data = receive_via_holochain(bob)  // off-chain data channel
+    assert H(bob_identity_data) * G == M_bob        // bind to on-chain proof
 
     // 5. Construct full receipt with decrypted identities
     full_receipt = {
@@ -1811,15 +1999,15 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
 
    | Operation                                | Cost (~gas)  | When             |
    |------------------------------------------+--------------+------------------|
-   | ~registerCredential~ with PS verify      | ~200,000 gas | Once per account |
-   | (PS pairing: ~147K + NIZK: ~53K)         |              |                  |
+   | ~registerCredential~ with PS verify      | ~235,000 gas | Once per account |
+   | (PS pairing: ~181K + NIZK: ~44K)         |              |                  |
    | ~approve~ with Chaum-Pedersen verify     | ~75,000 gas  | Once per pair    |
    | (proof verify: ~29K + std approve: ~46K) |              |                  |
    | ~BuckTransferReceipt~ event              | ~2,000 gas   | Per transfer     |
    | (2 indexed addresses + 3 uint256)        |              |                  |
 
    Credential registration uses the ~ecPairing~ precompile to verify the
-   Pointcheval-Sanders signature and NIZK proof (~200,000 gas, once per
+   Pointcheval-Sanders signature and NIZK proof (~235,000 gas, once per
    account).  The Chaum-Pedersen proof verification uses ~ecMul~ / ~ecAdd~
    (~29,000 gas per counterparty pair).  Subsequent transfers emit only the
    minimal receipt event (~2,000 gas) with no additional proof work.
@@ -1845,6 +2033,51 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
    they can register a separate plaintext identity claim alongside their
    encrypted credential.  This is the expected case for commercial DeFi
    operators -- public identity builds trust and attracts liquidity.
+
+
+** alt_bn128 Security Horizon
+
+   The alt_bn128 curve (BN254) offers ~128-bit security for discrete
+   logarithm in G_1 but only ~100-bit security against pairing-based
+   attacks, due to Kim-Barbulescu tower-NFS improvements (2016) to the
+   Number Field Sieve in extension fields.  This affects the PS signature
+   verification (which uses pairings at registration) but /not/ the
+   Chaum-Pedersen proof (which uses only G_1 scalar multiplications at
+   transaction time and remains at full ~128-bit security).
+
+   This is not specific to Alberta Buck.  /Every/ Ethereum application
+   using the ~ecPairing~ precompile -- Groth16 SNARK verifiers (zkSync,
+   Polygon zkEVM), BLS signature schemes, any pairing-based construction
+   -- faces the same constraint.  The alt_bn128 precompiles are the only
+   pairing-capable curve available on-chain until EIP-2537 (BLS12-381
+   precompiles) is deployed.
+
+   Three mitigations apply:
+
+   1. *Epoch-based credential expiry*: PS signatures are verified once at
+      registration and carry an expiry epoch.  An attacker who invests
+      computational resources to break a pairing equation recovers a
+      single credential that has likely already expired.  The Identity
+      Fountain's renewal model limits the value of any single break.
+
+   2. *DLog security is unaffected*: Per-transaction Chaum-Pedersen proofs
+      rely on discrete logarithm hardness in G_1, which remains at
+      ~128-bit security.  An attacker who breaks pairings cannot forge
+      re-encryption proofs or decrypt ElGamal ciphertexts.
+
+   3. *BLS12-381 migration path*: EIP-2537 introduces precompiles for
+      BLS12-381 (~128-bit pairing security).  When deployed, credential
+      registration migrates to BLS12-381 for PS verification while the
+      Chaum-Pedersen layer continues on alt_bn128 (or also migrates).
+      The architecture's separation of registration-time pairings from
+      transaction-time scalar multiplications makes this migration
+      straightforward -- only the ~registerCredential~ function changes.
+
+   The ~100-bit pairing security is adequate for the current threat model.
+   The practical cost of a tower-NFS attack on BN254 pairings remains far
+   beyond the value of any single Alberta Buck credential, particularly
+   given epoch-based expiry.  The system shares this constraint with the
+   entire Ethereum L2 scaling ecosystem.
 
 
 * Alternative Approaches Considered
@@ -2013,7 +2246,7 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
    ElGamal Chaum-Pedersen wins on per-transaction gas cost, has zero setup
    requirements, generates proofs instantly, supports targeted decryption, and
    requires minimal implementation.  Combined with Pointcheval-Sanders
-   rerandomizable signatures for credential derivation (one-time ~200K gas at
+   rerandomizable signatures for credential derivation (one-time ~235K gas at
    registration), the system achieves both cross-account unlinkability and
    per-transaction re-encryption correctness -- without the gas burden or
    trusted setup of SNARK-based alternatives.
