@@ -33,7 +33,10 @@ This document specifies identity requirements for every Alberta Buck
 operation, details the ElGamal + Pointcheval-Sanders + Chaum-Pedersen
 architecture, and demonstrates through adversarial scenarios that the
 scheme defeats forgery, substitution, and collusion while keeping
-on-chain costs minimal. ([PDF], [Text])
+on-chain costs minimal.  ([PDF], [Text])
+
+See [Alberta Buck Identity - Cryptographic Examples] for demonstrations
+of the cryptographic primitives used.
 
 Table of Contents
 ─────────────────
@@ -99,6 +102,9 @@ Table of Contents
 [PDF] <https://perry.kundert.ca/images/alberta-buck-identity.pdf>
 
 [Text] <https://perry.kundert.ca/images/alberta-buck-identity.txt>
+
+[Alberta Buck Identity - Cryptographic Examples]
+<../alberta-buck-identity-example>
 
 
 1 Identity with Anonymity

@@ -1,20 +1,28 @@
-#+TITLE: Alberta Buck Identity - Cryptographic Example
+#+TITLE: Alberta Buck Identity - Cryptographic Example (DRAFT v0.1)
 #+author: Perry Kundert
 #+date: 2026-04-10
+#+category: Alberta Buck
+#+series[]: Alberta-Buck
+#+series_order: 13
+#+weight: 14
 #+draft: false
+#+bucky: true
+#+description: Worked cryptographic examples of the Alberta Buck identity system: PS signatures, ElGamal encryption, NIZK proofs, Chaum-Pedersen re-encryption, and two-channel verification on BN254, with counter-examples demonstrating each failure mode.
+
+#+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
+#+LATEX_HEADER: \usepackage{draftwatermark}
+
 #+EXPORT_FILE_NAME: alberta-buck-identity-example
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
-#+OPTIONS: ^:nil
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
 #+OPTIONS: toc:nil
 
 #+PROPERTY: header-args :exports both :results output
 #+PROPERTY: header-args:python :session abid :results output table
 
-#+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
-
 #+BEGIN_ABSTRACT
-This document implements each cryptographic step of the Alberta Buck identity
+This document implements each cryptographic step of the [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][Alberta Buck identity]]
 system: Pointcheval-Sanders signature issuance, credential derivation via the
 Identity Fountain, on-chain registration verification, ElGamal re-encryption
 with Chaum-Pedersen proof, and identity verification by a counterparty.  All
@@ -25,11 +33,13 @@ We demonstrate a transfer from Private Alice to Public Bob: Alice holds a
 PS-signed identity, derives a fresh unlinkable credential, registers it, then
 re-encrypts her identity for Bob with a Chaum-Pedersen proof of correct
 re-encryption.  Bob verifies Alice's identity using the two-channel design:
-on-chain proof chain plus off-chain =identity_data=.
+on-chain proof chain plus off-chain =identity_data=. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-identity-example.txt][Text]])
 #+END_ABSTRACT
 
-#+TOC: headlines 3
+#+LATEX: \clearpage
+#+TOC: headlines 2
 
+#+LATEX: \clearpage
 * Setup: The alt_bn128 Curve and Helpers
 
   All operations use BN254, the curve behind Ethereum's =ecAdd= (0x06),
@@ -173,8 +183,8 @@ on-chain proof chain plus off-chain =identity_data=.
    : Identity scalar m = H(identity_data):
    :   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
    : PS signature sigma:
-   :   sigma_1 = (483010...,  75907...)
-   :   sigma_2 = (731457..., 330816...)
+   :   sigma_1 = (858109...,  69488...)
+   :   sigma_2 = (930288..., 971618...)
 
    #+LATEX: }
 
@@ -183,6 +193,11 @@ on-chain proof chain plus off-chain =identity_data=.
    The PS verification equation uses a bilinear pairing:
 
    \[ e(\sigma_1, X + m \cdot Y) = e(\sigma_2, g_2) \]
+
+   *What this proves:* The issuer's signature is mathematically valid --
+   it binds the identity scalar \( m \) to the issuer's secret key.  If
+   the signature passes, Alice can be sure the issuer actually certified
+   her identity (no one else knows \( (x, y) \)).
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
@@ -210,6 +225,38 @@ on-chain proof chain plus off-chain =identity_data=.
 
    #+LATEX: }
 
+   *How to read the output:* "PS signature verified" means both sides of
+   the pairing equation produce the same element in \( G_T \).  If \( m \)
+   were wrong (e.g., tampered identity data), the two pairings would
+   produce /different/ \( G_T \) elements and the assertion would fail.
+   A counter-example follows.
+
+*** Counter-example: Wrong Identity Scalar
+
+    If Eve tries to forge a signature using a different \( m \), the pairing
+    equation fails.  This is what a rejected verification looks like:
+
+    #+LATEX: {\scriptsize
+    #+BEGIN_SRC python :session abid :results output
+      # Tampered m -- what if someone changes one field in identity_data?
+      m_fake = keccak("tampered_identity_data")
+      lhs_bad = pairing(add(IPK_X, mul(IPK_Y, m_fake)), sigma[0])
+      rhs_good = pairing(G2, sigma[1])
+      ok = (lhs_bad == rhs_good)
+      print(f"PS verify with wrong m: {ok}")
+      print(f"  (The two G_T elements differ -- the pairing detects the mismatch.)")
+      print(f"  Any change to identity_data produces a different m, which")
+      print(f"  makes the pairing equation fail.  The signature is unforgeable.")
+    #+END_SRC
+
+    #+RESULTS:
+    : PS verify with wrong m: False
+    :   (The two G_T elements differ -- the pairing detects the mismatch.)
+    :   Any change to identity_data produces a different m, which
+    :   makes the pairing equation fail.  The signature is unforgeable.
+
+    #+LATEX: }
+
 
 * The Identity Fountain -- Alice Derives a Fresh Credential
 
@@ -224,6 +271,9 @@ on-chain proof chain plus off-chain =identity_data=.
    \( \sigma' = (t \cdot \sigma_1, t \cdot \sigma_2) \).  This is a valid PS
    signature on the same \( m \) -- but /statistically unlinkable/ to the
    original \( \sigma \).
+
+   *What this proves:* Rerandomization produces a fresh, valid PS signature
+   that cannot be correlated with the original -- even by the issuer.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
@@ -249,15 +299,22 @@ on-chain proof chain plus off-chain =identity_data=.
 
    #+RESULTS:
    : Rerandomized PS signature verified.
-   :   sigma'_1 = (615339..., 223933...)
-   :   sigma'_2 = (507632..., 987703...)
+   :   sigma'_1 = (705373..., 745956...)
+   :   sigma'_2 = (986878..., 434958...)
    : 
    : Original and rerandomized signatures are unlinkable:
-   :   sigma_1  = (483010...,  75907...)
-   :   sigma'_1 = (615339..., 223933...)
+   :   sigma_1  = (858109...,  69488...)
+   :   sigma'_1 = (705373..., 745956...)
    :   (No algorithm can correlate them.)
 
    #+LATEX: }
+
+   *How to read the output:* Two things to check: (1) "Rerandomized PS
+   signature verified" confirms \( \sigma' \) still satisfies the pairing
+   equation.  (2) Compare the coordinate fragments of =sigma_1= vs.
+   =sigma'_1= -- they share no visible pattern.  This isn't coincidence:
+   the rerandomization is /statistical/ (information-theoretic), not merely
+   computational.
 
 ** Generate Fresh Identity Key Pair and ElGamal Encryption
 
@@ -265,6 +322,10 @@ on-chain proof chain plus off-chain =identity_data=.
    scalar \( m \) under her own public key using ElGamal:
 
    \[ E_{\text{alice}} = (r \cdot G, \; m \cdot G + r \cdot pk_{\text{alice}}) \]
+
+   *What this proves:* Alice can encrypt her identity under her own public
+   key and recover it.  ElGamal decryption yields the /point/ \( M = m \cdot G \),
+   not the scalar \( m \) (solving the discrete log is infeasible).
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
@@ -297,12 +358,12 @@ on-chain proof chain plus off-chain =identity_data=.
    #+RESULTS:
    #+begin_example
    Fresh key pair for this Ethereum account:
-     sk_alice = 6250790805681775666049883221285615218580758415112376680837944936120426248272
-     pk_alice = (647689..., 302634...)
+     sk_alice = 3974562240248613817443761207776443680170089390780677536793051147741091392449
+     pk_alice = (253250..., 719558...)
 
    ElGamal ciphertext E_alice = (R, C):
-     R = r*G    = (748728..., 554476...)
-     C = m*G+r*pk = (558665..., 444760...)
+     R = r*G    = (361627..., 776399...)
+     C = m*G+r*pk = ( 94213...,  16319...)
 
    Message point M = m*G:
      M = (739132..., 937433...)
@@ -311,6 +372,37 @@ on-chain proof chain plus off-chain =identity_data=.
    #+end_example
 
    #+LATEX: }
+
+   *How to read the output:* The last two lines show the decrypted point
+   \( C - sk \cdot R \) and the original \( M \).  Their coordinate
+   fragments must match -- this confirms the ciphertext is well-formed.
+   If Alice used the wrong secret key, the decrypted point would be a
+   random, unrelated point (shown in the counter-example below).
+
+*** Counter-example: Wrong Secret Key
+
+    An attacker who doesn't know =sk_alice= cannot decrypt to the
+    correct \( M \).  The result is an unrelated random point:
+
+    #+LATEX: {\scriptsize
+    #+BEGIN_SRC python :session abid :results output
+      sk_eve = rand()  # Eve's key, not Alice's
+      M_wrong = add(C_alice, neg(mul(R_alice, sk_eve)))
+      print(f"Eve decrypts with wrong key:")
+      print(f"  M_wrong = {pt(M_wrong)}")
+      print(f"  M_real  = {pt(M_alice)}")
+      print(f"  Match: {eq(M_wrong, M_alice)}")
+      print(f"  (Completely different point -- no information about m is leaked.)")
+    #+END_SRC
+
+    #+RESULTS:
+    : Eve decrypts with wrong key:
+    :   M_wrong = (305943..., 749533...)
+    :   M_real  = (739132..., 937433...)
+    :   Match: False
+    :   (Completely different point -- no information about m is leaked.)
+
+    #+LATEX: }
 
 ** NIZK Proof: Binding PS Signature to ElGamal Ciphertext
 
@@ -363,9 +455,9 @@ on-chain proof chain plus off-chain =identity_data=.
 
    #+RESULTS:
    : NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-   :   challenge e = 2023286113776840231855571774176070181314878072030190373266575565534067129639
-   :   response s_m = 3954012208731152542800649229374169008492084351520941897766595142743227731449
-   :   response s_r = 13888480927922533270028042042565274320631142429454095988404342322975758360019
+   :   challenge e = 11596772272343490528704267066242587307299809469103532733094292496093712600732
+   :   response s_m = 8456468856417808597128338805715603461296159114195908949901349492274665059193
+   :   response s_r = 13335689362143614131000427335781003109719364194363085980379351804736369897760
 
    #+LATEX: }
 
@@ -377,6 +469,16 @@ on-chain proof chain plus off-chain =identity_data=.
   using =ecPairing=, =ecMul=, and =ecAdd= precompiles (~235K gas).
 
 ** Verify the NIZK Proof (What the Contract Computes)
+
+   *What this proves:* The same \( m \) appears in both the PS signature
+   and the ElGamal ciphertext, without revealing \( m \) or \( r \).  Five
+   checks run:
+
+   - *(b)* ElGamal C consistency: the committed \( m \) is inside \( C \)
+   - *(c)* ElGamal R consistency: the committed \( r \) is inside \( R \)
+   - *(a)* PS pairing product: the same \( m \) satisfies the PS equation
+   - *(d)* Fiat-Shamir: the challenge was honestly derived (not chosen after the fact)
+   - *(e)* Non-triviality: \( \sigma'_1 \neq \mathcal{O} \) (prevents trivial forgery)
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
@@ -490,6 +592,54 @@ on-chain proof chain plus off-chain =identity_data=.
 
    #+LATEX: }
 
+   *How to read the output:* All five checks must print "passed".  If any
+   prints "FAILED", the proof is invalid.  A counter-example follows showing
+   what happens when Alice tries to register a ciphertext containing a
+   /different/ \( m \) than the one in her PS signature.
+
+*** Counter-example: ElGamal Encrypts a Different \( m \)
+
+    If Alice (or an attacker) tries to encrypt one \( m \) in ElGamal but
+    prove a PS signature on a /different/ \( m \), the ElGamal consistency
+    check detects the mismatch:
+
+    #+LATEX: {\scriptsize
+    #+BEGIN_SRC python :session abid :results output
+      # Forge: encrypt a fake m_fake in ElGamal, but use the real PS sigma
+      m_fake  = rand()
+      r_fake  = rand()
+      R_fake  = mul(G1, r_fake)
+      C_fake  = add(mul(G1, m_fake), mul(pk_alice, r_fake))
+
+      # Try to build a NIZK proof binding sigma' (real m) to E_fake (fake m)
+      m_t = rand(); r_t = rand()
+      A_fake  = mul(sigma_p[0], m_t)
+      T_C_f   = add(mul(G1, m_t), mul(pk_alice, r_t))
+      T_R_f   = mul(G1, r_t)
+      e_f     = keccak(
+          sigma_p[0][0], sigma_p[0][1], sigma_p[1][0], sigma_p[1][1],
+          R_fake[0], R_fake[1], C_fake[0], C_fake[1],
+          pk_alice[0], pk_alice[1],
+          A_fake[0], A_fake[1], T_C_f[0], T_C_f[1], T_R_f[0], T_R_f[1])
+      s_m_f = (m_t + e_f * m_alice) % ORDER   # uses real m for PS...
+      s_r_f = (r_t + e_f * r_fake) % ORDER    # ...but fake r for ElGamal
+
+      # Check (b): s_m*G + s_r*pk == e*C_fake + T_C?
+      lhs = add(mul(G1, s_m_f), mul(pk_alice, s_r_f))
+      rhs = add(mul(C_fake, e_f), T_C_f)
+      ok  = eq(lhs, rhs)
+      print(f"Forged proof -- ElGamal C check: {ok}")
+      print(f"  (The check FAILS because s_m encodes m_real but C_fake")
+      print(f"   encrypts m_fake.  The NIZK forces both to be identical.)")
+    #+END_SRC
+
+    #+RESULTS:
+    : Forged proof -- ElGamal C check: False
+    :   (The check FAILS because s_m encodes m_real but C_fake
+    :    encrypts m_fake.  The NIZK forces both to be identical.)
+
+    #+LATEX: }
+
 
 * Bob Registers as a Public Account
 
@@ -541,7 +691,7 @@ on-chain proof chain plus off-chain =identity_data=.
 
   #+RESULTS:
   : Bob registered as PUBLIC account:
-  :   pk_bob = (881252..., 658355...)
+  :   pk_bob = (552937..., 166959...)
   :   E_bob  = (R, C) -- ElGamal ciphertext on-chain
   :   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
   :   isVerified(bob) = true
@@ -566,6 +716,10 @@ on-chain proof chain plus off-chain =identity_data=.
 
    Alice decrypts her own ciphertext to recover \( M = m \cdot G \), then
    re-encrypts under Bob's public key with fresh randomness.
+
+   *What this proves:* Re-encryption preserves the message point \( M \).
+   Bob can decrypt the new ciphertext with his own secret key and recover
+   the same \( M \) that was in Alice's original ciphertext.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
@@ -594,13 +748,17 @@ on-chain proof chain plus off-chain =identity_data=.
    #+RESULTS:
    : Alice re-encrypts her identity for Bob:
    :   E_bob = (R', C') where:
-   :     R' = r'*G     = (794019..., 873039...)
-   :     C' = M+r'*pk  = (328512..., 195671...)
+   :     R' = r'*G     = (780040..., 480638...)
+   :     C' = M+r'*pk  = (948541..., 222139...)
    : 
    : Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
    : Matches Alice's M:             (739132..., 937433...)
 
    #+LATEX: }
+
+   *How to read the output:* The last two lines show Bob's decrypted
+   point and Alice's original \( M \).  The coordinate fragments must
+   be identical -- same point, different ciphertext wrapping it.
 
 ** Chaum-Pedersen Proof of Correct Re-Encryption
 
@@ -655,9 +813,9 @@ on-chain proof chain plus off-chain =identity_data=.
 
    #+RESULTS:
    : Chaum-Pedersen proof:
-   :   e  = 18533242173358526839500470970144995594065693761526599021287331439448788654720
-   :   s1 = 6635416172394760537480183633708637860791690987916976797687826488331108174125
-   :   s2 = 15591952741655574773104062376164046029887086647808479450260242488533444150360
+   :   e  = 3237069779842981739037472317040763252632379197344544834559959217737446742346
+   :   s1 = 10805951989459779527698809651644634420169076828220426965814997751130381734917
+   :   s2 = 16966865532586120201635225732722659969932415823607660454272200406032537484700
 
    #+LATEX: }
 
@@ -665,6 +823,14 @@ on-chain proof chain plus off-chain =identity_data=.
 
    The BUCK contract reads \( E_{\text{alice}} \) from the IdentityRegistry
    (never from calldata), then verifies the proof.  Cost: ~29,000 gas.
+
+   *What this proves:* \( E_{\text{alice}} \) and \( E_{\text{bob}} \) encrypt
+   the same message point \( M \) -- without revealing \( M \), =sk_alice=,
+   or the re-encryption randomness \( r' \).  Three checks:
+
+   - *Check 1:* \( r' \) is consistent with \( R_{\text{bob}} \)
+   - *Check 2:* Both ciphertexts decrypt to the same \( M \)
+   - *Check 3:* Fiat-Shamir challenge was honestly derived
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
@@ -725,6 +891,51 @@ on-chain proof chain plus off-chain =identity_data=.
 
    #+LATEX: }
 
+   *How to read the output:* All three "passed" lines must appear.  If
+   Alice re-encrypted for a /different/ public key or used a different
+   \( M \), Check 2 would fail.  A counter-example follows.
+
+*** Counter-example: Re-Encryption with Wrong Message
+
+    If Alice tries to pass off a different identity point in the
+    re-encrypted ciphertext, Check 2 catches the discrepancy:
+
+    #+LATEX: {\scriptsize
+    #+BEGIN_SRC python :session abid :results output
+      # Alice tries to re-encrypt a DIFFERENT M (e.g., someone else's identity)
+      m_other = rand()
+      M_other = mul(G1, m_other)
+      r_bad   = rand()
+      R_bad   = mul(G1, r_bad)
+      C_bad   = add(M_other, mul(pk_bob, r_bad))  # encrypts M_other, not M_alice
+
+      # Build Chaum-Pedersen proof (Alice tries to cheat)
+      k1b = rand(); k2b = rand()
+      T1b = mul(R_alice, k1b); T2b = mul(pk_bob, k2b); T3b = mul(G1, k2b)
+      e_bad = keccak(
+          R_alice[0], R_alice[1], C_alice[0], C_alice[1],
+          R_bad[0], R_bad[1], C_bad[0], C_bad[1],
+          pk_alice[0], pk_alice[1], pk_bob[0], pk_bob[1],
+          T1b[0], T1b[1], T2b[0], T2b[1], T3b[0], T3b[1], 42, 1337)
+      s1b = (k1b + e_bad * sk_alice) % ORDER
+      s2b = (k2b + e_bad * r_bad)    % ORDER
+
+      # Check 2: s1*R_a - s2*pk_b == (T1-T2) + e*(C_alice - C_bad)?
+      lhs = add(mul(R_alice, s1b), neg(mul(pk_bob, s2b)))
+      rhs = add(add(T1b, neg(T2b)), mul(add(C_alice, neg(C_bad)), e_bad))
+      ok  = eq(lhs, rhs)
+      print(f"Forged re-encryption -- Check 2: {ok}")
+      print(f"  (FAILS: C_bad encrypts a different M than C_alice.)")
+      print(f"  (The contract rejects the approve() call.)")
+    #+END_SRC
+
+    #+RESULTS:
+    : Forged re-encryption -- Check 2: False
+    :   (FAILS: C_bad encrypts a different M than C_alice.)
+    :   (The contract rejects the approve() call.)
+
+    #+LATEX: }
+
 
 * Transfer -- Bilateral Identity Check
 
@@ -773,6 +984,12 @@ on-chain proof chain plus off-chain =identity_data=.
   Bob decrypts the ElGamal ciphertext to get the message point \( M \),
   then receives Alice's =identity_data= via Holochain and verifies
   the binding: \( H(\text{identity\_data}) \cdot G = M \).
+
+  *What this proves:* The plaintext identity Bob received off-chain
+  (via Holochain) is the /exact same/ identity the issuer certified
+  and Alice registered on-chain.  The binding is cryptographic: any
+  change to even one character of =identity_data= would produce a
+  different \( m \), yielding a different point \( m \cdot G \neq M \).
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results output
@@ -824,6 +1041,39 @@ on-chain proof chain plus off-chain =identity_data=.
 
   #+LATEX: }
 
+  *How to read the output:* The coordinate fragments of =m * G= and
+  =M= (decrypted from on-chain) must be identical.  A counter-example
+  follows showing what Bob sees if the Holochain data is tampered.
+
+** Counter-example: Tampered Identity Data
+
+   If a man-in-the-middle alters the identity data in transit, Bob
+   detects it immediately -- the hash no longer matches the on-chain
+   point:
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session abid :results output
+     # Someone tampers with the identity data in transit
+     tampered = alice_identity_data.replace("Alice", "Mallory")
+     m_tampered = keccak(tampered)
+     M_tampered = mul(G1, m_tampered)
+
+     print(f"Tampered identity_data: ...given_name: 'Mallory'...")
+     print(f"  H(tampered) * G = {pt(M_tampered)}")
+     print(f"  M (from chain)  = {pt(M_from_bob)}")
+     print(f"  Match: {eq(M_tampered, M_from_bob)}")
+     print(f"  (Bob rejects: the off-chain data doesn't match the on-chain point.)")
+   #+END_SRC
+
+   #+RESULTS:
+   : Tampered identity_data: ...given_name: 'Mallory'...
+   :   H(tampered) * G = (722726..., 633711...)
+   :   M (from chain)  = (739132..., 937433...)
+   :   Match: False
+   :   (Bob rejects: the off-chain data doesn't match the on-chain point.)
+
+   #+LATEX: }
+
 
 * Receipt Construction
 
@@ -831,6 +1081,10 @@ on-chain proof chain plus off-chain =identity_data=.
   from the public IdentityRegistry; Bob has Alice's from Holochain).  Both
   hold the transfer data from on-chain events.  Either can independently
   construct the canonical receipt.
+
+  *What this proves:* Because the receipt format is canonical (deterministic
+  JSON with sorted keys), both parties independently produce byte-identical
+  output.  Their =keccak256= hashes match without coordination.
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results output
@@ -879,6 +1133,9 @@ on-chain proof chain plus off-chain =identity_data=.
 
   #+LATEX: }
 
+  *How to read the output:* The two hash values must be identical.  If the
+  receipt format weren't canonical (e.g., different key ordering), the
+  hashes would diverge -- making it impossible to prove a dispute later.
 
 * Summary: What Each Party Knows
 
@@ -928,6 +1185,12 @@ on-chain proof chain plus off-chain =identity_data=.
   Alice derives a second credential from the same PS signature.  We verify
   that no observer can link the two credentials.
 
+  *What this proves:* Two credentials derived from the same PS signature
+  share absolutely /no observable structure/.  Every public artifact --
+  public key, ElGamal ciphertext, rerandomized signature -- is
+  independent.  Both verify under the same issuer public key, but
+  correlation is information-theoretically impossible.
+
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results output
     # === Alice creates a SECOND account (e.g., "savings") ===
@@ -976,17 +1239,17 @@ on-chain proof chain plus off-chain =identity_data=.
   #+RESULTS:
   #+begin_example
   Second credential derived (same identity, fresh account):
-    pk_alice_2 = (118101..., 933481...)
+    pk_alice_2 = (833097..., 999940...)
     E_alice_2  = (R, C) -- independent ciphertext
-    sigma'_2   = (859605..., 328350...)
+    sigma'_2   = (603028..., 940086...)
 
   Unlinkability check:
-    sigma'_1 (acct 1) = (615339..., 223933...)
-    sigma'_1 (acct 2) = (859605..., 328350...)
-    pk (acct 1)       = (647689..., 302634...)
-    pk (acct 2)       = (118101..., 933481...)
-    E.R (acct 1)      = (748728..., 554476...)
-    E.R (acct 2)      = (165288..., 601396...)
+    sigma'_1 (acct 1) = (705373..., 745956...)
+    sigma'_1 (acct 2) = (603028..., 940086...)
+    pk (acct 1)       = (253250..., 719558...)
+    pk (acct 2)       = (833097..., 999940...)
+    E.R (acct 1)      = (361627..., 776399...)
+    E.R (acct 2)      = (728255..., 723312...)
 
     All values are independent.  No shared structure.
     PS rerandomization is STATISTICALLY unlinkable --
@@ -998,3 +1261,8 @@ on-chain proof chain plus off-chain =identity_data=.
   #+end_example
 
   #+LATEX: }
+
+  *How to read the output:* Compare the coordinate fragments between
+  "acct 1" and "acct 2" for =sigma'_1=, =pk=, and =E.R=.  They must
+  all be completely different (random-looking).  If any pair matched,
+  the unlinkability property would be broken.
