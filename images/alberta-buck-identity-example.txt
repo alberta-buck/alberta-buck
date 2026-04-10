@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-             ALBERTA BUCK IDENTITY - CRYPTOGRAPHIC EXAMPLE
-                              (DRAFT V0.2)
+             ALBERTA BUCK - IDENTITY - CRYPTOGRAPHY EXAMPLE
+                                 (V1.0)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -25,11 +25,11 @@ registers it on-chain (~235K gas NIZK verification), and re-encrypts her
 identity for Bob with a Chaum-Pedersen proof of correct re-encryption
 (~29K gas).  Bob verifies Alice's identity using the two-channel design:
 the on-chain ElGamal ciphertext provides cryptographic binding, while
-Holochain delivers the plaintext `identity_data'.  We show how this
-proof chain protects Bob under subpoena – even 18 months and 500,000
-transactions later – and why Alice cannot hide from regulatory recovery
-despite the Identity Fountain's unlinkability guarantees. ([PDF],
-[Text])
+Holochain delivers the plaintext `identity_data'.  The AMM pool scenario
+demonstrates how this proof chain protects Bob under subpoena – even 18
+months and 500,000 transactions later – and why Alice cannot hide from
+regulatory recovery despite the Identity Fountain's unlinkability
+guarantees. ([PDF], [Text])
 
 Table of Contents
 ─────────────────
@@ -78,14 +78,14 @@ Table of Contents
 ═══════════════════════════════════
 
   The Alberta Buck identity system spans two networks (Ethereum and
-  Holochain) and a local device (the wallet).  This section maps every
-  piece of identity data to its storage location, visibility, and the
-  protocol step that consumes it.  Mermaid sequence diagrams trace the
-  data through registration, approval, transfer, and two-channel
-  verification – including the trust checkpoint where wallets detect
-  malfeasance, and the AMM pool scenario where a public pool operator
-  responds to a regulatory subpoena months after a swap.  The key
-  result: all cryptographic proofs are permanently on-chain, so
+  Holochain) and a local device (the wallet).  The tables and mermaid
+  sequence diagrams below map every piece of identity data to its
+  storage location, visibility, and the protocol step that consumes it –
+  tracing flows through registration, approval, transfer, and
+  two-channel verification, including the trust checkpoint where wallets
+  detect malfeasance, and the AMM pool scenario where a public pool
+  operator responds to a regulatory subpoena months after a swap.  The
+  key result: all cryptographic proofs are permanently on-chain, so
   regulatory compliance requires only Bob's secret key and an archival
   Ethereum node – not Alice's cooperation.
 
@@ -123,7 +123,7 @@ Table of Contents
   artifacts.  The secret key and plaintext identity /never/ touch
   Ethereum.
 
-  <file:images/registration-flow.png>
+  <file:./images/registration-flow.png>
 
 
 1.3 Approve: Re-Encryption with Trust Verification
@@ -143,7 +143,7 @@ Table of Contents
   detecting the same fraud produce consensus: the warranted agent
   becomes untrusted on the DHT.
 
-  <file:images/approve-flow.png>
+  <file:./images/approve-flow.png>
 
 
 1.4 Transfer: Everything On-Chain
@@ -154,7 +154,7 @@ Table of Contents
   cryptography runs during the transfer itself.  Public accounts
   (`isPublic=true') are exempt from needing a counterparty `approve'.
 
-  <file:images/transfer-flow.png>
+  <file:./images/transfer-flow.png>
 
 
 1.5 Two-Channel Verification and Malfeasance Detection
@@ -172,7 +172,7 @@ Table of Contents
   independently verify the evidence.  Since Holochain agents sign their
   source chain entries, Alice cannot deny having sent the bad data.
 
-  <file:images/verification-flow.png>
+  <file:./images/verification-flow.png>
 
 
 1.6 The Four Transfer Modes
@@ -251,7 +251,7 @@ Table of Contents
 1.7.2 Bob Responds to the Subpoena
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  <file:images/subpoena-flow.png>
+  <file:./images/subpoena-flow.png>
 
 
 1.7.3 Why Bob Is Protected
@@ -433,23 +433,22 @@ Table of Contents
   corresponding DHT entry does not.  Multiple independent warrants
   produce DHT-level consensus that Alice's agent is non-compliant.
 
-  Crucially, even if Alice never publishes, Bob's regulatory position is
-  unchanged.  He can still decrypt \( M \) from the on-chain ciphertext
-  and hand it to the regulator, who obtains `identity_data' from the
-  issuer.  Alice's non-publication delays the human-readable
-  identification by one step (issuer lookup) but cannot prevent it.
+  Even if Alice never publishes, Bob's regulatory position is unchanged.
+  He can still decrypt \( M \) from the on-chain ciphertext and hand it
+  to the regulator, who obtains `identity_data' from the issuer.
+  Alice's non-publication delays the human-readable identification by
+  one step (issuer lookup) but cannot prevent it.
 
 
 2 Setup: The alt_bn128 Curve and Helpers
 ════════════════════════════════════════
 
-  This section initializes the BN254 curve primitives used throughout
-  the worked examples.  We import `py_ecc.bn128' (which provides the
-  same `ecAdd', `ecMul', and `ecPairing' operations as Ethereum's
-  precompiles at addresses 0x06–0x08) and define helper functions for
-  random scalar generation, `keccak256' hashing, and point formatting.
-  All subsequent code blocks share a single `:session abid' so that
-  variables persist across steps.
+  All operations use BN254, the curve behind Ethereum's `ecAdd' (0x06),
+  `ecMul' (0x07), and `ecPairing' (0x08) precompiles.  The
+  `py_ecc.bn128' library provides exactly these primitives.  Helper
+  functions for random scalar generation, `keccak256' hashing, and point
+  formatting are defined here; all subsequent code blocks share a single
+  `:session abid' so that variables persist across steps.
 
   ┌────
   │ import secrets
@@ -534,10 +533,10 @@ Table of Contents
   keys, no whitespace), and computes the identity scalar \( m =
   \text{keccak256}(\text{identity\_data}) \mod \text{ORDER} \).  The
   issuer then produces a PS signature \( \sigma = (h, (x + m \cdot y)
-  \cdot h) \) binding \( m \) to the issuer's secret key.  We verify the
-  signature using the bilinear pairing equation, and show with a
-  counter-example that any change to `identity_data' (producing a
-  different \( m \)) causes verification to fail.
+  \cdot h) \) binding \( m \) to the issuer's secret key.  The bilinear
+  pairing equation verifies the signature, and a counter-example
+  confirms that any change to `identity_data' (producing a different \(
+  m \)) causes verification to fail.
 
 
 4.1 Alice's Plaintext Identity
@@ -596,8 +595,8 @@ Table of Contents
   │ Identity scalar m = H(identity_data):
   │   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
   │ PS signature sigma:
-  │   sigma_1 = (289721..., 131393...)
-  │   sigma_2 = (885125...,  97036...)
+  │   sigma_1 = (378462..., 520259...)
+  │   sigma_2 = (268365..., 989391...)
   └────
 
 
@@ -680,11 +679,11 @@ Table of Contents
   a rerandomized PS signature \( \sigma' \) (statistically unlinkable to
   the original), a fresh key pair \( (sk, pk) \), an ElGamal encryption
   of \( m \) under \( pk \), and a NIZK sigma-protocol proof binding the
-  PS signature to the ciphertext.  We demonstrate each step, verify that
+  PS signature to the ciphertext.  Each step is demonstrated below:
   rerandomization preserves signature validity while destroying
-  correlation, and show that ElGamal decryption recovers the correct
-  message point – with a counter-example proving that the wrong secret
-  key yields an unrelated random point.
+  correlation, and ElGamal decryption recovers the correct message
+  point.  A counter-example confirms that the wrong secret key yields an
+  unrelated random point.
 
 
 5.1 Rerandomize the PS Signature
@@ -722,12 +721,12 @@ Table of Contents
 
   ┌────
   │ Rerandomized PS signature verified.
-  │   sigma'_1 = (543423..., 965077...)
-  │   sigma'_2 = (868319..., 508159...)
+  │   sigma'_1 = (475568..., 490052...)
+  │   sigma'_2 = (680481..., 542846...)
   │ 
   │ Original and rerandomized signatures are unlinkable:
-  │   sigma_1  = (289721..., 131393...)
-  │   sigma'_1 = (543423..., 965077...)
+  │   sigma_1  = (378462..., 520259...)
+  │   sigma'_1 = (475568..., 490052...)
   │   (No algorithm can correlate them.)
   └────
 
@@ -783,12 +782,12 @@ Table of Contents
 
   ┌────
   │ Fresh key pair for this Ethereum account:
-  │   sk_alice = 13725523829749580215861707551607897987143842830582947020644223888449234189852
-  │   pk_alice = (969859..., 340202...)
+  │   sk_alice = 13434609706906281602435954922148668392183107913572095276174116828512126902198
+  │   pk_alice = (783122..., 385429...)
   │ 
   │ ElGamal ciphertext E_alice = (R, C):
-  │   R = r*G    = (812545..., 805822...)
-  │   C = m*G+r*pk = (124900..., 504001...)
+  │   R = r*G    = ( 41958..., 377230...)
+  │   C = m*G+r*pk = (412424..., 969832...)
   │ 
   │ Message point M = m*G:
   │   M = (739132..., 937433...)
@@ -821,7 +820,7 @@ Table of Contents
 
   ┌────
   │ Eve decrypts with wrong key:
-  │   M_wrong = (988774..., 427119...)
+  │   M_wrong = (264729..., 235944...)
   │   M_real  = (739132..., 937433...)
   │   Match: False
   │   (Completely different point -- no information about m is leaked.)
@@ -879,9 +878,9 @@ Table of Contents
 
   ┌────
   │ NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-  │   challenge e = 21119612956219658032613020964596688581853412781609982253583164614993325157422
-  │   response s_m = 19635832064968184068072514586707999865959069084852538998043191054795965142307
-  │   response s_r = 12141791411859924485501055731859083931436696911644860954104585236175079895896
+  │   challenge e = 21491337385542463159045710984023775194551722015736962603862656896647432198285
+  │   response s_m = 4915239536628504088984541843399639726166227456183300335952453067939445899387
+  │   response s_r = 21708135342797134490695627086496776834523515483786245687477083073026164545549
   └────
 
 
@@ -893,10 +892,11 @@ Table of Contents
   using the `ecPairing', `ecMul', and `ecAdd' precompiles (~235K gas
   total): two ElGamal consistency checks, one PS pairing product check,
   a Fiat-Shamir challenge reconstruction, and a non-triviality guard.
-  All five must pass for `isVerified[alice]' to be set.  We execute the
-  full verification and then show a counter-example where Alice tries to
-  register an ElGamal ciphertext containing a different \( m \) than her
-  PS signature – the ElGamal consistency check catches the mismatch.
+  All five must pass for `isVerified[alice]' to be set.  The full
+  verification runs below, followed by a counter-example where Alice
+  tries to register an ElGamal ciphertext containing a different \( m \)
+  than her PS signature – the ElGamal consistency check catches the
+  mismatch.
 
 
 6.1 Verify the NIZK Proof (What the Contract Computes)
@@ -978,7 +978,7 @@ Table of Contents
   │ 
   │ LHS_point = add(mul(sigma_p[0], s_m_v), neg(A_ps_v))   # s_m*s'_1 - A_ps = e*m*s'_1
   │ RHS_neg   = add(mul(sigma_p[1], e_v), neg(mul(sigma_p[0], e_v)))  # e*s'_2 - e*s'_1
-  │ # not quite right -- let me use the clean verification
+  │ # not quite right -- use the clean verification instead
   │ 
   │ # Clean pairing product check (what ecPairing precompile computes):
   │ # e(s_m*sigma'_1, Y) * e(-A_ps, Y) * e(e*sigma'_1, X) * e(-e*sigma'_2, g_2) == 1
@@ -1128,7 +1128,7 @@ Table of Contents
 
   ┌────
   │ Bob registered as PUBLIC account:
-  │   pk_bob = (870165..., 168745...)
+  │   pk_bob = (642088..., 703764...)
   │   E_bob  = (R, C) -- ElGamal ciphertext on-chain
   │   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
   │   isVerified(bob) = true
@@ -1147,9 +1147,9 @@ Table of Contents
   Chaum-Pedersen proof (~29K gas).  Since Bob is public, only Alice
   needs to approve; the bilateral identity check in `transfer' passes
   because `isPublic(bob) =' true= satisfies Bob's side automatically.
-  We demonstrate the re-encryption, the three-check Chaum-Pedersen
-  verification, and a counter-example showing that re-encrypting a
-  /different/ message point causes Check 2 to fail.
+  Below: the re-encryption, the three-check Chaum-Pedersen verification,
+  and a counter-example showing that re-encrypting a /different/ message
+  point causes Check 2 to fail.
 
 
 8.1 Re-Encrypt Alice's Identity for Bob
@@ -1188,8 +1188,8 @@ Table of Contents
   ┌────
   │ Alice re-encrypts her identity for Bob:
   │   E_bob = (R', C') where:
-  │     R' = r'*G     = (225828..., 908769...)
-  │     C' = M+r'*pk  = (256957..., 253031...)
+  │     R' = r'*G     = (754141..., 315128...)
+  │     C' = M+r'*pk  = (583888..., 593799...)
   │ 
   │ Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
   │ Matches Alice's M:             (739132..., 937433...)
@@ -1254,9 +1254,9 @@ Table of Contents
 
   ┌────
   │ Chaum-Pedersen proof:
-  │   e  = 11125101747695722916178045622985642159806285246899238936279381765286202985804
-  │   s1 = 21066873798487942261643834157932148923197616343868659258642596302400004418081
-  │   s2 = 2811161010030091469519925232901989459216313638418275546949479056780928303205
+  │   e  = 13535332957152186093849703513914775546812866660049576165778316128584465748601
+  │   s1 = 2450355588033808014352666748883188190279101850553856968489342521115207914871
+  │   s2 = 6125915724238082513920866527105019621742324121393381727876382150322360198885
   └────
 
 
@@ -1526,11 +1526,11 @@ Table of Contents
   has Alice's from Holochain) and the transfer metadata from on-chain
   events.  Either party can independently construct a canonical receipt
   – deterministic JSON with sorted keys and no whitespace – and compute
-  its `keccak256' hash.  We show that Alice's and Bob's independently
-  constructed receipts produce identical hashes without coordination.
-  This canonical form is what makes dispute resolution possible: both
-  parties hold the same evidence, and neither can alter their copy
-  without breaking the hash.
+  its `keccak256' hash.  Alice's and Bob's independently constructed
+  receipts produce identical hashes without coordination.  This
+  canonical form is what makes dispute resolution possible: both parties
+  hold the same evidence, and neither can alter their copy without
+  breaking the hash.
 
   ┌────
   │ # Both parties construct the same canonical receipt
@@ -1581,14 +1581,14 @@ Table of Contents
 12 Summary: What Each Party Knows
 ═════════════════════════════════
 
-  The table below summarizes the information landscape after a complete
-  Private-to-Public transfer.  The key takeaway: Eve (a passive on-chain
-  observer) learns nothing about Alice's identity from any public
-  artifact.  Bob learns Alice's identity only because Alice explicitly
-  authorized it via `approve'.  The issuer can identify Alice given \( M
-  \), but cannot link Alice's accounts from on-chain data alone.  No
-  party – not even the issuer – can link Alice's rerandomized signature
-  \( \sigma' \) back to the original \( \sigma \).
+  After a complete Private-to-Public transfer, the information landscape
+  is sharply partitioned.  Eve (a passive on-chain observer) learns
+  nothing about Alice's identity from any public artifact.  Bob learns
+  Alice's identity only because Alice explicitly authorized it via
+  `approve'.  The issuer can identify Alice given \( M \), but cannot
+  link Alice's accounts from on-chain data alone.  No party – not even
+  the issuer – can link Alice's rerandomized signature \( \sigma' \)
+  back to the original \( \sigma \).
 
   ┌────
   │ [
@@ -1692,17 +1692,17 @@ Table of Contents
 
   ┌────
   │ Second credential derived (same identity, fresh account):
-  │   pk_alice_2 = (758753..., 927131...)
+  │   pk_alice_2 = (235678...,  32774...)
   │   E_alice_2  = (R, C) -- independent ciphertext
-  │   sigma'_2   = (  6384..., 284472...)
+  │   sigma'_2   = (764679..., 868590...)
   │ 
   │ Unlinkability check:
-  │   sigma'_1 (acct 1) = (543423..., 965077...)
-  │   sigma'_1 (acct 2) = (  6384..., 284472...)
-  │   pk (acct 1)       = (969859..., 340202...)
-  │   pk (acct 2)       = (758753..., 927131...)
-  │   E.R (acct 1)      = (812545..., 805822...)
-  │   E.R (acct 2)      = (764570..., 218837...)
+  │   sigma'_1 (acct 1) = (475568..., 490052...)
+  │   sigma'_1 (acct 2) = (764679..., 868590...)
+  │   pk (acct 1)       = (783122..., 385429...)
+  │   pk (acct 2)       = (235678...,  32774...)
+  │   E.R (acct 1)      = ( 41958..., 377230...)
+  │   E.R (acct 2)      = (827557..., 224446...)
   │ 
   │   All values are independent.  No shared structure.
   │   PS rerandomization is STATISTICALLY unlinkable --

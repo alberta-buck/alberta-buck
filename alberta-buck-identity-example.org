@@ -1,4 +1,4 @@
-#+TITLE: Alberta Buck Identity - Cryptographic Example (DRAFT v0.2)
+#+TITLE: Alberta Buck - Identity - Cryptography Example (v1.0)
 #+author: Perry Kundert
 #+date: 2026-04-10
 #+category: Alberta Buck
@@ -7,12 +7,12 @@
 #+weight: 14
 #+draft: false
 #+bucky: true
-#+description: Worked cryptographic examples and data flow analysis of the Alberta Buck identity system on BN254: PS signatures, ElGamal encryption, NIZK registration proofs, Chaum-Pedersen re-encryption, two-channel verification, and the AMM pool regulatory compliance model -- with counter-examples demonstrating each failure mode, and mermaid diagrams showing where data resides across Ethereum, Holochain, and the local wallet at each step.
+#+math: true
+#+description: Cryptography examples and data flow analysis of the Alberta Buck identity system on BN254: PS signatures, ElGamal encryption, NIZK registration proofs, Chaum-Pedersen re-encryption, two-channel verification, and the AMM pool regulatory compliance model -- with counter-examples demonstrating each failure mode, and mermaid diagrams showing where data resides across Ethereum, Holochain, and the local wallet at each step.
 
 #+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
-#+LATEX_HEADER: \usepackage{draftwatermark}
 
-#+EXPORT_FILE_NAME: alberta-buck-identity-example
+#+EXPORT_FILE_NAME: ./images/alberta-buck-identity-example
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
@@ -37,8 +37,9 @@ fresh unlinkable credential via the Identity Fountain, registers it on-chain
 Chaum-Pedersen proof of correct re-encryption (~29K gas).  Bob verifies
 Alice's identity using the two-channel design: the on-chain ElGamal ciphertext
 provides cryptographic binding, while Holochain delivers the plaintext
-=identity_data=.  We show how this proof chain protects Bob under subpoena --
-even 18 months and 500,000 transactions later -- and why Alice cannot hide
+=identity_data=.  The AMM pool scenario demonstrates how this proof chain
+protects Bob under subpoena -- even 18 months and 500,000 transactions
+later -- and why Alice cannot hide
 from regulatory recovery despite the Identity Fountain's unlinkability
 guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-identity-example.txt][Text]])
 #+END_ABSTRACT
@@ -50,14 +51,14 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 * Data Flow: Where Everything Lives
 
   The Alberta Buck identity system spans two networks (Ethereum and
-  Holochain) and a local device (the wallet).  This section maps every
-  piece of identity data to its storage location, visibility, and the
-  protocol step that consumes it.  Mermaid sequence diagrams trace the
-  data through registration, approval, transfer, and two-channel
-  verification -- including the trust checkpoint where wallets detect
-  malfeasance, and the AMM pool scenario where a public pool operator
-  responds to a regulatory subpoena months after a swap.  The key
-  result: all cryptographic proofs are permanently on-chain, so
+  Holochain) and a local device (the wallet).  The tables and mermaid
+  sequence diagrams below map every piece of identity data to its
+  storage location, visibility, and the protocol step that consumes it
+  -- tracing flows through registration, approval, transfer, and
+  two-channel verification, including the trust checkpoint where
+  wallets detect malfeasance, and the AMM pool scenario where a public
+  pool operator responds to a regulatory subpoena months after a swap.
+  The key result: all cryptographic proofs are permanently on-chain, so
   regulatory compliance requires only Bob's secret key and an archival
   Ethereum node -- not Alice's cooperation.
 
@@ -90,7 +91,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    the NIZK proof (~235K gas) and stores the public artifacts.  The secret
    key and plaintext identity /never/ touch Ethereum.
 
-   #+BEGIN_SRC mermaid :file images/registration-flow.png
+   #+BEGIN_SRC mermaid :file ./images/registration-flow.png
    sequenceDiagram
        participant P as Holochain<br/>(Private entries)
        participant W as Alice's Wallet
@@ -116,7 +117,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+END_SRC
 
    #+RESULTS:
-   [[file:images/registration-flow.png]]
+   [[file:./images/registration-flow.png]]
 
 ** Approve: Re-Encryption with Trust Verification
 
@@ -134,7 +135,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    wallets detecting the same fraud produce consensus: the warranted
    agent becomes untrusted on the DHT.
 
-   #+BEGIN_SRC mermaid :file images/approve-flow.png
+   #+BEGIN_SRC mermaid :file ./images/approve-flow.png
    sequenceDiagram
        participant D as Holochain DHT<br/>(Public)
        participant P as Holochain<br/>(Private)
@@ -172,7 +173,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+END_SRC
 
    #+RESULTS:
-   [[file:images/approve-flow.png]]
+   [[file:./images/approve-flow.png]]
 
 ** Transfer: Everything On-Chain
 
@@ -181,7 +182,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    no cryptography runs during the transfer itself.  Public accounts
    (=isPublic=true=) are exempt from needing a counterparty =approve=.
 
-   #+BEGIN_SRC mermaid :file images/transfer-flow.png
+   #+BEGIN_SRC mermaid :file ./images/transfer-flow.png
    sequenceDiagram
        participant C as Caller
        participant B as BUCK ERC-20<br/>(Ethereum)
@@ -208,7 +209,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+END_SRC
 
    #+RESULTS:
-   [[file:images/transfer-flow.png]]
+   [[file:./images/transfer-flow.png]]
 
 ** Two-Channel Verification and Malfeasance Detection
 
@@ -225,7 +226,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    agents sign their source chain entries, Alice cannot deny having
    sent the bad data.
 
-   #+BEGIN_SRC mermaid :file images/verification-flow.png
+   #+BEGIN_SRC mermaid :file ./images/verification-flow.png
    sequenceDiagram
        participant D as Holochain DHT<br/>(Public)
        participant BW as Bob's Wallet
@@ -251,7 +252,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+END_SRC
 
    #+RESULTS:
-   [[file:images/verification-flow.png]]
+   [[file:./images/verification-flow.png]]
 
 ** The Four Transfer Modes
 
@@ -318,7 +319,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
 *** Bob Responds to the Subpoena
 
-    #+BEGIN_SRC mermaid :file images/subpoena-flow.png
+    #+BEGIN_SRC mermaid :file ./images/subpoena-flow.png
     sequenceDiagram
         participant R as Regulator
         participant BW as Bob's Wallet
@@ -359,7 +360,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
     #+END_SRC
 
     #+RESULTS:
-    [[file:images/subpoena-flow.png]]
+    [[file:./images/subpoena-flow.png]]
 
 *** Why Bob Is Protected
 
@@ -525,21 +526,20 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
      corresponding DHT entry does not.  Multiple independent warrants
      produce DHT-level consensus that Alice's agent is non-compliant.
 
-     Crucially, even if Alice never publishes, Bob's regulatory position
-     is unchanged.  He can still decrypt \( M \) from the on-chain
+     Even if Alice never publishes, Bob's regulatory position is
+     unchanged.  He can still decrypt \( M \) from the on-chain
      ciphertext and hand it to the regulator, who obtains =identity_data=
      from the issuer.  Alice's non-publication delays the human-readable
      identification by one step (issuer lookup) but cannot prevent it.
 
 * Setup: The alt_bn128 Curve and Helpers
 
-  This section initializes the BN254 curve primitives used throughout
-  the worked examples.  We import =py_ecc.bn128= (which provides the
-  same =ecAdd=, =ecMul=, and =ecPairing= operations as Ethereum's
-  precompiles at addresses 0x06--0x08) and define helper functions for
-  random scalar generation, =keccak256= hashing, and point formatting.
-  All subsequent code blocks share a single =:session abid= so that
-  variables persist across steps.
+  All operations use BN254, the curve behind Ethereum's =ecAdd=
+  (0x06), =ecMul= (0x07), and =ecPairing= (0x08) precompiles.  The
+  =py_ecc.bn128= library provides exactly these primitives.  Helper
+  functions for random scalar generation, =keccak256= hashing, and
+  point formatting are defined here; all subsequent code blocks share a
+  single =:session abid= so that variables persist across steps.
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results output
@@ -628,10 +628,10 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   \( m = \text{keccak256}(\text{identity\_data}) \mod \text{ORDER} \).
   The issuer then produces a PS signature
   \( \sigma = (h, (x + m \cdot y) \cdot h) \) binding \( m \) to the
-  issuer's secret key.  We verify the signature using the bilinear
-  pairing equation, and show with a counter-example that any change to
-  =identity_data= (producing a different \( m \)) causes verification to
-  fail.
+  issuer's secret key.  The bilinear pairing equation verifies the
+  signature, and a counter-example confirms that any change to
+  =identity_data= (producing a different \( m \)) causes verification
+  to fail.
 
 ** Alice's Plaintext Identity
 
@@ -771,11 +771,11 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   a rerandomized PS signature \( \sigma' \) (statistically unlinkable to
   the original), a fresh key pair \( (sk, pk) \), an ElGamal encryption
   of \( m \) under \( pk \), and a NIZK sigma-protocol proof binding the
-  PS signature to the ciphertext.  We demonstrate each step, verify that
+  PS signature to the ciphertext.  Each step is demonstrated below:
   rerandomization preserves signature validity while destroying
-  correlation, and show that ElGamal decryption recovers the correct
-  message point -- with a counter-example proving that the wrong secret
-  key yields an unrelated random point.
+  correlation, and ElGamal decryption recovers the correct message
+  point.  A counter-example confirms that the wrong secret key yields
+  an unrelated random point.
 
 ** Rerandomize the PS Signature
 
@@ -981,10 +981,11 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   using the =ecPairing=, =ecMul=, and =ecAdd= precompiles (~235K gas
   total): two ElGamal consistency checks, one PS pairing product check,
   a Fiat-Shamir challenge reconstruction, and a non-triviality guard.
-  All five must pass for =isVerified[alice]= to be set.  We execute the
-  full verification and then show a counter-example where Alice tries to
-  register an ElGamal ciphertext containing a different \( m \) than her
-  PS signature -- the ElGamal consistency check catches the mismatch.
+  All five must pass for =isVerified[alice]= to be set.  The full
+  verification runs below, followed by a counter-example where Alice
+  tries to register an ElGamal ciphertext containing a different
+  \( m \) than her PS signature -- the ElGamal consistency check catches
+  the mismatch.
 
 ** Verify the NIZK Proof (What the Contract Computes)
 
@@ -1063,7 +1064,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
      LHS_point = add(mul(sigma_p[0], s_m_v), neg(A_ps_v))   # s_m*s'_1 - A_ps = e*m*s'_1
      RHS_neg   = add(mul(sigma_p[1], e_v), neg(mul(sigma_p[0], e_v)))  # e*s'_2 - e*s'_1
-     # not quite right -- let me use the clean verification
+     # not quite right -- use the clean verification instead
 
      # Clean pairing product check (what ecPairing precompile computes):
      # e(s_m*sigma'_1, Y) * e(-A_ps, Y) * e(e*sigma'_1, X) * e(-e*sigma'_2, g_2) == 1
@@ -1232,7 +1233,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   Chaum-Pedersen proof (~29K gas).  Since Bob is public, only Alice
   needs to approve; the bilateral identity check in =transfer= passes
   because =isPublic(bob) == true= satisfies Bob's side automatically.
-  We demonstrate the re-encryption, the three-check Chaum-Pedersen
+  Below: the re-encryption, the three-check Chaum-Pedersen
   verification, and a counter-example showing that re-encrypting a
   /different/ message point causes Check 2 to fail.
 
@@ -1612,9 +1613,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   Bob has Alice's from Holochain) and the transfer metadata from
   on-chain events.  Either party can independently construct a canonical
   receipt -- deterministic JSON with sorted keys and no whitespace --
-  and compute its =keccak256= hash.  We show that Alice's and Bob's
-  independently constructed receipts produce identical hashes without
-  coordination.  This canonical form is what makes dispute resolution
+  and compute its =keccak256= hash.  Alice's and Bob's independently
+  constructed receipts produce identical hashes without coordination.
+  This canonical form is what makes dispute resolution
   possible: both parties hold the same evidence, and neither can alter
   their copy without breaking the hash.
 
@@ -1668,14 +1669,14 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
 * Summary: What Each Party Knows
 
-  The table below summarizes the information landscape after a complete
-  Private-to-Public transfer.  The key takeaway: Eve (a passive
-  on-chain observer) learns nothing about Alice's identity from any
-  public artifact.  Bob learns Alice's identity only because Alice
-  explicitly authorized it via =approve=.  The issuer can identify
-  Alice given \( M \), but cannot link Alice's accounts from on-chain
-  data alone.  No party -- not even the issuer -- can link Alice's
-  rerandomized signature \( \sigma' \) back to the original \( \sigma \).
+  After a complete Private-to-Public transfer, the information
+  landscape is sharply partitioned.  Eve (a passive on-chain observer)
+  learns nothing about Alice's identity from any public artifact.  Bob
+  learns Alice's identity only because Alice explicitly authorized it
+  via =approve=.  The issuer can identify Alice given \( M \), but
+  cannot link Alice's accounts from on-chain data alone.  No party --
+  not even the issuer -- can link Alice's rerandomized signature
+  \( \sigma' \) back to the original \( \sigma \).
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results value

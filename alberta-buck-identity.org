@@ -1,4 +1,4 @@
-#+title: Alberta Buck - Identity and Cryptographic Receipts (DRAFT v0.3)
+#+title: Alberta Buck - Identity and Receipts (v1.0)
 #+author: Perry Kundert
 #+date: 2026-04-08
 #+category: Alberta Buck
@@ -7,12 +7,12 @@
 #+weight: 13
 #+draft: false
 #+bucky: true
-#+description: How Alberta Buck proves identity in every transaction without exposing it. Pointcheval-Sanders rerandomizable signatures give each citizen unlinkable credentials across accounts; Chaum-Pedersen proofs verify re-encrypted identity at 29K gas. Credential derivation and receipt storage run off-chain in a Holochain wallet.
+#+math: true
+#+description: How Alberta Buck proves identity in every transaction without exposing it. Pointcheval-Sanders rerandomizable signatures give each citizen unlinkable credentials across accounts; Chaum-Pedersen proofs verify re-encrypted identity at 29K gas. Data flows across Ethereum (proof chain), Holochain (identity data channel), and the local wallet. Public AMM pools satisfy regulatory subpoenas from on-chain proof chains alone -- without counterparty cooperation.
 
 #+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
-#+LATEX_HEADER: \usepackage{draftwatermark}
 
-#+EXPORT_FILE_NAME: alberta-buck-identity
+#+EXPORT_FILE_NAME: ./images/alberta-buck-identity
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
@@ -24,31 +24,25 @@
 #+BEGIN_ABSTRACT
 Alberta Buck transactions carry provably authentic identity -- without
 exposing it.  Every participant holds an ElGamal ciphertext[fn:9] of their
-identity, encrypted under their own public key, backed by a
-Pointcheval-Sanders rerandomizable signature[fn:10] from the issuing
-authority.  A citizen with multiple accounts derives an independent, unlinkable
-credential for each -- rerandomizing the signature offline -- yet every
-credential is independently verifiable as issued by the same authority.  When a
-transaction requires identity exchange, the participant re-encrypts under the
-counterparty's key and produces a Chaum-Pedersen proof[fn:7]: a compact,
-unforgeable guarantee that the re-encrypted ciphertext contains the same
-identity as the registered credential.  No one -- not the contract, not the
-network, not the government -- sees the plaintext.
+identity, backed by a Pointcheval-Sanders rerandomizable signature[fn:10].  A
+citizen with multiple accounts derives an independent, unlinkable credential
+for each -- rerandomizing the signature offline -- yet every credential is
+verifiable as issued by the same authority.  At transaction time, the
+participant re-encrypts under the counterparty's key and produces a
+Chaum-Pedersen proof[fn:7] that the re-encrypted ciphertext contains the same
+identity as the registered credential.  No one sees the plaintext.
 
-Per-transaction identity verification costs ~29,000 gas via Ethereum's
-alt_bn128 scalar multiplication precompiles -- no pairing operations at
-transaction time.  Credential registration costs ~235,000 gas (a one-time
-pairing-based verification of the Pointcheval-Sanders signature).  No trusted
-setup.  Proof generation is instantaneous.
+Per-transaction verification costs ~29,000 gas (alt_bn128 scalar
+multiplications, no pairings).  One-time credential registration costs
+~235,000 gas (pairing-based PS signature check).  No trusted setup.
 
-This document specifies identity requirements for every Alberta Buck
-operation, details the ElGamal + Pointcheval-Sanders + Chaum-Pedersen
-architecture, and demonstrates through adversarial scenarios that the scheme
-defeats forgery, substitution, and collusion while keeping on-chain costs
-minimal.  ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-identity.txt][Text]])
-
-See [[../alberta-buck-identity-example][Alberta Buck Identity - Cryptographic Examples]] for demonstrations of the cryptographic
-primitives used.
+Identity data resides in three layers: Ethereum contract storage (proof
+chain), the local Holochain wallet (plaintext identity, secret keys), and the
+Holochain DHT (encrypted identity exchange, Warrants for malfeasance
+detection).  All proofs are permanently on-chain, so a public AMM pool
+operator can satisfy a regulatory subpoena months later using only their
+secret key and an archival node -- without any counterparty's cooperation.
+([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-identity.txt][Text]], [[../alberta-buck-identity-example][Cryptography Example Code]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -56,6 +50,18 @@ primitives used.
 
 #+LATEX: \clearpage
 * Identity with Anonymity
+
+  Every Alberta Buck account holds a cryptographically certified
+  identity that is invisible to observers but provably genuine to
+  authorized counterparties.  The core design rests on three pillars:
+  the Identity Fountain (offline credential derivation with statistical
+  unlinkability), the two-channel architecture (Ethereum proof chain
+  plus Holochain data channel), and the agent-per-account isolation
+  model.  Together with the bilateral =approve= / =transfer= flow,
+  these give citizens free transactions with verified counterparties,
+  let regulators recover identity under subpoena from on-chain proof
+  chains, and ensure that no party -- including the government -- can
+  surveil transactions at O(1) cost.
 
   The expectation to be able to transact Alberta BUCKs in complete freedom (no one else can prevent
   it) and anonymity (no one else can identify the parties) is paramount.  This is consistent with
@@ -584,10 +590,14 @@ primitives used.
 
 * Attacks and Defenses
 
-  The following scenarios demonstrate that the ElGamal Chaum-Pedersen proof
-  scheme defeats identity fraud, even when participants are actively criminal.
-  In each scenario we show what the attacker attempts, why it fails
-  mathematically, and what the on-chain verifier sees.
+  Nine adversarial scenarios follow -- from a sanctioned individual
+  substituting a false identity, through issuer credential forgery, to
+  systematic attacks on the trust chain -- each defeated by a specific
+  mathematical checkpoint.  The Chaum-Pedersen proof catches identity
+  substitution; the PS pairing equation catches credential forgery; the
+  Fiat-Shamir binding prevents replay; and the on-chain proof chain
+  provides non-repudiation.  A summary table maps each attack to its
+  failure point and the hardness assumption that protects it.
 
   The trust chain in every scenario is:
 
@@ -944,6 +954,41 @@ primitives used.
     cryptographic identity layer ensures that linking addresses reveals
     spending patterns, not people.
 
+*** Why \( M \) Is the Same Across All Accounts
+
+    A natural concern: if Alice derives ten accounts from the Identity
+    Fountain, and each counterparty who decrypts their re-encrypted
+    ciphertext recovers the same \( M = m \cdot G \), doesn't that
+    break unlinkability?
+
+    No.  The identity scalar \( m = H(\text{identity\_data}) \) is
+    intentionally invariant because it /is/ Alice's identity.  If each
+    account used a different \( m \), the two-channel verification
+    would break: Bob couldn't verify that the =identity_data= he
+    received matches what the issuer certified.  The Identity Fountain
+    protects the /credential wrapping/ (\( \sigma' \), \( pk \),
+    \( E \)), not the identity scalar itself.
+
+    The privacy boundary is:
+
+    | Observer                | Can link accounts? | Why?                                           |
+    |-------------------------+--------------------+------------------------------------------------|
+    | Eve (passive, on-chain) | NO                 | All public artifacts are independent random    |
+    |                         |                    | values (statistical unlinkability)              |
+    | Bob (authorized)        | Learns one account | By design -- the purpose of ~approve~          |
+    | Bob + Carol (colluding) | Yes, via \( M \)   | But both already know Alice's name from        |
+    |                         |                    | =identity_data= exchange                       |
+    | Issuer (on-chain only)  | NO                 | Cannot extract \( M \) without a secret key    |
+    | Issuer (given \( M \))  | YES                | By design -- regulatory compliance path        |
+
+    Before ~approve~, Alice's accounts are unlinkable to everyone.
+    After ~approve~, only that specific counterparty learns Alice's
+    identity for that account.  Counterparties who already know Alice's
+    name gain nothing new from comparing \( M \) values.
+
+    See [[../alberta-buck-identity-example/#why-m-is-the-same-across-all-accounts----and-why-thats-correct][the worked example]] for the full argument and the AMM pool
+    subpoena scenario.
+
 
 ** Attack 7: Alice Uses a Revoked or Expired Credential
 
@@ -1202,6 +1247,17 @@ primitives used.
 
 * Identity Visibility Modes
 
+  BUCK accounts operate in one of three identity modes, which determine
+  the data flow at =approve= and =transfer= time.  Private accounts
+  require bilateral =approve= calls (each party re-encrypts their
+  identity for the counterparty); public accounts (AMM pools,
+  exchanges) are exempt from =approve= because their =identity_data=
+  is already world-readable; contract accounts inherit their deployer's
+  identity.  The four transfer combinations (Private-Private,
+  Private-Public, Public-Private, Public-Public) range from two
+  =approve= calls with full Holochain exchange down to a standard
+  ERC-20 transfer with no identity work at all.
+
   | Mode            | What on-chain reveals         | What off-chain reveals                    |
   |-----------------+-------------------------------+-------------------------------------------|
   | Anonymous-valid | Address is verified (bit)     | Encrypted receipt: identities of both     |
@@ -1218,6 +1274,17 @@ primitives used.
 
 
 * Operations Table
+
+  Every Alberta Buck operation has a defined identity requirement and
+  receipt model.  High-risk operations (BuckCredit creation, oracle
+  claims, governance) require public identity; medium-risk operations
+  (transfers, DeFi swaps) require anonymous-valid identity with
+  encrypted 3-party ECDH receipts; low-risk operations (burns, credit
+  activation) require only self-verification; and permissionless
+  operations (price reads, balance queries) need no identity at all.
+  The tables below specify the exact identity mode, counterparty
+  requirements, and receipt format for each operation across the BUCK
+  ERC-20, BuckCredit ERC-721, and governance contracts.
 
 ** Core BUCK (ERC-20) Operations
 
@@ -1307,6 +1374,16 @@ primitives used.
 
 * Contract Identity: How DeFi Pools Become BUCK Counterparties
 
+  Smart contracts can't do KYC, yet every BUCK transfer requires both
+  parties to have verified identity.  The solution: the pool deployer
+  derives a separate credential from their own PS-signed identity (via
+  the Identity Fountain) and registers it for the contract address.
+  The deployer -- a real person with a verified identity -- becomes the
+  contract's legal counterparty for all BUCK transfers.  Public pools
+  (=isPublic = true=) exempt their counterparties from needing the pool
+  to call =approve=, enabling the standard AMM flow where millions of
+  private accounts swap against a single public pool.
+
   A Uniswap pool contract is just an address.  For BUCK transfers to/from that
   address to pass ~isVerified~, the contract must have an identity in the
   IdentityRegistry.  But a contract can't do KYC.  The solution:
@@ -1342,8 +1419,16 @@ primitives used.
 
 * On-Chain Integration: Receipts and Transfer Flow
 
-  The cryptography is sound.  The question is where it meets the EVM -- a
-  machine that hides nothing.
+  The BUCK ERC-20 contract stores and emits the bilateral =approve= /
+  =transfer= protocol, the =BuckTransferReceipt= event format, and the
+  =_receiptFragments= storage layout.  The central tension is that the
+  EVM hides nothing -- every storage slot and event is publicly
+  reconstructible -- so the contract carries only opaque ciphertexts
+  and verification flags, never plaintext identity.  All proof
+  verification happens during =approve= (~29K gas); the =transfer=
+  itself performs only boolean checks on pre-computed flags, yielding a
+  standard ERC-20 transfer flow with identity guarantees where no
+  on-chain artifact reveals who is transacting with whom.
 
 ** The Receipt Constraint
 
@@ -1611,6 +1696,19 @@ primitives used.
      data channel carries the content; the Ethereum proof chain guarantees its
      authenticity.
 
+   - *Non-publication detection*: Bob's wallet watches for
+     ~IdentityExchange~ events on Ethereum and checks for the
+     corresponding DHT entry within a grace period.  If Alice completes
+     the on-chain ~approve~ but never publishes her ~identity_data~ to
+     the DHT, Bob's wallet can flag the account as non-compliant, issue
+     a Holochain *Warrant* citing the on-chain tx hash, and optionally
+     revoke the approval.  The warrant is independently verifiable: any
+     agent can confirm the ~IdentityExchange~ event exists on Ethereum
+     but the corresponding DHT entry does not.  Alice's non-publication
+     does not protect her regardless -- Bob can still decrypt
+     \( M \) from the on-chain ciphertext, and the regulator can obtain
+     ~identity_data~ from the issuer.
+
    - *Re-encryption*: The hApp decrypts ~E_alice~ locally (Alice has
      ~sk_alice~), extracts the message point ~M~, and re-encrypts for Bob:
      ~E_bob = (r' * G, r' * pk_bob + M)~.  This is 2 scalar multiplications
@@ -1701,10 +1799,18 @@ primitives used.
 
 * Cryptographic Receipts: 3-Party ECDH
 
-  The BUCK contract emits minimal on-chain receipt events (previous section).
-  The wallet layer (Holochain hApp) constructs full receipts with decrypted
-  identity details, then encrypts them via 3-party ECDH so that only the
-  participants can decrypt.
+  While the BUCK contract emits only opaque ciphertext hashes on-chain,
+  the Holochain wallet layer constructs full receipts containing both
+  parties' decrypted =identity_data= and the transfer metadata.  These
+  receipts are encrypted using 3-party ECDH (sender + receiver +
+  ephemeral transaction key) so that only the direct participants can
+  decrypt.  A regulator cannot decrypt unilaterally -- they hold two of
+  three ECDH components but lack the participants' shared secret,
+  making the surveillance cost O(N) per participant rather than O(1).
+  The canonical receipt format (deterministic JSON with sorted keys)
+  ensures both parties independently produce byte-identical receipts
+  with matching =keccak256= hashes, enabling dispute resolution without
+  coordination.
 
 ** The Three Keys
 
@@ -1843,6 +1949,17 @@ primitives used.
 
 
 * Play-by-Play: BUCK/USDT Swap on Uniswap
+
+  A complete BUCK/USDT swap, step by step: from Alice's initial KYC
+  ceremony through the final on-chain transfer, showing every piece of
+  data, where it resides, and what each party does.  Alice is a private
+  account; Bob's pool is public (=isPublic = true=).  The
+  Private-to-Public transfer mode means Alice calls =approve= once
+  (~29K gas for Chaum-Pedersen verification), no =approve= is needed
+  from Bob's side, and the =transferFrom= performs only boolean flag
+  checks with no cryptography.  Each step shows the on-chain gas cost,
+  the Holochain wallet actions, and what an observer (Eve) can and
+  cannot see.
 
   Alice holds 1000 BUCK and wants to swap 500 BUCK for USDT.  Bob has deployed
   a BUCK/USDT Uniswap V3 pool.
@@ -2088,6 +2205,16 @@ primitives used.
 
 * Edge Cases and Design Considerations
 
+  Practical deployment scenarios beyond the simple Alice-to-Bob model:
+  flash loans (atomic borrow-repay cycles), multi-hop swaps (BUCK
+  through intermediate pools), contract-to-contract transfers (yield
+  aggregators), epoch-based credential expiry, Holochain integration
+  details (private entry storage, agent isolation, DHT identity
+  delivery and non-publication detection), the 3-party ECDH regulatory
+  escrow model (O(N) surveillance cost, no unilateral decryption), and
+  the alt_bn128 security horizon (~100-bit pairing security, BLS12-381
+  migration path via EIP-2537).
+
 ** Flash Loans and Atomic Transactions
 
    A flash loan borrows and repays in a single transaction.  The borrower's
@@ -2208,10 +2335,20 @@ primitives used.
 
 * Alternative Approaches Considered
 
-  The ElGamal Chaum-Pedersen scheme was chosen after evaluating several
-  cryptographic alternatives.  Each has merits for other use cases, but none
-  matches the combination of low gas cost, zero setup, instant proof generation,
-  and strong security guarantees needed for an ERC-20 identity layer.
+  Five cryptographic alternatives were evaluated before settling on the
+  ElGamal + Pointcheval-Sanders + Chaum-Pedersen architecture: Pedersen
+  Commitments with Groth16 SNARKs, Proxy Re-Encryption (NuCypher
+  Umbral), BBS+ Signatures with Selective Disclosure, Camenisch-Shoup
+  Verifiable Encryption, and Pedersen Equality Proofs.  Each is
+  assessed on per-transaction gas cost, setup requirements, proof
+  generation time, targeted decryption support, and implementation
+  complexity.  The comparison table shows ElGamal Chaum-Pedersen wins
+  on per-transaction gas (~29K vs. ~200K+ for SNARK-based
+  alternatives), requires no trusted setup, and generates proofs
+  instantaneously.  Combined with PS rerandomizable signatures for
+  one-time credential registration (~235K gas), the system achieves
+  both cross-account unlinkability and per-transaction re-encryption
+  correctness without the gas burden or trusted setup of alternatives.
 
 ** Pedersen Commitments + Groth16 ZK Proofs
 
@@ -2379,6 +2516,16 @@ primitives used.
 
 
 * Summary: Identity Requirement by Risk Level
+
+  The table below maps every Alberta Buck operation to its risk level,
+  identity mode, and receipt format.  The design principle: identity
+  requirements scale with the damage a malicious actor could cause.
+  Governance and BuckCredit operations require full public identity;
+  transfers and DeFi swaps require anonymous-valid identity with
+  encrypted receipts; read-only operations are permissionless.  In all
+  cases, the on-chain proof chain ensures that identity can be
+  recovered under subpoena without requiring ongoing cooperation from
+  any party.
 
   | Risk level | Operations                          | Identity mode   | Receipt           |
   |------------+-------------------------------------+-----------------+-------------------|
