@@ -242,18 +242,280 @@ on-chain proof chain plus off-chain =identity_data=. ([[https://perry.kundert.ca
 
    The amount of pre-work depends on the visibility of each party:
 
-   | Sender  | Receiver | Who Calls =approve=     | Holochain Work         | On-Chain Gas   |
-   |---------+----------+-------------------------+------------------------+----------------|
-   | Private | Private  | Both (Alice→Bob, Bob→Alice) | Both exchange via DHT | 2 x ~29K       |
-   | Private | Public   | Alice only              | Alice sends via DHT    | 1 x ~29K       |
-   | Public  | Private  | Bob only                | Bob sends via DHT      | 1 x ~29K       |
-   | Public  | Public   | Neither                 | None                   | 0 (standard ERC-20) |
+   | Sender  | Receiver | Who Calls =approve=         | Holochain Work        | On-Chain Gas        |
+   |---------+----------+-----------------------------+-----------------------+---------------------|
+   | Private | Private  | Both (Alice→Bob, Bob→Alice) | Both exchange via DHT | 2 x ~29K            |
+   | Private | Public   | Alice only                  | Alice sends via DHT   | 1 x ~29K            |
+   | Public  | Private  | Bob only                    | Bob sends via DHT     | 1 x ~29K            |
+   | Public  | Public   | Neither                     | None                  | 0 (standard ERC-20) |
 
    In every case, the =transfer= / =transferFrom= call itself does /no/
    cryptography -- it only reads the boolean results of prior =approve= calls
    and =isPublic= flags.  All proof verification happens during =approve=.
 
-#+LATEX: \clearpage
+** The AMM Pool Scenario: Retroactive Identity Recovery
+
+   Consider Bob's AMM liquidity pool -- a public BUCK account that
+   processes swaps automatically.  Over its lifetime, a million private
+   accounts call =approve(pool, amount, E_pool, proof)= and then swap
+   via =transferFrom=.  Bob's pool contract never examines any
+   counterparty's identity at the time of the swap.  It doesn't need to:
+   the EVM already verified every proof.
+
+   Eighteen months later, a regulator subpoenas Bob for Alice's identity
+   -- account #500,000 -- in connection with a fraud investigation.  How
+   does Bob comply, and how does the on-chain record prove his pool
+   wasn't complicit?
+
+*** What the Chain Already Guarantees
+
+    Every =approve= that succeeded is an /immutable proof receipt/.  The
+    EVM verified the Chaum-Pedersen proof at that block height; the
+    IdentityRegistry verified Alice's NIZK at registration time.  These
+    facts are encoded in the transaction receipts themselves -- the
+    transactions /could not have succeeded/ without valid proofs.
+
+    The chain of cryptographic commitments is:
+
+    1. *Issuance:* A trusted issuer (in TrustedIssuersRegistry) signed
+       Alice's identity scalar \( m \) with a PS signature \( \sigma \).
+       The issuer's public key was on-chain and valid at that epoch.
+
+    2. *Registration:* The IdentityRegistry verified Alice's NIZK proof --
+       binding \( \sigma' \) (rerandomized PS signature) to \( E_{\text{alice}} \)
+       (ElGamal ciphertext).  The NIZK proves the /same/ \( m \) appears in
+       both.  The transaction succeeded at block \( B_{\text{reg}} \); the
+       NIZK was valid at that block.
+
+    3. *Approve:* The BUCK contract verified Alice's Chaum-Pedersen proof --
+       proving \( E_{\text{pool}} \) encrypts the /same/ message point \( M \)
+       as her registered \( E_{\text{alice}} \).  The contract read
+       \( E_{\text{alice}} \) from the IdentityRegistry (not from calldata),
+       so Alice couldn't substitute a different ciphertext.  The transaction
+       succeeded at block \( B_{\text{approve}} \).
+
+    4. *Transfer:* The bilateral identity check passed.  The pool is public
+       (=isPublic(pool) = true=), Alice had a valid =_receiptFragments[alice][pool]=.
+       The swap executed at block \( B_{\text{transfer}} \).
+
+    None of these steps required Bob to be online, to run a Holochain
+    node, or to examine Alice's identity.  The EVM did it for him.
+
+*** Bob Responds to the Subpoena
+
+    #+BEGIN_SRC mermaid :file images/subpoena-flow.png
+    sequenceDiagram
+        participant R as Regulator
+        participant BW as Bob's Wallet
+        participant ETH as Ethereum<br/>(archival node)
+        participant HC as Holochain DHT
+
+        R->>BW: Subpoena: identify account 0xAlice<br/>(transfer at block B_transfer)
+
+        rect rgb(240, 248, 255)
+        Note over BW,ETH: Step 1: Locate the proof chain
+        BW->>ETH: Query IdentityExchange events<br/>where spender=pool, owner=0xAlice
+        ETH-->>BW: E_pool = (R', C') at block B_approve
+        BW->>ETH: Query registration tx for 0xAlice
+        ETH-->>BW: sigma', E_alice, NIZK pi at block B_reg
+        end
+
+        rect rgb(255, 248, 240)
+        Note over BW: Step 2: Decrypt
+        BW->>BW: M = C' - sk_pool * R'
+        end
+
+        rect rgb(240, 255, 240)
+        Note over BW,HC: Step 3: Recover plaintext
+        alt identity_data in Bob's Private store
+            BW->>BW: Read from local Holochain<br/>(if Bob verified at the time)
+        else Retrieve from Alice or DHT
+            BW->>HC: Request identity_data for agent<br/>(or regulator obtains from issuer)
+        end
+        BW->>BW: Verify: H(identity_data) * G == M
+        end
+
+        rect rgb(248, 240, 255)
+        Note over BW,R: Step 4: Deliver evidence package
+        BW->>R: Evidence package:<br/>1. identity_data (Alice's verified name)<br/>2. M = decrypted message point<br/>3. Block numbers: B_reg, B_approve, B_transfer<br/>4. On-chain tx hashes (independently verifiable)
+        end
+
+        Note over R: Regulator independently verifies:<br/>- Replay registration tx: NIZK valid at B_reg<br/>- Replay approve tx: Chaum-Pedersen valid at B_approve<br/>- Check issuer key was in TrustedIssuersRegistry at B_reg<br/>- Confirm H(identity_data) * G == M
+    #+END_SRC
+
+    #+RESULTS:
+    [[file:images/subpoena-flow.png]]
+
+*** Why Bob Is Protected
+
+    Bob's defense is the proof chain itself.  He doesn't need to argue
+    that he checked Alice's identity -- the /contract/ checked it, and the
+    Ethereum transaction log is the evidence:
+
+    - *Registration tx succeeded* \( \Rightarrow \) NIZK was valid
+      \( \Rightarrow \) a trusted issuer certified \( m \) at that epoch.
+    - *Approve tx succeeded* \( \Rightarrow \) Chaum-Pedersen was valid
+      \( \Rightarrow \) \( E_{\text{pool}} \) encrypts the same \( M \) as
+      \( E_{\text{alice}} \).
+    - *Bob decrypts* \( E_{\text{pool}} \) to \( M \); \( M = H(\text{identity\_data}) \cdot G \).
+
+    The regulator can independently replay these transactions against an
+    archival node.  No trust in Bob is required -- the math is
+    self-certifying.
+
+    Even in adversarial scenarios, Bob is covered:
+
+    | Scenario                             | Why Bob is protected                                         |
+    |--------------------------------------+--------------------------------------------------------------|
+    | Alice used a stolen identity         | The /issuer/ certified it; Bob's contract verified           |
+    |                                      | the issuer's PS signature was valid at that epoch.           |
+    |                                      | Liability falls on the issuer's KYC process.                 |
+    | Alice's issuer key was later revoked | The registration tx is timestamped.  The issuer key          |
+    |                                      | was in TrustedIssuersRegistry at block \( B_{\text{reg}} \). |
+    | Alice's identity epoch expired       | Epoch expiry is enforced at registration time.               |
+    |                                      | If the epoch was valid then, the proof stands.               |
+    | Alice's Holochain agent is offline   | Bob needs only \( E_{\text{pool}} \) (on-chain) and          |
+    |                                      | =sk_pool= (his own key).  The plaintext can be               |
+    |                                      | obtained from the issuer if Alice is uncooperative.          |
+    | Alice denies the transaction         | The approve tx is signed by Alice's Ethereum account.        |
+    |                                      | Non-repudiation is inherent in the blockchain.               |
+
+*** Data Availability Over Time
+
+    The critical question: will Bob still have what he needs 18 months
+    later?
+
+    | Data                          | Availability                          | Notes                          |
+    |-------------------------------+---------------------------------------+--------------------------------|
+    | \( E_{\text{pool}} \) (R',C') | Permanent (Ethereum event log)        | IdentityExchange event         |
+    | \( E_{\text{alice}} \)        | Permanent (IdentityRegistry storage)  | Until account is closed        |
+    | \( \sigma' \), NIZK \( \pi \) | Permanent (registration tx calldata)  | Archival node required         |
+    | Chaum-Pedersen proof          | Permanent (approve tx calldata)       | Archival node required         |
+    | =sk_pool= (Bob's secret key)  | Bob's custody                         | Standard key management        |
+    | =identity_data= (plaintext)   | Holochain DHT (if agent is online)    | May require issuer             |
+    |                               | or Bob's Private store (if he cached) | cooperation as fallback        |
+    | Issuer public key history     | TrustedIssuersRegistry (on-chain)     | Includes revocation timestamps |
+
+    Everything except the plaintext =identity_data= is permanently on-chain.
+    The plaintext is the one piece that lives off-chain -- but Bob only needs
+    it to produce a /human-readable name/ for the regulator.  The
+    cryptographic proof chain stands without it: \( M \) is recoverable from
+    \( E_{\text{pool}} \) alone, and \( M \) is what the issuer certified.
+
+    If Alice's Holochain agent is long gone, the regulator can obtain
+    =identity_data= from the issuer (who has it from the original KYC
+    ceremony) and verify \( H(\text{identity\_data}) \cdot G = M \)
+    independently.  The issuer doesn't need Bob's cooperation; the
+    regulator doesn't need Alice's.
+
+*** Why \( M \) Is the Same Across All Accounts -- And Why That's Correct
+
+    A natural concern: if Alice derives ten accounts from the Identity
+    Fountain, and each counterparty who decrypts their re-encrypted
+    ciphertext recovers the same \( M = m \cdot G \), doesn't that break
+    unlinkability?
+
+    No.  The Identity Fountain's guarantee is about /on-chain
+    unlinkability/ -- what a passive observer (Eve) can learn from the
+    public blockchain data alone, without any secret keys.  That
+    guarantee is airtight:
+
+    - \( \sigma'_1 \) and \( \sigma'_2 \) are /statistically/ unlinkable
+      (information-theoretic, not merely computational)
+    - \( E_1 \) and \( E_2 \) are IND-CPA secure under independent keys
+    - \( pk_1 \) and \( pk_2 \) are independent random points
+
+    No algorithm, no amount of computation, can correlate Alice's
+    accounts from on-chain data.
+
+    The identity scalar \( m = H(\text{identity\_data}) \) is
+    /intentionally invariant/ because it /is/ Alice's identity.  If each
+    account used a different \( m \), the two-channel verification would
+    break: Bob couldn't verify that the =identity_data= he received
+    matches what the issuer certified.  The Identity Fountain protects
+    the /credential wrapping/ (\( \sigma' \), \( pk \), \( E \)), not the
+    identity itself.
+
+    Think of it as giving Alice a new disguise for each account --
+    different keys, different signature, different ciphertext.  The
+    disguises fool passive surveillance (Eve).  They don't fool someone
+    Alice voluntarily shows her face to (Bob, during =approve=).
+
+    | Observer                | Can link accounts? | Why?                                               |
+    |-------------------------+--------------------+----------------------------------------------------|
+    | Eve (passive, on-chain) | NO                 | All public artifacts are independent random values |
+    | Bob (authorized)        | Learns one account | By design -- the point of =approve=                |
+    | Bob + Carol (colluding) | Yes, via \( M \)   | But both already know Alice's name                 |
+    | Issuer (on-chain only)  | NO                 | Can't extract \( M \) without a secret key         |
+    | Issuer (given \( M \))  | YES                | By design -- regulatory compliance path            |
+
+    The privacy boundary is clear: /before/ =approve=, Alice's accounts
+    are unlinkable to everyone.  /After/ =approve=, the specific
+    counterparty learns Alice's identity for that account -- and only
+    that counterparty (plus anyone with whom they share \( M \), but they
+    already shared Alice's name via the =identity_data= exchange).
+
+**** Alice Tries to Hide by Not Publishing =identity_data=
+
+     Alice might try to game the system: complete the on-chain =approve=
+     (re-encryption + Chaum-Pedersen proof), satisfying the ERC-20's
+     bilateral identity check, but never publish her =identity_data= to
+     the Holochain DHT.  She hopes that if a subpoena arrives, Bob won't
+     be able to produce a human-readable name.
+
+     This doesn't work.  Bob still holds the cryptographic thread:
+
+     1. Bob decrypts \( E_{\text{pool}} \) to recover \( M = m \cdot G \).
+        This requires only Bob's secret key and the on-chain ciphertext --
+        Alice's cooperation is unnecessary.
+
+     2. The regulator takes \( M \) to the issuer.  The issuer computes
+        \( m_i \cdot G \) for each identity they have issued and finds the
+        match.  The issuer has Alice's =identity_data= from the original
+        KYC ceremony.
+
+     3. The issuer confirms: this \( M \) belongs to Alice Johnson.
+
+     Alice's attempt to hide by not publishing is futile: the on-chain
+     \( E_{\text{pool}} \) and the issuer's records are sufficient.
+     Alice cannot retroactively alter either.
+
+**** Bob's Wallet Detects Non-Publication
+
+     Bob's wallet (Holochain hApp) can proactively monitor for
+     counterparties who complete the on-chain =approve= but fail to
+     publish the required DHT entries.  The expected protocol is:
+
+     1. Alice calls =approve(pool, amount, E_pool, proof)= on Ethereum.
+     2. Alice's wallet publishes a DHT entry containing her
+        =identity_data=, encrypted for Bob's Holochain agent, and
+        keyed by the =IdentityExchange= event hash.
+     3. Bob's wallet watches for the =IdentityExchange= event and
+        looks up the corresponding DHT entry within a grace period.
+
+     If step 2 never happens -- the on-chain =approve= succeeded but no
+     DHT entry appears -- Bob's wallet can:
+
+     - Flag the account as non-compliant (Alice approved on-chain but
+       didn't complete the Holochain identity exchange).
+     - Issue a Holochain *Warrant* against Alice's agent, citing the
+       on-chain tx hash as evidence of protocol violation.
+     - Report the account to pool operators or compliance systems.
+     - Optionally, Bob's contract could revoke the approval (reset
+       =_receiptFragments[alice][pool]=), blocking future swaps until
+       Alice completes the full protocol.
+
+     The warrant is independently verifiable: any Holochain agent can
+     check that the =IdentityExchange= event exists on Ethereum but the
+     corresponding DHT entry does not.  Multiple independent warrants
+     produce DHT-level consensus that Alice's agent is non-compliant.
+
+     Crucially, even if Alice never publishes, Bob's regulatory position
+     is unchanged.  He can still decrypt \( M \) from the on-chain
+     ciphertext and hand it to the regulator, who obtains =identity_data=
+     from the issuer.  Alice's non-publication delays the human-readable
+     identification by one step (issuer lookup) but cannot prevent it.
+
 * Setup: The alt_bn128 Curve and Helpers
 
   All operations use BN254, the curve behind Ethereum's =ecAdd= (0x06),
