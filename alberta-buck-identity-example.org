@@ -1,4 +1,4 @@
-#+TITLE: Alberta Buck Identity - Cryptographic Example (DRAFT v0.1)
+#+TITLE: Alberta Buck Identity - Cryptographic Example (DRAFT v0.2)
 #+author: Perry Kundert
 #+date: 2026-04-10
 #+category: Alberta Buck
@@ -18,8 +18,8 @@
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
 #+OPTIONS: toc:nil
 
-#+PROPERTY: header-args :exports both :results output
-#+PROPERTY: header-args:python :session abid :results output table
+#+PROPERTY: header-args:mermaid :exports results :results output
+#+PROPERTY: header-args:python :session abid :exports both :results output table
 
 #+BEGIN_ABSTRACT
 This document implements each cryptographic step of the [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][Alberta Buck identity]]
@@ -38,6 +38,220 @@ on-chain proof chain plus off-chain =identity_data=. ([[https://perry.kundert.ca
 
 #+LATEX: \clearpage
 #+TOC: headlines 2
+
+#+LATEX: \clearpage
+* Data Flow: Where Everything Lives
+
+  The Alberta Buck identity system spans two networks and a local device.
+  Understanding /where/ each piece of data resides -- and /when/ each step
+  can verify it -- is essential before diving into the cryptography.
+
+** Data Residency
+
+   #+LATEX: {\scriptsize
+   | Data                         | Location                 | Visibility        | When Used                      |
+   |------------------------------+--------------------------+-------------------+--------------------------------|
+   | =identity_data= (plaintext)  | Holochain Private entry  | Owner only        | Approve (sent to counterparty) |
+   | =m = H(identity_data)=       | Holochain Private entry  | Owner only        | Registration, Approve          |
+   | PS signature =sigma=         | Holochain Private entry  | Owner only        | Registration (rerandomized)    |
+   | Secret key =sk=              | Holochain Private entry  | Owner only        | Approve (decrypt + re-encrypt) |
+   | Rerandomized =sigma'=        | IdentityRegistry         | Public (on-chain) | Registration verification      |
+   | Public key =pk=              | IdentityRegistry         | Public (on-chain) | Approve, Transfer              |
+   | ElGamal ciphertext =E_alice= | IdentityRegistry         | Public (on-chain) | Approve (read by contract)     |
+   | NIZK proof =pi=              | IdentityRegistry (tx)    | Public (on-chain) | Registration verification      |
+   | Re-encrypted =E_bob=         | BUCK ERC-20 (approve)    | Public (on-chain) | Two-channel verification       |
+   | Chaum-Pedersen proof         | BUCK ERC-20 (approve tx) | Public (on-chain) | Approve verification           |
+   | =_receiptFragments[a][b]=    | BUCK ERC-20 storage      | Public (on-chain) | Transfer (bilateral check)     |
+   | =isPublic= flag              | IdentityRegistry         | Public (on-chain) | Transfer (exemption check)     |
+   | Public =identity_data=       | IdentityRegistry or DHT  | Public            | Anyone (no approve needed)     |
+   | Holochain Warrants           | Holochain DHT            | Public            | Malfeasance detection          |
+   | Canonical receipt            | Holochain Private entry  | Each party only   | Dispute resolution             |
+   #+LATEX: }
+
+** Registration: Credential Goes On-Chain
+
+   Alice's wallet reads her Private entries, derives a credential entirely
+   offline, then submits it to the IdentityRegistry.  The contract verifies
+   the NIZK proof (~235K gas) and stores the public artifacts.  The secret
+   key and plaintext identity /never/ touch Ethereum.
+
+   #+BEGIN_SRC mermaid :file images/registration-flow.png
+   sequenceDiagram
+       participant P as Holochain<br/>(Private entries)
+       participant W as Alice's Wallet
+       participant IR as IdentityRegistry<br/>(Ethereum)
+
+       W->>P: Read identity_data, m, sigma
+       P-->>W: (plaintext, scalar, PS signature)
+
+       rect rgb(240, 248, 255)
+       Note over W: Identity Fountain (offline)
+       W->>W: Rerandomize: sigma' = t * sigma
+       W->>W: Fresh key pair: (sk, pk)
+       W->>W: ElGamal encrypt: E = (r*G, m*G + r*pk)
+       W->>W: NIZK proof pi (Schnorr sigma protocol)
+       end
+
+       W->>IR: register(pk, E_alice, sigma', pi)
+       IR->>IR: Verify NIZK (5 checks, ~235K gas)
+       IR->>IR: Store pk, E_alice
+       IR->>IR: isVerified[alice] = true
+
+       W->>P: Store credential (sk, pk, sigma', E)
+   #+END_SRC
+
+   #+RESULTS:
+   [[file:images/registration-flow.png]]
+
+** Approve: Re-Encryption with Trust Verification
+
+   When Alice wants to transact with Bob, her wallet first /verifies
+   Bob's credentials/ before re-encrypting.  This is the critical trust
+   checkpoint: Alice's wallet reads Bob's on-chain data, checks his PS
+   signature (via the pairing equation) and public key, and only then
+   produces the re-encrypted ciphertext.
+
+   If anything is wrong -- invalid PS signature, mismatched NIZK proof,
+   revoked credential -- Alice simply /does not call approve/.  No
+   transaction, no risk.  If Alice's wallet detects provable malfeasance
+   (e.g., a forged PS signature from a revoked issuer), it can issue a
+   Holochain *Warrant* against Bob's agent.  Multiple independent
+   wallets detecting the same fraud produce consensus: the warranted
+   agent becomes untrusted on the DHT.
+
+   #+BEGIN_SRC mermaid :file images/approve-flow.png
+   sequenceDiagram
+       participant D as Holochain DHT<br/>(Public)
+       participant P as Holochain<br/>(Private)
+       participant W as Alice's Wallet
+       participant IR as IdentityRegistry<br/>(Ethereum)
+       participant B as BUCK ERC-20<br/>(Ethereum)
+
+       W->>P: Read sk_alice
+       W->>IR: Read E_alice, pk_bob, isPublic(bob)
+       IR-->>W: E_alice=(R,C), pk_bob, isPublic=true
+
+       rect rgb(255, 248, 240)
+       Note over W: Trust checkpoint
+       W->>W: Verify Bob's credentials<br/>(PS pairing, NIZK, revocation status)
+       alt Bob's credentials invalid
+           W->>D: Issue Warrant(bob_agent)
+           W-->>W: ABORT (do not approve)
+       end
+       end
+
+       W->>W: Decrypt: M = C - sk*R
+       W->>W: Re-encrypt for Bob:<br/>E_bob = (r'*G, M + r'*pk_bob)
+       W->>W: Chaum-Pedersen proof pi_cp
+
+       W->>B: approve(bob, amount, E_bob, pi_cp)
+
+       Note over B,IR: Contract reads E_alice from<br/>IdentityRegistry (NOT calldata)
+       B->>IR: Read E_alice
+       IR-->>B: E_alice=(R,C)
+
+       B->>B: Verify Chaum-Pedersen<br/>(3 checks, ~29K gas)
+       B->>B: _receiptFragments[alice][bob] = H(E_bob)
+       B->>B: _allowances[alice][bob] = amount
+       B-->>W: IdentityExchange event
+   #+END_SRC
+
+   #+RESULTS:
+   [[file:images/approve-flow.png]]
+
+** Transfer: Everything On-Chain
+
+   By the time =transfer= or =transferFrom= is called, all proofs have
+   already been verified.  The EVM code only checks boolean flags --
+   no cryptography runs during the transfer itself.  Public accounts
+   (=isPublic=true=) are exempt from needing a counterparty =approve=.
+
+   #+BEGIN_SRC mermaid :file images/transfer-flow.png
+   sequenceDiagram
+       participant C as Caller
+       participant B as BUCK ERC-20<br/>(Ethereum)
+       participant IR as IdentityRegistry<br/>(Ethereum)
+
+       C->>B: transfer(bob, 500) or<br/>transferFrom(alice, bob, 500)
+
+       rect rgb(240, 255, 240)
+       Note over B,IR: Bilateral identity check
+       B->>IR: isPublic(alice)?
+       IR-->>B: false
+       B->>B: _receiptFragments[alice][bob]<br/>exists? YES
+       Note over B: sender_ok = true
+
+       B->>IR: isPublic(bob)?
+       IR-->>B: true
+       Note over B: receiver_ok = true (exempt)
+       end
+
+       B->>B: Standard ERC-20 checks<br/>(balance, allowance)
+       B->>B: Execute transfer
+
+       B-->>C: Transfer event + BuckTransferReceipt
+   #+END_SRC
+
+   #+RESULTS:
+   [[file:images/transfer-flow.png]]
+
+** Two-Channel Verification and Malfeasance Detection
+
+   After the transfer, Bob verifies Alice's identity using two
+   independent channels.  Channel 1 (Ethereum) provides the binding
+   proof; Channel 2 (Holochain) provides the content.  Neither channel
+   alone is sufficient -- this is what makes the design tamper-evident.
+
+   If Bob detects that the off-chain =identity_data= doesn't match
+   the on-chain point \( M \), this is /provable/ malfeasance: Bob
+   holds the ciphertext (on-chain, timestamped) and the mismatched
+   data (signed by Alice's Holochain agent).  Bob issues a Warrant;
+   other agents independently verify the evidence.  Since Holochain
+   agents sign their source chain entries, Alice cannot deny having
+   sent the bad data.
+
+   #+BEGIN_SRC mermaid :file images/verification-flow.png
+   sequenceDiagram
+       participant D as Holochain DHT<br/>(Public)
+       participant BW as Bob's Wallet
+       participant ETH as Ethereum
+
+       BW->>ETH: Read E_bob from<br/>IdentityExchange event
+       ETH-->>BW: E_bob = (R', C')
+       BW->>BW: Decrypt: M = C' - sk_bob * R'
+
+       Note over BW,D: Channel 2: Holochain data delivery
+       D-->>BW: Receive identity_data from Alice<br/>(Remote Signal, encrypted for Bob)
+
+       BW->>BW: Verify: H(identity_data) * G == M?
+
+       alt Match (honest)
+           BW->>BW: Identity verified
+           BW->>BW: Store receipt (Private entry)
+       else Mismatch (malfeasance)
+           BW->>D: Issue Warrant(alice_agent)<br/>with evidence: E_bob, identity_data
+           Note over D: Other agents verify independently:<br/>decrypt E_bob, check H(data)*G != M
+           Note over D: Multiple warrants = consensus<br/>Warranted agent loses DHT trust
+       end
+   #+END_SRC
+
+   #+RESULTS:
+   [[file:images/verification-flow.png]]
+
+** The Four Transfer Modes
+
+   The amount of pre-work depends on the visibility of each party:
+
+   | Sender  | Receiver | Who Calls =approve=     | Holochain Work         | On-Chain Gas   |
+   |---------+----------+-------------------------+------------------------+----------------|
+   | Private | Private  | Both (Alice→Bob, Bob→Alice) | Both exchange via DHT | 2 x ~29K       |
+   | Private | Public   | Alice only              | Alice sends via DHT    | 1 x ~29K       |
+   | Public  | Private  | Bob only                | Bob sends via DHT      | 1 x ~29K       |
+   | Public  | Public   | Neither                 | None                   | 0 (standard ERC-20) |
+
+   In every case, the =transfer= / =transferFrom= call itself does /no/
+   cryptography -- it only reads the boolean results of prior =approve= calls
+   and =isPublic= flags.  All proof verification happens during =approve=.
 
 #+LATEX: \clearpage
 * Setup: The alt_bn128 Curve and Helpers
