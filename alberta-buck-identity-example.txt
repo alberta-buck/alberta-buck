@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
              ALBERTA BUCK IDENTITY - CRYPTOGRAPHIC EXAMPLE
-                              (DRAFT V0.1)
+                              (DRAFT V0.2)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -9,51 +9,63 @@
                                2026-04-10
 
 
-This document implements each cryptographic step of the [Alberta Buck
-identity] system: Pointcheval-Sanders signature issuance, credential
-derivation via the Identity Fountain, on-chain registration
-verification, ElGamal re-encryption with Chaum-Pedersen proof, and
-identity verification by a counterparty.  All operations use the
-alt_bn128 (BN254) curve – the same curve supported by Ethereum's
-precompiles – via the `py_ecc' library.
+This document has two parts.  First, a data flow analysis shows where
+each piece of identity data resides – Ethereum contract storage,
+Holochain DHT, or local wallet – at each step of the protocol, using
+mermaid sequence diagrams to trace registration, approval, transfer, and
+regulatory compliance flows.  Second, a complete worked cryptographic
+example implements every step in Python on the alt_bn128 (BN254) curve
+via `py_ecc', with counter-examples demonstrating what each verification
+check looks like when it fails.
 
-We demonstrate a transfer from Private Alice to Public Bob: Alice holds
-a PS-signed identity, derives a fresh unlinkable credential, registers
-it, then re-encrypts her identity for Bob with a Chaum-Pedersen proof of
-correct re-encryption.  Bob verifies Alice's identity using the
-two-channel design: on-chain proof chain plus off-chain
-`identity_data'. ([PDF], [Text])
+The scenario is a transfer from Private Alice to Public Bob (an AMM
+pool).  Alice obtains a Pointcheval-Sanders signed identity from an
+issuer, derives a fresh unlinkable credential via the Identity Fountain,
+registers it on-chain (~235K gas NIZK verification), and re-encrypts her
+identity for Bob with a Chaum-Pedersen proof of correct re-encryption
+(~29K gas).  Bob verifies Alice's identity using the two-channel design:
+the on-chain ElGamal ciphertext provides cryptographic binding, while
+Holochain delivers the plaintext `identity_data'.  We show how this
+proof chain protects Bob under subpoena – even 18 months and 500,000
+transactions later – and why Alice cannot hide from regulatory recovery
+despite the Identity Fountain's unlinkability guarantees. ([PDF],
+[Text])
 
 Table of Contents
 ─────────────────
 
-1. Setup: The alt_bn128 Curve and Helpers
-2. Issuer Key Generation
-3. KYC Ceremony – Issuer Signs Alice's Identity
+1. Data Flow: Where Everything Lives
+.. 1. Data Residency
+.. 2. Registration: Credential Goes On-Chain
+.. 3. Approve: Re-Encryption with Trust Verification
+.. 4. Transfer: Everything On-Chain
+.. 5. Two-Channel Verification and Malfeasance Detection
+.. 6. The Four Transfer Modes
+.. 7. The AMM Pool Scenario: Retroactive Identity Recovery
+2. Setup: The alt_bn128 Curve and Helpers
+3. Issuer Key Generation
+4. KYC Ceremony – Issuer Signs Alice's Identity
 .. 1. Alice's Plaintext Identity
 .. 2. Compute Identity Scalar and PS Signature
 .. 3. Verify the PS Signature (Issuer Self-Check)
-4. The Identity Fountain – Alice Derives a Fresh Credential
+5. The Identity Fountain – Alice Derives a Fresh Credential
 .. 1. Rerandomize the PS Signature
 .. 2. Generate Fresh Identity Key Pair and ElGamal Encryption
 .. 3. NIZK Proof: Binding PS Signature to ElGamal Ciphertext
-5. Registration – On-Chain Verification
+6. Registration – On-Chain Verification
 .. 1. Verify the NIZK Proof (What the Contract Computes)
-6. Bob Registers as a Public Account
-7. Alice Approves Bob – Re-Encryption + Chaum-Pedersen Proof
+7. Bob Registers as a Public Account
+8. Alice Approves Bob – Re-Encryption + Chaum-Pedersen Proof
 .. 1. Re-Encrypt Alice's Identity for Bob
 .. 2. Chaum-Pedersen Proof of Correct Re-Encryption
 .. 3. Verify Chaum-Pedersen Proof (What the Contract Computes)
-8. Transfer – Bilateral Identity Check
-9. Bob Verifies Alice's Identity (Two-Channel Design)
+9. Transfer – Bilateral Identity Check
+10. Bob Verifies Alice's Identity (Two-Channel Design)
 .. 1. Counter-example: Tampered Identity Data
-10. Receipt Construction
-11. Summary: What Each Party Knows
-12. Appendix: The Identity Fountain – Unlinkability Demonstration
+11. Receipt Construction
+12. Summary: What Each Party Knows
+13. Appendix: The Identity Fountain – Unlinkability Demonstration
 
-
-[Alberta Buck identity]
-<https://perry.kundert.ca/range/finance/alberta-buck-identity/>
 
 [PDF]
 <https://perry.kundert.ca/images/alberta-buck-identity-example.pdf>
@@ -62,12 +74,382 @@ Table of Contents
 <https://perry.kundert.ca/images/alberta-buck-identity-example.txt>
 
 
-1 Setup: The alt_bn128 Curve and Helpers
+1 Data Flow: Where Everything Lives
+═══════════════════════════════════
+
+  The Alberta Buck identity system spans two networks (Ethereum and
+  Holochain) and a local device (the wallet).  This section maps every
+  piece of identity data to its storage location, visibility, and the
+  protocol step that consumes it.  Mermaid sequence diagrams trace the
+  data through registration, approval, transfer, and two-channel
+  verification – including the trust checkpoint where wallets detect
+  malfeasance, and the AMM pool scenario where a public pool operator
+  responds to a regulatory subpoena months after a swap.  The key
+  result: all cryptographic proofs are permanently on-chain, so
+  regulatory compliance requires only Bob's secret key and an archival
+  Ethereum node – not Alice's cooperation.
+
+
+1.1 Data Residency
+──────────────────
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Data                          Location                  Visibility         When Used                      
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `identity_data' (plaintext)   Holochain Private entry   Owner only         Approve (sent to counterparty) 
+   `m = H(identity_data)'        Holochain Private entry   Owner only         Registration, Approve          
+   PS signature `sigma'          Holochain Private entry   Owner only         Registration (rerandomized)    
+   Secret key `sk'               Holochain Private entry   Owner only         Approve (decrypt + re-encrypt) 
+   Rerandomized `sigma''         IdentityRegistry          Public (on-chain)  Registration verification      
+   Public key `pk'               IdentityRegistry          Public (on-chain)  Approve, Transfer              
+   ElGamal ciphertext `E_alice'  IdentityRegistry          Public (on-chain)  Approve (read by contract)     
+   NIZK proof `pi'               IdentityRegistry (tx)     Public (on-chain)  Registration verification      
+   Re-encrypted `E_bob'          BUCK ERC-20 (approve)     Public (on-chain)  Two-channel verification       
+   Chaum-Pedersen proof          BUCK ERC-20 (approve tx)  Public (on-chain)  Approve verification           
+   `_receiptFragments[a][b]'     BUCK ERC-20 storage       Public (on-chain)  Transfer (bilateral check)     
+   `isPublic' flag               IdentityRegistry          Public (on-chain)  Transfer (exemption check)     
+   Public `identity_data'        IdentityRegistry or DHT   Public             Anyone (no approve needed)     
+   Holochain Warrants            Holochain DHT             Public             Malfeasance detection          
+   Canonical receipt             Holochain Private entry   Each party only    Dispute resolution             
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+1.2 Registration: Credential Goes On-Chain
+──────────────────────────────────────────
+
+  Alice's wallet reads her Private entries, derives a credential
+  entirely offline, then submits it to the IdentityRegistry.  The
+  contract verifies the NIZK proof (~235K gas) and stores the public
+  artifacts.  The secret key and plaintext identity /never/ touch
+  Ethereum.
+
+  <file:images/registration-flow.png>
+
+
+1.3 Approve: Re-Encryption with Trust Verification
+──────────────────────────────────────────────────
+
+  When Alice wants to transact with Bob, her wallet first /verifies
+  Bob's credentials/ before re-encrypting.  This is the critical trust
+  checkpoint: Alice's wallet reads Bob's on-chain data, checks his PS
+  signature (via the pairing equation) and public key, and only then
+  produces the re-encrypted ciphertext.
+
+  If anything is wrong – invalid PS signature, mismatched NIZK proof,
+  revoked credential – Alice simply /does not call approve/.  No
+  transaction, no risk.  If Alice's wallet detects provable malfeasance
+  (e.g., a forged PS signature from a revoked issuer), it can issue a
+  Holochain *Warrant* against Bob's agent.  Multiple independent wallets
+  detecting the same fraud produce consensus: the warranted agent
+  becomes untrusted on the DHT.
+
+  <file:images/approve-flow.png>
+
+
+1.4 Transfer: Everything On-Chain
+─────────────────────────────────
+
+  By the time `transfer' or `transferFrom' is called, all proofs have
+  already been verified.  The EVM code only checks boolean flags – no
+  cryptography runs during the transfer itself.  Public accounts
+  (`isPublic=true') are exempt from needing a counterparty `approve'.
+
+  <file:images/transfer-flow.png>
+
+
+1.5 Two-Channel Verification and Malfeasance Detection
+──────────────────────────────────────────────────────
+
+  After the transfer, Bob verifies Alice's identity using two
+  independent channels.  Channel 1 (Ethereum) provides the binding
+  proof; Channel 2 (Holochain) provides the content.  Neither channel
+  alone is sufficient – this is what makes the design tamper-evident.
+
+  If Bob detects that the off-chain `identity_data' doesn't match the
+  on-chain point \( M \), this is /provable/ malfeasance: Bob holds the
+  ciphertext (on-chain, timestamped) and the mismatched data (signed by
+  Alice's Holochain agent).  Bob issues a Warrant; other agents
+  independently verify the evidence.  Since Holochain agents sign their
+  source chain entries, Alice cannot deny having sent the bad data.
+
+  <file:images/verification-flow.png>
+
+
+1.6 The Four Transfer Modes
+───────────────────────────
+
+  The amount of pre-work depends on the visibility of each party:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Sender   Receiver  Who Calls `approve'          Holochain Work         On-Chain Gas        
+  ────────────────────────────────────────────────────────────────────────────────────────────
+   Private  Private   Both (Alice→Bob, Bob→Alice)  Both exchange via DHT  2 x ~29K            
+   Private  Public    Alice only                   Alice sends via DHT    1 x ~29K            
+   Public   Private   Bob only                     Bob sends via DHT      1 x ~29K            
+   Public   Public    Neither                      None                   0 (standard ERC-20) 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  In every case, the `transfer' / `transferFrom' call itself does /no/
+  cryptography – it only reads the boolean results of prior `approve'
+  calls and `isPublic' flags.  All proof verification happens during
+  `approve'.
+
+
+1.7 The AMM Pool Scenario: Retroactive Identity Recovery
+────────────────────────────────────────────────────────
+
+  Consider Bob's AMM liquidity pool – a public BUCK account that
+  processes swaps automatically.  Over its lifetime, a million private
+  accounts call `approve(pool, amount, E_pool, proof)' and then swap via
+  `transferFrom'.  Bob's pool contract never examines any counterparty's
+  identity at the time of the swap.  It doesn't need to: the EVM already
+  verified every proof.
+
+  Eighteen months later, a regulator subpoenas Bob for Alice's identity
+  – account #500,000 – in connection with a fraud investigation.  How
+  does Bob comply, and how does the on-chain record prove his pool
+  wasn't complicit?
+
+
+1.7.1 What the Chain Already Guarantees
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Every `approve' that succeeded is an /immutable proof receipt/.  The
+  EVM verified the Chaum-Pedersen proof at that block height; the
+  IdentityRegistry verified Alice's NIZK at registration time.  These
+  facts are encoded in the transaction receipts themselves – the
+  transactions /could not have succeeded/ without valid proofs.
+
+  The chain of cryptographic commitments is:
+
+  1. *Issuance:* A trusted issuer (in TrustedIssuersRegistry) signed
+     Alice's identity scalar \( m \) with a PS signature \( \sigma \).
+     The issuer's public key was on-chain and valid at that epoch.
+
+  2. *Registration:* The IdentityRegistry verified Alice's NIZK proof –
+     binding \( \sigma' \) (rerandomized PS signature) to \(
+     E_{\text{alice}} \) (ElGamal ciphertext).  The NIZK proves the
+     /same/ \( m \) appears in both.  The transaction succeeded at block
+     \( B_{\text{reg}} \); the NIZK was valid at that block.
+
+  3. *Approve:* The BUCK contract verified Alice's Chaum-Pedersen proof
+     – proving \( E_{\text{pool}} \) encrypts the /same/ message point
+     \( M \) as her registered \( E_{\text{alice}} \).  The contract
+     read \( E_{\text{alice}} \) from the IdentityRegistry (not from
+     calldata), so Alice couldn't substitute a different ciphertext.
+     The transaction succeeded at block \( B_{\text{approve}} \).
+
+  4. *Transfer:* The bilateral identity check passed.  The pool is
+     public (`isPublic(pool) = true'), Alice had a valid
+     `_receiptFragments[alice][pool]'.  The swap executed at block \(
+     B_{\text{transfer}} \).
+
+  None of these steps required Bob to be online, to run a Holochain
+  node, or to examine Alice's identity.  The EVM did it for him.
+
+
+1.7.2 Bob Responds to the Subpoena
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  <file:images/subpoena-flow.png>
+
+
+1.7.3 Why Bob Is Protected
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Bob's defense is the proof chain itself.  He doesn't need to argue
+  that he checked Alice's identity – the /contract/ checked it, and the
+  Ethereum transaction log is the evidence:
+
+  • *Registration tx succeeded* \( \Rightarrow \) NIZK was valid \(
+    \Rightarrow \) a trusted issuer certified \( m \) at that epoch.
+  • *Approve tx succeeded* \( \Rightarrow \) Chaum-Pedersen was valid \(
+    \Rightarrow \) \( E_{\text{pool}} \) encrypts the same \( M \) as \(
+    E_{\text{alice}} \).
+  • *Bob decrypts* \( E_{\text{pool}} \) to \( M \); \( M =
+     H(\text{identity\_data}) \cdot G \).
+
+  The regulator can independently replay these transactions against an
+  archival node.  No trust in Bob is required – the math is
+  self-certifying.
+
+  Even in adversarial scenarios, Bob is covered:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Scenario                              Why Bob is protected                                         
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Alice used a stolen identity          The /issuer/ certified it; Bob's contract verified           
+                                         the issuer's PS signature was valid at that epoch.           
+                                         Liability falls on the issuer's KYC process.                 
+   Alice's issuer key was later revoked  The registration tx is timestamped.  The issuer key          
+                                         was in TrustedIssuersRegistry at block \( B_{\text{reg}} \). 
+   Alice's identity epoch expired        Epoch expiry is enforced at registration time.               
+                                         If the epoch was valid then, the proof stands.               
+   Alice's Holochain agent is offline    Bob needs only \( E_{\text{pool}} \) (on-chain) and          
+                                         `sk_pool' (his own key).  The plaintext can be               
+                                         obtained from the issuer if Alice is uncooperative.          
+   Alice denies the transaction          The approve tx is signed by Alice's Ethereum account.        
+                                         Non-repudiation is inherent in the blockchain.               
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+1.7.4 Data Availability Over Time
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  The critical question: will Bob still have what he needs 18 months
+  later?
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Data                           Availability                           Notes                          
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────
+   \( E_{\text{pool}} \) (R',C')  Permanent (Ethereum event log)         IdentityExchange event         
+   \( E_{\text{alice}} \)         Permanent (IdentityRegistry storage)   Until account is closed        
+   \( \sigma' \), NIZK \( \pi \)  Permanent (registration tx calldata)   Archival node required         
+   Chaum-Pedersen proof           Permanent (approve tx calldata)        Archival node required         
+   `sk_pool' (Bob's secret key)   Bob's custody                          Standard key management        
+   `identity_data' (plaintext)    Holochain DHT (if agent is online)     May require issuer             
+                                  or Bob's Private store (if he cached)  cooperation as fallback        
+   Issuer public key history      TrustedIssuersRegistry (on-chain)      Includes revocation timestamps 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Everything except the plaintext `identity_data' is permanently
+  on-chain.  The plaintext is the one piece that lives off-chain – but
+  Bob only needs it to produce a /human-readable name/ for the
+  regulator.  The cryptographic proof chain stands without it: \( M \)
+  is recoverable from \( E_{\text{pool}} \) alone, and \( M \) is what
+  the issuer certified.
+
+  If Alice's Holochain agent is long gone, the regulator can obtain
+  `identity_data' from the issuer (who has it from the original KYC
+  ceremony) and verify \( H(\text{identity\_data}) \cdot G = M \)
+  independently.  The issuer doesn't need Bob's cooperation; the
+  regulator doesn't need Alice's.
+
+
+1.7.5 Why \( M \) Is the Same Across All Accounts – And Why That's Correct
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  A natural concern: if Alice derives ten accounts from the Identity
+  Fountain, and each counterparty who decrypts their re-encrypted
+  ciphertext recovers the same \( M = m \cdot G \), doesn't that break
+  unlinkability?
+
+  No.  The Identity Fountain's guarantee is about /on-chain
+  unlinkability/ – what a passive observer (Eve) can learn from the
+  public blockchain data alone, without any secret keys.  That guarantee
+  is airtight:
+
+  • \( \sigma'_1 \) and \( \sigma'_2 \) are /statistically/ unlinkable
+    (information-theoretic, not merely computational)
+  • \( E_1 \) and \( E_2 \) are IND-CPA secure under independent keys
+  • \( pk_1 \) and \( pk_2 \) are independent random points
+
+  No algorithm, no amount of computation, can correlate Alice's accounts
+  from on-chain data.
+
+  The identity scalar \( m = H(\text{identity\_data}) \) is
+  /intentionally invariant/ because it /is/ Alice's identity.  If each
+  account used a different \( m \), the two-channel verification would
+  break: Bob couldn't verify that the `identity_data' he received
+  matches what the issuer certified.  The Identity Fountain protects the
+  /credential wrapping/ (\( \sigma' \), \( pk \), \( E \)), not the
+  identity itself.
+
+  Think of it as giving Alice a new disguise for each account –
+  different keys, different signature, different ciphertext.  The
+  disguises fool passive surveillance (Eve).  They don't fool someone
+  Alice voluntarily shows her face to (Bob, during `approve').
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Observer                 Can link accounts?  Why?                                               
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+   Eve (passive, on-chain)  NO                  All public artifacts are independent random values 
+   Bob (authorized)         Learns one account  By design – the point of `approve'                 
+   Bob + Carol (colluding)  Yes, via \( M \)    But both already know Alice's name                 
+   Issuer (on-chain only)   NO                  Can't extract \( M \) without a secret key         
+   Issuer (given \( M \))   YES                 By design – regulatory compliance path             
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The privacy boundary is clear: /before/ `approve', Alice's accounts
+  are unlinkable to everyone.  /After/ `approve', the specific
+  counterparty learns Alice's identity for that account – and only that
+  counterparty (plus anyone with whom they share \( M \), but they
+  already shared Alice's name via the `identity_data' exchange).
+
+
+◊ 1.7.5.1 Alice Tries to Hide by Not Publishing `identity_data'
+
+  Alice might try to game the system: complete the on-chain `approve'
+  (re-encryption + Chaum-Pedersen proof), satisfying the ERC-20's
+  bilateral identity check, but never publish her `identity_data' to the
+  Holochain DHT.  She hopes that if a subpoena arrives, Bob won't be
+  able to produce a human-readable name.
+
+  This doesn't work.  Bob still holds the cryptographic thread:
+
+  1. Bob decrypts \( E_{\text{pool}} \) to recover \( M = m \cdot G \).
+     This requires only Bob's secret key and the on-chain ciphertext –
+     Alice's cooperation is unnecessary.
+
+  2. The regulator takes \( M \) to the issuer.  The issuer computes \(
+     m_i \cdot G \) for each identity they have issued and finds the
+     match.  The issuer has Alice's `identity_data' from the original
+     KYC ceremony.
+
+  3. The issuer confirms: this \( M \) belongs to Alice Johnson.
+
+  Alice's attempt to hide by not publishing is futile: the on-chain \(
+  E_{\text{pool}} \) and the issuer's records are sufficient.  Alice
+  cannot retroactively alter either.
+
+
+◊ 1.7.5.2 Bob's Wallet Detects Non-Publication
+
+  Bob's wallet (Holochain hApp) can proactively monitor for
+  counterparties who complete the on-chain `approve' but fail to publish
+  the required DHT entries.  The expected protocol is:
+
+  1. Alice calls `approve(pool, amount, E_pool, proof)' on Ethereum.
+  2. Alice's wallet publishes a DHT entry containing her
+     `identity_data', encrypted for Bob's Holochain agent, and keyed by
+     the `IdentityExchange' event hash.
+  3. Bob's wallet watches for the `IdentityExchange' event and looks up
+     the corresponding DHT entry within a grace period.
+
+  If step 2 never happens – the on-chain `approve' succeeded but no DHT
+  entry appears – Bob's wallet can:
+
+  • Flag the account as non-compliant (Alice approved on-chain but
+    didn't complete the Holochain identity exchange).
+  • Issue a Holochain *Warrant* against Alice's agent, citing the
+    on-chain tx hash as evidence of protocol violation.
+  • Report the account to pool operators or compliance systems.
+  • Optionally, Bob's contract could revoke the approval (reset
+    `_receiptFragments[alice][pool]'), blocking future swaps until Alice
+    completes the full protocol.
+
+  The warrant is independently verifiable: any Holochain agent can check
+  that the `IdentityExchange' event exists on Ethereum but the
+  corresponding DHT entry does not.  Multiple independent warrants
+  produce DHT-level consensus that Alice's agent is non-compliant.
+
+  Crucially, even if Alice never publishes, Bob's regulatory position is
+  unchanged.  He can still decrypt \( M \) from the on-chain ciphertext
+  and hand it to the regulator, who obtains `identity_data' from the
+  issuer.  Alice's non-publication delays the human-readable
+  identification by one step (issuer lookup) but cannot prevent it.
+
+
+2 Setup: The alt_bn128 Curve and Helpers
 ════════════════════════════════════════
 
-  All operations use BN254, the curve behind Ethereum's `ecAdd' (0x06),
-  `ecMul' (0x07), and `ecPairing' (0x08) precompiles.  The `py_ecc'
-  library provides exactly these primitives.
+  This section initializes the BN254 curve primitives used throughout
+  the worked examples.  We import `py_ecc.bn128' (which provides the
+  same `ecAdd', `ecMul', and `ecPairing' operations as Ethereum's
+  precompiles at addresses 0x06–0x08) and define helper functions for
+  random scalar generation, `keccak256' hashing, and point formatting.
+  All subsequent code blocks share a single `:session abid' so that
+  variables persist across steps.
 
   ┌────
   │ import secrets
@@ -113,13 +495,15 @@ Table of Contents
   └────
 
 
-2 Issuer Key Generation
+3 Issuer Key Generation
 ═══════════════════════
 
   The identity issuer (e.g., ATB Financial acting as Alberta's KYC
-  authority) generates a Pointcheval-Sanders key pair.  The secret key
-  is two scalars \( (x, y) \); the public key is two points in \( G_2
-  \).
+  authority) generates a Pointcheval-Sanders key pair: secret key \( (x,
+  y) \) (two scalars), public key \( (X, Y) \) (two points in \( G_2 \),
+  published on-chain in the `TrustedIssuersRegistry').  This key pair is
+  the root of trust for all identities the issuer certifies; every
+  credential in the system traces back to a PS signature under this key.
 
   ┌────
   │ # Issuer's PS secret key
@@ -142,16 +526,21 @@ Table of Contents
   └────
 
 
-3 KYC Ceremony – Issuer Signs Alice's Identity
+4 KYC Ceremony – Issuer Signs Alice's Identity
 ══════════════════════════════════════════════
 
-  Alice presents her identity documents.  The issuer verifies them,
-  constructs a canonical `identity_data' structure, computes the
-  identity scalar \( m = H(\text{identity\_data}) \), and produces a PS
-  signature.
+  Alice presents her identity documents to the issuer, who verifies
+  them, constructs a canonical `identity_data' JSON structure (sorted
+  keys, no whitespace), and computes the identity scalar \( m =
+  \text{keccak256}(\text{identity\_data}) \mod \text{ORDER} \).  The
+  issuer then produces a PS signature \( \sigma = (h, (x + m \cdot y)
+  \cdot h) \) binding \( m \) to the issuer's secret key.  We verify the
+  signature using the bilinear pairing equation, and show with a
+  counter-example that any change to `identity_data' (producing a
+  different \( m \)) causes verification to fail.
 
 
-3.1 Alice's Plaintext Identity
+4.1 Alice's Plaintext Identity
 ──────────────────────────────
 
   ┌────
@@ -180,7 +569,7 @@ Table of Contents
   └────
 
 
-3.2 Compute Identity Scalar and PS Signature
+4.2 Compute Identity Scalar and PS Signature
 ────────────────────────────────────────────
 
   The PS signature is \( \sigma = (h, (x + m \cdot y) \cdot h) \) where
@@ -207,12 +596,12 @@ Table of Contents
   │ Identity scalar m = H(identity_data):
   │   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
   │ PS signature sigma:
-  │   sigma_1 = (247881..., 688938...)
-  │   sigma_2 = (986573..., 483212...)
+  │   sigma_1 = (289721..., 131393...)
+  │   sigma_2 = (885125...,  97036...)
   └────
 
 
-3.3 Verify the PS Signature (Issuer Self-Check)
+4.3 Verify the PS Signature (Issuer Self-Check)
 ───────────────────────────────────────────────
 
   The PS verification equation uses a bilinear pairing:
@@ -256,7 +645,7 @@ Table of Contents
   A counter-example follows.
 
 
-3.3.1 Counter-example: Wrong Identity Scalar
+4.3.1 Counter-example: Wrong Identity Scalar
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   If Eve tries to forge a signature using a different \( m \), the
@@ -283,16 +672,22 @@ Table of Contents
   └────
 
 
-4 The Identity Fountain – Alice Derives a Fresh Credential
+5 The Identity Fountain – Alice Derives a Fresh Credential
 ══════════════════════════════════════════════════════════
 
   Alice wants to create a new Ethereum account.  Her Holochain wallet
-  derives a fresh, unlinkable credential: a rerandomized PS signature, a
-  new key pair, an ElGamal encryption of \( m \), and a NIZK proof
-  binding them.  This runs entirely offline on Alice's device.
+  runs the Identity Fountain entirely offline, producing four artifacts:
+  a rerandomized PS signature \( \sigma' \) (statistically unlinkable to
+  the original), a fresh key pair \( (sk, pk) \), an ElGamal encryption
+  of \( m \) under \( pk \), and a NIZK sigma-protocol proof binding the
+  PS signature to the ciphertext.  We demonstrate each step, verify that
+  rerandomization preserves signature validity while destroying
+  correlation, and show that ElGamal decryption recovers the correct
+  message point – with a counter-example proving that the wrong secret
+  key yields an unrelated random point.
 
 
-4.1 Rerandomize the PS Signature
+5.1 Rerandomize the PS Signature
 ────────────────────────────────
 
   Alice picks a random scalar \( t \) and computes \( \sigma' = (t \cdot
@@ -327,12 +722,12 @@ Table of Contents
 
   ┌────
   │ Rerandomized PS signature verified.
-  │   sigma'_1 = (766346..., 500690...)
-  │   sigma'_2 = (726189..., 898399...)
+  │   sigma'_1 = (543423..., 965077...)
+  │   sigma'_2 = (868319..., 508159...)
   │ 
   │ Original and rerandomized signatures are unlinkable:
-  │   sigma_1  = (247881..., 688938...)
-  │   sigma'_1 = (766346..., 500690...)
+  │   sigma_1  = (289721..., 131393...)
+  │   sigma'_1 = (543423..., 965077...)
   │   (No algorithm can correlate them.)
   └────
 
@@ -345,7 +740,7 @@ Table of Contents
   merely computational.
 
 
-4.2 Generate Fresh Identity Key Pair and ElGamal Encryption
+5.2 Generate Fresh Identity Key Pair and ElGamal Encryption
 ───────────────────────────────────────────────────────────
 
   Alice generates a new key pair on alt_bn128 and encrypts her identity
@@ -388,12 +783,12 @@ Table of Contents
 
   ┌────
   │ Fresh key pair for this Ethereum account:
-  │   sk_alice = 6663865663846015230416992911963616407722179914916866658193954793669416007824
-  │   pk_alice = (527230..., 447340...)
+  │   sk_alice = 13725523829749580215861707551607897987143842830582947020644223888449234189852
+  │   pk_alice = (969859..., 340202...)
   │ 
   │ ElGamal ciphertext E_alice = (R, C):
-  │   R = r*G    = (  2303..., 890226...)
-  │   C = m*G+r*pk = (603748..., 637932...)
+  │   R = r*G    = (812545..., 805822...)
+  │   C = m*G+r*pk = (124900..., 504001...)
   │ 
   │ Message point M = m*G:
   │   M = (739132..., 937433...)
@@ -408,7 +803,7 @@ Table of Contents
   random, unrelated point (shown in the counter-example below).
 
 
-4.2.1 Counter-example: Wrong Secret Key
+5.2.1 Counter-example: Wrong Secret Key
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   An attacker who doesn't know `sk_alice' cannot decrypt to the correct
@@ -426,14 +821,14 @@ Table of Contents
 
   ┌────
   │ Eve decrypts with wrong key:
-  │   M_wrong = (389271..., 532170...)
+  │   M_wrong = (988774..., 427119...)
   │   M_real  = (739132..., 937433...)
   │   Match: False
   │   (Completely different point -- no information about m is leaked.)
   └────
 
 
-4.3 NIZK Proof: Binding PS Signature to ElGamal Ciphertext
+5.3 NIZK Proof: Binding PS Signature to ElGamal Ciphertext
 ──────────────────────────────────────────────────────────
 
   Alice must prove (without revealing \( m \) or \( r \)) that:
@@ -484,21 +879,27 @@ Table of Contents
 
   ┌────
   │ NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-  │   challenge e = 16894208419167403750262675024004135882551024178024900451619210094119307991014
-  │   response s_m = 197523063036513683430508445243073489474738879741571046631721111850042710758
-  │   response s_r = 14180004284915576249534756990169985360830189950347452757274678156394405905422
+  │   challenge e = 21119612956219658032613020964596688581853412781609982253583164614993325157422
+  │   response s_m = 19635832064968184068072514586707999865959069084852538998043191054795965142307
+  │   response s_r = 12141791411859924485501055731859083931436696911644860954104585236175079895896
   └────
 
 
-5 Registration – On-Chain Verification
+6 Registration – On-Chain Verification
 ══════════════════════════════════════
 
   Alice submits \( (pk, E_{\text{alice}}, \sigma', \pi) \) to the
-  IdentityRegistry.  The contract verifies the PS signature and NIZK
-  proof using `ecPairing', `ecMul', and `ecAdd' precompiles (~235K gas).
+  IdentityRegistry contract.  The contract runs five verification checks
+  using the `ecPairing', `ecMul', and `ecAdd' precompiles (~235K gas
+  total): two ElGamal consistency checks, one PS pairing product check,
+  a Fiat-Shamir challenge reconstruction, and a non-triviality guard.
+  All five must pass for `isVerified[alice]' to be set.  We execute the
+  full verification and then show a counter-example where Alice tries to
+  register an ElGamal ciphertext containing a different \( m \) than her
+  PS signature – the ElGamal consistency check catches the mismatch.
 
 
-5.1 Verify the NIZK Proof (What the Contract Computes)
+6.1 Verify the NIZK Proof (What the Contract Computes)
 ──────────────────────────────────────────────────────
 
   *What this proves:* The same \( m \) appears in both the PS signature
@@ -630,7 +1031,7 @@ Table of Contents
   containing a /different/ \( m \) than the one in her PS signature.
 
 
-5.1.1 Counter-example: ElGamal Encrypts a Different \( m \)
+6.1.1 Counter-example: ElGamal Encrypts a Different \( m \)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   If Alice (or an attacker) tries to encrypt one \( m \) in ElGamal but
@@ -673,12 +1074,16 @@ Table of Contents
   └────
 
 
-6 Bob Registers as a Public Account
+7 Bob Registers as a Public Account
 ═══════════════════════════════════
 
-  Bob is a Uniswap pool operator.  He registers publicly: his
-  `identity_data' is world-readable in the IdentityRegistry.  This
-  exempts his counterparties from needing Bob to call `approve'.
+  Bob operates a Uniswap-style AMM liquidity pool and registers as a
+  public BUCK account: his `identity_data' is world-readable in the
+  IdentityRegistry, and `isPublic(bob) = true'.  This exempts Bob's
+  counterparties from needing Bob to call `approve' – any private
+  account can approve Bob's pool unilaterally, and the bilateral
+  identity check in `transfer' passes because Bob's public status
+  satisfies his side automatically.
 
   ┌────
   │ # Bob's identity (public pool operator)
@@ -723,7 +1128,7 @@ Table of Contents
 
   ┌────
   │ Bob registered as PUBLIC account:
-  │   pk_bob = (975843..., 914204...)
+  │   pk_bob = (870165..., 168745...)
   │   E_bob  = (R, C) -- ElGamal ciphertext on-chain
   │   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
   │   isVerified(bob) = true
@@ -733,19 +1138,21 @@ Table of Contents
   └────
 
 
-7 Alice Approves Bob – Re-Encryption + Chaum-Pedersen Proof
+8 Alice Approves Bob – Re-Encryption + Chaum-Pedersen Proof
 ═══════════════════════════════════════════════════════════
 
-  Alice wants to swap BUCK for USDT on Bob's pool.  She must call
-  `approve(pool, amount, E_bob, proof)' to re-encrypt her identity for
-  Bob and prove the re-encryption is correct.
+  Alice wants to swap BUCK for USDT on Bob's pool.  She calls
+  `approve(pool, amount, E_pool, proof)' to re-encrypt her identity
+  under Bob's public key and prove the re-encryption is correct via a
+  Chaum-Pedersen proof (~29K gas).  Since Bob is public, only Alice
+  needs to approve; the bilateral identity check in `transfer' passes
+  because `isPublic(bob) =' true= satisfies Bob's side automatically.
+  We demonstrate the re-encryption, the three-check Chaum-Pedersen
+  verification, and a counter-example showing that re-encrypting a
+  /different/ message point causes Check 2 to fail.
 
-  Since Bob is public, only Alice needs to approve.  The bilateral
-  identity check in `transfer' will pass: `isPublic(bob) =' true=
-  satisfies Bob's side.
 
-
-7.1 Re-Encrypt Alice's Identity for Bob
+8.1 Re-Encrypt Alice's Identity for Bob
 ───────────────────────────────────────
 
   Alice decrypts her own ciphertext to recover \( M = m \cdot G \), then
@@ -781,8 +1188,8 @@ Table of Contents
   ┌────
   │ Alice re-encrypts her identity for Bob:
   │   E_bob = (R', C') where:
-  │     R' = r'*G     = (482173..., 281380...)
-  │     C' = M+r'*pk  = (375842..., 595089...)
+  │     R' = r'*G     = (225828..., 908769...)
+  │     C' = M+r'*pk  = (256957..., 253031...)
   │ 
   │ Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
   │ Matches Alice's M:             (739132..., 937433...)
@@ -794,7 +1201,7 @@ Table of Contents
   identical – same point, different ciphertext wrapping it.
 
 
-7.2 Chaum-Pedersen Proof of Correct Re-Encryption
+8.2 Chaum-Pedersen Proof of Correct Re-Encryption
 ─────────────────────────────────────────────────
 
   Alice proves that \( E_{\text{bob}} \) encrypts the same message point
@@ -847,13 +1254,13 @@ Table of Contents
 
   ┌────
   │ Chaum-Pedersen proof:
-  │   e  = 7182482600627188350566306893005948742157655280700231287168961600163868335527
-  │   s1 = 2685870604546160009965764191781424440704420561855949270506256139934657121687
-  │   s2 = 10828260084589760092258991517596263688315191596956064345085715656510006783927
+  │   e  = 11125101747695722916178045622985642159806285246899238936279381765286202985804
+  │   s1 = 21066873798487942261643834157932148923197616343868659258642596302400004418081
+  │   s2 = 2811161010030091469519925232901989459216313638418275546949479056780928303205
   └────
 
 
-7.3 Verify Chaum-Pedersen Proof (What the Contract Computes)
+8.3 Verify Chaum-Pedersen Proof (What the Contract Computes)
 ────────────────────────────────────────────────────────────
 
   The BUCK contract reads \( E_{\text{alice}} \) from the
@@ -931,7 +1338,7 @@ Table of Contents
   M \), Check 2 would fail.  A counter-example follows.
 
 
-7.3.1 Counter-example: Re-Encryption with Wrong Message
+8.3.1 Counter-example: Re-Encryption with Wrong Message
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   If Alice tries to pass off a different identity point in the
@@ -972,12 +1379,16 @@ Table of Contents
   └────
 
 
-8 Transfer – Bilateral Identity Check
+9 Transfer – Bilateral Identity Check
 ═════════════════════════════════════
 
-  With Alice's `approve' done and Bob being a public account, the
-  `transfer' can proceed.  The contract checks that both parties'
-  identities are available to each other.
+  With Alice's `approve' completed and Bob registered as a public
+  account, the `transfer' can proceed.  The contract performs a
+  bilateral identity check: for each party, it verifies that either
+  `isPublic' is true or a valid `_receiptFragments' entry exists from a
+  prior `approve'.  No cryptography runs at transfer time – only boolean
+  flag checks.  We simulate the check for our Private-to-Public scenario
+  and show that both sides pass.
 
   ┌────
   │ # Simulating the contract's bilateral identity check:
@@ -1013,18 +1424,19 @@ Table of Contents
   └────
 
 
-9 Bob Verifies Alice's Identity (Two-Channel Design)
-════════════════════════════════════════════════════
+10 Bob Verifies Alice's Identity (Two-Channel Design)
+═════════════════════════════════════════════════════
 
-  Bob decrypts the ElGamal ciphertext to get the message point \( M \),
-  then receives Alice's `identity_data' via Holochain and verifies the
-  binding: \( H(\text{identity\_data}) \cdot G = M \).
-
-  *What this proves:* The plaintext identity Bob received off-chain (via
-  Holochain) is the /exact same/ identity the issuer certified and Alice
-  registered on-chain.  The binding is cryptographic: any change to even
-  one character of `identity_data' would produce a different \( m \),
-  yielding a different point \( m \cdot G \neq M \).
+  This is the two-channel design in action.  Channel 1 (Ethereum): Bob
+  decrypts \( E_{\text{pool}} \) with his secret key to recover the
+  message point \( M \).  Channel 2 (Holochain): Bob receives Alice's
+  `identity_data' and verifies the binding \( H(\text{identity\_data})
+  \cdot G = M \).  Neither channel alone is sufficient – the Ethereum
+  ciphertext proves /which/ identity was registered, while the Holochain
+  data provides the /human-readable content/.  A counter-example shows
+  that changing even one character of `identity_data' in transit (e.g.,
+  "Alice" to "Mallory") produces a completely different point that
+  doesn't match \( M \), so Bob detects tampering immediately.
 
   ┌────
   │ # === Bob's side ===
@@ -1077,8 +1489,8 @@ Table of Contents
   follows showing what Bob sees if the Holochain data is tampered.
 
 
-9.1 Counter-example: Tampered Identity Data
-───────────────────────────────────────────
+10.1 Counter-example: Tampered Identity Data
+────────────────────────────────────────────
 
   If a man-in-the-middle alters the identity data in transit, Bob
   detects it immediately – the hash no longer matches the on-chain
@@ -1106,18 +1518,19 @@ Table of Contents
   └────
 
 
-10 Receipt Construction
+11 Receipt Construction
 ═══════════════════════
 
-  Both parties hold each other's plaintext `identity_data' (Alice has
-  Bob's from the public IdentityRegistry; Bob has Alice's from
-  Holochain).  Both hold the transfer data from on-chain events.  Either
-  can independently construct the canonical receipt.
-
-  *What this proves:* Because the receipt format is canonical
-  (deterministic JSON with sorted keys), both parties independently
-  produce byte-identical output.  Their `keccak256' hashes match without
-  coordination.
+  After the transfer, both parties hold each other's plaintext
+  `identity_data' (Alice has Bob's from the public IdentityRegistry; Bob
+  has Alice's from Holochain) and the transfer metadata from on-chain
+  events.  Either party can independently construct a canonical receipt
+  – deterministic JSON with sorted keys and no whitespace – and compute
+  its `keccak256' hash.  We show that Alice's and Bob's independently
+  constructed receipts produce identical hashes without coordination.
+  This canonical form is what makes dispute resolution possible: both
+  parties hold the same evidence, and neither can alter their copy
+  without breaking the hash.
 
   ┌────
   │ # Both parties construct the same canonical receipt
@@ -1165,14 +1578,17 @@ Table of Contents
   └────
 
 
-  *How to read the output:* The two hash values must be identical.  If
-  the receipt format weren't canonical (e.g., different key ordering),
-  the hashes would diverge – making it impossible to prove a dispute
-  later.
-
-
-11 Summary: What Each Party Knows
+12 Summary: What Each Party Knows
 ═════════════════════════════════
+
+  The table below summarizes the information landscape after a complete
+  Private-to-Public transfer.  The key takeaway: Eve (a passive on-chain
+  observer) learns nothing about Alice's identity from any public
+  artifact.  Bob learns Alice's identity only because Alice explicitly
+  authorized it via `approve'.  The issuer can identify Alice given \( M
+  \), but cannot link Alice's accounts from on-chain data alone.  No
+  party – not even the issuer – can link Alice's rerandomized signature
+  \( \sigma' \) back to the original \( \sigma \).
 
   ┌────
   │ [
@@ -1213,17 +1629,22 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-12 Appendix: The Identity Fountain – Unlinkability Demonstration
+13 Appendix: The Identity Fountain – Unlinkability Demonstration
 ════════════════════════════════════════════════════════════════
 
-  Alice derives a second credential from the same PS signature.  We
-  verify that no observer can link the two credentials.
-
-  *What this proves:* Two credentials derived from the same PS signature
-  share absolutely /no observable structure/.  Every public artifact –
-  public key, ElGamal ciphertext, rerandomized signature – is
-  independent.  Both verify under the same issuer public key, but
-  correlation is information-theoretically impossible.
+  Alice derives a second credential from the same PS signature –
+  simulating a "savings" account alongside her "checking" account.  We
+  verify that the second credential is a valid PS signature on the same
+  \( m \), then compare all public artifacts (rerandomized signature,
+  public key, ElGamal ciphertext) between the two accounts.  Every
+  coordinate fragment is completely different: no shared structure, no
+  correlation.  This is /statistical/ unlinkability
+  (information-theoretic, not merely computational) – meaning no
+  algorithm, regardless of computing power, can determine that these two
+  accounts belong to the same person from on-chain data alone.  Both
+  credentials verify under the same issuer public key, confirming they
+  represent certified identities, but the issuer itself cannot link them
+  without access to a counterparty's decrypted \( M \).
 
   ┌────
   │ # === Alice creates a SECOND account (e.g., "savings") ===
@@ -1271,17 +1692,17 @@ Table of Contents
 
   ┌────
   │ Second credential derived (same identity, fresh account):
-  │   pk_alice_2 = (920844...,  31439...)
+  │   pk_alice_2 = (758753..., 927131...)
   │   E_alice_2  = (R, C) -- independent ciphertext
-  │   sigma'_2   = (688111..., 640821...)
+  │   sigma'_2   = (  6384..., 284472...)
   │ 
   │ Unlinkability check:
-  │   sigma'_1 (acct 1) = (766346..., 500690...)
-  │   sigma'_1 (acct 2) = (688111..., 640821...)
-  │   pk (acct 1)       = (527230..., 447340...)
-  │   pk (acct 2)       = (920844...,  31439...)
-  │   E.R (acct 1)      = (  2303..., 890226...)
-  │   E.R (acct 2)      = (160215..., 247228...)
+  │   sigma'_1 (acct 1) = (543423..., 965077...)
+  │   sigma'_1 (acct 2) = (  6384..., 284472...)
+  │   pk (acct 1)       = (969859..., 340202...)
+  │   pk (acct 2)       = (758753..., 927131...)
+  │   E.R (acct 1)      = (812545..., 805822...)
+  │   E.R (acct 2)      = (764570..., 218837...)
   │ 
   │   All values are independent.  No shared structure.
   │   PS rerandomization is STATISTICALLY unlinkable --
