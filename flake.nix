@@ -12,6 +12,12 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         python3Env = pkgs.python3.withPackages (ps: with ps; [
+          ipykernel
+          ipython
+          matplotlib
+          numpy
+          pandas
+          tabulate
           pytest
           pip
           web3               # Ethereum JSON-RPC client
