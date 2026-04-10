@@ -1,0 +1,9 @@
+[submodule "nucypher-contracts"]
+	path = nucypher-contracts
+	url = git@github.com:nucypher/nucypher-contracts.git
+[submodule "pyUmbral"]
+	path = pyUmbral
+	url = git@github.com:nucypher/pyUmbral.git
+[submodule "rust-umbral"]
+	path = rust-umbral
+	url = git@github.com:nucypher/rust-umbral.git

@@ -1,4 +1,4 @@
-#+title: TruthStake -- Decentralized Oracle via Kalman Filtering
+#+title: TruthStake -- Decentralized Oracle Design Evolution
 #+author: Perry Kundert
 #+date: 2026-03-10 09:00:00
 #+draft: false
@@ -1520,21 +1520,1046 @@
 
 ** Implementation Path
 
-   1. Implement ~TimeSeriesOracle~ in Python simulation (~truthstake.py~):
-      - ~TimeSlot~ dataclass with timestamp, submissions, challenges, finalized flag
+   1. [DONE] Implement ~TimeSeriesOracle~ in Python simulation (~truthstake.py~):
+      - ~TimeSlot~ dataclass with block-indexed slots, submissions, challenges
       - Forward Kalman pass over all slots
       - RTS backward smoother
       - Deferred settlement: finalize slots when challenge window expires
       - Age-scaled challenge bonds
+      - Circular buffer with anchor state for bounded on-chain storage
 
    2. Port attack tests from V1 to V2 time-series structure:
-      - Verify that the honey-pot collapse still works with deferred settlement
-      - Test forward propagation: corrupting slot T and challenging it corrects T+1..T+N
-      - Test age-scaled challenges: historical correction costs more but rewards more
-      - Test curve-shape attacks: adversary distorts rate-of-return, challenge corrects it
+      - [DONE] Verify that the honey-pot collapse still works with deferred settlement
+      - [DONE] Test forward propagation: corrupting slot T and challenging it corrects T+1..T+N
+      - [DONE] Test age-scaled challenges: historical correction costs more but rewards more
+      - [DONE] Test curve-shape attacks: rate-of-return and flash-crash preservation
+      - [DONE] Test circular buffer: eviction, anchor state, non-finalized protection
 
    3. Solidity implementation:
       - ~TimeSlot~ struct with packed storage (estimate, P, finalization state)
       - On-chain RTS smoother bounded to re-project from challenged slot to current
       - Gas-efficient batch finalization (finalize all expired slots in one tx)
-      - Consumer ~read(asset, timestamp)~ with per-slot fee and uncertainty premium
+      - Consumer ~read(asset, block)~ with per-slot fee and uncertainty premium
+
+* V3 Rethink: Stake-Weighted Mode vs. Kalman Filtering
+
+  The V2 implementation revealed a fundamental tension between Kalman filtering and
+  the oracle's actual use case.
+
+** The Smoother Manipulation Attack
+
+   An attacker who has placed bets on slot T can retroactively place bets on slot T-1
+   or T-2 that cause the RTS smoother to bend the curve through their slot T position.
+   The retroactive bets may be "wrong" in the sense that they don't match the true
+   value at T-1 -- but they're strategically placed so the smoothed curve passes
+   closer to the attacker's T position, winning them a larger share of the pool.
+
+   This is inherent to any averaging estimator: the estimate at one time depends on
+   observations at other times.  An attacker who understands the smoother's math can
+   game the cross-temporal dependency.
+
+** Two Kinds of Oracle Problem
+
+   Kalman filtering solves the wrong problem for most oracle use cases:
+
+*** Noisy Independent Measurements
+
+    Multiple observers each measure a hidden true value with Gaussian error.
+    Temperature from 20 sensors.  Commodity spot price from 5 exchanges with
+    different spreads and latency.  The true value is unknown; a weighted average
+    is the maximum-likelihood estimate.
+
+    *Kalman is ideal here.*  The filter extracts signal from noise, and reputation-
+    weighted R ensures proven-accurate reporters dominate the estimate.
+
+*** Deterministic Published Values
+
+    The true value is a *known fact*: COMEX Gold close, Bank of Canada rate, CPI
+    release.  There is no measurement noise.  The only question is whether each
+    reporter is telling the truth or lying.
+
+    *Kalman is wrong here.*  There is no hidden state to estimate.  An average of
+    "2905.30" (truth) and "3000.00" (lie) is "2952.65" -- wrong.  The correct
+    answer is "2905.30" because more honest reporters agree on it.  The **mode**
+    (most commonly posted value) is the right estimator.
+
+    Most of what the Alberta Buck needs falls into this category.
+
+** Why Not Median or Mean
+
+   - *Mean / Kalman*: a single large outlier shifts the estimate.  An attacker with
+     enough stake can move the settled value continuously.  Cross-temporal smoothing
+     creates secondary manipulation surfaces.
+
+   - *Median*: better than mean (robust to outliers) but still allows manipulation
+     by controlling the distribution's center.  A Sybil attack placing many values
+     just above/below the true value shifts the median without triggering outlier
+     detection.
+
+   - *Mode*: the attacker must match or exceed the count of the most popular value.
+     For published values with a single correct answer, all honest reporters post
+     the same number.  The attacker needs >50% of total posts (not stake, not
+     influence -- raw count) to override, making Sybil the primary attack vector.
+
+** Stake-Weighted Mode: The Right Estimator
+
+   Combine mode selection with stake weighting to resist both Sybil and capital
+   attacks:
+
+   #+begin_example
+   For each slot:
+     1. Group submissions by value (exact match, or within a precision epsilon)
+     2. For each group, compute total_stake = sum of stakes in that group
+     3. The winning value = the group with the highest total_stake
+     4. All reporters in the winning group share the losers' stakes
+   #+end_example
+
+   This is a *Schelling point game* with economic teeth:
+
+   - *Honest equilibrium*: everyone posts the true value (the obvious Schelling
+     point for a published fact), forming one large group.  Any liar's stake is
+     forfeited to this group.
+
+   - *Attack cost*: to override the honest group, the attacker needs
+     ~total_attacker_stake > total_honest_stake~ for the slot.  This is a pure
+     capital war with no cross-temporal amplification.
+
+   - *No smoothing artifacts*: each slot settles independently.  No retroactive
+     manipulation of historical slots can bend the current slot's outcome.
+
+   - *Flash crashes preserved*: if the true value crashed, all honest reporters
+     post the crash value.  No smoother dampens it.
+
+** What Carries Forward from V1/V2
+
+   The stake-weighted mode approach preserves the core TruthStake economics:
+
+   - *Challenge escalation*: challenges reopen the slot for new submissions at
+     higher stake, attracting more honest capital.  Each challenge level multiplies
+     the minimum stake, making defense exponentially more expensive for attackers.
+
+   - *Non-ergodic honey pot*: escrow from liar-controlled slots accumulates.  When
+     a challenge flips a slot, the escrowed stakes from the attacker's winning
+     period are confiscated and redistributed.  The longer the attack, the larger
+     the pot, the more attractive the defense.
+
+   - *Early submission bonus*: the first reporter to post the correct value earns
+     the most.  This incentivizes speed and conviction over waiting to copy.
+
+   - *Deferred settlement*: reporters are paid after the challenge window expires,
+     not at submission time.  This eliminates the circular dependency.
+
+   - *Block-indexed slots with circular buffer*: slots are indexed by Ethereum
+     block number; only the challenge-window-depth of slots are stored on-chain.
+
+   - *Age-scaled challenge bonds*: challenging older slots costs more but unlocks
+     more escrowed rewards.
+
+   - *Consumer feed fees*: per-read fees flow into the next slot's reward pool.
+
+** What Changes
+
+   | Aspect                   | V2 (Kalman + RTS)                       | V3 (Stake-Weighted Mode)                    |
+   |--------------------------+-----------------------------------------+---------------------------------------------|
+   | Estimator                | Weighted average (Kalman filter)        | Stake-weighted mode (most-staked value)      |
+   | Cross-slot dependency    | RTS smoother propagates corrections     | Slots settle independently                  |
+   | Manipulation surface     | Temporal + weighting                    | Capital only (pure stake war)                |
+   | Reporter reputation      | R = EMA of squared error (low R = more  | Not needed (mode doesn't weight by trust)    |
+   |                          | influence on average)                   |                                              |
+   | Sybil resistance         | Reputation system (new R = high)        | Stake requirement (each submission costs)    |
+   | Precision                | Continuous (any value)                  | Discrete (value groups within epsilon)       |
+   | Forward propagation      | Smoother re-projects corrections        | Not applicable (slots are independent)       |
+   | Ideal for                | Noisy measurements (temperature)        | Published values (commodity close, CPI)      |
+
+** The Precision Epsilon Problem
+
+   For the mode to work, submissions must be grouped.  "2905.30" and "2905.31" are
+   the same value to 4 significant figures.  The oracle needs a precision parameter:
+
+   #+begin_example
+   epsilon = 0.01%   (4 significant figures)
+   group_key = round(value / epsilon) * epsilon
+   #+end_example
+
+   This means reporters must agree to within epsilon -- effectively quantizing the
+   value space.  For published financial values with exact prices, this is natural.
+   For noisy measurements, epsilon must be wider, which reduces the mode's ability
+   to distinguish close values.
+
+   This is a feature, not a bug: the oracle's resolution matches the precision of
+   the underlying data.
+
+** Open Questions
+
+   - *Hybrid approach*: could the oracle use mode for "published value" assets and
+     Kalman for "noisy measurement" assets, selected per asset registration?
+
+   - *Value precision*: how does epsilon interact with different asset types?  Is
+     0.01% always right, or should it be configurable per asset?
+
+   - *Tie breaking*: what happens when two value groups have exactly equal total
+     stake?  Options: earliest-submitted group wins (preserves early bonus),
+     round is voided and stakes returned, or a challenge is auto-triggered.
+
+   - *Continuous values*: for assets without a single published price (e.g., OTC
+     commodities, real estate indices), is the mode appropriate at all, or should
+     these use a different oracle mechanism?
+
+* V4: Identity-Bound Oracles with Competitive Forking
+
+  V1-V3 assumed anonymous, adversarial reporters and tried to force honesty through
+  internal mechanism design: staking, Kalman weighting, mode voting.  The Alberta
+  Buck's architecture makes a stronger assumption available: *participants are
+  identified, their track record is permanent, and dishonesty has consequences
+  across the entire ecosystem, not just within the oracle.*
+
+  This changes everything.
+
+** The Buck Identity Foundation
+
+   The Alberta Buck is underpinned by legally owned wealth with title to named,
+   known parties.  Every Buck participant -- issuers (who post collateral and
+   create BuckCredits), holders, insurers -- has a persistent identity with
+   real-world consequences.  Insurance costs, attestation quality, counterparty
+   trust, and fee schedules all depend on your track record.
+
+   This identity foundation extends naturally to oracles: your oracle track record
+   is one facet of your overall Buck reputation.  A history of inaccurate oracle
+   submissions doesn't just lose you oracle stakes -- it increases your insurance
+   premiums, reduces the value of your attestations, and erodes counterparty trust
+   across the entire ecosystem.
+
+   The punishment for dishonesty is not mechanism-internal (stake confiscation); it
+   is *ecosystem-wide reputation damage* that compounds across every financial
+   relationship the participant has.
+
+** The Oracle as Claim Ledger
+
+   With identity, the oracle simplifies radically.  No Kalman filter.  No mode
+   voting.  No staking within the oracle.  No challenge escalation.
+
+   An oracle is a *public ledger of signed claims*:
+
+   #+begin_example
+   Claim {
+       oracle_id:    bytes32        -- which oracle this claim belongs to
+       reporter:     address        -- identified participant
+       block:        uint64         -- Ethereum block number (slot key)
+       value:        int256         -- claimed value at this block
+       signature:    bytes          -- reporter's signature
+   }
+   #+end_example
+
+   Anyone can create an oracle.  Anyone can post claims to any oracle.  Every
+   claim is permanently recorded and attributed.  The oracle itself does no
+   aggregation, filtering, or settlement.  It is a transparent record of who
+   said what, when.
+
+   Consumers choose which oracle (and which reporters within it) to trust,
+   based on the reporters' track records.  The Buck system's BUCK_K controller
+   uses whichever oracle the governance process has selected.
+
+** Reputation is External and Cross-System
+
+   In V1-V3, reporter reputation (R) was internal to the oracle -- an EMA of
+   squared error, used to weight Kalman updates.  This reputation was session-
+   local, address-specific, and had no consequences outside the oracle.
+
+   In V4, reputation is a *property of the identity*, not the oracle:
+
+   - Computed by comparing an identity's claims across all oracles against the
+     values that were eventually accepted by governance or consensus
+   - Permanent and public: your full history of claims is on-chain forever
+   - Affects the entire Buck ecosystem: insurance premiums, attestation fees,
+     counterparty credit limits, governance weight
+   - Cannot be reset by creating a new address (identity is the anchor, not the
+     address)
+
+   This eliminates the need for internal oracle mechanisms to punish liars.
+   The ecosystem does it automatically and far more severely than any per-round
+   stake confiscation could.
+
+** Why Internal Staking Becomes Unnecessary
+
+   V1-V3 required reporters to stake tokens on each submission because there
+   was no other way to make dishonesty costly.  With identity-bound reputation:
+
+   - *Posting a claim is free* (or costs only gas).  No oracle-specific staking.
+   - *The cost of lying is reputational*, not financial within the oracle.
+     A single bad claim doesn't cost you $X -- it permanently marks your record.
+   - *The cost compounds*: a pattern of inaccurate claims increases insurance
+     costs, reduces attestation income, and can lead to governance de-selection.
+     The NPV of this reputational damage far exceeds any per-round stake.
+   - *Sybil attacks are impossible*: identities are tied to real-world legal
+     entities and Buck holdings.  Creating 1000 fake identities requires 1000
+     real entities with real collateral.
+
+** Competitive Oracle Forking
+
+   Persistent disagreement within an oracle is not necessarily adversarial.
+   Edmonton gas prices and Calgary gas prices are both "correct" -- they're
+   just measuring different things.  An oracle that forces them into the same
+   number is wrong in both directions.
+
+*** When Oracles Should Fork
+
+    A fork is warranted when:
+
+    - Reporters persistently cluster into groups posting materially different values
+    - The disagreement is not due to one group lying, but due to genuine
+      measurement differences (geography, methodology, data source)
+    - Both groups have credible identities and track records
+
+    The mechanism: any participant can create a new oracle at any time.  Reporters
+    who disagree with the existing oracle's consensus simply start posting to a
+    new one (or both).  There is no formal "fork" transaction -- the competing
+    oracle already exists as an independent ledger.
+
+*** What Makes This Different from Chaos
+
+    Without governance, anyone creating oracles is just noise.  The Alberta Buck's
+    governance provides the signal: *which oracle(s) does the BUCK_K controller
+    actually use?*
+
+    The answer is determined by the Buck community through stake-weighted voting.
+
+** Oracle Governance: Stake-Weighted Identity Vote
+
+   When an oracle is contested -- either because of suspected corruption, or
+   because a fork has created competing oracles for the same asset -- the Buck
+   community votes on which oracle(s) to use for BUCK_K computation.
+
+*** Vote Weight
+
+    Each identified participant's vote is weighted by their total Buck-system stake:
+
+    #+begin_example
+    vote_weight(identity) = (issued_buck_value + held_buck_value) * time_discount
+    time_discount = 2^(-age / halflife)
+    #+end_example
+
+    Where ~age~ is how recently the participant was active (issued or transacted),
+    and ~halflife~ is a governance parameter (e.g., 90 days).  This means:
+
+    - Active participants have more say than dormant holders
+    - Large issuers (who have the most at stake if the oracle is corrupted) have
+      the most influence
+    - Historical holders who have exited the system have negligible weight
+    - No separate "governance token" -- your Buck stake IS your governance stake
+
+*** Vote Mechanics
+
+    #+begin_example
+    1. Contest initiated: any participant can call contest(oracle_id)
+       by posting a bond (prevents spam)
+    2. Nomination period: participants nominate replacement oracle(s)
+       (may include the incumbent)
+    3. Voting period: stake-weighted identity vote
+    4. Resolution: winning oracle(s) become the BUCK_K feed source
+       Contest bond returned if the vote changes the oracle selection
+    #+end_example
+
+*** Multiple Oracle Aggregation
+
+    The vote need not select a single oracle.  The BUCK_K controller could
+    aggregate from multiple trusted oracles:
+
+    - Median of N selected oracles (robust to one outlier)
+    - Stake-weighted average across selected oracles
+    - Fallback chain: primary oracle with secondary if primary goes stale
+
+    For commodity basket computation, different assets might use different
+    oracles entirely: a Gold oracle from one group, a Silver oracle from
+    another, each selected by governance vote.
+
+** Track Record as the Core Mechanism
+
+   The critical insight: in a system with persistent identity, *the track record
+   replaces the incentive mechanism*.
+
+   In anonymous systems, you must design mechanisms that make honesty
+   incentive-compatible for each individual interaction.  In identity-bound
+   systems, the mechanism is simpler: your entire history is visible, and
+   everyone individually decides whether to trust you based on it.
+
+*** What the Track Record Contains
+
+    For each identity across all oracles:
+
+    #+begin_example
+    - Total claims submitted
+    - Claims that matched governance-selected oracle's final values (within epsilon)
+    - Claims that diverged
+    - Mean absolute error across all historical claims
+    - Streak data: longest run of accurate claims, longest run of inaccurate ones
+    - Timeliness: how early in the submission window claims typically arrive
+    - Oracle participation: which oracles this identity contributes to
+    #+end_example
+
+*** How Track Record Feeds Back
+
+    The track record is not just informational -- it directly affects economic
+    outcomes across the Buck ecosystem:
+
+    | Track record signal       | Economic consequence                                  |
+    |---------------------------+-------------------------------------------------------|
+    | High oracle accuracy      | Lower insurance premiums on BuckCredits                |
+    | Persistent inaccuracy     | Higher premiums, fewer counterparties willing to deal  |
+    | Early submission pattern  | Preferred attestation provider status                  |
+    | Oracle governance wins    | Track record of picking winning oracles = trust signal |
+    | Participation breadth     | Active across many assets = systemic importance        |
+    | Oracle creation success   | Created oracles that won governance = credibility       |
+
+** Comparison: V1-V3 (Anonymous) vs. V4 (Identity-Bound)
+
+   | Aspect                    | V1-V3 (anonymous)                       | V4 (identity-bound)                          |
+   |---------------------------+-----------------------------------------+----------------------------------------------|
+   | Reporter identity         | Ethereum address (ephemeral)            | Legal identity with Buck holdings             |
+   | Sybil resistance          | Staking, reputation warmup              | Identity binding (impossible to Sybil)        |
+   | Dishonesty cost           | Lose staked tokens (per round)          | Permanent reputation damage (ecosystem-wide)  |
+   | Oracle structure          | Single oracle, internal competition     | Many oracles, external competition            |
+   | Aggregation               | Kalman / mode / weighted average        | None (oracle is a claim ledger)               |
+   | Disagreement handling     | Majority wins, minority loses stake     | Fork into competing oracles                   |
+   | Oracle selection          | One oracle per asset (monopoly)         | Governance votes on oracle set per asset       |
+   | Challenge mechanism       | Internal: bond, escalation, re-opening  | External: contest oracle via governance vote  |
+   | Reward for honesty        | Share of liars' stakes                  | Good reputation -> lower costs, higher income |
+   | Punishment for dishonesty | Lose stake, inflate R                   | Permanent record -> higher costs, fewer deals |
+   | Flash crash handling      | Smoothed away (Kalman) or preserved     | Preserved exactly (no aggregation)            |
+   |                           | (mode)                                  |                                               |
+   | Complexity                | High (filter, smoother, escrow, etc.)   | Low (claim ledger + governance vote)           |
+
+** What Remains from V1-V3
+
+   - *Block-indexed time slots*: claims target specific block ranges
+   - *Circular buffer*: only recent slots stored on-chain; history in archive nodes
+   - *Feed fees*: consumers pay to read oracle values, funding the oracle's operation
+   - *Early submission bonus*: not enforced by mechanism, but visible in track record
+     (consistently early reporters build trust faster)
+   - *Non-ergodic dynamics*: still present, but in reputation rather than stake.
+     A liar consortium can temporarily dominate an oracle, but the permanent record
+     means they pay for it forever across the entire ecosystem.  The longer they
+     lied, the worse their record, the higher the cost.
+
+** What Disappears
+
+   - Internal staking and stake redistribution
+   - Kalman filter / mode estimation / any aggregation within the oracle
+   - Challenge escalation within the oracle
+   - Escrow and retroactive confiscation
+   - Reporter R (measurement noise) weighting
+   - RTS smoother and forward propagation
+
+** Open Questions
+
+   - *Identity bootstrapping*: a new participant has no track record.  How do they
+     enter the oracle system?  Options: any identified Buck participant can post
+     claims immediately (track record starts empty, trust is earned); or a
+     minimum Buck holding is required to participate (barriers to entry, but
+     prevents zero-stake spam).
+
+   - *Cross-chain identity*: if the Buck expands to multiple chains, how does
+     oracle reputation follow?  Portable verifiable credentials?  Cross-chain
+     attestation bridges?
+
+   - *Governance attack*: a wealthy attacker buys enough Bucks to dominate
+     governance and selects a corrupt oracle.  Mitigations: time-discounting
+     makes flash accumulation less effective; supermajority requirements for
+     oracle changes; minimum participation duration before governance weight
+     accrues.
+
+   - *Oracle operator incentives*: if posting claims is free, what motivates
+     someone to run an oracle and post accurate values?  Answer: the oracle
+     operator is typically also a Buck issuer/holder whose assets depend on
+     accurate BUCK_K computation.  Alternatively, feed fees provide direct
+     revenue.
+
+   - *Transition from Chainlink*: the current BUCK_K controller uses Chainlink
+     price feeds.  The transition path: run identity-bound oracles in parallel,
+     compare against Chainlink, build track records, then governance-vote to
+     switch when the community trusts the new oracles.
+
+* On-Chain / Off-Chain Architecture: References, Not Data
+
+  The identity components (ZK proofs, homomorphic encryption, N/M recovery,
+  attestation documents, title records) require expensive computation and large
+  storage.  These are fundamentally unsuited to L1 Ethereum.  The right split:
+
+  - *Off-chain*: computation, proof generation, data storage, oracle claim
+    collection, reputation tracking, dispute evidence
+  - *On-chain (L1)*: references, commitments, feature attestations that are
+    trivial to verify (a signature check, a Merkle proof, a hash comparison)
+
+  This applies to *everything* in the Alberta Buck, not just oracles.
+
+** The Principle: On-Chain Stores References, Off-Chain Stores Data
+
+   A recurring pattern across every Buck component:
+
+   #+begin_example
+   Off-chain:  Full data + expensive proofs
+   On-chain:   commitment(data) + attestation_signatures
+   Validation: cheap check that commitment matches, signatures are valid
+   #+end_example
+
+   The on-chain contract never sees the underlying data.  It sees a hash, a
+   Merkle root, or a ZK proof verification result.  Anyone who needs the full
+   data retrieves it from the off-chain layer and verifies it against the
+   on-chain commitment.
+
+** Component-by-Component Implications
+
+*** Identity: ERC-3643 + Two Visibility Modes
+
+    ERC-3643 (T-REX -- Token for Regulated EXchanges)[fn:1] has already solved
+    most of the on-chain identity verification problem for regulated tokens.
+    The Alberta Buck should adopt its architecture rather than reinvent it.
+
+**** ERC-3643 Architecture (What Already Exists)
+
+     ERC-3643 defines five interacting contracts:
+
+     #+begin_example
+     ONCHAINID[fn:2]      Per-identity smart contract (ERC-734/735 compatible).
+                          Holds claims (hashed on-chain, data off-chain).
+                          Deployed as upgradeable proxy via IdFactory + CREATE2
+                          for deterministic same-address across EVM chains.
+
+     IdentityRegistry[fn:3] Maps wallet addresses -> ONCHAINID contracts.
+                          isVerified(address) checks:
+                            1. Address is registered
+                            2. ONCHAINID holds required claims
+                            3. Claims are signed by trusted issuers
+
+     ClaimTopicsRegistry  Defines what claims the token requires.
+                          E.g., topic 1 = KYC, topic 7 = accredited investor,
+                          topic 42 = licensed insurer (Alberta Buck-specific).
+
+     TrustedIssuersRegistry  Defines who can issue those claims.
+                          E.g., "CRA can issue topic 1 (KYC)",
+                          "AIRS can issue topic 42 (insurer license)".
+
+     Compliance           Additional transfer rules beyond identity.
+                          canTransfer(from, to, amount) -> bool
+                          E.g., per-country holder limits, maximum position size.
+     #+end_example
+
+     The token's ~transfer()~ function calls:
+
+     #+begin_example
+     require(identityRegistry.isVerified(_to), "Invalid identity");
+     require(compliance.canTransfer(msg.sender, _to, _amount), "Compliance");
+     #+end_example
+
+     This is exactly the "one line added to BuckCredit.createCredit" pattern --
+     but generalized to every token operation.
+
+**** How Identity Gets Set: The Attestation Ceremony
+
+     The process to activate an address for the Buck ecosystem:
+
+     #+begin_example
+     1. Off-chain: participant submits identity documents to a trusted
+        issuer (e.g., a law firm, notary, CRA-approved KYC provider)
+
+     2. Off-chain: trusted issuer verifies documents, generates a claim:
+        - claim_topic = 1 (KYC verified)
+        - claim_data  = hash(name, jurisdiction, ID doc hashes, ...)
+        - claim_sig   = issuer.sign(claim_topic, claim_data)
+        The claim data hash goes on-chain; the actual documents stay
+        off-chain (on Holochain, IPFS, or the issuer's storage).
+
+     3. On-chain: participant (or issuer on their behalf) calls:
+        identity.addClaim(topic, scheme, issuer, sig, data_hash, uri)
+        This stores the claim on the participant's ONCHAINID contract.
+
+     4. On-chain: a registry agent (token issuer or governance multisig) calls:
+        identityRegistry.registerIdentity(walletAddress, onchainId, country)
+        This links the wallet address to the ONCHAINID.
+
+     5. Now: identityRegistry.isVerified(walletAddress) returns true,
+        and the participant can hold/transfer BUCKs, create BuckCredits,
+        submit oracle claims, and vote in governance.
+     #+end_example
+
+     This is analogous to setting up an account to use a DeFi protocol with
+     KYC requirements -- the ceremony happens once (or periodically for
+     re-verification), and then on-chain operations just check ~isVerified~.
+
+     For the Alberta Buck, the claim topics would include:
+
+     | Topic | Meaning                    | Required for                    | Issuer              |
+     |-------+----------------------------+---------------------------------+----------------------|
+     |     1 | KYC verified               | All Buck operations              | Approved KYC provider|
+     |     2 | Alberta jurisdiction       | Issuing Alberta-domiciled credits | Legal attestor       |
+     |     7 | Accredited investor        | Large credit issuance            | Securities regulator |
+     |    42 | Licensed insurer           | BuckCredit.createCredit          | AIRS or equivalent   |
+     |    43 | Oracle reporter            | Oracle claim submission          | Self-attested + KYC  |
+     |    44 | Governance participant     | Oracle selection votes           | Derived from holdings|
+
+**** Two Visibility Modes: Private Transfers vs. Public Claims
+
+     The Alberta Buck requires two fundamentally different identity visibility
+     modes, depending on the operation:
+
+***** Mode 1: Anonymous-but-Valid (BUCK Transfers)
+
+      For ERC-20 BUCK transfers, the identity must be *verified* but not
+      *disclosed*.  The transfer parties know each other, but the public
+      blockchain sees only that two verified addresses transacted.
+
+      #+begin_example
+      What the blockchain sees:
+        - address A transferred X BUCK to address B
+        - identityRegistry.isVerified(A) == true
+        - identityRegistry.isVerified(B) == true
+        - compliance.canTransfer(A, B, X) == true
+
+      What the blockchain does NOT see:
+        - who A and B are (their names, jurisdictions, etc.)
+        - why the transfer occurred (the underlying transaction)
+
+      What the transfer participants see (off-chain):
+        - encrypted receipt containing: sender identity, receiver identity,
+          amount, purpose, timestamp, any additional terms
+        - encrypted with the participants' public keys (only sender and
+          receiver can decrypt)
+        - optionally: a regulatory escrow key that allows authorized
+          regulators to decrypt if needed (key escrow / threshold scheme)
+      #+end_example
+
+      The on-chain contract only calls ~isVerified~.  It never learns or
+      stores who the participants are.  The full identity disclosure happens
+      in the encrypted off-chain receipt.
+
+      Implementation:
+
+      #+begin_example
+      // Buck.sol transfer override (ERC-3643 style)
+      function transfer(address _to, uint256 _amount) public override returns (bool) {
+          require(identityRegistry.isVerified(msg.sender), "Sender not verified");
+          require(identityRegistry.isVerified(_to), "Receiver not verified");
+          require(compliance.canTransfer(msg.sender, _to, _amount), "Compliance");
+          _transfer(msg.sender, _to, _amount);
+          compliance.transferred(msg.sender, _to, _amount);
+          // Receipt creation happens off-chain (Holochain)
+          // Only participants + optional regulator escrow can read it
+          return true;
+      }
+      #+end_example
+
+***** Mode 2: Public Identity (Oracle Claims, Governance)
+
+      For oracle submissions and governance votes, identity is *intentionally
+      public*.  "I, Perry Kundert, have submitted this Oracle reading, and
+      stand by it for future credibility."  The whole point is that your name
+      is on your claims so the track record builds public trust.
+
+      #+begin_example
+      What the blockchain sees:
+        - address A submitted value V for asset G at block N
+        - identityRegistry.isVerified(A) == true
+
+      What anyone can look up (off-chain, public):
+        - A's ONCHAINID has a public-identity claim:
+          "Perry Kundert, Alberta, licensed insurer #12345"
+        - A's full oracle track record: 847 claims, 99.2% accuracy,
+          mean error 0.003%, earliest-quartile timeliness
+        - A's governance participation: voted in 12 oracle selections,
+          backed winning oracle 11 times
+
+      Why this is public:
+        - Your word is your bond.  The track record IS the reputation.
+        - Anyone evaluating whether to trust oracle X can see exactly
+          who is backing it and how reliable they have been.
+        - Insurers who also report oracle values gain cross-domain
+          credibility: "this insurer is accurate about prices" reduces
+          the risk premium on their BuckCredits.
+      #+end_example
+
+      The ONCHAINID supports both modes through different claim types:
+
+      #+begin_example
+      // Private claim (topic 1: KYC) -- data hash only, off-chain encrypted
+      identity.addClaim(
+          topic  = 1,
+          data   = keccak256(abi.encode(name, jurisdiction, docHashes)),
+          uri    = "holochain://agent/kyc/encrypted"  // only issuer + subject
+      );
+
+      // Public claim (topic 43: oracle reporter) -- data in the clear
+      identity.addClaim(
+          topic  = 43,
+          data   = keccak256(abi.encode("Perry Kundert", "Alberta", "insurer")),
+          uri    = "holochain://agent/oracle-identity/public"  // world-readable
+      );
+      #+end_example
+
+      The ~isVerified~ check works identically for both.  The difference is
+      whether the ~uri~ points to encrypted or public off-chain data.
+
+**** Off-Chain Identity Layer (Holochain)
+
+     | Component               | What it stores                                     |
+     |-------------------------+----------------------------------------------------|
+     | Agent source chain      | All identity-related actions: claim requests,      |
+     |                         | attestation receipts, oracle claim submissions,    |
+     |                         | governance votes -- append-only, tamper-evident     |
+     | KYC documents (private) | Encrypted with participant's key + issuer's key.   |
+     |                         | Regulatory escrow key optional (N/M threshold).    |
+     |                         | Referenced by ONCHAINID claim URI                  |
+     | Public identity (opt-in)| Name, jurisdiction, licenses, credentials.         |
+     |                         | World-readable via DHT.  Referenced by public      |
+     |                         | claim URI on ONCHAINID                             |
+     | Transfer receipts       | Encrypted per-transfer: sender + receiver keys     |
+     |                         | + optional regulatory escrow key.  Contains full   |
+     |                         | transaction details (identities, amounts, terms)   |
+     | Oracle claims           | Full claim history (value, block, signature).      |
+     |                         | Public for public-identity reporters.  Aggregated   |
+     |                         | into Merkle root committed on-chain                |
+     | Reputation scores       | Computed from oracle claim history vs. governance-  |
+     |                         | selected oracle values.  Publicly queryable        |
+
+     The Holochain DNA (application rules) enforces:
+
+     - Agents can only write to their own source chain
+     - Claims must have valid signatures from registered issuers
+     - Transfer receipts must be encrypted (no plaintext identity leaks)
+     - Oracle claims must be signed by the submitting agent's key
+     - Reputation is computed deterministically from public claim data
+
+**** On-Chain Contracts: What Changes
+
+     | Contract            | Current                        | With ERC-3643 identity            |
+     |---------------------+--------------------------------+-----------------------------------|
+     | Buck (ERC-20)       | ~transfer~ with no checks      | Add ~isVerified~ + compliance     |
+     |                     |                                | checks per ERC-3643               |
+     | BuckCredit (ERC-721)| Any address can be insurer      | ~createCredit~ requires          |
+     |                     |                                | topic 42 claim (licensed insurer) |
+     | BuckKController     | Reads Chainlink                | Reads OracleCommitment           |
+     |                     |                                | (unchanged from V4 proposal)      |
+     | *New*: ONCHAINID    | N/A                            | Per-identity contract (ERC-3643)  |
+     | *New*: IdRegistry   | N/A                            | Address -> ONCHAINID mapping      |
+     | *New*: ClaimTopics  | N/A                            | Required claims for BUCK          |
+     | *New*: TrustedIssuers| N/A                           | Authorized KYC/attestation providers|
+     | *New*: Compliance   | N/A                            | Transfer rules (jurisdiction, etc)|
+     | *New*: OracleCommit | N/A                            | Latest oracle values per asset    |
+
+     The "new" contracts are standard ERC-3643 components[fn:4], not custom code.
+     The only Alberta Buck-specific work is:
+
+     1. Defining the claim topics (table above)
+     2. Registering the trusted issuers (KYC providers, AIRS, etc.)
+     3. Writing the Compliance contract rules (jurisdiction restrictions,
+        position limits, etc.)
+     4. Modifying ~Buck.transfer~ and ~BuckCredit.createCredit~ to call
+        the identity registry
+     5. Writing ~OracleCommitment~ (simple value store with signature checks)
+
+**** Encrypted Receipts: The Privacy Bridge
+
+     The Alberta Buck needs a paper trail (receipts, audit history) without
+     making every transaction's participants publicly visible.  The pattern:
+
+     #+begin_example
+     Transfer: A -> B, 1000 BUCK
+
+     On-chain (public):
+       Transfer(A, B, 1000)           // addresses are pseudonymous
+
+     Off-chain (encrypted, Holochain):
+       Receipt {
+         sender:     "Perry Kundert (ONCHAINID 0x123...)"
+         receiver:   "Alberta Energy Corp (ONCHAINID 0x456...)"
+         amount:     1000 BUCK
+         purpose:    "Insurance premium payment for BuckCredit #42"
+         timestamp:  2026-03-14T15:00:00Z
+         terms:      "Quarterly premium, policy ref AEC-2026-Q1"
+       }
+
+     Encrypted with:
+       - sender's public key    (sender can always read)
+       - receiver's public key  (receiver can always read)
+       - regulatory escrow key  (regulator can read with N/M threshold)
+
+     Stored:
+       - On sender's Holochain source chain (their copy)
+       - On receiver's Holochain source chain (their copy)
+       - Receipt hash committed on-chain (optional, for proving existence)
+     #+end_example
+
+     Neither the sender's nor receiver's real identity appears on-chain.
+     The on-chain contract verified ~isVerified~ for both addresses, confirming
+     they are identified participants, but the identity details exist only in
+     the encrypted receipt.
+
+     A regulator with the escrow key can decrypt any receipt and learn the
+     participants' identities.  This satisfies AML/KYC requirements without
+     making every transaction publicly deanonymizable.
+
+*** BuckCredit (Insurance NFTs)
+
+    Currently, ~createCredit()~ lets any ~msg.sender~ be the insurer with no
+    identity check.  With the off-chain identity layer:
+
+    | Layer     | What lives here                                                  |
+    |-----------+------------------------------------------------------------------|
+    | Off-chain | Title documents, appraisal reports, insurance policy terms,       |
+    |           | collateral attestation with N/M party signatures, ZK proofs      |
+    |           | of collateral adequacy                                           |
+    | On-chain  | ~CreditParams~ struct (unchanged), plus:                         |
+    |           | ~collateral_root: bytes32~ (Merkle root of off-chain documents)  |
+    |           | ~require(features[msg.sender] & FEATURE_INSURER != 0)~           |
+
+    The ~createCredit~ function gains one line: check that the caller has the
+    insurer feature bit.  All the heavy identity/attestation work happened
+    off-chain before that bit was set.
+
+*** Oracle Price Feed
+
+    This is where the impact is largest.  The V1-V4 oracle designs -- Kalman
+    filtering, mode voting, claim ledgers, reputation tracking -- all become
+    *off-chain protocol*, not on-chain contracts.
+
+    | Layer     | What lives here                                                  |
+    |-----------+------------------------------------------------------------------|
+    | Off-chain | Full claim history (every reporter, every value, every block)     |
+    |           | Reputation computation (track records across all oracles)         |
+    |           | Dispute resolution (evidence submission, re-evaluation)           |
+    |           | Governance voting (stake-weighted identity vote on oracle set)    |
+    | On-chain  | ~oracle_value(asset_id) -> (int256 value, uint64 block)~         |
+    |           | ~oracle_root(asset_id) -> bytes32~ (commitment to claim set)     |
+    |           | ~oracle_attestors(asset_id) -> address[]~ (who signed this value) |
+
+    The ~BuckKController.compute()~ currently calls Chainlink's
+    ~AggregatorV3Interface.latestRoundData()~.  With off-chain oracles, it reads
+    a similar interface backed by the governance-selected oracle's latest
+    committed value:
+
+    #+begin_example
+    function latestValue(bytes32 assetId) external view
+        returns (int256 value, uint64 updatedAtBlock);
+    #+end_example
+
+    One storage read.  The entire oracle claim collection, reputation tracking,
+    and dispute resolution machinery runs off-chain.
+
+*** N/M Recovery and Multi-Party Agreement
+
+    | Layer     | What lives here                                                  |
+    |-----------+------------------------------------------------------------------|
+    | Off-chain | Encrypted key shards distributed to M parties, recovery ceremony |
+    |           | (collecting N signatures), shard recombination                   |
+    | On-chain  | ~recovery_config(address) -> (uint8 N, uint8 M, address[] parties)~ |
+    |           | ~recover(address, bytes[] sigs)~ -- verifies N valid signatures, |
+    |           | transfers ownership                                              |
+
+    The recovery ceremony is entirely off-chain.  On-chain just validates
+    that N of the M registered parties signed the recovery request.
+
+*** Receipts and Transaction Records
+
+    | Layer     | What lives here                                                  |
+    |-----------+------------------------------------------------------------------|
+    | Off-chain | Full receipt data (amounts, counterparties, timestamps, terms),   |
+    |           | cryptographic receipts with N/M party co-signatures              |
+    | On-chain  | ~receipt_root: bytes32~ per account (Merkle root of all receipts) |
+    |           | Updated periodically (batch commitment)                          |
+
+    Any party can prove a specific receipt exists by providing a Merkle proof
+    against the on-chain root.  The full receipt database lives off-chain.
+
+** The Off-Chain Layer: What Platform?
+
+   The off-chain layer needs:
+
+   1. *Agent-centric data ownership*: each identity owns and controls their own
+      claims, attestations, and records
+   2. *Cryptographic integrity*: data is signed by the owning identity, tamper-
+      evident, and independently verifiable
+   3. *Availability without centralization*: data must be retrievable without
+      depending on a single server
+   4. *Complex validation rules*: ZK proof verification, N/M signature checking,
+      reputation computation
+   5. *Selective disclosure*: prove properties of data without revealing the data
+      itself (ZK proofs of identity features, collateral adequacy, etc.)
+
+*** Holochain
+
+    Natural fit for agent-centric data.  Each participant maintains their own
+    source chain (append-only log of their actions).  Validation rules are
+    defined per application (DNA).  DHT provides distributed availability.
+
+    Strengths: no global consensus needed for storage, each agent owns their
+    data, validation is local.  Weakness: less mature tooling, smaller ecosystem
+    than Ethereum L2s.
+
+*** L2 Rollups (Optimistic or ZK)
+
+    Run the oracle/identity/reputation logic as an L2 that periodically commits
+    state roots to L1.  Fraud proofs (optimistic) or validity proofs (ZK) ensure
+    correctness.
+
+    Strengths: inherits Ethereum security, mature tooling, can run full EVM
+    contracts off-chain with L1 settlement.  Weakness: still has global state
+    (not agent-centric), sequencer centralization concerns.
+
+*** Hybrid: Holochain for Data, L2 for Disputes
+
+    Use Holochain for the agent-centric claim/attestation layer (where most
+    activity happens -- posting claims, building reputation, routine oracle
+    operation).  Use an L2 (or even L1) only for disputes and governance votes
+    that require economic finality.
+
+    Most of the time, the system runs entirely on Holochain.  The on-chain
+    contracts see periodic commitment updates ("oracle X says Gold is $2905 at
+    block N, signed by reporters [A, B, C]").  Only when someone disputes does
+    evidence move to a chain with economic finality.
+
+** Impact on the Existing Contracts
+
+*** BuckKController
+
+    Minimal change.  Replace ~AggregatorV3Interface~ with an
+    ~OracleCommitment~ interface:
+
+    #+begin_example
+    interface IOracleCommitment {
+        function latestValue(bytes32 assetId) external view
+            returns (int256 value, uint64 updatedAtBlock);
+    }
+    #+end_example
+
+    The ~_getBasketCost()~ function reads from this instead of Chainlink.
+    The implementation behind ~IOracleCommitment~ is a simple contract that
+    stores the latest governance-approved value per asset, updated by
+    authorized submitters (identified by the feature bitfield).
+
+*** BuckCredit
+
+    Add one require to ~createCredit~:
+
+    #+begin_example
+    require(identityFeatures[msg.sender] & FEATURE_INSURER != 0,
+            "Caller not attested insurer");
+    #+end_example
+
+    Plus a ~collateralRoot~ field in ~CreditParams~ for the off-chain
+    document commitment.
+
+*** Buck
+
+    No change.  It already just calls ~buckCredit.totalCurrentValue()~ and
+    ~buckK.compute()~.  The identity and oracle layers are transparent to it.
+
+*** New: IdentityRegistry Contract
+
+    A small new contract that stores identity feature bits and attestations:
+
+    #+begin_example
+    contract IdentityRegistry {
+        mapping(address => uint256) public features;    // bitfield
+        mapping(address => bytes32) public identityRoot; // off-chain commitment
+
+        function attest(address subject, uint256 featureBits, bytes32 root,
+                        bytes calldata attestorSig) external;
+        function revoke(address subject, uint256 featureBits) external;
+    }
+    #+end_example
+
+    ~attest()~ verifies that the caller (or the signature) belongs to an
+    authorized attestor, then sets the feature bits.  The actual identity
+    verification happened entirely off-chain.
+
+*** New: OracleCommitment Contract
+
+    Stores the latest governance-approved value per asset:
+
+    #+begin_example
+    contract OracleCommitment {
+        struct Commitment {
+            int256  value;
+            uint64  updatedAtBlock;
+            bytes32 claimRoot;       // Merkle root of supporting claims
+            address[] attestors;     // who signed this commitment
+        }
+        mapping(bytes32 => Commitment) public latest;  // assetId -> latest
+
+        function commit(bytes32 assetId, int256 value, bytes32 claimRoot,
+                        bytes[] calldata sigs) external;
+    }
+    #+end_example
+
+    ~commit()~ verifies that the signers are governance-approved oracle
+    reporters for this asset (checked via ~IdentityRegistry.features~),
+    then stores the value.  ~BuckKController~ reads from ~latest~.
+
+** What This Means for Storage and Gas
+
+   | Component          | Current on-chain storage       | With off-chain layer          |
+   |--------------------+--------------------------------+-------------------------------|
+   | Identity           | None                           | ~2 words per address          |
+   | Oracle claims      | N/A (uses Chainlink)           | 1 word per asset (latest val) |
+   | Oracle history     | N/A                            | 1 word per asset (Merkle root)|
+   | BuckCredit         | ~CreditParams~ struct          | +1 word (collateralRoot)      |
+   | Receipts           | None                           | 1 word per account (root)     |
+   | Recovery config    | None                           | N+2 words per account         |
+
+   Total new on-chain storage is tiny.  The oracle goes from "store every claim
+   from every reporter for every block in a circular buffer" (V2) to "store one
+   int256 per asset."  The identity system goes from "nothing" to "2 words per
+   participant."
+
+** What This Means for the V1-V4 Oracle Code
+
+   The Python simulation code (V1 Kalman, V2 time-series, V3 mode, V4 claim
+   ledger) represents the *off-chain oracle protocol*.  It is not wasted work --
+   it is the logic that runs on the off-chain layer (Holochain, L2, or a
+   dedicated service) to collect claims, compute reputation, resolve disputes,
+   and produce the commitment that gets posted to L1.
+
+   The on-chain oracle contract is trivially simple: store the latest value,
+   verify the submitters' signatures and identity features, expose a read
+   interface for ~BuckKController~.
+
+** The Full Stack
+
+   #+begin_example
+   Layer 1 (Ethereum L1):
+     IdentityRegistry    -- feature bits, identity commitments
+     OracleCommitment    -- latest value per asset, claim roots
+     BuckCredit          -- ERC-721 insurance NFTs (+ collateral root)
+     Buck                -- ERC-20 token (unchanged)
+     BuckKController     -- PID controller reading OracleCommitment
+
+   Off-chain (Holochain / L2 / hybrid):
+     Identity service    -- KYC, ZK proofs, attestation ceremony
+     Oracle protocol     -- claim collection, reputation, dispute resolution
+     Document storage    -- titles, policies, receipts (content-addressed)
+     Recovery service    -- N/M key shard management
+     Governance service  -- stake-weighted voting on oracle selection
+
+   Bridge:
+     Periodic commitment updates: off-chain -> L1 (signed state roots)
+     Dispute escalation: off-chain evidence -> L1 adjudication (rare)
+     Identity attestation: off-chain proof -> L1 feature bit set (infrequent)
+   #+end_example
+
+   Most activity never touches L1.  Oracle claims are posted off-chain.
+   Reputation is computed off-chain.  Identity is verified off-chain.  L1 sees
+   only the results: a price, a feature bit, a Merkle root.
+
+* Footnotes
+
+[fn:1] ERC-3643: Token for Regulated EXchanges (T-REX).  Ethereum Improvement
+Proposal.  https://eips.ethereum.org/EIPS/eip-3643
+
+[fn:2] ONCHAINID: blockchain-based identity management for ERC-3643.
+Documentation: https://docs.erc3643.org/erc-3643/smart-contracts-library/onchain-identities
+
+[fn:3] ERC-3643 Identity Registry: address-to-identity mapping and compliance
+verification.
+https://docs.erc3643.org/erc-3643/smart-contracts-library/onchain-identities/identity-registry
+
+[fn:4] T-REX: reference implementation of ERC-3643 by Tokeny Solutions.
+Source: https://github.com/TokenySolutions/T-REX
+Ecosystem: https://www.erc3643.org/
