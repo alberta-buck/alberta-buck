@@ -1810,3 +1810,261 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   "acct 1" and "acct 2" for =sigma'_1=, =pk=, and =E.R=.  They must
   all be completely different (random-looking).  If any pair matched,
   the unlinkability property would be broken.
+
+
+* Appendix: Small-Group Proofs
+
+  The BN254 examples above prove the cryptography at production scale, but 77-digit numbers resist
+  hand-verification.  These demonstrations use modulus \( p = 23 \) working in an order-11 subgroup
+  where every value fits in two digits.
+
+  | EC (additive)               | Modular (multiplicative)               |
+  |-----------------------------+----------------------------------------|
+  | Scalar mult \( m \cdot G \) | Exponentiation \( g^m \bmod p \)       |
+  | Point addition \( P + Q \)  | Multiplication \( P \cdot Q \bmod p \) |
+
+  Schnorr proofs require prime-order groups, so we use \( g = 4 \), which generates the order-11
+  subgroup (the quadratic residues mod 23).  All exponent arithmetic is mod \( q = 11 \).
+
+** Setup and ElGamal
+
+   ElGamal encryption of a group element \( M = g^m \) under public key
+   \( pk = g^{sk} \) with randomness \( r \):
+
+   \begin{align*}
+   E = (R,\, C) &= (g^r,\ M \cdot pk^r) \pmod{p} \\
+   \text{Decrypt: } M &= C \cdot (R^{sk})^{-1} \pmod{p}
+   \end{align*}
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session smgp :results value :exports both
+     import hashlib
+
+     p = 23;  q = 11;  g = 4     # safe prime, prime-order subgroup
+
+     def mod_exp(base, exp, mod):
+         result = 1
+         base = base % mod
+         while exp > 0:
+             if exp & 1:
+                 result = (result * base) % mod
+             base = (base * base) % mod
+             exp >>= 1
+         return result
+
+     def mod_inv(a, mod):
+         def egcd(a, b):
+             if a == 0: return b, 0, 1
+             g, x, y = egcd(b % a, a)
+             return g, y - (b // a) * x, x
+         _, x, _ = egcd(a % mod, mod)
+         return x % mod
+
+     def fs_hash(*args):
+         """Fiat-Shamir: H(args...) mod q"""
+         h = hashlib.sha256()
+         for a in args:
+             h.update(str(a).encode())
+         return int(h.hexdigest(), 16) % q
+
+     # Identity
+     m = 3;  M = mod_exp(g, m, p)
+
+     # Keys
+     sk_a = 5;  pk_a = mod_exp(g, sk_a, p)
+     sk_b = 7;  pk_b = mod_exp(g, sk_b, p)
+
+     # Encrypt for Alice (r_a=2) and Bob (r_b=9)
+     r_a = 2;  R_a = mod_exp(g, r_a, p)
+     C_a = (M * mod_exp(pk_a, r_a, p)) % p
+
+     r_b = 9;  R_b = mod_exp(g, r_b, p)
+     C_b = (M * mod_exp(pk_b, r_b, p)) % p
+
+     # Decrypt both
+     dec_a = (C_a * mod_inv(mod_exp(R_a, sk_a, p), p)) % p
+     dec_b = (C_b * mod_inv(mod_exp(R_b, sk_b, p), p)) % p
+
+     [
+         ["", "m", "M=g^m", "sk", "pk", "r", "R=g^r", "C=M*pk^r", "Decrypted"],
+         None,
+         ["Alice", m, M, sk_a, pk_a, r_a, R_a, C_a, dec_a],
+         ["Bob",   m, M, sk_b, pk_b, r_b, R_b, C_b, dec_b],
+     ]
+   #+END_SRC
+
+   #+RESULTS:
+   |       | m | M=g^m | sk | pk | r | R=g^r | C=M*pk^r | Decrypted |
+   |-------+---+-------+----+----+---+-------+----------+-----------|
+   | Alice | 3 |    18 |  5 | 12 | 2 |    16 |       16 |        18 |
+   | Bob   | 3 |    18 |  7 |  8 | 9 |    13 |        1 |        18 |
+
+   #+LATEX: }
+
+   Same message \( M = 18 \) in both ciphertexts: \( (16, 16) \) for
+   Alice, \( (13, 1) \) for Bob.  Different randomness makes them
+   unlinkable.
+
+** NIZK: Proof of Knowledge (Registration)
+
+   At registration, Alice proves she knows the plaintext \( m \) and
+   randomness \( r \) inside her ElGamal ciphertext -- without revealing
+   either.  (In the full protocol, a Pointcheval-Sanders pairing check
+   additionally binds \( m \) to the issuer's signature; this
+   demonstration isolates the sigma-protocol core.)
+
+   \begin{align*}
+   \text{Statement:}\quad & R = g^r,\quad C = g^m \cdot pk^r \\[4pt]
+   \text{Commit:}\quad    & T_R = g^{k_r},\quad T_C = g^{k_m} \cdot pk^{k_r} \\
+   \text{Challenge:}\quad & e = H(g,\, pk,\, R,\, C,\, T_R,\, T_C) \bmod q \\
+   \text{Respond:}\quad   & s_m = k_m - e \cdot m \pmod{q},\quad s_r = k_r - e \cdot r \pmod{q} \\[4pt]
+   \text{Verify 1:}\quad  & g^{s_r} \cdot R^e \stackrel{?}{=} T_R \\
+   \text{Verify 2:}\quad  & g^{s_m} \cdot pk^{s_r} \cdot C^e \stackrel{?}{=} T_C
+   \end{align*}
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session smgp :results output :exports both
+     # Prove knowledge of (m=3, r=2) in E_alice = (16, 16)
+     k_m = 1;  k_r = 1                                           # random nonces
+     T_R = mod_exp(g, k_r, p)                                    # 4
+     T_C = (mod_exp(g, k_m, p) * mod_exp(pk_a, k_r, p)) % p      # 2
+
+     e = fs_hash(g, pk_a, R_a, C_a, T_R, T_C)                    # 8
+
+     s_m = (k_m - e * m) % q                                     # 10
+     s_r = (k_r - e * r_a) % q                                   # 7
+
+     chk1 = (mod_exp(g, s_r, p) * mod_exp(R_a, e, p)) % p
+     chk2 = (mod_exp(g, s_m, p) * mod_exp(pk_a, s_r, p) * mod_exp(C_a, e, p)) % p
+
+     print(f"Commit:    T_R = {T_R},  T_C = {T_C}")
+     print(f"Challenge: e = {e}")
+     print(f"Respond:   s_m = {s_m},  s_r = {s_r}")
+     print(f"Verify 1:  g^s_r * R^e  = {chk1:2}          == T_R={T_R:2}  {'PASS' if chk1 == T_R else 'FAIL'}")
+     print(f"Verify 2:  g^s_m * pk^s_r * C^e = {chk2:2}  == T_C={T_C:2}  {'PASS' if chk2 == T_C else 'FAIL'}")
+
+     # Counter-example: Alice claims m'=5 (wrong identity)
+     m_fake = 5
+     s_m_fake = (k_m - e * m_fake) % q
+     chk2_f = (mod_exp(g, s_m_fake, p) * mod_exp(pk_a, s_r, p) * mod_exp(C_a, e, p)) % p
+     print(f"\nCounter-example (m'={m_fake}):")
+     print(f"  Verify 2:  {chk2_f}  == T_C={T_C}  {'PASS' if chk2_f == T_C else 'FAIL'}")
+     print(f"  The ciphertext encrypts m={m}, not m'={m_fake}.")
+     print(f"  No response value can bridge the gap.")
+   #+END_SRC
+
+   #+RESULTS:
+   #+begin_example
+   Commit:    T_R = 4,  T_C = 2
+   Challenge: e = 8
+   Respond:   s_m = 10,  s_r = 7
+   Verify 1:  g^s_r * R^e  =  4          == T_R= 4  PASS
+   Verify 2:  g^s_m * pk^s_r * C^e =  2  == T_C= 2  PASS
+
+   Counter-example (m'=5):
+     Verify 2:  4  == T_C=2  FAIL
+     The ciphertext encrypts m=3, not m'=5.
+     No response value can bridge the gap.
+   #+end_example
+
+   #+LATEX: }
+
+   *How it works:* The prover commits to random nonces \( k_m, k_r \)
+   before seeing the challenge \( e \).  Only someone who knows the real
+   \( m \) and \( r \) can produce responses that satisfy both equations
+   for the specific \( e \) the Fiat-Shamir hash generates.  Check 1
+   confirms knowledge of \( r \); Check 2 confirms knowledge of \( m \)
+   and its consistency with the ciphertext.  A wrong \( m' \) produces a
+   wrong \( s_m \), which ripples through the multi-exponentiation in
+   Check 2.
+
+** Chaum-Pedersen: Proof of Same Plaintext (Approve)
+
+   At =approve= time, Alice re-encrypts her identity for Bob and proves
+   both ciphertexts contain the same \( M \) -- without revealing it.
+   Three independent checks verify her key ownership, her knowledge of
+   the new randomness, and the binding constraint that the decrypted
+   values match.
+
+   \begin{align*}
+   \text{Statement:}\quad & C_a \cdot (R_a^{sk_a})^{-1} = C_b \cdot (pk_b^{r_b})^{-1} \quad (\text{same } M) \\[4pt]
+   \text{Commit:}\quad    & T_1 = g^{k_1},\quad T_2 = g^{k_2},\quad T_3 = pk_b^{k_2} \cdot R_a^{-k_1} \\
+   \text{Challenge:}\quad & e = H(g,\, pk_a,\, pk_b,\, R_a,\, C_a,\, R_b,\, C_b,\, T_1,\, T_2,\, T_3) \\
+   \text{Respond:}\quad   & s_1 = k_1 - e \cdot sk_a,\quad s_2 = k_2 - e \cdot r_b \pmod{q} \\[4pt]
+   \text{Verify 1:}\quad  & g^{s_1} \cdot pk_a^{e} \stackrel{?}{=} T_1 \quad (\text{owns } pk_a) \\
+   \text{Verify 2:}\quad  & g^{s_2} \cdot R_b^{e} \stackrel{?}{=} T_2 \quad (\text{knows } r_b) \\
+   \text{Verify 3:}\quad  & pk_b^{s_2} \cdot R_a^{-s_1} \cdot (C_b / C_a)^{e} \stackrel{?}{=} T_3 \quad (\text{same } M)
+   \end{align*}
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session smgp :results output :exports both
+     # Prove E_alice=(16,16) and E_bob=(13,1) encrypt the same M
+     k1 = 1;  k2 = 1
+     T1 = mod_exp(g, k1, p)                                            # 4
+     T2 = mod_exp(g, k2, p)                                            # 4
+     T3 = (mod_exp(pk_b, k2, p) * mod_exp(R_a, (q - k1) % q, p)) % p  # 12
+
+     e_cp = fs_hash(g, pk_a, pk_b, R_a, C_a, R_b, C_b, T1, T2, T3)   # 4
+
+     s1 = (k1 - e_cp * sk_a) % q                                      # 3
+     s2 = (k2 - e_cp * r_b) % q                                       # 9
+
+     v1 = (mod_exp(g, s1, p) * mod_exp(pk_a, e_cp, p)) % p
+     v2 = (mod_exp(g, s2, p) * mod_exp(R_b, e_cp, p)) % p
+     cb_ca = (C_b * mod_inv(C_a, p)) % p
+     v3 = (mod_exp(pk_b, s2, p) * mod_exp(R_a, (q - s1) % q, p)
+           * mod_exp(cb_ca, e_cp, p)) % p
+
+     print(f"Commit:    T1={T1},  T2={T2},  T3={T3}")
+     print(f"Challenge: e = {e_cp}")
+     print(f"Respond:   s1={s1},  s2={s2}")
+     print(f"Verify 1 (owns pk_a):    {v1:2} == T1={T1:2}  {'PASS' if v1 == T1 else 'FAIL'}")
+     print(f"Verify 2 (knows r_b):    {v2:2} == T2={T2:2}  {'PASS' if v2 == T2 else 'FAIL'}")
+     print(f"Verify 3 (same M):       {v3:2} == T3={T3:2}  {'PASS' if v3 == T3 else 'FAIL'}")
+
+     # Counter-example: Alice encrypts M'=g^7=8 instead of M=g^3=18
+     m_bad = 7;  M_bad = mod_exp(g, m_bad, p)
+     C_b_bad = (M_bad * mod_exp(pk_b, r_b, p)) % p
+     e_bad = fs_hash(g, pk_a, pk_b, R_a, C_a, R_b, C_b_bad, T1, T2, T3)
+     s1_b = (k1 - e_bad * sk_a) % q
+     s2_b = (k2 - e_bad * r_b) % q
+     v1_b = (mod_exp(g, s1_b, p) * mod_exp(pk_a, e_bad, p)) % p
+     v2_b = (mod_exp(g, s2_b, p) * mod_exp(R_b, e_bad, p)) % p
+     cb_ca_b = (C_b_bad * mod_inv(C_a, p)) % p
+     v3_b = (mod_exp(pk_b, s2_b, p) * mod_exp(R_a, (q - s1_b) % q, p)
+             * mod_exp(cb_ca_b, e_bad, p)) % p
+
+     print(f"\nCounter-example (M'=g^{m_bad}={M_bad}, C_b'={C_b_bad}):")
+     print(f"  Verify 1 (owns pk_a):  {v1_b:2} == T1={T1:2}  {'PASS' if v1_b == T1 else 'FAIL'}")
+     print(f"  Verify 2 (knows r_b):  {v2_b:2} == T2={T2:2}  {'PASS' if v2_b == T2 else 'FAIL'}")
+     print(f"  Verify 3 (same M):     {v3_b:2} == T3={T3:2}  {'PASS' if v3_b == T3 else 'FAIL'}")
+     print(f"  Alice owns her key and knows r_b -- checks 1,2 pass.")
+     print(f"  But E_alice encrypts M={M} while E_bob encrypts M'={M_bad}.")
+   #+END_SRC
+
+   #+RESULTS:
+   #+begin_example
+   Commit:    T1=4,  T2=4,  T3=12
+   Challenge: e = 4
+   Respond:   s1=3,  s2=9
+   Verify 1 (owns pk_a):     4 == T1= 4  PASS
+   Verify 2 (knows r_b):     4 == T2= 4  PASS
+   Verify 3 (same M):       12 == T3=12  PASS
+
+   Counter-example (M'=g^7=8, C_b'=3):
+     Verify 1 (owns pk_a):   4 == T1= 4  PASS
+     Verify 2 (knows r_b):   4 == T2= 4  PASS
+     Verify 3 (same M):      1 == T3=12  FAIL
+     Alice owns her key and knows r_b -- checks 1,2 pass.
+     But E_alice encrypts M=18 while E_bob encrypts M'=8.
+   #+end_example
+
+   #+LATEX: }
+
+   *How it works:* Check 3 is the binding constraint.  Expanding the
+   verification equation, it passes only when \( C_a / R_a^{sk_a} = C_b /
+   pk_b^{r_b} \) -- i.e., decrypting =E_alice= with Alice's key yields
+   the same \( M \) as de-randomizing =E_bob= with \( r_b \).  A different
+   message breaks this equality, producing a mismatch that no choice of
+   responses can hide, because the commitments were fixed before the
+   challenge was known.
