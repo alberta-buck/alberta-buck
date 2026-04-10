@@ -1,4 +1,4 @@
-#+title: Alberta Buck - Identity and Cryptographic Receipts (DRAFT v0.2)
+#+title: Alberta Buck - Identity and Cryptographic Receipts (DRAFT v0.3)
 #+author: Perry Kundert
 #+date: 2026-04-08
 #+category: Alberta Buck
@@ -535,6 +535,42 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
      and the ElGamal ciphertext.  The pairing is computed by the /verifier/
      on public inputs; the prover demonstrates knowledge of ~m~ via scalar
      responses.  No bilinear-map proof system is needed.
+
+     The concrete verification protocol:
+
+     #+begin_example
+     Public inputs:
+       sigma' = (sigma'_1, sigma'_2)  -- rerandomized PS signature (G_1)
+       E_new  = (R, C)                -- ElGamal ciphertext (G_1)
+       pk_new                         -- identity public key (G_1)
+       (X, Y)                         -- issuer public key (G_2)
+       g_2                            -- generator (G_2)
+
+     Proof:  pi = (e, s_m, s_r)
+
+     Verifier computes:
+       // (a) PS signature check via ecPairing precompile:
+       //     Reconstruct the commitment A = s_m * sigma'_1 - e * sigma'_2
+       //     in G_1, then verify the pairing product equation:
+       A_ps = ecMul(sigma'_1, s_m) + ecMul(sigma'_2, -e)    // 2 ecMul + 1 ecAdd
+       ecPairing([A_ps, Y], [ecMul(sigma'_1, e), X],
+                 [ecMul(sigma'_2, -e), g_2]) == 1            // 3 pairings
+
+       // (b) ElGamal consistency check (pure G_1 arithmetic):
+       //     s_m * G + s_r * pk_new  ==  e * C + T_b
+       //     s_r * G                 ==  e * R + T_r
+       //     where T_b, T_r are the prover's commitments (included in proof)
+
+       // (c) Fiat-Shamir challenge reconstruction:
+       e' = H(sigma', E_new, pk_new, A_ps, T_b, T_r, registrant_address)
+       require(e' == e)
+     #+end_example
+
+     Part (a) uses the ~ecPairing~ precompile (3 pairs: ~147K gas).
+     Parts (b) and (c) use ~ecMul~ / ~ecAdd~ (~30K gas).  Total: ~235K gas.
+     This is a standard Schnorr-family sigma protocol applied to a linear
+     pairing relation -- the same class of proof used in BLS signature
+     verification and PS credential presentation protocols.
 
      This one-time registration cost is comparable to deploying a small
      contract.  For an account that will hold meaningful value and transact
@@ -1166,10 +1202,13 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
   | Mode            | What on-chain reveals         | What off-chain reveals                    |
   |-----------------+-------------------------------+-------------------------------------------|
   | Anonymous-valid | Address is verified (bit)     | Encrypted receipt: identities of both     |
-  |                 | isVerified(addr) == true      | parties, decryptable only by participants |
-  |                 |                               | + optional regulatory escrow key          |
+  | (private)       | isVerified(addr) == true      | parties, decryptable only by participants |
+  |                 |                               | + optional regulatory escrow key.         |
+  |                 |                               | Requires bilateral ~approve~ for transfer.|
   | Public          | Address is verified + public  | Full name, jurisdiction, credentials,     |
-  |                 | identity claim (plaintext)    | track record -- world-readable            |
+  |                 | identity claim (plaintext)    | track record -- world-readable.           |
+  |                 | isPublic(addr) == true        | No ~approve~ needed -- counterparties     |
+  |                 |                               | already have this account's identity.     |
   | Contract        | Contract address is verified; | Deployer's identity is the contract's     |
   |                 | linked to deployer's identity | identity; receipts encrypted to deployer  |
   | Permissionless  | No identity check             | N/A                                       |
@@ -1256,8 +1295,8 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
    |                      | (no claims yet)  | (publicly identified) | PS sig      | issuer PS-signs identity scalar.         |
    | Register in registry | Self             | N/A                   | Event log   | Derives credential offline; registers    |
    |                      |                  |                       |             | with PS signature + NIZK proof.          |
-   | Add public identity  | Self             | Trusted issuer        | On-chain    | Opts in to public identification for     |
-   | claim                | KYC (topic 1)    | (publicly identified) | claim       | oracle/governance participation.         |
+   | Add public identity  | Self             | Trusted issuer        | On-chain    | Opts in to public identification.        |
+   | claim                | KYC (topic 1)    | (publicly identified) | claim       | Exempts counterparties from ~approve~.   |
    | Revoke claim         | Issuer or self   | N/A                   | Event log   | Removes a claim (e.g., expired license). |
    | N/M recovery         | N-of-M parties   | N/A                   | On-chain    | Transfers identity to new address after  |
    |                      | (all identified) |                       | + off-chain | N of M designated parties agree.         |
@@ -1387,19 +1426,32 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
      data to the on-chain proof chain)
    - Store verified identity for receipt construction on Holochain
 
-*** Receiving Transfers: ~approve(sender, 0)~ Handshake
+*** Bilateral Identity Exchange
 
-    For an account that wants to *receive* from a specific counterparty:
+    The ~transfer~ and ~transferFrom~ functions require that /both/ parties'
+    identities are available to each other.  For private accounts, this
+    means both must call ~approve~:
 
     #+begin_example
-    // Alice wants to receive BUCK from Bob (Alice has private identity):
-    buck.approve(bob, 0, E_alice_for_bob, chaumPedersenProof)
+    // Alice (private) wants to transact with Bob (private):
+    // Step 1: Alice approves Bob -- re-encrypts her identity for Bob
+    buck.approve(bob, amount, E_alice_for_bob, chaumPedersenProof)
+
+    // Step 2: Bob approves Alice -- re-encrypts his identity for Alice
+    buck.approve(alice, 0, E_bob_for_alice, chaumPedersenProof)
+    // Amount = 0: no spending authorization, just identity exchange
     #+end_example
 
-    Amount = 0 means no spending authorization.  The side-effect: Alice's
-    re-encrypted identity is now stored and verified for Bob.  When Bob
-    later calls ~transfer(alice, amount)~, the BUCK contract knows Alice's
-    identity fragment exists and is verified.
+    Both identity fragments must exist before BUCK can move.  If Bob is a
+    *public* account (e.g., a Uniswap pool operator), step 2 is unnecessary:
+    ~isPublic(bob) == true~ satisfies the bilateral check, and Alice can
+    look up Bob's ~identity_data~ directly from the IdentityRegistry.
+
+    This means a public pool operator receives BUCK from any verified
+    private account that has done a single ~approve~ -- no per-counterparty
+    setup on the pool's side.  Two public accounts can ~transfer~ with no
+    ~approve~ at all -- a standard ERC-20 transfer with identity
+    verification.
 
 ** Receipt Construction: What the Contract Emits
 
@@ -1429,6 +1481,41 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
    Only the counterparty (who has the identity private key to decrypt the
    ElGamal ciphertext) can recover the plaintext identity.
 
+*** Canonical Receipts and Public Accounts
+
+    Both parties in a transfer hold each other's plaintext ~identity_data~
+    (either from ~approve~ + Holochain, or from the public IdentityRegistry).
+    Both hold the transfer data (from the on-chain event).  If the receipt
+    format is canonical (deterministic field order, encoding), either party
+    can independently construct the identical receipt and compute
+    ~H(receipt)~.  The receipts match without coordination.
+
+    The receipt model varies by visibility mode:
+
+    | Sender  | Receiver | Receipt construction                    |
+    |---------+----------+-----------------------------------------|
+    | Public  | Public   | Fully on-chain.  Reconstructable by     |
+    |         |          | anyone from Transfer event + public     |
+    |         |          | IdentityRegistry entries.  No off-chain |
+    |         |          | component.                              |
+    | Public  | Private  | Private identity delivered via          |
+    |         |          | Holochain.  Both parties construct      |
+    |         |          | canonical receipt off-chain.            |
+    | Private | Private  | Both identities delivered via           |
+    |         |          | Holochain.  Both parties construct      |
+    |         |          | canonical receipt off-chain.            |
+
+    For transfers involving private accounts, the contract cannot compute
+    ~H(receipt)~ because it never sees plaintext identities.  The on-chain
+    ~BuckTransferReceipt~ event provides anchoring data (the ElGamal
+    ciphertext hashes from ~approve~) that binds the off-chain receipt to
+    the on-chain transfer.
+
+    For two public accounts, no receipt hash is needed: every input to the
+    receipt is already public on-chain.  The transfer is a standard ERC-20
+    ~transfer~ with identity verification -- no Holochain wallet, no
+    off-chain coordination required.
+
 ** The Complete ~transfer~ / ~transferFrom~ Flow
 
    #+begin_example
@@ -1436,6 +1523,19 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
        require(identityRegistry.isVerified(msg.sender), "Sender not verified");
        require(identityRegistry.isVerified(to),         "Receiver not verified");
        require(compliance.canTransfer(msg.sender, to, amount), "Compliance");
+
+       // Bilateral identity exchange: each party's identity must be
+       // available to the other -- via approve() or public registration.
+       require(
+           identityRegistry.isPublic(msg.sender)
+               || _receiptFragments[msg.sender][to] != 0,
+           "Sender identity not available to receiver"
+       );
+       require(
+           identityRegistry.isPublic(to)
+               || _receiptFragments[to][msg.sender] != 0,
+           "Receiver identity not available to sender"
+       );
 
        _transfer(msg.sender, to, amount);
        compliance.transferred(msg.sender, to, amount);
@@ -1452,11 +1552,28 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
    }
    #+end_example
 
-   The ~transferFrom~ path is identical: the receipt fragment hashes were
-   stored during ~approve~, so no additional identity data passes through the
-   DeFi router.  The Chaum-Pedersen proof was verified once (at ~approve~
-   time); subsequent transfers emit only the minimal receipt event (~2,000
-   gas).
+   The bilateral identity check enforces that both parties' identities are
+   available to their counterparty before any BUCK can move.  A *public*
+   account (pool operator, insurer) is exempt from the ~approve~ requirement
+   because its ~identity_data~ is already world-readable in the
+   IdentityRegistry.  This gives four transfer modes:
+
+   | Sender  | Receiver | Approvals needed                        |
+   |---------+----------+-----------------------------------------|
+   | Private | Private  | Both ~approve~ each other               |
+   | Private | Public   | Only sender approves receiver           |
+   | Public  | Private  | Only receiver approves sender           |
+   | Public  | Public   | None -- standard ERC-20 transfer        |
+
+   For two public accounts, the transfer is a plain ERC-20 ~transfer~ with
+   identity verification -- no Holochain wallet, no Chaum-Pedersen proofs, no
+   off-chain coordination.  All identity data is already on-chain.
+
+   The ~transferFrom~ path applies the same bilateral check.  The receipt
+   fragment hashes were stored during ~approve~, so no additional identity
+   data passes through the DeFi router.  The Chaum-Pedersen proof was verified
+   once (at ~approve~ time); subsequent transfers emit only the minimal
+   receipt event (~2,000 gas).
 
 ** Holochain: Off-Chain Computation and Storage
 
@@ -1801,6 +1918,12 @@ minimal. ([[https://perry.kundert.ca/images/alberta-buck-identity.pdf][PDF]], [[
     contract, so she can provide the re-encrypted ciphertext and proof.
     By the time ~transferFrom~ is called later (by the router), the
     verified identity fragment is already stored.
+
+    Note: the pool (~0xPOOL~) is a *public* account -- its ~identity_data~
+    is registered publicly in the IdentityRegistry.  Alice's wallet can
+    look it up directly, so the pool does not need to call ~approve~ for
+    Alice.  The bilateral identity check in ~transferFrom~ passes because
+    ~isPublic(0xPOOL) == true~ satisfies the pool-side requirement.
 
 *** Step 2: Alice Calls the Router
 
