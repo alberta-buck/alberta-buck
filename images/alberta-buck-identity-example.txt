@@ -9,6 +9,8 @@
                                2026-04-10
 
 
+<https://perry.kundert.ca/images/dominion-logo.png>
+
 This document has two parts.  First, a data flow analysis shows where
 each piece of identity data resides – Ethereum contract storage,
 Holochain DHT, or local wallet – at each step of the protocol, using
@@ -599,8 +601,8 @@ Table of Contents
   │ Identity scalar m = H(identity_data):
   │   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
   │ PS signature sigma:
-  │   sigma_1 = (861849..., 630235...)
-  │   sigma_2 = (612616..., 801226...)
+  │   sigma_1 = (929576..., 469692...)
+  │   sigma_2 = (481211..., 296001...)
   └────
 
 
@@ -725,12 +727,12 @@ Table of Contents
 
   ┌────
   │ Rerandomized PS signature verified.
-  │   sigma'_1 = (493703..., 101666...)
-  │   sigma'_2 = (256343..., 164322...)
+  │   sigma'_1 = (361794...,  98987...)
+  │   sigma'_2 = (333842..., 151779...)
   │ 
   │ Original and rerandomized signatures are unlinkable:
-  │   sigma_1  = (861849..., 630235...)
-  │   sigma'_1 = (493703..., 101666...)
+  │   sigma_1  = (929576..., 469692...)
+  │   sigma'_1 = (361794...,  98987...)
   │   (No algorithm can correlate them.)
   └────
 
@@ -786,12 +788,12 @@ Table of Contents
 
   ┌────
   │ Fresh key pair for this Ethereum account:
-  │   sk_alice = 21432963644012956592878055339663639605888465356996988042188746029520803691949
-  │   pk_alice = (265117..., 513834...)
+  │   sk_alice = 2060294029718270287552039809252163668025251738197635032643135024839228079850
+  │   pk_alice = (761537..., 590672...)
   │ 
   │ ElGamal ciphertext E_alice = (R, C):
-  │   R = r*G    = (379684...,  94712...)
-  │   C = m*G+r*pk = (573151..., 321954...)
+  │   R = r*G    = (415072..., 354011...)
+  │   C = m*G+r*pk = (137690..., 476398...)
   │ 
   │ Message point M = m*G:
   │   M = (739132..., 937433...)
@@ -824,7 +826,7 @@ Table of Contents
 
   ┌────
   │ Eve decrypts with wrong key:
-  │   M_wrong = (278940..., 932703...)
+  │   M_wrong = (791237..., 392298...)
   │   M_real  = (739132..., 937433...)
   │   Match: False
   │   (Completely different point -- no information about m is leaked.)
@@ -882,9 +884,9 @@ Table of Contents
 
   ┌────
   │ NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-  │   challenge e = 6517525241919618592053347016597637630094792132692676300650019148380317226165
-  │   response s_m = 11050476704517964521778849893384482878299577597865186352087311691168390264973
-  │   response s_r = 19941702221077421325796252897245025044005930467494025917926505895781330083768
+  │   challenge e = 8124028592775490274794155564978425704912690059734926450154423921164033191638
+  │   response s_m = 18058331409632603033400878380780556309737293944778319205581702243245059611975
+  │   response s_r = 11461440804984214006770320096943657698600621703989858601099278417429221341403
   └────
 
 
@@ -1132,7 +1134,7 @@ Table of Contents
 
   ┌────
   │ Bob registered as PUBLIC account:
-  │   pk_bob = (689988..., 694077...)
+  │   pk_bob = (563144..., 802738...)
   │   E_bob  = (R, C) -- ElGamal ciphertext on-chain
   │   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
   │   isVerified(bob) = true
@@ -1192,8 +1194,8 @@ Table of Contents
   ┌────
   │ Alice re-encrypts her identity for Bob:
   │   E_bob = (R', C') where:
-  │     R' = r'*G     = (857803..., 504693...)
-  │     C' = M+r'*pk  = ( 13643..., 274003...)
+  │     R' = r'*G     = (870927..., 114734...)
+  │     C' = M+r'*pk  = (399025..., 649695...)
   │ 
   │ Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
   │ Matches Alice's M:             (739132..., 937433...)
@@ -1258,9 +1260,9 @@ Table of Contents
 
   ┌────
   │ Chaum-Pedersen proof:
-  │   e  = 15390631928301132928404852650558045277997247213075705430827887254393720615074
-  │   s1 = 4552014130044867593850494728354570603844427994531903253610859130254182891990
-  │   s2 = 1886380837993057968345099547398569469528069960237506379284600322554839517364
+  │   e  = 21574191390788284156140800042311023656749368478159683700284052069104014429699
+  │   s1 = 1454496468624954752891055677604180146142277803397497077984487506729250936647
+  │   s2 = 14125415699851592951046339020966489432540388759662451419732120361244445362436
   └────
 
 
@@ -1696,17 +1698,17 @@ Table of Contents
 
   ┌────
   │ Second credential derived (same identity, fresh account):
-  │   pk_alice_2 = (536885..., 951303...)
+  │   pk_alice_2 = (338149..., 490426...)
   │   E_alice_2  = (R, C) -- independent ciphertext
-  │   sigma'_2   = (251137..., 882152...)
+  │   sigma'_2   = (779785..., 904596...)
   │ 
   │ Unlinkability check:
-  │   sigma'_1 (acct 1) = (493703..., 101666...)
-  │   sigma'_1 (acct 2) = (251137..., 882152...)
-  │   pk (acct 1)       = (265117..., 513834...)
-  │   pk (acct 2)       = (536885..., 951303...)
-  │   E.R (acct 1)      = (379684...,  94712...)
-  │   E.R (acct 2)      = (208945..., 719565...)
+  │   sigma'_1 (acct 1) = (361794...,  98987...)
+  │   sigma'_1 (acct 2) = (779785..., 904596...)
+  │   pk (acct 1)       = (761537..., 590672...)
+  │   pk (acct 2)       = (338149..., 490426...)
+  │   E.R (acct 1)      = (415072..., 354011...)
+  │   E.R (acct 2)      = (492016..., 746227...)
   │ 
   │   All values are independent.  No shared structure.
   │   PS rerandomization is STATISTICALLY unlinkable --

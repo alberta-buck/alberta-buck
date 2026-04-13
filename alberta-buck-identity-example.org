@@ -3,14 +3,14 @@
 #+date: 2026-04-10
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
-#+series_order: 13
-#+weight: 14
+#+series_order: 14
+#+weight: 15
 #+draft: false
 #+bucky: true
 #+math: true
 #+description: Cryptography examples and data flow analysis of the Alberta Buck identity system on BN254: PS signatures, ElGamal encryption, NIZK registration proofs, Chaum-Pedersen re-encryption, two-channel verification, and the AMM pool regulatory compliance model -- with counter-examples demonstrating each failure mode, and mermaid diagrams showing where data resides across Ethereum, Holochain, and the local wallet at each step.
 
-#+LATEX_HEADER: \usepackage[margin=1.333in]{geometry}
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 
 #+EXPORT_FILE_NAME: ./images/alberta-buck-identity-example
 #+STARTUP: org-startup-with-inline-images inlineimages
@@ -20,6 +20,9 @@
 
 #+PROPERTY: header-args:mermaid :exports results :results output
 #+PROPERTY: header-args:python :session abid :exports both :results output table
+
+#+ATTR_LATEX: :width 10cm
+[[https://perry.kundert.ca/images/dominion-logo.png]]
 
 #+BEGIN_ABSTRACT
 This document has two parts.  First, a data flow analysis shows where each
