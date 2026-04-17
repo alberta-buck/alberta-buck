@@ -4,8 +4,8 @@
 #+date: 2026-04-10
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
-#+series_order: 14
-#+weight: 15
+#+series_order: 15
+#+weight: 16
 #+draft: false
 #+bucky: true
 #+math: true
@@ -69,7 +69,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
 #+LATEX: \clearpage
 * The Problem: Transaction Graph Leakage
 
-  Alberta Buck's identity architecture ([[file:alberta-buck-identity.org][Identity]], [[file:alberta-buck-identity-example.org][Examples]]) solves
+  Alberta Buck's identity architecture ([[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]], [[https://perry.kundert.ca/range/finance/alberta-buck-identity-example][Examples]]) solves
   identity privacy: no observer can determine who owns an address, and
   no observer can link two credentials to the same person.  But all
   transactions occur on a public Ethereum ledger.  Balances, transfer
@@ -102,7 +102,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
    balance-changing event.  Demurrage owed at transfer-out is:
 
    \[
-   \text{demurrage} = \text{BUCK\text{-}age} \times 0.02
+   \text{demurrage} = \text{BUCK-age} \times 0.02
    \]
 
    For a constant balance \( B \) held for \( T \) years: BUCK-age
@@ -110,7 +110,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
    entire balance is consumed.  The /net available/ at any moment is:
 
    \[
-   \text{net\_available} = B - 0.02 \times \text{BUCK\text{-}age}
+   \text{net\_available} = B - 0.02 \times \text{BUCK-age}
    \]
 
    The Jubilee account grows as a function of =totalSupply= and the demurrage rate.  It represents
@@ -815,7 +815,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
   These examples implement the wormhole-specific cryptographic
   components on the alt_bn128 (BN254) curve.  For the identity
   primitives they build on (PS signatures, ElGamal, NIZK,
-  Chaum-Pedersen), see the [[file:alberta-buck-identity-example.org][Identity Examples]] document.
+  Chaum-Pedersen), see the [[https://perry.kundert.ca/range/finance/alberta-buck-identity-example][Identity Examples]] document.
 
 ** Setup
 
@@ -958,8 +958,8 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
 
    Alice derives three credentials from her Identity Fountain -- one for
    the source account, one for the burn address, one for the
-   destination.  All three share the same identity scalar \( m =
-   H(\text{identity\_data}) \), but every other value (keys, ciphertext,
+   destination.  All three share the same identity scalar
+   \( m = H(\text{identity\_data}) \), but every other value (keys, ciphertext,
    signature) is independent.
 
    #+LATEX: {\scriptsize
@@ -1016,7 +1016,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
    The wormhole SNARK internally verifies a Chaum-Pedersen proof that
    the source and destination ElGamal ciphertexts encrypt the same
    identity point \( M \).  This is the same proof used in =approve=
-   (see [[file:alberta-buck-identity-example.org][Identity Examples]]), but here it runs inside a SNARK rather than
+   (see [[https://perry.kundert.ca/range/finance/alberta-buck-identity-example][Identity Examples]]), but here it runs inside a SNARK rather than
    directly on-chain, hiding /which/ addresses are involved.
 
    #+LATEX: {\scriptsize

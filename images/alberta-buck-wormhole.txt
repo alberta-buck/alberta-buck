@@ -137,9 +137,11 @@ Table of Contents
   transactions.
 
 
-[Identity] <file:alberta-buck-identity.org>
+[Identity]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity>
 
-[Examples] <file:alberta-buck-identity-example.org>
+[Examples]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity-example>
 
 
 2 Economic Model: Demurrage-Compatible Privacy
@@ -158,13 +160,13 @@ Table of Contents
   cumulative balance-time accumulator (in BUCK-years) updated at every
   balance-changing event.  Demurrage owed at transfer-out is:
 
-  \[ \text{demurrage} = \text{BUCK\text{-}age} \times 0.02 \]
+  \[ \text{demurrage} = \text{BUCK-age} \times 0.02 \]
 
   For a constant balance \( B \) held for \( T \) years: BUCK-age \( = B
   \times T \), so demurrage \( = 0.02BT \).  After 50 years the entire
   balance is consumed.  The /net available/ at any moment is:
 
-  \[ \text{net\_available} = B - 0.02 \times \text{BUCK\text{-}age} \]
+  \[ \text{net\_available} = B - 0.02 \times \text{BUCK-age} \]
 
   The Jubilee account grows as a function of `totalSupply' and the
   demurrage rate.  It represents the accumulated demurrage across all
@@ -844,7 +846,8 @@ Table of Contents
   Chaum-Pedersen), see the [Identity Examples] document.
 
 
-[Identity Examples] <file:alberta-buck-identity-example.org>
+[Identity Examples]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity-example>
 
 6.1 Setup
 ─────────
@@ -909,12 +912,12 @@ Table of Contents
   └────
 
   ┌────
-  │ secret:       7c92d2e8d50974f297661f485bdf1189ceaa63b1...
-  │ addr_burn:    0xacb7c31ea2325c12f7fec9ab5e421e4d56ed8658
-  │ nullifier:    0x84a9eba25a7d84a1a22092b1215eaf946faa11a0...
+  │ secret:       e28067bd247044545ce313d8a7708693a68c6ea1...
+  │ addr_burn:    0xa5f7007645532821ffdea478a79573422b53d3a8
+  │ nullifier:    0x1ef91a946b4022ec72b5e3fadffa562cdf39ea93...
   │ 
-  │ SHA-256 addr:  0xacb7c31ea2325c12f7fec9ab5e421e4d56ed8658
-  │ Keccak check:  0x0ea7990fddb44a502806bff70763d481468b161c
+  │ SHA-256 addr:  0xa5f7007645532821ffdea478a79573422b53d3a8
+  │ Keccak check:  0x6f7e01297ba0191eb5fa7080d48e23ea9ac9418a
   │ Different hash families => no ECDSA key maps to addr_burn
   └────
 
@@ -1076,22 +1079,22 @@ Table of Contents
   │ Three credentials derived from the same identity:
   │ 
   │   source:
-  │     pk    = (045678..., 936059...)
-  │     E.R   = (603530..., 818320...)
-  │     E.C   = (078670..., 698717...)
-  │     sig_1 = (152134..., 945554...)
+  │     pk    = (326007..., 786566...)
+  │     E.R   = (792730..., 649994...)
+  │     E.C   = (580721..., 584254...)
+  │     sig_1 = (161380..., 604876...)
   │ 
   │   burn:
-  │     pk    = (693130..., 144422...)
-  │     E.R   = (842583..., 400060...)
-  │     E.C   = (913710..., 692247...)
-  │     sig_1 = (263450..., 162673...)
+  │     pk    = (878135..., 654514...)
+  │     E.R   = (600663..., 189626...)
+  │     E.C   = (784195..., 962140...)
+  │     sig_1 = (904311..., 511322...)
   │ 
   │   dest:
-  │     pk    = (513522..., 852366...)
-  │     E.R   = (157700..., 859325...)
-  │     E.C   = (811908..., 569305...)
-  │     sig_1 = (991753..., 171466...)
+  │     pk    = (873641..., 478886...)
+  │     E.R   = (603109..., 761251...)
+  │     E.C   = (319682..., 405639...)
+  │     sig_1 = (035923..., 484172...)
   │ 
   │ All three decrypt to the same M. Credentials are unlinkable
   │ but bound to the same real identity.
@@ -1162,7 +1165,8 @@ Table of Contents
   └────
 
 
-[Identity Examples] <file:alberta-buck-identity-example.org>
+[Identity Examples]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity-example>
 
 
 6.6 Counter-Example: Different Identity at Destination
@@ -1269,12 +1273,12 @@ Table of Contents
 
   ┌────
   │ Schnorr Proof of Knowledge of sk_burn
-  │   pk_burn:   (693130..., 144422...)
-  │   principal: 0xacb7c31ea2325c12f7fec9ab5e421e4d56ed8658
+  │   pk_burn:   (878135..., 654514...)
+  │   principal: 0xa5f7007645532821ffdea478a79573422b53d3a8
   │   caller:    0xAliceEthAddr
-  │   T:         (489906..., 256647...)
-  │   e:         2532075088449786137775601516244332830671033653875447121521112321410801674438
-  │   s:         7276266212076868968583789116704392561372559580667378505056246769432280763343
+  │   T:         (494569..., 014317...)
+  │   e:         7378354483941551721923622734179408956242231081691286662301926390432587951472
+  │   s:         13794766227092048565172125793515271616809646277617619994592912115745814849631
   │ 
   │   Verify: s*G + e*pk == T?  True
   │   Authorization granted: caller may act for principal
@@ -1311,9 +1315,9 @@ Table of Contents
 
   ┌────
   │ Counter-example: Eve uses wrong secret key
-  │   Eve's sk:  1320457858354932519949611257111840676655445473602998118441681703317938815303
-  │   pk_burn:   (693130..., 144422...)  (unchanged)
-  │   T:         (972995..., 976085...)
+  │   Eve's sk:  17764386341301337754239809110836159757202176009119842458572243514261707903844
+  │   pk_burn:   (878135..., 654514...)  (unchanged)
+  │   T:         (869609..., 515265...)
   │   Verify:    False  <-- FAIL
   │ 
   │   s*G + e*pk != T because s encodes sk_eve, not sk_burn.
@@ -1364,7 +1368,7 @@ Table of Contents
 
   ┌────
   │ Guardian Recovery: Bob recovers Alice's account
-  │   Bob's pk:     (767667..., 666721...)
+  │   Bob's pk:     (507879..., 055189...)
   │   Alice's addr: 0xAliceAccount
   │   Schnorr ok:   True
   │ 
