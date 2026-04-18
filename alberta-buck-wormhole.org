@@ -89,6 +89,9 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
   transactions.
 
 * Economic Model: Demurrage-Compatible Privacy
+  :PROPERTIES:
+  :CUSTOM_ID: demurrage-compatibl-privacy
+  :END:
 
   BUCK has economic properties that both complicate and enable a
   wormhole mechanism.
@@ -102,7 +105,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
    balance-changing event.  Demurrage owed at transfer-out is:
 
    \[
-   \text{demurrage} = \text{BUCK-age} \times 0.02
+   \text{demurrage} = \text{BUCK-age} \times 2\%
    \]
 
    For a constant balance \( B \) held for \( T \) years: BUCK-age
@@ -110,7 +113,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
    entire balance is consumed.  The /net available/ at any moment is:
 
    \[
-   \text{net\_available} = B - 0.02 \times \text{BUCK-age}
+   \text{net\_available} = B - 2\% \times \text{BUCK-age}
    \]
 
    The Jubilee account grows as a function of =totalSupply= and the demurrage rate.  It represents
@@ -177,6 +180,9 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
    intentional and auditable.
 
 * Protocol Design
+  :PROPERTIES:
+  :CUSTOM_ID: protocol-design
+  :END:
 
 ** Fixed-Denomination Wormholes
 
@@ -208,7 +214,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
     holds:
 
     \[
-    \text{amount} - 0.02 \times \text{buckAge}_{\text{dest}} \leq \text{amount} - 0.02 \times \text{buckAge}_{\text{burn}}
+    \text{amount} - 2\% \times \text{buckAge}_{\text{dest}} \leq \text{amount} - 2\% \times \text{buckAge}_{\text{burn}}
     \]
 
     That is, the destination's net-available must not exceed the burn
@@ -333,8 +339,8 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
       =burn_balance= with =burn_age=)
     - *Denomination*: =burn_balance= is a valid denomination (the burn
       address received exactly one fixed-denomination transfer)
-    - *Conservation*: =amount - 0.02 * dest_buckAge <=
-      burn_balance - 0.02 * burn_age= (destination net does not exceed
+    - *Conservation*: =amount - 2% * dest_buckAge <=
+      burn_balance - 2% * burn_age= (destination net does not exceed
       burn net)
     - Chaum-Pedersen equations (same identity on both sides)
     - PS pairing check (both credentials are issuer-signed)
@@ -386,7 +392,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
 
     The =buckAge= parameter is the freely chosen BUCK-age for the
     destination account.  The SNARK proves that the net-available
-    (=amount - 0.02 * buckAge=) does not exceed the source's
+    (=amount - 2% * buckAge=) does not exceed the source's
     net-available, and that the amount is a valid denomination.  The
     BUCK-age is /not/ required to be a denomination -- it is a continuous
     value that absorbs the remainder when decomposing an arbitrary source
@@ -397,6 +403,147 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
     as the source.  But the verifier (the EVM) sees only: "a valid proof
     exists, the nullifier is fresh, and the destination has a registered
     identity."
+
+* Global Commitment Pool: One Burn, Many Spends
+  :PROPERTIES:
+  :CUSTOM_ID: global-committment-pool
+  :END:
+
+  The fixed-denomination scheme above uses one burn address per
+  certificate.  This is privacy-clean (no on-chain link between
+  certificates) but operationally heavy: an Albertan splitting 5,000
+  BUCK into five 1,000-BUCK certificates pays for five identity
+  registrations, five =approveFor= handshakes, and five fixed-amount
+  transfers /at burn time/.
+
+  An alternative architecture, lifted from Zcash[fn:3] and
+  Aztec[fn:4], collapses this to a single burn transaction at the cost
+  of a global commitment tree maintained by the BUCK contract.  We
+  describe it here as a forward-looking design choice; the
+  per-burn-address scheme remains the v1 baseline because it
+  requires no new on-chain data structures.
+
+** From Burn-Addresses to Notes
+
+   In the v1 baseline:
+   - Each burn is a transfer to a distinct =addr_burn_i= holding a
+     fixed denomination
+   - Each spend is a SNARK against that address's =(balance, age)= leaf
+     in the EVM state trie
+   - The state-trie leaf is the cryptographic anchor
+
+   In the note-pool design:
+   - A single burn appends N /note commitments/ to a contract-managed
+     Merkle tree:
+     \[
+     cm_i = H(v_i,\; age_{0,i},\; t_{burn,i},\; \rho_i,\; \text{predicate}_i)
+     \]
+     where \( \rho_i \) is per-note randomness drawn at burn time
+   - The burn transaction transfers \( \sum v_i \) into the contract's
+     reserve and emits \( \{cm_i\} \) into the global tree
+   - Each spend is a SNARK proving inclusion of /some/ \( cm_i \) in
+     the tree, knowledge of its opening, and emission of a nullifier
+     \( nf_i = \text{PRF}(secret \| \rho_i) \) into a global nullifier
+     set
+   - The nullifier prevents double-spend; the commitment provides
+     amount confidentiality
+
+   The structural shift is from "one anchor per certificate" (state
+   trie leaf at =addr_burn=) to "one anchor per note" (Merkle leaf in
+   the contract's tree).  A single burn produces N anchors at once, so
+   one transaction replaces N.
+
+** Demurrage in the Note Model
+
+   Each note carries the demurrage state at its moment of birth:
+   - \( age_{0,i} \): BUCK-age the burner chose to bake into note i
+     (typically 0 for "fresh", or a positive value to absorb a
+     fractional remainder, exactly as in the v1 free-choice mechanism)
+   - \( t_{burn,i} \): block timestamp of the burn
+
+   At spend time \( t_{spend} \), the SNARK constrains the destination
+   to absorb the accumulated demurrage:
+   \[
+   v_{dest} - 2\% \times age_{dest} \;\leq\; v_i - 2\% \times \bigl(age_{0,i} + v_i \cdot (t_{spend} - t_{burn,i})\bigr).
+   \]
+
+   The note ages /while held in the pool/ at the same rate that
+   on-chain balances do.  A note minted today and spent in 25 years has
+   half its value absorbed by demurrage, exactly as a wallet balance
+   would.  The arithmetic is identical to v1; only the source of
+   \( (v, age) \) shifts from "state-trie leaf" to "private witness
+   bound by a Merkle inclusion proof."
+
+** Anonymity Set
+
+   *v1 (per-burn-address)*: anonymity set is "all unspent
+   fixed-denomination burns of this size that have not yet been
+   redeemed."  Each redemption shrinks the set by one.
+
+   *Note pool*: anonymity set is "all unspent notes of any size in the
+   global tree."  A small burn redeems against the same anonymity set
+   as a large burn.  Anonymity strictly improves with adoption;
+   v1 anonymity is bounded by the fixed-denomination
+   pool size.
+
+** Programmable Spend Predicates
+
+   Because the SNARK already evaluates a predicate against private
+   witness data, the predicate itself can be a note-bound parameter:
+
+   #+LATEX: {\scriptsize
+   | Predicate                                            | Note becomes                |
+   |------------------------------------------------------+-----------------------------|
+   | =know(secret)=                                       | Bearer note (anyone spends) |
+   | =know(secret) AND own(pk*)=                          | Targeted note (only =pk*=)  |
+   | =know(secret) AND own(pk*) AND t > t_unlock=         | Time-locked targeted note   |
+   | =know(secret) AND multisig(pk_1, ..., pk_k)=         | Notarized escrow note       |
+   | =know(secret) AND oracle(condition)=                 | Conditional payout note     |
+   | =know(secret) OR (own(pk_issuer) AND t > expiry)=    | Recoverable expiring note   |
+   #+LATEX: }
+
+   The contract sees only "a valid SNARK over commitment in the tree,
+   here is the nullifier, mint to recipient."  It need not distinguish
+   note types.
+
+   This is the substrate for /BUCK Cash/ -- printable bearer notes
+   carrying QR-encoded openings of pool commitments, redeemable by any
+   holder (or any /particular/ holder, depending on the predicate).
+   See [[file:alberta-buck-cash.org][The Alberta Buck -- Cash]] for the full design.
+
+** Trade-offs vs. v1 Baseline
+
+   #+LATEX: {\scriptsize
+   | Property                          | v1 (per-burn-address)        | Note pool                     |
+   |-----------------------------------+------------------------------+-------------------------------|
+   | Burn-time gas                     | O(N) registrations + xfers   | O(1) burn + N tree appends    |
+   | Spend-time SNARK size             | Merkle proof against state   | Merkle proof against note tree|
+   | Anonymity set                     | Per-denomination cohort      | Global pool                   |
+   | New on-chain data structure       | None (uses state trie)       | Note tree + nullifier set     |
+   | Programmable predicates           | Limited                      | Native                        |
+   | Compatibility with Identity       | Direct (existing flow)       | Predicate composes with CP    |
+   | Compatibility with Identity Guardians | Direct                   | Predicate composes with Schnorr|
+   | Bearer-instrument support         | No                           | Yes (Mode A predicate)        |
+   #+LATEX: }
+
+   The dominant reason to adopt the note pool is /not/ gas savings on
+   typical wormhole transfers -- it is enabling the predicate-driven
+   note family that includes BUCK Cash, time-locked gifts, escrow
+   instruments, and conditional payouts.  The wormhole becomes one
+   spend predicate among many, rather than the only privacy primitive.
+
+** Migration Path
+
+   The two architectures coexist cleanly:
+   1. v1 wormhole continues to operate against the EVM state trie
+   2. The contract gains a note tree and nullifier set in a v2 upgrade
+   3. New predicate-based products (BUCK Cash, gifts, escrow) use the
+      note pool from inception
+   4. v1 wormhole certificates can be migrated voluntarily by burning
+      to the note pool (a one-time tree append per legacy certificate)
+
+   No action is required from existing v1 users.  The v1 burn-address
+   pool remains an addressable anonymity set even after v2 rolls out.
 
 * Identity-Authorized Operations
 
@@ -1329,7 +1476,7 @@ transaction graph privacy.  ([[https://perry.kundert.ca/images/alberta-buck-worm
    BUCK-age 0, hoping to reset her demurrage clock.
 
    *Defense:* The SNARK enforces the conservation constraint:
-   \( \sum(\text{amount}_i - 0.02 \times \text{buckAge}_i) \leq \text{net\_available}_{\text{source}} \).
+   \( \sum(\text{amount}_i - 2\% \times \text{buckAge}_i) \leq \text{net\_available}_{\text{source}} \).
    Alice can set destination BUCK-age to 0, but the denomination must
    be correspondingly smaller (or she must accept more certificates
    with higher BUCK-ages) to satisfy conservation.  She cannot create
