@@ -401,7 +401,7 @@ Table of Contents
   • *id-payload*: Identity-binding data (see "Note Flavors" section)
   • *predicate*: optional additional spend predicate (time locks, oracle
     conditions, multi-sig; not elaborated in detail here – a single bit
-    `predicate =' None= keeps the SNARK to the three base flavors.  See
+    `predicate == None' keeps the SNARK to the three base flavors.  See
     "Open Questions" for bounded-programmability notes.)
 
   No per-note timestamp or baked-in BUCK-age: demurrage is computed at
@@ -466,13 +466,13 @@ Table of Contents
   Full face value is delivered: the recipient's nominal balance goes up
   by exactly \( v \).  The pool's demurrage cost rides along as the
   BUCK-age \( v \cdot A/B \) added to the recipient's account.  The
-  recipient will bear that demurrage on their /next/ outgoing transfer
-  through the ordinary BUCK accounting path – the same path any holder
-  travels, but on an age they acquired by accepting the note.  No
-  Jubilee payment is emitted from inside the deposit; the Jubilee grows
-  autonomously at \( \kappa \cdot \text{totalSupply} \), which continues
-  to include both \( B \) (before redemption) and \( v \) (after, as
-  part of recipient's balance).
+  recipient will bear that demurrage on their subsequent outgoing
+  transfers through the ordinary BUCK accounting path – the same path
+  any holder travels, but on an age they acquired by accepting the note.
+  No Jubilee payment is emitted from inside the deposit; the Jubilee
+  grows autonomously at \( \kappa \cdot \text{totalSupply} \), which
+  continues to include both \( B \) (before redemption) and \( v \)
+  (after, as part of recipient's balance).
 
 
 3 A Note is a Deferred Approve Handshake
@@ -499,7 +499,8 @@ Table of Contents
   3. `transfer(bob, v)' consummates the transfer once both halves are
      recorded.
 
-  All three steps land in the same block.  Each party learns the other's
+  All three steps may land in the same block, as long as they're
+  available by `transfer(bob, v)'-time.  Each party learns the other's
   \( M \); every on-chain observer sees both addresses, the amount, and
   the timing.  The transfer edge `(alice, bob, v, t)' is public and
   permanent.
@@ -537,7 +538,8 @@ Table of Contents
   other that `approve' would have produced.  The only difference from
   the observer's perspective is that mint and deposit are two
   independent transactions, and the commitment pool hides which mint
-  corresponds to which deposit.
+  corresponds to which deposit; the demurrage liability transferred with
+  \( v \) is the Note pool average at that instant[11].
 
 
 3.3 Mutual Decryptability: The BUCK Identity Invariant
@@ -966,11 +968,10 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Observations:
 
-  1. *Wormhole functionality* – the private same-identity round-trip
-     that the prior design called "Type 1" – is the degenerate subcase
-     of A2 where issuer and depositor share the same `M'.  It uses the
-     same mint construction, the same spend circuit, and the same pool;
-     no separate instrument is required.
+  1. *Wormhole functionality* – the private same-identity round-trip is
+     the degenerate subcase of A2 where issuer and depositor share the
+     same `M'.  It uses the same mint construction, the same spend
+     circuit, and the same pool; no separate instrument is required.
 
   2. *Cashier's cheques are B1* and are the only flavor where the
      recipient identity is /not/ determined at mint time.  All other
