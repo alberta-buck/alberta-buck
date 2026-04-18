@@ -1,4 +1,4 @@
-#+title: Alberta Buck - Identity and Receipts (v1.0)
+#+title: The Alberta Buck - Identity and Receipts (v1.0)
 #+author: Perry Kundert
 #+date: 2026-04-08
 #+category: Alberta Buck

@@ -9,7 +9,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: Formal correctness proofs for the two cryptographic transformations at the heart of Alberta Buck's identity system: Pointcheval-Sanders signature rerandomization (completeness and statistical unlinkability) and Chaum-Pedersen re-encryption (completeness, special soundness, honest-verifier zero-knowledge, and NIZK via Fiat-Shamir in the random oracle model).  Each theorem is accompanied by a compact py_ecc sanity check on BN254.  The end-to-end correctness corollary chains the two results together: an accepted Chaum-Pedersen proof against a registry-stored ElGamal ciphertext implies the re-encrypted ciphertext encrypts the same issuer-certified identity -- the guarantee on which every downstream protocol (approve, transfer, wormhole SNARK, guardian authorization) depends.
+#+description: Formal correctness proofs for the two cryptographic transformations at the heart of Alberta Buck's identity system: Pointcheval-Sanders signature rerandomization (completeness and statistical unlinkability) and Chaum-Pedersen re-encryption (completeness, special soundness, honest-verifier zero-knowledge, and NIZK via Fiat-Shamir in the random oracle model).  Each theorem is accompanied by a compact py_ecc sanity check on BN254.  The end-to-end correctness corollary chains the two results together: an accepted Chaum-Pedersen proof against a registry-stored ElGamal ciphertext implies the re-encrypted ciphertext encrypts the same issuer-certified identity -- the guarantee on which every downstream protocol (approve, transfer, BUCK Notes spend circuits, guardian authorization) depends.
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 #+LATEX_HEADER: \usepackage{draftwatermark}
@@ -36,7 +36,7 @@ a Pointcheval-Sanders signature to produce an unlinkable credential,
 and the =approve= handshake re-encrypts the credential's ElGamal
 ciphertext under the counterparty's public key with a Chaum-Pedersen
 proof of equality.  Everything downstream -- bilateral transfers, the
-wormhole SNARK ([[http://perry.kundert.ca/range/finance/alberta-buck-wormhole][Wormhole]]), Identity Guardian authorizations,
+BUCK Notes spend circuits ([[http://perry.kundert.ca/range/finance/alberta-buck-notes][Notes]]), Identity Guardian authorizations,
 regulatory recovery -- inherits its correctness from these two
 primitives.
 
@@ -686,13 +686,13 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      delivery and the check \( H(\text{identity\_data}) \cdot G = M \),
      he learns Alice's real identity with cryptographic assurance.
 
-   - *Wormhole SNARK (Wormhole):*  The source-to-destination binding
-     is the same Chaum-Pedersen statement, lifted inside a SNARK.
-     Theorem 4's soundness lifts directly: a SNARK-verified instance
-     of the Chaum-Pedersen relation implies the same extractable
-     witness relation, so the burn and mint credentials share
-     \( M \).  Identity laundering through the wormhole is therefore
-     infeasible.
+   - *Type 1 Notes spend circuit (Notes):*  The issuer-to-depositor
+     binding is the same Chaum-Pedersen statement, lifted inside a
+     SNARK.  Theorem 4's soundness lifts directly: a SNARK-verified
+     instance of the Chaum-Pedersen relation implies the same
+     extractable witness relation, so the mint-time issuer credential
+     and the spend-time depositor credential share \( M \).  Identity
+     laundering through the note pool is therefore infeasible.
 
    - *Identity Guardians (=approveFor=, recovery, cosigning):*  The
      Schnorr proof of knowledge of \( sk \) is a one-statement
@@ -702,14 +702,15 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      dropped.
 
 #+LATEX: \clearpage
-* Part IV: Targeted-Note Spend Predicate (BUCK Cash, Mode B)
+* Part IV: Targeted-Note Spend Predicate (Stealth-Address)
 
-  Mode B of the BUCK Cash design (=alberta-buck-cash.org=, "Three Modes")
-  prints a note that only a /pre-designated recipient/ can spend, while
-  preserving Alice's ability to publish the note in plain sight (paper,
-  email, message body) without leaking who the recipient is to anyone
-  but the recipient himself.  The construction is the CryptoNote stealth
-  address[fn:cryptonote] adapted to BN254: Alice picks an ephemeral
+  The Type 3 ("stealth-targeted") note of the BUCK Notes design
+  ([[file:alberta-buck-notes.org][Notes]], "Three Identity Bindings") prints a note that only a
+  /pre-designated recipient/ can spend, while preserving the printer's
+  ability to publish the note in plain sight (paper, email, message
+  body) without leaking who the recipient is to anyone but the
+  recipient himself.  The construction is the CryptoNote stealth
+  address[fn:cryptonote] adapted to BN254: the printer picks an ephemeral
   scalar \( r \) and publishes \( R = r \cdot G \) alongside the note
   commitment; the stealth public key
 
@@ -881,7 +882,7 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
    #+BEGIN_SRC python :session proofs :results output
      # Reuse ORDER, G1, multiply, add, neg, eq, rand from the Theorem 1 setup.
      # Hash a curve point to a non-zero scalar (random-oracle stand-in).
-     def H_scalar(P, tag=b"buck-cash|stealth|v1"):
+     def H_scalar(P, tag=b"buck-notes|stealth|v1"):
          data = tag + b"|" + str(P).encode()
          h    = int(hashlib.sha256(data).hexdigest(), 16) % ORDER
          return h if h != 0 else 1
@@ -1014,7 +1015,7 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
   | Theorem 5 (CP HVZK)              | CP         | uniform \( k_1, k_2 \)                 | *no* (perfect simulation)    |
   | NIZK corollary                   | CP + FS    | ROM                                    | ROM                          |
   | Theorem 6 (end-to-end)           | PS + CP    | q-SDH (PS unforgeability), DLog, ROM   | yes                          |
-  | Theorem 7 (Mode B targeted spend) | Schnorr+ECDH | DLog on \( G_1 \), ROM               | DLog, ROM                    |
+  | Theorem 7 (stealth-targeted spend) | Schnorr+ECDH | DLog on \( G_1 \), ROM              | DLog, ROM                    |
   #+LATEX: }
 
   Every assumption on the "yes" rows is already load-bearing for
@@ -1073,13 +1074,25 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      separate write-up at the same level of detail is the natural
      next step.
 
-   - /Circuit soundness/ of the wormhole SNARK: the cryptographic
-     statement inside the SNARK is the same Chaum-Pedersen relation,
-     so Theorem 4 applies to the /statement/ being proved.  Soundness
-     of the /proof system/ (Groth16 / PLONK / STARK) is assumed
-     separately and depends on the chosen proof system's trusted
-     setup (if any) and circuit correctness; this is orthogonal to
-     the contents of this document.
+   - /Circuit soundness/ of the BUCK Notes spend circuits: the
+     cryptographic statements inside the SNARK are (i) the same
+     Chaum-Pedersen relation (Type 1; Theorem 6 applies to the
+     /statement/ being proved), (ii) a Schnorr PoK over a registered
+     \( pk \) plus a PS-signature-in-circuit check (Type 2), and
+     (iii) the stealth-address Schnorr PoK of Theorem 7 (Type 3).
+     Soundness of the /proof system/ (Groth16 / PLONK / STARK) is
+     assumed separately and depends on the chosen proof system's
+     trusted setup (if any) and circuit correctness; this is
+     orthogonal to the contents of this document.
+
+   - /Collision-resistance and hiding/ of the Poseidon commitment
+     hash \( H_{\text{cm}} \) and pseudorandomness of the Poseidon
+     nullifier PRF.  Poseidon is modelled as a random oracle in the
+     SNARK circuit for the double-spend and commitment-binding
+     arguments; its concrete security on BN254 has been independently
+     studied and is assumed here.  See the Poseidon-hash
+     cryptanalysis literature for current best attacks and parameter
+     choices.
 
 * Footnotes
 
