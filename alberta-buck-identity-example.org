@@ -1,4 +1,4 @@
-#+TITLE: Alberta Buck - Identity - Cryptography Example (v1.0)
+#+TITLE: The Alberta Buck - Identity - Cryptography Example (v1.0)
 #+author: Perry Kundert
 #+date: 2026-04-10
 #+category: Alberta Buck
