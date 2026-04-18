@@ -67,24 +67,24 @@ private-bearer cell is ruled out by BUCK's mutual-decryptability invariant):
   whose recipient is named but not visible to third parties -- payroll,
   audit-friendly disbursement, B2C payment.
 - *B1 -- Bearer Cheque, Public Issuer.*  Plaintext issuer =M=; no
-  recipient binding; first registered holder to publish the nullifier =\rho=
+  recipient binding; first registered holder to publish the nullifier \( \rho \)=
   redeems.  A cashier's cheque: maker known, bearer not, cash-on-presentation.
 
 Demurrage needs no new machinery.  The Note Pool /is/ simply the BUCK
 ERC-20 contract's own balance -- a regular BUCK account accumulating
-BUCK-age like any other account.  Mint: the user transfers \( v \) BUCK to
+BUCK-age like any other account.  Mint: the user transfers \( v \) BUCKs to
 the contract (a standard ERC-20 transfer; sender pays their own outgoing
-demurrage), incrementing both the contract's balance \( B \) and a scalar
+demurrage fee), incrementing both the contract's balance \( B \) and a scalar
 \( F \) (sum of face values of live notes).  Redemption is an
 /age-preserving transfer/ unique to the Notes contract's single egress
-path: the recipient's nominal balance rises by the full face value
+path: the recipient's nominal balance rises by the /full/ face value
 \( v \), and their BUCK-age rises by \( v \cdot A/B \), where \( A \) and
 \( B \) are the pool account's accumulated BUCK-age and balance in the
-existing ERC-20 ledger.  That is: the pool's age-per-BUCK follows the
+existing ERC-20 ledger.  That is: the pool's /current/ age-per-BUCK follows the
 redeemed value to the recipient, who then bears the pool's share of
-demurrage on their /next/ outgoing transfer via the standard BUCK
+demurrage on their subsequent outgoing transfers via the standard BUCK
 accounting.  This is exactly the cost a user would have paid had they
-held \( v \) BUCK personally through the pool's residence period.
+held \( v \) BUCKs personally through the pool's current average residence period.
 Donations to the contract dilute \( A/B \) (donations add balance with
 no age), directly lowering the age-share absorbed by all subsequent
 redemptions.  Conservation is automatic: balance and age are each exactly
@@ -109,7 +109,7 @@ The consequence most relevant to users: the /addressed/ flavors (A1, A2)
 are cryptographically safe for long-term holding, because the spend
 predicate binds the recipient's Identity =M= and no mint-time knowledge
 enables a non-recipient to spend.  The /bearer/ flavor (B1) is a
-civil-trust instrument: the issuer necessarily knows =\rho= and could race
+civil-trust instrument: the issuer necessarily knows \( \rho \) and could race
 the holder to deposit, so B1 cheques are meant to be cashed promptly and
 trusted only to the extent the issuer's legal standing and operational
 discipline warrant.  This is an intrinsic cryptographic property, not a
@@ -255,8 +255,8 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
    -- the total face-value liability outstanding -- and does not appear
    in the redemption formula itself.
 
-   BUCK transferred to the contract address (via mint, donation, or
-   accident) joins \( B \) through the normal ERC-20 path.  BUCK
+   BUCKs transferred to the contract address (via mint, donation, or
+   accident) joins \( B \) through the normal ERC-20 path.  BUCKs
    transferred out of the contract on redemption uses a /single new
    primitive/: an age-preserving transfer that moves both balance and
    proportional BUCK-age from the contract to the recipient.  This is
@@ -282,10 +282,10 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
      single bit =predicate == None= keeps the SNARK to the three base
      flavors.  See "Open Questions" for bounded-programmability notes.)
 
-   No per-note timestamp or baked-in BUCK-age: demurrage is computed at
-   redemption time from the /pool's/ account state
-   \( (B, A) \), not from the individual note's life history, so no
-   per-note age fields need to ride in the commitment.
+   No per-note timestamp or baked-in BUCK-age: demurrage is computed at redemption time from the
+   /pool's/ account state \( (B, A) \), not from the individual note's life history, so no per-note
+   age fields need to ride in the
+   commitment[fn:astute].
 
    The commitment is inserted as a leaf of =noteTree= at mint time.
 
@@ -315,7 +315,7 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
      # Caller pays their own outgoing-transfer demurrage through the
      # normal BUCK accounting path.  Contract balance B gains v; its
      # accumulated BUCK-age A starts earning on the new v from here.
-     transfer v BUCK from caller to contract
+     transfer v BUCKs from caller to contract
      for each of {cm_1, ..., cm_N}:
         append cm_i to noteTree
      noteFaceSum += sum(v_i)
@@ -388,7 +388,7 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
       (=E_alice_for_depositor=, identity-bound flavor) or publishes
       her credential in the clear with a bearer secret \( \rho \)
       (public-issuer bearer flavor).  The commitment is appended to
-      =noteTree=; Alice's outgoing BUCK lands in the pool's balance
+      =noteTree=; Alice's outgoing BUCKs lands in the pool's balance
       \( B \).
 
    2. *Deposit.*  The eventual depositor submits a SNARK-proved spend
@@ -432,12 +432,12 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
 
 ** What the On-Chain Observer Sees
 
-   At mint: a transfer of \( v \) BUCK from Alice's address to the
+   At mint: a transfer of \( v \) BUCKs from Alice's address to the
    contract address, plus an =Appended(cm)= event.  The commitment
    \( cm \) is a Poseidon hash; observers learn nothing about the
    opening, the depositor, the issuer flavor, or \( \rho \).
 
-   At deposit: an age-preserving transfer of \( v \) BUCK from the
+   At deposit: an age-preserving transfer of \( v \) BUCKs from the
    contract address to the depositor's address, plus a
    =Deposited(nf, E_depositor_for_issuer)= event.  Observers learn
    who the depositor is (standard transfer visibility), but not which
@@ -476,8 +476,9 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
   (flavor, v, rho, id_payload, predicate, merkle_path)
   #+end_example
 
-  that opens to a commitment \( cm = H_{\text{cm}}(\text{flavor}, v, \rho,
-  \text{id-payload}, \text{predicate}) \) in the on-chain note tree.
+  that opens to a commitment
+  \( cm = H_{\text{cm}}(\text{flavor}, v, \rho, \text{id-payload}, \text{predicate}) \)
+  in the on-chain note tree.
   The tuple can live on any medium capable of storing ~200-500 bytes and
   being read back faithfully.  Three surfaces are supported:
 
@@ -813,7 +814,7 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
   | B1 (bearer cheque)  | *Bearer-to-private*                         | *Bearer-to-public*                           |
   |                     | Public issuer prints an unaddressed         | Same, but depositor is public.  Observers    |
   |                     | cheque; first registered spender to         | see a public identity cashed a B1 draft from |
-  |                     | publish =\rho= wins.  Civil-trust           | issuer =M=.  Use: redeeming a bearer         |
+  |                     | publish \( \rho \) wins.  Civil-trust       | issuer =M=.  Use: redeeming a bearer         |
   |                     | instrument: theft is not cryptographically  | instrument received out-of-band into a       |
   |                     | prevented, only bilaterally traceable.      | publicly attributable account.               |
   |                     | Use: cashier's cheques, physical coupons,   |                                              |
@@ -832,7 +833,7 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
      recipient identity is /not/ determined at mint time.  All other
      flavors bind a specific recipient via the re-randomized =E_note=
      payload.  This is also the only flavor exposed to issuer
-     race-condition risk -- whoever publishes the nullifier =\rho=
+     race-condition risk -- whoever publishes the nullifier \( \rho \)
      first takes the value.
 
   3. *Public-to-public A1 cells* are degenerate in information
@@ -869,8 +870,8 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
 ** The Pool is a Regular Account
 
    The BUCK contract's own address is a registered account in the
-   ordinary sense.  BUCK flowing in (mints, donations) is a standard
-   incoming transfer; BUCK flowing out (redemptions) is a standard
+   ordinary sense.  BUCKs flowing in (mints, donations) is a standard
+   incoming transfer; BUCKs flowing out (redemptions) is a standard
    age-preserving outgoing transfer.  The only contract-local state
    not already tracked by the ERC-20 ledger is =noteTree= (the
    commitment Merkle tree), =nullifiers= (the spent-note set), and
@@ -1513,7 +1514,7 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
    on-chain edge.  For truly paper bearer cash -- a note that anyone
    who holds the paper can spend -- a B1 cheque with hologram seal
    fills the role, issued by a trusted public party (credit union,
-   commercial issuer) who publicly warrants erasure of =\rho= after
+   commercial issuer) who publicly warrants erasure of \( \rho \) after
    printing.
 
    Most walking-around use cases -- paying for a coffee, tipping, splitting a bill with a friend --
@@ -2361,7 +2362,7 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
   physical cash is attractive.  Three properties make it a poor fit for
   the cryptographic surface:
 
-  1. /Issuer-race is unbounded./  A pure-bearer predicate =know(rho)=
+  1. /Issuer-race is unbounded./  A pure-bearer predicate \( \text{know} \rho \)
      has no cryptographic mechanism preventing a malicious issuer from
      retaining \( \rho \) and racing the holder to deposit.  The
      physical seal on paper makes the /observation/ of \( \rho \)
@@ -2692,7 +2693,7 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
   cryptographically safe (CP-equality binds the note to the
   recipient's =M=; Identity re-issuance recovers from key loss).
   /B1/ is a civil-trust instrument: the issuer necessarily knows
-  =\rho=, so B1 cheques are meant to be cashed promptly and backed by
+  \( \rho \), so B1 cheques are meant to be cashed promptly and backed by
   the issuer's legal standing rather than by cryptography alone.
   This is an intrinsic property of the bearer predicate, not a policy
   choice.
@@ -2701,7 +2702,7 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
   pure-bearer note with no Identity hook.  That use case remains the
   domain of physical trust models: tamper-evident seals over B1 paper
   notes, issued by a trusted printer with a public warranty that
-  =\rho= was erased after printing.  This keeps the
+  \( \rho \) was erased after printing.  This keeps the
   cryptographic/physical boundary explicit rather than contorting the
   cryptographic layer to approximate a property that inherently
   requires physical primitives.
@@ -2853,3 +2854,9 @@ re-randomized ElGamal) on which the A-spend predicate rests.
 [fn:identity-doc] See [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][("The Alberta
 Buck - Identity")]] for the PS signature, ElGamal credential, and
 Chaum-Pedersen re-encryption primitives used throughout.
+
+[fn:astute] The astute reader will recognize that this essentially /freezes/ demurrage for BUCK Note
+amounts while they are in transit; this has beneficial effects for the transmission of large
+long-term BUCK balances, such as inheritances.  The cost of this benefit is effectively amortized
+across all BUCK Note users; the value of Anonymity for short-term Note users subsidies long-term
+Note holders, who bear some additional risk that their Notes may be lost]
