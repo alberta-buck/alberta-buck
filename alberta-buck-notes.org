@@ -1,0 +1,1513 @@
+#+TITLE: The Alberta Buck - Notes (DRAFT v0.1)
+#+SUBTITLE: A Unified Commitment-Pool Architecture for Wormhole, Cash, and Cheques
+#+author: Perry Kundert
+#+date: 2026-04-18
+#+category: Alberta Buck
+#+series[]: Alberta-Buck
+#+series_order: 18
+#+weight: 19
+#+draft: false
+#+bucky: true
+#+math: true
+#+description: The Wormhole and BUCK Cash designs each rely on a commitment-and-nullifier note pool, yet propose two parallel architectures: burn-addresses plus phantom balances on one side, Mode A/B/C bearer/targeted/programmable notes on the other.  This document collapses them to a single primitive: one Merkle tree of note commitments, one nullifier set, one SNARK circuit family parameterised by three Identity bindings (Encrypted Issuer, Public Issuer, Stealth-Targeted to Recipient).  Demurrage becomes a pool-level obligation instead of a per-note or per-account charge: because typical note turnover is high, the pool's average BUCK-age stays small, and deposits pay a correspondingly small demurrage at redemption rather than an accumulated per-note age cost.  Pool-level conservation is preserved (Little's Law), and the system retains the property that unspent value ultimately flows to Jubilee.  The matrix of {Encrypted, Public, Stealth-Targeted} note bindings against {Anonymous-valid, Public} account modes produces six distinct cells corresponding directly to the full span of existing use cases (wormhole, cheques, targeted cheques, attribution payments) without any special-case machinery.  The key design consequence: only self-issued notes and stealth-targeted notes are genuinely safe for long-term holding, because only in those two cases does no third-party printer retain the private key required to spend.
+#+EXPORT_FILE_NAME: ./images/alberta-buck-notes
+#+STARTUP: org-startup-with-inline-images inlineimages
+#+STARTUP: org-latex-tables-centered nil
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+#+OPTIONS: toc:nil
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+#+LATEX_HEADER: \usepackage{draftwatermark}
+#+LATEX_HEADER: \usepackage{amsmath,amsthm,amssymb}
+#+LATEX_HEADER: \newtheorem{theorem}{Theorem}
+#+LATEX_HEADER: \newtheorem{lemma}[theorem]{Lemma}
+#+LATEX_HEADER: \newtheorem{proposition}[theorem]{Proposition}
+
+#+ATTR_LATEX: :width 10cm
+[[https://perry.kundert.ca/images/dominion-logo.png]]
+
+#+BEGIN_ABSTRACT
+The Alberta Buck /Wormhole/ ([[https://perry.kundert.ca/range/finance/alberta-buck-wormhole][Wormhole]]) and /Cash/
+([[https://perry.kundert.ca/range/finance/alberta-buck-cash][Cash]]) designs both need
+a privacy-preserving bridge from an on-chain balance to a later on-chain mint.  In
+the current series both designs supply their own mechanics: the Wormhole uses
+per-certificate burn addresses and =_mint_noincrease=; Cash uses a Zerocash-style
+commitment tree with Mode A/B/C spend predicates (bearer, stealth-targeted,
+programmable).  The overlap is nearly complete -- both reduce to "burn into a
+pool, mint out by SNARK" -- and maintaining two architectures doubles the
+verifier surface, the circuit count, and the audit scope without buying
+additional functionality.
+
+This document collapses the two into one primitive.  A single Merkle tree of
+note commitments and a single nullifier set replace both the burn-address
+family and the Cash note pool.  Three /Identity bindings/ parameterise the
+commitment:
+
+- *Type 1 -- Encrypted Issuer Identity.*  Spend predicate requires the depositor's
+  registered ElGamal credential to encrypt the same identity point the issuer's
+  credential encrypts.  Subsumes the v1 Wormhole: the issuer and the eventual
+  depositor must share an Identity scalar, but may use unlinkable key pairs.
+- *Type 2 -- Public Issuer Identity.*  Spend predicate requires the depositor
+  to be any registered identity; the issuer's public identity is bound to the
+  note in plaintext.  A cheque whose maker is known, whose bearer is not.
+- *Type 3 -- Stealth-Targeted to Recipient.*  Spend predicate requires the
+  depositor to hold the secret of a stealth public key derived from the
+  recipient's registered identity.  A cheque made out to a specific recipient,
+  retrievable only by them.
+
+Demurrage becomes a /pool-level/ obligation rather than a per-note accounting
+burden.  The contract maintains two aggregates -- pool BUCK-value \( V(t) \) and
+pool integrated BUCK-age \( A(t) \) -- and pays continuous demurrage to the
+Jubilee account at the same 2%/year rate applied to on-chain balances.
+Individual deposits pay demurrage based on the pool's /current/ average age
+\( \bar{a}(t) \), not on the note's own age: a note held for twenty years in a
+fast-turnover pool pays only the current pool-rate.  Conservation holds at the
+pool level via Little's Law \( V = \delta \bar{a} \); the economic burden of
+demurrage shifts from holders (who pay at deposit) to issuers (whose pledged
+collateral continuously services the obligation).
+
+The consequence most relevant to users: only notes where the issuer cannot
+later race the holder to spend are safe for long-term holding.  This is
+*Type 1* (issuer = depositor, same Identity, no third party knows the note
+secret) and *Type 3* (the issuer's knowledge of the note secret does not
+suffice to spend -- only the stealth-derived secret can).  Type 2's public-issuer
+attribution comes at the cost of retained issuer-spend capability, restricting
+it to short-lived use cases (cheques presented within hours or days, not
+stored for years).  This is an intrinsic cryptographic property, not a policy
+choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
+[[https://perry.kundert.ca/images/alberta-buck-notes.txt][Text]])
+#+END_ABSTRACT
+
+#+LATEX: \clearpage
+#+TOC: headlines 3
+
+#+LATEX: \clearpage
+* The Redundancy Between Wormhole and Cash
+
+  The v1 Wormhole ([[https://perry.kundert.ca/range/finance/alberta-buck-wormhole][Wormhole]]) and
+  the BUCK Cash proposal ([[https://perry.kundert.ca/range/finance/alberta-buck-cash][Cash]])
+  both solve the same core problem by different mechanical routes.
+
+** The Problem Both Solve
+
+   Each requires a cryptographic pipeline that:
+   1. Accepts a burn of an existing on-chain balance
+   2. Creates a durable, privacy-preserving token (certificate or note)
+      referencing the burn
+   3. Permits a later on-chain mint that can be proved (in zero
+      knowledge) to correspond to some prior burn
+   4. Prevents double-spending via a global nullifier
+   5. Preserves BUCK's demurrage economics (the minted amount must
+      reflect accumulated demurrage across the burn-to-mint interval)
+   6. Composes with the existing Identity system (so that the mint
+      lands in a properly registered, KYC-verified account)
+
+** The Two Current Mechanisms
+
+   *Wormhole v1 (burn-address model).*  Each certificate is anchored
+   by a distinct EVM address that receives a fixed-denomination
+   transfer.  The burn is an ordinary =transfer= call; the ZK proof
+   binds the destination mint to the source burn through the
+   =_mint_noincrease= primitive that transfers balance and BUCK-age
+   into the destination without adjusting =totalSupply=.  Each burn
+   address costs an identity registration, an =approveFor=
+   handshake, and a state-trie slot.
+
+   *BUCK Cash (note-pool model).*  A contract-managed Merkle tree of
+   note commitments replaces the per-burn-address state anchor.  A
+   single burn transaction appends \( N \) commitments to the tree
+   and emits the summed value into the contract reserve.  Each spend
+   is a SNARK proving inclusion of some commitment and emission of a
+   unique nullifier.  The spend /predicate/ inside the commitment
+   distinguishes bearer (Mode A), stealth-targeted (Mode B), and
+   programmable (Mode C) notes.
+
+** The Overlap
+
+   Functionally these are nearly identical.  Both provide
+   commit-nullify privacy; both bind the burn to a later mint through
+   a ZK relation; both produce one nullifier per unit redeemed; both
+   depend on the Identity system for the minting-account side.  The
+   divergence is cosmetic:
+
+   #+LATEX: {\scriptsize
+   | Wormhole v1 anchor   | Cash note-pool anchor       |
+   |----------------------+-----------------------------|
+   | =addr_burn= (state trie leaf) | =cm_i= (Merkle tree leaf) |
+   | =_mint_noincrease= to destination | =mint= directly (supply unchanged by note pool) |
+   | Per-burn =approveFor= + =approve=  | No per-note approval (spend predicate) |
+   | Fixed-denomination cohort anonymity set | Global pool anonymity set |
+   | Spend relation: CP re-encryption (Theorems 3-6) | Spend relation: predicate-specific (Theorems 4, 7) |
+   #+LATEX: }
+
+   What neither design fully expresses is that the /spend relation/
+   is orthogonal to the pool structure: Chaum-Pedersen re-encryption,
+   stealth-address Schnorr, and arbitrary predicates can /all/ coexist
+   as different spend circuits on the same note pool.  If we take
+   this seriously, burn addresses and =_mint_noincrease= become
+   redundant: the note pool absorbs the Wormhole as one spend-predicate
+   family among many.
+
+** Maintenance Cost of Duality
+
+   Keeping both mechanisms in production doubles:
+   - *Verifier code.*  Two Merkle-style lookups, two nullifier-set
+     discipline rules, two edge-case sets for the auditor.
+   - *SNARK circuits.*  The Wormhole CP-re-encryption circuit and
+     the Cash bearer/targeted/programmable circuits do not share
+     skeleton code; the proof systems compile separately.
+   - *Demurrage bookkeeping.*  The Wormhole's per-certificate
+     BUCK-age is computed against EVM storage; the Cash note's
+     per-commitment \( (t_{\text{print}}, age_0) \) is computed in
+     the SNARK.  Two distinct conservation invariants.
+   - *Identity integration.*  Wormhole requires =approveFor= against
+     the burn-address pseudo-account; Cash predicates compose
+     differently with Schnorr authorisations.
+   - *Documentation.*  Two designs to teach, two attack tables to
+     maintain, two sets of open questions.
+
+   A unified architecture reduces all of this to one audit, one
+   circuit family, one invariant.
+
+* The Single Primitive: Notes in One Global Pool
+
+  The unified design replaces both mechanisms with a single primitive.
+
+** The Note Contract State
+
+   The BUCK contract gains three new pieces of state:
+
+   #+LATEX: {\scriptsize
+   | State        | Type                           | Purpose                                            |
+   |--------------+--------------------------------+----------------------------------------------------|
+   | =noteTree=   | Merkle tree of commitments     | Cryptographic anchor for every outstanding note    |
+   | =nullifiers= | Set of used nullifiers         | Double-spend prevention                            |
+   | =poolV=      | Aggregate BUCK value           | Sum of face values of all outstanding notes        |
+   | =poolA=      | Integrated BUCK-age (lazy)     | \( \int_0^t V(s)\,ds \) -- pool's demurrage meter |
+   | =poolT=      | Timestamp of last =poolA= sync | Enables lazy integration of =poolA=                |
+   #+LATEX: }
+
+   =poolV= and =poolA= are updated at every mint and deposit; between
+   updates they are integrated forward on demand by \( A(t) \leftarrow
+   A(t_{\text{last}}) + V(t_{\text{last}}) \cdot (t - t_{\text{last}}) \).
+
+** The Note Commitment
+
+   A note commitment is a Poseidon hash of the fields the SNARK will
+   later open:
+
+   \[
+   cm \;=\; H_{\text{cm}}\!\left(\text{type},\; v,\; age_0,\; t_{\text{mint}},\; \rho,\; \text{id}_{\text{payload}},\; \text{predicate}\right)
+   \]
+
+   with:
+
+   - *type* \( \in \{1, 2, 3\} \): the Identity-binding mode
+   - *v* \( \in \mathbb{Z}_q \): face value
+   - *\( age_0 \)*: optional starting BUCK-age baked in at mint
+   - *\( t_{\text{mint}} \)*: block timestamp of the minting transaction
+   - *\( \rho \)*: per-note randomness (source of the nullifier)
+   - *\( \text{id}_{\text{payload}} \)*: Identity-binding data (see next section)
+   - *predicate*: optional additional spend predicate (for future Mode C
+     programmability -- not elaborated in this document; a single bit
+     =predicate == None= keeps the SNARK to the three base types)
+
+   The commitment is inserted as a leaf of =noteTree= at mint time.
+
+** The Note Nullifier
+
+   The nullifier is a pseudo-random function of the note's secret
+   witness material:
+
+   \[
+   nf \;=\; \text{PRF}_{\text{key}}(\rho)
+   \]
+
+   where =key= is the spend-side secret specific to the note type
+   (the issuer's \( sk \) in Type 1, any registered spender's \( sk \)
+   in Type 2, the stealth \( sk^\ast \) in Type 3).  The PRF is
+   instantiated via Poseidon in the SNARK-friendly setting.
+
+   The nullifier is emitted on deposit; double-spend is rejected by
+   set-membership check.
+
+** Lifecycle
+
+   #+begin_example
+   mint (burn):
+     transfer v BUCK (and BUCK-age) from caller's balance to contract reserve
+     for each of {cm_1, ..., cm_N}:
+        append cm_i to noteTree
+     poolV += sum(v_i)
+     update poolA lazily to block time
+
+   deposit (mint-out):
+     verify SNARK:
+       - Merkle inclusion of some cm in noteTree
+       - Knowledge of (v, age_0, t_mint, rho, id_payload, predicate)
+       - Predicate satisfied by witness (type-specific)
+       - nullifier correctness
+       - deposit_value = v * (1 - 0.02 * pool_avg_age_now)
+     require nf not in nullifiers
+     nullifiers += nf
+     mint deposit_value to recipient
+     poolV -= v
+     poolA -= (age_0 + v * (now - t_mint))
+   #+end_example
+
+   The deposit amount is less than face by the /pool/-average-age
+   demurrage cost, not by the individual note's age.  Conservation
+   (section "Demurrage at the Pool Level") is maintained via
+   continuous payments from the issuer-collateral reserve to Jubilee.
+
+#+LATEX: \clearpage
+* Three Identity Bindings
+
+  Every note commits to one of three /Identity-binding/ payloads.  The
+  binding determines who can spend the note and what observers learn
+  about the issuer.
+
+** Type 1: Encrypted Issuer Identity ("Wormhole")
+
+   *Identity payload.*
+   \[
+   \text{id}_{\text{payload}}^{(1)} \;=\; E_{\text{issuer}} \;=\; (R_i, C_i) \;=\; (r_i G,\; M_{\text{issuer}} + r_i \cdot pk_{\text{issuer}})
+   \]
+
+   where \( pk_{\text{issuer}} \) is the issuer's own identity public key
+   at mint time, \( M_{\text{issuer}} = m_{\text{issuer}} \cdot G \), and
+   \( r_i \) is fresh randomness.  This is a standard ElGamal encryption
+   of the issuer's Identity point under their own key -- the same
+   structure registered credentials use.
+
+   *Spend predicate.*  A depositor with registered credential
+   \( E_{\text{dep}} = (R_d, C_d) \) under their own \( pk_{\text{dep}} \)
+   submits a SNARK proving the Chaum-Pedersen relation
+   \( C_i - sk_{\text{issuer}} R_i = C_d - sk_{\text{dep}} R_d \).  That
+   is, the two credentials decrypt to the same Identity point.
+
+   This is Theorem 6 of the proofs document ([[file:alberta-buck-proofs.org][Proofs]]) lifted verbatim
+   into the SNARK; a SNARK-verified instance of the CP relation implies
+   \( m_{\text{issuer}} = m_{\text{dep}} \), i.e., /same underlying
+   Identity/.
+
+   *Consequence.*  Only accounts whose underlying Identity scalar
+   matches the issuer's can spend a Type 1 note.  This is the Wormhole
+   semantics: Alice mints a Type 1 note from address \( A_1 \) and later
+   deposits at address \( A_2 \), where both addresses carry Alice's
+   Identity (different registered credentials, same \( M \)).  Observers
+   cannot link the two addresses beyond the Identity-constant relation
+   they already have.
+
+** Type 2: Public Issuer Identity ("Signed Cheque")
+
+   *Identity payload.*
+   \[
+   \text{id}_{\text{payload}}^{(2)} \;=\; (m_{\text{issuer}},\; \sigma_{\text{issuer}})
+   \]
+
+   where \( m_{\text{issuer}} \in \mathbb{Z}_q \) is the issuer's
+   Identity scalar /in plaintext/ and \( \sigma_{\text{issuer}} \) is a
+   Schnorr signature on \( cm \) under the issuer's registered
+   \( pk_{\text{issuer}} = m_{\text{issuer}} \cdot G \) (or a signed
+   commitment to the note; details equivalent).
+
+   Anyone reading the commitment openings learns who issued the note:
+   the Identity point \( M_{\text{issuer}} = m_{\text{issuer}} \cdot G \)
+   is in the clear, and since this is a public-identity account, its
+   real-world identity is world-readable from the IdentityRegistry.
+
+   *Spend predicate.*  The SNARK proves:
+
+   1. Knowledge of \( \rho \) such that \( nf = \text{PRF}_\rho(\cdot) \)
+   2. \( \sigma_{\text{issuer}} \) verifies against the registered
+      \( pk_{\text{issuer}} \) in IdentityRegistry (SNARK-inside
+      signature verification)
+   3. The depositor is /some/ registered identity: Schnorr proof of
+      knowledge of \( sk_{\text{dep}} \) for a \( pk_{\text{dep}} \) that
+      IdentityRegistry attests to (anonymous-valid) or whose public
+      identity is published (public)
+
+   No CP-equality is required -- the issuer's identity is already known,
+   the depositor's identity is anyone properly registered.
+
+   *Consequence.*  Any registered identity can deposit.  The issuer
+   retains the right to spend their own note (by virtue of knowing
+   \( \rho \)), so holders of Type 2 notes bear /printer-race risk/: if
+   the issuer kept \( \rho \), they can race the holder to deposit.
+   Type 2 is appropriate for transactions that close within hours or
+   days, not long-term holding.  See section "Long-Term Holding Safety".
+
+** Type 3: Stealth-Targeted to Recipient ("Addressed Cheque")
+
+   *Identity payload.*
+   \[
+   \text{id}_{\text{payload}}^{(3)} \;=\; (R_e,\; pk^\ast)
+   \]
+
+   where \( R_e = r_e G \) is an ephemeral published with the note and
+
+   \[
+   pk^\ast \;=\; H_{\text{st}}(r_e \cdot pk_{\text{recipient}}) \cdot pk_{\text{recipient}}.
+   \]
+
+   \( pk_{\text{recipient}} \) is /not/ in the payload -- it would reveal
+   the target to observers.  Only the recipient, scanning notes with
+   their own \( sk_{\text{recipient}} \), can recognise a note as
+   addressed to them: for each candidate note they compute
+   \( s = sk_{\text{recipient}} \cdot R_e \) and check whether
+   \( H_{\text{st}}(s) \cdot pk_{\text{recipient}} \) equals the note's
+   \( pk^\ast \) (see Corollary 3 of Theorem 7 in [[file:alberta-buck-proofs.org][Proofs]]).
+
+   *Spend predicate.*  The SNARK proves knowledge of a scalar \( \alpha \)
+   with \( \alpha \cdot G = pk^\ast \).  By Theorem 7 this implies the
+   prover knows the stealth secret
+   \( sk^\ast = H_{\text{st}}(s) \cdot sk_{\text{recipient}} \),
+   which reduces to knowing \( sk_{\text{recipient}} \) (the issuer
+   cannot compute \( sk^\ast \) from \( r_e, pk_{\text{recipient}} \)
+   alone without breaking DLog).
+
+   The depositor also produces a Schnorr PoK of knowledge of
+   \( sk_{\text{dep}} \) for their own registered \( pk_{\text{dep}} \),
+   binding the deposit to a compliant mint-out identity.  Optionally,
+   the recipient's credential \( E_{\text{recipient}} \) can be used
+   directly: the SNARK proves CP-equality between the decrypted
+   \( M_{\text{recipient}} \) and the depositor's registered
+   \( E_{\text{dep}} \), making the deposit identity-binding.  The
+   minimal-privacy variant omits this and lets any registered depositor
+   submit the stealth-spend (suitable when the recipient wants
+   pseudonymous redemption to a fresh account).
+
+   *Consequence.*  Only the recipient -- the holder of
+   \( sk_{\text{recipient}} \) -- can spend the note.  The issuer
+   /cannot/ spend what she printed (Theorem 7, Corollary 1 -- "printer
+   non-fungibility").  Third parties who see the published note learn
+   nothing about \( pk_{\text{recipient}} \).  Type 3 is safe for
+   long-term holding because the issuer's knowledge of \( r_e \) does
+   not translate into spending power.
+
+** Comparison of the Three Bindings
+
+   #+LATEX: {\scriptsize
+   | Property                     | Type 1 Encrypted Issuer               | Type 2 Public Issuer                   | Type 3 Stealth-Targeted       |
+   |------------------------------+---------------------------------------+----------------------------------------+-------------------------------|
+   | Issuer known to observers    | No (ElGamal-encrypted)                | Yes (plaintext)                        | No (not in payload)           |
+   | Recipient known to observers | No (anyone with same \(M\) can spend) | No (any registered identity can spend) | No (stealth addr)             |
+   | Observer links burn-mint     | Only via timing; not by identity      | Public flow with anonymous recipient   | Not at all                    |
+   | Issuer can spend own note    | Yes (=Wormhole= self-case)            | Yes (knows \(\rho\))                   | No (Theorem 7 Corollary 1)    |
+   | Long-term holding safe       | Yes (issuer = intended spender)       | No (issuer race)                       | Yes (printer non-fungibility) |
+   | Replaces                     | Wormhole v1 certificates              | Bank cheques, attribution payments     | Cash Mode B targeted notes    |
+   | Spend-circuit soundness      | Theorem 6 (CP-equality)               | Schnorr + signature-in-SNARK           | Theorem 7 (stealth Schnorr)   |
+   #+LATEX: }
+
+   The three together span every existing use case in the
+   wormhole/cash series.  The Cash /Mode A/ (pure bearer, no identity
+   hook at all) is intentionally absent from this scheme; see "What
+   Gets Dropped" below.
+
+#+LATEX: \clearpage
+* The Interaction Matrix: Note Binding x Account Mode
+
+  The current Identity system ([[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]]) distinguishes two
+  registered-account visibility modes:
+
+  - *Anonymous-valid.*  The account is provably KYC-verified but the
+    underlying Identity is encrypted.  Counterparties need a bilateral
+    =approve= handshake to learn who they are dealing with.
+  - *Public.*  The account publishes its Identity claim in the clear.
+    Counterparties see the real-world Identity without an =approve= step.
+
+  Permissionless accounts are excluded: they have no registered
+  Identity and therefore cannot be either the minting side of a note
+  nor the depositing side.  Every cell below requires at least one
+  endpoint to be a registered identity.
+
+  Crossing the three note bindings with the two account modes at
+  deposit time produces six cells.  Each row corresponds to a note
+  /type/; each column corresponds to the /depositor account/ mode.
+
+  #+LATEX: {\scriptsize
+  | Note type           | Anonymous-valid depositor                   | Public depositor                                  |
+  |---------------------+---------------------------------------------+---------------------------------------------------|
+  | 1. Encrypted issuer | *Wormhole, private-private*                 | *Wormhole, private-to-public*                     |
+  |                     | Alice (issuer) and Alice' (depositor)       | Alice (issuer, private) deposits to her public    |
+  |                     | share \(M\); both anonymous-valid; no       | account.  Observers see: the public account       |
+  |                     | link.  Canonical Wormhole.                  | received value from some pool note.  Use: moving  |
+  |                     |                                             | wealth from private trading to a public identity. |
+  |---------------------+---------------------------------------------+---------------------------------------------------|
+  | 2. Public issuer    | *Public-to-private cheque*                  | *Public-to-public transfer by cheque*             |
+  |                     | Issuer X (public) writes a cheque; any      | Both parties public.  Equivalent to a plain       |
+  |                     | registered anonymous-valid account cashes   | public transfer except the note interposes a      |
+  |                     | it.  Recipient identity hidden from public. | delay/indirection.  Useful: pre-signed bearer     |
+  |                     | Use: payroll to private employees;          | cheques, printed and mailed before recipient      |
+  |                     | charitable disbursement; B2C payments.      | is determined.                                    |
+  |---------------------+---------------------------------------------+---------------------------------------------------|
+  | 3. Stealth-targeted | *Private-to-private addressed cheque*       | *Private-to-public addressed cheque*              |
+  |                     | Issuer (any) targets a specific             | Issuer targets a public identity.  The public     |
+  |                     | anonymous-valid recipient.  Only recipient  | identity is still not in the payload (stealth     |
+  |                     | can spend.  No public link between issuer   | addr); only the recipient recognizes the note on  |
+  |                     | and recipient.  Use: targeted remittances,  | scan.  Use: donations to a public charity from    |
+  |                     | inheritance, estate transfers.              | private accounts without a traceable transfer.    |
+  #+LATEX: }
+
+  Several observations:
+
+  1. *The Wormhole's full functionality (Type 1, Cell 1 and 2)*
+     collapses to a single note-pool spend circuit.  No burn
+     addresses, no =_mint_noincrease=, no approval machinery for
+     pseudo-accounts.
+
+  2. *Public-issuer cheques (Type 2)* supply the long-missing
+     "cashier's cheque" primitive: a public issuer commits to a
+     transfer that any registered holder can realise.  This is the
+     natural form for payroll issuance, charitable disbursements, and
+     attribution-preserving payments that current BUCK flow lacks.
+
+  3. *Stealth-targeted cheques (Type 3)* preserve the "personal
+     cheque" semantics from BUCK Cash's Mode B while gaining the
+     property that the depositor can be a distinct /account/ from
+     their registered identity if desired (the SNARK binds the
+     stealth secret, not the specific deposit address).
+
+  4. *Public-to-public transfers via Type 2* (Cell 2.2) are a
+     degenerate case: the same information flow could happen via a
+     direct public =transfer=.  The value of Cell 2.2 is the
+     /timing/: the cheque can be printed, mailed, or held by the
+     issuer before the recipient decides which of their public
+     accounts to deposit to.
+
+  5. *Account modes are independent of issuance*: the issuer's
+     account visibility at mint time and the depositor's account
+     visibility at deposit time are chosen independently.  The matrix
+     above shows the /depositor/ dimension; a full 3x2x2 enumeration
+     would duplicate most cells without adding structural insight.
+
+#+LATEX: \clearpage
+* Demurrage at the Pool Level
+
+  The economic coupling between notes and on-chain balances changes
+  materially from v1.  In v1, each certificate carried its own
+  \( (t_{\text{burn}}, age_{\text{burn}}) \) and the spender at
+  redemption time paid accumulated demurrage on that individual
+  age -- the same model as an on-chain balance.  In the pool design
+  the demurrage obligation is borne collectively by the pool, and
+  individual deposits pay only the current /pool-average/ rate.
+
+** Pool Aggregates
+
+   The contract maintains two aggregates (plus =poolT=, a last-update
+   timestamp to enable lazy integration):
+
+   \[
+   V(t) \;=\; \sum_{i \in \text{live}(t)} v_i, \qquad
+   A(t) \;=\; \sum_{i \in \text{live}(t)} v_i \cdot \bigl(t - t_{\text{mint},i}\bigr) + age_{0,i},
+   \]
+
+   where \( \text{live}(t) \) is the set of outstanding (un-deposited)
+   notes at time \( t \).  Between state-changing transactions,
+   \( V(t) \) is constant and \( A(t) \) grows at rate \( V(t) \):
+
+   \[
+   \frac{dA}{dt} \;=\; V(t).
+   \]
+
+   The contract realises this by storing the pair \( (V, A) \) at
+   every mint or deposit and integrating forward to the current block
+   timestamp on read.  The /pool-average age/ is
+
+   \[
+   \bar{a}(t) \;=\; A(t) / V(t),
+   \]
+
+   measured in years (assuming \( v_i \) and timestamps use
+   consistent units).
+
+** Pool Obligation and Jubilee Flow
+
+   The pool collectively owes Jubilee demurrage at the BUCK-wide rate
+   \( \kappa = 0.02\,\text{yr}^{-1} \).  The continuous obligation
+   rate is
+
+   \[
+   \frac{dO}{dt} \;=\; \kappa \cdot V(t),
+   \]
+
+   and the cumulative obligation \( O(t) = \int_0^t \kappa V(s)\,ds =
+   \kappa \cdot A(t) \) (from \( dA/dt = V \)).
+
+   The contract discharges this obligation in two ways, both of
+   which draw on the issuer-pledged collateral backing the BUCK
+   supply rather than the holder's balance:
+
+   - *Continuous Jubilee transfer.*  At every state-change event
+     (mint, deposit, or scheduled keeper call), the contract pays
+     \( \kappa \cdot V(t_{\text{prev}}) \cdot (t_{\text{now}} -
+     t_{\text{prev}}) \) BUCK from the reserve into the Jubilee
+     account.  This is the on-chain realisation of
+     \( dO/dt = \kappa V \).
+   - *Per-deposit discharge.*  At each deposit, the note's /face
+     value/ is not delivered in full; the depositor receives
+     \( v \cdot (1 - \kappa \cdot \bar{a}(t)) \), and the difference
+     \( v \cdot \kappa \cdot \bar{a}(t) \) is credited against the
+     obligation counter (or equivalently, retained in the reserve).
+
+** Deposit Formula
+
+   When note \( i \) with face \( v_i \) is deposited at time
+   \( t_{\text{dep}} \):
+
+   \[
+   v_{\text{delivered},i} \;=\; v_i \cdot \Bigl(1 - \kappa \cdot \bar{a}\bigl(t_{\text{dep}}\bigr)\Bigr).
+   \]
+
+   Note that \( \bar{a}(t_{\text{dep}}) \) is the /pool's/ current
+   average age, not the note's own age
+   \( a_i = t_{\text{dep}} - t_{\text{mint},i} \).  If the pool is in
+   high-turnover steady state with \( \bar{a} \approx 0.5\,\text{yr} \),
+   the per-deposit demurrage is \( 2\% \cdot 0.5 = 1\% \) regardless of
+   how long note \( i \) was individually held.
+
+** Conservation: Little's Law
+
+   The apparent asymmetry -- individual notes charged at a population
+   mean rather than at their personal age -- conserves value at the
+   pool level by Little's Law from queueing theory[fn:little]:
+
+   #+LATEX: \begin{theorem}[Pool Demurrage Conservation]
+   #+LATEX: \label{thm:demurrage-conservation}
+   #+LATEX: \end{theorem}
+
+   *Statement.*  In a pool at long-run statistical equilibrium with
+   constant mean inflow rate \( \mu \) (new notes' face value per
+   unit time) and constant mean outflow rate
+   \( \delta = \mu \) (deposited face value per unit time), the
+   cumulative demurrage paid by depositors converges to the
+   cumulative pool obligation over any window \( [T_1, T_2] \):
+
+   \[
+   \sum_{\substack{\text{deposits}\\i: t_{\text{dep},i} \in [T_1, T_2]}}
+   \kappa \cdot v_i \cdot \bar{a}(t_{\text{dep},i})
+   \;=\; \int_{T_1}^{T_2} \kappa \cdot V(t)\,dt \;+\; O_{\text{transient}}
+   \]
+
+   where \( O_{\text{transient}} \) is a bounded transient term going
+   to zero as \( T_2 - T_1 \to \infty \).
+
+   *Proof.*  Little's Law states that in a queueing system at
+   equilibrium, the mean number in the system equals the mean arrival
+   rate times the mean residence time:
+   \( V = \delta \cdot \bar{a} \), with \( \bar{a} \) the mean
+   residence time (here: mean note age at deposit) and \( V \) the
+   mean population size.
+
+   Demurrage charged per unit time by per-deposit discharge:
+   \( \kappa \delta \bar{a} \).  Demurrage accrued per unit time by
+   the pool obligation: \( \kappa V \).  Little's Law equates
+   \( V = \delta \bar{a} \), so both rates equal \( \kappa V \).
+
+   Over a finite window the deposits are a point process, not a
+   continuum, so the equality holds up to a transient term bounded by
+   the maximum per-deposit charge \( \kappa \cdot v_{\max} \cdot
+   \bar{a}_{\max} \), which is \( O(1) \) as the window grows.
+   \( \blacksquare \)
+
+   *Remark (implementation).*  In production the contract does not
+   rely on long-run equilibrium.  The continuous Jubilee payment
+   stream at rate \( \kappa V \) ensures the pool's obligation is
+   always current, and the per-deposit discharge then /rebates/ the
+   depositor for the pool-average cost of their note -- exactly as a
+   cooperative would treat its members.  The invariant
+
+   \[
+   \text{reserve}(t) + \text{jubilee}(t) \;=\; \text{initial reserve} + \int_0^t \mu(s)\,ds - \int_0^t \delta(s)\,ds
+   \]
+
+   is preserved as long as the per-deposit discharge formula tracks
+   \( \bar{a}(t_{\text{dep}}) \) accurately.
+
+** Numeric Example
+
+   Assume a pool at steady state with \( V = 10\,000\,000 \) BUCK
+   outstanding.  Suppose notes turn over with a mean residence time
+   \( \bar{a} = 6 \) months \( = 0.5 \) yr.  Little's Law gives the
+   deposit flow rate
+
+   \[
+   \delta \;=\; V / \bar{a} \;=\; 20\,000\,000 \text{ BUCK/yr}.
+   \]
+
+   A /single note/ held for \( \tau = 10 \) yr and deposited against
+   this pool pays demurrage
+
+   \[
+   v \cdot \kappa \cdot \bar{a} \;=\; v \cdot 0.02 \cdot 0.5 \;=\; 1\% \cdot v,
+   \]
+
+   rather than the per-note accrual \( v \cdot \kappa \cdot \tau = 20\%
+   \cdot v \) it would pay in a per-note-age model.  A long holder
+   pays the same rate as a fast cycler -- both pay the pool mean.
+
+   Pool obligation rate: \( \kappa V = 200\,000 \) BUCK/yr flowing
+   continuously into Jubilee from the issuer-pledged reserve.
+   Per-deposit discharge rate: \( \delta \cdot \kappa \cdot \bar{a}
+   = 200\,000 \) BUCK/yr collected from depositors and returned to
+   the reserve.  Net outflow from reserve: zero at equilibrium.
+
+** Who Actually Bears Demurrage
+
+   The pool-rate model redistributes the economic burden.  Three
+   stakeholders are involved:
+
+   1. *Issuers* (who pledge collateral to create BUCK).  Their
+      collateral now services the continuous \( \kappa V \) obligation
+      rather than the end-of-life per-note demurrage.  Net cost over
+      a note's lifetime is identical in steady state, but the timing
+      shifts from "at deposit" (paid by holder) to "continuously"
+      (paid by issuer-collateral yield).
+   2. *Holders of unspent notes.*  Pay a small pool-rate at
+      deposit.  Benefit: no individual decay clock.  A long-held note
+      retains most of its face value.
+   3. *Jubilee recipients* (currently defined as the issuer cohort
+      itself, redistributed pro rata to collateral pledge).  Receive
+      the same aggregate demurrage flow as before, but in a smooth
+      stream rather than a bursty per-deposit one.
+
+   Net monetary effect: identical in aggregate; distributionally,
+   holders gain at the expense of issuers-in-their-collateral-role.
+   Since the issuer cohort and the Jubilee recipient cohort are the
+   /same set of stakeholders/, the cross-subsidy washes out.
+
+#+LATEX: \clearpage
+* Long-Term Holding Safety: The Printer-Trust Distinction
+
+  Pool-rate demurrage makes every note type equally cheap to /hold/.
+  What distinguishes them for long-term storage is not demurrage but
+  the /printer-trust/ model: who, besides the intended holder, retains
+  information that could let them spend the note?
+
+** The Printer-Trust Model
+
+   At mint time, the issuer knows:
+   - The note's commitment preimage \( (v, age_0, t_{\text{mint}},
+     \rho, \text{id}_{\text{payload}}, \text{predicate}) \)
+   - Whatever additional secret is packed into \( \text{id}_{\text{payload}} \)
+     (the issuer's \( sk_{\text{issuer}} \) for Type 1, the ephemeral
+     \( r_e \) for Type 3, etc.)
+
+   The question is whether this knowledge enables the issuer -- or
+   anyone else with the same knowledge -- to spend the note later.
+
+** Type 1 (Encrypted Issuer Identity): Safe
+
+   The spend predicate requires a Chaum-Pedersen proof of equality
+   with the depositor's /registered/ credential.  The issuer is the
+   intended eventual depositor (possibly via a different registered
+   account sharing the same \( M \)).  No third party can spend: even
+   with full knowledge of \( \rho \), a non-issuer's registered
+   credential does not encrypt \( M_{\text{issuer}} \), so the CP
+   relation fails.
+
+   *Long-term holding is safe.*  The only person who can spend is the
+   issuer, and the issuer is the intended holder.
+
+** Type 2 (Public Issuer Identity): Unsafe for Long-Term Storage
+
+   The spend predicate requires only knowledge of \( \rho \) plus any
+   registered identity.  The issuer minted the note, so the issuer
+   knows \( \rho \).  If the issuer retains any copy of \( \rho \)
+   after printing the physical note -- in a database row, a printed
+   backup, a backup transaction -- the issuer can race the holder to
+   deposit.
+
+   This is not a cryptographic failure; it is a policy failure.  A
+   trustworthy issuer /could/ destroy \( \rho \) after printing.  But
+   the /holder has no way to verify that destruction/.  The note is
+   only as safe as the issuer's operational discipline.
+
+   *Long-term holding is unsafe.*  Type 2 notes should be cashed
+   promptly (hours to days).  They are a cheque, not a savings
+   instrument.  In the failure mode where the issuer does retain
+   \( \rho \), legal recourse is via the issuer's registered
+   Identity -- which is the point of making the issuer /public/: they
+   cannot deny having printed the note, and the registered Identity
+   is subpoena-able.
+
+   For use cases that need long-term safety with public attribution
+   (e.g., an inheritance instrument where the issuer's identity must
+   be known), the natural solution is to use Type 3 (stealth-targeted)
+   and separately publish the issuer's identity in a signed
+   accompanying statement rather than bake it into the commitment.
+
+** Type 3 (Stealth-Targeted to Recipient): Safe
+
+   The spend predicate is a Schnorr PoK of the stealth secret
+   \( sk^\ast = H_{\text{st}}(s) \cdot sk_{\text{recipient}} \).
+   Computing \( sk^\ast \) requires \( sk_{\text{recipient}} \), which
+   only the recipient possesses.  The issuer knows \( r_e \) and can
+   compute \( s = r_e \cdot pk_{\text{recipient}} \) and
+   \( H_{\text{st}}(s) \), but /cannot/ compute \( sk^\ast = H_{\text{st}}(s)
+   \cdot sk_{\text{recipient}} \) without \( sk_{\text{recipient}} \)
+   (Theorem 7, Corollary 1 -- "printer non-fungibility").
+
+   *Long-term holding is safe.*  The issuer's knowledge of every
+   mint-time secret does not enable them to spend.  Only the intended
+   recipient, through their own \( sk \), can redeem.
+
+** Summary: Which Notes Can Be Saved?
+
+   #+LATEX: {\scriptsize
+   | Note type | Issuer can spend later? | Long-term holding safe? | Comparable instrument              |
+   |-----------+-------------------------+-------------------------+------------------------------------|
+   | Type 1    | Only to themselves      | Yes                     | Savings account (self-owned)       |
+   | Type 2    | Yes (knows \( \rho \))  | No                      | Uncashed cheque (needs to clear)   |
+   | Type 3    | No (Theorem 7)          | Yes                     | Registered bond (recipient-locked) |
+   #+LATEX: }
+
+   The consequence: /only Type 1 and Type 3 notes are suitable for
+   long-term holding./  A user printing a Type 2 cheque and placing it
+   in a safe deposit box for a decade is, cryptographically, trusting
+   the issuer's operational discipline for a decade; a user doing the
+   same with Type 1 or Type 3 is trusting only the cryptography.
+
+   This constrains how the note types map to use cases:
+
+   - *Long-term savings, cold storage, estate, self-wormhole:*
+     Type 1 (if you are your own beneficiary) or Type 3 (if a named
+     heir is the beneficiary).
+   - *Cheques, payroll, invoices:* Type 2, cashed promptly.
+   - *Targeted gifts, remittances, inheritance:* Type 3.
+   - *Wormhole-style cross-address transfers:* Type 1 exclusively.
+
+#+LATEX: \clearpage
+* Required Identity Cryptography
+
+  The unified design re-uses the existing Identity machinery
+  ([[file:alberta-buck-identity.org][Identity]]) wherever possible, adding one new note-side
+  primitive and one re-use of the Theorem 7 stealth-address
+  construction.
+
+** Components Already Present
+
+   The following are unchanged from Identity v1 and are used directly:
+
+   1. *Pointcheval-Sanders issuer signature* \( \sigma \) on the
+      Identity scalar \( m \).  Re-randomisation continues to be used
+      for unlinkable credential generation (Identity Fountain).  No
+      change.
+   2. *ElGamal registered credential*
+      \( E = (R, C) = (r G, M + r \cdot pk) \) where
+      \( M = m \cdot G \).  Continues to be the on-chain identity
+      witness.  No change.
+   3. *Chaum-Pedersen equality of discrete logs*.  Used by Type 1
+      spend predicate for the same-\( M \) proof; identical to the
+      =approve= flow's CP proof, just wrapped in a SNARK.  Theorem 6
+      applies unchanged.
+   4. *Schnorr PoK of \( sk \) for registered \( pk \)*.  Used by Type
+      2 and Type 3 spend predicates to bind the depositing account to
+      a registered identity.  Single-statement case of CP, Theorems
+      3-5 apply verbatim.
+   5. *IdentityRegistry* mapping between on-chain addresses and
+      registered credentials (PS signatures, ElGamal ciphertexts,
+      public-claim flags).
+
+** New Primitive: The Note Commitment Hash
+
+   A SNARK-friendly commitment hash \( H_{\text{cm}} \) (Poseidon) is
+   needed to compute the commitment inside the spend circuit.  The
+   hash is deterministic, collision-resistant over the note's field,
+   and efficient in R1CS; Poseidon over the BN254 scalar field is the
+   natural choice and is already used by the Aztec and Zcash Sapling
+   circuits.
+
+   No novel cryptographic construction; only a circuit-level primitive
+   that is standard in modern SNARK systems.
+
+** New Primitive: The Nullifier PRF
+
+   The nullifier PRF \( \text{PRF}_{\text{key}}(\rho) \) is also
+   Poseidon-based, keyed differently per type:
+
+   - *Type 1:*  key = \( sk_{\text{issuer}} \) (which, per Theorem 6,
+     equals the depositor's \( sk \) since same \( M \)).  Nullifier
+     is therefore computable by the depositor and uniquely determined
+     by \( \rho \) and the Identity scalar shared between issuer and
+     depositor.
+   - *Type 2:*  key = \( \rho \) itself; nullifier =
+     \( H_{\text{nf}}(\rho) \), publicly computable by anyone who
+     knows \( \rho \).  This is the reason Type 2 is vulnerable to
+     issuer-race: whoever knows \( \rho \) can compute the nullifier
+     and race a deposit.
+   - *Type 3:*  key = \( sk^\ast \) (the stealth secret, known only
+     to the recipient).  The nullifier is uniquely bound to
+     \( (sk^\ast, \rho) \); only the intended recipient can compute
+     it.
+
+   Cross-type nullifier-space separation is enforced by a
+   type-domain-separator byte in the PRF input, so collisions across
+   types are avoided.
+
+** Re-Used Primitive: Theorem 7 (Stealth Address)
+
+   The stealth-address construction \( pk^\ast = H_{\text{st}}(s)
+   \cdot pk_{\text{recipient}} \) is proved sound in the proofs
+   document (Theorem 7) under DLog on \( G_1 \) alone.  The same
+   construction is used here verbatim for Type 3 notes.  No
+   modification, no new assumption.
+
+** The Re-Encryption Operation at Mint
+
+   Type 1 and Type 3 require the issuer to perform a re-encryption
+   operation at mint time:
+
+   *Type 1 mint-time re-encryption.*  The issuer takes their own
+   registered \( M_{\text{issuer}} = m_{\text{issuer}} \cdot G \) and
+   produces \( E_{\text{issuer}}^{(\text{note})} = (r_i G, M_{\text{issuer}} +
+   r_i \cdot pk_{\text{issuer}}) \) with fresh \( r_i \).  This is
+   just a fresh ElGamal encryption under the issuer's existing pk; the
+   same operation Alice performs at =approve= time.
+
+   *Type 3 mint-time stealth derivation.*  The issuer picks
+   \( r_e \leftarrow \mathbb{Z}_q^\ast \), computes \( R_e = r_e G \),
+   computes the shared point \( s = r_e \cdot pk_{\text{recipient}} \)
+   (the issuer can do this because she knows \( r_e \) and
+   \( pk_{\text{recipient}} \)), and computes \( pk^\ast =
+   H_{\text{st}}(s) \cdot pk_{\text{recipient}} \).  She packs
+   \( (R_e, pk^\ast) \) into the commitment.  She does /not/ compute
+   \( sk^\ast = H_{\text{st}}(s) \cdot sk_{\text{recipient}} \): she
+   can't, because she lacks \( sk_{\text{recipient}} \).
+
+   Both operations are single-curve-multiplication and single-hash
+   operations on BN254 G_1.  No pairing, no new hardness assumption.
+
+** The Re-Encryption Operation at Spend (Type 1 Only)
+
+   A Type 1 depositor must produce a fresh ElGamal encryption
+   \( E_{\text{dep}} = (R_d, C_d) = (r_d G, M_{\text{issuer}} + r_d
+   \cdot pk_{\text{dep}}) \) and a SNARK-internal CP proof that
+   \( E_{\text{issuer}}^{(\text{note})} \) and \( E_{\text{dep}} \)
+   decrypt to the same \( M \).  This is Theorem 6 (end-to-end
+   re-encryption correctness) lifted into the SNARK circuit: the
+   statement proved is identical to the on-chain CP proof from
+   =approve=, just encoded as a SNARK witness rather than a
+   Fiat-Shamir NIZK.
+
+   The extractable witness is \( (sk_{\text{issuer}}, r_d) \), and
+   since \( sk_{\text{issuer}} \) is bound (by registration) to
+   \( M_{\text{issuer}} \), the proof establishes that the depositor
+   owns the registered credential that encrypts the same \( M \) the
+   issuer encrypted.
+
+** The Schnorr PoK Operation at Spend (Type 2 and Type 3)
+
+   Both Type 2 and Type 3 spenders include a Schnorr PoK of
+   \( sk_{\text{dep}} \) for their registered \( pk_{\text{dep}} \),
+   Fiat-Shamir bound to the spend transaction.  For Type 3, an
+   /additional/ Schnorr PoK of \( sk^\ast \) for \( pk^\ast \) is
+   required, as per Theorem 7.
+
+   Both Schnorr proofs are standard; no novelty.
+
+** Summary: New Cryptographic Components
+
+   #+LATEX: {\scriptsize
+   | Component                          | Status                                     | Assumption |
+   |------------------------------------+--------------------------------------------+------------|
+   | Poseidon commitment hash           | New circuit primitive (standard in SNARKs) | ROM-like   |
+   | Poseidon nullifier PRF             | New circuit primitive                      | ROM-like   |
+   | PS signature (issuer)              | Re-used from Identity                      | q-SDH      |
+   | ElGamal credential + re-encryption | Re-used from Identity                      | DLog       |
+   | Chaum-Pedersen equality proof      | Re-used (lifted into SNARK) from Identity  | DLog + ROM |
+   | Stealth address derivation         | Re-used from Proofs Theorem 7              | DLog + ROM |
+   | Schnorr PoK of \( sk \)            | Re-used from Identity                      | DLog + ROM |
+   | SNARK proof system (Groth16/PLONK) | Standard on BN254                          | system-dep |
+   #+LATEX: }
+
+   Only the Poseidon hash family is new, and it is already standard
+   in the SNARK ecosystem.  No novel hardness assumption is
+   introduced.
+
+#+LATEX: \clearpage
+* The SNARK Circuits
+
+  Three spend circuits (one per note type) and one mint circuit are
+  required.  Alternatively, a single circuit conditioned on a
+  public =type= input subsumes all three spends; this is the more
+  efficient deployment choice but costs a larger universal verifier.
+
+** Mint Circuit
+
+   *Public inputs.*  =totalBurn= (the total face value burned),
+   \( \{cm_1, \ldots, cm_N\} \) (commitments to be appended), and
+   =issuerRegistryEntry= (a Merkle root or index into
+   IdentityRegistry attesting to the issuer's registered credential).
+
+   *Witnesses.*  For each note \( i \):
+   \( (type_i, v_i, age_{0,i}, \rho_i, \text{id}_{\text{payload},i},
+   \text{predicate}_i) \), plus the issuer's private material for
+   whatever \( \text{id}_{\text{payload}} \) the note requires.
+
+   *Constraints.*
+   1. \( \sum v_i + \sum 0.02 \cdot age_{0,i} = \texttt{totalBurn} \)
+      (amount conservation; baked-in BUCK-age also counts, as in v1).
+   2. Each \( cm_i = H_{\text{cm}}(\text{type}_i, v_i, age_{0,i}, now,
+      \rho_i, \text{id}_{\text{payload},i}, \text{predicate}_i) \)
+      (opening binding).
+   3. For each Type 1 note: \( \text{id}_{\text{payload},i}^{(1)} =
+      (R_{i,i}, M_{\text{issuer}} + r_{i,i} \cdot pk_{\text{issuer}}) \)
+      with \( R_{i,i} = r_{i,i} G \), and \( M_{\text{issuer}} \)
+      matches the issuer's registered ElGamal decryption.
+   4. For each Type 2 note: \( \text{id}_{\text{payload},i}^{(2)} =
+      (m_{\text{issuer}}, \sigma_i) \) with \( \sigma_i \) a valid
+      Schnorr signature on \( cm_i \) under
+      \( pk_{\text{issuer}} = m_{\text{issuer}} G \).
+   5. For each Type 3 note: \( \text{id}_{\text{payload},i}^{(3)} =
+      (R_{e,i}, pk^\ast_i) \) with \( R_{e,i} = r_{e,i} G \) and
+      \( pk^\ast_i = H_{\text{st}}(r_{e,i} \cdot
+      pk_{\text{recipient},i}) \cdot pk_{\text{recipient},i} \), for
+      each note's target recipient.
+
+   *Contract side.*  The contract verifies the proof, transfers
+   =totalBurn= BUCK (and appropriate BUCK-age) from the caller's
+   balance into the reserve, appends each \( cm_i \) to =noteTree=,
+   and updates \( \text{poolV}, \text{poolA}, \text{poolT} \).
+
+** Spend Circuit (Type 1 -- Encrypted Issuer)
+
+   *Public inputs.*  =noteRoot= (current Merkle root of =noteTree=),
+   =nullifier=, =depositValue=, =poolAvgAge= (current
+   \( \bar{a}(t_{\text{now}}) \)), =depositorRegistryEntry= (pointer
+   into IdentityRegistry for the depositor's credential).
+
+   *Witnesses.*  \( (v, age_0, t_{\text{mint}}, \rho,
+   \text{id}_{\text{payload}}^{(1)}, \text{path}) \),
+   \( sk_{\text{issuer/dep}} \) (shared, by Theorem 6), the
+   depositor's fresh encryption randomness \( r_d \), and the
+   depositor's registered credential
+   \( E_{\text{dep}}^{(\text{registry})} \).
+
+   *Constraints.*
+   1. \( cm = H_{\text{cm}}(1, v, age_0, t_{\text{mint}}, \rho,
+      \text{id}_{\text{payload}}^{(1)}, \text{pred}) \) opens to a
+      leaf of =noteTree= under =path= (Merkle inclusion).
+   2. =nullifier= = \( H_{\text{nf}}(1 \| sk_{\text{dep}} \| \rho) \).
+   3. \( \text{id}_{\text{payload}}^{(1)} = (R_i, C_i) \); the
+      registered credential \( E_{\text{dep}}^{(\text{registry})} =
+      (R_d^{\text{reg}}, C_d^{\text{reg}}) \) exists in
+      IdentityRegistry; CP-equality \( C_i - sk_{\text{dep}} R_i =
+      C_d^{\text{reg}} - sk_{\text{dep}} R_d^{\text{reg}} \) holds
+      (Theorem 6).
+   4. \( \texttt{depositValue} = v \cdot (1 - \kappa \cdot
+      \texttt{poolAvgAge}) \).
+
+   The contract checks =poolAvgAge= against its own lazy integration
+   of \( A/V \) (rejecting stale proofs); checks the nullifier is
+   unused; mints =depositValue= to the recipient; updates the
+   aggregates.
+
+** Spend Circuit (Type 2 -- Public Issuer)
+
+   *Public inputs.*  =noteRoot=, =nullifier=, =depositValue=,
+   =poolAvgAge=, =issuerPkClaim= (the issuer's public-identity claim
+   for human-readable verification, redundant with the circuit's own
+   check but useful for wallets), =depositorRegistryEntry=.
+
+   *Witnesses.*  \( (v, age_0, t_{\text{mint}}, \rho,
+   \text{id}_{\text{payload}}^{(2)}, \text{path}) \),
+   \( sk_{\text{dep}} \), the depositor's Schnorr nonce \( k_{\text{dep}} \).
+
+   *Constraints.*
+   1. Merkle inclusion of \( cm \) under =path= (as Type 1).
+   2. =nullifier= = \( H_{\text{nf}}(2 \| \rho) \) (publicly derivable
+      from \( \rho \) -- this is the first-come-first-served property
+      of Type 2).
+   3. \( \text{id}_{\text{payload}}^{(2)} = (m_{\text{issuer}},
+      \sigma_{\text{issuer}}) \) with \( \sigma_{\text{issuer}} \)
+      verifying against \( pk_{\text{issuer}} = m_{\text{issuer}} G \)
+      in IdentityRegistry.
+   4. Schnorr PoK of \( sk_{\text{dep}} \) for
+      \( pk_{\text{dep}} \) in IdentityRegistry, Fiat-Shamir bound
+      to =msg.sender=, =chainid=, =nullifier=.
+   5. =depositValue= = \( v \cdot (1 - \kappa \cdot \texttt{poolAvgAge}) \).
+
+** Spend Circuit (Type 3 -- Stealth-Targeted)
+
+   *Public inputs.*  =noteRoot=, =nullifier=, =depositValue=,
+   =poolAvgAge=, =depositorRegistryEntry=.  \( pk^\ast \) is /not/
+   a public input: revealing it would let an observer look up
+   \( pk_{\text{recipient}} \) in IdentityRegistry and deanonymise
+   the target.  Instead, \( pk^\ast \) is a private witness, and the
+   Merkle inclusion proof binds it to the commitment.
+
+   *Witnesses.*  \( (v, age_0, t_{\text{mint}}, \rho, R_e, pk^\ast,
+   \text{path}) \), \( sk_{\text{recipient}} \), the stealth secret
+   \( sk^\ast = H_{\text{st}}(sk_{\text{recipient}} \cdot R_e) \cdot
+   sk_{\text{recipient}} \), \( sk_{\text{dep}} \), Schnorr nonces.
+
+   *Constraints.*
+   1. Merkle inclusion of \( cm = H_{\text{cm}}(3, \ldots, R_e,
+      pk^\ast, \ldots) \).
+   2. =nullifier= = \( H_{\text{nf}}(3 \| sk^\ast \| \rho) \).
+   3. \( sk^\ast \cdot G = pk^\ast \) (Theorem 7 completeness).
+   4. \( sk^\ast = H_{\text{st}}(sk_{\text{recipient}} \cdot R_e) \cdot
+      sk_{\text{recipient}} \) (Theorem 7 setup; also binds
+      \( pk_{\text{recipient}} \) indirectly via this relation).
+   5. Schnorr PoK of \( sk_{\text{dep}} \) for
+      \( pk_{\text{dep}} \) in IdentityRegistry.
+   6. =depositValue= = \( v \cdot (1 - \kappa \cdot \texttt{poolAvgAge}) \).
+
+   /Optional identity-binding./  If the recipient wishes to bind the
+   deposit to their registered identity (for tax/audit purposes),
+   the circuit additionally proves CP-equality between
+   \( E_{\text{dep}}^{(\text{registry})} \) and a re-encryption of
+   the Identity point \( M \) decrypted from
+   \( E_{\text{recipient}}^{(\text{registry})} \), matching the
+   recipient's own credential.  This variant is opt-in; the
+   minimal-privacy variant simply requires /any/ registered depositor.
+
+** Circuit Engineering Budget
+
+   Ballpark constraint counts (orders of magnitude, BN254 Groth16):
+
+   #+LATEX: {\scriptsize
+   | Circuit element                      | Approx. constraints |
+   |--------------------------------------+---------------------|
+   | Poseidon commitment hash (1 call)    | ~250                |
+   | Poseidon nullifier PRF (1 call)      | ~250                |
+   | Merkle path verification (20 levels) | ~5000               |
+   | ElGamal / Chaum-Pedersen (Type 1)    | ~2000               |
+   | Schnorr PoK (Types 2/3)              | ~500                |
+   | Stealth-address relation (Type 3)    | ~1500               |
+   | Range check on \( v, age \)          | ~200                |
+   | =depositValue= arithmetic            | ~50                 |
+   #+LATEX: }
+
+   Total spend-circuit constraint count is in the range 6,000-10,000,
+   comparable to Zcash Sapling's Spend circuit (~25,000 including
+   note-commitment randomness features we don't need) and
+   Aztec's basic note-spend circuit.  On-chip proving time on a
+   modern smartphone: a few seconds.
+
+** Common Circuit Gadgets
+
+   A base-level library of gadgets is shared across all spend types:
+
+   - Merkle inclusion (Poseidon path)
+   - Poseidon hash wrapper
+   - Schnorr PoK
+   - Range proofs on field elements (for \( v, age \))
+   - Pool-rate demurrage arithmetic
+
+   Type-specific gadgets layer on top.  This is standard SNARK
+   library architecture (Aztec Noir, Circom, Halo2 all support this
+   layering).
+
+#+LATEX: \clearpage
+* Migration from v1 Wormhole and BUCK Cash
+
+  The transition is orderly and preserves all existing cryptographic
+  anchors.
+
+** Wormhole v1 to Notes
+
+   A v1 burn-address certificate \( (addr, v, age) \) maps to a
+   single Type 1 note:
+
+   #+begin_example
+   migrate_v1_to_notes(addr, v, age):
+     sk_addr    = recovered Schnorr key bound to addr
+     pk_addr    = sk_addr * G
+     M_addr     = registered M for addr (from IdentityRegistry)
+     r_i        = fresh random
+     R_i, C_i   = ElGamal(M_addr, r_i, pk_addr)
+     rho        = fresh random
+     cm         = Poseidon(1, v, age, now, rho, (R_i, C_i), None)
+     submit mint proof: burn (addr, v, age), append cm to noteTree
+   #+end_example
+
+   The result is a single Type 1 note equivalent to the original
+   certificate.  The v1 burn address is emptied (balance returns to
+   the reserve as part of =totalBurn=).
+
+** BUCK Cash to Notes
+
+   - *Cash Mode B (stealth-targeted)* maps one-to-one to Type 3; the
+     cryptographic structure is identical.
+   - *Cash Mode C (programmable)* can be expressed as a Type 1, 2, or
+     3 note with a non-trivial =predicate= field in the commitment,
+     evaluated by the spend circuit.  The three base types subsume
+     the most common programmable variants (time locks are a
+     predicate on \( t_{\text{mint}} \); oracle conditionals are a
+     predicate on oracle state; multi-sig is a conjunction of
+     multiple Schnorr PoKs).
+   - *Cash Mode A (pure bearer)* does not map to any of the three
+     types.  See "What Gets Dropped" below.
+
+** v1 Coexistence During Transition
+
+   The unified Notes architecture can be deployed alongside the v1
+   Wormhole during a transition window.  The v1 burn-address pool
+   remains a valid anonymity set; new users mint into the Notes pool;
+   v1 holders migrate at their convenience.  The aggregates
+   =poolV, poolA= track only Notes-pool activity; v1 certificates
+   continue to accrue per-account demurrage as before.
+
+   The final /old/ v1 certificate need not be migrated -- it can
+   continue to be redeemed against its burn-address anchor
+   indefinitely, at the cost of the contract maintaining two
+   verifier paths.  A practical deadline (e.g., 5 years from Notes
+   launch) is reasonable.
+
+#+LATEX: \clearpage
+* What Gets Dropped: Pure Bearer
+
+  The Cash document's /Mode A -- bearer note with QR code sealed under
+  a hologram, anyone who possesses the QR can deposit/ does not map
+  cleanly onto the unified scheme.  The reason is the same as why
+  Mode A in the Cash design required a physical hologram seal: a
+  purely secret-based predicate (=know(rho)= with no identity hook)
+  has no cryptographic mechanism preventing a malicious issuer from
+  retaining \( \rho \) and racing the holder.
+
+** Why Mode A Is Absent
+
+   Three routes considered:
+
+   1. /Blind minting/ -- the issuer does not know \( \rho \) at mint
+      time.  Requires the holder to participate in minting (giving a
+      blinded commitment).  Incompatible with the "print a stack of
+      bearer notes and hand them out" use case.
+
+   2. /Trusted printer/ -- hardware security module or audited print
+      service that provably erases \( \rho \).  Works in principle;
+      undermines the "trustless bearer instrument" pitch.
+
+   3. /Short expiry/ -- Mode A notes expire after a bounded period,
+      limiting the issuer-race window.  Equivalent to Type 2 with a
+      short-term contract; the use case is then cheque-like, not
+      cash-like.
+
+   None of these route options preserve the "$20 bill-equivalent"
+   property that Mode A was designed for.  The unified scheme
+   therefore /does not attempt/ to provide a pure-bearer cryptographic
+   note, and defers that use case to a separate design dimension:
+
+** The Physical-Token Escape Hatch
+
+   A pure-bearer instrument remains available via the /physical/
+   trust model that all physical bearer instruments already rely on.
+   Specifically: an issuer operating a print service with a
+   hardware-attested erasure of \( \rho \) can issue Type 2 notes
+   with a public warranty that the service did in fact erase
+   \( \rho \).  The warranty is an off-chain social/legal claim, not
+   a cryptographic one, but it is identical in kind to the trust
+   extended to the Bank of Canada when it issues physical polymer
+   banknotes (whose security rests on BoC printing discipline, not
+   on cryptography).
+
+   This keeps the pure-bearer door ajar without requiring the
+   unified scheme to pretend it solves the cryptographic problem of
+   making a truly trustless bearer note.  BUCK Cash's original Mode A
+   was arguably already conceding this point via the tamper-evident
+   seal ("the seal makes it safe to display, but any unsealed QR is
+   spendable by anyone"): the seal is a physical-world primitive, not
+   a cryptographic one.
+
+** Use-Case Coverage Without Mode A
+
+   The canonical Mode A use cases re-route cleanly:
+
+   #+LATEX: {\scriptsize
+   | Use case                   | Cash Mode A          | Unified scheme                             |
+   |----------------------------+----------------------+--------------------------------------------|
+   | Tip jar                    | Printed Mode A sheet | Public-issuer Type 2 cheques, held briefly |
+   | Walking-around money       | Printed Mode A notes | Self-issued Type 1 in a hot wallet         |
+   | Gifts to unknown recipient | Printed Mode A       | Type 2 signed cheque, short expiry         |
+   | Disaster preparedness cold | Printed Mode A hoard | Self-issued Type 1, long-term safe         |
+   | Underbanked payment rail   | Physical Mode A      | Type 2 cheque from issuer's office         |
+   #+LATEX: }
+
+   Every use case that truly requires "no identity link at all" is
+   handled by the physical-token escape hatch above.  Every use case
+   that tolerates an /encrypted/ identity link (which is most of
+   them) gains stronger cryptographic guarantees via Types 1 and 3.
+
+#+LATEX: \clearpage
+* Security Assumptions and Theorems Used
+
+  The unified Notes design rests on the same cryptographic foundations
+  as the existing Identity system, plus one already-proved additional
+  theorem:
+
+  #+LATEX: {\scriptsize
+  | Primitive / Theorem              | Usage in Notes                 | Assumption           |
+  |----------------------------------+--------------------------------+----------------------|
+  | PS signature (issuer credential) | Mint-circuit issuer-binding    | q-SDH                |
+  | ElGamal on \( G_1 \)             | Type 1 identity payload        | DLog on \( G_1 \)    |
+  | Theorem 6 (CP re-encryption)     | Type 1 spend predicate         | DLog + ROM           |
+  | Theorem 7 (stealth-targeted)     | Type 3 spend predicate         | DLog + ROM           |
+  | Schnorr PoK (sigma protocols)    | Type 2, Type 3 depositor check | DLog + ROM           |
+  | Poseidon hash/PRF (SNARK-side)   | Commitments, nullifiers        | ROM-like (circuit)   |
+  | SNARK proof system (e.g., PLONK) | Wrapping all of the above      | system-specific      |
+  | Merkle tree (noteTree)           | Commitment anchor              | collision-resistance |
+  #+LATEX: }
+
+  No /novel/ cryptographic assumption is introduced.  The only new
+  primitive not already in BUCK is the Poseidon hash family, which is
+  standard in SNARK deployments (Aztec, Zcash Sapling/Orchard,
+  Starknet, Mina) and well-studied.
+
+** Demurrage Conservation as a Contract Invariant
+
+   The contract's state-machine invariant (Theorem, section
+   "Demurrage at the Pool Level"):
+
+   \[
+   \text{reserve}(t) + \text{jubilee}(t) + \text{delivered}(t)
+   \;=\; \text{reserve}(0) + \int_0^t \mu(s)\,ds
+   \]
+
+   holds under the per-block lazy integration of =poolA= and the
+   per-deposit discharge formula.  The contract's obligation is to
+   /always/ pay the continuous Jubilee stream before serving a
+   deposit, so that \( \bar{a}(t_{\text{dep}}) \) is fresh.  A keeper
+   transaction can do this as a gas-paid batch; alternatively the
+   first transaction in any block containing a mint or deposit
+   automatically performs the lazy integration.
+
+   A soundness proof of this invariant at the /contract/ level is a
+   natural next item in the proofs document; the cryptographic
+   machinery used in the SNARKs (Theorems 6, 7) is already proven.
+
+#+LATEX: \clearpage
+* Implementation Scope
+
+  Rough engineering estimate, assuming the existing Alberta Buck
+  contract skeleton and an existing SNARK toolchain (Aztec Noir or
+  Circom/snarkJS):
+
+** Smart Contract Additions
+
+   - =noteTree= (Merkle tree with Poseidon nodes): ~1 week, bulk of
+     code is existing Aztec/Zcash sapling implementations.
+   - =nullifiers= mapping: trivial.
+   - =poolV, poolA, poolT= aggregates + lazy integration: trivial.
+   - Jubilee payment mechanism (continuous or per-block): 1 week.
+   - Three spend-circuit verifiers (Groth16-style on-chain): ~1 week
+     integration per circuit, bulk is circuit-side.
+   - Mint-circuit verifier: ~1 week.
+   - Migration helper for v1 certificates: ~1 week.
+
+   *Total:* ~8 weeks for an experienced Solidity engineer.
+
+** SNARK Circuits
+
+   - Mint circuit: ~2-3 weeks (Poseidon commitments, ElGamal
+     encryption, Schnorr signature verification inside the circuit).
+   - Spend circuits (three, with shared gadgets): ~4-6 weeks.
+   - Common gadgets library (Merkle, Poseidon wrappers, Schnorr,
+     range checks): ~2 weeks.
+
+   *Total:* ~10 weeks for an experienced SNARK engineer.
+
+** Wallet & UX
+
+   - Note scanning / recognition for Type 3 (stealth-address scan):
+     ~1 week.
+   - Type 1 self-mint-to-private-address flow (Wormhole replacement): ~1 week.
+   - Type 2 cheque creation and deposit UX: ~2 weeks.
+   - Type 3 targeted-note UX: ~2 weeks.
+   - Prover service integration for thin clients: ~2-3 weeks.
+
+   *Total:* ~8 weeks for a wallet team.
+
+** Cross-Checks and Audit
+
+   - Cryptographic review of the unified spend circuits: 4 weeks,
+     external auditor with SNARK-circuit expertise.
+   - Economic model validation (pool-rate demurrage in stress
+     scenarios: low turnover, high turnover, mint/deposit mismatch):
+     2 weeks.
+   - End-to-end fuzz and property-based testing: 2 weeks.
+
+   *Total:* ~8 weeks of external + internal audit.
+
+   Overall program estimate: 6-9 months of focused work to ship a
+   production-quality unified Notes system, subsuming Wormhole v1
+   and the BUCK Cash proposal into a single architecture.
+
+#+LATEX: \clearpage
+* Open Questions
+
+  The unified design resolves most of the architectural redundancy
+  but leaves a handful of economic and cryptographic questions worth
+  sharpening before commitment:
+
+** Pool-Rate Demurrage in Non-Equilibrium
+
+   Little's Law applies at steady state.  In the early life of the
+   pool -- where inflow vastly exceeds outflow -- \( \bar{a} \) is
+   near zero and depositors pay essentially no demurrage.  The
+   continuous Jubilee payment stream proceeds regardless, drawn from
+   the reserve.  During this phase the reserve is effectively
+   lending Jubilee its demurrage stream against future deposits.
+   This is fine as long as total inflow dominates outflow (which is
+   tautologically the case during a growing pool), but deserves
+   modelling.
+
+   The symmetric concern: a /shrinking/ pool (everyone depositing,
+   few minting) produces \( \bar{a} \) that grows faster than steady
+   state, so depositors near the end of a drawdown pay disproportionate
+   demurrage.  Again bounded; again worth modelling.
+
+** Stranded Collateral on Lost Notes
+
+   A genuinely lost note contributes forever to \( V(t) \) (and
+   therefore to the continuous Jubilee stream) but never returns to
+   the reserve.  The issuer's collateral covers this indefinitely.
+   Economic impact depends on the loss rate: at 1%/yr loss and 2%/yr
+   demurrage, the lost note's collateral has "paid for itself" (in
+   demurrage flow to Jubilee) in 50 years, identical to v1's
+   individual-decay horizon.  But the /principal/ never returns.
+
+   One cleanup path: a /reclaim/ mechanism where an issuer can,
+   after a very long period (say 99 years), submit a zero-knowledge
+   proof that a specific note commitment remains unspent and
+   reclaim the residual collateral less accumulated demurrage.
+   Requires the issuer to have retained the commitment data,
+   which is an issuer-side recordkeeping burden rather than a
+   protocol change.
+
+** Predicate Programmability vs. Circuit Simplicity
+
+   Keeping three fixed types simplifies the circuit count.  Adding
+   programmable predicates (time locks, oracle conditions,
+   multi-sigs) re-introduces the complexity of Cash Mode C.  A
+   compromise: support a /bounded/ predicate language in the circuit
+   (time-lock + oracle-condition + up-to-3-sig) rather than a fully
+   general one.  The bounded language covers 90%+ of the use cases
+   Mode C was designed for while keeping the verifier compact.
+
+** Universal Spend Circuit vs. Three
+
+   Deploying three distinct spend verifiers costs gas per transaction
+   (one verifier per call).  A universal verifier that takes =type=
+   as a public input and branches internally costs a larger but
+   single verifier.  Gas trade-off depends on production transaction
+   mix; if Type 1 dominates (Wormhole-style), three verifiers are
+   cheaper.  Empirical question, resolvable at deployment time.
+
+** Regulatory Interaction with Pool-Rate Demurrage
+
+   Jurisdictional regulators (FINTRAC, OSFI) have rules around
+   bearer instruments and tax treatment of negative-interest
+   accounts.  BUCK's on-chain demurrage was argued through
+   separately.  The pool-rate variant, where an issuer's collateral
+   is continuously paying demurrage on behalf of absent holders, is
+   a novel economic structure that may warrant a separate regulatory
+   conversation.  Not blocking but worth flagging.
+
+#+LATEX: \clearpage
+* Summary
+
+  The Wormhole and BUCK Cash designs converge naturally on a single
+  note-pool primitive.  Three Identity-binding types --
+  Encrypted-Issuer (Type 1, Wormhole-style), Public-Issuer (Type 2,
+  signed cheque), Stealth-Targeted (Type 3, addressed cheque) --
+  together span every use case in the existing series while removing
+  the burn-address / =_mint_noincrease= machinery, the per-certificate
+  Identity registration, and the separate Cash Mode A/B/C taxonomy.
+
+  Demurrage becomes a pool-level obligation: depositors pay the
+  /current pool-average age/ rate at redemption, not their own note's
+  accrued age.  In a steady-state high-turnover pool this rate is
+  small (~1% against a note held for any duration, regardless of
+  individual holding period), and Little's Law guarantees aggregate
+  conservation of the Jubilee flow.  The economic burden of
+  demurrage shifts from holders to issuer collateral -- a
+  redistribution within the same cohort, neutral in aggregate.
+
+  The printer-trust distinction produces a sharp partition of which
+  note types are safe for long-term holding: only /Type 1/ (issuer =
+  beneficiary) and /Type 3/ (stealth-targeted to beneficiary) can be
+  held for arbitrary durations.  /Type 2/ is cryptographically a
+  short-term instrument regardless of how long a user might wish to
+  keep it, because the issuer retains the spending secret.  This is
+  an intrinsic property that cannot be remedied by additional
+  cryptography; it follows directly from the Type 2 identity payload
+  carrying the issuer's public identity and no recipient-binding.
+
+  Pure-bearer notes (Cash Mode A) are not replaced by any
+  cryptographic Type; they remain the domain of physical trust
+  models (tamper-evident seals, trusted printers).  This is a
+  philosophical refinement of the Cash proposal rather than a
+  retreat: Cash Mode A already relied on a physical hologram for
+  its security, and the unified design makes the physical/crypto
+  boundary explicit.
+
+  No novel cryptographic assumption is introduced.  Theorems 6 and
+  7 of the Proofs document ([[file:alberta-buck-proofs.org][Proofs]]) apply verbatim to the Type 1
+  and Type 3 spend predicates, respectively; Type 2 reduces to
+  Schnorr.  The only new circuit-level primitive is Poseidon, which
+  is already standard across the SNARK ecosystem.  Implementation
+  scope is 6-9 months for a focused team.
+
+  The unification is, in the small, a refactor that removes
+  redundancy.  In the large, it crystallises the Alberta Buck design
+  around a single cryptographic primitive (the note pool) whose
+  Identity-binding dimension produces the full range of financial
+  instruments the series aspires to, and whose economic
+  dimension (pool-rate demurrage) elegantly solves the lost-note
+  problem that motivated the original BUCK Cash demurrage discussion.
+
+* Footnotes
+
+[fn:little] Little, J. D. C.  "A Proof for the Queueing Formula:
+\( L = \lambda W \)."  /Operations Research/ 9(3): 383-387 (1961).
+The pool-demurrage conservation argument is a direct application:
+\( V(t) = \delta(t) \cdot \bar{a}(t) \) relates the mean population,
+mean throughput, and mean residence time.  In our setting,
+\( V = \) outstanding BUCK in the pool, \( \delta = \) BUCK-per-year
+deposit rate, \( \bar{a} = \) mean age of a note at deposit, and
+the demurrage balance \( \kappa \delta \bar{a} = \kappa V \) follows
+from Little's Law instantaneously at equilibrium.
+
+[fn:zerocash] Ben-Sasson, E., Chiesa, A., Garman, C., Green, M.,
+Miers, I., Tromer, E., Virza, M.  "[[https://eprint.iacr.org/2014/349.pdf][Zerocash: Decentralized
+Anonymous Payments from Bitcoin]]."  IEEE S&P 2014.  The
+commitment-and-nullifier UTXO primitive used here.
+
+[fn:aztec] Williamson, Z., et al.  "[[https://aztec.network/][Aztec Protocol]]"
+(2018-).  The predicate-encrypted-notes model that inspired BUCK
+Cash's Mode C and informs the unified spend-circuit design.
+
+[fn:poseidon] Grassi, L., Khovratovich, D., Rechberger, C., Roy, A.,
+Schofnegger, M.  "[[https://eprint.iacr.org/2019/458.pdf][Poseidon: A New Hash Function for
+Zero-Knowledge Proof Systems]]" (USENIX Security 2021).  The
+SNARK-friendly hash used for commitments, nullifiers, and Merkle
+path computation.
+
+[fn:cryptonote] van Saberhagen, N.  "[[https://web.archive.org/web/20201028121818/https://cryptonote.org/whitepaper.pdf][CryptoNote v 2.0]]" (2013).
+The stealth-address construction used for Type 3 notes, with the
+security argument made explicit in Proofs Theorem 7.
+
+[fn:ps-wormhole] Pointcheval, D. and Sanders, O.  "Short Randomizable
+Signatures."  CT-RSA 2016.  The issuer-credential signature scheme
+used at BUCK registration time, unchanged here.
+
+[fn:cash-doc] See [[file:alberta-buck-cash.org][alberta-buck-cash.org]] ("The Alberta Buck -
+Cash") for the original three-mode proposal this document unifies
+with the Wormhole design.
+
+[fn:wormhole-doc] See [[file:alberta-buck-wormhole.org][alberta-buck-wormhole.org]] ("The Alberta
+Buck - Wormhole") for the burn-address architecture this document
+supersedes.  The "Global Commitment Pool: One Burn, Many Spends"
+section of that document is the direct predecessor of the present
+unification.
+
+[fn:proofs-doc] See [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] ("The Alberta Buck
+- Formal Correctness Proofs") for the Theorems 6 and 7 on which the
+Type 1 and Type 3 spend predicates rely.
+
+[fn:identity-doc] See [[file:alberta-buck-identity.org][alberta-buck-identity.org]] ("The Alberta
+Buck - Identity") for the PS signature, ElGamal credential, and
+Chaum-Pedersen re-encryption primitives used throughout.
