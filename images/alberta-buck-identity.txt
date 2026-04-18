@@ -8,6 +8,8 @@
                                2026-04-08
 
 
+<https://perry.kundert.ca/images/dominion-logo.png>
+
 Alberta Buck transactions carry provably authentic identity – without
 exposing it.  Every participant holds an ElGamal ciphertext[1] of their
 identity, backed by a Pointcheval-Sanders rerandomizable signature[2].

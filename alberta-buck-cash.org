@@ -1,0 +1,1186 @@
+#+TITLE: The Alberta Buck - Cash (DRAFT v0.1)
+#+SUBTITLE: Printable Bearer Notes, Targeted Gifts, and Programmable Money
+#+author: Perry Kundert
+#+date: 2026-04-17
+#+category: Alberta Buck
+#+series[]: Alberta-Buck
+#+series_order: 17
+#+weight: 18
+#+draft: false
+#+bucky: true
+#+math: true
+#+description: BUCK Cash extends the Alberta Buck identity and wormhole machinery into printable bearer instruments -- physical paper notes carrying QR-encoded cryptographic openings of pool commitments.  Three modes emerge from the same primitive: pure bearer (anyone with the QR can deposit, like a $20 bill), recipient-targeted (only a specific identity can deposit, like a personal cheque), and programmable (time-locked, oracle-conditioned, multi-sig).  Demurrage solves physical cash's lost-note problem: notes age in your pocket exactly as on-chain balances do, so hoarded or lost notes naturally return value to the commons.  Issuance is on chain and identity-bound (selective disclosure for regulators); circulation is private (cash-like).  Builds on Chaum's blind-signature e-cash (1982), Brands' offline divisible coins (1993), Casascius coins (2011), and Zerocash's commitment-and-nullifier model (2014), but is the first design where the bearer instrument is a first-class native primitive integrated with system identity, demurrage, and reserve mechanics.
+#+EXPORT_FILE_NAME: ./images/alberta-buck-cash
+#+STARTUP: org-startup-with-inline-images inlineimages
+#+STARTUP: org-latex-tables-centered nil
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+#+OPTIONS: toc:nil
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+#+LATEX_HEADER: \usepackage{draftwatermark}
+#+LATEX_HEADER: \usepackage{amsmath,amsthm,amssymb}
+
+#+ATTR_LATEX: :width 10cm
+[[https://perry.kundert.ca/images/dominion-logo.png]]
+
+#+BEGIN_ABSTRACT
+For forty years cryptographers have tried to digitize physical cash and failed.  Chaum's
+DigiCash (1990s) had the mathematics but went bankrupt for want of merchant adoption.
+Bitcoin gave us digital scarcity but has no native bearer-paper form -- Casascius coins
+and BIP-38 paper wallets are aftermarket wrappers, not first-class instruments.  Central
+bank digital currencies threaten the opposite: digital surveillance with no bearer privacy
+at all.
+
+The Alberta Buck identity, wormhole, and reserve machinery -- combined with one new primitive, a
+global commitment pool ([[https://perry.kundert.ca/range/finance/alberta-buck-wormhole/#global-committment-pool][Wormhole "Global Commitment Pool"]]) -- finally permit a /native/
+digital-physical bridge.  A *BUCK Note* is a slip of paper carrying a QR-encoded opening of an
+on-chain commitment.  The same cryptographic primitive instantiates three radically different
+financial instruments depending on the spend predicate baked into the commitment:
+
+- *Bearer notes* (Mode A): anyone who scans the QR can deposit.  Walking-around money.
+- *Targeted notes* (Mode B): only a specific identity can deposit.  Private gifts;
+  cold-storage.
+- *Programmable notes* (Mode C): time-locked, oracle-conditioned, multi-signature.
+  Escrow, traveler's cheques, conditional payouts.
+
+Demurrage -- the same mechanism that drives BUCK circulation on chain -- solves
+physical cash's oldest problem: lost notes.  A BUCK Note ages in your pocket at the
+same rate a wallet balance does.  After 50 years, a forgotten note's full value has
+returned to the Jubilee account and been redistributed to issuers.  The 5-10% of
+physical currency that humanity loses every century is no longer a permanent monetary
+extraction -- it is a temporary loan to the holder, repaid by demurrage.
+
+Issuance is on chain and identity-bound; circulation is private and offline; deposit
+finality is cryptographic.  Regulators retain selective-disclosure access to the
+issuance trail without observing day-to-day circulation.  This is stronger compliance
+than physical cash provides today, and stronger privacy than any CBDC has ever
+proposed. ([[https://perry.kundert.ca/images/alberta-buck-cash.pdf][PDF]],
+[[https://perry.kundert.ca/images/alberta-buck-cash.txt][Text]])
+#+END_ABSTRACT
+
+#+LATEX: \clearpage
+#+TOC: headlines 3
+
+#+LATEX: \clearpage
+* The Cash Paradox
+
+Physical cash is simultaneously irreplaceable and impossible to digitize.
+
+It is irreplaceable because it does things no digital instrument has ever matched.
+A $20 bill works without a network, a battery, a bank, an ID check, or a counterparty
+to your transaction.  It clears instantly, finally, and without fees.  It is the
+single most successful monetary instrument in human history -- so successful that
+roughly half the value of US currency in circulation is held overseas as a global
+store of value, in defiance of every theoretical reason it shouldn't be.[fn:cashshare]
+
+It is impossible to digitize because every attempt has reproduced the surveillance
+properties of bank money instead of the privacy properties of cash.  Modern card
+networks log every transaction.  Bank wire transfers require both parties to be
+identified.  Stablecoins record every transfer publicly on chain.  Central bank
+digital currencies, where they exist or are being designed (China's e-CNY,
+Europe's digital euro proposals), are explicitly programmable surveillance tools --
+the central bank can see, restrict, expire, or geofence any holder's balance at
+will.[fn:cbdc]
+
+The closest existing analogues to digital cash are aftermarket bearer wrappers
+around cryptocurrencies: Casascius physical Bitcoin coins (2011-2013), OpenDime
+USB sticks, BIP-38 paper wallets, and the various scratch-card "crypto gift cards"
+sold at convenience stores.  These work, technically -- a Casascius coin is a
+genuine bearer instrument -- but they are workarounds, not designs.  The underlying
+token (Bitcoin) does not natively understand bearer-paper form.  Loss of the
+physical coin is permanent loss of the value.  Counterfeiting requires faith in
+the manufacturer's hologram, not in the cryptography.[fn:casascius]
+
+What if the bearer-paper form were a /first-class/ instrument of the system?
+Designed in from the start, with the same cryptographic and economic properties
+as on-chain balances, integrated with the identity and reserve mechanics that
+already exist?
+
+That is BUCK Cash.
+
+** Why Forty Years of Trying
+
+David Chaum invented digital cash in 1982 with the blind-signature e-cash
+scheme.[fn:chaum82]  By 1989 he had founded DigiCash to commercialize it.  By 1998
+DigiCash was bankrupt -- not because the cryptography failed (it worked), but because
+no merchant wanted to be the first to accept it and no consumer wanted to be the
+first to hold it.  The two-sided market never bootstrapped.
+
+Stefan Brands extended Chaum's work in 1993 with offline divisible coins that revealed
+the spender's identity if (and only if) they double-spent.[fn:brands93]  Camenisch,
+Hohenberger, and Lysyanskaya improved on this in 2005 with compact divisible
+e-cash.[fn:chl05]  None of these schemes ever shipped in production at scale.
+
+Bitcoin, when it arrived in 2009, was deliberately /not/ digital cash in the Chaumian
+sense.  It was digital scarcity with public ledger transparency -- closer to digital
+gold than digital cash.  The bearer-paper market that grew up around it (Casascius,
+OpenDime, paper wallets) was an afterthought, not a design goal.
+
+Zerocash (2014)[fn:zerocash] and its production deployment as Zcash gave us the
+first scalable on-chain commitment-and-nullifier UTXO model -- the cryptographic
+primitive that BUCK Notes use.  Zcash showed that you can have private on-chain
+balances; it did not extend that to printable physical bearer instruments.  Aztec
+extended the model with predicate-encrypted notes for private smart contract calls,
+but again, no paper.
+
+The reason all of this never produced "BUCK Cash" -- a printable, demurrage-aware,
+identity-aware bearer instrument -- is that it required four pieces to come together
+simultaneously, and they did not until now:
+
+1. A *commitment-and-nullifier UTXO model* on a smart contract platform
+   (Zerocash gave us this in 2014; Aztec deployed it on Ethereum in 2018-2020).
+
+2. A *cryptographic identity layer* that lets some notes be targeted to a specific
+   recipient and others be left bearer (the BUCK identity system, with PS signatures,
+   ElGamal credentials, and Chaum-Pedersen re-encryption).
+
+3. A *demurrage mechanism* that solves the lost-cash problem and gives bearer notes
+   a finite lifespan (BUCK's demurrage and Jubilee are unique among monetary systems).
+
+4. A *jurisdictional reserve* that backs the value, so the bearer note represents a
+   real claim on real assets, not a speculative crypto-token whose price might collapse
+   between print and deposit (Alberta Buck's commodity-basket-stabilized reserve and
+   the BuckK PID controller).
+
+Alberta Buck has all four.  No prior system had all four.  That is why BUCK Cash is
+a /design/, not a workaround.
+
+* The Primitive: A BUCK Note
+
+A BUCK Note is, physically, a slip of paper -- or a card, or a steel plate, or a
+QR sticker on a fridge magnet.  Cryptographically, it is a tuple:
+
+#+begin_example
+(secret s, value v, age_at_print, t_print, predicate P, merkle_path)
+#+end_example
+
+These six values are encoded as a QR code (or NFC payload, or printed digits, or all
+three for redundancy).  The slip of paper is the bearer instrument.
+
+On chain, the BUCK contract maintains a Merkle tree of *note commitments*.  Each
+commitment is computed as:
+
+\[
+cm \;=\; H(s,\; v,\; age_{0},\; t_{print},\; P)
+\]
+
+where \( H \) is a SNARK-friendly hash (Poseidon or Pedersen, per the wormhole
+construction).  When a holder wants to deposit a note, they:
+
+1. Scan the QR code into their wallet app
+2. The app constructs a SNARK proving:
+   - Knowledge of \( (s, v, age_0, t_{print}, P) \) opening some commitment in the tree
+   - That the predicate \( P \) evaluates to true under the spender's witness
+   - That the destination mint amount equals \( v \) less accumulated demurrage
+3. The app submits the SNARK + a fresh nullifier \( nf = \text{PRF}(s) \) to the chain
+4. The contract verifies the proof, checks that \( nf \) is unspent, marks it spent,
+   and mints to the spender's account
+
+The contract sees only "valid SNARK + fresh nullifier + mint amount + recipient."  It
+does not see which commitment was opened, who the original printer was, or what kind
+of note this is.
+
+The note is now permanently dead.  The paper is just a piece of paper.  Tearing it in
+half is a *human* signal of finality, not a cryptographic one -- but it's a useful
+ritual to prevent confused future holders from trying to redeposit a dead QR.
+
+** Counterfeiting is Cryptographically Impossible
+
+A "fake" BUCK Note is just a random QR code.  Its claimed commitment does not appear
+in the on-chain tree.  The Merkle inclusion proof inside the SNARK fails.  No mint
+occurs.
+
+This is a stronger anti-counterfeit guarantee than the Bank of Canada provides for
+physical $20 bills.  Polymer banknotes can be counterfeited (the techniques are
+well-published; the question is only whether the counterfeit passes casual
+inspection).  A BUCK Note cannot be counterfeited at all -- the commitment registry
+is the authentic-bill list, and there is no inspection threshold to deceive.
+
+Wallet apps that scan a BUCK Note display its status immediately:
+
+#+LATEX: {\scriptsize
+| Display             | Meaning                                                       |
+|---------------------+---------------------------------------------------------------|
+| =VALID: 1,000 BUCK= | Commitment in tree, nullifier unspent                         |
+| =DEAD=              | Commitment in tree, nullifier already spent                   |
+| =FAKE=              | Commitment not in tree                                        |
+| =EXPIRED=           | Predicate includes an expiry that has passed                  |
+| =NOT FOR YOU=       | Predicate is targeted (Mode B), and you are not the recipient |
+#+LATEX: }
+
+Casual users do not need to understand the underlying cryptography any more than
+they need to understand the security features of a $20 bill.  They scan, see VALID,
+and accept the note as payment.
+
+* The Three Modes
+
+The same primitive instantiates three radically different financial instruments
+by varying the spend predicate \( P \).
+
+** Mode A: Bearer Notes ("Cash")
+
+The simplest predicate:
+
+\[
+P(\text{witness}) \;=\; \text{true if the witness reveals } s
+\]
+
+Anyone who knows \( s \) can spend the note.  This is exactly how a $20 bill works:
+the note is bearer, possession is the entirety of ownership, no identity is checked,
+finality is immediate.
+
+The cryptographic risk that physical cash does not have: anyone who *photographs*
+a bearer QR can spend it.  No physical possession is required.  A merchant's
+security camera that captures the back of a note while you tap-to-pay is a credible
+threat.  This is solvable, but requires that bearer notes be printed under a
+*tamper-evident seal*:
+
+- A peelable hologram covering the QR (the Casascius pattern -- the act of peeling
+  is the act of taking ownership)
+- A scratch-off panel covering a separate one-time code that must be combined with
+  the QR to spend (lottery-card pattern; lets the note be displayed without being
+  live)
+- A laminated sleeve that visibly damages on opening (mechanical seal, no electronic
+  components)
+
+A bearer note that has not yet had its seal broken is "in print but not yet alive."
+Once the seal is broken, the QR is exposed and the note becomes spendable by whoever
+holds it.  This restores the physical-exclusivity property of paper cash.
+
+The race condition that emerges if two people somehow both photograph an unsealed
+bearer QR is *exactly* the race that occurs if two people both find the same $20
+on the sidewalk: first to grab it (first to broadcast the spend transaction) owns it.
+The chain enforces atomic finality.
+
+#+begin_quote
+*Use cases*: tipping; small purchases; emergency money for travel; "kid's allowance"
+in physical form; merchant change-making; pocket-cash distributions in cash-poor
+communities.
+#+end_quote
+
+** Mode B: Targeted Notes ("Personal Cheques")
+
+A more interesting predicate:
+
+\[
+P(\text{witness}) \;=\; \text{true if the witness reveals } s \text{ AND proves knowledge of } sk \text{ for } pk^*
+\]
+
+where \( pk^* \) is a *stealth address* derived as
+
+\[
+pk^* \;=\; H(s) \cdot pk_{\text{recipient}}
+\]
+
+This binds the spendability to a specific identity without revealing whose identity it
+is to anyone reading the QR.  Anyone can scan the note; only the recipient can prove
+knowledge of \( sk \) for \( pk^* \) (because \( sk^* = H(s) \cdot sk_{\text{recipient}} \)
+and only the recipient knows \( sk_{\text{recipient}} \)).
+
+The stealth address pattern is borrowed from Monero[fn:cryptonote] and Zcash
+shielded addresses.  It guarantees that the note's targeting is *not observable on
+chain* until the recipient deposits.  An attacker examining the commitment tree
+cannot tell which notes are bearer, which are targeted, or to whom the targeted
+ones are addressed.
+
+The cryptographic machinery that makes this work -- specifically, the Chaum-Pedersen
+proof of equality of discrete logarithms -- is *exactly the same* machinery used in
+the BUCK Identity protocol's =approve= flow ([[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]]).
+Mode B targeting is not a new cryptographic component; it is a re-application of an
+existing one.
+
+#+begin_quote
+*Use cases*: gift cards; remittances to family abroad; private payments to specific
+counterparties; cold-storage savings targeted to your own future identity; estate
+planning (notes targeted to heirs, stored in a safe-deposit box); donations to
+specific charities without observable on-chain transfers.
+#+end_quote
+
+*** Untraceable Targeted Transfer
+
+The most novel use of Mode B: an untraceable transfer between two consenting
+identities.
+
+Alice wants to send 1,000 BUCK to Bob without producing any observable on-chain link
+between them.  She prints a Mode B note targeted to Bob's identity, hands him the
+paper (or sends him a photograph of the QR), and Bob deposits it.
+
+The on-chain history shows:
+- Alice's account decremented by 1,000 BUCK at the burn (issuance) step
+- One commitment added to the tree
+- Some time later, a SNARK consumes some commitment from the tree, mints to Bob's
+  account
+
+There is no link between Alice's burn and Bob's mint /except/ the temporal correlation,
+which is dissolved by the size of the global anonymity set.  If a thousand other
+people are also burning and minting around the same time, Alice's transfer is
+indistinguishable from any of theirs.
+
+This is *better than physical cash* in one respect: physical cash transfers are
+traceable to the bank ATM where the cash was withdrawn, if the bank chooses to
+correlate serial numbers.  BUCK Cash transfers are not traceable to the issuing
+account by anyone, including the issuer themselves, after the issuance step
+completes.
+
+** Mode C: Programmable Notes ("Smart Cheques")
+
+The fully general case: \( P \) is an arbitrary boolean predicate over public state
+and private witness data.
+
+\[
+P(\text{witness, public state}) \;=\; \text{any SNARK-encodable boolean function}
+\]
+
+Examples worth singling out:
+
+#+LATEX: {\scriptsize
+| Predicate                                          | Instrument                                  |
+|----------------------------------------------------+---------------------------------------------|
+| =know(s) AND own(pk*)= AND =t > t_unlock=          | Time-locked targeted note (savings)         |
+| =know(s) AND own(pk*)= AND =t < t_expiry=          | Expiring gift card                          |
+| =know(s) AND multisig(pk_1, ..., pk_k of n)=       | Notarized escrow                            |
+| =know(s) AND oracle(BTC_price > X)=                | Conditional payout / prediction voucher     |
+| =know(s) OR (own(pk_issuer) AND t > t_recovery)=   | Recoverable bearer note (issuer can recall) |
+| =know(s) AND (own(pk_a) OR own(pk_b))=             | Either-of-two recipients                    |
+| =know(s) AND signature(pk_authority, transaction)= | Authority-cosigned transfer                 |
+#+LATEX: }
+
+The contract does not need to understand any of these.  It sees only a SNARK proving
+"I opened a commitment in the tree and its predicate evaluates to true under my
+witness."  The predicate logic is entirely inside the SNARK circuit, written by the
+note's printer at issuance time.
+
+This is the substrate for BUCK Cash to extend beyond simple notes into a full family
+of programmable financial instruments, all sharing the same on-chain footprint and
+the same privacy properties.
+
+#+begin_quote
+*Use cases*: traveler's cheques (recoverable by issuer if lost, claimable by holder
+otherwise); inheritance instruments (claimable by heir after probate date); insurance
+payouts (claimable on oracle-confirmed event); escrow for real-estate closings;
+conditional bonuses (claimable if performance metric oracle-attested); payment
+streams (claimable in increments over time); subscription pre-pays (claimable by
+service provider in periodic increments).
+#+end_quote
+
+* Demurrage Solves the Lost-Cash Problem
+
+This is the part of BUCK Cash that I think is genuinely novel, and I want to spend
+some time on it because it has implications well beyond the BUCK system.
+
+** The Hidden Inflation of Lost Cash
+
+Every monetary system that uses physical bearer instruments suffers a constant slow
+loss to *unrecoverable currency*.  Banknotes are lost in fires, dropped down storm
+drains, forgotten in the pockets of jeans that get washed and shredded, buried in
+landfills, sealed in walls, hidden by the elderly and forgotten by their heirs.
+
+The Federal Reserve estimates that 5-10% of US paper currency is permanently
+unrecoverable at any given moment.[fn:lostcash]  At a US M0 of approximately
+$2.3 trillion, this represents *$115-230 billion in permanently extracted value* --
+seigniorage to the Federal Reserve, since the lost notes never get redeemed but the
+backing assets remain on the Fed's books.
+
+This is not theft, but it is not neutral either.  Lost cash is a regressive transfer:
+the people most likely to lose cash are the people who use cash most (the elderly,
+the unbanked, low-income workers paid in cash).  The beneficiary is whoever issued
+the cash, generally the central bank, ultimately the government.
+
+For private bank-issued cash (historical era; modern era in unusual cases like the
+Royal Bank of Scotland's banknotes still in circulation), the same dynamic applies
+to the issuing bank.  Lost notes are pure profit.
+
+** What Demurrage Does
+
+A BUCK Note carries two timestamps:
+- \( age_0 \): the BUCK-age the printer chose to bake into the note at issuance
+  (typically 0 for "fresh", but could be positive to absorb a fractional remainder)
+- \( t_{print} \): the block timestamp at which the note was printed
+
+When the note is deposited at time \( t_{spend} \), the SNARK enforces:
+
+\[
+v_{\text{deposited}} \;=\; v - 0.02 \times \bigl(age_0 + v \cdot (t_{spend} - t_{print})\bigr)
+\]
+
+In English: the note's effective value decreases by 2% of its face value per year of
+elapsed time since printing.  A 1,000 BUCK note printed today and deposited in five
+years deposits as 900 BUCK.  In 25 years it deposits as 500 BUCK.  In 50 years it is
+worthless.
+
+The 50 BUCK of demurrage on a five-year-old note does not vanish.  It flows to the
+*Jubilee account* described in [[https://perry.kundert.ca/range/finance/alberta-buck-wormhole][Wormhole]],
+which redistributes it pro rata to the issuers who pledged collateral to mint the
+original BUCK supply.
+
+** What This Means for Lost Notes
+
+A BUCK Note that is lost in a fire, dropped down a storm drain, or hidden in a wall
+by a paranoid grandparent is *not* permanently extracted from the system.  Its value
+decays to zero over 50 years, and during that decay, every BUCK of value lost to
+demurrage is automatically redistributed to BUCK issuers via the Jubilee account.
+
+The 5-10% of currency that physical cash systems lose forever -- BUCK Cash returns
+to the commons within a generation.
+
+This has cascading consequences:
+
+1. *Money supply self-correction.*  No system-wide accounting tail of "missing"
+   currency that the central authority must track and write off.  Lost notes write
+   themselves off automatically.
+
+2. *Anti-hoarding incentive matches on-chain balances.*  A BUCK held in your wallet
+   or in your pocket as cash decays at the same rate.  There is no advantage to
+   converting on-chain BUCK to physical cash to evade demurrage; the demurrage clock
+   runs the same way in both forms.
+
+3. *Inheritance is automatic.*  A grandparent who hides 100,000 BUCK in cash and
+   forgets to tell anyone does not extract 100,000 BUCK from the economy on their
+   death.  Over the following 50 years, the value flows back to the Jubilee
+   distribution -- which (since BUCK issuers tend to be Albertan asset owners
+   pledging real wealth) means it flows back, broadly, into the same economy where
+   the grandparent originally earned it.
+
+4. *No central bank profit from currency loss.*  The seigniorage that accrues to
+   central banks today from unrecoverable cash does not exist in BUCK Cash.  Lost
+   value does not benefit the issuer; it benefits the system as a whole.
+
+5. *Counterfeit-recovery is automatic.*  Even if a note printed years ago is
+   somehow forged (which is cryptographically impossible, but humour the
+   counterfactual), the value at stake is bounded by the demurrage decay.  An
+   attacker forging old notes would be forging worthless paper.
+
+This is, I believe, the first monetary system in history where lost cash returns
+to the commons by automatic mechanism rather than by accounting fiat.  It is a
+property that physical cash cannot have, because physical cash has no clock.  It
+emerges naturally from BUCK's existing demurrage mechanism applied to the
+note-as-commitment primitive.
+
+** The Symmetry With On-Chain Balances
+
+A second elegance worth pointing out: the demurrage rate on a BUCK Note is /the same/
+as the demurrage rate on an on-chain BUCK balance.  This is by design, and it
+matters.
+
+If physical BUCK Cash demurraged faster than on-chain BUCK, holders would prefer
+on-chain (and bearer cash would be discouraged, defeating the design's purpose).  If
+on-chain BUCK demurraged faster than physical Cash, holders would race to print all
+their on-chain balances as physical notes (and the chain would lose its primary use
+as a settlement layer).
+
+The matching demurrage rate makes the choice between on-chain and physical purely
+about *use case fit*: on-chain for routine commerce, automated payments, large
+transactions; physical for offline payments, gifts, savings under the mattress,
+disaster preparedness, and so on.  Neither form is privileged by the demurrage
+mechanism.
+
+* Physical Security Model
+
+The cryptography only protects what the cryptography touches.  The physical paper
+itself needs a security model.  This section sketches one.
+
+** Layered Defense
+
+A printed BUCK Note has three concentric layers of security:
+
+#+LATEX: {\scriptsize
+| Layer                   | What it protects                               | Mechanism                                                     |
+|-------------------------+------------------------------------------------+---------------------------------------------------------------|
+| Inner: secret           | The cryptographic ability to spend             | QR code containing \( s \)                                    |
+| Middle: physical seal   | Bearer-mode exclusivity                        | Hologram, scratch-off, laminate sleeve                        |
+| Outer: identity binding | Mode B targeting (only intended holder spends) | Stealth address \( pk^* = H(s) \cdot pk_{\text{recipient}} \) |
+#+LATEX: }
+
+The inner layer is the cryptographic core: as long as \( s \) is unknown, the note
+cannot be spent.  This is unconditional protection against any threat that does not
+include observing \( s \).
+
+The middle layer is what makes bearer mode safe to circulate.  An unsealed Mode A
+note is photographable, and once photographed by any observer, that observer can
+race to spend it.  Sealing the QR under a tamper-evident covering means the note can
+be displayed (passed hand-to-hand, stored in a wallet, mailed in an envelope)
+without exposure.  The seal must visibly damage on opening so that recipients can
+verify they were the first to expose the secret.
+
+The outer layer is what makes Mode B notes safe to *publicly* distribute.  A Mode B
+note can be photographed with no security implication: the photographer cannot spend
+it without also possessing \( sk_{\text{recipient}} \).  The targeting binding is
+cryptographic, not physical.
+
+** Recommended Manufacturing Profile
+
+A practical BUCK Note specification, suitable for industrial-scale printing:
+
+- *Substrate*: cotton-blend banknote paper or polymer (Bank of Canada-style).  Steel
+  or titanium plates for high-denomination "permanent" notes.
+
+- *Printing*: standard inkjet or laser printing of QR codes is sufficient for
+  cryptographic correctness.  For visual anti-confusion (so people can tell a
+  legitimate note from a printout), use UV-reactive ink, microprinting, or
+  watermarks -- the same techniques used for traditional banknotes.  These do not
+  add cryptographic security; they add *reassurance*.
+
+- *Seal*: peelable hologram covering the secret QR (Mode A), or scratch-off panel
+  covering a separate code (also Mode A), or no seal at all (Mode B and Mode C,
+  since the cryptography handles exclusivity).
+
+- *Redundancy*: print the QR twice (front and back) with Reed-Solomon error
+  correction.  A note that loses one QR to wear or damage can still be deposited
+  via the second.  For higher-value notes, also print the secret as base32 digits in
+  human-readable form.
+
+- *Issuer mark*: a non-cryptographic logo identifying the issuer (the Alberta Buck
+  reserve, a credit union, a commercial issuer).  This is for visual recognition
+  only; the cryptographic authenticity check is the on-chain commitment.
+
+- *Denomination indication*: visible face value (1, 5, 10, 100, 1,000, 10,000 BUCK)
+  for human convenience.  The actual value is what the on-chain commitment encodes;
+  the printed face value is metadata.  A wallet app that scans an apparent 1,000 BUCK
+  note and reads "actual value: 100 BUCK" warns the user before deposit.
+
+** The Wallet App
+
+The user-facing software is critical to the system's UX.  A reasonable wallet app
+flow when scanning a BUCK Note:
+
+1. Read the QR (or NFC payload, or human-typed digits)
+2. Query the chain for the commitment's status:
+   - In tree, nullifier unspent → VALID
+   - In tree, nullifier spent → DEAD
+   - Not in tree → FAKE
+3. Check the predicate:
+   - Mode A (bearer) → "Tap to Deposit"
+   - Mode B (targeted) → if your stored identity matches \( pk^* \), "Tap to Deposit";
+     else, "Not For You"
+   - Mode C (programmable) → display the predicate in plain English, gate appropriately
+4. On Deposit: construct the SNARK locally (or via a delegated prover service for
+   thin clients), submit the transaction, display the result
+
+This is a smartphone-class workload.  SNARK construction for a single-note deposit
+is on the order of seconds on a modern phone (Aztec's Noir compiler and Zcash's
+Halo2 prover both run on mobile).
+
+* Use Cases
+
+The same primitive serves a spectrum of use cases that today require entirely
+separate financial instruments.
+
+** Walking-Around Money
+
+Print 100 x 10-BUCK bearer notes, fold them into your wallet, hand them out as
+cash.  Recipients deposit when convenient or pass them on as change.  The notes age
+at 2% per year, encouraging rapid circulation rather than hoarding.
+
+This is the simplest use case and the closest analogue to a $20 bill.  The user
+experience is identical: hand someone paper, they have value.
+
+** Cross-Border Remittances
+
+A BUCK Note is just paper.  It crosses borders in pockets, envelopes, and parcels
+at zero marginal cost.  Mode B (targeted to recipient's identity) makes the transfer
+useless to anyone except the intended recipient, so loss in transit is not a
+financial risk.
+
+This compares favorably to the existing remittance industry, which extracts roughly
+6.5% in fees globally on $700+ billion in annual transfers.[fn:remit]  A BUCK Note
+remittance has a fixed cost: print + mail.  The mail might cost $1; print costs
+fractions of a cent; deposit gas costs a few dollars at most.  At any reasonable
+remittance value, the fee compression is enormous.
+
+The recipient does not need a smartphone or internet at the moment of receipt -- they
+need them only at the moment they want to convert the note to on-chain BUCK or to
+local fiat.  In countries with intermittent connectivity, this is a major usability
+improvement over digital remittance services.
+
+** Tip Jars and Charitable Donations
+
+A printed sheet of small-denomination Mode A notes, perforated for tear-off, can be
+left next to a tip jar or a donation box.  Patrons take notes (denominated at, say,
+2 BUCK each), scan them with their phone, and the value flows to the tip jar's
+identity address.
+
+This works without any intermediary, any payment processor fee, or any opening of an
+account.  The patron pays in physical cash; the recipient receives in on-chain BUCK.
+
+** Cold Storage and Disaster Preparedness
+
+A Mode C self-targeted note, time-locked until your future use, is a more durable
+form of cold storage than a 12-word seed phrase.  The note is *self-evidently* an
+instrument of value -- a customs officer, a relative, or your future self
+immediately recognizes a paper labeled "1,000 BUCK Note" as something worth keeping
+safe.  A seed phrase, by contrast, is opaque to anyone who has not been trained to
+recognize it.
+
+For disaster preparedness: a small folder of BUCK Notes in a fireproof safe survives
+infrastructure failures that would render exchange accounts and even hardware
+wallets unusable.  As long as the chain is reachable somewhere in the world, the
+notes can be deposited.  In a true grid-down emergency, the notes circulate
+hand-to-hand at face value (with the matching demurrage clock running uniformly,
+so prices remain stable in BUCK terms even during a multi-week outage).
+
+** Estate Planning
+
+Mode B notes targeted to your heir's identity, stored in a safe-deposit box: zero
+probate process, zero tax-event delay, zero court intervention.  The heir scans on
+your death, deposits, the BUCK is theirs.
+
+For larger estates: Mode C notes with a predicate like "spendable by heir after
+death-certificate oracle-attested" enable conditional inheritance without a lawyer.
+The oracle could be a probate court, a notary network, or a death-registry
+integration -- the SNARK does not care, as long as the predicate is well-defined.
+
+** Gift Cards Without Issuer Risk
+
+A traditional gift card carries the risk that the issuing merchant goes bankrupt
+between purchase and redemption (cumulative consumer losses to bankrupt gift-card
+issuers run into the hundreds of millions annually in North America[fn:giftcard]).
+A Mode B BUCK Note targeted to "anyone" (Mode A) or to the recipient's identity
+(Mode B) carries no issuer risk: the value is on chain in the BUCK reserve, not
+on the merchant's books.
+
+Specialized merchant gift cards become unnecessary -- replaced by BUCK Notes with a
+small denomination, optionally bundled with a paper merchant receipt indicating the
+intended use.
+
+** Tax-Compliant Compensation
+
+An employer paying a contractor in BUCK Notes faces the same tax-reporting
+obligations as paying in cash: payment is income, must be reported.  The on-chain
+issuance trail makes this easier to comply with than physical cash, not harder --
+the employer's burn transaction is an auditable record of the payment, even though
+the contractor's deposit is private.
+
+For employees: employers can issue Mode B notes targeted to each employee's
+registered identity, automating payroll while preserving employee privacy from
+external observers.
+
+** Underbanked and Cash-Economy Inclusion
+
+This is, perhaps, the most important use case.
+
+The Bank of Canada estimates 1-2% of Canadians are unbanked, with rates an order of
+magnitude higher in rural and Indigenous communities.[fn:unbanked]  Globally the
+World Bank estimates 1.4 billion adults are unbanked.[fn:globalunbanked]
+
+For these populations, physical cash is not a privacy preference; it is the only
+viable financial instrument.  A digital-only currency (CBDC, stablecoin, traditional
+e-payment) excludes them by definition.  BUCK Cash includes them: a person without
+a bank account, without a smartphone, without literacy in the local language, can
+hold and transfer BUCK Notes by physical handover, exactly as they hold and transfer
+paper currency today.
+
+When and if they choose to interact with the digital economy, they deposit a note
+and the value moves on chain.  Until then, they participate in the BUCK economy on
+exactly the terms they participate in the cash economy.
+
+* Selective Disclosure: Compliance Without Surveillance
+
+Bearer instruments are politically controversial.  Most jurisdictions either
+regulate them heavily (US bearer bonds were effectively abolished in 1982 by the Tax
+Equity and Fiscal Responsibility Act) or enforce strict reporting thresholds on
+large cash transactions (Canada's FINTRAC reports any cash transaction above
+$10,000).
+
+The concern is not bearer instruments per se; it is the *opacity to law enforcement
+and tax authorities* of large bearer-instrument flows.  Money laundering, sanctions
+evasion, and tax evasion all exploit bearer-instrument anonymity.
+
+BUCK Cash threads this needle in a way that physical cash and CBDCs both fail.
+
+** The Asymmetry: Issuance vs. Circulation
+
+Every BUCK Note's *issuance* is on chain and identity-bound.  When Alice burns
+5,000 BUCK from her registered identity to print five 1,000-BUCK Mode A notes, the
+chain records:
+
+- Alice's identity (via the existing PS signature + ElGamal credential machinery)
+- The amount burned
+- The block timestamp
+- Five new commitments added to the tree
+
+This record is *permanent* and *cryptographically traceable to Alice's identity*.
+
+The *circulation* of those notes -- who holds them, who passes them on, who
+eventually deposits them -- is private.  The chain sees only the deposit
+transaction, which reveals only the recipient's address (the depositor) and the
+amount.
+
+This produces an asymmetry:
+
+- *Anyone* can see that "5,000 BUCK was issued as five Mode A notes by [some
+  identity] at block 1,234,567"
+- *Only Alice or a regulator with Alice's selective-disclosure key* can see that
+  "the issuer was Alice"
+- *Nobody* can see who held the notes between issuance and deposit
+- *Anyone* can see "[some address] deposited a 1,000 BUCK Mode A note at block
+  1,234,890"
+
+Linking issuance to deposit requires either: temporal correlation (defeated by a
+sufficiently large global note pool), or knowledge of \( s \) (which only a holder
+of the note has at any given time).
+
+** The Regulatory Audit Path
+
+A regulator investigating illicit flows has a clean audit path:
+
+1. Identify a suspect deposit on chain (via subpoena to the depositing party's
+   identity, KYC obligations on the depositing wallet operator, etc.)
+2. Subpoena the issuer of any BUCK held by the suspect: the *issuer* is
+   identifiable from the on-chain issuance record (selective disclosure of the
+   issuer's identity)
+3. Examine the issuer's records for who they paid the note to (this is the issuer's
+   responsibility, the same way a bank that issues a cashier's cheque is responsible
+   for knowing who they issued it to)
+
+The audit path stops at the first hand-to-hand transfer (which is intentionally
+private, as physical cash is private).  But the *origination* of every note is
+traceable in a way that physical cash is not -- a $20 bill issued by the Bank of
+Canada is identical to every other $20 bill, with no per-bill issuance trail at all.
+
+** What Compliance Looks Like
+
+A reasonable regulatory regime around BUCK Cash:
+
+- *Issuers* (anyone who burns on-chain BUCK to mint notes) must be identity-registered
+  and may face reporting obligations on large issuances (analogous to current cash
+  withdrawal reporting)
+
+- *Depositors* (anyone who deposits a note to mint on-chain BUCK) face the same
+  reporting obligations as cash deposits at a bank today
+
+- *Holders* who simply pass notes hand-to-hand have no reporting obligation, the same
+  way you have no obligation to report having $200 in your wallet
+
+- *Demurrage rate* makes large-scale long-term cash hoarding economically unviable
+  (the 2%/year decay caps the value of cash-as-store-of-value at roughly the same
+  level as a moderate-yield savings account loses to inflation)
+
+This regime is *strictly more privacy-preserving* than the current Canadian dollar
+regime (which surveils every electronic transaction) and *strictly more
+compliance-friendly* than the current physical cash regime (which provides no
+issuance trail at all).
+
+** The CBDC Comparison
+
+China's e-CNY, the European Central Bank's proposed digital euro, the Bank of
+Canada's CBDC research -- all of these designs include either explicit or implicit
+surveillance capabilities.  The central bank can see, freeze, expire, restrict,
+geofence, or retroactively examine any holder's balance.[fn:cbdc]
+
+This is not an accident of the technology; it is a design goal.  The pitch to
+governments is precisely that CBDCs give them visibility into civilian payment
+flows that physical cash denies them.
+
+BUCK Cash is the opposite design.  Visibility is at the edges (issuance, deposit),
+not the center (circulation).  The issuer is identifiable, but only by selective
+disclosure with proper authorization (subpoena, court order, regulatory audit
+authority), not by everyday observation.  The bearer-circulation phase is private
+the way cash is private.
+
+A jurisdiction that adopts BUCK Cash gets *better compliance tools than physical
+cash provides today* without giving up *the privacy properties that make cash
+worth using*.  This is a genuine Pareto improvement on the current regulatory
+trade-off and would, I believe, be politically defensible to even cash-skeptical
+authorities.
+
+* Comparison With Prior Art
+
+This section places BUCK Cash in the lineage of digital cash designs from 1982 to
+the present, and identifies what each predecessor lacked.
+
+** Chaum's E-Cash (1982-1998)
+
+David Chaum's blind-signature scheme[fn:chaum82] introduced the core idea: an
+issuer (a bank) signs a token blinded by the holder so that the bank cannot link
+the issuance to the redemption.  When the holder spends the token, the merchant
+verifies the signature without revealing who originally received it.
+
+This is a beautiful design and operationally similar to BUCK Cash in spirit.  Its
+failures were *institutional*, not cryptographic:
+
+- Required a centralized issuer (the bank)
+- Required online verification at spend time (no offline transferability)
+- Two-sided market never bootstrapped (no merchants accepted, so no consumers held)
+- DigiCash (the commercial implementation) went bankrupt in 1998
+
+BUCK Cash has the same privacy properties without the centralized issuer (any
+identity-registered party can mint notes against their own collateral).  Spend-time
+verification is on chain rather than via the issuer (so the issuer cannot
+selectively block redemptions).  The two-sided market problem is mitigated by
+BUCK's existing on-chain ecosystem -- BUCK already exists as a usable currency, so
+adopting BUCK Cash is a UX upgrade rather than a greenfield bootstrapping.
+
+** Brands' Offline Divisible E-Cash (1993)
+
+Stefan Brands' scheme[fn:brands93] addressed the offline-spend problem: a
+divisible coin can be spent in pieces without contacting the issuer, but
+*double-spending mathematically reveals the spender's identity*.
+
+This is the "deterrent rather than prevention" model.  It works in theory but has
+two operational issues:
+
+- The deterrent only deters if identity revelation has consequences (it relied on
+  a legal/social enforcement layer external to the cryptography)
+- The complexity of divisible-coin management was substantial and never produced a
+  shipped product
+
+BUCK Cash handles double-spend by *prevention* (global nullifier set), not
+deterrence.  No legal layer is required.  Divisibility is achieved by issuing
+multiple notes at burn time rather than by a single divisible coin.
+
+** Casascius Coins (2011-2013)
+
+Mike Caldwell's Casascius coins[fn:casascius] were physical Bitcoin: a brass or
+silver coin with a holographic seal covering a private-key QR code.  Snap the
+seal, scan the QR, the coin's Bitcoin balance was yours.
+
+Casascius coins remain the closest existing analogue to BUCK Cash.  What they
+lacked:
+
+- Native integration with the underlying token (the Bitcoin protocol does not
+  understand bearer-coin form; the coin is an aftermarket wrapper)
+- Mode B targeting (all coins were bearer; no way to issue a coin claimable only by
+  a specific recipient)
+- Demurrage (a Casascius coin holds its full Bitcoin balance forever, unrelated to
+  any economic mechanism)
+- Programmable predicates (only one mode: bearer)
+- Issuer was a single individual, who eventually stopped issuing in 2013 due to
+  FinCEN money-transmitter concerns -- an issuance bottleneck that BUCK Cash
+  distributes to all identity-registered participants
+
+BUCK Cash is, in essence, what Casascius would have been if Bitcoin had been
+designed with bearer-paper as a first-class instrument from the start, and if the
+underlying token had a demurrage and identity layer.
+
+** BIP-38 Paper Wallets
+
+Encrypted Bitcoin private keys printed on paper, with a passphrase needed to spend.
+BIP-38 paper wallets are an aftermarket bearer instrument similar to Casascius but
+without the physical coin form factor.
+
+Same limitations as Casascius (no native integration, no targeting, no demurrage,
+no predicates), plus the additional UX burden of remembering or transmitting the
+passphrase.
+
+** Zerocash / Zcash (2014-)
+
+Ben-Sasson, Chiesa, Garman, Green, Miers, Tromer, and Virza's Zerocash[fn:zerocash]
+gave us the first scalable on-chain commitment-and-nullifier UTXO model with full
+zero-knowledge.  Zcash deployed it in 2016.
+
+Zcash provides on-chain shielded transactions but does *not* extend the model to
+physical bearer instruments.  All Zcash value lives on chain in shielded notes.  No
+mechanism exists for printing a shielded Zcash note as a paper instrument that
+someone else could deposit later.
+
+BUCK Cash uses Zerocash's commitment-and-nullifier primitive for its on-chain
+machinery and extends it with the printable-note layer.  The contribution is in the
+extension, not the primitive.
+
+** Aztec / Zk.Money
+
+Aztec's predicate-encrypted notes[fn:aztec] generalize Zerocash to private smart
+contract calls -- a note can encode arbitrary state operated on by arbitrary
+predicates.  This is the cryptographic ancestor of Mode C (programmable BUCK
+Notes).
+
+Aztec does not have physical bearer instruments either.  Its predicates are designed
+for on-chain DeFi applications (private DEX trades, private lending), not for paper
+notes.  BUCK Cash applies the same predicate machinery to a different problem:
+specifying spend conditions for a printable bearer instrument.
+
+** Tornado Cash and Privacy Pools
+
+Tornado Cash[fn:tornado] was the simplest possible commitment-and-nullifier mixer:
+fixed-denomination deposits in, anonymous withdrawals out.  Sanctioned by OFAC in
+2022 for money-laundering use.
+
+Privacy Pools (Buterin, Schaefer, Tromer, et al., 2023)[fn:privacypool] extends
+Tornado with per-spend "association sets" -- a depositor can prove their deposit is
+in a non-incriminating subset, allowing compliance without identification.
+
+Both are mixer designs, not cash-instrument designs.  Their relevance to BUCK Cash
+is the lineage: BUCK's commitment pool is a Tornado-style global mixer, but with
+predicates and identity bound in.  The selective-disclosure compliance story
+borrows from Privacy Pools' association-set ideas.
+
+** Comparison Summary
+
+#+LATEX: {\scriptsize
+| System              | Bearer paper | Targeting | Demurrage | Predicates | Native | Decentralized |  Year |
+|---------------------+--------------+-----------+-----------+------------+--------+---------------+-------|
+| Chaum E-Cash        | No           | No        | No        | No         | -      | No            |  1982 |
+| Brands Offline      | No           | No        | No        | No         | -      | No            |  1993 |
+| BIP-38 Paper Wallet | Yes          | No        | No        | No         | No     | Partial       |  2010 |
+| Casascius Coin      | Yes          | No        | No        | No         | No     | No            |  2011 |
+| Zerocash / Zcash    | No           | No        | No        | No         | -      | Yes           |  2014 |
+| Tornado Cash        | No           | No        | No        | No         | -      | Yes           |  2019 |
+| Aztec               | No           | No        | No        | Yes        | -      | Yes           |  2020 |
+| Privacy Pools       | No           | No        | No        | Limited    | -      | Yes           |  2023 |
+| CBDCs (e-CNY, etc.) | No           | Yes       | Sometimes | No         | Yes    | No            | 2020+ |
+| *BUCK Cash*         | *Yes*        | *Yes*     | *Yes*     | *Yes*      | *Yes*  | *Yes*         | 2026? |
+#+LATEX: }
+
+The "Native" column captures whether the bearer-paper instrument is a first-class
+designed primitive of the system (as opposed to an aftermarket wrapper or absent
+entirely).  BUCK Cash is the first design that fills every column.  This is not
+because the prior art was incompetent; it is because the four required pieces
+(commitment-pool primitive, identity layer, demurrage, jurisdictional reserve)
+finally converged in one system.
+
+* Comparison: Cash, CBDC, BUCK Cash
+
+A more direct comparison aimed at a non-cryptographer reader: how does BUCK Cash
+stack up against physical cash and central bank digital currencies?
+
+#+LATEX: {\scriptsize
+| Property                        | Physical Cash              | CBDC (typical)            | BUCK Cash                                  |
+|---------------------------------+----------------------------+---------------------------+--------------------------------------------|
+| *PRIVACY*                       |                            |                           |                                            |
+| Holder's identity hidden        | Yes                        | No (issuer sees all)      | Yes (during circulation)                   |
+| Transaction graph hidden        | Yes                        | No                        | Yes                                        |
+| Issuer's identity hidden        | Yes (notes are fungible)   | No                        | No (selective disclosure)                  |
+|                                 |                            |                           |                                            |
+| *FINALITY*                      |                            |                           |                                            |
+| Settlement is instant           | Yes                        | Yes                       | Yes (chain finality)                       |
+| Reversible by issuer            | No                         | Yes (CBDC freeze)         | No                                         |
+| Reversible by holder            | No                         | Yes (chargeback)          | No                                         |
+|                                 |                            |                           |                                            |
+| *INFRASTRUCTURE*                |                            |                           |                                            |
+| Works without internet          | Yes                        | No                        | Yes (transfer); needs net for deposit      |
+| Works without battery           | Yes                        | No                        | Yes (paper); needs power for deposit       |
+| Works without bank account      | Yes                        | No                        | Yes                                        |
+| Cross-border in your pocket     | Yes (with declaration)     | No (geofenced)            | Yes                                        |
+|                                 |                            |                           |                                            |
+| *DURABILITY*                    |                            |                           |                                            |
+| Survives infrastructure failure | Yes                        | No                        | Yes (paper); chain on recovery             |
+| Counterfeit-resistant           | Partial (printed security) | Yes                       | Yes (cryptographic)                        |
+| Recoverable if lost             | No                         | Yes (issuer can re-issue) | No (but demurrage returns value to system) |
+|                                 |                            |                           |                                            |
+| *ECONOMIC BEHAVIOR*             |                            |                           |                                            |
+| Lost notes extracted forever    | Yes                        | No                        | No (returned via demurrage)                |
+| Inflation tracks issuer policy  | Yes                        | Yes                       | Yes (tracks BuckK)                         |
+| Holds value over decades        | No (inflation)             | No (inflation)            | No (demurrage 2%/yr)                       |
+| Holds value over years          | Approximately              | Approximately             | Yes (with demurrage discount)              |
+|                                 |                            |                           |                                            |
+| *PROGRAMMABILITY*               |                            |                           |                                            |
+| Time-locked spends              | No                         | Possible                  | Yes                                        |
+| Conditional payouts             | No                         | Possible                  | Yes                                        |
+| Multi-signature spending        | No                         | Possible                  | Yes                                        |
+| Issuer can restrict spending    | No                         | Yes                       | No (issuer relinquishes control at print)  |
+|                                 |                            |                           |                                            |
+| *COMPLIANCE*                    |                            |                           |                                            |
+| Issuance is auditable           | No                         | Yes                       | Yes                                        |
+| Circulation is auditable        | No                         | Yes                       | No (private)                               |
+| Deposit is auditable            | Partial (CTR rules)        | Yes                       | Yes                                        |
+| Selective disclosure available  | No (no records)            | No (full disclosure)      | Yes                                        |
+#+LATEX: }
+
+The dominant insight from this table: *BUCK Cash combines the privacy properties of
+physical cash with the compliance and durability properties of CBDC, while
+preserving infrastructure-independence that CBDC abandons.*
+
+The single property where physical cash is genuinely irreplaceable -- "works without
+internet for deposits" -- is moderated for BUCK Cash but not eliminated.  Holders
+can transfer BUCK Notes hand-to-hand offline, indefinitely; they need internet only
+when they want to convert the bearer instrument to an on-chain balance.  In a
+disaster scenario, BUCK Notes circulate as cash for the duration of the outage,
+then deposit normally when the chain becomes reachable again.
+
+* Implementation Path
+
+This section sketches what would actually need to be built to ship BUCK Cash.
+
+** Phase 1: On-Chain Note Pool
+
+The prerequisite for everything else is the global commitment pool described in
+[[https://perry.kundert.ca/range/finance/alberta-buck-wormhole][Wormhole]],
+"Global Commitment Pool" section.  This is a v2 of the BUCK contract:
+
+- Add a Merkle tree of note commitments
+- Add a global nullifier set
+- Add a SNARK verifier for the standard "spend a note" predicate (Mode A bearer)
+- Add a =burn_to_notes= entry point that takes a value and a vector of commitments,
+  appending to the tree
+
+Engineering scope: roughly the size of an Aztec-style note pool.  Substantial but
+well-understood; multiple production reference implementations exist (Aztec, Zcash
+Sapling, Tornado Cash variants).
+
+** Phase 2: Mode A Bearer Notes
+
+With the note pool in place, Mode A is essentially "Tornado Cash with a paper
+output."  Build:
+
+- A wallet app that prints QR codes after a successful =burn_to_notes=
+- A wallet app that scans QR codes and submits spend SNARKs
+- A printer driver / template library for note layouts
+- A scratch-off / hologram seal vendor relationship for high-trust deployments
+
+Engineering scope: a smartphone app and a small print-shop integration.  Not large.
+
+** Phase 3: Mode B Targeted Notes
+
+Add the stealth-address derivation \( pk^* = H(s) \cdot pk_{\text{recipient}} \) and
+the corresponding spend predicate.  This re-uses the Chaum-Pedersen machinery from
+the Identity protocol.
+
+Engineering scope: a SNARK circuit extension and corresponding wallet-app UX.
+Modest.
+
+** Phase 4: Mode C Programmable Notes
+
+Add a circuit-compiler integration so that note printers can supply arbitrary
+predicates at issuance time.  Aztec's Noir compiler is the model here -- a
+domain-specific language for SNARK predicates that compiles to verifiable circuits.
+
+Engineering scope: substantial, but draws heavily on existing Aztec/Noir tooling.
+Could be deferred until after Phases 1-3 prove out the core concept.
+
+** Phase 5: Off-Chain Re-Targeting (Optional)
+
+Proxy re-encryption (e.g., Umbral[fn:umbral]) over Mode B notes would permit
+off-chain transfer between identities without consuming the nullifier.  This is
+the "Lightning Network for bearer instruments" extension.
+
+Engineering scope: requires a network of proxy nodes (the Identity Guardians could
+play this role) and a re-encryption circuit.  Defer until Phases 1-4 demonstrate
+demand.
+
+** Regulatory and Legal Engagement
+
+In parallel with engineering, the legal and regulatory work:
+
+- Confirm that BUCK Cash falls within Alberta's provincial jurisdiction over
+  property and civil rights (s 92(13)) -- the analysis in the
+  [[https://perry.kundert.ca/range/finance/alberta-buck-legal][Legal Foundation]]
+  document covers the underlying primitive; bearer notes are an extension that may
+  warrant additional treatment
+- Engage FINTRAC on the issuance-side reporting model
+- Engage the Office of the Superintendent of Financial Institutions (OSFI) on
+  reserve treatment
+- Coordinate with Alberta Treasury Branches (ATB) as a candidate first issuer
+
+* The Larger Picture
+
+I want to close by stepping back from the technical detail and considering what
+BUCK Cash is, in the broader arc of this series.
+
+The Alberta Buck began as an answer to a specific question: how can civilians
+access the third monetary element -- Claim money -- that banks currently monopolize?
+([[https://perry.kundert.ca/range/finance/missing-monetary-element][The Missing
+Monetary Element]] develops the framework.)
+
+The system that emerged -- BUCK_CREDIT, BUCK, BuckK, demurrage, Jubilee, the
+Identity Fountain, the Wormhole -- is a complete monetary infrastructure that
+operates on chain, with smartphone-mediated user access.  It is sufficient for an
+all-digital economy.
+
+But Alberta is not an all-digital economy, and neither is anywhere else.  Cash --
+real, physical, hand-to-hand, no-infrastructure-required cash -- remains essential
+for billions of people, in normal times and especially in abnormal ones.  A
+monetary system that does not have a cash form excludes the populations who need it
+most.
+
+BUCK Cash extends Alberta Buck into the cash-using world without compromising any
+of the on-chain properties.  The same demurrage, the same identity, the same
+reserve, the same Jubilee -- in a form factor that works at a farmers' market, in
+a remote community without reliable cellular coverage, in a power outage, across
+a border, in a wallet, under a mattress, in an envelope to a relative abroad.
+
+It is, I think, the missing layer that turns Alberta Buck from a sophisticated
+financial protocol into something the unbanked elderly can use as easily as the
+crypto-literate young.  And it is, I think, the design that finally answers the
+question Chaum was asking in 1982: what does digital cash look like, when you take
+"cash" seriously?
+
+The answer, forty years later: it looks like a piece of paper with a QR code, a
+hologram, a denomination, an issuer mark, and a value that decays at the same rate
+as your bank balance does.  Indistinguishable from cash to the user; cryptographically
+distinguishable from anything counterfeit; integrated with a complete monetary
+system that doesn't require a central bank to function.
+
+Alberta has, uniquely in the world, all four pieces required to build this.  Whether
+to assemble them is, as ever, the only question that matters.
+
+* Footnotes
+
+[fn:cashshare] Federal Reserve. "[[https://www.federalreserve.gov/paymentsystems/coin_data.htm][Currency in Circulation]]"
+(2024).  Approximately half of US currency in circulation by value is held outside
+the United States, providing a global store-of-value function despite zero yield.
+
+[fn:cbdc] Bank for International Settlements. "[[https://www.bis.org/publ/work880.pdf][Rise of the central bank digital currencies]]" (2020).
+Surveys CBDC designs across major central banks; notes that nearly all incorporate
+explicit issuer-side surveillance and programmability features (spending limits,
+geofencing, expiration, freezing) that physical cash does not have.
+
+[fn:casascius] Caldwell, M. "Casascius Physical Bitcoins" (2011-2013).  Physical
+brass and silver coins containing Bitcoin private keys under tamper-evident
+holographic seals.  Production halted in 2013 after FinCEN classified the issuer as
+a money transmitter requiring federal licensing.  Surviving "unpeeled" Casascius
+coins now trade at substantial premiums above their Bitcoin face value as
+collectibles.
+
+[fn:chaum82] Chaum, D. "Blind Signatures for Untraceable Payments" (1982).
+/Advances in Cryptology - Crypto '82/, pp. 199-203.  The foundational paper
+introducing blind signatures and digital cash.  Chaum's DigiCash company
+commercialized the design from 1989-1998 before bankruptcy.
+
+[fn:brands93] Brands, S. "Untraceable Off-line Cash in Wallets with Observers"
+(1993).  /Advances in Cryptology - Crypto '93/, pp. 302-318.  Offline divisible
+e-cash with double-spend identity revelation -- a deterrent rather than prevention
+model.
+
+[fn:chl05] Camenisch, J., Hohenberger, S., Lysyanskaya, A. "Compact E-Cash" (2005).
+/Advances in Cryptology - Eurocrypt '05/, pp. 302-321.  Compact divisible e-cash
+where a single coin can be spent in pieces with O(1) communication and storage
+per spend.
+
+[fn:zerocash] Ben-Sasson, E., Chiesa, A., Garman, C., Green, M., Miers, I., Tromer,
+E., Virza, M. "[[https://eprint.iacr.org/2014/349.pdf][Zerocash: Decentralized Anonymous Payments from Bitcoin]]" (2014).
+The foundational design for on-chain commitment-and-nullifier UTXO privacy.
+Deployed in production as Zcash since 2016.
+
+[fn:cryptonote] van Saberhagen, N. "[[https://web.archive.org/web/20201028121818/https://cryptonote.org/whitepaper.pdf][CryptoNote v 2.0]]" (2013).  Introduced one-time
+stealth addresses for the recipient-untraceable transaction graph in Monero and
+related cryptocurrencies.
+
+[fn:lostcash] Federal Reserve Bank of San Francisco. "[[https://www.frbsf.org/cash/publications/fed-notes/2018/november/diary-of-consumer-payment-choice-data/][Diary of Consumer Payment
+Choice]]" (2018).  Estimates 5-10% of US paper currency by value is permanently
+unrecoverable.  At a US M0 of $2.3 trillion, this represents $115-230 billion in
+permanently extracted seigniorage.
+
+[fn:remit] World Bank. "[[https://www.worldbank.org/en/topic/migrationremittancesdiasporaissues/brief/migration-remittances-data][Remittance Prices Worldwide]]" (Q4 2024).  Average global cost
+of remitting $200 was approximately 6.5% in 2024.  Total global remittance flows
+estimated at $702 billion in 2024.
+
+[fn:giftcard] Consumer Federation of America. "Gift Cards: A Costly Convenience"
+(2023).  Estimates of cumulative consumer losses to bankrupt gift-card issuers in
+the United States range from $200M-$1B annually depending on methodology.
+
+[fn:unbanked] Bank of Canada. "[[https://www.bankofcanada.ca/2023/06/staff-discussion-paper-2023-13/][2022 Methods-of-Payment Survey]]" (2023).
+Approximately 1-2% of Canadians lack bank accounts; rates substantially higher in
+rural and Indigenous communities.
+
+[fn:globalunbanked] World Bank. "[[https://www.worldbank.org/en/publication/globalfindex/Report][The Global Findex Database 2021]]" (2022).  An
+estimated 1.4 billion adults globally remain unbanked, with disproportionate
+concentrations in low-income countries, women, rural populations, and the elderly.
+
+[fn:aztec] Williamson, Z., et al. "Aztec Protocol" (2018-).  Ethereum L2 rollup
+providing general-purpose private smart contracts using PLONK proofs and predicate-encrypted notes.
+[[https://aztec.network/]]
+
+[fn:tornado] Pertsev, A., Semenov, R., Storm, R. "Tornado Cash Privacy Solution"
+(2019).  Fixed-denomination commitment-and-nullifier mixer on Ethereum.  Sanctioned
+by the US Office of Foreign Assets Control (OFAC) in August 2022 for alleged use in
+money laundering by North Korean state actors.
+
+[fn:privacypool] Buterin, V., Schaefer, J., Tromer, E., et al. "[[https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4563364][Blockchain Privacy and Regulatory Compliance: Towards a Practical Equilibrium]]"
+(2023).  Extends commitment-pool mixers with per-spend "association set" proofs,
+allowing depositors to demonstrate non-membership in incriminating subsets without
+revealing their specific deposit.
+
+[fn:umbral] Nunez, D. "[[https://github.com/nucypher/umbral-doc/blob/master/umbral-doc.pdf][Umbral: A Threshold Proxy Re-Encryption Scheme]]" (2018).  NuCypher's
+threshold proxy re-encryption scheme based on the BBS98 PRE construction.  Allows
+a delegator to grant a delegatee decryption rights to a ciphertext via a network of
+N proxies, no proper subset of which can compromise the underlying plaintext.
