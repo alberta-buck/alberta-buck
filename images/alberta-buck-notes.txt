@@ -1,7 +1,7 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                 THE ALBERTA BUCK - NOTES (DRAFT V0.1)
-               A Unified Commitment-Pool Architecture for
-                      Wormhole, Cash, and Cheques
+                 THE ALBERTA BUCK - NOTES (DRAFT V0.2)
+            Private Bearer Instruments on an Identity-Aware
+                           Demurrage Currency
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -12,27 +12,37 @@
 
 <https://perry.kundert.ca/images/dominion-logo.png>
 
-The Alberta Buck /Wormhole/ ([Wormhole]) and /Cash/ ([Cash]) designs
-both need a privacy-preserving bridge from an on-chain balance to a
-later on-chain mint.  In the current series both designs supply their
-own mechanics: the Wormhole uses per-certificate burn addresses and
-`_mint_noincrease'; Cash uses a Zerocash-style commitment tree with Mode
-A/B/C spend predicates (bearer, stealth-targeted, programmable).  The
-overlap is nearly complete – both reduce to "burn into a pool, mint out
-by SNARK" – and maintaining two architectures doubles the verifier
-surface, the circuit count, and the audit scope without buying
-additional functionality.
+For forty years cryptographers have tried to build digital cash and
+failed.  Chaum's DigiCash (1990s) had the mathematics but went bankrupt
+for want of merchant adoption.  Bitcoin gave us digital scarcity but no
+native bearer-paper form – Casascius coins and BIP-38 paper wallets are
+aftermarket wrappers, not first-class instruments.  Central bank digital
+currencies threaten the opposite: digital surveillance with no bearer
+privacy at all.
 
-This document collapses the two into one primitive.  A single Merkle
-tree of note commitments and a single nullifier set replace both the
-burn-address family and the Cash note pool.  Three /Identity bindings/
-parameterise the commitment:
+The Alberta Buck identity, reserve, and demurrage machinery – combined
+with one new primitive, a global commitment pool – finally permits a
+native digital-private bearer instrument.  This document specifies that
+primitive.
+
+A *BUCK Note* is an on-chain commitment whose opening authorises a
+private mint to a registered identity.  The same commitment can live
+only on chain (a software-only transfer between two of a user's own
+private accounts), travel between parties as a digital message, or be
+printed on paper as a QR-encoded slip.  All three surfaces share the
+same cryptography and the same on-chain footprint.
+
+A single Merkle tree of note commitments and a single nullifier set
+replace every parallel bearer-instrument architecture the Alberta Buck
+series has previously explored.  Three /Identity bindings/ parameterise
+the commitment:
 
 • *Type 1 – Encrypted Issuer Identity.* Spend predicate requires the
   depositor's registered ElGamal credential to encrypt the same identity
-  point the issuer's credential encrypts.  Subsumes the v1 Wormhole: the
-  issuer and the eventual depositor must share an Identity scalar, but
-  may use unlinkable key pairs.
+  point the issuer's credential encrypts.  A note Alice issues from one
+  of her private accounts and later deposits at another: the two
+  addresses share the underlying Identity scalar but are
+  cryptographically unlinkable to any third party.
 • *Type 2 – Public Issuer Identity.* Spend predicate requires the
   depositor to be any registered identity; the issuer's public identity
   is bound to the note in plaintext.  A cheque whose maker is known,
@@ -40,7 +50,8 @@ parameterise the commitment:
 • *Type 3 – Stealth-Targeted to Recipient.* Spend predicate requires the
   depositor to hold the secret of a stealth public key derived from the
   recipient's registered identity.  A cheque made out to a specific
-  recipient, retrievable only by them.
+  recipient, retrievable only by them, with no observable on-chain link
+  from issuer to recipient.
 
 Demurrage needs no new machinery.  The Note Pool /is/ simply the BUCK
 ERC-20 contract's own balance – a regular BUCK account accumulating
@@ -66,6 +77,17 @@ No face discount, no division in the delivered amount, no \( F \) in the
 formula – only a single new primitive (age-preserving transfer),
 localized to one contract function.
 
+A BUCK Note can be materialised as a physical paper slip with a
+QR-encoded opening, a hologram seal or scratch-off panel over the
+secret, and an issuer mark – indistinguishable in use from a $20 bill
+while being cryptographically impossible to counterfeit.  Demurrage
+solves physical cash's oldest problem: a lost note's value decays at the
+same rate as an on-chain balance, with the difference accruing to the
+Jubilee rather than as seigniorage to the issuer.  Issuance is on chain
+and identity-bound; circulation is private; deposit is auditable.  This
+is stronger compliance than physical cash provides today, and stronger
+privacy than any CBDC has ever proposed.
+
 The consequence most relevant to users: only notes where the issuer
 cannot later race the holder to spend are safe for long-term holding.
 This is *Type 1* (issuer = depositor, same Identity, no third party
@@ -80,23 +102,26 @@ an intrinsic cryptographic property, not a policy choice. ([PDF],
 Table of Contents
 ─────────────────
 
-1. The Redundancy Between Wormhole and Cash
-.. 1. The Problem Both Solve
-.. 2. The Two Current Mechanisms
-.. 3. The Overlap
-.. 4. Maintenance Cost of Duality
-2. The Single Primitive: Notes in One Global Pool
+1. The Cash Paradox
+.. 1. Why Forty Years of Trying
+2. The Core Primitive: One Global Commitment Pool
 .. 1. The Note Contract State
 .. 2. The Note Commitment
 .. 3. The Note Nullifier
 .. 4. Lifecycle
-3. Three Identity Bindings
+3. The Surface of a Note: Chain, Message, Paper
+.. 1. Chain-Only Notes
+.. 2. Message Notes
+.. 3. Paper Notes
+.. 4. Counterfeiting is Cryptographically Impossible
+.. 5. Wallet-App Status Codes
+4. Three Identity Bindings
 .. 1. Type 1: Encrypted Issuer Identity ("Wormhole")
 .. 2. Type 2: Public Issuer Identity ("Signed Cheque")
 .. 3. Type 3: Stealth-Targeted to Recipient ("Addressed Cheque")
 .. 4. Comparison of the Three Bindings
-4. The Interaction Matrix: Note Binding x Account Mode
-5. Demurrage at the Pool Level
+5. The Interaction Matrix: Note Binding x Account Mode
+6. Demurrage at the Pool Level
 .. 1. Reminder: How BUCK Demurrage Actually Works
 .. 2. The Pool Account's Demurrage
 .. 3. The Age-Preserving Redemption
@@ -104,13 +129,44 @@ Table of Contents
 .. 5. Conservation is Automatic, and Tight
 .. 6. Numeric Example
 .. 7. Who Bears the Demurrage, Really
-6. Long-Term Holding Safety: The Printer-Trust Distinction
+7. Demurrage Solves the Lost-Cash Problem
+.. 1. The Hidden Inflation of Lost Cash
+.. 2. What BUCK Demurrage Does For Lost Notes
+.. 3. The Symmetry With On-Chain Balances
+8. Long-Term Holding Safety: The Printer-Trust Distinction
 .. 1. The Printer-Trust Model
 .. 2. Type 1 (Encrypted Issuer Identity): Safe
 .. 3. Type 2 (Public Issuer Identity): Unsafe for Long-Term Storage
 .. 4. Type 3 (Stealth-Targeted to Recipient): Safe
 .. 5. Summary: Which Notes Can Be Saved?
-7. Required Identity Cryptography
+9. Physical Security Model
+.. 1. Layered Defense
+.. 2. Recommended Manufacturing Profile
+10. Use Cases
+.. 1. Walking-Around Money
+.. 2. Cross-Border Remittances
+.. 3. Tip Jars and Charitable Donations
+.. 4. Cold Storage and Disaster Preparedness
+.. 5. Estate Planning
+.. 6. Gift Cards Without Issuer Risk
+.. 7. Tax-Compliant Compensation
+.. 8. Underbanked and Cash-Economy Inclusion
+11. Selective Disclosure: Compliance Without Surveillance
+.. 1. The Asymmetry: Issuance vs. Circulation
+.. 2. The Regulatory Audit Path
+.. 3. What Compliance Looks Like
+.. 4. The CBDC Comparison
+12. Comparison With Prior Art
+.. 1. Chaum's E-Cash (1982-1998)
+.. 2. Brands' Offline Divisible E-Cash (1993)
+.. 3. Casascius Coins (2011-2013)
+.. 4. BIP-38 Paper Wallets
+.. 5. Zerocash / Zcash (2014-)
+.. 6. Aztec / Zk.Money
+.. 7. Tornado Cash and Privacy Pools
+.. 8. Comparison Summary
+.. 9. Comparison: Cash, CBDC, BUCK Notes
+13. Required Identity Cryptography
 .. 1. Components Already Present
 .. 2. New Primitive: The Note Commitment Hash
 .. 3. New Primitive: The Nullifier PRF
@@ -119,150 +175,159 @@ Table of Contents
 .. 6. The Re-Encryption Operation at Spend (Type 1 Only)
 .. 7. The Schnorr PoK Operation at Spend (Type 2 and Type 3)
 .. 8. Summary: New Cryptographic Components
-8. The SNARK Circuits
+14. The SNARK Circuits
 .. 1. Mint Circuit
 .. 2. Spend Circuit (Type 1 – Encrypted Issuer)
 .. 3. Spend Circuit (Type 2 – Public Issuer)
 .. 4. Spend Circuit (Type 3 – Stealth-Targeted)
 .. 5. Circuit Engineering Budget
 .. 6. Common Circuit Gadgets
-9. Migration from v1 Wormhole and BUCK Cash
-.. 1. Wormhole v1 to Notes
-.. 2. BUCK Cash to Notes
-.. 3. v1 Coexistence During Transition
-10. What Gets Dropped: Pure Bearer
-.. 1. Why Mode A Is Absent
-.. 2. The Physical-Token Escape Hatch
-.. 3. Use-Case Coverage Without Mode A
-11. Security Assumptions and Theorems Used
+15. What This Architecture Rules Out: Pure-Bearer Cryptographic Notes
+16. Security Assumptions and Theorems Used
 .. 1. Demurrage Conservation as a Contract Invariant
-12. Implementation Scope
+17. Implementation Scope
 .. 1. Smart Contract Additions
 .. 2. SNARK Circuits
 .. 3. Wallet & UX
 .. 4. Cross-Checks and Audit
-13. Open Questions
+.. 5. Phased Rollout
+.. 6. Regulatory and Legal Engagement
+18. Open Questions
 .. 1. Donation Incidence
 .. 2. Stranded Value on Lost Notes
 .. 3. Integer-Arithmetic Rounding
 .. 4. Predicate Programmability vs. Circuit Simplicity
 .. 5. Universal Spend Circuit vs. Three
 .. 6. Regulatory Interaction with the Age-Preserving Transfer
-14. Summary
+19. Summary
 
-
-[Wormhole]
-<https://perry.kundert.ca/range/finance/alberta-buck-wormhole>
-
-[Cash] <https://perry.kundert.ca/range/finance/alberta-buck-cash>
 
 [PDF] <https://perry.kundert.ca/images/alberta-buck-notes.pdf>
 
 [Text] <https://perry.kundert.ca/images/alberta-buck-notes.txt>
 
 
-1 The Redundancy Between Wormhole and Cash
-══════════════════════════════════════════
+1 The Cash Paradox
+══════════════════
 
-  The v1 Wormhole ([Wormhole]) and the BUCK Cash proposal ([Cash]) both
-  solve the same core problem by different mechanical routes.
+  Physical cash is simultaneously irreplaceable and impossible to
+  digitize.
 
+  It is irreplaceable because it does things no digital instrument has
+  ever matched.  A $20 bill works without a network, a battery, a bank,
+  an ID check, or a counterparty to your transaction.  It clears
+  instantly, finally, and without fees.  It is the single most
+  successful monetary instrument in human history – so successful that
+  roughly half the value of US currency in circulation is held overseas
+  as a global store of value, in defiance of every theoretical reason it
+  shouldn't be.[1]
 
-[Wormhole]
-<https://perry.kundert.ca/range/finance/alberta-buck-wormhole>
+  It is impossible to digitize because every attempt has reproduced the
+  surveillance properties of bank money instead of the privacy
+  properties of cash.  Modern card networks log every transaction.  Bank
+  wire transfers require both parties to be identified.  Stablecoins
+  record every transfer publicly on chain.  Central bank digital
+  currencies, where they exist or are being designed (China's e-CNY,
+  Europe's digital euro proposals), are explicitly programmable
+  surveillance tools – the central bank can see, restrict, expire, or
+  geofence any holder's balance at will.[2]
 
-[Cash] <https://perry.kundert.ca/range/finance/alberta-buck-cash>
+  The closest existing analogues to digital cash are aftermarket bearer
+  wrappers around cryptocurrencies: Casascius physical Bitcoin coins
+  (2011-2013), OpenDime USB sticks, BIP-38 paper wallets, and the
+  various scratch-card "crypto gift cards" sold at convenience stores.
+  These work, technically – a Casascius coin is a genuine bearer
+  instrument – but they are workarounds, not designs.  The underlying
+  token (Bitcoin) does not natively understand bearer-paper form.  Loss
+  of the physical coin is permanent loss of the value.  Counterfeiting
+  requires faith in the manufacturer's hologram, not in the
+  cryptography.[3]
 
-1.1 The Problem Both Solve
-──────────────────────────
+  What if the bearer-paper form were a /first-class/ instrument of the
+  system?  Designed in from the start, with the same cryptographic and
+  economic properties as on-chain balances, integrated with the identity
+  and reserve mechanics that already exist?
 
-  Each requires a cryptographic pipeline that:
-  1. Accepts a burn of an existing on-chain balance
-  2. Creates a durable, privacy-preserving token (certificate or note)
-     referencing the burn
-  3. Permits a later on-chain mint that can be proved (in zero
-     knowledge) to correspond to some prior burn
-  4. Prevents double-spending via a global nullifier
-  5. Preserves BUCK's demurrage economics (the minted amount must
-     reflect accumulated demurrage across the burn-to-mint interval)
-  6. Composes with the existing Identity system (so that the mint lands
-     in a properly registered, KYC-verified account)
-
-
-1.2 The Two Current Mechanisms
-──────────────────────────────
-
-  *Wormhole v1 (burn-address model).* Each certificate is anchored by a
-  distinct EVM address that receives a fixed-denomination transfer.  The
-  burn is an ordinary `transfer' call; the ZK proof binds the
-  destination mint to the source burn through the `_mint_noincrease'
-  primitive that transfers balance and BUCK-age into the destination
-  without adjusting `totalSupply'.  Each burn address costs an identity
-  registration, an `approveFor' handshake, and a state-trie slot.
-
-  *BUCK Cash (note-pool model).* A contract-managed Merkle tree of note
-  commitments replaces the per-burn-address state anchor.  A single burn
-  transaction appends \( N \) commitments to the tree and emits the
-  summed value into the contract reserve.  Each spend is a SNARK proving
-  inclusion of some commitment and emission of a unique nullifier.  The
-  spend /predicate/ inside the commitment distinguishes bearer (Mode A),
-  stealth-targeted (Mode B), and programmable (Mode C) notes.
+  That is what BUCK Notes is.
 
 
-1.3 The Overlap
-───────────────
+1.1 Why Forty Years of Trying
+─────────────────────────────
 
-  Functionally these are nearly identical.  Both provide commit-nullify
-  privacy; both bind the burn to a later mint through a ZK relation;
-  both produce one nullifier per unit redeemed; both depend on the
-  Identity system for the minting-account side.  The divergence is
-  cosmetic:
+  David Chaum invented digital cash in 1982 with the blind-signature
+  e-cash scheme.[4] By 1989 he had founded DigiCash to commercialize it.
+  By 1998 DigiCash was bankrupt – not because the cryptography failed
+  (it worked), but because no merchant wanted to be the first to accept
+  it and no consumer wanted to be the first to hold it.  The two-sided
+  market never bootstrapped.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Wormhole v1 anchor                               Cash note-pool anchor                              
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────
-   `addr_burn' (state trie leaf)                    `cm_i' (Merkle tree leaf)                          
-   `_mint_noincrease' to destination                `mint' directly (supply unchanged by note pool)    
-   Per-burn `approveFor' + `approve'                No per-note approval (spend predicate)             
-   Fixed-denomination cohort anonymity set          Global pool anonymity set                          
-   Spend relation: CP re-encryption (Theorems 3-6)  Spend relation: predicate-specific (Theorems 4, 7) 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  What neither design fully expresses is that the /spend relation/ is
-  orthogonal to the pool structure: Chaum-Pedersen re-encryption,
-  stealth-address Schnorr, and arbitrary predicates can /all/ coexist as
-  different spend circuits on the same note pool.  If we take this
-  seriously, burn addresses and `_mint_noincrease' become redundant: the
-  note pool absorbs the Wormhole as one spend-predicate family among
-  many.
+  Stefan Brands extended Chaum's work in 1993 with offline divisible
+  coins that revealed the spender's identity if (and only if) they
+  double-spent.[5] Camenisch, Hohenberger, and Lysyanskaya improved on
+  this in 2005 with compact divisible e-cash.[6] None of these schemes
+  ever shipped in production at scale.
+
+  Bitcoin, when it arrived in 2009, was deliberately /not/ digital cash
+  in the Chaumian sense.  It was digital scarcity with public ledger
+  transparency – closer to digital gold than digital cash.  The
+  bearer-paper market that grew up around it (Casascius, OpenDime, paper
+  wallets) was an afterthought, not a design goal.
+
+  Zerocash (2014)[7] and its production deployment as Zcash gave us the
+  first scalable on-chain commitment-and-nullifier UTXO model – the
+  cryptographic primitive that BUCK Notes use.  Zcash showed that you
+  can have private on-chain balances; it did not extend that to
+  printable physical bearer instruments.  Aztec[8] extended the model
+  with predicate-encrypted notes for private smart contract calls, but
+  again, no paper.
+
+  Tornado Cash[9] reduced the primitive to its simplest form
+  (fixed-denomination commitments in, anonymous withdrawals out) and was
+  OFAC-sanctioned in 2022.  Privacy Pools[10] extended Tornado with
+  per-spend association-set proofs, restoring compliance paths without
+  abandoning the privacy primitive.
+
+  The reason all of this never produced BUCK Notes – a printable,
+  demurrage-aware, identity-aware private bearer instrument – is that it
+  required four pieces to come together simultaneously, and they did not
+  until now:
+
+  1. A *commitment-and-nullifier UTXO model* on a smart contract
+     platform (Zerocash gave us this in 2014; Aztec deployed it on
+     Ethereum in 2018-2020).
+
+  2. A *cryptographic identity layer* that lets some notes be targeted
+     to a specific recipient and others be self-wormholed between a
+     user's own unlinkable accounts (the BUCK identity system, with PS
+     signatures, ElGamal credentials, and Chaum-Pedersen re-encryption –
+     see [Identity]).
+
+  3. A *demurrage mechanism* that solves the lost-cash problem and gives
+     bearer notes a finite lifespan (BUCK's demurrage and Jubilee are
+     unique among monetary systems).
+
+  4. A *jurisdictional reserve* that backs the value, so the bearer note
+     represents a real claim on real assets, not a speculative
+     crypto-token whose price might collapse between print and deposit
+     (Alberta Buck's commodity-basket-stabilized reserve and the BuckK
+     PID controller).
+
+  Alberta Buck has all four.  No prior system had all four.  That is why
+  BUCK Notes is a /design/, not a workaround.
 
 
-1.4 Maintenance Cost of Duality
-───────────────────────────────
-
-  Keeping both mechanisms in production doubles:
-  • *Verifier code.* Two Merkle-style lookups, two nullifier-set
-    discipline rules, two edge-case sets for the auditor.
-  • *SNARK circuits.* The Wormhole CP-re-encryption circuit and the Cash
-    bearer/targeted/programmable circuits do not share skeleton code;
-    the proof systems compile separately.
-  • *Demurrage bookkeeping.* The Wormhole's per-certificate BUCK-age is
-    computed against EVM storage; the Cash note's per-commitment \(
-    (t_{\text{print}}, age_0) \) is computed in the SNARK.  Two distinct
-    conservation invariants.
-  • *Identity integration.* Wormhole requires `approveFor' against the
-    burn-address pseudo-account; Cash predicates compose differently
-    with Schnorr authorisations.
-  • *Documentation.* Two designs to teach, two attack tables to
-    maintain, two sets of open questions.
-
-  A unified architecture reduces all of this to one audit, one circuit
-  family, one invariant.
+[Identity] <file:alberta-buck-identity.org>
 
 
-2 The Single Primitive: Notes in One Global Pool
+2 The Core Primitive: One Global Commitment Pool
 ════════════════════════════════════════════════
 
-  The unified design replaces both mechanisms with a single primitive.
+  The entire BUCK Notes design rests on a single on-chain primitive: a
+  Merkle tree of commitments with a nullifier set, accompanied by an
+  age-preserving transfer that delivers the opening's face value plus
+  the pool's proportional BUCK-age to a recipient.  Everything else –
+  paper notes, targeted cheques, self-wormholes, stealth deposits – is a
+  consequence of varying the /spend predicate/ inside the commitment.
 
 
 2.1 The Note Contract State
@@ -291,8 +356,7 @@ Table of Contents
   transferred out of the contract on redemption uses a /single new
   primitive/: an age-preserving transfer that moves both balance and
   proportional BUCK-age from the contract to the recipient.  This is the
-  only non-standard BUCK operation in the design, analogous to
-  `_mint_noincrease' in v1 Wormhole.
+  only non-standard BUCK operation in the design.
 
 
 2.2 The Note Commitment
@@ -311,9 +375,10 @@ Table of Contents
   • *\( \rho \)*: per-note randomness (source of the nullifier)
   • *\( \text{id}_{\text{payload}} \)*: Identity-binding data (see next
      section)
-  • *predicate*: optional additional spend predicate (for future Mode C
-    programmability – not elaborated in this document; a single bit
-    `predicate =' None= keeps the SNARK to the three base types)
+  • *predicate*: optional additional spend predicate (time locks, oracle
+    conditions, multi-sig; not elaborated in detail here – a single bit
+    `predicate =' None= keeps the SNARK to the three base types.  See
+    "Open Questions" for bounded-programmability notes.)
 
   No per-note timestamp or baked-in BUCK-age: demurrage is computed at
   redemption time from the /pool's/ account state \( (B, A) \), not from
@@ -385,7 +450,121 @@ Table of Contents
   part of recipient's balance).
 
 
-3 Three Identity Bindings
+3 The Surface of a Note: Chain, Message, Paper
+══════════════════════════════════════════════
+
+  A BUCK Note is, fundamentally, a tuple
+
+  ┌────
+  │ (type, v, rho, id_payload, predicate, merkle_path)
+  └────
+
+  that opens to a commitment \( cm = H_{\text{cm}}(\text{type}, v, \rho,
+    \text{id}_{\text{payload}}, \text{predicate}) \) in the on-chain
+    note tree.  The tuple can live on any medium capable of storing
+    ~200-500 bytes and being read back faithfully.  Three surfaces are
+    supported:
+
+
+3.1 Chain-Only Notes
+────────────────────
+
+  The opening is transmitted privately from issuer to depositor (for
+  Type 1, both are the same user using different accounts) through an
+  out-of-band encrypted channel – typically the wallet's internal
+  storage, or a direct peer-to-peer message between wallets.  The note
+  never leaves the issuer's control infrastructure.  This is the Type 1
+  "self-wormhole" use case: Alice mints a Type 1 note from a private
+  account, hands the opening to herself, and deposits into a second
+  unlinkable account.
+
+
+3.2 Message Notes
+─────────────────
+
+  The opening travels as a digital message: an email, SMS, QR shown on a
+  screen, signal-messenger attachment, NFC handoff.  No physical
+  artifact exists, but the recipient can store, forward, or print the
+  opening at their convenience.  Type 2 and Type 3 notes used between
+  parties who have reliable digital communication occupy this surface.
+
+
+3.3 Paper Notes
+───────────────
+
+  The opening is printed as a QR code on a slip of paper, a card, a
+  steel plate, or a sticker.  For Type 1 and Type 3 notes (where the
+  cryptography already prevents a photographing observer from spending),
+  no physical seal is required.  For Type 2 notes (where whoever reads
+  \( \rho \) can spend), the QR must be protected by a tamper-evident
+  seal – hologram, scratch-off panel, or laminated sleeve – so the
+  holder can verify they were the first to expose the secret.
+
+  A printed note typically also carries:
+  • A visible denomination (1, 5, 10, 100, 1,000, 10,000 BUCK) for human
+    convenience.  The actual value is what the commitment encodes; the
+    printed face is metadata that a wallet verifies before deposit.
+  • A human-readable issuer mark, for visual recognition.  Cryptographic
+    authenticity comes from the on-chain commitment, not the mark.
+  • Redundant QRs front and back with Reed-Solomon error correction,
+    plus the secret in base32 digits for manual recovery.
+
+  Paper notes are the form most people will think of when they hear
+  "BUCK Note."  Physical paper is the surface of last resort: it works
+  offline, without batteries, across borders, through power outages, and
+  past the expiration of any given digital communication channel.
+
+
+3.4 Counterfeiting is Cryptographically Impossible
+──────────────────────────────────────────────────
+
+  A "fake" BUCK Note is any opening whose claimed commitment does not
+  appear in the on-chain note tree.  The Merkle inclusion proof inside
+  the spend SNARK fails.  No mint occurs.  No second-guessing is
+  required: there is no paper-inspection threshold to deceive and no
+  "close enough" forgery that a harried cashier might accept.
+
+  This is a stronger anti-counterfeit guarantee than the Bank of Canada
+  provides for physical $20 bills.  Polymer banknotes can be
+  counterfeited (the techniques are well-published; the question is only
+  whether the counterfeit passes casual inspection).  A BUCK Note cannot
+  be counterfeited at all – the on-chain commitment registry is the
+  authentic-bill list, and any printed note whose commitment is not in
+  the tree will produce a `FAKE' wallet status on scan and nothing more.
+
+
+3.5 Wallet-App Status Codes
+───────────────────────────
+
+  A user-facing wallet that scans a BUCK Note (from chain storage,
+  message, or paper QR) displays one of five statuses:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Display              Meaning                                                                                 
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `VALID: 1,000 BUCK'  Commitment in tree, nullifier unspent, spend predicate satisfiable                      
+   `DEAD'               Commitment in tree, nullifier already spent                                             
+   `FAKE'               Commitment not in tree                                                                  
+   `EXPIRED'            Predicate includes an expiry that has passed                                            
+   `NOT FOR YOU'        Type 3 (or Type 1 with a different Identity) and the viewer is not the intended spender 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Casual users do not need to understand the underlying cryptography any
+  more than they need to understand the security features of a $20 bill.
+  They scan, see `VALID', and accept the note as payment.
+
+  On Deposit, the wallet constructs the SNARK locally (or via a
+  delegated prover service for thin clients), submits the transaction,
+  and displays the result.  SNARK construction for a single-note deposit
+  is on the order of seconds on a modern smartphone – Aztec's Noir
+  compiler and Zcash's Halo2 prover both run on mobile.
+
+  After successful deposit, the note's nullifier is consumed and the QR
+  is permanently dead.  A torn-in-half paper note is a /human/ signal of
+  finality, not a cryptographic one – but it's a useful ritual to
+  prevent confused future holders from trying to redeposit a dead QR.
+
+
+4 Three Identity Bindings
 ═════════════════════════
 
   Every note commits to one of three /Identity-binding/ payloads.  The
@@ -393,7 +572,7 @@ Table of Contents
   about the issuer.
 
 
-3.1 Type 1: Encrypted Issuer Identity ("Wormhole")
+4.1 Type 1: Encrypted Issuer Identity ("Wormhole")
 ──────────────────────────────────────────────────
 
   *Identity payload.* \[ \text{id}_{\text{payload}}^{(1)} \;=\;
@@ -429,7 +608,7 @@ Table of Contents
 [Proofs] <file:alberta-buck-proofs.org>
 
 
-3.2 Type 2: Public Issuer Identity ("Signed Cheque")
+4.2 Type 2: Public Issuer Identity ("Signed Cheque")
 ────────────────────────────────────────────────────
 
   *Identity payload.* \[ \text{id}_{\text{payload}}^{(2)} \;=\;
@@ -468,7 +647,7 @@ Table of Contents
   long-term holding.  See section "Long-Term Holding Safety".
 
 
-3.3 Type 3: Stealth-Targeted to Recipient ("Addressed Cheque")
+4.3 Type 3: Stealth-Targeted to Recipient ("Addressed Cheque")
 ──────────────────────────────────────────────────────────────
 
   *Identity payload.* \[ \text{id}_{\text{payload}}^{(3)} \;=\; (R_e,\;
@@ -517,7 +696,7 @@ Table of Contents
 [Proofs] <file:alberta-buck-proofs.org>
 
 
-3.4 Comparison of the Three Bindings
+4.4 Comparison of the Three Bindings
 ────────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -528,15 +707,16 @@ Table of Contents
    Observer links burn-mint      Only via timing; not by identity       Public flow with anonymous recipient    Not at all                    
    Issuer can spend own note     Yes (`Wormhole' self-case)             Yes (knows \(\rho\))                    No (Theorem 7 Corollary 1)    
    Long-term holding safe        Yes (issuer = intended spender)        No (issuer race)                        Yes (printer non-fungibility) 
-   Replaces                      Wormhole v1 certificates               Bank cheques, attribution payments      Cash Mode B targeted notes    
+   Primary use                   Private self-transfer; custody moves   Cashier's cheques; payroll; donations   Addressed remittances; gifts  
    Spend-circuit soundness       Theorem 6 (CP-equality)                Schnorr + signature-in-SNARK            Theorem 7 (stealth Schnorr)   
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  The three together span every existing use case in the wormhole/cash
-  series.  The Cash /Mode A/ (pure bearer, no identity hook at all) is
-  intentionally absent from this scheme; see "What Gets Dropped" below.
+  The three types together span every use case that a private
+  bearer-instrument layer on an identity-aware currency can support.  A
+  fourth option – pure bearer notes with no identity hook at all – is
+  intentionally absent; see "What This Architecture Rules Out" below.
 
 
-4 The Interaction Matrix: Note Binding x Account Mode
+5 The Interaction Matrix: Note Binding x Account Mode
 ═════════════════════════════════════════════════════
 
   The current Identity system ([Identity]) distinguishes two
@@ -593,11 +773,11 @@ Table of Contents
      payroll issuance, charitable disbursements, and
      attribution-preserving payments that current BUCK flow lacks.
 
-  3. *Stealth-targeted cheques (Type 3)* preserve the "personal cheque"
-     semantics from BUCK Cash's Mode B while gaining the property that
-     the depositor can be a distinct /account/ from their registered
-     identity if desired (the SNARK binds the stealth secret, not the
-     specific deposit address).
+  3. *Stealth-targeted cheques (Type 3)* provide the "personal cheque"
+     semantics – addressed to a specific recipient – with the property
+     that the depositor can be a distinct /account/ from their
+     registered identity if desired (the SNARK binds the stealth secret,
+     not the specific deposit address).
 
   4. *Public-to-public transfers via Type 2* (Cell 2.2) are a degenerate
      case: the same information flow could happen via a direct public
@@ -616,7 +796,7 @@ Table of Contents
 <https://perry.kundert.ca/range/finance/alberta-buck-identity>
 
 
-5 Demurrage at the Pool Level
+6 Demurrage at the Pool Level
 ═════════════════════════════
 
   The central simplification of this design: *the Note Pool is just a
@@ -629,7 +809,7 @@ Table of Contents
   the sum of face values of live notes.
 
 
-5.1 Reminder: How BUCK Demurrage Actually Works
+6.1 Reminder: How BUCK Demurrage Actually Works
 ───────────────────────────────────────────────
 
   Demurrage is /not transferred/ on any per-account basis.  It is an
@@ -658,7 +838,7 @@ Table of Contents
   quantities track /their share/ of that total.
 
 
-5.2 The Pool Account's Demurrage
+6.2 The Pool Account's Demurrage
 ────────────────────────────────
 
   Treat the BUCK contract address as an ordinary account.  Let:
@@ -681,7 +861,7 @@ Table of Contents
   applies to any other account.
 
 
-5.3 The Age-Preserving Redemption
+6.3 The Age-Preserving Redemption
 ─────────────────────────────────
 
   When a note of face \( v \) is redeemed, the contract performs an
@@ -717,7 +897,7 @@ Table of Contents
   held that BUCK.
 
 
-5.4 Donations Integrate Smoothly
+6.4 Donations Integrate Smoothly
 ────────────────────────────────
 
   Any BUCK transferred to the contract address /without/ minting a
@@ -745,7 +925,7 @@ Table of Contents
   mints if the pool is used again.
 
 
-5.5 Conservation is Automatic, and Tight
+6.5 Conservation is Automatic, and Tight
 ────────────────────────────────────────
 
   The age-preserving transfer conserves both quantities /exactly/:
@@ -769,7 +949,7 @@ Table of Contents
   balanced (evident from its definition).
 
 
-5.6 Numeric Example
+6.6 Numeric Example
 ───────────────────
 
   Suppose the pool holds \( B = 10\,000\,000 \) BUCK with \( A =
@@ -802,7 +982,7 @@ Table of Contents
   \text{totalSupply} \) per block regardless of who holds which BUCK.
 
 
-5.7 Who Bears the Demurrage, Really
+6.7 Who Bears the Demurrage, Really
 ───────────────────────────────────
 
   The answer is now sharply localized: *the Note recipient bears the
@@ -827,7 +1007,119 @@ Table of Contents
   between accounts.
 
 
-6 Long-Term Holding Safety: The Printer-Trust Distinction
+7 Demurrage Solves the Lost-Cash Problem
+════════════════════════════════════════
+
+  This section is about a property that is genuinely novel, with
+  implications well beyond the BUCK system.
+
+
+7.1 The Hidden Inflation of Lost Cash
+─────────────────────────────────────
+
+  Every monetary system that uses physical bearer instruments suffers a
+  constant slow loss to /unrecoverable currency/.  Banknotes are lost in
+  fires, dropped down storm drains, forgotten in the pockets of jeans
+  that get washed and shredded, buried in landfills, sealed in walls,
+  hidden by the elderly and forgotten by their heirs.
+
+  The Federal Reserve estimates that 5-10% of US paper currency is
+  permanently unrecoverable at any given moment.[11] At a US M0 of
+  approximately $2.3 trillion, this represents /$115-230 billion in
+  permanently extracted value/ – seigniorage to the Federal Reserve,
+  since the lost notes never get redeemed but the backing assets remain
+  on the Fed's books.
+
+  This is not theft, but it is not neutral either.  Lost cash is a
+  regressive transfer: the people most likely to lose cash are the
+  people who use cash most (the elderly, the unbanked, low-income
+  workers paid in cash).  The beneficiary is whoever issued the cash,
+  generally the central bank, ultimately the government.
+
+
+7.2 What BUCK Demurrage Does For Lost Notes
+───────────────────────────────────────────
+
+  A BUCK Note that is lost in a fire, dropped down a storm drain, or
+  hidden in a wall by a paranoid grandparent is /not/ permanently
+  extracted from the system.  The face value \( v \) sits in the pool as
+  part of \( B \), earning BUCK-age \( A \) at the standard rate.  No
+  redemption ever happens.
+
+  Two effects balance:
+
+  1. The BUCK backing the lost note stays in the pool indefinitely,
+     accruing age.  It does not vanish.
+  2. Other live-note redeemers, through the age-preserving transfer,
+     absorb an age-share \( v \cdot A/B \) at each deposit.  Because the
+     lost note's share weighs on \( A \) without a corresponding
+     redemption to drain it, the lost note's implicit demurrage is paid
+     installment-style by subsequent redeemers.
+
+  Over decades, the pool's age-per-BUCK \( A/B \) drifts upward as lost
+  notes accumulate unredeemed.  The autonomous Jubilee growth at rate \(
+  \kappa \cdot \text{totalSupply} \) continues regardless.  Net effect:
+  /the 5-10% of currency that physical cash systems lose forever, BUCK
+  Notes returns to the commons within a generation/, via the steady
+  demurrage pressure that the lost face value applies to live redeemers.
+
+  This has cascading consequences:
+
+  1. *Money supply self-correction.* No system-wide accounting tail of
+     "missing" currency that the central authority must track and write
+     off.  Lost notes write themselves off through the pool-age
+     mechanism.
+  2. *Anti-hoarding incentive matches on-chain balances.* A BUCK held in
+     your wallet or in your pocket as paper decays at the same rate (via
+     the age-share that will eventually be absorbed on redemption).
+     There is no advantage to converting on-chain BUCK to paper to evade
+     demurrage; the demurrage clock runs the same way in both forms.
+  3. *Inheritance is automatic.* A grandparent who hides 100,000 BUCK in
+     paper notes and forgets to tell anyone does not extract 100,000
+     BUCK from the economy on their death.  The value flows back through
+     the Jubilee to BUCK issuers – broadly, back into the same economy
+     where the grandparent originally earned it.
+  4. *No central bank profit from currency loss.* The seigniorage that
+     accrues to central banks today from unrecoverable cash does not
+     exist in BUCK Notes.  Lost value does not benefit the issuer; it
+     benefits the system as a whole.
+  5. *Counterfeit recovery is automatic.* Even if a note printed years
+     ago were somehow forged (which is cryptographically impossible, but
+     humour the counterfactual), the value at stake is bounded by the
+     demurrage decay.  An attacker forging old notes would be forging
+     paper whose backing BUCK has already been largely absorbed by live
+     redemptions.
+
+  This is, I believe, the first monetary system in history where lost
+  cash returns to the commons by automatic mechanism rather than by
+  accounting fiat.  Physical cash cannot have this property, because
+  physical cash has no clock.  It emerges naturally from BUCK's existing
+  demurrage mechanism applied to the note-pool primitive.
+
+
+7.3 The Symmetry With On-Chain Balances
+───────────────────────────────────────
+
+  A second elegance worth pointing out: the effective demurrage rate on
+  a BUCK Note – as absorbed by the recipient at deposit – is /the same/
+  as the demurrage rate on an on-chain BUCK balance that lived in the
+  pool for the same duration.  This is by design, and it matters.
+
+  If paper BUCK Notes demurraged faster than on-chain BUCK, holders
+  would prefer on-chain (and paper would be discouraged, defeating the
+  design's purpose).  If on-chain BUCK demurraged faster than paper
+  notes, holders would race to print all their on-chain balances as
+  physical notes (and the chain would lose its primary use as a
+  settlement layer).
+
+  The matching demurrage rate makes the choice between on-chain and
+  paper purely about /use case fit/: on-chain for routine commerce,
+  automated payments, large transactions; paper for offline payments,
+  gifts, savings under the mattress, disaster preparedness, and so on.
+  Neither form is privileged by the demurrage mechanism.
+
+
+8 Long-Term Holding Safety: The Printer-Trust Distinction
 ═════════════════════════════════════════════════════════
 
   Pool-rate demurrage makes every note type equally cheap to /hold/.
@@ -836,7 +1128,7 @@ Table of Contents
   information that could let them spend the note?
 
 
-6.1 The Printer-Trust Model
+8.1 The Printer-Trust Model
 ───────────────────────────
 
   At mint time, the issuer knows:
@@ -850,7 +1142,7 @@ Table of Contents
   else with the same knowledge – to spend the note later.
 
 
-6.2 Type 1 (Encrypted Issuer Identity): Safe
+8.2 Type 1 (Encrypted Issuer Identity): Safe
 ────────────────────────────────────────────
 
   The spend predicate requires a Chaum-Pedersen proof of equality with
@@ -864,7 +1156,7 @@ Table of Contents
   issuer, and the issuer is the intended holder.
 
 
-6.3 Type 2 (Public Issuer Identity): Unsafe for Long-Term Storage
+8.3 Type 2 (Public Issuer Identity): Unsafe for Long-Term Storage
 ─────────────────────────────────────────────────────────────────
 
   The spend predicate requires only knowledge of \( \rho \) plus any
@@ -892,7 +1184,7 @@ Table of Contents
   statement rather than bake it into the commitment.
 
 
-6.4 Type 3 (Stealth-Targeted to Recipient): Safe
+8.4 Type 3 (Stealth-Targeted to Recipient): Safe
 ────────────────────────────────────────────────
 
   The spend predicate is a Schnorr PoK of the stealth secret \( sk^\ast
@@ -909,7 +1201,7 @@ Table of Contents
   through their own \( sk \), can redeem.
 
 
-6.5 Summary: Which Notes Can Be Saved?
+8.5 Summary: Which Notes Can Be Saved?
 ──────────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -932,21 +1224,646 @@ Table of Contents
     beneficiary).
   • *Cheques, payroll, invoices:* Type 2, cashed promptly.
   • *Targeted gifts, remittances, inheritance:* Type 3.
-  • *Wormhole-style cross-address transfers:* Type 1 exclusively.
+  • *Self-wormhole cross-address transfers:* Type 1 exclusively.
 
 
-7 Required Identity Cryptography
-════════════════════════════════
+9 Physical Security Model
+═════════════════════════
 
-  The unified design re-uses the existing Identity machinery
-  ([Identity]) wherever possible, adding one new note-side primitive and
-  one re-use of the Theorem 7 stealth-address construction.
+  The cryptography only protects what the cryptography touches.  The
+  physical paper itself needs a security model.  This section sketches
+  one.
+
+
+9.1 Layered Defense
+───────────────────
+
+  A printed BUCK Note has three concentric layers of security:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Layer                    What it protects                                 Mechanism                                                                         
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Inner: secret            The cryptographic ability to spend               QR code containing \( \rho \)                                                     
+   Middle: physical seal    Type 2 publication-exclusivity                   Hologram, scratch-off, laminate sleeve                                            
+   Outer: identity binding  Type 1/Type 3 targeting (only intended spender)  Stealth address \( pk^* = H_{st}(s) \cdot pk_{\text{recipient}} \) or CP-equality 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The /inner/ layer is the cryptographic core: as long as \( \rho \)
+  (and the type-specific secret material packed into \(
+  \text{id}_{\text{payload}} \)) is unknown, the note cannot be spent.
+  This is unconditional protection against any threat that does not
+  include observing those secrets.
+
+  The /middle/ layer matters only for Type 2 notes, where the spender
+  predicate is "anyone who knows \( \rho \) plus any registered
+  identity."  An unsealed Type 2 QR photographed by any observer allows
+  that observer to race to spend.  Sealing the QR under a tamper-evident
+  covering means the note can be displayed (passed hand-to-hand, stored
+  in a wallet, mailed in an envelope) without exposure.  The seal must
+  visibly damage on opening so that recipients can verify they were the
+  first to expose the secret.  (This does not rescue Type 2 from the
+  issuer-race risk – the issuer who printed the note could still have
+  retained \( \rho \) before sealing – which is why Type 2 remains
+  unsafe for long-term holding.  The seal addresses post-printing
+  observation, not issuer trust.)
+
+  The /outer/ layer makes Type 1 and Type 3 notes safe to /publicly/
+  distribute.  A Type 1 or Type 3 note can be photographed with no
+  security implication: the photographer cannot spend it without also
+  possessing the stealth secret or the matching Identity scalar.  The
+  targeting binding is cryptographic, not physical.  For Types 1 and 3,
+  no physical seal is required.
+
+
+9.2 Recommended Manufacturing Profile
+─────────────────────────────────────
+
+  A practical BUCK Note specification, suitable for industrial-scale
+  printing:
+
+  • *Substrate.* Cotton-blend banknote paper or polymer (Bank of
+    Canada-style).  Steel or titanium plates for high-denomination
+    "permanent" notes.
+
+  • *Printing.* Standard inkjet or laser printing of QR codes is
+    sufficient for cryptographic correctness.  For visual anti-confusion
+    (so people can tell a legitimate note from a printout), use
+    UV-reactive ink, microprinting, or watermarks – the same techniques
+    used for traditional banknotes.  These do not add cryptographic
+    security; they add /reassurance/.
+
+  • *Seal.* Peelable hologram covering the secret QR (Type 2 only), or
+    scratch-off panel covering a separate code (also Type 2), or no seal
+    at all (Type 1 and Type 3, since the cryptography handles
+    exclusivity).
+
+  • *Redundancy.* Print the QR twice (front and back) with Reed-Solomon
+    error correction.  A note that loses one QR to wear or damage can
+    still be deposited via the second.  For higher-value notes, also
+    print the secret as base32 digits in human-readable form.
+
+  • *Issuer mark.* A non-cryptographic logo identifying the issuer (the
+    Alberta Buck reserve, a credit union, a commercial issuer).  This is
+    for visual recognition only; the cryptographic authenticity check is
+    the on-chain commitment.
+
+  • *Denomination indication.* Visible face value for human convenience.
+    The actual value is what the on-chain commitment encodes; the
+    printed face value is metadata.  A wallet app that scans an apparent
+    1,000 BUCK note and reads "actual value: 100 BUCK" from the
+    commitment warns the user before deposit.
+
+
+10 Use Cases
+════════════
+
+  The same primitive serves a spectrum of use cases that today require
+  entirely separate financial instruments.  Each use case maps to one or
+  two of the three Identity-binding types, with printer-trust
+  implications determining which choice is appropriate.
+
+
+10.1 Walking-Around Money
+─────────────────────────
+
+  Print a stack of Type 1 notes issued from one of your own private
+  accounts, in small denominations (10, 20, 100 BUCK).  Hand them out as
+  payment; they can only be deposited by /you/, at one of your other
+  registered private accounts.
+
+  This differs from physical cash: a Type 1 note is /not/ pure bearer –
+  a stranger who picks up a dropped Type 1 note cannot spend it.  For a
+  true cash-equivalent (spendable by anyone who holds the paper), a Type
+  2 note with hologram seal fills the role, at the cost of short-term
+  expiry and issuer-trust.  Most walking-around use cases – paying for a
+  coffee, tipping, splitting a bill with a friend – are better served by
+  Type 1 notes that you print for your own use and exchange via direct
+  digital transfer of the opening at the moment of payment.
+
+  Notes age at the pool rate, encouraging rapid circulation rather than
+  hoarding.  The wallet-app status codes give immediate VALID / DEAD /
+  FAKE feedback on scan.
+
+
+10.2 Cross-Border Remittances
+─────────────────────────────
+
+  A paper BUCK Note is just paper.  It crosses borders in pockets,
+  envelopes, and parcels at zero marginal cost.  A Type 3 note targeted
+  to the recipient's Identity makes the transfer useless to anyone
+  except the intended recipient, so loss in transit is not a financial
+  risk.
+
+  This compares favorably to the existing remittance industry, which
+  extracts roughly 6.5% in fees globally on $700+ billion in annual
+  transfers.[12] A paper-note remittance has a fixed cost: print
+  ⁃ mail.  The mail might cost $1; print costs fractions of a cent;
+  deposit gas costs a few dollars at most.  At any reasonable remittance
+  value, the fee compression is enormous.
+
+  The recipient does not need a smartphone or internet at the moment of
+  receipt – they need them only at the moment they want to convert the
+  note to on-chain BUCK or to local fiat.  In countries with
+  intermittent connectivity, this is a major usability improvement over
+  digital remittance services.
+
+
+10.3 Tip Jars and Charitable Donations
+──────────────────────────────────────
+
+  A sheet of small-denomination Type 2 notes, perforated for tear-off,
+  can be left next to a tip jar or a donation box.  Patrons take notes
+  (denominated at, say, 2 BUCK each), scan them with their phone, and
+  the value flows to the jar's registered identity.
+
+  This works without any intermediary, payment processor fee, or opening
+  of an account.  The patron pays in paper; the recipient receives in
+  on-chain BUCK.  Type 2 is appropriate here because the turnaround is
+  fast: the jar's operator empties the day's receipts to their main
+  account nightly.
+
+
+10.4 Cold Storage and Disaster Preparedness
+───────────────────────────────────────────
+
+  A Type 1 self-issued note, stored in a fireproof safe, is a more
+  durable form of cold storage than a 12-word seed phrase.  The note is
+  /self-evidently/ an instrument of value – a customs officer, a
+  relative, or your future self immediately recognizes a paper labeled
+  "1,000 BUCK Note" as something worth keeping safe.  A seed phrase, by
+  contrast, is opaque to anyone who has not been trained to recognize
+  it.
+
+  For disaster preparedness: a small folder of BUCK Notes in a fireproof
+  safe survives infrastructure failures that would render exchange
+  accounts and even hardware wallets unusable.  As long as the chain is
+  reachable somewhere in the world, the notes can be deposited.  In a
+  true grid-down emergency, the notes circulate hand-to-hand at face
+  value (with the matching pool-rate demurrage clock running uniformly,
+  so prices remain stable in BUCK terms even during a multi-week
+  outage).
+
+  Type 1 is the correct choice for self-directed cold storage (you are
+  your own beneficiary).  Type 3 targeted to a designated heir's
+  Identity is the correct choice for estate-directed cold storage.
+
+
+10.5 Estate Planning
+────────────────────
+
+  Type 3 notes targeted to your heir's Identity, stored in a
+  safe-deposit box: zero probate process, zero tax-event delay, zero
+  court intervention.  The heir scans on your death, deposits, the BUCK
+  is theirs.
+
+  For larger estates, additional conditional-spend predicates (time
+  locks, death-certificate oracle attestation) can be composed into the
+  commitment's `predicate' field.  The SNARK does not care what the
+  predicate is as long as it is well-defined at mint time.
+
+
+10.6 Gift Cards Without Issuer Risk
+───────────────────────────────────
+
+  A traditional gift card carries the risk that the issuing merchant
+  goes bankrupt between purchase and redemption (cumulative consumer
+  losses to bankrupt gift-card issuers run into the hundreds of millions
+  annually in North America[13]).  A Type 1 or Type 3 BUCK Note carries
+  no issuer risk: the value is on chain in the BUCK reserve, not on the
+  merchant's books.
+
+  Specialized merchant gift cards become unnecessary – replaced by BUCK
+  Notes of appropriate denomination, optionally bundled with a paper
+  merchant receipt indicating the intended use.
+
+
+10.7 Tax-Compliant Compensation
+───────────────────────────────
+
+  An employer paying a contractor in BUCK Notes faces the same
+  tax-reporting obligations as paying in cash: payment is income and
+  must be reported.  The on-chain issuance trail makes this easier to
+  comply with than paper cash, not harder – the employer's mint
+  transaction is an auditable record of the payment, even though the
+  contractor's deposit is private.
+
+  For employees: employers can issue Type 3 notes targeted to each
+  employee's registered Identity, automating payroll while preserving
+  employee privacy from external observers.
+
+
+10.8 Underbanked and Cash-Economy Inclusion
+───────────────────────────────────────────
+
+  This is, perhaps, the most important use case.
+
+  The Bank of Canada estimates 1-2% of Canadians are unbanked, with
+  rates an order of magnitude higher in rural and Indigenous
+  communities.[14] Globally the World Bank estimates 1.4 billion adults
+  are unbanked.[15]
+
+  For these populations, paper cash is not a privacy preference; it is
+  the only viable financial instrument.  A digital-only currency (CBDC,
+  stablecoin, traditional e-payment) excludes them by definition.  BUCK
+  Notes includes them: a person without a bank account, without a
+  smartphone, without literacy in the local language, can hold and
+  transfer BUCK Notes by physical handover, exactly as they hold and
+  transfer paper currency today.
+
+  When and if they choose to interact with the digital economy, they
+  deposit a note and the value moves on chain.  Until then, they
+  participate in the BUCK economy on exactly the terms they participate
+  in the cash economy.  The issuer of the paper – a credit union, a
+  reserve-backed issuer like ATB, or a local community organisation –
+  takes on the role that the central bank currently plays for physical
+  fiat, while the recipient retains the anonymity of a cash user.
+
+
+11 Selective Disclosure: Compliance Without Surveillance
+════════════════════════════════════════════════════════
+
+  Bearer instruments are politically controversial.  Most jurisdictions
+  either regulate them heavily (US bearer bonds were effectively
+  abolished in 1982 by the Tax Equity and Fiscal Responsibility Act) or
+  enforce strict reporting thresholds on large cash transactions
+  (Canada's FINTRAC reports any cash transaction above $10,000).
+
+  The concern is not bearer instruments per se; it is the /opacity to
+  law enforcement and tax authorities/ of large bearer-instrument flows.
+  Money laundering, sanctions evasion, and tax evasion all exploit
+  bearer-instrument anonymity.
+
+  BUCK Notes threads this needle in a way that paper cash and CBDCs both
+  fail.
+
+
+11.1 The Asymmetry: Issuance vs. Circulation
+────────────────────────────────────────────
+
+  Every BUCK Note's /issuance/ is on chain and identity-bound.  When
+  Alice mints 5,000 BUCK from her registered Identity, the chain
+  records:
+
+  • Alice's Identity (via the existing PS signature + ElGamal credential
+    machinery)
+  • The amount transferred into the Note Pool
+  • The block timestamp
+  • The commitments appended to the tree
+
+  This record is /permanent/ and /cryptographically traceable to Alice's
+  Identity/.
+
+  The /circulation/ of those notes – who holds them, who passes them on,
+  who eventually deposits them – is private.  The chain sees only the
+  deposit transaction, which reveals the recipient's address (the
+  depositor) and the amount, but nothing about the path from issuer to
+  depositor.
+
+  This produces an asymmetry:
+
+  • /Anyone/ can see that "5,000 BUCK was minted as notes by [some
+    identity] at block 1,234,567"
+  • /Only Alice or a regulator with Alice's selective-disclosure key/
+    can see that "the issuer was Alice"
+  • /Nobody/ can see who held the notes between issuance and deposit
+  • /Anyone/ can see "[some address] deposited a 1,000 BUCK note at
+    block 1,234,890"
+
+  Linking issuance to deposit requires either temporal correlation
+  (defeated by a sufficiently large global note pool) or knowledge of
+  the opening (which only a holder of the note has at any given time).
+
+
+11.2 The Regulatory Audit Path
+──────────────────────────────
+
+  A regulator investigating illicit flows has a clean audit path:
+
+  1. Identify a suspect deposit on chain (via subpoena to the depositing
+     party's Identity, KYC obligations on the depositing wallet
+     operator, etc.)
+  2. Subpoena the issuer of any BUCK held by the suspect: the /issuer/
+     is identifiable from the on-chain issuance record (selective
+     disclosure of the issuer's Identity, through the existing
+     `approveFor' pattern on the issuance transaction)
+  3. Examine the issuer's records for who they paid the note to (this is
+     the issuer's responsibility, the same way a bank that issues a
+     cashier's cheque is responsible for knowing who they issued it to)
+
+  The audit path stops at the first hand-to-hand transfer (which is
+  intentionally private, as physical cash is private).  But the
+  /origination/ of every note is traceable in a way that physical cash
+  is not – a $20 bill issued by the Bank of Canada is identical to every
+  other $20 bill, with no per-bill issuance trail at all.
+
+
+11.3 What Compliance Looks Like
+───────────────────────────────
+
+  A reasonable regulatory regime around BUCK Notes:
+
+  • /Issuers/ (anyone who mints notes from on-chain BUCK) must be
+    identity-registered and may face reporting obligations on large
+    issuances (analogous to current cash-withdrawal reporting).
+  • /Depositors/ (anyone who deposits a note to mint on-chain BUCK) face
+    the same reporting obligations as cash deposits at a bank today.
+  • /Holders/ who simply pass notes hand-to-hand have no reporting
+    obligation, the same way you have no obligation to report having
+    $200 in your wallet.
+  • /Pool-rate demurrage/ makes large-scale long-term cash hoarding
+    economically unviable (the demurrage decay caps the value of
+    cash-as-store-of-value at roughly the same level as a moderate-yield
+    savings account loses to inflation).
+
+  This regime is /strictly more privacy-preserving/ than the current
+  Canadian-dollar regime (which surveils every electronic transaction)
+  and /strictly more compliance-friendly/ than the current paper-cash
+  regime (which provides no issuance trail at all).
+
+
+11.4 The CBDC Comparison
+────────────────────────
+
+  China's e-CNY, the European Central Bank's proposed digital euro, the
+  Bank of Canada's CBDC research – all of these designs include either
+  explicit or implicit surveillance capabilities.  The central bank can
+  see, freeze, expire, restrict, geofence, or retroactively examine any
+  holder's balance.[2]
+
+  This is not an accident of the technology; it is a design goal.  The
+  pitch to governments is precisely that CBDCs give them visibility into
+  civilian payment flows that paper cash denies them.
+
+  BUCK Notes is the opposite design.  Visibility is at the edges
+  (issuance, deposit), not the center (circulation).  The issuer is
+  identifiable, but only by selective disclosure with proper
+  authorization (subpoena, court order, regulatory audit authority), not
+  by everyday observation.  The bearer-circulation phase is private the
+  way cash is private.
+
+  A jurisdiction that adopts BUCK Notes gets /better compliance tools
+  than paper cash provides today/ without giving up /the privacy
+  properties that make cash worth using/.  This is a genuine Pareto
+  improvement on the current regulatory trade-off and would, I believe,
+  be politically defensible to even cash-skeptical authorities.
+
+
+12 Comparison With Prior Art
+════════════════════════════
+
+  This section places BUCK Notes in the lineage of digital cash and
+  privacy-preserving pool designs from 1982 to the present, and
+  identifies what each predecessor lacked.
+
+
+12.1 Chaum's E-Cash (1982-1998)
+───────────────────────────────
+
+  David Chaum's blind-signature scheme[4] introduced the core idea: an
+  issuer (a bank) signs a token blinded by the holder so that the bank
+  cannot link the issuance to the redemption.  When the holder spends
+  the token, the merchant verifies the signature without revealing who
+  originally received it.
+
+  This is a beautiful design and operationally similar to BUCK Notes in
+  spirit.  Its failures were /institutional/, not cryptographic:
+
+  • Required a centralized issuer (the bank)
+  • Required online verification at spend time (no offline
+    transferability)
+  • Two-sided market never bootstrapped (no merchants accepted, so no
+    consumers held)
+  • DigiCash (the commercial implementation) went bankrupt in 1998
+
+  BUCK Notes has the same privacy properties without the centralized
+  issuer (any identity-registered party can mint notes against their own
+  on-chain BUCK).  Spend-time verification is on chain rather than via
+  the issuer (so the issuer cannot selectively block redemptions).  The
+  two-sided market problem is mitigated by BUCK's existing on-chain
+  ecosystem – BUCK already exists as a usable currency, so adopting BUCK
+  Notes is a UX upgrade rather than a greenfield bootstrapping.
+
+
+12.2 Brands' Offline Divisible E-Cash (1993)
+────────────────────────────────────────────
+
+  Stefan Brands' scheme[5] addressed the offline-spend problem: a
+  divisible coin can be spent in pieces without contacting the issuer,
+  but /double-spending mathematically reveals the spender's identity/.
+
+  This is the "deterrent rather than prevention" model.  It works in
+  theory but has two operational issues:
+
+  • The deterrent only deters if identity revelation has consequences
+    (it relied on a legal/social enforcement layer external to the
+    cryptography).
+  • The complexity of divisible-coin management was substantial and
+    never produced a shipped product.
+
+  BUCK Notes handles double-spend by /prevention/ (global nullifier
+  set), not deterrence.  No legal layer is required.  Divisibility is
+  achieved by issuing multiple notes at mint time rather than by a
+  single divisible coin.
+
+
+12.3 Casascius Coins (2011-2013)
+────────────────────────────────
+
+  Mike Caldwell's Casascius coins[3] were physical Bitcoin: a brass or
+  silver coin with a holographic seal covering a private-key QR code.
+  Snap the seal, scan the QR, the coin's Bitcoin balance was yours.
+
+  Casascius coins remain the closest existing analogue to paper BUCK
+  Notes.  What they lacked:
+
+  • Native integration with the underlying token (the Bitcoin protocol
+    does not understand bearer-coin form; the coin is an aftermarket
+    wrapper).
+  • Targeting (all coins were pure bearer; no way to issue a coin
+    claimable only by a specific recipient).
+  • Demurrage (a Casascius coin holds its full Bitcoin balance forever,
+    unrelated to any economic mechanism).
+  • Programmable predicates (only one mode: bearer).
+  • Issuer was a single individual, who eventually stopped issuing in
+    2013 due to FinCEN money-transmitter concerns – an issuance
+    bottleneck that BUCK Notes distributes to all identity-registered
+    participants.
+
+  BUCK Notes is, in essence, what Casascius would have been if Bitcoin
+  had been designed with bearer-paper as a first-class instrument from
+  the start, and if the underlying token had a demurrage and identity
+  layer.
+
+
+12.4 BIP-38 Paper Wallets
+─────────────────────────
+
+  Encrypted Bitcoin private keys printed on paper, with a passphrase
+  needed to spend.  BIP-38 paper wallets are an aftermarket bearer
+  instrument similar to Casascius but without the physical coin form
+  factor.
+
+  Same limitations as Casascius (no native integration, no targeting, no
+  demurrage, no predicates), plus the additional UX burden of
+  remembering or transmitting the passphrase.
+
+
+12.5 Zerocash / Zcash (2014-)
+─────────────────────────────
+
+  Ben-Sasson, Chiesa, Garman, Green, Miers, Tromer, and Virza's
+  Zerocash[7] gave us the first scalable on-chain
+  commitment-and-nullifier UTXO model with full zero-knowledge.  Zcash
+  deployed it in 2016.
+
+  Zcash provides on-chain shielded transactions but does /not/ extend
+  the model to physical bearer instruments, targeted cheques, or
+  identity-linked issuance.  All Zcash value lives on chain in shielded
+  notes.  No mechanism exists for printing a shielded Zcash note as a
+  paper instrument that someone else could deposit later.
+
+  BUCK Notes uses Zerocash's commitment-and-nullifier primitive for its
+  on-chain machinery and extends it with the Identity-binding layer and
+  the physical-paper surface.  The contribution is in the extension, not
+  the primitive.
+
+
+12.6 Aztec / Zk.Money
+─────────────────────
+
+  Aztec's predicate-encrypted notes[8] generalize Zerocash to private
+  smart contract calls – a note can encode arbitrary state operated on
+  by arbitrary predicates.  This is the cryptographic ancestor of the
+  `predicate' field in the BUCK Note commitment.
+
+  Aztec does not have physical bearer instruments either.  Its
+  predicates are designed for on-chain DeFi applications (private DEX
+  trades, private lending), not for paper notes or identity-bound
+  cheques.  BUCK Notes applies the same predicate machinery to a
+  different problem: specifying spend conditions for a private bearer
+  instrument that is issued against an identity-registered reserve.
+
+
+12.7 Tornado Cash and Privacy Pools
+───────────────────────────────────
+
+  Tornado Cash[9] was the simplest possible commitment-and-nullifier
+  mixer: fixed-denomination deposits in, anonymous withdrawals out.
+  Sanctioned by OFAC in 2022 for money-laundering use.
+
+  Privacy Pools (Buterin, Schaefer, Tromer, et al., 2023)[10] extends
+  Tornado with per-spend "association sets" – a depositor can prove
+  their deposit is in a non-incriminating subset, allowing compliance
+  without identification.
+
+  Both are mixer designs, not cash-instrument designs.  Their relevance
+  to BUCK Notes is the lineage: the Note Pool is a Tornado-style global
+  anonymity set, but with predicates and Identity bound in.  The
+  selective-disclosure compliance story borrows from Privacy Pools'
+  association-set ideas, but with issuer identity substituting for the
+  depositor-declared non-incrimination proof.
+
+
+12.8 Comparison Summary
+───────────────────────
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   System               Bearer paper  Targeting  Demurrage  Predicates  Native  Decentralized   Year 
+  ───────────────────────────────────────────────────────────────────────────────────────────────────
+   Chaum E-Cash         No            No         No         No          -       No              1982 
+   Brands Offline       No            No         No         No          -       No              1993 
+   BIP-38 Paper Wallet  Yes           No         No         No          No      Partial         2010 
+   Casascius Coin       Yes           No         No         No          No      No              2011 
+   Zerocash / Zcash     No            No         No         No          -       Yes             2014 
+   Tornado Cash         No            No         No         No          -       Yes             2019 
+   Aztec                No            No         No         Yes         -       Yes             2020 
+   Privacy Pools        No            No         No         Limited     -       Yes             2023 
+   CBDCs (e-CNY, etc.)  No            Yes        Sometimes  No          Yes     No             2020+ 
+   *BUCK Notes*         *Yes*         *Yes*      *Yes*      *Yes*       *Yes*   *Yes*          2026? 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The "Native" column captures whether the bearer-paper instrument is a
+  first-class designed primitive of the system (as opposed to an
+  aftermarket wrapper or absent entirely).  BUCK Notes is the first
+  design that fills every column.  This is not because the prior art was
+  incompetent; it is because the four required pieces (commitment-pool
+  primitive, identity layer, demurrage, jurisdictional reserve) finally
+  converged in one system.
+
+
+12.9 Comparison: Cash, CBDC, BUCK Notes
+───────────────────────────────────────
+
+  A more direct comparison aimed at a non-cryptographer reader: how does
+  BUCK Notes stack up against physical cash and central bank digital
+  currencies?
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Property                         Physical Cash               CBDC (typical)             BUCK Notes                                 
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   *PRIVACY*                                                                                                                          
+   Holder's identity hidden         Yes                         No (issuer sees all)       Yes (during circulation)                   
+   Transaction graph hidden         Yes                         No                         Yes                                        
+   Issuer's identity hidden         Yes (notes are fungible)    No                         No (selective disclosure)                  
+                                                                                                                                    
+   *FINALITY*                                                                                                                         
+   Settlement is instant            Yes                         Yes                        Yes (chain finality)                       
+   Reversible by issuer             No                          Yes (CBDC freeze)          No                                         
+   Reversible by holder             No                          Yes (chargeback)           No                                         
+                                                                                                                                    
+   *INFRASTRUCTURE*                                                                                                                   
+   Works without internet           Yes                         No                         Yes (transfer); needs net for deposit      
+   Works without battery            Yes                         No                         Yes (paper); needs power for deposit       
+   Works without bank account       Yes                         No                         Yes                                        
+   Cross-border in your pocket      Yes (with declaration)      No (geofenced)             Yes                                        
+                                                                                                                                    
+   *DURABILITY*                                                                                                                       
+   Survives infrastructure failure  Yes                         No                         Yes (paper); chain on recovery             
+   Counterfeit-resistant            Partial (printed security)  Yes                        Yes (cryptographic)                        
+   Recoverable if lost              No                          Yes (issuer can re-issue)  No (but demurrage returns value to system) 
+                                                                                                                                    
+   *ECONOMIC BEHAVIOR*                                                                                                                
+   Lost notes extracted forever     Yes                         No                         No (returned via demurrage)                
+   Inflation tracks issuer policy   Yes                         Yes                        Yes (tracks BuckK)                         
+   Holds value over decades         No (inflation)              No (inflation)             No (demurrage)                             
+   Holds value over years           Approximately               Approximately              Yes (with demurrage discount)              
+                                                                                                                                    
+   *PROGRAMMABILITY*                                                                                                                  
+   Time-locked spends               No                          Possible                   Yes                                        
+   Conditional payouts              No                          Possible                   Yes                                        
+   Multi-signature spending         No                          Possible                   Yes                                        
+   Issuer can restrict spending     No                          Yes                        No (issuer relinquishes control at mint)   
+                                                                                                                                    
+   *COMPLIANCE*                                                                                                                       
+   Issuance is auditable            No                          Yes                        Yes                                        
+   Circulation is auditable         No                          Yes                        No (private)                               
+   Deposit is auditable             Partial (CTR rules)         Yes                        Yes                                        
+   Selective disclosure available   No (no records)             No (full disclosure)       Yes                                        
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The dominant insight from this table: /BUCK Notes combines the privacy
+  properties of physical cash with the compliance and durability
+  properties of CBDC, while preserving infrastructure independence that
+  CBDC abandons./
+
+  The single property where physical cash is genuinely irreplaceable –
+  "works without internet for deposits" – is moderated for BUCK Notes
+  but not eliminated.  Holders can transfer BUCK Notes hand-to-hand
+  offline, indefinitely; they need internet only when they want to
+  convert the bearer instrument to an on-chain balance.  In a disaster
+  scenario, BUCK Notes circulate as cash for the duration of the outage,
+  then deposit normally when the chain becomes reachable again.
+
+
+13 Required Identity Cryptography
+═════════════════════════════════
+
+  BUCK Notes re-use the existing Identity machinery ([Identity])
+  wherever possible, adding one new note-side primitive and one re-use
+  of the Theorem 7 stealth-address construction.
 
 
 [Identity] <file:alberta-buck-identity.org>
 
-7.1 Components Already Present
-──────────────────────────────
+13.1 Components Already Present
+───────────────────────────────
 
   The following are unchanged from Identity v1 and are used directly:
 
@@ -969,8 +1886,8 @@ Table of Contents
      public-claim flags).
 
 
-7.2 New Primitive: The Note Commitment Hash
-───────────────────────────────────────────
+13.2 New Primitive: The Note Commitment Hash
+────────────────────────────────────────────
 
   A SNARK-friendly commitment hash \( H_{\text{cm}} \) (Poseidon) is
   needed to compute the commitment inside the spend circuit.  The hash
@@ -982,8 +1899,8 @@ Table of Contents
   that is standard in modern SNARK systems.
 
 
-7.3 New Primitive: The Nullifier PRF
-────────────────────────────────────
+13.3 New Primitive: The Nullifier PRF
+─────────────────────────────────────
 
   The nullifier PRF \( \text{PRF}_{\text{key}}(\rho) \) is also
   Poseidon-based, keyed differently per type:
@@ -1006,8 +1923,8 @@ Table of Contents
   types are avoided.
 
 
-7.4 Re-Used Primitive: Theorem 7 (Stealth Address)
-──────────────────────────────────────────────────
+13.4 Re-Used Primitive: Theorem 7 (Stealth Address)
+───────────────────────────────────────────────────
 
   The stealth-address construction \( pk^\ast = H_{\text{st}}(s) \cdot
      pk_{\text{recipient}} \) is proved sound in the proofs document
@@ -1016,8 +1933,8 @@ Table of Contents
      assumption.
 
 
-7.5 The Re-Encryption Operation at Mint
-───────────────────────────────────────
+13.5 The Re-Encryption Operation at Mint
+────────────────────────────────────────
 
   Type 1 and Type 3 require the issuer to perform a re-encryption
   operation at mint time:
@@ -1043,8 +1960,8 @@ Table of Contents
   operations on BN254 G_1.  No pairing, no new hardness assumption.
 
 
-7.6 The Re-Encryption Operation at Spend (Type 1 Only)
-──────────────────────────────────────────────────────
+13.6 The Re-Encryption Operation at Spend (Type 1 Only)
+───────────────────────────────────────────────────────
 
   A Type 1 depositor must produce a fresh ElGamal encryption \(
   E_{\text{dep}} = (R_d, C_d) = (r_d G, M_{\text{issuer}} + r_d \cdot
@@ -1062,8 +1979,8 @@ Table of Contents
   encrypted.
 
 
-7.7 The Schnorr PoK Operation at Spend (Type 2 and Type 3)
-──────────────────────────────────────────────────────────
+13.7 The Schnorr PoK Operation at Spend (Type 2 and Type 3)
+───────────────────────────────────────────────────────────
 
   Both Type 2 and Type 3 spenders include a Schnorr PoK of \(
   sk_{\text{dep}} \) for their registered \( pk_{\text{dep}} \),
@@ -1074,8 +1991,8 @@ Table of Contents
   Both Schnorr proofs are standard; no novelty.
 
 
-7.8 Summary: New Cryptographic Components
-─────────────────────────────────────────
+13.8 Summary: New Cryptographic Components
+──────────────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Component                           Status                                      Assumption 
@@ -1093,8 +2010,8 @@ Table of Contents
   the SNARK ecosystem.  No novel hardness assumption is introduced.
 
 
-8 The SNARK Circuits
-════════════════════
+14 The SNARK Circuits
+═════════════════════
 
   Three spend circuits (one per note type) and one mint circuit are
   required.  Alternatively, a single circuit conditioned on a public
@@ -1102,8 +2019,8 @@ Table of Contents
   deployment choice but costs a larger universal verifier.
 
 
-8.1 Mint Circuit
-────────────────
+14.1 Mint Circuit
+─────────────────
 
   *Public inputs.* `totalFace' (the total face value \( \sum v_i \) of
   the notes being minted), \( \{cm_1, \ldots, cm_N\} \) (commitments to
@@ -1143,8 +2060,8 @@ Table of Contents
   transfer path.
 
 
-8.2 Spend Circuit (Type 1 – Encrypted Issuer)
-─────────────────────────────────────────────
+14.2 Spend Circuit (Type 1 – Encrypted Issuer)
+──────────────────────────────────────────────
 
   *Public inputs.* `noteRoot' (current Merkle root of `noteTree'),
   `nullifier', `faceValue' (the note's face \( v \), revealed),
@@ -1177,8 +2094,8 @@ Table of Contents
   lives in the SNARK.
 
 
-8.3 Spend Circuit (Type 2 – Public Issuer)
-──────────────────────────────────────────
+14.3 Spend Circuit (Type 2 – Public Issuer)
+───────────────────────────────────────────
 
   *Public inputs.* `noteRoot', `nullifier', `faceValue', `issuerPkClaim'
   (the issuer's public-identity claim for human-readable verification,
@@ -1208,8 +2125,8 @@ Table of Contents
   to recipient, computed outside the SNARK.
 
 
-8.4 Spend Circuit (Type 3 – Stealth-Targeted)
-─────────────────────────────────────────────
+14.4 Spend Circuit (Type 3 – Stealth-Targeted)
+──────────────────────────────────────────────
 
   *Public inputs.* `noteRoot', `nullifier', `faceValue',
   `depositorRegistryEntry'.  \( pk^\ast \) is /not/ a public input:
@@ -1249,8 +2166,8 @@ Table of Contents
   simply requires /any/ registered depositor.
 
 
-8.5 Circuit Engineering Budget
-──────────────────────────────
+14.5 Circuit Engineering Budget
+───────────────────────────────
 
   Ballpark constraint counts (orders of magnitude, BN254 Groth16):
 
@@ -1272,8 +2189,8 @@ Table of Contents
   few seconds.
 
 
-8.6 Common Circuit Gadgets
-──────────────────────────
+14.6 Common Circuit Gadgets
+───────────────────────────
 
   A base-level library of gadgets is shared across all spend types:
 
@@ -1286,155 +2203,70 @@ Table of Contents
   architecture (Aztec Noir, Circom, Halo2 all support this layering).
 
 
-9 Migration from v1 Wormhole and BUCK Cash
-══════════════════════════════════════════
+15 What This Architecture Rules Out: Pure-Bearer Cryptographic Notes
+════════════════════════════════════════════════════════════════════
 
-  The transition is orderly and preserves all existing cryptographic
-  anchors.
+  The design intentionally does not provide a pure-bearer cryptographic
+  note – one whose spend predicate is "anyone who knows the opening can
+  deposit, with no Identity hook at all."  This is the closest analogue
+  to a $20 bill (possession is the entirety of ownership, no
+  registration involved), and it is attractive for the same reasons
+  physical cash is attractive.  Three properties make it a poor fit for
+  the cryptographic surface:
 
+  1. /Issuer-race is unbounded./ A pure-bearer predicate `know(rho)' has
+     no cryptographic mechanism preventing a malicious issuer from
+     retaining \( \rho \) and racing the holder to deposit.  The
+     physical seal on paper makes the /observation/ of \( \rho \)
+     detectable to the holder, but does not constrain the /issuer/ at
+     mint time.
+  2. /Deposit has no Identity binding./ The regulatory audit path
+     described above relies on the depositor being a registered
+     Identity.  A pure-bearer deposit with no Identity hook breaks this
+     property and forces the system into one of two uncomfortable
+     corners: accept unregistered deposits (losing all compliance), or
+     reintroduce Identity at deposit time (at which point it is just a
+     Type 2 note in different clothing).
+  3. /Three alternative routes all collapse into existing types./ /Blind
+     minting/ (the issuer does not know \( \rho \) at mint time)
+     requires the holder to participate in minting with a blinded
+     commitment – incompatible with "print a stack of notes and hand
+     them out."  /Trusted printer/ (HSM-attested erasure of \( \rho \))
+     works in principle but reintroduces a single-point-of-trust.
+     /Short expiry/ limits the issuer-race window – equivalent to Type 2
+     with an additional expiry predicate.
 
-9.1 Wormhole v1 to Notes
-────────────────────────
+  Rather than contort the cryptographic layer to approximate pure
+  bearer, BUCK Notes keeps the physical-world primitive where it
+  belongs: the /tamper-evident seal over a Type 2 note/ is a
+  physical-exclusivity mechanism, and that is an inherently physical
+  property.  Cryptography makes the /opening/ hard to forge; a hologram
+  makes the /observation/ detectable.  The two surfaces complement
+  without pretending to be the same primitive.
 
-  A v1 burn-address certificate \( (addr, v, age) \) maps to a single
-  Type 1 note:
+  For use cases that truly require "no identity link at all":
 
-  ┌────
-  │ migrate_v1_to_notes(addr, v, age):
-  │   sk_addr    = recovered Schnorr key bound to addr
-  │   pk_addr    = sk_addr * G
-  │   M_addr     = registered M for addr (from IdentityRegistry)
-  │   r_i        = fresh random
-  │   R_i, C_i   = ElGamal(M_addr, r_i, pk_addr)
-  │   rho        = fresh random
-  │   cm         = Poseidon(1, v_effective, rho, (R_i, C_i), None)
-  │   # v_effective = v - kappa * age folds the certificate's
-  │   # accrued BUCK-age into its face value at migration time.
-  │   submit mint proof: burn (addr, v, age), append cm to noteTree
-  └────
+  • /Short-lived hand-to-hand circulation/ is served by Type 2 paper
+    notes with tamper-evident seals, printed by a trusted issuer who
+    publicly warrants that they erased \( \rho \) after printing.  This
+    warranty is an off-chain social/legal claim identical in kind to the
+    trust extended to the Bank of Canada when it issues physical polymer
+    banknotes.  A credit union or a commercial issuer fills the role of
+    the central bank for this purpose.
+  • /Long-term holding/ is served by Type 1 (self-issued) or Type 3
+    (stealth-targeted), where the cryptography alone prevents
+    issuer-race and therefore no hologram seal is needed.
 
-  The v1 certificate's accumulated demurrage is discharged at migration
-  (by computing the certificate's current effective value \(
-  v_{\text{eff}} = v - \kappa \cdot \text{age} \) and using that as the
-  note's face).  After migration the note participates in the pool as a
-  normal Type 1 note; its subsequent demurrage is the pool-rate, not the
-  per-certificate rate.  The v1 burn address is emptied; its BUCK (net
-  of demurrage) flows into the contract balance \( B \) exactly as any
-  other mint.
-
-
-9.2 BUCK Cash to Notes
-──────────────────────
-
-  • *Cash Mode B (stealth-targeted)* maps one-to-one to Type 3; the
-    cryptographic structure is identical.
-  • *Cash Mode C (programmable)* can be expressed as a Type 1, 2, or 3
-    note with a non-trivial `predicate' field in the commitment,
-    evaluated by the spend circuit.  The three base types subsume the
-    most common programmable variants (time locks are a predicate on \(
-    t_{\text{mint}} \); oracle conditionals are a predicate on oracle
-    state; multi-sig is a conjunction of multiple Schnorr PoKs).
-  • *Cash Mode A (pure bearer)* does not map to any of the three types.
-    See "What Gets Dropped" below.
-
-
-9.3 v1 Coexistence During Transition
-────────────────────────────────────
-
-  The unified Notes architecture can be deployed alongside the v1
-  Wormhole during a transition window.  The v1 burn-address pool remains
-  a valid anonymity set; new users mint into the Notes pool; v1 holders
-  migrate at their convenience.  The Notes contract's `noteFaceSum'
-  reflects only Notes-pool activity; v1 certificates continue to accrue
-  per-certificate demurrage as before, via their individual burn-address
-  accounts.
-
-  The final /old/ v1 certificate need not be migrated – it can continue
-  to be redeemed against its burn-address anchor indefinitely, at the
-  cost of the contract maintaining two verifier paths.  A practical
-  deadline (e.g., 5 years from Notes launch) is reasonable.
+  The canonical "walking-around money" use case is handled by Type 1
+  notes: Alice issues a stack for her own use, hands them out, and the
+  recipients transfer the openings back to Alice via direct message for
+  deposit at one of Alice's own accounts.  This changes the UX – payment
+  now involves a brief digital handshake – but gains a property physical
+  cash lacks: a dropped or stolen Type 1 note is useless to anyone but
+  Alice.
 
 
-10 What Gets Dropped: Pure Bearer
-═════════════════════════════════
-
-  The Cash document's /Mode A – bearer note with QR code sealed under a
-  hologram, anyone who possesses the QR can deposit/ does not map
-  cleanly onto the unified scheme.  The reason is the same as why Mode A
-  in the Cash design required a physical hologram seal: a purely
-  secret-based predicate (`know(rho)' with no identity hook) has no
-  cryptographic mechanism preventing a malicious issuer from retaining
-  \( \rho \) and racing the holder.
-
-
-10.1 Why Mode A Is Absent
-─────────────────────────
-
-  Three routes considered:
-
-  1. /Blind minting/ – the issuer does not know \( \rho \) at mint time.
-     Requires the holder to participate in minting (giving a blinded
-     commitment).  Incompatible with the "print a stack of bearer notes
-     and hand them out" use case.
-
-  2. /Trusted printer/ – hardware security module or audited print
-     service that provably erases \( \rho \).  Works in principle;
-     undermines the "trustless bearer instrument" pitch.
-
-  3. /Short expiry/ – Mode A notes expire after a bounded period,
-     limiting the issuer-race window.  Equivalent to Type 2 with a
-     short-term contract; the use case is then cheque-like, not
-     cash-like.
-
-  None of these route options preserve the "$20 bill-equivalent"
-  property that Mode A was designed for.  The unified scheme therefore
-  /does not attempt/ to provide a pure-bearer cryptographic note, and
-  defers that use case to a separate design dimension:
-
-
-10.2 The Physical-Token Escape Hatch
-────────────────────────────────────
-
-  A pure-bearer instrument remains available via the /physical/ trust
-  model that all physical bearer instruments already rely on.
-  Specifically: an issuer operating a print service with a
-  hardware-attested erasure of \( \rho \) can issue Type 2 notes with a
-  public warranty that the service did in fact erase \( \rho \).  The
-  warranty is an off-chain social/legal claim, not a cryptographic one,
-  but it is identical in kind to the trust extended to the Bank of
-  Canada when it issues physical polymer banknotes (whose security rests
-  on BoC printing discipline, not on cryptography).
-
-  This keeps the pure-bearer door ajar without requiring the unified
-  scheme to pretend it solves the cryptographic problem of making a
-  truly trustless bearer note.  BUCK Cash's original Mode A was arguably
-  already conceding this point via the tamper-evident seal ("the seal
-  makes it safe to display, but any unsealed QR is spendable by
-  anyone"): the seal is a physical-world primitive, not a cryptographic
-  one.
-
-
-10.3 Use-Case Coverage Without Mode A
-─────────────────────────────────────
-
-  The canonical Mode A use cases re-route cleanly:
-
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Use case                    Cash Mode A           Unified scheme                             
-  ──────────────────────────────────────────────────────────────────────────────────────────────
-   Tip jar                     Printed Mode A sheet  Public-issuer Type 2 cheques, held briefly 
-   Walking-around money        Printed Mode A notes  Self-issued Type 1 in a hot wallet         
-   Gifts to unknown recipient  Printed Mode A        Type 2 signed cheque, short expiry         
-   Disaster preparedness cold  Printed Mode A hoard  Self-issued Type 1, long-term safe         
-   Underbanked payment rail    Physical Mode A       Type 2 cheque from issuer's office         
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Every use case that truly requires "no identity link at all" is
-  handled by the physical-token escape hatch above.  Every use case that
-  tolerates an /encrypted/ identity link (which is most of them) gains
-  stronger cryptographic guarantees via Types 1 and 3.
-
-
-11 Security Assumptions and Theorems Used
+16 Security Assumptions and Theorems Used
 ═════════════════════════════════════════
 
   The unified Notes design rests on the same cryptographic foundations
@@ -1459,7 +2291,7 @@ Table of Contents
   Mina) and well-studied.
 
 
-11.1 Demurrage Conservation as a Contract Invariant
+16.1 Demurrage Conservation as a Contract Invariant
 ───────────────────────────────────────────────────
 
   Because the pool is a regular BUCK account and redemption uses a
@@ -1485,7 +2317,7 @@ Table of Contents
   accounts' \( (B, A) \) pairs.
 
 
-12 Implementation Scope
+17 Implementation Scope
 ═══════════════════════
 
   Rough engineering estimate, assuming the existing Alberta Buck
@@ -1493,7 +2325,7 @@ Table of Contents
   Circom/snarkJS):
 
 
-12.1 Smart Contract Additions
+17.1 Smart Contract Additions
 ─────────────────────────────
 
   • `noteTree' (Merkle tree with Poseidon nodes): ~1 week, bulk of code
@@ -1501,17 +2333,15 @@ Table of Contents
   • `nullifiers' mapping: trivial.
   • `noteFaceSum' scalar + mint/deposit updates: trivial (audit only).
   • Age-preserving transfer primitive (system-level hook writing to two
-    accounts' \( (B, A) \) atomically): ~1 week, mirrors the v1
-    `_mint_noincrease' pattern.
+    accounts' \( (B, A) \) atomically): ~1 week.
   • Three spend-circuit verifiers (Groth16-style on-chain): ~1 week
     integration per circuit, bulk is circuit-side.
   • Mint-circuit verifier: ~1 week.
-  • Migration helper for v1 certificates: ~1 week.
 
-  *Total:* ~8 weeks for an experienced Solidity engineer.
+  *Total:* ~7 weeks for an experienced Solidity engineer.
 
 
-12.2 SNARK Circuits
+17.2 SNARK Circuits
 ───────────────────
 
   • Mint circuit: ~2-3 weeks (Poseidon commitments, ElGamal encryption,
@@ -1523,45 +2353,88 @@ Table of Contents
   *Total:* ~10 weeks for an experienced SNARK engineer.
 
 
-12.3 Wallet & UX
+17.3 Wallet & UX
 ────────────────
 
   • Note scanning / recognition for Type 3 (stealth-address scan): ~1
     week.
-  • Type 1 self-mint-to-private-address flow (Wormhole replacement): ~1
-    week.
+  • Type 1 self-mint-to-private-address flow: ~1 week.
   • Type 2 cheque creation and deposit UX: ~2 weeks.
   • Type 3 targeted-note UX: ~2 weeks.
+  • QR-print templates, hologram-seal vendor integration: ~1 week.
   • Prover service integration for thin clients: ~2-3 weeks.
 
-  *Total:* ~8 weeks for a wallet team.
+  *Total:* ~9 weeks for a wallet team.
 
 
-12.4 Cross-Checks and Audit
+17.4 Cross-Checks and Audit
 ───────────────────────────
 
-  • Cryptographic review of the unified spend circuits: 4 weeks,
-    external auditor with SNARK-circuit expertise.
+  • Cryptographic review of the spend circuits: 4 weeks, external
+    auditor with SNARK-circuit expertise.
   • Economic model validation (pool-rate demurrage in stress scenarios:
-    low turnover, high turnover, mint/deposit mismatch): 2 weeks.
+    low turnover, high turnover, mint/deposit mismatch, large
+    accumulated lost-note face sum): 2 weeks.
   • End-to-end fuzz and property-based testing: 2 weeks.
 
   *Total:* ~8 weeks of external + internal audit.
 
-  Overall program estimate: 6-9 months of focused work to ship a
-  production-quality unified Notes system, subsuming Wormhole v1 and the
-  BUCK Cash proposal into a single architecture.
+
+17.5 Phased Rollout
+───────────────────
+
+  The engineering work is naturally phaseable:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Phase  Scope                                                      Dependencies                     
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+       1  On-chain note pool: `noteTree', nullifiers, mint-verifier  Existing BUCK ERC-20 deployment  
+       2  Type 1 spend circuit + chain-only self-wormhole wallet UX  Phase 1, Identity CP gadget      
+       3  Paper-note QR export/import, printer-template library      Phase 2, hologram vendor         
+       4  Type 2 spend circuit + signed-cheque wallet UX             Phase 1                          
+       5  Type 3 spend circuit + stealth-address scan UX             Phase 2, Proofs Theorem 7 gadget 
+       6  Programmable `predicate' field (bounded predicate DSL)     Phases 1-5, Aztec Noir toolchain 
+       7  Optional: off-chain re-targeting via proxy re-encryption   Phases 1-5, Identity Guardians   
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Phases 1-2 establish the minimum viable Notes system (self-wormhole
+  only).  Phases 3-5 ship the full use-case matrix (paper notes,
+  cheques, targeted gifts).  Phases 6-7 are optional extensions deferred
+  until the core system is production-proven.
+
+  Overall program estimate: 6-9 months of focused work to ship Phases
+  1-5 as a production-quality BUCK Notes system.  Phases 6-7 add 4-8
+  months of further engineering if demand materialises.
 
 
-13 Open Questions
+17.6 Regulatory and Legal Engagement
+────────────────────────────────────
+
+  In parallel with engineering, the legal and regulatory work:
+
+  • Confirm that BUCK Notes falls within Alberta's provincial
+    jurisdiction over property and civil rights (s 92(13)) – the
+    analysis in the [Legal Foundation] document covers the underlying
+    primitive; bearer notes are an extension that may warrant additional
+    treatment.
+  • Engage FINTRAC on the issuance-side reporting model.
+  • Engage the Office of the Superintendent of Financial Institutions
+    (OSFI) on reserve treatment.
+  • Coordinate with Alberta Treasury Branches (ATB) as a candidate first
+    issuer of paper notes under a public-warranty of \( \rho \)-erasure
+    for the Type 2 walking-around-cash surface.
+
+
+[Legal Foundation] <file:alberta-buck-legal.org>
+
+
+18 Open Questions
 ═════════════════
 
-  The unified design resolves most of the architectural redundancy but
-  leaves a handful of economic and cryptographic questions worth
-  sharpening before commitment:
+  The architecture above leaves a handful of economic and cryptographic
+  questions worth sharpening before commitment:
 
 
-13.1 Donation Incidence
+18.1 Donation Incidence
 ───────────────────────
 
   Donations to the contract lower \( A/B \) and therefore lower the
@@ -1579,7 +2452,7 @@ Table of Contents
   \( A/B \) at their redemption).
 
 
-13.2 Stranded Value on Lost Notes
+18.2 Stranded Value on Lost Notes
 ─────────────────────────────────
 
   A lost note contributes to \( F \) indefinitely.  The BUCK backing
@@ -1598,7 +2471,7 @@ Table of Contents
   recordkeeping; deferred.
 
 
-13.3 Integer-Arithmetic Rounding
+18.3 Integer-Arithmetic Rounding
 ────────────────────────────────
 
   Redemption involves two integer divisions (computing \( v \cdot A / B
@@ -1609,19 +2482,19 @@ Table of Contents
   is a minor contract-level decision with no cryptographic impact.
 
 
-13.4 Predicate Programmability vs. Circuit Simplicity
+18.4 Predicate Programmability vs. Circuit Simplicity
 ─────────────────────────────────────────────────────
 
   Keeping three fixed types simplifies the circuit count.  Adding
   programmable predicates (time locks, oracle conditions, multi-sigs)
-  re-introduces the complexity of Cash Mode C.  A compromise: support a
-  /bounded/ predicate language in the circuit (time-lock +
-  oracle-condition + up-to-3-sig) rather than a fully general one.  The
-  bounded language covers 90%+ of the use cases Mode C was designed for
-  while keeping the verifier compact.
+  re-introduces most of the complexity that the fixed type scheme was
+  chosen to avoid.  A compromise: support a /bounded/ predicate language
+  in the circuit (time-lock + oracle-condition + up-to-3-sig) rather
+  than a fully general one.  The bounded language covers 90%+ of the
+  programmable-predicate use cases while keeping the verifier compact.
 
 
-13.5 Universal Spend Circuit vs. Three
+18.5 Universal Spend Circuit vs. Three
 ──────────────────────────────────────
 
   Deploying three distinct spend verifiers costs gas per transaction
@@ -1632,7 +2505,7 @@ Table of Contents
   Empirical question, resolvable at deployment time.
 
 
-13.6 Regulatory Interaction with the Age-Preserving Transfer
+18.6 Regulatory Interaction with the Age-Preserving Transfer
 ────────────────────────────────────────────────────────────
 
   Jurisdictional regulators (FINTRAC, OSFI) have rules around bearer
@@ -1652,29 +2525,30 @@ Table of Contents
   state is fully transparent either way.
 
 
-14 Summary
+19 Summary
 ══════════
 
-  The Wormhole and BUCK Cash designs converge naturally on a single
-  note-pool primitive.  Three Identity-binding types – Encrypted-Issuer
-  (Type 1, Wormhole-style), Public-Issuer (Type 2, signed cheque),
-  Stealth-Targeted (Type 3, addressed cheque) – together span every use
-  case in the existing series while removing the burn-address /
-  `_mint_noincrease' machinery, the per-certificate Identity
-  registration, and the separate Cash Mode A/B/C taxonomy.
+  BUCK Notes is the Alberta Buck's native private-bearer primitive.  A
+  single Merkle tree of commitments, a single nullifier set, and three
+  Identity-binding types – Encrypted-Issuer (Type 1, self-wormhole),
+  Public-Issuer (Type 2, signed cheque), Stealth-Targeted (Type 3,
+  addressed cheque) – span every use case the Alberta Buck series needs
+  a bearer instrument to cover, from cold-storage cryptographic
+  self-wormholes to walking-around paper notes to cross-border targeted
+  remittances.
 
-  Demurrage needs no new machinery: the Note Pool is literally the BUCK
-  ERC-20 contract's own balance – a regular BUCK account with its own \(
-  B \) and \( A \) in the ERC-20 ledger.  The only Note-side state
-  beyond the Merkle tree and nullifier set is one scalar \( F \), the
-  total face value of live notes, kept as an audit quantity.  Redemption
-  delivers the /full face value/ \( v \) to the recipient, together with
-  the pool's proportional share of BUCK-age \( v \cdot A/B \); the
-  recipient absorbs this age onto their own account and bears the
-  demurrage cost on their next outgoing transfer through the ordinary
-  BUCK accounting path.  This is exactly the demurrage they would have
-  paid had they held \( v \) BUCK personally through the pool's
-  residence period.  The entire mechanism requires a single new
+  Demurrage needs no note-side machinery: the Note Pool is literally the
+  BUCK ERC-20 contract's own balance – a regular BUCK account with its
+  own \( B \) and \( A \) in the ERC-20 ledger.  The only Note-side
+  state beyond the Merkle tree and nullifier set is one scalar \( F \),
+  the total face value of live notes, kept as an audit quantity.
+  Redemption delivers the /full face value/ \( v \) to the recipient,
+  together with the pool's proportional share of BUCK-age \( v \cdot A/B
+  \); the recipient absorbs this age onto their own account and bears
+  the demurrage cost on their next outgoing transfer through the
+  ordinary BUCK accounting path.  This is exactly the demurrage they
+  would have paid had they held \( v \) BUCK personally through the
+  pool's residence period.  The entire mechanism requires a single new
   primitive, an age-preserving transfer from pool to recipient,
   localized to the Notes contract's one egress function.  Donations to
   the pool dilute \( A/B \) and cheaply subsidise all subsequent
@@ -1691,27 +2565,145 @@ Table of Contents
   it follows directly from the Type 2 identity payload carrying the
   issuer's public identity and no recipient-binding.
 
-  Pure-bearer notes (Cash Mode A) are not replaced by any cryptographic
-  Type; they remain the domain of physical trust models (tamper-evident
-  seals, trusted printers).  This is a philosophical refinement of the
-  Cash proposal rather than a retreat: Cash Mode A already relied on a
-  physical hologram for its security, and the unified design makes the
-  physical/crypto boundary explicit.
+  The cryptographic architecture does not attempt to provide a
+  pure-bearer note.  That use case remains the domain of physical trust
+  models: tamper-evident seals over Type 2 paper notes, issued by a
+  trusted printer with a public warranty that the opening was erased
+  after printing.  This keeps the cryptographic/physical boundary
+  explicit rather than contorting the cryptographic layer to approximate
+  a property that inherently requires physical primitives.
+
+  A BUCK Note can live on chain as a commitment-opening pair, travel
+  between wallets as a digital message, or be printed on paper as a
+  QR-encoded slip with a hologram seal (for Type 2) or without one (for
+  Types 1 and 3).  All three surfaces share the same cryptography and
+  the same on-chain footprint.  Counterfeiting is cryptographically
+  impossible: a "fake" note's commitment is simply absent from the
+  on-chain tree, the Merkle proof fails, and the wallet displays `FAKE'.
+  Lost notes are not extracted as seigniorage: the pool-age mechanism
+  returns their value to the commons via demurrage pressure on
+  subsequent live-note redemptions.
+
+  Issuance is on chain and identity-bound.  Circulation is private.
+  Deposit is identity-bound and auditable.  Selective-disclosure audit
+  paths give regulators access to the issuance trail without observing
+  day-to-day circulation.  This is stronger compliance than physical
+  cash provides today, and stronger privacy than any CBDC has ever
+  proposed.
 
   No novel cryptographic assumption is introduced.  Theorems 6 and 7 of
   the Proofs document ([Proofs]) apply verbatim to the Type 1 and Type 3
   spend predicates, respectively; Type 2 reduces to Schnorr.  The only
   new circuit-level primitive is Poseidon, which is already standard
-  across the SNARK ecosystem.  Implementation scope is 6-9 months for a
-  focused team.
+  across the SNARK ecosystem.  Implementation scope for Phases 1-5
+  (everything except programmable predicates and off-chain re-targeting)
+  is 6-9 months for a focused team.
 
-  The unification is, in the small, a refactor that removes redundancy.
-  In the large, it crystallises the Alberta Buck design around a single
-  cryptographic primitive (the note pool) whose Identity-binding
-  dimension produces the full range of financial instruments the series
-  aspires to, and whose economic dimension (pool-rate demurrage)
-  elegantly solves the lost-note problem that motivated the original
-  BUCK Cash demurrage discussion.
+  BUCK Notes answers the question Chaum was asking in 1982: what does
+  digital cash look like when you take "cash" seriously?  The answer,
+  forty years later: it looks like a commitment in an on-chain pool,
+  openable as a message, a QR, or a printed slip, with a value that
+  decays at the same rate your bank balance does, integrated with a
+  complete monetary system that does not require a central bank to
+  function.  Alberta has, uniquely in the world, all four pieces
+  required to build this.  Whether to assemble them is, as ever, the
+  only question that matters.
 
 
 [Proofs] <file:alberta-buck-proofs.org>
+
+
+
+Footnotes
+─────────
+
+[1] Federal Reserve.  "[Currency in Circulation]
+(<https://www.federalreserve.gov/paymentsystems/coin_data.htm>)"
+(2024).  Approximately half of US currency in circulation by value is
+held outside the United States, providing a global store-of-value
+function despite zero yield.
+
+[2] Bank for International Settlements.  "[Rise of the Central Bank
+Digital Currencies] (<https://www.bis.org/publ/work880.pdf>)" (2020).
+Surveys CBDC designs across major central banks; notes that nearly all
+incorporate explicit issuer-side surveillance and programmability
+features (spending limits, geofencing, expiration, freezing) that
+physical cash does not have.
+
+[3] Caldwell, M.  "Casascius Physical Bitcoins" (2011-2013).  Physical
+brass and silver coins containing Bitcoin private keys under
+tamper-evident holographic seals.  Production halted in 2013 after
+FinCEN classified the issuer as a money transmitter requiring federal
+licensing.  Surviving "unpeeled" Casascius coins now trade at
+substantial premiums above their Bitcoin face value as collectibles.
+
+[4] Chaum, D.  "Blind Signatures for Untraceable Payments" (1982).
+/Advances in Cryptology - Crypto '82/, pp. 199-203.  The foundational
+paper introducing blind signatures and digital cash.  Chaum's DigiCash
+company commercialized the design from 1989-1998 before bankruptcy.
+
+[5] Brands, S.  "Untraceable Off-line Cash in Wallets with Observers"
+(1993).  /Advances in Cryptology - Crypto '93/, pp.  302-318.  Offline
+divisible e-cash with double-spend identity revelation – a deterrent
+rather than prevention model.
+
+[6] Camenisch, J., Hohenberger, S., Lysyanskaya, A.  "Compact E-Cash"
+(2005).  /Advances in Cryptology - Eurocrypt '05/, pp.  302-321.
+Compact divisible e-cash where a single coin can be spent in pieces
+with O(1) communication and storage per spend.
+
+[7] Ben-Sasson, E., Chiesa, A., Garman, C., Green, M., Miers, I.,
+Tromer, E., Virza, M.  "[Zerocash: Decentralized Anonymous Payments
+from Bitcoin] (<https://eprint.iacr.org/2014/349.pdf>)" (2014).  IEEE
+S&P 2014.  The foundational design for on-chain
+commitment-and-nullifier UTXO privacy, deployed in production as Zcash
+since 2016 – the commitment-and-nullifier primitive used by BUCK
+Notes.
+
+[8] Williamson, Z., et al.  "[Aztec Protocol]
+(<https://aztec.network/>)" (2018-).  Ethereum L2 rollup providing
+general-purpose private smart contracts using PLONK proofs and
+predicate-encrypted notes.  The cryptographic ancestor of the
+`predicate' field in BUCK Note commitments.
+
+[9] Pertsev, A., Semenov, R., Storm, R.  "Tornado Cash Privacy
+Solution" (2019).  Fixed-denomination commitment-and-nullifier mixer
+on Ethereum.  Sanctioned by the US Office of Foreign Assets Control
+(OFAC) in August 2022 for alleged use in money laundering by North
+Korean state actors.
+
+[10] Buterin, V., Schaefer, J., Tromer, E., et al.  "[Blockchain
+Privacy and Regulatory Compliance: Towards a Practical Equilibrium]
+(<https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4563364>)"
+(2023).  Extends commitment-pool mixers with per-spend "association
+set" proofs, allowing depositors to demonstrate non-membership in
+incriminating subsets without revealing their specific deposit.
+
+[11] Federal Reserve Bank of San Francisco.  "[Diary of Consumer
+Payment Choice]
+(<https://www.frbsf.org/cash/publications/fed-notes/2018/november/diary-of-consumer-payment-choice-data/>)"
+(2018).  Estimates 5-10% of US paper currency by value is permanently
+unrecoverable.  At a US M0 of $2.3 trillion, this represents $115-230
+billion in permanently extracted seigniorage.
+
+[12] World Bank.  "[Remittance Prices Worldwide]
+(<https://www.worldbank.org/en/topic/migrationremittancesdiasporaissues/brief/migration-remittances-data>)"
+(Q4 2024).  Average global cost of remitting $200 was approximately
+6.5% in 2024.  Total global remittance flows estimated at $702 billion
+in 2024.
+
+[13] Consumer Federation of America.  "Gift Cards: A Costly
+Convenience" (2023).  Estimates of cumulative consumer losses to
+bankrupt gift-card issuers in the United States range from $200M-$1B
+annually depending on methodology.
+
+[14] Bank of Canada.  "[2022 Methods-of-Payment Survey]
+(<https://www.bankofcanada.ca/2023/06/staff-discussion-paper-2023-13/>)"
+(2023).  Approximately 1-2% of Canadians lack bank accounts; rates
+substantially higher in rural and Indigenous communities.
+
+[15] World Bank.  "[The Global Findex Database 2021]
+(<https://www.worldbank.org/en/publication/globalfindex/Report>)"
+(2022).  An estimated 1.4 billion adults globally remain unbanked,
+with disproportionate concentrations in low-income countries, women,
+rural populations, and the elderly.
