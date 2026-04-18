@@ -55,16 +55,24 @@ commitment:
   recipient's registered identity.  A cheque made out to a specific recipient,
   retrievable only by them.
 
-Demurrage becomes a /pool-level/ obligation rather than a per-note accounting
-burden.  The contract maintains two aggregates -- pool BUCK-value \( V(t) \) and
-pool integrated BUCK-age \( A(t) \) -- and pays continuous demurrage to the
-Jubilee account at the same 2%/year rate applied to on-chain balances.
-Individual deposits pay demurrage based on the pool's /current/ average age
-\( \bar{a}(t) \), not on the note's own age: a note held for twenty years in a
-fast-turnover pool pays only the current pool-rate.  Conservation holds at the
-pool level via Little's Law \( V = \delta \bar{a} \); the economic burden of
-demurrage shifts from holders (who pay at deposit) to issuers (whose pledged
-collateral continuously services the obligation).
+Demurrage needs no new machinery.  The Note Pool /is/ simply the BUCK
+ERC-20 contract's own balance -- a regular BUCK account accumulating
+BUCK-age like any other account.  The contract tracks just one additional
+scalar beyond the Merkle tree and nullifier set: \( F \), the sum of
+face values of live (unspent) notes.  When a note of face \( v \) is
+redeemed, the contract delivers
+\( v_{\text{delivered}} = v \cdot (B - \kappa A)/F \) BUCK to the recipient,
+where \( B \) and \( A \) are the contract account's balance and accumulated
+BUCK-age in the existing ledger -- quantities already maintained by the
+ERC-20 demurrage machinery for every account.  Donations sent to the
+contract address (deliberate, philanthropic, or accidental) raise \( B \)
+without raising \( F \), so subsequent redemptions deliver more than the
+equilibrium pool-rate -- possibly more than face value.  Conservation is
+automatic: demurrage is never actually transferred; the Jubilee balance
+grows autonomously per block at rate \( \kappa \cdot \text{totalSupply} \),
+and every account (pool included) reduces its spendable balance by its
+own \( \kappa A \) on outgoing transfers.  No Little's Law, no continuous
+Jubilee stream, no separate pool obligation.
 
 The consequence most relevant to users: only notes where the issuer cannot
 later race the holder to spend are safe for long-term holding.  This is
@@ -175,21 +183,25 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
 
 ** The Note Contract State
 
-   The BUCK contract gains three new pieces of state:
+   The BUCK contract gains exactly three new pieces of state:
 
    #+LATEX: {\scriptsize
-   | State        | Type                           | Purpose                                            |
-   |--------------+--------------------------------+----------------------------------------------------|
-   | =noteTree=   | Merkle tree of commitments     | Cryptographic anchor for every outstanding note    |
-   | =nullifiers= | Set of used nullifiers         | Double-spend prevention                            |
-   | =poolV=      | Aggregate BUCK value           | Sum of face values of all outstanding notes        |
-   | =poolA=      | Integrated BUCK-age (lazy)     | \( \int_0^t V(s)\,ds \) -- pool's demurrage meter |
-   | =poolT=      | Timestamp of last =poolA= sync | Enables lazy integration of =poolA=                |
+   | State           | Type                       | Purpose                                         |
+   |-----------------+----------------------------+-------------------------------------------------|
+   | =noteTree=      | Merkle tree of commitments | Cryptographic anchor for every outstanding note |
+   | =nullifiers=    | Set of used nullifiers     | Double-spend prevention                         |
+   | =noteFaceSum=   | \( F \) in \( \mathbb{Z} \) | Sum of face values of all outstanding notes    |
    #+LATEX: }
 
-   =poolV= and =poolA= are updated at every mint and deposit; between
-   updates they are integrated forward on demand by \( A(t) \leftarrow
-   A(t_{\text{last}}) + V(t_{\text{last}}) \cdot (t - t_{\text{last}}) \).
+   That is all.  The pool's nominal BUCK balance \( B \) and accumulated
+   BUCK-age \( A \) are not tracked as separate state: /the pool is just
+   a BUCK account/, specifically the ERC-20 contract's own address, and
+   \( B, A \) are exactly the balance and BUCK-age the ERC-20 ledger
+   already maintains for it.  No lazy integration, no shadow aggregates,
+   no separate =poolT= timestamp.  BUCK transferred to the contract
+   address (via mint, donation, or accident) joins \( B \) through the
+   normal ERC-20 path; BUCK transferred out (via redemption) leaves
+   through the normal ERC-20 path with the normal demurrage accounting.
 
 ** The Note Commitment
 
@@ -197,20 +209,23 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
    later open:
 
    \[
-   cm \;=\; H_{\text{cm}}\!\left(\text{type},\; v,\; age_0,\; t_{\text{mint}},\; \rho,\; \text{id}_{\text{payload}},\; \text{predicate}\right)
+   cm \;=\; H_{\text{cm}}\!\left(\text{type},\; v,\; \rho,\; \text{id}_{\text{payload}},\; \text{predicate}\right)
    \]
 
    with:
 
    - *type* \( \in \{1, 2, 3\} \): the Identity-binding mode
    - *v* \( \in \mathbb{Z}_q \): face value
-   - *\( age_0 \)*: optional starting BUCK-age baked in at mint
-   - *\( t_{\text{mint}} \)*: block timestamp of the minting transaction
    - *\( \rho \)*: per-note randomness (source of the nullifier)
    - *\( \text{id}_{\text{payload}} \)*: Identity-binding data (see next section)
    - *predicate*: optional additional spend predicate (for future Mode C
      programmability -- not elaborated in this document; a single bit
      =predicate == None= keeps the SNARK to the three base types)
+
+   No per-note timestamp or baked-in BUCK-age: demurrage is computed at
+   redemption time from the /pool's/ account state
+   \( (B, A) \), not from the individual note's life history, so no
+   per-note age fields need to ride in the commitment.
 
    The commitment is inserted as a leaf of =noteTree= at mint time.
 
@@ -235,30 +250,42 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
 
    #+begin_example
    mint (burn):
-     transfer v BUCK (and BUCK-age) from caller's balance to contract reserve
+     # Standard ERC-20 transfer from caller to contract address.
+     # Caller pays their own outgoing-transfer demurrage through the
+     # normal BUCK accounting path.  Contract balance B gains v; its
+     # accumulated BUCK-age A starts earning on the new v from here.
+     transfer v BUCK from caller to contract
      for each of {cm_1, ..., cm_N}:
         append cm_i to noteTree
-     poolV += sum(v_i)
-     update poolA lazily to block time
+     noteFaceSum += sum(v_i)
 
    deposit (mint-out):
      verify SNARK:
        - Merkle inclusion of some cm in noteTree
-       - Knowledge of (v, age_0, t_mint, rho, id_payload, predicate)
+       - Knowledge of (v, rho, id_payload, predicate)
        - Predicate satisfied by witness (type-specific)
        - nullifier correctness
-       - deposit_value = v * (1 - 0.02 * pool_avg_age_now)
+       - v is a public output of the SNARK
      require nf not in nullifiers
      nullifiers += nf
-     mint deposit_value to recipient
-     poolV -= v
-     poolA -= (age_0 + v * (now - t_mint))
+     # Contract reads its own balance and BUCK-age from the ERC-20 ledger:
+     B = balanceOf(contract)
+     A = buckAgeOf(contract)
+     delivered = v * (B - kappa * A) / noteFaceSum
+     # Standard ERC-20 transfer from contract to recipient.  Contract's
+     # demurrage accounting on (B, A) is updated by the normal BUCK path;
+     # no special-case bookkeeping.
+     transfer delivered BUCK from contract to recipient
+     noteFaceSum -= v
    #+end_example
 
-   The deposit amount is less than face by the /pool/-average-age
-   demurrage cost, not by the individual note's age.  Conservation
-   (section "Demurrage at the Pool Level") is maintained via
-   continuous payments from the issuer-collateral reserve to Jubilee.
+   The deposit amount is /less than face/ by the pool's current
+   demurrage-per-face-unit \( \kappa A / F \), but may equal or exceed
+   \( v \) if donations have pushed \( B > F \) (see "Donations and
+   Negative Effective Demurrage" below).  No Jubilee payment is emitted
+   from inside the deposit: the Jubilee grows autonomously on every
+   block at rate \( \kappa \cdot \text{totalSupply} \), and the
+   contract's share of that growth is already reflected in \( A \).
 
 #+LATEX: \clearpage
 * Three Identity Bindings
@@ -485,197 +512,188 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
 #+LATEX: \clearpage
 * Demurrage at the Pool Level
 
-  The economic coupling between notes and on-chain balances changes
-  materially from v1.  In v1, each certificate carried its own
-  \( (t_{\text{burn}}, age_{\text{burn}}) \) and the spender at
-  redemption time paid accumulated demurrage on that individual
-  age -- the same model as an on-chain balance.  In the pool design
-  the demurrage obligation is borne collectively by the pool, and
-  individual deposits pay only the current /pool-average/ rate.
+  The central simplification of this design: *the Note Pool is just a
+  regular BUCK account.*  Specifically, it is the BUCK ERC-20 contract's
+  own balance.  BUCKs transferred to the contract's address join the
+  pool; BUCKs transferred out (as note redemptions) leave the pool.  The
+  contract account accumulates BUCK-age like every other account and
+  participates in the ordinary demurrage accounting with no special-case
+  code.  The only piece of additional state is a single scalar \( F \),
+  the sum of face values of live notes.
 
-** Pool Aggregates
+** Reminder: How BUCK Demurrage Actually Works
 
-   The contract maintains two aggregates (plus =poolT=, a last-update
-   timestamp to enable lazy integration):
+   Demurrage is /not transferred/ on any per-account basis.  It is an
+   accounting entry maintained on each account's state:
 
-   \[
-   V(t) \;=\; \sum_{i \in \text{live}(t)} v_i, \qquad
-   A(t) \;=\; \sum_{i \in \text{live}(t)} v_i \cdot \bigl(t - t_{\text{mint},i}\bigr) + age_{0,i},
-   \]
+   - Every block, the Jubilee account's balance grows by
+     \( \kappa \cdot \text{totalSupply} \cdot \Delta t \).  This is a
+     single global operation; the sum of all other accounts' nominal
+     balances is held constant.
+   - Each account \( X \) has a running BUCK-age \( A_X \) that grows
+     at rate \( B_X \) (its nominal balance) per unit time.
+   - When account \( X \) transfers \( v \) BUCK out, its spendable
+     fraction is \( (B_X - \kappa A_X)/B_X \); the outgoing transfer
+     costs the account \( v \cdot B_X / (B_X - \kappa A_X) \) of its
+     nominal balance, and the corresponding \( \kappa A_X \cdot v /
+     (B_X - \kappa A_X) \) demurrage "owed" is simply extinguished
+     from \( (B_X, A_X) \) against the Jubilee's autonomous growth.
 
-   where \( \text{live}(t) \) is the set of outstanding (un-deposited)
-   notes at time \( t \).  Between state-changing transactions,
-   \( V(t) \) is constant and \( A(t) \) grows at rate \( V(t) \):
-
-   \[
-   \frac{dA}{dt} \;=\; V(t).
-   \]
-
-   The contract realises this by storing the pair \( (V, A) \) at
-   every mint or deposit and integrating forward to the current block
-   timestamp on read.  The /pool-average age/ is
-
-   \[
-   \bar{a}(t) \;=\; A(t) / V(t),
-   \]
-
-   measured in years (assuming \( v_i \) and timestamps use
-   consistent units).
-
-** Pool Obligation and Jubilee Flow
-
-   The pool collectively owes Jubilee demurrage at the BUCK-wide rate
-   \( \kappa = 0.02\,\text{yr}^{-1} \).  The continuous obligation
-   rate is
+   System-wide invariant (preserved by every transfer):
 
    \[
-   \frac{dO}{dt} \;=\; \kappa \cdot V(t),
+   \sum_{\text{all accounts } X} B_X \;+\; B_{\text{Jubilee}}
+   \;=\; \text{constant}.
    \]
 
-   and the cumulative obligation \( O(t) = \int_0^t \kappa V(s)\,ds =
-   \kappa \cdot A(t) \) (from \( dA/dt = V \)).
+   The Jubilee balance reflects the aggregate accrual
+   \( \kappa \int_0^t \text{totalSupply}(s)\,ds \); individual accounts'
+   \( \kappa A_X \) quantities track /their share/ of that total.
 
-   The contract discharges this obligation in two ways, both of
-   which draw on the issuer-pledged collateral backing the BUCK
-   supply rather than the holder's balance:
+** The Pool Account's Demurrage
 
-   - *Continuous Jubilee transfer.*  At every state-change event
-     (mint, deposit, or scheduled keeper call), the contract pays
-     \( \kappa \cdot V(t_{\text{prev}}) \cdot (t_{\text{now}} -
-     t_{\text{prev}}) \) BUCK from the reserve into the Jubilee
-     account.  This is the on-chain realisation of
-     \( dO/dt = \kappa V \).
-   - *Per-deposit discharge.*  At each deposit, the note's /face
-     value/ is not delivered in full; the depositor receives
-     \( v \cdot (1 - \kappa \cdot \bar{a}(t)) \), and the difference
-     \( v \cdot \kappa \cdot \bar{a}(t) \) is credited against the
-     obligation counter (or equivalently, retained in the reserve).
+   Treat the BUCK contract address as an ordinary account.  Let:
 
-** Deposit Formula
+   - \( B \) = the contract's ERC-20 balance (= sum of all BUCK
+     transferred in via mints and donations, minus all BUCK
+     transferred out via redemptions, modulo the standard demurrage
+     adjustment on outgoing transfers).
+   - \( A \) = the contract's accumulated BUCK-age, as maintained by
+     the ERC-20 ledger.
 
-   When note \( i \) with face \( v_i \) is deposited at time
-   \( t_{\text{dep}} \):
+   \( B \) and \( A \) are already on chain; the Notes design queries
+   them, it does not compute them.  The pool's /effective spendable
+   value/ at any moment is
 
    \[
-   v_{\text{delivered},i} \;=\; v_i \cdot \Bigl(1 - \kappa \cdot \bar{a}\bigl(t_{\text{dep}}\bigr)\Bigr).
+   E \;=\; B - \kappa \cdot A.
    \]
 
-   Note that \( \bar{a}(t_{\text{dep}}) \) is the /pool's/ current
-   average age, not the note's own age
-   \( a_i = t_{\text{dep}} - t_{\text{mint},i} \).  If the pool is in
-   high-turnover steady state with \( \bar{a} \approx 0.5\,\text{yr} \),
-   the per-deposit demurrage is \( 2\% \cdot 0.5 = 1\% \) regardless of
-   how long note \( i \) was individually held.
+   This is the amount the contract would be able to transfer out if it
+   emptied itself in a single call -- exactly the same definition that
+   applies to any other account.
 
-** Conservation: Little's Law
+** The Deposit Formula
 
-   The apparent asymmetry -- individual notes charged at a population
-   mean rather than at their personal age -- conserves value at the
-   pool level by Little's Law from queueing theory[fn:little]:
-
-   #+LATEX: \begin{theorem}[Pool Demurrage Conservation]
-   #+LATEX: \label{thm:demurrage-conservation}
-   #+LATEX: \end{theorem}
-
-   *Statement.*  In a pool at long-run statistical equilibrium with
-   constant mean inflow rate \( \mu \) (new notes' face value per
-   unit time) and constant mean outflow rate
-   \( \delta = \mu \) (deposited face value per unit time), the
-   cumulative demurrage paid by depositors converges to the
-   cumulative pool obligation over any window \( [T_1, T_2] \):
+   When a note of face \( v \) is redeemed, the contract delivers
 
    \[
-   \sum_{\substack{\text{deposits}\\i: t_{\text{dep},i} \in [T_1, T_2]}}
-   \kappa \cdot v_i \cdot \bar{a}(t_{\text{dep},i})
-   \;=\; \int_{T_1}^{T_2} \kappa \cdot V(t)\,dt \;+\; O_{\text{transient}}
+   v_{\text{delivered}} \;=\; v \cdot \frac{E}{F} \;=\; v \cdot \frac{B - \kappa A}{F}.
    \]
 
-   where \( O_{\text{transient}} \) is a bounded transient term going
-   to zero as \( T_2 - T_1 \to \infty \).
+   The interpretation is exact: each live-note face-unit is backed by
+   the pool's effective value divided equally across all outstanding
+   face.  A deposit claims its proportional share.
 
-   *Proof.*  Little's Law states that in a queueing system at
-   equilibrium, the mean number in the system equals the mean arrival
-   rate times the mean residence time:
-   \( V = \delta \cdot \bar{a} \), with \( \bar{a} \) the mean
-   residence time (here: mean note age at deposit) and \( V \) the
-   mean population size.
+   Equivalently, the effective per-note demurrage rate is
+   \( 1 - E/F = 1 - (B - \kappa A)/F \).  In the "ideal" case where
+   \( B = F \) (every BUCK in the pool corresponds to a live note's
+   face value, no donations or losses), this reduces to
+   \( \kappa A / B \) -- exactly the pool account's own demurrage rate,
+   which is the BUCK-wide \( \kappa \) scaled by the pool's average
+   BUCK-age-per-balance.
 
-   Demurrage charged per unit time by per-deposit discharge:
-   \( \kappa \delta \bar{a} \).  Demurrage accrued per unit time by
-   the pool obligation: \( \kappa V \).  Little's Law equates
-   \( V = \delta \bar{a} \), so both rates equal \( \kappa V \).
+** Donations and Negative Effective Demurrage
 
-   Over a finite window the deposits are a point process, not a
-   continuum, so the equality holds up to a transient term bounded by
-   the maximum per-deposit charge \( \kappa \cdot v_{\max} \cdot
-   \bar{a}_{\max} \), which is \( O(1) \) as the window grows.
-   \( \blacksquare \)
+   Any BUCK transferred to the contract address /without/ minting a
+   corresponding note increases \( B \) but not \( F \).  This happens
+   naturally in several ways:
 
-   *Remark (implementation).*  In production the contract does not
-   rely on long-run equilibrium.  The continuous Jubilee payment
-   stream at rate \( \kappa V \) ensures the pool's obligation is
-   always current, and the per-deposit discharge then /rebates/ the
-   depositor for the pool-average cost of their note -- exactly as a
-   cooperative would treat its members.  The invariant
+   1. *Accidental transfers.*  A user fat-fingers the contract address
+      as a recipient.
+   2. *Philanthropic donations.*  A user deliberately sends BUCK to
+      the contract to subsidise the pool.
+   3. *Recovered collateral.*  Mechanism-level refunds (e.g., an
+      issuer's collateral unlock flowing into the pool) sent to the
+      contract address.
+   4. *Rounding / dust.*  Accumulated fractional-unit residuals from
+      integer arithmetic in redemption divisions.
 
-   \[
-   \text{reserve}(t) + \text{jubilee}(t) \;=\; \text{initial reserve} + \int_0^t \mu(s)\,ds - \int_0^t \delta(s)\,ds
-   \]
+   Each such transfer raises \( E/F \).  If donations are large enough
+   that \( E/F > 1 \), the next redemption delivers /more/ than its
+   face value: "negative effective demurrage".  This is not a bug --
+   it is the mathematically clean outcome of the pool being
+   over-backed relative to its note obligations, and the excess is
+   distributed pro-rata across live notes as they are redeemed.
 
-   is preserved as long as the per-deposit discharge formula tracks
-   \( \bar{a}(t_{\text{dep}}) \) accurately.
+   The property is desirable:
+
+   - /Donations land./  Philanthropists can cheaply subsidise all
+     outstanding noteholders.  There is no accidental burn sink: a
+     donation is consumed by the next round of redemptions.
+   - /Accidents self-heal./  A misdirected transfer to the contract
+     doesn't vanish; it becomes a pro-rata benefit to live
+     noteholders (who may include the sender).
+   - /Over-collateralisation is cheap to express./  An issuer wishing
+     to guarantee "notes redeem at \( \geq 1.01 \times \) face" can
+     simply fund the pool ahead of the corresponding mints.
+
+** Conservation is Automatic
+
+   No additional Jubilee stream is emitted from the pool.  The pool
+   account participates in the BUCK system's ordinary demurrage
+   accounting:
+
+   - The Jubilee account grows at rate
+     \( \kappa \cdot \text{totalSupply} \) per block.  The pool's
+     balance \( B \) is part of \( \text{totalSupply} \), so the
+     pool's share of Jubilee growth is exactly
+     \( \kappa \cdot B \) -- the same rate a regular holder with
+     balance \( B \) would contribute.
+   - When the contract transfers \( v_{\text{delivered}} \) out, the
+     standard ERC-20 demurrage accounting reduces \( (B, A) \) as
+     for any other outgoing transfer.
+   - When users transfer BUCK to the contract, the sender pays the
+     standard demurrage on /their/ outgoing transfer; the contract
+     receives a clean \( v \) that begins accruing age immediately.
+
+   Conservation of the system total
+   \( \sum_X B_X + B_{\text{Jubilee}} = \text{constant} \) is
+   preserved transaction-by-transaction, with no pool-specific
+   invariant to maintain.
 
 ** Numeric Example
 
-   Assume a pool at steady state with \( V = 10\,000\,000 \) BUCK
-   outstanding.  Suppose notes turn over with a mean residence time
-   \( \bar{a} = 6 \) months \( = 0.5 \) yr.  Little's Law gives the
-   deposit flow rate
+   Suppose the pool holds \( B = 10\,000\,000 \) BUCK, has accumulated
+   \( A = 5\,000\,000 \) BUCK-years (average BUCK-age of 0.5 yr), and
+   \( F = 10\,000\,000 \) BUCK of live notes outstanding.  Then
+   \( E = B - \kappa A = 10{,}000{,}000 - 0.02 \cdot 5{,}000{,}000 =
+   9{,}900{,}000 \), and \( E/F = 0.99 \): every note redeems at 99%
+   of face, independent of how long the note itself was held.
 
-   \[
-   \delta \;=\; V / \bar{a} \;=\; 20\,000\,000 \text{ BUCK/yr}.
-   \]
+   Now suppose an anonymous donor sends 500,000 BUCK to the contract
+   address.  \( B \) rises to \( 10{,}500{,}000 \); the donor's
+   BUCK-age transfers along with the principal per standard ERC-20
+   semantics (add to \( A \)), but the donor's demurrage on the
+   /outgoing/ transfer is paid out of their own account, not the
+   pool's.  The new ratio is roughly \( E'/F \approx 1.04 \): the
+   next redemption delivers ~104% of face.  As redemptions drain
+   \( F \) faster than \( B \), the premium compresses back toward
+   1.0 and eventually below.
 
-   A /single note/ held for \( \tau = 10 \) yr and deposited against
-   this pool pays demurrage
+   No Jubilee payment was emitted by the pool during any of this; no
+   aggregate-level invariant was adjusted.  The contract's \( (B, A) \)
+   move through ordinary ERC-20 transitions; \( F \) moves through
+   increments on mint and decrements on deposit.
 
-   \[
-   v \cdot \kappa \cdot \bar{a} \;=\; v \cdot 0.02 \cdot 0.5 \;=\; 1\% \cdot v,
-   \]
+** Who Bears the Demurrage, Really
 
-   rather than the per-note accrual \( v \cdot \kappa \cdot \tau = 20\%
-   \cdot v \) it would pay in a per-note-age model.  A long holder
-   pays the same rate as a fast cycler -- both pay the pool mean.
+   The simpler model has a sharper answer: *the current noteholder
+   bears the demurrage that the pool accrued while holding their
+   BUCK-equivalent.*  When you mint a note of face \( v \), you
+   transfer \( v \) BUCK to the pool.  While the pool holds that
+   \( v \), it accrues BUCK-age at rate \( v \).  When /any/ note is
+   redeemed, it pays its share of the pool's total BUCK-age
+   (\( \kappa A \)) weighted by its fraction of face (\( v/F \)).
 
-   Pool obligation rate: \( \kappa V = 200\,000 \) BUCK/yr flowing
-   continuously into Jubilee from the issuer-pledged reserve.
-   Per-deposit discharge rate: \( \delta \cdot \kappa \cdot \bar{a}
-   = 200\,000 \) BUCK/yr collected from depositors and returned to
-   the reserve.  Net outflow from reserve: zero at equilibrium.
-
-** Who Actually Bears Demurrage
-
-   The pool-rate model redistributes the economic burden.  Three
-   stakeholders are involved:
-
-   1. *Issuers* (who pledge collateral to create BUCK).  Their
-      collateral now services the continuous \( \kappa V \) obligation
-      rather than the end-of-life per-note demurrage.  Net cost over
-      a note's lifetime is identical in steady state, but the timing
-      shifts from "at deposit" (paid by holder) to "continuously"
-      (paid by issuer-collateral yield).
-   2. *Holders of unspent notes.*  Pay a small pool-rate at
-      deposit.  Benefit: no individual decay clock.  A long-held note
-      retains most of its face value.
-   3. *Jubilee recipients* (currently defined as the issuer cohort
-      itself, redistributed pro rata to collateral pledge).  Receive
-      the same aggregate demurrage flow as before, but in a smooth
-      stream rather than a bursty per-deposit one.
-
-   Net monetary effect: identical in aggregate; distributionally,
-   holders gain at the expense of issuers-in-their-collateral-role.
-   Since the issuer cohort and the Jubilee recipient cohort are the
-   /same set of stakeholders/, the cross-subsidy washes out.
+   This is not exactly "you pay for your own note's age": if the pool
+   has high turnover, \( A \) stays small relative to \( B \), and
+   your per-note demurrage is correspondingly small even if you
+   personally held for a long time.  Conversely, in a stagnant pool,
+   even a short-held note pays a larger share.  The pool is a
+   /mutualised/ demurrage system among noteholders -- and in the
+   limit where you are the only noteholder, it reduces to "you pay
+   for your own age" exactly.
 
 #+LATEX: \clearpage
 * Long-Term Holding Safety: The Printer-Trust Distinction
@@ -688,8 +706,8 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
 ** The Printer-Trust Model
 
    At mint time, the issuer knows:
-   - The note's commitment preimage \( (v, age_0, t_{\text{mint}},
-     \rho, \text{id}_{\text{payload}}, \text{predicate}) \)
+   - The note's commitment preimage
+     \( (v, \rho, \text{id}_{\text{payload}}, \text{predicate}) \)
    - Whatever additional secret is packed into \( \text{id}_{\text{payload}} \)
      (the issuer's \( sk_{\text{issuer}} \) for Type 1, the ephemeral
      \( r_e \) for Type 3, etc.)
@@ -936,22 +954,22 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
 
 ** Mint Circuit
 
-   *Public inputs.*  =totalBurn= (the total face value burned),
-   \( \{cm_1, \ldots, cm_N\} \) (commitments to be appended), and
-   =issuerRegistryEntry= (a Merkle root or index into
-   IdentityRegistry attesting to the issuer's registered credential).
+   *Public inputs.*  =totalFace= (the total face value \( \sum v_i \)
+   of the notes being minted), \( \{cm_1, \ldots, cm_N\} \) (commitments
+   to be appended), and =issuerRegistryEntry= (a Merkle root or index
+   into IdentityRegistry attesting to the issuer's registered
+   credential).
 
    *Witnesses.*  For each note \( i \):
-   \( (type_i, v_i, age_{0,i}, \rho_i, \text{id}_{\text{payload},i},
+   \( (type_i, v_i, \rho_i, \text{id}_{\text{payload},i},
    \text{predicate}_i) \), plus the issuer's private material for
    whatever \( \text{id}_{\text{payload}} \) the note requires.
 
    *Constraints.*
-   1. \( \sum v_i + \sum 0.02 \cdot age_{0,i} = \texttt{totalBurn} \)
-      (amount conservation; baked-in BUCK-age also counts, as in v1).
-   2. Each \( cm_i = H_{\text{cm}}(\text{type}_i, v_i, age_{0,i}, now,
-      \rho_i, \text{id}_{\text{payload},i}, \text{predicate}_i) \)
-      (opening binding).
+   1. \( \sum v_i = \texttt{totalFace} \) (amount conservation).
+   2. Each \( cm_i = H_{\text{cm}}(\text{type}_i, v_i, \rho_i,
+      \text{id}_{\text{payload},i}, \text{predicate}_i) \) (opening
+      binding).
    3. For each Type 1 note: \( \text{id}_{\text{payload},i}^{(1)} =
       (R_{i,i}, M_{\text{issuer}} + r_{i,i} \cdot pk_{\text{issuer}}) \)
       with \( R_{i,i} = r_{i,i} G \), and \( M_{\text{issuer}} \)
@@ -966,29 +984,30 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
       pk_{\text{recipient},i}) \cdot pk_{\text{recipient},i} \), for
       each note's target recipient.
 
-   *Contract side.*  The contract verifies the proof, transfers
-   =totalBurn= BUCK (and appropriate BUCK-age) from the caller's
-   balance into the reserve, appends each \( cm_i \) to =noteTree=,
-   and updates \( \text{poolV}, \text{poolA}, \text{poolT} \).
+   *Contract side.*  The contract verifies the proof, pulls =totalFace=
+   BUCK from the caller (ordinary ERC-20 transfer, caller pays their
+   own outgoing-transfer demurrage), appends each \( cm_i \) to
+   =noteTree=, and increments =noteFaceSum= by =totalFace=.  No other
+   state is touched -- the contract's \( (B, A) \) update through the
+   normal transfer path.
 
 ** Spend Circuit (Type 1 -- Encrypted Issuer)
 
    *Public inputs.*  =noteRoot= (current Merkle root of =noteTree=),
-   =nullifier=, =depositValue=, =poolAvgAge= (current
-   \( \bar{a}(t_{\text{now}}) \)), =depositorRegistryEntry= (pointer
-   into IdentityRegistry for the depositor's credential).
+   =nullifier=, =faceValue= (the note's face \( v \), revealed),
+   =depositorRegistryEntry= (pointer into IdentityRegistry for the
+   depositor's credential).
 
-   *Witnesses.*  \( (v, age_0, t_{\text{mint}}, \rho,
-   \text{id}_{\text{payload}}^{(1)}, \text{path}) \),
-   \( sk_{\text{issuer/dep}} \) (shared, by Theorem 6), the
-   depositor's fresh encryption randomness \( r_d \), and the
+   *Witnesses.*  \( (v, \rho, \text{id}_{\text{payload}}^{(1)},
+   \text{path}) \), \( sk_{\text{issuer/dep}} \) (shared, by Theorem 6),
+   the depositor's fresh encryption randomness \( r_d \), and the
    depositor's registered credential
    \( E_{\text{dep}}^{(\text{registry})} \).
 
    *Constraints.*
-   1. \( cm = H_{\text{cm}}(1, v, age_0, t_{\text{mint}}, \rho,
-      \text{id}_{\text{payload}}^{(1)}, \text{pred}) \) opens to a
-      leaf of =noteTree= under =path= (Merkle inclusion).
+   1. \( cm = H_{\text{cm}}(1, v, \rho, \text{id}_{\text{payload}}^{(1)},
+      \text{pred}) \) opens to a leaf of =noteTree= under =path=
+      (Merkle inclusion).
    2. =nullifier= = \( H_{\text{nf}}(1 \| sk_{\text{dep}} \| \rho) \).
    3. \( \text{id}_{\text{payload}}^{(1)} = (R_i, C_i) \); the
       registered credential \( E_{\text{dep}}^{(\text{registry})} =
@@ -996,24 +1015,25 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
       IdentityRegistry; CP-equality \( C_i - sk_{\text{dep}} R_i =
       C_d^{\text{reg}} - sk_{\text{dep}} R_d^{\text{reg}} \) holds
       (Theorem 6).
-   4. \( \texttt{depositValue} = v \cdot (1 - \kappa \cdot
-      \texttt{poolAvgAge}) \).
+   4. =faceValue= \( = v \) (witness \( v \) revealed as public input).
 
-   The contract checks =poolAvgAge= against its own lazy integration
-   of \( A/V \) (rejecting stale proofs); checks the nullifier is
-   unused; mints =depositValue= to the recipient; updates the
-   aggregates.
+   The contract checks the nullifier is unused, reads its own \( (B, A) \)
+   and \( F = \texttt{noteFaceSum} \), computes
+   \( \texttt{delivered} = v \cdot (B - \kappa A) / F \), transfers
+   =delivered= BUCK to the recipient via standard ERC-20, and
+   decrements =noteFaceSum= by \( v \).  The demurrage arithmetic
+   lives entirely in the contract, not the SNARK.
 
 ** Spend Circuit (Type 2 -- Public Issuer)
 
-   *Public inputs.*  =noteRoot=, =nullifier=, =depositValue=,
-   =poolAvgAge=, =issuerPkClaim= (the issuer's public-identity claim
-   for human-readable verification, redundant with the circuit's own
+   *Public inputs.*  =noteRoot=, =nullifier=, =faceValue=,
+   =issuerPkClaim= (the issuer's public-identity claim for
+   human-readable verification, redundant with the circuit's own
    check but useful for wallets), =depositorRegistryEntry=.
 
-   *Witnesses.*  \( (v, age_0, t_{\text{mint}}, \rho,
-   \text{id}_{\text{payload}}^{(2)}, \text{path}) \),
-   \( sk_{\text{dep}} \), the depositor's Schnorr nonce \( k_{\text{dep}} \).
+   *Witnesses.*  \( (v, \rho, \text{id}_{\text{payload}}^{(2)},
+   \text{path}) \), \( sk_{\text{dep}} \), the depositor's Schnorr
+   nonce \( k_{\text{dep}} \).
 
    *Constraints.*
    1. Merkle inclusion of \( cm \) under =path= (as Type 1).
@@ -1027,25 +1047,29 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
    4. Schnorr PoK of \( sk_{\text{dep}} \) for
       \( pk_{\text{dep}} \) in IdentityRegistry, Fiat-Shamir bound
       to =msg.sender=, =chainid=, =nullifier=.
-   5. =depositValue= = \( v \cdot (1 - \kappa \cdot \texttt{poolAvgAge}) \).
+   5. =faceValue= \( = v \).
+
+   The contract's delivery computation is identical to Type 1:
+   \( \texttt{delivered} = v \cdot (B - \kappa A) / F \), computed
+   outside the SNARK.
 
 ** Spend Circuit (Type 3 -- Stealth-Targeted)
 
-   *Public inputs.*  =noteRoot=, =nullifier=, =depositValue=,
-   =poolAvgAge=, =depositorRegistryEntry=.  \( pk^\ast \) is /not/
-   a public input: revealing it would let an observer look up
-   \( pk_{\text{recipient}} \) in IdentityRegistry and deanonymise
-   the target.  Instead, \( pk^\ast \) is a private witness, and the
+   *Public inputs.*  =noteRoot=, =nullifier=, =faceValue=,
+   =depositorRegistryEntry=.  \( pk^\ast \) is /not/ a public input:
+   revealing it would let an observer look up
+   \( pk_{\text{recipient}} \) in IdentityRegistry and deanonymise the
+   target.  Instead, \( pk^\ast \) is a private witness, and the
    Merkle inclusion proof binds it to the commitment.
 
-   *Witnesses.*  \( (v, age_0, t_{\text{mint}}, \rho, R_e, pk^\ast,
-   \text{path}) \), \( sk_{\text{recipient}} \), the stealth secret
+   *Witnesses.*  \( (v, \rho, R_e, pk^\ast, \text{path}) \),
+   \( sk_{\text{recipient}} \), the stealth secret
    \( sk^\ast = H_{\text{st}}(sk_{\text{recipient}} \cdot R_e) \cdot
    sk_{\text{recipient}} \), \( sk_{\text{dep}} \), Schnorr nonces.
 
    *Constraints.*
-   1. Merkle inclusion of \( cm = H_{\text{cm}}(3, \ldots, R_e,
-      pk^\ast, \ldots) \).
+   1. Merkle inclusion of \( cm = H_{\text{cm}}(3, v, \rho, (R_e,
+      pk^\ast), \text{pred}) \).
    2. =nullifier= = \( H_{\text{nf}}(3 \| sk^\ast \| \rho) \).
    3. \( sk^\ast \cdot G = pk^\ast \) (Theorem 7 completeness).
    4. \( sk^\ast = H_{\text{st}}(sk_{\text{recipient}} \cdot R_e) \cdot
@@ -1053,7 +1077,11 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
       \( pk_{\text{recipient}} \) indirectly via this relation).
    5. Schnorr PoK of \( sk_{\text{dep}} \) for
       \( pk_{\text{dep}} \) in IdentityRegistry.
-   6. =depositValue= = \( v \cdot (1 - \kappa \cdot \texttt{poolAvgAge}) \).
+   6. =faceValue= \( = v \).
+
+   As with Types 1 and 2, the contract computes
+   \( \texttt{delivered} = v \cdot (B - \kappa A) / F \) outside the
+   SNARK.
 
    /Optional identity-binding./  If the recipient wishes to bind the
    deposit to their registered identity (for tax/audit purposes),
@@ -1077,8 +1105,7 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
    | ElGamal / Chaum-Pedersen (Type 1)    | ~2000               |
    | Schnorr PoK (Types 2/3)              | ~500                |
    | Stealth-address relation (Type 3)    | ~1500               |
-   | Range check on \( v, age \)          | ~200                |
-   | =depositValue= arithmetic            | ~50                 |
+   | Range check on \( v \)               | ~100                |
    #+LATEX: }
 
    Total spend-circuit constraint count is in the range 6,000-10,000,
@@ -1094,8 +1121,7 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
    - Merkle inclusion (Poseidon path)
    - Poseidon hash wrapper
    - Schnorr PoK
-   - Range proofs on field elements (for \( v, age \))
-   - Pool-rate demurrage arithmetic
+   - Range proofs on field elements (for \( v \))
 
    Type-specific gadgets layer on top.  This is standard SNARK
    library architecture (Aztec Noir, Circom, Halo2 all support this
@@ -1120,13 +1146,20 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
      r_i        = fresh random
      R_i, C_i   = ElGamal(M_addr, r_i, pk_addr)
      rho        = fresh random
-     cm         = Poseidon(1, v, age, now, rho, (R_i, C_i), None)
+     cm         = Poseidon(1, v_effective, rho, (R_i, C_i), None)
+     # v_effective = v - kappa * age folds the certificate's
+     # accrued BUCK-age into its face value at migration time.
      submit mint proof: burn (addr, v, age), append cm to noteTree
    #+end_example
 
-   The result is a single Type 1 note equivalent to the original
-   certificate.  The v1 burn address is emptied (balance returns to
-   the reserve as part of =totalBurn=).
+   The v1 certificate's accumulated demurrage is discharged at
+   migration (by computing the certificate's current effective value
+   \( v_{\text{eff}} = v - \kappa \cdot \text{age} \) and using that
+   as the note's face).  After migration the note participates in the
+   pool as a normal Type 1 note; its subsequent demurrage is the
+   pool-rate, not the per-certificate rate.  The v1 burn address is
+   emptied; its BUCK (net of demurrage) flows into the contract
+   balance \( B \) exactly as any other mint.
 
 ** BUCK Cash to Notes
 
@@ -1147,9 +1180,10 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
    The unified Notes architecture can be deployed alongside the v1
    Wormhole during a transition window.  The v1 burn-address pool
    remains a valid anonymity set; new users mint into the Notes pool;
-   v1 holders migrate at their convenience.  The aggregates
-   =poolV, poolA= track only Notes-pool activity; v1 certificates
-   continue to accrue per-account demurrage as before.
+   v1 holders migrate at their convenience.  The Notes contract's
+   =noteFaceSum= reflects only Notes-pool activity; v1 certificates
+   continue to accrue per-certificate demurrage as before, via their
+   individual burn-address accounts.
 
    The final /old/ v1 certificate need not be migrated -- it can
    continue to be redeemed against its burn-address anchor
@@ -1258,25 +1292,26 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
 
 ** Demurrage Conservation as a Contract Invariant
 
-   The contract's state-machine invariant (Theorem, section
-   "Demurrage at the Pool Level"):
+   Because the pool is a regular BUCK account, no Notes-specific
+   demurrage invariant is needed: the system-wide BUCK invariant
 
    \[
-   \text{reserve}(t) + \text{jubilee}(t) + \text{delivered}(t)
-   \;=\; \text{reserve}(0) + \int_0^t \mu(s)\,ds
+   \sum_{\text{all accounts}} B_X \;+\; B_{\text{Jubilee}}
+   \;=\; \text{constant}
    \]
 
-   holds under the per-block lazy integration of =poolA= and the
-   per-deposit discharge formula.  The contract's obligation is to
-   /always/ pay the continuous Jubilee stream before serving a
-   deposit, so that \( \bar{a}(t_{\text{dep}}) \) is fresh.  A keeper
-   transaction can do this as a gas-paid batch; alternatively the
-   first transaction in any block containing a mint or deposit
-   automatically performs the lazy integration.
+   covers it automatically.  The Notes contract only needs to
+   maintain two auxiliary local invariants:
 
-   A soundness proof of this invariant at the /contract/ level is a
-   natural next item in the proofs document; the cryptographic
-   machinery used in the SNARKs (Theorems 6, 7) is already proven.
+   1. \( F \geq 0 \) (no negative note face sum).
+   2. Every \( v \) appearing in a deposit equals the \( v \) that
+      appeared in the corresponding mint (enforced by the SNARK via
+      the Merkle inclusion of \( cm \) binding \( v \)).
+
+   Both are trivial to prove from the contract's state machine; no
+   queueing-theoretic assumption is required.  The arithmetic
+   \( \texttt{delivered} = v \cdot (B - \kappa A)/F \) is a simple
+   contract-side computation against on-chain ERC-20 state.
 
 #+LATEX: \clearpage
 * Implementation Scope
@@ -1290,8 +1325,9 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
    - =noteTree= (Merkle tree with Poseidon nodes): ~1 week, bulk of
      code is existing Aztec/Zcash sapling implementations.
    - =nullifiers= mapping: trivial.
-   - =poolV, poolA, poolT= aggregates + lazy integration: trivial.
-   - Jubilee payment mechanism (continuous or per-block): 1 week.
+   - =noteFaceSum= scalar + mint/deposit updates: trivial.
+   - Deposit delivery formula \( v(B - \kappa A)/F \): trivial, uses
+     existing ERC-20 \( (B, A) \) getters.
    - Three spend-circuit verifiers (Groth16-style on-chain): ~1 week
      integration per circuit, bulk is circuit-side.
    - Mint-circuit verifier: ~1 week.
@@ -1342,40 +1378,49 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
   but leaves a handful of economic and cryptographic questions worth
   sharpening before commitment:
 
-** Pool-Rate Demurrage in Non-Equilibrium
+** Donation-Driven Premia and Their Incidence
 
-   Little's Law applies at steady state.  In the early life of the
-   pool -- where inflow vastly exceeds outflow -- \( \bar{a} \) is
-   near zero and depositors pay essentially no demurrage.  The
-   continuous Jubilee payment stream proceeds regardless, drawn from
-   the reserve.  During this phase the reserve is effectively
-   lending Jubilee its demurrage stream against future deposits.
-   This is fine as long as total inflow dominates outflow (which is
-   tautologically the case during a growing pool), but deserves
-   modelling.
+   Because \( E/F \) can exceed 1 whenever donations accumulate
+   faster than redemptions drain them, the redemption rate seen by
+   users is subject to external "weather".  A large donation
+   immediately before a redemption benefits that single depositor;
+   a large donation spread across many redemptions benefits all of
+   them proportionally.  This is equitable /in expectation/ but
+   bursty in any given window.
 
-   The symmetric concern: a /shrinking/ pool (everyone depositing,
-   few minting) produces \( \bar{a} \) that grows faster than steady
-   state, so depositors near the end of a drawdown pay disproportionate
-   demurrage.  Again bounded; again worth modelling.
+   Whether to smooth the bursts -- e.g., by rate-limiting the
+   fraction of \( E/F > 1 \) a single redemption can claim, or by
+   time-averaging \( B \) -- is a design question.  The simplest
+   answer is to do nothing: the pool is transparent, the premium
+   math is public, and the on-chain sequencing is first-come.
 
-** Stranded Collateral on Lost Notes
+** Stranded Value on Lost Notes
 
-   A genuinely lost note contributes forever to \( V(t) \) (and
-   therefore to the continuous Jubilee stream) but never returns to
-   the reserve.  The issuer's collateral covers this indefinitely.
-   Economic impact depends on the loss rate: at 1%/yr loss and 2%/yr
-   demurrage, the lost note's collateral has "paid for itself" (in
-   demurrage flow to Jubilee) in 50 years, identical to v1's
-   individual-decay horizon.  But the /principal/ never returns.
+   A lost note contributes to \( F \) indefinitely.  Its share of
+   \( B \) is never claimed by the intended redeemer; instead, the
+   pool's BUCK-age continues to accrue against that unclaimed face
+   value, and future redeemers pay demurrage partially on behalf of
+   the lost note.  As \( A/F \) creeps upward with unreclaimed
+   value, \( E/F \) drifts downward; holders of live notes see a
+   slowly growing demurrage tax until the lost face value washes
+   out.
 
-   One cleanup path: a /reclaim/ mechanism where an issuer can,
-   after a very long period (say 99 years), submit a zero-knowledge
-   proof that a specific note commitment remains unspent and
-   reclaim the residual collateral less accumulated demurrage.
-   Requires the issuer to have retained the commitment data,
-   which is an issuer-side recordkeeping burden rather than a
-   protocol change.
+   A reclaim path is possible: after a very long period (say 99
+   years), the contract could treat \( F \) as including only notes
+   whose commitments are demonstrably recent, via a rolling
+   window.  Lost value then re-surfaces as donation-equivalent at
+   the window boundary.  This requires careful circuit and
+   economic-policy design and is deferred.
+
+** Integer-Arithmetic Rounding
+
+   The deposit formula \( v \cdot (B - \kappa A)/F \) involves
+   integer division.  Residuals left behind by truncated division
+   remain in \( B \) (they are never transferred out), raising
+   \( E/F \) for the /next/ depositor -- the rounding is
+   self-healing rather than drift-accumulating.  Choice of rounding
+   direction (floor vs. banker's) is a minor contract-level
+   decision with no cryptographic impact.
 
 ** Predicate Programmability vs. Circuit Simplicity
 
@@ -1396,15 +1441,19 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
    mix; if Type 1 dominates (Wormhole-style), three verifiers are
    cheaper.  Empirical question, resolvable at deployment time.
 
-** Regulatory Interaction with Pool-Rate Demurrage
+** Regulatory Interaction with Redemption Premia
 
    Jurisdictional regulators (FINTRAC, OSFI) have rules around
    bearer instruments and tax treatment of negative-interest
    accounts.  BUCK's on-chain demurrage was argued through
-   separately.  The pool-rate variant, where an issuer's collateral
-   is continuously paying demurrage on behalf of absent holders, is
-   a novel economic structure that may warrant a separate regulatory
-   conversation.  Not blocking but worth flagging.
+   separately, and the Notes contract inherits that treatment with
+   no pool-specific novelty -- the contract is just another BUCK
+   account.  The one new wrinkle is that donations can push
+   \( E/F > 1 \), producing redemption premia that look economically
+   like small interest payments.  Whether these count as ordinary
+   income, capital gain, or bearer-instrument appreciation is a
+   tax-counsel question rather than a protocol one.  Not blocking
+   but worth flagging.
 
 #+LATEX: \clearpage
 * Summary
@@ -1417,14 +1466,19 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
   the burn-address / =_mint_noincrease= machinery, the per-certificate
   Identity registration, and the separate Cash Mode A/B/C taxonomy.
 
-  Demurrage becomes a pool-level obligation: depositors pay the
-  /current pool-average age/ rate at redemption, not their own note's
-  accrued age.  In a steady-state high-turnover pool this rate is
-  small (~1% against a note held for any duration, regardless of
-  individual holding period), and Little's Law guarantees aggregate
-  conservation of the Jubilee flow.  The economic burden of
-  demurrage shifts from holders to issuer collateral -- a
-  redistribution within the same cohort, neutral in aggregate.
+  Demurrage needs no new machinery: the Note Pool is literally the
+  BUCK ERC-20 contract's own balance -- a regular BUCK account with
+  its own \( B \) and \( A \) in the ERC-20 ledger.  The only
+  Note-side state beyond the Merkle tree and nullifier set is one
+  scalar \( F \), the total face value of live notes.  Redemption of
+  face \( v \) delivers \( v \cdot (B - \kappa A)/F \): the note's
+  proportional share of the pool's effective spendable value.
+  Conservation falls out of the existing BUCK accounting -- the
+  Jubilee grows autonomously at \( \kappa \cdot \text{totalSupply} \)
+  per block, with no Notes-specific obligation stream.  Donations
+  (deliberate, philanthropic, or accidental) raise \( B \) without
+  raising \( F \), reducing or inverting the effective demurrage
+  subsequent redeemers pay -- a useful property, not a bug.
 
   The printer-trust distinction produces a sharp partition of which
   note types are safe for long-term holding: only /Type 1/ (issuer =
@@ -1463,13 +1517,13 @@ choice. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
 
 [fn:little] Little, J. D. C.  "A Proof for the Queueing Formula:
 \( L = \lambda W \)."  /Operations Research/ 9(3): 383-387 (1961).
-The pool-demurrage conservation argument is a direct application:
-\( V(t) = \delta(t) \cdot \bar{a}(t) \) relates the mean population,
-mean throughput, and mean residence time.  In our setting,
-\( V = \) outstanding BUCK in the pool, \( \delta = \) BUCK-per-year
-deposit rate, \( \bar{a} = \) mean age of a note at deposit, and
-the demurrage balance \( \kappa \delta \bar{a} = \kappa V \) follows
-from Little's Law instantaneously at equilibrium.
+An earlier draft of this document modelled pool demurrage as a
+Little's-Law equilibrium between inflow, mean residence time, and
+outstanding pool value.  The final design obviates the queueing-theoretic
+framing: the pool account's \( (B, A) \) is already maintained by the
+ERC-20 ledger, and the per-redemption formula \( v \cdot (B - \kappa A)/F \)
+uses on-chain state directly with no equilibrium assumption.  Little's
+Law is cited here only for historical completeness.
 
 [fn:zerocash] Ben-Sasson, E., Chiesa, A., Garman, C., Green, M.,
 Miers, I., Tromer, E., Virza, M.  "[[https://eprint.iacr.org/2014/349.pdf][Zerocash: Decentralized
