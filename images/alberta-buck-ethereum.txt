@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                THE ALBERTA BUCK - ETHEREUM IMPLEMENTATION
-                              (DRAFT V0.1)
+                              (DRAFT V0.2)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -12,24 +12,37 @@
 <https://perry.kundert.ca/images/dominion-logo.png>
 
 This document presents a concrete Ethereum implementation of the
-[Alberta Buck Architecture], specifying the three core smart contracts:
+[Alberta Buck Architecture], specifying the four core smart contracts:
 
 1. *BUCK_CREDIT* (ERC-721): An NFT representing an insurer's offer of
    parametric insurance on a real-world asset, with deterministic
    depreciation curves and piecemeal client activation.
-2. *BUCK* (ERC-20): A fungible token minted against aggregated
-   BUCK_CREDIT values, with on-chain credit-limit enforcement and
-   default insurance premiums.
-3. *BUCK_K* (Custom): An on-chain PID controller that computes a dynamic
-   Value Stabilization Factor from commodity-basket oracle prices
-   vs. BUCK market price, maintaining purchasing-power parity.
+2. *IdentityRegistry* (Custom): An on-chain registry of per-address
+   Pointcheval-Sanders signature credentials and ElGamal-encrypted
+   identity points, verified via a BN254-precompile NIZK at registration
+   time.  This is the trust anchor every BUCK transfer is gated on – see
+   the companion [Identity] and [Proofs] documents for the full
+   cryptographic design.
+3. *BUCK* (ERC-20): A fungible token minted against aggregated
+   BUCK_CREDIT values, with on-chain credit-limit enforcement, default
+   insurance premiums, and *identity-aware* `approve' and `transfer'
+   flows that enforce the BUCK mutual-decryptability invariant on every
+   counterparty pair via Chaum-Pedersen NIZK re-encryption proofs.
+4. *BUCK_K* (Custom): A controller that supplies the dynamic Value
+   Stabilization Factor used in credit-limit computation.  The eventual
+   on-chain PID + commodity-oracle implementation is summarised below;
+   the first deployment uses a simplified governance-set value to keep
+   the focus on the identity layer.
 
 This is the first of several planned implementation approaches.  The
 ERC-721 approach is chosen for its clarity, wide tooling support, and
 natural fit for unique insured assets.  Subsequent documents will
 examine ERC-1155 (semi-fungible batch credits), ERC-3643 (regulated
 security token with identity compliance), and ERC-4626 (vault-based
-credit pooling).
+credit pooling).  The *Implementation Plan* at the end of this document
+specifies the concrete phased build order, starting from minimal stubs
+of BUCK_CREDIT and BUCK_K so the cryptographic identity work can land
+first.
 
 Table of Contents
 ─────────────────
@@ -43,36 +56,64 @@ Table of Contents
 ..... 1. Depreciation Examples
 .. 3. Activation (Execution) Model
 .. 4. Insurer Updates
-4. BUCK: ERC-20 Token
+4. IdentityRegistry: On-Chain Trust Anchor
+.. 1. Cryptographic Surface
+.. 2. Solidity Surface
+.. 3. Public-Claim Accounts
+.. 4. Issuer Trust
+5. BUCK: ERC-20 Token
 .. 1. mint() Implementation
-.. 2. Default Insurance Premium
-5. BUCK_K: On-Chain PID Value Stabilization Controller
+.. 2. Identity-Aware `approve()'
+.. 3. Identity-Aware `transfer()' and `transferFrom()'
+.. 4. Default Insurance Premium
+6. BUCK_K: On-Chain PID Value Stabilization Controller
 .. 1. Process Variable and Setpoint
 .. 2. Solidity Implementation
 .. 3. PID Tuning Considerations
 .. 4. Adaptive Gain Scheduling (Future Enhancement)
-6. Integration: Full mint() Walkthrough
-7. Gas Cost Analysis
-8. Security Considerations
+7. Integration: Full mint() and transfer() Walkthrough
+.. 1. Step 0: Identity Registration (One-Time)
+.. 2. Step 1: Mint
+.. 3. Step 2: Approve Bob (Identity Handshake)
+.. 4. Step 3: Bob Pulls the Transfer
+8. Gas Cost Analysis
+9. Security Considerations
 .. 1. Oracle Manipulation
 .. 2. Credit Enumeration DoS
 .. 3. Insurer Trust
 .. 4. Reentrancy
-9. Future Approaches
+10. Future Approaches
 .. 1. ERC-1155: Semi-Fungible Batch Credits
 .. 2. ERC-3643 (T-REX): Regulated Security Token
 .. 3. ERC-4626: Vault-Based Insurance Pool
 .. 4. L2 and Cross-Chain Deployment
+11. Implementation Plan
+.. 1. Testing Strategy: Three Layers
+.. 2. Off-Chain Wallet (alberta_buck.wallet, Python)
+.. 3. Phase 0: Stub the Surrounding Contracts
+.. 4. Phase 1: BN254 Helper Library
+.. 5. Phase 2: `IdentityRegistry' Contract
+.. 6. Phase 3: Identity-Aware `Buck' ERC-20
+.. 7. Phase 4: Public-Claim Account Support
+.. 8. Phase 5: Notes Scaffolding
+.. 9. Sequencing and Stop Conditions
 
 
 [Alberta Buck Architecture] </range/finance/alberta-buck-architecture/>
+
+[Identity] <file:alberta-buck-identity.org>
+
+[Proofs] <file:alberta-buck-proofs.org>
 
 
 1 Contract Architecture Overview
 ════════════════════════════════
 
-  The Alberta Buck Ethereum implementation comprises three interacting
-  contracts plus external oracle infrastructure:
+  The Alberta Buck Ethereum implementation comprises four interacting
+  contracts.  The `IdentityRegistry' is the trust anchor of every BUCK
+  transfer: `mint', `approve' and `transfer' are all gated on the sender
+  (and, where relevant, the recipient) holding a verified, registered
+  identity credential.
 
   <file:./images/buck-eth-layers.png>
 
@@ -81,12 +122,33 @@ Table of Contents
      to insure a client's asset.
   2. The *client* (asset owner) activates all or part of their credit,
      paying the current premium.
-  3. When the client calls `BUCK.mint()', the contract aggregates all of
-     the client's active credits, applies depreciation, multiplies by
-     the current `BUCK_K', and mints BUCKs up to the resulting limit.
-  4. `BUCK_K' is recomputed on-chain from commodity oracle prices
-     vs. BUCK market price, using a PID controller that amortizes its
-     state update across mint operations.
+  3. Before the client can interact with `BUCK' at all, they `register'
+     a Pointcheval-Sanders identity credential and ElGamal-encrypted
+     identity point with `IdentityRegistry'.  The contract verifies the
+     issuer's PS signature and the binding NIZK proof on-chain via the
+     BN254 pairing precompile.
+  4. When the client calls `BUCK.mint()', the contract requires
+     `IdentityRegistry.isVerified(sender)', then aggregates the client's
+     active credits, applies depreciation, multiplies by the current
+     `BUCK_K', and mints BUCKs up to the resulting limit.
+  5. To send BUCKs, the sender first calls `BUCK.approve(spender,
+     amount, E_bob, pi_CP)', which routes the recipient's re-encrypted
+     identity ciphertext and Chaum-Pedersen proof through the
+     `IdentityRegistry'; the proof binds `E_bob' to the sender's
+     registered credential without ever revealing the underlying
+     identity point \( M \).
+  6. `transfer' / `transferFrom' then perform a bilateral identity check
+     (public-claim recipients skip the receipt requirement, private
+     recipients must have a stored receipt fragment from a prior
+     `approve') and emit a `BuckTransferReceipt' event carrying only
+     ciphertext hashes.
+  7. `BUCK_K' ships in two stages.  *Phase 0* uses a simplified
+     governance-set static value, so the identity layer can land first.
+     The on-chain PID + commodity-oracle implementation described in the
+     [BUCK_K] section is the eventual replacement.
+
+
+[BUCK_K] See section 6
 
 
 2 ERC Standard Analysis for BUCK_CREDIT
@@ -404,16 +466,245 @@ Table of Contents
   triggering the default insurance mechanism described below.
 
 
-4 BUCK: ERC-20 Token
+4 IdentityRegistry: On-Chain Trust Anchor
+═════════════════════════════════════════
+
+  The `IdentityRegistry' is the binding between Ethereum addresses and
+  the privacy-preserving identity machinery described in the companion
+  documents [Identity with Anonymity], [Identity Example – Data Flow],
+  and [Cryptographic Proofs].  Every BUCK `mint', `approve' and
+  `transfer' consults this registry; an unregistered address cannot hold
+  or move BUCKs.
+
+  The registry stores three pieces of state per address:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Field         Type               Source                                               
+  ───────────────────────────────────────────────────────────────────────────────────────
+   `pk[a]'       `G_1' point        Identity public key generated by the wallet          
+   `E_addr[a]'   `(R, C) in G_1^2'  ElGamal encryption of \( M = m \cdot G \) under `pk' 
+   `isVerified'  `bool'             True after PS + NIZK proofs verify on-chain          
+   `isPublic'    `bool'             Opt-in: account publishes \( M \) (DeFi pools, etc.) 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  It also holds a small set of trusted issuer public keys
+  `trustedIssuers[issuerAddr] = (X, Y)' in \( G_2^2 \), populated by
+  governance.  These are the only PS public keys whose signatures the
+  registry will accept at `register()' time.
+
+
+[Identity with Anonymity] <file:alberta-buck-identity.org>
+
+[Identity Example – Data Flow] <file:alberta-buck-identity-example.org>
+
+[Cryptographic Proofs] <file:alberta-buck-proofs.org>
+
+4.1 Cryptographic Surface
+─────────────────────────
+
+  The registry implements three on-chain verifications, all reducible to
+  BN254 precompile calls:
+
+  1. *PS signature verification at registration*: `e(sigma'_1, X + m *
+     Y) = e(sigma'_2, g_2)', where the verifier reconstructs the
+     relation linearly in `m' via the binding NIZK in step 2.  Costs
+     ~147K gas (3-4 `ecPairing' pairs).
+  2. *NIZK proof binding the rerandomized PS signature to the ElGamal
+     ciphertext*.  A Schnorr-family sigma protocol with three response
+     scalars and a Fiat-Shamir challenge bound to `(sigma', E_new,
+     pk_new, registrant_address)'.  Costs ~30K gas of `ecMul=/=ecAdd' on
+     top of the pairing check.  Total registration cost is ~235K gas
+     (one-time).
+  3. *Chaum-Pedersen proof of re-encryption correctness at `approve'
+     time*.  The recipient identity ciphertext `E_bob' and proof `pi_CP
+     = (e, s_1, s_2)' arrive in `approve()' calldata; the registry reads
+     `E_alice' from storage (anchoring the proof to the registered
+     credential) and verifies via 3-4 `ecMul' + 3-4 `ecAdd' operations
+     and a Fiat-Shamir reconstruction.  Costs ~29K gas per counterparty
+     pair.
+
+
+4.2 Solidity Surface
+────────────────────
+
+  ┌────
+  │ // SPDX-License-Identifier: GPL-3.0-or-later
+  │ pragma solidity ^0.8.20;
+  │ 
+  │ import {BN254} from "./BN254.sol";  // helper library wrapping ecAdd/ecMul/ecPairing
+  │ 
+  │ contract IdentityRegistry {
+  │ 
+  │     struct G1Point  { uint256 X; uint256 Y; }                  // affine BN254 G_1
+  │     struct G2Point  { uint256[2] X; uint256[2] Y; }            // affine BN254 G_2
+  │ 
+  │     struct ElGamalCT { G1Point R; G1Point C; }                 // (R, C) = (r*G, r*pk + M)
+  │     struct PSSig     { G1Point s1; G1Point s2; }               // rerandomized PS signature
+  │     struct PSPubKey  { G2Point X; G2Point Y; }                 // issuer (X, Y) in G_2
+  │ 
+  │     // NIZK binding the PS signature to the ElGamal ciphertext (registration).
+  │     struct RegistrationProof {
+  │         uint256 e;       // Fiat-Shamir challenge
+  │         uint256 s_m;     // response for the identity scalar m
+  │         uint256 s_r;     // response for the ElGamal randomness r
+  │         G1Point T_b;     // commitment binding C = r*pk + m*G
+  │         G1Point T_r;     // commitment binding R = r*G
+  │     }
+  │ 
+  │     // Chaum-Pedersen proof of equality of plaintexts (per-approve).
+  │     struct CPProof {
+  │         uint256 e;       // Fiat-Shamir challenge
+  │         uint256 s1;      // response for sk_alice
+  │         uint256 s2;      // response for r_b (bob's ciphertext randomness)
+  │     }
+  │ 
+  │     // --- Per-address identity state ---
+  │     mapping(address => G1Point)   public pk;
+  │     mapping(address => ElGamalCT) public E_addr;
+  │     mapping(address => bool)      public isVerified;
+  │     mapping(address => bool)      public isPublic;
+  │ 
+  │     // --- Trusted issuers (set by governance) ---
+  │     mapping(address => PSPubKey)  public trustedIssuers;
+  │     address public governance;
+  │ 
+  │     event Registered(address indexed account, address indexed issuer);
+  │     event PublicSet(address indexed account, bool isPublic);
+  │     event IssuerTrusted(address indexed issuer);
+  │ 
+  │     /// @notice One-time per-address registration with PS+NIZK proofs (~235K gas).
+  │     /// @param  _pk           Identity public key (G_1) generated by the wallet.
+  │     /// @param  E             ElGamal ciphertext (R, C) = (r*G, r*pk + M) of identity point M.
+  │     /// @param  issuer        Address of the issuer whose PS signature appears in sigma'.
+  │     /// @param  sigma         Rerandomized PS signature (sigma'_1, sigma'_2) on m = H(identity_data).
+  │     /// @param  proof         NIZK proof binding sigma to E under pk.
+  │     function register(
+  │         G1Point calldata _pk,
+  │         ElGamalCT calldata E,
+  │         address issuer,
+  │         PSSig calldata sigma,
+  │         RegistrationProof calldata proof
+  │     ) external {
+  │         require(!isVerified[msg.sender], "already registered");
+  │         PSPubKey memory ipk = trustedIssuers[issuer];
+  │         require(ipk.X.X[0] | ipk.X.X[1] != 0, "untrusted issuer");
+  │ 
+  │         // (1) Recompute Fiat-Shamir challenge with full context binding.
+  │         uint256 e_check = BN254.fsRegistration(
+  │             sigma, E, _pk, proof.T_b, proof.T_r, msg.sender
+  │         );
+  │         require(e_check == proof.e, "bad NIZK challenge");
+  │ 
+  │         // (2) Verify NIZK consistency in G_1 (ecMul/ecAdd, ~30K gas).
+  │         require(
+  │             BN254.checkRegistrationNIZK(_pk, E, sigma, proof, ipk),
+  │             "bad NIZK proof"
+  │         );
+  │ 
+  │         // (3) Verify PS signature relation via ecPairing precompile (~147K gas).
+  │         require(
+  │             BN254.checkPSSignature(sigma, ipk, proof),
+  │             "bad PS signature"
+  │         );
+  │ 
+  │         pk[msg.sender]      = _pk;
+  │         E_addr[msg.sender]  = E;
+  │         isVerified[msg.sender] = true;
+  │         emit Registered(msg.sender, issuer);
+  │     }
+  │ 
+  │     /// @notice Opt in/out of "public" identity (M is published, no per-tx CP required).
+  │     ///         Used for AMM pools, treasury accounts, and other DeFi infrastructure.
+  │     function setPublic(bool _isPublic) external {
+  │         require(isVerified[msg.sender], "not registered");
+  │         isPublic[msg.sender] = _isPublic;
+  │         emit PublicSet(msg.sender, _isPublic);
+  │     }
+  │ 
+  │     /// @notice Verify a Chaum-Pedersen proof that E_bob re-encrypts the identity
+  │     ///         registered to `sender` under `recipient`'s public key.
+  │     /// @dev    Called by Buck.approve(); E_alice is read from storage here.
+  │     ///         ~29K gas of ecMul/ecAdd + Fiat-Shamir reconstruction.
+  │     function verifyApprove(
+  │         address sender,
+  │         address recipient,
+  │         ElGamalCT calldata E_bob,
+  │         CPProof calldata pi
+  │     ) external view returns (bool) {
+  │         require(isVerified[sender],    "sender not verified");
+  │         require(isVerified[recipient], "recipient not verified");
+  │         ElGamalCT storage E_alice = E_addr[sender];
+  │         return BN254.checkChaumPedersen(
+  │             E_alice, E_bob, pk[sender], pk[recipient], pi, sender, recipient
+  │         );
+  │     }
+  │ 
+  │     /// @notice Governance whitelists an authorized issuer's PS public key.
+  │     function trustIssuer(address issuer, PSPubKey calldata ipk) external {
+  │         require(msg.sender == governance, "not governance");
+  │         trustedIssuers[issuer] = ipk;
+  │         emit IssuerTrusted(issuer);
+  │     }
+  │ }
+  └────
+
+
+4.3 Public-Claim Accounts
+─────────────────────────
+
+  DeFi infrastructure – AMM pools, vaults, oracles – cannot generate
+  Chaum-Pedersen proofs at `approve' time, because the contract has no
+  private key.  These accounts call `setPublic(true)' after
+  `register()'; from then on, counterparties of a public account skip
+  the proof requirement and the on-chain receipt is constructed directly
+  from the published identity point.  Public accounts forfeit content
+  privacy: their identity \( M \) is observable on-chain, but they
+  retain unforgeability and the audit trail.
+
+
+4.4 Issuer Trust
+────────────────
+
+  `trustedIssuers' is the only governance-controlled trust anchor in the
+  system.  Adding a new issuer admits a new origin of registrable
+  identities; removing one stops new registrations under that issuer
+  (existing registrations are unaffected – they were verified at
+  registration time and are never re-verified).  Epoch-based credential
+  renewal, key revocation, and issuer rotation are described in the
+  [Identity] document.
+
+
+[Identity] <file:alberta-buck-identity.org::*Epoch-Based Credential
+Renewal>
+
+
+5 BUCK: ERC-20 Token
 ════════════════════
 
-  The BUCK token is a standard ERC-20 with a custom `mint()' function
-  that enforces credit limits.  BUCKs are freely transferable once
-  minted – they represent fungible value backed by the aggregate pool of
-  attested assets, not any specific BUCK_CREDIT.
+  The BUCK token is an *identity-aware* ERC-20.  Beyond the usual mint /
+  transfer / approve surface, every state-changing call routes through
+  the `IdentityRegistry':
+
+  • `mint()' refuses to issue BUCKs to an unverified address.
+  • `approve()' takes the recipient's re-encrypted identity ciphertext
+    and a Chaum-Pedersen NIZK proof, and stores a /receipt fragment/
+    binding the (sender, spender) pair to that ciphertext.
+  • `transfer()' and `transferFrom()' enforce a *bilateral* identity
+    check using the receipt fragments and the public-claim flag, then
+    emit a `BuckTransferReceipt' carrying only ciphertext hashes – no
+    plaintext identity ever touches the chain.
+
+  This is the on-chain enforcement of the [mutual-decryptability
+  invariant]: every transfer leaves behind a permanent record from which
+  both counterparties (and only those counterparties, by decrypting
+  their respective ciphertext) can reconstruct the identity of the
+  other.
 
 
-4.1 mint() Implementation
+[mutual-decryptability invariant]
+<file:alberta-buck-identity.org::*Counterparties Exchange Identities>
+
+5.1 mint() Implementation
 ─────────────────────────
 
   ┌────
@@ -422,36 +713,80 @@ Table of Contents
   │ 
   │ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
   │ 
+  │ interface IBuckK {
+  │     function currentBuckK() external view returns (uint256);
+  │ }
+  │ 
+  │ interface IBuckCredit {
+  │     function totalCurrentValue(address holder) external view returns (uint256);
+  │ }
+  │ 
+  │ interface IIdentityRegistry {
+  │     struct G1Point   { uint256 X; uint256 Y; }
+  │     struct ElGamalCT { G1Point R; G1Point C; }
+  │     struct CPProof   { uint256 e; uint256 s1; uint256 s2; }
+  │ 
+  │     function isVerified(address) external view returns (bool);
+  │     function isPublic(address)   external view returns (bool);
+  │     function E_addr(address) external view returns (G1Point memory, G1Point memory);
+  │     function verifyApprove(
+  │         address sender, address recipient,
+  │         ElGamalCT calldata E_bob, CPProof calldata pi
+  │     ) external view returns (bool);
+  │ }
+  │ 
   │ contract Buck is ERC20 {
   │ 
-  │     BuckCredit public immutable buckCredit;
-  │     BuckKController public immutable buckK;
-  │     address public immutable insurancePool;
+  │     IBuckCredit       public immutable buckCredit;
+  │     IBuckK            public immutable buckK;
+  │     IIdentityRegistry public immutable identity;
+  │     address           public immutable insurancePool;
   │ 
   │     uint256 constant PRECISION = 1e18;
   │ 
   │     // Per-account stored credit limit (monotonically increases per mint)
   │     mapping(address => uint256) public storedLimit;
   │ 
+  │     // Receipt fragments: keccak256(E_recipient_ciphertext) per (sender, spender) pair.
+  │     // Set by approve(); consumed by transferFrom() and the mirrored transfer() path.
+  │     mapping(address => mapping(address => bytes32)) internal _receiptFragments;
+  │ 
   │     event Minted(address indexed account, uint256 amount, uint256 premium,
   │                  uint256 creditValue, uint256 buckKValue, uint256 newLimit);
   │ 
-  │     constructor(address _buckCredit, address _buckK, address _insurancePool)
-  │         ERC20("Alberta Buck", "BUCK")
-  │     {
-  │         buckCredit = BuckCredit(_buckCredit);
-  │         buckK = BuckKController(_buckK);
+  │     /// @dev Receipt event: ciphertext *hashes* only.  Counterparties verify off-chain
+  │     ///      by recomputing keccak256 over their stored E_alice / E_bob.
+  │     event BuckTransferReceipt(
+  │         address indexed from,
+  │         address indexed to,
+  │         uint256 amount,
+  │         bytes32 fromCipherHash,
+  │         bytes32 toCipherHash
+  │     );
+  │ 
+  │     constructor(
+  │         address _buckCredit,
+  │         address _buckK,
+  │         address _identity,
+  │         address _insurancePool
+  │     ) ERC20("Alberta Buck", "BUCK") {
+  │         buckCredit    = IBuckCredit(_buckCredit);
+  │         buckK         = IBuckK(_buckK);
+  │         identity      = IIdentityRegistry(_identity);
   │         insurancePool = _insurancePool;
   │     }
   │ 
   │     /// @notice Mint BUCKs against the caller's aggregated BUCK_CREDIT value.
-  │     /// @param amount  Desired BUCK amount to mint (18 decimals).
+  │     /// @dev    Caller must hold a verified IdentityRegistry credential.
+  │     /// @param  amount  Desired BUCK amount to mint (18 decimals).
   │     function mint(uint256 amount) external {
+  │         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+  │ 
   │         // 1. Aggregate all BUCK_CREDITs in the caller's account
   │         uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
   │ 
-  │         // 2. Get current BUCK_K stabilization factor
-  │         uint256 currentBuckK = buckK.compute();
+  │         // 2. Get current BUCK_K stabilization factor (Phase 0: static getter)
+  │         uint256 currentBuckK = buckK.currentBuckK();
   │ 
   │         // 3. Compute maximum credit limit
   │         uint256 maxLimit = totalCreditValue * currentBuckK / PRECISION;
@@ -482,14 +817,135 @@ Table of Contents
   │     }
   │ 
   │     /// @notice Burn BUCKs to reduce outstanding balance (repayment).
-  │     /// @dev Reduces balance, freeing credit capacity for future minting.
   │     function burn(uint256 amount) external {
   │         _burn(msg.sender, amount);
   │     }
   └────
 
 
-4.2 Default Insurance Premium
+5.2 Identity-Aware `approve()'
+──────────────────────────────
+
+  The standard ERC-20 `approve(spender, amount)' becomes:
+
+  ┌────
+  │ /// @notice Approve `spender` to transfer up to `amount` BUCKs from the caller's balance,
+  │ ///         and simultaneously record a Chaum-Pedersen-bound identity receipt fragment.
+  │ /// @dev    The proof `pi_CP` proves that `E_bob` re-encrypts the *same identity point M*
+  │ ///         that the caller registered in IdentityRegistry, under spender's public key.
+  │ ///         IdentityRegistry reads E_alice from its own storage, anchoring the proof.
+  │ /// @param  spender The address being approved as a transfer agent.
+  │ /// @param  amount  ERC-20 allowance.
+  │ /// @param  E_bob   ElGamal ciphertext of the caller's identity, encrypted under pk_spender.
+  │ /// @param  pi_CP   Chaum-Pedersen NIZK proof of equal-plaintext re-encryption.
+  │ function approve(
+  │     address spender,
+  │     uint256 amount,
+  │     IIdentityRegistry.ElGamalCT calldata E_bob,
+  │     IIdentityRegistry.CPProof   calldata pi_CP
+  │ ) public returns (bool) {
+  │     require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+  │     require(
+  │         identity.isVerified(spender) || identity.isPublic(spender),
+  │         "BUCK: spender not verified"
+  │     );
+  │ 
+  │     // Public spenders (AMM pools, vaults) skip CP -- their identity is already on-chain.
+  │     if (!identity.isPublic(spender)) {
+  │         require(
+  │             identity.verifyApprove(msg.sender, spender, E_bob, pi_CP),
+  │             "BUCK: bad CP proof"
+  │         );
+  │         _receiptFragments[msg.sender][spender] = keccak256(
+  │             abi.encode(E_bob.R.X, E_bob.R.Y, E_bob.C.X, E_bob.C.Y)
+  │         );
+  │     } else {
+  │         // Public counterparty: receipt is a hash of the well-known M instead.
+  │         _receiptFragments[msg.sender][spender] = _publicReceiptHash(spender);
+  │     }
+  │ 
+  │     _approve(msg.sender, spender, amount);
+  │     return true;
+  │ }
+  │ 
+  │ /// @dev Block the parameterless ERC-20 approve; identity-bound approve is mandatory.
+  │ function approve(address, uint256) public pure override returns (bool) {
+  │     revert("BUCK: use identity-bound approve");
+  │ }
+  └────
+  The `approve' call costs roughly `29K (CP verify) + 46K (standard
+  ERC-20 approve) + 22K (receipt SSTORE)' = ~97K gas, paid once per
+  (sender, spender) pair.  Subsequent transfers between the same
+  counterparties incur only the bilateral check and the receipt event
+  (~5K gas of additional work above a baseline ERC-20 transfer).
+
+
+5.3 Identity-Aware `transfer()' and `transferFrom()'
+────────────────────────────────────────────────────
+
+  ┌────
+  │ /// @notice Transfer BUCKs to `to`.
+  │ /// @dev    Requires bilateral identity verification:
+  │ ///         - Both addresses are isVerified, and
+  │ ///         - Either (a) `to` is isPublic, or
+  │ ///                  (b) caller has a stored receipt fragment for `to` from a prior approve().
+  │ function transfer(address to, uint256 amount) public override returns (bool) {
+  │     _identityCheckedTransfer(msg.sender, to, amount);
+  │     return true;
+  │ }
+  │ 
+  │ /// @notice TransferFrom path used by spenders (AMM router pulling Alice's BUCKs).
+  │ function transferFrom(address from, address to, uint256 amount)
+  │     public override returns (bool)
+  │ {
+  │     _spendAllowance(from, msg.sender, amount);
+  │     _identityCheckedTransfer(from, to, amount);
+  │     return true;
+  │ }
+  │ 
+  │ function _identityCheckedTransfer(address from, address to, uint256 amount) internal {
+  │     require(identity.isVerified(from), "BUCK: sender not verified");
+  │     require(
+  │         identity.isVerified(to) || identity.isPublic(to),
+  │         "BUCK: recipient not verified"
+  │     );
+  │ 
+  │     bytes32 toHash;
+  │     if (identity.isPublic(to)) {
+  │         // Public recipient: receipt anchored to recipient's published M.
+  │         toHash = _publicReceiptHash(to);
+  │     } else {
+  │         // Private recipient: caller must have a Chaum-Pedersen-bound receipt fragment.
+  │         toHash = _receiptFragments[from][to];
+  │         require(toHash != bytes32(0), "BUCK: missing identity receipt");
+  │     }
+  │ 
+  │     bytes32 fromHash = identity.isPublic(from)
+  │         ? _publicReceiptHash(from)
+  │         : _receiptFragments[to][from];  // mirrored fragment if `to` previously approved `from`
+  │     // For a one-shot transfer with no prior reciprocal approve, fromHash may be zero.
+  │     // The receipt event still records the asymmetric attestation; auditors reading the
+  │     // event know which side was Chaum-Pedersen bound.
+  │ 
+  │     _transfer(from, to, amount);
+  │     emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
+  │ }
+  │ 
+  │ function _publicReceiptHash(address account) internal view returns (bytes32) {
+  │     (IIdentityRegistry.G1Point memory R, IIdentityRegistry.G1Point memory C)
+  │         = identity.E_addr(account);
+  │     return keccak256(abi.encode(R.X, R.Y, C.X, C.Y, "PUBLIC"));
+  │ }
+  └────
+  The `BuckTransferReceipt' event is the auditable trail:
+  `fromCipherHash' and `toCipherHash' are keccak256 commitments over the
+  corresponding ElGamal ciphertexts.  Counterparties can match a receipt
+  to their off-chain copies of \( E_{alice}, E_{bob} \) by recomputing
+  the hash; observers without the underlying ciphertexts learn nothing
+  beyond the fact of a transfer.
+
+
+5.4 Default Insurance Premium
 ─────────────────────────────
 
   The premium scales with utilization: the closer the account's
@@ -539,7 +995,7 @@ Table of Contents
 </range/finance/alberta-buck-architecture/#value-stabilization>
 
 
-5 BUCK_K: On-Chain PID Value Stabilization Controller
+6 BUCK_K: On-Chain PID Value Stabilization Controller
 ═════════════════════════════════════════════════════
 
   The `BUCK_K' contract maintains purchasing-power parity between the
@@ -551,7 +1007,7 @@ Table of Contents
 
 [ownercredit PID controller] <https://github.com/pjkundert/ownercredit>
 
-5.1 Process Variable and Setpoint
+6.1 Process Variable and Setpoint
 ─────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -570,7 +1026,7 @@ Table of Contents
   BUCK_K when BUCKs are overvalued.
 
 
-5.2 Solidity Implementation
+6.2 Solidity Implementation
 ───────────────────────────
 
   ┌────
@@ -746,7 +1202,7 @@ Table of Contents
   └────
 
 
-5.3 PID Tuning Considerations
+6.3 PID Tuning Considerations
 ─────────────────────────────
 
   The PID gains determine how aggressively BUCK_K responds to price
@@ -772,7 +1228,7 @@ Table of Contents
   prohibitively expensive proposition on a liquid pool.
 
 
-5.4 Adaptive Gain Scheduling (Future Enhancement)
+6.4 Adaptive Gain Scheduling (Future Enhancement)
 ─────────────────────────────────────────────────
 
   The current implementation uses governance-set fixed gains.  A future
@@ -791,8 +1247,8 @@ Table of Contents
   spiking the derivative term.
 
 
-6 Integration: Full mint() Walkthrough
-══════════════════════════════════════
+7 Integration: Full mint() and transfer() Walkthrough
+═════════════════════════════════════════════════════
 
   Consider Alice, who owns a $500K Calgary home (land: $200K, structure:
   $300K).  Two insurers (LandCo, HomeCo) have issued BUCK_CREDITs:
@@ -810,30 +1266,111 @@ Table of Contents
   to the 80% depreciable portion).  Alice activated all of the land
   credit but only half of the structure credit.
 
+
+7.1 Step 0: Identity Registration (One-Time)
+────────────────────────────────────────────
+
+  Before Alice can interact with BUCK at all, she must hold a verified
+  identity credential:
+
+  1. *KYC ceremony* (off-chain): a trusted issuer (the Alberta
+     government, ATB Financial, etc.)  verifies Alice's documents and
+     signs her identity scalar \( m = H(identity\_data) \) with their PS
+     key, producing \( \sigma = (\sigma_1, \sigma_2) \).  Alice stores
+     \( (m, \sigma) \) in her wallet.
+  2. *Derivation* (off-chain): Alice's wallet rerandomizes \( \sigma \)
+     into \( \sigma' \), generates a fresh identity key pair \(
+     (sk_{alice}, pk_{alice}) \), encrypts her identity point \( M = m
+     \cdot G \) under \( pk_{alice} \), and produces a NIZK proof \( \pi
+     \) binding \( \sigma' \) to that ciphertext.
+  3. *On-chain registration*: Alice calls
+     `IdentityRegistry.register(pk_alice, E_alice, issuer, sigma', pi)'.
+     The contract verifies \( \pi \) and the PS pairing relation via the
+     BN254 precompiles (~235K gas, paid once for the lifetime of this
+     Ethereum address).  After this call, `isVerified[alice] =' true=.
+
+  Alice repeats steps 2-3 for every Ethereum account she controls; the
+  issuer never sees those accounts.
+
+
+7.2 Step 1: Mint
+────────────────
+
   Alice calls `BUCK.mint(50000e18)':
 
-  1. `buckCredit.totalCurrentValue(alice)' returns `341,000e18'.
-  2. `buckK.compute()' fetches oracle prices:
-     • Commodity basket costs 1.02 USDC (slight inflation above 1.00
-       parity).
-     • BUCK trades at 0.99 USDC on Uniswap.
-     • Error = 1.02 - 0.99 = +0.03 (BUCK undervalued by 3%).
-     • PID output: BUCK_K = 1.015 (credit expansion to correct
-       undervaluation).
-  3. `maxLimit = 341,000 * 1.015 = 346,115' BUCKs.
-  4. Alice's current balance is 280,000 BUCKs.  After mint: 330,000 <
+  1. The contract first checks `identity.isVerified(alice) =' true=.
+  2. `buckCredit.totalCurrentValue(alice)' returns `341,000e18'.
+  3. `buckK.currentBuckK()' returns the current stabilization factor.
+     *Phase 0*: this is just the static value the governance multisig
+     last wrote.  *Eventual PID build*: the controller fetches oracles –
+     e.g. commodity basket at 1.02 USDC, BUCK at 0.99 USDC, error +0.03
+     -> BUCK_K = 1.015.
+  4. `maxLimit = 341,000 * BUCK_K'.  Assume BUCK_K = 1.015, so maxLimit
+     = 346,115.
+  5. Alice's current balance is 280,000 BUCKs.  After mint: 330,000 <
      346,115.  OK.
-  5. Utilization after mint: 330,000 / 346,115 = 95.3%.
+  6. Utilization after mint: 330,000 / 346,115 = 95.3%.
      • Premium rate: 0.50% + (0.953^2 * 4.50%) = 4.59%.
      • Premium: 50,000 * 4.59% = 2,295 BUCKs to insurance pool.
-  6. Alice receives 47,705 BUCKs.  Insurance pool receives 2,295 BUCKs.
+  7. Alice receives 47,705 BUCKs.  Insurance pool receives 2,295 BUCKs.
+
+
+7.3 Step 2: Approve Bob (Identity Handshake)
+────────────────────────────────────────────
+
+  Alice wants to pay Bob 10,000 BUCKs through the same router pattern
+  most ERC-20 flows use (`approve' + `transferFrom').  Bob is also
+  registered.
+
+  1. Alice's wallet reads Bob's `pk_bob' from `IdentityRegistry'.
+  2. Off-chain, Alice's wallet decrypts `E_alice' (it knows `sk_alice'),
+     recovers \( M \), and re-encrypts under \( pk_{bob} \) with fresh
+     randomness \( r_b \): \( E_{bob} = (r_b \cdot G,\ r_b \cdot
+     pk_{bob} + M) \).
+  3. The wallet produces a Chaum-Pedersen NIZK proof \( \pi_{CP} = (e,
+     s_1, s_2) \) that `E_bob' encrypts the same \( M \) registered in
+     `E_alice'.  The Fiat-Shamir challenge binds `msg.sender = alice',
+     `spender = bob', and `block.chainid'.
+  4. Alice calls `BUCK.approve(bob, 10000e18, E_bob, pi_CP)'.  The
+     contract:
+     • checks both parties are verified;
+     • asks `IdentityRegistry.verifyApprove(alice, bob, E_bob, pi_CP)' –
+       the registry reads `E_alice' from its own storage (so Alice can't
+       substitute a fake credential) and runs the CP check (~29K gas);
+     • stores `_receiptFragments[alice][bob] = keccak256(E_bob)';
+     • records the standard ERC-20 allowance.
+  5. Off-chain, Alice's Holochain hApp delivers the matching
+     `identity_data' and \( E_{bob} \) ciphertext to Bob's hApp.  Bob's
+     wallet decrypts to recover \( M' \) and asserts \(
+     H(identity\_data) \cdot G \stackrel{?}{=} M' \) – the two-channel
+     binding from the Identity document.
+
+
+7.4 Step 3: Bob Pulls the Transfer
+──────────────────────────────────
+
+  Bob (or a contract Bob authorized) calls `BUCK.transferFrom(alice,
+  bob, 10000e18)':
+
+  1. `_spendAllowance(alice, bob, 10000e18)' debits the allowance Alice
+     set above.
+  2. `_identityCheckedTransfer(alice, bob, 10000e18)' verifies both
+     parties are still verified and that `_receiptFragments[alice][bob]
+     !' 0= (Alice did supply a CP-bound receipt at approve time).
+  3. Tokens transfer.
+  4. `BuckTransferReceipt(alice, bob, 10000e18, fromHash, toHash)' is
+     emitted, with `fromHash' and `toHash' being keccak256 commitments
+     over the corresponding ciphertexts.  An auditor with subpoena power
+     over either Alice or Bob can recover the underlying identities; an
+     outside observer learns only that addresses `alice' and `bob'
+     exchanged 10,000 BUCKs.
 
   Later, HomeCo reappraises the structure at $280K (updated
   `faceValue').  Alice's credit limit drops.  If her outstanding balance
   exceeds the new limit, the default insurance mechanism activates.
 
 
-7 Gas Cost Analysis
+8 Gas Cost Analysis
 ═══════════════════
 
   Approximate gas costs (Ethereum mainnet, Solidity 0.8.x optimizer):
@@ -858,10 +1395,10 @@ Table of Contents
   alternative EVM chains.  The contract architecture is chain-agnostic.
 
 
-8 Security Considerations
+9 Security Considerations
 ═════════════════════════
 
-8.1 Oracle Manipulation
+9.1 Oracle Manipulation
 ───────────────────────
 
   • *TWAP resistance*: The BUCK/USDC price uses a Uniswap V3 TWAP (30+
@@ -873,7 +1410,7 @@ Table of Contents
     within an acceptable window (e.g., 1 hour) and revert if stale.
 
 
-8.2 Credit Enumeration DoS
+9.2 Credit Enumeration DoS
 ──────────────────────────
 
   A malicious user could create many tiny BUCK_CREDITs to make
@@ -883,7 +1420,7 @@ Table of Contents
   • Off-chain aggregation with Merkle proof (advanced).
 
 
-8.3 Insurer Trust
+9.3 Insurer Trust
 ─────────────────
 
   The insurer can reduce `faceValue' at any time, potentially pushing
@@ -896,22 +1433,22 @@ Table of Contents
     20%).
 
 
-8.4 Reentrancy
+9.4 Reentrancy
 ──────────────
 
   Standard OpenZeppelin `ReentrancyGuard' on `mint()' and `activate()'.
   All state changes occur before external calls.
 
 
-9 Future Approaches
-═══════════════════
+10 Future Approaches
+════════════════════
 
   This ERC-721 implementation prioritizes clarity and correctness.
   Subsequent documents will explore:
 
 
-9.1 ERC-1155: Semi-Fungible Batch Credits
-─────────────────────────────────────────
+10.1 ERC-1155: Semi-Fungible Batch Credits
+──────────────────────────────────────────
 
   If standardized credit classes emerge (e.g., "Calgary residential,
   HomeCo, LINEAR 200bp"), multiple properties in the same class could
@@ -924,8 +1461,8 @@ Table of Contents
   state mapping, partially negating the fungibility benefit.
 
 
-9.2 ERC-3643 (T-REX): Regulated Security Token
-──────────────────────────────────────────────
+10.2 ERC-3643 (T-REX): Regulated Security Token
+───────────────────────────────────────────────
 
   For production deployment under regulatory oversight:
   • *ONCHAINID*: Native identity registry for KYC/AML compliance.
@@ -939,8 +1476,8 @@ Table of Contents
   under provincial regulation.
 
 
-9.3 ERC-4626: Vault-Based Insurance Pool
-────────────────────────────────────────
+10.3 ERC-4626: Vault-Based Insurance Pool
+─────────────────────────────────────────
 
   While a poor fit for BUCK_CREDIT itself, ERC-4626 is well-suited for
   the `InsurancePool':
@@ -951,11 +1488,266 @@ Table of Contents
   • Standard DeFi composability (yield aggregators, lending protocols).
 
 
-9.4 L2 and Cross-Chain Deployment
-─────────────────────────────────
+10.4 L2 and Cross-Chain Deployment
+──────────────────────────────────
 
   The contracts are EVM-compatible and can deploy on Arbitrum, Optimism,
   Base, or Polygon with minimal changes.  Cross-chain BUCK transfers via
   canonical bridges or LayerZero/Axelar would enable multi-chain
   liquidity while maintaining a single BUCK_K oracle on the settlement
   layer.
+
+
+11 Implementation Plan
+══════════════════════
+
+  This document specifies the *eventual* shape of the system.  The first
+  deployment ships in narrow phases so the cryptographic identity layer
+  – the single largest piece of new ground in the design – can land
+  first, against minimal stubs of the surrounding contracts.  Each phase
+  ends in a self-contained, deployable state with passing tests.
+
+
+11.1 Testing Strategy: Three Layers
+───────────────────────────────────
+
+  Tests are stratified by what they actually need from the EVM, so the
+  cryptographic and accounting work can iterate without ever touching a
+  network:
+
+  1. *Local-EVM unit tests (default).* Foundry's in-memory EVM ships the
+     BN254 precompiles (`ecAdd' `0x06', `ecMul' `0x07', `ecPairing'
+     `0x08') and all the EIP-2929 / cancun behavior we need.  Every
+     contract in this document – BUCK_CREDIT, BUCK, IdentityRegistry,
+     the BN254 helper, the static BUCK_K – is fully exercisable without
+     RPC, on a clean state, in milliseconds per test.
+  2. *Pinned mainnet/Sepolia forks (only the eventual PID BUCK_K).* When
+     the production `BuckKController' ships and needs to read Chainlink
+     price feeds and the Uniswap V3 BUCK/USDC TWAP, run the relevant
+     tests with `--fork-url ${RPC} --fork-block-number ${N}'.  Pinning
+     the block number is the determinism knob: the EVM state at block
+     /N/ is immutable, and Foundry caches the RPC responses under
+     `~/.foundry/cache/rpc/' – after the first run the suite is offline
+     and bit-reproducible.  `vm.mockCall' covers pathological oracle
+     paths (stale feeds, manipulated TWAPs) without needing to find a
+     block at which they actually occurred.
+  3. *Differential parity with the Python reference.* The cryptographic
+     surface is described by an executable Python reference (see
+     *Off-Chain Wallet* below).  CI regenerates the canonical JSON test
+     vectors from that reference and `git diff --exit-code''s them
+     against committed copies; the Solidity tests load the same vectors
+     via `vm.readFile' and assert equality.  Any drift between the spec,
+     the wallet, or the Solidity tells us /immediately/ which of the
+     three is wrong.
+
+  The deliberate exclusion: no `vm.ffi' shelling out to Python at test
+  time.  That trades determinism, speed, and CI portability for a
+  coupling we don't need – the wallet emits vectors once, the Solidity
+  reads them many times.
+
+
+11.2 Off-Chain Wallet (alberta_buck.wallet, Python)
+───────────────────────────────────────────────────
+
+  The off-chain components – KYC ceremony, credential derivation,
+  Chaum-Pedersen proving, and (later) SNARK witness generation for Notes
+  – are implemented as a Python package, `alberta_buck.wallet', with a
+  CLI front-end.  Python is the natural choice: the existing references
+  in [Identity Example] and [Proofs] are already Python, `py_ecc' ships
+  a complete BN254 (alt_bn128) implementation matching Ethereum's
+  precompiles, and the package is invoked the same way every other dev
+  tool in this repo is (`nix develop --command python3 -m
+  alberta_buck.wallet ...').
+
+  The wallet has three jobs:
+
+  • *Reference implementation* of the cryptography in
+    [alberta-buck-identity.org], the place where the spec is
+    ground-truthed.
+  • *Test-vector emission*: a CLI verb (`wallet emit-vectors') writes a
+    canonical JSON file under `test/vectors/' containing the inputs and
+    expected outputs of every on-chain proof check.  Foundry tests load
+    this file and assert agreement with the Solidity verifier.
+  • *End-to-end developer surface*: a CLI verb (`wallet sign', `wallet
+    register', `wallet approve') produces the calldata an end user's
+    wallet would submit, so integration tests (and humans) can drive the
+    contracts the same way a real wallet would.
+
+  The wallet does *not* hold private keys for production users; it is a
+  deterministic reference and a test driver.  A production wallet would
+  reuse the same primitives behind a different storage and UI.
+
+
+[Identity Example] <file:alberta-buck-identity-example.org>
+
+[Proofs] <file:alberta-buck-proofs.org>
+
+[alberta-buck-identity.org] <file:alberta-buck-identity.org>
+
+
+11.3 Phase 0: Stub the Surrounding Contracts
+────────────────────────────────────────────
+
+  Goal: `Buck' can be developed and tested against a minimal,
+  deterministic surface for `BuckCredit' and `BuckK'.  All real moving
+  parts (depreciation curves, PID, oracles) are deferred.
+
+  • `BuckKController.sol' -> replace with `BuckKControllerStatic.sol':
+    • State: `uint256 public buckK' (18 decimals, default `1e18').
+    • Functions: `currentBuckK() view returns (uint256)' and
+      `setBuckK(uint256)' (governance-only).
+    • Drop all PID state, Chainlink basket, and Uniswap TWAP code.  The
+      full PID implementation documented above remains the design target
+      – it slots back in once the identity layer is stable.
+  • `BuckCredit.sol' -> keep the existing implementation, but treat only
+    one function as a load-bearing interface for Phase 0+:
+    `totalCurrentValue(address holder) external view returns (uint256)'.
+    No depreciation rework, no insurer-flow churn.
+
+  Deliverables: passing Foundry tests that mint, set new BUCK_K values,
+  and watch credit limits re-derive correctly.
+
+
+11.4 Phase 1: BN254 Helper Library
+──────────────────────────────────
+
+  Goal: a single Solidity library that wraps the three BN254 precompiles
+  and exposes the typed operations the identity contracts need.
+
+  • `src/crypto/BN254.sol' with:
+    • `G1Point', `G2Point' structs and constants for `g1', `g2'.
+    • `add(G1Point, G1Point) -> G1Point' via `ecAdd' precompile
+      (`0x06').
+    • `mul(G1Point, uint256) -> G1Point' via `ecMul' precompile
+      (`0x07').
+    • `pairingProd3(...)' and `pairingProd4(...)' helpers via
+      `ecPairing' precompile (`0x08').
+    • Pure-Solidity Fiat-Shamir helpers: `fsRegistration(...)' and
+      `fsChaumPedersen(...)', each wrapping a `keccak256' over the
+      canonical encoding from the Identity document.
+    • High-level checks: `checkPSSignature', `checkRegistrationNIZK',
+      `checkChaumPedersen'.
+
+  Deliverables: differential tests against the Python reference in
+  `alberta-buck-identity-example.org' (same curve, same encoding, same
+  Fiat-Shamir transcript).  `nix develop --command python3' drives the
+  reference; Foundry `vm.ffi' or pre-baked vector files feed the
+  Solidity tests.
+
+
+11.5 Phase 2: `IdentityRegistry' Contract
+─────────────────────────────────────────
+
+  Goal: ship the on-chain trust anchor exactly as specified in the
+  [IdentityRegistry section].
+
+  • `src/IdentityRegistry.sol' implementing `register', `setPublic',
+    `verifyApprove', `trustIssuer'.
+  • All proofs verified using `BN254' helpers from Phase 1.
+  • Tests:
+    • End-to-end registration with the Python reference vectors
+      (positive case + the four counter-examples from
+      `alberta-buck-identity-example.org').
+    • `register' rejects untrusted issuers.
+    • `register' rejects double-registration of the same address.
+    • `verifyApprove' accepts a valid Chaum-Pedersen proof and rejects
+      every documented tampered case (wrong message, wrong randomness,
+      wrong public key, replayed challenge).
+    • Gas measurements within ~15% of the published estimates (235K
+      register / 29K verifyApprove).
+
+  Deliverables: deployable registry, passing test suite, documented gas
+  measurements.
+
+
+[IdentityRegistry section] See section 4
+
+
+11.6 Phase 3: Identity-Aware `Buck' ERC-20
+──────────────────────────────────────────
+
+  Goal: replace the current `Buck.sol' with the identity-aware version
+  specified in the [BUCK section].
+
+  • Add `IIdentityRegistry' interface and constructor wiring.
+  • `mint' gates on `isVerified'.
+  • `approve(spender, amount, E_bob, pi_CP)' with the parameterless
+    `approve(address, uint256)' reverting.
+  • `transfer' / `transferFrom' via `_identityCheckedTransfer' with
+    bilateral checks and the `BuckTransferReceipt' event.
+  • `_receiptFragments' storage and `_publicReceiptHash' helper.
+
+  Tests:
+  • Two registered users can complete the full `approve' ->
+    `transferFrom' cycle and observe a `BuckTransferReceipt' whose
+    hashes match the off-chain ciphertexts.
+  • Unregistered `mint' reverts.
+  • `transfer' to an unregistered, non-public recipient reverts.
+  • `transfer' without a prior CP-bound `approve' (and a non-public
+    recipient) reverts.
+  • Public-claim recipients accept transfers without an `approve' step.
+
+
+[BUCK section] See section 5
+
+
+11.7 Phase 4: Public-Claim Account Support
+──────────────────────────────────────────
+
+  Goal: AMM pools, vaults, and treasuries can interact with BUCK without
+  needing to generate Chaum-Pedersen proofs.
+
+  • Confirm `setPublic(true)' is invocable only by registered accounts.
+  • Add a small `MockAMMPool' test contract that `register=s,
+      =setPublic(true)=s, then participates in =approve=/=transferFrom'
+      flows on both sides (taker and maker).
+  • Verify the receipt event uses the well-known `M' for the public side
+    and the CP-bound ciphertext for the private side.
+
+
+11.8 Phase 5: Notes Scaffolding
+───────────────────────────────
+
+  Goal: lay the structural groundwork for [BUCK Notes] without yet
+  shipping the SNARK verifier.
+
+  • `src/notes/PoseidonMerkleTree.sol' – append-only commitment tree
+    with the same domain separation as the Notes design document
+    (commitment-pool root, capacity, fixed depth).
+  • `src/notes/NullifierSet.sol' – `mapping(bytes32 => bool)' with
+    `insert=/=isSpent' and permissioned writers (the `BuckNotes'
+    contract once it lands).
+  • `src/notes/IGroth16Verifier.sol' and `IPlonkVerifier.sol' – empty
+    interfaces matching the output of the standard SNARK toolchains
+    (snarkjs / circom / Halo2-EVM exporter), so that later wiring is a
+    constructor argument rather than an interface design choice.
+  • Stub `BuckNotes.sol' with `deposit(faceValue)', `mint(...)',
+    `spend(...)' reverting with "TODO: ship in alberta-buck-notes.org
+    Phase 6", but with the full set of events and parameter shapes the
+    Notes document requires.
+
+  Deliverables: deploy-and-test green; integration tests from this
+  repository's perspective treat the Notes module as a dark continent
+  that the Notes document will fill in.
+
+
+[BUCK Notes] <file:alberta-buck-notes.org>
+
+
+11.9 Sequencing and Stop Conditions
+───────────────────────────────────
+
+  The phases are strict prerequisites of one another: Phase /n+1/ does
+  not begin until Phase /n/ has a passing CI run and a Foundry gas
+  snapshot.  Implementation `STOP' conditions:
+
+  • Phase 1: a Solidity `checkChaumPedersen' disagreement with the
+    Python reference vectors.  Disagreement implies a bug in the spec or
+    in one of the implementations – resolve before any contract that
+    depends on it ships.
+  • Phase 3: `BuckTransferReceipt' hash collisions across distinct
+    ciphertexts (would indicate an ABI-encoding bug – canonicalisation
+    matters).
+  • Phase 5: any Solidity-side type that does not match the chosen SNARK
+    verifier output (revisit the toolchain choice; do not paper over
+    with adapter contracts).
