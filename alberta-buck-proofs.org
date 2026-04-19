@@ -1,5 +1,5 @@
-#+TITLE: Alberta Buck - Formal Correctness Proofs (DRAFT v0.1)
-#+SUBTITLE: Rerandomization and Re-Encryption
+#+TITLE: Alberta Buck - Formal Correctness Proofs (DRAFT v0.3)
+#+SUBTITLE: Rerandomization, Re-Encryption, and Notes Spend Predicates
 #+author: Perry Kundert
 #+date: 2026-04-17
 #+category: Alberta Buck
@@ -9,7 +9,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: Formal correctness proofs for the two cryptographic transformations at the heart of Alberta Buck's identity system: Pointcheval-Sanders signature rerandomization (completeness and statistical unlinkability) and Chaum-Pedersen re-encryption (completeness, special soundness, honest-verifier zero-knowledge, and NIZK via Fiat-Shamir in the random oracle model).  Each theorem is accompanied by a compact py_ecc sanity check on BN254.  The end-to-end correctness corollary chains the two results together: an accepted Chaum-Pedersen proof against a registry-stored ElGamal ciphertext implies the re-encrypted ciphertext encrypts the same issuer-certified identity -- the guarantee on which every downstream protocol (approve, transfer, BUCK Notes spend circuits, guardian authorization) depends.
+#+description: Formal correctness proofs for the cryptographic transformations at the heart of Alberta Buck's identity system and BUCK Notes pool: Pointcheval-Sanders signature rerandomization (completeness and statistical unlinkability), Chaum-Pedersen re-encryption (completeness, special soundness, honest-verifier zero-knowledge, and NIZK via Fiat-Shamir in the random oracle model), and the BUCK Notes spend predicates (mint re-randomization correctness; A-spend and B-spend SNARK soundness; nullifier construction and double-spend prevention; mutual-decryptability preservation).  Each theorem is accompanied by a compact py_ecc sanity check on BN254.  The end-to-end correctness corollary chains the identity results together: an accepted Chaum-Pedersen proof against a registry-stored ElGamal ciphertext implies the re-encrypted ciphertext encrypts the same issuer-certified identity -- the guarantee on which every downstream protocol (approve, transfer, BUCK Notes spend circuits, guardian authorization) depends.
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 #+LATEX_HEADER: \usepackage{draftwatermark}
@@ -58,13 +58,37 @@ rest of the series relies on:
   implies that the re-encrypted ciphertext carries the same
   issuer-certified identity point \( M = m \cdot G \) as the
   registered credential (end-to-end re-encryption correctness).
+- *Theorem 7*: ElGamal re-randomization at note mint preserves the
+  recipient's encrypted identity point under their registered key
+  (BUCK Notes mint correctness).
+- *Theorem 8*: an accepted A-spend SNARK on a noteTree commitment
+  implies, via Chaum-Pedersen equality, that the depositor's
+  registered credential and the note's ciphertext encrypt the same
+  identity point.  Identity re-issuance is transparent.
+- *Theorem 9*: an accepted B-spend SNARK certifies (i) a registered
+  depositor knowing the bearer secret \( \rho \) and (ii) a
+  Schnorr-signed public-issuer attestation on the commitment.
+- *Theorem 10*: the A-spend nullifier (keyed on \( M_{\text{rec}} \))
+  survives Identity re-issuance and is not precomputable by the
+  issuer; the B-spend nullifier (keyed on \( \rho \)) is publicly
+  derivable -- the bearer-cheque property.  Domain separation
+  prevents cross-flavor collision.
+- *Theorem 11*: Notes preserve the BUCK mutual-decryptability
+  invariant -- both counterparties recover the other's identity
+  point in every accepted spend.
+
+An appendix preserves the original CryptoNote-style stealth-address
+spend proof (*Theorem A.1*) used in an earlier draft of BUCK Notes;
+the current Notes design supersedes it via Theorems 7-11.
 
 Every theorem is accompanied by an executable =py_ecc= sanity check on
 BN254.  The proofs assume only the q-SDH assumption (for PS signature
 unforgeability), the discrete logarithm assumption on
-\( \text{alt\_bn128}\ G_1 \), and the random oracle model (for the
-Fiat-Shamir transform) -- all standard assumptions that Ethereum's
-security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-proofs.txt][Text]])
+\( \text{alt\_bn128}\ G_1 \), the random oracle model (for the
+Fiat-Shamir transform and Poseidon hashing), and knowledge soundness
+of the underlying SNARK proof system (for Theorems 8-9) -- all
+standard assumptions that Ethereum's security or any zk-SNARK rollup
+already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-proofs.txt][Text]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -98,10 +122,10 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
 
 ** Hardness Assumptions
 
-   Three standard assumptions underpin every theorem in this document.
+   Four standard assumptions underpin the theorems in this document.
    None is specific to Alberta Buck -- each one is already required by
-   Ethereum's own security model or by any pairing-based construction
-   built on the =ecPairing= precompile.
+   Ethereum's own security model or by any pairing-based / zk-SNARK
+   construction built on the =ecPairing= precompile.
 
    1. *Discrete Logarithm (DLog) on \( G_1 \)*: given \( P, Q \in G_1 \),
       finding \( \alpha \in \mathbb{Z}_q \) with \( Q = \alpha P \) is
@@ -118,11 +142,24 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
       to sigma protocols whose security is proved in the ROM, with the
       hash function \( H \) modelled as a random oracle bound to all
       public inputs and context (caller address, chain id, etc.).
+      Poseidon (commitment hash and nullifier PRF) is also modelled
+      as a random oracle for the BUCK Notes proofs in Part IV.
+
+   4. *Knowledge soundness of the underlying zk-SNARK proof system*
+      (Part IV only): the SNARK system used for BUCK Notes spend
+      circuits (Groth16, PLONK, or any knowledge-sound construction
+      over BN254) admits a polynomial-time witness extractor on
+      every accepting proof.  This is a system-specific assumption
+      depending on the chosen scheme's trusted setup or universal
+      setup.
 
    The rerandomization proofs (Part I) are /unconditional/: Theorem 1
    follows from bilinearity alone, and Theorem 2 is information-theoretic.
    The Chaum-Pedersen proofs (Part II) are interactive-sigma-protocol
-   facts; the NIZK corollary (Part II, end) invokes the ROM.
+   facts; the NIZK corollary (Part II, end) invokes the ROM.  Part IV
+   (Notes spend predicates) additionally invokes assumption (4) --
+   knowledge soundness of the underlying SNARK system -- to lift the
+   sigma-protocol guarantees of Theorems 4-5 into the SNARK setting.
 
 #+LATEX: \clearpage
 * Part I: Pointcheval-Sanders Signature Rerandomization
@@ -686,13 +723,15 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      delivery and the check \( H(\text{identity\_data}) \cdot G = M \),
      he learns Alice's real identity with cryptographic assurance.
 
-   - *Type 1 Notes spend circuit (Notes):*  The issuer-to-depositor
-     binding is the same Chaum-Pedersen statement, lifted inside a
-     SNARK.  Theorem 4's soundness lifts directly: a SNARK-verified
-     instance of the Chaum-Pedersen relation implies the same
-     extractable witness relation, so the mint-time issuer credential
-     and the spend-time depositor credential share \( M \).  Identity
-     laundering through the note pool is therefore infeasible.
+   - *A-spend predicate (Notes):*  The recipient-to-depositor binding
+     in addressed Notes (flavors A1 and A2) is the same Chaum-Pedersen
+     statement, lifted inside a SNARK.  Theorem 4's soundness lifts
+     directly: a SNARK-verified instance of the Chaum-Pedersen relation
+     implies the same extractable witness relation, so the mint-time
+     recipient credential \( E_{\text{note}} \) and the spend-time
+     depositor credential \( E_{\text{dep}}^{(\text{reg})} \) share
+     \( M \) (formalized as Theorem 8 in Part IV).  Identity laundering
+     through the note pool is therefore infeasible.
 
    - *Identity Guardians (=approveFor=, recovery, cosigning):*  The
      Schnorr proof of knowledge of \( sk \) is a one-statement
@@ -702,7 +741,548 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      dropped.
 
 #+LATEX: \clearpage
-* Part IV: Targeted-Note Spend Predicate (Stealth-Address)
+* Part IV: BUCK Notes Spend Predicates (A1, A2, B1)
+
+  This Part proves correctness of the spend predicates underlying
+  BUCK Notes ([[file:alberta-buck-notes.org][Notes]]).  A note is an asynchronous /deferred
+  approve/ handshake mediated by a global commitment pool: the
+  issuer's half is encoded in a Merkle commitment at mint time, the
+  depositor's half is supplied at spend time inside a zk-SNARK.  The
+  three valid /flavors/ -- *A1* (addressed cheque, public issuer),
+  *A2* (addressed cheque, private issuer), and *B1* (bearer cheque,
+  public issuer) -- distinguish themselves by the commitment payload
+  but collapse to two spend-circuit shapes:
+
+  - *A-spend* (covers A1 and A2): the depositor proves Chaum-Pedersen
+    equality (Theorem 6) between the recipient-binding ciphertext
+    \( E_{\text{note}} \) baked into the commitment and the
+    depositor's /current/ registered credential, without revealing
+    the encrypted identity scalar \( m \).
+  - *B-spend* (covers B1): the depositor proves knowledge of the
+    bearer secret \( \rho \), proves knowledge of their registered
+    \( sk_{\text{dep}} \) via Schnorr PoK, and verifies a Schnorr
+    signature attesting the public issuer's identity.
+
+  Throughout, the SNARK proof system (Groth16, PLONK, or any
+  knowledge-sound zk-SNARK over BN254) is treated as a black box.
+  /Soundness of the SNARK proof system itself is not analyzed here/;
+  we only show that the in-circuit statements -- assuming standard
+  SNARK extraction -- imply the desired cryptographic guarantees.
+  Soundness of the underlying sigma-protocol relations (CP-equality
+  and Schnorr) is established in Parts I-III; this Part lifts those
+  results to the SNARK setting and adds the new pieces specific to
+  the pool architecture: mint re-randomization correctness
+  (Theorem 7), spend-predicate soundness (Theorems 8, 9), nullifier
+  construction (Theorem 10), and preservation of the BUCK mutual
+  decryptability invariant (Theorem 11).
+
+** Setup
+
+   *Pool state.*  The BUCK contract maintains
+   - =noteTree=: an append-only Merkle tree (depth ~20, Poseidon)
+     of commitments
+     \( cm = H_{\text{cm}}(\text{flavor},\; v,\; \rho,\;
+        \text{payload},\; \text{predicate}) \).
+   - =nullifiers=: a set of spent nullifiers.
+
+   The pool's BUCK balance and accumulated BUCK-age are tracked by
+   the standard ERC-20 ledger; demurrage arithmetic is orthogonal
+   to the cryptographic predicate and is not analyzed here.
+
+   *Identity primitives (recap).*  Each registered identity has
+   - an issuer-certified scalar \( m \in \mathbb{Z}_q \) and identity
+     point \( M = m \cdot G \in G_1 \) (PS-signed at registration; see
+     Part I);
+   - an ElGamal credential
+     \( E^{(\text{reg})} = (R^{\text{reg}}, C^{\text{reg}}) =
+        (r G,\; M + r \cdot pk) \) on file in IdentityRegistry,
+     where \( pk = sk \cdot G \).
+
+   Identity Fountain re-issuance gives a /fresh/
+   \( (sk', pk', E^{(\text{reg})\prime}) \) bound to the same \( M \).
+
+   *Mint construction.*  Let
+   \( E_r = (R_r, C_r) =
+   (r_r G,\; M_{\text{rec}} + r_r \cdot pk_{\text{rec}}) \) be the
+   recipient's registered credential (read by the issuer at mint
+   time).  Let \( r' \leftarrow \mathbb{Z}_q^\ast \) be fresh
+   issuer-side randomness.  Define
+   \[
+   E_{\text{note}} \;:=\;
+   \bigl(R_r + r' G,\;\; C_r + r' \cdot pk_{\text{rec}}\bigr).
+   \]
+   The mint payloads, by flavor, are:
+
+   #+LATEX: {\scriptsize
+   | Flavor | Payload                                                        |
+   |--------+----------------------------------------------------------------|
+   | A2     | \( (E_{\text{note}},\ E_{\text{iss-for-rec}}) \)               |
+   | A1     | \( (E_{\text{note}},\ m_{\text{iss}},\ \sigma_{\text{iss}}) \) |
+   | B1     | \( (m_{\text{iss}},\ \sigma_{\text{iss}},\ pk_{\text{iss}}) \) |
+   #+LATEX: }
+
+   where \( E_{\text{iss-for-rec}} \) is an ElGamal encryption of
+   \( M_{\text{iss}} \) (and a means to recover \( pk_{\text{iss}} \),
+   either by carrying it alongside or by IdentityRegistry lookup of
+   \( m_{\text{iss}} \)) under \( pk_{\text{rec}} \), and
+   \( \sigma_{\text{iss}} \) is a Schnorr signature on \( cm \) under
+   \( pk_{\text{iss}} = m_{\text{iss}} \cdot G \).
+
+   *Nullifier construction.*  With domain separators
+   \( \{A, B\} \) and Poseidon-modelled-as-RO \( H_{\text{nf}} \):
+   \[
+   nf^{(A)} \;=\; H_{\text{nf}}(A \,\|\, M_{\text{rec}} \,\|\, \rho),
+   \qquad
+   nf^{(B)} \;=\; H_{\text{nf}}(B \,\|\, \rho).
+   \]
+
+   *Design note.*  An earlier draft of =alberta-buck-notes.org= keyed
+   the A-spend nullifier on \( sk_{\text{dep}} \) rather than on
+   \( M_{\text{rec}} \).  That choice is incompatible with key-loss
+   recovery: Identity re-issuance produces a fresh \( sk_{\text{dep}}' \)
+   and hence a /different/ nullifier on the same note, allowing a
+   recipient to deposit it both before and after rotating their key.
+   Keying on \( M_{\text{rec}} \) -- the issuer-certified identity
+   point, recovered in-circuit by ElGamal decryption of
+   \( E_{\text{note}} \) -- is what realizes the key-loss-recovery
+   property the prose claims, and what the rest of this Part proves
+   correct.  The notes document has been updated to match.
+
+** Theorem 7 (Mint Re-randomization Correctness)
+
+   *Statement.*  Let \( E_r = (R_r, C_r) =
+   (r_r G,\ M_{\text{rec}} + r_r \cdot pk_{\text{rec}}) \) be a valid
+   ElGamal ciphertext of \( M_{\text{rec}} \) under
+   \( pk_{\text{rec}} \), and let \( r' \in \mathbb{Z}_q \) be
+   arbitrary.  Then
+   \( E_{\text{note}} := (R_r + r' G,\; C_r + r' \cdot pk_{\text{rec}}) \)
+   is a valid ElGamal ciphertext of the same \( M_{\text{rec}} \)
+   under the same \( pk_{\text{rec}} \), with effective randomness
+   \( r_r + r' \).
+
+   *Proof.*  By group arithmetic on \( G_1 \):
+
+   \begin{align*}
+   R_r + r' G &= r_r G + r' G = (r_r + r') G, \\
+   C_r + r' \cdot pk_{\text{rec}}
+                 &= M_{\text{rec}} + r_r \cdot pk_{\text{rec}}
+                                + r' \cdot pk_{\text{rec}} \\
+                 &= M_{\text{rec}} + (r_r + r') \cdot pk_{\text{rec}}.
+   \end{align*}
+
+   The pair has the canonical ElGamal form
+   \( (\rho G,\ M_{\text{rec}} + \rho \cdot pk_{\text{rec}}) \) with
+   \( \rho = r_r + r' \).  \( \blacksquare \)
+
+   *Information-theoretic remarks.*
+
+   1. *Issuer ignorance.*  The issuer manipulates \( E_r \) as group
+      elements only -- she never decrypts.  She therefore learns
+      neither \( M_{\text{rec}} \), \( m_{\text{rec}} \), nor
+      \( r_r \).  This is load-bearing for Theorem 10
+      (issuer-cannot-precompute the A-spend nullifier) and for the
+      BUCK privacy story (an issuer cannot enumerate registered
+      identities by re-randomizing their credentials).
+
+   2. *Distribution.*  If \( r' \leftarrow \mathbb{Z}_q^\ast \) is
+      uniform, then \( r_r + r' \) is uniform on \( \mathbb{Z}_q \)
+      (translation by a fixed value).  \( E_{\text{note}} \) is
+      therefore distributed identically to a fresh ElGamal encryption
+      of \( M_{\text{rec}} \) under \( pk_{\text{rec}} \) -- the same
+      information-theoretic argument as Theorem 2's signature
+      rerandomization, applied to the ciphertext.  Two
+      independently-minted A-notes for the same recipient are
+      unlinkable to anyone who does not hold \( sk_{\text{rec}} \).
+
+** Theorem 8 (A-Spend Soundness)
+
+   *Statement.*  Suppose the BUCK contract accepts a SNARK proof
+   \( \pi^{(A)} \) for the A-spend circuit
+   (=alberta-buck-notes.org=, "A-Spend Circuit") on public inputs
+   \( (\texttt{noteRoot},\ nf,\ v,\ \texttt{depositorRegistryEntry}) \).
+   Then under (i) knowledge soundness of the SNARK system,
+   (ii) the DLog assumption on \( G_1 \), and (iii) the ROM, there
+   exists an extractor \( \mathcal{E} \) that outputs a witness
+   \( (\text{flavor},\ v,\ \rho,\ \text{payload},\ \text{path},\
+   sk_{\text{dep}}) \) such that:
+
+   1. \( cm = H_{\text{cm}}(\text{flavor},\ v,\ \rho,\ \text{payload}) \)
+      lies on the Merkle path =path= under =noteRoot=.
+   2. The extracted \( sk_{\text{dep}} \) satisfies
+      \( pk_{\text{dep}} = sk_{\text{dep}} \cdot G \), where
+      \( pk_{\text{dep}} \) is registered in IdentityRegistry under
+      =depositorRegistryEntry=.
+   3. \( \texttt{payload} \) contains a ciphertext
+      \( E_{\text{note}} = (R_n, C_n) \), and the depositor's
+      identity point
+      \( M := C^{\text{reg}} - sk_{\text{dep}} \cdot R^{\text{reg}} \)
+      (decrypted from their registered credential) satisfies
+      \( C_n - sk_{\text{dep}} \cdot R_n = M \).
+   4. \( nf = H_{\text{nf}}(A \,\|\, M \,\|\, \rho) \).
+   5. If \( \text{flavor} = A1 \): the payload also contains
+      \( (m_{\text{iss}}, \sigma_{\text{iss}}) \) with
+      \( \sigma_{\text{iss}} \) verifying as a Schnorr signature on
+      \( cm \) under
+      \( pk_{\text{iss}} := m_{\text{iss}} \cdot G \).
+
+   *Proof.*  Knowledge soundness of the SNARK gives an extractor
+   producing witnesses satisfying every constraint of the circuit
+   (with overwhelming probability).  Constraints 1, 2, 4, and 5 are
+   direct algebraic identities on the extracted witness.
+
+   Constraint 3 is the in-circuit Chaum-Pedersen equality
+   \[
+   C_n - sk_{\text{dep}} \cdot R_n \;=\;
+   C^{\text{reg}} - sk_{\text{dep}} \cdot R^{\text{reg}}.
+   \]
+   Theorem 4 (special soundness of Chaum-Pedersen) establishes that
+   any accepting CP-equality statement implies the two ciphertexts
+   share the same encrypted message point under their respective
+   public keys.  In the present case both are encrypted under
+   \( pk_{\text{dep}} \) (the depositor's registered key), so
+   equality of decrypted plaintexts reduces to equality in
+   \( G_1 \) -- precisely constraint 3.
+
+   By the registration-time PS-signature binding (Theorem 6, chain
+   of trust), \( M \) is the issuer-certified identity point covered
+   by the depositor's PS signature at IdentityRegistry registration.
+   By Theorem 7, \( E_{\text{note}} \) was constructed at mint as a
+   re-randomization of the recipient's registered credential and
+   therefore encrypts \( M_{\text{rec}} \).  CP-equality forces
+   \( M = M_{\text{rec}} \).  \( \blacksquare \)
+
+   *Implications.*
+
+   - *Wrong identity rejected.*  No prover lacking knowledge of an
+     \( sk_{\text{dep}} \) bound (by registration) to the same
+     \( m_{\text{rec}} \) chosen at mint can produce an accepting
+     \( \pi^{(A)} \).  An adversary holding a credential bound to
+     \( M' \neq M_{\text{rec}} \) fails CP-equality: their
+     \( M = M' \neq M_{\text{rec}} \).
+   - *Issuer cannot self-redeem an A-note.*  The issuer knows
+     \( pk_{\text{rec}} \) and \( r' \) but not
+     \( sk_{\text{rec}} \); she cannot decrypt \( E_{\text{note}} \)
+     to verify \( M_{\text{rec}} \) and cannot supply an
+     \( sk_{\text{dep}} \) bound to that \( M_{\text{rec}} \) unless
+     she /is/ the recipient (degenerate "self-wormhole" subcase
+     where issuer \( \equiv \) recipient).
+   - *Identity re-issuance is transparent.*  After re-issuance
+     \( (sk_{\text{rec}}', pk_{\text{rec}}', E^{(\text{reg})\prime}) \)
+     -- bound to the same \( M_{\text{rec}} \) -- the same
+     CP-equality holds with the new credential, so the recipient
+     can deposit notes printed before re-issuance.  The depositor's
+     IdentityRegistry entry referenced by =depositorRegistryEntry=
+     is the /current/ entry; the binding is to \( M \), not to a
+     specific signing key.
+
+** Theorem 9 (B-Spend Soundness)
+
+   *Statement.*  Suppose the BUCK contract accepts a SNARK proof
+   \( \pi^{(B)} \) for the B-spend circuit on public inputs
+   \( (\texttt{noteRoot},\ nf,\ v,\ \texttt{issuerPkClaim},\
+   \texttt{depositorRegistryEntry}) \).
+   Then under knowledge soundness of the SNARK, the DLog assumption
+   on \( G_1 \), the EUF-CMA security of Schnorr signatures
+   under DLog and the ROM[fn:schnorr], and the ROM, there exists an
+   extractor outputting
+   \( (v,\ \rho,\ \text{payload},\ \text{path},\ sk_{\text{dep}}) \)
+   such that:
+
+   1. \( cm = H_{\text{cm}}(B1,\ v,\ \rho,\ \text{payload}) \) lies
+      on =path= under =noteRoot=.
+   2. \( nf = H_{\text{nf}}(B \,\|\, \rho) \).
+   3. \( \texttt{payload} \) contains
+      \( (m_{\text{iss}}, \sigma_{\text{iss}}) \), and
+      \( \sigma_{\text{iss}} \) is a valid Schnorr signature on
+      \( cm \) under
+      \( pk_{\text{iss}} := m_{\text{iss}} \cdot G \), with
+      \( pk_{\text{iss}} \) registered in IdentityRegistry.
+   4. \( pk_{\text{dep}} = sk_{\text{dep}} \cdot G \) is registered
+      in IdentityRegistry under =depositorRegistryEntry=.
+   5. \( v = \texttt{faceValue} \).
+
+   *Proof.*  The SNARK extractor produces witnesses satisfying every
+   circuit constraint.  Constraint 4 of the B-spend circuit
+   (=alberta-buck-notes.org=, "B-Spend Circuit") is a Schnorr proof
+   of knowledge of \( sk_{\text{dep}} \) for \( pk_{\text{dep}} \) --
+   a one-statement specialization of Chaum-Pedersen (drop relations
+   (S2), (S3) of Part II), inheriting Theorem 4's special-soundness
+   extractor and Theorem 5's HVZK simulator.  Constraint 3 is the
+   verification of the Schnorr signature \( \sigma_{\text{iss}} \) on
+   \( cm \) under \( pk_{\text{iss}} \); Schnorr signatures are
+   EUF-CMA secure under DLog and the ROM[fn:schnorr], so the
+   signature could only have been produced by the holder of
+   \( sk_{\text{iss}} = m_{\text{iss}} \).  Constraints 1, 2, 5 are
+   direct algebraic identities.  \( \blacksquare \)
+
+   *Implications.*
+
+   - *Registered depositor.*  Every B-spend deposit attaches a
+     registered Identity to the deposit transaction, satisfying the
+     BUCK compliance hook (KYC-attached identity at every transfer
+     endpoint).
+   - *Public issuer attestation.*  The issuer of a B1 note is
+     publicly attested by \( m_{\text{iss}} \) and the
+     EUF-CMA-secure signature; downstream observers and regulators
+     can audit which public issuer printed the note.
+   - *Knowledge of \( \rho \) is the bearer property.*  The
+     predicate is satisfied by /any/ registered identity that knows
+     \( \rho \).  This is exactly the cashier's-cheque semantics:
+     possession of the opening conveys spend authority.
+
+   *Remark on issuer race.*  The issuer who chose \( \rho \) at mint
+   trivially knows it and can race the bearer to deposit -- this is
+   a /civil-trust/ property, not a cryptographic vulnerability.  The
+   deposit event carries \( E_{\text{dep-for-iss}} \), so an issuer
+   who steals their own bearer cheque is identified at the moment of
+   theft (Theorem 11).  The cryptography places no prior restraint
+   on the issuer; the legal and reputational system does.  The same
+   trust model applies to a paper cashier's cheque, where the
+   issuing bank could in principle redirect the draft.
+
+** Theorem 10 (Nullifier Construction and Double-Spend Prevention)
+
+   *Statement (A-spend nullifier, keyed by \( M_{\text{rec}} \)).*
+
+   1. *Determinism / key-loss recovery.*
+      \( nf^{(A)} = H_{\text{nf}}(A \,\|\, M_{\text{rec}} \,\|\, \rho) \)
+      depends on the depositor's witness only through
+      \( (M_{\text{rec}}, \rho) \).  Identity Fountain re-issuance
+      preserves \( M_{\text{rec}} \), so the nullifier is invariant
+      under re-issuance; a re-issued recipient cannot double-spend
+      the same note.
+   2. *Issuer non-computability (in the ROM).*  The issuer holds
+      \( pk_{\text{rec}}, r_r, r' \) and \( \rho \), but not
+      \( sk_{\text{rec}} \).  Computing \( nf^{(A)} \) requires
+      \( M_{\text{rec}} = C_r - r_r \cdot pk_{\text{rec}} \)
+      (equivalent to ElGamal-decrypting \( E_r \) without
+      \( sk_{\text{rec}} \)) -- breaking ElGamal IND-CPA, which
+      reduces to DLog on \( pk_{\text{rec}} \).  Hence the issuer
+      cannot precompute the nullifier and observe its on-chain
+      appearance to detect a spend.
+   3. *Recipient computability.*  The recipient decrypts
+      \( E_{\text{note}} \) with \( sk_{\text{rec}} \) to recover
+      \( M_{\text{rec}} \), reads \( \rho \) from the (decrypted)
+      commitment opening, and computes \( nf^{(A)} \) -- exactly the
+      data the spend circuit requires.
+
+   *Statement (B-spend nullifier, keyed by \( \rho \) alone).*
+
+   4. *Public derivability.*  Any party knowing \( \rho \) can
+      compute \( nf^{(B)} = H_{\text{nf}}(B \| \rho) \).  This is
+      precisely the first-come-first-served property of bearer
+      cheques: whoever publishes \( \rho \) first wins.
+
+   *Statement (double-spend prevention, both shapes).*
+
+   5. Two accepting spend proofs on the same \( cm \) by the same
+      flavor produce the same nullifier (by 1 or by 4); the
+      contract's check \( nf \notin \texttt{nullifiers} \) rejects
+      the second submission.
+
+   *Statement (cross-flavor disjointness).*
+
+   6. Domain separation (\( A \) vs. \( B \) prefix) makes
+      \( \{nf^{(A)}\} \cap \{nf^{(B)}\} = \emptyset \) except on a
+      negligible RO-collision event.  A single
+      \( \texttt{nullifiers} \) set safely tracks both flavors.
+
+   *Proof sketches.*  Determinism (1) and public derivability (4)
+   are syntactic from the PRF definition.  Issuer non-computability
+   (2) is the IND-CPA reduction outlined above; making the random
+   oracle programmable, an issuer who outputs the correct
+   \( nf^{(A)} \) on \( (pk_{\text{rec}}, E_r, r', \rho) \) with
+   non-negligible probability allows the simulator to read
+   \( M_{\text{rec}} \) off the RO-query log and thereby decrypt
+   \( E_r \).  Double-spend rejection (5) is a contract-level
+   invariant on the \( \texttt{nullifiers} \) set.  Cross-flavor
+   disjointness (6) follows from RO collision resistance.
+   \( \blacksquare \)
+
+** Theorem 11 (Mutual-Decryptability Preservation)
+
+   *Statement.*  For every accepted spend (A1, A2, or B1):
+   1. The depositor learns the issuer's identity scalar
+      \( m_{\text{iss}} \) (and thus \( M_{\text{iss}} \), and via
+      off-chain identity-data lookup the issuer's real-world
+      identity).
+   2. The issuer learns the depositor's identity scalar
+      \( m_{\text{dep}} \) (and thus \( M_{\text{dep}} \), and via
+      the same identity-data path the depositor's real-world
+      identity).
+
+   This is the BUCK Identity invariant -- every transfer's two
+   counterparties mutually disclose -- preserved under the Notes
+   pool detour.
+
+   *Proof (by cases).*
+
+   - /A1, B1 (public issuer)./  The mint payload contains
+     \( m_{\text{iss}} \) in plaintext, witnessed by
+     \( \sigma_{\text{iss}} \) under
+     \( pk_{\text{iss}} = m_{\text{iss}} \cdot G \).  The depositor
+     reads it directly.  EUF-CMA security of Schnorr (Theorem 9
+     citation) guarantees the issuer claim cannot be forged.
+   - /A2 (private issuer)./  The mint payload contains
+     \( E_{\text{iss-for-rec}} \), an ElGamal encryption of
+     \( M_{\text{iss}} \) under \( pk_{\text{rec}} \) (with
+     \( pk_{\text{iss}} \) similarly encrypted, or recovered from
+     IdentityRegistry by lookup of \( m_{\text{iss}} \) once
+     decrypted).  The recipient decrypts using \( sk_{\text{rec}} \)
+     by ElGamal correctness.
+   - /Depositor \( \to \) issuer (all flavors)./  The deposit
+     transaction emits an event payload \( E_{\text{dep-for-iss}} \),
+     an ElGamal encryption of \( M_{\text{dep}} \) under
+     \( pk_{\text{iss}} \).  The issuer decrypts using
+     \( sk_{\text{iss}} \).  For A1 and B1 the issuer is public so
+     \( pk_{\text{iss}} \) is directly known to the depositor; for
+     A2 the depositor recovers \( pk_{\text{iss}} \) via the
+     payload-decryption path above.
+
+   In each case both parties recover the other's identity point and
+   -- via the standard off-chain identity_data delivery path
+   (Theorem 6) -- the underlying real-world identity.  The on-chain
+   observer learns neither \( M_{\text{iss}} \) (for A2),
+   \( M_{\text{dep}} \), nor the linkage between \( cm \) and the
+   deposit event without solving DLog on the relevant ElGamal keys
+   or guessing \( \rho \) (a uniform \( q \)-element).
+   \( \blacksquare \)
+
+   *Privacy corollary.*  Bilateral disclosure between the two
+   counterparties is preserved.  The "mass-harvest" threat -- bulk
+   on-chain analytics, KYC-provider subpoena scope expansion,
+   chain-analytics enrichment -- is broken: the chain shows
+   \( cm \), \( nf \), public flavor metadata, and the deposit
+   event, but cannot link any pair without the corresponding
+   counterparty secret.  See =alberta-buck-notes.org=, "Privacy:
+   Defeating Mass Harvest, Preserving Bilateral Disclosure," for
+   the threat-model framing.
+
+** Sanity Check (py_ecc on BN254)
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session proofs :results output
+     # Reuse ORDER, G1, multiply, add, neg, eq, rand, hashlib, m, sk_alice,
+     # pk_alice, sk_bob, pk_bob from Parts I-III.  Issuer = Alice; Bob is
+     # the recipient, with a fresh registered identity scalar m_rec.
+
+     m_rec = int(hashlib.sha256(b"Bob Recipient | Alberta | AIC-2026").hexdigest(),
+                 16) % ORDER
+     M_rec = multiply(G1, m_rec)
+     r_r   = rand()
+     R_r   = multiply(G1, r_r)
+     C_r   = add(M_rec, multiply(pk_bob, r_r))     # Bob's ElGamal credential
+
+     def elgamal_decrypt(R, C, sk):
+         return add(C, neg(multiply(R, sk)))
+
+     assert eq(elgamal_decrypt(R_r, C_r, sk_bob), M_rec)
+
+     # --- Theorem 7: mint re-randomization correctness (A2/A1) ---
+     r_prime = rand()
+     R_n = add(R_r, multiply(G1, r_prime))
+     C_n = add(C_r, multiply(pk_bob, r_prime))
+     assert eq(elgamal_decrypt(R_n, C_n, sk_bob), M_rec), \
+         "Theorem 7 FAILED: E_note must decrypt to M_rec"
+     print("Theorem 7  (mint re-randomization):                PASS  (E_note -> M_rec)")
+
+     # --- Theorem 8: A-spend CP-equality holds for the recipient ---
+     def cp_a_check(R_n, C_n, R_reg, C_reg, sk_dep):
+         return eq(elgamal_decrypt(R_n, C_n, sk_dep),
+                   elgamal_decrypt(R_reg, C_reg, sk_dep))
+     assert cp_a_check(R_n, C_n, R_r, C_r, sk_bob)
+     print("Theorem 8  (A-spend, recipient deposits):          PASS  (CP M_note=M_reg)")
+
+     # --- Theorem 8 (negative): issuer Alice cannot self-redeem ---
+     M_iss = multiply(G1, m)                       # Alice's identity point
+     M_alice_decrypts_note = elgamal_decrypt(R_n, C_n, sk_alice)
+     assert not eq(M_alice_decrypts_note, M_iss), \
+         "Issuer self-redeem must fail: decrypt(E_note, sk_alice) != M_iss"
+     print("Theorem 8  (issuer cannot redeem own A-note):      PASS  (CP fails)")
+
+     # --- Theorem 10.1: nullifier determinism / key-loss recovery ---
+     def H_nf(domain, *fields):
+         blob = domain + b"|" + b"|".join(str(f).encode() for f in fields)
+         return int(hashlib.sha256(blob).hexdigest(), 16) % ORDER
+
+     rho = rand()
+     nf_A_pre  = H_nf(b"A", M_rec, rho)
+     # Bob re-issues: fresh sk_bob_2, fresh credential, same M_rec.
+     sk_bob_2 = rand()
+     pk_bob_2 = multiply(G1, sk_bob_2)
+     r_r_2    = rand()
+     R_r_2    = multiply(G1, r_r_2)
+     C_r_2    = add(M_rec, multiply(pk_bob_2, r_r_2))
+     assert eq(elgamal_decrypt(R_r_2, C_r_2, sk_bob_2), M_rec)
+     nf_A_post = H_nf(b"A", M_rec, rho)            # same M_rec, same rho
+     assert nf_A_pre == nf_A_post, \
+         "Theorem 10.1 FAILED: nullifier must survive re-issuance"
+     print("Theorem 10.1 (nullifier survives re-issuance):     PASS")
+
+     # --- Theorem 10.4: B-spend nullifier publicly derivable from rho ---
+     nf_B_holder = H_nf(b"B", rho)
+     nf_B_eve    = H_nf(b"B", rho)                 # Eve only needs rho
+     assert nf_B_holder == nf_B_eve
+     assert nf_A_pre != nf_B_holder                # cross-flavor disjoint
+     print("Theorem 10.4 (B-spend nullifier public from rho):  PASS")
+
+     # --- Theorem 11: mutual decryptability round-trip ---
+     # A2 mint payload: E_iss-for-rec encrypts M_iss under pk_bob.
+     r_iss_for_rec = rand()
+     E_iss_R = multiply(G1, r_iss_for_rec)
+     E_iss_C = add(M_iss, multiply(pk_bob, r_iss_for_rec))
+     assert eq(elgamal_decrypt(E_iss_R, E_iss_C, sk_bob), M_iss), \
+         "Theorem 11 FAILED: recipient must recover M_iss"
+     # Deposit-event payload: E_dep-for-iss encrypts M_dep under pk_alice.
+     M_dep = M_rec                                 # depositor = recipient
+     r_dep_for_iss = rand()
+     E_dep_R = multiply(G1, r_dep_for_iss)
+     E_dep_C = add(M_dep, multiply(pk_alice, r_dep_for_iss))
+     assert eq(elgamal_decrypt(E_dep_R, E_dep_C, sk_alice), M_dep), \
+         "Theorem 11 FAILED: issuer must recover M_dep"
+     print("Theorem 11 (mutual decryptability round-trip):     PASS")
+   #+END_SRC
+
+   #+RESULTS:
+   : Theorem 7  (mint re-randomization):                PASS  (E_note -> M_rec)
+   : Theorem 8  (A-spend, recipient deposits):          PASS  (CP M_note=M_reg)
+   : Theorem 8  (issuer cannot redeem own A-note):      PASS  (CP fails)
+   : Theorem 10.1 (nullifier survives re-issuance):     PASS
+   : Theorem 10.4 (B-spend nullifier public from rho):  PASS
+   : Theorem 11 (mutual decryptability round-trip):     PASS
+
+   #+LATEX: }
+
+   *How to read the output:* Six PASS lines.  Theorem 7 confirms the
+   mint construction yields a valid encryption of the recipient's
+   \( M \) under their own \( pk \).  The two Theorem 8 lines show
+   the recipient succeeding (positive case) and the issuer failing
+   (negative case): only credentials bound to the same \( M \) as
+   the note can produce a CP-equality witness.  Theorem 10.1 is the
+   key-loss-recovery sanity check -- the same nullifier is produced
+   before and after the recipient rotates their signing key, so a
+   re-issued recipient cannot double-spend.  Theorem 10.4
+   demonstrates the public derivability of the B-spend nullifier
+   (anyone who knows \( \rho \) can compute it -- the bearer-cheque
+   property).  Theorem 11 closes the mutual-decryptability loop:
+   issuer-side payload encrypts \( M_{\text{iss}} \) for the
+   recipient, deposit-side payload encrypts \( M_{\text{dep}} \) for
+   the issuer -- both decrypt correctly under the holder's
+   \( sk \).
+
+#+LATEX: \clearpage
+* Appendix A: Stealth-Address Primitive (Preserved; Not Used by Current Notes)
+
+  *Historical note.*  This appendix preserves the proof of a
+  primitive used in an earlier draft of BUCK Notes (the "Type 3
+  stealth-targeted" note).  The current Notes design
+  (=alberta-buck-notes.org=) does /not/ use a stealth address;
+  recipient binding is achieved by ElGamal re-randomization plus
+  Chaum-Pedersen equality (Theorems 7-8 above), which preserves the
+  BUCK mutual-decryptability invariant (Theorem 11) that a
+  stand-alone stealth address does not.  The proof below remains a
+  sound primitive on BN254 should a future revision wish to invoke
+  it.
 
   The Type 3 ("stealth-targeted") note of the BUCK Notes design
   ([[file:alberta-buck-notes.org][Notes]], "Three Identity Bindings") prints a note that only a
@@ -773,7 +1353,7 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
    *Verify.*  The contract recomputes \( e \) and checks
    \( s_\alpha \cdot G + e \cdot pk^\ast \stackrel{?}{=} T \).
 
-** Theorem 7 (Targeted-Note Spend Soundness)
+** Theorem A.1 (Targeted-Note Spend Soundness)
 
    *Statement.*  Let \( pk_{\text{recipient}} = sk_{\text{recipient}} \cdot G \)
    and \( R = r \cdot G \) be points published alongside a note,
@@ -925,10 +1505,10 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
             str(pk_bob).encode(), b"cm-placeholder",
             b"msg.sender=0xBob", b"chainid=1"]
 
-     # --- Theorem 7 completeness: Bob spends ---
+     # --- Theorem A.1 completeness: Bob spends ---
      pi_bob = schnorr_prove(sk_star, ctx)
-     assert schnorr_verify(pk_star, *pi_bob, ctx), "Theorem 7 completeness FAILED"
-     print("Theorem 7 (completeness, recipient):    PASS")
+     assert schnorr_verify(pk_star, *pi_bob, ctx), "Theorem A.1 completeness FAILED"
+     print("Theorem A.1 (completeness, recipient):    PASS")
 
      # --- Corollary 1: Alice (printer) cannot spend ---
      # She knows r_eph and sigma but NOT sk_bob.  Best-effort guess at sk_star:
@@ -937,14 +1517,14 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      pi_alice     = schnorr_prove(alice_guess, ctx)
      assert not schnorr_verify(pk_star, *pi_alice, ctx), \
          "Corollary 1 FAILED: printer's proof should not verify"
-     print("Theorem 7 (printer cannot spend):       PASS  (Alice's PoK rejected)")
+     print("Theorem A.1 (printer cannot spend):       PASS  (Alice's PoK rejected)")
 
      # --- Corollary: Eve (no secrets) cannot spend ---
      eve_guess = rand()
      pi_eve    = schnorr_prove(eve_guess, ctx)
      assert not schnorr_verify(pk_star, *pi_eve, ctx), \
          "Eve's proof should not verify"
-     print("Theorem 7 (outsider cannot spend):      PASS  (Eve's PoK rejected)")
+     print("Theorem A.1 (outsider cannot spend):      PASS  (Eve's PoK rejected)")
 
      # --- Soundness extractor: two transcripts with same T, distinct e ---
      k     = rand()
@@ -963,11 +1543,11 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      # Extract alpha = (s_2 - s_1) * (e_1 - e_2)^{-1} mod q
      delta_e_inv = pow((e_1 - e_2) % ORDER, -1, ORDER)
      alpha       = ((s_2 - s_1) * delta_e_inv) % ORDER
-     assert alpha == sk_star, "Theorem 7 extractor FAILED"
+     assert alpha == sk_star, "Theorem A.1 extractor FAILED"
      # And alpha = sigma * sk_bob; recover sk_bob via sigma^{-1}:
      sk_bob_rec = (alpha * pow(sigma, -1, ORDER)) % ORDER
      assert sk_bob_rec == sk_bob, "DLog reduction step FAILED"
-     print("Theorem 7 (extractor + DLog reduction): PASS  (alpha extracted; sk_bob = alpha / sigma)")
+     print("Theorem A.1 (extractor + DLog reduction): PASS  (alpha extracted; sk_bob = alpha / sigma)")
 
      # --- Recipient scan: how Bob discovers his own notes ---
      # Bob, given (R_eph, pk_star_candidate), tests whether he is the recipient.
@@ -975,15 +1555,15 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      sigma_test     = H_scalar(s_test)
      pk_star_check  = multiply(pk_bob, sigma_test)
      assert eq(pk_star_check, pk_star), "scan check FAILED"
-     print("Targeted-note scan (recipient view):    PASS  (Bob recognizes his note)")
+     print("Targeted-note scan (recipient view):      PASS  (Bob recognizes his note)")
    #+END_SRC
 
    #+RESULTS:
-   : Theorem 7 (completeness, recipient):    PASS
-   : Theorem 7 (printer cannot spend):       PASS  (Alice's PoK rejected)
-   : Theorem 7 (outsider cannot spend):      PASS  (Eve's PoK rejected)
-   : Theorem 7 (extractor + DLog reduction): PASS  (alpha extracted; sk_bob = alpha / sigma)
-   : Targeted-note scan (recipient view):    PASS  (Bob recognizes his note)
+   : Theorem A.1 (completeness, recipient):    PASS
+   : Theorem A.1 (printer cannot spend):       PASS  (Alice's PoK rejected)
+   : Theorem A.1 (outsider cannot spend):      PASS  (Eve's PoK rejected)
+   : Theorem A.1 (extractor + DLog reduction): PASS  (alpha extracted; sk_bob = alpha / sigma)
+   : Targeted-note scan (recipient view):      PASS  (Bob recognizes his note)
 
    #+LATEX: }
 
@@ -992,7 +1572,7 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
    two confirm the design property the reduction promises: neither the
    printer (Alice, with \( r \) but not \( sk_{\text{bob}} \)) nor an
    outsider (Eve, with neither) can fabricate an accepting proof.  The
-   fourth instantiates the Theorem 7 reduction concretely: from two
+   fourth instantiates the Theorem A.1 reduction concretely: from two
    transcripts on the same \( T \), the extractor recovers \( \alpha \),
    and dividing by \( \sigma = H(s) \) recovers the underlying DLog
    secret \( sk_{\text{bob}} \) -- precisely the reduction step that
@@ -1005,17 +1585,24 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
 * Security Assumptions Summary
 
   #+LATEX: {\scriptsize
-  | Theorem                          | Primitive  | Assumption needed                      | Conditional on crypto?       |
-  |----------------------------------+------------+----------------------------------------+------------------------------|
-  | Theorem 1 (PS completeness)      | PS         | bilinearity of \( e \)                 | *no* (unconditional)         |
-  | Theorem 2 (PS unlinkability)     | PS         | prime-order \( G_1 \), uniform \( t \) | *no* (information-theoretic) |
-  | Theorem 3 (CP completeness)      | CP         | group axioms                           | *no* (unconditional)         |
-  | Theorem 4 (CP special soundness) | CP         | none for extractor; DLog for           | DLog (only for reduction)    |
-  |                                  |            | cheating-prover reduction              |                              |
-  | Theorem 5 (CP HVZK)              | CP         | uniform \( k_1, k_2 \)                 | *no* (perfect simulation)    |
-  | NIZK corollary                   | CP + FS    | ROM                                    | ROM                          |
-  | Theorem 6 (end-to-end)           | PS + CP    | q-SDH (PS unforgeability), DLog, ROM   | yes                          |
-  | Theorem 7 (stealth-targeted spend) | Schnorr+ECDH | DLog on \( G_1 \), ROM              | DLog, ROM                    |
+  | Theorem                            | Primitive    | Assumption needed                      | Conditional on crypto?       |
+  |------------------------------------+--------------+----------------------------------------+------------------------------|
+  | Theorem 1 (PS completeness)        | PS           | bilinearity of \( e \)                 | *no* (unconditional)         |
+  | Theorem 2 (PS unlinkability)       | PS           | prime-order \( G_1 \), uniform \( t \) | *no* (information-theoretic) |
+  | Theorem 3 (CP completeness)        | CP           | group axioms                           | *no* (unconditional)         |
+  | Theorem 4 (CP special soundness)   | CP           | none for extractor; DLog for           | DLog (only for reduction)    |
+  |                                    |              | cheating-prover reduction              |                              |
+  | Theorem 5 (CP HVZK)                | CP           | uniform \( k_1, k_2 \)                 | *no* (perfect simulation)    |
+  | NIZK corollary                     | CP + FS      | ROM                                    | ROM                          |
+  | Theorem 6 (end-to-end)             | PS + CP      | q-SDH (PS unforgeability), DLog, ROM   | yes                          |
+  | Theorem 7 (mint re-randomization)  | ElGamal      | group axioms                           | *no* (unconditional)         |
+  | Theorem 8 (A-spend soundness)      | CP-in-SNARK  | SNARK knowledge soundness, DLog, ROM   | yes                          |
+  | Theorem 9 (B-spend soundness)      | Schnorr      | SNARK knowledge soundness,             | yes                          |
+  |                                    | + Sig + PoK  | Schnorr EUF-CMA (DLog + ROM)           |                              |
+  | Theorem 10 (nullifier construction)| Poseidon-PRF | ROM (Poseidon), DLog (issuer-ignorance)| ROM, DLog                    |
+  | Theorem 11 (mutual decryptability) | ElGamal      | ElGamal correctness; Schnorr EUF-CMA   | DLog, ROM                    |
+  | Theorem A.1 (stealth-targeted)     | Schnorr+ECDH | DLog on \( G_1 \), ROM (preserved;     | DLog, ROM                    |
+  |                                    |              | not used by current Notes design)      |                              |
   #+LATEX: }
 
   Every assumption on the "yes" rows is already load-bearing for
@@ -1074,16 +1661,15 @@ security already requires. ([[https://perry.kundert.ca/images/alberta-buck-proof
      separate write-up at the same level of detail is the natural
      next step.
 
-   - /Circuit soundness/ of the BUCK Notes spend circuits: the
-     cryptographic statements inside the SNARK are (i) the same
-     Chaum-Pedersen relation (Type 1; Theorem 6 applies to the
-     /statement/ being proved), (ii) a Schnorr PoK over a registered
-     \( pk \) plus a PS-signature-in-circuit check (Type 2), and
-     (iii) the stealth-address Schnorr PoK of Theorem 7 (Type 3).
-     Soundness of the /proof system/ (Groth16 / PLONK / STARK) is
-     assumed separately and depends on the chosen proof system's
-     trusted setup (if any) and circuit correctness; this is
-     orthogonal to the contents of this document.
+   - /Circuit soundness/ of the BUCK Notes spend circuits: Part IV
+     proves that the in-circuit statements (CP-equality on
+     \( E_{\text{note}} \) for A-spend; Schnorr PoK and signature
+     verify for B-spend) imply the desired cryptographic guarantees
+     /assuming/ knowledge soundness of the underlying SNARK system.
+     Soundness of the /proof system itself/ (Groth16 / PLONK / STARK)
+     depends on the chosen proof system's trusted setup (if any) and
+     circuit correctness; this is orthogonal to the contents of this
+     document.
 
    - /Collision-resistance and hiding/ of the Poseidon commitment
      hash \( H_{\text{cm}} \) and pseudorandomness of the Poseidon
@@ -1113,10 +1699,20 @@ transform replacing an interactive verifier's challenge with a hash of
 the transcript, analyzed in the random oracle model of Bellare and
 Rogaway (CCS 1993).
 
+[fn:schnorr] Schnorr, C.-P.  "Efficient Signature Generation by Smart
+Cards."  Journal of Cryptology 4(3), 1991, pp. 161-174.  The Schnorr
+signature scheme is EUF-CMA secure under the discrete logarithm
+assumption in the random oracle model; see Pointcheval and Stern
+(2000) [fn:forklemma] for the forking-lemma reduction, and Bellare
+and Neven, "Multi-signatures in the Plain Public-Key Model" (CCS 2006)
+for tightened security bounds.
+
 [fn:cryptonote] van Saberhagen, N.  "CryptoNote v 2.0."  2013.  Section
 4.3 ("Unlinkable payments") introduces the one-time stealth-address
 construction \( P = H_s(rA) G + B \) used by Monero and adapted here to
 the multiplicative form \( pk^\ast = H(s) \cdot pk_{\text{recipient}} \)
 that fits the BUCK identity's existing public-key structure.  The
-security argument in CryptoNote is informal; Theorem 7 makes the
-DLog-on-\( G_1 \) reduction explicit on BN254.
+security argument in CryptoNote is informal; Theorem A.1 (Appendix A)
+makes the DLog-on-\( G_1 \) reduction explicit on BN254.  Note that
+the current BUCK Notes design does not invoke this primitive; see
+Appendix A's historical note.

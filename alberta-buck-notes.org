@@ -1,4 +1,4 @@
-#+TITLE: The Alberta Buck - Notes (DRAFT v0.2)
+#+TITLE: The Alberta Buck - Notes (DRAFT v0.3)
 #+SUBTITLE: Private Bearer Instruments on an Identity-Aware Demurrage Currency
 #+author: Perry Kundert
 #+date: 2026-04-18
@@ -42,82 +42,18 @@ A *BUCK Note* is an on-chain commitment whose opening authorises a private mint
 to a registered identity.  The same commitment can live only on chain (a
 software-only transfer between two of a user's own private accounts), travel
 between parties as a digital message, or be printed on paper as a QR-encoded
-slip.  All three surfaces share the same cryptography and the same on-chain
-footprint.
+slip -- all three surfaces sharing the same cryptography and the same on-chain
+footprint, indistinguishable in use from a $20 bill while being cryptographically
+impossible to counterfeit.
 
-A single Merkle tree of note commitments and a single nullifier set replace every
-parallel bearer-instrument architecture the Alberta Buck series has previously
-explored.  Two orthogonal axes parameterise a note -- /depositor Identity
-binding/ (present: only the named recipient may deposit; absent: any
-registered holder of the opening may) and /issuer visibility/ (public: the
-issuer's Identity =M= is in the clear on the note; private: it is encrypted
-to the recipient).  Crossing these yields three realisable flavors (the
-private-bearer cell is ruled out by BUCK's mutual-decryptability invariant):
-
-- *A2 -- Addressed Cheque, Private Issuer.*  The issuer re-randomizes the
-  recipient's registered ElGamal credential into the note payload; the
-  A-spend predicate requires the depositor's /current/ registered credential
-  to decrypt to the same identity point.  A note Alice issues from a private
-  account to a named recipient (including herself at another of her own
-  accounts) with no on-chain edge visible to third parties.  The canonical
-  /wormhole/ is the degenerate self-issued subcase.
-- *A1 -- Addressed Cheque, Public Issuer.*  Same addressed binding as A2,
-  plus a Schnorr signature by the issuer over the commitment with their
-  plaintext =M_issuer=.  A cheque whose maker is publicly attributable and
-  whose recipient is named but not visible to third parties -- payroll,
-  audit-friendly disbursement, B2C payment.
-- *B1 -- Bearer Cheque, Public Issuer.*  Plaintext issuer =M=; no
-  recipient binding; first registered holder to publish the nullifier \( \rho \)=
-  redeems.  A cashier's cheque: maker known, bearer not, cash-on-presentation.
-
-Demurrage needs no new machinery.  The Note Pool /is/ simply the BUCK
-ERC-20 contract's own balance -- a regular BUCK account accumulating
-BUCK-age like any other account.  Mint: the user transfers \( v \) BUCKs to
-the contract (a standard ERC-20 transfer; sender pays their own outgoing
-demurrage fee), incrementing both the contract's balance \( B \) and a scalar
-\( F \) (sum of face values of live notes).  Redemption is an
-/age-preserving transfer/ unique to the Notes contract's single egress
-path: the recipient's nominal balance rises by the /full/ face value
-\( v \), and their BUCK-age rises by \( v \cdot A/B \), where \( A \) and
-\( B \) are the pool account's accumulated BUCK-age and balance in the
-existing ERC-20 ledger.  That is: the pool's /current/ age-per-BUCK follows the
-redeemed value to the recipient, who then bears the pool's share of
-demurrage on their subsequent outgoing transfers via the standard BUCK
-accounting.  This is exactly the cost a user would have paid had they
-held \( v \) BUCKs personally through the pool's current average residence period.
-Donations to the contract dilute \( A/B \) (donations add balance with
-no age), directly lowering the age-share absorbed by all subsequent
-redemptions.  Conservation is automatic: balance and age are each exactly
-transferred, nothing is created or destroyed; the Jubilee continues to
-grow autonomously at \( \kappa \cdot \text{totalSupply} \).  No face
-discount, no division in the delivered amount, no \( F \) in the
-formula -- only a single new primitive (age-preserving transfer),
-localized to one contract function.
-
-A BUCK Note can be materialised as a physical paper slip with a QR-encoded
-opening, a hologram seal or scratch-off panel over the secret, and an issuer
-mark -- indistinguishable in use from a $20 bill while being
-cryptographically impossible to counterfeit.  Demurrage solves physical cash's
-oldest problem: a lost note's value decays at the same rate as an on-chain
-balance, with the difference accruing to the Jubilee rather than as
-seigniorage to the issuer.  Issuance is on chain and identity-bound;
-circulation is private; deposit is auditable.  This is stronger compliance
-than physical cash provides today, and stronger privacy than any CBDC has
-ever proposed.
-
-The consequence most relevant to users: the /addressed/ flavors (A1, A2)
-are cryptographically safe for long-term holding, because the spend
-predicate binds the recipient's Identity =M= and no mint-time knowledge
-enables a non-recipient to spend.  The /bearer/ flavor (B1) is a
-civil-trust instrument: the issuer necessarily knows \( \rho \) and could race
-the holder to deposit, so B1 cheques are meant to be cashed promptly and
-trusted only to the extent the issuer's legal standing and operational
-discipline warrant.  This is an intrinsic cryptographic property, not a
-policy choice.  Notes are designed to defeat /bulk on-chain
-traceability/ -- KYC-provider subpoenas, chain-analytics fingerprinting,
-omnibus surveillance -- while preserving /bilateral/ Identity
-disclosure: the two named parties to any specific note always learn each
-other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
+Notes defeat /bulk on-chain traceability/ -- KYC-provider subpoenas,
+chain-analytics fingerprinting, omnibus surveillance -- while preserving
+/bilateral/ Identity disclosure: the two named parties to any specific note
+always learn each other's =M=, and either is compellable on warrant.  This is
+stronger compliance than physical cash provides today, stronger privacy than
+any CBDC has ever proposed, and the first design where a private bearer
+instrument is a native, first-class primitive of the monetary system rather
+than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
 [[https://perry.kundert.ca/images/alberta-buck-notes.txt][Text]])
 #+END_ABSTRACT
 
@@ -224,6 +160,79 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
 
    Alberta Buck has all four.  No prior system had all four.  That is why
    BUCK Notes is a /design/, not a workaround.
+
+** BUCK Notes at a Glance
+
+   Before the chapter-length treatment, here is the entire design in
+   one page.
+
+   *One on-chain primitive.*  A single Merkle tree of note commitments
+   and a single nullifier set replace every parallel bearer-instrument
+   architecture the Alberta Buck series has previously explored
+   (self-wormholes between private accounts, signed cheques, targeted
+   gifts, printable paper notes).
+
+   *Two orthogonal axes parameterise a note.*  /Depositor Identity
+   binding/ (present: only the named recipient may deposit; absent: any
+   registered holder of the opening may) crosses with /issuer
+   visibility/ (public: the issuer's Identity =M= is in the clear on
+   the note; private: it is encrypted to the recipient).  Crossing
+   these yields three realisable flavors -- the private-bearer cell is
+   ruled out by BUCK's mutual-decryptability invariant:
+
+   - *A2 -- Addressed Cheque, Private Issuer.*  The issuer
+     re-randomizes the recipient's registered ElGamal credential into
+     the note payload; the A-spend predicate requires the depositor's
+     /current/ registered credential to decrypt to the same identity
+     point.  A note Alice issues from a private account to a named
+     recipient (including herself at another of her own accounts) with
+     no on-chain edge visible to third parties.  The canonical
+     /wormhole/ is the degenerate self-issued subcase.
+   - *A1 -- Addressed Cheque, Public Issuer.*  Same addressed binding
+     as A2, plus a Schnorr signature by the issuer over the commitment
+     with their plaintext =M_issuer=.  A cheque whose maker is
+     publicly attributable and whose recipient is named but not
+     visible to third parties -- payroll, audit-friendly disbursement,
+     B2C payment.
+   - *B1 -- Bearer Cheque, Public Issuer.*  Plaintext issuer =M=; no
+     recipient binding; first registered holder to publish the
+     nullifier \( \rho \) redeems.  A cashier's cheque: maker known,
+     bearer not, cash-on-presentation.
+
+   *Demurrage needs no new machinery.*  The Note Pool /is/ simply the
+   BUCK ERC-20 contract's own balance -- a regular BUCK account
+   accumulating BUCK-age like any other account.  Mint transfers
+   \( v \) BUCKs to the contract (a standard ERC-20 transfer; sender
+   pays their own outgoing demurrage fee).  Redemption is an
+   /age-preserving transfer/ unique to the Notes contract's single
+   egress path: the recipient's nominal balance rises by the /full/
+   face value \( v \), and their BUCK-age rises by \( v \cdot A/B \),
+   where \( A \) and \( B \) are the pool account's accumulated
+   BUCK-age and balance in the existing ERC-20 ledger.  Donations to
+   the contract dilute \( A/B \), directly lowering the age-share
+   absorbed by all subsequent redemptions.  Conservation is automatic;
+   the Jubilee continues to grow autonomously at
+   \( \kappa \cdot \text{totalSupply} \).
+
+   *Lost notes return value to the commons.*  Demurrage solves
+   physical cash's oldest problem: a lost note's value decays at the
+   same rate as an on-chain balance, with the difference accruing to
+   the Jubilee rather than as seigniorage to the issuer.
+
+   *Holding semantics differ by flavor.*  The /addressed/ flavors
+   (A1, A2) are cryptographically safe for long-term holding, because
+   the spend predicate binds the recipient's Identity =M= and no
+   mint-time knowledge enables a non-recipient to spend.  The
+   /bearer/ flavor (B1) is a civil-trust instrument: the issuer
+   necessarily knows \( \rho \) and could race the holder to deposit,
+   so B1 cheques are meant to be cashed promptly and trusted only to
+   the extent the issuer's legal standing and operational discipline
+   warrant.  This is an intrinsic cryptographic property, not a policy
+   choice.
+
+   The remainder of this document develops each piece in detail and
+   establishes the formal proofs (Theorems 7-11 of the companion
+   /Proofs/ document).
 
 * The Core Primitive: One Global Commitment Pool
 
@@ -649,7 +658,13 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
    *Spend.*  The depositor (= recipient, or any credential sharing the
    same \( M \)) produces a SNARK proving:
    1. Merkle inclusion of \( cm = H_{\text{cm}}(\text{flavor},\ v,\ \rho,\ \text{payload}^{A2}) \) in =noteTree=.
-   2. Nullifier \( nf = H_{\text{nf}}(\text{flavor} \| sk_{\text{dep}} \| \rho) \).
+   2. Nullifier \( nf = H_{\text{nf}}(\text{A} \| M_{\text{rec}} \| \rho) \),
+      with \( M_{\text{rec}} = C_n - sk_{\text{dep}} \cdot R_n \) computed
+      in-circuit from \( E_{\text{note}} = (R_n, C_n) \).  Keying on
+      \( M_{\text{rec}} \) (rather than \( sk_{\text{dep}} \)) makes the
+      nullifier survive Identity re-issuance: a depositor who recovers
+      with a fresh \( sk'_{\text{dep}} \) bound to the same
+      \( M_{\text{rec}} \) computes the /same/ nullifier.
    3. Chaum-Pedersen equality (Theorem 6) between the depositor's
       registered \( E_{\text{dep}}^{(\text{reg})} \) and the note's
       \( E_{\text{note}} \): both decrypt to the same \( M \).
@@ -2082,8 +2097,8 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
       registered credentials (PS signatures, ElGamal ciphertexts,
       public-claim flags).
 
-   Notably absent: the stealth-address construction (Theorem 7) is
-   /not/ used by Notes.  Recipient binding is handled directly by
+   Notably absent: the stealth-address construction (proofs.org
+   Theorem A.1, preserved in the appendix) is /not/ used by Notes.  Recipient binding is handled directly by
    re-randomizing the recipient's registered ElGamal credential and
    verifying via CP-equality -- the same mechanism Identity already
    uses to defeat the BUCK mutual-decryptability requirement.
@@ -2105,13 +2120,21 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
    The nullifier PRF is Poseidon-based, keyed differently per spend
    shape:
 
-   - *A-spend:* key = \( sk_{\text{dep}} \).  Nullifier =
-     \( H_{\text{nf}}(\text{A} \| sk_{\text{dep}} \| \rho) \).  By
-     CP-equality, \( sk_{\text{dep}} \) is bound to
-     \( M_{\text{rec}} \); any credential attesting to the same =M=
-     produces the same nullifier, so a recipient who re-issues their
-     Identity with a fresh signing key still computes the same
-     nullifier (key-loss recovery).
+   - *A-spend:* key = \( M_{\text{rec}} \) (the recipient's identity
+     point, recovered in-circuit by ElGamal decryption of
+     \( E_{\text{note}} \) under the depositor's witness
+     \( sk_{\text{dep}} \)).  Nullifier =
+     \( H_{\text{nf}}(\text{A} \| M_{\text{rec}} \| \rho) \).  Keying on
+     \( M_{\text{rec}} \) -- /not/ on \( sk_{\text{dep}} \) -- is what
+     makes key-loss recovery work: any credential attesting to the same
+     =M= decrypts \( E_{\text{note}} \) to the same identity point and
+     therefore produces the same nullifier.  A recipient who re-issues
+     their Identity with a fresh signing key still computes the same
+     \( nf \), so the note is neither lost nor double-spendable across
+     re-issuance.  The issuer cannot pre-compute \( nf \) because she
+     never decrypts \( E_{\text{note}} \) (no knowledge of
+     \( sk_{\text{rec}} \)); see proofs.org Theorem 10 for the IND-CPA
+     reduction.
    - *B-spend:* key = \( \rho \) itself; nullifier =
      \( H_{\text{nf}}(\text{B} \| \rho) \), publicly computable by
      anyone who knows \( \rho \).  This is the first-come-first-served
@@ -2184,9 +2207,10 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
 
    Only the Poseidon hash family is new, and it is already standard
    in the SNARK ecosystem.  No novel hardness assumption is
-   introduced.  Theorem 7 (stealth-address) remains available in the
-   Proofs document as an independent primitive but is not invoked by
-   the Notes construction.
+   introduced.  Theorem A.1 (stealth-address, preserved in proofs.org
+   Appendix A) remains available as an independent primitive but is
+   not invoked by the Notes construction; the current Notes spend
+   predicates are covered by Theorems 7-11.
 
 #+LATEX: \clearpage
 * The SNARK Circuits
@@ -2260,14 +2284,19 @@ other's =M=, and either is compellable on warrant. ([[https://perry.kundert.ca/i
 
    *Constraints.*
    1. Merkle inclusion of \( cm \) under =path= in =noteTree=.
-   2. =nullifier= = \( H_{\text{nf}}(\text{A} \| sk_{\text{dep}} \| \rho) \).
+   2. =nullifier= = \( H_{\text{nf}}(\text{A} \| M_{\text{rec}} \| \rho) \),
+      with \( M_{\text{rec}} = C_n - sk_{\text{dep}}\, R_n \) recomputed
+      in-circuit from the payload's \( E_{\text{note}} = (R_n, C_n) \)
+      and the witness \( sk_{\text{dep}} \).
    3. The payload contains \( E_{\text{note}} = (R_n, C_n) \); the
       depositor's registered credential \( E_{\text{dep}}^{(\text{reg})} \)
       is present in IdentityRegistry; and CP-equality holds:
       \( C_n - sk_{\text{dep}}\, R_n = C^{\text{reg}} -
       sk_{\text{dep}}\, R^{\text{reg}} \) (Theorem 6).  This
       proves the depositor's Identity =M= equals the recipient's =M=
-      bound at mint, without revealing either.
+      bound at mint, without revealing either, and pins the
+      \( M_{\text{rec}} \) used by the nullifier in (2) to the
+      registered identity rather than to a forged scalar.
    4. If the flavor is A1: the payload also contains
       \( (m_{\text{issuer}}, \sigma) \); verify \( \sigma \) under
       \( pk_{\text{issuer}} = m_{\text{issuer}} G \) on \( cm \).
