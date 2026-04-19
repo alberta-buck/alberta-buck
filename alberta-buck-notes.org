@@ -1,4 +1,4 @@
-#+TITLE: The Alberta Buck - Notes (DRAFT v0.3)
+#+TITLE: The Alberta Buck - Notes (DRAFT v0.4)
 #+SUBTITLE: Private Bearer Instruments on an Identity-Aware Demurrage Currency
 #+author: Perry Kundert
 #+date: 2026-04-18
@@ -2097,11 +2097,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
       registered credentials (PS signatures, ElGamal ciphertexts,
       public-claim flags).
 
-   Notably absent: the stealth-address construction (proofs.org
-   Theorem A.1, preserved in the appendix) is /not/ used by Notes.  Recipient binding is handled directly by
-   re-randomizing the recipient's registered ElGamal credential and
-   verifying via CP-equality -- the same mechanism Identity already
-   uses to defeat the BUCK mutual-decryptability requirement.
+   Notably absent: a stealth-address construction is /not/ used by
+   Notes.  Recipient binding is handled directly by re-randomizing the
+   recipient's registered ElGamal credential and verifying via
+   CP-equality -- the same mechanism Identity already uses to defeat
+   the BUCK mutual-decryptability requirement.
 
 ** New Primitive: The Note Commitment Hash
 
@@ -2207,10 +2207,8 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
    Only the Poseidon hash family is new, and it is already standard
    in the SNARK ecosystem.  No novel hardness assumption is
-   introduced.  Theorem A.1 (stealth-address, preserved in proofs.org
-   Appendix A) remains available as an independent primitive but is
-   not invoked by the Notes construction; the current Notes spend
-   predicates are covered by Theorems 7-11.
+   introduced.  The current Notes spend predicates are covered by
+   Theorems 7-11 of the companion /Proofs/ document.
 
 #+LATEX: \clearpage
 * The SNARK Circuits
@@ -2837,14 +2835,6 @@ incriminating subsets without revealing their specific deposit.
 Schofnegger, M.  "[[https://eprint.iacr.org/2019/458.pdf][Poseidon: A New Hash Function for Zero-Knowledge Proof Systems]]"
 (USENIX Security 2021).  The SNARK-friendly hash used for commitments,
 nullifiers, and Merkle path computation.
-
-[fn:cryptonote] van Saberhagen, N.  "[[https://web.archive.org/web/20201028121818/https://cryptonote.org/whitepaper.pdf][CryptoNote v 2.0]]" (2013).
-Introduced one-time stealth addresses for the recipient-untraceable
-transaction graph in Monero and related cryptocurrencies.  BUCK Notes
-does not use the stealth-address construction; addressed recipient
-binding is instead accomplished by re-randomizing the recipient's
-registered ElGamal credential, exploiting BUCK's Identity registry
-in a way Monero's permissionless setting does not admit.
 
 [fn:ps-wormhole] Pointcheval, D. and Sanders, O.  "Short Randomizable
 Signatures."  CT-RSA 2016.  The issuer-credential signature scheme
