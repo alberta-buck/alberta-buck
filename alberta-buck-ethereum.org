@@ -5,7 +5,7 @@
 #+series[]: Alberta-Buck
 #+series_order: 9
 #+weight: 10
-#+draft: true
+#+draft: false
 #+bucky: true
 #+description: Ethereum implementation of the Alberta Buck: ERC-721 BUCK_CREDIT for insured-asset NFTs with deterministic depreciation, an identity-bound ERC-20 BUCK token with Chaum-Pedersen approve receipts, a privacy-preserving IdentityRegistry with PS-credential + ElGamal registration, a Notes commitment pool with Groth16-verified mint circuit, and a BUCK_K controller (static Phase-0, PID + commodity-basket oracle for later deployment) for value stabilisation.
 
@@ -15,13 +15,13 @@
 #+OPTIONS: toc:nil
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
-#+LATEX_HEADER: \usepackage{draftwatermark}
+# #+LATEX_HEADER: \usepackage{draftwatermark}
 
 #+ATTR_LATEX: :width 10cm
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
 #+BEGIN_ABSTRACT
-This document presents a concrete Ethereum implementation of the [[/range/finance/alberta-buck-architecture/][Alberta Buck Architecture]],
+This document presents a concrete Ethereum implementation of the [[https://perry.kundert.ca/range/finance/alberta-buck-architecture/][Alberta Buck Architecture]],
 specifying the five core smart contracts:
 
 1. *BUCK_CREDIT* (ERC-721): An NFT representing an insurer's offer of parametric insurance on a
@@ -29,7 +29,7 @@ specifying the five core smart contracts:
 2. *IdentityRegistry* (custom): An on-chain registry of per-address Pointcheval-Sanders signature
    credentials and ElGamal-encrypted identity points, verified via a BN254-precompile NIZK at
    registration time.  This is the trust anchor every BUCK transfer is gated on -- see the
-   companion [[file:alberta-buck-identity.org][Identity]] and [[file:alberta-buck-proofs.org][Proofs]] documents for the full cryptographic design.
+   companion [[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]] documents for the full cryptographic design.
 3. *BUCK* (ERC-20): A fungible token minted against aggregated BUCK_CREDIT values, with on-chain
    credit-limit enforcement, default insurance premiums, and *identity-aware* =approve= and
    =transfer= flows that enforce the BUCK mutual-decryptability invariant on every counterparty
@@ -37,7 +37,7 @@ specifying the five core smart contracts:
 4. *Notes* (custom): A privacy-preserving denomination layer on top of BUCK.  Clients escrow BUCK
    into a commitment pool by posting a Groth16 SNARK that ties the deposited =totalFace= to a batch
    of Poseidon-hash note commitments; no information about individual note values, flavours, or
-   identity bindings leaves the wallet.  See [[file:alberta-buck-notes.org][Notes]] and [[file:alberta-buck-proofs.org][Proofs]] for the circuit design.
+   identity bindings leaves the wallet.  See [[https://perry.kundert.ca/range/finance/alberta-buck-notes][Notes]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]] for the circuit design.
 5. *BUCK_K* (custom): A controller that supplies the dynamic Value Stabilization Factor used in
    credit-limit computation.  The first deployment uses =BuckKControllerStatic=, a
    governance-settable constant, so the identity and notes layers can land first; the eventual
@@ -439,8 +439,8 @@ limit, triggering the default insurance mechanism described below.
   :END:
 
 The =IdentityRegistry= is the binding between Ethereum addresses and the privacy-preserving identity
-machinery described in the companion documents [[file:alberta-buck-identity.org][Identity with Anonymity]],
-[[file:alberta-buck-identity-example.org][Identity Example -- Data Flow]], and [[file:alberta-buck-proofs.org][Cryptographic Proofs]].
+machinery described in the companion documents [[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity with Anonymity]],
+[[https://perry.kundert.ca/range/finance/alberta-buck-identity-example][Identity Example -- Data Flow]], and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Cryptographic Proofs]].
 Every BUCK =mint=, =approve= and =transfer= consults this registry; an unregistered address cannot
 hold or move BUCKs.
 
@@ -653,7 +653,7 @@ unforgeability and the audit trail.
 admits a new origin of registrable identities; removing one stops new registrations under that
 issuer (existing registrations are unaffected -- they were verified at registration time and are
 never re-verified).  Epoch-based credential renewal, key revocation, and issuer rotation are
-described in the [[file:alberta-buck-identity.org::*Epoch-Based Credential Renewal][Identity]] document.
+described in the [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal[Identity: Epoch-Based Credential Renewal]] document.
 
 
 * BUCK: ERC-20 Token
@@ -671,7 +671,7 @@ every state-changing call routes through the =IdentityRegistry=:
   and the public-claim flag, then emit a =BuckTransferReceipt= carrying only ciphertext hashes --
   no plaintext identity ever touches the chain.
 
-This is the on-chain enforcement of the [[file:alberta-buck-identity.org::*Counterparties Exchange Identities][mutual-decryptability invariant]]: every transfer leaves
+This is the on-chain enforcement of the [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#counterparties-exchange-identities][mutual-decryptability invariant]]: every transfer leaves
 behind a permanent record from which both counterparties (and only those counterparties, by
 decrypting their respective ciphertext) can reconstruct the identity of the other.
 
@@ -1218,8 +1218,8 @@ contract, backed by an equal amount of BUCK locked in that contract.  Notes do n
 flavours, or identity bindings -- the public state is just a list of opaque 32-byte commitments and
 a running face-value total.
 
-The design is specified in full in [[file:alberta-buck-notes.org][Notes]] and the underlying SNARK construction in
-[[file:alberta-buck-proofs.org][Proofs]].  This section documents the Ethereum surface: the =Notes= contract, the =IMintVerifier=
+The design is specified in full in [[https://perry.kundert.ca/range/finance/alberta-buck-notes][Notes]] and the underlying SNARK construction in
+[[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]].  This section documents the Ethereum surface: the =Notes= contract, the =IMintVerifier=
 interface, the circom Groth16 mint circuit, and the adapter that bridges the two.
 
 ** Mint Circuit (circom, Groth16 on BN254)
@@ -1363,7 +1363,7 @@ contract Notes {
 
 Phase 2 closes the happy path (credit-backed BUCKs in -> opaque commitments out, with a real SNARK
 binding the sum).  The *spend* path -- nullifier reveals plus per-output commitments under a
-second SNARK -- is the subject of [[file:alberta-buck-notes.org::*Phase 3 - Spend][Notes Phase 3]]; the =nullifiers[]= mapping above is the
+second SNARK -- is the subject of [[https://perry.kundert.ca/range/finance/alberta-buck-notes/#phased-rollout][Notes Phase 3]]; the =nullifiers[]= mapping above is the
 reserved on-chain state for that phase.
 
 
@@ -1614,7 +1614,7 @@ are annotated with what the current code actually ships.
 | Phase 4 | Public-claim accounts                          | *done* -- =setPublic= / =setSystemPublic=; Notes wired as public                   |
 | Phase 5 | Notes Phase-1 scaffolding                      | *done* -- =Notes.sol= + =StubMintVerifier=; commitments/nullifiers in place        |
 | Phase 6 | Groth16 mint circuit + adapter                 | *done* -- circom =mint.circom= (N=2), =MintGroth16Verifier=, =MintVerifierAdapter= |
-| Phase 7 | Notes Phase-3 spend circuit + nullifier reveal | *pending* -- see [[file:alberta-buck-notes.org::*Phase 3 - Spend][Notes Phase 3]]                                                     |
+| Phase 7 | Notes Phase-3 spend circuit + nullifier reveal | *pending* -- see [[https://perry.kundert.ca/range/finance/alberta-buck-notes/#phased-rollout][Notes Phase 3]]                                                     |
 | Phase 8 | Live =BuckKController= (PID + oracle)          | *pending* -- contract skeleton exists; oracle hookup and PID tuning outstanding    |
 | Phase 9 | Production MPC trusted-setup ceremony          | *pending* -- =scripts/snark/setup.sh= uses dev-only entropy                        |
 
@@ -1653,7 +1653,7 @@ once, the Solidity reads them many times.
 The off-chain components -- KYC ceremony, credential derivation, Chaum-Pedersen proving, and (later)
 SNARK witness generation for Notes -- are implemented as a Python package, ~alberta_buck.wallet~,
 with a CLI front-end.  Python is the natural choice: the existing references in
-[[file:alberta-buck-identity-example.org][Identity Example]] and [[file:alberta-buck-proofs.org][Proofs]]
+[[https://perry.kundert.ca/range/finance/alberta-buck-identity-example][Identity Example]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]]
 are already Python, ~py_ecc~ ships a complete BN254 (alt_bn128) implementation matching Ethereum's
 precompiles, and the package is invoked the same way every other dev tool in this repo is
 (~nix develop --command python3 -m alberta_buck.wallet ...~).
@@ -1661,7 +1661,7 @@ precompiles, and the package is invoked the same way every other dev tool in thi
 The wallet has three jobs:
 
 - *Reference implementation* of the cryptography in
-  [[file:alberta-buck-identity.org][alberta-buck-identity.org]], the place where the spec is
+  [[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]], the place where the spec is
   ground-truthed.
 - *Test-vector emission*: a CLI verb (~wallet emit-vectors~) writes a canonical JSON file under
   ~test/vectors/~ containing the inputs and expected outputs of every on-chain proof check.  Foundry
@@ -1763,7 +1763,7 @@ Chaum-Pedersen proofs.
 
 ** Phase 5: Notes Scaffolding
 
-Goal: lay the structural groundwork for [[file:alberta-buck-notes.org][BUCK Notes]] -- a commitment pool, a pluggable mint
+Goal: lay the structural groundwork for [[https://perry.kundert.ca/range/finance/alberta-buck-notes][BUCK Notes]] -- a commitment pool, a pluggable mint
 verifier interface, and the off-chain wallet helpers -- behind a stub verifier so the end-to-end
 flow can be exercised without yet shipping the SNARK.
 
@@ -1823,7 +1823,7 @@ design pins down the eventual batch-size surface.
 Still pending:
 
 - *Phase 7*: the spend circuit, nullifier reveal, and =Notes.spend= entry point -- the subject of
-  [[file:alberta-buck-notes.org::*Phase 3 - Spend][Notes Phase 3]].  This is where the on-chain Poseidon Merkle tree lands (a spend proof is
+  [[https://perry.kundert.ca/range/finance/alberta-buck-notes/#phased-rollout][Notes Phase 3]].  This is where the on-chain Poseidon Merkle tree lands (a spend proof is
   "some unspent note in the commitment pool" -- root-consistent membership is the natural query).
 - *Phase 8*: live =BuckKController= deployment.  The contract is already in-tree with mock-feed
   unit tests; the remaining work is oracle wiring (Chainlink feed addresses, Uniswap V3 pool),

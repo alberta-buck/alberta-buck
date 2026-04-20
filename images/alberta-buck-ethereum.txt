@@ -113,13 +113,15 @@ Table of Contents
 .. 12. Sequencing and Stop Conditions
 
 
-[Alberta Buck Architecture] </range/finance/alberta-buck-architecture/>
+[Alberta Buck Architecture]
+<https://perry.kundert.ca/range/finance/alberta-buck-architecture/>
 
-[Identity] <file:alberta-buck-identity.org>
+[Identity]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity>
 
-[Proofs] <file:alberta-buck-proofs.org>
+[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs>
 
-[Notes] <file:alberta-buck-notes.org>
+[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes>
 
 
 1 Contract Architecture Overview
@@ -525,11 +527,14 @@ Table of Contents
   registry will accept at `register()' time.
 
 
-[Identity with Anonymity] <file:alberta-buck-identity.org>
+[Identity with Anonymity]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity>
 
-[Identity Example – Data Flow] <file:alberta-buck-identity-example.org>
+[Identity Example – Data Flow]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity-example>
 
-[Cryptographic Proofs] <file:alberta-buck-proofs.org>
+[Cryptographic Proofs]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs>
 
 4.1 Cryptographic Surface
 ─────────────────────────
@@ -742,11 +747,8 @@ Table of Contents
   (existing registrations are unaffected – they were verified at
   registration time and are never re-verified).  Epoch-based credential
   renewal, key revocation, and issuer rotation are described in the
-  [Identity] document.
-
-
-[Identity] <file:alberta-buck-identity.org::*Epoch-Based Credential
-Renewal>
+  [[<https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal>[Identity:
+  Epoch-Based Credential Renewal]] document.
 
 
 5 BUCK: ERC-20 Token
@@ -773,7 +775,7 @@ Renewal>
 
 
 [mutual-decryptability invariant]
-<file:alberta-buck-identity.org::*Counterparties Exchange Identities>
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/#counterparties-exchange-identities>
 
 5.1 mint() Implementation
 ─────────────────────────
@@ -1355,9 +1357,9 @@ Renewal>
   circom Groth16 mint circuit, and the adapter that bridges the two.
 
 
-[Notes] <file:alberta-buck-notes.org>
+[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes>
 
-[Proofs] <file:alberta-buck-proofs.org>
+[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs>
 
 7.1 Mint Circuit (circom, Groth16 on BN254)
 ───────────────────────────────────────────
@@ -1516,7 +1518,8 @@ Renewal>
   the reserved on-chain state for that phase.
 
 
-[Notes Phase 3] <file:alberta-buck-notes.org::*Phase 3 - Spend>
+[Notes Phase 3]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/#phased-rollout>
 
 
 8 Integration: Full mint() and transfer() Walkthrough
@@ -1846,7 +1849,8 @@ Renewal>
   offline.
 
 
-[Notes Phase 3] <file:alberta-buck-notes.org::*Phase 3 - Spend>
+[Notes Phase 3]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/#phased-rollout>
 
 
 12.2 Testing Strategy: Three Layers
@@ -1902,9 +1906,8 @@ Renewal>
 
   The wallet has three jobs:
 
-  • *Reference implementation* of the cryptography in
-    [alberta-buck-identity.org], the place where the spec is
-    ground-truthed.
+  • *Reference implementation* of the cryptography in [Identity], the
+    place where the spec is ground-truthed.
   • *Test-vector emission*: a CLI verb (`wallet emit-vectors') writes a
     canonical JSON file under `test/vectors/' containing the inputs and
     expected outputs of every on-chain proof check.  Foundry tests load
@@ -1919,11 +1922,13 @@ Renewal>
   reuse the same primitives behind a different storage and UI.
 
 
-[Identity Example] <file:alberta-buck-identity-example.org>
+[Identity Example]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity-example>
 
-[Proofs] <file:alberta-buck-proofs.org>
+[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs>
 
-[alberta-buck-identity.org] <file:alberta-buck-identity.org>
+[Identity]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity>
 
 
 12.4 Phase 0: Stub the Surrounding Contracts
@@ -2089,7 +2094,7 @@ Renewal>
   change only.
 
 
-[BUCK Notes] <file:alberta-buck-notes.org>
+[BUCK Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes>
 
 [Notes] See section 7
 
@@ -2155,7 +2160,8 @@ Renewal>
     `scripts/snark/setup.sh' trusted-setup entropy.
 
 
-[Notes Phase 3] <file:alberta-buck-notes.org::*Phase 3 - Spend>
+[Notes Phase 3]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/#phased-rollout>
 
 
 12.12 Sequencing and Stop Conditions

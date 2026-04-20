@@ -2547,6 +2547,9 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    *Total:* ~8 weeks of external + internal audit.
 
 ** Phased Rollout
+  :PROPERTIES:
+  :CUSTOM_ID: phased-rollout
+  :END:
 
    The engineering work is naturally phaseable:
 
