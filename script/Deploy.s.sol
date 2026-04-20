@@ -5,6 +5,7 @@ import "forge-std/Script.sol";
 import "../src/BuckCredit.sol";
 import "../src/Buck.sol";
 import "../src/BuckKController.sol";
+import "../src/IdentityRegistry.sol";
 
 /// @notice Deploy all three core contracts to a local or test network.
 contract Deploy is Script {
@@ -33,10 +34,16 @@ contract Deploy is Script {
         );
         console.log("BuckKController deployed at:", address(buckK));
 
-        // 3. Deploy Buck (ERC-20)
+        // 3. Deploy IdentityRegistry (Phase-2 identity layer)
+        IdentityRegistry identity = new IdentityRegistry(governance);
+        console.log("IdentityRegistry deployed at:", address(identity));
+
+        // 4. Deploy Buck (ERC-20)
         //    Insurance pool = deployer address for now (replace with InsurancePool contract)
         address insurancePool = governance;
-        Buck buck = new Buck(address(buckCredit), address(buckK), insurancePool);
+        Buck buck = new Buck(
+            address(buckCredit), address(buckK), address(identity), insurancePool
+        );
         console.log("Buck deployed at:", address(buck));
 
         vm.stopBroadcast();
