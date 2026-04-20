@@ -1,0 +1,223 @@
+{
+  "$schema_version": 1,
+  "ORDER": "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
+  "alice": {
+    "M": {
+      "x": "0x07a0b762be40b41daa6b78fab3533a436b6a39889558cdf73c75d418d7bf5e7c",
+      "y": "0x0aac71b70bf9ed7e6103ef447157a594a6b3b7c0684b6dd9572a017f430f8299"
+    },
+    "canonical_identity_data": "{\"date_of_birth\":\"1992-03-15\",\"epoch\":42,\"family_name\":\"Johnson\",\"given_name\":\"Alice\",\"id_number\":\"AIC-2026-4839201\",\"id_type\":\"Alberta Identity Card\",\"issued_at\":\"2026-01-20T14:30:00Z\",\"issuer_id\":\"atb-financial-ca\",\"jurisdiction\":\"Alberta, Canada\"}",
+    "ciphertext": {
+      "C": {
+        "x": "0x2f9db11149e58b5b37d1f9e979313a9d9e174181ccead17cabd2a571f19bb01b",
+        "y": "0x2a2dd72c66ddf1bf48d7bb58247c7a8ff7830cfb80d169fb84d988de8aca55d0"
+      },
+      "R": {
+        "x": "0x22c238ad47259d9fdf65bac4f41869c55f6f061e8f0e300092cd536a68b8ebec",
+        "y": "0x26ee4236b55c5da03f3c58ef74cb81b5e2b8e40ba5523e6ec6be7b09ab25515d"
+      }
+    },
+    "elgamal_kp": {
+      "pk": {
+        "x": "0x260f787a044e3af962778a868b558466a6ac4e78bed38c3a4fa87e382e8ceb4b",
+        "y": "0x17f83b960bdfb1a5c5c01daf8cfbd92394cbb597a68498e876163bb3de3c4473"
+      },
+      "sk": "0x14c89fee22701d24cac198b69654702ae1f91be06bb85e006b647ff2d6cbdaa0"
+    },
+    "fields": {
+      "date_of_birth": "1992-03-15",
+      "epoch": 42,
+      "family_name": "Johnson",
+      "given_name": "Alice",
+      "id_number": "AIC-2026-4839201",
+      "id_type": "Alberta Identity Card",
+      "issued_at": "2026-01-20T14:30:00Z",
+      "issuer_id": "atb-financial-ca",
+      "jurisdiction": "Alberta, Canada"
+    },
+    "m": "0x0e407c01fa40a794cf7a2a879d7529e8f5d8ce50530ebd6b929d59ca323f181f",
+    "ps_sig_raw": {
+      "sigma_1": {
+        "x": "0x170e22592d85dbcc94d88a4198c2440db59cf9c64e788c1417df94305be181b6",
+        "y": "0x058340f8138f11da95dbe584a9966a770972e48ed23fc5c7133226c2baff40a1"
+      },
+      "sigma_2": {
+        "x": "0x0cce4d03a719dcd0f47cad5bcd243e085fb102f99b8b15495386ca7a41ae7f2d",
+        "y": "0x09c345f11de56105597efa6aceb7a639ecf2e38b93973f29bd2cfe1379f04065"
+      }
+    },
+    "ps_sig_rerand": {
+      "sigma_1": {
+        "x": "0x14343000360dc5b1dc5f8091ee2a28a10a2380169b3985593a3eef9393e20631",
+        "y": "0x0fbbdae6a6a0e059a5844b575d2361a46e7006eb8ad582534e88bb7eb1555f94"
+      },
+      "sigma_2": {
+        "x": "0x1f9c870150278f0f5b9ee838f22bcb2c270959b91b36371cf5a7ca9b452c85df",
+        "y": "0x25dff852a998118e71aff56e120ca69ff0637c7ecdd5365bbd4595486e5f8cfb"
+      }
+    },
+    "r": "0x04613806db599cbe44d10a3433aaa90da79d9ccf8759122b6107423be7722ce5",
+    "registrant": "0x00000000000000000000000a11ce0000000000000000000000000000000a11ce",
+    "registration_proof": {
+      "A_ps": {
+        "x": "0x1e9d1721a62da2ca6fa48c4fd0641d6b9e4b8044bc88bf6048c93c03cfd54401",
+        "y": "0x27db48f95867cca0b7d425adc64ab894281e074431c4e5948688ca3f98c592fa"
+      },
+      "T_C": {
+        "x": "0x141b3bd6212c171772ed6d49b0e6f76648d4f24b84c41fee3861e5bf42e275d2",
+        "y": "0x08c081016cefdb846fc08bb65e14dd692f57b59aee9f47a22769427521026419"
+      },
+      "T_R": {
+        "x": "0x2caed8be3cfb01e1b99a8267a99531fe8883e36ee3de95b30011bfe68bd8f072",
+        "y": "0x02fffaa97f332dd4e5a59f0847c71f8b38c7c72147a61b3c31a2855ccd5ac9ee"
+      },
+      "e": "0x2fd612faa926143be6eaa362cb7f78af7069e4327f9351f933f076cb87e942c6",
+      "s_m": "0x1be2caaa44d1560ff8e0e74b72ee10a05b654e581fa65368f23f28232d32cbc9",
+      "s_r": "0x2bddfe12b8aad6bf270b529751f7c23b1d93e895cf6d89c22cafc08e2b5daf2e"
+    }
+  },
+  "approve": {
+    "E_alice": {
+      "C": {
+        "x": "0x2f9db11149e58b5b37d1f9e979313a9d9e174181ccead17cabd2a571f19bb01b",
+        "y": "0x2a2dd72c66ddf1bf48d7bb58247c7a8ff7830cfb80d169fb84d988de8aca55d0"
+      },
+      "R": {
+        "x": "0x22c238ad47259d9fdf65bac4f41869c55f6f061e8f0e300092cd536a68b8ebec",
+        "y": "0x26ee4236b55c5da03f3c58ef74cb81b5e2b8e40ba5523e6ec6be7b09ab25515d"
+      }
+    },
+    "E_for_bob": {
+      "C": {
+        "x": "0x1250d4fc7d6e2a9356108f2305dc39058c5d6247040c19a2c8c0713584b01943",
+        "y": "0x27656a90317fcd8d8f0e0c1486f50bb7153ae97a650831f84b98c0c805c5b29f"
+      },
+      "R": {
+        "x": "0x29487146f47fdff4c4dd2c7501a51e647d0a197e91f8ee86ba93a050949d7931",
+        "y": "0x08ea31595f9ba93c9cf244db623d5732f45e44f343b1bda8d3c51df9e17cd552"
+      }
+    },
+    "chainid": "0x0000000000000000000000000000000000000000000000000000000000000001",
+    "cp_proof": {
+      "T1": {
+        "x": "0x2ff244bfeb2c10fbf301f0f8dc330ef54a5f3a1c72bd8b3128fc967a153e1f22",
+        "y": "0x04af30ad98cf3e9b276d01ffa6ae3a38c0c8c4f4aae318473cfb3d7deebfe450"
+      },
+      "T2": {
+        "x": "0x036a61738acac40e9343632fb06c85274e4cedc2e599f199e9e46931ae2a8dcd",
+        "y": "0x28ad36a12510b31e5422cc184d44478ff55507c537b928f2d639132032ef317f"
+      },
+      "T3": {
+        "x": "0x04ee1501b833fd79067768f31fc5e3e79909d9feef2e37b625f0783364ecabea",
+        "y": "0x05cee09a2cabf4ba6df57b78cc1f575dd7040f0c038db53c3505d0d66c1bd684"
+      },
+      "e": "0x1f909ec2b8304d1fbad4018a599fb4587185482d1de9a739bb19ff99da9659ef",
+      "s1": "0x1f4127175995d02dddbdaa72af2cede5c182af9ded3cb03e7e534b6326420a78",
+      "s2": "0x0ec4f57ba68f0001effe27604d772c08cbeb686b07fd75905a037a10ea68683a"
+    },
+    "r_prime": "0x02b0342b8149655149f3d969399fb294cef2008b79d745f49a68f5a45662ba96",
+    "sender": "0x00000000000000000000000a11ce0000000000000000000000000000000a11ce",
+    "spender": "0x000000000000000000000000b0b0000000000000000000000000000000000b0b"
+  },
+  "bob": {
+    "M": {
+      "x": "0x0cef52e77ea5e5e7a7afc96f9e67c558d4f5f37b9eeb4ab4079f0ae1f916d96b",
+      "y": "0x29159e9254f05d991618fe98db27c0e5a4d1e7820853baafd70a97a334f97125"
+    },
+    "canonical_identity_data": "{\"date_of_birth\":\"1985-07-22\",\"epoch\":42,\"family_name\":\"Smith\",\"given_name\":\"Bob\",\"id_number\":\"AB-CORP-2026-00182\",\"id_type\":\"Corporate Registration\",\"issued_at\":\"2026-02-01T09:00:00Z\",\"issuer_id\":\"atb-financial-ca\",\"jurisdiction\":\"Alberta, Canada\"}",
+    "ciphertext": {
+      "C": {
+        "x": "0x0c78a21592bcfd7db916b13040a907fc35cd639193963b6e8245ecf009f224a3",
+        "y": "0x1c41a2a8a3cde23e87b65da05e8b889ff567dfb687195523a2c309f1a72d3344"
+      },
+      "R": {
+        "x": "0x0406394b3b819710e757ebe2e76b54f8589670bf10d90e8e874426f3f56167dc",
+        "y": "0x2feacdb28b3296d0781918f7440adf39ccc845804ef5d44fde7e01b835925f8c"
+      }
+    },
+    "elgamal_kp": {
+      "pk": {
+        "x": "0x1ddcf7ec92407b9cd465e9ea488b8981a2df7c9ce1dfe92a06b63313720e94eb",
+        "y": "0x1fa6bcdff2254df8bcb963224f6a4552f8188c5e11f30ebb6ab465e6e8e3a1ac"
+      },
+      "sk": "0x1e860c6789ab3f6d346d171cd985e228525e8acf0989055d4011e844a54a7fcf"
+    },
+    "fields": {
+      "date_of_birth": "1985-07-22",
+      "epoch": 42,
+      "family_name": "Smith",
+      "given_name": "Bob",
+      "id_number": "AB-CORP-2026-00182",
+      "id_type": "Corporate Registration",
+      "issued_at": "2026-02-01T09:00:00Z",
+      "issuer_id": "atb-financial-ca",
+      "jurisdiction": "Alberta, Canada"
+    },
+    "m": "0x125a4e36b2d4153e0800dace5a18dc462a4a94c2d68b3f83e3d499dc7873b46b",
+    "ps_sig_raw": {
+      "sigma_1": {
+        "x": "0x02c18a5c97a5b137f8abaf4cda3b5f1603c974ae1fafb1afe2fe77b26f18530e",
+        "y": "0x1f69690a5a6a3f24c1aab74156c2b0099756e79f02b7a9ea2caea99ecd2854e0"
+      },
+      "sigma_2": {
+        "x": "0x080a43a8bd20189b1570a2c2eb6dbb3cb4a91c7e03ce59fa1bcabb7ee7b70f52",
+        "y": "0x1e2ba61d8e1d3a5eef96b35d801d1000bf4995aff89a687924821ef70fc5cda0"
+      }
+    },
+    "ps_sig_rerand": {
+      "sigma_1": {
+        "x": "0x006c0e33f8c1231f4990fb43ee5ea2a5a5b0d939d058d5cd898c5c197ef9c6f0",
+        "y": "0x276a73e05d538c302e13739cd7a86a0bc6caee6ead333c8c69813c1fe77e49f9"
+      },
+      "sigma_2": {
+        "x": "0x1aa9061b689278e363d0b18a26374a33ac1b6379f2dac63829409544d1067918",
+        "y": "0x21043bf89f5ed4f32167b51c23e244731b97c622028e9802661f40b8750d01fa"
+      }
+    },
+    "r": "0x0e32f254d4159ea0ab31b229f7c14365885d0543739d7d74fd7f2714980bf2d7",
+    "registrant": "0x000000000000000000000000b0b0000000000000000000000000000000000b0b",
+    "registration_proof": {
+      "A_ps": {
+        "x": "0x2905dd6f822f511b80f4e190e7198eb07afe1365e18695e7b7fdd12f3fce88fe",
+        "y": "0x0073b98417e36359a58e9a68379907b9a8177d94075839724818b082ef61f84e"
+      },
+      "T_C": {
+        "x": "0x03a2e14f69e45a66e9b86e10293bd0deacb176daa86aea31a08c1a3225b16736",
+        "y": "0x25573dcbeea5f2dfa5683aaf75ddc79bb2248197a3ff9635a02b51b4e4a0860e"
+      },
+      "T_R": {
+        "x": "0x17faec33df55ca0500ff07e16cf40bec71e2b6e2d43806ae60ffa2e0e3d17e17",
+        "y": "0x138df8b51efaa191adb3972e9a76447a9b4c598842f260056199458650f06add"
+      },
+      "e": "0x20d09e71ee1bddc69aff2a6819a781f27092f12843b3e53a34aed14579e5e4d5",
+      "s_m": "0x0ea461971f83fbbb92fec79eb233f2b62d2b6ba7dc579c5e06472978cb9dbf11",
+      "s_r": "0x1dc11101a2a648807530e1e3226a451fb1b7ff7e1126764c41484d400439fa10"
+    }
+  },
+  "chainid": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "issuer": {
+    "pk_X": {
+      "x": [
+        "0x2a05f5757f9bee6d21d76d04d3c94e4147928e6a82684a600e5ff01e4150d0d2",
+        "0x04f5ddcb1f2c43876d4631e0eab69351b888de6ef4064094f92e3bd0455db378"
+      ],
+      "y": [
+        "0x203215acea06e2923ea72b0cbe15edf6d019d837851095d8e21bade5945e0bb7",
+        "0x2f518ff0e488ede9f71d781fd1fb89876e1419a48df0f3cd5657912d0710cf9d"
+      ]
+    },
+    "pk_Y": {
+      "x": [
+        "0x133b890d7fd9dbbec846800a62179e8143393b910bc18391787779c70ea5d384",
+        "0x03aa2fa01e08f1bcdbc5ac94c68a11150a2a1ae283333047c03c3dafd14f3e84"
+      ],
+      "y": [
+        "0x0b019f684d610e60771764144c3754cb9177784574f84e576cdf382137c71c68",
+        "0x2e31c3d9ac454dbf23bab9b83c481a55636eb387a66c83081e31a6c931bb2410"
+      ]
+    },
+    "sk_x": "0x2d9dfcc0a58048907908a3697bb7d392d9e2aefa9d4ffafc925bb8dc7cd1aa7e",
+    "sk_y": "0x038c1eaeb23b6e68793e4a4b8b27c8c5063dfc848630efbfe2d7f523cb362019"
+  },
+  "seed": "0x00000000000000000000000000000000000000000000000000000000a1bcb0ca"
+}

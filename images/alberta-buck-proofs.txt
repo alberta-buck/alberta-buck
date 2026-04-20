@@ -59,10 +59,6 @@ of the series relies on:
   – both counterparties recover the other's identity point in every
   accepted spend.
 
-An appendix preserves the original CryptoNote-style stealth-address
-spend proof (*Theorem A.1*) used in an earlier draft of BUCK Notes; the
-current Notes design supersedes it via Theorems 7-11.
-
 Every theorem is accompanied by an executable `py_ecc' sanity check on
 BN254.  The proofs assume only the q-SDH assumption (for PS signature
 unforgeability), the discrete logarithm assumption on \(
@@ -103,15 +99,9 @@ Table of Contents
 .. 5. Theorem 10 (Nullifier Construction and Double-Spend Prevention)
 .. 6. Theorem 11 (Mutual-Decryptability Preservation)
 .. 7. Sanity Check (py_ecc on BN254)
-6. Appendix A: Stealth-Address Primitive (Preserved; Not Used by Current Notes)
-.. 1. Setup
-.. 2. The Statement
-.. 3. Protocol (Fiat-Shamir Schnorr on \( pk^\ast \))
-.. 4. Theorem A.1 (Targeted-Note Spend Soundness)
-.. 5. Corollaries
-.. 6. Sanity Check (py_ecc on BN254)
-7. Security Assumptions Summary
-8. Implementation Notes
+.. 8. Worked Example: End-to-End A1 Note Transfer (SNARK Relations)
+6. Security Assumptions Summary
+7. Implementation Notes
 .. 1. What the Contract Must Enforce
 .. 2. What the Prover Must Enforce
 .. 3. Scope Not Covered Here
@@ -1292,322 +1282,171 @@ Table of Contents
   holder's \( sk \).
 
 
-6 Appendix A: Stealth-Address Primitive (Preserved; Not Used by Current Notes)
-══════════════════════════════════════════════════════════════════════════════
+5.8 Worked Example: End-to-End A1 Note Transfer (SNARK Relations)
+─────────────────────────────────────────────────────────────────
 
-  *Historical note.* This appendix preserves the proof of a primitive
-  used in an earlier draft of BUCK Notes (the "Type 3 stealth-targeted"
-  note).  The current Notes design (`alberta-buck-notes.org') does /not/
-  use a stealth address; recipient binding is achieved by ElGamal
-  re-randomization plus Chaum-Pedersen equality (Theorems 7-8 above),
-  which preserves the BUCK mutual-decryptability invariant (Theorem 11)
-  that a stand-alone stealth address does not.  The proof below remains
-  a sound primitive on BN254 should a future revision wish to invoke it.
-
-  The Type 3 ("stealth-targeted") note of the BUCK Notes design
-  ([Notes], "Three Identity Bindings") prints a note that only a
-  /pre-designated recipient/ can spend, while preserving the printer's
-  ability to publish the note in plain sight (paper, email, message
-  body) without leaking who the recipient is to anyone but the recipient
-  himself.  The construction is the CryptoNote stealth address[5]
-  adapted to BN254: the printer picks an ephemeral scalar \( r \) and
-  publishes \( R = r \cdot G \) alongside the note commitment; the
-  stealth public key
-
-  \[ pk^\ast \;=\; H(s) \cdot pk_{\text{recipient}}, \qquad s \;=\; r
-    \cdot pk_{\text{recipient}} \;=\; sk_{\text{recipient}} \cdot R, \]
-
-  is bound into the commitment.  The spend predicate is a Schnorr proof
-  of knowledge of the discrete log of \( pk^\ast \), bound by
-  Fiat-Shamir to the on-chain transaction.  This Part proves that only
-  the holder of \( sk_{\text{recipient}} \) can satisfy the predicate.
-
-
-[Notes] <file:alberta-buck-notes.org>
-
-6.1 Setup
-─────────
-
-  • \( pk_{\text{recipient}} = sk_{\text{recipient}} \cdot G \in G_1 \)
-    is a registered identity public key (registered as in Part I via PS
-    credential, or directly as a stand-alone Schnorr key).
-  • \( r \leftarrow \mathbb{Z}_q^\ast \) is an ephemeral scalar chosen
-    by the printer; \( R = r \cdot G \) is published with the note.
-  • \( H : G_1 \to \mathbb{Z}_q^\ast \) is a hash function modelled as a
-    random oracle, with output bound to a domain-separation tag to
-    prevent cross-protocol collisions.
-  • The shared point is \( s = r \cdot pk_{\text{recipient}} =
-    sk_{\text{recipient}} \cdot R \in G_1 \) (the standard ECDH
-    agreement on \( G_1 \)); it is computable by the printer (who knows
-    \( r \)) and by the recipient (who knows \( sk_{\text{recipient}}
-    \)), and by no one else.
-  • The stealth secret is \( sk^\ast = H(s) \cdot sk_{\text{recipient}}
-    \bmod q \); by construction \( pk^\ast = sk^\ast \cdot G \).
-  • The note commitment is \( cm = H_{\text{cm}}\!\left(v,\
-    \text{age}_0,\ t_{\text{print}},\ \rho,\
-    \text{predicate}\bigl(pk^\ast, R\bigr)\right) \).
-
-
-6.2 The Statement
-─────────────────
-
-  To spend the note, the prover must demonstrate knowledge of a scalar
-  \( \alpha \in \mathbb{Z}_q \) satisfying
-
-  \[ \alpha \cdot G \;=\; pk^\ast \tag{T1} \]
-
-  /and/ that \( pk^\ast \) is the stealth public key of an unspent note
-  in the commitment tree.  (T1) is a single-statement Schnorr proof of
-  knowledge.  The membership predicate is enforced by the SNARK circuit
-  that opens \( cm \) and checks the nullifier; it is orthogonal to the
-  spend-key argument and is not analyzed in this section.
-
-
-6.3 Protocol (Fiat-Shamir Schnorr on \( pk^\ast \))
-───────────────────────────────────────────────────
-
-  *Commit.* Prover samples \( k \leftarrow \mathbb{Z}_q \) and computes
-  \( T = k \cdot G \).
-
-  *Challenge.*
-
-  \[ e \;=\; H_{\text{ch}}\!\left(G,\ pk^\ast,\ R,\
-     pk_{\text{recipient}},\ cm,\ T,\ \texttt{msg.sender},\
-     \texttt{chainid}\right).  \]
-
-  *Respond.* \( s_\alpha = k - e \cdot \alpha \bmod q \).
-
-  *Verify.* The contract recomputes \( e \) and checks \( s_\alpha \cdot
-  G + e \cdot pk^\ast \stackrel{?}{=} T \).
-
-
-6.4 Theorem A.1 (Targeted-Note Spend Soundness)
-───────────────────────────────────────────────
-
-  *Statement.* Let \( pk_{\text{recipient}} = sk_{\text{recipient}}
-  \cdot G \) and \( R = r \cdot G \) be points published alongside a
-  note, inducing \( pk^\ast = H(r \cdot pk_{\text{recipient}}) \cdot
-  pk_{\text{recipient}} \).  Suppose an adversary \( \mathcal{A} \),
-  running in time \( \tau \) and making \( q_H \) queries to \( H \) and
-  \( H_{\text{ch}} \), produces an accepting Schnorr transcript on \(
-  pk^\ast \) bound to the public inputs above with probability \(
-  \varepsilon \).  Then there is an algorithm \( \mathcal{B} \), running
-  in time \( O(\tau) \), that solves the discrete logarithm problem on
-  \( G_1 \) with probability at least \( \varepsilon \cdot (\varepsilon
-  - 1/q) / q_H \).  In particular, no efficient \( \mathcal{A} \)
-  lacking \( sk_{\text{recipient}} \) can satisfy the spend predicate
-  without first breaking DLog on BN254.
-
-  *Proof.* We reduce to DLog on \( G_1 \).  Given a DLog challenge \(
-  (G, Q) \) with \( Q = a \cdot G \) for unknown \( a \in \mathbb{Z}_q
-  \), \( \mathcal{B} \) proceeds as follows.
-
-  /Embedding./ Set \( pk_{\text{recipient}} := Q \) (so the unknown
-  discrete log \( a \) plays the role of \( sk_{\text{recipient}} \)).
-  Sample \( r \leftarrow \mathbb{Z}_q^\ast \) honestly and publish \( R
-  = r \cdot G \).  The shared point is \( s = r \cdot Q \), which \(
-  \mathcal{B} \) /can compute as a point/ even though it does not know
-  \( a \).
-
-  /Random-oracle programming./ When \( \mathcal{A} \) (or \( \mathcal{B}
-  \) itself, in setting up the challenge) queries \( H(s) \), respond
-  with a fresh uniform \( \sigma \leftarrow \mathbb{Z}_q^\ast \) and
-  record \( (s, \sigma) \).  All other \( H \) queries are answered
-  consistently with fresh uniform values.  The induced stealth key is \(
-  pk^\ast = \sigma \cdot Q \), which \( \mathcal{B} \) computes and
-  publishes as part of the note.
-
-  /Run \( \mathcal{A} \)./ Hand \( \mathcal{A} \) the public inputs \(
-  (G, R, pk_{\text{recipient}} = Q, cm) \) plus an arbitrary (simulated)
-  commitment-tree opening.  By assumption, with probability \(
-  \varepsilon \) the adversary produces an accepting Schnorr transcript
-  \( (T, e, s_\alpha) \) on \( pk^\ast \).
-
-  /Extraction by forking./ Apply the forking lemma[2]: rewind \(
-  \mathcal{A} \) to the point of the \( H_{\text{ch}} \) query that
-  produced \( e \), and re-execute with a fresh challenge \( e' \neq e
-  \).  With probability \( \varepsilon \cdot (\varepsilon - 1/q)/q_H \)
-  we obtain a second accepting transcript \( (T, e', s'_\alpha) \) with
-  the same commitment \( T \).  Subtracting:
-
-  \[ (s_\alpha - s'_\alpha) \cdot G + (e - e') \cdot pk^\ast = O
-     \;\Longrightarrow\; \alpha = (s'_\alpha - s_\alpha)(e - e')^{-1}
-     \bmod q, \quad \alpha \cdot G = pk^\ast.  \]
-
-  /Solving the DLog challenge./ Substitute the embedding: \( pk^\ast =
-  \sigma \cdot Q = \sigma \cdot a \cdot G \), so
-
-  \[ \alpha \equiv \sigma \cdot a \pmod q \;\Longrightarrow\; a
-     \;\equiv\; \alpha \cdot \sigma^{-1} \pmod q.  \]
-
-  \( \mathcal{B} \) outputs \( a \), solving the DLog instance.  \(
-  \blacksquare \)
-
-  *Remark on what the reduction does /not/ require.* The argument is
-  pure DLog on \( G_1 \); it does not invoke CDH or any pairing-based
-  assumption.  In particular, the printer's ability to compute the
-  shared point \( s \) (because she knows \( r \)) does /not/ help her
-  spend the note: she would still need to compute \( \alpha = H(s) \cdot
-  a \) without knowing \( a \), which is exactly the DLog problem on \(
-  pk_{\text{recipient}} \).  This is the cryptographic justification for
-  the design property "Alice can target Bob without retaining the
-  ability to redirect or claim the note herself."
-
-
-6.5 Corollaries
-───────────────
-
-  1. *Printer non-fungibility.* Even Alice (who knows \( r \), and hence
-     \( s \), and hence \( H(s) \)) cannot spend a note targeted to Bob
-     unless she also knows \( sk_{\text{bob}} \).  The reduction above
-     goes through with the printer in the adversary role: knowing \(
-     H(s) \) as a scalar reduces the spend problem to DLog on \(
-     pk_{\text{bob}} \), not below it.
-
-  2. *Recipient unlinkability across notes.* If \( r_1, r_2 \) are
-     independent ephemerals targeting the same \( pk_{\text{recipient}}
-     \), the resulting \( pk^\ast_1, pk^\ast_2 \) are computationally
-     independent (they differ by a multiplicative factor \(
-     H(s_1)/H(s_2) \) whose distribution is uniform under the ROM
-     assumption).  An on-chain observer cannot tell two notes are
-     addressed to the same recipient without the recipient's secret.
-
-  3. *No interaction during printing.* The protocol is fully
-     non-interactive between printer and recipient at print time: Alice
-     needs only \( pk_{\text{recipient}} \) (registered on chain or
-     shared once out of band).  Bob discovers his notes by trial
-     decryption: for each candidate note he scans, he computes \( s =
-     sk_{\text{bob}} \cdot R \) and checks whether \( H(s) \cdot
-     pk_{\text{bob}} \) appears in the note's commitment opening.  This
-     recovers Monero/CryptoNote scan semantics.
-
-
-6.6 Sanity Check (py_ecc on BN254)
-──────────────────────────────────
+  The block above asserts each theorem in isolation.  Below is a single
+  end-to-end run of one A1 note (addressed cheque, public issuer) from
+  issuance to deposit, structured as the two SNARK relations the prover
+  would attest to and the contract would verify – `mint_relation' and
+  `spend_relation' – plus a toy Merkle tree and nullifier set to make
+  the contract's role explicit.  An A2 transfer is the same relation
+  with the issuer-signature constraint dropped; a B1 transfer drops the
+  CP-equality constraint and re-keys the nullifier on \( \rho \) instead
+  of \( M_{\text{rec}} \).
 
   ┌────
-  │ # Reuse ORDER, G1, multiply, add, neg, eq, rand from the Theorem 1 setup.
-  │ # Hash a curve point to a non-zero scalar (random-oracle stand-in).
-  │ def H_scalar(P, tag=b"buck-notes|stealth|v1"):
-  │     data = tag + b"|" + str(P).encode()
-  │     h    = int(hashlib.sha256(data).hexdigest(), 16) % ORDER
-  │     return h if h != 0 else 1
+  │ # Reuses ORDER, G1, multiply, add, neg, eq, rand, hashlib, m, sk_alice,
+  │ # pk_alice, sk_bob, pk_bob, M_rec, R_r, C_r from prior blocks.
   │ 
-  │ # --- Setup: Bob is the recipient, Alice is the printer ---
-  │ sk_bob = rand()
-  │ pk_bob = multiply(G1, sk_bob)
+  │ def H_cm(*fields):
+  │     blob = b"buck-cm|" + b"|".join(str(f).encode() for f in fields)
+  │     return int(hashlib.sha256(blob).hexdigest(), 16) % ORDER
   │ 
-  │ r_eph  = rand()
-  │ R_eph  = multiply(G1, r_eph)
+  │ def H_node(l, r):
+  │     return int(hashlib.sha256(b"merk|" + str(l).encode() + b"|" +
+  │                               str(r).encode()).hexdigest(), 16) % ORDER
   │ 
-  │ # Shared point computed two ways (must agree -- ECDH on G_1)
-  │ s_alice = multiply(pk_bob, r_eph)         # printer's view: r * pk_bob
-  │ s_bob   = multiply(R_eph,  sk_bob)        # recipient's view: sk_bob * R
-  │ assert eq(s_alice, s_bob), "ECDH agreement failed"
-  │ sigma   = H_scalar(s_alice)               # = H(s)
+  │ def H_e(*fields):
+  │     return int(hashlib.sha256(b"|".join(str(f).encode()
+  │                                         for f in fields)).hexdigest(), 16) % ORDER
   │ 
-  │ # Stealth public key and the (recipient-only) stealth secret
-  │ pk_star = multiply(pk_bob, sigma)         # H(s) * pk_bob
-  │ sk_star = (sigma * sk_bob) % ORDER        # H(s) * sk_bob   (only Bob can compute)
-  │ assert eq(multiply(G1, sk_star), pk_star)
+  │ def schnorr_sign(sk, msg):
+  │     k = rand(); R = multiply(G1, k)
+  │     e = H_e(R, multiply(G1, sk), msg)
+  │     return (R, (k - e * sk) % ORDER)
   │ 
-  │ # --- Schnorr PoK of sk_star, Fiat-Shamir bound to public inputs ---
-  │ def schnorr_prove(witness, ctx):
-  │     k     = rand()
-  │     T     = multiply(G1, k)
-  │     tag   = b"|".join([b"schnorr-spend"] + ctx + [str(T).encode()])
-  │     e     = int(hashlib.sha256(tag).hexdigest(), 16) % ORDER
-  │     s_a   = (k - e * witness) % ORDER
-  │     return (T, e, s_a)
+  │ def schnorr_verify(pk, msg, sig):
+  │     R, s = sig
+  │     e = H_e(R, pk, msg)
+  │     return eq(add(multiply(G1, s), multiply(pk, e)), R)
   │ 
-  │ def schnorr_verify(pk, T, e, s_a, ctx):
-  │     tag   = b"|".join([b"schnorr-spend"] + ctx + [str(T).encode()])
-  │     e_chk = int(hashlib.sha256(tag).hexdigest(), 16) % ORDER
-  │     if e_chk != e:
+  │ def merkle(leaves, depth=3):                  # 8-leaf toy tree
+  │     layer = list(leaves) + [0] * (2**depth - len(leaves))
+  │     layers = [layer]
+  │     while len(layers[-1]) > 1:
+  │         prev = layers[-1]
+  │         layers.append([H_node(prev[2*i], prev[2*i+1])
+  │                        for i in range(len(prev)//2)])
+  │     return layers
+  │ 
+  │ def merkle_path(layers, idx):
+  │     path = []
+  │     for layer in layers[:-1]:
+  │         path.append((idx & 1, layer[idx ^ 1])); idx >>= 1
+  │     return path
+  │ 
+  │ def merkle_root(leaf, path):
+  │     h = leaf
+  │     for bit, sib in path:
+  │         h = H_node(sib, h) if bit else H_node(h, sib)
+  │     return h
+  │ 
+  │ # --- MINT (A1): Alice issues a 1,000-BUCK note to Bob ---------------
+  │ face = 1000
+  │ m_iss_pub = m                                 # A1: issuer M is in the clear
+  │ r_prime = rand()
+  │ R_n = add(R_r, multiply(G1, r_prime))         # E_note = re-randomized E_r
+  │ C_n = add(C_r, multiply(pk_bob, r_prime))
+  │ rho = rand()
+  │ cm  = H_cm("A1", face, rho, R_n, C_n, m_iss_pub)
+  │ sig_iss = schnorr_sign(m_iss_pub, cm)         # A1: sk = m_iss, pk = m_iss * G1
+  │ 
+  │ def mint_relation_A1(pub, wit):               # what the Mint SNARK proves
+  │     face_p, cm_p = pub
+  │     R_r_w, C_r_w, pk_rec_w, r_prime_w, rho_w, m_iss_w, sig_w = wit
+  │     R_n_w = add(R_r_w, multiply(G1, r_prime_w))
+  │     C_n_w = add(C_r_w, multiply(pk_rec_w, r_prime_w))
+  │     if H_cm("A1", face_p, rho_w, R_n_w, C_n_w, m_iss_w) != cm_p:
   │         return False
-  │     return eq(add(multiply(G1, s_a), multiply(pk, e)), T)
+  │     return schnorr_verify(multiply(G1, m_iss_w), cm_p, sig_w)
   │ 
-  │ ctx = [str(G1).encode(), str(pk_star).encode(), str(R_eph).encode(),
-  │        str(pk_bob).encode(), b"cm-placeholder",
-  │        b"msg.sender=0xBob", b"chainid=1"]
+  │ assert mint_relation_A1(
+  │     (face, cm),
+  │     (R_r, C_r, pk_bob, r_prime, rho, m_iss_pub, sig_iss))
+  │ print("Mint relation (A1):                          PASS  (cm opens; issuer sig verifies)")
   │ 
-  │ # --- Theorem A.1 completeness: Bob spends ---
-  │ pi_bob = schnorr_prove(sk_star, ctx)
-  │ assert schnorr_verify(pk_star, *pi_bob, ctx), "Theorem A.1 completeness FAILED"
-  │ print("Theorem A.1 (completeness, recipient):    PASS")
+  │ # Contract appends cm to noteTree; we put it at slot 3.
+  │ leaves = [0]*8; leaves[3] = cm
+  │ tree   = merkle(leaves, depth=3)
+  │ root   = tree[-1][0]
+  │ path   = merkle_path(tree, 3)
   │ 
-  │ # --- Corollary 1: Alice (printer) cannot spend ---
-  │ # She knows r_eph and sigma but NOT sk_bob.  Best-effort guess at sk_star:
-  │ # she can only multiply sigma by something she knows -- not sk_bob.
-  │ alice_guess  = (sigma * rand()) % ORDER     # pretend any scalar she knows
-  │ pi_alice     = schnorr_prove(alice_guess, ctx)
-  │ assert not schnorr_verify(pk_star, *pi_alice, ctx), \
-  │     "Corollary 1 FAILED: printer's proof should not verify"
-  │ print("Theorem A.1 (printer cannot spend):       PASS  (Alice's PoK rejected)")
+  │ # --- SPEND (A-spend): Bob deposits the note -------------------------
+  │ sk_dep  = sk_bob
+  │ R_reg, C_reg = R_r, C_r                       # Bob's currently registered cred.
+  │ M_rec_w = add(C_n, neg(multiply(R_n, sk_dep)))
+  │ nf      = int(hashlib.sha256(b"buck-nf|A|" + str(M_rec_w).encode()
+  │                               + b"|" + str(rho).encode()).hexdigest(), 16) % ORDER
   │ 
-  │ # --- Corollary: Eve (no secrets) cannot spend ---
-  │ eve_guess = rand()
-  │ pi_eve    = schnorr_prove(eve_guess, ctx)
-  │ assert not schnorr_verify(pk_star, *pi_eve, ctx), \
-  │     "Eve's proof should not verify"
-  │ print("Theorem A.1 (outsider cannot spend):      PASS  (Eve's PoK rejected)")
+  │ def spend_relation_A1(pub, wit):              # what the A-Spend SNARK proves
+  │     root_p, nf_p, face_p = pub
+  │     (cm_w, rho_w, R_n_w, C_n_w, m_iss_w, sig_w, path_w,
+  │      sk_dep_w, R_reg_w, C_reg_w) = wit
+  │     # (1) Merkle inclusion of cm in noteTree
+  │     if merkle_root(cm_w, path_w) != root_p:                       return False
+  │     # (2) commitment opening binds (face, rho, E_note, m_iss)
+  │     if H_cm("A1", face_p, rho_w, R_n_w, C_n_w, m_iss_w) != cm_w:  return False
+  │     # (3) nullifier keyed on M_rec recovered in-circuit
+  │     M_rec_c = add(C_n_w, neg(multiply(R_n_w, sk_dep_w)))
+  │     nf_c    = int(hashlib.sha256(b"buck-nf|A|" + str(M_rec_c).encode()
+  │                                   + b"|" + str(rho_w).encode()).hexdigest(), 16) % ORDER
+  │     if nf_c != nf_p:                                              return False
+  │     # (4) CP-equality: registered credential decrypts to the same M
+  │     M_reg_c = add(C_reg_w, neg(multiply(R_reg_w, sk_dep_w)))
+  │     if not eq(M_rec_c, M_reg_c):                                  return False
+  │     # (5) A1-only: issuer signature on cm verifies under m_iss * G
+  │     return schnorr_verify(multiply(G1, m_iss_w), cm_w, sig_w)
   │ 
-  │ # --- Soundness extractor: two transcripts with same T, distinct e ---
-  │ k     = rand()
-  │ T_fix = multiply(G1, k)
-  │ def respond(e):
-  │     return (k - e * sk_star) % ORDER
-  │ e_1, e_2 = rand(), rand()
-  │ while e_1 == e_2:
-  │     e_2 = rand()
-  │ s_1, s_2 = respond(e_1), respond(e_2)
-  │ # Verify both transcripts (without the FS challenge check, raw Schnorr)
-  │ def raw_verify(pk, T, e, s_a):
-  │     return eq(add(multiply(G1, s_a), multiply(pk, e)), T)
-  │ assert raw_verify(pk_star, T_fix, e_1, s_1)
-  │ assert raw_verify(pk_star, T_fix, e_2, s_2)
-  │ # Extract alpha = (s_2 - s_1) * (e_1 - e_2)^{-1} mod q
-  │ delta_e_inv = pow((e_1 - e_2) % ORDER, -1, ORDER)
-  │ alpha       = ((s_2 - s_1) * delta_e_inv) % ORDER
-  │ assert alpha == sk_star, "Theorem A.1 extractor FAILED"
-  │ # And alpha = sigma * sk_bob; recover sk_bob via sigma^{-1}:
-  │ sk_bob_rec = (alpha * pow(sigma, -1, ORDER)) % ORDER
-  │ assert sk_bob_rec == sk_bob, "DLog reduction step FAILED"
-  │ print("Theorem A.1 (extractor + DLog reduction): PASS  (alpha extracted; sk_bob = alpha / sigma)")
+  │ pub_spend = (root, nf, face)
+  │ wit_bob   = (cm, rho, R_n, C_n, m_iss_pub, sig_iss, path,
+  │              sk_dep, R_reg, C_reg)
+  │ assert spend_relation_A1(pub_spend, wit_bob)
+  │ print("Spend relation (A1, recipient):              PASS  (Merkle + opening + nf + CP + sig)")
   │ 
-  │ # --- Recipient scan: how Bob discovers his own notes ---
-  │ # Bob, given (R_eph, pk_star_candidate), tests whether he is the recipient.
-  │ s_test         = multiply(R_eph, sk_bob)
-  │ sigma_test     = H_scalar(s_test)
-  │ pk_star_check  = multiply(pk_bob, sigma_test)
-  │ assert eq(pk_star_check, pk_star), "scan check FAILED"
-  │ print("Targeted-note scan (recipient view):      PASS  (Bob recognizes his note)")
+  │ # Negative: issuer Alice tries to redeem the note Bob is addressed on.
+  │ wit_alice = (cm, rho, R_n, C_n, m_iss_pub, sig_iss, path,
+  │              sk_alice, R_reg, C_reg)
+  │ assert not spend_relation_A1(pub_spend, wit_alice)
+  │ print("Spend relation (issuer self-redeem):         PASS  (rejected: CP-equality fails)")
+  │ 
+  │ # --- Contract: nullifier set rejects double spend -------------------
+  │ spent = set()
+  │ def deposit(pub, wit):
+  │     if not spend_relation_A1(pub, wit):  return "reject:proof"
+  │     if pub[1] in spent:                  return "reject:double-spend"
+  │     spent.add(pub[1]);                   return f"accept:{pub[2]}"
+  │ 
+  │ assert deposit(pub_spend, wit_bob)  == f"accept:{face}"
+  │ assert deposit(pub_spend, wit_bob)  == "reject:double-spend"
+  │ print("Contract (nullifier set rejects replay):     PASS")
   └────
 
   ┌────
-  │ Theorem A.1 (completeness, recipient):    PASS
-  │ Theorem A.1 (printer cannot spend):       PASS  (Alice's PoK rejected)
-  │ Theorem A.1 (outsider cannot spend):      PASS  (Eve's PoK rejected)
-  │ Theorem A.1 (extractor + DLog reduction): PASS  (alpha extracted; sk_bob = alpha / sigma)
-  │ Targeted-note scan (recipient view):      PASS  (Bob recognizes his note)
+  │ Mint relation (A1):                          PASS  (cm opens; issuer sig verifies)
+  │ Spend relation (A1, recipient):              PASS  (Merkle + opening + nf + CP + sig)
+  │ Spend relation (issuer self-redeem):         PASS  (rejected: CP-equality fails)
+  │ Contract (nullifier set rejects replay):     PASS
   └────
 
+  *How to read the output:* The two relations `mint_relation_A1' and
+  `spend_relation_A1' are the precise statements a SNARK proof system
+  (Groth16 / PLONK on BN254) would attest to in production – they are
+  written as plain Python predicates here so the reader can trace each
+  constraint by hand.  Mint binds \( cm \) to \( (\text{face}, \rho,
+  E_{\text{note}}, m_{\text{iss}}) \) and to the issuer's Schnorr
+  signature; spend re-derives \( cm \) from the witness, checks Merkle
+  inclusion against the public root, recovers \( M_{\text{rec}} \) from
+  \( E_{\text{note}} \) under \( sk_{\text{dep}} \), checks the
+  nullifier against \( H_{\text{nf}}(A \| M_{\text{rec}} \| \rho) \),
+  proves CP-equality with the depositor's registered credential, and (A1
+  only) verifies the issuer signature on \( cm \).  The two negative
+  cases – issuer-self-redeem and double-spend – show the relation
+  rejecting the only two attacks the SNARK is responsible for filtering
+  at this layer.
 
-  *How to read the output:* Five PASS lines.  The first confirms
-  completeness (the legitimate recipient can always spend).  The next
-  two confirm the design property the reduction promises: neither the
-  printer (Alice, with \( r \) but not \( sk_{\text{bob}} \)) nor an
-  outsider (Eve, with neither) can fabricate an accepting proof.  The
-  fourth instantiates the Theorem A.1 reduction concretely: from two
-  transcripts on the same \( T \), the extractor recovers \( \alpha \),
-  and dividing by \( \sigma = H(s) \) recovers the underlying DLog
-  secret \( sk_{\text{bob}} \) – precisely the reduction step that would
-  solve the embedded DLog challenge in the security proof.  The final
-  line shows the recipient-side scan procedure that Bob runs to discover
-  notes addressed to him without any interaction with the printer.
 
-
-7 Security Assumptions Summary
+6 Security Assumptions Summary
 ══════════════════════════════
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1627,8 +1466,6 @@ Table of Contents
                                         + Sig + PoK   Schnorr EUF-CMA (DLog + ROM)                                          
    Theorem 10 (nullifier construction)  Poseidon-PRF  ROM (Poseidon), DLog (issuer-ignorance)  ROM, DLog                    
    Theorem 11 (mutual decryptability)   ElGamal       ElGamal correctness; Schnorr EUF-CMA     DLog, ROM                    
-   Theorem A.1 (stealth-targeted)       Schnorr+ECDH  DLog on \( G_1 \), ROM (preserved;       DLog, ROM                    
-                                                      not used by current Notes design)                                     
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Every assumption on the "yes" rows is already load-bearing for
   Ethereum itself (ECDSA on secp256k1 assumes DLog; every pairing-based
@@ -1637,10 +1474,10 @@ Table of Contents
   introduces /no novel/ cryptographic assumption.
 
 
-8 Implementation Notes
+7 Implementation Notes
 ══════════════════════
 
-8.1 What the Contract Must Enforce
+7.1 What the Contract Must Enforce
 ──────────────────────────────────
 
   The theorems assume a well-formed verifier.  Three conditions on the
@@ -1664,7 +1501,7 @@ Table of Contents
      via calldata the binding is severed and Theorem 6 does not apply.
 
 
-8.2 What the Prover Must Enforce
+7.2 What the Prover Must Enforce
 ────────────────────────────────
 
   • *Uniform randomness for \( t, k_1, k_2, r_b \).* Theorems 2 and 5
@@ -1680,7 +1517,7 @@ Table of Contents
     longer bound to the intended transaction.
 
 
-8.3 Scope Not Covered Here
+7.3 Scope Not Covered Here
 ──────────────────────────
 
   • /Knowledge soundness/ of the registration-time NIZK that binds \(
@@ -1736,13 +1573,3 @@ scheme is EUF-CMA secure under the discrete logarithm assumption in
 the random oracle model; see Pointcheval and Stern (2000) [2] for the
 forking-lemma reduction, and Bellare and Neven, "Multi-signatures in
 the Plain Public-Key Model" (CCS 2006) for tightened security bounds.
-
-[5] van Saberhagen, N.  "CryptoNote v 2.0."  2013.  Section 4.3
-("Unlinkable payments") introduces the one-time stealth-address
-construction \( P = H_s(rA) G + B \) used by Monero and adapted here
-to the multiplicative form \( pk^\ast = H(s) \cdot
-pk_{\text{recipient}} \) that fits the BUCK identity's existing
-public-key structure.  The security argument in CryptoNote is
-informal; Theorem A.1 (Appendix A) makes the DLog-on-\( G_1 \)
-reduction explicit on BN254.  Note that the current BUCK Notes design
-does not invoke this primitive; see Appendix A's historical note.
