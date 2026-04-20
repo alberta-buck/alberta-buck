@@ -163,6 +163,19 @@ contract IdentityRegistry {
         emit PublicSet(msg.sender, _isPublic);
     }
 
+    /// @notice Governance-only: flag a system contract address (e.g. the Notes
+    ///         commitment pool) as public.  System accounts have no PS-signed
+    ///         credential, so they cannot self-register; this hook lets them
+    ///         act as the recipient side of identity-bound transfers without
+    ///         a Chaum-Pedersen receipt.  No `isVerified` flag is set: the
+    ///         account remains an unregistered public sink.
+    function setSystemPublic(address account, bool _isPublic) external {
+        require(msg.sender == governance, "not governance");
+        require(account != address(0),    "account=0");
+        isPublic[account] = _isPublic;
+        emit PublicSet(account, _isPublic);
+    }
+
     // ---- approve verification ----------------------------------------------
 
     /// @notice Verify Alice's Chaum-Pedersen proof of equal-plaintext re-encryption
