@@ -1,23 +1,23 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                THE ALBERTA BUCK - ETHEREUM IMPLEMENTATION
-                              (DRAFT V0.2)
+                              (DRAFT V0.3)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-                          2026-03-07 12:00:00
+                          2026-04-20 12:00:00
 
 
 <https://perry.kundert.ca/images/dominion-logo.png>
 
 This document presents a concrete Ethereum implementation of the
-[Alberta Buck Architecture], specifying the four core smart contracts:
+[Alberta Buck Architecture], specifying the five core smart contracts:
 
 1. *BUCK_CREDIT* (ERC-721): An NFT representing an insurer's offer of
    parametric insurance on a real-world asset, with deterministic
    depreciation curves and piecemeal client activation.
-2. *IdentityRegistry* (Custom): An on-chain registry of per-address
+2. *IdentityRegistry* (custom): An on-chain registry of per-address
    Pointcheval-Sanders signature credentials and ElGamal-encrypted
    identity points, verified via a BN254-precompile NIZK at registration
    time.  This is the trust anchor every BUCK transfer is gated on – see
@@ -28,11 +28,19 @@ This document presents a concrete Ethereum implementation of the
    insurance premiums, and *identity-aware* `approve' and `transfer'
    flows that enforce the BUCK mutual-decryptability invariant on every
    counterparty pair via Chaum-Pedersen NIZK re-encryption proofs.
-4. *BUCK_K* (Custom): A controller that supplies the dynamic Value
-   Stabilization Factor used in credit-limit computation.  The eventual
-   on-chain PID + commodity-oracle implementation is summarised below;
-   the first deployment uses a simplified governance-set value to keep
-   the focus on the identity layer.
+4. *Notes* (custom): A privacy-preserving denomination layer on top of
+   BUCK.  Clients escrow BUCK into a commitment pool by posting a
+   Groth16 SNARK that ties the deposited `totalFace' to a batch of
+   Poseidon-hash note commitments; no information about individual note
+   values, flavours, or identity bindings leaves the wallet.  See
+   [Notes] and [Proofs] for the circuit design.
+5. *BUCK_K* (custom): A controller that supplies the dynamic Value
+   Stabilization Factor used in credit-limit computation.  The first
+   deployment uses `BuckKControllerStatic', a governance-settable
+   constant, so the identity and notes layers can land first; the
+   eventual on-chain PID + commodity-basket oracle implementation
+   (`BuckKController') is fully specified below and slots in at the same
+   interface.
 
 This is the first of several planned implementation approaches.  The
 ERC-721 approach is chosen for its clarity, wide tooling support, and
@@ -40,9 +48,7 @@ natural fit for unique insured assets.  Subsequent documents will
 examine ERC-1155 (semi-fungible batch credits), ERC-3643 (regulated
 security token with identity compliance), and ERC-4626 (vault-based
 credit pooling).  The *Implementation Plan* at the end of this document
-specifies the concrete phased build order, starting from minimal stubs
-of BUCK_CREDIT and BUCK_K so the cryptographic identity work can land
-first.
+specifies the concrete phased build order and tracks completion status.
 
 Table of Contents
 ─────────────────
@@ -66,37 +72,45 @@ Table of Contents
 .. 2. Identity-Aware `approve()'
 .. 3. Identity-Aware `transfer()' and `transferFrom()'
 .. 4. Default Insurance Premium
-6. BUCK_K: On-Chain PID Value Stabilization Controller
+6. BUCK_K: Value Stabilization Controller
 .. 1. Process Variable and Setpoint
 .. 2. Solidity Implementation
 .. 3. PID Tuning Considerations
 .. 4. Adaptive Gain Scheduling (Future Enhancement)
-7. Integration: Full mint() and transfer() Walkthrough
+7. Notes: Privacy-Preserving Denomination
+.. 1. Mint Circuit (circom, Groth16 on BN254)
+.. 2. `IMintVerifier' and `MintVerifierAdapter'
+.. 3. `Notes' Contract
+8. Integration: Full mint() and transfer() Walkthrough
 .. 1. Step 0: Identity Registration (One-Time)
 .. 2. Step 1: Mint
 .. 3. Step 2: Approve Bob (Identity Handshake)
 .. 4. Step 3: Bob Pulls the Transfer
-8. Gas Cost Analysis
-9. Security Considerations
+.. 5. Step 4: Alice Denominates 125 BUCK as Notes
+9. Gas Cost Analysis
+10. Security Considerations
 .. 1. Oracle Manipulation
 .. 2. Credit Enumeration DoS
 .. 3. Insurer Trust
 .. 4. Reentrancy
-10. Future Approaches
+11. Future Approaches
 .. 1. ERC-1155: Semi-Fungible Batch Credits
 .. 2. ERC-3643 (T-REX): Regulated Security Token
 .. 3. ERC-4626: Vault-Based Insurance Pool
 .. 4. L2 and Cross-Chain Deployment
-11. Implementation Plan
-.. 1. Testing Strategy: Three Layers
-.. 2. Off-Chain Wallet (alberta_buck.wallet, Python)
-.. 3. Phase 0: Stub the Surrounding Contracts
-.. 4. Phase 1: BN254 Helper Library
-.. 5. Phase 2: `IdentityRegistry' Contract
-.. 6. Phase 3: Identity-Aware `Buck' ERC-20
-.. 7. Phase 4: Public-Claim Account Support
-.. 8. Phase 5: Notes Scaffolding
-.. 9. Sequencing and Stop Conditions
+12. Implementation Plan
+.. 1. Phase Completion Status (current)
+.. 2. Testing Strategy: Three Layers
+.. 3. Off-Chain Wallet (alberta_buck.wallet, Python)
+.. 4. Phase 0: Stub the Surrounding Contracts
+.. 5. Phase 1: BN254 Helper Library
+.. 6. Phase 2: `IdentityRegistry' Contract
+.. 7. Phase 3: Identity-Aware `Buck' ERC-20
+.. 8. Phase 4: Public-Claim Account Support
+.. 9. Phase 5: Notes Scaffolding
+.. 10. Phase 6: Groth16 Mint Circuit + Verifier
+.. 11. Phase 7 and Beyond
+.. 12. Sequencing and Stop Conditions
 
 
 [Alberta Buck Architecture] </range/finance/alberta-buck-architecture/>
@@ -105,15 +119,20 @@ Table of Contents
 
 [Proofs] <file:alberta-buck-proofs.org>
 
+[Notes] <file:alberta-buck-notes.org>
+
 
 1 Contract Architecture Overview
 ════════════════════════════════
 
-  The Alberta Buck Ethereum implementation comprises four interacting
+  The Alberta Buck Ethereum implementation comprises five interacting
   contracts.  The `IdentityRegistry' is the trust anchor of every BUCK
   transfer: `mint', `approve' and `transfer' are all gated on the sender
   (and, where relevant, the recipient) holding a verified, registered
-  identity credential.
+  identity credential.  The `Notes' contract sits on top of BUCK as a
+  public (`setSystemPublic') counterparty whose commitments pool is
+  extended only when the caller supplies a Groth16 SNARK binding the
+  deposited `totalFace' to a batch of Poseidon note commitments.
 
   <file:./images/buck-eth-layers.png>
 
@@ -142,10 +161,23 @@ Table of Contents
      recipients must have a stored receipt fragment from a prior
      `approve') and emit a `BuckTransferReceipt' event carrying only
      ciphertext hashes.
-  7. `BUCK_K' ships in two stages.  *Phase 0* uses a simplified
-     governance-set static value, so the identity layer can land first.
-     The on-chain PID + commodity-oracle implementation described in the
-     [BUCK_K] section is the eventual replacement.
+  7. To denominate holdings as private notes, the client calls
+        `Notes.mint(proofBytes, cm[], totalFace)'.  The
+        `MintVerifierAdapter' decodes the proof as `(uint256[2],
+        uint256[2][2], uint256[2])' and forwards to the
+        snarkjs-generated `MintGroth16Verifier', which checks a Groth16
+        proof with public signals `[totalFace, cm[0], cm[1]]'.  The
+        circuit enforces `totalFace =' ∑ v_i= and `cm_i ='
+        Poseidon(flavor_i, v_i, rho_i, idHash_i, predicate_i)= per note.
+        The `Notes' contract is registered `setSystemPublic(true)' so
+        its `transferFrom' pull from the minter satisfies the
+        identity-aware `BUCK' transfer rules without itself holding a
+        private credential.
+  8. `BUCK_K' ships in two stages.  *Phase 0* uses
+     `BuckKControllerStatic' with a governance-settable value, so the
+     identity and notes layers can land first.  The on-chain PID +
+     commodity-oracle implementation (`BuckKController', described in
+     the [BUCK_K] section) is the eventual replacement.
 
 
 [BUCK_K] See section 6
@@ -543,19 +575,28 @@ Table of Contents
   │     struct PSPubKey  { G2Point X; G2Point Y; }                 // issuer (X, Y) in G_2
   │ 
   │     // NIZK binding the PS signature to the ElGamal ciphertext (registration).
+  │     // Six-element Schnorr-family sigma protocol; A_ps is the PS-side commitment
+  │     // m_tilde * sigma'_1, indispensable for the pairing-product check (a).
   │     struct RegistrationProof {
   │         uint256 e;       // Fiat-Shamir challenge
   │         uint256 s_m;     // response for the identity scalar m
   │         uint256 s_r;     // response for the ElGamal randomness r
-  │         G1Point T_b;     // commitment binding C = r*pk + m*G
-  │         G1Point T_r;     // commitment binding R = r*G
+  │         G1Point A_ps;    // PS-side commitment: m_tilde * sigma'_1
+  │         G1Point T_C;     // ElGamal C commitment: m_tilde*G + r_tilde*pk
+  │         G1Point T_R;     // ElGamal R commitment: r_tilde * G
   │     }
   │ 
-  │     // Chaum-Pedersen proof of equality of plaintexts (per-approve).
+  │     // Chaum-Pedersen proof of equality of plaintexts (per-approve).  T1, T2, T3
+  │     // commitments must be in calldata: only T3 (Check 1) and T1-T2 (Check 2)
+  │     // are recoverable from the verification equations, so a transcript that
+  │     // binds T1 and T2 separately requires both.
   │     struct CPProof {
   │         uint256 e;       // Fiat-Shamir challenge
   │         uint256 s1;      // response for sk_alice
-  │         uint256 s2;      // response for r_b (bob's ciphertext randomness)
+  │         uint256 s2;      // response for r' (re-encryption randomness for bob)
+  │         G1Point T1;      // k1 * R_alice
+  │         G1Point T2;      // k2 * pk_bob
+  │         G1Point T3;      // k2 * G
   │     }
   │ 
   │     // --- Per-address identity state ---
@@ -573,77 +614,107 @@ Table of Contents
   │     event IssuerTrusted(address indexed issuer);
   │ 
   │     /// @notice One-time per-address registration with PS+NIZK proofs (~235K gas).
-  │     /// @param  _pk           Identity public key (G_1) generated by the wallet.
-  │     /// @param  E             ElGamal ciphertext (R, C) = (r*G, r*pk + M) of identity point M.
-  │     /// @param  issuer        Address of the issuer whose PS signature appears in sigma'.
-  │     /// @param  sigma         Rerandomized PS signature (sigma'_1, sigma'_2) on m = H(identity_data).
-  │     /// @param  proof         NIZK proof binding sigma to E under pk.
+  │     /// @param  issuer  Address of the issuer whose PS signature appears in sigma'.
+  │     /// @param  pk      Identity public key (G_1) generated by the wallet.
+  │     /// @param  E       ElGamal ciphertext (R, C) = (r*G, r*pk + M) of identity point M.
+  │     /// @param  sigma   Rerandomized PS signature (sigma'_1, sigma'_2) on m = H(identity_data).
+  │     /// @param  proof   NIZK proof binding sigma to E under pk.
   │     function register(
-  │         G1Point calldata _pk,
-  │         ElGamalCT calldata E,
   │         address issuer,
+  │         G1Point calldata pk,
+  │         ElGamalCT calldata E,
   │         PSSig calldata sigma,
   │         RegistrationProof calldata proof
   │     ) external {
   │         require(!isVerified[msg.sender], "already registered");
-  │         PSPubKey memory ipk = trustedIssuers[issuer];
-  │         require(ipk.X.X[0] | ipk.X.X[1] != 0, "untrusted issuer");
+  │         require(isTrustedIssuer[issuer], "untrusted issuer");
   │ 
   │         // (1) Recompute Fiat-Shamir challenge with full context binding.
   │         uint256 e_check = BN254.fsRegistration(
-  │             sigma, E, _pk, proof.T_b, proof.T_r, msg.sender
+  │             sigma, E, pk, proof.A_ps, proof.T_C, proof.T_R, msg.sender
   │         );
   │         require(e_check == proof.e, "bad NIZK challenge");
   │ 
   │         // (2) Verify NIZK consistency in G_1 (ecMul/ecAdd, ~30K gas).
   │         require(
-  │             BN254.checkRegistrationNIZK(_pk, E, sigma, proof, ipk),
+  │             BN254.checkRegistrationNIZK(pk, E, sigma, proof, _trustedIssuers[issuer]),
   │             "bad NIZK proof"
   │         );
   │ 
   │         // (3) Verify PS signature relation via ecPairing precompile (~147K gas).
   │         require(
-  │             BN254.checkPSSignature(sigma, ipk, proof),
+  │             BN254.checkPSSignature(sigma, _trustedIssuers[issuer], proof),
   │             "bad PS signature"
   │         );
   │ 
-  │         pk[msg.sender]      = _pk;
-  │         E_addr[msg.sender]  = E;
+  │         _pk[msg.sender]      = pk;
+  │         _E_addr[msg.sender]  = E;
   │         isVerified[msg.sender] = true;
+  │         issuerOf[msg.sender]   = issuer;
   │         emit Registered(msg.sender, issuer);
   │     }
   │ 
   │     /// @notice Opt in/out of "public" identity (M is published, no per-tx CP required).
-  │     ///         Used for AMM pools, treasury accounts, and other DeFi infrastructure.
+  │     ///         Used for AMM pools, treasury accounts, and other DeFi infrastructure
+  │     ///         that control their own private key.
   │     function setPublic(bool _isPublic) external {
   │         require(isVerified[msg.sender], "not registered");
   │         isPublic[msg.sender] = _isPublic;
   │         emit PublicSet(msg.sender, _isPublic);
   │     }
   │ 
+  │     /// @notice Governance marks a system contract (e.g. Notes, InsurancePool) as public
+  │     ///         without requiring it to self-register.  System contracts have no private
+  │     ///         key to generate CP proofs with, but they are well-known trusted counterparties.
+  │     function setSystemPublic(address account, bool _isPublic) external {
+  │         require(msg.sender == governance, "not governance");
+  │         require(account != address(0),    "account=0");
+  │         isPublic[account] = _isPublic;
+  │         emit PublicSet(account, _isPublic);
+  │     }
+  │ 
   │     /// @notice Verify a Chaum-Pedersen proof that E_bob re-encrypts the identity
-  │     ///         registered to `sender` under `recipient`'s public key.
+  │     ///         registered to `sender` under `spender`'s public key.
   │     /// @dev    Called by Buck.approve(); E_alice is read from storage here.
   │     ///         ~29K gas of ecMul/ecAdd + Fiat-Shamir reconstruction.
   │     function verifyApprove(
   │         address sender,
-  │         address recipient,
+  │         address spender,
   │         ElGamalCT calldata E_bob,
   │         CPProof calldata pi
   │     ) external view returns (bool) {
-  │         require(isVerified[sender],    "sender not verified");
-  │         require(isVerified[recipient], "recipient not verified");
-  │         ElGamalCT storage E_alice = E_addr[sender];
+  │         require(isVerified[sender],  "sender not verified");
+  │         require(isVerified[spender], "spender not verified");
+  │         ElGamalCT storage E_alice = _E_addr[sender];
   │         return BN254.checkChaumPedersen(
-  │             E_alice, E_bob, pk[sender], pk[recipient], pi, sender, recipient
+  │             E_alice, E_bob, _pk[sender], _pk[spender], pi, sender, spender
   │         );
   │     }
   │ 
   │     /// @notice Governance whitelists an authorized issuer's PS public key.
   │     function trustIssuer(address issuer, PSPubKey calldata ipk) external {
   │         require(msg.sender == governance, "not governance");
-  │         trustedIssuers[issuer] = ipk;
+  │         _trustedIssuers[issuer] = ipk;
+  │         isTrustedIssuer[issuer] = true;
   │         emit IssuerTrusted(issuer);
+  │     }
+  │ 
+  │     /// @notice Governance revokes a previously trusted issuer.  Does not un-register
+  │     ///         existing accounts; only prevents new registrations under that issuer.
+  │     function revokeIssuer(address issuer) external {
+  │         require(msg.sender == governance, "not governance");
+  │         require(isTrustedIssuer[issuer],  "not trusted");
+  │         isTrustedIssuer[issuer] = false;
+  │         delete _trustedIssuers[issuer];
+  │         emit IssuerRevoked(issuer);
+  │     }
+  │ 
+  │     function transferGovernance(address next) external {
+  │         require(msg.sender == governance, "not governance");
+  │         require(next != address(0),       "next=0");
+  │         address prev = governance;
+  │         governance = next;
+  │         emit GovernanceTransferred(prev, next);
   │     }
   │ }
   └────
@@ -724,13 +795,15 @@ Renewal>
   │ interface IIdentityRegistry {
   │     struct G1Point   { uint256 X; uint256 Y; }
   │     struct ElGamalCT { G1Point R; G1Point C; }
-  │     struct CPProof   { uint256 e; uint256 s1; uint256 s2; }
+  │     struct CPProof   {
+  │         uint256 e; uint256 s1; uint256 s2;
+  │         G1Point T1; G1Point T2; G1Point T3;
+  │     }
   │ 
   │     function isVerified(address) external view returns (bool);
   │     function isPublic(address)   external view returns (bool);
-  │     function E_addr(address) external view returns (G1Point memory, G1Point memory);
   │     function verifyApprove(
-  │         address sender, address recipient,
+  │         address sender, address spender,
   │         ElGamalCT calldata E_bob, CPProof calldata pi
   │     ) external view returns (bool);
   │ }
@@ -995,14 +1068,32 @@ Renewal>
 </range/finance/alberta-buck-architecture/#value-stabilization>
 
 
-6 BUCK_K: On-Chain PID Value Stabilization Controller
-═════════════════════════════════════════════════════
+6 BUCK_K: Value Stabilization Controller
+════════════════════════════════════════
 
   The `BUCK_K' contract maintains purchasing-power parity between the
-  BUCK and its commodity basket.  It implements a PID
-  (Proportional-Integral-Derivative) controller identical in structure
-  to the project's [ownercredit PID controller], ported to Solidity
-  fixed-point arithmetic.
+  BUCK and its commodity basket.  It ships in two stages behind a shared
+  one-function interface (`currentBuckK() external view returns
+  (uint256)') so the `Buck' contract is invariant to which stage is
+  deployed:
+
+  • *Phase 0 – `BuckKControllerStatic'*: a governance-settable constant.
+    Constructor `(uint256 _buckK, address _governance)'; functions
+    `currentBuckK()', `compute()' (no-op, returns the stored value),
+    `setBuckK(uint256)' (governance-only),
+    `transferGovernance(address)'.  This is the version currently
+    deployed alongside the identity and notes layers so those layers can
+    land first.
+  • *Phase Later – `BuckKController'*: a full PID implementation,
+    identical in structure to the project's [ownercredit PID
+    controller], ported to Solidity fixed-point arithmetic.  It reads a
+    commodity basket from Chainlink feeds and the BUCK/USDC price from a
+    Uniswap V3 TWAP, runs a P/I/D update on `compute()' once per `dT'
+    seconds, and writes the new `buckK'.
+
+  The PID implementation is documented in full below; the `Buck' ERC-20
+  reads only `currentBuckK()' from either variant, so swapping one for
+  the other is a constructor argument.
 
 
 [ownercredit PID controller] <https://github.com/pjkundert/ownercredit>
@@ -1247,7 +1338,188 @@ Renewal>
   spiking the derivative term.
 
 
-7 Integration: Full mint() and transfer() Walkthrough
+7 Notes: Privacy-Preserving Denomination
+════════════════════════════════════════
+
+  BUCK transfers carry a public `(from, to, amount)' quartet.  For
+  private value movement, holders denominate their BUCKs as *notes*: a
+  pair of Poseidon-hash commitments posted to the `Notes' contract,
+  backed by an equal amount of BUCK locked in that contract.  Notes do
+  not leak values, flavours, or identity bindings – the public state is
+  just a list of opaque 32-byte commitments and a running face-value
+  total.
+
+  The design is specified in full in [Notes] and the underlying SNARK
+  construction in [Proofs].  This section documents the Ethereum
+  surface: the `Notes' contract, the `IMintVerifier' interface, the
+  circom Groth16 mint circuit, and the adapter that bridges the two.
+
+
+[Notes] <file:alberta-buck-notes.org>
+
+[Proofs] <file:alberta-buck-proofs.org>
+
+7.1 Mint Circuit (circom, Groth16 on BN254)
+───────────────────────────────────────────
+
+  `circuits/mint.circom' is pinned at `N = 2' commitments per batch for
+  the Phase 2 deployment.  A variable-N deployment re-templates both the
+  circuit and the `MintVerifierAdapter''s public-signals arity.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Signal          Role     Description                                                         
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+   `totalFace'     public   Sum of note values, in BUCK (18 decimals)                           
+   `cm[i]'         public   Poseidon(5)(flavor, v, rho, idHash, predicate) for each note \(i\)  
+   `flavor[i]'     private  Note flavour (A1/A2/B1 from Notes design; 2 == A2 in tests)         
+   `v[i]'          private  Note value (18-decimal integer, sum of v[i] must equal `totalFace') 
+   `rho[i]'        private  Per-note randomness                                                 
+   `idHash[i]'     private  Hash of the identity binding for this note                          
+   `predicate[i]'  private  Predicate commitment (zero for the plain mint path)                 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Constraints: 2 Poseidon-hash checks (`cm[i] ==' Poseidon(5)(…)=) and
+  one sum check (`totalFace ==' sum v[i]=).  snarkjs compiles this to
+  648 non-linear + 1023 linear R1CS constraints; a ceremonial 2^12
+  powers-of-tau and groth16 phase-2 setup under `scripts/snark/setup.sh'
+  emits `src/MintGroth16Verifier.sol', the auto-generated snarkjs
+  verifier:
+
+  ┌────
+  │ interface IMintGroth16 {
+  │     function verifyProof(
+  │         uint256[2]    calldata a,
+  │         uint256[2][2] calldata b,
+  │         uint256[2]    calldata c,
+  │         uint256[3]    calldata pubSignals   // [totalFace, cm[0], cm[1]]
+  │     ) external view returns (bool);
+  │ }
+  └────
+
+  The trusted-setup contributions in `setup.sh' use a fixed dev-only
+  entropy string.  A production deployment must run a real multi-party
+  ceremony; the same script is the scaffolding.
+
+
+7.2 `IMintVerifier' and `MintVerifierAdapter'
+─────────────────────────────────────────────
+
+  The `Notes' contract is decoupled from the specific SNARK toolchain
+  via a narrow interface:
+
+  ┌────
+  │ interface IMintVerifier {
+  │     /// @return ok  true iff (proof, totalFace, commitments) is a valid mint witness for `issuer`.
+  │     function verifyMint(
+  │         bytes    calldata proof,
+  │         uint256           totalFace,
+  │         uint256[] calldata commitments,
+  │         address           issuer
+  │     ) external view returns (bool);
+  │ }
+  └────
+
+  Two implementations ship today:
+
+  • `StubMintVerifier' (Phase 1): returns a governance-controlled
+    boolean.  Used in the initial deployment and all unit tests that
+    exercise state transitions unrelated to the SNARK itself.
+  • `MintVerifierAdapter' (Phase 2): decodes `proof' as
+    `abi.encode(uint256[2], uint256[2][2], uint256[2])', rebuilds the
+    `pubSignals' array as `[totalFace, commitments[0], commitments[1]]',
+    and forwards to `MintGroth16Verifier.verifyProof'.
+    `MINT_BATCH_SIZE' is a public constant (`2').
+
+  Swapping the verifier is a single governance call
+  (`Notes.setMintVerifier(address)'); the `Notes' contract's own storage
+  and event surface are invariant.
+
+
+7.3 `Notes' Contract
+────────────────────
+
+  ┌────
+  │ // SPDX-License-Identifier: GPL-3.0-or-later
+  │ pragma solidity ^0.8.20;
+  │ 
+  │ import {IERC20}          from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+  │ import {IMintVerifier}   from "./IMintVerifier.sol";
+  │ 
+  │ contract Notes {
+  │     IERC20         public immutable buck;
+  │     IMintVerifier  public mintVerifier;
+  │     address        public governance;
+  │ 
+  │     // Public transparency state.
+  │     uint256[]                    public  commitments;       // ordered list of cm values
+  │     mapping(uint256 => bool)     public  commitmentExists;  // duplicate-rejection index
+  │     mapping(uint256 => bool)     public  nullifiers;        // reserved for Phase 3 spend path
+  │     uint256                      public  noteFaceSum;       // sum of all v_i ever minted
+  │ 
+  │     event Minted    (address indexed issuer, uint256 totalFace, uint256 startIndex, uint256 count);
+  │     event Appended  (uint256 indexed cm, uint256 indexed leafIndex);
+  │     event MintVerifierUpdated  (address indexed previous, address indexed next);
+  │     event GovernanceTransferred(address indexed previous, address indexed next);
+  │ 
+  │     constructor(address _buck, address _verifier, address _governance) {
+  │         require(_buck     != address(0), "buck=0");
+  │         require(_verifier != address(0), "verifier=0");
+  │         require(_governance != address(0), "gov=0");
+  │         buck         = IERC20(_buck);
+  │         mintVerifier = IMintVerifier(_verifier);
+  │         governance   = _governance;
+  │     }
+  │ 
+  │     /// @notice Escrow `totalFace` BUCK and append `cms` to the commitment pool.
+  │     /// @dev    The caller must first approve(this, totalFace) on BUCK.  Because Notes
+  │     ///         is registered setSystemPublic(true), the transferFrom satisfies BUCK's
+  │     ///         identity-aware transfer rules without requiring Notes to hold a CP-bound
+  │     ///         receipt fragment for the caller.
+  │     function mint(
+  │         bytes calldata proof,
+  │         uint256[] calldata cms,
+  │         uint256 totalFace
+  │     ) external {
+  │         require(cms.length > 0, "Notes: empty batch");
+  │         require(
+  │             mintVerifier.verifyMint(proof, totalFace, cms, msg.sender),
+  │             "Notes: bad mint proof"
+  │         );
+  │ 
+  │         // Pull the face value from the caller.  Reverts if allowance or balance insufficient.
+  │         require(buck.transferFrom(msg.sender, address(this), totalFace), "Notes: transfer failed");
+  │ 
+  │         uint256 startIndex = commitments.length;
+  │         for (uint256 i = 0; i < cms.length; i++) {
+  │             uint256 cm = cms[i];
+  │             require(cm != 0,                         "Notes: zero commitment");
+  │             require(!commitmentExists[cm],           "Notes: duplicate commitment");
+  │             commitmentExists[cm] = true;
+  │             commitments.push(cm);
+  │             emit Appended(cm, startIndex + i);
+  │         }
+  │         noteFaceSum += totalFace;
+  │         emit Minted(msg.sender, totalFace, startIndex, cms.length);
+  │     }
+  │ 
+  │     function commitmentCount() external view returns (uint256) { return commitments.length; }
+  │ 
+  │     // --- Governance ---
+  │     function setMintVerifier(address next) external { /* governance-gated */ }
+  │     function transferGovernance(address next) external { /* governance-gated */ }
+  │ }
+  └────
+  Phase 2 closes the happy path (credit-backed BUCKs in -> opaque
+  commitments out, with a real SNARK binding the sum).  The *spend* path
+  – nullifier reveals plus per-output commitments under a second SNARK –
+  is the subject of [Notes Phase 3]; the `nullifiers[]' mapping above is
+  the reserved on-chain state for that phase.
+
+
+[Notes Phase 3] <file:alberta-buck-notes.org::*Phase 3 - Spend>
+
+
+8 Integration: Full mint() and transfer() Walkthrough
 ═════════════════════════════════════════════════════
 
   Consider Alice, who owns a $500K Calgary home (land: $200K, structure:
@@ -1267,7 +1539,7 @@ Renewal>
   credit but only half of the structure credit.
 
 
-7.1 Step 0: Identity Registration (One-Time)
+8.1 Step 0: Identity Registration (One-Time)
 ────────────────────────────────────────────
 
   Before Alice can interact with BUCK at all, she must hold a verified
@@ -1284,16 +1556,17 @@ Renewal>
      \cdot G \) under \( pk_{alice} \), and produces a NIZK proof \( \pi
      \) binding \( \sigma' \) to that ciphertext.
   3. *On-chain registration*: Alice calls
-     `IdentityRegistry.register(pk_alice, E_alice, issuer, sigma', pi)'.
+     `IdentityRegistry.register(issuer, pk_alice, E_alice, sigma', pi)'.
      The contract verifies \( \pi \) and the PS pairing relation via the
      BN254 precompiles (~235K gas, paid once for the lifetime of this
-     Ethereum address).  After this call, `isVerified[alice] =' true=.
+     Ethereum address).  After this call, `isVerified[alice] =' true=
+     and `issuerOf[alice] =' issuer=.
 
   Alice repeats steps 2-3 for every Ethereum account she controls; the
   issuer never sees those accounts.
 
 
-7.2 Step 1: Mint
+8.2 Step 1: Mint
 ────────────────
 
   Alice calls `BUCK.mint(50000e18)':
@@ -1315,7 +1588,7 @@ Renewal>
   7. Alice receives 47,705 BUCKs.  Insurance pool receives 2,295 BUCKs.
 
 
-7.3 Step 2: Approve Bob (Identity Handshake)
+8.3 Step 2: Approve Bob (Identity Handshake)
 ────────────────────────────────────────────
 
   Alice wants to pay Bob 10,000 BUCKs through the same router pattern
@@ -1346,7 +1619,7 @@ Renewal>
      binding from the Identity document.
 
 
-7.4 Step 3: Bob Pulls the Transfer
+8.4 Step 3: Bob Pulls the Transfer
 ──────────────────────────────────
 
   Bob (or a contract Bob authorized) calls `BUCK.transferFrom(alice,
@@ -1365,26 +1638,65 @@ Renewal>
      outside observer learns only that addresses `alice' and `bob'
      exchanged 10,000 BUCKs.
 
+
+8.5 Step 4: Alice Denominates 125 BUCK as Notes
+───────────────────────────────────────────────
+
+  Separately, Alice wants to move some of her BUCKs off the
+  public-ledger transfer path into private notes.  Her wallet picks
+  flavour `A2' and values `[100 BUCK, 25 BUCK]' (totalFace = 125), draws
+  fresh `rho[i]' and `idHash[i]' randomness, and builds the circuit
+  witness.  `snarkjs groth16 fullProve' against
+  `build/snark/mint/mint.wasm' and `mint_final.zkey' produces a proof
+  triple `(pA, pB, pC)' which the wallet abi-encodes as `(uint256[2],
+  uint256[2][2], uint256[2])' into `proofBytes'.
+
+  On-chain, Alice makes two calls:
+
+  1. `BUCK.approve(notes, 125e18, E_notes, pi_CP_notes)' – standard
+     identity-aware approve.  The `Notes' contract was registered
+     `setSystemPublic(true)' by governance, so this branch takes the
+     public-claim path (no CP proof is actually checked against Notes,
+     though the ERC-20 allowance is still written).
+  2. `Notes.mint(proofBytes, [cm[0], cm[1]], 125e18)' – the
+     `MintVerifierAdapter' forwards to the Groth16 verifier (~475K gas
+     total); on success, 125 BUCK moves from Alice to `Notes', the two
+     `cm[i]' are appended to `commitments[]', and `noteFaceSum +'
+     125e18=.  Alice's wallet keeps the openings (`flavor, v, rho,
+     idHash, predicate') privately – those are the `NoteOpening' records
+     she will need for the eventual Phase 3 `spend'.
+
   Later, HomeCo reappraises the structure at $280K (updated
   `faceValue').  Alice's credit limit drops.  If her outstanding balance
-  exceeds the new limit, the default insurance mechanism activates.
+  exceeds the new limit, the default insurance mechanism activates (or
+  the Jubilee fund eventually releases the lien), and she can no longer
+  mint BUCKs.
 
 
-8 Gas Cost Analysis
+9 Gas Cost Analysis
 ═══════════════════
 
-  Approximate gas costs (Ethereum mainnet, Solidity 0.8.x optimizer):
+  Approximate gas costs (Ethereum mainnet, Solidity 0.8.x optimizer).
+  The Notes row is measured from the
+  `MintVerifierTest.test_mint_acceptedByGroth16Verifier' Foundry run
+  against the real Groth16 verifier; the rest are architectural
+  estimates for the eventual PID build.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Operation                      Gas (approx)  Cost at 30 gwei  Notes                             
-  ─────────────────────────────────────────────────────────────────────────────────────────────────
-   BUCK_CREDIT.activate()         ~50K          ~$4              Single SSTORE + event             
-   BUCK_CREDIT.updateCredit()     ~80K          ~$6              Multiple SSTOREs (insurer pays)   
-   BUCK.mint() (no PID update)    ~150K         ~$12             Enumerate credits + mint          
-   BUCK.mint() (with PID update)  ~350K         ~$28             + Oracle reads + PID computation  
-   BUCK_CREDIT.currentValue()     0 (view)      Free             Pure computation, no state change 
-   BUCK_K.currentBuckK()          0 (view)      Free             Read cached value                 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Operation                       Gas (approx)  Cost at 30 gwei  Notes                               
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   BUCK_CREDIT.activate()          ~50K          ~$4              Single SSTORE + event               
+   BUCK_CREDIT.updateCredit()      ~80K          ~$6              Multiple SSTOREs (insurer pays)     
+   IdentityRegistry.register()     ~235K         ~$19             PS pairing + NIZK (one-time)        
+   IdentityRegistry.verifyApprove  ~29K          ~$2              CP proof, per counterparty pair     
+   BUCK.approve() (identity)       ~97K          ~$8              29K CP + 46K allowance + 22K SSTORE 
+   BUCK.transfer / transferFrom    ~80K          ~$6              ERC-20 baseline + receipt event     
+   BUCK.mint() (static BUCK_K)     ~150K         ~$12             Enumerate credits + mint            
+   BUCK.mint() (with PID update)   ~350K         ~$28             + Oracle reads + PID computation    
+   Notes.mint() (Groth16)          ~475K         ~$38             Groth16 verify + cm append + xfer   
+   BUCK_CREDIT.currentValue()      0 (view)      Free             Pure computation, no state change   
+   BUCK_K.currentBuckK()           0 (view)      Free             Read cached value                   
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   The PID update cost (~200K gas additional) is amortized across all
   mints within a `dT' window.  With a 1-hour `dT', only the first mint
@@ -1395,11 +1707,11 @@ Renewal>
   alternative EVM chains.  The contract architecture is chain-agnostic.
 
 
-9 Security Considerations
-═════════════════════════
+10 Security Considerations
+══════════════════════════
 
-9.1 Oracle Manipulation
-───────────────────────
+10.1 Oracle Manipulation
+────────────────────────
 
   • *TWAP resistance*: The BUCK/USDC price uses a Uniswap V3 TWAP (30+
     minutes), requiring sustained capital commitment to manipulate.
@@ -1410,8 +1722,8 @@ Renewal>
     within an acceptable window (e.g., 1 hour) and revert if stale.
 
 
-9.2 Credit Enumeration DoS
-──────────────────────────
+10.2 Credit Enumeration DoS
+───────────────────────────
 
   A malicious user could create many tiny BUCK_CREDITs to make
   `totalCurrentValue()' gas-prohibitive.  Mitigations:
@@ -1420,8 +1732,8 @@ Renewal>
   • Off-chain aggregation with Merkle proof (advanced).
 
 
-9.3 Insurer Trust
-─────────────────
+10.3 Insurer Trust
+──────────────────
 
   The insurer can reduce `faceValue' at any time, potentially pushing
   accounts into default.  This is by design – it reflects real-world
@@ -1433,21 +1745,21 @@ Renewal>
     20%).
 
 
-9.4 Reentrancy
-──────────────
+10.4 Reentrancy
+───────────────
 
   Standard OpenZeppelin `ReentrancyGuard' on `mint()' and `activate()'.
   All state changes occur before external calls.
 
 
-10 Future Approaches
+11 Future Approaches
 ════════════════════
 
   This ERC-721 implementation prioritizes clarity and correctness.
   Subsequent documents will explore:
 
 
-10.1 ERC-1155: Semi-Fungible Batch Credits
+11.1 ERC-1155: Semi-Fungible Batch Credits
 ──────────────────────────────────────────
 
   If standardized credit classes emerge (e.g., "Calgary residential,
@@ -1461,7 +1773,7 @@ Renewal>
   state mapping, partially negating the fungibility benefit.
 
 
-10.2 ERC-3643 (T-REX): Regulated Security Token
+11.2 ERC-3643 (T-REX): Regulated Security Token
 ───────────────────────────────────────────────
 
   For production deployment under regulatory oversight:
@@ -1476,7 +1788,7 @@ Renewal>
   under provincial regulation.
 
 
-10.3 ERC-4626: Vault-Based Insurance Pool
+11.3 ERC-4626: Vault-Based Insurance Pool
 ─────────────────────────────────────────
 
   While a poor fit for BUCK_CREDIT itself, ERC-4626 is well-suited for
@@ -1488,7 +1800,7 @@ Renewal>
   • Standard DeFi composability (yield aggregators, lending protocols).
 
 
-10.4 L2 and Cross-Chain Deployment
+11.4 L2 and Cross-Chain Deployment
 ──────────────────────────────────
 
   The contracts are EVM-compatible and can deploy on Arbitrum, Optimism,
@@ -1498,17 +1810,46 @@ Renewal>
   layer.
 
 
-11 Implementation Plan
+12 Implementation Plan
 ══════════════════════
 
   This document specifies the *eventual* shape of the system.  The first
   deployment ships in narrow phases so the cryptographic identity layer
   – the single largest piece of new ground in the design – can land
   first, against minimal stubs of the surrounding contracts.  Each phase
-  ends in a self-contained, deployable state with passing tests.
+  ends in a self-contained, deployable state with passing tests.  The
+  status table below reflects the repo at the header date; the phase
+  subsections document the intent of each phase as originally scoped and
+  are annotated with what the current code actually ships.
 
 
-11.1 Testing Strategy: Three Layers
+12.1 Phase Completion Status (current)
+──────────────────────────────────────
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Phase    Scope                                           Status                                                                            
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Phase 0  Stub `BuckCredit' + `BuckKControllerStatic'     *done* – `BuckKControllerStatic.sol' live                                         
+   Phase 1  `BN254.sol' helper library                      *done* – ecAdd/ecMul/ecPairing wrappers + FS helpers                              
+   Phase 2  `IdentityRegistry.sol'                          *done* – PS + NIZK + CP all on-chain                                              
+   Phase 3  Identity-aware `Buck.sol'                       *done* – CP-bound approve, bilateral transfer, receipt event                      
+   Phase 4  Public-claim accounts                           *done* – `setPublic' / `setSystemPublic'; Notes wired as public                   
+   Phase 5  Notes Phase-1 scaffolding                       *done* – `Notes.sol' + `StubMintVerifier'; commitments/nullifiers in place        
+   Phase 6  Groth16 mint circuit + adapter                  *done* – circom `mint.circom' (N=2), `MintGroth16Verifier', `MintVerifierAdapter' 
+   Phase 7  Notes Phase-3 spend circuit + nullifier reveal  *pending* – see [Notes Phase 3]                                                   
+   Phase 8  Live `BuckKController' (PID + oracle)           *pending* – contract skeleton exists; oracle hookup and PID tuning outstanding    
+   Phase 9  Production MPC trusted-setup ceremony           *pending* – `scripts/snark/setup.sh' uses dev-only entropy                        
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Current forge suite: 100 local-EVM unit tests pass; one
+  `BuckKControllerForkTest' requires a live mainnet RPC and is skipped
+  offline.
+
+
+[Notes Phase 3] <file:alberta-buck-notes.org::*Phase 3 - Spend>
+
+
+12.2 Testing Strategy: Three Layers
 ───────────────────────────────────
 
   Tests are stratified by what they actually need from the EVM, so the
@@ -1546,7 +1887,7 @@ Renewal>
   reads them many times.
 
 
-11.2 Off-Chain Wallet (alberta_buck.wallet, Python)
+12.3 Off-Chain Wallet (alberta_buck.wallet, Python)
 ───────────────────────────────────────────────────
 
   The off-chain components – KYC ceremony, credential derivation,
@@ -1585,7 +1926,7 @@ Renewal>
 [alberta-buck-identity.org] <file:alberta-buck-identity.org>
 
 
-11.3 Phase 0: Stub the Surrounding Contracts
+12.4 Phase 0: Stub the Surrounding Contracts
 ────────────────────────────────────────────
 
   Goal: `Buck' can be developed and tested against a minimal,
@@ -1594,11 +1935,15 @@ Renewal>
 
   • `BuckKController.sol' -> replace with `BuckKControllerStatic.sol':
     • State: `uint256 public buckK' (18 decimals, default `1e18').
-    • Functions: `currentBuckK() view returns (uint256)' and
-      `setBuckK(uint256)' (governance-only).
+    • Functions: `currentBuckK() view returns (uint256)', `compute()'
+      (no-op compat shim), `setBuckK(uint256)',
+      `transferGovernance(address)' (both governance-only).
     • Drop all PID state, Chainlink basket, and Uniswap TWAP code.  The
       full PID implementation documented above remains the design target
-      – it slots back in once the identity layer is stable.
+      – it slots back in once the identity layer is stable.  The
+      design-target `BuckKController.sol' also ships (unit-tested with
+      mocked feeds); the live-oracle fork test is gated on RPC
+      availability.
   • `BuckCredit.sol' -> keep the existing implementation, but treat only
     one function as a load-bearing interface for Phase 0+:
     `totalCurrentValue(address holder) external view returns (uint256)'.
@@ -1608,7 +1953,7 @@ Renewal>
   and watch credit limits re-derive correctly.
 
 
-11.4 Phase 1: BN254 Helper Library
+12.5 Phase 1: BN254 Helper Library
 ──────────────────────────────────
 
   Goal: a single Solidity library that wraps the three BN254 precompiles
@@ -1635,7 +1980,7 @@ Renewal>
   Solidity tests.
 
 
-11.5 Phase 2: `IdentityRegistry' Contract
+12.6 Phase 2: `IdentityRegistry' Contract
 ─────────────────────────────────────────
 
   Goal: ship the on-chain trust anchor exactly as specified in the
@@ -1663,7 +2008,7 @@ Renewal>
 [IdentityRegistry section] See section 4
 
 
-11.6 Phase 3: Identity-Aware `Buck' ERC-20
+12.7 Phase 3: Identity-Aware `Buck' ERC-20
 ──────────────────────────────────────────
 
   Goal: replace the current `Buck.sol' with the identity-aware version
@@ -1691,7 +2036,7 @@ Renewal>
 [BUCK section] See section 5
 
 
-11.7 Phase 4: Public-Claim Account Support
+12.8 Phase 4: Public-Claim Account Support
 ──────────────────────────────────────────
 
   Goal: AMM pools, vaults, and treasuries can interact with BUCK without
@@ -1705,37 +2050,116 @@ Renewal>
     and the CP-bound ciphertext for the private side.
 
 
-11.8 Phase 5: Notes Scaffolding
+12.9 Phase 5: Notes Scaffolding
 ───────────────────────────────
 
-  Goal: lay the structural groundwork for [BUCK Notes] without yet
-  shipping the SNARK verifier.
+  Goal: lay the structural groundwork for [BUCK Notes] – a commitment
+  pool, a pluggable mint verifier interface, and the off-chain wallet
+  helpers – behind a stub verifier so the end-to-end flow can be
+  exercised without yet shipping the SNARK.
 
-  • `src/notes/PoseidonMerkleTree.sol' – append-only commitment tree
-    with the same domain separation as the Notes design document
-    (commitment-pool root, capacity, fixed depth).
-  • `src/notes/NullifierSet.sol' – `mapping(bytes32 => bool)' with
-    `insert=/=isSpent' and permissioned writers (the `BuckNotes'
-    contract once it lands).
-  • `src/notes/IGroth16Verifier.sol' and `IPlonkVerifier.sol' – empty
-    interfaces matching the output of the standard SNARK toolchains
-    (snarkjs / circom / Halo2-EVM exporter), so that later wiring is a
-    constructor argument rather than an interface design choice.
-  • Stub `BuckNotes.sol' with `deposit(faceValue)', `mint(...)',
-    `spend(...)' reverting with "TODO: ship in alberta-buck-notes.org
-    Phase 6", but with the full set of events and parameter shapes the
-    Notes document requires.
+  *Shipped*:
 
-  Deliverables: deploy-and-test green; integration tests from this
-  repository's perspective treat the Notes module as a dark continent
-  that the Notes document will fill in.
+  • `src/Notes.sol' – the contract documented in the [Notes] section
+    above.  State is a flat `commitments[]' append list with a
+    `commitmentExists' duplicate index and a `nullifiers' mapping
+    reserved for the spend path.  The initial Phase 1 deployment
+    deliberately does /not/ build an incremental Poseidon Merkle tree
+    on-chain: without a SNARK asserting root consistency at mint time, a
+    Merkle tree would be storage-heavy dead weight.  The tree comes back
+    as a state-structure change in Phase 7 alongside the spend circuit.
+  • `src/IMintVerifier.sol' – the narrow `verifyMint(proof, totalFace,
+    commitments, issuer)' interface.  Decoupling `Notes' from the SNARK
+    toolchain was the key Phase-5 invariant so that the Phase-6 verifier
+    lands as a constructor-argument swap.
+  • `src/StubMintVerifier.sol' – governance-toggleable boolean verifier
+    used by all Notes state-machine tests.
+  • `alberta_buck.wallet.notes' (Python) – `NoteOpening' dataclass,
+    flavour constants, keccak-based placeholder commitment / nullifier
+    helpers with domain-separating tags, `id_payload_a1/a2/b1' helpers
+    matching the expected circuit public-input layout.  13 pytest tests.
+  • `test/Notes.t.sol' – 16 tests including happy path, duplicate
+    detection, zero-commitment rejection, empty batch, verifier
+    disabled, external rejecting verifier, missing approval, missing
+    balance, state-atomicity on transfer failure.
+
+  The Python wallet's `note_commitment' is a keccak-based placeholder;
+  the on-chain contract stores opaque `uint256' commitments without
+  re-hashing, so swapping keccak for Poseidon is an off-chain wallet
+  change only.
 
 
 [BUCK Notes] <file:alberta-buck-notes.org>
 
+[Notes] See section 7
 
-11.9 Sequencing and Stop Conditions
-───────────────────────────────────
+
+12.10 Phase 6: Groth16 Mint Circuit + Verifier
+──────────────────────────────────────────────
+
+  Goal: turn the stub into a cryptographically load-bearing verifier.
+  The mint contract must refuse to append a batch unless a real Groth16
+  proof ties `totalFace' to the sum of the (flavour, value, rho, idHash,
+  predicate) openings, and each `cm[i]' to `Poseidon(5)' of its opening.
+
+  *Shipped*:
+
+  • `flake.nix' adds `circom' to the dev shell and bootstraps npm dev
+    dependencies on first entry.
+  • `package.json' pins `circomlib' 2.0.5, `circomlibjs' ^0.1.7,
+    `snarkjs' 0.7.5, `ethers' ^6.13.4.
+  • `circuits/mint.circom' – `N = 2' mint circuit (see [Notes] section
+    for the signal table).  648 non-linear + 1023 linear R1CS
+    constraints.
+  • `scripts/snark/setup.sh' – circom compile, 2^12 powers-of-tau,
+    groth16 phase-2 setup, export verification key + Solidity verifier
+    (renamed `MintGroth16Verifier').  Dev-only entropy.
+  • `scripts/snark/prove_mint.js' – witness builder (two A2 notes,
+    `v'[100,25]e18=), seeded LCG randomness,
+    `snarkjs.groth16.fullProve', `pB' Fp2-coordinate swap, abi-encoded
+    `proofBytes', and sanity-check `snarkjs.groth16.verify'.
+  • `src/MintGroth16Verifier.sol' – snarkjs-generated verifier.
+  • `src/MintVerifierAdapter.sol' – `MINT_BATCH_SIZE=2' adapter
+    implementing `IMintVerifier'.
+  • `test/MintVerifier.t.sol' – 7 tests: happy path (real proof
+    accepted, ~475K gas), three tamper attacks (`totalFace', `cm[0]',
+    batch size) all reverting with `Notes: bad mint proof', malformed
+    proof-bytes revert at decode, adapter constructor rejects zero.
+
+  The circuit is pinned at `N=2'.  A variable-N deployment re-templates
+  both the circuit and the adapter's public-signals arity; this is
+  deliberately deferred until the Phase-7 spend circuit design pins down
+  the eventual batch-size surface.
+
+
+[Notes] See section 7
+
+
+12.11 Phase 7 and Beyond
+────────────────────────
+
+  Still pending:
+
+  • *Phase 7*: the spend circuit, nullifier reveal, and `Notes.spend'
+    entry point – the subject of [Notes Phase 3].  This is where the
+    on-chain Poseidon Merkle tree lands (a spend proof is "some unspent
+    note in the commitment pool" – root-consistent membership is the
+    natural query).
+  • *Phase 8*: live `BuckKController' deployment.  The contract is
+    already in-tree with mock-feed unit tests; the remaining work is
+    oracle wiring (Chainlink feed addresses, Uniswap V3 pool),
+    governance gain-setting, and a live mainnet fork test cycle before
+    flipping the `Buck' constructor to point at it instead of the Static
+    variant.
+  • *Phase 9*: production MPC ceremony to replace the dev-only
+    `scripts/snark/setup.sh' trusted-setup entropy.
+
+
+[Notes Phase 3] <file:alberta-buck-notes.org::*Phase 3 - Spend>
+
+
+12.12 Sequencing and Stop Conditions
+────────────────────────────────────
 
   The phases are strict prerequisites of one another: Phase /n+1/ does
   not begin until Phase /n/ has a passing CI run and a Foundry gas
@@ -1751,3 +2175,10 @@ Renewal>
   • Phase 5: any Solidity-side type that does not match the chosen SNARK
     verifier output (revisit the toolchain choice; do not paper over
     with adapter contracts).
+  • Phase 6: a tamper-path test that fails to revert.  The adapter +
+    Groth16 verifier must reject every documented attack on `totalFace',
+    `cm[i]', batch size, and malformed proof bytes; any false-accept is
+    a hard stop before further Notes work.
+  • Phase 7: any inconsistency between the Phase-6 mint-circuit
+    commitment layout and the spend circuit's opening layout (would fork
+    the two proof systems' views of a note, silently).
