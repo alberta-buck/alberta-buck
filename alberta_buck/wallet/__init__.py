@@ -25,6 +25,11 @@ from alberta_buck.wallet.nizk import (
 from alberta_buck.wallet.chaum_pedersen import (
     CPProof, chaum_pedersen_prove, chaum_pedersen_verify,
 )
+from alberta_buck.wallet.notes import (
+    NoteOpening, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
+    note_commitment, nullifier_a, nullifier_b,
+    id_payload_a1, id_payload_a2, id_payload_b1,
+)
 
 __all__ = [
     "G1", "G2", "ORDER", "add", "mul", "neg", "eq", "pairing", "is_inf",
@@ -36,4 +41,7 @@ __all__ = [
     "elgamal_encrypt", "elgamal_decrypt",
     "RegistrationProof", "registration_prove", "registration_verify",
     "CPProof", "chaum_pedersen_prove", "chaum_pedersen_verify",
+    "NoteOpening", "FLAVOR_A1", "FLAVOR_A2", "FLAVOR_B1",
+    "note_commitment", "nullifier_a", "nullifier_b",
+    "id_payload_a1", "id_payload_a2", "id_payload_b1",
 ]
