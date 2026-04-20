@@ -474,19 +474,28 @@ contract IdentityRegistry {
     struct PSPubKey  { G2Point X; G2Point Y; }                 // issuer (X, Y) in G_2
 
     // NIZK binding the PS signature to the ElGamal ciphertext (registration).
+    // Six-element Schnorr-family sigma protocol; A_ps is the PS-side commitment
+    // m_tilde * sigma'_1, indispensable for the pairing-product check (a).
     struct RegistrationProof {
         uint256 e;       // Fiat-Shamir challenge
         uint256 s_m;     // response for the identity scalar m
         uint256 s_r;     // response for the ElGamal randomness r
-        G1Point T_b;     // commitment binding C = r*pk + m*G
-        G1Point T_r;     // commitment binding R = r*G
+        G1Point A_ps;    // PS-side commitment: m_tilde * sigma'_1
+        G1Point T_C;     // ElGamal C commitment: m_tilde*G + r_tilde*pk
+        G1Point T_R;     // ElGamal R commitment: r_tilde * G
     }
 
-    // Chaum-Pedersen proof of equality of plaintexts (per-approve).
+    // Chaum-Pedersen proof of equality of plaintexts (per-approve).  T1, T2, T3
+    // commitments must be in calldata: only T3 (Check 1) and T1-T2 (Check 2)
+    // are recoverable from the verification equations, so a transcript that
+    // binds T1 and T2 separately requires both.
     struct CPProof {
         uint256 e;       // Fiat-Shamir challenge
         uint256 s1;      // response for sk_alice
-        uint256 s2;      // response for r_b (bob's ciphertext randomness)
+        uint256 s2;      // response for r' (re-encryption randomness for bob)
+        G1Point T1;      // k1 * R_alice
+        G1Point T2;      // k2 * pk_bob
+        G1Point T3;      // k2 * G
     }
 
     // --- Per-address identity state ---
@@ -637,7 +646,10 @@ interface IBuckCredit {
 interface IIdentityRegistry {
     struct G1Point   { uint256 X; uint256 Y; }
     struct ElGamalCT { G1Point R; G1Point C; }
-    struct CPProof   { uint256 e; uint256 s1; uint256 s2; }
+    struct CPProof   {
+        uint256 e; uint256 s1; uint256 s2;
+        G1Point T1; G1Point T2; G1Point T3;
+    }
 
     function isVerified(address) external view returns (bool);
     function isPublic(address)   external view returns (bool);

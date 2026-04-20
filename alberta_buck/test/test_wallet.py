@@ -129,7 +129,7 @@ def _full_registration_setup(seed: int, identity_fields=ALICE):
     r = rand_scalar(rng)
     M = mul(G1, m)
     E = elgamal_encrypt(M, kp.pk, r)
-    registrant = 0xa11ce0000000000000000000000000000000a11ce
+    registrant = 0xa11ce00000000000000000000000000000a11ce
     proof = registration_prove(sigma_p, m, r, kp.pk, E, registrant, rng=rng)
     return issuer, sigma_p, kp, E, proof, registrant
 
@@ -168,7 +168,7 @@ def test_registration_proof_rejects_mismatched_elgamal_m():
     r_fake = rand_scalar(rng)
     M_fake = mul(G1, m_fake)
     E_fake = elgamal_encrypt(M_fake, kp.pk, r_fake)
-    registrant = 0xa11ce0000000000000000000000000000000a11ce
+    registrant = 0xa11ce00000000000000000000000000000a11ce
 
     # Try to prove the real-m PS signature binds to the fake-m ciphertext.
     # The honest prover would reject; if the prover lies and uses (m_real, r_fake),
@@ -209,7 +209,7 @@ def _approve_setup(seed: int):
     r_prime = rand_scalar(rng)
     E_for_bob = elgamal_encrypt(M_a, bob_kp.pk, r_prime)
 
-    sender_addr  = 0xa11ce0000000000000000000000000000000a11ce
+    sender_addr  = 0xa11ce00000000000000000000000000000a11ce
     spender_addr = 0xb0b0000000000000000000000000000000000b0b
     chainid      = 1
 
