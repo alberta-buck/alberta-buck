@@ -53,8 +53,7 @@ always learn each other's =M=, and either is compellable on warrant.  This is
 stronger compliance than physical cash provides today, stronger privacy than
 any CBDC has ever proposed, and the first design where a private bearer
 instrument is a native, first-class primitive of the monetary system rather
-than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]],
-[[https://perry.kundert.ca/images/alberta-buck-notes.txt][Text]])
+than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-notes.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-notes.txt][Text]], [[https://perry.kundert.ca/content/range/alberta-buck-notes-flow][Walkthrough]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage

@@ -747,8 +747,11 @@ Table of Contents
   (existing registrations are unaffected – they were verified at
   registration time and are never re-verified).  Epoch-based credential
   renewal, key revocation, and issuer rotation are described in the
-  [[<https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal>[Identity:
-  Epoch-Based Credential Renewal]] document.
+  [Identity: Epoch-Based Credential Renewal] document.
+
+
+[Identity: Epoch-Based Credential Renewal]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal>
 
 
 5 BUCK: ERC-20 Token

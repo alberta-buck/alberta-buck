@@ -41,7 +41,8 @@ note always learn each other's `M', and either is compellable on
 warrant.  This is stronger compliance than physical cash provides today,
 stronger privacy than any CBDC has ever proposed, and the first design
 where a private bearer instrument is a native, first-class primitive of
-the monetary system rather than an aftermarket wrapper. ([PDF], [Text])
+the monetary system rather than an aftermarket wrapper. ([PDF], [Text],
+[Walkthrough])
 
 Table of Contents
 ─────────────────
@@ -163,6 +164,9 @@ Table of Contents
 [PDF] <https://perry.kundert.ca/images/alberta-buck-notes.pdf>
 
 [Text] <https://perry.kundert.ca/images/alberta-buck-notes.txt>
+
+[Walkthrough]
+<https://perry.kundert.ca/content/range/alberta-buck-notes-flow>
 
 
 1 The Cash Paradox

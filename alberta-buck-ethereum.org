@@ -7,6 +7,7 @@
 #+weight: 10
 #+draft: false
 #+bucky: true
+#+math: true
 #+description: Ethereum implementation of the Alberta Buck: ERC-721 BUCK_CREDIT for insured-asset NFTs with deterministic depreciation, an identity-bound ERC-20 BUCK token with Chaum-Pedersen approve receipts, a privacy-preserving IdentityRegistry with PS-credential + ElGamal registration, a Notes commitment pool with Groth16-verified mint circuit, and a BUCK_K controller (static Phase-0, PID + commodity-basket oracle for later deployment) for value stabilisation.
 
 #+EXPORT_FILE_NAME: ./images/alberta-buck-ethereum
@@ -653,7 +654,7 @@ unforgeability and the audit trail.
 admits a new origin of registrable identities; removing one stops new registrations under that
 issuer (existing registrations are unaffected -- they were verified at registration time and are
 never re-verified).  Epoch-based credential renewal, key revocation, and issuer rotation are
-described in the [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal[Identity: Epoch-Based Credential Renewal]] document.
+described in the [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal][Identity: Epoch-Based Credential Renewal]] document.
 
 
 * BUCK: ERC-20 Token
@@ -1832,6 +1833,70 @@ Still pending:
 - *Phase 9*: production MPC ceremony to replace the dev-only =scripts/snark/setup.sh= trusted-setup
   entropy.
 
+*** Open Work Items Identified by the Notes Correctness Review
+
+The Phase 6 \(\to\) Phase 7 transition surfaced three correctness obligations that are documented as
+open questions in [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] (Part IV, "Open Questions") and listed here as concrete
+engineering tasks.  Each is a /Phase-7 prerequisite/ -- the spend path cannot ship until they are
+discharged, because each one shapes either the mint-circuit schema (which the spend circuit must
+re-derive in-circuit) or the on-chain commitment-store layout (which the spend circuit must
+Merkle-prove against).
+
+1. *Add =Num2Bits= range checks on =v[i]= in =circuits/mint.circom=*.
+
+   Today, =sum(v[i]) === totalFace= is a constraint in \( \mathbb{F}_r \) with
+   \( r \approx 2^{254} \) and no per-=v[i]= range bound.  A malicious prover can satisfy the
+   constraint with values whose integer sum differs from =totalFace= by a multiple of \( r \).
+   Phase 2 is dormant against this (no spend exists, so no surplus BUCK can be released), but the
+   moment a spend circuit is deployed each =cm= will be redeemed for the =v= committed in its
+   opening, and any field-overflow at mint becomes extractable value at spend.
+
+   *Action*: add =component vbits[i] = Num2Bits(128); vbits[i].in <== v[i];= for each =i= and a
+   matching range check on =totalFace=.  At =N <= 2^64= and =k = 128= the integer sum cannot wrap
+   the field (62-bit margin).  Re-run =scripts/snark/setup.sh= to refresh the proving and
+   verification keys; re-export =MintGroth16Verifier.sol=; refresh the test fixture with
+   =scripts/snark/prove_mint.js=.  =MintVerifier.t.sol= should grow a tamper test that constructs
+   an overflow witness and asserts the verifier rejects it.
+
+2. *Decide on an explicit batch identifier in =Notes.mint=*.
+
+   =Notes.mint= currently emits a =Minted(issuer, totalFace, startIndex, count)= event alongside
+   the BUCK =Transfer= -- the on-chain transfer-to-batch correspondence is recoverable only by an
+   off-chain indexer.  The spend circuits in Theorems 8-10 do not require an explicit batch ID
+   for soundness (each commitment stands on its own opening), so this is a /design/ open
+   question, not a correctness bug.
+
+   *Action*: weigh the cost (one storage slot per mint, an extra public input per spend if the
+   batch ID is to be proven against) against the value (regulator-visible audit trails, slashing
+   logic, on-chain analytics without an indexer).  If retained, the natural construction is
+   =batchId = Poseidon(msg.sender, totalFace, startIndex, N)= stored in a
+   =mapping(uint256 => bytes32) public batchIds= keyed by =startIndex=.  Resolve before Phase 7
+   pins the spend-circuit public-input layout.
+
+3. *Build the Phase-7 spend circuit and its on-chain support*.
+
+   The spend predicate must simultaneously prove three properties that are entangled through the
+   mint-circuit commitment layout:
+
+   - *Merkle membership* of =cm= under an on-chain =noteRoot=.  Phase 5 deliberately deferred the
+     incremental Poseidon Merkle tree -- the flat =commitments[]= array must be migrated to (or
+     mirrored by) an incremental tree before Phase 7 can ship.  The migration choice is binary:
+     either rebuild the tree at Phase-7 deployment from the =Appended= event log, or maintain the
+     incremental root from genesis as an optional post-Phase-6 storage upgrade.  Decide and
+     document.
+   - *Nullifier determinism*: =nf = Poseidon(flavor, M_rec, rho)= for A-spends or
+     =nf = Poseidon(B, rho)= for B-spends, computed in-circuit from the witness so a malicious
+     prover cannot select a nullifier outside the spent set.
+   - *Value conservation*: the public =faceReleased= equals the committed =v= in the opening, and
+     =v= is range-bounded per item (1) above so the deposit cannot extract more BUCK than was
+     escrowed at mint.
+
+   *Action*: freeze the =mint.circom= field order =Poseidon(flavor, v, rho, idHash, predicate)=
+   and the witness/public split before opening =spend.circom= for implementation, since any later
+   schema change forks the proof systems' views of a note.  Treat the items above as the Phase-7
+   stop conditions (already noted in *Sequencing and Stop Conditions* below; cross-reference is
+   intentional).
+
 ** Sequencing and Stop Conditions
 
 The phases are strict prerequisites of one another: Phase /n+1/ does not begin until Phase /n/
@@ -1848,4 +1913,9 @@ has a passing CI run and a Foundry gas snapshot.  Implementation =STOP= conditio
   every documented attack on =totalFace=, =cm[i]=, batch size, and malformed proof bytes; any
   false-accept is a hard stop before further Notes work.
 - Phase 7: any inconsistency between the Phase-6 mint-circuit commitment layout and the spend
-  circuit's opening layout (would fork the two proof systems' views of a note, silently).
+  circuit's opening layout (would fork the two proof systems' views of a note, silently).  In
+  particular, =mint.circom= must carry =Num2Bits= range checks on each =v[i]= /before/ the spend
+  circuit ships -- without them, the value-conservation constraint =sum(v[i]) === totalFace= holds
+  only modulo the BN254 scalar field and an attacker who escrowed =totalFace= once at mint can
+  release =totalFace + k*r= cumulatively over N deposits.  Open Question 1 in
+  [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] (Part IV) records the underlying analysis.
