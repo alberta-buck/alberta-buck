@@ -19,8 +19,10 @@
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 #+LATEX_HEADER: \usepackage{draftwatermark}
 
-* Abstract
+#+ATTR_LATEX: :width 10cm
+[[https://perry.kundert.ca/images/dominion-logo.png]]
 
+#+BEGIN_ABSTRACT
 This document is the /narrative/ companion to [[file:alberta-buck-notes.org][alberta-buck-notes.org]] (architectural
 overview), [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] (formal correctness), and [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]]
 (Solidity surface).  It walks one concrete example -- Alice mints a 1,200-BUCK transfer
@@ -75,7 +77,12 @@ the pinned-N dispatch set under =mint_batch.circom=) are addressed at the end
 and cross-referenced into the proofs and implementation docs.  The mint-circuit
 field-overflow concern from earlier drafts has been closed by the =Num2Bits(128)=
 range bounds in =mint_batch.circom= and the matching bounds in =spend.circom=.
+#+END_ABSTRACT
 
+#+LATEX: \clearpage
+#+TOC: headlines 3
+
+#+LATEX: \clearpage
 * Cast of Characters
 
 The example uses concrete names so the message flow is easy to track:

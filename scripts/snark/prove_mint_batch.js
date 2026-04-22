@@ -251,6 +251,8 @@ async function main() {
         mirror      = step.newFilled;
     }
     const newRoot = rolling;
+    const postFilled = mirror;
+    const postNextLeafIndex = nextLeafIndex + N;
 
     const totalFace = v.reduce((acc, x) => acc + x, 0n);
 
@@ -331,6 +333,18 @@ async function main() {
     const outPath = path.join(fixDir, `${args.name}.json`);
     fs.writeFileSync(outPath, JSON.stringify(fixture, null, 2));
     console.log(`wrote ${outPath}`);
+
+    // Post-mint wallet-mirror state.  Pass via --initial-state to the next
+    // invocation to chain proofs across batches (e.g. mint at leaf 0 then at
+    // leaf N).  Format matches the loader at the top of main().
+    const statePath = path.join(fixDir, `${args.name}-state.json`);
+    const stateOut = {
+        filledSubtrees: postFilled.map((x) => x.toString()),
+        oldRoot:        newRoot.toString(),
+        nextLeafIndex:  postNextLeafIndex,
+    };
+    fs.writeFileSync(statePath, JSON.stringify(stateOut, null, 2));
+    console.log(`wrote ${statePath}`);
 
     // snarkjs's own verify as a sanity check before we ship the fixture.
     const vk = JSON.parse(fs.readFileSync(path.join(buildDir, "verification_key.json"), "utf8"));

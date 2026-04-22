@@ -10,6 +10,7 @@ import {BuckCredit}                  from "../src/BuckCredit.sol";
 import {BuckKControllerStatic}       from "../src/BuckKControllerStatic.sol";
 import {Notes}                       from "../src/Notes.sol";
 import {MintBatchN16Groth16Verifier} from "../src/MintBatchN16Groth16Verifier.sol";
+import {MintBatchN32Groth16Verifier} from "../src/MintBatchN32Groth16Verifier.sol";
 import {MintVerifierAdapter}         from "../src/MintVerifierAdapter.sol";
 import {StubSpendVerifier}           from "../src/StubSpendVerifier.sol";
 
@@ -26,7 +27,8 @@ contract MintVerifierTest is Test {
     BuckKControllerStatic       internal kCtrl;
     IdentityRegistry            internal reg;
     Notes                       internal notes;
-    MintBatchN16Groth16Verifier internal g16;
+    MintBatchN16Groth16Verifier internal g16;     // N=16 verifier
+    MintBatchN32Groth16Verifier internal g16N32;  // N=32 verifier (per-N dispatch)
     MintVerifierAdapter         internal adapter;
 
     address internal constant GOV    = address(0xA0);
@@ -61,9 +63,12 @@ contract MintVerifierTest is Test {
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
 
         g16     = new MintBatchN16Groth16Verifier();
+        g16N32  = new MintBatchN32Groth16Verifier();
         adapter = new MintVerifierAdapter(GOV);
-        vm.prank(GOV);
+        vm.startPrank(GOV);
         adapter.registerVerifier(16, address(g16));
+        adapter.registerVerifier(32, address(g16N32));
+        vm.stopPrank();
 
         StubSpendVerifier spendStub = new StubSpendVerifier(GOV);
         notes   = new Notes(
@@ -274,6 +279,48 @@ contract MintVerifierTest is Test {
         );
     }
 
+    // ---- N=32 per-N dispatch ----------------------------------------------
+
+    function test_mint_acceptedByGroth16Verifier_N32() public {
+        // Loads the N=32 fixture and mints through the SAME adapter, proving
+        // per-N dispatch routes cms.length=32 to MintBatchN32Groth16Verifier
+        // while the N=16 verifier (registered alongside) sits idle.
+        string memory fx = vm.readFile("build/snark/mint_batch_n32/fixtures/basic.json");
+        uint256 n             = vm.parseJsonUint(fx, ".N");
+        uint256 oldRoot       = vm.parseJsonUint(fx, ".public.oldRoot");
+        uint256 newRoot       = vm.parseJsonUint(fx, ".public.newRoot");
+        uint256 nextLeafIndex = vm.parseJsonUint(fx, ".public.nextLeafIndex");
+        uint256 totalFace     = vm.parseJsonUint(fx, ".public.totalFace");
+        uint256[] memory cms  = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            cms[i] = vm.parseJsonUint(fx, string.concat(".public.cm[", vm.toString(i), "]"));
+        }
+        bytes memory proof = vm.parseJsonBytes(fx, ".proofBytes");
+
+        assertEq(n, 32, "fixture is N=32");
+        assertEq(oldRoot, notes.EMPTY_ROOT(), "fixture oldRoot is empty tree");
+
+        uint256 aliceBefore = buck.balanceOf(alice);
+        uint256 poolBefore  = buck.balanceOf(address(notes));
+
+        vm.prank(alice);
+        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+
+        assertEq(buck.balanceOf(alice),          aliceBefore - totalFace);
+        assertEq(buck.balanceOf(address(notes)), poolBefore + totalFace);
+        assertEq(notes.noteFaceSum(),  totalFace);
+        assertEq(notes.nextLeafIndex(), 32);
+        assertEq(notes.noteRoot(),     newRoot);
+    }
+
+    function test_adapter_routesByBatchSize() public view {
+        // Confirms per-N registration is independently addressable.
+        assertEq(adapter.verifiers(16), address(g16),    "N=16 -> N=16 verifier");
+        assertEq(adapter.verifiers(32), address(g16N32), "N=32 -> N=32 verifier");
+        assertEq(adapter.verifiers(15), address(0),      "N=15 unregistered");
+        assertEq(adapter.verifiers(64), address(0),      "N=64 unregistered");
+    }
+
     function test_adapter_constructor_rejectsZero() public {
         vm.expectRevert(bytes("governance=0"));
         new MintVerifierAdapter(address(0));
@@ -292,5 +339,97 @@ contract MintVerifierTest is Test {
         vm.prank(GOV);
         a.registerVerifier(16, address(g16));
         assertEq(a.verifiers(16), address(g16));
+    }
+
+    // ---- replay + chained-batch protection --------------------------------
+
+    /// @notice Resubmitting an accepted mint proof must revert.  After the
+    ///         first mint the live root and nextLeafIndex have advanced; the
+    ///         stale-state guards catch the replay before the verifier is
+    ///         touched a second time.
+    function test_mint_replayRejected() public {
+        _mint(fxProofBytes, fxOldRoot, fxNewRoot, fxNextLeafIndex, fxTotalFace, fxCommitments);
+        // After mint: noteRoot == fxNewRoot, nextLeafIndex == 16.  The same
+        // proof's public oldRoot == EMPTY_ROOT no longer matches; the guard
+        // reverts before re-running the Groth16 verifier.
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: stale oldRoot"));
+        notes.mint(
+            fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
+            fxTotalFace, fxCommitments
+        );
+    }
+
+    /// @notice Mixed-N successive batches: N=16 basic followed by an N=32
+    ///         batch starting at leaf 16.  Exercises the per-N adapter
+    ///         dispatch *across* chained state -- the N=32 verifier must
+    ///         accept a proof whose nextLeafIndex public input is 16 and
+    ///         whose oldRoot is the rolling root left by the N=16 batch.
+    function test_mint_successiveBatches_crossN() public {
+        // First mint: basic N=16 (leaves 0..15).
+        _mint(fxProofBytes, fxOldRoot, fxNewRoot, fxNextLeafIndex, fxTotalFace, fxCommitments);
+        assertEq(notes.nextLeafIndex(), 16);
+
+        // Second mint: N=32 fixture starting at leaf 16, oldRoot = basic.newRoot.
+        string memory fx = vm.readFile("build/snark/mint_batch_n32/fixtures/after_n16.json");
+        uint256 n             = vm.parseJsonUint(fx, ".N");
+        uint256 oldRoot       = vm.parseJsonUint(fx, ".public.oldRoot");
+        uint256 newRoot       = vm.parseJsonUint(fx, ".public.newRoot");
+        uint256 nextLeafIndex = vm.parseJsonUint(fx, ".public.nextLeafIndex");
+        uint256 totalFace     = vm.parseJsonUint(fx, ".public.totalFace");
+        uint256[] memory cms  = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            cms[i] = vm.parseJsonUint(fx, string.concat(".public.cm[", vm.toString(i), "]"));
+        }
+        bytes memory proof = vm.parseJsonBytes(fx, ".proofBytes");
+
+        assertEq(n,             32);
+        assertEq(oldRoot,       fxNewRoot, "after_n16.oldRoot must equal basic.newRoot");
+        assertEq(nextLeafIndex, 16);
+
+        vm.prank(alice);
+        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+
+        // Tree advanced by 32 leaves on top of the first 16 -> 48 total.
+        assertEq(notes.nextLeafIndex(), 48);
+        assertEq(notes.noteRoot(),      newRoot);
+        assertEq(notes.noteFaceSum(),   fxTotalFace + totalFace);
+    }
+
+    /// @notice Two N=16 batches in succession.  The second proof's oldRoot
+    ///         is the first batch's newRoot, and its nextLeafIndex is 16.
+    ///         The contract must accept it, advance nextLeafIndex to 32, and
+    ///         install the chained newRoot.
+    function test_mint_successiveBatches() public {
+        // First mint: basic fixture (leaves 0..15).
+        _mint(fxProofBytes, fxOldRoot, fxNewRoot, fxNextLeafIndex, fxTotalFace, fxCommitments);
+        assertEq(notes.nextLeafIndex(), 16);
+        assertEq(notes.noteRoot(), fxNewRoot);
+
+        // Second mint: successive fixture (leaves 16..31), oldRoot = basic.newRoot.
+        string memory fx = vm.readFile("build/snark/mint_batch_n16/fixtures/successive.json");
+        uint256 oldRoot       = vm.parseJsonUint(fx, ".public.oldRoot");
+        uint256 newRoot       = vm.parseJsonUint(fx, ".public.newRoot");
+        uint256 nextLeafIndex = vm.parseJsonUint(fx, ".public.nextLeafIndex");
+        uint256 totalFace     = vm.parseJsonUint(fx, ".public.totalFace");
+        uint256[] memory cms  = new uint256[](16);
+        for (uint256 i = 0; i < 16; i++) {
+            cms[i] = vm.parseJsonUint(fx, string.concat(".public.cm[", vm.toString(i), "]"));
+        }
+        bytes memory proof = vm.parseJsonBytes(fx, ".proofBytes");
+
+        assertEq(oldRoot,       fxNewRoot, "successive.oldRoot must equal basic.newRoot");
+        assertEq(nextLeafIndex, 16,        "successive starts at leaf 16");
+
+        uint256 poolBefore = buck.balanceOf(address(notes));
+        uint256 sumBefore  = notes.noteFaceSum();
+
+        vm.prank(alice);
+        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+
+        assertEq(notes.nextLeafIndex(), 32);
+        assertEq(notes.noteRoot(),      newRoot);
+        assertEq(notes.noteFaceSum(),   sumBefore + totalFace);
+        assertEq(buck.balanceOf(address(notes)), poolBefore + totalFace);
     }
 }
