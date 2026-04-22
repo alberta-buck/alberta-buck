@@ -11,14 +11,20 @@ import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {Notes}                from "../src/Notes.sol";
 import {IMintVerifier}        from "../src/IMintVerifier.sol";
 import {StubMintVerifier}     from "../src/StubMintVerifier.sol";
+import {StubSpendVerifier}    from "../src/StubSpendVerifier.sol";
 
 /// @notice IMintVerifier that always rejects -- exercises the negative path
 ///         without depending on StubMintVerifier's enabled toggle.
 contract RejectingMintVerifier is IMintVerifier {
-    function verifyMint(bytes calldata, uint256, uint256[] calldata, address)
-        external pure returns (bool) { return false; }
+    function verifyMint(
+        bytes calldata, uint256, uint256, uint256, uint256, uint256[] calldata
+    ) external pure returns (bool) { return false; }
 }
 
+/// @notice IMintVerifier whose `oldRoot` and `nextLeafIndex` echoing is
+///         transparent, but otherwise accepts everything.  Lets the Notes
+///         tests assert behaviour driven by the contract's stale-state
+///         guards rather than verifier acceptance.
 contract NotesTest is Test {
 
     Buck                  internal buck;
@@ -27,6 +33,7 @@ contract NotesTest is Test {
     IdentityRegistry      internal reg;
     Notes                 internal notes;
     StubMintVerifier      internal stub;
+    StubSpendVerifier     internal spendStub;
 
     address internal constant GOV     = address(0xA0);
     address internal constant ISSUER  = address(0x1551E1);
@@ -37,13 +44,18 @@ contract NotesTest is Test {
 
     string  internal vj;
 
-    // Three precomputed commitments from the Python wallet:
-    // alberta_buck.wallet.notes.note_commitment(NoteOpening(...))
+    // Three placeholder commitments (field-bounded constants).  Phase 7-bis
+    // does not validate them on-chain beyond field-membership; the SNARK is
+    // the binding party.  These let us exercise mint plumbing with the stub.
     uint256 internal constant CM1 = 0x2f32199a12908d70cb27b94f766fccde66484f15ec37b1143f0c9958cdd3379d;
     uint256 internal constant CM2 = 0x067dc83e554e6adbf068d54a60a711b426be3a79cb43907396eee3dd1cd0b7ab;
     uint256 internal constant CM3 = 0x114e67cd78234325b9227116d9abc66397e28860b3287259aad1b60e7ac11346;
 
     bytes   internal constant DUMMY_PROOF = hex"deadbeef";
+
+    // Derived in setUp so we can reach the empty-tree root the constructor
+    // writes into roots[0].
+    uint256 internal EMPTY_ROOT_;
 
     // ---- harness setup -----------------------------------------------------
 
@@ -64,9 +76,13 @@ contract NotesTest is Test {
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
 
-        // Notes stack.
-        stub  = new StubMintVerifier(GOV);
-        notes = new Notes(address(buck), address(stub), GOV);
+        // Notes stack (no PoseidonT3 dep in Phase 7-bis).
+        stub      = new StubMintVerifier(GOV);
+        spendStub = new StubSpendVerifier(GOV);
+        notes     = new Notes(
+            address(buck), address(stub), address(spendStub), GOV
+        );
+        EMPTY_ROOT_ = notes.EMPTY_ROOT();
 
         // The pool is a "regular account" -- it has no PS credential, so we
         // mark it system-public to satisfy Buck's identity-bound transfer.
@@ -146,9 +162,7 @@ contract NotesTest is Test {
         credit.activate(tokenId, faceValue);
     }
 
-    /// @dev Approve Notes from Alice to spend `amount` BUCK.  Notes is public
-    ///      (set in setUp), so Buck's identity-bound approve takes the
-    ///      public-spender path and the CP proof / ciphertext are unused.
+    /// @dev Approve Notes from Alice to spend `amount` BUCK.
     function _approveNotes(address from, uint256 amount) internal {
         IdentityRegistry.ElGamalCT memory junk;
         IdentityRegistry.CPProof memory junkPi;
@@ -162,23 +176,52 @@ contract NotesTest is Test {
         cms[1] = b;
     }
 
+    /// @dev Stub-friendly mint: oldRoot pulled from live state, newRoot is a
+    ///      caller-chosen scalar (the stub doesn't bind it; production mint
+    ///      requires the SNARK-attested newRoot).
+    function _stubMint(
+        address from,
+        uint256[] memory cms,
+        uint256 totalFace,
+        uint256 newRoot
+    ) internal {
+        // Snapshot live state BEFORE vm.prank: any external call after the
+        // prank consumes it.  argument-eval order would otherwise burn the
+        // prank on `notes.noteRoot()` and notes.mint() would see msg.sender
+        // = test contract instead of `from`.
+        uint256 oldRoot       = notes.noteRoot();
+        uint32  nextLeafIndex = notes.nextLeafIndex();
+        vm.prank(from);
+        notes.mint(
+            DUMMY_PROOF,
+            oldRoot,
+            newRoot,
+            nextLeafIndex,
+            totalFace,
+            cms
+        );
+    }
+
     // ---- constructor -------------------------------------------------------
 
     function test_constructor_setsImmutables() public view {
         assertEq(address(notes.buck()),          address(buck));
         assertEq(address(notes.mintVerifier()),  address(stub));
         assertEq(notes.governance(),             GOV);
-        assertEq(notes.commitmentCount(),        0);
+        assertEq(notes.nextLeafIndex(),          0);
         assertEq(notes.noteFaceSum(),            0);
+        assertEq(notes.noteRoot(),               EMPTY_ROOT_);
     }
 
     function test_constructor_rejectsZero() public {
         vm.expectRevert(bytes("buck=0"));
-        new Notes(address(0), address(stub), GOV);
-        vm.expectRevert(bytes("verifier=0"));
-        new Notes(address(buck), address(0), GOV);
+        new Notes(address(0), address(stub), address(spendStub), GOV);
+        vm.expectRevert(bytes("mintVerifier=0"));
+        new Notes(address(buck), address(0), address(spendStub), GOV);
+        vm.expectRevert(bytes("spendVerifier=0"));
+        new Notes(address(buck), address(stub), address(0), GOV);
         vm.expectRevert(bytes("governance=0"));
-        new Notes(address(buck), address(stub), address(0));
+        new Notes(address(buck), address(stub), address(spendStub), address(0));
     }
 
     // ---- governance --------------------------------------------------------
@@ -213,48 +256,47 @@ contract NotesTest is Test {
         uint256 aliceBefore  = buck.balanceOf(alice);
         uint256 poolBefore   = buck.balanceOf(address(notes));
 
-        vm.prank(alice);
-        notes.mint(DUMMY_PROOF, cms, face);
+        uint256 newRoot = uint256(keccak256("newRoot1")) % notes.FIELD_R();
+        _stubMint(alice, cms, face, newRoot);
 
         assertEq(buck.balanceOf(alice),         aliceBefore - face);
         assertEq(buck.balanceOf(address(notes)), poolBefore + face);
         assertEq(notes.noteFaceSum(),           face);
-        assertEq(notes.commitmentCount(),       2);
-        assertEq(notes.commitments(0),          CM1);
-        assertEq(notes.commitments(1),          CM2);
-        assertTrue(notes.commitmentExists(CM1));
-        assertTrue(notes.commitmentExists(CM2));
+        assertEq(notes.nextLeafIndex(),         2);
+        assertEq(notes.noteRoot(),              newRoot);
+        assertTrue(notes.isAcceptedRoot(newRoot));
+        // The empty-tree root is still in the recent-roots window.
+        assertTrue(notes.isAcceptedRoot(EMPTY_ROOT_));
     }
 
-    function test_mint_emitsAppendedAndMintedEvents() public {
+    function test_mint_emitsMintedEvent() public {
         _approveNotes(alice, 200e18);
         uint256[] memory cms = _cms(CM1, CM2);
 
-        vm.expectEmit(true, true, false, false, address(notes));
-        emit Notes.Appended(CM1, 0);
-        vm.expectEmit(true, true, false, false, address(notes));
-        emit Notes.Appended(CM2, 1);
-        vm.expectEmit(true, false, false, true, address(notes));
-        emit Notes.Minted(alice, 200e18, 0, 2);
+        uint256 newRoot = uint256(keccak256("e1")) % notes.FIELD_R();
+        vm.expectEmit(true, false, true, true, address(notes));
+        emit Notes.Minted(alice, 200e18, 0, 2, newRoot);
 
-        vm.prank(alice);
-        notes.mint(DUMMY_PROOF, cms, 200e18);
+        _stubMint(alice, cms, 200e18, newRoot);
     }
 
     function test_mint_secondBatchExtendsLeafIndex() public {
         _approveNotes(alice, 300e18);
         uint256[] memory first = _cms(CM1, CM2);
-        vm.prank(alice);
-        notes.mint(DUMMY_PROOF, first, 200e18);
+        uint256 r1 = uint256(keccak256("r1")) % notes.FIELD_R();
+        _stubMint(alice, first, 200e18, r1);
 
         uint256[] memory second = new uint256[](1);
         second[0] = CM3;
-        vm.prank(alice);
-        notes.mint(DUMMY_PROOF, second, 100e18);
+        uint256 r2 = uint256(keccak256("r2")) % notes.FIELD_R();
+        _stubMint(alice, second, 100e18, r2);
 
-        assertEq(notes.commitmentCount(), 3);
-        assertEq(notes.commitments(2),    CM3);
-        assertEq(notes.noteFaceSum(),     300e18);
+        assertEq(notes.nextLeafIndex(), 3);
+        assertEq(notes.noteFaceSum(),   300e18);
+        assertEq(notes.noteRoot(),      r2);
+        // Both prior roots still in the window.
+        assertTrue(notes.isAcceptedRoot(r1));
+        assertTrue(notes.isAcceptedRoot(EMPTY_ROOT_));
     }
 
     function test_mint_rejectsEmptyBatch() public {
@@ -262,41 +304,57 @@ contract NotesTest is Test {
         uint256[] memory empty;
         vm.prank(alice);
         vm.expectRevert(bytes("Notes: empty mint"));
-        notes.mint(DUMMY_PROOF, empty, 0);
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, EMPTY_ROOT_, 0, 0, empty);
     }
 
-    function test_mint_rejectsZeroCommitment() public {
+    function test_mint_rejectsStaleOldRoot() public {
+        _approveNotes(alice, 100e18);
+        uint256[] memory cms = new uint256[](1);
+        cms[0] = CM1;
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: stale oldRoot"));
+        notes.mint(DUMMY_PROOF, uint256(0xdeadbeef), 1, 0, 100e18, cms);
+    }
+
+    function test_mint_rejectsStaleNextLeafIndex() public {
+        _approveNotes(alice, 100e18);
+        uint256[] memory cms = new uint256[](1);
+        cms[0] = CM1;
+        // oldRoot is correct, nextLeafIndex is wrong (claim 5 instead of 0).
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: stale nextLeafIndex"));
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 5, 100e18, cms);
+    }
+
+    function test_mint_rejectsZeroNewRoot() public {
+        _approveNotes(alice, 100e18);
+        uint256[] memory cms = new uint256[](1);
+        cms[0] = CM1;
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: zero newRoot"));
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 0, 0, 100e18, cms);
+    }
+
+    function test_mint_rejectsNewRootOutOfField() public {
+        _approveNotes(alice, 100e18);
+        uint256[] memory cms = new uint256[](1);
+        cms[0] = CM1;
+        uint256 fieldR = notes.FIELD_R();
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: newRoot out of field"));
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, fieldR, 0, 100e18, cms);
+    }
+
+    function test_mint_rejectsCommitmentOutOfField() public {
         _approveNotes(alice, 100e18);
         uint256[] memory bad = new uint256[](1);
-        bad[0] = 0;
+        bad[0] = notes.FIELD_R();  // exactly r is out of [0, r)
         vm.prank(alice);
-        vm.expectRevert(bytes("Notes: zero commitment"));
-        notes.mint(DUMMY_PROOF, bad, 100e18);
+        vm.expectRevert(bytes("Notes: cm out of field"));
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, bad);
     }
 
-    function test_mint_rejectsDuplicateCommitmentInBatch() public {
-        _approveNotes(alice, 200e18);
-        uint256[] memory dup = _cms(CM1, CM1);
-        vm.prank(alice);
-        vm.expectRevert(bytes("Notes: duplicate commitment"));
-        notes.mint(DUMMY_PROOF, dup, 200e18);
-    }
-
-    function test_mint_rejectsDuplicateAcrossBatches() public {
-        _approveNotes(alice, 200e18);
-        uint256[] memory first = new uint256[](1);
-        first[0] = CM1;
-        vm.prank(alice);
-        notes.mint(DUMMY_PROOF, first, 100e18);
-
-        uint256[] memory second = new uint256[](1);
-        second[0] = CM1;
-        vm.prank(alice);
-        vm.expectRevert(bytes("Notes: duplicate commitment"));
-        notes.mint(DUMMY_PROOF, second, 100e18);
-    }
-
-    function test_mint_rejectedByVerifier() public {
+    function test_mint_rejectedByDisabledStub() public {
         // Disable the stub -> verifyMint() returns false.
         vm.prank(GOV);
         stub.setEnabled(false);
@@ -306,7 +364,7 @@ contract NotesTest is Test {
         cms[0] = CM1;
         vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(DUMMY_PROOF, cms, 100e18);
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
     }
 
     function test_mint_rejectedByExternalRejectingVerifier() public {
@@ -319,7 +377,7 @@ contract NotesTest is Test {
         cms[0] = CM1;
         vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(DUMMY_PROOF, cms, 100e18);
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
     }
 
     function test_mint_revertsOnMissingApproval() public {
@@ -328,31 +386,150 @@ contract NotesTest is Test {
         cms[0] = CM1;
         vm.prank(alice);
         vm.expectRevert(); // OZ ERC20InsufficientAllowance
-        notes.mint(DUMMY_PROOF, cms, 100e18);
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
     }
 
     function test_mint_revertsWhenIssuerLacksBalance() public {
         // Bob is verified but has zero BUCK balance and no credit.
-        _approveNotes(bob, 100e18);  // approval works without balance
+        _approveNotes(bob, 100e18);
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
         vm.prank(bob);
         vm.expectRevert(); // OZ ERC20InsufficientBalance
-        notes.mint(DUMMY_PROOF, cms, 100e18);
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
     }
 
     function test_mint_failedTransferLeavesNoStateMutation() public {
-        // Set up an over-spend: Alice approves 50, tries to mint 100 face value.
         _approveNotes(alice, 50e18);
         uint256[] memory cms = _cms(CM1, CM2);
         vm.prank(alice);
         vm.expectRevert();
-        notes.mint(DUMMY_PROOF, cms, 100e18);
+        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
 
-        // No commitments leaked.
-        assertEq(notes.commitmentCount(),  0);
-        assertFalse(notes.commitmentExists(CM1));
-        assertFalse(notes.commitmentExists(CM2));
-        assertEq(notes.noteFaceSum(),      0);
+        // No advancement.
+        assertEq(notes.nextLeafIndex(), 0);
+        assertEq(notes.noteFaceSum(),   0);
+        assertEq(notes.noteRoot(),      EMPTY_ROOT_);
+    }
+
+    /// @notice Phase 7-bis duplicate-self-punishment economic test.  In the
+    ///         shipped per-leaf design, minting a duplicate `cm` reverted
+    ///         outright (the contract maintained `commitmentExists`).  The
+    ///         pivot drops that on-chain check -- the prover can publish a
+    ///         duplicate `cm` (paying totalFace twice for the same opening),
+    ///         the chain accepts it, but the deterministic nullifier
+    ///         Poseidon3(rho, idHash, 4242) collapses both notes to one
+    ///         spend.  The duplicate is unspendable forever; the issuer
+    ///         loses money but no other party is harmed.
+    ///
+    /// @dev We exercise the *first half* of that statement here: the chain
+    ///      no longer reverts on duplicate cm.  The "second half" (only one
+    ///      copy is spendable) belongs in the spend test suite.
+    function test_mint_acceptsDuplicateCommitmentInBatch() public {
+        _approveNotes(alice, 200e18);
+        uint256[] memory dup = _cms(CM1, CM1);
+        uint256 newRoot = uint256(keccak256("dup")) % notes.FIELD_R();
+        _stubMint(alice, dup, 200e18, newRoot);
+
+        // Both leaves accepted; nextLeafIndex advanced; tx did NOT revert.
+        assertEq(notes.nextLeafIndex(), 2);
+        assertEq(notes.noteFaceSum(),   200e18);
+    }
+
+    function test_mint_acceptsDuplicateAcrossBatches() public {
+        _approveNotes(alice, 200e18);
+        uint256[] memory first = new uint256[](1);
+        first[0] = CM1;
+        uint256 r1 = uint256(keccak256("a")) % notes.FIELD_R();
+        _stubMint(alice, first, 100e18, r1);
+
+        uint256[] memory second = new uint256[](1);
+        second[0] = CM1; // same cm again
+        uint256 r2 = uint256(keccak256("b")) % notes.FIELD_R();
+        _stubMint(alice, second, 100e18, r2);
+
+        assertEq(notes.nextLeafIndex(), 2);
+        assertEq(notes.noteFaceSum(),   200e18);
+    }
+
+    // ---- root window -------------------------------------------------------
+
+    function test_isAcceptedRoot_acceptsLiveAndPriorRoots() public {
+        assertTrue(notes.isAcceptedRoot(EMPTY_ROOT_));
+
+        _approveNotes(alice, 100e18);
+        uint256[] memory cms = new uint256[](1);
+        cms[0] = CM1;
+        uint256 r1 = uint256(keccak256("R")) % notes.FIELD_R();
+        _stubMint(alice, cms, 100e18, r1);
+
+        assertTrue(notes.isAcceptedRoot(EMPTY_ROOT_));
+        assertTrue(notes.isAcceptedRoot(r1));
+        assertFalse(notes.isAcceptedRoot(uint256(0xdeadbeef)));
+        assertFalse(notes.isAcceptedRoot(0));
+    }
+
+    function test_isAcceptedRoot_evictsAfterHistoryWindow() public {
+        // Each mint advances the ring by one slot.  ROOT_HISTORY_SIZE = 30,
+        // so 31 single-leaf mints overwrite the genesis root.
+        _approveNotes(alice, 31 * 1e18);
+        for (uint256 i = 0; i < 31; i++) {
+            uint256[] memory batch = new uint256[](1);
+            batch[0] = uint256(keccak256(abi.encode("cm", i))) % notes.FIELD_R();
+            uint256 r = uint256(keccak256(abi.encode("rt", i))) % notes.FIELD_R();
+            _stubMint(alice, batch, 1e18, r);
+        }
+
+        assertFalse(notes.isAcceptedRoot(EMPTY_ROOT_),
+            "empty root should have been evicted");
+        assertTrue(notes.isAcceptedRoot(notes.noteRoot()));
+    }
+
+    /// @notice Concurrency model: Bob lands a mint, Alice's pre-Bob proof
+    ///         must revert (stale oldRoot OR stale nextLeafIndex), no BUCK
+    ///         is moved from Alice, and Alice can re-mint after re-syncing.
+    function test_mint_concurrencyLoserRevertsCleanly() public {
+        _approveNotes(alice, 200e18);
+        _grantCredit(bob, 1000e18);
+        vm.prank(bob);
+        buck.mint(200e18);
+        _approveNotes(bob, 100e18);
+
+        uint256 aliceBalBefore = buck.balanceOf(alice);
+
+        // Snapshot the pre-Bob state Alice's prover would have used.
+        uint256 staleOldRoot       = notes.noteRoot();
+        uint32  staleNextLeafIndex = notes.nextLeafIndex();
+
+        // Bob mints first, advancing both nextLeafIndex and noteRoot.
+        uint256[] memory bobCms = new uint256[](1);
+        bobCms[0] = CM3;
+        uint256 bobRoot = uint256(keccak256("bobwins")) % notes.FIELD_R();
+        _stubMint(bob, bobCms, 100e18, bobRoot);
+        assertEq(notes.nextLeafIndex(), 1);
+        assertEq(notes.noteRoot(),      bobRoot);
+
+        // Alice tries to land her stale proof -- both guards would catch it,
+        // but oldRoot fires first.  No BUCK movement, alice's balance
+        // unchanged, no leaf-index advancement beyond Bob's contribution.
+        uint256[] memory aliceCms = _cms(CM1, CM2);
+        uint256 aliceRoot = uint256(keccak256("aliceloses")) % notes.FIELD_R();
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: stale oldRoot"));
+        notes.mint(DUMMY_PROOF, staleOldRoot, aliceRoot, staleNextLeafIndex, 200e18, aliceCms);
+        assertEq(buck.balanceOf(alice), aliceBalBefore);
+
+        // Alice re-syncs and re-mints against the new live state.
+        uint256 aliceRoot2 = uint256(keccak256("aliceretries")) % notes.FIELD_R();
+        uint256 liveOldRoot       = notes.noteRoot();
+        uint32  liveNextLeafIndex = notes.nextLeafIndex();
+        vm.prank(alice);
+        notes.mint(
+            DUMMY_PROOF, liveOldRoot, aliceRoot2, liveNextLeafIndex,
+            200e18, aliceCms
+        );
+        assertEq(notes.nextLeafIndex(), 3);
+        assertEq(notes.noteRoot(),      aliceRoot2);
+        assertEq(buck.balanceOf(alice), aliceBalBefore - 200e18);
     }
 }

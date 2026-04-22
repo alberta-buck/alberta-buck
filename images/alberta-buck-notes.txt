@@ -1,5 +1,5 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                 THE ALBERTA BUCK - NOTES (DRAFT V0.3)
+                 THE ALBERTA BUCK - NOTES (DRAFT V0.4)
             Private Bearer Instruments on an Identity-Aware
                            Demurrage Currency
 
@@ -41,7 +41,8 @@ note always learn each other's `M', and either is compellable on
 warrant.  This is stronger compliance than physical cash provides today,
 stronger privacy than any CBDC has ever proposed, and the first design
 where a private bearer instrument is a native, first-class primitive of
-the monetary system rather than an aftermarket wrapper. ([PDF], [Text])
+the monetary system rather than an aftermarket wrapper. ([PDF], [Text],
+[Walkthrough])
 
 Table of Contents
 ─────────────────
@@ -135,17 +136,16 @@ Table of Contents
 .. 6. Schnorr PoK at Spend (B-Spend)
 .. 7. Summary: New Cryptographic Components
 16. The SNARK Circuits
-.. 1. Mint Circuit
-.. 2. A-Spend Circuit (Addressed: A1 / A2)
-.. 3. B-Spend Circuit (Bearer: B1)
-.. 4. Circuit Engineering Budget
-.. 5. Common Circuit Gadgets
+.. 1. Mint Circuit (`circuits/mint_batch.circom')
+.. 2. Spend Circuit (`circuits/spend.circom', B-flavor / bearer shape)
+.. 3. Circuit Engineering Budget
+.. 4. Common Circuit Gadgets
 17. What This Architecture Rules Out: Pure-Bearer Cryptographic Notes
 18. Security Assumptions and Theorems Used
 .. 1. Demurrage Conservation as a Contract Invariant
 19. Implementation Scope
-.. 1. Smart Contract Additions
-.. 2. SNARK Circuits
+.. 1. Shipped (Phases 1-3)
+.. 2. Pending Engineering (Phases 4-8)
 .. 3. Wallet & UX
 .. 4. Cross-Checks and Audit
 .. 5. Phased Rollout
@@ -155,14 +155,17 @@ Table of Contents
 .. 2. Stranded Value on Lost Notes
 .. 3. Integer-Arithmetic Rounding
 .. 4. Predicate Programmability vs. Circuit Simplicity
-.. 5. Universal Spend Circuit vs. Two
-.. 6. Regulatory Interaction with the Age-Preserving Transfer
+.. 5. Universal Spend Circuit vs. A/B Specialization
+.. 6. Regulatory Interaction with `transferCarrying'
 21. Summary
 
 
 [PDF] <https://perry.kundert.ca/images/alberta-buck-notes.pdf>
 
 [Text] <https://perry.kundert.ca/images/alberta-buck-notes.txt>
+
+[Walkthrough]
+<https://perry.kundert.ca/content/range/alberta-buck-notes-flow>
 
 
 1 The Cash Paradox
@@ -316,19 +319,18 @@ Table of Contents
     \( \rho \) redeems.  A cashier's cheque: maker known, bearer not,
     cash-on-presentation.
 
-  *Demurrage needs no new machinery.* The Note Pool /is/ simply the BUCK
-  ERC-20 contract's own balance – a regular BUCK account accumulating
-  BUCK-age like any other account.  Mint transfers \( v \) BUCKs to the
-  contract (a standard ERC-20 transfer; sender pays their own outgoing
-  demurrage fee).  Redemption is an /age-preserving transfer/ unique to
+  *Demurrage needs no new machinery.* The Notes Pool /is/ simply the
+  Notes contract's own ERC-20 balance – a regular BUCK account tracked
+  by the existing demurrage ledger.  Mint pulls `totalFace' BUCK from
+  the caller via standard ERC-20 transfer (sender pays their own
+  outgoing demurrage fee).  Spend uses a /carrying transfer/ unique to
   the Notes contract's single egress path: the recipient's nominal
-  balance rises by the /full/ face value \( v \), and their BUCK-age
-  rises by \( v \cdot A/B \), where \( A \) and \( B \) are the pool
-  account's accumulated BUCK-age and balance in the existing ERC-20
-  ledger.  Donations to the contract dilute \( A/B \), directly lowering
-  the age-share absorbed by all subsequent redemptions.  Conservation is
-  automatic; the Jubilee continues to grow autonomously at \( \kappa
-  \cdot \text{totalSupply} \).
+  balance rises by the /full/ face value, and their `_indexAtLastTouch'
+  weighted-merges toward the pool's stale index, inheriting the average
+  pool-residence demurrage on the inflowing share.  Donations to the
+  contract freshen the pool's index, directly lowering the demurrage
+  absorbed by all subsequent spends.  Conservation is automatic; the
+  Jubilee continues to grow autonomously per BUCK's standard accounting.
 
   *Lost notes return value to the commons.* Demurrage solves physical
   cash's oldest problem: a lost note's value decays at the same rate as
@@ -354,40 +356,62 @@ Table of Contents
 ════════════════════════════════════════════════
 
   The entire BUCK Notes design rests on a single on-chain primitive: a
-  Merkle tree of commitments with a nullifier set, accompanied by an
-  age-preserving transfer that delivers the opening's face value plus
-  the pool's proportional BUCK-age to a recipient.  Everything else –
-  paper notes, addressed cheques, bearer cheques, self-wormholes – is a
+  Merkle tree of commitments with a nullifier set, accompanied by a
+  /carrying transfer/ (`transferCarrying') that delivers the opening's
+  face value to a recipient and weighted-merges the pool's accumulated
+  demurrage index into the recipient's account.  Everything else – paper
+  notes, addressed cheques, bearer cheques, self-wormholes – is a
   consequence of varying the /spend predicate/ inside the commitment.
 
 
 2.1 The Note Contract State
 ───────────────────────────
 
-  The BUCK contract gains exactly three new pieces of state:
+  The Notes contract is a separate, dedicated contract (`src/Notes.sol')
+  holding a Tornado-style incremental Poseidon-T3 Merkle tree, a
+  nullifier set, and a small ring buffer of historical roots.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   State          Type                         Purpose                                         
-  ─────────────────────────────────────────────────────────────────────────────────────────────
-   `noteTree'     Merkle tree of commitments   Cryptographic anchor for every outstanding note 
-   `nullifiers'   Set of used nullifiers       Double-spend prevention                         
-   `noteFaceSum'  \( F \) in \( \mathbb{Z} \)  Sum of face values of all outstanding notes     
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  That is all.  The pool's nominal BUCK balance \( B \) and accumulated
-  BUCK-age \( A \) are not tracked as separate state: /the pool is just
-  a BUCK account/, specifically the ERC-20 contract's own address, and
-  \( B, A \) are exactly the balance and BUCK-age the ERC-20 ledger
-  already maintains for it.  No lazy integration, no shadow aggregates,
-  no separate `poolT' timestamp.  `noteFaceSum' is a pure audit scalar –
-  the total face-value liability outstanding – and does not appear in
-  the redemption formula itself.
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   State               Type                                            Purpose                                                           
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `nullifiers'        `mapping(uint256 =\Rightarrow' bool)=           Double-spend prevention                                           
+   `noteFaceSum'       `uint256'                                       Total face value of all outstanding notes (audit scalar)          
+   `nextLeafIndex'     `uint32'                                        Next free leaf slot (also = current leaf count)                   
+   `roots[30]'         `uint256[ROOT_HISTORY_SIZE]'                    Recent root ring buffer; spends may use any historical root       
+   `currentRootIndex'  `uint32'                                        Newest entry in `roots[]'                                         
+   `mintVerifiers[N]'  `mapping(uint256 =\Rightarrow' IMintVerifier)=  Per-N batch-mint verifier dispatch (pinned set, e.g. 16/128/1024) 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The tree is fixed at depth \( d=20 \) (\(\approx 1{,}048{,}576\)
+  leaves) and uses Poseidon-T3 (2-input) at every internal node.  Under
+  Phase-7-bis the per-leaf Merkle insertion logic lives /inside the mint
+  SNARK/; the contract itself does not maintain `zeros[]' or
+  `filledSubtrees[]' and does not expose an on-chain `_insert()' entry
+  point.  Every mint submits a SNARK-attested `newRoot' which the
+  contract writes into `roots[]' in one step.  The ring buffer holds the
+  30 most recent roots so spends remain valid for a short window after
+  new notes are inserted, without requiring per-spend root-update
+  synchronisation.  The per-commitment `commitmentExists'
+  duplicate-reject map from Phase 7 has also been retired – duplicate
+  mints are now economically self-punishing via the deterministic
+  nullifier \( \text{Poseidon}_3(\rho, \text{idHash}, 4242) \), so the
+  chain does not need an explicit check.
 
-  BUCKs transferred to the contract address (via mint, donation, or
-  accident) joins \( B \) through the normal ERC-20 path.  BUCKs
-  transferred out of the contract on redemption uses a /single new
-  primitive/: an age-preserving transfer that moves both balance and
-  proportional BUCK-age from the contract to the recipient.  This is the
-  only non-standard BUCK operation in the design.
+  The /Notes pool/ – the BUCK custody side of the design – is just the
+  Notes contract's own ERC-20 balance.  No separate `poolBalance',
+  `poolAge', or `poolT' state is maintained: the BUCK ledger's own
+  per-account balance and demurrage index for `address(notes)' already
+  are the pool, and `noteFaceSum' is a pure audit scalar (the total
+  face-value liability outstanding).  The pool is registered
+  `isSystemPublic' in the IdentityRegistry so that identity-bound
+  transfers from any registered party can land at it.
+
+  BUCKs transferred to the Notes contract on mint join its ERC-20
+  balance through the normal path.  BUCKs transferred out on spend use a
+  single new BUCK primitive – `transferCarrying' – which moves both face
+  value and a proportional share of accumulated demurrage (via a
+  weighted-index merge on the recipient's `_indexAtLastTouch') from the
+  pool to the recipient.  This is the only non-standard BUCK operation
+  in the design; see "Demurrage at the Pool Level" below.
 
 
 2.2 The Note Commitment
@@ -440,45 +464,63 @@ Table of Contents
 ─────────────
 
   ┌────
-  │ mint (burn):
-  │   # Standard ERC-20 transfer from caller to contract address.
-  │   # Caller pays their own outgoing-transfer demurrage through the
-  │   # normal BUCK accounting path.  Contract balance B gains v; its
-  │   # accumulated BUCK-age A starts earning on the new v from here.
-  │   transfer v BUCKs from caller to contract
-  │   for each of {cm_1, ..., cm_N}:
-  │      append cm_i to noteTree
-  │   noteFaceSum += sum(v_i)
+  │ mint (burn, Phase-7-bis batch):
+  │   # The caller supplies a batch of N commitments, the SNARK-attested
+  │   # newRoot, and the oldRoot / nextLeafIndex they based the proof on.
+  │   # The per-leaf Poseidon insertion is inside the SNARK, not on chain.
+  │   require cms.length > 0
+  │   require oldRoot       == roots[currentRootIndex]    # stale-state guard
+  │   require nextLeafIndex == self.nextLeafIndex         # stale-state guard
+  │   cmBatchHash = keccak256(abi.encodePacked(cms))
+  │   require mintVerifiers[cms.length].verifyMint(
+  │             proof, oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash)
+  │   # The SNARK has proved, for some witness
+  │   #   (flavor_i, v_i, rho_i, idHash_i, predHash_i, pathSiblings_i)_i:
+  │   #     - cm_i = Poseidon5(flavor_i, v_i, rho_i, idHash_i, predHash_i)
+  │   #     - v_i in [0, 2^128), totalFace in [0, 2^128)  # Num2Bits(128)
+  │   #     - sum(v_i) == totalFace
+  │   #     - folding {cm_i} onto oldRoot at nextLeafIndex using pathSiblings_i
+  │   #       yields newRoot
+  │   #     - cmBatchHash == H(cm_0, ..., cm_{N-1})
+  │   buck.transferFrom(caller, address(this), totalFace)
+  │   # Adopt the SNARK-attested new root and advance the rolling state.
+  │   currentRootIndex = (currentRootIndex + 1) % ROOT_HISTORY_SIZE
+  │   roots[currentRootIndex] = newRoot
+  │   self.nextLeafIndex     += cms.length
+  │   noteFaceSum            += totalFace
+  │   emit Minted(caller, totalFace, nextLeafIndex, cms.length, newRoot)
   │ 
-  │ deposit (mint-out):
-  │   verify SNARK (A-spend or B-spend, per flavor):
-  │     - Merkle inclusion of some cm in noteTree
-  │     - Knowledge of (v, rho, id_payload, predicate)
-  │     - Flavor-specific spend predicate satisfied by witness
-  │     - nullifier correctness
-  │     - v is a public output of the SNARK
-  │   require nf not in nullifiers
-  │   nullifiers += nf
-  │   # Read pool state from the ERC-20 ledger:
-  │   (B, A) = (balanceOf(contract), buckAgeOf(contract))
-  │   ageShare = v * A / B
-  │   # Age-preserving transfer (the one new primitive):
-  │   #   contract.balance -= v;   contract.age -= ageShare
-  │   #   recipient.balance += v;  recipient.age += ageShare
-  │   transferPreservingAge(contract, recipient, v, ageShare)
-  │   noteFaceSum -= v
+  │ spend (mint-out):
+  │   # caller supplies (proof, root, nullifier, face, recipient)
+  │   require root in roots[]         # any of the last 30 historical roots
+  │   require nullifier not in nullifiers
+  │   verify SNARK (spend, B-flavor / bearer shape):
+  │     - face in [0, 2^128) and face == v   # Num2Bits(128) on both
+  │     - cm = Poseidon5(flavor, v, rho, idHash, predHash)
+  │     - Merkle inclusion of cm under root  # Switcher + Poseidon(2) per level
+  │     - nullifier == Poseidon3(rho, idHash, 4242)
+  │     - ghost-bind public signals (face, recipient, chainId) via x*x
+  │   nullifiers[nullifier] = true
+  │   noteFaceSum -= face
+  │   # The single new BUCK primitive: pay the face out of the pool to
+  │   # recipient and merge the pool's demurrage index into recipient's
+  │   # weighted-average _indexAtLastTouch.  Recipient receives face BUCK
+  │   # and inherits the pool's average BUCK-age proportional to their
+  │   # delivered share of the new total balance.
+  │   buck.transferCarrying(recipient, face)
   └────
 
   Full face value is delivered: the recipient's nominal balance goes up
-  by exactly \( v \).  The pool's demurrage cost rides along as the
-  BUCK-age \( v \cdot A/B \) added to the recipient's account.  The
-  recipient will bear that demurrage on their subsequent outgoing
-  transfers through the ordinary BUCK accounting path – the same path
-  any holder travels, but on an age they acquired by accepting the note.
-  No Jubilee payment is emitted from inside the deposit; the Jubilee
-  grows autonomously at \( \kappa \cdot \text{totalSupply} \), which
-  continues to include both \( B \) (before redemption) and \( v \)
-  (after, as part of recipient's balance).
+  by exactly `face'.  The pool's demurrage cost rides along as a
+  weighted-merge of the pool's `_indexAtLastTouch' into the recipient's
+  index, in proportion to the inflowing share of their new total
+  balance.  The recipient bears that demurrage on their subsequent
+  outgoing transfers through the ordinary BUCK accounting path – the
+  same path any holder travels, but on an inherited index acquired by
+  accepting the note.  No Jubilee payment is emitted from inside spend;
+  the Jubilee grows autonomously per BUCK's standard `_advanceGlobals' /
+  `_accrueJubilee' machinery, independent of how BUCK is distributed
+  between accounts.
 
 
 3 A Note is a Deferred Approve Handshake
@@ -533,8 +575,9 @@ Table of Contents
      • completes /their half/ of approve by attaching
        `E_depositor_for_issuer' (the mirror ElGamal ciphertext) as a
        deposit-event payload, and
-     • authorises the age-preserving transfer of \( v \) and \( v \cdot
-       A/B \) out of the pool.
+     • authorises `transferCarrying(recipient, face)' out of the pool,
+       weighted-merging the pool's demurrage index into the recipient's
+       `_indexAtLastTouch'.
 
   3. *Receipt.* The issuer later scans deposit events for the nullifier
      of the note she printed and reads `E_depositor_for_issuer' to learn
@@ -574,15 +617,19 @@ Table of Contents
 ───────────────────────────────────
 
   At mint: a transfer of \( v \) BUCKs from Alice's address to the
-  contract address, plus an `Appended(cm)' event.  The commitment \( cm
-  \) is a Poseidon hash; observers learn nothing about the opening, the
-  depositor, the issuer flavor, or \( \rho \).
+  contract address, plus a `Minted(issuer, totalFace, startIndex, count,
+  newRoot)' event.  The commitments themselves live in the transaction
+  calldata (`cms[]'); each \( cm_i \) is a Poseidon hash, so observers
+  learn nothing about the opening, the depositor, the issuer flavor, or
+  \( \rho \).
 
-  At deposit: an age-preserving transfer of \( v \) BUCKs from the
+  At deposit: a `transferCarrying' of `face' BUCKs from the Notes
   contract address to the depositor's address, plus a `Deposited(nf,
   E_depositor_for_issuer)' event.  Observers learn who the depositor is
   (standard transfer visibility), but not which mint this corresponds
-  to.
+  to.  The `TransferCarrying' event is distinguishable from a standard
+  `Transfer', but only as a generic pool-egress signal; it does not link
+  mint to spend.
 
   The two transactions are decoupled in time and unlinked in the chain
   state.  Any mass-harvest analysis that tries to reconstruct the
@@ -1030,14 +1077,14 @@ Table of Contents
 7.1 The Pool is a Regular Account
 ─────────────────────────────────
 
-  The BUCK contract's own address is a registered account in the
-  ordinary sense.  BUCKs flowing in (mints, donations) is a standard
-  incoming transfer; BUCKs flowing out (redemptions) is a standard
-  age-preserving outgoing transfer.  The only contract-local state not
-  already tracked by the ERC-20 ledger is `noteTree' (the commitment
-  Merkle tree), `nullifiers' (the spent-note set), and `noteFaceSum'
-  (aggregate live face value – an audit convenience, not a liability
-  figure).
+  The Notes contract's own address is a registered account in the
+  ordinary sense (system-public in IdentityRegistry).  BUCKs flowing in
+  (mints, donations) is a standard incoming transfer; BUCKs flowing out
+  (spends) uses `transferCarrying'.  The only contract-local state not
+  already tracked by the BUCK ledger is the Merkle-tree root history
+  (`roots[]', `nextLeafIndex'), the nullifier set (`nullifiers'), and
+  `noteFaceSum' (aggregate live face value – an audit scalar, not a
+  liability figure).
 
 
 7.2 Regular Transfer vs. A-Flavor Note
@@ -1046,32 +1093,32 @@ Table of Contents
   A regular `transfer(alice, bob, v)' followed (or preceded) by
   `approve(alice, bob)' has the following on-chain signature:
 
-  • Alice's account: balance debited by \( v \cdot B_A / (B_A - \kappa
-         A_A) \), demurrage settled at Alice.
-  • Bob's account: balance credited by \( v \).
-  • Edge observable: Alice –> Bob, amount \( v \), block \( t \).
+  • Alice's account: `face' debited from her balance, plus her
+    accumulated fee burned and `_indexAtLastTouch[alice]' reset to
+    `cumIndex_now'.
+  • Bob's account: balance credited by `face', his `_indexAtLastTouch'
+    weighted-merged toward `cumIndex_now'.
+  • Edge observable: Alice –> Bob, amount `face', block \( t \).
 
-  The A-flavor equivalent (A2 between two anon-valid accounts):
+  The A-flavor Note equivalent (A2 between two anon-valid accounts):
 
-  • Alice mints: balance debited by the same \( v \cdot B_A / (B_A -
-    \kappa A_A) \) (Alice pays her own outgoing-transfer demurrage,
-    settling her age-per-BUCK at mint time).  The pool's balance gains
-    \( v \), age-clean.
-  • Bob deposits at time \( t + \Delta \): the pool transfers \( v \)
-    face plus \( v \cdot A_{\text{pool}}/B_{\text{pool}} \) proportional
-    age to Bob.  Bob now bears the pool's averaged age for the value he
-    receives; his own account's age-per-BUCK adjusts upward in
-    proportion.
+  • Alice mints: standard ERC-20 transfer of `totalFace' to the Notes
+    contract.  Alice pays her own outgoing-transfer fee and resets her
+    index, exactly as in a regular transfer.  The pool's balance gains
+    `totalFace'; its index weighted-merges forward.
+  • Bob spends at time \( t + \Delta \): the pool's `transferCarrying'
+    delivers `face' to Bob and weighted-merges the pool's stale
+    `_indexAtLastTouch' into Bob's index.  Bob now bears the pool's
+    averaged demurrage on the inflowing share of his balance.
   • Edge observable: Alice –> pool at \( t \); pool –> Bob at \( t +
     \Delta \).  The edge connecting them is erased.
 
   Economic outcomes match a regular transfer up to the timing
-  difference: Bob acquires age proportional to how long the pool held
-  the value, which under pool-rate demurrage is bounded by the pool's
-  current \( A/B \) regardless of how long Bob's specific commitment sat
-  in the tree.  This is the key property that makes indefinite holding
-  of A-flavor Notes economically equivalent to holding BUCK – same
-  demurrage rate, just with a different edge visible on chain.
+  difference: Bob acquires the pool's averaged BUCK-age on the inflow,
+  regardless of how long Bob's specific commitment sat in the tree.
+  This is the key property that makes indefinite holding of A-flavor
+  Notes economically equivalent to holding BUCK – same demurrage rate
+  (averaged over the pool), just with a different edge visible on chain.
 
 
 7.3 Regular Transfer vs. B-Flavor Note
@@ -1160,199 +1207,215 @@ Table of Contents
 8.1 Reminder: How BUCK Demurrage Actually Works
 ───────────────────────────────────────────────
 
-  Demurrage is /not transferred/ on any per-account basis.  It is an
-  accounting entry maintained on each account's state:
+  BUCK accounts no longer carry an explicit BUCK-age \( A_X \) state.
+  The implementation uses a /global cumulative index/, `cumIndex', that
+  grows at a fixed rate `BASE_RATE_PER_SEC' per second; each account
+  stores only one extra scalar, `_indexAtLastTouch[X]', the value of
+  `cumIndex' at the account's most recent settlement.
 
-  • Every block, the Jubilee account's balance grows by \( \kappa \cdot
-    \text{totalSupply} \cdot \Delta t \).  This is a single global
-    operation; the sum of all other accounts' nominal balances is held
-    constant.
-  • Each account \( X \) has a running BUCK-age \( A_X \) that grows at
-    rate \( B_X \) (its nominal balance) per unit time.
-  • When account \( X \) transfers \( v \) BUCK out, its spendable
-    fraction is \( (B_X - \kappa A_X)/B_X \); the outgoing transfer
-    costs the account \( v \cdot B_X / (B_X - \kappa A_X) \) of its
-    nominal balance, and the corresponding \( \kappa A_X \cdot v / (B_X
-    - \kappa A_X) \) demurrage "owed" is simply extinguished from \(
-    (B_X, A_X) \) against the Jubilee's autonomous growth.
+  The fee owed by account \( X \) at any moment is \[ \text{feeOwing}(X)
+  \;=\; B_X \cdot \frac{\text{cumIndex}_{\text{now}} -
+  \text{idx}_X}{\text{SCALE}}, \] i.e. the account's nominal balance
+  times the slice of `cumIndex' accumulated since it last touched.  This
+  is mathematically equivalent to the older \( \kappa A_X \) formulation
+  – BUCK-age \( A_X = B_X \cdot (\text{cumIndex}_{\text{now}} -
+  \text{idx}_X)/(\text{rate} \cdot \text{SCALE}) \) – but stores nothing
+  per-account beyond a single index value.
 
-  System-wide invariant (preserved by every transfer):
+  On a /standard/ ERC-20 transfer the sender's accumulated fee is first
+  /burned/ (its outgoing balance is reduced and `totalSupply' drops),
+  the sender's `idx' resets to `cumIndex', and the recipient's `idx' is
+  /weighted-merged/ toward `cumIndex' – the recipient receives clean
+  BUCK with no inherited age and pays no fee.
 
-  \[ \sum_{\text{all accounts } X} B_X \;+\; B_{\text{Jubilee}} \;=\;
-     \text{constant}.  \]
+  Once per touch, the contract also "accrues the Jubilee": the gap
+  between the Jubilee's required balance (its own accumulated `cumIndex'
+  slice times `totalSupply') and its actual balance is minted into the
+  Jubilee account, and its `idx' is weighted-merged forward.  This keeps
+  the system-wide invariant
 
-  The Jubilee balance reflects the aggregate accrual \( \kappa \int_0^t
-  \text{totalSupply}(s)\,ds \); individual accounts' \( \kappa A_X \)
-  quantities track /their share/ of that total.
+  \[ \sum_{\text{all accounts } X} B_X \;=\; \text{totalSupply
+     (incl. Jubilee)} \]
+
+  automatically preserved across every transfer.
 
 
 8.2 The Pool Account's Demurrage
 ────────────────────────────────
 
-  Treat the BUCK contract address as an ordinary account.  Let:
+  The Notes pool is an /ordinary/ BUCK account (the Notes contract's own
+  ERC-20 balance).  Its demurrage state is therefore exactly two numbers
+  maintained by the BUCK ledger:
 
-  • \( B \) = the contract's ERC-20 balance (= sum of all BUCK
-    transferred in via mints and donations, minus all BUCK transferred
-    out via redemptions, modulo the standard demurrage adjustment on
-    outgoing transfers).
-  • \( A \) = the contract's accumulated BUCK-age, as maintained by the
-    ERC-20 ledger.
+  • \( B \) = `balanceOf(notes)' – BUCK transferred in via mint and
+    donations, minus BUCK transferred out via spend.
+  • \( \text{idx}_{\text{pool}} \) =
+    `_indexAtLastTouch[address(notes)]', the `cumIndex' snapshot at the
+    pool's most recent touch.
 
-  \( B \) and \( A \) are already on chain; the Notes design queries
-  them, it does not compute them.  The pool's /effective spendable
-  value/ at any moment is
-
-  \[ E \;=\; B - \kappa \cdot A.  \]
-
-  This is the amount the contract would be able to transfer out if it
-  emptied itself in a single call – exactly the same definition that
-  applies to any other account.
+  The pool's effective fee-owed at this moment is \( B \cdot
+  (\text{cumIndex}_{\text{now}} - \text{idx}_{\text{pool}})/\text{SCALE}
+  \).  The Notes contract never reads or writes either value: it lives
+  inside the BUCK ledger just like every other account.  Mints
+  weighted-merge `idx_pool' toward the new `cumIndex'; spends use the
+  carrying primitive defined next.
 
 
 8.3 The Age-Preserving Redemption
 ─────────────────────────────────
 
-  When a note of face \( v \) is redeemed, the contract performs an
-  /age-preserving transfer/ of \( v \) BUCK from itself to the
-  recipient:
+  When a note of face \( v \) is spent, the Notes contract calls the
+  single new BUCK primitive `transferCarrying(recipient, v)'.  Unlike
+  the standard ERC-20 transfer, `transferCarrying' /does not/ burn any
+  sender-side fee: the pool's index is left untouched, the full face
+  value lands in the recipient, and the recipient's `_indexAtLastTouch'
+  is weighted-merged toward the /pool's/ index (which is older than
+  `cumIndex_now', hence carries fee owed):
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Side       Balance change  BUCK-age change    
-  ───────────────────────────────────────────────
-   Pool       \( -v \)        \( -v \cdot A/B \) 
-   Recipient  \( +v \)        \( +v \cdot A/B \) 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Full face value is delivered; the pool's BUCK-age /proportional share/
-  – one average age-per-BUCK times face \( v \) – moves along with the
-  balance to the recipient.  The recipient's account absorbs that age
-  just as if they had personally held \( v \) BUCK through the pool's
+  ┌────
+  │ br        = balanceOf(recipient)                    // before transfer
+  │ idxFrom   = _indexAtLastTouch[pool]                 // pool's stale index
+  │ _indexAtLastTouch[recipient]
+  │     = (br * _indexAtLastTouch[recipient] + v * idxFrom)
+  │                              / (br + v)
+  │ _update(pool, recipient, v)                         // ordinary balance move
+  └────
+
+  The pool's `_indexAtLastTouch' is /not/ disturbed – successive spends
+  from the pool draw against the same shared index, so each recipient
+  inherits the same per-BUCK age share as long as the pool keeps minting
+  and spending without an intervening standard transfer.
+
+  The recipient's combined index after the merge corresponds to a
+  weighted average of the two BUCK-ages: the recipient's prior holding
+  ages from its prior `idx', and the freshly received \( v \) BUCK ages
+  from the pool's `idx'.  When the recipient next makes a standard
+  outgoing transfer they pay the (combined) fee out of their balance,
+  exactly as if they had personally held \( v \) BUCK across the pool's
   residence period.
 
-  The pool's /own/ age-per-BUCK ratio \( A/B \) is preserved across the
-  redemption: \( A_{\text{new}}/B_{\text{new}} = (A - vA/B) / (B
-  • v) = A(B - v) / (B(B - v)) = A/B \).  The ratio drifts only
-  through time (age accrues at rate \( B \)) and through mints (fresh
-  BUCK arrives age-free, diluting the ratio).
-
-  Contrast with a standard BUCK transfer, where the sender bears the
-  demurrage on their side (balance reduced by \( v \cdot B/(B - \kappa
-  A) \)) and the recipient receives a clean \( v \) with no age.  The
-  age-preserving variant simply /follows/ the balance with its
-  proportional age, deferring the demurrage reckoning to the recipient's
-  next outgoing transfer.  This is an economically natural choice for a
-  Note recipient: they have accepted the note in lieu of a direct BUCK
-  holding, and in return accept the demurrage cost that goes with having
-  held that BUCK.
+  This is the cost of anonymity: the recipient inherits the average pool
+  BUCK-age, which is a net /benefit/ for any note that has been held
+  longer than the pool's average age, and a net cost for notes spent
+  quickly into the pool.  In practice, fast-circulating notes subsidise
+  slow ones.
 
 
 8.4 Donations Integrate Smoothly
 ────────────────────────────────
 
-  Any BUCK transferred to the contract address /without/ minting a
-  corresponding note increases \( B \) without adding BUCK-age (the
-  sender's age stays with the sender per standard ERC-20 semantics).
-  The pool's ratio \( A/B \) drops; subsequent redemptions carry a
-  /smaller/ age-share per face unit.  Over a sequence of redemptions the
+  Any BUCK transferred to the Notes contract /without/ minting a
+  corresponding note arrives via a standard ERC-20 transfer, which
+  weighted-merges the pool's `_indexAtLastTouch' toward the current
+  `cumIndex' (i.e. forward in time).  The pool's per-BUCK fee owed
+  drops; subsequent `transferCarrying' spends therefore deliver
+  recipients an index closer to `cumIndex_now', meaning a smaller
+  inherited fee-share per face unit.  Over a sequence of spends, the
   donation is consumed as a demurrage subsidy for live noteholders.
 
   Four origin cases, all handled identically:
 
-  1. *Accidental transfers.* A user fat-fingers the contract as a
-     recipient.  Their BUCK is not burned; it dilutes \( A/B \), and
-     future redeemers bear marginally less age.
+  1. *Accidental transfers.* A user fat-fingers the Notes contract as a
+     recipient.  Their BUCK is not burned; it freshens `idx_pool', and
+     future redeemers inherit marginally less fee.
   2. *Philanthropic donations.* A user deliberately sends BUCK to the
-     contract to subsidise noteholders.  The subsidy spreads across all
-     future redemptions until \( A/B \) drifts back up.
+     pool to subsidise noteholders.  The subsidy spreads across all
+     future redemptions until `idx_pool' staleness rebuilds.
   3. *Recovered collateral.* Mechanism-level refunds (e.g., an issuer's
-     collateral unlock) sent to the contract address.
+     collateral unlock) sent to the pool address.
   4. *Rounding / dust.* Integer-arithmetic residuals.  Self-healing.
 
-  After all notes are eventually redeemed, any remaining donation
-  principal sits at \( F = 0, B = D_{\text{residual}}, A = 0 \) –
-  unclaimable by redemption, but available to subsidise a fresh round of
-  mints if the pool is used again.
+  After all notes are eventually spent, any remaining donation principal
+  sits at `noteFaceSum = 0, balanceOf(notes) > 0' – unclaimable by
+  spend, but available to subsidise a fresh round of mints if the pool
+  is used again, or recoverable by governance sweep (per Notes contract
+  policy).
 
 
 8.5 Conservation is Automatic, and Tight
 ────────────────────────────────────────
 
-  The age-preserving transfer conserves both quantities /exactly/:
+  `transferCarrying' conserves the pool's and recipient's nominal
+  balances exactly:
 
   • \( \Delta B_{\text{pool}} + \Delta B_{\text{recipient}} = 0 \).
-  • \( \Delta A_{\text{pool}} + \Delta A_{\text{recipient}} = 0 \).
 
-  Total BUCK in circulation is unchanged by redemption; total
-  accumulated BUCK-age is unchanged by redemption.  The Jubilee
-  continues to grow autonomously at rate \( \kappa \cdot
-  \text{totalSupply} \) per block; this total is unaffected by whether
-  the \( v \) BUCK sits in the pool or in the recipient's account.  And
-  whether the demurrage on that age is eventually paid out by the pool's
-  (hypothetical) transfer or by the recipient's real outgoing transfer,
-  the same \( \kappa \cdot v \cdot A/B \) amount of spendable value will
-  be reconciled against the Jubilee.
+  No fee is burned, no `totalSupply' movement happens; the recipient's
+  `idx' weighted-merge is pure bookkeeping.  The next time the recipient
+  makes a standard transfer, the inherited fee-share will be paid out of
+  their balance and into the Jubilee via the ordinary BUCK accounting
+  path.
 
-  No pool-specific conservation theorem is needed beyond the system-wide
-  \( \sum_X B_X + B_{\text{Jubilee}} = \text{const} \) (automatic) and
-  the local observation that the age-preserving transfer is two-sided
-  balanced (evident from its definition).
+  Globally, the system-wide invariant \( \sum_X B_X = \text{totalSupply
+  (incl. Jubilee)} \) holds across every transfer (carrying or standard)
+  by construction.  The Jubilee's required-balance growth is independent
+  of how BUCK is distributed between accounts; it depends only on
+  `cumIndex' and `totalSupply'.  No pool-specific conservation theorem
+  is required.
 
 
 8.6 Numeric Example
 ───────────────────
 
-  Suppose the pool holds \( B = 10\,000\,000 \) BUCK with \( A =
-  5\,000\,000 \) BUCK-years (average age 0.5 yr), and \( F =
-  10\,000\,000 \) BUCK of live notes outstanding.
+  Suppose the pool holds \( B = 10\,000\,000 \) BUCK and was last
+  touched 0.5 yr ago, so the pool's `idx_pool' lags `cumIndex_now' by an
+  amount corresponding to a 1% fee owed (the BUCK base demurrage rate is
+  2% per year).  The pool currently owes the Jubilee \( 100\,000 \) BUCK
+  against its \( 10\,000\,000 \) face.
 
-  Alice redeems a note of face \( v = 1{,}000 \):
-  • Alice's balance rises by 1,000 BUCK.
-  • Alice's BUCK-age rises by \( 1{,}000 \cdot 5{,}000{,}000 /
-    10{,}000{,}000 = 500 \) BUCK-years.  In nominal units: her 1,000
-    incoming BUCK has an effective /age/ of 0.5 yr attached to it.
-  • When Alice next spends 1,000 BUCK from this account, the outgoing
-    transfer reconciles its share of her total BUCK-age against the
-    Jubilee: roughly \( 0.02 \cdot 500 = 10 \) BUCK worth of demurrage
-    is paid out of her balance (the exact amount depends on her other
-    holdings' age).  Net effect: she receives 1,000, pays ~10 when she
-    spends them, nets 990.  This matches the previous-model result where
-    she received 990 at redemption – same economic total, different
-    accounting.
+  Alice spends a note of face \( v = 1{,}000 \):
+  • Alice's BUCK balance rises by exactly 1,000.
+  • Alice's `_indexAtLastTouch' weighted-merges toward `idx_pool': if
+    she previously held 0 BUCK, her index is set to `idx_pool' directly
+    (1% of fee per BUCK is now attached to her); if she previously held
+    9,000 BUCK at `cumIndex_now', the merge yields an index close to
+    `cumIndex_now' (only 0.1% of fee per BUCK across her now-10,000
+    balance).
+  • When Alice next makes a standard outgoing transfer of \( v \), her
+    accumulated fee on the proportional share is burned out of her
+    balance and credited to `totalSupply' such that the Jubilee can mint
+    into balance.  Net: she receives 1,000 face value, pays up to \( 1\%
+    \times 1{,}000 = 10 \) BUCK as demurrage when she next spends – same
+    economic outcome as if she had personally held the BUCK during the
+    pool's residency.
 
-  Now suppose an anonymous donor sends 500,000 BUCK to the contract
-  address.  \( B \) rises to \( 10{,}500{,}000 \); the donor's BUCK-age
-  stays with them.  The pool's \( A/B \) drops from \( 0.5 \) to \(
-  5{,}000{,}000 / 10{,}500{,}000 \approx 0.476 \).  Alice's next
-  redemption absorbs a smaller age-share per face – a direct subsidy
-  from the donor.
+  Now suppose an anonymous donor sends 500,000 BUCK to the pool via a
+  standard transfer.  `idx_pool' weighted-merges forward toward
+  `cumIndex_now'; the per-BUCK fee owed by the pool drops.  Alice's next
+  spend now inherits a /smaller/ index-gap and therefore pays less
+  demurrage on her next outgoing transfer – a direct subsidy from the
+  donor.
 
-  No Jubilee payment was emitted by the pool during any of this.  The
-  Jubilee's growth is unchanged: it keeps accruing \( \kappa \cdot
-  \text{totalSupply} \) per block regardless of who holds which BUCK.
+  The Jubilee's growth schedule is unchanged: it keeps accruing relative
+  to `cumIndex \cdot totalSupply' regardless of how BUCK sloshes between
+  accounts.
 
 
 8.7 Who Bears the Demurrage, Really
 ───────────────────────────────────
 
-  The answer is now sharply localized: *the Note recipient bears the
-  pool's accumulated share of demurrage on the face value they received,
-  and they pay it when they next spend from that account.* The recipient
-  has accepted the note, and with it has accepted the demurrage cost of
-  the BUCK sitting in the pool while the note was outstanding.
+  The answer is sharply localized: *the Note recipient inherits the
+  pool's accumulated demurrage share on the face value they received and
+  pays it on their next standard outgoing transfer.* The recipient has
+  accepted the note, and with it the demurrage cost of the BUCK sitting
+  in the pool while the note was outstanding.
 
-  This is the "price" the recipient pays for accepting BUCK Notes
-  instead of a direct BUCK transfer: they inherit the note's
-  pool-residence demurrage, prorated across all live notes at the moment
-  of redemption.  The trade-off is explicit – and visible in the
-  resulting \( (B, A) \) state on the recipient's account.
+  This is the "price" the recipient pays for accepting a BUCK Note
+  instead of a direct BUCK transfer: they inherit the average
+  pool-residence demurrage, weighted across their prior holding.  For
+  notes held longer than the pool's average residence, this is /cheaper/
+  than holding the BUCK directly; for notes spent quickly into the pool,
+  it is more expensive.  The trade-off is explicit in the resulting
+  `_indexAtLastTouch' on the recipient's account.
 
   Noteholders (while holding) bear no demurrage: they hold a
-  cryptographic note, not a BUCK balance, and the BUCK they implicitly
-  own sits in the pool where its age is borne collectively.  The issuer
-  (at mint time) bears their own outgoing-transfer demurrage to deposit
-  into the pool, as for any ERC-20 transfer.  Third parties bear
-  nothing.  The Jubilee keeps receiving the BUCK-wide demurrage stream
-  \( \kappa \cdot \text{totalSupply} \) regardless of how BUCK sloshes
-  between accounts.
+  cryptographic commitment, not a BUCK balance, and the BUCK they
+  implicitly own sits in the pool where its accumulated fee is borne
+  collectively until spent.  The issuer (at mint time) pays their own
+  outgoing-transfer fee through the standard ERC-20 path to deposit into
+  the pool.  Third parties bear nothing.  The Jubilee keeps receiving
+  the BUCK-wide demurrage stream regardless of how BUCK sloshes between
+  accounts.
 
 
 9 Demurrage Solves the Lost-Cash Problem
@@ -1390,26 +1453,28 @@ Table of Contents
 
   A BUCK Note that is lost in a fire, dropped down a storm drain, or
   hidden in a wall by a paranoid grandparent is /not/ permanently
-  extracted from the system.  The face value \( v \) sits in the pool as
-  part of \( B \), earning BUCK-age \( A \) at the standard rate.  No
-  redemption ever happens.
+  extracted from the system.  The face value sits in the pool's ERC-20
+  balance, with the pool's `_indexAtLastTouch' drifting further behind
+  `cumIndex_now' as the pool sits untouched.  No spend ever happens.
 
   Two effects balance:
 
-  1. The BUCK backing the lost note stays in the pool indefinitely,
-     accruing age.  It does not vanish.
-  2. Other live-note redeemers, through the age-preserving transfer,
-     absorb an age-share \( v \cdot A/B \) at each deposit.  Because the
-     lost note's share weighs on \( A \) without a corresponding
-     redemption to drain it, the lost note's implicit demurrage is paid
-     installment-style by subsequent redeemers.
+  1. The BUCK backing the lost note stays in the pool indefinitely.  It
+     does not vanish.
+  2. Other live-note spenders, through `transferCarrying', inherit a
+     share of the pool's stale index at each spend.  Because the lost
+     note's backing weighs on `balanceOf(notes)' without a corresponding
+     spend to drain it, the lost-note's implicit demurrage is paid
+     installment-style by subsequent spenders on their next outgoing
+     transfer.
 
-  Over decades, the pool's age-per-BUCK \( A/B \) drifts upward as lost
-  notes accumulate unredeemed.  The autonomous Jubilee growth at rate \(
-  \kappa \cdot \text{totalSupply} \) continues regardless.  Net effect:
-  /the 5-10% of currency that physical cash systems lose forever, BUCK
-  Notes returns to the commons within a generation/, via the steady
-  demurrage pressure that the lost face value applies to live redeemers.
+  Over decades, the pool's index-gap (`cumIndex_now - idx_pool') on the
+  lost-note backing accumulates the demurrage that would have been owed
+  had the BUCK been held in a regular account.  The autonomous Jubilee
+  growth continues regardless.  Net effect: /the 5-10% of currency that
+  physical cash systems lose forever, BUCK Notes returns to the commons
+  within a generation/, via the steady demurrage pressure that the lost
+  face value applies to live spenders inheriting the pool's stale index.
 
   This has cascading consequences:
 
@@ -1538,6 +1603,14 @@ Table of Contents
   itself – which would require the Identity system's own recovery
   mechanism – is the only failure mode, and it is shared with every
   other BUCK holding.
+
+  *Status (current implementation).* The shipped `spend.circom' is
+  B-shape only; A-flavor notes minted today are bearer-spendable by
+  anyone holding the opening, until `spend_a.circom' adds the in-circuit
+  CP-equality binding.  The cryptographic safety arguments above
+  describe the design with Phase 4 shipped; A1/A2 issuers should treat
+  today's notes as civil-trust instruments and not yet rely on
+  cryptographic recipient binding.
 
 
 10.3 B1 (Bearer): Civil-Trust, Not Cryptographic
@@ -2439,170 +2512,165 @@ Table of Contents
 16 The SNARK Circuits
 ═════════════════════
 
-  Because the flavor taxonomy collapses to two spend-circuit shapes, the
-  Notes system requires exactly three circuits: one /mint/ and two
-  /spend/ (A-spend for addressed A1/A2 deposits, B-spend for bearer B1
-  deposits).  A single universal spend circuit dispatched on a public
-  `flavor' input is a valid deployment variant; the trade-off is a
-  larger verifier vs. fewer distinct trusted-setup ceremonies.
+  The Notes implementation uses two BN254 Groth16 circuits:
+  `mint_batch.circom' (Phase-7-bis, parameterised by pinned N) and
+  `spend.circom'.  `spend.circom' is a single, flavor-agnostic
+  /bearer-shape/ circuit: it handles B1 today, and treats any A-flavor
+  commitment as bearer-redeemable (the in-circuit CP-equality binding to
+  the depositor's registered identity is deferred to a follow-up
+  `spend_a.circom', see "Phased Rollout" below).
 
 
-16.1 Mint Circuit
-─────────────────
+16.1 Mint Circuit (`circuits/mint_batch.circom')
+────────────────────────────────────────────────
 
-  *Public inputs.* `totalFace' (the total face value \( \sum v_i \) of
-  the notes being minted), \( \{cm_1, \ldots, cm_N\} \) (commitments to
-  be appended), and `issuerRegistryEntry' (a Merkle root or index into
-  IdentityRegistry attesting to the issuer's registered credential).
+  The per-leaf on-chain Poseidon insertion that Phase 7 shipped was
+  gas-cost-fatal at realistic batch sizes (~800K gas/leaf; N=16 alone
+  exceeds the block limit).  Phase-7-bis moves the Merkle-tree update
+  /inside the SNARK/: the circuit consumes `oldRoot' as a public input,
+  folds N commitments onto it using witness sibling paths, and exposes
+  the resulting `newRoot' as a public output.  On-chain mint cost
+  becomes essentially constant in N – ~380K + ~500 gas/leaf of calldata.
+  The design memo is [alberta-buck-notes-rollup-mint.org].
 
-  *Witnesses.* For each note \( i \): \( (\text{flavor}_i, v_i, \rho_i,
-  \text{id-payload}_i, \text{predicate}_i) \), plus the issuer's private
-  material required by the flavor.
+  *Public inputs (5 entries, N-independent).*
+  • `oldRoot' – the live note root the prover read from chain
+  • `newRoot' – the root after folding `cm_1..cm_N'
+  • `nextLeafIndex' – the live tree size the prover read from chain
+  • `totalFace' – \( \sum v_i \), range-bounded to 128 bits
+  • `cmBatchHash' – \( H(\text{cm}_1, \ldots, \text{cm}_N) \), letting
+    the contract bind calldata to the SNARK without making every `cm_i'
+    its own public input (keccak on chain; Poseidon reserved for a
+    future in-field variant)
 
-  *Constraints.*
-  1. \( \sum v_i = \texttt{totalFace} \) (amount conservation).
-  2. Each \( cm_i = H_{\text{cm}}(\text{flavor}_i, v_i, \rho_i,
-           \text{id-payload}_i, \text{predicate}_i) \) (opening
-           binding).
-  3. For each *A2* note (private issuer, addressed): the issuer
-     re-randomizes the recipient's registry credential \( E_r = (R_r,
-     C_r) \) with fresh \( r'_i \): \( \text{id-payload}_i =
-     E_{\text{note},i} = (R_r + r'_i G,\; C_r + r'_i\,
-     pk_{\text{rec},i}) \).  The issuer's registered ElGamal decryption
-     of its own credential is bound into the commitment via \(
-     M_{\text{issuer}} \) (not revealed), to keep the standard BUCK
-     mutual-decryptability payload \( E_{\text{issuer-for-rec}} \)
-     available at deposit time.
-  4. For each *A1* note (public issuer, addressed): same as A2 plus the
-     payload contains plaintext \( m_{\text{issuer}} \) and a Schnorr
-     signature \( \sigma_i \) on \( cm_i \) under \( pk_{\text{issuer}}
-     = m_{\text{issuer}} G \).
-  5. For each *B1* note (public issuer, bearer): the payload is \(
-     (m_{\text{issuer}}, \sigma_i) \) with \( \sigma_i \) a valid
-     Schnorr signature on \( cm_i \) under \( pk_{\text{issuer}} \).  No
-     recipient binding.
-
-  *Contract side.* The contract verifies the proof, pulls `totalFace'
-  BUCK from the caller (ordinary ERC-20 transfer; the caller pays
-  outgoing-transfer demurrage), appends each \( cm_i \) to `noteTree',
-  and increments `noteFaceSum' by `totalFace'.  No demurrage arithmetic
-  lives in the SNARK.
-
-
-16.2 A-Spend Circuit (Addressed: A1 / A2)
-─────────────────────────────────────────
-
-  This circuit handles both addressed flavors.  A1 and A2 differ only in
-  whether the commitment payload carries \( (m_{\text{issuer}}, \sigma)
-  \) alongside \( E_{\text{note}} \); the recipient-binding mechanism –
-  CP-equality against the depositor's /current/ registered credential
-  for \( M_{\text{rec}} \) – is identical.
-
-  *Public inputs.* `noteRoot', `nullifier', `faceValue',
-  `depositorRegistryEntry'.
-
-  *Witnesses.* \( (\text{flavor}, v, \rho, \text{id-payload},
-     \text{path}) \), \( sk_{\text{dep}} \), the Merkle path to the
-     depositor's current registry credential \(
-     E_{\text{dep}}^{(\text{reg})} = (R^{\text{reg}}, C^{\text{reg}})
-     \).
+  *Witnesses.* For each leaf \( i \): \( (\text{flavor}_i, v_i, \rho_i,
+     \text{idHash}_i, \text{predHash}_i) \) plus the TREE_DEPTH sibling
+     hashes `pathSiblings_i[0..19]' needed to fold \( cm_i \) into the
+     rolling tree.
 
   *Constraints.*
-  1. Merkle inclusion of \( cm \) under `path' in `noteTree'.
-  2. `nullifier' = \( H_{\text{nf}}(\text{A} \| M_{\text{rec}} \| \rho)
-     \), with \( M_{\text{rec}} = C_n - sk_{\text{dep}}\, R_n \)
-     recomputed in-circuit from the payload's \( E_{\text{note}} = (R_n,
-     C_n) \) and the witness \( sk_{\text{dep}} \).
-  3. The payload contains \( E_{\text{note}} = (R_n, C_n) \); the
-     depositor's registered credential \( E_{\text{dep}}^{(\text{reg})}
-     \) is present in IdentityRegistry; and CP-equality holds: \( C_n -
-     sk_{\text{dep}}\, R_n = C^{\text{reg}} - sk_{\text{dep}}\,
-     R^{\text{reg}} \) (Theorem 6).  This proves the depositor's
-     Identity `M' equals the recipient's `M' bound at mint, without
-     revealing either, and pins the \( M_{\text{rec}} \) used by the
-     nullifier in (2) to the registered identity rather than to a forged
-     scalar.
-  4. If the flavor is A1: the payload also contains \(
-     (m_{\text{issuer}}, \sigma) \); verify \( \sigma \) under \(
-     pk_{\text{issuer}} = m_{\text{issuer}} G \) on \( cm \).  (A2 omits
-     this constraint; no public issuer to verify.)
-  5. `faceValue' \( = v \).
+  1. `totalFace' \( = \sum v_i \) (amount conservation).
+  2. Each \( cm_i = \text{Poseidon5}(\text{flavor}_i, v_i, \rho_i,
+           \text{idHash}_i, \text{predHash}_i) \) (opening binding).
+  3. Each \( v_i \in [0, 2^{128}) \) and `totalFace' \( \in [0, 2^{128})
+           \) via `Num2Bits(128)'.
+  4. Rolling Merkle insertion: threading `oldRoot' and `nextLeafIndex'
+     through N successive single-leaf insertions (Switcher + Poseidon-T3
+     per level, per leaf), the result equals `newRoot'.  About 4.3K
+     constraints per leaf; total ~6K R1CS per leaf including the
+     opening.
+  5. Calldata binding: `cmBatchHash' \( = H(cm_1, \ldots, cm_N) \).
+  6. Belt-and-suspenders: \( cm_i \neq 0 \) and \( cm_i \neq
+     \text{ZERO\_VALUE} \) per leaf.
 
-  The contract checks the nullifier is unused, reads its own \( (B, A)
-  \), performs the age-preserving transfer of \( v \) balance and \( v
-  \cdot A/B \) BUCK-age from pool to depositor, and decrements
-  `noteFaceSum' by \( v \).
+  *Pinned N set.* Each pinned N has its own compiled circuit, trusted
+  setup, and deployed verifier.  Recommended initial set: \{16, 128,
+  1024\}.  The wallet rounds any requested split up to the smallest pin
+  \( N^* \geq N_\text{requested} \) and pads with `v = 0' dummy
+  openings; dummies are valid commitments in the tree but spendable for
+  zero BUCK.
 
-  *Key-loss recovery.* The binding is to `M', not to the specific \(
-  pk_{\text{rec}} \) used at mint.  A recipient who rotates their
-  signing key via IdentityRegistry re-issuance still satisfies the
-  CP-equality check with their new credential.
-
-
-16.3 B-Spend Circuit (Bearer: B1)
-─────────────────────────────────
-
-  *Public inputs.* `noteRoot', `nullifier', `faceValue', `issuerPkClaim'
-  (plaintext \( pk_{\text{issuer}} \) for wallet display, redundantly
-  verified by the circuit), `depositorRegistryEntry'.
-
-  *Witnesses.* \( (v, \rho, \text{id-payload}, \text{path}) \), \(
-  sk_{\text{dep}} \), Schnorr nonces.
-
-  *Constraints.*
-  1. Merkle inclusion of \( cm \) under `path'.
-  2. `nullifier' = \( H_{\text{nf}}(\text{B} \| \rho) \).  Derivable
-     from \( \rho \) alone – this is the first-come-first-served
-     property of B1.
-  3. The payload contains \( (m_{\text{issuer}}, \sigma) \); verify \(
-     \sigma \) on \( cm \) under \( pk_{\text{issuer}} =
-     m_{\text{issuer}} G \) in IdentityRegistry.
-  4. Schnorr PoK of \( sk_{\text{dep}} \) for \( pk_{\text{dep}} \) in
-     IdentityRegistry, Fiat-Shamir bound to `msg.sender', `chainid',
-     `nullifier'.
-  5. `faceValue' \( = v \).
-
-  Contract delivery is identical to A-spend: age-preserving transfer of
-  \( v \) balance and \( v \cdot A/B \) BUCK-age from pool to depositor,
-  computed outside the SNARK.
+  *Contract side.* The Notes contract checks `oldRoot' and
+  `nextLeafIndex' against its live state, recomputes `cmBatchHash' from
+  the calldata `cms[]', dispatches to `mintVerifiers[cms.length]' to
+  verify the proof, pulls `totalFace' BUCK from the caller via the
+  standard ERC-20 path, writes `newRoot' into the ring buffer, advances
+  `nextLeafIndex' by `cms.length', and bumps `noteFaceSum' by
+  `totalFace'.  A single `Minted' event covers the whole batch; per-leaf
+  `Appended' events from Phase 7 are gone.
 
 
-16.4 Circuit Engineering Budget
+[alberta-buck-notes-rollup-mint.org]
+<file:alberta-buck-notes-rollup-mint.org>
+
+
+16.2 Spend Circuit (`circuits/spend.circom', B-flavor / bearer shape)
+─────────────────────────────────────────────────────────────────────
+
+  *Public inputs.* `noteRoot', `nullifier', `face', `recipient',
+  `chainId'.
+
+  *Witnesses.* \( (\text{flavor}, v, \rho, \text{idHash},
+     \text{predHash}, \text{leafIndex}, \text{path}[20]) \).
+
+  *Constraints.* Five groups, mirroring the circuit's section labels:
+
+  • *(R)* Range bounds: \( v \in [0, 2^{128}) \) and \( \text{face} \in
+    [0, 2^{128}) \) via `Num2Bits(128)' on each, and \( \text{face}
+    \equiv v \) (face exposed publicly equals the witness face).
+  • *(C)* Commitment opening: \( cm = \text{Poseidon5}(\text{flavor}, v,
+    \rho, \text{idHash}, \text{predHash}) \).
+  • *(M)* Merkle membership: walk `path[20]' with `Switcher' selectors
+    and Poseidon-T3 at each level, asserting the result equals
+    `noteRoot'.
+  • *(N)* Nullifier: \( \text{nullifier} = \text{Poseidon3}(ρ,
+    \text{idHash},
+    1) \).  The constant tag 4242 is the B-spend domain
+    separator; the same `idHash' can mint an A-flavor note and a
+    B-flavor note without nullifier collision (different `flavor' in the
+    commitment), but both today share this circuit and tag.
+  • *(B)* Ghost binding: `recipient' and `chainId' are constrained into
+    the witness via \( x \cdot x \) so the proof cannot be replayed
+    against a different recipient or chain (replay protection by
+    Fiat-Shamir on the public inputs).
+
+  *Contract side.* `Notes.spend(proof, root, nullifier, face,
+     recipient)' requires `root' to be in the recent `roots' ring,
+     requires `nullifier' unused, verifies the Groth16 proof through
+     `SpendVerifierAdapter', sets `nullifiers[nullifier] = true',
+     decrements `noteFaceSum' by `face', and finally calls
+     `buck.transferCarrying(recipient, face)' to deliver the funds plus
+     the pool's accumulated demurrage share.
+
+  *Bearer semantics today.* Anyone holding the opening \( (\rho,
+  \text{idHash}, \text{flavor}, v, \text{predHash}) \) can produce a
+  valid spend proof and direct the proceeds to any recipient registered
+  (or registered as system-public) in IdentityRegistry.  This is the
+  correct semantics for a B1 bearer note.  For A-flavor notes (A1/A2
+  addressed), the in-circuit identity binding that would restrict
+  redemption to the bound recipient is deferred – they are
+  bearer-spendable today and become identity-bound once `spend_a.circom'
+  ships.
+
+
+16.3 Circuit Engineering Budget
 ───────────────────────────────
 
-  Ballpark constraint counts (orders of magnitude, BN254 Groth16):
+  Constraint counts for the Notes circuits (BN254 Groth16):
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Circuit element                       Approx. constraints 
-  ───────────────────────────────────────────────────────────
-   Poseidon commitment hash (1 call)     ~250                
-   Poseidon nullifier PRF (1 call)       ~250                
-   Merkle path verification (20 levels)  ~5000               
-   ElGamal / Chaum-Pedersen (A-spend)    ~2000               
-   Schnorr signature verify (A1, B1)     ~500                
-   Schnorr PoK (B-spend depositor)       ~500                
-   Range check on \( v \)                ~100                
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  A-spend totals ~8,000 constraints (includes the A1 signature verify);
-  B-spend totals ~6,000.  Comparable to Zcash Sapling's Spend circuit
-  (~25,000, with randomness features we don't need) and Aztec's basic
-  note-spend circuit.  On-chip proving time on a modern smartphone: a
-  few seconds.
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Circuit                                          Constraints       PTAU pow 
+  ─────────────────────────────────────────────────────────────────────────────
+   `mint.circom' (Phase 7; N=2, per-leaf on chain)  ~3,500 (retired)  2^{15}   
+   `mint_batch.circom' (Phase-7-bis; N=16)          ~96,000           2^{17}   
+   `mint_batch.circom' (Phase-7-bis; N=128)         ~770,000          2^{20}   
+   `mint_batch.circom' (Phase-7-bis; N=1024)        ~6,000,000        2^{23}   
+   `spend.circom' (B-shape; depth-20 Merkle)        ~12,000           2^{15}   
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The spend circuit is comparable to Zcash Sapling's Spend circuit
+  (~25,000) and Aztec's basic note-spend circuit; on-chip proving on a
+  modern smartphone: a few seconds.  `mint_batch' at N=16 is still a
+  desktop-seconds proof; N=128 is minutes; N=1024 requires a beefy
+  machine and hours of prover time, with the on-chain verification cost
+  invariant across all three.  The 2^{23} ceremony is the ceiling that
+  fixes the largest pinned N – raising it would require a fresh trusted
+  setup.
 
 
-16.5 Common Circuit Gadgets
+16.4 Common Circuit Gadgets
 ───────────────────────────
 
-  Shared library across all three circuits:
+  Shared library used by both circuits:
 
-  • Merkle inclusion (Poseidon path)
-  • Poseidon hash wrapper
-  • ElGamal re-randomization and CP-equality
-  • Schnorr signature verify + Schnorr PoK
-  • Range proofs on field elements (for \( v \))
+  • Poseidon hash (T3 for Merkle pairs; T6/Poseidon5 for commitment
+    opening; T4/Poseidon3 for nullifier)
+  • Tornado-style Merkle inclusion (Switcher + Poseidon at each level)
+  • `Num2Bits' range proofs on field elements
 
-  Flavor-specific wiring layers on top.  Standard SNARK library
-  architecture (Aztec Noir, Circom, Halo2 all support this layering).
+  The `spend_a.circom' follow-up will add ElGamal re-randomization and
+  Chaum-Pedersen equality gadgets (~2000 extra constraints) on top of
+  this base, plus an A-flavor branch that asserts CP-equality against
+  the depositor's current IdentityRegistry credential.
 
 
 17 What This Architecture Rules Out: Pure-Bearer Cryptographic Notes
@@ -2696,64 +2764,74 @@ Table of Contents
 18.1 Demurrage Conservation as a Contract Invariant
 ───────────────────────────────────────────────────
 
-  Because the pool is a regular BUCK account and redemption uses a
-  two-sided-balanced age-preserving transfer, no Notes-specific
-  demurrage invariant is needed.  The system-wide BUCK invariants
+  Because the pool is a regular BUCK account and `transferCarrying'
+  moves only nominal balance (no fee burn, no `totalSupply' change), no
+  Notes-specific demurrage invariant is needed.  The system-wide BUCK
+  invariant
 
-  \[ \sum_{\text{all accounts}} B_X \;+\; B_{\text{Jubilee}} \;=\;
-     \text{const}, \qquad \frac{d}{dt}\!\sum_{\text{all accounts}} A_X
-     \;=\; \sum_{\text{all accounts}} B_X \]
+  \[ \sum_{\text{all accounts}} B_X \;=\; \text{totalSupply
+     (incl. Jubilee)} \]
 
-  hold trivially through redemption: the \( v \) balance and \( v \cdot
-  A/B \) age moved from pool to recipient appear on both sides of each
-  sum.  The Notes contract only needs to maintain two auxiliary local
+  holds trivially through every spend: `transferCarrying' moves exactly
+  `face' BUCK from pool to recipient, leaving the sum unchanged.  The
+  recipient's `_indexAtLastTouch' weighted-merge is pure bookkeeping; no
+  balance sum is touched.
+
+  The Notes contract only needs to maintain two auxiliary local
   invariants:
 
-  1. \( F \geq 0 \) (no negative note face sum).
-  2. Every \( v \) appearing in a deposit equals the \( v \) that
-     appeared in the corresponding mint (enforced by the SNARK via the
-     Merkle inclusion of \( cm \) binding \( v \)).
+  1. `noteFaceSum' \( \geq 0 \) (no negative note face sum).
+  2. Every `face' appearing in a spend equals the \( v \) that appeared
+     in the corresponding mint (enforced by the SNARK via the Merkle
+     inclusion of \( cm \) binding \( v \), and the circuit's \(
+     \text{face} \equiv v \) constraint).
 
-  Both are trivial.  The only new mechanism is the age-preserving
-  transfer primitive, itself a simple state-machine operation on two
-  accounts' \( (B, A) \) pairs.
+  Both are trivial.  The only new BUCK mechanism is `transferCarrying',
+  itself a simple state-machine operation weighted-merging the
+  recipient's `_indexAtLastTouch' toward the pool's index.
 
 
 19 Implementation Scope
 ═══════════════════════
 
-  Rough engineering estimate, assuming the existing Alberta Buck
-  contract skeleton and an existing SNARK toolchain (Aztec Noir or
-  Circom/snarkJS):
+  Phases 1-3 of the Phased-Rollout table above are shipped and exercised
+  end-to-end in the Alberta Buck repository.  This section records the
+  remaining engineering surface and points readers at the live code.
 
 
-19.1 Smart Contract Additions
-─────────────────────────────
+19.1 Shipped (Phases 1-3)
+─────────────────────────
 
-  • `noteTree' (Merkle tree with Poseidon nodes): ~1 week, bulk of code
-    is existing Aztec/Zcash sapling implementations.
-  • `nullifiers' mapping: trivial.
-  • `noteFaceSum' scalar + mint/deposit updates: trivial (audit only).
-  • Age-preserving transfer primitive (system-level hook writing to two
-    accounts' \( (B, A) \) atomically): ~1 week.
-  • A-spend and B-spend verifiers (Groth16-style on-chain): ~1 week
-    integration per circuit.
-  • Mint-circuit verifier: ~1 week.
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Component                                                            Source                                                                                        
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Notes contract: roots, nullifiers, mint/spend (Phase-7-bis surface)  `src/Notes.sol'                                                                               
+   `transferCarrying' primitive in BUCK                                 `src/Buck.sol' (`transferCarrying', `_indexAtLastTouch' merge)                                
+   Mint Groth16 circuits + per-N verifiers                              `circuits/mint_batch.circom', `src/MintGroth16Verifier_N*.sol'                                
+   Spend Groth16 circuit + verifier (B-shape)                           `circuits/spend.circom', `src/SpendGroth16Verifier.sol'                                       
+   Poseidon-T3 precompile (in-EVM bytecode)                             `src/PoseidonT3Bytecode.sol'                                                                  
+   Verifier adapters (proof-bytes plumbing, per-N mint dispatch)        `src/MintVerifierAdapter.sol', `src/SpendVerifierAdapter.sol'                                 
+   End-to-end tests (real Groth16 fixtures)                             `test/MintVerifier.t.sol', `test/SpendVerifier.t.sol'                                         
+   Prover scripts (witness gen + ptau ceremony)                         `scripts/snark/prove_mint_batch.js', `scripts/snark/prove_spend.js', `scripts/snark/setup.sh' 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  *Total:* ~6 weeks for an experienced Solidity engineer.
 
+19.2 Pending Engineering (Phases 4-8)
+─────────────────────────────────────
 
-19.2 SNARK Circuits
-───────────────────
-
-  • Mint circuit: ~2-3 weeks (Poseidon commitments, ElGamal
-    re-randomization, Schnorr signature verification inside the
-    circuit).
-  • A-spend and B-spend circuits (with shared gadgets): ~3-5 weeks.
-  • Common gadgets library (Merkle, Poseidon wrappers, ElGamal/CP,
-    Schnorr, range checks): ~2 weeks.
-
-  *Total:* ~8 weeks for an experienced SNARK engineer.
+  • *`spend_a.circom' (Phase 4).* ElGamal re-randomization and
+    Chaum-Pedersen equality gadgets to bind A-flavor spend to the
+    depositor's registered `M'.  ~3-5 weeks of SNARK-circuit work
+    ⁃ verifier integration.
+  • *A1 issuer-signature-in-payload (Phase 5).* Schnorr verification
+    inside the spend circuit and corresponding wallet UX.  ~2 weeks.
+  • *Sealed-QR print flow for B1 (Phase 6).* Hologram-vendor
+    integration, QR templates, paper-redemption UX.  ~2 weeks.
+  • *Programmable predicates (Phase 7).* Bounded predicate DSL compiled
+    into the spend circuit.  Multi-month engineering; deferred until
+    production demand materialises.
+  • *Off-chain re-targeting via PRE (Phase 8).* Identity Guardians
+    coordination; deferred.
 
 
 19.3 Wallet & UX
@@ -2770,20 +2848,17 @@ Table of Contents
   • QR-print templates, hologram-seal vendor integration: ~1 week.
   • Prover service integration for thin clients: ~2-3 weeks.
 
-  *Total:* ~9 weeks for a wallet team.
-
 
 19.4 Cross-Checks and Audit
 ───────────────────────────
 
-  • Cryptographic review of the spend circuits: 4 weeks, external
-    auditor with SNARK-circuit expertise.
-  • Economic model validation (pool-rate demurrage in stress scenarios:
-    low turnover, high turnover, mint/deposit mismatch, large
+  • Cryptographic review of the spend circuit (and the forthcoming
+    `spend_a.circom'): 4 weeks, external auditor with SNARK-circuit
+    expertise.
+  • Economic model validation (pool-rate demurrage carrying in stress
+    scenarios: low turnover, high turnover, mint/spend mismatch, large
     accumulated lost-note face sum): 2 weeks.
   • End-to-end fuzz and property-based testing: 2 weeks.
-
-  *Total:* ~8 weeks of external + internal audit.
 
 
 19.5 Phased Rollout
@@ -2791,25 +2866,36 @@ Table of Contents
 
   The engineering work is naturally phaseable:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Phase  Scope                                                      Dependencies                     
-  ────────────────────────────────────────────────────────────────────────────────────────────────────
-       1  On-chain note pool: `noteTree', nullifiers, mint-verifier  Existing BUCK ERC-20 deployment  
-       2  A-spend circuit (A2 self-wormhole + addressed cheque UX)   Phase 1, Identity CP gadget      
-       3  A1 public-issuer addressed cheque (signature-in-payload)   Phase 2                          
-       4  B-spend circuit + B1 bearer cheque + sealed-QR print flow  Phase 1, hologram vendor         
-       5  Programmable `predicate' field (bounded predicate DSL)     Phases 1-4, Aztec Noir toolchain 
-       6  Optional: off-chain re-targeting via proxy re-encryption   Phases 1-4, Identity Guardians   
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Phase 1-2 establishes the minimum viable Notes system (private
-  addressed cheques + self-wormhole).  Phase 3 adds auditable issuance
-  (payroll, B2C).  Phase 4 adds bearer instruments.  Phases 5-6 are
-  optional extensions deferred until the core system is
-  production-proven.
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Phase  Scope                                                                                                   Status                                      
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       1  On-chain Notes pool: incremental Merkle tree, nullifiers, `Notes'                                       *Shipped* (`src/Notes.sol')                 
+       2  Mint circuit + on-chain Groth16 verifier (`mint.circom', N=2)                                           *Shipped* (historical; superseded by 2-bis) 
+   2-bis  Batch-mint circuit: per-leaf Merkle insertion moved into the SNARK (`mint_batch.circom', pinned N set)  Active implementation work                  
+       3  Spend circuit (B-shape / bearer) + `transferCarrying'                                                   *Shipped* (Phase 7 BUCK Notes)              
+       4  `spend_a.circom': in-circuit CP-equality binding for A1/A2 notes                                        Pending (ElGamal + Chaum-Pedersen gadgets)  
+       5  A1 public-issuer signature-in-payload + auditable payroll UX                                            Pending (depends on Phase 4)                
+       6  Sealed-QR print flow for B1 walking-around notes                                                        Pending (hologram-vendor integration)       
+       7  Programmable `predicate' field (bounded predicate DSL)                                                  Deferred (Aztec Noir / Halo2 toolchain)     
+       8  Optional: off-chain re-targeting via proxy re-encryption                                                Deferred (Identity Guardians)               
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Phases 1-3 are *shipped* and exercised end-to-end by the test suite
+  (`test/MintVerifier.t.sol', `test/SpendVerifier.t.sol') on real
+  Groth16 fixtures.  Today's spend circuit is a single flavor-agnostic
+  /B-shape/ verifier: any commitment the prover knows the opening for
+  can be redeemed to any IdentityRegistry- verified or system-public
+  recipient.  This is the correct semantics for B1 bearer notes and the
+  temporary semantics for A1 and A2 addressed notes until Phase 4 ships.
 
-  Overall program estimate: 5-7 months of focused work to ship Phases
-  1-4 as a production-quality BUCK Notes system.  Phases 5-6 add 4-8
-  months of further engineering if demand materialises.
+  Phase 4 (`spend_a.circom') closes the A-flavor gap by adding the
+  in-circuit ElGamal re-randomization and Chaum-Pedersen equality
+  gadgets that bind redemption to the registered recipient's `M'.  Until
+  then, A1/A2 notes are correctly minted but bearer-spendable; issuers
+  should rely on civil trust and not treat A-flavor notes as
+  cryptographically address-bound.
+
+  Phases 5-8 are optional extensions deferred until the core system is
+  production-proven.
 
 
 19.6 Regulatory and Legal Engagement
@@ -2844,32 +2930,35 @@ Table of Contents
 20.1 Donation Incidence
 ───────────────────────
 
-  Donations to the contract lower \( A/B \) and therefore lower the
-  age-share every subsequent redeemer absorbs.  The benefit spreads
-  across all future redemptions rather than accruing to a single lucky
-  first-redeemer.  Because the age-share calculation uses the /current/
-  \( A/B \) at each redemption, a donation immediately before a large
-  redemption benefits that redemption more than a small one – but every
-  subsequent redemption benefits in proportion.  This is reasonable
-  behaviour without any special smoothing logic.
+  Donations to the Notes contract weighted-merge `idx_pool' forward
+  toward `cumIndex_now', lowering the per-BUCK fee owed by the pool and
+  therefore reducing the index gap every subsequent redeemer inherits.
+  The benefit spreads across all future redemptions rather than accruing
+  to a single lucky first-redeemer.  A donation immediately before a
+  large redemption benefits that redemption more (because the merge uses
+  the donation's relative weight against the pool's existing balance),
+  but every subsequent redemption benefits in proportion to the
+  freshened index.  No special smoothing logic is needed.
 
   Residual donation principal (after all notes drain) is not lost: it
-  remains in \( B \) with \( A = 0 \), available to subsidise the next
-  generation of mints (whose recipients will absorb an artificially low
-  \( A/B \) at their redemption).
+  sits in `balanceOf(notes)' with a `_indexAtLastTouch' close to
+  whatever `cumIndex' it last touched at, available to subsidise the
+  next generation of mints, or recoverable by governance sweep per
+  Notes-contract policy.
 
 
 20.2 Stranded Value on Lost Notes
 ─────────────────────────────────
 
-  A lost note contributes to \( F \) indefinitely.  The BUCK backing
-  that note sits in the pool, accumulating BUCK-age.  Since the
-  age-preserving transfer uses \( A/B \) (not \( A/F \)), the lost face
-  value weighs on \( A \) through continued age accumulation, and \( B
-  \) remains unclaimed.  Redemptions of live notes absorb an ever-larger
-  \( A/B \) as the lost share's age dominates.  At 1%/yr loss and 2%/yr
-  demurrage, the long-term tendency is that the lost note's implicit
-  demurrage is paid instalment-style by subsequent live noteholders.
+  A lost note contributes to `noteFaceSum' indefinitely.  The BUCK
+  backing that note sits in the pool, where its share of accumulated
+  demurrage stays attached to `idx_pool'.  Each spend of a live note
+  inherits a slice of that accumulated index gap on its delivered face –
+  so over time the lost note's implicit demurrage is paid
+  instalment-style by subsequent live noteholders on their next outgoing
+  transfers.  At 1%/yr loss and 2%/yr demurrage, the long-term tendency
+  is that the pool absorbs the lost-note demurrage as a small pool-wide
+  overhead.
 
   A reclaim path is possible: after a very long period (say 99 years),
   the contract could allow the issuer to submit a zero-knowledge proof
@@ -2881,12 +2970,14 @@ Table of Contents
 20.3 Integer-Arithmetic Rounding
 ────────────────────────────────
 
-  Redemption involves two integer divisions (computing \( v \cdot A / B
-  \) for the age-share).  Any residual from truncated division remains
-  in the pool's \( (B, A) \) state, raising \( A/B \) slightly for the
-  next redeemer – the rounding is self-healing rather than
-  drift-accumulating.  Choice of rounding direction (floor vs. banker's)
-  is a minor contract-level decision with no cryptographic impact.
+  The `transferCarrying' weighted-index merge involves one integer
+  division \( ( br \cdot \text{idx}_r + v \cdot \text{idx}_p ) / (br +
+  v) \) for the recipient's new index.  Truncation rounds the
+  recipient's inherited fee /down/ by at most one `cumIndex' unit per
+  spend – trivially small (sub-wei demurrage on any realistic balance)
+  and /not/ drift-accumulating: the lost fraction never exceeds the
+  recipient's prior index gap.  Floor rounding is fine; no banker's
+  logic required.
 
 
 20.4 Predicate Programmability vs. Circuit Simplicity
@@ -2901,19 +2992,23 @@ Table of Contents
   programmable-predicate use cases while keeping the verifier compact.
 
 
-20.5 Universal Spend Circuit vs. Two
-────────────────────────────────────
+20.5 Universal Spend Circuit vs. A/B Specialization
+───────────────────────────────────────────────────
 
-  Deploying two distinct spend verifiers (A-spend and B-spend) costs gas
-  per transaction (one verifier per call).  A universal verifier that
-  takes `flavor' as a public input and branches internally costs a
-  larger but single verifier.  Gas trade-off depends on production
-  transaction mix; if A-flavor dominates, a dedicated A-spend verifier
-  is cheaper.  Empirical question, resolvable at deployment time.
+  The shipped `spend.circom' is already a /universal/ B-shape verifier:
+  a single Groth16 verifier handles every B1 deposit and (today) every
+  A-flavor deposit treated as bearer.  When Phase 4 ships
+  `spend_a.circom', the natural deployment is two distinct spend
+  verifiers (A vs. B), with the wallet selecting the correct one based
+  on the note's `flavor' field.  An alternative is one "super-spend"
+  verifier that takes `flavor' as a public input and branches
+  internally; the trade-off is gas per spend (one larger verifier
+  vs. selecting between two smaller ones) against trusted-setup ceremony
+  count.  Empirical question, resolvable at Phase-4 deployment time.
 
 
-20.6 Regulatory Interaction with the Age-Preserving Transfer
-────────────────────────────────────────────────────────────
+20.6 Regulatory Interaction with `transferCarrying'
+───────────────────────────────────────────────────
 
   Jurisdictional regulators (FINTRAC, OSFI) have rules around bearer
   instruments and tax treatment of negative-interest accounts.  BUCK's
@@ -2921,15 +3016,17 @@ Table of Contents
   contract inherits that treatment with no pool-specific novelty – the
   contract is just another BUCK account.
 
-  The one new wrinkle is the /age-preserving transfer/ itself: ordinary
-  BUCK transfers carry only balance (recipient gets "fresh" BUCK),
-  whereas Note redemptions carry balance plus a proportional BUCK-age.
-  This means a Note recipient's post-redemption spendable value is less
-  than their nominal balance – the difference being the demurrage they
-  will pay on their next outgoing transfer.  For tax and reporting
-  purposes, whether the "face" or the "spendable" number should be used
-  as the income figure is a question for tax counsel.  The on-chain
-  state is fully transparent either way.
+  The one new wrinkle is the `transferCarrying' primitive itself:
+  ordinary BUCK transfers carry only balance (recipient gets "fresh"
+  BUCK and resets `_indexAtLastTouch' to `cumIndex_now'), whereas Note
+  redemptions weighted-merge the recipient's `_indexAtLastTouch' /toward
+  the pool's stale index/.  This means a Note recipient's
+  post-redemption spendable value is less than their nominal balance –
+  the difference being the demurrage they will pay on their next
+  outgoing transfer.  For tax and reporting purposes, whether the "face"
+  or the "spendable" number should be used as the income figure is a
+  question for tax counsel.  The on-chain state (`balanceOf' and
+  `_indexAtLastTouch') is fully transparent either way.
 
 
 21 Summary
@@ -2946,22 +3043,22 @@ Table of Contents
   fourth cell, private-bearer, is ruled out by BUCK's
   mutual-decryptability invariant.
 
-  Demurrage needs no note-side machinery: the Note Pool is literally the
-  BUCK ERC-20 contract's own balance – a regular BUCK account with its
-  own \( B \) and \( A \) in the ERC-20 ledger.  The only Note-side
-  state beyond the Merkle tree and nullifier set is one scalar \( F \),
-  the total face value of live notes, kept as an audit quantity.
-  Redemption delivers the /full face value/ \( v \) to the recipient,
-  together with the pool's proportional share of BUCK-age \( v \cdot A/B
-  \); the recipient absorbs this age onto their own account and bears
-  the demurrage cost on their next outgoing transfer through the
-  ordinary BUCK accounting path.  This is exactly the demurrage they
-  would have paid had they held \( v \) BUCK personally through the
-  pool's residence period.  The entire mechanism requires a single new
-  primitive, an age-preserving transfer from pool to recipient,
-  localized to the Notes contract's one egress function.  Donations to
-  the pool dilute \( A/B \) and cheaply subsidise all subsequent
-  redeemers.  Conservation of balance, age, and Jubilee growth all fall
+  Demurrage needs no note-side machinery: the Notes Pool is the Notes
+  contract's own ERC-20 balance – a regular BUCK account with its single
+  `_indexAtLastTouch[notes]' entry in the BUCK ledger.  The only
+  Note-side state beyond the Merkle tree and nullifier set is
+  `noteFaceSum', the total face value of live notes, kept as an audit
+  scalar.  Spend delivers the /full face value/ to the recipient via
+  `transferCarrying', weighted-merging the recipient's
+  `_indexAtLastTouch' toward the pool's stale index.  The recipient
+  inherits the average pool BUCK-age and bears the resulting demurrage
+  on their next standard outgoing transfer through the ordinary BUCK
+  accounting path – exactly the demurrage they would have paid had they
+  held the BUCK personally through the pool's residence period.  The
+  entire mechanism requires a single new primitive, `transferCarrying',
+  localised to the Notes contract's one egress function.  Donations to
+  the pool freshen `idx_pool' and cheaply subsidise all subsequent
+  redeemers.  Conservation of nominal balance and Jubilee growth fall
   out exactly.
 
   The addressed-versus-bearer distinction produces a sharp partition of

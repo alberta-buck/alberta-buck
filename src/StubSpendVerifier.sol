@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {IMintVerifier} from "./IMintVerifier.sol";
+import {ISpendVerifier} from "./ISpendVerifier.sol";
 
-/// @title StubMintVerifier -- placeholder for the Notes mint verifier.
-/// @notice Accepts any proof while the SNARK toolchain is being wired up.  The
-///         `enabled` flag lets governance freeze mints (or tests exercise the
-///         negative path) without redeploying.
+/// @title StubSpendVerifier -- placeholder for the Notes spend verifier.
+/// @notice Accepts any proof while the SNARK toolchain is being wired up.
+///         The `enabled` flag lets governance freeze spends (or tests
+///         exercise the negative path) without redeploying.
 ///
-/// @dev    DO NOT use in production.  This contract performs zero cryptographic
-///         checks; a real per-N Groth16 verifier is required before Notes
-///         mint becomes a security-sensitive operation.
-contract StubMintVerifier is IMintVerifier {
+/// @dev    DO NOT use in production.  This contract performs zero
+///         cryptographic checks; a real verifier is required before
+///         Notes spend becomes a security-sensitive operation.
+contract StubSpendVerifier is ISpendVerifier {
 
     address public governance;
     bool    public enabled;
@@ -40,14 +40,14 @@ contract StubMintVerifier is IMintVerifier {
         emit EnabledSet(_enabled);
     }
 
-    /// @inheritdoc IMintVerifier
-    function verifyMint(
-        bytes calldata /*proof*/,
-        uint256 /*oldRoot*/,
-        uint256 /*newRoot*/,
-        uint256 /*nextLeafIndex*/,
-        uint256 /*totalFace*/,
-        uint256[] calldata /*commitments*/
+    /// @inheritdoc ISpendVerifier
+    function verifySpend(
+        bytes   calldata /*proof*/,
+        uint256          /*noteRoot*/,
+        uint256          /*nullifier*/,
+        uint256          /*face*/,
+        address          /*recipient*/,
+        uint256          /*chainId*/
     ) external view returns (bool) {
         return enabled;
     }

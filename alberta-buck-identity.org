@@ -267,6 +267,9 @@ secret key and an archival node -- without any counterparty's cooperation.
      cryptographically invisible to the others.
 
 **** Epoch-Based Credential Renewal
+     :PROPERTIES:
+     :CUSTOM_ID: epoch-based-renewal
+     :END:
 
      If the issuer revokes Alice's identity (fraud, death, court order), all
      her derived credentials must be invalidated -- without linking them.
@@ -314,6 +317,10 @@ secret key and an archival node -- without any counterparty's cooperation.
    attacked separately, not extracted from one compromised custodian.
 
 ** Counterparties Exchange Identities
+   :PROPERTIES:
+   :CUSTOM_ID: counterparties-exchange-identities
+   :END:
+
 
    Each transaction is between parties identified to each other by provably
    untampered copies of their identity, encrypted by each party specifically for

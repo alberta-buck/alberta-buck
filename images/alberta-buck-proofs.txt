@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             ALBERTA BUCK - FORMAL CORRECTNESS PROOFS (DRAFT
-                                 V0.3)
+                                 V0.5)
             Rerandomization, Re-Encryption, and Notes Spend
                                Predicates
 
@@ -8,7 +8,7 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-                               2026-04-17
+                               2026-04-22
 
 
 <https://perry.kundert.ca/images/dominion-logo.png>
@@ -100,6 +100,10 @@ Table of Contents
 .. 6. Theorem 11 (Mutual-Decryptability Preservation)
 .. 7. Sanity Check (py_ecc on BN254)
 .. 8. Worked Example: End-to-End A1 Note Transfer (SNARK Relations)
+.. 9. Mint-Circuit Status: Phase 7-bis Closure of the Earlier Open Questions
+..... 1. Closure 1 (Field-Overflow / Value-Conservation Range Check) – /Discharged in circuit/
+..... 2. Closure 2 (Single `transferFrom' \(\leftrightarrow\) \( N \) Commitments) – /Discharged by SNARK binding/
+..... 3. Closure 3 (Spend-Circuit Trio) – /Mint half discharged; nullifier + spend-side value conservation deferred to `spend.circom'/
 6. Security Assumptions Summary
 7. Implementation Notes
 .. 1. What the Contract Must Enforce
@@ -817,10 +821,35 @@ Table of Contents
 ─────────
 
   *Pool state.* The BUCK contract maintains
-  • `noteTree': an append-only Merkle tree (depth ~20, Poseidon) of
-    commitments \( cm = H_{\text{cm}}(\text{flavor},\; v,\; \rho,\;
-    \text{payload},\; \text{predicate}) \).
+  • `noteTree': an append-only Poseidon Merkle tree of fixed depth 20
+    (max \( 2^{20} \approx 10^6 \) outstanding commitments) with leaves
+    \[ cm \;=\; \mathrm{Poseidon}_5\bigl(\mathrm{flavor},\; v,\; \rho,\;
+    \mathrm{idHash},\; \mathrm{predicate}\bigr), \] where \(
+    \mathrm{idHash} \) is a Poseidon digest of the per-flavor payload
+    (the recipient ciphertext \( E_{\text{note}} \) for A-spends, the
+    issuer-key bundle for B-spends).  Equivalently, writing \(
+    H_{\text{cm}}(\mathrm{flavor},\, v,\, \rho,\, \mathrm{payload},\,
+    \mathrm{predicate}) := \mathrm{Poseidon}_5(\mathrm{flavor},\, v,\,
+    \rho,\, H_{\text{payload}}(\mathrm{payload}),\, \mathrm{predicate})
+    \).  Internal nodes use Poseidon-2 over BN254's scalar field; empty
+    leaves hash to a fixed domain-separated `ZERO_VALUE'.
   • `nullifiers': a set of spent nullifiers.
+  • `roots': a ring buffer of recent `noteRoot' values (window 30) that
+    spend proofs may pin against.
+
+  *Mint architecture (Phase 7-bis batch mint).* `Notes.mint' no longer
+  touches the Merkle tree directly.  Instead, each mint submits a
+  Groth16 proof of in-circuit incremental insertion of \( N \) fresh
+  leaves – `N' is fixed per pinned verifier (currently \( N \in \{16,
+  32\} \) on L1; see [alberta-buck-notes-rollup-mint.org] for the per-N
+  dispatch architecture and gas-economics rationale).  The contract
+  verifies the proof, asserts `oldRoot' matches the live root and
+  `nextLeafIndex' matches the live size, accepts the SNARK-attested
+  `newRoot' into the root-history ring buffer, advances `nextLeafIndex'
+  by \( N \), and pulls `totalFace' BUCK from the issuer.  Per-leaf
+  range checks (\( v_i, \texttt{totalFace} \in [0, 2^{128}) \)) and
+  value conservation (\( \sum_i v_i === \texttt{totalFace} \)) are
+  enforced inside the same circuit.
 
   The pool's BUCK balance and accumulated BUCK-age are tracked by the
   standard ERC-20 ledger; demurrage arithmetic is orthogonal to the
@@ -874,6 +903,10 @@ Table of Contents
   is what realizes the key-loss-recovery property the prose claims, and
   what the rest of this Part proves correct.  The notes document has
   been updated to match.
+
+
+[alberta-buck-notes-rollup-mint.org]
+<file:alberta-buck-notes-rollup-mint.org>
 
 
 5.2 Theorem 7 (Mint Re-randomization Correctness)
@@ -1444,6 +1477,96 @@ Table of Contents
   cases – issuer-self-redeem and double-spend – show the relation
   rejecting the only two attacks the SNARK is responsible for filtering
   at this layer.
+
+
+5.9 Mint-Circuit Status: Phase 7-bis Closure of the Earlier Open Questions
+──────────────────────────────────────────────────────────────────────────
+
+  An earlier draft of this document (v0.4) flagged three open
+  correctness obligations against the Phase-6 placeholder mint circuit
+  (`circuits/mint.circom').  The Phase 7-bis batch-mint pivot
+  (`circuits/mint_batch.circom', deployed as per-N pinned variants
+  `mint_batch_n${N}.circom'; see [alberta-buck-notes-rollup-mint.org])
+  closes all three at the mint layer.  This section records the closure
+  for the proof record so a reader cross-checking the prior draft can
+  see which obligations are now discharged in the circuit vs. deferred
+  to the spend circuit.
+
+
+[alberta-buck-notes-rollup-mint.org]
+<file:alberta-buck-notes-rollup-mint.org>
+
+5.9.1 Closure 1 (Field-Overflow / Value-Conservation Range Check) – /Discharged in circuit/
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  The Phase-6 draft's value-conservation constraint \( \sum_{i=1}^{N}
+  v_i \;===\; \texttt{totalFace} \) is an equation in \( \mathbb{F}_r \)
+  with \( r \approx 2^{254} \) and therefore admits integer-overflow
+  witnesses unless each \( v_i \) is bounded.  `mint_batch.circom' now
+  applies `Num2Bits(128)' to every \( v_i \) and to `totalFace'
+  (constraint family /(R)/ in the circuit source).  With \( N \leq
+  2^{20} \) (the tree-depth cap) and 128-bit per-leaf face, the integer
+  sum cannot overflow: \( N \cdot 2^{128} \leq 2^{148} \ll 2^{254} = r
+  \).  No spend circuit can be tricked into releasing more BUCK than was
+  escrowed by an integer-vs-field-arithmetic mismatch on the mint side.
+
+
+5.9.2 Closure 2 (Single `transferFrom' \(\leftrightarrow\) \( N \) Commitments) – /Discharged by SNARK binding/
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Phase 7-bis makes the `totalFace' public input of the mint SNARK both
+  (i) the value passed to `buck.transferFrom' and (ii) the value the
+  circuit forces to equal \( \sum_i v_i \).  The single `Transfer' event
+  of size `totalFace' is therefore cryptographically bound to the
+  Groth16 proof's public inputs – which include the entire `cms[]' array
+  on the per-N pinned verifiers (see
+  [alberta-buck-notes-rollup-mint.org], "Calldata delivery").  No
+  separate batch-identifier storage slot is needed for soundness;
+  on-chain analytics that want a transfer \(\leftrightarrow\) batch
+  correspondence can recover it from the `Minted' event's `cms'
+  parameter and the simultaneous `Transfer'.
+
+
+[alberta-buck-notes-rollup-mint.org]
+<file:alberta-buck-notes-rollup-mint.org>
+
+
+5.9.3 Closure 3 (Spend-Circuit Trio) – /Mint half discharged; nullifier + spend-side value conservation deferred to `spend.circom'/
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  The earlier draft's three coupled obligations – Merkle membership,
+  nullifier determinism, and value conservation – now split cleanly
+  between the two circuits:
+
+  1. *Merkle membership (mint side).* `mint_batch' performs an
+     in-circuit dual Merkle walk per leaf (constraint family /(M)/ in
+     the circuit source): the empty-seat walk constrains every witness
+     sibling against the rolling prior root, and the filled-seat walk
+     advances the rolling root with \( cm_i \) inserted.  After all \( N
+     \) leaves the final rolling root is constrained to equal the public
+     `newRoot'.  The contract accepts `newRoot' into its root-history
+     ring buffer; spend circuits prove inclusion against any root in
+     that window.  The Phase-2 flat `commitments[]' array is /gone/.
+
+  2. *Nullifier determinism (spend side).* The spend circuit must still
+     recompute \( nf = H_{\text{nf}}(\mathrm{flavor},\ M_{\text{rec}},\
+     \rho) \) (A-spend) or \( nf = H_{\text{nf}}(B,\ \rho) \) (B-spend)
+     from the committed witness.  This is the obligation Theorem 10
+     states; closure belongs to `circuits/spend.circom'.
+
+  3. *Value conservation (spend side).* The spend circuit must still
+     output `faceReleased' equal to the committed \( v \) in the
+     opening, with \( v \) the same 128-bit-bounded quantity
+     range-checked at mint.  The mint-side range check (Closure 1)
+     remains load-bearing here: a spend circuit that trusts \( v \)
+     without re-bounding it relies on the mint circuit having already
+     done so.
+
+  The mint-circuit layout is now /frozen/ at \(
+  \mathrm{Poseidon}_5(\mathrm{flavor},\, v,\, \rho,\, \mathrm{idHash},\,
+  \mathrm{predicate}) \) over BN254 with tree depth 20; spend-circuit
+  design no longer ratifies the mint-circuit layout because the layout
+  is published and pinned by the per-N verifiers already deployed.
 
 
 6 Security Assumptions Summary
