@@ -9,9 +9,14 @@ import "../src/IdentityRegistry.sol";
 import "../src/Notes.sol";
 import "../src/StubMintVerifier.sol";
 import "../src/StubSpendVerifier.sol";
-import "../src/PoseidonT3Bytecode.sol";
 
-/// @notice Deploy all three core contracts to a local or test network.
+/// @notice Deploy all core contracts to a local or test network.
+///
+/// @dev Notes (Phase 7-bis) no longer needs the on-chain PoseidonT3
+///      precompile -- per-leaf Merkle insertion happens in the mint SNARK.
+///      A real deployment registers per-N MintBatchN${N}Groth16Verifier(s)
+///      against the MintVerifierAdapter; this script wires the StubMintVerifier
+///      so a fresh deployment is functional pending real circuit setup.
 contract Deploy is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envOr("PRIVATE_KEY", uint256(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80)); // Anvil default key #0
@@ -50,22 +55,18 @@ contract Deploy is Script {
         );
         console.log("Buck deployed at:", address(buck));
 
-        // 5. Deploy Notes (Phase 1: stub mint verifier)
+        // 5. Deploy Notes (Phase 7-bis: stub mint verifier; production will
+        //    deploy MintVerifierAdapter + per-N MintBatchN${N}Groth16Verifier
+        //    and call adapter.registerVerifier(N, addr) for each pinned N).
         StubMintVerifier  mintVerifier  = new StubMintVerifier(governance);
         console.log("StubMintVerifier deployed at:", address(mintVerifier));
         StubSpendVerifier spendVerifier = new StubSpendVerifier(governance);
         console.log("StubSpendVerifier deployed at:", address(spendVerifier));
 
-        // Poseidon-T3 (2-input) hash precompile, deployed from raw bytecode.
-        // Required by Notes for the on-chain incremental Merkle tree.
-        address poseidonT3 = PoseidonT3Bytecode.deploy();
-        console.log("PoseidonT3 deployed at:", poseidonT3);
-
         Notes notes = new Notes(
             address(buck),
             address(mintVerifier),
             address(spendVerifier),
-            poseidonT3,
             governance
         );
         console.log("Notes deployed at:", address(notes));

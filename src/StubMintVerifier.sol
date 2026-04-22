@@ -3,14 +3,14 @@ pragma solidity ^0.8.20;
 
 import {IMintVerifier} from "./IMintVerifier.sol";
 
-/// @title StubMintVerifier — Phase 1 placeholder for the Notes mint verifier.
+/// @title StubMintVerifier -- placeholder for the Notes mint verifier.
 /// @notice Accepts any proof while the SNARK toolchain is being wired up.  The
 ///         `enabled` flag lets governance freeze mints (or tests exercise the
 ///         negative path) without redeploying.
 ///
 /// @dev    DO NOT use in production.  This contract performs zero cryptographic
-///         checks; a real verifier is required before Notes mint becomes a
-///         security-sensitive operation.
+///         checks; a real per-N Groth16 verifier is required before Notes
+///         mint becomes a security-sensitive operation.
 contract StubMintVerifier is IMintVerifier {
 
     address public governance;
@@ -43,9 +43,11 @@ contract StubMintVerifier is IMintVerifier {
     /// @inheritdoc IMintVerifier
     function verifyMint(
         bytes calldata /*proof*/,
+        uint256 /*oldRoot*/,
+        uint256 /*newRoot*/,
+        uint256 /*nextLeafIndex*/,
         uint256 /*totalFace*/,
-        uint256[] calldata /*commitments*/,
-        address /*issuer*/
+        uint256[] calldata /*commitments*/
     ) external view returns (bool) {
         return enabled;
     }

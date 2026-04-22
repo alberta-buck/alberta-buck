@@ -5,7 +5,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {IMintVerifier}  from "./IMintVerifier.sol";
 import {ISpendVerifier} from "./ISpendVerifier.sol";
-import {IPoseidonT3}    from "./IPoseidonT3.sol";
 
 /// @dev Buck-specific age-preserving transfer.  Notes calls this on spend
 ///      so the recipient absorbs the pool's average demurrage age rather
@@ -14,29 +13,37 @@ interface IBuckCarrying {
     function transferCarrying(address to, uint256 amount) external returns (bool);
 }
 
-/// @title Notes -- BUCK Notes commitment-pool registry.
+/// @title Notes -- BUCK Notes commitment-pool registry (Phase 7-bis batch mint).
 /// @notice One global pool of Poseidon commitments behind a SNARK-verified
-///         mint, plus an on-chain incremental Poseidon Merkle accumulator
-///         whose root the spend SNARK opens against.  Off-chain provers
-///         reconstruct sibling paths from the `Appended` event stream and
-///         submit a `(noteRoot, nullifier)` pair the contract checks against
-///         the recent-roots window before paying out.
+///         batch mint.  The mint circuit folds N leaves into the rolling
+///         Merkle root *in-circuit*, so this contract no longer maintains
+///         filled-subtrees, the zeros[] precompute, or per-commitment
+///         existence flags -- it just verifies the proof, accepts the
+///         SNARK-attested `newRoot`, advances `nextLeafIndex`, and pulls
+///         BUCK from the issuer.
 ///
-/// @dev    Tree shape: depth 20 (max ~1M notes), leaf hash is the Poseidon-5
-///         note commitment from `mint.circom`, internal nodes are
-///         `Poseidon(left, right)` over BN254's scalar field.  Empty leaves
-///         hash a fixed `ZERO_VALUE` (a domain-separated keccak256 reduced
-///         mod r); all level-zero subtree roots are precomputed in the
-///         constructor.  Insertion uses the Tornado-style filled-subtrees
-///         technique -- exactly `depth` Poseidon hashes per leaf -- and
-///         appends the resulting root to a fixed-size ring buffer that
-///         `isAcceptedRoot` walks linearly during spend verification.
+///         Spend is unchanged from Phase 7: the spender supplies a Groth16
+///         proof binding (noteRoot, nullifier, face, recipient, chainId) to
+///         a Poseidon opening + Merkle membership under a recent root.
+///
+/// @dev    Tree shape: depth 20 (max 2^20 = ~1M notes), leaf hash is
+///         Poseidon-5(flavor, v, rho, idHash, predicate).  Internal nodes
+///         use Poseidon-2 over BN254's scalar field.  Empty leaves hash a
+///         fixed `ZERO_VALUE` (a domain-separated keccak256 reduced mod r);
+///         the mint circuit hard-codes the same constant.  The contract
+///         exposes `ZERO_VALUE`, `TREE_DEPTH`, and the empty-tree root for
+///         off-chain wallet bootstrap, but no longer hashes anything itself.
+///
+///         Stale-state guards (in-flight contention is rollup-style):
+///           - `oldRoot == roots[currentRootIndex]`   - prover read live root
+///           - `nextLeafIndex == self.nextLeafIndex`  - prover read live size
+///         Either guard failing reverts cleanly with no BUCK movement; the
+///         loser of a concurrent mint race re-proves against the new state.
 contract Notes {
 
     // ---- immutable wiring -------------------------------------------------
 
-    IERC20       public immutable buck;
-    IPoseidonT3  public immutable poseidon;
+    IERC20 public immutable buck;
 
     /// @notice Field modulus of BN254's scalar field, mirrored from the
     ///         circuit so on-chain reductions stay consistent with the SNARK.
@@ -53,12 +60,20 @@ contract Notes {
     ///         storage slot per accepted root.
     uint8   public constant ROOT_HISTORY_SIZE = 30;
 
-    /// @notice Field element each empty leaf hashes to.  Domain-separated
-    ///         from the Poseidon-5 commitment space so a malicious prover
-    ///         cannot fabricate a "real" commitment that collides with an
-    ///         empty slot (probability is already 2^-254 with random rho,
-    ///         but the domain separation makes the gap formal).
-    uint256 public immutable ZERO_VALUE;
+    /// @notice Field element each empty leaf hashes to.  Hard-coded to match
+    ///         the circuit's ZERO_VALUE() literal -- changing one without the
+    ///         other breaks the in-circuit Merkle insertion.  Computed as
+    ///         `keccak256("AlbertaBuck:Notes:zero") % FIELD_R`.
+    uint256 public constant ZERO_VALUE =
+        12478158023141672556814566805819277863195393802640872128727997243357085450959;
+
+    /// @notice Empty-tree root: 20 levels of self-paired ZERO_VALUE.  The
+    ///         constructor seeds `roots[0]` to this so a freshly-deployed
+    ///         contract has a valid live root for the first mint's oldRoot
+    ///         check.  Computed off-chain from the same Poseidon-2 chain the
+    ///         circuit uses; pinned literal here keeps the constructor pure.
+    uint256 public constant EMPTY_ROOT =
+        6959478139657271248173638342125700921600510448444968095526832403890386862787;
 
     // ---- governance + verifier --------------------------------------------
 
@@ -66,17 +81,7 @@ contract Notes {
     IMintVerifier  public mintVerifier;
     ISpendVerifier public spendVerifier;
 
-    // ---- commitment / nullifier state -------------------------------------
-
-    /// @notice Ordered list of all minted commitments.  `leafIndex` in events
-    ///         maps to the position in this array.  Off-chain provers can
-    ///         reconstruct the full tree state from this list alone (or
-    ///         equivalently from the `Appended` event stream).
-    uint256[] public commitments;
-
-    /// @notice Membership view -- O(1) check for a commitment without
-    ///         scanning `commitments`.
-    mapping(uint256 => bool) public commitmentExists;
+    // ---- nullifier + audit state ------------------------------------------
 
     /// @notice Spent nullifier set.  Spend SNARK enforces uniqueness here.
     mapping(uint256 => bool) public nullifiers;
@@ -85,24 +90,16 @@ contract Notes {
     ///         notes (incremented on mint, decremented on spend).
     uint256 public noteFaceSum;
 
-    // ---- Merkle tree state ------------------------------------------------
-
-    /// @notice Pre-computed empty-subtree roots, one per level.  `zeros[0]`
-    ///         is `ZERO_VALUE`; `zeros[i] = Poseidon(zeros[i-1], zeros[i-1])`.
-    uint256[TREE_DEPTH] public zeros;
-
-    /// @notice Most-recently-seen left sibling at each level, used by the
-    ///         filled-subtrees insertion scheme.  When the next leaf's
-    ///         path bit at level `i` is 0 (left child), we stash our hash
-    ///         here; when it's 1, we pair against this slot to climb.
-    uint256[TREE_DEPTH] public filledSubtrees;
+    // ---- Merkle accumulator state -----------------------------------------
 
     /// @notice Index of the next leaf slot to fill (also == number of
     ///         appended commitments).  Capped at `2**TREE_DEPTH`.
+    ///         The mint SNARK reads this as a public input and the contract
+    ///         re-asserts equality on every mint to make stale proofs revert.
     uint32  public nextLeafIndex;
 
     /// @notice Ring buffer of recent roots.  `roots[currentRootIndex]` is
-    ///         the live root.
+    ///         the live root; spend proofs may pin any root in the window.
     uint256[ROOT_HISTORY_SIZE] public roots;
     uint8   public currentRootIndex;
 
@@ -112,24 +109,20 @@ contract Notes {
     event MintVerifierUpdated(address indexed previous, address indexed next);
     event SpendVerifierUpdated(address indexed previous, address indexed next);
 
-    /// @notice Emitted when a note is successfully spent.  `face` BUCK was
-    ///         transferred (transferCarrying) from this contract to
-    ///         `recipient`; `nullifier` is now burned forever.
+    /// @notice Emitted when a note is successfully spent.
     event Spent(uint256 indexed nullifier, uint256 face, address indexed recipient);
 
-    /// @notice One per minted commitment.  `leafIndex` is the Merkle leaf
-    ///         position (0-indexed insertion order).
-    event Appended(uint256 indexed cm, uint256 indexed leafIndex);
-
-    /// @notice Emitted once per mint call after every commitment in the
-    ///         batch has been folded into the tree.  `newRoot` is the live
-    ///         root after the batch (also `roots[currentRootIndex]`).
+    /// @notice Emitted once per successful mint.  `cms` calldata carries the
+    ///         per-leaf commitments in insertion order; offline provers
+    ///         reconstruct the tree by replaying Minted events plus the tx
+    ///         calldata cms[].  Indexed fields are kept narrow so the log
+    ///         topics are small (issuer + newRoot for filtering).
     event Minted(
         address indexed issuer,
         uint256 totalFace,
         uint256 startIndex,
         uint256 count,
-        uint256 newRoot
+        uint256 indexed newRoot
     );
 
     // ---- constructor / governance -----------------------------------------
@@ -138,40 +131,21 @@ contract Notes {
         address _buck,
         address _mintVerifier,
         address _spendVerifier,
-        address _poseidon,
         address _governance
     ) {
         require(_buck          != address(0), "buck=0");
         require(_mintVerifier  != address(0), "mintVerifier=0");
         require(_spendVerifier != address(0), "spendVerifier=0");
-        require(_poseidon      != address(0), "poseidon=0");
         require(_governance    != address(0), "governance=0");
         buck          = IERC20(_buck);
         mintVerifier  = IMintVerifier(_mintVerifier);
         spendVerifier = ISpendVerifier(_spendVerifier);
-        poseidon      = IPoseidonT3(_poseidon);
         governance    = _governance;
 
-        // Domain-separated empty-leaf scalar.  Reducing mod r keeps it in
-        // the field; the high bits lost by the reduction don't matter --
-        // any field element distinct from the commitment space works.
-        uint256 z = uint256(keccak256("AlbertaBuck:Notes:zero")) % FIELD_R;
-        ZERO_VALUE = z;
-
-        // Pre-compute the empty-subtree root at every level so insertion
-        // never has to hash zeros against zeros at runtime.
-        zeros[0]          = z;
-        filledSubtrees[0] = z;
-        for (uint256 i = 1; i < TREE_DEPTH; i++) {
-            uint256 prev = zeros[i - 1];
-            uint256 hash = IPoseidonT3(_poseidon).poseidon([prev, prev]);
-            zeros[i]          = hash;
-            filledSubtrees[i] = hash;
-        }
-        // Initial root is the empty-tree root.
-        roots[0] = IPoseidonT3(_poseidon).poseidon(
-            [zeros[TREE_DEPTH - 1], zeros[TREE_DEPTH - 1]]
-        );
+        // Genesis: empty-tree root in slot 0.  All other ring slots are 0
+        // (which `_isAcceptedRoot` rejects, so they cannot be misused as a
+        // forged-but-historical root before being overwritten).
+        roots[0] = EMPTY_ROOT;
 
         emit GovernanceTransferred(address(0), _governance);
         emit MintVerifierUpdated(address(0),  _mintVerifier);
@@ -201,18 +175,13 @@ contract Notes {
 
     // ---- views ------------------------------------------------------------
 
-    /// @notice Number of commitments minted so far (== future leaf count).
-    function commitmentCount() external view returns (uint256) {
-        return commitments.length;
-    }
-
     /// @notice Live Merkle root after all insertions to date.
     function noteRoot() external view returns (uint256) {
         return roots[currentRootIndex];
     }
 
     /// @notice True iff `root` appears anywhere in the recent-roots window.
-    ///         The spend SNARK pins one specific root in its public inputs;
+    ///         Spend SNARK pins one specific root in its public inputs;
     ///         this check makes that root acceptable for at most
     ///         `ROOT_HISTORY_SIZE` future insertions.
     function isAcceptedRoot(uint256 root) external view returns (bool) {
@@ -235,49 +204,63 @@ contract Notes {
     /// @notice Mint a batch of notes.
     ///
     /// The caller is the issuer.  They must have approved this contract for
-    /// at least `totalFace` BUCK in advance (BUCK's identity-bound approve
-    /// requires this contract to be flagged `isPublic` in IdentityRegistry,
-    /// or the caller to provide an identity-bound approve receipt -- the
-    /// pool is "a regular account" per the design doc).
+    /// at least `totalFace` BUCK in advance.  The mint SNARK proves:
+    ///   - cms[i] = Poseidon-5 opening of the per-leaf witness;
+    ///   - sum of v_i = totalFace, each v_i in [0, 2^128);
+    ///   - inserting cms[] starting at `nextLeafIndex` against `oldRoot`
+    ///     produces `newRoot`.
     ///
-    /// On success: SNARK proof verifies, BUCK is pulled from the issuer to
-    /// this contract, every commitment is appended to both the leaf list
-    /// and the Merkle accumulator, the new root is recorded in the ring
-    /// buffer, and `noteFaceSum` is incremented by `totalFace`.
+    /// Stale-state guards reject proofs whose `oldRoot` or `nextLeafIndex`
+    /// no longer matches live state (rollup-style contention model: the
+    /// loser's tx reverts cleanly with no BUCK movement and re-proves
+    /// against the new state).
     function mint(
-        bytes calldata proof,
-        uint256[] calldata cms,
-        uint256 totalFace
+        bytes   calldata proof,
+        uint256          oldRoot,
+        uint256          newRoot,
+        uint32           nextLeafIndex_,
+        uint256          totalFace,
+        uint256[] calldata cms
     ) external {
-        require(cms.length > 0, "Notes: empty mint");
+        require(cms.length > 0,                            "Notes: empty mint");
+        require(uint256(nextLeafIndex_) + cms.length
+                <= (uint256(1) << TREE_DEPTH),             "Notes: tree full");
+        require(oldRoot == roots[currentRootIndex],        "Notes: stale oldRoot");
+        require(nextLeafIndex_ == nextLeafIndex,           "Notes: stale nextLeafIndex");
+        require(newRoot != 0,                              "Notes: zero newRoot");
+        require(newRoot < FIELD_R,                         "Notes: newRoot out of field");
+
+        // Cheap field-bound on every commitment (the SNARK already constrains
+        // them via the Poseidon-5 opening, but a malformed cms[] -- e.g. one
+        // entry >= FIELD_R -- would still pass the verifier because the
+        // public input is reduced before binding into the IC[] term).  Bound
+        // them here so off-chain readers get the canonical residue.
+        uint256 N = cms.length;
+        for (uint256 i = 0; i < N; i++) {
+            require(cms[i] < FIELD_R, "Notes: cm out of field");
+        }
+
         require(
-            mintVerifier.verifyMint(proof, totalFace, cms, msg.sender),
+            mintVerifier.verifyMint(
+                proof, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
+            ),
             "Notes: bad mint proof"
         );
 
-        // Pull face value first so a failed transfer aborts the whole mint
-        // (no commitments leak into the tree on payment failure).
+        // Pull face value before mutating tree state so a failed transfer
+        // aborts the whole mint with no leaf-index advancement.
         require(
             buck.transferFrom(msg.sender, address(this), totalFace),
             "Notes: transfer failed"
         );
 
-        uint256 startIndex = commitments.length;
-        uint256 newRoot;
-        for (uint256 i = 0; i < cms.length; i++) {
-            uint256 cm = cms[i];
-            require(cm != 0,                  "Notes: zero commitment");
-            require(cm < FIELD_R,             "Notes: cm out of field");
-            require(cm != ZERO_VALUE,         "Notes: cm == zero leaf");
-            require(!commitmentExists[cm],    "Notes: duplicate commitment");
-            commitmentExists[cm] = true;
-            commitments.push(cm);
-            emit Appended(cm, startIndex + i);
-            newRoot = _insert(cm);
-        }
-        noteFaceSum += totalFace;
+        uint256 startIndex = nextLeafIndex;
+        nextLeafIndex      = nextLeafIndex_ + uint32(N);
+        currentRootIndex   = (currentRootIndex + 1) % ROOT_HISTORY_SIZE;
+        roots[currentRootIndex] = newRoot;
+        noteFaceSum       += totalFace;
 
-        emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
+        emit Minted(msg.sender, totalFace, startIndex, N, newRoot);
     }
 
     // ---- spend ------------------------------------------------------------
@@ -288,10 +271,7 @@ contract Notes {
     ///         not been burned, and that the Groth16 spend proof binds
     ///         `(noteRoot, nullifier, face, recipient, block.chainid)` in
     ///         its public inputs.  On success the pool transferCarrying's
-    ///         `face` BUCK to `recipient` -- the recipient absorbs the pool's
-    ///         average demurrage age via a weighted-index merge, which is
-    ///         the anonymity cost and also the upside for anyone who held a
-    ///         note longer than the pool average.
+    ///         `face` BUCK to `recipient`.
     ///
     /// @dev Nullifier and face-sum bookkeeping happen before the external
     ///      transferCarrying call.  If the transfer reverts the whole spend
@@ -323,42 +303,5 @@ contract Notes {
         );
 
         emit Spent(nullifier, face, recipient);
-    }
-
-    // ---- internal: incremental tree insertion -----------------------------
-
-    /// @dev Tornado-style filled-subtrees insertion.  Exactly `TREE_DEPTH`
-    ///      Poseidon-2 hashes per leaf; updates `filledSubtrees` along the
-    ///      left-spine of the inserted leaf, advances `nextLeafIndex`, and
-    ///      writes the new root into the ring buffer.  Returns the new root.
-    function _insert(uint256 leaf) internal returns (uint256 root) {
-        uint32 idx = nextLeafIndex;
-        require(idx < uint32(1) << TREE_DEPTH, "Notes: tree full");
-
-        uint256 cur = leaf;
-        for (uint8 level = 0; level < TREE_DEPTH; level++) {
-            uint256 left;
-            uint256 right;
-            if ((idx & 1) == 0) {
-                // We are a left child: stash for the future right sibling
-                // and pair with the empty-subtree root on the right.
-                left  = cur;
-                right = zeros[level];
-                filledSubtrees[level] = cur;
-            } else {
-                // We are a right child: pair with our previously-stashed
-                // left sibling.  filledSubtrees[level] is unchanged --
-                // this subtree at this level is now sealed.
-                left  = filledSubtrees[level];
-                right = cur;
-            }
-            cur = poseidon.poseidon([left, right]);
-            idx >>= 1;
-        }
-
-        nextLeafIndex     = nextLeafIndex + 1;
-        currentRootIndex  = (currentRootIndex + 1) % ROOT_HISTORY_SIZE;
-        roots[currentRootIndex] = cur;
-        return cur;
     }
 }

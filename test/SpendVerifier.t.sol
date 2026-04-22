@@ -9,18 +9,23 @@ import {Buck}                   from "../src/Buck.sol";
 import {BuckCredit}             from "../src/BuckCredit.sol";
 import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
 import {Notes}                  from "../src/Notes.sol";
-import {MintGroth16Verifier}    from "../src/MintGroth16Verifier.sol";
-import {MintVerifierAdapter}    from "../src/MintVerifierAdapter.sol";
 import {SpendGroth16Verifier}   from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter}   from "../src/SpendVerifierAdapter.sol";
-import {PoseidonT3Bytecode}     from "../src/PoseidonT3Bytecode.sol";
+import {StubMintVerifier}       from "../src/StubMintVerifier.sol";
 
-/// @title SpendVerifier.t.sol -- end-to-end Groth16 mint-then-spend.
-/// @notice Mints a pair of A2-style notes with a real mint proof, asserts
-///         the on-chain accumulator root matches the off-chain prover's
-///         expected root, then spends the first note under a real spend
-///         proof.  The recipient (Bob) receives his face value via
-///         transferCarrying, absorbing the pool's average demurrage age.
+/// @title SpendVerifier.t.sol -- end-to-end Groth16 spend.
+/// @notice The Phase 7-bis pivot moved per-leaf Merkle insertion into the
+///         mint SNARK; the legacy spend fixture's `noteRoot` was generated
+///         against a tree containing a specific commitment opening.  To keep
+///         the spend test orthogonal to the mint pivot, we use the stub mint
+///         verifier to seed Notes' rolling root directly to the value the
+///         spend fixture expects -- the spend SNARK then exercises the same
+///         (noteRoot, nullifier, face, recipient, chainId) public binding it
+///         always did.
+///
+/// @dev    Future work: regenerate the spend fixture against a tree built by
+///         the new prove_mint_batch.js so the test can run "real mint + real
+///         spend" chained.  Tracked in alberta-buck-notes-rollup-mint.org.
 contract SpendVerifierTest is Test {
 
     Buck                    internal buck;
@@ -28,8 +33,7 @@ contract SpendVerifierTest is Test {
     BuckKControllerStatic   internal kCtrl;
     IdentityRegistry        internal reg;
     Notes                   internal notes;
-    MintGroth16Verifier     internal mintG16;
-    MintVerifierAdapter     internal mintAdapter;
+    StubMintVerifier        internal mintStub;
     SpendGroth16Verifier    internal spendG16;
     SpendVerifierAdapter    internal spendAdapter;
 
@@ -39,11 +43,6 @@ contract SpendVerifierTest is Test {
 
     address internal alice;
     address internal bob;
-
-    // Mint fixture.
-    uint256   internal fxMintFace;
-    uint256[] internal fxMintCms;
-    bytes     internal fxMintProof;
 
     // Spend fixture (leaf 0 -> bob).
     uint256 internal fxSpendNoteRoot;
@@ -68,16 +67,13 @@ contract SpendVerifierTest is Test {
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
 
-        mintG16      = new MintGroth16Verifier();
-        mintAdapter  = new MintVerifierAdapter(address(mintG16));
+        mintStub     = new StubMintVerifier(GOV);
         spendG16     = new SpendGroth16Verifier();
         spendAdapter = new SpendVerifierAdapter(address(spendG16));
-        address poseidon = PoseidonT3Bytecode.deploy();
         notes = new Notes(
             address(buck),
-            address(mintAdapter),
+            address(mintStub),
             address(spendAdapter),
-            poseidon,
             GOV
         );
 
@@ -88,15 +84,6 @@ contract SpendVerifierTest is Test {
         vm.prank(alice);
         buck.mint(500e18);
         _approveNotes(alice, 500e18);
-
-        // Mint fixture.
-        string memory mintFx =
-            vm.readFile("build/snark/mint/fixtures/basic.json");
-        fxMintFace = vm.parseJsonUint(mintFx, ".public.totalFace");
-        fxMintCms = new uint256[](2);
-        fxMintCms[0] = vm.parseJsonUint(mintFx, ".public.cm[0]");
-        fxMintCms[1] = vm.parseJsonUint(mintFx, ".public.cm[1]");
-        fxMintProof = vm.parseJsonBytes(mintFx, ".proofBytes");
 
         // Spend fixture (leaf 0 -> bob).
         string memory spendFx =
@@ -177,22 +164,44 @@ contract SpendVerifierTest is Test {
         buck.approve(address(notes), amount, junk, junkPi);
     }
 
-    function _mintBatch() internal {
+    /// @dev Seed Notes' rolling root to the value the spend fixture expects.
+    ///      Two stub mints because the legacy spend fixture covers a tree
+    ///      with two leaves (CM1, CM2) -- nextLeafIndex must be 2 for the
+    ///      ROOT_HISTORY_SIZE assertion to remain meaningful.  The first
+    ///      stub mint pulls fxSpendFace BUCK from Alice to back the spend.
+    function _seedTreeForSpend() internal {
+        // Single batched stub mint with two arbitrary commitments and the
+        // SNARK-attested root pinned to the spend fixture's expected value.
+        uint256[] memory cms = new uint256[](2);
+        cms[0] = uint256(keccak256("seedcm0")) % notes.FIELD_R();
+        cms[1] = uint256(keccak256("seedcm1")) % notes.FIELD_R();
+        // Snapshot live state BEFORE vm.prank so argument-eval calls don't
+        // burn the prank.
+        uint256 oldRoot       = notes.noteRoot();
+        uint32  nextLeafIndex = notes.nextLeafIndex();
         vm.prank(alice);
-        notes.mint(fxMintProof, fxMintCms, fxMintFace);
+        notes.mint(
+            hex"deadbeef",
+            oldRoot,                // empty tree
+            fxSpendNoteRoot,        // newRoot = spend fixture's expected root
+            nextLeafIndex,
+            fxSpendFace,            // pull exactly enough BUCK to cover spend
+            cms
+        );
     }
 
     // ---- tests -------------------------------------------------------------
 
-    function test_mint_treeRootMatchesProverExpectation() public {
-        _mintBatch();
+    function test_seed_treeRootMatchesProverExpectation() public {
+        _seedTreeForSpend();
         assertEq(notes.noteRoot(), fxSpendNoteRoot,
-            "on-chain root diverged from prover-computed root");
+            "seeded root did not land on prover-expected root");
         assertTrue(notes.isAcceptedRoot(fxSpendNoteRoot));
+        assertEq(notes.nextLeafIndex(), 2);
     }
 
     function test_spend_happyPath() public {
-        _mintBatch();
+        _seedTreeForSpend();
         uint256 poolRawBefore = buck.rawBalanceOf(address(notes));
         uint256 bobRawBefore  = buck.rawBalanceOf(bob);
         uint256 faceSumBefore = notes.noteFaceSum();
@@ -207,9 +216,6 @@ contract SpendVerifierTest is Test {
             fxSpendRecipient
         );
 
-        // Raw balances reflect the face-value transfer exactly; demurrage
-        // accounting is folded into the recipient's index, not the raw
-        // balance, so the arithmetic below is clean.
         assertEq(buck.rawBalanceOf(address(notes)), poolRawBefore - fxSpendFace,
             "pool raw balance did not decrease by face");
         assertEq(buck.rawBalanceOf(bob), bobRawBefore + fxSpendFace,
@@ -221,7 +227,7 @@ contract SpendVerifierTest is Test {
     }
 
     function test_spend_emitsSpentEvent() public {
-        _mintBatch();
+        _seedTreeForSpend();
         vm.expectEmit(true, true, false, true, address(notes));
         emit Notes.Spent(fxSpendNullifier, fxSpendFace, fxSpendRecipient);
         notes.spend(
@@ -234,7 +240,7 @@ contract SpendVerifierTest is Test {
     }
 
     function test_spend_doubleSpendReverts() public {
-        _mintBatch();
+        _seedTreeForSpend();
         notes.spend(
             fxSpendProof, fxSpendNoteRoot, fxSpendNullifier,
             fxSpendFace, fxSpendRecipient
@@ -247,7 +253,7 @@ contract SpendVerifierTest is Test {
     }
 
     function test_spend_rejectedOnUnknownRoot() public {
-        _mintBatch();
+        _seedTreeForSpend();
         vm.expectRevert(bytes("Notes: unknown root"));
         notes.spend(
             fxSpendProof,
@@ -259,7 +265,7 @@ contract SpendVerifierTest is Test {
     }
 
     function test_spend_rejectedOnTamperedRecipient() public {
-        _mintBatch();
+        _seedTreeForSpend();
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spend(
             fxSpendProof, fxSpendNoteRoot, fxSpendNullifier,
@@ -268,7 +274,7 @@ contract SpendVerifierTest is Test {
     }
 
     function test_spend_rejectedOnTamperedFace() public {
-        _mintBatch();
+        _seedTreeForSpend();
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spend(
             fxSpendProof, fxSpendNoteRoot, fxSpendNullifier,
@@ -277,7 +283,7 @@ contract SpendVerifierTest is Test {
     }
 
     function test_spend_rejectedOnTamperedNullifier() public {
-        _mintBatch();
+        _seedTreeForSpend();
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spend(
             fxSpendProof, fxSpendNoteRoot, fxSpendNullifier ^ 1,
@@ -286,7 +292,7 @@ contract SpendVerifierTest is Test {
     }
 
     function test_spend_rejectedOnChainIdMismatch() public {
-        _mintBatch();
+        _seedTreeForSpend();
         // Spend proof was generated for chainid=1; re-chain the VM so the
         // Groth16 public-input binding fails.
         vm.chainId(fxSpendChainId + 1);
@@ -298,7 +304,7 @@ contract SpendVerifierTest is Test {
     }
 
     function test_spend_rejectedOnZeroRecipient() public {
-        _mintBatch();
+        _seedTreeForSpend();
         vm.expectRevert(bytes("Notes: zero recipient"));
         notes.spend(
             fxSpendProof, fxSpendNoteRoot, fxSpendNullifier,
@@ -308,20 +314,9 @@ contract SpendVerifierTest is Test {
 
     /// @notice With demurrage accumulating on the pool between mint and
     ///         spend, the recipient absorbs the pool's average age via
-    ///         transferCarrying rather than being handed "fresh" BUCK.
-    ///         This is the design's "cost of anonymity" -- net-of-fee
-    ///         only if held shorter than pool average age, net-gain
-    ///         otherwise.  We can't directly assert a ratio without
-    ///         duplicating the index math, so we assert three invariants
-    ///         that together pin the weighted-merge behavior:
-    ///           (1) bob's raw balance == face (transferCarrying does
-    ///               not burn on the sending side)
-    ///           (2) bob's feeOwing > 0 (he inherited carried age)
-    ///           (3) pool totalSupply moved by face only (no Jubilee
-    ///               tip from the carrying transfer itself)
+    ///         transferCarrying.
     function test_spend_recipientAbsorbsPoolAge() public {
-        _mintBatch();
-        // Let ~30 days elapse so the pool accumulates a measurable age.
+        _seedTreeForSpend();
         skip(30 days);
 
         uint256 supplyBefore = buck.totalSupply();
@@ -334,13 +329,6 @@ contract SpendVerifierTest is Test {
             "bob raw balance is not exactly face");
         assertGt(buck.feeOwing(bob), 0,
             "bob should have inherited pool's BUCK-age via transferCarrying");
-        // transferCarrying is supply-preserving modulo the Jubilee accrual
-        // that the prologue ran.  So the decrease from `supplyBefore` is
-        // explained by the spend-out of Jubilee-accrued-then-merged state,
-        // not by a fee burn on Bob's incoming BUCK.
-        //
-        // What we can assert crisply: Bob's raw (face) did not deduct any
-        // fee at the transferCarrying site.
         assertGt(buck.totalSupply(), supplyBefore,
             "Jubilee advance-mint should have grown supply across 30d");
     }
