@@ -1,0 +1,254 @@
+#+title: BUCK Notes -- SNARK-Verified Batch Mint Design (Phase 7 Pivot)
+#+author: Perry Kundert
+#+date: 2026-04-22
+#+category: Alberta Buck
+#+series[]: Alberta-Buck
+
+#+BEGIN_ABSTRACT
+This memo records a substantial design pivot for the BUCK Notes mint path,
+captured before context compaction.  The shipped Phase-7 implementation
+(=src/Notes.sol=, =circuits/mint.circom=) costs ~1.9M gas at N=2 and scales
+roughly linearly per leaf -- a non-starter at batch sizes large enough to
+amortize identity-handshake and BUCK-approve overhead.  The pivot moves the
+per-leaf Poseidon Merkle insertions /into/ the mint SNARK, so the on-chain mint
+cost becomes essentially constant in N regardless of whether N=8 or N=1024.
+
+This document is the urgent primary work item.  Updating
+=alberta-buck-notes-flow.org= to reflect the new mint flow is the immediate
+next step.
+#+END_ABSTRACT
+
+* Motivation
+
+| Approach                          | Per-leaf on-chain cost | N=2     | N=16   | N=128  |
+|-----------------------------------+------------------------+---------+--------+--------|
+| Shipped (per-leaf on-chain insert) | ~800K gas              | ~1.9M   | ~13M   | ~100M+ |
+| Pivot (in-circuit insert)         | ~500 gas (calldata)    | ~330K   | ~340K  | ~400K  |
+
+The shipped design is dominated by =N x TREE_DEPTH= Poseidon-T3 calls at
+~30-40K gas each.  Even N=16 exceeds the 30M block limit; N=128 is roughly two
+orders of magnitude past economic viability at any realistic gas price.
+
+Moving the tree update into the SNARK makes the on-chain cost essentially flat:
+one Groth16 verify, three SSTOREs (root, currentRootIndex, nextLeafIndex), and
+the calldata to publish the leaf list.
+
+* Design Sketch
+
+** Public inputs to mint_batch circuit (5 entries, N-independent)
+
+| Signal          | Description                                                 |
+|-----------------+-------------------------------------------------------------|
+| =oldRoot=       | The live note Merkle root the prover read from chain        |
+| =newRoot=       | Root after inserting =cm[0..N-1]= starting at =nextLeafIndex= |
+| =nextLeafIndex= | The live tree size the prover read from chain               |
+| =totalFace=     | Sum of =v[i]=, range-bounded to 128 bits                    |
+| =cmBatchHash=   | =Hash(cm[0], ..., cm[N-1])= so the contract can attest to leaves |
+
+** Private witness
+
+- Per leaf i in 0..N-1: =flavor[i], v[i], rho[i], idHash[i], predicate[i]=
+- Per leaf i in 0..N-1: TREE_DEPTH path siblings needed to fold =cm[i]= into
+  the rolling tree (derivable from the prover's local mirror of
+  =filledSubtrees= plus the previously-inserted leaves of this same batch)
+
+** In-circuit constraints
+
+- N x Poseidon-5: =cm[i] === Poseidon(flavor, v, rho, idHash, predicate)[i]=
+- N x Num2Bits(128) on =v[i]=, plus Num2Bits(128) on =totalFace=
+- 1 sum: =totalFace === sum(v[i])=
+- N x TREE_DEPTH Poseidon-2 hashes implementing the rolling
+  filled-subtrees insertion from =oldRoot= to =newRoot=
+- 1 batch hash: =cmBatchHash === Hash(cm[0], ..., cm[N-1])= (Poseidon if shared
+  with the SNARK field; keccak if the contract should compute it cheaply)
+- (Optional) =cm[i] != 0= and =cm[i] != ZERO_VALUE= belt-and-suspenders
+
+** Constraint counts and proving cost
+
+Per leaf: ~1.7K opening + ~4.3K insertion = ~6K R1CS.
+
+| N    | R1CS  | ptau | Approx prover time (single desktop)        |
+|------+-------+------+--------------------------------------------|
+|   16 | ~96K  | 2^17 | seconds                                    |
+|  128 | ~770K | 2^20 | minutes                                    |
+| 1024 | ~6M   | 2^23 | hours; large memory footprint              |
+
+** On-chain =Notes.mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms[])=
+
+1. =mintVerifier.verifyMint(proof, [oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash])=
+2. Require =oldRoot == roots[currentRootIndex]=
+3. Require =nextLeafIndex == self.nextLeafIndex=
+4. Require =Hash(cms) == cmBatchHash= (or recompute Poseidon if shared field)
+5. =buck.transferFrom(msg.sender, address(this), totalFace)=
+6. =roots[(currentRootIndex+1) % HISTORY] = newRoot=; advance index;
+   =self.nextLeafIndex += cms.length=
+7. =noteFaceSum += totalFace=
+8. Emit one =Minted(issuer, totalFace, startIndex, count, newRoot)=
+9. Either emit per-leaf =Appended(cm, leafIndex)= or omit and rely on calldata
+   =cms[]= (calldata is cheaper -- 16 gas/byte non-zero vs ~256 gas per LOG byte)
+
+** On-chain cost projection
+
+- Groth16 verify: ~215K + ~6K per public input x 5 inputs = ~250K
+- SSTORE x 3: ~80K
+- Calldata =cms[]=: 32B per leaf x 16 gas/byte = ~500 gas/leaf
+- BUCK transferFrom: ~50K (warm)
+
+Total: *~380K + ~500 gas/leaf*, regardless of N.  Cross-over with the
+shipped design at N=1; at N=128 saves >100M gas per mint.
+
+* Hostile-Alice Security Analysis
+
+The single behavioral change vs. shipped Phase 7 is that
+=commitmentExists[cm]= duplicate-detection moves from explicit on-chain check
+to economic self-enforcement.  Walk through every attack vector:
+
+** A1. Underpay =totalFace=
+=totalFace= is a public input bound to the SNARK by the sum constraint and
+Num2Bits(128).  =transferFrom= pulls exactly =totalFace=.  GUARANTEE: intact.
+
+** A2. Field-overflow on sum
+Num2Bits(128) on each =v[i]= and on =totalFace= gives 62-bit margin against
+field wrap at N <= 2^64.  GUARANTEE: intact.
+
+** A3. Duplicate =cm= across mints
+Today: =commitmentExists[cm]= reverts.  New: insertion succeeds at a new leaf.
+Alice paid =totalFace= twice for the same opening; the nullifier
+=Poseidon(rho, idHash, 4242)= is deterministic in the opening, so she can
+spend exactly one copy; the other is unspendable forever.  She loses money;
+no one else is harmed.  GUARANTEE: economically self-enforcing.
+
+** A4. =cm= collision with =ZERO_VALUE= or 0
+=ZERO_VALUE= is a domain-separated keccak reduced mod =r=; collision with the
+Poseidon-5 commitment space is 2^-254.  Forcing such a collision requires
+breaking Poseidon preimage resistance.  Add =cm[i] != 0= and
+=cm[i] != ZERO_VALUE= in-circuit for belt-and-suspenders.  GUARANTEE: intact.
+
+** A5. Lying about =oldRoot=
+Contract asserts =oldRoot == roots[currentRootIndex]=.  Lying causes revert.
+GUARANTEE: intact.
+
+** A6. Lying about =newRoot=
+SNARK constraints derive =newRoot= from =oldRoot= plus N folded leaves; Alice
+cannot satisfy them with a fabricated =newRoot=.  GUARANTEE: intact.
+
+** A7. Front-running by Bob to invalidate Alice's proof
+Bob's mint lands first -> =currentRootIndex= advances -> Alice's =oldRoot=
+check fails -> Alice's tx reverts.  Alice paid no BUCK (transferFrom never
+ran); she re-proves against the new root.  GUARANTEE: no value loss;
+*new operational concern*: wasted prover time under contention.  Mitigation:
+optimistic retry in the wallet.  Eventual mitigation: sequencer / proof
+aggregation.
+
+** A8. Mint with =idHash= she does not own
+Same as today: B-flavor mint does not bind =idHash= to a registered identity
+(that is A-flavor's deferred work).  Alice's chosen =idHash= determines her
+nullifier at spend.  GUARANTEE: intact.
+
+** A9. Mint junk leaves whose openings she does not know
+The circuit requires Alice to know the opening; she pays =totalFace= per
+junk leaf.  Equivalent to a paid donation to the pool.  GUARANTEE: intact.
+
+** A10. Spend nullifier reuse
+Spend path unchanged.  =nullifiers[nf] = true= on first burn; second reverts.
+GUARANTEE: intact.
+
+** A11. Spend front-running
+=recipient= is bound in the spend SNARK public inputs and tied to the witness
+via the existing ghost-bind constraint group.  Bob cannot reuse Alice's proof
+with a different recipient.  GUARANTEE: intact.
+
+** A12. Lying about =nextLeafIndex=
+Contract asserts equality with on-chain state; SNARK consumes the same value
+when computing path indices for insertion.  Lying either reverts on the
+contract check or produces a =newRoot= the contract was not asked to honour.
+GUARANTEE: intact.
+
+** Headline
+Every hostile-Alice guarantee in the shipped Phase 7 design holds under the
+batch-mint pivot.  Buggy /wallets/ (e.g., =rho= RNG collision) are no longer
+caught by the chain, but the failure mode is "wallet owner forfeits one note",
+not "pool drains".
+
+* Concurrency Model
+
+| Scenario                         | Behaviour                                   |
+|----------------------------------+---------------------------------------------|
+| Single user, sequential mints    | Each mint reads the live root, no race      |
+| Single user, queued mints        | Wallet keeps a local rolling state mirror; no race |
+| Multiple users, shared traffic   | Classic rollup race; losers revert cleanly  |
+| Adversarial griefing             | Equivalent to gas-paid DoS of any rollup    |
+
+Initial deployment recommendation: *optimistic retry* in the wallet
+(re-prove against the new live root on revert).  Add a sequencer-style
+mempool only if real-world contention warrants it.
+
+A future "aggregated mint" path can collapse multiple users' batches into one
+proof per slot, but it inherits the same trust model as any other sequencer.
+
+* Migration Plan from Shipped Phase 7
+
+** Circuits
+- New =circuits/mint_batch.circom= parameterised on N.
+- Reuses existing Poseidon-2 / Poseidon-5 templates; adds the rolling
+  filled-subtrees insertion sub-circuit -- the in-circuit dual of the shipped
+  =Notes._insert=.
+- =scripts/snark/setup.sh= extended to compile =mint_batch= at the pinned N
+  set.  Recommend an initial pinned set of {16, 128, 1024}.
+- The shipped =mint.circom= stays as a reference until the batch path is
+  battle-tested; the small-N adapter then retires.
+
+** Contracts
+- =src/Notes.sol=:
+  - Drop =_insert()=, =filledSubtrees=, =zeros[]=, =commitmentExists=.
+  - Keep =roots[]= ring buffer (now updated by writing the SNARK-attested
+    =newRoot=).
+  - Add =nextLeafIndex= invariant check on mint.
+  - Replace per-leaf =Appended= event with one batch event (or rely on
+    calldata =cms[]=).
+- =src/MintVerifierAdapter.sol= -> per-N adapter under
+  =mapping(uint256 => IMintVerifier) public mintVerifiers= keyed by =N=.
+  =Notes.mint= dispatches by =cms.length=.
+- =src/IMintVerifier.sol= -- extend to
+  =verifyMint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash)=
+  (or pass cms[] and let the adapter compute the hash).
+
+** Off-chain wallet
+- =alberta_buck.wallet.notes= maintains a local mirror of the
+  =filledSubtrees= state; for each batch derives the sibling paths per
+  inserted leaf in order and emits the witness in the new layout.
+- =scripts/snark/prove_mint_batch.js= -- new prover script.
+
+** Tests
+- =test/MintVerifier.t.sol=: refresh fixtures; add tamper tests for =oldRoot=,
+  =newRoot=, =nextLeafIndex=, =cmBatchHash=; add a concurrency test (two
+  minters race; loser reverts cleanly with no BUCK loss).
+- =test/Notes.t.sol=: drop the duplicate-cm test; add an economic test that
+  demonstrates duplicate-cm self-punishment (paid twice, spendable once).
+
+** Documentation
+- *Urgent first*: =alberta-buck-notes-flow.org= -- walk the new mint flow
+  end-to-end; replace the per-leaf insertion narrative with the
+  batched-root-update narrative.  Re-validate every "what does the chain see"
+  claim against the new layout.
+- =alberta-buck-notes.org=: update Notes-contract state and lifecycle
+  sections; mark the shipped per-leaf path historical, batch-mint primary.
+- =alberta-buck-ethereum.org=: rewrite the Notes section and the gas table
+  entries.
+
+* Open Questions
+
+1. *Hash choice for =cmBatchHash=*: Poseidon (single-field, in-circuit cheap
+   but on-chain expensive) vs keccak (cheap on-chain, no in-circuit reuse).
+   Likely keccak.
+2. *Per-leaf events vs calldata-only*: keeping =Appended(cm, leafIndex)= eats
+   ~2K gas per leaf in LOG cost; the saving is that off-chain provers can
+   subscribe to the event stream rather than parse calldata.  Worth measuring.
+3. *Pinned N set*: {16, 128, 1024} is a guess.  Real choice depends on
+   wallet UX (typical denomination request size) and prover-time tolerance.
+4. *Should =Notes= still expose =commitmentCount()=?*  =nextLeafIndex= covers
+   the same information; removes an SLOAD-able mirror.
+5. *Cross-batch ordering*: if Alice posts batch B1 and Bob posts batch B2 in
+   the same block, the ordering must be deterministic for both provers'
+   =oldRoot= assumptions to hold.  Use block ordering and let the loser
+   re-prove; sequencer is the eventual fix.

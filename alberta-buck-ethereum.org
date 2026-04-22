@@ -102,11 +102,16 @@ commitments pool is extended only when the caller supplies a Groth16 SNARK bindi
   +---------------------------------------------------------------------------------------+
   |                                    Notes (custom)                                     |
   |                                                                                       |
-  |  mint(proofBytes, cm[], totalFace):                                                   |
-  |     require mintVerifier.verifyMint(proofBytes, totalFace, cm[], issuer)              |
+  |  mint(proofBytes, oldRoot, newRoot, nextLeafIndex, totalFace, cms[]):                 |
+  |     require oldRoot == roots[currentRootIndex]                                        |
+  |     require nextLeafIndex == self.nextLeafIndex                                       |
+  |     cmBatchHash = keccak256(abi.encodePacked(cms))                                    |
+  |     require mintVerifiers[cms.length].verifyMint(                                     |
+  |          proofBytes, oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash)         |
   |     buck.transferFrom(caller, this, totalFace)                                        |
-  |     for each cm[i]: require !commitmentExists, append + Poseidon-Merkle insert,       |
-  |                     emit Appended(cm,leaf), noteFaceSum += v_i                        |
+  |     roots[++currentRootIndex % HISTORY] = newRoot                                     |
+  |     self.nextLeafIndex += cms.length; noteFaceSum += totalFace                        |
+  |     emit Minted(caller, totalFace, startIndex, count, newRoot)                        |
   |                                                                                       |
   |  spend(proofBytes, root, nullifier, face, recipient):                                 |
   |     require isAcceptedRoot(root) and !nullifiers[nullifier]                           |
@@ -114,8 +119,9 @@ commitments pool is extended only when the caller supplies a Groth16 SNARK bindi
   |     nullifiers[nf] = true; noteFaceSum -= face;                                       |
   |     buck.transferCarrying(recipient, face)                                            |
   |                                                                                       |
-  |  Tornado-style Poseidon Merkle tree (depth 20) + 30-slot recent-roots ring buffer     |
-  |  commitments[] + nullifiers[] + noteFaceSum are the public transparency state         |
+  |  Per-leaf Merkle insertion lives inside the mint SNARK (Phase-7-bis); the contract    |
+  |  records SNARK-attested newRoot into the same 30-slot recent-roots ring buffer the    |
+  |  spend side already consumes.  nullifiers[] + noteFaceSum are the transparency state. |
   +---------------------------------------------------------------------------------------+
 #+END_SRC
 
@@ -609,26 +615,36 @@ interface, the circom Groth16 mint circuit, and the adapter that bridges the two
 
 ** Mint Circuit (circom, Groth16 on BN254)
 
-=circuits/mint.circom= is pinned at =N = 2= commitments per batch.  A variable-N deployment
-re-templates both the circuit and the =MintVerifierAdapter='s public-signals arity.
+Phase-7-bis ships =circuits/mint_batch.circom=, a parameterised batch-mint circuit
+that subsumes the per-leaf on-chain Poseidon insertion of Phase 7.  One compile per
+pinned N (recommended {16, 128, 1024}); each pin produces its own
+=MintGroth16Verifier_N*.sol= and registers in =mintVerifiers[N]= on =Notes=.  The
+public-signals arity is 5 regardless of N.
 
-| Signal         | Role    | Description                                                          |
-|----------------+---------+----------------------------------------------------------------------|
-| =totalFace=    | public  | Sum of note values, in BUCK (18 decimals)                            |
-| =cm[i]=        | public  | Poseidon(5)(flavor, v, rho, idHash, predicate) for each note \(i\)   |
-| =flavor[i]=    | private | Note flavour (A1/A2/B1 from Notes design; 2 == A2 in tests)          |
-| =v[i]=         | private | Note value (18-decimal integer, range-bounded to 128 bits)           |
-| =rho[i]=       | private | Per-note randomness                                                  |
-| =idHash[i]=    | private | Hash of the identity binding for this note                           |
-| =predicate[i]= | private | Predicate commitment (zero for the plain mint path)                  |
+| Signal              | Role    | Description                                                            |
+|---------------------+---------+------------------------------------------------------------------------|
+| =oldRoot=           | public  | Live note Merkle root the prover read from chain                       |
+| =newRoot=           | public  | Root after folding =cm[0..N-1]= starting at =nextLeafIndex=            |
+| =nextLeafIndex=     | public  | Live tree size the prover read from chain                              |
+| =totalFace=         | public  | Sum of note values, range-bounded to 128 bits                          |
+| =cmBatchHash=       | public  | =keccak256(abi.encodePacked(cm[0..N-1]))= -- ties calldata to the SNARK |
+| =flavor[i]=         | private | Note flavour (A1/A2/B1 from Notes design)                              |
+| =v[i]=              | private | Note value (18-decimal integer, range-bounded to 128 bits)             |
+| =rho[i]=            | private | Per-note randomness                                                    |
+| =idHash[i]=         | private | Hash of the identity binding for this note                             |
+| =predicate[i]=      | private | Predicate commitment (zero for the plain mint path)                    |
+| =pathSiblings[i][d]= | private | Depth-20 sibling hashes used to fold leaf =i= into the rolling tree    |
 
-Constraints: 2 Poseidon-hash checks (=cm[i] === Poseidon(5)(...)=), one sum check (=totalFace ===
-sum v[i]=), and =Num2Bits(128)= range bounds on each =v[i]= and on =totalFace= -- the range
-bound closes the field-overflow attack that would otherwise make =sum(v[i]) === totalFace= true
-only modulo the BN254 scalar field.  snarkjs compiles this to roughly 3,500 R1CS constraints,
-which fits comfortably in a 2^15 powers-of-tau.  =scripts/snark/setup.sh= generates a single
-=pot15_final.ptau= shared between mint and spend, runs the groth16 phase-2 setup for both, and
-exports =src/MintGroth16Verifier.sol= and =src/SpendGroth16Verifier.sol=.
+Constraints: N Poseidon-5 opening checks, =Num2Bits(128)= range bounds on each =v[i]=
+and on =totalFace= (closing the field-overflow attack), one sum check
+(=totalFace === sum v[i]=), N x TREE_DEPTH Poseidon-2 hashes implementing the
+rolling filled-subtrees insertion from =oldRoot= to =newRoot=, and one keccak-style
+hash check binding =cmBatchHash= to the per-leaf commitments.  Total constraints
+work out to ~6K R1CS per leaf (~1.7K opening + ~4.3K insertion); see
+=alberta-buck-notes-rollup-mint.org= for per-N R1CS / PTAU sizing.
+=scripts/snark/setup.sh= now runs one phase-2 setup per pinned N, exporting
+=src/MintGroth16Verifier_N*.sol= for each.  =src/SpendGroth16Verifier.sol= is
+unchanged from Phase 7.
 
 #+BEGIN_SRC solidity
 interface IMintGroth16 {
@@ -689,51 +705,65 @@ Two implementations of each interface ship:
   deployment bootstraps and unit tests that exercise state transitions unrelated to the SNARK
   itself.
 - *Adapters* (=MintVerifierAdapter=, =SpendVerifierAdapter=): decode =proof= as
-  =abi.encode(uint256[2], uint256[2][2], uint256[2])=, build the public-signals tuple (3 entries
-  for mint, 5 for spend), and forward to the snarkjs-generated =MintGroth16Verifier= /
-  =SpendGroth16Verifier=.  =MINT_BATCH_SIZE= is a public constant on the mint adapter (=2=).
+  =abi.encode(uint256[2], uint256[2][2], uint256[2])=, build the public-signals tuple
+  (5 entries for mint -- =[oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash]=
+  -- and 5 entries for spend), and forward to the snarkjs-generated
+  =MintGroth16Verifier_N*= / =SpendGroth16Verifier=.  The mint adapter is per-N:
+  =mintVerifiers= is a =mapping(uint256 =>= IMintVerifier)= keyed on =cms.length=, with
+  one verifier registered per pinned batch size (recommended {16, 128, 1024}).
 
 Swapping either verifier is a single governance call
-(=Notes.setMintVerifier(address)= / =Notes.setSpendVerifier(address)=); the =Notes= contract's own
-storage and event surface are invariant.
+(=Notes.setMintVerifier(N, address)= / =Notes.setSpendVerifier(address)=); the =Notes=
+contract's own storage and event surface are invariant.
 
 ** =Notes= Contract
 
-=src/Notes.sol= is constructed with =(buck, mintVerifier, spendVerifier, poseidon, governance)=.
-Its state has three layers:
+=src/Notes.sol= is constructed with =(buck, mintVerifierRegistry, spendVerifier,
+governance)=.  Its state is intentionally lean -- the per-leaf Poseidon insertion math
+that Phase 7 had on chain now lives inside the mint SNARK, and the contract just
+records the SNARK-attested =newRoot=:
 
-- *Verifier handles*: =IMintVerifier mintVerifier=, =ISpendVerifier spendVerifier=, both
-  governance-swappable.  =IPoseidonT3 poseidon= is the 2-input Poseidon precompile
-  (=src/PoseidonT3Bytecode.sol= deploys it from raw bytecode in =Deploy.s.sol=).
-- *Commitment-pool audit state*: =uint256[] commitments= (ordered leaf list),
-  =mapping commitmentExists= (O(1) membership), =mapping nullifiers=, =uint256 noteFaceSum=.
-- *Incremental Merkle accumulator* (Tornado-style, depth =TREE_DEPTH = 20=, ~1M leaves):
-  =uint256[20] zeros= (precomputed empty-subtree roots), =uint256[20] filledSubtrees= (left-sibling
-  stash), =uint32 nextLeafIndex=, and =uint256[ROOT_HISTORY_SIZE=30] roots= with =uint8
-  currentRootIndex= selecting the live root.  =ZERO_VALUE= is a domain-separated keccak256 reduced
-  mod the BN254 scalar field, precluding collision with the Poseidon-5 commitment space.
+- *Verifier handles*: per-N =mintVerifiers[N]= (governance-swappable per pinned N),
+  =ISpendVerifier spendVerifier= (governance-swappable singleton).  No on-chain
+  Poseidon precompile is required for mint -- it remains relevant for legacy spend-
+  side off-chain tree reconstruction tools, but the contract no longer calls it.
+- *Audit and double-spend state*: =mapping nullifiers=, =uint256 noteFaceSum=.
+- *Tree state*: =uint32 nextLeafIndex= and
+  =uint256[ROOT_HISTORY_SIZE=30] roots= with =uint8 currentRootIndex= selecting the
+  live root.  =filledSubtrees=, =zeros[]=, and =commitmentExists= from Phase 7 are
+  retired -- the rolling tree state lives in the wallets' local mirrors and inside
+  the SNARK; duplicate commitments are economically self-punishing via the
+  deterministic nullifier =Poseidon3(rho, idHash, 4242)= (one spend nullifies every
+  copy of the same opening; Alice loses any BUCK she paid to mint duplicates).
 
-=mint(proof, cms, totalFace)= verifies the mint proof, pulls =totalFace= BUCK via
-=transferFrom(caller, this, totalFace)=, then for each =cm= asserts =cm != 0=, =cm < FIELD_R=,
-=cm != ZERO_VALUE=, and not a duplicate; appends to =commitments[]=, emits =Appended=, and calls
-=_insert(cm)=.  The insertion walks the path from the leaf up =TREE_DEPTH= levels using the
-filled-subtrees scheme (exactly =TREE_DEPTH= Poseidon-2 hashes per leaf), advances
-=nextLeafIndex=, writes the new root into the ring buffer at =(currentRootIndex + 1) %
-ROOT_HISTORY_SIZE=, and returns it.  The final root is emitted in =Minted(issuer, totalFace,
-startIndex, count, newRoot)=.
+=mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms)= asserts =cms.length > 0=,
+checks =oldRoot == roots[currentRootIndex]= and =nextLeafIndex == self.nextLeafIndex=
+(stale-state guards), recomputes =cmBatchHash = keccak256(abi.encodePacked(cms))=,
+dispatches to =mintVerifiers[cms.length].verifyMint(proof, oldRoot, newRoot,
+nextLeafIndex, totalFace, cmBatchHash)=, pulls =totalFace= BUCK via
+=transferFrom(caller, this, totalFace)=, writes =newRoot= into the ring buffer at
+=(currentRootIndex + 1) % ROOT_HISTORY_SIZE=, advances =nextLeafIndex= by =cms.length=,
+bumps =noteFaceSum= by =totalFace=, and emits a single =Minted(issuer, totalFace,
+startIndex, count, newRoot)= event.  Per-leaf =Appended= events from Phase 7 are gone:
+the commitments themselves live in the transaction calldata for off-chain tree
+replayers and indexers to read.
 
-=spend(proof, root, nullifier, face, recipient)= requires =recipient != 0=, =face > 0=, that
-=root= is still in the recent-roots window (=isAcceptedRoot(root)=), and that =nullifier= has not
-been seen.  It forwards =(proof, root, nullifier, face, recipient, block.chainid)= to
-=spendVerifier.verifySpend=, marks the nullifier burned and decrements =noteFaceSum= before
-calling =IBuckCarrying(address(buck)).transferCarrying(recipient, face)= -- the carrying path
-moves the pool's average demurrage age to the recipient atomically with the face value.  A
-=Spent(nullifier, face, recipient)= event closes the spend.
+=spend(proof, root, nullifier, face, recipient)= is unchanged from Phase 7: requires
+=recipient != 0=, =face > 0=, that =root= is still in the recent-roots window
+(=isAcceptedRoot(root)=), and that =nullifier= has not been seen.  It forwards
+=(proof, root, nullifier, face, recipient, block.chainid)= to
+=spendVerifier.verifySpend=, marks the nullifier burned and decrements =noteFaceSum=
+before calling =IBuckCarrying(address(buck)).transferCarrying(recipient, face)= -- the
+carrying path moves the pool's average demurrage age to the recipient atomically with
+the face value.  A =Spent(nullifier, face, recipient)= event closes the spend.
 
-Phase 7 closes the full denomination loop: credit-backed BUCKs in via =mint= -> opaque
-commitments accumulate under a recent-roots ring buffer -> =spend= redeems any committed
+Phase 7-bis closes the same loop as Phase 7 but at /N-independent on-chain cost/:
+credit-backed BUCKs in via =mint= (~380K + ~500 gas/leaf calldata) -> opaque
+commitments fold into the rolling root via the SNARK -> =spend= redeems any committed
 commitment against any recent root with a fresh nullifier, paying the recipient via
-=transferCarrying= so the SNARK's =face === v= invariant is preserved at the ERC-20 boundary.
+=transferCarrying= so the SNARK's =face === v= invariant is preserved at the ERC-20
+boundary.  The pivot is documented in
+[[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
 
 
 * Integration: Full mint() and transfer() Walkthrough
@@ -833,10 +863,14 @@ Bob (or a contract Bob authorized) calls =BUCK.transferFrom(alice, bob, 10000e18
 ** Step 4: Alice Denominates 125 BUCK as Notes
 
 Separately, Alice wants to move some of her BUCKs off the public-ledger transfer path into private
-notes.  Her wallet picks flavour =A2= and values =[100 BUCK, 25 BUCK]= (totalFace = 125), draws fresh
-=rho[i]= and =idHash[i]= randomness, and builds the circuit witness.  =snarkjs groth16 fullProve=
-against =build/snark/mint/mint.wasm= and =mint_final.zkey= produces a proof triple =(pA, pB, pC)=
-which the wallet abi-encodes as =(uint256[2], uint256[2][2], uint256[2])= into =proofBytes=.
+notes.  Her wallet picks flavour =A2= and values =[100 BUCK, 25 BUCK]= (totalFace = 125 BUCK), draws
+fresh =rho[i]= and =idHash[i]= randomness, and -- since the deployment pins =N \in {16, 128, 1024}=
+-- pads the live pair with 14 dummy openings whose =v_i = 0= so the batch lands on the smallest
+pinned circuit (=N* = 16=).  The wallet snapshots =(oldRoot, nextLeafIndex)= from chain, derives
+the depth-20 sibling paths for each of the 16 leaves /in submission order/, and runs
+=snarkjs groth16 fullProve= against =build/snark/mint_batch_N16/mint.wasm= and =mint_final.zkey=.
+The proof triple =(pA, pB, pC)= is abi-encoded as =(uint256[2], uint256[2][2], uint256[2])= into
+=proofBytes=.
 
 On-chain, Alice makes two calls:
 
@@ -844,20 +878,23 @@ On-chain, Alice makes two calls:
    =Notes= contract was registered =setSystemPublic(true)= by governance, so this branch takes the
    public-claim path (no CP proof is actually checked against Notes, though the ERC-20 allowance is
    still written).
-2. =Notes.mint(proofBytes, [cm[0], cm[1]], 125e18)= -- the =MintVerifierAdapter= forwards to the
-   Groth16 verifier; on success, 125 BUCK moves from Alice to =Notes=, the two =cm[i]= are
-   appended to =commitments[]= and folded into the depth-20 Poseidon Merkle tree (one =Appended=
-   event per leaf), the new root is written into the 30-slot ring buffer, and =noteFaceSum +=
-   125e18=.  Alice's wallet keeps the openings (=flavor, v, rho, idHash, predicate=) privately
-   -- those are the =NoteOpening= records she will need to spend.
+2. =Notes.mint(proofBytes, oldRoot, newRoot, nextLeafIndex, 125e18, [cm[0], ..., cm[15]])= -- the
+   =MintVerifierAdapter= dispatches by =cms.length=16= to =mintVerifiers[16]= and forwards to the
+   N=16 Groth16 verifier with public signals =[oldRoot, newRoot, nextLeafIndex, 125e18,
+   keccak256(cms)]=.  On success, 125 BUCK moves from Alice to =Notes=, =roots[]= advances to the
+   SNARK-attested =newRoot=, =nextLeafIndex= advances by 16, and =noteFaceSum += 125e18=.  Alice's
+   wallet keeps the live openings (=flavor, v, rho, idHash, predicate= for the two real notes)
+   privately -- those are the =NoteOpening= records she will need to spend.  The 14 dummy openings
+   are discarded.
 
 ** Step 5: Alice (or her recipient) Spends a Note
 
 Later, the holder of one of Alice's notes -- it could be Alice herself, or the bearer to whom she
 off-chain handed the opening -- redeems =cm[0]= for 100 BUCK to address =recipient=:
 
-1. The wallet reconstructs the Merkle path =(pathElements[20], pathIndices[20])= for =cm[0]= from
-   the public =Appended= event log (or from a locally-cached tree).
+1. The wallet reconstructs the Merkle path =(pathElements[20], pathIndices[20])= for =cm[0]= by
+   replaying the =Minted= event log and pulling the calldata =cms[]= out of each batch mint
+   transaction (or from a locally-cached tree).
 2. =snarkjs groth16 fullProve= against =build/snark/spend/spend.wasm= and =spend_final.zkey=
    produces a proof binding =[noteRoot, nullifier, face, recipient, chainId]= = =[currentRoot,
    Poseidon(rho, idHash, 4242), 100e18, recipient, 1]= to the witness opening.

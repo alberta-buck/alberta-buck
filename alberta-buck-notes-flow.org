@@ -1,7 +1,7 @@
-#+TITLE: The Alberta Buck - Notes Flow (DRAFT v0.1)
+#+TITLE: The Alberta Buck - Notes Flow (DRAFT v0.2)
 #+SUBTITLE: How One BUCK Transfer Becomes N Unlinkable Notes (Step by Step)
 #+author: Perry Kundert
-#+date: 2026-04-20
+#+date: 2026-04-22
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
 #+series_order: 16
@@ -25,15 +25,30 @@ This document is the /narrative/ companion to [[file:alberta-buck-notes.org][alb
 overview), [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] (formal correctness), and [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]]
 (Solidity surface).  It walks one concrete example -- Alice mints a 1,200-BUCK transfer
 into six notes of denominations =[1000, 100, 25, 25, 25, 25]= -- end-to-end through the
-Phase-6 Groth16-verified mint pipeline, and then walks the /inverse/ flow: Bob redeems
-his 1,000-BUCK note via the Phase-7 spend circuit, receives 1,000 BUCK from the pool
-via a demurrage-carrying transfer, and leaves no chain-observable link back to =cm_0=
-(the specific commitment he opened).  Every actor, every artifact, and every check is
-named.  The Phase-7 spend pipeline shipped in the bearer-shape (=spend.circom=,
+*Phase-7-bis SNARK-verified batch-mint pipeline*, and then walks the /inverse/ flow:
+Bob redeems his 1,000-BUCK note via the Phase-7 spend circuit, receives 1,000 BUCK
+from the pool via a demurrage-carrying transfer, and leaves no chain-observable link
+back to =cm_0= (the specific commitment he opened).  Every actor, every artifact, and
+every check is named.
+
+The mint pipeline is in the middle of a planned pivot away from the original Phase-7
+design (per-leaf on-chain Poseidon insertion at ~800K gas/leaf, capped by the block
+limit at N <= ~30 in practice).  In the new design the per-leaf Merkle-tree
+insertions are pushed /into/ the mint SNARK: the circuit takes =oldRoot= as a public
+input, folds N commitments into the rolling tree using witness sibling paths, and
+emits a SNARK-attested =newRoot= for the contract to record.  On-chain mint cost
+becomes essentially constant in N -- ~380K plus ~500 gas per leaf of calldata --
+making honest single-call batches of 16, 128, or 1024 notes practical.  The full
+design memo, including R1CS counts, gas projections, and a per-attack-vector
+hostile-Alice analysis, is [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
+
+The Phase-7 spend pipeline shipped in the bearer-shape (=spend.circom=,
 =SpendGroth16Verifier=, =Notes.spend=) and is exercised end-to-end in
 =test/SpendVerifier.t.sol=; the A-flavor in-circuit ElGamal/Chaum-Pedersen variant
 remains deferred to a future =spend_a.circom=, and that gap is flagged inline rather
-than papered over.
+than papered over.  The spend path is /unchanged/ by the mint pivot: it already takes
+=cm= as a private witness under a public =noteRoot=, and the rolling-tree-update
+trick is contained to =mint=.
 
 The aim is to show, by walking the path, that the system delivers five concrete
 guarantees:
@@ -55,11 +70,11 @@ guarantees:
    =Notes.sol= and =MintGroth16Verifier.sol= reject every batch that does not satisfy
    the mint relation.  The on-chain truth is what governs.
 
-The remaining caveats (the deferred A-flavor in-circuit identity binding, and the
-two-note batch size pinned by the shipped =mint.circom=) are addressed at the end and
-cross-referenced into the proofs and implementation docs.  The mint-circuit
+The remaining caveats (the deferred A-flavor in-circuit identity binding, and
+the pinned-N dispatch set under =mint_batch.circom=) are addressed at the end
+and cross-referenced into the proofs and implementation docs.  The mint-circuit
 field-overflow concern from earlier drafts has been closed by the =Num2Bits(128)=
-range bounds in =mint.circom= and the matching bounds in =spend.circom=.
+range bounds in =mint_batch.circom= and the matching bounds in =spend.circom=.
 
 * Cast of Characters
 
@@ -89,19 +104,30 @@ By the end of the mint transaction Alice will have:
 
 - A single Ethereum transaction =T_mint= on-chain whose effects are:
   - 1,200 BUCK debited from Alice and credited to the =Notes= pool address.
-  - Six opaque =uint256= commitments =[cm_0..cm_5]= appended to =Notes.commitments[]=.
-  - One =Minted(issuer=Alice, totalFace=1200, startIndex=K, count=6)= event.
+  - A batch of =N*= opaque =uint256= commitments (here =N* = 16=: six live plus
+    ten dummies) folded into the note Merkle tree, moving the root from
+    =oldRoot= to the SNARK-attested =newRoot=, and the tree size from
+    =nextLeafIndex= to =nextLeafIndex + N*=.
+  - One =Minted(issuer=Alice, totalFace=1200e18, startIndex=K, count=N*, newRoot)=
+    event; no per-leaf =Appended= events -- the commitments themselves live in
+    the transaction calldata.
   - One =Transfer(Alice, Notes, 1200)= ERC-20 event.
-  - One Groth16 proof in calldata, accepted by the on-chain verifier.
+  - One Groth16 proof (256 bytes, shape-independent of N) in calldata, accepted
+    by the on-chain per-N verifier.
 
-- Six off-chain artifacts, one per recipient, each containing the /opening/ of exactly
-  one commitment plus the mint-transaction reference.
+- Six off-chain artifacts, one per /live/ recipient, each containing the
+  /opening/ of exactly one commitment plus the mint-transaction reference.  The
+  ten dummy openings are discarded or retained privately by Alice as anonymity-
+  set filler.
 
-The key invariant: looking at the chain alone, Mallory sees that Alice escrowed 1,200
-BUCK and posted six hashes.  She cannot tell which hash hides which value, who any
-recipient is, or even whether two of the recipients are the same person.  Looking at
-his off-chain artifact, Bob sees his 1,000 BUCK is real, was minted by Alice in =T_mint=,
-and that five other notes exist whose hidden values sum to 200 BUCK -- but he does not
+The key invariant: looking at the chain alone, Mallory sees that Alice escrowed
+1,200 BUCK and folded =N*= hashes into the tree.  She cannot tell which hash
+hides which value, who any recipient is, or even whether two of the recipients
+are the same person -- or which entries are live notes vs. zero-value padding.
+Looking at his off-chain artifact, Bob sees his 1,000 BUCK is real, was minted
+by Alice in =T_mint=, and that the /live/ siblings among the other fifteen have
+hidden values summing to exactly 200 BUCK (the rest are =v = 0= padding he
+cannot distinguish from live notes by chain inspection alone) -- but he does not
 learn what those values are or who holds them.
 
 * What's Inside a Note (Conceptually)
@@ -144,113 +170,233 @@ The on-chain contract stores only =cm_i=.  Openings live exclusively off-chain.
 Alice's wallet has done all the slow work before any transaction is broadcast:
 
 - She owns 1,200 BUCK on-chain.
-- She has decided on the denomination split: =[1000, 100, 25, 25, 25, 25]=.  N=6, but
-  the Phase-6 circuit is pinned at =N=2= (see [[file:alberta-buck-ethereum.org][Phase 6]]); for the example we proceed
-  /as if/ a future =Mint(6)= circuit were already in place.  The structure of every
-  step is identical -- only the circuit constant changes.
+- She has decided on the denomination split: =[1000, 100, 25, 25, 25, 25]=.  N=6.
+  The deployed mint pipeline pins a small set of batch sizes -- recommended {16,
+  128, 1024} -- one circom circuit and one verifier per pin.  Alice's wallet rounds
+  her requested split up to the smallest pin =N* >= 6=, here =N* = 16=, and pads
+  with =16 - 6 = 10= "blinded zero" openings whose =v_i = 0=.  The padding leaves
+  cost the same SNARK constraints as live notes but contribute zero to =totalFace=
+  and are spendable for zero BUCK; in effect they are anonymity-set filler whose
+  openings Alice may discard.  The narrative below tracks the six live notes and
+  ignores the ten dummies (they show up in the on-chain commitments[] vector
+  alongside the live ones, indistinguishable to Mallory).
 - She has chosen an =idHash_i= for each recipient (typically a Poseidon hash of the
   recipient's IdentityRegistry-bound ElGamal credential, derived once at out-of-band
   introduction time).
-- Her CSPRNG produces six fresh =rho_i= nonces.
+- Her CSPRNG produces a fresh =rho_i= nonce per leaf -- live or padded.
 
-She now has six opening tuples in memory.
+She now has 16 opening tuples in memory: 6 live, 10 dummies.
 
 ** Step 1: Build Commitments
 
-For =i = 0..5= her wallet computes
+For =i = 0..15= (six live, ten dummies) her wallet computes
 
 #+BEGIN_SRC text
 cm_i = Poseidon5( flavor_i, v_i, rho_i, idHash_i, predicate_i )
 #+END_SRC
 
-This is pure off-chain Poseidon arithmetic in =alberta_buck.wallet.notes=.  Six
+This is pure off-chain Poseidon arithmetic in =alberta_buck.wallet.notes=.  Sixteen
 =uint256= field elements drop out.  Their order in the eventual on-chain array is fixed
-by Alice's local list -- the contract preserves whatever order she submits.
+by Alice's local list -- the contract preserves whatever order she submits, and the
+SNARK assumes leaves land in the tree at indices =[nextLeafIndex, nextLeafIndex+1,
+..., nextLeafIndex+N-1]= in submission order.
 
-** Step 2: Generate the Groth16 Proof
+Alice's wallet must also keep a /local mirror of the rolling tree state/.  The
+Tornado-style Merkle tree the contract maintains is parameterised by the standard
+=filledSubtrees[d]= for =d = 0..TREE_DEPTH-1= -- the rightmost partially-built node
+at each level.  The wallet snapshots this state from the chain (or replays it from
+the mint event log) immediately before assembling the proof, then derives, for each
+of the 16 leaves /in submission order/, the depth-20 sibling sequence the in-circuit
+insertion will consume.  That derivation is the only delicate piece of new wallet
+code; everything else is unchanged from Phase-7.
 
-Alice's wallet runs =scripts/snark/prove_mint.js= (or the production equivalent).  The
-witness consists of:
+** Step 2: Generate the Batch-Mint Groth16 Proof
 
-- Public inputs: =totalFace = 1200e18=, =cm = [cm_0, cm_1, cm_2, cm_3, cm_4, cm_5]=.
-- Private witnesses: =flavor[i], v[i], rho[i], idHash[i], predicate[i]= for each =i=.
+Alice's wallet runs =scripts/snark/prove_mint_batch.js= (the Phase-7-bis successor
+to Phase-7's =prove_mint.js=).  The =mint_batch.circom= circuit at her chosen pin
+=N* = 16= takes a substantially richer witness than the Phase-7 mint did, because
+the Merkle-tree update has moved /into/ the SNARK.
 
-The =mint.circom= circuit checks two relations across the witness:
+*Public inputs* (5 entries, N-independent):
 
-1. *Per-note opening.*  For each =i=, ~cm[i] === Poseidon5(flavor[i], v[i], rho[i], idHash[i], predicate[i])~.
-   Six Poseidon evaluations, six equality constraints.
-2. *Sum conservation.*  ~sum(v[0]..v[5]) === totalFace~.  One linear constraint.
+#+BEGIN_SRC text
+oldRoot         # the live note root she read from chain
+newRoot         # the root after folding her N leaves
+nextLeafIndex   # the live tree size she read from chain
+totalFace       # 1200e18 -- range-bounded to 128 bits
+cmBatchHash     # H(cm_0, cm_1, ..., cm_{N-1}) -- ties calldata to the SNARK
+#+END_SRC
 
-The witness is processed by snarkjs's Groth16 prover.  A few hundred milliseconds later
-the wallet has a fixed-size proof object: =(pi_A: G1, pi_B: G2, pi_C: G1)=.  Encoded as
-ABI-static =(uint256[2], uint256[2][2], uint256[2])= it is exactly 256 bytes.
+The hash =H(...)= is keccak256 (cheap on-chain; the contract recomputes it from
+calldata and asserts equality with the SNARK's bound value), or Poseidon if a
+future deployment chooses to keep the hash inside the field for in-circuit reuse.
+
+*Private witness* (per-leaf and per-level):
+
+#+BEGIN_SRC text
+For i in 0..N-1:
+  flavor[i], v[i], rho[i], idHash[i], predicate[i]    # the opening
+  pathSiblings[i][d] for d in 0..TREE_DEPTH-1         # 20 siblings per leaf
+#+END_SRC
+
+The =pathSiblings= for leaf =i= are derived by the wallet from its local
+=filledSubtrees= mirror plus the previously-folded leaves of /this same batch/
+(leaves =0..i-1= sit at known positions and contribute their Poseidon hashes to
+=i='s path on the right).  The wallet does this work; the chain consumes only
+=oldRoot=, =newRoot=, and the calldata =cms[]=.
+
+*In-circuit constraints*:
+
+1. *Per-leaf opening.*  For each =i=,
+   ~cm[i] === Poseidon5(flavor[i], v[i], rho[i], idHash[i], predicate[i])~.
+   N Poseidon-5 evaluations, N equality constraints.
+2. *Range bounds.*  Each =v[i]= and =totalFace= passes through =Num2Bits(128)=.
+3. *Sum conservation.*  ~sum(v[0..N-1]) === totalFace~.
+4. *Rolling Merkle insertion.*  The circuit threads =oldRoot= and =nextLeafIndex=
+   through N successive single-leaf insertions, mirroring the on-chain Phase-7
+   =Notes._insert= logic but in-circuit: at each step it folds =cm[i]= up the
+   tree using =pathSiblings[i][*]= and =Switcher(...)= per level, advances the
+   rolling state, and finally asserts the resulting root equals =newRoot=.
+   N x TREE_DEPTH Poseidon-2 hashes (~4.3K constraints per leaf).
+5. *Calldata binding.*  =cmBatchHash === H(cm[0], cm[1], ..., cm[N-1])=.
+6. (Optional belt-and-suspenders.)  =cm[i] != 0= and =cm[i] != ZERO_VALUE= per
+   leaf, blocking pathological collisions with empty-tree zeros.
+
+Constraint counts work out to roughly *6K R1CS per leaf* (~1.7K opening + ~4.3K
+insertion); at =N=16= that is ~96K R1CS, a 2^17 PTAU, and seconds of prover time
+on a desktop.  At =N=128= it is ~770K R1CS and minutes; at =N=1024= it is ~6M
+R1CS and hours plus a sizeable memory footprint.  The =scripts/snark/setup.sh=
+ceremony emits one verifier per pin.
+
+The witness is processed by snarkjs's Groth16 prover.  Tens of seconds to minutes
+later the wallet has a fixed-size proof object =(pi_A: G1, pi_B: G2, pi_C: G1)=,
+encoded as ABI-static =(uint256[2], uint256[2][2], uint256[2])= -- exactly 256
+bytes regardless of N.
 
 *Observation.*  The Groth16 proof reveals /nothing/ about the witness.  Soundness
-guarantees that no =proofBytes= can satisfy the verification equation unless a witness
-exists; zero-knowledge guarantees that the verification equation reveals nothing about
-which witness was used.  Mallory, even with the proof in hand, cannot back out
-=v[i]=, =rho[i]=, =idHash[i]=, =flavor[i]=, or =predicate[i]=.
+guarantees that no =proofBytes= can satisfy the verification equation unless a
+witness exists; zero-knowledge guarantees that the verification equation reveals
+nothing about which witness was used.  Mallory, even with the proof in hand,
+cannot back out =v[i]=, =rho[i]=, =idHash[i]=, =flavor[i]=, =predicate[i]=, or
+the per-leaf Merkle paths -- only =oldRoot=, =newRoot=, =nextLeafIndex=,
+=totalFace=, and =cmBatchHash= leak.
 
 ** Step 3: Submit =Notes.mint= On Chain
 
 Alice now broadcasts a single transaction =T_mint= calling
 
 #+BEGIN_SRC solidity
-notes.mint(proofBytes, [cm_0..cm_5], 1200e18);
+notes.mint(
+    proofBytes,
+    oldRoot, newRoot, nextLeafIndex,
+    1200e18,                  // totalFace
+    [cm_0, cm_1, ..., cm_15]  // calldata, cms.length === N* (here 16)
+);
 #+END_SRC
 
-The honest EVM walks =Notes.mint=:
+The honest EVM walks =Notes.mint= (Phase-7-bis surface):
 
 #+BEGIN_SRC solidity
 require(cms.length > 0, "Notes: empty mint");
-require(mintVerifier.verifyMint(proof, totalFace, cms, msg.sender),
-        "Notes: bad mint proof");
+
+// Stale-state guards: the prover must have read the live tree state.
+require(oldRoot       == roots[currentRootIndex],   "Notes: stale oldRoot");
+require(nextLeafIndex == self.nextLeafIndex,         "Notes: stale leafIndex");
+
+// SNARK verify against the dispatched per-N adapter.
+bytes32 cmBatchHash = keccak256(abi.encodePacked(cms));
+IMintVerifier mintVerifier = mintVerifiers[cms.length];
+require(address(mintVerifier) != address(0),         "Notes: unknown N");
+require(mintVerifier.verifyMint(
+            proofBytes, oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash
+        ),                                            "Notes: bad mint proof");
+
+// Pull BUCK only after the proof is accepted.
 require(buck.transferFrom(msg.sender, address(this), totalFace),
-        "Notes: transfer failed");
-// ... append cms[i] to commitments[], assert no duplicates,
-//     emit Minted(...).
+                                                      "Notes: transfer failed");
+
+// Adopt the SNARK-attested new root, advance the rolling state.
+currentRootIndex = (currentRootIndex + 1) % ROOT_HISTORY_SIZE;
+roots[currentRootIndex] = newRoot;
+self.nextLeafIndex     += cms.length;
+noteFaceSum            += totalFace;
+
+// Single batch event; per-leaf Appended is gone.  cms[] live in calldata.
+emit Minted(msg.sender, totalFace, /*startIndex=*/ nextLeafIndex,
+            /*count=*/ uint16(cms.length), newRoot);
 #+END_SRC
 
-Three things happen in strict order, and *all of them are atomic* (one transaction, one
-EVM state transition):
+Five things happen in strict order, and *all of them are atomic* (one transaction,
+one EVM state transition):
 
-a. The =MintVerifierAdapter= unpacks the 256-byte =proofBytes= into Groth16 form,
-   builds the public-signal vector =[totalFace, cm_0..cm_5]=, and invokes the
-   =MintGroth16Verifier=.  If the verifier returns false, the entire transaction
-   reverts -- nothing is written, no BUCK moves.
-b. The BUCK ERC-20's =transferFrom= debits =totalFace= from Alice and credits the
-   =Notes= pool.  This is a normal allowance-driven pull, gated by Alice's prior
-   =approve(notes, 1200e18, ...)=.  Because the =Notes= pool is registered as
+a. *Stale-state guards.*  The contract asserts that =oldRoot= equals the current
+   ring-buffer head and =nextLeafIndex= equals the live tree size.  Either fails
+   if another mint landed since Alice's wallet snapshotted state (more on this
+   under *Prover Contention and the Rollup Race* below).
+b. *Calldata binding.*  The contract recomputes =cmBatchHash =
+   keccak(abi.encodePacked(cms))= over the calldata it just received.  This hash
+   is one of the Groth16 public inputs, so any tampering with =cms[]= en route
+   from the prover to the chain mismatches the SNARK and the verify call rejects.
+c. *SNARK verify.*  The =MintVerifierAdapter= dispatches by =cms.length= to the
+   per-N verifier (one circuit per pin, one verifier contract per pin), unpacks
+   the 256-byte =proofBytes= into Groth16 form, builds the 5-entry public-signal
+   vector =[oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash]=, and
+   invokes the appropriate =MintGroth16Verifier=.  If the verifier returns false,
+   the entire transaction reverts -- nothing is written, no BUCK moves.
+d. *BUCK escrow.*  =buck.transferFrom= debits =totalFace= from Alice and credits
+   the =Notes= pool.  Allowance-driven pull, gated by Alice's prior
+   =approve(notes, 1200e18, ...)=.  Because the pool is registered
    /system-public/ in the IdentityRegistry, the bilateral identity check on the
    transfer leg succeeds without a Chaum-Pedersen receipt.
-c. For each =cm_i=: the contract checks =!commitmentExists[cm_i]=, marks it true,
-   appends to =commitments[]=, emits =Appended(cm_i, startIndex+i)=.  Finally a single
-   =Minted(Alice, 1200e18, startIndex, 6)= event closes the call.
+e. *Root advancement.*  The contract writes =newRoot= into the next ring-buffer
+   slot, advances =currentRootIndex= and =nextLeafIndex=, accumulates
+   =noteFaceSum=, and emits a single =Minted(issuer, totalFace, startIndex,
+   count, newRoot)= event.  The new root immediately becomes the live root that
+   the next minter must read.
 
-If any of (a), (b), or (c) fails -- bad proof, insufficient BUCK, missing approval,
-duplicate commitment -- the entire transaction reverts and the chain state is
-indistinguishable from no submission at all.  *Alice gets one shot per transaction*; she
-cannot retry a partial state.
+If any of (a)-(e) fails -- stale root, stale leafIndex, bad proof, insufficient
+BUCK, missing approval -- the entire transaction reverts and the chain state is
+indistinguishable from no submission at all.  *Alice gets one shot per
+transaction*; she cannot retry a partial state.
+
+*Note on duplicate commitments.*  Phase-7 carried an explicit
+=commitmentExists[cm]= mapping that reverted on duplicate insertion.  The
+batch-mint contract drops it -- not because duplicates are harmless, but because
+they are now /economically self-punishing/: if Alice submits the same opening
+twice (whether across two batches or twice in one), she pays =totalFace= on each
+occurrence, the leaves land at distinct tree indices, but the spend nullifier
+=Poseidon3(rho, idHash, 4242)= is /deterministic in the opening/.  After the
+first spend nullifies =cm=, the second copy is unspendable forever.  Net result:
+Alice burns BUCK she could have kept.  The chain's job is value conservation, not
+saving Alice from a buggy =rho= RNG.  See *Why Outside Observers Cannot Link*
+below and the per-attack-vector audit in
+[[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
 
 ** Step 4: Off-Chain Note Delivery
 
-After =T_mint= confirms, Alice transmits each opening to its intended recipient by any
-out-of-band channel: an encrypted message, a printed QR code, a USB stick.  The payload
-to recipient =i= is:
+After =T_mint= confirms, Alice transmits each live opening to its intended recipient
+by any out-of-band channel: an encrypted message, a printed QR code, a USB stick.
+The payload to recipient =i= is:
 
 #+BEGIN_SRC text
 note_artifact_i = {
   txHash:    T_mint,                # Ethereum transaction ID
-  index:     startIndex + i,        # position in Notes.commitments[]
-  cm:        cm_i,                  # for cross-checking against the chain
+  leafIndex: startIndex + i,        # absolute position in the commitment vector
+  cm:        cm_i,                  # for cross-checking against calldata
   opening:   ( flavor_i, v_i, rho_i, idHash_i, predicate_i ),
-  meta:      { issuer: Alice's IdentityRegistry handle, ... },
+  meta:      { issuer: Alice's IdentityRegistry handle, batchSize: N*, ... },
 }
 #+END_SRC
 
-The chain itself never sees =opening=.  =cm_i= is already on-chain; the artifact
-includes it only as a convenience so the recipient does not have to recompute it
-before locating his entry in =commitments[]=.
+The chain itself never sees =opening=.  =cm_i= is already folded into =newRoot=;
+the artifact carries it explicitly only as a convenience so the recipient does
+not have to recompute it before locating it in the batch's calldata =cms[]=.
+
+The ten dummy openings Alice generated to pad to the pinned N=16 circuit receive
+no artifact; they are discarded (or, at Alice's option, retained privately as
+unspendable anonymity-set filler).  From the recipient's perspective the presence
+of dummies is invisible: Bob's artifact only names his own leaf, and the batch
+total =totalFace = 1,200 BUCK= is exactly the sum of the live =v_i=.
 
 ** Step 5: Recipient Verification (Offline, Independent)
 
@@ -262,33 +408,40 @@ any help from an indexer, he runs:
    ~cm_check == cm~.  If this fails, Alice lied about the opening; Bob discards the
    artifact and demands a real one.  (Binding of Poseidon makes substitution
    impossible.)
-2. *Look up the mint transaction.*  Bob reads =T_mint= on-chain, parses the call data
-   into =(proofBytes, cms[], totalFace, msg.sender)=.
+2. *Look up the mint transaction.*  Bob reads =T_mint= on-chain, parses the call
+   data into =(proofBytes, oldRoot, newRoot, nextLeafIndex, totalFace, cms[])= and
+   reads =msg.sender= from the transaction envelope.
 3. *Confirm =msg.sender= is Alice.*  Cross-check =msg.sender= against the
    IdentityRegistry: it must resolve to Alice's PS-credentialed identity.  If Bob
    wanted an A1 identified cheque, the issuer field of his opening must match.
-4. *Confirm membership.*  Read =Notes.commitments(index)= via an =eth_call= and assert
-   it equals =cm=.  Bob now has chain-anchored evidence that =cm= is officially a
-   commitment in the pool.
+4. *Confirm calldata membership.*  Assert =cms[leafIndex - nextLeafIndex] == cm=
+   (where the artifact's =leafIndex= is the absolute position).  The chain's
+   acceptance of =T_mint= confirms that every entry in =cms[]= was folded into
+   =newRoot= and that =newRoot= was added to the root ring buffer.  Bob therefore
+   has chain-anchored evidence that =cm= is officially a commitment in the pool.
 5. *Confirm batch totals.*  Read =totalFace= from the call data.  The chain's
-   acceptance of =T_mint= is itself a proof that the Groth16 verifier accepted -- which
-   means ~sum(v[0..5]) === totalFace~ holds in the witness.  Bob does not need to
-   re-verify the proof; the EVM already did.  But if he wants belt-and-suspenders, he
-   can re-run =MintGroth16Verifier.verify(proofBytes, [totalFace, cms...])= locally
-   against the same on-chain bytecode, and get the same accept.
+   acceptance of =T_mint= is itself a proof that the Groth16 verifier accepted --
+   which means ~sum(v[0..N-1]) === totalFace~ holds in the witness.  Bob does not
+   need to re-verify the proof; the EVM already did.  But if he wants
+   belt-and-suspenders, he can re-run
+   =MintGroth16Verifier.verify(proofBytes, [oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash])=
+   locally against the same on-chain bytecode -- and =cmBatchHash= he recomputes
+   from the calldata =cms[]= using the same =keccak256(abi.encodePacked(cms))= the
+   contract uses.
 
 After (1)-(5) Bob knows:
 
 - His note encodes exactly 1,000 BUCK.  (Step 1.)
 - It was minted in =T_mint= by Alice.  (Steps 2, 3.)
-- It is one of exactly six commitments produced by that mint, the others being
-  =cms[0..5] \ cm=.  (Step 4.)
-- The hidden values of the other five sum to exactly =1200 - 1000 = 200= BUCK.  (Step 5
-  + the per-note opening relation: he knows /his/ value, the chain attests to the
-  /sum/.)
+- It is one of =N*= (here 16) commitments folded into the tree by that mint,
+  the others being =cms[] \ cm=.  (Step 4.)
+- The /live/ values among the other siblings sum to exactly =1200 - 1000 = 200=
+  BUCK (the residual of =totalFace= once Bob subtracts his own =v=); the batch
+  may also contain dummy openings with =v = 0=.  (Step 5 + the per-note opening
+  relation: he knows /his/ value, the chain attests to the /sum/.)
 - He learns nothing else about the other notes -- not their individual values, not
-  their recipients, not their flavors.  Each =cm_j= is hiding under a fresh =rho_j= he
-  does not have.
+  their recipients, not their flavors, not which are live and which are padding.
+  Each =cm_j= is hiding under a fresh =rho_j= he does not have.
 
 This is the unlinkability promise made concrete: each recipient can pin down their own
 slice and the batch total, without learning anything about siblings.
@@ -303,79 +456,131 @@ prop up the soundness story:
 
 ** Pillar 1: The On-Chain Verifier Is Fixed Code
 
-=MintGroth16Verifier.sol= was emitted from the Groth16 verification key produced by
-the trusted setup ([[file:alberta-buck-ethereum.org][Phase 9]] for production; dev-only entropy in =scripts/snark/setup.sh=
-today).  Its bytecode is deployed once and immutable.  Validators run whatever bytecode
-sits at that address; Alice cannot tamper with it without consensus-breaking the chain.
+=MintGroth16Verifier.sol= (one per pinned N) was emitted from the Groth16
+verification key produced by the trusted setup ([[file:alberta-buck-ethereum.org][Phase 9]] for production; dev-only
+entropy in =scripts/snark/setup.sh= today).  Its bytecode is deployed once and
+immutable.  Validators run whatever bytecode sits at that address; Alice cannot
+tamper with it without consensus-breaking the chain.
 
-Knowledge soundness of Groth16 means: for every =proofBytes= the verifier accepts on
-public inputs =[totalFace, cm_0..cm_N-1]=, there exists a witness
-=(flavor[i], v[i], rho[i], idHash[i], predicate[i])_i= such that:
+Knowledge soundness of Groth16 means: for every =proofBytes= the verifier accepts
+on public inputs =[oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash]=,
+there exists a witness
+=(flavor[i], v[i], rho[i], idHash[i], predicate[i], pathSiblings[i][*])_i= such
+that:
 
 - =cm[i] = Poseidon5(flavor[i], v[i], rho[i], idHash[i], predicate[i])= for all =i=
-- =sum(v[i]) = totalFace=
+- each =v[i]= and =totalFace= fit in 128 bits and =sum(v[i]) = totalFace=
+- folding =cm[0..N-1]= into the tree rooted at =oldRoot=, starting at position
+  =nextLeafIndex=, using =pathSiblings[i][*]= as the right-of-insert context,
+  yields exactly =newRoot=
+- =cmBatchHash = H(cm[0], ..., cm[N-1])=.
 
-Alice is free to /find/ such a witness any way she likes -- she's the prover.  But she
-cannot find a witness for a /false/ statement; that's what soundness prohibits.
+Alice is free to /find/ such a witness any way she likes -- she's the prover.
+But she cannot find a witness for a /false/ statement; that's what soundness
+prohibits.
 
 ** Pillar 2: BUCK Escrow Is Inside the Same Atomic Call
 
-The proof check, the BUCK pull, and the commitment append all live in the same
-=Notes.mint= function.  An EVM transaction is all-or-nothing: the only two outcomes are
-"the entire call's state changes commit" or "the entire call's state changes revert".
+The proof check, the BUCK pull, and the root advancement all live in the same
+=Notes.mint= function.  An EVM transaction is all-or-nothing: the only two
+outcomes are "the entire call's state changes commit" or "the entire call's state
+changes revert".
 
 This means Alice cannot, for instance:
 
 - Verify a proof, then refuse to pay -- the verifier acceptance and the
   =transferFrom= live in the same call, gated by the same =require=.
-- Pay 1,200 BUCK but then get away with appending only one =cm= and pocketing the
-  delta -- the loop appending commitments runs after =transferFrom=, in the same call,
-  and a revert at any point unwinds the transfer too.
-- Trick the contract into appending a duplicate =cm= -- =commitmentExists[cm]= is
-  checked per item.
+- Pay 1,200 BUCK but then get away with advancing only part of the tree --
+  =newRoot= is SNARK-attested as the deterministic fold of =all= of =cms[]= onto
+  =oldRoot= at =nextLeafIndex=, and the contract writes it in one store.
+- Replay a prior =proofBytes= -- the SNARK is bound to =(oldRoot, newRoot,
+  nextLeafIndex, totalFace, cmBatchHash)= and the contract's stale-state guards
+  reject any submission whose =oldRoot= no longer matches the live root or whose
+  =nextLeafIndex= no longer matches the live tree size.
+- Submit the same opening twice /in one batch/ to double-spend at spend time --
+  the nullifier is deterministic in =(rho, idHash)=, so whichever duplicate lands
+  first at spend will consume both.  (See the duplicate-commitment note under
+  Step 3.)
 
 ** Pillar 3: Public Inputs Are Sealed Into the Proof
 
-The Groth16 verifier consumes the public-signal vector
-=[totalFace, cm_0, .., cm_N-1]=.  The proof was generated against the specific values
-Alice committed to before submission.  If Alice tries to submit the proof with a
-different =totalFace= or with the =cms= permuted, the verifier rejects.
+The Groth16 verifier consumes the public-signal vector =[oldRoot, newRoot,
+nextLeafIndex, totalFace, cmBatchHash]=.  The proof was generated against the
+specific values Alice committed to before submission.  If Alice tries to submit
+the proof with a different =totalFace=, a different =newRoot=, a different
+=nextLeafIndex=, or a permuted =cms[]= whose keccak no longer matches
+=cmBatchHash=, the verifier rejects.
 
-This is the bedrock of the test suite in =test/MintVerifier.t.sol= -- four explicit
-tamper paths (=totalFace + 1=, =cm[0] ^ 1=, wrong batch size, malformed proof bytes)
-each revert with =Notes: bad mint proof= or an ABI decode error.  Soundness is not a
-proof of /absence/ of attack, but every documented attack surface is closed by a test
-that triggers a verifier reject.
+Note that =cms[]= itself is *not* a public input to the SNARK -- the proof binds
+only to its hash =cmBatchHash=.  The contract is the component that recomputes
+that hash from calldata on every call, so any mismatch between the proved hash
+and the recomputed hash reverts at verify time.
+
+The refreshed =test/MintVerifier.t.sol= should cover at least these tamper paths,
+each expected to revert with =Notes: bad mint proof= or =Notes: stale oldRoot= or
+=Notes: stale leafIndex= or an ABI decode error:
+
+- =totalFace + 1=
+- =newRoot= flipped by one bit
+- =oldRoot= spoofed to a stale value
+- =nextLeafIndex= spoofed to a fictional size
+- =cms[0] ^ 1= (commitment tampered in calldata after proving)
+- =cms[]= length differs from the dispatched verifier's pinned N
+- malformed 256-byte =proofBytes=
+
+Soundness is not a proof of /absence/ of attack, but every documented attack
+surface is closed by a test that triggers a verifier reject.
 
 ** Putting the Pillars Together: The Adversarial Walk
 
-Suppose hostile-Alice tries to mint two *contradictory* batches that both claim to be
-the canonical breakdown of her =T_mint= transfer.  She would need:
+Suppose hostile-Alice tries to mint two *contradictory* batches that both claim to
+be the canonical breakdown of her =T_mint= transfer.  She would need:
 
 - Two different =proofBytes= and/or =cms[]=, both passing the on-chain verifier.
 
 That requires either:
 
-- Two valid Groth16 witnesses for the same public inputs (allowed -- but they yield
-  the same =cms=, so they are not /contradictory/), or
-- Two valid Groth16 witnesses with /different/ public inputs.  Allowed too, but each
-  one demands its own =transferFrom= for its own =totalFace= -- *that* is the
-  duplicate-spend problem ERC-20 solves.  Alice cannot transfer the same 1,200 BUCK
-  twice without holding 2,400 BUCK to start with.
+- Two valid Groth16 witnesses for the same public inputs (allowed -- but they
+  yield the same =cms=, so they are not /contradictory/), or
+- Two valid Groth16 witnesses with /different/ public inputs.  Allowed too, but
+  each one demands its own =transferFrom= for its own =totalFace= -- *that* is
+  the duplicate-spend problem ERC-20 solves.  Alice cannot transfer the same
+  1,200 BUCK twice without holding 2,400 BUCK to start with.
 
-So a single 1,200-BUCK escrow yields exactly one accepted batch.  The only freedom
-Alice has is /which/ batch she lays down -- which denominations and which recipients --
-and that freedom is hers to keep, by design.
+So a single 1,200-BUCK escrow yields exactly one accepted batch.  The only
+freedom Alice has is /which/ batch she lays down -- which denominations and which
+recipients -- and that freedom is hers to keep, by design.
 
-What about hostile-Alice trying to mint /more/ commitment value than she escrowed?
-She would need a witness whose =sum(v[i])= equals the integer =totalFace= /that the
-EVM sees/, but whose individual =v[i]= values /actually/ sum to more.  In
-=F_r= with =r ~ 2^254= and no range check on =v[i]=, the constraint
-~sum(v[i]) === totalFace~ would be satisfiable by witnesses whose integer sum differs
-from =totalFace= by a multiple of =r=.  =mint.circom= closes this with a
-=Num2Bits(128)= range constraint on each =v[i]= (and =spend.circom= mirrors it on
-both =face= and the witness =v=); a 128-bit cap is comfortably above any plausible
-BUCK denomination and well below =r/2=, so an integer overshoot can never wrap.
+What about hostile-Alice trying to mint /more/ commitment value than she
+escrowed?  She would need a witness whose =sum(v[i])= equals the integer
+=totalFace= /that the EVM sees/, but whose individual =v[i]= values /actually/
+sum to more.  In =F_r= with =r ~ 2^254= and no range check on =v[i]=, the
+constraint ~sum(v[i]) === totalFace~ would be satisfiable by witnesses whose
+integer sum differs from =totalFace= by a multiple of =r=.  =mint_batch.circom=
+closes this with a =Num2Bits(128)= range constraint on each =v[i]= and on
+=totalFace=, mirrored by =spend.circom='s check on =face= and the witness =v=.
+A 128-bit cap is comfortably above any plausible BUCK denomination and well
+below =r/2=, so an integer overshoot can never wrap.
+
+What about hostile-Alice trying to mint a commitment that is /already/ in the
+tree (to collide on a nullifier she does not control, or to attempt a
+hash-collision attack)?  She cannot collide on a nullifier without knowing
+somebody else's opening -- the nullifier is a Poseidon-PRF output, so forging a
+collision is as hard as inverting Poseidon.  She /can/ re-mint her own opening
+(the contract no longer blocks duplicates), but doing so forces her to pay
+=totalFace= a second time and buys her nothing: the nullifier is deterministic
+in the opening, so whichever of her two copies she spends first permanently
+nullifies both.  This is the value-conservation property in action -- the chain
+does not need a =commitmentExists= check because the nullifier mechanism already
+collapses duplicate openings to one spend, and Alice bears the cost of any
+duplication.
+
+Full per-attack-vector analysis (twelve attack vectors A1-A12) is in the pivot
+design memo [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].  Every hostile-Alice guarantee
+from the Phase-7 per-leaf insertion design survives under the batch-mint pivot;
+the only behavioural change is that duplicate-commitment rejection moves from an
+explicit on-chain check to economic self-enforcement via the deterministic
+nullifier.
 
 * Why Outside Observers Cannot Link
 
@@ -386,28 +591,36 @@ T_mint:
   from:  Alice (a registered IdentityRegistry account)
   to:    Notes (a system-public contract)
   value: 0 (BUCK is ERC-20, not ETH)
-  data:  Notes.mint(proofBytes, [cm_0..cm_5], 1200e18)
+  data:  Notes.mint(proofBytes, oldRoot, newRoot, nextLeafIndex,
+                    1200e18, [cm_0..cm_15])
 
 events emitted (in order):
   Buck.Transfer(Alice, Notes, 1200e18)
-  Notes.Appended(cm_0, K+0)
-  ...
-  Notes.Appended(cm_5, K+5)
-  Notes.Minted(Alice, 1200e18, K, 6)
+  Notes.Minted(Alice, 1200e18, startIndex=K, count=16, newRoot)
 #+END_SRC
+
+The batch-mint contract emits one =Minted= event per batch rather than per-leaf
+=Appended= events; the commitments themselves live in calldata for off-chain
+provers and wallets to read.  (Calldata is about an order of magnitude cheaper per
+byte than LOG data, which is part of why the N-independent cost bound holds.)
 
 What can Mallory infer?
 
 - That Alice (publicly) escrowed 1,200 BUCK.  *Yes* -- her address is =msg.sender=.
-- That six new commitments entered the pool.  *Yes* -- she sees the indices.
-- /Which/ commitment is worth /how much/.  *No* -- each is a fresh =Poseidon5= output
-  hidden by an independent =rho_i=.  Without a =rho_i=, distinguishing the 1,000-BUCK
-  hash from the 25-BUCK hash is computationally equivalent to inverting Poseidon on a
-  uniform field element, modelled here as a random oracle.
-- /Who/ holds each note.  *No* -- =idHash_i= is also inside the hash.
-- Whether two commitments share a recipient.  *No* -- two notes addressed to the same
-  =idHash= but with distinct =rho_i= produce uniformly independent =cm_i=, so the
-  chain shows nothing distinguishable from independent draws.
+- That sixteen new commitments entered the pool at indices =[K..K+15]=.  *Yes* --
+  =Minted= announces =startIndex= and =count=, and =cms[]= is in calldata.
+- /Which/ commitment is worth /how much/.  *No* -- each is a fresh =Poseidon5=
+  output hidden by an independent =rho_i=.  Without a =rho_i=, distinguishing
+  the 1,000-BUCK hash from the 25-BUCK hash (or from a 0-BUCK dummy) is
+  computationally equivalent to inverting Poseidon on a uniform field element,
+  modelled here as a random oracle.
+- /Which entries are live notes and which are dummies.*  *No* -- the padding
+  leaves are constructed with the same Poseidon-5 shape and a fresh =rho=;
+  nothing about them is chain-distinguishable from a live =cm= with a small =v=.
+- /Who/ holds each live note.  *No* -- =idHash_i= is also inside the hash.
+- Whether two commitments share a recipient.  *No* -- two notes addressed to the
+  same =idHash= but with distinct =rho_i= produce uniformly independent =cm_i=,
+  so the chain shows nothing distinguishable from independent draws.
 
 What about /linking back to a specific note artifact/ that Bob later possesses?  Mallory
 sees =cm_0..cm_5= published by Alice in =T_mint=.  Bob's artifact references some
@@ -450,16 +663,30 @@ desynchronize.  Each =Notes.mint= invocation does its own =transferFrom=; each
 
 ** No Replay
 
-A literal replay -- broadcasting the exact same =T_mint= calldata in a new transaction
--- fails for two independent reasons:
+A literal replay -- broadcasting the exact same =T_mint= calldata in a new
+transaction -- fails for three independent reasons:
 
-a. *Commitment uniqueness.*  =commitmentExists[cm_i]= is set true on the first append.
-   The second submission would revert at the first =require(!commitmentExists[cm_i])=
-   check.  (Replay-of-cm with a different =rho= is structurally different and is
-   simply a fresh mint, not a replay.)
-b. *Allowance and balance.*  Even if the prior call's state were somehow reverted,
-   the second mint would re-debit Alice's BUCK and re-consume her allowance to the
-   =Notes= pool.
+a. *Stale-state guards.*  The contract checks =oldRoot == roots[currentRootIndex]=
+   and =nextLeafIndex == self.nextLeafIndex=.  The first mint has already
+   advanced both, so the replay's =oldRoot= and =nextLeafIndex= public inputs no
+   longer match the live chain state.  The contract reverts before the SNARK is
+   even called, with =Notes: stale oldRoot= or =Notes: stale leafIndex=.
+b. *SNARK binding.*  Even if a future minter coincidentally re-created the same
+   =oldRoot= and =nextLeafIndex= state (which is prohibited by the monotonic
+   advancement of =nextLeafIndex=), the SNARK was bound to the specific
+   =(cmBatchHash, newRoot)= pair of the prior batch.  A replay would fold the
+   same =cms[]= a second time and produce a different =newRoot= than the SNARK
+   attested to, breaking the rolling-tree relation.
+c. *Allowance and balance.*  Even setting the above aside, the second mint would
+   re-debit Alice's BUCK and re-consume her allowance to the =Notes= pool --
+   economic-level double-escrow protection on top of the structural guards.
+
+/Replay of the same opening across batches/ (the replacement of the Phase-7
+=commitmentExists= check) is structurally allowed but economically
+self-punishing: Alice escrows =totalFace= again, the duplicate commitment lands
+at a fresh leaf index, and the deterministic nullifier =Poseidon3(rho, idHash,
+4242)= means the first spend nullifies every copy.  Alice pays twice for a
+spend-once outcome.
 
 ** Cross-Chain or Cross-Deployment Replay
 
@@ -473,25 +700,97 @@ verifier address (and key) differ.
 The only cross-context vulnerability would be a /chain-id collision/ on identical
 verification keys, which the production setup ceremony precludes by construction.
 
+* Prover Contention and the Rollup Race
+
+The batch-mint pivot introduces one genuinely new operational concern that did
+not exist in the Phase-7 per-leaf insertion design: a mint transaction is now a
+/rollup-style/ transaction.  Alice's proof is bound to the specific =oldRoot=
+and =nextLeafIndex= she snapshotted when she began proving; if any other mint
+lands between her snapshot and her submission, those values go stale and her
+transaction reverts at one of the stale-state guards.
+
+This is not a /safety/ concern -- Alice loses no BUCK (the contract reverts
+before =transferFrom= runs) and produces no bad on-chain state.  It is a
+/liveness and efficiency/ concern: Alice wasted the prover time spent
+constructing a proof that is no longer accepted, and has to re-prove against
+the fresh state.
+
+** Who Wins When Two Minters Race?
+
+When Alice and Bob both submit =T_mint_A= and =T_mint_B= targeting the same
+=oldRoot=:
+
+- One of the two (by block ordering) lands first and updates the root.
+- The other transaction executes, discovers the stale-state mismatch, and
+  reverts at the =require(oldRoot == roots[currentRootIndex])= line before any
+  BUCK moves.
+
+Transaction fees are paid by the loser for the reverted transaction (gas for
+the revert path, not for the full mint).  The loser then re-proves against the
+new =oldRoot= and =nextLeafIndex= and resubmits.  The new proof folds /their/
+commitments onto the root that /now/ includes the winner's commitments -- no
+commitment has been lost; the loser's tree-position is just different from the
+one they originally predicted.
+
+** Mitigation Layers
+
+Three mitigation layers, in ascending complexity:
+
+1. *Optimistic retry (wallet-level).*  On revert, the wallet re-fetches
+   =(currentRoot, nextLeafIndex)= from the chain, rederives the sibling paths
+   for the new insertion positions, re-runs the prover, and resubmits.  For
+   small N this is fast enough to not matter.  This is the recommended
+   initial deployment strategy.
+2. *Retry budget and back-off (wallet-level).*  For large N where prover time
+   is nontrivial (minutes to hours at N=1024), the wallet should expose a
+   "chance of contention" estimate to the user and offer to batch at the
+   smallest pinned N that fits the job, or to enqueue the mint on a private
+   relay channel during low-traffic windows.
+3. *Sequencer / proof aggregation (future).*  If real-world contention
+   warrants it, an external sequencer can batch multiple users' mints into a
+   single proof per slot, preserving the N-independent on-chain cost while
+   amortising prover time.  Sequencer capture is a separate trust axis and is
+   deferred; the shipped protocol is sequencer-free.
+
+** What Does Not Regress
+
+- *Atomicity.*  A reverted mint leaves /no/ chain-visible state change; it is
+  strictly indistinguishable from no submission.
+- *Value conservation.*  No reverted transaction debits BUCK, so there is no
+  way for a loser to pay the pool without appending commitments.
+- *Unlinkability.*  A re-submitted mint on a fresh root still produces the
+  same (anonymity-preserving) calldata and event shape; Mallory cannot tell a
+  retry from a first attempt.
+- *Spend-time invariants.*  The spend circuit takes the current =noteRoot=
+  (or any recent-window root); a late-arriving mint does not invalidate any
+  previously-proved spend.
+
+The rollup race is the price of replacing ~800K gas/leaf with ~500 gas/leaf,
+and for practical block-rate contention it is negligible.
+
 * Receipt Construction From the Transaction ID Alone
 
 A practical question: months later, Bob wants to prove to Carol that his note was
 legitimately issued.  He needs no help from Alice and no live indexer:
 
 1. Bob fetches =T_mint= from any Ethereum archive node.
-2. He decodes the call data into =(proofBytes, cms, totalFace)= using the standard
-   =Notes.mint= ABI.
+2. He decodes the call data into =(proofBytes, oldRoot, newRoot, nextLeafIndex,
+   totalFace, cms)= using the standard =Notes.mint= ABI.
 3. He notes =msg.sender= and resolves it to Alice's identity via the
    IdentityRegistry on the same chain (a single =eth_call=).
-4. He locates his =cm= in =cms[]= at the index recorded in his artifact and asserts
+4. He locates his =cm= in =cms[]= at =leafIndex - nextLeafIndex= and asserts
    equality.
-5. He recomputes ~Poseidon5(flavor, v, rho, idHash, predicate) == cm~ from the opening.
-6. (Optional) He re-runs =MintGroth16Verifier.verify(proofBytes, [totalFace, cms...])=
-   locally to convince himself the EVM did its job.
+5. He recomputes ~Poseidon5(flavor, v, rho, idHash, predicate) == cm~ from the
+   opening.
+6. (Optional.)  He recomputes =cmBatchHash = keccak256(abi.encodePacked(cms))=
+   and re-runs =MintGroth16Verifier.verify(proofBytes, [oldRoot, newRoot,
+   nextLeafIndex, totalFace, cmBatchHash])= against the per-N verifier keyed by
+   =cms.length=, convincing himself the EVM did its job.
 
-The "receipt" Carol receives is therefore =(T_mint, opening, idHash mapping)=.  Its
-validity is independently checkable against the public chain.  Nothing here requires
-ongoing cooperation from Alice -- which is exactly the property a receipt should have.
+The "receipt" Carol receives is therefore =(T_mint, opening, idHash mapping)=.
+Its validity is independently checkable against the public chain.  Nothing here
+requires ongoing cooperation from Alice -- which is exactly the property a
+receipt should have.
 
 * The Redemption (Spend), Step by Step
 
@@ -563,17 +862,22 @@ indefinite holding ([[file:alberta-buck-notes.org][Notes]]).
 ** Step 1: Fetch the Commitment Tree and Build a Merkle Path
 
 =Notes.sol= maintains a Tornado-style incremental Poseidon-T3 Merkle tree of
-=TREE_DEPTH = 20= (max ~1M leaves), updated inside =mint()= via the filled-subtrees
-trick (exactly 20 hashes per inserted commitment).  The current root is exposed as
-=noteRoot()=.  Two things happen:
+=TREE_DEPTH = 20= (max ~1M leaves).  Under Phase-7-bis the per-leaf insertion
+math lives inside the mint SNARK; the contract just records the SNARK-attested
+=newRoot= at each =mint()= call.  The current root is exposed as =noteRoot()=.
+Two things happen:
 
-a. Bob (or, more practically, any light-node helper running off-chain) fetches the
-   =Appended(cm, leafIndex)= event log from genesis to the current block,
-   reconstructs the tree using the same =ZERO_VALUE= and the same Poseidon-T3
-   wrapper the contract uses, and computes his Merkle path for =cm_0= -- a sequence
-   of sibling hashes plus left/right indices up to the root.  The path is purely
-   public information; everyone can reproduce it, and Bob does not have to trust
-   any indexer because the event log is canonical.
+a. Bob (or, more practically, any light-node helper running off-chain)
+   reconstructs the tree off-chain.  The commitments themselves are available
+   from each mint transaction's calldata =cms[]=, keyed by the =Minted(issuer,
+   totalFace, startIndex, count, newRoot)= event that indexes the batch.  A
+   replayer walks all =Minted= events in order, takes the =cms[]= slice out of
+   each mint's calldata, and appends them to its local tree using the same
+   =ZERO_VALUE= and Poseidon-T3 wrapper the in-circuit insertion uses.  Bob's
+   Merkle path for =cm_0= -- a sequence of sibling hashes plus left/right
+   indices up to the root -- falls out of that rebuilt tree.  The path is
+   purely public information; everyone can reproduce it, and Bob does not have
+   to trust any indexer because calldata is canonical.
 b. Bob reads the current =noteRoot()= via =eth_call=.  He may instead pin any root
    in the recent-roots window: =Notes.sol= retains the last =ROOT_HISTORY_SIZE = 30=
    roots in a ring buffer (=roots[]=, advanced once per inserted leaf), and the
@@ -615,9 +919,9 @@ tree itself remains append-only and nothing is deleted.
 
 ** Step 3: Generate the Spend Proof
 
-Bob's wallet runs =scripts/snark/prove_spend.js= (the Phase-7 analogue of
-=prove_mint.js=, using the depth-20 PTAU produced by =scripts/snark/setup.sh= at
-=POT_POW=15=).  =spend.circom='s signal layout is exactly:
+Bob's wallet runs =scripts/snark/prove_spend.js= (the spend-side analogue of
+=prove_mint_batch.js=, using the depth-20 PTAU produced by
+=scripts/snark/setup.sh=).  =spend.circom='s signal layout is exactly:
 
 #+BEGIN_SRC text
 public  noteRoot;         # an accepted root from the on-chain ring buffer
@@ -881,9 +1185,10 @@ the =totalFace= escrowed -- property C follows from mint-side value conservation
 plus spend-side nullifier uniqueness.
 
 The earlier caveat about a missing =Num2Bits= range check on =v[i]= at mint time
-is closed: =mint.circom= range-bounds each =v[i]= to 128 bits and =spend.circom=
-range-bounds both =face= and the witness =v= identically, so an integer overshoot
-of =totalFace= by a multiple of =r= is structurally impossible at either end.
+is closed: =mint_batch.circom= range-bounds each =v[i]= to 128 bits and
+=spend.circom= range-bounds both =face= and the witness =v= identically, so an
+integer overshoot of =totalFace= by a multiple of =r= is structurally impossible
+at either end.
 Property C now rests on those range bounds plus the nullifier-uniqueness check and
 Merkle membership.
 
@@ -1026,70 +1331,94 @@ more that become concrete only once the redemption path exists.
   | Spend | Value conservation across mint<->spend | Range-bounded mint =v[i]= + spend =face === v=; cumulative payouts \le =totalFace= per batch    |
   #+LATEX: }
 
-  All nine rows are enforced by code in the tree.  Mint is Phase 5 (=Notes.sol=,
-  stub verifier) and Phase 6 (=mint.circom=, =MintGroth16Verifier=,
-  =MintVerifierAdapter=); spend is Phase 7 (=spend.circom= in bearer shape,
-  =SpendGroth16Verifier=, =SpendVerifierAdapter=, on-chain Merkle accumulator and
-  30-slot root-history ring in =Notes.sol=, =buck.transferCarrying=).  The
-  [[file:alberta-buck-ethereum.org][IdentityRegistry]] provides the issuer-attestation and recipient-verification
-  legs, and the [[file:alberta-buck-proofs.org][formal proofs]] (Theorems 7-11) provide the cryptographic backstop.
-  The one residual caveat is that A-flavor in-circuit identity binding
-  (Chaum-Pedersen equality on the depositor's registered credential) is deferred
-  to =spend_a.circom=; until it ships, A-flavor privacy rests on the off-chain
-  =idHash= secret and the pool's identity-bound transfer surface, not on an
-  in-SNARK CP check.
+  All nine rows are enforced by code in the tree.  Mint landed in two phases:
+  Phase 5 (=Notes.sol= with a stub verifier) and Phase 7 (per-leaf on-chain
+  Poseidon insertion with =mint.circom=, =MintGroth16Verifier=,
+  =MintVerifierAdapter=).  Phase 7-bis moves the Merkle insertion /into/ the
+  SNARK (=mint_batch.circom=, per-N Groth16 verifiers, per-N adapter dispatch);
+  the chain writes the SNARK-attested =newRoot= into the same 30-slot root-
+  history ring =Notes.sol= already maintained for the spend side.  Spend is
+  unchanged by the pivot: =spend.circom= in bearer shape,
+  =SpendGroth16Verifier=, =SpendVerifierAdapter=, the on-chain Merkle
+  accumulator, and =buck.transferCarrying=.  The [[file:alberta-buck-ethereum.org][IdentityRegistry]] provides the
+  issuer-attestation and recipient-verification legs, and the [[file:alberta-buck-proofs.org][formal proofs]]
+  (Theorems 7-11) provide the cryptographic backstop.  The one residual caveat
+  is that A-flavor in-circuit identity binding (Chaum-Pedersen equality on the
+  depositor's registered credential) is deferred to =spend_a.circom=; until it
+  ships, A-flavor privacy rests on the off-chain =idHash= secret and the pool's
+  identity-bound transfer surface, not on an in-SNARK CP check.
   
 * Open Questions and Forward-Looking Caveats
 
-The example above uses the shipped Phase-6 mint + Phase-7 spend pipeline.  Four
-caveats remain and are tracked in depth elsewhere; listed here so the reader is
-not misled about the current state.
+The example above uses the Phase-7-bis batch-mint + Phase-7 spend pipeline.
+Six caveats remain and are tracked in depth elsewhere; listed here so the
+reader is not misled about the current state.
 
 1. *Range bounds on =v[i]= (resolved).*  Earlier drafts flagged the possibility
    that ~sum(v[i]) === totalFace~ in =F_r= without per-=v= range checks would
-   let an adversarial mint overshoot =totalFace= by a multiple of =r=.
-   =mint.circom= now ranges each =v[i]= via =Num2Bits(128)=, and =spend.circom=
-   mirrors the check on both =face= and the witness =v=.  The integer-overflow
-   attack is structurally impossible.  Preserved here as a breadcrumb; see
-   [[file:alberta-buck-proofs.org][Open Question 1]] in the proofs for the historical formulation.
-2. *Implicit transfer<->batch binding.*  The chain emits =Transfer= and =Minted=
-   in the same transaction, but no on-chain batch identifier ties the BUCK
-   transfer to the specific =cm= range.  Off-chain indexers reconstruct the
-   binding from event correlation.  Whether to add an explicit =batchId= storage
-   slot (and a matching public input to the spend circuit) is an open design
-   question; see [[file:alberta-buck-proofs.org][Open Question 2]].
+   let an adversarial mint overshoot =totalFace= by a multiple of =r=.  Both
+   =mint_batch.circom= and =spend.circom= now range-bound each value via
+   =Num2Bits(128)=.  The integer-overflow attack is structurally impossible.
+   Preserved here as a breadcrumb; see [[file:alberta-buck-proofs.org][Open Question 1]] in the proofs for the
+   historical formulation.
+2. *Implicit transfer<->batch binding.*  The chain emits =Transfer= and
+   =Minted= in the same transaction, but no on-chain batch identifier ties the
+   BUCK transfer to the specific =cm= range.  Off-chain indexers reconstruct
+   the binding from event correlation.  Whether to add an explicit =batchId=
+   storage slot (and a matching public input to the spend circuit) is an open
+   design question; see [[file:alberta-buck-proofs.org][Open Question 2]].
 3. *A-flavor in-circuit identity binding (deferred).*  The shipped
    =spend.circom= enforces a bearer-shape (B-spend) discharge: knowledge of the
    Poseidon-5 opening is the spend authorization.  Distinguishing A-flavor
    (in-circuit ElGamal decryption + Chaum-Pedersen equality against the
    depositor's registered credential) is deferred to =spend_a.circom=.  Until
    that circuit is wired in, A-flavor notes rely for recipient binding on the
-   secrecy of =idHash= in the off-chain artifact and on the pool's
-   identity-bound =transferCarrying= recipient check, not on an in-SNARK CP
-   proof.  Theorem 8 in [[file:alberta-buck-proofs.org][the proofs]] describes the intended binding; its
-   chain-observable enforcement lands with =spend_a.circom=.
-4. *Phase-6 batch size is pinned at =N=2=.*  The walk above used =N=6= for
-   narrative clarity.  The shipped =mint.circom= is templated at =N=2= and the
-   =MintVerifierAdapter= hard-codes =MINT_BATCH_SIZE=2=.  Splitting 1,200 BUCK
-   into six notes requires three sequential =Notes.mint= calls of two notes
-   each (which weakens the unlinkability story for that particular issuer,
-   since the three calls are linkable as a sequence by =msg.sender=).
-   Variable-=N= support is deliberately deferred; see [[file:alberta-buck-ethereum.org][Open Work Items]] in the
-   implementation doc.
+   secrecy of =idHash= in the off-chain artifact and on the pool's identity-
+   bound =transferCarrying= recipient check, not on an in-SNARK CP proof.
+   Theorem 8 in [[file:alberta-buck-proofs.org][the proofs]] describes the intended binding; its chain-
+   observable enforcement lands with =spend_a.circom=.
+4. *Variable-=N= batch size (resolved via pinned set).*  Phase-7's
+   =mint.circom= was templated at =N=2=.  Phase-7-bis generalises this: the
+   wallet rounds any requested split up to the smallest pinned N >= N_requested
+   from the deployed set (recommended {16, 128, 1024}), padding with =v = 0=
+   dummy openings.  Each pinned N has its own verifier contract; the
+   =MintVerifierAdapter= dispatches on =cms.length=.  Adding a new pin means
+   running a new trusted-setup ceremony, deploying a new verifier, and
+   registering it in =mintVerifiers[N]= -- operationally additive, no protocol
+   change.
+5. *Hash choice for =cmBatchHash= (open).*  Two candidates: keccak256 (cheap
+   on-chain, reconstructed from calldata in a few hundred gas) or Poseidon
+   over the field (in-circuit "free" but ~30-60K gas to recompute on-chain).
+   Default is keccak; see the design memo for the trade-off.  Revisit if an
+   on-chain Poseidon precompile ships.
+6. *Prover contention (resolved operationally, not protocolly).*  The batch-
+   mint pivot makes each mint a rollup-style transaction with a stale-state
+   guard on =oldRoot= and =nextLeafIndex=.  Losers in a race re-prove; no BUCK
+   is lost.  Initial deployment uses wallet-side optimistic retry; a
+   sequencer/aggregator is deferred until real-world contention warrants it.
+   See *Prover Contention and the Rollup Race* above.
 
 * Cross-References
 
-- [[file:alberta-buck-notes.org][alberta-buck-notes.org]] -- architectural overview of the Notes primitive (flavors,
-  Merkle tree, demurrage interaction).
+- [[file:alberta-buck-notes.org][alberta-buck-notes.org]] -- architectural overview of the Notes primitive
+  (flavors, Merkle tree, demurrage interaction).
+- [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] -- Phase-7-bis batch-mint design memo:
+  R1CS counts per N, gas projections, per-attack-vector hostile-Alice audit
+  (A1-A12), concurrency model, migration plan.
 - [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] -- formal correctness arguments (Theorems 7-11; Open
   Questions in Part IV).
 - [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]] -- Solidity surface, gas costs, phase-by-phase
   implementation status, Open Work Items.
-- [[file:alberta-buck-identity.org][alberta-buck-identity.org]] -- IdentityRegistry, PS credentials, and the bilateral
-  ElGamal handshake that anchors =msg.sender= to a verifiable identity.
-- =circuits/mint.circom= -- the Phase-6 mint circuit source.
-- =src/Notes.sol=, =src/MintGroth16Verifier.sol=, =src/MintVerifierAdapter.sol= -- the
-  on-chain code paths walked above.
-- =scripts/snark/prove_mint.js= -- the reference prover used in tests.
-- =test/MintVerifier.t.sol= -- the seven Foundry tests (happy path + four tampers + two
-  guards) that pin the soundness story to executable assertions.
+- [[file:alberta-buck-identity.org][alberta-buck-identity.org]] -- IdentityRegistry, PS credentials, and the
+  bilateral ElGamal handshake that anchors =msg.sender= to a verifiable
+  identity.
+- =circuits/mint_batch.circom= -- the Phase-7-bis batch-mint circuit (one
+  compile per pinned N).
+- =circuits/spend.circom= -- the Phase-7 spend circuit (bearer-shape).
+- =src/Notes.sol=, =src/MintGroth16Verifier*.sol=, =src/MintVerifierAdapter.sol=,
+  =src/SpendGroth16Verifier.sol=, =src/SpendVerifierAdapter.sol= -- the on-chain
+  code paths walked above.
+- =scripts/snark/prove_mint_batch.js=, =scripts/snark/prove_spend.js= -- the
+  reference provers used in tests.
+- =test/MintVerifier.t.sol=, =test/SpendVerifier.t.sol= -- the Foundry tests
+  that pin the soundness stories to executable assertions.

@@ -253,21 +253,27 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    #+LATEX: {\scriptsize
    | State                | Type                                      | Purpose                                                          |
    |----------------------+-------------------------------------------+------------------------------------------------------------------|
-   | =commitments=        | =uint256[]= (append-only)                 | Audit log of every minted leaf, in insertion order               |
-   | =commitmentExists=   | =mapping(uint256 =\Rightarrow= bool)=     | O(1) duplicate-commitment check at mint time                     |
    | =nullifiers=         | =mapping(uint256 =\Rightarrow= bool)=     | Double-spend prevention                                          |
    | =noteFaceSum=        | =uint256=                                 | Total face value of all outstanding notes (audit scalar)         |
-   | =zeros[20]=          | =uint256[TREE_DEPTH]=                     | Cached Poseidon zeros for empty subtrees                         |
-   | =filledSubtrees[20]= | =uint256[TREE_DEPTH]=                     | Right-most filled hash at each level (Tornado-style)             |
    | =nextLeafIndex=      | =uint32=                                  | Next free leaf slot (also = current leaf count)                  |
    | =roots[30]=          | =uint256[ROOT_HISTORY_SIZE]=              | Recent root ring buffer; spends may use any historical root      |
    | =currentRootIndex=   | =uint32=                                  | Newest entry in =roots[]=                                        |
+   | =mintVerifiers[N]=   | =mapping(uint256 =\Rightarrow= IMintVerifier)= | Per-N batch-mint verifier dispatch (pinned set, e.g. 16/128/1024) |
    #+LATEX: }
 
    The tree is fixed at depth \( d=20 \) (\(\approx 1{,}048{,}576\) leaves) and
-   uses Poseidon-T3 (2-input) at every internal node.  The ring buffer holds the
-   30 most recent roots so spends remain valid for a short window after new
-   notes are inserted, without requiring per-spend root-update synchronisation.
+   uses Poseidon-T3 (2-input) at every internal node.  Under Phase-7-bis the
+   per-leaf Merkle insertion logic lives /inside the mint SNARK/; the contract
+   itself does not maintain =zeros[]= or =filledSubtrees[]= and does not expose
+   an on-chain =_insert()= entry point.  Every mint submits a SNARK-attested
+   =newRoot= which the contract writes into =roots[]= in one step.  The ring
+   buffer holds the 30 most recent roots so spends remain valid for a short
+   window after new notes are inserted, without requiring per-spend root-update
+   synchronisation.  The per-commitment =commitmentExists= duplicate-reject
+   map from Phase 7 has also been retired -- duplicate mints are now
+   economically self-punishing via the deterministic nullifier
+   \( \text{Poseidon}_3(\rho, \text{idHash}, 4242) \), so the chain does not
+   need an explicit check.
 
    The /Notes pool/ -- the BUCK custody side of the design -- is just the
    Notes contract's own ERC-20 balance.  No separate =poolBalance=,
@@ -334,27 +340,31 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** Lifecycle
 
    #+begin_example
-   mint (burn):
-     # The caller's BUCK is pulled into the Notes contract via the
-     # standard ERC-20 transferFrom path -- caller pays any outgoing
-     # demurrage of their own through normal BUCK accounting.  The
-     # Notes pool's balance gains totalFace, and its demurrage index
-     # (_indexAtLastTouch[notes]) keeps tracking the global cumIndex
-     # automatically.
-     verify SNARK (mint):
-       - For each i in [0, N):  cm_i = Poseidon5(flavor, v_i, rho_i, idHash_i, predHash_i)
-       - sum(v_i) == totalFace
-       - v_i in [0, 2^128)             # Num2Bits(128) range bound
-       - flavor, predHash, idHash form valid for the chosen flavor (B today)
-     require none of {cm_1, ..., cm_N} already in commitments[]
-     for each of {cm_1, ..., cm_N}:
-        commitments.push(cm_i)
-        commitmentExists[cm_i] = true
-        _insert(cm_i)               # Tornado-style filled-subtrees walk
-                                    # exactly TREE_DEPTH Poseidon hashes
-        roots[++currentRootIndex % 30] = newRoot
-     noteFaceSum += totalFace
+   mint (burn, Phase-7-bis batch):
+     # The caller supplies a batch of N commitments, the SNARK-attested
+     # newRoot, and the oldRoot / nextLeafIndex they based the proof on.
+     # The per-leaf Poseidon insertion is inside the SNARK, not on chain.
+     require cms.length > 0
+     require oldRoot       == roots[currentRootIndex]    # stale-state guard
+     require nextLeafIndex == self.nextLeafIndex         # stale-state guard
+     cmBatchHash = keccak256(abi.encodePacked(cms))
+     require mintVerifiers[cms.length].verifyMint(
+               proof, oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash)
+     # The SNARK has proved, for some witness
+     #   (flavor_i, v_i, rho_i, idHash_i, predHash_i, pathSiblings_i)_i:
+     #     - cm_i = Poseidon5(flavor_i, v_i, rho_i, idHash_i, predHash_i)
+     #     - v_i in [0, 2^128), totalFace in [0, 2^128)  # Num2Bits(128)
+     #     - sum(v_i) == totalFace
+     #     - folding {cm_i} onto oldRoot at nextLeafIndex using pathSiblings_i
+     #       yields newRoot
+     #     - cmBatchHash == H(cm_0, ..., cm_{N-1})
      buck.transferFrom(caller, address(this), totalFace)
+     # Adopt the SNARK-attested new root and advance the rolling state.
+     currentRootIndex = (currentRootIndex + 1) % ROOT_HISTORY_SIZE
+     roots[currentRootIndex] = newRoot
+     self.nextLeafIndex     += cms.length
+     noteFaceSum            += totalFace
+     emit Minted(caller, totalFace, nextLeafIndex, cms.length, newRoot)
 
    spend (mint-out):
      # caller supplies (proof, root, nullifier, face, recipient)
@@ -471,9 +481,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** What the On-Chain Observer Sees
 
    At mint: a transfer of \( v \) BUCKs from Alice's address to the
-   contract address, plus an =Appended(cm)= event.  The commitment
-   \( cm \) is a Poseidon hash; observers learn nothing about the
-   opening, the depositor, the issuer flavor, or \( \rho \).
+   contract address, plus a =Minted(issuer, totalFace, startIndex,
+   count, newRoot)= event.  The commitments themselves live in the
+   transaction calldata (=cms[]=); each \( cm_i \) is a Poseidon hash,
+   so observers learn nothing about the opening, the depositor, the
+   issuer flavor, or \( \rho \).
 
    At deposit: a =transferCarrying= of =face= BUCKs from the Notes
    contract address to the depositor's address, plus a
@@ -918,7 +930,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    in (mints, donations) is a standard incoming transfer; BUCKs
    flowing out (spends) uses =transferCarrying=.  The only
    contract-local state not already tracked by the BUCK ledger is the
-   Merkle tree (=commitments=, =filledSubtrees=, =roots=, etc.), the
+   Merkle-tree root history (=roots[]=, =nextLeafIndex=), the
    nullifier set (=nullifiers=), and =noteFaceSum= (aggregate live
    face value -- an audit scalar, not a liability figure).
 
@@ -2265,42 +2277,71 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 #+LATEX: \clearpage
 * The SNARK Circuits
 
-  The shipped Notes implementation uses two BN254 Groth16 circuits:
-  =mint.circom= and =spend.circom=.  =spend.circom= is a single,
-  flavor-agnostic /bearer-shape/ circuit: it handles B1 today, and
-  treats any A-flavor commitment as bearer-redeemable (the in-circuit
-  CP-equality binding to the depositor's registered identity is
-  deferred to a follow-up =spend_a.circom=, see "Phased Rollout"
-  below).
+  The Notes implementation uses two BN254 Groth16 circuits:
+  =mint_batch.circom= (Phase-7-bis, parameterised by pinned N) and
+  =spend.circom=.  =spend.circom= is a single, flavor-agnostic
+  /bearer-shape/ circuit: it handles B1 today, and treats any A-flavor
+  commitment as bearer-redeemable (the in-circuit CP-equality binding
+  to the depositor's registered identity is deferred to a follow-up
+  =spend_a.circom=, see "Phased Rollout" below).
 
-** Mint Circuit (=circuits/mint.circom=)
+** Mint Circuit (=circuits/mint_batch.circom=)
 
-   *Public inputs.*  =totalFace= (the total face value \( \sum v_i \)
-   of the notes being minted) and \( \{cm_1, \ldots, cm_N\} \), the
-   batch of commitments to be appended.  Issuer attestation lives
-   outside the SNARK -- the contract gates =mint= on its caller, not
-   on a circuit-level credential.
+   The per-leaf on-chain Poseidon insertion that Phase 7 shipped was
+   gas-cost-fatal at realistic batch sizes (~800K gas/leaf; N=16 alone
+   exceeds the block limit).  Phase-7-bis moves the Merkle-tree update
+   /inside the SNARK/: the circuit consumes =oldRoot= as a public
+   input, folds N commitments onto it using witness sibling paths, and
+   exposes the resulting =newRoot= as a public output.  On-chain mint
+   cost becomes essentially constant in N -- ~380K + ~500 gas/leaf of
+   calldata.  The design memo is
+   [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
 
-   *Witnesses.*  For each note \( i \): \( (\text{flavor}_i, v_i,
-   \rho_i, \text{idHash}_i, \text{predHash}_i) \).
+   *Public inputs (5 entries, N-independent).*
+   - =oldRoot= -- the live note root the prover read from chain
+   - =newRoot= -- the root after folding =cm_1..cm_N=
+   - =nextLeafIndex= -- the live tree size the prover read from chain
+   - =totalFace= -- \( \sum v_i \), range-bounded to 128 bits
+   - =cmBatchHash= -- \( H(\text{cm}_1, \ldots, \text{cm}_N) \),
+     letting the contract bind calldata to the SNARK without making
+     every =cm_i= its own public input (keccak on chain; Poseidon
+     reserved for a future in-field variant)
+
+   *Witnesses.*  For each leaf \( i \): \( (\text{flavor}_i, v_i,
+   \rho_i, \text{idHash}_i, \text{predHash}_i) \) plus the TREE_DEPTH
+   sibling hashes =pathSiblings_i[0..19]= needed to fold \( cm_i \)
+   into the rolling tree.
 
    *Constraints.*
    1. =totalFace= \( = \sum v_i \) (amount conservation).
    2. Each \( cm_i = \text{Poseidon5}(\text{flavor}_i, v_i, \rho_i,
       \text{idHash}_i, \text{predHash}_i) \) (opening binding).
-   3. Each \( v_i \in [0, 2^{128}) \) via =Num2Bits(128)=.
-   4. Public signals are ghost-bound via \( x \cdot x \) constraints
-      so the witness cannot vary the totalFace or commitments
-      independently of the published public-input vector.
+   3. Each \( v_i \in [0, 2^{128}) \) and =totalFace= \( \in [0,
+      2^{128}) \) via =Num2Bits(128)=.
+   4. Rolling Merkle insertion: threading =oldRoot= and =nextLeafIndex=
+      through N successive single-leaf insertions (Switcher + Poseidon-T3
+      per level, per leaf), the result equals =newRoot=.  About 4.3K
+      constraints per leaf; total ~6K R1CS per leaf including the
+      opening.
+   5. Calldata binding: =cmBatchHash= \( = H(cm_1, \ldots, cm_N) \).
+   6. Belt-and-suspenders: \( cm_i \neq 0 \) and
+      \( cm_i \neq \text{ZERO\_VALUE} \) per leaf.
 
-   *Contract side.*  The Notes contract verifies the proof through
-   =MintVerifierAdapter=, requires no =cm_i= already exists, pulls
-   =totalFace= BUCK from the caller via the standard ERC-20 path
-   (the caller pays outgoing-transfer demurrage), appends each
-   \( cm_i \) to the on-chain Merkle tree (Tornado-style
-   filled-subtrees walk; exactly TREE_DEPTH=20 Poseidon hashes per
-   leaf), pushes the new root onto the 30-slot ring buffer, and
-   bumps =noteFaceSum= by =totalFace=.
+   *Pinned N set.*  Each pinned N has its own compiled circuit, trusted
+   setup, and deployed verifier.  Recommended initial set: \{16, 128,
+   1024\}.  The wallet rounds any requested split up to the smallest
+   pin \( N^* \geq N_\text{requested} \) and pads with =v = 0= dummy
+   openings; dummies are valid commitments in the tree but spendable
+   for zero BUCK.
+
+   *Contract side.*  The Notes contract checks =oldRoot= and
+   =nextLeafIndex= against its live state, recomputes =cmBatchHash=
+   from the calldata =cms[]=, dispatches to =mintVerifiers[cms.length]=
+   to verify the proof, pulls =totalFace= BUCK from the caller via the
+   standard ERC-20 path, writes =newRoot= into the ring buffer,
+   advances =nextLeafIndex= by =cms.length=, and bumps =noteFaceSum= by
+   =totalFace=.  A single =Minted= event covers the whole batch;
+   per-leaf =Appended= events from Phase 7 are gone.
 
 ** Spend Circuit (=circuits/spend.circom=, B-flavor / bearer shape)
 
@@ -2354,20 +2395,26 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Circuit Engineering Budget
 
-   Measured constraint counts for the shipped circuits (BN254
-   Groth16):
+   Constraint counts for the Notes circuits (BN254 Groth16):
 
    #+LATEX: {\scriptsize
-   | Circuit                                      | Constraints |
-   |----------------------------------------------+-------------|
-   | =mint.circom= (N=2 batch)                    | ~3,500      |
-   | =spend.circom= (B-shape; depth-20 Merkle)    | ~12,000     |
+   | Circuit                                      | Constraints     | PTAU pow |
+   |----------------------------------------------+-----------------+----------|
+   | =mint.circom= (Phase 7; N=2, per-leaf on chain) | ~3,500 (retired) | 2^{15}  |
+   | =mint_batch.circom= (Phase-7-bis; N=16)      | ~96,000         | 2^{17}   |
+   | =mint_batch.circom= (Phase-7-bis; N=128)     | ~770,000        | 2^{20}   |
+   | =mint_batch.circom= (Phase-7-bis; N=1024)    | ~6,000,000      | 2^{23}   |
+   | =spend.circom= (B-shape; depth-20 Merkle)    | ~12,000         | 2^{15}   |
    #+LATEX: }
 
-   Powers-of-tau ceremony at \( 2^{15} \) is sufficient for both.
-   Comparable to Zcash Sapling's Spend circuit (~25,000) and Aztec's
-   basic note-spend circuit.  On-chip proving time on a modern
-   smartphone: a few seconds.
+   The spend circuit is comparable to Zcash Sapling's Spend circuit
+   (~25,000) and Aztec's basic note-spend circuit; on-chip proving on
+   a modern smartphone: a few seconds.  =mint_batch= at N=16 is still
+   a desktop-seconds proof; N=128 is minutes; N=1024 requires a beefy
+   machine and hours of prover time, with the on-chain verification
+   cost invariant across all three.  The 2^{23} ceremony is the
+   ceiling that fixes the largest pinned N -- raising it would require
+   a fresh trusted setup.
 
 ** Common Circuit Gadgets
 
@@ -2513,14 +2560,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    #+LATEX: {\scriptsize
    | Component                                   | Source                                              |
    |---------------------------------------------+-----------------------------------------------------|
-   | Notes contract: tree, nullifiers, mint/spend | =src/Notes.sol=                                    |
+   | Notes contract: roots, nullifiers, mint/spend (Phase-7-bis surface) | =src/Notes.sol=              |
    | =transferCarrying= primitive in BUCK         | =src/Buck.sol= (=transferCarrying=, =_indexAtLastTouch= merge) |
-   | Mint Groth16 circuit + verifier              | =circuits/mint.circom=, =src/MintGroth16Verifier.sol= |
+   | Mint Groth16 circuits + per-N verifiers      | =circuits/mint_batch.circom=, =src/MintGroth16Verifier_N*.sol= |
    | Spend Groth16 circuit + verifier (B-shape)   | =circuits/spend.circom=, =src/SpendGroth16Verifier.sol= |
-   | Poseidon-T3 incremental Merkle tree          | =src/Notes.sol= (zeros / filledSubtrees walk), =src/PoseidonT3Bytecode.sol= |
-   | Verifier adapters (proof-bytes plumbing)     | =src/MintVerifierAdapter.sol=, =src/SpendVerifierAdapter.sol= |
+   | Poseidon-T3 precompile (in-EVM bytecode)    | =src/PoseidonT3Bytecode.sol=                        |
+   | Verifier adapters (proof-bytes plumbing, per-N mint dispatch) | =src/MintVerifierAdapter.sol=, =src/SpendVerifierAdapter.sol= |
    | End-to-end tests (real Groth16 fixtures)     | =test/MintVerifier.t.sol=, =test/SpendVerifier.t.sol= |
-   | Prover scripts (witness gen + ptau ceremony) | =scripts/snark/=                                    |
+   | Prover scripts (witness gen + ptau ceremony) | =scripts/snark/prove_mint_batch.js=, =scripts/snark/prove_spend.js=, =scripts/snark/setup.sh= |
    #+LATEX: }
 
 ** Pending Engineering (Phases 4-8)
@@ -2570,16 +2617,17 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    The engineering work is naturally phaseable:
 
    #+LATEX: {\scriptsize
-   | Phase | Scope                                                              | Status                                        |
-   |-------+--------------------------------------------------------------------+-----------------------------------------------|
-   |     1 | On-chain Notes pool: incremental Merkle tree, nullifiers, =Notes=  | *Shipped* (=src/Notes.sol=)                   |
-   |     2 | Mint circuit + on-chain Groth16 verifier (=mint.circom=)           | *Shipped* (Phase 2 BUCK Notes)                |
-   |     3 | Spend circuit (B-shape / bearer) + =transferCarrying=              | *Shipped* (Phase 7 BUCK Notes)                |
-   |     4 | =spend_a.circom=: in-circuit CP-equality binding for A1/A2 notes   | Pending (ElGamal + Chaum-Pedersen gadgets)    |
-   |     5 | A1 public-issuer signature-in-payload + auditable payroll UX       | Pending (depends on Phase 4)                  |
-   |     6 | Sealed-QR print flow for B1 walking-around notes                   | Pending (hologram-vendor integration)         |
-   |     7 | Programmable =predicate= field (bounded predicate DSL)             | Deferred (Aztec Noir / Halo2 toolchain)       |
-   |     8 | Optional: off-chain re-targeting via proxy re-encryption           | Deferred (Identity Guardians)                 |
+   | Phase  | Scope                                                              | Status                                        |
+   |--------+--------------------------------------------------------------------+-----------------------------------------------|
+   |     1  | On-chain Notes pool: incremental Merkle tree, nullifiers, =Notes=  | *Shipped* (=src/Notes.sol=)                   |
+   |     2  | Mint circuit + on-chain Groth16 verifier (=mint.circom=, N=2)      | *Shipped* (historical; superseded by 2-bis)   |
+   |   2-bis | Batch-mint circuit: per-leaf Merkle insertion moved into the SNARK (=mint_batch.circom=, pinned N set) | Active implementation work            |
+   |     3  | Spend circuit (B-shape / bearer) + =transferCarrying=              | *Shipped* (Phase 7 BUCK Notes)                |
+   |     4  | =spend_a.circom=: in-circuit CP-equality binding for A1/A2 notes   | Pending (ElGamal + Chaum-Pedersen gadgets)    |
+   |     5  | A1 public-issuer signature-in-payload + auditable payroll UX       | Pending (depends on Phase 4)                  |
+   |     6  | Sealed-QR print flow for B1 walking-around notes                   | Pending (hologram-vendor integration)         |
+   |     7  | Programmable =predicate= field (bounded predicate DSL)             | Deferred (Aztec Noir / Halo2 toolchain)       |
+   |     8  | Optional: off-chain re-targeting via proxy re-encryption           | Deferred (Identity Guardians)                 |
    #+LATEX: }
 
    Phases 1-3 are *shipped* and exercised end-to-end by the test
