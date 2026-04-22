@@ -11,6 +11,7 @@ import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {Notes}                 from "../src/Notes.sol";
 import {MintGroth16Verifier}   from "../src/MintGroth16Verifier.sol";
 import {MintVerifierAdapter}   from "../src/MintVerifierAdapter.sol";
+import {PoseidonT3Bytecode}    from "../src/PoseidonT3Bytecode.sol";
 
 /// @title MintVerifier.t.sol — end-to-end Groth16-verified mint.
 /// @notice Builds the full Buck + Identity + Notes stack with a *real* mint
@@ -56,7 +57,8 @@ contract MintVerifierTest is Test {
 
         g16     = new MintGroth16Verifier();
         adapter = new MintVerifierAdapter(address(g16));
-        notes   = new Notes(address(buck), address(adapter), GOV);
+        address poseidon = PoseidonT3Bytecode.deploy();
+        notes   = new Notes(address(buck), address(adapter), poseidon, GOV);
 
         vm.prank(GOV);
         reg.setSystemPublic(address(notes), true);

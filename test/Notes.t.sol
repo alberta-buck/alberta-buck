@@ -11,6 +11,7 @@ import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {Notes}                from "../src/Notes.sol";
 import {IMintVerifier}        from "../src/IMintVerifier.sol";
 import {StubMintVerifier}     from "../src/StubMintVerifier.sol";
+import {PoseidonT3Bytecode}   from "../src/PoseidonT3Bytecode.sol";
 
 /// @notice IMintVerifier that always rejects -- exercises the negative path
 ///         without depending on StubMintVerifier's enabled toggle.
@@ -27,6 +28,7 @@ contract NotesTest is Test {
     IdentityRegistry      internal reg;
     Notes                 internal notes;
     StubMintVerifier      internal stub;
+    address               internal poseidon;
 
     address internal constant GOV     = address(0xA0);
     address internal constant ISSUER  = address(0x1551E1);
@@ -65,8 +67,9 @@ contract NotesTest is Test {
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
 
         // Notes stack.
-        stub  = new StubMintVerifier(GOV);
-        notes = new Notes(address(buck), address(stub), GOV);
+        stub     = new StubMintVerifier(GOV);
+        poseidon = PoseidonT3Bytecode.deploy();
+        notes    = new Notes(address(buck), address(stub), poseidon, GOV);
 
         // The pool is a "regular account" -- it has no PS credential, so we
         // mark it system-public to satisfy Buck's identity-bound transfer.
@@ -174,11 +177,13 @@ contract NotesTest is Test {
 
     function test_constructor_rejectsZero() public {
         vm.expectRevert(bytes("buck=0"));
-        new Notes(address(0), address(stub), GOV);
+        new Notes(address(0), address(stub), poseidon, GOV);
         vm.expectRevert(bytes("verifier=0"));
-        new Notes(address(buck), address(0), GOV);
+        new Notes(address(buck), address(0), poseidon, GOV);
+        vm.expectRevert(bytes("poseidon=0"));
+        new Notes(address(buck), address(stub), address(0), GOV);
         vm.expectRevert(bytes("governance=0"));
-        new Notes(address(buck), address(stub), address(0));
+        new Notes(address(buck), address(stub), poseidon, address(0));
     }
 
     // ---- governance --------------------------------------------------------
@@ -234,8 +239,10 @@ contract NotesTest is Test {
         emit Notes.Appended(CM1, 0);
         vm.expectEmit(true, true, false, false, address(notes));
         emit Notes.Appended(CM2, 1);
-        vm.expectEmit(true, false, false, true, address(notes));
-        emit Notes.Minted(alice, 200e18, 0, 2);
+        // We don't predict newRoot here; the dedicated tree-shape tests
+        // below pin it.  Match topic-only on Minted.
+        vm.expectEmit(true, false, false, false, address(notes));
+        emit Notes.Minted(alice, 200e18, 0, 2, 0);
 
         vm.prank(alice);
         notes.mint(DUMMY_PROOF, cms, 200e18);
@@ -354,5 +361,137 @@ contract NotesTest is Test {
         assertFalse(notes.commitmentExists(CM1));
         assertFalse(notes.commitmentExists(CM2));
         assertEq(notes.noteFaceSum(),      0);
+    }
+
+    // ---- Merkle tree -------------------------------------------------------
+
+    /// @notice The constructor's `ZERO_VALUE` and the level-0..19 empty
+    ///         subtree roots, plus the genesis root, must all match the
+    ///         off-chain reference produced by `merkle_fixture.js`.
+    function test_constructor_matchesOffChainEmptyTree() public view {
+        string memory fx =
+            vm.readFile("build/snark/poseidon/merkle_fixture.json");
+        assertEq(notes.ZERO_VALUE(),
+                 vm.parseJsonUint(fx, ".zeroValue"),
+                 "ZERO_VALUE mismatch");
+        for (uint256 i = 0; i < 20; i++) {
+            string memory key = string.concat(
+                ".zeros[", vm.toString(i), "]"
+            );
+            assertEq(notes.zeros(i),
+                     vm.parseJsonUint(fx, key),
+                     "zeros[i] mismatch");
+        }
+        assertEq(notes.noteRoot(),
+                 vm.parseJsonUint(fx, ".emptyRoot"),
+                 "empty root mismatch");
+        assertEq(notes.nextLeafIndex(), 0);
+    }
+
+    /// @notice Mint exactly the leaves the off-chain fixture pins, one at a
+    ///         time, and assert the on-chain root matches the off-chain
+    ///         reference root after each insertion.  This is the only test
+    ///         that proves the filled-subtrees walk is correctly implemented;
+    ///         the rest are property-based.
+    function test_mint_perLeafRootMatchesOffChainReference() public {
+        string memory fx =
+            vm.readFile("build/snark/poseidon/merkle_fixture.json");
+
+        _approveNotes(alice, 300e18);
+
+        uint256[3] memory cms = [CM1, CM2, CM3];
+        for (uint256 i = 0; i < 3; i++) {
+            uint256[] memory batch = new uint256[](1);
+            batch[0] = cms[i];
+            vm.prank(alice);
+            notes.mint(DUMMY_PROOF, batch, 100e18);
+
+            string memory key = string.concat(
+                ".rootAfterEach[", vm.toString(i), "]"
+            );
+            assertEq(notes.noteRoot(),
+                     vm.parseJsonUint(fx, key),
+                     "on-chain root diverged from off-chain reference");
+            assertEq(notes.nextLeafIndex(), i + 1);
+            assertTrue(notes.isAcceptedRoot(notes.noteRoot()));
+        }
+    }
+
+    /// @notice Mint two leaves in a single batch and confirm the post-batch
+    ///         root equals the off-chain reference after two insertions.
+    function test_mint_batchRootMatchesAfterTwoLeaves() public {
+        string memory fx =
+            vm.readFile("build/snark/poseidon/merkle_fixture.json");
+
+        _approveNotes(alice, 200e18);
+        uint256[] memory cms = _cms(CM1, CM2);
+        vm.prank(alice);
+        notes.mint(DUMMY_PROOF, cms, 200e18);
+
+        assertEq(notes.noteRoot(),
+                 vm.parseJsonUint(fx, ".rootAfterEach[1]"));
+        assertEq(notes.nextLeafIndex(), 2);
+    }
+
+    function test_isAcceptedRoot_acceptsLiveAndPriorRoots() public {
+        uint256 emptyRoot = notes.noteRoot();
+        assertTrue(notes.isAcceptedRoot(emptyRoot));
+
+        _approveNotes(alice, 100e18);
+        uint256[] memory cms = new uint256[](1);
+        cms[0] = CM1;
+        vm.prank(alice);
+        notes.mint(DUMMY_PROOF, cms, 100e18);
+
+        // Both the empty-tree root and the post-mint root remain in the
+        // recent-roots window.
+        assertTrue(notes.isAcceptedRoot(emptyRoot));
+        assertTrue(notes.isAcceptedRoot(notes.noteRoot()));
+        // Random unrelated value is rejected.
+        assertFalse(notes.isAcceptedRoot(uint256(0xdeadbeef)));
+        assertFalse(notes.isAcceptedRoot(0));
+    }
+
+    /// @notice After ROOT_HISTORY_SIZE+1 fresh roots, the very first one
+    ///         (the empty-tree root) must have been evicted from the ring
+    ///         buffer; nothing else should leak in.
+    function test_isAcceptedRoot_evictsAfterHistoryWindow() public {
+        uint256 emptyRoot = notes.noteRoot();
+
+        // Each mint advances the ring by one slot.  ROOT_HISTORY_SIZE = 30,
+        // so 31 single-leaf mints overwrite the genesis root.  Use unique
+        // commitments derived from a counter so we don't trip the dup check.
+        _approveNotes(alice, 31 * 1e18);
+        for (uint256 i = 0; i < 31; i++) {
+            uint256[] memory batch = new uint256[](1);
+            // Field-bounded distinct value.
+            batch[0] = uint256(keccak256(abi.encode("cm", i)))
+                       % notes.FIELD_R();
+            vm.prank(alice);
+            notes.mint(DUMMY_PROOF, batch, 1e18);
+        }
+
+        assertFalse(notes.isAcceptedRoot(emptyRoot),
+            "empty root should have been evicted");
+        // Latest root is still accepted.
+        assertTrue(notes.isAcceptedRoot(notes.noteRoot()));
+    }
+
+    function test_mint_rejectsCommitmentEqualToZeroLeaf() public {
+        _approveNotes(alice, 100e18);
+        uint256[] memory bad = new uint256[](1);
+        bad[0] = notes.ZERO_VALUE();
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: cm == zero leaf"));
+        notes.mint(DUMMY_PROOF, bad, 100e18);
+    }
+
+    function test_mint_rejectsCommitmentOutOfField() public {
+        _approveNotes(alice, 100e18);
+        uint256[] memory bad = new uint256[](1);
+        bad[0] = notes.FIELD_R();  // exactly r is out of [0, r)
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: cm out of field"));
+        notes.mint(DUMMY_PROOF, bad, 100e18);
     }
 }
