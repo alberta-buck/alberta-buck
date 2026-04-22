@@ -25,9 +25,12 @@ This document is the /narrative/ companion to [[file:alberta-buck-notes.org][alb
 overview), [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] (formal correctness), and [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]]
 (Solidity surface).  It walks one concrete example -- Alice mints a 1,200-BUCK transfer
 into six notes of denominations =[1000, 100, 25, 25, 25, 25]= -- end-to-end through the
-Phase-6 Groth16-verified mint pipeline, naming every actor, every artifact, and every
-check.  Where the example bumps up against an open question (Phase-7 spend, mint-circuit
-range bounds), the gap is flagged inline rather than papered over.
+Phase-6 Groth16-verified mint pipeline, and then walks the /inverse/ flow: Bob redeems
+his 1,000-BUCK note via the Phase-7 spend circuit, receives 1,000 BUCK from the pool,
+and leaves no chain-observable link back to =cm_0= (the specific commitment he opened).
+Every actor, every artifact, and every check is named.  Where the example bumps up
+against an open question (Phase-7 spend circuit not yet in code, mint-circuit range
+bounds), the gap is flagged inline rather than papered over.
 
 The aim is to show, by walking the path, that the system delivers five concrete
 guarantees:
@@ -423,7 +426,8 @@ this nullifier", with =cm= as a private witness rather than a public input.
 
 That is when the unlinkability of /spend events/ to /mint events/ becomes a true
 chain-observable property.  Today (Phase 6) Bob still has to point at a specific =cm=
-when redeeming -- because no redemption path exists yet at all.
+when redeeming -- because no redemption path exists yet at all.  The full walkthrough
+of the Phase-7 redemption flow is in *The Redemption (Spend), Step by Step* below.
 
 * Atomicity, No Double-Mint, No Replay
 
@@ -487,22 +491,618 @@ The "receipt" Carol receives is therefore =(T_mint, opening, idHash mapping)=.  
 validity is independently checkable against the public chain.  Nothing here requires
 ongoing cooperation from Alice -- which is exactly the property a receipt should have.
 
-* Putting the Five Guarantees Side-by-Side
+* The Redemption (Spend), Step by Step (Phase 7 Design)
+
+This section walks the /inverse/ of the mint.  Bob holds the opening for the 1,000-BUCK
+note =cm_0=; he wants to redeem it for 1,000 BUCK credited to his on-chain account, and
+he wants no public observer to be able to tell /which/ commitment in the pool he
+consumed.  The section describes Phase-7 design intent -- the spend circuit, the
+on-chain =Notes.spend= entry point, and the Merkle-root machinery it depends on are
+not yet in the code tree.  Everything here follows directly from Theorems 8-10 of
+[[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] and the spend-circuit sketches in
+[[file:alberta-buck-notes.org][alberta-buck-notes.org]] §§2270-2340.
+
+Bob's note is of flavor /A1/ (addressed, identified cheque).  The A-spend circuit is
+described in detail; the B-spend (bearer cheque) collapses to a simpler nullifier rule
+and is covered as a one-paragraph delta at the end.
+
+Two properties of the flow are worth stating up front, because they shape every step:
+
+- *The anonymity set is the full matching-flavor pool, not only same-denomination.*
+  The spend proof takes =cm= as a /private/ witness under a public =noteRoot= -- the
+  chain-observable anonymity set is every unspent commitment of the matching flavor
+  in the tree.  The *face value is a public output*, because the BUCK contract must
+  know how much to pay out; amount-level linkability narrows the effective set to
+  commitments whose hidden =v= could equal the revealed =face=.  Same-denomination
+  issuance is therefore the strongest-privacy regime, but the underlying
+  cryptographic hiding is over the whole tree, not over a denomination class.
+- *The BUCK ERC-20 does not verify the SNARK itself.*  The authorization chain is:
+  valid SNARK + fresh nullifier + root match \(\to\) =Notes.spend= proceeds \(\to\)
+  =Notes.spend= invokes a BUCK transfer out of the pool.  The proof is a capability
+  token for entry into =Notes.spend=; the resulting ERC-20 movement is a routine
+  pool-to-recipient call gated by that entry.  Since the =Notes= pool is a system-
+  public contract in the [[file:alberta-buck-identity.org][IdentityRegistry]], the pool's outbound transfer does not
+  itself require a Chaum-Pedersen receipt -- the recipient's own registration (for
+  A-spends) or a Schnorr signature over =(chainid, nullifier, recipient)= (for
+  B-spends) is what binds the payout destination to the proof.
+
+** Step 0: Bob Holds a Verified Note
+
+From the mint walk (*Step 5: Recipient Verification*) Bob already has:
+
+#+BEGIN_SRC text
+note_artifact_0 = {
+  txHash:    T_mint,
+  index:     K + 0,
+  cm:        cm_0,
+  opening:   ( flavor_A1, 1000e18, rho_0, idHash_bob, predicate_0 ),
+  meta:      { issuer: Alice, ... },
+}
+#+END_SRC
+
+He has independently confirmed that =cm_0= is in =Notes.commitments[]= at index =K=
+and that =Poseidon5(opening)= reproduces it.  The opening has been sitting in his
+wallet for weeks, months, or years -- addressed A-notes are cryptographically safe for
+indefinite holding ([[file:alberta-buck-notes.org][Notes]]).
+
+** Step 1: Fetch the Commitment Tree and Build a Merkle Path
+
+The Phase-7 =Notes= contract maintains an incremental Poseidon Merkle tree of depth
+~20, whose current root is exposed as =noteRoot()=.  Two things happen:
+
+a. Bob (or, more practically, any light-node helper running off-chain) fetches the
+   =Appended(cm, index)= event log from genesis to the current block, reconstructs the
+   tree, and computes his Merkle path for =cm_0= -- a sequence of sibling hashes up to
+   the root.  The path is purely public information; everyone can reproduce it, and
+   Bob does not have to trust any indexer because the event log is canonical.
+b. Bob reads the current =noteRoot()= via =eth_call= and confirms it matches the root
+   he reconstructed.  Any divergence means the local event log is out of sync; in no
+   case does it weaken privacy, only liveness.
+
+Phase 7 also stores a short window of /recent/ historical roots on-chain (e.g. the
+last 128 blocks of root updates), so that a spend transaction assembled against a
+slightly-stale root is not forced to re-prove against every new mint between
+assembly and inclusion.  This is standard zk-rollup hygiene (Zcash, Tornado Cash);
+the concrete window size is a deployment parameter.
+
+** Step 2: Compute the Nullifier
+
+The A-spend nullifier is
+
+\[
+  nf \;=\; \mathrm{Poseidon}_{\mathrm{nf}}\!\bigl(\mathrm{flavor}_A \;\|\; M_{\mathrm{rec}} \;\|\; \rho_0\bigr),
+\]
+
+where \( M_{\mathrm{rec}} = H(\mathrm{identity}_{\mathrm{bob}}) \cdot G \) is the
+identity point Bob's wallet recovers by decrypting the opening's credential payload
+under his registered secret key \( sk_{\mathrm{bob}} \).  Three properties follow:
+
+- *Deterministic.*  The same =(flavor, M_rec, rho)= always gives the same =nf=.  So
+  Bob can only spend =cm_0= once; a second attempt re-derives the same =nf= and is
+  rejected by the nullifier-set check.
+- *Unforgeable without the opening.*  An attacker who sees =cm_0= and the tree cannot
+  compute =nf= without =rho_0= and =M_rec=, both of which live inside the opening.
+- *Re-issuance-safe.*  If Bob's ElGamal key pair is rotated (new =sk_bob'=), his
+  registered credential re-derives the /same/ =M_rec= on a canonical identity, so
+  re-issuance does not create a second redemption path for the same note.  This is
+  Theorem 10.1 in [[file:alberta-buck-proofs.org][the proofs]].
+
+The nullifier is the chain-observable anchor of the spend.  Publishing it is what
+marks =cm_0= as consumed from the tree's /semantic/ point of view, even though the
+tree itself remains append-only and nothing is deleted.
+
+** Step 3: Generate the Spend Proof
+
+Bob's wallet runs =scripts/snark/prove_spend.js= (the Phase-7 analogue of
+=prove_mint.js=).  The spend circuit's signal layout is:
+
+#+BEGIN_SRC text
+public  noteRoot;         # the canonical root Bob read in Step 1
+public  nullifier;        # the nf computed in Step 2
+public  face;             # 1000e18 -- the BUCK to release
+public  recipient;        # Bob's on-chain address (the payout destination)
+public  chainid;          # replay-domain separation
+
+private cm;               # cm_0 -- the specific commitment being opened
+private flavor, v, rho,
+        idHash, predicate;  # the opening
+private merkle_siblings[]; # depth-20 path
+private merkle_indices[];  # left/right flags per level
+private sk_dep;           # Bob's ElGamal secret key (A-spend only)
+private E_note;           # the ElGamal credential baked into cm (A-spend only)
+#+END_SRC
+
+The A-spend circuit enforces five relations simultaneously:
+
+1. *Opening binds.*  =cm === Poseidon5(flavor, v, rho, idHash, predicate)=.
+2. *Merkle membership.*  Walking =merkle_siblings= with =merkle_indices= from =cm=
+   reaches =noteRoot=.
+3. *Nullifier derivation.*  =nullifier === Poseidon_nf(flavor || M_rec || rho)=,
+   where =M_rec= is recovered in-circuit from =E_note= and =sk_dep= (Chaum-Pedersen
+   decryption lifted into the circuit).
+4. *Depositor is the rightful recipient.*  A CP-equality constraint proves that
+   =M_rec= recovered from =E_note= under =sk_dep= equals the =M_reg= that Bob's
+   IdentityRegistry credential registers on chain.  (Theorem 8 reduces the soundness
+   of this constraint to Chaum-Pedersen + knowledge-soundness of the SNARK.)
+5. *Value release matches.*  =face === v=.  Range-bounded by the same =Num2Bits(128)=
+   check that closes Open Question 1 in the proofs.
+
+Critically, =cm= is a *private* witness.  The proof convinces the verifier that
+/some/ =cm= in the tree satisfies (1)-(5); it does not reveal /which/.
+
+Bob's wallet serializes the Groth16 proof into the standard
+=(uint256[2], uint256[2][2], uint256[2])= ABI-static tuple (256 bytes).
+
+** Step 4: Submit =Notes.spend= On Chain
+
+Bob now broadcasts the spend transaction =T_spend=:
+
+#+BEGIN_SRC solidity
+notes.spend(proofBytes, noteRoot, nullifier, 1000e18, bob);
+#+END_SRC
+
+The honest EVM walks =Notes.spend= (design intent; Phase 7 pending):
+
+#+BEGIN_SRC solidity
+require(isAcceptedRoot(noteRoot),        "Notes: stale root");
+require(!nullifiers[nullifier],          "Notes: double spend");
+require(spendVerifier.verifySpend(
+    proof, noteRoot, nullifier, face, recipient, block.chainid
+),                                       "Notes: bad spend proof");
+
+nullifiers[nullifier] = true;            // mark spent before paying out
+noteFaceSum          -= face;
+
+require(buck.transfer(recipient, face),  "Notes: payout failed");
+emit Spent(nullifier, face, recipient);
+#+END_SRC
+
+Four invariants are enforced in order:
+
+a. =noteRoot= is current (or within the recent-roots retention window).  A root from
+   outside that window is stale -- Bob must rebuild the proof against a fresher root.
+b. =nullifier= has never been published before.  This is the double-spend check;
+   Theorem 10.5 in [[file:alberta-buck-proofs.org][the proofs]] says it is sufficient.
+c. The SNARK itself is valid against the =SpendGroth16Verifier=.  By soundness, a
+   witness satisfying (1)-(5) exists.
+d. Only after (a)-(c) pass does the contract mark the nullifier and invoke
+   =buck.transfer(bob, 1000e18)= from its own pool balance.  Because the =Notes= pool
+   is /system-public/, the outbound ERC-20 transfer skips the Chaum-Pedersen leg; the
+   bilateral identity check degenerates to "recipient is a registered account or
+   flavor is bearer".
+
+If any of (a)-(d) reverts, the whole transaction reverts: no BUCK moves, the nullifier
+bit is never set, the noteFaceSum is unchanged.  *Bob gets one attempt per root
+window*; a failed spend can be retried with a refreshed proof, but never in a way
+that consumes a nullifier without paying out the BUCK.
+
+** Step 5: BUCK ERC-20 Pays Out
+
+The =buck.transfer= call inside =Notes.spend= is a routine ERC-20 movement from the
+pool's address to Bob's.  Nothing in the ERC-20 contract knows or cares that the
+transfer originated from a SNARK-authorized redemption -- as far as =Buck.sol= is
+concerned, the =Notes= pool is just another account making a transfer to a registered
+recipient, satisfying the bilateral identity predicate because the pool is
+system-public.
+
+The result on-chain (ignoring demurrage for a moment -- see the next paragraph):
+
+- =Buck.balanceOf(Notes)= decreases by 1,000 BUCK (plus the carried demurrage).
+- =Buck.balanceOf(Bob)= increases by 1,000 BUCK (plus the carried demurrage).
+- =Buck.Transfer(Notes, Bob, payout)= is emitted, where =payout= is face + carry.
+- =Notes.Spent(nullifier, 1000e18, Bob)= is emitted (the Note's recorded =face=).
+- =Notes.nullifiers[nullifier]= becomes =true=.
+
+*Demurrage carry.*  The BUCK transfer in (d) is a /variant/ of the standard BUCK
+ERC-20 transfer.  In a standard outgoing transfer of 1,000 BUCK, the demurrage that
+has accrued on the transferred slice is deducted from the source account as a
+separate fee (retained / burned by the BUCK contract), and the recipient receives
+1,000 fresh BUCKs whose age clock starts anew and dilutes the recipient's average
+demurrage BUCK-age.  The Note spend uses a different convention: the demurrage that
+would normally have been deducted as a fee is instead /transferred to the
+recipient/ along with the face amount, so Bob receives =face + carried_fee=.  The
+Note pool's demurrage BUCK-age is unchanged on the outgoing leg (just as in a
+standard transfer out), but the fee does not get burned -- it rides along with the
+payout.  A further wrinkle dilutes the carry: the pool's actual BUCK balance =B=
+may exceed the sum of outstanding note face values =F= (because anyone can donate
+or burn BUCK to the pool by =buck.transfer(notes, amount)=), and the over-supply
+=B - F= is distributed pro-rata across redeemers, effectively reducing the
+demurrage owed per face-BUCK by the ratio =F/B=.  The full arithmetic, rationale,
+and a proposal for exposing this variant as a first-class BUCK ERC-20 option are
+in *Demurrage-Carrying Transfers: A BUCK ERC-20 Design Proposal* below.
+
+** What the Observer Sees at Spend (Mallory Returns)
+
+After =T_spend= confirms, Mallory can read:
+
+#+BEGIN_SRC text
+T_spend:
+  from:  Bob (a registered IdentityRegistry account)
+  to:    Notes (system-public)
+  data:  Notes.spend(proofBytes, noteRoot, nullifier, 1000e18, Bob)
+
+events:
+  Buck.Transfer(Notes, Bob, 1000e18)
+  Notes.Spent(nullifier, 1000e18, Bob)
+#+END_SRC
+
+What she infers:
+
+- *That a note was spent.*  Yes -- the nullifier is fresh and the pool balance dropped
+  by 1,000 BUCK.
+- *That the spend was for 1,000 BUCK to Bob.*  Yes -- =face= and =recipient= are
+  public inputs (they must be, to tell the ERC-20 whom to pay).
+- /Which commitment in the tree was consumed?/  *No* -- =cm= is a private witness to
+  the SNARK.  Mallory's anonymity set is every unspent commitment of flavor =A= in
+  the pool whose hidden =v= could equal 1,000 BUCK.  At deployment scale this is
+  potentially the entire pool minus prior nullified entries; in a same-denomination
+  regime (many 1,000-BUCK notes in circulation) it is exactly the 1,000-BUCK
+  subset.
+- /Which mint did the spent note come from?/  *No* -- there is no cross-reference
+  to =T_mint= in =T_spend=.  The only link back to any specific mint would be the
+  nullifier, but nullifiers are Poseidon-PRF outputs over secret material; inverting
+  one to recover =(flavor, M_rec, rho)= is exactly the pre-image resistance we
+  assume.
+- /Who held the note before Bob?/  *No*.  If Alice gave the note to Carol who handed
+  it to Dave who sold it to Bob, none of those transfers touched the chain.  The
+  chain sees only "at mint Alice deposited, later Bob withdrew" -- the intermediate
+  holders are invisible.
+
+The residual linkability surfaces are (i) =face= (the revealed amount) and (ii)
+=recipient= (the on-chain payout address).  Both are unavoidable at the SNARK/ERC-20
+boundary -- the contract must know where and how much to pay.  The community-
+standardized mitigation is fixed-denomination notes (so revealing =face= does not
+subdivide the anonymity set) and batched, relay-mediated payouts (so revealing
+=recipient= need not reveal the /true/ beneficiary).  Both are orthogonal to the
+core spend circuit and can be layered on top.
+
+** Why Alice Cannot Steal Bob's Note (Even Between Rooms)
+
+The analogue of the mint-time adversarial walk, flipped: can /any/ actor other than
+Bob -- including Alice-the-issuer, any prior holder, or a random Mallory -- redeem
+=cm_0=?  No, for three independently sufficient reasons:
+
+1. *Opening secrecy.*  The spend circuit requires =(flavor, v, rho, idHash,
+   predicate)= as a private witness.  Without the opening, the circuit is
+   unsatisfiable.  Alice may remember =rho_0= -- she generated it -- but she does
+   /not/ have Bob's =sk_bob=, which is required to decrypt =E_note= in-circuit
+   (relation 3 of the spend circuit).  She cannot produce =M_rec= and therefore
+   cannot compute a valid =nullifier=.
+2. *Recipient-binding in the nullifier.*  Even with the full opening, the A-spend
+   nullifier is keyed on =M_rec= -- the recipient's identity point.  Any prover
+   other than an actor who can prove registration under that same =M_rec= via
+   CP-equality is blocked by relation 4.  This is Theorem 8 in [[file:alberta-buck-proofs.org][the proofs]]: only
+   the registered depositor can assemble an accepting A-spend proof.
+3. *Recipient-binding at the payout site.*  The spend circuit takes =recipient= as a
+   public input -- so if a front-runner intercepts Bob's =proofBytes= and tries to
+   retarget the payout to themselves by re-submitting with a different =recipient=
+   argument, the SNARK immediately rejects (the proof was generated against Bob's
+   address in the public signals, not the attacker's).  The Chaum-Pedersen binding
+   additionally forces =recipient= to be an account registered to the same =M_rec=
+   that keys the nullifier.
+
+For /B-spend/ (bearer) notes, protection (2) collapses -- the nullifier is publicly
+derivable from =rho= alone.  Whoever publishes the nullifier first wins the payout,
+which is the civil-trust semantics of bearer cash.  Protection (3) still applies,
+because the spend circuit still takes =recipient= as a public input and still
+signs it into the proof (via a Schnorr PoK of =sk_dep= over
+=chainid || nullifier || recipient=) so the payout destination cannot be rewritten
+in-flight.
+
+** The B-Spend One-Paragraph Delta
+
+If Bob's note were flavor /B1/ (bearer), Steps 1 and 4 are unchanged; Steps 2-3
+shrink.  The nullifier is =nf = Poseidon_nf(flavor_B || rho_0)= -- publicly
+derivable from the opening, no secret key involved.  The spend circuit drops
+relations 3 and 4 and replaces them with a single Schnorr PoK: the prover
+demonstrates knowledge of the secret key of the /payout/ address =recipient= by
+signing =(chainid, nullifier, recipient)= in-circuit.  This is cheaper (~6,000
+vs ~8,000 constraints, per [[file:alberta-buck-notes.org][Notes]]) but has weaker holder-binding -- if two
+parties hold copies of the same B1 opening (e.g. a paper note photographed and
+forwarded), whichever submits =T_spend= first wins.  That is the intended civil-
+trust semantics of a bearer cheque, not a bug.
+
+** Recapping Property C (Only Valid Notes Redeem)
+
+The original Property C question -- /subsequently only those N valid notes can be
+deposited/ -- becomes concrete at this layer.  Claim: no actor can redeem a
+commitment =cm= unless
+
+a. =cm= was appended to =commitments[]= by a prior =Notes.mint= transaction whose
+   Groth16 proof verified (i.e., =cm= is part of an honest mint batch), /and/
+b. The actor holds the opening of =cm=, /and/
+c. For A-spends, the actor is the depositor keyed by =M_rec= in that opening.
+
+Proof sketch.  The spend circuit's relation 2 (Merkle membership) rejects any =cm=
+not in =noteRoot=.  The mint circuit's relations 1-2 (opening binding and sum
+conservation) are what places a =cm= in =noteRoot= in the first place, and by the
+mint-side soundness story in *Why Alice Cannot Cheat* every such =cm= corresponds to
+a well-formed opening whose =v= is included in the mint's =totalFace= escrow.  The
+spend circuit's relation 5 (=face === v=) then ensures the BUCK released equals
+exactly the share of the escrow that =cm= was allocated.  Summing over every
+accepted spend of a given mint batch, the cumulative BUCK released equals at most
+the =totalFace= escrowed -- property C follows from mint-side value conservation
+plus spend-side nullifier uniqueness.
+
+The outstanding caveat is Open Question 1 (missing =Num2Bits= range check on =v[i]=
+at mint time), which is /load-bearing/ here: without range bounds on =v[i]=, the
+mint-side =sum(v[i]) === totalFace= holds only modulo =r=, so an adversarial mint
+could leave a =cm= whose opening has =v = totalFace + r= in the tree -- and relation
+5 of the spend circuit would happily release =totalFace + r= BUCK against it.
+Phase 7 /cannot ship/ until that range check lands.
+
+* Demurrage-Carrying Transfers: A BUCK ERC-20 Design Proposal
+
+The Note-spend payout in Step 5 invoked a /variant/ of =buck.transfer= whose
+semantics differ from the standard BUCK ERC-20 transfer in one targeted respect:
+the demurrage due on the transferred amount is *carried with* the transfer to the
+recipient rather than *deducted from* the source account as a fee.  This section
+unpacks the mechanic in detail and proposes an approach to making it a
+first-class, per-account option of the BUCK ERC-20 itself -- suitable for the
+Note pool and a small family of similarly-shaped "transitory" accounts.
+
+** Standard vs. Fee-Carrying Transfer
+
+BUCK balances accumulate demurrage over time.  The age-per-BUCK accounting lives
+in [[file:alberta-buck-notes.org][alberta-buck-notes.org §Demurrage Interaction]] and the ERC-20 surface in
+[[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org §BUCK: ERC-20 Token]]; the headline property is that a
+BUCK held for longer has a higher accrued demurrage fee, and that fee settles at
+the next transfer.
+
+- /Fee-deducting transfer (the default)./  Alice transfers 1,000 BUCK to Bob.
+  Demurrage accrued on Alice's account for the transferred slice, computed at
+  transfer time, is a separate deduction from Alice's remaining balance -- the
+  BUCK contract retains it (effectively a burn against the source's balance,
+  since the fee is not credited to any other account).  Bob receives 1,000 BUCK
+  /fresh/: its age clock starts anew in Bob's account, diluting Bob's average
+  demurrage BUCK-age.  From the ERC-20 perspective, Alice's balance drops by
+  =1,000 + fee=, Bob's balance rises by =1,000=, and total supply drops by
+  =fee=.
+- /Fee-carrying transfer (the proposed variant)./  The source contract transfers
+  a face amount of 1,000 BUCK to Bob, /plus/ the demurrage that would have been
+  deducted as a fee.  Bob receives =face + carried_fee= BUCK in one movement.
+  The source's balance drops by =1,000 + fee= -- identical to the deducting
+  case -- but instead of the fee being burned, it is credited to the recipient.
+  Total supply is preserved; the "cost" of the transfer, accounting-wise, is
+  absorbed by the recipient rather than by the network.
+
+The two variants are balance-symmetric on the source side.  The difference is
+entirely on the destination side: is the fee burned or forwarded?
+
+** Why the Note Pool Needs the Fee-Carrying Variant
+
+The Note pool is the BUCK contract's own account.  Its balance holds the aggregate
+face value of every outstanding note, plus any BUCK donated or burned into the
+contract.  Three structural features make the fee-deducting default impractical:
+
+1. *Per-note age opacity.*  When Alice mints six notes, the pool records only six
+   opaque Poseidon commitments -- there is no per-note age clock that the
+   redeeming Bob could query, because every per-note field except =cm= is hidden
+   off-chain.  The pool cannot deduct "the demurrage /Alice's specific note/
+   owes" because the chain does not distinguish Alice's fraction of the pool from
+   Carol's, Dave's, and the rest.  Any per-note fee would have to be computed
+   off the pool aggregate, which would force Bob to pay demurrage fees that the
+   pool's other depositors owed.
+2. *Face-to-payout identity.*  =face= is the public SNARK output and the value
+   the mint circuit committed to.  A fee-deducting pool transfer would deliver
+   =face - fee= to Bob while the proof claimed =face=.  This would break the
+   mint-to-spend value-conservation invariant: the SNARK's promise would not
+   match the ERC-20 ledger movement, and the spend circuit would have to become
+   aware of demurrage accounting to compensate, defeating the clean separation
+   between privacy (the SNARK) and settlement (the ERC-20).
+3. *Transitory nature of the pool./*  The pool is not a long-term BUCK holder with
+   a business reason to retain demurrage fees.  Every BUCK that enters the pool
+   is earmarked for exactly one future redeemer; the pool is a bookkeeping
+   buffer, not an economic actor.  Charging it fee-deducting transfers would
+   skim value from the pool's balance that the pool has no natural mechanism to
+   replenish -- over time, the pool would accumulate a cumulative fee deficit
+   and insolvency.
+
+The fee-carrying variant solves all three: per-note demurrage collapses to a
+pool-level calculation at spend time, Bob receives exactly the face the SNARK
+promised (plus a fee bonus), and the pool never bleeds value into uncredited
+fees.
+
+** Over-Supply and the Subsidy Dilution
+
+A second, orthogonal mechanism compounds the fee-carrying behaviour.  The pool's
+actual BUCK balance =B= can exceed the sum of outstanding note face values =F=
+for two reasons:
+
+- /Donated BUCK./  Anyone can =buck.transfer(notes, amount)= to gift BUCK to
+  the pool.  The pool does not track donations as separate ledger entries; the
+  donated BUCK becomes indistinguishable from the pool's aggregate balance.
+- /Burned BUCK./  Equivalently, BUCK sent to the contract with no matching
+  mint commitment is lost to the sender but retained in the pool.
+
+The over-supply =B - F= is distributed across all outstanding note holders
+pro-rata at redemption time.  When Bob redeems a 1,000-face note out of an
+outstanding =F = 10,000= and pool balance =B = 10,100= BUCK, the 100-BUCK
+over-supply subsidises every redemption at a rate of =(B-F)/F = 1%= of face:
+
+\[
+  \mathrm{payout\_face} \;=\; \mathrm{face} \;\cdot\; \frac{B}{F}
+\]
+
+so Bob's face-equivalent payout is 1,010 BUCK before any demurrage carry.  The
+carried fee itself is then computed on the /subsidised/ face: demurrage at the
+pool's aggregate age-per-BUCK, applied to =payout_face=, and diluted by the
+ratio =F/B= (because the over-supply is, by construction, younger than the
+face-backed fraction of the pool -- donations enter as fresh BUCK).  Net:
+
+\[
+  \mathrm{payout} \;=\; \mathrm{face} \cdot \frac{B}{F} \;+\; \mathrm{fee}(\mathrm{face}, \text{pool age}) \cdot \frac{F}{B}
+\]
+
+The chain-observer's view collapses this to a single =Transfer(Notes, Bob,
+payout)= event.  The arithmetic is internal to =Notes.spend= and is identical
+for every spender of the same face, keeping the anonymity set intact.
+
+** A Proposal: Per-Account Fee-Treatment Mode
+
+Fee-carrying transfers are useful beyond the Note pool.  A BUCK account benefits
+from the variant whenever:
+
+- The true beneficiary of the BUCK is /not/ the account-of-record but some
+  downstream recipient the account forwards to (escrow, payroll, bridge, pool).
+- Per-depositor age bookkeeping is either opaque (commitment-pool privacy) or
+  inconvenient (batched flows, cross-chain delays).
+- The account is /transitory/: it has no durable business reason to retain
+  demurrage fees that its depositors would normally pay on their own.
+
+This document proposes a per-account /fee-treatment mode/ in the BUCK ERC-20,
+exposed as:
+
+#+BEGIN_SRC solidity
+enum FeeTreatment { Deducting, Carrying }
+
+mapping(address => FeeTreatment) internal _feeMode;     // default: Deducting
+
+event FeeModeSet(address indexed account, FeeTreatment mode);
+event FeeCarried(address indexed from, address indexed to,
+                 uint256 face, uint256 carriedFee);
+
+/// @notice Opt a BUCK-derived contract into demurrage-carrying transfers.
+///         Callable only by governance; callable only for addresses whose
+///         bytecode exposes the BuckDerived() marker (prevents EOAs).
+function setFeeMode(address account, FeeTreatment mode) external;
+#+END_SRC
+
+Transfer semantics branch on the /source/ account's mode:
+
+- =Deducting= (default).  Standard behaviour; every existing account is in this
+  mode.  A 1,000-BUCK outgoing transfer debits =1,000 + fee=, credits =1,000=,
+  and burns =fee=.
+- =Carrying=.  The variant.  A 1,000-BUCK outgoing transfer debits =1,000 + fee=
+  from the source (same debit as Deducting), credits =1,000 + fee= to the
+  recipient, and additionally emits =FeeCarried(from, to, 1000, fee)= so that
+  the recipient's wallet can correctly attribute the "bonus" portion to
+  demurrage carry rather than an overpayment.
+
+Three guard conditions constrain the =Carrying= mode:
+
+1. *Governance-only assignment.*  =setFeeMode= is callable only by the BUCK
+   governance address (the same governance path that trusts issuers and upgrades
+   the IdentityRegistry).  Account creation via the standard registration path
+   never sets =Carrying=; an explicit post-deployment governance call is
+   required.
+2. *Derivation whitelist.*  The governance call requires the target address's
+   bytecode to expose a =BuckDerived()= marker (a view function returning a
+   sentinel constant).  EOAs, which have no bytecode, can never be in
+   =Carrying= mode even by governance misconfiguration.  Externally-authored
+   contracts that do not declare themselves BUCK-derived are equally ineligible.
+3. *Recipient disclosure.*  The =FeeCarried= event is emitted /before/ the
+   standard =Transfer= event within the same call, so any wallet that indexes
+   transfers in order sees the fee-mode signal before the balance movement.
+   Wallets that understand the event attribute the carry correctly; wallets
+   that do not still see a strictly-correct =Transfer(from, to, amount + fee)=
+   event, so total-supply and per-account balance accounting remain consistent
+   -- only downstream per-account age bookkeeping needs the event to stay
+   precise.
+
+** Examples Beyond Notes
+
+The pattern generalises cleanly:
+
+- /Escrow pools for delivery-vs-payment./  A contract holding BUCK pending a
+  condition (oracle decision, off-chain proof, cross-chain bridge settlement)
+  shares the Note pool's per-depositor age opacity.  Setting the escrow to
+  =Carrying= lets the eventual beneficiary receive the intended face amount
+  plus accrued fee without the escrow contract running a demurrage deficit.
+- /Batched payroll./  A payroll contract pulling from an employer and
+  distributing to N employees, if in =Carrying= mode, delivers the gross face
+  amount with demurrage carry.  Each employee absorbs their proportional share
+  of the fee, rather than the employer pre-funding it out of a separate
+  balance.
+- /Cross-chain bridges./  A BUCK-side bridge escrow holding funds pending
+  withdrawal on the other chain can carry demurrage to the withdrawer, so
+  bridge latency does not eat into user-visible amounts.
+- /Transitory utility accounts./  Any contract that routes BUCK between an
+  inbound party and an outbound party within a bounded lifetime -- a prediction
+  market escrow, a subscription-period holding vault, a donation-matching
+  intermediary -- fits the pattern.  The /inconvenience of computing exact
+  fees due between deposit and spending/ is the tell that =Carrying= is the
+  right mode.
+
+In every case the shared invariant is: the account-of-record is transitory, its
+depositors are the true beneficiaries of the held BUCK, and the contract has no
+durable reason to retain demurrage.
+
+** Restrictions: EOAs and External Contracts Stay Deducting
+
+Regular BUCK-holding addresses -- EOAs, externally-authored contracts, unregistered
+wallets -- *cannot* be set to =Carrying= mode.  Three reasons:
+
+1. *Consent.*  Recipients of an EOA transfer cannot be expected to interpret
+   the =FeeCarried= event as a known quantity; wallets would have to prompt for
+   acceptance on every ingestion, which is a UX disaster.  BUCK-derived contracts
+   are programmatic, their API contracts are documented, and their recipients
+   know in advance what to expect.
+2. *Adversarial bookkeeping./*  A malicious EOA in =Carrying= mode could claim
+   large outgoing "fees" to friendly recipients as a covert value-transfer
+   channel, avoiding demurrage they owed.  The derivation whitelist closes this
+   by limiting =Carrying= to bytecode that has been reviewed alongside the BUCK
+   governance process.
+3. *Total-supply integrity./*  The BUCK contract's global demurrage accounting
+   assumes regular accounts deduct fees (burn).  If EOAs could carry, the
+   aggregate demurrage burn rate would depend on per-account mode settings in
+   ways that governance would have no principled way to calibrate.
+   Restricting =Carrying= to a small whitelist keeps the macro-level demurrage
+   model tractable.
+
+** Open Design Questions
+
+1. *Mode-switching with non-zero balance./*  Can a contract switch from =Deducting=
+   to =Carrying= while holding BUCK?  The cleanest answer is no -- require
+   =balanceOf(account) == 0= as a precondition -- to avoid discontinuities in
+   age-per-BUCK accounting across the switch.  An upgrade path (drain, switch,
+   refill) covers the rare legitimate use case.
+2. *Interaction with the Chaum-Pedersen approve receipt./*  The fee-carrying leg
+   does not change the CP-equality obligation on the sender (the source's
+   identity is still bound by the receipt).  What changes is the /amount/ the
+   recipient sees credited; the CP receipt commits to a face, not a
+   face-plus-fee.  Acceptable as long as the receipt's =amount= field is
+   interpreted as "what the source committed to pay" rather than "what the
+   recipient netted".
+3. *Event-ordering discipline./*  =FeeCarried= before =Transfer= keeps wallets
+   compatible.  A conformance test in =test/Buck.t.sol= should assert the order,
+   so a future refactor cannot silently flip it.
+4. *Gas cost./*  Each =Carrying= transfer adds one SLOAD for the source's mode
+   lookup (~100 gas) plus one event emission (~375 gas).  Negligible compared to
+   the ~475 KB Groth16 verify in the Notes case.
+
+This proposal is referenced from [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]]'s *Open Work Items*
+section as a concrete Phase-7 deliverable: the Note spend cannot ship without it,
+and the =Carrying= mode is the minimum-surface mechanism that makes the spend's
+value-conservation invariant hold at the ERC-20 layer.
+
+* Putting the Guarantees Side-by-Side
+
+The mint walkthrough established five guarantees; the spend walkthrough adds four
+more that become concrete only once the redemption path exists.
 
   #+LATEX: {\scriptsize
-  | Guarantee                             | Mechanism                                                                                  |
-  |---------------------------------------+--------------------------------------------------------------------------------------------|
-  | Atomic conservation                   | Single EVM call: proof verify, =transferFrom=, append-cms all-or-nothing                   |
-  | Issuer-bound, recipient-blinded       | =msg.sender= is public; =cm_i= is Poseidon-hidden over =(flavor, v, rho, idHash, pred)=    |
-  | Per-note disclosure (recipient only)  | Off-chain opening contains exactly one note's witness fields                               |
-  | Offline receipt reconstruction        | =T_mint= calldata + opening + on-chain Identity lookup is sufficient and self-checkable    |
-  | Adversarial-prover soundness          | Groth16 knowledge soundness on fixed on-chain verifier; ERC-20 balance/allowance integrity |
+  | Stage | Guarantee                              | Mechanism                                                                                       |
+  |-------+----------------------------------------+-------------------------------------------------------------------------------------------------|
+  | Mint  | Atomic conservation                    | Single EVM call: proof verify, =transferFrom=, append-cms all-or-nothing                        |
+  | Mint  | Issuer-bound, recipient-blinded        | =msg.sender= is public; =cm_i= is Poseidon-hidden over =(flavor, v, rho, idHash, pred)=         |
+  | Mint  | Per-note disclosure (recipient only)   | Off-chain opening contains exactly one note's witness fields                                    |
+  | Mint  | Offline receipt reconstruction         | =T_mint= calldata + opening + on-chain Identity lookup is sufficient and self-checkable         |
+  | Mint  | Adversarial-prover soundness           | Groth16 knowledge soundness on fixed on-chain verifier; ERC-20 balance/allowance integrity      |
+  | Spend | Redemption unlinkable to specific =cm= | =cm= is a /private/ witness under public =noteRoot=; only nullifier + face + recipient revealed |
+  | Spend | Double-spend prevented                 | Deterministic nullifier + one-bit =nullifiers= mapping; rejected on reuse                       |
+  | Spend | Recipient-bound payout                 | =recipient= is a public SNARK input; proof rejects if re-targeted in-flight                     |
+  | Spend | Value conservation across mint<->spend | Range-bounded mint =v[i]= + spend =face === v=; cumulative payouts \le =totalFace= per batch    |
   #+LATEX: }
 
-  Each row is enforced by code already in the tree: Phase 5 (=Notes.sol=, =StubMintVerifier=) for
-  the contract surface, Phase 6 (=mint.circom=, =MintGroth16Verifier=, =MintVerifierAdapter=) for
-  the SNARK pipeline, the [[file:alberta-buck-ethereum.org][ IdentityRegistry]] for issuer attestation, and the [[file:alberta-buck-proofs.org][formal proofs]] (Theorems
-  7-11) for the cryptographic backstop.
+  The mint-stage rows are enforced by code already in the tree: Phase 5 (=Notes.sol=,
+  =StubMintVerifier=) for the contract surface, Phase 6 (=mint.circom=,
+  =MintGroth16Verifier=, =MintVerifierAdapter=) for the SNARK pipeline, the
+  [[file:alberta-buck-ethereum.org][IdentityRegistry]] for issuer attestation, and the [[file:alberta-buck-proofs.org][formal proofs]] (Theorems 7-11) for
+  the cryptographic backstop.  The spend-stage rows are Phase-7 design intent: the
+  spend circuit, the incremental Merkle root, and =Notes.spend= are not yet in the
+  tree, and the mint-circuit range check (Open Question 1) is a prerequisite for the
+  value-conservation row.
   
 * Open Questions and Forward-Looking Caveats
   
@@ -522,12 +1122,13 @@ so the reader is not misled about the current state.
    correlation.  Whether to add an explicit =batchId= storage slot (and a matching
    public input to the spend circuit) is an open design question; see [[file:alberta-buck-proofs.org][Open Question 2]].
 3. *Spend circuit not yet built.*  Bob's note is currently not redeemable -- there is
-   no =Notes.spend= function.  The Phase-7 design will add a Merkle-membership +
-   nullifier + value-conservation SNARK that lets Bob spend his note without revealing
-   which =cm_i= he opened.  Until then, the system is "mint-only" and the
+   no =Notes.spend= function in the tree.  The Phase-7 design is walked in
+   *The Redemption (Spend), Step by Step* above, and open questions on its
+   integration with the mint-circuit commitment schema are in [[file:alberta-buck-proofs.org][Open Question 3]] of the
+   proofs.  Until that circuit ships, the system is "mint-only" and the
    unlinkability story is an at-rest property of the published commitments rather than
-   an end-to-end chain-observable property of the spend.  See [[file:alberta-buck-proofs.org][Open Question 3]] and the
-   [[file:alberta-buck-ethereum.org][Phase 7 and Beyond]] section.
+   an end-to-end chain-observable property of the spend.  See also the
+   [[file:alberta-buck-ethereum.org][Phase 7 and Beyond]] section of the implementation doc.
 4. *Phase-6 batch size is pinned at =N=2=.*  The walk above used =N=6= for narrative
    clarity.  The shipped =mint.circom= is templated at =N=2= and the
    =MintVerifierAdapter= hard-codes =MINT_BATCH_SIZE=2=.  Splitting 1,200 BUCK into

@@ -1897,6 +1897,27 @@ Merkle-prove against).
    stop conditions (already noted in *Sequencing and Stop Conditions* below; cross-reference is
    intentional).
 
+4. *Add a per-account fee-treatment mode to the BUCK ERC-20*.
+
+   The Notes redemption path requires a /fee-carrying/ BUCK transfer: the demurrage that would
+   normally be deducted from the source as a fee is instead credited to the recipient along with
+   the face amount.  Without this, the Note-pool's accounting develops a cumulative demurrage
+   deficit (each redemption skims fee value the pool has no way to replenish), and the spend
+   SNARK's =face === v= value-conservation invariant is broken at the ERC-20 boundary (the
+   recipient nets =face - fee=, not =face=).  The design is walked in detail in
+   [[file:alberta-buck-notes-flow.org][alberta-buck-notes-flow.org §Demurrage-Carrying Transfers]].
+
+   *Action*: add an =enum FeeTreatment { Deducting, Carrying }= and a
+   =mapping(address => FeeTreatment) _feeMode= to =Buck.sol=, defaulting every existing and new
+   account to =Deducting=.  Gate =setFeeMode= behind governance and a =BuckDerived()= bytecode
+   marker so that only whitelisted derived contracts (the Notes pool today; escrow pools, payroll
+   routers, and cross-chain bridges in future) can be flipped to =Carrying=.  Emit
+   =FeeCarried(from, to, face, carriedFee)= before the standard =Transfer= event on every
+   Carrying-mode transfer so wallets can attribute the bonus portion correctly.  Require
+   =balanceOf(account) == 0= as a precondition for mode changes to avoid age-per-BUCK
+   discontinuities.  Add a Foundry conformance test that asserts event ordering and that
+   =Carrying= is unreachable by EOAs.
+
 ** Sequencing and Stop Conditions
 
 The phases are strict prerequisites of one another: Phase /n+1/ does not begin until Phase /n/

@@ -8,6 +8,7 @@ import "../src/BuckKController.sol";
 import "../src/IdentityRegistry.sol";
 import "../src/Notes.sol";
 import "../src/StubMintVerifier.sol";
+import "../src/StubSpendVerifier.sol";
 import "../src/PoseidonT3Bytecode.sol";
 
 /// @notice Deploy all three core contracts to a local or test network.
@@ -50,8 +51,10 @@ contract Deploy is Script {
         console.log("Buck deployed at:", address(buck));
 
         // 5. Deploy Notes (Phase 1: stub mint verifier)
-        StubMintVerifier mintVerifier = new StubMintVerifier(governance);
+        StubMintVerifier  mintVerifier  = new StubMintVerifier(governance);
         console.log("StubMintVerifier deployed at:", address(mintVerifier));
+        StubSpendVerifier spendVerifier = new StubSpendVerifier(governance);
+        console.log("StubSpendVerifier deployed at:", address(spendVerifier));
 
         // Poseidon-T3 (2-input) hash precompile, deployed from raw bytecode.
         // Required by Notes for the on-chain incremental Merkle tree.
@@ -59,7 +62,11 @@ contract Deploy is Script {
         console.log("PoseidonT3 deployed at:", poseidonT3);
 
         Notes notes = new Notes(
-            address(buck), address(mintVerifier), poseidonT3, governance
+            address(buck),
+            address(mintVerifier),
+            address(spendVerifier),
+            poseidonT3,
+            governance
         );
         console.log("Notes deployed at:", address(notes));
 

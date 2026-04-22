@@ -3,8 +3,16 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {IMintVerifier} from "./IMintVerifier.sol";
-import {IPoseidonT3}   from "./IPoseidonT3.sol";
+import {IMintVerifier}  from "./IMintVerifier.sol";
+import {ISpendVerifier} from "./ISpendVerifier.sol";
+import {IPoseidonT3}    from "./IPoseidonT3.sol";
+
+/// @dev Buck-specific age-preserving transfer.  Notes calls this on spend
+///      so the recipient absorbs the pool's average demurrage age rather
+///      than paying a spike of settled fee at mint time.
+interface IBuckCarrying {
+    function transferCarrying(address to, uint256 amount) external returns (bool);
+}
 
 /// @title Notes -- BUCK Notes commitment-pool registry.
 /// @notice One global pool of Poseidon commitments behind a SNARK-verified
@@ -54,8 +62,9 @@ contract Notes {
 
     // ---- governance + verifier --------------------------------------------
 
-    address       public governance;
-    IMintVerifier public mintVerifier;
+    address        public governance;
+    IMintVerifier  public mintVerifier;
+    ISpendVerifier public spendVerifier;
 
     // ---- commitment / nullifier state -------------------------------------
 
@@ -101,6 +110,12 @@ contract Notes {
 
     event GovernanceTransferred(address indexed previous, address indexed next);
     event MintVerifierUpdated(address indexed previous, address indexed next);
+    event SpendVerifierUpdated(address indexed previous, address indexed next);
+
+    /// @notice Emitted when a note is successfully spent.  `face` BUCK was
+    ///         transferred (transferCarrying) from this contract to
+    ///         `recipient`; `nullifier` is now burned forever.
+    event Spent(uint256 indexed nullifier, uint256 face, address indexed recipient);
 
     /// @notice One per minted commitment.  `leafIndex` is the Merkle leaf
     ///         position (0-indexed insertion order).
@@ -121,18 +136,21 @@ contract Notes {
 
     constructor(
         address _buck,
-        address _verifier,
+        address _mintVerifier,
+        address _spendVerifier,
         address _poseidon,
         address _governance
     ) {
-        require(_buck       != address(0), "buck=0");
-        require(_verifier   != address(0), "verifier=0");
-        require(_poseidon   != address(0), "poseidon=0");
-        require(_governance != address(0), "governance=0");
-        buck         = IERC20(_buck);
-        mintVerifier = IMintVerifier(_verifier);
-        poseidon     = IPoseidonT3(_poseidon);
-        governance   = _governance;
+        require(_buck          != address(0), "buck=0");
+        require(_mintVerifier  != address(0), "mintVerifier=0");
+        require(_spendVerifier != address(0), "spendVerifier=0");
+        require(_poseidon      != address(0), "poseidon=0");
+        require(_governance    != address(0), "governance=0");
+        buck          = IERC20(_buck);
+        mintVerifier  = IMintVerifier(_mintVerifier);
+        spendVerifier = ISpendVerifier(_spendVerifier);
+        poseidon      = IPoseidonT3(_poseidon);
+        governance    = _governance;
 
         // Domain-separated empty-leaf scalar.  Reducing mod r keeps it in
         // the field; the high bits lost by the reduction don't matter --
@@ -156,7 +174,8 @@ contract Notes {
         );
 
         emit GovernanceTransferred(address(0), _governance);
-        emit MintVerifierUpdated(address(0), _verifier);
+        emit MintVerifierUpdated(address(0),  _mintVerifier);
+        emit SpendVerifierUpdated(address(0), _spendVerifier);
     }
 
     function transferGovernance(address next) external {
@@ -171,6 +190,13 @@ contract Notes {
         require(next != address(0),       "verifier=0");
         emit MintVerifierUpdated(address(mintVerifier), next);
         mintVerifier = IMintVerifier(next);
+    }
+
+    function setSpendVerifier(address next) external {
+        require(msg.sender == governance, "not governance");
+        require(next != address(0),       "verifier=0");
+        emit SpendVerifierUpdated(address(spendVerifier), next);
+        spendVerifier = ISpendVerifier(next);
     }
 
     // ---- views ------------------------------------------------------------
@@ -190,8 +216,12 @@ contract Notes {
     ///         this check makes that root acceptable for at most
     ///         `ROOT_HISTORY_SIZE` future insertions.
     function isAcceptedRoot(uint256 root) external view returns (bool) {
+        return _isAcceptedRoot(root);
+    }
+
+    function _isAcceptedRoot(uint256 root) internal view returns (bool) {
         if (root == 0) return false;
-        uint8  idx = currentRootIndex;
+        uint8 idx = currentRootIndex;
         for (uint256 i = 0; i < ROOT_HISTORY_SIZE; i++) {
             if (roots[idx] == root) return true;
             if (idx == 0) idx = ROOT_HISTORY_SIZE - 1;
@@ -248,6 +278,51 @@ contract Notes {
         noteFaceSum += totalFace;
 
         emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
+    }
+
+    // ---- spend ------------------------------------------------------------
+
+    /// @notice Redeem a note.  Verifies that the spender knows a Poseidon-5
+    ///         opening of a commitment included under `noteRoot` (which must
+    ///         still be in the recent-roots window), that the nullifier has
+    ///         not been burned, and that the Groth16 spend proof binds
+    ///         `(noteRoot, nullifier, face, recipient, block.chainid)` in
+    ///         its public inputs.  On success the pool transferCarrying's
+    ///         `face` BUCK to `recipient` -- the recipient absorbs the pool's
+    ///         average demurrage age via a weighted-index merge, which is
+    ///         the anonymity cost and also the upside for anyone who held a
+    ///         note longer than the pool average.
+    ///
+    /// @dev Nullifier and face-sum bookkeeping happen before the external
+    ///      transferCarrying call.  If the transfer reverts the whole spend
+    ///      reverts, so the nullifier is not "consumed but unpaid".
+    function spend(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient
+    ) external {
+        require(recipient != address(0),  "Notes: zero recipient");
+        require(face      > 0,            "Notes: zero face");
+        require(_isAcceptedRoot(root),    "Notes: unknown root");
+        require(!nullifiers[nullifier],   "Notes: already spent");
+        require(
+            spendVerifier.verifySpend(
+                proof, root, nullifier, face, recipient, block.chainid
+            ),
+            "Notes: bad spend proof"
+        );
+
+        nullifiers[nullifier] = true;
+        noteFaceSum          -= face;
+
+        require(
+            IBuckCarrying(address(buck)).transferCarrying(recipient, face),
+            "Notes: transfer failed"
+        );
+
+        emit Spent(nullifier, face, recipient);
     }
 
     // ---- internal: incremental tree insertion -----------------------------

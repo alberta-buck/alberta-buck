@@ -1,38 +1,33 @@
 #!/usr/bin/env bash
-# Groth16 trusted setup for the mint circuit (development only).
+# Groth16 trusted setup for the BUCK Notes circuits (development only).
 #
-# Produces:
-#   build/snark/ptau/pot12_final.ptau   - universal powers of tau
-#   build/snark/mint/mint_final.zkey    - circuit-specific proving key
-#   build/snark/mint/verification_key.json
-#   src/MintGroth16Verifier.sol         - auto-generated Solidity verifier
+# Produces (per circuit <c> in {mint, spend}):
+#   build/snark/ptau/pot${POT_POW}_final.ptau   - universal powers of tau
+#   build/snark/<c>/<c>_final.zkey              - circuit-specific proving key
+#   build/snark/<c>/verification_key.json
+#   src/<C>Groth16Verifier.sol                  - auto-generated Solidity verifier
 #
-# The ceremony contributions use fixed dev-only entropy; production deployments
+# The mint circuit is small enough for pow 12; the spend circuit
+# (~12k total constraints from the depth-20 Merkle path + Poseidon openings)
+# bumps the universal ceremony to pow 15 -- snarkjs sizes the FFT domain at
+# `2 * constraints` rounded up to the next power of 2, so 12120 * 2 = 24240
+# requires 2^15 = 32768.  Both circuits share that pot15 ptau -- ptau is
+# "universal" within a single curve, larger only costs constant time per
+# circuit beyond what each needs.
+#
+# Ceremony contributions use fixed dev-only entropy; production deployments
 # must replace this with a real multi-party ceremony.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD="$ROOT/build/snark"
 POT_DIR="$BUILD/ptau"
-MINT="$BUILD/mint"
-POT_POW=12
+POT_POW=15
 PTAU0="$POT_DIR/pot${POT_POW}_0000.ptau"
 PTAU1="$POT_DIR/pot${POT_POW}_0001.ptau"
 PTAUF="$POT_DIR/pot${POT_POW}_final.ptau"
-R1CS="$MINT/mint.r1cs"
-ZKEY0="$MINT/mint_0000.zkey"
-ZKEYF="$MINT/mint_final.zkey"
-VKEY="$MINT/verification_key.json"
-VERIFIER="$ROOT/src/MintGroth16Verifier.sol"
 
-mkdir -p "$POT_DIR" "$MINT"
-
-if [ ! -f "$R1CS" ]; then
-    echo "[circom] compiling circuits/mint.circom"
-    mkdir -p "$MINT"
-    ( cd "$ROOT/circuits" && \
-      circom mint.circom --r1cs --wasm --sym --output "$MINT" -l ../node_modules )
-fi
+mkdir -p "$POT_DIR"
 
 if [ ! -f "$PTAUF" ]; then
     echo "[ptau] new bn128 2^${POT_POW}"
@@ -46,24 +41,50 @@ else
     echo "[ptau] reusing $PTAUF"
 fi
 
-if [ ! -f "$ZKEYF" ]; then
-    echo "[zkey] groth16 setup"
-    snarkjs g16s "$R1CS" "$PTAUF" "$ZKEY0" -v
-    echo "[zkey] contribute (dev entropy)"
-    echo "alberta-buck-dev-zkey" | snarkjs zkc "$ZKEY0" "$ZKEYF" \
-        --name="alberta-buck-dev" -v
-    echo "[zkey] export verification key"
-    snarkjs zkev "$ZKEYF" "$VKEY"
-else
-    echo "[zkey] reusing $ZKEYF"
-fi
+# ---------------------------------------------------------------------------
+# Per-circuit setup.  Each circuit gets its own zkey, verification key, and
+# Solidity verifier.  The Solidity contract name is forced to
+# "<C>Groth16Verifier" via sed since snarkjs's template names every contract
+# the same generic "Groth16Verifier".
 
-echo "[sol] exporting Solidity verifier"
-snarkjs zkesv "$ZKEYF" "$VERIFIER"
-# snarkjs's generic template names the contract Groth16Verifier; rename to
-# match the rest of the project.
-sed -i.bak 's/contract Groth16Verifier/contract MintGroth16Verifier/' "$VERIFIER"
-rm -f "$VERIFIER.bak"
-echo "wrote $VERIFIER"
+setup_circuit() {
+    local CIRCUIT="$1"          # e.g. "mint", "spend"
+    local CONTRACT_PREFIX="$2"  # e.g. "Mint", "Spend"
+    local OUT="$BUILD/$CIRCUIT"
+    local R1CS="$OUT/${CIRCUIT}.r1cs"
+    local ZKEY0="$OUT/${CIRCUIT}_0000.zkey"
+    local ZKEYF="$OUT/${CIRCUIT}_final.zkey"
+    local VKEY="$OUT/verification_key.json"
+    local VERIFIER="$ROOT/src/${CONTRACT_PREFIX}Groth16Verifier.sol"
+
+    mkdir -p "$OUT"
+
+    if [ ! -f "$R1CS" ]; then
+        echo "[circom] compiling circuits/${CIRCUIT}.circom"
+        ( cd "$ROOT/circuits" && \
+          circom "${CIRCUIT}.circom" --r1cs --wasm --sym --output "$OUT" -l ../node_modules )
+    fi
+
+    if [ ! -f "$ZKEYF" ]; then
+        echo "[zkey] groth16 setup ($CIRCUIT)"
+        snarkjs g16s "$R1CS" "$PTAUF" "$ZKEY0" -v
+        echo "[zkey] contribute ($CIRCUIT, dev entropy)"
+        echo "alberta-buck-dev-zkey-${CIRCUIT}" | snarkjs zkc "$ZKEY0" "$ZKEYF" \
+            --name="alberta-buck-dev-${CIRCUIT}" -v
+        echo "[zkey] export verification key ($CIRCUIT)"
+        snarkjs zkev "$ZKEYF" "$VKEY"
+    else
+        echo "[zkey] reusing $ZKEYF"
+    fi
+
+    echo "[sol] exporting Solidity verifier ($CIRCUIT)"
+    snarkjs zkesv "$ZKEYF" "$VERIFIER"
+    sed -i.bak "s/contract Groth16Verifier/contract ${CONTRACT_PREFIX}Groth16Verifier/" "$VERIFIER"
+    rm -f "$VERIFIER.bak"
+    echo "wrote $VERIFIER"
+}
+
+setup_circuit mint  Mint
+setup_circuit spend Spend
 
 echo "setup complete"

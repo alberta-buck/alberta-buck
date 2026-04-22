@@ -11,6 +11,7 @@ import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {Notes}                from "../src/Notes.sol";
 import {IMintVerifier}        from "../src/IMintVerifier.sol";
 import {StubMintVerifier}     from "../src/StubMintVerifier.sol";
+import {StubSpendVerifier}    from "../src/StubSpendVerifier.sol";
 import {PoseidonT3Bytecode}   from "../src/PoseidonT3Bytecode.sol";
 
 /// @notice IMintVerifier that always rejects -- exercises the negative path
@@ -28,6 +29,7 @@ contract NotesTest is Test {
     IdentityRegistry      internal reg;
     Notes                 internal notes;
     StubMintVerifier      internal stub;
+    StubSpendVerifier     internal spendStub;
     address               internal poseidon;
 
     address internal constant GOV     = address(0xA0);
@@ -67,9 +69,12 @@ contract NotesTest is Test {
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
 
         // Notes stack.
-        stub     = new StubMintVerifier(GOV);
-        poseidon = PoseidonT3Bytecode.deploy();
-        notes    = new Notes(address(buck), address(stub), poseidon, GOV);
+        stub      = new StubMintVerifier(GOV);
+        spendStub = new StubSpendVerifier(GOV);
+        poseidon  = PoseidonT3Bytecode.deploy();
+        notes     = new Notes(
+            address(buck), address(stub), address(spendStub), poseidon, GOV
+        );
 
         // The pool is a "regular account" -- it has no PS credential, so we
         // mark it system-public to satisfy Buck's identity-bound transfer.
@@ -177,13 +182,15 @@ contract NotesTest is Test {
 
     function test_constructor_rejectsZero() public {
         vm.expectRevert(bytes("buck=0"));
-        new Notes(address(0), address(stub), poseidon, GOV);
-        vm.expectRevert(bytes("verifier=0"));
-        new Notes(address(buck), address(0), poseidon, GOV);
+        new Notes(address(0), address(stub), address(spendStub), poseidon, GOV);
+        vm.expectRevert(bytes("mintVerifier=0"));
+        new Notes(address(buck), address(0), address(spendStub), poseidon, GOV);
+        vm.expectRevert(bytes("spendVerifier=0"));
+        new Notes(address(buck), address(stub), address(0), poseidon, GOV);
         vm.expectRevert(bytes("poseidon=0"));
-        new Notes(address(buck), address(stub), address(0), GOV);
+        new Notes(address(buck), address(stub), address(spendStub), address(0), GOV);
         vm.expectRevert(bytes("governance=0"));
-        new Notes(address(buck), address(stub), poseidon, address(0));
+        new Notes(address(buck), address(stub), address(spendStub), poseidon, address(0));
     }
 
     // ---- governance --------------------------------------------------------

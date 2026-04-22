@@ -235,7 +235,14 @@ contract Buck is ERC20 {
     }
 
     function _identityCheckedTransfer(address from, address to, uint256 amount) internal {
-        require(identity.isVerified(from), "BUCK: sender not verified");
+        // System-public accounts (e.g. the Notes pool) are governance-
+        // designated audit origins -- they have no PS credential, but they
+        // are identifiable, so they qualify as a legitimate sender.  The
+        // receipt-hash branch below already anticipates isPublic(from).
+        require(
+            identity.isVerified(from) || identity.isPublic(from),
+            "BUCK: sender not verified"
+        );
         require(
             identity.isVerified(to) || identity.isPublic(to),
             "BUCK: recipient not verified"
@@ -425,7 +432,14 @@ contract Buck is ERC20 {
     ///         standard transfer out.
     function transferCarrying(address to, uint256 amount) external returns (bool) {
         address from = msg.sender;
-        require(identity.isVerified(from), "BUCK: sender not verified");
+        // Same sender rule as standard transfer: verified-or-public.  The
+        // Notes pool is the canonical isPublic sender -- it pays out carried
+        // BUCK on spend, absorbing the pool's average demurrage age into
+        // the recipient's weighted index.
+        require(
+            identity.isVerified(from) || identity.isPublic(from),
+            "BUCK: sender not verified"
+        );
         require(
             identity.isVerified(to) || identity.isPublic(to),
             "BUCK: recipient not verified"
