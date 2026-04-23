@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             ALBERTA BUCK - FORMAL CORRECTNESS PROOFS (DRAFT
-                                 V0.5)
+                                 V0.6)
             Rerandomization, Re-Encryption, and Notes Spend
                                Predicates
 

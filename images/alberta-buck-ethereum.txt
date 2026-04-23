@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                THE ALBERTA BUCK - ETHEREUM IMPLEMENTATION
-                              (DRAFT V0.3)
+                              (DRAFT V0.6)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
