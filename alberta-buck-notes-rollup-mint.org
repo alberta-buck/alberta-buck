@@ -4,6 +4,17 @@
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
 
+#+EXPORT_FILE_NAME: ./images/alberta-buck-notes-rollup-mint
+#+STARTUP: org-startup-with-inline-images inlineimages
+#+STARTUP: org-latex-tables-centered nil
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+#+OPTIONS: toc:nil
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+
+#+ATTR_LATEX: :width 10cm
+[[https://perry.kundert.ca/images/dominion-logo.png]]
+
 #+BEGIN_ABSTRACT
 This memo records a substantial design pivot for the BUCK Notes mint path.
 The shipped Phase-7 implementation (=src/Notes.sol=, =circuits/mint.circom=)
@@ -34,6 +45,10 @@ Updating =alberta-buck-notes-flow.org= to reflect the new mint flow is the
 immediate next step.
 #+END_ABSTRACT
 
+#+LATEX: \clearpage
+#+TOC: headlines 3
+
+#+LATEX: \clearpage
 * Motivation
 
 | Approach                           | Per-leaf on-chain cost | N=2   | N=16  (M) | N=32  (M) | N=128 (P) |
@@ -434,6 +449,29 @@ proof per slot, but it inherits the same trust model as any other sequencer.
   sections; mark the shipped per-leaf path historical, batch-mint primary.
 - =alberta-buck-ethereum.org=: rewrite the Notes section and the gas table
   entries.
+
+* Related Work: Serialized B1 Sub-Notes
+
+The batch-mint pivot amortizes the cost of /inserting/ N leaves into
+=noteRoot=.  An orthogonal, B1-only amortization -- /serialized sub-notes/
+-- amortizes the cost of /producing/ N bearer notes from /one/ leaf, by
+anchoring a cryptographically committed sub-tree of N pseudorandom serials
+=s_i= under a single =cm_parent= and spending each against a shared per-
+parent nullifier bitmap.  Mint-circuit reuse is exact: =cm_parent= is an
+ordinary Poseidon-5 output, and the mint-batch circuit hashes it
+identically to any other B1 leaf.  The spend circuit diverges (adds a
+log_2(N) Poseidon-2 sub-tree walk) and the on-chain double-spend guard
+changes from a nullifier mapping to a per-parent bitmap.
+
+Serialization is B1-only: each spend reveals =cm_parent= publicly, linking
+co-spent siblings.  For bearer notes that linkage is free; for A1/A2 it
+defeats the privacy property.
+
+See =alberta-buck-notes-serialized.org= for the full design, side-by-side
+data-flow diagrams, per-field security analysis, and cost comparison.
+Per-bearer-note mint cost drops to ~31K / N_fam vs. ~31K at the batch-mint
+pivot baseline -- another 2-4 orders of magnitude for commonly-sized B1
+families.
 
 * Open Questions
 

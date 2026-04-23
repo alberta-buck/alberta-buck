@@ -9,6 +9,10 @@ import {Buck}                        from "../src/Buck.sol";
 import {BuckCredit}                  from "../src/BuckCredit.sol";
 import {BuckKControllerStatic}       from "../src/BuckKControllerStatic.sol";
 import {Notes}                       from "../src/Notes.sol";
+import {MintBatchN1Groth16Verifier}  from "../src/MintBatchN1Groth16Verifier.sol";
+import {MintBatchN2Groth16Verifier}  from "../src/MintBatchN2Groth16Verifier.sol";
+import {MintBatchN4Groth16Verifier}  from "../src/MintBatchN4Groth16Verifier.sol";
+import {MintBatchN8Groth16Verifier}  from "../src/MintBatchN8Groth16Verifier.sol";
 import {MintBatchN16Groth16Verifier} from "../src/MintBatchN16Groth16Verifier.sol";
 import {MintBatchN32Groth16Verifier} from "../src/MintBatchN32Groth16Verifier.sol";
 import {MintVerifierAdapter}         from "../src/MintVerifierAdapter.sol";
@@ -27,6 +31,10 @@ contract MintVerifierTest is Test {
     BuckKControllerStatic       internal kCtrl;
     IdentityRegistry            internal reg;
     Notes                       internal notes;
+    MintBatchN1Groth16Verifier  internal g16N1;   // N=1  verifier
+    MintBatchN2Groth16Verifier  internal g16N2;   // N=2  verifier
+    MintBatchN4Groth16Verifier  internal g16N4;   // N=4  verifier
+    MintBatchN8Groth16Verifier  internal g16N8;   // N=8  verifier
     MintBatchN16Groth16Verifier internal g16;     // N=16 verifier
     MintBatchN32Groth16Verifier internal g16N32;  // N=32 verifier (per-N dispatch)
     MintVerifierAdapter         internal adapter;
@@ -62,10 +70,18 @@ contract MintVerifierTest is Test {
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
 
+        g16N1   = new MintBatchN1Groth16Verifier();
+        g16N2   = new MintBatchN2Groth16Verifier();
+        g16N4   = new MintBatchN4Groth16Verifier();
+        g16N8   = new MintBatchN8Groth16Verifier();
         g16     = new MintBatchN16Groth16Verifier();
         g16N32  = new MintBatchN32Groth16Verifier();
         adapter = new MintVerifierAdapter(GOV);
         vm.startPrank(GOV);
+        adapter.registerVerifier(1,  address(g16N1));
+        adapter.registerVerifier(2,  address(g16N2));
+        adapter.registerVerifier(4,  address(g16N4));
+        adapter.registerVerifier(8,  address(g16N8));
         adapter.registerVerifier(16, address(g16));
         adapter.registerVerifier(32, address(g16N32));
         vm.stopPrank();
@@ -279,6 +295,58 @@ contract MintVerifierTest is Test {
         );
     }
 
+    // ---- small-N per-N dispatch ladder ------------------------------------
+
+    /// @dev Shared helper: load the fresh-tree basic.json fixture for the
+    ///      given N, mint through the adapter, and assert per-N invariants.
+    ///      Each pinned N uses its own circuit + Groth16 verifier; the
+    ///      adapter's job is to dispatch by cms.length.
+    function _mintFromFreshFixture(uint256 n, string memory fixPath) internal {
+        string memory fx = vm.readFile(fixPath);
+        uint256 fxn           = vm.parseJsonUint(fx, ".N");
+        uint256 oldRoot       = vm.parseJsonUint(fx, ".public.oldRoot");
+        uint256 newRoot       = vm.parseJsonUint(fx, ".public.newRoot");
+        uint256 nextLeafIndex = vm.parseJsonUint(fx, ".public.nextLeafIndex");
+        uint256 totalFace     = vm.parseJsonUint(fx, ".public.totalFace");
+        uint256[] memory cms  = new uint256[](fxn);
+        for (uint256 i = 0; i < fxn; i++) {
+            cms[i] = vm.parseJsonUint(fx, string.concat(".public.cm[", vm.toString(i), "]"));
+        }
+        bytes memory proof = vm.parseJsonBytes(fx, ".proofBytes");
+
+        assertEq(fxn,            n,                     "fixture N matches");
+        assertEq(oldRoot,        notes.EMPTY_ROOT(),    "fresh-tree oldRoot");
+        assertEq(nextLeafIndex,  0,                     "fresh-tree nextLeafIndex");
+
+        uint256 aliceBefore = buck.balanceOf(alice);
+        uint256 poolBefore  = buck.balanceOf(address(notes));
+
+        vm.prank(alice);
+        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+
+        assertEq(buck.balanceOf(alice),          aliceBefore - totalFace);
+        assertEq(buck.balanceOf(address(notes)), poolBefore + totalFace);
+        assertEq(notes.noteFaceSum(),  totalFace);
+        assertEq(notes.nextLeafIndex(), n);
+        assertEq(notes.noteRoot(),     newRoot);
+    }
+
+    function test_mint_acceptedByGroth16Verifier_N1() public {
+        _mintFromFreshFixture(1, "build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+
+    function test_mint_acceptedByGroth16Verifier_N2() public {
+        _mintFromFreshFixture(2, "build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+
+    function test_mint_acceptedByGroth16Verifier_N4() public {
+        _mintFromFreshFixture(4, "build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+
+    function test_mint_acceptedByGroth16Verifier_N8() public {
+        _mintFromFreshFixture(8, "build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+
     // ---- N=32 per-N dispatch ----------------------------------------------
 
     function test_mint_acceptedByGroth16Verifier_N32() public {
@@ -314,9 +382,15 @@ contract MintVerifierTest is Test {
     }
 
     function test_adapter_routesByBatchSize() public view {
-        // Confirms per-N registration is independently addressable.
+        // Confirms per-N registration is independently addressable across the
+        // full small-N ladder plus N=32.
+        assertEq(adapter.verifiers(1),  address(g16N1),  "N=1  -> N=1  verifier");
+        assertEq(adapter.verifiers(2),  address(g16N2),  "N=2  -> N=2  verifier");
+        assertEq(adapter.verifiers(4),  address(g16N4),  "N=4  -> N=4  verifier");
+        assertEq(adapter.verifiers(8),  address(g16N8),  "N=8  -> N=8  verifier");
         assertEq(adapter.verifiers(16), address(g16),    "N=16 -> N=16 verifier");
         assertEq(adapter.verifiers(32), address(g16N32), "N=32 -> N=32 verifier");
+        assertEq(adapter.verifiers(3),  address(0),      "N=3  unregistered");
         assertEq(adapter.verifiers(15), address(0),      "N=15 unregistered");
         assertEq(adapter.verifiers(64), address(0),      "N=64 unregistered");
     }
