@@ -1,4 +1,4 @@
-#+TITLE: The Alberta Buck - Notes (DRAFT v0.6)
+#+TITLE: The Alberta Buck - Notes (DRAFT v0.7)
 #+SUBTITLE: Private Bearer Instruments on an Identity-Aware Demurrage Currency
 #+author: Perry Kundert
 #+date: 2026-04-18
@@ -181,11 +181,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
    - *A2 -- Addressed Cheque, Private Issuer.*  The issuer
      re-randomizes the recipient's registered ElGamal credential into
-     the note payload; the A-spend predicate requires the depositor's
-     /current/ registered credential to decrypt to the same identity
-     point.  A note Alice issues from a private account to a named
-     recipient (including herself at another of her own accounts) with
-     no on-chain edge visible to third parties.  The canonical
+     the note payload; the A-spend predicate requires the depositor to
+     produce \( sk_{\text{rec}} \) (the mint-time private key paired
+     with the \( pk_{\text{rec}} \) used for the re-randomization) and
+     prove it decrypts both \( E_{\text{note}} \) and the depositor's
+     own registered credential to the same identity point.  A note
+     Alice issues from a private account to a named recipient
+     (including herself at another of her own accounts) with no
+     on-chain edge visible to third parties.  The canonical
      /wormhole/ is the degenerate self-issued subcase.
    - *A1 -- Addressed Cheque, Public Issuer.*  Same addressed binding
      as A2, plus a Schnorr signature by the issuer over the commitment
@@ -329,10 +332,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    \]
 
    where =key= is the spend-side secret specific to the flavor: the
-   depositor's \( sk_{\text{dep}} \) for A-spend (binding through
-   CP-equality to the recipient's =M=), or \( \rho \) itself for
-   B-spend (publicly derivable by any holder of the opening).  The
-   PRF is instantiated via Poseidon in the SNARK-friendly setting.
+   recipient's identity point \( M_{\text{rec}} \) for A-spend
+   (recovered in-circuit by ElGamal-decrypting \( E_{\text{note}} \)
+   under the depositor-supplied \( sk_{\text{dep}} \), which must
+   equal the mint-time \( sk_{\text{rec}} \)), or \( \rho \) itself
+   for B-spend (publicly derivable by any holder of the opening).
+   The PRF is instantiated via Poseidon in the SNARK-friendly
+   setting.
 
    The nullifier is emitted on deposit; double-spend is rejected by
    set-membership check.
@@ -699,19 +705,26 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    knows).  Exactly one ElGamal decrypt and one point-equality per
    candidate -- the same scan cost as a stealth-address scheme.
 
-   *Spend.*  The depositor (= recipient, or any credential sharing the
-   same \( M \)) produces a SNARK proving:
+   *Spend.*  The depositor (who must be the recipient -- specifically,
+   the holder of \( sk_{\text{rec}} \) paired with the mint-time
+   \( pk_{\text{rec}} \)) produces a SNARK proving:
    1. Merkle inclusion of \( cm = H_{\text{cm}}(\text{flavor},\ v,\ \rho,\ \text{payload}^{A2}) \) in =noteTree=.
    2. Nullifier \( nf = H_{\text{nf}}(\text{A} \| M_{\text{rec}} \| \rho) \),
       with \( M_{\text{rec}} = C_n - sk_{\text{dep}} \cdot R_n \) computed
       in-circuit from \( E_{\text{note}} = (R_n, C_n) \).  Keying on
-      \( M_{\text{rec}} \) (rather than \( sk_{\text{dep}} \)) makes the
-      nullifier survive Identity re-issuance: a depositor who recovers
-      with a fresh \( sk'_{\text{dep}} \) bound to the same
-      \( M_{\text{rec}} \) computes the /same/ nullifier.
+      \( M_{\text{rec}} \) rather than \( sk_{\text{dep}} \) keeps the
+      nullifier value independent of which signing key decrypted
+      \( E_{\text{note}} \) (a privacy property of the hash), but does
+      /not/ enable key-loss recovery: the decryption step itself
+      requires the specific \( sk_{\text{rec}} \) paired with the
+      mint-time \( pk_{\text{rec}} \).
    3. Chaum-Pedersen equality (Theorem 6) between the depositor's
       registered \( E_{\text{dep}}^{(\text{reg})} \) and the note's
-      \( E_{\text{note}} \): both decrypt to the same \( M \).
+      \( E_{\text{note}} \): both decrypt to the same \( M \) under the
+      /same/ \( sk_{\text{dep}} \).  The circuit uses a single secret-key
+      witness, so this constraint implicitly forces
+      \( pk_{\text{rec}} = pk_{\text{dep}} \) -- the depositor's current
+      registered public key must equal the recipient's mint-time key.
    4. =faceValue= \( = v \).
    Simultaneously, the depositor attaches =E_depositor_for_issuer= (an
    ElGamal re-encryption of their own \( M_{\text{dep}} \) under the
@@ -721,13 +734,16 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    private witness and decrypted by the recipient from
    \( E_{\text{iss-for-rec}} \).
 
-   *Consequences.*  Only credentials encrypting \( M_{\text{rec}} \)
-   can deposit (CP-soundness).  The issuer cannot spend what she
-   printed unless she herself is the recipient (issuer's credential
-   encrypts \( M_{\text{issuer}} \neq M_{\text{rec}} \); no valid CP
-   proof).  Key-loss recovery is automatic: Identity re-issuance gives
-   the recipient a fresh \( sk'_{\text{rec}} \) bound to the same
-   \( M_{\text{rec}} \), and Theorem 6 still verifies.
+   *Consequences.*  Only the holder of the mint-time
+   \( sk_{\text{rec}} \) can deposit (CP-soundness under single-key
+   ElGamal).  The issuer cannot spend what she printed unless she
+   herself is the recipient.  *A-notes are bound to the mint-time
+   key pair:* Identity re-issuance to a fresh \( (sk', pk') \) on the
+   same \( M \) does /not/ restore spend capability, because
+   \( E_{\text{note}} \) is under \( pk_{\text{rec}} \) and the fresh
+   \( sk' \) cannot decrypt it.  Loss of \( sk_{\text{rec}} \) renders
+   the note unspendable; see "Key-Pair Binding and Loss Semantics"
+   below.
 
 ** Flavor A1: Addressed Cheque, Public Issuer
 
@@ -807,7 +823,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | Depositor pre-known at mint | Yes (bakes in recipient's \(M\))        | Yes (bakes in recipient's \(M\))        | No (any registered identity)                 |
    | Spend predicate             | CP-equality (Theorem 6)                 | CP-equality (Theorem 6)                 | Schnorr PoK + signature-in-SNARK             |
    | Issuer can spend own note   | No (CP fails: different \(M\))          | No (CP fails: different \(M\))          | Yes, but identified on deposit               |
-   | Long-term holding safe      | Yes; key loss recoverable via Identity  | Yes; key loss recoverable               | Yes cryptographically; civil-trust on issuer |
+   | Long-term holding safe      | Yes cryptographically; sk_rec required  | Yes cryptographically; sk_rec required  | Yes cryptographically; civil-trust on issuer |
    | Mutual decryptability       | \(E_{\text{iss-for-rec}}\) at mint      | Plaintext \(M_{\text{iss}}\) at mint    | Plaintext \(M_{\text{iss}}\) at mint         |
    |                             | + \(E_{\text{dep-for-iss}}\) at deposit | + \(E_{\text{dep-for-iss}}\) at deposit | + \(E_{\text{dep-for-iss}}\) at deposit      |
    #+LATEX: }
@@ -1019,8 +1035,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    Notes compose transparently with the rest of BUCK:
 
    - /Identity Fountain re-issuance/ applies to Note mints and
-     deposits identically to regular transfers; A-flavor key-loss
-     recovery falls out automatically.
+     deposits identically to regular transfers.  *A-flavor notes
+     do not benefit from re-issuance recovery:* they are bound to
+     the recipient's mint-time \( sk_{\text{rec}} \) via single-key
+     ElGamal, so a fresh keypair cannot decrypt an
+     \( E_{\text{note}} \) printed against the previous
+     \( pk_{\text{rec}} \).
    - /Sanctions/ and /Jubilee/ operate at the account level and
      reach the pool through its own account state, requiring no
      Notes-specific logic.
@@ -1397,37 +1417,68 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    on-chain in the clear (A1) or encrypted for the recipient (A2).
    Neither affects who can spend.
 
-*** Key-Loss Recovery via Identity Re-Issuance
+*** Key-Pair Binding and Loss Semantics
 
-    BUCK Identity allows a user to re-issue their Identity scalar:
-    the same registered \( M \) is re-attested with a fresh signing
-    keypair \( (sk', pk') \).  Because A-flavor notes bind
-    =M_rec= (not \( pk_{\text{rec}} \) in any structural way -- the
-    randomness \( r' \) attaches to the /old/ \( pk_{\text{rec}} \)
-    used at mint, but the CP-equality check runs against /any/
-    currently-valid registered credential for the same \( M \)), a
-    recipient who loses their mint-time private key recovers full
-    spend ability as soon as they complete Identity re-issuance.
+    A-flavor notes are bound at mint time to a specific
+    \( pk_{\text{rec}} \) -- the recipient's registered public key at
+    the moment the issuer re-randomized
+    \( E_r \rightarrow E_{\text{note}} \).  The A-spend circuit
+    decrypts \( E_{\text{note}} \) using a witness
+    \( sk_{\text{dep}} \) and the same single witness also decrypts
+    the depositor's currently-registered credential
+    \( E_{\text{dep}}^{(\text{reg})} \).  CP-equality between the two
+    decryptions is therefore only satisfiable when
+    \( pk_{\text{rec}} = pk_{\text{dep}} \), i.e. the depositor is
+    registered under the /same public key/ that the issuer used at
+    mint.
 
-    The implementation consequence: the A-spend circuit verifies
-    equality against the depositor's /current/ registered credential
-    for \( M_{\text{rec}} \), looked up from the IdentityRegistry at
-    deposit time, not against the specific \( pk_{\text{rec}} \)
-    snapshot the issuer used at mint.
+    *BUCK Identity re-issuance does not recover A-notes.*  The
+    Identity Fountain allows a user to re-issue their Identity scalar
+    on a fresh signing keypair \( (sk', pk') \) bound to the same
+    \( M \).  Re-issuance revokes the previous credential
+    (=identity.org=, Attack 7): subsequent =isVerified= calls against
+    the old entry return false, and A-spend references to the old
+    =depositorRegistryEntry= are rejected at the contract boundary
+    before the circuit runs.  Pointing =depositorRegistryEntry= at
+    the new entry admits \( sk' \) as the witness, but \( sk' \) does
+    not decrypt \( E_{\text{note}} \) to \( M \) (the ciphertext is
+    under the old \( pk_{\text{rec}} \)), so CP-equality fails
+    in-circuit.  In either case the spend proof cannot be produced.
 
-    Addressed notes are therefore the natural instrument for
-    long-term holding: estate planning, cold storage, and the
-    self-directed /wormhole/ (A2 with issuer =
-    recipient).  Cryptographic loss of =M= itself -- which would
-    require the Identity system's own recovery mechanism -- is the
-    only failure mode, and it is shared with every other BUCK
-    holding.
+    The operational consequence: *loss of \( sk_{\text{rec}} \) is
+    terminal for any A-note minted to that credential.*  This is the
+    same property that governs any ElGamal-encrypted payload under
+    the recipient's key; Notes inherits it directly.
+
+    *Cold-storage and long-hold implications.*  A-notes -- especially
+    A2 notes directed to the recipient themselves (the /wormhole/)
+    and A1/A2 notes directed to an heir's =M= (estate planning) --
+    place a hard key-management obligation on the recipient (or the
+    designated heir): the mint-time \( sk_{\text{rec}} \) must be
+    preserved for the full holding period.  Proactive key rotation
+    requires either (a) spending the note first and re-minting under
+    the new key, or (b) maintaining the old \( sk_{\text{rec}} \) in
+    cold storage alongside the note itself until all notes bound to
+    that key have been redeemed.  Cryptographic loss of =M= -- the
+    failure mode the Identity Fountain /does/ recover from, via a
+    re-attestation on the same scalar -- is a /separate/ event from
+    loss of a note-binding \( sk_{\text{rec}} \), and re-issuance
+    only addresses the former.
+
+    *Comparison to cash.*  Physical cash held in a safe and lost
+    through fire or theft is irrecoverable by its bearer
+    instrument-owner.  A-notes under lost \( sk_{\text{rec}} \) have
+    the same property: the holder has irrevocably lost the bearer
+    capability.  The BUCK-system-level recovery mechanism is
+    demurrage -- unspent BUCK eventually returns to the pool, so
+    economically lost A-notes rejoin the circulating supply over
+    time.
 
     *Status (current implementation).*  The shipped =spend.circom=
     is B-shape only; A-flavor notes minted today are
     bearer-spendable by anyone holding the opening, until
     =spend_a.circom= adds the in-circuit CP-equality binding.  The
-    cryptographic safety arguments above describe the design with
+    cryptographic binding arguments above describe the design with
     Phase 4 shipped; A1/A2 issuers should treat today's notes as
     civil-trust instruments and not yet rely on cryptographic
     recipient binding.
@@ -1661,9 +1712,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
    A2 (issuer = recipient) is the correct choice for self-directed
    cold storage; A2 or A1 targeted to a designated heir's =M= is the
-   correct choice for estate-directed cold storage.  Identity
-   re-issuance makes these robust against loss of the mint-time
-   signing key.
+   correct choice for estate-directed cold storage.  The cold-storage
+   bundle must include both the note opening /and/ the mint-time
+   \( sk_{\text{rec}} \): A-notes are bound to the specific key pair
+   used at mint and are unspendable under Identity re-issuance alone
+   (see "Key-Pair Binding and Loss Semantics" above).  Practically,
+   this means the safe-deposit box or heir-accessible vault holds a
+   sealed record of both the commitment opening and the private key
+   material that decrypts \( E_{\text{note}} \).
 
 ** Estate Planning
 
@@ -2088,7 +2144,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | *DURABILITY*                    |                            |                           |                                             |
    | Survives infrastructure failure | Yes                        | No                        | Yes (paper); chain on recovery              |
    | Counterfeit-resistant           | Partial (printed security) | Yes                       | Yes (cryptographic)                         |
-   | Recoverable if lost             | No                         | Yes (issuer can re-issue) | No (but demurrage returns value to system)  |
+   | Recoverable if lost             | No                         | Yes (issuer can re-issue) | No; A-notes require mint-time sk_rec        |
    |                                 |                            |                           |                                             |
    | *ECONOMIC BEHAVIOR*             |                            |                           |                                             |
    | Lost notes extracted forever    | Yes                        | No                        | No (returned via demurrage)                 |
@@ -2189,14 +2245,18 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
      \( E_{\text{note}} \) under the depositor's witness
      \( sk_{\text{dep}} \)).  Nullifier =
      \( H_{\text{nf}}(\text{A} \| M_{\text{rec}} \| \rho) \).  Keying on
-     \( M_{\text{rec}} \) -- /not/ on \( sk_{\text{dep}} \) -- is what
-     makes key-loss recovery work: any credential attesting to the same
-     =M= decrypts \( E_{\text{note}} \) to the same identity point and
-     therefore produces the same nullifier.  A recipient who re-issues
-     their Identity with a fresh signing key still computes the same
-     \( nf \), so the note is neither lost nor double-spendable across
-     re-issuance.  The issuer cannot pre-compute \( nf \) because she
-     never decrypts \( E_{\text{note}} \) (no knowledge of
+     \( M_{\text{rec}} \) -- /not/ on \( sk_{\text{dep}} \) -- makes the
+     nullifier value independent of which specific signing key performed
+     the decryption (a hash-determinism property) and precludes a
+     pathological scenario in which a recipient simultaneously holds
+     multiple valid credentials for the same =M= from yielding distinct
+     nullifiers and double-depositing.  *This does /not/ provide
+     key-loss recovery:* the decryption step itself requires the
+     specific \( sk_{\text{rec}} \) paired with the mint-time
+     \( pk_{\text{rec}} \), so a recipient who loses that key cannot
+     produce the nullifier at all (see "Key-Pair Binding and Loss
+     Semantics" above).  The issuer cannot pre-compute \( nf \) because
+     she never decrypts \( E_{\text{note}} \) (no knowledge of
      \( sk_{\text{rec}} \)); see proofs.org Theorem 10 for the IND-CPA
      reduction.
    - *B-spend:* key = \( \rho \) itself; nullifier =
@@ -2801,8 +2861,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
   The addressed-versus-bearer distinction produces a sharp partition
   of which flavors are safe for long-term holding: /A1/ and /A2/ are
-  cryptographically safe (CP-equality binds the note to the
-  recipient's =M=; Identity re-issuance recovers from key loss).
+  cryptographically safe against third-party theft (CP-equality binds
+  the note to the recipient's \( sk_{\text{rec}} \) via single-key
+  ElGamal under \( pk_{\text{rec}} \)), with the key-management
+  corollary that the mint-time \( sk_{\text{rec}} \) itself must be
+  preserved -- Identity re-issuance rotates the Identity scalar's
+  keypair but does /not/ recover notes bound to a lost
+  \( sk_{\text{rec}} \).
   /B1/ is a civil-trust instrument: the issuer necessarily knows
   \( \rho \), so B1 cheques are meant to be cashed promptly and backed by
   the issuer's legal standing rather than by cryptography alone.

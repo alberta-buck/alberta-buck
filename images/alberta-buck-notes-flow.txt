@@ -1158,9 +1158,15 @@ Table of Contents
     the in-circuit Chaum-Pedersen
     ⁃ ElGamal decryption will pin `idHash' to Bob's registered `M_rec',
       making `nf'
-    re-issuance-safe under Identity rotation (Theorem 10.1).  Until
-    then, `idHash' unlinkability for A-flavor notes rests on it being
-    secret in the opening, not on a registry-bound CP equality.
+    a deterministic function of `(M_rec, rho)' alone (Theorem 10.1a).
+    The A-spend binding is to the mint-time key pair: the circuit
+    requires Bob to supply the \( sk_{\text{rec}} \) paired with the \(
+    pk_{\text{rec}} \) the issuer used at mint, so A-notes are /not/
+    recoverable via Identity re-issuance if that key is lost (Theorem
+    10.1b; proofs.org "Key-Pair Binding and Loss Semantics").  Until
+    `spend_a.circom' ships, `idHash' unlinkability for A-flavor notes
+    rests on it being secret in the opening, not on a registry-bound CP
+    equality.
 
   The nullifier is the chain-observable anchor of the spend.  Publishing
   it marks `cm_0' as consumed from the tree's /semantic/ point of view,

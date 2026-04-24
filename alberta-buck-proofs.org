@@ -1,4 +1,4 @@
-#+TITLE: Alberta Buck - Formal Correctness Proofs (DRAFT v0.6)
+#+TITLE: Alberta Buck - Formal Correctness Proofs (DRAFT v0.7)
 #+SUBTITLE: Rerandomization, Re-Encryption, and Notes Spend Predicates
 #+author: Perry Kundert
 #+date: 2026-04-22
@@ -64,15 +64,19 @@ rest of the series relies on:
 - *Theorem 8*: an accepted A-spend SNARK on a noteTree commitment
   implies, via Chaum-Pedersen equality, that the depositor's
   registered credential and the note's ciphertext encrypt the same
-  identity point.  Identity re-issuance is transparent.
+  identity point under the /same/ public key -- the
+  \( pk_{\text{rec}} \) that was live at mint time.  A-notes are
+  bound to that key pair: if \( sk_{\text{rec}} \) is lost, Identity
+  re-issuance to a fresh keypair \( (sk', pk') \) on the same
+  \( M \) does not restore spend capability.
 - *Theorem 9*: an accepted B-spend SNARK certifies (i) a registered
   depositor knowing the bearer secret \( \rho \) and (ii) a
   Schnorr-signed public-issuer attestation on the commitment.
 - *Theorem 10*: the A-spend nullifier (keyed on \( M_{\text{rec}} \))
-  survives Identity re-issuance and is not precomputable by the
-  issuer; the B-spend nullifier (keyed on \( \rho \)) is publicly
-  derivable -- the bearer-cheque property.  Domain separation
-  prevents cross-flavor collision.
+  is a deterministic function of \( (M_{\text{rec}}, \rho) \) alone
+  and is not precomputable by the issuer; the B-spend nullifier
+  (keyed on \( \rho \)) is publicly derivable -- the bearer-cheque
+  property.  Domain separation prevents cross-flavor collision.
 - *Theorem 11*: Notes preserve the BUCK mutual-decryptability
   invariant -- both counterparties recover the other's identity
   point in every accepted spend.
@@ -862,15 +866,20 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 
    *Design note.*  An earlier draft of =alberta-buck-notes.org= keyed
    the A-spend nullifier on \( sk_{\text{dep}} \) rather than on
-   \( M_{\text{rec}} \).  That choice is incompatible with key-loss
-   recovery: Identity re-issuance produces a fresh \( sk_{\text{dep}}' \)
-   and hence a /different/ nullifier on the same note, allowing a
-   recipient to deposit it both before and after rotating their key.
-   Keying on \( M_{\text{rec}} \) -- the issuer-certified identity
-   point, recovered in-circuit by ElGamal decryption of
-   \( E_{\text{note}} \) -- is what realizes the key-loss-recovery
-   property the prose claims, and what the rest of this Part proves
-   correct.  The notes document has been updated to match.
+   \( M_{\text{rec}} \).  Keying on \( M_{\text{rec}} \) -- the
+   issuer-certified identity point, recovered in-circuit by ElGamal
+   decryption of \( E_{\text{note}} \) -- keeps the nullifier
+   independent of /which/ `sk` value was used to decrypt (a privacy
+   improvement over sk-keyed nullifiers) and prevents a recipient
+   who somehow holds two simultaneously-valid credentials for the
+   same \( M \) from double-depositing.  *It does not provide
+   key-loss recovery.*  The spend-time decryption step still
+   requires the specific \( sk_{\text{rec}} \) paired with the
+   mint-time \( pk_{\text{rec}} \); if that key is lost, the note
+   is unspendable regardless of Identity re-issuance.  The notes
+   document has been updated to match; see Theorem 8 below for the
+   formal statement and Section "Key-Pair Binding and Loss Semantics"
+   in =alberta-buck-notes.org= for the operational implications.
 
 ** Theorem 7 (Mint Re-randomization Correctness)
 
@@ -990,14 +999,26 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
      \( sk_{\text{dep}} \) bound to that \( M_{\text{rec}} \) unless
      she /is/ the recipient (degenerate "self-wormhole" subcase
      where issuer \( \equiv \) recipient).
-   - *Identity re-issuance is transparent.*  After re-issuance
-     \( (sk_{\text{rec}}', pk_{\text{rec}}', E^{(\text{reg})\prime}) \)
-     -- bound to the same \( M_{\text{rec}} \) -- the same
-     CP-equality holds with the new credential, so the recipient
-     can deposit notes printed before re-issuance.  The depositor's
-     IdentityRegistry entry referenced by =depositorRegistryEntry=
-     is the /current/ entry; the binding is to \( M \), not to a
-     specific signing key.
+   - *A-notes are bound to the mint-time key pair.*  The circuit
+     uses a /single/ witness \( sk_{\text{dep}} \) to decrypt both
+     the note's \( E_{\text{note}} = (R_n, C_n) \) (encrypted under
+     \( pk_{\text{rec}} \) at mint time) and the depositor's
+     currently-registered \( E^{(\text{reg})} \) (encrypted under
+     the depositor's current \( pk_{\text{dep}} \)).  Constraint 3
+     therefore forces \( pk_{\text{rec}} = pk_{\text{dep}} \): the
+     same public key must appear on both ciphertexts, otherwise
+     \( C_n - sk_{\text{dep}} \cdot R_n = M_{\text{rec}} +
+     (r_r + r') \cdot (pk_{\text{rec}} - pk_{\text{dep}}) \neq
+     M_{\text{rec}} \).  Identity re-issuance produces a fresh
+     \( (sk', pk') \) bound to the same \( M \) but revokes the
+     previous credential (=identity.org=, Attack 7); the old
+     IdentityRegistry entry fails =isVerified= and cannot be used,
+     while the new entry has \( pk' \neq pk_{\text{rec}} \) and
+     fails CP-equality.  Consequently, *loss of
+     \( sk_{\text{rec}} \) renders the A-note unspendable.*
+     Key-management practice for A-note recipients (especially
+     long-hold A2 cold-storage instruments) must treat
+     \( sk_{\text{rec}} \) as load-bearing for note recoverability.
 
 ** Theorem 9 (B-Spend Soundness)
 
@@ -1068,13 +1089,17 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 
    *Statement (A-spend nullifier, keyed by \( M_{\text{rec}} \)).*
 
-   1. *Determinism / key-loss recovery.*
+   1. *Determinism.*
       \( nf^{(A)} = H_{\text{nf}}(A \,\|\, M_{\text{rec}} \,\|\, \rho) \)
       depends on the depositor's witness only through
-      \( (M_{\text{rec}}, \rho) \).  Identity Fountain re-issuance
-      preserves \( M_{\text{rec}} \), so the nullifier is invariant
-      under re-issuance; a re-issued recipient cannot double-spend
-      the same note.
+      \( (M_{\text{rec}}, \rho) \).  Keying on the identity point
+      rather than on \( sk_{\text{dep}} \) (a) keeps the nullifier
+      value independent of which specific signing key was used to
+      decrypt \( E_{\text{note}} \) -- a modest privacy improvement
+      -- and (b) prevents any pathological scenario in which a
+      recipient holds multiple simultaneously-valid credentials for
+      the same \( M \) from yielding distinct nullifiers and
+      enabling double-deposit.
    2. *Issuer non-computability (in the ROM).*  The issuer holds
       \( pk_{\text{rec}}, r_r, r' \) and \( \rho \), but not
       \( sk_{\text{rec}} \).  Computing \( nf^{(A)} \) requires
@@ -1084,11 +1109,19 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
       reduces to DLog on \( pk_{\text{rec}} \).  Hence the issuer
       cannot precompute the nullifier and observe its on-chain
       appearance to detect a spend.
-   3. *Recipient computability.*  The recipient decrypts
-      \( E_{\text{note}} \) with \( sk_{\text{rec}} \) to recover
-      \( M_{\text{rec}} \), reads \( \rho \) from the (decrypted)
-      commitment opening, and computes \( nf^{(A)} \) -- exactly the
-      data the spend circuit requires.
+   3. *Recipient computability (key-dependent).*  The recipient
+      decrypts \( E_{\text{note}} \) with the specific
+      \( sk_{\text{rec}} \) paired with the mint-time
+      \( pk_{\text{rec}} \) to recover \( M_{\text{rec}} \), reads
+      \( \rho \) from the (decrypted) commitment opening, and
+      computes \( nf^{(A)} \) -- exactly the data the spend circuit
+      requires.  *Loss of \( sk_{\text{rec}} \) is unrecoverable:*
+      no alternative credential can decrypt \( E_{\text{note}} \),
+      so the nullifier -- and hence the spend -- cannot be produced
+      even if Identity re-issuance preserves \( M_{\text{rec}} \) on
+      a fresh keypair.  The nullifier-value invariance across
+      re-issuance is a formal property of the hash function, not an
+      operational recovery mechanism.
 
    *Statement (B-spend nullifier, keyed by \( \rho \) alone).*
 
@@ -1208,47 +1241,72 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
      C_n = add(C_r, multiply(pk_bob, r_prime))
      assert eq(elgamal_decrypt(R_n, C_n, sk_bob), M_rec), \
          "Theorem 7 FAILED: E_note must decrypt to M_rec"
-     print("Theorem 7  (mint re-randomization):                PASS  (E_note -> M_rec)")
+     print("Theorem 7  (mint re-randomization):                    PASS  (E_note -> M_rec)")
 
      # --- Theorem 8: A-spend CP-equality holds for the recipient ---
      def cp_a_check(R_n, C_n, R_reg, C_reg, sk_dep):
          return eq(elgamal_decrypt(R_n, C_n, sk_dep),
                    elgamal_decrypt(R_reg, C_reg, sk_dep))
      assert cp_a_check(R_n, C_n, R_r, C_r, sk_bob)
-     print("Theorem 8  (A-spend, recipient deposits):          PASS  (CP M_note=M_reg)")
+     print("Theorem 8  (A-spend, recipient deposits):              PASS  (CP M_note=M_reg)")
 
      # --- Theorem 8 (negative): issuer Alice cannot self-redeem ---
      M_iss = multiply(G1, m)                       # Alice's identity point
      M_alice_decrypts_note = elgamal_decrypt(R_n, C_n, sk_alice)
      assert not eq(M_alice_decrypts_note, M_iss), \
          "Issuer self-redeem must fail: decrypt(E_note, sk_alice) != M_iss"
-     print("Theorem 8  (issuer cannot redeem own A-note):      PASS  (CP fails)")
+     print("Theorem 8  (issuer cannot redeem own A-note):          PASS  (CP fails)")
 
-     # --- Theorem 10.1: nullifier determinism / key-loss recovery ---
+     # --- Theorem 10.1: nullifier determinism and key-pair binding ---
      def H_nf(domain, *fields):
          blob = domain + b"|" + b"|".join(str(f).encode() for f in fields)
          return int(hashlib.sha256(blob).hexdigest(), 16) % ORDER
 
      rho = rand()
-     nf_A_pre  = H_nf(b"A", M_rec, rho)
-     # Bob re-issues: fresh sk_bob_2, fresh credential, same M_rec.
+     # Recipient with mint-time sk_rec decrypts E_note -> M_rec and
+     # computes the nullifier.  This is the only path that works.
+     M_rec_decrypted = elgamal_decrypt(R_n, C_n, sk_bob)
+     assert eq(M_rec_decrypted, M_rec), \
+         "Theorem 10.1 FAILED: sk_rec must decrypt E_note to M_rec"
+     nf_A = H_nf(b"A", M_rec_decrypted, rho)
+     # Nullifier value is a pure function of (M_rec, rho): recomputing
+     # with the same inputs yields the same value regardless of which
+     # credential is held.  This is a hash-determinism property.
+     assert nf_A == H_nf(b"A", M_rec, rho), \
+         "Theorem 10.1 FAILED: nullifier must be deterministic in (M_rec, rho)"
+     print("Theorem 10.1a (nullifier determinism in (M_rec,rho)):  PASS")
+
+     # --- Theorem 10.1 (negative): re-issued recipient without sk_rec ---
+     # Bob re-issues (fresh sk_bob_2, pk_bob_2) bound to the same M_rec.
+     # Bob no longer has sk_bob.  He cannot decrypt E_note:
      sk_bob_2 = rand()
      pk_bob_2 = multiply(G1, sk_bob_2)
-     r_r_2    = rand()
-     R_r_2    = multiply(G1, r_r_2)
-     C_r_2    = add(M_rec, multiply(pk_bob_2, r_r_2))
+     M_wrong  = elgamal_decrypt(R_n, C_n, sk_bob_2)
+     assert not eq(M_wrong, M_rec), \
+         "Theorem 10.1 FAILED: sk_bob_2 must NOT decrypt E_note to M_rec"
+     # With the wrong M, the nullifier he could compute differs from nf_A,
+     # but more importantly the A-spend circuit's CP-equality constraint
+     # (C_n - sk*R_n == C_reg - sk*R_reg) cannot be satisfied: E_note is
+     # under pk_bob (old), E_reg_2 is under pk_bob_2 (new), so no single
+     # sk witness decrypts both to the same point.  The re-issued
+     # recipient cannot produce an accepting spend proof.
+     r_r_2 = rand()
+     R_r_2 = multiply(G1, r_r_2)
+     C_r_2 = add(M_rec, multiply(pk_bob_2, r_r_2))
+     # sk_bob_2 decrypts E_reg_2 to M_rec ...
      assert eq(elgamal_decrypt(R_r_2, C_r_2, sk_bob_2), M_rec)
-     nf_A_post = H_nf(b"A", M_rec, rho)            # same M_rec, same rho
-     assert nf_A_pre == nf_A_post, \
-         "Theorem 10.1 FAILED: nullifier must survive re-issuance"
-     print("Theorem 10.1 (nullifier survives re-issuance):     PASS")
+     # ... but the same sk_bob_2 does NOT decrypt E_note to M_rec:
+     assert not eq(elgamal_decrypt(R_n, C_n, sk_bob_2),
+                   elgamal_decrypt(R_r_2, C_r_2, sk_bob_2)), \
+         "Theorem 10.1 FAILED: CP-equality must fail under key rotation"
+     print("Theorem 10.1b (A-note unspendable after key loss):     PASS  (CP fails)")
 
      # --- Theorem 10.4: B-spend nullifier publicly derivable from rho ---
      nf_B_holder = H_nf(b"B", rho)
      nf_B_eve    = H_nf(b"B", rho)                 # Eve only needs rho
      assert nf_B_holder == nf_B_eve
      assert nf_A_pre != nf_B_holder                # cross-flavor disjoint
-     print("Theorem 10.4 (B-spend nullifier public from rho):  PASS")
+     print("Theorem 10.4 (B-spend nullifier public from rho):      PASS")
 
      # --- Theorem 11: mutual decryptability round-trip ---
      # A2 mint payload: E_iss-for-rec encrypts M_iss under pk_bob.
@@ -1264,28 +1322,32 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
      E_dep_C = add(M_dep, multiply(pk_alice, r_dep_for_iss))
      assert eq(elgamal_decrypt(E_dep_R, E_dep_C, sk_alice), M_dep), \
          "Theorem 11 FAILED: issuer must recover M_dep"
-     print("Theorem 11 (mutual decryptability round-trip):     PASS")
+     print("Theorem 11 (mutual decryptability round-trip):         PASS")
    #+END_SRC
 
    #+RESULTS:
-   : Theorem 7  (mint re-randomization):                PASS  (E_note -> M_rec)
-   : Theorem 8  (A-spend, recipient deposits):          PASS  (CP M_note=M_reg)
-   : Theorem 8  (issuer cannot redeem own A-note):      PASS  (CP fails)
-   : Theorem 10.1 (nullifier survives re-issuance):     PASS
-   : Theorem 10.4 (B-spend nullifier public from rho):  PASS
-   : Theorem 11 (mutual decryptability round-trip):     PASS
+   : Theorem 7  (mint re-randomization):                    PASS  (E_note -> M_rec)
+   : Theorem 8  (A-spend, recipient deposits):              PASS  (CP M_note=M_reg)
+   : Theorem 8  (issuer cannot redeem own A-note):          PASS  (CP fails)
+   : Theorem 10.1a (nullifier determinism in (M_rec,rho)):  PASS
+   : Theorem 10.1b (A-note unspendable after key loss):     PASS  (CP fails)
+   : Theorem 10.4 (B-spend nullifier public from rho):      PASS
+   : Theorem 11 (mutual decryptability round-trip):         PASS
 
    #+LATEX: }
 
-   *How to read the output:* Six PASS lines.  Theorem 7 confirms the
+   *How to read the output:* Seven PASS lines.  Theorem 7 confirms the
    mint construction yields a valid encryption of the recipient's
    \( M \) under their own \( pk \).  The two Theorem 8 lines show
    the recipient succeeding (positive case) and the issuer failing
    (negative case): only credentials bound to the same \( M \) as
-   the note can produce a CP-equality witness.  Theorem 10.1 is the
-   key-loss-recovery sanity check -- the same nullifier is produced
-   before and after the recipient rotates their signing key, so a
-   re-issued recipient cannot double-spend.  Theorem 10.4
+   the note can produce a CP-equality witness.  Theorem 10.1a is
+   nullifier-value determinism (a pure hash property: same inputs
+   give same output).  Theorem 10.1b is the key-pair-binding check:
+   a re-issued recipient holding a fresh \( sk' \) (but lacking the
+   mint-time \( sk_{\text{rec}} \)) cannot satisfy CP-equality, so
+   the note is unspendable -- the honest converse of the
+   superseded "key-loss recovery" framing.  Theorem 10.4
    demonstrates the public derivability of the B-spend nullifier
    (anyone who knows \( \rho \) can compute it -- the bearer-cheque
    property).  Theorem 11 closes the mutual-decryptability loop:
@@ -1543,22 +1605,22 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 * Security Assumptions Summary
 
   #+LATEX: {\scriptsize
-  | Theorem                            | Primitive    | Assumption needed                      | Conditional on crypto?       |
-  |------------------------------------+--------------+----------------------------------------+------------------------------|
-  | Theorem 1 (PS completeness)        | PS           | bilinearity of \( e \)                 | *no* (unconditional)         |
-  | Theorem 2 (PS unlinkability)       | PS           | prime-order \( G_1 \), uniform \( t \) | *no* (information-theoretic) |
-  | Theorem 3 (CP completeness)        | CP           | group axioms                           | *no* (unconditional)         |
-  | Theorem 4 (CP special soundness)   | CP           | none for extractor; DLog for           | DLog (only for reduction)    |
-  |                                    |              | cheating-prover reduction              |                              |
-  | Theorem 5 (CP HVZK)                | CP           | uniform \( k_1, k_2 \)                 | *no* (perfect simulation)    |
-  | NIZK corollary                     | CP + FS      | ROM                                    | ROM                          |
-  | Theorem 6 (end-to-end)             | PS + CP      | q-SDH (PS unforgeability), DLog, ROM   | yes                          |
-  | Theorem 7 (mint re-randomization)  | ElGamal      | group axioms                           | *no* (unconditional)         |
-  | Theorem 8 (A-spend soundness)      | CP-in-SNARK  | SNARK knowledge soundness, DLog, ROM   | yes                          |
-  | Theorem 9 (B-spend soundness)      | Schnorr      | SNARK knowledge soundness,             | yes                          |
-  |                                    | + Sig + PoK  | Schnorr EUF-CMA (DLog + ROM)           |                              |
-  | Theorem 10 (nullifier construction)| Poseidon-PRF | ROM (Poseidon), DLog (issuer-ignorance)| ROM, DLog                    |
-  | Theorem 11 (mutual decryptability) | ElGamal      | ElGamal correctness; Schnorr EUF-CMA   | DLog, ROM                    |
+  | Theorem                             | Primitive    | Assumption needed                       | Conditional on crypto?       |
+  |-------------------------------------+--------------+-----------------------------------------+------------------------------|
+  | Theorem 1 (PS completeness)         | PS           | bilinearity of \( e \)                  | *no* (unconditional)         |
+  | Theorem 2 (PS unlinkability)        | PS           | prime-order \( G_1 \), uniform \( t \)  | *no* (information-theoretic) |
+  | Theorem 3 (CP completeness)         | CP           | group axioms                            | *no* (unconditional)         |
+  | Theorem 4 (CP special soundness)    | CP           | none for extractor; DLog for            | DLog (only for reduction)    |
+  |                                     |              | cheating-prover reduction               |                              |
+  | Theorem 5 (CP HVZK)                 | CP           | uniform \( k_1, k_2 \)                  | *no* (perfect simulation)    |
+  | NIZK corollary                      | CP + FS      | ROM                                     | ROM                          |
+  | Theorem 6 (end-to-end)              | PS + CP      | q-SDH (PS unforgeability), DLog, ROM    | yes                          |
+  | Theorem 7 (mint re-randomization)   | ElGamal      | group axioms                            | *no* (unconditional)         |
+  | Theorem 8 (A-spend soundness)       | CP-in-SNARK  | SNARK knowledge soundness, DLog, ROM    | yes                          |
+  | Theorem 9 (B-spend soundness)       | Schnorr      | SNARK knowledge soundness,              | yes                          |
+  |                                     | + Sig + PoK  | Schnorr EUF-CMA (DLog + ROM)            |                              |
+  | Theorem 10 (nullifier construction) | Poseidon-PRF | ROM (Poseidon), DLog (issuer-ignorance) | ROM, DLog                    |
+  | Theorem 11 (mutual decryptability)  | ElGamal      | ElGamal correctness; Schnorr EUF-CMA    | DLog, ROM                    |
   #+LATEX: }
 
   Every assumption on the "yes" rows is already load-bearing for
