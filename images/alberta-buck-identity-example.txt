@@ -46,21 +46,26 @@ Table of Contents
 .. 7. The AMM Pool Scenario: Retroactive Identity Recovery
 2. Setup: The alt_bn128 Curve and Helpers
 3. Issuer Key Generation
+.. 1. Same Operation via the Wallet API
 4. KYC Ceremony – Issuer Signs Alice's Identity
 .. 1. Alice's Plaintext Identity
 .. 2. Compute Identity Scalar and PS Signature
 .. 3. Verify the PS Signature (Issuer Self-Check)
+.. 4. Same Operation via the Wallet API
 5. The Identity Fountain – Alice Derives a Fresh Credential
 .. 1. Rerandomize the PS Signature
 .. 2. Generate Fresh Identity Key Pair and ElGamal Encryption
 .. 3. NIZK Proof: Binding PS Signature to ElGamal Ciphertext
 6. Registration – On-Chain Verification
 .. 1. Verify the NIZK Proof (What the Contract Computes)
+.. 2. Same Operation via the Wallet API
 7. Bob Registers as a Public Account
+.. 1. Same Operation via the Wallet API
 8. Alice Approves Bob – Re-Encryption + Chaum-Pedersen Proof
 .. 1. Re-Encrypt Alice's Identity for Bob
 .. 2. Chaum-Pedersen Proof of Correct Re-Encryption
 .. 3. Verify Chaum-Pedersen Proof (What the Contract Computes)
+.. 4. Same Operation via the Wallet API
 9. Transfer – Bilateral Identity Check
 10. Bob Verifies Alice's Identity (Two-Channel Design)
 .. 1. Counter-example: Tampered Identity Data
@@ -531,6 +536,34 @@ Table of Contents
   └────
 
 
+3.1 Same Operation via the Wallet API
+─────────────────────────────────────
+
+  The reference implementation in `alberta_buck.wallet.issuer' packages
+  the same key generation behind a typed `Issuer' class.  Wrapping the
+  scalars produced above into an `Issuer' lets every later step in this
+  document call the wallet API while keeping the keys identical to the
+  raw-crypto example.
+
+  ┌────
+  │ from alberta_buck.wallet import Issuer, PSKeyPair
+  │ 
+  │ ATB_ADDR = 0xa7b00000000000000000000000000000000a7b00
+  │ issuer_obj = Issuer(
+  │     issuer_id="atb-financial-ca",
+  │     issuer_addr=ATB_ADDR,
+  │     keypair=PSKeyPair(sk_x=isk_x, sk_y=isk_y, pk_X=IPK_X, pk_Y=IPK_Y),
+  │ )
+  │ print(f"Wallet API: {issuer_obj.issuer_id!r} @ 0x{issuer_obj.issuer_addr:040x}")
+  │ print(f"  pk_X, pk_Y match the raw G_2 points above.")
+  └────
+
+  ┌────
+  │ Wallet API: 'atb-financial-ca' @ 0xa7b00000000000000000000000000000000a7b00
+  │   pk_X, pk_Y match the raw G_2 points above.
+  └────
+
+
 4 KYC Ceremony – Issuer Signs Alice's Identity
 ══════════════════════════════════════════════
 
@@ -601,8 +634,8 @@ Table of Contents
   │ Identity scalar m = H(identity_data):
   │   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
   │ PS signature sigma:
-  │   sigma_1 = (928210..., 919476...)
-  │   sigma_2 = (272245..., 683813...)
+  │   sigma_1 = (254037..., 533082...)
+  │   sigma_2 = (280643..., 850493...)
   └────
 
 
@@ -677,6 +710,47 @@ Table of Contents
   └────
 
 
+4.4 Same Operation via the Wallet API
+─────────────────────────────────────
+
+  `Issuer.issue(...)' bundles the canonicalization, `m' computation, and
+  PS signing into one call.  `ps_verify(...)' performs the same pairing
+  equation as the raw block above; the counter-example uses the same
+  primitive against a tampered `m'.
+
+  ┌────
+  │ from alberta_buck.wallet import ps_verify, identity_scalar
+  │ ALICE_ADDR = 0xa11ce00000000000000000000000000000a11ce
+  │ 
+  │ alice_fields = {
+  │     "given_name":    "Alice",
+  │     "family_name":   "Johnson",
+  │     "jurisdiction":  "Alberta, Canada",
+  │     "id_type":       "Alberta Identity Card",
+  │     "id_number":     "AIC-2026-4839201",
+  │     "date_of_birth": "1992-03-15",
+  │     "issuer_id":     "atb-financial-ca",
+  │     "issued_at":     "2026-01-20T14:30:00Z",
+  │     "epoch":         42,
+  │ }
+  │ cred = issuer_obj.issue(alice_fields, ALICE_ADDR)
+  │ # Wallet computes m the same way: m = keccak256(canonical) mod ORDER
+  │ assert cred.m == identity_scalar(cred.canonical) == m_alice
+  │ # PS verification, same pairing equation as the raw block:
+  │ ok      = ps_verify(issuer_obj.pk_X, issuer_obj.pk_Y, cred.sigma, cred.m)
+  │ ok_bad  = ps_verify(issuer_obj.pk_X, issuer_obj.pk_Y, cred.sigma, m_fake)
+  │ print(f"Wallet API: cred.m == m_alice : {cred.m == m_alice}")
+  │ print(f"  ps_verify(sigma, m_alice)   : {ok}")
+  │ print(f"  ps_verify(sigma, m_fake)    : {ok_bad}")
+  └────
+
+  ┌────
+  │ Wallet API: cred.m == m_alice : True
+  │   ps_verify(sigma, m_alice)   : True
+  │   ps_verify(sigma, m_fake)    : False
+  └────
+
+
 5 The Identity Fountain – Alice Derives a Fresh Credential
 ══════════════════════════════════════════════════════════
 
@@ -727,12 +801,12 @@ Table of Contents
 
   ┌────
   │ Rerandomized PS signature verified.
-  │   sigma'_1 = (398411...,  90800...)
-  │   sigma'_2 = (598390..., 105976...)
+  │   sigma'_1 = (353354..., 475402...)
+  │   sigma'_2 = (106758..., 378682...)
   │ 
   │ Original and rerandomized signatures are unlinkable:
-  │   sigma_1  = (928210..., 919476...)
-  │   sigma'_1 = (398411...,  90800...)
+  │   sigma_1  = (254037..., 533082...)
+  │   sigma'_1 = (353354..., 475402...)
   │   (No algorithm can correlate them.)
   └────
 
@@ -788,12 +862,12 @@ Table of Contents
 
   ┌────
   │ Fresh key pair for this Ethereum account:
-  │   sk_alice = 17737881631636671062268899161664283414660666643220344544964291836200473831069
-  │   pk_alice = (609248..., 989869...)
+  │   sk_alice = 5337178719053273768779803481371184569706294644357140262510352340982769664927
+  │   pk_alice = (846278..., 691503...)
   │ 
   │ ElGamal ciphertext E_alice = (R, C):
-  │   R = r*G    = ( 97938..., 204577...)
-  │   C = m*G+r*pk = (543508..., 334077...)
+  │   R = r*G    = (236485..., 306358...)
+  │   C = m*G+r*pk = ( 80929..., 697166...)
   │ 
   │ Message point M = m*G:
   │   M = (739132..., 937433...)
@@ -826,7 +900,7 @@ Table of Contents
 
   ┌────
   │ Eve decrypts with wrong key:
-  │   M_wrong = ( 23457..., 959472...)
+  │   M_wrong = (196443..., 660890...)
   │   M_real  = (739132..., 937433...)
   │   Match: False
   │   (Completely different point -- no information about m is leaked.)
@@ -884,9 +958,9 @@ Table of Contents
 
   ┌────
   │ NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-  │   challenge e = 1574858575072606295685736576041995672090773500421894210799661933339986316355
-  │   response s_m = 579000065372464677899259918904778557791566564606305266080261569780595968586
-  │   response s_r = 14530692361404787995064219169072736523079611969185143957130180190022100978826
+  │   challenge e = 3106436009118268932837662440700338157266274450420241514217361446203271481698
+  │   response s_m = 20862264227408967911892434622129686844960690030974921772851777689485705854539
+  │   response s_r = 8990490691724345301124600140323575113826000715714883395606231002422431611176
   └────
 
 
@@ -1080,6 +1154,50 @@ Table of Contents
   └────
 
 
+6.2 Same Operation via the Wallet API
+─────────────────────────────────────
+
+  The wallet's Identity Fountain is three calls
+  (`rerandomize_for_registration', `identity_keygen', `elgamal_encrypt')
+  plus a registration NIZK round-trip (`registration_prove' /
+  `registration_verify').  The wallet's Fiat-Shamir transcript binds the
+  registrant Ethereum address for replay protection – the only
+  substantive difference from the raw NIZK above.
+
+  ┌────
+  │ from alberta_buck.wallet import (
+  │     rerandomize_for_registration, identity_keygen, elgamal_encrypt,
+  │     registration_prove, registration_verify,
+  │ )
+  │ from alberta_buck.wallet.bn254 import rand_scalar
+  │ 
+  │ sigma_w_p, _   = rerandomize_for_registration(cred)
+  │ wallet_kp      = identity_keygen()
+  │ r_w            = rand_scalar()
+  │ E_w            = elgamal_encrypt(mul(G1, cred.m), wallet_kp.pk, r_w)
+  │ 
+  │ proof_w = registration_prove(
+  │     sigma_w_p, cred.m, r_w, wallet_kp.pk, E_w, ALICE_ADDR,
+  │ )
+  │ ok = registration_verify(
+  │     sigma_w_p, E_w, wallet_kp.pk,
+  │     issuer_obj.pk_X, issuer_obj.pk_Y, proof_w, ALICE_ADDR,
+  │ )
+  │ # Replay to a different registrant address must be rejected.
+  │ ok_replay = registration_verify(
+  │     sigma_w_p, E_w, wallet_kp.pk,
+  │     issuer_obj.pk_X, issuer_obj.pk_Y, proof_w, ALICE_ADDR ^ 1,
+  │ )
+  │ print(f"Wallet API: registration_verify (correct registrant)  : {ok}")
+  │ print(f"            registration_verify (replayed registrant) : {ok_replay}")
+  └────
+
+  ┌────
+  │ Wallet API: registration_verify (correct registrant)  : True
+  │             registration_verify (replayed registrant) : False
+  └────
+
+
 7 Bob Registers as a Public Account
 ═══════════════════════════════════
 
@@ -1134,13 +1252,50 @@ Table of Contents
 
   ┌────
   │ Bob registered as PUBLIC account:
-  │   pk_bob = (616178..., 615202...)
+  │   pk_bob = (456762...,  66042...)
   │   E_bob  = (R, C) -- ElGamal ciphertext on-chain
   │   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
   │   isVerified(bob) = true
   │   isPublic(bob)   = true
   │ 
   │ Bob's identity is world-readable.  No approve() needed from Bob's side.
+  └────
+
+
+7.1 Same Operation via the Wallet API
+─────────────────────────────────────
+
+  Bob's KYC is the identical ceremony as Alice's, just with corporate
+  fields and a different applicant address.  `Issuer.issue(...)'
+  produces a fresh sigma each call (random `h' per the PS spec) but
+  verifies under the same issuer key.
+
+  ┌────
+  │ BOB_ADDR = 0x0b0b000000000000000000000000000000000b0b
+  │ 
+  │ bob_fields = {
+  │     "given_name":    "Bob",
+  │     "family_name":   "Smith",
+  │     "jurisdiction":  "Alberta, Canada",
+  │     "id_type":       "Corporate Registration",
+  │     "id_number":     "AB-CORP-2026-00182",
+  │     "date_of_birth": "1985-07-22",
+  │     "issuer_id":     "atb-financial-ca",
+  │     "issued_at":     "2026-02-01T09:00:00Z",
+  │     "epoch":         42,
+  │ }
+  │ cred_bob = issuer_obj.issue(bob_fields, BOB_ADDR)
+  │ assert cred_bob.m == m_bob
+  │ assert ps_verify(issuer_obj.pk_X, issuer_obj.pk_Y, cred_bob.sigma, cred_bob.m)
+  │ print(f"Wallet API: cred_bob.m == m_bob    : {cred_bob.m == m_bob}")
+  │ print(f"  ps_verify(cred_bob.sigma, m_bob) : True")
+  │ print(f"  Issuer log now has 2 entries: {len(issuer_obj.issuance_log())}")
+  └────
+
+  ┌────
+  │ Wallet API: cred_bob.m == m_bob    : True
+  │   ps_verify(cred_bob.sigma, m_bob) : True
+  │   Issuer log now has 2 entries: 2
   └────
 
 
@@ -1194,8 +1349,8 @@ Table of Contents
   ┌────
   │ Alice re-encrypts her identity for Bob:
   │   E_bob = (R', C') where:
-  │     R' = r'*G     = (748814...,  81606...)
-  │     C' = M+r'*pk  = (157773..., 499239...)
+  │     R' = r'*G     = (383744..., 569524...)
+  │     C' = M+r'*pk  = (936507..., 848433...)
   │ 
   │ Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
   │ Matches Alice's M:             (739132..., 937433...)
@@ -1260,9 +1415,9 @@ Table of Contents
 
   ┌────
   │ Chaum-Pedersen proof:
-  │   e  = 1809105665795824120355591111725889777272433320332005848186823390153016378660
-  │   s1 = 16257661755265098499591117282311651261823466492011276407651112863133962231636
-  │   s2 = 17381353074441706913616817632114432822361123451703170371601987574536097985814
+  │   e  = 61382628185361422489980217040398965630521971500429003301257707724073879376
+  │   s1 = 18875442783530647435762586544699770487398033464501945700465729711080338590237
+  │   s2 = 14152585458556853765263183554766842642567508489282029916813229114688998405074
   └────
 
 
@@ -1382,6 +1537,49 @@ Table of Contents
   │ Forged re-encryption -- Check 2: False
   │   (FAILS: C_bad encrypts a different M than C_alice.)
   │   (The contract rejects the approve() call.)
+  └────
+
+
+8.4 Same Operation via the Wallet API
+─────────────────────────────────────
+
+  The wallet's `chaum_pedersen_prove' / `chaum_pedersen_verify' run the
+  same three checks as the on-chain verifier, with the Fiat-Shamir
+  transcript binding `(sender, spender, chainid)' for replay protection
+  across addresses and chains.  A wrong-`M' ciphertext (the same forgery
+  as the counter-example above) fails Check 2.
+
+  ┌────
+  │ from alberta_buck.wallet import (
+  │     ElGamalCiphertext, chaum_pedersen_prove, chaum_pedersen_verify,
+  │ )
+  │ E_alice_w   = ElGamalCiphertext(R=R_alice,   C=C_alice)
+  │ E_for_bob_w = ElGamalCiphertext(R=R_for_bob, C=C_for_bob)
+  │ proof_cp_w  = chaum_pedersen_prove(
+  │     E_alice_w, E_for_bob_w, pk_alice, pk_bob,
+  │     sk_alice, r_prime, ALICE_ADDR, BOB_ADDR, 1,
+  │ )
+  │ ok_good = chaum_pedersen_verify(
+  │     E_alice_w, E_for_bob_w, pk_alice, pk_bob,
+  │     proof_cp_w, ALICE_ADDR, BOB_ADDR, 1,
+  │ )
+  │ # Same forgery as the counter-example: re-encrypt a different M.
+  │ E_bad_w = ElGamalCiphertext(R=R_bad, C=C_bad)
+  │ proof_bad_w = chaum_pedersen_prove(
+  │     E_alice_w, E_bad_w, pk_alice, pk_bob,
+  │     sk_alice, r_bad, ALICE_ADDR, BOB_ADDR, 1,
+  │ )
+  │ ok_bad = chaum_pedersen_verify(
+  │     E_alice_w, E_bad_w, pk_alice, pk_bob,
+  │     proof_bad_w, ALICE_ADDR, BOB_ADDR, 1,
+  │ )
+  │ print(f"Wallet API: chaum_pedersen_verify(honest E_for_bob)  : {ok_good}")
+  │ print(f"            chaum_pedersen_verify(forged wrong-M)    : {ok_bad}")
+  └────
+
+  ┌────
+  │ Wallet API: chaum_pedersen_verify(honest E_for_bob)  : True
+  │             chaum_pedersen_verify(forged wrong-M)    : False
   └────
 
 
@@ -1698,17 +1896,17 @@ Table of Contents
 
   ┌────
   │ Second credential derived (same identity, fresh account):
-  │   pk_alice_2 = (864300..., 680631...)
+  │   pk_alice_2 = (344211..., 486292...)
   │   E_alice_2  = (R, C) -- independent ciphertext
-  │   sigma'_2   = (785295..., 139582...)
+  │   sigma'_2   = (766018..., 512451...)
   │ 
   │ Unlinkability check:
-  │   sigma'_1 (acct 1) = (398411...,  90800...)
-  │   sigma'_1 (acct 2) = (785295..., 139582...)
-  │   pk (acct 1)       = (609248..., 989869...)
-  │   pk (acct 2)       = (864300..., 680631...)
-  │   E.R (acct 1)      = ( 97938..., 204577...)
-  │   E.R (acct 2)      = (892624...,  80041...)
+  │   sigma'_1 (acct 1) = (353354..., 475402...)
+  │   sigma'_1 (acct 2) = (766018..., 512451...)
+  │   pk (acct 1)       = (846278..., 691503...)
+  │   pk (acct 2)       = (344211..., 486292...)
+  │   E.R (acct 1)      = (236485..., 306358...)
+  │   E.R (acct 2)      = (226032..., 148188...)
   │ 
   │   All values are independent.  No shared structure.
   │   PS rerandomization is STATISTICALLY unlinkable --

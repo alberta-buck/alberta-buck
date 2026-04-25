@@ -4,6 +4,17 @@
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
 
+#+EXPORT_FILE_NAME: ./images/alberta-buck-notes-rollup-mint
+#+STARTUP: org-startup-with-inline-images inlineimages
+#+STARTUP: org-latex-tables-centered nil
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+#+OPTIONS: toc:nil
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+
+#+ATTR_LATEX: :width 10cm
+[[https://perry.kundert.ca/images/dominion-logo.png]]
+
 #+BEGIN_ABSTRACT
 This memo records a substantial design pivot for the BUCK Notes mint path.
 The shipped Phase-7 implementation (=src/Notes.sol=, =circuits/mint.circom=)
@@ -34,6 +45,10 @@ Updating =alberta-buck-notes-flow.org= to reflect the new mint flow is the
 immediate next step.
 #+END_ABSTRACT
 
+#+LATEX: \clearpage
+#+TOC: headlines 3
+
+#+LATEX: \clearpage
 * Motivation
 
 | Approach                           | Per-leaf on-chain cost | N=2   | N=16  (M) | N=32  (M) | N=128 (P) |
@@ -59,20 +74,20 @@ numbers and the cost-model fit are in /On-chain cost projection/ below.
 
 ** Public inputs to mint_batch circuit (=4 + N= entries)
 
-| pub index    | Signal          | Description                                          |
-|--------------+-----------------+------------------------------------------------------|
-| =pub[0]=     | =oldRoot=       | The live note Merkle root the prover read from chain |
-| =pub[1]=     | =newRoot=       | Root after inserting =cm[0..N-1]= starting at =nextLeafIndex= |
-| =pub[2]=     | =nextLeafIndex= | The live tree size the prover read from chain       |
-| =pub[3]=     | =totalFace=     | Sum of =v[i]=, range-bounded to 128 bits            |
-| =pub[4..4+N)=| =cm[0..N)=      | The batch commitments, one per public input         |
+| pub index     | Signal          | Description                                                   |
+|---------------+-----------------+---------------------------------------------------------------|
+| =pub[0]=      | =oldRoot=       | The live note Merkle root the prover read from chain          |
+| =pub[1]=      | =newRoot=       | Root after inserting =cm[0..N-1]= starting at =nextLeafIndex= |
+| =pub[2]=      | =nextLeafIndex= | The live tree size the prover read from chain                 |
+| =pub[3]=      | =totalFace=     | Sum of =v[i]=, range-bounded to 128 bits                      |
+| =pub[4..4+N)= | =cm[0..N)=      | The batch commitments, one per public input                   |
 
 We pass =cm[]= directly as individual public inputs rather than folding them
 into a =cmBatchHash=.  Trade-off: +N ECMULs in on-chain verifier cost vs.
 -1 Poseidon-N constraint in-circuit and -1 keccak on-chain.  At the prover
 sizes we care about (N <= 128) the Groth16 verifier cost grows linearly with
 N anyway, and the hash-elision keeps the public-input surface
-self-describing for the adapter (=pub[4+i] === cm[i]=).
+self-describing for the adapter (~pub[4+i] === cm[i]~).
 
 ** Private witness
 
@@ -83,9 +98,9 @@ self-describing for the adapter (=pub[4+i] === cm[i]=).
 
 ** In-circuit constraints
 
-- N x Poseidon-5: =cm[i] === Poseidon(flavor, v, rho, idHash, predicate)[i]=
+- N x Poseidon-5: ~cm[i] === Poseidon(flavor, v, rho, idHash, predicate)[i]~
 - N x Num2Bits(128) on =v[i]=, plus Num2Bits(128) on =totalFace=
-- 1 sum: =totalFace === sum(v[i])=
+- 1 sum: ~totalFace === sum(v[i])~
 - N x TREE_DEPTH /dual/ Poseidon-2 hashes implementing the rolling
   filled-subtrees insertion from =oldRoot= to =newRoot=.  Each leaf walks two
   Merkle paths sharing the same siblings: =priorWalk[i]= uses =ZERO_VALUE= at
@@ -128,8 +143,8 @@ N=16 lands at 14.5 KB, N=32 at 20.8 KB.  Linear extrapolation puts N=64 at
 
 ** On-chain =Notes.mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms[])=
 
-1. Require =oldRoot == roots[currentRootIndex]= (stale-state guard, pre-SNARK)
-2. Require =nextLeafIndex == self.nextLeafIndex= (stale-state guard, pre-SNARK)
+1. Require ~oldRoot == roots[currentRootIndex]~ (stale-state guard, pre-SNARK)
+2. Require ~nextLeafIndex == self.nextLeafIndex~ (stale-state guard, pre-SNARK)
 3. Require every =cms[i] < FIELD_R= and =newRoot < FIELD_R=
 4. =mintVerifier.verifyMint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms[])=
    -- adapter dispatches to the per-N =MintBatchN${N}Groth16Verifier= by
@@ -165,13 +180,13 @@ under-counted by ~5x; the corrected number is the empirically-fitted ~31K.
 
 |    N | mint-tx total | per-note (mint / N) | block-share (30M cap) |
 |------+---------------+---------------------+-----------------------|
-|   16 | 624K       M  | 39K            M    | ~2.1%             M   |
-|   32 | 1.12M      M  | 35K            M    | ~3.7%             M   |
-|   64 | ~2.1M      P  | ~33K           P    | ~7%               P   |
-|  128 | ~4.1M      P  | ~32K           P    | ~14%               P  |
-|  256 | ~8.0M      P  | ~31K           P    | ~27%               P  |
-|  512 | ~16M       P  | ~31K           P    | ~53%   (half block)P  |
-| 1024 | ~32M       P  | ~31K           P    | >100% (UNFEASIBLE) P  |
+|   16 | 624K       M  | 39K            M    | ~2.1%               M |
+|   32 | 1.12M      M  | 35K            M    | ~3.7%               M |
+|   64 | ~2.1M      P  | ~33K           P    | ~7%                 P |
+|  128 | ~4.1M      P  | ~32K           P    | ~14%                P |
+|  256 | ~8.0M      P  | ~31K           P    | ~27%                P |
+|  512 | ~16M       P  | ~31K           P    | ~53%  (half block)  P |
+| 1024 | ~32M       P  | ~31K           P    | >100% (UNFEASIBLE)  P |
 
 The per-note cost asymptotes at ~31K, not ~6K as the pure-ECMUL projection
 suggested.  Doubling N from 16 to 32 saves ~4K/note; doubling again to 64
@@ -321,7 +336,7 @@ breaking Poseidon preimage resistance.  Add =cm[i] != 0= and
 =cm[i] != ZERO_VALUE= in-circuit for belt-and-suspenders.  GUARANTEE: intact.
 
 ** A5. Lying about =oldRoot=
-Contract asserts =oldRoot == roots[currentRootIndex]=.  Lying causes revert.
+Contract asserts ~oldRoot == roots[currentRootIndex]~.  Lying causes revert.
 GUARANTEE: intact.
 
 ** A6. Lying about =newRoot=
@@ -434,6 +449,29 @@ proof per slot, but it inherits the same trust model as any other sequencer.
   sections; mark the shipped per-leaf path historical, batch-mint primary.
 - =alberta-buck-ethereum.org=: rewrite the Notes section and the gas table
   entries.
+
+* Related Work: Serialized B1 Sub-Notes
+
+The batch-mint pivot amortizes the cost of /inserting/ N leaves into
+=noteRoot=.  An orthogonal, B1-only amortization -- /serialized sub-notes/
+-- amortizes the cost of /producing/ N bearer notes from /one/ leaf, by
+anchoring a cryptographically committed sub-tree of N pseudorandom serials
+=s_i= under a single =cm_parent= and spending each against a shared per-
+parent nullifier bitmap.  Mint-circuit reuse is exact: =cm_parent= is an
+ordinary Poseidon-5 output, and the mint-batch circuit hashes it
+identically to any other B1 leaf.  The spend circuit diverges (adds a
+log_2(N) Poseidon-2 sub-tree walk) and the on-chain double-spend guard
+changes from a nullifier mapping to a per-parent bitmap.
+
+Serialization is B1-only: each spend reveals =cm_parent= publicly, linking
+co-spent siblings.  For bearer notes that linkage is free; for A1/A2 it
+defeats the privacy property.
+
+See =alberta-buck-notes-serialized.org= for the full design, side-by-side
+data-flow diagrams, per-field security analysis, and cost comparison.
+Per-bearer-note mint cost drops to ~31K / N_fam vs. ~31K at the batch-mint
+pivot baseline -- another 2-4 orders of magnitude for commonly-sized B1
+families.
 
 * Open Questions
 

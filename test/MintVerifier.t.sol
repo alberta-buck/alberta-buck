@@ -9,6 +9,10 @@ import {Buck}                        from "../src/Buck.sol";
 import {BuckCredit}                  from "../src/BuckCredit.sol";
 import {BuckKControllerStatic}       from "../src/BuckKControllerStatic.sol";
 import {Notes}                       from "../src/Notes.sol";
+import {MintBatchN1Groth16Verifier}  from "../src/MintBatchN1Groth16Verifier.sol";
+import {MintBatchN2Groth16Verifier}  from "../src/MintBatchN2Groth16Verifier.sol";
+import {MintBatchN4Groth16Verifier}  from "../src/MintBatchN4Groth16Verifier.sol";
+import {MintBatchN8Groth16Verifier}  from "../src/MintBatchN8Groth16Verifier.sol";
 import {MintBatchN16Groth16Verifier} from "../src/MintBatchN16Groth16Verifier.sol";
 import {MintBatchN32Groth16Verifier} from "../src/MintBatchN32Groth16Verifier.sol";
 import {MintVerifierAdapter}         from "../src/MintVerifierAdapter.sol";
@@ -27,6 +31,10 @@ contract MintVerifierTest is Test {
     BuckKControllerStatic       internal kCtrl;
     IdentityRegistry            internal reg;
     Notes                       internal notes;
+    MintBatchN1Groth16Verifier  internal g16N1;   // N=1  verifier
+    MintBatchN2Groth16Verifier  internal g16N2;   // N=2  verifier
+    MintBatchN4Groth16Verifier  internal g16N4;   // N=4  verifier
+    MintBatchN8Groth16Verifier  internal g16N8;   // N=8  verifier
     MintBatchN16Groth16Verifier internal g16;     // N=16 verifier
     MintBatchN32Groth16Verifier internal g16N32;  // N=32 verifier (per-N dispatch)
     MintVerifierAdapter         internal adapter;
@@ -62,10 +70,18 @@ contract MintVerifierTest is Test {
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
 
+        g16N1   = new MintBatchN1Groth16Verifier();
+        g16N2   = new MintBatchN2Groth16Verifier();
+        g16N4   = new MintBatchN4Groth16Verifier();
+        g16N8   = new MintBatchN8Groth16Verifier();
         g16     = new MintBatchN16Groth16Verifier();
         g16N32  = new MintBatchN32Groth16Verifier();
         adapter = new MintVerifierAdapter(GOV);
         vm.startPrank(GOV);
+        adapter.registerVerifier(1,  address(g16N1));
+        adapter.registerVerifier(2,  address(g16N2));
+        adapter.registerVerifier(4,  address(g16N4));
+        adapter.registerVerifier(8,  address(g16N8));
         adapter.registerVerifier(16, address(g16));
         adapter.registerVerifier(32, address(g16N32));
         vm.stopPrank();
@@ -279,6 +295,58 @@ contract MintVerifierTest is Test {
         );
     }
 
+    // ---- small-N per-N dispatch ladder ------------------------------------
+
+    /// @dev Shared helper: load the fresh-tree basic.json fixture for the
+    ///      given N, mint through the adapter, and assert per-N invariants.
+    ///      Each pinned N uses its own circuit + Groth16 verifier; the
+    ///      adapter's job is to dispatch by cms.length.
+    function _mintFromFreshFixture(uint256 n, string memory fixPath) internal {
+        string memory fx = vm.readFile(fixPath);
+        uint256 fxn           = vm.parseJsonUint(fx, ".N");
+        uint256 oldRoot       = vm.parseJsonUint(fx, ".public.oldRoot");
+        uint256 newRoot       = vm.parseJsonUint(fx, ".public.newRoot");
+        uint256 nextLeafIndex = vm.parseJsonUint(fx, ".public.nextLeafIndex");
+        uint256 totalFace     = vm.parseJsonUint(fx, ".public.totalFace");
+        uint256[] memory cms  = new uint256[](fxn);
+        for (uint256 i = 0; i < fxn; i++) {
+            cms[i] = vm.parseJsonUint(fx, string.concat(".public.cm[", vm.toString(i), "]"));
+        }
+        bytes memory proof = vm.parseJsonBytes(fx, ".proofBytes");
+
+        assertEq(fxn,            n,                     "fixture N matches");
+        assertEq(oldRoot,        notes.EMPTY_ROOT(),    "fresh-tree oldRoot");
+        assertEq(nextLeafIndex,  0,                     "fresh-tree nextLeafIndex");
+
+        uint256 aliceBefore = buck.balanceOf(alice);
+        uint256 poolBefore  = buck.balanceOf(address(notes));
+
+        vm.prank(alice);
+        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+
+        assertEq(buck.balanceOf(alice),          aliceBefore - totalFace);
+        assertEq(buck.balanceOf(address(notes)), poolBefore + totalFace);
+        assertEq(notes.noteFaceSum(),  totalFace);
+        assertEq(notes.nextLeafIndex(), n);
+        assertEq(notes.noteRoot(),     newRoot);
+    }
+
+    function test_mint_acceptedByGroth16Verifier_N1() public {
+        _mintFromFreshFixture(1, "build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+
+    function test_mint_acceptedByGroth16Verifier_N2() public {
+        _mintFromFreshFixture(2, "build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+
+    function test_mint_acceptedByGroth16Verifier_N4() public {
+        _mintFromFreshFixture(4, "build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+
+    function test_mint_acceptedByGroth16Verifier_N8() public {
+        _mintFromFreshFixture(8, "build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+
     // ---- N=32 per-N dispatch ----------------------------------------------
 
     function test_mint_acceptedByGroth16Verifier_N32() public {
@@ -314,9 +382,15 @@ contract MintVerifierTest is Test {
     }
 
     function test_adapter_routesByBatchSize() public view {
-        // Confirms per-N registration is independently addressable.
+        // Confirms per-N registration is independently addressable across the
+        // full small-N ladder plus N=32.
+        assertEq(adapter.verifiers(1),  address(g16N1),  "N=1  -> N=1  verifier");
+        assertEq(adapter.verifiers(2),  address(g16N2),  "N=2  -> N=2  verifier");
+        assertEq(adapter.verifiers(4),  address(g16N4),  "N=4  -> N=4  verifier");
+        assertEq(adapter.verifiers(8),  address(g16N8),  "N=8  -> N=8  verifier");
         assertEq(adapter.verifiers(16), address(g16),    "N=16 -> N=16 verifier");
         assertEq(adapter.verifiers(32), address(g16N32), "N=32 -> N=32 verifier");
+        assertEq(adapter.verifiers(3),  address(0),      "N=3  unregistered");
         assertEq(adapter.verifiers(15), address(0),      "N=15 unregistered");
         assertEq(adapter.verifiers(64), address(0),      "N=64 unregistered");
     }
@@ -431,5 +505,223 @@ contract MintVerifierTest is Test {
         assertEq(notes.noteRoot(),      newRoot);
         assertEq(notes.noteFaceSum(),   sumBefore + totalFace);
         assertEq(buck.balanceOf(address(notes)), poolBefore + totalFace);
+    }
+
+    // ---- per-N rejection + replay + successive coverage (N=1..8) ----------
+    //
+    // N=16 is exercised by the named tests above; the small-N variants need
+    // the same load-bearing checks because each pinned N has its own circuit
+    // *and* its own Solidity verifier (different IC[] length encodes a
+    // different number of public cm[] inputs).  A regression in any per-N
+    // verifier or in the fixture pipeline would otherwise only surface when
+    // someone ran the small-N happy path -- the tamper checks are what prove
+    // the verifier is load-bearing.
+
+    struct Fx {
+        uint256   n;
+        uint256   oldRoot;
+        uint256   newRoot;
+        uint256   nextLeafIndex;
+        uint256   totalFace;
+        uint256[] cms;
+        bytes     proof;
+    }
+
+    function _loadFx(string memory path) internal view returns (Fx memory fx) {
+        string memory j = vm.readFile(path);
+        fx.n             = vm.parseJsonUint(j, ".N");
+        fx.oldRoot       = vm.parseJsonUint(j, ".public.oldRoot");
+        fx.newRoot       = vm.parseJsonUint(j, ".public.newRoot");
+        fx.nextLeafIndex = vm.parseJsonUint(j, ".public.nextLeafIndex");
+        fx.totalFace     = vm.parseJsonUint(j, ".public.totalFace");
+        fx.cms           = new uint256[](fx.n);
+        for (uint256 i = 0; i < fx.n; i++) {
+            fx.cms[i] = vm.parseJsonUint(
+                j, string.concat(".public.cm[", vm.toString(i), "]")
+            );
+        }
+        fx.proof = vm.parseJsonBytes(j, ".proofBytes");
+    }
+
+    function _rejectTamperTotalFace(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace + 1, fx.cms
+        );
+    }
+
+    function _rejectTamperNewRoot(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        uint256 bogus = uint256(keccak256("bogus")) % notes.FIELD_R();
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fx.proof, fx.oldRoot, bogus, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+    }
+
+    function _rejectTamperCommitment(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        fx.cms[0] ^= 1;
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+    }
+
+    function _replayRejected(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        vm.prank(alice);
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+        // After accepted mint: live oldRoot has advanced; same proof must be
+        // caught by the stale-state guard before the verifier is even called.
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: stale oldRoot"));
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+    }
+
+    function _successiveBatches(
+        string memory basicPath, string memory successivePath
+    ) internal {
+        Fx memory a = _loadFx(basicPath);
+        vm.prank(alice);
+        notes.mint(
+            a.proof, a.oldRoot, a.newRoot, uint32(a.nextLeafIndex),
+            a.totalFace, a.cms
+        );
+        assertEq(notes.nextLeafIndex(), a.n);
+        assertEq(notes.noteRoot(),      a.newRoot);
+
+        Fx memory b = _loadFx(successivePath);
+        assertEq(b.oldRoot,       a.newRoot, "successive.oldRoot == basic.newRoot");
+        assertEq(b.nextLeafIndex, a.n,       "successive starts at leaf N");
+        assertEq(b.n,             a.n,       "successive batch size matches");
+
+        uint256 sumBefore  = notes.noteFaceSum();
+        uint256 poolBefore = buck.balanceOf(address(notes));
+        vm.prank(alice);
+        notes.mint(
+            b.proof, b.oldRoot, b.newRoot, uint32(b.nextLeafIndex),
+            b.totalFace, b.cms
+        );
+
+        assertEq(notes.nextLeafIndex(), a.n + b.n);
+        assertEq(notes.noteRoot(),      b.newRoot);
+        assertEq(notes.noteFaceSum(),   sumBefore + b.totalFace);
+        assertEq(buck.balanceOf(address(notes)), poolBefore + b.totalFace);
+    }
+
+    // ---- N=1 -------------------------------------------------------------
+    function test_mint_rejectedOnTamperedTotalFace_N1() public {
+        _rejectTamperTotalFace("build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedNewRoot_N1() public {
+        _rejectTamperNewRoot("build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedCommitment_N1() public {
+        _rejectTamperCommitment("build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+    function test_mint_replayRejected_N1() public {
+        _replayRejected("build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+    function test_mint_successiveBatches_N1() public {
+        _successiveBatches(
+            "build/snark/mint_batch_n1/fixtures/basic.json",
+            "build/snark/mint_batch_n1/fixtures/successive.json"
+        );
+    }
+
+    // ---- N=2 -------------------------------------------------------------
+    function test_mint_rejectedOnTamperedTotalFace_N2() public {
+        _rejectTamperTotalFace("build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedNewRoot_N2() public {
+        _rejectTamperNewRoot("build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedCommitment_N2() public {
+        _rejectTamperCommitment("build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+    function test_mint_replayRejected_N2() public {
+        _replayRejected("build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+    function test_mint_successiveBatches_N2() public {
+        _successiveBatches(
+            "build/snark/mint_batch_n2/fixtures/basic.json",
+            "build/snark/mint_batch_n2/fixtures/successive.json"
+        );
+    }
+
+    // ---- N=4 -------------------------------------------------------------
+    function test_mint_rejectedOnTamperedTotalFace_N4() public {
+        _rejectTamperTotalFace("build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedNewRoot_N4() public {
+        _rejectTamperNewRoot("build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedCommitment_N4() public {
+        _rejectTamperCommitment("build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+    function test_mint_replayRejected_N4() public {
+        _replayRejected("build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+    function test_mint_successiveBatches_N4() public {
+        _successiveBatches(
+            "build/snark/mint_batch_n4/fixtures/basic.json",
+            "build/snark/mint_batch_n4/fixtures/successive.json"
+        );
+    }
+
+    // ---- N=8 -------------------------------------------------------------
+    function test_mint_rejectedOnTamperedTotalFace_N8() public {
+        _rejectTamperTotalFace("build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedNewRoot_N8() public {
+        _rejectTamperNewRoot("build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedCommitment_N8() public {
+        _rejectTamperCommitment("build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+    function test_mint_replayRejected_N8() public {
+        _replayRejected("build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+    function test_mint_successiveBatches_N8() public {
+        _successiveBatches(
+            "build/snark/mint_batch_n8/fixtures/basic.json",
+            "build/snark/mint_batch_n8/fixtures/successive.json"
+        );
+    }
+
+    // ---- cross-N replay (proof from N=4 cannot be reused at N=8) ---------
+    //
+    // Confirms that even after a successful small-N mint, a proof generated
+    // for a *different* batch size cannot be replayed at the new live state:
+    // the per-N verifier dispatch + stale-state guards cooperate to reject.
+    function test_mint_crossNReplayRejected() public {
+        Fx memory n4 = _loadFx("build/snark/mint_batch_n4/fixtures/basic.json");
+        vm.prank(alice);
+        notes.mint(
+            n4.proof, n4.oldRoot, n4.newRoot, uint32(n4.nextLeafIndex),
+            n4.totalFace, n4.cms
+        );
+        // Live nextLeafIndex == 4, live root == n4.newRoot.  Replaying with
+        // N=4's public oldRoot = EMPTY_ROOT must hit the stale-state guard.
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: stale oldRoot"));
+        notes.mint(
+            n4.proof, n4.oldRoot, n4.newRoot, uint32(n4.nextLeafIndex),
+            n4.totalFace, n4.cms
+        );
     }
 }

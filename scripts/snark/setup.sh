@@ -96,10 +96,15 @@ setup_circuit() {
 # Ptau power needed for a given mint_batch N.  Empirically N=16 produces
 # ~164K non-linear + ~185K linear constraints; snarkjs's groth16 setup needs
 # an FFT domain >= total constraints, so 2^19 = 524288 suffices for N=16.
-# Each doubling of N roughly doubles the constraints.
+# Each doubling of N roughly doubles the constraints; small-N variants
+# (N=1..8) sit comfortably inside pot15..pot18.
 ptau_pow_for_n() {
     local N="$1"
     case "$N" in
+          1) echo 15 ;;
+          2) echo 16 ;;
+          4) echo 17 ;;
+          8) echo 18 ;;
          16) echo 19 ;;
          32) echo 20 ;;
          64) echo 21 ;;
@@ -126,8 +131,12 @@ render_mint_batch_n() {
 # ---- legacy mint + spend (pot15) -----------------------------------------
 
 PTAU15="$(ensure_ptau 15)"
-setup_circuit mint  MintGroth16Verifier  "$PTAU15"
-setup_circuit spend SpendGroth16Verifier "$PTAU15"
+setup_circuit mint    MintGroth16Verifier   "$PTAU15"
+setup_circuit spend   SpendGroth16Verifier  "$PTAU15"
+# spend_a (Phase 8 V1): same scaffolding as spend, A-tag nullifier + flavor
+# constraint.  Constraint count is essentially the same as spend, so pot15
+# suffices.
+setup_circuit spend_a SpendAGroth16Verifier "$PTAU15"
 
 # ---- mint_batch per-N (Phase 7-bis pivot) --------------------------------
 

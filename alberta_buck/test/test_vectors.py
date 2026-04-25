@@ -19,6 +19,7 @@ from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_decrypt, Iden
 from alberta_buck.wallet.ps import PSSignature, ps_verify
 from alberta_buck.wallet.nizk import RegistrationProof, registration_verify
 from alberta_buck.wallet.chaum_pedersen import CPProof, chaum_pedersen_verify
+from alberta_buck.wallet.spend_cp import SpendCPProof, spend_cp_verify
 from alberta_buck.wallet.vectors import build_vectors
 
 
@@ -139,6 +140,22 @@ def test_chaum_pedersen_proof_verifies(vectors):
 def test_bob_can_decrypt_re_encrypted_M(vectors):
     _, _, a, b, ap = _decode(vectors)
     assert elgamal_decrypt(ap["E_for_bob"], b["kp"].sk) == a["M"]
+
+
+def test_spend_cp_proof_verifies(vectors):
+    """Round-trip the V2 A-spend CP-DLEQ vector through the Python verifier."""
+    _, _, a, _, _ = _decode(vectors)
+    sc = vectors["spend_cp"]
+    E_n = ElGamalCiphertext(R=_pt(sc["E_n"]["R"]), C=_pt(sc["E_n"]["C"]))
+    pi  = SpendCPProof(
+        e=_h(sc["proof"]["e"]), s=_h(sc["proof"]["s"]),
+        T1=_pt(sc["proof"]["T1"]), T2=_pt(sc["proof"]["T2"]),
+    )
+    assert spend_cp_verify(
+        E_n, a["E"], a["kp"].pk, pi,
+        recipient=_h(sc["recipient"]),
+        chainid=_h(sc["chainid"]),
+    )
 
 
 def test_vectors_are_deterministic_for_same_seed():

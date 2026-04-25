@@ -25,10 +25,21 @@ from alberta_buck.wallet.nizk import (
 from alberta_buck.wallet.chaum_pedersen import (
     CPProof, chaum_pedersen_prove, chaum_pedersen_verify,
 )
+from alberta_buck.wallet.poseidon import poseidon, F_R
 from alberta_buck.wallet.notes import (
     NoteOpening, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
+    NULLIFIER_TAG_A, NULLIFIER_TAG_B,
     note_commitment, nullifier_a, nullifier_b,
     id_payload_a1, id_payload_a2, id_payload_b1,
+    id_hash_a1, id_hash_a2, id_hash_b1,
+)
+from alberta_buck.wallet.issuer import (
+    Issuer, IssuedCredential, rerandomize_for_registration,
+)
+from alberta_buck.wallet.spend_a import (
+    TREE_DEPTH, ZERO_VALUE, EMPTY_ROOT,
+    MerkleTree, merkle_walk,
+    SpendAWitness, make_spend_a_witness, spend_a_satisfied,
 )
 
 __all__ = [
@@ -41,7 +52,14 @@ __all__ = [
     "elgamal_encrypt", "elgamal_decrypt",
     "RegistrationProof", "registration_prove", "registration_verify",
     "CPProof", "chaum_pedersen_prove", "chaum_pedersen_verify",
+    "poseidon", "F_R",
     "NoteOpening", "FLAVOR_A1", "FLAVOR_A2", "FLAVOR_B1",
+    "NULLIFIER_TAG_A", "NULLIFIER_TAG_B",
     "note_commitment", "nullifier_a", "nullifier_b",
     "id_payload_a1", "id_payload_a2", "id_payload_b1",
+    "id_hash_a1", "id_hash_a2", "id_hash_b1",
+    "Issuer", "IssuedCredential", "rerandomize_for_registration",
+    "TREE_DEPTH", "ZERO_VALUE", "EMPTY_ROOT",
+    "MerkleTree", "merkle_walk",
+    "SpendAWitness", "make_spend_a_witness", "spend_a_satisfied",
 ]
