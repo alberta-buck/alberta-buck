@@ -254,14 +254,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    nullifier set, and a small ring buffer of historical roots.
 
    #+LATEX: {\scriptsize
-   | State                | Type                                      | Purpose                                                          |
-   |----------------------+-------------------------------------------+------------------------------------------------------------------|
-   | =nullifiers=         | =mapping(uint256 =\Rightarrow= bool)=     | Double-spend prevention                                          |
-   | =noteFaceSum=        | =uint256=                                 | Total face value of all outstanding notes (audit scalar)         |
-   | =nextLeafIndex=      | =uint32=                                  | Next free leaf slot (also = current leaf count)                  |
-   | =roots[30]=          | =uint256[ROOT_HISTORY_SIZE]=              | Recent root ring buffer; spends may use any historical root      |
-   | =currentRootIndex=   | =uint32=                                  | Newest entry in =roots[]=                                        |
-   | =mintVerifiers[N]=   | =mapping(uint256 =\Rightarrow= IMintVerifier)= | Per-N batch-mint verifier dispatch (pinned set, e.g. 16/128/1024) |
+   | State              | Type                                           | Purpose                                                           |
+   |--------------------+------------------------------------------------+-------------------------------------------------------------------|
+   | =nullifiers=       | =mapping(uint256 =\Rightarrow= bool)=          | Double-spend prevention                                           |
+   | =noteFaceSum=      | =uint256=                                      | Total face value of all outstanding notes (audit scalar)          |
+   | =nextLeafIndex=    | =uint32=                                       | Next free leaf slot (also = current leaf count)                   |
+   | =roots[30]=        | =uint256[ROOT_HISTORY_SIZE]=                   | Recent root ring buffer; spends may use any historical root       |
+   | =currentRootIndex= | =uint32=                                       | Newest entry in =roots[]=                                         |
+   | =mintVerifiers[N]= | =mapping(uint256 =\Rightarrow= IMintVerifier)= | Per-N batch-mint verifier dispatch (pinned set, e.g. 16/128/1024) |
    #+LATEX: }
 
    The tree is fixed at depth \( d=20 \) (\(\approx 1{,}048{,}576\) leaves) and
@@ -606,13 +606,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    message, or paper QR) displays one of five statuses:
 
    #+LATEX: {\scriptsize
-   | Display             | Meaning                                                              |
-   |---------------------+----------------------------------------------------------------------|
-   | =VALID: 1,000 BUCK= | Commitment in tree, nullifier unspent, spend predicate satisfiable   |
-   | =DEAD=              | Commitment in tree, nullifier already spent                          |
-   | =FAKE=              | Commitment not in tree                                               |
-   | =EXPIRED=           | Predicate includes an expiry that has passed                         |
-   | =NOT FOR YOU=       | Addressed (A1/A2) note whose bound =M_rec= does not match the viewer's Identity        |
+   | Display             | Meaning                                                                         |
+   |---------------------+---------------------------------------------------------------------------------|
+   | =VALID: 1,000 BUCK= | Commitment in tree, nullifier unspent, spend predicate satisfiable              |
+   | =DEAD=              | Commitment in tree, nullifier already spent                                     |
+   | =FAKE=              | Commitment not in tree                                                          |
+   | =EXPIRED=           | Predicate includes an expiry that has passed                                    |
+   | =NOT FOR YOU=       | Addressed (A1/A2) note whose bound =M_rec= does not match the viewer's Identity |
    #+LATEX: }
 
    Casual users do not need to understand the underlying cryptography any
@@ -1475,13 +1475,43 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
     time.
 
     *Status (current implementation).*  The shipped =spend.circom=
-    is B-shape only; A-flavor notes minted today are
-    bearer-spendable by anyone holding the opening, until
-    =spend_a.circom= adds the in-circuit CP-equality binding.  The
-    cryptographic binding arguments above describe the design with
-    Phase 4 shipped; A1/A2 issuers should treat today's notes as
-    civil-trust instruments and not yet rely on cryptographic
-    recipient binding.
+    is B-shape only; Phase 8 V2 ships =spend_a.circom= as the
+    A-flavor companion via two cooperating components -- a SNARK and
+    an off-chain identity check -- glued by =Notes.spendACP=:
+
+    1. *In-circuit (=spend_a.circom= V2)*: enforces the A-tag
+       nullifier (Poseidon-3 with tag 4243), the flavor-in-{1,2}
+       gate, the Merkle membership proof, and the new binding
+       constraint ~Poseidon-8(eN.R, eN.C, issuerData[0..3]) ===
+       idHash~.  The Poseidon-8 gate makes =E_n= a public input and
+       binds the publicly-revealed note ciphertext ~E_n = (R_n, C_n)~
+       to the leaf at mint time, so the on-chain identity verifier
+       cannot be played against a substituted ciphertext.
+
+    2. *Off-chain (=IdentityRegistry.verifySpendCP=)*: the spender
+       provides a 4-element Chaum-Pedersen DLEQ proof =(e, s, T1,
+       T2)= showing that their wallet's =sk_dep= decrypts both
+       =E_addr[spender]= and =E_n= to the same identity point =M=.
+       Verified by Solidity using the EIP-196 BN254 precompiles
+       (~36K gas: 2 ecMul + 2 ecAdd + keccak FS).  =Notes.spendACP=
+       calls
+       =identityRegistry.verifySpendCP(msg.sender, recipient, E_n,
+       cpProof)= after the SNARK verifier passes; both must succeed.
+
+    The DLEQ statement was relegated off-chain because its native
+    BN254 G1 arithmetic would have cost ~+250K R1CS in non-native
+    circom -- prohibitively expensive in-circuit -- whereas the
+    EIP-196 precompiles do the same job in a single transaction at
+    ~36K gas.  The Poseidon-8 binding constraint inside the SNARK
+    (~265 R1CS) is what closes the loop: it forces the spender to
+    reveal the same =E_n= the credential was minted against, so a
+    spender who substitutes a different ciphertext (in order to
+    satisfy a CP-DLEQ they can satisfy with their own key) fails the
+    in-circuit check.  All identity, security, and privacy
+    properties enumerated above -- including the Theorem 10.1
+    invariant (re-issuance does not recover A-notes) -- are
+    preserved.  See [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]]
+    Phase 8 for the implementation split.
 
 ** B1 (Bearer): Civil-Trust, Not Cryptographic
 
@@ -2337,13 +2367,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 #+LATEX: \clearpage
 * The SNARK Circuits
 
-  The Notes implementation uses two BN254 Groth16 circuits:
-  =mint_batch.circom= (Phase-7-bis, parameterised by pinned N) and
-  =spend.circom=.  =spend.circom= is a single, flavor-agnostic
-  /bearer-shape/ circuit: it handles B1 today, and treats any A-flavor
-  commitment as bearer-redeemable (the in-circuit CP-equality binding
-  to the depositor's registered identity is deferred to a follow-up
-  =spend_a.circom=, see "Phased Rollout" below).
+  The Notes implementation uses three BN254 Groth16 circuits:
+  =mint_batch.circom= (Phase-7-bis, parameterised by pinned N),
+  =spend.circom= (B-shape, flavor-agnostic bearer redemption), and
+  =spend_a.circom= V2 (A-shape, with a Poseidon-8 idHash binding
+  gate that pins =E_n= to the leaf -- the off-chain CP-DLEQ
+  identity check is verified by =IdentityRegistry.verifySpendCP=
+  via EIP-196 BN254 precompiles, called from =Notes.spendACP=; see
+  "Phased Rollout" below).
 
 ** Mint Circuit (=circuits/mint_batch.circom=)
 
@@ -2443,15 +2474,18 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    =buck.transferCarrying(recipient, face)= to deliver the funds
    plus the pool's accumulated demurrage share.
 
-   *Bearer semantics today.*  Anyone holding the opening
+   *Bearer semantics for B-shape spends.*  Anyone holding the opening
    \( (\rho, \text{idHash}, \text{flavor}, v, \text{predHash}) \) can
-   produce a valid spend proof and direct the proceeds to any
+   produce a valid B-spend proof and direct the proceeds to any
    recipient registered (or registered as system-public) in
    IdentityRegistry.  This is the correct semantics for a B1 bearer
-   note.  For A-flavor notes (A1/A2 addressed), the in-circuit
-   identity binding that would restrict redemption to the bound
-   recipient is deferred -- they are bearer-spendable today and
-   become identity-bound once =spend_a.circom= ships.
+   note.  *A-flavor identity binding is now shipped* via the V2
+   =spend_a.circom= + =Notes.spendACP= path: the SNARK enforces a
+   Poseidon-8 binding gate that pins the publicly-revealed =E_n= to
+   the leaf, and =IdentityRegistry.verifySpendCP= confirms the
+   spender's =sk_dep= satisfies the equal-plaintext relation between
+   =E_n= and their registered =E_reg=.  See "Phased Rollout" below
+   and =test/SpendAVerifier.t.sol= for the end-to-end exercise.
 
 ** Circuit Engineering Budget
 
@@ -2465,6 +2499,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | =mint_batch.circom= (Phase-7-bis; N=128)     | ~770,000        | 2^{20}   |
    | =mint_batch.circom= (Phase-7-bis; N=1024)    | ~6,000,000      | 2^{23}   |
    | =spend.circom= (B-shape; depth-20 Merkle)    | ~12,000         | 2^{15}   |
+   | =spend_a.circom= V2 (A-shape + Poseidon-8 idHash bind) | ~13,300 (6152 nl + 7140 lin) | 2^{15} |
    #+LATEX: }
 
    The spend circuit is comparable to Zcash Sapling's Spend circuit
@@ -2485,10 +2520,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    - Tornado-style Merkle inclusion (Switcher + Poseidon at each level)
    - =Num2Bits= range proofs on field elements
 
-   The =spend_a.circom= follow-up will add ElGamal re-randomization
-   and Chaum-Pedersen equality gadgets (~2000 extra constraints) on
-   top of this base, plus an A-flavor branch that asserts CP-equality
-   against the depositor's current IdentityRegistry credential.
+   =spend_a.circom= V2 adds two extras on top of this base: an A-tag
+   nullifier domain separator and a Poseidon-8 binding gate that
+   pins =E_n= to the committed =idHash= (~265 R1CS).  The
+   Chaum-Pedersen equality between =E_n= and the depositor's
+   registered =E_reg= is verified /off-chain/ by =Notes.spendACP=
+   via =IdentityRegistry.verifySpendCP= using EIP-196 BN254
+   precompiles (~36K gas), avoiding the prohibitive ~+250K R1CS
+   cost of non-native G1 arithmetic in circom.
 
 #+LATEX: \clearpage
 * What This Architecture Rules Out: Pure-Bearer Cryptographic Notes
@@ -2620,22 +2659,26 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    #+LATEX: {\scriptsize
    | Component                                   | Source                                              |
    |---------------------------------------------+-----------------------------------------------------|
-   | Notes contract: roots, nullifiers, mint/spend (Phase-7-bis surface) | =src/Notes.sol=              |
+   | Notes contract: roots, nullifiers, mint/spend/spendACP (Phase-7-bis + Phase-8-V2 surface) | =src/Notes.sol=              |
    | =transferCarrying= primitive in BUCK         | =src/Buck.sol= (=transferCarrying=, =_indexAtLastTouch= merge) |
    | Mint Groth16 circuits + per-N verifiers      | =circuits/mint_batch.circom=, =src/MintGroth16Verifier_N*.sol= |
    | Spend Groth16 circuit + verifier (B-shape)   | =circuits/spend.circom=, =src/SpendGroth16Verifier.sol= |
+   | Spend_A Groth16 circuit + verifier (V2; Poseidon-8 binding gate) | =circuits/spend_a.circom=, =src/SpendAGroth16Verifier.sol= |
    | Poseidon-T3 precompile (in-EVM bytecode)    | =src/PoseidonT3Bytecode.sol=                        |
-   | Verifier adapters (proof-bytes plumbing, per-N mint dispatch) | =src/MintVerifierAdapter.sol=, =src/SpendVerifierAdapter.sol= |
-   | End-to-end tests (real Groth16 fixtures)     | =test/MintVerifier.t.sol=, =test/SpendVerifier.t.sol= |
-   | Prover scripts (witness gen + ptau ceremony) | =scripts/snark/prove_mint_batch.js=, =scripts/snark/prove_spend.js=, =scripts/snark/setup.sh= |
+   | Verifier adapters (proof-bytes plumbing, per-N mint dispatch) | =src/MintVerifierAdapter.sol=, =src/SpendVerifierAdapter.sol=, =src/SpendAVerifierAdapter.sol= |
+   | A-spend identity gate (off-chain CP-DLEQ, EIP-196 precompiles) | =alberta_buck.wallet.spend_cp=, =IdentityRegistry.verifySpendCP=, =src/ISpendAVerifier.sol= |
+   | End-to-end tests (real Groth16 fixtures)     | =test/MintVerifier.t.sol=, =test/MintBatchVerifier.t.sol=, =test/SpendVerifier.t.sol=, =test/SpendAVerifier.t.sol= |
+   | Prover scripts (witness gen + ptau ceremony) | =scripts/snark/prove_mint_batch.js=, =scripts/snark/prove_spend.js=, =scripts/snark/prove_spend_a.js=, =scripts/snark/setup.sh= |
    #+LATEX: }
 
-** Pending Engineering (Phases 4-8)
+** Pending Engineering (Phases 5-8)
 
-   - *=spend_a.circom= (Phase 4).*  ElGamal re-randomization and
-     Chaum-Pedersen equality gadgets to bind A-flavor spend to the
-     depositor's registered =M=.  ~3-5 weeks of SNARK-circuit work
-     + verifier integration.
+   - *=spend_a.circom= V2 (Phase 4).*  *Shipped.*  In-circuit
+     Poseidon-8 binding gate that pins =E_n= to the leaf, paired
+     with off-chain Chaum-Pedersen DLEQ verified in
+     =IdentityRegistry.verifySpendCP= via EIP-196 BN254 precompiles
+     (~36K gas) and called from =Notes.spendACP=.  Exercised end-to-
+     end by =test/SpendAVerifier.t.sol= (26 tests).
    - *A1 issuer-signature-in-payload (Phase 5).*  Schnorr verification
      inside the spend circuit and corresponding wallet UX.  ~2 weeks.
    - *Sealed-QR print flow for B1 (Phase 6).*  Hologram-vendor
@@ -2677,34 +2720,73 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    The engineering work is naturally phaseable:
 
    #+LATEX: {\scriptsize
-   | Phase  | Scope                                                              | Status                                        |
-   |--------+--------------------------------------------------------------------+-----------------------------------------------|
-   |     1  | On-chain Notes pool: incremental Merkle tree, nullifiers, =Notes=  | *Shipped* (=src/Notes.sol=)                   |
-   |     2  | Mint circuit + on-chain Groth16 verifier (=mint.circom=, N=2)      | *Shipped* (historical; superseded by 2-bis)   |
-   |   2-bis | Batch-mint circuit: per-leaf Merkle insertion moved into the SNARK (=mint_batch.circom=, pinned N set) | Active implementation work            |
-   |     3  | Spend circuit (B-shape / bearer) + =transferCarrying=              | *Shipped* (Phase 7 BUCK Notes)                |
-   |     4  | =spend_a.circom=: in-circuit CP-equality binding for A1/A2 notes   | Pending (ElGamal + Chaum-Pedersen gadgets)    |
-   |     5  | A1 public-issuer signature-in-payload + auditable payroll UX       | Pending (depends on Phase 4)                  |
-   |     6  | Sealed-QR print flow for B1 walking-around notes                   | Pending (hologram-vendor integration)         |
-   |     7  | Programmable =predicate= field (bounded predicate DSL)             | Deferred (Aztec Noir / Halo2 toolchain)       |
-   |     8  | Optional: off-chain re-targeting via proxy re-encryption           | Deferred (Identity Guardians)                 |
+   | Phase | Scope                                                                             | Status                                                       |
+   |-------+-----------------------------------------------------------------------------------+--------------------------------------------------------------|
+   |     1 | On-chain Notes pool: incremental Merkle tree, nullifiers, =Notes=                 | *Shipped* (=src/Notes.sol=)                                  |
+   |     2 | Mint circuit + on-chain Groth16 verifier (=mint.circom=, N=2)                     | *Shipped* (historical; superseded by 2-bis)                  |
+   | 2-bis | Batch-mint circuit: per-leaf Merkle insertion moved into the                      | Active implementation work                                   |
+   |       | SNARK (=mint_batch.circom=, pinned N set)                                         |                                                              |
+   |     3 | Spend circuit (B-shape / bearer) + =transferCarrying=                             | *Shipped* (Phase 7 BUCK Notes)                               |
+   |     4 | =spend_a.circom= V1 (predicate-only A-spend) + V2 (in-circuit EIP-196 precompiles | V1 *Shipped*; V2 *Shipped*; =alberta_buck.wallet.spend_cp=,  |
+   |       | Poseidon-8 idHash binding gate; off-chain CP-DLEQ via                             | =IdentityRegistry.verifySpendCP=, =src/ISpendAVerifier.sol=, |
+   |       | in =IdentityRegistry.verifySpendCP=, called from =Notes.spendACP=)                | =src/SpendAVerifierAdapter.sol=                              |
+   |     5 | A1 public-issuer signature-in-payload + auditable payroll UX                      | Pending (depends on Phase 4)                                 |
+   |     6 | Sealed-QR print flow for B1 walking-around notes                                  | Pending (hologram-vendor integration)                        |
+   |     7 | Programmable =predicate= field (bounded predicate DSL)                            | Deferred (Aztec Noir / Halo2 toolchain)                      |
+   |     8 | Optional: off-chain re-targeting via proxy re-encryption                          | Deferred (Identity Guardians)                                |
    #+LATEX: }
 
-   Phases 1-3 are *shipped* and exercised end-to-end by the test
-   suite (=test/MintVerifier.t.sol=, =test/SpendVerifier.t.sol=) on
-   real Groth16 fixtures.  Today's spend circuit is a single
-   flavor-agnostic /B-shape/ verifier: any commitment the prover
-   knows the opening for can be redeemed to any IdentityRegistry-
-   verified or system-public recipient.  This is the correct
-   semantics for B1 bearer notes and the temporary semantics for A1
-   and A2 addressed notes until Phase 4 ships.
+   Phases 1-4 are *shipped* and exercised end-to-end by the test
+   suite (=test/MintVerifier.t.sol=, =test/MintBatchVerifier.t.sol=,
+   =test/SpendVerifier.t.sol=, =test/SpendAVerifier.t.sol=) on real
+   Groth16 fixtures.  The B-shape spend circuit is a single
+   flavor-agnostic verifier: any commitment the prover knows the
+   opening for can be redeemed to any IdentityRegistry-verified or
+   system-public recipient (the correct semantics for B1 bearer
+   notes).  The A-shape =spend_a.circom= V2 adds the in-circuit
+   Poseidon-8 idHash binding gate that pins =E_n= to the leaf at
+   mint time, paired with off-chain CP-DLEQ verification in
+   =IdentityRegistry.verifySpendCP=, called from =Notes.spendACP=.
 
-   Phase 4 (=spend_a.circom=) closes the A-flavor gap by adding the
-   in-circuit ElGamal re-randomization and Chaum-Pedersen equality
-   gadgets that bind redemption to the registered recipient's =M=.
-   Until then, A1/A2 notes are correctly minted but bearer-spendable;
-   issuers should rely on civil trust and not treat A-flavor notes
-   as cryptographically address-bound.
+   Phase 4 closes the A-flavor gap in two layers, both shipped.  V1
+   ships =spend_a.circom= (A-tag nullifier, flavor constraint) without
+   the identity gate.  V2 layers the identity binding using two
+   cooperating components:
+
+   1. *In-circuit Poseidon-8 binding gate* (constraint (I) in the
+      revised =spend_a.circom=): the SNARK now publishes =E_n.R= and
+      =E_n.C= as four additional public inputs (the spender's note
+      ciphertext, in BN254 G1 affine coordinates), and enforces
+
+      \[
+        \mathsf{Poseidon\text{-}8}(\mathsf{E_n.R.x}, \mathsf{E_n.R.y},
+                                  \mathsf{E_n.C.x}, \mathsf{E_n.C.y},
+                                  \mathsf{issuerData}[0..3]) \;\equiv\; \mathsf{idHash} \pmod{F_R}.
+      \]
+
+      This pins the publicly-revealed =E_n= to the leaf at mint time
+      (~265 R1CS) without requiring any non-native BN254 arithmetic in
+      the circuit.
+
+   2. *Off-chain Chaum-Pedersen DLEQ verification* in
+      =IdentityRegistry.verifySpendCP=, called from =Notes.spendACP=
+      via the EIP-196 BN254 precompiles (~36K gas).  The verifier
+      reads the spender's registered =(pk_dep, E_reg)= from storage
+      and confirms a single =sk_dep= satisfies both ~pk_dep === sk_dep
+      * G~ and the equal-plaintext relation between =E_n= and =E_reg=.
+
+   This split is forced by the prohibitive cost of non-native BN254
+   G1 arithmetic in circom (~+250K R1CS per CP constraint set);
+   moving the DLEQ verification on-chain costs ~36K gas via precompiles
+   instead.  =Notes.spendACP(proof, root, nullifier, face, recipient,
+   E_n, cpProof)= calls both the Groth16 verifier (which checks the
+   binding gate) and =IdentityRegistry.verifySpendCP= (which checks
+   the equality of plaintexts) atomically.  All A1/A2 identity,
+   security, and privacy properties documented above -- including the
+   Theorem 10.1 invariant -- remain in force; only the verification
+   /location/ moved (off-chain CP via precompiles, not non-native G1
+   in circuit).  End-to-end exercised by 26 forge tests in
+   =test/SpendAVerifier.t.sol=.
 
    Phases 5-8 are optional extensions deferred until the core system
    is production-proven.
@@ -2793,17 +2875,17 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Universal Spend Circuit vs. A/B Specialization
 
-   The shipped =spend.circom= is already a /universal/ B-shape
-   verifier: a single Groth16 verifier handles every B1 deposit and
-   (today) every A-flavor deposit treated as bearer.  When Phase 4
-   ships =spend_a.circom=, the natural deployment is two distinct
-   spend verifiers (A vs. B), with the wallet selecting the correct
-   one based on the note's =flavor= field.  An alternative is one
-   "super-spend" verifier that takes =flavor= as a public input and
-   branches internally; the trade-off is gas per spend
-   (one larger verifier vs. selecting between two smaller ones)
-   against trusted-setup ceremony count.  Empirical question,
-   resolvable at Phase-4 deployment time.
+   Phase 4 deployed two distinct spend verifiers: =spend.circom=
+   (universal B-shape) and =spend_a.circom= V2 (A-shape with the
+   Poseidon-8 idHash binding gate and 9 public inputs).  The wallet
+   selects between =Notes.spend= and =Notes.spendACP= based on the
+   note's =flavor= field.  The alternative -- one "super-spend"
+   verifier branching internally on =flavor= -- was rejected: the
+   A-shape circuit publishes four extra public inputs (E_n.R/C
+   coordinates) and an additional binding constraint, and unifying
+   the two verifiers would force every B-spend proof to carry the
+   A-only public-input overhead.  Two verifiers, two trusted-setup
+   ceremonies (both pot15), is the shipped configuration.
 
 ** Regulatory Interaction with =transferCarrying=
 

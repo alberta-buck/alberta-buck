@@ -506,4 +506,222 @@ contract MintVerifierTest is Test {
         assertEq(notes.noteFaceSum(),   sumBefore + totalFace);
         assertEq(buck.balanceOf(address(notes)), poolBefore + totalFace);
     }
+
+    // ---- per-N rejection + replay + successive coverage (N=1..8) ----------
+    //
+    // N=16 is exercised by the named tests above; the small-N variants need
+    // the same load-bearing checks because each pinned N has its own circuit
+    // *and* its own Solidity verifier (different IC[] length encodes a
+    // different number of public cm[] inputs).  A regression in any per-N
+    // verifier or in the fixture pipeline would otherwise only surface when
+    // someone ran the small-N happy path -- the tamper checks are what prove
+    // the verifier is load-bearing.
+
+    struct Fx {
+        uint256   n;
+        uint256   oldRoot;
+        uint256   newRoot;
+        uint256   nextLeafIndex;
+        uint256   totalFace;
+        uint256[] cms;
+        bytes     proof;
+    }
+
+    function _loadFx(string memory path) internal view returns (Fx memory fx) {
+        string memory j = vm.readFile(path);
+        fx.n             = vm.parseJsonUint(j, ".N");
+        fx.oldRoot       = vm.parseJsonUint(j, ".public.oldRoot");
+        fx.newRoot       = vm.parseJsonUint(j, ".public.newRoot");
+        fx.nextLeafIndex = vm.parseJsonUint(j, ".public.nextLeafIndex");
+        fx.totalFace     = vm.parseJsonUint(j, ".public.totalFace");
+        fx.cms           = new uint256[](fx.n);
+        for (uint256 i = 0; i < fx.n; i++) {
+            fx.cms[i] = vm.parseJsonUint(
+                j, string.concat(".public.cm[", vm.toString(i), "]")
+            );
+        }
+        fx.proof = vm.parseJsonBytes(j, ".proofBytes");
+    }
+
+    function _rejectTamperTotalFace(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace + 1, fx.cms
+        );
+    }
+
+    function _rejectTamperNewRoot(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        uint256 bogus = uint256(keccak256("bogus")) % notes.FIELD_R();
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fx.proof, fx.oldRoot, bogus, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+    }
+
+    function _rejectTamperCommitment(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        fx.cms[0] ^= 1;
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+    }
+
+    function _replayRejected(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        vm.prank(alice);
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+        // After accepted mint: live oldRoot has advanced; same proof must be
+        // caught by the stale-state guard before the verifier is even called.
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: stale oldRoot"));
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+    }
+
+    function _successiveBatches(
+        string memory basicPath, string memory successivePath
+    ) internal {
+        Fx memory a = _loadFx(basicPath);
+        vm.prank(alice);
+        notes.mint(
+            a.proof, a.oldRoot, a.newRoot, uint32(a.nextLeafIndex),
+            a.totalFace, a.cms
+        );
+        assertEq(notes.nextLeafIndex(), a.n);
+        assertEq(notes.noteRoot(),      a.newRoot);
+
+        Fx memory b = _loadFx(successivePath);
+        assertEq(b.oldRoot,       a.newRoot, "successive.oldRoot == basic.newRoot");
+        assertEq(b.nextLeafIndex, a.n,       "successive starts at leaf N");
+        assertEq(b.n,             a.n,       "successive batch size matches");
+
+        uint256 sumBefore  = notes.noteFaceSum();
+        uint256 poolBefore = buck.balanceOf(address(notes));
+        vm.prank(alice);
+        notes.mint(
+            b.proof, b.oldRoot, b.newRoot, uint32(b.nextLeafIndex),
+            b.totalFace, b.cms
+        );
+
+        assertEq(notes.nextLeafIndex(), a.n + b.n);
+        assertEq(notes.noteRoot(),      b.newRoot);
+        assertEq(notes.noteFaceSum(),   sumBefore + b.totalFace);
+        assertEq(buck.balanceOf(address(notes)), poolBefore + b.totalFace);
+    }
+
+    // ---- N=1 -------------------------------------------------------------
+    function test_mint_rejectedOnTamperedTotalFace_N1() public {
+        _rejectTamperTotalFace("build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedNewRoot_N1() public {
+        _rejectTamperNewRoot("build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedCommitment_N1() public {
+        _rejectTamperCommitment("build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+    function test_mint_replayRejected_N1() public {
+        _replayRejected("build/snark/mint_batch_n1/fixtures/basic.json");
+    }
+    function test_mint_successiveBatches_N1() public {
+        _successiveBatches(
+            "build/snark/mint_batch_n1/fixtures/basic.json",
+            "build/snark/mint_batch_n1/fixtures/successive.json"
+        );
+    }
+
+    // ---- N=2 -------------------------------------------------------------
+    function test_mint_rejectedOnTamperedTotalFace_N2() public {
+        _rejectTamperTotalFace("build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedNewRoot_N2() public {
+        _rejectTamperNewRoot("build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedCommitment_N2() public {
+        _rejectTamperCommitment("build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+    function test_mint_replayRejected_N2() public {
+        _replayRejected("build/snark/mint_batch_n2/fixtures/basic.json");
+    }
+    function test_mint_successiveBatches_N2() public {
+        _successiveBatches(
+            "build/snark/mint_batch_n2/fixtures/basic.json",
+            "build/snark/mint_batch_n2/fixtures/successive.json"
+        );
+    }
+
+    // ---- N=4 -------------------------------------------------------------
+    function test_mint_rejectedOnTamperedTotalFace_N4() public {
+        _rejectTamperTotalFace("build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedNewRoot_N4() public {
+        _rejectTamperNewRoot("build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedCommitment_N4() public {
+        _rejectTamperCommitment("build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+    function test_mint_replayRejected_N4() public {
+        _replayRejected("build/snark/mint_batch_n4/fixtures/basic.json");
+    }
+    function test_mint_successiveBatches_N4() public {
+        _successiveBatches(
+            "build/snark/mint_batch_n4/fixtures/basic.json",
+            "build/snark/mint_batch_n4/fixtures/successive.json"
+        );
+    }
+
+    // ---- N=8 -------------------------------------------------------------
+    function test_mint_rejectedOnTamperedTotalFace_N8() public {
+        _rejectTamperTotalFace("build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedNewRoot_N8() public {
+        _rejectTamperNewRoot("build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+    function test_mint_rejectedOnTamperedCommitment_N8() public {
+        _rejectTamperCommitment("build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+    function test_mint_replayRejected_N8() public {
+        _replayRejected("build/snark/mint_batch_n8/fixtures/basic.json");
+    }
+    function test_mint_successiveBatches_N8() public {
+        _successiveBatches(
+            "build/snark/mint_batch_n8/fixtures/basic.json",
+            "build/snark/mint_batch_n8/fixtures/successive.json"
+        );
+    }
+
+    // ---- cross-N replay (proof from N=4 cannot be reused at N=8) ---------
+    //
+    // Confirms that even after a successful small-N mint, a proof generated
+    // for a *different* batch size cannot be replayed at the new live state:
+    // the per-N verifier dispatch + stale-state guards cooperate to reject.
+    function test_mint_crossNReplayRejected() public {
+        Fx memory n4 = _loadFx("build/snark/mint_batch_n4/fixtures/basic.json");
+        vm.prank(alice);
+        notes.mint(
+            n4.proof, n4.oldRoot, n4.newRoot, uint32(n4.nextLeafIndex),
+            n4.totalFace, n4.cms
+        );
+        // Live nextLeafIndex == 4, live root == n4.newRoot.  Replaying with
+        // N=4's public oldRoot = EMPTY_ROOT must hit the stale-state guard.
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: stale oldRoot"));
+        notes.mint(
+            n4.proof, n4.oldRoot, n4.newRoot, uint32(n4.nextLeafIndex),
+            n4.totalFace, n4.cms
+        );
+    }
 }

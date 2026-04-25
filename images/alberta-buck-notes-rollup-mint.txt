@@ -132,7 +132,7 @@ Table of Contents
   on-chain.  At the prover sizes we care about (N <= 128) the Groth16
   verifier cost grows linearly with N anyway, and the hash-elision keeps
   the public-input surface self-describing for the adapter (`pub[4+i]
-  ==' cm[i]=).
+  === cm[i]').
 
 
 2.2 Private witness
@@ -149,10 +149,10 @@ Table of Contents
 2.3 In-circuit constraints
 ──────────────────────────
 
-  • N x Poseidon-5: `cm[i] ==' Poseidon(flavor, v, rho, idHash,
-    predicate)[i]=
+  • N x Poseidon-5: `cm[i] === Poseidon(flavor, v, rho, idHash,
+    predicate)[i]'
   • N x Num2Bits(128) on `v[i]', plus Num2Bits(128) on `totalFace'
-  • 1 sum: `totalFace ==' sum(v[i])=
+  • 1 sum: `totalFace === sum(v[i])'
   • N x TREE_DEPTH /dual/ Poseidon-2 hashes implementing the rolling
     filled-subtrees insertion from `oldRoot' to `newRoot'.  Each leaf
     walks two Merkle paths sharing the same siblings: `priorWalk[i]'
@@ -203,9 +203,9 @@ Table of Contents
 2.5 On-chain `Notes.mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms[])'
 ───────────────────────────────────────────────────────────────────────────────────
 
-  1. Require `oldRoot =' roots[currentRootIndex]= (stale-state guard,
+  1. Require `oldRoot == roots[currentRootIndex]' (stale-state guard,
      pre-SNARK)
-  2. Require `nextLeafIndex =' self.nextLeafIndex= (stale-state guard,
+  2. Require `nextLeafIndex == self.nextLeafIndex' (stale-state guard,
      pre-SNARK)
   3. Require every `cms[i] < FIELD_R' and `newRoot < FIELD_R'
   4. `mintVerifier.verifyMint(proof, oldRoot, newRoot, nextLeafIndex,
@@ -254,13 +254,13 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       N  mint-tx total  per-note (mint / N)  block-share (30M cap) 
   ─────────────────────────────────────────────────────────────────
-     16  624K       M   39K            M     ~2.1%             M   
-     32  1.12M      M   35K            M     ~3.7%             M   
-     64  ~2.1M      P   ~33K           P     ~7%               P   
-    128  ~4.1M      P   ~32K           P     ~14%               P  
-    256  ~8.0M      P   ~31K           P     ~27%               P  
-    512  ~16M       P   ~31K           P     ~53%   (half block)P  
-   1024  ~32M       P   ~31K           P     >100% (UNFEASIBLE) P  
+     16  624K       M   39K            M     ~2.1%               M 
+     32  1.12M      M   35K            M     ~3.7%               M 
+     64  ~2.1M      P   ~33K           P     ~7%                 P 
+    128  ~4.1M      P   ~32K           P     ~14%                P 
+    256  ~8.0M      P   ~31K           P     ~27%                P 
+    512  ~16M       P   ~31K           P     ~53%  (half block)  P 
+   1024  ~32M       P   ~31K           P     >100% (UNFEASIBLE)  P 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   The per-note cost asymptotes at ~31K, not ~6K as the pure-ECMUL
@@ -454,7 +454,7 @@ Table of Contents
 3.5 A5. Lying about `oldRoot'
 ─────────────────────────────
 
-  Contract asserts `oldRoot =' roots[currentRootIndex]=.  Lying causes
+  Contract asserts `oldRoot == roots[currentRootIndex]'.  Lying causes
   revert.  GUARANTEE: intact.
 
 

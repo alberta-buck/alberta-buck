@@ -17,7 +17,9 @@ The test produces alberta_buck/test/gold_silver_history.png.
 
 import logging
 import os
+import socket
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -38,9 +40,35 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 PLOT_DIR = Path(__file__).parent
 DAYS = int(os.environ.get("DAYS", "365"))
 
+
+def _rpc_unreachable_reason():
+    """Return None if an RPC is configured AND reachable; otherwise a skip reason.
+
+    Bare presence of MAINNET_RPC_URL/ETH_RPC_URL is not enough -- a developer
+    may have ETH_RPC_URL=http://localhost:8545 in .env without Anvil running.
+    Probe the host with a short TCP connect to skip cleanly in that case.
+    """
+    url = os.environ.get("ETH_RPC_URL") or os.environ.get("MAINNET_RPC_URL")
+    if not url:
+        return "MAINNET_RPC_URL/ETH_RPC_URL not set"
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        return f"could not parse host from {url!r}"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    # Remote HTTPS endpoints (Alchemy, Infura) -- assume reachable, don't probe.
+    if parsed.scheme == "https" and host not in ("localhost", "127.0.0.1"):
+        return None
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return None
+    except (OSError, socket.timeout) as exc:
+        return f"RPC at {url} unreachable ({exc.__class__.__name__}); skipping"
+
+
 needs_rpc = pytest.mark.skipif(
-    not (os.environ.get("MAINNET_RPC_URL") or os.environ.get("ETH_RPC_URL")),
-    reason="MAINNET_RPC_URL not set -- skipping mainnet fork test",
+    _rpc_unreachable_reason() is not None,
+    reason=_rpc_unreachable_reason() or "RPC reachable",
 )
 
 

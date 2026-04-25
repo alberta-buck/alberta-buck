@@ -3,8 +3,10 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {IMintVerifier}  from "./IMintVerifier.sol";
-import {ISpendVerifier} from "./ISpendVerifier.sol";
+import {IMintVerifier}   from "./IMintVerifier.sol";
+import {ISpendVerifier}  from "./ISpendVerifier.sol";
+import {ISpendAVerifier} from "./ISpendAVerifier.sol";
+import {IdentityRegistry} from "./IdentityRegistry.sol";
 
 /// @dev Buck-specific age-preserving transfer.  Notes calls this on spend
 ///      so the recipient absorbs the pool's average demurrage age rather
@@ -80,6 +82,20 @@ contract Notes {
     address        public governance;
     IMintVerifier  public mintVerifier;
     ISpendVerifier public spendVerifier;
+    /// @notice A-flavor spend verifier (Phase 8 V2 -- spend_a.circom).
+    ///         Optional at construction (zero-address means A-spends are
+    ///         disabled until governance wires it).  Distinct interface from
+    ///         `spendVerifier` because spend_a V2 has 9 public inputs (the
+    ///         5-tuple plus the four BN254 G1 coordinates of the publicly
+    ///         revealed note ciphertext E_n), bound to the leaf via the
+    ///         in-circuit Poseidon-8 idHash gate.
+    ISpendAVerifier public spendAVerifier;
+
+    /// @notice Identity registry consulted on every A-spend for the off-chain
+    ///         CP-DLEQ identity binding (Phase 8 V2).  Optional at
+    ///         construction (zero-address disables A-spends just like a
+    ///         zero `spendAVerifier`).
+    IdentityRegistry public identityRegistry;
 
     // ---- nullifier + audit state ------------------------------------------
 
@@ -108,9 +124,16 @@ contract Notes {
     event GovernanceTransferred(address indexed previous, address indexed next);
     event MintVerifierUpdated(address indexed previous, address indexed next);
     event SpendVerifierUpdated(address indexed previous, address indexed next);
+    event SpendAVerifierUpdated(address indexed previous, address indexed next);
+    event IdentityRegistryUpdated(address indexed previous, address indexed next);
 
     /// @notice Emitted when a note is successfully spent.
     event Spent(uint256 indexed nullifier, uint256 face, address indexed recipient);
+
+    /// @notice Emitted when an A-flavor note is successfully spent.  The
+    ///         nullifier domain (tag 4243) is disjoint from B-spend (tag
+    ///         4242) so off-chain indexers can dedupe on `nullifier` alone.
+    event SpentA(uint256 indexed nullifier, uint256 face, address indexed recipient);
 
     /// @notice Emitted once per successful mint.  `cms` calldata carries the
     ///         per-leaf commitments in insertion order; offline provers
@@ -171,6 +194,25 @@ contract Notes {
         require(next != address(0),       "verifier=0");
         emit SpendVerifierUpdated(address(spendVerifier), next);
         spendVerifier = ISpendVerifier(next);
+    }
+
+    /// @notice Wire (or rotate) the A-flavor spend verifier.  Passing
+    ///         `address(0)` *disables* A-spends (the next `spendACP()` call
+    ///         will revert on the verifier dispatch); use that path during
+    ///         emergency lockdowns rather than redeploying Notes.
+    function setSpendAVerifier(address next) external {
+        require(msg.sender == governance, "not governance");
+        emit SpendAVerifierUpdated(address(spendAVerifier), next);
+        spendAVerifier = ISpendAVerifier(next);
+    }
+
+    /// @notice Wire (or rotate) the identity registry consulted by
+    ///         `spendACP`.  Passing `address(0)` disables A-spends just like
+    ///         a zero `spendAVerifier`; emergency lockdowns may flip either.
+    function setIdentityRegistry(address next) external {
+        require(msg.sender == governance, "not governance");
+        emit IdentityRegistryUpdated(address(identityRegistry), next);
+        identityRegistry = IdentityRegistry(next);
     }
 
     // ---- views ------------------------------------------------------------
@@ -303,5 +345,80 @@ contract Notes {
         );
 
         emit Spent(nullifier, face, recipient);
+    }
+
+    // ---- A-flavor spend (Phase 8 V2) -------------------------------------
+
+    /// @notice Redeem an A-flavor note (spend_a.circom V2).
+    ///
+    /// The A-spend SNARK is structurally identical to spend (same Merkle
+    /// path + Poseidon-5 opening + face binding) with three A-specific
+    /// differentiators:
+    ///   - flavor in {1,2}: spend_a rejects B-flavor openings, where spend
+    ///     accepts any flavor;
+    ///   - nullifier tag = 4243 (vs 4242 for spend), so the nullifier
+    ///     preimage spaces are disjoint and the same `nullifiers` mapping
+    ///     can serve both flavors with no cross-flavor collision risk;
+    ///   - the publicly-revealed note ciphertext E_n = (R_n, C_n) is bound
+    ///     to the leaf via Poseidon-8(eNoteR, eNoteC, issuerData[4]) ===
+    ///     idHash, so the on-chain CP-DLEQ verifier sees the same E_n that
+    ///     was committed at mint time.
+    ///
+    /// V2 ships the cryptographic "must be the registered recipient to
+    /// spend" binding *off-chain* relative to the SNARK -- the spender
+    /// (msg.sender) provides a 4-element Chaum-Pedersen DLEQ proof showing
+    /// that their wallet's secret key sk_dep decrypts both the registered
+    /// E_addr[msg.sender] and the freshly-revealed E_n to the same
+    /// identity point M.  IdentityRegistry.verifySpendCP runs that check
+    /// using EIP-196 BN254 precompiles (~36K gas) and binds (recipient,
+    /// chainid) into the Fiat-Shamir transcript so a proof tied to one
+    /// (recipient, chain) tuple cannot be replayed against another.  The
+    /// Poseidon-8 idHash gate inside the SNARK forces the prover to reveal
+    /// the same E_n the credential was minted against -- a spender who
+    /// substitutes a different ciphertext (so they can satisfy the CP-DLEQ
+    /// with their own key) would fail the in-circuit binding.  Together
+    /// the two checks reject every spender other than the address whose
+    /// (pk, E_addr) the credential was issued to.
+    function spendACP(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient,
+        IdentityRegistry.ElGamalCT calldata E_n,
+        IdentityRegistry.SpendCPProof calldata cpProof
+    ) external {
+        require(address(spendAVerifier)   != address(0), "Notes: A-spend disabled");
+        require(address(identityRegistry) != address(0), "Notes: identity registry not set");
+        require(recipient != address(0),  "Notes: zero recipient");
+        require(face      > 0,            "Notes: zero face");
+        require(_isAcceptedRoot(root),    "Notes: unknown root");
+        require(!nullifiers[nullifier],   "Notes: already spent");
+
+        // SNARK: 9 public inputs bind the 5-tuple plus E_n's coords.
+        require(
+            spendAVerifier.verifySpendA(
+                proof, root, nullifier, face, recipient, block.chainid,
+                E_n.R.X, E_n.R.Y, E_n.C.X, E_n.C.Y
+            ),
+            "Notes: bad spend proof"
+        );
+
+        // Off-chain identity binding: msg.sender must own the sk_dep that
+        // decrypts both E_n and their registered E_addr to the same M.
+        require(
+            identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof),
+            "Notes: bad identity proof"
+        );
+
+        nullifiers[nullifier] = true;
+        noteFaceSum          -= face;
+
+        require(
+            IBuckCarrying(address(buck)).transferCarrying(recipient, face),
+            "Notes: transfer failed"
+        );
+
+        emit SpentA(nullifier, face, recipient);
     }
 }

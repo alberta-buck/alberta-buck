@@ -87,7 +87,7 @@ into a =cmBatchHash=.  Trade-off: +N ECMULs in on-chain verifier cost vs.
 -1 Poseidon-N constraint in-circuit and -1 keccak on-chain.  At the prover
 sizes we care about (N <= 128) the Groth16 verifier cost grows linearly with
 N anyway, and the hash-elision keeps the public-input surface
-self-describing for the adapter (=pub[4+i] === cm[i]=).
+self-describing for the adapter (~pub[4+i] === cm[i]~).
 
 ** Private witness
 
@@ -98,9 +98,9 @@ self-describing for the adapter (=pub[4+i] === cm[i]=).
 
 ** In-circuit constraints
 
-- N x Poseidon-5: =cm[i] === Poseidon(flavor, v, rho, idHash, predicate)[i]=
+- N x Poseidon-5: ~cm[i] === Poseidon(flavor, v, rho, idHash, predicate)[i]~
 - N x Num2Bits(128) on =v[i]=, plus Num2Bits(128) on =totalFace=
-- 1 sum: =totalFace === sum(v[i])=
+- 1 sum: ~totalFace === sum(v[i])~
 - N x TREE_DEPTH /dual/ Poseidon-2 hashes implementing the rolling
   filled-subtrees insertion from =oldRoot= to =newRoot=.  Each leaf walks two
   Merkle paths sharing the same siblings: =priorWalk[i]= uses =ZERO_VALUE= at
@@ -143,8 +143,8 @@ N=16 lands at 14.5 KB, N=32 at 20.8 KB.  Linear extrapolation puts N=64 at
 
 ** On-chain =Notes.mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms[])=
 
-1. Require =oldRoot == roots[currentRootIndex]= (stale-state guard, pre-SNARK)
-2. Require =nextLeafIndex == self.nextLeafIndex= (stale-state guard, pre-SNARK)
+1. Require ~oldRoot == roots[currentRootIndex]~ (stale-state guard, pre-SNARK)
+2. Require ~nextLeafIndex == self.nextLeafIndex~ (stale-state guard, pre-SNARK)
 3. Require every =cms[i] < FIELD_R= and =newRoot < FIELD_R=
 4. =mintVerifier.verifyMint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms[])=
    -- adapter dispatches to the per-N =MintBatchN${N}Groth16Verifier= by
@@ -336,7 +336,7 @@ breaking Poseidon preimage resistance.  Add =cm[i] != 0= and
 =cm[i] != ZERO_VALUE= in-circuit for belt-and-suspenders.  GUARANTEE: intact.
 
 ** A5. Lying about =oldRoot=
-Contract asserts =oldRoot == roots[currentRootIndex]=.  Lying causes revert.
+Contract asserts ~oldRoot == roots[currentRootIndex]~.  Lying causes revert.
 GUARANTEE: intact.
 
 ** A6. Lying about =newRoot=

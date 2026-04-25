@@ -46,11 +46,36 @@ hostile-Alice analysis, is [[file:alberta-buck-notes-rollup-mint.org][alberta-bu
 
 The Phase-7 spend pipeline shipped in the bearer-shape (=spend.circom=,
 =SpendGroth16Verifier=, =Notes.spend=) and is exercised end-to-end in
-=test/SpendVerifier.t.sol=; the A-flavor in-circuit ElGamal/Chaum-Pedersen variant
-remains deferred to a future =spend_a.circom=, and that gap is flagged inline rather
-than papered over.  The spend path is /unchanged/ by the mint pivot: it already takes
-=cm= as a private witness under a public =noteRoot=, and the rolling-tree-update
-trick is contained to =mint=.
+=test/SpendVerifier.t.sol=.  The A-flavor pipeline (Phase 8) ships in two layers,
+both in tree.  V1 added the addressed-spend scaffolding (=spend_a.circom= -- A-tag
+nullifier, flavor in {A1, A2}) without the cryptographic identity gate.  V2 ships
+the identity binding via /two cooperating components/ glued by the new
+=Notes.spendACP= entrypoint:
+
+  - *In-circuit*: =spend_a.circom= V2 publishes =E_n= (the spender's note
+    ciphertext, as four BN254 G1 affine coordinates) and enforces a Poseidon-8
+    binding gate that pins =E_n= to the leaf at mint time
+    (~Poseidon-8(E_n.R.x, E_n.R.y, E_n.C.x, E_n.C.y, issuerData[0..3]) === idHash~).
+    This costs ~265 R1CS and stops a spender from substituting a different
+    =E_n= just to make the off-chain identity check pass with their own key.
+  - *Off-chain*: a 4-element Chaum-Pedersen DLEQ proof =(e, s, T1, T2)=
+    verified inside =IdentityRegistry.verifySpendCP= via the EIP-196 BN254
+    precompiles (~36K gas) -- /not/ inside the SNARK, since the DLEQ statement
+    requires native BN254 G1 arithmetic that is prohibitively expensive in
+    non-native circom (~+250K R1CS).  The verifier reads the spender's
+    registered =(pk_dep, E_reg)= from storage and confirms a single =sk_dep=
+    satisfies ~pk_dep === sk_dep * G~ and the equal-plaintext relation between
+    =E_n= and =E_reg=.
+
+=Notes.spendACP(proof, root, nullifier, face, recipient, E_n, cpProof)= calls
+both the SpendA Groth16 verifier (which checks the binding gate) and
+=IdentityRegistry.verifySpendCP= (which checks the DLEQ); both must succeed for
+the pool to call =buck.transferCarrying(recipient, face)=.  All A1/A2 identity,
+security, and privacy properties remain in place; only the DLEQ verification
+/location/ moved.  Exercised end-to-end by 26 forge tests in
+=test/SpendAVerifier.t.sol=.  The B-spend path is /unchanged/ by the mint pivot:
+it already takes =cm= as a private witness under a public =noteRoot=, and the
+rolling-tree-update trick is contained to =mint=.
 
 The aim is to show, by walking the path, that the system delivers five concrete
 guarantees:
@@ -72,11 +97,17 @@ guarantees:
    =Notes.sol= and =MintGroth16Verifier.sol= reject every batch that does not satisfy
    the mint relation.  The on-chain truth is what governs.
 
-The remaining caveats (the deferred A-flavor in-circuit identity binding, and
-the pinned-N dispatch set under =mint_batch.circom=) are addressed at the end
-and cross-referenced into the proofs and implementation docs.  The mint-circuit
-field-overflow concern from earlier drafts has been closed by the =Num2Bits(128)=
-range bounds in =mint_batch.circom= and the matching bounds in =spend.circom=.
+The remaining caveats (the pinned-N dispatch set under =mint_batch.circom=, and
+the V2 wiring through =Notes.spendACP= + =IdentityRegistry.verifySpendCP=) are
+addressed at the end and cross-referenced into the proofs and implementation
+docs.  The mint-circuit field-overflow concern from earlier drafts has been
+closed by the =Num2Bits(128)= range bounds in =mint_batch.circom= and the
+matching bounds in =spend.circom=.  The A-flavor in-circuit identity binding
+gap that earlier drafts flagged as deferred is now closed by Phase 8 V2:
+the in-circuit Poseidon-8 binding gate pins =E_n= to the leaf, and the
+off-chain CP-DLEQ (=IdentityRegistry.verifySpendCP=, called from
+=Notes.spendACP=) verifies that the spender's =sk_dep= decrypts both =E_n=
+and =E_reg= to the same identity point =M=.
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -111,7 +142,7 @@ By the end of the mint transaction Alice will have:
 
 - A single Ethereum transaction =T_mint= on-chain whose effects are:
   - 1,200 BUCK debited from Alice and credited to the =Notes= pool address.
-  - A batch of =N*= opaque =uint256= commitments (here =N* = 16=: six live plus
+  - A batch of =N*= opaque =uint256= commitments (here ~N* = 16~: six live plus
     ten dummies) folded into the note Merkle tree, moving the root from
     =oldRoot= to the SNARK-attested =newRoot=, and the tree size from
     =nextLeafIndex= to =nextLeafIndex + N*=.
@@ -133,7 +164,7 @@ hides which value, who any recipient is, or even whether two of the recipients
 are the same person -- or which entries are live notes vs. zero-value padding.
 Looking at his off-chain artifact, Bob sees his 1,000 BUCK is real, was minted
 by Alice in =T_mint=, and that the /live/ siblings among the other fifteen have
-hidden values summing to exactly 200 BUCK (the rest are =v = 0= padding he
+hidden values summing to exactly 200 BUCK (the rest are ~v = 0~ padding he
 cannot distinguish from live notes by chain inspection alone) -- but he does not
 learn what those values are or who holds them.
 
@@ -180,8 +211,8 @@ Alice's wallet has done all the slow work before any transaction is broadcast:
 - She has decided on the denomination split: =[1000, 100, 25, 25, 25, 25]=.  N=6.
   The deployed mint pipeline pins a small set of batch sizes -- recommended {16,
   128, 1024} -- one circom circuit and one verifier per pin.  Alice's wallet rounds
-  her requested split up to the smallest pin =N* >= 6=, here =N* = 16=, and pads
-  with =16 - 6 = 10= "blinded zero" openings whose =v_i = 0=.  The padding leaves
+  her requested split up to the smallest pin ~N* >= 6~, here ~N* = 16~, and pads
+  with ~16 - 6 = 10~ "blinded zero" openings whose ~v_i = 0~.  The padding leaves
   cost the same SNARK constraints as live notes but contribute zero to =totalFace=
   and are spendable for zero BUCK; in effect they are anonymity-set filler whose
   openings Alice may discard.  The narrative below tracks the six live notes and
@@ -196,7 +227,7 @@ She now has 16 opening tuples in memory: 6 live, 10 dummies.
 
 ** Step 1: Build Commitments
 
-For =i = 0..15= (six live, ten dummies) her wallet computes
+For ~i = 0..15~ (six live, ten dummies) her wallet computes
 
 #+BEGIN_SRC text
 cm_i = Poseidon5( flavor_i, v_i, rho_i, idHash_i, predicate_i )
@@ -210,7 +241,7 @@ SNARK assumes leaves land in the tree at indices =[nextLeafIndex, nextLeafIndex+
 
 Alice's wallet must also keep a /local mirror of the rolling tree state/.  The
 Tornado-style Merkle tree the contract maintains is parameterised by the standard
-=filledSubtrees[d]= for =d = 0..TREE_DEPTH-1= -- the rightmost partially-built node
+=filledSubtrees[d]= for ~d = 0..TREE_DEPTH-1~ -- the rightmost partially-built node
 at each level.  The wallet snapshots this state from the chain (or replays it from
 the mint event log) immediately before assembling the proof, then derives, for each
 of the 16 leaves /in submission order/, the depth-20 sibling sequence the in-circuit
@@ -221,7 +252,7 @@ code; everything else is unchanged from Phase-7.
 
 Alice's wallet runs =scripts/snark/prove_mint_batch.js= (the Phase-7-bis successor
 to Phase-7's =prove_mint.js=).  The =mint_batch.circom= circuit at her chosen pin
-=N* = 16= takes a substantially richer witness than the Phase-7 mint did, because
+~N* = 16~ takes a substantially richer witness than the Phase-7 mint did, because
 the Merkle-tree update has moved /into/ the SNARK.
 
 *Public inputs* (5 entries, N-independent):
@@ -265,8 +296,8 @@ The =pathSiblings= for leaf =i= are derived by the wallet from its local
    tree using =pathSiblings[i][*]= and =Switcher(...)= per level, advances the
    rolling state, and finally asserts the resulting root equals =newRoot=.
    N x TREE_DEPTH Poseidon-2 hashes (~4.3K constraints per leaf).
-5. *Calldata binding.*  =cmBatchHash === H(cm[0], cm[1], ..., cm[N-1])=.
-6. (Optional belt-and-suspenders.)  =cm[i] != 0= and =cm[i] != ZERO_VALUE= per
+5. *Calldata binding.*  ~cmBatchHash === H(cm[0], cm[1], ..., cm[N-1])~.
+6. (Optional belt-and-suspenders.)  ~cm[i] != 0~ and ~cm[i] != ZERO_VALUE~ per
    leaf, blocking pathological collisions with empty-tree zeros.
 
 Constraint counts work out to roughly *6K R1CS per leaf* (~1.7K opening + ~4.3K
@@ -403,7 +434,7 @@ The ten dummy openings Alice generated to pad to the pinned N=16 circuit receive
 no artifact; they are discarded (or, at Alice's option, retained privately as
 unspendable anonymity-set filler).  From the recipient's perspective the presence
 of dummies is invisible: Bob's artifact only names his own leaf, and the batch
-total =totalFace = 1,200 BUCK= is exactly the sum of the live =v_i=.
+total ~totalFace = 1,200 BUCK~ is exactly the sum of the live =v_i=.
 
 ** Step 5: Recipient Verification (Offline, Independent)
 
@@ -421,7 +452,7 @@ any help from an indexer, he runs:
 3. *Confirm =msg.sender= is Alice.*  Cross-check =msg.sender= against the
    IdentityRegistry: it must resolve to Alice's PS-credentialed identity.  If Bob
    wanted an A1 identified cheque, the issuer field of his opening must match.
-4. *Confirm calldata membership.*  Assert =cms[leafIndex - nextLeafIndex] == cm=
+4. *Confirm calldata membership.*  Assert ~cms[leafIndex - nextLeafIndex] == cm~
    (where the artifact's =leafIndex= is the absolute position).  The chain's
    acceptance of =T_mint= confirms that every entry in =cms[]= was folded into
    =newRoot= and that =newRoot= was added to the root ring buffer.  Bob therefore
@@ -442,9 +473,9 @@ After (1)-(5) Bob knows:
 - It was minted in =T_mint= by Alice.  (Steps 2, 3.)
 - It is one of =N*= (here 16) commitments folded into the tree by that mint,
   the others being =cms[] \ cm=.  (Step 4.)
-- The /live/ values among the other siblings sum to exactly =1200 - 1000 = 200=
+- The /live/ values among the other siblings sum to exactly ~1200 - 1000 = 200~
   BUCK (the residual of =totalFace= once Bob subtracts his own =v=); the batch
-  may also contain dummy openings with =v = 0=.  (Step 5 + the per-note opening
+  may also contain dummy openings with ~v = 0~.  (Step 5 + the per-note opening
   relation: he knows /his/ value, the chain attests to the /sum/.)
 - He learns nothing else about the other notes -- not their individual values, not
   their recipients, not their flavors, not which are live and which are padding.
@@ -475,12 +506,12 @@ there exists a witness
 =(flavor[i], v[i], rho[i], idHash[i], predicate[i], pathSiblings[i][*])_i= such
 that:
 
-- =cm[i] = Poseidon5(flavor[i], v[i], rho[i], idHash[i], predicate[i])= for all =i=
+- ~cm[i] = Poseidon5(flavor[i], v[i], rho[i], idHash[i], predicate[i])~ for all =i=
 - each =v[i]= and =totalFace= fit in 128 bits and =sum(v[i]) = totalFace=
 - folding =cm[0..N-1]= into the tree rooted at =oldRoot=, starting at position
   =nextLeafIndex=, using =pathSiblings[i][*]= as the right-of-insert context,
   yields exactly =newRoot=
-- =cmBatchHash = H(cm[0], ..., cm[N-1])=.
+- ~cmBatchHash = H(cm[0], ..., cm[N-1])~.
 
 Alice is free to /find/ such a witness any way she likes -- she's the prover.
 But she cannot find a witness for a /false/ statement; that's what soundness
@@ -673,8 +704,8 @@ desynchronize.  Each =Notes.mint= invocation does its own =transferFrom=; each
 A literal replay -- broadcasting the exact same =T_mint= calldata in a new
 transaction -- fails for three independent reasons:
 
-a. *Stale-state guards.*  The contract checks =oldRoot == roots[currentRootIndex]=
-   and =nextLeafIndex == self.nextLeafIndex=.  The first mint has already
+a. *Stale-state guards.*  The contract checks ~oldRoot == roots[currentRootIndex]~
+   and ~nextLeafIndex == self.nextLeafIndex~.  The first mint has already
    advanced both, so the replay's =oldRoot= and =nextLeafIndex= public inputs no
    longer match the live chain state.  The contract reverts before the SNARK is
    even called, with =Notes: stale oldRoot= or =Notes: stale leafIndex=.
@@ -729,7 +760,7 @@ When Alice and Bob both submit =T_mint_A= and =T_mint_B= targeting the same
 
 - One of the two (by block ordering) lands first and updates the root.
 - The other transaction executes, discovers the stale-state mismatch, and
-  reverts at the =require(oldRoot == roots[currentRootIndex])= line before any
+  reverts at the ~require(oldRoot == roots[currentRootIndex])~ line before any
   BUCK moves.
 
 Transaction fees are paid by the loser for the reverted transaction (gas for
@@ -789,7 +820,7 @@ legitimately issued.  He needs no help from Alice and no live indexer:
    equality.
 5. He recomputes ~Poseidon5(flavor, v, rho, idHash, predicate) == cm~ from the
    opening.
-6. (Optional.)  He recomputes =cmBatchHash = keccak256(abi.encodePacked(cms))=
+6. (Optional.)  He recomputes ~cmBatchHash = keccak256(abi.encodePacked(cms))~
    and re-runs =MintGroth16Verifier.verify(proofBytes, [oldRoot, newRoot,
    nextLeafIndex, totalFace, cmBatchHash])= against the per-N verifier keyed by
    =cms.length=, convincing himself the EVM did its job.
@@ -804,22 +835,32 @@ receipt should have.
 This section walks the /inverse/ of the mint.  Bob holds the opening for the 1,000-BUCK
 note =cm_0=; he wants to redeem it for 1,000 BUCK credited to his on-chain account, and
 he wants no public observer to be able to tell /which/ commitment in the pool he
-consumed.  The shipped pieces are =circuits/spend.circom=, =SpendGroth16Verifier.sol=,
-=SpendVerifierAdapter.sol=, =Notes.spend()=, and the Tornado-style on-chain Merkle
-accumulator inside =Notes.sol=; everything below describes /code paths that are in the
-tree and exercised by =test/SpendVerifier.t.sol=/.  The companion theorems live in
+consumed.  The shipped pieces for B-spend are =circuits/spend.circom=,
+=SpendGroth16Verifier.sol=, =SpendVerifierAdapter.sol=, =Notes.spend()=, and
+the Tornado-style on-chain Merkle accumulator inside =Notes.sol=; for A-spend
+the shipped pieces are =circuits/spend_a.circom=, =SpendAGroth16Verifier.sol=,
+=SpendAVerifierAdapter.sol=, =IdentityRegistry.verifySpendCP=, and
+=Notes.spendACP()=.  Everything below describes /code paths that are in the
+tree/, exercised by =test/SpendVerifier.t.sol= (B-shape) and
+=test/SpendAVerifier.t.sol= (A-shape, V2).  The companion theorems live in
 Theorems 8-10 of [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]].
 
-Bob's note is of flavor /A1/ (addressed, identified cheque), but the shipped spend
-circuit is /flavor-agnostic/: it enforces a B-shape (bearer) discharge in which
-knowledge of the Poseidon-5 opening plus the Poseidon-3 nullifier preimage is the
-spend authorization.  In particular the in-circuit ElGamal decryption and
-Chaum-Pedersen equality that would distinguish A-flavor from B-flavor are deferred
-to a future =spend_a.circom=; until that ships, A-flavor notes are effectively
-bearer-spendable at the SNARK boundary, with the on-chain wallet conventions and
-the pool's identity-bound transfer surface still applying.  The walk below uses
-Bob's A1 note as the worked example, with notes inline where A-flavor identity
-binding will tighten the picture once =spend_a.circom= lands.
+Bob's note is of flavor /A1/ (addressed, identified cheque).  The Phase-7
+=spend.circom= is /flavor-agnostic/ -- it enforces a B-shape (bearer) discharge
+in which knowledge of the Poseidon-5 opening plus the Poseidon-3 nullifier
+preimage is the spend authorization.  Phase 8 V2 added an A-shape companion
+=spend_a.circom= (A-tag nullifier, flavor in {A1, A2}, plus the in-circuit
+Poseidon-8 binding gate that pins =E_n= to =idHash=) and a new on-chain
+entrypoint =Notes.spendACP= that calls /both/ the A-Groth16 verifier
+=spendAVerifier.verifySpendA= /and/ =IdentityRegistry.verifySpendCP=.  The
+DLEQ check lives off-chain (in Solidity, via the EIP-196 BN254 precompiles)
+because verifying it inside the SNARK would have cost ~+250K R1CS in
+non-native circom; on-chain it costs ~36K gas (2 ecMul + 2 ecAdd + keccak FS).
+The walk below uses Bob's A1 note end-to-end: Bob's wallet emits =E_n=
+(the spender's note ciphertext, public-input to the SNARK) and a 4-element
+Chaum-Pedersen DLEQ proof =(e, s, T1, T2)=; =Notes.spendACP= rejects unless
+both checks pass, with all A1/A2 identity, security, and privacy properties
+preserved.
 
 Three properties of the flow are worth stating up front, because they shape every
 step:
@@ -832,12 +873,13 @@ step:
   hidden =v= could equal the revealed =face=.  Same-denomination issuance is
   therefore the strongest-privacy regime, but the underlying cryptographic hiding
   is over the whole tree, not over a denomination class.
-- *The BUCK ERC-20 does not verify the SNARK itself.*  The authorization chain is:
-  valid SNARK + accepted root + fresh nullifier \(\to\) =Notes.spend= proceeds
-  \(\to\) =Notes.spend= invokes =buck.transferCarrying(recipient, face)= from the
-  pool.  The proof is a capability token for entry into =Notes.spend=; the
-  resulting ERC-20 movement is a routine pool-to-recipient call gated by that
-  entry.  Since the =Notes= pool is a system-public account in the
+- *The BUCK ERC-20 does not verify the SNARK itself.*  The authorization chain
+  is: valid SNARK + accepted root + fresh nullifier (+ for A-spends, valid
+  CP-DLEQ identity proof) \(\to\) =Notes.spend= or =Notes.spendACP= proceeds
+  \(\to\) the entrypoint invokes =buck.transferCarrying(recipient, face)= from
+  the pool.  The proof is a capability token for entry into the appropriate
+  spend method; the resulting ERC-20 movement is a routine pool-to-recipient
+  call gated by that entry.  Since the =Notes= pool is a system-public account in the
   [[file:alberta-buck-identity.org][IdentityRegistry]], the pool's outbound transfer does not itself require a
   Chaum-Pedersen receipt -- the recipient's own registration is what makes them
   acceptable as a transfer destination.
@@ -869,7 +911,7 @@ indefinite holding ([[file:alberta-buck-notes.org][Notes]]).
 ** Step 1: Fetch the Commitment Tree and Build a Merkle Path
 
 =Notes.sol= maintains a Tornado-style incremental Poseidon-T3 Merkle tree of
-=TREE_DEPTH = 20= (max ~1M leaves).  Under Phase-7-bis the per-leaf insertion
+~TREE_DEPTH = 20~ (max ~1M leaves).  Under Phase-7-bis the per-leaf insertion
 math lives inside the mint SNARK; the contract just records the SNARK-attested
 =newRoot= at each =mint()= call.  The current root is exposed as =noteRoot()=.
 Two things happen:
@@ -886,7 +928,7 @@ a. Bob (or, more practically, any light-node helper running off-chain)
    purely public information; everyone can reproduce it, and Bob does not have
    to trust any indexer because calldata is canonical.
 b. Bob reads the current =noteRoot()= via =eth_call=.  He may instead pin any root
-   in the recent-roots window: =Notes.sol= retains the last =ROOT_HISTORY_SIZE = 30=
+   in the recent-roots window: =Notes.sol= retains the last ~ROOT_HISTORY_SIZE = 30~
    roots in a ring buffer (=roots[]=, advanced once per inserted leaf), and the
    on-chain =isAcceptedRoot()= scans that ring backward from =currentRootIndex=.
    This is the standard zk-rollup hygiene (Zcash, Tornado Cash) for tolerating
@@ -908,21 +950,33 @@ between a nullifier and a commitment is impossible.  Three properties follow:
 
 - *Deterministic.*  The same =(rho, idHash)= always yields the same =nf=.  So Bob
   can only spend =cm_0= once; a second attempt re-derives the same =nf= and is
-  rejected by =nullifiers[nf] = true= on the first spend.
+  rejected by ~nullifiers[nf] = true~ on the first spend.
 - *Unforgeable without the opening.*  An attacker who sees =cm_0= and the tree
   cannot compute =nf= without =rho_0= and =idHash_0=, both of which live inside the
   opening (and =rho_0= is not derivable from the recipient's identity alone).
-- *A-flavor binding is not yet in the SNARK.*  The bearer-shape circuit treats
-  =idHash= as a witness scalar -- it does not constrain it to the recipient's
-  registered identity.  Once =spend_a.circom= ships, the in-circuit Chaum-Pedersen
-  + ElGamal decryption will pin =idHash= to Bob's registered =M_rec=, making =nf=
-  a deterministic function of =(M_rec, rho)= alone (Theorem 10.1a).  The A-spend
-  binding is to the mint-time key pair: the circuit requires Bob to supply the
-  \( sk_{\text{rec}} \) paired with the \( pk_{\text{rec}} \) the issuer used at
-  mint, so A-notes are /not/ recoverable via Identity re-issuance if that key
-  is lost (Theorem 10.1b; proofs.org "Key-Pair Binding and Loss Semantics").
-  Until =spend_a.circom= ships, =idHash= unlinkability for A-flavor notes rests
-  on it being secret in the opening, not on a registry-bound CP equality.
+- *A-flavor binding is enforced jointly by the SNARK + off-chain CP-DLEQ.*
+  The Phase-7 bearer-shape circuit treats =idHash= as a witness scalar -- it
+  does not constrain it to the recipient's registered identity.  Phase 8 V2
+  closes the gap with two cooperating components glued by =Notes.spendACP=:
+  (a) =spend_a.circom= V2 publishes =E_n= as 4 public inputs and enforces
+  ~Poseidon-8(E_n.R.x, E_n.R.y, E_n.C.x, E_n.C.y, issuerData[0..3]) === idHash~,
+  pinning =E_n= to the leaf at mint time (~265 R1CS); (b) Bob provides a
+  4-element CP-DLEQ proof =(e, s, T1, T2)=, and
+  =IdentityRegistry.verifySpendCP= reads Bob's registered =(pk_dep, E_reg)=
+  from storage and confirms a single =sk_dep= satisfies both
+  ~pk_dep === sk_dep * G~ and the equal-plaintext relation
+  ~C_n - sk_dep * R_n === C_reg - sk_dep * R_reg~ via the EIP-196 BN254
+  precompiles (~36K gas).  Combined, this makes =nf= effectively a
+  deterministic function of =(M_rec, rho)= alone (Theorem 10.1a) at the
+  contract boundary, and prevents a spender from substituting a different
+  =E_n= just to make the off-chain check pass with their own key.  The
+  A-spend binding is to the mint-time key pair: the verifier requires Bob to
+  supply the \( sk_{\text{rec}} \) paired with the \( pk_{\text{rec}} \) the
+  issuer used at mint, so A-notes are /not/ recoverable via Identity
+  re-issuance if that key is lost (Theorem 10.1b; proofs.org "Key-Pair
+  Binding and Loss Semantics").  The DLEQ-off-chain placement is forced by
+  the prohibitive cost of native BN254 G1 arithmetic in non-native circom
+  (~+250K R1CS for one CP-equality set).
 
 The nullifier is the chain-observable anchor of the spend.  Publishing it marks
 =cm_0= as consumed from the tree's /semantic/ point of view, even though the
@@ -950,13 +1004,13 @@ private pathIndices[depth];       # left/right bit per level
 The shipped circuit enforces five relation groups:
 
 1. *Range bounds and value match.*  Both the public =face= and the witness =v=
-   pass through =Num2Bits(128)=, then =face === v=.  This closes the field-overflow
+   pass through =Num2Bits(128)=, then ~face === v~.  This closes the field-overflow
    gap: =v= cannot wrap around =r= to claim more than its in-range share.
 2. *Opening binds.*  ~cm = Poseidon5(flavor, v, rho, idHash, predicate)~.
 3. *Merkle membership.*  =MerkleProof(20)= walks (=cm=, =pathElements=,
    =pathIndices=) up the tree using =Switcher= + =Poseidon(2)= per level and
    asserts the climb reaches =noteRoot=.
-4. *Nullifier derivation.*  =nullifier === Poseidon3(rho, idHash, 4242)=.
+4. *Nullifier derivation.*  ~nullifier === Poseidon3(rho, idHash, 4242)~.
 5. *Public-input ghost binding.*  =recipient= and =chainId= each appear in a
    trivial =x*x= row.  This is the minimal anchor needed for circom not to
    optimise out unreferenced public signals; once anchored, Groth16's IC[]
@@ -966,36 +1020,53 @@ Critically, =cm= is /not/ a public input; it is recomputed inside the proof from
 the witness opening.  The proof convinces the verifier that /some/ =cm= in the
 tree satisfies (1)-(4); it does not reveal /which/.
 
-The two A-flavor relations from earlier drafts -- in-circuit ElGamal decryption of
-the note's =E_note= payload, and a Chaum-Pedersen equality against the depositor's
-registered credential -- are deferred to a follow-up =spend_a.circom=.  Until that
-ships, the bearer/B-spend semantics apply uniformly: knowledge of the Poseidon-5
-opening /is/ the spend authorization.  For genuine A-flavor protection, wallet
-software relies on =idHash= secrecy in the off-chain artifact and on the pool's
-identity-bound transfer surface (the =transferCarrying= recipient check), not on
-in-SNARK CP equality.
+Bob's =A1= spend uses the A-shape circuit =spend_a.circom= V2 and the new
+on-chain entrypoint =Notes.spendACP=, /not/ the B-shape =Notes.spend=.  The
+A-shape circuit publishes /nine/ public inputs -- the original five
+(=noteRoot=, =nullifier=, =face=, =recipient=, =chainId=) plus four new
+=E_n= coordinates =(R_n.x, R_n.y, C_n.x, C_n.y)= -- and adds the Poseidon-8
+binding constraint ~Poseidon-8(E_n.R.x, E_n.R.y, E_n.C.x, E_n.C.y,
+issuerData[0..3]) === idHash~ (~265 R1CS).  The Chaum-Pedersen DLEQ check
+itself lives /off-chain/ in =IdentityRegistry.verifySpendCP=, called from
+=Notes.spendACP= via the EIP-196 BN254 precompiles (~36K gas).  This split
+delivers genuine A-flavor protection (Theorem 8 #3 + Theorem 10.1) without
+paying the +250K-R1CS cost of native G1 arithmetic in non-native circom.
 
-Bob's wallet serializes the Groth16 proof into the standard
-=(uint256[2], uint256[2][2], uint256[2])= ABI-static tuple (256 bytes).
+Bob's wallet serializes the A-shape Groth16 proof into the standard
+=(uint256[2], uint256[2][2], uint256[2])= ABI-static tuple (256 bytes), and
+also assembles the 4-element CP-DLEQ proof =(e, s, T1, T2)= using
+=alberta_buck.wallet.spend_cp.prove_spend_cp= bound to the transcript
+=(E_n, E_reg, pk_dep, T1, T2, recipient, chainid)=.
 
-** Step 4: Submit =Notes.spend= On Chain
+** Step 4: Submit =Notes.spendACP= On Chain
 
-Bob now broadcasts the spend transaction =T_spend=:
+Bob now broadcasts the A-spend transaction =T_spend=:
 
 #+BEGIN_SRC solidity
-notes.spend(proofBytes, noteRoot, nullifier, 1000e18, bob);
+notes.spendACP(proofBytes, noteRoot, nullifier, 1000e18, bob, E_n, cpProof);
 #+END_SRC
 
-The honest EVM walks =Notes.spend= (the function exactly as it ships):
+The honest EVM walks =Notes.spendACP= (the function exactly as it ships):
 
 #+BEGIN_SRC solidity
+require(address(spendAVerifier)   != address(0), "Notes: A-spend disabled");
+require(address(identityRegistry) != address(0), "Notes: identity registry not set");
 require(recipient != address(0),  "Notes: zero recipient");
 require(face      > 0,            "Notes: zero face");
 require(_isAcceptedRoot(root),    "Notes: unknown root");
 require(!nullifiers[nullifier],   "Notes: already spent");
-require(spendVerifier.verifySpend(
-    proof, root, nullifier, face, recipient, block.chainid
+
+// SNARK leg: 9 public inputs bind the 5-tuple plus E_n's coords.
+require(spendAVerifier.verifySpendA(
+    proof, root, nullifier, face, recipient, block.chainid,
+    E_n.R.X, E_n.R.Y, E_n.C.X, E_n.C.Y
 ),                                "Notes: bad spend proof");
+
+// Identity leg: msg.sender must own the sk_dep that decrypts both
+// E_n and their registered E_addr to the same M.
+require(identityRegistry.verifySpendCP(
+    msg.sender, recipient, E_n, cpProof
+),                                "Notes: bad identity proof");
 
 nullifiers[nullifier] = true;     // mark spent before paying out
 noteFaceSum          -= face;
@@ -1003,35 +1074,48 @@ noteFaceSum          -= face;
 require(IBuckCarrying(address(buck))
             .transferCarrying(recipient, face),
         "Notes: transfer failed");
-emit Spent(nullifier, face, recipient);
+emit SpentA(nullifier, face, recipient);
 #+END_SRC
 
-Four invariants are enforced in order:
+Five invariants are enforced in order:
 
 a. =root= appears in the recent-roots window.  A root that has rotated out is
    stale -- Bob must rebuild the proof against a fresher root.
 b. =nullifier= has never been published before (Theorem 10.5 in [[file:alberta-buck-proofs.org][the proofs]]
    says this single-bit check is sufficient for double-spend prevention).
-c. The SNARK is valid against =SpendGroth16Verifier= via the
-   =SpendVerifierAdapter=, which packs =[root, nullifier, face, recipient,
-   chainid]= into the public-signal vector and unpacks =proofBytes= to Groth16
-   form.  By soundness, a witness satisfying (1)-(4) above exists.
-d. Only after (a)-(c) pass does the contract mark the nullifier and invoke
+c. The SNARK is valid against =SpendAGroth16Verifier= via the
+   =SpendAVerifierAdapter=, which packs =[root, nullifier, face, recipient,
+   chainid, E_n.R.X, E_n.R.Y, E_n.C.X, E_n.C.Y]= into the 9-element public-
+   signal vector and unpacks =proofBytes= to Groth16 form.  By soundness, a
+   witness satisfying (1)-(5) above exists, including the Poseidon-8 binding
+   that pins =E_n= to the leaf at mint time.
+d. =identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof)=
+   succeeds, i.e. =msg.sender='s registered =sk_dep= satisfies ~pk_dep ===
+   sk_dep * G~ and the equal-plaintext relation between =E_n= and =E_reg=,
+   verified via 2 ecMul + 2 ecAdd + keccak Fiat-Shamir (~36K gas).
+e. Only after (a)-(d) pass does the contract mark the nullifier and invoke
    =buck.transferCarrying(bob, 1000e18)= from its own pool balance (see Step 5).
-   Because the =Notes= pool is registered =isPublic= in the IdentityRegistry, the
-   outbound transfer's bilateral identity check degenerates to "recipient is a
-   registered or system-public account" and skips the Chaum-Pedersen leg.
+   Because the =Notes= pool is registered =isPublic= in the IdentityRegistry,
+   the outbound transfer's bilateral identity check degenerates to
+   "recipient is a registered or system-public account" and skips the
+   pool-side Chaum-Pedersen leg.
 
-If any of (a)-(d) reverts, the whole transaction reverts: no BUCK moves, the
-nullifier bit is never set, the =noteFaceSum= is unchanged.  *Bob gets one attempt
-per root window*; a failed spend can be retried with a refreshed proof, but never
-in a way that consumes a nullifier without paying out the BUCK.
+If any of (a)-(e) reverts, the whole transaction reverts: no BUCK moves, the
+nullifier bit is never set, the =noteFaceSum= is unchanged.  *Bob gets one
+attempt per root window*; a failed spend can be retried with a refreshed proof,
+but never in a way that consumes a nullifier without paying out the BUCK.
+
+(For B1 bearer notes, the corresponding entrypoint is the simpler
+=Notes.spend(proofBytes, root, nullifier, face, recipient)= that omits
+the SNARK's =E_n= public inputs and the off-chain CP leg -- B-spends are
+authorised purely by knowledge of the Poseidon-5 opening + Poseidon-3
+nullifier preimage.)
 
 ** Step 5: BUCK ERC-20 Pays Out (=transferCarrying=)
 
-The call inside =Notes.spend= is =buck.transferCarrying(bob, 1000e18)=, a small
+The call inside =Notes.spendACP= is =buck.transferCarrying(bob, 1000e18)=, a small
 extension of the standard BUCK transfer that the =Notes= pool uses on its single
-egress.  Nothing else in =Buck.sol= is special-cased for the pool: it is just a
+egress.  (=Notes.spend= calls the same primitive on the B-spend path.)  Nothing else in =Buck.sol= is special-cased for the pool: it is just a
 registered account making an outbound transfer of 1,000 BUCK to a registered
 recipient.  The result on-chain:
 
@@ -1085,11 +1169,11 @@ After =T_spend= confirms, Mallory can read:
 T_spend:
   from:  Bob (a registered IdentityRegistry account)
   to:    Notes (system-public)
-  data:  Notes.spend(proofBytes, noteRoot, nullifier, 1000e18, Bob)
+  data:  Notes.spendACP(proofBytes, noteRoot, nullifier, 1000e18, Bob, E_n, cpProof)
 
 events:
   Buck.Transfer(Notes, Bob, 1000e18)
-  Notes.Spent(nullifier, 1000e18, Bob)
+  Notes.SpentA(nullifier, 1000e18, Bob)
 #+END_SRC
 
 What she infers:
@@ -1125,9 +1209,9 @@ core spend circuit and can be layered on top.
 ** Why Alice Cannot Steal Bob's Note (Even Between Rooms)
 
 Can /any/ actor other than Bob -- Alice-the-issuer, a prior holder, or a random
-Mallory -- redeem =cm_0= under the shipped circuit?  Two protections apply
-unconditionally; the third (full A-flavor binding) lands when =spend_a.circom=
-ships:
+Mallory -- redeem =cm_0= under the shipped circuit?  Three protections apply,
+the third now shipped via Phase 8 V2's off-chain CP-DLEQ in
+=IdentityRegistry.verifySpendCP= (called from =Notes.spendACP=):
 
 1. *Opening secrecy.*  =spend.circom= requires the full Poseidon-5 opening
    =(flavor, v, rho, idHash, predicate)= as a private witness.  Without =rho_0= and
@@ -1141,23 +1225,30 @@ ships:
    non-malleable.  A front-runner who intercepts Bob's =proofBytes= and resubmits
    with a different =recipient= is rejected by the verifier.  =chainId= is bound
    identically, blocking cross-chain replay.
-3. *Recipient-binding /in/ the nullifier (deferred).*  In the full A-flavor design,
-   the nullifier will be keyed on =M_rec= recovered from the in-circuit ElGamal
-   decryption of =E_note= under =sk_dep=, with a Chaum-Pedersen equality against
-   Bob's registered credential proving =M_rec= equals Bob's =M= (Theorem 8).
-   That circuit is =spend_a.circom=, not yet shipped.  Until then the shipped
-   bearer-shape spend treats =idHash= as a generic witness scalar and Alice -- who
-   knows =idHash_0= and =rho_0= because she generated them at mint -- could in
-   principle redeem to herself.  The wallet-level mitigation in the meantime is
-   that =idHash= for A-flavor is a Poseidon hash of Bob's identity that Alice
-   binds at mint and discards immediately, leaving only Bob with the secret.  The
-   on-chain reinforcement is the pool's =transferCarrying= recipient check, which
-   the bearer-shape circuit does not bypass.
+3. *Recipient-binding via off-chain CP-DLEQ (Phase 8 V2, shipped).*
+   For A-flavor notes the spender provides =E_n= alongside the spend and a
+   Chaum-Pedersen DLEQ proof =(e, s, T1, T2)=; =Notes.spendACP= calls
+   =identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof)=
+   which reads the spender's registered =(pk_dep, E_reg)= from storage and
+   confirms a single =sk_dep= satisfies both ~pk_dep === sk_dep * G~ /and/
+   the equal-plaintext relation ~C_n - sk_dep * R_n === C_reg - sk_dep * R_reg~
+   (Theorem 8 #3).  =E_n= is bound to the spent leaf via the Poseidon-8
+   constraint ~idHash === Poseidon-8(R_n.x, R_n.y, C_n.x, C_n.y, issuerData[0..3])~
+   added to =spend_a.circom= V2, so Alice-who-minted cannot substitute a
+   different ciphertext.  This makes Alice unable to redeem to herself even
+   though she knows =idHash_0= and =rho_0=: she does not hold Bob's
+   =sk_rec=, so the DLEQ fails.  The verifier costs ~36K gas (two ecMul +
+   two ecAdd via EIP-196 precompiles, plus a keccak Fiat-Shamir recompute)
+   -- much cheaper than the +250K-R1CS prove-time cost of doing the same
+   check in non-native circom, which is why the DLEQ verification site lives
+   in =Notes.spendACP= (Solidity) rather than inside the SNARK.
 
-The /A-flavor strict-binding/ guarantee Theorem 8 promises will become a
-chain-observable property once =spend_a.circom= is wired in.  Today, the design
-intent for A-flavor still holds at the artifact level (Bob's =idHash_0= is what
-authenticates him), and the SNARK enforces the bearer-shape discharge.
+The /A-flavor strict-binding/ guarantee Theorem 8 promises is now a
+chain-observable property: the =verifySpendCP= boolean is the gate.  Bob's
+=idHash_0= is what authenticates him at the artifact level, the SNARK
+enforces the bearer-shape discharge, and the off-chain CP-DLEQ enforces the
+identity binding to Bob's registered key -- with all A1/A2 identity, security,
+and privacy properties preserved.
 
 ** B-Flavor Notes Today
 
@@ -1189,7 +1280,7 @@ not in =noteRoot=.  The mint circuit's relations 1-2 (opening binding and sum
 conservation) are what places a =cm= in =noteRoot= in the first place, and by the
 mint-side soundness story in *Why Alice Cannot Cheat* every such =cm= corresponds to
 a well-formed opening whose =v= is included in the mint's =totalFace= escrow.  The
-spend circuit's relation 5 (=face === v=) then ensures the BUCK released equals
+spend circuit's relation 5 (~face === v~) then ensures the BUCK released equals
 exactly the share of the escrow that =cm= was allocated.  Summing over every
 accepted spend of a given mint batch, the cumulative BUCK released equals at most
 the =totalFace= escrowed -- property C follows from mint-side value conservation
@@ -1339,7 +1430,7 @@ more that become concrete only once the redemption path exists.
   | Spend | Redemption unlinkable to specific =cm= | =cm= is a /private/ witness under public =noteRoot=; only nullifier + face + recipient revealed |
   | Spend | Double-spend prevented                 | Deterministic nullifier + one-bit =nullifiers= mapping; rejected on reuse                       |
   | Spend | Recipient-bound payout                 | =recipient= is a public SNARK input; proof rejects if re-targeted in-flight                     |
-  | Spend | Value conservation across mint<->spend | Range-bounded mint =v[i]= + spend =face === v=; cumulative payouts \le =totalFace= per batch    |
+  | Spend | Value conservation across mint<->spend | Range-bounded mint =v[i]= + spend ~face === v~; cumulative payouts \le =totalFace= per batch    |
   #+LATEX: }
 
   All nine rows are enforced by code in the tree.  Mint landed in two phases:
@@ -1352,18 +1443,25 @@ more that become concrete only once the redemption path exists.
   unchanged by the pivot: =spend.circom= in bearer shape,
   =SpendGroth16Verifier=, =SpendVerifierAdapter=, the on-chain Merkle
   accumulator, and =buck.transferCarrying=.  The [[file:alberta-buck-ethereum.org][IdentityRegistry]] provides the
-  issuer-attestation and recipient-verification legs, and the [[file:alberta-buck-proofs.org][formal proofs]]
-  (Theorems 7-11) provide the cryptographic backstop.  The one residual caveat
-  is that A-flavor in-circuit identity binding (Chaum-Pedersen equality on the
-  depositor's registered credential) is deferred to =spend_a.circom=; until it
-  ships, A-flavor privacy rests on the off-chain =idHash= secret and the pool's
-  identity-bound transfer surface, not on an in-SNARK CP check.
+  issuer-attestation and recipient-verification legs (now extended with
+  =verifySpendCP= for A-flavor identity binding), and the [[file:alberta-buck-proofs.org][formal proofs]]
+  (Theorems 7-11) provide the cryptographic backstop.  The A-flavor identity
+  binding -- Chaum-Pedersen equality on the depositor's registered credential
+  (Theorem 8 #3) -- ships in Phase 8 V2 in two cooperating layers: (a) the
+  in-circuit Poseidon-8 binding gate in =spend_a.circom= V2 that pins =E_n=
+  to =idHash= at mint time, and (b) the off-chain DLEQ verified in
+  =Notes.spendACP= via the EIP-196 BN254 precompiles inside
+  =IdentityRegistry.verifySpendCP=.  The on-chain DLEQ check is ~36K gas
+  (two ecMul + two ecAdd + Fiat-Shamir keccak), much cheaper than the
+  ~+250K-R1CS prove-time cost of doing the same constraint over non-native
+  BN254 G1 in circom.
   
 * Open Questions and Forward-Looking Caveats
 
-The example above uses the Phase-7-bis batch-mint + Phase-7 spend pipeline.
-Six caveats remain and are tracked in depth elsewhere; listed here so the
-reader is not misled about the current state.
+The example above uses the Phase-7-bis batch-mint + Phase-7 spend pipeline,
+extended with Phase 8 V2's off-chain CP-DLEQ identity binding for A-flavor
+spend.  Six items are tracked in depth elsewhere; listed here so the reader
+is not misled about the current state.
 
 1. *Range bounds on =v[i]= (resolved).*  Earlier drafts flagged the possibility
    that ~sum(v[i]) === totalFace~ in =F_r= without per-=v= range checks would
@@ -1378,20 +1476,31 @@ reader is not misled about the current state.
    the binding from event correlation.  Whether to add an explicit =batchId=
    storage slot (and a matching public input to the spend circuit) is an open
    design question; see [[file:alberta-buck-proofs.org][Open Question 2]].
-3. *A-flavor in-circuit identity binding (deferred).*  The shipped
-   =spend.circom= enforces a bearer-shape (B-spend) discharge: knowledge of the
-   Poseidon-5 opening is the spend authorization.  Distinguishing A-flavor
-   (in-circuit ElGamal decryption + Chaum-Pedersen equality against the
-   depositor's registered credential) is deferred to =spend_a.circom=.  Until
-   that circuit is wired in, A-flavor notes rely for recipient binding on the
-   secrecy of =idHash= in the off-chain artifact and on the pool's identity-
-   bound =transferCarrying= recipient check, not on an in-SNARK CP proof.
-   Theorem 8 in [[file:alberta-buck-proofs.org][the proofs]] describes the intended binding; its chain-
-   observable enforcement lands with =spend_a.circom=.
+3. *A-flavor identity binding (Phase 8 V2 shipped).*  The Phase-7
+   =spend.circom= enforces a bearer-shape (B-spend) discharge: knowledge of
+   the Poseidon-5 opening is the spend authorization.  Phase 8 ships A-flavor
+   in two layers: V1's =spend_a.circom= adds the addressed-spend scaffolding
+   (A-tag nullifier, flavor in {A1, A2}); V2 layers the cryptographic
+   identity gate via two cooperating components, glued by the new
+   =Notes.spendACP= entrypoint.  /In-circuit/, =spend_a.circom= V2 publishes
+   =E_n= as 4 public inputs and enforces the Poseidon-8 binding
+   ~idHash === Poseidon-8(R_n.x, R_n.y, C_n.x, C_n.y, issuerData[0..3])~,
+   pinning the revealed ciphertext to the leaf at mint time (~265 R1CS).
+   /Off-chain/, =IdentityRegistry.verifySpendCP= verifies the 4-element
+   Chaum-Pedersen DLEQ via the EIP-196 BN254 precompiles -- /not/ inside the
+   SNARK, since the DLEQ requires native BN254 G1 arithmetic that is
+   prohibitively expensive in non-native circom (~+250K R1CS).  The on-chain
+   DLEQ check is ~36K gas (two ecMul + two ecAdd + Fiat-Shamir keccak) and
+   confirms a single =sk_dep= satisfies both ~pk_dep === sk_dep * G~ and the
+   equal-plaintext relation ~C_n - sk_dep * R_n === C_reg - sk_dep * R_reg~
+   (Theorem 8 #3).  All A1/A2 identity, security, and privacy properties
+   enumerated in [[file:alberta-buck-notes.org][alberta-buck-notes.org]] remain in place; only the DLEQ
+   verification /location/ moved.  Exercised end-to-end by 26 forge tests
+   in =test/SpendAVerifier.t.sol=.
 4. *Variable-=N= batch size (resolved via pinned set).*  Phase-7's
    =mint.circom= was templated at =N=2=.  Phase-7-bis generalises this: the
    wallet rounds any requested split up to the smallest pinned N >= N_requested
-   from the deployed set (recommended {16, 128, 1024}), padding with =v = 0=
+   from the deployed set (recommended {16, 128, 1024}), padding with ~v = 0~
    dummy openings.  Each pinned N has its own verifier contract; the
    =MintVerifierAdapter= dispatches on =cms.length=.  Adding a new pin means
    running a new trusted-setup ceremony, deploying a new verifier, and

@@ -309,7 +309,7 @@ registry will accept at =register()= time.
 
 The registry implements three on-chain verifications, all reducible to BN254 precompile calls:
 
-1. *PS signature verification at registration*: =e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)=, where
+1. *PS signature verification at registration*: ~e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)~, where
    the verifier reconstructs the relation linearly in =m= via the binding NIZK in step 2.  Costs
    ~147K gas (3-4 =ecPairing= pairs).
 2. *NIZK proof binding the rerandomized PS signature to the ElGamal ciphertext*.  A Schnorr-family
@@ -317,7 +317,7 @@ The registry implements three on-chain verifications, all reducible to BN254 pre
    =(sigma', E_new, pk_new, registrant_address)=.  Costs ~30K gas of =ecMul=/=ecAdd= on top of the
    pairing check.  Total registration cost is ~235K gas (one-time).
 3. *Chaum-Pedersen proof of re-encryption correctness at =approve= time*.  The recipient identity
-   ciphertext =E_bob= and proof =pi_CP = (e, s_1, s_2)= arrive in =approve()= calldata; the registry
+   ciphertext =E_bob= and proof ~pi_CP = (e, s_1, s_2)~ arrive in =approve()= calldata; the registry
    reads =E_alice= from storage (anchoring the proof to the registered credential) and verifies via
    3-4 =ecMul= + 3-4 =ecAdd= operations and a Fiat-Shamir reconstruction.  Costs ~29K gas
    per counterparty pair.
@@ -360,7 +360,7 @@ Design notes on the surface:
 - =verifyApprove= reads =E_alice= from storage so the caller cannot substitute a fake credential;
   the =CPProof= structure carries T1/T2/T3 because the transcript binds T1 and T2 separately (only
   T3 is recoverable from the verification equations).
-- The =RegistrationProof= carries the PS-side commitment =A_ps = m_tilde * sigma'_1= alongside the
+- The =RegistrationProof= carries the PS-side commitment ~A_ps = m_tilde * sigma'_1~ alongside the
   two ElGamal-side commitments =T_C=, =T_R= -- =A_ps= is indispensable for the pairing-product
   check and cannot be reconstructed from the other responses.
 - Governance hooks round out the surface: =revokeIssuer=, =transferGovernance=.  Revocation does
@@ -410,9 +410,9 @@ decrypting their respective ciphertext) can reconstruct the identity of the othe
 performs the seven-step sequence:
 
 1. Require =identity.isVerified(msg.sender)=.
-2. Read =creditValue = buckCredit.totalCurrentValue(msg.sender)=.
+2. Read ~creditValue = buckCredit.totalCurrentValue(msg.sender)~.
 3. Read =k = buckK.currentBuckK()= (Phase-0 static getter or eventual PID =compute()=).
-4. =maxLimit = creditValue * k / 1e18=; the stored per-account =storedLimit= ratchets upward only.
+4. ~maxLimit = creditValue * k / 1e18~; the stored per-account =storedLimit= ratchets upward only.
 5. Refuse if =balanceOf(sender) + amount > storedLimit=.
 6. Compute the default-insurance premium (see below).
 7. =_mint(sender, amount - premium)=, =_mint(insurancePool, premium)=, emit
@@ -467,7 +467,7 @@ without the underlying ciphertexts learn nothing beyond the fact of a transfer.
 
 BUCK carries a continuous on-chain demurrage accrual to drive a perpetual Jubilee schedule.  All
 balance accounting is in /raw/ units; the displayed =balanceOf(a)= subtracts a per-account
-=feeOwing(a) = raw_balance(a) * (cumIndexNow - _indexAtLastTouch[a]) / SCALE=.  =cumIndex= grows
+~feeOwing(a) = raw_balance(a) * (cumIndexNow - _indexAtLastTouch[a]) / SCALE~.  =cumIndex= grows
 linearly at =BASE_RATE_PER_SEC * (now - genesis)=.  Two transfer flavours coexist:
 
 - *Deducting* (default ERC-20 path): the sender's accumulated fee is burned to the Jubilee
@@ -476,10 +476,10 @@ linearly at =BASE_RATE_PER_SEC * (now - genesis)=.  Two transfer flavours coexis
 - *Carrying* (=transferCarrying(to, amount)=): no fee burn.  =amount= raw units move atomically
   with the sender's accrued demurrage age -- the recipient's index becomes the
   amount-weighted average of its old index and the sender's =_indexAtLastTouch=:
-  =_indexAtLastTouch[to] = (br * _indexAtLastTouch[to] + amount * idxFrom) / (br + amount)=.
+  ~_indexAtLastTouch[to] = (br * _indexAtLastTouch[to] + amount * idxFrom) / (br + amount)~.
   The sender's index is unchanged; sender keeps the residual age on its remaining balance.
 
-=transferCarrying= is the entry point =Notes.spend= calls when paying out a redeemed face value:
+=transferCarrying= is the entry point =Notes.spend= and =Notes.spendACP= call when paying out a redeemed face value:
 it is the reason a recipient absorbs the pool's average demurrage age (the anonymity cost --
 and upside, for anyone who held a note longer than the pool average) rather than a discontinuous
 spike of settled fee.  The Jubilee accumulates fee burns into a single sink whose own
@@ -491,8 +491,8 @@ The premium scales with utilization: the closer the account's outstanding BUCKs 
 limit, the more expensive each additional BUCK becomes.  This mirrors the architecture document's
 description of [[/range/finance/alberta-buck-architecture/#value-stabilization][Parametric Default Insurance]].
 
-The shipped curve is quadratic in utilization: =premium_rate = BASE_RATE + utilization^2 *
-SCALE_RATE=, with =BASE_RATE = 50bp= (0.50%) and =SCALE_RATE = 450bp= (4.50% additional at 100%
+The shipped curve is quadratic in utilization: ~premium_rate = BASE_RATE + utilization^2 *
+SCALE_RATE~, with =BASE_RATE = 50bp= (0.50%) and ~SCALE_RATE = 450bp~ (4.50% additional at 100%
 utilization).  Concretely: ~0.5% at 0% utilization, ~1.75% at 50%, ~4.55% at 90%; 100% is
 unreachable because the limit check itself rejects.  The =_computePremium(account, mintAmount,
 limit)= helper computes utilization on the post-mint balance and returns the BUCK amount due
@@ -552,8 +552,8 @@ shape is:
   feedDecimals; }=.
 - *Entry point*: =compute() returns (uint256)=.  If =now - lastUpdate < dT= it returns the cached
   =buckK= without state change.  Otherwise it reads =basketCost= (Chainlink-weighted setpoint),
-  =buckPrice= (Uniswap V3 TWAP, process variable), runs one PID cycle =rawOutput = 1e18 + newP*Kp
-  + newI*Ki + newD*Kd= (each term divided by =1e18=), clamps to =[buckKMin, buckKMax]= with
+  =buckPrice= (Uniswap V3 TWAP, process variable), runs one PID cycle ~rawOutput = 1e18 + newP*Kp
+  + newI*Ki + newD*Kd~ (each term divided by =1e18=), clamps to =[buckKMin, buckKMax]= with
   anti-windup on the integral term, writes the new state, and emits =BuckKUpdated=.
 - *View*: =currentBuckK() view returns (uint256)= -- the Buck contract calls this for non-mutating
   reads.
@@ -673,7 +673,8 @@ five constraint groups:
   =(pathElements, pathIndices)=: a chain of =Poseidon(2)= hashes with =Switcher= selectors
   ordering the left/right inputs at each level.
 - *(N)* B-shape nullifier ~nullifier === Poseidon(3)(rho, idHash, 4242)~ -- the constant tag
-  4242 domain-separates the B-path; the A-path will use its own tag when =spend_a.circom= ships.
+  4242 domain-separates the B-path; the shipped =spend_a.circom= V2 uses tag 4243 to keep
+  A and B nullifiers structurally disjoint.
 - *(B)* Ghost bind ~face * 1 === v * 1~ and a quadratic anchor =x*x= guarantees the prover
   committed to the value actually being redeemed (not an arbitrary smaller face).
 
@@ -814,7 +815,7 @@ Alice calls =BUCK.mint(50000e18)=:
    the static value the governance multisig last wrote.  *Eventual PID build*: the controller
    fetches oracles -- e.g. commodity basket at 1.02 USDC, BUCK at 0.99 USDC, error +0.03 ->
    BUCK_K = 1.015.
-4. =maxLimit = 341,000 * BUCK_K=.  Assume BUCK_K = 1.015, so maxLimit = 346,115.
+4. ~maxLimit = 341,000 * BUCK_K~.  Assume BUCK_K = 1.015, so maxLimit = 346,115.
 5. Alice's current balance is 280,000 BUCKs.  After mint: 330,000 < 346,115.  OK.
 6. Utilization after mint: 330,000 / 346,115 = 95.3%.
    - Premium rate: 0.50% + (0.953^2 * 4.50%) = 4.59%.
@@ -832,13 +833,13 @@ Alice wants to pay Bob 10,000 BUCKs through the same router pattern most ERC-20 
    \( E_{bob} = (r_b \cdot G,\ r_b \cdot pk_{bob} + M) \).
 3. The wallet produces a Chaum-Pedersen NIZK proof \( \pi_{CP} = (e, s_1, s_2) \) that =E_bob=
    encrypts the same \( M \) registered in =E_alice=.  The Fiat-Shamir challenge binds
-   =msg.sender = alice=, =spender = bob=, and =block.chainid=.
+   ~msg.sender = alice~, ~spender = bob~, and =block.chainid=.
 4. Alice calls =BUCK.approve(bob, 10000e18, E_bob, pi_CP)=.  The contract:
    - checks both parties are verified;
    - asks =IdentityRegistry.verifyApprove(alice, bob, E_bob, pi_CP)= -- the registry reads
      =E_alice= from its own storage (so Alice can't substitute a fake credential) and runs the
      CP check (~29K gas);
-   - stores =_receiptFragments[alice][bob] = keccak256(E_bob)=;
+   - stores ~_receiptFragments[alice][bob] = keccak256(E_bob)~;
    - records the standard ERC-20 allowance.
 5. Off-chain, Alice's Holochain hApp delivers the matching =identity_data= and \( E_{bob} \) ciphertext
    to Bob's hApp.  Bob's wallet decrypts to recover \( M' \) and asserts
@@ -864,8 +865,8 @@ Bob (or a contract Bob authorized) calls =BUCK.transferFrom(alice, bob, 10000e18
 Separately, Alice wants to move some of her BUCKs off the public-ledger transfer path into private
 notes.  Her wallet picks flavour =A2= and values =[100 BUCK, 25 BUCK]= (totalFace = 125 BUCK), draws
 fresh =rho[i]= and =idHash[i]= randomness, and -- since the deployment pins =N \in {16, 128, 1024}=
--- pads the live pair with 14 dummy openings whose =v_i = 0= so the batch lands on the smallest
-pinned circuit (=N* = 16=).  The wallet snapshots =(oldRoot, nextLeafIndex)= from chain, derives
+-- pads the live pair with 14 dummy openings whose ~v_i = 0~ so the batch lands on the smallest
+pinned circuit (~N* = 16~).  The wallet snapshots =(oldRoot, nextLeafIndex)= from chain, derives
 the depth-20 sibling paths for each of the 16 leaves /in submission order/, and runs
 =snarkjs groth16 fullProve= against =build/snark/mint_batch_N16/mint.wasm= and =mint_final.zkey=.
 The proof triple =(pA, pB, pC)= is abi-encoded as =(uint256[2], uint256[2][2], uint256[2])= into
@@ -914,21 +915,23 @@ Approximate gas costs (Ethereum mainnet, Solidity 0.8.x optimizer).  The Notes r
 from the =MintVerifier.t.sol= and =SpendVerifier.t.sol= Foundry runs against the real Groth16
 verifiers; the rest are architectural estimates for the eventual PID build.
 
-| Operation                      | Gas (approx) | Cost at 30 gwei | Notes                                |
-|--------------------------------+--------------+-----------------+--------------------------------------|
-| BUCK_CREDIT.activate()         | ~50K         | ~$4             | Single SSTORE + event                |
-| BUCK_CREDIT.updateCredit()     | ~80K         | ~$6             | Multiple SSTOREs (insurer pays)      |
-| IdentityRegistry.register()    | ~235K        | ~$19            | PS pairing + NIZK (one-time)         |
-| IdentityRegistry.verifyApprove | ~29K         | ~$2             | CP proof, per counterparty pair      |
-| BUCK.approve() (identity)      | ~97K         | ~$8             | 29K CP + 46K allowance + 22K SSTORE  |
-| BUCK.transfer / transferFrom   | ~80K         | ~$6             | ERC-20 baseline + receipt event      |
-| BUCK.transferCarrying()        | ~60K         | ~$5             | Weighted-merge index, no fee burn    |
-| BUCK.mint() (static BUCK_K)    | ~150K        | ~$12            | Enumerate credits + mint             |
-| BUCK.mint() (with PID update)  | ~350K        | ~$28            | + Oracle reads + PID computation     |
-| Notes.mint() (Groth16, N=2)    | ~1.9M        | ~$152           | Groth16 verify + 20-deep tree insert |
-| Notes.spend() (Groth16)        | ~360K        | ~$29            | Groth16 verify + transferCarrying    |
-| BUCK_CREDIT.currentValue()     | 0 (view)     | Free            | Pure computation, no state change    |
-| BUCK_K.currentBuckK()          | 0 (view)     | Free            | Read cached value                    |
+| Operation                                     | Gas (approx) | Cost at 30 gwei | Notes                                 |
+|-----------------------------------------------+--------------+-----------------+---------------------------------------|
+| BUCK_CREDIT.activate()                        | ~50K         | ~$4             | Single SSTORE + event                 |
+| BUCK_CREDIT.updateCredit()                    | ~80K         | ~$6             | Multiple SSTOREs (insurer pays)       |
+| IdentityRegistry.register()                   | ~235K        | ~$19            | PS pairing + NIZK (one-time)          |
+| IdentityRegistry.verifyApprove                | ~29K         | ~$2             | CP proof, per counterparty pair       |
+| BUCK.approve() (identity)                     | ~97K         | ~$8             | 29K CP + 46K allowance + 22K SSTORE   |
+| BUCK.transfer / transferFrom                  | ~80K         | ~$6             | ERC-20 baseline + receipt event       |
+| BUCK.transferCarrying()                       | ~60K         | ~$5             | Weighted-merge index, no fee burn     |
+| BUCK.mint() (static BUCK_K)                   | ~150K        | ~$12            | Enumerate credits + mint              |
+| BUCK.mint() (with PID update)                 | ~350K        | ~$28            | + Oracle reads + PID computation      |
+| Notes.mint() (Groth16, N=2)                   | ~1.9M        | ~$152           | Groth16 verify + 20-deep tree insert  |
+| Notes.spend() (Groth16, B-shape)              | ~360K        | ~$29            | Groth16 verify + transferCarrying     |
+| Notes.spendACP() (Groth16 + CP-DLEQ, A-shape) | ~410K        | ~$33            | Groth16 verify + verifySpendCP        |
+|                                               |              |                 | (~36K via EIP-196) + transferCarrying |
+| BUCK_CREDIT.currentValue()                    | 0 (view)     | Free            | Pure computation, no state change     |
+| BUCK_K.currentBuckK()                         | 0 (view)     | Free            | Read cached value                     |
 
 The PID update cost (~200K gas additional) is amortized across all mints within a =dT= window.  With
 a 1-hour =dT=, only the first mint after each hour pays for the oracle reads and PID computation.
@@ -1030,13 +1033,16 @@ are annotated with what the current code actually ships.
 The phase set has grown since the original v0.5 plan in two directions.  /Backward/, Phase 7-bis
 landed the in-circuit Merkle-insertion batch-mint pivot documented in
 [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] -- now shipped as
-=mint_batch.circom= with per-N pinned verifiers in {1, 2, 4, 8, 16, 32}.  /Forward/, the path to
-live BUCK_K (Phase 10/11) and dynamic BUCK_CREDIT-backed minting (Phase 12) is sequenced behind
-two remaining Notes deliverables: serialized B1 sub-notes (Phase 9) per
-[[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]], and A-flavor spend
-(Phase 8) with the key-pair-binding semantics corrected by the 2026-04 Deepseek R4 review.  Both
-companion memos have been reviewed for cryptographic correctness; see /Cryptographic Correctness
-Review of Companion Memos/ below.
+=mint_batch.circom= with per-N pinned verifiers in {1, 2, 4, 8, 16, 32}.  Phase 8 (A-flavor spend
+with key-pair binding) also shipped, in two layers: =spend_a.circom= V2 (in-circuit Poseidon-8
+idHash binding gate) plus off-chain Chaum-Pedersen DLEQ verified in
+=IdentityRegistry.verifySpendCP= via EIP-196 BN254 precompiles, all glued by the new
+=Notes.spendACP= entry point.  /Forward/, the path to live BUCK_K (Phase 10/11) and dynamic
+BUCK_CREDIT-backed minting (Phase 12) is sequenced behind one remaining Notes deliverable:
+serialized B1 sub-notes (Phase 9) per
+[[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]].  Both companion
+memos have been reviewed for cryptographic correctness; see /Cryptographic Correctness Review of
+Companion Memos/ below.
 
 ** Phase Completion Status (current)
 
@@ -1052,23 +1058,24 @@ Review of Companion Memos/ below.
 | Phase 6     | Groth16 mint circuit (=mint.circom=, N=2) + adapter          | *done* -- =MintGroth16Verifier=, =MintVerifierAdapter=                                  |
 | Phase 7     | B-flavor spend circuit + nullifier reveal                    | *done* -- =spend.circom=, =SpendGroth16Verifier=, Tornado-tree, =transferCarrying=      |
 | Phase 7-bis | Batch-mint pivot: in-circuit Merkle insertion                | *done* -- =mint_batch.circom=, per-N verifiers in {1, 2, 4, 8, 16, 32}                  |
-| Phase 8     | A-flavor spend (=spend_a.circom= with key-pair binding)      | *pending* -- semantics corrected by Deepseek review (=sk_rec= loss is terminal)         |
+| Phase 8     | A-flavor spend (=spend_a.circom= V2 + off-chain CP-DLEQ)     | *done* -- =spend_a.circom= V2 (in-circuit Poseidon-8 idHash binding gate); =Notes.spendACP= calls =SpendAGroth16Verifier= + =IdentityRegistry.verifySpendCP= (~36K gas via EIP-196) |
 | Phase 9     | Serialized B1 sub-notes (=spend_serialized.circom= + bitmap) | *pending* -- POC validated to N_fam=4096; circuit + bitmap storage outstanding          |
 | Phase 10    | Live =BuckKController= (PID + AMM-pool oracles)              | *pending* -- contract skeleton in-tree; AMM-pool oracle wiring + PID tuning outstanding |
 | Phase 11    | BUCK liquidity bootstrap + BUCK/USDC AMM pool                | *pending* -- closes the loop on Phase 10 by giving the controller a real BUCK price     |
 | Phase 12    | BUCK_CREDIT insurance integration in =Buck.mint=             | *pending* -- per-tx credit-limit deduction + simultaneous insurance purchase polish     |
 | Phase 13    | Production MPC trusted-setup ceremony                        | *pending* -- replaces dev entropy in =scripts/snark/setup.sh=                           |
 
-Current forge suite: 145 unit tests pass; one =BuckKControllerForkTest= requires a live mainnet
-RPC and is skipped offline.
+Current forge suite: 202 unit tests pass (across 13 test suites); one =BuckKControllerForkTest=
+requires a live mainnet RPC and is skipped offline.
 
 ** Cryptographic Correctness Review of Companion Memos
 
-Two design memos drive the immediate path forward.  Phase 7-bis is already shipped (one of them);
-Phases 8 and 9 are the two outstanding Notes deliverables.  Both memos were reviewed for
-cryptographic correctness on 2026-04-24; both verdicts are /sound/, with one explicit operational
-trust assumption (=K_fam= destruction in serialized B1) that is /symmetric/ to a pre-existing one
-(issuer-retained =rho= in single-note B1) and is documented in the Phase 9 wallet-UX requirement.
+Two design memos drive the immediate path forward.  Phase 7-bis (batch-mint) and Phase 8 V2
+(A-spend) are both shipped; only Phase 9 (serialized B1 sub-notes) remains as an outstanding
+Notes deliverable.  Both memos were reviewed for cryptographic correctness on 2026-04-24; both
+verdicts are /sound/, with one explicit operational trust assumption (=K_fam= destruction in
+serialized B1) that is /symmetric/ to a pre-existing one (issuer-retained =rho= in single-note
+B1) and is documented in the Phase 9 wallet-UX requirement.
 
 *** [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] -- Phase 7-bis batch-mint design
 
@@ -1105,9 +1112,9 @@ insertion replaces the per-leaf =Notes._insert= ladder with one SNARK-attested =
 assumption (symmetric to existing single-note B1 issuer-race over =rho=).  Mint-circuit reuse is
 exact; only the spend circuit and the double-spend storage diverge.
 
-- *Construction*: =subRoot = MerkleRoot(s_0..s_{N-1})=,
-  =predicate_fam = Poseidon-2(predicate_base, subRoot)=,
-  =cm_parent = Poseidon-5(flavor, v, rho, idHash, predicate_fam)=.  Because =cm_parent= is an
+- *Construction*: ~subRoot = MerkleRoot(s_0..s_{N-1})~,
+  ~predicate_fam = Poseidon-2(predicate_base, subRoot)~,
+  ~cm_parent = Poseidon-5(flavor, v, rho, idHash, predicate_fam)~.  Because =cm_parent= is an
   ordinary Poseidon-5 output, =mint_batch.circom= hashes it identically to a single-note B1 leaf
   -- /no new mint circuit, no new trusted setup, no new pinned-N variants/.
 - *Witness-and-verify discipline*: the spend circuit does NOT invert =s_i -> i= (which would
@@ -1274,7 +1281,7 @@ the matching off-chain entity -- same PS keypair, same address, plus the issuanc
   - =issue(identity_fields, applicant_addr, applicant_pk=None, rng)= -> =IssuedCredential=:
     overwrites the =issuer_id= field in the submitted record (so applicants cannot smuggle a
     different issuer label into the canonical), canonicalizes, computes m, signs sigma, and --
-    when =applicant_pk= is given -- ElGamal-encrypts =M = m*G= under it for confidential
+    when =applicant_pk= is given -- ElGamal-encrypts ~M = m*G~ under it for confidential
     delivery.  The wallet decrypts on receipt to confirm M before rerandomizing sigma.
   - =revoke(addr)= / =reset(addr)= / =issuance_log()= / =verify_credential(cred)= helpers.
   - =rerandomize_for_registration(cred, rng)= -- convenience wrapper for the wallet-side step
@@ -1367,7 +1374,7 @@ rho, idHash, predicate) openings, and each =cm[i]= to =Poseidon(5)= of its openi
 
 - =flake.nix= adds =circom= to the dev shell and bootstraps npm dev dependencies on first entry.
 - =package.json= pins =circomlib= 2.0.5, =circomlibjs= ^0.1.7, =snarkjs= 0.7.5, =ethers= ^6.13.4.
-- =circuits/mint.circom= -- =N = 2= mint circuit (see [[#notes][Notes]] section for the signal table), with
+- =circuits/mint.circom= -- ~N = 2~ mint circuit (see [[#notes][Notes]] section for the signal table), with
   =Num2Bits(128)= range bounds on =totalFace= and each =v[i]=.  ~3,500 R1CS constraints.
 - =scripts/snark/setup.sh= -- circom compile, 2^15 powers-of-tau (shared between mint and spend),
   groth16 phase-2 setup, export verification key + Solidity verifier (=MintGroth16Verifier=,
@@ -1395,13 +1402,25 @@ nullifier, paying out an equal face value of BUCK via =transferCarrying= so the 
 - =circuits/spend.circom= -- single-note B-shape redemption (~12,000 R1CS constraints).  Public
   inputs =[noteRoot, nullifier, face, recipient, chainId]=; five constraint groups (range,
   commitment, Merkle inclusion at depth 20, nullifier determinism
-  =Poseidon(3)(rho, idHash, 4242)=, value conservation).  A-flavor in-circuit identity binding is
-  deferred to =spend_a.circom= (a follow-up phase).
+  =Poseidon(3)(rho, idHash, 4242)=, value conservation).
+- =circuits/spend_a.circom= V2 -- A-shape redemption circuit (~13,300 R1CS constraints; 6152
+  non-linear + 7140 linear).  Public inputs =[noteRoot, nullifier, face, recipient, chainId,
+  E_n.R.x, E_n.R.y, E_n.C.x, E_n.C.y]= (9 total); adds the A-tag nullifier
+  =Poseidon(3)(rho, idHash, 4243)=, the flavor-in-{1,2} gate, and the in-circuit Poseidon-8
+  binding constraint =Poseidon-8(E_n.R.x, E_n.R.y, E_n.C.x, E_n.C.y, issuerData[0..3]) ===
+  idHash= (~265 R1CS) that pins the publicly-revealed =E_n= to the leaf at mint time.
 - =src/SpendGroth16Verifier.sol= and =src/SpendVerifierAdapter.sol= -- snarkjs-generated verifier
-  and the narrow =ISpendVerifier= adapter.
+  and the narrow =ISpendVerifier= adapter for B-shape spends.
+- =src/SpendAGroth16Verifier.sol= and =src/SpendAVerifierAdapter.sol= -- snarkjs-generated
+  verifier and the narrow =ISpendAVerifier= adapter for A-shape (V2) spends; the adapter
+  packs the 9 public signals in order and calls the underlying =verifyProof=.
 - =src/Notes.sol= extended with the Tornado-style incremental Poseidon Merkle tree (depth 20,
-  =TREE_DEPTH= precomputed empty-subtree roots, 30-slot =roots[]= ring buffer), and the new
-  =spend(proof, root, nullifier, face, recipient)= entry point.
+  =TREE_DEPTH= precomputed empty-subtree roots, 30-slot =roots[]= ring buffer), and three
+  spend entry points: =spend(proof, root, nullifier, face, recipient)= for B-shape,
+  =spendACP(proof, root, nullifier, face, recipient, E_n, cpProof)= for A-shape (which calls
+  both =spendAVerifier.verifySpendA= and =identityRegistry.verifySpendCP= atomically), and a
+  governance setter =setIdentityRegistry= guarded by the same =onlyGovernance= modifier as
+  the verifier setters.
 - =src/PoseidonT3Bytecode.sol= -- a helper that deploys the 2-input Poseidon precompile from
   raw bytecode generated by circomlibjs; =script/Deploy.s.sol= deploys it and passes the address
   to =Notes='s constructor.
@@ -1411,16 +1430,22 @@ nullifier, paying out an equal face value of BUCK via =transferCarrying= so the 
   redemption pays the recipient =face=, not =face - fee=.  (The per-account =FeeTreatment= enum
   that earlier drafts proposed has been replaced by this simpler single-function approach; the
   Notes pool does not need a flag because =transferCarrying= is the only path it calls.)
-- =test/SpendVerifier.t.sol= and =test/BuckDemurrage.t.sol= cover: happy path, double-spend,
-  unknown root, tampered recipient/face/nullifier, chainId mismatch, zero-recipient, and the
-  weighted-merge invariant that the recipient's age equals the pool's average after spend.
+- =test/SpendVerifier.t.sol= and =test/BuckDemurrage.t.sol= cover the B-spend path: happy
+  path, double-spend, unknown root, tampered recipient/face/nullifier, chainId mismatch,
+  zero-recipient, and the weighted-merge invariant that the recipient's age equals the
+  pool's average after spend.
+- =test/SpendAVerifier.t.sol= covers the A-spend path (V2; 26 tests): happy path, double
+  spend, A-tag-disjoint-from-B-tag, every SNARK-public-input tamper (including all four
+  =E_n= coordinates), every CP-DLEQ tamper (e, s, T1, T2), unregistered/wrong-spender
+  rejection via =verifySpendCP=, and governance lockdown for both =setSpendAVerifier= and
+  =setIdentityRegistry=.
 
 *Pending* (now sequenced as their own phases below):
 
 - *Phase 7-bis*: in-circuit Merkle-insertion batch-mint pivot.  Now /done/ -- see /Phase 7-bis:
   Batch-Mint Pivot/ below.
-- *Phase 8*: A-flavor spend (=spend_a.circom=) with key-pair binding (Deepseek-corrected
-  semantics).
+- *Phase 8*: A-flavor spend (=spend_a.circom= V2 with in-circuit Poseidon-8 binding +
+  off-chain CP-DLEQ via =Notes.spendACP=).  Now /done/ -- see /Phase 8: A-flavor Spend/ below.
 - *Phase 9*: serialized B1 sub-notes (=spend_serialized.circom= + per-parent bitmap).
 - *Phase 10*: live =BuckKController= deployment with AMM-pool oracles (XAU/USDC, BUCK/USDC, etc.).
 - *Phase 11*: BUCK liquidity bootstrap + BUCK/USDC AMM pool deployment.
@@ -1435,10 +1460,10 @@ open questions in [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] (Par
 contracts:
 
 1. *=Num2Bits= range checks on =v[i]= and =totalFace= in =circuits/mint.circom=* -- /resolved/.
-   =vRange[i] = Num2Bits(128)= and =totalRange = Num2Bits(128)= are wired in =mint.circom=;
+   ~vRange[i] = Num2Bits(128)~ and ~totalRange = Num2Bits(128)~ are wired in =mint.circom=;
    =scripts/snark/setup.sh= and =MintGroth16Verifier= have been refreshed.  The spend circuit
-   re-derives the matching range bound on its own =v= (=vRange = Num2Bits(128)=) and on the
-   public =face= (=faceRange = Num2Bits(128)=), closing the field-overflow corridor end-to-end.
+   re-derives the matching range bound on its own =v= (~vRange = Num2Bits(128)~) and on the
+   public =face= (~faceRange = Num2Bits(128)~), closing the field-overflow corridor end-to-end.
 
 2. *Explicit batch identifier in =Notes.mint=* -- /still an open design question, not a
    correctness bug/.  The shipped =Minted(issuer, totalFace, startIndex, count, newRoot)= event
@@ -1474,7 +1499,7 @@ N=256-512 on L1 with stock Groth16 verifiers and an L2 ceiling of N=1024+.
 - =src/MintBatchN{1,2,4,8,16,32}Groth16Verifier.sol= -- snarkjs-generated per-N verifiers,
   measured 14.5 KB at N=16 and 20.8 KB at N=32 (both under the EIP-170 24 KB ceiling).
 - =src/MintVerifierAdapter.sol= -- now dispatches by =cms.length= to =mintVerifiers[cms.length]=,
-  builds =pub[0..4+N) = [oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N)]= inline, forwards
+  builds ~pub[0..4+N) = [oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N)]~ inline, forwards
   to the per-N Groth16 verifier.
 - =src/Notes.sol= -- public inputs include =(oldRoot, newRoot, nextLeafIndex, totalFace)=;
   =filledSubtrees=, =zeros[]=, and =commitmentExists= are retired (duplicate-=cm= migrated to
@@ -1501,44 +1526,140 @@ cost is unchanged at ~360K (independent of mint batch size).
   cannot land on L1 at all.  L2 deployment (Arbitrum/Base/Optimism, ~100x looser block budgets)
   lifts this; recursion (Nova/Halo2/Plonky3) is the eventual fix above N=512.
 
-** Phase 8: A-flavor Spend (=spend_a.circom= with Key-Pair Binding)
+** Phase 8: A-flavor Spend (=spend_a.circom= V2 + off-chain CP-DLEQ) -- *Shipped*
 
 Goal: ship the missing half of the spend surface -- private redemption of A1/A2 notes that carry
-an in-circuit Chaum-Pedersen / ElGamal identity binding -- with the corrected key-pair-binding
-semantics surfaced by the 2026-04 Deepseek R4 review.
+an identity binding -- with the corrected key-pair-binding semantics surfaced by the 2026-04
+Deepseek R4 review.  *Both V1 and V2 are now in tree, exercised end-to-end by 26 forge tests in
+=test/SpendAVerifier.t.sol=.*
 
 *Corrected design invariant* (per [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] Theorem
 10.1):
 
-- The A-spend circuit takes a /single/ =sk_dep= witness and uses it for both ciphertexts =E_note=
-  (carried in the note opening) and =E_dep_current= (registered to the spender).  This forces
-  ~pk_rec_mint === pk_dep_current~ at constraint time -- if the recipient lost their private key
-  and re-registered under a new ElGamal key, the CP-equality fails.
+- The A-spend identity binding requires a /single/ =sk_dep= witness that simultaneously satisfies
+  =pk_dep_current === sk_dep * G= (the spender's registered public key) /and/ produces matching
+  decryptions of both the note ciphertext =E_n= and the registered ciphertext =E_reg=.  The
+  Chaum-Pedersen DLEQ enforces ~C_n - sk_dep * R_n === C_reg - sk_dep * R_reg~ -- if the
+  recipient lost =sk_rec= and re-registered under a new ElGamal key, no single =sk_dep= satisfies
+  both constraints.
 - *Consequence*: A-note loss-recovery via identity re-issuance is /impossible/ by design.
   =sk_rec= must be backed up like a hardware-wallet seed; loss is terminal.  The companion
   documents ([[file:alberta-buck-notes.org][alberta-buck-notes.org]],
   [[file:alberta-buck-notes-flow.org][alberta-buck-notes-flow.org]]) were revised in the same
   cycle to remove the now-incorrect "transparent re-issuance" framing.
 
-*Deliverables*:
+Phase 8 ships in two layers, both in tree:
 
-- =circuits/spend_a.circom= -- A-shape redemption circuit.  Constraint groups: range bounds on
+*** V1: =spend_a.circom= predicate-only A-spend
+
+The Phase 8 V1 circuit ships the addressed-spend /scaffolding/ -- A-tag nullifier, flavor
+constraint, recipient binding -- but defers the cryptographic identity gate to V2.  The reason is
+purely engineering: the CP-equality constraint
+~C_n - sk_dep * R_n === C_reg - sk_dep * R_reg~ requires native BN254 G1 arithmetic in-circuit,
+which is non-native field arithmetic over the BN254 scalar field, costing on the order of 10K-25K
+constraints per group operation.  A full in-circuit CP would multiply spend_a's constraint count
+by ~10x.  Until Phase 8 V2 ships the off-chain verifier (below), A-flavor notes remain
+predicate-bound only -- whoever holds =(rho, idHash, predicate)= can spend.
+
+*** V2: In-circuit Poseidon-8 binding + off-chain CP-DLEQ + Solidity precompile verifier
+
+Phase 8 V2 ships the cryptographic identity gate as two cooperating components glued by the new
+=Notes.spendACP= entry point.  The /in-circuit/ half is a Poseidon-8 binding gate added to
+=spend_a.circom= V2 that pins the publicly-revealed =E_n= to the leaf's =idHash= at mint time
+(~265 R1CS).  The /off-chain/ half is a 4-element Chaum-Pedersen DLEQ proof verified by Solidity
+using the EIP-196 BN254 precompiles inside =IdentityRegistry.verifySpendCP= (~36K gas).  The
+DLEQ-verification site moves out of the circuit (where it would have cost ~+250K R1CS in
+non-native BN254 G1 arithmetic) and into =Notes.spendACP=, which calls /both/ the SpendA Groth16
+verifier /and/ =verifySpendCP= atomically.  This preserves the V1 invariant (Theorem 10.1):
+identity re-issuance still cannot recover an A-note, because the second algebraic check fails
+under any new key, /and/ the in-circuit binding stops a spender from substituting a different
+=E_n= just to make the off-chain check pass with their own key.
+
+The DLEQ statement (single-=sk_dep= variant of Theorem 8 #3):
+
+#+begin_quote
+  Prove knowledge of =sk_dep= such that
+    =pk_dep             === sk_dep * G=          (registered key)
+    =(C_reg - C_n)      === sk_dep * (R_reg - R_n)=
+#+end_quote
+
+Sigma protocol (=alberta_buck.wallet.spend_cp=):
+
+#+begin_quote
+  Prover picks =t in Fr=, computes ~T1 = t*G~, ~T2 = t*(R_reg - R_n)~.
+  Challenge:   ~e = H(R_n, R_reg, C_n, C_reg, pk_dep, T1, T2, recipient, chainid)~
+  Response:    ~s = t + e*sk_dep~
+  Proof:       =(e, s, T1, T2)=  -- 4 field elements, ~36K gas to verify on-chain.
+#+end_quote
+
+*Architectural note: identity verification location*.  The A-spend identity check lives in the
+=Notes.spendACP= API call, not in the SNARK circuit.  The spender provides their identity
+ciphertext =E_n= alongside the spend, and =Notes.spendACP= calls
+=identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof)= which reads
+=_E_addr[spender]= and =_pk[spender]= from registry storage.  All A1/A2 identity, security, and
+privacy properties enumerated in [[file:alberta-buck-notes.org][alberta-buck-notes.org]] remain
+in place: only the DLEQ verification /location/ moved (off-chain CP via precompiles, instead of
+non-native G1 in the circuit).  The link between the SNARK and the CP verifier is the note's
+identity ciphertext =E_n=, exposed as 4 additional public inputs to =spend_a.circom= V2 and
+re-bound to =idHash= via the in-circuit Poseidon-8 binding gate (~265 R1CS).  Together the
+two layers force the spender to (a) prove a leaf opening pinning the published =E_n= to
+=idHash= at mint time, and (b) prove they own the =sk_dep= that decrypts both =E_n= and the
+registered =E_reg= to the same identity point =M=.
+
+Why off-chain CP rather than in-circuit:
+
+| Option                                    | Cost                                | Status              |
+|-------------------------------------------+-------------------------------------+---------------------|
+| In-circuit CP (non-native BN254 G1)       | +250K R1CS, +30s prove, +6 KB vkey  | Rejected (V1, V2)   |
+| BabyJubJub re-key (re-register on Twisted | Re-architect IdentityRegistry,      | Rejected (scope)    |
+|   Edwards curve)                          |   wallet, all Identity flows        |                     |
+| *Off-chain CP-DLEQ + EIP-196 precompiles* | *4 field elts, ~36K gas verify*     | *Selected (V2)*     |
+
+*V1 Deliverables (shipped)* -- predicate-only A-spend:
+
+- =circuits/spend_a.circom= V1 -- A-shape redemption circuit.  Constraint groups: range bounds on
   =face=/=v=, Poseidon-5 commitment opening, Tornado-style Merkle inclusion (depth 20), A-tag
   nullifier =Poseidon(3)(rho, idHash, 4243)= (4243 domain-separates from B-flavor's 4242),
-  CP-equality bind ~C_n - sk_dep * R_n === C_reg - sk_dep * R_reg~ (the single-witness
-  constraint that forces key-pair binding), value-conservation ghost bind.
+  flavor in {A1, A2}, value-conservation ghost bind.
 - =src/SpendAGroth16Verifier.sol= -- snarkjs-generated verifier for the A-spend circuit.
-- =src/SpendVerifierAdapter.sol= -- extend dispatch to route by flavor or calldata shape;
-  preferred surface is a flag-keyed mapping =spendVerifiers[flavor]= mirroring the per-N mint
-  pattern.
-- =src/Notes.sol= -- gain =spendA(proof, root, nullifier, face, recipient)= entry point with the
-  same recent-roots window and =transferCarrying= settlement; the per-flavor nullifier-tag domain
-  separation prevents cross-flavor replay.
-- =alberta_buck.wallet.notes= -- A-spend witness emission (CP-equality witness, =sk_dep=).
-- =scripts/snark/prove_spend_a.js= + =setup.sh= integration -- one new pinned circuit (~14K R1CS
-  estimated; reuses the same 2^15 ptau as single-note spend).
-- =test/SpendAVerifier.t.sol= -- happy path, key-pair-binding rejection (re-registered recipient
-  cannot spend), tamper paths on every public input, A-tag nullifier non-collision with B-tag.
+- =src/Notes.sol= -- gained =spendA(...)= entry point (V1; superseded by =spendACP= in V2).
+- =scripts/snark/prove_spend_a.js= + =setup.sh= integration.
+
+*V2 Deliverables (shipped)* -- cryptographic identity gate via two cooperating components:
+
+- =alberta_buck/wallet/spend_cp.py= -- Python prover and verifier for the CP-DLEQ; mirrors
+  [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] Theorem 8 #3 algebra.  Tests in
+  =alberta_buck/test/test_spend_cp.py= cover honest spend, identity re-issuance rejection,
+  tampered transcript, and cross-chain/recipient replay.
+- =src/IdentityRegistry.sol= -- adds =SpendCPProof= struct =(e, s, T1, T2)= and
+  =verifySpendCP(spender, recipient, E_n, cpProof) -> bool= external view that reads
+  =_E_addr[spender]= and =_pk[spender]= from storage, runs the two algebraic checks via 2 ecMul +
+  2 ecAdd EIP-196 precompiles, and recomputes the Fiat-Shamir challenge over the same byte-for-
+  byte transcript order as the Python prover.  ~36K gas total.
+- =circuits/spend_a.circom= V2 -- exposes =(R_n.x, R_n.y, C_n.x, C_n.y)= as 4 new public
+  inputs (9 total) and adds the Poseidon-8 binding constraint
+  =idHash === Poseidon-8(R_n.x, R_n.y, C_n.x, C_n.y, issuerData[0..3])= so the on-chain CP-DLEQ
+  verifier and the SNARK agree on which ciphertext is being spent.  =issuerData[4]= is a private
+  witness (A1: m_issuer + sigma; A2: E_iss coords mod F_R).  This costs ~265 R1CS for one
+  Poseidon-8, well within the existing pot15 ptau budget.  Total ~13,300 R1CS (6152 non-linear
+  + 7140 linear).
+- =src/ISpendAVerifier.sol= -- new interface distinct from =ISpendVerifier= due to the 9 public
+  inputs (vs B-spend's 5).  Method =verifySpendA(proof, noteRoot, nullifier, face, recipient,
+  chainId, eNoteRx, eNoteRy, eNoteCx, eNoteCy)=.
+- =src/SpendAVerifierAdapter.sol= -- wraps =ISpendAGroth16Verifier=; decodes
+  proof bytes; packs the 9 public signals in order before calling the underlying =verifyProof=.
+- =src/Notes.sol= -- gains =spendACP(proof, root, nullifier, face, recipient, E_n, cpProof)=:
+  calls =spendAVerifier.verifySpendA(...)= with E_n.R/C coords /and/
+  =identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof)=.  Both must succeed.
+  Also gains storage slot =identityRegistry= and governance setter =setIdentityRegistry= guarded
+  by =onlyGovernance=, with companion =IdentityRegistryUpdated= event.  =spendAVerifier='s type
+  is now =ISpendAVerifier= (was =ISpendVerifier=).
+- =test/SpendAVerifier.t.sol= -- 26 forge tests covering happy path, double spend, A-tag
+  nullifier non-collision with B-tag, tamper paths on every SNARK public input (including all
+  four =E_n= coordinates), CP-DLEQ tampers (e, s, T1, T2), unregistered-spender rejection,
+  wrong-spender rejection (passing CPProof from a different spender), and governance lockdown
+  for both =setSpendAVerifier= and =setIdentityRegistry=.  Fixture generated by
+  =scripts/snark/prove_spend_a.js= against vectors from =alberta_buck.wallet.vectors=.
 
 *Stop condition*: any test that demonstrates an A-note spendable after =sk_rec= loss + identity
 re-issuance is a hard halt.  The cryptographic invariant is the whole point of Phase 8.
@@ -1564,7 +1685,7 @@ Per [[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]
 
 *Phase 9-B: Contract support*:
 - =Notes.sol= adds =spendSerialized(proof, root, cm_parent, i, face, recipient)= alongside the
-  existing =spend()= and the Phase 8 =spendA()=.
+  existing =spend()= and the Phase 8 =spendACP()=.
 - New storage =mapping(uint256 => uint256[]) bitmap= (parent => packed bitmap), allocated on
   first write per parent; 256 bits per =uint256= word.
 - =nullifiers= mapping unchanged for single-note and A-flavor flows.
