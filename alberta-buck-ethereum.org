@@ -40,7 +40,7 @@ specifying the five core smart contracts:
    of Poseidon-hash note commitments; later, any holder can redeem a single note by presenting a
    second Groth16 SNARK proving membership in the on-chain Tornado-style incremental Poseidon
    Merkle tree under a fresh nullifier.  Redemption pays out via =BUCK.transferCarrying=, which
-   weighted-merges the recipient's demurrage age with the pool's so the SNARK's =face === v=
+   weighted-merges the recipient's demurrage age with the pool's so the SNARK's ~face === v~
    value-conservation invariant holds at the ERC-20 boundary.  See [[https://perry.kundert.ca/range/finance/alberta-buck-notes][Notes]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]] for the
    circuit design.
 5. *BUCK_K* (custom): A controller that supplies the dynamic Value Stabilization Factor used in
@@ -253,7 +253,7 @@ salvage/lot-clearing value).
 ** Activation (Execution) Model
 
 The client executes (activates) their credit piecemeal through =activate(tokenId, amount)= --
-gated on =ownerOf(tokenId) == msg.sender= and capped at the token's =faceValue=.  Activation
+gated on ~ownerOf(tokenId) == msg.sender~ and capped at the token's =faceValue=.  Activation
 increases the =activatedValue= and stamps =lastActivatedAt=; the /premium/ for the newly
 activated amount is collected by =BUCK.mint()=, not here.
 
@@ -272,7 +272,7 @@ These changes affect /future/ credit limit computations, including already-activ
 the depreciation function is computed from current parameters, not historical ones).
 
 =updateCredit(tokenId, newFaceValue, newDepreciationFloor, newDepType, newDepRate,
-newDepStartAt, newPremiumRate)= is gated on =msg.sender == credits[tokenId].insurer=.  If
+newDepStartAt, newPremiumRate)= is gated on ~msg.sender == credits[tokenId].insurer~.  If
 =newFaceValue < activatedValue= the contract caps =activatedValue= downward in the same call;
 =assetClass= and =insurer= are never changed.
 
@@ -637,7 +637,7 @@ public-signals arity is 5 regardless of N.
 
 Constraints: N Poseidon-5 opening checks, =Num2Bits(128)= range bounds on each =v[i]=
 and on =totalFace= (closing the field-overflow attack), one sum check
-(=totalFace === sum v[i]=), N x TREE_DEPTH Poseidon-2 hashes implementing the
+(~totalFace === sum v[i]~), N x TREE_DEPTH Poseidon-2 hashes implementing the
 rolling filled-subtrees insertion from =oldRoot= to =newRoot=, and one keccak-style
 hash check binding =cmBatchHash= to the per-leaf commitments.  Total constraints
 work out to ~6K R1CS per leaf (~1.7K opening + ~4.3K insertion); see
@@ -668,13 +668,13 @@ root.  Public inputs are =[noteRoot, nullifier, face, recipient, chainId]=; priv
 five constraint groups:
 
 - *(R)* =Num2Bits(128)= on =face= and on =v=.
-- *(C)* =cm === Poseidon(5)(flavor, v, rho, idHash, predicate)=.
+- *(C)* ~cm === Poseidon(5)(flavor, v, rho, idHash, predicate)~.
 - *(M)* Tornado-style Merkle inclusion of =cm= under =noteRoot= at path
   =(pathElements, pathIndices)=: a chain of =Poseidon(2)= hashes with =Switcher= selectors
   ordering the left/right inputs at each level.
-- *(N)* B-shape nullifier =nullifier === Poseidon(3)(rho, idHash, 4242)= -- the constant tag
+- *(N)* B-shape nullifier ~nullifier === Poseidon(3)(rho, idHash, 4242)~ -- the constant tag
   4242 domain-separates the B-path; the A-path will use its own tag when =spend_a.circom= ships.
-- *(B)* Ghost bind =face * 1 === v * 1= and a quadratic anchor =x*x= guarantees the prover
+- *(B)* Ghost bind ~face * 1 === v * 1~ and a quadratic anchor =x*x= guarantees the prover
   committed to the value actually being redeemed (not an arbitrary smaller face).
 
 snarkjs compiles the circuit to roughly 12,000 R1CS constraints; the 2^15 pot is shared with
@@ -737,11 +737,10 @@ records the SNARK-attested =newRoot=:
   copy of the same opening; Alice loses any BUCK she paid to mint duplicates).
 
 =mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms)= asserts =cms.length > 0=,
-checks =oldRoot == roots[currentRootIndex]= and =nextLeafIndex == self.nextLeafIndex=
-(stale-state guards), recomputes =cmBatchHash = keccak256(abi.encodePacked(cms))=,
-dispatches to =mintVerifiers[cms.length].verifyMint(proof, oldRoot, newRoot,
-nextLeafIndex, totalFace, cmBatchHash)=, pulls =totalFace= BUCK via
-=transferFrom(caller, this, totalFace)=, writes =newRoot= into the ring buffer at
+checks ~oldRoot == roots[currentRootIndex]~ and ~nextLeafIndex == self.nextLeafIndex~
+(stale-state guards), recomputes ~cmBatchHash = keccak256(abi.encodePacked(cms))~,
+dispatches to =mintVerifiers[cms.length].verifyMint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash)=,
+pulls =totalFace= BUCK via =transferFrom(caller, this, totalFace)=, writes =newRoot= into the ring buffer at
 =(currentRootIndex + 1) % ROOT_HISTORY_SIZE=, advances =nextLeafIndex= by =cms.length=,
 bumps =noteFaceSum= by =totalFace=, and emits a single =Minted(issuer, totalFace,
 startIndex, count, newRoot)= event.  Per-leaf =Appended= events from Phase 7 are gone:
@@ -761,7 +760,7 @@ Phase 7-bis closes the same loop as Phase 7 but at /N-independent on-chain cost/
 credit-backed BUCKs in via =mint= (~380K + ~500 gas/leaf calldata) -> opaque
 commitments fold into the rolling root via the SNARK -> =spend= redeems any committed
 commitment against any recent root with a fresh nullifier, paying the recipient via
-=transferCarrying= so the SNARK's =face === v= invariant is preserved at the ERC-20
+=transferCarrying= so the SNARK's ~face === v~ invariant is preserved at the ERC-20
 boundary.  The pivot is documented in
 [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
 
@@ -799,8 +798,8 @@ Before Alice can interact with BUCK at all, she must hold a verified identity cr
 3. *On-chain registration*: Alice calls
    =IdentityRegistry.register(issuer, pk_alice, E_alice, sigma', pi)=.  The contract verifies
    \( \pi \) and the PS pairing relation via the BN254 precompiles (~235K gas, paid once for the
-   lifetime of this Ethereum address).  After this call, =isVerified[alice] == true= and
-   =issuerOf[alice] == issuer=.
+   lifetime of this Ethereum address).  After this call, ~isVerified[alice] == true~ and
+   ~issuerOf[alice] == issuer~.
 
 Alice repeats steps 2-3 for every Ethereum account she controls; the issuer never sees those
 accounts.
@@ -809,7 +808,7 @@ accounts.
 
 Alice calls =BUCK.mint(50000e18)=:
 
-1. The contract first checks =identity.isVerified(alice) == true=.
+1. The contract first checks ~identity.isVerified(alice) == true~.
 2. =buckCredit.totalCurrentValue(alice)= returns =341,000e18=.
 3. =buckK.currentBuckK()= returns the current stabilization factor.  *Phase 0*: this is just
    the static value the governance multisig last wrote.  *Eventual PID build*: the controller
@@ -1244,7 +1243,7 @@ adapter's public-signals arity.
 
 Goal: cryptographically redeem a minted commitment against an on-chain Merkle root under a fresh
 nullifier, paying out an equal face value of BUCK via =transferCarrying= so the SNARK's
-=face === v= invariant is preserved at the ERC-20 boundary.
+~face === v~ invariant is preserved at the ERC-20 boundary.
 
 *Shipped*:
 
@@ -1307,7 +1306,7 @@ contracts:
 
 4. *Per-account fee-treatment mode* -- /superseded/.  The earlier draft added an =enum
    FeeTreatment { Deducting, Carrying }=, a per-account =_feeMode= mapping, a =BuckDerived()=
-   bytecode marker, a =balanceOf(account) == 0= precondition for mode changes, and a
+   bytecode marker, a ~balanceOf(account) == 0~ precondition for mode changes, and a
    =FeeCarried= event.  The shipped solution is simpler: a single =transferCarrying(to, amount)=
    method on =Buck.sol= that performs the weighted-merge index update atomically, callable by
    any contract (today only =Notes= calls it; future escrow/payroll contracts may too).  No
@@ -1334,6 +1333,6 @@ has a passing CI run and a Foundry gas snapshot.  Implementation =STOP= conditio
   opening layout (would fork the two proof systems' views of a note, silently).  Both circuits
   are pinned at =Poseidon(5)(flavor, v, rho, idHash, predicate)= with =Num2Bits(128)= range
   bounds on every =v[i]=, =totalFace=, and =face=; the value-conservation constraint
-  =sum(v[i]) === totalFace= now holds in the integers (62-bit margin against field overflow at
+  ~sum(v[i]) === totalFace~ now holds in the integers (62-bit margin against field overflow at
   =N <= 2^64=).  Any future change to either circuit's commitment layout must be made
   simultaneously in both.

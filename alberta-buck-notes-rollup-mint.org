@@ -74,13 +74,13 @@ numbers and the cost-model fit are in /On-chain cost projection/ below.
 
 ** Public inputs to mint_batch circuit (=4 + N= entries)
 
-| pub index    | Signal          | Description                                          |
-|--------------+-----------------+------------------------------------------------------|
-| =pub[0]=     | =oldRoot=       | The live note Merkle root the prover read from chain |
-| =pub[1]=     | =newRoot=       | Root after inserting =cm[0..N-1]= starting at =nextLeafIndex= |
-| =pub[2]=     | =nextLeafIndex= | The live tree size the prover read from chain       |
-| =pub[3]=     | =totalFace=     | Sum of =v[i]=, range-bounded to 128 bits            |
-| =pub[4..4+N)=| =cm[0..N)=      | The batch commitments, one per public input         |
+| pub index     | Signal          | Description                                                   |
+|---------------+-----------------+---------------------------------------------------------------|
+| =pub[0]=      | =oldRoot=       | The live note Merkle root the prover read from chain          |
+| =pub[1]=      | =newRoot=       | Root after inserting =cm[0..N-1]= starting at =nextLeafIndex= |
+| =pub[2]=      | =nextLeafIndex= | The live tree size the prover read from chain                 |
+| =pub[3]=      | =totalFace=     | Sum of =v[i]=, range-bounded to 128 bits                      |
+| =pub[4..4+N)= | =cm[0..N)=      | The batch commitments, one per public input                   |
 
 We pass =cm[]= directly as individual public inputs rather than folding them
 into a =cmBatchHash=.  Trade-off: +N ECMULs in on-chain verifier cost vs.
@@ -180,13 +180,13 @@ under-counted by ~5x; the corrected number is the empirically-fitted ~31K.
 
 |    N | mint-tx total | per-note (mint / N) | block-share (30M cap) |
 |------+---------------+---------------------+-----------------------|
-|   16 | 624K       M  | 39K            M    | ~2.1%             M   |
-|   32 | 1.12M      M  | 35K            M    | ~3.7%             M   |
-|   64 | ~2.1M      P  | ~33K           P    | ~7%               P   |
-|  128 | ~4.1M      P  | ~32K           P    | ~14%               P  |
-|  256 | ~8.0M      P  | ~31K           P    | ~27%               P  |
-|  512 | ~16M       P  | ~31K           P    | ~53%   (half block)P  |
-| 1024 | ~32M       P  | ~31K           P    | >100% (UNFEASIBLE) P  |
+|   16 | 624K       M  | 39K            M    | ~2.1%               M |
+|   32 | 1.12M      M  | 35K            M    | ~3.7%               M |
+|   64 | ~2.1M      P  | ~33K           P    | ~7%                 P |
+|  128 | ~4.1M      P  | ~32K           P    | ~14%                P |
+|  256 | ~8.0M      P  | ~31K           P    | ~27%                P |
+|  512 | ~16M       P  | ~31K           P    | ~53%  (half block)  P |
+| 1024 | ~32M       P  | ~31K           P    | >100% (UNFEASIBLE)  P |
 
 The per-note cost asymptotes at ~31K, not ~6K as the pure-ECMUL projection
 suggested.  Doubling N from 16 to 32 saves ~4K/note; doubling again to 64
