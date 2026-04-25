@@ -1,19 +1,34 @@
 """Simulated government / institutional credential issuer.
 
-Models the off-chain side of the credential pipeline: an entity that holds a
-PS keypair, accepts identity-document submissions, signs the resulting
-identity scalar m = H(canonical_identity_data), and (optionally) returns the
-credential point M = m*G ElGamal-encrypted to the applicant's public key so
-the transmission itself is confidential.
+Mirrors the issuance ceremony described in alberta-buck-identity.org sec
+"Issuance: The Issuer Signs Once": the issuer verifies identity documents
+out-of-band, canonicalizes them, computes m = H(canonical_identity_data),
+produces the PS signature sigma = (h, (x + m*y)*h), and hands the applicant
+back (m, sigma, identity_data) for storage in their wallet's Holochain
+Private entry.  All wallet-side derivation steps (rerandomization, fresh
+identity key pair, ElGamal encryption under that key, registration NIZK)
+happen later, in the wallet -- not here.
 
 The on-chain trust anchor for an issuer is its Ethereum address registered
-via IdentityRegistry.trustIssuer(addr, pk).  This module supplies the
-matching off-chain entity: same PS keypair, the address that the registry
-uses as the trust anchor, and a simulated issuance log used by tests to
-exercise revocation/rotation scenarios.
+via IdentityRegistry.trustIssuer(addr, pk) (referred to as the
+TrustedIssuersRegistry in the spec).  This module supplies the matching
+off-chain entity: same PS keypair, the address that the registry uses as
+the trust anchor, and a simulated issuance log standing in for the
+"issuance event published to the issuer's Holochain source chain" called
+out in the same section.
 
-Wallet-side ElGamal re-encryption (Alice -> Bob during approve) is handled
-by alberta_buck.wallet.chaum_pedersen and is not the issuer's job.
+Revocation follows the epoch-based renewal model from
+alberta-buck-identity.org sec "Epoch-Based Credential Renewal": the issuer
+does not invalidate the cryptographic artifact (sigma is eternal), it
+simply refuses to re-issue at the next epoch -- which is exactly what
+Issuer.revoke() simulates.
+
+The optional `applicant_pk` parameter to issue() is a test convenience for
+modeling a confidential delivery channel; the spec assumes the (m, sigma,
+identity_data) hand-off uses the secure channel of the in-person KYC
+ceremony itself.  Wallet-side ElGamal re-encryption (Alice -> Bob during
+approve) is handled by alberta_buck.wallet.chaum_pedersen and is not the
+issuer's job either.
 """
 
 from __future__ import annotations
@@ -142,12 +157,15 @@ class Issuer:
         )
 
     def revoke(self, applicant_addr: int) -> None:
-        """Add an applicant address to the simulated revocation set.
+        """Mark an applicant as ineligible for re-issuance at the next epoch.
 
-        The on-chain effect is realized either by (i) IdentityRegistry
-        rotating the issuer's PS key (so old sigmas no longer verify) or
-        (ii) a per-applicant revocation oracle the wallet consults; this
-        module just records the issuer's intent.
+        Per identity.org sec "Epoch-Based Credential Renewal", the issuer
+        does not (and cannot) invalidate already-issued PS signatures; it
+        simply refuses to provide the applicant's next-epoch credential.
+        Existing on-chain registrations remain mathematically valid until
+        their epoch expires, at which point isVerified returns false at
+        the IdentityRegistry layer.  This method records the issuer's
+        intent; the on-chain effect is the absence of a fresh issuance.
         """
         self._revoked.add(applicant_addr)
 
