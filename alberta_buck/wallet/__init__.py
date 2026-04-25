@@ -30,6 +30,9 @@ from alberta_buck.wallet.notes import (
     note_commitment, nullifier_a, nullifier_b,
     id_payload_a1, id_payload_a2, id_payload_b1,
 )
+from alberta_buck.wallet.issuer import (
+    Issuer, IssuedCredential, rerandomize_for_registration,
+)
 
 __all__ = [
     "G1", "G2", "ORDER", "add", "mul", "neg", "eq", "pairing", "is_inf",
@@ -44,4 +47,5 @@ __all__ = [
     "NoteOpening", "FLAVOR_A1", "FLAVOR_A2", "FLAVOR_B1",
     "note_commitment", "nullifier_a", "nullifier_b",
     "id_payload_a1", "id_payload_a2", "id_payload_b1",
+    "Issuer", "IssuedCredential", "rerandomize_for_registration",
 ]

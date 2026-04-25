@@ -1027,23 +1027,117 @@ self-contained, deployable state with passing tests.  The status table below ref
 the header date; the phase subsections document the intent of each phase as originally scoped and
 are annotated with what the current code actually ships.
 
+The phase set has grown since the original v0.5 plan in two directions.  /Backward/, Phase 7-bis
+landed the in-circuit Merkle-insertion batch-mint pivot documented in
+[[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] -- now shipped as
+=mint_batch.circom= with per-N pinned verifiers in {1, 2, 4, 8, 16, 32}.  /Forward/, the path to
+live BUCK_K (Phase 10/11) and dynamic BUCK_CREDIT-backed minting (Phase 12) is sequenced behind
+two remaining Notes deliverables: serialized B1 sub-notes (Phase 9) per
+[[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]], and A-flavor spend
+(Phase 8) with the key-pair-binding semantics corrected by the 2026-04 Deepseek R4 review.  Both
+companion memos have been reviewed for cryptographic correctness; see /Cryptographic Correctness
+Review of Companion Memos/ below.
+
 ** Phase Completion Status (current)
 
-| Phase   | Scope                                          | Status                                                                                      |
-|---------+------------------------------------------------+---------------------------------------------------------------------------------------------|
-| Phase 0 | Stub =BuckCredit= + =BuckKControllerStatic=    | *done* -- =BuckKControllerStatic.sol= live                                                  |
-| Phase 1 | =BN254.sol= helper library                     | *done* -- ecAdd/ecMul/ecPairing wrappers + FS helpers                                       |
-| Phase 2 | =IdentityRegistry.sol=                         | *done* -- PS + NIZK + CP all on-chain                                                       |
-| Phase 3 | Identity-aware =Buck.sol=                      | *done* -- CP-bound approve, bilateral transfer, receipt event                               |
-| Phase 4 | Public-claim accounts                          | *done* -- =setPublic= / =setSystemPublic=; Notes wired as public                            |
-| Phase 5 | Notes Phase-1 scaffolding                      | *done* -- =Notes.sol= + =StubMintVerifier=; commitments/nullifiers in place                 |
-| Phase 6 | Groth16 mint circuit + adapter                 | *done* -- circom =mint.circom= (N=2), =MintGroth16Verifier=, =MintVerifierAdapter=          |
-| Phase 7 | Notes Phase-3 spend circuit + nullifier reveal | *done* -- =spend.circom=, =SpendGroth16Verifier=, Tornado-tree =Notes= + =transferCarrying= |
-| Phase 8 | Live =BuckKController= (PID + oracle)          | *pending* -- contract skeleton exists; oracle hookup and PID tuning outstanding             |
-| Phase 9 | Production MPC trusted-setup ceremony          | *pending* -- =scripts/snark/setup.sh= uses dev-only entropy                                 |
+| Phase       | Scope                                                        | Status                                                                                  |
+|-------------+--------------------------------------------------------------+-----------------------------------------------------------------------------------------|
+| Phase 0     | Stub =BuckCredit= + =BuckKControllerStatic=                  | *done* -- =BuckKControllerStatic.sol= live                                              |
+| Phase 1     | =BN254.sol= helper library                                   | *done* -- ecAdd/ecMul/ecPairing wrappers + FS helpers                                   |
+| Phase 2     | =IdentityRegistry.sol=                                       | *done* -- PS + NIZK + CP all on-chain                                                   |
+| Phase 2-A   | Simulated issuer (=alberta_buck.wallet.issuer=) + tests      | *done* -- =Issuer= class with PS issuance, ElGamal delivery, revocation; 15 tests pass  |
+| Phase 3     | Identity-aware =Buck.sol=                                    | *done* -- CP-bound approve, bilateral transfer, receipt event                           |
+| Phase 4     | Public-claim accounts                                        | *done* -- =setPublic= / =setSystemPublic=; Notes wired as public                        |
+| Phase 5     | Notes scaffolding + stub verifiers                           | *done* -- =Notes.sol= + =StubMintVerifier= / =StubSpendVerifier=                        |
+| Phase 6     | Groth16 mint circuit (=mint.circom=, N=2) + adapter          | *done* -- =MintGroth16Verifier=, =MintVerifierAdapter=                                  |
+| Phase 7     | B-flavor spend circuit + nullifier reveal                    | *done* -- =spend.circom=, =SpendGroth16Verifier=, Tornado-tree, =transferCarrying=      |
+| Phase 7-bis | Batch-mint pivot: in-circuit Merkle insertion                | *done* -- =mint_batch.circom=, per-N verifiers in {1, 2, 4, 8, 16, 32}                  |
+| Phase 8     | A-flavor spend (=spend_a.circom= with key-pair binding)      | *pending* -- semantics corrected by Deepseek review (=sk_rec= loss is terminal)         |
+| Phase 9     | Serialized B1 sub-notes (=spend_serialized.circom= + bitmap) | *pending* -- POC validated to N_fam=4096; circuit + bitmap storage outstanding          |
+| Phase 10    | Live =BuckKController= (PID + AMM-pool oracles)              | *pending* -- contract skeleton in-tree; AMM-pool oracle wiring + PID tuning outstanding |
+| Phase 11    | BUCK liquidity bootstrap + BUCK/USDC AMM pool                | *pending* -- closes the loop on Phase 10 by giving the controller a real BUCK price     |
+| Phase 12    | BUCK_CREDIT insurance integration in =Buck.mint=             | *pending* -- per-tx credit-limit deduction + simultaneous insurance purchase polish     |
+| Phase 13    | Production MPC trusted-setup ceremony                        | *pending* -- replaces dev entropy in =scripts/snark/setup.sh=                           |
 
-Current forge suite: 100 local-EVM unit tests pass; one =BuckKControllerForkTest= requires a live
-mainnet RPC and is skipped offline.
+Current forge suite: 145 unit tests pass; one =BuckKControllerForkTest= requires a live mainnet
+RPC and is skipped offline.
+
+** Cryptographic Correctness Review of Companion Memos
+
+Two design memos drive the immediate path forward.  Phase 7-bis is already shipped (one of them);
+Phases 8 and 9 are the two outstanding Notes deliverables.  Both memos were reviewed for
+cryptographic correctness on 2026-04-24; both verdicts are /sound/, with one explicit operational
+trust assumption (=K_fam= destruction in serialized B1) that is /symmetric/ to a pre-existing one
+(issuer-retained =rho= in single-note B1) and is documented in the Phase 9 wallet-UX requirement.
+
+*** [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] -- Phase 7-bis batch-mint design
+
+*Verdict*: cryptographically sound; integrated into shipped code.  The in-circuit Poseidon Merkle
+insertion replaces the per-leaf =Notes._insert= ladder with one SNARK-attested =newRoot= per batch.
+
+- *Public-input layout* =(oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N-1])= is
+  binding-complete: the contract's =oldRoot == roots[currentRootIndex]= guard plus the SNARK's
+  derivation of =newRoot= from =oldRoot= and the folded leaves chains the on-chain root state to
+  the SNARK-attested transition without a trusted off-chain step.
+- *Dual Merkle walk* per leaf -- =priorWalk= consumes =ZERO_VALUE= at the insertion slot to attest
+  =oldRoot=; =postWalk= consumes =cm[i]= to advance =rollingRoot= -- is the correct in-circuit dual
+  of the shipped on-chain insert.  Both walks share the same siblings, supplied by the prover's
+  local =filledSubtrees= mirror.
+- =nextLeafIndex= as a public input forces wallet/chain agreement on tree size and prevents the
+  prover from misplacing leaves at a stale index.
+- *Hostile-Alice analysis* A1 through A12 holds.  A3 (duplicate =cm= across mints) correctly
+  migrates from explicit revert to economic self-enforcement: the deterministic
+  =Poseidon-3(rho, idHash, 4242)= nullifier means duplicate openings are spendable exactly once;
+  the issuer pays =totalFace= for each duplicate and forfeits all but one.  A6 (lying about
+  =newRoot=) is closed by the SNARK constraint set; A7 (front-running) reverts on the =oldRoot=
+  guard with no value lost.
+- *Affine cost model* =mint_tx_gas(N) ~= 125K + 31K * N= empirically fits the measured N=16 (624K)
+  and N=32 (1.12M) Foundry runs; per-note cost asymptotes at ~31K.
+- *Pinned-N policy* {16, 32} on stock L1 (both fit the EIP-170 24 KB ceiling at 14.5 KB and 20.8
+  KB respectively), promote to {16, 32, 128} via calldata-IC delivery, recursion above N=512 is
+  the natural sequencing.  Currently shipped: per-N pinned verifiers at {1, 2, 4, 8, 16, 32}; the
+  smaller sizes are useful for unit tests and small-batch wallet flows even after the L1 ceiling
+  is reached.
+
+*** [[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]] -- Serialized B1 sub-notes design
+
+*Verdict*: cryptographically sound, with =K_fam= destruction as the single operational trust
+assumption (symmetric to existing single-note B1 issuer-race over =rho=).  Mint-circuit reuse is
+exact; only the spend circuit and the double-spend storage diverge.
+
+- *Construction*: =subRoot = MerkleRoot(s_0..s_{N-1})=,
+  =predicate_fam = Poseidon-2(predicate_base, subRoot)=,
+  =cm_parent = Poseidon-5(flavor, v, rho, idHash, predicate_fam)=.  Because =cm_parent= is an
+  ordinary Poseidon-5 output, =mint_batch.circom= hashes it identically to a single-note B1 leaf
+  -- /no new mint circuit, no new trusted setup, no new pinned-N variants/.
+- *Witness-and-verify discipline*: the spend circuit does NOT invert =s_i -> i= (which would
+  require breaking the PRF /and/ would let an attacker enumerate every sibling).  The recipient
+  witnesses =(i, s_i, path_i_in_subRoot)= privately; the circuit verifies
+  ~MerkleOpen(subRoot, i, s_i, path) === true~.  =i= is emitted as a public signal and used by the
+  contract to flip =bitmap[cm_parent]= bit =i=.
+- *=K_fam= destruction* is the documented operational trust assumption.  An issuer retaining
+  =K_fam= can produce =(i, s_i, path)= on demand for any sub-note and impersonate recipients.
+  This is /symmetric/ to the existing single-note B1 issuer-race -- an issuer who retains =rho=
+  can race the recipient at spend time -- and is enforceable only by wallet UX / HSM attestation,
+  not by the cryptography itself.  Promoted to a Phase 9 deliverable.
+- *B1-only restriction*: each spend reveals =cm_parent=, linking co-spent siblings.  For bearer
+  notes the linkage is free (denom + family membership are not secrets in a bearer model); for
+  A1/A2 the linkage would defeat the privacy property.  Correctly scoped.
+- *Per-parent bitmap nullifier* amortizes to ~2.96K gas per sub-note (=SLOAD + warm SSTORE=) vs
+  20K cold for the single-note path -- ~7x storage reduction at the asymptote.  The
+  /bit-flip squat/ attack is closed by the fact that only =Notes.spendSerialized= writes bits, and
+  that path requires a Groth16 proof binding =(cm_parent, i)= to the recipient.
+- *Brute-force resistance* is 2^128 (Poseidon preimage / second-preimage), identical to the
+  single-note path.  Serialization adds zero attack surface at the "forge a note I don't own"
+  level.
+
+The =scripts/snark/serialized_notes_poc.py= driver validates the construction end-to-end
+(issuer-mint, recipient-verify, spend-predicate, forgery tests) at N_fam in {256, 1024, 4096}.
+Porting the predicate to =circuits/spend_serialized.circom= is the remaining implementation work.
+
+The two memos are mutually orthogonal: rollup-mint amortizes /publishing/ N commitments into
+=noteRoot=; serialized amortizes /producing/ N bearer notes from /one/ commitment.  Together they
+drop marginal per-note mint cost by 2-3 orders of magnitude vs. the shipped per-leaf design.
 
 ** Testing Strategy: Three Layers
 
@@ -1082,7 +1176,7 @@ are already Python, ~py_ecc~ ships a complete BN254 (alt_bn128) implementation m
 precompiles, and the package is invoked the same way every other dev tool in this repo is
 (~nix develop --command python3 -m alberta_buck.wallet ...~).
 
-The wallet has three jobs:
+The wallet has four jobs:
 
 - *Reference implementation* of the cryptography in
   [[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]], the place where the spec is
@@ -1093,6 +1187,11 @@ The wallet has three jobs:
 - *End-to-end developer surface*: a CLI verb (~wallet sign~, ~wallet register~, ~wallet approve~)
   produces the calldata an end user's wallet would submit, so integration tests (and humans) can
   drive the contracts the same way a real wallet would.
+- *Simulated counterparties*: ~alberta_buck.wallet.issuer~ models the off-chain government /
+  institutional issuer (PS keypair, identity-record canonicalization, signed credential delivery,
+  optional ElGamal-encrypted transmission to the applicant, in-memory revocation log).  This is
+  the entity the wallet's ~register~ verb effectively /receives a credential from/ before
+  rerandomizing and posting to ~IdentityRegistry~.  See Phase 2-A for the implementation status.
 
 The wallet does *not* hold private keys for production users; it is a deterministic reference and a
 test driver.  A production wallet would reuse the same primitives behind a different storage and
@@ -1153,6 +1252,52 @@ Goal: ship the on-chain trust anchor exactly as specified in the [[#identity-reg
   - Gas measurements within ~15% of the published estimates (235K register / 29K verifyApprove).
 
 Deliverables: deployable registry, passing test suite, documented gas measurements.
+
+** Phase 2-A: Simulated Issuer (Government Registry) + Test-Credential Pipeline
+
+Goal: model the off-chain side of credential issuance -- the entity an applicant submits identity
+documents to, which signs them with PS and (optionally) returns the credential ElGamal-encrypted
+to the applicant's public key.  Without this layer the existing tests have no way to drive
+=IdentityRegistry= other than from inline =ps_keygen= + =ps_sign= calls in test fixtures, which
+collapses the issuer's role into the wallet's role and makes multi-issuer / rotation / revocation
+scenarios awkward.
+
+The on-chain trust anchor is unchanged: =IdentityRegistry.trustIssuer(addr, pk)= keys the
+issuer's PS public key by Ethereum address and =revokeIssuer(addr)= clears it.  This phase adds
+the matching off-chain entity -- same PS keypair, same address, plus the issuance ceremony itself.
+
+- =alberta_buck/wallet/issuer.py=:
+  - =Issuer= dataclass: =issuer_id= (string label, e.g. "atb-financial-ca"), =issuer_addr=
+    (Ethereum address used as the on-chain trust anchor), =keypair= (PS), simulated revocation
+    set, in-memory issuance log.
+  - =Issuer.setup(issuer_id, issuer_addr, rng)= class-method for deterministic test setup.
+  - =issue(identity_fields, applicant_addr, applicant_pk=None, rng)= -> =IssuedCredential=:
+    overwrites the =issuer_id= field in the submitted record (so applicants cannot smuggle a
+    different issuer label into the canonical), canonicalizes, computes m, signs sigma, and --
+    when =applicant_pk= is given -- ElGamal-encrypts =M = m*G= under it for confidential
+    delivery.  The wallet decrypts on receipt to confirm M before rerandomizing sigma.
+  - =revoke(addr)= / =reset(addr)= / =issuance_log()= / =verify_credential(cred)= helpers.
+  - =rerandomize_for_registration(cred, rng)= -- convenience wrapper for the wallet-side step
+    that produces sigma' before calling =IdentityRegistry.register=.
+- =alberta_buck/test/test_issuer.py=: 15 tests covering keygen determinism, single-credential
+  round-trip, =issuer_id= overwrite invariant, ElGamal delivery decryption, revocation,
+  multi-issuer non-cross-verification, and the full end-to-end pipeline (issue -> rerandomize ->
+  ElGamal encrypt -> =registration_prove= -> =registration_verify=).
+- Future: replace the inline =ps_keygen= calls in =alberta_buck/wallet/vectors.py= and the
+  Foundry-side identity test vectors with =Issuer.setup(...).issue(...)= so the canonical JSON
+  emitted to =test/vectors/= reflects an actual issuance ceremony rather than a synthetic one.
+  This is mechanical and can be done incrementally -- vectors stay byte-identical when seeded
+  the same way.
+
+Cryptographic note: ElGamal /re-encryption/ proper (Alice -> Bob during =approve=) is wallet-side
+and remains in =alberta_buck.wallet.chaum_pedersen=.  The issuer's optional ElGamal step is a
+one-shot encryption to the applicant; no Chaum-Pedersen proof is required because the issuer is
+trusted to encrypt to the address the applicant nominated, and the applicant verifies M decrypts
+to =m*G= for the m they intended to receive.
+
+Deliverables: =issuer.py= module exporting =Issuer= and =IssuedCredential=; =test_issuer.py=
+green; the wallet's =__init__.py= re-exports the new symbols so downstream tests can write
+=from alberta_buck.wallet import Issuer=.
 
 ** Phase 3: Identity-Aware =Buck= ERC-20
 
@@ -1270,17 +1415,18 @@ nullifier, paying out an equal face value of BUCK via =transferCarrying= so the 
   unknown root, tampered recipient/face/nullifier, chainId mismatch, zero-recipient, and the
   weighted-merge invariant that the recipient's age equals the pool's average after spend.
 
-*Pending*:
+*Pending* (now sequenced as their own phases below):
 
-- *Phase 8*: live =BuckKController= deployment.  The contract is already in-tree with mock-feed
-  unit tests; the remaining work is oracle wiring (Chainlink feed addresses, Uniswap V3 pool),
-  governance gain-setting, and a live mainnet fork test cycle before flipping the =Buck=
-  constructor to point at it instead of the Static variant.
-- *Phase 9*: production MPC ceremony to replace the dev-only =scripts/snark/setup.sh= trusted-setup
-  entropy.
-- *A-flavor spend*: =spend_a.circom= for redemptions that carry an in-circuit CP-equality /
-  ElGamal identity binding.  Orthogonal to Phase 8/9; shares the existing Merkle-tree and
-  nullifier infrastructure.
+- *Phase 7-bis*: in-circuit Merkle-insertion batch-mint pivot.  Now /done/ -- see /Phase 7-bis:
+  Batch-Mint Pivot/ below.
+- *Phase 8*: A-flavor spend (=spend_a.circom=) with key-pair binding (Deepseek-corrected
+  semantics).
+- *Phase 9*: serialized B1 sub-notes (=spend_serialized.circom= + per-parent bitmap).
+- *Phase 10*: live =BuckKController= deployment with AMM-pool oracles (XAU/USDC, BUCK/USDC, etc.).
+- *Phase 11*: BUCK liquidity bootstrap + BUCK/USDC AMM pool deployment.
+- *Phase 12*: BUCK_CREDIT insurance integration in =Buck.mint= (dynamic credit-limit deduction +
+  simultaneous insurance purchase).
+- *Phase 13*: production MPC trusted-setup ceremony.
 
 *** Resolved Items from the Notes Correctness Review
 
@@ -1314,6 +1460,268 @@ contracts:
    weighted merge is continuous -- the recipient simply absorbs a proportional share of the
    sender's unsettled age.
 
+** Phase 7-bis: Batch-Mint Pivot (in-circuit Merkle insertion)
+
+Goal: collapse the per-leaf on-chain Poseidon ladder of Phase 7 into one SNARK-attested =newRoot=
+per batch, lifting the practical mint ceiling from N=4 (block-saturated under per-leaf inserts) to
+N=256-512 on L1 with stock Groth16 verifiers and an L2 ceiling of N=1024+.
+
+*Shipped*:
+
+- =circuits/mint_batch.circom= -- parameterised batch-mint circuit;
+  =circuits/mint_batch_n{1,2,4,8,16,32}.circom= are the per-N specialisations consumed by
+  =scripts/snark/setup.sh=.
+- =src/MintBatchN{1,2,4,8,16,32}Groth16Verifier.sol= -- snarkjs-generated per-N verifiers,
+  measured 14.5 KB at N=16 and 20.8 KB at N=32 (both under the EIP-170 24 KB ceiling).
+- =src/MintVerifierAdapter.sol= -- now dispatches by =cms.length= to =mintVerifiers[cms.length]=,
+  builds =pub[0..4+N) = [oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N)]= inline, forwards
+  to the per-N Groth16 verifier.
+- =src/Notes.sol= -- public inputs include =(oldRoot, newRoot, nextLeafIndex, totalFace)=;
+  =filledSubtrees=, =zeros[]=, and =commitmentExists= are retired (duplicate-=cm= migrated to
+  economic self-enforcement via the deterministic nullifier).  The 30-slot =roots[]= ring buffer
+  is now updated by writing the SNARK-attested =newRoot= rather than the per-leaf on-chain insert.
+- =scripts/snark/prove_mint_batch.js= -- new prover script; the off-chain wallet maintains a local
+  mirror of =filledSubtrees= and emits per-leaf sibling paths in submission order.
+- =scripts/snark/setup.sh= -- runs phase-2 setup per pinned N, exporting one verifier Solidity
+  file per pinned N.
+- =test/MintVerifier.t.sol= -- exercises real Groth16 at multiple pinned N, plus tamper paths on
+  =oldRoot=, =newRoot=, =nextLeafIndex=, =totalFace=, and =cm[]=; per-N dispatch test exercises
+  multiple pinned sizes coexisting on one adapter.
+
+*Cost*: =mint_tx_gas(N) ~= 125K + 31K * N=, measured at N=16 (624K) and N=32 (1.12M) on the forge
+harness.  Per-note cost amortizes from 39K at N=16 to 35K at N=32 toward a ~31K asymptote.  Spend
+cost is unchanged at ~360K (independent of mint batch size).
+
+*Stop conditions for promoting to N >= 64*:
+- EIP-170 24 KB verifier-bytecode ceiling.  N=64 lands at ~33 KB, breaching the limit.  The three
+  escape hatches (calldata-IC hash-pinned, sharded SSTORE2, plain SLOAD) are documented in
+  [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]]; calldata-IC is
+  the natural fit for the Holochain wallet.
+- Block-share economics.  At N=512 a single mint occupies ~half a 30M-gas block; at N=1024 it
+  cannot land on L1 at all.  L2 deployment (Arbitrum/Base/Optimism, ~100x looser block budgets)
+  lifts this; recursion (Nova/Halo2/Plonky3) is the eventual fix above N=512.
+
+** Phase 8: A-flavor Spend (=spend_a.circom= with Key-Pair Binding)
+
+Goal: ship the missing half of the spend surface -- private redemption of A1/A2 notes that carry
+an in-circuit Chaum-Pedersen / ElGamal identity binding -- with the corrected key-pair-binding
+semantics surfaced by the 2026-04 Deepseek R4 review.
+
+*Corrected design invariant* (per [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] Theorem
+10.1):
+
+- The A-spend circuit takes a /single/ =sk_dep= witness and uses it for both ciphertexts =E_note=
+  (carried in the note opening) and =E_dep_current= (registered to the spender).  This forces
+  ~pk_rec_mint === pk_dep_current~ at constraint time -- if the recipient lost their private key
+  and re-registered under a new ElGamal key, the CP-equality fails.
+- *Consequence*: A-note loss-recovery via identity re-issuance is /impossible/ by design.
+  =sk_rec= must be backed up like a hardware-wallet seed; loss is terminal.  The companion
+  documents ([[file:alberta-buck-notes.org][alberta-buck-notes.org]],
+  [[file:alberta-buck-notes-flow.org][alberta-buck-notes-flow.org]]) were revised in the same
+  cycle to remove the now-incorrect "transparent re-issuance" framing.
+
+*Deliverables*:
+
+- =circuits/spend_a.circom= -- A-shape redemption circuit.  Constraint groups: range bounds on
+  =face=/=v=, Poseidon-5 commitment opening, Tornado-style Merkle inclusion (depth 20), A-tag
+  nullifier =Poseidon(3)(rho, idHash, 4243)= (4243 domain-separates from B-flavor's 4242),
+  CP-equality bind ~C_n - sk_dep * R_n === C_reg - sk_dep * R_reg~ (the single-witness
+  constraint that forces key-pair binding), value-conservation ghost bind.
+- =src/SpendAGroth16Verifier.sol= -- snarkjs-generated verifier for the A-spend circuit.
+- =src/SpendVerifierAdapter.sol= -- extend dispatch to route by flavor or calldata shape;
+  preferred surface is a flag-keyed mapping =spendVerifiers[flavor]= mirroring the per-N mint
+  pattern.
+- =src/Notes.sol= -- gain =spendA(proof, root, nullifier, face, recipient)= entry point with the
+  same recent-roots window and =transferCarrying= settlement; the per-flavor nullifier-tag domain
+  separation prevents cross-flavor replay.
+- =alberta_buck.wallet.notes= -- A-spend witness emission (CP-equality witness, =sk_dep=).
+- =scripts/snark/prove_spend_a.js= + =setup.sh= integration -- one new pinned circuit (~14K R1CS
+  estimated; reuses the same 2^15 ptau as single-note spend).
+- =test/SpendAVerifier.t.sol= -- happy path, key-pair-binding rejection (re-registered recipient
+  cannot spend), tamper paths on every public input, A-tag nullifier non-collision with B-tag.
+
+*Stop condition*: any test that demonstrates an A-note spendable after =sk_rec= loss + identity
+re-issuance is a hard halt.  The cryptographic invariant is the whole point of Phase 8.
+
+** Phase 9: Serialized B1 Sub-Notes (=spend_serialized.circom= + per-parent bitmap)
+
+Goal: amortize bearer-note issuance by anchoring N pseudorandom serials =s_i= under one
+=cm_parent= leaf and spending each against a shared per-parent nullifier bitmap.  The mint circuit
+is /unchanged/ -- =cm_parent= is an ordinary Poseidon-5 output -- so this phase is
+spend-side-only on circuits and storage.  Per-bearer-note marginal mint cost drops to
+~31K/N_fam at N_batch=16, vs ~31K at the Phase 7-bis baseline.
+
+Per [[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]] migration plan
+(Phases A-D):
+
+*Phase 9-A: Spend-serialized circuit*:
+- =circuits/spend_serialized.circom= -- extend single-note spend with =(subRoot, i, s_i,
+  path_i_in_subRoot)= sub-block; constraint groups are the single-note spend's plus a depth-K
+  Poseidon-2 sub-tree walk.  Constraint count ~25K at K=10 (N_fam=1024), within stock 24 KB
+  verifier.
+- =scripts/snark/setup.sh= phase-2 setup (re-uses the existing pot17-pot19 ptau).
+- =src/SpendSerializedGroth16Verifier.sol= + adapter route in =SpendVerifierAdapter=.
+
+*Phase 9-B: Contract support*:
+- =Notes.sol= adds =spendSerialized(proof, root, cm_parent, i, face, recipient)= alongside the
+  existing =spend()= and the Phase 8 =spendA()=.
+- New storage =mapping(uint256 => uint256[]) bitmap= (parent => packed bitmap), allocated on
+  first write per parent; 256 bits per =uint256= word.
+- =nullifiers= mapping unchanged for single-note and A-flavor flows.
+
+*Phase 9-C: Wallet support*:
+- Mint path: add "serialize with N" option that builds =K_fam=, =subRoot=, =predicate_fam=,
+  /destroys =K_fam= after deriving the per-recipient payloads/.
+- Payload schema v2: extend the bearer-note blob format to include =(i, s_i, path_i_in_subRoot,
+  subRoot)= when the note is serialized.
+- Spend path: detect payload variant from schema version; route to the appropriate verifier.
+- *Wallet UX requirement*: =K_fam= destruction is the operational trust assumption.  The wallet
+  must present this prominently to the issuer and SHOULD attest destruction via HSM if available.
+
+*Phase 9-D: Measure + promote*:
+- Measure spend-serialized gas at N_fam in {16, 256, 1024}.  Target: spend-tx ~390-410K
+  (single-note baseline + log_2(N_fam) sub-tree levels at ~4K each).
+- Confirm verifier bytecode size; confirm no EIP-170 breach.
+- Document family-linkage disclosure prominently in wallet UX.
+
+*Stop condition*: any test that demonstrates a sibling sub-note spendable without the recipient's
+=(i, s_i, path)= triple, or a =bitmap[cm_parent]= bit settable by anything other than
+=Notes.spendSerialized= with a valid Groth16 proof.
+
+** Phase 10: Live =BuckKController= (PID + AMM-pool oracles)
+
+Goal: replace =BuckKControllerStatic= in the =Buck= constructor with the live =BuckKController=
+reading commodity-basket prices and the BUCK/USDC TWAP from on-chain sources.  The controller is
+in-tree with mock-feed unit tests; the remaining work is wiring real oracle addresses, picking
+gains, and validating against historical price paths on a forked-mainnet harness.
+
+*Oracle source: AMM pools, not Chainlink (interim)*:
+
+The architecture document targets Chainlink commodity feeds; the *interim* Phase 10 deployment
+substitutes Uniswap V3 TWAP reads on USDC-quoted pools for each basket component.  Rationale:
+Chainlink commodity feeds (XAU/USD, AGRI baskets, etc.) are limited in coverage and add an
+external trust dependency before BUCK has a price discovery surface of its own.  AMM-pool oracles
+-- with sufficient TWAP windows and pool depth -- are self-sovereign and deployable on any chain
+without an off-chain oracle integration step.
+
+*Initial basket components* (illustrative; final composition is governance-set):
+
+| Component   | Oracle source                | Weight | Notes                          |
+|-------------+------------------------------+--------+--------------------------------|
+| XAU (gold)  | Uniswap V3 PAXG/USDC TWAP    | 30%    | Wrapped-gold proxy             |
+| WTI (oil)   | Uniswap V3 USOIL-token/USDC  | 20%    | Synthetic if no liquid wrapper |
+| Wheat       | Uniswap V3 wheat-token/USDC  | 10%    | Synthetic                      |
+| Real estate | Tokenised REIT / USDC        | 20%    | RE-tokenised proxy             |
+| USD         | =1.0= (numeraire)            | 20%    | Anchor to the quote currency   |
+
+*Process variable*: Uniswap V3 BUCK/USDC TWAP (Phase 11 dependency -- pool must exist).
+
+*Deliverables*:
+
+- =src/BuckKController.sol= -- already in-tree with PID structure; complete the
+  =_getBasketCost()= and =_getBuckPrice()= AMM-pool TWAP plumbing.  Use
+  =OracleLibrary.consult(pool, twapInterval)= for tick-cumulative deltas; per-pool decimal
+  normalisation helper.
+- =script/Deploy.s.sol= -- swap =BuckKControllerStatic= -> =BuckKController=, wire the
+  basket-pool addresses + weights, set initial gains (Kp/Ki/Kd), set =dT= and =twapInterval=.
+- =test/BuckKController.t.sol= -- mocked-pool unit tests (already passing); add fork-test (gated
+  on RPC) that runs the controller against a few thousand blocks of historical price paths and
+  asserts BUCK_K trajectories within a reasonable corridor.
+- Governance migration runbook: how to flip =Buck='s controller pointer atomically.
+
+*Stop condition*: a fork-test that drives BUCK_K outside the =[buckKMin, buckKMax]= band on
+realistic historical input would indicate gain mistuning or anti-windup logic bug -- halt before
+mainnet promotion.
+
+** Phase 11: BUCK Liquidity Bootstrap + BUCK/USDC AMM Pool
+
+Goal: deploy the BUCK/USDC Uniswap V3 pool that Phase 10 reads as its process variable, seed
+initial liquidity, and validate the closed loop /BUCK price -> BUCK_K -> credit limits -> BUCK
+supply -> BUCK price/.  Without this pool the live controller has no signal.
+
+*Deliverables*:
+
+- *Treasury minting path*: a one-time governance authorisation to mint a seed quantity of BUCK
+  against a treasury-owned BUCK_CREDIT (the seed is collateralised by the same insurance-NFT
+  mechanism every other mint uses; no special path).
+- *Pool deployment*: deploy =UniswapV3Pool BUCK/USDC= at an initial fee tier (0.30% suggested for
+  sub-Jubilee bootstrap).  Add the BUCK/USDC pool address to =BuckKController= in the same
+  governance batch as the Phase 10 controller swap.
+- *Liquidity bootstrap*: provide initial single-sided liquidity (USDC + the treasury-minted BUCK)
+  at a price band tied to the initial BUCK_K target.  Documented in
+  =script/BootstrapLiquidity.s.sol=.
+- *Ongoing test harness*: =test/AMMPool.t.sol= -- fork-test that walks several mint -> AMM-swap
+  -> spend -> AMM-swap cycles and asserts that the BUCK_K controller responds with the expected
+  sign and magnitude.
+- *Loop validation*: run a multi-day testnet rehearsal with synthetic transaction flow before the
+  controller takes mainnet inputs.
+
+*Stop condition*: BUCK_K oscillating with growing amplitude under realistic flow indicates gains
+too aggressive (Phase 10 tuning) or an oracle-update cadence too slow (=dT= too high) -- both are
+halt conditions.
+
+** Phase 12: BUCK_CREDIT Insurance Integration in =Buck.mint=
+
+Goal: close the loop the architecture document describes -- the BUCK_CREDIT NFT is the
+insurance-backed collateral that bounds BUCK issuance; =Buck.mint()= deduces an instantaneous
+credit limit from the holder's deposited NFTs and simultaneously pays the default-insurance
+premium into the InsurancePool.  Most of the mechanics already exist (current =Buck.mint()= reads
+=buckCredit.totalCurrentValue(sender)= and pays =_computePremium()= to the pool); this phase is
+integration polish, insurer onboarding, and Jubilee fund hookup.
+
+*Deliverables*:
+
+- *InsurancePool contract* (=src/InsurancePool.sol=) -- ERC-4626 vault that accumulates
+  default-insurance premiums and pays out on documented default events.  Pool shares are
+  mutual-insurance equity; depositors absorb claim losses pro-rata.  Governance-controlled
+  claim-payout authority for Phase 12; on-chain claim adjudication is a follow-up phase.
+- *Default detection*: a periodic (or manually triggerable) view that walks accounts whose
+  ~balanceOf(sender) > storedLimit * BUCK_K~ -- those are in default and need either =burn()=
+  (voluntary), forced liquidation of activated BUCK_CREDIT, or an InsurancePool payout.
+  Off-chain monitoring tooling reads the events; on-chain enforcement is governance in Phase 12
+  and automated in a follow-up.
+- *BUCK_CREDIT insurer onboarding script* (=script/OnboardInsurer.s.sol=) -- the mechanical
+  steps to register an insurer, mint a representative BUCK_CREDIT, and validate the full
+  =BUCK_CREDIT.mint -> client.activate -> Buck.mint -> InsurancePool.deposit= flow.
+- *Jubilee fund hookup* -- the =BUCK= demurrage accrual already feeds a single sink whose
+  =_indexAtLastTouch= is weighted-merged on disbursement; Phase 12 routes this sink to a
+  governance-controlled =JubileeFund= contract that periodically distributes accumulated fees to
+  defaulted accounts (or burns them, governance choice).
+- *End-to-end mint walkthrough test* (=test/MintWalkthrough.t.sol=) that drives the full
+  Step 0-4 sequence from /Integration: Full mint() and transfer() Walkthrough/ above against a
+  forked-mainnet harness with real AMM-pool oracles (Phase 10 + 11) and a representative
+  BUCK_CREDIT.
+
+*Stop condition*: any path that allows minting BUCK above the credit limit (modulo the documented
+strict-monotonic =storedLimit= ratchet and the =BUCK_K= reduction default window) is a hard halt.
+The credit-limit guarantee is the system's solvency invariant.
+
+** Phase 13: Production MPC Trusted-Setup Ceremony
+
+Goal: replace the dev-only entropy in =scripts/snark/setup.sh= with a production multi-party
+ceremony for every shipped circuit: =mint_batch_n{1,2,4,8,16,32}= (Phase 7-bis), =spend=
+(Phase 7), =spend_a= (Phase 8), =spend_serialized= (Phase 9).  Each circuit's =zkey= is
+circuit-specific; the underlying =ptau= is universal up to the chosen power and can be inherited
+from a community ceremony (e.g., Perpetual Powers of Tau).
+
+*Deliverables*:
+
+- *Ceremony plan*: contributor recruitment, attestation ledger, public-coordination thread,
+  per-circuit =zkey= contribution sequence, archival storage for transcripts.
+- *Import community ptau*: pull pot15-pot25 from Perpetual Powers of Tau (or equivalent), verify
+  provenance against the published attestations, mirror to project-controlled storage.
+- *Per-circuit phase-2 ceremony*: at least 5 independent contributors per circuit, with the
+  final =zkey= verifiable by any third party against the contribution log.
+- *Verifier re-deployment*: regenerate =MintBatchN*Groth16Verifier.sol= and the spend verifiers
+  from the production =zkey=; deploy via governance in a single batched transaction (atomic
+  across all circuits to avoid mixed-trust state).
+- *Public attestation*: publish ceremony transcripts and verification instructions alongside the
+  deployed contract addresses.
+
+*Stop condition*: any contributor unable to demonstrate independent entropy generation (e.g.,
+re-using a colleague's machine, no hardware-RNG attestation) reduces the trust assumption below
+the "1-of-N honest" threshold.  Halt and re-do that contribution before final =zkey= publication.
+
 ** Sequencing and Stop Conditions
 
 The phases are strict prerequisites of one another: Phase /n+1/ does not begin until Phase /n/
@@ -1322,6 +1730,10 @@ has a passing CI run and a Foundry gas snapshot.  Implementation =STOP= conditio
 - Phase 1: a Solidity =checkChaumPedersen= disagreement with the Python reference vectors.
   Disagreement implies a bug in the spec or in one of the implementations -- resolve before any
   contract that depends on it ships.
+- Phase 2-A: an =Issuer.issue(...)= path that produces a credential whose sigma the wallet's
+  =rerandomize_for_registration= cannot turn into a sigma' accepted by =registration_verify=
+  under the issuer's PS public key.  The issuance -> registration handoff is the contract this
+  phase establishes; any drift here propagates into every later identity-bound test.
 - Phase 3: =BuckTransferReceipt= hash collisions across distinct ciphertexts (would indicate an
   ABI-encoding bug -- canonicalisation matters).
 - Phase 5: any Solidity-side type that does not match the chosen SNARK verifier output (revisit
@@ -1336,3 +1748,26 @@ has a passing CI run and a Foundry gas snapshot.  Implementation =STOP= conditio
   ~sum(v[i]) === totalFace~ now holds in the integers (62-bit margin against field overflow at
   =N <= 2^64=).  Any future change to either circuit's commitment layout must be made
   simultaneously in both.
+- Phase 7-bis: an =oldRoot= / =newRoot= chain break.  The contract guard
+  =oldRoot == roots[currentRootIndex]= and the SNARK derivation of =newRoot= are the two halves
+  of the chain; either side admitting a fabricated =newRoot= silently forks the tree.  Any per-N
+  adapter dispatching to the wrong verifier (=cms.length=N= mismatching =mintVerifiers[N]=) is
+  the same class of failure.
+- Phase 8: any A-spend test that completes after =sk_rec= loss + identity re-issuance.  The
+  single-=sk_dep= witness invariant is the cryptographic substance of the phase; if a compiled
+  circuit accepts unequal =pk_rec_mint= and =pk_dep_current= the constraint set is broken.
+- Phase 9: a =bitmap[cm_parent]= bit settable by anything other than =Notes.spendSerialized=
+  with a valid Groth16 proof, OR a sibling sub-note spendable without the recipient's
+  =(i, s_i, path)= triple.  Either is a forge-a-note-I-don't-own admission and a hard halt.
+- Phase 10: BUCK_K trajectory outside =[buckKMin, buckKMax]= on a fork-test driven by realistic
+  historical price paths.  Indicates gain mistuning or anti-windup logic bug; halt before
+  mainnet promotion.
+- Phase 11: BUCK_K oscillating with growing amplitude under realistic flow.  Indicates gains
+  too aggressive (Phase 10) or oracle-update cadence too slow (=dT= too high).  Either is a
+  halt condition.
+- Phase 12: any path that mints BUCK above the credit limit (modulo the documented
+  strict-monotonic =storedLimit= ratchet and the BUCK_K reduction default window).  The
+  credit-limit guarantee is the system's solvency invariant.
+- Phase 13: any contributor unable to demonstrate independent entropy generation reduces the
+  trust assumption below "1-of-N honest"; halt and re-do that contribution before final =zkey=
+  publication.
