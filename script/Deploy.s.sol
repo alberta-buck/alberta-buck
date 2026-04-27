@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
+import "../src/BN254.sol";
 import "../src/BuckCredit.sol";
 import "../src/Buck.sol";
 import "../src/BuckKController.sol";
@@ -71,9 +72,25 @@ contract Deploy is Script {
         );
         console.log("Notes deployed at:", address(notes));
 
-        // The Notes pool is a system account: flag it public so identity-bound
-        // BUCK transfers from issuers can land at the pool address.
-        identity.setSystemPublic(address(notes), true);
+        // Bind a Public Identity to the Notes pool address.  The pool is a
+        // BUCK-aware contract operated by governance; its plaintext identity m
+        // is publicly disclosed off-chain (no cryptographic privacy of who
+        // operates the pool), and approve receipts are decryptable by the
+        // governance-held sk for subpoena response.
+        //
+        // TODO(production): replace placeholder (pk, E) below with operator-
+        // generated values from the alberta_buck.wallet ElGamal keypair tool.
+        // The (pk, E) pair has the same shape as an EOA self-registration
+        // record; the operator publishes m_notes alongside the binding.
+        BN254.G1Point memory pk_notes_placeholder = BN254.g1();
+        IdentityRegistry.ElGamalCT memory E_notes_placeholder =
+            IdentityRegistry.ElGamalCT({ R: BN254.g1(), C: BN254.g1() });
+        identity.bindContract(
+            address(notes),
+            pk_notes_placeholder,
+            E_notes_placeholder,
+            true  // isPublicIdentity
+        );
 
         vm.stopBroadcast();
     }

@@ -59,7 +59,7 @@ Table of Contents
 6. Registration – On-Chain Verification
 .. 1. Verify the NIZK Proof (What the Contract Computes)
 .. 2. Same Operation via the Wallet API
-7. Bob Registers as a Public Account
+7. Bob Binds His Pool as a Public-Identity Contract
 .. 1. Same Operation via the Wallet API
 8. Alice Approves Bob – Re-Encryption + Chaum-Pedersen Proof
 .. 1. Re-Encrypt Alice's Identity for Bob
@@ -104,25 +104,25 @@ Table of Contents
 1.1 Data Residency
 ──────────────────
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Data                          Location                  Visibility         When Used                      
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-   `identity_data' (plaintext)   Holochain Private entry   Owner only         Approve (sent to counterparty) 
-   `m = H(identity_data)'        Holochain Private entry   Owner only         Registration, Approve          
-   PS signature `sigma'          Holochain Private entry   Owner only         Registration (rerandomized)    
-   Secret key `sk'               Holochain Private entry   Owner only         Approve (decrypt + re-encrypt) 
-   Rerandomized `sigma''         IdentityRegistry          Public (on-chain)  Registration verification      
-   Public key `pk'               IdentityRegistry          Public (on-chain)  Approve, Transfer              
-   ElGamal ciphertext `E_alice'  IdentityRegistry          Public (on-chain)  Approve (read by contract)     
-   NIZK proof `pi'               IdentityRegistry (tx)     Public (on-chain)  Registration verification      
-   Re-encrypted `E_bob'          BUCK ERC-20 (approve)     Public (on-chain)  Two-channel verification       
-   Chaum-Pedersen proof          BUCK ERC-20 (approve tx)  Public (on-chain)  Approve verification           
-   `_receiptFragments[a][b]'     BUCK ERC-20 storage       Public (on-chain)  Transfer (bilateral check)     
-   `isPublic' flag               IdentityRegistry          Public (on-chain)  Transfer (exemption check)     
-   Public `identity_data'        IdentityRegistry or DHT   Public             Anyone (no approve needed)     
-   Holochain Warrants            Holochain DHT             Public             Malfeasance detection          
-   Canonical receipt             Holochain Private entry   Each party only    Dispute resolution             
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Data                          Location                  Visibility         When Used                            
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   identity_data = plaintext     Holochain Private entry   Owner only         Approve (sent to counterparty)       
+   `m = H(identity_data)'        Holochain Private entry   Owner only         Registration, Approve                
+   PS signature `sigma'          Holochain Private entry   Owner only         Registration (rerandomized)          
+   Secret key `sk'               Holochain Private entry   Owner only         Approve (decrypt + re-encrypt)       
+   Rerandomized `sigma''         IdentityRegistry          Public (on-chain)  Registration verification            
+   Public key `pk'               IdentityRegistry          Public (on-chain)  Approve, Transfer                    
+   ElGamal ciphertext `E_alice'  IdentityRegistry          Public (on-chain)  Approve (read by contract)           
+   NIZK proof `pi'               IdentityRegistry (tx)     Public (on-chain)  Registration verification            
+   Re-encrypted `E_bob'          BUCK ERC-20 (approve)     Public (on-chain)  Two-channel verification             
+   Chaum-Pedersen proof          BUCK ERC-20 (approve tx)  Public (on-chain)  Approve verification                 
+   `_receiptFragments[a][b]'     BUCK ERC-20 storage       Public (on-chain)  Transfer (bilateral check)           
+   `isPublicIdentity' flag       IdentityRegistry          Public (on-chain)  Transfer (receipt-fragment fallback) 
+   Public `identity_data'        IdentityRegistry or DHT   Public             Anyone (no approve needed)           
+   Holochain Warrants            Holochain DHT             Public             Malfeasance detection                
+   Canonical receipt             Holochain Private entry   Each party only    Dispute resolution                   
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 1.2 Registration: Credential Goes On-Chain
@@ -161,9 +161,12 @@ Table of Contents
 ─────────────────────────────────
 
   By the time `transfer' or `transferFrom' is called, all proofs have
-  already been verified.  The EVM code only checks boolean flags – no
-  cryptography runs during the transfer itself.  Public accounts
-  (`isPublic=true') are exempt from needing a counterparty `approve'.
+  already been verified.  The EVM code only checks boolean flags and
+  stored receipt fragments – no cryptography runs during the transfer
+  itself.  Public-Identity contracts (those bound via
+  `bindContract(target, pk, E, isPublicIdentity_=true)') need not have a
+  per-pair receipt fragment: the receipt falls back to the bound
+  `_identityHash' for that side.
 
   <file:./images/transfer-flow.png>
 
@@ -202,8 +205,8 @@ Table of Contents
 
   In every case, the `transfer' / `transferFrom' call itself does /no/
   cryptography – it only reads the boolean results of prior `approve'
-  calls and `isPublic' flags.  All proof verification happens during
-  `approve'.
+  calls and the `isPublicIdentity' flag bound at `bindContract' time.
+  All proof verification happens during `approve'.
 
 
 1.7 The AMM Pool Scenario: Retroactive Identity Recovery
@@ -250,10 +253,12 @@ Table of Contents
      calldata), so Alice couldn't substitute a different ciphertext.
      The transaction succeeded at block \( B_{\text{approve}} \).
 
-  4. *Transfer:* The bilateral identity check passed.  The pool is
-     public (`isPublic(pool) = true'), Alice had a valid
-     `_receiptFragments[alice][pool]'.  The swap executed at block \(
-     B_{\text{transfer}} \).
+  4. *Transfer:* The bilateral identity check passed.  The pool was
+     bound under a Public Identity (`isPublicIdentity(pool) = true' via
+     `IdentityRegistry.bindContract'), and Alice had a valid
+     `_receiptFragments[alice][pool]' from her `approve'.  The pool side
+     fell back to the bound `_identityHash(pool)'.  The swap executed at
+     block \( B_{\text{transfer}} \).
 
   None of these steps required Bob to be online, to run a Holochain
   node, or to examine Alice's identity.  The EVM did it for him.
@@ -634,8 +639,8 @@ Table of Contents
   │ Identity scalar m = H(identity_data):
   │   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
   │ PS signature sigma:
-  │   sigma_1 = (254037..., 533082...)
-  │   sigma_2 = (280643..., 850493...)
+  │   sigma_1 = (290280..., 935849...)
+  │   sigma_2 = (408228..., 584680...)
   └────
 
 
@@ -801,12 +806,12 @@ Table of Contents
 
   ┌────
   │ Rerandomized PS signature verified.
-  │   sigma'_1 = (353354..., 475402...)
-  │   sigma'_2 = (106758..., 378682...)
+  │   sigma'_1 = (981279..., 955919...)
+  │   sigma'_2 = (137122...,  45486...)
   │ 
   │ Original and rerandomized signatures are unlinkable:
-  │   sigma_1  = (254037..., 533082...)
-  │   sigma'_1 = (353354..., 475402...)
+  │   sigma_1  = (290280..., 935849...)
+  │   sigma'_1 = (981279..., 955919...)
   │   (No algorithm can correlate them.)
   └────
 
@@ -862,12 +867,12 @@ Table of Contents
 
   ┌────
   │ Fresh key pair for this Ethereum account:
-  │   sk_alice = 5337178719053273768779803481371184569706294644357140262510352340982769664927
-  │   pk_alice = (846278..., 691503...)
+  │   sk_alice = 14542977407667496953358196198607177682448658772056520055188504924080847952059
+  │   pk_alice = (849015..., 493782...)
   │ 
   │ ElGamal ciphertext E_alice = (R, C):
-  │   R = r*G    = (236485..., 306358...)
-  │   C = m*G+r*pk = ( 80929..., 697166...)
+  │   R = r*G    = (778589..., 507677...)
+  │   C = m*G+r*pk = (557954..., 153719...)
   │ 
   │ Message point M = m*G:
   │   M = (739132..., 937433...)
@@ -900,7 +905,7 @@ Table of Contents
 
   ┌────
   │ Eve decrypts with wrong key:
-  │   M_wrong = (196443..., 660890...)
+  │   M_wrong = (921492..., 161514...)
   │   M_real  = (739132..., 937433...)
   │   Match: False
   │   (Completely different point -- no information about m is leaked.)
@@ -958,9 +963,9 @@ Table of Contents
 
   ┌────
   │ NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-  │   challenge e = 3106436009118268932837662440700338157266274450420241514217361446203271481698
-  │   response s_m = 20862264227408967911892434622129686844960690030974921772851777689485705854539
-  │   response s_r = 8990490691724345301124600140323575113826000715714883395606231002422431611176
+  │   challenge e = 2108382860146337568167547135520847183401889651491003392210927091806219272232
+  │   response s_m = 17017331170553200676309748887708818182855613387974001758244139182623046463023
+  │   response s_r = 1733881811309862669345504562908263611695849879528707164319965270330168152310
   └────
 
 
@@ -1198,16 +1203,25 @@ Table of Contents
   └────
 
 
-7 Bob Registers as a Public Account
-═══════════════════════════════════
+7 Bob Binds His Pool as a Public-Identity Contract
+══════════════════════════════════════════════════
 
-  Bob operates a Uniswap-style AMM liquidity pool and registers as a
-  public BUCK account: his `identity_data' is world-readable in the
-  IdentityRegistry, and `isPublic(bob) = true'.  This exempts Bob's
-  counterparties from needing Bob to call `approve' – any private
-  account can approve Bob's pool unilaterally, and the bilateral
-  identity check in `transfer' passes because Bob's public status
-  satisfies his side automatically.
+  Bob operates a Uniswap-style AMM liquidity pool.  Bob himself is a
+  registered EOA, but the /pool contract/ is the entity that holds and
+  moves BUCK on his behalf.  At deployment time Bob (or the
+  `BuckAwareDeployer.deployAndBind' helper, atomically) calls
+  `IdentityRegistry.bindContract(pool, pk_bob, E_bob,
+  isPublicIdentity_=true)', publishing Bob's `(pk, E)' against the
+  pool's address and marking the pool `isPublicIdentity = true'.  Bob's
+  `identity_data' remains world-readable in the IdentityRegistry under
+  his own EOA.
+
+  Counterparties of the pool need not wait for the pool to call
+  `approve' back: when no per-pair receipt fragment exists for the pool
+  side, `transfer' falls back to the bound `_identityHash(pool)' for the
+  receipt event.  The bilateral identity check still requires both
+  parties to be `isVerified'; the public-side fallback only relaxes the
+  receipt-fragment requirement, not the verification requirement.
 
   ┌────
   │ # Bob's identity (public pool operator)
@@ -1239,26 +1253,33 @@ Table of Contents
   │ C_bob  = add(M_bob, mul(pk_bob, r_bob))
   │ E_bob_reg = (R_bob, C_bob)
   │ 
-  │ # Bob registers (same PS+NIZK verification as Alice -- omitted for brevity)
-  │ # AND publishes identity_data on-chain (public account)
-  │ print("Bob registered as PUBLIC account:")
+  │ # Bob registers as an EOA (same PS+NIZK verification as Alice -- omitted for brevity)
+  │ # His pool is then bound under a Public Identity at deployment via
+  │ #   IdentityRegistry.bindContract(pool, pk_bob, E_bob, isPublicIdentity_=true)
+  │ # (or atomically via BuckAwareDeployer.deployAndBind).
+  │ POOL_ADDR = 0xa11ce0fa11ce0fa11ce0fa11ce0fa11ce0fa1100  # illustrative
+  │ print("Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:")
   │ print(f"  pk_bob = {pt(pk_bob)}")
   │ print(f"  E_bob  = (R, C) -- ElGamal ciphertext on-chain")
   │ print(f"  identity_data = '{bob_identity_data[:50]}...'")
-  │ print(f"  isVerified(bob) = true")
-  │ print(f"  isPublic(bob)   = true")
-  │ print(f"\nBob's identity is world-readable.  No approve() needed from Bob's side.")
+  │ print(f"  isVerified(bob)             = true")
+  │ print(f"  isVerified(pool)            = true   (set by bindContract)")
+  │ print(f"  isPublicIdentity(pool)      = true   (set by bindContract)")
+  │ print(f"\nThe pool's identity hash falls back into receipts when no per-pair")
+  │ print(f"fragment exists.  Bob himself never needs to approve his own pool.")
   └────
 
   ┌────
-  │ Bob registered as PUBLIC account:
-  │   pk_bob = (456762...,  66042...)
+  │ Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:
+  │   pk_bob = (852877..., 334205...)
   │   E_bob  = (R, C) -- ElGamal ciphertext on-chain
   │   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
-  │   isVerified(bob) = true
-  │   isPublic(bob)   = true
+  │   isVerified(bob)             = true
+  │   isVerified(pool)            = true   (set by bindContract)
+  │   isPublicIdentity(pool)      = true   (set by bindContract)
   │ 
-  │ Bob's identity is world-readable.  No approve() needed from Bob's side.
+  │ The pool's identity hash falls back into receipts when no per-pair
+  │ fragment exists.  Bob himself never needs to approve his own pool.
   └────
 
 
@@ -1304,13 +1325,19 @@ Table of Contents
 
   Alice wants to swap BUCK for USDT on Bob's pool.  She calls
   `approve(pool, amount, E_pool, proof)' to re-encrypt her identity
-  under Bob's public key and prove the re-encryption is correct via a
-  Chaum-Pedersen proof (~29K gas).  Since Bob is public, only Alice
-  needs to approve; the bilateral identity check in `transfer' passes
-  because `isPublic(bob) =' true= satisfies Bob's side automatically.
-  Below: the re-encryption, the three-check Chaum-Pedersen verification,
-  and a counter-example showing that re-encrypting a /different/ message
-  point causes Check 2 to fail.
+  under the pool's bound public key (Bob's `pk_bob') and prove the
+  re-encryption is correct via a Chaum-Pedersen proof (`29K gas).
+  Approve always requires CP, even though the pool is a Public-Identity
+  contract -- this captures Alice's per-pair consent, not just the
+  registry-derivable identity hash; see
+  [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale][/Why
+  approve Is Always CP-Bound/]] for the full rationale.  The pool itself
+  need not reciprocate with its own =approve=; the bilateral identity
+  check in =transfer= passes because ~isPublicIdentity(pool) == true',
+  and the receipt event falls back to `_identityHash(pool)' for the
+  pool's side.  Below: the re-encryption, the three-check Chaum-Pedersen
+  verification, and a counter-example showing that re-encrypting a
+  /different/ message point causes Check 2 to fail.
 
 
 8.1 Re-Encrypt Alice's Identity for Bob
@@ -1349,8 +1376,8 @@ Table of Contents
   ┌────
   │ Alice re-encrypts her identity for Bob:
   │   E_bob = (R', C') where:
-  │     R' = r'*G     = (383744..., 569524...)
-  │     C' = M+r'*pk  = (936507..., 848433...)
+  │     R' = r'*G     = (145681..., 671155...)
+  │     C' = M+r'*pk  = (354445...,  87027...)
   │ 
   │ Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
   │ Matches Alice's M:             (739132..., 937433...)
@@ -1415,9 +1442,9 @@ Table of Contents
 
   ┌────
   │ Chaum-Pedersen proof:
-  │   e  = 61382628185361422489980217040398965630521971500429003301257707724073879376
-  │   s1 = 18875442783530647435762586544699770487398033464501945700465729711080338590237
-  │   s2 = 14152585458556853765263183554766842642567508489282029916813229114688998405074
+  │   e  = 19656484362135698795741089605498967820248729450409863071508840121939729874765
+  │   s1 = 5303397134615359351631622479314571323772043165715143707599842649821948352857
+  │   s2 = 1895394948056753826005517151679185835780036932506710649884220283012208767072
   └────
 
 
@@ -1586,45 +1613,53 @@ Table of Contents
 9 Transfer – Bilateral Identity Check
 ═════════════════════════════════════
 
-  With Alice's `approve' completed and Bob registered as a public
-  account, the `transfer' can proceed.  The contract performs a
-  bilateral identity check: for each party, it verifies that either
-  `isPublic' is true or a valid `_receiptFragments' entry exists from a
-  prior `approve'.  No cryptography runs at transfer time – only boolean
-  flag checks.  We simulate the check for our Private-to-Public scenario
-  and show that both sides pass.
+  With Alice's `approve' completed and the pool bound under a Public
+  Identity, the `transfer' can proceed.  The contract performs a
+  bilateral identity check: both parties must be `isVerified', and the
+  receipt event must carry a fragment for each side.  Per-pair receipt
+  fragments stored at `approve' time are the primary source.  When a
+  side has no fragment and that side is `isPublicIdentity = true', the
+  bound `_identityHash' falls in for that side's receipt slot.  No
+  cryptography runs at transfer time – only state lookups.  We simulate
+  the check for our Private-to-Public-Identity scenario.
 
   ┌────
   │ # Simulating the contract's bilateral identity check:
-  │ is_public_alice = False
-  │ is_public_bob   = True
-  │ receipt_alice_to_bob = True   # set during approve() above
-  │ receipt_bob_to_alice = False  # Bob never called approve (he's public)
+  │ is_verified_alice         = True
+  │ is_verified_pool          = True
+  │ is_public_identity_pool   = True   # bindContract(pool, ..., true)
+  │ receipt_alice_to_pool     = True   # set during approve() above
+  │ receipt_pool_to_alice     = False  # pool never called approve (public)
   │ 
-  │ # Sender (Alice) identity available to receiver (Bob)?
-  │ sender_ok = is_public_alice or receipt_alice_to_bob
-  │ # Receiver (Bob) identity available to sender (Alice)?
-  │ receiver_ok = is_public_bob or receipt_bob_to_alice
+  │ # Both must be verified; receipt-fragment fallback to _identityHash
+  │ # is only allowed on a side whose isPublicIdentity == true.
+  │ assert is_verified_alice and is_verified_pool
+  │ 
+  │ # Alice's fragment for the receipt -- her per-pair CP hash.
+  │ alice_frag = "H(E_pool)" if receipt_alice_to_pool else None
+  │ # Pool's fragment -- per-pair CP hash if present, else _identityHash(pool).
+  │ pool_frag = (
+  │     "H(E_alice)" if receipt_pool_to_alice
+  │     else ("_identityHash(pool)" if is_public_identity_pool else None)
+  │ )
   │ 
   │ print("Bilateral identity check:")
-  │ print(f"  Alice (private): isPublic={is_public_alice}, "
-  │       f"receiptFragment={receipt_alice_to_bob} => {sender_ok}")
-  │ print(f"  Bob   (public):  isPublic={is_public_bob}, "
-  │       f"receiptFragment={receipt_bob_to_alice} => {receiver_ok}")
-  │ print(f"\n  sender_ok AND receiver_ok = {sender_ok and receiver_ok}")
-  │ print(f"\n==> transfer(bob, 500 BUCK) SUCCEEDS")
-  │ print(f"    BuckTransferReceipt emitted with identity hashes")
+  │ print(f"  Alice (private):  fragment = {alice_frag}")
+  │ print(f"  Pool  (public):   fragment = {pool_frag}")
+  │ print(f"\n  both fragments present => transfer SUCCEEDS")
+  │ print(f"\n==> transfer(pool, 500 BUCK) SUCCEEDS")
+  │ print(f"    BuckTransferReceipt emitted with both identity hashes")
   └────
 
   ┌────
   │ Bilateral identity check:
-  │   Alice (private): isPublic=False, receiptFragment=True => True
-  │   Bob   (public):  isPublic=True, receiptFragment=False => True
+  │   Alice (private):  fragment = H(E_pool)
+  │   Pool  (public):   fragment = _identityHash(pool)
   │ 
-  │   sender_ok AND receiver_ok = True
+  │   both fragments present => transfer SUCCEEDS
   │ 
-  │ ==> transfer(bob, 500 BUCK) SUCCEEDS
-  │     BuckTransferReceipt emitted with identity hashes
+  │ ==> transfer(pool, 500 BUCK) SUCCEEDS
+  │     BuckTransferReceipt emitted with both identity hashes
   └────
 
 
@@ -1896,17 +1931,17 @@ Table of Contents
 
   ┌────
   │ Second credential derived (same identity, fresh account):
-  │   pk_alice_2 = (344211..., 486292...)
+  │   pk_alice_2 = (472717..., 595999...)
   │   E_alice_2  = (R, C) -- independent ciphertext
-  │   sigma'_2   = (766018..., 512451...)
+  │   sigma'_2   = (563809...,  19896...)
   │ 
   │ Unlinkability check:
-  │   sigma'_1 (acct 1) = (353354..., 475402...)
-  │   sigma'_1 (acct 2) = (766018..., 512451...)
-  │   pk (acct 1)       = (846278..., 691503...)
-  │   pk (acct 2)       = (344211..., 486292...)
-  │   E.R (acct 1)      = (236485..., 306358...)
-  │   E.R (acct 2)      = (226032..., 148188...)
+  │   sigma'_1 (acct 1) = (981279..., 955919...)
+  │   sigma'_1 (acct 2) = (563809...,  19896...)
+  │   pk (acct 1)       = (849015..., 493782...)
+  │   pk (acct 2)       = (472717..., 595999...)
+  │   E.R (acct 1)      = (778589..., 507677...)
+  │   E.R (acct 2)      = (988379..., 316462...)
   │ 
   │   All values are independent.  No shared structure.
   │   PS rerandomization is STATISTICALLY unlinkable --

@@ -187,21 +187,18 @@ contract Buck is ERC20 {
         IdentityRegistry.CPProof calldata pi_CP
     ) external returns (bool) {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
-        require(
-            identity.isVerified(spender) || identity.isPublic(spender),
-            "BUCK: spender not verified"
-        );
+        require(identity.isVerified(spender),    "BUCK: spender not verified");
 
-        bytes32 receipt;
-        if (identity.isPublic(spender)) {
-            receipt = _publicReceiptHash(spender);
-        } else {
-            require(
-                identity.verifyApprove(msg.sender, spender, E_bob, pi_CP),
-                "BUCK: bad CP proof"
-            );
-            receipt = _ciphertextHash(E_bob);
-        }
+        // CP fires regardless of spender's identity flavor (Public or
+        // Encrypted): the receipt encrypts the caller's identity point M
+        // under the spender's pk so the spender's operator (with sk_spender)
+        // can later decrypt to identify the caller -- the audit-trail
+        // property the contract owner needs for subpoena response.
+        require(
+            identity.verifyApprove(msg.sender, spender, E_bob, pi_CP),
+            "BUCK: bad CP proof"
+        );
+        bytes32 receipt = _ciphertextHash(E_bob);
         _receiptFragments[msg.sender][spender] = receipt;
         emit ApproveReceipt(msg.sender, spender, receipt);
 
@@ -235,30 +232,34 @@ contract Buck is ERC20 {
     }
 
     function _identityCheckedTransfer(address from, address to, uint256 amount) internal {
-        // System-public accounts (e.g. the Notes pool) are governance-
-        // designated audit origins -- they have no PS credential, but they
-        // are identifiable, so they qualify as a legitimate sender.  The
-        // receipt-hash branch below already anticipates isPublic(from).
-        require(
-            identity.isVerified(from) || identity.isPublic(from),
-            "BUCK: sender not verified"
-        );
-        require(
-            identity.isVerified(to) || identity.isPublic(to),
-            "BUCK: recipient not verified"
-        );
+        require(identity.isVerified(from), "BUCK: sender not verified");
+        require(identity.isVerified(to),   "BUCK: recipient not verified");
 
-        bytes32 toHash;
-        if (identity.isPublic(to)) {
-            toHash = _publicReceiptHash(to);
-        } else {
-            toHash = _receiptFragments[from][to];
-            require(toHash != bytes32(0), "BUCK: missing identity receipt");
+        // toHash carries the CP-encrypted recipient identity from a prior
+        // approve.  EOA-to-EOA Encrypted transfers MUST have one (strong
+        // privacy: only the recipient's operator can decrypt to learn the
+        // sender).  Transfers where either party has a Public Identity (an
+        // AMM pool, custodial vault, etc.) are allowed to fall back to a
+        // deterministic _identityHash because the public party's operator
+        // already has off-chain attestation pinning m to a known counterparty
+        // -- the fallback simply makes the same correlation publicly
+        // recomputable from the registry, which is a property the public
+        // party already accepted by binding a Public Identity.
+        bytes32 toHash = _receiptFragments[from][to];
+        if (toHash == bytes32(0)) {
+            require(
+                identity.isPublicIdentity(from) || identity.isPublicIdentity(to),
+                "BUCK: missing identity receipt"
+            );
+            toHash = _identityHash(to);
         }
-
-        bytes32 fromHash = identity.isPublic(from)
-            ? _publicReceiptHash(from)
-            : _receiptFragments[to][from];
+        // fromHash is best-effort: if the recipient hasn't pre-attested back
+        // to the sender, fall back to the sender's deterministic identity
+        // hash.  Auditors aggregating transfers can still attribute the
+        // counterparty side via the registry; only the directional privacy
+        // toHash protects is sacrificed.
+        bytes32 fromHash = _receiptFragments[to][from];
+        if (fromHash == bytes32(0)) fromHash = _identityHash(from);
 
         _transfer(from, to, amount);
         emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
@@ -272,9 +273,14 @@ contract Buck is ERC20 {
         return keccak256(abi.encode(E.R.X, E.R.Y, E.C.X, E.C.Y));
     }
 
-    function _publicReceiptHash(address account) internal view returns (bytes32) {
+    /// @dev Deterministic identity hash from the registered (pk, E_addr).
+    ///      Used as a fallback receipt fragment when no prior approve-time CP
+    ///      receipt exists between two verified counterparties (e.g., the
+    ///      passive-receive direction of an AMM swap).
+    function _identityHash(address account) internal view returns (bytes32) {
+        BN254.G1Point memory pk            = identity.pkOf(account);
         IdentityRegistry.ElGamalCT memory E = identity.ciphertextOf(account);
-        return keccak256(abi.encode(E.R.X, E.R.Y, E.C.X, E.C.Y, "PUBLIC"));
+        return keccak256(abi.encode(pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y));
     }
 
     /// @dev Premium = mintAmount * (BASE_RATE + util^2 * SCALE_RATE) / BP.
@@ -432,18 +438,12 @@ contract Buck is ERC20 {
     ///         standard transfer out.
     function transferCarrying(address to, uint256 amount) external returns (bool) {
         address from = msg.sender;
-        // Same sender rule as standard transfer: verified-or-public.  The
-        // Notes pool is the canonical isPublic sender -- it pays out carried
-        // BUCK on spend, absorbing the pool's average demurrage age into
-        // the recipient's weighted index.
-        require(
-            identity.isVerified(from) || identity.isPublic(from),
-            "BUCK: sender not verified"
-        );
-        require(
-            identity.isVerified(to) || identity.isPublic(to),
-            "BUCK: recipient not verified"
-        );
+        // Both sides must hold a registered Identity binding -- the Notes pool
+        // (and any other BUCK-aware contract that pays out carried BUCK on
+        // spend) is bound via IdentityRegistry.bindContract under a Public
+        // Identity, exactly like every EOA counterparty.  No isPublic shortcut.
+        require(identity.isVerified(from), "BUCK: sender not verified");
+        require(identity.isVerified(to),   "BUCK: recipient not verified");
         require(to != address(this), "BUCK: cannot carry to Jubilee");
 
         _advanceGlobals();

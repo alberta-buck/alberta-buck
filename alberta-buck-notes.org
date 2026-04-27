@@ -2245,7 +2245,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
       identity.  Single-statement case of CP.
    6. *IdentityRegistry* mapping between on-chain addresses and
       registered credentials (PS signatures, ElGamal ciphertexts,
-      public-claim flags).
+      isPublicIdentity flags set by ~bindContract~).
 
    Notably absent: a stealth-address construction is /not/ used by
    Notes.  Recipient binding is handled directly by re-randomizing the
@@ -2492,24 +2492,39 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    Constraint counts for the Notes circuits (BN254 Groth16):
 
    #+LATEX: {\scriptsize
-   | Circuit                                      | Constraints     | PTAU pow |
-   |----------------------------------------------+-----------------+----------|
-   | =mint.circom= (Phase 7; N=2, per-leaf on chain) | ~3,500 (retired) | 2^{15}  |
-   | =mint_batch.circom= (Phase-7-bis; N=16)      | ~96,000         | 2^{17}   |
-   | =mint_batch.circom= (Phase-7-bis; N=128)     | ~770,000        | 2^{20}   |
-   | =mint_batch.circom= (Phase-7-bis; N=1024)    | ~6,000,000      | 2^{23}   |
-   | =spend.circom= (B-shape; depth-20 Merkle)    | ~12,000         | 2^{15}   |
-   | =spend_a.circom= V2 (A-shape + Poseidon-8 idHash bind) | ~13,300 (6152 nl + 7140 lin) | 2^{15} |
-   #+LATEX: }
+   | Circuit                                                | R1CS (total)                 | PTAU pow |
+   |--------------------------------------------------------+------------------------------+----------|
+   | #ERROR                                                 | ~3,500 (retired)             | 2^{15}   |
+   | =mint_batch.circom= (Phase-7-bis; N=1)   M             | 21,914                       | 2^{15}   |
+   | =mint_batch.circom= (Phase-7-bis; N=2)   M             | 43,701                       | 2^{16}   |
+   | =mint_batch.circom= (Phase-7-bis; N=4)   M             | 87,273                       | 2^{17}   |
+   | =mint_batch.circom= (Phase-7-bis; N=8)   M             | 174,417                      | 2^{18}   |
+   | =mint_batch.circom= (Phase-7-bis; N=16)  M             | 348,705                      | 2^{19}   |
+   | =mint_batch.circom= (Phase-7-bis; N=32)  M             | 697,281                      | 2^{20}   |
+   | =mint_batch.circom= (Phase-7-bis; N=128) P             | ~2,800,000                   | 2^{22}   |
+   | =mint_batch.circom= (Phase-7-bis; N=1024) P            | ~22,000,000                  | 2^{25}   |
+   | =spend.circom= (B-shape; depth-20 Merkle)              | ~12,000                      | 2^{15}   |
+   | =spend_a.circom= V2 (A-shape + Poseidon-8 idHash bind) | ~13,300 (6152 nl + 7140 lin) | 2^{15}   |
+   #+TBLFM: $1=mint.circom= (Phase 7; N=2, per-leaf on chain)
+#+LATEX: }
+
+   Measured (M) via =snarkjs r1cs info build/snark/mint_batch_n${N}.r1cs=
+   on the shipped pinned-N set {1, 2, 4, 8, 16, 32}; projected (P)
+   linearly from the N=16 / N=32 baseline (~21,800 R1CS per leaf, ~half
+   of which is the dual Merkle walk that pins =oldRoot= and advances
+   =newRoot= against the same witness siblings).  The PTAU power is
+   the smallest 2^k ceremony whose FFT domain accommodates the circuit
+   plus snarkjs setup overhead.
 
    The spend circuit is comparable to Zcash Sapling's Spend circuit
    (~25,000) and Aztec's basic note-spend circuit; on-chip proving on
-   a modern smartphone: a few seconds.  =mint_batch= at N=16 is still
-   a desktop-seconds proof; N=128 is minutes; N=1024 requires a beefy
-   machine and hours of prover time, with the on-chain verification
-   cost invariant across all three.  The 2^{23} ceremony is the
-   ceiling that fixes the largest pinned N -- raising it would require
-   a fresh trusted setup.
+   a modern smartphone: a few seconds.  =mint_batch= at N=16 is a
+   ~6-second proof on a dev laptop (snarkjs); N=32 is ~12 s; N=128
+   is minutes (rapidsnark territory); N=1024 requires a beefy machine
+   and roughly an hour, with the on-chain verification cost still
+   bounded by a single Groth16 verify regardless of N.  The 2^{25}
+   ceremony is the ceiling that fixes the largest pinned N -- raising
+   it would require a fresh trusted setup.
 
 ** Common Circuit Gadgets
 
@@ -2657,18 +2672,18 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** Shipped (Phases 1-3)
 
    #+LATEX: {\scriptsize
-   | Component                                   | Source                                              |
-   |---------------------------------------------+-----------------------------------------------------|
-   | Notes contract: roots, nullifiers, mint/spend/spendACP (Phase-7-bis + Phase-8-V2 surface) | =src/Notes.sol=              |
-   | =transferCarrying= primitive in BUCK         | =src/Buck.sol= (=transferCarrying=, =_indexAtLastTouch= merge) |
-   | Mint Groth16 circuits + per-N verifiers      | =circuits/mint_batch.circom=, =src/MintGroth16Verifier_N*.sol= |
-   | Spend Groth16 circuit + verifier (B-shape)   | =circuits/spend.circom=, =src/SpendGroth16Verifier.sol= |
-   | Spend_A Groth16 circuit + verifier (V2; Poseidon-8 binding gate) | =circuits/spend_a.circom=, =src/SpendAGroth16Verifier.sol= |
-   | Poseidon-T3 precompile (in-EVM bytecode)    | =src/PoseidonT3Bytecode.sol=                        |
-   | Verifier adapters (proof-bytes plumbing, per-N mint dispatch) | =src/MintVerifierAdapter.sol=, =src/SpendVerifierAdapter.sol=, =src/SpendAVerifierAdapter.sol= |
-   | A-spend identity gate (off-chain CP-DLEQ, EIP-196 precompiles) | =alberta_buck.wallet.spend_cp=, =IdentityRegistry.verifySpendCP=, =src/ISpendAVerifier.sol= |
-   | End-to-end tests (real Groth16 fixtures)     | =test/MintVerifier.t.sol=, =test/MintBatchVerifier.t.sol=, =test/SpendVerifier.t.sol=, =test/SpendAVerifier.t.sol= |
-   | Prover scripts (witness gen + ptau ceremony) | =scripts/snark/prove_mint_batch.js=, =scripts/snark/prove_spend.js=, =scripts/snark/prove_spend_a.js=, =scripts/snark/setup.sh= |
+   | Component                                                        | Source                                                                                                                          |
+   |------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------|
+   | Notes contract: roots, nullifiers, mint/spend/spendACP           | =src/Notes.sol=                                                                                                                 |
+   | =transferCarrying= primitive in BUCK                             | =src/Buck.sol= (=transferCarrying=, =_indexAtLastTouch= merge)                                                                  |
+   | Mint Groth16 circuits + per-N verifiers                          | =circuits/mint_batch.circom=, =src/MintGroth16Verifier_N*.sol=                                                                  |
+   | Spend Groth16 circuit + verifier (B-shape)                       | =circuits/spend.circom=, =src/SpendGroth16Verifier.sol=                                                                         |
+   | Spend_A Groth16 circuit + verifier (V2; Poseidon-8 binding gate) | =circuits/spend_a.circom=, =src/SpendAGroth16Verifier.sol=                                                                      |
+   | Poseidon-T3 precompile (in-EVM bytecode)                         | =src/PoseidonT3Bytecode.sol=                                                                                                    |
+   | Verifier adapters (proof-bytes plumbing, per-N mint dispatch)    | =src/MintVerifierAdapter.sol=, =src/SpendVerifierAdapter.sol=, =src/SpendAVerifierAdapter.sol=                                  |
+   | A-spend identity gate (off-chain CP-DLEQ, EIP-196 precompiles)   | =alberta_buck.wallet.spend_cp=, =IdentityRegistry.verifySpendCP=, =src/ISpendAVerifier.sol=                                     |
+   | End-to-end tests (real Groth16 fixtures)                         | =test/MintVerifier.t.sol=, =test/MintBatchVerifier.t.sol=, =test/SpendVerifier.t.sol=, =test/SpendAVerifier.t.sol=              |
+   | Prover scripts (witness gen + ptau ceremony)                     | =scripts/snark/prove_mint_batch.js=, =scripts/snark/prove_spend.js=, =scripts/snark/prove_spend_a.js=, =scripts/snark/setup.sh= |
    #+LATEX: }
 
 ** Pending Engineering (Phases 5-8)

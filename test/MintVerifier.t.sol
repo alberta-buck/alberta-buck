@@ -91,8 +91,15 @@ contract MintVerifierTest is Test {
             address(buck), address(adapter), address(spendStub), GOV
         );
 
-        vm.prank(GOV);
-        reg.setSystemPublic(address(notes), true);
+        // Bind Notes as a Public-Identity contract.  No off-chain CP
+        // material exists for Notes; the receipt-fragment fallback handles
+        // the alice <-> Notes counterparty pair.
+        reg.bindContract(
+            address(notes),
+            BN254.g1(),
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
+            true
+        );
 
         // Generous credit + balance so Alice can mint up to N*1e18.
         _grantCredit(alice, 10000e18);
@@ -177,10 +184,10 @@ contract MintVerifierTest is Test {
     }
 
     function _approveNotes(address from, uint256 amount) internal {
-        IdentityRegistry.ElGamalCT memory junk;
-        IdentityRegistry.CPProof memory junkPi;
-        vm.prank(from);
-        buck.approve(address(notes), amount, junk, junkPi);
+        bytes32 slot = keccak256(
+            abi.encode(address(notes), keccak256(abi.encode(from, uint256(1))))
+        );
+        vm.store(address(buck), slot, bytes32(amount));
     }
 
     function _mint(
@@ -259,6 +266,30 @@ contract MintVerifierTest is Test {
         notes.mint(
             fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
             fxTotalFace, shorter
+        );
+    }
+
+    /// @notice Proof generated for N=16 routed to a *registered* smaller-N
+    ///         verifier must still be rejected.  The N=15 "wrong batch size"
+    ///         test above exercises the unregistered-verifier path; this test
+    ///         exercises the registered-but-mismatched-arity path: the adapter
+    ///         dispatches by cms.length=8 to the N=8 verifier, which sees a
+    ///         well-formed proof but with public inputs that don't match what
+    ///         the N=16 prover signed -- the Groth16 pairing check fails.
+    ///         This is the load-bearing test for "per-N circuits are
+    ///         non-interchangeable": you cannot smuggle an N=16 proof through
+    ///         the N=8 dispatch slot to under-bind your batch.
+    function test_mint_rejectedOnRegisteredCrossNDispatch() public {
+        // Truncate the N=16 fixture's cms[] to 8 entries; live state still
+        // matches (fresh tree, nextLeafIndex=0).  Adapter dispatches to N=8
+        // verifier; pairing check rejects.
+        uint256[] memory eight = new uint256[](8);
+        for (uint256 i = 0; i < 8; i++) eight[i] = fxCommitments[i];
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
+            fxTotalFace, eight
         );
     }
 
@@ -723,5 +754,181 @@ contract MintVerifierTest is Test {
             n4.proof, n4.oldRoot, n4.newRoot, uint32(n4.nextLeafIndex),
             n4.totalFace, n4.cms
         );
+    }
+
+    // ---- partial-batch coverage (real leaves + v=0 dummy padding) --------
+    //
+    // The prover supports padding a batch up to N with v=0 "dummy" leaves
+    // when the wallet has fewer than N real notes to mint.  The circuit
+    // still constrains the dummies' Poseidon openings and folds them into
+    // the rolling root, so on-chain we must observe:
+    //   - totalFace == sum of *only* the live v_i (dummies contribute 0)
+    //   - nextLeafIndex still advances by N (the full batch width)
+    //   - the resulting noteRoot reflects all N inserted commitments
+    // This is the load-bearing case for wallets that batch by cadence
+    // rather than by reaching exactly N pending notes.
+    //
+    // Per-N partials use a fixture with `live count < N`; dummies sit at the
+    // tail with v=0.  The expected face is recorded inline alongside each
+    // call so a fixture regeneration that changes the live distribution
+    // surfaces as a noisy test failure rather than a silent acceptance.
+
+    function _partialBatchHappy(string memory path, uint256 n, uint256 expectedFace)
+        internal
+    {
+        Fx memory fx = _loadFx(path);
+        assertEq(fx.n,             n,                  "partial fixture batch size");
+        assertEq(fx.oldRoot,       notes.EMPTY_ROOT(), "partial starts at empty tree");
+        assertEq(fx.totalFace,     expectedFace,       "live leaves sum to expected face");
+        assertEq(fx.cms.length,    n,                  "all cms exposed");
+
+        uint256 aliceBefore = buck.balanceOf(alice);
+        uint256 poolBefore  = buck.balanceOf(address(notes));
+
+        vm.prank(alice);
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+
+        // Only the live face value moves from Alice to the pool; dummies
+        // contribute nothing to the BUCK accounting.
+        assertEq(buck.balanceOf(alice),          aliceBefore - fx.totalFace);
+        assertEq(buck.balanceOf(address(notes)), poolBefore  + fx.totalFace);
+        assertEq(notes.noteFaceSum(),  fx.totalFace);
+        // The tree still advances by the full batch width: every dummy
+        // occupies a leaf slot under the SNARK-attested newRoot.
+        assertEq(notes.nextLeafIndex(), n);
+        assertEq(notes.noteRoot(),      fx.newRoot);
+    }
+
+    function _partialBatchRejectsInflatedTotalFace(string memory path) internal {
+        Fx memory fx = _loadFx(path);
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace + 1, fx.cms
+        );
+    }
+
+    // ---- N=2 partial (1 live, 1 dummy) -----------------------------------
+    function test_mint_partialBatch_N2() public {
+        _partialBatchHappy("build/snark/mint_batch_n2/fixtures/partial.json", 2, 1.5e18);
+    }
+    function test_mint_partialBatch_rejectsInflatedTotalFace_N2() public {
+        _partialBatchRejectsInflatedTotalFace("build/snark/mint_batch_n2/fixtures/partial.json");
+    }
+
+    // ---- N=4 partial (2 live, 2 dummy) -----------------------------------
+    function test_mint_partialBatch_N4() public {
+        _partialBatchHappy("build/snark/mint_batch_n4/fixtures/partial.json", 4, 2.5e18);
+    }
+    function test_mint_partialBatch_rejectsInflatedTotalFace_N4() public {
+        _partialBatchRejectsInflatedTotalFace("build/snark/mint_batch_n4/fixtures/partial.json");
+    }
+
+    // ---- N=8 partial (3 live, 5 dummy) -----------------------------------
+    function test_mint_partialBatch_N8() public {
+        _partialBatchHappy("build/snark/mint_batch_n8/fixtures/partial.json", 8, 5e18);
+    }
+    function test_mint_partialBatch_rejectsInflatedTotalFace_N8() public {
+        _partialBatchRejectsInflatedTotalFace("build/snark/mint_batch_n8/fixtures/partial.json");
+    }
+
+    // ---- N=16 partial (5 live, 11 dummy) ---------------------------------
+    function test_mint_partialBatch_N16() public {
+        // Fixture: 5 live leaves at v=[1, 2.5, 3, 0.5, 1.5] BUCK, 11 dummies.
+        _partialBatchHappy("build/snark/mint_batch_n16/fixtures/partial.json", 16, 8.5e18);
+    }
+    function test_mint_partialBatch_rejectsInflatedTotalFace() public {
+        _partialBatchRejectsInflatedTotalFace("build/snark/mint_batch_n16/fixtures/partial.json");
+    }
+
+    // ---- partial-after-basic chained-state coverage (N=4) ----------------
+    //
+    // A partial batch is just a normal batch from the contract's POV; what we
+    // need to confirm is that a partial proof generated against a non-empty
+    // wallet-mirror state (initial-state == basic-state.json from the prior
+    // batch) still chains cleanly: oldRoot == prior newRoot, nextLeafIndex
+    // == N, the dummies still occupy the trailing seats, and the SNARK
+    // attests to the chained newRoot.  N=4 is the cheapest pinned size that
+    // exercises both halves (live leaf padding plus chained-state continuation)
+    // without bloating the prove time relative to the test signal.
+    function test_mint_successivePartialBatch_N4() public {
+        // First mint: basic N=4 (4 live leaves at v=[1,2,3,4] => totalFace=10).
+        Fx memory a = _loadFx("build/snark/mint_batch_n4/fixtures/basic.json");
+        vm.prank(alice);
+        notes.mint(
+            a.proof, a.oldRoot, a.newRoot, uint32(a.nextLeafIndex),
+            a.totalFace, a.cms
+        );
+        assertEq(notes.nextLeafIndex(), 4);
+        assertEq(notes.noteRoot(),      a.newRoot);
+
+        // Second mint: partial N=4 starting at leaf 4 with 2 live (1.5+0.5),
+        // 2 dummy.  Generated by prove_mint_batch.js with --start-leaf=4 and
+        // --initial-state=basic-state.json.
+        Fx memory b = _loadFx("build/snark/mint_batch_n4/fixtures/partial_after_basic.json");
+        assertEq(b.n,             4);
+        assertEq(b.oldRoot,       a.newRoot, "partial.oldRoot must equal basic.newRoot");
+        assertEq(b.nextLeafIndex, 4,         "partial starts at leaf 4");
+        assertEq(b.totalFace,     2e18,      "1.5 + 0.5 BUCK live face");
+
+        uint256 sumBefore  = notes.noteFaceSum();
+        uint256 poolBefore = buck.balanceOf(address(notes));
+
+        vm.prank(alice);
+        notes.mint(
+            b.proof, b.oldRoot, b.newRoot, uint32(b.nextLeafIndex),
+            b.totalFace, b.cms
+        );
+
+        // Tree advances by full batch width (4) even though only 2 live.
+        assertEq(notes.nextLeafIndex(),         8);
+        assertEq(notes.noteRoot(),              b.newRoot);
+        // Pool / face sum increase by ONLY the live face value.
+        assertEq(notes.noteFaceSum(),           sumBefore + b.totalFace);
+        assertEq(buck.balanceOf(address(notes)), poolBefore + b.totalFace);
+    }
+
+    // ---- zero-face mint behavior (all-dummy batch) ------------------------
+    //
+    // The contract only requires `cms.length > 0`, not `totalFace > 0`, so a
+    // batch of pure dummies (every v=0) is accepted: the tree still advances
+    // and the SNARK still attests to the new root, but no BUCK moves.  This
+    // documents the chosen behavior and makes any future tightening
+    // (`require(totalFace > 0)`) a deliberate, breaking change instead of a
+    // silent regression.
+    //
+    // Operationally: an all-dummy mint is a "tree-tick" -- a wallet can
+    // burn a leaf seat without backing it with a real note.  Whether to
+    // permit that is a policy decision; the present circuit + contract
+    // permit it because the SNARK still proves the leaves are well-formed
+    // commitments (Poseidon-5 openings) and the totalFace == sum(v_i)
+    // binding still holds when sum(v_i) == 0.
+    function test_mint_zeroFace_acceptedAndAdvancesTree() public {
+        Fx memory fx = _loadFx("build/snark/mint_batch_n1/fixtures/zero_face.json");
+        assertEq(fx.n,             1);
+        assertEq(fx.totalFace,     0,                  "zero-face fixture sums to 0");
+        assertEq(fx.oldRoot,       notes.EMPTY_ROOT(), "fresh tree");
+
+        uint256 aliceBefore = buck.balanceOf(alice);
+        uint256 poolBefore  = buck.balanceOf(address(notes));
+        uint256 sumBefore   = notes.noteFaceSum();
+
+        vm.prank(alice);
+        notes.mint(
+            fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+            fx.totalFace, fx.cms
+        );
+
+        // No BUCK moves; tree still advances by 1 leaf; noteRoot updates to
+        // the SNARK-attested new root; noteFaceSum unchanged.
+        assertEq(buck.balanceOf(alice),          aliceBefore);
+        assertEq(buck.balanceOf(address(notes)), poolBefore);
+        assertEq(notes.noteFaceSum(),            sumBefore);
+        assertEq(notes.nextLeafIndex(),          1);
+        assertEq(notes.noteRoot(),               fx.newRoot);
     }
 }

@@ -63,36 +63,48 @@ Table of Contents
 .. 5. DeFi Integration (Uniswap, Lending, etc.)
 .. 6. Identity Management
 5. Contract Identity: How DeFi Pools Become BUCK Counterparties
-6. On-Chain Integration: Receipts and Transfer Flow
+.. 1. What's actually wired up
+.. 2. The interaction surface
+.. 3. Step-by-step: bringing up a BUCK/USDC AMM
+.. 4. What this means for accountability
+.. 5. Encrypted-Identity contracts
+6. Why `approve' Is Always CP-Bound
+.. 1. Approve documents consent; transfer documents execution
+.. 2. Engagement with the BN254 identity key, not just the ETH key
+.. 3. Per-pair freshness vs. constant identity hash
+.. 4. Uniform receipt semantics; no fast-path / slow-path bifurcation
+.. 5. Defense against silent rebinding / identity rotation
+.. 6. Cost
+7. On-Chain Integration: Receipts and Transfer Flow
 .. 1. The Receipt Constraint
 .. 2. The `approve' Function as Identity Handshake
 .. 3. Receipt Construction: What the Contract Emits
 .. 4. The Complete `transfer' / `transferFrom' Flow
 .. 5. Holochain: Off-Chain Computation and Storage
 .. 6. Summary: What Each Layer Sees
-7. Cryptographic Receipts: 3-Party ECDH
+8. Cryptographic Receipts: 3-Party ECDH
 .. 1. The Three Keys
 .. 2. Encryption Scheme
 .. 3. Who Can Decrypt
-8. Play-by-Play: BUCK/USDT Swap on Uniswap
+9. Play-by-Play: BUCK/USDT Swap on Uniswap
 .. 1. Prerequisites (One-Time Setup)
 .. 2. The Swap Transaction
-9. Edge Cases and Design Considerations
+10. Edge Cases and Design Considerations
 .. 1. Flash Loans and Atomic Transactions
 .. 2. Multi-Hop Swaps
 .. 3. Contract-to-Contract Transfers
 .. 4. Wrapping and Bridging
 .. 5. Gas Costs
-.. 6. Privacy of Pool Deployer Identity
+.. 6. Pool Operator Identity Binding
 .. 7. alt_bn128 Security Horizon
-10. Alternative Approaches Considered
+11. Alternative Approaches Considered
 .. 1. Pedersen Commitments + Groth16 ZK Proofs
 .. 2. Proxy Re-Encryption (NuCypher Umbral)[5]
 .. 3. BBS+ Signatures with Selective Disclosure
 .. 4. Camenisch-Shoup Verifiable Encryption
 .. 5. Pedersen Equality Proofs (Homomorphic Comparison)[6]
 .. 6. Comparison Summary
-11. Summary: Identity Requirement by Risk Level
+12. Summary: Identity Requirement by Risk Level
 
 
 [PDF] <https://perry.kundert.ca/images/alberta-buck-identity.pdf>
@@ -136,14 +148,20 @@ Table of Contents
   termination contract with the VoIP carrier), who is carrying it into
   our phone system (the VoIP carrier's contract with phone system
   providers), and who they are calling - except for /you/.  Allowing
-  arbitrary hostile groups to ravage a community under the cover of
-  darkness has been used throughout history to subjugate free people.
+  government-approved hostile groups to ravage citizens under the cover
+  of darkness has been used throughout history to subjugate free people.
   If the government can issue identity documents to whomever they wish,
-  and you are forced to trust them, how free are you?
+  and you are forced to trust them and use them to identify yourself as
+  a participant in every transaction, how free are you?
 
-  The Alberta Buck enforces these principles: the freedom to /transact
-  in privacy and peace/, and the confidence that your counterparty /is
-  who they say they are/.
+  The Alberta Buck enforces /these/ principles:
+  • The freedom to /transact in privacy and peace/ by keeping your
+    identity private between only you and your counterparties (no third
+    party is able to correlate activity between any of your accounts),
+    and
+  • The confidence that someone /really is who they say they are/ by
+    proving their identity has not been forged (you have the ability to
+    vet every counterparty's identity before transacting with them).
 
 
 1.1 Revealing Identity while Preserving Privacy
@@ -1478,21 +1496,22 @@ Table of Contents
   full Holochain exchange down to a standard ERC-20 transfer with no
   identity work at all.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Mode             What on-chain reveals          What off-chain reveals                     
-  ────────────────────────────────────────────────────────────────────────────────────────────
-   Anonymous-valid  Address is verified (bit)      Encrypted receipt: identities of both      
-   (private)        isVerified(addr) == true       parties, decryptable only by participants  
-                                                   + optional regulatory escrow key.          
-                                                   Requires bilateral `approve' for transfer. 
-   Public           Address is verified + public   Full name, jurisdiction, credentials,      
-                    identity claim (plaintext)     track record – world-readable.             
-                    isPublic(addr) == true         No `approve' needed – counterparties       
-                                                   already have this account's identity.      
-   Contract         Contract address is verified;  Deployer's identity is the contract's      
-                    linked to deployer's identity  identity; receipts encrypted to deployer   
-   Permissionless   No identity check              N/A                                        
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Mode             What on-chain reveals         What off-chain reveals                     
+  ───────────────────────────────────────────────────────────────────────────────────────────
+   Anonymous-valid  Address is verified (bit)     Encrypted receipt: identities of both      
+   (private)        isVerified(addr) == true      parties, decryptable only by participants  
+                                                  + optional regulatory escrow key.          
+                                                  Requires bilateral `approve' for transfer. 
+   Public-Identity  Contract is verified + bound  Full name, jurisdiction, credentials,      
+   (contract)       with public identity claim    track record – world-readable.             
+                    isPublicIdentity(c) == true   Counterparty side falls back to bound      
+                                                  _identityHash when no per-pair receipt.    
+   Contract         Contract address is verified  Deployer publishes (pk, E); receipts use   
+                    (bindContract)                the bound _identityHash on the contract's  
+                                                  side when no per-pair fragment exists.     
+   Permissionless   No identity check             N/A                                        
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 4 Operations Table
@@ -1623,52 +1642,308 @@ Table of Contents
 ══════════════════════════════════════════════════════════════
 
   Smart contracts can't do KYC, yet every BUCK transfer requires both
-  parties to have verified identity.  The solution: the pool deployer
-  derives a separate credential from their own PS-signed identity (via
-  the Identity Fountain) and registers it for the contract address.  The
-  deployer – a real person with a verified identity – becomes the
-  contract's legal counterparty for all BUCK transfers.  Public pools
-  (`isPublic = true') exempt their counterparties from needing the pool
-  to call `approve', enabling the standard AMM flow where millions of
-  private accounts swap against a single public pool.
+  parties to be /identifiable/.  The solution is *bindContract*: at
+  deployment time the operator (or an atomic
+  `BuckAwareDeployer.deployAndBind' helper) calls
+  `IdentityRegistry.bindContract(target, pk, E, isPublicIdentity_)',
+  publishing the operator's BN254 public key `pk' and ElGamal ciphertext
+  `E' against the contract's address.  `bindContract' is
+  *first-binder-wins* (anyone may bind any address whose code is
+  deployed; the deployer protects against front-running by binding
+  atomically with the deploy), the bound contract is marked
+  `isVerified[target] = true', and the boolean
+  `isPublicIdentity[target]' is set per the binding.  When the spender
+  or a transfer endpoint is bound under a Public Identity, the BUCK
+  contract may fall back to the bound `_identityHash(target)' in
+  receipts when no per-pair receipt fragment exists – but Chaum-Pedersen
+  on the sender's side is *always* required at `approve' time, even
+  against a Public- Identity spender, so a subpoena of the sender always
+  recovers a full encrypted-to-counterparty receipt.
 
-  A Uniswap pool contract is just an address.  For BUCK transfers
-  to/from that address to pass `isVerified', the contract must have an
-  identity in the IdentityRegistry.  But a contract can't do KYC.  The
-  solution:
-
-  *The pool deployer's identity becomes the contract's identity.*
-
-  When someone creates a BUCK/USDT Uniswap pool:
-
-  1. Deployer (a verified BUCK participant) calls the Uniswap factory to
-     create the pool.  The factory deploys a new contract at a
-     deterministic address.
-
-  2. Deployer derives a separate credential for the pool contract (from
-     the same PS-signed identity, via the Identity Fountain) and
-     registers it: `identityRegistry.registerCredential(poolAddress,
-     pk_deployer, E_deployer, sigma', pi)'
-
-     This links the pool contract's address to the deployer's
-     credential.  The pool inherits the deployer's verified identity.
-
-  3. Now `isVerified(poolAddress)' returns true.  BUCK transfers to/from
-     the pool pass the identity check.
-
-  4. When a user calls `approve' for the pool, the Chaum-Pedersen proof
-     is verified against the pool's credential (which is the deployer's
-     credential).  The deployer's identity becomes the counterparty
-     identity in all encrypted receipts.
-
-  This means: if you deploy a BUCK DeFi pool, you are the identified
-  legal operator.  Your identity is on the line for every transaction
-  through that pool.  If a court subpoenas you, you can be compelled to
-  decrypt the ElGamal ciphertexts (because your identity private key was
-  used for the pool's identity exchange handshakes).
+  The Uniswap V2 integration (`test/UniswapV2Integration.t.sol')
+  exercises this end-to-end: the BUCK/USDC pair is created by the
+  Uniswap factory, then bound under a Public Identity with the
+  operator's `(pk, E)'.  Verified Alice adds liquidity; verified Bob
+  swaps in either direction; unverified Carol is rejected.
 
 
-6 On-Chain Integration: Receipts and Transfer Flow
+5.1 What's actually wired up
+────────────────────────────
+
+  The relevant code in `src/IdentityRegistry.sol':
+
+  ┌────
+  │ /// Bind a deployed contract address to an operator-controlled identity.
+  │ /// First-binder-wins; deployers protect against front-running by binding
+  │ /// atomically alongside the deploy (BuckAwareDeployer.deployAndBind).
+  │ /// `isPublicIdentity_` selects the receipt-fragment fallback policy: if
+  │ /// true, transfers may use the bound _identityHash on this side when no
+  │ /// per-pair CP fragment exists; if false (Encrypted-Identity contract)
+  │ /// the contract participates exactly like an EOA (no fallback).
+  │ function bindContract(
+  │     address target,
+  │     Point   calldata pk,
+  │     Cipher  calldata E,
+  │     bool             isPublicIdentity_
+  │ ) external {
+  │     require(target.code.length > 0, "not a contract");
+  │     require(!isVerified[target],    "already bound");
+  │     _pks[target]                = pk;
+  │     _ciphers[target]            = E;
+  │     isVerified[target]          = true;
+  │     isPublicIdentity[target]    = isPublicIdentity_;
+  │     emit ContractBound(target, msg.sender, isPublicIdentity_);
+  │ }
+  └────
+
+  No `register' for the contract address (no PS signature is needed
+  because the contract has no underlying KYC credential of its own); the
+  operator's already-registered `(pk, E)' is republished against the
+  contract's address.  Whoever holds the operator's secret key `sk' can
+  decrypt every receipt that uses the bound ciphertext.
+
+
+5.2 The interaction surface
+───────────────────────────
+
+  Public-Identity contracts compose with BUCK in two places.  Both relax
+  the per-pair receipt-fragment requirement, but neither bypasses the
+  Chaum-Pedersen handshake on the sender's side.
+
+  1. *Approve against any spender, including Public-Identity*
+     (`Buck.approve').  Approve always requires CP – there is no
+     isPublicIdentity shortcut.  The sender's wallet constructs
+     `E_spender' by re-encrypting against the spender's published `pk'
+     (read from `IdentityRegistry'), produces the CP proof, and the
+     contract verifies it.  This guarantees that a subpoena of the
+     sender's records always recovers a full receipt for the
+     counterparty's identity.  See [Why `approve' Is Always CP-Bound]
+     for the full rationale (consent vs. execution, BN254-key
+     engagement, per-pair freshness, uniform audit semantics, and
+     defence against future identity rotation).
+
+  2. *Transfer with a Public-Identity counterparty*
+     (`Buck._identityCheckedTransfer').  Both parties must be
+     `isVerified'.  If a per-pair receipt fragment exists for a side, it
+     is used as that side's identity material in the receipt.  If a side
+     has no fragment and `isPublicIdentity[side] == true', the bound
+     `_identityHash(side)' is used as that side's fragment.  EOA<->EOA
+     Encrypted-Identity transfers MUST have a prior CP receipt – there
+     is no fallback for EOAs.
+
+
+[Why `approve' Is Always CP-Bound] See section 6
+
+
+5.3 Step-by-step: bringing up a BUCK/USDC AMM
+─────────────────────────────────────────────
+
+  Concrete deployment sequence as exercised by the integration test:
+
+  1. Operator calls `UniswapV2Factory.createPair(BUCK, USDC)'.  The
+     factory deploys a new `UniswapV2Pair' at a CREATE2-deterministic
+     address.
+
+  2. Operator calls `reg.bindContract(pair, pk_op, E_op, true)' and
+     `reg.bindContract(router, pk_op, E_op, true)' (or atomically via
+     `BuckAwareDeployer.deployAndBind', which avoids any
+     first-binder-wins front-running between deploy and bind).  `pk_op'
+     and `E_op' are the operator's already-registered identity material.
+
+     That's the entire administrative step.  The pair and the router are
+     now valid Public-Identity BUCK counterparties; their
+     `_identityHash' is the operator's bound hash.
+
+  3. A verified user (Alice) approves the router for BUCK using the
+     identity-bound `approve' overload.  Alice's wallet reads
+     `pk_router' from `IdentityRegistry' (which is `pk_op'), decrypts
+     her own stored ciphertext to recover `M', re-encrypts under
+     `pk_router' to produce `E_router', generates the CP proof, and
+     submits.  The contract verifies CP and stores
+     `_receiptFragments[alice][router] = H(E_router)'.  She approves
+     USDC using plain ERC-20 `approve'.  Then `router.addLiquidity(BUCK,
+     USDC, ...)'.  The router's internal `safeTransferFrom' calls land
+     Alice's BUCK and USDC into the pair.  The pair issues LP tokens to
+     Alice.
+
+  4. Verified swappers (Bob, …) call `router.swapExactTokensForTokens'.
+     BUCK->USDC: pair receives Bob's BUCK (verified from,
+     Public-Identity to – allowed); pair sends USDC out (no BUCK
+     identity check on the USDC side).  USDC->BUCK: pair sends BUCK to
+     Bob (Public-Identity from, verified to – the pair side falls back
+     to `_identityHash(pair)' because no per-pair fragment exists from
+     the pair to Bob).
+
+  5. An unverified user (Carol) trying to receive BUCK from a swap is
+     rejected: the pair's `_safeTransfer' on BUCK reverts with "BUCK:
+     recipient not verified", which the pair surfaces as "UniswapV2:
+     TRANSFER_FAILED".
+
+
+5.4 What this means for accountability
+──────────────────────────────────────
+
+  *The pool's identity is the operator's identity.* The bound `(pk, E)'
+  is the operator's already-registered material; whoever holds the
+  operator's `sk' can decrypt every receipt that uses the pool's
+  `_identityHash'.  Every BUCK transfer touching the pool emits a
+  `BuckTransferReceipt' whose pool-side fragment is either a per-pair
+  CP-bound ciphertext (if one exists) or the bound `_identityHash(pool)'
+  (if none does).  Auditors and subpoena responders can:
+
+  • *On the sender's side*: produce the CP-bound ciphertext from the
+    sender's own records (always present – approve always requires CP).
+  • *On the pool's side*: ask the operator (whose key `sk' binds to
+    `pk') for the corresponding identity, just as for an EOA
+    counterparty.
+
+  *The operator is the legal counterparty.* Setting up a BUCK/X AMM is
+  permissionless at the factory level (anyone can call `createPair').
+  What gates the pool's usability for BUCK is `bindContract' – and
+  *whoever calls bindContract first wins*.  That is operationally
+  significant: the operator must bind atomically with the deploy (via
+  `BuckAwareDeployer.deployAndBind') to prevent an attacker from
+  front-running and binding the pool to /their/ key.  Once bound, the
+  operator's identity is the contract's identity for audit purposes.
+
+  `bindContract' does not require governance.  Permissioning is instead
+  a property of /how the contract is deployed/: a contract meant to be
+  operator-controlled deploys via a deployer/binder helper that performs
+  both steps atomically.  Governance plays no role.
+
+
+5.5 Encrypted-Identity contracts
+────────────────────────────────
+
+  Setting `isPublicIdentity_=false' in `bindContract' produces an
+  *Encrypted-Identity contract*: the contract is bound and verified
+  exactly like a Public-Identity contract, but it participates in
+  transfers identically to an EOA – no per-side receipt-fragment
+  fallback to `_identityHash'.  Use this for treasury or escrow
+  contracts whose interactions deserve full per-pair CP receipts on both
+  sides without exposing a permanent `_identityHash' in receipts that
+  lack a fragment.
+
+
+6 Why `approve' Is Always CP-Bound
+══════════════════════════════════
+
+  The receipt-fragment fallback to `_identityHash' described above
+  applies only to the /transfer/ side of the protocol.  At `approve'
+  time the rule is simpler and stricter: *every* call to `Buck.approve'
+  requires a Chaum-Pedersen proof, regardless of whether the spender is
+  a private EOA, a Public-Identity contract, or an Encrypted-Identity
+  contract.  The parameterless ERC-20 `approve(address, uint256)'
+  reverts with `BUCK: use identity-bound approve'.
+
+  This is a deliberate departure from a tempting optimization.  When the
+  spender is a Public-Identity contract, both parties' identities are
+  already on-chain (the sender via `register', the spender via
+  `bindContract'), so a /transfer/ receipt could in principle be
+  reconstructed at execution time using `_identityHash' on both sides
+  without any CP work.  The transfer event would document /who paid
+  whom/ correctly.
+
+  What that optimization would lose is the on-chain record of /who
+  consented to whom/.  Five concrete things break if approve becomes
+  CP-optional:
+
+
+6.1 Approve documents consent; transfer documents execution
+───────────────────────────────────────────────────────────
+
+  In every `transferFrom' flow – DeFi routers, swap aggregators,
+  multi-hop trades, allowance-based subscriptions – the spender is not
+  the ultimate recipient and the approve precedes the transfer by an
+  unbounded amount of time.  Approve is the moment Alice says "I am
+  authorising this address to draw against my balance"; the
+  `transferFrom' is when the spender does the drawing, often weeks
+  later.  With CP-bound approve, that consent leaves a permanent
+  per-pair commitment (`_receiptFragments[alice][spender] =
+  keccak256(E_spender)') plus an `IdentityExchange' event carrying the
+  ciphertext.  With plain ERC-20 approve, the only artifact is a
+  standard `Approval(alice, spender, amount)' log – indistinguishable
+  from a unit-test approval, a phishing approval, or any other
+  context-free allowance write.  The transfer event happens after the
+  consent moment has been forgotten.
+
+
+6.2 Engagement with the BN254 identity key, not just the ETH key
+────────────────────────────────────────────────────────────────
+
+  CP requires the sender's wallet to decrypt its own `E_alice' with
+  `sk_alice^{BN254}', re-encrypt under `pk_spender', and produce a
+  Schnorr-style transcript.  That proves the holder of the /identity/
+  key personally signed off on this counterparty – not merely the holder
+  of the Ethereum tx-signing key.  The two keys live in the same wallet
+  today, but a custodian, a hardware wallet without BN254 support, a
+  session key, or a compromised tx-signer can authorise plain ERC-20
+  approves without ever touching the identity layer.  CP forecloses that
+  gap.  An EOA whose Ethereum key has leaked to an attacker can still be
+  drained on-chain, but the leaked approves will not produce CP
+  fragments and will be visibly non-conforming to a downstream audit.
+
+
+6.3 Per-pair freshness vs. constant identity hash
+─────────────────────────────────────────────────
+
+  `_identityHash(spender)' is the same value forever – it appears
+  identically in every receipt that spender ever participates in.  The
+  CP fragment is per `(sender, spender)' pair and is committed at the
+  moment of consent.  Without it, a regulator looking at receipts for
+  "Bob's pool" sees `_identityHash(pool)' against every counterparty and
+  cannot, from chain data alone, separate "Alice deliberately authorised
+  this pool" from "Alice was somehow drawn against by this pool."  The
+  existence of `_receiptFragments[alice][pool] != 0' is itself the
+  cryptographic proof of consent for that specific pair.
+
+
+6.4 Uniform receipt semantics; no fast-path / slow-path bifurcation
+───────────────────────────────────────────────────────────────────
+
+  If approve were CP-optional for Public-Identity counterparties, every
+  audit tool, every operator, and every regulator would have to handle
+  two receipt flavours: "fragment present, sender-signed off-on" and
+  "fragment absent, fall back to identity hash."  Operators would route
+  flow through the bifurcation to obscure consent trails (e.g., always
+  approve the public router, never the EOA).  Mandatory CP collapses
+  both cases into one: the fragment is /always/ present after a
+  successful approve, and `_identityHash' fallback exists only on the
+  /transfer/ side, only between parties who never approved each other,
+  and only for the side that is `isPublicIdentity = true'.
+
+
+6.5 Defense against silent rebinding / identity rotation
+────────────────────────────────────────────────────────
+
+  Today `bindContract' is one-shot, so a contract's identity is fixed at
+  first bind.  But any future revocation, rotation, or compliance-driven
+  rebind would mean `_identityHash(spender)' changes.  The CP fragment
+  captures /the spender identity that the sender actually authorised at
+  this block height/.  Plain ERC-20 approve would capture only the
+  address – useless if the operator changes hands later, since the
+  address can outlive the binding.
+
+
+6.6 Cost
+────────
+
+  The premium for the always-CP rule is `29K gas per approve (4 ~ecMul'
+     + 4 `ecAdd' + 1 `keccak256') plus the storage write of one 32-byte
+     `_receiptFragments' slot.  Approve is amortised across many
+     `transferFrom' calls – the per-transfer cost remains ~2K gas (one
+     event + two SLOADs).  In exchange, every BUCK authorisation leaves
+     a sender-key-bound, per-pair, on-chain consent record that is
+     openable on subpoena without the counterparty's cooperation and
+     without trust in any operator.
+
+  The shortest version: the receipt event is reconstructable from
+  registry data, but the consent event is not.  CP at approve is what
+  makes the BUCK identity layer's /consent/ visible on-chain, not just
+  its /execution/.
+
+
+7 On-Chain Integration: Receipts and Transfer Flow
 ══════════════════════════════════════════════════
 
   The BUCK ERC-20 contract stores and emits the bilateral `approve' /
@@ -1683,7 +1958,7 @@ Table of Contents
   reveals who is transacting with whom.
 
 
-6.1 The Receipt Constraint
+7.1 The Receipt Constraint
 ──────────────────────────
 
   *Events are public.* Every `emit' on Ethereum is readable by every
@@ -1713,7 +1988,7 @@ Table of Contents
   coordinates.  No identity content touches the EVM in any form.
 
 
-6.2 The `approve' Function as Identity Handshake
+7.2 The `approve' Function as Identity Handshake
 ────────────────────────────────────────────────
 
   The ERC-20 `approve' function is the natural point for identity
@@ -1774,7 +2049,7 @@ Table of Contents
   • Store verified identity for receipt construction on Holochain
 
 
-6.2.1 Bilateral Identity Exchange
+7.2.1 Bilateral Identity Exchange
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The `transfer' and `transferFrom' functions require that /both/
@@ -1791,20 +2066,23 @@ Table of Contents
   │ // Amount = 0: no spending authorization, just identity exchange
   └────
 
-  Both identity fragments must exist before BUCK can move.  If Bob is a
-  *public* account (e.g., a Uniswap pool operator), step 2 is
-  unnecessary: `isPublic(bob) == true' satisfies the bilateral check,
-  and Alice can look up Bob's `identity_data' directly from the
-  IdentityRegistry.
+  Both identity fragments must exist before BUCK can move.  If Bob's
+  counterparty is a *Public-Identity contract* (e.g., a Uniswap pool
+  bound via `bindContract(pool, pk_op, E_op, true)'), step 2 is not
+  required from the pool side: `isPublicIdentity(pool) == true' lets the
+  bilateral check fall back to the bound `_identityHash(pool)' on the
+  pool side.  Alice still must complete step 1 (her own CP- bound
+  `approve') – approve always requires CP, even against Public-Identity
+  spenders, so a subpoena of Alice always recovers her per-pair
+  ciphertext for the pool.
 
-  This means a public pool operator receives BUCK from any verified
+  This means a Public-Identity pool receives BUCK from any verified
   private account that has done a single `approve' – no per-counterparty
-  setup on the pool's side.  Two public accounts can `transfer' with no
-  `approve' at all – a standard ERC-20 transfer with identity
-  verification.
+  setup on the pool's side.  EOA<->EOA private transfers always require
+  both `approve' steps; there is no fallback for EOAs.
 
 
-6.3 Receipt Construction: What the Contract Emits
+7.3 Receipt Construction: What the Contract Emits
 ─────────────────────────────────────────────────
 
   The BUCK contract emits a *minimal* event that reveals only
@@ -1834,7 +2112,7 @@ Table of Contents
   ElGamal ciphertext) can recover the plaintext identity.
 
 
-6.3.1 Canonical Receipts and Public Accounts
+7.3.1 Canonical Receipts and Public Accounts
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Both parties in a transfer hold each other's plaintext `identity_data'
@@ -1874,7 +2152,7 @@ Table of Contents
   off-chain coordination required.
 
 
-6.4 The Complete `transfer' / `transferFrom' Flow
+7.4 The Complete `transfer' / `transferFrom' Flow
 ─────────────────────────────────────────────────
 
   ┌────
@@ -1883,62 +2161,64 @@ Table of Contents
   │     require(identityRegistry.isVerified(to),         "Receiver not verified");
   │     require(compliance.canTransfer(msg.sender, to, amount), "Compliance");
   │ 
-  │     // Bilateral identity exchange: each party's identity must be
-  │     // available to the other -- via approve() or public registration.
-  │     require(
-  │         identityRegistry.isPublic(msg.sender)
-  │             || _receiptFragments[msg.sender][to] != 0,
-  │         "Sender identity not available to receiver"
-  │     );
-  │     require(
-  │         identityRegistry.isPublic(to)
-  │             || _receiptFragments[to][msg.sender] != 0,
-  │         "Receiver identity not available to sender"
-  │     );
+  │     // Bilateral identity check.  The primary identity material is the
+  │     // per-pair receipt fragment stored at approve() time.  If a side
+  │     // has no fragment AND that side is bound under a Public Identity,
+  │     // fall back to the bound _identityHash for that side.  EOA<->EOA
+  │     // Encrypted transfers MUST have prior CP receipts (no fallback).
+  │     bytes32 fromHash = _receiptFragments[msg.sender][to];
+  │     bytes32 toHash   = _receiptFragments[to][msg.sender];
+  │ 
+  │     if (toHash == 0) {
+  │         require(
+  │             identityRegistry.isPublicIdentity(msg.sender)
+  │              || identityRegistry.isPublicIdentity(to),
+  │             "no receipt fragment and no public side"
+  │         );
+  │         toHash = identityRegistry.identityHash(to);
+  │     }
+  │     // fromHash always falls back best-effort to identityHash(from).
+  │     if (fromHash == 0) {
+  │         fromHash = identityRegistry.identityHash(msg.sender);
+  │     }
   │ 
   │     _transfer(msg.sender, to, amount);
   │     compliance.transferred(msg.sender, to, amount);
   │ 
-  │     // Emit minimal receipt -- no identity data, just hashes of
-  │     // pre-stored re-encrypted ElGamal ciphertexts
   │     emit BuckTransferReceipt(
   │         msg.sender, to, amount,
-  │         _receiptFragments[msg.sender][to],
-  │         _receiptFragments[to][msg.sender]
+  │         fromHash, toHash
   │     );
   │ 
   │     return true;
   │ }
   └────
 
-  The bilateral identity check enforces that both parties' identities
-  are available to their counterparty before any BUCK can move.  A
-  *public* account (pool operator, insurer) is exempt from the `approve'
-  requirement because its `identity_data' is already world-readable in
-  the IdentityRegistry.  This gives four transfer modes:
+  The bilateral identity check enforces that both parties are
+  `isVerified' and that the receipt event carries identity material for
+  both sides.  A *Public-Identity contract* (pool, router, treasury
+  bound via `bindContract(target, pk, E, true)') lets the pool side fall
+  back to the bound `_identityHash(pool)' when no per-pair receipt
+  fragment exists.  Approvals are still always CP-bound; there is no
+  isPublicIdentity shortcut at approve time.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Sender   Receiver  Approvals needed                
-  ────────────────────────────────────────────────────
-   Private  Private   Both `approve' each other       
-   Private  Public    Only sender approves receiver   
-   Public   Private   Only receiver approves sender   
-   Public   Public    None – standard ERC-20 transfer 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Sender  Receiver  Approvals needed                              
+  ─────────────────────────────────────────────────────────────────
+   EOA     EOA       Both must call CP-bound `approve' before move 
+   EOA     Pub-Id    Only sender approves; pool side falls back    
+   Pub-Id  EOA       Sender approves; receiver side falls back     
+   Pub-Id  Pub-Id    One side may approve; both can fall back      
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  For two public accounts, the transfer is a plain ERC-20 `transfer'
-  with identity verification – no Holochain wallet, no Chaum-Pedersen
-  proofs, no off-chain coordination.  All identity data is already
-  on-chain.
-
-  The `transferFrom' path applies the same bilateral check.  The receipt
-  fragment hashes were stored during `approve', so no additional
-  identity data passes through the DeFi router.  The Chaum-Pedersen
-  proof was verified once (at `approve' time); subsequent transfers emit
-  only the minimal receipt event (~2,000 gas).
+  The `transferFrom' path applies the same bilateral check.  Receipt
+  fragments were stored during `approve', so no additional identity data
+  passes through a DeFi router.  Chaum-Pedersen verification ran once at
+  `approve' time; subsequent transfers emit only the minimal receipt
+  event (~2,000 gas plus two SLOADs for the fragments).
 
 
-6.5 Holochain: Off-Chain Computation and Storage
+7.5 Holochain: Off-Chain Computation and Storage
 ────────────────────────────────────────────────
 
   Alice's wallet (a Holochain hApp) performs all credential derivation
@@ -2004,7 +2284,7 @@ Table of Contents
     provides only an anchor hash.
 
 
-6.5.1 Agent Isolation Model
+7.5.1 Agent Isolation Model
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice does not reuse a single Holochain agent across multiple BUCK
@@ -2055,7 +2335,7 @@ Table of Contents
   environment; the proofs provide the guarantees.
 
 
-6.6 Summary: What Each Layer Sees
+7.6 Summary: What Each Layer Sees
 ─────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2082,7 +2362,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-7 Cryptographic Receipts: 3-Party ECDH
+8 Cryptographic Receipts: 3-Party ECDH
 ══════════════════════════════════════
 
   While the BUCK contract emits only opaque ciphertext hashes on-chain,
@@ -2099,7 +2379,7 @@ Table of Contents
   coordination.
 
 
-7.1 The Three Keys
+8.1 The Three Keys
 ──────────────────
 
   For a transfer from Alice to a DeFi pool operated by Bob:
@@ -2132,7 +2412,7 @@ Table of Contents
   emitted in events.
 
 
-7.2 Encryption Scheme
+8.2 Encryption Scheme
 ─────────────────────
 
   The wallet (Holochain hApp) computes the encryption key via ECDH:
@@ -2168,10 +2448,10 @@ Table of Contents
   └────
 
 
-7.3 Who Can Decrypt
+8.3 Who Can Decrypt
 ───────────────────
 
-7.3.1 Sender (Alice)
+8.3.1 Sender (Alice)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice has `k_s' (her identity private key) and can recompute `k_e'
@@ -2186,8 +2466,8 @@ Table of Contents
   └────
 
 
-7.3.2 Receiver / Pool Operator (Bob)
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+8.3.2 Receiver (Bob)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Bob has `k_r' (his identity private key) and looks up Alice's identity
   public key from the registry:
@@ -2201,10 +2481,13 @@ Table of Contents
   └────
 
 
-7.3.3 Court-Compelled Decryption (Subpoena of Pool Operator)
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+8.3.3 Court-Compelled Decryption (Subpoena of a Counterparty)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  A court subpoenas Bob to decrypt a specific transaction receipt:
+  A court subpoenas Bob (a verified counterparty to the transfer) to
+  decrypt a specific transaction receipt.  The pool itself cannot be
+  subpoenaed – it has no decryption key.  The only cooperators who can
+  produce plaintext are the verified humans who exchanged the BUCK:
 
   ┌────
   │ // Court provides: the transaction hash
@@ -2222,7 +2505,7 @@ Table of Contents
   cannot decrypt receipts where he is not a party.
 
 
-7.3.4 Regulatory Escrow (Optional)
+8.3.4 Regulatory Escrow (Optional)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   A regulatory authority's public key `K_reg' adds a third shared
@@ -2251,25 +2534,28 @@ Table of Contents
   transaction.
 
 
-8 Play-by-Play: BUCK/USDT Swap on Uniswap
+9 Play-by-Play: BUCK/USDT Swap on Uniswap
 ═════════════════════════════════════════
 
   A complete BUCK/USDT swap, step by step: from Alice's initial KYC
   ceremony through the final on-chain transfer, showing every piece of
   data, where it resides, and what each party does.  Alice is a private
-  account; Bob's pool is public (`isPublic = true').  The
-  Private-to-Public transfer mode means Alice calls `approve' once (~29K
-  gas for Chaum-Pedersen verification), no `approve' is needed from
-  Bob's side, and the `transferFrom' performs only boolean flag checks
-  with no cryptography.  Each step shows the on-chain gas cost, the
-  Holochain wallet actions, and what an observer (Eve) can and cannot
-  see.
+  EOA; Bob's pool is a *Public-Identity contract*
+  (`isPublicIdentity(pool) = true', bound at deploy time via
+  `bindContract(pool, pk_bob, E_bob, true)').  The Private-to-Public-
+  Identity mode means Alice still calls `approve' (always CP-bound, ~29K
+  gas) – there is no isPublicIdentity shortcut at approve time – but no
+  `approve' is needed from the pool's side because its receipt fragment
+  falls back to the bound `_identityHash(pool)'.  `transferFrom'
+  performs only state lookups, no cryptography.  Each step shows the
+  on-chain gas cost, the Holochain wallet actions, and what an observer
+  (Eve) can and cannot see.
 
   Alice holds 1000 BUCK and wants to swap 500 BUCK for USDT.  Bob has
   deployed a BUCK/USDT Uniswap V3 pool.
 
 
-8.1 Prerequisites (One-Time Setup)
+9.1 Prerequisites (One-Time Setup)
 ──────────────────────────────────
 
   ┌────
@@ -2288,24 +2574,34 @@ Table of Contents
   │          alice_wallet, pk_alice, E_alice, sigma', pi)
   │   6. identityRegistry.isVerified(alice_wallet) == true
   │ 
-  │ Bob (pool deployer):
-  │   1. Completed KYC (same ceremony as Alice)
-  │   2. Derived credential for his account (same offline process)
-  │   3. Credential registered in IdentityRegistry (~235K gas)
-  │   4. Created BUCK/USDT pool via Uniswap factory
-  │      -> pool deployed at address 0xPOOL
-  │   5. Derived and registered a separate credential for the pool
-  │      (from same PS-signed identity, via the Identity Fountain):
-  │      identityRegistry.registerCredential(
-  │          0xPOOL, pk_bob_pool, E_bob_pool, sigma'_pool, pi_pool)
-  │   6. identityRegistry.isVerified(0xPOOL) == true
+  │ Pool operator Bob:
+  │   1. Completed KYC (same ceremony as Alice).  His EOA is registered
+  │      in IdentityRegistry with credential (pk_bob, E_bob).
+  │   2. Deploys the BUCK/USDT pool atomically with bindContract:
+  │      BuckAwareDeployer.deployAndBind(
+  │          UniswapV2Factory.createPair.selector(BUCK, USDT),
+  │          pk_bob, E_bob,
+  │          isPublicIdentity_=true
+  │      )
+  │      -> pair at address 0xPOOL bound under Bob's published (pk, E),
+  │         with isPublicIdentity[0xPOOL] = true and
+  │         isVerified[0xPOOL]       = true.
+  │      Atomic deploy+bind defends against first-binder-wins front-running.
+  │   3. Same atomic pattern for the router 0xROUTER.
+  │ 
+  │ After binding:
+  │   isVerified(0xPOOL)       == true
+  │   isPublicIdentity(0xPOOL) == true
+  │   identityHash(0xPOOL)     == keccak(pk_bob, E_bob)
+  │   -- Bob's EOA secret key sk_bob decrypts every ciphertext that
+  │      uses the pool's bound identity.
   └────
 
 
-8.2 The Swap Transaction
+9.2 The Swap Transaction
 ────────────────────────
 
-8.2.1 Step 1: Alice Approves the Router (Identity Handshake)
+9.2.1 Step 1: Alice Approves the Router (Identity Handshake)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice's wallet (Holochain hApp) prepares the identity exchange
@@ -2348,14 +2644,18 @@ Table of Contents
   By the time `transferFrom' is called later (by the router), the
   verified identity fragment is already stored.
 
-  Note: the pool (`0xPOOL') is a *public* account – its `identity_data'
-  is registered publicly in the IdentityRegistry.  Alice's wallet can
-  look it up directly, so the pool does not need to call `approve' for
-  Alice.  The bilateral identity check in `transferFrom' passes because
-  `isPublic(0xPOOL) == true' satisfies the pool-side requirement.
+  Note: the pool (`0xPOOL') is a *Public-Identity contract* – its bound
+  `(pk, E)' is the operator's published material in the
+  IdentityRegistry.  Alice's wallet reads `pk_pool == pk_bob' from the
+  registry, decrypts her own ciphertext to recover `M', then re-encrypts
+  under `pk_bob' to produce `E_bob' for the CP proof.  The pool itself
+  does not call `approve' back – the bilateral identity check in
+  `transferFrom' is satisfied because `isPublicIdentity(0xPOOL) == true'
+  lets the pool-side fragment fall back to `_identityHash(0xPOOL)'.
+  Approve, however, was still fully CP-bound on Alice's side.
 
 
-8.2.2 Step 2: Alice Calls the Router
+9.2.2 Step 2: Alice Calls the Router
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   ┌────
@@ -2375,7 +2675,7 @@ Table of Contents
   Uniswap contract that knows nothing about BUCK identity.
 
 
-8.2.3 Step 3: Router Calls BUCK.transferFrom (Minimal Receipt Emission)
+9.2.3 Step 3: Router Calls BUCK.transferFrom (Minimal Receipt Emission)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Inside the router, the swap triggers:
@@ -2395,16 +2695,24 @@ Table of Contents
   │     require(identityRegistry.isVerified(to),   "Receiver not verified");
   │     require(compliance.canTransfer(from, to, amount), "Compliance");
   │ 
+  │     bytes32 fromHash = _receiptFragments[from][to];   // keccak256(E_pool from Alice)
+  │     bytes32 toHash   = _receiptFragments[to][from];    // 0 -- pool never approved Alice
+  │     if (toHash == 0) {
+  │         require(
+  │             identityRegistry.isPublicIdentity(from)
+  │              || identityRegistry.isPublicIdentity(to),
+  │             "no receipt fragment and no public side"
+  │         );
+  │         toHash = identityRegistry.identityHash(to);    // _identityHash(0xPOOL)
+  │     }
+  │     if (fromHash == 0) {
+  │         fromHash = identityRegistry.identityHash(from);
+  │     }
+  │ 
   │     _transfer(from, to, amount);
   │     compliance.transferred(from, to, amount);
   │ 
-  │     // Emit minimal receipt -- ONLY hashes of pre-stored ElGamal ciphertexts
-  │     emit BuckTransferReceipt(
-  │         from, to, amount,
-  │         _receiptFragments[from][to],     // keccak256 of Alice's E_bob
-  │         _receiptFragments[to][from]       // keccak256 of Bob's E_alice
-  │     );
-  │ 
+  │     emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
   │     return true;
   │ }
   └────
@@ -2419,7 +2727,7 @@ Table of Contents
   encrypts the same identity as her registered credential.
 
 
-8.2.4 Step 4: Wallet Constructs the Full Receipt (Off-Chain)
+9.2.4 Step 4: Wallet Constructs the Full Receipt (Off-Chain)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice's wallet (Holochain hApp) observes the `BuckTransferReceipt'
@@ -2468,7 +2776,7 @@ Table of Contents
   └────
 
 
-8.2.5 Step 5: Pool Executes the Swap
+9.2.5 Step 5: Pool Executes the Swap
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The Uniswap pool sends USDT to Alice.  Since USDT is not an Alberta
@@ -2476,7 +2784,7 @@ Table of Contents
   follows whatever rules USDT imposes, which is typically none).
 
 
-8.2.6 Step 6: Completed State
+9.2.6 Step 6: Completed State
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   ┌────
@@ -2523,8 +2831,8 @@ Table of Contents
   └────
 
 
-9 Edge Cases and Design Considerations
-══════════════════════════════════════
+10 Edge Cases and Design Considerations
+═══════════════════════════════════════
 
   Practical deployment scenarios beyond the simple Alice-to-Bob model:
   flash loans (atomic borrow-repay cycles), multi-hop swaps (BUCK
@@ -2537,8 +2845,8 @@ Table of Contents
   migration path via EIP-2537).
 
 
-9.1 Flash Loans and Atomic Transactions
-───────────────────────────────────────
+10.1 Flash Loans and Atomic Transactions
+────────────────────────────────────────
 
   A flash loan borrows and repays in a single transaction.  The
   borrower's address must be verified, and the lending contract must be
@@ -2546,8 +2854,8 @@ Table of Contents
   single atomic event.
 
 
-9.2 Multi-Hop Swaps
-───────────────────
+10.2 Multi-Hop Swaps
+────────────────────
 
   A swap routed through BUCK -> WETH -> USDT involves two BUCK transfers
   (BUCK -> pool1, pool1 -> pool2 if intermediate).  Each BUCK transfer
@@ -2555,8 +2863,8 @@ Table of Contents
   registered if it holds BUCK transiently.
 
 
-9.3 Contract-to-Contract Transfers
-──────────────────────────────────
+10.3 Contract-to-Contract Transfers
+───────────────────────────────────
 
   When one DeFi contract sends BUCK to another (e.g., a yield aggregator
   moving BUCK between pools), both contracts must be registered.  The
@@ -2565,8 +2873,8 @@ Table of Contents
   identified legal operator at each end.
 
 
-9.4 Wrapping and Bridging
-─────────────────────────
+10.4 Wrapping and Bridging
+──────────────────────────
 
   If BUCK is wrapped (WBUCK) for use on another chain, the wrapping
   contract must be registered.  The wrap/unwrap generates receipts.  On
@@ -2577,8 +2885,8 @@ Table of Contents
   deployed.
 
 
-9.5 Gas Costs
-─────────────
+10.5 Gas Costs
+──────────────
 
   The design has three gas-consuming identity operations:
 
@@ -2607,30 +2915,38 @@ Table of Contents
   transfer.
 
 
-9.6 Privacy of Pool Deployer Identity
-─────────────────────────────────────
+10.6 Pool Operator Identity Binding
+───────────────────────────────────
 
-  The pool deployer's ElGamal credential is stored in the
-  IdentityRegistry alongside the pool contract's address.  The
-  credential `E_deployer' is an opaque ciphertext – anyone can see it
-  on-chain, but no one can decrypt it without the deployer's identity
-  private key.
+  Under `bindContract', the pool's identity is the operator's identity.
+  `isVerified(0xPOOL) == true' and `isPublicIdentity(0xPOOL) == true'
+  once the operator (or `BuckAwareDeployer.deployAndBind' atomically)
+  has bound the pool to the operator's published `(pk, E)'.  The pool
+  itself holds no decryption key; the operator does, and the operator's
+  `sk' decrypts every receipt that uses `_identityHash(pool)'.
 
-  What is publicly visible: "0xPOOL is operated by a verified entity"
-  (because `isVerified(0xPOOL) == true').  What is *not* visible: who
-  that entity is.  The deployer's real identity is revealed only in the
-  ElGamal ciphertexts re-encrypted for specific counterparties during
-  `approve' handshakes.
+  *First-binder-wins.* Because `bindContract' requires only that
+  `target.code.length > 0' and that the address has not yet been bound,
+  an attacker can race a passive deployment and bind a freshly deployed
+  contract to /their/ key before the deployer does.  The defense is
+  atomic deploy+bind via `BuckAwareDeployer'; passive `createPair'
+  followed by a separate `bindContract' from the operator's wallet is
+  unsafe in adversarial settings.
 
-  If a deployer wants public identification (e.g., "DeFi Ops Inc.,
-  Alberta"), they can register a separate plaintext identity claim
-  alongside their encrypted credential.  This is the expected case for
-  commercial DeFi operators – public identity builds trust and attracts
-  liquidity.
+  The factory transaction is on-chain and pseudonymous; the
+  IdentityRegistry has no record of who deployed the contract.  Once
+  bound, the operator's identity (the EOA who registered `(pk_op,
+  E_op)') is the pool's accountability surface.
+
+  For commercial DeFi operators who want public branding ("DeFi Ops
+  Inc., Alberta"), publication happens off-chain (their own website, the
+  IdentityRegistry's optional `plaintextIdentity' claim on the
+  /operator's EOA/, social channels) – `bindContract' supplies the
+  on-chain link between contract and operator credential.
 
 
-9.7 alt_bn128 Security Horizon
-──────────────────────────────
+10.7 alt_bn128 Security Horizon
+───────────────────────────────
 
   The alt_bn128 curve (BN254) offers ~128-bit security for discrete
   logarithm in G_1 but only ~100-bit security against pairing-based
@@ -2675,7 +2991,7 @@ Table of Contents
   constraint with the entire Ethereum L2 scaling ecosystem.
 
 
-10 Alternative Approaches Considered
+11 Alternative Approaches Considered
 ════════════════════════════════════
 
   Five cryptographic alternatives were evaluated before settling on the
@@ -2694,7 +3010,7 @@ Table of Contents
   trusted setup of alternatives.
 
 
-10.1 Pedersen Commitments + Groth16 ZK Proofs
+11.1 Pedersen Commitments + Groth16 ZK Proofs
 ─────────────────────────────────────────────
 
   In this approach, the issuer stores a Pedersen commitment `C = v*G +
@@ -2732,7 +3048,7 @@ Table of Contents
     only adds attack surface.
 
 
-10.2 Proxy Re-Encryption (NuCypher Umbral)[5]
+11.2 Proxy Re-Encryption (NuCypher Umbral)[5]
 ─────────────────────────────────────────────
 
   In PRE, Alice generates a re-encryption key `rk_{A->B}' that allows an
@@ -2767,7 +3083,7 @@ Table of Contents
     model makes it unnecessary.
 
 
-10.3 BBS+ Signatures with Selective Disclosure
+11.3 BBS+ Signatures with Selective Disclosure
 ──────────────────────────────────────────────
 
   BBS+ (pairing-based multi-message signatures) allows an issuer to sign
@@ -2807,7 +3123,7 @@ Table of Contents
     mechanism.
 
 
-10.4 Camenisch-Shoup Verifiable Encryption
+11.4 Camenisch-Shoup Verifiable Encryption
 ──────────────────────────────────────────
 
   A purpose-built primitive: encrypt a value and simultaneously prove
@@ -2828,7 +3144,7 @@ Table of Contents
     efficient.
 
 
-10.5 Pedersen Equality Proofs (Homomorphic Comparison)[6]
+11.5 Pedersen Equality Proofs (Homomorphic Comparison)[6]
 ─────────────────────────────────────────────────────────
 
   Pedersen commitments support homomorphic equality checking: given `C_1
@@ -2853,7 +3169,7 @@ Table of Contents
     relation on the randomness).
 
 
-10.6 Comparison Summary
+11.6 Comparison Summary
 ───────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2879,7 +3195,7 @@ Table of Contents
   alternatives.
 
 
-11 Summary: Identity Requirement by Risk Level
+12 Summary: Identity Requirement by Risk Level
 ══════════════════════════════════════════════
 
   The table below maps every Alberta Buck operation to its risk level,

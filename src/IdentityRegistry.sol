@@ -73,8 +73,14 @@ contract IdentityRegistry {
     mapping(address => BN254.G1Point) internal _pk;
     mapping(address => ElGamalCT)     internal _E_addr;
     mapping(address => bool)          public  isVerified;
-    mapping(address => bool)          public  isPublic;
     mapping(address => address)       public  issuerOf;
+
+    /// @notice Marks a binding whose plaintext identity m is publicly disclosed
+    ///         off-chain (e.g., Uniswap pair operated by a known counterparty).
+    ///         The on-chain (pk, E_addr) record is identical in shape to an
+    ///         encrypted-identity binding; the flag signals to indexers and
+    ///         auditors that off-chain attestation pins m to a known operator.
+    mapping(address => bool)          public  isPublicIdentity;
 
     // ---- events -------------------------------------------------------------
 
@@ -82,7 +88,7 @@ contract IdentityRegistry {
     event IssuerTrusted(address indexed issuer);
     event IssuerRevoked(address indexed issuer);
     event Registered(address indexed account, address indexed issuer);
-    event PublicSet(address indexed account, bool isPublic);
+    event ContractBound(address indexed target, address indexed binder, bool isPublicIdentity);
 
     // ---- constructor / governance ------------------------------------------
 
@@ -165,24 +171,38 @@ contract IdentityRegistry {
         emit Registered(msg.sender, issuer);
     }
 
-    /// @notice Toggle account's public-identity flag (skips approve-time CP for receives).
-    function setPublic(bool _isPublic) external {
-        require(isVerified[msg.sender], "not registered");
-        isPublic[msg.sender] = _isPublic;
-        emit PublicSet(msg.sender, _isPublic);
-    }
+    // ---- contract identity binding -----------------------------------------
 
-    /// @notice Governance-only: flag a system contract address (e.g. the Notes
-    ///         commitment pool) as public.  System accounts have no PS-signed
-    ///         credential, so they cannot self-register; this hook lets them
-    ///         act as the recipient side of identity-bound transfers without
-    ///         a Chaum-Pedersen receipt.  No `isVerified` flag is set: the
-    ///         account remains an unregistered public sink.
-    function setSystemPublic(address account, bool _isPublic) external {
-        require(msg.sender == governance, "not governance");
-        require(account != address(0),    "account=0");
-        isPublic[account] = _isPublic;
-        emit PublicSet(account, _isPublic);
+    /// @notice Bind a (pk, E_addr) Identity to a deployed contract address.
+    ///         No PSSig / NIZK is required: trust derives from atomic
+    ///         deploy+bind (use `BuckAwareDeployer.deployAndBind` to deploy
+    ///         and bind in a single transaction so no front-runner has a
+    ///         window to register a competing binding before the operator).
+    ///         For pre-existing contracts the first binder wins.
+    /// @dev    The binding shape is identical to a self-registered EOA:
+    ///         (pk, E_addr) is stored, isVerified is set true.  The
+    ///         `isPublicIdentity_` flag records that the operator has chosen
+    ///         to publicly disclose m off-chain (typical for AMM pools and
+    ///         other BUCK-unaware contracts whose operator wants on-chain
+    ///         counterparty audit trails to be openable on subpoena).  An
+    ///         encrypted-identity binding (isPublicIdentity_ = false) is
+    ///         supported by the same call but currently exercised only by
+    ///         BUCK-aware contracts that ship the operator's off-chain
+    ///         per-counterparty pre-approval flow (deferred).
+    function bindContract(
+        address target,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_
+    ) external {
+        require(target.code.length > 0, "target not a deployed contract");
+        require(!isVerified[target],    "already bound");
+
+        _pk[target]              = pk;
+        _E_addr[target]          = E;
+        isVerified[target]       = true;
+        isPublicIdentity[target] = isPublicIdentity_;
+        emit ContractBound(target, msg.sender, isPublicIdentity_);
     }
 
     // ---- approve verification ----------------------------------------------

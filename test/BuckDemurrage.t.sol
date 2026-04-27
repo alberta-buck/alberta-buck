@@ -39,9 +39,12 @@ contract BuckDemurrageTest is Test {
         reg = new IdentityRegistry(GOV);
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
+        // Bob acts as a Public-Identity counterparty contract throughout the
+        // demurrage tests (no CP-proof receipts are exchanged here -- the
+        // tests focus on demurrage / Jubilee / transferCarrying mechanics).
         bob   = address(uint160(_u(".bob.registrant")));
         _registerAlice();
-        _registerBob();
+        _bindPublicPool(bob);
 
         credit = new BuckCredit();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
@@ -108,13 +111,6 @@ contract BuckDemurrageTest is Test {
         reg.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
     }
 
-    function _registerBob() internal {
-        BN254.G1Point memory pk = _g1(".bob.elgamal_kp.pk");
-        IdentityRegistry.ElGamalCT memory E = _ct(".bob.ciphertext");
-        vm.prank(bob);
-        reg.register(ISSUER, pk, E, _ps("bob"), _regProof("bob"));
-    }
-
     function _grantCredit(address client, uint256 faceValue) internal {
         uint256 tokenId = credit.createCredit(
             client, 0, faceValue, faceValue,
@@ -130,15 +126,16 @@ contract BuckDemurrageTest is Test {
         buck.mint(mintAmt);
     }
 
-    function _approveBobMax() internal {
-        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
-        vm.prank(alice);
-        buck.approve(bob, type(uint256).max, E_b, _cpProof());
-    }
-
-    function _bobPublic() internal {
-        vm.prank(bob);
-        reg.setPublic(true);
+    /// @dev Plant minimal contract bytecode at `target` (so bindContract's
+    ///      code.length check passes), then bind a placeholder Public Identity.
+    function _bindPublicPool(address target) internal {
+        vm.etch(target, hex"60006000fd");
+        BN254.G1Point memory pk = BN254.g1();
+        IdentityRegistry.ElGamalCT memory E = IdentityRegistry.ElGamalCT({
+            R: BN254.g1(),
+            C: BN254.g1()
+        });
+        reg.bindContract(target, pk, E, true);
     }
 
     // ---- baseline behaviour -----------------------------------------------
@@ -156,7 +153,6 @@ contract BuckDemurrageTest is Test {
         // Jubilee participates in demurrage: after it accrues a balance, it
         // owes fee on that balance like any other Carrying account.
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         // Warp and transfer to trigger an _update, which advance-mints to Jubilee.
         vm.warp(block.timestamp + 1 hours);
@@ -201,7 +197,6 @@ contract BuckDemurrageTest is Test {
 
     function test_transfer_burnsSenderFee_andAdvanceMintsJubilee() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         vm.warp(block.timestamp + 1 hours);
 
@@ -236,7 +231,6 @@ contract BuckDemurrageTest is Test {
 
     function test_transfer_remainingBalanceStartsFreshClock() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         vm.warp(block.timestamp + 1 hours);
 
@@ -260,7 +254,6 @@ contract BuckDemurrageTest is Test {
         // NOT burn any extra fee from Alice to Jubilee.  After the carrying
         // transfer, Jubilee should equal exactly jubileeTarget at this block.
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         vm.warp(block.timestamp + 1 hours);
         uint256 target = buck.jubileeTarget();
@@ -274,7 +267,6 @@ contract BuckDemurrageTest is Test {
 
     function test_transferCarrying_preservesTotalSpendable() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         vm.warp(block.timestamp + 1 hours);
 
@@ -290,7 +282,6 @@ contract BuckDemurrageTest is Test {
 
     function test_transferCarrying_recipientAbsorbsCarriedAge() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         vm.warp(block.timestamp + 1 hours);
 
@@ -312,7 +303,6 @@ contract BuckDemurrageTest is Test {
 
     function test_transferCarrying_senderRemainingKeepsOldAge() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         vm.warp(block.timestamp + 1 hours);
         uint256 aliceFeeBefore = buck.feeOwing(alice);
@@ -337,7 +327,6 @@ contract BuckDemurrageTest is Test {
 
     function test_transferCarrying_systemFeeDebtPreserved() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         vm.warp(block.timestamp + 1 hours);
 
@@ -353,7 +342,6 @@ contract BuckDemurrageTest is Test {
 
     function test_transferCarrying_thenStandardTransferBurnsCarriedFee() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         vm.warp(block.timestamp + 1 hours);
 
@@ -363,10 +351,8 @@ contract BuckDemurrageTest is Test {
         uint256 bobFeeOwed = buck.feeOwing(bob);
         assertGt(bobFeeOwed, 0, "bob inherited carried fee");
 
-        // Make alice public so bob can transfer to her without a receipt fragment.
-        vm.prank(alice);
-        reg.setPublic(true);
-
+        // Bob is a Public-Identity contract -> the receipt-fragment fallback
+        // kicks in for the bob -> alice transfer (no prior CP approve needed).
         uint256 supplyBefore = buck.totalSupply();
         vm.prank(bob);
         buck.transfer(alice, 1e18);
@@ -404,7 +390,6 @@ contract BuckDemurrageTest is Test {
     ///         continuously; the actual balance catches up on first activity.
     function test_dormantAccount_caughtUpByActivity() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        _bobPublic();
 
         // Alice is dormant for a full year.
         vm.warp(block.timestamp + 365 days);

@@ -12,6 +12,7 @@ ffi = false
 fs_permissions = [
     { access = "read", path = "./test/vectors" },
     { access = "read", path = "./build/snark" },
+    { access = "read", path = "./out" },
 ]
 
 # Remappings for installed dependencies
@@ -20,6 +21,9 @@ remappings = [
     "@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/",
     "@uniswap/v3-core/=lib/v3-core/",
     "@uniswap/v3-periphery/=lib/v3-periphery/",
+    "@uniswap/v2-core/=lib/v2-core/",
+    "@uniswap/v2-periphery/=lib/v2-periphery/",
+    "@uniswap/lib/=lib/solidity-lib/",
 ]
 
 [profile.default.fmt]
