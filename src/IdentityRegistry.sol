@@ -85,6 +85,34 @@ contract IdentityRegistry {
     ///         auditors that off-chain attestation pins m to a known operator.
     mapping(address => bool)          public  isPublicIdentity;
 
+    /// @notice True if outflows from this address dispatch through the
+    ///         demurrage Carrying path (recipient absorbs the proportional
+    ///         age basis via `_demurrage[to]`).  Default is false (Non-
+    ///         Carrying) for EOAs registered via register().  bindContract()
+    ///         takes an explicit flag; service contracts (AMM pools, Notes,
+    ///         the Jubilee fund) bind with isCarrying_=true; user-controlled
+    ///         multisig / AA wallets bind with isCarrying_=false.
+    mapping(address => bool)          public  isCarrying;
+
+    /// @notice True once any counterparty has issued an identity-bound
+    ///         approve naming this address as the spender.  Once true,
+    ///         setIsCarrying() can no longer change isCarrying[a] -- the
+    ///         flavour the recipient consented to is locked in.  The
+    ///         freeze is one-way; there is no unfreeze.
+    mapping(address => bool)          public  carryingFrozen;
+
+    /// @notice The msg.sender of the bindContract() call that bound this
+    ///         address.  Only the binder may call setIsCarrying() before
+    ///         the flag is frozen by a counterparty's approve.  EOAs are
+    ///         self-registered and have no binder (binderOf[eoa] == 0),
+    ///         so setIsCarrying() can never target an EOA.
+    mapping(address => address)       public  binderOf;
+
+    /// @notice Authorised Buck contract -- the only address permitted to
+    ///         call markApproved() to freeze the carrying flag.  Set once
+    ///         by governance via setBuck() after Buck is deployed.
+    address                           public  buck;
+
     // ---- events -------------------------------------------------------------
 
     event GovernanceTransferred(address indexed previous, address indexed next);
@@ -92,6 +120,9 @@ contract IdentityRegistry {
     event IssuerRevoked(address indexed issuer);
     event Registered(address indexed account, address indexed issuer);
     event ContractBound(address indexed target, address indexed binder, bool isPublicIdentity);
+    event BuckSet(address indexed buck);
+    event CarryingFlagSet(address indexed target, bool isCarrying);
+    event CarryingFrozen(address indexed target);
 
     // ---- constructor / governance ------------------------------------------
 
@@ -122,6 +153,17 @@ contract IdentityRegistry {
         isTrustedIssuer[issuer] = false;
         delete _trustedIssuers[issuer];
         emit IssuerRevoked(issuer);
+    }
+
+    /// @notice One-time governance setter for the authorised Buck contract.
+    ///         Must be called once after Buck is deployed; the registry then
+    ///         accepts markApproved() calls only from this address.
+    function setBuck(address _buck) external {
+        require(msg.sender == governance, "not governance");
+        require(buck == address(0),       "buck already set");
+        require(_buck != address(0),      "buck=0");
+        buck = _buck;
+        emit BuckSet(_buck);
     }
 
     // ---- views --------------------------------------------------------------
@@ -206,11 +248,22 @@ contract IdentityRegistry {
     ///         supported by the same call but currently exercised only by
     ///         BUCK-aware contracts that ship the operator's off-chain
     ///         per-counterparty pre-approval flow (deferred).
+    /// @dev    `isCarrying_` selects the demurrage transfer flavour for
+    ///         outflows from this address.  Service contracts that hold
+    ///         BUCK on behalf of others (Notes pool, AMM pools, the Jubilee
+    ///         fund itself) bind with `isCarrying_=true` so recipients
+    ///         absorb the proportional age basis on disbursement.  Multisig
+    ///         and AA wallets that act on behalf of a single user bind
+    ///         with `isCarrying_=false`.  msg.sender is recorded as the
+    ///         binder; only the binder may later call setIsCarrying() to
+    ///         change the flag, and only before any counterparty has
+    ///         frozen it via approve().
     function bindContract(
         address target,
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
-        bool isPublicIdentity_
+        bool isPublicIdentity_,
+        bool isCarrying_
     ) external {
         require(target.code.length > 0,  "target not a deployed contract");
         require(!_isRegistered(target),  "already bound");
@@ -218,7 +271,31 @@ contract IdentityRegistry {
         _pk[target]              = pk;
         _E_addr[target]          = E;
         isPublicIdentity[target] = isPublicIdentity_;
+        isCarrying[target]       = isCarrying_;
+        binderOf[target]         = msg.sender;
         emit ContractBound(target, msg.sender, isPublicIdentity_);
+        emit CarryingFlagSet(target, isCarrying_);
+    }
+
+    /// @notice Pre-approval reconfiguration of the carrying flag.  Only the
+    ///         original binder may call this, and only while no counterparty
+    ///         has yet issued an approve naming `target` as the spender.
+    function setIsCarrying(address target, bool value) external {
+        require(msg.sender == binderOf[target], "not binder");
+        require(!carryingFrozen[target],        "carrying frozen by approval");
+        isCarrying[target] = value;
+        emit CarryingFlagSet(target, value);
+    }
+
+    /// @notice Freeze `spender`'s carrying flag.  Called from Buck.approve()
+    ///         the first time a counterparty issues an identity-bound
+    ///         approve naming `spender`; idempotent thereafter.
+    function markApproved(address spender) external {
+        require(msg.sender == buck, "only Buck");
+        if (!carryingFrozen[spender]) {
+            carryingFrozen[spender] = true;
+            emit CarryingFrozen(spender);
+        }
     }
 
     // ---- approve verification ----------------------------------------------

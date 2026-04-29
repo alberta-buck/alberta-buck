@@ -49,6 +49,8 @@ contract BuckDemurrageTest is Test {
         credit = new BuckCredit();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(GOV);
+        reg.setBuck(address(buck));
     }
 
     // ---- JSON / identity helpers (copied from Buck.t.sol) ------------------
@@ -135,34 +137,22 @@ contract BuckDemurrageTest is Test {
             R: BN254.g1(),
             C: BN254.g1()
         });
-        reg.bindContract(target, pk, E, true);
+        reg.bindContract(target, pk, E, true, true);
     }
 
-    // ---- baseline behaviour -----------------------------------------------
+    // ---- baseline ---------------------------------------------------------
 
     function test_demurrage_zeroAtMint() public {
         _setupAliceWithBuck(1000e18, 100e18);
-        // Same block as mint: no time has elapsed since the index was bumped, so
-        // alice's lastTouch equals cumIndex.
-        assertEq(buck.feeOwing(alice), 0, "fee should be 0 same block as mint");
-        assertEq(buck.feeOwing(POOL),  0, "POOL fee should be 0 same block as mint");
-        assertEq(buck.jubileeActual(), 0, "no fees burned yet");
-    }
-
-    function test_demurrage_jubileeIsExempt() public {
-        // Conservation model: Jubilee never receives a fee transfer and is
-        // exempt from per-account demurrage.  feeOwing(jubilee) is always 0
-        // and rawBalanceOf(jubilee) is always 0 (modulo any voluntary
-        // transfer in, which tests don't perform).
-        _setupAliceWithBuck(1000e18, 100e18);
-
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(alice);
-        buck.mint(1e18);
-
-        assertEq(buck.rawBalanceOf(address(buck)), 0, "Jubilee never holds raw under conservation");
-        assertEq(buck.feeOwing(address(buck)),     0, "Jubilee exempt from demurrage");
-        assertEq(buck.balanceOf(address(buck)),    0, "Jubilee balanceOf == 0");
+        // Same block as mint: alice's _timestamp == now, _demurrage == 0.
+        assertEq(buck.feeOwing(alice),     0, "fee 0 same block as mint");
+        assertEq(buck.balanceOfFees(alice), 0, "no locked dust at mint");
+        // POOL just received the premium -- crystallized, _demurrage == 0,
+        // _timestamp == now -- so its fee is also 0.
+        assertEq(buck.feeOwing(POOL),      0, "POOL fee 0 same block");
+        // Jubilee got 0 from accrual (elapsed == 0 since contract construction
+        // assuming no warp before mint).
+        assertEq(buck.jubileeActual(),     0, "Jubilee not yet accrued");
     }
 
     function test_demurrage_balanceOfReflectsFee() public {
@@ -171,207 +161,317 @@ contract BuckDemurrageTest is Test {
 
         vm.warp(block.timestamp + 1 hours);
         uint256 fee = buck.feeOwing(alice);
-        assertGt(fee, 0, "fee must accrue after warp");
-        assertEq(buck.balanceOf(alice), balAtMint - fee, "balanceOf == raw - fee");
+        assertGt(fee, 0, "fee accrues after warp");
+        assertEq(buck.balanceOf(alice),     balAtMint - fee, "balanceOf == raw - fee");
+        assertEq(buck.balanceOfFees(alice), fee,             "balanceOfFees == fee (uncapped)");
     }
 
-    function test_demurrage_jubileeTargetTracksAreaUnderSupply() public {
-        _setupAliceWithBuck(1000e18, 100e18);
-        uint256 supply = buck.totalSupply();
-
-        // After 1 day: target ~= supply * (1day/365.25day) * 0.02
-        vm.warp(block.timestamp + 1 days);
-        uint256 expected = supply * 2 * 1 days / (uint256(365 days + 6 hours) * 100);
-        assertApproxEqRel(buck.jubileeTarget(), expected, 0.001e18, "target ~= supply * day/year * 2%");
-    }
-
-    // ---- transfer conserves supply ----------------------------------------
-
-    function test_transfer_conservesTotalSupply() public {
-        // Plain transfer never changes totalSupply -- demurrage is purely a
-        // view-time computation; no BUCK is burned or moved to Jubilee.
-        _setupAliceWithBuck(1000e18, 100e18);
-
-        vm.warp(block.timestamp + 1 hours);
-
-        uint256 supplyBefore = buck.totalSupply();
-        uint256 feeAliceBefore = buck.feeOwing(alice);
-        assertGt(feeAliceBefore, 0, "Alice has accrued fee");
-
-        vm.prank(alice);
-        buck.transfer(bob, 1e18);
-
-        assertEq(buck.totalSupply(), supplyBefore, "totalSupply unchanged across transfer");
-        assertEq(buck.jubileeActual(), 0, "Jubilee never receives BUCK under conservation");
-    }
-
-    function test_transfer_senderRetainsBuckAge() public {
-        // Sender's idx is NOT reset on outflow -- the residual raw keeps its
-        // age basis, and feeOwing on the remaining balance scales linearly
-        // with the now-smaller raw.
-        _setupAliceWithBuck(1000e18, 100e18);
-
-        vm.warp(block.timestamp + 1 hours);
-
-        uint256 rawBefore = buck.rawBalanceOf(alice);
-        uint256 feeBefore = buck.feeOwing(alice);
-        assertGt(feeBefore, 0, "Alice has accrued fee");
-
-        vm.prank(alice);
-        buck.transfer(bob, 1e18);
-
-        // Alice's residual raw = rawBefore - 1e18.  Her idx is unchanged, so
-        // her fee scales linearly: feeAfter / feeBefore == rawAfter / rawBefore.
-        uint256 rawAfter = buck.rawBalanceOf(alice);
-        uint256 feeAfter = buck.feeOwing(alice);
-        assertEq(rawAfter, rawBefore - 1e18, "raw decreased by transfer amount");
-
-        uint256 expectedFee = feeBefore * rawAfter / rawBefore;
-        assertApproxEqAbs(feeAfter, expectedFee, 1, "fee scales linearly with residual raw");
-    }
-
-    function test_transfer_recipientAbsorbsCarriedAge() public {
-        // All transfers are carrying under conservation: the recipient's idx
-        // is weighted-merged with the sender's idx, so the recipient inherits
-        // a slice of the sender's accumulated age proportional to value.
-        _setupAliceWithBuck(1000e18, 100e18);
-
-        vm.warp(block.timestamp + 1 hours);
-
-        // Pre-condition: bob is empty.
-        assertEq(buck.balanceOf(bob), 0, "bob starts empty");
-        assertEq(buck.feeOwing(bob),  0, "bob has no fee debt");
-
-        vm.prank(alice);
-        buck.transfer(bob, 10e18);
-
-        // Bob now has carried-age 10 BUCK -> non-zero feeOwing immediately.
-        uint256 bobFee = buck.feeOwing(bob);
-        assertGt(bobFee, 0, "bob inherits carried fee debt");
-        assertLt(buck.balanceOf(bob), 10e18, "bob's spendable reduced by carried fee");
-    }
-
-    function test_transfer_systemFeeDebtPreserved() public {
-        // Carrying merge conserves sum_a feeOwing(a) across any transfer.
-        _setupAliceWithBuck(1000e18, 100e18);
-
-        vm.warp(block.timestamp + 1 hours);
-
-        uint256 totalDebtBefore = buck.feeOwing(alice) + buck.feeOwing(bob) + buck.feeOwing(POOL);
-
-        vm.prank(alice);
-        buck.transfer(bob, 10e18);
-
-        uint256 totalDebtAfter = buck.feeOwing(alice) + buck.feeOwing(bob) + buck.feeOwing(POOL);
-        assertApproxEqAbs(totalDebtAfter, totalDebtBefore, 10, "system fee debt preserved");
-    }
-
-    function test_transfer_jubileeTargetEqualsSumOfFees() public {
-        // Algebraic identity: at any block, sum_a feeOwing(a) ==
-        // BASE_RATE * area_under_supply == jubileeTarget().
-        _setupAliceWithBuck(1000e18, 100e18);
-
-        vm.warp(block.timestamp + 1 hours);
-
-        // Move some BUCK around (transfers conserve fee debt, not change it).
-        vm.prank(alice);
-        buck.transfer(bob, 5e18);
-
-        vm.warp(block.timestamp + 12 hours);
-
-        uint256 sumOfFees = buck.feeOwing(alice) + buck.feeOwing(bob) + buck.feeOwing(POOL);
-        uint256 target    = buck.jubileeTarget();
-        assertApproxEqAbs(sumOfFees, target, 100, "sum_a feeOwing == jubileeTarget");
-    }
-
-    // ---- transferCarrying alias -------------------------------------------
-
-    function test_transferCarrying_isAliasForTransfer() public {
-        // Under conservation, transfer and transferCarrying have identical
-        // semantics: both carry the sender's idx to the recipient via the
-        // weighted-merge in _update.  transferCarrying remains for ABI
-        // compatibility with BUCK-aware contracts (Notes etc.).
-        _setupAliceWithBuck(1000e18, 100e18);
-
-        vm.warp(block.timestamp + 1 hours);
-
-        uint256 supplyBefore   = buck.totalSupply();
-        uint256 totalDebtBefore = buck.feeOwing(alice) + buck.feeOwing(bob) + buck.feeOwing(POOL);
-
-        vm.prank(alice);
-        buck.transferCarrying(bob, 10e18);
-
-        // Conservation: supply and total fee debt unchanged.
-        assertEq(buck.totalSupply(), supplyBefore, "supply unchanged");
-        uint256 totalDebtAfter = buck.feeOwing(alice) + buck.feeOwing(bob) + buck.feeOwing(POOL);
-        assertApproxEqAbs(totalDebtAfter, totalDebtBefore, 10, "system fee debt preserved");
-
-        // Bob inherited a slice of alice's age -> non-zero feeOwing.
-        assertGt(buck.feeOwing(bob), 0, "bob absorbed carried age");
-    }
-
-    function test_chainedTransfers_preserveSystemFeeDebt() public {
-        _setupAliceWithBuck(1000e18, 100e18);
-
-        vm.warp(block.timestamp + 1 hours);
-        uint256 debt0 = buck.feeOwing(alice) + buck.feeOwing(bob) + buck.feeOwing(POOL);
-
-        vm.prank(alice);
-        buck.transfer(bob, 10e18);
-
-        vm.prank(bob);
-        buck.transfer(alice, 1e18);
-
-        uint256 debt1 = buck.feeOwing(alice) + buck.feeOwing(bob) + buck.feeOwing(POOL);
-        assertApproxEqAbs(debt1, debt0, 100, "system fee debt preserved across chained transfers");
-    }
-
-    // ---- long-idle behaviour ----------------------------------------------
-
-    /// @notice Flat-rate cumulative-index model: after 1 year of idle with no
-    ///         updates, total fee owed is ~2 percent of totalSupply, within
-    ///         integer-rounding tolerance.  (Replaces the dynamic-rate
-    ///         overshoot test from the old model.)
     function test_longIdle_feeTrackBaseRate() public {
         _setupAliceWithBuck(1000e18, 100e18);
 
         vm.warp(block.timestamp + 365 days);
 
         uint256 supply    = buck.totalSupply();
-        // Expected: supply * BASE_RATE_PER_SEC * elapsed / SCALE.
-        // BASE_RATE_PER_SEC = 2e25 / (365.25 days), so 365 days elapsed gives
-        // ~(365/365.25) * 0.02 ~= 0.019986.
+        // Expected aggregate locked fees ~= supply * (365/365.25) * 0.02.
         uint256 expected  = supply * 2e25 * 365 days / (uint256(365 days + 6 hours) * 1e27);
-        uint256 actualOwed = buck.feeOwing(alice) + buck.feeOwing(POOL);
+        uint256 ownedFees = buck.feeOwing(alice) + buck.feeOwing(POOL);
 
-        assertApproxEqRel(actualOwed, expected, 0.001e18, "flat-rate integral matches");
+        assertApproxEqRel(ownedFees, expected, 0.001e18, "flat-rate integral matches");
     }
 
-    /// @notice The Jubilee fund's claim under conservation is purely the
-    ///         BASE_RATE * area_under_supply integral; jubileeActual stays at
-    ///         0 (no transfers, no advance-mints).  Account dormancy doesn't
-    ///         change this -- the implied claim grows continuously with time.
-    function test_dormantAccount_jubileeTargetTracksContinuously() public {
+    // ---- Jubilee accrual at mint/burn -------------------------------------
+
+    function test_jubilee_growsAtMint() public {
+        // After 1 hour of idle holding, a follow-up mint accrues Jubilee by
+        // approximately rate * old_supply * 1 hour.
         _setupAliceWithBuck(1000e18, 100e18);
+        uint256 oldSupply = buck.totalSupply();
 
-        // Everyone is dormant for a full year.
-        vm.warp(block.timestamp + 365 days);
-
-        uint256 target = buck.jubileeTarget();
-        assertGt(target, 0, "target grew during dormant period");
-        assertEq(buck.jubileeActual(), 0, "no BUCK ever moves to Jubilee under conservation");
-
-        // sum_a feeOwing(a) tracks target identically.
-        uint256 sumOfFees = buck.feeOwing(alice) + buck.feeOwing(POOL);
-        assertApproxEqAbs(sumOfFees, target, 100, "sum_a feeOwing == jubileeTarget");
-
-        // No mint/burn -> jubileeActual stays at 0; transfers do not change that.
-        vm.prank(alice);
-        buck.transfer(bob, 1e18);
-        assertEq(buck.jubileeActual(), 0, "transfer doesn't materialize Jubilee");
+        vm.warp(block.timestamp + 1 hours);
+        uint256 jubBefore = buck.jubileeActual();
+        assertEq(jubBefore, 0, "no accrual yet");
 
         vm.prank(alice);
         buck.mint(1e18);
-        assertEq(buck.jubileeActual(), 0, "mint doesn't materialize Jubilee under conservation");
+
+        // delta ~= old_supply * RATE_PER_SEC * 3600s / SCALE
+        uint256 expected = oldSupply * 2e25 * 1 hours / (uint256(365 days + 6 hours) * 1e27);
+        assertApproxEqAbs(buck.jubileeActual(), expected, 2, "Jubilee credited at mint");
+    }
+
+    function test_jubilee_growsAtBurn() public {
+        _setupAliceWithBuck(1000e18, 100e18);
+        uint256 oldSupply = buck.totalSupply();
+
+        vm.warp(block.timestamp + 1 hours);
+        uint256 jubBefore = buck.jubileeActual();
+        assertEq(jubBefore, 0, "no accrual yet");
+
+        // Burn a small amount that fits inside alice's spendable.
+        vm.prank(alice);
+        buck.burn(1e18);
+
+        uint256 expected = oldSupply * 2e25 * 1 hours / (uint256(365 days + 6 hours) * 1e27);
+        assertApproxEqAbs(buck.jubileeActual(), expected, 2, "Jubilee credited at burn");
+    }
+
+    function test_jubilee_idleBetweenMintBurn() public {
+        // Plain transfers do NOT trigger Jubilee accrual.  Jubilee actual
+        // stays at whatever it was after the most recent mint/burn.
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(alice);
+        buck.mint(1e18);  // first accrual
+        uint256 jubAfterMint = buck.jubileeActual();
+        assertGt(jubAfterMint, 0, "first mint accrued");
+
+        vm.warp(block.timestamp + 1 hours);
+        // alice (non-carrying) transfer to bob: no accrual.
+        vm.prank(alice);
+        buck.transfer(bob, 1e18);
+        assertEq(buck.jubileeActual(), jubAfterMint, "non-carrying transfer no accrue");
+
+        // bob is a Carrying contract; bob -> alice goes through carrying path.
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(bob);
+        buck.transfer(alice, 1);
+        assertEq(buck.jubileeActual(), jubAfterMint, "carrying transfer no accrue");
+    }
+
+    function test_jubilee_accruesItsOwnDemurrage() public {
+        // Once Jubilee holds raw, it starts accruing its own self-demurrage
+        // -- treated as any other (Carrying) account.  jubileeBalance() is
+        // raw - feeOwing.
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(alice);
+        buck.mint(1e18);  // credits Jubilee with ~0.000228 BUCK at age 0
+
+        uint256 jubRaw = buck.rawBalanceOf(address(buck));
+        assertGt(jubRaw, 0, "Jubilee has raw");
+        // Same block -> _timestamp[jubilee] == now -> feeOwing == 0.
+        assertEq(buck.feeOwing(address(buck)), 0, "fresh Jubilee credit at age 0");
+
+        vm.warp(block.timestamp + 1 hours);
+        // Now Jubilee has accrued self-demurrage on its raw.
+        uint256 jubFee = buck.feeOwing(address(buck));
+        assertGt(jubFee, 0, "Jubilee accrues its own fees on idle raw");
+        assertEq(buck.balanceOf(address(buck)), jubRaw - jubFee, "balanceOf reflects fee");
+    }
+
+    // ---- Non-Carrying transfer (alice -> bob) -----------------------------
+
+    function test_nonCarrying_recipientGetsFreshBUCKs() public {
+        // Alice (EOA, isCarrying=false) -> Bob (EOA): non-carrying path.
+        // Bob receives BUCK with no inherited fee debt.
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        assertEq(buck.feeOwing(bob), 0, "bob starts at 0");
+
+        vm.prank(alice);
+        buck.transfer(bob, 10e18);
+
+        // Bob's rawBalance = 10e18 and his _timestamp == now -> 0 pending.
+        assertEq(buck.feeOwing(bob),  0,    "bob has no inherited fee");
+        assertEq(buck.balanceOf(bob), 10e18, "bob spendable == full transferred amount");
+    }
+
+    function test_nonCarrying_senderKeepsLockedFees() public {
+        // Alice's locked fees stay in her account after a non-carrying
+        // outflow.  _demurrage[alice] grows on crystallization.
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        uint256 feeBeforeTransfer = buck.feeOwing(alice);
+        assertGt(feeBeforeTransfer, 0, "alice has fees");
+
+        vm.prank(alice);
+        buck.transfer(bob, 10e18);
+
+        // Right after the transfer alice's pending elapsed is 0; her
+        // _demurrage holds the same fee value she had pre-transfer.
+        assertApproxEqAbs(buck.feeOwing(alice), feeBeforeTransfer, 1,
+            "alice's fees crystallized but preserved");
+    }
+
+    function test_nonCarrying_spendableCapEnforced() public {
+        // Alice's spendable is balanceOf(alice) = raw - feeOwing.  Trying to
+        // transfer more than that reverts.
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        uint256 spendable = buck.balanceOf(alice);
+        assertGt(buck.rawBalanceOf(alice), spendable, "raw > spendable after warp");
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: amount exceeds spendable"));
+        buck.transfer(bob, spendable + 1);
+
+        vm.prank(alice);
+        buck.transfer(bob, spendable);  // exact spendable should succeed
+    }
+
+    // ---- Carrying transfer (POOL -> bob) ----------------------------------
+
+    function test_carrying_recipientAbsorbsAge() public {
+        // Pre-load Carrying-source bob via a non-carrying transfer from alice
+        // (bob is a Public-Identity Carrying contract bound in setUp).
+        _setupAliceWithBuck(1000e18, 100e18);
+        vm.prank(alice);
+        buck.transfer(bob, 20e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        uint256 bobFeeBefore = buck.feeOwing(bob);
+        assertGt(bobFeeBefore, 0, "bob has accumulated fees");
+
+        uint256 aliceFeeBefore = buck.feeOwing(alice);
+
+        // bob (Carrying) -> alice: alice's _demurrage absorbs the proportional fee.
+        vm.prank(bob);
+        buck.transfer(alice, 10e18);
+
+        uint256 aliceFeeAfter = buck.feeOwing(alice);
+        // Alice's fee grew by approximately the carried portion.
+        // carried ~= bobFeeBefore * (10e18 / 20e18) = bobFeeBefore / 2.
+        uint256 expectedCarried = bobFeeBefore / 2;
+        assertApproxEqAbs(aliceFeeAfter - aliceFeeBefore, expectedCarried, 10,
+            "alice absorbed bob's carried fee on the transferred portion");
+    }
+
+    function test_carrying_senderBasisUnchanged() public {
+        // bob's _timestamp and basis are NOT advanced by a Carrying outflow.
+        // Its residual continues to age from the original basis -- the fee
+        // on the residual scales linearly with the smaller raw.
+        _setupAliceWithBuck(1000e18, 100e18);
+        vm.prank(alice);
+        buck.transfer(bob, 20e18);
+        uint256 bobRaw = buck.rawBalanceOf(bob);
+
+        vm.warp(block.timestamp + 1 hours);
+        uint256 bobFeeBefore = buck.feeOwing(bob);
+        assertGt(bobFeeBefore, 0, "bob has accumulated fees");
+
+        uint256 amount = 10e18;
+        vm.prank(bob);
+        buck.transfer(alice, amount);
+
+        // bob residual fee = (bobRaw - amount) / bobRaw * bobFeeBefore.
+        uint256 expectedResidualFee = bobFeeBefore * (bobRaw - amount) / bobRaw;
+        uint256 bobFeeAfter = buck.feeOwing(bob);
+        assertApproxEqAbs(bobFeeAfter, expectedResidualFee, 10,
+            "bob residual fee scales with residual raw");
+    }
+
+    function test_carrying_canTransferUpToRaw() public {
+        // bob (Carrying) is allowed to transfer up to its full raw, even
+        // when balanceOf(bob) < raw -- the carried fee debt rides with
+        // the BUCK.
+        _setupAliceWithBuck(1000e18, 100e18);
+        vm.prank(alice);
+        buck.transfer(bob, 20e18);
+        uint256 bobRaw = buck.rawBalanceOf(bob);
+
+        vm.warp(block.timestamp + 1 hours);
+        uint256 bobSpendable = buck.balanceOf(bob);
+        assertGt(bobRaw, bobSpendable, "bob raw > spendable after warp");
+
+        // Transfer the full raw -- should succeed (no spendable cap on Carrying).
+        vm.prank(bob);
+        buck.transfer(alice, bobRaw);
+
+        assertEq(buck.rawBalanceOf(bob), 0, "bob drained to 0");
+    }
+
+    // ---- dispatch by isCarrying flag -------------------------------------
+
+    function test_dispatch_followsIsCarryingFlag() public {
+        // Same `transfer` call from two different sender types takes
+        // different paths.
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        // Pre-load bob (Carrying) with BUCK via a non-carrying transfer.
+        vm.prank(alice);
+        buck.transfer(bob, 20e18);
+
+        // Bob receives fresh BUCKs (no inherited fee) since alice is non-carrying.
+        assertEq(buck.feeOwing(bob), 0, "non-carrying source -> recipient fresh");
+
+        vm.warp(block.timestamp + 1 hours);
+
+        // Bob (Carrying) -> alice: alice absorbs carried fee.
+        uint256 aliceFeeBefore = buck.feeOwing(alice);
+        vm.prank(bob);
+        buck.transfer(alice, 5e18);
+        uint256 aliceFeeAfter = buck.feeOwing(alice);
+        assertGt(aliceFeeAfter, aliceFeeBefore, "carrying source -> recipient inherits fee");
+    }
+
+    // ---- conservation invariants ------------------------------------------
+
+    function test_invariant_balanceOfPlusBalanceOfFees() public {
+        // For every account: balanceOf(a) + balanceOfFees(a) == rawBalanceOf(a).
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        vm.warp(block.timestamp + 30 days);
+
+        for (uint256 i = 0; i < 3; i++) {
+            address a = [alice, POOL, address(buck)][i];
+            assertEq(
+                buck.balanceOf(a) + buck.balanceOfFees(a),
+                buck.rawBalanceOf(a),
+                "balanceOf + balanceOfFees == rawBalanceOf"
+            );
+        }
+    }
+
+    function test_invariant_totalSupplyEqualsSumOfRaw() public {
+        // After mint/burn/transfer, the OZ-level invariant holds:
+        // sum_a _balanceof[a] == totalSupply.
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(alice);
+        buck.transfer(bob, 5e18);
+
+        vm.warp(block.timestamp + 30 days);
+        vm.prank(alice);
+        buck.mint(1e18);  // triggers Jubilee accrual
+
+        uint256 sum = buck.rawBalanceOf(alice)
+                    + buck.rawBalanceOf(bob)
+                    + buck.rawBalanceOf(POOL)
+                    + buck.rawBalanceOf(address(buck));
+        assertEq(sum, buck.totalSupply(), "supply == sum of raws");
+    }
+
+    function test_invariant_carryingPreservesSystemFeeDebt() public {
+        // A Carrying-source transfer preserves sum_a feeOwing(a).
+        _setupAliceWithBuck(1000e18, 100e18);
+
+        // Pre-load bob.
+        vm.prank(alice);
+        buck.transfer(bob, 20e18);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        uint256 sumBefore = buck.feeOwing(alice)
+                          + buck.feeOwing(bob)
+                          + buck.feeOwing(POOL)
+                          + buck.feeOwing(address(buck));
+
+        uint256 amount = buck.rawBalanceOf(bob) / 2;
+        vm.prank(bob);
+        buck.transfer(alice, amount);
+
+        uint256 sumAfter = buck.feeOwing(alice)
+                         + buck.feeOwing(bob)
+                         + buck.feeOwing(POOL)
+                         + buck.feeOwing(address(buck));
+
+        assertApproxEqAbs(sumAfter, sumBefore, 10,
+            "carrying transfer conserves total feeOwing");
     }
 }

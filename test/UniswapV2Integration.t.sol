@@ -111,6 +111,8 @@ contract UniswapV2IntegrationTest is Test {
         credit = new BuckCredit();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(GOV);
+        reg.setBuck(address(buck));
 
         // Mock USDC: 18-decimal ERC-20 minted to this test contract.
         usdc = address(new MockUSDC(1_000_000_000e18));
@@ -139,8 +141,8 @@ contract UniswapV2IntegrationTest is Test {
         IdentityRegistry.ElGamalCT memory placeholderE = IdentityRegistry.ElGamalCT({
             R: BN254.g1(), C: BN254.g1()
         });
-        reg.bindContract(pair,   BN254.g1(), placeholderE, true);
-        reg.bindContract(router, BN254.g1(), placeholderE, true);
+        reg.bindContract(pair,   BN254.g1(), placeholderE, true, true);
+        reg.bindContract(router, BN254.g1(), placeholderE, true, true);
 
         // Distribute USDC from this test contract to Alice and Bob.
         IERC20Like(usdc).transfer(alice, 1_000_000e18);

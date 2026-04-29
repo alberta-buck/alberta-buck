@@ -42,14 +42,15 @@ contract BuckAwareDeployer {
         bytes calldata factoryCall,
         BN254.G1Point calldata pk,
         IdentityRegistry.ElGamalCT calldata E,
-        bool isPublicIdentity_
+        bool isPublicIdentity_,
+        bool isCarrying_
     ) external returns (address deployed) {
         (bool ok, bytes memory ret) = factory.call(factoryCall);
         require(ok, "factory call failed");
         require(ret.length >= 32, "factory return too short");
         deployed = abi.decode(ret, (address));
         require(deployed != address(0), "factory returned zero");
-        registry.bindContract(deployed, pk, E, isPublicIdentity_);
+        registry.bindContract(deployed, pk, E, isPublicIdentity_, isCarrying_);
         emit Deployed(deployed, msg.sender, isPublicIdentity_);
     }
 
@@ -61,14 +62,15 @@ contract BuckAwareDeployer {
         bytes calldata initCode,
         BN254.G1Point calldata pk,
         IdentityRegistry.ElGamalCT calldata E,
-        bool isPublicIdentity_
+        bool isPublicIdentity_,
+        bool isCarrying_
     ) external returns (address deployed) {
         bytes memory ic = initCode;
         assembly {
             deployed := create2(0, add(ic, 32), mload(ic), salt)
         }
         require(deployed != address(0), "create2 failed");
-        registry.bindContract(deployed, pk, E, isPublicIdentity_);
+        registry.bindContract(deployed, pk, E, isPublicIdentity_, isCarrying_);
         emit Deployed(deployed, msg.sender, isPublicIdentity_);
     }
 

@@ -75,6 +75,8 @@ contract NotesTest is Test {
         credit = new BuckCredit();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(GOV);
+        reg.setBuck(address(buck));
 
         // Notes stack (no PoseidonT3 dep in Phase 7-bis).
         stub      = new StubMintVerifier(GOV);
@@ -92,7 +94,8 @@ contract NotesTest is Test {
             address(notes),
             BN254.g1(),
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
-            true
+            true, // isPublicIdentity
+            true  // isCarrying
         );
 
         // Give Alice a credit limit and BUCK balance so she can mint notes.

@@ -8,12 +8,10 @@ import {ISpendVerifier}  from "./ISpendVerifier.sol";
 import {ISpendAVerifier} from "./ISpendAVerifier.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 
-/// @dev Buck-specific age-preserving transfer.  Notes calls this on spend
-///      so the recipient absorbs the pool's average demurrage age rather
-///      than paying a spike of settled fee at mint time.
-interface IBuckCarrying {
-    function transferCarrying(address to, uint256 amount) external returns (bool);
-}
+// (Buck dispatches to the Carrying transfer path automatically when the
+//  sender is registered with isCarrying = true in IdentityRegistry; the
+//  Notes pool is registered as a Carrying service contract at deploy/bind
+//  time.  No special Buck interface is needed -- Notes calls IERC20.transfer.)
 
 /// @title Notes -- BUCK Notes commitment-pool registry (Phase 7-bis batch mint).
 /// @notice One global pool of Poseidon commitments behind a SNARK-verified
@@ -340,7 +338,7 @@ contract Notes {
         noteFaceSum          -= face;
 
         require(
-            IBuckCarrying(address(buck)).transferCarrying(recipient, face),
+            buck.transfer(recipient, face),
             "Notes: transfer failed"
         );
 
@@ -415,7 +413,7 @@ contract Notes {
         noteFaceSum          -= face;
 
         require(
-            IBuckCarrying(address(buck)).transferCarrying(recipient, face),
+            buck.transfer(recipient, face),
             "Notes: transfer failed"
         );
 

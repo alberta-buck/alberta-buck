@@ -541,19 +541,27 @@ post-approval changes are not (recipients have already
 consented to a specific Carrying flavour and the operator must
 not be able to retroactively change it).
 
-The lock is enforced by a per-address counter or boolean
-=_carryingFrozen[a]= maintained by =IdentityRegistry=:
+The lock is enforced by a per-address boolean
+=carryingFrozen[a]= and a =binderOf[a]= mapping in
+=IdentityRegistry=, plus a one-time =setBuck()= governance hook
+that authorises the Buck contract to mark a spender frozen on
+approve:
 
 #+LATEX: {\scriptsize
 #+BEGIN_SRC pseudocode
-function approve(spender, amount, E_spender, pi_CP):
-    // ... existing CP-receipt machinery ...
-    identity._carryingFrozen[spender] = true
+// Buck.approve(spender, amount, E_spender, pi_CP):
+//   ... existing CP-receipt machinery ...
+//   identity.markApproved(spender)        // freezes the spender's flag
 
-function setIsCarrying(target, value):
-    require(msg.sender == bindingOperator(target))
-    require(!identity._carryingFrozen[target], "isCarrying frozen by approval")
-    identity.isCarrying[target] = value
+function markApproved(address spender):       // IdentityRegistry, external
+    require(msg.sender == buck, "only Buck")
+    if !carryingFrozen[spender]:
+        carryingFrozen[spender] = true
+
+function setIsCarrying(address target, bool value):  // IdentityRegistry, external
+    require(msg.sender == binderOf[target],     "not binder")
+    require(!carryingFrozen[target],            "carrying frozen by approval")
+    isCarrying[target] = value
 #+END_SRC
 #+LATEX: }
 
@@ -775,6 +783,14 @@ walks away with $50 spendable; this is a policy decision tied
 to BuckCredit's specific close terms.  (Discuss further with
 the BuckCredit design.)
 
+*** Simplifications
+
+The true Jubilee account accrues demurrage on its own holdings.  These examples ignore this for
+simplicity.  In practice, the Jubilee fund deploys its holdings to low-risk revenue generating
+contracts (AMM pools, parametric insurance, ...), which earn at least the owed demurrage fees and
+return the profits to the pool.  So, the Jubilee fund ends up holding the required funds without
+demurrage fees owing.
+
 ** Why no compound interest is required
 
 The integral identity that makes the redemption work cleanly:
@@ -833,11 +849,10 @@ Verifiable on every block, after every operation:
    (no change in the reported view).  Sum totals are preserved.
 
 6. *isCarrying-immutability invariant.*  For any address =a= such
-   that =_carryingFrozen[a]= is true,
-   =isCarrying[a]= cannot be modified by any subsequent
-   transaction.  =_carryingFrozen[a]= becomes true the first
-   time =a= appears as the spender argument of an =approve()=
-   call.
+   that =carryingFrozen[a]= is true, =isCarrying[a]= cannot be
+   modified by any subsequent transaction.  =carryingFrozen[a]=
+   becomes true the first time =Buck.approve= names =a= as the
+   spender (via the registry's =markApproved(a)= hook).
 
 * Comparison with a "pure-view Jubilee" model
 
@@ -891,16 +906,23 @@ accrual reads =totalSupply()= and the elapsed time directly.
 
 #+LATEX: {\scriptsize
 #+BEGIN_SRC solidity
-mapping(address => bool) public  isCarrying;
-mapping(address => bool) internal _carryingFrozen;
+mapping(address => bool)    public isCarrying;
+mapping(address => bool)    public carryingFrozen;
+mapping(address => address) public binderOf;
+address                     public buck;             // set once via setBuck()
 #+END_SRC
 #+LATEX: }
 
 =isCarrying[a]= is set at registration / binding time and read
 on every =Buck._update= to dispatch the transfer flavour.
-=_carryingFrozen[a]= is set to true the first time =a= appears
-as the spender on an =approve()= call; once frozen,
-=isCarrying[a]= cannot be changed.
+=carryingFrozen[a]= is set to true the first time =a= appears
+as the spender on an identity-bound =approve()= call; once
+frozen, =isCarrying[a]= cannot be changed.  =binderOf[a]=
+records the =msg.sender= of the =bindContract()= call (zero for
+EOAs, which therefore can never be targets of =setIsCarrying=).
+=buck= is a one-time governance setter naming the authorised
+=Buck= contract -- the only address permitted to call
+=markApproved=.
 
 ** =Buck.sol= public/external view surface
 
@@ -962,9 +984,17 @@ function _update(address from, address to, uint256 value) internal override {
 
 #+LATEX: {\scriptsize
 #+BEGIN_SRC solidity
-// register() always sets isCarrying[msg.sender] = false.
-// bindContract() takes a default-true isCarrying flag, with an
-// optional override for non-service contracts (multisigs, AA wallets).
+// One-time governance setter for the authorised Buck contract.
+// Subsequent attempts revert; only callable while buck == address(0).
+function setBuck(address _buck) external;
+
+// register() leaves isCarrying[msg.sender] = false (EOAs are always
+// Non-Carrying); binderOf[msg.sender] is left unset, so the EOA can
+// never be the target of setIsCarrying.
+//
+// bindContract() takes an explicit isCarrying_ flag.  Service
+// contracts pass true; user-controlled smart-contract wallets pass
+// false.  The caller is recorded in binderOf[target].
 function bindContract(
     address target,
     BN254.G1Point calldata pk,
@@ -973,12 +1003,13 @@ function bindContract(
     bool isCarrying_
 ) external;
 
-// Explicit setter for pre-approval reconfiguration.  Reverts if
-// _carryingFrozen[target] is already set.
+// Pre-approval reconfiguration of the carrying flag.  Reverts if
+// the target has already been frozen by a counterparty's approve.
 function setIsCarrying(address target, bool value) external;
 
-// Called from Buck.approve() to freeze the spender's flag.
-function _markApproved(address spender) internal;
+// Called from Buck.approve() to freeze the spender's flag.  Reverts
+// unless msg.sender == buck.  Idempotent across multiple approvers.
+function markApproved(address spender) external;
 #+END_SRC
 #+LATEX: }
 
@@ -986,9 +1017,9 @@ Receipt fragments and identity binding (existing
 =IdentityRegistry= flow) are layered on top unchanged: the
 identity check for both flavours of transfer happens at the
 public function boundary, before the demurrage logic runs.
-=Buck.approve= now also calls =identity._markApproved(spender)=
-so the spender's =isCarrying= flag becomes immutable from that
-moment on.
+=Buck.approve= calls =identity.markApproved(spender)= immediately
+after writing the CP receipt so the spender's =isCarrying= flag
+becomes immutable from that moment on.
 
 * Open questions and policy choices
 
