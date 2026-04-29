@@ -69,10 +69,13 @@ contract IdentityRegistry {
     mapping(address => PSPubKey)  internal _trustedIssuers;
     mapping(address => bool)      public  isTrustedIssuer;
 
-    // Per-account identity record.
+    // Per-account identity record.  An address is "verified" iff its pk has
+    // been written -- both register() and bindContract() write _pk, so the
+    // presence of a non-zero pk is the canonical signal.  isVerified() is
+    // exposed as a view (selector-compatible with the prior public mapping)
+    // so external callers and indexers see no ABI change.
     mapping(address => BN254.G1Point) internal _pk;
     mapping(address => ElGamalCT)     internal _E_addr;
-    mapping(address => bool)          public  isVerified;
     mapping(address => address)       public  issuerOf;
 
     /// @notice Marks a binding whose plaintext identity m is publicly disclosed
@@ -135,6 +138,21 @@ contract IdentityRegistry {
         return _trustedIssuers[issuer];
     }
 
+    /// @dev True iff `a` has a registered (pk, E_addr) binding -- written by
+    ///      both register() and bindContract().  Default G1 point is (0, 0)
+    ///      (point at infinity); a non-zero coordinate means the slot has
+    ///      been initialized.
+    function _isRegistered(address a) internal view returns (bool) {
+        BN254.G1Point storage k = _pk[a];
+        return k.X != 0 || k.Y != 0;
+    }
+
+    /// @notice True iff `a` has registered an identity binding (EOA via
+    ///         register() or contract via bindContract()).
+    function isVerified(address a) external view returns (bool) {
+        return _isRegistered(a);
+    }
+
     // ---- registration ------------------------------------------------------
 
     /// @notice Register caller's identity binding under issuer-signed credential.
@@ -148,8 +166,8 @@ contract IdentityRegistry {
         PSSig calldata sigma,
         RegistrationProof calldata proof
     ) external {
-        require(!isVerified[msg.sender],  "already registered");
-        require(isTrustedIssuer[issuer],  "untrusted issuer");
+        require(!_isRegistered(msg.sender), "already registered");
+        require(isTrustedIssuer[issuer],    "untrusted issuer");
         require(!BN254.isInfinity(sigma.sigma_1), "sigma_1=O");
 
         // (d) Fiat-Shamir
@@ -164,10 +182,9 @@ contract IdentityRegistry {
         // (a) PS pairing product
         require(_checkPSPairing(sigma, proof, _trustedIssuers[issuer]), "bad PS sig");
 
-        _pk[msg.sender]      = pk;
-        _E_addr[msg.sender]  = E;
-        isVerified[msg.sender] = true;
-        issuerOf[msg.sender]   = issuer;
+        _pk[msg.sender]     = pk;
+        _E_addr[msg.sender] = E;
+        issuerOf[msg.sender] = issuer;
         emit Registered(msg.sender, issuer);
     }
 
@@ -195,12 +212,11 @@ contract IdentityRegistry {
         ElGamalCT calldata E,
         bool isPublicIdentity_
     ) external {
-        require(target.code.length > 0, "target not a deployed contract");
-        require(!isVerified[target],    "already bound");
+        require(target.code.length > 0,  "target not a deployed contract");
+        require(!_isRegistered(target),  "already bound");
 
         _pk[target]              = pk;
         _E_addr[target]          = E;
-        isVerified[target]       = true;
         isPublicIdentity[target] = isPublicIdentity_;
         emit ContractBound(target, msg.sender, isPublicIdentity_);
     }
@@ -217,7 +233,7 @@ contract IdentityRegistry {
         ElGamalCT calldata E_bob,
         CPProof calldata pi
     ) external view returns (bool) {
-        if (!isVerified[sender] || !isVerified[spender]) return false;
+        if (!_isRegistered(sender) || !_isRegistered(spender)) return false;
 
         ElGamalCT memory E_a = _E_addr[sender];
         BN254.G1Point memory pkA = _pk[sender];
@@ -264,7 +280,7 @@ contract IdentityRegistry {
         ElGamalCT calldata E_n,
         SpendCPProof calldata pi
     ) external view returns (bool) {
-        if (!isVerified[spender]) return false;
+        if (!_isRegistered(spender)) return false;
 
         ElGamalCT memory E_reg     = _E_addr[spender];
         BN254.G1Point memory pkDep = _pk[spender];

@@ -334,7 +334,14 @@ contract SpendVerifierTest is Test {
             "bob raw balance is not exactly face");
         assertGt(buck.feeOwing(bob), 0,
             "bob should have inherited pool's BUCK-age via transferCarrying");
-        assertGt(buck.totalSupply(), supplyBefore,
-            "Jubilee advance-mint should have grown supply across 30d");
+        // transferCarrying does not change totalSupply (no fee burn) and is
+        // not a Jubilee outflow when the sender is the Notes pool, so under
+        // deferred Jubilee accrual the supply is unchanged.  The grown
+        // jubileeTarget is materialized at the next mint, burn, or Jubilee
+        // outflow.
+        assertEq(buck.totalSupply(), supplyBefore,
+            "transferCarrying preserves totalSupply (deferred Jubilee accrual)");
+        assertGt(buck.jubileeTarget(), buck.jubileeActual(),
+            "Jubilee gap accumulated across 30d, not yet materialized");
     }
 }

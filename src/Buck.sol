@@ -41,48 +41,53 @@ contract Buck is ERC20 {
 
     // ---- demurrage / Jubilee fund -----------------------------------------
     //
-    // Flat 2%/yr demurrage.  Per-account state = (raw_balance, idxAtLastTouch).
-    //   feeOwing(a) = raw_balance(a) * (cumIndexNow - idxAtLastTouch[a]) / SCALE
+    // Conservation model.  Demurrage is purely a VIEW-LAYER computation; no
+    // BUCK is ever moved or burned to satisfy it.  totalSupply changes ONLY
+    // at user-initiated mint() / burn().
     //
-    // cumIndex grows linearly: BASE_RATE_PER_SEC * (now - genesis).
+    // Per-account state = (raw, idx).  At time t with cumIndex(t) linear in
+    // time:
+    //   feeOwing(a)  = raw[a] * (cumIndex(t) - idx[a]) / SCALE
+    //   balanceOf(a) = raw[a] - feeOwing(a)            -- spendable
     //
-    // Deducting transfer (transfer / transferFrom): sender's fee is BURNED
-    // (totalSupply drops by fee), sender's index resets to cumIndex.  The
-    // recipient is weighted-merge'd with cumIndex -- recipient's prior fee debt
-    // is preserved and the fresh BUCKs land at age 0.  No incoming burn.
+    // The Jubilee fund's claim against the system is the sum of every
+    // account's feeOwing.  This sum equals BASE_RATE * ∫ totalSupply dt
+    // exactly, provided every transfer preserves system fee debt.  That
+    // requires *carrying* recipient-merge:
+    //   idx[to]_new = (raw[to] * idx[to] + value * idx[from]) / (raw[to] + value)
+    // (mints, having no sender, use cumIndex as the basis -- fresh BUCKs at
+    // age 0).  The sender's idx is unchanged on outflow; raw[from] simply
+    // decreases by value.
     //
-    // Carrying transfer (transferCarrying): no burn.  Recipient is
-    // weighted-merge'd with the SENDER's idxAtLastTouch -- the recipient
-    // absorbs the carried age basis.  Sender's index is unchanged so the
-    // remaining balance keeps its own age.  Total system fee debt preserved.
+    // Algebraic identity (carrying merge conserves system fee debt):
+    //   sum_a raw[a] * (cumIndex - idx[a])  is invariant under transfer.
+    // Together with d(sum_a raw[a] * (cumIndex - idx[a])) / dt
+    //              = BASE_RATE_PER_SEC * totalSupply
+    // this gives sum_a feeOwing(a) = BASE_RATE * area_under_supply
+    // identically -- the Jubilee target *is* the implied claim, no separate
+    // accounting needed.  Hence jubileeTarget() returns the implied balance.
     //
-    // Jubilee fund = address(this).  Treated as a Carrying account that grows
-    // with fresh BUCKs at BASE_RATE on the FULL totalSupply (Jubilee included).
-    // Each _update advance-mints `jubileeTarget() - jubileeRaw` to Jubilee and
-    // weighted-merges its index toward cumIndex (preserves Jubilee's prior fee
-    // debt; fresh BUCKs land at age 0).  Funds are deployed to pools via
-    // standard approve + transferFrom (Deducting), which burns Jubilee's
-    // accrued fee on outflow exactly like any other account.
+    // The Jubilee address (= address(this)) is exempt from demurrage:
+    // feeOwing(address(this)) is defined to be zero.  Jubilee deployment
+    // (e.g., to the insurance pool) is performed by minting fresh BUCK; the
+    // governance layer caps mint amounts by the unspent jubileeTarget.
+    //
+    // _areaAcc is updated only when totalSupply changes (mint/burn).  Pure
+    // transfers leave it untouched -- between supply changes totalSupply is
+    // piecewise constant and the live area is computed lazily as
+    //   _areaAcc + totalSupply * (now - _areaLastUpdate).
 
     uint256 internal constant SCALE              = 1e27;
     uint256 internal constant BASE_RATE_PER_YEAR = 2e25;                              // 0.02 in SCALE
     uint256 internal constant SECONDS_PER_YEAR_  = 365 days + 6 hours;                // 365.25 days
     uint256 internal constant BASE_RATE_PER_SEC  = BASE_RATE_PER_YEAR / SECONDS_PER_YEAR_;
 
-    uint256 internal _cumIndex;
-    uint64  internal _lastIndexUpdate;
-    uint256 internal _areaAcc;            // integral of totalSupply dt (BUCK*seconds)
+    uint64  internal immutable _genesis;  // cumIndex starts at 0 here, grows linearly.
+
+    uint256 internal _areaAcc;            // ∫ totalSupply dt up to _areaLastUpdate.
     uint64  internal _areaLastUpdate;
 
     mapping(address => uint256) internal _indexAtLastTouch;
-
-    // keccak256("buck.settling.v1") -- transient-storage re-entry guard slot.
-    bytes32 private constant SETTLE_SLOT =
-        0x808f796326b23af2b0e4e7824e695a7744c402b093670a86cbd6e7a21dbb4cff;
-
-    event FeeBurned(address indexed from, uint256 amount, uint256 cumIndex);
-    event JubileeAccrued(uint256 amount, uint256 newJubileeBalance, uint256 cumIndex);
-    event TransferCarrying(address indexed from, address indexed to, uint256 amount);
 
     // ---- premium model -----------------------------------------------------
 
@@ -141,8 +146,8 @@ contract Buck is ERC20 {
         identity      = IdentityRegistry(_identity);
         insurancePool = _insurancePool;
 
-        _lastIndexUpdate = uint64(block.timestamp);
-        _areaLastUpdate  = uint64(block.timestamp);
+        _genesis        = uint64(block.timestamp);
+        _areaLastUpdate = uint64(block.timestamp);
     }
 
     // ---- mint / burn -------------------------------------------------------
@@ -301,87 +306,45 @@ contract Buck is ERC20 {
 
     // ---- demurrage internals ----------------------------------------------
 
+    /// @dev Live area-under-totalSupply integral at this block.  totalSupply
+    ///      is piecewise-constant between mint/burn events, so the area is
+    ///      _areaAcc plus the rectangle of the current totalSupply since
+    ///      _areaLastUpdate.  Pure transfers do NOT advance _areaAcc.
     function _areaNow() internal view returns (uint256) {
         return _areaAcc + totalSupply() * (block.timestamp - _areaLastUpdate);
     }
 
-    /// @notice Required Jubilee balance at this block: BASE_RATE * area-under-supply.
+    /// @notice The Jubilee fund's claim against the system at this block:
+    ///         BASE_RATE * area_under_supply.  Under the conservation model
+    ///         this equals sum_a feeOwing(a) identically -- no separate
+    ///         storage is needed to track a Jubilee actual.
     function jubileeTarget() public view returns (uint256) {
         return Math.mulDiv(_areaNow(), BASE_RATE_PER_SEC, SCALE);
     }
 
-    /// @notice Current Jubilee actual balance (raw, bypasses balanceOf override).
+    /// @notice Literal raw BUCK held at the Jubilee address (= address(this)).
+    ///         Under the conservation model no BUCK is ever moved to the
+    ///         Jubilee for demurrage; this is non-zero only if an external
+    ///         party deliberately transferred BUCK to the contract.  The
+    ///         meaningful Jubilee claim is jubileeTarget().
     function jubileeActual() public view returns (uint256) {
         return ERC20.balanceOf(address(this));
     }
 
-    /// @dev Cumulative demurrage index at this block.  Linear in time at flat
-    ///      BASE_RATE_PER_SEC (no rate dynamics).
+    /// @dev Cumulative demurrage index at this block.  Linear in time, no
+    ///      rate dynamics; storage-free.
     function _cumIndexNow() internal view returns (uint256) {
-        return _cumIndex + BASE_RATE_PER_SEC * (block.timestamp - _lastIndexUpdate);
+        return BASE_RATE_PER_SEC * (block.timestamp - _genesis);
     }
 
-    /// @notice Fee owed by `a` at this block (BUCK, with 18 decimals).  Jubilee
-    ///         is NOT exempt: it carries its own age basis like any other
-    ///         account.  Its fee debt grows on its prior balance and carries
-    ///         accumulated demurrage obligation on outflow (transfers from address(this)).
+    /// @notice Fee owed by `a` at this block (BUCK, 18 decimals).  Jubilee
+    ///         (address(this)) is exempt -- its claim is materialized via
+    ///         jubileeTarget(), not as a per-account fee on whatever raw it
+    ///         happens to hold.
     function feeOwing(address a) public view returns (uint256) {
+        if (a == address(this)) return 0;
         uint256 raw = ERC20.balanceOf(a);
         return Math.mulDiv(raw, _cumIndexNow() - _indexAtLastTouch[a], SCALE);
-    }
-
-    /// @dev Advance the global cumIndex / areaAcc accumulators to `now`.  Must
-    ///      be called BEFORE reading any cumIndex-dependent state in _update or
-    ///      transferCarrying.
-    function _advanceGlobals() internal {
-        _cumIndex        = _cumIndexNow();
-        _areaAcc         = _areaNow();
-        _lastIndexUpdate = uint64(block.timestamp);
-        _areaLastUpdate  = uint64(block.timestamp);
-    }
-
-    /// @dev Mint Jubilee deficit (target - rawBalance) to address(this) and
-    ///      weighted-merge its idxAtLastTouch toward cumIndex so the fresh
-    ///      BUCKs land at age 0 while Jubilee's prior fee debt is preserved.
-    ///      Caller must have already called _advanceGlobals().
-    function _accrueJubilee() internal {
-        uint256 jubRaw = ERC20.balanceOf(address(this));
-        uint256 target = jubileeTarget();
-        if (target <= jubRaw) return;
-
-        uint256 delta  = target - jubRaw;
-        // Weighted-merge: (jubRaw * old_idx + delta * cumIndex) / target.
-        // Identity check: feeOwing(jubilee) before == jubRaw*(cum-old_idx)/SCALE
-        //                 feeOwing(jubilee) after  == target*(cum-new_idx)/SCALE
-        // Both expand to jubRaw*(cum-old_idx)/SCALE -- prior debt preserved.
-        _indexAtLastTouch[address(this)] =
-            (jubRaw * _indexAtLastTouch[address(this)] + delta * _cumIndex) / target;
-
-        _setSettling(true);
-        super._mint(address(this), delta);
-        _setSettling(false);
-
-        emit JubileeAccrued(delta, target, _cumIndex);
-    }
-
-    /// @dev Burn `a`'s currently-owed fee from its raw balance and reset its
-    ///      index to cumIndex.  Caller must have already advanced globals.
-    function _settle(address a) internal {
-        uint256 fee = feeOwing(a);
-        if (fee > 0) {
-            _setSettling(true);
-            super._burn(a, fee);
-            _setSettling(false);
-            emit FeeBurned(a, fee, _cumIndex);
-        }
-        _indexAtLastTouch[a] = _cumIndex;
-    }
-
-    function _settling() private view returns (bool x) {
-        assembly { x := tload(SETTLE_SLOT) }
-    }
-    function _setSettling(bool v) private {
-        assembly { tstore(SETTLE_SLOT, v) }
     }
 
     // ---- ERC-20 hook overrides --------------------------------------------
@@ -398,31 +361,44 @@ contract Buck is ERC20 {
         return ERC20.balanceOf(a);
     }
 
-    /// @dev Threads demurrage through every state change (mint, burn, transfer).
-    ///      Order: advance globals -> accrue Jubilee -> settle `from` -> merge
-    ///      recipient -> super._update.  Re-entry guard short-circuits the
-    ///      recursive calls from advance-mint and settle-burn.
+    /// @dev Threads demurrage through every state change.  Conservation model:
+    ///      no fee transfer, no fee burn, no advance-mint to Jubilee.  All
+    ///      the contract has to do is (i) advance _areaAcc when totalSupply
+    ///      is about to change, and (ii) carry-merge the recipient's idx so
+    ///      the system fee-debt is conserved across transfers.  Sender side
+    ///      is untouched: raw[from] decreases by value (super._update),
+    ///      idx[from] keeps its prior basis -- the residual carries its
+    ///      original age and the transferred portion's fee debt is
+    ///      absorbed by the recipient via the merge.  Sum_a feeOwing(a) ==
+    ///      BASE_RATE * area_under_supply at all times.
+    ///
+    ///      Note: a sender CAN transfer up to raw[from] (super._update's
+    ///      ERC-20 guard).  Spending more than balanceOf(from) merely
+    ///      transfers some fee debt with the BUCK -- the recipient's idx
+    ///      absorbs it.  balanceOf(from) is the cap on "send without
+    ///      passing any of my fee debt to the recipient".
     function _update(address from, address to, uint256 value) internal override {
-        if (_settling()) {
-            super._update(from, to, value);
-            return;
+        // Advance _areaAcc only when totalSupply is about to change.
+        // (mint: from == 0, burn: to == 0; both adjust totalSupply via
+        // super._update.  Pure transfers conserve totalSupply.)
+        if (from == address(0) || to == address(0)) {
+            _areaAcc        = _areaNow();
+            _areaLastUpdate = uint64(block.timestamp);
         }
 
-        _advanceGlobals();
-        _accrueJubilee();
-
-        // Deducting: burn `from`'s accrued fee, reset its index.
-        if (from != address(0)) {
-            _settle(from);
-        }
-
-        // Carrying-style: weighted-merge `to`'s index with cumIndex.  Fresh
-        // BUCKs land at age 0; recipient's prior fee debt is preserved.
-        if (to != address(0)) {
-            uint256 br = ERC20.balanceOf(to);
+        // Carrying recipient-merge.  Mints (from == 0) come in at age 0
+        // (cumIndex basis); transfers carry the sender's age basis so
+        // sum_a feeOwing(a) is preserved.  Jubilee (address(this)) is
+        // exempt: feeOwing(jubilee) is identically zero, so its idx is
+        // never read -- skip the write.
+        if (to != address(0) && to != address(this)) {
+            uint256 br          = ERC20.balanceOf(to);
+            uint256 incomingIdx = (from == address(0))
+                ? _cumIndexNow()
+                : _indexAtLastTouch[from];
             if (br + value > 0) {
                 _indexAtLastTouch[to] =
-                    (br * _indexAtLastTouch[to] + value * _cumIndex) / (br + value);
+                    (br * _indexAtLastTouch[to] + value * incomingIdx) / (br + value);
             }
         }
 
@@ -431,42 +407,12 @@ contract Buck is ERC20 {
 
     // ---- transferCarrying --------------------------------------------------
 
-    /// @notice Transfer `amount` to `to` carrying its accumulated BUCK-age.
-    ///         No fee is burned at transfer time; recipient's index is shifted
-    ///         backward by a balance-weighted average so total system age is
-    ///         preserved.  Recipient eventually burns the same fee on a future
-    ///         standard transfer out.
+    /// @notice Alias for `transfer` retained for ABI compatibility with
+    ///         BUCK-aware contracts (Notes, etc.).  Under the conservation
+    ///         model every transfer already carries the sender's BUCK-age
+    ///         basis to the recipient via the merge in _update; the previous
+    ///         distinction between deducting and carrying transfers is gone.
     function transferCarrying(address to, uint256 amount) external returns (bool) {
-        address from = msg.sender;
-        // Both sides must hold a registered Identity binding -- the Notes pool
-        // (and any other BUCK-aware contract that pays out carried BUCK on
-        // spend) is bound via IdentityRegistry.bindContract under a Public
-        // Identity, exactly like every EOA counterparty.  No isPublic shortcut.
-        require(identity.isVerified(from), "BUCK: sender not verified");
-        require(identity.isVerified(to),   "BUCK: recipient not verified");
-        require(to != address(this), "BUCK: cannot carry to Jubilee");
-
-        _advanceGlobals();
-        _accrueJubilee();
-
-        // Weighted-average merge of recipient's index toward sender's
-        // idxAtLastTouch -- absorbs the carried age so post-merge fee-debt =
-        // sender's pre-debt on `amount` plus recipient's pre-debt on its
-        // existing balance.
-        uint256 br = ERC20.balanceOf(to);
-        uint256 idxFrom = _indexAtLastTouch[from];
-        if (br + amount > 0) {
-            _indexAtLastTouch[to] =
-                (br * _indexAtLastTouch[to] + amount * idxFrom) / (br + amount);
-        }
-        // Sender's index unchanged: their remaining balance keeps its age.
-
-        // Bypass _update's prologue/settle/merge so the carried merge survives.
-        _setSettling(true);
-        super._update(from, to, amount);
-        _setSettling(false);
-
-        emit TransferCarrying(from, to, amount);
-        return true;
+        return transfer(to, amount);
     }
 }
