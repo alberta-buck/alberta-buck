@@ -68,24 +68,25 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 ** Data Residency
 
    #+LATEX: {\scriptsize
-   | Data                         | Location                 | Visibility        | When Used                      |
-   |------------------------------+--------------------------+-------------------+--------------------------------|
-   | =identity_data= (plaintext)  | Holochain Private entry  | Owner only        | Approve (sent to counterparty) |
-   | =m = H(identity_data)=       | Holochain Private entry  | Owner only        | Registration, Approve          |
-   | PS signature =sigma=         | Holochain Private entry  | Owner only        | Registration (rerandomized)    |
-   | Secret key =sk=              | Holochain Private entry  | Owner only        | Approve (decrypt + re-encrypt) |
-   | Rerandomized =sigma'=        | IdentityRegistry         | Public (on-chain) | Registration verification      |
-   | Public key =pk=              | IdentityRegistry         | Public (on-chain) | Approve, Transfer              |
-   | ElGamal ciphertext =E_alice= | IdentityRegistry         | Public (on-chain) | Approve (read by contract)     |
-   | NIZK proof =pi=              | IdentityRegistry (tx)    | Public (on-chain) | Registration verification      |
-   | Re-encrypted =E_bob=         | BUCK ERC-20 (approve)    | Public (on-chain) | Two-channel verification       |
-   | Chaum-Pedersen proof         | BUCK ERC-20 (approve tx) | Public (on-chain) | Approve verification           |
-   | =_receiptFragments[a][b]=    | BUCK ERC-20 storage      | Public (on-chain) | Transfer (bilateral check)     |
-   | =isPublic= flag              | IdentityRegistry         | Public (on-chain) | Transfer (exemption check)     |
-   | Public =identity_data=       | IdentityRegistry or DHT  | Public            | Anyone (no approve needed)     |
-   | Holochain Warrants           | Holochain DHT            | Public            | Malfeasance detection          |
-   | Canonical receipt            | Holochain Private entry  | Each party only   | Dispute resolution             |
-   #+LATEX: }
+   | Data                         | Location                 | Visibility        | When Used                            |
+   |------------------------------+--------------------------+-------------------+--------------------------------------|
+   | identity_data = plaintext    | Holochain Private entry  | Owner only        | Approve (sent to counterparty)       |
+   | =m = H(identity_data)=       | Holochain Private entry  | Owner only        | Registration, Approve                |
+   | PS signature =sigma=         | Holochain Private entry  | Owner only        | Registration (rerandomized)          |
+   | Secret key =sk=              | Holochain Private entry  | Owner only        | Approve (decrypt + re-encrypt)       |
+   | Rerandomized =sigma'=        | IdentityRegistry         | Public (on-chain) | Registration verification            |
+   | Public key =pk=              | IdentityRegistry         | Public (on-chain) | Approve, Transfer                    |
+   | ElGamal ciphertext =E_alice= | IdentityRegistry         | Public (on-chain) | Approve (read by contract)           |
+   | NIZK proof =pi=              | IdentityRegistry (tx)    | Public (on-chain) | Registration verification            |
+   | Re-encrypted =E_bob=         | BUCK ERC-20 (approve)    | Public (on-chain) | Two-channel verification             |
+   | Chaum-Pedersen proof         | BUCK ERC-20 (approve tx) | Public (on-chain) | Approve verification                 |
+   | =_receiptFragments[a][b]=    | BUCK ERC-20 storage      | Public (on-chain) | Transfer (bilateral check)           |
+   | =isPublicIdentity= flag      | IdentityRegistry         | Public (on-chain) | Transfer (receipt-fragment fallback) |
+   | Public =identity_data=       | IdentityRegistry or DHT  | Public            | Anyone (no approve needed)           |
+   | Holochain Warrants           | Holochain DHT            | Public            | Malfeasance detection                |
+   | Canonical receipt            | Holochain Private entry  | Each party only   | Dispute resolution                   |
+   #+TBLFM: $1=identity_data= (plaintext)
+#+LATEX: }
 
 ** Registration: Credential Goes On-Chain
 
@@ -147,8 +148,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
        participant B as BUCK ERC-20<br/>(Ethereum)
 
        W->>P: Read sk_alice
-       W->>IR: Read E_alice, pk_bob, isPublic(bob)
-       IR-->>W: E_alice=(R,C), pk_bob, isPublic=true
+       W->>IR: Read E_alice, pk_bob, isPublicIdentity(bob)
+       IR-->>W: E_alice=(R,C), pk_bob, isPublicIdentity=true
 
        rect rgb(255, 248, 240)
        Note over W: Trust checkpoint
@@ -181,9 +182,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 ** Transfer: Everything On-Chain
 
    By the time =transfer= or =transferFrom= is called, all proofs have
-   already been verified.  The EVM code only checks boolean flags --
-   no cryptography runs during the transfer itself.  Public accounts
-   (=isPublic=true=) are exempt from needing a counterparty =approve=.
+   already been verified.  The EVM code only checks boolean flags and
+   stored receipt fragments -- no cryptography runs during the transfer
+   itself.  Public-Identity contracts (those bound via
+   ~bindContract(target, pk, E, isPublicIdentity_=true)~) need not have a
+   per-pair receipt fragment: the receipt falls back to the bound
+   =_identityHash= for that side.
 
    #+BEGIN_SRC mermaid :file ./images/transfer-flow.png
    sequenceDiagram
@@ -195,14 +199,17 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
        rect rgb(240, 255, 240)
        Note over B,IR: Bilateral identity check
-       B->>IR: isPublic(alice)?
-       IR-->>B: false
+       B->>IR: isVerified(alice) && isVerified(bob)?
+       IR-->>B: true, true
        B->>B: _receiptFragments[alice][bob]<br/>exists? YES
-       Note over B: sender_ok = true
+       Note over B: aliceFrag = stored ciphertext-hash
 
-       B->>IR: isPublic(bob)?
+       B->>B: _receiptFragments[bob][alice]<br/>exists? NO
+       B->>IR: isPublicIdentity(bob)?
        IR-->>B: true
-       Note over B: receiver_ok = true (exempt)
+       B->>IR: _identityHash(bob)
+       IR-->>B: H(pk_bob, E_bob)
+       Note over B: bobFrag = _identityHash(bob)
        end
 
        B->>B: Standard ERC-20 checks<br/>(balance, allowance)
@@ -270,7 +277,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    In every case, the =transfer= / =transferFrom= call itself does /no/
    cryptography -- it only reads the boolean results of prior =approve= calls
-   and =isPublic= flags.  All proof verification happens during =approve=.
+   and the =isPublicIdentity= flag bound at =bindContract= time.  All proof
+   verification happens during =approve=.
 
 ** The AMM Pool Scenario: Retroactive Identity Recovery
 
@@ -313,9 +321,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
        so Alice couldn't substitute a different ciphertext.  The transaction
        succeeded at block \( B_{\text{approve}} \).
 
-    4. *Transfer:* The bilateral identity check passed.  The pool is public
-       (=isPublic(pool) = true=), Alice had a valid =_receiptFragments[alice][pool]=.
-       The swap executed at block \( B_{\text{transfer}} \).
+    4. *Transfer:* The bilateral identity check passed.  The pool was bound
+       under a Public Identity (~isPublicIdentity(pool) = true~ via
+       =IdentityRegistry.bindContract=), and Alice had a valid
+       =_receiptFragments[alice][pool]= from her =approve=.  The pool side
+       fell back to the bound =_identityHash(pool)=.  The swap executed at
+       block \( B_{\text{transfer}} \).
 
     None of these steps required Bob to be online, to run a Holochain
     node, or to examine Alice's identity.  The EVM did it for him.
@@ -720,8 +731,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    : Identity scalar m = H(identity_data):
    :   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
    : PS signature sigma:
-   :   sigma_1 = (878994..., 438857...)
-   :   sigma_2 = (686697...,  13890...)
+   :   sigma_1 = ( 20005...,  22484...)
+   :   sigma_2 = (313886..., 372935...)
 
    #+LATEX: }
 
@@ -883,12 +894,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : Rerandomized PS signature verified.
-   :   sigma'_1 = (433472..., 230427...)
-   :   sigma'_2 = (803519..., 283392...)
+   :   sigma'_1 = (877575..., 460253...)
+   :   sigma'_2 = (493874..., 405235...)
    : 
    : Original and rerandomized signatures are unlinkable:
-   :   sigma_1  = (878994..., 438857...)
-   :   sigma'_1 = (433472..., 230427...)
+   :   sigma_1  = ( 20005...,  22484...)
+   :   sigma'_1 = (877575..., 460253...)
    :   (No algorithm can correlate them.)
 
    #+LATEX: }
@@ -942,12 +953,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    #+begin_example
    Fresh key pair for this Ethereum account:
-     sk_alice = 8968254625441550629060262299788512616886990901800413931227359870433241511467
-     pk_alice = (604102..., 522480...)
+     sk_alice = 6930439595792189231300284107883031400324093761849875043740363699103850858621
+     pk_alice = (196916..., 490613...)
 
    ElGamal ciphertext E_alice = (R, C):
-     R = r*G    = (323441..., 718153...)
-     C = m*G+r*pk = (887141..., 786635...)
+     R = r*G    = (317411..., 873776...)
+     C = m*G+r*pk = (733114..., 194976...)
 
    Message point M = m*G:
      M = (739132..., 937433...)
@@ -981,7 +992,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
     #+RESULTS:
     : Eve decrypts with wrong key:
-    :   M_wrong = (746535..., 818170...)
+    :   M_wrong = (340865..., 428413...)
     :   M_real  = (739132..., 937433...)
     :   Match: False
     :   (Completely different point -- no information about m is leaked.)
@@ -1039,9 +1050,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-   :   challenge e = 6567013608681197115665025365070303515839296188314794709636173729037109525226
-   :   response s_m = 11982856539463251563500019214843922409676232248490850737589748661330005292384
-   :   response s_r = 11155460706539292622511293114553679576188540417776643655074151270114931327196
+   :   challenge e = 17178887482363216326737571073487103897263396493046265050513872580020101789190
+   :   response s_m = 16259379493728893246422565722561224351352440146527786176118906873141582162403
+   :   response s_r = 6117324858485391315596214213924667359609104574359392933756936595300596616114
 
    #+LATEX: }
 
@@ -1276,15 +1287,23 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+LATEX: }
 
 
-* Bob Registers as a Public Account
+* Bob Binds His Pool as a Public-Identity Contract
 
-  Bob operates a Uniswap-style AMM liquidity pool and registers as a
-  public BUCK account: his =identity_data= is world-readable in the
-  IdentityRegistry, and =isPublic(bob) = true=.  This exempts Bob's
-  counterparties from needing Bob to call =approve= -- any private
-  account can approve Bob's pool unilaterally, and the bilateral
-  identity check in =transfer= passes because Bob's public status
-  satisfies his side automatically.
+  Bob operates a Uniswap-style AMM liquidity pool.  Bob himself is a
+  registered EOA, but the /pool contract/ is the entity that holds and
+  moves BUCK on his behalf.  At deployment time Bob (or the
+  =BuckAwareDeployer.deployAndBind= helper, atomically) calls
+  ~IdentityRegistry.bindContract(pool, pk_bob, E_bob, isPublicIdentity_=true)~,
+  publishing Bob's =(pk, E)= against the pool's address and marking the
+  pool ~isPublicIdentity = true~.  Bob's =identity_data= remains
+  world-readable in the IdentityRegistry under his own EOA.
+
+  Counterparties of the pool need not wait for the pool to call =approve=
+  back: when no per-pair receipt fragment exists for the pool side,
+  =transfer= falls back to the bound =_identityHash(pool)= for the
+  receipt event.  The bilateral identity check still requires both
+  parties to be =isVerified=; the public-side fallback only relaxes the
+  receipt-fragment requirement, not the verification requirement.
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results output
@@ -1317,26 +1336,35 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
     C_bob  = add(M_bob, mul(pk_bob, r_bob))
     E_bob_reg = (R_bob, C_bob)
 
-    # Bob registers (same PS+NIZK verification as Alice -- omitted for brevity)
-    # AND publishes identity_data on-chain (public account)
-    print("Bob registered as PUBLIC account:")
+    # Bob registers as an EOA (same PS+NIZK verification as Alice -- omitted for brevity)
+    # His pool is then bound under a Public Identity at deployment via
+    #   IdentityRegistry.bindContract(pool, pk_bob, E_bob, isPublicIdentity_=true)
+    # (or atomically via BuckAwareDeployer.deployAndBind).
+    POOL_ADDR = 0xa11ce0fa11ce0fa11ce0fa11ce0fa11ce0fa1100  # illustrative
+    print("Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:")
     print(f"  pk_bob = {pt(pk_bob)}")
     print(f"  E_bob  = (R, C) -- ElGamal ciphertext on-chain")
     print(f"  identity_data = '{bob_identity_data[:50]}...'")
-    print(f"  isVerified(bob) = true")
-    print(f"  isPublic(bob)   = true")
-    print(f"\nBob's identity is world-readable.  No approve() needed from Bob's side.")
+    print(f"  isVerified(bob)             = true")
+    print(f"  isVerified(pool)            = true   (set by bindContract)")
+    print(f"  isPublicIdentity(pool)      = true   (set by bindContract)")
+    print(f"\nThe pool's identity hash falls back into receipts when no per-pair")
+    print(f"fragment exists.  Bob himself never needs to approve his own pool.")
   #+END_SRC
 
   #+RESULTS:
-  : Bob registered as PUBLIC account:
-  :   pk_bob = (949044..., 780678...)
-  :   E_bob  = (R, C) -- ElGamal ciphertext on-chain
-  :   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
-  :   isVerified(bob) = true
-  :   isPublic(bob)   = true
-  : 
-  : Bob's identity is world-readable.  No approve() needed from Bob's side.
+  #+begin_example
+  Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:
+    pk_bob = (  2756..., 869638...)
+    E_bob  = (R, C) -- ElGamal ciphertext on-chain
+    identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
+    isVerified(bob)             = true
+    isVerified(pool)            = true   (set by bindContract)
+    isPublicIdentity(pool)      = true   (set by bindContract)
+
+  The pool's identity hash falls back into receipts when no per-pair
+  fragment exists.  Bob himself never needs to approve his own pool.
+  #+end_example
 
   #+LATEX: }
 
@@ -1373,7 +1401,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    : Wallet API: cred_bob.m == m_bob    : True
    :   ps_verify(cred_bob.sigma, m_bob) : True
-   :   Issuer log now has 2 entries: 6
+   :   Issuer log now has 2 entries: 2
 
    #+LATEX: }
 
@@ -1382,10 +1410,15 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
   Alice wants to swap BUCK for USDT on Bob's pool.  She calls
   =approve(pool, amount, E_pool, proof)= to re-encrypt her identity
-  under Bob's public key and prove the re-encryption is correct via a
-  Chaum-Pedersen proof (~29K gas).  Since Bob is public, only Alice
-  needs to approve; the bilateral identity check in =transfer= passes
-  because =isPublic(bob) == true= satisfies Bob's side automatically.
+  under the pool's bound public key (Bob's =pk_bob=) and prove the
+  re-encryption is correct via a Chaum-Pedersen proof (~29K gas).
+  Approve always requires CP, even though the pool is a Public-Identity
+  contract -- this captures Alice's per-pair consent, not just the
+  registry-derivable identity hash; see [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale][/Why approve Is Always
+  CP-Bound/]] for the full rationale.  The pool itself need not
+  reciprocate with its own =approve=; the bilateral identity check in
+  =transfer= passes because ~isPublicIdentity(pool) == true~, and the
+  receipt event falls back to =_identityHash(pool)= for the pool's side.
   Below: the re-encryption, the three-check Chaum-Pedersen
   verification, and a counter-example showing that re-encrypting a
   /different/ message point causes Check 2 to fail.
@@ -1426,8 +1459,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    : Alice re-encrypts her identity for Bob:
    :   E_bob = (R', C') where:
-   :     R' = r'*G     = (195316..., 836886...)
-   :     C' = M+r'*pk  = (758170..., 116287...)
+   :     R' = r'*G     = (806944..., 939093...)
+   :     C' = M+r'*pk  = (150241..., 623844...)
    : 
    : Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
    : Matches Alice's M:             (739132..., 937433...)
@@ -1491,9 +1524,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : Chaum-Pedersen proof:
-   :   e  = 5406286201599415101329000159650479878526551003181631696909248587033852847770
-   :   s1 = 6261812172894848331038219918846897700922479806151165840824133042315128639487
-   :   s2 = 4297844741003400485953661935162540395269950035361487071099736196996032645425
+   :   e  = 7007377908732927999168957863997131114474306579403933658700448136936800967087
+   :   s1 = 5865837094385340442069181236385922137618819184855376084939248084806139088474
+   :   s2 = 12088396958355473142176449452854428721993497027823390067447915409194597637942
 
    #+LATEX: }
 
@@ -1660,46 +1693,54 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
 * Transfer -- Bilateral Identity Check
 
-  With Alice's =approve= completed and Bob registered as a public
-  account, the =transfer= can proceed.  The contract performs a
-  bilateral identity check: for each party, it verifies that either
-  =isPublic= is true or a valid =_receiptFragments= entry exists from a
-  prior =approve=.  No cryptography runs at transfer time -- only
-  boolean flag checks.  We simulate the check for our Private-to-Public
-  scenario and show that both sides pass.
+  With Alice's =approve= completed and the pool bound under a Public
+  Identity, the =transfer= can proceed.  The contract performs a
+  bilateral identity check: both parties must be =isVerified=, and the
+  receipt event must carry a fragment for each side.  Per-pair receipt
+  fragments stored at =approve= time are the primary source.  When a
+  side has no fragment and that side is ~isPublicIdentity = true~, the
+  bound =_identityHash= falls in for that side's receipt slot.  No
+  cryptography runs at transfer time -- only state lookups.  We
+  simulate the check for our Private-to-Public-Identity scenario.
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results output
     # Simulating the contract's bilateral identity check:
-    is_public_alice = False
-    is_public_bob   = True
-    receipt_alice_to_bob = True   # set during approve() above
-    receipt_bob_to_alice = False  # Bob never called approve (he's public)
+    is_verified_alice         = True
+    is_verified_pool          = True
+    is_public_identity_pool   = True   # bindContract(pool, ..., true)
+    receipt_alice_to_pool     = True   # set during approve() above
+    receipt_pool_to_alice     = False  # pool never called approve (public)
 
-    # Sender (Alice) identity available to receiver (Bob)?
-    sender_ok = is_public_alice or receipt_alice_to_bob
-    # Receiver (Bob) identity available to sender (Alice)?
-    receiver_ok = is_public_bob or receipt_bob_to_alice
+    # Both must be verified; receipt-fragment fallback to _identityHash
+    # is only allowed on a side whose isPublicIdentity == true.
+    assert is_verified_alice and is_verified_pool
+
+    # Alice's fragment for the receipt -- her per-pair CP hash.
+    alice_frag = "H(E_pool)" if receipt_alice_to_pool else None
+    # Pool's fragment -- per-pair CP hash if present, else _identityHash(pool).
+    pool_frag = (
+        "H(E_alice)" if receipt_pool_to_alice
+        else ("_identityHash(pool)" if is_public_identity_pool else None)
+    )
 
     print("Bilateral identity check:")
-    print(f"  Alice (private): isPublic={is_public_alice}, "
-          f"receiptFragment={receipt_alice_to_bob} => {sender_ok}")
-    print(f"  Bob   (public):  isPublic={is_public_bob}, "
-          f"receiptFragment={receipt_bob_to_alice} => {receiver_ok}")
-    print(f"\n  sender_ok AND receiver_ok = {sender_ok and receiver_ok}")
-    print(f"\n==> transfer(bob, 500 BUCK) SUCCEEDS")
-    print(f"    BuckTransferReceipt emitted with identity hashes")
+    print(f"  Alice (private):  fragment = {alice_frag}")
+    print(f"  Pool  (public):   fragment = {pool_frag}")
+    print(f"\n  both fragments present => transfer SUCCEEDS")
+    print(f"\n==> transfer(pool, 500 BUCK) SUCCEEDS")
+    print(f"    BuckTransferReceipt emitted with both identity hashes")
   #+END_SRC
 
   #+RESULTS:
   : Bilateral identity check:
-  :   Alice (private): isPublic=False, receiptFragment=True => True
-  :   Bob   (public):  isPublic=True, receiptFragment=False => True
+  :   Alice (private):  fragment = H(E_pool)
+  :   Pool  (public):   fragment = _identityHash(pool)
   : 
-  :   sender_ok AND receiver_ok = True
+  :   both fragments present => transfer SUCCEEDS
   : 
-  : ==> transfer(bob, 500 BUCK) SUCCEEDS
-  :     BuckTransferReceipt emitted with identity hashes
+  : ==> transfer(pool, 500 BUCK) SUCCEEDS
+  :     BuckTransferReceipt emitted with both identity hashes
 
   #+LATEX: }
 
@@ -1979,17 +2020,17 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   #+RESULTS:
   #+begin_example
   Second credential derived (same identity, fresh account):
-    pk_alice_2 = (234659..., 956165...)
+    pk_alice_2 = (759747..., 182614...)
     E_alice_2  = (R, C) -- independent ciphertext
-    sigma'_2   = (960236..., 908744...)
+    sigma'_2   = (162356...,  42652...)
 
   Unlinkability check:
-    sigma'_1 (acct 1) = (433472..., 230427...)
-    sigma'_1 (acct 2) = (960236..., 908744...)
-    pk (acct 1)       = (604102..., 522480...)
-    pk (acct 2)       = (234659..., 956165...)
-    E.R (acct 1)      = (323441..., 718153...)
-    E.R (acct 2)      = (779252..., 522857...)
+    sigma'_1 (acct 1) = (877575..., 460253...)
+    sigma'_1 (acct 2) = (162356...,  42652...)
+    pk (acct 1)       = (196916..., 490613...)
+    pk (acct 2)       = (759747..., 182614...)
+    E.R (acct 1)      = (317411..., 873776...)
+    E.R (acct 2)      = (600886..., 886064...)
 
     All values are independent.  No shared structure.
     PS rerandomization is STATISTICALLY unlinkable --

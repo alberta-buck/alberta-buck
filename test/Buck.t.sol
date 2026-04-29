@@ -114,6 +114,20 @@ contract BuckTest is Test {
         reg.register(ISSUER, pk, E, _ps("bob"), _regProof("bob"));
     }
 
+    /// @dev Plant minimal contract bytecode at `target` (so bindContract's
+    ///      code.length check passes), bind a placeholder Public Identity,
+    ///      and return.  Used to model BUCK-unaware Public-Identity contracts
+    ///      (Uniswap pair, custodial vault, etc.) in unit tests.
+    function _bindPublicIdentity(address target) internal {
+        vm.etch(target, hex"60006000fd");
+        BN254.G1Point memory pk = BN254.g1();
+        IdentityRegistry.ElGamalCT memory E = IdentityRegistry.ElGamalCT({
+            R: BN254.g1(),
+            C: BN254.g1()
+        });
+        reg.bindContract(target, pk, E, true);
+    }
+
     /// @dev Mint a BuckCredit NFT to `client` with a fixed face value, no depreciation,
     ///      and activate it fully.  faceValue is denominated in 1e18-scaled USD.
     function _grantCredit(address client, uint256 faceValue) internal {
@@ -261,18 +275,19 @@ contract BuckTest is Test {
         buck.approve(carol, 100e18, E_b, _cpProof());
     }
 
-    function test_identityApprove_publicSpenderSkipsCP() public {
-        // Make Bob public; CP proof is then irrelevant (any junk goes through).
-        vm.prank(bob);
-        reg.setPublic(true);
+    function test_identityApprove_publicContractStillRequiresCP() public {
+        // Bind a Public-Identity contract (e.g., AMM pair).  Even though its
+        // identity is publicly attested off-chain, approve() still requires a
+        // valid CP proof so the contract operator obtains a CP-encrypted
+        // receipt of the approver's identity for subpoena decryption.
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
 
         IdentityRegistry.ElGamalCT memory junk;
         IdentityRegistry.CPProof memory junkProof;
         vm.prank(alice);
-        buck.approve(bob, 50e18, junk, junkProof);
-        assertEq(buck.allowance(alice, bob), 50e18);
-        // Receipt is the public-receipt hash, not the junk ciphertext hash.
-        assertTrue(buck.receiptFragment(alice, bob) != bytes32(0));
+        vm.expectRevert(bytes("BUCK: bad CP proof"));
+        buck.approve(pool, 50e18, junk, junkProof);
     }
 
     // ---- transfer ----------------------------------------------------------
@@ -319,17 +334,20 @@ contract BuckTest is Test {
         assertEq(buck.balanceOf(bob),   10e18);
     }
 
-    function test_transfer_publicRecipientSkipsReceipt() public {
+    function test_transfer_publicContractRecipientSkipsReceipt() public {
         _grantCredit(alice, 1000e18);
         vm.prank(alice);
         buck.mint(100e18);
 
-        // Bob goes public -> Alice can transfer to Bob without prior approve receipt.
-        vm.prank(bob);
-        reg.setPublic(true);
+        // Public-Identity contract recipient -> Alice can transfer without
+        // a prior CP approve receipt; the receipt-fragment fallback to the
+        // deterministic _identityHash kicks in because the contract's
+        // identity is already publicly attested.
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
         vm.prank(alice);
-        buck.transfer(bob, 5e18);
-        assertEq(buck.balanceOf(bob), 5e18);
+        buck.transfer(pool, 5e18);
+        assertEq(buck.balanceOf(pool), 5e18);
     }
 
     function test_transferFrom_consumesAllowance() public {
@@ -345,5 +363,34 @@ contract BuckTest is Test {
         buck.transferFrom(alice, bob, 25e18);
         assertEq(buck.allowance(alice, bob), 25e18);
         assertEq(buck.balanceOf(bob),        25e18);
+    }
+
+    // ---- public-contract sender -> verified-EOA (e.g. Uniswap pair payout) -
+
+    function test_transfer_publicContractSenderToVerifiedSkipsReceiptFragment() public {
+        // A Public-Identity contract (proxy for a Uniswap pair) holds BUCK
+        // and pays it out to verified Bob.  No prior CP approve from the
+        // contract to Bob exists, and the contract has no off-chain crypto
+        // material to produce one -- the transfer succeeds because the
+        // contract's identity is publicly attested (fallback to identityHash).
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
+
+        // Seed the contract with BUCK.  Alice transfers to it directly,
+        // exercising the Public-recipient-receipt fallback at the same time.
+        _grantCredit(alice, 1000e18);
+        vm.prank(alice);
+        buck.mint(100e18);
+        vm.prank(alice);
+        buck.transfer(pool, 30e18);
+        assertEq(buck.balanceOf(pool), 30e18);
+
+        // Now the public contract pays out to Bob (verified, never approved
+        // by the contract).  Pre-refactor this reverted with "missing
+        // identity receipt"; post-refactor it succeeds via the Public-sender
+        // fallback.
+        vm.prank(pool);
+        buck.transfer(bob, 7e18);
+        assertEq(buck.balanceOf(bob), 7e18);
     }
 }

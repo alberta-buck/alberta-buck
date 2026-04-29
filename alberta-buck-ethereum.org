@@ -65,9 +65,14 @@ end of this document specifies the concrete phased build order and tracks comple
 The Alberta Buck Ethereum implementation comprises five interacting contracts.  The =IdentityRegistry=
 is the trust anchor of every BUCK transfer: =mint=, =approve= and =transfer= are all gated on the
 sender (and, where relevant, the recipient) holding a verified, registered identity credential.
-The =Notes= contract sits on top of BUCK as a public (=setSystemPublic=) counterparty whose
-commitments pool is extended only when the caller supplies a Groth16 SNARK binding the deposited
-=totalFace= to a batch of Poseidon note commitments.
+The =Notes= contract sits on top of BUCK as a Public-Identity counterparty
+(bound via =IdentityRegistry.bindContract(notes, pk, E, true)=) whose
+commitments pool is extended only when the caller supplies a Groth16 SNARK
+binding the deposited =totalFace= to a batch of Poseidon note commitments.
+Every account /and/ contract that operates on BUCKs is required to carry an
+Identity binding -- EOAs via =register=, contracts via =bindContract= -- so
+that bilateral identity-checked =transfer= / =transferFrom= calls have a
+verifiable counterparty on both sides.
 
 #+BEGIN_SRC ditaa :file ./images/buck-eth-layers.png :exports results
      Chainlink / Uniswap V3 Oracles       BN254 precompiles             circom / snarkjs
@@ -82,8 +87,9 @@ commitments pool is extended only when the caller supplies a Groth16 SNARK bindi
   | - currentValue() | | - currentBuckK() | | - E_addr[addr]=(R,C) | |     totalFace, cm[]) |
   | - activate()     | | - compute()      | | - isVerified, isPub  | | - Groth16 verifier   |
   | - updateCredit() | | (PID: Kp,Ki,Kd,  | | - trustedIssuers     | |   arity = 3 pub sigs |
-  | - totalCurrent.. | |  basket[])       | | - register / setPub  | +----------+-----------+
-  +--------+---------+ +--------+---------+ | - setSystemPublic    |            |
+  | - totalCurrent.. | |  basket[])       | | - register (EOA)     | +----------+-----------+
+  +--------+---------+ +--------+---------+ | - bindContract       |            |
+           |                    |           | - isPublicIdentity   |            |
            |                    |           | - verifyApprove      |            |
            |                    |           +-----+----------------+            |
            |                    |                 |                             |
@@ -141,16 +147,24 @@ The flow is:
    the recipient's re-encrypted identity ciphertext and Chaum-Pedersen proof through the
    =IdentityRegistry=; the proof binds =E_bob= to the sender's registered credential without ever
    revealing the underlying identity point \( M \).
-6. =transfer= / =transferFrom= then perform a bilateral identity check (public-claim recipients
-   skip the receipt requirement, private recipients must have a stored receipt fragment from a prior
-   =approve=) and emit a =BuckTransferReceipt= event carrying only ciphertext hashes.
+6. =transfer= / =transferFrom= then perform a bilateral identity check: both parties must be
+   registered (=isVerified=).  Per-pair receipt fragments stored at =approve= time are the
+   primary identity material in the receipt; if no fragment exists and at least one party is
+   bound under a Public Identity (=isPublicIdentity=), the bound =_identityHash= falls in as the
+   fragment for that side.  EOA<->EOA Encrypted-Identity transfers MUST have a prior CP receipt.
+   The contract emits a =BuckTransferReceipt= event carrying only ciphertext hashes.
 7. To denominate holdings as private notes, the client calls =Notes.mint(proofBytes, cm[],
    totalFace)=.  The =MintVerifierAdapter= decodes the proof as =(uint256[2], uint256[2][2],
    uint256[2])= and forwards to the snarkjs-generated =MintGroth16Verifier=, which checks a Groth16
    proof with public signals =[totalFace, cm[0], cm[1]]=.  The circuit enforces =totalFace == \sum
    v_i= and =cm_i == Poseidon(flavor_i, v_i, rho_i, idHash_i, predicate_i)= per note.  The =Notes=
-   contract is registered =setSystemPublic(true)= so its =transferFrom= pull from the minter
-   satisfies the identity-aware =BUCK= transfer rules without itself holding a private credential.
+   contract was bound under a Public Identity at deployment via
+   =IdentityRegistry.bindContract(notes, pk, E, true)= (or via
+   =BuckAwareDeployer.deployAndBind= for atomic deploy+bind), so its
+   =transferFrom= pull from the minter satisfies the identity-aware =BUCK=
+   transfer rules: both parties are =isVerified=, and the Notes-side receipt
+   fragment falls back to the deterministic =_identityHash= because the
+   pool's operator has publicly disclosed =m= off-chain.
 8. =BUCK_K= ships in two stages.  *Phase 0* uses =BuckKControllerStatic= with a governance-settable
    value, so the identity and notes layers can land first.  The on-chain PID + commodity-oracle
    implementation (=BuckKController=, described in the [[#buck-k-pid][BUCK_K]] section) is the eventual
@@ -292,18 +306,27 @@ machinery described in the companion documents [[https://perry.kundert.ca/range/
 Every BUCK =mint=, =approve= and =transfer= consults this registry; an unregistered address cannot
 hold or move BUCKs.
 
-The registry stores three pieces of state per address:
+The registry stores four pieces of state per address:
 
-| Field        | Type              | Source                                               |
-|--------------+-------------------+------------------------------------------------------|
-| =pk[a]=      | =G_1= point       | Identity public key generated by the wallet          |
-| =E_addr[a]=  | =(R, C) in G_1^2= | ElGamal encryption of \( M = m \cdot G \) under =pk= |
-| =isVerified= | =bool=            | True after PS + NIZK proofs verify on-chain          |
-| =isPublic=   | =bool=            | Opt-in: account publishes \( M \) (DeFi pools, etc.) |
+| Field               | Type              | Source                                                                                |
+|---------------------+-------------------+---------------------------------------------------------------------------------------|
+| =pk[a]=             | =G_1= point       | Identity public key generated by the wallet (EOA) or by the contract operator         |
+| =E_addr[a]=         | =(R, C) in G_1^2= | ElGamal encryption of \( M = m \cdot G \) under =pk= (or =(g_1, g_1)= for contracts disclosing m) |
+| =isVerified=        | =bool=            | True after PS + NIZK proofs verify on-chain (EOA) or after =bindContract= (contract)  |
+| =isPublicIdentity=  | =bool=            | True only for contracts bound with the public-disclosure flag via =bindContract=      |
 
 It also holds a small set of trusted issuer public keys =trustedIssuers[issuerAddr] = (X, Y)= in
 \( G_2^2 \), populated by governance.  These are the only PS public keys whose signatures the
 registry will accept at =register()= time.
+
+EOAs always self-register via =register=; the =isPublicIdentity= flag stays
+=false= for them (an EOA always carries an Encrypted Identity).  Contracts
+bind via =bindContract=, which has no PS / NIZK requirement -- trust derives
+either from atomic deploy+bind via =BuckAwareDeployer=, or from
+first-binder-wins for already-deployed contracts.  The flag captures
+whether the contract operator has chosen to publicly disclose =m= off-chain
+(typical for AMM pools and other BUCK-unaware contracts whose operator
+wants the on-chain audit trail to be openable on subpoena).
 
 ** Cryptographic Surface
 
@@ -339,8 +362,13 @@ struct RegistrationProof { uint256 e, s_m, s_r; G1Point A_ps, T_C, T_R; }
 struct CPProof           { uint256 e, s1, s2;   G1Point T1, T2, T3;   }
 
 function register(address issuer, G1Point pk, ElGamalCT E, PSSig sigma, RegistrationProof proof);
-function setPublic(bool isPublic);
-function setSystemPublic(address account, bool isPublic);   // governance
+
+// Bind a (pk, E_addr) Identity to a deployed contract address (target.code.length > 0).
+// First binder wins for pre-existing contracts; for atomic deploy+bind use
+// BuckAwareDeployer.deployAndBind.  isPublicIdentity_=true means the operator
+// has chosen to publicly disclose m off-chain.
+function bindContract(address target, G1Point pk, ElGamalCT E, bool isPublicIdentity_);
+
 function trustIssuer(address issuer, PSPubKey ipk);         // governance
 function verifyApprove(address sender, address spender,
                        ElGamalCT E_bob, CPProof pi) view returns (bool);
@@ -349,14 +377,18 @@ function verifyApprove(address sender, address spender,
 Design notes on the surface:
 
 - Per-address state is =pk=, =E_addr= ((R,C) ciphertext of the identity point =M=), =isVerified=,
-  =isPublic=, and =issuerOf= -- all public-readable mappings.
+  =isPublicIdentity=, and =issuerOf= -- all public-readable mappings.
 - =register= runs three checks in order: (1) recompute the Fiat-Shamir challenge with
   =msg.sender= binding, (2) verify the Schnorr-family NIZK in =G_1=, (3) verify the PS pairing
   relation in =G_2=.  An =already registered= / =untrusted issuer= guard precedes them.  Total
   cost ~235K gas (one-time per address).
-- =setPublic= and =setSystemPublic= are the only two mutators after registration.  The system
-  variant is governance-gated and exists for contracts (Notes, InsurancePool) that have no private
-  key to sign CP proofs with -- =Notes= is registered public this way by =script/Deploy.s.sol=.
+- =bindContract= is the only post-registration mutator and is permissioned by
+  the deployment pattern, not by governance: any caller may bind any
+  yet-unbound deployed contract.  The intended discipline is operator OPSEC
+  -- either the operator is the contract's deployer and uses
+  =BuckAwareDeployer.deployAndBind= for atomic deploy+bind (no front-running
+  window), or the operator races to bind a pre-existing contract before any
+  other party.  Once bound, the binding is immutable.
 - =verifyApprove= reads =E_alice= from storage so the caller cannot substitute a fake credential;
   the =CPProof= structure carries T1/T2/T3 because the transcript binds T1 and T2 separately (only
   T3 is recoverable from the verification equations).
@@ -367,14 +399,28 @@ Design notes on the surface:
   not un-register existing accounts; they were verified once at registration and are never
   re-verified.
 
-** Public-Claim Accounts
+** Public-Identity Contracts
 
-DeFi infrastructure -- AMM pools, vaults, oracles -- cannot generate Chaum-Pedersen proofs at
-=approve= time, because the contract has no private key.  These accounts call =setPublic(true)=
-after =register()=; from then on, counterparties of a public account skip the proof requirement and
-the on-chain receipt is constructed directly from the published identity point.  Public accounts
-forfeit content privacy: their identity \( M \) is observable on-chain, but they retain
-unforgeability and the audit trail.
+DeFi infrastructure -- AMM pools, vaults, oracles, the Notes pool -- cannot
+generate Chaum-Pedersen proofs at =approve= time because the contract has no
+private key.  Such contracts are bound with =bindContract(target, pk, E,
+isPublicIdentity_=true)= -- the binding has the same =(pk, E_addr)= shape
+as a self-registered EOA, plus the =isPublicIdentity= flag that records the
+operator's commitment to publicly disclose =m= off-chain.  Counterparties
+of a Public-Identity contract still call the identity-bound =approve=, but
+the bilateral receipt-fragment check on the contract side is satisfied by
+the deterministic =_identityHash= rather than a per-counterparty CP receipt
+(see the next section).  Public-Identity contracts forfeit content
+privacy: their identity \( M \) is openable on subpoena via the operator's
+off-chain attestation, but they retain unforgeability and the audit trail.
+
+A second, deferred mode binds a contract under an Encrypted Identity
+(=isPublicIdentity_=false=).  This is intended for BUCK-aware contracts
+where the operator runs an off-chain pre-approval flow per counterparty
+(decrypting each user's =E_user= to attest that the contract is a willing
+counterparty), and ships the resulting CP material on-chain so per-user
+=approve= calls can succeed without divulging the contract's =m=.  The
+=bindContract= surface supports it; no production contract uses it yet.
 
 ** Issuer Trust
 
@@ -396,9 +442,11 @@ every state-changing call routes through the =IdentityRegistry=:
 - =mint()= refuses to issue BUCKs to an unverified address.
 - =approve()= takes the recipient's re-encrypted identity ciphertext and a Chaum-Pedersen NIZK proof,
   and stores a /receipt fragment/ binding the (sender, spender) pair to that ciphertext.
-- =transfer()= and =transferFrom()= enforce a *bilateral* identity check using the receipt fragments
-  and the public-claim flag, then emit a =BuckTransferReceipt= carrying only ciphertext hashes --
-  no plaintext identity ever touches the chain.
+- =transfer()= and =transferFrom()= enforce a *bilateral* identity check using the receipt fragments;
+  if a fragment is missing and at least one party is bound under a Public Identity
+  (=isPublicIdentity=), the bound =_identityHash= falls in for that side.  The contract then emits a
+  =BuckTransferReceipt= carrying only ciphertext hashes -- no plaintext identity ever touches the
+  chain.
 
 This is the on-chain enforcement of the [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#counterparties-exchange-identities][mutual-decryptability invariant]]: every transfer leaves
 behind a permanent record from which both counterparties (and only those counterparties, by
@@ -426,14 +474,26 @@ The shipped signature is
 
 =approve(address spender, uint256 amount, IdentityRegistry.ElGamalCT E_bob, IdentityRegistry.CPProof pi_CP)=.
 
-The parameterless ERC-20 =approve(address, uint256)= reverts with =BUCK: use identity-bound
-approve= -- the identity-bound form is mandatory.  Both =sender= and =spender= must be verified
-(=spender= may instead be =isPublic=).  For private spenders the call routes through
-=identity.verifyApprove(...)=; on success the receipt fragment
-=keccak256(abi.encode(E_bob.R.X, E_bob.R.Y, E_bob.C.X, E_bob.C.Y))= is stored at
-=_receiptFragments[sender][spender]=.  For =isPublic= spenders the CP proof is skipped and the
-fragment is set to a hash of the spender's published =M= via =_publicReceiptHash(spender)=.  The
-ERC-20 allowance is then written via =_approve(sender, spender, amount)=.
+The parameterless ERC-20 =approve(address, uint256)= reverts with =BUCK: use
+identity-bound approve= -- the identity-bound form is mandatory.  Both
+=sender= and =spender= must be =isVerified= (i.e. registered EOAs or
+contracts bound via =bindContract=).  Critically, the CP proof is /always/
+required regardless of the spender's Identity flavor: even when the spender
+is a Public-Identity contract, the ERC-20 allowance write must be
+accompanied by a CP proof.  On success the receipt fragment
+=keccak256(abi.encode(E_bob.R.X, E_bob.R.Y, E_bob.C.X, E_bob.C.Y))= is
+stored at =_receiptFragments[sender][spender]= and the ERC-20 allowance is
+written via =_approve(sender, spender, amount)=.
+
+The full rationale for the always-CP rule -- consent vs. execution,
+BN254-key engagement, per-pair freshness, uniform audit semantics, and
+defense against future identity rotation -- is laid out in
+[[https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale][/Why approve Is Always CP-Bound/]] in the BUCK Identity document.
+
+For Public-Identity spenders the operator constructs =E_bob= and =pi_CP= by
+re-encrypting against the spender's published =m=; for Encrypted-Identity
+spenders the operator must obtain =E_spender= and pre-approval material
+from the spender's wallet (the standard EOA-to-EOA flow).
 
 The =approve= call costs roughly =29K (CP verify) + 46K (standard ERC-20 approve) + 22K (receipt
 SSTORE)= = ~97K gas, paid once per (sender, spender) pair.  Subsequent transfers between the same
@@ -445,18 +505,24 @@ above a baseline ERC-20 transfer).
 Both =transfer(to, amount)= and =transferFrom(from, to, amount)= route through
 =_identityCheckedTransfer=, which enforces:
 
-- =isVerified(from)= and (=isVerified(to)= or =isPublic(to)=).
-- For private =to=, =_receiptFragments[from][to] != 0= (the prior CP-bound =approve= must exist).
-- The =to= side of the receipt event is the stored fragment hash, or =_publicReceiptHash(to)= if
-  the recipient is public.
-- The =from= side is the mirrored fragment =_receiptFragments[to][from]= if a reciprocal
-  approve exists, or =_publicReceiptHash(from)= for public senders, or =bytes32(0)= for a
-  one-shot transfer with no prior reciprocal approve.  The receipt still records the
-  asymmetric attestation -- auditors reading the event know which side was CP-bound.
+- =isVerified(from)= and =isVerified(to)= -- both parties must carry an
+  Identity binding (EOA via =register=, contract via =bindContract=).
+- The =to= side: try =_receiptFragments[from][to]=; if zero, fall back to
+  =_identityHash(to)= /only/ if =isPublicIdentity(from) ||
+  isPublicIdentity(to)= -- otherwise revert with =BUCK: missing identity
+  receipt=.  EOA-to-EOA Encrypted transfers MUST have a prior approve-time
+  CP receipt; transfers where at least one party is a Public-Identity
+  contract are allowed to use the deterministic fallback.
+- The =from= side is best-effort: try the mirrored fragment
+  =_receiptFragments[to][from]= for a reciprocal approve, otherwise fall
+  back unconditionally to =_identityHash(from)=.  The receipt still records
+  the asymmetric attestation -- auditors reading the event know which side
+  was CP-bound vs. registry-derived.
 
 After the underlying =_transfer= settles, =BuckTransferReceipt(from, to, amount, fromHash,
-toHash)= is emitted.  =_publicReceiptHash(account)= is =keccak256(abi.encode(R.X, R.Y, C.X, C.Y,
-"PUBLIC"))= over the account's stored ElGamal ciphertext.
+toHash)= is emitted.  =_identityHash(account)= is =keccak256(abi.encode(pk.X, pk.Y, R.X, R.Y, C.X,
+C.Y))= over the account's stored public key and ElGamal ciphertext --
+identical for the same account across every transfer it participates in.
 
 The =BuckTransferReceipt= event is the auditable trail: =fromCipherHash= and =toCipherHash= are
 keccak256 commitments over the corresponding ElGamal ciphertexts.  Counterparties can match a
@@ -874,10 +940,16 @@ The proof triple =(pA, pB, pC)= is abi-encoded as =(uint256[2], uint256[2][2], u
 
 On-chain, Alice makes two calls:
 
-1. =BUCK.approve(notes, 125e18, E_notes, pi_CP_notes)= -- standard identity-aware approve.  The
-   =Notes= contract was registered =setSystemPublic(true)= by governance, so this branch takes the
-   public-claim path (no CP proof is actually checked against Notes, though the ERC-20 allowance is
-   still written).
+1. =BUCK.approve(notes, 125e18, E_notes, pi_CP_notes)= -- standard
+   identity-aware approve.  The =Notes= contract was bound at deployment
+   under a Public Identity (=bindContract(notes, pk_notes, E_notes, true)=
+   from =script/Deploy.s.sol=), so Alice's wallet constructs =E_notes= by
+   re-encrypting against the Notes pool's published =m=.  The CP proof
+   itself is /still required/ -- the always-CP rule (see
+   [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale][/Why approve Is Always CP-Bound/]]) applies regardless of spender
+   flavour -- and the on-chain receipt fragment Alice's operator stores is
+   Alice's own =E_notes= re-encryption, openable on subpoena to show
+   "Alice authorised the Notes pool to draw 125 BUCK."
 2. =Notes.mint(proofBytes, oldRoot, newRoot, nextLeafIndex, 125e18, [cm[0], ..., cm[15]])= -- the
    =MintVerifierAdapter= dispatches by =cms.length=16= to =mintVerifiers[16]= and forwards to the
    N=16 Groth16 verifier with public signals =[oldRoot, newRoot, nextLeafIndex, 125e18,
@@ -926,7 +998,12 @@ verifiers; the rest are architectural estimates for the eventual PID build.
 | BUCK.transferCarrying()                       | ~60K         | ~$5             | Weighted-merge index, no fee burn     |
 | BUCK.mint() (static BUCK_K)                   | ~150K        | ~$12            | Enumerate credits + mint              |
 | BUCK.mint() (with PID update)                 | ~350K        | ~$28            | + Oracle reads + PID computation      |
-| Notes.mint() (Groth16, N=2)                   | ~1.9M        | ~$152           | Groth16 verify + 20-deep tree insert  |
+| Notes.mint() (mint_batch, N=1)                | ~461K        | ~$37            | Groth16 verify (N=1, ~216K) + insert  |
+| Notes.mint() (mint_batch, N=2)                | ~473K        | ~$38            | ~237K gas/leaf -- amortising starts   |
+| Notes.mint() (mint_batch, N=4)                | ~500K        | ~$40            | ~125K gas/leaf                        |
+| Notes.mint() (mint_batch, N=8)                | ~562K        | ~$45            | ~70K  gas/leaf                        |
+| Notes.mint() (mint_batch, N=16)               | ~624K        | ~$50            | ~39K  gas/leaf -- shipped sweet-spot  |
+| Notes.mint() (mint_batch, N=32)               | ~1.12M       | ~$90            | ~35K  gas/leaf (verifier ~422K)       |
 | Notes.spend() (Groth16, B-shape)              | ~360K        | ~$29            | Groth16 verify + transferCarrying     |
 | Notes.spendACP() (Groth16 + CP-DLEQ, A-shape) | ~410K        | ~$33            | Groth16 verify + verifySpendCP        |
 |                                               |              |                 | (~36K via EIP-196) + transferCarrying |
@@ -1053,7 +1130,7 @@ Companion Memos/ below.
 | Phase 2     | =IdentityRegistry.sol=                                       | *done* -- PS + NIZK + CP all on-chain                                                   |
 | Phase 2-A   | Simulated issuer (=alberta_buck.wallet.issuer=) + tests      | *done* -- =Issuer= class with PS issuance, ElGamal delivery, revocation; 15 tests pass  |
 | Phase 3     | Identity-aware =Buck.sol=                                    | *done* -- CP-bound approve, bilateral transfer, receipt event                           |
-| Phase 4     | Public-claim accounts                                        | *done* -- =setPublic= / =setSystemPublic=; Notes wired as public                        |
+| Phase 4     | Public-Identity contracts                                    | *done* -- =bindContract(target, pk, E, isPublicIdentity_)=; Notes wired as Public-Identity |
 | Phase 5     | Notes scaffolding + stub verifiers                           | *done* -- =Notes.sol= + =StubMintVerifier= / =StubSpendVerifier=                        |
 | Phase 6     | Groth16 mint circuit (=mint.circom=, N=2) + adapter          | *done* -- =MintGroth16Verifier=, =MintVerifierAdapter=                                  |
 | Phase 7     | B-flavor spend circuit + nullifier reveal                    | *done* -- =spend.circom=, =SpendGroth16Verifier=, Tornado-tree, =transferCarrying=      |
@@ -1247,7 +1324,7 @@ the reference; Foundry =vm.ffi= or pre-baked vector files feed the Solidity test
 
 Goal: ship the on-chain trust anchor exactly as specified in the [[#identity-registry][IdentityRegistry section]].
 
-- =src/IdentityRegistry.sol= implementing =register=, =setPublic=, =verifyApprove=, =trustIssuer=.
+- =src/IdentityRegistry.sol= implementing =register=, =bindContract=, =verifyApprove=, =trustIssuer=.
 - All proofs verified using =BN254= helpers from Phase 1.
 - Tests:
   - End-to-end registration with the Python reference vectors (positive case + the four
@@ -1316,26 +1393,31 @@ Goal: replace the current =Buck.sol= with the identity-aware version specified i
   reverting.
 - =transfer= / =transferFrom= via =_identityCheckedTransfer= with bilateral checks and the
   =BuckTransferReceipt= event.
-- =_receiptFragments= storage and =_publicReceiptHash= helper.
+- =_receiptFragments= storage and =_identityHash= helper (keccak of bound =(pk, E)=).
 
 Tests:
 - Two registered users can complete the full =approve= -> =transferFrom= cycle and observe a
   =BuckTransferReceipt= whose hashes match the off-chain ciphertexts.
 - Unregistered =mint= reverts.
-- =transfer= to an unregistered, non-public recipient reverts.
-- =transfer= without a prior CP-bound =approve= (and a non-public recipient) reverts.
-- Public-claim recipients accept transfers without an =approve= step.
+- =transfer= to an unregistered recipient reverts.
+- =transfer= without a prior CP-bound =approve= reverts when neither party is bound under a
+  Public Identity.
+- Transfers to/from a Public-Identity contract may fall back to the bound =_identityHash= when
+  no per-pair receipt fragment exists; EOA<->EOA encrypted transfers MUST have a prior CP receipt.
 
-** Phase 4: Public-Claim Account Support
+** Phase 4: Public-Identity Contract Support
 
 Goal: AMM pools, vaults, and treasuries can interact with BUCK without needing to generate
 Chaum-Pedersen proofs.
 
-- Confirm =setPublic(true)= is invocable only by registered accounts.
-- Add a small =MockAMMPool= test contract that =register=s, =setPublic(true)=s, then participates
-  in =approve=/=transferFrom= flows on both sides (taker and maker).
-- Verify the receipt event uses the well-known =M= for the public side and the CP-bound
-  ciphertext for the private side.
+- Confirm =bindContract(target, pk, E, isPublicIdentity_=true)= is invocable only against deployed
+  contracts (=target.code.length > 0=) and is first-binder-wins; atomic deploy+bind is available
+  via =BuckAwareDeployer.deployAndBind= / =deployAndBindCreate2=.
+- Add a small =MockAMMPool= test contract whose deployer =bindContract=s it as a Public-Identity
+  contract with the operator's published =(pk, E)=, then participates in =approve=/=transferFrom=
+  flows on both sides (taker and maker).
+- Verify the receipt event uses the bound =_identityHash= as the public side's fragment when no
+  per-pair CP fragment exists, and the CP-bound ciphertext on the counterparty side.
 
 ** Phase 5: Notes Scaffolding
 
@@ -1509,13 +1591,18 @@ N=256-512 on L1 with stock Groth16 verifiers and an L2 ceiling of N=1024+.
   mirror of =filledSubtrees= and emits per-leaf sibling paths in submission order.
 - =scripts/snark/setup.sh= -- runs phase-2 setup per pinned N, exporting one verifier Solidity
   file per pinned N.
-- =test/MintVerifier.t.sol= -- exercises real Groth16 at multiple pinned N, plus tamper paths on
-  =oldRoot=, =newRoot=, =nextLeafIndex=, =totalFace=, and =cm[]=; per-N dispatch test exercises
-  multiple pinned sizes coexisting on one adapter.
+- =test/MintVerifier.t.sol= -- 43 tests: full N=1..16 ladder (happy path, four tamper paths
+  =totalFace= / =newRoot= / =cm[]= / wrong-N, replay-after-mint, two-batch successive insertion)
+  plus the N=32 happy path, cross-N successive (N=16 -> N=32), cross-N replay (N=4 proof rejected
+  after live state advances), per-N dispatch coverage, and a partial-batch case (5 live + 11
+  v=0 dummy leaves at N=16) confirming dummies advance =nextLeafIndex= by N without inflating
+  =totalFace=.
 
-*Cost*: =mint_tx_gas(N) ~= 125K + 31K * N=, measured at N=16 (624K) and N=32 (1.12M) on the forge
-harness.  Per-note cost amortizes from 39K at N=16 to 35K at N=32 toward a ~31K asymptote.  Spend
-cost is unchanged at ~360K (independent of mint batch size).
+*Cost*: full forge measurements across the pinned ladder -- N=1: 461K, N=2: 473K, N=4: 500K,
+N=8: 562K, N=16: 624K, N=32: 1.12M.  Per-note cost amortizes from 461K at N=1 (the constant
+~216K Groth16 verifier dominates) to 39K at N=16 to 35K at N=32, approaching the ~31K asymptote
+implied by the per-leaf calldata + R1CS slope.  Spend cost is unchanged at ~360K (independent
+of mint batch size).
 
 *Stop conditions for promoting to N >= 64*:
 - EIP-170 24 KB verifier-bytecode ceiling.  N=64 lands at ~33 KB, breaching the limit.  The three

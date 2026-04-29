@@ -96,8 +96,13 @@ contract SpendAVerifierTest is Test {
         notes.setIdentityRegistry (address(reg));
         vm.stopPrank();
 
-        vm.prank(GOV);
-        reg.setSystemPublic(address(notes), true);
+        // Bind Notes as a Public-Identity contract.
+        reg.bindContract(
+            address(notes),
+            BN254.g1(),
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
+            true
+        );
 
         _grantCredit(alice, 1000e18);
         vm.prank(alice);
@@ -197,10 +202,10 @@ contract SpendAVerifierTest is Test {
     }
 
     function _approveNotes(address from, uint256 amount) internal {
-        IdentityRegistry.ElGamalCT memory junk;
-        IdentityRegistry.CPProof memory junkPi;
-        vm.prank(from);
-        buck.approve(address(notes), amount, junk, junkPi);
+        bytes32 slot = keccak256(
+            abi.encode(address(notes), keccak256(abi.encode(from, uint256(1))))
+        );
+        vm.store(address(buck), slot, bytes32(amount));
     }
 
     /// @dev Seed Notes' rolling root to the value the V2 fixture expects:

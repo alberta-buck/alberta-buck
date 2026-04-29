@@ -84,10 +84,16 @@ contract NotesTest is Test {
         );
         EMPTY_ROOT_ = notes.EMPTY_ROOT();
 
-        // The pool is a "regular account" -- it has no PS credential, so we
-        // mark it system-public to satisfy Buck's identity-bound transfer.
-        vm.prank(GOV);
-        reg.setSystemPublic(address(notes), true);
+        // Notes is a BUCK-aware contract operated by GOV; bind it as a
+        // Public-Identity contract so identity-bound transfers fall back to
+        // the deterministic _identityHash receipt for the EOA <-> Notes
+        // counterparty pairs (no off-chain CP material exists for Notes).
+        reg.bindContract(
+            address(notes),
+            BN254.g1(),
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
+            true
+        );
 
         // Give Alice a credit limit and BUCK balance so she can mint notes.
         _grantCredit(alice, 1000e18);
@@ -162,12 +168,15 @@ contract NotesTest is Test {
         credit.activate(tokenId, faceValue);
     }
 
-    /// @dev Approve Notes from Alice to spend `amount` BUCK.
+    /// @dev Approve Notes from `from` to spend `amount` BUCK.  Writes the
+    ///      ERC-20 allowance slot directly (slot 1 in OpenZeppelin's layout)
+    ///      to sidestep the CP-proof requirement on buck.approve(); this test
+    ///      suite focuses on Notes mint/spend mechanics, not the CP plumbing.
     function _approveNotes(address from, uint256 amount) internal {
-        IdentityRegistry.ElGamalCT memory junk;
-        IdentityRegistry.CPProof memory junkPi;
-        vm.prank(from);
-        buck.approve(address(notes), amount, junk, junkPi);
+        bytes32 slot = keccak256(
+            abi.encode(address(notes), keccak256(abi.encode(from, uint256(1))))
+        );
+        vm.store(address(buck), slot, bytes32(amount));
     }
 
     function _cms(uint256 a, uint256 b) internal pure returns (uint256[] memory cms) {

@@ -403,12 +403,15 @@ Table of Contents
      ZERO_VALUE' per leaf, blocking pathological collisions with
      empty-tree zeros.
 
-  Constraint counts work out to roughly *6K R1CS per leaf* (~1.7K
-  opening + ~4.3K insertion); at `N=16' that is ~96K R1CS, a 2^17 PTAU,
-  and seconds of prover time on a desktop.  At `N=128' it is ~770K R1CS
-  and minutes; at `N=1024' it is ~6M R1CS and hours plus a sizeable
-  memory footprint.  The `scripts/snark/setup.sh' ceremony emits one
-  verifier per pin.
+  Constraint counts work out to roughly *21,800 R1CS per leaf* (opening
+  + range-bound + dual Merkle walk: one path consumed to attest
+  `oldRoot', one to advance `newRoot'); the shipped pinned-N set
+  measures 21,914 R1CS at N=1, 348,705 at N=16, and 697,281 at N=32.
+  The doubling per pin holds linearly through the projected sizes (N=128
+  ~2.8M R1CS, N=1024 ~22M).  At N=16 the 2^19 PTAU and ~6 s prover wall
+  on a dev laptop are comfortable; at N=128 it is
+  rapidsnark-and-minutes; at N=1024 it is hours plus a multi-GB zkey.
+  The `scripts/snark/setup.sh' ceremony emits one verifier per pin.
 
   The witness is processed by snarkjs's Groth16 prover.  Tens of seconds
   to minutes later the wallet has a fixed-size proof object `(pi_A: G1,
@@ -492,15 +495,19 @@ Table of Contents
      the entire transaction reverts – nothing is written, no BUCK moves.
      d. *BUCK escrow.* `buck.transferFrom' debits `totalFace' from Alice
      and credits the `Notes' pool.  Allowance-driven pull, gated by
-     Alice's prior `approve(notes, 1200e18, ...)'.  Because the pool is
-     registered /system-public/ in the IdentityRegistry, the bilateral
-     identity check on the transfer leg succeeds without a
-     Chaum-Pedersen receipt.  e. *Root advancement.* The contract writes
-     `newRoot' into the next ring-buffer slot, advances
-     `currentRootIndex' and `nextLeafIndex', accumulates `noteFaceSum',
-     and emits a single `Minted(issuer, totalFace, startIndex, count,
-     newRoot)' event.  The new root immediately becomes the live root
-     that the next minter must read.
+     Alice's prior `approve(notes, 1200e18, E_notes, pi_CP)'.  The
+     approve was CP-bound (the always-CP rule applies regardless of
+     spender flavour – see [/Why approve Is Always CP-Bound/]), so
+     Alice's side of the receipt is the per-pair CP fragment.  The pool
+     was bound under a Public Identity (`bindContract(notes, pk, E,
+     true)'), so the pool side of the receipt falls back to
+     `_identityHash(notes)' without requiring a per-pair fragment from
+     the pool.  e. *Root advancement.* The contract writes `newRoot'
+     into the next ring-buffer slot, advances `currentRootIndex' and
+     `nextLeafIndex', accumulates `noteFaceSum', and emits a single
+     `Minted(issuer, totalFace, startIndex, count, newRoot)' event.  The
+     new root immediately becomes the live root that the next minter
+     must read.
 
   If any of (a)-(e) fails – stale root, stale leafIndex, bad proof,
   insufficient BUCK, missing approval – the entire transaction reverts
@@ -522,6 +529,9 @@ Table of Contents
   Outside Observers Cannot Link* below and the per-attack-vector audit
   in [alberta-buck-notes-rollup-mint.org].
 
+
+[/Why approve Is Always CP-Bound/]
+   <https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale>
 
 [alberta-buck-notes-rollup-mint.org]
 <file:alberta-buck-notes-rollup-mint.org>
@@ -1353,10 +1363,15 @@ Table of Contents
      Fiat-Shamir (~36K gas).  e. Only after (a)-(d) pass does the
      contract mark the nullifier and invoke `buck.transferCarrying(bob,
      1000e18)' from its own pool balance (see Step 5).  Because the
-     `Notes' pool is registered `isPublic' in the IdentityRegistry, the
-     outbound transfer's bilateral identity check degenerates to
-     "recipient is a registered or system-public account" and skips the
-     pool-side Chaum-Pedersen leg.
+     `Notes' pool was bound under a Public Identity in the
+     IdentityRegistry (`bindContract(notes, pk, E, true)'), the outbound
+     transfer's bilateral identity check still requires both parties to
+     be `isVerified', but the pool-side receipt fragment falls back to
+     the pool's deterministic `_identityHash' – no per-counterparty CP
+     receipt is required for the Notes-pool side because the pool's
+     operator has already disclosed `m' off-chain, making the
+     registry-derived hash a non-confidential audit trail equivalent to
+     what an EOA-to-EOA approve-time CP receipt would provide.
 
   If any of (a)-(e) reverts, the whole transaction reverts: no BUCK
   moves, the nullifier bit is never set, the `noteFaceSum' is unchanged.
@@ -1687,9 +1702,14 @@ Table of Contents
   └────
 
   The preconditions match `transfer': sender and recipient both
-  `isVerified || isPublic' in the IdentityRegistry, recipient not the
-  Jubilee address (the Jubilee is not an accepted carry destination).
-  The weighted-merge update on the recipient is:
+  `isVerified' in the IdentityRegistry, recipient not the Jubilee
+  address (the Jubilee is not an accepted carry destination).  The
+  bilateral receipt-fragment check applies as on `transfer': an
+  EOA-to-EOA Encrypted-Identity pair must have a prior approve-time CP
+  receipt, and Public-Identity contracts (those bound via
+  `bindContract(target, pk, E, true)') fall back to the deterministic
+  `_identityHash' on the public side.  The weighted-merge update on the
+  recipient is:
 
   ┌────
   │ _indexAtLastTouch[to] =
@@ -1728,14 +1748,18 @@ Table of Contents
 11.5 Open Question: Identity Receipts on Carry
 ──────────────────────────────────────────────
 
-  The shipped `transferCarrying' uses the same `isVerified || isPublic'
-  identity predicate as `transfer'; it does /not/ require a
-  Chaum-Pedersen approve receipt as `approve' does.  Whether a full CP
-  approval leg should be layered on for non-public senders is an open
-  question; for the Note pool it is moot (the pool is `isPublic' by
-  governance flag), but if `transferCarrying' is opened up to private
-  EOAs an approve-style receipt may be wanted for auditability.  See the
-  *Open Work Items* in [alberta-buck-ethereum.org].
+  The shipped `transferCarrying' uses the same identity predicate as
+  `transfer' – both parties `isVerified', with the receipt-fragment
+  fallback to `_identityHash' on the public side when at least one party
+  has `isPublicIdentity =' true=.  Unlike `approve', `transferCarrying'
+  does not require its own per-call Chaum-Pedersen receipt; the Notes
+  pool side relies on its bound Public Identity to satisfy the bilateral
+  check.  Whether `transferCarrying' for two Encrypted-Identity
+  counterparties should require a per-call CP receipt is an open
+  question; for the Notes pool it is moot (the pool is bound under a
+  Public Identity), but if peer-to-peer carry is ever opened up an
+  approve-style receipt may be wanted for auditability.  See the *Open
+  Work Items* in [alberta-buck-ethereum.org].
 
 
 [alberta-buck-ethereum.org] <file:alberta-buck-ethereum.org>

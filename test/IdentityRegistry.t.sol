@@ -190,22 +190,58 @@ contract IdentityRegistryTest is Test {
         reg.register(ISSUER, pk, E, bad, _regProof("alice"));
     }
 
-    // ---- setPublic ---------------------------------------------------------
+    // ---- bindContract ------------------------------------------------------
 
-    function test_setPublic_requiresVerified() public {
-        vm.prank(alice);
-        vm.expectRevert(bytes("not registered"));
-        reg.setPublic(true);
+    function test_bindContract_rejectsEOA() public {
+        // Alice is an EOA -- her address has no code, so bindContract refuses.
+        vm.expectRevert(bytes("target not a deployed contract"));
+        reg.bindContract(
+            alice,
+            BN254.g1(),
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
+            true
+        );
     }
 
-    function test_setPublic_toggles_flag() public {
-        _registerAlice();
-        vm.prank(alice);
-        reg.setPublic(true);
-        assertTrue(reg.isPublic(alice));
-        vm.prank(alice);
-        reg.setPublic(false);
-        assertFalse(reg.isPublic(alice));
+    function test_bindContract_succeedsForDeployedContract_public() public {
+        address pool = address(0xDECAF);
+        vm.etch(pool, hex"60006000fd");
+
+        IdentityRegistry.ElGamalCT memory E =
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        reg.bindContract(pool, BN254.g1(), E, true);
+
+        assertTrue(reg.isVerified(pool),         "pool now verified");
+        assertTrue(reg.isPublicIdentity(pool),   "pool is Public Identity");
+        BN254.G1Point memory storedPk = reg.pkOf(pool);
+        assertTrue(BN254.eq(storedPk, BN254.g1()), "stored pk matches");
+    }
+
+    function test_bindContract_succeedsForDeployedContract_encrypted() public {
+        // BUCK-aware contracts may bind under an encrypted Identity (operator
+        // controls the off-chain sk that decrypts approve receipts).
+        address vault = address(0xBADD);
+        vm.etch(vault, hex"60006000fd");
+
+        IdentityRegistry.ElGamalCT memory E =
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        reg.bindContract(vault, BN254.g1(), E, false);
+
+        assertTrue(reg.isVerified(vault),          "vault now verified");
+        assertFalse(reg.isPublicIdentity(vault),   "vault is encrypted Identity");
+    }
+
+    function test_bindContract_firstBinderWins() public {
+        address pool = address(0xDECAF);
+        vm.etch(pool, hex"60006000fd");
+
+        IdentityRegistry.ElGamalCT memory E =
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        reg.bindContract(pool, BN254.g1(), E, true);
+
+        // Second bind reverts -- first binder owns the slot.
+        vm.expectRevert(bytes("already bound"));
+        reg.bindContract(pool, BN254.g1(), E, true);
     }
 
     // ---- verifyApprove -----------------------------------------------------
