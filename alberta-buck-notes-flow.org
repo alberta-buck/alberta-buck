@@ -1,4 +1,4 @@
-#+TITLE: The Alberta Buck - Notes Flow (DRAFT v0.6)
+#+TITLE: The Alberta Buck - Notes Flow (DRAFT v0.9)
 #+SUBTITLE: How One BUCK Transfer Becomes N Unlinkable Notes (Step by Step)
 #+author: Perry Kundert
 #+date: 2026-04-22

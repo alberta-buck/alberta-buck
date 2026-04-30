@@ -1,4 +1,4 @@
-#+TITLE: Alberta Buck - Formal Correctness Proofs (DRAFT v0.7)
+#+TITLE: The Alberta Buck - Formal Correctness Proofs (DRAFT v0.9)
 #+SUBTITLE: Rerandomization, Re-Encryption, and Notes Spend Predicates
 #+author: Perry Kundert
 #+date: 2026-04-22

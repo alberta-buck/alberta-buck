@@ -1,4 +1,4 @@
-#+TITLE: The Alberta Buck - Notes (DRAFT v0.7)
+#+TITLE: The Alberta Buck - Notes (DRAFT v0.9)
 #+SUBTITLE: Private Bearer Instruments on an Identity-Aware Demurrage Currency
 #+author: Perry Kundert
 #+date: 2026-04-18
