@@ -1,8 +1,9 @@
-           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            BUCK NOTES – SINGLE VS. SERIALIZED B1 SUB-NOTES
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+             ALBERTA BUCK NOTES - SINGLE VS. SERIALIZED B1
+                               SUB-NOTES
 
                              Perry Kundert
-           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
                                2026-04-23
@@ -273,13 +274,13 @@ Table of Contents
 3.1 Single-note mint
 ────────────────────
 
-  <file:images/notes-serialized/mint-single.png>
+  <file:./images/mint-single.png>
 
 
 3.2 Serialized-note mint (N sub-notes in one leaf)
 ──────────────────────────────────────────────────
 
-  <file:images/notes-serialized/mint-serialized.png>
+  <file:./images/mint-serialized.png>
 
 
 3.3 Mint-phase field origin + privacy (side-by-side)
@@ -310,13 +311,13 @@ Table of Contents
 4.1 Single-note spend
 ─────────────────────
 
-  <file:images/notes-serialized/spend-single.png>
+  <file:./images/spend-single.png>
 
 
 4.2 Serialized-note spend
 ─────────────────────────
 
-  <file:images/notes-serialized/spend-serialized.png>
+  <file:./images/spend-serialized.png>
 
 
 4.3 Spend-phase field origin + privacy (side-by-side)
@@ -369,13 +370,13 @@ Table of Contents
 5.1 Single-note nullifier set
 ─────────────────────────────
 
-  <file:images/notes-serialized/storage-single.png>
+  <file:./images/storage-single.png>
 
 
 5.2 Serialized-note per-parent bitmap
 ─────────────────────────────────────
 
-  <file:images/notes-serialized/storage-serialized.png>
+  <file:./images/storage-serialized.png>
 
 
 5.3 Storage cost per note

@@ -1,10 +1,10 @@
-#+title: BUCK Notes -- Single vs. Serialized B1 Sub-Notes
+#+title: Alberta Buck Notes - Single vs. Serialized B1 Sub-Notes
 #+author: Perry Kundert
 #+date: 2026-04-23
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
 
-#+EXPORT_FILE_NAME: ./images/alberta-buck-serialized
+#+EXPORT_FILE_NAME: ./images/alberta-buck-notes-serialized
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
@@ -51,7 +51,6 @@ Model/.
 #+TOC: headlines 3
 
 #+LATEX: \clearpage
-
 * Scope and Summary
 ** Applicability
 
