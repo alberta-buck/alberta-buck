@@ -366,23 +366,28 @@ contract BuckDemurrageTest is Test {
     }
 
     function test_carrying_canTransferUpToRaw() public {
-        // bob (Carrying) is allowed to transfer up to its full raw, even
-        // when balanceOf(bob) < raw -- the carried fee debt rides with
-        // the BUCK.
+        // bob (Carrying) is allowed to transfer up to its full raw.  Under
+        // Carrying-balanceOf-equals-raw semantics, raw == balanceOf, so
+        // there is no separate "spendable" cap to evade -- the accumulated
+        // fees ride with the outflow into the recipient's _demurrage rather
+        // than being locked inside bob's account.
         _setupAliceWithBuck(1000e18, 100e18);
         vm.prank(alice);
         buck.transfer(bob, 20e18);
         uint256 bobRaw = buck.rawBalanceOf(bob);
 
         vm.warp(block.timestamp + 1 hours);
-        uint256 bobSpendable = buck.balanceOf(bob);
-        assertGt(bobRaw, bobSpendable, "bob raw > spendable after warp");
+        // Carrying account: raw == balanceOf, regardless of warp.
+        assertEq(buck.balanceOf(bob), bobRaw, "Carrying balanceOf == raw");
+        // Fees are visible separately and have grown.
+        assertGt(buck.balanceOfFees(bob), 0, "Carrying balanceOfFees grew");
 
-        // Transfer the full raw -- should succeed (no spendable cap on Carrying).
+        // Transfer the full raw -- recipient absorbs the carried fee.
         vm.prank(bob);
         buck.transfer(alice, bobRaw);
 
         assertEq(buck.rawBalanceOf(bob), 0, "bob drained to 0");
+        assertEq(buck.balanceOf(bob),    0, "bob spendable also 0");
     }
 
     // ---- dispatch by isCarrying flag -------------------------------------

@@ -51,6 +51,14 @@ interface IERC20Like {
     function totalSupply() external view returns (uint256);
 }
 
+interface IUniswapV2Pair {
+    function token0() external view returns (address);
+    function token1() external view returns (address);
+    function getReserves() external view returns (uint112, uint112, uint32);
+    function sync() external;
+    function skim(address to) external;
+}
+
 /// @title UniswapV2Integration.t.sol -- BUCK/USDC AMM round-trip on a locally
 ///        deployed Uniswap V2 stack.
 ///
@@ -279,6 +287,144 @@ contract UniswapV2IntegrationTest is Test {
         vm.prank(CAROL);
         vm.expectRevert(bytes("BUCK: sender not verified"));
         buck.transfer(pair, 1_000e18);
+    }
+
+    // ---- Demurrage / Carrying-account interaction with V2 ------------------
+    //
+    // These tests validate the assumption that a Carrying account's
+    // balanceOf does not decay with demurrage -- it returns the raw ERC-20
+    // balance.  The accumulated fees are visible separately via
+    // balanceOfFees(a) and are carried with outflows.  This is the only
+    // semantic that lets stock Uniswap V2 work with BUCK over time:
+    //
+    //   * Pair's balanceOf == cached reserve (modulo legitimate inflows /
+    //     outflows), so the K invariant remains satisfiable across long
+    //     idle periods without periodic sync().
+    //   * skim() never reverts on a "negative" surplus.
+    //   * mint()/burn() proportions match what the router quoted.
+    //
+    // Demurrage on the pool's BUCK still accumulates -- it just rides with
+    // outflows: when the pair carrying-transfers BUCK to a non-Carrying
+    // recipient (e.g., a swapper), the recipient's _demurrage absorbs the
+    // proportional carried fee, and the recipient's spendable = received raw
+    // minus that carried fee.
+
+    function test_decay_pairBalanceOfRetainsRawAcrossYear() public {
+        _seedPool();
+        uint256 pairBuckRaw = buck.rawBalanceOf(pair);
+        uint256 pairBuckBalance = buck.balanceOf(pair);
+        assertEq(pairBuckBalance, pairBuckRaw, "Carrying balanceOf == raw at deposit");
+
+        vm.warp(block.timestamp + 365 days);
+
+        assertEq(buck.rawBalanceOf(pair), pairBuckRaw, "raw unchanged across warp");
+        assertEq(buck.balanceOf(pair),    pairBuckRaw, "Carrying balanceOf still == raw after 1yr");
+
+        // Fees are observable separately and have grown.
+        uint256 pairFees = buck.balanceOfFees(pair);
+        assertGt(pairFees, 0, "balanceOfFees grew with time");
+        // ~2% of 100k = ~2k after 1yr.
+        assertApproxEqRel(pairFees, 2_000e18, 0.01e18, "fees ~2% of pair raw");
+    }
+
+    function test_decay_swapBUCKtoUSDC_succeedsAfterYear() public {
+        _seedPool();
+        _bobApproveRouter(1_000e18);
+
+        vm.warp(block.timestamp + 365 days);
+
+        // The pair's balanceOf is unchanged (Carrying semantics), so reserve
+        // and balance still match -- swap proceeds at the cached price.
+        address[] memory path = new address[](2);
+        path[0] = address(buck);
+        path[1] = usdc;
+
+        uint256 usdcBefore = IERC20Like(usdc).balanceOf(bob);
+        vm.prank(bob);
+        uint[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
+            1_000e18, 0, path, bob, block.timestamp + 1
+        );
+        assertEq(amounts[0], 1_000e18, "input BUCK == 1000");
+        assertGt(amounts[1], 0,        "non-zero USDC out after 1yr");
+        assertEq(IERC20Like(usdc).balanceOf(bob), usdcBefore + amounts[1], "Bob USDC credited");
+    }
+
+    function test_decay_swapUSDCtoBUCK_succeedsAfterYear() public {
+        _seedPool();
+        vm.prank(bob);
+        IERC20Like(usdc).approve(router, 1_000e18);
+
+        vm.warp(block.timestamp + 365 days);
+
+        address[] memory path = new address[](2);
+        path[0] = usdc;
+        path[1] = address(buck);
+
+        uint256 bobBuckBefore = buck.balanceOf(bob);
+        uint256 bobRawBefore  = buck.rawBalanceOf(bob);
+        vm.prank(bob);
+        uint[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
+            1_000e18, 0, path, bob, block.timestamp + 1
+        );
+        assertEq(amounts[0], 1_000e18, "input USDC == 1000");
+        assertGt(amounts[1], 0,        "non-zero BUCK out after 1yr");
+
+        // Bob (non-Carrying EOA) receives the gross amount as raw, but his
+        // spendable rises by less (recipient absorbs the pair's carried fee).
+        uint256 bobBuckAfter = buck.balanceOf(bob);
+        assertGt(bobBuckAfter, bobBuckBefore, "bob's spendable increased");
+
+        uint256 bobRawDelta = buck.rawBalanceOf(bob) - bobRawBefore;
+        assertEq(bobRawDelta, amounts[1], "bob raw rose by gross swap output");
+        // Spendable rise < raw rise: the difference is the carried fee.
+        assertLt(bobBuckAfter - bobBuckBefore, bobRawDelta,
+            "bob's spendable rise < raw rise (carried fee absorbed)");
+    }
+
+    function test_decay_skimDoesNotRevert() public {
+        _seedPool();
+
+        vm.warp(block.timestamp + 365 days);
+
+        // Under Carrying semantics balanceOf(BUCK, pair) == reserve0, so
+        // skim's `balance.sub(reserve)` is zero, not underflow.  USDC is a
+        // plain ERC-20 with no decay; its sub is also zero.  skim succeeds
+        // and transfers nothing.  The destination must still be a verified
+        // BUCK recipient because skim invokes BUCK.transfer (even with
+        // value=0, BUCK's identity check fires); use alice.
+        IUniswapV2Pair(pair).skim(alice);
+    }
+
+    function test_decay_addLiquidityAfterYear_noSyncNeeded() public {
+        _seedPool();
+        uint256 aliceLP = IERC20Like(pair).balanceOf(alice);
+
+        vm.warp(block.timestamp + 365 days);
+
+        // Bob adds the same proportional liquidity 1yr later, no sync first.
+        // Under Carrying semantics, pair's balanceOf still matches reserves,
+        // so the router's quoting is correct and Bob's deposit is measured
+        // accurately -- he should get the same shares Alice did, modulo the
+        // MINIMUM_LIQUIDITY locked at first mint.
+        _setBuckAllowance(bob, router, 100_000e18);
+        vm.prank(bob);
+        IERC20Like(usdc).approve(router, 100_000e18);
+
+        vm.prank(bob);
+        (uint amtA, uint amtB, uint bobLP) = IUniswapV2Router02(router).addLiquidity(
+            address(buck), usdc,
+            100_000e18, 100_000e18,
+            0, 0,
+            bob,
+            block.timestamp + 1
+        );
+
+        assertEq(amtA, 100_000e18, "Bob deposits full BUCK side");
+        assertEq(amtB, 100_000e18, "Bob deposits full USDC side");
+        // Bob's LP shares should be proportional to his deposit, modulo the
+        // 1000-wei MINIMUM_LIQUIDITY locked at Alice's first mint.  Bob
+        // gets ~aliceLP + 1000.
+        assertApproxEqAbs(bobLP, aliceLP + 1000, 1, "Bob LP shares ~= Alice LP shares + MIN_LIQUIDITY");
     }
 
     // ---- helpers -----------------------------------------------------------

@@ -43,10 +43,25 @@ contract Buck is ERC20 {
     //
     // See alberta-buck-demurrage.org for the full model.  Summary:
     //
-    // Per-account state = (_balanceof[a], _demurrage[a], _timestamp[a]).
-    //   live_fee(a)        = _demurrage[a] + _balanceof[a] * RATE * (now - _timestamp[a])
-    //   balanceOfFees(a)   = min(live_fee(a), _balanceof[a])
-    //   balanceOf(a)       = _balanceof[a] - balanceOfFees(a)
+    // Per-account state = (_balances[a], _demurrage[a], _timestamp[a]).
+    //   live_fee(a)        = _demurrage[a] + _balances[a] * RATE * (now - _timestamp[a])
+    //
+    // The view-layer semantics depend on identity flavour:
+    //   Non-Carrying:
+    //     balanceOfFees(a) = min(live_fee(a), _balances[a])    -- locked dust
+    //     balanceOf(a)     = _balances[a] - balanceOfFees(a)   -- spendable
+    //   Carrying:
+    //     balanceOfFees(a) = live_fee(a)                        -- carried on outflow
+    //     balanceOf(a)     = _balances[a]                      -- raw (no decay)
+    //
+    // The Carrying-balanceOf-equals-raw rule is what lets stock ERC-20
+    // consumers (Uniswap, AMMs, etc.) co-exist with BUCK across long idle
+    // periods: a pair / pool's balanceOf matches its cached reserve and the
+    // K invariant remains satisfiable.  The accumulated fees ride with
+    // outflows -- a Carrying account's transfer pushes
+    // `value * RATE * (now - _timestamp[from])` into the recipient's
+    // _demurrage, and balanceOf(recipient) reflects it via the recipient's
+    // own (Non-Carrying) view subtraction.
     //
     // Crystallization fires before every balance-mutating event for `a`:
     //   _demurrage[a] += pending_fee;  _timestamp[a] = now.
@@ -315,17 +330,45 @@ contract Buck is ERC20 {
         return _demurrage[a] + pending;
     }
 
-    /// @notice Locked-fee dust visible to the holder.  Capped at raw so an
-    ///         account is never "short" more than it actually holds.
+    /// @notice Accumulated fees on `a`'s balance.  Semantics differ by
+    ///         identity flavour:
+    ///           * Non-Carrying:  locked dust inaccessible to the holder.
+    ///                            Capped at raw -- the account is never
+    ///                            "short" more than it actually holds.
+    ///           * Carrying:      the carried-on-outflow fee that rides with
+    ///                            transfers.  NOT capped at raw (a very old
+    ///                            Carrying account can owe more than it
+    ///                            holds; on a full-raw outflow the recipient
+    ///                            absorbs the over-debt via _demurrage[to]).
     function balanceOfFees(address a) public view returns (uint256) {
-        uint256 raw = ERC20.balanceOf(a);
         uint256 fee = feeOwing(a);
+        if (identity.isCarrying(a)) {
+            return fee;
+        }
+        uint256 raw = ERC20.balanceOf(a);
         return fee >= raw ? raw : fee;
     }
 
-    /// @notice Net spendable BUCK at `a` (raw - locked fees).
+    /// @notice Spendable BUCK at `a`.  Semantics differ by identity flavour:
+    ///           * Non-Carrying:  raw - locked fees.  Decreases over time
+    ///                            against an idle holding -- the locked dust
+    ///                            stays in the account but the holder cannot
+    ///                            spend it.
+    ///           * Carrying:      raw, full-stop.  The account's accumulated
+    ///                            fees do NOT subtract from balanceOf because
+    ///                            they are carried on outflow, not locked
+    ///                            inside the account.  This is what AMM
+    ///                            pools, Notes pools, and the Jubilee fund
+    ///                            need: their balanceOf must match the
+    ///                            actual transferable raw, otherwise stock
+    ///                            ERC-20 consumers (e.g. Uniswap's K
+    ///                            invariant) silently break across long
+    ///                            idle periods.
     function balanceOf(address a) public view override returns (uint256) {
         uint256 raw = ERC20.balanceOf(a);
+        if (identity.isCarrying(a)) {
+            return raw;
+        }
         uint256 fee = feeOwing(a);
         return fee >= raw ? 0 : raw - fee;
     }
