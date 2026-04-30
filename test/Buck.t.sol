@@ -44,6 +44,8 @@ contract BuckTest is Test {
         credit = new BuckCredit();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);   // BUCK_K = 1.0
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(GOV);
+        reg.setBuck(address(buck));
     }
 
     // ---- JSON helpers (duplicated from IdentityRegistry.t.sol intentionally;
@@ -125,7 +127,7 @@ contract BuckTest is Test {
             R: BN254.g1(),
             C: BN254.g1()
         });
-        reg.bindContract(target, pk, E, true);
+        reg.bindContract(target, pk, E, true, true);
     }
 
     /// @dev Mint a BuckCredit NFT to `client` with a fixed face value, no depreciation,
@@ -250,6 +252,22 @@ contract BuckTest is Test {
         assertEq(buck.allowance(alice, bob), 100e18);
         bytes32 expected = keccak256(abi.encode(E_b.R.X, E_b.R.Y, E_b.C.X, E_b.C.Y));
         assertEq(buck.receiptFragment(alice, bob), expected);
+    }
+
+    function test_identityApprove_freezesSpenderCarryingFlag() public {
+        // Pre-approve, bob is an EOA with isCarrying = false (default).
+        // After alice approves bob, bob's carryingFrozen flag is set so the
+        // flavour bob holds at the moment of approve cannot be changed
+        // retroactively.
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        IdentityRegistry.CPProof memory pi = _cpProof();
+
+        assertFalse(reg.carryingFrozen(bob), "not yet frozen");
+
+        vm.prank(alice);
+        buck.approve(bob, 100e18, E_b, pi);
+
+        assertTrue(reg.carryingFrozen(bob), "frozen by approve");
     }
 
     function test_identityApprove_rejectsBadProof() public {

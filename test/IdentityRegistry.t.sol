@@ -199,6 +199,7 @@ contract IdentityRegistryTest is Test {
             alice,
             BN254.g1(),
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
+            true,
             true
         );
     }
@@ -209,10 +210,12 @@ contract IdentityRegistryTest is Test {
 
         IdentityRegistry.ElGamalCT memory E =
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-        reg.bindContract(pool, BN254.g1(), E, true);
+        reg.bindContract(pool, BN254.g1(), E, true, true);
 
         assertTrue(reg.isVerified(pool),         "pool now verified");
         assertTrue(reg.isPublicIdentity(pool),   "pool is Public Identity");
+        assertTrue(reg.isCarrying(pool),         "pool is Carrying");
+        assertEq(reg.binderOf(pool), address(this), "binder is the test contract");
         BN254.G1Point memory storedPk = reg.pkOf(pool);
         assertTrue(BN254.eq(storedPk, BN254.g1()), "stored pk matches");
     }
@@ -225,10 +228,11 @@ contract IdentityRegistryTest is Test {
 
         IdentityRegistry.ElGamalCT memory E =
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-        reg.bindContract(vault, BN254.g1(), E, false);
+        reg.bindContract(vault, BN254.g1(), E, false, false);
 
         assertTrue(reg.isVerified(vault),          "vault now verified");
         assertFalse(reg.isPublicIdentity(vault),   "vault is encrypted Identity");
+        assertFalse(reg.isCarrying(vault),         "vault is Non-Carrying (user wallet)");
     }
 
     function test_bindContract_firstBinderWins() public {
@@ -237,11 +241,11 @@ contract IdentityRegistryTest is Test {
 
         IdentityRegistry.ElGamalCT memory E =
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-        reg.bindContract(pool, BN254.g1(), E, true);
+        reg.bindContract(pool, BN254.g1(), E, true, true);
 
         // Second bind reverts -- first binder owns the slot.
         vm.expectRevert(bytes("already bound"));
-        reg.bindContract(pool, BN254.g1(), E, true);
+        reg.bindContract(pool, BN254.g1(), E, true, true);
     }
 
     // ---- verifyApprove -----------------------------------------------------
@@ -289,5 +293,119 @@ contract IdentityRegistryTest is Test {
         IdentityRegistry.CPProof memory bad = _cpProof();
         bad.e = (bad.e + 1) % BN254.R;
         assertFalse(reg.verifyApprove(alice, bob, E_b, bad));
+    }
+
+    // ---- setBuck -----------------------------------------------------------
+
+    function test_setBuck_governance_oneTime() public {
+        address fakeBuck  = address(0xB0CC);
+        address fakeBuck2 = address(0xB0DD);
+
+        // Non-governance caller is rejected.
+        vm.expectRevert(bytes("not governance"));
+        reg.setBuck(fakeBuck);
+
+        // Governance succeeds; buck is set.
+        vm.prank(GOV);
+        reg.setBuck(fakeBuck);
+        assertEq(reg.buck(), fakeBuck);
+
+        // Second call (even from governance) reverts.
+        vm.expectRevert(bytes("buck already set"));
+        vm.prank(GOV);
+        reg.setBuck(fakeBuck2);
+
+        // Zero buck rejected on a fresh registry.
+        IdentityRegistry fresh = new IdentityRegistry(GOV);
+        vm.expectRevert(bytes("buck=0"));
+        vm.prank(GOV);
+        fresh.setBuck(address(0));
+    }
+
+    // ---- setIsCarrying / markApproved freeze -------------------------------
+
+    function _planAt(address target) internal {
+        vm.etch(target, hex"60006000fd");
+    }
+
+    function test_setIsCarrying_onlyBinder() public {
+        address pool = address(0xDECAF);
+        _planAt(pool);
+        IdentityRegistry.ElGamalCT memory E =
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+
+        // The test contract is the binder.
+        reg.bindContract(pool, BN254.g1(), E, true, true);
+
+        // Random caller cannot flip the flag.
+        vm.prank(alice);
+        vm.expectRevert(bytes("not binder"));
+        reg.setIsCarrying(pool, false);
+
+        // Binder can.
+        reg.setIsCarrying(pool, false);
+        assertFalse(reg.isCarrying(pool));
+        reg.setIsCarrying(pool, true);
+        assertTrue(reg.isCarrying(pool));
+    }
+
+    function test_markApproved_onlyBuck() public {
+        address pool = address(0xDECAF);
+        _planAt(pool);
+        IdentityRegistry.ElGamalCT memory E =
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        reg.bindContract(pool, BN254.g1(), E, true, true);
+
+        // Without a buck set, no caller can markApproved.
+        vm.expectRevert(bytes("only Buck"));
+        reg.markApproved(pool);
+
+        // After setBuck, only that address can call.
+        address fakeBuck = address(0xB0CC);
+        vm.prank(GOV);
+        reg.setBuck(fakeBuck);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("only Buck"));
+        reg.markApproved(pool);
+
+        // Buck succeeds.
+        vm.prank(fakeBuck);
+        reg.markApproved(pool);
+        assertTrue(reg.carryingFrozen(pool));
+
+        // Idempotent (no revert on re-call).
+        vm.prank(fakeBuck);
+        reg.markApproved(pool);
+    }
+
+    function test_setIsCarrying_revertsAfterFreeze() public {
+        address pool = address(0xDECAF);
+        _planAt(pool);
+        IdentityRegistry.ElGamalCT memory E =
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        reg.bindContract(pool, BN254.g1(), E, true, true);
+
+        // Buck-side approval freezes the flag.
+        address fakeBuck = address(0xB0CC);
+        vm.prank(GOV);
+        reg.setBuck(fakeBuck);
+        vm.prank(fakeBuck);
+        reg.markApproved(pool);
+
+        // Binder can no longer change isCarrying.
+        vm.expectRevert(bytes("carrying frozen by approval"));
+        reg.setIsCarrying(pool, false);
+
+        // The original value is preserved.
+        assertTrue(reg.isCarrying(pool));
+    }
+
+    function test_setIsCarrying_targetingEOA_reverts() public {
+        // EOAs have binderOf == address(0), so setIsCarrying reverts for any
+        // caller (no one can match address(0) as msg.sender from a real tx).
+        _registerAlice();
+        vm.expectRevert(bytes("not binder"));
+        reg.setIsCarrying(alice, true);
     }
 }

@@ -75,6 +75,8 @@ contract SpendAVerifierTest is Test {
         credit = new BuckCredit();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(GOV);
+        reg.setBuck(address(buck));
 
         // Two Groth16 verifiers, two adapters: B-spend wraps the legacy
         // spend.circom verifier (so Notes.spend() works); A-spend V2 wraps
@@ -101,7 +103,8 @@ contract SpendAVerifierTest is Test {
             address(notes),
             BN254.g1(),
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
-            true
+            true, // isPublicIdentity
+            true  // isCarrying
         );
 
         _grantCredit(alice, 1000e18);

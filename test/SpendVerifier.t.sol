@@ -66,6 +66,8 @@ contract SpendVerifierTest is Test {
         credit = new BuckCredit();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(GOV);
+        reg.setBuck(address(buck));
 
         mintStub     = new StubMintVerifier(GOV);
         spendG16     = new SpendGroth16Verifier();
@@ -82,7 +84,8 @@ contract SpendVerifierTest is Test {
             address(notes),
             BN254.g1(),
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
-            true
+            true, // isPublicIdentity
+            true  // isCarrying
         );
 
         _grantCredit(alice, 1000e18);
@@ -319,7 +322,9 @@ contract SpendVerifierTest is Test {
 
     /// @notice With demurrage accumulating on the pool between mint and
     ///         spend, the recipient absorbs the pool's average age via
-    ///         transferCarrying.
+    ///         the registry-dispatched Carrying transfer (Notes is bound
+    ///         with isCarrying = true, so notes.spend's transfer call lands
+    ///         in Buck's Carrying path automatically).
     function test_spend_recipientAbsorbsPoolAge() public {
         _seedTreeForSpend();
         skip(30 days);
@@ -333,8 +338,10 @@ contract SpendVerifierTest is Test {
         assertEq(buck.rawBalanceOf(bob), fxSpendFace,
             "bob raw balance is not exactly face");
         assertGt(buck.feeOwing(bob), 0,
-            "bob should have inherited pool's BUCK-age via transferCarrying");
-        assertGt(buck.totalSupply(), supplyBefore,
-            "Jubilee advance-mint should have grown supply across 30d");
+            "bob inherits pool's BUCK-age via Carrying dispatch");
+        // The transfer itself does not change totalSupply (no mint/burn
+        // happened in this call); supply is unchanged.
+        assertEq(buck.totalSupply(), supplyBefore,
+            "spend transfer preserves totalSupply");
     }
 }

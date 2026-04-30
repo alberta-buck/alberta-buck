@@ -69,6 +69,8 @@ contract MintVerifierTest is Test {
         credit = new BuckCredit();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(GOV);
+        reg.setBuck(address(buck));
 
         g16N1   = new MintBatchN1Groth16Verifier();
         g16N2   = new MintBatchN2Groth16Verifier();
@@ -98,7 +100,8 @@ contract MintVerifierTest is Test {
             address(notes),
             BN254.g1(),
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}),
-            true
+            true, // isPublicIdentity
+            true  // isCarrying
         );
 
         // Generous credit + balance so Alice can mint up to N*1e18.

@@ -166,7 +166,7 @@ contract BuckCredit is ERC721Enumerable {
         emit CreditActivated(tokenId, msg.sender, amount, c.activatedValue);
     }
 
-    /// @notice Aggregate current value of all credits owned by an account.
+    /// @notice Aggregate current value of all BuckCredits owned by an account.
     /// @dev Called by Buck.mint() to compute the credit limit.
     function totalCurrentValue(address account) external view returns (uint256) {
         uint256 total = 0;

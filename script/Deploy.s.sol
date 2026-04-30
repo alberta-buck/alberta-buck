@@ -89,7 +89,8 @@ contract Deploy is Script {
             address(notes),
             pk_notes_placeholder,
             E_notes_placeholder,
-            true  // isPublicIdentity
+            true, // isPublicIdentity
+            true  // isCarrying -- Notes pool deploys carried-age BUCK to spenders
         );
 
         vm.stopBroadcast();
