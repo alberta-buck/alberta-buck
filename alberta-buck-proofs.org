@@ -744,7 +744,7 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 * Part IV: BUCK Notes Spend Predicates (A1, A2, B1)
 
   This Part proves correctness of the spend predicates underlying
-  BUCK Notes ([[file:alberta-buck-notes.org][Notes]]).  A note is an asynchronous /deferred
+  BUCK Notes ([[https://perry.kundert.ca/range/finance/alberta-buck-notes/][Notes]]).  A note is an asynchronous /deferred
   approve/ handshake mediated by a global commitment pool: the
   issuer's half is encoded in a Merkle commitment at mint time, the
   depositor's half is supplied at spend time inside a zk-SNARK.  The
@@ -803,7 +803,7 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    submits a Groth16 proof of in-circuit incremental insertion of
    \( N \) fresh leaves -- =N= is fixed per pinned verifier
    (currently \( N \in \{16, 32\} \) on L1; see
-   [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] for the per-N dispatch
+   [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]] for the per-N dispatch
    architecture and gas-economics rationale).  The contract verifies
    the proof, asserts =oldRoot= matches the live root and
    =nextLeafIndex= matches the live size, accepts the SNARK-attested
@@ -1528,7 +1528,7 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    circuit (=circuits/mint.circom=).  The Phase 7-bis batch-mint
    pivot (=circuits/mint_batch.circom=, deployed as per-N pinned
    variants =mint_batch_n${N}.circom=; see
-   [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]]) closes all three at the
+   [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]]) closes all three at the
    mint layer.  This section records the closure for the proof
    record so a reader cross-checking the prior draft can see which
    obligations are now discharged in the circuit vs. deferred to the
@@ -1556,7 +1556,7 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
     The single =Transfer= event of size =totalFace= is therefore
     cryptographically bound to the Groth16 proof's public inputs --
     which include the entire =cms[]= array on the per-N pinned
-    verifiers (see [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]], "Calldata
+    verifiers (see [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]], "Calldata
     delivery").  No separate batch-identifier storage slot is needed
     for soundness; on-chain analytics that want a transfer \(\leftrightarrow\) batch
     correspondence can recover it from the =Minted= event's =cms=

@@ -30,7 +30,7 @@ specifying the five core smart contracts:
 2. *IdentityRegistry* (custom): An on-chain registry of per-address Pointcheval-Sanders signature
    credentials and ElGamal-encrypted identity points, verified via a BN254-precompile NIZK at
    registration time.  This is the trust anchor every BUCK transfer is gated on -- see the
-   companion [[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]] documents for the full cryptographic design.
+   companion [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][Identity]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Proofs]] documents for the full cryptographic design.
 3. *BUCK* (ERC-20): A fungible token minted against aggregated BUCK_CREDIT values, with on-chain
    credit-limit enforcement, default insurance premiums, and *identity-aware* =approve= and
    =transfer= flows that enforce the BUCK mutual-decryptability invariant on every counterparty
@@ -41,7 +41,7 @@ specifying the five core smart contracts:
    second Groth16 SNARK proving membership in the on-chain Tornado-style incremental Poseidon
    Merkle tree under a fresh nullifier.  Redemption pays out via =BUCK.transferCarrying=, which
    weighted-merges the recipient's demurrage age with the pool's so the SNARK's ~face === v~
-   value-conservation invariant holds at the ERC-20 boundary.  See [[https://perry.kundert.ca/range/finance/alberta-buck-notes][Notes]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]] for the
+   value-conservation invariant holds at the ERC-20 boundary.  See [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][Notes]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Proofs]] for the
    circuit design.
 5. *BUCK_K* (custom): A controller that supplies the dynamic Value Stabilization Factor used in
    credit-limit computation.  The first deployment uses =BuckKControllerStatic=, a
@@ -301,8 +301,8 @@ limit, triggering the default insurance mechanism described below.
   :END:
 
 The =IdentityRegistry= is the binding between Ethereum addresses and the privacy-preserving identity
-machinery described in the companion documents [[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity with Anonymity]],
-[[https://perry.kundert.ca/range/finance/alberta-buck-identity-example][Identity Example -- Data Flow]], and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Cryptographic Proofs]].
+machinery described in the companion documents [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][Identity with Anonymity]],
+[[https://perry.kundert.ca/range/finance/alberta-buck-identity-example/][Identity Example -- Data Flow]], and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Cryptographic Proofs]].
 Every BUCK =mint=, =approve= and =transfer= consults this registry; an unregistered address cannot
 hold or move BUCKs.
 
@@ -675,8 +675,8 @@ contract, backed by an equal amount of BUCK locked in that contract.  Notes do n
 flavours, or identity bindings -- the public state is just a list of opaque 32-byte commitments and
 a running face-value total.
 
-The design is specified in full in [[https://perry.kundert.ca/range/finance/alberta-buck-notes][Notes]] and the underlying SNARK construction in
-[[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]].  This section documents the Ethereum surface: the =Notes= contract, the =IMintVerifier=
+The design is specified in full in [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][Notes]] and the underlying SNARK construction in
+[[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Proofs]].  This section documents the Ethereum surface: the =Notes= contract, the =IMintVerifier=
 interface, the circom Groth16 mint circuit, and the adapter that bridges the two.
 
 ** Mint Circuit (circom, Groth16 on BN254)
@@ -829,7 +829,7 @@ commitments fold into the rolling root via the SNARK -> =spend= redeems any comm
 commitment against any recent root with a fresh nullifier, paying the recipient via
 =transferCarrying= so the SNARK's ~face === v~ invariant is preserved at the ERC-20
 boundary.  The pivot is documented in
-[[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
+[[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]].
 
 
 * Integration: Full mint() and transfer() Walkthrough
@@ -1109,7 +1109,7 @@ are annotated with what the current code actually ships.
 
 The phase set has grown since the original v0.5 plan in two directions.  /Backward/, Phase 7-bis
 landed the in-circuit Merkle-insertion batch-mint pivot documented in
-[[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] -- now shipped as
+[[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]] -- now shipped as
 =mint_batch.circom= with per-N pinned verifiers in {1, 2, 4, 8, 16, 32}.  Phase 8 (A-flavor spend
 with key-pair binding) also shipped, in two layers: =spend_a.circom= V2 (in-circuit Poseidon-8
 idHash binding gate) plus off-chain Chaum-Pedersen DLEQ verified in
@@ -1117,7 +1117,7 @@ idHash binding gate) plus off-chain Chaum-Pedersen DLEQ verified in
 =Notes.spendACP= entry point.  /Forward/, the path to live BUCK_K (Phase 10/11) and dynamic
 BUCK_CREDIT-backed minting (Phase 12) is sequenced behind one remaining Notes deliverable:
 serialized B1 sub-notes (Phase 9) per
-[[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]].  Both companion
+[[https://perry.kundert.ca/images/alberta-buck-notes-serialized.pdf][alberta-buck-notes-serialized.org]].  Both companion
 memos have been reviewed for cryptographic correctness; see /Cryptographic Correctness Review of
 Companion Memos/ below.
 
@@ -1154,7 +1154,7 @@ verdicts are /sound/, with one explicit operational trust assumption (=K_fam= de
 serialized B1) that is /symmetric/ to a pre-existing one (issuer-retained =rho= in single-note
 B1) and is documented in the Phase 9 wallet-UX requirement.
 
-*** [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] -- Phase 7-bis batch-mint design
+*** [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]] -- Phase 7-bis batch-mint design
 
 *Verdict*: cryptographically sound; integrated into shipped code.  The in-circuit Poseidon Merkle
 insertion replaces the per-leaf =Notes._insert= ladder with one SNARK-attested =newRoot= per batch.
@@ -1183,7 +1183,7 @@ insertion replaces the per-leaf =Notes._insert= ladder with one SNARK-attested =
   smaller sizes are useful for unit tests and small-batch wallet flows even after the L1 ceiling
   is reached.
 
-*** [[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]] -- Serialized B1 sub-notes design
+*** [[https://perry.kundert.ca/images/alberta-buck-notes-serialized.pdf][alberta-buck-notes-serialized.org]] -- Serialized B1 sub-notes design
 
 *Verdict*: cryptographically sound, with =K_fam= destruction as the single operational trust
 assumption (symmetric to existing single-note B1 issuer-race over =rho=).  Mint-circuit reuse is
@@ -1255,7 +1255,7 @@ once, the Solidity reads them many times.
 The off-chain components -- KYC ceremony, credential derivation, Chaum-Pedersen proving, and (later)
 SNARK witness generation for Notes -- are implemented as a Python package, ~alberta_buck.wallet~,
 with a CLI front-end.  Python is the natural choice: the existing references in
-[[https://perry.kundert.ca/range/finance/alberta-buck-identity-example][Identity Example]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs][Proofs]]
+[[https://perry.kundert.ca/range/finance/alberta-buck-identity-example/][Identity Example]] and [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Proofs]]
 are already Python, ~py_ecc~ ships a complete BN254 (alt_bn128) implementation matching Ethereum's
 precompiles, and the package is invoked the same way every other dev tool in this repo is
 (~nix develop --command python3 -m alberta_buck.wallet ...~).
@@ -1263,7 +1263,7 @@ precompiles, and the package is invoked the same way every other dev tool in thi
 The wallet has four jobs:
 
 - *Reference implementation* of the cryptography in
-  [[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]], the place where the spec is
+  [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][Identity]], the place where the spec is
   ground-truthed.
 - *Test-vector emission*: a CLI verb (~wallet emit-vectors~) writes a canonical JSON file under
   ~test/vectors/~ containing the inputs and expected outputs of every on-chain proof check.  Foundry
@@ -1421,7 +1421,7 @@ Chaum-Pedersen proofs.
 
 ** Phase 5: Notes Scaffolding
 
-Goal: lay the structural groundwork for [[https://perry.kundert.ca/range/finance/alberta-buck-notes][BUCK Notes]] -- a commitment pool, a pluggable mint
+Goal: lay the structural groundwork for [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][BUCK Notes]] -- a commitment pool, a pluggable mint
 verifier interface, and the off-chain wallet helpers -- behind a stub verifier so the end-to-end
 flow can be exercised without yet shipping the SNARK.
 
@@ -1538,7 +1538,7 @@ nullifier, paying out an equal face value of BUCK via =transferCarrying= so the 
 *** Resolved Items from the Notes Correctness Review
 
 The Phase 6 \(\to\) Phase 7 transition surfaced four correctness obligations originally listed as
-open questions in [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] (Part IV).  All four are now resolved in the shipped
+open questions in [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]] (Part IV).  All four are now resolved in the shipped
 contracts:
 
 1. *=Num2Bits= range checks on =v[i]= and =totalFace= in =circuits/mint.circom=* -- /resolved/.
@@ -1607,7 +1607,7 @@ of mint batch size).
 *Stop conditions for promoting to N >= 64*:
 - EIP-170 24 KB verifier-bytecode ceiling.  N=64 lands at ~33 KB, breaching the limit.  The three
   escape hatches (calldata-IC hash-pinned, sharded SSTORE2, plain SLOAD) are documented in
-  [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]]; calldata-IC is
+  [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]]; calldata-IC is
   the natural fit for the Holochain wallet.
 - Block-share economics.  At N=512 a single mint occupies ~half a 30M-gas block; at N=1024 it
   cannot land on L1 at all.  L2 deployment (Arbitrum/Base/Optimism, ~100x looser block budgets)
@@ -1620,7 +1620,7 @@ an identity binding -- with the corrected key-pair-binding semantics surfaced by
 Deepseek R4 review.  *Both V1 and V2 are now in tree, exercised end-to-end by 26 forge tests in
 =test/SpendAVerifier.t.sol=.*
 
-*Corrected design invariant* (per [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] Theorem
+*Corrected design invariant* (per [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]] Theorem
 10.1):
 
 - The A-spend identity binding requires a /single/ =sk_dep= witness that simultaneously satisfies
@@ -1631,8 +1631,8 @@ Deepseek R4 review.  *Both V1 and V2 are now in tree, exercised end-to-end by 26
   both constraints.
 - *Consequence*: A-note loss-recovery via identity re-issuance is /impossible/ by design.
   =sk_rec= must be backed up like a hardware-wallet seed; loss is terminal.  The companion
-  documents ([[file:alberta-buck-notes.org][alberta-buck-notes.org]],
-  [[file:alberta-buck-notes-flow.org][alberta-buck-notes-flow.org]]) were revised in the same
+  documents ([[https://perry.kundert.ca/range/finance/alberta-buck-notes/][alberta-buck-notes.org]],
+  [[https://perry.kundert.ca/range/finance/alberta-buck-notes-flow/][alberta-buck-notes-flow.org]]) were revised in the same
   cycle to remove the now-incorrect "transparent re-issuance" framing.
 
 Phase 8 ships in two layers, both in tree:
@@ -1684,7 +1684,7 @@ Sigma protocol (=alberta_buck.wallet.spend_cp=):
 ciphertext =E_n= alongside the spend, and =Notes.spendACP= calls
 =identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof)= which reads
 =_E_addr[spender]= and =_pk[spender]= from registry storage.  All A1/A2 identity, security, and
-privacy properties enumerated in [[file:alberta-buck-notes.org][alberta-buck-notes.org]] remain
+privacy properties enumerated in [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][alberta-buck-notes.org]] remain
 in place: only the DLEQ verification /location/ moved (off-chain CP via precompiles, instead of
 non-native G1 in the circuit).  The link between the SNARK and the CP verifier is the note's
 identity ciphertext =E_n=, exposed as 4 additional public inputs to =spend_a.circom= V2 and
@@ -1715,7 +1715,7 @@ Why off-chain CP rather than in-circuit:
 *V2 Deliverables (shipped)* -- cryptographic identity gate via two cooperating components:
 
 - =alberta_buck/wallet/spend_cp.py= -- Python prover and verifier for the CP-DLEQ; mirrors
-  [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] Theorem 8 #3 algebra.  Tests in
+  [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]] Theorem 8 #3 algebra.  Tests in
   =alberta_buck/test/test_spend_cp.py= cover honest spend, identity re-issuance rejection,
   tampered transcript, and cross-chain/recipient replay.
 - =src/IdentityRegistry.sol= -- adds =SpendCPProof= struct =(e, s, T1, T2)= and
@@ -1759,7 +1759,7 @@ is /unchanged/ -- =cm_parent= is an ordinary Poseidon-5 output -- so this phase 
 spend-side-only on circuits and storage.  Per-bearer-note marginal mint cost drops to
 ~31K/N_fam at N_batch=16, vs ~31K at the Phase 7-bis baseline.
 
-Per [[file:alberta-buck-notes-serialized.org][alberta-buck-notes-serialized.org]] migration plan
+Per [[https://perry.kundert.ca/images/alberta-buck-notes-serialized.pdf][alberta-buck-notes-serialized.org]] migration plan
 (Phases A-D):
 
 *Phase 9-A: Spend-serialized circuit*:

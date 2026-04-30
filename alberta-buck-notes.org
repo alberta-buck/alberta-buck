@@ -1510,7 +1510,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
     in-circuit check.  All identity, security, and privacy
     properties enumerated above -- including the Theorem 10.1
     invariant (re-issuance does not recover A-notes) -- are
-    preserved.  See [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]]
+    preserved.  See [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum][alberta-buck-ethereum.org]]
     Phase 8 for the implementation split.
 
 ** B1 (Bearer): Civil-Trust, Not Cryptographic
@@ -2386,7 +2386,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    exposes the resulting =newRoot= as a public output.  On-chain mint
    cost becomes essentially constant in N -- ~380K + ~500 gas/leaf of
    calldata.  The design memo is
-   [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
+   [[https://perry.kundert.ca/images/finance/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint]].
 
    *Public inputs (5 entries, N-independent).*
    - =oldRoot= -- the live note root the prover read from chain

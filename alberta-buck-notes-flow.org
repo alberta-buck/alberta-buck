@@ -23,8 +23,8 @@
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
 #+BEGIN_ABSTRACT
-This document is the /narrative/ companion to [[file:alberta-buck-notes.org][alberta-buck-notes.org]] (architectural
-overview), [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] (formal correctness), and [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]]
+This document is the /narrative/ companion to [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][alberta-buck-notes.org]] (architectural
+overview), [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]] (formal correctness), and [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][alberta-buck-ethereum.org]]
 (Solidity surface).  It walks one concrete example -- Alice mints a 1,200-BUCK transfer
 into six notes of denominations =[1000, 100, 25, 25, 25, 25]= -- end-to-end through the
 *Phase-7-bis SNARK-verified batch-mint pipeline*, and then walks the /inverse/ flow:
@@ -42,7 +42,7 @@ emits a SNARK-attested =newRoot= for the contract to record.  On-chain mint cost
 becomes essentially constant in N -- ~380K plus ~500 gas per leaf of calldata --
 making honest single-call batches of 16, 128, or 1024 notes practical.  The full
 design memo, including R1CS counts, gas projections, and a per-attack-vector
-hostile-Alice analysis, is [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
+hostile-Alice analysis, is [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]].
 
 The Phase-7 spend pipeline shipped in the bearer-shape (=spend.circom=,
 =SpendGroth16Verifier=, =Notes.spend=) and is exercised end-to-end in
@@ -119,7 +119,7 @@ and =E_reg= to the same identity point =M=.
 The example uses concrete names so the message flow is easy to track:
 
 - *Alice* -- the issuer.  She holds 1,200 BUCK and wants to break it into six notes.  She
-  is registered with the [[file:alberta-buck-identity.org][IdentityRegistry]] so that her =msg.sender= address resolves to a
+  is registered with the [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][IdentityRegistry]] so that her =msg.sender= address resolves to a
   cryptographically attested identity.
 - *Bob, Carol, Dave, Eve, Frank, Grace* -- six recipients.  Bob will get the 1,000-BUCK
   note; Carol the 100-BUCK note; Dave/Eve/Frank/Grace one 25-BUCK note each.  Recipients
@@ -178,7 +178,7 @@ cm_i      = Poseidon5( flavor_i, v_i, rho_i, idHash_i, predicate_i )
 #+END_SRC
 
 - =flavor_i= -- which note variant (A1 identified cheque, A2 private cheque, B1 bearer
-  cheque); see [[file:alberta-buck-notes.org][Notes]] for the menu.
+  cheque); see [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][Notes]] for the menu.
 - =v_i= -- the face value in BUCK base units (18-decimal scaled integer).
 - =rho_i= -- a fresh, uniformly random nonce.  This is the source of unlinkability:
   swapping =rho_i= changes =cm_i= to a uniformly fresh hash even if every other field
@@ -197,7 +197,7 @@ whole flow work:
   =flavor_i=.
 - *Binding*.  No prover, hostile or honest, can find two distinct openings hashing to
   the same =cm_i= (collision-resistance of Poseidon on BN254, modelled as a random
-  oracle in [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] Part IV).
+  oracle in [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]] Part IV).
 
 The on-chain contract stores only =cm_i=.  Openings live exclusively off-chain.
 
@@ -415,7 +415,7 @@ first spend nullifies =cm=, the second copy is unspendable forever.  Net result:
 Alice burns BUCK she could have kept.  The chain's job is value conservation, not
 saving Alice from a buggy =rho= RNG.  See *Why Outside Observers Cannot Link*
 below and the per-attack-vector audit in
-[[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].
+[[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]].
 
 ** Step 4: Off-Chain Note Delivery
 
@@ -502,7 +502,7 @@ prop up the soundness story:
 ** Pillar 1: The On-Chain Verifier Is Fixed Code
 
 =MintGroth16Verifier.sol= (one per pinned N) was emitted from the Groth16
-verification key produced by the trusted setup ([[file:alberta-buck-ethereum.org][Phase 9]] for production; dev-only
+verification key produced by the trusted setup ([[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][Phase 9]] for production; dev-only
 entropy in =scripts/snark/setup.sh= today).  Its bytecode is deployed once and
 immutable.  Validators run whatever bytecode sits at that address; Alice cannot
 tamper with it without consensus-breaking the chain.
@@ -621,7 +621,7 @@ collapses duplicate openings to one spend, and Alice bears the cost of any
 duplication.
 
 Full per-attack-vector analysis (twelve attack vectors A1-A12) is in the pivot
-design memo [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]].  Every hostile-Alice guarantee
+design memo [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]].  Every hostile-Alice guarantee
 from the Phase-7 per-leaf insertion design survives under the batch-mint pivot;
 the only behavioural change is that duplicate-commitment rejection moves from an
 explicit on-chain check to economic self-enforcement via the deterministic
@@ -680,7 +680,7 @@ unlinkability of recipients and amounts, not of issuers.
 
 ** Spend-Time Unlinkability
 
-The shipped spend circuit ([[file:alberta-buck-ethereum.org][Phase 7]]) lets Bob deposit his note without revealing
+The shipped spend circuit ([[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][Phase 7]]) lets Bob deposit his note without revealing
 /which/ =cm= in the on-chain set he opened.  The spend SNARK proves "I know an
 opening to /some/ commitment in the Merkle tree under the public =noteRoot= that
 hashes to this nullifier", with =cm= as a private witness rather than a public
@@ -850,7 +850,7 @@ the shipped pieces are =circuits/spend_a.circom=, =SpendAGroth16Verifier.sol=,
 =Notes.spendACP()=.  Everything below describes /code paths that are in the
 tree/, exercised by =test/SpendVerifier.t.sol= (B-shape) and
 =test/SpendAVerifier.t.sol= (A-shape, V2).  The companion theorems live in
-Theorems 8-10 of [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]].
+Theorems 8-10 of [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]].
 
 Bob's note is of flavor /A1/ (addressed, identified cheque).  The Phase-7
 =spend.circom= is /flavor-agnostic/ -- it enforces a B-shape (bearer) discharge
@@ -887,7 +887,7 @@ step:
   the pool.  The proof is a capability token for entry into the appropriate
   spend method; the resulting ERC-20 movement is a routine pool-to-recipient
   call gated by that entry.  Since the =Notes= pool is a system-public account in the
-  [[file:alberta-buck-identity.org][IdentityRegistry]], the pool's outbound transfer does not itself require a
+  [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][IdentityRegistry]], the pool's outbound transfer does not itself require a
   Chaum-Pedersen receipt -- the recipient's own registration is what makes them
   acceptable as a transfer destination.
 - *Public inputs are bound into the proof, including =chainId=.*  =spend.circom=
@@ -913,7 +913,7 @@ note_artifact_0 = {
 He has independently confirmed that =cm_0= is in =Notes.commitments[]= at index =K=
 and that =Poseidon5(opening)= reproduces it.  The opening has been sitting in his
 wallet for weeks, months, or years -- addressed A-notes are cryptographically safe for
-indefinite holding ([[file:alberta-buck-notes.org][Notes]]).
+indefinite holding ([[https://perry.kundert.ca/range/finance/alberta-buck-notes/][Notes]]).
 
 ** Step 1: Fetch the Commitment Tree and Build a Merkle Path
 
@@ -1088,7 +1088,7 @@ Five invariants are enforced in order:
 
 a. =root= appears in the recent-roots window.  A root that has rotated out is
    stale -- Bob must rebuild the proof against a fresher root.
-b. =nullifier= has never been published before (Theorem 10.5 in [[file:alberta-buck-proofs.org][the proofs]]
+b. =nullifier= has never been published before (Theorem 10.5 in [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][the proofs]]
    says this single-bit check is sufficient for double-spend prevention).
 c. The SNARK is valid against =SpendAGroth16Verifier= via the
    =SpendAVerifierAdapter=, which packs =[root, nullifier, face, recipient,
@@ -1231,7 +1231,7 @@ the third now shipped via Phase 8 V2's off-chain CP-DLEQ in
    produce a valid nullifier or proof.  For Alice's secrets, this is the load-
    bearing protection on bearer-flavor (B1) notes: she could in principle race the
    bearer to deposit, which is the civil-trust semantics of bearer cash and is
-   discussed at length in [[file:alberta-buck-notes.org][alberta-buck-notes.org §Long-Term Holding Safety]].
+   discussed at length in [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][alberta-buck-notes.org §Long-Term Holding Safety]].
 2. *Recipient-binding at the payout site.*  =recipient= is a public SNARK input
    ghost-bound by =recipient * recipient=, so Groth16's IC[] commitment makes it
    non-malleable.  A front-runner who intercepts Bob's =proofBytes= and resubmits
@@ -1432,7 +1432,7 @@ on its bound Public Identity to satisfy the bilateral check.  Whether
 a per-call CP receipt is an open question; for the Notes pool it is moot
 (the pool is bound under a Public Identity), but if peer-to-peer carry is
 ever opened up an approve-style receipt may be wanted for auditability.
-See the *Open Work Items* in [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]].
+See the *Open Work Items* in [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][alberta-buck-ethereum.org]].
 
 * Putting the Guarantees Side-by-Side
 
@@ -1462,9 +1462,9 @@ more that become concrete only once the redemption path exists.
   history ring =Notes.sol= already maintained for the spend side.  Spend is
   unchanged by the pivot: =spend.circom= in bearer shape,
   =SpendGroth16Verifier=, =SpendVerifierAdapter=, the on-chain Merkle
-  accumulator, and =buck.transferCarrying=.  The [[file:alberta-buck-ethereum.org][IdentityRegistry]] provides the
+  accumulator, and =buck.transferCarrying=.  The [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][IdentityRegistry]] provides the
   issuer-attestation and recipient-verification legs (now extended with
-  =verifySpendCP= for A-flavor identity binding), and the [[file:alberta-buck-proofs.org][formal proofs]]
+  =verifySpendCP= for A-flavor identity binding), and the [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][formal proofs]]
   (Theorems 7-11) provide the cryptographic backstop.  The A-flavor identity
   binding -- Chaum-Pedersen equality on the depositor's registered credential
   (Theorem 8 #3) -- ships in Phase 8 V2 in two cooperating layers: (a) the
@@ -1488,14 +1488,14 @@ is not misled about the current state.
    let an adversarial mint overshoot =totalFace= by a multiple of =r=.  Both
    =mint_batch.circom= and =spend.circom= now range-bound each value via
    =Num2Bits(128)=.  The integer-overflow attack is structurally impossible.
-   Preserved here as a breadcrumb; see [[file:alberta-buck-proofs.org][Open Question 1]] in the proofs for the
+   Preserved here as a breadcrumb; see [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Open Question 1]] in the proofs for the
    historical formulation.
 2. *Implicit transfer<->batch binding.*  The chain emits =Transfer= and
    =Minted= in the same transaction, but no on-chain batch identifier ties the
    BUCK transfer to the specific =cm= range.  Off-chain indexers reconstruct
    the binding from event correlation.  Whether to add an explicit =batchId=
    storage slot (and a matching public input to the spend circuit) is an open
-   design question; see [[file:alberta-buck-proofs.org][Open Question 2]].
+   design question; see [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Open Question 2]].
 3. *A-flavor identity binding (Phase 8 V2 shipped).*  The Phase-7
    =spend.circom= enforces a bearer-shape (B-spend) discharge: knowledge of
    the Poseidon-5 opening is the spend authorization.  Phase 8 ships A-flavor
@@ -1514,7 +1514,7 @@ is not misled about the current state.
    confirms a single =sk_dep= satisfies both ~pk_dep === sk_dep * G~ and the
    equal-plaintext relation ~C_n - sk_dep * R_n === C_reg - sk_dep * R_reg~
    (Theorem 8 #3).  All A1/A2 identity, security, and privacy properties
-   enumerated in [[file:alberta-buck-notes.org][alberta-buck-notes.org]] remain in place; only the DLEQ
+   enumerated in [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][alberta-buck-notes.org]] remain in place; only the DLEQ
    verification /location/ moved.  Exercised end-to-end by 26 forge tests
    in =test/SpendAVerifier.t.sol=.
 4. *Variable-=N= batch size (resolved via pinned set).*  Phase-7's
@@ -1540,16 +1540,16 @@ is not misled about the current state.
 
 * Cross-References
 
-- [[file:alberta-buck-notes.org][alberta-buck-notes.org]] -- architectural overview of the Notes primitive
+- [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][alberta-buck-notes.org]] -- architectural overview of the Notes primitive
   (flavors, Merkle tree, demurrage interaction).
-- [[file:alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint.org]] -- Phase-7-bis batch-mint design memo:
+- [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]] -- Phase-7-bis batch-mint design memo:
   R1CS counts per N, gas projections, per-attack-vector hostile-Alice audit
   (A1-A12), concurrency model, migration plan.
-- [[file:alberta-buck-proofs.org][alberta-buck-proofs.org]] -- formal correctness arguments (Theorems 7-11; Open
+- [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]] -- formal correctness arguments (Theorems 7-11; Open
   Questions in Part IV).
-- [[file:alberta-buck-ethereum.org][alberta-buck-ethereum.org]] -- Solidity surface, gas costs, phase-by-phase
+- [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][alberta-buck-ethereum.org]] -- Solidity surface, gas costs, phase-by-phase
   implementation status, Open Work Items.
-- [[file:alberta-buck-identity.org][alberta-buck-identity.org]] -- IdentityRegistry, PS credentials, and the
+- [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][alberta-buck-identity.org]] -- IdentityRegistry, PS credentials, and the
   bilateral ElGamal handshake that anchors =msg.sender= to a verifiable
   identity.
 - =circuits/mint_batch.circom= -- the Phase-7-bis batch-mint circuit (one

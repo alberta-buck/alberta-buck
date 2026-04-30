@@ -1686,7 +1686,8 @@ Table of Contents
   [alberta-buck-ethereum.org] Phase 8 for the implementation split.
 
 
-[alberta-buck-ethereum.org] <file:alberta-buck-ethereum.org>
+[alberta-buck-ethereum.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-ethereum>
 
 
 10.3 B1 (Bearer): Civil-Trust, Not Cryptographic
@@ -2618,7 +2619,7 @@ Table of Contents
   folds N commitments onto it using witness sibling paths, and exposes
   the resulting `newRoot' as a public output.  On-chain mint cost
   becomes essentially constant in N – ~380K + ~500 gas/leaf of calldata.
-  The design memo is [alberta-buck-notes-rollup-mint.org].
+  The design memo is [alberta-buck-notes-rollup-mint].
 
   *Public inputs (5 entries, N-independent).*
   • `oldRoot' – the live note root the prover read from chain
@@ -2667,8 +2668,8 @@ Table of Contents
   `Appended' events from Phase 7 are gone.
 
 
-[alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+[alberta-buck-notes-rollup-mint]
+<https://perry.kundert.ca/images/finance/alberta-buck-notes-rollup-mint.pdf>
 
 
 16.2 Spend Circuit (`circuits/spend.circom', B-flavor / bearer shape)

@@ -161,14 +161,17 @@ Table of Contents
 14. Cross-References
 
 
-[alberta-buck-notes.org] <file:alberta-buck-notes.org>
+[alberta-buck-notes.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
-[alberta-buck-proofs.org] <file:alberta-buck-proofs.org>
+[alberta-buck-proofs.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-[alberta-buck-ethereum.org] <file:alberta-buck-ethereum.org>
+[alberta-buck-ethereum.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
 1 Cast of Characters
@@ -201,7 +204,8 @@ Table of Contents
     compute.
 
 
-[IdentityRegistry] <file:alberta-buck-identity.org>
+[IdentityRegistry]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/>
 
 
 2 The Promise
@@ -279,9 +283,10 @@ Table of Contents
   off-chain.
 
 
-[Notes] <file:alberta-buck-notes.org>
+[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
-[alberta-buck-proofs.org] <file:alberta-buck-proofs.org>
+[alberta-buck-proofs.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 
 4 The Mint, Step by Step
@@ -534,7 +539,7 @@ Table of Contents
    <https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale>
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
 4.5 Step 4: Off-Chain Note Delivery
@@ -665,7 +670,8 @@ Table of Contents
   what soundness prohibits.
 
 
-[Phase 9] <file:alberta-buck-ethereum.org>
+[Phase 9]
+<https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
 
 
 5.2 Pillar 2: BUCK Escrow Is Inside the Same Atomic Call
@@ -789,7 +795,7 @@ Table of Contents
 
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
 6 Why Outside Observers Cannot Link
@@ -870,7 +876,8 @@ Table of Contents
   is in *The Redemption (Spend), Step by Step* below.
 
 
-[Phase 7] <file:alberta-buck-ethereum.org>
+[Phase 7]
+<https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
 
 
 7 Atomicity, No Double-Mint, No Replay
@@ -1123,9 +1130,11 @@ Table of Contents
     by the verifier.
 
 
-[alberta-buck-proofs.org] <file:alberta-buck-proofs.org>
+[alberta-buck-proofs.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-[IdentityRegistry] <file:alberta-buck-identity.org>
+[IdentityRegistry]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/>
 
 10.1 Step 0: Bob Holds a Verified Note
 ──────────────────────────────────────
@@ -1148,7 +1157,7 @@ Table of Contents
   A-notes are cryptographically safe for indefinite holding ([Notes]).
 
 
-[Notes] <file:alberta-buck-notes.org>
+[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
 
 10.2 Step 1: Fetch the Commitment Tree and Build a Merkle Path
@@ -1386,7 +1395,8 @@ Table of Contents
   Poseidon-3 nullifier preimage.)
 
 
-[the proofs] <file:alberta-buck-proofs.org>
+[the proofs]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 
 10.6 Step 5: BUCK ERC-20 Pays Out (`transferCarrying')
@@ -1556,7 +1566,7 @@ Table of Contents
 
 
 [alberta-buck-notes.org §Long-Term Holding Safety]
-<file:alberta-buck-notes.org>
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
 
 10.9 B-Flavor Notes Today
@@ -1762,7 +1772,8 @@ Table of Contents
   Work Items* in [alberta-buck-ethereum.org].
 
 
-[alberta-buck-ethereum.org] <file:alberta-buck-ethereum.org>
+[alberta-buck-ethereum.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
 
 
 12 Putting the Guarantees Side-by-Side
@@ -1810,9 +1821,11 @@ Table of Contents
   constraint over non-native BN254 G1 in circom.
 
 
-[IdentityRegistry] <file:alberta-buck-ethereum.org>
+[IdentityRegistry]
+<https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
 
-[formal proofs] <file:alberta-buck-proofs.org>
+[formal proofs]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 
 13 Open Questions and Forward-Looking Caveats
@@ -1884,11 +1897,14 @@ Table of Contents
      and the Rollup Race* above.
 
 
-[Open Question 1] <file:alberta-buck-proofs.org>
+[Open Question 1]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-[Open Question 2] <file:alberta-buck-proofs.org>
+[Open Question 2]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-[alberta-buck-notes.org] <file:alberta-buck-notes.org>
+[alberta-buck-notes.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
 
 14 Cross-References
@@ -1919,13 +1935,17 @@ Table of Contents
     tests that pin the soundness stories to executable assertions.
 
 
-[alberta-buck-notes.org] <file:alberta-buck-notes.org>
+[alberta-buck-notes.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
-[alberta-buck-proofs.org] <file:alberta-buck-proofs.org>
+[alberta-buck-proofs.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-[alberta-buck-ethereum.org] <file:alberta-buck-ethereum.org>
+[alberta-buck-ethereum.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
 
-[alberta-buck-identity.org] <file:alberta-buck-identity.org>
+[alberta-buck-identity.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/>

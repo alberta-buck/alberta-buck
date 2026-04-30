@@ -818,7 +818,7 @@ Table of Contents
   preservation of the BUCK mutual decryptability invariant (Theorem 11).
 
 
-[Notes] <file:alberta-buck-notes.org>
+[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
 5.1 Setup
 ─────────
@@ -914,7 +914,7 @@ Table of Contents
 
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
 5.2 Theorem 7 (Mint Re-randomization Correctness)
@@ -1551,7 +1551,7 @@ Table of Contents
 
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 5.9.1 Closure 1 (Field-Overflow / Value-Conservation Range Check) – /Discharged in circuit/
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
@@ -1585,7 +1585,7 @@ Table of Contents
 
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
 5.9.3 Closure 3 (Spend-Circuit Trio) – /Mint half discharged; nullifier + spend-side value conservation deferred to `spend.circom'/

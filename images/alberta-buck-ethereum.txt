@@ -138,11 +138,11 @@ Table of Contents
 <https://perry.kundert.ca/range/finance/alberta-buck-architecture/>
 
 [Identity]
-<https://perry.kundert.ca/range/finance/alberta-buck-identity>
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/>
 
-[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs>
+[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes>
+[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
 
 1 Contract Architecture Overview
@@ -420,10 +420,10 @@ Table of Contents
 
 
 [Identity with Anonymity]
-<https://perry.kundert.ca/range/finance/alberta-buck-identity>
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/>
 
 [Identity Example – Data Flow]
-<https://perry.kundert.ca/range/finance/alberta-buck-identity-example>
+<https://perry.kundert.ca/range/finance/alberta-buck-identity-example/>
 
 [Cryptographic Proofs]
 <https://perry.kundert.ca/range/finance/alberta-buck-proofs>
@@ -898,9 +898,9 @@ Table of Contents
   circom Groth16 mint circuit, and the adapter that bridges the two.
 
 
-[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes>
+[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
-[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs>
+[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 7.1 Mint Circuit (circom, Groth16 on BN254)
 ───────────────────────────────────────────
@@ -1089,7 +1089,7 @@ Table of Contents
 
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
 8 Integration: Full mint() and transfer() Walkthrough
@@ -1465,10 +1465,10 @@ Table of Contents
 
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 [alberta-buck-notes-serialized.org]
-<file:alberta-buck-notes-serialized.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-serialized.pdf>
 
 12.1 Phase Completion Status (current)
 ──────────────────────────────────────
@@ -1552,7 +1552,7 @@ Table of Contents
 
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
 12.2.2 [alberta-buck-notes-serialized.org] – Serialized B1 sub-notes design
@@ -1611,7 +1611,7 @@ Table of Contents
 
 
 [alberta-buck-notes-serialized.org]
-<file:alberta-buck-notes-serialized.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-serialized.pdf>
 
 
 12.3 Testing Strategy: Three Layers
@@ -1692,12 +1692,12 @@ Table of Contents
 
 
 [Identity Example]
-<https://perry.kundert.ca/range/finance/alberta-buck-identity-example>
+<https://perry.kundert.ca/range/finance/alberta-buck-identity-example/>
 
-[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs>
+[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 [Identity]
-<https://perry.kundert.ca/range/finance/alberta-buck-identity>
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/>
 
 
 12.5 Phase 0: Stub the Surrounding Contracts
@@ -1933,7 +1933,8 @@ Table of Contents
   change only.
 
 
-[BUCK Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes>
+[BUCK Notes]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
 [Notes] See section 7
 
@@ -2105,7 +2106,8 @@ Table of Contents
         absorbs a proportional share of the sender's unsettled age.
 
 
-[alberta-buck-proofs.org] <file:alberta-buck-proofs.org>
+[alberta-buck-proofs.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 
 12.14 Phase 7-bis: Batch-Mint Pivot (in-circuit Merkle insertion)
@@ -2168,7 +2170,7 @@ Table of Contents
 
 
 [alberta-buck-notes-rollup-mint.org]
-<file:alberta-buck-notes-rollup-mint.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
 12.15 Phase 8: A-flavor Spend (`spend_a.circom' V2 + off-chain CP-DLEQ) – *Shipped*
@@ -2201,11 +2203,14 @@ Table of Contents
   Phase 8 ships in two layers, both in tree:
 
 
-[alberta-buck-proofs.org] <file:alberta-buck-proofs.org>
+[alberta-buck-proofs.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-[alberta-buck-notes.org] <file:alberta-buck-notes.org>
+[alberta-buck-notes.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
-[alberta-buck-notes-flow.org] <file:alberta-buck-notes-flow.org>
+[alberta-buck-notes-flow.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes-flow/>
 
 12.15.1 V1: `spend_a.circom' predicate-only A-spend
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
@@ -2354,9 +2359,11 @@ Table of Contents
   cryptographic invariant is the whole point of Phase 8.
 
 
-[alberta-buck-notes.org] <file:alberta-buck-notes.org>
+[alberta-buck-notes.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-notes/>
 
-[alberta-buck-proofs.org] <file:alberta-buck-proofs.org>
+[alberta-buck-proofs.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 
 12.16 Phase 9: Serialized B1 Sub-Notes (`spend_serialized.circom' + per-parent bitmap)
@@ -2419,7 +2426,7 @@ Table of Contents
 
 
 [alberta-buck-notes-serialized.org]
-<file:alberta-buck-notes-serialized.org>
+<https://perry.kundert.ca/images/alberta-buck-notes-serialized.pdf>
 
 
 12.17 Phase 10: Live `BuckKController' (PID + AMM-pool oracles)
