@@ -91,8 +91,30 @@ contract Buck is ERC20 {
 
     uint64  internal _jubileeLastUpdate;
 
-    mapping(address => uint256) internal _demurrage;
-    mapping(address => uint64)  internal _timestamp;
+    /// @dev Per-account demurrage state, packed into a single 256-bit slot.
+    ///      Field order is fixed: `uint128 buckSeconds` at offset 0-15,
+    ///      `uint64 timestamp` at offset 16-23, `uint64 reserved` at 24-31.
+    ///
+    ///      `buckSeconds` is the cumulative integral of (raw balance * dt)
+    ///      crystallised through `timestamp`.  At view time:
+    ///        feeOwing(a) = (buckSeconds + raw * (now - timestamp))
+    ///                      * BASE_RATE_PER_SEC / SCALE
+    ///      so storing the integral (rather than the locked-fee value) keeps
+    ///      the rate independent of storage and avoids a `SCALE` rescale on
+    ///      every crystallisation.
+    ///
+    ///      `reserved` is a 64-bit zero placeholder for future per-account
+    ///      flags (frozen, account-class, etc.).  Using uint128 (not int128)
+    ///      so the i64 balance cap is not yet enforced -- the existing
+    ///      Notes / Spend SNARK fixtures encode 1e20-style face values that
+    ///      exceed int64 range; a follow-up commit will regenerate those
+    ///      fixtures and tighten the cap.
+    struct DemurrageState {
+        uint128 buckSeconds;
+        uint64  timestamp;
+        uint64  reserved;
+    }
+    mapping(address => DemurrageState) internal _state;
 
     // ---- premium model -----------------------------------------------------
 
@@ -330,12 +352,14 @@ contract Buck is ERC20 {
     ///         only grows at mint/burn checkpoints, but its self-demurrage
     ///         on idle accumulated balance is real.
     function feeOwing(address a) public view returns (uint256) {
-        uint256 raw     = ERC20.balanceOf(a);
-        uint256 elapsed = block.timestamp - _timestamp[a];
-        uint256 pending = (raw == 0 || elapsed == 0)
-            ? 0
-            : Math.mulDiv(raw, BASE_RATE_PER_SEC * elapsed, SCALE);
-        return _demurrage[a] + pending;
+        DemurrageState storage s = _state[a];
+        uint256 raw      = ERC20.balanceOf(a);
+        uint256 elapsed  = block.timestamp - s.timestamp;
+        // Live integral: stored buckSeconds plus the rectangle since the
+        // last crystallisation.  Both terms fit in uint256 trivially.
+        uint256 buckSecondsLive = uint256(s.buckSeconds) + (raw * elapsed);
+        if (buckSecondsLive == 0) return 0;
+        return Math.mulDiv(buckSecondsLive, BASE_RATE_PER_SEC, SCALE);
     }
 
     /// @notice Accumulated fees on `a`'s balance.  Semantics differ by
@@ -403,20 +427,49 @@ contract Buck is ERC20 {
 
     // ---- demurrage internals ----------------------------------------------
 
-    /// @dev Fold pending fee on `a` into _demurrage[a] and reset _timestamp.
-    ///      Called before every balance-mutating event for `a`.  Idempotent
-    ///      in time -- two calls within the same block produce the same
-    ///      state as one.
+    /// @dev Fold pending balance*dt into the packed _state[a] slot in a
+    ///      single read/write pair.  Called before every balance-mutating
+    ///      event for `a`.  Idempotent in time -- two calls within the same
+    ///      block produce the same state as one.
     function _crystallize(address a) internal {
+        DemurrageState memory s = _state[a];
         uint256 raw     = ERC20.balanceOf(a);
-        uint64  ts      = _timestamp[a];
-        uint256 elapsed = block.timestamp - ts;
+        uint256 elapsed = block.timestamp - s.timestamp;
+        bool dirty = false;
         if (elapsed != 0 && raw != 0) {
-            _demurrage[a] += Math.mulDiv(raw, BASE_RATE_PER_SEC * elapsed, SCALE);
+            uint256 newBs = uint256(s.buckSeconds) + raw * elapsed;
+            require(newBs <= type(uint128).max, "BUCK: buckSeconds overflow");
+            s.buckSeconds = uint128(newBs);
+            dirty = true;
         }
-        if (ts != block.timestamp) {
-            _timestamp[a] = uint64(block.timestamp);
+        if (s.timestamp != uint64(block.timestamp)) {
+            s.timestamp = uint64(block.timestamp);
+            dirty = true;
         }
+        if (dirty) {
+            _state[a] = s;
+        }
+    }
+
+    /// @dev Crystallise `a` AND add an extra `extraBuckSeconds` to its
+    ///      stored integral, in a single SSTORE.  Used by Carrying transfer
+    ///      to fold the carried `value * age_basis` into the recipient's
+    ///      state alongside the recipient's own crystallisation -- avoids
+    ///      the back-to-back SSTORE that would happen if we called
+    ///      _crystallize(to) then patched the slot a second time.
+    function _crystallizeAndAdd(address a, uint256 extraBuckSeconds) internal {
+        DemurrageState memory s = _state[a];
+        uint256 raw     = ERC20.balanceOf(a);
+        uint256 elapsed = block.timestamp - s.timestamp;
+        uint256 newBs   = uint256(s.buckSeconds);
+        if (elapsed != 0 && raw != 0) {
+            newBs += raw * elapsed;
+        }
+        newBs += extraBuckSeconds;
+        require(newBs <= type(uint128).max, "BUCK: buckSeconds overflow");
+        s.buckSeconds = uint128(newBs);
+        s.timestamp   = uint64(block.timestamp);
+        _state[a] = s;
     }
 
     /// @dev Mint accumulated cumulative-rate to the Jubilee fund.
@@ -452,21 +505,18 @@ contract Buck is ERC20 {
     }
 
     /// @dev Carrying transfer: sender's basis untouched; recipient's
-    ///      _demurrage absorbs the proportional age basis on the
-    ///      transferred portion.
+    ///      buckSeconds absorbs `value * (now - sender.timestamp)` in
+    ///      addition to its own crystallisation, in one SSTORE.
     function _carryingTransfer(address from, address to, uint256 value) internal {
         // age_basis is the elapsed time on sender's basis at this moment;
-        // captured BEFORE crystallizing the recipient since crystallize
-        // does not touch _timestamp[from].
-        uint256 ageBasis    = block.timestamp - _timestamp[from];
-        uint256 carriedFee  = (value == 0 || ageBasis == 0)
+        // captured BEFORE the recipient is crystallised since
+        // _crystallize{,AndAdd} does not touch _state[from].
+        uint256 ageBasis = block.timestamp - _state[from].timestamp;
+        uint256 carriedBuckSeconds = (value == 0 || ageBasis == 0)
             ? 0
-            : Math.mulDiv(value, BASE_RATE_PER_SEC * ageBasis, SCALE);
-        _crystallize(to);
+            : value * ageBasis;
+        _crystallizeAndAdd(to, carriedBuckSeconds);
         super._update(from, to, value);
-        if (carriedFee != 0) {
-            _demurrage[to] += carriedFee;
-        }
     }
 
     // ---- ERC-20 hook override ---------------------------------------------
