@@ -123,7 +123,7 @@ contract UniswapV2IntegrationTest is Test {
         reg.setBuck(address(buck));
 
         // Mock USDC: 18-decimal ERC-20 minted to this test contract.
-        usdc = address(new MockUSDC(1_000_000_000e18));
+        usdc = address(new MockUSDC(1_000_000_000e6));
 
         // WETH9 for router constructor (unused by BUCK/USDC swaps).
         weth = deployCode("out/WETH9.sol/WETH9.json");
@@ -153,16 +153,16 @@ contract UniswapV2IntegrationTest is Test {
         reg.bindContract(router, BN254.g1(), placeholderE, true, true);
 
         // Distribute USDC from this test contract to Alice and Bob.
-        IERC20Like(usdc).transfer(alice, 1_000_000e18);
-        IERC20Like(usdc).transfer(bob,   1_000_000e18);
+        IERC20Like(usdc).transfer(alice, 1_000_000e6);
+        IERC20Like(usdc).transfer(bob,   1_000_000e6);
 
         // Mint BUCK to Alice and Bob via grantCredit + Buck.mint.
-        _grantCredit(alice, 1_000_000e18);
-        _grantCredit(bob,   1_000_000e18);
+        _grantCredit(alice, 1_000_000e6);
+        _grantCredit(bob,   1_000_000e6);
         vm.prank(alice);
-        buck.mint(500_000e18);
+        buck.mint(500_000e6);
         vm.prank(bob);
-        buck.mint(500_000e18);
+        buck.mint(500_000e6);
     }
 
     // ---- pair address sanity -----------------------------------------------
@@ -179,7 +179,7 @@ contract UniswapV2IntegrationTest is Test {
     // ---- addLiquidity ------------------------------------------------------
 
     function test_addLiquidity_fromVerifiedAlice() public {
-        _aliceApproveRouter(100_000e18);
+        _aliceApproveRouter(100_000e6);
 
         uint256 buckBefore = buck.balanceOf(alice);
         uint256 usdcBefore = IERC20Like(usdc).balanceOf(alice);
@@ -187,24 +187,24 @@ contract UniswapV2IntegrationTest is Test {
         vm.prank(alice);
         (uint amtA, uint amtB, uint liq) = IUniswapV2Router02(router).addLiquidity(
             address(buck), usdc,
-            100_000e18, 100_000e18,
+            100_000e6, 100_000e6,
             0, 0,
             alice,
             block.timestamp + 1
         );
 
-        assertEq(amtA, 100_000e18, "BUCK side fully deposited");
-        assertEq(amtB, 100_000e18, "USDC side fully deposited");
+        assertEq(amtA, 100_000e6, "BUCK side fully deposited");
+        assertEq(amtB, 100_000e6, "USDC side fully deposited");
         assertGt(liq, 0, "Alice received LP tokens");
         assertEq(IERC20Like(pair).balanceOf(alice), liq, "LP balance = returned liquidity");
 
         // Pair holds the underlying.
-        assertEq(buck.balanceOf(pair), 100_000e18, "pair holds BUCK");
-        assertEq(IERC20Like(usdc).balanceOf(pair), 100_000e18, "pair holds USDC");
+        assertEq(buck.balanceOf(pair), 100_000e6, "pair holds BUCK");
+        assertEq(IERC20Like(usdc).balanceOf(pair), 100_000e6, "pair holds USDC");
 
         // Alice's tokens debited.
-        assertEq(buck.balanceOf(alice), buckBefore - 100_000e18, "Alice BUCK debited");
-        assertEq(IERC20Like(usdc).balanceOf(alice), usdcBefore - 100_000e18, "Alice USDC debited");
+        assertEq(buck.balanceOf(alice), buckBefore - 100_000e6, "Alice BUCK debited");
+        assertEq(IERC20Like(usdc).balanceOf(alice), usdcBefore - 100_000e6, "Alice USDC debited");
     }
 
     // ---- swap BUCK -> USDC -------------------------------------------------
@@ -212,7 +212,7 @@ contract UniswapV2IntegrationTest is Test {
     function test_swap_BUCKtoUSDC_fromVerifiedBob() public {
         _seedPool();
 
-        _bobApproveRouter(1_000e18);
+        _bobApproveRouter(1_000e6);
 
         address[] memory path = new address[](2);
         path[0] = address(buck);
@@ -221,9 +221,9 @@ contract UniswapV2IntegrationTest is Test {
         uint256 usdcBefore = IERC20Like(usdc).balanceOf(bob);
         vm.prank(bob);
         uint[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
-            1_000e18, 0, path, bob, block.timestamp + 1
+            1_000e6, 0, path, bob, block.timestamp + 1
         );
-        assertEq(amounts[0], 1_000e18, "input BUCK == 1000");
+        assertEq(amounts[0], 1_000e6, "input BUCK == 1000");
         assertGt(amounts[1], 0,        "non-zero USDC out");
         assertEq(IERC20Like(usdc).balanceOf(bob), usdcBefore + amounts[1], "Bob USDC credited");
     }
@@ -234,7 +234,7 @@ contract UniswapV2IntegrationTest is Test {
         _seedPool();
 
         vm.prank(bob);
-        IERC20Like(usdc).approve(router, 1_000e18);
+        IERC20Like(usdc).approve(router, 1_000e6);
 
         address[] memory path = new address[](2);
         path[0] = usdc;
@@ -243,9 +243,9 @@ contract UniswapV2IntegrationTest is Test {
         uint256 buckBefore = buck.balanceOf(bob);
         vm.prank(bob);
         uint[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
-            1_000e18, 0, path, bob, block.timestamp + 1
+            1_000e6, 0, path, bob, block.timestamp + 1
         );
-        assertEq(amounts[0], 1_000e18, "input USDC == 1000");
+        assertEq(amounts[0], 1_000e6, "input USDC == 1000");
         assertGt(amounts[1], 0,        "non-zero BUCK out");
         assertEq(buck.balanceOf(bob), buckBefore + amounts[1], "Bob BUCK credited from pair");
     }
@@ -259,9 +259,9 @@ contract UniswapV2IntegrationTest is Test {
         // identity registry, so the pair's BUCK payout to her must revert.
         // The pair wraps the BUCK transfer in a try/_safeTransfer, so the
         // revert string surfaces as "UniswapV2: TRANSFER_FAILED".
-        IERC20Like(usdc).transfer(CAROL, 10_000e18);
+        IERC20Like(usdc).transfer(CAROL, 10_000e6);
         vm.prank(CAROL);
-        IERC20Like(usdc).approve(router, 1_000e18);
+        IERC20Like(usdc).approve(router, 1_000e6);
 
         address[] memory path = new address[](2);
         path[0] = usdc;
@@ -270,7 +270,7 @@ contract UniswapV2IntegrationTest is Test {
         vm.prank(CAROL);
         vm.expectRevert(bytes("UniswapV2: TRANSFER_FAILED"));
         IUniswapV2Router02(router).swapExactTokensForTokens(
-            1_000e18, 0, path, CAROL, block.timestamp + 1
+            1_000e6, 0, path, CAROL, block.timestamp + 1
         );
     }
 
@@ -286,7 +286,7 @@ contract UniswapV2IntegrationTest is Test {
         // dance -- BUCK's demurrage override defeats forge-std's `deal`.
         vm.prank(CAROL);
         vm.expectRevert(bytes("BUCK: sender not verified"));
-        buck.transfer(pair, 1_000e18);
+        buck.transfer(pair, 1_000e6);
     }
 
     // ---- Demurrage / Carrying-account interaction with V2 ------------------
@@ -324,12 +324,12 @@ contract UniswapV2IntegrationTest is Test {
         uint256 pairFees = buck.balanceOfFees(pair);
         assertGt(pairFees, 0, "balanceOfFees grew with time");
         // ~2% of 100k = ~2k after 1yr.
-        assertApproxEqRel(pairFees, 2_000e18, 0.01e18, "fees ~2% of pair raw");
+        assertApproxEqRel(pairFees, 2_000e6, 0.01e18, "fees ~2% of pair raw");
     }
 
     function test_decay_swapBUCKtoUSDC_succeedsAfterYear() public {
         _seedPool();
-        _bobApproveRouter(1_000e18);
+        _bobApproveRouter(1_000e6);
 
         vm.warp(block.timestamp + 365 days);
 
@@ -342,9 +342,9 @@ contract UniswapV2IntegrationTest is Test {
         uint256 usdcBefore = IERC20Like(usdc).balanceOf(bob);
         vm.prank(bob);
         uint[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
-            1_000e18, 0, path, bob, block.timestamp + 1
+            1_000e6, 0, path, bob, block.timestamp + 1
         );
-        assertEq(amounts[0], 1_000e18, "input BUCK == 1000");
+        assertEq(amounts[0], 1_000e6, "input BUCK == 1000");
         assertGt(amounts[1], 0,        "non-zero USDC out after 1yr");
         assertEq(IERC20Like(usdc).balanceOf(bob), usdcBefore + amounts[1], "Bob USDC credited");
     }
@@ -352,7 +352,7 @@ contract UniswapV2IntegrationTest is Test {
     function test_decay_swapUSDCtoBUCK_succeedsAfterYear() public {
         _seedPool();
         vm.prank(bob);
-        IERC20Like(usdc).approve(router, 1_000e18);
+        IERC20Like(usdc).approve(router, 1_000e6);
 
         vm.warp(block.timestamp + 365 days);
 
@@ -364,9 +364,9 @@ contract UniswapV2IntegrationTest is Test {
         uint256 bobRawBefore  = buck.rawBalanceOf(bob);
         vm.prank(bob);
         uint[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
-            1_000e18, 0, path, bob, block.timestamp + 1
+            1_000e6, 0, path, bob, block.timestamp + 1
         );
-        assertEq(amounts[0], 1_000e18, "input USDC == 1000");
+        assertEq(amounts[0], 1_000e6, "input USDC == 1000");
         assertGt(amounts[1], 0,        "non-zero BUCK out after 1yr");
 
         // Bob (non-Carrying EOA) receives the gross amount as raw, but his
@@ -406,21 +406,21 @@ contract UniswapV2IntegrationTest is Test {
         // so the router's quoting is correct and Bob's deposit is measured
         // accurately -- he should get the same shares Alice did, modulo the
         // MINIMUM_LIQUIDITY locked at first mint.
-        _setBuckAllowance(bob, router, 100_000e18);
+        _setBuckAllowance(bob, router, 100_000e6);
         vm.prank(bob);
-        IERC20Like(usdc).approve(router, 100_000e18);
+        IERC20Like(usdc).approve(router, 100_000e6);
 
         vm.prank(bob);
         (uint amtA, uint amtB, uint bobLP) = IUniswapV2Router02(router).addLiquidity(
             address(buck), usdc,
-            100_000e18, 100_000e18,
+            100_000e6, 100_000e6,
             0, 0,
             bob,
             block.timestamp + 1
         );
 
-        assertEq(amtA, 100_000e18, "Bob deposits full BUCK side");
-        assertEq(amtB, 100_000e18, "Bob deposits full USDC side");
+        assertEq(amtA, 100_000e6, "Bob deposits full BUCK side");
+        assertEq(amtB, 100_000e6, "Bob deposits full USDC side");
         // Bob's LP shares should be proportional to his deposit, modulo the
         // 1000-wei MINIMUM_LIQUIDITY locked at Alice's first mint.  Bob
         // gets ~aliceLP + 1000.
@@ -430,11 +430,11 @@ contract UniswapV2IntegrationTest is Test {
     // ---- helpers -----------------------------------------------------------
 
     function _seedPool() internal {
-        _aliceApproveRouter(100_000e18);
+        _aliceApproveRouter(100_000e6);
         vm.prank(alice);
         IUniswapV2Router02(router).addLiquidity(
             address(buck), usdc,
-            100_000e18, 100_000e18,
+            100_000e6, 100_000e6,
             0, 0, alice,
             block.timestamp + 1
         );

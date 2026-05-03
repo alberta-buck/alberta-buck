@@ -131,7 +131,7 @@ contract BuckTest is Test {
     }
 
     /// @dev Mint a BuckCredit NFT to `client` with a fixed face value, no depreciation,
-    ///      and activate it fully.  faceValue is denominated in 1e18-scaled USD.
+    ///      and activate it fully.  faceValue is denominated in 1e6-scaled USD.
     function _grantCredit(address client, uint256 faceValue) internal {
         uint256 tokenId = credit.createCredit(
             client,
@@ -172,66 +172,66 @@ contract BuckTest is Test {
     function test_mint_requiresVerifiedSender() public {
         vm.prank(carol);
         vm.expectRevert(bytes("BUCK: sender not verified"));
-        buck.mint(1e18);
+        buck.mint(1e6);
     }
 
     function test_mint_revertsWithoutCredit() public {
         // Alice has no BuckCredit NFT yet -> credit limit = 0.
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: exceeds credit limit"));
-        buck.mint(1e18);
+        buck.mint(1e6);
     }
 
     function test_mint_succeedsWithinLimit() public {
-        _grantCredit(alice, 1000e18);
-        uint256 amount = 100e18;
+        _grantCredit(alice, 1000e6);
+        uint256 amount = 100e6;
 
         vm.prank(alice);
         buck.mint(amount);
 
         // Premium at ~10% utilization (100/1000): rate = 50 + (0.1)^2 * 450 = 50 + 4.5 = 54.5 bp
-        // i.e. ~0.545% of 100e18 ≈ 0.545e18.
+        // i.e. ~0.545% of 100e6 ≈ 0.545e6.
         uint256 premium = buck.balanceOf(POOL);
         uint256 net     = buck.balanceOf(alice);
         assertEq(net + premium, amount, "net + premium == minted");
         assertGt(premium, 0, "premium should be positive");
-        assertEq(buck.storedLimit(alice), 1000e18, "limit ratchet up");
+        assertEq(buck.storedLimit(alice), 1000e6, "limit ratchet up");
     }
 
     function test_mint_storedLimitOnlyIncreases() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(50e18);
-        assertEq(buck.storedLimit(alice), 1000e18);
+        buck.mint(50e6);
+        assertEq(buck.storedLimit(alice), 1000e6);
 
-        // Reduce BUCK_K to half; credit value would imply 500e18 limit, but stored limit holds.
+        // Reduce BUCK_K to half; credit value would imply 500e6 limit, but stored limit holds.
         vm.prank(GOV);
         kCtrl.setBuckK(0.5e18);
         vm.prank(alice);
-        buck.mint(10e18);
-        assertEq(buck.storedLimit(alice), 1000e18, "stored limit stays at peak");
+        buck.mint(10e6);
+        assertEq(buck.storedLimit(alice), 1000e6, "stored limit stays at peak");
     }
 
     function test_mint_rejectsWhenAggregatedExceedsLimit() public {
-        _grantCredit(alice, 100e18);
+        _grantCredit(alice, 100e6);
         vm.prank(alice);
-        buck.mint(50e18);
+        buck.mint(50e6);
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: exceeds credit limit"));
-        buck.mint(60e18);
+        buck.mint(60e6);
     }
 
     // ---- burn --------------------------------------------------------------
 
     function test_burn_reducesBalance() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
         uint256 before_ = buck.balanceOf(alice);
 
         vm.prank(alice);
-        buck.burn(10e18);
-        assertEq(buck.balanceOf(alice), before_ - 10e18);
+        buck.burn(10e6);
+        assertEq(buck.balanceOf(alice), before_ - 10e6);
     }
 
     // ---- approve -----------------------------------------------------------
@@ -239,7 +239,7 @@ contract BuckTest is Test {
     function test_plainApprove_isBlocked() public {
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: use identity-bound approve"));
-        buck.approve(bob, 100e18);
+        buck.approve(bob, 100e6);
     }
 
     function test_identityApprove_succeedsWithValidProof() public {
@@ -247,9 +247,9 @@ contract BuckTest is Test {
         IdentityRegistry.CPProof memory pi = _cpProof();
 
         vm.prank(alice);
-        buck.approve(bob, 100e18, E_b, pi);
+        buck.approve(bob, 100e6, E_b, pi);
 
-        assertEq(buck.allowance(alice, bob), 100e18);
+        assertEq(buck.allowance(alice, bob), 100e6);
         bytes32 expected = keccak256(abi.encode(E_b.R.X, E_b.R.Y, E_b.C.X, E_b.C.Y));
         assertEq(buck.receiptFragment(alice, bob), expected);
     }
@@ -265,7 +265,7 @@ contract BuckTest is Test {
         assertFalse(reg.carryingFrozen(bob), "not yet frozen");
 
         vm.prank(alice);
-        buck.approve(bob, 100e18, E_b, pi);
+        buck.approve(bob, 100e6, E_b, pi);
 
         assertTrue(reg.carryingFrozen(bob), "frozen by approve");
     }
@@ -276,21 +276,21 @@ contract BuckTest is Test {
         bad.e = (bad.e + 1) % BN254.R;
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: bad CP proof"));
-        buck.approve(bob, 100e18, E_b, bad);
+        buck.approve(bob, 100e6, E_b, bad);
     }
 
     function test_identityApprove_rejectsUnverifiedSender() public {
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(carol);
         vm.expectRevert(bytes("BUCK: sender not verified"));
-        buck.approve(bob, 100e18, E_b, _cpProof());
+        buck.approve(bob, 100e6, E_b, _cpProof());
     }
 
     function test_identityApprove_rejectsUnverifiedSpender() public {
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: spender not verified"));
-        buck.approve(carol, 100e18, E_b, _cpProof());
+        buck.approve(carol, 100e6, E_b, _cpProof());
     }
 
     function test_identityApprove_publicContractStillRequiresCP() public {
@@ -305,7 +305,7 @@ contract BuckTest is Test {
         IdentityRegistry.CPProof memory junkProof;
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: bad CP proof"));
-        buck.approve(pool, 50e18, junk, junkProof);
+        buck.approve(pool, 50e6, junk, junkProof);
     }
 
     // ---- transfer ----------------------------------------------------------
@@ -313,49 +313,49 @@ contract BuckTest is Test {
     function test_transfer_requiresVerifiedSender() public {
         vm.prank(carol);
         vm.expectRevert(bytes("BUCK: sender not verified"));
-        buck.transfer(bob, 1e18);
+        buck.transfer(bob, 1e6);
     }
 
     function test_transfer_requiresVerifiedRecipient() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: recipient not verified"));
-        buck.transfer(carol, 1e18);
+        buck.transfer(carol, 1e6);
     }
 
     function test_transfer_requiresPriorApproveReceipt() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
 
         // Alice has not yet approved Bob -> no receipt fragment -> must revert.
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: missing identity receipt"));
-        buck.transfer(bob, 1e18);
+        buck.transfer(bob, 1e6);
     }
 
     function test_transfer_succeedsAfterApprove() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
 
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
-        buck.approve(bob, 50e18, E_b, _cpProof());
+        buck.approve(bob, 50e6, E_b, _cpProof());
 
         uint256 aliceBefore = buck.balanceOf(alice);
         vm.prank(alice);
-        buck.transfer(bob, 10e18);
-        assertEq(buck.balanceOf(alice), aliceBefore - 10e18);
-        assertEq(buck.balanceOf(bob),   10e18);
+        buck.transfer(bob, 10e6);
+        assertEq(buck.balanceOf(alice), aliceBefore - 10e6);
+        assertEq(buck.balanceOf(bob),   10e6);
     }
 
     function test_transfer_publicContractRecipientSkipsReceipt() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
 
         // Public-Identity contract recipient -> Alice can transfer without
         // a prior CP approve receipt; the receipt-fragment fallback to the
@@ -364,23 +364,23 @@ contract BuckTest is Test {
         address pool = address(0xDECAF);
         _bindPublicIdentity(pool);
         vm.prank(alice);
-        buck.transfer(pool, 5e18);
-        assertEq(buck.balanceOf(pool), 5e18);
+        buck.transfer(pool, 5e6);
+        assertEq(buck.balanceOf(pool), 5e6);
     }
 
     function test_transferFrom_consumesAllowance() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
 
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
-        buck.approve(bob, 50e18, E_b, _cpProof());
+        buck.approve(bob, 50e6, E_b, _cpProof());
 
         vm.prank(bob);
-        buck.transferFrom(alice, bob, 25e18);
-        assertEq(buck.allowance(alice, bob), 25e18);
-        assertEq(buck.balanceOf(bob),        25e18);
+        buck.transferFrom(alice, bob, 25e6);
+        assertEq(buck.allowance(alice, bob), 25e6);
+        assertEq(buck.balanceOf(bob),        25e6);
     }
 
     // ---- public-contract sender -> verified-EOA (e.g. Uniswap pair payout) -
@@ -396,19 +396,19 @@ contract BuckTest is Test {
 
         // Seed the contract with BUCK.  Alice transfers to it directly,
         // exercising the Public-recipient-receipt fallback at the same time.
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
         vm.prank(alice);
-        buck.transfer(pool, 30e18);
-        assertEq(buck.balanceOf(pool), 30e18);
+        buck.transfer(pool, 30e6);
+        assertEq(buck.balanceOf(pool), 30e6);
 
         // Now the public contract pays out to Bob (verified, never approved
         // by the contract).  Pre-refactor this reverted with "missing
         // identity receipt"; post-refactor it succeeds via the Public-sender
         // fallback.
         vm.prank(pool);
-        buck.transfer(bob, 7e18);
-        assertEq(buck.balanceOf(bob), 7e18);
+        buck.transfer(bob, 7e6);
+        assertEq(buck.balanceOf(bob), 7e6);
     }
 }

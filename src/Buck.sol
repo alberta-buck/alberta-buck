@@ -184,6 +184,14 @@ contract Buck is ERC20 {
         _burn(msg.sender, amount);
     }
 
+    /// @notice Decimal scale.  6 matches USDC / USDT and gives ~9.22 trillion
+    ///         BUCK of headroom per account when balances are eventually
+    ///         capped at int64 (a follow-up that requires SNARK fixture
+    ///         regeneration; see alberta-buck-demurrage.org).
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+
     // ---- identity-bound approve --------------------------------------------
 
     /// @notice Identity-bound approve.  Sets ERC-20 allowance and stores a
