@@ -166,8 +166,10 @@ contract SpendVerifierTest is Test {
     }
 
     function _approveNotes(address from, uint256 amount) internal {
+        // _allowances lives at slot 2 in the new packed-state Buck.sol
+        // (slot 0 is _state, slot 1 is _totalSupply).
         bytes32 slot = keccak256(
-            abi.encode(address(notes), keccak256(abi.encode(from, uint256(1))))
+            abi.encode(address(notes), keccak256(abi.encode(from, uint256(2))))
         );
         vm.store(address(buck), slot, bytes32(amount));
     }

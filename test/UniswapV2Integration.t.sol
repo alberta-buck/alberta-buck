@@ -446,8 +446,9 @@ contract UniswapV2IntegrationTest is Test {
     ///      contract-pinned CP proof fixture (production approve() still
     ///      requires CP -- exercised in Buck.t.sol).
     function _setBuckAllowance(address owner_, address spender, uint256 amount) internal {
+        // _allowances at slot 2 in packed-state Buck layout.
         bytes32 slot = keccak256(
-            abi.encode(spender, keccak256(abi.encode(owner_, uint256(1))))
+            abi.encode(spender, keccak256(abi.encode(owner_, uint256(2))))
         );
         vm.store(address(buck), slot, bytes32(amount));
     }

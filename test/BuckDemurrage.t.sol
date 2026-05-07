@@ -434,9 +434,15 @@ contract BuckDemurrageTest is Test {
         }
     }
 
-    function test_invariant_totalSupplyEqualsSumOfRaw() public {
-        // After mint/burn/transfer, the OZ-level invariant holds:
-        // sum_a _balanceof[a] == totalSupply.
+    function test_invariant_sumRawEqualsTotalSupplyPlusJubileeAccrual() public {
+        // Under the packed-state model, totalSupply mutates ONLY on user
+        // mint/burn.  Jubilee demurrage accrual writes Jubilee's slot
+        // directly without touching totalSupply.  The exact invariant:
+        //
+        //   sum_a rawBalanceOf(a) == totalSupply + jubileeActual()
+        //
+        // because the Jubilee's raw is the SOLE source of stored balance
+        // that wasn't matched by a totalSupply mutation.
         _setupAliceWithBuck(1000e6, 100e6);
 
         vm.warp(block.timestamp + 1 hours);
@@ -447,11 +453,12 @@ contract BuckDemurrageTest is Test {
         vm.prank(alice);
         buck.mint(1e6);  // triggers Jubilee accrual
 
-        uint256 sum = buck.rawBalanceOf(alice)
-                    + buck.rawBalanceOf(bob)
-                    + buck.rawBalanceOf(POOL)
-                    + buck.rawBalanceOf(address(buck));
-        assertEq(sum, buck.totalSupply(), "supply == sum of raws");
+        uint256 sumRaw = buck.rawBalanceOf(alice)
+                       + buck.rawBalanceOf(bob)
+                       + buck.rawBalanceOf(POOL)
+                       + buck.rawBalanceOf(address(buck));
+        assertEq(sumRaw, buck.totalSupply() + buck.jubileeActual(),
+                 "sum_raw == totalSupply + jubilee accrual");
     }
 
     function test_invariant_carryingPreservesSystemFeeDebt() public {

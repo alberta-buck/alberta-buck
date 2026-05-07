@@ -205,8 +205,9 @@ contract SpendAVerifierTest is Test {
     }
 
     function _approveNotes(address from, uint256 amount) internal {
+        // _allowances at slot 2 in packed-state Buck layout.
         bytes32 slot = keccak256(
-            abi.encode(address(notes), keccak256(abi.encode(from, uint256(1))))
+            abi.encode(address(notes), keccak256(abi.encode(from, uint256(2))))
         );
         vm.store(address(buck), slot, bytes32(amount));
     }
