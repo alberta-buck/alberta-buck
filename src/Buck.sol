@@ -28,6 +28,11 @@ interface IBuckK {
 
 interface IBuckCredit {
     function totalCurrentValue(address holder) external view returns (uint256);
+    function balanceOf(address owner) external view returns (uint256);
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
+    function creditInfo(uint256 tokenId)
+        external view returns (uint256 faceValue, uint256 activatedValue, uint32 premiumRate);
 }
 
 contract Buck is ERC20 {
@@ -116,13 +121,44 @@ contract Buck is ERC20 {
     }
     mapping(address => DemurrageState) internal _state;
 
-    // ---- premium model -----------------------------------------------------
+    // ---- premium / mutual-insurance pool model -----------------------------
+    //
+    // Mint(N) delivers N BUCK to the holder AND simultaneously mints a "pool
+    // principal" deposit to insurancePool sized so that, at the insurer's
+    // assumed annual ROI, the principal's investment yield exactly covers the
+    // annual premium on the activated coverage:
+    //
+    //     pool_principal = annual_premium * POOL_ROI_INV
+    //
+    // POOL_ROI_INV = 10 (i.e. 10% assumed ROI; principal × 10% = premium).
+    // The insurer keeps any return above 10% as profit.
+    //
+    // Per allocated NFT slice of size `take` at annual rate `r` (bp):
+    //     annual_premium = take * r / BP
+    //     pool_principal = take * r * POOL_ROI_INV / BP
+    //     net to holder  = take - pool_principal
+    //                    = take * (BP - r * POOL_ROI_INV) / BP
+    //
+    // Inverting: to deliver `delivery` net to the holder from one NFT,
+    //     take = ceil(delivery * BP / (BP - r * POOL_ROI_INV))
+    //
+    // An NFT's effective rate (rate × POOL_ROI_INV) must stay strictly under
+    // BP -- a 1000bp NFT consumes 100% of its take as principal and would
+    // diverge.  Enforced per-allocation.
+    //
+    // Burn(N) is the inverse: the holder picks NFTs to unwind coverage on,
+    // their balance drops by N, and pool_principal proportional to the
+    // unwound coverage is burned from insurancePool (returning the
+    // mutual-insurance investment).  Sort order on both paths is ascending
+    // premiumRate so a mint-burn round-trip is rate-neutral and not
+    // arbitrageable.
+    //
+    // Per-NFT outstanding mint allocations are tracked in `mintsBacked`; cap
+    // per NFT is its current activatedValue.  Burn decrements; mint
+    // increments.
 
-    /// @notice Base premium rate (basis points) at zero utilization.
-    uint256 public constant BASE_RATE  = 50;     // 0.50%
-    /// @notice Additional rate at 100% utilization, scaled quadratically.
-    uint256 public constant SCALE_RATE = 450;    // +4.50%
-    uint256 internal constant BP = 10000;
+    uint256 internal constant BP            = 10000;
+    uint256 internal constant POOL_ROI_INV  = 10;     // 10% assumed annual ROI
 
     // ---- per-account state -------------------------------------------------
 
@@ -136,6 +172,12 @@ contract Buck is ERC20 {
     ///      fragment proves Alice has performed the Chaum-Pedersen binding
     ///      to `to` at least once.  Cleared by setReceiptDirty().
     mapping(address => mapping(address => bytes32)) internal _receiptFragments;
+
+    /// @notice Outstanding BUCK coverage backed by a given BuckCredit NFT.
+    ///         Increases by `take` on mint (where take = holder_delivery +
+    ///         pool_principal); decreases by `unwind` on burn.  Cap is the
+    ///         NFT's current activatedValue (insurer's commitment).
+    mapping(uint256 => uint256) public mintsBacked;
 
     // ---- events ------------------------------------------------------------
 
@@ -178,32 +220,256 @@ contract Buck is ERC20 {
 
     // ---- mint / burn -------------------------------------------------------
 
-    /// @notice Mint BUCKs against the caller's aggregated BUCK_CREDIT value.
+    /// @notice Mint `amount` BUCK to the caller; the mutual-insurance pool
+    ///         principal (annual_premium × POOL_ROI_INV) is minted alongside
+    ///         to insurancePool.  Coverage is drawn cheapest-first across the
+    ///         caller's BuckCredit NFTs.
     function mint(uint256 amount) external {
+        _mintAllocated(amount, _selectCheapest(msg.sender));
+    }
+
+    /// @notice Mint with a caller-supplied NFT order.  An off-chain optimizer
+    ///         can pre-sort by effective cost (rate / depreciation / coverage
+    ///         midpoint / ...) and hand the order in; iteration stops once
+    ///         `amount` is fully delivered.
+    function mint(uint256 amount, uint256[] calldata tokenIds) external {
+        _mintAllocated(amount, tokenIds);
+    }
+
+    /// @notice Burn `amount` BUCK from the caller.  Coverage is unwound on
+    ///         the chosen NFTs cheapest-first; the proportional pool
+    ///         principal is burned from insurancePool.
+    function burn(uint256 amount) external {
+        _burnAllocated(amount, _selectCheapest(msg.sender));
+    }
+
+    /// @notice Burn with caller-supplied NFT unwind order.
+    function burn(uint256 amount, uint256[] calldata tokenIds) external {
+        _burnAllocated(amount, tokenIds);
+    }
+
+    function _mintAllocated(uint256 amount, uint256[] memory tokenIds) internal {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
 
+        // Limit ratchet + early gate using `amount` as a lower bound on the
+        // total drawn coverage (totalCoverage >= amount because the pool
+        // principal is non-negative).  The post-allocation check below
+        // tightens it once the exact figure is known.
         uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
         uint256 currentBuckK     = buckK.currentBuckK();
         uint256 maxLimit         = totalCreditValue * currentBuckK / PRECISION;
-
         if (maxLimit > storedLimit[msg.sender]) {
             storedLimit[msg.sender] = maxLimit;
         }
-
         uint256 limit = storedLimit[msg.sender];
         require(ERC20.balanceOf(msg.sender) + amount <= limit, "BUCK: exceeds credit limit");
 
-        uint256 premium = _computePremium(msg.sender, amount, limit);
-        _mint(msg.sender, amount - premium);
-        if (premium > 0) {
-            _mint(insurancePool, premium);
+        (uint256 totalCoverage, uint256 poolPrincipal) = _allocateMint(amount, tokenIds);
+
+        require(
+            ERC20.balanceOf(msg.sender) + totalCoverage <= limit,
+            "BUCK: exceeds credit limit"
+        );
+
+        _mint(msg.sender, amount);
+        if (poolPrincipal > 0) {
+            _mint(insurancePool, poolPrincipal);
         }
 
-        emit Minted(msg.sender, amount, premium, totalCreditValue, currentBuckK, limit);
+        emit Minted(msg.sender, totalCoverage, poolPrincipal, totalCreditValue, currentBuckK, limit);
     }
 
-    function burn(uint256 amount) external {
+    function _burnAllocated(uint256 amount, uint256[] memory tokenIds) internal {
+        (, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
         _burn(msg.sender, amount);
+        if (poolRefund > 0) {
+            _burn(insurancePool, poolRefund);
+        }
+    }
+
+    /// @notice Quote the total coverage drawn and pool principal minted to
+    ///         deliver `amount` net to a holder iterating `tokenIds` in
+    ///         order.  Reverts (insufficient capacity / bad order) for the
+    ///         same reasons mint() would.  Pure of state changes.
+    function quoteMint(uint256 amount, uint256[] calldata tokenIds)
+        external view returns (uint256 totalCoverage, uint256 poolPrincipal)
+    {
+        return _allocateMintView(amount, tokenIds);
+    }
+
+    /// @notice Symmetric quote for burn.
+    function quoteBurn(uint256 amount, uint256[] calldata tokenIds)
+        external view returns (uint256 totalUnwind, uint256 poolRefund)
+    {
+        return _allocateBurnView(amount, tokenIds);
+    }
+
+    /// @dev Allocate `amount` net delivery across `tokenIds` cheapest-first
+    ///      and write mintsBacked.  Per-NFT inversion:
+    ///      take = ceil(remaining × BP / (BP − rate × POOL_ROI_INV)).
+    ///      The view-only twin `_allocateMintView` runs the same math without
+    ///      writing storage; keep them in sync.
+    function _allocateMint(uint256 amount, uint256[] memory tokenIds)
+        internal returns (uint256 totalCoverage, uint256 poolPrincipal)
+    {
+        uint256 remaining = amount;
+        for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
+            uint256 tid = tokenIds[i];
+            require(buckCredit.ownerOf(tid) == msg.sender, "BUCK: not credit owner");
+            (, uint256 activated, uint32 rate) = buckCredit.creditInfo(tid);
+            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            require(effRate < BP, "BUCK: NFT rate too high");
+
+            uint256 used = mintsBacked[tid];
+            if (activated <= used) continue;
+            uint256 avail = activated - used;
+            uint256 denom = BP - effRate;
+            uint256 netCap = avail * denom / BP;          // delivery this NFT can provide
+
+            uint256 take;
+            uint256 principal_i;
+            if (netCap >= remaining) {
+                // Closed-form inversion, ceil so delivery >= remaining.
+                take = (remaining * BP + denom - 1) / denom;
+                if (take > avail) take = avail;
+                principal_i = take - remaining;
+                remaining = 0;
+            } else {
+                take = avail;
+                principal_i = take - netCap;
+                remaining -= netCap;
+            }
+            mintsBacked[tid] = used + take;
+            totalCoverage += take;
+            poolPrincipal += principal_i;
+        }
+        require(remaining == 0, "BUCK: insufficient credit allocation");
+    }
+
+    function _allocateMintView(uint256 amount, uint256[] memory tokenIds)
+        internal view returns (uint256 totalCoverage, uint256 poolPrincipal)
+    {
+        uint256 remaining = amount;
+        for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
+            uint256 tid = tokenIds[i];
+            (, uint256 activated, uint32 rate) = buckCredit.creditInfo(tid);
+            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            require(effRate < BP, "BUCK: NFT rate too high");
+            uint256 used  = mintsBacked[tid];
+            if (activated <= used) continue;
+            uint256 avail = activated - used;
+            uint256 denom = BP - effRate;
+            uint256 netCap = avail * denom / BP;
+            uint256 take;
+            uint256 principal_i;
+            if (netCap >= remaining) {
+                take = (remaining * BP + denom - 1) / denom;
+                if (take > avail) take = avail;
+                principal_i = take - remaining;
+                remaining = 0;
+            } else {
+                take = avail;
+                principal_i = take - netCap;
+                remaining -= netCap;
+            }
+            totalCoverage += take;
+            poolPrincipal += principal_i;
+        }
+        require(remaining == 0, "BUCK: insufficient credit allocation");
+    }
+
+    /// @dev Mirror of _allocateMint.  Walks tokenIds cheapest-first and
+    ///      unwinds enough coverage so the holder's balance reduction equals
+    ///      `amount`; the proportional pool principal is reported as
+    ///      `poolRefund` for the caller to burn from insurancePool.
+    function _allocateBurn(uint256 amount, uint256[] memory tokenIds)
+        internal returns (uint256 totalUnwind, uint256 poolRefund)
+    {
+        uint256 remaining = amount;
+        for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
+            uint256 tid = tokenIds[i];
+            require(buckCredit.ownerOf(tid) == msg.sender, "BUCK: not credit owner");
+            (, , uint32 rate) = buckCredit.creditInfo(tid);
+            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            // effRate < BP is guaranteed by the mint-side check; if a stale
+            // NFT survives at effRate >= BP, fall through harmlessly.
+            uint256 used = mintsBacked[tid];
+            if (used == 0 || effRate >= BP) continue;
+            uint256 denom  = BP - effRate;
+            uint256 netCap = used * denom / BP;       // holder reduction this NFT can absorb
+
+            uint256 unwind;
+            uint256 refund_i;
+            if (netCap >= remaining) {
+                unwind = (remaining * BP + denom - 1) / denom;
+                if (unwind > used) unwind = used;
+                refund_i = unwind - remaining;
+                remaining = 0;
+            } else {
+                unwind = used;
+                refund_i = unwind - netCap;
+                remaining -= netCap;
+            }
+            mintsBacked[tid] = used - unwind;
+            totalUnwind += unwind;
+            poolRefund  += refund_i;
+        }
+        require(remaining == 0, "BUCK: insufficient coverage to unwind");
+    }
+
+    function _allocateBurnView(uint256 amount, uint256[] memory tokenIds)
+        internal view returns (uint256 totalUnwind, uint256 poolRefund)
+    {
+        uint256 remaining = amount;
+        for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
+            uint256 tid = tokenIds[i];
+            (, , uint32 rate) = buckCredit.creditInfo(tid);
+            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            uint256 used = mintsBacked[tid];
+            if (used == 0 || effRate >= BP) continue;
+            uint256 denom  = BP - effRate;
+            uint256 netCap = used * denom / BP;
+            uint256 unwind;
+            uint256 refund_i;
+            if (netCap >= remaining) {
+                unwind = (remaining * BP + denom - 1) / denom;
+                if (unwind > used) unwind = used;
+                refund_i = unwind - remaining;
+                remaining = 0;
+            } else {
+                unwind = used;
+                refund_i = unwind - netCap;
+                remaining -= netCap;
+            }
+            totalUnwind += unwind;
+            poolRefund  += refund_i;
+        }
+        require(remaining == 0, "BUCK: insufficient coverage to unwind");
+    }
+
+    /// @dev Build the caller's NFT list sorted ascending by premiumRate.
+    ///      Insertion sort -- O(n^2) but n is the per-account NFT count
+    ///      (typically a handful), and each iteration costs one storage read
+    ///      via tokenOfOwnerByIndex + creditInfo.
+    function _selectCheapest(address holder) internal view returns (uint256[] memory) {
+        uint256 n = buckCredit.balanceOf(holder);
+        uint256[] memory tids  = new uint256[](n);
+        uint32[]  memory rates = new uint32[](n);
+        for (uint256 i = 0; i < n; i++) {
+            uint256 tid = buckCredit.tokenOfOwnerByIndex(holder, i);
+            (, , uint32 r) = buckCredit.creditInfo(tid);
+            tids[i]  = tid;
+            rates[i] = r;
+        }
+        for (uint256 i = 1; i < n; i++) {
+            uint256 j = i;
+            while (j > 0 && rates[j - 1] > rates[j]) {
+                (rates[j - 1], rates[j]) = (rates[j], rates[j - 1]);
+                (tids[j - 1],  tids[j])  = (tids[j],  tids[j - 1]);
+                j--;
+            }
+        }
+        return tids;
     }
 
     /// @notice Decimal scale.  6 matches USDC / USDT and gives ~9.22 trillion
@@ -325,22 +591,6 @@ contract Buck is ERC20 {
         BN254.G1Point memory pk            = identity.pkOf(account);
         IdentityRegistry.ElGamalCT memory E = identity.ciphertextOf(account);
         return keccak256(abi.encode(pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y));
-    }
-
-    /// @dev Premium = mintAmount * (BASE_RATE + util^2 * SCALE_RATE) / BP.
-    ///      Utilisation is computed against the *raw* outstanding balance
-    ///      (fee-debt counts as drawn credit), not the net spendable.
-    function _computePremium(
-        address account,
-        uint256 mintAmount,
-        uint256 limit
-    ) internal view returns (uint256) {
-        if (limit == 0) return 0;
-        uint256 newBalance  = ERC20.balanceOf(account) + mintAmount;
-        uint256 utilization = newBalance * PRECISION / limit;
-        uint256 utilSq      = utilization * utilization / PRECISION;
-        uint256 rate        = BASE_RATE + utilSq * SCALE_RATE / PRECISION;
-        return mintAmount * rate / BP;
     }
 
     // ---- demurrage views --------------------------------------------------

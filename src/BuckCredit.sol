@@ -166,6 +166,16 @@ contract BuckCredit is ERC721Enumerable {
         emit CreditActivated(tokenId, msg.sender, amount, c.activatedValue);
     }
 
+    /// @notice Compact (faceValue, activatedValue, premiumRate) view used by
+    ///         Buck.mint() to walk a holder's NFTs without unpacking the full
+    ///         CreditParams tuple per token.
+    function creditInfo(uint256 tokenId)
+        external view returns (uint256 faceValue, uint256 activatedValue, uint32 premiumRate)
+    {
+        CreditParams storage c = credits[tokenId];
+        return (c.faceValue, c.activatedValue, c.premiumRate);
+    }
+
     /// @notice Aggregate current value of all BuckCredits owned by an account.
     /// @dev Called by Buck.mint() to compute the credit limit.
     function totalCurrentValue(address account) external view returns (uint256) {

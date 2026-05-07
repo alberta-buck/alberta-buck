@@ -132,14 +132,23 @@ contract BuckTest is Test {
 
     /// @dev Mint a BuckCredit NFT to `client` with a fixed face value, no depreciation,
     ///      and activate it fully.  faceValue is denominated in 1e6-scaled USD.
-    function _grantCredit(address client, uint256 faceValue) internal {
-        uint256 tokenId = credit.createCredit(
+    ///      Sets a 50bp annual premiumRate so Buck.mint pulls a non-zero
+    ///      premium against this NFT.
+    function _grantCredit(address client, uint256 faceValue) internal returns (uint256) {
+        return _grantCreditAtRate(client, faceValue, 50);
+    }
+
+    function _grantCreditAtRate(address client, uint256 faceValue, uint32 premiumRate)
+        internal returns (uint256 tokenId)
+    {
+        tokenId = credit.createCredit(
             client,
             0,                  // assetClass
             faceValue,
             faceValue,          // depreciationFloor == faceValue: no depreciation
             BuckCredit.DepreciationType.NONE,
-            0, 0, 0
+            0, 0,
+            premiumRate
         );
         vm.prank(client);
         credit.activate(tokenId, faceValue);
@@ -189,13 +198,93 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(amount);
 
-        // Premium at ~10% utilization (100/1000): rate = 50 + (0.1)^2 * 450 = 50 + 4.5 = 54.5 bp
-        // i.e. ~0.545% of 100e6 ≈ 0.545e6.
-        uint256 premium = buck.balanceOf(POOL);
-        uint256 net     = buck.balanceOf(alice);
-        assertEq(net + premium, amount, "net + premium == minted");
-        assertGt(premium, 0, "premium should be positive");
-        assertEq(buck.storedLimit(alice), 1000e6, "limit ratchet up");
+        // 50bp annual rate, 10x pool ROI inverse:
+        //   denom = BP - 50*10 = 9500
+        //   take  = ceil(100e6 * 10000 / 9500) = 105_263_158
+        //   pool  = take - amount             =   5_263_158
+        assertEq(buck.balanceOf(alice), amount,            "holder gets exactly amount");
+        assertEq(buck.balanceOf(POOL),  5_263_158,         "pool principal = annual_premium * 10");
+        assertEq(buck.totalSupply(),    amount + 5_263_158, "total = delivery + principal");
+        assertEq(buck.storedLimit(alice), 1000e6,           "limit ratchet up");
+    }
+
+    function test_mint_cheapestFirst_picksLowestRateNFT() public {
+        // Two NFTs of equal face: rate=200bp and rate=50bp.  The default
+        // selector should drain the 50bp NFT first.
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        vm.prank(alice);
+        buck.mint(80e6);
+
+        // denom_cheap = 9500, take = ceil(80e6 * 10000/9500) = 84_210_527
+        // pool        = take - 80e6 = 4_210_527
+        assertEq(buck.mintsBacked(cheap), 84_210_527, "cheap NFT consumed first");
+        assertEq(buck.mintsBacked(dear),  0,          "dear NFT untouched");
+        assertEq(buck.balanceOf(POOL),    4_210_527,  "pool principal");
+        assertEq(buck.balanceOf(alice),   80e6,       "holder gets net amount");
+    }
+
+    function test_mint_cheapestFirst_spillsIntoNextNFT() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        vm.prank(alice);
+        buck.mint(150e6);
+
+        // Cheap fully drawn: take = 100e6, netCap = 100e6 * 9500/10000 = 95e6,
+        // pool_cheap = 5e6, remaining = 150e6 - 95e6 = 55e6.
+        // Dear: denom = 8000, take = ceil(55e6 * 10000/8000) = 68_750_000,
+        // pool_dear = 68.75e6 - 55e6 = 13_750_000.
+        assertEq(buck.mintsBacked(cheap), 100e6,      "cheap exhausted");
+        assertEq(buck.mintsBacked(dear),  68_750_000, "spillover to dear NFT");
+        assertEq(buck.balanceOf(POOL),    18_750_000, "pool = 5e6 + 13.75e6");
+        assertEq(buck.balanceOf(alice),   150e6);
+    }
+
+    function test_mint_explicitTokenIds_overridesOrder() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        // Caller forces the dear-first order (e.g. external optimizer reasoning
+        // about depreciation or off-chain insurer preferences).
+        uint256[] memory order = new uint256[](2);
+        order[0] = dear;
+        order[1] = cheap;
+
+        vm.prank(alice);
+        buck.mint(80e6, order);
+
+        // Dear: denom = 8000, take = ceil(80e6 * 10000/8000) = 100e6 (full cap),
+        //        pool_dear = 20e6.  remaining = 80e6 - 80e6 = 0 (full netCap).
+        assertEq(buck.mintsBacked(dear),  100e6, "dear NFT drawn first per caller order");
+        assertEq(buck.mintsBacked(cheap), 0);
+        assertEq(buck.balanceOf(POOL),    20e6, "100e6 take * 200bp * 10 / BP = 20e6");
+        assertEq(buck.balanceOf(alice),   80e6);
+    }
+
+    function test_mint_explicitTokenIds_revertsIfInsufficient() public {
+        uint256 small = _grantCreditAtRate(alice, 50e6, 50);
+        _grantCreditAtRate(alice, 100e6, 200); // exists but not in the supplied list
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = small;
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
+        buck.mint(80e6, order);
+    }
+
+    function test_mint_explicitTokenIds_rejectsNonOwnerToken() public {
+        uint256 bobToken = _grantCreditAtRate(bob, 100e6, 50);
+        _grantCreditAtRate(alice, 100e6, 50);
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = bobToken;
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: not credit owner"));
+        buck.mint(10e6, order);
     }
 
     function test_mint_storedLimitOnlyIncreases() public {
@@ -232,6 +321,86 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.burn(10e6);
         assertEq(buck.balanceOf(alice), before_ - 10e6);
+    }
+
+    function test_burn_refundsPoolPrincipalProportionally() public {
+        uint256 tid = _grantCredit(alice, 1000e6);          // 50bp NFT
+        vm.prank(alice);
+        buck.mint(100e6);
+        uint256 backedAfterMint = buck.mintsBacked(tid);    // 105_263_158
+        uint256 poolAfterMint   = buck.balanceOf(POOL);     //   5_263_158
+
+        vm.prank(alice);
+        buck.burn(10e6);
+
+        // Inverse of mint at the same rate:
+        //   unwind = ceil(10e6 * 10000 / 9500) = 10_526_316
+        //   refund = unwind - 10e6              =     526_316
+        assertEq(buck.balanceOf(alice),   100e6 - 10e6, "holder net burn");
+        assertEq(buck.balanceOf(POOL),    poolAfterMint - 526_316, "pool refund returned");
+        assertEq(buck.mintsBacked(tid),   backedAfterMint - 10_526_316, "coverage unwound");
+    }
+
+    function test_burn_explicitTokenIds_unwindsChosenNFT() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        // Mint draws cheap-first; force burn against dear by passing an
+        // explicit list (no allocation on dear yet, so this should revert).
+        vm.prank(alice);
+        buck.mint(50e6);
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = dear;
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: insufficient coverage to unwind"));
+        buck.burn(10e6, order);
+
+        // Burn against the cheap NFT (the one with allocation) succeeds.
+        order[0] = cheap;
+        vm.prank(alice);
+        buck.burn(10e6, order);
+        assertEq(buck.balanceOf(alice), 50e6 - 10e6);
+    }
+
+    function test_quoteMint_matchesExecution() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        uint256[] memory order = new uint256[](2);
+        order[0] = cheap;
+        order[1] = dear;
+
+        (uint256 quotedCoverage, uint256 quotedPrincipal) = buck.quoteMint(150e6, order);
+
+        vm.prank(alice);
+        buck.mint(150e6, order);
+
+        // Total coverage written across the two NFTs should equal the quote.
+        assertEq(buck.mintsBacked(cheap) + buck.mintsBacked(dear), quotedCoverage);
+        assertEq(buck.balanceOf(POOL), quotedPrincipal);
+        assertEq(quotedCoverage, 150e6 + quotedPrincipal, "delivery + principal == coverage");
+    }
+
+    function test_quoteBurn_matchesExecution() public {
+        uint256 tid = _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = tid;
+
+        (uint256 quotedUnwind, uint256 quotedRefund) = buck.quoteBurn(40e6, order);
+
+        uint256 backedBefore = buck.mintsBacked(tid);
+        uint256 poolBefore   = buck.balanceOf(POOL);
+
+        vm.prank(alice);
+        buck.burn(40e6, order);
+
+        assertEq(backedBefore - buck.mintsBacked(tid), quotedUnwind, "unwound matches quote");
+        assertEq(poolBefore   - buck.balanceOf(POOL),  quotedRefund, "refund matches quote");
     }
 
     // ---- approve -----------------------------------------------------------
