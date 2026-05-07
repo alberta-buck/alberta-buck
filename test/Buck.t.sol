@@ -364,6 +364,58 @@ contract BuckTest is Test {
         assertEq(buck.balanceOf(alice), 50e6 - 10e6);
     }
 
+    function test_burn_mostExpensiveFirst_releasesDearestFirst() public {
+        // Both NFTs end up with allocation after a 150e6 mint (cheap NFT
+        // exhausted, dear partially drawn).  A subsequent burn(50e6) should
+        // unwind dear first under the new most-expensive-first selector.
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        vm.prank(alice);
+        buck.mint(150e6);
+
+        uint256 backedCheapBefore = buck.mintsBacked(cheap);   // 100e6 (full cap)
+        uint256 backedDearBefore  = buck.mintsBacked(dear);    // 68_750_000
+        uint256 poolBefore        = buck.balanceOf(POOL);      // 18_750_000
+
+        vm.prank(alice);
+        buck.burn(50e6);
+
+        // Dear-first unwind: denom_dear = 8000, unwind = ceil(50e6 * 10000/8000)
+        // = 62_500_000, refund_dear = 62.5e6 - 50e6 = 12_500_000.
+        assertEq(buck.mintsBacked(cheap), backedCheapBefore,
+                 "cheap NFT untouched while dear has capacity");
+        assertEq(buck.mintsBacked(dear),  backedDearBefore - 62_500_000,
+                 "dear NFT consumed by 62.5e6");
+        assertEq(buck.balanceOf(POOL),    poolBefore - 12_500_000,
+                 "pool refunds the dear-rate principal first");
+        assertEq(buck.balanceOf(alice),   150e6 - 50e6, "holder net burn");
+    }
+
+    function test_burn_mostExpensiveFirst_spillsIntoCheap() public {
+        // Burn larger than the dear NFT's outstanding -- spills into cheap.
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        vm.prank(alice);
+        buck.mint(150e6);
+
+        // Burn enough to drain dear AND eat into cheap.
+        // Dear netCap = 68.75e6 * 8000/10000 = 55e6 of holder reduction.
+        // Burn 100e6: dear contributes 55e6 (full), remaining 45e6 goes to cheap.
+        // Cheap denom = 9500, unwind = ceil(45e6*10000/9500) = 47_368_422,
+        // refund_cheap = 47.37e6 - 45e6 = 2_368_422.
+        // Total refund = 13_750_000 (dear) + 2_368_422 (cheap) = 16_118_422.
+        vm.prank(alice);
+        buck.burn(100e6);
+
+        assertEq(buck.mintsBacked(dear),  0,                          "dear fully unwound");
+        assertEq(buck.mintsBacked(cheap), 100e6 - 47_368_422,         "cheap partially unwound");
+        assertEq(buck.balanceOf(alice),   50e6,                        "holder burned 100e6");
+        // 18_750_000 minted to pool initially; 16_118_422 refunded.
+        assertEq(buck.balanceOf(POOL),    18_750_000 - 16_118_422,    "pool refund spans both NFTs");
+    }
+
     function test_quoteMint_matchesExecution() public {
         uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
         uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);

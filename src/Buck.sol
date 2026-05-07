@@ -111,9 +111,17 @@ contract Buck is IERC20, IERC20Metadata {
     //
     // mint(N) delivers N to the holder + a mutual-insurance pool deposit of
     // (annual_premium * POOL_ROI_INV) to insurancePool, both drawn against
-    // BuckCredit NFT capacity cheapest-first.  Per-NFT inversion:
+    // BuckCredit NFT capacity cheapest-first to minimise the holder's premium
+    // cost.  Per-NFT inversion:
     //     take = ceil(remaining * BP / (BP - rate * POOL_ROI_INV))
-    // burn(N) is the exact inverse.  See _allocateMint / _allocateBurn.
+    //
+    // burn(N) walks the holder's NFTs most-expensive-first.  This frees the
+    // most expensive coverage capacity and returns the largest pool principal
+    // per BUCK burned (the holder's mutual-insurance investment unwound
+    // dearest-side first).  The asymmetry is rate-neutral: per-NFT inversion is
+    // symmetric (same `denom` on both sides), so a mint-burn round-trip on the
+    // same NFT restores its mintsBacked exactly -- no arbitrage from the
+    // differing default selectors.
 
     // ---- events ------------------------------------------------------------
 
@@ -157,8 +165,8 @@ contract Buck is IERC20, IERC20Metadata {
     // ---- IERC20Metadata ----------------------------------------------------
 
     function name()     external pure returns (string memory) { return "Alberta Buck"; }
-    function symbol()   external pure returns (string memory) { return "BUCK";          }
-    function decimals() external pure returns (uint8)         { return 6;               }
+    function symbol()   external pure returns (string memory) { return "BUCK";         }
+    function decimals() external pure returns (uint8)         { return 6;              }
 
     // ---- IERC20 ------------------------------------------------------------
 
@@ -228,8 +236,12 @@ contract Buck is IERC20, IERC20Metadata {
         _mintAllocated(amount, tokenIds);
     }
 
+    /// @notice Burn `amount` BUCK.  Coverage is unwound most-expensive-first
+    ///         so the dearest insurance is released first, returning the
+    ///         largest pool principal per BUCK burned and freeing expensive
+    ///         capacity for re-use.
     function burn(uint256 amount) external {
-        _burnAllocated(amount, _selectCheapest(msg.sender));
+        _burnAllocated(amount, _selectMostExpensive(msg.sender));
     }
 
     function burn(uint256 amount, uint256[] calldata tokenIds) external {
@@ -456,6 +468,18 @@ contract Buck is IERC20, IERC20Metadata {
                 (tids[j - 1],  tids[j])  = (tids[j],  tids[j - 1]);
                 j--;
             }
+        }
+        return tids;
+    }
+
+    /// @dev Build the caller's NFT list sorted descending by premiumRate.
+    ///      Reverses _selectCheapest in place; one extra pass is negligible
+    ///      next to the n storage reads we already did.
+    function _selectMostExpensive(address holder) internal view returns (uint256[] memory) {
+        uint256[] memory tids = _selectCheapest(holder);
+        uint256 n = tids.length;
+        for (uint256 i = 0; i < n / 2; i++) {
+            (tids[i], tids[n - 1 - i]) = (tids[n - 1 - i], tids[i]);
         }
         return tids;
     }
