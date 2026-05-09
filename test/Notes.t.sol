@@ -172,12 +172,14 @@ contract NotesTest is Test {
     }
 
     /// @dev Approve Notes from `from` to spend `amount` BUCK.  Writes the
-    ///      ERC-20 allowance slot directly (slot 1 in OpenZeppelin's layout)
-    ///      to sidestep the CP-proof requirement on buck.approve(); this test
-    ///      suite focuses on Notes mint/spend mechanics, not the CP plumbing.
+    ///      ERC-20 allowance slot directly (slot 2 in the packed-state Buck
+    ///      layout: slot 0 is _state, slot 1 is _totalSupply, slot 2 is
+    ///      _allowances) to sidestep the CP-proof requirement on
+    ///      buck.approve().  This suite focuses on Notes mint/spend
+    ///      mechanics, not the CP plumbing.
     function _approveNotes(address from, uint256 amount) internal {
         bytes32 slot = keccak256(
-            abi.encode(address(notes), keccak256(abi.encode(from, uint256(1))))
+            abi.encode(address(notes), keccak256(abi.encode(from, uint256(2))))
         );
         vm.store(address(buck), slot, bytes32(amount));
     }

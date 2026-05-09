@@ -131,15 +131,24 @@ contract BuckTest is Test {
     }
 
     /// @dev Mint a BuckCredit NFT to `client` with a fixed face value, no depreciation,
-    ///      and activate it fully.  faceValue is denominated in 1e18-scaled USD.
-    function _grantCredit(address client, uint256 faceValue) internal {
-        uint256 tokenId = credit.createCredit(
+    ///      and activate it fully.  faceValue is denominated in 1e6-scaled USD.
+    ///      Sets a 50bp annual premiumRate so Buck.mint pulls a non-zero
+    ///      premium against this NFT.
+    function _grantCredit(address client, uint256 faceValue) internal returns (uint256) {
+        return _grantCreditAtRate(client, faceValue, 50);
+    }
+
+    function _grantCreditAtRate(address client, uint256 faceValue, uint32 premiumRate)
+        internal returns (uint256 tokenId)
+    {
+        tokenId = credit.createCredit(
             client,
             0,                  // assetClass
             faceValue,
             faceValue,          // depreciationFloor == faceValue: no depreciation
             BuckCredit.DepreciationType.NONE,
-            0, 0, 0
+            0, 0,
+            premiumRate
         );
         vm.prank(client);
         credit.activate(tokenId, faceValue);
@@ -172,66 +181,278 @@ contract BuckTest is Test {
     function test_mint_requiresVerifiedSender() public {
         vm.prank(carol);
         vm.expectRevert(bytes("BUCK: sender not verified"));
-        buck.mint(1e18);
+        buck.mint(1e6);
     }
 
     function test_mint_revertsWithoutCredit() public {
         // Alice has no BuckCredit NFT yet -> credit limit = 0.
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: exceeds credit limit"));
-        buck.mint(1e18);
+        buck.mint(1e6);
     }
 
     function test_mint_succeedsWithinLimit() public {
-        _grantCredit(alice, 1000e18);
-        uint256 amount = 100e18;
+        _grantCredit(alice, 1000e6);
+        uint256 amount = 100e6;
 
         vm.prank(alice);
         buck.mint(amount);
 
-        // Premium at ~10% utilization (100/1000): rate = 50 + (0.1)^2 * 450 = 50 + 4.5 = 54.5 bp
-        // i.e. ~0.545% of 100e18 ≈ 0.545e18.
-        uint256 premium = buck.balanceOf(POOL);
-        uint256 net     = buck.balanceOf(alice);
-        assertEq(net + premium, amount, "net + premium == minted");
-        assertGt(premium, 0, "premium should be positive");
-        assertEq(buck.storedLimit(alice), 1000e18, "limit ratchet up");
+        // 50bp annual rate, 10x pool ROI inverse:
+        //   denom = BP - 50*10 = 9500
+        //   take  = ceil(100e6 * 10000 / 9500) = 105_263_158
+        //   pool  = take - amount             =   5_263_158
+        assertEq(buck.balanceOf(alice), amount,            "holder gets exactly amount");
+        assertEq(buck.balanceOf(POOL),  5_263_158,         "pool principal = annual_premium * 10");
+        assertEq(buck.totalSupply(),    amount + 5_263_158, "total = delivery + principal");
+        assertEq(buck.storedLimit(alice), 1000e6,           "limit ratchet up");
+    }
+
+    function test_mint_cheapestFirst_picksLowestRateNFT() public {
+        // Two NFTs of equal face: rate=200bp and rate=50bp.  The default
+        // selector should drain the 50bp NFT first.
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        vm.prank(alice);
+        buck.mint(80e6);
+
+        // denom_cheap = 9500, take = ceil(80e6 * 10000/9500) = 84_210_527
+        // pool        = take - 80e6 = 4_210_527
+        assertEq(buck.mintsBacked(cheap), 84_210_527, "cheap NFT consumed first");
+        assertEq(buck.mintsBacked(dear),  0,          "dear NFT untouched");
+        assertEq(buck.balanceOf(POOL),    4_210_527,  "pool principal");
+        assertEq(buck.balanceOf(alice),   80e6,       "holder gets net amount");
+    }
+
+    function test_mint_cheapestFirst_spillsIntoNextNFT() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        vm.prank(alice);
+        buck.mint(150e6);
+
+        // Cheap fully drawn: take = 100e6, netCap = 100e6 * 9500/10000 = 95e6,
+        // pool_cheap = 5e6, remaining = 150e6 - 95e6 = 55e6.
+        // Dear: denom = 8000, take = ceil(55e6 * 10000/8000) = 68_750_000,
+        // pool_dear = 68.75e6 - 55e6 = 13_750_000.
+        assertEq(buck.mintsBacked(cheap), 100e6,      "cheap exhausted");
+        assertEq(buck.mintsBacked(dear),  68_750_000, "spillover to dear NFT");
+        assertEq(buck.balanceOf(POOL),    18_750_000, "pool = 5e6 + 13.75e6");
+        assertEq(buck.balanceOf(alice),   150e6);
+    }
+
+    function test_mint_explicitTokenIds_overridesOrder() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        // Caller forces the dear-first order (e.g. external optimizer reasoning
+        // about depreciation or off-chain insurer preferences).
+        uint256[] memory order = new uint256[](2);
+        order[0] = dear;
+        order[1] = cheap;
+
+        vm.prank(alice);
+        buck.mint(80e6, order);
+
+        // Dear: denom = 8000, take = ceil(80e6 * 10000/8000) = 100e6 (full cap),
+        //        pool_dear = 20e6.  remaining = 80e6 - 80e6 = 0 (full netCap).
+        assertEq(buck.mintsBacked(dear),  100e6, "dear NFT drawn first per caller order");
+        assertEq(buck.mintsBacked(cheap), 0);
+        assertEq(buck.balanceOf(POOL),    20e6, "100e6 take * 200bp * 10 / BP = 20e6");
+        assertEq(buck.balanceOf(alice),   80e6);
+    }
+
+    function test_mint_explicitTokenIds_revertsIfInsufficient() public {
+        uint256 small = _grantCreditAtRate(alice, 50e6, 50);
+        _grantCreditAtRate(alice, 100e6, 200); // exists but not in the supplied list
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = small;
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
+        buck.mint(80e6, order);
+    }
+
+    function test_mint_explicitTokenIds_rejectsNonOwnerToken() public {
+        uint256 bobToken = _grantCreditAtRate(bob, 100e6, 50);
+        _grantCreditAtRate(alice, 100e6, 50);
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = bobToken;
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: not credit owner"));
+        buck.mint(10e6, order);
     }
 
     function test_mint_storedLimitOnlyIncreases() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(50e18);
-        assertEq(buck.storedLimit(alice), 1000e18);
+        buck.mint(50e6);
+        assertEq(buck.storedLimit(alice), 1000e6);
 
-        // Reduce BUCK_K to half; credit value would imply 500e18 limit, but stored limit holds.
+        // Reduce BUCK_K to half; credit value would imply 500e6 limit, but stored limit holds.
         vm.prank(GOV);
         kCtrl.setBuckK(0.5e18);
         vm.prank(alice);
-        buck.mint(10e18);
-        assertEq(buck.storedLimit(alice), 1000e18, "stored limit stays at peak");
+        buck.mint(10e6);
+        assertEq(buck.storedLimit(alice), 1000e6, "stored limit stays at peak");
     }
 
     function test_mint_rejectsWhenAggregatedExceedsLimit() public {
-        _grantCredit(alice, 100e18);
+        _grantCredit(alice, 100e6);
         vm.prank(alice);
-        buck.mint(50e18);
+        buck.mint(50e6);
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: exceeds credit limit"));
-        buck.mint(60e18);
+        buck.mint(60e6);
     }
 
     // ---- burn --------------------------------------------------------------
 
     function test_burn_reducesBalance() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
         uint256 before_ = buck.balanceOf(alice);
 
         vm.prank(alice);
-        buck.burn(10e18);
-        assertEq(buck.balanceOf(alice), before_ - 10e18);
+        buck.burn(10e6);
+        assertEq(buck.balanceOf(alice), before_ - 10e6);
+    }
+
+    function test_burn_refundsPoolPrincipalProportionally() public {
+        uint256 tid = _grantCredit(alice, 1000e6);          // 50bp NFT
+        vm.prank(alice);
+        buck.mint(100e6);
+        uint256 backedAfterMint = buck.mintsBacked(tid);    // 105_263_158
+        uint256 poolAfterMint   = buck.balanceOf(POOL);     //   5_263_158
+
+        vm.prank(alice);
+        buck.burn(10e6);
+
+        // Inverse of mint at the same rate:
+        //   unwind = ceil(10e6 * 10000 / 9500) = 10_526_316
+        //   refund = unwind - 10e6              =     526_316
+        assertEq(buck.balanceOf(alice),   100e6 - 10e6, "holder net burn");
+        assertEq(buck.balanceOf(POOL),    poolAfterMint - 526_316, "pool refund returned");
+        assertEq(buck.mintsBacked(tid),   backedAfterMint - 10_526_316, "coverage unwound");
+    }
+
+    function test_burn_explicitTokenIds_unwindsChosenNFT() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        // Mint draws cheap-first; force burn against dear by passing an
+        // explicit list (no allocation on dear yet, so this should revert).
+        vm.prank(alice);
+        buck.mint(50e6);
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = dear;
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: insufficient coverage to unwind"));
+        buck.burn(10e6, order);
+
+        // Burn against the cheap NFT (the one with allocation) succeeds.
+        order[0] = cheap;
+        vm.prank(alice);
+        buck.burn(10e6, order);
+        assertEq(buck.balanceOf(alice), 50e6 - 10e6);
+    }
+
+    function test_burn_mostExpensiveFirst_releasesDearestFirst() public {
+        // Both NFTs end up with allocation after a 150e6 mint (cheap NFT
+        // exhausted, dear partially drawn).  A subsequent burn(50e6) should
+        // unwind dear first under the new most-expensive-first selector.
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        vm.prank(alice);
+        buck.mint(150e6);
+
+        uint256 backedCheapBefore = buck.mintsBacked(cheap);   // 100e6 (full cap)
+        uint256 backedDearBefore  = buck.mintsBacked(dear);    // 68_750_000
+        uint256 poolBefore        = buck.balanceOf(POOL);      // 18_750_000
+
+        vm.prank(alice);
+        buck.burn(50e6);
+
+        // Dear-first unwind: denom_dear = 8000, unwind = ceil(50e6 * 10000/8000)
+        // = 62_500_000, refund_dear = 62.5e6 - 50e6 = 12_500_000.
+        assertEq(buck.mintsBacked(cheap), backedCheapBefore,
+                 "cheap NFT untouched while dear has capacity");
+        assertEq(buck.mintsBacked(dear),  backedDearBefore - 62_500_000,
+                 "dear NFT consumed by 62.5e6");
+        assertEq(buck.balanceOf(POOL),    poolBefore - 12_500_000,
+                 "pool refunds the dear-rate principal first");
+        assertEq(buck.balanceOf(alice),   150e6 - 50e6, "holder net burn");
+    }
+
+    function test_burn_mostExpensiveFirst_spillsIntoCheap() public {
+        // Burn larger than the dear NFT's outstanding -- spills into cheap.
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        vm.prank(alice);
+        buck.mint(150e6);
+
+        // Burn enough to drain dear AND eat into cheap.
+        // Dear netCap = 68.75e6 * 8000/10000 = 55e6 of holder reduction.
+        // Burn 100e6: dear contributes 55e6 (full), remaining 45e6 goes to cheap.
+        // Cheap denom = 9500, unwind = ceil(45e6*10000/9500) = 47_368_422,
+        // refund_cheap = 47.37e6 - 45e6 = 2_368_422.
+        // Total refund = 13_750_000 (dear) + 2_368_422 (cheap) = 16_118_422.
+        vm.prank(alice);
+        buck.burn(100e6);
+
+        assertEq(buck.mintsBacked(dear),  0,                          "dear fully unwound");
+        assertEq(buck.mintsBacked(cheap), 100e6 - 47_368_422,         "cheap partially unwound");
+        assertEq(buck.balanceOf(alice),   50e6,                        "holder burned 100e6");
+        // 18_750_000 minted to pool initially; 16_118_422 refunded.
+        assertEq(buck.balanceOf(POOL),    18_750_000 - 16_118_422,    "pool refund spans both NFTs");
+    }
+
+    function test_quoteMint_matchesExecution() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
+
+        uint256[] memory order = new uint256[](2);
+        order[0] = cheap;
+        order[1] = dear;
+
+        (uint256 quotedCoverage, uint256 quotedPrincipal) = buck.quoteMint(150e6, order);
+
+        vm.prank(alice);
+        buck.mint(150e6, order);
+
+        // Total coverage written across the two NFTs should equal the quote.
+        assertEq(buck.mintsBacked(cheap) + buck.mintsBacked(dear), quotedCoverage);
+        assertEq(buck.balanceOf(POOL), quotedPrincipal);
+        assertEq(quotedCoverage, 150e6 + quotedPrincipal, "delivery + principal == coverage");
+    }
+
+    function test_quoteBurn_matchesExecution() public {
+        uint256 tid = _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = tid;
+
+        (uint256 quotedUnwind, uint256 quotedRefund) = buck.quoteBurn(40e6, order);
+
+        uint256 backedBefore = buck.mintsBacked(tid);
+        uint256 poolBefore   = buck.balanceOf(POOL);
+
+        vm.prank(alice);
+        buck.burn(40e6, order);
+
+        assertEq(backedBefore - buck.mintsBacked(tid), quotedUnwind, "unwound matches quote");
+        assertEq(poolBefore   - buck.balanceOf(POOL),  quotedRefund, "refund matches quote");
     }
 
     // ---- approve -----------------------------------------------------------
@@ -239,7 +460,7 @@ contract BuckTest is Test {
     function test_plainApprove_isBlocked() public {
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: use identity-bound approve"));
-        buck.approve(bob, 100e18);
+        buck.approve(bob, 100e6);
     }
 
     function test_identityApprove_succeedsWithValidProof() public {
@@ -247,9 +468,9 @@ contract BuckTest is Test {
         IdentityRegistry.CPProof memory pi = _cpProof();
 
         vm.prank(alice);
-        buck.approve(bob, 100e18, E_b, pi);
+        buck.approve(bob, 100e6, E_b, pi);
 
-        assertEq(buck.allowance(alice, bob), 100e18);
+        assertEq(buck.allowance(alice, bob), 100e6);
         bytes32 expected = keccak256(abi.encode(E_b.R.X, E_b.R.Y, E_b.C.X, E_b.C.Y));
         assertEq(buck.receiptFragment(alice, bob), expected);
     }
@@ -265,7 +486,7 @@ contract BuckTest is Test {
         assertFalse(reg.carryingFrozen(bob), "not yet frozen");
 
         vm.prank(alice);
-        buck.approve(bob, 100e18, E_b, pi);
+        buck.approve(bob, 100e6, E_b, pi);
 
         assertTrue(reg.carryingFrozen(bob), "frozen by approve");
     }
@@ -276,21 +497,21 @@ contract BuckTest is Test {
         bad.e = (bad.e + 1) % BN254.R;
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: bad CP proof"));
-        buck.approve(bob, 100e18, E_b, bad);
+        buck.approve(bob, 100e6, E_b, bad);
     }
 
     function test_identityApprove_rejectsUnverifiedSender() public {
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(carol);
         vm.expectRevert(bytes("BUCK: sender not verified"));
-        buck.approve(bob, 100e18, E_b, _cpProof());
+        buck.approve(bob, 100e6, E_b, _cpProof());
     }
 
     function test_identityApprove_rejectsUnverifiedSpender() public {
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: spender not verified"));
-        buck.approve(carol, 100e18, E_b, _cpProof());
+        buck.approve(carol, 100e6, E_b, _cpProof());
     }
 
     function test_identityApprove_publicContractStillRequiresCP() public {
@@ -305,7 +526,7 @@ contract BuckTest is Test {
         IdentityRegistry.CPProof memory junkProof;
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: bad CP proof"));
-        buck.approve(pool, 50e18, junk, junkProof);
+        buck.approve(pool, 50e6, junk, junkProof);
     }
 
     // ---- transfer ----------------------------------------------------------
@@ -313,49 +534,49 @@ contract BuckTest is Test {
     function test_transfer_requiresVerifiedSender() public {
         vm.prank(carol);
         vm.expectRevert(bytes("BUCK: sender not verified"));
-        buck.transfer(bob, 1e18);
+        buck.transfer(bob, 1e6);
     }
 
     function test_transfer_requiresVerifiedRecipient() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: recipient not verified"));
-        buck.transfer(carol, 1e18);
+        buck.transfer(carol, 1e6);
     }
 
     function test_transfer_requiresPriorApproveReceipt() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
 
         // Alice has not yet approved Bob -> no receipt fragment -> must revert.
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: missing identity receipt"));
-        buck.transfer(bob, 1e18);
+        buck.transfer(bob, 1e6);
     }
 
     function test_transfer_succeedsAfterApprove() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
 
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
-        buck.approve(bob, 50e18, E_b, _cpProof());
+        buck.approve(bob, 50e6, E_b, _cpProof());
 
         uint256 aliceBefore = buck.balanceOf(alice);
         vm.prank(alice);
-        buck.transfer(bob, 10e18);
-        assertEq(buck.balanceOf(alice), aliceBefore - 10e18);
-        assertEq(buck.balanceOf(bob),   10e18);
+        buck.transfer(bob, 10e6);
+        assertEq(buck.balanceOf(alice), aliceBefore - 10e6);
+        assertEq(buck.balanceOf(bob),   10e6);
     }
 
     function test_transfer_publicContractRecipientSkipsReceipt() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
 
         // Public-Identity contract recipient -> Alice can transfer without
         // a prior CP approve receipt; the receipt-fragment fallback to the
@@ -364,23 +585,23 @@ contract BuckTest is Test {
         address pool = address(0xDECAF);
         _bindPublicIdentity(pool);
         vm.prank(alice);
-        buck.transfer(pool, 5e18);
-        assertEq(buck.balanceOf(pool), 5e18);
+        buck.transfer(pool, 5e6);
+        assertEq(buck.balanceOf(pool), 5e6);
     }
 
     function test_transferFrom_consumesAllowance() public {
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
 
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
-        buck.approve(bob, 50e18, E_b, _cpProof());
+        buck.approve(bob, 50e6, E_b, _cpProof());
 
         vm.prank(bob);
-        buck.transferFrom(alice, bob, 25e18);
-        assertEq(buck.allowance(alice, bob), 25e18);
-        assertEq(buck.balanceOf(bob),        25e18);
+        buck.transferFrom(alice, bob, 25e6);
+        assertEq(buck.allowance(alice, bob), 25e6);
+        assertEq(buck.balanceOf(bob),        25e6);
     }
 
     // ---- public-contract sender -> verified-EOA (e.g. Uniswap pair payout) -
@@ -396,19 +617,19 @@ contract BuckTest is Test {
 
         // Seed the contract with BUCK.  Alice transfers to it directly,
         // exercising the Public-recipient-receipt fallback at the same time.
-        _grantCredit(alice, 1000e18);
+        _grantCredit(alice, 1000e6);
         vm.prank(alice);
-        buck.mint(100e18);
+        buck.mint(100e6);
         vm.prank(alice);
-        buck.transfer(pool, 30e18);
-        assertEq(buck.balanceOf(pool), 30e18);
+        buck.transfer(pool, 30e6);
+        assertEq(buck.balanceOf(pool), 30e6);
 
         // Now the public contract pays out to Bob (verified, never approved
         // by the contract).  Pre-refactor this reverted with "missing
         // identity receipt"; post-refactor it succeeds via the Public-sender
         // fallback.
         vm.prank(pool);
-        buck.transfer(bob, 7e18);
-        assertEq(buck.balanceOf(bob), 7e18);
+        buck.transfer(bob, 7e6);
+        assertEq(buck.balanceOf(bob), 7e6);
     }
 }

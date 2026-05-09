@@ -1,119 +1,134 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {Math}  from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC20}         from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {Math}           from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {BN254} from "./BN254.sol";
+import {BN254}            from "./BN254.sol";
+import {BuckTypes, BuckQty, BuckSeconds, toBuckQty, toBuckSeconds} from "./BuckTypes.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 
-/// @title Buck — identity-bound ERC-20 minted against aggregated BUCK_CREDIT value.
-/// @notice
-///   * mint(amount) — caller must be identity-verified; mint is bounded by
-///     BuckCredit aggregated value scaled by BUCK_K, with a quadratic
-///     utilization premium routed to the insurance pool.
-///   * approve(spender, amount, E_bob, pi) — bilateral identity binding.
-///     The plain ERC-20 approve is blocked: the identity-bound overload is
-///     mandatory so allowances always carry a Chaum-Pedersen receipt.
-///   * transfer / transferFrom — every counterparty pair must be identity-bound
-///     (via prior approve receipt) or the recipient must be a public account.
+/// @title Buck — identity-bound ERC-20 with single-slot per-account state.
 ///
-/// @dev   Receipt fragments are keccak256 commitments over E_recipient.  They
-///        let Buck cheaply re-check identity binding on every transfer without
-///        re-running the Chaum-Pedersen NIZK; auditors recompute the hash from
-///        their off-chain ciphertext copies.
+/// All transfer-path state for an account fits in one storage slot
+/// (AccountState).  Demurrage runs against the packed `balance` field; the
+/// Jubilee receives system-level demurrage credit via direct slot writes
+/// (`totalSupply` is NOT mutated by demurrage -- only by user mint / burn).
+///
+/// Mint/burn-side bookkeeping (storedLimit, mintsBacked, allowances, receipt
+/// fragments) lives in separate maps because it's touched per-mint, not per
+/// transfer.  This keeps the hot path to one SSTORE per side per transfer.
 interface IBuckK {
     function currentBuckK() external view returns (uint256);
 }
 
 interface IBuckCredit {
     function totalCurrentValue(address holder) external view returns (uint256);
+    function balanceOf(address owner) external view returns (uint256);
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
+    function creditInfo(uint256 tokenId)
+        external view returns (uint256 faceValue, uint256 activatedValue, uint32 premiumRate);
 }
 
-contract Buck is ERC20 {
+contract Buck is IERC20, IERC20Metadata {
+
+    // ---- immutables --------------------------------------------------------
 
     IBuckCredit       public immutable buckCredit;
     IBuckK            public immutable buckK;
     IdentityRegistry  public immutable identity;
     address           public immutable insurancePool;
 
-    uint256 internal constant PRECISION = 1e18;
+    // ---- constants ---------------------------------------------------------
 
-    // ---- demurrage / Jubilee fund -----------------------------------------
-    //
-    // See alberta-buck-demurrage.org for the full model.  Summary:
-    //
-    // Per-account state = (_balances[a], _demurrage[a], _timestamp[a]).
-    //   live_fee(a)        = _demurrage[a] + _balances[a] * RATE * (now - _timestamp[a])
-    //
-    // The view-layer semantics depend on identity flavour:
-    //   Non-Carrying:
-    //     balanceOfFees(a) = min(live_fee(a), _balances[a])    -- locked dust
-    //     balanceOf(a)     = _balances[a] - balanceOfFees(a)   -- spendable
-    //   Carrying:
-    //     balanceOfFees(a) = live_fee(a)                        -- carried on outflow
-    //     balanceOf(a)     = _balances[a]                      -- raw (no decay)
-    //
-    // The Carrying-balanceOf-equals-raw rule is what lets stock ERC-20
-    // consumers (Uniswap, AMMs, etc.) co-exist with BUCK across long idle
-    // periods: a pair / pool's balanceOf matches its cached reserve and the
-    // K invariant remains satisfiable.  The accumulated fees ride with
-    // outflows -- a Carrying account's transfer pushes
-    // `value * RATE * (now - _timestamp[from])` into the recipient's
-    // _demurrage, and balanceOf(recipient) reflects it via the recipient's
-    // own (Non-Carrying) view subtraction.
-    //
-    // Crystallization fires before every balance-mutating event for `a`:
-    //   _demurrage[a] += pending_fee;  _timestamp[a] = now.
-    // It is idempotent in time -- pure read paths never call it.
-    //
-    // Mint/burn paths run _accrueJubilee() which super._update-mints
-    //   delta = totalSupply * RATE * (now - _jubileeLastUpdate)
-    // to address(this), bringing the Jubilee fund to the cumulative claim
-    // it has on the system.  Pure transfers do NOT trigger Jubilee accrual.
-    // totalSupply therefore grows over time (and unwinds at lien close).
-    //
-    // Transfer dispatch is via IdentityRegistry.isCarrying(from):
-    //   - false  (EOA / user wallet): _nonCarryingTransfer.  Crystallize
-    //            both sides; sender's _demurrage retains its locked fees;
-    //            recipient gets fresh BUCKs (no carried fee).  Spendable
-    //            check `value <= balanceOf(from)` enforced.
-    //   - true   (service contract): _carryingTransfer.  Sender's basis
-    //            untouched; recipient's _demurrage absorbs
-    //            `value * RATE * (now - _timestamp[from])`.  Sender may
-    //            transfer up to raw (the carried fee debt rides with the
-    //            BUCK; recipient's balanceOf reflects it via the merge).
-
+    /// @dev BuckK fixed-point scale.  IBuckK.currentBuckK() returns a 1e18
+    ///      ratio; division by this scale converts (BUCK * buckK) back to BUCK.
+    ///      Sourced from BuckTypes so all BUCK-denominated math shares one
+    ///      authoritative constant.
+    uint256 internal constant BUCKK_SCALE        = BuckTypes.BUCKK_SCALE;
     uint256 internal constant SCALE              = 1e27;
-    uint256 internal constant BASE_RATE_PER_YEAR = 2e25;                              // 0.02 in SCALE
-    uint256 internal constant SECONDS_PER_YEAR_  = 365 days + 6 hours;                // 365.25 days
+    uint256 internal constant BASE_RATE_PER_YEAR = 2e25;                // 0.02 in SCALE
+    uint256 internal constant SECONDS_PER_YEAR_  = 365 days + 6 hours;
     uint256 internal constant BASE_RATE_PER_SEC  = BASE_RATE_PER_YEAR / SECONDS_PER_YEAR_;
 
-    uint64  internal _jubileeLastUpdate;
+    uint256 internal constant BP                 = 10000;
+    uint256 internal constant POOL_ROI_INV       = 10;                  // 10% assumed annual ROI
 
-    mapping(address => uint256) internal _demurrage;
-    mapping(address => uint64)  internal _timestamp;
+    // ---- packed per-account state ------------------------------------------
+    //
+    //   balance      uint80   raw stored balance.  Spendable (Non-Carrying):
+    //                         balance - feeOwing.  Cap = 2^80-1 ≈ 1.21e24
+    //                         (= 1.21e18 BUCK at 6 decimals).
+    //
+    //   buckSeconds  uint120  cumulative integral of (balance * dt)
+    //                         crystallised through `timestamp`.
+    //                         feeOwing(a) = (buckSeconds + balance*elapsed)
+    //                                       * BASE_RATE_PER_SEC / SCALE
+    //
+    //   timestamp    uint40   last crystallisation (seconds since epoch).
+    //                         2^40 sec ≈ year 36812 -- safe past 2038.
+    //
+    //   flags        uint16   reserved for future per-account flags.
 
-    // ---- premium model -----------------------------------------------------
+    struct AccountState {
+        BuckQty     balance;       // uint80 underlying; cap = BuckTypes.MAX_BALANCE
+        BuckSeconds buckSeconds;   // uint120 underlying; cap = BuckTypes.MAX_BS
+        uint40      timestamp;
+        uint16      flags;
+    }
+    mapping(address => AccountState) internal _state;
 
-    /// @notice Base premium rate (basis points) at zero utilization.
-    uint256 public constant BASE_RATE  = 50;     // 0.50%
-    /// @notice Additional rate at 100% utilization, scaled quadratically.
-    uint256 public constant SCALE_RATE = 450;    // +4.50%
-    uint256 internal constant BP = 10000;
+    // ---- ERC-20 supply + allowances ----------------------------------------
 
-    // ---- per-account state -------------------------------------------------
+    uint256 private _totalSupply;
+    mapping(address => mapping(address => uint256)) private _allowances;
 
-    /// @notice Highest-ever credit limit observed for this account.  mint()
-    ///         only ratchets it upward; BUCK_K-driven tightening shows up as a
-    ///         premium spike rather than retroactive limit reduction.
+    // ---- mint-side bookkeeping (rare path) ---------------------------------
+
+    /// @notice Highest-ever credit limit observed for this account.
     mapping(address => uint256) public storedLimit;
-
-    /// @dev Receipt fragment per (from, to): keccak256 over the recipient's
-    ///      identity ciphertext (E_to) sent at approve() time.  A non-zero
-    ///      fragment proves Alice has performed the Chaum-Pedersen binding
-    ///      to `to` at least once.  Cleared by setReceiptDirty().
+    /// @notice Outstanding BUCK coverage backed by a given BuckCredit NFT.
+    mapping(uint256 => uint256) public mintsBacked;
+    /// @dev keccak256(E_to) per (from, to) from approve-time CP receipts.
     mapping(address => mapping(address => bytes32)) internal _receiptFragments;
+
+    // ---- Jubilee accrual checkpoint ----------------------------------------
+
+    /// @dev Timestamp through which Jubilee accrual has been applied.
+    ///      Mint/burn -> _accrueJubilee writes
+    ///        _state[address(this)].balance += totalSupply * RATE * elapsed
+    ///      directly into Jubilee's slot.  totalSupply is NOT mutated --
+    ///      demurrage is internal redistribution, not minting.
+    ///
+    ///      Exact invariant: sum_a(rawBalance(a)) == totalSupply + jubileeActual.
+    ///
+    ///      Every BUCK has exactly one fee owner:
+    ///        Non-Carrying: locked silently inside raw balance
+    ///                      (balanceOf = raw - feeOwing).
+    ///        Carrying:     balanceOf == raw; Jubilee pre-accrues their share.
+    ///      When Carrying BUCKs flow to non-Carrying via _carryingTransfer,
+    ///      liveBs*value/raw of the sender's full live integral propagates
+    ///      to the recipient -- Jubilee pre-accrued it; it now debits in
+    ///      exact proportion to the BUCKs transferred.
+    uint64 internal _jubileeLastUpdate;
+
+    // ---- premium / mutual-insurance pool model -----------------------------
+    //
+    // mint(N) delivers N to the holder + a mutual-insurance pool deposit of
+    // (annual_premium * POOL_ROI_INV) to insurancePool, both drawn against
+    // BuckCredit NFT capacity cheapest-first to minimise the holder's premium
+    // cost.  Per-NFT inversion:
+    //     take = ceil(remaining * BP / (BP - rate * POOL_ROI_INV))
+    //
+    // burn(N) walks the holder's NFTs most-expensive-first.  This frees the
+    // most expensive coverage capacity and returns the largest pool principal
+    // per BUCK burned (the holder's mutual-insurance investment unwound
+    // dearest-side first).  The asymmetry is rate-neutral: per-NFT inversion is
+    // symmetric (same `denom` on both sides), so a mint-burn round-trip on the
+    // same NFT restores its mintsBacked exactly -- no arbitrage from the
+    // differing default selectors.
 
     // ---- events ------------------------------------------------------------
 
@@ -125,9 +140,7 @@ contract Buck is ERC20 {
         uint256 buckKValue,
         uint256 newLimit
     );
-
     event ApproveReceipt(address indexed owner, address indexed spender, bytes32 receiptHash);
-
     event BuckTransferReceipt(
         address indexed from,
         address indexed to,
@@ -135,13 +148,16 @@ contract Buck is ERC20 {
         bytes32 fromCipherHash,
         bytes32 toCipherHash
     );
+    event JubileeAccrued(uint256 delta, uint256 newJubileeBalance);
+
+    // ---- constructor -------------------------------------------------------
 
     constructor(
         address _buckCredit,
         address _buckK,
         address _identity,
         address _insurancePool
-    ) ERC20("Alberta Buck", "BUCK") {
+    ) {
         require(_buckCredit    != address(0), "buckCredit=0");
         require(_buckK         != address(0), "buckK=0");
         require(_identity      != address(0), "identity=0");
@@ -150,45 +166,49 @@ contract Buck is ERC20 {
         buckK         = IBuckK(_buckK);
         identity      = IdentityRegistry(_identity);
         insurancePool = _insurancePool;
-
         _jubileeLastUpdate = uint64(block.timestamp);
     }
 
-    // ---- mint / burn -------------------------------------------------------
+    // ---- IERC20Metadata ----------------------------------------------------
 
-    /// @notice Mint BUCKs against the caller's aggregated BUCK_CREDIT value.
-    function mint(uint256 amount) external {
-        require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+    function name()     external pure returns (string memory) { return "Alberta Buck"; }
+    function symbol()   external pure returns (string memory) { return "BUCK";         }
+    function decimals() external pure returns (uint8)         { return BuckTypes.DECIMALS; }
 
-        uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
-        uint256 currentBuckK     = buckK.currentBuckK();
-        uint256 maxLimit         = totalCreditValue * currentBuckK / PRECISION;
+    // ---- IERC20 ------------------------------------------------------------
 
-        if (maxLimit > storedLimit[msg.sender]) {
-            storedLimit[msg.sender] = maxLimit;
-        }
+    function totalSupply() external view returns (uint256) { return _totalSupply; }
 
-        uint256 limit = storedLimit[msg.sender];
-        require(ERC20.balanceOf(msg.sender) + amount <= limit, "BUCK: exceeds credit limit");
-
-        uint256 premium = _computePremium(msg.sender, amount, limit);
-        _mint(msg.sender, amount - premium);
-        if (premium > 0) {
-            _mint(insurancePool, premium);
-        }
-
-        emit Minted(msg.sender, amount, premium, totalCreditValue, currentBuckK, limit);
+    function balanceOf(address a) public view returns (uint256) {
+        AccountState storage s = _state[a];
+        uint256 raw = s.balance.asUint();
+        if (identity.isCarrying(a)) return raw;
+        uint256 fee = _feeOwing(s, raw);
+        return fee >= raw ? 0 : raw - fee;
     }
 
-    function burn(uint256 amount) external {
-        _burn(msg.sender, amount);
+    function allowance(address owner, address spender) external view returns (uint256) {
+        return _allowances[owner][spender];
+    }
+
+    /// @notice Block parameterless approve.  Identity-bound overload mandatory.
+    function approve(address, uint256) external pure returns (bool) {
+        revert("BUCK: use identity-bound approve");
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        _identityCheckedTransfer(msg.sender, to, amount);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        _spendAllowance(from, msg.sender, amount);
+        _identityCheckedTransfer(from, to, amount);
+        return true;
     }
 
     // ---- identity-bound approve --------------------------------------------
 
-    /// @notice Identity-bound approve.  Sets ERC-20 allowance and stores a
-    ///         Chaum-Pedersen receipt that `E_bob` re-encrypts the caller's
-    ///         identity point M under spender's identity public key.
     function approve(
         address spender,
         uint256 amount,
@@ -197,12 +217,6 @@ contract Buck is ERC20 {
     ) external returns (bool) {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
         require(identity.isVerified(spender),    "BUCK: spender not verified");
-
-        // CP fires regardless of spender's identity flavor (Public or
-        // Encrypted): the receipt encrypts the caller's identity point M
-        // under the spender's pk so the spender's operator (with sk_spender)
-        // can later decrypt to identify the caller -- the audit-trail
-        // property the contract owner needs for subpoena response.
         require(
             identity.verifyApprove(msg.sender, spender, E_bob, pi_CP),
             "BUCK: bad CP proof"
@@ -210,55 +224,282 @@ contract Buck is ERC20 {
         bytes32 receipt = _ciphertextHash(E_bob);
         _receiptFragments[msg.sender][spender] = receipt;
         emit ApproveReceipt(msg.sender, spender, receipt);
-
-        // Freeze spender's isCarrying flag in the registry: from this
-        // moment on, the carrying-flavour the recipient consented to is
-        // immutable.  Idempotent across multiple approvers.
         identity.markApproved(spender);
-
         _approve(msg.sender, spender, amount);
         return true;
-    }
-
-    /// @notice Block the parameterless ERC-20 approve.  Identity-bound
-    ///         approve is mandatory so every allowance carries a CP receipt.
-    function approve(address, uint256) public pure override returns (bool) {
-        revert("BUCK: use identity-bound approve");
     }
 
     function receiptFragment(address from, address to) external view returns (bytes32) {
         return _receiptFragments[from][to];
     }
 
-    // ---- identity-checked transfers ----------------------------------------
+    // ---- mint / burn -------------------------------------------------------
 
-    function transfer(address to, uint256 amount) public override returns (bool) {
-        _identityCheckedTransfer(msg.sender, to, amount);
-        return true;
+    function mint(uint256 amount) external {
+        _mintAllocated(amount, _selectCheapest(msg.sender));
     }
 
-    function transferFrom(address from, address to, uint256 amount)
-        public override returns (bool)
+    function mint(uint256 amount, uint256[] calldata tokenIds) external {
+        _mintAllocated(amount, tokenIds);
+    }
+
+    /// @notice Burn `amount` BUCK.  Coverage is unwound most-expensive-first
+    ///         so the dearest insurance is released first, returning the
+    ///         largest pool principal per BUCK burned and freeing expensive
+    ///         capacity for re-use.
+    function burn(uint256 amount) external {
+        _burnAllocated(amount, _selectMostExpensive(msg.sender));
+    }
+
+    function burn(uint256 amount, uint256[] calldata tokenIds) external {
+        _burnAllocated(amount, tokenIds);
+    }
+
+    /// @notice Quote total coverage / pool principal for delivering `amount`
+    ///         net via the supplied tokenIds order.
+    function quoteMint(uint256 amount, uint256[] calldata tokenIds)
+        external view returns (uint256 totalCoverage, uint256 poolPrincipal)
     {
-        _spendAllowance(from, msg.sender, amount);
-        _identityCheckedTransfer(from, to, amount);
-        return true;
+        return _allocateMintView(amount, tokenIds);
     }
+
+    function quoteBurn(uint256 amount, uint256[] calldata tokenIds)
+        external view returns (uint256 totalUnwind, uint256 poolRefund)
+    {
+        return _allocateBurnView(amount, tokenIds);
+    }
+
+    function _mintAllocated(uint256 amount, uint256[] memory tokenIds) internal {
+        require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+
+        uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
+        uint256 currentBuckK     = buckK.currentBuckK();
+        uint256 maxLimit         = totalCreditValue * currentBuckK / BUCKK_SCALE;
+        if (maxLimit > storedLimit[msg.sender]) {
+            storedLimit[msg.sender] = maxLimit;
+        }
+        uint256 limit = storedLimit[msg.sender];
+        require(_state[msg.sender].balance.asUint() + amount <= limit, "BUCK: exceeds credit limit");
+
+        (uint256 totalCoverage, uint256 poolPrincipal) = _allocateMint(amount, tokenIds);
+
+        require(
+            _state[msg.sender].balance.asUint() + totalCoverage <= limit,
+            "BUCK: exceeds credit limit"
+        );
+
+        _accrueJubilee();
+        _crystallize(msg.sender);
+        _addBalance(msg.sender, amount);
+        if (poolPrincipal > 0) {
+            _crystallize(insurancePool);
+            _addBalance(insurancePool, poolPrincipal);
+        }
+        _totalSupply += amount + poolPrincipal;
+
+        emit Transfer(address(0), msg.sender, amount);
+        if (poolPrincipal > 0) emit Transfer(address(0), insurancePool, poolPrincipal);
+        emit Minted(msg.sender, totalCoverage, poolPrincipal, totalCreditValue, currentBuckK, limit);
+    }
+
+    function _burnAllocated(uint256 amount, uint256[] memory tokenIds) internal {
+        require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+        (, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
+
+        _accrueJubilee();
+        _crystallize(msg.sender);
+        require(amount <= balanceOf(msg.sender), "BUCK: amount exceeds spendable");
+        _subBalance(msg.sender, amount);
+        if (poolRefund > 0) {
+            _crystallize(insurancePool);
+            require(poolRefund <= balanceOf(insurancePool), "BUCK: pool underfunded");
+            _subBalance(insurancePool, poolRefund);
+        }
+        _totalSupply -= amount + poolRefund;
+
+        emit Transfer(msg.sender, address(0), amount);
+        if (poolRefund > 0) emit Transfer(insurancePool, address(0), poolRefund);
+    }
+
+    // ---- mint/burn allocator (per-NFT cheapest-first inversion) ------------
+
+    /// @dev Walk `tokenIds` cheapest-first and allocate enough coverage to
+    ///      deliver `amount` net to msg.sender.  Per-NFT inversion:
+    ///         take = ceil(remaining * BP / (BP - rate * POOL_ROI_INV)).
+    ///      Writes mintsBacked.  Returns (totalCoverage, poolPrincipal).
+    function _allocateMint(uint256 amount, uint256[] memory tokenIds)
+        internal returns (uint256 totalCoverage, uint256 poolPrincipal)
+    {
+        uint256 remaining = amount;
+        for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
+            uint256 tid = tokenIds[i];
+            require(buckCredit.ownerOf(tid) == msg.sender, "BUCK: not credit owner");
+            (, uint256 activated, uint32 rate) = buckCredit.creditInfo(tid);
+            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            require(effRate < BP, "BUCK: NFT rate too high");
+
+            uint256 used = mintsBacked[tid];
+            if (activated <= used) continue;
+            uint256 avail  = activated - used;
+            uint256 denom  = BP - effRate;
+            uint256 netCap = avail * denom / BP;
+
+            uint256 take;
+            uint256 principal_i;
+            if (netCap >= remaining) {
+                take = (remaining * BP + denom - 1) / denom;
+                if (take > avail) take = avail;
+                principal_i = take - remaining;
+                remaining = 0;
+            } else {
+                take = avail;
+                principal_i = take - netCap;
+                remaining -= netCap;
+            }
+            mintsBacked[tid] = used + take;
+            totalCoverage += take;
+            poolPrincipal += principal_i;
+        }
+        require(remaining == 0, "BUCK: insufficient credit allocation");
+    }
+
+    function _allocateMintView(uint256 amount, uint256[] memory tokenIds)
+        internal view returns (uint256 totalCoverage, uint256 poolPrincipal)
+    {
+        uint256 remaining = amount;
+        for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
+            uint256 tid = tokenIds[i];
+            (, uint256 activated, uint32 rate) = buckCredit.creditInfo(tid);
+            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            require(effRate < BP, "BUCK: NFT rate too high");
+            uint256 used = mintsBacked[tid];
+            if (activated <= used) continue;
+            uint256 avail  = activated - used;
+            uint256 denom  = BP - effRate;
+            uint256 netCap = avail * denom / BP;
+            uint256 take;
+            uint256 principal_i;
+            if (netCap >= remaining) {
+                take = (remaining * BP + denom - 1) / denom;
+                if (take > avail) take = avail;
+                principal_i = take - remaining;
+                remaining = 0;
+            } else {
+                take = avail;
+                principal_i = take - netCap;
+                remaining -= netCap;
+            }
+            totalCoverage += take;
+            poolPrincipal += principal_i;
+        }
+        require(remaining == 0, "BUCK: insufficient credit allocation");
+    }
+
+    function _allocateBurn(uint256 amount, uint256[] memory tokenIds)
+        internal returns (uint256 totalUnwind, uint256 poolRefund)
+    {
+        uint256 remaining = amount;
+        for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
+            uint256 tid = tokenIds[i];
+            require(buckCredit.ownerOf(tid) == msg.sender, "BUCK: not credit owner");
+            (, , uint32 rate) = buckCredit.creditInfo(tid);
+            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            uint256 used    = mintsBacked[tid];
+            // Silently skip fully-unused or over-rate NFTs rather than reverting: a reappraisal
+            // that pushes premiumRate above the pool-ROI threshold must not strand a burn.
+            if (used == 0 || effRate >= BP) continue;
+            uint256 denom   = BP - effRate;
+            uint256 netCap  = used * denom / BP;
+
+            uint256 unwind;
+            uint256 refund_i;
+            if (netCap >= remaining) {
+                unwind = (remaining * BP + denom - 1) / denom;
+                if (unwind > used) unwind = used;
+                refund_i = unwind - remaining;
+                remaining = 0;
+            } else {
+                unwind   = used;
+                refund_i = unwind - netCap;
+                remaining -= netCap;
+            }
+            mintsBacked[tid] = used - unwind;
+            totalUnwind += unwind;
+            poolRefund  += refund_i;
+        }
+        require(remaining == 0, "BUCK: insufficient coverage to unwind");
+    }
+
+    function _allocateBurnView(uint256 amount, uint256[] memory tokenIds)
+        internal view returns (uint256 totalUnwind, uint256 poolRefund)
+    {
+        uint256 remaining = amount;
+        for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
+            uint256 tid = tokenIds[i];
+            (, , uint32 rate) = buckCredit.creditInfo(tid);
+            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            uint256 used = mintsBacked[tid];
+            if (used == 0 || effRate >= BP) continue; // mirrors _allocateBurn skip, not a revert
+            uint256 denom  = BP - effRate;
+            uint256 netCap = used * denom / BP;
+            uint256 unwind;
+            uint256 refund_i;
+            if (netCap >= remaining) {
+                unwind = (remaining * BP + denom - 1) / denom;
+                if (unwind > used) unwind = used;
+                refund_i = unwind - remaining;
+                remaining = 0;
+            } else {
+                unwind   = used;
+                refund_i = unwind - netCap;
+                remaining -= netCap;
+            }
+            totalUnwind += unwind;
+            poolRefund  += refund_i;
+        }
+        require(remaining == 0, "BUCK: insufficient coverage to unwind");
+    }
+
+    /// @dev Build the caller's NFT list sorted ascending by premiumRate.
+    function _selectCheapest(address holder) internal view returns (uint256[] memory) {
+        uint256 n = buckCredit.balanceOf(holder);
+        uint256[] memory tids  = new uint256[](n);
+        uint32[]  memory rates = new uint32[](n);
+        for (uint256 i = 0; i < n; i++) {
+            uint256 tid = buckCredit.tokenOfOwnerByIndex(holder, i);
+            (, , uint32 r) = buckCredit.creditInfo(tid);
+            tids[i]  = tid;
+            rates[i] = r;
+        }
+        for (uint256 i = 1; i < n; i++) {
+            uint256 j = i;
+            while (j > 0 && rates[j - 1] > rates[j]) {
+                (rates[j - 1], rates[j]) = (rates[j], rates[j - 1]);
+                (tids[j - 1],  tids[j])  = (tids[j],  tids[j - 1]);
+                j--;
+            }
+        }
+        return tids;
+    }
+
+    /// @dev Build the caller's NFT list sorted descending by premiumRate.
+    ///      Reverses _selectCheapest in place; one extra pass is negligible
+    ///      next to the n storage reads we already did.
+    function _selectMostExpensive(address holder) internal view returns (uint256[] memory) {
+        uint256[] memory tids = _selectCheapest(holder);
+        uint256 n = tids.length;
+        for (uint256 i = 0; i < n / 2; i++) {
+            (tids[i], tids[n - 1 - i]) = (tids[n - 1 - i], tids[i]);
+        }
+        return tids;
+    }
+
+    // ---- identity-checked transfers ----------------------------------------
 
     function _identityCheckedTransfer(address from, address to, uint256 amount) internal {
         require(identity.isVerified(from), "BUCK: sender not verified");
         require(identity.isVerified(to),   "BUCK: recipient not verified");
 
-        // toHash carries the CP-encrypted recipient identity from a prior
-        // approve.  EOA-to-EOA Encrypted transfers MUST have one (strong
-        // privacy: only the recipient's operator can decrypt to learn the
-        // sender).  Transfers where either party has a Public Identity (an
-        // AMM pool, custodial vault, etc.) are allowed to fall back to a
-        // deterministic _identityHash because the public party's operator
-        // already has off-chain attestation pinning m to a known counterparty
-        // -- the fallback simply makes the same correlation publicly
-        // recomputable from the registry, which is a property the public
-        // party already accepted by binding a Public Identity.
         bytes32 toHash = _receiptFragments[from][to];
         if (toHash == bytes32(0)) {
             require(
@@ -267,16 +508,165 @@ contract Buck is ERC20 {
             );
             toHash = _identityHash(to);
         }
-        // fromHash is best-effort: if the recipient hasn't pre-attested back
-        // to the sender, fall back to the sender's deterministic identity
-        // hash.  Auditors aggregating transfers can still attribute the
-        // counterparty side via the registry; only the directional privacy
-        // toHash protects is sacrificed.
         bytes32 fromHash = _receiptFragments[to][from];
         if (fromHash == bytes32(0)) fromHash = _identityHash(from);
 
-        _transfer(from, to, amount);
+        if (identity.isCarrying(from)) {
+            _carryingTransfer(from, to, amount);
+        } else {
+            _nonCarryingTransfer(from, to, amount);
+        }
+        emit Transfer(from, to, amount);
         emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
+    }
+
+    /// @dev Non-Carrying sender keeps locked dust in its own slot; recipient
+    ///      crystallises and receives fresh BUCK with no inherited IOU.
+    function _nonCarryingTransfer(address from, address to, uint256 value) internal {
+        _crystallize(from);
+        require(value <= balanceOf(from), "BUCK: amount exceeds spendable");
+        _crystallize(to);
+        _subBalance(from, value);
+        _addBalance(to, value);
+    }
+
+    /// @dev Carrying transfer: proportionally apportions the sender's live
+    ///      buckSeconds (crystallised + current rectangle) to the recipient.
+    ///      Both sides settle in one SSTORE each.
+    function _carryingTransfer(address from, address to, uint256 value) internal {
+        // ---- from ----
+        AccountState memory fs = _state[from];
+        uint256 raw = fs.balance.asUint();
+        // Carrying senders' balanceOf returns raw; checking raw is consistent
+        // with the ERC-20 visible balance and avoids re-reading the carrying flag.
+        require(value <= raw, "BUCK: amount exceeds raw");
+
+        uint256 elapsed = block.timestamp - uint256(fs.timestamp);
+        uint256 liveBs  = fs.buckSeconds.asUint() + raw * elapsed;
+        uint256 carried = raw > 0 ? liveBs * value / raw : 0;
+
+        fs.balance     = toBuckQty(raw - value);
+        fs.buckSeconds = toBuckSeconds(liveBs - carried);
+        fs.timestamp   = uint40(block.timestamp);
+        _state[from] = fs;
+
+        // ---- to ----
+        AccountState memory ts = _state[to];
+        uint256 toRaw     = ts.balance.asUint();
+        uint256 toElapsed = block.timestamp - uint256(ts.timestamp);
+        uint256 toBs      = ts.buckSeconds.asUint() + toRaw * toElapsed + carried;
+
+        ts.balance     = toBuckQty(toRaw + value);
+        ts.buckSeconds = toBuckSeconds(toBs);
+        ts.timestamp   = uint40(block.timestamp);
+        _state[to] = ts;
+    }
+
+    // ---- demurrage views ---------------------------------------------------
+
+    function feeOwing(address a) public view returns (uint256) {
+        AccountState storage s = _state[a];
+        return _feeOwing(s, s.balance.asUint());
+    }
+
+    function balanceOfFees(address a) public view returns (uint256) {
+        uint256 fee = feeOwing(a);
+        if (identity.isCarrying(a)) return fee;
+        uint256 raw = _state[a].balance.asUint();
+        return fee >= raw ? raw : fee;
+    }
+
+    function rawBalanceOf(address a) external view returns (uint256) {
+        return _state[a].balance.asUint();
+    }
+
+    function jubileeBalance() external view returns (uint256) {
+        return balanceOf(address(this));
+    }
+
+    function jubileeActual() external view returns (uint256) {
+        return _state[address(this)].balance.asUint();
+    }
+
+    // ---- demurrage internals -----------------------------------------------
+
+    function _feeOwing(AccountState storage s, uint256 raw) internal view returns (uint256) {
+        uint256 elapsed = block.timestamp - uint256(s.timestamp);
+        uint256 buckSecondsLive = s.buckSeconds.asUint() + (raw * elapsed);
+        if (buckSecondsLive == 0) return 0;
+        return Math.mulDiv(buckSecondsLive, BASE_RATE_PER_SEC, SCALE);
+    }
+
+    /// @dev Fold the elapsed (balance * dt) rectangle into buckSeconds and
+    ///      bump the timestamp.  Idempotent in time: a second call within
+    ///      the same block is a no-op.  No balance change.
+    function _crystallize(address a) internal {
+        AccountState memory s = _state[a];
+        uint256 raw     = s.balance.asUint();
+        uint256 elapsed = block.timestamp - uint256(s.timestamp);
+        bool dirty = false;
+        if (elapsed != 0 && raw != 0) {
+            uint256 newBs = s.buckSeconds.asUint() + raw * elapsed;
+            s.buckSeconds = toBuckSeconds(newBs);
+            dirty = true;
+        }
+        if (uint256(s.timestamp) != block.timestamp) {
+            s.timestamp = uint40(block.timestamp);
+            dirty = true;
+        }
+        if (dirty) _state[a] = s;
+    }
+
+    /// @dev System-level Jubilee accrual.  Adds totalSupply*RATE*elapsed to
+    ///      Jubilee's balance directly -- NOT a mint, totalSupply unchanged.
+    ///      Accrues for all BUCK (Carrying and non-Carrying alike); when
+    ///      Carrying BUCKs later move to non-Carrying via _carryingTransfer,
+    ///      liveBs*value/raw of the sender's full live integral propagates
+    ///      proportionally to the recipient -- Jubilee pre-accrued it.
+    function _accrueJubilee() internal {
+        uint256 elapsed = block.timestamp - uint256(_jubileeLastUpdate);
+        if (elapsed == 0) return;
+        uint256 supply = _totalSupply;
+        _jubileeLastUpdate = uint64(block.timestamp);
+        if (supply == 0) return;
+        uint256 delta = Math.mulDiv(supply, BASE_RATE_PER_SEC * elapsed, SCALE);
+        if (delta == 0) return;
+        _crystallize(address(this));
+        _addBalance(address(this), delta);
+        emit JubileeAccrued(delta, _state[address(this)].balance.asUint());
+    }
+
+    // ---- balance writes ----------------------------------------------------
+
+    function _addBalance(address a, uint256 amount) internal {
+        if (amount == 0) return;
+        AccountState memory s = _state[a];
+        s.balance = toBuckQty(s.balance.asUint() + amount);
+        _state[a] = s;
+    }
+
+    function _subBalance(address a, uint256 amount) internal {
+        if (amount == 0) return;
+        AccountState memory s = _state[a];
+        uint256 raw = s.balance.asUint();
+        require(raw >= amount, "BUCK: insufficient balance");
+        unchecked { s.balance = toBuckQty(raw - amount); }
+        _state[a] = s;
+    }
+
+    // ---- ERC-20 internals --------------------------------------------------
+
+    function _approve(address owner, address spender, uint256 amount) internal {
+        _allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
+    }
+
+    function _spendAllowance(address owner, address spender, uint256 amount) internal {
+        uint256 cur = _allowances[owner][spender];
+        if (cur != type(uint256).max) {
+            require(cur >= amount, "BUCK: insufficient allowance");
+            unchecked { _allowances[owner][spender] = cur - amount; }
+        }
     }
 
     // ---- helpers -----------------------------------------------------------
@@ -287,207 +677,9 @@ contract Buck is ERC20 {
         return keccak256(abi.encode(E.R.X, E.R.Y, E.C.X, E.C.Y));
     }
 
-    /// @dev Deterministic identity hash from the registered (pk, E_addr).
-    ///      Used as a fallback receipt fragment when no prior approve-time CP
-    ///      receipt exists between two verified counterparties (e.g., the
-    ///      passive-receive direction of an AMM swap).
     function _identityHash(address account) internal view returns (bytes32) {
-        BN254.G1Point memory pk            = identity.pkOf(account);
+        BN254.G1Point memory pk             = identity.pkOf(account);
         IdentityRegistry.ElGamalCT memory E = identity.ciphertextOf(account);
         return keccak256(abi.encode(pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y));
-    }
-
-    /// @dev Premium = mintAmount * (BASE_RATE + util^2 * SCALE_RATE) / BP.
-    ///      Utilisation is computed against the *raw* outstanding balance
-    ///      (fee-debt counts as drawn credit), not the net spendable.
-    function _computePremium(
-        address account,
-        uint256 mintAmount,
-        uint256 limit
-    ) internal view returns (uint256) {
-        if (limit == 0) return 0;
-        uint256 newBalance  = ERC20.balanceOf(account) + mintAmount;
-        uint256 utilization = newBalance * PRECISION / limit;
-        uint256 utilSq      = utilization * utilization / PRECISION;
-        uint256 rate        = BASE_RATE + utilSq * SCALE_RATE / PRECISION;
-        return mintAmount * rate / BP;
-    }
-
-    // ---- demurrage views --------------------------------------------------
-
-    /// @notice Fee owed by `a` at this block (BUCK, 18 decimals).
-    ///         live_fee = _demurrage[a] + raw * RATE * (now - _timestamp[a]).
-    ///         The Jubilee fund (address(this)) accrues demurrage like any
-    ///         other account -- under the deferred-Jubilee model its raw
-    ///         only grows at mint/burn checkpoints, but its self-demurrage
-    ///         on idle accumulated balance is real.
-    function feeOwing(address a) public view returns (uint256) {
-        uint256 raw     = ERC20.balanceOf(a);
-        uint256 elapsed = block.timestamp - _timestamp[a];
-        uint256 pending = (raw == 0 || elapsed == 0)
-            ? 0
-            : Math.mulDiv(raw, BASE_RATE_PER_SEC * elapsed, SCALE);
-        return _demurrage[a] + pending;
-    }
-
-    /// @notice Accumulated fees on `a`'s balance.  Semantics differ by
-    ///         identity flavour:
-    ///           * Non-Carrying:  locked dust inaccessible to the holder.
-    ///                            Capped at raw -- the account is never
-    ///                            "short" more than it actually holds.
-    ///           * Carrying:      the carried-on-outflow fee that rides with
-    ///                            transfers.  NOT capped at raw (a very old
-    ///                            Carrying account can owe more than it
-    ///                            holds; on a full-raw outflow the recipient
-    ///                            absorbs the over-debt via _demurrage[to]).
-    function balanceOfFees(address a) public view returns (uint256) {
-        uint256 fee = feeOwing(a);
-        if (identity.isCarrying(a)) {
-            return fee;
-        }
-        uint256 raw = ERC20.balanceOf(a);
-        return fee >= raw ? raw : fee;
-    }
-
-    /// @notice Spendable BUCK at `a`.  Semantics differ by identity flavour:
-    ///           * Non-Carrying:  raw - locked fees.  Decreases over time
-    ///                            against an idle holding -- the locked dust
-    ///                            stays in the account but the holder cannot
-    ///                            spend it.
-    ///           * Carrying:      raw, full-stop.  The account's accumulated
-    ///                            fees do NOT subtract from balanceOf because
-    ///                            they are carried on outflow, not locked
-    ///                            inside the account.  This is what AMM
-    ///                            pools, Notes pools, and the Jubilee fund
-    ///                            need: their balanceOf must match the
-    ///                            actual transferable raw, otherwise stock
-    ///                            ERC-20 consumers (e.g. Uniswap's K
-    ///                            invariant) silently break across long
-    ///                            idle periods.
-    function balanceOf(address a) public view override returns (uint256) {
-        uint256 raw = ERC20.balanceOf(a);
-        if (identity.isCarrying(a)) {
-            return raw;
-        }
-        uint256 fee = feeOwing(a);
-        return fee >= raw ? 0 : raw - fee;
-    }
-
-    /// @notice Raw BUCK balance (gross, OZ-storage view).  Equals
-    ///         balanceOf(a) + balanceOfFees(a) at every block.
-    function rawBalanceOf(address a) public view returns (uint256) {
-        return ERC20.balanceOf(a);
-    }
-
-    /// @notice Spendable BUCK held by the Jubilee fund.  Alias for
-    ///         balanceOf(address(this)); separate name for clarity in
-    ///         tooling that aggregates Jubilee state.
-    function jubileeBalance() external view returns (uint256) {
-        return balanceOf(address(this));
-    }
-
-    /// @notice Raw BUCK held at the Jubilee address.  Grows at mint/burn
-    ///         events via _accrueJubilee; never via demurrage transfers
-    ///         (there are none under this model).
-    function jubileeActual() public view returns (uint256) {
-        return ERC20.balanceOf(address(this));
-    }
-
-    // ---- demurrage internals ----------------------------------------------
-
-    /// @dev Fold pending fee on `a` into _demurrage[a] and reset _timestamp.
-    ///      Called before every balance-mutating event for `a`.  Idempotent
-    ///      in time -- two calls within the same block produce the same
-    ///      state as one.
-    function _crystallize(address a) internal {
-        uint256 raw     = ERC20.balanceOf(a);
-        uint64  ts      = _timestamp[a];
-        uint256 elapsed = block.timestamp - ts;
-        if (elapsed != 0 && raw != 0) {
-            _demurrage[a] += Math.mulDiv(raw, BASE_RATE_PER_SEC * elapsed, SCALE);
-        }
-        if (ts != block.timestamp) {
-            _timestamp[a] = uint64(block.timestamp);
-        }
-    }
-
-    /// @dev Mint accumulated cumulative-rate to the Jubilee fund.
-    ///      Only the mint/burn paths call this; pure transfers don't.
-    ///      Updates _jubileeLastUpdate FIRST so re-entry through super._update
-    ///      (which fires our _update override) sees elapsed == 0.
-    function _accrueJubilee() internal {
-        uint256 elapsed = block.timestamp - _jubileeLastUpdate;
-        if (elapsed == 0) return;
-        uint256 supply = totalSupply();
-        if (supply == 0) {
-            _jubileeLastUpdate = uint64(block.timestamp);
-            return;
-        }
-        uint256 delta = Math.mulDiv(supply, BASE_RATE_PER_SEC * elapsed, SCALE);
-        _jubileeLastUpdate = uint64(block.timestamp);
-        _crystallize(address(this));
-        if (delta != 0) {
-            // Direct super._update bypasses our _update override (no
-            // recursion) and credits raw to the Jubilee.  totalSupply
-            // grows by delta.
-            super._update(address(0), address(this), delta);
-        }
-    }
-
-    /// @dev Non-Carrying transfer: sender retains its locked fees;
-    ///      recipient gets fresh BUCKs (no inherited fee debt).
-    function _nonCarryingTransfer(address from, address to, uint256 value) internal {
-        require(value <= balanceOf(from), "BUCK: amount exceeds spendable");
-        _crystallize(from);
-        _crystallize(to);
-        super._update(from, to, value);
-    }
-
-    /// @dev Carrying transfer: sender's basis untouched; recipient's
-    ///      _demurrage absorbs the proportional age basis on the
-    ///      transferred portion.
-    function _carryingTransfer(address from, address to, uint256 value) internal {
-        // age_basis is the elapsed time on sender's basis at this moment;
-        // captured BEFORE crystallizing the recipient since crystallize
-        // does not touch _timestamp[from].
-        uint256 ageBasis    = block.timestamp - _timestamp[from];
-        uint256 carriedFee  = (value == 0 || ageBasis == 0)
-            ? 0
-            : Math.mulDiv(value, BASE_RATE_PER_SEC * ageBasis, SCALE);
-        _crystallize(to);
-        super._update(from, to, value);
-        if (carriedFee != 0) {
-            _demurrage[to] += carriedFee;
-        }
-    }
-
-    // ---- ERC-20 hook override ---------------------------------------------
-
-    /// @dev Threads demurrage through every state change.
-    ///      mint/burn paths run _accrueJubilee + crystallize the user side
-    ///      and super._update.  Inter-account transfers dispatch to either
-    ///      _nonCarryingTransfer or _carryingTransfer based on the sender's
-    ///      registry-side isCarrying flag.
-    function _update(address from, address to, uint256 value) internal override {
-        if (from == address(0) || to == address(0)) {
-            // mint or burn -- accrue Jubilee against the elapsed period,
-            // crystallize the user side, and let OZ ERC20 mutate the raw.
-            _accrueJubilee();
-            if (from != address(0)) {
-                require(value <= balanceOf(from), "BUCK: amount exceeds spendable");
-                _crystallize(from);
-            }
-            if (to != address(0)) {
-                _crystallize(to);
-            }
-            super._update(from, to, value);
-            return;
-        }
-
-        if (identity.isCarrying(from)) {
-            _carryingTransfer(from, to, value);
-        } else {
-            _nonCarryingTransfer(from, to, value);
-        }
     }
 }

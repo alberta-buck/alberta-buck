@@ -3,9 +3,24 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
+import {BuckTypes, BuckQty, toBuckQty} from "./BuckTypes.sol";
+
 /// @title BuckCredit — ERC-721 Insured Asset NFT
 /// @notice Each token represents an insurer's offer of parametric insurance on a
 ///         real-world asset, with deterministic depreciation and piecemeal activation.
+///
+/// When insurance is executed, it protects a certain asset valuation, and
+/// each piecemeal contract covers a certain fraction of the asset (eg. 65%), up to a total
+/// of the asset's current value.
+///
+/// When claimed, the insurance contracts each pay the insured fraction of a drop in its value from
+/// the insured valuation, net deductible.
+///
+/// All monetary fields (faceValue, depreciationFloor, activatedValue) are
+/// 6-decimal BUCK amounts and packed into uint80 slots — same storage type as
+/// Buck.sol's ERC-20 balances.  Bounds and precision come from BuckTypes so a
+/// future change propagates to both contracts in lockstep.
+
 contract BuckCredit is ERC721Enumerable {
 
     enum DepreciationType {
@@ -14,6 +29,12 @@ contract BuckCredit is ERC721Enumerable {
         DECLINING_BALANCE  // Percentage of remaining value per year
     }
 
+    /// @dev Field declaration order is chosen to pack into 3 storage slots:
+    ///      slot 0: insurer (20) + assetClass (1) + createdAt (6)            = 27
+    ///      slot 1: faceValue (10) + depreciationFloor (10) + depType (1)
+    ///              + depRate (4) + depStartAt (6)                           = 31
+    ///      slot 2: premiumRate (4) + lastUpdated (6) + activatedValue (10)
+    ///              + lastActivatedAt (6)                                    = 26
     struct CreditParams {
         // Immutable (set at creation)
         address insurer;            // Vendor who can update this credit
@@ -21,8 +42,8 @@ contract BuckCredit is ERC721Enumerable {
         uint48  createdAt;          // Creation timestamp
 
         // Insurer-mutable (reappraisal, schedule changes)
-        uint256 faceValue;          // Maximum insured value (18 decimals)
-        uint256 depreciationFloor;  // Minimum value after depreciation
+        BuckQty faceValue;          // Maximum insured value           (uint80 BUCK, 6 decimals)
+        BuckQty depreciationFloor;  // Minimum value after depreciation (uint80 BUCK, 6 decimals)
 
         DepreciationType depType;   // Depreciation model
         uint32  depRate;            // Annual rate in basis points (10000 = 100%)
@@ -32,9 +53,16 @@ contract BuckCredit is ERC721Enumerable {
         uint48  lastUpdated;        // Timestamp of last insurer update
 
         // Client-mutable (activation)
-        uint256 activatedValue;     // Currently activated portion (<= faceValue)
+        BuckQty activatedValue;     // Currently activated portion (<= faceValue) (uint80 BUCK, 6 decimals)
         uint48  lastActivatedAt;    // Timestamp of last activation
     }
+
+    // ── Depreciation constants ──────────────────────────────────────
+    uint256 internal constant BP                = 10_000;
+    uint256 internal constant SECONDS_PER_YEAR  = 365 days + 6 hours;   // matches Buck.sol
+    /// Cap declining-balance compounding to bound gas; by then the value is
+    /// indistinguishable from `floor` for any rate >= a few hundred bps.
+    uint256 internal constant MAX_DEP_YEARS     = 100;
 
     mapping(uint256 => CreditParams) public credits;
     uint256 private _nextTokenId;
@@ -50,6 +78,9 @@ contract BuckCredit is ERC721Enumerable {
     constructor() ERC721("BuckCredit", "BUCK_CREDIT") {}
 
     /// @notice Insurer creates a new BUCK_CREDIT NFT for a client.
+    /// @dev faceValue / depreciationFloor are accepted as uint256 for ABI
+    ///      ergonomics but must fit in BuckTypes.MAX_BALANCE (uint80 cap)
+    ///      since they are stored alongside the BUCK supply.
     function createCredit(
         address client,
         uint8 assetClass,
@@ -60,6 +91,8 @@ contract BuckCredit is ERC721Enumerable {
         uint48 depStartAt,
         uint32 premiumRate
     ) external returns (uint256) {
+        require(depreciationFloor <= faceValue, "floor > face");
+
         uint256 tokenId = _nextTokenId++;
         _mint(client, tokenId);
 
@@ -67,14 +100,14 @@ contract BuckCredit is ERC721Enumerable {
             insurer: msg.sender,
             assetClass: assetClass,
             createdAt: uint48(block.timestamp),
-            faceValue: faceValue,
-            depreciationFloor: depreciationFloor,
+            faceValue: toBuckQty(faceValue),
+            depreciationFloor: toBuckQty(depreciationFloor),
             depType: depType,
             depRate: depRate,
             depStartAt: depStartAt,
             premiumRate: premiumRate,
             lastUpdated: uint48(block.timestamp),
-            activatedValue: 0,
+            activatedValue: BuckQty.wrap(0),
             lastActivatedAt: 0
         });
 
@@ -88,17 +121,24 @@ contract BuckCredit is ERC721Enumerable {
     /// @dev Pure computation from on-chain state — no oracle needed.
     function currentValue(uint256 tokenId) public view returns (uint256) {
         CreditParams storage c = credits[tokenId];
-        if (c.activatedValue == 0) return 0;
+        if (c.activatedValue.isZero()) return 0;
 
+        uint256 face = c.faceValue.asUint();
         uint256 depreciatedFace = _depreciate(
-            c.faceValue, c.depType, c.depRate,
-            c.depreciationFloor, c.depStartAt
+            face, c.depType, c.depRate,
+            c.depreciationFloor.asUint(), c.depStartAt
         );
 
-        // Activated portion depreciates proportionally
-        return depreciatedFace * c.activatedValue / c.faceValue;
+        // Activated portion depreciates proportionally.
+        return depreciatedFace * c.activatedValue.asUint() / face;
     }
 
+    /// @dev Discrete-time depreciation.  No transcendental approximations —
+    ///      DECLINING_BALANCE compounds the per-year factor (BP - rate)/BP
+    ///      whole-year by whole-year, then linearly interpolates across the
+    ///      trailing partial year.  Matches the convention most accounting
+    ///      systems use for declining-balance schedules and avoids the
+    ///      accuracy / range-reduction headaches of a fixed-point exp(-x).
     function _depreciate(
         uint256 faceValue,
         DepreciationType depType,
@@ -109,47 +149,42 @@ contract BuckCredit is ERC721Enumerable {
         if (depType == DepreciationType.NONE || block.timestamp <= startAt) {
             return faceValue;
         }
+        if (faceValue <= floor) return floor;
 
-        uint256 elapsed = block.timestamp - startAt;
+        uint256 elapsed     = block.timestamp - startAt;
         uint256 depreciable = faceValue - floor;
 
         if (depType == DepreciationType.LINEAR) {
-            // loss = depreciable * rate * elapsed / (365.25 days * 10000)
-            uint256 loss = depreciable * depRate * elapsed / (365.25 days * 10000);
+            uint256 loss = depreciable * uint256(depRate) * elapsed
+                           / (SECONDS_PER_YEAR * BP);
             if (loss >= depreciable) return floor;
             return faceValue - loss;
         }
 
         if (depType == DepreciationType.DECLINING_BALANCE) {
-            // Continuous approximation: exp(-rate * elapsed / (10000 * 365.25 days))
-            uint256 exponent = uint256(depRate) * elapsed / (365.25 days);
-            // exponent is in basis-point-years; convert to 18-decimal fixed point
-            uint256 expFp = exponent * 1e14;
-            uint256 factor = _expNeg(expFp);
-            return floor + depreciable * factor / 1e18;
+            if (depRate == 0)        return faceValue;
+            if (depRate >= BP)       return floor;
+
+            uint256 wholeYears = elapsed / SECONDS_PER_YEAR;
+            if (wholeYears >= MAX_DEP_YEARS) return floor;
+
+            uint256 keep = BP - uint256(depRate);
+            uint256 v    = depreciable;
+            for (uint256 i = 0; i < wholeYears; i++) {
+                v = v * keep / BP;
+                if (v == 0) return floor;
+            }
+            // Linear interpolation across the remaining partial year:
+            //   v(t) = v - (v - v_next) * fracSec / SECONDS_PER_YEAR
+            uint256 fracSec = elapsed - wholeYears * SECONDS_PER_YEAR;
+            if (fracSec != 0) {
+                uint256 vNext = v * keep / BP;
+                v = v - (v - vNext) * fracSec / SECONDS_PER_YEAR;
+            }
+            return floor + v;
         }
 
         return faceValue; // fallback
-    }
-
-    /// @dev Fixed-point exp(-x) for x in 18-decimal format.
-    ///      6th-order Taylor series, accurate to <0.01% for x < 3.0.
-    ///      For production, use PRBMath.exp() or ABDKMath64x64.
-    function _expNeg(uint256 x) internal pure returns (uint256) {
-        uint256 UNIT = 1e18;
-        if (x > 10 * UNIT) return 0;
-
-        uint256 x2 = x * x / UNIT;
-        uint256 x3 = x2 * x / UNIT;
-        uint256 x4 = x3 * x / UNIT;
-        uint256 x5 = x4 * x / UNIT;
-        uint256 x6 = x5 * x / UNIT;
-
-        uint256 pos = UNIT + x2 / 2 + x4 / 24 + x6 / 720;
-        uint256 neg = x + x3 / 6 + x5 / 120;
-
-        if (neg >= pos) return 0;
-        return pos - neg;
     }
 
     // ── Activation ──────────────────────────────────────────────────
@@ -158,16 +193,31 @@ contract BuckCredit is ERC721Enumerable {
     function activate(uint256 tokenId, uint256 amount) external {
         require(ownerOf(tokenId) == msg.sender, "Not credit owner");
         CreditParams storage c = credits[tokenId];
-        require(c.activatedValue + amount <= c.faceValue, "Exceeds face value");
+        uint256 newActivated = c.activatedValue.asUint() + amount;
+        require(newActivated <= c.faceValue.asUint(), "Exceeds face value");
 
-        c.activatedValue += amount;
+        c.activatedValue  = toBuckQty(newActivated);
         c.lastActivatedAt = uint48(block.timestamp);
 
-        emit CreditActivated(tokenId, msg.sender, amount, c.activatedValue);
+        emit CreditActivated(tokenId, msg.sender, amount, newActivated);
+    }
+
+    /// @notice Compact (faceValue, activatedValue, premiumRate) view used by
+    ///         Buck.mint() to walk a holder's NFTs without unpacking the full
+    ///         CreditParams tuple per token.  Returned in uint256 form for
+    ///         arithmetic ergonomics on the consumer side.
+    function creditInfo(uint256 tokenId)
+        external view returns (uint256 faceValue, uint256 activatedValue, uint32 premiumRate)
+    {
+        CreditParams storage c = credits[tokenId];
+        return (c.faceValue.asUint(), c.activatedValue.asUint(), c.premiumRate);
     }
 
     /// @notice Aggregate current value of all BuckCredits owned by an account.
     /// @dev Called by Buck.mint() to compute the credit limit.
+    /// 
+    /// The sum of all currently available BuckCredit insurable assets, at their
+    /// present value.
     function totalCurrentValue(address account) external view returns (uint256) {
         uint256 total = 0;
         uint256 count = balanceOf(account);
@@ -190,19 +240,21 @@ contract BuckCredit is ERC721Enumerable {
         uint32 newPremiumRate
     ) external {
         CreditParams storage c = credits[tokenId];
-        require(msg.sender == c.insurer, "Not insurer");
+        require(msg.sender == c.insurer,                "Not insurer");
+        require(newDepreciationFloor <= newFaceValue,   "floor > face");
 
-        if (newFaceValue < c.activatedValue) {
-            c.activatedValue = newFaceValue;
+        BuckQty newFace = toBuckQty(newFaceValue);  // bound-check up front
+        if (newFaceValue < c.activatedValue.asUint()) {
+            c.activatedValue = newFace;
         }
 
-        c.faceValue = newFaceValue;
-        c.depreciationFloor = newDepreciationFloor;
-        c.depType = newDepType;
-        c.depRate = newDepRate;
-        c.depStartAt = newDepStartAt;
-        c.premiumRate = newPremiumRate;
-        c.lastUpdated = uint48(block.timestamp);
+        c.faceValue         = newFace;
+        c.depreciationFloor = toBuckQty(newDepreciationFloor);
+        c.depType           = newDepType;
+        c.depRate           = newDepRate;
+        c.depStartAt        = newDepStartAt;
+        c.premiumRate       = newPremiumRate;
+        c.lastUpdated       = uint48(block.timestamp);
 
         emit CreditUpdated(tokenId, msg.sender, newFaceValue, newDepRate, newPremiumRate);
     }
