@@ -423,9 +423,9 @@ Both route through =_identityCheckedTransfer=, which:
 
 After identity checks, transfer dispatch is automatic on the sender's =isCarrying= flag: Carrying
 senders (AMM pools, the Notes pool, the Jubilee fund) take the =_carryingTransfer= path that
-preserves the sender's basis and folds the value-weighted age into the recipient's =buckSeconds=;
-Non-Carrying senders take =_nonCarryingTransfer= which just shifts raw balance after a spendable
-check on =balanceOf(from)= = ~balance - feeOwing~.  =BuckTransferReceipt(from, to, amount,
+crystallises both sides through now and apportions the sender's live =buckSeconds= proportionally
+to the value transferred; Non-Carrying senders take =_nonCarryingTransfer= which just shifts raw
+balance after a spendable check on =balanceOf(from)= = ~balance - feeOwing~.  =BuckTransferReceipt(from, to, amount,
 fromHash, toHash)= is emitted; ~_identityHash(a) = keccak256(abi.encode(pk, E_addr))~ is
 deterministic per account.
 
@@ -434,9 +434,8 @@ deterministic per account.
    :CUSTOM_ID: demurrage
    :END:
 
-BUCK accrues continuous demurrage to fund a perpetual Jubilee: a fund that accrues over 50 years to
-release pledged assets.  Each account's =buckSeconds= field is the cumulative integral of (raw
-balance × dt) crystallised on every balance changing event at the block's =timestamp= ; the live fee
+BUCK accrues continuous demurrage to fund a perpetual Jubilee.  Each account's =buckSeconds=
+field is the cumulative integral of (raw balance × dt) crystallised at =timestamp=; the live fee
 owed is
 
 #+BEGIN_SRC text
@@ -452,8 +451,9 @@ with ~BASE_RATE_PER_YEAR = 0.02~ (2%/year) and ~SCALE = 1e27~.  Visible balance:
   into the recipient's =buckSeconds= so the locked debt rides with the BUCKs.
 
 =_crystallize(a)= folds the time rectangle into =buckSeconds= and bumps =timestamp=; it never
-changes balance.  Carrying transfer uses =_crystallizeAndAdd(to, value * ageBasis)= to fold
-recipient's own rectangle plus the carried IOU in one SSTORE.
+changes balance.  Carrying transfer crystallises both sides through now, apportions
+~liveBs * value / raw~ of the sender's live integral to the recipient (where
+~liveBs = buckSeconds + raw * (now - timestamp)~), and settles each side in one SSTORE.
 
 The Jubilee is a normal account at =address(this)=, treated as Carrying.  On every mint or burn,
 =_accrueJubilee= writes
@@ -469,10 +469,16 @@ redistribution, not minting.  The exact invariant:
 sum_a rawBalanceOf(a) == totalSupply + jubileeActual()
 #+END_SRC
 
-The "extra" raw stored on Jubilee approximately matches the sum of locked fees hidden in
-Non-Carrying balanceOf results -- Carrying accounts contribute their share of system demurrage to
-Jubilee without the offsetting balanceOf deduction, so Jubilee accrues a small enrichment beyond
-what Non-Carrying holders have locked.  This is the price of giving AMM pools ERC-20-stable views.  =JubileeAccrued(delta, newBalance)= surfaces every accrual.
+Jubilee is the system-wide fee escrow.  Every BUCK has exactly one fee owner: non-Carrying accounts
+lock it silently inside their raw balance (=balanceOf = raw - feeOwing=); Carrying accounts (Notes
+pool, AMM pools, Jubilee itself) show =balanceOf = raw=, so their fee portion sits in Jubilee
+instead.  The =_accrueJubilee= call credits Jubilee at the full =totalSupply= rate, covering
+Carrying holdings too.  When Carrying BUCKs flow to a non-Carrying account via =_carryingTransfer=, the recipient absorbs
+~liveBs * value / raw~ as extra =buckSeconds=, where =liveBs= is the sender's full live integral
+(crystallised history plus the current elapsed rectangle).  Jubilee pre-accrued the full fee at
+the =totalSupply= rate; it now debits in exact proportion to the BUCKs transferred, with both
+sides settled through the current block.  =JubileeAccrued(delta, newBalance)= surfaces every
+accrual.
 
 The Jubilee is the sink that funds default coverage, perpetual-ground-rent disbursement, or a
 periodic balance reset -- all governance-driven on-chain disbursement paths land on top of this

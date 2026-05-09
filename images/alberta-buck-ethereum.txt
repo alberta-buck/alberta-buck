@@ -182,9 +182,10 @@ Table of Contents
   • `NONE': returns the activated face value, unchanged.
   • `LINEAR': loss accrues at `depRate' bp/year on the depreciable
     portion (`faceValue - floor'), clamped at `depreciationFloor'.
-  • `DECLINING_BALANCE': continuous-compounded via an in-contract
-    `_expNeg' (piecewise minimax-rational, accurate to <1% across full
-    [0, 10] range).
+  • `DECLINING_BALANCE': discrete whole-year compounding – the factor
+    `(BP - depRate)/BP' is applied once per complete year via a loop
+    capped at 100 years, then a linear interpolation bridges the
+    trailing partial year.  No transcendental approximations.
 
   In every case the activated portion depreciates proportionally:
   `currentValue = depreciatedFace * activatedValue / faceValue'.
@@ -194,8 +195,8 @@ Table of Contents
   ────────────────────────────────────────────────────────────────────────
    Land           NONE               –           –  $100,000              
    House (bldg)   LINEAR             200bp     20%  $52,000               
-   Vehicle        DECLINING_BALANCE  1500bp     5%  $5,633                
-   Farm equip     DECLINING_BALANCE  1000bp    10%  $16,791               
+   Vehicle        DECLINING_BALANCE  1500bp     5%  $5,725                
+   Farm equip     DECLINING_BALANCE  1000bp    10%  $13,815               
    Gold in vault  NONE               –           –  $100,000              
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -388,10 +389,10 @@ Table of Contents
 
   ┌────
   │ struct AccountState {
-  │     uint80  balance;       // raw, ~1.21e24 cap (1.21e18 BUCK at 6 decimals)
-  │     uint120 buckSeconds;   // demurrage IOU integral
-  │     uint40  timestamp;     // last crystallisation (safe past year 36800)
-  │     uint16  flags;         // reserved for future per-account flags
+  │     BuckQty     balance;       // uint80 underlying; ~1.21e24 cap (1.21e18 BUCK at 6 decimals)
+  │     BuckSeconds buckSeconds;   // uint120 underlying; demurrage IOU integral
+  │     uint40      timestamp;     // last crystallisation (safe past year 36800)
+  │     uint16      flags;         // reserved for future per-account flags
   │ }
   │ mapping(address => AccountState) internal _state;
   └────
@@ -454,13 +455,15 @@ Table of Contents
   1. `isVerified(msg.sender)' guard.
   2. Read `buckCredit.totalCurrentValue(sender) * buckK.currentBuckK() /
      1e18', ratchet `storedLimit[sender]' upward only.
-  3. Early gate: `balanceOf(sender) + amount <= storedLimit' – `amount'
-     is a lower bound on total coverage drawn (since pool principal is
-     non-negative).
+  3. Early gate: `_state[sender].balance (raw) + amount <= storedLimit'
+     – uses raw balance so that accrued demurrage fees do not silently
+     inflate the apparent headroom; `amount' is a lower bound on total
+     coverage drawn (since pool principal is non-negative).
   4. `_allocateMint(amount, tokenIds)' walks the NFTs cheapest-first (or
      in caller order), writes `mintsBacked', returns `(totalCoverage,
      poolPrincipal)'.
-  5. Tight gate: `balanceOf(sender) + totalCoverage <= storedLimit'.
+  5. Tight gate: `_state[sender].balance (raw) + totalCoverage <=
+     storedLimit'.
   6. `_accrueJubilee()', crystallise the holder, credit `amount' to the
         holder; if `poolPrincipal > 0', crystallise `insurancePool' and
         credit `poolPrincipal' to it.  `_totalSupply +' amount +
@@ -525,13 +528,14 @@ Table of Contents
 
   After identity checks, transfer dispatch is automatic on the sender's
   `isCarrying' flag: Carrying senders (AMM pools, the Notes pool, the
-  Jubilee fund) take the `_carryingTransfer' path that preserves the
-  sender's basis and folds the value-weighted age into the recipient's
-  `buckSeconds'; Non-Carrying senders take `_nonCarryingTransfer' which
-  just shifts raw balance after a spendable check on `balanceOf(from)' =
-  `balance - feeOwing'.  `BuckTransferReceipt(from, to, amount,
-  fromHash, toHash)' is emitted; `_identityHash(a) =
-  keccak256(abi.encode(pk, E_addr))' is deterministic per account.
+  Jubilee fund) take the `_carryingTransfer' path that crystallises both
+  sides through now and apportions the sender's live `buckSeconds'
+  proportionally to the value transferred; Non-Carrying senders take
+  `_nonCarryingTransfer' which just shifts raw balance after a spendable
+  check on `balanceOf(from)' = `balance - feeOwing'.
+  `BuckTransferReceipt(from, to, amount, fromHash, toHash)' is emitted;
+  `_identityHash(a) = keccak256(abi.encode(pk, E_addr))' is
+  deterministic per account.
 
 
 5.5 Demurrage and Jubilee
@@ -539,7 +543,7 @@ Table of Contents
 
   BUCK accrues continuous demurrage to fund a perpetual Jubilee.  Each
   account's `buckSeconds' field is the cumulative integral of (raw
-  balance × dt) crystallised through `timestamp'; the live fee owed is
+  balance × dt) crystallised at `timestamp'; the live fee owed is
 
   ┌────
   │ feeOwing(a) = (buckSeconds + balance * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE
@@ -557,9 +561,11 @@ Table of Contents
     recipient's `buckSeconds' so the locked debt rides with the BUCKs.
 
   `_crystallize(a)' folds the time rectangle into `buckSeconds' and
-  bumps `timestamp'; it never changes balance.  Carrying transfer uses
-  `_crystallizeAndAdd(to, value * ageBasis)' to fold recipient's own
-  rectangle plus the carried IOU in one SSTORE.
+  bumps `timestamp'; it never changes balance.  Carrying transfer
+  crystallises both sides through now, apportions `liveBs * value / raw'
+  of the sender's live integral to the recipient (where `liveBs =
+  buckSeconds + raw * (now - timestamp)'), and settles each side in one
+  SSTORE.
 
   The Jubilee is a normal account at `address(this)', treated as
   Carrying.  On every mint or burn, `_accrueJubilee' writes
@@ -576,15 +582,19 @@ Table of Contents
   │ sum_a rawBalanceOf(a) == totalSupply + jubileeActual()
   └────
 
-  The "extra" raw stored on Jubilee precisely matches the sum of locked
-  fees hidden in Non-Carrying balanceOf results, so spendable supply
-  across all Non-Carrying accounts equals `totalSupply' up to
-  per-account rounding.  Carrying accounts retain visible balance
-  through demurrage cycles; the Jubilee accordingly accrues credit for
-  their share of system demurrage without offsetting their balanceOf – a
-  small enrichment of the Jubilee fund that is the price of giving AMM
-  pools ERC-20-stable views.  `JubileeAccrued(delta, newBalance)'
-  surfaces every accrual.
+  Jubilee is the system-wide fee escrow.  Every BUCK has exactly one fee
+  owner: non-Carrying accounts lock it silently inside their raw balance
+  (`balanceOf = raw - feeOwing'); Carrying accounts (Notes pool, AMM
+  pools, Jubilee itself) show `balanceOf = raw', so their fee portion
+  sits in Jubilee instead.  The `_accrueJubilee' call credits Jubilee at
+  the full `totalSupply' rate, covering Carrying holdings too.  When
+  Carrying BUCKs flow to a non-Carrying account via `_carryingTransfer',
+  the recipient absorbs `liveBs * value / raw' as extra `buckSeconds',
+  where `liveBs' is the sender's full live integral (crystallised
+  history plus the current elapsed rectangle).  Jubilee pre-accrued the
+  full fee at the `totalSupply' rate; it now debits in exact proportion
+  to the BUCKs transferred, with both sides settled through the current
+  block.  `JubileeAccrued(delta, newBalance)' surfaces every accrual.
 
   The Jubilee is the sink that funds default coverage,
   perpetual-ground-rent disbursement, or a periodic balance reset – all
@@ -1179,7 +1189,7 @@ Table of Contents
 12 Status
 ═════════
 
-  Current Foundry suite: 245 unit tests pass across 13 suites; one
+  Current Foundry suite: 247 unit tests pass across 13 suites; one
   `BuckKControllerForkTest' requires a live mainnet RPC and is skipped
   offline.  The shipped surface covers all five contracts in tree
   (`BuckCredit', `IdentityRegistry', `Buck', `BuckKControllerStatic' +

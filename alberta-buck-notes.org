@@ -1063,13 +1063,20 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
   code.  The only piece of additional state is a single scalar \( F \),
   the sum of face values of live notes.
 
-** Reminder: How BUCK Demurrage Actually Works
+** Reminder: How BUCK Demurrage Works (Target Design)
 
-   BUCK accounts no longer carry an explicit BUCK-age \( A_X \) state.
-   The implementation uses a /global cumulative index/, =cumIndex=,
-   that grows at a fixed rate =BASE_RATE_PER_SEC= per second; each
-   account stores only one extra scalar, =_indexAtLastTouch[X]=, the
-   value of =cumIndex= at the account's most recent settlement.
+   *Note:* This section describes the /target/ =cumIndex=-based design
+   that Notes requires for exact fee propagation.  The current =Buck.sol=
+   uses a =buckSeconds + timestamp= approach; see the Ethereum
+   implementation document for a precise description of that interim
+   design and its invariants.
+
+   In the target design, BUCK accounts no longer carry an explicit
+   BUCK-age \( A_X \) state.  The implementation uses a /global
+   cumulative index/, =cumIndex=, that grows at a fixed rate
+   =BASE_RATE_PER_SEC= per second; each account stores only one extra
+   scalar, =_indexAtLastTouch[X]=, the value of =cumIndex= at the
+   account's most recent settlement.
 
    The fee owed by account \( X \) at any moment is
    \[

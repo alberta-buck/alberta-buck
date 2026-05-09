@@ -102,12 +102,16 @@ contract Buck is IERC20, IERC20Metadata {
     ///      directly into Jubilee's slot.  totalSupply is NOT mutated --
     ///      demurrage is internal redistribution, not minting.
     ///
-    ///      Invariant: sum(stored balances) == totalSupply + cumulative
-    ///      Jubilee accrual.  The "extra" stored on Jubilee's side
-    ///      approximately matches the locked fees hidden inside non-Carrying
-    ///      balanceOf results -- Carrying accounts contribute demurrage to
-    ///      Jubilee without the offsetting balanceOf reduction, so Jubilee
-    ///      accrues a small enrichment beyond the non-Carrying locked fees.
+    ///      Exact invariant: sum_a(rawBalance(a)) == totalSupply + jubileeActual.
+    ///
+    ///      Every BUCK has exactly one fee owner:
+    ///        Non-Carrying: locked silently inside raw balance
+    ///                      (balanceOf = raw - feeOwing).
+    ///        Carrying:     balanceOf == raw; Jubilee pre-accrues their share.
+    ///      When Carrying BUCKs flow to non-Carrying via _carryingTransfer,
+    ///      liveBs*value/raw of the sender's full live integral propagates
+    ///      to the recipient -- Jubilee pre-accrued it; it now debits in
+    ///      exact proportion to the BUCKs transferred.
     uint64 internal _jubileeLastUpdate;
 
     // ---- premium / mutual-insurance pool model -----------------------------
@@ -526,20 +530,36 @@ contract Buck is IERC20, IERC20Metadata {
         _addBalance(to, value);
     }
 
-    /// @dev Carrying sender's basis is untouched (timestamp unchanged);
-    ///      recipient absorbs `value * (now - sender.timestamp)` into its
-    ///      buckSeconds in a single SSTORE alongside its own crystallisation.
+    /// @dev Carrying transfer: proportionally apportions the sender's live
+    ///      buckSeconds (crystallised + current rectangle) to the recipient.
+    ///      Both sides settle in one SSTORE each.
     function _carryingTransfer(address from, address to, uint256 value) internal {
-        uint256 ageBasis = block.timestamp - uint256(_state[from].timestamp);
-        uint256 carriedBuckSeconds = (value == 0 || ageBasis == 0)
-            ? 0
-            : value * ageBasis;
-        // Carrying senders' balanceOf returns raw, so checking raw here is consistent with ERC-20
-        // visible balance and avoids a double-read of the carrying flag.
-        require(value <= _state[from].balance.asUint(), "BUCK: amount exceeds raw");
-        _crystallizeAndAdd(to, carriedBuckSeconds);
-        _subBalance(from, value);
-        _addBalance(to, value);
+        // ---- from ----
+        AccountState memory fs = _state[from];
+        uint256 raw = fs.balance.asUint();
+        // Carrying senders' balanceOf returns raw; checking raw is consistent
+        // with the ERC-20 visible balance and avoids re-reading the carrying flag.
+        require(value <= raw, "BUCK: amount exceeds raw");
+
+        uint256 elapsed = block.timestamp - uint256(fs.timestamp);
+        uint256 liveBs  = fs.buckSeconds.asUint() + raw * elapsed;
+        uint256 carried = raw > 0 ? liveBs * value / raw : 0;
+
+        fs.balance     = toBuckQty(raw - value);
+        fs.buckSeconds = toBuckSeconds(liveBs - carried);
+        fs.timestamp   = uint40(block.timestamp);
+        _state[from] = fs;
+
+        // ---- to ----
+        AccountState memory ts = _state[to];
+        uint256 toRaw     = ts.balance.asUint();
+        uint256 toElapsed = block.timestamp - uint256(ts.timestamp);
+        uint256 toBs      = ts.buckSeconds.asUint() + toRaw * toElapsed + carried;
+
+        ts.balance     = toBuckQty(toRaw + value);
+        ts.buckSeconds = toBuckSeconds(toBs);
+        ts.timestamp   = uint40(block.timestamp);
+        _state[to] = ts;
     }
 
     // ---- demurrage views ---------------------------------------------------
@@ -597,28 +617,12 @@ contract Buck is IERC20, IERC20Metadata {
         if (dirty) _state[a] = s;
     }
 
-    /// @dev Crystallise `a` and add `extraBuckSeconds` to its IOU integral
-    ///      in a single SSTORE.  Used by Carrying transfer to fold the
-    ///      carried `value * age_basis` alongside the recipient's own
-    ///      rectangle.
-    function _crystallizeAndAdd(address a, uint256 extraBuckSeconds) internal {
-        AccountState memory s = _state[a];
-        uint256 raw     = s.balance.asUint();
-        uint256 elapsed = block.timestamp - uint256(s.timestamp);
-        uint256 newBs   = s.buckSeconds.asUint();
-        if (elapsed != 0 && raw != 0) {
-            newBs += raw * elapsed;
-        }
-        newBs += extraBuckSeconds;
-        s.buckSeconds = toBuckSeconds(newBs);
-        s.timestamp   = uint40(block.timestamp);
-        _state[a] = s;
-    }
-
     /// @dev System-level Jubilee accrual.  Adds totalSupply*RATE*elapsed to
     ///      Jubilee's balance directly -- NOT a mint, totalSupply unchanged.
-    ///      The "extra" balance held by Jubilee precisely matches the sum of
-    ///      locked fees hidden in Non-Carrying balanceOf results.
+    ///      Accrues for all BUCK (Carrying and non-Carrying alike); when
+    ///      Carrying BUCKs later move to non-Carrying via _carryingTransfer,
+    ///      liveBs*value/raw of the sender's full live integral propagates
+    ///      proportionally to the recipient -- Jubilee pre-accrued it.
     function _accrueJubilee() internal {
         uint256 elapsed = block.timestamp - uint256(_jubileeLastUpdate);
         if (elapsed == 0) return;
