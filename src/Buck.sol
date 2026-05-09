@@ -103,10 +103,11 @@ contract Buck is IERC20, IERC20Metadata {
     ///      demurrage is internal redistribution, not minting.
     ///
     ///      Invariant: sum(stored balances) == totalSupply + cumulative
-    ///      Jubilee accrual.  The "extra" stored on Jubilee's side precisely
-    ///      offsets the locked fees hidden inside non-Carrying balanceOf
-    ///      results, so total spendable supply across all accounts ==
-    ///      totalSupply at every block.
+    ///      Jubilee accrual.  The "extra" stored on Jubilee's side
+    ///      approximately matches the locked fees hidden inside non-Carrying
+    ///      balanceOf results -- Carrying accounts contribute demurrage to
+    ///      Jubilee without the offsetting balanceOf reduction, so Jubilee
+    ///      accrues a small enrichment beyond the non-Carrying locked fees.
     uint64 internal _jubileeLastUpdate;
 
     // ---- premium / mutual-insurance pool model -----------------------------
@@ -298,6 +299,7 @@ contract Buck is IERC20, IERC20Metadata {
     }
 
     function _burnAllocated(uint256 amount, uint256[] memory tokenIds) internal {
+        require(identity.isVerified(msg.sender), "BUCK: sender not verified");
         (, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
 
         _accrueJubilee();
@@ -399,6 +401,8 @@ contract Buck is IERC20, IERC20Metadata {
             (, , uint32 rate) = buckCredit.creditInfo(tid);
             uint256 effRate = uint256(rate) * POOL_ROI_INV;
             uint256 used    = mintsBacked[tid];
+            // Silently skip fully-unused or over-rate NFTs rather than reverting: a reappraisal
+            // that pushes premiumRate above the pool-ROI threshold must not strand a burn.
             if (used == 0 || effRate >= BP) continue;
             uint256 denom   = BP - effRate;
             uint256 netCap  = used * denom / BP;
@@ -431,7 +435,7 @@ contract Buck is IERC20, IERC20Metadata {
             (, , uint32 rate) = buckCredit.creditInfo(tid);
             uint256 effRate = uint256(rate) * POOL_ROI_INV;
             uint256 used = mintsBacked[tid];
-            if (used == 0 || effRate >= BP) continue;
+            if (used == 0 || effRate >= BP) continue; // mirrors _allocateBurn skip, not a revert
             uint256 denom  = BP - effRate;
             uint256 netCap = used * denom / BP;
             uint256 unwind;
@@ -530,6 +534,8 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 carriedBuckSeconds = (value == 0 || ageBasis == 0)
             ? 0
             : value * ageBasis;
+        // Carrying senders' balanceOf returns raw, so checking raw here is consistent with ERC-20
+        // visible balance and avoids a double-read of the carrying flag.
         require(value <= _state[from].balance.asUint(), "BUCK: amount exceeds raw");
         _crystallizeAndAdd(to, carriedBuckSeconds);
         _subBalance(from, value);

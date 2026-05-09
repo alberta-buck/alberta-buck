@@ -164,8 +164,9 @@ Fields group by mutability:
 - =NONE=: returns the activated face value, unchanged.
 - =LINEAR=: loss accrues at =depRate= bp/year on the depreciable portion (=faceValue - floor=),
   clamped at =depreciationFloor=.
-- =DECLINING_BALANCE=: continuous-compounded via an in-contract =_expNeg= (piecewise
-  minimax-rational, accurate to <1% across full [0, 10] range).
+- =DECLINING_BALANCE=: discrete whole-year compounding -- the factor =(BP - depRate)/BP= is
+  applied once per complete year via a loop capped at 100 years, then a linear interpolation
+  bridges the trailing partial year.  No transcendental approximations.
 
 In every case the activated portion depreciates proportionally:
 ~currentValue = depreciatedFace * activatedValue / faceValue~.
@@ -174,8 +175,8 @@ In every case the activated portion depreciates proportionally:
 |---------------+-------------------+--------+-------+-----------------------|
 | Land          | NONE              | --     |    -- | $100,000              |
 | House (bldg)  | LINEAR            | 200bp  |   20% | $52,000               |
-| Vehicle       | DECLINING_BALANCE | 1500bp |    5% | $5,633                |
-| Farm equip    | DECLINING_BALANCE | 1000bp |   10% | $16,791               |
+| Vehicle       | DECLINING_BALANCE | 1500bp |    5% | $5,725                |
+| Farm equip    | DECLINING_BALANCE | 1000bp |   10% | $13,815               |
 | Gold in vault | NONE              | --     |    -- | $100,000              |
 
 A residential property would typically have two BUCK_CREDITs: one for the land (NONE) and one for
@@ -318,10 +319,10 @@ The transfer-path state for an account is one slot:
 
 #+BEGIN_SRC solidity
 struct AccountState {
-    uint80  balance;       // raw, ~1.21e24 cap (1.21e18 BUCK at 6 decimals)
-    uint120 buckSeconds;   // demurrage IOU integral
-    uint40  timestamp;     // last crystallisation (safe past year 36800)
-    uint16  flags;         // reserved for future per-account flags
+    BuckQty     balance;       // uint80 underlying; ~1.21e24 cap (1.21e18 BUCK at 6 decimals)
+    BuckSeconds buckSeconds;   // uint120 underlying; demurrage IOU integral
+    uint40      timestamp;     // last crystallisation (safe past year 36800)
+    uint16      flags;         // reserved for future per-account flags
 }
 mapping(address => AccountState) internal _state;
 #+END_SRC
@@ -371,11 +372,12 @@ The shipped =mint= sequence:
 1. =isVerified(msg.sender)= guard.
 2. Read =buckCredit.totalCurrentValue(sender) * buckK.currentBuckK() / 1e18=, ratchet
    =storedLimit[sender]= upward only.
-3. Early gate: ~balanceOf(sender) + amount <= storedLimit~ -- =amount= is a lower bound on total
-   coverage drawn (since pool principal is non-negative).
+3. Early gate: ~_state[sender].balance (raw) + amount <= storedLimit~ -- uses raw balance so that
+   accrued demurrage fees do not silently inflate the apparent headroom; =amount= is a lower bound
+   on total coverage drawn (since pool principal is non-negative).
 4. =_allocateMint(amount, tokenIds)= walks the NFTs cheapest-first (or in caller order), writes
    =mintsBacked=, returns =(totalCoverage, poolPrincipal)=.
-5. Tight gate: ~balanceOf(sender) + totalCoverage <= storedLimit~.
+5. Tight gate: ~_state[sender].balance (raw) + totalCoverage <= storedLimit~.
 6. =_accrueJubilee()=, crystallise the holder, credit =amount= to the holder; if =poolPrincipal >
    0=, crystallise =insurancePool= and credit =poolPrincipal= to it.  =_totalSupply += amount +
    poolPrincipal=.
@@ -432,9 +434,10 @@ deterministic per account.
    :CUSTOM_ID: demurrage
    :END:
 
-BUCK accrues continuous demurrage to fund a perpetual Jubilee.  Each account's =buckSeconds=
-field is the cumulative integral of (raw balance × dt) crystallised through =timestamp=; the live
-fee owed is
+BUCK accrues continuous demurrage to fund a perpetual Jubilee: a fund that accrues over 50 years to
+release pledged assets.  Each account's =buckSeconds= field is the cumulative integral of (raw
+balance × dt) crystallised on every balance changing event at the block's =timestamp= ; the live fee
+owed is
 
 #+BEGIN_SRC text
 feeOwing(a) = (buckSeconds + balance * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE
@@ -466,12 +469,10 @@ redistribution, not minting.  The exact invariant:
 sum_a rawBalanceOf(a) == totalSupply + jubileeActual()
 #+END_SRC
 
-The "extra" raw stored on Jubilee precisely matches the sum of locked fees hidden in Non-Carrying
-balanceOf results, so spendable supply across all Non-Carrying accounts equals =totalSupply= up
-to per-account rounding.  Carrying accounts retain visible balance through demurrage cycles; the
-Jubilee accordingly accrues credit for their share of system demurrage without offsetting their
-balanceOf -- a small enrichment of the Jubilee fund that is the price of giving AMM pools
-ERC-20-stable views.  =JubileeAccrued(delta, newBalance)= surfaces every accrual.
+The "extra" raw stored on Jubilee approximately matches the sum of locked fees hidden in
+Non-Carrying balanceOf results -- Carrying accounts contribute their share of system demurrage to
+Jubilee without the offsetting balanceOf deduction, so Jubilee accrues a small enrichment beyond
+what Non-Carrying holders have locked.  This is the price of giving AMM pools ERC-20-stable views.  =JubileeAccrued(delta, newBalance)= surfaces every accrual.
 
 The Jubilee is the sink that funds default coverage, perpetual-ground-rent disbursement, or a
 periodic balance reset -- all governance-driven on-chain disbursement paths land on top of this
@@ -908,7 +909,7 @@ flags for later study:
 
 * Status
 
-Current Foundry suite: 245 unit tests pass across 13 suites; one =BuckKControllerForkTest=
+Current Foundry suite: 247 unit tests pass across 13 suites; one =BuckKControllerForkTest=
 requires a live mainnet RPC and is skipped offline.  The shipped surface covers all five
 contracts in tree (=BuckCredit=, =IdentityRegistry=, =Buck=, =BuckKControllerStatic= +
 =BuckKController=, =Notes=) plus the SNARK toolchain (=mint_batch.circom= at pinned
