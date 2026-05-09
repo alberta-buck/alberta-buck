@@ -6,6 +6,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {Math}           from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {BN254}            from "./BN254.sol";
+import {BuckTypes}        from "./BuckTypes.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 
 /// @title Buck — identity-bound ERC-20 with single-slot per-account state.
@@ -42,7 +43,11 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- constants ---------------------------------------------------------
 
-    uint256 internal constant PRECISION          = 1e18;
+    /// @dev BuckK fixed-point scale.  IBuckK.currentBuckK() returns a 1e18
+    ///      ratio; division by this scale converts (BUCK * buckK) back to BUCK.
+    ///      Sourced from BuckTypes so all BUCK-denominated math shares one
+    ///      authoritative constant.
+    uint256 internal constant BUCKK_SCALE        = BuckTypes.BUCKK_SCALE;
     uint256 internal constant SCALE              = 1e27;
     uint256 internal constant BASE_RATE_PER_YEAR = 2e25;                // 0.02 in SCALE
     uint256 internal constant SECONDS_PER_YEAR_  = 365 days + 6 hours;
@@ -51,7 +56,8 @@ contract Buck is IERC20, IERC20Metadata {
     uint256 internal constant BP                 = 10000;
     uint256 internal constant POOL_ROI_INV       = 10;                  // 10% assumed annual ROI
 
-    uint256 internal constant MAX_BALANCE        = type(uint80).max;    // ~1.21e24
+    /// @dev uint80 cap on packed BUCK balances; centralised in BuckTypes.
+    uint256 internal constant MAX_BALANCE        = BuckTypes.MAX_BALANCE;
     uint256 internal constant MAX_BUCKSECONDS    = type(uint120).max;
 
     // ---- packed per-account state ------------------------------------------
@@ -166,7 +172,7 @@ contract Buck is IERC20, IERC20Metadata {
 
     function name()     external pure returns (string memory) { return "Alberta Buck"; }
     function symbol()   external pure returns (string memory) { return "BUCK";         }
-    function decimals() external pure returns (uint8)         { return 6;              }
+    function decimals() external pure returns (uint8)         { return BuckTypes.DECIMALS; }
 
     // ---- IERC20 ------------------------------------------------------------
 
@@ -267,7 +273,7 @@ contract Buck is IERC20, IERC20Metadata {
 
         uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
         uint256 currentBuckK     = buckK.currentBuckK();
-        uint256 maxLimit         = totalCreditValue * currentBuckK / PRECISION;
+        uint256 maxLimit         = totalCreditValue * currentBuckK / BUCKK_SCALE;
         if (maxLimit > storedLimit[msg.sender]) {
             storedLimit[msg.sender] = maxLimit;
         }

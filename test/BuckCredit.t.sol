@@ -139,21 +139,22 @@ contract BuckCreditTest is Test {
         vm.prank(alice);
         credit.activate(tokenId, 100_000e6);
 
-        // After 1 year: ~exp(-0.15) of depreciable = ~86.07%
+        // Discrete annual compounding: depreciable * (BP - rate)/BP per full year,
+        // linearly interpolated across the trailing partial year.
+        // After 1 year: 5K + 95K * 0.85 = 5K + 80,750 = 85,750
         vm.warp(block.timestamp + 365.25 days);
         uint256 val1 = credit.currentValue(tokenId);
-        // Expected: 5K + 95K * exp(-0.15) ≈ 5K + 81,765 ≈ 86,765
-        assertApproxEqRel(val1, 86_765e6, 0.01e18);  // within 1%
+        assertApproxEqRel(val1, 85_750e6, 0.001e18);  // within 0.1%
 
-        // After 5 years total: exp(-0.75) ≈ 0.4724 → 5K + 95K*0.4724 ≈ 49,878
+        // After 5 years total: 5K + 95K * 0.85^5 = 5K + 42,152 = 47,152
         vm.warp(block.timestamp + 365.25 days * 4);  // total 5 years
         uint256 val5 = credit.currentValue(tokenId);
-        assertApproxEqRel(val5, 49_878e6, 0.02e18);  // within 2%
+        assertApproxEqRel(val5, 47_152e6, 0.001e18);  // within 0.1%
 
-        // After 10 years total: exp(-1.5) ≈ 0.2231 → 5K + 95K*0.2231 ≈ 26,195
+        // After 10 years total: 5K + 95K * 0.85^10 = 5K + 18,703 = 23,703
         vm.warp(block.timestamp + 365.25 days * 5);  // total 10 years
         uint256 val10 = credit.currentValue(tokenId);
-        assertApproxEqRel(val10, 26_195e6, 0.02e18);
+        assertApproxEqRel(val10, 23_703e6, 0.001e18);  // within 0.1%
     }
 
     function test_totalCurrentValue() public {

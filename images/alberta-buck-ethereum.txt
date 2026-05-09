@@ -183,8 +183,8 @@ Table of Contents
   • `LINEAR': loss accrues at `depRate' bp/year on the depreciable
     portion (`faceValue - floor'), clamped at `depreciationFloor'.
   • `DECLINING_BALANCE': continuous-compounded via an in-contract
-    `_expNeg' (6th-order Taylor series, accurate to <0.01% for x < 3.0;
-    production deployments would swap in PRBMath or ABDKMath).
+    `_expNeg' (piecewise minimax-rational, accurate to <1% across full
+    [0, 10] range).
 
   In every case the activated portion depreciates proportionally:
   `currentValue = depreciatedFace * activatedValue / faceValue'.
@@ -294,7 +294,7 @@ Table of Contents
   │ struct G2Point  { uint256[2] X; uint256[2] Y; }
   │ 
   │ struct ElGamalCT { G1Point R; G1Point C; }      // (R, C) = (r*G, r*pk + M)
-  │ struct PSSig     { G1Point s1; G1Point s2; }
+  │ struct PSSig     { G1Point sigma_1; G1Point sigma_2; }
   │ struct PSPubKey  { G2Point X; G2Point Y; }
   │ 
   │ struct RegistrationProof { uint256 e, s_m, s_r; G1Point A_ps, T_C, T_R; }
@@ -304,7 +304,7 @@ Table of Contents
   │ function register(address issuer, G1Point pk, ElGamalCT E,
   │                   PSSig sigma, RegistrationProof proof);
   │ function bindContract(address target, G1Point pk, ElGamalCT E,
-  │                       bool isCarrying, bool isPublicIdentity_);
+  │                       bool isPublicIdentity_, bool isCarrying);
   │ function trustIssuer(address issuer, PSPubKey ipk);                 // governance
   │ function verifyApprove(address sender, address spender,
   │                        ElGamalCT E_bob, CPProof pi) view returns (bool);
@@ -338,12 +338,12 @@ Table of Contents
   DeFi infrastructure – AMM pools, vaults, oracles, the Notes pool –
   can't generate Chaum-Pedersen proofs at `approve' time because the
   contract has no private key.  Such contracts bind via
-  `bindContract(target, pk, E, isCarrying, isPublicIdentity_=true)'.
-  Counterparties of a Public-Identity contract still call the
-  identity-bound `approve' (the always-CP rule applies regardless of
-  spender flavor), but the receipt-fragment check on the contract side
-  is satisfied by the deterministic `_identityHash' rather than a
-  per-counterparty CP receipt.  Public-Identity contracts forfeit
+  `bindContract(target, pk, E, isPublicIdentity_=true,
+  isCarrying=true)'.  Counterparties of a Public-Identity contract still
+  call the identity-bound `approve' (the always-CP rule applies
+  regardless of spender flavor), but the receipt-fragment check on the
+  contract side is satisfied by the deterministic `_identityHash' rather
+  than a per-counterparty CP receipt.  Public-Identity contracts forfeit
   content privacy: their identity M is openable on subpoena via the
   operator's off-chain attestation.  Encrypted-Identity contract binding
   (`isPublicIdentity_=false') is supported by the surface but not yet
@@ -710,9 +710,10 @@ Table of Contents
   `circuits/mint_batch.circom' is a parameterised batch-mint circuit.
   Each pinned size N (specialised at N ∈ {1, 2, 4, 8, 16, 32}, with the
   smaller sizes useful for unit tests and small wallet flows) produces
-  its own `MintBatchN*Groth16Verifier.sol'.  The contract dispatches by
-  `cms.length' to `mintVerifiers[N]'.  Public-signals arity is 5
-  regardless of N:
+  its own `MintBatchN*Groth16Verifier.sol'.  The shipped `Notes'
+  contract holds a single `mintVerifier' adapter; per-N dispatch lives
+  inside the adapter (a single `IMintVerifier' chooses the right pinned
+  verifier by `cms.length').  Public-signals arity is 5 regardless of N:
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Signal           Description                                                            
@@ -812,7 +813,7 @@ Table of Contents
   │ interface IMintVerifier {
   │     function verifyMint(bytes proof, uint256 oldRoot, uint256 newRoot,
   │                         uint256 nextLeafIndex, uint256 totalFace,
-  │                         uint256 cmBatchHash) external view returns (bool);
+  │                         uint256[] calldata cms) external view returns (bool);
   │ }
   │ interface ISpendVerifier {
   │     function verifySpend(bytes proof, uint256 root, uint256 nullifier,
@@ -831,22 +832,28 @@ Table of Contents
   for unit tests that exercise state transitions unrelated to the SNARK.
   The production `Adapter' contracts decode the proof as `(uint256[2],
   uint256[2][2], uint256[2])', build the public-signals tuple, and
-  forward to the snarkjs-generated Groth16 verifier.  `mintVerifiers' is
-  per-N (`mapping(uint256 => IMintVerifier)'); spend verifiers are
-  singletons.  Swapping any of them is a single governance call.
+  forward to the snarkjs-generated Groth16 verifier.  `mintVerifier' is
+  a singleton `IMintVerifier' adapter that internally dispatches by
+  `cms.length' to the correct pinned `MintBatchN*Groth16Verifier'; spend
+  verifiers are likewise singletons.  Swapping any of them is a single
+  governance call.
 
 
 7.4 Notes Contract
 ──────────────────
 
-  `src/Notes.sol' is constructed with `(buck, mintVerifierRegistry,
-  spendVerifier, spendAVerifier, identityRegistry, governance)'.  Its
-  state is intentionally lean – per-leaf insertion math now lives in the
-  SNARK:
+  `src/Notes.sol' is constructed with `(buck, mintVerifier,
+  spendVerifier, governance)'.  The A-flavor spend verifier and the
+  identity registry are wired post-construction via governance setters
+  (`setSpendAVerifier', `setIdentityRegistry'); until both are set,
+  `spendACP' reverts with `Notes: A-spend disabled' or `Notes: identity
+  registry not set'.  Its state is intentionally lean – per-leaf
+  insertion math now lives in the SNARK:
 
-  • *Verifier handles*: per-N `mintVerifiers[N]', singletons for B-spend
-    and A-spend, plus the `identityRegistry' used by `spendACP' for
-    `verifySpendCP'.  All swappable by governance.
+  • *Verifier handles*: singleton `mintVerifier' (the adapter that
+    dispatches by batch size), singletons `spendVerifier' for B-spend
+    and `spendAVerifier' for A-spend, plus the `identityRegistry' used
+    by `spendACP' for `verifySpendCP'.  All swappable by governance.
   • *Audit / double-spend state*: `mapping(uint256 => bool) nullifiers',
      `uint256 noteFaceSum'.
   • *Tree state*: `uint32 nextLeafIndex' and
@@ -858,14 +865,16 @@ Table of Contents
 
   `mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms)' asserts
   `cms.length > 0', checks `oldRoot == roots[currentRootIndex]' and
-  `nextLeafIndex == self.nextLeafIndex' (stale-state guards), recomputes
-  `cmBatchHash', dispatches to `mintVerifiers[cms.length]', pulls
-  `totalFace' BUCK via `transferFrom(caller, this, totalFace)', writes
-  `newRoot' into the ring buffer at `(currentRootIndex + 1) %
-  ROOT_HISTORY_SIZE', advances `nextLeafIndex' by `cms.length', bumps
-  `noteFaceSum' by `totalFace', and emits `Minted(issuer, totalFace,
-  startIndex, count, newRoot)'.  Per-leaf `Appended' events are gone;
-  the commitments live in calldata for off-chain replayers.
+  `nextLeafIndex == self.nextLeafIndex' (stale-state guards),
+  field-bounds each `cms[i]' against `FIELD_R', dispatches to
+  `mintVerifier' (which forwards to the per-N pinned Groth16 verifier
+  internally), pulls `totalFace' BUCK via `transferFrom(caller, this,
+  totalFace)', writes `newRoot' into the ring buffer at
+  `(currentRootIndex + 1) % ROOT_HISTORY_SIZE', advances `nextLeafIndex'
+  by `cms.length', bumps `noteFaceSum' by `totalFace', and emits
+  `Minted(issuer, totalFace, startIndex, count, newRoot)'.  Per-leaf
+  `Appended' events are gone; the commitments live in calldata for
+  off-chain replayers.
 
   `spend(proof, root, nullifier, face, recipient)' (B-flavor) requires
   `recipient != 0', `face > 0', `isAcceptedRoot(root)' (root in the
@@ -993,11 +1002,12 @@ Table of Contents
      rule applies even though Notes is bound under a Public Identity.
      The receipt fragment is openable on subpoena.
   2. `Notes.mint(proofBytes, oldRoot, newRoot, nextLeafIndex, 125e6,
-     [cm[0]..cm[15]])' – the adapter dispatches by `cms.length=16' to
-     `mintVerifiers[16]'.  On success, 125e6 BUCK moves from Alice to
-     Notes, `roots[]' advances to the SNARK-attested `newRoot',
-     `nextLeafIndex' advances by 16, `noteFaceSum +' 125e6=.  Alice
-     keeps the live openings privately; the dummies are discarded.
+     [cm[0]..cm[15]])' – the adapter dispatches internally by
+     `cms.length=16' to its pinned `MintBatch16' Groth16 verifier.  On
+     success, 125e6 BUCK moves from Alice to Notes, `roots[]' advances
+     to the SNARK-attested `newRoot', `nextLeafIndex' advances by 16,
+     `noteFaceSum +' 125e6=.  Alice keeps the live openings privately;
+     the dummies are discarded.
 
 
 8.6 Step 5: Spend a Note
