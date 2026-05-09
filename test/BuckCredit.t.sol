@@ -213,7 +213,7 @@ contract BuckCreditTest is Test {
         );
 
         // Activated should be capped to new face value
-        (,,,,,,,,,,uint256 activated,) = credit.credits(tokenId);
+        (, uint256 activated, ) = credit.creditInfo(tokenId);
         assertEq(activated, 250_000e6);
     }
 

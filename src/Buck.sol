@@ -6,7 +6,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {Math}           from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {BN254}            from "./BN254.sol";
-import {BuckTypes}        from "./BuckTypes.sol";
+import {BuckTypes, BuckQty, BuckSeconds, toBuckQty, toBuckSeconds} from "./BuckTypes.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 
 /// @title Buck — identity-bound ERC-20 with single-slot per-account state.
@@ -56,10 +56,6 @@ contract Buck is IERC20, IERC20Metadata {
     uint256 internal constant BP                 = 10000;
     uint256 internal constant POOL_ROI_INV       = 10;                  // 10% assumed annual ROI
 
-    /// @dev uint80 cap on packed BUCK balances; centralised in BuckTypes.
-    uint256 internal constant MAX_BALANCE        = BuckTypes.MAX_BALANCE;
-    uint256 internal constant MAX_BUCKSECONDS    = type(uint120).max;
-
     // ---- packed per-account state ------------------------------------------
     //
     //   balance      uint80   raw stored balance.  Spendable (Non-Carrying):
@@ -77,10 +73,10 @@ contract Buck is IERC20, IERC20Metadata {
     //   flags        uint16   reserved for future per-account flags.
 
     struct AccountState {
-        uint80  balance;
-        uint120 buckSeconds;
-        uint40  timestamp;
-        uint16  flags;
+        BuckQty     balance;       // uint80 underlying; cap = BuckTypes.MAX_BALANCE
+        BuckSeconds buckSeconds;   // uint120 underlying; cap = BuckTypes.MAX_BS
+        uint40      timestamp;
+        uint16      flags;
     }
     mapping(address => AccountState) internal _state;
 
@@ -180,7 +176,7 @@ contract Buck is IERC20, IERC20Metadata {
 
     function balanceOf(address a) public view returns (uint256) {
         AccountState storage s = _state[a];
-        uint256 raw = uint256(s.balance);
+        uint256 raw = s.balance.asUint();
         if (identity.isCarrying(a)) return raw;
         uint256 fee = _feeOwing(s, raw);
         return fee >= raw ? 0 : raw - fee;
@@ -278,12 +274,12 @@ contract Buck is IERC20, IERC20Metadata {
             storedLimit[msg.sender] = maxLimit;
         }
         uint256 limit = storedLimit[msg.sender];
-        require(uint256(_state[msg.sender].balance) + amount <= limit, "BUCK: exceeds credit limit");
+        require(_state[msg.sender].balance.asUint() + amount <= limit, "BUCK: exceeds credit limit");
 
         (uint256 totalCoverage, uint256 poolPrincipal) = _allocateMint(amount, tokenIds);
 
         require(
-            uint256(_state[msg.sender].balance) + totalCoverage <= limit,
+            _state[msg.sender].balance.asUint() + totalCoverage <= limit,
             "BUCK: exceeds credit limit"
         );
 
@@ -534,7 +530,7 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 carriedBuckSeconds = (value == 0 || ageBasis == 0)
             ? 0
             : value * ageBasis;
-        require(value <= uint256(_state[from].balance), "BUCK: amount exceeds raw");
+        require(value <= _state[from].balance.asUint(), "BUCK: amount exceeds raw");
         _crystallizeAndAdd(to, carriedBuckSeconds);
         _subBalance(from, value);
         _addBalance(to, value);
@@ -544,18 +540,18 @@ contract Buck is IERC20, IERC20Metadata {
 
     function feeOwing(address a) public view returns (uint256) {
         AccountState storage s = _state[a];
-        return _feeOwing(s, uint256(s.balance));
+        return _feeOwing(s, s.balance.asUint());
     }
 
     function balanceOfFees(address a) public view returns (uint256) {
         uint256 fee = feeOwing(a);
         if (identity.isCarrying(a)) return fee;
-        uint256 raw = uint256(_state[a].balance);
+        uint256 raw = _state[a].balance.asUint();
         return fee >= raw ? raw : fee;
     }
 
     function rawBalanceOf(address a) external view returns (uint256) {
-        return uint256(_state[a].balance);
+        return _state[a].balance.asUint();
     }
 
     function jubileeBalance() external view returns (uint256) {
@@ -563,14 +559,14 @@ contract Buck is IERC20, IERC20Metadata {
     }
 
     function jubileeActual() external view returns (uint256) {
-        return uint256(_state[address(this)].balance);
+        return _state[address(this)].balance.asUint();
     }
 
     // ---- demurrage internals -----------------------------------------------
 
     function _feeOwing(AccountState storage s, uint256 raw) internal view returns (uint256) {
         uint256 elapsed = block.timestamp - uint256(s.timestamp);
-        uint256 buckSecondsLive = uint256(s.buckSeconds) + (raw * elapsed);
+        uint256 buckSecondsLive = s.buckSeconds.asUint() + (raw * elapsed);
         if (buckSecondsLive == 0) return 0;
         return Math.mulDiv(buckSecondsLive, BASE_RATE_PER_SEC, SCALE);
     }
@@ -580,13 +576,12 @@ contract Buck is IERC20, IERC20Metadata {
     ///      the same block is a no-op.  No balance change.
     function _crystallize(address a) internal {
         AccountState memory s = _state[a];
-        uint256 raw     = uint256(s.balance);
+        uint256 raw     = s.balance.asUint();
         uint256 elapsed = block.timestamp - uint256(s.timestamp);
         bool dirty = false;
         if (elapsed != 0 && raw != 0) {
-            uint256 newBs = uint256(s.buckSeconds) + raw * elapsed;
-            require(newBs <= MAX_BUCKSECONDS, "BUCK: buckSeconds overflow");
-            s.buckSeconds = uint120(newBs);
+            uint256 newBs = s.buckSeconds.asUint() + raw * elapsed;
+            s.buckSeconds = toBuckSeconds(newBs);
             dirty = true;
         }
         if (uint256(s.timestamp) != block.timestamp) {
@@ -602,15 +597,14 @@ contract Buck is IERC20, IERC20Metadata {
     ///      rectangle.
     function _crystallizeAndAdd(address a, uint256 extraBuckSeconds) internal {
         AccountState memory s = _state[a];
-        uint256 raw     = uint256(s.balance);
+        uint256 raw     = s.balance.asUint();
         uint256 elapsed = block.timestamp - uint256(s.timestamp);
-        uint256 newBs   = uint256(s.buckSeconds);
+        uint256 newBs   = s.buckSeconds.asUint();
         if (elapsed != 0 && raw != 0) {
             newBs += raw * elapsed;
         }
         newBs += extraBuckSeconds;
-        require(newBs <= MAX_BUCKSECONDS, "BUCK: buckSeconds overflow");
-        s.buckSeconds = uint120(newBs);
+        s.buckSeconds = toBuckSeconds(newBs);
         s.timestamp   = uint40(block.timestamp);
         _state[a] = s;
     }
@@ -629,7 +623,7 @@ contract Buck is IERC20, IERC20Metadata {
         if (delta == 0) return;
         _crystallize(address(this));
         _addBalance(address(this), delta);
-        emit JubileeAccrued(delta, uint256(_state[address(this)].balance));
+        emit JubileeAccrued(delta, _state[address(this)].balance.asUint());
     }
 
     // ---- balance writes ----------------------------------------------------
@@ -637,17 +631,16 @@ contract Buck is IERC20, IERC20Metadata {
     function _addBalance(address a, uint256 amount) internal {
         if (amount == 0) return;
         AccountState memory s = _state[a];
-        uint256 newBal = uint256(s.balance) + amount;
-        require(newBal <= MAX_BALANCE, "BUCK: balance overflow");
-        s.balance = uint80(newBal);
+        s.balance = toBuckQty(s.balance.asUint() + amount);
         _state[a] = s;
     }
 
     function _subBalance(address a, uint256 amount) internal {
         if (amount == 0) return;
         AccountState memory s = _state[a];
-        require(uint256(s.balance) >= amount, "BUCK: insufficient balance");
-        unchecked { s.balance = uint80(uint256(s.balance) - amount); }
+        uint256 raw = s.balance.asUint();
+        require(raw >= amount, "BUCK: insufficient balance");
+        unchecked { s.balance = toBuckQty(raw - amount); }
         _state[a] = s;
     }
 
