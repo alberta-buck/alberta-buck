@@ -10,7 +10,7 @@ auto_detect_solc = true
 evm_version = "cancun"
 ffi = false
 fs_permissions = [
-    { access = "read", path = "./test/vectors" },
+    { access = "read-write", path = "./test/vectors" },
     { access = "read", path = "./build/snark" },
     { access = "read", path = "./out" },
 ]
