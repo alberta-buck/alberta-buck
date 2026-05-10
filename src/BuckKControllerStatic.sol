@@ -26,9 +26,11 @@ contract BuckKControllerStatic {
         return buckK;
     }
 
-    /// @notice State-changing accessor — preserves source-compat with the eventual
-    ///         PID controller, but performs no PID work in Phase 0.
-    function compute() external view returns (uint256) {
+    /// @notice State-changing accessor -- preserves source-compat with the
+    ///         eventual PID controller, but performs no PID work in Phase 0.
+    /// @dev    Non-view to match the IBuckK interface signature used by
+    ///         Buck.sol (the dynamic controller's compute() writes state).
+    function compute() external returns (uint256) {
         return buckK;
     }
 

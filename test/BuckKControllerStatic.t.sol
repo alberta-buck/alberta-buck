@@ -15,7 +15,7 @@ contract BuckKControllerStaticTest is Test {
         ctrl = new BuckKControllerStatic(ONE, governance);
     }
 
-    function test_initialState() public view {
+    function test_initialState() public {
         assertEq(ctrl.buckK(), ONE);
         assertEq(ctrl.currentBuckK(), ONE);
         assertEq(ctrl.compute(), ONE);

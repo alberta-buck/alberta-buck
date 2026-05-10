@@ -207,6 +207,83 @@ contract BuckKControllerUnitTest is Test {
         emit log_named_int("integral after 10 cycles", ctrl.I());
     }
 
+    // -------------------------------------------------------------------- //
+    //  dt clamp (long-gap protection)                                        //
+    // -------------------------------------------------------------------- //
+
+    function test_dTMax_default_is_unbounded() public view {
+        assertEq(ctrl.dTMax(), type(uint256).max);
+    }
+
+    function test_setDTMax_governance_required() public {
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert("Not governance");
+        ctrl.setDTMax(7200);
+    }
+
+    function test_setDTMax_rejects_below_dT() public {
+        vm.prank(governance);
+        vm.expectRevert("dTMax<dT");
+        ctrl.setDTMax(1800);  // dT is 3600
+    }
+
+    function test_dTMax_clamps_long_gap_integral() public {
+        // Disable derivative for these tests -- otherwise a first-cycle
+        // step in error spikes D*Kd huge enough to rail the output, which
+        // freezes the integral via anti-windup and masks the clamp effect.
+        vm.prank(governance);
+        ctrl.setGains(0.1e18, 0.01e18, 0);
+
+        // 1% under-valuation: small enough that PID stays in-band and the
+        // integral is the term we actually observe.
+        ctrl.setBuckPrice(0.99e18);
+
+        // One normal cycle to capture the per-dT integral increment.
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        int256 iAfterOneCycle = ctrl.I();
+        assertGt(iAfterOneCycle, 0, "first cycle did not accumulate I");
+
+        // Configure dTMax = dT (= 3600) and warp a full day.  The controller
+        // should treat the gap as one dT-step worth of error.
+        vm.prank(governance);
+        ctrl.setDTMax(3600);
+
+        int256 iBefore = ctrl.I();
+        vm.warp(block.timestamp + 24 hours);
+        ctrl.compute();
+        int256 deltaClamped = ctrl.I() - iBefore;
+
+        emit log_named_int("I delta over one normal cycle",  iAfterOneCycle);
+        emit log_named_int("I delta over a clamped 24h gap", deltaClamped);
+
+        // With clamp: deltaClamped ~= iAfterOneCycle.
+        // Without clamp it would be ~24x larger.  Allow 50% slack.
+        int256 deltaAbs    = deltaClamped < 0 ? -deltaClamped : deltaClamped;
+        int256 oneCycleAbs = iAfterOneCycle < 0 ? -iAfterOneCycle : iAfterOneCycle;
+        assertLe(deltaAbs, oneCycleAbs * 3 / 2, "dTMax clamp ineffective");
+
+        // lastUpdate advances to real block.timestamp (no backlog).
+        assertEq(ctrl.lastUpdate(), block.timestamp);
+    }
+
+    function test_dTMax_does_not_drive_buckK_to_rail_after_long_gap() public {
+        vm.prank(governance);
+        ctrl.setGains(0.1e18, 0.01e18, 0);
+        vm.prank(governance);
+        ctrl.setDTMax(3600);
+
+        // 24-hour silence with sustained 5% under-valuation.
+        ctrl.setBuckPrice(0.95e18);
+        vm.warp(block.timestamp + 24 hours);
+        uint256 k = ctrl.compute();
+
+        // P at 5% error * Kp=0.1 = 0.005 → K ≈ 1.005.  Without clamp, the
+        // 24h I accumulation would shove K toward the rail.
+        assertLt(k, 1.10e18, "buckK overshot after clamped long gap");
+        assertGt(k, 1.0e18,  "buckK did not respond at all");
+    }
+
     function test_governance_setGains() public {
         vm.prank(governance);
         ctrl.setGains(0.2e18, 0.02e18, 0.1e18);

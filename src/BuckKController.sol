@@ -37,6 +37,23 @@ contract BuckKController {
     uint256 public buckK;     // Current BUCK_K (18-decimal, 1e18 = 1.0)
     uint256 public dT;        // Minimum seconds between PID state updates
 
+    /// @notice Maximum effective dt (seconds) used for integration / derivative.
+    ///         When the actual gap (block.timestamp - lastUpdate) exceeds
+    ///         dTMax, the PID treats the cycle as if only dTMax seconds had
+    ///         passed.  Real `lastUpdate` still advances to block.timestamp,
+    ///         so we don't accumulate a backlog across subsequent cycles.
+    ///
+    ///         Rationale: in early days, mints may be infrequent.  A 24h gap
+    ///         followed by a single compute() with sustained error would
+    ///         otherwise slug the integral with 24h of accumulated error in
+    ///         one step, slamming buckK to a rail.  Clamping treats long
+    ///         silences as "we don't know what happened" rather than "this
+    ///         error persisted the entire time."
+    ///
+    ///         Default: type(uint256).max (no clamp -- backwards-compat).
+    ///         Governance can set a finite value via `setDTMax`.
+    uint256 public dTMax;
+
     // --- Output Limits (anti-windup) ---
     uint256 public buckKMin;
     uint256 public buckKMax;
@@ -99,20 +116,47 @@ contract BuckKController {
         governance = _governance;
         buckK = _buckK;
         lastUpdate = block.timestamp;
+        dTMax = type(uint256).max; // disabled by default; governance opts in
     }
 
-    /// @notice Compute and return the current BUCK_K value.
-    /// @dev If dT has elapsed, performs a full PID cycle (oracle reads + state update).
-    ///      Otherwise returns cached buckK.  The minter pays gas for any PID update.
+    /// @notice Run (or cache) one PID cycle and return the current BUCK_K.
+    ///
+    /// @dev Permissionless and side-effect-only-when-due.  If less than `dT`
+    ///      seconds have elapsed since the last cycle, this is a cheap
+    ///      cached read (one SLOAD + return) -- callers can invoke it
+    ///      freely.  When `dT` has elapsed, performs a full PID cycle:
+    ///      oracle reads, P/I/D update, anti-windup clamp, store.
+    ///
+    ///      Pokability: this function is intentionally external and
+    ///      non-restricted so any caller (mint, burn, transfer wrapper,
+    ///      keeper, individual user) can advance the PID.  In normal
+    ///      operation Buck.mint() / Buck.burn() drive it; in long quiet
+    ///      stretches a keeper may wish to call it to keep the integral
+    ///      alive (or rely on dTMax to bound the eventual catch-up step).
+    ///
+    ///      Future: if a richer PID grows expensive enough that mint-time
+    ///      amortization becomes painful, the cycle work can be split into
+    ///      a state-machine over multiple calls -- each transfer advancing
+    ///      one micro-step of (read pool i, accumulate, finalize).  The
+    ///      tradeoff is that pool reads stretch over real time and so the
+    ///      basket sample becomes incoherent unless every input is itself
+    ///      TWAP'd over a window covering the state-machine duration.
+    ///      Today's full-cycle compute is cheap enough that the simpler
+    ///      "all-or-nothing per dT" pattern wins; revisit if oracle reads
+    ///      grow or the basket expands materially.
     function compute() external returns (uint256) {
-        if (block.timestamp - lastUpdate < dT) {
+        uint256 elapsed = block.timestamp - lastUpdate;
+        if (elapsed < dT) {
             return buckK;
         }
 
         int256 basketCost = _getBasketCost();
         int256 buckPrice  = _getBuckPrice();
 
-        int256 dt = int256(block.timestamp - lastUpdate);
+        // Clamp the effective integration step but advance lastUpdate to
+        // real block.timestamp so the next cycle measures forward correctly.
+        uint256 effective = elapsed > dTMax ? dTMax : elapsed;
+        int256 dt = int256(effective);
         int256 error = basketCost - buckPrice;
 
         int256 newP = error;
@@ -216,6 +260,14 @@ contract BuckKController {
     function setDT(uint256 _dT) external {
         require(msg.sender == governance, "Not governance");
         dT = _dT;
+    }
+
+    /// @notice Cap the effective integration window for any single PID cycle.
+    /// @dev Pass type(uint256).max to disable (no clamp).  See `dTMax` doc.
+    function setDTMax(uint256 _dTMax) external {
+        require(msg.sender == governance, "Not governance");
+        require(_dTMax >= dT, "dTMax<dT");
+        dTMax = _dTMax;
     }
 
     function addBasketComponent(address feed, uint256 weight, uint8 feedDecimals) external {

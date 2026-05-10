@@ -21,6 +21,10 @@ import {IdentityRegistry} from "./IdentityRegistry.sol";
 /// transfer.  This keeps the hot path to one SSTORE per side per transfer.
 interface IBuckK {
     function currentBuckK() external view returns (uint256);
+    /// @dev State-changing accessor.  Runs a PID cycle if `dT` has elapsed,
+    ///      otherwise returns the cached value.  Buck mints/burns call this
+    ///      so user activity drives (and amortizes) PID work.
+    function compute() external returns (uint256);
 }
 
 interface IBuckCredit {
@@ -273,7 +277,9 @@ contract Buck is IERC20, IERC20Metadata {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
 
         uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
-        uint256 currentBuckK     = buckK.currentBuckK();
+        // compute() advances the PID if dT has elapsed (cheap cached read
+        // otherwise).  Mint activity is the primary driver of the controller.
+        uint256 currentBuckK     = buckK.compute();
         uint256 maxLimit         = totalCreditValue * currentBuckK / BUCKK_SCALE;
         if (maxLimit > storedLimit[msg.sender]) {
             storedLimit[msg.sender] = maxLimit;
@@ -304,6 +310,9 @@ contract Buck is IERC20, IERC20Metadata {
 
     function _burnAllocated(uint256 amount, uint256[] memory tokenIds) internal {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+        // Burn doesn't consume the K value but still touches the controller
+        // so burn activity also amortizes PID work alongside mints.
+        buckK.compute();
         (, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
 
         _accrueJubilee();
