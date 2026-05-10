@@ -85,6 +85,37 @@ abstract contract UniswapV3Fixture is Test, IUniswapV3MintCallback, IUniswapV3Sw
         IUniswapV3Pool(pool).mint(address(this), minTick, maxTick, liquidity, data);
     }
 
+    /// @dev Bump the pool's `observationCardinalityNext` so it can store
+    ///      enough observations to satisfy a TWAP consult of `secondsAgo`.
+    function _bumpCardinality(address pool, uint16 next) internal {
+        IUniswapV3Pool(pool).increaseObservationCardinalityNext(next);
+    }
+
+    /// @dev Write an oracle observation without moving the pool's spot price.
+    ///      `_modifyPosition` writes an observation whenever the current tick
+    ///      is in-range; calling `burn(MIN..MAX, 0)` on a full-range position
+    ///      this fixture already owns is the cheapest way to "touch".
+    function _touchPool(address pool) internal {
+        int24 spacing = IUniswapV3Pool(pool).tickSpacing();
+        int24 minTick = (UniswapV3OracleLib.MIN_TICK / spacing) * spacing;
+        int24 maxTick = (UniswapV3OracleLib.MAX_TICK / spacing) * spacing;
+        IUniswapV3Pool(pool).burn(minTick, maxTick, 0);
+    }
+
+    /// @dev Walk forward `secondsAgo` seconds in `nTouches` steps, writing an
+    ///      observation each step.  After this completes, `consult(pool,
+    ///      secondsAgo)` returns a real time-weighted mean (not just the
+    ///      "extrapolate from latest" degenerate path).  Pre-condition:
+    ///      this fixture owns a full-range position on `pool`.
+    function _warmupTwap(address pool, uint32 secondsAgo, uint8 nTouches) internal {
+        require(nTouches > 0, "warmup:nTouches=0");
+        uint256 step = uint256(secondsAgo) / nTouches + 1;
+        for (uint8 i = 0; i < nTouches; i++) {
+            vm.warp(block.timestamp + step);
+            _touchPool(pool);
+        }
+    }
+
     /// @dev Drive `pool`'s spot price to `targetSqrtX96` by swapping into the
     ///      pool until it reaches the target.  Caller must pre-mint the
     ///      input token; we accept "huge" amount-specified and rely on
