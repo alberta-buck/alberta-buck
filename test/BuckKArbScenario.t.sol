@@ -19,19 +19,26 @@ import {SimulationFixture} from "./fixtures/SimulationFixture.sol";
 contract BuckKArbScenarioTest is Test, SimulationFixture {
     address GOV = makeAddr("governance");
 
-    // Simulation parameters
+    // Simulation parameters.
+    //
+    // Scaled to model "10 % of population mint, < 1 % do arb" against a
+    // ~100K BUCK / 100K USDT pool.  Each Bob is sized to be 0.5-2 % of pool
+    // depth so individual swap impact is bounded; the aggregate Bob volume
+    // (~37.5K BUCK across 30 Bobs) is the realistic mint flow that drives
+    // pool drift.  Alice's 5K/5K reserve mirrors a single sophisticated
+    // arber with capital ~5 % of total pool size.
     uint256 constant DURATION_DAYS = 30;
     uint256 constant TICK_SECONDS  = 1 hours;
     uint256 constant SNAP_EVERY    = 6 hours;
-    uint256 constant N_BOBS        = 10;
+    uint256 constant N_BOBS        = 30;
 
-    // Per-Bob random ranges
-    uint256 constant BOB_MINT_MIN     = 2_000e18;     // 2,000 BUCK
-    uint256 constant BOB_MINT_MAX     = 10_000e18;    // 10,000 BUCK
-    uint256 constant BOB_LIFESPAN_MIN = 7 days;
-    uint256 constant BOB_LIFESPAN_MAX = 22 days;
+    // Per-Bob random ranges.
+    uint256 constant BOB_MINT_MIN     = 500e18;       // 0.5 % of pool
+    uint256 constant BOB_MINT_MAX     = 2_000e18;     // 2.0 % of pool
+    uint256 constant BOB_LIFESPAN_MIN = 5 days;
+    uint256 constant BOB_LIFESPAN_MAX = 20 days;
     uint256 constant BOB_ARRIVE_MIN   = 0;
-    uint256 constant BOB_ARRIVE_MAX   = 8 days;
+    uint256 constant BOB_ARRIVE_MAX   = 15 days;      // arrivals spread over half the run
     uint256 constant BOB_KEEP_MIN_BP  = 500;          //  5 % keep
     uint256 constant BOB_KEEP_MAX_BP  = 3000;         // 30 % keep
 
@@ -40,8 +47,8 @@ contract BuckKArbScenarioTest is Test, SimulationFixture {
 
     function setUp() public {
         setUpSim(GOV);
-        // Alice's off-LP reserves: 50K BUCK, 50K USDT.
-        _seedAlice(50_000e18, 50_000e6);
+        // Alice's off-LP reserves: 5K BUCK, 5K USDT (= 5 % of pool side).
+        _seedAlice(5_000e18, 5_000e6);
         _generateBobs();
     }
 

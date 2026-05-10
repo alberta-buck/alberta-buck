@@ -307,73 +307,109 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
     //  Alice arbitrage policy                                                //
     // -------------------------------------------------------------------- //
 
-    uint256 internal constant ARB_ENTRY_THRESHOLD_BP = 300;  // 3.00 %
-    uint256 internal constant ARB_EXIT_THRESHOLD_BP  =  50;  // 0.50 %
-    uint256 internal constant ARB_FRACTION_BP        = 5000; // 50 % of reserve
+    // Alice's policy parameters.
+    //
+    // Position size is the minimum of three bounds:
+    //   (1) ARB_RESERVE_FRACTION_BP of remaining reserve on the input side
+    //       (governance: how aggressively to deploy capital per cycle).
+    //   (2) ARB_TARGET_SLIPPAGE_BP of the pool's input-side balance
+    //       (sized so the round-trip slippage is comfortably narrower than
+    //       the entry threshold, otherwise her own swap immediately erases
+    //       the edge she just spotted).
+    //   (3) POOL_DEPTH_CAP_BP of the pool's input-side balance (hard
+    //       envelope; "5 % even for a very wealthy Alice").
+    //
+    // For the default 3 % entry threshold and 1 % target slippage the
+    // expected per-cycle PnL is roughly +1 % of position when the price
+    // recovers cleanly to parity, more on overshoots.
+    uint256 internal constant ARB_ENTRY_THRESHOLD_BP  =  300;  // 3.00 %
+    uint256 internal constant ARB_RESERVE_FRACTION_BP = 5000;  // 50 % of reserve
+    uint256 internal constant ARB_TARGET_SLIPPAGE_BP  =  100;  // 1 % of pool side
+    uint256 internal constant POOL_DEPTH_CAP_BP       =  500;  // 5 % hard ceiling
+
+    /// @dev Combined cap on a single arb swap.  See policy parameters above.
+    function _aliceArbSize(uint256 reserve, address inputToken) internal view returns (uint256) {
+        uint256 fromReserve = (reserve * ARB_RESERVE_FRACTION_BP) / 10000;
+        uint256 poolBal     = MockERC20(inputToken).balanceOf(buckUsdt);
+        uint256 fromTarget  = (poolBal * ARB_TARGET_SLIPPAGE_BP) / 10000;
+        uint256 fromCap     = (poolBal * POOL_DEPTH_CAP_BP)      / 10000;
+
+        uint256 r = fromReserve < fromTarget ? fromReserve : fromTarget;
+        return r < fromCap ? r : fromCap;
+    }
 
     /// @dev Run one tick of Alice's arbitrage logic.  Idempotent and side-
     ///      effect-free if no threshold trigger fires.
+    ///
+    ///      Entry: when |err| exceeds ARB_ENTRY_THRESHOLD_BP and Alice is
+    ///      flat, take the contrarian side at min(reserve%, pool-depth%).
+    ///
+    ///      Exit: |err| <= ARB_EXIT_THRESHOLD_BP (recovered to within 1 %
+    ///      of parity), OR sign-flip past the entry threshold (overshoot
+    ///      profit-taking).
     function _aliceTick() internal {
         int256  basketCost = _getBasketCostExternal();
         int256  buckTwap   = _getBuckTwapExternal();
         if (basketCost <= 0 || buckTwap <= 0) return;
 
-        // err > 0 -> BUCK undervalued (TWAP < basket).  err in 18-dec USD
-        // terms; threshold check normalised to basis points of basket cost.
+        // err > 0 -> BUCK undervalued (TWAP < basket).
         int256 err = basketCost - buckTwap;
-        int256 errBp = (err * 10000) / basketCost; // signed bp
+        int256 errBp = (err * 10000) / basketCost;
 
         if (alice.arbDirection == 0) {
-            // Flat: look for entry.
-            if (errBp >= int256(ARB_ENTRY_THRESHOLD_BP) && alice.usdtReserve > 0) {
-                // BUCK is undervalued -> buy BUCK with USDT.
-                uint256 usdtIn = (alice.usdtReserve * ARB_FRACTION_BP) / 10000;
+            if (errBp >= int256(ARB_ENTRY_THRESHOLD_BP)) {
+                // BUCK undervalued -> buy BUCK with USDT.
+                uint256 usdtIn = _aliceArbSize(alice.usdtReserve, address(usdt));
                 if (usdtIn == 0) return;
                 uint256 buckOut = _swapExactInput(buckUsdt, address(usdt), address(buck), usdtIn);
-                alice.usdtReserve  -= usdtIn;
-                alice.buckReserve  += buckOut;
+                alice.usdtReserve   -= usdtIn;
+                alice.buckReserve   += buckOut;
                 alice.arbBuckEntered = buckOut;
                 alice.arbUsdtSpent   = usdtIn;
                 alice.arbDirection   = 1;
                 ctrl.compute();
-            } else if (errBp <= -int256(ARB_ENTRY_THRESHOLD_BP) && alice.buckReserve > 0) {
+            } else if (errBp <= -int256(ARB_ENTRY_THRESHOLD_BP)) {
                 // BUCK overvalued -> sell BUCK for USDT.
-                uint256 buckIn = (alice.buckReserve * ARB_FRACTION_BP) / 10000;
+                uint256 buckIn = _aliceArbSize(alice.buckReserve, address(buck));
                 if (buckIn == 0) return;
                 uint256 usdtOut = _swapExactInput(buckUsdt, address(buck), address(usdt), buckIn);
-                alice.buckReserve  -= buckIn;
-                alice.usdtReserve  += usdtOut;
+                alice.buckReserve   -= buckIn;
+                alice.usdtReserve   += usdtOut;
                 alice.arbBuckEntered = buckIn;     // amount we owe back
-                alice.arbUsdtSpent   = usdtOut;    // (USDT received -- reused field)
+                alice.arbUsdtSpent   = usdtOut;    // USDT received
                 alice.arbDirection   = 2;
                 ctrl.compute();
             }
         } else {
-            // Open position: check exit.
-            int256 absErrBp = errBp < 0 ? -errBp : errBp;
-            if (uint256(absErrBp) <= ARB_EXIT_THRESHOLD_BP) {
-                if (alice.arbDirection == 1) {
-                    // Close long: sell the BUCK we bought, realize PnL.
-                    uint256 usdtOut = _swapExactInput(
-                        buckUsdt, address(buck), address(usdt), alice.arbBuckEntered);
-                    alice.buckReserve -= alice.arbBuckEntered;
-                    alice.usdtReserve += usdtOut;
-                    alice.realizedUsdtPnl += int256(usdtOut) - int256(alice.arbUsdtSpent);
-                } else {
-                    // Close short: buy back BUCK with USDT.  Cost may differ
-                    // from received -- target buy exactly arbBuckEntered.
-                    uint256 usdtIn = _swapExactOutput(
-                        buckUsdt, address(usdt), address(buck), alice.arbBuckEntered);
-                    alice.usdtReserve -= usdtIn;
-                    alice.buckReserve += alice.arbBuckEntered;
-                    alice.realizedUsdtPnl += int256(alice.arbUsdtSpent) - int256(usdtIn);
-                }
-                alice.arbBuckEntered = 0;
-                alice.arbUsdtSpent   = 0;
-                alice.arbDirection   = 0;
-                alice.arbCount      += 1;
-                ctrl.compute();
+            // Open position: exit on sign-flip past parity.  Long exits the
+            // moment err <= 0 (BUCK recovered to / above basket); short
+            // exits when err >= 0.  Sign-flip is wider than her own entry
+            // slippage so the round trip is profitable in expectation, and
+            // captures every overshoot the way down to or past parity.
+            bool exitTrigger = (alice.arbDirection == 1 && errBp <= 0)
+                            || (alice.arbDirection == 2 && errBp >= 0);
+            if (!exitTrigger) return;
+
+            if (alice.arbDirection == 1) {
+                // Close long.
+                uint256 usdtOut = _swapExactInput(
+                    buckUsdt, address(buck), address(usdt), alice.arbBuckEntered);
+                alice.buckReserve -= alice.arbBuckEntered;
+                alice.usdtReserve += usdtOut;
+                alice.realizedUsdtPnl += int256(usdtOut) - int256(alice.arbUsdtSpent);
+            } else {
+                // Close short -- target exact buy of arbBuckEntered BUCK.
+                uint256 usdtIn = _swapExactOutput(
+                    buckUsdt, address(usdt), address(buck), alice.arbBuckEntered);
+                alice.usdtReserve -= usdtIn;
+                alice.buckReserve += alice.arbBuckEntered;
+                alice.realizedUsdtPnl += int256(alice.arbUsdtSpent) - int256(usdtIn);
             }
+            alice.arbBuckEntered = 0;
+            alice.arbUsdtSpent   = 0;
+            alice.arbDirection   = 0;
+            alice.arbCount      += 1;
+            ctrl.compute();
         }
     }
 
