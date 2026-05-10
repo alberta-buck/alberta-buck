@@ -105,6 +105,13 @@ contract BuckKControllerUnitTest is Test {
 
         // Set BUCK price to match basket ($1.00) -- no error, no PID correction
         ctrl.setBuckPrice(1.0e18);
+
+        // Prime the controller: the first compute() captures references and
+        // returns the cached buckK without running PID math.  All subsequent
+        // tests start from a primed state.
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        assertTrue(ctrl.primed());
     }
 
     /// @dev Compute basket weight for a component given its price and target dollar share.
@@ -284,6 +291,129 @@ contract BuckKControllerUnitTest is Test {
         assertGt(k, 1.0e18,  "buckK did not respond at all");
     }
 
+    // -------------------------------------------------------------------- //
+    //  Priming + dS-compensated derivative                                   //
+    // -------------------------------------------------------------------- //
+
+    /// @dev The first compute() captures references and returns cached buckK.
+    function test_prime_does_not_run_pid() public {
+        // Deploy a fresh harness so we can observe the prime cycle in
+        // isolation (the setUp() one is already past).
+        BuckKHarness fresh = _makeHarness(0.1e18, 0.01e18, 0.00001e18, 3600);
+        _wireBasket(fresh);
+        fresh.setBuckPrice(0.90e18);  // 10% under -- big error if PID actually ran
+
+        assertFalse(fresh.primed(), "should start un-primed");
+
+        vm.warp(block.timestamp + 3601);
+        uint256 k = fresh.compute();
+
+        assertTrue(fresh.primed(),                "prime flag not set");
+        assertEq  (k, 1.0e18,                     "prime cycle modified buckK");
+        assertEq  (fresh.I(), 0,                  "prime cycle accumulated I");
+        assertEq  (fresh.D(), 0,                  "prime cycle accumulated D");
+        // P captured the actual initial error.
+        assertGt  (fresh.P(), 0,                  "P not primed with current error");
+    }
+
+    /// @dev Priming doesn't make the first-after-step cycle spike-free
+    ///      (derivative correctly responds to a real change in process).
+    ///      What it buys: after the new equilibrium is reached, P_prev =
+    ///      new error, so the *next* cycle sees a tiny (P - P_prev) and
+    ///      D collapses.  Pre-priming, every fresh deploy with non-zero
+    ///      Kd produced a perpetual derivative contribution because P_prev
+    ///      was permanently stuck at 0.
+    function test_derivative_dies_after_step_settles() public {
+        BuckKHarness fresh = _makeHarness(0.1e18, 0.01e18, 0.00001e18, 3600);
+        _wireBasket(fresh);
+        fresh.setBuckPrice(1.0e18);
+
+        vm.warp(block.timestamp + 3601);
+        fresh.compute();   // prime
+
+        // Step: BUCK drops 1%.
+        fresh.setBuckPrice(0.99e18);
+        vm.warp(block.timestamp + 3601);
+        fresh.compute();
+        int256 d1 = fresh.D();
+
+        // Hold steady -- next cycle's (error - P) ~= 0, so D dies.
+        vm.warp(block.timestamp + 3601);
+        fresh.compute();
+        int256 d2 = fresh.D();
+
+        int256 absD1 = d1 < 0 ? -d1 : d1;
+        int256 absD2 = d2 < 0 ? -d2 : d2;
+        emit log_named_int("D on step",            d1);
+        emit log_named_int("D one cycle past step", d2);
+
+        assertGt(absD1, 0,                 "D did not respond to step");
+        assertLt(absD2 * 10, absD1,        "D did not die after equilibrium");
+    }
+
+    /// @dev A pure setpoint shift (basket moved, BUCK didn't) should not
+    ///      drive derivative action -- dS compensation strips the basket
+    ///      delta out of (error - P) before dividing by dt.
+    function test_dS_suppresses_derivative_on_basket_only_shift() public {
+        // Reset to gains where Kd > 0 so we'd actually see a derivative
+        // contribution if dS compensation were absent.
+        vm.prank(governance);
+        ctrl.setGains(0.1e18, 0.01e18, 0.0001e18);
+
+        // Force a second prime under the new gains.  setUp's prime captured
+        // P with Kd=0.00001 baked in; we want a fresh reference point.
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+
+        int256 dBeforeShift = ctrl.D();
+
+        // Shift the basket UP (gold spike) -- BUCK price unchanged.
+        // basketCost grows by ~30% * (gold doubling) = ~30% basket move.
+        goldFeed.setPrice(286286487500 * 2);
+
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+
+        int256 dAfterShift = ctrl.D();
+        int256 absD        = dAfterShift < 0 ? -dAfterShift : dAfterShift;
+
+        emit log_named_int("D before basket shift", dBeforeShift);
+        emit log_named_int("D after  basket shift", dAfterShift);
+
+        // Without dS comp the derivative would be ~ (basketShift / dt) * UNIT
+        // = 0.30e18 * 1e18 / 3600 ~= 8.3e31.  With dS, basket shift is
+        // subtracted out of the (error - P) numerator, so D should be
+        // basically noise (well under 1e18 in magnitude).
+        assertLt(uint256(absD), 1e16, "dS compensation failed: spurious D on basket shift");
+
+        // Sanity: the integral and proportional terms still react -- this
+        // test isolates dS's effect on D, not the rest of the controller.
+        assertNotEq(ctrl.P(), 0, "P should reflect the new error");
+    }
+
+    function _makeHarness(int256 _Kp, int256 _Ki, int256 _Kd, uint256 _dT) internal returns (BuckKHarness h) {
+        h = new BuckKHarness(
+            _Kp, _Ki, _Kd, _dT,
+            0.50e18, 1.50e18, 1.0e18,
+            address(0), 0, governance
+        );
+    }
+
+    function _wireBasket(BuckKHarness h) internal {
+        uint256 wGold   = _basketWeight(286286487500, 8, 0.30e18);
+        uint256 wSilver = _basketWeight(3181750000,   8, 0.05e18);
+        uint256 wOil    = _basketWeight(7200000000,   8, 0.30e18);
+        uint256 wGas    = _basketWeight(350000000,    8, 0.20e18);
+        uint256 wCopper = _basketWeight(420000000,    8, 0.15e18);
+        vm.startPrank(governance);
+        h.addBasketComponent(address(goldFeed),   wGold,   8);
+        h.addBasketComponent(address(silverFeed), wSilver, 8);
+        h.addBasketComponent(address(oilFeed),    wOil,    8);
+        h.addBasketComponent(address(gasFeed),    wGas,    8);
+        h.addBasketComponent(address(copperFeed), wCopper, 8);
+        vm.stopPrank();
+    }
+
     function test_governance_setGains() public {
         vm.prank(governance);
         ctrl.setGains(0.2e18, 0.02e18, 0.1e18);
@@ -355,6 +485,10 @@ contract BuckKControllerForkTest is Test {
         vm.stopPrank();
 
         ctrl.setBuckPrice(1.0e18);
+
+        // Prime the controller (see unit-test setUp for the why).
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
     }
 
     function _basketWeight(int256 price, uint8 dec, uint256 targetDollars) internal pure returns (uint256) {

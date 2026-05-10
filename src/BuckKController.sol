@@ -33,6 +33,26 @@ contract BuckKController {
     int256 public D;
     uint256 public lastUpdate;
 
+    /// @notice Set to true after the first compute() that successfully reads
+    ///         oracles.  Until primed, `P` and `lastBasketCost` are zero
+    ///         placeholders -- if we ran a full PID step from that state,
+    ///         the derivative term `(error - P) / dt` would spike off a
+    ///         spurious "error went from 0 to current" transition.
+    ///
+    ///         The priming cycle reads basketCost / buckPrice, captures
+    ///         them as the references for the next cycle, and returns the
+    ///         cached buckK without doing any P/I/D math.  Mirrors the
+    ///         ezpwd::pid constructor pattern of pre-loading P with the
+    ///         actual initial error.
+    bool public primed;
+
+    /// @notice Last observed basket cost (18-dec USD).  Used to compute the
+    ///         setpoint shift `dS = basketCost - lastBasketCost` so that
+    ///         changes in the target (e.g. gold spike, governance re-weight)
+    ///         do not appear as derivative-of-process action.  Mirrors the
+    ///         ezpwd::pid `dS` correction.
+    int256 public lastBasketCost;
+
     // --- Output ---
     uint256 public buckK;     // Current BUCK_K (18-decimal, 1e18 = 1.0)
     uint256 public dT;        // Minimum seconds between PID state updates
@@ -152,17 +172,35 @@ contract BuckKController {
 
         int256 basketCost = _getBasketCost();
         int256 buckPrice  = _getBuckPrice();
+        int256 error      = basketCost - buckPrice;
+
+        // Priming cycle: capture references and exit without PID action.
+        // Avoids first-cycle derivative spike from P_prev = 0 and avoids
+        // a spurious dS = basketCost - 0 = ~$1.00 setpoint-shift on cycle
+        // one.  Subsequent cycles compute deltas against real references.
+        if (!primed) {
+            P              = error;
+            lastBasketCost = basketCost;
+            lastUpdate     = block.timestamp;
+            primed         = true;
+            emit BuckKUpdated(buckK, error, error, I, int256(0));
+            return buckK;
+        }
 
         // Clamp the effective integration step but advance lastUpdate to
         // real block.timestamp so the next cycle measures forward correctly.
         uint256 effective = elapsed > dTMax ? dTMax : elapsed;
         int256 dt = int256(effective);
-        int256 error = basketCost - buckPrice;
+
+        // Setpoint shift since last cycle.  Subtracting dS from (error - P)
+        // strips out target movement (e.g. gold spike, governance re-weight)
+        // so derivative reflects only BUCK's drift relative to its target.
+        int256 dS = basketCost - lastBasketCost;
 
         int256 newP = error;
         int256 newI = I + error * dt / UNIT;
         int256 newD = dt > 0
-            ? (error - P) * UNIT / dt
+            ? (error - P - dS) * UNIT / dt
             : int256(0);
 
         int256 rawOutput = UNIT
@@ -183,10 +221,11 @@ contract BuckKController {
             I = newI;
         }
 
-        P = newP;
-        D = newD;
-        buckK = newBuckK;
-        lastUpdate = block.timestamp;
+        P              = newP;
+        D              = newD;
+        buckK          = newBuckK;
+        lastUpdate     = block.timestamp;
+        lastBasketCost = basketCost;     // update reference for next dS
 
         emit BuckKUpdated(newBuckK, error, P, I, D);
         return newBuckK;
