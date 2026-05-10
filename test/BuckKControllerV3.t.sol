@@ -79,6 +79,15 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
         // 1 BUCK (1e18 in 18-dec) = 1 USDT (1e6 in 6-dec)
         buckUsdt  = _createAndInitPool(address(buck),  1e18,          address(usdt), 1 * 1e6,        3000);
 
+        // Seed liquidity in the BUCK/USDT pool only -- the four basket pools
+        // are read via slot0() and don't need depth.  Liquidity = 1e17
+        // approximates the design's "100k BUCK / 100k USDT" first-pool size
+        // (full-range V3: amount0 ~= L/sqrtP, amount1 ~= L*sqrtP, and at the
+        // 1:1 init price each side resolves to ~1e23 BUCK + ~1e11 USDT).
+        buck.mint(address(this), 1e30);
+        usdt.mint(address(this), 1e30);
+        _mintFullRange(buckUsdt, 1e17);
+
         // Deploy controller targeting once-per-minute PID cycles.
         //
         // Kd left at 0 for these tests because the derivative term
@@ -198,6 +207,95 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
         uint256 lastUpdateBefore = ctrl.lastUpdate();
         ctrl.compute();
         assertGt(ctrl.lastUpdate(), lastUpdateBefore, "PID did not run after dT");
+    }
+
+    // -------------------------------------------------------------------- //
+    //  Swap-driven price drift -> PID response                               //
+    // -------------------------------------------------------------------- //
+
+    function test_drift_buck_undervalued_pushes_buckK_up() public {
+        // First PID cycle at parity to establish baseline lastUpdate / state.
+        vm.warp(block.timestamp + 61);
+        ctrl.compute();
+        uint256 baselineK = ctrl.buckK();
+
+        // Sell BUCK into the pool until 1 BUCK quotes at 0.95 USDT.
+        _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 0.95e6);
+
+        int256 driftedPrice = _buckPrice();
+        emit log_named_int("BUCK price after drift (18-dec)", driftedPrice);
+        // Confirm we actually moved the pool ~5% down (allow tick-rounding).
+        assertApproxEqRel(uint256(driftedPrice), 0.95e18, 0.005e18);
+
+        // Run several PID cycles -- buckK should monotonically expand toward
+        // the cap as the proportional + integral terms accumulate the
+        // positive (basket - buck) error.
+        uint256 prevK = baselineK;
+        for (uint i = 0; i < 5; i++) {
+            vm.warp(block.timestamp + 61);
+            uint256 k = ctrl.compute();
+            assertGe(k, prevK, "buckK regressed mid-drift");
+            prevK = k;
+        }
+
+        assertGt(ctrl.buckK(), baselineK, "buckK did not expand under undervaluation");
+        assertGt(ctrl.I(), 0, "integral did not accumulate positive error");
+        emit log_named_uint("buckK after 5 cycles (BUCK 5% under)", ctrl.buckK());
+        emit log_named_int ("integral after 5 cycles",                 ctrl.I());
+    }
+
+    function test_drift_buck_overvalued_pushes_buckK_down() public {
+        vm.warp(block.timestamp + 61);
+        ctrl.compute();
+        uint256 baselineK = ctrl.buckK();
+
+        // Buy BUCK out of the pool until 1 BUCK quotes at 1.05 USDT.
+        _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 1.05e6);
+
+        int256 driftedPrice = _buckPrice();
+        emit log_named_int("BUCK price after drift (18-dec)", driftedPrice);
+        assertApproxEqRel(uint256(driftedPrice), 1.05e18, 0.005e18);
+
+        uint256 prevK = baselineK;
+        for (uint i = 0; i < 5; i++) {
+            vm.warp(block.timestamp + 61);
+            uint256 k = ctrl.compute();
+            assertLe(k, prevK, "buckK regressed upward mid-drift");
+            prevK = k;
+        }
+
+        assertLt(ctrl.buckK(), baselineK, "buckK did not contract under overvaluation");
+        assertLt(ctrl.I(), 0, "integral did not accumulate negative error");
+        emit log_named_uint("buckK after 5 cycles (BUCK 5% over)",  ctrl.buckK());
+        emit log_named_int ("integral after 5 cycles",              ctrl.I());
+    }
+
+    function test_drift_recovery_to_parity() public {
+        // 1) Drive BUCK 5% under, run 3 cycles -> buckK expands.
+        vm.warp(block.timestamp + 61);
+        ctrl.compute();
+
+        _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 0.95e6);
+        for (uint i = 0; i < 3; i++) {
+            vm.warp(block.timestamp + 61);
+            ctrl.compute();
+        }
+        uint256 expandedK = ctrl.buckK();
+        assertGt(expandedK, 1e18);
+
+        // 2) Recover BUCK back to parity (1.00) -- proportional error returns
+        //    to ~0.  Integral retains its accumulated positive lean, so
+        //    buckK does NOT instantly snap back; it relaxes gradually.
+        _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 1e6);
+        for (uint i = 0; i < 3; i++) {
+            vm.warp(block.timestamp + 61);
+            ctrl.compute();
+        }
+        // After recovery, P-term contributes ~0, I-term still positive ->
+        // buckK still elevated relative to neutral, but should be no higher
+        // than the under-valued peak.
+        assertLe(ctrl.buckK(), expandedK, "buckK kept rising after parity recovery");
+        emit log_named_uint("buckK after recovery to parity", ctrl.buckK());
     }
 
     function test_mint_pacing_5_blocks_per_pid() public {

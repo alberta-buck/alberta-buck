@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {UniswapV3OracleLib} from "../../src/lib/UniswapV3OracleLib.sol";
 
@@ -11,15 +12,26 @@ interface IUniswapV3Factory {
     function feeAmountTickSpacing(uint24 fee) external view returns (int24);
 }
 
+interface IUniswapV3MintCallback {
+    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external;
+}
+
+interface IUniswapV3SwapCallback {
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external;
+}
+
 /// @notice Local Uniswap V3 deployment helpers shared by BuckKController tests.
 ///
 /// `setUpV3()` deploys a fresh `UniswapV3Factory` via `vm.deployCode` so each
-/// test starts from a clean factory state.  `_createAndInitPool` creates a
-/// pool at a target price expressed as token-amount pairs, sidestepping the
-/// need for callers to compute sqrtPriceX96 themselves.  This first-pass
-/// fixture is read-only -- pools are initialized but no liquidity is minted,
-/// since slot0() spot-price reads work on a freshly initialized pool.
-abstract contract UniswapV3Fixture is Test {
+/// test starts from a clean factory state.  `_createAndInitPool` initializes a
+/// pool at a target spot price; `_mintFullRange` seeds liquidity; `_moveSpotTo`
+/// drives the pool spot price to a chosen sqrtPriceX96 by swapping against
+/// the existing liquidity.
+///
+/// Mint and swap callbacks just push the owed tokens from this fixture's
+/// balance to the calling pool.  Fixture lacks per-pool authentication
+/// (callbacks accept any caller), which is fine in tests but unsafe in prod.
+abstract contract UniswapV3Fixture is Test, IUniswapV3MintCallback, IUniswapV3SwapCallback {
     address public v3Factory;
 
     function setUpV3() internal {
@@ -43,8 +55,8 @@ abstract contract UniswapV3Fixture is Test {
         return uint160(sqrtRoot);
     }
 
-    /// @dev Create a pool for `(base, quote)` at fee tier `fee` and initialize
-    ///      it so 1 base unit costs `quoteAmt`/`baseAmt` quote units.
+    /// @dev Create + initialize a pool for `(base, quote)` at fee tier `fee`
+    ///      so 1 base unit costs `quoteAmt`/`baseAmt` quote units.
     function _createAndInitPool(
         address base, uint256 baseAmt,
         address quote, uint256 quoteAmt,
@@ -55,5 +67,66 @@ abstract contract UniswapV3Fixture is Test {
         require(pool != address(0), "fixture:pool=0");
         uint160 sqrtP = _sqrtPriceX96(base, baseAmt, quote, quoteAmt);
         IUniswapV3Pool(pool).initialize(sqrtP);
+    }
+
+    /// @dev Mint a full-range liquidity position into `pool` for this fixture
+    ///      account.  Caller MUST have already minted enough of token0 and
+    ///      token1 to this fixture's balance (the callback transfers them
+    ///      to the pool).  `liquidity` is the V3 L value, NOT a raw token
+    ///      amount; both token amounts are derived by the pool from L and
+    ///      the current sqrtPrice.
+    function _mintFullRange(address pool, uint128 liquidity) internal {
+        int24 spacing  = IUniswapV3Pool(pool).tickSpacing();
+        // Largest in-range usable ticks for the spacing.
+        int24 minTick  = (UniswapV3OracleLib.MIN_TICK / spacing) * spacing;
+        int24 maxTick  = (UniswapV3OracleLib.MAX_TICK / spacing) * spacing;
+
+        bytes memory data = abi.encode(IUniswapV3Pool(pool).token0(), IUniswapV3Pool(pool).token1());
+        IUniswapV3Pool(pool).mint(address(this), minTick, maxTick, liquidity, data);
+    }
+
+    /// @dev Drive `pool`'s spot price to `targetSqrtX96` by swapping into the
+    ///      pool until it reaches the target.  Caller must pre-mint the
+    ///      input token; we accept "huge" amount-specified and rely on
+    ///      sqrtPriceLimit to stop the swap at the target.
+    function _moveSpotTo(address pool, uint160 targetSqrtX96) internal {
+        (uint160 cur,,,,,,) = IUniswapV3Pool(pool).slot0();
+        if (cur == targetSqrtX96) return;
+        bool zeroForOne = targetSqrtX96 < cur;
+
+        bytes memory data = abi.encode(IUniswapV3Pool(pool).token0(), IUniswapV3Pool(pool).token1());
+        IUniswapV3Pool(pool).swap(
+            address(this),
+            zeroForOne,
+            type(int128).max,   // huge "exact-input"; capped by sqrtPriceLimit
+            targetSqrtX96,
+            data
+        );
+    }
+
+    /// @dev Drive `pool` so that 1 base unit quotes at `quoteAmt` quote units.
+    function _moveSpotToPrice(
+        address pool,
+        address base, uint256 baseAmt,
+        address quote, uint256 quoteAmt
+    ) internal {
+        _moveSpotTo(pool, _sqrtPriceX96(base, baseAmt, quote, quoteAmt));
+    }
+
+    // -------------------------------------------------------------------- //
+    //  V3 callbacks                                                         //
+    //  Both unchecked w.r.t. msg.sender -- safe in tests only.              //
+    // -------------------------------------------------------------------- //
+
+    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external override {
+        (address t0, address t1) = abi.decode(data, (address, address));
+        if (amount0Owed > 0) IERC20(t0).transfer(msg.sender, amount0Owed);
+        if (amount1Owed > 0) IERC20(t1).transfer(msg.sender, amount1Owed);
+    }
+
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override {
+        (address t0, address t1) = abi.decode(data, (address, address));
+        if (amount0Delta > 0) IERC20(t0).transfer(msg.sender, uint256(amount0Delta));
+        if (amount1Delta > 0) IERC20(t1).transfer(msg.sender, uint256(amount1Delta));
     }
 }
