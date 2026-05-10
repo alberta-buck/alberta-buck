@@ -144,6 +144,58 @@ abstract contract UniswapV3Fixture is Test, IUniswapV3MintCallback, IUniswapV3Sw
         _moveSpotTo(pool, _sqrtPriceX96(base, baseAmt, quote, quoteAmt));
     }
 
+    // sqrtRatio bounds copied from Uniswap V3 TickMath (canonical mainnet pool init values)
+    uint160 internal constant MIN_SQRT_RATIO = 4295128739;
+    uint160 internal constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
+
+    /// @dev Swap `amountIn` of `tokenIn` into `pool`, receiving `tokenOut`.
+    ///      Uses an extreme sqrtPriceLimit so the entire input is consumed.
+    function _swapExactInput(address pool, address tokenIn, address tokenOut, uint256 amountIn)
+        internal returns (uint256 amountOut)
+    {
+        address t0 = IUniswapV3Pool(pool).token0();
+        address t1 = IUniswapV3Pool(pool).token1();
+        bool zeroForOne = tokenIn == t0;
+        require(zeroForOne || tokenIn == t1, "swap:invalid tokenIn");
+
+        uint160 sqrtLimit = zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1;
+        bytes memory data = abi.encode(t0, t1);
+
+        uint256 outBefore = IERC20(tokenOut).balanceOf(address(this));
+        IUniswapV3Pool(pool).swap(
+            address(this),
+            zeroForOne,
+            int256(amountIn),
+            sqrtLimit,
+            data
+        );
+        amountOut = IERC20(tokenOut).balanceOf(address(this)) - outBefore;
+    }
+
+    /// @dev Swap into `pool` until exactly `amountOut` of `tokenOut` is received.
+    ///      Returns the actual `tokenIn` amount consumed.
+    function _swapExactOutput(address pool, address tokenIn, address tokenOut, uint256 amountOut)
+        internal returns (uint256 amountIn)
+    {
+        address t0 = IUniswapV3Pool(pool).token0();
+        address t1 = IUniswapV3Pool(pool).token1();
+        bool zeroForOne = tokenIn == t0;
+        require(zeroForOne || tokenIn == t1, "swap:invalid tokenIn");
+
+        uint160 sqrtLimit = zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1;
+        bytes memory data = abi.encode(t0, t1);
+
+        uint256 inBefore = IERC20(tokenIn).balanceOf(address(this));
+        IUniswapV3Pool(pool).swap(
+            address(this),
+            zeroForOne,
+            -int256(amountOut),
+            sqrtLimit,
+            data
+        );
+        amountIn = inBefore - IERC20(tokenIn).balanceOf(address(this));
+    }
+
     // -------------------------------------------------------------------- //
     //  V3 callbacks                                                         //
     //  Both unchecked w.r.t. msg.sender -- safe in tests only.              //
