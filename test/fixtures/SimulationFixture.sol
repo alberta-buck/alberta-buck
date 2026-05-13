@@ -49,6 +49,7 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
     // -------------------------------------------------------------------- //
 
     BuckKController public ctrl;
+    BuckKController public alicePid;
 
     MockERC20 public usdt;
     MockERC20 public usdc;
@@ -82,6 +83,7 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
         uint64  arriveTime;     // block.timestamp at first action
         uint64  retireTime;     // block.timestamp when he closes out
         uint8   state;          // 0=pending 1=alive 2=retired
+        uint8   kind;           // 0=Bob (farmer), 1=Fred (builder)
         uint256 buckBalance;    // virtual BUCK held (18-dec)
         uint256 usdtBalance;    // virtual USDT held (6-dec)
     }
@@ -110,15 +112,18 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
         int256  spotBuckUsd;  // 18-dec: spot BUCK price in USDT
         int256  twapBuckUsd;  // 18-dec: TWAP BUCK price in USDT
         int256  basketCost;   // 18-dec: basket cost
-        uint256 buckK;        // 18-dec
+        uint256 buckK;        // 18-dec: official PID output
+        uint256 aliceK;       // 18-dec: Alice's faster PID output
         uint256 aliceBuck;    // alice virtual BUCK reserve
         uint256 aliceUsdt;    // alice virtual USDT reserve
         int256  aliceRealizedPnl;
         uint8   aliceArbDir;
         uint32  bobsAlive;
         uint32  bobsRetired;
+        uint32  fredsAlive;
+        uint32  fredsRetired;
     }
-    Snapshot[] public snapshots;
+    Snapshot[] internal snapshots;
     uint64 internal _simStart;
 
     // -------------------------------------------------------------------- //
@@ -150,20 +155,20 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
 
         // Mint the fixture a generous treasury for liquidity, reserves, and
         // simulated mints.  Sized to 1e30 of each so we never run out.
-        usdt.mint (address(this), 1e30);
-        usdc.mint (address(this), 1e30);
-        xaut.mint (address(this), 1e30);
-        paxg.mint (address(this), 1e30);
-        cbbtc.mint(address(this), 1e30);
-        wbtc.mint (address(this), 1e30);
-        buck.mint (address(this), 1e30);
+        usdt.mint (address(this), 1e32);
+        usdc.mint (address(this), 1e32);
+        xaut.mint (address(this), 1e32);
+        paxg.mint (address(this), 1e32);
+        cbbtc.mint(address(this), 1e32);
+        wbtc.mint (address(this), 1e32);
+        buck.mint (address(this), 1e32);
 
         // Seed liquidity in every pool (small on basket; large on BUCK/USDT).
         _mintFullRange(xautUsdt,  1e15);
         _mintFullRange(paxgUsdc,  1e15);
         _mintFullRange(cbbtcUsdc, 1e15);
         _mintFullRange(wbtcUsdt,  1e15);
-        _mintFullRange(buckUsdt,  1e17);  // ~100K BUCK / 100K USDT
+        _mintFullRange(buckUsdt,  1e19);  // ~10M BUCK / 10M USDT
 
         // Cardinality + TWAP warmup.
         _bumpCardinality(xautUsdt,  64);
@@ -205,9 +210,32 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
         ctrl.setDTMax(3600);
         vm.stopPrank();
 
-        // Prime the controller now that everything is wired.
+        // Alice's private faster PID (5x gains).  Same oracle pool wiring.
+        alicePid = new BuckKController(
+            0.5e18, 0.05e18, 0,
+            60,
+            0.50e18, 1.50e18,
+            1.0e18,
+            buckUsdt, TWAP,
+            governance
+        );
+        vm.prank(governance);
+        alicePid.setBuckPriceOracle(buckUsdt, address(buck), address(usdt), 6, TWAP);
+        vm.startPrank(governance);
+        alicePid.addBasketPool(xautUsdt,  address(xaut),  address(usdt),
+            _scaleWeight(W_EACH, GOLD_USD * 1e18), 6,  6, TWAP);
+        alicePid.addBasketPool(paxgUsdc,  address(paxg),  address(usdc),
+            _scaleWeight(W_EACH, GOLD_USD * 1e18), 18, 6, TWAP);
+        alicePid.addBasketPool(cbbtcUsdc, address(cbbtc), address(usdc),
+            _scaleWeight(W_EACH, BTC_USD  * 1e18), 8,  6, TWAP);
+        alicePid.addBasketPool(wbtcUsdt,  address(wbtc),  address(usdt),
+            _scaleWeight(W_EACH, BTC_USD  * 1e18), 8,  6, TWAP);
+        alicePid.setDTMax(3600);
+        vm.stopPrank();
+
         vm.warp(block.timestamp + 61);
         ctrl.compute();
+        alicePid.compute();
 
         _simStart = uint64(block.timestamp);
     }
@@ -234,6 +262,16 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
         uint64  arriveTime,
         uint64  retireTime
     ) internal returns (uint256 id) {
+        return _addBobKind(mintAmount, keepFractionBp, arriveTime, retireTime, 0);
+    }
+
+    function _addBobKind(
+        uint256 mintAmount,
+        uint256 keepFractionBp,
+        uint64  arriveTime,
+        uint64  retireTime,
+        uint8   kind
+    ) internal returns (uint256 id) {
         require(retireTime > arriveTime, "bob:retire<=arrive");
         require(keepFractionBp <= 10000, "bob:keep>1");
         bobs.push(Bob({
@@ -242,6 +280,7 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
             arriveTime:     arriveTime,
             retireTime:     retireTime,
             state:          0,
+            kind:           kind,
             buckBalance:    0,
             usdtBalance:    0
         }));
@@ -272,6 +311,7 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
         }
         b.state = 1;
         ctrl.compute();
+        alicePid.compute();
     }
 
     /// @dev Bob retires: covers his liability via USDT->BUCK swap if short,
@@ -301,6 +341,7 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
         b.buckBalance = 0;
         b.state = 2;
         ctrl.compute();
+        alicePid.compute();
     }
 
     // -------------------------------------------------------------------- //
@@ -322,10 +363,13 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
     // For the default 3 % entry threshold and 1 % target slippage the
     // expected per-cycle PnL is roughly +1 % of position when the price
     // recovers cleanly to parity, more on overshoots.
-    uint256 internal constant ARB_ENTRY_THRESHOLD_BP  =  300;  // 3.00 %
-    uint256 internal constant ARB_RESERVE_FRACTION_BP = 5000;  // 50 % of reserve
-    uint256 internal constant ARB_TARGET_SLIPPAGE_BP  =  100;  // 1 % of pool side
-    uint256 internal constant POOL_DEPTH_CAP_BP       =  500;  // 5 % hard ceiling
+    uint256 internal constant ARB_RESERVE_FRACTION_BP =  5000; // 50 % of reserve
+    uint256 internal constant ARB_TARGET_SLIPPAGE_BP  =   100; // 1 % of pool side
+    uint256 internal constant POOL_DEPTH_CAP_BP       =   500; // 5 % hard ceiling
+    // PID-spread thresholds: signal = aliceK - buckK (both 18-dec PID outputs).
+    uint256 internal constant ALICE_ENTRY_SIGNAL      = 0.003e18;   // 0.3 %
+    uint256 internal constant ALICE_EXIT_SIGNAL       = 0.0005e18;  // 0.05 %
+    uint256 internal constant ALICE_FULL_SIZE_SIGNAL  = 0.02e18;    // 2 % saturates
 
     /// @dev Combined cap on a single arb swap.  See policy parameters above.
     function _aliceArbSize(uint256 reserve, address inputToken) internal view returns (uint256) {
@@ -338,28 +382,28 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
         return r < fromCap ? r : fromCap;
     }
 
-    /// @dev Run one tick of Alice's arbitrage logic.  Idempotent and side-
-    ///      effect-free if no threshold trigger fires.
+    /// @dev Run one tick of Alice's PID-spread arbitrage strategy.
     ///
-    ///      Entry: when |err| exceeds ARB_ENTRY_THRESHOLD_BP and Alice is
-    ///      flat, take the contrarian side at min(reserve%, pool-depth%).
+    /// signal = aliceK - buckK (both 18-dec PID outputs).
+    ///   > 0  =>  Alice's faster PID has accumulated more "BUCK undervalued"
+    ///            pressure than the slow official controller.  She expects
+    ///            BUCK to be pushed UP over the next many cycles.  Buy BUCK.
+    ///   < 0  =>  mirror; sell BUCK.
     ///
-    ///      Exit: |err| <= ARB_EXIT_THRESHOLD_BP (recovered to within 1 %
-    ///      of parity), OR sign-flip past the entry threshold (overshoot
-    ///      profit-taking).
+    /// Position size scales linearly with |signal| up to ALICE_FULL_SIZE_SIGNAL,
+    /// capped by reserve / pool-target-slippage / pool-depth.
+    ///
+    /// Exit: |signal| decays back below ALICE_EXIT_SIGNAL (PIDs reconverged)
+    /// OR sign-flip past entry threshold in the opposite direction.
     function _aliceTick() internal {
-        int256  basketCost = _getBasketCostExternal();
-        int256  buckTwap   = _getBuckTwapExternal();
-        if (basketCost <= 0 || buckTwap <= 0) return;
-
-        // err > 0 -> BUCK undervalued (TWAP < basket).
-        int256 err = basketCost - buckTwap;
-        int256 errBp = (err * 10000) / basketCost;
+        uint256 aliceK = alicePid.compute();
+        int256  signal = int256(aliceK) - int256(ctrl.buckK());
+        uint256 sigMag = uint256(signal >= 0 ? signal : -signal);
 
         if (alice.arbDirection == 0) {
-            if (errBp >= int256(ARB_ENTRY_THRESHOLD_BP)) {
-                // BUCK undervalued -> buy BUCK with USDT.
-                uint256 usdtIn = _aliceArbSize(alice.usdtReserve, address(usdt));
+            if (sigMag < ALICE_ENTRY_SIGNAL) return;
+            if (signal > 0) {
+                uint256 usdtIn = _aliceSize(alice.usdtReserve, address(usdt), sigMag);
                 if (usdtIn == 0) return;
                 uint256 buckOut = _swapExactInput(buckUsdt, address(usdt), address(buck), usdtIn);
                 alice.usdtReserve   -= usdtIn;
@@ -367,38 +411,31 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
                 alice.arbBuckEntered = buckOut;
                 alice.arbUsdtSpent   = usdtIn;
                 alice.arbDirection   = 1;
-                ctrl.compute();
-            } else if (errBp <= -int256(ARB_ENTRY_THRESHOLD_BP)) {
-                // BUCK overvalued -> sell BUCK for USDT.
-                uint256 buckIn = _aliceArbSize(alice.buckReserve, address(buck));
+            } else {
+                uint256 buckIn = _aliceSize(alice.buckReserve, address(buck), sigMag);
                 if (buckIn == 0) return;
                 uint256 usdtOut = _swapExactInput(buckUsdt, address(buck), address(usdt), buckIn);
                 alice.buckReserve   -= buckIn;
                 alice.usdtReserve   += usdtOut;
-                alice.arbBuckEntered = buckIn;     // amount we owe back
-                alice.arbUsdtSpent   = usdtOut;    // USDT received
+                alice.arbBuckEntered = buckIn;
+                alice.arbUsdtSpent   = usdtOut;
                 alice.arbDirection   = 2;
-                ctrl.compute();
             }
+            ctrl.compute();
+            alicePid.compute();
         } else {
-            // Open position: exit on sign-flip past parity.  Long exits the
-            // moment err <= 0 (BUCK recovered to / above basket); short
-            // exits when err >= 0.  Sign-flip is wider than her own entry
-            // slippage so the round trip is profitable in expectation, and
-            // captures every overshoot the way down to or past parity.
-            bool exitTrigger = (alice.arbDirection == 1 && errBp <= 0)
-                            || (alice.arbDirection == 2 && errBp >= 0);
-            if (!exitTrigger) return;
+            bool converged = sigMag <= ALICE_EXIT_SIGNAL;
+            bool flipped = (alice.arbDirection == 1 && signal <= -int256(ALICE_ENTRY_SIGNAL))
+                        || (alice.arbDirection == 2 && signal >=  int256(ALICE_ENTRY_SIGNAL));
+            if (!converged && !flipped) return;
 
             if (alice.arbDirection == 1) {
-                // Close long.
                 uint256 usdtOut = _swapExactInput(
                     buckUsdt, address(buck), address(usdt), alice.arbBuckEntered);
                 alice.buckReserve -= alice.arbBuckEntered;
                 alice.usdtReserve += usdtOut;
                 alice.realizedUsdtPnl += int256(usdtOut) - int256(alice.arbUsdtSpent);
             } else {
-                // Close short -- target exact buy of arbBuckEntered BUCK.
                 uint256 usdtIn = _swapExactOutput(
                     buckUsdt, address(usdt), address(buck), alice.arbBuckEntered);
                 alice.usdtReserve -= usdtIn;
@@ -410,7 +447,17 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
             alice.arbDirection   = 0;
             alice.arbCount      += 1;
             ctrl.compute();
+            alicePid.compute();
         }
+    }
+
+    /// @dev Position size scaled by signal magnitude, capped by reserve / pool.
+    function _aliceSize(uint256 reserve, address inputToken, uint256 sigMag)
+        internal view returns (uint256)
+    {
+        uint256 cap = _aliceArbSize(reserve, inputToken);
+        if (sigMag >= ALICE_FULL_SIZE_SIGNAL) return cap;
+        return (cap * sigMag) / ALICE_FULL_SIZE_SIGNAL;
     }
 
     // -------------------------------------------------------------------- //
@@ -418,64 +465,59 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
     // -------------------------------------------------------------------- //
 
     function _snap() internal {
-        (uint32 alive, uint32 retired) = _bobCounts();
-        snapshots.push(Snapshot({
-            t:                uint64(block.timestamp - _simStart),
-            spotBuckUsd:      _getBuckSpotExternal(),
-            twapBuckUsd:      _getBuckTwapExternal(),
-            basketCost:       _getBasketCostExternal(),
-            buckK:            ctrl.buckK(),
-            aliceBuck:        alice.buckReserve,
-            aliceUsdt:        alice.usdtReserve,
-            aliceRealizedPnl: alice.realizedUsdtPnl,
-            aliceArbDir:      alice.arbDirection,
-            bobsAlive:        alive,
-            bobsRetired:      retired
-        }));
+        snapshots.push();
+        Snapshot storage s = snapshots[snapshots.length - 1];
+        s.t                = uint64(block.timestamp - _simStart);
+        s.spotBuckUsd      = _getBuckSpotExternal();
+        s.twapBuckUsd      = _getBuckTwapExternal();
+        s.basketCost       = _getBasketCostExternal();
+        s.buckK            = ctrl.buckK();
+        s.aliceK           = alicePid.buckK();
+        s.aliceBuck        = alice.buckReserve;
+        s.aliceUsdt        = alice.usdtReserve;
+        s.aliceRealizedPnl = alice.realizedUsdtPnl;
+        s.aliceArbDir      = alice.arbDirection;
+        (uint32 ba, uint32 br, uint32 fa, uint32 fr) = _actorCounts();
+        s.bobsAlive    = ba;
+        s.bobsRetired  = br;
+        s.fredsAlive   = fa;
+        s.fredsRetired = fr;
     }
 
     function _bobCounts() internal view returns (uint32 alive, uint32 retired) {
         for (uint i = 0; i < bobs.length; i++) {
+            if (bobs[i].kind != 0) continue;
             if (bobs[i].state == 1) alive++;
             else if (bobs[i].state == 2) retired++;
         }
     }
 
+    function _actorCounts() internal view
+        returns (uint32 ba, uint32 br, uint32 fa, uint32 fr)
+    {
+        for (uint i = 0; i < bobs.length; i++) {
+            uint8 st = bobs[i].state;
+            if (bobs[i].kind == 0) {
+                if (st == 1) ba++; else if (st == 2) br++;
+            } else {
+                if (st == 1) fa++; else if (st == 2) fr++;
+            }
+        }
+    }
+
+
     function _writeSnapshotsJson(string memory path) internal {
         string memory body = "[";
         for (uint i = 0; i < snapshots.length; i++) {
             if (i > 0) body = string.concat(body, ",");
-            Snapshot memory s = snapshots[i];
-            body = string.concat(body,
-                "{\"t\":",                vm.toString(uint256(s.t)),
-                ",\"spot\":",             _intStr(s.spotBuckUsd),
-                ",\"twap\":",             _intStr(s.twapBuckUsd),
-                ",\"basket\":",           _intStr(s.basketCost),
-                ",\"buckK\":",            vm.toString(s.buckK),
-                ",\"aliceBuck\":",        vm.toString(s.aliceBuck),
-                ",\"aliceUsdt\":",        vm.toString(s.aliceUsdt),
-                ",\"aliceRealizedPnl\":", _intStr(s.aliceRealizedPnl),
-                ",\"aliceArbDir\":",      vm.toString(uint256(s.aliceArbDir)),
-                ",\"bobsAlive\":",        vm.toString(uint256(s.bobsAlive)),
-                ",\"bobsRetired\":",      vm.toString(uint256(s.bobsRetired)),
-                "}"
-            );
+            body = string.concat(body, _snapJson(snapshots[i]));
         }
         body = string.concat(body, "]");
 
         string memory bobsJson = "[";
         for (uint i = 0; i < bobs.length; i++) {
             if (i > 0) bobsJson = string.concat(bobsJson, ",");
-            Bob memory b = bobs[i];
-            bobsJson = string.concat(bobsJson,
-                "{\"id\":",         vm.toString(i),
-                ",\"mintAmount\":", vm.toString(b.mintAmount),
-                ",\"keepBp\":",     vm.toString(b.keepFractionBp),
-                ",\"arrive\":",     vm.toString(uint256(b.arriveTime - _simStart)),
-                ",\"retire\":",     vm.toString(uint256(b.retireTime - _simStart)),
-                ",\"state\":",      vm.toString(uint256(b.state)),
-                "}"
-            );
+            bobsJson = string.concat(bobsJson, _bobJson(i, bobs[i]));
         }
         bobsJson = string.concat(bobsJson, "]");
 
@@ -486,6 +528,35 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
             "}"
         );
         vm.writeFile(path, full);
+    }
+
+    function _snapJson(Snapshot memory s) internal pure returns (string memory r) {
+        r = string.concat("{\"t\":",    vm.toString(uint256(s.t)));
+        r = string.concat(r, ",\"spot\":",   _intStr(s.spotBuckUsd));
+        r = string.concat(r, ",\"twap\":",   _intStr(s.twapBuckUsd));
+        r = string.concat(r, ",\"basket\":", _intStr(s.basketCost));
+        r = string.concat(r, ",\"buckK\":",  vm.toString(s.buckK));
+        r = string.concat(r, ",\"aliceK\":", vm.toString(s.aliceK));
+        r = string.concat(r, ",\"aliceBuck\":", vm.toString(s.aliceBuck));
+        r = string.concat(r, ",\"aliceUsdt\":", vm.toString(s.aliceUsdt));
+        r = string.concat(r, ",\"aliceRealizedPnl\":", _intStr(s.aliceRealizedPnl));
+        r = string.concat(r, ",\"aliceArbDir\":", vm.toString(uint256(s.aliceArbDir)));
+        r = string.concat(r, ",\"bobsAlive\":",   vm.toString(uint256(s.bobsAlive)));
+        r = string.concat(r, ",\"bobsRetired\":", vm.toString(uint256(s.bobsRetired)));
+        r = string.concat(r, ",\"fredsAlive\":",  vm.toString(uint256(s.fredsAlive)));
+        r = string.concat(r, ",\"fredsRetired\":",vm.toString(uint256(s.fredsRetired)));
+        r = string.concat(r, "}");
+    }
+
+    function _bobJson(uint256 id, Bob memory b) internal view returns (string memory r) {
+        r = string.concat("{\"id\":", vm.toString(id));
+        r = string.concat(r, ",\"kind\":",       vm.toString(uint256(b.kind)));
+        r = string.concat(r, ",\"mintAmount\":", vm.toString(b.mintAmount));
+        r = string.concat(r, ",\"keepBp\":",     vm.toString(b.keepFractionBp));
+        r = string.concat(r, ",\"arrive\":",     vm.toString(uint256(b.arriveTime - _simStart)));
+        r = string.concat(r, ",\"retire\":",     vm.toString(uint256(b.retireTime - _simStart)));
+        r = string.concat(r, ",\"state\":",      vm.toString(uint256(b.state)));
+        r = string.concat(r, "}");
     }
 
     function _intStr(int256 v) internal pure returns (string memory) {

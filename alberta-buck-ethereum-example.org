@@ -150,6 +150,9 @@ equilibrium -- but the integration is slow by design and reads only
 the lagged TWAP.  Alice trades against short-term excursions because
 she knows where parity lives and roughly when the PID will catch up.
 
+#+ATTR_LATEX: :width 14cm
+[[file:./images/arb-scenario.png]]
+
 ** Scenario
 
 | Parameter                     | Value                                                  |
