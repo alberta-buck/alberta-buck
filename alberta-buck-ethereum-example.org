@@ -14,6 +14,216 @@
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 
+* Bootstrap, Funding Factor, and the BUCK_K Feedback Loop
+  :PROPERTIES:
+  :CUSTOM_ID: bootstrap-feedback
+  :END:
+
+The first worked example traces how Alberta Buck reaches monetary equilibrium
+from a cold start.  Two mechanisms operate in tandem:
+
+  - The *insurance funding factor*, a counter-cyclical constraint on minting
+    that creates pre-mint demand for BUCK proportional to how undervalued BUCK
+    currently trades.
+  - The *BUCK_K credit-limit feedback*, where the PID's =buckK= multiplier
+    expands or contracts every holder's borrowing capacity, voluntarily
+    inducing burns during inflation and mints during deflation.
+
+The shipped scenario test (=test/BuckEquilibriumScenario.t.sol=) demonstrates
+both loops against a real =Buck.sol= + =BuckCredit.sol= stack and a Uniswap V2
+BUCK/USDC pool.  The basket is pegged to $1.00 USDC for clarity (the live
+configuration tracks a 4-pool commodity basket; the dynamics are identical).
+
+#+ATTR_LATEX: :width 14cm
+[[file:./images/equilibrium-scenario.png]]
+
+** Insurance Funding Factor
+
+When a holder calls =Buck.mint(amount)=, the per-NFT allocator computes a
+=poolPrincipal= amount that's the insurance contribution credited to the
+mutual-coverage pool.  Before the mint is accepted, the holder must already
+hold
+
+#+BEGIN_SRC text
+required = poolPrincipal * fundingFactor / 1e18
+#+END_SRC
+
+of BUCK in their wallet.  The pre-balance is *not consumed* -- it's
+skin-in-the-game collateral that must remain held going forward.
+
+The factor itself is counter-cyclical in BUCK's deviation from basket:
+
+#+BEGIN_SRC text
+factor = max(0, 1 + 10 * (basket - BUCK) / basket)
+#+END_SRC
+
+| BUCK price (basket = $1.00) | Funding factor | Interpretation       |
+|-----------------------------+----------------+----------------------|
+| $1.10  (10 % deflation)     | 0.0            | gate fully opens     |
+| $1.05  (5 % deflation)      | 0.5            | 50 % of premium      |
+| $1.00  (parity)             | 1.0            | full premium pre-held |
+| $0.97  (3 % inflation)      | 1.3            | 30 % surcharge       |
+| $0.95  (5 % inflation)      | 1.5            | 50 % surcharge       |
+| $0.90  (10 % inflation)     | 2.0            | 2x surcharge         |
+| $0.80  (20 % inflation)     | 3.0            | 3x surcharge         |
+
+The 10:1 slope is hardcoded in =BuckKController.fundingFactor()=; later
+governance versions may parametrise it.  =BuckKControllerStatic= returns 0,
+which is the convention for "gate disabled" (Phase-0 environments without
+oracles).
+
+*** Bootstrap exemption
+
+At =totalSupply == 0= no BUCK exists, so any non-zero requirement is
+unsatisfiable.  =Buck._mintAllocated= explicitly bypasses the gate in that
+window so the first mint can seed the system.  Once any BUCK has been minted,
+every subsequent mint must satisfy the live factor.
+
+*** Why this matters for the bootstrap
+
+Picture the system on day 0: a single =BuckCredit= NFT has been issued, no
+=Buck= has been minted, the BUCK/USDC pool is empty.  Whoever mints first
+(the bootstrap participant) seeds the supply; their first action is usually
+to provide that BUCK as liquidity in the BUCK/USDC pair so others have a
+market to interact with.
+
+After that point, every newcomer faces the funding factor.  When the pool
+has just been seeded -- BUCK trading near $1.00 -- factor is roughly 1.0:
+each new minter must accumulate the full insurance principal as BUCK
+*before* their first mint.  That accumulation is itself a BUCK buy from the
+pool, supporting the BUCK price.
+
+As more newcomers arrive and mint+sell, BUCK drifts below parity.  Factor
+rises.  The next newcomer must accumulate *more* BUCK pre-mint than the
+previous one.  The barrier-of-entry mechanically supports BUCK demand
+proportional to how undervalued BUCK has become.
+
+This is the "running start" property: the system cannot mint itself into
+oblivion because every new mint is preceded by BUCK demand whose magnitude
+scales with the very inflation pressure it would otherwise cause.
+
+** BUCK_K Credit-Limit Feedback
+
+In parallel with the funding factor, the on-chain PID controller adjusts
+=buckK=, the credit-limit multiplier.  Each holder's effective borrowing
+capacity is
+
+#+BEGIN_SRC text
+limit = totalCreditValue * buckK / 1e18
+#+END_SRC
+
+The scenario test wires =buckK= with /negative/ PID gains so:
+
+  - *Inflation* (BUCK trading below basket): =error = basket - BUCK > 0=
+    drives =buckK= /down/.  Existing holders' effective limits contract.
+    Holders who target a fixed utilization fraction (e.g. 50 % of limit)
+    must burn BUCK to stay within the new, lower limit.
+
+  - *Deflation* (BUCK trading above basket): =error < 0= drives =buckK= /up/.
+    Holders gain headroom and can mint more BUCK to lock in the premium,
+    selling into the pool and pushing spot back down toward basket.
+
+The shipped basket-driven PID (=BuckKArbScenarioTest=) uses /positive/ gains:
+it expands credit during inflation on the theory that the new BUCK is spent
+on commodities, pulling commodity prices toward BUCK from the other side.
+The scenario in this section uses the opposite sign convention to model the
+direct supply-contraction channel.  Both are valid governance choices; the
+shipped contract is sign-agnostic, and operators pick gains.
+
+** Carol/Hank/Alice dynamics
+
+The scenario test populates the simulation with three actor archetypes:
+
+  - *Alice* (singular, identified): the bootstrap participant.  Holds the
+    initial =$4M= face-value =BuckCredit=, mints =$1M= BUCK at the genesis
+    bypass, and pairs it 1:1 with USDC in the V2 pool to provide market
+    liquidity.
+
+  - *Carol[1..50]* (synthetic public identities): borrowers.  Each holds a
+    =$100K= face-value vehicle-style credit (1.5%/yr premium) and runs a
+    full lifecycle:
+    1. Arrives at a Gaussian-distributed time (peak day 180, std 100 days).
+    2. Pre-buys =poolPrincipal * fundingFactor / 1e18= BUCK from the pool.
+    3. Mints 50% of her current credit limit; immediately swaps the proceeds
+       to USDC.
+    4. Holds the position for ~270 days (Gaussian-distributed).
+    5. Departs by buying her =mintedNet= BUCK back from the pool and burning
+       it (releases coverage, returns the insurance pool principal).
+
+    A small fraction of active Carols re-evaluate monthly to track =buckK=:
+    if =buckK= has risen and BUCK is trading at a premium they top up
+    (mint more, dump for premium); if =buckK= has fallen and BUCK trades
+    at a discount they reduce (buy back, burn).
+
+  - *Hank[1..40]* (synthetic public identities): opportunistic holders.
+    Each arrives at a Gaussian-distributed time and spends $500 USDC per
+    month on BUCK, building a long-term position.  Hanks are price-aware:
+    they skip months when BUCK trades above $1.05 (no premium accumulation).
+    They never burn; they're modelling demand for BUCK-denominated
+    multi-year savings, inheritance Notes, and farmland.
+
+Without Hanks the Carol-only market is one-sided: every Carol mints+dumps
+and the pool drifts permanently BUCK-heavy.  With Hanks the demand side
+absorbs Carol supply at near-parity, letting the system find a real
+equilibrium where Carol-arrival flow ≈ Carol-departure flow + Hank-buy flow.
+
+** Historical analogues
+
+The funding-factor mechanism has direct precedents:
+
+  - *Initial margin in futures and equity margin trading*: opening a leveraged
+    position requires posting cash collateral as a percentage of notional.
+    Higher exchange-mandated initial-margin requirements (often imposed
+    during volatile or stressed periods) function as a counter-cyclical
+    brake on credit expansion -- the same pattern as raising the funding
+    factor when BUCK trades below basket.
+
+  - *Reserve requirements in fractional-reserve banking*: central banks
+    historically required commercial banks to hold a percentage of deposits
+    as reserves.  Raising reserve requirements tightens credit creation
+    capacity; lowering them loosens it.  The funding factor implements the
+    same principle at the level of an individual minter rather than an
+    institution.
+
+  - *Gesell's stamp scrip and demurrage currencies*: Silvio Gesell's
+    /Freigeld/ proposal required holders to affix monthly stamps to bank
+    notes to keep them valid.  The stamp fee created continuous demand
+    for the underlying currency (you had to buy stamps with the same
+    currency you were stamping).  The funding factor pre-mint requirement
+    creates analogous demand: to mint BUCK you must first acquire BUCK.
+
+  - *Mutual-aid society buy-ins*: English friendly societies, modern
+    benevolent mutuals, and cooperative banks have historically required
+    new members to pay an initial contribution before drawing benefits.
+    The funding factor formalises this: the new BUCK minter is by
+    construction a contributor to the mutual-insurance pool, and they
+    must demonstrate that contribution by holding BUCK already.
+
+  - *Tax-driven currency demand*: Modern Monetary Theory's chartalism
+    holds that fiat currency derives value from being the only acceptable
+    medium for tax payment.  The funding factor creates a similar
+    structural demand sink: anyone who wants to use BUCK credit must
+    first hold BUCK, and the magnitude of that requirement scales with
+    the system's monetary stress.
+
+  - *Cryptocurrency bootstrap auctions*: early-stage crypto networks
+    often gate participation on pre-purchased tokens (pre-sale, initial
+    DEX offering, vesting cliffs).  The funding factor accomplishes the
+    same goal -- ensuring new entrants are economically aligned -- without
+    a one-shot pre-sale.  The "entry fee" is paid in BUCK and remains in
+    the holder's wallet, so it is collateral rather than burn.
+
+** Reproducing this example
+
+#+BEGIN_SRC shell :exports code :eval no-export
+forge test --match-contract BuckEquilibriumScenarioTest -vv
+python -m pytest alberta_buck/test/test_equilibrium_plot.py -v -s
+#+END_SRC
+
+The Forge test emits =test/vectors/equilibrium-scenario.json= (weekly
+snapshots over 18 simulated months).  The Python script reads that JSON and
+writes =images/equilibrium-scenario.png= -- the four-panel chart above.
+
 * Vehicle Insurance Lifecycle
   :PROPERTIES:
   :CUSTOM_ID: vehicle-lifecycle

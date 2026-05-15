@@ -161,6 +161,8 @@
   Alice trades against short-term excursions because she knows where
   parity lives and roughly when the PID will catch up.
 
+  <file:./images/arb-scenario.png>
+
 
 2.1 Scenario
 ────────────

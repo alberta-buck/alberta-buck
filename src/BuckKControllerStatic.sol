@@ -34,6 +34,15 @@ contract BuckKControllerStatic {
         return buckK;
     }
 
+    /// @notice Phase-0 stub: funding factor disabled (returns 0).  Buck.sol's
+    ///         mint gate is `balance >= poolPrincipal * factor / 1e18`, so a
+    ///         zero factor lets all mints through.  The dynamic PID
+    ///         controller (BuckKController.fundingFactor) implements the real
+    ///         counter-cyclical formula.
+    function fundingFactor() external pure returns (uint256) {
+        return 0;
+    }
+
     /// @notice Governance updates the published BUCK_K value.
     function setBuckK(uint256 _buckK) external {
         require(msg.sender == governance, "not governance");

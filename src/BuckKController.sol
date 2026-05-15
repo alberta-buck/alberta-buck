@@ -53,6 +53,12 @@ contract BuckKController {
     ///         ezpwd::pid `dS` correction.
     int256 public lastBasketCost;
 
+    /// @notice Last observed BUCK reference price (18-dec USD).  Cached by
+    ///         compute() alongside lastBasketCost so external callers (e.g.
+    ///         Buck.mint) can read the most recent oracle pair without
+    ///         re-doing the V3 consult.  Drives `fundingFactor()`.
+    int256 public lastBuckPrice;
+
     // --- Output ---
     uint256 public buckK;     // Current BUCK_K (18-decimal, 1e18 = 1.0)
     uint256 public dT;        // Minimum seconds between PID state updates
@@ -181,6 +187,7 @@ contract BuckKController {
         if (!primed) {
             P              = error;
             lastBasketCost = basketCost;
+            lastBuckPrice  = buckPrice;
             lastUpdate     = block.timestamp;
             primed         = true;
             emit BuckKUpdated(buckK, error, error, I, int256(0));
@@ -226,6 +233,7 @@ contract BuckKController {
         buckK          = newBuckK;
         lastUpdate     = block.timestamp;
         lastBasketCost = basketCost;     // update reference for next dS
+        lastBuckPrice  = buckPrice;      // cache for fundingFactor() reads
 
         emit BuckKUpdated(newBuckK, error, P, I, D);
         return newBuckK;
@@ -236,9 +244,39 @@ contract BuckKController {
         return buckK;
     }
 
+    /// @notice Counter-cyclical insurance funding factor (18-dec, 1e18 = 1.0).
+    ///
+    /// @dev   factor = max(0, 1e18 + 10 * (basket - BUCK) * 1e18 / basket)
+    ///
+    ///        Throttles new mints when BUCK trades below its commodity
+    ///        basket (BUCK undervalued / monetary inflation): the minter
+    ///        must pre-hold `poolPrincipal * factor / 1e18` BUCK before
+    ///        their mint is accepted.  Saturates at 0 once BUCK trades
+    ///        >= 110% of basket -- in deflationary regimes the gate fully
+    ///        opens and new minting is unconstrained by reserves.
+    ///
+    ///        Reference points (basket fixed at $1.00):
+    ///          BUCK = $1.00 (parity)     => factor = 1.00
+    ///          BUCK = $0.99 (1 % infl.)  => factor = 1.10
+    ///          BUCK = $0.97 (3 % infl.)  => factor = 1.30
+    ///          BUCK = $1.10 (10% defl.)  => factor = 0
+    ///
+    ///        Returns 1e18 when un-primed (basket reference is zero) so
+    ///        Buck.sol's gate behaves as a unit-coverage requirement during
+    ///        the very early bootstrap; Buck.sol independently bypasses the
+    ///        check when totalSupply == 0 to allow the genesis mint.
+    function fundingFactor() external view returns (uint256) {
+        int256 b = lastBasketCost;
+        if (b <= 0) return uint256(UNIT);
+        int256 p = lastBuckPrice;
+        int256 raw = UNIT + int256(10) * (b - p) * UNIT / b;
+        if (raw <= 0) return 0;
+        return uint256(raw);
+    }
+
     // --- Oracle Helpers ---
 
-    function _getBasketCost() internal view returns (int256) {
+    function _getBasketCost() internal view virtual returns (int256) {
         int256 total = 0;
 
         // Chainlink-feed components

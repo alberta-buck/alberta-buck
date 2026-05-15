@@ -25,6 +25,12 @@ interface IBuckK {
     ///      otherwise returns the cached value.  Buck mints/burns call this
     ///      so user activity drives (and amortizes) PID work.
     function compute() external returns (uint256);
+    /// @dev Counter-cyclical insurance funding factor (18-dec; 1e18 == 1.0).
+    ///      Buck.mint gates on
+    ///        balanceOf(minter) >= poolPrincipal * fundingFactor / 1e18.
+    ///      The Static controller returns 0 (gate disabled); the PID
+    ///      controller returns max(0, 1e18 + 10*(basket-BUCK)*1e18/basket).
+    function fundingFactor() external view returns (uint256);
 }
 
 interface IBuckCredit {
@@ -293,6 +299,29 @@ contract Buck is IERC20, IERC20Metadata {
             _state[msg.sender].balance.asUint() + totalCoverage <= limit,
             "BUCK: exceeds credit limit"
         );
+
+        // Counter-cyclical insurance funding gate.  The minter must already
+        // hold poolPrincipal * fundingFactor / 1e18 BUCK as a precondition
+        // (the balance is NOT consumed -- it is skin-in-the-game collateral
+        // that throttles new mints when BUCK trades below basket).
+        //
+        // Bootstrap exemption: when totalSupply == 0 no BUCK exists yet, so
+        // the very first mint by definition cannot satisfy any non-zero
+        // requirement.  Skipping the gate here lets the genesis minter seed
+        // the system; every subsequent mint must satisfy the live factor.
+        //
+        // Mints with zero poolPrincipal (NFT premium so low it rounds to 0)
+        // also bypass: there is no insurance contribution to back.
+        if (_totalSupply > 0 && poolPrincipal > 0) {
+            uint256 factor   = buckK.fundingFactor();
+            if (factor > 0) {
+                uint256 required = poolPrincipal * factor / BUCKK_SCALE;
+                require(
+                    balanceOf(msg.sender) >= required,
+                    "BUCK: insufficient mint funding"
+                );
+            }
+        }
 
         _accrueJubilee();
         _crystallize(msg.sender);
