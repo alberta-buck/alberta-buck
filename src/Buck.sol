@@ -124,6 +124,20 @@ contract Buck is IERC20, IERC20Metadata {
     ///      exact proportion to the BUCKs transferred.
     uint64 internal _jubileeLastUpdate;
 
+    // ---- Direct-mint integration -------------------------------------------
+    //
+    // BuckBasket is the privileged caller of mintFromBasket / burnFromBasket
+    // for the TOKEN-presentation (direct-mint) path.  Wired post-deploy by
+    // `setBasket(address)` so the basket can be constructed with Buck's
+    // address.  Once set, the field is immutable in effect (further
+    // setBasket calls revert).
+    //
+    // Placed last in the storage layout so the existing slot positions of
+    // _state / _totalSupply / _allowances / storedLimit / mintsBacked /
+    // _receiptFragments / _jubileeLastUpdate (which tests reach via
+    // `vm.store(..., slot, ...)`) remain unchanged.
+    address public basket;
+
     // ---- premium / mutual-insurance pool model -----------------------------
     //
     // mint(N) delivers N to the holder + a mutual-insurance pool deposit of
@@ -263,6 +277,47 @@ contract Buck is IERC20, IERC20Metadata {
 
     function burn(uint256 amount, uint256[] calldata tokenIds) external {
         _burnAllocated(amount, tokenIds);
+    }
+
+    // ---- Direct-mint path (TOKEN-presentation via BuckBasket) -------------
+
+    /// @notice One-shot wiring of the BuckBasket address; immutable thereafter.
+    /// @dev    Must be set by `insurancePool` (which is governance-bound at
+    ///         deploy) so that the basket address is locked under the same
+    ///         authority that holds the system's mutual reserves.
+    function setBasket(address _basket) external {
+        require(msg.sender == insurancePool, "BUCK: not insurancePool");
+        require(basket == address(0), "BUCK: basket already set");
+        require(_basket != address(0), "BUCK: basket=0");
+        basket = _basket;
+    }
+
+    /// @notice Mint `amount` BUCK to `to`.  Bypasses the BuckCredit /
+    ///         funding-factor machinery -- direct-mint BUCK is backed by
+    ///         the TOKEN reserves in BuckBasket's pools, not by insured-
+    ///         asset credit.  Only callable by the registered basket.
+    function mintFromBasket(address to, uint256 amount) external {
+        require(msg.sender == basket && basket != address(0), "BUCK: not basket");
+        if (amount == 0) return;
+        _accrueJubilee();
+        _crystallize(to);
+        _addBalance(to, amount);
+        _totalSupply += amount;
+        emit Transfer(address(0), to, amount);
+    }
+
+    /// @notice Burn `amount` BUCK from BuckBasket's balance.  Only callable
+    ///         by the registered basket.  Mirrors mintFromBasket on the
+    ///         supply side without consulting credit-NFT machinery.
+    function burnFromBasket(uint256 amount) external {
+        require(msg.sender == basket && basket != address(0), "BUCK: not basket");
+        if (amount == 0) return;
+        _accrueJubilee();
+        _crystallize(msg.sender);
+        require(_state[msg.sender].balance.asUint() >= amount, "BUCK: insufficient");
+        _subBalance(msg.sender, amount);
+        _totalSupply -= amount;
+        emit Transfer(msg.sender, address(0), amount);
     }
 
     /// @notice Quote total coverage / pool principal for delivering `amount`
