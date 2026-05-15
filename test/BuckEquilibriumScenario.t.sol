@@ -154,6 +154,11 @@ contract BuckEquilibriumScenarioTest is Test {
     int256[]  internal s_basket;      // 18-dec basket cost (constant $1)
     uint256[] internal s_buckK;
     uint256[] internal s_factor;
+    // PID accumulators -- exposed so the plot can show the controller's
+    // internal state alongside the prices it's responding to.
+    int256[]  internal s_pid_p;
+    int256[]  internal s_pid_i;
+    int256[]  internal s_pid_d;
     uint256[] internal s_supply;
     uint256[] internal s_jubilee;
     uint256[] internal s_pool_buck;
@@ -632,6 +637,9 @@ contract BuckEquilibriumScenarioTest is Test {
         s_basket.push(kCtrl.getBasketCost());
         s_buckK.push(kCtrl.buckK());
         s_factor.push(kCtrl.fundingFactor());
+        s_pid_p.push(kCtrl.P());
+        s_pid_i.push(kCtrl.I());
+        s_pid_d.push(kCtrl.D());
         s_supply.push(buck.totalSupply());
         s_jubilee.push(buck.jubileeActual());
 
@@ -678,6 +686,9 @@ contract BuckEquilibriumScenarioTest is Test {
         j = string.concat(j, _jInt ("basket",     s_basket),     ",");
         j = string.concat(j, _jUint("buckK",      s_buckK),      ",");
         j = string.concat(j, _jUint("factor",     s_factor),     ",");
+        j = string.concat(j, _jInt ("pid_p",      s_pid_p),      ",");
+        j = string.concat(j, _jInt ("pid_i",      s_pid_i),      ",");
+        j = string.concat(j, _jInt ("pid_d",      s_pid_d),      ",");
         j = string.concat(j, _jUint("supply",     s_supply),     ",");
         j = string.concat(j, _jUint("jubilee",    s_jubilee),    ",");
         j = string.concat(j, _jUint("pool_buck",  s_pool_buck),  ",");

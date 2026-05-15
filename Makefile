@@ -35,6 +35,9 @@ endif
 .PHONY: deploy-local deploy-sepolia
 .PHONY: install update
 .PHONY: test-python venv-activate
+.PHONY: vectors plots images
+.PHONY: vector-lifecycle vector-equilibrium vector-arb
+.PHONY: plot-lifecycle plot-equilibrium plot-arb
 
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -106,6 +109,48 @@ test-python:
 
 venv-activate:
 	pip install -e ".[tests]"
+
+
+# ── Worked-example vectors and plots ─────────────────────────────────
+#
+# `images` regenerates every artifact referenced by
+# alberta-buck-ethereum-example.org from scratch:
+#
+#   1. Runs the three Forge tests that emit JSON snapshot vectors under
+#      test/vectors/  (lifecycle, equilibrium, arb scenario).
+#   2. Runs the matching Python plot scripts to produce PNGs under
+#      images/.
+#
+# Individual vector-* and plot-* targets are also exposed for partial
+# regeneration during iteration on a single example.
+
+VECTORS_DIR	= test/vectors
+IMAGES_DIR	= images
+
+vector-lifecycle:
+	forge test $(FORGE_OPTS) --match-test test_lifecycle -vv
+
+vector-equilibrium:
+	forge test $(FORGE_OPTS) --match-contract BuckEquilibriumScenarioTest -vv
+
+vector-arb:
+	forge test $(FORGE_OPTS) --match-contract BuckKArbScenarioTest -vv
+
+vectors:		vector-lifecycle vector-equilibrium vector-arb
+
+plot-lifecycle:
+	python -m pytest alberta_buck/test/test_lifecycle_plot.py -v -s
+
+plot-equilibrium:
+	python -m pytest alberta_buck/test/test_equilibrium_plot.py -v -s
+
+plot-arb:
+	python -m pytest alberta_buck/test/test_arb_plot.py -v -s
+
+plots:			plot-lifecycle plot-equilibrium plot-arb
+
+# One-shot: regenerate vectors then plots in the right order.
+images:			vectors plots
 
 
 # ── Dependencies ─────────────────────────────────────────────────────

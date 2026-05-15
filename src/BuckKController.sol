@@ -53,17 +53,17 @@ contract BuckKController {
     int256 public D;
     uint256 public lastUpdate;
 
-    /// @notice Set to true after the first compute() that successfully reads
-    ///         oracles.  Until primed, `P` and `lastBasketCost` are zero
-    ///         placeholders -- if we ran a full PID step from that state,
-    ///         the derivative term `(error - P) / dt` would spike off a
-    ///         spurious "error went from 0 to current" transition.
+    /// @notice Always true after construction.  Retained for ABI compatibility
+    ///         with earlier two-phase priming designs.
     ///
-    ///         The priming cycle reads basketCost / buckPrice, captures
-    ///         them as the references for the next cycle, and returns the
-    ///         cached buckK without doing any P/I/D math.  Mirrors the
-    ///         ezpwd::pid constructor pattern of pre-loading P with the
-    ///         actual initial error.
+    ///         History: previous revisions deferred priming to the first
+    ///         compute() call so that real oracle prices could be captured
+    ///         as P_prev / lastBasketCost references.  That approach
+    ///         required the controller to live in a "not yet primed" state
+    ///         and complicated callers.  The shipped design primes I and
+    ///         the price references in the constructor (assuming error = 0
+    ///         and parity references at deploy), so every compute() runs
+    ///         a full PID cycle.
     bool public primed;
 
     /// @notice Last observed basket cost (18-dec USD).  Used to compute the
@@ -126,6 +126,34 @@ contract BuckKController {
     ///      to $1 (USDT, USDC).  weight is the pool's USD share of the basket
     ///      (18-dec), unitsPerWeight scales how much "one unit" represents in
     ///      18-dec USD when multiplied against `weight`.
+    ///
+    ///      All BuckKControllers start with an initial assumption that 1 BUCK equals 1 full
+    ///      commodity basket value at initialization.
+    ///
+    ///      The _getBuckPrice API returns the current BUCK price in the exchange currency: the
+    ///      process value, and _getBasketCost returns the current BUCK commodity basket price in
+    ///      the exchange currency: the setpoint value.  Both of these float freely in this
+    ///      implementation.  For example, if there is a 10% USD$ inflation, we expect both the
+    ///      setpoint (the basket in USD$) and the process value (the BUCK in USD$) to increase by
+    ///      10%.
+    ///
+    ///      This is a non-ideal embodiment.
+    ///
+    ///      The BUCK is defined in terms of a number of commodities priced in their RWA tokens
+    ///      (eg. XAUT, PAXG, cbBTC, WBTC, ...)  *directly*, measured in terms of TOKEN/BUCK pools:
+    ///      XAUT/BUCK, cbBTC/BUCK, etc.  These start at zero, and a special mint process allows a
+    ///      token eg. PAXG to be presented to the Buck contract, and it will mint the BUCK half of
+    ///      new units in the PAXG/BUCK pool.  Later, the pool liquidity token can be returned to
+    ///      Buck contract, which will redeem the current proportion of PAXG/BUCK units from the
+    ///      pool, burn the BUCKs and return the PAXG to the owner.
+    ///
+    ///      This eliminates an intermediate token such as USDC and USDT, and also the variability
+    ///      of its peg, eg. USD$.  The XAUT/BUCK pools are very low fee, to make the
+    ///      XAUT->BUCK->cbBTC path a low-cost route to exchange RWA tokens.
+    ///
+    ///      In this embodiment, _getBuckPrice always returns 1.0, while _getBacketCost returns the
+    ///      value of the defined commodity basket in BUCKs.  
+    ///
     struct BasketPool {
         address pool;
         address baseToken;
@@ -163,6 +191,37 @@ contract BuckKController {
         buckK = _buckK;
         lastUpdate = block.timestamp;
         dTMax = type(uint256).max; // disabled by default; governance opts in
+
+        // ----------------------------------------------------------------
+        // Constructor-time PID priming (assume error = 0 at deploy)
+        // ----------------------------------------------------------------
+        //
+        // Pre-load `I` so that the first compute() with zero residual error
+        // reproduces the initial buckK value exactly.  Algebra (with P = 0,
+        // D = 0):
+        //     buckK = UNIT + (I * Ki) / UNIT
+        //   => I = ((buckK - UNIT) * UNIT) / Ki
+        //
+        // When Ki == 0 (e.g. P-only tuning) the I term contributes nothing
+        // regardless, so we leave I = 0.
+        //
+        // Set `lastBasketCost` and `lastBuckPrice` to UNIT (parity, $1.00)
+        // so the FIRST compute() interprets any deviation as a one-shot
+        // setpoint shift (correctly subtracted by dS in the derivative
+        // calculation) rather than as a process step.  This lets us avoid
+        // calling `_getBuckPrice()` / `_getBasketCost()` in the constructor
+        // -- those calls would be unsafe in derived test harnesses (their
+        // overrides reference storage initialised after the parent
+        // constructor returns).
+        //
+        // `primed = true` marks the controller as ready; compute() no
+        // longer has a separate prime branch.
+        if (_Ki != 0) {
+            I = ((int256(_buckK) - UNIT) * UNIT) / _Ki;
+        }
+        lastBasketCost = UNIT;
+        lastBuckPrice  = UNIT;
+        primed         = true;
     }
 
     /// @notice Run (or cache) one PID cycle and return the current BUCK_K.
@@ -196,8 +255,8 @@ contract BuckKController {
             return buckK;
         }
 
-        int256 basketCost = _getBasketCost();  # process
-        int256 buckPrice  = _getBuckPrice();   # setpoint
+        int256 basketCost = _getBasketCost();   // setpoint (target value)
+        int256 buckPrice  = _getBuckPrice();    // process variable (observed)
         // Sign convention: error = process - setpoint = BUCK - basket.
         //
         //   BUCK BELOW basket (monetary inflation)  =>  error < 0
@@ -211,21 +270,11 @@ contract BuckKController {
         // below).  See alberta-buck-ethereum.org "BUCK_K Sign Convention".
         int256 error      = buckPrice - basketCost;
 
-        // Priming cycle: capture references and exit without PID action.
-        // Avoids first-cycle derivative spike from P_prev = 0 and avoids
-        // a spurious dS = -lastBasketCost shift on cycle one.  Subsequent
-        // cycles compute deltas against real references.  Also initiallize
-	// I for an initial steady-state output.
-        if (!primed) {
-            P              = error;
-	    I		   = Ki ? ( _buckK - P * Kp - basketCost ) / Ki : 0;
-            lastBasketCost = basketCost;
-            lastBuckPrice  = buckPrice;
-            lastUpdate     = block.timestamp;
-            primed         = true;
-            emit BuckKUpdated(buckK, error, error, I, int256(0));
-            return buckK;
-        }
+        // Priming was performed at construction time: `I` is pre-loaded for
+        // steady-state continuity, `lastBasketCost` / `lastBuckPrice` are
+        // initialised to UNIT (assumed parity at deploy), and `primed` is
+        // already true.  No runtime prime branch is needed -- every
+        // compute() runs a full PID cycle.
 
         // Clamp the effective integration step but advance lastUpdate to
         // real block.timestamp so the next cycle measures forward correctly.

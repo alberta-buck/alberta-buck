@@ -6,15 +6,19 @@ Workflow:
   2.  python -m pytest alberta_buck/test/test_equilibrium_plot.py -v -s
         # reads JSON, writes images/equilibrium-scenario.png
 
-Four-panel layout:
+Five-panel layout:
   Panel 1: BUCK pool spot price vs the $1.00 pegged basket.
   Panel 2: buckK (left axis) and insurance fundingFactor (right axis), so the
            feedback couple between credit-multiplier and pre-mint reserve
            requirement is visible at a glance.
-  Panel 3: Total BUCK supply and Jubilee balance (both 6-dec).
-  Panel 4: Active Carol count and aggregate mintedNet (per-Carol BUCK
-           liability tracked outside the contract; useful for diagnosing
-           the rebalance loop).
+  Panel 3: PID accumulators (P, I, D).  Lets us see the controller's
+           internal state alongside the prices it's responding to -- handy
+           for diagnosing wind-up, anti-windup clamping, and the dS-corrected
+           derivative.
+  Panel 4: Total BUCK supply (left axis) and Jubilee balance (right axis).
+           Separate axes so the Jubilee's slow accrual is visible against
+           the much larger supply curve.
+  Panel 5: Carol lifecycle (arrive/mint/hold/retire) + Hank accumulation.
 """
 
 import json
@@ -67,7 +71,13 @@ def test_equilibrium_plot():
     hankHld= [int(v) / E6 for v in d.get("hank_hold", [0] * len(active))]
     aggMint= [int(v) / E6 for v in d["agg_minted"]]
 
-    fig, axes = plt.subplots(4, 1, figsize=(13, 12), sharex=True)
+    # PID accumulators (signed, 18-dec).  May be absent in older vectors --
+    # gracefully degrade to zero so the plot still renders.
+    pidP = [_signed_int(v) / E18 for v in d.get("pid_p", [0] * len(days))]
+    pidI = [_signed_int(v) / E18 for v in d.get("pid_i", [0] * len(days))]
+    pidD = [_signed_int(v) / E18 for v in d.get("pid_d", [0] * len(days))]
+
+    fig, axes = plt.subplots(5, 1, figsize=(13, 15), sharex=True)
 
     # ---- Panel 1: prices --------------------------------------------- #
     ax = axes[0]
@@ -96,17 +106,43 @@ def test_equilibrium_plot():
     ax.set_title("BUCK_K (credit-limit multiplier) vs insurance funding factor")
     ax.legend(handles=[l1, l2], loc="upper right", fontsize=9)
 
-    # ---- Panel 3: supply + jubilee ----------------------------------- #
+    # ---- Panel 3: PID accumulators ----------------------------------- #
+    # P, I and D span very different magnitudes (P ~ 0.1, I integrates to
+    # ~100s, D spikes can hit 1e8+ on step changes), so we use a symmetric
+    # logarithmic scale on a single shared axis.  Symlog renders linearly
+    # near zero (defaulting to |y| < 0.01) and logarithmically beyond, so
+    # tiny P moves remain visible alongside huge D transients.
     ax = axes[2]
-    ax.plot(days, supply,  label="totalSupply",     color="tab:blue", linewidth=1.4)
-    ax.plot(days, jubilee, label="Jubilee balance", color="tab:orange", linewidth=1.0)
-    ax.set_ylabel("BUCK")
-    ax.legend(loc="upper right", fontsize=9)
-    ax.grid(True, alpha=0.3)
-    ax.set_title("Total BUCK supply and Jubilee accumulation")
+    l1, = ax.plot(days, pidP, color="tab:red",   linewidth=1.4, label="P (error)")
+    l2, = ax.plot(days, pidI, color="tab:blue",  linewidth=1.2, label="I (integral)")
+    l3, = ax.plot(days, pidD, color="tab:olive", linewidth=0.8,
+                  linestyle=":", label="D (derivative)")
+    ax.axhline(0, color="black", alpha=0.3, linewidth=0.5)
+    ax.set_yscale("symlog", linthresh=0.01)
+    ax.set_ylabel("PID state (symlog)")
+    ax.grid(True, alpha=0.3, which="both")
+    ax.set_title("PID accumulators (P, I, D) -- internal state of the controller "
+                 "(symmetric-log scale)")
+    ax.legend(handles=[l1, l2, l3], loc="upper right", fontsize=9)
 
-    # ---- Panel 4: actor populations + flows -------------------------- #
+    # ---- Panel 4: supply (left) + jubilee (right) -------------------- #
     ax = axes[3]
+    l1, = ax.plot(days, supply, color="tab:blue", linewidth=1.4, label="totalSupply")
+    ax.set_ylabel("totalSupply (BUCK)", color="tab:blue")
+    ax.tick_params(axis="y", labelcolor="tab:blue")
+    ax.grid(True, alpha=0.3)
+
+    ax2 = ax.twinx()
+    l2, = ax2.plot(days, jubilee, color="tab:orange", linewidth=1.0,
+                   label="Jubilee balance")
+    ax2.set_ylabel("Jubilee (BUCK)", color="tab:orange")
+    ax2.tick_params(axis="y", labelcolor="tab:orange")
+
+    ax.set_title("BUCK total supply (left) and Jubilee accumulation (right)")
+    ax.legend(handles=[l1, l2], loc="upper right", fontsize=9)
+
+    # ---- Panel 5: actor populations + flows -------------------------- #
+    ax = axes[4]
     l1, = ax.plot(days, active,  color="tab:orange", linewidth=1.4, label="active Carols")
     l3, = ax.plot(days, retired, color="tab:brown",  linewidth=1.0, linestyle="--",
                   label="retired Carols")
@@ -137,5 +173,9 @@ def test_equilibrium_plot():
     print(f"  spot end:      ${spot[-1]:.4f}")
     print(f"  buckK end:     {buckk[-1]:.4f}")
     print(f"  factor end:    {factor[-1]:.4f}")
+    print(f"  PID P end:     {pidP[-1]:.4f}")
+    print(f"  PID I end:     {pidI[-1]:.4f}")
+    print(f"  PID D end:     {pidD[-1]:.4f}")
     print(f"  supply end:    ${supply[-1]:,.0f}")
+    print(f"  jubilee end:   ${jubilee[-1]:,.2f}")
     print(f"  active Carols: {active[-1]}")

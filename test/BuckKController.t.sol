@@ -339,25 +339,56 @@ contract BuckKControllerUnitTest is Test {
     //  Priming + dS-compensated derivative                                   //
     // -------------------------------------------------------------------- //
 
-    /// @dev The first compute() captures references and returns cached buckK.
-    function test_prime_does_not_run_pid() public {
-        // Deploy a fresh harness so we can observe the prime cycle in
-        // isolation (the setUp() one is already past).
-        BuckKHarness fresh = _makeHarness(0.1e18, 0.01e18, 0.00001e18, 3600);
-        _wireBasket(fresh);
-        fresh.setBuckPrice(0.90e18);  // 10% under -- big error if PID actually ran
+    /// @dev Priming now happens in the constructor.  `primed` is true
+    ///      immediately after deploy, `I` is pre-loaded for steady-state
+    ///      continuity (error = 0 assumed at deploy), and price references
+    ///      are set to UNIT (parity).  No separate prime branch runs at
+    ///      compute() time.
+    function test_constructor_primes_controller() public {
+        // Initial buckK chosen above UNIT so the I-prime math is observable.
+        BuckKHarness fresh = new BuckKHarness(
+            0.1e18, 0.01e18, 0,
+            3600,
+            0.50e18, 1.50e18,
+            1.20e18,                 // buckK starts above neutral
+            address(0xdead), 600,
+            governance
+        );
 
-        assertFalse(fresh.primed(), "should start un-primed");
+        assertTrue(fresh.primed(),         "should be primed at construction");
+        assertEq(fresh.lastBasketCost(), int256(1e18), "basket reference not at parity");
+        assertEq(fresh.lastBuckPrice(),  int256(1e18), "buck reference not at parity");
+
+        // I = ((buckK - UNIT) * UNIT) / Ki
+        //   = ((1.20e18 - 1e18) * 1e18) / 0.01e18
+        //   = (0.20e36) / 0.01e18
+        //   = 20e18
+        assertApproxEqRel(fresh.I(), 20e18, 0.0001e18,
+                          "I not pre-loaded for steady-state continuity");
+        // P and D start at zero (no proportional or derivative history).
+        assertEq(fresh.P(), 0, "P should be 0 at construction");
+        assertEq(fresh.D(), 0, "D should be 0 at construction");
+    }
+
+    /// @dev Steady-state continuity: when oracles read at parity (BUCK == basket)
+    ///      the very first compute() must reproduce the initial buckK output.
+    ///      This is the property that justifies constructor-time I priming.
+    function test_first_compute_at_parity_reproduces_buckK() public {
+        BuckKHarness fresh = new BuckKHarness(
+            0.1e18, 0.01e18, 0,
+            3600,
+            0.50e18, 1.50e18,
+            1.20e18,                  // non-neutral starting buckK
+            address(0xdead), 600,
+            governance
+        );
+        _wireBasket(fresh);
+        fresh.setBuckPrice(1.0e18);   // BUCK at parity (basket = $1.00)
 
         vm.warp(block.timestamp + 3601);
         uint256 k = fresh.compute();
-
-        assertTrue(fresh.primed(),                "prime flag not set");
-        assertEq  (k, 1.0e18,                     "prime cycle modified buckK");
-        assertEq  (fresh.I(), 0,                  "prime cycle accumulated I");
-        assertEq  (fresh.D(), 0,                  "prime cycle accumulated D");
-        // P captured the actual initial error (BUCK - basket = -0.10).
-        assertLt  (fresh.P(), 0,                  "P not primed with current error");
+        assertApproxEqRel(k, 1.20e18, 0.0001e18,
+                          "first compute at parity did not reproduce initial buckK");
     }
 
     /// @dev Priming doesn't make the first-after-step cycle spike-free
