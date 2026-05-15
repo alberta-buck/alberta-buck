@@ -91,13 +91,15 @@ contract BuckEquilibriumScenarioTest is Test {
     uint256 constant BUCKK_MIN   = 0.05e18;
     uint256 constant BUCKK_MAX   = 1.00e18;
 
-    // PID: negative gains so error (basket - BUCK) > 0 (BUCK undervalued)
-    // produces a DECREASE in buckK -> tighter credit -> burn pressure.
+    // PID: POSITIVE gains.  Under the project sign convention,
+    //   error = BUCK - basket
+    // is negative when BUCK is undervalued (inflation), so positive Kp
+    // contracts buckK -> tighter credit -> burn pressure -> price recovery.
     // Tuned to give a ~10% buckK move per 5% sustained drift -- gentle
     // enough that natural Carol/Hank flows dominate but firm enough to
     // pull buckK off neutral when persistent error appears.
-    int256  constant KP    = -int256(0.5e18);
-    int256  constant KI    = -int256(0.005e18);
+    int256  constant KP    = int256(0.5e18);
+    int256  constant KI    = int256(0.005e18);
     int256  constant KD    = int256(0);
     uint256 constant CTRL_DT = 60;                 // seconds
 

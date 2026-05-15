@@ -385,10 +385,21 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
     /// @dev Run one tick of Alice's PID-spread arbitrage strategy.
     ///
     /// signal = aliceK - buckK (both 18-dec PID outputs).
-    ///   > 0  =>  Alice's faster PID has accumulated more "BUCK undervalued"
-    ///            pressure than the slow official controller.  She expects
-    ///            BUCK to be pushed UP over the next many cycles.  Buy BUCK.
-    ///   < 0  =>  mirror; sell BUCK.
+    ///
+    /// Under the project sign convention (error = BUCK - basket, positive
+    /// gains), buckK FALLS when BUCK is undervalued and RISES when BUCK is
+    /// overvalued.  Alice's faster PID slopes the same way but reacts
+    /// sooner.  Therefore:
+    ///
+    ///   signal < 0  (aliceK already dropping faster than ctrl)
+    ///       -> Alice anticipates further BUCK supply contraction by ctrl
+    ///       -> BUCK price expected to RECOVER upward
+    ///       -> Buy BUCK with USDT (long).
+    ///
+    ///   signal > 0  (aliceK rising faster than ctrl)
+    ///       -> Alice anticipates further BUCK supply expansion by ctrl
+    ///       -> BUCK price expected to FALL toward basket
+    ///       -> Sell BUCK for USDT (short).
     ///
     /// Position size scales linearly with |signal| up to ALICE_FULL_SIZE_SIGNAL,
     /// capped by reserve / pool-target-slippage / pool-depth.
@@ -402,7 +413,9 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
 
         if (alice.arbDirection == 0) {
             if (sigMag < ALICE_ENTRY_SIGNAL) return;
-            if (signal > 0) {
+            if (signal < 0) {
+                // aliceK below buckK -> ctrl will follow downward -> BUCK
+                // supply will contract -> BUCK price will rise.  Buy BUCK.
                 uint256 usdtIn = _aliceSize(alice.usdtReserve, address(usdt), sigMag);
                 if (usdtIn == 0) return;
                 uint256 buckOut = _swapExactInput(buckUsdt, address(usdt), address(buck), usdtIn);
@@ -412,6 +425,8 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
                 alice.arbUsdtSpent   = usdtIn;
                 alice.arbDirection   = 1;
             } else {
+                // aliceK above buckK -> ctrl will follow upward -> BUCK
+                // supply will expand -> BUCK price will fall.  Sell BUCK.
                 uint256 buckIn = _aliceSize(alice.buckReserve, address(buck), sigMag);
                 if (buckIn == 0) return;
                 uint256 usdtOut = _swapExactInput(buckUsdt, address(buck), address(usdt), buckIn);
@@ -425,8 +440,10 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
             alicePid.compute();
         } else {
             bool converged = sigMag <= ALICE_EXIT_SIGNAL;
-            bool flipped = (alice.arbDirection == 1 && signal <= -int256(ALICE_ENTRY_SIGNAL))
-                        || (alice.arbDirection == 2 && signal >=  int256(ALICE_ENTRY_SIGNAL));
+            // Sign-flip: long (entered on signal<0) exits when signal >= +entry;
+            //           short (entered on signal>0) exits when signal <= -entry.
+            bool flipped = (alice.arbDirection == 1 && signal >=  int256(ALICE_ENTRY_SIGNAL))
+                        || (alice.arbDirection == 2 && signal <= -int256(ALICE_ENTRY_SIGNAL));
             if (!converged && !flipped) return;
 
             if (alice.arbDirection == 1) {

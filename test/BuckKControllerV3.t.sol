@@ -213,7 +213,7 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
     //  Swap-driven price drift -> PID response                               //
     // -------------------------------------------------------------------- //
 
-    function test_drift_buck_undervalued_pushes_buckK_up() public {
+    function test_drift_buck_undervalued_pushes_buckK_down() public {
         // First PID cycle at parity to establish baseline lastUpdate / state.
         vm.warp(block.timestamp + 61);
         ctrl.compute();
@@ -227,24 +227,23 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
         // Confirm we actually moved the pool ~5% down (allow tick-rounding).
         assertApproxEqRel(uint256(driftedPrice), 0.95e18, 0.005e18);
 
-        // Run several PID cycles -- buckK should monotonically expand toward
-        // the cap as the proportional + integral terms accumulate the
-        // positive (basket - buck) error.
+        // error = BUCK - basket = -0.05 -> buckK contracts monotonically as
+        // proportional + integral terms accumulate the negative error.
         uint256 prevK = baselineK;
         for (uint i = 0; i < 5; i++) {
             vm.warp(block.timestamp + 61);
             uint256 k = ctrl.compute();
-            assertGe(k, prevK, "buckK regressed mid-drift");
+            assertLe(k, prevK, "buckK regressed upward mid-drift");
             prevK = k;
         }
 
-        assertGt(ctrl.buckK(), baselineK, "buckK did not expand under undervaluation");
-        assertGt(ctrl.I(), 0, "integral did not accumulate positive error");
+        assertLt(ctrl.buckK(), baselineK, "buckK did not contract under undervaluation");
+        assertLt(ctrl.I(), 0, "integral did not accumulate negative error");
         emit log_named_uint("buckK after 5 cycles (BUCK 5% under)", ctrl.buckK());
         emit log_named_int ("integral after 5 cycles",                 ctrl.I());
     }
 
-    function test_drift_buck_overvalued_pushes_buckK_down() public {
+    function test_drift_buck_overvalued_pushes_buckK_up() public {
         vm.warp(block.timestamp + 61);
         ctrl.compute();
         uint256 baselineK = ctrl.buckK();
@@ -256,22 +255,23 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
         emit log_named_int("BUCK price after drift (18-dec)", driftedPrice);
         assertApproxEqRel(uint256(driftedPrice), 1.05e18, 0.005e18);
 
+        // error = BUCK - basket = +0.05 -> buckK expands monotonically.
         uint256 prevK = baselineK;
         for (uint i = 0; i < 5; i++) {
             vm.warp(block.timestamp + 61);
             uint256 k = ctrl.compute();
-            assertLe(k, prevK, "buckK regressed upward mid-drift");
+            assertGe(k, prevK, "buckK regressed downward mid-drift");
             prevK = k;
         }
 
-        assertLt(ctrl.buckK(), baselineK, "buckK did not contract under overvaluation");
-        assertLt(ctrl.I(), 0, "integral did not accumulate negative error");
+        assertGt(ctrl.buckK(), baselineK, "buckK did not expand under overvaluation");
+        assertGt(ctrl.I(), 0, "integral did not accumulate positive error");
         emit log_named_uint("buckK after 5 cycles (BUCK 5% over)",  ctrl.buckK());
         emit log_named_int ("integral after 5 cycles",              ctrl.I());
     }
 
     function test_drift_recovery_to_parity() public {
-        // 1) Drive BUCK 5% under, run 3 cycles -> buckK expands.
+        // 1) Drive BUCK 5% under, run 3 cycles -> buckK contracts.
         vm.warp(block.timestamp + 61);
         ctrl.compute();
 
@@ -280,21 +280,21 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
             vm.warp(block.timestamp + 61);
             ctrl.compute();
         }
-        uint256 expandedK = ctrl.buckK();
-        assertGt(expandedK, 1e18);
+        uint256 contractedK = ctrl.buckK();
+        assertLt(contractedK, 1e18);
 
         // 2) Recover BUCK back to parity (1.00) -- proportional error returns
-        //    to ~0.  Integral retains its accumulated positive lean, so
-        //    buckK does NOT instantly snap back; it relaxes gradually.
+        //    to ~0.  Integral retains its accumulated negative lean, so
+        //    buckK does NOT instantly snap back; it relaxes upward.
         _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 1e6);
         for (uint i = 0; i < 3; i++) {
             vm.warp(block.timestamp + 61);
             ctrl.compute();
         }
-        // After recovery, P-term contributes ~0, I-term still positive ->
-        // buckK still elevated relative to neutral, but should be no higher
-        // than the under-valued peak.
-        assertLe(ctrl.buckK(), expandedK, "buckK kept rising after parity recovery");
+        // After recovery, P-term contributes ~0, I-term still negative ->
+        // buckK still depressed relative to neutral, but should be no lower
+        // than the under-valued trough.
+        assertGe(ctrl.buckK(), contractedK, "buckK kept falling after parity recovery");
         emit log_named_uint("buckK after recovery to parity", ctrl.buckK());
     }
 

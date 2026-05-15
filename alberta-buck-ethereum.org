@@ -525,13 +525,27 @@ controller layout, ported to 18-decimal Solidity fixed-point.
 |------------------+------------------------------------+--------------------------------------------------|
 | Process Variable | BUCK/USDT Uniswap V3 TWAP          | What a BUCK actually trades for                  |
 | Setpoint         | Commodity-basket TWAP sum          | What a BUCK should be worth                      |
-| Error            | Setpoint - Process                 | Positive: BUCK undervalued; negative: overvalued |
+| Error            | Process - Setpoint                 | Positive: BUCK overvalued; negative: undervalued |
 | Output (BUCK_K)  | =1e18 + (P*Kp + I*Ki + D*Kd)/1e18= | Credit-limit multiplier (1.0 = neutral)          |
 
-When BUCK trades below basket, BUCK_K rises, expanding credit limits across the system; cheap BUCK
-floods out, arbitrageurs buy underpriced commodities, and BUCK price recovers.  The converse
-clamps credit when BUCK is overvalued.  See =alberta-buck-ethereum-example.org= for a worked
-arbitrage scenario.
+Sign convention (all shipped gains are *positive*):
+
+  - *BUCK below basket (inflation)*: =error < 0= -> =BUCK_K= /decreases/.
+    Credit contracts; holders running near their limit must burn BUCK to
+    stay compliant; supply shrinks; BUCK price recovers toward basket
+    from below.
+
+  - *BUCK above basket (deflation)*: =error > 0= -> =BUCK_K= /increases/.
+    Credit expands; holders can mint additional BUCK against their NFTs
+    and sell it into the pool at the premium; supply grows; BUCK price
+    recovers toward basket from above.
+
+Two canary tests in =test/BuckKController.t.sol= guard this direction
+(=test_sign_convention_inflation_contracts_credit= and
+=test_sign_convention_deflation_expands_credit=); any sign flip in the
+controller surface fails them within one PID cycle.  See
+=alberta-buck-ethereum-example.org= for the bootstrap, equilibrium, and
+arbitrage examples that exercise the loop end-to-end.
 
 *** Basket and BUCK Price Oracles
 

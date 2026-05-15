@@ -20,6 +20,26 @@ interface IERC20Decimals {
 ///         The BUCK reference price is read from a Uniswap V3 BUCK/quote pool
 ///         (e.g. BUCK/USDT) via TWAP.  Tests override `_getBuckPrice` through
 ///         BuckKHarness.
+///
+///         SIGN CONVENTION
+///         ---------------
+///         error = buckPrice - basketCost  (process minus setpoint).
+///
+///           BUCK BELOW basket (inflation):   error < 0 -> buckK DECREASES,
+///                                            contracting credit, inducing
+///                                            voluntary burns, pulling BUCK
+///                                            price back up.
+///
+///           BUCK ABOVE basket (deflation):   error > 0 -> buckK INCREASES,
+///                                            expanding credit, encouraging
+///                                            new mints + sales, pulling BUCK
+///                                            price back down.
+///
+///         All shipped gains should be POSITIVE (Kp, Ki, Kd >= 0) under this
+///         convention.  Negating any gain inverts the controller and is only
+///         appropriate if the operator intends the alternative credit channel
+///         (expand-on-inflation, contract-on-deflation) -- see the early-2026
+///         arb-scenario doc for the rationale of that alternative.
 contract BuckKController {
 
     // --- PID Gains (governance-set, 18-decimal fixed point) ---
@@ -176,16 +196,29 @@ contract BuckKController {
             return buckK;
         }
 
-        int256 basketCost = _getBasketCost();
-        int256 buckPrice  = _getBuckPrice();
-        int256 error      = basketCost - buckPrice;
+        int256 basketCost = _getBasketCost();  # process
+        int256 buckPrice  = _getBuckPrice();   # setpoint
+        // Sign convention: error = process - setpoint = BUCK - basket.
+        //
+        //   BUCK BELOW basket (monetary inflation)  =>  error < 0
+        //   BUCK ABOVE basket (monetary deflation) =>  error > 0
+        //
+        // With Kp > 0, positive error pushes buckK UP and negative error
+        // pushes it DOWN.  This matches the canonical credit-stabilizer
+        // policy: deflation expands credit (encourages new mints/sales,
+        // returning BUCK toward parity from above) while inflation contracts
+        // credit (forces voluntary burns, returning BUCK toward parity from
+        // below).  See alberta-buck-ethereum.org "BUCK_K Sign Convention".
+        int256 error      = buckPrice - basketCost;
 
         // Priming cycle: capture references and exit without PID action.
         // Avoids first-cycle derivative spike from P_prev = 0 and avoids
-        // a spurious dS = basketCost - 0 = ~$1.00 setpoint-shift on cycle
-        // one.  Subsequent cycles compute deltas against real references.
+        // a spurious dS = -lastBasketCost shift on cycle one.  Subsequent
+        // cycles compute deltas against real references.  Also initiallize
+	// I for an initial steady-state output.
         if (!primed) {
             P              = error;
+	    I		   = Ki ? ( _buckK - P * Kp - basketCost ) / Ki : 0;
             lastBasketCost = basketCost;
             lastBuckPrice  = buckPrice;
             lastUpdate     = block.timestamp;
@@ -199,10 +232,12 @@ contract BuckKController {
         uint256 effective = elapsed > dTMax ? dTMax : elapsed;
         int256 dt = int256(effective);
 
-        // Setpoint shift since last cycle.  Subtracting dS from (error - P)
-        // strips out target movement (e.g. gold spike, governance re-weight)
-        // so derivative reflects only BUCK's drift relative to its target.
-        int256 dS = basketCost - lastBasketCost;
+        // Setpoint shift since last cycle.  With error = BUCK - basket, an
+        // upward move in basket DECREASES error by an equal amount, so the
+        // setpoint contribution to (error - P_prev) is -(basketCost - lastBasketCost).
+        // Subtracting that from (error - P_prev) leaves only the process change
+        // (d(BUCK)/dt) for the derivative term.
+        int256 dS = lastBasketCost - basketCost;
 
         int256 newP = error;
         int256 newI = I + error * dt / UNIT;

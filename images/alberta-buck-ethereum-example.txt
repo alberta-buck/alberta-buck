@@ -8,7 +8,255 @@
                                2026-05-10
 
 
-1 Vehicle Insurance Lifecycle
+1 Bootstrap, Funding Factor, and the BUCK_K Feedback Loop
+═════════════════════════════════════════════════════════
+
+  The first worked example traces how Alberta Buck reaches monetary
+  equilibrium from a cold start.  Two mechanisms operate in tandem:
+
+  • The *insurance funding factor*, a counter-cyclical constraint on
+    minting that creates pre-mint demand for BUCK proportional to how
+    undervalued BUCK currently trades.
+  • The *BUCK_K credit-limit feedback*, where the PID's `buckK'
+    multiplier expands or contracts every holder's borrowing capacity,
+    voluntarily inducing burns during inflation and mints during
+    deflation.
+
+  The shipped scenario test (`test/BuckEquilibriumScenario.t.sol')
+  demonstrates both loops against a real `Buck.sol' + `BuckCredit.sol'
+  stack and a Uniswap V2 BUCK/USDC pool.  The basket is pegged to $1.00
+  USDC for clarity (the live configuration tracks a 4-pool commodity
+  basket; the dynamics are identical).
+
+  <file:./images/equilibrium-scenario.png>
+
+
+1.1 Insurance Funding Factor
+────────────────────────────
+
+  When a holder calls `Buck.mint(amount)', the per-NFT allocator
+  computes a `poolPrincipal' amount that's the insurance contribution
+  credited to the mutual-coverage pool.  Before the mint is accepted,
+  the holder must already hold
+
+  ┌────
+  │ required = poolPrincipal * fundingFactor / 1e18
+  └────
+
+  of BUCK in their wallet.  The pre-balance is *not consumed* – it's
+  skin-in-the-game collateral that must remain held going forward.
+
+  The factor itself is counter-cyclical in BUCK's deviation from basket:
+
+  ┌────
+  │ factor = max(0, 1 + 10 * (basket - BUCK) / basket)
+  └────
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   BUCK price (basket = $1.00)  Funding factor  Interpretation        
+  ────────────────────────────────────────────────────────────────────
+   $1.10  (10 % deflation)                 0.0  gate fully opens      
+   $1.05  (5 % deflation)                  0.5  50 % of premium       
+   $1.00  (parity)                         1.0  full premium pre-held 
+   $0.97  (3 % inflation)                  1.3  30 % surcharge        
+   $0.95  (5 % inflation)                  1.5  50 % surcharge        
+   $0.90  (10 % inflation)                 2.0  2x surcharge          
+   $0.80  (20 % inflation)                 3.0  3x surcharge          
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The 10:1 slope is hardcoded in `BuckKController.fundingFactor()';
+  later governance versions may parametrise it.  `BuckKControllerStatic'
+  returns 0, which is the convention for "gate disabled" (Phase-0
+  environments without oracles).
+
+
+1.1.1 Bootstrap exemption
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  At `totalSupply =' 0= no BUCK exists, so any non-zero requirement is
+  unsatisfiable.  `Buck._mintAllocated' explicitly bypasses the gate in
+  that window so the first mint can seed the system.  Once any BUCK has
+  been minted, every subsequent mint must satisfy the live factor.
+
+
+1.1.2 Why this matters for the bootstrap
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Picture the system on day 0: a single `BuckCredit' NFT has been
+  issued, no `Buck' has been minted, the BUCK/USDC pool is empty.
+  Whoever mints first (the bootstrap participant) seeds the supply;
+  their first action is usually to provide that BUCK as liquidity in the
+  BUCK/USDC pair so others have a market to interact with.
+
+  After that point, every newcomer faces the funding factor.  When the
+  pool has just been seeded – BUCK trading near $1.00 – factor is
+  roughly 1.0: each new minter must accumulate the full insurance
+  principal as BUCK *before* their first mint.  That accumulation is
+  itself a BUCK buy from the pool, supporting the BUCK price.
+
+  As more newcomers arrive and mint+sell, BUCK drifts below parity.
+  Factor rises.  The next newcomer must accumulate *more* BUCK pre-mint
+  than the previous one.  The barrier-of-entry mechanically supports
+  BUCK demand proportional to how undervalued BUCK has become.
+
+  This is the "running start" property: the system cannot mint itself
+  into oblivion because every new mint is preceded by BUCK demand whose
+  magnitude scales with the very inflation pressure it would otherwise
+  cause.
+
+
+1.2 BUCK_K Credit-Limit Feedback
+────────────────────────────────
+
+  In parallel with the funding factor, the on-chain PID controller
+  adjusts `buckK', the credit-limit multiplier.  Each holder's effective
+  borrowing capacity is
+
+  ┌────
+  │ limit = totalCreditValue * buckK / 1e18
+  └────
+
+  The shipped controller defines the PID error as
+
+  ┌────
+  │ error = buckPrice - basketCost            ; process minus setpoint
+  └────
+
+  so that under canonical /positive/ PID gains:
+
+  • *Inflation* (BUCK trading below basket): `error < 0' drives `buckK'
+    /down/.  Existing holders' effective limits contract.  Holders who
+    target a fixed utilization fraction (e.g. 50 % of limit) must burn
+    BUCK to stay within the new, lower limit.
+
+  • *Deflation* (BUCK trading above basket): `error > 0' drives `buckK'
+    /up/.  Holders gain headroom and can mint more BUCK to lock in the
+    premium, selling into the pool and pushing spot back down toward
+    basket.
+
+  This sign convention is enforced by two canary tests in
+  `test/BuckKController.t.sol':
+
+  • `test_sign_convention_inflation_contracts_credit' – BUCK at $0.95
+    must drive `buckK' /below/ 1.0 within one cycle.
+  • `test_sign_convention_deflation_expands_credit' – BUCK at $1.05 must
+    drive `buckK' /above/ 1.0 within one cycle.
+
+  Both tests rely on positive gains; negating any gain inverts the
+  controller and the canary fails immediately.  Any production
+  deployment that selects gains MUST pick positive values under this
+  convention.
+
+
+1.3 Carol/Hank/Alice dynamics
+─────────────────────────────
+
+  The scenario test populates the simulation with three actor
+  archetypes:
+
+  • *Alice* (singular, identified): the bootstrap participant.  Holds
+    the initial `$4M' face-value `BuckCredit', mints `$1M' BUCK at the
+    genesis bypass, and pairs it 1:1 with USDC in the V2 pool to provide
+    market liquidity.
+
+  • *Carol[1..50]* (synthetic public identities): borrowers.  Each holds
+    a `$100K' face-value vehicle-style credit (1.5%/yr premium) and runs
+    a full lifecycle:
+    1. Arrives at a Gaussian-distributed time (peak day 180, std 100
+       days).
+    2. Pre-buys `poolPrincipal * fundingFactor / 1e18' BUCK from the
+       pool.
+    3. Mints 50% of her current credit limit; immediately swaps the
+       proceeds to USDC.
+    4. Holds the position for ~270 days (Gaussian-distributed).
+    5. Departs by buying her `mintedNet' BUCK back from the pool and
+       burning it (releases coverage, returns the insurance pool
+       principal).
+
+    A small fraction of active Carols re-evaluate monthly to track
+    `buckK': if `buckK' has risen and BUCK is trading at a premium they
+    top up (mint more, dump for premium); if `buckK' has fallen and BUCK
+    trades at a discount they reduce (buy back, burn).
+
+  • *Hank[1..40]* (synthetic public identities): opportunistic holders.
+    Each arrives at a Gaussian-distributed time and spends $500 USDC per
+    month on BUCK, building a long-term position.  Hanks are
+    price-aware: they skip months when BUCK trades above $1.05 (no
+    premium accumulation).  They never burn; they're modelling demand
+    for BUCK-denominated multi-year savings, inheritance Notes, and
+    farmland.
+
+  Without Hanks the Carol-only market is one-sided: every Carol
+  mints+dumps and the pool drifts permanently BUCK-heavy.  With Hanks
+  the demand side absorbs Carol supply at near-parity, letting the
+  system find a real equilibrium where Carol-arrival flow ≈
+  Carol-departure flow + Hank-buy flow.
+
+
+1.4 Historical analogues
+────────────────────────
+
+  The funding-factor mechanism has direct precedents:
+
+  • *Initial margin in futures and equity margin trading*: opening a
+    leveraged position requires posting cash collateral as a percentage
+    of notional.  Higher exchange-mandated initial-margin requirements
+    (often imposed during volatile or stressed periods) function as a
+    counter-cyclical brake on credit expansion – the same pattern as
+    raising the funding factor when BUCK trades below basket.
+
+  • *Reserve requirements in fractional-reserve banking*: central banks
+    historically required commercial banks to hold a percentage of
+    deposits as reserves.  Raising reserve requirements tightens credit
+    creation capacity; lowering them loosens it.  The funding factor
+    implements the same principle at the level of an individual minter
+    rather than an institution.
+
+  • *Gesell's stamp scrip and demurrage currencies*: Silvio Gesell's
+    /Freigeld/ proposal required holders to affix monthly stamps to bank
+    notes to keep them valid.  The stamp fee created continuous demand
+    for the underlying currency (you had to buy stamps with the same
+    currency you were stamping).  The funding factor pre-mint
+    requirement creates analogous demand: to mint BUCK you must first
+    acquire BUCK.
+
+  • *Mutual-aid society buy-ins*: English friendly societies, modern
+    benevolent mutuals, and cooperative banks have historically required
+    new members to pay an initial contribution before drawing benefits.
+    The funding factor formalises this: the new BUCK minter is by
+    construction a contributor to the mutual-insurance pool, and they
+    must demonstrate that contribution by holding BUCK already.
+
+  • *Tax-driven currency demand*: Modern Monetary Theory's chartalism
+    holds that fiat currency derives value from being the only
+    acceptable medium for tax payment.  The funding factor creates a
+    similar structural demand sink: anyone who wants to use BUCK credit
+    must first hold BUCK, and the magnitude of that requirement scales
+    with the system's monetary stress.
+
+  • *Cryptocurrency bootstrap auctions*: early-stage crypto networks
+    often gate participation on pre-purchased tokens (pre-sale, initial
+    DEX offering, vesting cliffs).  The funding factor accomplishes the
+    same goal – ensuring new entrants are economically aligned – without
+    a one-shot pre-sale.  The "entry fee" is paid in BUCK and remains in
+    the holder's wallet, so it is collateral rather than burn.
+
+
+1.5 Reproducing this example
+────────────────────────────
+
+  ┌────
+  │ forge test --match-contract BuckEquilibriumScenarioTest -vv
+  │ python -m pytest alberta_buck/test/test_equilibrium_plot.py -v -s
+  └────
+
+  The Forge test emits `test/vectors/equilibrium-scenario.json' (weekly
+  snapshots over 18 simulated months).  The Python script reads that
+  JSON and writes `images/equilibrium-scenario.png' – the four-panel
+  chart above.
+
+
+2 Vehicle Insurance Lifecycle
 ═════════════════════════════
 
   This example traces a single year in the life of a vehicle-insurance
@@ -19,7 +267,7 @@
   `alberta_buck/test/test_lifecycle_plot.py' for the visualisation.
 
 
-1.1 Generating the data
+2.1 Generating the data
 ───────────────────────
 
   ┌────
@@ -34,7 +282,7 @@
   └────
 
 
-1.2 Scenario
+2.2 Scenario
 ────────────
 
   Alice owns a $10,000 vehicle.  Her insurer issues a `BUCK_CREDIT' NFT
@@ -71,7 +319,7 @@
   (1:1 ratio).  Bob then buys 500 USDC of BUCK each month for a year.
 
 
-1.3 Key outcomes after one year
+2.3 Key outcomes after one year
 ───────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -91,7 +339,7 @@
   depreciation.
 
 
-1.4 Lifecycle chart
+2.4 Lifecycle chart
 ───────────────────
 
   <file:./images/lifecycle.png>
@@ -122,7 +370,7 @@
     365.  After 30 years the credit would reach its $500 salvage floor.
 
 
-1.5 Demurrage and Jubilee mechanics
+2.5 Demurrage and Jubilee mechanics
 ───────────────────────────────────
 
   During the year Alice holds no BUCK directly – it lives in the Uniswap
@@ -148,7 +396,7 @@
   reset – all on-chain paths land on the Jubilee slot.
 
 
-2 BUCK Inflation/Deflation Arbitrage
+3 BUCK Inflation/Deflation Arbitrage
 ════════════════════════════════════
 
   This second example traces a market-making strategy around the BUCK_K
@@ -164,7 +412,7 @@
   <file:./images/arb-scenario.png>
 
 
-2.1 Scenario
+3.1 Scenario
 ────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -203,7 +451,7 @@
     response fully materialises.
 
 
-2.2 A typical round-trip
+3.2 A typical round-trip
 ────────────────────────
 
   Trace one drift-and-arbitrage cycle:
@@ -220,29 +468,31 @@
 
   3. *Day 12, 14:30*.  Several more Bobs cash out.  Pool is now ~109K /
      91K, spot $0.835, TWAP caught up to ~$0.842.  PID now sees a real
-     ~16% error: `buckK' ratchets 1.0000 → 1.005 → 1.012 → … → 1.024
-     over the next hour.
+     ~-16% error (`BUCK - basket'): `buckK' ratchets 1.0000 → 0.995 →
+     0.988 → … → 0.976 over the next hour, contracting credit.
 
   4. *Day 12, 14:35*.  Alice judges the dislocation will revert (basket
-     is stable, the PID is actively driving `buckK' up).  She swaps
-     *20,000 USDT into BUCK* in her own pool, picking up ~24,500 BUCK at
-     an effective rate of $0.816 (V3 slippage included).  Pool now 84.5K
-     BUCK / 111K USDT.  Her own swap snaps spot up to $1.31, but the
-     TWAP still averages near $0.85 because most of the 600-second
-     window predates her trade.
+     is stable, the PID is actively contracting `buckK', which will
+     force voluntary burns from over-extended holders – BUCK supply will
+     shrink, lifting spot back toward parity).  She swaps *20,000 USDT
+     into BUCK* in her own pool, picking up ~24,500 BUCK at an effective
+     rate of $0.816 (V3 slippage included).  Pool now 84.5K BUCK / 111K
+     USDT.  Her own swap snaps spot up to $1.31, but the TWAP still
+     averages near $0.85 because most of the 600-second window predates
+     her trade.
 
-  5. *Day 12, 15:00 - Day 14, 09:00*.  PID continues raising `buckK'
-     (peaks ~1.040).  Other arbitrageurs notice and buy BUCK with USDT.
-     The expanded credit limit lets new minters draw extra BUCK against
-     their NFTs, which they spend into commodities – a non-pool channel
-     that doesn't directly push BUCK/USDT but does pull commodity prices
-     closer to BUCK's.  Cumulative pressure pulls the pool toward
-     parity.
+  5. *Day 12, 15:00 - Day 14, 09:00*.  PID continues lowering `buckK'
+     (troughs ~0.96).  The tighter credit limit prompts existing holders
+     running near 100 % of limit to burn BUCK (buying BUCK from the pool
+     with USDT, then burning it to release coverage capacity).  The
+     buy-back pressure plus the supply contraction pulls BUCK back
+     toward basket from below.  Other arbitrageurs see the same signal
+     and pre-position long BUCK, accelerating the recovery.
 
   6. *Day 14, 09:00*.  Pool sits at 100K BUCK / 100.4K USDT, spot
      $1.004, TWAP $1.001.  PID sees the error reverted.  Over the next
-     day `buckK' retreats from 1.040 toward 1.000 (the integral term has
-     accumulated; recovery is gradual).
+     day `buckK' relaxes from 0.96 back toward 1.000 (the integral term
+     has accumulated negative; recovery is gradual).
 
   7. *Day 14, 09:30*.  Alice swaps her 24,500 BUCK back for ~24,470 USDT
      at recovered parity, plus ~73 USDT of LP fees from other swaps
@@ -255,7 +505,7 @@
   and buys back at recovered parity.
 
 
-2.3 What the PID guarantees Alice
+3.3 What the PID guarantees Alice
 ─────────────────────────────────
 
   Alice's strategy works because the PID is, by design, slow:
@@ -286,7 +536,7 @@
   drift becomes capital flowing toward the under-priced side.
 
 
-2.4 When the PID can't help her
+3.4 When the PID can't help her
 ───────────────────────────────
 
   Two scenarios break Alice's mean-reversion assumption:
@@ -302,7 +552,7 @@
     *operator* of whichever pool runs deeper.
 
 
-2.5 Reproducing this example
+3.5 Reproducing this example
 ────────────────────────────
 
   A scripted Foundry test exercising this scenario lives at
@@ -318,7 +568,7 @@
   Alice's PnL; aggregate Bob mint/burn flow.
 
 
-3 Reproducing the Examples
+4 Reproducing the Examples
 ══════════════════════════
 
   ┌────

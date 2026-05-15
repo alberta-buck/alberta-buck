@@ -237,8 +237,8 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
 
     function test_pid_via_twap_under_sustained_drift() public {
         // Drive BUCK to 0.95 and let it sit through a full TWAP window with
-        // periodic touches.  The PID should then see a real ~5% error and
-        // expand buckK above 1.0.
+        // periodic touches.  The PID should then see a real -5% error
+        // (BUCK - basket) and contract buckK below 1.0.
         _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 0.95e6);
         for (uint i = 0; i < 25; i++) {
             vm.warp(block.timestamp + 30);
@@ -251,7 +251,7 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
             _touchPool(wbtcUsdt);
         }
 
-        // Now run a couple of PID cycles via TWAP.  K must rise.
+        // Now run a couple of PID cycles via TWAP.  K must fall.
         uint256 baselineK = ctrl.buckK();
         for (uint i = 0; i < 3; i++) {
             vm.warp(block.timestamp + 61);
@@ -262,7 +262,7 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
             _touchPool(wbtcUsdt);
             ctrl.compute();
         }
-        assertGt(ctrl.buckK(), baselineK, "PID did not respond to TWAP'd drift");
+        assertLt(ctrl.buckK(), baselineK, "PID did not respond to TWAP'd drift");
         emit log_named_uint("buckK after TWAP'd 5% under drift", ctrl.buckK());
     }
 
