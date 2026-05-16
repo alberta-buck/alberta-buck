@@ -91,6 +91,7 @@ abstract contract BuckKControllerBase {
         uint256 _buckKMin, uint256 _buckKMax, uint256 _buckK,
         address _governance
     ) {
+        require(_buckKMin <= _buckK && _buckK <= _buckKMax, "buckK out of bounds");
         Kp = _Kp; Ki = _Ki; Kd = _Kd;
         dT = _dT;
         buckKMin = _buckKMin;
@@ -105,6 +106,10 @@ abstract contract BuckKControllerBase {
         // the initial buckK.  Steady-state algebra (with P = 0, D = 0):
         //     buckK = UNIT + (I * Ki) / UNIT
         //   => I = ((buckK - UNIT) * UNIT) / Ki
+        //
+        // All quantities are 18-decimal; buckK is in the range [buckKMin,
+        // buckKMax] which are bounded well below type(int256).max, so the
+        // cast and multiplication cannot overflow.
         if (_Ki != 0) {
             I = ((int256(_buckK) - UNIT) * UNIT) / _Ki;
         }

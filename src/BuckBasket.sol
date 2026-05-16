@@ -162,8 +162,11 @@ contract BuckBasket is IUniswapV3MintCallback {
     /// @dev    Dilutes every existing constituent's basketAmount by
     ///         (1 - weightBp/10000), then sets the new constituent's
     ///         basketAmount = (weightBp/10000) / initialPriceInBuck.
-    ///         At declared initial prices the sum of (amount * price) is
-    ///         exactly 1.0 BUCK both before and after the call.
+    ///         After the call the basket value at *current* pool prices
+    ///         is exactly 1.0 BUCK (modulo TWAP rounding).  If existing
+    ///         pools have drifted from their initial prices the diluted
+    ///         amounts will not equal their original declared-weight
+    ///         proportions — the basket weights float with the market.
     function addBasketToken(
         address token,
         uint8   decimals,

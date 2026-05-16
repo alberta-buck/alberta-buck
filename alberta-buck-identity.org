@@ -1879,11 +1879,12 @@ secret key and an archival node -- without any counterparty's cooperation.
        require(identityRegistry.isVerified(to),         "Receiver not verified");
        require(compliance.canTransfer(msg.sender, to, amount), "Compliance");
 
-       // Bilateral identity check.  The primary identity material is the
-       // per-pair receipt fragment stored at approve() time.  If a side
-       // has no fragment AND that side is bound under a Public Identity,
-       // fall back to the bound _identityHash for that side.  EOA<->EOA
-       // Encrypted transfers MUST have prior CP receipts (no fallback).
+       // Bilateral identity check.  Every transfer must carry identity
+       // material for both sides.  If a side has no per-pair CP receipt
+       // fragment, at least one party must be bound under a Public
+       // Identity so the fallback to the bound _identityHash is valid.
+       // EOA<->EOA private transfers MUST have prior CP receipts (no
+       // fallback -- neither side is public).
        bytes32 fromHash = _receiptFragments[msg.sender][to];
        bytes32 toHash   = _receiptFragments[to][msg.sender];
 
@@ -1891,12 +1892,16 @@ secret key and an archival node -- without any counterparty's cooperation.
            require(
                identityRegistry.isPublicIdentity(msg.sender)
                 || identityRegistry.isPublicIdentity(to),
-               "no receipt fragment and no public side"
+               "sender must identity-approve recipient (both private)"
            );
            toHash = identityRegistry.identityHash(to);
        }
-       // fromHash always falls back best-effort to identityHash(from).
        if (fromHash == 0) {
+           require(
+               identityRegistry.isPublicIdentity(msg.sender)
+                || identityRegistry.isPublicIdentity(to),
+               "recipient must identity-approve sender (both private)"
+           );
            fromHash = identityRegistry.identityHash(msg.sender);
        }
 
@@ -1912,20 +1917,20 @@ secret key and an archival node -- without any counterparty's cooperation.
    }
    #+end_example
 
-   The bilateral identity check enforces that both parties are
-   ~isVerified~ and that the receipt event carries identity material
-   for both sides.  A *Public-Identity contract* (pool, router,
-   treasury bound via ~bindContract(target, pk, E, true)~) lets the
-   pool side fall back to the bound ~_identityHash(pool)~ when no
-   per-pair receipt fragment exists.  Approvals are still always
-   CP-bound; there is no isPublicIdentity shortcut at approve time.
+   The bilateral identity check enforces that both sides of the receipt
+   event carry identity material.  A *Public-Identity contract* (pool,
+   router, treasury bound via ~bindContract(target, pk, E, true)~)
+   satisfies either direction's fallback — when no per-pair CP fragment
+   exists, the public side's bound ~_identityHash~ is a valid identity
+   commitment.  Approvals are always CP-bound; there is no
+   ~isPublicIdentity~ shortcut at approve time.
 
-   | Sender | Receiver | Approvals needed                              |
-   |--------+----------+-----------------------------------------------|
-   | EOA    | EOA      | Both must call CP-bound ~approve~ before move |
-   | EOA    | Pub-Id   | Only sender approves; pool side falls back    |
-   | Pub-Id | EOA      | Sender approves; receiver side falls back     |
-   | Pub-Id | Pub-Id   | One side may approve; both can fall back      |
+   | Sender | Receiver | Minimum for transfer                            |
+   |--------+----------+--------------------------------------------------|
+   | EOA    | EOA      | Both must CP-approve each other                 |
+   | EOA    | Pub-Id   | Sender CP-approves; pool side falls back        |
+   | Pub-Id | EOA      | Neither needs CP; pool is public, guards pass   |
+   | Pub-Id | Pub-Id   | Neither needs CP; both public, guards pass      |
 
    The ~transferFrom~ path applies the same bilateral check.  Receipt
    fragments were stored during ~approve~, so no additional identity

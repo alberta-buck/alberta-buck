@@ -149,26 +149,30 @@ Permit2 never custodies the token -- =transferFrom= moves it
 owner -> recipient atomically.  So Permit2 requires *nothing of the
 pool*; it only needs (1) and (2) to behave like standard ERC20.
 
-** Where BUCK breaks each touchpoint
+** Where BUCK interacts with each touchpoint
 
-  - *Touchpoint (1) is structurally forbidden.*
-    =Buck.approve(address,uint256)= unconditionally =revert=s
-    (=Buck.sol:219=); the only writer of =_allowances= is the 4-arg
-    identity-bound =approve= (=Buck.sol:236=).  There is no standard
-    path to set =_allowances[actor][PERMIT2]=.  This is the single
-    fundamental incompatibility -- everything else is satisfiable.
-  - *Touchpoint (2) already works -- with one subtlety.*  When Permit2
-    calls =BUCK.transferFrom(actor, pool, amt)=:
-    =_spendAllowance(actor, PERMIT2, amt)= (=Buck.sol:757=) checks
+  - *Touchpoint (1) — plain =approve= now succeeds.*
+    =Buck.approve(address,uint256)= sets an ERC-20 allowance without
+    identity checks (the standard ERC-20 path).  Identity is enforced
+    at transfer time, not at approve time.  The 4-arg identity-bound
+    =approve= remains the only path that establishes a per-pair CP
+    receipt fragment and freezes the spender's carrying flag.  A plain
+    allowance authorises a spender to /initiate/ =transferFrom= but
+    cannot bypass the transfer-time identity gate: a plain-approved
+    spender still cannot move BUCK between two non-public parties
+    without a real CP receipt fragment (see Identity).  This makes
+    BUCK a first-class Permit2 citizen — =approve(PERMIT2, max)= works.
+  - *Touchpoint (2) already works.*  When Permit2 calls
+    =BUCK.transferFrom(actor, pool, amt)=:
+    =_spendAllowance(actor, PERMIT2, amt)= checks
     =_allowances[actor][PERMIT2]=; a =type(uint256).max= allowance is
-    *not decremented* (=Buck.sol:759=) -- exactly Permit2's expectation
-    (the underlying ERC20 allowance to Permit2 is "infinite and
-    untouched" while Permit2 meters sub-allowances).
+    *not decremented* — exactly Permit2's expectation (the underlying
+    ERC20 allowance to Permit2 is "infinite and untouched" while
+    Permit2 meters sub-allowances).
     =_identityCheckedTransfer(actor, pool)= then needs
-    =isVerified(actor)=, =isVerified(pool)=, and -- since
-    =_receiptFragments[actor][pool]= is zero -- one side
-    =isPublicIdentity= (=Buck.sol:599=).  A public-bound pool
-    satisfies this.
+    =isVerified(actor)=, =isVerified(pool)=, and — since
+    =_receiptFragments[actor][pool]= is zero — at least one side
+    =isPublicIdentity=.  A public-bound pool satisfies this.
 
 ** What each party must satisfy
 
@@ -189,49 +193,41 @@ pool*; it only needs (1) and (2) to behave like standard ERC20.
 
 ** Two routes to BUCK-through-Permit2
 
-  - *Zero-change (the v1 design's fallback):* never use Permit2 for
-    BUCK.  The actor =transfer=s BUCK into the Universal Router and
-    calls =execute= with =payerIsUser=false= / =CONTRACT_BALANCE=; the
-    router pays the pool from its own balance via solmate
-    =safeTransfer=.  Permit2 untouched; =payerIsUser=true= stays dead
-    for BUCK.  A trailing =SWEEP= / =PAY_PORTION= command returns the
-    output to the actor.  USDC-only routes are unaffected (USDC is
-    ungated); the driver standardises on pre-fund for uniformity.
+  - *Plain-approve route (the current implementation):* BUCK's plain
+    =approve(address,uint256)= sets allowances without identity
+    checks.  The actor calls =approve(PERMIT2, max)=, signs a Permit2
+    =PermitSingle= authorising the Universal Router, and the router
+    calls =transferFrom(actor, pool, amt)= via Permit2.  Identity is
+    enforced at transfer time: =isVerified(actor)=, =isVerified(pool)=,
+    and the public-pool fallback satisfies both guards.
+    Receipt caveat: =transferFrom(actor, pool)= makes the /pool/ the
+    counterparty on the BUCK side, so =_receiptFragments[actor][pool]=
+    is consulted.  Since the actor approved Permit2 (not each pool),
+    no per-pair CP fragment exists — the receipt uses
+    =_identityHash(pool)= for the =to= side.  The transfer succeeds but
+    the identity trail is the deterministic pool hash, not a per-pair
+    decryptable ciphertext.
 
-#+BEGIN_SRC text
-  payOrPermit2Transfer(token, payer, recipient, amount):
-    if payer == address(this):  pay()  -> ERC20.safeTransfer  (NO Permit2)
-    else:                       PERMIT2.transferFrom           (BUCK: dead)
-#+END_SRC
+  - *Pre-fund route (stronger receipts):* the actor =transfer=s BUCK
+    into the Universal Router and calls =execute= with
+    =payerIsUser=false= / =CONTRACT_BALANCE=; the router pays each
+    pool from its own balance via =safeTransfer=.  BUCK moves
+    Actor → Router → Pool.  With one CP-approve to the Router
+    (=_receiptFragments[actor][router]= set), every pool interaction
+    carries a per-pair CP receipt — the Router is the single
+    counterparty on every BUCK transfer, regardless of which pool
+    executes the swap.  One =approve(router, max, E_router, cp_proof)=
+    covers /all/ pools the Router touches.  This mirrors the standard
+    ERC-20 pattern where one USDC =approve(router, max)= covers all
+    swaps.
 
-  - *Minimal contract change (recommended for genuine compatibility):*
-    a governance-set infrastructure allowlist that lets the *plain*
-    =approve= succeed for whitelisted spenders only:
-
-#+BEGIN_SRC solidity
-mapping(address => bool) public approvableInfra;            // governance-set
-function approve(address spender, uint256 amount) external returns (bool) {
-    require(approvableInfra[spender], "BUCK: use identity-bound approve");
-    _approve(msg.sender, spender, amount);                  // standard ERC20 path
-    return true;
-}
-#+END_SRC
-
-    Governance whitelists the Permit2 singleton (and optionally the
-    Universal Router).  Ordinary counterparties still *must* use the
-    identity-bound approve -- the privacy/receipt model is unchanged
-    for person-to-person payments.  Only sanctioned, audited routing
-    infrastructure gets the standard ERC20 path.  =transferFrom= is
-    unaffected: it already does the right thing (identity-checked
-    actor -> pool, public pool satisfies it, max allowance
-    non-decrementing per Permit2's expectation).  ~6 lines + a
-    governance setter makes BUCK a first-class Permit2 (hence Universal
-    Router, hence any standard router) citizen without weakening the
-    counterparty-privacy invariant.  With this route Permit2 need
-    *not* be identity-bound at all (the allowance is set via the plain
-    path, so =isVerified(PERMIT2)= is never checked), and the full
-    =payerIsUser=true= UR command set becomes available for BUCK --
-    removing the pre-fund choreography entirely.
+  - *Defense-in-depth option (optional allowlist):* a governance-set
+    =approvableInfra= mapping could restrict the plain =approve= path
+    to whitelisted infrastructure (Permit2, Universal Router).  All
+    other addresses would revert, preserving the "always use identity-
+    bound approve" invariant for person-to-person payments.  This is
+    not required for the simulation but may be desirable in
+    production.
 
 ** Caveat: the receipt-fragment relaxation
 
@@ -245,8 +241,8 @@ intended trade-off -- a deliberate relaxation, not an oversight.
 
 * Identity Binding
 
-BUCK transfer requires =isVerified(from)= AND =isVerified(to)=, plus at
-least one side =isPublicIdentity= (absent a per-pair receipt).  For any
+BUCK transfer requires =isVerified(from)= AND =isVerified(to)=; both
+directions must carry identity material (see Identity).  For any
 route that touches BUCK, every address BUCK rests in or moves through
 must be =bindContract=-bound Public+Carrying:
 

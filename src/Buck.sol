@@ -61,6 +61,9 @@ contract Buck is IERC20, IERC20Metadata {
     uint256 internal constant SCALE              = 1e27;
     uint256 internal constant BASE_RATE_PER_YEAR = 2e25;                // 0.02 in SCALE
     uint256 internal constant SECONDS_PER_YEAR_  = 365 days + 6 hours;
+    /// @dev Integer division truncation loses ~3e-19 per second relative,
+    ///      or ~1e-11 annually.  This is below the resolution of 6-decimal
+    ///      BUCK and far smaller than the base rate itself.
     uint256 internal constant BASE_RATE_PER_SEC  = BASE_RATE_PER_YEAR / SECONDS_PER_YEAR_;
 
     uint256 internal constant BP                 = 10000;
@@ -721,6 +724,14 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- demurrage internals -----------------------------------------------
 
+    /// @dev Dimensional analysis:
+    ///        buckSecondsLive     [raw * s]
+    ///        BASE_RATE_PER_SEC   [2e25 / (365d+6h)]  = 0.02 / year_in_seconds
+    ///        SCALE = 1e27        [dimensionless]
+    ///        fee = buckSecondsLive * BASE_RATE_PER_SEC / SCALE
+    ///            = balance * elapsed * 0.02 / year_length   [raw units]
+    ///
+    ///        Example: 1 BUCK (1e6 raw) held 1 year → 1e6 * 0.02 = 20,000 raw.
     function _feeOwing(AccountState storage s, uint256 raw) internal view returns (uint256) {
         uint256 elapsed = block.timestamp - uint256(s.timestamp);
         uint256 buckSecondsLive = s.buckSeconds.asUint() + (raw * elapsed);
