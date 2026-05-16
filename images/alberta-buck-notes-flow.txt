@@ -500,19 +500,20 @@ Table of Contents
      the entire transaction reverts – nothing is written, no BUCK moves.
      d. *BUCK escrow.* `buck.transferFrom' debits `totalFace' from Alice
      and credits the `Notes' pool.  Allowance-driven pull, gated by
-     Alice's prior `approve(notes, 1200e18, E_notes, pi_CP)'.  The
-     approve was CP-bound (the always-CP rule applies regardless of
-     spender flavour – see [/Why approve Is Always CP-Bound/]), so
-     Alice's side of the receipt is the per-pair CP fragment.  The pool
-     was bound under a Public Identity (`bindContract(notes, pk, E,
-     true)'), so the pool side of the receipt falls back to
-     `_identityHash(notes)' without requiring a per-pair fragment from
-     the pool.  e. *Root advancement.* The contract writes `newRoot'
-     into the next ring-buffer slot, advances `currentRootIndex' and
-     `nextLeafIndex', accumulates `noteFaceSum', and emits a single
-     `Minted(issuer, totalFace, startIndex, count, newRoot)' event.  The
-     new root immediately becomes the live root that the next minter
-     must read.
+     Alice's prior `approve(notes, 1200e18, E_notes, pi_CP)'.  This
+     CP-bound approve is mandatory: Alice is a private EOA, and mutual
+     decryptability requires a per-pair CP fragment for every private
+     party (the `identityHash' fallback is only valid for
+     Public-Identity contracts).  The pool was bound under a Public
+     Identity (`bindContract(notes, pk, E, true)'), so the pool side
+     falls back to `_identityHash(notes)' without requiring a fragment
+     from the pool.  The Notes operator decrypts Alice's CP ciphertext
+     from the `IdentityExchange' event under subpoena.  e. *Root
+     advancement.* The contract writes `newRoot' into the next
+     ring-buffer slot, advances `currentRootIndex' and `nextLeafIndex',
+     accumulates `noteFaceSum', and emits a single `Minted(issuer,
+     totalFace, startIndex, count, newRoot)' event.  The new root
+     immediately becomes the live root that the next minter must read.
 
   If any of (a)-(e) fails – stale root, stale leafIndex, bad proof,
   insufficient BUCK, missing approval – the entire transaction reverts
@@ -534,9 +535,6 @@ Table of Contents
   Outside Observers Cannot Link* below and the per-attack-vector audit
   in [alberta-buck-notes-rollup-mint.org].
 
-
-[/Why approve Is Always CP-Bound/]
-   <https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale>
 
 [alberta-buck-notes-rollup-mint.org]
 <https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
@@ -1373,14 +1371,14 @@ Table of Contents
      contract mark the nullifier and invoke `buck.transferCarrying(bob,
      1000e18)' from its own pool balance (see Step 5).  Because the
      `Notes' pool was bound under a Public Identity in the
-     IdentityRegistry (`bindContract(notes, pk, E, true)'), the outbound
-     transfer's bilateral identity check still requires both parties to
-     be `isVerified', but the pool-side receipt fragment falls back to
-     the pool's deterministic `_identityHash' – no per-counterparty CP
-     receipt is required for the Notes-pool side because the pool's
-     operator has already disclosed `m' off-chain, making the
-     registry-derived hash a non-confidential audit trail equivalent to
-     what an EOA-to-EOA approve-time CP receipt would provide.
+     IdentityRegistry (`bindContract(notes, pk, E, true)'), the
+     pool-side receipt fragment falls back to the pool's deterministic
+     `_identityHash'.  Bob, however, is a private EOA: mutual
+     decryptability requires a per-pair CP fragment from Bob to the
+     Notes contract, established by a one-time `approve(notes, amount,
+     E_notes, pi_CP)' before his first spend.  This gives the Notes
+     operator a decryptable ciphertext for Bob's identity under
+     subpoena, paralleling what the issuer provided at mint time.
 
   If any of (a)-(e) reverts, the whole transaction reverts: no BUCK
   moves, the nullifier bit is never set, the `noteFaceSum' is unchanged.
@@ -1716,10 +1714,9 @@ Table of Contents
   address (the Jubilee is not an accepted carry destination).  The
   bilateral receipt-fragment check applies as on `transfer': an
   EOA-to-EOA Encrypted-Identity pair must have a prior approve-time CP
-  receipt, and Public-Identity contracts (those bound via
-  `bindContract(target, pk, E, true)') fall back to the deterministic
-  `_identityHash' on the public side.  The weighted-merge update on the
-  recipient is:
+  receipt for every private party; the `_identityHash' fallback is only
+  valid for a Public-Identity contract (bound via `bindContract(target,
+  pk, E, true)').  The weighted-merge update on the recipient is:
 
   ┌────
   │ _indexAtLastTouch[to] =
