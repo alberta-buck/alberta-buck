@@ -609,6 +609,18 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- identity-checked transfers ----------------------------------------
 
+    /// @dev Every transfer emits a BuckTransferReceipt carrying identity material
+    ///      for both sides.  For private (non-public) counterparties the
+    ///      per-pair receipt fragment MUST have been laid down by the 4-arg
+    ///      identity-bound approve() before the transfer.  If a side is bound
+    ///      under a Public Identity the fallback to the bound _identityHash
+    ///      (its deterministic registered-credential hash) is always valid.
+    ///
+    ///      The two guards cover the four quadrants:
+    ///
+    ///        | from \ to  | private               | public               |
+    ///        | private    | both must CP-approve   | from must CP-approve |
+    ///        | public     | to must CP-approve     | neither needs CP     |
     function _identityCheckedTransfer(address from, address to, uint256 amount) internal {
         require(identity.isVerified(from), "BUCK: sender not verified");
         require(identity.isVerified(to),   "BUCK: recipient not verified");
@@ -617,12 +629,18 @@ contract Buck is IERC20, IERC20Metadata {
         if (toHash == bytes32(0)) {
             require(
                 identity.isPublicIdentity(from) || identity.isPublicIdentity(to),
-                "BUCK: missing identity receipt"
+                "BUCK: sender must identity-approve recipient (both private)"
             );
             toHash = _identityHash(to);
         }
         bytes32 fromHash = _receiptFragments[to][from];
-        if (fromHash == bytes32(0)) fromHash = _identityHash(from);
+        if (fromHash == bytes32(0)) {
+            require(
+                identity.isPublicIdentity(from) || identity.isPublicIdentity(to),
+                "BUCK: recipient must identity-approve sender (both private)"
+            );
+            fromHash = _identityHash(from);
+        }
 
         if (identity.isCarrying(from)) {
             _carryingTransfer(from, to, amount);

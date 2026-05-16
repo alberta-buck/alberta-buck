@@ -10,3 +10,6 @@
 [submodule "uniswap/uniswap-ai"]
 	path = uniswap/uniswap-ai
 	url = git@github.com:Uniswap/uniswap-ai.git
+[submodule "lib/forge-std"]
+	path = lib/forge-std
+	url = https://github.com/foundry-rs/forge-std

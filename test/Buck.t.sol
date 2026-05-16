@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm}   from "forge-std/Vm.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
@@ -128,6 +129,14 @@ contract BuckTest is Test {
             C: BN254.g1()
         });
         reg.bindContract(target, pk, E, true, true);
+    }
+
+    /// @dev Write a receipt fragment directly to Buck's storage, simulating the
+    ///      effect of a CP-bound approve without needing a proof fixture for the
+    ///      (from, to) pair.  _receiptFragments is at slot 5 in Buck's layout.
+    function _setReceiptFragment(address from, address to, bytes32 value) internal {
+        bytes32 slot = keccak256(abi.encode(to, keccak256(abi.encode(from, uint256(5)))));
+        vm.store(address(buck), slot, value);
     }
 
     /// @dev Mint a BuckCredit NFT to `client` with a fixed face value, no depreciation,
@@ -491,7 +500,7 @@ contract BuckTest is Test {
         buck.approve(bob, 50e6);                 // plain approve, no receipt
 
         vm.prank(bob);
-        vm.expectRevert(bytes("BUCK: missing identity receipt"));
+        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient (both private)"));
         buck.transferFrom(alice, bob, 10e6);     // alice & bob both non-public
     }
 
@@ -627,7 +636,7 @@ contract BuckTest is Test {
 
         // Alice has not yet approved Bob -> no receipt fragment -> must revert.
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: missing identity receipt"));
+        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient (both private)"));
         buck.transfer(bob, 1e6);
     }
 
@@ -636,9 +645,17 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(100e6);
 
+        // Alice CP-approves Bob (sender → recipient direction).
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
         buck.approve(bob, 50e6, E_b, _cpProof());
+
+        // Bob must also CP-approve Alice (recipient → sender direction) for
+        // the bilateral identity invariant to hold: both private parties need
+        // a per-pair receipt fragment so each can decrypt the other's identity.
+        // Simulate Bob's approve by writing his receipt fragment directly
+        // (no Bob→Alice CP proof exists in the shared test vectors).
+        _setReceiptFragment(bob, alice, bytes32(uint256(1)));
 
         uint256 aliceBefore = buck.balanceOf(alice);
         vm.prank(alice);
@@ -668,9 +685,13 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(100e6);
 
+        // Alice CP-approves Bob (sender → spender direction).
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
         buck.approve(bob, 50e6, E_b, _cpProof());
+
+        // Bob must also CP-approve Alice for the bilateral invariant (both private).
+        _setReceiptFragment(bob, alice, bytes32(uint256(1)));
 
         vm.prank(bob);
         buck.transferFrom(alice, bob, 25e6);
@@ -678,32 +699,113 @@ contract BuckTest is Test {
         assertEq(buck.balanceOf(bob),        25e6);
     }
 
-    // ---- public-contract sender -> verified-EOA (e.g. Uniswap pair payout) -
+    // ---- receipt-hash invariants across transfer combinations ---------------
 
-    function test_transfer_publicContractSenderToVerifiedSkipsReceiptFragment() public {
-        // A Public-Identity contract (proxy for a Uniswap pair) holds BUCK
-        // and pays it out to verified Bob.  No prior CP approve from the
-        // contract to Bob exists, and the contract has no off-chain crypto
-        // material to produce one -- the transfer succeeds because the
-        // contract's identity is publicly attested (fallback to identityHash).
-        address pool = address(0xDECAF);
-        _bindPublicIdentity(pool);
-
-        // Seed the contract with BUCK.  Alice transfers to it directly,
-        // exercising the Public-recipient-receipt fallback at the same time.
+    /// @dev Verify that BuckTransferReceipt events carry the correct hash
+    ///      values for each transfer combination, matching the identity
+    ///      fallback rules in _identityCheckedTransfer.
+    ///
+    ///      Both parties are private EOAs: bilateral CP-approve required.
+    function test_receiptHashes_EOAtoEOA_bilateralCPApprove() public {
         _grantCredit(alice, 1000e6);
         vm.prank(alice);
         buck.mint(100e6);
-        vm.prank(alice);
-        buck.transfer(pool, 30e6);
-        assertEq(buck.balanceOf(pool), 30e6);
 
-        // Now the public contract pays out to Bob (verified, never approved
-        // by the contract).  Pre-refactor this reverted with "missing
-        // identity receipt"; post-refactor it succeeds via the Public-sender
-        // fallback.
+        // Alice CP-approves Bob (sender → recipient).
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        vm.prank(alice);
+        buck.approve(bob, 50e6, E_b, _cpProof());
+        bytes32 aliceForBobFrag = buck.receiptFragment(alice, bob);
+
+        // Bob CP-approves Alice (recipient → sender) — simulated.
+        bytes32 bobForAliceFrag = keccak256("bob-for-alice");
+        _setReceiptFragment(bob, alice, bobForAliceFrag);
+
+        vm.recordLogs();
+        vm.prank(alice);
+        buck.transfer(bob, 10e6);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 eventSig = keccak256("BuckTransferReceipt(address,address,uint256,bytes32,bytes32)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                // Non-indexed params: (uint256 amount, bytes32 fromCipherHash, bytes32 toCipherHash)
+                (/*amount*/, bytes32 fromHash, bytes32 toHash) =
+                    abi.decode(logs[i].data, (uint256, bytes32, bytes32));
+                assertEq(toHash, aliceForBobFrag, "toHash: CP fragment");
+                assertEq(fromHash, bobForAliceFrag, "fromHash: CP fragment");
+                return;
+            }
+        }
+        fail("BuckTransferReceipt event not found");
+    }
+
+    function test_receiptHashes_EOAtoPublicPool_skipsReverseReceipt() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
+
+        // No CP approve at all — transfer relies on public-pool fallback.
+        vm.recordLogs();
+        vm.prank(alice);
+        buck.transfer(pool, 5e6);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 eventSig = keccak256("BuckTransferReceipt(address,address,uint256,bytes32,bytes32)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                (/*amount*/, bytes32 fromHash, bytes32 toHash) =
+                    abi.decode(logs[i].data, (uint256, bytes32, bytes32));
+                // toHash: no CP fragment -> falls back to _identityHash(pool)
+                assertEq(toHash, _idHashOf(pool), "toHash: pool identityHash");
+                // fromHash: no reverse fragment -> falls back to _identityHash(alice)
+                assertEq(fromHash, _idHashOf(alice), "fromHash: alice identityHash");
+                return;
+            }
+        }
+        fail("BuckTransferReceipt event not found");
+    }
+
+    function test_receiptHashes_PublicPoolToEOA_fallsBackBothSides() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
+
+        // Seed pool.
+        vm.prank(alice);
+        buck.transfer(pool, 20e6);
+
+        // Pool pays out to Bob — no CP fragments in either direction.
+        vm.recordLogs();
         vm.prank(pool);
         buck.transfer(bob, 7e6);
-        assertEq(buck.balanceOf(bob), 7e6);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 eventSig = keccak256("BuckTransferReceipt(address,address,uint256,bytes32,bytes32)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                (/*amount*/, bytes32 fromHash, bytes32 toHash) =
+                    abi.decode(logs[i].data, (uint256, bytes32, bytes32));
+                // toHash: no CP fragment -> falls back to _identityHash(bob)
+                assertEq(toHash, _idHashOf(bob), "toHash: bob identityHash");
+                // fromHash: no reverse fragment -> falls back to _identityHash(pool)
+                assertEq(fromHash, _idHashOf(pool), "fromHash: pool identityHash");
+                return;
+            }
+        }
+        fail("BuckTransferReceipt event not found");
+    }
+
+    /// @dev helper to compute _identityHash the same way Buck.sol does
+    function _idHashOf(address a) internal view returns (bytes32) {
+        BN254.G1Point memory pk = reg.pkOf(a);
+        IdentityRegistry.ElGamalCT memory E = reg.ciphertextOf(a);
+        return keccak256(abi.encode(pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y));
     }
 }

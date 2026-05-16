@@ -160,6 +160,8 @@ install:
 	forge install smartcontractkit/chainlink-brownie-contracts --no-git
 	forge install Uniswap/v3-core --no-git
 	forge install Uniswap/v3-periphery --no-git
+	forge install Uniswap/universal-router --no-git
+	forge install foundry-rs/forge-std --no-git
 
 update:
 	forge update
