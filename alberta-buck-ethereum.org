@@ -419,16 +419,24 @@ ERC-20-baseline transfer).
 
 ** transfer() and transferFrom()
 
-Both route through =_identityCheckedTransfer=, which:
+Both route through =_identityCheckedTransfer=, which enforces /mutual
+decryptability/: every private (non-public) party must hold a per-pair CP
+receipt fragment for its counterparty, established before the transfer by
+the 4-arg identity-bound =approve=.  Only public-identity contracts may
+use the deterministic =_identityHash= fallback.
 
 - Requires =isVerified(from)= and =isVerified(to)=.
-- For the =to= side: tries =_receiptFragments[from][to]=; if zero, falls back to =_identityHash(to)=
-  /only/ if =isPublicIdentity(from) || isPublicIdentity(to)= -- otherwise reverts with
-  =BUCK: missing identity receipt=.  EOA-to-EOA Encrypted transfers require a prior CP receipt;
-  Public-Identity counterparties may use the deterministic fallback.
-- For the =from= side: tries =_receiptFragments[to][from]= (a reciprocal approve); falls back
-  unconditionally to =_identityHash(from)= otherwise.  Auditors reading the event know which side
-  was CP-bound vs registry-derived.
+- For the =to= side (=_receiptFragments[from][to]): if zero, requires
+  =isPublicIdentity(from)= — reverts with =BUCK: sender must
+  identity-approve recipient= otherwise.  Falls back to =_identityHash(to)=
+  when =from= is public.
+- For the =from= side (=_receiptFragments[to][from]): if zero, requires
+  =isPublicIdentity(to)= — reverts with =BUCK: recipient must
+  identity-approve sender= otherwise.  Falls back to =_identityHash(from)=
+  when =to= is public.
+- Both guards pass only when /both/ parties are public-identity contracts.
+  EOA-to-EOA transfers require bilateral CP-approve; EOA-to-Public and
+  Public-to-EOA require the private party to CP-approve the public one.
 
 After identity checks, transfer dispatch is automatic on the sender's =isCarrying= flag: Carrying
 senders (AMM pools, the Notes pool, the Jubilee fund) take the =_carryingTransfer= path that

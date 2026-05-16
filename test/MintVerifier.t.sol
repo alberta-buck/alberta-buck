@@ -93,9 +93,7 @@ contract MintVerifierTest is Test {
             address(buck), address(adapter), address(spendStub), GOV
         );
 
-        // Bind Notes as a Public-Identity contract.  No off-chain CP
-        // material exists for Notes; the receipt-fragment fallback handles
-        // the alice <-> Notes counterparty pair.
+        // Bind Notes as a Public-Identity contract.
         reg.bindContract(
             address(notes),
             BN254.g1(),
@@ -103,6 +101,13 @@ contract MintVerifierTest is Test {
             true, // isPublicIdentity
             true  // isCarrying
         );
+        // Mutual decryptability: Alice must CP-approve the public Notes.
+        {
+            bytes32 _fragSlot = keccak256(
+                abi.encode(address(notes), keccak256(abi.encode(alice, uint256(5))))
+            );
+            vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+        }
 
         // Generous credit + balance so Alice can mint up to N*1e18.
         _grantCredit(alice, 10000e18);

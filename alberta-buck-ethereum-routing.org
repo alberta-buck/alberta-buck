@@ -239,12 +239,20 @@ receipt-fragment trail that direct identity-bound transfers leave.
 For routing infrastructure against public-bound pools that is the
 intended trade-off -- a deliberate relaxation, not an oversight.
 
-* Identity Binding
+* Identity Binding and CP-Approval Requirements
 
 BUCK transfer requires =isVerified(from)= AND =isVerified(to)=; both
-directions must carry identity material (see Identity).  For any
-route that touches BUCK, every address BUCK rests in or moves through
-must be =bindContract=-bound Public+Carrying:
+directions must carry identity material (see Identity).  Mutual
+decryptability requires that every private (non-public) party hold a
+per-pair CP receipt fragment for its counterparty, established by the
+4-arg identity-bound =approve= before the transfer.  The
+=identityHash= fallback is only valid for a party bound under a Public
+Identity — a private party's receipt must always be a decryptable CP
+ciphertext, so a subpoena of the counterparty's operator recovers the
+private party's plaintext identity.
+
+For the routing simulation, every address BUCK rests in or moves
+through must be =bindContract=-bound Public+Carrying:
 
   - *The Universal Router contract itself* -- it is pre-funded with
     BUCK and pays pools from its own balance, and custodies
@@ -256,13 +264,35 @@ must be =bindContract=-bound Public+Carrying:
     credit-mint arbers.  Pure-USDC arbers never touch BUCK and need no
     binding.
   - *=BuckBasket=* -- per the canonical wiring.
-  - *Permit2 binding depends on the route* (see the Permit2 section):
-    under the zero-change pre-fund flow Permit2 is never touched and
-    not bound; under the recommended =approvableInfra= allowlist change
-    Permit2 still need not be bound (the allowance uses the plain
-    =approve= path, so =isVerified(PERMIT2)= is never checked).  Only
-    the heavyweight no-change "4-arg approve to Permit2" variant would
-    require binding Permit2 Public.
+
+*** CP-approve: one counterparty covers all pools
+
+In the pre-fund route (=payerIsUser=false=) the Universal Router is
+the /sole/ BUCK counterparty for every user — it pre-receives the
+user's BUCK, pays each pool from its own balance, custodies
+intermediate hops, and returns output BUCK to the user.  Every BUCK
+transfer is user ↔ Router.  One identity-bound
+=approve(router, max, E_router, cp_proof)= per user covers every
+pool the Router reaches: all swaps, all LP operations, both
+directions.  The Router operator holds the bound secret key and can
+decrypt every counterparty's identity from the on-chain receipt
+alone — satisfying mutual decryptability for subpoena response.
+
+In the Permit2 route (=payerIsUser=true=) the counterparty is the
+individual pool (=transferFrom(user, pool)=), requiring a CP-approve
+per pool — impractical.  The pre-fund route is strongly preferred
+for BUCK: stronger receipts, one CP-approve, no per-pool setup.
+
+*** CP-approve vs. plain approve
+
+The 4-arg identity-bound =approve= (CP-approve) establishes a per-pair
+decryptable receipt fragment and freezes the spender's carrying flag.
+The standard 2-arg =approve= (plain approve) sets an ERC-20 allowance
+without identity checks — needed for Permit2 and standard router
+compatibility.  Identity is enforced at transfer time, not at approve
+time.  A plain allowance alone cannot manufacture a transfer between
+two non-public parties; the transfer-time guard requires a CP fragment
+for every private party.
 
 For the simulation we use the anvil-admin shortcut the test fixtures
 already sanction (=vm.etch= + =bindContract= in tests; the RPC

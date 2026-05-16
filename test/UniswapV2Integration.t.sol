@@ -152,6 +152,23 @@ contract UniswapV2IntegrationTest is Test {
         reg.bindContract(pair,   BN254.g1(), placeholderE, true, true);
         reg.bindContract(router, BN254.g1(), placeholderE, true, true);
 
+        // Mutual decryptability: private EOAs must CP-approve the public
+        // router/pair so the operator can decrypt identities from receipts.
+        // Both the router and the pair can appear as counterparties in BUCK
+        // transfers during addLiquidity / swap / removeLiquidity.
+        bytes32 _fragSlot =
+            keccak256(abi.encode(pair, keccak256(abi.encode(alice, uint256(5)))));
+        vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+        _fragSlot =
+            keccak256(abi.encode(pair, keccak256(abi.encode(bob, uint256(5)))));
+        vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+        _fragSlot =
+            keccak256(abi.encode(router, keccak256(abi.encode(alice, uint256(5)))));
+        vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+        _fragSlot =
+            keccak256(abi.encode(router, keccak256(abi.encode(bob, uint256(5)))));
+        vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+
         // Distribute USDC from this test contract to Alice and Bob.
         IERC20Like(usdc).transfer(alice, 1_000_000e6);
         IERC20Like(usdc).transfer(bob,   1_000_000e6);

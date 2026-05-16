@@ -613,17 +613,31 @@ contract Buck is IERC20, IERC20Metadata {
     // ---- identity-checked transfers ----------------------------------------
 
     /// @dev Every transfer emits a BuckTransferReceipt carrying identity material
-    ///      for both sides.  For private (non-public) counterparties the
-    ///      per-pair receipt fragment MUST have been laid down by the 4-arg
-    ///      identity-bound approve() before the transfer.  If a side is bound
-    ///      under a Public Identity the fallback to the bound _identityHash
-    ///      (its deterministic registered-credential hash) is always valid.
+    ///      for both sides.  Mutual decryptability requires that every private
+    ///      (non-public) party hold a per-pair CP receipt fragment for its
+    ///      counterparty, laid down by the 4-arg identity-bound approve() before
+    ///      the transfer.  The identityHash fallback is only valid for a party
+    ///      bound under a Public Identity (whose plaintext identity is already
+    ///      attested off-chain in the registry).  Only public→public transfers
+    ///      may proceed without any CP fragments.
     ///
     ///      The two guards cover the four quadrants:
     ///
-    ///        | from \ to  | private               | public               |
-    ///        | private    | both must CP-approve   | from must CP-approve |
-    ///        | public     | to must CP-approve     | neither needs CP     |
+    ///        | from \ to  | private                   | public                    |
+    ///        | private    | both must CP-approve       | from must CP-approve to   |
+    ///        | public     | to must CP-approve from    | neither needs CP          |
+    ///
+    ///      Rationale: when a regulator subpoenas the operator of a public
+    ///      contract (Uniswap pool, router), the operator must be able to
+    ///      decrypt every counterparty's identity from the on-chain receipt
+    ///      alone.  The operator holds the secret key for the contract's bound
+    ///      (pk, E).  A per-pair CP fragment from the private counterparty
+    ///      (re-encrypted under that pk) gives the operator exactly that
+    ///      capability.  The identityHash fallback (a keccak256 of the
+    ///      counterparty's registered credential) is not decryptable — it
+    ///      identifies the credential but does not reveal the plaintext
+    ///      identity.  Hence the fallback is only valid when the party it
+    ///      represents is already public.
     function _identityCheckedTransfer(address from, address to, uint256 amount) internal {
         require(identity.isVerified(from), "BUCK: sender not verified");
         require(identity.isVerified(to),   "BUCK: recipient not verified");
@@ -631,16 +645,16 @@ contract Buck is IERC20, IERC20Metadata {
         bytes32 toHash = _receiptFragments[from][to];
         if (toHash == bytes32(0)) {
             require(
-                identity.isPublicIdentity(from) || identity.isPublicIdentity(to),
-                "BUCK: sender must identity-approve recipient (both private)"
+                identity.isPublicIdentity(from),
+                "BUCK: sender must identity-approve recipient"
             );
             toHash = _identityHash(to);
         }
         bytes32 fromHash = _receiptFragments[to][from];
         if (fromHash == bytes32(0)) {
             require(
-                identity.isPublicIdentity(from) || identity.isPublicIdentity(to),
-                "BUCK: recipient must identity-approve sender (both private)"
+                identity.isPublicIdentity(to),
+                "BUCK: recipient must identity-approve sender"
             );
             fromHash = _identityHash(from);
         }

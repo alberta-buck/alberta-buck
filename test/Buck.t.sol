@@ -500,7 +500,7 @@ contract BuckTest is Test {
         buck.approve(bob, 50e6);                 // plain approve, no receipt
 
         vm.prank(bob);
-        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient (both private)"));
+        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient"));
         buck.transferFrom(alice, bob, 10e6);     // alice & bob both non-public
     }
 
@@ -531,6 +531,11 @@ contract BuckTest is Test {
 
         address pool = address(0xDECAF);
         _bindPublicIdentity(pool);
+
+        // Mutual decryptability: the private sender must CP-approve the
+        // public recipient so the pool operator can decrypt Alice's identity
+        // from the receipt under subpoena.
+        _setReceiptFragment(alice, pool, bytes32(uint256(1)));
 
         // `bob` stands in for a router/Permit2 spender: alice grants it a
         // plain allowance; it pulls her BUCK into the public pool.
@@ -636,7 +641,7 @@ contract BuckTest is Test {
 
         // Alice has not yet approved Bob -> no receipt fragment -> must revert.
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient (both private)"));
+        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient"));
         buck.transfer(bob, 1e6);
     }
 
@@ -669,12 +674,13 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(100e6);
 
-        // Public-Identity contract recipient -> Alice can transfer without
-        // a prior CP approve receipt; the receipt-fragment fallback to the
-        // deterministic _identityHash kicks in because the contract's
-        // identity is already publicly attested.
+        // Public-Identity contract recipient: the private sender must still
+        // CP-approve the pool so the pool operator can decrypt the sender's
+        // identity (mutual decryptability).  The pool side falls back to
+        // identityHash (it is public, so no CP needed from the pool).
         address pool = address(0xDECAF);
         _bindPublicIdentity(pool);
+        _setReceiptFragment(alice, pool, bytes32(uint256(1)));
         vm.prank(alice);
         buck.transfer(pool, 5e6);
         assertEq(buck.balanceOf(pool), 5e6);
@@ -740,7 +746,7 @@ contract BuckTest is Test {
         fail("BuckTransferReceipt event not found");
     }
 
-    function test_receiptHashes_EOAtoPublicPool_skipsReverseReceipt() public {
+    function test_receiptHashes_EOAtoPublicPool_senderCPFragment() public {
         _grantCredit(alice, 1000e6);
         vm.prank(alice);
         buck.mint(100e6);
@@ -748,7 +754,11 @@ contract BuckTest is Test {
         address pool = address(0xDECAF);
         _bindPublicIdentity(pool);
 
-        // No CP approve at all — transfer relies on public-pool fallback.
+        // Mutual decryptability: private sender must CP-approve the public
+        // pool so the pool operator can decrypt Alice's identity.
+        bytes32 aliceForPool = keccak256("alice-for-pool");
+        _setReceiptFragment(alice, pool, aliceForPool);
+
         vm.recordLogs();
         vm.prank(alice);
         buck.transfer(pool, 5e6);
@@ -759,17 +769,17 @@ contract BuckTest is Test {
             if (logs[i].topics[0] == eventSig) {
                 (/*amount*/, bytes32 fromHash, bytes32 toHash) =
                     abi.decode(logs[i].data, (uint256, bytes32, bytes32));
-                // toHash: no CP fragment -> falls back to _identityHash(pool)
-                assertEq(toHash, _idHashOf(pool), "toHash: pool identityHash");
-                // fromHash: no reverse fragment -> falls back to _identityHash(alice)
-                assertEq(fromHash, _idHashOf(alice), "fromHash: alice identityHash");
+                // toHash: Alice→pool CP fragment (sender's identity for pool)
+                assertEq(toHash, aliceForPool, "toHash: sender CP fragment");
+                // fromHash: pool didn't CP-approve alice, but pool is public → identityHash(alice)
+                assertEq(fromHash, _idHashOf(alice), "fromHash: alice identityHash (pool public)");
                 return;
             }
         }
         fail("BuckTransferReceipt event not found");
     }
 
-    function test_receiptHashes_PublicPoolToEOA_fallsBackBothSides() public {
+    function test_receiptHashes_PublicPoolToEOA_recipientCPFragment() public {
         _grantCredit(alice, 1000e6);
         vm.prank(alice);
         buck.mint(100e6);
@@ -777,11 +787,17 @@ contract BuckTest is Test {
         address pool = address(0xDECAF);
         _bindPublicIdentity(pool);
 
-        // Seed pool.
+        // Alice CP-approves pool so she can seed it.
+        _setReceiptFragment(alice, pool, keccak256("alice-for-pool"));
         vm.prank(alice);
         buck.transfer(pool, 20e6);
 
-        // Pool pays out to Bob — no CP fragments in either direction.
+        // Bob CP-approves pool (mutual decryptability: private recipient
+        // must CP-approve public sender so pool operator can decrypt Bob).
+        bytes32 bobForPool = keccak256("bob-for-pool");
+        _setReceiptFragment(bob, pool, bobForPool);
+
+        // Pool pays out to Bob.
         vm.recordLogs();
         vm.prank(pool);
         buck.transfer(bob, 7e6);
@@ -792,10 +808,10 @@ contract BuckTest is Test {
             if (logs[i].topics[0] == eventSig) {
                 (/*amount*/, bytes32 fromHash, bytes32 toHash) =
                     abi.decode(logs[i].data, (uint256, bytes32, bytes32));
-                // toHash: no CP fragment -> falls back to _identityHash(bob)
+                // toHash: pool is public sender → identityHash(bob) fallback
                 assertEq(toHash, _idHashOf(bob), "toHash: bob identityHash");
-                // fromHash: no reverse fragment -> falls back to _identityHash(pool)
-                assertEq(fromHash, _idHashOf(pool), "fromHash: pool identityHash");
+                // fromHash: Bob→pool CP fragment (private recipient's identity)
+                assertEq(fromHash, bobForPool, "fromHash: recipient CP fragment");
                 return;
             }
         }

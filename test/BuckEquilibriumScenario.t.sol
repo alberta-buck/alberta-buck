@@ -198,6 +198,17 @@ contract BuckEquilibriumScenarioTest is Test {
         reg.bindContract(pair,   BN254.g1(), E, true, true);
         reg.bindContract(router, BN254.g1(), E, true, true);
 
+        // Mutual decryptability: Alice seeds the pool and receives LP
+        // payouts, so she must CP-approve both pair and router.
+        {
+            bytes32 _fragSlot = keccak256(
+                abi.encode(pair, keccak256(abi.encode(alice, uint256(5)))));
+            vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+            _fragSlot = keccak256(
+                abi.encode(router, keccak256(abi.encode(alice, uint256(5)))));
+            vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+        }
+
         vm.prank(GOV);
         kCtrl.setV2BuckPair(pair, address(buck));
 

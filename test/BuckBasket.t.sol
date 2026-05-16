@@ -104,6 +104,16 @@ contract BuckBasketTest is Test {
         vm.prank(address(this));
         reg.bindContract(address(basketC), BN254.g1(), E, true, true);
 
+        // Mutual decryptability: private EOA Alice must CP-approve the
+        // public basket so the operator can decrypt her identity from the
+        // receipt on redeem (basket→alice BUCK payout).
+        {
+            bytes32 _fragSlot = keccak256(
+                abi.encode(address(basketC), keccak256(abi.encode(alice, uint256(5))))
+            );
+            vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+        }
+
         // Mock RWA tokens.
         paxg  = new BBToken("Tether Gold (mock)",      "PAXG",  18);
         cbbtc = new BBToken("Coinbase Wrapped BTC",    "cbBTC",  8);
