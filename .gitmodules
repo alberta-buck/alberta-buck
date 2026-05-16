@@ -7,3 +7,6 @@
 [submodule "rust-umbral"]
 	path = rust-umbral
 	url = git@github.com:nucypher/rust-umbral.git
+[submodule "uniswap/uniswap-ai"]
+	path = uniswap/uniswap-ai
+	url = git@github.com:Uniswap/uniswap-ai.git

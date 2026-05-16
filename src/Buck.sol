@@ -215,9 +215,29 @@ contract Buck is IERC20, IERC20Metadata {
         return _allowances[owner][spender];
     }
 
-    /// @notice Block parameterless approve.  Identity-bound overload mandatory.
-    function approve(address, uint256) external pure returns (bool) {
-        revert("BUCK: use identity-bound approve");
+    /// @notice Standard ERC-20 approve.
+    /// @dev    Identity is enforced at TRANSFER time, not at approve time.
+    ///         A bare allowance only authorises `spender` to *initiate* a
+    ///         transferFrom; `_identityCheckedTransfer` then independently
+    ///         re-validates that both `from` and `to` are verified and that
+    ///         the (from,to) pair satisfies the receipt-fragment / public-
+    ///         identity rule.  Because that gate keys on (from,to) -- never
+    ///         (from,spender) -- a plain allowance can never manufacture a
+    ///         transfer the transfer rules would not already permit: a
+    ///         plain-approved spender still cannot move BUCK between two
+    ///         non-public parties without a real Chaum-Pedersen receipt
+    ///         fragment established by the 4-arg identity-bound `approve`.
+    ///
+    ///         This makes BUCK a first-class citizen of standard router /
+    ///         Permit2 infrastructure (which requires a plain
+    ///         `approve(PERMIT2, max)`) without weakening any
+    ///         counterparty-privacy invariant.  The 4-arg identity-bound
+    ///         `approve` remains the only path that lays down the receipt
+    ///         fragment + `markApproved` carrying-flag freeze required for
+    ///         confidential (non-public) counterparty transfers.
+    function approve(address spender, uint256 amount) external returns (bool) {
+        _approve(msg.sender, spender, amount);
+        return true;
     }
 
     function transfer(address to, uint256 amount) external returns (bool) {

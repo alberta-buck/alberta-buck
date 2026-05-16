@@ -457,10 +457,84 @@ contract BuckTest is Test {
 
     // ---- approve -----------------------------------------------------------
 
-    function test_plainApprove_isBlocked() public {
+    /// @dev Plain ERC-20 approve is now permitted (required for standard
+    ///      router / Permit2 infrastructure).  It sets the allowance but
+    ///      does NOT establish a Chaum-Pedersen receipt fragment and does
+    ///      NOT freeze the spender's carrying flag -- those remain exclusive
+    ///      to the 4-arg identity-bound approve.  Identity is enforced at
+    ///      transfer time, not here.
+    function test_plainApprove_setsAllowanceButNoReceiptOrFreeze() public {
+        assertFalse(reg.carryingFrozen(bob), "not yet frozen");
+
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: use identity-bound approve"));
-        buck.approve(bob, 100e6);
+        bool ok = buck.approve(bob, 100e6);
+        assertTrue(ok, "plain approve returns true");
+
+        assertEq(buck.allowance(alice, bob), 100e6, "allowance set");
+        assertEq(buck.receiptFragment(alice, bob), bytes32(0),
+                 "plain approve must NOT establish a receipt fragment");
+        assertFalse(reg.carryingFrozen(bob),
+                    "plain approve must NOT freeze the spender carrying flag");
+    }
+
+    /// @dev GUARANTEE: a plain allowance cannot bypass the confidential-
+    ///      transfer rule.  Bob is verified but non-public; with only a
+    ///      plain approve (no 4-arg receipt) and neither party public, a
+    ///      spender-initiated transferFrom into a non-public party still
+    ///      reverts exactly as a direct transfer would.
+    function test_plainApprove_transferFrom_toConfidential_stillReverts() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        vm.prank(alice);
+        buck.approve(bob, 50e6);                 // plain approve, no receipt
+
+        vm.prank(bob);
+        vm.expectRevert(bytes("BUCK: missing identity receipt"));
+        buck.transferFrom(alice, bob, 10e6);     // alice & bob both non-public
+    }
+
+    /// @dev GUARANTEE: transferFrom still requires a verified recipient,
+    ///      regardless of the plain allowance.
+    function test_plainApprove_transferFrom_requiresVerifiedRecipient() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        vm.prank(alice);
+        buck.approve(bob, 50e6);
+
+        vm.prank(bob);
+        vm.expectRevert(bytes("BUCK: recipient not verified"));
+        buck.transferFrom(alice, carol, 10e6);   // carol unverified
+    }
+
+    /// @dev The intended new capability (the Permit2 / router path): a
+    ///      plain-approved spender CAN move the owner's BUCK to a
+    ///      public-identity recipient (a bound pool), because the
+    ///      (from,to) gate is satisfied by the public side -- no receipt
+    ///      fragment, no CP proof.  This is the standard-router flow.
+    function test_plainApprove_transferFrom_toPublicRecipient_succeeds() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
+
+        // `bob` stands in for a router/Permit2 spender: alice grants it a
+        // plain allowance; it pulls her BUCK into the public pool.
+        vm.prank(alice);
+        buck.approve(bob, 50e6);
+
+        uint256 aliceBefore = buck.balanceOf(alice);
+        vm.prank(bob);
+        buck.transferFrom(alice, pool, 10e6);
+
+        assertEq(buck.balanceOf(alice), aliceBefore - 10e6, "owner debited");
+        assertEq(buck.balanceOf(pool),  10e6,                "pool credited");
+        assertEq(buck.allowance(alice, bob), 40e6,           "allowance spent");
     }
 
     function test_identityApprove_succeedsWithValidProof() public {

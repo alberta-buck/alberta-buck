@@ -89,7 +89,7 @@ issues a Uniswap V3 NFT to the user.
 
 ** Modified
   - =Buck.sol= gets two new entry points: =mintFromBasket(to, amount)=
-    and =burnFromBasket(amount)=.  Both gated on =msg.sender == basket=
+    and =burnFromBasket(amount)=.  Both gated on ~msg.sender == basket~
     (a single trusted address fixed at construction).  These bypass
     the =BuckCredit= and funding-factor machinery -- direct mints have
     no insurance backing because the BUCK is backed directly by the
@@ -488,7 +488,7 @@ Not in v1: =removeBasketToken=, =setBasketAmount=, =setFeeTier=,
 * Failure Modes
 
 ** Empty pool slippage guard
-   When a pool has fresh liquidity (=cardinality=1=, just slot0 obs),
+   When a pool has fresh liquidity (~cardinality=1~, just slot0 obs),
    TWAP read either reverts or returns the init price.  =depositToken=
    catches the revert and skips the guard for the first deposit only.
    Subsequent deposits enforce normally.
@@ -518,7 +518,7 @@ Not in v1: =removeBasketToken=, =setBasketAmount=, =setFeeTier=,
    =_readReferences= to return them.  Cover:
 
      - Constructor pre-loads I correctly for initial buckK != UNIT
-     - At parity (=buckValue == basketValue= held constant), compute()
+     - At parity (~buckValue == basketValue~ held constant), compute()
        returns initial buckK
      - Inflation (=buckValue < basketValue=, error < 0): buckK contracts
        monotonically (sign convention canary)
