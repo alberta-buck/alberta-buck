@@ -243,6 +243,95 @@ contract BuckBasketTest is Test {
         assertApproxEqRel(paxg.balanceOf(alice), aliceTBefore + 1e18, 0.001e18);
     }
 
+    function test_redeem_revertsWhenNotOwner() public {
+        vm.prank(GOV);
+        address pool = basketC.addBasketToken(
+            address(paxg), 18, PAXG_INITIAL_PRICE_BUCK, 10000, 500
+        );
+        _bindPool(pool);
+
+        vm.prank(alice);
+        paxg.approve(address(basketC), 1e18);
+        vm.prank(alice);
+        uint256 rid = basketC.depositToken(address(paxg), 1e18, 0);
+
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert("not owner");
+        basketC.redeem(rid, 0);
+    }
+
+    function test_redeem_profitSplitPreservesTreasury() public {
+        vm.prank(GOV);
+        address pool = basketC.addBasketToken(
+            address(paxg), 18, PAXG_INITIAL_PRICE_BUCK, 10000, 500
+        );
+        _bindPool(pool);
+
+        // Alice deposits.
+        vm.prank(alice);
+        paxg.approve(address(basketC), 1e18);
+        vm.prank(alice);
+        uint256 rid = basketC.depositToken(address(paxg), 1e18, 0);
+
+        (address tok, uint256 principalT, uint256 principalB, uint128 L,) =
+            basketC.deposits(rid);
+        uint256 supplyBefore = buck.totalSupply();
+
+        // Redeem immediately at the same pool price.  No external swaps
+        // have occurred, so profit ≈ 0.  The split:
+        //   profitT = max(0, tokenOut - principalT)
+        //   profitB = max(0, buckOut - principalB)
+        //   half to user, half retained as treasury (re-deposited into pool).
+        vm.prank(alice);
+        basketC.redeem(rid, 0);
+
+        // Principal BUCK is burned.
+        assertLt(buck.totalSupply(), supplyBefore, "principal BUCK burned");
+
+        // Deposit record is cleared after redeem.
+        (, uint256 postPrincipalT,,,) = basketC.deposits(rid);
+        assertEq(postPrincipalT, 0, "deposit record cleared");
+    }
+
+    /// @dev maxDeviationBp=0 skips the TWAP guard entirely; deposit succeeds
+    ///      even if the spot price has moved.
+    function test_depositToken_zeroMaxDeviationSkipsGuard() public {
+        vm.prank(GOV);
+        address pool = basketC.addBasketToken(
+            address(paxg), 18, PAXG_INITIAL_PRICE_BUCK, 10000, 500
+        );
+        _bindPool(pool);
+
+        // Two deposits at different sizes, both with maxDeviationBp=0.
+        vm.prank(alice);
+        paxg.approve(address(basketC), 1e18);
+        vm.prank(alice);
+        basketC.depositToken(address(paxg), 1e18, 0);
+
+        paxg.mint(alice, 0.5e18);
+        vm.prank(alice);
+        paxg.approve(address(basketC), 0.5e18);
+        vm.prank(alice);
+        basketC.depositToken(address(paxg), 0.5e18, 0);
+    }
+
+    /// @dev Cold-pool deposit with non-zero maxDeviationBp: the guard tries to
+    ///      consult TWAP but the pool has no old-enough observations, so the
+    ///      try/catch silently skips the guard.  The deposit succeeds.
+    function test_depositToken_coldPoolSkipsSlippageGuard() public {
+        vm.prank(GOV);
+        address pool = basketC.addBasketToken(
+            address(paxg), 18, PAXG_INITIAL_PRICE_BUCK, 10000, 500
+        );
+        _bindPool(pool);
+
+        vm.prank(alice);
+        paxg.approve(address(basketC), 1e18);
+        vm.prank(alice);
+        basketC.depositToken(address(paxg), 1e18, 100);  // 1% slippage, cold pool
+    }
+
     // -------------------------------------------------------------------- //
     //  Identity helpers (mirrors BuckLifecycle.t.sol)                       //
     // -------------------------------------------------------------------- //

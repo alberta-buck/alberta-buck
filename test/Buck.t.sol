@@ -7,7 +7,9 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
+import {MockBasket} from "./mocks/MockBasket.sol";
 
 /// @title Buck.t.sol — identity-bound ERC-20 mint / approve / transfer flow.
 contract BuckTest is Test {
@@ -462,6 +464,126 @@ contract BuckTest is Test {
 
         assertEq(backedBefore - buck.mintsBacked(tid), quotedUnwind, "unwound matches quote");
         assertEq(poolBefore   - buck.balanceOf(POOL),  quotedRefund, "refund matches quote");
+    }
+
+    // ---- setBasket ----------------------------------------------------------
+
+    function test_setBasket_onlyInsurancePool() public {
+        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.expectRevert("BUCK: not insurancePool");
+        fresh.setBasket(address(0xDECAF));
+    }
+
+    function test_setBasket_oneShot() public {
+        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(POOL);
+        fresh.setBasket(address(0xB0CC));
+        vm.prank(POOL);
+        vm.expectRevert("BUCK: basket already set");
+        fresh.setBasket(address(0xB0DD));
+    }
+
+    function test_setBasket_rejectsZero() public {
+        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(POOL);
+        vm.expectRevert("BUCK: basket=0");
+        fresh.setBasket(address(0));
+    }
+
+    // ---- burn: all NFTs over-rate -------------------------------------------
+
+    function test_burn_revertsWhenAllNFTsOverRate() public {
+        // Mint against a reasonable-rate NFT, then the insurer bumps the
+        // premium rate so high that effRate >= BP.  On burn, the NFT is
+        // silently skipped and the burn fails with insufficient coverage.
+        uint256 tid = _grantCreditAtRate(alice, 100e6, 100);  // effRate=1000
+
+        vm.prank(alice);
+        buck.mint(50e6);
+
+        // Insurer reappraises: bumps premium rate to 1000 (effRate=10000 == BP).
+        vm.prank(address(this));  // insurer == credit creator
+        credit.updateCredit(
+            tid, 100e6, 100e6,
+            BuckCredit.DepreciationType.NONE, 0, 0,
+            1000  // premiumRate = 1000 → effRate = 1000*10 = 10000 = BP → skipped
+        );
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = tid;
+        vm.prank(alice);
+        vm.expectRevert("BUCK: insufficient coverage to unwind");
+        buck.burn(10e6, order);
+    }
+
+    // ---- funding factor gate ------------------------------------------------
+
+    function test_mint_revertsWhenFundingFactorUnsatisfied() public {
+        // Deploy a fresh stack: new IdentityRegistry, controller with real
+        // funding factor, and Buck.  Alice needs a fresh registration.
+        IdentityRegistry r = new IdentityRegistry(GOV);
+        BuckKControllerDirect kc = new BuckKControllerDirect(
+            0.1e18, 0.01e18, 0,
+            60,
+            0.50e18, 1.50e18,
+            1.0e18,
+            GOV
+        );
+        Buck b = new Buck(address(credit), address(kc), address(r), POOL);
+        vm.prank(GOV);
+        r.setBuck(address(b));
+
+        // Register Alice on the fresh registry.
+        {
+            BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+            IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+            // Need a trusted issuer on the fresh registry.
+            IdentityRegistry.PSPubKey memory ipk;
+            ipk.X.X[0] = _u(".issuer.pk_X.x[0]");
+            ipk.X.X[1] = _u(".issuer.pk_X.x[1]");
+            ipk.X.Y[0] = _u(".issuer.pk_X.y[0]");
+            ipk.X.Y[1] = _u(".issuer.pk_X.y[1]");
+            ipk.Y.X[0] = _u(".issuer.pk_Y.x[0]");
+            ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
+            ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
+            ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+            vm.prank(GOV);
+            r.trustIssuer(ISSUER, ipk);
+            vm.prank(alice);
+            r.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
+        }
+
+        // Wire a mock basket signalling inflation (basket > 1.0 BUCK).
+        MockBasket basket = new MockBasket();
+        basket.setBasketValue(int256(1.05e18));
+        vm.prank(GOV);
+        kc.setBasket(address(basket));
+
+        // Advance time past dT so the PID cycle runs.
+        vm.warp(block.timestamp + 61);
+        kc.compute();
+        uint256 factor = kc.fundingFactor();
+        assertGt(factor, 0, "funding factor should be positive");
+
+        // Alice has a credit NFT.  She mints some initial BUCK.
+        uint256 tid = _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        b.mint(1e6);
+
+        // Compute again to get a non-zero funding factor.
+        vm.warp(block.timestamp + 61);
+        kc.compute();
+
+        // Now try to mint more — the funding factor requires balanceOf >=
+        // poolPrincipal * factor / 1e18, but alice only has 1e6 BUCK.  The
+        // poolPrincipal from a 100e6 mint at 50bp is ~526k, and with factor
+        // ~1.48, the required balance is ~780k.  Alice only has 1e6 — hmm,
+        // that might actually pass.  Let me mint a larger amount.
+        // poolPrincipal for 500e6 at 50bp = 500e6 * (BP/(BP-500) - 1) ≈ 26.3e6.
+        // required = 26.3e6 * 1.48 / 1e18 ≈ 38.9e6.  Alice only has 1e6 → reverts.
+        vm.prank(alice);
+        vm.expectRevert("BUCK: insufficient mint funding");
+        b.mint(500e6);
     }
 
     // ---- approve -----------------------------------------------------------
