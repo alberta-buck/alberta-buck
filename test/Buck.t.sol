@@ -427,6 +427,25 @@ contract BuckTest is Test {
         assertEq(buck.balanceOf(POOL),    18_750_000 - 16_118_422,    "pool refund spans both NFTs");
     }
 
+    function test_quoteMint_multiRate_matchesExecution() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 200e6, 200);
+
+        // Quote with a mixed cheap-dear order.
+        uint256[] memory order = new uint256[](2);
+        order[0] = cheap;
+        order[1] = dear;
+
+        (uint256 quotedCoverage, uint256 quotedPrincipal) = buck.quoteMint(250e6, order);
+
+        vm.prank(alice);
+        buck.mint(250e6, order);
+
+        uint256 totalBacked = buck.mintsBacked(cheap) + buck.mintsBacked(dear);
+        assertEq(totalBacked, quotedCoverage, "coverage matches quote");
+        assertEq(buck.balanceOf(POOL), quotedPrincipal, "principal matches quote");
+    }
+
     function test_quoteMint_matchesExecution() public {
         uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
         uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
