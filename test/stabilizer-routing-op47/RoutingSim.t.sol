@@ -93,10 +93,15 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
     uint256[][N] internal px;                  // px[t][day]
     uint256 internal nDays;
 
-    // ---- agents (virtual ledger) --------------------------------------- //
+    // ---- agents --------------------------------------------------------- //
     uint256 internal constant N_AGENTS  = 5;
     uint256 internal constant MAX_ROUNDS = 6;
     uint256 internal constant SIM_DAYS  = 120;   // bounded horizon (tractable)
+
+    // Agent-type tags.  Add new constants here when adding agent types.
+    uint8 internal constant AGENT_ANONYMOUS_ARB = 0;   // BUCK-unaware arb
+    // uint8 internal constant AGENT_PEG_ARB     = 1;   // future: BUCK peg maint.
+
     // CAP_BP bounds each cross-arb fill to a small fraction of the x/BUCK
     // pool's token side (serialized ordering shows up as slippage the next
     // agent re-quotes against).  NB: best-execution BUCK routing is the
@@ -115,7 +120,15 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
     uint256 internal constant BP            = 10_000;
     uint256 internal constant FEE_DEN       = 1_000_000;  // V3 fee denominator
 
-    struct Agent { uint256 usdc; uint256[N] bal; }
+    struct Agent {
+        uint8   agentType;   // AGENT_ANONYMOUS_ARB, AGENT_PEG_ARB, ...
+        uint256 usdc;
+        uint256[N] bal;
+        // Future agent-type fields (union by convention — use only when
+        // agentType matches):
+        // uint256[] receiptIds;   // BuckBasketReceipt NFTs (peg agent)
+        // uint256[] creditIds;    // BuckCredit NFTs (credit-mint agent)
+    }
     Agent[N_AGENTS] internal ag;
     uint256 internal initVal;   // total agent portfolio USDC value at day 0
 
@@ -231,6 +244,7 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
         // fill is small relative to the pool, so serialized ordering shows
         // up as slippage the later agents must re-quote against.
         for (uint256 i = 0; i < N_AGENTS; i++) {
+            ag[i].agentType = AGENT_ANONYMOUS_ARB;
             ag[i].usdc = 1e24;
             for (uint8 t = 0; t < N; t++) {
                 ag[i].bal[t] = 1_000_000_000 * 10 ** dec[t];
@@ -264,7 +278,7 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
             // ---- agent dispatch (randomized order each day) ----
             uint256[N_AGENTS] memory order = _shuffle(d);
             for (uint256 k = 0; k < N_AGENTS; k++) {
-                _runAnonymousArbAgent(order[k], d);
+                _dispatchAgent(order[k], d);
                 _anchorUsdcBuck();   // outsider continuously re-pegs USDC/BUCK
             }
 
@@ -281,10 +295,23 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
     //  Agent types                                                        //
     //                                                                     //
     //  To add a new agent type:                                           //
-    //    1. Add its state to the Agent struct (or a parallel struct)       //
-    //    2. Write a _run<Type>Agent function                              //
-    //    3. Call it from the simulation loop above                        //
+    //    1. Add an AGENT_<NAME> constant above                             //
+    //    2. Add any per-agent state fields to the Agent struct             //
+    //    3. Write a _run<Name>Agent function                              //
+    //    4. Add a case to _dispatchAgent below                            //
+    //    5. Assign the agent type in setUp                                //
     // =================================================================== //
+
+    /// @dev Route to the correct agent behaviour based on its type tag.
+    function _dispatchAgent(uint256 a, uint256 d) internal {
+        uint8 t = ag[a].agentType;
+        if (t == AGENT_ANONYMOUS_ARB) {
+            _runAnonymousArbAgent(a, d);
+        }
+        // else if (t == AGENT_PEG_ARB) {
+        //     _runPegAgent(a, d);
+        // }
+    }
 
     /// @dev Anonymous BUCK-unaware agent: holds only USDC + RWA tokens.
     ///      Routes through both direct TOKEN/USDC and indirect TOKEN/BUCK
@@ -318,22 +345,37 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
         }
     }
 
-    // -- Extension point: BUCK-aware peg agent ----------------------------
+    // -- Extension point: BUCK-aware peg agent (AGENT_PEG_ARB = 1) ---------
     //
-    // A BUCK-aware agent (identity-bound, holding RWA tokens) would:
-    //   1. Watch BUCK/USDC spot vs BUCK fundamental ($1)
-    //   2. If BUCK > $1+m: deposit RWA via BuckBasket, mint BUCK, sell on
-    //      BUCK/USDC pool (increases BUCK supply, pushes price down).
-    //   3. If BUCK < $1-m: buy BUCK from pool, redeem via BuckBasket
-    //      (decreases BUCK supply, pushes price up).
+    //   struct Agent { ... uint256[] receiptIds; ... }
     //
-    // Stub:
-    //   function _runPegAgent(uint256 d) internal { ... }
+    //   function _runPegAgent(uint256 a, uint256 d) internal {
+    //       uint256 buckSpot = _spot(poolUbk, address(buck), address(usdc),
+    //                                uint128(1e6));
+    //       if (buckSpot > 1_010_000) {
+    //           // BUCK overvalued: deposit RWA -> mint BUCK -> sell into pool
+    //           for (uint8 t = 0; t < N; t++) {
+    //               uint256 bal = IERC20(address(tok[t])).balanceOf(address(this));
+    //               if (bal == 0) continue;
+    //               tok[t].approve(address(basket), bal / 100);
+    //               uint256 rid = basket.depositToken(address(tok[t]), bal / 100, 0);
+    //               ag[a].receiptIds.push(rid);
+    //               uint256 bBal = buck.balanceOf(address(this));
+    //               if (bBal > 0) _ur(_path2(address(buck), FEE_BUCK, address(usdc)),
+    //                                  address(buck), address(usdc), bBal);
+    //           }
+    //       } else if (buckSpot < 990_000 && ag[a].receiptIds.length > 0) {
+    //           // BUCK undervalued: redeem oldest receipt -> receive tokens
+    //           uint256 rid = ag[a].receiptIds[ag[a].receiptIds.length - 1];
+    //           basket.redeem(rid, 0);
+    //           ag[a].receiptIds.pop();
+    //       }
+    //   }
     //
-    // The fixture contract (address(this)) is already identity-bound and
-    // holds RWA tokens; it can act as the peg agent without additional
-    // setup.  Receipt NFTs from BuckBasket.depositToken are held by the
-    // fixture and can be redeemed when BUCK is undervalued.
+    // Then add the case to _dispatchAgent and assign AGENT_PEG_ARB in setUp.
+    // The fixture (address(this)) holds RWA tokens and is identity-bound;
+    // for a multi-agent peg population, each agent needs its own bound
+    // account (or the fixture acts as a single shared peg agent).
 
     // =================================================================== //
     //  Arb strategies (called by agent types above)                       //
