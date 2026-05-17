@@ -250,40 +250,48 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
     }
 
     // =================================================================== //
-    //  The simulation                                                     //
+    //  Simulation loop                                                    //
     // =================================================================== //
 
     function test_routing_drives_pools_to_equilibrium() public {
         uint256 horizon = nDays < SIM_DAYS ? nDays : SIM_DAYS;
         for (uint256 d = 0; d < horizon; d++) {
-            // advance one day; keep every pool's oracle from going stale
+            // ---- daily state advance ----
             vm.warp(block.timestamp + 1 days);
             for (uint8 t = 0; t < N; t++) _touchPool(poolUsdc[t]);
-            _anchorUsdcBuck();        // outsider holds USDC/BUCK ~ fundamental
+            _anchorUsdcBuck();
 
-            // All agents learn the day's reference simultaneously, but their
-            // on-chain order is randomized (serialized execution => slippage).
+            // ---- agent dispatch (randomized order each day) ----
             uint256[N_AGENTS] memory order = _shuffle(d);
             for (uint256 k = 0; k < N_AGENTS; k++) {
-                _agentDay(order[k], d);
-                // Outsiders continuously arb USDC/BUCK back to BUCK's
-                // fundamental (deep capital, strong redeem incentive), so
-                // the anchor stays solid no matter the routed volume.
-                _anchorUsdcBuck();
+                _runAnonymousArbAgent(order[k], d);
+                _anchorUsdcBuck();   // outsider continuously re-pegs USDC/BUCK
             }
 
-            kCtrl.compute();          // keep the PID warm
+            // ---- system housekeeping ----
+            kCtrl.compute();
             _snap(d);
             lastDay = d;
         }
-
         _writeJson();
         _assertConverged();
     }
 
-    /// @dev One agent's day: up to MAX_ROUNDS of (re-quote, best trade)
-    ///      until no route clears its risk/reward threshold.
-    function _agentDay(uint256 a, uint256 d) internal {
+    // =================================================================== //
+    //  Agent types                                                        //
+    //                                                                     //
+    //  To add a new agent type:                                           //
+    //    1. Add its state to the Agent struct (or a parallel struct)       //
+    //    2. Write a _run<Type>Agent function                              //
+    //    3. Call it from the simulation loop above                        //
+    // =================================================================== //
+
+    /// @dev Anonymous BUCK-unaware agent: holds only USDC + RWA tokens.
+    ///      Routes through both direct TOKEN/USDC and indirect TOKEN/BUCK
+    ///      pools, comparing best-execution on every trade.  Never holds
+    ///      or knowingly moves BUCK — the Universal Router custodies
+    ///      intermediate BUCK between V3 legs (pre-fund route).
+    function _runAnonymousArbAgent(uint256 a, uint256 d) internal {
         for (uint256 r = 0; r < MAX_ROUNDS; r++) {
             bool acted = false;
 
@@ -292,15 +300,7 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
                 if (_directArb(a, t, d)) acted = true;
             }
 
-            // (2) Best-execution TOKEN_x -> TOKEN_y conversion.  The agent
-            //     compares the BUCK-free route (x->USDC->y, market-anchored)
-            //     against the BUCK route (x->BUCK->y) and only takes the
-            //     BUCK route when it quotes strictly better.  By
-            //     construction every BUCK-routed fill moves x/BUCK & y/BUCK
-            //     *toward* parity with the market-pinned USDC pools and
-            //     stops at parity -- non-destructive and self-limiting.
-            //     The agent stays BUCK-neutral (x in, y out; BUCK is
-            //     router-internal between the two V3 legs).
+            // (2) Cross-arb: TOKEN_x -> TOKEN_y comparing BUCK vs USDC route.
             for (uint8 x = 0; x < N; x++) {
                 for (uint8 y = 0; y < N; y++) {
                     if (x == y) continue;
@@ -308,18 +308,36 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
                 }
             }
 
-            // (3) Triangular USDC -> y vs USDC -> BUCK -> y, using the
-            //     OUTSIDER USDC/BUCK pool.  This is the leg that pins each
-            //     TOKEN/BUCK pool's *absolute* level: USDC/BUCK is anchored
-            //     to BUCK's fundamental by outsiders, and best-execution
-            //     routing propagates that anchor through every y/BUCK pool.
-            //     Agent stays BUCK-neutral (USDC in, y out / y in, USDC out).
+            // (3) Triangular arb: USDC <-> BUCK <-> TOKEN, propagating the
+            //     outsider USDC/BUCK anchor to every TOKEN/BUCK pool.
             for (uint8 y = 0; y < N; y++) {
                 if (_triArb(a, y)) acted = true;
             }
-            if (!acted) break;        // risk/reward exhausted for this agent
+
+            if (!acted) break;   // risk/reward exhausted
         }
     }
+
+    // -- Extension point: BUCK-aware peg agent ----------------------------
+    //
+    // A BUCK-aware agent (identity-bound, holding RWA tokens) would:
+    //   1. Watch BUCK/USDC spot vs BUCK fundamental ($1)
+    //   2. If BUCK > $1+m: deposit RWA via BuckBasket, mint BUCK, sell on
+    //      BUCK/USDC pool (increases BUCK supply, pushes price down).
+    //   3. If BUCK < $1-m: buy BUCK from pool, redeem via BuckBasket
+    //      (decreases BUCK supply, pushes price up).
+    //
+    // Stub:
+    //   function _runPegAgent(uint256 d) internal { ... }
+    //
+    // The fixture contract (address(this)) is already identity-bound and
+    // holds RWA tokens; it can act as the peg agent without additional
+    // setup.  Receipt NFTs from BuckBasket.depositToken are held by the
+    // fixture and can be redeemed when BUCK is undervalued.
+
+    // =================================================================== //
+    //  Arb strategies (called by agent types above)                       //
+    // =================================================================== //
 
     // ---- (1) direct TOKEN/USDC reference arb --------------------------- //
 
@@ -455,7 +473,7 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
     }
 
     // =================================================================== //
-    //  Universal Router execution (pre-fund / payerIsUser=false)          //
+    //  Execution: Universal Router (pre-fund / payerIsUser=false)         //
     // =================================================================== //
 
     function _ur(bytes memory path, address tokenIn, address tokenOut, uint256 amountIn)
