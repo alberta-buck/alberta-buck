@@ -15,6 +15,7 @@ fs_permissions = [
     { access = "read-write", path = "./test/vectors" },
     { access = "read", path = "./build/snark" },
     { access = "read", path = "./out" },
+    { access = "read-write", path = "./test/stabilizer-routing-dsv4" },
 ]
 
 # Remappings for installed dependencies
