@@ -78,12 +78,12 @@ def test_routing_sim_plot():
 
     # ---- Panel 4: cumulative route usage ----------------------------- #
     ax = axes[3]
-    direct = col("directTrades", 0)
-    cycle = col("cycleTrades", 0)
+    direct = [f["directTrades"] for f in fr]
+    cycle = [f["cycleTrades"] for f in fr]
     ax.plot(days, direct, color="tab:red", linewidth=1.4,
-            label="direct TOKEN/USDC trades")
+            label="direct TOKEN/USDC reference-arb trades")
     ax.plot(days, cycle, color="tab:purple", linewidth=1.4,
-            label="BUCK-routed cyclic trades (USDC->TOKEN->BUCK->TOKEN->USDC)")
+            label="BUCK-routed trades (TOKEN<->BUCK<->TOKEN / USDC<->BUCK<->TOKEN)")
     ax.set_ylabel("cumulative trades")
     ax.legend(loc="upper left", fontsize=9)
     ax.grid(True, alpha=0.3)
@@ -124,5 +124,5 @@ def test_routing_sim_plot():
         print(f"  {names[t]:5s}  ref ${ref:,.2f}  "
               f"USDC-pool ${su:,.2f} ({100*(su-ref)/ref:+.2f}%)  "
               f"BUCK-pool ${sb:,.2f} ({100*(sb-ref)/ref:+.2f}%)")
-    print(f"  direct trades: {col('directTrades', 0)[-1]}  "
-          f"BUCK-routed trades: {col('cycleTrades', 0)[-1]}")
+    print(f"  direct trades: {fr[-1]['directTrades']}  "
+          f"BUCK-routed trades: {fr[-1]['cycleTrades']}")

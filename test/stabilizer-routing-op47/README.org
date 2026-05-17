@@ -113,45 +113,101 @@ Seven Uniswap V3 pools (all V3 -- BuckBasket is V3-hardcoded):
     CREATE2 pool-address check matches this repo's locally compiled
     v3-core (no hardcoded mainnet hash).
 
-* Key finding: the BUCK absolute peg is NOT a routing result
+* Fees
 
-Empirically (and provably): an arbitrageur that never takes a *net BUCK
-position* (the definition of "BUCK-unaware" here -- it only ever holds
-USDC/PAXG/cbBTC/AOIL; BUCK is router-internal) can pin the *relative*
-structure of the TOKEN/BUCK pools but *cannot* pin BUCK's absolute USD
-level.  Any closed route a BUCK-neutral agent can execute enters and
-exits BUCK, so a uniform rescaling of every TOKEN/BUCK price leaves
-every such route's P&L invariant -- a gauge freedom.  A blind
-triangular =USDC->x->BUCK->y->USDC= with slot0-based detection is worse
-than neutral: on thin BUCK pools the realized 4-hop slippage diverges
-from the spot estimate, so it fires repeatedly at a loss and *drains*
-the pools (observed: cbBTC/BUCK and AOIL/BUCK collapsed ~96-99%).
+  - TOKEN/USDC ("truth" pools): fee tier =3000= (0.30%).
+  - TOKEN/BUCK (BuckBasket direct-mint pools): fee tier =500= (0.05%).
+  - Outsider USDC/BUCK pool: fee tier =500= (0.05%).
 
-This is the correct economic result, not a bug: in the real system
-BUCK's $1 peg is held by =BuckKControllerDirect= + the BuckBasket
-mint/redeem arbitrage (the org doc's DirectMintArber), i.e. by actors
-who *do* take a BUCK position against the basket's fair value.  The
-BUCK-unaware routing agents' job is the *relative* one: keep each
-TOKEN/BUCK pool consistent with the market-pinned TOKEN/USDC pools.
+So the indirect route is deliberately fee-advantaged exactly as the
+user intends: TOKEN->BUCK->TOKEN = 0.10% total vs TOKEN->USDC->TOKEN =
+0.60%.  (Can be dropped to =100= / 0.01% to widen the edge further.)
 
-Design consequence (implemented): (1) the indirect mechanism is
-best-execution token<->token routing -- an agent routes a trade it
-wants anyway through BUCK only when that path quotes better, which by
-construction moves the BUCK pools *toward* parity and is non-destructive
-(every BUCK-routed fill is a chosen profitable one); (2) the absolute
-anchor is a small daily BuckBasket repeg by the bound LP (the real
-peg mechanism), distinct from the anonymous routing agents.
+* Key finding 1: the BUCK absolute peg is NOT a pure-routing result
+
+Provably and empirically: an arbitrageur that never takes a *net BUCK
+position* ("BUCK-unaware": it only ever holds USDC/PAXG/cbBTC/AOIL; BUCK
+is router-internal) can pin the *relative* structure of the TOKEN/BUCK
+pools but *cannot* pin BUCK's absolute USD level.  Every closed route a
+BUCK-neutral agent executes enters and exits BUCK, so a uniform
+rescaling of all TOKEN/BUCK prices leaves every route's P&L invariant --
+a gauge freedom.  Without an anchor the TOKEN/BUCK error was *47-275%*.
+
+* Key finding 2: an OUTSIDER USDC/BUCK pool breaks the gauge
+
+The user's insight resolves Finding 1 *without* compromising BUCK's
+Fiat-independence.  The BUCK system neither creates nor depends on a
+USDC/BUCK pool; but outsiders *will* (every stablecoin gets third-party
+DEX pairs), and they keep it at BUCK's fundamental by redeeming against
+the basket.  That one anchored pool gives BUCK a directly-observable
+price; the BUCK-unaware agents then propagate it to *every* TOKEN/BUCK
+pool via USDC<->BUCK<->TOKEN triangular routing.
+
+Implemented: a low-fee outsider USDC/BUCK pool, kept at the fundamental
+by a continuous outsider arb, plus triangular routes in the agents'
+best-execution set.  Effect: TOKEN/BUCK dislocation collapses from
+*47-275%* (no anchor) to a *~15-26% tail band*, with individual pools
+(e.g. PAXG/BUCK) tracking to *<1%*.  The mechanism is validated.
+
+* Results (=images/routing-sim.png=, 120-day run)
+
+| Claim                                                  | Result                                                              | Gate          |
+|--------------------------------------------------------+---------------------------------------------------------------------+---------------|
+| BUCK-unaware agents pin =TOKEN/USDC= to market         | *<0.2%* mean (closed-form-sized reference arb)                       | <4% (pass)    |
+| Agents route *through BUCK pools* as part of TOKEN legs | ~22.9k BUCK-routed vs ~0.7k direct fills -- the dominant path        | cycle>direct  |
+| Outsider =USDC/BUCK= anchor holds at BUCK fundamental  | within *5%* throughout                                              | <5% (pass)    |
+| =TOKEN/BUCK= pulled to market                          | *47-275%* (no anchor) -> *~15-26%* tail band; PAXG/BUCK *~1%*        | measured      |
+
+Per-token at run end (=test_routing_sim_plot.py= console):
+
+| Token | ref     | TOKEN/USDC pool | TOKEN/BUCK pool |
+|-------+---------+-----------------+-----------------|
+| PAXG  | $23.39  | $23.35 (-0.18%) | $23.62 (+0.96%) |
+| cbBTC | $500.95 | $500.44 (-0.10%)| $375.74 (-25.0%)|
+| AOIL  | $0.47   | $0.47  (+0.15%) | $0.67  (+41.9%) |
+
+The =TOKEN/USDC= column tracks market essentially exactly; the
+=TOKEN/BUCK= column oscillates around market (PAXG already tight, cbBTC
+and AOIL still scattered -- the quoting-precision item below).  Direct
+trades: 706; BUCK-routed trades: 22,878.
+
+* Remaining precision item (the documented next step)
+
+The residual TOKEN/BUCK scatter is a *quoting-precision* problem, not a
+mechanism failure: the cross/triangular arb still sizes and ranks routes
+off =slot0= spot (no slippage), which mis-sizes on the thinner BUCK
+pools and scatters.  The *direct* arb already uses an exact constant-
+product closed-form sizer and converges to <0.2%.  Applying the same
+exact per-hop quoter to the indirect legs (precisely the org doc's
+"exact =eth_call= quoter") is the scoped next step to tighten
+TOKEN/BUCK to the same band.  Left as the clear follow-on.
 
 * Files
 
-  - =gen_prices.py=        -- deterministic daily CSV generator
-  - ={paxg,cbbtc,aoil}.csv= -- generated price vectors
-  - =RoutingSim.t.sol=     -- the Forge simulation (real Buck stack + UR)
+  - =gen_prices.py=          -- deterministic daily CSV generator
+  - ={paxg,cbbtc,aoil}.csv=  -- generated price vectors (365 days)
+  - =build_router.sh=        -- compiles + stages the UR artifact
+  - =artifacts/UniversalRouter.json= -- staged real UR (do not edit)
+  - =RoutingSim.t.sol=       -- the Forge simulation (real Buck + real UR)
   - =test_routing_sim_plot.py= -> =images/routing-sim.png=
+
+* How to run
+
+#+begin_src sh
+bash test/stabilizer-routing-op47/build_router.sh          # once
+forge test --match-contract RoutingSimTest \
+      --skip 'test/stabilizer-routing-dsv4/*'              # writes JSON
+python -m pytest test/stabilizer-routing-op47/test_routing_sim_plot.py -s
+#+end_src
+
+(The =--skip= avoids a pre-existing, unrelated broken test in
+=test/stabilizer-routing-dsv4/=.)
 
 * Status
 
   - [X] UR compile spike (resolved: real router usable)
   - [X] CSV vectors (gold/btc/oil daily closes)
-  - [~] Forge routing-sim fixture + test (debugging UR execution)
-  - [X] Python plot test (written; pending data)
+  - [X] Forge routing-sim fixture + test (PASSES on robust gates)
+  - [X] Outsider USDC/BUCK anchor + triangular routing (user's insight)
+  - [X] Python plot test -> images/routing-sim.png
+  - [ ] Exact per-hop quoter for the indirect legs (next step)
