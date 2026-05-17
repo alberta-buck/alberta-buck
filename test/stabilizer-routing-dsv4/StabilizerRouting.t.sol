@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
 contract SimToken is ERC20 {
     uint8 private immutable _dec;
@@ -12,186 +14,254 @@ contract SimToken is ERC20 {
     function mint(address to, uint256 amt) external { _mint(to, amt); }
 }
 
-/// @title StabilizerRouting — Arbitrage-driven pool price convergence.
+interface IV3Factory {
+    function createPool(address a, address b, uint24 fee) external returns (address);
+}
+
+/// @title StabilizerRouting — arbitrage-driven V3 pool price convergence.
 ///
-/// Simulates 10 agents with USDC reserves arbitraging 3 RWA tokens
-/// (PAXG, cbBTC, AOIL) against an exogenous daily CSV reference price.
-/// Each day agents compare pool spot to reference and trade toward
-/// equilibrium, limited by aggressiveness and multi-round convergence.
-/// Records weekly snapshots as JSON for plotting.
+/// Seven V3 pools (PAXG/USDC, cbBTC/USDC, AOIL/USDC, BUCK/USDC,
+/// PAXG/BUCK, cbBTC/BUCK, AOIL/BUCK) seeded at day-0 reference prices.
+/// Agents compare pool spot to daily CSV reference and trade through
+/// both direct TOKEN/USDC and indirect TOKEN/BUCK→BUCK/USDC routes,
+/// driving all pools toward equilibrium.
 contract StabilizerRoutingTest is Test {
+    using Math for uint256;
+
     // ── tokens ──────────────────────────────────────────────────────────
     SimToken internal usdc;
     SimToken internal paxg;
     SimToken internal cbbtc;
     SimToken internal aoil;
+    SimToken internal buck;
 
-    // ── pool state (simulated — no real V3 pools needed for Phase 0) ───
-    // Each "pool" is just a spot price stored in contract storage.
-    uint256 internal spotPaxgUsdc;
-    uint256 internal spotCbbtcUsdc;
-    uint256 internal spotAoilUsdc;
+    // ── pools ───────────────────────────────────────────────────────────
+    address internal paxgUsdc;   address internal paxgBuck;
+    address internal cbbtcUsdc;  address internal cbbtcBuck;
+    address internal aoilUsdc;   address internal aoilBuck;
+    address internal buckUsdc;
+    address internal v3Factory;
 
     // ── config ──────────────────────────────────────────────────────────
-    uint256 constant N_AGENTS  = 10;
-    uint256 constant N_DAYS     = 365;
-    uint256 constant DAY_SECS   = 1 days;
-    uint256 constant AGENT_USDC = 1_000_000e6;    // $1M each
-    uint256 constant ENTRY_BP   = 300;             // 3% edge to enter
-    uint256 constant EXIT_BP    = 50;              // 0.5% to stop
+    uint24 constant FEE = 500;
+    uint256 constant N_AGENTS = 5;
+    uint256 constant N_DAYS   = 90;
+    uint256 constant DAY_SECS = 1 days;
+    uint256 constant ENTRY_BP = 300;
+    uint256 constant AGGR_BP  = 3000;
     uint256 constant MAX_ROUNDS = 5;
-    uint256 constant AGGRESSION_BP = 3000;          // 30% of gap per trade
 
     // ── agents ──────────────────────────────────────────────────────────
     struct Agent {
-        uint256 usdc;
-        uint256 paxg;
-        uint256 cbbtc;
-        uint256 aoil;
+        uint256 usdc; uint256 paxg; uint256 cbbtc; uint256 aoil;
     }
     Agent[N_AGENTS] internal agents;
+    address[N_AGENTS] internal agentAddr;
 
-    // ── reference prices ────────────────────────────────────────────────
+    // ── prices ──────────────────────────────────────────────────────────
     uint256[] internal refPaxg;
     uint256[] internal refCbbtc;
     uint256[] internal refAoil;
 
     // ── snapshots ───────────────────────────────────────────────────────
     uint256[] internal sDay;
-    uint256[] internal sPaxgSpot;     uint256[] internal sPaxgRef;
-    uint256[] internal sCbbtcSpot;    uint256[] internal sCbbtcRef;
-    uint256[] internal sAoilSpot;     uint256[] internal sAoilRef;
-    uint256[] internal sAgentUsdc;
+    uint256[] internal sPaxgS;   uint256[] internal sPaxgR;
+    uint256[] internal sCbbtcS;  uint256[] internal sCbbtcR;
+    uint256[] internal sAoilS;   uint256[] internal sAoilR;
+
+    // ── pool seed price tracking ────────────────────────────────────────
+    mapping(address => uint256) internal poolSpot;  // pool → current spot (18-dec)
 
     // ── setup ───────────────────────────────────────────────────────────
 
     function setUp() public {
+        // 1. Tokens.
         usdc  = new SimToken("USD Coin",  "USDC",  6);
         paxg  = new SimToken("PAX Gold",  "PAXG",  18);
         cbbtc = new SimToken("cbBTC",     "cbBTC", 8);
         aoil  = new SimToken("AlbertaOil","AOIL",  18);
+        buck  = new SimToken("BUCK",      "BUCK",  6);
 
-        // Parse prices using Python helper output (simpler than Solidity CSV parser).
-        _parseRefPrices();
+        // 2. V3 factory + 7 pools.
+        _loadRefPrices();
+        v3Factory = deployCode("out/UniswapV3Factory.sol/UniswapV3Factory.json");
 
-        // Initialize pool spots to day-0 reference prices (18-dec, USDC per whole TOKEN).
-        spotPaxgUsdc  = refPaxg[0];
-        spotCbbtcUsdc = refCbbtc[0];
-        spotAoilUsdc  = refAoil[0];
+        paxgUsdc  = _makePool(address(usdc), address(paxg),  refPaxg[0]);
+        cbbtcUsdc = _makePool(address(usdc), address(cbbtc), refCbbtc[0]);
+        aoilUsdc  = _makePool(address(usdc), address(aoil),  refAoil[0]);
+        buckUsdc  = _makePool(address(usdc), address(buck),  1e18);
 
-        // Mint USDC to agents.
+        paxgBuck  = _makePool(address(buck), address(paxg),  refPaxg[0]);
+        cbbtcBuck = _makePool(address(buck), address(cbbtc), refCbbtc[0]);
+        aoilBuck  = _makePool(address(buck), address(aoil),  refAoil[0]);
+
+        // 3. Seed pools with deep liquidity.
+        _seedPair(paxgUsdc,  500_000e6, 100e18);
+        _seedPair(cbbtcUsdc, 1_000_000e6, 5e8);
+        _seedPair(aoilUsdc,  500_000e6, 1000e18);
+        _seedPair(buckUsdc,  500_000e6, 500_000e6);
+        _seedPair(paxgBuck,  100_000e6, 50e18);
+        _seedPair(cbbtcBuck, 200_000e6, 2e8);
+        _seedPair(aoilBuck,  100_000e6, 500e18);
+
+        // 4. Agents — each gets USDC + token balances.
         for (uint256 i = 0; i < N_AGENTS; i++) {
-            agents[i] = Agent(AGENT_USDC, 0, 0, 0);
+            address ag = makeAddr(string.concat("agent", vm.toString(i)));
+            agentAddr[i] = ag;
+            usdc.mint(ag, 1_000_000e6);
+            paxg.mint(ag, 100e18);
+            cbbtc.mint(ag, 5e8);
+            aoil.mint(ag, 500e18);
+            agents[i] = Agent(1_000_000e6, 100e18, 5e8, 500e18);
         }
     }
 
-    /// @dev Parse the pre-computed 6-decimal integer prices from a simple format.
-    function _parseRefPrices() internal {
-        // Read the pre-parsed integer prices from a JSON file produced by gen_prices.py.
-        // For simplicity, read the CSV directly and parse inline.
-        string memory paxgCsv  = vm.readFile("test/stabilizer-routing-dsv4/prices/PAXG.csv");
-        string memory cbbtcCsv = vm.readFile("test/stabilizer-routing-dsv4/prices/cbBTC.csv");
-        string memory aoilCsv  = vm.readFile("test/stabilizer-routing-dsv4/prices/AOIL.csv");
-        _parseCsv(paxgCsv,  refPaxg);
-        _parseCsv(cbbtcCsv, refCbbtc);
-        _parseCsv(aoilCsv,  refAoil);
+    // ── pool helpers ────────────────────────────────────────────────────
+
+    function _makePool(address t0, address t1, uint256 price) internal returns (address) {
+        address p = IV3Factory(v3Factory).createPool(t0, t1, FEE);
+        IUniswapV3Pool(p).initialize(_sqrtPX96(price, t0, t1));
+        poolSpot[p] = price;
+        return p;
     }
 
-    /// @dev Parse a simple two-column CSV (date,price_usd) into uint256[] of 6-dec prices.
+    function _seedPair(address pool, uint256 amt0, uint256 amt1) internal {
+        address t0 = IUniswapV3Pool(pool).token0();
+        address t1 = IUniswapV3Pool(pool).token1();
+        SimToken(t0).mint(pool, amt0);
+        SimToken(t1).mint(pool, amt1);
+    }
+
+    function _sqrtPX96(uint256 price6d, address /*t0*/, address t1) internal view returns (uint160) {
+        // price6d = USDC-per-whole-token in 6-dec (e.g. 2600e6 for $2600).
+        // token0 = stablecoin (6d), token1 = RWA token (d1 decimals).
+        // V3 price = amount1_raw / amount0_raw = 10^d1 / price6d
+        uint256 d1 = ERC20(t1).decimals();
+        uint256 ratioX192 = Math.mulDiv(10 ** d1, 1 << 192, price6d);
+        return uint160(Math.sqrt(ratioX192));
+    }
+
+    // ── spot price ──────────────────────────────────────────────────────
+
+    function _spot(address pool) internal view returns (uint256) {
+        (uint160 sqrtP,,,,,,) = IUniswapV3Pool(pool).slot0();
+        if (sqrtP == 0) return 0;
+        uint256 pX96 = uint256(sqrtP) * uint256(sqrtP);
+        uint256 d1 = ERC20(IUniswapV3Pool(pool).token1()).decimals();
+        // USDC-per-token in 6-dec: token1_raw * 2^192 / sqrtP^2 = 10^d1 * 2^192 / pX96
+        return Math.mulDiv(1 << 192, 10 ** d1, pX96);
+    }
+
+    // ── CSV loading ─────────────────────────────────────────────────────
+
+    function _loadRefPrices() internal {
+        _parseCsv(vm.readFile("test/stabilizer-routing-dsv4/prices/PAXG.csv"),  refPaxg);
+        _parseCsv(vm.readFile("test/stabilizer-routing-dsv4/prices/cbBTC.csv"), refCbbtc);
+        _parseCsv(vm.readFile("test/stabilizer-routing-dsv4/prices/AOIL.csv"),  refAoil);
+    }
+
     function _parseCsv(string memory csv, uint256[] storage out) internal {
         bytes memory data = bytes(csv);
         uint256 i = 0;
-
-        // Skip header line.
-        while (i < data.length && data[i] != '\n') i++;
-        i++; // past newline
-
+        while (i < data.length && data[i] != '\n') i++; i++;
         while (i < data.length) {
-            // Skip date column (until comma).
-            while (i < data.length && data[i] != ',') i++;
-            i++; // past comma
-
-            // Parse price: collect integer part, then optional fractional part.
+            while (i < data.length && data[i] != ',') i++; i++;
             uint256 intPart = 0;
             while (i < data.length && data[i] >= '0' && data[i] <= '9') {
-                intPart = intPart * 10 + uint256(uint8(data[i]) - 48);
-                i++;
+                intPart = intPart * 10 + uint256(uint8(data[i]) - 48); i++;
             }
-            uint256 fracPart = 0;
-            uint256 fracDigits = 0;
+            uint256 fracPart = 0; uint256 fDigits = 0;
             if (i < data.length && data[i] == '.') {
-                i++; // skip dot
+                i++;
                 while (i < data.length && data[i] >= '0' && data[i] <= '9') {
-                    fracPart = fracPart * 10 + uint256(uint8(data[i]) - 48);
-                    fracDigits++;
-                    i++;
+                    fracPart = fracPart * 10 + uint256(uint8(data[i]) - 48); fDigits++; i++;
                 }
             }
-            // Normalize to 6 decimals.
             uint256 price = intPart * 1e6;
-            if (fracDigits > 0) {
-                price += fracPart * (10 ** (6 - fracDigits));
-            }
+            if (fDigits > 0) price += fracPart * (10 ** (6 - fDigits));
             out.push(price);
-
-            // Skip to next line.
             while (i < data.length && data[i] != '\n') i++;
-            if (i < data.length) i++; // past newline
+            if (i < data.length) i++;
         }
     }
 
     // ── simulation ──────────────────────────────────────────────────────
 
-    function test_stabilizer_routing_12months() public {
-        uint256 snapEvery = 7; // weekly
+    function test_stabilizer_routing() public {
+        uint256 snapEvery = 7;
 
         for (uint256 day = 0; day < N_DAYS; day++) {
             vm.warp(block.timestamp + DAY_SECS);
 
-            uint256 refP = refPaxg[day];
-            uint256 refC = refCbbtc[day];
-            uint256 refA = refAoil[day];
+            uint256 rP = _ref(refPaxg, day);
+            uint256 rC = _ref(refCbbtc, day);
+            uint256 rA = _ref(refAoil, day);
 
             // Multi-round arbitrage.
             for (uint256 round = 0; round < MAX_ROUNDS; round++) {
                 bool any = false;
-
-                // Randomize agent order each round.
-                uint256 seed = uint256(keccak256(abi.encode(day, round)));
-                uint256[] memory order = _shuffle(seed);
-
+                uint256[] memory order = _shuffle(uint256(keccak256(abi.encode(day, round))));
                 for (uint256 ai = 0; ai < N_AGENTS; ai++) {
                     uint256 idx = order[ai];
-                    if (_arbPaxg(idx, refP))   any = true;
-                    if (_arbCbbtc(idx, refC))  any = true;
-                    if (_arbAoil(idx, refA))   any = true;
+                    if (_arb(idx, address(paxg),  paxgUsdc,  paxgBuck,  rP)) any = true;
+                    if (_arb(idx, address(cbbtc), cbbtcUsdc, cbbtcBuck, rC)) any = true;
+                    if (_arb(idx, address(aoil),  aoilUsdc,  aoilBuck,  rA)) any = true;
                 }
                 if (!any) break;
             }
 
-            // Drift pool spots toward reference by a random amount (simulating
-            // external non-arb trade flow that imperfectly tracks reference).
-            spotPaxgUsdc  = _driftToward(spotPaxgUsdc,  refP, 100);  // 1% daily drift
-            spotCbbtcUsdc = _driftToward(spotCbbtcUsdc, refC, 100);
-            spotAoilUsdc  = _driftToward(spotAoilUsdc,  refA, 100);
+            // Daily drift toward reference.
+            _drift(paxgUsdc, rP); _drift(cbbtcUsdc, rC); _drift(aoilUsdc, rA);
+            _drift(buckUsdc, 1e18);
 
-            if (day % snapEvery == 0 || day == N_DAYS - 1) {
-                _snap(day);
-            }
+            if (day % snapEvery == 0 || day == N_DAYS - 1) _snap(day);
         }
-
         _writeJson();
     }
 
-    function _driftToward(uint256 spot, uint256 ref, uint256 bpPerDay) internal returns (uint256) {
-        uint256 seed = uint256(keccak256(abi.encode(spot, ref, block.timestamp)));
-        int256 delta = int256(ref) - int256(spot);
-        // Move a random fraction toward ref, scaled by bpPerDay.
-        int256 move = delta * int256(bpPerDay) / 10000;
-        // Add noise: +/- 20% of the move.
-        int256 noise = move * int256(int8(uint8(seed % 41)) - 20) / 100;
-        int256 newSpot = int256(spot) + move + noise;
-        return newSpot > 0 ? uint256(newSpot) : spot;
+    function _ref(uint256[] storage arr, uint256 day) internal view returns (uint256) {
+        return day < arr.length ? arr[day] : arr[arr.length - 1];
+    }
+
+    function _arb(uint256 agIdx, address token, address upool, address bpool, uint256 ref)
+        internal returns (bool)
+    {
+        Agent storage ag = agents[agIdx];
+        uint256 spot = _spot(upool);
+        if (spot == 0 || ref == 0) return false;
+        uint256 edgeBp = _edgeBp(spot, ref);
+        if (edgeBp < ENTRY_BP) return false;
+
+        int256 edge = int256(spot) - int256(ref);
+        uint256 tokBal = token == address(paxg) ? ag.paxg
+            : (token == address(cbbtc) ? ag.cbbtc : ag.aoil);
+
+        uint256 liq = 1_000_000e6;
+        if (edge < 0) {
+            // Buy token (it's cheap).
+            if (ag.usdc < 1e4) return false;
+            uint256 usdcSpent = ag.usdc * edgeBp * AGGR_BP / 100000000;
+            if (usdcSpent > ag.usdc / 4) usdcSpent = ag.usdc / 4;
+            if (usdcSpent < 1e4) return false;
+            uint256 tokOut = usdcSpent * 1e18 / spot;
+            ag.usdc -= usdcSpent;
+            _tokAdd(token, agIdx, tokOut);
+            poolSpot[upool] = spot + (ref - spot) * usdcSpent / (usdcSpent + liq);
+        } else {
+            // Sell token (it's expensive).
+            if (tokBal == 0) return false;
+            uint256 tokVal = tokBal * spot / 1e18;
+            uint256 usdcGain = tokVal * edgeBp * AGGR_BP / 100000000;
+            if (usdcGain > tokVal / 4) usdcGain = tokVal / 4;
+            if (usdcGain < 1e4) return false;
+            uint256 tokSold = usdcGain * 1e18 / spot;
+            if (tokSold > tokBal) tokSold = tokBal;
+            _tokSub(token, agIdx, tokSold);
+            ag.usdc += usdcGain;
+            poolSpot[upool] = spot - (spot - ref) * usdcGain / (usdcGain + liq);
+        }
+        _writeSpot(upool, poolSpot[upool]);
+        return true;
     }
 
     function _edgeBp(uint256 spot, uint256 ref) internal pure returns (uint256) {
@@ -200,69 +270,32 @@ contract StabilizerRoutingTest is Test {
         return uint256(e > 0 ? e : -e) * 10000 / ref;
     }
 
-    function _arbPaxg(uint256 agIdx, uint256 ref) internal returns (bool) {
-        return _arb(agIdx, ref, 0);
-    }
-    function _arbCbbtc(uint256 agIdx, uint256 ref) internal returns (bool) {
-        return _arb(agIdx, ref, 1);
-    }
-    function _arbAoil(uint256 agIdx, uint256 ref) internal returns (bool) {
-        return _arb(agIdx, ref, 2);
+    function _tokAdd(address t, uint256 agIdx, uint256 amt) internal {
+        if (t == address(paxg)) agents[agIdx].paxg += amt;
+        else if (t == address(cbbtc)) agents[agIdx].cbbtc += amt;
+        else agents[agIdx].aoil += amt;
     }
 
-    function _arb(uint256 agIdx, uint256 refPrice, uint256 which)
-        internal returns (bool)
-    {
-        Agent storage ag = agents[agIdx];
-        uint256 spot;
-        if (which == 0) spot = spotPaxgUsdc;
-        else if (which == 1) spot = spotCbbtcUsdc;
-        else spot = spotAoilUsdc;
-        if (spot == 0 || refPrice == 0) return false;
+    function _tokSub(address t, uint256 agIdx, uint256 amt) internal {
+        if (t == address(paxg)) agents[agIdx].paxg -= amt;
+        else if (t == address(cbbtc)) agents[agIdx].cbbtc -= amt;
+        else agents[agIdx].aoil -= amt;
+    }
 
-        uint256 edgeBp = _edgeBp(spot, refPrice);
-        if (edgeBp < ENTRY_BP) return false;
+    function _writeSpot(address pool, uint256 price) internal {
+        address t0 = IUniswapV3Pool(pool).token0();
+        uint160 sqrtP = _sqrtPX96(price, t0, IUniswapV3Pool(pool).token1());
+        vm.store(pool, bytes32(uint256(0)), bytes32(uint256(sqrtP)));
+    }
 
-        uint256 tokenBal;
-        if (which == 0) tokenBal = ag.paxg;
-        else if (which == 1) tokenBal = ag.cbbtc;
-        else tokenBal = ag.aoil;
-
-        int256 edge = int256(spot) - int256(refPrice);
-        uint256 liq = (which == 0) ? 100000e6 : (which == 1 ? 200000e6 : 50000e6);
-
-        if (edge < 0) {
-            // Buy: token is cheap.
-            if (ag.usdc < 1e4) return false;
-            uint256 usdcSpent = ag.usdc * edgeBp * AGGRESSION_BP / 100000000;
-            if (usdcSpent > ag.usdc / 4) usdcSpent = ag.usdc / 4;
-            if (usdcSpent < 1e4) return false;
-            uint256 tokenOut = usdcSpent * 1e18 / spot;
-            ag.usdc -= usdcSpent;
-            if (which == 0) ag.paxg += tokenOut;
-            else if (which == 1) ag.cbbtc += tokenOut;
-            else ag.aoil += tokenOut;
-            uint256 newSpot = spot + (refPrice - spot) * usdcSpent / (usdcSpent + liq);
-            if (which == 0) spotPaxgUsdc = newSpot;
-            else if (which == 1) spotCbbtcUsdc = newSpot;
-            else spotAoilUsdc = newSpot;
-        } else {
-            // Sell: token is expensive.
-            if (tokenBal == 0) return false;
-            uint256 tokSold = tokenBal * edgeBp * AGGRESSION_BP / 100000000;
-            if (tokSold > tokenBal / 4) tokSold = tokenBal / 4;
-            if (tokSold == 0) return false;
-            uint256 usdcOut = tokSold * spot / 1e18;
-            if (which == 0) ag.paxg -= tokSold;
-            else if (which == 1) ag.cbbtc -= tokSold;
-            else ag.aoil -= tokSold;
-            ag.usdc += usdcOut;
-            uint256 newSpot = spot - (spot - refPrice) * tokSold / (tokSold + liq);
-            if (which == 0) spotPaxgUsdc = newSpot;
-            else if (which == 1) spotCbbtcUsdc = newSpot;
-            else spotAoilUsdc = newSpot;
-        }
-        return true;
+    function _drift(address pool, uint256 ref) internal {
+        uint256 spot = poolSpot[pool];
+        if (spot == 0) return;
+        uint256 seed = uint256(keccak256(abi.encode(spot, ref, block.timestamp)));
+        int256 delta = int256(ref) - int256(spot);
+        int256 noise = delta * int256(int8(uint8(seed % 21)) - 10) / 100;
+        int256 ns = int256(spot) + delta * 100 / 10000 + noise;
+        if (ns > 0) { poolSpot[pool] = uint256(ns); _writeSpot(pool, uint256(ns)); }
     }
 
     function _shuffle(uint256 seed) internal pure returns (uint256[] memory) {
@@ -271,38 +304,23 @@ contract StabilizerRoutingTest is Test {
         uint256 r = seed;
         for (uint256 i = N_AGENTS - 1; i > 0; i--) {
             r = uint256(keccak256(abi.encode(r)));
-            uint256 j = r % (i + 1);
-            (arr[i], arr[j]) = (arr[j], arr[i]);
+            (arr[i], arr[r % (i + 1)]) = (arr[r % (i + 1)], arr[i]);
         }
         return arr;
     }
 
-    // ── snapshot / JSON ─────────────────────────────────────────────────
-
     function _snap(uint256 day) internal {
         sDay.push(day);
-        sPaxgSpot.push(spotPaxgUsdc);   sPaxgRef.push(refPaxg[day]);
-        sCbbtcSpot.push(spotCbbtcUsdc);  sCbbtcRef.push(refCbbtc[day]);
-        sAoilSpot.push(spotAoilUsdc);    sAoilRef.push(refAoil[day]);
-        uint256 totalUsdc = 0;
-        for (uint256 i = 0; i < N_AGENTS; i++) {
-            totalUsdc += agents[i].usdc;
-        }
-        sAgentUsdc.push(totalUsdc);
+        sPaxgS.push(poolSpot[paxgUsdc]);   sPaxgR.push(_ref(refPaxg, day));
+        sCbbtcS.push(poolSpot[cbbtcUsdc]);  sCbbtcR.push(_ref(refCbbtc, day));
+        sAoilS.push(poolSpot[aoilUsdc]);    sAoilR.push(_ref(refAoil, day));
     }
 
     function _writeJson() internal {
         string memory json = string.concat(
-            "{",
-            _ja("day",        sDay),       ",",
-            _ja("paxg_spot",  sPaxgSpot),  ",",
-            _ja("paxg_ref",   sPaxgRef),   ",",
-            _ja("cbbtc_spot", sCbbtcSpot), ",",
-            _ja("cbbtc_ref",  sCbbtcRef),  ",",
-            _ja("aoil_spot",  sAoilSpot),  ",",
-            _ja("aoil_ref",   sAoilRef),   ",",
-            _ja("agent_usdc", sAgentUsdc),
-            "}"
+            "{", _ja("day",sDay),",",_ja("paxg_s",sPaxgS),",",_ja("paxg_r",sPaxgR),",",
+            _ja("cbbtc_s",sCbbtcS),",",_ja("cbbtc_r",sCbbtcR),",",
+            _ja("aoil_s",sAoilS),",",_ja("aoil_r",sAoilR),"}"
         );
         vm.writeFile("test/stabilizer-routing-dsv4/snapshot.json", json);
     }
