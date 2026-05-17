@@ -380,15 +380,15 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
         uint256 inX = _cap(poolBuck[x], address(tok[x]), ag[a].bal[x]);
         if (inX == 0) return false;
 
-        // Fee-aware first-order quotes of both routes for x -> y.
+        // Exact reserve-based quotes of both routes for x -> y.
         // Route A: x -> USDC -> y  (BUCK-free, market-anchored reference).
-        uint256 a1 = _feeAdj(_spot(poolUsdc[x], address(tok[x]), address(usdc),  uint128(inX)), FEE_USDC);
+        uint256 a1 = _exactQuote(poolUsdc[x], address(tok[x]), address(usdc), inX, FEE_USDC);
         uint256 outA = a1 == 0 ? 0
-            : _feeAdj(_spot(poolUsdc[y], address(usdc), address(tok[y]), uint128(a1)), FEE_USDC);
+            : _exactQuote(poolUsdc[y], address(usdc), address(tok[y]), a1, FEE_USDC);
         // Route B: x -> BUCK -> y  (the indirect TOKEN->BUCK->TOKEN route).
-        uint256 b1 = _feeAdj(_spot(poolBuck[x], address(tok[x]), address(buck),  uint128(inX)), FEE_BUCK);
+        uint256 b1 = _exactQuote(poolBuck[x], address(tok[x]), address(buck), inX, FEE_BUCK);
         uint256 outB = b1 == 0 ? 0
-            : _feeAdj(_spot(poolBuck[y], address(buck), address(tok[y]), uint128(b1)), FEE_BUCK);
+            : _exactQuote(poolBuck[y], address(buck), address(tok[y]), b1, FEE_BUCK);
         if (outA == 0 || outB == 0) return false;
 
         // Only route through BUCK when it is strictly the better execution
@@ -415,10 +415,10 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
         {
             uint256 inU = _cap(poolUbk, address(usdc), ag[a].usdc);
             if (inU > 0) {
-                uint256 dA = _feeAdj(_spot(poolUsdc[y], address(usdc), address(tok[y]), uint128(inU)), FEE_USDC);
-                uint256 q1 = _feeAdj(_spot(poolUbk, address(usdc), address(buck), uint128(inU)), FEE_BUCK);
+                uint256 dA = _exactQuote(poolUsdc[y], address(usdc), address(tok[y]), inU, FEE_USDC);
+                uint256 q1 = _exactQuote(poolUbk, address(usdc), address(buck), inU, FEE_BUCK);
                 uint256 dB = q1 == 0 ? 0
-                    : _feeAdj(_spot(poolBuck[y], address(buck), address(tok[y]), uint128(q1)), FEE_BUCK);
+                    : _exactQuote(poolBuck[y], address(buck), address(tok[y]), q1, FEE_BUCK);
                 if (dA > 0 && dB > dA + (dA * CROSS_MARGIN_BP) / BP) {
                     uint256 out = _ur(
                         _path3(address(usdc), FEE_BUCK, address(buck), FEE_BUCK, address(tok[y])),
@@ -435,10 +435,10 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
         {
             uint256 inY = _cap(poolBuck[y], address(tok[y]), ag[a].bal[y]);
             if (inY > 0) {
-                uint256 dA = _feeAdj(_spot(poolUsdc[y], address(tok[y]), address(usdc), uint128(inY)), FEE_USDC);
-                uint256 q1 = _feeAdj(_spot(poolBuck[y], address(tok[y]), address(buck), uint128(inY)), FEE_BUCK);
+                uint256 dA = _exactQuote(poolUsdc[y], address(tok[y]), address(usdc), inY, FEE_USDC);
+                uint256 q1 = _exactQuote(poolBuck[y], address(tok[y]), address(buck), inY, FEE_BUCK);
                 uint256 dB = q1 == 0 ? 0
-                    : _feeAdj(_spot(poolUbk, address(buck), address(usdc), uint128(q1)), FEE_BUCK);
+                    : _exactQuote(poolUbk, address(buck), address(usdc), q1, FEE_BUCK);
                 if (dA > 0 && dB > dA + (dA * CROSS_MARGIN_BP) / BP) {
                     uint256 out = _ur(
                         _path3(address(tok[y]), FEE_BUCK, address(buck), FEE_BUCK, address(usdc)),
@@ -505,6 +505,18 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
         return c < avail ? c : avail;
     }
 
+    /// @dev Exact V3 quote: output received for `amtIn` of `tokenIn`
+    ///      swapped into `pool` for `tokenOut`, net of `fee`.
+    ///      Uses getQuoteAtTick (same V3 math as the actual swap) then
+    ///      applies the pool fee exactly once.
+    function _exactQuote(address pool, address tokenIn, address tokenOut,
+                         uint256 amtIn, uint24 fee)
+        internal view returns (uint256)
+    {
+        if (amtIn > type(uint128).max) return 0;
+        uint256 raw = _spot(pool, tokenIn, tokenOut, uint128(amtIn));
+        return _feeAdj(raw, fee);
+    }
 
     /// @dev Discount a hop output by the pool's swap fee (V3 fee is in
     ///      hundredths of a bip; denominator 1e6).
@@ -642,7 +654,7 @@ contract RoutingSimTest is Test, UniswapV3Fixture {
             string memory path = string.concat(
                 "test/stabilizer-routing-op47/", csvF[t]
             );
-            uint256[] memory series = new uint256[](512);
+            uint256[] memory series = new uint256[](1024);
             uint256 n;
             vm.readLine(path);                              // skip header
             while (true) {

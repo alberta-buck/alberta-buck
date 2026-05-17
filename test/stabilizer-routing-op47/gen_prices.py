@@ -1,42 +1,35 @@
 #!/usr/bin/env python3
-"""Generate three daily close-price CSV vectors for the routing simulation.
+"""Generate daily close-price CSV vectors for the routing simulation.
 
-PAXG  (gold, ~troy oz USD)   18-dec token in the sim
-cbBTC (bitcoin, USD)          8-dec token in the sim
-AOIL  ("Alberta Oil", USD/bbl) 18-dec synthetic token in the sim
+PAXG  (gold, USD/troy oz)   18-dec token
+cbBTC (bitcoin, USD)         8-dec token
+AOIL  ("Alberta Oil", USD/bbl) 18-dec synthetic token
 
-Deterministic geometric-Brownian-motion-ish random walks (fixed seed) so the
-Forge fixture and the plot test always see the same series.  One row per day:
-
-    day,close_usd
-
-`close_usd` is an integer number of micro-dollars (1e6 == $1.00), matching the
-6-dec USDC accounting used on-chain so the fixture parses a plain uint with no
-float handling.
+Deterministic geometric-Brownian-motion walks (fixed seed).
+One row per day: day,close_usd_micro
+close_usd_micro is integer micro-dollars (1e6 == $1.00).
 """
 
-import csv
-import math
-import random
+import csv, math, random
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-DAYS = 365  # one-year daily horizon (bounded; the multi-year run is the
-            # documented Python-driver extension, out of scope here)
+DAYS = 730  # 2-year daily horizon
 
-# (filename, start price USD, annual drift, annual vol)
 SERIES = [
-    ("paxg.csv",  2000.0, 0.06, 0.16),  # gold
-    ("cbbtc.csv", 60000.0, 0.20, 0.55),  # bitcoin
-    ("aoil.csv",  70.0, -0.02, 0.35),  # oil
+    # (filename, start USD, annual drift, annual vol, seed)
+    ("paxg.csv",   2600.0,  0.08, 0.16, 42),
+    ("cbbtc.csv", 65000.0,  0.15, 0.55, 43),
+    ("aoil.csv",     78.0,  0.02, 0.35, 44),
 ]
 
 USDC = 1_000_000  # 1e6 micro-dollars == $1.00
 
 
-def gen(start: float, mu: float, sigma: float, rng: random.Random):
-    dt = 1.0 / 365.0
+def gen(start: float, mu: float, sigma: float, seed: int):
+    rng = random.Random(seed)
+    dt = 1.0 / 365.25
     p = start
     out = [p]
     for _ in range(1, DAYS):
@@ -47,19 +40,20 @@ def gen(start: float, mu: float, sigma: float, rng: random.Random):
 
 
 def main():
-    rng = random.Random(0x42)  # fixed seed -- reproducible series
-    for fname, start, mu, sigma in SERIES:
-        prices = gen(start, mu, sigma, rng)
+    for fname, start, mu, sigma, seed in SERIES:
+        prices = gen(start, mu, sigma, seed)
         path = HERE / fname
         with path.open("w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["day", "close_usd_micro"])
             for day, px in enumerate(prices):
                 w.writerow([day, round(px * USDC)])
-        print(f"{fname}: {DAYS} rows, "
-              f"start ${prices[0]:,.2f} end ${prices[-1]:,.2f} "
-              f"min ${min(prices):,.2f} max ${max(prices):,.2f}")
+        print(f"  {fname}: {DAYS} rows "
+              f"${prices[0]:,.2f} -> ${prices[-1]:,.2f} "
+              f"[${min(prices):,.2f} .. ${max(prices):,.2f}]")
 
 
 if __name__ == "__main__":
+    print(f"Generating {DAYS}-day price CSVs:")
     main()
+    print("Done.")
