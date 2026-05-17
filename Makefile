@@ -153,6 +153,55 @@ plots:			plot-lifecycle plot-equilibrium plot-arb
 images:			vectors plots
 
 
+# ── Routing stabilizer simulation ─────────────────────────────────────
+#
+# Builds the Universal Router artifact, generates price CSVs, runs the
+# Forge test, and renders the plot.  The UR lives in a sub-project with
+# its own foundry.toml (solc 0.8.26, via_ir); we build it separately and
+# stage the artifact, then temporarily disable its foundry.toml during
+# the main project's forge test to avoid test-discovery interference.
+#
+#   make images-routing       # prices -> router -> test -> plot (full pipeline)
+#   make vector-routing       # just the forge test (after prices + router)
+#   make plot-routing         # just the Python plot
+#   make prices-routing       # regenerate price CSVs only
+
+ROUTING_DIR	= test/stabilizer-routing-op47
+ROUTING_PRICES	= $(ROUTING_DIR)/paxg.csv $(ROUTING_DIR)/cbbtc.csv $(ROUTING_DIR)/aoil.csv
+ROUTING_ARTIFACT = $(ROUTING_DIR)/artifacts/UniversalRouter.json
+ROUTING_VECTOR	= test/vectors/routing-sim.json
+ROUTING_PLOT_SCRIPT = $(ROUTING_DIR)/test_routing_sim_plot.py
+ROUTING_IMAGE	= images/routing-sim.png
+
+prices-routing:	$(ROUTING_PRICES)
+
+$(ROUTING_PRICES): $(ROUTING_DIR)/gen_prices.py
+	python3 $<
+
+$(ROUTING_ARTIFACT):
+	( cd lib/universal-router && FORK_URL=http://localhost forge build --skip test --skip script )
+	mkdir -p $(ROUTING_DIR)/artifacts
+	cp lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json $(ROUTING_ARTIFACT)
+
+vector-routing:	$(ROUTING_PRICES) $(ROUTING_ARTIFACT)
+	@test -f lib/universal-router/foundry.toml.bak || \
+		cp lib/universal-router/foundry.toml lib/universal-router/foundry.toml.bak 2>/dev/null || true
+	cp lib/universal-router/foundry.toml lib/universal-router/foundry.toml.bak 2>/dev/null; \
+	touch lib/universal-router/foundry.toml 2>/dev/null; \
+	rm lib/universal-router/foundry.toml 2>/dev/null || true; \
+	forge test $(FORGE_OPTS) --match-contract RoutingSimTest --skip 'test/stabilizer-routing-dsv4/*' -vv; \
+	EX=$$?; mv lib/universal-router/foundry.toml.bak lib/universal-router/foundry.toml 2>/dev/null || true; \
+	exit $$EX
+
+plot-routing:	$(ROUTING_VECTOR)
+	python -m pytest $(ROUTING_PLOT_SCRIPT) -v -s
+
+$(ROUTING_IMAGE): $(ROUTING_VECTOR)
+	python -m pytest $(ROUTING_PLOT_SCRIPT) -v -s
+
+images-routing:	prices-routing $(ROUTING_ARTIFACT) vector-routing plot-routing
+
+
 # ── Dependencies ─────────────────────────────────────────────────────
 
 install:
