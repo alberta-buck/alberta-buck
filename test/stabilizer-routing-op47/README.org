@@ -1,0 +1,157 @@
+#+title: Stabilizer Routing Simulation (op47)
+#+author: Perry Kundert
+#+date: 2026-05-17
+
+Implementation of the externally-driven routing simulation described in
+=alberta-buck-ethereum-routing.org=, built "as simply as possible" against
+the *real* =BuckKControllerDirect= / =Buck= / =BuckBasket= / =IdentityRegistry=
+stack and the *real* =lib/universal-router= Universal Router.
+
+* Goal
+
+Show that *BUCK-unaware, anonymous arbitrage agents* -- who only know
+market prices and the quoted prices of every Uniswap route -- will, by
+ordinary profit-seeking AMM routing, drive both the direct =TOKEN/USDC=
+pools and the indirect =TOKEN -> BUCK -> TOKEN= pools toward equilibrium
+with the real-world (CSV) market prices.
+
+* Decisions / Findings (running log)
+
+** Universal Router compile spike -- RESOLVED (use the real router)
+
+The org doc names the V4-era Universal Router compile as the single
+biggest practicality risk and carries a =SimSwapper= fallback for it.
+
+Spike result: =lib/universal-router= compiles *cleanly standalone*:
+
+#+begin_example
+$ (cd lib/universal-router && forge build --force --skip test --skip script)
+Compiling 91 files with Solc 0.8.26
+Compiling 117 files with Solc 0.8.26
+Compiler run successful!
+-> lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json
+#+end_example
+
+Therefore the =SimSwapper= fallback is *not* needed.  We deploy the
+real =UniversalRouter= from its compiled artifact via =vm.deployCode=,
+exactly as the repo already deploys =UniswapV3Factory= from =out/=.
+
+** Architecture: Forge fixture, not the Python/anvil driver
+
+The org doc proposes a Python+anvil+web3 external driver because a Forge
+test "cannot" do a real multi-year run.  For "as simply as possible" we
+keep the *proven repo pattern* instead:
+
+  Forge simulation fixture  ->  test/vectors/*.json  ->  Python plot test
+
+This is the established =SimulationFixture.sol= / =BuckEquilibriumScenario=
+-> =equilibrium-scenario.json= -> =test_equilibrium_plot.py= pipeline.
+=foundry.toml= is already tuned for it (u64 gas limit, 1 GiB memory).
+
+Horizon is a bounded daily series (months..1yr), not multi-year; the
+multi-year Python driver remains the documented extension, out of scope
+here.
+
+** The "anonymous non-BUCK-aware agent" constraint -- pre-fund route
+
+Real =Buck.sol= gates *every* transfer on =isVerified(from)= AND
+=isVerified(to)= (+ CP receipt fragments for non-public parties).  An
+anonymous codeless EOA can therefore never itself hold or move BUCK.
+
+Faithful resolution (the org doc's pre-fund route, =payerIsUser=false=):
+
+  - Agents hold and trade *only* USDC / PAXG / cbBTC / AOIL.  They are
+    codeless EOAs, never identity-bound, never a BUCK =from=/=to=.
+  - On an indirect route =PAXG -> BUCK -> cbBTC=, the *Universal Router*
+    is the sole BUCK counterparty: it custodies the intermediate BUCK
+    between the two V3 legs.  Router + every BUCK pool + BuckBasket are
+    =bindContract=-bound Public+Carrying at deploy (per the org doc's
+    Deployment section and =BuckBasket.t.sol::setUp=).
+  - Net: the agent supplies a non-BUCK token and receives a non-BUCK
+    token; BUCK transit is entirely router-internal.  The agent remains
+    anonymous and BUCK-unaware while still using the TOKEN/BUCK pools.
+
+This is the mechanism that makes "real BuckKControllerDirect, real
+TOKEN/BUCK pools, anonymous routers" testable at all.
+
+* Topology
+
+Seven Uniswap V3 pools (all V3 -- BuckBasket is V3-hardcoded):
+
+  - Truth pools: PAXG/USDC, cbBTC/USDC, AOIL/USDC, BUCK/USDC
+  - Basket pools (TOKEN/BUCK x3): PAXG/BUCK, cbBTC/BUCK, AOIL/BUCK
+    created + seeded via =BuckBasket.addBasketToken= + a direct-mint
+    deposit so the BUCK-routed graph is live from day 0.
+
+* Agent model
+
+  - All agents learn the day's reference (CSV close) simultaneously.
+  - Trade execution is *serialized* in a randomized per-day order; an
+    agent re-quotes after every fill, so earlier agents' fills are
+    slippage the later ones must observe (hence each caps its size).
+  - Each agent runs multiple rounds/day: quote all routes (direct
+    TOKEN/USDC and indirect TOKEN->BUCK->TOKEN), pick the most
+    profitable that moves a pool toward reference, execute a
+    size-limited trade via the Universal Router, re-quote, repeat until
+    the marginal edge no longer clears its risk/reward threshold.
+
+* Implementation notes (gotchas hit + fixes)
+
+  - *Receipt NFT*: =BuckBasket.depositToken= safe-mints a receipt to the
+    depositor; the test contract had to implement =onERC721Received=.
+  - *BUCK is 6-dec, uint80-capped* (=BuckTypes.MAX_BALANCE ~= 1.2e24
+    raw=).  Real BTC/gold dollar magnitudes overflow the minted-BUCK
+    quantity.  Convergence is scale-invariant, so all monetary
+    magnitudes are divided by =PRICE_SCALE= (units unchanged).
+  - *Oracle pokes*: only the TOKEN/USDC pools have a fixture-owned
+    position, so only those can be =burn(0)=-poked.  TOKEN/BUCK pools
+    are BuckBasket-owned; =_readPoolPrice= falls back to slot0 spot on a
+    cold basket pool, so they need no pre-warm.
+  - *UR V3 pool address*: =UNISWAP_V3_POOL_INIT_CODE_HASH= is
+    constructor-configurable; we pass
+    =keccak256(vm.getCode("UniswapV3Pool.sol:UniswapV3Pool"))= so UR's
+    CREATE2 pool-address check matches this repo's locally compiled
+    v3-core (no hardcoded mainnet hash).
+
+* Key finding: the BUCK absolute peg is NOT a routing result
+
+Empirically (and provably): an arbitrageur that never takes a *net BUCK
+position* (the definition of "BUCK-unaware" here -- it only ever holds
+USDC/PAXG/cbBTC/AOIL; BUCK is router-internal) can pin the *relative*
+structure of the TOKEN/BUCK pools but *cannot* pin BUCK's absolute USD
+level.  Any closed route a BUCK-neutral agent can execute enters and
+exits BUCK, so a uniform rescaling of every TOKEN/BUCK price leaves
+every such route's P&L invariant -- a gauge freedom.  A blind
+triangular =USDC->x->BUCK->y->USDC= with slot0-based detection is worse
+than neutral: on thin BUCK pools the realized 4-hop slippage diverges
+from the spot estimate, so it fires repeatedly at a loss and *drains*
+the pools (observed: cbBTC/BUCK and AOIL/BUCK collapsed ~96-99%).
+
+This is the correct economic result, not a bug: in the real system
+BUCK's $1 peg is held by =BuckKControllerDirect= + the BuckBasket
+mint/redeem arbitrage (the org doc's DirectMintArber), i.e. by actors
+who *do* take a BUCK position against the basket's fair value.  The
+BUCK-unaware routing agents' job is the *relative* one: keep each
+TOKEN/BUCK pool consistent with the market-pinned TOKEN/USDC pools.
+
+Design consequence (implemented): (1) the indirect mechanism is
+best-execution token<->token routing -- an agent routes a trade it
+wants anyway through BUCK only when that path quotes better, which by
+construction moves the BUCK pools *toward* parity and is non-destructive
+(every BUCK-routed fill is a chosen profitable one); (2) the absolute
+anchor is a small daily BuckBasket repeg by the bound LP (the real
+peg mechanism), distinct from the anonymous routing agents.
+
+* Files
+
+  - =gen_prices.py=        -- deterministic daily CSV generator
+  - ={paxg,cbbtc,aoil}.csv= -- generated price vectors
+  - =RoutingSim.t.sol=     -- the Forge simulation (real Buck stack + UR)
+  - =test_routing_sim_plot.py= -> =images/routing-sim.png=
+
+* Status
+
+  - [X] UR compile spike (resolved: real router usable)
+  - [X] CSV vectors (gold/btc/oil daily closes)
+  - [~] Forge routing-sim fixture + test (debugging UR execution)
+  - [X] Python plot test (written; pending data)
