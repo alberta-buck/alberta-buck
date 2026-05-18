@@ -38,6 +38,7 @@ endif
 .PHONY: vectors plots images
 .PHONY: vector-lifecycle vector-equilibrium vector-arb
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
+.PHONY: sim sim-build sim-run sim-test sim-plot
 
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -200,6 +201,44 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 	python -m pytest $(ROUTING_PLOT_SCRIPT) -v -s
 
 images-routing:	prices-routing $(ROUTING_ARTIFACT) vector-routing plot-routing
+
+
+# ── Externally-driven sim (anvil + web3.py) ──────────────────────────
+#
+# The faithful org-doc architecture: a Python driver owns the timeline
+# and the agents; anvil hosts the real BuckKControllerDirect / Buck /
+# BuckBasket / IdentityRegistry stack + real Uniswap V3 + Universal
+# Router.  EOA agents get REAL cryptographic IdentityRegistry identities.
+#
+#   make sim                # full pipeline: build -> run -> plot
+#   make sim-build          # emit SimLP + stack artifacts (+ UR artifact)
+#   make sim-run            # run the routing scenario (SIM_DAYS=120)
+#   make sim-test           # the pytest smoke wrapper
+#   make sim-plot           # render images/routing-sim.png from the JSON
+#
+# Override horizon:  make sim-run SIM_DAYS=365 SIM_TICKS=4
+
+SIM_DAYS	?= 120
+SIM_TICKS	?= 4
+SIM_PKG		= alberta_buck.sim
+SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
+
+# SimLP + Direct-stack artifacts.  Scoped build skips re-compiling the
+# 0.7.6 v3-core trigger (incompatible with the project's via_ir); the
+# cached v3 artifacts are reused as-is.
+sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES)
+	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
+
+sim-run:	sim-build
+	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+
+sim-test:	sim-build
+	python -m pytest $(SIM_TEST) -v -s
+
+sim-plot:	$(ROUTING_VECTOR)
+	python -m pytest $(ROUTING_PLOT_SCRIPT) -v -s
+
+sim:		sim-run sim-plot
 
 
 # ── Dependencies ─────────────────────────────────────────────────────
