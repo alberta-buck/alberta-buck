@@ -48,6 +48,7 @@ def test_routing_sim_web3():
 
     assert s["all_eoa_verified"], "an EOA agent failed real registration"
     assert s["cycle_trades"] > 0, "BUCK pools never entered routing"
+    assert s["ub_trades"] > 0, "the floating BUCK/USDC pool was never routed"
     assert s["direct_trades"] > 0, "market maker never acted"
     # Lenient: one token is snapped per day at a random tick; arbs propagate.
     for i, t in enumerate(s["tokens"]):

@@ -17,7 +17,9 @@ from web3 import Web3
 
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.chain import Chain, load_artifact
-from alberta_buck.sim.router import sqrt_price_x96, full_range_ticks
+from alberta_buck.sim.router import (
+    sqrt_price_x96, full_range_ticks, MIN_SQRT_RATIO, MAX_SQRT_RATIO,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 UR_ARTIFACT = "test/stabilizer-routing-op47/artifacts/UniversalRouter.json"
@@ -49,6 +51,7 @@ class Deployment:
     dec: list = field(default_factory=list)         # decimals
     pool_usdc: list = field(default_factory=list)   # TOKEN/USDC addrs
     pool_buck: list = field(default_factory=list)   # TOKEN/BUCK addrs
+    pool_ub: str = ""                               # floating BUCK/USDC pool
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK
 
@@ -95,6 +98,10 @@ def deploy(chain: Chain, anvil, scenario, rng) -> Deployment:
 
     # --- SimLP (V3 mint/swap callback helper) ------------------------ #
     simlp = chain.deploy("SimLP", sol_file="SimLP")
+    # SimLP will custody BUCK to seed the floating BUCK/USDC pool, so it
+    # needs a public Identity (BUCK transfers are identity-gated).
+    chain.send(reg.functions.bindContract(
+        simlp.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
     big = 10 ** 30
     chain.send(usdc.functions.mint(simlp.address, big))
     for c in tok:
@@ -152,5 +159,41 @@ def deploy(chain: Chain, anvil, scenario, rng) -> Deployment:
         chain.send(c.functions.approve(basket.address, seed))
         chain.send(basket.functions.depositToken(c.address, seed, 0))
         d.pool_buck.append(pb)
+
+    # --- floating BUCK/USDC pool (gauge-breaking, not a peg) ---------- #
+    #
+    # An outsider-style, large, low-fee BUCK/USDC pool: established at the
+    # initial *instantaneous* BUCK basket valuation in USD and then left to
+    # float on supply/demand.  By construction every TOKEN/USDC and
+    # TOKEN/BUCK pool is seeded at the same p0, so 1 BUCK == 1 USDC (raw,
+    # scaled) at t0.  It exists only to be *used by routing* (it gives the
+    # BUCK-unaware router a direct USDC<->BUCK leg); its price is never
+    # controlled.  SimLP must hold BUCK to LP it, acquired by swapping a
+    # little cbBTC into the (BUCK-deepest) cbBTC/BUCK pool.
+    cb = 1  # cbBTC
+    pbc = w3.eth.contract(address=d.pool_buck[cb], abi=pool_v3_abi)
+    bt0 = pbc.functions.token0().call()
+    cb_in = 50_000 * 10 ** dec[cb]
+    zfo = tok[cb].address.lower() == bt0.lower()      # cbBTC is tokenIn
+    lim = (MIN_SQRT_RATIO + 1) if zfo else (MAX_SQRT_RATIO - 1)
+    chain.send(simlp.functions.swap(
+        d.pool_buck[cb], simlp.address, zfo, cb_in, lim,
+        pbc.functions.token0().call(), pbc.functions.token1().call()))
+    acquired = buck.functions.balanceOf(simlp.address).call()
+
+    chain.send(v3f.functions.createPool(buck.address, usdc.address, FEE_BUCK))
+    pub = v3f.functions.getPool(buck.address, usdc.address, FEE_BUCK).call()
+    poolU = w3.eth.contract(address=pub, abi=pool_v3_abi)
+    chain.send(poolU.functions.initialize(
+        sqrt_price_x96(buck.address, 1_000_000, usdc.address, 1_000_000)))
+    u0 = poolU.functions.token0().call()
+    u1 = poolU.functions.token1().call()
+    # Bind the pool BEFORE LPing it: the mint callback transfers BUCK into
+    # it, and BUCK transfers are identity-gated on the recipient.
+    chain.send(reg.functions.bindContract(
+        pub, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+    lo, hi = full_range_ticks(TICK_SPACING[FEE_BUCK])
+    chain.send(simlp.functions.mint(pub, lo, hi, max(1, acquired // 2), u0, u1))
+    d.pool_ub = pub
 
     return d

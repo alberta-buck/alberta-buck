@@ -53,6 +53,13 @@ class Snapshotter:
             ref.append(self.s.prices.ref(i, day))
             su.append(_implied(d, d.pool_usdc[i], tc, d.dec[i], d.usdc))
             sb.append(_implied(d, d.pool_buck[i], tc, d.dec[i], d.buck))
+        # Floating BUCK/USDC pool: implied USDC-micro per 1 BUCK.
+        buck_usd = 0
+        if getattr(d, "pool_ub", ""):
+            ru = _bal(d.usdc, d.pool_ub)
+            rb = _bal(d.buck, d.pool_ub)
+            if rb:
+                buck_usd = ru * 1_000_000 // rb
         try:
             bv = int(d.basket.functions.basketValueInBuck().call())
         except Exception:
@@ -71,6 +78,8 @@ class Snapshotter:
             "supply": int(d.buck.functions.totalSupply().call()),
             "directTrades": ctr["directTrades"],
             "cycleTrades": ctr["cycleTrades"],
+            "ubTrades": ctr.get("ubTrades", 0),
+            "buckUsd": buck_usd,
             "aggPnl": self.agg_value(agents, day) - init_val,
         })
 

@@ -76,44 +76,65 @@ class AnonymousArbAgent(Agent):
         super().setup(d, scenario, rng)
         d.chain.send(d.usdc.functions.mint(self.address, self.USDC_SEED))
 
+    def _candidates(self, d, amt, x):
+        """Routes that start+end in USDC and pass through BUCK pools.
+        Each: (tokens_fees for encode_path, hops for the quoter, uses_ub)."""
+        U, B = d.usdc.address, d.buck.address
+        tx = d.tokens[x].address
+        fu, fb = d.fee_usdc, d.fee_buck
+        out = []
+        # C1: USDC -> x -> BUCK -> y -> USDC (4-hop, cross-token)
+        for y in range(len(d.tokens)):
+            if y == x:
+                continue
+            ty = d.tokens[y].address
+            out.append((
+                [U, fu, tx, fb, B, fb, ty, fu, U],
+                [(d.pool_usdc[x], U, tx, fu), (d.pool_buck[x], tx, B, fb),
+                 (d.pool_buck[y], B, ty, fb), (d.pool_usdc[y], ty, U, fu)],
+                False))
+        if d.pool_ub:
+            # C2: USDC -> BUCK -> x -> USDC  (enters BUCK via BUCK/USDC)
+            out.append((
+                [U, fb, B, fb, tx, fu, U],
+                [(d.pool_ub, U, B, fb), (d.pool_buck[x], B, tx, fb),
+                 (d.pool_usdc[x], tx, U, fu)],
+                True))
+            # C3: USDC -> x -> BUCK -> USDC  (exits BUCK via BUCK/USDC)
+            out.append((
+                [U, fu, tx, fb, B, fb, U],
+                [(d.pool_usdc[x], U, tx, fu), (d.pool_buck[x], tx, B, fb),
+                 (d.pool_ub, B, U, fb)],
+                True))
+        return out
+
     def act(self, d, scenario, day, tick, ctr) -> None:
         w3, ab = d.w3, d.erc20_abi
-        usdc = d.usdc.address
         bal = d.usdc.functions.balanceOf(self.address).call()
         if bal == 0:
             return
-        best = None
+        best = None  # (profit, amt, tokens_fees, uses_ub)
         for x in range(len(d.tokens)):
-            tx = d.tokens[x].address
-            # Size off the *binding* pool on the entry side: USDC reserve of
-            # x/USDC and BUCK reserve of x/BUCK (both 6-dec, ~same scale).
+            # Size off the binding pool(s): USDC side of x/USDC, BUCK side
+            # of x/BUCK, and (if used) USDC side of BUCK/USDC -- all 6-dec.
             usdc_res = d.usdc.functions.balanceOf(d.pool_usdc[x]).call()
             buck_res = d.buck.functions.balanceOf(d.pool_buck[x]).call()
-            cap = min(usdc_res, buck_res) * self.POOL_FRAC_BP // 10_000
-            amt = min(bal, cap)
+            binders = [usdc_res, buck_res]
+            if d.pool_ub:
+                binders.append(d.usdc.functions.balanceOf(d.pool_ub).call())
+            amt = min(bal, min(binders) * self.POOL_FRAC_BP // 10_000)
             if amt == 0:
                 continue
-            for y in range(len(d.tokens)):
-                if y == x:
-                    continue
-                ty = d.tokens[y].address
-                hops = [
-                    (d.pool_usdc[x], usdc, tx, d.fee_usdc),
-                    (d.pool_buck[x], tx, d.buck.address, d.fee_buck),
-                    (d.pool_buck[y], d.buck.address, ty, d.fee_buck),
-                    (d.pool_usdc[y], ty, usdc, d.fee_usdc),
-                ]
-                out = quote_path(w3, ab, hops, amt)
-                if out > amt * (10_000 + self.MARGIN_BP) // 10_000:
-                    if best is None or out - amt > best[0]:
-                        best = (out - amt, amt, x, y)
+            for toks, hops, uses_ub in self._candidates(d, amt, x):
+                o = quote_path(w3, ab, hops, amt)
+                if o > amt * (10_000 + self.MARGIN_BP) // 10_000:
+                    if best is None or o - amt > best[0]:
+                        best = (o - amt, amt, toks, uses_ub)
         if best is None:
             return
-        _, amt, x, y = best
+        _, amt, toks, uses_ub = best
         ctr["cycle_attempt"] = ctr.get("cycle_attempt", 0) + 1
-        tx, ty = d.tokens[x].address, d.tokens[y].address
-        path = encode_path([usdc, d.fee_usdc, tx, d.fee_buck,
-                             d.buck.address, d.fee_buck, ty, d.fee_usdc, usdc])
+        path = encode_path(toks)
         # pre-fund the router, then execute (payerIsUser=false)
         d.chain.send(d.usdc.functions.transfer(d.router.address, amt),
                      sender=self.account)
@@ -123,6 +144,8 @@ class AnonymousArbAgent(Agent):
             d.chain.send(d.router.functions.execute(cmds, inputs, deadline),
                          sender=self.account, gas=3_000_000)
             ctr["cycleTrades"] += 1
+            if uses_ub:
+                ctr["ubTrades"] = ctr.get("ubTrades", 0) + 1
         except Exception as e:  # serialized slippage / gate -- record once
             ctr["cycle_err"] = repr(e)[:300]
 

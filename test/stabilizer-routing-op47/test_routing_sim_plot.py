@@ -76,19 +76,33 @@ def test_routing_sim_plot():
             ax.set_title("Direct (TOKEN/USDC) and indirect (TOKEN/BUCK) pool "
                          "prices vs market reference")
 
-    # ---- Panel 4: cumulative route usage ----------------------------- #
+    # ---- Panel 4: cumulative route usage + floating BUCK price ------- #
     ax = axes[3]
     direct = [f["directTrades"] for f in fr]
     cycle = [f["cycleTrades"] for f in fr]
-    ax.plot(days, direct, color="tab:red", linewidth=1.4,
-            label="direct TOKEN/USDC reference-arb trades")
-    ax.plot(days, cycle, color="tab:purple", linewidth=1.4,
-            label="BUCK-routed trades (TOKEN<->BUCK<->TOKEN / USDC<->BUCK<->TOKEN)")
+    ub = [f.get("ubTrades", 0) for f in fr]
+    l1, = ax.plot(days, direct, color="tab:red", linewidth=1.4,
+                  label="market-maker snaps (TOKEN/USDC)")
+    l2, = ax.plot(days, cycle, color="tab:purple", linewidth=1.4,
+                  label="BUCK-routed trades (total)")
+    l3, = ax.plot(days, ub, color="tab:brown", linewidth=1.4, linestyle="--",
+                  label="trades via the floating BUCK/USDC pool")
     ax.set_ylabel("cumulative trades")
-    ax.legend(loc="upper left", fontsize=9)
     ax.grid(True, alpha=0.3)
-    ax.set_title("Route usage -- proof the BUCK pools are routed alongside "
-                 "the TOKEN/USDC pools")
+    ax.set_title("Route usage + the floating (uncontrolled) BUCK/USDC pool "
+                 "price")
+
+    # BUCK per US$ on the right axis (buckUsd = USDC-micro per 1 BUCK;
+    # BUCK per $ = 1e6 / buckUsd).  The pool floats on supply/demand --
+    # it is never controlled; this is just the gauge-breaking liquidity.
+    bpd = [(1_000_000 / v if v else float("nan"))
+           for v in (f.get("buckUsd", 0) for f in fr)]
+    axr = ax.twinx()
+    l4, = axr.plot(days, bpd, color="tab:cyan", linewidth=1.2,
+                   label="BUCK per US$ (floating)")
+    axr.set_ylabel("BUCK per US$", color="tab:cyan")
+    axr.tick_params(axis="y", labelcolor="tab:cyan")
+    ax.legend(handles=[l1, l2, l3, l4], loc="upper left", fontsize=8)
 
     # ---- Panel 5: controller + agent PnL ----------------------------- #
     ax = axes[4]

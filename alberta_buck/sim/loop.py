@@ -39,7 +39,7 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
 
     snap = Snapshotter(d, scenario)
     init_val = snap.agg_value(agents, 0)
-    ctr = {"directTrades": 0, "cycleTrades": 0}
+    ctr = {"directTrades": 0, "cycleTrades": 0, "ubTrades": 0}
 
     ts = w3.eth.get_block("latest")["timestamp"] + 10
     tick_secs = max(60, 86_400 // scenario.ticks_per_day)
@@ -87,6 +87,7 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
         "tokens": [t[0] for t in scenario.tokens],
         "track_err": track,
         "cycle_trades": ctr["cycleTrades"],
+        "ub_trades": ctr["ubTrades"],
         "direct_trades": ctr["directTrades"],
         "all_eoa_verified": verified,
         "n_agents": len(agents),
@@ -96,7 +97,8 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
         for i, t in enumerate(summary["tokens"]):
             print(f"[sim]   {t:5s} TOKEN/USDC tail tracking err {100*track[i]:.2f}%")
         print(f"[sim] BUCK-routed trades: {ctr['cycleTrades']}  "
-              f"(attempts: {ctr.get('cycle_attempt', 0)})  "
+              f"(via BUCK/USDC pool: {ctr['ubTrades']}; "
+              f"attempts: {ctr.get('cycle_attempt', 0)})  "
               f"whale snaps: {ctr['directTrades']}  "
               f"all EOAs verified: {verified}")
         if ctr.get("cycle_err"):
