@@ -11,11 +11,14 @@ JSON schema (parallel per-frame, N=3 tokens [PAXG, cbBTC, AOIL]):
                 basketVal, buckK, supply,
                 directTrades, cycleTrades, aggPnl }
 
-Units: refUsd/spotUsdc/spotBuck are all USDC/BUCK micro-dollars / token
-(1e6 == $1.00); BUCK is 6-dec and anchor/basket-pegged ~ $1, so spotBuck
-is directly comparable to the reference.  The headline result: the BUCK-routed
-(indirect) pools converge onto the same market reference as the direct
-TOKEN/USDC pools, driven only by BUCK-unaware routed arbitrage.
+Units: refUsd/spotUsdc are USDC micro-dollars / token (1e6 == $1.00).
+BUCK is NOT pegged -- it floats.  spotBuck is raw 6-dec BUCK / token; its
+USD value is obtained *indirectly* through the live floating BUCK/USDC
+pool: USD/token = spotBuck * (buckUsd / 1e6) / 1e6, where buckUsd is
+USDC-micro per BUCK.  The headline result: even though BUCK floats
+freely, the TOKEN/BUCK pool valued through the instantaneous BUCK/USDC
+price tracks the same market reference as the direct TOKEN/USDC pool --
+driven only by BUCK-unaware routed arbitrage.
 """
 
 import json
@@ -57,24 +60,34 @@ def test_routing_sim_plot():
     fig, axes = plt.subplots(5, 1, figsize=(13, 16), sharex=True)
     colors = ["tab:orange", "tab:blue", "tab:green"]
 
+    # buckUsd = USDC-micro per 1 BUCK from the *live* floating BUCK/USDC
+    # pool (it floats; BUCK is NOT assumed ~$1).
+    bu = [f.get("buckUsd", 0) for f in fr]
+
     # ---- Panels 1-3: per token, both pools vs market reference -------- #
     for t in range(3):
         ax = axes[t]
         ref = [v / E6 for v in col("refUsd", t)]
         su = [v / E6 for v in col("spotUsdc", t)]
-        sb = [v / E6 for v in col("spotBuck", t)]
+        # Indirect USD price of the TOKEN/BUCK pool, valued through the
+        # instantaneous BUCK/USDC pool price:
+        #   USD/token = (raw BUCK/token) * (USD/BUCK)
+        #             = spotBuck * (buckUsd/1e6) / 1e6
+        sbk = col("spotBuck", t)
+        sb = [(sbk[i] * bu[i] / 1e12) if bu[i] else float("nan")
+              for i in range(len(fr))]
         ax.plot(days, ref, color="black", linestyle="--", linewidth=1.4,
                 label="market reference (CSV)")
         ax.plot(days, su, color="tab:red", linewidth=1.2,
                 label=f"{names[t]}/USDC pool (direct)")
         ax.plot(days, sb, color="tab:purple", linewidth=1.2,
-                label=f"{names[t]}/BUCK pool (indirect, BUCK~$1)")
+                label=f"{names[t]}/BUCK -> USD via live BUCK/USDC (indirect)")
         ax.set_ylabel(f"{names[t]}  USD")
         ax.legend(loc="upper left", fontsize=8)
         ax.grid(True, alpha=0.3)
         if t == 0:
-            ax.set_title("Direct (TOKEN/USDC) and indirect (TOKEN/BUCK) pool "
-                         "prices vs market reference")
+            ax.set_title("Direct (TOKEN/USDC) vs indirect (TOKEN/BUCK valued "
+                         "through the floating BUCK/USDC pool) vs CSV")
 
     # ---- Panel 4: cumulative route usage + floating BUCK price ------- #
     ax = axes[3]
@@ -134,9 +147,9 @@ def test_routing_sim_plot():
     for t in range(3):
         ref = col("refUsd", t)[-1] / E6
         su = col("spotUsdc", t)[-1] / E6
-        sb = col("spotBuck", t)[-1] / E6
+        sb = col("spotBuck", t)[-1] * (bu[-1] / 1e6) / E6 if bu[-1] else float("nan")
         print(f"  {names[t]:5s}  ref ${ref:,.2f}  "
               f"USDC-pool ${su:,.2f} ({100*(su-ref)/ref:+.2f}%)  "
-              f"BUCK-pool ${sb:,.2f} ({100*(sb-ref)/ref:+.2f}%)")
+              f"BUCK-pool->USD ${sb:,.2f} ({100*(sb-ref)/ref:+.2f}%)")
     print(f"  direct trades: {fr[-1]['directTrades']}  "
           f"BUCK-routed trades: {fr[-1]['cycleTrades']}")
