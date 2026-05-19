@@ -39,7 +39,9 @@ def test_routing_sim_web3():
                 ("cbBTC", "Coinbase Wrapped BTC", 8),
                 ("AOIL", "Alberta Oil", 18)],
         csv_files=["paxg.csv", "cbbtc.csv", "aoil.csv"],
-        agents={"AnonymousArbAgent": 3, "MarketMakerWhale": 1},
+        agents={"AnonymousArbAgent": 2,
+                "TokenAccumulatorAgent": 3,
+                "MarketMakerWhale": 1},
         days=30,
         ticks_per_day=3,
     )

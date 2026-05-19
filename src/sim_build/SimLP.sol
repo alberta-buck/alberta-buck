@@ -30,6 +30,19 @@ contract SimLP {
         );
     }
 
+    /// @notice Generic passthrough so this *public, identity-bound* helper
+    ///         can itself act as the BUCK-backed LP: pledge an insured
+    ///         asset (BuckCredit.activate) and mint BUCK (Buck.mint).  All
+    ///         resulting BUCK transfers are public<->public (SimLP -> pool),
+    ///         so no identity fakery is needed anywhere.
+    function exec(address target, bytes calldata data)
+        external returns (bytes memory)
+    {
+        (bool ok, bytes memory ret) = target.call(data);
+        require(ok, "SimLP: exec failed");
+        return ret;
+    }
+
     function swap(
         address pool,
         address recipient,

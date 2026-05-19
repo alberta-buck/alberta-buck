@@ -36,7 +36,9 @@ ROUTING = Scenario(
             ("cbBTC", "Coinbase Wrapped BTC", 8),
             ("AOIL", "Alberta Oil", 18)],
     csv_files=["paxg.csv", "cbbtc.csv", "aoil.csv"],
-    agents={"AnonymousArbAgent": 4, "MarketMakerWhale": 1},
+    agents={"AnonymousArbAgent": 3,
+            "TokenAccumulatorAgent": 3,   # one per token (idx % N)
+            "MarketMakerWhale": 1},
     days=120,
     ticks_per_day=4,
 )

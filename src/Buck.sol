@@ -383,14 +383,13 @@ contract Buck is IERC20, IERC20Metadata {
         // (the balance is NOT consumed -- it is skin-in-the-game collateral
         // that throttles new mints when BUCK trades below basket).
         //
-        // Bootstrap exemption: when totalSupply == 0 no BUCK exists yet, so
-        // the very first mint by definition cannot satisfy any non-zero
-        // requirement.  Skipping the gate here lets the genesis minter seed
-        // the system; every subsequent mint must satisfy the live factor.
-        //
-        // Mints with zero poolPrincipal (NFT premium so low it rounds to 0)
-        // also bypass: there is no insurance contribution to back.
-        if (_totalSupply > 0 && poolPrincipal > 0) {
+        // The gate ALWAYS applies when there is a non-zero poolPrincipal:
+        // there is no totalSupply==0 bootstrap exemption, because BUCK can
+        // always first be acquired from the direct-issuance (TOKEN/BUCK)
+        // pools.  Mints with zero poolPrincipal (NFT premium so low it
+        // rounds to 0) still bypass: there is no insurance contribution to
+        // back.
+        if (poolPrincipal > 0) {
             uint256 factor   = buckK.fundingFactor();
             if (factor > 0) {
                 uint256 required = poolPrincipal * factor / BUCKK_SCALE;

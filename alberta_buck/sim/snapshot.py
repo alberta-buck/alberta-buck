@@ -36,6 +36,9 @@ class Snapshotter:
         self.tokens = [t[0] for t in scenario.tokens]
 
     def agg_value(self, agents, day) -> int:
+        """Total agent portfolio in USDC, valued at *day-0* prices so this
+        is REALIZED economic P&L (arb edge + token accumulation), not
+        mark-to-market noise from the day's GBM-moved CSV reference."""
         d = self.d
         v = 0
         for ag in agents:
@@ -43,7 +46,7 @@ class Snapshotter:
                 continue
             v += _bal(d.usdc, ag.address)
             for i, tc in enumerate(d.tokens):
-                v += _bal(tc, ag.address) * self.s.prices.ref(i, day) // (10 ** d.dec[i])
+                v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
         return v
 
     def capture(self, day, ctr, agents, init_val) -> None:

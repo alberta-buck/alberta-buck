@@ -1,7 +1,8 @@
 """Pluggable agents.
 
 `Agent` subclasses register themselves in `REGISTRY` by class name; a
-scenario lists how many of each to spawn.  Two ship today:
+scenario lists how many of each to spawn.  Three ship today
+(AnonymousArbAgent, TokenAccumulatorAgent, MarketMakerWhale):
 
   * AnonymousArbAgent -- a registered EOA holding only USDC + RWA TOKENs.
     Each tick it scans USDC->x->BUCK->y->USDC cycles with the exact
@@ -60,6 +61,26 @@ class Agent:
             sender=self.account, gas=3_000_000,
         )
 
+    def _exec(self, d, in_tok_c, amt, toks, uses_ub, ctr) -> bool:
+        """Pre-fund the router and run one V3 multi-hop (payerIsUser=false,
+        recipient = self).  Returns True on success.  Shared by all
+        BUCK-unaware routing agents."""
+        ctr["cycle_attempt"] = ctr.get("cycle_attempt", 0) + 1
+        d.chain.send(in_tok_c.functions.transfer(d.router.address, amt),
+                     sender=self.account)
+        deadline = d.w3.eth.get_block("latest")["timestamp"] + 3600
+        cmds, inputs = ur_exec_args(self.address, amt, encode_path(toks))
+        try:
+            d.chain.send(d.router.functions.execute(cmds, inputs, deadline),
+                         sender=self.account, gas=3_000_000)
+            ctr["cycleTrades"] += 1
+            if uses_ub:
+                ctr["ubTrades"] = ctr.get("ubTrades", 0) + 1
+            return True
+        except Exception as e:  # serialized slippage / gate -- record once
+            ctr["cycle_err"] = repr(e)[:300]
+            return False
+
     def act(self, d, scenario, day, tick, ctr) -> None:  # pragma: no cover
         raise NotImplementedError
 
@@ -67,10 +88,12 @@ class Agent:
 @_register
 class AnonymousArbAgent(Agent):
     USDC_SEED = 2_000_000 * 10 ** 6      # scaled $2M
-    POOL_FRAC_BP = 10                     # tiny fill (0.1% of binding pool):
-                                          # slippage << edge so the exact
-                                          # quoter detects real opportunities
-    MARGIN_BP = 15                        # cycle must beat input by >0.15%
+    POOL_FRAC_BP = 25                     # small fill (0.25% of binding
+                                          # pool): low slippage, but enough
+                                          # to book a material realized edge
+    MARGIN_BP = 60                        # only take cycles with a REAL edge
+                                          # (>0.60% net) so arb profit is
+                                          # visible, not competed to ~0
 
     def setup(self, d, scenario, rng) -> None:
         super().setup(d, scenario, rng)
@@ -110,13 +133,15 @@ class AnonymousArbAgent(Agent):
 
     def act(self, d, scenario, day, tick, ctr) -> None:
         w3, ab = d.w3, d.erc20_abi
-        bal = d.usdc.functions.balanceOf(self.address).call()
-        if bal == 0:
-            return
-        best = None  # (profit, amt, tokens_fees, uses_ub)
+        # Act on the best opportunity *per token* every tick -- NOT a single
+        # global winner.  Otherwise the deepest pool's larger absolute
+        # profit makes the agent always trade that one token and the other
+        # TOKEN/BUCK pools never get arbed (the BUCK/USDC pool then only
+        # tracks the dominant token).
         for x in range(len(d.tokens)):
-            # Size off the binding pool(s): USDC side of x/USDC, BUCK side
-            # of x/BUCK, and (if used) USDC side of BUCK/USDC -- all 6-dec.
+            bal = d.usdc.functions.balanceOf(self.address).call()
+            if bal == 0:
+                return
             usdc_res = d.usdc.functions.balanceOf(d.pool_usdc[x]).call()
             buck_res = d.buck.functions.balanceOf(d.pool_buck[x]).call()
             binders = [usdc_res, buck_res]
@@ -125,29 +150,14 @@ class AnonymousArbAgent(Agent):
             amt = min(bal, min(binders) * self.POOL_FRAC_BP // 10_000)
             if amt == 0:
                 continue
+            best = None
             for toks, hops, uses_ub in self._candidates(d, amt, x):
                 o = quote_path(w3, ab, hops, amt)
                 if o > amt * (10_000 + self.MARGIN_BP) // 10_000:
                     if best is None or o - amt > best[0]:
-                        best = (o - amt, amt, toks, uses_ub)
-        if best is None:
-            return
-        _, amt, toks, uses_ub = best
-        ctr["cycle_attempt"] = ctr.get("cycle_attempt", 0) + 1
-        path = encode_path(toks)
-        # pre-fund the router, then execute (payerIsUser=false)
-        d.chain.send(d.usdc.functions.transfer(d.router.address, amt),
-                     sender=self.account)
-        deadline = w3.eth.get_block("latest")["timestamp"] + 3600
-        cmds, inputs = ur_exec_args(self.address, amt, path)
-        try:
-            d.chain.send(d.router.functions.execute(cmds, inputs, deadline),
-                         sender=self.account, gas=3_000_000)
-            ctr["cycleTrades"] += 1
-            if uses_ub:
-                ctr["ubTrades"] = ctr.get("ubTrades", 0) + 1
-        except Exception as e:  # serialized slippage / gate -- record once
-            ctr["cycle_err"] = repr(e)[:300]
+                        best = (o - amt, toks, uses_ub)
+            if best is not None:
+                self._exec(d, d.usdc, amt, best[1], best[2], ctr)
 
 
 @_register
@@ -182,3 +192,62 @@ class MarketMakerWhale(Agent):
 
     def act(self, d, scenario, day, tick, ctr) -> None:  # unused (loop drives)
         pass
+
+
+@_register
+class TokenAccumulatorAgent(Agent):
+    """A BUCK-unaware arber that maximizes a single target TOKEN's holdings
+    (not USDC).  It hunts cycles that start and end in its target token and
+    pass through the floating BUCK/USDC pool, netting more of the token.
+    BUCK and USDC are router-internal between hops -- the agent only ever
+    holds its target TOKEN.  Each instance targets a different token
+    (idx %% N), so the population pulls every TOKEN/BUCK pool, not just the
+    deepest one."""
+
+    SEED_WHOLE = 1_000_000               # whole target tokens, seeded
+    POOL_FRAC_BP = 25                     # small fill (0.25%) -- low slippage
+    MARGIN_BP = 60                        # only take cycles netting >0.60%
+                                          # more of the token (visible profit)
+
+    def setup(self, d, scenario, rng) -> None:
+        super().setup(d, scenario, rng)
+        self.tgt = self.idx % len(d.tokens)
+        c = d.tokens[self.tgt]
+        d.chain.send(c.functions.mint(
+            self.address, self.SEED_WHOLE * 10 ** d.dec[self.tgt]))
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if not d.pool_ub:
+            return
+        w3, ab = d.w3, d.erc20_abi
+        t = self.tgt
+        tc = d.tokens[t]
+        T, B, U = tc.address, d.buck.address, d.usdc.address
+        fu, fb = d.fee_usdc, d.fee_buck
+        bal = tc.functions.balanceOf(self.address).call()
+        if bal == 0:
+            return
+        # Size off the token side of the pools the cycle traverses.
+        binders = [tc.functions.balanceOf(d.pool_buck[t]).call(),
+                   tc.functions.balanceOf(d.pool_usdc[t]).call()]
+        amt = min(bal, min(binders) * self.POOL_FRAC_BP // 10_000)
+        if amt == 0:
+            return
+        # Both directions of the token<->BUCK<->USDC<->token triangle, each
+        # using the floating BUCK/USDC pool; pick the more profitable.
+        cands = [
+            ([T, fb, B, fb, U, fu, T],
+             [(d.pool_buck[t], T, B, fb), (d.pool_ub, B, U, fb),
+              (d.pool_usdc[t], U, T, fu)]),
+            ([T, fu, U, fb, B, fb, T],
+             [(d.pool_usdc[t], T, U, fu), (d.pool_ub, U, B, fb),
+              (d.pool_buck[t], B, T, fb)]),
+        ]
+        best = None
+        for toks, hops in cands:
+            o = quote_path(w3, ab, hops, amt)
+            if o > amt * (10_000 + self.MARGIN_BP) // 10_000:
+                if best is None or o - amt > best[0]:
+                    best = (o - amt, toks)
+        if best is not None:
+            self._exec(d, tc, amt, best[1], True, ctr)
