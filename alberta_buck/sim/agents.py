@@ -204,7 +204,11 @@ class TokenAccumulatorAgent(Agent):
     (idx %% N), so the population pulls every TOKEN/BUCK pool, not just the
     deepest one."""
 
-    SEED_WHOLE = 1_000_000               # whole target tokens, seeded
+    SEED_USDC = 2_000_000 * 10 ** 6       # ~$2M of the target token (sized
+                                          # in USD so ROI is comparable to
+                                          # the USDC arbs -- NOT a fixed
+                                          # token count, which at cbBTC
+                                          # prices dwarfs every other base)
     POOL_FRAC_BP = 25                     # small fill (0.25%) -- low slippage
     MARGIN_BP = 60                        # only take cycles netting >0.60%
                                           # more of the token (visible profit)
@@ -213,8 +217,9 @@ class TokenAccumulatorAgent(Agent):
         super().setup(d, scenario, rng)
         self.tgt = self.idx % len(d.tokens)
         c = d.tokens[self.tgt]
-        d.chain.send(c.functions.mint(
-            self.address, self.SEED_WHOLE * 10 ** d.dec[self.tgt]))
+        ref0 = scenario.prices.ref(self.tgt, 0)          # USDC-micro / token
+        seed = self.SEED_USDC * (10 ** d.dec[self.tgt]) // ref0
+        d.chain.send(c.functions.mint(self.address, seed))
 
     def act(self, d, scenario, day, tick, ctr) -> None:
         if not d.pool_ub:

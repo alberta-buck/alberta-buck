@@ -117,7 +117,13 @@ def test_routing_sim_plot():
     axr.tick_params(axis="y", labelcolor="tab:cyan")
     ax.legend(handles=[l1, l2, l3, l4], loc="upper left", fontsize=8)
 
-    # ---- Panel 5: controller + agent PnL ----------------------------- #
+    # ---- Panel 5: controller + annualized returns (APR) -------------- #
+    # Absolute PnL is uninformative without the capital base, so show
+    # annualized return on the capital actually deployed:
+    #   arb APR     = realized PnL / arb capital  (USDC seeds, day-0)
+    #   LP APR (g)  = cumulative fees / capital deployed in that pool group
+    # (LP profit is extracted from the V3 positions: uncollected fees via
+    #  feeGrowth + tokensOwed -- see snapshot._lp_groups.)
     ax = axes[4]
     bk = [_i(f["buckK"]) / E18 for f in fr]
     bv = [_i(f["basketVal"]) / E18 for f in fr]
@@ -128,14 +134,39 @@ def test_routing_sim_plot():
     ax.set_ylabel("BUCK (18d)")
     ax.set_xlabel("Day")
     ax.grid(True, alpha=0.3)
+
+    def apr(series_roi):
+        # annualize; suppress the noisy first few days (small denominator)
+        return [100 * r * 365 / d if d >= 5 else float("nan")
+                for r, d in zip(series_roi, days)]
+
+    inv = [f.get("invested", 0) or 1 for f in fr]
+    arb_roi = [f["aggPnl"] / iv for f, iv in zip(fr, inv)]
+
+    def lp_roi(group):
+        out = []
+        for f in fr:
+            fee, cap = f.get("lp", {}).get(group, [0, 0])
+            out.append(fee / cap if cap else 0.0)
+        return out
+
     ax2 = ax.twinx()
-    pnl = [_i(f["aggPnl"]) / E6 for f in fr]
-    l3, = ax2.plot(days, pnl, color="tab:cyan", linewidth=1.0,
-                   label="aggregate agent realized PnL (USDC)")
-    ax2.set_ylabel("USDC", color="tab:cyan")
+    handles = [l1, l2]
+    handles.append(ax2.plot(days, apr(arb_roi), color="tab:cyan",
+                            linewidth=1.4, label="arb agents APR")[0])
+    handles.append(ax2.plot(days, apr(lp_roi("buck")), color="tab:purple",
+                            linewidth=1.2,
+                            label="direct-mint TOKEN/BUCK LP APR")[0])
+    handles.append(ax2.plot(days, apr(lp_roi("ub")), color="tab:brown",
+                            linewidth=1.2, label="BUCK/USDC LP APR")[0])
+    handles.append(ax2.plot(days, apr(lp_roi("usdc")), color="tab:olive",
+                            linewidth=1.0, linestyle=":",
+                            label="TOKEN/USDC LP APR")[0])
+    ax2.set_ylabel("APR (%)", color="tab:cyan")
     ax2.tick_params(axis="y", labelcolor="tab:cyan")
-    ax.legend(handles=[l1, l2, l3], loc="upper left", fontsize=9)
-    ax.set_title("Controller (buckK, basketValueInBuck) and arbitrageur PnL")
+    ax.legend(handles=handles, loc="upper left", fontsize=8, ncol=2)
+    ax.set_title("Controller + annualized return on deployed capital "
+                 "(arb agents & LP positions)")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -153,3 +184,16 @@ def test_routing_sim_plot():
               f"BUCK-pool->USD ${sb:,.2f} ({100*(sb-ref)/ref:+.2f}%)")
     print(f"  direct trades: {fr[-1]['directTrades']}  "
           f"BUCK-routed trades: {fr[-1]['cycleTrades']}")
+    last, dN = fr[-1], days[-1] or 1
+    iv = last.get("invested", 0) or 1
+    r = last["aggPnl"] / iv
+    print(f"  arb agents:        capital ${iv/E6:,.0f}  "
+          f"PnL ${last['aggPnl']/E6:,.0f}  ROI {100*r:+.2f}%  "
+          f"APR {100*r*365/dN:+.1f}%")
+    for g, lbl in (("buck", "TOKEN/BUCK direct-mint"),
+                   ("ub", "BUCK/USDC outsider   "),
+                   ("usdc", "TOKEN/USDC truth     ")):
+        fee, cap = last.get("lp", {}).get(g, [0, 0])
+        rr = fee / cap if cap else 0.0
+        print(f"  {lbl} LP: capital ${cap/E6:,.0f}  fees ${fee/E6:,.0f}  "
+              f"ROI {100*rr:+.3f}%  APR {100*rr*365/dN:+.2f}%")

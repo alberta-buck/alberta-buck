@@ -11,8 +11,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from web3 import Web3
+
+from alberta_buck.sim.chain import load_artifact
+
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO / "test" / "vectors" / "routing-sim.json"
+Q96 = 1 << 96
+Q128 = 1 << 128
+MASK256 = (1 << 256) - 1
 
 
 def _bal(c, who):
@@ -34,6 +41,53 @@ class Snapshotter:
         self.s = scenario
         self.frames: list[dict] = []
         self.tokens = [t[0] for t in scenario.tokens]
+        self._pool_abi, _ = load_artifact("UniswapV3Pool")
+        # address -> day-0 USDC-micro value per RAW unit helper key
+        self._kind = {Web3.to_checksum_address(d.usdc.address): ("usdc", 0),
+                      Web3.to_checksum_address(d.buck.address): ("buck", 0)}
+        for i, tc in enumerate(d.tokens):
+            self._kind[Web3.to_checksum_address(tc.address)] = ("tok", i)
+        self._lp_cap: dict | None = None     # group -> capital (USDC, day0)
+
+    # -- LP (Uniswap V3 position) accounting --------------------------- #
+
+    def _raw_usd0(self, addr: str, raw: int) -> int:
+        """USDC-micro value at day-0 prices of `raw` units of token `addr`.
+        USDC: 1:1.  BUCK: 1:1 (1 BUCK == 1 USDC at t0 by construction).
+        TOKEN i: raw * ref0_i / 10**dec_i."""
+        kind, i = self._kind[Web3.to_checksum_address(addr)]
+        if kind in ("usdc", "buck"):
+            return raw
+        return raw * self.s.prices.ref(i, 0) // (10 ** self.d.dec[i])
+
+    def _lp_groups(self) -> dict:
+        """Per-group (usdc/buck/ub) cumulative LP fee income and deployed
+        capital, both in USDC-micro at day-0 prices.  Full-range positions:
+        uncollected fee ~= L*(feeGrowthGlobal - feeGrowthInsideLast)/2**128
+        + tokensOwed (no poke needed); deployed capital = the L-backed
+        redeemable amounts at the *first* observed price."""
+        d = self.d
+        fees = {"usdc": 0, "buck": 0, "ub": 0}
+        cap = {"usdc": 0, "buck": 0, "ub": 0}
+        for addr, owner, lo, hi, grp in d.pool_meta:
+            p = d.w3.eth.contract(address=addr, abi=self._pool_abi)
+            t0 = p.functions.token0().call()
+            t1 = p.functions.token1().call()
+            key = Web3.solidity_keccak(
+                ["address", "int24", "int24"],
+                [Web3.to_checksum_address(owner), lo, hi])
+            L, fi0, fi1, owed0, owed1 = p.functions.positions(key).call()
+            fg0 = p.functions.feeGrowthGlobal0X128().call()
+            fg1 = p.functions.feeGrowthGlobal1X128().call()
+            unc0 = L * ((fg0 - fi0) & MASK256) // Q128 + owed0
+            unc1 = L * ((fg1 - fi1) & MASK256) // Q128 + owed1
+            fees[grp] += self._raw_usd0(t0, unc0) + self._raw_usd0(t1, unc1)
+            sp = p.functions.slot0().call()[0]
+            if sp:
+                a0 = L * Q96 // sp           # full-range redeemable amounts
+                a1 = L * sp // Q96
+                cap[grp] += self._raw_usd0(t0, a0) + self._raw_usd0(t1, a1)
+        return {g: (fees[g], cap[g]) for g in fees}
 
     def agg_value(self, agents, day) -> int:
         """Total agent portfolio in USDC, valued at *day-0* prices so this
@@ -71,7 +125,13 @@ class Snapshotter:
             bk = int(d.kctrl.functions.buckK().call())
         except Exception:
             bk = 0
+        lg = self._lp_groups()
+        if self._lp_cap is None:                       # freeze capital basis
+            self._lp_cap = {g: lg[g][1] for g in lg}
+        lp = {g: [lg[g][0], self._lp_cap[g]] for g in lg}
         self.frames.append({
+            "invested": init_val,                      # arb capital (USDC,d0)
+            "lp": lp,                                  # group: [feeUsd, capUsd]
             "day": day,
             "refUsd": ref,
             "spotUsdc": su,

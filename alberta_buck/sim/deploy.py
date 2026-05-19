@@ -55,6 +55,7 @@ class Deployment:
     pool_usdc: list = field(default_factory=list)   # TOKEN/USDC addrs
     pool_buck: list = field(default_factory=list)   # TOKEN/BUCK addrs
     pool_ub: str = ""                               # floating BUCK/USDC pool
+    pool_meta: list = field(default_factory=list)   # (pool,owner,lo,hi,group)
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK
 
@@ -226,4 +227,14 @@ def deploy(chain: Chain, anvil, scenario, rng) -> Deployment:
     chain.send(simlp.functions.mint(pub, lo, hi, max(1, Lub), u0, u1))
     d.pool_ub = pub
 
+    # LP-position metadata for ROI/APR accounting: (pool, owner, lo, hi,
+    # group).  TOKEN/USDC + BUCK/USDC are SimLP-funded; TOKEN/BUCK are
+    # direct-mint funded (owned by BuckBasket).  All full-range.
+    lou, hiu = full_range_ticks(TICK_SPACING[FEE_USDC])
+    lob, hib = full_range_ticks(TICK_SPACING[FEE_BUCK])
+    d.pool_meta = (
+        [(d.pool_usdc[i], simlp.address, lou, hiu, "usdc") for i in range(len(tok))]
+        + [(d.pool_buck[i], basket.address, lob, hib, "buck") for i in range(len(tok))]
+        + [(d.pool_ub, simlp.address, lob, hib, "ub")]
+    )
     return d
