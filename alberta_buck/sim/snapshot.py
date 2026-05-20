@@ -129,6 +129,11 @@ class Snapshotter:
         if self._lp_cap is None:                       # freeze capital basis
             self._lp_cap = {g: lg[g][1] for g in lg}
         lp = {g: [lg[g][0], self._lp_cap[g]] for g in lg}
+        # Raw token + BUCK balances in each TOKEN/BUCK pool.
+        pool_bal = []
+        for i, tc in enumerate(d.tokens):
+            pool_bal.append([_bal(tc, d.pool_buck[i]),
+                             _bal(d.buck, d.pool_buck[i])])
         self.frames.append({
             "invested": init_val,                      # arb capital (USDC,d0)
             "lp": lp,                                  # group: [feeUsd, capUsd]
@@ -144,10 +149,12 @@ class Snapshotter:
             "ubTrades": ctr.get("ubTrades", 0),
             "buckUsd": buck_usd,
             "aggPnl": self.agg_value(agents, day) - init_val,
+            "poolBal": pool_bal,
         })
 
     def write(self, path=None) -> Path:
         p = Path(path) if path else DEFAULT_OUT
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"tokens": self.tokens, "frames": self.frames}))
+        p.write_text(json.dumps({"tokens": self.tokens, "decimals": self.d.dec,
+                                 "frames": self.frames}))
         return p

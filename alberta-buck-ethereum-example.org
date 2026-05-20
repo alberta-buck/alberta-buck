@@ -14,6 +14,10 @@
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 
+* Maintaining Equilibrium
+
+  The BUCK is defined in terms of basket of commodities.  
+
 * Bootstrap, Funding Factor, and the BUCK_K Feedback Loop
   :PROPERTIES:
   :CUSTOM_ID: bootstrap-feedback

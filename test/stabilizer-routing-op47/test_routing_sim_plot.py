@@ -51,13 +51,14 @@ def test_routing_sim_plot():
 
     d = json.loads(DATA.read_text())
     names = d["tokens"]
+    dec = d.get("decimals", [18, 8, 18])
     fr = d["frames"]
     days = [f["day"] for f in fr]
 
     def col(key, t):
         return [f[key][t] for f in fr]
 
-    fig, axes = plt.subplots(5, 1, figsize=(13, 16), sharex=True)
+    fig, axes = plt.subplots(5, 1, figsize=(13, 18), sharex=True)
     colors = ["tab:orange", "tab:blue", "tab:green"]
 
     # buckUsd = USDC-micro per 1 BUCK from the *live* floating BUCK/USDC
@@ -83,11 +84,36 @@ def test_routing_sim_plot():
         ax.plot(days, sb, color="tab:purple", linewidth=1.2,
                 label=f"{names[t]}/BUCK -> USD via live BUCK/USDC (indirect)")
         ax.set_ylabel(f"{names[t]}  USD")
-        ax.legend(loc="upper left", fontsize=8)
         ax.grid(True, alpha=0.3)
         if t == 0:
             ax.set_title("Direct (TOKEN/USDC) vs indirect (TOKEN/BUCK valued "
                          "through the floating BUCK/USDC pool) vs CSV")
+
+        # ---- right axes: TOKEN/BUCK pool balances -------------------- #
+        bal_tok = [f["poolBal"][t][0] / (10 ** dec[t]) for f in fr]
+        bal_buck = [f["poolBal"][t][1] / E6 for f in fr]
+
+        ax2 = ax.twinx()
+        l_tok = ax2.plot(days, bal_tok, color="tab:orange", linewidth=1.0,
+                         linestyle="--",
+                         label=f"{names[t]} in {names[t]}/BUCK pool")
+        ax2.set_ylabel(f"{names[t]} balance", color="tab:orange")
+        ax2.tick_params(axis="y", labelcolor="tab:orange")
+
+        ax3 = ax.twinx()
+        ax3.spines.right.set_position(("axes", 1.12))
+        l_buck = ax3.plot(days, bal_buck, color="tab:green", linewidth=1.0,
+                          linestyle=":",
+                          label=f"BUCK in {names[t]}/BUCK pool")
+        ax3.set_ylabel("BUCK balance", color="tab:green")
+        ax3.tick_params(axis="y", labelcolor="tab:green")
+
+        # Combine legends from all three axes.
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        lines3, labels3 = ax3.get_legend_handles_labels()
+        ax.legend(lines1 + lines2 + lines3, labels1 + labels2 + labels3,
+                  loc="upper left", fontsize=7)
 
     # ---- Panel 4: cumulative route usage + floating BUCK price ------- #
     ax = axes[3]

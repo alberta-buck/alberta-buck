@@ -30,7 +30,8 @@ FEE_BUCK = 500
 TICK_SPACING = {3000: 60, 500: 10}
 # Common BUCK reserve every TOKEN/BUCK basket pool is seeded to, so no
 # single token's pool depth dominates the shared routing.
-TARGET_BUCK = 10 ** 14
+#TARGET_BUCK = 10 ** 14
+TARGET_BUCK = 10 ** 12  # Bucks are 6-digit fixed, so 1,000,000 x 1e6 = 10**12
 
 
 @dataclass
