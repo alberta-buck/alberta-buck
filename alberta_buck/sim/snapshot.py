@@ -158,7 +158,8 @@ class Snapshotter:
         return v
 
     def capture(self, day, ctr, agents, init_val,
-                rebal_init_val: int | None = None) -> None:
+                rebal_init_val: int | None = None,
+                dm_init_val: int | None = None) -> None:
         d = self.d
         ref, su, sb = [], [], []
         for i, tc in enumerate(d.tokens):
@@ -198,6 +199,12 @@ class Snapshotter:
             reb_pnl = self._agent_value(
                 agents, day, "BuckBasketRebalancerAgent") - rebal_init_val
 
+        # Direct-mint agent P&L.
+        dm_pnl = 0
+        if dm_init_val is not None:
+            dm_pnl = self._agent_value(
+                agents, day, "DirectMintAgent") - dm_init_val
+
         self.frames.append({
             "invested": init_val,                      # arb capital (USDC,d0)
             "lp": lp,                                  # group: [feeUsd, capUsd]
@@ -217,6 +224,9 @@ class Snapshotter:
             "poolWeights": pool_weights,
             "rebalancerPnl": reb_pnl,
             "rebalanceTrades": ctr.get("rebalanceTrades", 0),
+            "directMintPnl": dm_pnl,
+            "dmEntries": ctr.get("dmEntries", 0),
+            "dmExits": ctr.get("dmExits", 0),
         })
 
     def write(self, path=None) -> Path:

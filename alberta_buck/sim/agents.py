@@ -48,14 +48,12 @@ class Agent:
     def address(self) -> str:
         return self.account.address
 
-    # registered as a real cryptographic identity
+    # registered as a real cryptographic identity (disk-cached per seed).
     def setup(self, d, scenario, rng) -> None:
-        self.account = d.chain.new_account()
+        self.account, args = idmod.cached_eoa_setup(
+            scenario.seed, type(self).__name__, self.idx,
+            d.issuer_kp, rng)
         d.anvil.set_balance(self.address, 100 * 10 ** 18)
-        addr_int = int(self.address, 16)
-        args = idmod.register_args(d.issuer_kp, addr_int,
-                                   idmod.fields_for(type(self).__name__, self.idx),
-                                   rng)
         d.chain.send(
             d.reg.functions.register(d.issuer_addr, *args),
             sender=self.account, gas=3_000_000,
@@ -104,7 +102,7 @@ class AnonymousArbAgent(Agent):
         Each: (tokens_fees for encode_path, hops for the quoter, uses_ub)."""
         U, B = d.usdc.address, d.buck.address
         tx = d.tokens[x].address
-        fu, fb = d.fee_usdc, d.fee_buck
+        fu, fb, fub = d.fee_usdc, d.fee_buck, d.fee_ub
         out = []
         # C1: USDC -> x -> BUCK -> y -> USDC (4-hop, cross-token)
         for y in range(len(d.tokens)):
@@ -119,15 +117,15 @@ class AnonymousArbAgent(Agent):
         if d.pool_ub:
             # C2: USDC -> BUCK -> x -> USDC  (enters BUCK via BUCK/USDC)
             out.append((
-                [U, fb, B, fb, tx, fu, U],
-                [(d.pool_ub, U, B, fb), (d.pool_buck[x], B, tx, fb),
+                [U, fub, B, fb, tx, fu, U],
+                [(d.pool_ub, U, B, fub), (d.pool_buck[x], B, tx, fb),
                  (d.pool_usdc[x], tx, U, fu)],
                 True))
             # C3: USDC -> x -> BUCK -> USDC  (exits BUCK via BUCK/USDC)
             out.append((
-                [U, fu, tx, fb, B, fb, U],
+                [U, fu, tx, fb, B, fub, U],
                 [(d.pool_usdc[x], U, tx, fu), (d.pool_buck[x], tx, B, fb),
-                 (d.pool_ub, B, U, fb)],
+                 (d.pool_ub, B, U, fub)],
                 True))
         return out
 
@@ -228,7 +226,7 @@ class TokenAccumulatorAgent(Agent):
         t = self.tgt
         tc = d.tokens[t]
         T, B, U = tc.address, d.buck.address, d.usdc.address
-        fu, fb = d.fee_usdc, d.fee_buck
+        fu, fb, fub = d.fee_usdc, d.fee_buck, d.fee_ub
         bal = tc.functions.balanceOf(self.address).call()
         if bal == 0:
             return
@@ -241,11 +239,11 @@ class TokenAccumulatorAgent(Agent):
         # Both directions of the token<->BUCK<->USDC<->token triangle, each
         # using the floating BUCK/USDC pool; pick the more profitable.
         cands = [
-            ([T, fb, B, fb, U, fu, T],
-             [(d.pool_buck[t], T, B, fb), (d.pool_ub, B, U, fb),
+            ([T, fb, B, fub, U, fu, T],
+             [(d.pool_buck[t], T, B, fb), (d.pool_ub, B, U, fub),
               (d.pool_usdc[t], U, T, fu)]),
-            ([T, fu, U, fb, B, fb, T],
-             [(d.pool_usdc[t], T, U, fu), (d.pool_ub, U, B, fb),
+            ([T, fu, U, fub, B, fb, T],
+             [(d.pool_usdc[t], T, U, fu), (d.pool_ub, U, B, fub),
               (d.pool_buck[t], B, T, fb)]),
         ]
         best = None

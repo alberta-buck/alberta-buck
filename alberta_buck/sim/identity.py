@@ -6,12 +6,20 @@ address (so a proof valid for one address cannot be replayed).  Contracts
 (BuckBasket, every V3 pool, the Universal Router) get a public
 `bindContract` Identity.  This mirrors `alberta_buck/wallet/vectors.py`
 exactly (the path the Solidity verifier already accepts).
+
+Deterministic EOA + registration-args cache (``test/vectors/identity-cache.json``):
+the first run with a given seed incurs the full NIZK-prove cost; subsequent
+runs hit the cache (~instant).  Cache key = (seed_hex, class_name, agent_idx).
 """
 
 from __future__ import annotations
 
-import random
+import json, os, random
+from pathlib import Path
 from typing import Any, Callable
+
+from eth_account import Account
+from eth_account.signers.local import LocalAccount
 
 from alberta_buck.wallet.bn254 import G1, mul, point_to_words, rand_scalar
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
@@ -24,6 +32,80 @@ from alberta_buck.wallet.nizk import registration_prove
 _G = point_to_words(G1)                       # (1, 2)
 BIND_PK = _G
 BIND_E = (_G, _G)                              # ElGamalCT (R, C)
+
+_CACHE_PATH = Path(__file__).resolve().parents[2] / "test" / "vectors" / "identity-cache.json"
+
+
+def _load_cache() -> dict:
+    if _CACHE_PATH.exists():
+        try:
+            return json.loads(_CACHE_PATH.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_cache(cache: dict) -> None:
+    _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _CACHE_PATH.write_text(json.dumps(cache))
+
+
+def _cache_key(seed: int, class_name: str, idx: int) -> str:
+    return f"{seed:08x}:{class_name}:{idx}"
+
+
+def _deterministic_key(seed: int, class_name: str, idx: int) -> bytes:
+    """Derive a reproducible EOA private key from seed + class + idx."""
+    import hashlib
+    material = f"{seed}:{class_name}:{idx}".encode()
+    h = hashlib.sha256(material).digest()
+    # Expand to 32 bytes via another round.
+    h = hashlib.sha256(h + b"eoa").digest()
+    return h
+
+
+def _to_serializable(args: tuple) -> list:
+    """Convert register_args return value to JSON-serialisable form."""
+    pk, E_arg, sig_arg, proof_arg = args
+    def tups(x):
+        if isinstance(x, tuple):
+            return [tups(v) for v in x]
+        return x
+    return [tups(pk), tups(E_arg), tups(sig_arg), tups(proof_arg)]
+
+
+def _from_serializable(data: list) -> tuple:
+    """Reconstruct register_args from JSON."""
+    def tup(x):
+        if isinstance(x, list):
+            return tuple(tup(v) for v in x)
+        return x
+    return tuple(tup(v) for v in data)
+
+
+def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
+                     rng: Callable[[], int]) -> tuple[LocalAccount, tuple]:
+    """Return (account, register_args) for an agent, using disk cache.
+
+    The EOA private key is deterministic (seed + class + idx), so the
+    address is stable across runs.  Registration args are cached per key;
+    only the first run pays the NIZK-prove cost.
+    """
+    pk_bytes = _deterministic_key(seed, class_name, idx)
+    account = Account.from_key(pk_bytes)
+    addr_int = int(account.address, 16)
+
+    cache = _load_cache()
+    key = _cache_key(seed, class_name, idx)
+    if key in cache:
+        return account, _from_serializable(cache[key])
+
+    # Generate fresh registration args and cache them.
+    fields = fields_for(class_name, idx)
+    args = register_args(issuer, addr_int, fields, rng)
+    cache[key] = _to_serializable(args)
+    _save_cache(cache)
+    return account, args
 
 
 def seeded_rng(seed: int) -> Callable[[], int]:

@@ -52,7 +52,7 @@ REBALANCING = Scenario(
     agents={"AnonymousArbAgent": 3,
             "TokenAccumulatorAgent": 3,
             "MarketMakerWhale": 1,
-            "BuckBasketRebalancerAgent": 1},
+            "DirectMintAgent": 8},        # staggered entry every ~30d
     days=365,
     ticks_per_day=4,
 )

@@ -27,12 +27,12 @@ UR_ARTIFACT = "alberta_buck/sim/artifacts/UniversalRouter.json"
 E6 = 10 ** 6
 E18 = 10 ** 18
 FEE_USDC = 3000
-FEE_BUCK = 500
+FEE_BUCK = 3000         # TOKEN/BUCK pools: 0.30% (direct-mint LP profit)
+FEE_BUCK_UB = 500       # BUCK/USDC pool:   0.05% (gauge-breaking, cheap)
 TICK_SPACING = {3000: 60, 500: 10}
 # Common BUCK reserve every TOKEN/BUCK basket pool is seeded to, so no
 # single token's pool depth dominates the shared routing.
-#TARGET_BUCK = 10 ** 14
-TARGET_BUCK = 10 ** 12  # Bucks are 6-digit fixed, so 1,000,000 x 1e6 = 10**12
+TARGET_BUCK = 10 ** 14  # $10^8 / 10^6-dec = $100 BUCK per pool
 
 DEPOSITED_TOPIC = Web3.keccak(
     text="Deposited(address,uint256,address,uint256,uint256,uint128)")
@@ -65,7 +65,8 @@ class Deployment:
     pool_meta: list = field(default_factory=list)   # (pool,owner,lo,hi,group)
     pool_receipts: dict = field(default_factory=dict)  # token_index -> receiptId
     fee_usdc: int = FEE_USDC
-    fee_buck: int = FEE_BUCK
+    fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
+    fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
 
 
 def _erc20_abi() -> list:
@@ -247,8 +248,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
         buck.address,
         buck.encode_abi("mint(uint256)", args=[TARGET_BUCK_LP])))
 
-    chain.send(v3f.functions.createPool(buck.address, usdc.address, FEE_BUCK))
-    pub = v3f.functions.getPool(buck.address, usdc.address, FEE_BUCK).call()
+    chain.send(v3f.functions.createPool(buck.address, usdc.address, FEE_BUCK_UB))
+    pub = v3f.functions.getPool(buck.address, usdc.address, FEE_BUCK_UB).call()
     poolU = w3.eth.contract(address=pub, abi=pool_v3_abi)
     spU = sqrt_price_x96(buck.address, 1_000_000, usdc.address, 1_000_000)
     chain.send(poolU.functions.initialize(spU))
@@ -262,15 +263,15 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
         Lub = TARGET_BUCK * spU // Q96
     else:
         Lub = TARGET_BUCK * Q96 // spU
-    lo, hi = full_range_ticks(TICK_SPACING[FEE_BUCK])
-    chain.send(simlp.functions.mint(pub, lo, hi, max(1, Lub), u0, u1))
+    lo_ub, hi_ub = full_range_ticks(TICK_SPACING[FEE_BUCK_UB])
+    chain.send(simlp.functions.mint(pub, lo_ub, hi_ub, max(1, Lub), u0, u1))
     d.pool_ub = pub
 
     if verbose:
         buck_bal = buck.functions.balanceOf(pub).call()
         usdc_bal = usdc.functions.balanceOf(pub).call()
         print(f"[deploy] BUCK/USDC pool {pub[:10]}...  "
-              f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)")
+              f"fee={FEE_BUCK_UB} ({TICK_SPACING[FEE_BUCK_UB]}-tick)")
         print(f"         sqrtPriceX96={spU}  implied $1.00/BUCK (by construction)")
         print(f"         reserves: {buck_bal/E18:,.2f} BUCK  "
               f"{usdc_bal/E6:,.2f} USDC")
@@ -279,10 +280,11 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     # group).  TOKEN/USDC + BUCK/USDC are SimLP-funded; TOKEN/BUCK are
     # direct-mint funded (owned by BuckBasket).  All full-range.
     lou, hiu = full_range_ticks(TICK_SPACING[FEE_USDC])
-    lob, hib = full_range_ticks(TICK_SPACING[FEE_BUCK])
+    lob_tok, hib_tok = full_range_ticks(TICK_SPACING[FEE_BUCK])
+    lob_ub, hib_ub = full_range_ticks(TICK_SPACING[FEE_BUCK_UB])
     d.pool_meta = (
         [(d.pool_usdc[i], simlp.address, lou, hiu, "usdc") for i in range(len(tok))]
-        + [(d.pool_buck[i], basket.address, lob, hib, "buck") for i in range(len(tok))]
-        + [(d.pool_ub, simlp.address, lob, hib, "ub")]
+        + [(d.pool_buck[i], basket.address, lob_tok, hib_tok, "buck") for i in range(len(tok))]
+        + [(d.pool_ub, simlp.address, lob_ub, hib_ub, "ub")]
     )
     return d
