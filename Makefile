@@ -254,6 +254,28 @@ sim-plot:	$(ROUTING_VECTOR)
 sim:		sim-run sim-plot
 
 
+# ── Rebalancing simulation (Phase 1: BuckBasket-rebalancer arb agent) ──
+#
+# Adds a BuckBasketRebalancerAgent that monitors TOKEN/BUCK pool value
+# weights vs basket target weights and rebalances overweight->underweight.
+#
+#   make sim-rebalancing         # build -> run -> plot (365 days)
+#   make sim-run-rebalancing     # run the rebalancing scenario
+#   make sim-plot-rebalancing    # render images/rebalancing-sim.png
+
+REBALANCING_VECTOR   = test/vectors/rebalancing-sim.json
+REBALANCING_IMAGE    = images/rebalancing-sim.png
+SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
+
+sim-run-rebalancing:	sim-build
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+
+sim-plot-rebalancing:	$(REBALANCING_VECTOR)
+	python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing:	sim-run-rebalancing sim-plot-rebalancing
+
+
 # ── Dependencies ─────────────────────────────────────────────────────
 
 install:

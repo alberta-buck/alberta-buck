@@ -8,6 +8,7 @@ from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.agents import REGISTRY, MarketMakerWhale
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
+import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 from alberta_buck.sim.snapshot import Snapshotter
 
 E6 = 10 ** 6
@@ -42,6 +43,8 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
 
     snap = Snapshotter(d, scenario)
     init_val = snap.agg_value(agents, 0)
+    # Rebalancer initial capital (day-0 prices) for separate P&L tracking.
+    reb_init = snap._agent_value(agents, 0, "BuckBasketRebalancerAgent")
     ctr = {"directTrades": 0, "cycleTrades": 0, "ubTrades": 0}
 
     ts = w3.eth.get_block("latest")["timestamp"] + 10
@@ -66,7 +69,7 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
             chain.send(d.kctrl.functions.compute())
         except Exception:
             pass
-        snap.capture(day, ctr, agents, init_val)
+        snap.capture(day, ctr, agents, init_val, reb_init)
         if verbose and (day % 20 == 0 or day == scenario.days - 1):
             f = snap.frames[-1]
             errs = [abs(f["spotUsdc"][i] - f["refUsd"][i]) / max(1, f["refUsd"][i])

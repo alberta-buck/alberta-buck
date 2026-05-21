@@ -16,7 +16,7 @@ from web3 import Web3
 from alberta_buck.sim.chain import load_artifact
 
 REPO = Path(__file__).resolve().parents[2]
-DEFAULT_OUT = REPO / "test" / "vectors" / "routing-sim.json"
+DEFAULT_VECTORS = REPO / "test" / "vectors"
 Q96 = 1 << 96
 Q128 = 1 << 128
 MASK256 = (1 << 256) - 1
@@ -33,6 +33,47 @@ def _implied(d, pool, token_c, dec, quote_c):
     if rt == 0:
         return 0
     return rq * (10 ** dec) // rt
+
+
+def _pool_value_weights(d) -> list[list[float]]:
+    """Per-token [actual_weight, target_weight] from TOKEN/BUCK pools.
+
+    Target weights derive from the basket definition (basketAmount_i *
+    poolPrice_i).  Actual weights derive from pool composition (tokenReserve_i
+    * poolPrice_i).  Both are normalised so they sum to 1.0.
+    """
+    N = len(d.tokens)
+    # Compute implied BUCK prices (18-dec BUCK per 1 whole token).
+    prices = []
+    for i in range(N):
+        rt = _bal(d.tokens[i], d.pool_buck[i])
+        rb = _bal(d.buck, d.pool_buck[i])
+        prices.append(rb * (10 ** d.dec[i]) // rt if rt else 0)
+
+    # Target values from basket definition.
+    target_val = []
+    for i in range(N):
+        try:
+            c = d.basket.functions.constituents(i).call()
+            ba = c[2]  # Constituent.basketAmount
+        except Exception:
+            ba = 0
+        target_val.append(ba * prices[i] if prices[i] else 0)
+    tv_sum = sum(target_val)
+
+    # Actual values from pool token-side reserves.
+    actual_val = []
+    for i in range(N):
+        rt = _bal(d.tokens[i], d.pool_buck[i])
+        actual_val.append(rt * prices[i] if prices[i] else 0)
+    av_sum = sum(actual_val)
+
+    out = []
+    for i in range(N):
+        tw = target_val[i] / tv_sum if tv_sum else 0.0
+        aw = actual_val[i] / av_sum if av_sum else 0.0
+        out.append([aw, tw])
+    return out
 
 
 class Snapshotter:
@@ -103,7 +144,21 @@ class Snapshotter:
                 v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
         return v
 
-    def capture(self, day, ctr, agents, init_val) -> None:
+    def _agent_value(self, agents, day, cls_name: str) -> int:
+        """Portfolio value of all agents whose class name matches."""
+        d = self.d
+        v = 0
+        for ag in agents:
+            if type(ag).__name__ != cls_name:
+                continue
+            if not getattr(ag, "is_eoa", False) or ag.account is None:
+                continue
+            for i, tc in enumerate(d.tokens):
+                v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
+        return v
+
+    def capture(self, day, ctr, agents, init_val,
+                rebal_init_val: int | None = None) -> None:
         d = self.d
         ref, su, sb = [], [], []
         for i, tc in enumerate(d.tokens):
@@ -134,6 +189,15 @@ class Snapshotter:
         for i, tc in enumerate(d.tokens):
             pool_bal.append([_bal(tc, d.pool_buck[i]),
                              _bal(d.buck, d.pool_buck[i])])
+        # Basket target vs actual pool value weights (for rebalancing plot).
+        pool_weights = _pool_value_weights(d)
+
+        # Rebalancer P&L (if any rebalancers are present).
+        reb_pnl = 0
+        if rebal_init_val is not None:
+            reb_pnl = self._agent_value(
+                agents, day, "BuckBasketRebalancerAgent") - rebal_init_val
+
         self.frames.append({
             "invested": init_val,                      # arb capital (USDC,d0)
             "lp": lp,                                  # group: [feeUsd, capUsd]
@@ -150,10 +214,14 @@ class Snapshotter:
             "buckUsd": buck_usd,
             "aggPnl": self.agg_value(agents, day) - init_val,
             "poolBal": pool_bal,
+            "poolWeights": pool_weights,
+            "rebalancerPnl": reb_pnl,
+            "rebalanceTrades": ctr.get("rebalanceTrades", 0),
         })
 
     def write(self, path=None) -> Path:
-        p = Path(path) if path else DEFAULT_OUT
+        p = Path(path) if path else (
+            DEFAULT_VECTORS / f"{self.s.name}-sim.json")
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"tokens": self.tokens, "decimals": self.d.dec,
                                  "frames": self.frames}))

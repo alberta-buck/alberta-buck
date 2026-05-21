@@ -43,4 +43,18 @@ ROUTING = Scenario(
     ticks_per_day=4,
 )
 
-SCENARIOS = {ROUTING.name: ROUTING}
+REBALANCING = Scenario(
+    name="rebalancing",
+    tokens=[("PAXG", "PAX Gold", 18),
+            ("cbBTC", "Coinbase Wrapped BTC", 8),
+            ("AOIL", "Alberta Oil", 18)],
+    csv_files=["paxg.csv", "cbbtc.csv", "aoil.csv"],
+    agents={"AnonymousArbAgent": 3,
+            "TokenAccumulatorAgent": 3,
+            "MarketMakerWhale": 1,
+            "BuckBasketRebalancerAgent": 1},
+    days=365,
+    ticks_per_day=4,
+)
+
+SCENARIOS = {ROUTING.name: ROUTING, REBALANCING.name: REBALANCING}
