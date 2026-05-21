@@ -39,6 +39,8 @@ endif
 .PHONY: vector-lifecycle vector-equilibrium vector-arb
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
 .PHONY: sim sim-build sim-run sim-test sim-plot
+.PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
+.PHONY: prices-routing vector-routing plot-routing images-routing
 
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -231,7 +233,7 @@ images-routing:	prices-routing $(ROUTING_ARTIFACT) vector-routing plot-routing
 #
 # Override horizon:  make sim-run SIM_DAYS=365 SIM_TICKS=4
 
-SIM_DAYS	?= 365 # 120
+SIM_DAYS	?= 365
 SIM_TICKS	?= 4
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
@@ -254,17 +256,19 @@ sim-plot:	$(ROUTING_VECTOR)
 sim:		sim-run sim-plot
 
 
-# ── Rebalancing simulation (Phase 1: BuckBasket-rebalancer arb agent) ──
+# ── Rebalancing simulation (Phase 1: staggered direct-mint agents) ──────
 #
-# Adds a BuckBasketRebalancerAgent that monitors TOKEN/BUCK pool value
-# weights vs basket target weights and rebalances overweight->underweight.
+# DirectMintAgents enter on a staggered cadence (every ~30 days), each
+# depositing into the most-underweight TOKEN/BUCK pool and holding for
+# months.  The entry/exit flow naturally rebalances pools toward target
+# weights.  BuckBasket has been fixed so equal weightBp yields equal
+# target weights (0 => default 1/N share).
 #
 #   make sim-rebalancing         # build -> run -> plot (365 days)
 #   make sim-run-rebalancing     # run the rebalancing scenario
 #   make sim-plot-rebalancing    # render images/rebalancing-sim.png
 
 REBALANCING_VECTOR   = test/vectors/rebalancing-sim.json
-REBALANCING_IMAGE    = images/rebalancing-sim.png
 SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
 
 sim-run-rebalancing:	sim-build
