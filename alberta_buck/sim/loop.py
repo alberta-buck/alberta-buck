@@ -7,8 +7,11 @@ import random
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.agents import REGISTRY, MarketMakerWhale
 from alberta_buck.sim.chain import Chain
-from alberta_buck.sim.deploy import deploy
+from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 from alberta_buck.sim.snapshot import Snapshotter
+
+E6 = 10 ** 6
+E18 = 10 ** 18
 
 
 def run(scenario, anvil, out_path=None, verbose=True) -> dict:
@@ -73,6 +76,98 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
 
     path = snap.write(out_path)
 
+    # --- teardown: redeem TOKEN/BUCK pools + pool ROI report ----------- #
+    if verbose:
+        from eth_abi import decode as eth_abi_decode
+
+        print("\n[teardown] ======== Pool Teardown ========")
+
+        # Capture LP group state BEFORE redeeming TOKEN/BUCK pools
+        # (redemption collects fees, zeroing the buck group position).
+        lg_pre = snap._lp_groups()
+        cap_pre = dict(snap._lp_cap) if snap._lp_cap else {}
+
+        # -- TOKEN/BUCK pools: redeem each via BuckBasket ------------ #
+        for i, tc in enumerate(d.tokens):
+            sym = scenario.tokens[i][0]
+            rid = d.pool_receipts.get(i)
+            pb = d.pool_buck[i]
+            if rid is None:
+                print(f"\n[teardown] {sym}/BUCK pool {pb[:10]}...  "
+                      f"NO receipt ID — cannot redeem")
+                continue
+
+            # Pre-redeem pool state.
+            tok_pre = tc.functions.balanceOf(pb).call()
+            buck_pre = d.buck.functions.balanceOf(pb).call()
+            implied_pre = (buck_pre * (10 ** d.dec[i]) // tok_pre
+                           if tok_pre else 0)
+            # Initial deposit details.
+            dep = d.basket.functions.deposits(rid).call()
+            principal_tok = dep[1]
+            principal_buck = dep[2]
+
+            print(f"\n[teardown] {sym}/BUCK pool {pb[:10]}...  "
+                  f"receiptId={rid}")
+            print(f"           pre-redeem: {tok_pre/(10**d.dec[i]):,.6g} {sym}  "
+                  f"{buck_pre/E18:,.2f} BUCK  "
+                  f"implied {implied_pre/E18:,.2f} BUCK/{sym}")
+            print(f"           initial deposit: "
+                  f"{principal_tok/(10**d.dec[i]):,.6g} {sym}  "
+                  f"{principal_buck/E18:,.2f} BUCK")
+
+            try:
+                rcpt = chain.send(d.basket.functions.redeem(rid, 0))
+                for log in rcpt["logs"]:
+                    if log["topics"][0] == REDEEMED_TOPIC:
+                        toUserT, halfProfitT, burnedB, halfProfitB, _liq = \
+                            eth_abi_decode(
+                                ["uint256", "uint256", "uint256",
+                                 "uint256", "uint128"],
+                                log["data"])
+                        user_tok = toUserT + halfProfitT
+                        profit_tok = user_tok - principal_tok if user_tok > principal_tok else 0
+                        total_profit_tok = profit_tok  # token-side profit
+                        # halfProfitB is user's BUCK profit; 2x is total BUCK profit
+                        total_profit_buck = 2 * halfProfitB
+                        print(f"           redeemed:")
+                        print(f"             token to user: "
+                              f"{user_tok/(10**d.dec[i]):,.6g} {sym}  "
+                              f"(principal {toUserT/(10**d.dec[i]):,.6g}"
+                              f" + profit {halfProfitT/(10**d.dec[i]):,.6g})")
+                        print(f"             BUCK profit to user: "
+                              f"{halfProfitB/E18:,.2f} BUCK")
+                        print(f"             BUCK burned: {burnedB/E18:,.2f}")
+                        print(f"             treasury retained: "
+                              f"{halfProfitT/(10**d.dec[i]):,.6g} {sym}")
+                        roi_tok = (100 * profit_tok / principal_tok
+                                   if principal_tok else 0)
+                        print(f"             token profit: "
+                              f"{profit_tok/(10**d.dec[i]):,.6g} {sym}  "
+                              f"ROI {roi_tok:+.3f}%")
+                        break
+                else:
+                    print(f"           WARNING: no Redeemed event found")
+            except Exception as e:
+                print(f"           redeem FAILED: {e}")
+
+            # Post-redeem pool state.
+            tok_post = tc.functions.balanceOf(pb).call()
+            buck_post = d.buck.functions.balanceOf(pb).call()
+            implied_post = (buck_post * (10 ** d.dec[i]) // tok_post
+                            if tok_post else 0)
+            print(f"           post-redeem: {tok_post/(10**d.dec[i]):,.6g} {sym}  "
+                  f"{buck_post/E18:,.2f} BUCK  "
+                  f"implied {implied_post/E18:,.2f} BUCK/{sym}")
+
+        # -- TOKEN/USDC pools + BUCK/USDC pool: LP group summary ----- #
+        print(f"\n[teardown] LP group summary (cumulative fees / day-0 capital):")
+        for g, cap0 in cap_pre.items():
+            fee, _cap = lg_pre.get(g, (0, 0))
+            roi = 100 * fee / cap0 if cap0 else 0
+            print(f"  {g:5s}  capital ${cap0/E6:,.0f}  "
+                  f"fees ${fee/E6:,.0f}  ROI {roi:+.3f}%")
+
     # --- summary ----------------------------------------------------- #
     tail = snap.frames[-30:] if len(snap.frames) >= 30 else snap.frames
     track = []
@@ -93,7 +188,7 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
         "n_agents": len(agents),
     }
     if verbose:
-        print(f"[sim] wrote {path}")
+        print(f"\n[sim] wrote {path}")
         for i, t in enumerate(summary["tokens"]):
             print(f"[sim]   {t:5s} TOKEN/USDC tail tracking err {100*track[i]:.2f}%")
         print(f"[sim] BUCK-routed trades: {ctr['cycleTrades']}  "

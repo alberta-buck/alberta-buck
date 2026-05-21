@@ -24,6 +24,7 @@ from alberta_buck.sim.router import (
 REPO = Path(__file__).resolve().parents[2]
 UR_ARTIFACT = "test/stabilizer-routing-op47/artifacts/UniversalRouter.json"
 
+E6 = 10 ** 6
 E18 = 10 ** 18
 FEE_USDC = 3000
 FEE_BUCK = 500
@@ -32,6 +33,11 @@ TICK_SPACING = {3000: 60, 500: 10}
 # single token's pool depth dominates the shared routing.
 #TARGET_BUCK = 10 ** 14
 TARGET_BUCK = 10 ** 12  # Bucks are 6-digit fixed, so 1,000,000 x 1e6 = 10**12
+
+DEPOSITED_TOPIC = Web3.keccak(
+    text="Deposited(address,uint256,address,uint256,uint256,uint128)")
+REDEEMED_TOPIC = Web3.keccak(
+    text="Redeemed(address,uint256,address,uint256,uint256,uint256,uint256,uint128)")
 
 
 @dataclass
@@ -57,6 +63,7 @@ class Deployment:
     pool_buck: list = field(default_factory=list)   # TOKEN/BUCK addrs
     pool_ub: str = ""                               # floating BUCK/USDC pool
     pool_meta: list = field(default_factory=list)   # (pool,owner,lo,hi,group)
+    pool_receipts: dict = field(default_factory=dict)  # token_index -> receiptId
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK
 
@@ -66,7 +73,7 @@ def _erc20_abi() -> list:
     return abi
 
 
-def deploy(chain: Chain, anvil, scenario, rng) -> Deployment:
+def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, pool_acct, issuer_addr = accts[0], accts[1], accts[2], accts[3]
@@ -158,8 +165,18 @@ def deploy(chain: Chain, anvil, scenario, rng) -> Deployment:
             Lusdc = TARGET_BUCK * sp // Q96
         else:                                       # USDC is token1
             Lusdc = TARGET_BUCK * Q96 // sp
-        chain.send(simlp.functions.mint(pu, lo, hi, max(1, Lusdc), t0, t1))
+        rcpt = chain.send(simlp.functions.mint(pu, lo, hi, max(1, Lusdc), t0, t1))
         d.pool_usdc.append(pu)
+
+        if verbose:
+            tok_bal = c.functions.balanceOf(pu).call()
+            usdc_bal = usdc.functions.balanceOf(pu).call()
+            implied = usdc_bal * (10 ** dec[i]) // tok_bal if tok_bal else 0
+            print(f"[deploy] TOKEN/USDC {sym}/USDC pool {pu[:10]}...  "
+                  f"fee={FEE_USDC} ({TICK_SPACING[FEE_USDC]}-tick)")
+            print(f"         sqrtPriceX96={sp}  implied ${implied/E6:,.2f}/{sym}")
+            print(f"         reserves: {tok_bal/(10**dec[i]):,.6g} {sym}  "
+                  f"{usdc_bal/E6:,.2f} USDC")
 
         # TOKEN/BUCK basket pool via direct mint.
         chain.send(basket.functions.addBasketToken(
@@ -175,8 +192,28 @@ def deploy(chain: Chain, anvil, scenario, rng) -> Deployment:
         seed = max(10 ** dec[i], TARGET_BUCK * (10 ** dec[i]) // p0)
         chain.send(c.functions.mint(deployer, seed))
         chain.send(c.functions.approve(basket.address, seed))
-        chain.send(basket.functions.depositToken(c.address, seed, 0))
+        dep_rcpt = chain.send(basket.functions.depositToken(c.address, seed, 0))
         d.pool_buck.append(pb)
+
+        # Extract receiptId from the Deposited event.
+        rid = None
+        for log in dep_rcpt["logs"]:
+            if log["topics"][0] == DEPOSITED_TOPIC:
+                rid = int.from_bytes(log["topics"][2], "big")
+                d.pool_receipts[i] = rid
+                break
+
+        if verbose:
+            tok_bal = c.functions.balanceOf(pb).call()
+            buck_bal = buck.functions.balanceOf(pb).call()
+            implied = buck_bal * (10 ** dec[i]) // tok_bal if tok_bal else 0
+            print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
+                  f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)")
+            print(f"         seed={seed/(10**dec[i]):,.6g} {sym}  "
+                  f"initialPrice={p0/E6:,.2f} BUCK/{sym}")
+            print(f"         reserves: {tok_bal/(10**dec[i]):,.6g} {sym}  "
+                  f"{buck_bal/E18:,.2f} BUCK")
+            print(f"         receiptId={rid}")
 
     # --- floating BUCK/USDC pool (gauge-breaking, not a peg) ---------- #
     #
@@ -227,6 +264,15 @@ def deploy(chain: Chain, anvil, scenario, rng) -> Deployment:
     lo, hi = full_range_ticks(TICK_SPACING[FEE_BUCK])
     chain.send(simlp.functions.mint(pub, lo, hi, max(1, Lub), u0, u1))
     d.pool_ub = pub
+
+    if verbose:
+        buck_bal = buck.functions.balanceOf(pub).call()
+        usdc_bal = usdc.functions.balanceOf(pub).call()
+        print(f"[deploy] BUCK/USDC pool {pub[:10]}...  "
+              f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)")
+        print(f"         sqrtPriceX96={spU}  implied $1.00/BUCK (by construction)")
+        print(f"         reserves: {buck_bal/E18:,.2f} BUCK  "
+              f"{usdc_bal/E6:,.2f} USDC")
 
     # LP-position metadata for ROI/APR accounting: (pool, owner, lo, hi,
     # group).  TOKEN/USDC + BUCK/USDC are SimLP-funded; TOKEN/BUCK are

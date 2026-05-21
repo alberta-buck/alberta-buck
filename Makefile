@@ -218,7 +218,7 @@ images-routing:	prices-routing $(ROUTING_ARTIFACT) vector-routing plot-routing
 #
 # Override horizon:  make sim-run SIM_DAYS=365 SIM_TICKS=4
 
-SIM_DAYS	?= 120
+SIM_DAYS	?= 365 # 120
 SIM_TICKS	?= 4
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
