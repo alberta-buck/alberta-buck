@@ -48,6 +48,11 @@ class Agent:
     def address(self) -> str:
         return self.account.address
 
+    def deposit_info(self, d) -> tuple | None:
+        """Return (token_idx, principal_tok, principal_buck) for LP position
+        value tracking.  None means the agent has no BuckBasket deposit."""
+        return None
+
     # registered as a real cryptographic identity (disk-cached per seed).
     def setup(self, d, scenario, rng) -> None:
         self.account, args = idmod.cached_eoa_setup(

@@ -152,6 +152,16 @@ class DirectMintAgent(Agent):
             print(f"[dm-{self.idx}] _enter failed: {e!r}")
             self._receipt_id = None
 
+    def deposit_info(self, d) -> tuple | None:
+        """Return (token_idx, principal_tok, principal_buck) for LP value.
+        Returns None once the position has been redeemed (tokens are back in
+        the EOA and counted by _bal())."""
+        if (self._receipt_id is None or self._deposit_token_idx is None
+                or self._exited):
+            return None
+        return (self._deposit_token_idx,
+                self._principal_tok, self._principal_buck)
+
     def _exit(self, d, ctr) -> None:
         """Redeem the receipt NFT."""
         self._exited = True

@@ -147,7 +147,8 @@ class Snapshotter:
         return v
 
     def _agent_value(self, agents, day, cls_name: str) -> int:
-        """Portfolio value of all agents whose class name matches."""
+        """Portfolio value of all agents whose class name matches, including
+        the value of any BuckBasket LP deposits (receipt NFTs)."""
         d = self.d
         v = 0
         for ag in agents:
@@ -157,6 +158,12 @@ class Snapshotter:
                 continue
             for i, tc in enumerate(d.tokens):
                 v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
+            # Include BuckBasket deposit value (LP position principal).
+            di = ag.deposit_info(d) if hasattr(ag, "deposit_info") else None
+            if di is not None:
+                tok_idx, ptok, pbuck = di
+                v += ptok * self.s.prices.ref(tok_idx, 0) // (10 ** d.dec[tok_idx])
+                v += pbuck // (10 ** 12)  # 1 BUCK = 1 USDC at t=0; 18d→6d
         return v
 
     def capture(self, day, ctr, agents, init_val,
