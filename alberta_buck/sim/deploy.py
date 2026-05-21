@@ -22,7 +22,7 @@ from alberta_buck.sim.router import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
-UR_ARTIFACT = "test/stabilizer-routing-op47/artifacts/UniversalRouter.json"
+UR_ARTIFACT = "alberta_buck/sim/artifacts/UniversalRouter.json"
 
 E6 = 10 ** 6
 E18 = 10 ** 18
@@ -143,6 +143,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     # --- pools: TOKEN/USDC (truth) + TOKEN/BUCK (basket) ------------- #
     pool_v3_abi, _ = load_artifact("UniswapV3Pool")
     for i, c in enumerate(tok):
+        sym = scenario.tokens[i][0]
         p0 = scenario.prices.day0(i)
         # TOKEN/USDC pool, initialized at day-0 price, deep SimLP liquidity.
         chain.send(v3f.functions.createPool(c.address, usdc.address, FEE_USDC))

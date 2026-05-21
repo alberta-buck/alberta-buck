@@ -1,14 +1,16 @@
 """Render the routing-sim result to images/routing-sim.png.
 
 Workflow:
-  1.  forge test --match-contract RoutingSimTest
-        # writes test/vectors/routing-sim.json
-  2.  python -m pytest test/stabilizer-routing-op47/test_routing_sim_plot.py -v -s
-        # reads JSON, writes images/routing-sim.png
+  1.  make sim-run           # writes test/vectors/routing-sim.json
+  2.  make sim-plot          # reads JSON, writes images/routing-sim.png
+
+Alternate invocations:
+  python -m alberta_buck.sim.plot_routing
+  python -m pytest alberta_buck/sim/plot_routing.py -v -s
 
 JSON schema (parallel per-frame, N=3 tokens [PAXG, cbBTC, AOIL]):
   frames[i] = { day, refUsd[3], spotUsdc[3], spotBuck[3],
-                basketVal, buckK, supply,
+                basketVal, buckK, supply, poolBal[3][2],
                 directTrades, cycleTrades, aggPnl }
 
 Units: refUsd/spotUsdc are USDC micro-dollars / token (1e6 == $1.00).
@@ -223,3 +225,7 @@ def test_routing_sim_plot():
         rr = fee / cap if cap else 0.0
         print(f"  {lbl} LP: capital ${cap/E6:,.0f}  fees ${fee/E6:,.0f}  "
               f"ROI {100*rr:+.3f}%  APR {100*rr*365/dN:+.2f}%")
+
+
+if __name__ == "__main__":
+    test_routing_sim_plot()

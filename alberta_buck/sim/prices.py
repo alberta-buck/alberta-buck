@@ -13,8 +13,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-CSV_DIR = REPO / "test" / "stabilizer-routing-op47"
+HERE = Path(__file__).resolve().parent
+CSV_DIR = HERE / "prices"
 
 PRICE_SCALE = 100
 

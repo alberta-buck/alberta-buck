@@ -168,21 +168,34 @@ images:			vectors plots
 #   make prices-routing       # regenerate price CSVs only
 
 ROUTING_DIR	= test/stabilizer-routing-op47
-ROUTING_PRICES	= $(ROUTING_DIR)/paxg.csv $(ROUTING_DIR)/cbbtc.csv $(ROUTING_DIR)/aoil.csv
-ROUTING_ARTIFACT = $(ROUTING_DIR)/artifacts/UniversalRouter.json
+SIM_PRICES_DIR  = alberta_buck/sim/prices
+SIM_PLOT_SCRIPT = alberta_buck/sim/plot_routing.py
+SIM_GEN_PRICES  = alberta_buck/sim/gen_prices.py
+SIM_ARTIFACTS   = alberta_buck/sim/artifacts
+
+ROUTING_PRICES	= $(SIM_PRICES_DIR)/paxg.csv $(SIM_PRICES_DIR)/cbbtc.csv $(SIM_PRICES_DIR)/aoil.csv
+ROUTING_ARTIFACT = $(SIM_ARTIFACTS)/UniversalRouter.json
 ROUTING_VECTOR	= test/vectors/routing-sim.json
-ROUTING_PLOT_SCRIPT = $(ROUTING_DIR)/test_routing_sim_plot.py
 ROUTING_IMAGE	= images/routing-sim.png
 
 prices-routing:	$(ROUTING_PRICES)
 
-$(ROUTING_PRICES): $(ROUTING_DIR)/gen_prices.py
-	python3 $<
+# Generate price CSVs in alberta_buck/sim/prices/; symlink back to
+# test/stabilizer-routing-op47/ for the legacy Forge test compatibility.
+$(ROUTING_PRICES): $(SIM_GEN_PRICES)
+	python3 $(SIM_GEN_PRICES)
+	mkdir -p $(ROUTING_DIR)
+	cd $(ROUTING_DIR) && \
+		ln -sf ../../$(SIM_PRICES_DIR)/paxg.csv paxg.csv && \
+		ln -sf ../../$(SIM_PRICES_DIR)/cbbtc.csv cbbtc.csv && \
+		ln -sf ../../$(SIM_PRICES_DIR)/aoil.csv aoil.csv
 
 $(ROUTING_ARTIFACT):
 	( cd lib/universal-router && FORK_URL=http://localhost forge build --skip test --skip script )
+	mkdir -p $(SIM_ARTIFACTS)
+	cp lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json $@
 	mkdir -p $(ROUTING_DIR)/artifacts
-	cp lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json $(ROUTING_ARTIFACT)
+	cd $(ROUTING_DIR)/artifacts && ln -sf ../../$(SIM_ARTIFACTS)/UniversalRouter.json UniversalRouter.json
 
 vector-routing:	$(ROUTING_PRICES) $(ROUTING_ARTIFACT)
 	@test -f lib/universal-router/foundry.toml.bak || \
@@ -195,10 +208,10 @@ vector-routing:	$(ROUTING_PRICES) $(ROUTING_ARTIFACT)
 	exit $$EX
 
 plot-routing:	$(ROUTING_VECTOR)
-	python -m pytest $(ROUTING_PLOT_SCRIPT) -v -s
+	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
 
 $(ROUTING_IMAGE): $(ROUTING_VECTOR)
-	python -m pytest $(ROUTING_PLOT_SCRIPT) -v -s
+	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
 
 images-routing:	prices-routing $(ROUTING_ARTIFACT) vector-routing plot-routing
 
@@ -236,7 +249,7 @@ sim-test:	sim-build
 	python -m pytest $(SIM_TEST) -v -s
 
 sim-plot:	$(ROUTING_VECTOR)
-	python -m pytest $(ROUTING_PLOT_SCRIPT) -v -s
+	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
 
 sim:		sim-run sim-plot
 

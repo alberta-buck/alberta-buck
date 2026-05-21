@@ -14,6 +14,7 @@ import csv, math, random
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+OUT_DIR = HERE / "prices"
 
 DAYS = 730  # 2-year daily horizon
 
@@ -40,9 +41,10 @@ def gen(start: float, mu: float, sigma: float, seed: int):
 
 
 def main():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     for fname, start, mu, sigma, seed in SERIES:
         prices = gen(start, mu, sigma, seed)
-        path = HERE / fname
+        path = OUT_DIR / fname
         with path.open("w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["day", "close_usd_micro"])
