@@ -61,11 +61,13 @@ def _pool_value_weights(d) -> list[list[float]]:
         target_val.append(ba * prices[i] if prices[i] else 0)
     tv_sum = sum(target_val)
 
-    # Actual values from pool token-side reserves.
+    # Actual values from pool token-side reserves (normalized by token
+    # decimals so 8-dec cbBTC is comparable to 18-dec PAXG/AOIL).
     actual_val = []
     for i in range(N):
         rt = _bal(d.tokens[i], d.pool_buck[i])
-        actual_val.append(rt * prices[i] if prices[i] else 0)
+        actual_val.append(rt * prices[i] // (10 ** d.dec[i])
+                          if prices[i] else 0)
     av_sum = sum(actual_val)
 
     out = []

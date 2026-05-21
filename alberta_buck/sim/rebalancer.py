@@ -89,7 +89,7 @@ class BuckBasketRebalancerAgent(Agent):
             tc = d.tokens[i]
             pb = d.pool_buck[i]
             rt = tc.functions.balanceOf(pb).call()
-            actual_val.append(rt * prices[i])
+            actual_val.append(rt * prices[i] // (10 ** d.dec[i]))
         av_sum = sum(actual_val)
         if av_sum == 0:
             return

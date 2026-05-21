@@ -50,7 +50,6 @@ class DirectMintAgent(Agent):
         self._principal_buck: int = 0   # BUCK minted at deposit
         self._entered = False
         self._exited = False
-        self._entry_failed = False
 
     def setup(self, d, scenario, rng) -> None:
         super().setup(d, scenario, rng)
@@ -81,17 +80,17 @@ class DirectMintAgent(Agent):
             self._enter(d, scenario, ctr)
         elif (self._entered and not self._exited
               and self._receipt_id is not None and day >= self._exit_day):
+            print(f"[dm-{self.idx}] exiting day={day} exit_day={self._exit_day}")
             self._exit(d, ctr)
 
     def _enter(self, d, scenario, ctr) -> None:
         """Choose the most underweight pool and deposit into it."""
-        self._entered = True
         N = len(d.tokens)
 
         # Read pool prices and compute target vs actual value weights.
         prices = [self._pool_price(d, i) for i in range(N)]
         if any(p == 0 for p in prices):
-            self._entry_failed = True
+            print(f"[dm-{self.idx}] zero prices {prices}")
             return
 
         target_val = []
@@ -104,16 +103,16 @@ class DirectMintAgent(Agent):
             target_val.append(ba * prices[i])
         tv_sum = sum(target_val)
         if tv_sum == 0:
-            self._entry_failed = True
+            print(f"[dm-{self.idx}] tv_sum=0 target_val={target_val}")
             return
 
         actual_val = []
         for i in range(N):
             rt = _bal(d.tokens[i], d.pool_buck[i])
-            actual_val.append(rt * prices[i])
+            actual_val.append(rt * prices[i] // (10 ** d.dec[i]))
         av_sum = sum(actual_val)
         if av_sum == 0:
-            self._entry_failed = True
+            print(f"[dm-{self.idx}] av_sum=0 actual_val={actual_val}")
             return
 
         target_w = [v / tv_sum for v in target_val]
@@ -127,12 +126,15 @@ class DirectMintAgent(Agent):
         tc = d.tokens[tgt_idx]
         ref0 = scenario.prices.ref(tgt_idx, 0)
         seed = self.SEED_USDC * (10 ** d.dec[tgt_idx]) // ref0
+        # Mint can be from anyone; approve + depositToken must be from the
+        # agent so transferFrom pulls the agent's tokens.
         d.chain.send(tc.functions.mint(self.address, seed))
-        d.chain.send(tc.functions.approve(d.basket.address, seed))
-
+        d.chain.send(tc.functions.approve(d.basket.address, seed),
+                     sender=self.account)
         try:
             rcpt = d.chain.send(
-                d.basket.functions.depositToken(tc.address, seed, 0))
+                d.basket.functions.depositToken(tc.address, seed, 0),
+                sender=self.account)
             # Extract receiptId from the Deposited event.
             from alberta_buck.sim.deploy import DEPOSITED_TOPIC
             for log in rcpt["logs"]:
@@ -144,10 +146,11 @@ class DirectMintAgent(Agent):
                 self._principal_tok = dep[1]
                 self._principal_buck = dep[2]
                 self._deposit_token_idx = tgt_idx
+                self._entered = True
                 ctr["dmEntries"] = ctr.get("dmEntries", 0) + 1
-        except Exception:
+        except Exception as e:
+            print(f"[dm-{self.idx}] _enter failed: {e!r}")
             self._receipt_id = None
-            self._entry_failed = True
 
     def _exit(self, d, ctr) -> None:
         """Redeem the receipt NFT."""
@@ -155,7 +158,10 @@ class DirectMintAgent(Agent):
         if self._receipt_id is None:
             return
         try:
-            d.chain.send(d.basket.functions.redeem(self._receipt_id, 0))
+            d.chain.send(d.basket.functions.redeem(self._receipt_id, 0),
+                         sender=self.account)
+            print(f"[dm-{self.idx}] redeemed receiptId={self._receipt_id}")
             ctr["dmExits"] = ctr.get("dmExits", 0) + 1
-        except Exception:
+        except Exception as e:
+            print(f"[dm-{self.idx}] redeem failed: {e!r}")
             ctr["dmExitFails"] = ctr.get("dmExitFails", 0) + 1
