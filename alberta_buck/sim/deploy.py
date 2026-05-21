@@ -182,7 +182,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
 
         # TOKEN/BUCK basket pool via direct mint.
         chain.send(basket.functions.addBasketToken(
-            c.address, dec[i], p0, 10000 // len(tok), FEE_BUCK), sender=gov)
+            c.address, dec[i], p0, 0, FEE_BUCK), sender=gov)  # 0 => equal share
         pb = v3f.functions.getPool(c.address, buck.address, FEE_BUCK).call()
         chain.send(reg.functions.bindContract(
             pb, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)

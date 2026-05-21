@@ -67,6 +67,7 @@ contract BuckBasket is IUniswapV3MintCallback {
         int24   tickLower;
         int24   tickUpper;
         bool    buckIsToken0;        // BUCK address ordering in the pool
+        uint256 targetWeightBp;      // declared weight in basis points (0-10000)
     }
 
     Constituent[] public constituents;
@@ -159,14 +160,25 @@ contract BuckBasket is IUniswapV3MintCallback {
     // --- Configuration (governance) --------------------------------------- //
 
     /// @notice Add a basket constituent.
-    /// @dev    Dilutes every existing constituent's basketAmount by
-    ///         (1 - weightBp/10000), then sets the new constituent's
-    ///         basketAmount = (weightBp/10000) / initialPriceInBuck.
-    ///         After the call the basket value at *current* pool prices
-    ///         is exactly 1.0 BUCK (modulo TWAP rounding).  If existing
-    ///         pools have drifted from their initial prices the diluted
-    ///         amounts will not equal their original declared-weight
-    ///         proportions — the basket weights float with the market.
+    /// @dev    `weightBp` is the declared target weight in basis points
+    ///         (1 bp = 0.01%).  Pass 0 to default to an equal share:
+    ///         `10000 / N` for the resulting N-constituent basket.
+    ///
+    ///         Existing constituents' declared weights are rescaled
+    ///         proportionally so the total remains 10000 bp, preserving
+    ///         their relative weight ratios.  Every existing constituent's
+    ///         `basketAmount` is then recomputed at its *current* pool
+    ///         spot price so its contribution equals its declared weight
+    ///         share of 1.0 BUCK.  The new constituent is set at
+    ///         `initialPriceInBuck`.
+    ///
+    ///         Because existing constituents are re-priced at the current
+    ///         spot, price drift between additions is locked into
+    ///         `basketAmount`.  A future `rebalanceWeights()` (governance)
+    ///         will allow re-weighting or removing one or more constituents,
+    ///         recomputing all `basketAmount` values from current spot
+    ///         prices so every constituent matches its declared weight
+    ///         share of 1.0 BUCK.  Passing a weight of 0 removes a token.
     function addBasketToken(
         address token,
         uint8   decimals,
@@ -176,35 +188,50 @@ contract BuckBasket is IUniswapV3MintCallback {
     ) external returns (address pool) {
         require(msg.sender == governance, "Not governance");
         require(token != address(0) && token != address(buck), "bad token");
-        require(weightBp > 0 && weightBp <= 10000, "bad weight");
+        require(weightBp <= 10000, "bad weight");
         require(indexOf[token] == 0, "already present");
         require(initialPriceInBuck > 0, "bad price");
 
-        // Rescale existing constituents so they collectively contribute
-        // (10000 - weightBp) / 10000 of the new basket's 1.0 BUCK value
-        // at *current* pool prices.  The new constituent then fills the
-        // remaining weightBp/10000 share.
-        //
-        //   scale = ((10000 - weightBp) / 10000) / existingTotal
-        //
-        // Where existingTotal = sum(basketAmount_i * currentPrice_i).  When
-        // the basket is empty, existingTotal == 0 and the loop is skipped;
-        // the new constituent's weight may be any value up to 100%.
+        // --- resolve target weight -------------------------------------- //
+        // weightBp == 0  =>  equal share for all N constituents.
+        uint256 N = constituents.length + 1;
+        uint256 newW = weightBp > 0 ? weightBp : 10000 / N;
+        // Total existing declared weight (before rescaling).
+        uint256 existingSumW = 0;
+        for (uint256 i = 0; i < constituents.length; i++) {
+            existingSumW += constituents[i].targetWeightBp;
+        }
+
+        // --- renormalize existing constituents --------------------------- //
+        // Each existing constituent's declared weight is scaled so the
+        // total across all N constituents is 10000 bp.  Its basketAmount
+        // is then recomputed at the *current* pool spot price so its
+        // contribution to basketValueInBuck equals its declared share.
         if (constituents.length > 0) {
-            uint256 existingTotal = uint256(_currentBasketValueAtCurrentPrices());
-            require(existingTotal > 0, "existing basket = 0");
-            // scale = (1 - weightBp/10000) * UNIT / existingTotal  (18-dec)
-            uint256 numerator = (10000 - weightBp) * 1e18 / 10000;
-            uint256 scaleX18  = (numerator * 1e18) / existingTotal;
+            uint256 remaining = 10000 - newW;
+            require(remaining > 0 || newW == 10000, "no remaining weight");
             for (uint256 i = 0; i < constituents.length; i++) {
-                constituents[i].basketAmount =
-                    UniswapV3OracleLib.mulDiv(constituents[i].basketAmount, scaleX18, 1e18);
+                Constituent storage c = constituents[i];
+                uint256 scaledW = existingSumW > 0
+                    ? c.targetWeightBp * remaining / existingSumW
+                    : 0;
+                c.targetWeightBp = scaledW;
+                // basketAmount = scaledW / 10000 / spotPrice  (18-dec)
+                uint256 spotPrice = _readPoolPrice(c, 0);
+                require(spotPrice > 0, "pool price = 0");
+                uint256 weightUnit =
+                    UniswapV3OracleLib.mulDiv(scaledW, 1e18, 10000);
+                c.basketAmount =
+                    UniswapV3OracleLib.mulDiv(weightUnit, 1e18, spotPrice);
             }
         }
 
-        // New constituent's basketAmount = (weight / price) in 18-dec.
-        uint256 weightUnit = (weightBp * 1e18) / 10000;
-        uint256 basketAmount = (weightUnit * 1e18) / initialPriceInBuck;
+        // --- new constituent --------------------------------------------- //
+        // basketAmount = newW / 10000 / initialPriceInBuck
+        uint256 weightUnit =
+            UniswapV3OracleLib.mulDiv(newW, 1e18, 10000);
+        uint256 basketAmount =
+            UniswapV3OracleLib.mulDiv(weightUnit, 1e18, initialPriceInBuck);
 
         // Create / locate the V3 pool.  Order tokens by address.
         pool = _findOrCreatePool(token, feeTier);
@@ -239,7 +266,8 @@ contract BuckBasket is IUniswapV3MintCallback {
             pool: pool,
             tickLower: tickLower,
             tickUpper: tickUpper,
-            buckIsToken0: address(buck) < token
+            buckIsToken0: address(buck) < token,
+            targetWeightBp: newW
         }));
         indexOf[token] = constituents.length;
 
@@ -247,8 +275,25 @@ contract BuckBasket is IUniswapV3MintCallback {
         // manifest as a single-cycle P/I spike.
         controller.reprime();
 
-        emit BasketTokenAdded(token, weightBp, initialPriceInBuck, pool);
+        emit BasketTokenAdded(token, newW, initialPriceInBuck, pool);
     }
+
+    /// @notice (Future) Re-weight or remove basket constituents.
+    /// @dev    Accepts one or more (token, weightBp) pairs.  Weight 0
+    ///         removes the token.  The remaining declared-weight budget
+    ///         is distributed to unchanged constituents proportionally.
+    ///         All `basketAmount` values are recomputed at current spot
+    ///         prices so each constituent's contribution equals its
+    ///         declared share of 1.0 BUCK.
+    //
+    // function rebalanceWeights(
+    //     address[] calldata tokens,
+    //     uint256[] calldata weightBps
+    // ) external {
+    //     require(msg.sender == governance, "Not governance");
+    //     require(tokens.length == weightBps.length, "length mismatch");
+    //     // ... renormalize all targetWeightBp, recompute basketAmount ...
+    // }
 
     function setGovernance(address _governance) external {
         require(msg.sender == governance, "Not governance");
