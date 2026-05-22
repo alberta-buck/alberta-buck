@@ -112,32 +112,36 @@ def test_rebalancing_sim_plot():
     ax.grid(True, alpha=0.3)
     ax.set_title("TOKEN/BUCK pool value weights: actual vs basket target")
 
-    # ---- Panel 5: treasury compounding (NAV vs outstanding) --------- #
+    # ---- Panel 5: treasury compounding (NAV, outstanding, treasury) -- #
     ax = axes[4]
     handles5 = []
     nav = [f.get("basketNav", 0) / E18 for f in fr]
     l1, = ax.plot(days, nav, color="tab:blue", linewidth=1.5,
-                  label="basket NAV (total LP value in BUCK)")
+                  label="basket NAV (total LP BUCK value)")
     handles5.append(l1)
     out = [f.get("dmOutstanding", 0) / E18 for f in fr]
     l2, = ax.plot(days, out, color="tab:orange", linewidth=1.2,
                   linestyle="--",
                   label="DM outstanding (BUCK principal)")
     handles5.append(l2)
+    tb = [f.get("treasuryBuck", 0) / E18 for f in fr]
+    l3, = ax.plot(days, tb, color="tab:green", linewidth=1.4,
+                  label="treasury BUCK (retained profit)")
+    handles5.append(l3)
     ax.set_ylabel("BUCK (18d)")
     ax.set_xlabel("Day")
     ax.grid(True, alpha=0.3)
 
     ax2 = ax.twinx()
     ts = [f.get("treasuryShare", 0) * 100 for f in fr]
-    l3, = ax2.plot(days, ts, color="tab:green", linewidth=1.4,
-                   label="treasury share (%)")
-    handles5.append(l3)
-    ax2.set_ylabel("treasury share (%)", color="tab:green")
-    ax2.tick_params(axis="y", labelcolor="tab:green")
+    l4, = ax2.plot(days, ts, color="tab:red", linewidth=1.0,
+                   linestyle=":", label="treasury share (%)")
+    handles5.append(l4)
+    ax2.set_ylabel("treasury share (%)", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
 
-    ax.legend(handles=handles5, loc="upper left", fontsize=8)
-    ax.set_title("Basket NAV, DM outstanding liability & treasury share")
+    ax.legend(handles=handles5, loc="upper left", fontsize=7)
+    ax.set_title("Basket NAV, outstanding, treasury BUCK & share")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)

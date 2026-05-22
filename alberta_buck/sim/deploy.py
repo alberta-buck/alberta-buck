@@ -35,9 +35,9 @@ TICK_SPACING = {3000: 60, 500: 10}
 TARGET_BUCK = 10 ** 14  # $10^8 / 10^6-dec = $100 BUCK per pool
 
 DEPOSITED_TOPIC = Web3.keccak(
-    text="Deposited(address,uint256,address,uint256,uint256,uint128)")
+    text="Deposited(address,uint256,address,uint256,uint256,address,uint128)")
 REDEEMED_TOPIC = Web3.keccak(
-    text="Redeemed(address,uint256,address,uint256,uint256,uint256,uint256,uint128)")
+    text="Redeemed(address,uint256,address,uint256,uint256,uint256,uint256)")
 
 
 @dataclass
@@ -180,42 +180,18 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
             print(f"         reserves: {tok_bal/(10**dec[i]):,.6g} {sym}  "
                   f"{usdc_bal/E6:,.2f} USDC")
 
-        # TOKEN/BUCK basket pool via direct mint.
+        # TOKEN/BUCK basket pool (empty — bootstrapped by DM agents).
         chain.send(basket.functions.addBasketToken(
             c.address, dec[i], p0, 0, FEE_BUCK), sender=gov)  # 0 => equal share
         pb = v3f.functions.getPool(c.address, buck.address, FEE_BUCK).call()
         chain.send(reg.functions.bindContract(
             pb, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
-        # Seed every basket pool to a COMMON BUCK depth.  depositToken mints
-        # BUCK = seed*p0/10**dec, so seeding a fixed token count would make
-        # the BUCK reserve scale with p0 (~1000x spread across PAXG/cbBTC/
-        # AOIL) and the deepest pool (cbBTC) would monopolize all routing.
-        # Solve seed so minted BUCK ~= TARGET_BUCK for every token.
-        seed = max(10 ** dec[i], TARGET_BUCK * (10 ** dec[i]) // p0)
-        chain.send(c.functions.mint(deployer, seed))
-        chain.send(c.functions.approve(basket.address, seed))
-        dep_rcpt = chain.send(basket.functions.depositToken(c.address, seed, 0))
         d.pool_buck.append(pb)
 
-        # Extract receiptId from the Deposited event.
-        rid = None
-        for log in dep_rcpt["logs"]:
-            if log["topics"][0] == DEPOSITED_TOPIC:
-                rid = int.from_bytes(log["topics"][2], "big")
-                d.pool_receipts[i] = rid
-                break
-
         if verbose:
-            tok_bal = c.functions.balanceOf(pb).call()
-            buck_bal = buck.functions.balanceOf(pb).call()
-            implied = buck_bal * (10 ** dec[i]) // tok_bal if tok_bal else 0
             print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
                   f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)")
-            print(f"         seed={seed/(10**dec[i]):,.6g} {sym}  "
-                  f"initialPrice={p0/E6:,.2f} BUCK/{sym}")
-            print(f"         reserves: {tok_bal/(10**dec[i]):,.6g} {sym}  "
-                  f"{buck_bal/E18:,.2f} BUCK")
-            print(f"         receiptId={rid}")
+            print(f"         empty pool — bootstrap DM agents will seed")
 
     # --- floating BUCK/USDC pool (gauge-breaking, not a peg) ---------- #
     #

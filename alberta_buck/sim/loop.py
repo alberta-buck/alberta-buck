@@ -24,7 +24,8 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
 
     if verbose:
         print(f"[sim] deploying '{scenario.name}' "
-              f"({scenario.days}d x {scenario.ticks_per_day} ticks)...")
+              f"({scenario.days}d x {scenario.ticks_per_day} ticks)...",
+              flush=True)
     d = deploy(chain, anvil, scenario, rng)
 
     # --- build + register the agent population ----------------------- #
@@ -77,7 +78,8 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
             errs = [abs(f["spotUsdc"][i] - f["refUsd"][i]) / max(1, f["refUsd"][i])
                     for i in range(len(d.tokens))]
             print(f"[sim] day {day:4d}  meanTrackErr={100*sum(errs)/len(errs):.2f}%"
-                  f"  cycle={ctr['cycleTrades']} direct={ctr['directTrades']}")
+                  f"  cycle={ctr['cycleTrades']} direct={ctr['directTrades']}",
+                  flush=True)
 
     path = snap.write(out_path)
 

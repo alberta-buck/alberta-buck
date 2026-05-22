@@ -36,24 +36,63 @@ interface IBuckKControllerDirect {
 ///         single Buck-owned full-range liquidity position in each pool,
 ///         and orchestrates the direct-mint / redeem flow.
 ///
-///         Depositors hand the basket a real-world-asset token (PAXG,
-///         cbBTC, ...) and receive a BuckBasketReceipt NFT representing
-///         their claim on the corresponding pool slice.  BuckBasket
-///         mints the BUCK side of their liquidity contribution against
-///         the pool's current spot price (manipulation-guarded by a
-///         spot-vs-TWAP deviation check), adds the (TOKEN, BUCK) pair to
-///         its full-range position, and records the depositor's L share.
+/// # Two kinds of BUCK
 ///
-///         On redeem, BuckBasket withdraws the depositor's L share from
-///         the pool, burns the principal BUCK, returns the principal
-///         TOKEN plus half the accrued TOKEN+BUCK profit to the
-///         depositor, and immediately redeposits the retained half into
-///         its own treasury position in the same pool.
+/// BuckBasket manages two distinct categories of BUCK, both minted via
+/// `Buck.mintFromBasket()`:
+///
+/// 1.  **Externally-backed BUCKs** — minted during `depositToken()` when a
+///     user supplies a basket TOKEN (or already-minted, fully-backed BUCKs).
+///     The deposited asset is the backing.  Every mint is recorded in
+///     `totalOutstandingBuck` and matched by a corresponding `Deposit`
+///     entry.  These BUCKs are a *liability*: they will be burned by
+///     `redeem()` when the depositor exits.
+///
+/// 2.  **Treasury BUCKs** — minted by `_buckToLp()` / `_reinvestBuck()` when
+///     the treasury reinvests retained profit.  These are backed by the
+///     profit TOKEN retained from redemptions and are NOT tracked in
+///     `totalOutstandingBuck` (no Deposit NFT).  They silently increase the
+///     treasury's share of total LP value.
+///
+/// # Invariant (per depositor)
+///
+/// For every `depositToken()` that mints N externally-backed BUCKs,
+/// `redeem()` burns exactly N BUCKs from the same pool (or less, if the
+/// pool was BUCK-depleted — the depositor eats the loss).  Any BUCKs
+/// *beyond* the burned principal are profit, earned from:
+///
+///  * AMM pool fees (paid by external traders in TOKEN and BUCK),
+///  * Appreciation of the pool's TOKEN value and corresponding inflow of
+///    externally-supplied BUCKs from arbitrage.
+///
+/// Profit BUCKs are retained by the treasury and reinvested via
+/// `_reinvestBuck()` → `_buckToLp()`: swapped for the most-underweight
+/// basket TOKEN, used to mint *new* (treasury) BUCKs, and LP'd.  No NFT
+/// is issued; the LP value accrues to the treasury silently.
+///
+/// # Treasury withdrawal
+///
+/// When governance withdraws accumulated treasury profit, ALL TOKENs are
+/// returned, the principal portion of BUCKs is burned, and all profit
+/// BUCKs are returned to governance.  Unlike user redemptions, treasury
+/// redemptions do NOT re-invest profits — they are paid out.
+///
+/// # Net result
+///
+/// After every externally-backed BUCK minted by `depositToken()` has been
+/// burned by `redeem()`, `totalOutstandingBuck == 0` and the remaining LP
+/// value in the pools consists entirely of treasury-owned TOKENs and their
+/// corresponding BuckBasket-minted (treasury) BUCKs — the compounded
+/// profits from all direct-mint activity.
 abstract contract BuckBasketAbstractGuards is IUniswapV3MintCallback {
     function uniswapV3MintCallback(uint256, uint256, bytes calldata) external virtual override;
 }
 
-contract BuckBasket is IUniswapV3MintCallback {
+interface IUniswapV3SwapCallback {
+    function uniswapV3SwapCallback(int256, int256, bytes calldata) external;
+}
+
+contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Constituents ----------------------------------------------------- //
 
@@ -74,13 +113,15 @@ contract BuckBasket is IUniswapV3MintCallback {
     mapping(address => uint256) public indexOf;   // token -> 1+index (0 = not present)
 
     struct Deposit {
-        address token;
-        uint256 principalToken;      // native decimals
-        uint256 principalBuck;       // 18-dec
-        uint128 liquidityShare;      // V3 L units; the depositor's slice of pool L
+        uint256 buckPrincipal;     // 18-dec BUCK minted at deposit
+        uint256 tokenPrincipal;    // native-dec token deposited (for ROI)
+        address token;             // original deposit token
         uint64  depositTime;
     }
     mapping(uint256 => Deposit) public deposits;
+
+    /// @notice Total outstanding BUCK principal across all active deposits.
+    uint256 public totalOutstandingBuck;
 
     // --- Wiring ----------------------------------------------------------- //
 
@@ -107,29 +148,33 @@ contract BuckBasket is IUniswapV3MintCallback {
     event Deposited(
         address indexed depositor,
         uint256 indexed receiptId,
-        address indexed token,
-        uint256 tokenAmount,
-        uint256 buckAmount,
+        address indexed depositedToken,
+        uint256 tokenAmount,          // native decimals
+        uint256 buckAmount,            // 18-dec BUCK minted
+        address lpToken,               // token actually LP'd into
         uint128 liquidity
     );
     event Redeemed(
         address indexed depositor,
         uint256 indexed receiptId,
-        address indexed token,
-        uint256 principalToken,
-        uint256 halfProfitToken,
-        uint256 burnedBuck,
-        uint256 halfProfitBuck,
-        uint128 liquidityShare
+        address indexed redeemedToken, // overweight token returned to user
+        uint256 tokenToUser,           // native-dec token returned (principal + half profit)
+        uint256 burnedBuck,            // BUCK principal burned
+        uint256 retainedBuck,          // profit BUCK kept by treasury
+        uint256 remainingBp            // 0 if fully redeemed; else new NFT share
     );
 
     // --- Constants -------------------------------------------------------- //
 
     int24 internal constant MIN_TICK = -887272;
     int24 internal constant MAX_TICK =  887272;
+    uint160 internal constant MIN_SQRT_RATIO = 4295128739;
+    uint160 internal constant MAX_SQRT_RATIO =
+        1461446703485210103287273052203988822378723970342;
 
     // --- Mint callback re-entry guard ------------------------------------- //
-    address internal _callbackPool;
+    address internal _callbackPool;       // mint callback guard
+    address internal _swapCallbackPool;    // swap callback guard
 
     constructor(
         address _buck,
@@ -325,48 +370,130 @@ contract BuckBasket is IUniswapV3MintCallback {
         return total;
     }
 
+    // --- Pool valuation helpers ---------------------------------------- //
+
+    /// @notice Total BUCK value of the BuckBasket's LP in one pool.
+    ///         0 if the pool has no token reserves (empty / not yet seeded).
+    function _poolLpValue(Constituent storage c) internal view
+        returns (uint256 valueBuck)
+    {
+        uint256 tokBal = IERC20(c.token).balanceOf(c.pool);
+        if (tokBal == 0) return 0;
+        uint256 spotPrice = _readPoolPrice(c, 0);
+        uint256 buckBal = IERC20(address(buck)).balanceOf(c.pool);
+        valueBuck = UniswapV3OracleLib.mulDiv(tokBal, spotPrice, 10 ** c.decimals)
+                    + buckBal;
+    }
+
+    /// @notice Total BUCK value across all TOKEN/BUCK pools.
+    function _totalBasketLpValue() internal view returns (uint256 total) {
+        for (uint256 i = 0; i < constituents.length; i++) {
+            total += _poolLpValue(constituents[i]);
+        }
+    }
+
+    /// @notice Index of the pool whose LP is most underweight relative to
+    ///         its targetWeightBp.  Empty pools (value=0) are always first.
+    function _mostUnderweightPool() internal view returns (uint256 idx) {
+        int256 best = type(int256).max;
+        for (uint256 i = 0; i < constituents.length; i++) {
+            uint256 v = _poolLpValue(constituents[i]);
+            uint256 w = constituents[i].targetWeightBp;
+            // Ratio: value per basis-point (lower = more underweight).
+            // Empty pools have v=0, so ratio=0 (most underweight).
+            int256 ratio = w > 0 ? int256(v / w) : type(int256).max;
+            if (ratio < best) {
+                best = ratio;
+                idx = i;
+            }
+        }
+    }
+
+    /// @notice Index of the pool whose LP is most overweight relative to
+    ///         its targetWeightBp.  Skips empty pools (they can't be sold).
+    function _mostOverweightPool() internal view returns (uint256 idx) {
+        int256 best = -1;
+        for (uint256 i = 0; i < constituents.length; i++) {
+            uint256 v = _poolLpValue(constituents[i]);
+            uint256 w = constituents[i].targetWeightBp;
+            if (v == 0 || w == 0) continue;
+            int256 ratio = int256(v / w);
+            if (ratio > best) {
+                best = ratio;
+                idx = i;
+            }
+        }
+        require(best >= 0, "no overweight pool");
+    }
+
     // --- Direct mint ----------------------------------------------------- //
 
-    /// @notice Deposit `tokenAmount` of `token`, receive a claim NFT and
-    ///         a Buck-custodied slice of the TOKEN/BUCK pool liquidity.
-    /// @param  maxDeviationBp If non-zero AND a TWAP is available, the
-    ///         deposit reverts when |spot - TWAP| > maxDeviationBp / 10000
-    ///         of TWAP.  Pass 0 to skip the guard (e.g. cold-pool seed).
+    /// @notice Deposit a basket token.  Mints BUCK at the token's current
+    ///         pool spot price and adds (token, BUCK) liquidity to that
+    ///         pool.  The depositor receives an NFT representing their
+    ///         share of total basket value.
+    ///
+    ///         Cross-pool rebalancing ("buy low, sell high") is deferred
+    ///         to a follow-up change.  The helpers _mostUnderweightPool(),
+    ///         _mostOverweightPool(), _reinvestBuck(), and the swap callback
+    ///         are already in place for that work.
+    ///
+    /// @param  maxDeviationBp 0 = skip TWAP guard (bootstrap / cold pool).
+    ///         Non-zero rejects the deposit if |spot - TWAP| exceeds
+    ///         maxDeviationBp / 10000 of TWAP, protecting large deposits
+    ///         from being front-run at a stale pool price.
     function depositToken(
         address token,
         uint256 tokenAmount,
         uint256 maxDeviationBp
     ) external returns (uint256 receiptId) {
-        uint256 idx = indexOf[token];
-        require(idx > 0, "not in basket");
         require(tokenAmount > 0, "amount=0");
-        Constituent storage c = constituents[idx - 1];
 
-        // Spot price read; slippage guard against TWAP if requested.
+        // --- BUCK deposit: swap BUCK -> underweight token, then LP ------ //
+        if (token == address(buck)) {
+            // Pull user's already-minted, fully-backed BUCKs.
+            IERC20(address(buck)).transferFrom(
+                msg.sender, address(this), tokenAmount);
+
+            (Constituent storage tgtC, uint256 tgtTok, uint256 buckToMint) =
+                _buckToLp(tokenAmount);
+
+            receiptId = receipt.mint(msg.sender);
+            deposits[receiptId] = Deposit({
+                buckPrincipal: buckToMint,
+                tokenPrincipal: tgtTok,
+                token: tgtC.token,
+                depositTime: uint64(block.timestamp)
+            });
+            totalOutstandingBuck += buckToMint;
+            controller.compute();
+            emit Deposited(msg.sender, receiptId, address(buck),
+                           tokenAmount, buckToMint, tgtC.token, 0);
+            return receiptId;
+        }
+
+        // --- TOKEN deposit: standard single-pool LP ---------------------- //
+        uint256 depositIdx = indexOf[token];
+        require(depositIdx > 0, "not in basket");
+        Constituent storage c = constituents[depositIdx - 1];
+
         uint256 spotPrice = _readPoolPrice(c, 0);
         _enforceSlippageGuard(c, spotPrice, maxDeviationBp);
 
-        // BUCK to mint = tokenAmount * spotPrice / 10**decimals (normalising
-        // tokenAmount from native decimals to 18-dec, multiplying by
-        // 18-dec spotPrice, then collapsing back to 18-dec BUCK).
-        uint256 buckAmount = UniswapV3OracleLib.mulDiv(
+        uint256 buckToMint = UniswapV3OracleLib.mulDiv(
             tokenAmount, spotPrice, 10 ** c.decimals
         );
-        require(buckAmount > 0, "buck=0");
+        require(buckToMint > 0, "buck=0");
 
-        // Pull TOKEN from depositor; mint corresponding BUCK to ourselves.
         IERC20(token).transferFrom(msg.sender, address(this), tokenAmount);
-        buck.mintFromBasket(address(this), buckAmount);
+        buck.mintFromBasket(address(this), buckToMint);
 
-        // Compute target liquidity from (token, buck) at current sqrtPrice.
-        uint128 liquidity = _liquidityForAmounts(c, tokenAmount, buckAmount);
+        uint128 liquidity = _liquidityForAmounts(c, tokenAmount, buckToMint);
         require(liquidity > 0, "L=0");
-        require(constituents.length > 0, ""); // gas/state guard; unreachable
         if (_isFirstPositionInPool(c)) {
             require(liquidity >= minSeedLiquidity, "seed too small");
         }
 
-        // Mint the liquidity into our full-range position.
         _callbackPool = c.pool;
         IUniswapV3Pool(c.pool).mint(
             address(this), c.tickLower, c.tickUpper, liquidity,
@@ -374,59 +501,167 @@ contract BuckBasket is IUniswapV3MintCallback {
         );
         _callbackPool = address(0);
 
-        // Issue receipt with deposit metadata.
         receiptId = receipt.mint(msg.sender);
         deposits[receiptId] = Deposit({
+            buckPrincipal: buckToMint,
+            tokenPrincipal: tokenAmount,
             token: token,
-            principalToken: tokenAmount,
-            principalBuck: buckAmount,
-            liquidityShare: liquidity,
             depositTime: uint64(block.timestamp)
         });
+        totalOutstandingBuck += buckToMint;
+        controller.compute();
+        emit Deposited(msg.sender, receiptId, token, tokenAmount,
+                       buckToMint, c.token, liquidity);
+    }
 
-        // Keep PID warm.  Return value ignored; direct-mint isn't gated.
+    // --- Redemption ------------------------------------------------------- //
+
+    /// @notice Redeem all or part of a basket receipt.  Withdraws LP from
+    ///         the original deposit pool, burns principal BUCK, returns
+    ///         TOKEN (principal + half profit) to the user, and keeps
+    ///         profit BUCK for treasury re-investment.
+    ///
+    ///         Cross-pool redemption ("sell high" from most-overweight
+    ///         pool) is deferred to a follow-up change that will use
+    ///         _mostOverweightPool() and _reinvestBuck().
+    ///
+    /// @param  redeemBp  0 = redeem entire deposit; otherwise basis points
+    ///                    of the deposit's buckPrincipal to redeem.
+    /// @param  maxDeviationBp 0 = skip TWAP guard.
+    function redeem(uint256 receiptId, uint256 redeemBp,
+                    uint256 maxDeviationBp) external {
+        require(receipt.ownerOf(receiptId) == msg.sender, "not owner");
+        Deposit memory d = deposits[receiptId];
+        require(d.buckPrincipal > 0, "empty deposit");
+
+        uint256 redeemShare = redeemBp > 0 ? redeemBp : 10000;
+        require(redeemShare <= 10000, "redeemBp > 10000");
+
+        Constituent storage c = constituents[indexOf[d.token] - 1];
+        _enforceSlippageGuard(c, _readPoolPrice(c, 0), maxDeviationBp);
+
+        // Read current LP position in the pool.
+        (uint128 totalL,,,,) = IUniswapV3Pool(c.pool).positions(
+            keccak256(abi.encodePacked(address(this), c.tickLower, c.tickUpper))
+        );
+        require(totalL > 0, "no LP in pool");
+
+        // Withdraw proportional share of the LP.
+        uint128 burnL = redeemShare == 10000
+            ? totalL
+            : uint128(uint256(totalL) * redeemShare / 10000);
+        require(burnL > 0 && burnL <= totalL, "burnL out of range");
+        (uint256 tokOut, uint256 buckOut) = _decreaseAndCollect(c, burnL);
+
+        uint256 redeemBuck = redeemShare == 10000
+            ? d.buckPrincipal
+            : d.buckPrincipal * redeemShare / 10000;
+
+        // Burn principal BUCK.
+        uint256 burnedB = buckOut < redeemBuck ? buckOut : redeemBuck;
+        if (burnedB > 0) buck.burnFromBasket(burnedB);
+
+        // Client receives ALL tokens (principal + any profit).  Treasury
+        // keeps any BUCK beyond the burned principal (BUCK profit).
+        uint256 scaledTokenPrincipal = redeemShare == 10000
+            ? d.tokenPrincipal
+            : d.tokenPrincipal * redeemShare / 10000;
+        uint256 toUser = tokOut;  // all tokens to client
+        if (toUser > 0) IERC20(c.token).transfer(msg.sender, toUser);
+
+        // Treasury retains BUCK profit and reinvests it into the most
+        // underweight pool (buy-low compounding).
+        uint256 profitBuck = buckOut > burnedB ? buckOut - burnedB : 0;
+        if (profitBuck > 0) {
+            _reinvestBuck(profitBuck);
+        }
+
+        // Update or delete the deposit.
+        if (redeemShare == 10000) {
+            delete deposits[receiptId];
+            receipt.burn(receiptId);
+        } else {
+            deposits[receiptId].buckPrincipal -= redeemBuck;
+            deposits[receiptId].tokenPrincipal -= scaledTokenPrincipal;
+        }
+        totalOutstandingBuck -= redeemBuck;
+
         controller.compute();
 
-        emit Deposited(msg.sender, receiptId, token, tokenAmount, buckAmount, liquidity);
+        emit Redeemed(
+            msg.sender, receiptId, c.token,
+            toUser, burnedB, profitBuck,
+            redeemShare == 10000 ? 0 : 10000 - redeemShare
+        );
     }
+
+    // --- Shared: BUCK -> underweight-token LP ---------------------------- //
+
+    /// @notice Swap BUCKs already held by the BuckBasket for the most
+    ///         underweight pool's token, mint new BUCKs against that token,
+    ///         and LP both.  Returns the LP constituent and amounts.
+    ///         Caller decides whether to issue an NFT / update outstanding.
+    function _buckToLp(uint256 buckAmount)
+        internal
+        returns (Constituent storage tgtC, uint256 tgtTok, uint256 buckToMint)
+    {
+        require(buckAmount > 0, "buckAmount=0");
+
+        uint256 tgtIdx = _mostUnderweightPool();
+        tgtC = constituents[tgtIdx];
+
+        // Swap BUCK -> target token on the target pool.
+        _swapCallbackPool = tgtC.pool;
+        (int256 d0, int256 d1) = IUniswapV3Pool(tgtC.pool).swap(
+            address(this), tgtC.buckIsToken0,
+            int256(buckAmount),
+            tgtC.buckIsToken0 ? MAX_SQRT_RATIO - 1 : MIN_SQRT_RATIO + 1,
+            abi.encode(address(buck), tgtC.token)
+        );
+        _swapCallbackPool = address(0);
+        tgtTok = tgtC.buckIsToken0
+            ? uint256(d1 > 0 ? d1 : int256(0))
+            : uint256(d0 > 0 ? d0 : int256(0));
+        require(tgtTok > 0, "swap BUCK->token failed");
+
+        // Mint new BUCK against the received token.
+        uint256 spotPrice = _readPoolPrice(tgtC, 0);
+        buckToMint = UniswapV3OracleLib.mulDiv(
+            tgtTok, spotPrice, 10 ** tgtC.decimals
+        );
+        require(buckToMint > 0, "buck=0");
+        buck.mintFromBasket(address(this), buckToMint);
+
+        // LP into the underweight pool.
+        uint128 liquidity = _liquidityForAmounts(
+            tgtC, tgtTok, buckToMint);
+        require(liquidity > 0, "L=0");
+        if (_isFirstPositionInPool(tgtC)) {
+            require(liquidity >= minSeedLiquidity, "seed too small");
+        }
+
+        _callbackPool = tgtC.pool;
+        IUniswapV3Pool(tgtC.pool).mint(
+            address(this), tgtC.tickLower, tgtC.tickUpper, liquidity,
+            abi.encode(tgtC.token)
+        );
+        _callbackPool = address(0);
+    }
+
+    /// @notice Reinvest treasury BUCK profit — same as _buckToLp, but
+    ///         no NFT (silent NAV increase).
+    function _reinvestBuck(uint256 buckAmount) internal {
+        if (buckAmount == 0) return;
+        _buckToLp(buckAmount);
+    }
+
+    // --- Settlement helpers ---------------------------------------------- //
 
     struct RedeemResult {
         uint256 toUserT;
         uint256 halfProfitT;
         uint256 burnedB;
         uint256 halfProfitB;
-    }
-
-    /// @notice Redeem a deposit receipt.  Caller must own the receipt NFT.
-    function redeem(uint256 receiptId, uint256 maxDeviationBp) external {
-        require(receipt.ownerOf(receiptId) == msg.sender, "not owner");
-        Deposit memory d = deposits[receiptId];
-        require(d.liquidityShare > 0, "empty deposit");
-        Constituent storage c = constituents[indexOf[d.token] - 1];
-
-        // Slippage guard against current spot vs TWAP.
-        _enforceSlippageGuard(c, _readPoolPrice(c, 0), maxDeviationBp);
-
-        // Withdraw the full liquidity share.
-        (uint256 tokenOut, uint256 buckOut) = _decreaseAndCollect(c, d.liquidityShare);
-
-        // Compute split + execute payouts + burn.
-        RedeemResult memory r = _settleRedemption(c, d, tokenOut, buckOut, msg.sender);
-
-        // Redeposit retained residuals into treasury position.
-        if (r.halfProfitT > 0 && r.halfProfitB > 0) {
-            _mintTreasury(c, d.token, r.halfProfitT, r.halfProfitB);
-        }
-
-        delete deposits[receiptId];
-        receipt.burn(receiptId);
-        controller.compute();
-
-        emit Redeemed(
-            msg.sender, receiptId, d.token,
-            r.toUserT, r.halfProfitT, r.burnedB, r.halfProfitB,
-            d.liquidityShare
-        );
     }
 
     function _settleRedemption(
@@ -436,19 +671,13 @@ contract BuckBasket is IUniswapV3MintCallback {
         uint256 buckOut,
         address to
     ) internal returns (RedeemResult memory r) {
-        // Profit on each side (clamp negatives to 0 -- depositor eats losses).
-        uint256 profitT = tokenOut > d.principalToken ? tokenOut - d.principalToken : 0;
-        uint256 profitB = buckOut  > d.principalBuck  ? buckOut  - d.principalBuck  : 0;
+        uint256 profitT = tokenOut > d.tokenPrincipal ? tokenOut - d.tokenPrincipal : 0;
+        uint256 profitB = buckOut  > d.buckPrincipal  ? buckOut  - d.buckPrincipal  : 0;
         r.halfProfitT = profitT / 2;
         r.halfProfitB = profitB / 2;
-
-        // Burn principal BUCK (or all of buckOut if pool was BUCK-depleted).
-        r.burnedB = buckOut < d.principalBuck ? buckOut : d.principalBuck;
+        r.burnedB = buckOut < d.buckPrincipal ? buckOut : d.buckPrincipal;
         if (r.burnedB > 0) buck.burnFromBasket(r.burnedB);
-
-        // Pay depositor: principal_T (or all of tokenOut if T-depleted) plus
-        // their half of the profit, on each side.
-        r.toUserT = d.principalToken <= tokenOut ? d.principalToken : tokenOut;
+        r.toUserT = d.tokenPrincipal <= tokenOut ? d.tokenPrincipal : tokenOut;
         uint256 totalT = r.toUserT + r.halfProfitT;
         if (totalT > 0) IERC20(d.token).transfer(to, totalT);
         if (r.halfProfitB > 0) IERC20(address(buck)).transfer(to, r.halfProfitB);
@@ -489,6 +718,19 @@ contract BuckBasket is IUniswapV3MintCallback {
             if (amount0Owed > 0) IERC20(c.token).transfer(msg.sender, amount0Owed);
             if (amount1Owed > 0) IERC20(address(buck)).transfer(msg.sender, amount1Owed);
         }
+    }
+
+    /// @notice Swap callback: pay positive deltas (tokens the pool needs to
+    ///         receive from us) from the BuckBasket's own balance.
+    function uniswapV3SwapCallback(
+        int256 amount0Delta,
+        int256 amount1Delta,
+        bytes calldata data
+    ) external override {
+        require(msg.sender == _swapCallbackPool, "bad swap callback");
+        (address t0, address t1) = abi.decode(data, (address, address));
+        if (amount0Delta > 0) IERC20(t0).transfer(msg.sender, uint256(amount0Delta));
+        if (amount1Delta > 0) IERC20(t1).transfer(msg.sender, uint256(amount1Delta));
     }
 
     // --- Internal helpers ------------------------------------------------- //

@@ -148,15 +148,14 @@ class Snapshotter:
 
     def _basket_nav(self) -> int:
         """Total BUCK value of ALL BuckBasket LP positions (token + BUCK
-        sides), in 18-dec BUCK raw.  Each TOKEN/BUCK pool's full-range
-        position is owned by the BuckBasket."""
+        sides), in 18-dec BUCK raw.  Empty pools (no reserves) contribute 0."""
         d = self.d
         total = 0
         for i in range(len(d.tokens)):
             rt = _bal(d.tokens[i], d.pool_buck[i])
             rb = _bal(d.buck, d.pool_buck[i])
-            if rt == 0:
-                continue
+            if rt == 0 or rb == 0:
+                continue  # empty pool
             p = rb * (10 ** d.dec[i]) // rt   # BUCK per whole token (18d)
             total += rt * p // (10 ** d.dec[i])  # token side value in BUCK
             total += rb                          # BUCK side value
@@ -232,10 +231,11 @@ class Snapshotter:
 
         # Basket NAV (total BUCK value of all BuckBasket LP) and
         # outstanding DM liability (sum of buckPrincipal across active
-        # deposits).  Treasury share = (NAV - outstanding) / NAV.
+        # deposits).  Treasury BUCK tracks retained profit from redemptions.
         nav = self._basket_nav()
         out_buck = ctr.get("dmOutstandingBuck", 0)
-        treas_frac = (nav - out_buck) / nav if nav > 0 else 0.0
+        treas_buck = ctr.get("treasuryBuck", 0)
+        treas_frac = treas_buck / nav if nav > 0 else 0.0
 
         self.frames.append({
             "invested": init_val,                      # arb capital (USDC,d0)
@@ -259,6 +259,7 @@ class Snapshotter:
             "directMintPnl": dm_pnl,
             "dmEntries": ctr.get("dmEntries", 0),
             "dmExits": ctr.get("dmExits", 0),
+            "dmExitFails": ctr.get("dmExitFails", 0),
             "basketNav": nav,
             "dmOutstanding": out_buck,
             "treasuryShare": treas_frac,
