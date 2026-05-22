@@ -146,6 +146,22 @@ class Snapshotter:
                 v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
         return v
 
+    def _basket_nav(self) -> int:
+        """Total BUCK value of ALL BuckBasket LP positions (token + BUCK
+        sides), in 18-dec BUCK raw.  Each TOKEN/BUCK pool's full-range
+        position is owned by the BuckBasket."""
+        d = self.d
+        total = 0
+        for i in range(len(d.tokens)):
+            rt = _bal(d.tokens[i], d.pool_buck[i])
+            rb = _bal(d.buck, d.pool_buck[i])
+            if rt == 0:
+                continue
+            p = rb * (10 ** d.dec[i]) // rt   # BUCK per whole token (18d)
+            total += rt * p // (10 ** d.dec[i])  # token side value in BUCK
+            total += rb                          # BUCK side value
+        return total
+
     def _agent_value(self, agents, day, cls_name: str) -> int:
         """Portfolio value of all agents whose class name matches, including
         the value of any BuckBasket LP deposits (receipt NFTs)."""
@@ -214,6 +230,13 @@ class Snapshotter:
             dm_pnl = self._agent_value(
                 agents, day, "DirectMintAgent") - dm_init_val
 
+        # Basket NAV (total BUCK value of all BuckBasket LP) and
+        # outstanding DM liability (sum of buckPrincipal across active
+        # deposits).  Treasury share = (NAV - outstanding) / NAV.
+        nav = self._basket_nav()
+        out_buck = ctr.get("dmOutstandingBuck", 0)
+        treas_frac = (nav - out_buck) / nav if nav > 0 else 0.0
+
         self.frames.append({
             "invested": init_val,                      # arb capital (USDC,d0)
             "lp": lp,                                  # group: [feeUsd, capUsd]
@@ -236,6 +259,9 @@ class Snapshotter:
             "directMintPnl": dm_pnl,
             "dmEntries": ctr.get("dmEntries", 0),
             "dmExits": ctr.get("dmExits", 0),
+            "basketNav": nav,
+            "dmOutstanding": out_buck,
+            "treasuryShare": treas_frac,
         })
 
     def write(self, path=None) -> Path:

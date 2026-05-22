@@ -148,6 +148,8 @@ class DirectMintAgent(Agent):
                 self._deposit_token_idx = tgt_idx
                 self._entered = True
                 ctr["dmEntries"] = ctr.get("dmEntries", 0) + 1
+                ctr["dmOutstandingBuck"] = (
+                    ctr.get("dmOutstandingBuck", 0) + self._principal_buck)
         except Exception as e:
             print(f"[dm-{self.idx}] _enter failed: {e!r}")
             self._receipt_id = None
@@ -172,6 +174,11 @@ class DirectMintAgent(Agent):
                          sender=self.account)
             print(f"[dm-{self.idx}] redeemed receiptId={self._receipt_id}")
             ctr["dmExits"] = ctr.get("dmExits", 0) + 1
+            ctr["dmOutstandingBuck"] = (
+                ctr.get("dmOutstandingBuck", 0) - self._principal_buck)
         except Exception as e:
             print(f"[dm-{self.idx}] redeem failed: {e!r}")
             ctr["dmExitFails"] = ctr.get("dmExitFails", 0) + 1
+            # Even on failure, the deposit is gone from BuckBasket's
+            # perspective if _decreaseAndCollect ran.  Conservatively
+            # keep the outstanding liability tracked.
