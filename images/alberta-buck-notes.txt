@@ -81,7 +81,7 @@ Table of Contents
 .. 5. Cost and UX Trade-Offs
 .. 6. Composability
 8. Demurrage at the Pool Level
-.. 1. Reminder: How BUCK Demurrage Actually Works
+.. 1. Reminder: How BUCK Demurrage Works (Target Design)
 .. 2. The Pool Account's Demurrage
 .. 3. The Age-Preserving Redemption
 .. 4. Donations Integrate Smoothly
@@ -616,6 +616,15 @@ Table of Contents
   It is what rules out /pure-bearer anonymous notes/ (neither party
   learns the other's identity), and what forces the exactly-three-flavor
   taxonomy below.
+
+  The Notes contract itself is bound under a Public Identity
+  (`bindContract(notes, pk_op, E_op, true, true)').  Both the issuer and
+  the recipient must complete a one-time CP-bound `approve' for the
+  Notes contract address before their first mint or spend.  This
+  establishes the per-pair CP fragments that the BUCK transfer guard
+  requires and that the Notes operator decrypts under subpoena.  Outside
+  observers see only opaque hashes of independently-randomised ElGamal
+  ciphertexts — no link between mint and deposit.
 
 
 3.4 What the On-Chain Observer Sees
@@ -1221,14 +1230,21 @@ Table of Contents
   the sum of face values of live notes.
 
 
-8.1 Reminder: How BUCK Demurrage Actually Works
-───────────────────────────────────────────────
+8.1 Reminder: How BUCK Demurrage Works (Target Design)
+──────────────────────────────────────────────────────
 
-  BUCK accounts no longer carry an explicit BUCK-age \( A_X \) state.
-  The implementation uses a /global cumulative index/, `cumIndex', that
-  grows at a fixed rate `BASE_RATE_PER_SEC' per second; each account
-  stores only one extra scalar, `_indexAtLastTouch[X]', the value of
-  `cumIndex' at the account's most recent settlement.
+  *Note:* This section describes the /target/ `cumIndex'-based design
+  that Notes requires for exact fee propagation.  The current `Buck.sol'
+  uses a `buckSeconds + timestamp' approach; see the Ethereum
+  implementation document for a precise description of that interim
+  design and its invariants.
+
+  In the target design, BUCK accounts no longer carry an explicit
+  BUCK-age \( A_X \) state.  The implementation uses a /global
+  cumulative index/, `cumIndex', that grows at a fixed rate
+  `BASE_RATE_PER_SEC' per second; each account stores only one extra
+  scalar, `_indexAtLastTouch[X]', the value of `cumIndex' at the
+  account's most recent settlement.
 
   The fee owed by account \( X \) at any moment is \[ \text{feeOwing}(X)
   \;=\; B_X \cdot \frac{\text{cumIndex}_{\text{now}} -

@@ -484,6 +484,15 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    (neither party learns the other's identity), and what forces the
    exactly-three-flavor taxonomy below.
 
+   The Notes contract itself is bound under a Public Identity
+   (=bindContract(notes, pk_op, E_op, true, true)=).  Both the issuer
+   and the recipient must complete a one-time CP-bound =approve= for
+   the Notes contract address before their first mint or spend.  This
+   establishes the per-pair CP fragments that the BUCK transfer guard
+   requires and that the Notes operator decrypts under subpoena.
+   Outside observers see only opaque hashes of independently-randomised
+   ElGamal ciphertexts — no link between mint and deposit.
+
 ** What the On-Chain Observer Sees
 
    At mint: a transfer of \( v \) BUCKs from Alice's address to the

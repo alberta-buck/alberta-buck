@@ -125,6 +125,21 @@ contract BuckLifecycleTest is Test {
         reg.bindContract(pair,   BN254.g1(), E, /*isPublicIdentity=*/true, /*isCarrying=*/true);
         reg.bindContract(router, BN254.g1(), E, true, true);
 
+        // Mutual decryptability: private EOAs must CP-approve the public
+        // router/pair so the operator can decrypt identities from receipts.
+        bytes32 fragSlot =
+            keccak256(abi.encode(pair, keccak256(abi.encode(alice, uint256(5)))));
+        vm.store(address(buck), fragSlot, bytes32(uint256(1)));
+        fragSlot =
+            keccak256(abi.encode(pair, keccak256(abi.encode(bob, uint256(5)))));
+        vm.store(address(buck), fragSlot, bytes32(uint256(1)));
+        fragSlot =
+            keccak256(abi.encode(router, keccak256(abi.encode(alice, uint256(5)))));
+        vm.store(address(buck), fragSlot, bytes32(uint256(1)));
+        fragSlot =
+            keccak256(abi.encode(router, keccak256(abi.encode(bob, uint256(5)))));
+        vm.store(address(buck), fragSlot, bytes32(uint256(1)));
+
         // Fund Alice with USDC for pool seeding and Bob with USDC for swaps.
         IERC20Like(usdc).transfer(alice, 10_000e6);   // 5k for pool + 5k spare
         IERC20Like(usdc).transfer(bob,    6_000e6);   // 12 × 500 USDC swaps

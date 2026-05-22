@@ -1,0 +1,93 @@
+#+title: Stabilizer Routing Simulation — Phase 0
+#+date: 2026-05-17
+
+* Status
+
+Phase 0 is functional: 10 arbitrage agents with USDC reserves trade 3 RWA
+tokens (PAXG, cbBTC, AOIL) against daily CSV reference prices over 12
+months.  Agents enter when the pool spot deviates >3% from reference,
+take partial positions (30% of the gap), and re-evaluate for up to 5
+rounds per day.  Agent order is randomized each round so the first-mover
+advantage rotates.
+
+=forge test --match-contract StabilizerRoutingTest= passes at ~62M gas,
+emitting =snapshot.json= with weekly observations.
+
+* Results
+
+Average spot-vs-reference deviation over 12 months:
+- PAXG: 1.6%
+- cbBTC: 2.6%
+- AOIL: 1.4%
+
+Agents start with $1M USDC each ($10M total) and end with ~$1M total USDC
+— the rest is held in token positions.  This is expected: the simulation
+has no mechanism for agents to rebalance to USDC.  The pool price model
+uses static liquidity depth (~$100K–$200K per token), so trade impact is
+visible but not realistic.
+
+* Limitations (Phase 0 vs Design Doc)
+
+1. *No real V3 pools yet* — spot prices are stored as contract variables
+   and moved by a linear impact formula.  The design doc calls for actual
+   Uniswap V3 pools with Universal Router execution.
+
+2. *No TOKEN/BUCK pools* — the BUCK basket and BUCK/USDC pool are not
+   deployed.  The routing pathfinder (=_findBestRoute=) exists as a stub
+   but isn't wired.  USDC-only arbers trade through TOKEN/USDC directly.
+
+3. *No Permit2 or Universal Router* — the V4-era Universal Router
+   dependency tree doesn't compile in this repo (missing =v4-periphery=
+   and =node_modules/@uniswap/v3-core=).  The design doc's =SimSwapper=
+   fallback is the intended execution path.
+
+4. *No direct-mint arbers* — only =UsdcArber= is implemented.  The
+   design doc calls for =DirectMintArber= (seeds TOKEN/BUCK via
+   =BuckBasket.depositToken=) and =CreditMintArber= (mints BUCK against
+   insured credit).
+
+5. *No demurrage, identity, or carrying flags* — these are immaterial
+   for the price-convergence question and are deferred to Phase 2.
+
+6. *Static liquidity* — pool depth is a fixed parameter rather than
+   derived from actual V3 liquidity positions.
+
+* Files
+
+| =gen_prices.py=    | Generates =prices/{PAXG,cbBTC,AOIL}.csv= (730 days)       |
+| =StabilizerRouting.t.sol= | Foundry test: deploy, sim, snapshot                |
+| =SimSwapper.sol=   | Minimal V3 swap executor (not yet wired)                 |
+| =plot.py=          | Renders =plot.png= from =snapshot.json=                  |
+| =prices/=          | Generated daily price CSVs (2024-01-01 → 2026-01-01)     |
+| =snapshot.json=    | Weekly observations emitted by the test                  |
+| =plot.png=         | Spot-vs-reference over 12 months                          |
+
+* Running
+
+#+BEGIN_SRC bash
+# Generate prices (once).
+python3 test/stabilizer-routing-dsv4/gen_prices.py
+
+# Run simulation.
+forge test --match-contract StabilizerRoutingTest -vvv
+
+# Plot results.
+python3 test/stabilizer-routing-dsv4/plot.py
+#+END_SRC
+
+* Next Steps (Phase 1)
+
+1. Wire real Uniswap V3 pools using the existing =UniswapV3Fixture=
+   callback pattern.  This replaces the linear impact model with actual
+   V3 swap math.
+
+2. Deploy the full BUCK system (=BuckBasket=, =BuckKControllerDirect=)
+   and seed PAXG/BUCK, cbBTC/BUCK, AOIL/BUCK, BUCK/USDC pools.
+
+3. Add the off-chain pathfinder that compares direct TOKEN/USDC routes
+   against TOKEN/BUCK→BUCK/USDC indirect routes and selects the best.
+
+4. Implement =DirectMintArber= — pledges TOKEN into =BuckBasket=, mints
+   BUCK, seeds TOKEN/BUCK pools, routes the spread through BUCK pools.
+
+5. Wire the =SimSwapper= as the execution contract for multi-hop swaps.

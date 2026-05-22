@@ -98,6 +98,20 @@ contract NotesTest is Test {
             true  // isCarrying
         );
 
+        // Mutual decryptability: private EOAs must CP-approve the public
+        // Notes contract so the operator can decrypt identities from receipts.
+        {
+            bytes32 _fragSlot = keccak256(
+                abi.encode(address(notes), keccak256(abi.encode(alice, uint256(5))))
+            );
+            vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+            // Bob also needs a fragment if any test receives BUCK from Notes.
+            _fragSlot = keccak256(
+                abi.encode(address(notes), keccak256(abi.encode(bob, uint256(5))))
+            );
+            vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+        }
+
         // Give Alice a credit limit and BUCK balance so she can mint notes.
         _grantCredit(alice, 1000e18);
         vm.prank(alice);

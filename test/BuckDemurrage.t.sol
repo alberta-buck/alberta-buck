@@ -51,6 +51,12 @@ contract BuckDemurrageTest is Test {
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+
+        // Mutual decryptability: private EOA Alice must CP-approve the
+        // public-identity contract Bob so the operator can decrypt Alice's
+        // identity from any transfer receipt.
+        bytes32 slot = keccak256(abi.encode(bob, keccak256(abi.encode(alice, uint256(5)))));
+        vm.store(address(buck), slot, bytes32(uint256(1)));
     }
 
     // ---- JSON / identity helpers (copied from Buck.t.sol) ------------------

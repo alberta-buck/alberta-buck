@@ -105,6 +105,13 @@ contract BuckKControllerUnitTest is Test {
 
         // Set BUCK price to match basket ($1.00) -- no error, no PID correction
         ctrl.setBuckPrice(1.0e18);
+
+        // Prime the controller: the first compute() captures references and
+        // returns the cached buckK without running PID math.  All subsequent
+        // tests start from a primed state.
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        assertTrue(ctrl.primed());
     }
 
     /// @dev Compute basket weight for a component given its price and target dollar share.
@@ -128,21 +135,56 @@ contract BuckKControllerUnitTest is Test {
         assertApproxEqRel(k, 1.0e18, 0.001e18);
     }
 
-    function test_compute_buck_undervalued() public {
-        // BUCK trades at $0.95, basket costs $1.00 -> error = +0.05 -> buckK increases
+    // -------------------------------------------------------------------- //
+    //  Canonical sign convention: error = BUCK - basket.                     //
+    //                                                                        //
+    //    BUCK BELOW basket (inflation):  error < 0  =>  buckK DECREASES.    //
+    //    BUCK ABOVE basket (deflation): error > 0  =>  buckK INCREASES.    //
+    //                                                                        //
+    //  All shipped Kp / Ki / Kd are POSITIVE.  These two tests are the      //
+    //  load-bearing assertion of the project's monetary policy direction.   //
+    // -------------------------------------------------------------------- //
+
+    function test_sign_convention_inflation_contracts_credit() public {
+        // BUCK drops 5% below the basket -> credit must tighten.
         ctrl.setBuckPrice(0.95e18);
         vm.warp(block.timestamp + 3601);
         uint256 k = ctrl.compute();
-        assertGt(k, 1.0e18);  // buckK should expand
+        assertLt(k, 1.0e18, "inflation must contract credit (buckK down)");
+        // Error sign and P sign should both be negative.
+        assertLt(ctrl.P(), 0, "P sign wrong on undervalued BUCK");
+    }
+
+    function test_sign_convention_deflation_expands_credit() public {
+        // BUCK rises 5% above the basket -> credit must loosen.
+        ctrl.setBuckPrice(1.05e18);
+        vm.warp(block.timestamp + 3601);
+        uint256 k = ctrl.compute();
+        assertGt(k, 1.0e18, "deflation must expand credit (buckK up)");
+        assertGt(ctrl.P(), 0, "P sign wrong on overvalued BUCK");
+    }
+
+    function test_compute_buck_undervalued() public {
+        // BUCK trades at $0.95, basket costs $1.00.
+        // Sign convention: error = BUCK - basket = -0.05 (negative).
+        // With Kp > 0, buckK should CONTRACT (tighter credit -> burn pressure
+        // -> BUCK supply contracts -> price rises back to parity).
+        ctrl.setBuckPrice(0.95e18);
+        vm.warp(block.timestamp + 3601);
+        uint256 k = ctrl.compute();
+        assertLt(k, 1.0e18);  // buckK should contract (inflation defense)
         emit log_named_uint("buckK (BUCK undervalued 5%)", k);
     }
 
     function test_compute_buck_overvalued() public {
-        // BUCK trades at $1.05, basket costs $1.00 -> error = -0.05 -> buckK decreases
+        // BUCK trades at $1.05, basket costs $1.00.
+        // Sign convention: error = BUCK - basket = +0.05 (positive).
+        // With Kp > 0, buckK should EXPAND (more credit -> new mints + sales
+        // -> BUCK supply grows -> price falls back to parity).
         ctrl.setBuckPrice(1.05e18);
         vm.warp(block.timestamp + 3601);
         uint256 k = ctrl.compute();
-        assertLt(k, 1.0e18);  // buckK should contract
+        assertGt(k, 1.0e18);  // buckK should expand (deflation defense)
         emit log_named_uint("buckK (BUCK overvalued 5%)", k);
     }
 
@@ -158,20 +200,22 @@ contract BuckKControllerUnitTest is Test {
         assertEq(k1, k2);  // cached, not recomputed
     }
 
-    function test_anti_windup_floor() public {
-        // Massive BUCK overvaluation -> buckK should clamp at floor
+    function test_anti_windup_ceiling() public {
+        // Massive BUCK overvaluation (deflation) -> error very positive ->
+        // buckK should clamp at buckKMax (1.50).
         ctrl.setBuckPrice(2.0e18);  // BUCK trades at 2x basket
         vm.warp(block.timestamp + 3601);
         uint256 k = ctrl.compute();
-        assertEq(k, 0.50e18);  // clamped at buckKMin
+        assertEq(k, 1.50e18);  // clamped at buckKMax
     }
 
-    function test_anti_windup_ceiling() public {
-        // Massive BUCK undervaluation -> buckK should clamp at ceiling
+    function test_anti_windup_floor() public {
+        // Massive BUCK undervaluation (inflation) -> error very negative ->
+        // buckK should clamp at buckKMin (0.50).
         ctrl.setBuckPrice(0.10e18);  // BUCK trades at 10% of basket
         vm.warp(block.timestamp + 3601);
         uint256 k = ctrl.compute();
-        assertEq(k, 1.50e18);  // clamped at buckKMax
+        assertEq(k, 0.50e18);  // clamped at buckKMin
     }
 
     function test_commodity_price_shock_oil() public {
@@ -181,17 +225,21 @@ contract BuckKControllerUnitTest is Test {
         // Oil was 30% of basket; doubling it adds ~$0.30 -> basket ~$1.30
         assertApproxEqRel(uint256(newCost), 1.30e18, 0.01e18);  // within 1%
 
-        // With BUCK still at $1.00, error = +$0.30 -> buckK should increase
+        // With BUCK still at $1.00 and basket now $1.30, BUCK is undervalued
+        // versus the basket: error = BUCK - basket = -0.30 -> buckK CONTRACTS
+        // (BUCK has lost ~23% purchasing power vs the basket; the controller
+        // tightens credit to throttle supply growth until BUCK price catches up).
         vm.warp(block.timestamp + 3601);
         uint256 k = ctrl.compute();
-        assertGt(k, 1.0e18);
+        assertLt(k, 1.0e18);
         emit log_named_uint("buckK (oil doubled)", k);
     }
 
     function test_multi_step_pid_convergence() public {
         // Simulate sustained BUCK undervaluation over multiple PID cycles.
-        // The integral term accumulates, so buckK should trend upward overall,
-        // though individual cycles may oscillate.
+        // With error = BUCK - basket = -0.03 sustained, both P and I terms
+        // are negative, so buckK trends downward overall (credit contraction
+        // in response to inflation).
         ctrl.setBuckPrice(0.97e18);  // 3% undervaluation
 
         for (uint i = 0; i < 10; i++) {
@@ -199,12 +247,246 @@ contract BuckKControllerUnitTest is Test {
             ctrl.compute();
         }
         uint256 finalK = ctrl.buckK();
-        // After 10 cycles of sustained error, buckK should be meaningfully above 1.0
-        assertGt(finalK, 1.001e18);
-        // Integral should be positive (accumulated undervaluation signal)
-        assertGt(ctrl.I(), 0);
+        // After 10 cycles of sustained inflation, buckK should be measurably below 1.0.
+        assertLt(finalK, 0.999e18);
+        // Integral should be negative (accumulated negative error).
+        assertLt(ctrl.I(), 0);
         emit log_named_uint("buckK after 10 cycles (3% underval)", finalK);
         emit log_named_int("integral after 10 cycles", ctrl.I());
+    }
+
+    // -------------------------------------------------------------------- //
+    //  dt clamp (long-gap protection)                                        //
+    // -------------------------------------------------------------------- //
+
+    function test_dTMax_default_is_unbounded() public view {
+        assertEq(ctrl.dTMax(), type(uint256).max);
+    }
+
+    function test_setDTMax_governance_required() public {
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert("Not governance");
+        ctrl.setDTMax(7200);
+    }
+
+    function test_setDTMax_rejects_below_dT() public {
+        vm.prank(governance);
+        vm.expectRevert("dTMax<dT");
+        ctrl.setDTMax(1800);  // dT is 3600
+    }
+
+    function test_dTMax_clamps_long_gap_integral() public {
+        // Disable derivative for these tests -- otherwise a first-cycle
+        // step in error spikes D*Kd huge enough to rail the output, which
+        // freezes the integral via anti-windup and masks the clamp effect.
+        vm.prank(governance);
+        ctrl.setGains(0.1e18, 0.01e18, 0);
+
+        // 1% under-valuation: small enough that PID stays in-band and the
+        // integral is the term we actually observe.
+        ctrl.setBuckPrice(0.99e18);
+
+        // One normal cycle to capture the per-dT integral increment.
+        // BUCK at $0.99 -> error = -0.01 -> I should accumulate negatively.
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        int256 iAfterOneCycle = ctrl.I();
+        assertLt(iAfterOneCycle, 0, "first cycle did not accumulate I");
+
+        // Configure dTMax = dT (= 3600) and warp a full day.  The controller
+        // should treat the gap as one dT-step worth of error.
+        vm.prank(governance);
+        ctrl.setDTMax(3600);
+
+        int256 iBefore = ctrl.I();
+        vm.warp(block.timestamp + 24 hours);
+        ctrl.compute();
+        int256 deltaClamped = ctrl.I() - iBefore;
+
+        emit log_named_int("I delta over one normal cycle",  iAfterOneCycle);
+        emit log_named_int("I delta over a clamped 24h gap", deltaClamped);
+
+        // With clamp: deltaClamped ~= iAfterOneCycle.
+        // Without clamp it would be ~24x larger.  Allow 50% slack.
+        int256 deltaAbs    = deltaClamped < 0 ? -deltaClamped : deltaClamped;
+        int256 oneCycleAbs = iAfterOneCycle < 0 ? -iAfterOneCycle : iAfterOneCycle;
+        assertLe(deltaAbs, oneCycleAbs * 3 / 2, "dTMax clamp ineffective");
+
+        // lastUpdate advances to real block.timestamp (no backlog).
+        assertEq(ctrl.lastUpdate(), block.timestamp);
+    }
+
+    function test_dTMax_does_not_drive_buckK_to_rail_after_long_gap() public {
+        vm.prank(governance);
+        ctrl.setGains(0.1e18, 0.01e18, 0);
+        vm.prank(governance);
+        ctrl.setDTMax(3600);
+
+        // 24-hour silence with sustained 5% under-valuation.  Under the
+        // BUCK-minus-basket convention, error = -0.05 so buckK should
+        // descend (not ascend).  Without the dTMax clamp the 24h integral
+        // would slam buckK against the lower rail; with the clamp it should
+        // dip just below 1.0 but stay well clear of buckKMin.
+        ctrl.setBuckPrice(0.95e18);
+        vm.warp(block.timestamp + 24 hours);
+        uint256 k = ctrl.compute();
+
+        assertGt(k, 0.90e18, "buckK overshot below band after clamped long gap");
+        assertLt(k, 1.0e18,  "buckK did not respond at all");
+    }
+
+    // -------------------------------------------------------------------- //
+    //  Priming + dS-compensated derivative                                   //
+    // -------------------------------------------------------------------- //
+
+    /// @dev Priming now happens in the constructor.  `primed` is true
+    ///      immediately after deploy, `I` is pre-loaded for steady-state
+    ///      continuity (error = 0 assumed at deploy), and price references
+    ///      are set to UNIT (parity).  No separate prime branch runs at
+    ///      compute() time.
+    function test_constructor_primes_controller() public {
+        // Initial buckK chosen above UNIT so the I-prime math is observable.
+        BuckKHarness fresh = new BuckKHarness(
+            0.1e18, 0.01e18, 0,
+            3600,
+            0.50e18, 1.50e18,
+            1.20e18,                 // buckK starts above neutral
+            address(0xdead), 600,
+            governance
+        );
+
+        assertTrue(fresh.primed(),         "should be primed at construction");
+        assertEq(fresh.lastBasketCost(), int256(1e18), "basket reference not at parity");
+        assertEq(fresh.lastBuckPrice(),  int256(1e18), "buck reference not at parity");
+
+        // I = ((buckK - UNIT) * UNIT) / Ki
+        //   = ((1.20e18 - 1e18) * 1e18) / 0.01e18
+        //   = (0.20e36) / 0.01e18
+        //   = 20e18
+        assertApproxEqRel(fresh.I(), 20e18, 0.0001e18,
+                          "I not pre-loaded for steady-state continuity");
+        // P and D start at zero (no proportional or derivative history).
+        assertEq(fresh.P(), 0, "P should be 0 at construction");
+        assertEq(fresh.D(), 0, "D should be 0 at construction");
+    }
+
+    /// @dev Steady-state continuity: when oracles read at parity (BUCK == basket)
+    ///      the very first compute() must reproduce the initial buckK output.
+    ///      This is the property that justifies constructor-time I priming.
+    function test_first_compute_at_parity_reproduces_buckK() public {
+        BuckKHarness fresh = new BuckKHarness(
+            0.1e18, 0.01e18, 0,
+            3600,
+            0.50e18, 1.50e18,
+            1.20e18,                  // non-neutral starting buckK
+            address(0xdead), 600,
+            governance
+        );
+        _wireBasket(fresh);
+        fresh.setBuckPrice(1.0e18);   // BUCK at parity (basket = $1.00)
+
+        vm.warp(block.timestamp + 3601);
+        uint256 k = fresh.compute();
+        assertApproxEqRel(k, 1.20e18, 0.0001e18,
+                          "first compute at parity did not reproduce initial buckK");
+    }
+
+    /// @dev Priming doesn't make the first-after-step cycle spike-free
+    ///      (derivative correctly responds to a real change in process).
+    ///      What it buys: after the new equilibrium is reached, P_prev =
+    ///      new error, so the *next* cycle sees a tiny (P - P_prev) and
+    ///      D collapses.  Pre-priming, every fresh deploy with non-zero
+    ///      Kd produced a perpetual derivative contribution because P_prev
+    ///      was permanently stuck at 0.
+    function test_derivative_dies_after_step_settles() public {
+        BuckKHarness fresh = _makeHarness(0.1e18, 0.01e18, 0.00001e18, 3600);
+        _wireBasket(fresh);
+        fresh.setBuckPrice(1.0e18);
+
+        vm.warp(block.timestamp + 3601);
+        fresh.compute();   // prime
+
+        // Step: BUCK drops 1%.
+        fresh.setBuckPrice(0.99e18);
+        vm.warp(block.timestamp + 3601);
+        fresh.compute();
+        int256 d1 = fresh.D();
+
+        // Hold steady -- next cycle's (error - P) ~= 0, so D dies.
+        vm.warp(block.timestamp + 3601);
+        fresh.compute();
+        int256 d2 = fresh.D();
+
+        int256 absD1 = d1 < 0 ? -d1 : d1;
+        int256 absD2 = d2 < 0 ? -d2 : d2;
+        emit log_named_int("D on step",            d1);
+        emit log_named_int("D one cycle past step", d2);
+
+        assertGt(absD1, 0,                 "D did not respond to step");
+        assertLt(absD2 * 10, absD1,        "D did not die after equilibrium");
+    }
+
+    /// @dev A pure setpoint shift (basket moved, BUCK didn't) should not
+    ///      drive derivative action -- dS compensation strips the basket
+    ///      delta out of (error - P) before dividing by dt.
+    function test_dS_suppresses_derivative_on_basket_only_shift() public {
+        // Reset to gains where Kd > 0 so we'd actually see a derivative
+        // contribution if dS compensation were absent.
+        vm.prank(governance);
+        ctrl.setGains(0.1e18, 0.01e18, 0.0001e18);
+
+        // Force a second prime under the new gains.  setUp's prime captured
+        // P with Kd=0.00001 baked in; we want a fresh reference point.
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+
+        int256 dBeforeShift = ctrl.D();
+
+        // Shift the basket UP (gold spike) -- BUCK price unchanged.
+        // basketCost grows by ~30% * (gold doubling) = ~30% basket move.
+        goldFeed.setPrice(286286487500 * 2);
+
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+
+        int256 dAfterShift = ctrl.D();
+        int256 absD        = dAfterShift < 0 ? -dAfterShift : dAfterShift;
+
+        emit log_named_int("D before basket shift", dBeforeShift);
+        emit log_named_int("D after  basket shift", dAfterShift);
+
+        // Without dS comp the derivative would be ~ (basketShift / dt) * UNIT
+        // = 0.30e18 * 1e18 / 3600 ~= 8.3e31.  With dS, basket shift is
+        // subtracted out of the (error - P) numerator, so D should be
+        // basically noise (well under 1e18 in magnitude).
+        assertLt(uint256(absD), 1e16, "dS compensation failed: spurious D on basket shift");
+
+        // Sanity: the integral and proportional terms still react -- this
+        // test isolates dS's effect on D, not the rest of the controller.
+        assertNotEq(ctrl.P(), 0, "P should reflect the new error");
+    }
+
+    function _makeHarness(int256 _Kp, int256 _Ki, int256 _Kd, uint256 _dT) internal returns (BuckKHarness h) {
+        h = new BuckKHarness(
+            _Kp, _Ki, _Kd, _dT,
+            0.50e18, 1.50e18, 1.0e18,
+            address(0), 0, governance
+        );
+    }
+
+    function _wireBasket(BuckKHarness h) internal {
+        uint256 wGold   = _basketWeight(286286487500, 8, 0.30e18);
+        uint256 wSilver = _basketWeight(3181750000,   8, 0.05e18);
+        uint256 wOil    = _basketWeight(7200000000,   8, 0.30e18);
+        uint256 wGas    = _basketWeight(350000000,    8, 0.20e18);
+        uint256 wCopper = _basketWeight(420000000,    8, 0.15e18);
+        vm.startPrank(governance);
+        h.addBasketComponent(address(goldFeed),   wGold,   8);
+        h.addBasketComponent(address(silverFeed), wSilver, 8);
+        h.addBasketComponent(address(oilFeed),    wOil,    8);
+        h.addBasketComponent(address(gasFeed),    wGas,    8);
+        h.addBasketComponent(address(copperFeed), wCopper, 8);
+        vm.stopPrank();
     }
 
     function test_governance_setGains() public {
@@ -278,6 +560,10 @@ contract BuckKControllerForkTest is Test {
         vm.stopPrank();
 
         ctrl.setBuckPrice(1.0e18);
+
+        // Prime the controller (see unit-test setUp for the why).
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
     }
 
     function _basketWeight(int256 price, uint8 dec, uint256 targetDollars) internal pure returns (uint256) {

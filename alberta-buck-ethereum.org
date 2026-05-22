@@ -1,6 +1,6 @@
-#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.91)
+#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.92)
 #+author: Perry Kundert
-#+date: 2026-05-06 12:00:00
+#+date: 2026-05-10 12:00:00
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
 #+series_order: 9
@@ -32,8 +32,10 @@ contracts:
    mutual-insurance-pool minting that draws coverage from BUCK_CREDIT NFTs cheapest-first.
 4. *Notes* -- privacy-preserving denomination on top of BUCK.  Mint and spend via Groth16 SNARKs over
    a Tornado-style incremental Poseidon Merkle tree.
-5. *BUCK_K* -- the value-stabilization factor for credit-limit computation.  A governance-set static
-   variant ships today; a PID + commodity-basket-oracle variant is in tree pending live-pool wiring.
+5. *BUCK_K* -- the value-stabilization factor for credit-limit computation.  Both a governance-set
+   static variant and a full PID + Uniswap-V3-pool basket controller ship today; mint and burn drive
+   the PID through =compute()=, and the controller is wired with priming, setpoint-shift (=dS=)
+   compensation, and a long-gap =dTMax= clamp following the ezpwd::pid pattern.
 
 This is the first implementation, prioritizing clarity over breadth of standards.  Subsequent
 documents will examine ERC-1155, ERC-3643, and ERC-4626 alternatives for individual layers.
@@ -120,8 +122,13 @@ The flow is:
 6. To denominate as private notes, the client calls =Notes.mint= with a Groth16 proof binding the
    deposited =totalFace= to a batch of Poseidon commitments.  Holders later call =Notes.spend= or
    =Notes.spendACP= with a fresh nullifier and a SNARK proving inclusion under a recent root.
-7. =BUCK_K= ships in a governance-set static form today; the live PID + AMM-pool-oracle variant is
-   in tree, pending the BUCK/USDC pool that gives it a process variable to read.
+7. =BUCK_K= ships in two forms today.  The governance-set static variant is the simpler choice for
+   early deployments where no BUCK price oracle exists yet.  The PID + Uniswap-V3-pool variant
+   reads its process variable (BUCK price) from a BUCK/USDT TWAP and its setpoint (basket cost)
+   from a four-pool basket -- XAUT/USDT, PAXG/USDC, cbBTC/USDC, WBTC/USDT, 25 % each -- chosen for
+   resilience against any single basis-currency or asset-token freeze.  =Buck.mint= and =Buck.burn=
+   call =BuckK.compute()=, so user activity drives and amortizes the PID; long quiet stretches
+   are bounded by =dTMax=.
 
 * ERC Standard Choice for BUCK_CREDIT
 
@@ -370,8 +377,10 @@ on the same NFT order is rate-neutral and not arbitrageable -- both sides hit th
 The shipped =mint= sequence:
 
 1. =isVerified(msg.sender)= guard.
-2. Read =buckCredit.totalCurrentValue(sender) * buckK.currentBuckK() / 1e18=, ratchet
-   =storedLimit[sender]= upward only.
+2. Read =buckCredit.totalCurrentValue(sender) * buckK.compute() / 1e18=, ratchet
+   =storedLimit[sender]= upward only.  =compute()= advances the PID if =dT= has elapsed (oracle
+   reads + state update) or returns the cached value otherwise -- mint and burn together amortize
+   PID work across user activity.
 3. Early gate: ~_state[sender].balance (raw) + amount <= storedLimit~ -- uses raw balance so that
    accrued demurrage fees do not silently inflate the apparent headroom; =amount= is a lower bound
    on total coverage drawn (since pool principal is non-negative).
@@ -410,16 +419,24 @@ ERC-20-baseline transfer).
 
 ** transfer() and transferFrom()
 
-Both route through =_identityCheckedTransfer=, which:
+Both route through =_identityCheckedTransfer=, which enforces /mutual
+decryptability/: every private (non-public) party must hold a per-pair CP
+receipt fragment for its counterparty, established before the transfer by
+the 4-arg identity-bound =approve=.  Only public-identity contracts may
+use the deterministic =_identityHash= fallback.
 
 - Requires =isVerified(from)= and =isVerified(to)=.
-- For the =to= side: tries =_receiptFragments[from][to]=; if zero, falls back to =_identityHash(to)=
-  /only/ if =isPublicIdentity(from) || isPublicIdentity(to)= -- otherwise reverts with
-  =BUCK: missing identity receipt=.  EOA-to-EOA Encrypted transfers require a prior CP receipt;
-  Public-Identity counterparties may use the deterministic fallback.
-- For the =from= side: tries =_receiptFragments[to][from]= (a reciprocal approve); falls back
-  unconditionally to =_identityHash(from)= otherwise.  Auditors reading the event know which side
-  was CP-bound vs registry-derived.
+- For the =to= side (=_receiptFragments[from][to]): if zero, requires
+  =isPublicIdentity(from)= — reverts with =BUCK: sender must
+  identity-approve recipient= otherwise.  Falls back to =_identityHash(to)=
+  when =from= is public.
+- For the =from= side (=_receiptFragments[to][from]): if zero, requires
+  =isPublicIdentity(to)= — reverts with =BUCK: recipient must
+  identity-approve sender= otherwise.  Falls back to =_identityHash(from)=
+  when =to= is public.
+- Both guards pass only when /both/ parties are public-identity contracts.
+  EOA-to-EOA transfers require bilateral CP-approve; EOA-to-Public and
+  Public-to-EOA require the private party to CP-approve the public one.
 
 After identity checks, transfer dispatch is automatic on the sender's =isCarrying= flag: Carrying
 senders (AMM pools, the Notes pool, the Jubilee fund) take the =_carryingTransfer= path that
@@ -490,52 +507,136 @@ single accumulating slot.
   :END:
 
 =BUCK_K= supplies the credit-limit multiplier =BUCK.mint= reads to size against
-=totalCurrentValue=.  The interface is one function -- =currentBuckK() external view returns
-(uint256)= -- so =BUCK= is invariant to which implementation is wired in.  Two implementations
-exist in tree: =BuckKControllerStatic= (governance-set constant, currently used in deployments
-because BUCK has no AMM-quoted price yet) and =BuckKController= (full PID + commodity-basket-oracle
-implementation, used in unit tests with mocked feeds; live-pool wiring is the remaining work).
+=totalCurrentValue=.  The =IBuckK= interface is two functions -- =currentBuckK() external view
+returns (uint256)= and =compute() external returns (uint256)= -- so =BUCK= is invariant to which
+implementation is wired in.  =BUCK.mint= and =BUCK.burn= both call =compute()= so user activity
+drives the controller and amortises any PID work; the function is otherwise permissionless,
+keepers and individual users can poke it directly during quiet stretches.  Two implementations
+ship today: =BuckKControllerStatic= (governance-set constant) and =BuckKController= (full PID +
+Uniswap-V3-pool basket).
 
 ** Static Variant
 
 =BuckKControllerStatic= holds one =uint256 buckK= (18 decimals, =1e18= = neutral).  Functions:
-=currentBuckK()=, =compute()= (no-op), =setBuckK(uint256)= (governance-only),
-=transferGovernance(address)=.  This is what =script/Deploy.s.sol= wires into =BUCK= today, so the
-identity, demurrage, and Notes layers can be exercised while BUCK_K is held constant.
+=currentBuckK()=, =compute()= (returns the stored value, non-view to match the IBuckK signature),
+=setBuckK(uint256)= (governance-only), =transferGovernance(address)=.  This is the simpler choice
+for early deployments where no BUCK price oracle exists yet, exercising the identity, demurrage,
+and Notes layers while =BUCK_K= is held constant.
 
 ** PID Variant
 
-=BuckKController= ports the JavaScript PID controller from
-[[https://github.com/pjkundert/ownercredit][ownercredit]] to 18-decimal Solidity fixed-point.
+=BuckKController= follows the
+[[https://github.com/pjkundert/ezpwd-reed-solomon/blob/master/c%2B%2B/ezpwd/pid][ezpwd::pid]]
+controller layout, ported to 18-decimal Solidity fixed-point.
 
 | PID Term         | Source                             | Meaning                                          |
 |------------------+------------------------------------+--------------------------------------------------|
-| Process Variable | BUCK/USDC Uniswap V3 TWAP          | What a BUCK actually trades for                  |
-| Setpoint         | Commodity-basket oracle sum        | What a BUCK should be worth                      |
-| Error            | Setpoint - Process                 | Positive: BUCK undervalued; negative: overvalued |
+| Process Variable | BUCK/USDT Uniswap V3 TWAP          | What a BUCK actually trades for                  |
+| Setpoint         | Commodity-basket TWAP sum          | What a BUCK should be worth                      |
+| Error            | Process - Setpoint                 | Positive: BUCK overvalued; negative: undervalued |
 | Output (BUCK_K)  | =1e18 + (P*Kp + I*Ki + D*Kd)/1e18= | Credit-limit multiplier (1.0 = neutral)          |
 
-When BUCK trades below basket, BUCK_K rises, expanding credit limits across the system; cheap BUCK
-floods out, arbitrageurs buy underpriced commodities, and BUCK price recovers.  The converse
-clamps credit when BUCK is overvalued.
+Sign convention (all shipped gains are *positive*):
 
-The shipped contract holds =int256 Kp, Ki, Kd=, =uint256 dT= (minimum update interval,
-~1 hour suggested), =uint256 buckKMin, buckKMax= (output clamps), the BUCK/USDC pool address, the
-TWAP interval, and a =basket[]= array of =BasketComponent { feed, weight, feedDecimals }=.
-=compute()= short-circuits if =now - lastUpdate < dT=; otherwise it reads basket cost and
-BUCK price, runs one PID cycle with anti-windup on the integral term, clamps to =[buckKMin,
-buckKMax]=, writes state, and emits =BuckKUpdated=.  =setGains=, =setDT=, =addBasketComponent= are
-governance-only.
+  - *BUCK below basket (inflation)*: =error < 0= -> =BUCK_K= /decreases/.
+    Credit contracts; holders running near their limit must burn BUCK to
+    stay compliant; supply shrinks; BUCK price recovers toward basket
+    from below.
 
-The =_getBasketCost= and =_getBuckPrice= helpers use Uniswap V3's
-=OracleLibrary.consult(pool, twapInterval)= to convert tickCumulative deltas into 18-decimal
-prices, with per-pool decimal normalisation.  The targeted *interim* basket is AMM-pool-quoted
-(PAXG/USDC for gold, tokenised wheat/USDC, REIT/USDC, and a USD anchor weight) rather than
-Chainlink-fed -- AMM pools are self-sovereign and don't add an external trust dependency before
-BUCK has its own price-discovery surface.  Switching to Chainlink later is a per-component
-configuration change, not a contract change.
+  - *BUCK above basket (deflation)*: =error > 0= -> =BUCK_K= /increases/.
+    Credit expands; holders can mint additional BUCK against their NFTs
+    and sell it into the pool at the premium; supply grows; BUCK price
+    recovers toward basket from above.
 
-** Tuning
+Two canary tests in =test/BuckKController.t.sol= guard this direction
+(=test_sign_convention_inflation_contracts_credit= and
+=test_sign_convention_deflation_expands_credit=); any sign flip in the
+controller surface fails them within one PID cycle.  See
+=alberta-buck-ethereum-example.org= for the bootstrap, equilibrium, and
+arbitrage examples that exercise the loop end-to-end.
+
+*** Basket and BUCK Price Oracles
+
+The controller reads basket components from two parallel sources, both summed into the basket
+cost: a Chainlink-feed array (=BasketComponent { feed, weight, feedDecimals }=, used in tests
+against mock aggregators) and a Uniswap-V3-pool array (=BasketPool { pool, baseToken, quoteToken,
+weight, baseDecimals, quoteDecimals, twapInterval }=).  =addBasketComponent= and =addBasketPool=
+are governance-only.  The shipped target basket is V3-pool-sourced:
+
+| Pool         | Base       | Quote | Weight |
+|--------------+------------+-------+--------|
+| XAUT / USDT  | XAUT (6d)  | USDT  | 25 %   |
+| PAXG / USDC  | PAXG (18d) | USDC  | 25 %   |
+| cbBTC / USDC | cbBTC (8d) | USDC  | 25 %   |
+| WBTC / USDT  | WBTC (8d)  | USDT  | 25 %   |
+
+Two gold tokens and two BTC tokens, paired against two stablecoins, gives the basket resilience
+against any single asset-token or basis-currency freeze.  =setBuckPriceOracle(pool, buckToken,
+quoteToken, quoteDecimals, twapInterval)= configures the BUCK price oracle (typically BUCK/USDT).
+
+Pool reads route through =UniswapV3OracleLib= (=src/lib/=) -- a 0.8-compatible port of the
+=OracleLibrary= /=TickMath= /=FullMath= helpers we need.  The vendored =lib/v3-periphery=
+=OracleLibrary= is pinned to =<0.8.0= and can't be imported directly under 0.8.20+.  When a pool's
+=twapInterval > 0= the controller calls =consult(pool, secondsAgo)= for the time-weighted mean
+tick; when zero it reads =slot0().tick= directly (test-only).
+
+*** Priming and =dS= Compensation
+
+The first =compute()= after deployment captures references and returns the cached =buckK=
+without running PID math:
+
+#+BEGIN_SRC text
+prime cycle:  P = current_error;  lastBasketCost = current_basket;  primed = true;
+              return buckK
+#+END_SRC
+
+This avoids the spurious first-cycle derivative spike that arose from =P_prev = 0= (default
+storage) combined with a non-zero initial error.  All subsequent cycles compute
+
+#+BEGIN_SRC text
+dS = basketCost - lastBasketCost
+D  = (error - P_prev - dS) * UNIT / dt
+#+END_SRC
+
+where =dS= captures setpoint movement (gold spike, governance basket re-weight, oracle update).
+Subtracting =dS= from =(error - P_prev)= strips out target movement so derivative reflects only
+BUCK's drift relative to its (moving) target.  Without =dS=, a basket-side jump would otherwise
+fire =Kd * basketJump / dt= as if BUCK had moved, slamming =BUCK_K= toward a rail.
+
+*** =dT=, =dTMax=, and Pokability
+
+Three time constants govern when and how aggressively the controller responds:
+
+- *=dT= (minimum cycle interval)*: =compute()= short-circuits if =now - lastUpdate < dT= and
+  returns cached =buckK= as a one-SLOAD operation.  This is the amortisation knob -- multiple
+  mints in a single =dT= window share one PID cycle's gas cost.  60 s is reasonable for a chain
+  with ~12 s blocks (one PID cycle per ~5 blocks).
+- *=dTMax= (long-gap clamp)*: when =now - lastUpdate > dTMax=, the cycle integrates as if only
+  =dTMax= seconds had passed.  Real =lastUpdate= still advances to =now=, so subsequent cycles
+  measure forward correctly.  Default =type(uint256).max= (no clamp); governance opts in via
+  =setDTMax=.  Typical value 1 h: a 24-h silence then integrates as one 1-h step rather than
+  slamming the integral with 24 h of accumulated error.
+- *Pokability*: =compute()= is permissionless and side-effect-only-when-due.  In normal operation
+  =Buck.mint= / =Buck.burn= drive it; in long quiet stretches a keeper can poke it directly
+  to keep the integral fresh, or rely on =dTMax= to bound the eventual catch-up step.
+
+The TWAP window itself (currently 600 s on every pool) is the manipulation-resistance knob.
+A flash-loan-shape attack that drives BUCK to $0.50 in one block and unwinds the next leaves spot
+collapsed but TWAP unmoved -- the test suite verifies that during such an attack the TWAP read
+sits at ~$1.000002 while spot reads $0.500.
+
+*** Future: Amortizing PID Work via a State Machine
+
+Today's =compute()= reads all five pools and runs the full P/I/D math in a single call.  At
+~5 V3 pool reads + a few mults this is cheap (~300-500 K gas including a state write).  If a
+richer PID grew expensive enough that mint-time amortization became painful, the cycle work
+could be split into a state machine over multiple calls -- each transfer advancing one micro-step
+of (read pool i, accumulate, finalize).  The tradeoff is that pool reads stretch over real time
+and so the basket sample becomes incoherent unless every input is itself TWAP'd over a window
+covering the state-machine duration; today's full-cycle compute wins for that reason.  Revisit
+when oracle reads grow or the basket expands materially.
+
+*** Tuning
 
 | Gain | Effect of increasing                  | Risk                           |
 |------+---------------------------------------+--------------------------------|
@@ -544,14 +645,14 @@ configuration change, not a contract change.
 | Kd   | Damps oscillation, anticipates trends | Noise amplification            |
 
 Initial gains should be conservative (high Kd relative to Kp, low Ki).  =dT= acts as a coarse
-damper: at 1 hour, BUCK_K updates at most once per hour regardless of mint frequency.  TWAP
-interval (suggested 30 minutes) is the manipulation-resistance knob -- an attacker would need to
-sustain a price manipulation for the full TWAP window to meaningfully move BUCK_K, which is
-prohibitively expensive on a deep pool.
+damper, =dTMax= as a backstop.  Priming and =dS= compensation make non-zero =Kd= safe at small
+=dT=: pre-priming, every fresh deploy with =Kd > 0= had a permanent derivative contribution
+because =P_prev= was stuck at 0 -- post-priming, =P_prev= captures the actual initial error and
+the derivative dies off as soon as the system reaches a new equilibrium.
 
 A future enhancement is on-chain gain scheduling: maintain a rolling variance of the error signal
-and rotate between conservative and responsive gain sets at regime boundaries.  This maps directly
-to the =PIDController.reset()= hot-swap pattern in the JavaScript reference.
+and rotate between conservative and responsive gain sets at regime boundaries.  This maps to the
+=ezpwd::pid::reset()= hot-swap pattern in the C++ reference.
 
 * Notes: Privacy-Preserving Denomination
   :PROPERTIES:
@@ -829,7 +930,8 @@ oracle figures are estimates against unwritten oracle wiring.
 | BUCK.mint() (static BUCK_K, 1 NFT)             | ~150K        | ~$12       | NFT walk + allocator + Jubilee accrual   |
 | BUCK.mint() (static BUCK_K, 2-NFT spillover)   | ~210K        | ~$17       | + second NFT crystallise                 |
 | BUCK.burn() (1 NFT)                            | ~120K        | ~$10       | Mirror of mint, no limit ratchet         |
-| BUCK.mint() (with PID update)                  | ~350K        | ~$28       | + oracle reads + PID computation         |
+| BUCK.mint() (with PID update, 4-pool basket)   | ~450K        | ~$36       | + 4 V3 TWAP reads + BUCK TWAP + PID math |
+| BUCK.mint() (PID cached, within dT)            | ~155K        | ~$12       | one SLOAD on the cache path              |
 | Notes.mint (mint_batch, N=1)                   | ~461K        | ~$37       | Groth16 verify (~216K) + insert          |
 | Notes.mint (mint_batch, N=16)                  | ~624K        | ~$50       | ~39K/leaf -- shipped sweet-spot          |
 | Notes.mint (mint_batch, N=32)                  | ~1.12M       | ~$90       | ~35K/leaf (verifier ~422K)               |
@@ -837,18 +939,22 @@ oracle figures are estimates against unwritten oracle wiring.
 | Notes.spendACP (Groth16 + CP-DLEQ, A-shape)    | ~410K        | ~$33       | + verifySpendCP (~36K) via EIP-196       |
 | BUCK_CREDIT.currentValue / BUCK_K.currentBuckK | 0            | Free       | View                                     |
 
-The PID update cost is amortised across all mints within a =dT= window (1-hour suggested) -- only
-the first mint after each window pays for the oracle reads and computation.  The same contracts
-deploy on EVM L2s (Arbitrum, Optimism, Base) where gas is 10-100x cheaper.
+The PID update cost is amortised across all mints within a =dT= window (60 s default; only the
+first mint after each window pays the oracle-read + PID-math cost; every other mint sees the
+cached one-SLOAD path).  =Buck.burn= calls =compute()= too, so burns share the amortisation.  The
+same contracts deploy on EVM L2s (Arbitrum, Optimism, Base) where gas is 10-100x cheaper.
 
 * Security Considerations
 
 ** Oracle Manipulation
 
-BUCK/USDC and basket prices use Uniswap V3 TWAPs (30+ minutes), so manipulation requires
-sustained capital commitment proportional to pool depth.  When/if Chainlink basket feeds are
-adopted later, =_getBasketCost= must verify =updatedAt= is within an acceptable window (~1 hour)
-and revert if stale.
+BUCK/USDT and basket pool prices use Uniswap V3 TWAPs (600 s shipped, governance-tunable per
+pool), so manipulation requires sustained capital commitment over the full window proportional to
+pool depth.  The =BuckKControllerV3TwapTest= suite verifies that a single-block flash-shape attack
+driving BUCK to $0.50 leaves spot collapsed but TWAP unchanged at ~$1.000002, with the PID
+computing off the unchanged TWAP.  When/if Chainlink basket feeds are adopted later, the
+Chainlink branch of =_getBasketCost= must verify =updatedAt= is within an acceptable window
+(~1 hour) and revert if stale.
 
 ** Credit Enumeration DoS
 
@@ -915,7 +1021,7 @@ flags for later study:
 
 * Status
 
-Current Foundry suite: 247 unit tests pass across 13 suites; one =BuckKControllerForkTest=
+Current Foundry suite: 272 unit tests pass across 17 suites; one =BuckKControllerForkTest=
 requires a live mainnet RPC and is skipped offline.  The shipped surface covers all five
 contracts in tree (=BuckCredit=, =IdentityRegistry=, =Buck=, =BuckKControllerStatic= +
 =BuckKController=, =Notes=) plus the SNARK toolchain (=mint_batch.circom= at pinned
@@ -923,12 +1029,29 @@ N \in {1, 2, 4, 8, 16, 32}, =spend.circom=, =spend_a.circom= V2) and a Python re
 (=alberta_buck.wallet=) that emits canonical test vectors the Solidity tests load via
 =vm.readFile=.
 
+The BUCK_K test suites cover:
+
+- =BuckKControllerUnitTest= -- harness with mocked Chainlink feeds, mocked BUCK price.  Includes
+  priming, =dS= compensation, =dTMax= clamp, anti-windup, and multi-step integral convergence.
+- =BuckKControllerV3Test= -- locally deployed Uniswap V3 factory, all four basket pools at
+  reference prices, BUCK/USDT pool with a 1e17 full-range LP (~100 K BUCK / 100 K USDT, matching
+  the design narrative).  Spot-price reads, swap-driven price drift, and PID response.
+- =BuckKControllerV3TwapTest= -- same V3 setup with =twapInterval = 600 s= on every pool, plus a
+  warmup loop that walks forward writing observations on each pool.  Verifies the TWAP path
+  smooths a flash-shape spike (spot $0.50, TWAP $1.000002) and tracks sustained drift over the
+  600-s window (TWAP converges from $1.00 → $0.97 → $0.95 over a full window at $0.95 spot).
+
 Outstanding work tracked in companion memos:
 
-- *Live BUCK_K oracles* -- =BuckKController= is in tree with PID structure and mocked-feed unit
-  tests; wiring AMM-pool oracles for the basket components and the BUCK/USDC pool (the process
-  variable) is the remaining work.  Depends on a BUCK/USDC pool existing, which is a chicken-and-
-  egg with treasury minting.
+- *Mainnet-fork BUCK_K test* -- exercise =BuckKController= against the four real on-chain pools
+  at a pinned recent block, verifying basket cost reads sensibly against live data.  Cheap
+  validation step before mainnet.
+- *Multi-block historical replay* -- a backtest harness that walks =BuckKController= through 12
+  months of EVM history at a chosen block cadence, for tuning =Kp/Ki/Kd= against a real
+  price tape.  Highest-value validation; biggest engineering lift.
+- *PID-driven arbitrage scenario test* -- the worked example in =alberta-buck-ethereum-example.org=
+  demands a scripted Foundry test that drives Bobs through mint/swap/burn cycles while an Alice
+  arbitrages around the PID equilibrium, with a Python visualisation of the trajectories.
 - *Serialised B1 sub-notes* (=spend_serialized.circom= + per-parent bitmap) -- design validated
   end-to-end by =scripts/snark/serialized_notes_poc.py= at N_fam in {256, 1024, 4096}; circuit
   port and contract bitmap support are the implementation gap.  See

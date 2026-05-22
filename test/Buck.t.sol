@@ -2,11 +2,14 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm}   from "forge-std/Vm.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
+import {MockBasket} from "./mocks/MockBasket.sol";
 
 /// @title Buck.t.sol — identity-bound ERC-20 mint / approve / transfer flow.
 contract BuckTest is Test {
@@ -128,6 +131,14 @@ contract BuckTest is Test {
             C: BN254.g1()
         });
         reg.bindContract(target, pk, E, true, true);
+    }
+
+    /// @dev Write a receipt fragment directly to Buck's storage, simulating the
+    ///      effect of a CP-bound approve without needing a proof fixture for the
+    ///      (from, to) pair.  _receiptFragments is at slot 5 in Buck's layout.
+    function _setReceiptFragment(address from, address to, bytes32 value) internal {
+        bytes32 slot = keccak256(abi.encode(to, keccak256(abi.encode(from, uint256(5)))));
+        vm.store(address(buck), slot, value);
     }
 
     /// @dev Mint a BuckCredit NFT to `client` with a fixed face value, no depreciation,
@@ -416,6 +427,25 @@ contract BuckTest is Test {
         assertEq(buck.balanceOf(POOL),    18_750_000 - 16_118_422,    "pool refund spans both NFTs");
     }
 
+    function test_quoteMint_multiRate_matchesExecution() public {
+        uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
+        uint256 dear  = _grantCreditAtRate(alice, 200e6, 200);
+
+        // Quote with a mixed cheap-dear order.
+        uint256[] memory order = new uint256[](2);
+        order[0] = cheap;
+        order[1] = dear;
+
+        (uint256 quotedCoverage, uint256 quotedPrincipal) = buck.quoteMint(250e6, order);
+
+        vm.prank(alice);
+        buck.mint(250e6, order);
+
+        uint256 totalBacked = buck.mintsBacked(cheap) + buck.mintsBacked(dear);
+        assertEq(totalBacked, quotedCoverage, "coverage matches quote");
+        assertEq(buck.balanceOf(POOL), quotedPrincipal, "principal matches quote");
+    }
+
     function test_quoteMint_matchesExecution() public {
         uint256 cheap = _grantCreditAtRate(alice, 100e6, 50);
         uint256 dear  = _grantCreditAtRate(alice, 100e6, 200);
@@ -455,12 +485,211 @@ contract BuckTest is Test {
         assertEq(poolBefore   - buck.balanceOf(POOL),  quotedRefund, "refund matches quote");
     }
 
+    // ---- setBasket ----------------------------------------------------------
+
+    function test_setBasket_onlyInsurancePool() public {
+        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.expectRevert("BUCK: not insurancePool");
+        fresh.setBasket(address(0xDECAF));
+    }
+
+    function test_setBasket_oneShot() public {
+        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(POOL);
+        fresh.setBasket(address(0xB0CC));
+        vm.prank(POOL);
+        vm.expectRevert("BUCK: basket already set");
+        fresh.setBasket(address(0xB0DD));
+    }
+
+    function test_setBasket_rejectsZero() public {
+        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        vm.prank(POOL);
+        vm.expectRevert("BUCK: basket=0");
+        fresh.setBasket(address(0));
+    }
+
+    // ---- burn: all NFTs over-rate -------------------------------------------
+
+    function test_burn_revertsWhenAllNFTsOverRate() public {
+        // Mint against a reasonable-rate NFT, then the insurer bumps the
+        // premium rate so high that effRate >= BP.  On burn, the NFT is
+        // silently skipped and the burn fails with insufficient coverage.
+        uint256 tid = _grantCreditAtRate(alice, 100e6, 100);  // effRate=1000
+
+        vm.prank(alice);
+        buck.mint(50e6);
+
+        // Insurer reappraises: bumps premium rate to 1000 (effRate=10000 == BP).
+        vm.prank(address(this));  // insurer == credit creator
+        credit.updateCredit(
+            tid, 100e6, 100e6,
+            BuckCredit.DepreciationType.NONE, 0, 0,
+            1000  // premiumRate = 1000 → effRate = 1000*10 = 10000 = BP → skipped
+        );
+
+        uint256[] memory order = new uint256[](1);
+        order[0] = tid;
+        vm.prank(alice);
+        vm.expectRevert("BUCK: insufficient coverage to unwind");
+        buck.burn(10e6, order);
+    }
+
+    // ---- funding factor gate ------------------------------------------------
+
+    function test_mint_revertsWhenFundingFactorUnsatisfied() public {
+        // Deploy a fresh stack: new IdentityRegistry, controller with real
+        // funding factor, and Buck.  Alice needs a fresh registration.
+        IdentityRegistry r = new IdentityRegistry(GOV);
+        BuckKControllerDirect kc = new BuckKControllerDirect(
+            0.1e18, 0.01e18, 0,
+            60,
+            0.50e18, 1.50e18,
+            1.0e18,
+            GOV
+        );
+        Buck b = new Buck(address(credit), address(kc), address(r), POOL);
+        vm.prank(GOV);
+        r.setBuck(address(b));
+
+        // Register Alice on the fresh registry.
+        {
+            BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+            IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+            // Need a trusted issuer on the fresh registry.
+            IdentityRegistry.PSPubKey memory ipk;
+            ipk.X.X[0] = _u(".issuer.pk_X.x[0]");
+            ipk.X.X[1] = _u(".issuer.pk_X.x[1]");
+            ipk.X.Y[0] = _u(".issuer.pk_X.y[0]");
+            ipk.X.Y[1] = _u(".issuer.pk_X.y[1]");
+            ipk.Y.X[0] = _u(".issuer.pk_Y.x[0]");
+            ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
+            ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
+            ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+            vm.prank(GOV);
+            r.trustIssuer(ISSUER, ipk);
+            vm.prank(alice);
+            r.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
+        }
+
+        // Wire a mock basket signalling inflation (basket > 1.0 BUCK).
+        MockBasket basket = new MockBasket();
+        basket.setBasketValue(int256(1.05e18));
+        vm.prank(GOV);
+        kc.setBasket(address(basket));
+
+        // Advance time past dT so the PID cycle runs.
+        vm.warp(block.timestamp + 61);
+        kc.compute();
+        uint256 factor = kc.fundingFactor();
+        assertGt(factor, 0, "funding factor should be positive");
+
+        // Alice has a credit NFT.  She mints some initial BUCK.
+        uint256 tid = _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        b.mint(1e6);
+
+        // Compute again to get a non-zero funding factor.
+        vm.warp(block.timestamp + 61);
+        kc.compute();
+
+        // Now try to mint more — the funding factor requires balanceOf >=
+        // poolPrincipal * factor / 1e18, but alice only has 1e6 BUCK.  The
+        // poolPrincipal from a 100e6 mint at 50bp is ~526k, and with factor
+        // ~1.48, the required balance is ~780k.  Alice only has 1e6 — hmm,
+        // that might actually pass.  Let me mint a larger amount.
+        // poolPrincipal for 500e6 at 50bp = 500e6 * (BP/(BP-500) - 1) ≈ 26.3e6.
+        // required = 26.3e6 * 1.48 / 1e18 ≈ 38.9e6.  Alice only has 1e6 → reverts.
+        vm.prank(alice);
+        vm.expectRevert("BUCK: insufficient mint funding");
+        b.mint(500e6);
+    }
+
     // ---- approve -----------------------------------------------------------
 
-    function test_plainApprove_isBlocked() public {
+    /// @dev Plain ERC-20 approve is now permitted (required for standard
+    ///      router / Permit2 infrastructure).  It sets the allowance but
+    ///      does NOT establish a Chaum-Pedersen receipt fragment and does
+    ///      NOT freeze the spender's carrying flag -- those remain exclusive
+    ///      to the 4-arg identity-bound approve.  Identity is enforced at
+    ///      transfer time, not here.
+    function test_plainApprove_setsAllowanceButNoReceiptOrFreeze() public {
+        assertFalse(reg.carryingFrozen(bob), "not yet frozen");
+
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: use identity-bound approve"));
-        buck.approve(bob, 100e6);
+        bool ok = buck.approve(bob, 100e6);
+        assertTrue(ok, "plain approve returns true");
+
+        assertEq(buck.allowance(alice, bob), 100e6, "allowance set");
+        assertEq(buck.receiptFragment(alice, bob), bytes32(0),
+                 "plain approve must NOT establish a receipt fragment");
+        assertFalse(reg.carryingFrozen(bob),
+                    "plain approve must NOT freeze the spender carrying flag");
+    }
+
+    /// @dev GUARANTEE: a plain allowance cannot bypass the confidential-
+    ///      transfer rule.  Bob is verified but non-public; with only a
+    ///      plain approve (no 4-arg receipt) and neither party public, a
+    ///      spender-initiated transferFrom into a non-public party still
+    ///      reverts exactly as a direct transfer would.
+    function test_plainApprove_transferFrom_toConfidential_stillReverts() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        vm.prank(alice);
+        buck.approve(bob, 50e6);                 // plain approve, no receipt
+
+        vm.prank(bob);
+        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient"));
+        buck.transferFrom(alice, bob, 10e6);     // alice & bob both non-public
+    }
+
+    /// @dev GUARANTEE: transferFrom still requires a verified recipient,
+    ///      regardless of the plain allowance.
+    function test_plainApprove_transferFrom_requiresVerifiedRecipient() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        vm.prank(alice);
+        buck.approve(bob, 50e6);
+
+        vm.prank(bob);
+        vm.expectRevert(bytes("BUCK: recipient not verified"));
+        buck.transferFrom(alice, carol, 10e6);   // carol unverified
+    }
+
+    /// @dev The intended new capability (the Permit2 / router path): a
+    ///      plain-approved spender CAN move the owner's BUCK to a
+    ///      public-identity recipient (a bound pool), because the
+    ///      (from,to) gate is satisfied by the public side -- no receipt
+    ///      fragment, no CP proof.  This is the standard-router flow.
+    function test_plainApprove_transferFrom_toPublicRecipient_succeeds() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
+
+        // Mutual decryptability: the private sender must CP-approve the
+        // public recipient so the pool operator can decrypt Alice's identity
+        // from the receipt under subpoena.
+        _setReceiptFragment(alice, pool, bytes32(uint256(1)));
+
+        // `bob` stands in for a router/Permit2 spender: alice grants it a
+        // plain allowance; it pulls her BUCK into the public pool.
+        vm.prank(alice);
+        buck.approve(bob, 50e6);
+
+        uint256 aliceBefore = buck.balanceOf(alice);
+        vm.prank(bob);
+        buck.transferFrom(alice, pool, 10e6);
+
+        assertEq(buck.balanceOf(alice), aliceBefore - 10e6, "owner debited");
+        assertEq(buck.balanceOf(pool),  10e6,                "pool credited");
+        assertEq(buck.allowance(alice, bob), 40e6,           "allowance spent");
     }
 
     function test_identityApprove_succeedsWithValidProof() public {
@@ -553,7 +782,7 @@ contract BuckTest is Test {
 
         // Alice has not yet approved Bob -> no receipt fragment -> must revert.
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: missing identity receipt"));
+        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient"));
         buck.transfer(bob, 1e6);
     }
 
@@ -562,9 +791,17 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(100e6);
 
+        // Alice CP-approves Bob (sender → recipient direction).
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
         buck.approve(bob, 50e6, E_b, _cpProof());
+
+        // Bob must also CP-approve Alice (recipient → sender direction) for
+        // the bilateral identity invariant to hold: both private parties need
+        // a per-pair receipt fragment so each can decrypt the other's identity.
+        // Simulate Bob's approve by writing his receipt fragment directly
+        // (no Bob→Alice CP proof exists in the shared test vectors).
+        _setReceiptFragment(bob, alice, bytes32(uint256(1)));
 
         uint256 aliceBefore = buck.balanceOf(alice);
         vm.prank(alice);
@@ -578,12 +815,13 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(100e6);
 
-        // Public-Identity contract recipient -> Alice can transfer without
-        // a prior CP approve receipt; the receipt-fragment fallback to the
-        // deterministic _identityHash kicks in because the contract's
-        // identity is already publicly attested.
+        // Public-Identity contract recipient: the private sender must still
+        // CP-approve the pool so the pool operator can decrypt the sender's
+        // identity (mutual decryptability).  The pool side falls back to
+        // identityHash (it is public, so no CP needed from the pool).
         address pool = address(0xDECAF);
         _bindPublicIdentity(pool);
+        _setReceiptFragment(alice, pool, bytes32(uint256(1)));
         vm.prank(alice);
         buck.transfer(pool, 5e6);
         assertEq(buck.balanceOf(pool), 5e6);
@@ -594,9 +832,13 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(100e6);
 
+        // Alice CP-approves Bob (sender → spender direction).
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
         buck.approve(bob, 50e6, E_b, _cpProof());
+
+        // Bob must also CP-approve Alice for the bilateral invariant (both private).
+        _setReceiptFragment(bob, alice, bytes32(uint256(1)));
 
         vm.prank(bob);
         buck.transferFrom(alice, bob, 25e6);
@@ -604,32 +846,123 @@ contract BuckTest is Test {
         assertEq(buck.balanceOf(bob),        25e6);
     }
 
-    // ---- public-contract sender -> verified-EOA (e.g. Uniswap pair payout) -
+    // ---- receipt-hash invariants across transfer combinations ---------------
 
-    function test_transfer_publicContractSenderToVerifiedSkipsReceiptFragment() public {
-        // A Public-Identity contract (proxy for a Uniswap pair) holds BUCK
-        // and pays it out to verified Bob.  No prior CP approve from the
-        // contract to Bob exists, and the contract has no off-chain crypto
-        // material to produce one -- the transfer succeeds because the
-        // contract's identity is publicly attested (fallback to identityHash).
-        address pool = address(0xDECAF);
-        _bindPublicIdentity(pool);
-
-        // Seed the contract with BUCK.  Alice transfers to it directly,
-        // exercising the Public-recipient-receipt fallback at the same time.
+    /// @dev Verify that BuckTransferReceipt events carry the correct hash
+    ///      values for each transfer combination, matching the identity
+    ///      fallback rules in _identityCheckedTransfer.
+    ///
+    ///      Both parties are private EOAs: bilateral CP-approve required.
+    function test_receiptHashes_EOAtoEOA_bilateralCPApprove() public {
         _grantCredit(alice, 1000e6);
         vm.prank(alice);
         buck.mint(100e6);
-        vm.prank(alice);
-        buck.transfer(pool, 30e6);
-        assertEq(buck.balanceOf(pool), 30e6);
 
-        // Now the public contract pays out to Bob (verified, never approved
-        // by the contract).  Pre-refactor this reverted with "missing
-        // identity receipt"; post-refactor it succeeds via the Public-sender
-        // fallback.
+        // Alice CP-approves Bob (sender → recipient).
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        vm.prank(alice);
+        buck.approve(bob, 50e6, E_b, _cpProof());
+        bytes32 aliceForBobFrag = buck.receiptFragment(alice, bob);
+
+        // Bob CP-approves Alice (recipient → sender) — simulated.
+        bytes32 bobForAliceFrag = keccak256("bob-for-alice");
+        _setReceiptFragment(bob, alice, bobForAliceFrag);
+
+        vm.recordLogs();
+        vm.prank(alice);
+        buck.transfer(bob, 10e6);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 eventSig = keccak256("BuckTransferReceipt(address,address,uint256,bytes32,bytes32)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                // Non-indexed params: (uint256 amount, bytes32 fromCipherHash, bytes32 toCipherHash)
+                (/*amount*/, bytes32 fromHash, bytes32 toHash) =
+                    abi.decode(logs[i].data, (uint256, bytes32, bytes32));
+                assertEq(toHash, aliceForBobFrag, "toHash: CP fragment");
+                assertEq(fromHash, bobForAliceFrag, "fromHash: CP fragment");
+                return;
+            }
+        }
+        fail("BuckTransferReceipt event not found");
+    }
+
+    function test_receiptHashes_EOAtoPublicPool_senderCPFragment() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
+
+        // Mutual decryptability: private sender must CP-approve the public
+        // pool so the pool operator can decrypt Alice's identity.
+        bytes32 aliceForPool = keccak256("alice-for-pool");
+        _setReceiptFragment(alice, pool, aliceForPool);
+
+        vm.recordLogs();
+        vm.prank(alice);
+        buck.transfer(pool, 5e6);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 eventSig = keccak256("BuckTransferReceipt(address,address,uint256,bytes32,bytes32)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                (/*amount*/, bytes32 fromHash, bytes32 toHash) =
+                    abi.decode(logs[i].data, (uint256, bytes32, bytes32));
+                // toHash: Alice→pool CP fragment (sender's identity for pool)
+                assertEq(toHash, aliceForPool, "toHash: sender CP fragment");
+                // fromHash: pool didn't CP-approve alice, but pool is public → identityHash(alice)
+                assertEq(fromHash, _idHashOf(alice), "fromHash: alice identityHash (pool public)");
+                return;
+            }
+        }
+        fail("BuckTransferReceipt event not found");
+    }
+
+    function test_receiptHashes_PublicPoolToEOA_recipientCPFragment() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        address pool = address(0xDECAF);
+        _bindPublicIdentity(pool);
+
+        // Alice CP-approves pool so she can seed it.
+        _setReceiptFragment(alice, pool, keccak256("alice-for-pool"));
+        vm.prank(alice);
+        buck.transfer(pool, 20e6);
+
+        // Bob CP-approves pool (mutual decryptability: private recipient
+        // must CP-approve public sender so pool operator can decrypt Bob).
+        bytes32 bobForPool = keccak256("bob-for-pool");
+        _setReceiptFragment(bob, pool, bobForPool);
+
+        // Pool pays out to Bob.
+        vm.recordLogs();
         vm.prank(pool);
         buck.transfer(bob, 7e6);
-        assertEq(buck.balanceOf(bob), 7e6);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 eventSig = keccak256("BuckTransferReceipt(address,address,uint256,bytes32,bytes32)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                (/*amount*/, bytes32 fromHash, bytes32 toHash) =
+                    abi.decode(logs[i].data, (uint256, bytes32, bytes32));
+                // toHash: pool is public sender → identityHash(bob) fallback
+                assertEq(toHash, _idHashOf(bob), "toHash: bob identityHash");
+                // fromHash: Bob→pool CP fragment (private recipient's identity)
+                assertEq(fromHash, bobForPool, "fromHash: recipient CP fragment");
+                return;
+            }
+        }
+        fail("BuckTransferReceipt event not found");
+    }
+
+    /// @dev helper to compute _identityHash the same way Buck.sol does
+    function _idHashOf(address a) internal view returns (bytes32) {
+        BN254.G1Point memory pk = reg.pkOf(a);
+        IdentityRegistry.ElGamalCT memory E = reg.ciphertextOf(a);
+        return keccak256(abi.encode(pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y));
     }
 }

@@ -233,4 +233,96 @@ contract BuckCreditTest is Test {
             uint48(block.timestamp), 100
         );
     }
+
+    function test_depStartAt_future_delaysDepreciation() public {
+        vm.prank(insurer);
+        uint256 tokenId = credit.createCredit(
+            alice, 1, FACE_VALUE, FLOOR,
+            BuckCredit.DepreciationType.LINEAR, 200,
+            uint48(block.timestamp + 365 days),  // starts in 1 year
+            100
+        );
+
+        vm.prank(alice);
+        credit.activate(tokenId, FACE_VALUE);
+
+        // At t=0: no depreciation (start is in the future).
+        assertEq(credit.currentValue(tokenId), FACE_VALUE);
+
+        // After 2 years: only 1 year of depreciation has elapsed.
+        vm.warp(block.timestamp + 365 days * 2);
+        uint256 val = credit.currentValue(tokenId);
+        // 500K - (400K * 0.02 * 1) = 500K - 8K = 492K
+        assertApproxEqRel(val, 492_000e6, 0.001e18);
+    }
+
+    function test_DECLINING_BALANCE_zeroRate_noDepreciation() public {
+        vm.prank(insurer);
+        uint256 tokenId = credit.createCredit(
+            alice, 1, 100_000e6, 5_000e6,
+            BuckCredit.DepreciationType.DECLINING_BALANCE, 0,  // rate=0
+            uint48(block.timestamp),
+            100
+        );
+        vm.prank(alice);
+        credit.activate(tokenId, 100_000e6);
+
+        vm.warp(block.timestamp + 365 days * 50);
+        // rate=0 means no decline — value stays at face.
+        assertEq(credit.currentValue(tokenId), 100_000e6);
+    }
+
+    function test_updateCredit_newFaceBelowActivated_capsActivated() public {
+        vm.prank(insurer);
+        uint256 tokenId = credit.createCredit(
+            alice, 1, FACE_VALUE, FLOOR,
+            BuckCredit.DepreciationType.NONE, 0, 0, 100
+        );
+        vm.prank(alice);
+        credit.activate(tokenId, FACE_VALUE);
+
+        // Insurer reduces face value below activation.
+        vm.prank(insurer);
+        credit.updateCredit(
+            tokenId, 250_000e6, FLOOR,
+            BuckCredit.DepreciationType.NONE, 0, 0, 100
+        );
+        (, uint256 activated,) = credit.creditInfo(tokenId);
+        assertEq(activated, 250_000e6, "activated capped to new face");
+    }
+
+    function test_updateCredit_newFaceZero_clearsActivated() public {
+        vm.prank(insurer);
+        uint256 tokenId = credit.createCredit(
+            alice, 1, FACE_VALUE, FLOOR,
+            BuckCredit.DepreciationType.NONE, 0, 0, 100
+        );
+        vm.prank(alice);
+        credit.activate(tokenId, 100_000e6);
+
+        // Insurer zeros the face value (total write-off).
+        vm.prank(insurer);
+        credit.updateCredit(
+            tokenId, 0, 0,
+            BuckCredit.DepreciationType.NONE, 0, 0, 100
+        );
+        (, uint256 activated,) = credit.creditInfo(tokenId);
+        assertEq(activated, 0, "activated cleared on total write-off");
+    }
+
+    function test_DECLINING_BALANCE_maxRate_immediateDepreciation() public {
+        vm.prank(insurer);
+        uint256 tokenId = credit.createCredit(
+            alice, 1, 100_000e6, 10_000e6,
+            BuckCredit.DepreciationType.DECLINING_BALANCE,
+            uint32(10000),  // rate = 100% -> immediate decline to floor
+            uint48(block.timestamp),
+            100
+        );
+        vm.prank(alice);
+        credit.activate(tokenId, 100_000e6);
+
+        vm.warp(block.timestamp + 1);
+        assertEq(credit.currentValue(tokenId), 10_000e6, "rate=100% -> immediate floor");
+    }
 }

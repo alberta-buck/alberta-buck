@@ -1417,8 +1417,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   registry-derivable identity hash; see [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale][/Why approve Is Always
   CP-Bound/]] for the full rationale.  The pool itself need not
   reciprocate with its own =approve=; the bilateral identity check in
-  =transfer= passes because ~isPublicIdentity(pool) == true~, and the
-  receipt event falls back to =_identityHash(pool)= for the pool's side.
+  =transfer= passes both guards because ~isPublicIdentity(pool) == true~
+  satisfies the public-side fallback, and the receipt carries Alice's
+  per-pair CP fragment alongside the deterministic identity hashes.
   Below: the re-encryption, the three-check Chaum-Pedersen
   verification, and a counter-example showing that re-encrypting a
   /different/ message point causes Check 2 to fail.
@@ -1705,42 +1706,49 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results output
-    # Simulating the contract's bilateral identity check:
+    # Simulating the contract's bilateral identity check
+    # Alice (private EOA) -> Pool (public contract)
     is_verified_alice         = True
     is_verified_pool          = True
-    is_public_identity_pool   = True   # bindContract(pool, ..., true)
+    is_public_alice           = False  # EOA, not public-identity
+    is_public_pool            = True   # bindContract(pool, ..., true)
     receipt_alice_to_pool     = True   # set during approve() above
-    receipt_pool_to_alice     = False  # pool never called approve (public)
+    receipt_pool_to_alice     = False  # pool never CP-approved alice
 
-    # Both must be verified; receipt-fragment fallback to _identityHash
-    # is only allowed on a side whose isPublicIdentity == true.
     assert is_verified_alice and is_verified_pool
 
-    # Alice's fragment for the receipt -- her per-pair CP hash.
-    alice_frag = "H(E_pool)" if receipt_alice_to_pool else None
-    # Pool's fragment -- per-pair CP hash if present, else _identityHash(pool).
-    pool_frag = (
-        "H(E_alice)" if receipt_pool_to_alice
-        else ("_identityHash(pool)" if is_public_identity_pool else None)
-    )
+    # toHash = _receiptFragments[from][to]  -- Alice->Pool direction
+    if receipt_alice_to_pool:
+        toHash = "H(E_pool)"               # Alice's per-pair CP fragment
+    elif is_public_alice or is_public_pool:
+        toHash = "_identityHash(pool)"     # fallback (pool is public)
+    else:
+        raise Exception("sender must identity-approve recipient")
+    # fromHash = _receiptFragments[to][from]  -- Pool->Alice direction
+    if receipt_pool_to_alice:
+        fromHash = "H(E_alice)"            # Pool's CP fragment (doesn't exist)
+    elif is_public_alice or is_public_pool:
+        fromHash = "_identityHash(alice)"  # fallback (pool is public)
+    else:
+        raise Exception("recipient must identity-approve sender")
 
     print("Bilateral identity check:")
-    print(f"  Alice (private):  fragment = {alice_frag}")
-    print(f"  Pool  (public):   fragment = {pool_frag}")
-    print(f"\n  both fragments present => transfer SUCCEEDS")
-    print(f"\n==> transfer(pool, 500 BUCK) SUCCEEDS")
-    print(f"    BuckTransferReceipt emitted with both identity hashes")
+    print(f"  toHash   (Alice->Pool): {toHash}")
+    print(f"  fromHash (Pool->Alice): {fromHash}")
+    print(f"\n  both hashes present => transfer SUCCEEDS")
+    print(f"\n==> transfer(alice, pool, 500 BUCK) SUCCEEDS")
+    print(f"    BuckTransferReceipt(fromHash={fromHash}, toHash={toHash})")
   #+END_SRC
 
   #+RESULTS:
   : Bilateral identity check:
-  :   Alice (private):  fragment = H(E_pool)
-  :   Pool  (public):   fragment = _identityHash(pool)
-  : 
-  :   both fragments present => transfer SUCCEEDS
-  : 
-  : ==> transfer(pool, 500 BUCK) SUCCEEDS
-  :     BuckTransferReceipt emitted with both identity hashes
+  :   toHash   (Alice->Pool): H(E_pool)
+  :   fromHash (Pool->Alice): _identityHash(alice)
+  :
+  :   both hashes present => transfer SUCCEEDS
+  :
+  : ==> transfer(alice, pool, 500 BUCK) SUCCEEDS
+  :     BuckTransferReceipt(fromHash=_identityHash(alice), toHash=H(E_pool))
 
   #+LATEX: }
 

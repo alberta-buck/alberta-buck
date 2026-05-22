@@ -39,3 +39,4 @@ lcov.info
 *.tex
 *.fls
 *.log
+foundry.lock

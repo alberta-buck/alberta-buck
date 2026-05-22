@@ -21,6 +21,16 @@ import {IdentityRegistry} from "./IdentityRegistry.sol";
 /// transfer.  This keeps the hot path to one SSTORE per side per transfer.
 interface IBuckK {
     function currentBuckK() external view returns (uint256);
+    /// @dev State-changing accessor.  Runs a PID cycle if `dT` has elapsed,
+    ///      otherwise returns the cached value.  Buck mints/burns call this
+    ///      so user activity drives (and amortizes) PID work.
+    function compute() external returns (uint256);
+    /// @dev Counter-cyclical insurance funding factor (18-dec; 1e18 == 1.0).
+    ///      Buck.mint gates on
+    ///        balanceOf(minter) >= poolPrincipal * fundingFactor / 1e18.
+    ///      The Static controller returns 0 (gate disabled); the PID
+    ///      controller returns max(0, 1e18 + 10*(basket-BUCK)*1e18/basket).
+    function fundingFactor() external view returns (uint256);
 }
 
 interface IBuckCredit {
@@ -51,6 +61,9 @@ contract Buck is IERC20, IERC20Metadata {
     uint256 internal constant SCALE              = 1e27;
     uint256 internal constant BASE_RATE_PER_YEAR = 2e25;                // 0.02 in SCALE
     uint256 internal constant SECONDS_PER_YEAR_  = 365 days + 6 hours;
+    /// @dev Integer division truncation loses ~3e-19 per second relative,
+    ///      or ~1e-11 annually.  This is below the resolution of 6-decimal
+    ///      BUCK and far smaller than the base rate itself.
     uint256 internal constant BASE_RATE_PER_SEC  = BASE_RATE_PER_YEAR / SECONDS_PER_YEAR_;
 
     uint256 internal constant BP                 = 10000;
@@ -113,6 +126,20 @@ contract Buck is IERC20, IERC20Metadata {
     ///      to the recipient -- Jubilee pre-accrued it; it now debits in
     ///      exact proportion to the BUCKs transferred.
     uint64 internal _jubileeLastUpdate;
+
+    // ---- Direct-mint integration -------------------------------------------
+    //
+    // BuckBasket is the privileged caller of mintFromBasket / burnFromBasket
+    // for the TOKEN-presentation (direct-mint) path.  Wired post-deploy by
+    // `setBasket(address)` so the basket can be constructed with Buck's
+    // address.  Once set, the field is immutable in effect (further
+    // setBasket calls revert).
+    //
+    // Placed last in the storage layout so the existing slot positions of
+    // _state / _totalSupply / _allowances / storedLimit / mintsBacked /
+    // _receiptFragments / _jubileeLastUpdate (which tests reach via
+    // `vm.store(..., slot, ...)`) remain unchanged.
+    address public basket;
 
     // ---- premium / mutual-insurance pool model -----------------------------
     //
@@ -191,9 +218,29 @@ contract Buck is IERC20, IERC20Metadata {
         return _allowances[owner][spender];
     }
 
-    /// @notice Block parameterless approve.  Identity-bound overload mandatory.
-    function approve(address, uint256) external pure returns (bool) {
-        revert("BUCK: use identity-bound approve");
+    /// @notice Standard ERC-20 approve.
+    /// @dev    Identity is enforced at TRANSFER time, not at approve time.
+    ///         A bare allowance only authorises `spender` to *initiate* a
+    ///         transferFrom; `_identityCheckedTransfer` then independently
+    ///         re-validates that both `from` and `to` are verified and that
+    ///         the (from,to) pair satisfies the receipt-fragment / public-
+    ///         identity rule.  Because that gate keys on (from,to) -- never
+    ///         (from,spender) -- a plain allowance can never manufacture a
+    ///         transfer the transfer rules would not already permit: a
+    ///         plain-approved spender still cannot move BUCK between two
+    ///         non-public parties without a real Chaum-Pedersen receipt
+    ///         fragment established by the 4-arg identity-bound `approve`.
+    ///
+    ///         This makes BUCK a first-class citizen of standard router /
+    ///         Permit2 infrastructure (which requires a plain
+    ///         `approve(PERMIT2, max)`) without weakening any
+    ///         counterparty-privacy invariant.  The 4-arg identity-bound
+    ///         `approve` remains the only path that lays down the receipt
+    ///         fragment + `markApproved` carrying-flag freeze required for
+    ///         confidential (non-public) counterparty transfers.
+    function approve(address spender, uint256 amount) external returns (bool) {
+        _approve(msg.sender, spender, amount);
+        return true;
     }
 
     function transfer(address to, uint256 amount) external returns (bool) {
@@ -255,6 +302,47 @@ contract Buck is IERC20, IERC20Metadata {
         _burnAllocated(amount, tokenIds);
     }
 
+    // ---- Direct-mint path (TOKEN-presentation via BuckBasket) -------------
+
+    /// @notice One-shot wiring of the BuckBasket address; immutable thereafter.
+    /// @dev    Must be set by `insurancePool` (which is governance-bound at
+    ///         deploy) so that the basket address is locked under the same
+    ///         authority that holds the system's mutual reserves.
+    function setBasket(address _basket) external {
+        require(msg.sender == insurancePool, "BUCK: not insurancePool");
+        require(basket == address(0), "BUCK: basket already set");
+        require(_basket != address(0), "BUCK: basket=0");
+        basket = _basket;
+    }
+
+    /// @notice Mint `amount` BUCK to `to`.  Bypasses the BuckCredit /
+    ///         funding-factor machinery -- direct-mint BUCK is backed by
+    ///         the TOKEN reserves in BuckBasket's pools, not by insured-
+    ///         asset credit.  Only callable by the registered basket.
+    function mintFromBasket(address to, uint256 amount) external {
+        require(msg.sender == basket && basket != address(0), "BUCK: not basket");
+        if (amount == 0) return;
+        _accrueJubilee();
+        _crystallize(to);
+        _addBalance(to, amount);
+        _totalSupply += amount;
+        emit Transfer(address(0), to, amount);
+    }
+
+    /// @notice Burn `amount` BUCK from BuckBasket's balance.  Only callable
+    ///         by the registered basket.  Mirrors mintFromBasket on the
+    ///         supply side without consulting credit-NFT machinery.
+    function burnFromBasket(uint256 amount) external {
+        require(msg.sender == basket && basket != address(0), "BUCK: not basket");
+        if (amount == 0) return;
+        _accrueJubilee();
+        _crystallize(msg.sender);
+        require(_state[msg.sender].balance.asUint() >= amount, "BUCK: insufficient");
+        _subBalance(msg.sender, amount);
+        _totalSupply -= amount;
+        emit Transfer(msg.sender, address(0), amount);
+    }
+
     /// @notice Quote total coverage / pool principal for delivering `amount`
     ///         net via the supplied tokenIds order.
     function quoteMint(uint256 amount, uint256[] calldata tokenIds)
@@ -273,7 +361,9 @@ contract Buck is IERC20, IERC20Metadata {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
 
         uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
-        uint256 currentBuckK     = buckK.currentBuckK();
+        // compute() advances the PID if dT has elapsed (cheap cached read
+        // otherwise).  Mint activity is the primary driver of the controller.
+        uint256 currentBuckK     = buckK.compute();
         uint256 maxLimit         = totalCreditValue * currentBuckK / BUCKK_SCALE;
         if (maxLimit > storedLimit[msg.sender]) {
             storedLimit[msg.sender] = maxLimit;
@@ -287,6 +377,28 @@ contract Buck is IERC20, IERC20Metadata {
             _state[msg.sender].balance.asUint() + totalCoverage <= limit,
             "BUCK: exceeds credit limit"
         );
+
+        // Counter-cyclical insurance funding gate.  The minter must already
+        // hold poolPrincipal * fundingFactor / 1e18 BUCK as a precondition
+        // (the balance is NOT consumed -- it is skin-in-the-game collateral
+        // that throttles new mints when BUCK trades below basket).
+        //
+        // The gate ALWAYS applies when there is a non-zero poolPrincipal:
+        // there is no totalSupply==0 bootstrap exemption, because BUCK can
+        // always first be acquired from the direct-issuance (TOKEN/BUCK)
+        // pools.  Mints with zero poolPrincipal (NFT premium so low it
+        // rounds to 0) still bypass: there is no insurance contribution to
+        // back.
+        if (poolPrincipal > 0) {
+            uint256 factor   = buckK.fundingFactor();
+            if (factor > 0) {
+                uint256 required = poolPrincipal * factor / BUCKK_SCALE;
+                require(
+                    balanceOf(msg.sender) >= required,
+                    "BUCK: insufficient mint funding"
+                );
+            }
+        }
 
         _accrueJubilee();
         _crystallize(msg.sender);
@@ -304,6 +416,9 @@ contract Buck is IERC20, IERC20Metadata {
 
     function _burnAllocated(uint256 amount, uint256[] memory tokenIds) internal {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+        // Burn doesn't consume the K value but still touches the controller
+        // so burn activity also amortizes PID work alongside mints.
+        buckK.compute();
         (, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
 
         _accrueJubilee();
@@ -496,6 +611,32 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- identity-checked transfers ----------------------------------------
 
+    /// @dev Every transfer emits a BuckTransferReceipt carrying identity material
+    ///      for both sides.  Mutual decryptability requires that every private
+    ///      (non-public) party hold a per-pair CP receipt fragment for its
+    ///      counterparty, laid down by the 4-arg identity-bound approve() before
+    ///      the transfer.  The identityHash fallback is only valid for a party
+    ///      bound under a Public Identity (whose plaintext identity is already
+    ///      attested off-chain in the registry).  Only public→public transfers
+    ///      may proceed without any CP fragments.
+    ///
+    ///      The two guards cover the four quadrants:
+    ///
+    ///        | from \ to  | private                   | public                    |
+    ///        | private    | both must CP-approve       | from must CP-approve to   |
+    ///        | public     | to must CP-approve from    | neither needs CP          |
+    ///
+    ///      Rationale: when a regulator subpoenas the operator of a public
+    ///      contract (Uniswap pool, router), the operator must be able to
+    ///      decrypt every counterparty's identity from the on-chain receipt
+    ///      alone.  The operator holds the secret key for the contract's bound
+    ///      (pk, E).  A per-pair CP fragment from the private counterparty
+    ///      (re-encrypted under that pk) gives the operator exactly that
+    ///      capability.  The identityHash fallback (a keccak256 of the
+    ///      counterparty's registered credential) is not decryptable — it
+    ///      identifies the credential but does not reveal the plaintext
+    ///      identity.  Hence the fallback is only valid when the party it
+    ///      represents is already public.
     function _identityCheckedTransfer(address from, address to, uint256 amount) internal {
         require(identity.isVerified(from), "BUCK: sender not verified");
         require(identity.isVerified(to),   "BUCK: recipient not verified");
@@ -503,13 +644,19 @@ contract Buck is IERC20, IERC20Metadata {
         bytes32 toHash = _receiptFragments[from][to];
         if (toHash == bytes32(0)) {
             require(
-                identity.isPublicIdentity(from) || identity.isPublicIdentity(to),
-                "BUCK: missing identity receipt"
+                identity.isPublicIdentity(from),
+                "BUCK: sender must identity-approve recipient"
             );
             toHash = _identityHash(to);
         }
         bytes32 fromHash = _receiptFragments[to][from];
-        if (fromHash == bytes32(0)) fromHash = _identityHash(from);
+        if (fromHash == bytes32(0)) {
+            require(
+                identity.isPublicIdentity(to),
+                "BUCK: recipient must identity-approve sender"
+            );
+            fromHash = _identityHash(from);
+        }
 
         if (identity.isCarrying(from)) {
             _carryingTransfer(from, to, amount);
@@ -590,6 +737,14 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- demurrage internals -----------------------------------------------
 
+    /// @dev Dimensional analysis:
+    ///        buckSecondsLive     [raw * s]
+    ///        BASE_RATE_PER_SEC   [2e25 / (365d+6h)]  = 0.02 / year_in_seconds
+    ///        SCALE = 1e27        [dimensionless]
+    ///        fee = buckSecondsLive * BASE_RATE_PER_SEC / SCALE
+    ///            = balance * elapsed * 0.02 / year_length   [raw units]
+    ///
+    ///        Example: 1 BUCK (1e6 raw) held 1 year → 1e6 * 0.02 = 20,000 raw.
     function _feeOwing(AccountState storage s, uint256 raw) internal view returns (uint256) {
         uint256 elapsed = block.timestamp - uint256(s.timestamp);
         uint256 buckSecondsLive = s.buckSeconds.asUint() + (raw * elapsed);

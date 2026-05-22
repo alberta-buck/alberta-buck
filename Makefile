@@ -35,6 +35,12 @@ endif
 .PHONY: deploy-local deploy-sepolia
 .PHONY: install update
 .PHONY: test-python venv-activate
+.PHONY: vectors plots images
+.PHONY: vector-lifecycle vector-equilibrium vector-arb
+.PHONY: plot-lifecycle plot-equilibrium plot-arb
+.PHONY: sim sim-build sim-run sim-test sim-plot
+.PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
+.PHONY: prices-routing vector-routing plot-routing images-routing
 
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -108,6 +114,172 @@ venv-activate:
 	pip install -e ".[tests]"
 
 
+# ── Worked-example vectors and plots ─────────────────────────────────
+#
+# `images` regenerates every artifact referenced by
+# alberta-buck-ethereum-example.org from scratch:
+#
+#   1. Runs the three Forge tests that emit JSON snapshot vectors under
+#      test/vectors/  (lifecycle, equilibrium, arb scenario).
+#   2. Runs the matching Python plot scripts to produce PNGs under
+#      images/.
+#
+# Individual vector-* and plot-* targets are also exposed for partial
+# regeneration during iteration on a single example.
+
+VECTORS_DIR	= test/vectors
+IMAGES_DIR	= images
+
+vector-lifecycle:
+	forge test $(FORGE_OPTS) --match-test test_lifecycle -vv
+
+vector-equilibrium:
+	forge test $(FORGE_OPTS) --match-contract BuckEquilibriumScenarioTest -vv
+
+vector-arb:
+	forge test $(FORGE_OPTS) --match-contract BuckKArbScenarioTest -vv
+
+vectors:		vector-lifecycle vector-equilibrium vector-arb
+
+plot-lifecycle:
+	python -m pytest alberta_buck/test/test_lifecycle_plot.py -v -s
+
+plot-equilibrium:
+	python -m pytest alberta_buck/test/test_equilibrium_plot.py -v -s
+
+plot-arb:
+	python -m pytest alberta_buck/test/test_arb_plot.py -v -s
+
+plots:			plot-lifecycle plot-equilibrium plot-arb
+
+# One-shot: regenerate vectors then plots in the right order.
+images:			vectors plots
+
+
+# ── Routing stabilizer simulation ─────────────────────────────────────
+#
+# Builds the Universal Router artifact, generates price CSVs, runs the
+# Forge test, and renders the plot.  The UR lives in a sub-project with
+# its own foundry.toml (solc 0.8.26, via_ir); we build it separately and
+# stage the artifact, then temporarily disable its foundry.toml during
+# the main project's forge test to avoid test-discovery interference.
+#
+#   make images-routing       # prices -> router -> test -> plot (full pipeline)
+#   make vector-routing       # just the forge test (after prices + router)
+#   make plot-routing         # just the Python plot
+#   make prices-routing       # regenerate price CSVs only
+
+ROUTING_DIR	= test/stabilizer-routing-op47
+SIM_PRICES_DIR  = alberta_buck/sim/prices
+SIM_PLOT_SCRIPT = alberta_buck/sim/plot_routing.py
+SIM_GEN_PRICES  = alberta_buck/sim/gen_prices.py
+SIM_ARTIFACTS   = alberta_buck/sim/artifacts
+
+ROUTING_PRICES	= $(SIM_PRICES_DIR)/paxg.csv $(SIM_PRICES_DIR)/cbbtc.csv $(SIM_PRICES_DIR)/aoil.csv
+ROUTING_ARTIFACT = $(SIM_ARTIFACTS)/UniversalRouter.json
+ROUTING_VECTOR	= test/vectors/routing-sim.json
+ROUTING_IMAGE	= images/routing-sim.png
+
+prices-routing:	$(ROUTING_PRICES)
+
+# Generate price CSVs in alberta_buck/sim/prices/; symlink back to
+# test/stabilizer-routing-op47/ for the legacy Forge test compatibility.
+$(ROUTING_PRICES): $(SIM_GEN_PRICES)
+	python3 $(SIM_GEN_PRICES)
+	mkdir -p $(ROUTING_DIR)
+	cd $(ROUTING_DIR) && \
+		ln -sf ../../$(SIM_PRICES_DIR)/paxg.csv paxg.csv && \
+		ln -sf ../../$(SIM_PRICES_DIR)/cbbtc.csv cbbtc.csv && \
+		ln -sf ../../$(SIM_PRICES_DIR)/aoil.csv aoil.csv
+
+$(ROUTING_ARTIFACT):
+	( cd lib/universal-router && FORK_URL=http://localhost forge build --skip test --skip script )
+	mkdir -p $(SIM_ARTIFACTS)
+	cp lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json $@
+	mkdir -p $(ROUTING_DIR)/artifacts
+	cd $(ROUTING_DIR)/artifacts && ln -sf ../../$(SIM_ARTIFACTS)/UniversalRouter.json UniversalRouter.json
+
+vector-routing:	$(ROUTING_PRICES) $(ROUTING_ARTIFACT)
+	@test -f lib/universal-router/foundry.toml.bak || \
+		cp lib/universal-router/foundry.toml lib/universal-router/foundry.toml.bak 2>/dev/null || true
+	cp lib/universal-router/foundry.toml lib/universal-router/foundry.toml.bak 2>/dev/null; \
+	touch lib/universal-router/foundry.toml 2>/dev/null; \
+	rm lib/universal-router/foundry.toml 2>/dev/null || true; \
+	forge test $(FORGE_OPTS) --match-contract RoutingSimTest --skip 'test/stabilizer-routing-dsv4/*' -vv; \
+	EX=$$?; mv lib/universal-router/foundry.toml.bak lib/universal-router/foundry.toml 2>/dev/null || true; \
+	exit $$EX
+
+plot-routing:	$(ROUTING_VECTOR)
+	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
+
+$(ROUTING_IMAGE): $(ROUTING_VECTOR)
+	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
+
+images-routing:	prices-routing $(ROUTING_ARTIFACT) vector-routing plot-routing
+
+
+# ── Externally-driven sim (anvil + web3.py) ──────────────────────────
+#
+# The faithful org-doc architecture: a Python driver owns the timeline
+# and the agents; anvil hosts the real BuckKControllerDirect / Buck /
+# BuckBasket / IdentityRegistry stack + real Uniswap V3 + Universal
+# Router.  EOA agents get REAL cryptographic IdentityRegistry identities.
+#
+#   make sim                # full pipeline: build -> run -> plot
+#   make sim-build          # emit SimLP + stack artifacts (+ UR artifact)
+#   make sim-run            # run the routing scenario (SIM_DAYS=120)
+#   make sim-test           # the pytest smoke wrapper
+#   make sim-plot           # render images/routing-sim.png from the JSON
+#
+# Override horizon:  make sim-run SIM_DAYS=365 SIM_TICKS=4
+
+SIM_DAYS	?= 365
+SIM_TICKS	?= 4
+SIM_PKG		= alberta_buck.sim
+SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
+
+# SimLP + Direct-stack artifacts.  Scoped build skips re-compiling the
+# 0.7.6 v3-core trigger (incompatible with the project's via_ir); the
+# cached v3 artifacts are reused as-is.
+sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES)
+	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
+
+sim-run:	sim-build
+	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+
+sim-test:	sim-build
+	python -m pytest $(SIM_TEST) -v -s
+
+sim-plot:	$(ROUTING_VECTOR)
+	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
+
+sim:		sim-run sim-plot
+
+
+# ── Rebalancing simulation (Phase 1: staggered direct-mint agents) ──────
+#
+# DirectMintAgents enter on a staggered cadence (every ~30 days), each
+# depositing into the most-underweight TOKEN/BUCK pool and holding for
+# months.  The entry/exit flow naturally rebalances pools toward target
+# weights.  BuckBasket has been fixed so equal weightBp yields equal
+# target weights (0 => default 1/N share).
+#
+#   make sim-rebalancing         # build -> run -> plot (365 days)
+#   make sim-run-rebalancing     # run the rebalancing scenario
+#   make sim-plot-rebalancing    # render images/rebalancing-sim.png
+
+REBALANCING_VECTOR   = test/vectors/rebalancing-sim.json
+SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
+
+sim-run-rebalancing:	sim-build
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+
+sim-plot-rebalancing:	$(REBALANCING_VECTOR)
+	python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing:	sim-run-rebalancing sim-plot-rebalancing
+
+
 # ── Dependencies ─────────────────────────────────────────────────────
 
 install:
@@ -115,6 +287,8 @@ install:
 	forge install smartcontractkit/chainlink-brownie-contracts --no-git
 	forge install Uniswap/v3-core --no-git
 	forge install Uniswap/v3-periphery --no-git
+	forge install Uniswap/universal-router --no-git
+	forge install foundry-rs/forge-std --no-git
 
 update:
 	forge update

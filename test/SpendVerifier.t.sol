@@ -87,6 +87,17 @@ contract SpendVerifierTest is Test {
             true, // isPublicIdentity
             true  // isCarrying
         );
+        // Mutual decryptability: Alice and Bob must CP-approve the public Notes.
+        {
+            bytes32 _fragSlot = keccak256(
+                abi.encode(address(notes), keccak256(abi.encode(alice, uint256(5))))
+            );
+            vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+            _fragSlot = keccak256(
+                abi.encode(address(notes), keccak256(abi.encode(bob, uint256(5))))
+            );
+            vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
+        }
 
         _grantCredit(alice, 1000e18);
         vm.prank(alice);

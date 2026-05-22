@@ -1,0 +1,229 @@
+#+title: Stabilizer Routing Simulation (op47)
+#+author: Perry Kundert
+#+date: 2026-05-17
+
+Implementation of the externally-driven routing simulation described in
+=alberta-buck-ethereum-routing.org=, built against the *real*
+=BuckKControllerDirect= / =Buck= / =BuckBasket= / =IdentityRegistry=
+stack and the *real* =lib/universal-router= Universal Router.
+
+* Goal
+
+Show that *BUCK-unaware, anonymous arbitrage agents* — who only know
+market prices and the quoted prices of every Uniswap route — will, by
+ordinary profit-seeking AMM routing, drive both the direct =TOKEN/USDC=
+pools and the indirect =TOKEN -> BUCK -> TOKEN= pools toward equilibrium
+with the real-world (CSV) market prices.
+
+* Architecture
+
+The simulation is a single Forge test with three clear layers:
+
+** Layer 1: Topology (tokens, pools, BUCK system)
+
+Seven Uniswap V3 pools deployed from the repo's locally-compiled
+=v3-core=:
+
+  - *Truth pools:* PAXG/USDC, cbBTC/USDC, AOIL/USDC, BUCK/USDC
+  - *Basket pools:* PAXG/BUCK, cbBTC/BUCK, AOIL/BUCK
+    Created + seeded via =BuckBasket.addBasketToken= + =depositToken=.
+  - *Outsider pool:* USDC/BUCK — maintained at BUCK fundamental by a
+    continuous outsider arb (=_anchorUsdcBuck=).  This pool is the
+    gauge-breaking anchor that gives BUCK a directly-observable price;
+    BUCK-unaware routers then propagate it to every TOKEN/BUCK pool via
+    triangular routing.
+
+All infrastructure (Universal Router, BuckBasket, every BUCK pool) is
+=bindContract=-bound Public+Carrying.  Agents are a *virtual ledger* —
+the fixture contract custodies the real ERC20s and per-agent balances
+are mapping entries — so agents are maximally anonymous (no EOA, no
+identity binding).  The Universal Router is the sole BUCK counterparty
+(pre-fund / =payerIsUser=false= route).
+
+** Layer 2: Agent dispatch
+
+Each agent has an =agentType= tag (=AGENT_ANONYMOUS_ARB=, …).
+The simulation loop shuffles agent order each day (serialized execution
+→ slippage) and calls =_dispatchAgent=, which routes to the correct
+behaviour by type.  See *Extending with new agent types* below.
+
+** Layer 3: Arb strategies
+
+Three strategies are currently implemented for the anonymous arb agent:
+
+  1. *Direct reference arb* — closed-form constant-product sizer moves
+     each TOKEN/USDC pool's spot toward the CSV reference.  Converges to
+     <0.2% mean tracking error.
+  2. *Cross-arb (TOKEN_x → TOKEN_y)* — compares the BUCK-free route
+     (x→USDC→y) against the BUCK route (x→BUCK→y) and only takes the
+     BUCK route when it quotes strictly better.  Every fill pushes
+     x/BUCK and y/BUCK toward parity with the USDC-anchored pools.
+  3. *Triangular arb (USDC ↔ BUCK ↔ TOKEN)* — propagates the outsider
+     USDC/BUCK anchor to every TOKEN/BUCK pool.  The agent enters and
+     exits BUCK in a single transaction; BUCK is router-internal.
+
+* Findings
+
+** Key finding 1: the BUCK absolute peg is NOT a pure-routing result
+
+A BUCK-neutral agent (never takes a net BUCK position) can pin TOKEN/BUCK
+*relative* structure but cannot pin BUCK's absolute USD level.  Every
+closed route a BUCK-neutral agent executes enters and exits BUCK, so a
+uniform rescaling of all TOKEN/BUCK prices leaves every route's P&L
+invariant — a gauge freedom.  Without an anchor the TOKEN/BUCK error was
+*47-275%*.
+
+** Key finding 2: an OUTSIDER USDC/BUCK pool breaks the gauge
+
+The BUCK system neither creates nor depends on a USDC/BUCK pool; but
+outsiders *will* (every stablecoin gets third-party DEX pairs), and they
+keep it at BUCK's fundamental by redeeming against the basket.  That one
+anchored pool gives BUCK a directly-observable price; the BUCK-unaware
+agents then propagate it to *every* TOKEN/BUCK pool via triangular
+routing.  TOKEN/BUCK dislocation collapses from *47-275%* to a *~15-26%
+tail band*, with individual pools (e.g. PAXG/BUCK) tracking to *<1%*.
+
+* Results (=images/routing-sim.png=, 120-day run)
+
+| Claim                                                  | Result                                                              | Gate          |
+|--------------------------------------------------------+---------------------------------------------------------------------+---------------|
+| BUCK-unaware agents pin =TOKEN/USDC= to market         | *<0.2%* mean (closed-form-sized reference arb)                       | <4% (pass)    |
+| Agents route *through BUCK pools* as part of TOKEN legs | ~22.9k BUCK-routed vs ~0.7k direct fills — the dominant path        | cycle>direct  |
+| Outsider =USDC/BUCK= anchor holds at BUCK fundamental  | within *5%* throughout                                              | <5% (pass)    |
+| =TOKEN/BUCK= pulled to market                          | *47-275%* (no anchor) → *~15-26%* tail band; PAXG/BUCK *~1%*        | measured      |
+
+* Extending with new agent types
+
+The simulation is designed so that adding a new agent type is mechanical.
+Follow these five steps:
+
+** Step 1: Add an agent-type constant
+
+#+begin_src solidity
+uint8 internal constant AGENT_PEG_ARB = 1;   // BUCK-aware peg maintenance
+#+end_src
+
+** Step 2: Add per-agent state (if needed)
+
+#+begin_src solidity
+struct Agent {
+    uint8   agentType;
+    uint256 usdc;
+    uint256[N] bal;
+    // Peg-agent fields (use only when agentType == AGENT_PEG_ARB):
+    uint256[] receiptIds;   // BuckBasketReceipt NFT IDs
+}
+#+end_src
+
+** Step 3: Write the agent behaviour function
+
+The function signature is =_runPegAgent(uint256 a, uint256 d)= where =a=
+is the agent index and =d= is the day index.  The agent reads state from
+=ag[a]=, reads pool prices via =_spot= / =_exactQuote=, and executes
+trades via =_ur= (Universal Router pre-fund route).
+
+Stub for a BUCK-aware peg agent:
+
+#+begin_src solidity
+function _runPegAgent(uint256 a, uint256 d) internal {
+    uint256 buckSpot = _spot(poolUbk, address(buck), address(usdc),
+                             uint128(1e6));
+    if (buckSpot > 1_010_000) {
+        // BUCK overvalued (> $1.01): deposit RWA, mint BUCK, sell on pool.
+        // This increases BUCK supply and pushes BUCK/USDC toward $1.
+        for (uint8 t = 0; t < N; t++) {
+            uint256 bal = IERC20(address(tok[t])).balanceOf(address(this));
+            if (bal < 1e15) continue;
+            tok[t].approve(address(basket), bal / 10);
+            uint256 rid = basket.depositToken(address(tok[t]), bal / 10, 0);
+            ag[a].receiptIds.push(rid);
+        }
+        uint256 bBal = buck.balanceOf(address(this));
+        if (bBal > 0) {
+            _ur(_path2(address(buck), FEE_BUCK, address(usdc)),
+                address(buck), address(usdc), bBal);
+        }
+    } else if (buckSpot < 990_000 && ag[a].receiptIds.length > 0) {
+        // BUCK undervalued (< $0.99): redeem oldest receipt.
+        uint256 rid = ag[a].receiptIds[ag[a].receiptIds.length - 1];
+        basket.redeem(rid, 0);
+        ag[a].receiptIds.pop();
+    }
+}
+#+end_src
+
+** Step 4: Add a case to the dispatch function
+
+#+begin_src solidity
+function _dispatchAgent(uint256 a, uint256 d) internal {
+    uint8 t = ag[a].agentType;
+    if (t == AGENT_ANONYMOUS_ARB) {
+        _runAnonymousArbAgent(a, d);
+    } else if (t == AGENT_PEG_ARB) {
+        _runPegAgent(a, d);
+    }
+}
+#+end_src
+
+** Step 5: Assign the agent type in setUp
+
+#+begin_src solidity
+for (uint256 i = 0; i < N_AGENTS; i++) {
+    if (i < 3) {
+        ag[i].agentType = AGENT_ANONYMOUS_ARB;   // 3 BUCK-unaware arbs
+        ag[i].usdc = 1e24;
+    } else {
+        ag[i].agentType = AGENT_PEG_ARB;          // 2 peg-maintaining arbs
+        ag[i].usdc = 1e18;                       // smaller USDC reserves
+    }
+    for (uint8 t = 0; t < N; t++) ag[i].bal[t] = 1_000_000_000 * 10 ** dec[t];
+}
+#+end_src
+
+* Adding a new basket token
+
+To add a fourth RWA token to the basket:
+
+1. Bump =N= from 3 to 4.
+2. Add the token to =tok=, =dec=, =csvF= arrays in =setUp=.
+3. Extend =day0Px=, =px=, =poolUsdc=, =poolBuck= to size =N=.
+4. Add the =addBasketToken= + =depositToken= call in the pool-seeding loop.
+5. Extend the Agent struct's =bal= array (it's already =[N]=).
+6. Extend =Snap= struct arrays similarly.
+
+All arb loops iterate =0..N=, so they pick up the new token automatically.
+
+* Files
+
+  - =gen_prices.py=          — deterministic daily CSV generator (730-day horizon)
+  - ={paxg,cbbtc,aoil}.csv=  — generated price vectors (realistic start prices)
+  - =build_router.sh=        — compiles + stages the UR artifact
+  - =artifacts/UniversalRouter.json= — staged real UR (do not edit)
+  - =RoutingSim.t.sol=       — the Forge simulation (real Buck + real UR)
+  - =test_routing_sim_plot.py= → =images/routing-sim.png=
+
+* How to run
+
+#+begin_src sh
+# One-shot full pipeline:
+make images-routing
+
+# Or step by step:
+make prices-routing                              # regenerate price CSVs
+bash test/stabilizer-routing-op47/build_router.sh  # build UR artifact
+make vector-routing                              # run Forge test
+make plot-routing                                # render plot
+#+end_src
+
+* Status
+
+  - [X] UR compile spike (resolved: real router usable)
+  - [X] CSV vectors (730-day daily closes, realistic prices)
+  - [X] Forge routing-sim fixture + test (PASSES on robust gates)
+  - [X] Outsider USDC/BUCK anchor + triangular routing
+  - [X] Python plot test → images/routing-sim.png
+  - [X] Agent type dispatch (extensible architecture)
+  - [X] Makefile targets (images-routing, vector-routing, plot-routing)
+  - [ ] Closed-form cross/tri arb sizing (exact per-hop quoter)
+  - [ ] BUCK-aware peg agent (mint/burn via BuckBasket)
+  - [ ] Multi-year Python/anvil external driver
