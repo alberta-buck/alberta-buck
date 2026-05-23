@@ -32,7 +32,8 @@ FEE_BUCK_UB = 500       # BUCK/USDC pool:   0.05% (gauge-breaking, cheap)
 TICK_SPACING = {3000: 60, 500: 10}
 # Common BUCK reserve every TOKEN/BUCK basket pool is seeded to, so no
 # single token's pool depth dominates the shared routing.
-TARGET_BUCK = 10 ** 14  # $10^8 / 10^6-dec = $100 BUCK per pool
+#TARGET_BUCK = 10 ** 14  # $10^14 / 10^6-dec = $100,000,000 BUCK per pool
+TARGET_BUCK = 10 ** 12  # $10^12 / 10^6-dec = $1,000,000 BUCK per pool
 
 DEPOSITED_TOPIC = Web3.keccak(
     text="Deposited(address,uint256,address,uint256,uint256,address,uint128)")

@@ -63,7 +63,7 @@ counterparty on both sides.
   |   (ERC-721)      | | (Static today;   | |  (custom contract)   | | + SpendVerifier(s)   |
   |                  | |  PID in tree)    | |                      | |                      |
   | - credits[id]    | | - currentBuckK() | | - pk[addr]           | | - verifyMint         |
-  | - currentValue() | | - (PID:           | | - E_addr[addr]      | | - verifySpend (B)    |
+  | - currentValue() | | - (PID:          | | - E_addr[addr]       | | - verifySpend (B)    |
   | - activate()     | |   Kp,Ki,Kd,      | | - isVerified         | | - verifySpendA (A V2)|
   | - creditInfo()   | |   basket[])      | | - isCarrying         | +----------+-----------+
   | - totalCurrent.. | +--------+---------+ | - isPublicIdentity   |            |

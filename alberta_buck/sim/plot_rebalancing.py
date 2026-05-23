@@ -163,10 +163,16 @@ def test_rebalancing_sim_plot():
     dm_exits = last.get("dmExits", 0)
     nav_final = last.get("basketNav", 0) / E18
     out_final = last.get("dmOutstanding", 0) / E18
+    tb_final = last.get("treasuryBuck", 0) / E18
     ts_final = last.get("treasuryShare", 0) * 100
+    invested = last.get("dmTotalInvested", 0)
+    avg_roi = 100 * tb_final / (invested / E18) if invested else 0
     print(f"  direct trades: {last.get('directTrades',0)}  "
           f"BUCK-routed: {last.get('cycleTrades',0)}  "
           f"rebalance: {last.get('rebalanceTrades',0)}")
+    print(f"  Treasury BUCK: {tb_final:,.2f}  "
+          f"share of NAV: {ts_final:.2f}%  "
+          f"avg DM ROI: {avg_roi:.2f}%")
     print(f"  direct-mint entries: {dm_entries}  exits: {dm_exits}")
     print(f"  basket NAV: {nav_final:,.2f} BUCK  "
           f"outstanding: {out_final:,.2f} BUCK  "

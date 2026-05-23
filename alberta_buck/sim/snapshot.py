@@ -260,6 +260,7 @@ class Snapshotter:
             "dmEntries": ctr.get("dmEntries", 0),
             "dmExits": ctr.get("dmExits", 0),
             "dmExitFails": ctr.get("dmExitFails", 0),
+            "dmTotalInvested": ctr.get("dmTotalInvested", 0),
             "basketNav": nav,
             "dmOutstanding": out_buck,
             "treasuryShare": treas_frac,
