@@ -36,9 +36,6 @@ class DirectMintAgent(Agent):
     """
 
     SEED_USDC = 2_000_000 * 10 ** 6    # ~$2M per agent (day-0 prices)
-    HOLD_MIN = 30                       # minimum hold (days)
-    HOLD_MAX = 90                       # maximum hold (days)
-    ENTRY_INTERVAL = 7                  # weekly entries after bootstrap
 
     _counter: int = 0                   # class-level instance counter
 
@@ -59,19 +56,23 @@ class DirectMintAgent(Agent):
         super().setup(d, scenario, rng)
         N = len(d.tokens)
         seq = self._seq
-        # First N agents are bootstrap: entered in `bootstrap()` before
-        # tick 0 — `_entry_day` is left as None so `act()` never enters
-        # them.  Remainder enter on a weekly cadence starting day 0 of
-        # the tick loop.
+        # First N agents are bootstrap: deposit before tick 0 (one per
+        # token so every pool has live liquidity).
         if seq < N:
-            self._entry_day = None    # bootstrap path
-            entry_for_exit = 0        # treat as "entered day 0" for exit timing
+            self._entry_day = None
+            entry_for_exit = 0
         else:
-            entry = (seq - N) * self.ENTRY_INTERVAL
-            self._entry_day = min(entry, scenario.days - 1)
+            # Stagger remaining agents evenly across the simulation horizon.
+            M = max(DirectMintAgent._counter - N, 1)
+            interval = scenario.days / (M + 1)
+            entry = (seq - N + 1) * interval
+            self._entry_day = min(int(entry), scenario.days - 1)
             entry_for_exit = entry
-        hold = self.HOLD_MIN + (seq * 37 + 13) % (self.HOLD_MAX - self.HOLD_MIN)
-        self._exit_day = min(entry_for_exit + hold, scenario.days)
+        # Hold for a meaningful fraction of remaining sim time.
+        remaining = max(scenario.days - entry_for_exit, 30)
+        hold = remaining * (50 + (seq * 37 + 13) % 30) // 100  # 50-80% of remaining
+        hold = max(hold, 30)  # floor at 30 days
+        self._exit_day = min(int(entry_for_exit + hold), scenario.days)
 
     def bootstrap(self, d, scenario, ctr) -> None:
         """Bootstrap path: seq < N agents deposit one per basket token
