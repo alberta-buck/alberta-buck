@@ -37,7 +37,9 @@ TARGET_BUCK = 10 ** 14  # $10^8 / 10^6-dec = $100 BUCK per pool
 DEPOSITED_TOPIC = Web3.keccak(
     text="Deposited(address,uint256,address,uint256,uint256,address,uint128)")
 REDEEMED_TOPIC = Web3.keccak(
-    text="Redeemed(address,uint256,address,uint256,uint256,uint256,uint256)")
+    text="Redeemed(address,uint256,uint256,uint256,uint256)")
+REDEEMED_FROM_POOL_TOPIC = Web3.keccak(
+    text="RedeemedFromPool(uint256,address,address,uint256,uint256,uint256,uint256,uint128)")
 
 
 @dataclass

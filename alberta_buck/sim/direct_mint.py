@@ -129,12 +129,14 @@ class DirectMintAgent(Agent):
             ctr["dmExits"] = ctr.get("dmExits", 0) + 1
             ctr["dmOutstandingBuck"] = (
                 ctr.get("dmOutstandingBuck", 0) - self._principal_buck)
-            # Track retained BUCK profit for treasury share.
+            # Track retained BUCK profit for treasury share.  New event
+            # shape (post-#1 fix): Redeemed carries only receipt-level
+            # aggregates; per-pool TOKEN payouts are in RedeemedFromPool.
             for log in rcpt["logs"]:
                 if log["topics"][0] == REDEEMED_TOPIC:
                     from eth_abi import decode
-                    _, _, retainedBuck, _ = decode(
-                        ["uint256", "uint256", "uint256", "uint256"],
+                    _, retainedBuck, _ = decode(
+                        ["uint256", "uint256", "uint256"],
                         log["data"])
                     ctr["treasuryBuck"] = (
                         ctr.get("treasuryBuck", 0) + retainedBuck)
