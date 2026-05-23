@@ -10,6 +10,7 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
+from alberta_buck.sim.direct_mint import DirectMintAgent
 from alberta_buck.sim.snapshot import Snapshotter
 
 E6 = 10 ** 6
@@ -29,6 +30,10 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
     d = deploy(chain, anvil, scenario, rng)
 
     # --- build + register the agent population ----------------------- #
+    # Reset per-class counters defensively so back-to-back sim runs in
+    # the same process don't accumulate stale seq numbers (the bootstrap
+    # path depends on `seq < N`).
+    DirectMintAgent._counter = 0
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
         cls = REGISTRY[cls_name]
@@ -43,12 +48,24 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
         print(f"[sim] registered {len(agents)} EOA identities "
               f"({len(arbs)} arb, {len(whales)} whale); deploy done.")
 
+    # --- pre-tick bootstrap phase ----------------------------------- #
+    # Agents that need to seed on-chain state before any market activity
+    # (DM agents seeding empty BuckBasket pools) run their bootstrap()
+    # here, so every pool has live liquidity by tick 0.
+    ctr = {"directTrades": 0, "cycleTrades": 0, "ubTrades": 0}
+    for a in agents:
+        a.bootstrap(d, scenario, ctr)
+    if verbose and ctr.get("dmEntries", 0) > 0:
+        print(f"[sim] bootstrap: {ctr['dmEntries']} DM deposits seeded "
+              f"basket pools before tick 0", flush=True)
+
     snap = Snapshotter(d, scenario)
+    # Capital baselines: computed AFTER bootstrap so the dm baseline
+    # includes the bootstrap deposits (otherwise day-0 P&L would jump
+    # by the bootstrap principal).
     init_val = snap.agg_value(agents, 0)
-    # Rebalancer / direct-mint initial capital (day-0 prices).
     reb_init = snap._agent_value(agents, 0, "BuckBasketRebalancerAgent")
     dm_init = snap._agent_value(agents, 0, "DirectMintAgent")
-    ctr = {"directTrades": 0, "cycleTrades": 0, "ubTrades": 0}
 
     ts = w3.eth.get_block("latest")["timestamp"] + 10
     tick_secs = max(60, 86_400 // scenario.ticks_per_day)
@@ -83,89 +100,68 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
 
     path = snap.write(out_path)
 
-    # --- teardown: redeem TOKEN/BUCK pools + pool ROI report ----------- #
+    # --- teardown: force-redeem active DM positions, then report ----- #
     if verbose:
-        from eth_abi import decode as eth_abi_decode
+        print("\n[teardown] ======== Force-Redeem Active DM Positions ========")
 
-        print("\n[teardown] ======== Pool Teardown ========")
-
-        # Capture LP group state BEFORE redeeming TOKEN/BUCK pools
-        # (redemption collects fees, zeroing the buck group position).
+        # Capture LP group state BEFORE the teardown redemptions
+        # (each redeem collects fees and reshuffles the buck group).
         lg_pre = snap._lp_groups()
         cap_pre = dict(snap._lp_cap) if snap._lp_cap else {}
 
-        # -- TOKEN/BUCK pools: redeem each via BuckBasket ------------ #
-        for i, tc in enumerate(d.tokens):
-            sym = scenario.tokens[i][0]
-            rid = d.pool_receipts.get(i)
-            pb = d.pool_buck[i]
-            if rid is None:
-                print(f"\n[teardown] {sym}/BUCK pool {pb[:10]}...  "
-                      f"NO receipt ID — cannot redeem")
-                continue
+        # Pre-teardown state.
+        outstanding_pre = ctr.get("dmOutstandingBuck", 0)
+        treasury_pre = ctr.get("treasuryBuck", 0)
+        nav_pre = snap._basket_nav()
+        print(f"[teardown] pre-state:  outstanding {outstanding_pre/E18:,.2f}  "
+              f"treasury {treasury_pre/E18:,.2f}  "
+              f"nav {nav_pre/E18:,.2f} BUCK")
 
-            # Pre-redeem pool state.
-            tok_pre = tc.functions.balanceOf(pb).call()
-            buck_pre = d.buck.functions.balanceOf(pb).call()
-            implied_pre = (buck_pre * (10 ** d.dec[i]) // tok_pre
-                           if tok_pre else 0)
-            # Initial deposit details.
-            dep = d.basket.functions.deposits(rid).call()
-            principal_tok = dep[1]
-            principal_buck = dep[2]
-
-            print(f"\n[teardown] {sym}/BUCK pool {pb[:10]}...  "
-                  f"receiptId={rid}")
-            print(f"           pre-redeem: {tok_pre/(10**d.dec[i]):,.6g} {sym}  "
-                  f"{buck_pre/E18:,.2f} BUCK  "
-                  f"implied {implied_pre/E18:,.2f} BUCK/{sym}")
-            print(f"           initial deposit: "
-                  f"{principal_tok/(10**d.dec[i]):,.6g} {sym}  "
-                  f"{principal_buck/E18:,.2f} BUCK")
-
+        # Force-redeem every DM agent that entered but never exited.
+        # The agent's own _exit() updates ctr (dmExits, dmOutstandingBuck,
+        # treasuryBuck) by decoding the new Redeemed event shape.
+        active_dm = [a for a in agents
+                     if type(a).__name__ == "DirectMintAgent"
+                     and getattr(a, "_entered", False)
+                     and not getattr(a, "_exited", True)
+                     and getattr(a, "_receipt_id", None) is not None]
+        print(f"[teardown] forcing redemption of {len(active_dm)} active "
+              f"DM positions...")
+        forced_ok = 0
+        for a in active_dm:
             try:
-                rcpt = chain.send(d.basket.functions.redeem(rid, 0))
-                for log in rcpt["logs"]:
-                    if log["topics"][0] == REDEEMED_TOPIC:
-                        toUserT, halfProfitT, burnedB, halfProfitB, _liq = \
-                            eth_abi_decode(
-                                ["uint256", "uint256", "uint256",
-                                 "uint256", "uint128"],
-                                log["data"])
-                        user_tok = toUserT + halfProfitT
-                        profit_tok = user_tok - principal_tok if user_tok > principal_tok else 0
-                        total_profit_tok = profit_tok  # token-side profit
-                        # halfProfitB is user's BUCK profit; 2x is total BUCK profit
-                        total_profit_buck = 2 * halfProfitB
-                        print(f"           redeemed:")
-                        print(f"             token to user: "
-                              f"{user_tok/(10**d.dec[i]):,.6g} {sym}  "
-                              f"(principal {toUserT/(10**d.dec[i]):,.6g}"
-                              f" + profit {halfProfitT/(10**d.dec[i]):,.6g})")
-                        print(f"             BUCK profit to user: "
-                              f"{halfProfitB/E18:,.2f} BUCK")
-                        print(f"             BUCK burned: {burnedB/E18:,.2f}")
-                        print(f"             treasury retained: "
-                              f"{halfProfitT/(10**d.dec[i]):,.6g} {sym}")
-                        roi_tok = (100 * profit_tok / principal_tok
-                                   if principal_tok else 0)
-                        print(f"             token profit: "
-                              f"{profit_tok/(10**d.dec[i]):,.6g} {sym}  "
-                              f"ROI {roi_tok:+.3f}%")
-                        break
-                else:
-                    print(f"           WARNING: no Redeemed event found")
+                a._exit(d, ctr)
+                forced_ok += 1
             except Exception as e:
-                print(f"           redeem FAILED: {e}")
+                print(f"  [teardown] dm-{a.idx} exit failed: {e!r}")
+        print(f"[teardown] {forced_ok}/{len(active_dm)} forced "
+              f"redemptions succeeded")
 
-            # Post-redeem pool state.
-            tok_post = tc.functions.balanceOf(pb).call()
-            buck_post = d.buck.functions.balanceOf(pb).call()
-            implied_post = (buck_post * (10 ** d.dec[i]) // tok_post
-                            if tok_post else 0)
-            print(f"           post-redeem: {tok_post/(10**d.dec[i]):,.6g} {sym}  "
-                  f"{buck_post/E18:,.2f} BUCK  "
-                  f"implied {implied_post/E18:,.2f} BUCK/{sym}")
+        # Post-teardown state.
+        outstanding_post = ctr.get("dmOutstandingBuck", 0)
+        treasury_post = ctr.get("treasuryBuck", 0)
+        nav_post = snap._basket_nav()
+        print(f"\n[teardown] post-state: outstanding {outstanding_post/E18:,.2f}  "
+              f"treasury {treasury_post/E18:,.2f}  "
+              f"nav {nav_post/E18:,.2f} BUCK")
+        treasury_delta = treasury_post - treasury_pre
+        if treasury_delta != 0:
+            print(f"[teardown] teardown released "
+                  f"{treasury_delta/E18:,.2f} BUCK to treasury")
+
+        # End-of-sim summary: entries, exits, treasury share of remaining NAV.
+        print(f"\n[teardown] Lifetime DM activity:")
+        print(f"  entries:           {ctr.get('dmEntries', 0)}")
+        print(f"  exits:             {ctr.get('dmExits', 0)}")
+        print(f"  exit failures:     {ctr.get('dmExitFails', 0)}")
+        print(f"  outstanding BUCK:  {outstanding_post/E18:,.2f}")
+        print(f"  treasury BUCK:     {treasury_post/E18:,.2f}  (cumulative)")
+        if nav_post > 0:
+            ts_pct = 100 * (nav_post - outstanding_post) / nav_post
+            print(f"  treasury share:    {ts_pct:.2f}% of remaining NAV "
+                  f"({nav_post/E18:,.2f} BUCK)")
+        else:
+            print(f"  treasury share:    NAV is 0 (all positions cleared)")
 
         # -- TOKEN/USDC pools + BUCK/USDC pool: LP group summary ----- #
         print(f"\n[teardown] LP group summary (cumulative fees / day-0 capital):")

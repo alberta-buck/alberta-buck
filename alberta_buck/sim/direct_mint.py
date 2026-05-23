@@ -24,12 +24,21 @@ from alberta_buck.sim.agents import Agent, _register
 class DirectMintAgent(Agent):
     """Direct-mint LP provider.  Entry chooses any basket token; the
     BuckBasket contract routes it to the most underweight pool.  Exit
-    withdraws from the most overweight pool (TOKEN only return)."""
+    withdraws from the most overweight pool (TOKEN only return).
+
+    Schedule (per agent's `_seq`, assigned at construction):
+      seq < N (one per basket token)  — bootstrap: deposit during the
+                                        pre-tick `bootstrap()` phase so
+                                        every pool has live liquidity
+                                        before the first arb tick.
+      seq >= N                        — staggered weekly entries
+                                        starting day 0 of the tick loop.
+    """
 
     SEED_USDC = 2_000_000 * 10 ** 6    # ~$2M per agent (day-0 prices)
-    HOLD_MIN = 90                       # minimum hold (days)
-    HOLD_MAX = 180                      # maximum hold (days)
-    ENTRY_INTERVAL = 30                 # stagger between later agents
+    HOLD_MIN = 30                       # minimum hold (days)
+    HOLD_MAX = 90                       # maximum hold (days)
+    ENTRY_INTERVAL = 7                  # weekly entries after bootstrap
 
     _counter: int = 0                   # class-level instance counter
 
@@ -50,23 +59,39 @@ class DirectMintAgent(Agent):
         super().setup(d, scenario, rng)
         N = len(d.tokens)
         seq = self._seq
-        # Bootstrap: first N agents (one per token) enter at days 0..N-1.
-        # Remainder staggered every ENTRY_INTERVAL after bootstrap.
+        # First N agents are bootstrap: entered in `bootstrap()` before
+        # tick 0 — `_entry_day` is left as None so `act()` never enters
+        # them.  Remainder enter on a weekly cadence starting day 0 of
+        # the tick loop.
         if seq < N:
-            entry = seq              # days 0, 1, 2 — one per token
+            self._entry_day = None    # bootstrap path
+            entry_for_exit = 0        # treat as "entered day 0" for exit timing
         else:
-            entry = N + (seq - N) * self.ENTRY_INTERVAL
+            entry = (seq - N) * self.ENTRY_INTERVAL
+            self._entry_day = min(entry, scenario.days - 1)
+            entry_for_exit = entry
         hold = self.HOLD_MIN + (seq * 37 + 13) % (self.HOLD_MAX - self.HOLD_MIN)
-        self._entry_day = min(entry, scenario.days - 1)
-        self._exit_day = min(entry + hold, scenario.days)
+        self._exit_day = min(entry_for_exit + hold, scenario.days)
+
+    def bootstrap(self, d, scenario, ctr) -> None:
+        """Bootstrap path: seq < N agents deposit one per basket token
+        before the first tick, so the basket has live liquidity in every
+        pool when day-0 arb starts."""
+        if self._entry_day is not None:
+            return
+        self._enter(d, scenario, ctr)
 
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0:
             return
-        if not self._entered and day >= self._entry_day:
+        if (not self._entered
+                and self._entry_day is not None
+                and day >= self._entry_day):
             self._enter(d, scenario, ctr)
         elif (self._entered and not self._exited
-              and self._receipt_id is not None and day >= self._exit_day):
+              and self._receipt_id is not None
+              and self._exit_day is not None
+              and day >= self._exit_day):
             self._exit(d, ctr)
 
     def _enter(self, d, scenario, ctr) -> None:

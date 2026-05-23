@@ -222,6 +222,27 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     uint160 internal constant MAX_SQRT_RATIO =
         1461446703485210103287273052203988822378723970342;
 
+    /// @notice Floor for the BUCK side of `_coverBuckShortfall`'s
+    ///         exact-output swap.  V3 returns `(0,0)` for swap amounts
+    ///         too small to register on its sqrt-price curve; padding
+    ///         the request to a microscopic floor guarantees delivery
+    ///         when there's liquidity to draw against.  Any excess
+    ///         BUCK beyond the strict shortfall flows to treasury
+    ///         profit — at 1e12 wei (~$1e-6) the "fake profit" is
+    ///         economically negligible.
+    uint256 internal constant MIN_SHORTFALL_SWAP_BUCK = 1e12;
+
+    /// @notice Per-pool BUCK shortfall below which redemption skips
+    ///         the `_coverBuckShortfall` swap entirely and accepts the
+    ///         under-burn as dust.  V3 `burn()` integer-rounds reserve
+    ///         payouts (typically 1 wei per side), and integer division
+    ///         in the per-pool allocation accumulates another few wei
+    ///         per pool.  100 wei tolerates typical rounding without
+    ///         issuing a wasteful swap; the post-loop dust handler
+    ///         absorbs the cumulative under-burn from `totalProfit`
+    ///         when possible, otherwise accepts it as orphan outstanding.
+    uint256 internal constant DUST_SHORTFALL_WEI = 100;
+
     // --- Mint callback re-entry guard ------------------------------------- //
     address internal _callbackPool;       // mint callback guard
     address internal _swapCallbackPool;    // swap callback guard
@@ -698,6 +719,77 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         }
     }
 
+    // --- Per-pool redemption helper -------------------------------------- //
+
+    /// @dev Result of a single pool's slice of a redemption.  Returned by
+    ///      `_processPoolRedemption` so the caller can aggregate.
+    struct PoolRedeemResult {
+        uint256 burnedBuck;   // BUCK to count toward totalIntendedBurn
+        uint256 profit;       // BUCK above burn share → treasury
+        bool    withdrawn;    // false if pool was skipped (empty / dust L)
+    }
+
+    /// @notice Process one pool's slice of a redemption: withdraw the
+    ///         L-share, cover any BUCK shortfall, transfer TOKEN to
+    ///         depositor, emit `RedeemedFromPool`.  Extracted from the
+    ///         `redeem()` loop to keep stack pressure under EVM limits.
+    function _processPoolRedemption(
+        uint256 i,
+        uint256 allocValue,
+        uint256 redeemBuck_,
+        uint256 redeemValue,
+        uint256 receiptId
+    ) internal returns (PoolRedeemResult memory r) {
+        Constituent storage pc = constituents[i];
+        uint256 poolVal = _poolLpValue(pc);
+        if (poolVal == 0) return r;
+        uint256 poolRedeemFrac = allocValue * 1e18 / poolVal;
+        if (poolRedeemFrac > 1e18) poolRedeemFrac = 1e18;
+
+        (uint128 totalL,,,,) = IUniswapV3Pool(pc.pool).positions(
+            keccak256(abi.encodePacked(address(this),
+                          pc.tickLower, pc.tickUpper))
+        );
+        if (totalL == 0) return r;
+        uint128 burnL = uint128(uint256(totalL) * poolRedeemFrac / 1e18);
+        if (burnL == 0) return r;
+
+        (uint256 tok, uint256 b) = _decreaseAndCollect(pc, burnL);
+        r.withdrawn = true;
+
+        // Per-pool burn budget = redeemBuck weighted by alloc share.
+        uint256 poolPrincipalBuck = UniswapV3OracleLib.mulDiv(
+            redeemBuck_, allocValue, redeemValue);
+        uint256 tokSpent = 0;
+
+        if (b >= poolPrincipalBuck) {
+            r.profit = b - poolPrincipalBuck;
+        } else {
+            uint256 strictShortfall = poolPrincipalBuck - b;
+            if (strictShortfall <= DUST_SHORTFALL_WEI) {
+                // V3 burn integer-rounding dust: skip the swap.
+                poolPrincipalBuck = b;
+            } else {
+                uint256 actualBuck;
+                (tokSpent, actualBuck) = _coverBuckShortfall(
+                    pc, tok, strictShortfall);
+                if (actualBuck > strictShortfall) {
+                    r.profit = actualBuck - strictShortfall;
+                }
+            }
+        }
+
+        r.burnedBuck = poolPrincipalBuck;
+
+        uint256 tokToUser = tok - tokSpent;
+        if (tokToUser > 0) {
+            IERC20(pc.token).transfer(msg.sender, tokToUser);
+        }
+        emit RedeemedFromPool(
+            receiptId, pc.pool, pc.token,
+            tokToUser, poolPrincipalBuck, r.profit, tokSpent, burnL);
+    }
+
     // --- Redemption (P-controller: sell overweight pools proportionally) -- //
 
     /// @notice Redeem all or part of a basket receipt.  See the contract-
@@ -782,74 +874,37 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
         for (uint256 i = 0; i < constituents.length; i++) {
             if (alloc[i] == 0) continue;
-
-            Constituent storage pc = constituents[i];
-            uint256 poolVal = _poolLpValue(pc);
-            if (poolVal == 0) continue;
-            uint256 poolRedeemFrac = alloc[i] * 1e18 / poolVal;
-            if (poolRedeemFrac > 1e18) poolRedeemFrac = 1e18;
-
-            (uint128 totalL,,,,) = IUniswapV3Pool(pc.pool).positions(
-                keccak256(abi.encodePacked(address(this),
-                              pc.tickLower, pc.tickUpper))
-            );
-            if (totalL == 0) continue;
-            uint128 burnL = uint128(
-                uint256(totalL) * poolRedeemFrac / 1e18);
-            if (burnL == 0) continue;
-
-            (uint256 tok, uint256 b) = _decreaseAndCollect(pc, burnL);
-            anyWithdrawn = true;
-
-            // Per-pool burn budget = redeemBuck weighted by alloc share.
-            uint256 poolPrincipalBuck = UniswapV3OracleLib.mulDiv(
-                redeemBuck, alloc[i], redeemValue);
-            uint256 tokSpent = 0;
-            uint256 poolProfit = 0;
-
-            if (b >= poolPrincipalBuck) {
-                // Surplus: keep the excess BUCK as treasury profit.
-                poolProfit = b - poolPrincipalBuck;
-            } else {
-                // Shortfall: swap some withdrawn TOKEN back to BUCK on
-                // the same pool to bring the bucket up to the per-pool
-                // burn budget.  Reverts if the pool can't cover.
-                tokSpent = _coverBuckShortfall(
-                    pc, tok, poolPrincipalBuck - b);
+            PoolRedeemResult memory r = _processPoolRedemption(
+                i, alloc[i], redeemBuck, redeemValue, receiptId);
+            if (r.withdrawn) {
+                anyWithdrawn = true;
+                totalIntendedBurn += r.burnedBuck;
+                totalProfit += r.profit;
             }
-
-            totalIntendedBurn += poolPrincipalBuck;
-            totalProfit += poolProfit;
-
-            uint256 tokToUser = tok - tokSpent;
-            if (tokToUser > 0) {
-                IERC20(pc.token).transfer(msg.sender, tokToUser);
-            }
-            emit RedeemedFromPool(
-                receiptId, pc.pool, pc.token,
-                tokToUser, poolPrincipalBuck, poolProfit, tokSpent, burnL);
         }
         require(anyWithdrawn, "no LP withdrawn");
-        // Integer-division dust: `poolPrincipalBuck = redeemBuck *
-        // poolFrac / 10000` truncates, so Σ poolPrincipalBuck can be a
-        // few wei less than `redeemBuck`.  Absorb the dust by shrinking
-        // treasury profit (the basket holds the same total BUCK either
-        // way — we're just relabeling it).  Reverts if the rounding
-        // exceeds available profit (rare; user retries with smaller
-        // redeemBp).
-        if (totalIntendedBurn < redeemBuck) {
-            uint256 dust = redeemBuck - totalIntendedBurn;
-            require(totalProfit >= dust, "burn rounding uncovered");
-            totalProfit -= dust;
-            totalIntendedBurn += dust;
-        }
-        require(totalIntendedBurn == redeemBuck, "burn mismatch");
 
-        // --- step 5: burn principal BUCK ----------------------------- //
-        // Mint/burn invariant: burn exactly `redeemBuck`, no more, no
-        // less.  Step 4's shortfall handling guarantees the basket holds
-        // at least this much BUCK at this point.
-        buck.burnFromBasket(redeemBuck);
+        // --- step 5: reconcile burn vs redeemBuck -------------------- //
+        // `totalIntendedBurn` ≤ `redeemBuck` (integer-division
+        // truncation in `mulDiv` and skipped per-pool dust shortfalls).
+        // Three-tier reconciliation:
+        //   1. If equal: clean — burn exactly `redeemBuck`.
+        //   2. If dust ≤ totalProfit: absorb from profit (rebalance
+        //      the bucket's labels — same total BUCK held).
+        //   3. Otherwise: accept under-burn.  Burn what the basket
+        //      actually has from this redemption; the unburnt dust
+        //      stays in the pool (orphan outstanding).  Per-redemption
+        //      orphan is bounded by N × DUST_SHORTFALL_WEI wei.
+        uint256 actualBurn = totalIntendedBurn;
+        if (actualBurn < redeemBuck) {
+            uint256 dust = redeemBuck - actualBurn;
+            if (totalProfit >= dust) {
+                totalProfit -= dust;
+                actualBurn = redeemBuck;
+            }
+            // else: actualBurn stays as totalIntendedBurn (orphan accepted).
+        }
+        if (actualBurn > 0) buck.burnFromBasket(actualBurn);
 
         // --- step 6: treasury reinvestment --------------------------- //
         // Surplus BUCK from overweight pools is the basket's realized
@@ -867,8 +922,11 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         }
 
         // --- step 7: update deposit state ---------------------------- //
-        // Full redemption ⇒ delete deposit + burn receipt NFT.
-        // Partial ⇒ scale down both BUCK and TOKEN principals.
+        // Full redemption ⇒ delete deposit + burn receipt NFT (any
+        // orphan dust is forfeited from the user's principal share).
+        // Partial ⇒ scale down both BUCK and TOKEN principals by what
+        // we *intended* to burn, so cumulative orphan dust stays
+        // bounded across multiple partial redemptions.
         uint256 scaledTokenPrincipal = redeemShare == 10000
             ? d.tokenPrincipal
             : d.tokenPrincipal * redeemShare / 10000;
@@ -879,14 +937,17 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             deposits[receiptId].buckPrincipal -= redeemBuck;
             deposits[receiptId].tokenPrincipal -= scaledTokenPrincipal;
         }
-        totalOutstandingBuck -= redeemBuck;
+        // Decrement outstanding by what we actually burned.  If
+        // `actualBurn < redeemBuck`, the difference persists as orphan
+        // outstanding (bounded per redemption by N × DUST_SHORTFALL_WEI).
+        totalOutstandingBuck -= actualBurn;
 
         // --- step 8: keep PID warm + emit aggregate ------------------ //
         controller.compute();
 
         emit Redeemed(
             msg.sender, receiptId,
-            redeemBuck, totalProfit,
+            actualBurn, totalProfit,
             redeemShare == 10000 ? 0 : 10000 - redeemShare
         );
     }
@@ -909,18 +970,27 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         // Swap BUCK -> target token on the target pool.  Callback data
         // carries the constituent token address; the callback uses
         // `buckIsToken0` to decide which side to pay.
+        //
+        // sqrtPriceLimit selection (V3 SPL rule):
+        //   zeroForOne=true  (price moves DOWN) ⇒ limit < current ⇒ MIN_SQRT_RATIO+1
+        //   zeroForOne=false (price moves UP)   ⇒ limit > current ⇒ MAX_SQRT_RATIO-1
+        // BUCK→TOKEN with buckIsToken0=true:  zeroForOne=true  ⇒ MIN+1.
+        // BUCK→TOKEN with buckIsToken0=false: zeroForOne=false ⇒ MAX-1.
+        // (Gap #6 will TWAP-bound this in place of the permissive extremes.)
         _swapCallbackPool = tgtC.pool;
         (int256 d0, int256 d1) = IUniswapV3Pool(tgtC.pool).swap(
             address(this), tgtC.buckIsToken0,
             int256(buckAmount),
-            tgtC.buckIsToken0 ? MAX_SQRT_RATIO - 1 : MIN_SQRT_RATIO + 1,
+            tgtC.buckIsToken0 ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
             abi.encode(tgtC.token)
         );
         _swapCallbackPool = address(0);
-        tgtTok = tgtC.buckIsToken0
-            ? uint256(d1 > 0 ? d1 : int256(0))
-            : uint256(d0 > 0 ? d0 : int256(0));
-        require(tgtTok > 0, "swap BUCK->token failed");
+        // Sign convention: TOKEN-side delta is NEGATIVE after a
+        // BUCK→TOKEN swap (pool sent us TOKEN).  Extract its absolute
+        // value as the received amount.
+        int256 tokenDelta = tgtC.buckIsToken0 ? d1 : d0;
+        require(tokenDelta < 0, "swap BUCK->token failed");
+        tgtTok = uint256(-tokenDelta);
 
         // Mint new BUCK against the received token.
         uint256 spotPrice = _readPoolPrice(tgtC, 0);
@@ -969,22 +1039,39 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     ///         the full `shortfall` (would otherwise under-burn and
     ///         break the invariant).  User retries with a smaller
     ///         `redeemBp`.
-    /// @return tokSpent  Native-dec TOKEN consumed by the swap.
+    /// @return tokSpent   Native-dec TOKEN consumed by the swap.
+    /// @return actualBuck 18-dec BUCK actually received from the swap;
+    ///                    `actualBuck >= shortfall` is guaranteed by
+    ///                    the floor and require below.  Any
+    ///                    `actualBuck - shortfall` is excess BUCK that
+    ///                    the caller should book as treasury profit.
     function _coverBuckShortfall(
         Constituent storage ovC,
         uint256 tokAvailable,
         uint256 shortfall
-    ) internal returns (uint256 tokSpent) {
+    ) internal returns (uint256 tokSpent, uint256 actualBuck) {
         require(shortfall > 0, "shortfall=0");
         require(tokAvailable > 0, "tokAvail=0");
 
+        // Pad the request to MIN_SHORTFALL_SWAP_BUCK so V3 doesn't
+        // return (0,0) for sub-curve-resolution dust shortfalls (e.g.,
+        // a few wei from V3's burn-side integer rounding).
+        uint256 askBuck = shortfall < MIN_SHORTFALL_SWAP_BUCK
+            ? MIN_SHORTFALL_SWAP_BUCK
+            : shortfall;
+
+        // sqrtPriceLimit selection (V3 SPL rule):
+        //   zeroForOne=true  (price DOWN) ⇒ limit MIN_SQRT_RATIO+1
+        //   zeroForOne=false (price UP)   ⇒ limit MAX_SQRT_RATIO-1
+        // TOKEN→BUCK with buckIsToken0=true:  zeroForOne=false ⇒ MAX-1.
+        // TOKEN→BUCK with buckIsToken0=false: zeroForOne=true  ⇒ MIN+1.
+        // (Gap #6 will TWAP-bound this in place of the permissive extremes.)
         _swapCallbackPool = ovC.pool;
         (int256 d0, int256 d1) = IUniswapV3Pool(ovC.pool).swap(
             address(this),
             !ovC.buckIsToken0,                  // zeroForOne for TOKEN→BUCK
-            -int256(shortfall),                  // negative ⇒ exact-output
-            // Permissive limit today (gap #6); fix will TWAP-bound this.
-            ovC.buckIsToken0 ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
+            -int256(askBuck),                    // negative ⇒ exact-output
+            ovC.buckIsToken0 ? MAX_SQRT_RATIO - 1 : MIN_SQRT_RATIO + 1,
             abi.encode(ovC.token)
         );
         _swapCallbackPool = address(0);
@@ -993,7 +1080,7 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         int256 buckDelta = ovC.buckIsToken0 ? d0 : d1;
         int256 tokDelta  = ovC.buckIsToken0 ? d1 : d0;
         require(buckDelta < 0 && tokDelta > 0, "unexpected swap deltas");
-        uint256 actualBuck = uint256(-buckDelta);
+        actualBuck = uint256(-buckDelta);
         tokSpent = uint256(tokDelta);
         require(actualBuck >= shortfall, "swap shortfall incomplete");
         require(tokSpent <= tokAvailable, "swap exceeded tokAvail");

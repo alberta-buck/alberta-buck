@@ -64,6 +64,14 @@ class Agent:
             sender=self.account, gas=3_000_000,
         )
 
+    def bootstrap(self, d, scenario, ctr) -> None:
+        """Called once after every agent's `setup()` but before the
+        day/tick loop.  Default: no-op.  Agents that need to seed
+        on-chain state before any market activity (e.g., the first DM
+        agents seeding empty BuckBasket pools) override this so all
+        pools are live by tick 0."""
+        pass
+
     def _exec(self, d, in_tok_c, amt, toks, uses_ub, ctr) -> bool:
         """Pre-fund the router and run one V3 multi-hop (payerIsUser=false,
         recipient = self).  Returns True on success.  Shared by all

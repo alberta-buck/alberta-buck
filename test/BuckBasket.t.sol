@@ -198,16 +198,14 @@ contract BuckBasketTest is Test {
         assertEq(receipt.ownerOf(receiptId), alice);
 
         (
-            address token,
-            uint256 principalT,
             uint256 principalB,
-            uint128 L,
+            uint256 principalT,
+            address token,
             /* uint64 */
         ) = basketC.deposits(receiptId);
         assertEq(token, address(paxg));
         assertEq(principalT, depositAmt);
         assertApproxEqRel(principalB, expectedBuck, 0.001e18);
-        assertGt(L, 0);
 
         // totalSupply grew by the minted BUCK.
         assertEq(buck.totalSupply(), principalB);
@@ -230,7 +228,7 @@ contract BuckBasketTest is Test {
 
         // Redeem immediately.  No external swaps -> profit ~= 0.
         vm.prank(alice);
-        basketC.redeem(rid, 0);
+        basketC.redeem(rid, 0, 0);
 
         vm.expectRevert();
         receipt.ownerOf(rid);
@@ -258,7 +256,7 @@ contract BuckBasketTest is Test {
         address attacker = makeAddr("attacker");
         vm.prank(attacker);
         vm.expectRevert("not owner");
-        basketC.redeem(rid, 0);
+        basketC.redeem(rid, 0, 0);
     }
 
     function test_redeem_profitSplitPreservesTreasury() public {
@@ -274,9 +272,11 @@ contract BuckBasketTest is Test {
         vm.prank(alice);
         uint256 rid = basketC.depositToken(address(paxg), 1e18, 0);
 
-        (address tok, uint256 principalT, uint256 principalB, uint128 L,) =
+        (uint256 principalB, uint256 principalT, address tok,) =
             basketC.deposits(rid);
         uint256 supplyBefore = buck.totalSupply();
+        // Silence unused-warning.
+        tok; principalT; principalB;
 
         // Redeem immediately at the same pool price.  No external swaps
         // have occurred, so profit ≈ 0.  The split:
@@ -284,13 +284,13 @@ contract BuckBasketTest is Test {
         //   profitB = max(0, buckOut - principalB)
         //   half to user, half retained as treasury (re-deposited into pool).
         vm.prank(alice);
-        basketC.redeem(rid, 0);
+        basketC.redeem(rid, 0, 0);
 
         // Principal BUCK is burned.
         assertLt(buck.totalSupply(), supplyBefore, "principal BUCK burned");
 
         // Deposit record is cleared after redeem.
-        (, uint256 postPrincipalT,,,) = basketC.deposits(rid);
+        (, uint256 postPrincipalT,,) = basketC.deposits(rid);
         assertEq(postPrincipalT, 0, "deposit record cleared");
     }
 
@@ -330,6 +330,185 @@ contract BuckBasketTest is Test {
         paxg.approve(address(basketC), 1e18);
         vm.prank(alice);
         basketC.depositToken(address(paxg), 1e18, 100);  // 1% slippage, cold pool
+    }
+
+    // -------------------------------------------------------------------- //
+    //  Multi-pool deposit / redeem                                          //
+    // -------------------------------------------------------------------- //
+
+    /// @dev Set up a two-constituent basket (PAXG + cbBTC at equal weight)
+    ///      and have Alice make one deposit into each.  Returns the two
+    ///      receipt IDs.
+    function _setupTwoPoolBasket()
+        internal returns (uint256 ridPaxg, uint256 ridCbbtc)
+    {
+        vm.startPrank(GOV);
+        address pPaxg  = basketC.addBasketToken(
+            address(paxg),  18, PAXG_INITIAL_PRICE_BUCK,  5000, 500);
+        address pCbbtc = basketC.addBasketToken(
+            address(cbbtc), 8,  CBBTC_INITIAL_PRICE_BUCK, 5000, 500);
+        vm.stopPrank();
+        _bindPool(pPaxg);
+        _bindPool(pCbbtc);
+
+        // Equal-value deposits ($4000 each) so the pools have matching
+        // LP value and neither dominates the allocator's pass-1.
+        vm.prank(alice);
+        paxg.approve(address(basketC), 1e18);
+        vm.prank(alice);
+        ridPaxg = basketC.depositToken(address(paxg), 1e18, 0);
+
+        // 0.04 cbBTC × $100,000 = $4000 (8-dec → 0.04 × 1e8 = 4e6).
+        vm.prank(alice);
+        cbbtc.approve(address(basketC), 4e6);
+        vm.prank(alice);
+        ridCbbtc = basketC.depositToken(address(cbbtc), 4e6, 0);
+    }
+
+    /// @dev Multi-pool redemption: the depositor's claim is allocated
+    ///      across BOTH pools (proportional to each pool's current value
+    ///      share), so Alice receives PAXG AND cbBTC even though she
+    ///      originally only deposited PAXG.
+    function test_redeem_multiPool_returnsBothTokens() public {
+        (uint256 ridPaxg, ) = _setupTwoPoolBasket();
+
+        uint256 paxgBefore = paxg.balanceOf(alice);
+        uint256 cbbtcBefore = cbbtc.balanceOf(alice);
+        uint256 supplyBefore = buck.totalSupply();
+
+        // Capture the depositor's actual minted principal (slightly less
+        // than the ideal 4000 BUCK due to V3 sqrt-tick rounding at LP).
+        (uint256 principalBuck, , , ) = basketC.deposits(ridPaxg);
+
+        vm.prank(alice);
+        basketC.redeem(ridPaxg, 0, 0);
+
+        // Alice should have received BOTH tokens (multi-pool allocation).
+        assertGt(paxg.balanceOf(alice), paxgBefore,
+                 "Alice got PAXG from PAXG pool");
+        assertGt(cbbtc.balanceOf(alice), cbbtcBefore,
+                 "Alice also got cbBTC from cbBTC pool");
+
+        // Principal BUCK burned ≈ the depositor's principalBuck, modulo
+        // orphan dust ≤ N × DUST_SHORTFALL_WEI (100 wei × 2 pools).
+        assertLt(buck.totalSupply(), supplyBefore,
+                 "principal BUCK was burned");
+        uint256 burned = supplyBefore - buck.totalSupply();
+        assertApproxEqAbs(burned, principalBuck, 1000);
+    }
+
+    /// @dev Mint/burn invariant under multi-pool redemption: after a
+    ///      full redeem of one deposit, totalOutstandingBuck decreases
+    ///      by approximately the burned principal (modulo orphan dust).
+    function test_redeem_multiPool_preservesOutstandingInvariant() public {
+        (uint256 ridPaxg, ) = _setupTwoPoolBasket();
+
+        uint256 outstandingBefore = basketC.totalOutstandingBuck();
+        uint256 supplyBefore = buck.totalSupply();
+
+        vm.prank(alice);
+        basketC.redeem(ridPaxg, 0, 0);
+
+        // Outstanding decreases by exactly the burn amount.
+        uint256 burned = supplyBefore - buck.totalSupply();
+        uint256 outstandingDelta = outstandingBefore -
+            basketC.totalOutstandingBuck();
+        assertEq(outstandingDelta, burned,
+                 "totalOutstandingBuck tracks actual burn");
+
+        // Receipt deleted (full redemption).
+        vm.expectRevert();
+        receipt.ownerOf(ridPaxg);
+    }
+
+    /// @dev Partial multi-pool redemption: 50% of the principal redeemed,
+    ///      remainder remains as an active deposit.
+    function test_redeem_multiPool_partial() public {
+        (uint256 ridPaxg, ) = _setupTwoPoolBasket();
+
+        (uint256 principalBefore, , , ) = basketC.deposits(ridPaxg);
+
+        vm.prank(alice);
+        basketC.redeem(ridPaxg, 5000, 0);  // 50% redemption
+
+        (uint256 principalAfter, , , ) = basketC.deposits(ridPaxg);
+        assertApproxEqRel(principalAfter, principalBefore / 2, 0.001e18,
+                          "buckPrincipal halved after 50% redeem");
+
+        // Receipt NOT burned (partial redemption).
+        assertEq(receipt.ownerOf(ridPaxg), alice,
+                 "receipt still owned by alice");
+    }
+
+    /// @dev Three-pool bootstrap-and-redeem (mirrors the sim's
+    ///      REBALANCING scenario: equal-weight 3-token basket where
+    ///      each agent bootstraps one pool with a TOKEN deposit at the
+    ///      basket's initial spot, then redeems later).
+    function test_redeem_threePool_simBootstrapPattern() public {
+        // Third mock token to make a 3-constituent basket like the sim.
+        BBToken aoil = new BBToken("Alberta Oil (mock)", "AOIL", 18);
+        uint256 AOIL_INITIAL = 100e18;  // $100/AOIL
+        aoil.mint(alice, 1_000_000e18);
+
+        vm.startPrank(GOV);
+        address pP = basketC.addBasketToken(
+            address(paxg),  18, PAXG_INITIAL_PRICE_BUCK,  3333, 500);
+        address pC = basketC.addBasketToken(
+            address(cbbtc), 8,  CBBTC_INITIAL_PRICE_BUCK, 3333, 500);
+        address pA = basketC.addBasketToken(
+            address(aoil),  18, AOIL_INITIAL,             3334, 500);
+        vm.stopPrank();
+        _bindPool(pP);
+        _bindPool(pC);
+        _bindPool(pA);
+
+        // Bootstrap: $4000-equivalent of each token (matches sim spirit).
+        vm.startPrank(alice);
+        paxg.approve(address(basketC), 1e18);
+        uint256 ridP = basketC.depositToken(address(paxg), 1e18, 0);
+
+        cbbtc.approve(address(basketC), 4e6);            // 0.04 cbBTC
+        uint256 ridC = basketC.depositToken(address(cbbtc), 4e6, 0);
+
+        aoil.approve(address(basketC), 40e18);           // 40 AOIL
+        uint256 ridA = basketC.depositToken(address(aoil), 40e18, 0);
+        vm.stopPrank();
+
+        // Sanity: 3 outstanding deposits, all roughly balanced.
+        assertEq(basketC.constituentsLength(), 3);
+        assertGt(basketC.totalOutstandingBuck(), 11_000e18);
+        assertLt(basketC.totalOutstandingBuck(), 13_000e18);
+
+        // Redeem the PAXG deposit — exercises the 3-pool allocator path
+        // (the sim's failing scenario).
+        (uint256 principalBuck, , , ) = basketC.deposits(ridP);
+        uint256 supplyBefore = buck.totalSupply();
+
+        vm.prank(alice);
+        basketC.redeem(ridP, 0, 0);
+
+        // Receipt deleted, principal burned (modulo dust).
+        vm.expectRevert();
+        receipt.ownerOf(ridP);
+        uint256 burned = supplyBefore - buck.totalSupply();
+        assertApproxEqAbs(burned, principalBuck, 1000);
+
+        // Silence unused warnings.
+        ridC; ridA;
+    }
+
+    /// @dev When NO pool is overweight (basket exactly at target),
+    ///      redemption still succeeds via proportional-by-value fallback.
+    ///      This was the gap #4 liveness hazard.
+    function test_redeem_equilibrium_succeeds() public {
+        (uint256 ridPaxg, ) = _setupTwoPoolBasket();
+        // Both pools fresh from bootstrap at initial price → all at target.
+
+        uint256 supplyBefore = buck.totalSupply();
+        vm.prank(alice);
+        basketC.redeem(ridPaxg, 0, 0);
+        // No revert: equilibrium redeem allocates proportional-by-value.
+        assertLt(buck.totalSupply(), supplyBefore);
     }
 
     // -------------------------------------------------------------------- //

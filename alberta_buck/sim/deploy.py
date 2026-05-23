@@ -65,7 +65,6 @@ class Deployment:
     pool_buck: list = field(default_factory=list)   # TOKEN/BUCK addrs
     pool_ub: str = ""                               # floating BUCK/USDC pool
     pool_meta: list = field(default_factory=list)   # (pool,owner,lo,hi,group)
-    pool_receipts: dict = field(default_factory=dict)  # token_index -> receiptId
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool

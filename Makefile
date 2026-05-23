@@ -52,6 +52,8 @@ build:
 
 test:
 	forge test $(FORGE_OPTS) -vvv
+unit-%:
+	forge test $(FORGE_OPTS) --match-test $* -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:

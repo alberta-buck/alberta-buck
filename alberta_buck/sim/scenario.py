@@ -52,7 +52,11 @@ REBALANCING = Scenario(
     agents={"AnonymousArbAgent": 3,
             "TokenAccumulatorAgent": 3,
             "MarketMakerWhale": 1,
-            "DirectMintAgent": 8},        # staggered entry every ~30d
+            # First 3 (one per token) bootstrap before tick 0; remainder
+            # enter weekly (ENTRY_INTERVAL=7) with 30–90-day holds, so
+            # the sim sees ~50 entries + ~50 exits — enough churn to
+            # observe treasury share accumulating over the year.
+            "DirectMintAgent": 50},
     days=365,
     ticks_per_day=4,
 )
