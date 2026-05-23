@@ -39,7 +39,7 @@ DEPOSITED_TOPIC = Web3.keccak(
 REDEEMED_TOPIC = Web3.keccak(
     text="Redeemed(address,uint256,uint256,uint256,uint256)")
 REDEEMED_FROM_POOL_TOPIC = Web3.keccak(
-    text="RedeemedFromPool(uint256,address,address,uint256,uint256,uint256,uint256,uint128)")
+    text="RedeemedFromPool(uint256,address,address,uint256,uint256,uint128)")
 
 
 @dataclass

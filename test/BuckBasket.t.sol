@@ -26,6 +26,16 @@ interface IV3Factory {
     function feeAmountTickSpacing(uint24 fee) external view returns (int24);
 }
 
+interface IV3PoolForTest {
+    function swap(address recipient, bool zeroForOne, int256 amountSpecified,
+                  uint160 sqrtPriceLimitX96, bytes calldata data)
+        external returns (int256 amount0, int256 amount1);
+    function slot0() external view returns (uint160, int24, uint16, uint16,
+                                              uint16, uint8, bool);
+    function token0() external view returns (address);
+    function token1() external view returns (address);
+}
+
 /// @title BuckBasketTest -- Layers 4 + 5 of the direct-embodiment test plan.
 ///        Real Uniswap V3 pools, real Buck + identity stack.
 contract BuckBasketTest is Test {
@@ -374,10 +384,8 @@ contract BuckBasketTest is Test {
 
         uint256 paxgBefore = paxg.balanceOf(alice);
         uint256 cbbtcBefore = cbbtc.balanceOf(alice);
-        uint256 supplyBefore = buck.totalSupply();
+        uint256 outstandingBefore = basketC.totalOutstandingBuck();
 
-        // Capture the depositor's actual minted principal (slightly less
-        // than the ideal 4000 BUCK due to V3 sqrt-tick rounding at LP).
         (uint256 principalBuck, , , ) = basketC.deposits(ridPaxg);
 
         vm.prank(alice);
@@ -389,12 +397,14 @@ contract BuckBasketTest is Test {
         assertGt(cbbtc.balanceOf(alice), cbbtcBefore,
                  "Alice also got cbBTC from cbBTC pool");
 
-        // Principal BUCK burned ≈ the depositor's principalBuck, modulo
-        // orphan dust ≤ N × DUST_SHORTFALL_WEI (100 wei × 2 pools).
-        assertLt(buck.totalSupply(), supplyBefore,
-                 "principal BUCK was burned");
-        uint256 burned = supplyBefore - buck.totalSupply();
-        assertApproxEqAbs(burned, principalBuck, 1000);
+        // Outstanding decreases by the actual burn ≈ principal (modulo
+        // orphan dust ≤ MAX_ORPHAN_DUST_WEI).  Supply delta is NOT a
+        // direct indicator anymore: _reinvestBuck mints new BUCK as
+        // part of the same tx, so supplyBefore - supplyAfter is biased
+        // by the treasury reinvest amount.
+        uint256 outstandingDelta = outstandingBefore
+            - basketC.totalOutstandingBuck();
+        assertApproxEqAbs(outstandingDelta, principalBuck, 1e6);
     }
 
     /// @dev Mint/burn invariant under multi-pool redemption: after a
@@ -404,17 +414,17 @@ contract BuckBasketTest is Test {
         (uint256 ridPaxg, ) = _setupTwoPoolBasket();
 
         uint256 outstandingBefore = basketC.totalOutstandingBuck();
-        uint256 supplyBefore = buck.totalSupply();
+        (uint256 principalBuck, , , ) = basketC.deposits(ridPaxg);
 
         vm.prank(alice);
         basketC.redeem(ridPaxg, 0, 0);
 
-        // Outstanding decreases by exactly the burn amount.
-        uint256 burned = supplyBefore - buck.totalSupply();
+        // Outstanding decreases by ≈ principalBuck (the actual burn).
+        // Tolerance covers MAX_ORPHAN_DUST_WEI for edge cases where the
+        // pool was V3-burn-drained too thin to swap the last few wei.
         uint256 outstandingDelta = outstandingBefore -
             basketC.totalOutstandingBuck();
-        assertEq(outstandingDelta, burned,
-                 "totalOutstandingBuck tracks actual burn");
+        assertApproxEqAbs(outstandingDelta, principalBuck, 1e6);
 
         // Receipt deleted (full redemption).
         vm.expectRevert();
@@ -484,22 +494,125 @@ contract BuckBasketTest is Test {
         (uint256 principalBuck, , , ) = basketC.deposits(ridP);
         uint256 supplyBefore = buck.totalSupply();
 
+        uint256 outstandingBefore = basketC.totalOutstandingBuck();
+
         vm.prank(alice);
         basketC.redeem(ridP, 0, 0);
 
-        // Receipt deleted, principal burned.  Net supply change includes
-        // the _reinvestBuck mint (treasury compounding), so we check the
-        // accounting invariant (outstanding) rather than raw supply delta.
+        // Receipt deleted, outstanding decremented by the actual burn
+        // ≈ principalBuck (tolerance covers MAX_ORPHAN_DUST_WEI).
         vm.expectRevert();
         receipt.ownerOf(ridP);
-        uint256 burned = supplyBefore - buck.totalSupply();
-        // Principal burn is the dominant term; reinvestment BUCK adds a
-        // small offset.  Over 3-pool allocation integer rounding the net
-        // delta stays within 0.1% of principal.
-        assertApproxEqRel(burned, principalBuck, 1e15);  // 0.1%
+        uint256 outstandingDelta = outstandingBefore
+            - basketC.totalOutstandingBuck();
+        assertApproxEqAbs(outstandingDelta, principalBuck, 1e6);
 
         // Silence unused warnings.
         ridC; ridA;
+        supplyBefore;
+    }
+
+    /// @dev Three-pool basket where one pool has been heavily perturbed
+    ///      by an external arb (the swap moves the pool's price ~5%
+    ///      and consumes a meaningful fraction of liquidity).  This is
+    ///      the scenario the rebalancing sim was hitting that caused
+    ///      every DM redemption to revert with `ERC20InsufficientBalance`
+    ///      under the old per-pool-shortfall + tick-quote `_buckToLp`
+    ///      code paths.
+    ///
+    ///      The test contract acts as a V3 swap recipient via the
+    ///      `uniswapV3SwapCallback` below.
+    function test_redeem_heavyArbPerturbation() public {
+        // Bind self so BUCK can be transferred to this test contract
+        // (V3 pool sends BUCK back during arb swap).
+        IdentityRegistry.ElGamalCT memory E = IdentityRegistry.ElGamalCT({
+            R: BN254.g1(), C: BN254.g1()
+        });
+        reg.bindContract(address(this), BN254.g1(), E, true, true);
+
+        // 3-pool basket like the sim.
+        BBToken aoil = new BBToken("Alberta Oil", "AOIL", 18);
+        uint256 AOIL_INITIAL = 100e18;
+        aoil.mint(alice, 1_000_000e18);
+        aoil.mint(address(this), 1_000_000e18);
+        paxg.mint(address(this), 10_000e18);
+
+        vm.startPrank(GOV);
+        address pP = basketC.addBasketToken(
+            address(paxg),  18, PAXG_INITIAL_PRICE_BUCK,  3333, 500);
+        address pC = basketC.addBasketToken(
+            address(cbbtc), 8,  CBBTC_INITIAL_PRICE_BUCK, 3333, 500);
+        address pA = basketC.addBasketToken(
+            address(aoil),  18, AOIL_INITIAL,             3334, 500);
+        vm.stopPrank();
+        _bindPool(pP); _bindPool(pC); _bindPool(pA);
+
+        // Bootstrap each pool with an equal-USD deposit.
+        vm.startPrank(alice);
+        paxg.approve(address(basketC), 1e18);
+        uint256 ridP = basketC.depositToken(address(paxg), 1e18, 0);
+        cbbtc.approve(address(basketC), 4e6);
+        basketC.depositToken(address(cbbtc), 4e6, 0);
+        aoil.approve(address(basketC), 40e18);
+        basketC.depositToken(address(aoil), 40e18, 0);
+        vm.stopPrank();
+
+        // External arb: dump TOKEN into the PAXG pool to drive its
+        // price down and consume meaningful liquidity (basket-minted
+        // BUCK accumulates in the pool on the BUCK side).
+        _arbDumpTokenForBuck(pP, address(paxg), 0.2e18);
+
+        // Now redeem the PAXG deposit.  Pre-redesign this would revert
+        // because per-pool shortfall coverage + tick-quoted _buckToLp
+        // demanded more BUCK in callbacks than the basket held.
+        uint256 outstandingBefore = basketC.totalOutstandingBuck();
+        (uint256 principalBuck, , , ) = basketC.deposits(ridP);
+
+        vm.prank(alice);
+        basketC.redeem(ridP, 0, 0);
+
+        // Receipt deleted, outstanding decremented by the actual burn.
+        vm.expectRevert();
+        receipt.ownerOf(ridP);
+        uint256 outstandingDelta = outstandingBefore
+            - basketC.totalOutstandingBuck();
+        assertApproxEqAbs(outstandingDelta, principalBuck, 1e6);
+    }
+
+    /// @dev External-arb helper: dump `amt` of `token` into `pool` for
+    ///      BUCK (uses this test contract as the V3 swap callback).
+    function _arbDumpTokenForBuck(address pool, address token, uint256 amt)
+        internal
+    {
+        bool zeroForOne = (token == IV3PoolForTest(pool).token0());
+        IV3PoolForTest(pool).swap(
+            address(this),
+            zeroForOne,
+            int256(amt),
+            zeroForOne ? uint160(4295128739 + 1) : uint160(
+                1461446703485210103287273052203988822378723970342 - 1),
+            abi.encode(token, pool)
+        );
+    }
+
+    /// @notice V3 swap callback for the test-contract arb path.  Pays
+    ///         whichever positive delta the pool demands from this
+    ///         test contract's balance.
+    function uniswapV3SwapCallback(
+        int256 amount0Delta, int256 amount1Delta, bytes calldata data
+    ) external {
+        (address tokenIn, address pool) = abi.decode(data, (address, address));
+        require(msg.sender == pool, "bad cb");
+        if (amount0Delta > 0) {
+            if (tokenIn == IV3PoolForTest(pool).token0()) {
+                IERC20(tokenIn).transfer(msg.sender, uint256(amount0Delta));
+            }
+        }
+        if (amount1Delta > 0) {
+            if (tokenIn == IV3PoolForTest(pool).token1()) {
+                IERC20(tokenIn).transfer(msg.sender, uint256(amount1Delta));
+            }
+        }
     }
 
     /// @dev When NO pool is overweight (basket exactly at target),
