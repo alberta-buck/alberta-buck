@@ -895,14 +895,19 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         //      actually has from this redemption; the unburnt dust
         //      stays in the pool (orphan outstanding).  Per-redemption
         //      orphan is bounded by N × DUST_SHORTFALL_WEI wei.
+        // Cap at redeemBuck; excess → treasury profit.
         uint256 actualBurn = totalIntendedBurn;
+        if (actualBurn > redeemBuck) {
+            totalProfit += actualBurn - redeemBuck;
+            actualBurn = redeemBuck;
+        }
         if (actualBurn < redeemBuck) {
             uint256 dust = redeemBuck - actualBurn;
             if (totalProfit >= dust) {
                 totalProfit -= dust;
                 actualBurn = redeemBuck;
             }
-            // else: actualBurn stays as totalIntendedBurn (orphan accepted).
+            // else accept orphan.
         }
         if (actualBurn > 0) buck.burnFromBasket(actualBurn);
 

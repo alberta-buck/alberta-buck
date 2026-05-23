@@ -32,6 +32,11 @@ remappings = [
     "@uniswap/lib/=lib/solidity-lib/",
 ]
 
+[profile.v3]
+via_ir = false
+src = "src/uniswap_v3_build"
+out = "out"
+
 [profile.default.fmt]
 line_length = 120
 tab_width = 4

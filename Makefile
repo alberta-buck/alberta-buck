@@ -240,10 +240,14 @@ SIM_TICKS	?= 4
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 
-# SimLP + Direct-stack artifacts.  Scoped build skips re-compiling the
-# 0.7.6 v3-core trigger (incompatible with the project's via_ir); the
-# cached v3 artifacts are reused as-is.
+# Two-step Solidity build:
+#  (1) v3 profile: compile 0.7.6 Uniswap V3 core contracts without via_ir.
+#  (2) default profile: compile everything else with via_ir enabled
+#      (required for BuckBasket's deep call stack).  Skips the 0.7.6
+#      trigger to avoid the IR-incompatibility error.
+# Both profiles share the same ``out/`` directory.
 sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES)
+	FOUNDRY_PROFILE=v3 forge build --skip test --skip script
 	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
 
 sim-run:	sim-build
