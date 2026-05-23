@@ -92,15 +92,6 @@ interface IBuckKControllerDirect {
 ///
 /// # Known gaps (to address during redesign; see inline `BUG #N:` tags)
 ///
-/// * #2  Target-weight formula divergence: `_poolWeightErrors` uses
-///       `targetWeightBp * priceInBuck` while the spec
-///       (`_currentBasketValueAtCurrentPrices`, `basket_model.py`) uses
-///       `basketAmount * priceInBuck`.  Re-weights toward initially
-///       expensive constituents.
-/// * #4  Liveness: `require(totalPos > 0)` reverts when no pool is
-///       currently overweight, holding depositor exit hostage to
-///       market state.  Fix: fall back to proportional-by-value across
-///       all pools.
 /// * #5  Slippage guard runs on the depositor's original pool, not on
 ///       the pools the redemption actually withdraws from.
 /// * #6  `_buckToLp` swap uses `MIN/MAX_SQRT_RATIO ± 1` (no real
@@ -169,6 +160,12 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     uint16  public observationCardinality;
     uint256 public defaultMaxDeviationBp;
     uint256 public minSeedLiquidity;
+
+    /// @notice Redemption-value threshold (bp of the most-overweight
+    ///         pool's LP value) below which `_allocateRedemption` uses
+    ///         the gas-cheap single-pool fast path instead of the full
+    ///         two-pass allocation across constituents.  100 bp = 1%.
+    uint16 public constant SMALL_REDEEM_BP = 100;
 
     // --- Events ----------------------------------------------------------- //
 
@@ -446,15 +443,22 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     }
 
     /// @notice Index of the pool whose LP is most underweight relative to
-    ///         its targetWeightBp.  Empty pools (value=0) are always first.
+    ///         its price-adjusted target value.  Empty pools (value=0)
+    ///         are always first.
+    /// @dev    Ratio: actual value / target value (lower = more
+    ///         underweight).  Target value = basketAmount * priceInBuck,
+    ///         matching `_poolWeightErrors` and `basket_model.py`.
     function _mostUnderweightPool() internal view returns (uint256 idx) {
         int256 best = type(int256).max;
         for (uint256 i = 0; i < constituents.length; i++) {
-            uint256 v = _poolLpValue(constituents[i]);
-            uint256 w = constituents[i].targetWeightBp;
-            // Ratio: value per basis-point (lower = more underweight).
+            Constituent storage c = constituents[i];
+            uint256 v = _poolLpValue(c);
+            uint256 p = _readPoolPrice(c, 0);
+            uint256 tgt = UniswapV3OracleLib.mulDiv(c.basketAmount, p, 1e18);
+            int256 ratio = tgt > 0
+                ? int256(v * 1e18 / tgt)
+                : type(int256).max;
             // Empty pools have v=0, so ratio=0 (most underweight).
-            int256 ratio = w > 0 ? int256(v / w) : type(int256).max;
             if (ratio < best) {
                 best = ratio;
                 idx = i;
@@ -463,14 +467,17 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     }
 
     /// @notice Index of the pool whose LP is most overweight relative to
-    ///         its targetWeightBp.  Skips empty pools (they can't be sold).
+    ///         its price-adjusted target value.  Skips empty pools.
     function _mostOverweightPool() internal view returns (uint256 idx) {
         int256 best = -1;
         for (uint256 i = 0; i < constituents.length; i++) {
-            uint256 v = _poolLpValue(constituents[i]);
-            uint256 w = constituents[i].targetWeightBp;
-            if (v == 0 || w == 0) continue;
-            int256 ratio = int256(v / w);
+            Constituent storage c = constituents[i];
+            uint256 v = _poolLpValue(c);
+            if (v == 0) continue;
+            uint256 p = _readPoolPrice(c, 0);
+            uint256 tgt = UniswapV3OracleLib.mulDiv(c.basketAmount, p, 1e18);
+            if (tgt == 0) continue;
+            int256 ratio = int256(v * 1e18 / tgt);
             if (ratio > best) {
                 best = ratio;
                 idx = i;
@@ -567,54 +574,126 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
                        buckToMint, c.token, liquidity);
     }
 
-    // --- Pool weight errors (P-controller) -------------------------------- //
+    // --- Redemption allocation ------------------------------------------- //
 
-    /// @notice Per-pool value-weight error: actualWeight - targetWeight.
-    ///         Positive = overweight (sell), negative = underweight (buy).
+    /// @notice Allocate `redeemValue` BUCK across constituent pools.
+    ///         Each `alloc[i]` is the BUCK-value to extract from pool i;
+    ///         Σ ≈ redeemValue (modulo integer-division dust).
     ///
-    ///         Target value per constituent uses
-    ///             targetVal_i = basketAmount_i * priceInBuck_i / 1e18
-    ///         where `basketAmount_i` was set at addBasketToken time so
-    ///         that `basketAmount × initialPrice` equals the declared
-    ///         weight share of 1 BUCK.  Σ(targetVal_i) is therefore
-    ///         `basketValueInBuck` — and `targetVal_i / Σ` is the
-    ///         constituent's natural value share, which drifts correctly
-    ///         as prices move (an equal-weight basket where TOKEN_A
-    ///         doubles in price has TOKEN_A's *target* share rise too —
-    ///         that's the intent of value-weighting).
+    /// # Model
     ///
-    ///         Mirrors `_currentBasketValueAtCurrentPrices` and
-    ///         `basket_model.py`'s `_weight_errors`.
-    function _poolWeightErrors() internal view
-        returns (int256[] memory errors, uint256 totalPositive)
+    /// Ideal post-redemption state: every pool sits at its target share
+    /// of the smaller, post-redemption NAV.  That is,
+    ///     alloc_i = v_i - t_i × (NAV - redeemValue)
+    /// where `t_i = basketAmount_i × price_i / Σ(...)` is the pool's
+    /// natural value share (same definition as
+    /// `_currentBasketValueAtCurrentPrices` and `basket_model.py`).
+    ///
+    ///   * Heavily overweight pool: alloc_i > t_i × redeemValue
+    ///     (pool contributes more than its proportional share — pulls
+    ///     the basket toward target).
+    ///   * At-target pool: alloc_i = t_i × redeemValue (proportional).
+    ///   * Heavily underweight pool: alloc_i < 0 (would require ADDING
+    ///     value — clamp to 0, redistribute the slack).
+    ///
+    /// Algorithm (one shot — full-range LP withdrawal doesn't move pool
+    /// prices, so a static computation matches the loop's behaviour):
+    ///
+    ///   Pass 1 — Take from pools with positive ideal allocation
+    ///   (overweight + slightly underweight), proportional to their
+    ///   excess over the post-redemption target.
+    ///
+    ///   Pass 2 — If pass 1's positives didn't cover `redeemValue`
+    ///   (heavily-underweight pools clamped to zero), take the
+    ///   remainder proportional to current pool value across ALL pools.
+    ///   This handles the equilibrium case (all at target ⇒ pure
+    ///   proportional contribution) and the rare "anti-rebalancing"
+    ///   case where even underweight pools must contribute.
+    ///
+    /// # Small-redemption fast path
+    ///
+    /// If `redeemValue` is below `SMALL_REDEEM_BP` of the most
+    /// overweight pool's value, satisfy the entire redemption from
+    /// that single pool.  Saves the dominant-case gas of running the
+    /// full multi-pool allocation when the impact is small.
+    function _allocateRedemption(uint256 redeemValue, uint256 navTotal)
+        internal view returns (uint256[] memory alloc)
     {
         uint256 N = constituents.length;
-        errors = new int256[](N);
+        alloc = new uint256[](N);
+        if (redeemValue == 0 || navTotal == 0) return alloc;
 
-        // Compute actual and target values.
-        uint256[] memory actualVal = new uint256[](N);
+        // Gather per-pool value + target value.
+        uint256 totalTarget = 0;
+        uint256[] memory v = new uint256[](N);
         uint256[] memory targetVal = new uint256[](N);
-        uint256 avSum = 0;
-        uint256 tvSum = 0;
         for (uint256 i = 0; i < N; i++) {
-            uint256 v = _poolLpValue(constituents[i]);
-            actualVal[i] = v;
-            avSum += v;
-            uint256 p = _readPoolPrice(constituents[i], 0);
+            Constituent storage c = constituents[i];
+            v[i] = _poolLpValue(c);
+            uint256 p = _readPoolPrice(c, 0);
             targetVal[i] = UniswapV3OracleLib.mulDiv(
-                constituents[i].basketAmount, p, 1e18);
-            tvSum += targetVal[i];
+                c.basketAmount, p, 1e18);
+            totalTarget += targetVal[i];
+        }
+        if (totalTarget == 0) return alloc;
+
+        // Compute each pool's "ideal" allocation (positive part) and
+        // find the most overweight pool for the fast-path threshold.
+        // postNav = NAV - redeemValue (clamped at 0).
+        uint256 postNav = navTotal > redeemValue ? navTotal - redeemValue : 0;
+        uint256[] memory positive = new uint256[](N);
+        uint256 totalPositive = 0;
+        uint256 mostOvIdx = 0;
+        uint256 mostOvAbsExcess = 0;
+        for (uint256 i = 0; i < N; i++) {
+            uint256 tgtPost = UniswapV3OracleLib.mulDiv(
+                targetVal[i], postNav, totalTarget);
+            if (v[i] > tgtPost) {
+                positive[i] = v[i] - tgtPost;
+                totalPositive += positive[i];
+            }
+            // Track the most overweight pool by absolute excess over
+            // its CURRENT target (not post-redemption target) for the
+            // fast-path threshold check.
+            uint256 tgtNow = UniswapV3OracleLib.mulDiv(
+                targetVal[i], navTotal, totalTarget);
+            if (v[i] > tgtNow && v[i] - tgtNow > mostOvAbsExcess) {
+                mostOvAbsExcess = v[i] - tgtNow;
+                mostOvIdx = i;
+            }
         }
 
-        if (avSum == 0 || tvSum == 0) return (errors, 0);
+        // Fast path: small redemption against the most overweight pool.
+        // Skips the multi-pool allocation entirely.
+        if (mostOvAbsExcess > 0
+            && redeemValue * 10000
+                <= uint256(SMALL_REDEEM_BP) * v[mostOvIdx]) {
+            alloc[mostOvIdx] = redeemValue;
+            return alloc;
+        }
 
-        // Normalise to basis points and compute error.
-        for (uint256 i = 0; i < N; i++) {
-            int256 aw = int256(actualVal[i] * 10000 / avSum);
-            int256 tw = int256(targetVal[i] * 10000 / tvSum);
-            errors[i] = aw - tw;
-            if (errors[i] > 0) {
-                totalPositive += uint256(errors[i]);
+        // Pass 1: allocate by positive ideal allocation.
+        uint256 fromPositive = totalPositive >= redeemValue
+            ? redeemValue : totalPositive;
+        if (fromPositive > 0) {
+            for (uint256 i = 0; i < N; i++) {
+                if (positive[i] > 0) {
+                    alloc[i] = UniswapV3OracleLib.mulDiv(
+                        positive[i], fromPositive, totalPositive);
+                }
+            }
+        }
+
+        // Pass 2: if pass 1 didn't cover redeemValue (because some
+        // pools were heavily underweight and clamped to zero), allocate
+        // the remainder proportional to current pool value.  Handles
+        // the equilibrium fallback (totalPositive == 0 ⇒ all from
+        // pass 2) and the "must dip into underweight" case.
+        if (redeemValue > totalPositive) {
+            uint256 remainder = redeemValue - totalPositive;
+            for (uint256 i = 0; i < N; i++) {
+                alloc[i] += UniswapV3OracleLib.mulDiv(
+                    v[i], remainder, navTotal);
             }
         }
     }
@@ -666,69 +745,65 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         Constituent storage depC = constituents[indexOf[d.token] - 1];
         _enforceSlippageGuard(depC, _readPoolPrice(depC, 0), maxDeviationBp);
 
-        // --- step 3: compute value claim ----------------------------- //
+        // --- step 3: compute value claim + per-pool allocation -------- //
         // The depositor's BUCK principal claims a proportional share of
         // total LP NAV — including AMM fees, external-arb BUCK influx,
         // and any reinvested treasury BUCK.  NAV/outstanding > 1 ⇒ the
         // depositor's value claim exceeds their principal (profit).
-        (int256[] memory errors, uint256 totalPos) = _poolWeightErrors();
-        // BUG #4: liveness hazard — reverts if no pool is currently
-        // overweight, even though the depositor has a valid claim
-        // against treasury and external-arb BUCK in the pools.  Fix:
-        // fall back to proportional-by-value across all pools.
-        require(totalPos > 0, "no overweight pools");
-
-        uint256 totalValue = _totalBasketLpValue();
-        require(totalValue > 0, "no LP value");
-        uint256 redeemValue = UniswapV3OracleLib.mulDiv(
-            redeemBuck, totalValue, totalOutstandingBuck);
-
-        // --- step 4: P-controller allocation over overweight pools --- //
-        // For each pool with positive value-weight error: withdraw an
-        // L-slice equal to (pool's share of value claim) / (pool LP
-        // value).  Heavier overweight ⇒ larger slice; the redemption
-        // itself nudges the basket toward target weights.
         //
-        // Per pool the mint/burn invariant is honoured locally:
-        //   poolPrincipalBuck = redeemBuck * poolFrac / 10000
-        //   Σ poolPrincipalBuck == redeemBuck
-        // is guaranteed by `totalPos` cancellation.  If the pool's
-        // withdrawn BUCK side `b` is short of `poolPrincipalBuck`, the
-        // basket swaps part of the withdrawn TOKEN back to BUCK on the
-        // same pool (`_coverBuckShortfall`) to make up the difference.
-        // The depositor then receives `tok - tokSpent`; treasury
-        // collects any surplus `b - poolPrincipalBuck` for reinvestment.
+        // `_allocateRedemption` returns per-pool BUCK-value extractions
+        // that drive every pool toward its target share of the post-
+        // redemption NAV.  In equilibrium this is proportional-by-value
+        // for everyone (no revert); when pools are skewed it pulls
+        // hardest from the overweight ones.  Small redemptions (below
+        // SMALL_REDEEM_BP of the most overweight pool) take a single-
+        // pool fast path for gas.
+        uint256 navTotal = _totalBasketLpValue();
+        require(navTotal > 0, "no LP value");
+        uint256 redeemValue = UniswapV3OracleLib.mulDiv(
+            redeemBuck, navTotal, totalOutstandingBuck);
+        uint256[] memory alloc = _allocateRedemption(redeemValue, navTotal);
+
+        // --- step 4: per-pool withdrawal + shortfall cover ------------ //
+        // For each pool with non-zero allocation: withdraw an L-slice of
+        // value `alloc[i]`, transfer the TOKEN side to the depositor,
+        // and route the BUCK side through the per-pool burn budget
+        // (`poolPrincipalBuck = redeemBuck × alloc[i] / redeemValue`).
+        //
+        // If the pool's withdrawn BUCK side is short of its burn share,
+        // the basket swaps part of the withdrawn TOKEN back to BUCK on
+        // the same pool (`_coverBuckShortfall`) — preserving the
+        // mint/burn invariant Σ poolPrincipalBuck == redeemBuck.
+        // The depositor receives `tok - tokSpent`; treasury collects
+        // any surplus `b - poolPrincipalBuck` for reinvestment.
         uint256 totalProfit = 0;
         uint256 totalIntendedBurn = 0;
         bool    anyWithdrawn = false;
 
         for (uint256 i = 0; i < constituents.length; i++) {
-            if (errors[i] <= 0) continue;  // skip non-overweight pools
+            if (alloc[i] == 0) continue;
 
-            uint256 poolFrac = uint256(errors[i]) * 10000 / totalPos;
-            uint256 poolRedeem = redeemValue * poolFrac / 10000;
-            if (poolRedeem == 0) continue;
-
-            Constituent storage ovC = constituents[i];
-            uint256 ovPoolVal = _poolLpValue(ovC);
-            if (ovPoolVal == 0) continue;
-            uint256 poolRedeemFrac = poolRedeem * 1e18 / ovPoolVal;
+            Constituent storage pc = constituents[i];
+            uint256 poolVal = _poolLpValue(pc);
+            if (poolVal == 0) continue;
+            uint256 poolRedeemFrac = alloc[i] * 1e18 / poolVal;
             if (poolRedeemFrac > 1e18) poolRedeemFrac = 1e18;
 
-            (uint128 totalL,,,,) = IUniswapV3Pool(ovC.pool).positions(
+            (uint128 totalL,,,,) = IUniswapV3Pool(pc.pool).positions(
                 keccak256(abi.encodePacked(address(this),
-                              ovC.tickLower, ovC.tickUpper))
+                              pc.tickLower, pc.tickUpper))
             );
             if (totalL == 0) continue;
             uint128 burnL = uint128(
                 uint256(totalL) * poolRedeemFrac / 1e18);
             if (burnL == 0) continue;
 
-            (uint256 tok, uint256 b) = _decreaseAndCollect(ovC, burnL);
+            (uint256 tok, uint256 b) = _decreaseAndCollect(pc, burnL);
             anyWithdrawn = true;
 
-            // Per-pool burn budget.
-            uint256 poolPrincipalBuck = redeemBuck * poolFrac / 10000;
+            // Per-pool burn budget = redeemBuck weighted by alloc share.
+            uint256 poolPrincipalBuck = UniswapV3OracleLib.mulDiv(
+                redeemBuck, alloc[i], redeemValue);
             uint256 tokSpent = 0;
             uint256 poolProfit = 0;
 
@@ -740,7 +815,7 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
                 // the same pool to bring the bucket up to the per-pool
                 // burn budget.  Reverts if the pool can't cover.
                 tokSpent = _coverBuckShortfall(
-                    ovC, tok, poolPrincipalBuck - b);
+                    pc, tok, poolPrincipalBuck - b);
             }
 
             totalIntendedBurn += poolPrincipalBuck;
@@ -748,10 +823,10 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
             uint256 tokToUser = tok - tokSpent;
             if (tokToUser > 0) {
-                IERC20(ovC.token).transfer(msg.sender, tokToUser);
+                IERC20(pc.token).transfer(msg.sender, tokToUser);
             }
             emit RedeemedFromPool(
-                receiptId, ovC.pool, ovC.token,
+                receiptId, pc.pool, pc.token,
                 tokToUser, poolPrincipalBuck, poolProfit, tokSpent, burnL);
         }
         require(anyWithdrawn, "no LP withdrawn");
