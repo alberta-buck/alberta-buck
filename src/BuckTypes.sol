@@ -160,3 +160,17 @@ function toBuckSeconds(uint256 x) pure returns (BuckSeconds) {
     require(x <= BuckTypes.MAX_BS, "BuckSeconds: overflow");
     return BuckSeconds.wrap(uint120(x));
 }
+
+// ─── Shared cross-contract DTOs ──────────────────────────────────────────
+
+/// @notice One NFT's mint-relevant fields, returned in bulk by
+///         BuckCredit.batchCreditInfo so Buck's _allocateMint /
+///         _allocateBurn loops do not pay an external call per NFT.
+///         File-level struct so both Buck.sol and BuckCredit.sol can
+///         reference the same definition without an import cycle.
+struct CreditSlice {
+    address owner;            // ownerOf(tokenId)
+    uint256 faceValue;        // 6-decimal BUCK
+    uint256 activatedValue;   // 6-decimal BUCK
+    uint32  premiumRate;      // basis points
+}

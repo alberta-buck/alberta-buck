@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
-import {BuckTypes, BuckQty, toBuckQty} from "./BuckTypes.sol";
+import {BuckTypes, BuckQty, toBuckQty, CreditSlice} from "./BuckTypes.sol";
 
 /// @notice Hook surface BuckCredit calls on Buck whenever an NFT mutation
 ///         (mint / burn / transfer / activate) changes a holder's
@@ -29,6 +29,41 @@ interface IBuckHook {
 /// 6-decimal BUCK amounts and packed into uint80 slots — same storage type as
 /// Buck.sol's ERC-20 balances.  Bounds and precision come from BuckTypes so a
 /// future change propagates to both contracts in lockstep.
+///
+/// === Architectural note: why BuckCredit is its own contract ===
+///
+/// BuckCredit and Buck currently communicate via:
+///   Buck -> BuckCredit: totalCurrentValue, batchCreditInfo, ownerOf,
+///                       balanceOf, tokenOfOwnerByIndex, activateFromBuck
+///   BuckCredit -> Buck: IBuckHook.onCreditMutation (cache invalidation)
+///
+/// It is tempting to collapse the pair into a single Diamond (EIP-2535)
+/// with separate facets, eliminating the cross-contract calls and the
+/// setBuck()/IBuckHook wiring.  This is a dead end:
+///
+///   ERC-20 and ERC-721 share function selectors with incompatible
+///   semantics.  balanceOf(address) is 0x70a08231 in both standards
+///   (BUCK amount vs. NFT count), transferFrom(address,address,uint256)
+///   is 0x23b872dd in both (amount vs. tokenId), and the Transfer event
+///   has different indexed-argument counts.  A Diamond router can
+///   dispatch one of these per selector; whichever loses stops being
+///   standards-compliant and silently breaks wallets, indexers,
+///   marketplaces, and routers.  ERC-1155 exists precisely because no
+///   production system can safely mix raw ERC-20 + ERC-721 on one
+///   address.
+///
+/// What IS available for modularization:
+///   1. Buck as a Diamond (identity / demurrage / mint-burn / ERC-20
+///      facets) -- selectors don't collide within ERC-20.  Future work.
+///   2. Make BuckCredit independently upgradeable (UUPS / Transparent
+///      proxy) without merging into Buck's Diamond -- Buck's
+///      `immutable buckCredit` address stays stable, BuckCredit's logic
+///      can be patched in place.  Also future work.
+///   3. Amortize the cross-contract call cost via batch reads --
+///      batchCreditInfo() below packs the per-NFT view that Buck's
+///      _allocateMint / _allocateBurn loops need into one external call.
+///
+/// === End architectural note ===
 
 contract BuckCredit is ERC721Enumerable {
 
@@ -294,6 +329,29 @@ contract BuckCredit is ERC721Enumerable {
     {
         CreditParams storage c = credits[tokenId];
         return (c.faceValue.asUint(), c.activatedValue.asUint(), c.premiumRate);
+    }
+
+    /// @notice Bulk variant of creditInfo + ownerOf: returns one CreditSlice
+    ///         per tokenId, all in a single external call.  Used by
+    ///         Buck._allocateMint / _allocateBurn to walk a holder's NFT
+    ///         list without paying per-NFT cross-contract dispatch overhead
+    ///         (~700 gas warm per call, ~2 calls per NFT in the old per-iter
+    ///         pattern).  Reverts on the first unknown tokenId (via
+    ///         ownerOf), matching the per-iter pattern's failure mode.
+    function batchCreditInfo(uint256[] calldata tokenIds)
+        external view returns (CreditSlice[] memory slices)
+    {
+        slices = new CreditSlice[](tokenIds.length);
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tid = tokenIds[i];
+            CreditParams storage c = credits[tid];
+            slices[i] = CreditSlice({
+                owner:          ownerOf(tid),
+                faceValue:      c.faceValue.asUint(),
+                activatedValue: c.activatedValue.asUint(),
+                premiumRate:    c.premiumRate
+            });
+        }
     }
 
     /// @notice Aggregate current value of all BuckCredits owned by an account.
