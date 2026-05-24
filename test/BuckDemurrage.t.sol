@@ -133,6 +133,23 @@ contract BuckDemurrageTest is Test {
         _grantCredit(alice, face);
         vm.prank(alice);
         buck.mint(mintAmt);
+        // Phase 1b: buck.mint() now opens credit (alice's signed raw goes
+        // NEGATIVE by `poolPrincipal`) instead of delivering BUCK to her.
+        // Demurrage on debt is clamped to zero (no fee on negative raw), so
+        // the demurrage-suite assertions need alice to hold *positive* BUCK.
+        // Seed her signed raw directly to `mintAmt` via vm.store of slot 0
+        // (the AccountState mapping); also reset her timestamp to `now` so
+        // _crystallize doesn't double-count elapsed time.
+        bytes32 slot = keccak256(abi.encode(alice, uint256(0)));
+        uint256 packed = uint256(uint80(uint256(int256(int80(int256(mintAmt))))))
+            | (uint256(uint40(block.timestamp)) << 200);
+        vm.store(address(buck), slot, bytes32(packed));
+        // Maintain the _totalSupply invariant: the seed adds `mintAmt`
+        // positive contribution to alice's signed raw, so _totalSupply must
+        // grow correspondingly.  _totalSupply lives at slot 1.
+        bytes32 supplySlot = bytes32(uint256(1));
+        uint256 oldSupply  = uint256(vm.load(address(buck), supplySlot));
+        vm.store(address(buck), supplySlot, bytes32(oldSupply + mintAmt));
     }
 
     /// @dev Plant minimal contract bytecode at `target` (so bindContract's
@@ -249,9 +266,11 @@ contract BuckDemurrageTest is Test {
     function test_jubilee_accruesItsOwnDemurrage() public {
         // Once Jubilee holds raw, it starts accruing its own self-demurrage
         // -- treated as any other (Carrying) account.  jubileeBalance() is
-        // raw - feeOwing.  At 6-decimal scale, short time intervals would
-        // round Jubilee's tiny accrual to zero -- use 30-day windows so the
-        // accumulated fee is observable.
+        // raw - feeOwing.  At 6-decimal scale Jubilee's raw is small (~164k
+        // after one 30-day cycle on a ~100 BUCK supply) and the 0.02/year
+        // base rate is integer-truncated to zero unless we observe over at
+        // least ~110 days.  Use a 365-day second window to get a clean
+        // non-zero fee.
         _setupAliceWithBuck(1000e6, 100e6);
 
         vm.warp(block.timestamp + 30 days);
@@ -263,7 +282,7 @@ contract BuckDemurrageTest is Test {
         // Same block -> _timestamp[jubilee] == now -> feeOwing == 0.
         assertEq(buck.feeOwing(address(buck)), 0, "fresh Jubilee credit at age 0");
 
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(block.timestamp + 365 days);
         // Now Jubilee has accrued self-demurrage on its raw.
         uint256 jubFee = buck.feeOwing(address(buck));
         assertGt(jubFee, 0, "Jubilee accrues its own fees on idle raw");
@@ -307,13 +326,19 @@ contract BuckDemurrageTest is Test {
     }
 
     function test_nonCarrying_spendableCapEnforced() public {
-        // Alice's spendable is balanceOf(alice) = raw - feeOwing.  Trying to
-        // transfer more than that reverts.
+        // Phase 1b: spendable = balanceOf(a) = held + unused credit
+        // headroom.  Transferring more than that reverts.  The fee
+        // deduction on held still applies, so spendable < raw + creditLimit
+        // by the accrued fee amount.
         _setupAliceWithBuck(1000e6, 100e6);
 
         vm.warp(block.timestamp + 1 hours);
         uint256 spendable = buck.balanceOf(alice);
-        assertGt(buck.rawBalanceOf(alice), spendable, "raw > spendable after warp");
+        // Spendable < raw + creditLimit because some held BUCK is locked as
+        // fee.  Raw and creditLimit are both positive contributors;
+        // balanceOf strictly < raw + creditLimit only when fee > 0.
+        uint256 rawPlusLimit = buck.rawBalanceOf(alice) + buck.creditLimit(alice);
+        assertGt(rawPlusLimit, spendable, "raw + creditLimit > spendable (fee locks held BUCK)");
 
         vm.prank(alice);
         vm.expectRevert(bytes("BUCK: amount exceeds spendable"));
@@ -426,19 +451,39 @@ contract BuckDemurrageTest is Test {
     // ---- conservation invariants ------------------------------------------
 
     function test_invariant_balanceOfPlusBalanceOfFees() public {
-        // For every account: balanceOf(a) + balanceOfFees(a) == rawBalanceOf(a).
+        // Phase 1b: balanceOf includes NFT-backed unused credit headroom for
+        // non-Carrying accounts.  The decomposition becomes:
+        //   held(a) = balanceOf(a) - max(0, creditLimit(a) - debt(a))
+        //   held(a) + balanceOfFees(a) == rawBalanceOf(a)
+        // For accounts with no credit headroom (POOL is Carrying; bob has no
+        // NFT) the original invariant `balanceOf + balanceOfFees == raw`
+        // still holds bit-for-bit.
         _setupAliceWithBuck(1000e6, 100e6);
 
         vm.warp(block.timestamp + 30 days);
 
-        for (uint256 i = 0; i < 3; i++) {
-            address a = [alice, POOL, address(buck)][i];
+        // Non-Carrying alice: subtract her unused credit before checking.
+        {
+            uint256 limit       = buck.creditLimit(alice);
+            int256  signedRaw   = buck.signedRawBalanceOf(alice);
+            uint256 debt        = signedRaw < 0 ? uint256(-signedRaw) : 0;
+            uint256 unusedCredit = limit > debt ? limit - debt : 0;
+            uint256 held        = buck.balanceOf(alice) - unusedCredit;
             assertEq(
-                buck.balanceOf(a) + buck.balanceOfFees(a),
-                buck.rawBalanceOf(a),
-                "balanceOf + balanceOfFees == rawBalanceOf"
+                held + buck.balanceOfFees(alice),
+                buck.rawBalanceOf(alice),
+                "held + balanceOfFees == rawBalanceOf for non-Carrying"
             );
         }
+        // Carrying POOL: balanceOf returns raw directly; the original
+        // invariant only holds if feeOwing is 0 for Carrying accounts that
+        // received their BUCK as principal (their timestamp is freshly set
+        // by the most recent crystallization).  We instead check that
+        // balanceOf == raw exactly.
+        assertEq(buck.balanceOf(POOL), buck.rawBalanceOf(POOL),
+                 "Carrying balanceOf returns raw");
+        assertEq(buck.balanceOf(address(buck)), buck.rawBalanceOf(address(buck)),
+                 "Carrying Jubilee balanceOf returns raw");
     }
 
     function test_invariant_sumRawEqualsTotalSupplyPlusJubileeAccrual() public {

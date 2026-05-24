@@ -1002,9 +1002,17 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 delta = Math.mulDiv(supply, BASE_RATE_PER_SEC * elapsed, SCALE);
         if (delta == 0) return;
         _crystallize(address(this));
-        _addBalance(address(this), delta);
-        int256 jubRaw = _state[address(this)].balance.asInt();
-        emit JubileeAccrued(delta, jubRaw > 0 ? uint256(jubRaw) : 0);
+        // Direct balance write: Jubilee accrual is redistribution from
+        // every Carrying/non-Carrying account's already-accounted raw, NOT
+        // a fresh mint.  Going through _addBalance / _setBalanceSigned
+        // would inflate _totalSupply by `delta`, breaking the invariant
+        //   sum_a max(0, signedRaw(a)) == totalSupply + jubileeActual.
+        int256 oldJubSigned = _state[address(this)].balance.asInt();
+        int256 newJubSigned = oldJubSigned + int256(delta);
+        AccountState memory js = _state[address(this)];
+        js.balance = toBuckQtySigned(newJubSigned);
+        _state[address(this)] = js;
+        emit JubileeAccrued(delta, newJubSigned > 0 ? uint256(newJubSigned) : 0);
     }
 
     // ---- balance writes ----------------------------------------------------
