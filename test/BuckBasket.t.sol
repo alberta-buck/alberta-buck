@@ -83,6 +83,7 @@ contract BuckBasketTest is Test {
         buck = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         // V3 factory (deployed from compiled artifact, same path as other tests).
         v3Factory = deployCode("out/UniswapV3Factory.sol/UniswapV3Factory.json");

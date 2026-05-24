@@ -105,6 +105,7 @@ contract BuckLifecycleTest is Test {
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         // Mock USDC.
         usdc = address(new LifecycleUSDC());

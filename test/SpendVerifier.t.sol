@@ -68,6 +68,7 @@ contract SpendVerifierTest is Test {
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         mintStub     = new StubMintVerifier(GOV);
         spendG16     = new SpendGroth16Verifier();

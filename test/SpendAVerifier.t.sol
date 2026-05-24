@@ -77,6 +77,7 @@ contract SpendAVerifierTest is Test {
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         // Two Groth16 verifiers, two adapters: B-spend wraps the legacy
         // spend.circom verifier (so Notes.spend() works); A-spend V2 wraps

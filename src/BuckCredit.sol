@@ -235,7 +235,39 @@ contract BuckCredit is ERC721Enumerable {
 
     /// @notice Client activates additional credit, up to the current face value.
     function activate(uint256 tokenId, uint256 amount) external {
-        require(ownerOf(tokenId) == msg.sender, "Not credit owner");
+        address owner = ownerOf(tokenId);
+        require(owner == msg.sender, "Not credit owner");
+        _activate(tokenId, owner, amount);
+    }
+
+    /// @notice Activate `amount` of coverage on behalf of `holder`, restricted
+    ///         to the registered Buck contract.  Buck calls this from
+    ///         _allocateMint so a single `Buck.mint(amount, [tid])` call
+    ///         expands the holder's NFT-backed credit headroom directly,
+    ///         without requiring a separate `activate()` step.
+    function activateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
+        require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
+        require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
+        _activate(tokenId, holder, amount);
+    }
+
+    /// @notice Deactivate `amount` of coverage on behalf of `holder`, restricted
+    ///         to Buck.  Mirror of activateFromBuck for the burn-side unwind.
+    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
+        require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
+        require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
+        CreditParams storage c = credits[tokenId];
+        uint256 current = c.activatedValue.asUint();
+        require(amount <= current, "BuckCredit: deactivate > active");
+        c.activatedValue  = toBuckQty(current - amount);
+        c.lastActivatedAt = uint48(block.timestamp);
+
+        IBuckHook(buck).onCreditMutation(holder, address(0));
+        emit CreditActivated(tokenId, holder, 0, current - amount);
+    }
+
+    function _activate(uint256 tokenId, address holder, uint256 amount) internal {
+        if (amount == 0) return;
         CreditParams storage c = credits[tokenId];
         uint256 newActivated = c.activatedValue.asUint() + amount;
         require(newActivated <= c.faceValue.asUint(), "Exceeds face value");
@@ -247,10 +279,10 @@ contract BuckCredit is ERC721Enumerable {
         // credit limit -- invalidate the cache for this holder.
         address b = buck;
         if (b != address(0)) {
-            IBuckHook(b).onCreditMutation(msg.sender, address(0));
+            IBuckHook(b).onCreditMutation(holder, address(0));
         }
 
-        emit CreditActivated(tokenId, msg.sender, amount, newActivated);
+        emit CreditActivated(tokenId, holder, amount, newActivated);
     }
 
     /// @notice Compact (faceValue, activatedValue, premiumRate) view used by

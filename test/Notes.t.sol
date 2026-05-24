@@ -77,6 +77,7 @@ contract NotesTest is Test {
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         // Notes stack (no PoseidonT3 dep in Phase 7-bis).
         stub      = new StubMintVerifier(GOV);

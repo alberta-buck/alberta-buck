@@ -122,7 +122,7 @@ interface IUniswapV3SwapCallback {
 contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Constituents ----------------------------------------------------- //
-
+    // @notice Maintains the invariant that sum of targetWeightBp equals 10000 BP (100%)
     struct Constituent {
         address token;
         uint8   decimals;
@@ -281,18 +281,20 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     ///         Existing constituents' declared weights are rescaled
     ///         proportionally so the total remains 10000 bp, preserving
     ///         their relative weight ratios.  Every existing constituent's
-    ///         `basketAmount` is then recomputed at its *current* pool
-    ///         spot price so its contribution equals its declared weight
-    ///         share of 1.0 BUCK.  The new constituent is set at
-    ///         `initialPriceInBuck`.
+    ///         `basketAmount` is NOT recomputed at its *current* pool
+    ///         spot price; its contribution equals its declared weight
+    ///         share of 1.0 BUCK, at its original `initialPriceInBuck`.
     ///
-    ///         Because existing constituents are re-priced at the current
-    ///         spot, price drift between additions is locked into
-    ///         `basketAmount`.  A future `rebalanceWeights()` (governance)
-    ///         will allow re-weighting or removing one or more constituents,
-    ///         recomputing all `basketAmount` values from current spot
-    ///         prices so every constituent matches its declared weight
-    ///         share of 1.0 BUCK.  Passing a weight of 0 removes a token.
+    ///         A future `rebalanceWeights()` (governance) will allow
+    ///         re-weighting or removing one or more constituents, and
+    ///         recomputing `basketAmount` values from current spot prices
+    ///         so every constituent matches its declared weight share of
+    ///         1.0 BUCK.  Passing a weight of 0 would remove a token.
+    ///         This is not implemented; the BUCK assets should be
+    ///         considered long-term (ie. generationally) stable -- a Note
+    ///         containing a certain number of BUCKs should purchase
+    ///         roughly the same basket of commodities when deposited and
+    ///         used by your grand-children.
     function addBasketToken(
         address token,
         uint8   decimals,
@@ -307,38 +309,31 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         require(initialPriceInBuck > 0, "bad price");
 
         // --- resolve target weight -------------------------------------- //
-        // weightBp == 0  =>  equal share for all N constituents.
+        // weightBp == 0  =>  1/N for new, (N-1)/N for existing constituents.
         uint256 N = constituents.length + 1;
         uint256 newW = weightBp > 0 ? weightBp : 10000 / N;
-        // Total existing declared weight (before rescaling).
-        uint256 existingSumW = 0;
-        for (uint256 i = 0; i < constituents.length; i++) {
-            existingSumW += constituents[i].targetWeightBp;
-        }
+	require(newW <= 10000, "target weight not <= 100%");
 
+        // Total existing declared weight after rescaling existing
+	// weights to 10000 net newW, eliminating rounding error.
+        uint256 oldSumW = 0;
+	uint256 oldW = 10000 - newW;
+	    
         // --- renormalize existing constituents --------------------------- //
         // Each existing constituent's declared weight is scaled so the
         // total across all N constituents is 10000 bp.  Its basketAmount
-        // is then recomputed at the *current* pool spot price so its
-        // contribution to basketValueInBuck equals its declared share.
-        if (constituents.length > 0) {
-            uint256 remaining = 10000 - newW;
-            require(remaining > 0 || newW == 10000, "no remaining weight");
-            for (uint256 i = 0; i < constituents.length; i++) {
-                Constituent storage c = constituents[i];
-                uint256 scaledW = existingSumW > 0
-                    ? c.targetWeightBp * remaining / existingSumW
-                    : 0;
-                c.targetWeightBp = scaledW;
-                // basketAmount = scaledW / 10000 / spotPrice  (18-dec)
-                uint256 spotPrice = _readPoolPrice(c, 0);
-                require(spotPrice > 0, "pool price = 0");
-                uint256 weightUnit =
-                    UniswapV3OracleLib.mulDiv(scaledW, 1e18, 10000);
-                c.basketAmount =
-                    UniswapV3OracleLib.mulDiv(weightUnit, 1e18, spotPrice);
-            }
+        // is then recomputed to its new basket share (in tokens).
+        for (uint256 i = 0; i < constituents.length; i++) {
+            Constituent storage c = constituents[i];
+            c.targetWeightBp = 
+		UniswapV3OracleLib.mulDiv(c.targetWeightBp, oldW, 10000);
+	    require(c.targetWeightBp > 0 && c.targetWeightBp < 10000, "invalid basket rescale");
+	    oldSumW += c.targetWeightBp;
+            c.basketAmount =
+                UniswapV3OracleLib.mulDiv(c.basketAmount, oldW, 10000);
         }
+	require(oldSumW < 10000, "scaled weights incorrect" );
+	newW = 10000 - oldSumW;
 
         // --- new constituent --------------------------------------------- //
         // basketAmount = newW / 10000 / initialPriceInBuck
@@ -528,69 +523,72 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     ) external returns (uint256 receiptId) {
         require(tokenAmount > 0, "amount=0");
 
-        // --- BUCK deposit: swap BUCK -> underweight token, then LP ------ //
-        if (token == address(buck)) {
-            // Pull user's already-minted, fully-backed BUCKs.
+	uint128 liquidity = 0;
+	uint256 buckToMint = 0;
+	uint256 tokenPrincipal;          // native-dec amount on c.token side of LP
+	Constituent storage c;
+	if (token == address(buck)) {
+	    // --- BUCK deposit: swap BUCK -> underweight token, then LP ------ //
+	    //
+            // Pull user's already-minted, fully-backed BUCKs.  The
+	    // Constituent liquidity token is selected automatically.  The
+	    // bucksToMint might be lower than tokenAmount due to fees.
             IERC20(address(buck)).transferFrom(
                 msg.sender, address(this), tokenAmount);
+            // tokenPrincipal here is the swap output (`tgtTok`) in c.token's
+            // native decimals -- NOT the user's BUCK input -- so it matches
+            // the units `_settleRedemption` and `_finalizeDeposit` expect.
+            (c, liquidity, buckToMint, tokenPrincipal) = _buckToLp(tokenAmount);
+        } else {
+            // --- TOKEN deposit: standard single-pool LP ---------------------- //
+	    //
+	    // Pull user's backing liquidity; The Constituent liquidity
+	    // token is as supplied, and the bucksToMint is computed by
+	    // their current value.
+            uint256 depositIdx = indexOf[token];
+            require(depositIdx > 0, "not in basket");
+            c = constituents[depositIdx - 1];
 
-            (Constituent storage tgtC, uint256 tgtTok, uint256 buckToMint) =
-                _buckToLp(tokenAmount);
+            uint256 spotPrice = _readPoolPrice(c, 0);
+            _enforceSlippageGuard(c, spotPrice, maxDeviationBp);
 
-            receiptId = receipt.mint(msg.sender);
-            deposits[receiptId] = Deposit({
-                buckPrincipal: buckToMint,
-                tokenPrincipal: tgtTok,
-                token: tgtC.token,
-                depositTime: uint64(block.timestamp)
-            });
-            totalOutstandingBuck += buckToMint;
-            controller.compute();
-            emit Deposited(msg.sender, receiptId, address(buck),
-                           tokenAmount, buckToMint, tgtC.token, 0);
-            return receiptId;
-        }
+            buckToMint = UniswapV3OracleLib.mulDiv(
+                tokenAmount, spotPrice, 10 ** c.decimals
+            );
+            require(buckToMint > 0, "buck=0");
 
-        // --- TOKEN deposit: standard single-pool LP ---------------------- //
-        uint256 depositIdx = indexOf[token];
-        require(depositIdx > 0, "not in basket");
-        Constituent storage c = constituents[depositIdx - 1];
+            IERC20(token).transferFrom(msg.sender, address(this), tokenAmount);
+            buck.mintFromBasket(address(this), buckToMint);
 
-        uint256 spotPrice = _readPoolPrice(c, 0);
-        _enforceSlippageGuard(c, spotPrice, maxDeviationBp);
+            liquidity = _liquidityForAmounts(c, tokenAmount, buckToMint);
+            require(liquidity > 0, "L=0");
+            if (_isFirstPositionInPool(c)) {
+                require(liquidity >= minSeedLiquidity, "seed too small");
+            }
 
-        uint256 buckToMint = UniswapV3OracleLib.mulDiv(
-            tokenAmount, spotPrice, 10 ** c.decimals
-        );
-        require(buckToMint > 0, "buck=0");
-
-        IERC20(token).transferFrom(msg.sender, address(this), tokenAmount);
-        buck.mintFromBasket(address(this), buckToMint);
-
-        uint128 liquidity = _liquidityForAmounts(c, tokenAmount, buckToMint);
-        require(liquidity > 0, "L=0");
-        if (_isFirstPositionInPool(c)) {
-            require(liquidity >= minSeedLiquidity, "seed too small");
-        }
-
-        _callbackPool = c.pool;
-        IUniswapV3Pool(c.pool).mint(
-            address(this), c.tickLower, c.tickUpper, liquidity,
-            abi.encode(token)
-        );
-        _callbackPool = address(0);
-
-        receiptId = receipt.mint(msg.sender);
-        deposits[receiptId] = Deposit({
-            buckPrincipal: buckToMint,
-            tokenPrincipal: tokenAmount,
-            token: token,
-            depositTime: uint64(block.timestamp)
+            _callbackPool = c.pool;
+            IUniswapV3Pool(c.pool).mint(
+                address(this), c.tickLower, c.tickUpper, liquidity,
+                abi.encode(token)
+            );
+            _callbackPool = address(0);
+            tokenPrincipal = tokenAmount;
+	}
+	receiptId = receipt.mint(msg.sender);
+	// Record details of actual token deposited, and what it was worth in BUCKs
+	deposits[receiptId] = Deposit({
+	    buckPrincipal: buckToMint,
+	    tokenPrincipal: tokenPrincipal,
+	    token: c.token,
+	    depositTime: uint64(block.timestamp)
         });
-        totalOutstandingBuck += buckToMint;
-        controller.compute();
-        emit Deposited(msg.sender, receiptId, token, tokenAmount,
-                       buckToMint, c.token, liquidity);
+	totalOutstandingBuck += buckToMint;
+	controller.compute();
+	// Record of account's TOKENs -> BUCKs -> LP and the resultant BuckBasket receipt
+	emit Deposited(msg.sender, receiptId,
+		       token, tokenAmount,   // The token supplied
+		       buckToMint,           // The BUCKs it represents
+		       c.token, liquidity);  // And the LP token selected
     }
 
     // --- Redemption allocation ------------------------------------------- //
@@ -961,7 +959,12 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     ///         Caller decides whether to issue an NFT / update outstanding.
     function _buckToLp(uint256 buckAmount)
         internal
-        returns (Constituent storage tgtC, uint256 tgtTok, uint256 buckToMint)
+        returns (
+            Constituent storage tgtC,
+            uint128 liquidity,
+            uint256 buckToMint,
+            uint256 tgtTok
+        )
     {
         require(buckAmount > 0, "buckAmount=0");
 
@@ -1006,7 +1009,6 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         (uint160 sqrtP,,,,,,) = IUniswapV3Pool(tgtC.pool).slot0();
         uint160 sqrtLow  = UniswapV3OracleLib.getSqrtRatioAtTick(tgtC.tickLower);
         uint160 sqrtHigh = UniswapV3OracleLib.getSqrtRatioAtTick(tgtC.tickUpper);
-        uint128 liquidity;
         if (tgtC.buckIsToken0) {
             // TOKEN=token1: L from amount1 over [sqrtLow, sqrtP].
             liquidity = UniswapV3OracleLib.getLiquidityForAmount1(
