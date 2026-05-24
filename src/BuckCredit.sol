@@ -5,6 +5,15 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
 import {BuckTypes, BuckQty, toBuckQty} from "./BuckTypes.sol";
 
+/// @notice Hook surface BuckCredit calls on Buck whenever an NFT mutation
+///         (mint / burn / transfer / activate) changes a holder's
+///         totalCurrentValue.  Buck uses it to invalidate its per-block
+///         credit-limit cache for the affected holders so that subsequent
+///         creditLimit() reads compute against the fresh NFT state.
+interface IBuckHook {
+    function onCreditMutation(address from, address to) external;
+}
+
 /// @title BuckCredit — ERC-721 Insured Asset NFT
 /// @notice Each token represents an insurer's offer of parametric insurance on a
 ///         real-world asset, with deterministic depreciation and piecemeal activation.
@@ -67,6 +76,13 @@ contract BuckCredit is ERC721Enumerable {
     mapping(uint256 => CreditParams) public credits;
     uint256 private _nextTokenId;
 
+    /// @notice Buck contract that receives credit-mutation callbacks for
+    ///         cache invalidation.  Wired one-shot post-deployment via
+    ///         setBuck(...); zero-address means callbacks are skipped (so
+    ///         BuckCredit can be deployed and exercised before Buck exists,
+    ///         e.g. in older fixtures).
+    address public buck;
+
     // --- Events ---
     event CreditCreated(uint256 indexed tokenId, address indexed insurer,
                         address indexed owner, uint256 faceValue);
@@ -74,8 +90,36 @@ contract BuckCredit is ERC721Enumerable {
                         uint256 newFaceValue, uint32 newDepRate, uint32 newPremiumRate);
     event CreditActivated(uint256 indexed tokenId, address indexed owner,
                           uint256 additionalValue, uint256 totalActivated);
+    event BuckSet(address indexed buck);
 
     constructor() ERC721("BuckCredit", "BUCK_CREDIT") {}
+
+    /// @notice One-shot wiring of the Buck contract for credit-mutation
+    ///         hooks.  Callable by anyone (the Buck address is public and
+    ///         the function is idempotent once set), but immutable after
+    ///         first set.  Mirrors Buck.setBasket(...) for the symmetric
+    ///         BuckBasket wiring style.
+    function setBuck(address _buck) external {
+        require(buck == address(0), "BuckCredit: buck already set");
+        require(_buck != address(0), "BuckCredit: buck=0");
+        buck = _buck;
+        emit BuckSet(_buck);
+    }
+
+    /// @dev Override the OZ ERC721 _update hook so any NFT state change
+    ///      (mint / burn / transfer) invalidates Buck's per-block credit-
+    ///      limit cache for both the previous and new owners.  ERC721Enumerable
+    ///      itself overrides _update; we call super to preserve its
+    ///      enumeration bookkeeping.
+    function _update(address to, uint256 tokenId, address auth)
+        internal override returns (address from)
+    {
+        from = super._update(to, tokenId, auth);
+        address b = buck;
+        if (b != address(0)) {
+            IBuckHook(b).onCreditMutation(from, to);
+        }
+    }
 
     /// @notice Insurer creates a new BUCK_CREDIT NFT for a client.
     /// @dev faceValue / depreciationFloor are accepted as uint256 for ABI
@@ -199,6 +243,13 @@ contract BuckCredit is ERC721Enumerable {
         c.activatedValue  = toBuckQty(newActivated);
         c.lastActivatedAt = uint48(block.timestamp);
 
+        // activatedValue feeds totalCurrentValue(), which gates Buck's
+        // credit limit -- invalidate the cache for this holder.
+        address b = buck;
+        if (b != address(0)) {
+            IBuckHook(b).onCreditMutation(msg.sender, address(0));
+        }
+
         emit CreditActivated(tokenId, msg.sender, amount, newActivated);
     }
 
@@ -255,6 +306,13 @@ contract BuckCredit is ERC721Enumerable {
         c.depStartAt        = newDepStartAt;
         c.premiumRate       = newPremiumRate;
         c.lastUpdated       = uint48(block.timestamp);
+
+        // Insurer reappraisal can change totalCurrentValue of the holder;
+        // invalidate Buck's credit-limit cache for the current owner.
+        address b = buck;
+        if (b != address(0)) {
+            IBuckHook(b).onCreditMutation(ownerOf(tokenId), address(0));
+        }
 
         emit CreditUpdated(tokenId, msg.sender, newFaceValue, newDepRate, newPremiumRate);
     }

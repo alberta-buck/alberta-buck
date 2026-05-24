@@ -141,6 +141,20 @@ contract Buck is IERC20, IERC20Metadata {
     // `vm.store(..., slot, ...)`) remain unchanged.
     address public basket;
 
+    // ---- Credit-limit cache ------------------------------------------------
+    //
+    // creditLimit(a) = totalCurrentValue(a) * currentBuckK / 1e18 -- live sum
+    // over the holder's BuckCredit NFTs.  Caching per block avoids re-scanning
+    // NFTs in the (common) case where the same account makes multiple
+    // transfers in one block.  BuckCredit invalidates the cache via the
+    // onCreditMutation hook on every NFT mint / burn / transfer / activate /
+    // updateCredit.
+    //
+    // Appended after `basket` so existing slot positions are preserved (see
+    // the `vm.store` consumers enumerated in the Phase-1 plan).
+    mapping(address => uint256) public creditLimitCache;
+    mapping(address => uint64)  public creditLimitBlock;
+
     // ---- premium / mutual-insurance pool model -----------------------------
     //
     // mint(N) delivers N to the holder + a mutual-insurance pool deposit of
@@ -208,10 +222,26 @@ contract Buck is IERC20, IERC20Metadata {
 
     function balanceOf(address a) public view returns (uint256) {
         AccountState storage s = _state[a];
-        uint256 raw = s.balance.asUint();
+        int256 raw = s.balance.asInt();
+        if (raw <= 0) return 0;            // debt or empty -- nothing spendable
+        uint256 rawU = uint256(raw);
+        if (identity.isCarrying(a)) return rawU;
+        uint256 fee = _feeOwing(s, rawU);
+        return fee >= rawU ? 0 : rawU - fee;
+    }
+
+    /// @notice Signed view of an account's balance after demurrage.  Returns
+    ///         the negative raw value directly for debt-bearing accounts
+    ///         (those that have spent into BuckCredit-backed headroom);
+    ///         otherwise equivalent to `int256(balanceOf(a))` for non-Carrying
+    ///         accounts, or `int256(rawBalanceOf(a))` for Carrying ones.
+    function signedBalanceOf(address a) public view returns (int256) {
+        AccountState storage s = _state[a];
+        int256 raw = s.balance.asInt();
+        if (raw <= 0) return raw;          // debt accrues no demurrage (clamped in _feeOwing)
         if (identity.isCarrying(a)) return raw;
-        uint256 fee = _feeOwing(s, raw);
-        return fee >= raw ? 0 : raw - fee;
+        uint256 fee = _feeOwing(s, uint256(raw));
+        return raw - int256(fee);
     }
 
     function allowance(address owner, address spender) external view returns (uint256) {
@@ -278,6 +308,57 @@ contract Buck is IERC20, IERC20Metadata {
 
     function receiptFragment(address from, address to) external view returns (bytes32) {
         return _receiptFragments[from][to];
+    }
+
+    // ---- Credit-limit machinery (NFT-backed negative-balance headroom) ----
+
+    /// @notice Live credit limit (NFT-backed BUCK headroom) for account `a`.
+    /// @dev    Formula: ~totalCurrentValue(a) * currentBuckK / BUCKK_SCALE~.
+    ///         Sum of depreciated activated BuckCredit values scaled by the
+    ///         current PID multiplier.  Cached per block to avoid re-scanning
+    ///         a holder's NFT list across multiple transfers in the same
+    ///         block; the cache is invalidated by BuckCredit via the
+    ///         `onCreditMutation` hook on every NFT mint / burn / transfer /
+    ///         activate / updateCredit.
+    function creditLimit(address a) public view returns (uint256) {
+        if (creditLimitBlock[a] == uint64(block.number)) {
+            return creditLimitCache[a];
+        }
+        return _computeCreditLimit(a);
+    }
+
+    /// @dev Pure computation of the live credit limit; no cache read/write.
+    function _computeCreditLimit(address holder) internal view returns (uint256) {
+        uint256 cv = buckCredit.totalCurrentValue(holder);
+        if (cv == 0) return 0;
+        uint256 bk = buckK.currentBuckK();
+        return cv * bk / BUCKK_SCALE;
+    }
+
+    /// @dev Refresh the per-block cache.  Called from any non-view path that
+    ///      needs the credit limit (mint, burn, negative-going transfer).
+    function _refreshCreditLimit(address holder) internal returns (uint256 limit) {
+        if (creditLimitBlock[holder] == uint64(block.number)) {
+            return creditLimitCache[holder];
+        }
+        limit = _computeCreditLimit(holder);
+        creditLimitCache[holder] = limit;
+        creditLimitBlock[holder] = uint64(block.number);
+    }
+
+    /// @dev Mark the cache stale for `holder` so the next read recomputes.
+    function _invalidateCreditCache(address holder) internal {
+        if (holder == address(0)) return;
+        creditLimitBlock[holder] = 0;
+    }
+
+    /// @notice Hook called by BuckCredit on every NFT state change to
+    ///         invalidate Buck's per-block credit-limit cache.  Restricted
+    ///         to the registered BuckCredit contract.
+    function onCreditMutation(address from, address to) external {
+        require(msg.sender == address(buckCredit), "BUCK: not credit");
+        _invalidateCreditCache(from);
+        _invalidateCreditCache(to);
     }
 
     // ---- mint / burn -------------------------------------------------------
@@ -713,18 +794,31 @@ contract Buck is IERC20, IERC20Metadata {
 
     function feeOwing(address a) public view returns (uint256) {
         AccountState storage s = _state[a];
-        return _feeOwing(s, s.balance.asUint());
+        int256 raw = s.balance.asInt();
+        if (raw <= 0) return 0;             // no demurrage on debt or empty
+        return _feeOwing(s, uint256(raw));
     }
 
     function balanceOfFees(address a) public view returns (uint256) {
         uint256 fee = feeOwing(a);
         if (identity.isCarrying(a)) return fee;
-        uint256 raw = _state[a].balance.asUint();
-        return fee >= raw ? raw : fee;
+        int256 raw = _state[a].balance.asInt();
+        if (raw <= 0) return 0;
+        uint256 rawU = uint256(raw);
+        return fee >= rawU ? rawU : fee;
     }
 
+    /// @notice Unsigned raw balance.  Clamps negative (debt) accounts to 0
+    ///         so legacy ERC-20-style readers see a non-negative number;
+    ///         use `signedRawBalanceOf` if you need to distinguish debt.
     function rawBalanceOf(address a) external view returns (uint256) {
-        return _state[a].balance.asUint();
+        int256 raw = _state[a].balance.asInt();
+        return raw <= 0 ? 0 : uint256(raw);
+    }
+
+    /// @notice Signed raw balance (negative = NFT-backed debt).
+    function signedRawBalanceOf(address a) external view returns (int256) {
+        return _state[a].balance.asInt();
     }
 
     function jubileeBalance() external view returns (uint256) {
@@ -732,7 +826,8 @@ contract Buck is IERC20, IERC20Metadata {
     }
 
     function jubileeActual() external view returns (uint256) {
-        return _state[address(this)].balance.asUint();
+        int256 raw = _state[address(this)].balance.asInt();
+        return raw <= 0 ? 0 : uint256(raw);
     }
 
     // ---- demurrage internals -----------------------------------------------
