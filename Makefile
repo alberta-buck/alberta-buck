@@ -19,8 +19,13 @@ ANVIL_PORT		?= 8545
 ANVIL_BLOCK_TIME	?= 0
 FORK_BLOCK		?=
 
-# Forge options
-FORGE_OPTS		?= --optimize --optimizer-runs 200
+# Forge options.  --use 0.8.28 sidesteps a solc 0.8.31 IR codegen bug
+# ("Modifiers not implemented yet"); the v2/v3 builds use their own
+# pragmas (=0.5.16, =0.7.6) so we skip them here and they pick up via
+# the FOUNDRY_PROFILE=v3 path / their own solc.
+FORGE_OPTS		?= --optimize --optimizer-runs 200 --use 0.8.28 \
+			   --skip 'src/uniswap_v2_build/**' \
+			   --skip 'src/uniswap_v3_build/**'
 
 # Fork block pinning (deterministic tests): set FORK_BLOCK=12345 to pin
 ifdef FORK_BLOCK
