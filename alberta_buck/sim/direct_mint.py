@@ -46,13 +46,13 @@ class DirectMintAgent(Agent):
         seq = self._seq
         days = scenario.days
 
-        # Phase-shift so agents are spread evenly across the horizon.
+        # Phase-shift so non-bootstrap agents are spread evenly.
         total = max(DirectMintAgent._counter, 1)
-        offset = int(days * seq / total)
+        offset = int(days * (seq + 1) / (total + 1))  # +1 avoids day-0 overlap
 
         for r in range(self.CYCLES):
             # Entry: spread rounds across the agent's window.
-            t0 = offset + int((days - offset) * r / self.CYCLES)
+            t0 = min(offset + int((days - offset) * r / self.CYCLES), days - 1)
             t0 = min(t0, days - 1)
             # Hold: 1/4 to 1/2 of remaining horizon.
             remaining = max(days - t0, 30)

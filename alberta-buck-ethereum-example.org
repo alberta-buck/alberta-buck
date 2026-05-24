@@ -18,6 +18,13 @@
 
   The BUCK is defined in terms of basket of commodities.  
 
+  (tell the story of how the BuckBasket uses BUCK-unaware arb agents to keep the TOKEN/BUCK pools in
+  equilibrium with the external TOKEN/USDC, TOKEN/ETH pools: the price of TOKEN in BUCKs
+  automatically will maintain relative TOKEN price equilibrium (eg. cbBTC vs PAXG will always be the
+  same ratio in BUCKs, as their prices in ETH or USDC)
+
+  
+
 * Bootstrap, Funding Factor, and the BUCK_K Feedback Loop
   :PROPERTIES:
   :CUSTOM_ID: bootstrap-feedback

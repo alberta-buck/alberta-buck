@@ -50,15 +50,23 @@ def _pool_value_weights(d) -> list[list[float]]:
         rb = _bal(d.buck, d.pool_buck[i])
         prices.append(rb * (10 ** d.dec[i]) // rt if rt else 0)
 
-    # Target values from basket definition.
+    # Target values: basketAmount * initialPriceInBuck * initialPriceInBuck
+    # / spotPrice.  When price doubles, target halves → overweight → sell.
+    #   base = basketAmount * initialPrice_inBuck (= weight/10000)
+    #   targetVal = base * initialPrice_inBuck / spotPrice
     target_val = []
     for i in range(N):
         try:
             c = d.basket.functions.constituents(i).call()
-            ba = c[2]  # Constituent.basketAmount
+            ba = c[2]       # basketAmount
+            ip = c[3]       # initialPriceInBuck
         except Exception:
-            ba = 0
-        target_val.append(ba * prices[i] if prices[i] else 0)
+            ba, ip = 0, 0
+        base = ba * ip // (10 ** 18) if ba and ip else 0
+        if base and prices[i]:
+            target_val.append(base * ip // prices[i])
+        else:
+            target_val.append(base)
     tv_sum = sum(target_val)
 
     # Actual values from pool token-side reserves (normalized by token

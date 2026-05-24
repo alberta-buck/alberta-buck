@@ -642,16 +642,27 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         alloc = new uint256[](N);
         if (redeemValue == 0 || navTotal == 0) return alloc;
 
-        // Gather per-pool value + target value.
+        // Target value per pool: the pool's BUCK-value contribution
+        // scaled inversely by price change from initial.  When PAXG
+        // doubles, its target HALVES → overweight → sell PAXG.
+        //   base = basketAmount * initialPriceInBuck   (= weight/10000)
+        //   targetVal = base * initialPriceInBuck / spotPrice
         uint256 totalTarget = 0;
         uint256[] memory v = new uint256[](N);
         uint256[] memory targetVal = new uint256[](N);
         for (uint256 i = 0; i < N; i++) {
             Constituent storage c = constituents[i];
             v[i] = _poolLpValue(c);
-            uint256 p = _readPoolPrice(c, 0);
-            targetVal[i] = UniswapV3OracleLib.mulDiv(
-                c.basketAmount, p, 1e18);
+            uint256 spotPrice = _readPoolPrice(c, 0);
+            if (spotPrice > 0 && c.initialPriceInBuck > 0) {
+                // base = basketAmount * initialPrice / 1e18
+                uint256 base = UniswapV3OracleLib.mulDiv(
+                    c.basketAmount, c.initialPriceInBuck, 1e18);
+                targetVal[i] = UniswapV3OracleLib.mulDiv(
+                    base, c.initialPriceInBuck, spotPrice);
+            } else {
+                targetVal[i] = c.targetWeightBp;
+            }
             totalTarget += targetVal[i];
         }
         if (totalTarget == 0) return alloc;

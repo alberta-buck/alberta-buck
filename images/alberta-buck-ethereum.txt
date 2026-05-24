@@ -1,18 +1,18 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                THE ALBERTA BUCK - ETHEREUM IMPLEMENTATION
-                             (DRAFT V0.92)
+                             (DRAFT V0.93)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-                          2026-05-10 12:00:00
+                          2026-05-23 12:00:00
 
 
 <https://perry.kundert.ca/images/dominion-logo.png>
 
 A concrete Ethereum implementation of the [Alberta Buck Architecture],
-in five contracts:
+in six contracts:
 
 1. *BUCK_CREDIT* (ERC-721) – one NFT per insured asset, with
    deterministic depreciation and piecemeal client activation.
@@ -22,15 +22,31 @@ in five contracts:
 3. *BUCK* (ERC-20) – identity-bound, single-slot per-account state,
    continuous demurrage, mutual-insurance-pool minting that draws
    coverage from BUCK_CREDIT NFTs cheapest-first.
-4. *Notes* – privacy-preserving denomination on top of BUCK.  Mint and
+4. *BuckBasket* – USD-free basket registry and direct-mint orchestrator.
+   Custodies a single full-range Uniswap-V3 LP position per TOKEN/BUCK
+   pool, mints BUCK against deposited basket tokens at the current pool
+   spot price, and on redemption withdraws proportionally from
+   overweight pools, hands the depositor the TOKEN side(s) and recycles
+   the BUCK side "sell high / buy low" into the most underweight pool as
+   treasury LP.  Publishes `basketValueInBuck() = sum( basketAmount_i *
+   pool_price_in_BUCK_i )' as the direct-embodiment process variable for
+   `BUCK_K'.
+5. *BUCK_K* – the value-stabilization factor for credit-limit
+   computation.  Three implementations ship today:
+   `BuckKControllerStatic' (governance-set constant),
+   `BuckKControllerDirect' (USD-free PID; setpoint = 1.0 BUCK by
+   definition, process variable = `BuckBasket.basketValueInBuck()'), and
+   `BuckKController' (PID against an external four-pool USDT/USDC basket
+   of Uniswap-V3 TWAPs, with a BUCK/USDT TWAP as the BUCK price).  The
+   PID mechanics – priming, setpoint-shift (`dS') compensation, long-gap
+   `dTMax' clamp, `fundingFactor()' counter-cyclical insurance view –
+   live in a shared `BuckKControllerBase' following the ezpwd::pid
+   pattern; `Buck.mint' and `Buck.burn' drive `compute()', and
+   `BuckBasket' holds the privileged hook to `reprime()' after
+   constituent additions.
+6. *Notes* – privacy-preserving denomination on top of BUCK.  Mint and
    spend via Groth16 SNARKs over a Tornado-style incremental Poseidon
    Merkle tree.
-5. *BUCK_K* – the value-stabilization factor for credit-limit
-   computation.  Both a governance-set static variant and a full PID +
-   Uniswap-V3-pool basket controller ship today; mint and burn drive the
-   PID through `compute()', and the controller is wired with priming,
-   setpoint-shift (`dS') compensation, and a long-gap `dTMax' clamp
-   following the ezpwd::pid pattern.
 
 This is the first implementation, prioritizing clarity over breadth of
 standards.  Subsequent documents will examine ERC-1155, ERC-3643, and
@@ -57,35 +73,45 @@ Table of Contents
 .. 3. Identity-Bound approve()
 .. 4. transfer() and transferFrom()
 .. 5. Demurrage and Jubilee
-6. BUCK_K: Value Stabilization Controller
+6. BuckBasket: Direct-Mint Orchestrator + USD-Free Value Anchor
+.. 1. Two Kinds of BUCK
+.. 2. Constituents and Weights
+.. 3. Process Variable: `basketValueInBuck()'
+.. 4. Direct-Mint: `depositToken'
+.. 5. Redemption: "Sell High, Recycle to Buy Low"
+.. 6. Invariant
+.. 7. Known Gaps
+.. 8. Dynamic Issuance: Why BuckBasket Needs BUCK_K
+7. BUCK_K: Value Stabilization Controller
 .. 1. Static Variant
-.. 2. PID Variant
-..... 1. Basket and BUCK Price Oracles
-..... 2. Priming and `dS' Compensation
-..... 3. `dT', `dTMax', and Pokability
+.. 2. Direct Variant (USD-Free)
+.. 3. External-Basket Variant
+..... 1. External Basket and BUCK Price Oracles
+..... 2. Priming and `dS' Compensation (shared with the Direct Variant)
+..... 3. `dT', `dTMax', and Pokability (shared with the Direct Variant)
 ..... 4. Future: Amortizing PID Work via a State Machine
-..... 5. Tuning
-7. Notes: Privacy-Preserving Denomination
+..... 5. Tuning (shared with the Direct Variant)
+8. Notes: Privacy-Preserving Denomination
 .. 1. Mint Circuit (Batch, In-Circuit Merkle Insertion)
 .. 2. Spend Circuits (B-flavor, A-flavor V2)
 .. 3. Verifier Interfaces
 .. 4. Notes Contract
-8. End-to-End Walkthrough
+9. End-to-End Walkthrough
 .. 1. Step 0: Identity Registration (One-Time)
 .. 2. Step 1: Mint
 .. 3. Step 2: Approve Bob (Identity Handshake)
 .. 4. Step 3: Bob Pulls the Transfer
 .. 5. Step 4: Alice Denominates as Notes
 .. 6. Step 5: Spend a Note
-9. Gas Cost Snapshot
-10. Security Considerations
+10. Gas Cost Snapshot
+11. Security Considerations
 .. 1. Oracle Manipulation
 .. 2. Credit Enumeration DoS
 .. 3. Insurer Trust
 .. 4. Reentrancy
 .. 5. Pool Solvency
-11. Future Directions
-12. Status
+12. Future Directions
+13. Status
 
 
 [Alberta Buck Architecture]
@@ -104,6 +130,17 @@ Table of Contents
   both sides.
 
   <file:./images/buck-eth-layers.png>
+
+  (The diagram above is from the pre-`BuckBasket' revision.  In the
+  current tree, a sixth box – `BuckBasket' – sits beside `BUCK_K', owns
+  one full-range V3 LP per TOKEN/BUCK pool, and is the privileged caller
+  of `Buck.mintFromBasket' / `Buck.burnFromBasket' and
+  `BuckKControllerDirect.reprime'.  The `BUCK_K' "PID" box now resolves
+  to one of three implementations – `Static', `Direct' (reads
+  `BuckBasket.basketValueInBuck()' as PV), or `External-Basket' (reads
+  BUCK/USDT and four basket TWAPs).  Diagram regeneration is tracked
+  separately so a documentation-only revision doesn't require a ditaa
+  rebuild.)
 
   The flow is:
 
@@ -131,16 +168,40 @@ Table of Contents
      Poseidon commitments.  Holders later call `Notes.spend' or
      `Notes.spendACP' with a fresh nullifier and a SNARK proving
      inclusion under a recent root.
-  7. `BUCK_K' ships in two forms today.  The governance-set static
-     variant is the simpler choice for early deployments where no BUCK
-     price oracle exists yet.  The PID + Uniswap-V3-pool variant reads
-     its process variable (BUCK price) from a BUCK/USDT TWAP and its
-     setpoint (basket cost) from a four-pool basket – XAUT/USDT,
-     PAXG/USDC, cbBTC/USDC, WBTC/USDT, 25 % each – chosen for resilience
-     against any single basis-currency or asset-token freeze.
-     `Buck.mint' and `Buck.burn' call `BuckK.compute()', so user
-     activity drives and amortizes the PID; long quiet stretches are
-     bounded by `dTMax'.
+  7. `BuckBasket' is the *direct-mint orchestrator* and the value
+     anchor.  Anyone holding a basket constituent (PAXG, cbBTC, XAUT,
+     WBTC, etc., as wired by governance via `addBasketToken') can call
+     `BuckBasket.depositToken' to LP it into the corresponding
+     TOKEN/BUCK Uniswap-V3 pool; the basket mints exactly `tokenAmount *
+     spotPrice' worth of fresh BUCK against the deposit (via the
+     privileged `Buck.mintFromBasket' hook), pairs the two sides as
+     full-range V3 liquidity, and hands the depositor an ERC-721 receipt
+     (`BuckBasketReceipt').  Depositing already-minted BUCK is
+     symmetric: the basket swaps it into the most underweight
+     constituent's TOKEN and LPs there.  On `BuckBasket.redeem', the
+     value claim is allocated across overweight pools proportional to
+     each pool's positive value-weight error; the basket withdraws L
+     from each, transfers the entire TOKEN side to the depositor, burns
+     the principal BUCK from the BUCK side, and routes the remaining
+     "profit" BUCK into the most underweight pool's TOKEN as treasury LP
+     – the "sell high on the way out, recycle to buy low" leg fires in
+     the same transaction.
+  8. `BUCK_K' ships in three forms today.  The governance-set static
+     variant is the simpler choice for early deployments where no
+     on-chain price reference exists.  `BuckKControllerDirect' is the
+     *USD-free* embodiment: process variable =
+     `BuckBasket.basketValueInBuck()', setpoint = 1.0 BUCK by
+     definition, error = `1.0 - basketValue'.  The legacy
+     `BuckKController' reads its process variable (BUCK price) from a
+     BUCK/USDT TWAP and its setpoint (basket cost) from a four-pool
+     USDT/USDC basket – XAUT/USDT, PAXG/USDC, cbBTC/USDC, WBTC/USDT, 25
+     % each – chosen for resilience against any single basis-currency or
+     asset-token freeze.  `Buck.mint' and `Buck.burn' call
+     `BuckK.compute()' regardless of variant, so user activity drives
+     and amortizes the PID; long quiet stretches are bounded by `dTMax',
+     and `BuckBasket' is the privileged caller of `reprime()' after
+     `addBasketToken' so dilution discontinuities don't fire a one-cycle
+     P/I spike.
 
 
 2 ERC Standard Choice for BUCK_CREDIT
@@ -625,22 +686,283 @@ Table of Contents
   single accumulating slot.
 
 
-6 BUCK_K: Value Stabilization Controller
+6 BuckBasket: Direct-Mint Orchestrator + USD-Free Value Anchor
+══════════════════════════════════════════════════════════════
+
+  `BuckBasket' is the contract that closes the loop between BUCK and the
+  real-world commodity tokens it tracks.  It registers a set of
+  TOKEN/BUCK Uniswap-V3 pools (one per basket constituent), custodies a
+  single full-range Buck-owned LP position in each, lets anyone
+  direct-mint BUCK by depositing a constituent (or recycle
+  already-minted BUCK into the most underweight constituent), and on
+  redemption pulls BUCK out of overweight pools while routing the
+  surplus into the most underweight pool as treasury LP.  It is also the
+  publisher of the USD-free process variable read by
+  `BuckKControllerDirect'.
+
+
+6.1 Two Kinds of BUCK
+─────────────────────
+
+  BUCK in circulation today has two provenances, both flowing through
+  the same ERC-20:
+
+  1. *BuckBasket-minted BUCK* – minted by `BuckBasket' via the
+        privileged `Buck.mintFromBasket(to, amount)' hook when a
+        depositor pledges a TOKEN.  Tracked in
+        `BuckBasket.totalOutstandingBuck'; burned on redemption.  The
+        activation gate is /not/ the BuckCredit credit limit – it is the
+        depositor's willingness to put TOKEN (or BUCK) into the basket
+        at the current pool valuation.
+  2. *Externally-supplied BUCK* – created by the standard
+     `Buck.mint(amount, tokenIds)' path described in [BUCK], backed by
+     `BuckCredit' insured-asset NFTs and gated by `BUCK_K'.  These BUCK
+     reach the TOKEN/BUCK pools indirectly via arbitrage swaps and are
+     the lever the PID actually pulls on.
+
+  The two supply paths converge in the basket's BUCK-side balance.
+  Price-up TOKEN moves leave extra BUCK in the pool (TOKEN bought with
+  BUCK by external traders); price-down moves draw BUCK out.  Combined
+  with reinvested treasury BUCK from prior redemptions, the basket's NAV
+  typically exceeds `totalOutstandingBuck' – the spread is what
+  compounds for depositors and underwrites the "profit" side of the
+  redemption split.
+
+
+[BUCK] See section 5
+
+
+6.2 Constituents and Weights
+────────────────────────────
+
+  Governance registers each basket constituent via
+  `addBasketToken(token, decimals, initialPriceInBuck, weightBp,
+  feeTier)'.  `weightBp' is the declared target weight in basis points;
+  passing 0 defaults to an equal share (`10000 / N').  The call:
+
+  1. Renormalizes every existing constituent's `targetWeightBp' so the
+     total across the N+1 constituents sums to 10000 bp, preserving each
+     existing constituent's *relative* weight ratio.
+  2. Re-prices every existing constituent's `basketAmount' at the
+     *current* pool spot price so its contribution to
+     `basketValueInBuck' equals its declared weight share of 1.0 BUCK.
+  3. Finds or creates the BUCK/TOKEN V3 pool at the requested fee tier,
+     initializes it at `initialPriceInBuck' (silently no-ops if already
+     initialized), and bumps the observation cardinality so TWAP reads
+     are available immediately after the first swap.
+  4. Computes the full-range tick bounds for the pool's fee-tier spacing
+     and stores the constituent's `buckIsToken0' ordering.
+  5. Calls `controller.reprime()' so the controller absorbs the
+     dilution-discontinuity in `basketValueInBuck' without firing a
+     one-cycle P/I spike.
+
+  A future `rebalanceWeights(tokens[], weightBps[])' will let governance
+  re-weight (or, with `weightBp = 0', remove) one or more constituents
+  in a single call – recomputing all `basketAmount' values from the
+  current spot prices so each constituent's contribution again matches
+  its declared share of 1.0 BUCK.
+
+
+6.3 Process Variable: `basketValueInBuck()'
+───────────────────────────────────────────
+
+  ┌────
+  │ basketValueInBuck = sum_i ( basketAmount_i * pool_price_in_BUCK_i / 1e18 )
+  └────
+
+  This is the direct-embodiment "process variable" – the value of one
+  basket bundle measured in BUCK – and is what `BuckKControllerDirect'
+  reads.  TWAP-windowed reads (`twapWindow' seconds) fall back to spot
+  if the pool is too cold to satisfy the request, so the PID degrades
+  gracefully on a freshly-added constituent rather than freezing.
+
+
+6.4 Direct-Mint: `depositToken'
+───────────────────────────────
+
+  `depositToken(token, tokenAmount, maxDeviationBp)' has two paths
+  chosen on `token':
+
+  • *Basket TOKEN deposit*: the depositor pledges a registered
+    constituent.  `BuckBasket' reads the pool's spot price, mints
+    `tokenAmount * spotPrice' worth of BUCK to itself via
+    `Buck.mintFromBasket', and LPs the (TOKEN, BUCK) pair as full-range
+    liquidity in that constituent's pool.  An ERC-721 receipt
+    (`BuckBasketReceipt') records the (BUCK principal, TOKEN principal,
+    original token, deposit time).
+  • *Already-minted BUCK deposit* (`token =' address(buck)=): the
+    depositor's BUCK is pulled in, swapped on the *most underweight*
+    pool for that pool's TOKEN, partner BUCK is freshly minted against
+    the received TOKEN, and the full (TOKEN, BUCK) pair is LP'd into the
+    underweight pool.  This is the cross-pool rebalance arrow on the
+    deposit side.
+
+  `maxDeviationBp' optionally guards against TWAP/spot divergence (set
+  to 0 during bootstrap or cold-pool deposits; non-zero rejects the
+  deposit if `|spot - TWAP| > maxDeviationBp / 10000').
+
+
+6.5 Redemption: "Sell High, Recycle to Buy Low"
+───────────────────────────────────────────────
+
+  `redeem(receiptId, redeemBp, maxDeviationBp)' settles a value claim
+  `valueClaim = redeemBuck * NAV / totalOutstandingBuck' where `NAV' is
+  the basket's total LP value across all pools.  The claim is split
+  across constituents by `_allocateRedemption', then settled in seven
+  phases:
+
+  1. *Validate + size* the receipt; compute `redeemBuck' as either the
+     full `buckPrincipal' or a basis-point fraction.
+  2. *Slippage guard* on the depositor's original pool (the known gap:
+     this guard should also fire on every pool actually withdrawn from –
+     tracked as `BUG #5').
+  3. *Allocate* `redeemValue' across pools.  Each pool's "ideal"
+     allocation is `alloc_i = v_i - t_i * (NAV - redeemValue)' where
+     `t_i' is the pool's natural value share at target.  Heavily
+     overweight pools contribute /more/ than their proportional share;
+     heavily underweight pools clamp to zero.  Two passes handle the
+     equilibrium case (proportional) and the rare "must dip into
+     underweight" case.  A small-redemption fast path takes the entire
+     claim from the most overweight pool when `redeemValue' is below
+     `SMALL_REDEEM_BP' (1 %) of that pool's value, saving the multi-pool
+     gas in the dominant case.
+  4. *Burn LP* from each allocated pool.  TOKEN and BUCK are held inside
+     `BuckBasket'; no transfers yet, so any aggregate BUCK shortfall
+     (e.g. from a single pool dominating the allocation but carrying
+     mostly TOKEN) can still reach back into the basket's TOKEN
+     holdings.
+  5. *Cover shortfall* by greedy TOKEN→BUCK swaps on the pools with the
+     most TOKEN balance left, using exact-input swaps padded by
+     `SHORTFALL_BUFFER_BP' (2 %).  Any residual gap below
+     `MAX_ORPHAN_DUST_WEI' (1 µBUCK) is tolerated; larger gaps revert
+     with `"pool depth too thin"'.
+  6. *Pay depositor* the surviving TOKEN side per pool, emit one
+     `RedeemedFromPool' event per touched pool (TOKEN-to-user,
+     TOKEN-swapped, L burned).
+  7. *Reinvest profit* above the `MIN_REINVEST_BUCK' floor (0.001 BUCK):
+     the BUCK side minus the principal burn is routed through
+     `_buckToLp' into the most underweight pool's TOKEN and LP'd as a
+     treasury position.  Sub-floor profit stays in the basket's BUCK
+     balance and is swept by the next redemption (still treasury-owned,
+     just not yet LP'd).  Then `Buck.burnFromBasket' burns the
+     principal, `totalOutstandingBuck' decrements, and the deposit is
+     finalized (cleared on full redemption; both BUCK and TOKEN
+     principals scale down proportionally on partial).
+
+  The depositor/treasury split is *approximately* 50/50: full-range V3
+  LP is roughly 50/50 by value at any price, so the TOKEN side
+  (depositor) and BUCK side (treasury) are roughly equal.  The principal
+  burn comes out of the BUCK side, slightly favouring the depositor.
+
+
+6.6 Invariant
+─────────────
+
+  After all deposits exit, `totalOutstandingBuck = 0' and remaining LP
+  value is entirely treasury-owned – compounded TOKEN appreciation,
+  accumulated AMM fees, and external-arb BUCK that didn't get claimed.
+  Modulo bounded `MAX_ORPHAN_DUST_WEI' per-redemption dust, this is the
+  liveness backstop the audit trail rests on.
+
+
+6.7 Known Gaps
+──────────────
+
+  The contract carries `BUG #N:' tags for the redesign work still in
+  flight:
+
+  • *#5* – Slippage guard runs on the depositor's original pool, not on
+    the pools actually withdrawn from.
+  • *#6* – `_buckToLp' / `_swapTokenForBuckExactIn' swaps use the
+    permissive `MIN/MAX_SQRT_RATIO ± 1' price limit; should be
+    TWAP-bounded to resist sandwich.
+  • *#7* – `_mostUnderweightPool' / `_mostOverweightPool' read spot
+      prices; should use TWAP.
+  • *#8* – `_reinvestBuck' LPs into a single most-underweight pool;
+    should mirror the redemption's proportional allocation.
+  • *#9* – TOKEN deposits LP into the deposited token's own pool with no
+    underweight-routing – asymmetric with the BUCK-deposit path.
+  • *#10* – `Buck.mintFromBasket' bypasses `BuckK''s `fundingFactor'
+    gate; document or fold basket-minted BUCK into the PID's accounting
+    (see [Dynamic Issuance] below).
+  • *#11* – `_reinvestBuck' emits no event; downstream observers can't
+    distinguish treasury reinvestment from external arb trades.
+  • *#13* – Late-basket-life redemptions can revert `pool depth too
+    thin' when the basket NAV is too low to cover the remaining
+    outstanding (genuine liquidity exhaustion, not dust); a graceful
+    tail-redemption mode is future work.
+
+
+[Dynamic Issuance] See section 6.8
+
+
+6.8 Dynamic Issuance: Why BuckBasket Needs BUCK_K
+─────────────────────────────────────────────────
+
+  `BuckBasket' mints BUCK at *exactly* the current pool spot price.
+  That is value-neutral at the moment of deposit, but it is also the
+  cause of a structural deflationary pressure on BUCK:
+
+  • Direct-mint adds new BUCK only when a depositor *wants* to LP a
+    constituent.  External BUCK demand (somebody wants to buy a TOKEN
+    and the cheapest path is BUCK -> TOKEN swap on the BuckBasket pool)
+    does *not* mint new BUCK – it just rearranges existing BUCK between
+    the pool and the swap-caller.
+  • The only path that produces "free" BUCK against assets *outside* the
+    basket is `Buck.mint(amount, tokenIds)' via `BuckCredit' NFTs, gated
+    by `maxLimit = totalCreditValue * currentBuckK / 1e18'.  When
+    external arbitrageurs buy TOKEN with BUCK from the basket pools,
+    BUCK gets scarce (price up vs. TOKEN ⇒ each TOKEN/BUCK pool quotes a
+    higher TOKEN price in BUCK terms ⇒ `basketValueInBuck' rises above
+    1.0).
+
+  Sign convention (inherited from [BUCK_K]):
+
+  • `basketValue > 1.0' (BUCK undervalued / inflation: TOKEN expensive
+    in BUCK): `error < 0' ⇒ `buckK' /decreases/ ⇒ `BuckCredit'-backed
+    mints shrink ⇒ BUCK supply contracts ⇒ basket value falls back
+    toward 1.0.
+  • `basketValue < 1.0' (BUCK overvalued / deflation: TOKEN cheap in
+    BUCK): `error > 0' ⇒ `buckK' /increases/ ⇒ `BuckCredit'-backed mints
+    expand ⇒ BUCK supply grows ⇒ basket value rises back toward 1.0.
+
+  So the closed-loop equilibrium picture is: `BuckBasket' establishes
+  the TOKEN-side anchor and publishes the deviation signal;
+  `BuckKControllerDirect' integrates that deviation into a credit-limit
+  multiplier; `Buck' meters new supply against the multiplier; external
+  arb agents close the loop by moving BUCK between the basket pools and
+  the wider market.  Direct-mint deposits are the *value injector*
+  (asset coming in); `BuckCredit'-backed mints under PID control are the
+  *supply regulator* (BUCK going out).
+
+
+[BUCK_K] See section 7
+
+
+7 BUCK_K: Value Stabilization Controller
 ════════════════════════════════════════
 
   `BUCK_K' supplies the credit-limit multiplier `BUCK.mint' reads to
-  size against `totalCurrentValue'.  The `IBuckK' interface is two
-  functions – `currentBuckK() external view returns (uint256)' and
-  `compute() external returns (uint256)' – so `BUCK' is invariant to
-  which implementation is wired in.  `BUCK.mint' and `BUCK.burn' both
-  call `compute()' so user activity drives the controller and amortises
-  any PID work; the function is otherwise permissionless, keepers and
-  individual users can poke it directly during quiet stretches.  Two
-  implementations ship today: `BuckKControllerStatic' (governance-set
-  constant) and `BuckKController' (full PID + Uniswap-V3-pool basket).
+  size against `totalCurrentValue'.  The `IBuckK' interface is three
+  functions – `currentBuckK() external view returns (uint256)',
+  `compute() external returns (uint256)', and `fundingFactor() external
+  view returns (uint256)' (counter-cyclical insurance scalar) – so
+  `BUCK' is invariant to which implementation is wired in.  `BUCK.mint'
+  and `BUCK.burn' both call `compute()' so user activity drives the
+  controller and amortises any PID work; the function is otherwise
+  permissionless, keepers and individual users can poke it directly
+  during quiet stretches.  Three implementations ship today:
+  `BuckKControllerStatic' (governance-set constant),
+  `BuckKControllerDirect' (USD-free PID against `BuckBasket'), and
+  `BuckKController' (PID against an external four-pool USDT/USDC basket
+  of Uniswap-V3 TWAPs).  The PID mechanics – prime cycle, `dS'
+  correction, `dT' / `dTMax', anti-windup, `fundingFactor()' – live in a
+  shared `BuckKControllerBase' abstract contract; each concrete variant
+  only overrides `_readReferences() returns (int256 buckValue, int256
+  basketValue)' to wire its specific price sources.
 
 
-6.1 Static Variant
+7.1 Static Variant
 ──────────────────
 
   `BuckKControllerStatic' holds one `uint256 buckK' (18 decimals, `1e18'
@@ -652,11 +974,64 @@ Table of Contents
   layers while `BUCK_K' is held constant.
 
 
-6.2 PID Variant
-───────────────
+7.2 Direct Variant (USD-Free)
+─────────────────────────────
 
-  `BuckKController' follows the [ezpwd::pid] controller layout, ported
-  to 18-decimal Solidity fixed-point.
+  `BuckKControllerDirect' is the embodiment used in tandem with
+  `BuckBasket'.  It has no external stablecoin intermediary; BUCK
+  measures itself against a basket of TOKEN/BUCK Uniswap-V3 pools that
+  `BuckBasket' owns and prices.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   PID Term          Source                                           Meaning                                          
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Setpoint          `UNIT' (= `1e18', constant by definition)        One BUCK should buy one basket bundle            
+   Process Variable  `BuckBasket.basketValueInBuck()'                 sum_i (basketAmount_i * pool_price_in_BUCK_i)    
+   Error             `buckValue - basketValue' = `1.0 - basketValue'  Positive: BUCK overvalued; negative: undervalued 
+   Output (BUCK_K)   `1e18 + (P*Kp + I*Ki + D*Kd)/1e18'               Credit-limit multiplier (1.0 = neutral)          
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The sign convention is identical to the External-Basket variant below
+  (all shipped gains are positive), but the error semantics are inverted
+  relative to a "BUCK price in USDT" reading:
+
+  • `basketValue > 1.0' (one BUCK now buys *less* than one basket – BUCK
+    undervalued / inflation): `error < 0' ⇒ `BUCK_K' /decreases/ ⇒
+    credit contracts ⇒ supply shrinks ⇒ BUCK recovers value vs. the
+    basket.
+  • `basketValue < 1.0' (one BUCK now buys *more* than one basket – BUCK
+    overvalued / deflation): `error > 0' ⇒ `BUCK_K' /increases/ ⇒ credit
+    expands ⇒ supply grows ⇒ BUCK gives back value to the basket.
+
+  `basket' is wired one-shot from governance via `setBasket(address)'
+  (immutable thereafter); deploying a new `BuckBasket' requires a new
+  controller.  `reprime() external' is callable *only* by the registered
+  `BuckBasket'; `BuckBasket.addBasketToken' invokes it after every
+  constituent addition so the dilution discontinuity in
+  `basketValueInBuck' – a new constituent's `basketAmount * spotPrice'
+  contribution appears in a single block – doesn't manifest as a
+  one-cycle P/I spike.  `_reprime()' recaptures `P' against the new
+  process state and re-derives `I' so the next no-error cycle reproduces
+  the current `buckK'.
+
+  Cold-pool / pre-basket behaviour: `_readReferences' returns `(UNIT,
+  UNIT)' until `setBasket' fires, so the controller returns the priming
+  `buckK' and runs no PID math.  Once the basket is wired and
+  observations exist, the loop is identical to the External-Basket
+  variant – only the PV source differs.
+
+
+7.3 External-Basket Variant
+───────────────────────────
+
+  `BuckKController' is the original Uniswap-V3-basket variant.  It reads
+  `BUCK' and a multi-token basket from separate Uniswap-V3 pools
+  (typically priced in USDT/USDC) and treats their difference as the
+  error term; it predates `BuckBasket' and remains in tree for
+  deployments where the basket-of-pools approach is preferred over (or
+  runs in parallel with) the direct embodiment.  It follows the
+  [ezpwd::pid] controller layout, ported to 18-decimal Solidity
+  fixed-point.
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    PID Term          Source                              Meaning                                          
@@ -690,14 +1065,14 @@ Table of Contents
 [ezpwd::pid]
 <https://github.com/pjkundert/ezpwd-reed-solomon/blob/master/c%2B%2B/ezpwd/pid>
 
-6.2.1 Basket and BUCK Price Oracles
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+7.3.1 External Basket and BUCK Price Oracles
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  The controller reads basket components from two parallel sources, both
-  summed into the basket cost: a Chainlink-feed array (`BasketComponent
-  { feed, weight, feedDecimals }', used in tests against mock
-  aggregators) and a Uniswap-V3-pool array (`BasketPool { pool,
-  baseToken, quoteToken, weight, baseDecimals, quoteDecimals,
+  The External-Basket controller reads basket components from two
+  parallel sources, both summed into the basket cost: a Chainlink-feed
+  array (`BasketComponent { feed, weight, feedDecimals }', used in tests
+  against mock aggregators) and a Uniswap-V3-pool array (`BasketPool {
+  pool, baseToken, quoteToken, weight, baseDecimals, quoteDecimals,
   twapInterval }').  `addBasketComponent' and `addBasketPool' are
   governance-only.  The shipped target basket is V3-pool-sourced:
 
@@ -725,8 +1100,8 @@ Table of Contents
   `slot0().tick' directly (test-only).
 
 
-6.2.2 Priming and `dS' Compensation
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+7.3.2 Priming and `dS' Compensation (shared with the Direct Variant)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The first `compute()' after deployment captures references and returns
   the cached `buckK' without running PID math:
@@ -753,8 +1128,8 @@ Table of Contents
   slamming `BUCK_K' toward a rail.
 
 
-6.2.3 `dT', `dTMax', and Pokability
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+7.3.3 `dT', `dTMax', and Pokability (shared with the Direct Variant)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Three time constants govern when and how aggressively the controller
   responds:
@@ -785,7 +1160,7 @@ Table of Contents
   the TWAP read sits at ~$1.000002 while spot reads $0.500.
 
 
-6.2.4 Future: Amortizing PID Work via a State Machine
+7.3.4 Future: Amortizing PID Work via a State Machine
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Today's `compute()' reads all five pools and runs the full P/I/D math
@@ -801,8 +1176,8 @@ Table of Contents
   grow or the basket expands materially.
 
 
-6.2.5 Tuning
-╌╌╌╌╌╌╌╌╌╌╌╌
+7.3.5 Tuning (shared with the Direct Variant)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Gain  Effect of increasing                   Risk                           
@@ -826,7 +1201,7 @@ Table of Contents
   `ezpwd::pid::reset()' hot-swap pattern in the C++ reference.
 
 
-7 Notes: Privacy-Preserving Denomination
+8 Notes: Privacy-Preserving Denomination
 ════════════════════════════════════════
 
   BUCK transfers carry a public `(from, to, amount)' quartet.  Notes
@@ -844,7 +1219,7 @@ Table of Contents
 
 [Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-7.1 Mint Circuit (Batch, In-Circuit Merkle Insertion)
+8.1 Mint Circuit (Batch, In-Circuit Merkle Insertion)
 ─────────────────────────────────────────────────────
 
   `circuits/mint_batch.circom' is a parameterised batch-mint circuit.
@@ -894,7 +1269,7 @@ Table of Contents
 <https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
-7.2 Spend Circuits (B-flavor, A-flavor V2)
+8.2 Spend Circuits (B-flavor, A-flavor V2)
 ──────────────────────────────────────────
 
   `circuits/spend.circom' proves redemption of a single B-shape note
@@ -944,7 +1319,7 @@ Table of Contents
 <https://perry.kundert.ca/range/finance/alberta-buck-notes-flow/>
 
 
-7.3 Verifier Interfaces
+8.3 Verifier Interfaces
 ───────────────────────
 
   `Notes' is decoupled from the SNARK toolchain via narrow interfaces:
@@ -979,7 +1354,7 @@ Table of Contents
   governance call.
 
 
-7.4 Notes Contract
+8.4 Notes Contract
 ──────────────────
 
   `src/Notes.sol' is constructed with `(buck, mintVerifier,
@@ -1033,7 +1408,7 @@ Table of Contents
   atomically; both verifications must succeed.
 
 
-8 End-to-End Walkthrough
+9 End-to-End Walkthrough
 ════════════════════════
 
   Alice owns a $500K Calgary home (land $200K, structure $300K).  Two
@@ -1051,7 +1426,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-8.1 Step 0: Identity Registration (One-Time)
+9.1 Step 0: Identity Registration (One-Time)
 ────────────────────────────────────────────
 
   Alice obtains a PS-signed credential off-chain from a trusted issuer
@@ -1066,7 +1441,7 @@ Table of Contents
   sees those accounts.
 
 
-8.2 Step 1: Mint
+9.2 Step 1: Mint
 ────────────────
 
   Alice calls `BUCK.mint(50_000e6)' – the no-arg form, so the built-in
@@ -1090,7 +1465,7 @@ Table of Contents
      plus standard `Transfer' events.
 
 
-8.3 Step 2: Approve Bob (Identity Handshake)
+9.3 Step 2: Approve Bob (Identity Handshake)
 ────────────────────────────────────────────
 
   Alice's wallet reads Bob's `pk_bob' from `IdentityRegistry', decrypts
@@ -1112,7 +1487,7 @@ Table of Contents
   two-channel binding from the Identity document.
 
 
-8.4 Step 3: Bob Pulls the Transfer
+9.4 Step 3: Bob Pulls the Transfer
 ──────────────────────────────────
 
   `BUCK.transferFrom(alice, bob, 10_000e6)' debits the allowance, runs
@@ -1125,7 +1500,7 @@ Table of Contents
   that addresses Alice and Bob exchanged 10,000e6.
 
 
-8.5 Step 4: Alice Denominates as Notes
+9.5 Step 4: Alice Denominates as Notes
 ──────────────────────────────────────
 
   Alice picks flavour A2 and values `[100e6, 25e6]' (totalFace 125e6).
@@ -1150,7 +1525,7 @@ Table of Contents
      the dummies are discarded.
 
 
-8.6 Step 5: Spend a Note
+9.6 Step 5: Spend a Note
 ────────────────────────
 
   Later, the holder of one of Alice's notes (Alice herself, or a bearer
@@ -1179,8 +1554,8 @@ Table of Contents
   events; the Jubilee accumulator is the long-horizon backstop.
 
 
-9 Gas Cost Snapshot
-═══════════════════
+10 Gas Cost Snapshot
+════════════════════
 
   Approximate gas costs from the current Foundry suite (Solidity 0.8.31,
   optimizer on).  PID and oracle figures are estimates against unwritten
@@ -1217,10 +1592,10 @@ Table of Contents
   Optimism, Base) where gas is 10-100x cheaper.
 
 
-10 Security Considerations
+11 Security Considerations
 ══════════════════════════
 
-10.1 Oracle Manipulation
+11.1 Oracle Manipulation
 ────────────────────────
 
   BUCK/USDT and basket pool prices use Uniswap V3 TWAPs (600 s shipped,
@@ -1234,7 +1609,7 @@ Table of Contents
   acceptable window (~1 hour) and revert if stale.
 
 
-10.2 Credit Enumeration DoS
+11.2 Credit Enumeration DoS
 ───────────────────────────
 
   A malicious user could mint many tiny BUCK_CREDITs to make
@@ -1245,7 +1620,7 @@ Table of Contents
   small N.
 
 
-10.3 Insurer Trust
+11.3 Insurer Trust
 ──────────────────
 
   The insurer can reduce `faceValue' at any time, potentially pushing
@@ -1256,7 +1631,7 @@ Table of Contents
   reductions > 20%) are a future enhancement.
 
 
-10.4 Reentrancy
+11.4 Reentrancy
 ───────────────
 
   All state changes occur before external calls in `BUCK.mint',
@@ -1268,7 +1643,7 @@ Table of Contents
   before mainnet is a one-line change if review insists.
 
 
-10.5 Pool Solvency
+11.5 Pool Solvency
 ──────────────────
 
   `insurancePool' holds the cumulative pool principal for every
@@ -1282,7 +1657,7 @@ Table of Contents
   principals') is preserved.
 
 
-11 Future Directions
+12 Future Directions
 ════════════════════
 
   This implementation prioritises clarity and correctness; alternatives
@@ -1323,21 +1698,31 @@ Table of Contents
     Nova / Halo2 / Plonky3 recursion is the natural fix above N=512.
 
 
-12 Status
+13 Status
 ═════════
 
-  Current Foundry suite: 272 unit tests pass across 17 suites; one
+  Current Foundry suite: 22 test files cover all six contracts in tree
+  (`BuckCredit', `IdentityRegistry', `Buck', `BuckBasket',
+  `BuckKControllerStatic' + `BuckKControllerDirect' + `BuckKController',
+  `Notes') plus the SNARK toolchain (`mint_batch.circom' at pinned N ∈
+  {1, 2, 4, 8, 16, 32}, `spend.circom', `spend_a.circom' V2) and a
+  Python reference wallet (`alberta_buck.wallet') that emits canonical
+  test vectors the Solidity tests load via `vm.readFile'.  One
   `BuckKControllerForkTest' requires a live mainnet RPC and is skipped
-  offline.  The shipped surface covers all five contracts in tree
-  (`BuckCredit', `IdentityRegistry', `Buck', `BuckKControllerStatic' +
-  `BuckKController', `Notes') plus the SNARK toolchain
-  (`mint_batch.circom' at pinned N ∈ {1, 2, 4, 8, 16, 32},
-  `spend.circom', `spend_a.circom' V2) and a Python reference wallet
-  (`alberta_buck.wallet') that emits canonical test vectors the Solidity
-  tests load via `vm.readFile'.
+  offline.
 
-  The BUCK_K test suites cover:
+  The BUCK_K and BuckBasket test suites cover:
 
+  • `BuckKControllerBaseTest' – abstract-base harness exercising the
+    shared PID mechanics (priming, `dS' compensation, `dT', `dTMax',
+    anti-windup, integral convergence, `fundingFactor') against a
+    synthetic `_readReferences' override.
+  • `BuckKControllerStaticTest' – governance-set constant, `setBuckK'
+    guards, `fundingFactor' always-`UNIT'.
+  • `BuckKControllerDirectTest' – the USD-free direct embodiment wired
+    to a mock basket source; `reprime' access control,
+    dilution-discontinuity absorption, sign-convention canaries on the
+    `basketValue > 1.0' and `< 1.0' branches.
   • `BuckKControllerUnitTest' – harness with mocked Chainlink feeds,
     mocked BUCK price.  Includes priming, `dS' compensation, `dTMax'
     clamp, anti-windup, and multi-step integral convergence.
@@ -1352,9 +1737,44 @@ Table of Contents
     flash-shape spike (spot $0.50, TWAP $1.000002) and tracks sustained
     drift over the 600-s window (TWAP converges from $1.00 → $0.97 →
     $0.95 over a full window at $0.95 spot).
+  • `BuckBasketTest' – direct-mint deposit/redeem flows,
+    `addBasketToken' renormalization, proportional-allocation
+    correctness across overweight/underweight pools, "sell high / buy
+    low" redemption invariants, shortfall-cover greedy swap, and the
+    `reprime' callback into `BuckKControllerDirect'.
+  • `BuckEquilibriumScenarioTest' – multi-month closed-loop scenario;
+    ticks `BuckBasket.depositToken' / `redeem' and `Buck.mint' / `burn'
+    across simulated price drift to exercise `fundingFactor' and the
+    `buckK' response in concert.
+  • `BuckKArbScenarioTest' – driven-arbitrageur scenario
+    (`BuckKArbScenarioTest', 2-year horizon) that exercises the
+    External-Basket PID against an Alice agent who trades around the PID
+    equilibrium; emits `arb-scenario.json' for the Python visualizer.
+
+  The Python simulation harness in `alberta_buck/sim/' externally drives
+  an anvil instance with the deployed contracts (see `make sim*' targets
+  and the project memo on the externally-driven sim) to replay
+  multi-agent scenarios – `direct_mint.py' and `scenario.py' for the
+  basket-side flows, `agents.py' for arb / depositor / redeemer agents,
+  `rebalancer.py' for the cross-pool recycling sanity check,
+  `plot_basket_model.py' / `plot_rebalancing.py' / `plot_routing.py' for
+  visualization.
 
   Outstanding work tracked in companion memos:
 
+  • *Equilibrium-seeking dynamic-issuance test* – closed-loop
+    integration of `BuckBasket', `BuckKControllerDirect', `BuckCredit',
+    and `Buck' against an external market driver and an arb agent that
+    responds to `buckK' changes by minting/burning `BuckCredit'-backed
+    BUCK.  Should emit a snapshot tape suitable for the existing
+    `plot_*' visualizers and double as the regression for [Dynamic
+    Issuance: Why BuckBasket Needs BUCK_K].  Highest-priority validation
+    for the closed-loop control claim.
+  • *Resolve `BUG #5..#11/#13' in `BuckBasket'* – per-withdrawal
+    slippage guards, TWAP-bounded swap limits, TWAP-driven
+    overweight/underweight reads, proportional reinvestment, symmetric
+    TOKEN-deposit routing, basket-mint accounting in `fundingFactor',
+    treasury-reinvest event, graceful tail-redemption.
   • *Mainnet-fork BUCK_K test* – exercise `BuckKController' against the
     four real on-chain pools at a pinned recent block, verifying basket
     cost reads sensibly against live data.  Cheap validation step before
@@ -1363,11 +1783,6 @@ Table of Contents
     `BuckKController' through 12 months of EVM history at a chosen block
     cadence, for tuning `Kp/Ki/Kd' against a real price tape.
     Highest-value validation; biggest engineering lift.
-  • *PID-driven arbitrage scenario test* – the worked example in
-    `alberta-buck-ethereum-example.org' demands a scripted Foundry test
-    that drives Bobs through mint/swap/burn cycles while an Alice
-    arbitrages around the PID equilibrium, with a Python visualisation
-    of the trajectories.
   • *Serialised B1 sub-notes* (`spend_serialized.circom' + per-parent
     bitmap) – design validated end-to-end by
     `scripts/snark/serialized_notes_poc.py' at N_fam in {256, 1024,
@@ -1385,6 +1800,8 @@ Table of Contents
   time – the wallet emits vectors once, the Solidity reads them many
   times.
 
+
+[Dynamic Issuance: Why BuckBasket Needs BUCK_K] See section 6.8
 
 [alberta-buck-notes-serialized.org]
 <https://perry.kundert.ca/images/alberta-buck-notes-serialized.pdf>
