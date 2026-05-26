@@ -242,8 +242,18 @@ contract BuckKControllerUnitTest is Test {
         // in response to inflation).
         ctrl.setBuckPrice(0.97e18);  // 3% undervaluation
 
+        // NOTE: track time via a locally-incremented uint256 instead of
+        // re-reading block.timestamp each iteration.  solc 0.8.28's
+        // optimizer folds identical `block.timestamp + N` reads across
+        // intervening vm.warp calls (CSE doesn't know vm.warp mutates
+        // the TIMESTAMP opcode), so a loop of vm.warp(block.timestamp +
+        // 3601) silently no-ops on iterations 2..N -- elapsed stays at
+        // 3601 and only the first PID cycle runs.  Tracking `t` outside
+        // the optimizer's view sidesteps the fold.
+        uint256 t = block.timestamp;
         for (uint i = 0; i < 10; i++) {
-            vm.warp(block.timestamp + 3601);
+            t += 3601;
+            vm.warp(t);
             ctrl.compute();
         }
         uint256 finalK = ctrl.buckK();
@@ -403,17 +413,25 @@ contract BuckKControllerUnitTest is Test {
         _wireBasket(fresh);
         fresh.setBuckPrice(1.0e18);
 
-        vm.warp(block.timestamp + 3601);
+        // Track time via locally-incremented `t` -- see the note on
+        // test_multi_step_pid_convergence above.  Three consecutive
+        // vm.warp(block.timestamp + 3601) calls would CSE-fold to a
+        // single advance under the solc 0.8.28 optimizer.
+        uint256 t = block.timestamp;
+        t += 3601;
+        vm.warp(t);
         fresh.compute();   // prime
 
         // Step: BUCK drops 1%.
         fresh.setBuckPrice(0.99e18);
-        vm.warp(block.timestamp + 3601);
+        t += 3601;
+        vm.warp(t);
         fresh.compute();
         int256 d1 = fresh.D();
 
         // Hold steady -- next cycle's (error - P) ~= 0, so D dies.
-        vm.warp(block.timestamp + 3601);
+        t += 3601;
+        vm.warp(t);
         fresh.compute();
         int256 d2 = fresh.D();
 

@@ -92,8 +92,16 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
         // observation roughly every 30s on every pool.  This populates the
         // observation array so consult(pool, TWAP) does a real interpolation
         // rather than extrapolating off a single stale slot.
+        //
+        // NOTE: track time via a locally-incremented `t` -- solc 0.8.28's
+        // optimizer folds identical `vm.warp(block.timestamp + 30)` calls
+        // into a single advance via CSE on block.timestamp (it doesn't
+        // know vm.warp mutates the TIMESTAMP opcode).  Using `t += 30;
+        // vm.warp(t);` sidesteps the fold.
+        uint256 t = block.timestamp;
         for (uint i = 0; i < 22; i++) {              // 22 * 30s = 660s > TWAP
-            vm.warp(block.timestamp + 30);
+            t += 30;
+            vm.warp(t);
             _touchPool(xautUsdt);
             _touchPool(paxgUsdc);
             _touchPool(cbbtcUsdc);
@@ -193,6 +201,7 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
     // -------------------------------------------------------------------- //
 
     function test_twap_lags_then_tracks_sustained_drift() public {
+        uint256 t = block.timestamp;
         // Drive BUCK to 0.95 USDT.
         _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 0.95e6);
 
@@ -212,7 +221,8 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
 
         // Hold at 0.95 for 300s (half the window) with periodic touches
         for (uint i = 0; i < 10; i++) {
-            vm.warp(block.timestamp + 30);
+            t += 30;
+            vm.warp(t);
             _touchPool(buckUsdt);
         }
         int256 twapMid = _twapBuckPrice();
@@ -223,7 +233,8 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
 
         // Hold for another 400s (more than the window) -> TWAP converges
         for (uint i = 0; i < 14; i++) {
-            vm.warp(block.timestamp + 30);
+            t += 30;
+            vm.warp(t);
             _touchPool(buckUsdt);
         }
         int256 twapFinal = _twapBuckPrice();
@@ -236,12 +247,14 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
     // -------------------------------------------------------------------- //
 
     function test_pid_via_twap_under_sustained_drift() public {
+        uint256 t = block.timestamp;
         // Drive BUCK to 0.95 and let it sit through a full TWAP window with
         // periodic touches.  The PID should then see a real -5% error
         // (BUCK - basket) and contract buckK below 1.0.
         _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 0.95e6);
         for (uint i = 0; i < 25; i++) {
-            vm.warp(block.timestamp + 30);
+            t += 30;
+            vm.warp(t);
             _touchPool(buckUsdt);
             // Touch basket pools too so their TWAPs stay fresh, otherwise
             // their consult observation index would lag and skew the basket.
@@ -254,7 +267,8 @@ contract BuckKControllerV3TwapTest is Test, UniswapV3Fixture {
         // Now run a couple of PID cycles via TWAP.  K must fall.
         uint256 baselineK = ctrl.buckK();
         for (uint i = 0; i < 3; i++) {
-            vm.warp(block.timestamp + 61);
+            t += 61;
+            vm.warp(t);
             _touchPool(buckUsdt);    // keep TWAP fresh between cycles
             _touchPool(xautUsdt);
             _touchPool(paxgUsdc);
