@@ -115,8 +115,19 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     simlp = chain.deploy("SimLP", sol_file="SimLP")
     # SimLP will custody BUCK to seed the floating BUCK/USDC pool, so it
     # needs a public Identity (BUCK transfers are identity-gated).
+    #
+    # Bind as Public + NON-Carrying.  Under Phase 1b, buck.mint(N) no
+    # longer delivers N to the holder's raw balance -- it opens NFT-
+    # backed credit headroom that the holder spends INTO pools (raw
+    # goes negative).  A Carrying-flagged SimLP cannot go negative
+    # (_carryingTransfer asserts rawSigned >= value), so the V3 mint
+    # callback that transfers BUCK to the pool reverts with "BUCK:
+    # Carrying amount exceeds raw".  As Non-Carrying, SimLP uses its
+    # creditLimit (held + unusedCredit) as spendable; the transfer to
+    # the pool drives signedRaw to -value and the pool receives freshly
+    # issued BUCK.
     chain.send(reg.functions.bindContract(
-        simlp.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+        simlp.address, idmod.BIND_PK, idmod.BIND_E, True, False), sender=deployer)
     big = 10 ** 30
     chain.send(usdc.functions.mint(simlp.address, big))
     for c in tok:

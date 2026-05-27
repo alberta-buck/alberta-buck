@@ -37,8 +37,13 @@ ROUTING = Scenario(
             ("AOIL", "Alberta Oil", 18)],
     csv_files=["paxg.csv", "cbbtc.csv", "aoil.csv"],
     agents={"AnonymousArbAgent": 3,
-            "TokenAccumulatorAgent": 3,   # one per token (idx % N)
-            "MarketMakerWhale": 1},
+            "TokenAccumulatorAgent": 3,    # one per token (idx % N)
+            "MarketMakerWhale": 1,
+            # One BootstrapDMAgent per token seeds the TOKEN/BUCK pools
+            # before tick 0 (deposit-once-never-exit), giving arbs real
+            # liquidity to route through.  No stochastic churn here --
+            # ROUTING isolates arb dynamics, not LP turnover.
+            "BootstrapDMAgent": 3},
     days=120,
     ticks_per_day=4,
 )
@@ -52,10 +57,14 @@ REBALANCING = Scenario(
     agents={"AnonymousArbAgent": 3,
             "TokenAccumulatorAgent": 3,
             "MarketMakerWhale": 1,
-            # First 3 (one per token) bootstrap before tick 0; remainder
-            # enter weekly (ENTRY_INTERVAL=7) with 30–90-day holds, so
-            # the sim sees ~50 entries + ~50 exits — enough churn to
-            # observe treasury share accumulating over the year.
+            # Three pinned LPs floor the pools at bootstrap so the
+            # arb-stabilization narrative is well-defined from tick 0.
+            "BootstrapDMAgent": 3,
+            # 50 stochastic LPs: per-tick Bernoulli enter/exit with
+            # tuned probabilities (see DirectMintAgent.{ENTER,EXIT}_PROB)
+            # produce ~50 entries+exits across the year — enough churn
+            # to observe treasury share accumulating without the brittle
+            # setup-time schedule machinery.
             "DirectMintAgent": 50},
     days=365,
     ticks_per_day=4,

@@ -10,7 +10,7 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
-from alberta_buck.sim.direct_mint import DirectMintAgent
+from alberta_buck.sim.direct_mint import BootstrapDMAgent, DirectMintAgent
 from alberta_buck.sim.snapshot import Snapshotter
 
 E6 = 10 ** 6
@@ -31,8 +31,9 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
 
     # --- build + register the agent population ----------------------- #
     # Reset per-class counters defensively so back-to-back sim runs in
-    # the same process don't accumulate stale seq numbers (the bootstrap
-    # path depends on `seq < N`).
+    # the same process don't accumulate stale seq numbers (the
+    # bootstrap-token assignment depends on `seq < N`).
+    BootstrapDMAgent._counter = 0
     DirectMintAgent._counter = 0
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
