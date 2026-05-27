@@ -176,8 +176,13 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
         _bumpCardinality(cbbtcUsdc, 64);
         _bumpCardinality(wbtcUsdt,  64);
         _bumpCardinality(buckUsdt,  64);
+        // Local-counter warmup (see _advance / _warmupTwap comments) --
+        // otherwise the 22 vm.warp calls fold and the TWAP observation
+        // array stays empty.
+        uint256 tWarm = block.timestamp;
         for (uint i = 0; i < 22; i++) {
-            vm.warp(block.timestamp + 30);
+            tWarm += 30;
+            vm.warp(tWarm);
             _touchPool(xautUsdt);
             _touchPool(paxgUsdc);
             _touchPool(cbbtcUsdc);
@@ -622,8 +627,23 @@ abstract contract SimulationFixture is Test, UniswapV3Fixture {
     //  Time advance                                                          //
     // -------------------------------------------------------------------- //
 
+    /// @dev Mirror of block.timestamp maintained by `_advance` so that
+    ///      consecutive calls actually advance time.  See the comment on
+    ///      test_multi_step_pid_convergence (BuckKController.t.sol) for
+    ///      the root cause: solc 0.8.28's optimizer CSEs block.timestamp
+    ///      reads across vm.warp boundaries, so naive
+    ///      `vm.warp(block.timestamp + secs)` calls fold into a single
+    ///      advance.  `_simTime` lives outside the optimizer's CSE
+    ///      window, so each call passes a fresh absolute timestamp.
+    uint256 internal _simTime;
+
     function _advance(uint256 secs) internal {
-        vm.warp(block.timestamp + secs);
+        // Lazy-init the first time _advance is called.  We can't put
+        // this in setUp because SimulationFixture is inherited and the
+        // child's setUp() may run vm.warp / vm.roll itself.
+        if (_simTime == 0) _simTime = block.timestamp;
+        _simTime += secs;
+        vm.warp(_simTime);
     }
 
     /// @dev Touch the BUCK pool so its TWAP keeps up; called every tick to

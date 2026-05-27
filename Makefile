@@ -253,9 +253,44 @@ SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 #      (required for BuckBasket's deep call stack).  Skips the 0.7.6
 #      trigger to avoid the IR-incompatibility error.
 # Both profiles share the same ``out/`` directory.
-sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES)
+sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) v2-patch-init-code-hash
 	FOUNDRY_PROFILE=v3 forge build --skip test --skip script
 	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
+
+# ── Uniswap V2 init-code-hash patch ──────────────────────────────────────
+#
+# UniswapV2Library.pairFor hardcodes a CREATE2 init-code-hash constant
+# (lib/v2-periphery/contracts/libraries/UniswapV2Library.sol).  The
+# upstream value is for the mainnet-deployed UniswapV2Pair bytecode; when
+# we compile UniswapV2Pair locally (0.5.16, default optimizer) the
+# bytecode -- and therefore its init-code-hash -- differs, so
+# UniswapV2Router02 computes pair addresses the local factory did not
+# deploy and every router call reverts with "call to non-contract
+# address".
+#
+# Fix: after the local UniswapV2Pair artifact exists, compute its
+# init-code-hash with `cast keccak` and patch UniswapV2Library.sol in
+# place.  Subsequent forge builds recompile Router02 against the
+# corrected library so router.pairFor() == factory.getPair().
+#
+# `lib/` is gitignored (forge install --no-git), so this target is also
+# the source of truth for re-applying the patch on a fresh dependency
+# install.  Run `make v2-patch-init-code-hash` (or any `sim-build`
+# derivative) after `forge install` to re-apply.
+.PHONY: v2-patch-init-code-hash
+v2-patch-init-code-hash:
+	@# Phase 1: ensure UniswapV2Pair artifact exists so we can hash it.
+	@test -f out/UniswapV2Pair.sol/UniswapV2Pair.json || \
+		forge build --skip test --skip script --skip 'src/uniswap_v3_build/*' >/dev/null
+	@HASH=$$(cast keccak $$(jq -r '.bytecode.object' out/UniswapV2Pair.sol/UniswapV2Pair.json) | sed 's/^0x//'); \
+		LIB=lib/v2-periphery/contracts/libraries/UniswapV2Library.sol; \
+		CURRENT=$$(grep -oE "hex'[0-9a-f]{64}' // init code hash" $$LIB | sed -E "s/hex'([0-9a-f]+)'.*/\1/"); \
+		if [ "$$CURRENT" = "$$HASH" ]; then \
+			echo "v2-patch: UniswapV2Library hash already correct ($$HASH)"; \
+		else \
+			sed -i.bak "s/hex'[0-9a-f]\{64\}' \/\/ init code hash/hex'$$HASH' \/\/ init code hash/" $$LIB; \
+			echo "v2-patch: patched UniswapV2Library init-code-hash $$CURRENT -> $$HASH"; \
+		fi
 
 sim-run:	sim-build
 	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
