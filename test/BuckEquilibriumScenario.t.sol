@@ -7,6 +7,7 @@ import {BN254}                 from "../src/BN254.sol";
 import {IdentityRegistry}      from "../src/IdentityRegistry.sol";
 import {Buck}                  from "../src/Buck.sol";
 import {BuckCredit}            from "../src/BuckCredit.sol";
+import {BuckCreditHarness}            from "./harness/BuckCreditHarness.sol";
 import {BuckKPeggedHarness}    from "./harness/BuckKPeggedHarness.sol";
 
 /// @dev Mock USDC for the equilibrium scenario.  Name differs from LifecycleUSDC
@@ -111,7 +112,7 @@ contract BuckEquilibriumScenarioTest is Test {
     address internal constant ISSUER = address(0x1551E1);
 
     Buck                internal buck;
-    BuckCredit          internal credit;
+    BuckCreditHarness          internal credit;
     BuckKPeggedHarness  internal kCtrl;
     IdentityRegistry    internal reg;
     address             internal usdc;
@@ -181,7 +182,7 @@ contract BuckEquilibriumScenarioTest is Test {
         alice = address(uint160(_u(".alice.registrant")));
         _registerAlice();
 
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKPeggedHarness(KP, KI, KD, CTRL_DT, BUCKK_MIN, BUCKK_MAX, BUCKK_INIT, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
@@ -356,7 +357,7 @@ contract BuckEquilibriumScenarioTest is Test {
             BuckCredit.DepreciationType.NONE, 0, uint48(block.timestamp), 0
         );
         vm.prank(alice);
-        credit.activate(aliceTokenId, ALICE_FACEVALUE);
+        credit.forceActivate(aliceTokenId, ALICE_FACEVALUE);
 
         // Each Carol's vehicle-style NFT (1.5 %/yr premium, no depreciation
         // to keep the math focused on the funding-factor loop).
@@ -366,7 +367,7 @@ contract BuckEquilibriumScenarioTest is Test {
                 BuckCredit.DepreciationType.NONE, 0, uint48(block.timestamp), CAROL_PREMIUM_BP
             );
             vm.prank(carolAddrs[i]);
-            credit.activate(tid, CAROL_FACEVALUE);
+            credit.forceActivate(tid, CAROL_FACEVALUE);
             carols[i].tokenId = tid;
         }
     }

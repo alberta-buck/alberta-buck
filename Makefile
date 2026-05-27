@@ -284,11 +284,11 @@ v2-patch-init-code-hash:
 		forge build --skip test --skip script --skip 'src/uniswap_v3_build/*' >/dev/null
 	@HASH=$$(cast keccak $$(jq -r '.bytecode.object' out/UniswapV2Pair.sol/UniswapV2Pair.json) | sed 's/^0x//'); \
 		LIB=lib/v2-periphery/contracts/libraries/UniswapV2Library.sol; \
-		CURRENT=$$(grep -oE "hex'[0-9a-f]{64}' // init code hash" $$LIB | sed -E "s/hex'([0-9a-f]+)'.*/\1/"); \
+		CURRENT=$$(grep -oE "hex'[0-9a-f]*' // init code hash" $$LIB | sed -E "s/hex'([0-9a-f]*)'.*/\1/"); \
 		if [ "$$CURRENT" = "$$HASH" ]; then \
 			echo "v2-patch: UniswapV2Library hash already correct ($$HASH)"; \
 		else \
-			sed -i.bak "s/hex'[0-9a-f]\{64\}' \/\/ init code hash/hex'$$HASH' \/\/ init code hash/" $$LIB; \
+			sed -i.bak "s/hex'[0-9a-f]*' \/\/ init code hash/hex'$$HASH' \/\/ init code hash/" $$LIB; \
 			echo "v2-patch: patched UniswapV2Library init-code-hash $$CURRENT -> $$HASH"; \
 		fi
 

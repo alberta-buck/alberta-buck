@@ -6,6 +6,7 @@ import {Test} from "forge-std/Test.sol";
 import {IdentityRegistry}       from "../src/IdentityRegistry.sol";
 import {Buck}                   from "../src/Buck.sol";
 import {BuckCredit}             from "../src/BuckCredit.sol";
+import {BuckCreditHarness}             from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
 
 /// @title BuckCreditLimit.t.sol -- Phase 1a creditLimit() view + per-block
@@ -20,7 +21,7 @@ import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
 contract BuckCreditLimitTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
 
@@ -32,7 +33,7 @@ contract BuckCreditLimitTest is Test {
 
     function setUp() public {
         reg     = new IdentityRegistry(GOV);
-        credit  = new BuckCredit();
+        credit  = new BuckCreditHarness();
         kCtrl   = new BuckKControllerStatic(1e18, GOV);   // BUCK_K = 1.0
         buck    = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
@@ -58,7 +59,7 @@ contract BuckCreditLimitTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(ALICE);
-        credit.activate(tid, 600_000e6);
+        credit.forceActivate(tid, 600_000e6);
         // BUCK_K = 1e18, totalCurrentValue = 600_000e6 raw, limit = same.
         assertEq(buck.creditLimit(ALICE), 600_000e6, "creditLimit must equal activated");
     }
@@ -71,7 +72,7 @@ contract BuckCreditLimitTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(ALICE);
-        credit.activate(tid, 500_000e6);
+        credit.forceActivate(tid, 500_000e6);
 
         // Halve BUCK_K -- limit should halve.
         vm.prank(GOV);
@@ -93,7 +94,7 @@ contract BuckCreditLimitTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(ALICE);
-        credit.activate(0, 100_000e6);
+        credit.forceActivate(0, 100_000e6);
         // Drive a cache write by calling _refresh-equivalent via a known
         // path: creditLimit() view alone doesn't persist; instead use the
         // public mapping to assert raw cache state.
@@ -110,7 +111,7 @@ contract BuckCreditLimitTest is Test {
         );
         // Activate the new NFT -- another hook fire.
         vm.prank(ALICE);
-        credit.activate(1, 50_000e6);
+        credit.forceActivate(1, 50_000e6);
         assertEq(buck.creditLimit(ALICE), 150_000e6, "limit must include both NFTs");
     }
 
@@ -122,7 +123,7 @@ contract BuckCreditLimitTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(ALICE);
-        credit.activate(tid, 100_000e6);
+        credit.forceActivate(tid, 100_000e6);
         // Confirm starting state.
         assertEq(buck.creditLimit(ALICE), 100_000e6);
         assertEq(buck.creditLimit(BOB),   0);
@@ -142,7 +143,7 @@ contract BuckCreditLimitTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(ALICE);
-        credit.activate(tid, 100_000e6);
+        credit.forceActivate(tid, 100_000e6);
         assertEq(buck.creditLimit(ALICE), 100_000e6);
 
         // Insurer reappraises to a lower face -- activated caps down and

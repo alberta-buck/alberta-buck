@@ -9,6 +9,7 @@ import {BN254}                 from "../src/BN254.sol";
 import {IdentityRegistry}      from "../src/IdentityRegistry.sol";
 import {Buck}                  from "../src/Buck.sol";
 import {BuckCredit}            from "../src/BuckCredit.sol";
+import {BuckCreditHarness}            from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
 import {BuckBasket}            from "../src/BuckBasket.sol";
 import {BuckBasketReceipt}     from "../src/BuckBasketReceipt.sol";
@@ -45,7 +46,7 @@ contract BuckBasketTest is Test {
     address constant ISSUER = address(0x1551E1);
 
     Buck                   internal buck;
-    BuckCredit             internal credit;
+    BuckCreditHarness             internal credit;
     BuckKControllerDirect  internal kCtrl;
     BuckBasket             internal basketC;
     BuckBasketReceipt      internal receipt;
@@ -70,7 +71,7 @@ contract BuckBasketTest is Test {
         alice = address(uint160(_u(".alice.registrant")));
         _registerAlice();
 
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
 
         kCtrl = new BuckKControllerDirect(
             0.1e18, 0.01e18, 0,

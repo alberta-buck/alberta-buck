@@ -267,19 +267,31 @@ contract BuckCredit is ERC721Enumerable {
     }
 
     // ── Activation ──────────────────────────────────────────────────
+    //
+    // Activation and deactivation are NOT public operations.  Both are
+    // bundled into the holder's `Buck.mint(N, [tids])` / `Buck.burn(N,
+    // [tids])` calls, which atomically (a) compute the per-NFT take /
+    // unwind via the cheapest-first / most-expensive-first inversion,
+    // (b) move the corresponding pool principal between the holder and
+    // insurancePool, and (c) grow / shrink activatedValue.  The
+    // economic reason: a policy is a one-time purchase.  Paying the
+    // pool principal at activation time and earning the 10%-ROI yield
+    // on it from the insurance pool exactly funds the annual premium
+    // on the activated coverage in perpetuity -- so the activation
+    // doesn't need a recurring fee, but it MUST come with the upfront
+    // principal payment or the pool has no yield to draw from.
+    //
+    // Allowing a free standalone `activate(tid, A)` would let a holder
+    // self-issue arbitrary credit headroom without ever paying the
+    // pool: balanceOf would jump by `A * buckK / 1e18` from "unused
+    // credit" headroom that nothing backs.  That's why this surface
+    // exposes only `activateFromBuck` / `deactivateFromBuck`, restricted
+    // to the registered Buck contract.
 
-    /// @notice Client activates additional credit, up to the current face value.
-    function activate(uint256 tokenId, uint256 amount) external {
-        address owner = ownerOf(tokenId);
-        require(owner == msg.sender, "Not credit owner");
-        _activate(tokenId, owner, amount);
-    }
-
-    /// @notice Activate `amount` of coverage on behalf of `holder`, restricted
-    ///         to the registered Buck contract.  Buck calls this from
-    ///         _allocateMint so a single `Buck.mint(amount, [tid])` call
-    ///         expands the holder's NFT-backed credit headroom directly,
-    ///         without requiring a separate `activate()` step.
+    /// @notice Activate `amount` of coverage on behalf of `holder`,
+    ///         restricted to the registered Buck contract.  Called from
+    ///         Buck._allocateMint after the funding-factor gate and as
+    ///         part of the atomic activate-pay-draw sequence.
     function activateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
         require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
         require(ownerOf(tokenId) == holder, "BuckCredit: not holder");

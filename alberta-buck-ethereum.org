@@ -1,4 +1,4 @@
-#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.95)
+#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.96)
 #+author: Perry Kundert
 #+date: 2026-05-24 12:00:00
 #+category: Alberta Buck
@@ -237,21 +237,48 @@ In every case the activated portion depreciates proportionally:
 A residential property would typically have two BUCK_CREDITs: one for the land (NONE) and one for
 the structure (LINEAR or DECLINING_BALANCE with a salvage floor).
 
-** Activation
+** Activation = Mint, Deactivation = Burn
 
-The client activates piecemeal via =activate(tokenId, amount)= -- gated on
-~ownerOf(tokenId) == msg.sender~ and capped at =faceValue=.  Activation just updates
-=activatedValue= and =lastActivatedAt=; it grows the holder's =creditLimit= without yet drawing
-BUCK against it.  Pre-activation lets the client /reserve/ insurance against the asset and watch
-the credit headroom appear in =Buck.balanceOf= before deciding when to actually spend it.
+There is no public =BuckCredit.activate()= function.  Activation -- expanding =activatedValue=
+and thus growing the holder's =creditLimit= -- happens /only/ atomically as part of
+=Buck.mint(N, [tids])=, and deactivation happens /only/ atomically as part of =Buck.burn(N,
+[tids])=.  The two-step "first =activate(...)=, then =mint(...)=" flow that earlier drafts
+exposed has been collapsed into a single primitive each direction.
 
-=Buck.mint(amount[, tokenIds])= auto-activates any additional coverage it needs via the
-Buck-restricted =activateFromBuck(tokenId, holder, amount)= entry point -- a top-up only call
-(no-op if =activatedValue >= mintsBacked + take=).  =Buck.burn= is the mirror image but
-deliberately does /not/ shrink =activatedValue=: the holder's expressed credit limit is sticky and
-only the per-NFT =mintsBacked= tally shrinks, so the same coverage capacity is immediately
-re-usable for a future mint.  =deactivateFromBuck= exists for future explicit-deactivation flows
-but is unused by burn.
+This is a deliberate consequence of the mutual-insurance pool model.  Drawing =take= units of
+coverage on an NFT generates =annual_premium = take * premiumRate / BP= per year.  Instead of
+charging that premium on a continuous schedule, the contract requires an /upfront/
+=poolPrincipal = annual_premium * POOL_ROI_INV= deposit (where ~POOL_ROI_INV = 10~ encodes the
+insurer's assumed 10 % annual ROI on pool capital).  At parity, the pool's investment yield on
+=poolPrincipal= exactly funds the annual premium on =take= in perpetuity -- so /a policy is a
+one-time purchase/, not a recurring expense.
+
+Bundling activation with the principal payment forecloses the loophole an earlier draft had:
+a free standalone =activate(tid, A)= would let a holder self-issue =A * buckK / 1e18= of
+credit headroom that nothing backs -- =balanceOf= would jump by the activation amount with no
+corresponding deposit ever reaching =insurancePool=.  Insurance-without-premium isn't
+insurance.
+
+Therefore the surface =BuckCredit= exposes is restricted to (a) insurer-side creation /
+re-appraisal (=createCredit=, =updateCredit=), (b) standard ERC-721 ownership operations
+(=transferFrom=, =balanceOf=, =ownerOf=, ...), and (c) two Buck-only entry points
+(=activateFromBuck=, =deactivateFromBuck=) which =Buck._allocateMint= / =_allocateBurn= call as
+part of their atomic sequences.  Test fixtures that need to set up a holder with non-zero
+=creditLimit= without exercising the mint() purchase path use the =BuckCreditHarness=
+subclass's =forceActivate= -- explicitly not present on production =BuckCredit=.
+
+=Buck.mint(amount[, tokenIds])= walks the holder's NFTs cheapest-first (or in caller-supplied
+order), computes =take_i = ceil(remaining_i * BP / (BP - rate_i * POOL_ROI_INV))= per NFT,
+calls =activateFromBuck(tid, holder, take_i)= to grow =activatedValue= and =mintsBacked= in
+lockstep, debits =poolPrincipal_i = take_i - amount_i= from the holder's signed raw, and
+credits the same amount to =insurancePool=.  =Buck.burn(amount[, tokenIds])= is the symmetric
+inverse: walks most-expensive-first, computes =unwind_i=, calls =deactivateFromBuck= to
+shrink =activatedValue= and =mintsBacked= in lockstep, debits =poolRefund_i= from
+=insurancePool=, and credits it to the holder's signed raw.
+
+The post-burn solvency invariant: after release, the holder's =debt= must still fit under the
+shrunken =creditLimit=.  If you owe X and try to release enough coverage to drop =creditLimit=
+below X, the burn reverts -- repay first.
 
 =totalCurrentValue(account)= walks =tokenOfOwnerByIndex= and sums =currentValue(tokenId)= -- the
 single call =Buck.creditLimit= makes to size the holder's headroom (then multiplied by
@@ -464,7 +491,7 @@ coverage midpoint.
 *most-expensive-first* -- the dearest insurance is released first, returning the largest pool
 principal per BUCK burned and freeing expensive coverage capacity for re-use.  The asymmetry is
 not arbitrageable: per-NFT inversion is symmetric (same =denom= on both sides), so a mint-burn
-round-trip on the same NFT restores its =mintsBacked= exactly.
+round-trip on the same NFT restores both its =mintsBacked= and =activatedValue= exactly.
 
 The /mutual-insurance pool model/: each NFT carries an annual =premiumRate= in basis points.
 Drawing =take= units of coverage from one NFT generates an annual premium of
@@ -481,14 +508,17 @@ principal = take - amount
 The allocator (=_allocateMint=) walks =BuckCredit.batchCreditInfo(tokenIds)= once, then iterates
 in memory: per-NFT ~netCap = avail * denom / BP~ where ~avail = faceValue - mintsBacked~, and
 either fully consumes the NFT (headroom contribution = =netCap=, principal = =take - netCap=) or
-partially consumes it via the closed-form inversion to land exactly on =remaining=.
+partially consumes it via the closed-form inversion to land exactly on =remaining=.  For each
+NFT touched, =_allocateMint= calls =BuckCredit.activateFromBuck(tid, holder, take_i)= to grow
+=activatedValue= and =mintsBacked= in lockstep -- the activation and the principal payment are
+the same atomic operation.
 
 Per-NFT bookkeeping: =mintsBacked[tokenId]= tracks the cumulative outstanding allocation against
-each NFT, capped at =faceValue= (not =activatedValue= -- the auto-activation top-up walks into
-unactivated capacity).  Burn decrements =mintsBacked= but leaves =activatedValue= alone
-(=activatedValue= is sticky and grows monotonically via mint top-up or explicit =activate=).
-A mint-burn round-trip on the same NFT order is rate-neutral and not arbitrageable -- both sides
-hit the same =denom=.
+each NFT, capped at =faceValue=.  Under production semantics (no public
+=BuckCredit.activate()=), the invariant ~mintsBacked[tid] == activatedValue[tid]~ holds at every
+observation point -- they grow together on mint and shrink together on burn.  A mint-burn
+round-trip on the same NFT order is rate-neutral and not arbitrageable -- both sides hit the
+same =denom=.
 
 The shipped =mint= sequence:
 
@@ -497,17 +527,32 @@ The shipped =mint= sequence:
    returns the cached value otherwise.  Mint and burn together amortize PID work across user
    activity.
 3. =_allocateMint(amount, tokenIds)= reads =BuckCredit.batchCreditInfo(tokenIds)= once, walks the
-   slice array, writes =mintsBacked=, top-up calls =BuckCredit.activateFromBuck= per NFT only
-   when =mintsBacked + take > activatedValue= (no-op otherwise), returns
-   =(totalCoverage, poolPrincipal)=.
-4. Counter-cyclical funding gate (if =buckK.fundingFactor() > 0=):
-   ~balanceOf(sender) >= poolPrincipal * factor / 1e18~.  Throttles fresh credit issuance during
-   BUCK-undervalued regimes.
-5. =_accrueJubilee()=, crystallise =insurancePool= and =msg.sender=, debit =poolPrincipal= from
+   slice array, calls =BuckCredit.activateFromBuck(tid, holder, take_i)= per NFT (grows
+   =activatedValue= and =mintsBacked= in lockstep), returns =(totalCoverage, poolPrincipal)=.
+4. =_accrueJubilee()=, crystallise =insurancePool= and =msg.sender=, debit =poolPrincipal= from
    the sender's signed raw (=_subBalance= is signed-aware -- the raw goes negative if the sender
    had no positive holdings), credit =poolPrincipal= to =insurancePool= (always Carrying, always
    ends positive).  =_totalSupply= is maintained automatically by =_setBalanceSigned= so that
    ~_totalSupply == sum_a max(0, signedRaw(a))~ holds.
+5. *Counter-cyclical funding margin (post-settlement)*: after the debit, the sender's
+   /unused credit headroom/ must be at least =poolPrincipal * buckK.fundingFactor() / 1e18=.
+   I.e., the new mint is not allowed to come within funding-factor BUCKs of maxing out the
+   sender's credit limit:
+
+   #+BEGIN_SRC text
+   debt_post         = max(0, -signedRaw_post)
+   unusedCredit_post = max(0, creditLimit_post - debt_post)
+   require(unusedCredit_post >= poolPrincipal * factor / 1e18,
+           "BUCK: insufficient credit margin")
+   #+END_SRC
+
+   In normal regimes (=buckK >= ~0.1=, factor near 1.0) the gate passes by a wide margin --
+   new activation grows =creditLimit= by ~take * buckK~ while debt grows only by
+   ~take - amount~.  The gate bites when =buckK= is very low (the controller is throttling
+   issuance during severe BUCK undervaluation) or when the holder is highly leveraged on a
+   prior position.  This is a much weaker gate than an earlier "held BUCK only" formulation
+   the codebase carried: the holder does NOT need to acquire BUCK on the open market before
+   minting; they just can't pile new credit issuance on top of an already-maxed position.
 6. Emit =Transfer(0, insurancePool, poolPrincipal)=,
    =Minted(sender, totalCoverage, poolPrincipal, creditValue, buckKValue, newLimit)=.
 
@@ -523,11 +568,17 @@ totalSupply                += poolPrincipal       (only the pool's positive cont
 #+END_SRC
 
 =burn(amount[, tokenIds])= mirrors the math but with the most-expensive-first default selector:
-unwind dearest NFT first, decrement =mintsBacked=, debit =poolRefund= from =insurancePool=, credit
-=poolRefund= to the holder's signed raw (climbs toward zero from debt, or further positive from a
-positive balance).  =activatedValue= is unchanged.  =quoteMint= and =quoteBurn= are read-only
-views that return =(totalCoverage, poolPrincipal)= or =(totalUnwind, poolRefund)= for the same
-allocator math, so an off-chain optimizer can size required limits and refunds before submitting.
+unwind dearest NFT first, call =BuckCredit.deactivateFromBuck(tid, holder, unwind_i)= which
+shrinks =activatedValue= and =mintsBacked= in lockstep, debit =poolRefund= from =insurancePool=,
+credit =poolRefund= to the holder's signed raw (climbs toward zero from debt, or further
+positive from a positive balance).  =quoteMint= and =quoteBurn= are read-only views that return
+=(totalCoverage, poolPrincipal)= or =(totalUnwind, poolRefund)= for the same allocator math, so
+an off-chain optimizer can size required limits and refunds before submitting.
+
+The burn-side solvency check: after refund and deactivation, the holder's remaining =debt= must
+still fit under the shrunken =creditLimit=.  If you owe X and try to release enough coverage to
+drop =creditLimit= below X, the burn reverts with =BUCK: post-burn debt exceeds credit limit=.
+Repay first.
 
 The =balanceOf(sender) >= amount= spendable check on transfer-out is where credit headroom
 becomes a real BUCK flow: a transfer larger than =held= but at-or-below =held + unusedCredit=

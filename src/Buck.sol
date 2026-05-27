@@ -503,21 +503,6 @@ contract Buck is IERC20, IERC20Metadata {
         // activation may walk into unactivated capacity).
         (uint256 totalCoverage, uint256 poolPrincipal) = _allocateMint(amount, tokenIds);
 
-        // Counter-cyclical insurance funding gate.  The minter's *current*
-        // spendable (positive held + unused credit) must cover poolPrincipal
-        // * fundingFactor / 1e18 -- so that under-valued-BUCK regimes
-        // throttle fresh credit issuance.
-        if (poolPrincipal > 0) {
-            uint256 factor = buckK.fundingFactor();
-            if (factor > 0) {
-                uint256 required = poolPrincipal * factor / BUCKK_SCALE;
-                require(
-                    balanceOf(msg.sender) >= required,
-                    "BUCK: insufficient mint funding"
-                );
-            }
-        }
-
         // Settlement: insurance pool receives `poolPrincipal`, minter is
         // debited the same amount.  _setBalanceSigned tracks _totalSupply
         // across both writes so the invariant
@@ -536,6 +521,36 @@ contract Buck is IERC20, IERC20Metadata {
             emit Transfer(address(0), insurancePool, poolPrincipal);
         }
 
+        // Counter-cyclical insurance funding gate -- margin requirement.
+        //
+        // Computed AFTER settlement (post-debit signedRaw, post-activation
+        // creditLimit).  The gate is: the holder's unused credit headroom
+        // must be at least `poolPrincipal * fundingFactor / 1e18` -- they
+        // are not allowed to come within funding-factor BUCKs of maxed-
+        // out.  In normal regimes (buckK >= ~0.1, factor near 1.0) the
+        // gate passes by a wide margin: new activation grows creditLimit
+        // by `take * buckK`, while the principal debt only grows by
+        // `take - amount`.  The gate bites when buckK is very low
+        // (controller pinning credit issuance during BUCK undervaluation)
+        // or when the holder is highly leveraged.
+        //
+        // Note: this is a much weaker gate than the prior "held BUCK"
+        // formulation.  The holder doesn't need to buy BUCK on the open
+        // market to satisfy funding-factor; they just can't pile new
+        // credit issuance on top of an already-maxed-out position.
+        if (poolPrincipal > 0) {
+            uint256 factor = buckK.fundingFactor();
+            if (factor > 0) {
+                uint256 required = poolPrincipal * factor / BUCKK_SCALE;
+                int256  signedRaw_post = signedBalanceOf(msg.sender);
+                uint256 debt_post = signedRaw_post < 0 ? uint256(-signedRaw_post) : 0;
+                uint256 limit_post = creditLimit(msg.sender);
+                uint256 unusedCredit = limit_post > debt_post ? limit_post - debt_post : 0;
+                require(unusedCredit >= required,
+                        "BUCK: insufficient credit margin");
+            }
+        }
+
         // The Minted event keeps its historical shape; `newLimit` now refers
         // to the live creditLimit after activation, not a stored ratchet.
         emit Minted(
@@ -548,29 +563,36 @@ contract Buck is IERC20, IERC20Metadata {
         );
     }
 
-    /// @dev Burn flow (Phase 1b): symmetric to mint -- closes NFT-backed
-    ///      credit positions.  For each NFT in `tokenIds` (most-expensive-
-    ///      first by default), _allocateBurn computes the unwind take per
-    ///      NFT and refunds the insurance principal back to the holder.
-    ///      `BuckCredit.deactivateFromBuck(tid, holder, unwind_i)` shrinks
-    ///      the holder's activatedValue (and thus creditLimit) by the
-    ///      unwound take; `mintsBacked[tid] -= unwind_i`; insurance pool's
-    ///      raw shrinks by `poolRefund` (= sum principal); holder's signed
-    ///      raw grows by `poolRefund` (climbs out of debt or into positive).
+    /// @dev Burn flow: symmetric to mint -- deactivates and closes NFT-
+    ///      backed credit positions.  For each NFT in `tokenIds` (most-
+    ///      expensive-first by default), _allocateBurn computes the
+    ///      unwind take per NFT, decrements mintsBacked, and calls
+    ///      BuckCredit.deactivateFromBuck(tid, holder, unwind_i) so the
+    ///      activatedValue (and thus creditLimit) shrinks in lockstep.
+    ///      Insurance pool's raw shrinks by `poolRefund` (= sum
+    ///      principal); holder's signed raw grows by `poolRefund`.
+    ///
+    ///      Solvency check (replaces the Phase 1a "amount <= balanceOf"
+    ///      gate, which was a Phase-1a-era "burn N from your held
+    ///      balance" semantic that doesn't fit the Phase 1b atomic
+    ///      activate-pay-draw / deactivate-refund-release model): after
+    ///      the burn, the holder's debt must still fit under the
+    ///      shrunken credit limit.  If you owe X and want to release
+    ///      enough coverage to drop creditLimit below X, repay first.
     ///
     ///      End-state arithmetic:
-    ///          creditLimit drops by sum take_i
-    ///          signedRawBalance += poolRefund  (toward zero from debt;
-    ///                                           into positive from zero)
-    ///          balanceOf change = -sum amount_i (the user's "spendable"
-    ///                                            shrinks by exactly `amount`)
+    ///          activatedValue, mintsBacked   -= sum unwind_i  (per NFT)
+    ///          creditLimit                   -= sum unwind_i * buckK / 1e18
+    ///          signedRawBalance              += poolRefund
+    ///          balanceOf change              = -(sum amount_i)
+    ///                                          (the user's "spendable"
+    ///                                          shrinks by exactly amount)
     function _burnAllocated(uint256 amount, uint256[] memory tokenIds) internal {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
         // Burn activity amortizes the PID; the K value isn't consumed here.
         buckK.compute();
-        require(amount <= balanceOf(msg.sender), "BUCK: amount exceeds spendable");
 
-        (, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
+        (uint256 totalUnwind, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
 
         _accrueJubilee();
         if (poolRefund > 0) {
@@ -583,8 +605,20 @@ contract Buck is IERC20, IERC20Metadata {
             // Per-side Transfer event: pool -> holder for the refund.
             emit Transfer(insurancePool, address(0), poolRefund);
         }
-        // No additional totalSupply mutation needed -- _setBalanceSigned
-        // tracked both writes.
+
+        // Post-burn solvency: the holder's debt must not exceed their
+        // shrunken creditLimit.  Computed after settlement so signed raw
+        // already reflects the refund (climb toward zero).  Reading
+        // creditLimit() picks up the just-invalidated cache, so it
+        // reflects the now-deactivated value.
+        int256 signedRaw = signedBalanceOf(msg.sender);
+        uint256 debt     = signedRaw < 0 ? uint256(-signedRaw) : 0;
+        require(debt <= creditLimit(msg.sender),
+                "BUCK: post-burn debt exceeds credit limit");
+
+        // Silence the unused-variable warning while keeping the metric
+        // available for future event emission.
+        totalUnwind;
     }
 
     // ---- mint/burn allocator (per-NFT cheapest-first inversion) ------------
@@ -629,16 +663,17 @@ contract Buck is IERC20, IERC20Metadata {
                 remaining -= netCap;
             }
             mintsBacked[tid] = used + take;
-            // Top-up activation: only expand activatedValue if mintsBacked
-            // now exceeds it.  A holder may pre-`activate()` to grow their
-            // credit limit independently of any mint, in which case the
-            // existing activatedValue already covers `mintsBacked + take`
-            // and this call is a no-op (delta = 0).  BuckCredit fires
-            // onCreditMutation on real activation, invalidating Buck's
-            // per-block credit-limit cache for msg.sender.  The slice's
-            // activatedValue is the pre-call snapshot; safe to use here
-            // because activatedValue only mutates via activate/activateFromBuck
-            // and we never see the same tid twice in one call.
+            // Activate `take` more coverage on this NFT -- but only the
+            // delta needed to satisfy `activatedValue >= mintsBacked`.
+            // In production (no public BuckCredit.activate()), the
+            // invariant `mintsBacked == activatedValue` holds at every
+            // observation point, so the delta is always `take`.  In
+            // test harnesses (BuckCreditHarness.forceActivate), the
+            // holder may have pre-activated past mintsBacked, in which
+            // case the existing activatedValue covers the new
+            // mintsBacked = used + take and this call is a no-op
+            // (delta = 0).  Either way the post-mint invariant
+            // `mintsBacked <= activatedValue <= faceValue` holds.
             uint256 needed = used + take;
             if (s.activatedValue < needed) {
                 buckCredit.activateFromBuck(tid, msg.sender, needed - s.activatedValue);
@@ -712,13 +747,16 @@ contract Buck is IERC20, IERC20Metadata {
                 remaining -= netCap;
             }
             mintsBacked[tid] = used - unwind;
-            // burn() does NOT shrink activatedValue.  The holder's
-            // expressed credit limit is sticky -- it only grows on mint
-            // top-up or an explicit user-side activate().  Freeing
-            // mintsBacked is enough to make the same coverage capacity
-            // re-usable for a future mint; the cache need not invalidate
-            // because creditLimit is a function of activatedValue, which
-            // didn't change.
+            // Deactivate exactly `unwind` coverage on this NFT.  Mirror
+            // of the activateFromBuck call in _allocateMint -- the
+            // invariant mintsBacked[tid] == activatedValue[tid] holds
+            // by construction since public activate() is gone.  Burning
+            // is THE deactivation; it shrinks activatedValue (and thus
+            // creditLimit) in lockstep with mintsBacked and refunds the
+            // proportional pool principal.  BuckCredit fires
+            // onCreditMutation, invalidating Buck's per-block credit-
+            // limit cache.
+            buckCredit.deactivateFromBuck(tid, msg.sender, unwind);
             totalUnwind += unwind;
             poolRefund  += refund_i;
         }

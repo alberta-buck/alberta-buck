@@ -7,6 +7,7 @@ import {BN254}                  from "../src/BN254.sol";
 import {IdentityRegistry}       from "../src/IdentityRegistry.sol";
 import {Buck}                   from "../src/Buck.sol";
 import {BuckCredit}             from "../src/BuckCredit.sol";
+import {BuckCreditHarness}             from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
 import {Notes}                  from "../src/Notes.sol";
 import {SpendAGroth16Verifier}  from "../src/SpendAGroth16Verifier.sol";
@@ -33,7 +34,7 @@ import {StubMintVerifier}       from "../src/StubMintVerifier.sol";
 contract SpendAVerifierTest is Test {
 
     Buck                    internal buck;
-    BuckCredit              internal credit;
+    BuckCreditHarness              internal credit;
     BuckKControllerStatic   internal kCtrl;
     IdentityRegistry        internal reg;
     Notes                   internal notes;
@@ -72,7 +73,7 @@ contract SpendAVerifierTest is Test {
         _registerFrom(ij, "alice", alice);
         _registerFrom(ij, "bob",   bob);
 
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
@@ -213,7 +214,7 @@ contract SpendAVerifierTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(client);
-        credit.activate(tokenId, faceValue);
+        credit.forceActivate(tokenId, faceValue);
     }
 
     function _approveNotes(address from, uint256 amount) internal {

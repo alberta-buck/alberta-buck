@@ -7,6 +7,7 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 
 /// @dev Stand-in for USDC.  Name differs from MockUSDC in UniswapV2Integration
@@ -50,7 +51,7 @@ interface IUniswapV2Pair {
 contract BuckLifecycleTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
 
@@ -100,7 +101,7 @@ contract BuckLifecycleTest is Test {
         _registerBob();
 
         // BUCK stack.
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
@@ -167,7 +168,7 @@ contract BuckLifecycleTest is Test {
         );
         creditExists = true;
         vm.prank(alice);
-        credit.activate(tokenId, 10_000e6);
+        credit.forceActivate(tokenId, 10_000e6);
         _snap("credit-created");
 
         // ── 2. Alice mints 5,000 BUCK against the credit ─────────────────────

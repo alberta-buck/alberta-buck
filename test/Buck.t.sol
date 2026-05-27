@@ -7,6 +7,7 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {MockBasket} from "./mocks/MockBasket.sol";
@@ -15,7 +16,7 @@ import {MockBasket} from "./mocks/MockBasket.sol";
 contract BuckTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
 
@@ -44,7 +45,7 @@ contract BuckTest is Test {
         _registerBob();
 
         // Buck stack.
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);   // BUCK_K = 1.0
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
@@ -163,7 +164,7 @@ contract BuckTest is Test {
             premiumRate
         );
         vm.prank(client);
-        credit.activate(tokenId, faceValue);
+        credit.forceActivate(tokenId, faceValue);
     }
 
     /// @dev Under Phase 1b semantics, balanceOf(non-Carrying holder) ==

@@ -6,6 +6,7 @@ import {Test} from "forge-std/Test.sol";
 import {IdentityRegistry}       from "../src/IdentityRegistry.sol";
 import {Buck}                   from "../src/Buck.sol";
 import {BuckCredit}             from "../src/BuckCredit.sol";
+import {BuckCreditHarness}             from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
 
 /// @title BuckSignedBalance.t.sol -- Phase 1a signedBalanceOf / signedRawBalanceOf
@@ -20,7 +21,7 @@ import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
 contract BuckSignedBalanceTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
 
@@ -30,7 +31,7 @@ contract BuckSignedBalanceTest is Test {
 
     function setUp() public {
         reg     = new IdentityRegistry(GOV);
-        credit  = new BuckCredit();
+        credit  = new BuckCreditHarness();
         kCtrl   = new BuckKControllerStatic(1e18, GOV);
         buck    = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);

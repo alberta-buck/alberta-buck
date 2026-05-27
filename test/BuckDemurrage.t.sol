@@ -6,6 +6,7 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 
 /// @title BuckDemurrage.t.sol -- demurrage / Jubilee / transferCarrying invariants.
@@ -19,7 +20,7 @@ import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 contract BuckDemurrageTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
 
@@ -46,7 +47,7 @@ contract BuckDemurrageTest is Test {
         _registerAlice();
         _bindPublicPool(bob);
 
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
@@ -126,7 +127,7 @@ contract BuckDemurrageTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(client);
-        credit.activate(tokenId, faceValue);
+        credit.forceActivate(tokenId, faceValue);
     }
 
     function _setupAliceWithBuck(uint256 face, uint256 mintAmt) internal {
