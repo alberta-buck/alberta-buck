@@ -198,8 +198,17 @@ class DirectMintAgent(_DMBase):
         super().setup(d, scenario, rng)
         # Per-agent RNG keyed off (scenario.seed, agent.idx) for
         # reproducibility independent of the order other agents consume
-        # the shared `rng`.
-        self._rng = random.Random((scenario.seed, "DirectMintAgent", self._seq))
+        # the shared `rng`.  random.Random rejects tuples -- fold the
+        # key triple into a single 64-bit-safe int by hashing the bytes.
+        import hashlib
+        seed_bytes = (
+            int(scenario.seed).to_bytes(32, "big", signed=False)
+            + b"DirectMintAgent"
+            + int(self._seq).to_bytes(8, "big", signed=False)
+        )
+        self._rng = random.Random(
+            int.from_bytes(hashlib.blake2b(seed_bytes, digest_size=16).digest(),
+                           "big"))
 
     def act(self, d, scenario, day, tick, ctr) -> None:
         if self._rng is None:

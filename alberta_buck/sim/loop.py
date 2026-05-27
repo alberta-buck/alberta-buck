@@ -110,13 +110,15 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
         lg_pre = snap._lp_groups()
         cap_pre = dict(snap._lp_cap) if snap._lp_cap else {}
 
-        # Pre-teardown state.
+        # Pre-teardown state.  All three quantities are 6-decimal BUCK wei
+        # (BUCK uses USDC-compatible decimals); divide by E6 to get whole
+        # BUCK for the display.
         outstanding_pre = ctr.get("dmOutstandingBuck", 0)
         treasury_pre = ctr.get("treasuryBuck", 0)
         nav_pre = snap._basket_nav()
-        print(f"[teardown] pre-state:  outstanding {outstanding_pre/E18:,.2f}  "
-              f"treasury {treasury_pre/E18:,.2f}  "
-              f"nav {nav_pre/E18:,.2f} BUCK")
+        print(f"[teardown] pre-state:  outstanding {outstanding_pre/E6:,.2f}  "
+              f"treasury {treasury_pre/E6:,.2f}  "
+              f"nav {nav_pre/E6:,.2f} BUCK")
 
         # Force-redeem every DM agent that entered but never exited.
         # The agent's own _exit() updates ctr (dmExits, dmOutstandingBuck,
@@ -142,25 +144,35 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
         outstanding_post = ctr.get("dmOutstandingBuck", 0)
         treasury_post = ctr.get("treasuryBuck", 0)
         nav_post = snap._basket_nav()
-        print(f"\n[teardown] post-state: outstanding {outstanding_post/E18:,.2f}  "
-              f"treasury {treasury_post/E18:,.2f}  "
-              f"nav {nav_post/E18:,.2f} BUCK")
+        print(f"\n[teardown] post-state: outstanding {outstanding_post/E6:,.2f}  "
+              f"treasury {treasury_post/E6:,.2f}  "
+              f"nav {nav_post/E6:,.2f} BUCK")
         treasury_delta = treasury_post - treasury_pre
         if treasury_delta != 0:
             print(f"[teardown] teardown released "
-                  f"{treasury_delta/E18:,.2f} BUCK to treasury")
+                  f"{treasury_delta/E6:,.2f} BUCK to treasury")
 
-        # End-of-sim summary: entries, exits, treasury share of remaining NAV.
+        # End-of-sim summary: entries, exits, treasury share of NAV.
+        #
+        # "treasury share" = treasuryBuck / NAV.  treasuryBuck is the
+        # cumulative profit BUCK retained by the basket on redemptions
+        # (the "sell-high, recycle to buy-low" treasury leg).  NAV is
+        # the total LP value of all basket pools, which already includes
+        # the TOKEN side that the active LPs still own -- so the prior
+        # formula (NAV - outstanding) / NAV was wrong: it counted every
+        # active deposit's TOKEN-side principal as "treasury" simply
+        # because LP value is ~2x the BUCK obligation, not because the
+        # basket actually retained any profit.
         print(f"\n[teardown] Lifetime DM activity:")
         print(f"  entries:           {ctr.get('dmEntries', 0)}")
         print(f"  exits:             {ctr.get('dmExits', 0)}")
         print(f"  exit failures:     {ctr.get('dmExitFails', 0)}")
-        print(f"  outstanding BUCK:  {outstanding_post/E18:,.2f}")
-        print(f"  treasury BUCK:     {treasury_post/E18:,.2f}  (cumulative)")
+        print(f"  outstanding BUCK:  {outstanding_post/E6:,.2f}")
+        print(f"  treasury BUCK:     {treasury_post/E6:,.2f}  (cumulative)")
         if nav_post > 0:
-            ts_pct = 100 * (nav_post - outstanding_post) / nav_post
-            print(f"  treasury share:    {ts_pct:.2f}% of remaining NAV "
-                  f"({nav_post/E18:,.2f} BUCK)")
+            ts_pct = 100 * treasury_post / nav_post
+            print(f"  treasury share:    {ts_pct:.4f}% of NAV "
+                  f"({nav_post/E6:,.2f} BUCK)")
         else:
             print(f"  treasury share:    NAV is 0 (all positions cleared)")
 

@@ -156,7 +156,8 @@ class Snapshotter:
 
     def _basket_nav(self) -> int:
         """Total BUCK value of ALL BuckBasket LP positions (token + BUCK
-        sides), in 18-dec BUCK raw.  Empty pools (no reserves) contribute 0."""
+        sides), in 6-decimal BUCK wei (BUCK uses USDC-compatible
+        decimals).  Empty pools (no reserves) contribute 0."""
         d = self.d
         total = 0
         for i in range(len(d.tokens)):
@@ -186,7 +187,12 @@ class Snapshotter:
             if di is not None:
                 tok_idx, ptok, pbuck = di
                 v += ptok * self.s.prices.ref(tok_idx, 0) // (10 ** d.dec[tok_idx])
-                v += pbuck // (10 ** 12)  # 1 BUCK = 1 USDC at t=0; 18d→6d
+                # 1 BUCK == 1 USDC at t=0; BUCK is 6-dec just like USDC, so
+                # the BUCK-side principal contributes 1:1 to the USDC-d0
+                # value tally (the old "// 10**12" assumed BUCK was 18-dec
+                # and shrank the deposit value by 12 orders of magnitude,
+                # making DM agent P&L invisible).
+                v += pbuck
         return v
 
     def capture(self, day, ctr, agents, init_val,
