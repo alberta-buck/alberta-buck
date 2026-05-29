@@ -626,6 +626,22 @@ Table of Contents
   learns the other's identity), and what forces the exactly-three-flavor
   taxonomy below.
 
+  *Assumed vs. enforced.* Early drafts /assumed/ this invariant: the
+  commitment bound the issuer's identity material (`issuerData') but no
+  contract ever verified it, so a malicious issuer could pay someone and
+  keep cryptographic deniability of the act.  The mutual-decryptability
+  fix closes that gap (full treatment in
+  /alberta-buck-notes-decryptability/).  *Phase 1 (shipped):* the
+  issuer's half is bound at /mint/ – `Notes.mint' requires a registered
+  `isPublicIdentity' issuer to sign the batch commitment with a Schnorr
+  signature verified by `IdentityRegistry.verifyIssuerSchnorr' – and the
+  depositor's half is bound at /deposit/ via `verifyDepositorForIssuer'
+  plus the `SpentB' event carrying `E_depositor_for_issuer'.  *Phase 2:*
+  the private (A2) issuer's re-encryption is bound in-circuit at mint,
+  and the B-spend SNARK is extended to bind the issuer to each bearer
+  leaf (so a bearer leaf from a non-public minter becomes impossible,
+  not merely unbound).
+
   The Notes contract itself is bound under a Public Identity
   (`bindContract(notes, pk_op, E_op, true, true)').  Both the issuer and
   the recipient must complete a one-time CP-bound `approve' for the
@@ -834,6 +850,25 @@ Table of Contents
   (Chaum-Pedersen equality and Schnorr PoK), distinguished by which half
   of the handshake is carried in the commitment.
 
+  *Why bearer forces a public issuer – and how it is enforced.* The B2
+  cell is ruled out for a concrete reason, not a stylistic one: a bearer
+  note has no pre-known depositor, hence no recipient \( pk \) under
+  which to encrypt \( M_{\text{issuer}} \).  The eventual (unknown)
+  depositor can therefore recover the issuer's Identity /only/ if it is
+  published in the clear – so /bearer \( \Rightarrow \) public issuer/
+  is forced by mutual decryptability rather than chosen.  An A note
+  escapes this only because it /does/ have a recipient key: the private
+  A2 issuer re-encrypts \( M_{\text{issuer}} \) under \( pk_{\text{rec}}
+  \) (`E_iss-for-rec'), which a bearer note has nowhere to send.  Phase
+  1 makes the public-issuer requirement a cryptographic fact: when a
+  registered `isPublicIdentity' issuer mints, `Notes.mint' requires a
+  Schnorr signature over the batch (`verifyIssuerSchnorr'), so every
+  bearer leaf is provably tied to the issuer's decrypted Identity and
+  the depositor can produce a sound receipt naming the payer.
+  (Cryptographically /forbidding/ a bearer leaf from a /non-public/
+  minter – not merely binding the public ones – awaits the mint SNARK
+  exposing a verified per-leaf `issuerMode', in Phase 2.)
+
 
 5.1 Flavor A2: Addressed Cheque, Private Issuer
 ───────────────────────────────────────────────
@@ -976,6 +1011,21 @@ Table of Contents
   (the issuer breaks a promise to the bearer), not a cryptographic
   vulnerability.  Same trust model as a paper cashier's cheque: the bank
   can in principle redirect the draft, and the law stops them.
+
+  *Implementation status (Phase 1).* The issuer's public binding is
+  enforced at /mint/, not in the B-spend SNARK: a registered
+  `isPublicIdentity' issuer signs the batch commitment and `Notes.mint'
+  checks it via `IdentityRegistry.verifyIssuerSchnorr', so the in-clear
+  \( M_{\text{issuer}} \) is provably the minter's.  The shipped B-spend
+  circuit (`spend.circom') is the plain bearer shape (\( \rho \)
+  nullifier + Merkle inclusion + face/recipient binding); the depositor
+  optionally completes the reverse leg by passing
+  `E_depositor_for_issuer' plus a Chaum-Pedersen proof to `Notes.spend',
+  checked by `verifyDepositorForIssuer' and published in the `SpentB'
+  event.  Folding the issuer signature-in-SNARK and the depositor's
+  Schnorr PoK (steps 3-4 above) /into/ the B-spend circuit – which also
+  lets the contract reject a bearer leaf from a non-public minter – is
+  Phase 2.
 
 
 5.4 Comparison of the Three Flavors

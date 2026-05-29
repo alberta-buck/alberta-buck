@@ -134,6 +134,19 @@ contract Notes {
     ///         4242) so off-chain indexers can dedupe on `nullifier` alone.
     event SpentA(uint256 indexed nullifier, uint256 face, address indexed recipient);
 
+    /// @notice Emitted on a bearer-note spend that completes the
+    ///         depositor->issuer half of the mutual-decryptability handshake:
+    ///         `eDepForIss` re-encrypts the recipient's registered Identity
+    ///         under the issuer's key (verified via verifyDepositorForIssuer),
+    ///         so the public issuer can recover who cashed the note.
+    event SpentB(
+        uint256 indexed nullifier,
+        uint256 face,
+        address indexed recipient,
+        address indexed issuer,
+        IdentityRegistry.ElGamalCT eDepForIss
+    );
+
     /// @notice Emitted once per successful mint.  `cms` calldata carries the
     ///         per-leaf commitments in insertion order; offline provers
     ///         reconstruct the tree by replaying Minted events plus the tx
@@ -381,6 +394,49 @@ contract Notes {
         uint256          face,
         address          recipient
     ) external {
+        _spend(
+            proof, root, nullifier, face, recipient, address(0),
+            IdentityRegistry.ElGamalCT(BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
+            IdentityRegistry.CPProof(0, 0, 0,
+                BN254.G1Point(0, 0), BN254.G1Point(0, 0), BN254.G1Point(0, 0))
+        );
+    }
+
+    /// @notice Spend a bearer (B) note and complete the depositor->issuer half
+    ///         of the mutual-decryptability handshake.  `eDepForIss`
+    ///         re-encrypts the recipient's registered Identity under the public
+    ///         `issuer`'s key; `cpProof` (a Chaum-Pedersen re-encryption proof)
+    ///         is checked via IdentityRegistry.verifyDepositorForIssuer, and the
+    ///         SpentB event publishes `eDepForIss` so the issuer can recover who
+    ///         cashed the note.  An encrypted-Identity recipient uses this
+    ///         overload; a public recipient is already recoverable from the
+    ///         registry via the plain spend.  (Binding the issuer to the note
+    ///         itself awaits the B-spend circuit revealing it; see
+    ///         alberta-buck-notes-decryptability.org.)
+    function spend(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient,
+        address          issuer,
+        IdentityRegistry.ElGamalCT calldata eDepForIss,
+        IdentityRegistry.CPProof    calldata cpProof
+    ) external {
+        require(issuer != address(0), "Notes: zero issuer");
+        _spend(proof, root, nullifier, face, recipient, issuer, eDepForIss, cpProof);
+    }
+
+    function _spend(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient,
+        address          issuer,
+        IdentityRegistry.ElGamalCT memory eDepForIss,
+        IdentityRegistry.CPProof    memory cpProof
+    ) internal {
         require(recipient != address(0),  "Notes: zero recipient");
         require(face      > 0,            "Notes: zero face");
         require(_isAcceptedRoot(root),    "Notes: unknown root");
@@ -395,12 +451,27 @@ contract Notes {
         nullifiers[nullifier] = true;
         noteFaceSum          -= face;
 
+        bool bound = issuer != address(0);
+        if (bound) {
+            // Depositor->issuer binding: the recipient re-encrypts their
+            // registered Identity under the issuer's key so the issuer can
+            // recover who cashed the note from the SpentB event.
+            require(address(identityRegistry) != address(0),
+                    "Notes: identity registry not set");
+            require(
+                identityRegistry.verifyDepositorForIssuer(
+                    recipient, issuer, eDepForIss, cpProof),
+                "Notes: bad depositor binding"
+            );
+        }
+
         require(
             buck.transfer(recipient, face),
             "Notes: transfer failed"
         );
 
-        emit Spent(nullifier, face, recipient);
+        if (bound) emit SpentB(nullifier, face, recipient, issuer, eDepForIss);
+        else       emit Spent(nullifier, face, recipient);
     }
 
     // ---- A-flavor spend (Phase 8 V2) -------------------------------------

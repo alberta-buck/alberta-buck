@@ -321,6 +321,34 @@ contract IdentityRegistry {
         ElGamalCT calldata E_bob,
         CPProof calldata pi
     ) external view returns (bool) {
+        return _verifyApprove(sender, spender, E_bob, pi);
+    }
+
+    /// @notice The depositor->issuer half of the BUCK Notes mutual-decryptability
+    ///         handshake: proves `eDepForIss` re-encrypts the depositor's
+    ///         registered Identity under the (public) issuer's key, so the
+    ///         issuer can recover who cashed a bearer note from the Notes SpentB
+    ///         event.  Identical relation to verifyApprove (sender = depositor,
+    ///         spender = issuer), named for the deposit context.  The
+    ///         Fiat-Shamir transcript binds (depositor, issuer, chainid); the
+    ///         specific note is tied in by the SpentB event emitting the
+    ///         nullifier and `eDepForIss` atomically.  See
+    ///         alberta-buck-notes-decryptability.org.
+    function verifyDepositorForIssuer(
+        address depositor,
+        address issuer,
+        ElGamalCT calldata eDepForIss,
+        CPProof calldata pi
+    ) external view returns (bool) {
+        return _verifyApprove(depositor, issuer, eDepForIss, pi);
+    }
+
+    function _verifyApprove(
+        address sender,
+        address spender,
+        ElGamalCT calldata E_bob,
+        CPProof calldata pi
+    ) internal view returns (bool) {
         if (!_isRegistered(sender) || !_isRegistered(spender)) return false;
 
         ElGamalCT memory E_a = _E_addr[sender];

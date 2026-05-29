@@ -546,6 +546,103 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
   pre-cutover notes (a new wallet status alongside =VALID=/=DEAD=/=FAKE=).
 
 #+LATEX: \clearpage
+* Implementation Status (Phase 1 shipped)
+
+  This section records what is *actually shipped* against the spec above, so the
+  state is self-contained.  Work proceeds on branch =feature/decryptability=
+  (cut from =master= after the =feature/buck-negative-balance= merge, =f445905=).
+
+** Phase 1 -- shipped, wired, and tested
+
+   The public-issuer half and the bearer depositor->issuer half are implemented
+   end-to-end.  Commits, in order:
+
+   - =d8dc818= -- =IdentityRegistry.verifyIssuerSchnorr= + =SchnorrProof= struct +
+     =_fsIssuerSchnorr= helper.  Checks =s*G == R + e*pk_iss=, gated on
+     =isPublicIdentity[issuer]=; Fiat-Shamir binds (pk_iss, R, hBatch, issuer,
+     chainid).
+   - =0df3e71= -- =Notes.mint= split into a 6-arg (legacy) and 7-arg
+     (=+ SchnorrProof=) overload over an internal =_mint=.  When
+     =isPublicIdentity(msg.sender)=, =_mint= *requires*
+     =verifyIssuerSchnorr(msg.sender, keccak256(cms), sig)=; the 6-arg path
+     passes a zero proof and so reverts for a public issuer.  New
+     =IssuerBound(issuer, newRoot)= event.
+   - =5f92cdc= -- wallet =alberta_buck/wallet/schnorr.py=
+     (=issuer_schnorr_sign/verify=, =batch_commitment= = keccak of packed cms);
+     =vectors.py= emits an =issuer_schnorr= section into
+     =test/vectors/identity.json=; the FS transcript matches =_fsIssuerSchnorr=
+     byte-for-byte.
+   - =a4b36ba= -- =IdentityRegistry.verifyDepositorForIssuer= (extracted the
+     verifyApprove body into =_verifyApprove=; the alias just relabels
+     sender/spender as depositor/issuer).  =Notes.spend= split into a 5-arg
+     (legacy) and 8-arg (=+ issuer, eDepForIss, CPProof=) overload over
+     =_spend=; the 8-arg path checks
+     =verifyDepositorForIssuer(recipient, issuer, ...)= and emits =SpentB=.
+
+   Tests -- all green; full forge suite *383 passed, 1 skipped* (the
+   offline-skipped =BuckKControllerForkTest=):
+   - =test/IssuerSchnorr.t.sol= -- 7 in-Solidity (completeness + soundness:
+     tampered batch / response, wrong key, non-public, unregistered, cross-issuer
+     replay) + 4 =IssuerSchnorrVectorTest= (the python-emitted proof verifies
+     on-chain -- the cross-artifact parity check).
+   - =test/NotesIssuerBinding.t.sol= -- 5 (valid binding mints; tampered /
+     wrong-batch sig and the 6-arg overload revert =Notes: bad issuer binding=;
+     non-public minter skips).
+   - =test/NotesDepositorBinding.t.sol= -- 5 (registry parity reusing the
+     =approve= vector as a depositor->issuer proof; bound spend emits =SpentB=;
+     bad CP reverts =Notes: bad depositor binding=; legacy 5-arg unbound works).
+   - =alberta_buck/test/test_schnorr.py= -- 6 (round-trip, tamper, keccak parity).
+
+** Decisions / deviations from the spec text above
+
+   - *The Schnorr binding is at mint, gated only on the minter being public.*
+     There is NO per-leaf =issuerMode= public signal yet, so the "Enforcing
+     bearer => public issuer" subsection is *not* implemented: Phase 1 binds
+     *public minters only*; the contract still cannot tell a bearer leaf from an
+     addressed one (=cms= opaque).
+   - *=verifyDepositorForIssuer= reuses the =verifyApprove= relation verbatim* --
+     no new sigma protocol, no new wallet signer, no new vector.  The existing
+     =approve= (Alice->Bob) vector *is* a valid depositor(Alice)->issuer(Bob)
+     proof.  FS binds (depositor, issuer, chainid); the specific note is tied in
+     only by =SpentB= emitting (nullifier, eDepForIss) atomically -- the
+     nullifier is NOT in the CP transcript.
+   - *=Notes.spend= binds the =recipient= (the beneficiary), not =msg.sender=.*
+   - *Both bindings are optional overloads* (non-breaking): the 6-arg =mint= and
+     5-arg =spend= still serve legacy / non-public paths.
+   - The shipped event is =SpentB(nullifier, face, recipient, issuer, eDepForIss)=
+     (issuer included).  The depositor *names* =issuer= as a parameter; it is
+     *not* recovered from the leaf, because the B-spend circuit does not reveal it.
+
+** Residual gaps -> Phase 2 (NOT done)
+
+   1. *Bearer-from-non-public is still unbound* -- needs the mint SNARK to expose
+      a verified per-leaf =issuerMode= so =Notes.mint= can reject a bearer leaf
+      from a non-public minter.
+   2. *The depositor names the issuer at B-spend* (not cryptographically tied to
+      the note) -- sound only for an honest depositor; binding the issuer into
+      the B-spend circuit removes this.
+   3. *A2 private-issuer in-SNARK re-encryption binding* -- the central Phase 2
+      item; extend =mint_batch.circom= + regenerate per-N verifiers / trusted
+      setup, behind =Notes.setMintVerifier=.
+   4. *=RcptVerify=* off-chain receipt verifier (wallet) -- unimplemented.
+   5. *Formal verification* (Picus / Halmos / EasyCrypt) -- not started.
+
+** Cross-references and house conventions
+
+   - =alberta-buck-notes.org= was updated this session: the "Mutual
+     Decryptability" invariant gained an "assumed vs. enforced" note, the "Note
+     Flavors" intro gained a "why bearer forces a public issuer -- and how it is
+     enforced" paragraph, and Flavor B1 gained a Phase-1 status note.  That =.org=
+     edit and the regenerated PDF/TXT exports are *uncommitted*; the Phase 1
+     code/tests above are committed.
+   - Conventions in force: a negative signed BUCK balance is *not* "debt" -- it
+     is "used credit" / an outstanding claim on the holder's own assets; the
+     carrying transfer is the =isCarrying=-dispatched =Buck._carryingTransfer=
+     (=buckSeconds= apportionment), *not* a =transferCarrying= primitive.  Build
+     and test via =make nix-test=; Python via =nix develop --command python -m
+     pytest=.  Commit messages: ASCII only, no co-author/AI attribution.
+
+#+LATEX: \clearpage
 * Open Questions
 
   1. *In-SNARK vs blinded-CP for A2.*  The in-SNARK route is simpler to reason
