@@ -3,8 +3,7 @@
 A Python program owns the timeline and the actors; `anvil` is a hosted EVM
 running the *real* BuckKControllerDirect / Buck / BuckBasket / IdentityRegistry
 stack plus a real Uniswap V3 + Universal Router.  See
-`alberta-buck-ethereum-routing.org` and
-`test/stabilizer-routing-op47/README.org`.
+`alberta-buck-ethereum-routing.org`.
 
 Run:  python -m alberta_buck.sim --scenario routing --days 120
 """

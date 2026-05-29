@@ -45,7 +45,7 @@ endif
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
 .PHONY: sim sim-build sim-run sim-test sim-plot
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
-.PHONY: prices-routing vector-routing plot-routing images-routing
+.PHONY: prices-routing plot-routing
 
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -165,20 +165,17 @@ plots:			plot-lifecycle plot-equilibrium plot-arb
 images:			vectors plots
 
 
-# ── Routing stabilizer simulation ─────────────────────────────────────
+# ── Sim inputs: price CSVs + Universal Router artifact ────────────────
 #
-# Builds the Universal Router artifact, generates price CSVs, runs the
-# Forge test, and renders the plot.  The UR lives in a sub-project with
-# its own foundry.toml (solc 0.8.26, via_ir); we build it separately and
-# stage the artifact, then temporarily disable its foundry.toml during
-# the main project's forge test to avoid test-discovery interference.
+# Shared inputs for the web3-driven simulation (see "Externally-driven
+# sim" below): generate the commodity price CSVs and build the Universal
+# Router artifact.  The UR lives in a sub-project with its own
+# foundry.toml (solc 0.8.26, via_ir), so we build it separately and stage
+# the artifact under alberta_buck/sim/artifacts/.
 #
-#   make images-routing       # prices -> router -> test -> plot (full pipeline)
-#   make vector-routing       # just the forge test (after prices + router)
-#   make plot-routing         # just the Python plot
-#   make prices-routing       # regenerate price CSVs only
+#   make prices-routing       # (re)generate the commodity price CSVs
+#   make plot-routing         # render images/routing-sim.png from the sim JSON
 
-ROUTING_DIR	= test/stabilizer-routing-op47
 SIM_PRICES_DIR  = alberta_buck/sim/prices
 SIM_PLOT_SCRIPT = alberta_buck/sim/plot_routing.py
 SIM_GEN_PRICES  = alberta_buck/sim/gen_prices.py
@@ -191,32 +188,14 @@ ROUTING_IMAGE	= images/routing-sim.png
 
 prices-routing:	$(ROUTING_PRICES)
 
-# Generate price CSVs in alberta_buck/sim/prices/; symlink back to
-# test/stabilizer-routing-op47/ for the legacy Forge test compatibility.
+# Generate the commodity price CSVs in alberta_buck/sim/prices/.
 $(ROUTING_PRICES): $(SIM_GEN_PRICES)
 	python3 $(SIM_GEN_PRICES)
-	mkdir -p $(ROUTING_DIR)
-	cd $(ROUTING_DIR) && \
-		ln -sf ../../$(SIM_PRICES_DIR)/paxg.csv paxg.csv && \
-		ln -sf ../../$(SIM_PRICES_DIR)/cbbtc.csv cbbtc.csv && \
-		ln -sf ../../$(SIM_PRICES_DIR)/aoil.csv aoil.csv
 
 $(ROUTING_ARTIFACT):
 	( cd lib/universal-router && FORK_URL=http://localhost forge build --skip test --skip script )
 	mkdir -p $(SIM_ARTIFACTS)
 	cp lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json $@
-	mkdir -p $(ROUTING_DIR)/artifacts
-	cd $(ROUTING_DIR)/artifacts && ln -sf ../../$(SIM_ARTIFACTS)/UniversalRouter.json UniversalRouter.json
-
-vector-routing:	$(ROUTING_PRICES) $(ROUTING_ARTIFACT)
-	@test -f lib/universal-router/foundry.toml.bak || \
-		cp lib/universal-router/foundry.toml lib/universal-router/foundry.toml.bak 2>/dev/null || true
-	cp lib/universal-router/foundry.toml lib/universal-router/foundry.toml.bak 2>/dev/null; \
-	touch lib/universal-router/foundry.toml 2>/dev/null; \
-	rm lib/universal-router/foundry.toml 2>/dev/null || true; \
-	forge test $(FORGE_OPTS) --match-contract RoutingSimTest --skip 'test/stabilizer-routing-dsv4/*' -vv; \
-	EX=$$?; mv lib/universal-router/foundry.toml.bak lib/universal-router/foundry.toml 2>/dev/null || true; \
-	exit $$EX
 
 plot-routing:	$(ROUTING_VECTOR)
 	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
@@ -224,7 +203,6 @@ plot-routing:	$(ROUTING_VECTOR)
 $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
 
-images-routing:	prices-routing $(ROUTING_ARTIFACT) vector-routing plot-routing
 
 
 # ── Externally-driven sim (anvil + web3.py) ──────────────────────────

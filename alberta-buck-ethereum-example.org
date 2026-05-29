@@ -83,12 +83,16 @@ governance versions may parametrise it.  =BuckKControllerStatic= returns 0,
 which is the convention for "gate disabled" (Phase-0 environments without
 oracles).
 
-*** Bootstrap exemption
+*** Bootstrap via zero-cost insurance
 
-At =totalSupply == 0= no BUCK exists, so any non-zero requirement is
-unsatisfiable.  =Buck._mintAllocated= explicitly bypasses the gate in that
-window so the first mint can seed the system.  Once any BUCK has been minted,
-every subsequent mint must satisfy the live factor.
+The requirement scales with =poolPrincipal=, the insurance contribution -- so
+a *zero-premium* =BuckCredit= yields =poolPrincipal == 0= and a *zero*
+requirement, whatever the factor.  That is the bootstrap path: the first
+participant pledges a zero-premium credit and mints freely to seed the supply
+(no BUCK need pre-exist), then LPs that BUCK into the BUCK/USDC pair so others
+have a market.  There is no special =totalSupply == 0= branch -- the exemption
+falls straight out of the =poolPrincipal * factor= formula (and is exactly
+what the simulation's SimLP bootstrap does).
 
 *** Why this matters for the bootstrap
 

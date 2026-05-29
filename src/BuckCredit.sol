@@ -290,8 +290,10 @@ contract BuckCredit is ERC721Enumerable {
 
     /// @notice Activate `amount` of coverage on behalf of `holder`,
     ///         restricted to the registered Buck contract.  Called from
-    ///         Buck._allocateMint after the funding-factor gate and as
-    ///         part of the atomic activate-pay-draw sequence.
+    ///         Buck._allocateMint as part of the atomic activate-pay-draw
+    ///         sequence; the funding-factor reserve check runs upstream
+    ///         in Buck._mintAllocated against the holder's pre-mint
+    ///         balanceOf (held + unused credit).
     function activateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
         require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
         require(ownerOf(tokenId) == holder, "BuckCredit: not holder");

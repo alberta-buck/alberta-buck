@@ -1,4 +1,4 @@
-#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.96)
+#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.93)
 #+author: Perry Kundert
 #+date: 2026-05-24 12:00:00
 #+category: Alberta Buck
@@ -72,63 +72,67 @@ contracts via =bindContract= -- so bilateral identity-checked transfers always h
 counterparty on both sides.
 
 #+BEGIN_SRC ditaa :file ./images/buck-eth-layers.png :exports results
-     Uniswap V3 TWAPs                BN254 precompiles             circom / snarkjs
-     (BUCK/USDC, basket pools)       (ecAdd ecMul ecPairing)       (Groth16 on BN254)
-                  |                                 |                            |
-                  v                                 v                            v
-  +------------------+ +------------------+ +----------------------+ +----------------------+
-  |   BUCK_CREDIT    | |     BUCK_K       | |   IdentityRegistry   | |     MintVerifier     |
-  |   (ERC-721)      | | (Static today;   | |  (custom contract)   | | + SpendVerifier(s)   |
-  |                  | |  PID in tree)    | |                      | |                      |
-  | - credits[id]    | | - currentBuckK() | | - pk[addr]           | | - verifyMint         |
-  | - currentValue() | | - (PID:          | | - E_addr[addr]       | | - verifySpend (B)    |
-  | - activate()     | |   Kp,Ki,Kd,      | | - isVerified         | | - verifySpendA (A V2)|
-  | - creditInfo()   | |   basket[])      | | - isCarrying         | +----------+-----------+
-  | - totalCurrent.. | +--------+---------+ | - isPublicIdentity   |            |
-  +--------+---------+          |           | - verifyApprove      |            |
-           |                    |           | - verifySpendCP      |            |
-           v                    v           +-----+----------------+            |
-  +-----------------------------------------------------------------+           |
-  |                          BUCK (ERC-20)                          |           |
-  |                                                                 |           |
-  |  AccountState[a]: (uint80 balance, uint120 buckSeconds,         |           |
-  |                    uint40 timestamp, uint16 flags) -- one slot  |           |
-  |                                                                 |           |
-  |  mint(amount[, tokenIds]):                                      |           |
-  |     allocate cheapest-first across BUCK_CREDIT NFTs,            |           |
-  |     mint amount to holder, mint pool principal to insurancePool |           |
-  |  burn(amount[, tokenIds]):  inverse, refunds pool principal     |           |
-  |  approve(sp, amt, E_b, pi_CP):   IdentityRegistry.verifyApprove |           |
-  |  transfer / transferFrom: bilateral identity check, dispatch    |           |
-  |     to Carrying or Non-Carrying path on sender's flag           |           |
-  +-----+-----------------------------------------------------------+           |
-        |                                                                       |
-        v                                                                       v
-  +---------------------------------------------------------------------------------------+
-  |                                    Notes (custom)                                     |
-  |                                                                                       |
-  |  mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms[]):                      |
-  |     mintVerifier.verifyMint(proof, ..., totalFace, cms)                               |
-  |     buck.transferFrom(caller, this, totalFace)                                        |
-  |     roots[++currentRootIndex % HISTORY] = newRoot                                     |
-  |                                                                                       |
-  |  spend(proof, root, nullifier, face, recipient):       (B-flavor)                     |
-  |  spendACP(proof, root, nullifier, face, recipient, E_n, cpProof):  (A-flavor V2)      |
-  |     verify SNARK + (A-only) verifySpendCP via EIP-196 precompiles                     |
-  |     buck.transfer(recipient, face)  -- Carrying via pool's isCarrying flag            |
-  +---------------------------------------------------------------------------------------+
+                          +---------------------+
+                          | Alberta Buck Wallet |
+                          |  Identity + BUCK    |
+                          |   + BuckCredit NFTs |
+                          +-+--+--+--+--+--+----+
+                            |  |  |  |  |  |
+              register      |  |  |  |  |  |  createCredit
+              approve     <-+  |  |  |  |  +-> (insurer)
+                               |  |  |  |
+              mint, burn     <-+  |  |  +-> spend / mint Notes
+                                  |  |
+                         transfer |  +-> deposit / redeem
+            (any Ethereum wallet) |      (BuckBasket)
+                                  v
+
+
+    +-----------+      +-----------+        +-----------+    +-----------+
+    |   Notes   |      |           |        |           |    | Identity  |
+    | (privacy) +<---->+   Buck    +<------>+BuckBasket |    | Registry  |
+    |           | xfer | (ERC 20)  | mintFB |direct mint|    |  (BN254)  |
+    +-----------+      |           | burnFB | + V3 LPs  |    |           |
+                       +-+--+---+--+        +-----+-----+    +-----+-----+
+                         |  |   ^                 |                ^
+                         |  |   |                 | reprime        |
+                         |  |   | basketValue     |                | isVerified
+                         |  |   +-----------------+                | (every BUCK
+                         |  |                                      |  mover
+                         |  | compute                              |  consults)
+                         |  v                                      |
+                         | +--------+                              |
+                         | | BUCK_K |                              |
+                         | |  (PID) |                              |
+                         | +--------+                              |
+                         |                                         |
+                         | activateFromBuck                        |
+                         | onCreditMutation                        |
+                         v                                         |
+                       +-+----------+                              |
+                       | BuckCredit |<-- createCredit              |
+                       | (ERC 721)  |    (insurer)                 |
+                       +------------+                              |
+                                                                   |
+                       (Buck, BuckBasket, Notes all call ----------+
+                        IdentityRegistry before settling)
 #+END_SRC
 
 #+RESULTS:
 [[file:./images/buck-eth-layers.png]]
 
-(The diagram above is from the pre-=BuckBasket= revision.  In the current tree, a sixth box --
-=BuckBasket= -- sits beside =BUCK_K=, owns one full-range V3 LP per TOKEN/BUCK pool, and is the
-privileged caller of =Buck.mintFromBasket= / =Buck.burnFromBasket= and =BuckKControllerDirect.reprime=.
-The =BUCK_K= "PID" box now resolves to one of three implementations -- =Static=, =Direct= (reads
-=BuckBasket.basketValueInBuck()= as PV), or =External-Basket= (reads BUCK/USDT and four basket
-TWAPs).  Diagram regeneration is tracked separately so a documentation-only revision doesn't
-require a ditaa rebuild.)
+A Wallet (EOA) is the only initiator.  It registers once with =IdentityRegistry= and then
+mints, burns, transfers, deposits or spends via the contract entry points in the second
+row.  Every contract that moves BUCK -- =Buck=, =BuckBasket=, =Notes= -- consults
+=IdentityRegistry.isVerified= on both counterparties before settling.  =BuckCredit=
+(ERC-721) is mutated only by insurers (=createCredit=, =updateCredit=) and by =Buck= itself
+(=activateFromBuck= / =onCreditMutation= hook during mint and burn).  =BUCK_K= is private
+infrastructure: =Buck= calls =compute()= on every mint/burn, and =BuckBasket= is the
+privileged caller of =reprime()= and the source of =basketValueInBuck()= that the
+=Direct= variant integrates against.  External dependencies (not shown): Uniswap V3 (LPs
+custodied by =BuckBasket=; TWAPs read by the =External= variant of =BUCK_K=); the BN254
+EVM precompiles (pairings for =IdentityRegistry=, modular arithmetic for the
+=Mint/SpendVerifier= contracts); circom / snarkjs for off-chain Notes proof generation.
 
 The flow is:
 
@@ -137,7 +141,7 @@ The flow is:
 2. The *client* may pre-activate some or all of the credit via =BuckCredit.activate= to expose the
    activated portion as a /credit limit/ (without yet drawing against it).  Pre-activation is
    optional -- =Buck.mint= will auto-activate (top-up only) any additional coverage it needs.
-3. Before touching BUCK, the client =register=s with =IdentityRegistry=, posting a rerandomized PS
+3. Before touching BUCK, the client =registers= with =IdentityRegistry=, posting a rerandomized PS
    credential and ElGamal-encrypted identity point.  The registry verifies both via BN254
    pairings (~235K gas, paid once per address).
 4. =BUCK.mint(amount[, tokenIds])= draws coverage cheapest-first across the client's NFTs (via the
@@ -242,22 +246,15 @@ the structure (LINEAR or DECLINING_BALANCE with a salvage floor).
 There is no public =BuckCredit.activate()= function.  Activation -- expanding =activatedValue=
 and thus growing the holder's =creditLimit= -- happens /only/ atomically as part of
 =Buck.mint(N, [tids])=, and deactivation happens /only/ atomically as part of =Buck.burn(N,
-[tids])=.  The two-step "first =activate(...)=, then =mint(...)=" flow that earlier drafts
-exposed has been collapsed into a single primitive each direction.
+[tids])=.
 
 This is a deliberate consequence of the mutual-insurance pool model.  Drawing =take= units of
-coverage on an NFT generates =annual_premium = take * premiumRate / BP= per year.  Instead of
+coverage on an NFT generates ~annual_premium = take * premiumRate / BP~ per year.  Instead of
 charging that premium on a continuous schedule, the contract requires an /upfront/
-=poolPrincipal = annual_premium * POOL_ROI_INV= deposit (where ~POOL_ROI_INV = 10~ encodes the
+~poolPrincipal = annual_premium * POOL_ROI_INV~ deposit (where ~POOL_ROI_INV = 10~ encodes the
 insurer's assumed 10 % annual ROI on pool capital).  At parity, the pool's investment yield on
 =poolPrincipal= exactly funds the annual premium on =take= in perpetuity -- so /a policy is a
 one-time purchase/, not a recurring expense.
-
-Bundling activation with the principal payment forecloses the loophole an earlier draft had:
-a free standalone =activate(tid, A)= would let a holder self-issue =A * buckK / 1e18= of
-credit headroom that nothing backs -- =balanceOf= would jump by the activation amount with no
-corresponding deposit ever reaching =insurancePool=.  Insurance-without-premium isn't
-insurance.
 
 Therefore the surface =BuckCredit= exposes is restricted to (a) insurer-side creation /
 re-appraisal (=createCredit=, =updateCredit=), (b) standard ERC-721 ownership operations
@@ -268,15 +265,15 @@ part of their atomic sequences.  Test fixtures that need to set up a holder with
 subclass's =forceActivate= -- explicitly not present on production =BuckCredit=.
 
 =Buck.mint(amount[, tokenIds])= walks the holder's NFTs cheapest-first (or in caller-supplied
-order), computes =take_i = ceil(remaining_i * BP / (BP - rate_i * POOL_ROI_INV))= per NFT,
+order), computes ~take_i = ceil(remaining_i * BP / (BP - rate_i * POOL_ROI_INV))~ per NFT,
 calls =activateFromBuck(tid, holder, take_i)= to grow =activatedValue= and =mintsBacked= in
-lockstep, debits =poolPrincipal_i = take_i - amount_i= from the holder's signed raw, and
+lockstep, debits ~poolPrincipal_i = take_i - amount_i~ from the holder's signed raw, and
 credits the same amount to =insurancePool=.  =Buck.burn(amount[, tokenIds])= is the symmetric
 inverse: walks most-expensive-first, computes =unwind_i=, calls =deactivateFromBuck= to
 shrink =activatedValue= and =mintsBacked= in lockstep, debits =poolRefund_i= from
 =insurancePool=, and credits it to the holder's signed raw.
 
-The post-burn solvency invariant: after release, the holder's =debt= must still fit under the
+The post-burn solvency invariant: after release, the holder's used credit must still fit under the
 shrunken =creditLimit=.  If you owe X and try to release enough coverage to drop =creditLimit=
 below X, the burn reverts -- repay first.
 
@@ -284,8 +281,8 @@ below X, the burn reverts -- repay first.
 single call =Buck.creditLimit= makes to size the holder's headroom (then multiplied by
 =currentBuckK= and divided by =1e18=).  =creditInfo(tokenId)= returns
 =(faceValue, activatedValue, premiumRate)= one NFT at a time;
-=batchCreditInfo(uint256[] tokenIds)= returns a packed =CreditSlice[] = (owner, faceValue,
-activatedValue, premiumRate)= for the entire list in one external call, used by =Buck=
+=batchCreditInfo(uint256[] tokenIds)= returns a packed ~CreditSlice[] = (owner, faceValue, activatedValue, premiumRate)~
+for the entire list in one external call, used by =Buck=
 =_allocateMint= / =_allocateBurn= to amortize per-NFT cross-contract dispatch overhead.
 
 ** Buck Wiring
@@ -295,7 +292,7 @@ sizing, and =BuckCredit= notifies =Buck= when NFT state changes so =Buck='s per-
 =creditLimitCache= can invalidate.  The cycle is broken with a one-shot
 =BuckCredit.setBuck(address)= called post-deployment, and a tiny =IBuckHook= surface
 (=onCreditMutation(address from, address to)=) that fires from =BuckCredit._update= (mint /
-transfer / burn) plus =activate= / =updateCredit= / =activateFromBuck= / =deactivateFromBuck=.
+transfer / burn) plus =updateCredit= / =activateFromBuck= / =deactivateFromBuck=.
 Until =setBuck= is called, the hook is silent (=address(0)= guard), so =BuckCredit= can be
 deployed and exercised before =Buck= exists in test fixtures.
 
@@ -437,7 +434,7 @@ The transfer-path state for an account is one slot:
 struct AccountState {
     BuckQty     balance;       // int80 underlying; signed.  Range = [-6.04e23, +6.04e23] raw
                                // = [-6.04e17, +6.04e17] BUCK at 6 decimals.  Negative ==
-                               // NFT-backed debt; positive == held BUCK.
+                               // NFT-backed used credit; positive == held BUCK.
     BuckSeconds buckSeconds;   // uint120 underlying; demurrage IOU integral on positive holdings
     uint40      timestamp;     // last crystallisation (safe past year 36800)
     uint16      flags;         // reserved for future per-account flags
@@ -463,21 +460,21 @@ USDC.
 
 =signedRawBalanceOf(a)= returns the raw =int80= directly; =rawBalanceOf(a)= clamps negatives to
 zero for legacy ERC-20-style readers; =signedBalanceOf(a)= subtracts demurrage from positive raw
-(returns raw directly for negative raw, since debt accrues no demurrage).  =balanceOf(a)= --
+(returns raw directly for negative raw, since used credit accrues no demurrage).  =balanceOf(a)= --
 the ERC-20 view -- answers /"what alice can spend right now"/:
 
 #+BEGIN_SRC text
 held(a)         = max(0, signedRaw(a) - feeOwing(a))             // Non-Carrying
-debt(a)         = max(0, -signedRaw(a))
-unusedCredit(a) = max(0, creditLimit(a) - debt(a))
+used(a)         = max(0, -signedRaw(a))
+unusedCredit(a) = max(0, creditLimit(a) - used(a))
 balanceOf(a)    = held(a) + unusedCredit(a)                      // Non-Carrying
 balanceOf(a)    = max(0, signedRaw(a))                           // Carrying
 #+END_SRC
 
 Carrying accounts (AMM pools, Notes pool, Jubilee) hold no BuckCredit NFTs, so
-=creditLimit == 0= and the signed-balance machinery degenerates to the prior unsigned model.
+~creditLimit == 0~ and the signed-balance machinery degenerates to the prior unsigned model.
 =feeOwing= and =balanceOfFees= clamp to zero on negative raw -- demurrage is a per-second
-property of *held* BUCK, not debt.
+property of *held* BUCK, not used credit.
 
 ** mint(N) and burn(N)
 
@@ -523,45 +520,45 @@ same =denom=.
 The shipped =mint= sequence:
 
 1. =isVerified(msg.sender)= guard.
-2. =buckK.compute()= -- advances the PID if =dT= has elapsed (oracle reads + state update) or
-   returns the cached value otherwise.  Mint and burn together amortize PID work across user
-   activity.
-3. =_allocateMint(amount, tokenIds)= reads =BuckCredit.batchCreditInfo(tokenIds)= once, walks the
-   slice array, calls =BuckCredit.activateFromBuck(tid, holder, take_i)= per NFT (grows
+2. =buckK.compute()= -- advances the PID if =dT= has elapsed; otherwise returns the cached
+   value.  Mint and burn together amortize PID work across user activity.
+3. Capture =fundingFactor= and -- when it is non-zero -- the minter's *pre-activation*
+   =balanceOf=.  The reserve is measured before this mint activates the credit it pledges, so
+   the freshly-activated headroom cannot satisfy its own reserve.
+4. =_allocateMint(amount, tokenIds)= reads =BuckCredit.batchCreditInfo(tokenIds)= once, walks
+   the slice array, calls =BuckCredit.activateFromBuck(tid, holder, take_i)= per NFT (grows
    =activatedValue= and =mintsBacked= in lockstep), returns =(totalCoverage, poolPrincipal)=.
-4. =_accrueJubilee()=, crystallise =insurancePool= and =msg.sender=, debit =poolPrincipal= from
-   the sender's signed raw (=_subBalance= is signed-aware -- the raw goes negative if the sender
-   had no positive holdings), credit =poolPrincipal= to =insurancePool= (always Carrying, always
-   ends positive).  =_totalSupply= is maintained automatically by =_setBalanceSigned= so that
-   ~_totalSupply == sum_a max(0, signedRaw(a))~ holds.
-5. *Counter-cyclical funding margin (post-settlement)*: after the debit, the sender's
-   /unused credit headroom/ must be at least =poolPrincipal * buckK.fundingFactor() / 1e18=.
-   I.e., the new mint is not allowed to come within funding-factor BUCKs of maxing out the
-   sender's credit limit:
+5. *Counter-cyclical funding-factor reserve*, enforced now that =poolPrincipal= is known:
 
    #+BEGIN_SRC text
-   debt_post         = max(0, -signedRaw_post)
-   unusedCredit_post = max(0, creditLimit_post - debt_post)
-   require(unusedCredit_post >= poolPrincipal * factor / 1e18,
-           "BUCK: insufficient credit margin")
+   require(preActivationBalanceOf >= poolPrincipal * fundingFactor / 1e18,
+           "BUCK: insufficient mint funding")
    #+END_SRC
 
-   In normal regimes (=buckK >= ~0.1=, factor near 1.0) the gate passes by a wide margin --
-   new activation grows =creditLimit= by ~take * buckK~ while debt grows only by
-   ~take - amount~.  The gate bites when =buckK= is very low (the controller is throttling
-   issuance during severe BUCK undervaluation) or when the holder is highly leveraged on a
-   prior position.  This is a much weaker gate than an earlier "held BUCK only" formulation
-   the codebase carried: the holder does NOT need to acquire BUCK on the open market before
-   minting; they just can't pile new credit issuance on top of an already-maxed position.
-6. Emit =Transfer(0, insurancePool, poolPrincipal)=,
+   The reserve scales with the *insurance principal this mint pays into the pool* -- NOT the
+   gross BUCK minted, nor the credit limit applied for.  Its job is to put a gentle base-level
+   demand under BUCK exactly when many credit-holders come online to mint (each must hold a
+   little BUCK sized to its insurance cost), not to impede issuance -- which a gate on the whole
+   credit limit would.  A *zero-premium* credit yields =poolPrincipal == 0= ("zero-cost
+   insurance"), so the requirement is zero and the mint is exempt (the basket / LP bootstrap
+   mints freely).  On a non-Carrying account ~balanceOf = held + unusedCredit~; =fundingFactor=
+   is 0 under the static controller (gate disabled), ~1.0 at parity, and rises above 1.0 when
+   BUCK is undervalued, so it bites hardest on bootstrapping *insured* credit from a thin
+   reserve while the market already signals too much BUCK.
+6. =_accrueJubilee()=, crystallise =insurancePool= and =msg.sender=, debit =poolPrincipal= from
+   the sender's signed raw (=_subBalance= is signed-aware -- the raw goes negative if the sender
+   had no positive holdings), credit =poolPrincipal= to =insurancePool=.  =_totalSupply= is
+   maintained automatically by =_setBalanceSigned= so that ~_totalSupply == sum_a max(0,
+   signedRaw(a))~ holds.
+7. Emit =Transfer(0, insurancePool, poolPrincipal)=,
    =Minted(sender, totalCoverage, poolPrincipal, creditValue, buckKValue, newLimit)=.
 
-End-state arithmetic for a fresh mint against a zero-balance, non-debt holder:
+End-state arithmetic for a fresh mint against a zero-balance, non-credit-using holder:
 
 #+BEGIN_SRC text
-signedRawBalanceOf(holder) = -poolPrincipal       (debt = principal paid to pool)
+signedRawBalanceOf(holder) = -poolPrincipal       (used = principal paid to pool)
 creditLimit(holder)        = sum take_i           (= activatedValue * BUCK_K / UNIT)
-balanceOf(holder)          = creditLimit - debt   = sum take_i - sum principal_i
+balanceOf(holder)          = creditLimit - used   = sum take_i - sum principal_i
                                                   = sum amount_i
                                                   = amount               (modulo rounding)
 totalSupply                += poolPrincipal       (only the pool's positive contribution grows)
@@ -570,14 +567,14 @@ totalSupply                += poolPrincipal       (only the pool's positive cont
 =burn(amount[, tokenIds])= mirrors the math but with the most-expensive-first default selector:
 unwind dearest NFT first, call =BuckCredit.deactivateFromBuck(tid, holder, unwind_i)= which
 shrinks =activatedValue= and =mintsBacked= in lockstep, debit =poolRefund= from =insurancePool=,
-credit =poolRefund= to the holder's signed raw (climbs toward zero from debt, or further
+credit =poolRefund= to the holder's signed raw (climbs toward zero from used credit, or further
 positive from a positive balance).  =quoteMint= and =quoteBurn= are read-only views that return
 =(totalCoverage, poolPrincipal)= or =(totalUnwind, poolRefund)= for the same allocator math, so
 an off-chain optimizer can size required limits and refunds before submitting.
 
-The burn-side solvency check: after refund and deactivation, the holder's remaining =debt= must
+The burn-side solvency check: after refund and deactivation, the holder's remaining used credit must
 still fit under the shrunken =creditLimit=.  If you owe X and try to release enough coverage to
-drop =creditLimit= below X, the burn reverts with =BUCK: post-burn debt exceeds credit limit=.
+drop =creditLimit= below X, the burn reverts with =BUCK: post-burn credit used exceeds limit=.
 Repay first.
 
 The =balanceOf(sender) >= amount= spendable check on transfer-out is where credit headroom
@@ -585,7 +582,7 @@ becomes a real BUCK flow: a transfer larger than =held= but at-or-below =held + 
 drives the sender's signed raw negative, and the recipient receives freshly-issued BUCK.
 =_setBalanceSigned= grows =_totalSupply= by exactly the amount of the positive contribution
 created on the recipient side (offsetting nothing on the sender side, whose positive contribution
-just shrank from =held= toward zero or further into debt).
+just shrank from =held= toward zero or further into used credit).
 
 ** Identity-Bound approve()
 
@@ -644,23 +641,25 @@ live fee owed is
 
 #+BEGIN_SRC text
 feeOwing(a) = (buckSeconds + max(0, balance) * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE
-            = 0    when signed raw <= 0   (no demurrage on debt)
+            = 0    when signed raw <= 0   (no demurrage on used credit)
 #+END_SRC
 
 with ~BASE_RATE_PER_YEAR = 0.02~ (2%/year) and ~SCALE = 1e27~.  Demurrage is a per-second property
-of /held/ BUCK; debt-bearing accounts (signed raw < 0) accrue zero fee until they climb back into
+of /held/ BUCK; accounts using credit (signed raw < 0) accrue zero fee until they climb back into
 positive territory.  =_crystallize= uses ~max(0, signedRaw)~ as the rectangle height so a
-negative-going transfer doesn't poison the buckSeconds integral.
+negative-going transfer doesn't poison the buckSeconds integral.  This makes sense; any account
+extends into its credit only when a transfer has produced a positive BUCK balance somewhere else,
+where it accrues demurrage.
 
 Visible balance:
 
 - *Non-Carrying* (default for EOAs): ~balanceOf(a) = held + unusedCredit~ where
-  =held = max(0, signedRaw - feeOwing)= and =unusedCredit = max(0, creditLimit - debt)=.
+  =held = max(0, signedRaw - feeOwing)= and ~unusedCredit = max(0, creditLimit - used)~.
   The locked fee stays inside the account's own slot; spendable on the held side shrinks over
   idle periods; unused credit shrinks if =BUCK_K= falls.
 - *Carrying* (AMM pools, Notes, Jubilee, etc.): ~balanceOf(a) = max(0, signedRaw)~.  The account
   never loses visible balance to demurrage; instead, on every outflow the value-weighted age is
-  folded into the recipient's =buckSeconds= so the locked debt rides with the BUCKs.  Carrying
+  folded into the recipient's =buckSeconds= so the locked fees ride with the BUCKs.  Carrying
   accounts hold no BuckCredit NFTs and never go negative (the spendable check inside
   =_carryingTransfer= rejects any transfer that would drive raw < 0).
 
@@ -872,17 +871,17 @@ moment of deposit, but it is also the cause of a structural deflationary pressur
 Sign convention (inherited from [[#buck-k-pid][BUCK_K]]):
 
 - ~basketValue > 1.0~ (BUCK undervalued / inflation: TOKEN expensive in BUCK):
-  ~error < 0~ ⇒ =buckK= /decreases/ ⇒ =BuckCredit=-backed mints shrink ⇒ BUCK supply contracts ⇒
+  ~error < 0~ ⇒ =buckK= /decreases/ ⇒ =BuckCredit= backed mints shrink ⇒ BUCK supply contracts ⇒
   basket value falls back toward 1.0.
 - ~basketValue < 1.0~ (BUCK overvalued / deflation: TOKEN cheap in BUCK):
-  ~error > 0~ ⇒ =buckK= /increases/ ⇒ =BuckCredit=-backed mints expand ⇒ BUCK supply grows ⇒
+  ~error > 0~ ⇒ =buckK= /increases/ ⇒ =BuckCredit= backed mints expand ⇒ BUCK supply grows ⇒
   basket value rises back toward 1.0.
 
 So the closed-loop equilibrium picture is: =BuckBasket= establishes the TOKEN-side anchor and
 publishes the deviation signal; =BuckKControllerDirect= integrates that deviation into a
 credit-limit multiplier; =Buck= meters new supply against the multiplier; external arb agents
 close the loop by moving BUCK between the basket pools and the wider market.  Direct-mint
-deposits are the *value injector* (asset coming in); =BuckCredit=-backed mints under PID control
+deposits are the *value injector* (asset coming in); =BuckCredit= backed mints under PID control
 are the *supply regulator* (BUCK going out).
 
 #+LATEX: \clearpage
@@ -1353,7 +1352,6 @@ oracle figures are estimates against unwritten oracle wiring.
 
 | Operation                                      | Gas (approx) | At 30 gwei | Notes                                    |
 |------------------------------------------------+--------------+------------+------------------------------------------|
-| BUCK_CREDIT.activate()                         | ~50K         | ~$4        | Single SSTORE + event                    |
 | BUCK_CREDIT.updateCredit()                     | ~80K         | ~$6        | Multiple SSTOREs (insurer pays)          |
 | IdentityRegistry.register()                    | ~235K        | ~$19       | PS pairing + NIZK (one-time)             |
 | IdentityRegistry.verifyApprove                 | ~29K         | ~$2        | CP proof, per counterparty pair          |
@@ -1516,7 +1514,7 @@ Outstanding work tracked in companion memos:
 
 - *Equilibrium-seeking dynamic-issuance test* -- closed-loop integration of =BuckBasket=,
   =BuckKControllerDirect=, =BuckCredit=, and =Buck= against an external market driver and an arb
-  agent that responds to =buckK= changes by minting/burning =BuckCredit=-backed BUCK.  Should
+  agent that responds to =buckK= changes by minting/burning =BuckCredit= backed BUCK.  Should
   emit a snapshot tape suitable for the existing =plot_*= visualizers and double as the
   regression for [[#dynamic-issuance][Dynamic Issuance: Why BuckBasket Needs BUCK_K]].  Highest-priority
   validation for the closed-loop control claim.

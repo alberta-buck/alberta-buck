@@ -537,6 +537,15 @@ contract BuckKControllerForkTest is Test {
     address governance = makeAddr("governance");
 
     function setUp() public {
+        // Fork-only: the live Chainlink gold/silver feeds exist only on a
+        // mainnet fork.  Under a plain `forge test` (no --fork-url) the feed
+        // address has no code, so skip rather than fail.  Runs for real under
+        // `make test-fork-mainnet`.
+        if (GOLD_FEED.code.length == 0) {
+            vm.skip(true);
+            return;
+        }
+
         // Mock feeds for commodities without live Chainlink data
         oilFeed    = new MockAggregatorV3("WTI / USD", 8, 7200000000);   // $72.00
         gasFeed    = new MockAggregatorV3("NG / USD",  8, 350000000);    // $3.50

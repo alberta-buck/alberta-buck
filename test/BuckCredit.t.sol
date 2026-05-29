@@ -70,7 +70,13 @@ contract BuckCreditTest is Test {
         credit.forceActivate(tokenId, FACE_VALUE + 1);
     }
 
-    function test_activate_reverts_if_not_owner() public {
+    /// @notice Production activation has no public surface: it flows only
+    ///         through Buck.mint() -> activateFromBuck, gated on the caller
+    ///         being the registered Buck contract.  The BuckCredit unit test
+    ///         never wires `buck`, so any caller fails the msg.sender == buck
+    ///         gate.  (Replaces the pre-refactor test of a public activate()
+    ///         that no longer exists.)
+    function test_activateFromBuck_reverts_if_not_buck() public {
         vm.prank(insurer);
         uint256 tokenId = credit.createCredit(
             alice, 1, FACE_VALUE, FLOOR,
@@ -78,9 +84,26 @@ contract BuckCreditTest is Test {
             uint48(block.timestamp), 100
         );
 
-        vm.prank(insurer);  // insurer is not the owner
-        vm.expectRevert("Not credit owner");
-        credit.forceActivate(tokenId, 100e6);
+        vm.prank(insurer);  // not the registered Buck contract
+        vm.expectRevert("BuckCredit: not buck");
+        credit.activateFromBuck(tokenId, alice, 100e6);
+    }
+
+    /// @notice Even the registered Buck contract may only activate coverage on
+    ///         behalf of the NFT's actual owner: the `holder` argument is
+    ///         checked against ownerOf.  Wire this test contract as `buck` to
+    ///         clear the first gate, then fail the holder gate.
+    function test_activateFromBuck_reverts_if_not_holder() public {
+        vm.prank(insurer);
+        uint256 tokenId = credit.createCredit(
+            alice, 1, FACE_VALUE, FLOOR,
+            BuckCredit.DepreciationType.NONE, 0,
+            uint48(block.timestamp), 100
+        );
+
+        credit.setBuck(address(this));  // this test acts as the Buck contract
+        vm.expectRevert("BuckCredit: not holder");
+        credit.activateFromBuck(tokenId, insurer, 100e6);  // insurer != owner
     }
 
     function test_linear_depreciation() public {

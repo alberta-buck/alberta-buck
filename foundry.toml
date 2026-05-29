@@ -16,8 +16,7 @@ fs_permissions = [
     { access = "read-write", path = "./test/vectors" },
     { access = "read", path = "./build/snark" },
     { access = "read", path = "./out" },
-    { access = "read-write", path = "./test/stabilizer-routing-dsv4" },
-    { access = "read", path = "./test/stabilizer-routing-op47" },
+    { access = "read", path = "./alberta_buck/sim/prices" },
     { access = "read", path = "./lib/universal-router/out" },
 ]
 

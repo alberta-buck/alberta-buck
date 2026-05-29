@@ -1,7 +1,7 @@
 """Per-day state capture -> JSON in the existing routing-sim schema.
 
-Schema is byte-compatible with test/stabilizer-routing-op47/
-test_routing_sim_plot.py so the established plot renders this unchanged:
+Schema matches alberta_buck/sim/plot_routing.py so the established plot
+renders this unchanged:
   {"tokens":[sym...], "frames":[{day, refUsd[N], spotUsdc[N], spotBuck[N],
    basketVal, buckK, supply, directTrades, cycleTrades, aggPnl}, ...]}
 """

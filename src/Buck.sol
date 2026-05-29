@@ -26,8 +26,9 @@ interface IBuckK {
     ///      so user activity drives (and amortizes) PID work.
     function compute() external returns (uint256);
     /// @dev Counter-cyclical insurance funding factor (18-dec; 1e18 == 1.0).
-    ///      Buck.mint gates on
-    ///        balanceOf(minter) >= poolPrincipal * fundingFactor / 1e18.
+    ///      Buck.mint gates on `balanceOf(minter) >= amount * fundingFactor
+    ///      / 1e18` -- the minter must hold (as positive BUCK or unused
+    ///      credit headroom) a reserve scaled to the BUCKs being issued.
     ///      The Static controller returns 0 (gate disabled); the PID
     ///      controller returns max(0, 1e18 + 10*(basket-BUCK)*1e18/basket).
     function fundingFactor() external view returns (uint256);
@@ -226,7 +227,7 @@ contract Buck is IERC20, IERC20Metadata {
 
     /// @notice ERC-20 spendable balance.  Includes positive held BUCK (net
     ///         of demurrage for non-Carrying accounts) plus *unused credit
-    ///         headroom* (creditLimit - debt) for non-Carrying accounts.
+    ///         headroom* (creditLimit - used) for non-Carrying accounts.
     ///         The user-facing semantic: "what alice can spend right now."
     ///
     ///         Carrying accounts (AMM pools, Notes, Jubilee) hold no NFT-
@@ -245,21 +246,21 @@ contract Buck is IERC20, IERC20Metadata {
             uint256 fee = _feeOwing(s, rawU);
             held = fee >= rawU ? 0 : rawU - fee;
         }
-        uint256 debt = raw < 0 ? uint256(-raw) : 0;
+        uint256 used = raw < 0 ? uint256(-raw) : 0;
         uint256 limit = creditLimit(a);
-        uint256 unusedCredit = limit > debt ? limit - debt : 0;
+        uint256 unusedCredit = limit > used ? limit - used : 0;
         return held + unusedCredit;
     }
 
     /// @notice Signed view of an account's balance after demurrage.  Returns
-    ///         the negative raw value directly for debt-bearing accounts
+    ///         the negative raw value directly for used-credit accounts
     ///         (those that have spent into BuckCredit-backed headroom).  Does
     ///         NOT include credit headroom -- use `balanceOf` for the
     ///         ERC-20 visible "what can I spend" semantic.
     function signedBalanceOf(address a) public view returns (int256) {
         AccountState storage s = _state[a];
         int256 raw = s.balance.asInt();
-        if (raw <= 0) return raw;          // debt accrues no demurrage (clamped in _feeOwing)
+        if (raw <= 0) return raw;          // credit used accrues no demurrage (clamped in _feeOwing)
         if (identity.isCarrying(a)) return raw;
         uint256 fee = _feeOwing(s, uint256(raw));
         return raw - int256(fee);
@@ -474,7 +475,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///
     ///      Insurance pool gets `poolPrincipal` (= sum principal_i) added; the
     ///      minter's signed balance is deducted by the same amount, driving it
-    ///      negative (NFT-backed debt).  _setBalanceSigned tracks `_totalSupply`
+    ///      negative (NFT-backed credit used).  _setBalanceSigned tracks `_totalSupply`
     ///      across both writes -- net effect on totalSupply: `+poolPrincipal`
     ///      (insurance pool gained positive; minter's positive contribution
     ///      stayed 0 since they went from 0 toward negative).
@@ -482,7 +483,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///      End-state arithmetic:
     ///          creditLimit(alice)  = sum take_i      (= totalCurrentValue * buckK)
     ///          signedRawBalance     = -poolPrincipal  (= -sum principal_i)
-    ///          balanceOf            = creditLimit - debt
+    ///          balanceOf            = creditLimit - used
     ///                               = sum(take_i) - sum(principal_i)
     ///                               = sum amount_i
     ///                               = `amount`        (modulo integer rounding)
@@ -496,12 +497,39 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
         uint256 currentBuckK     = buckK.compute();
 
+        // Counter-cyclical funding-factor reserve, captured against the
+        // minter's PRE-activation balanceOf (held + unused credit) so the
+        // credit this mint is about to activate cannot itself satisfy the
+        // reserve.  The reserve is scaled to the *insurance principal* this
+        // mint pays into the pool -- NOT the gross BUCK minted:
+        //     balanceOf(minter) >= poolPrincipal * fundingFactor / 1e18
+        // poolPrincipal is the premium-funding overhead (sum of take_i -
+        // amount_i).  A zero-premium credit yields poolPrincipal == 0 --
+        // zero-cost "insurance" -- so the requirement is zero and the mint is
+        // exempt (the SimLP bootstrap and any uninsured pledge mint freely).
+        // Where it bites: you cannot bootstrap *insured* credit from an
+        // inadequate reserve while BUCK is undervalued (factor > 1).  Static
+        // controller returns factor 0 (gate off); the PID controller drives
+        // the factor up when BUCK is undervalued and back to ~1.0 at parity.
+        // Captured before _allocateMint because that activates the pledged
+        // credit; enforced after, once poolPrincipal is known.
+        uint256 factor            = buckK.fundingFactor();
+        uint256 preFundingBalance = factor > 0 ? balanceOf(msg.sender) : 0;
+
         // Walk the holder's NFTs cheapest-first; activates `take_i` on each
         // via BuckCredit.activateFromBuck, writes mintsBacked[tid] += take_i,
         // returns aggregate (totalCoverage = sum take, poolPrincipal = sum
         // principal).  The cap per NFT is `faceValue - mintsBacked` (auto-
         // activation may walk into unactivated capacity).
         (uint256 totalCoverage, uint256 poolPrincipal) = _allocateMint(amount, tokenIds);
+
+        // Reserve scales with the insurance principal; poolPrincipal == 0
+        // (zero-cost insurance) => zero requirement => exempt.
+        if (factor > 0 && poolPrincipal > 0) {
+            uint256 required = poolPrincipal * factor / BUCKK_SCALE;
+            require(preFundingBalance >= required,
+                    "BUCK: insufficient mint funding");
+        }
 
         // Settlement: insurance pool receives `poolPrincipal`, minter is
         // debited the same amount.  _setBalanceSigned tracks _totalSupply
@@ -519,36 +547,6 @@ contract Buck is IERC20, IERC20Metadata {
             // observability (the BUCK is freshly minted into the pool from
             // the minter's credit, not from a pre-held positive balance).
             emit Transfer(address(0), insurancePool, poolPrincipal);
-        }
-
-        // Counter-cyclical insurance funding gate -- margin requirement.
-        //
-        // Computed AFTER settlement (post-debit signedRaw, post-activation
-        // creditLimit).  The gate is: the holder's unused credit headroom
-        // must be at least `poolPrincipal * fundingFactor / 1e18` -- they
-        // are not allowed to come within funding-factor BUCKs of maxed-
-        // out.  In normal regimes (buckK >= ~0.1, factor near 1.0) the
-        // gate passes by a wide margin: new activation grows creditLimit
-        // by `take * buckK`, while the principal debt only grows by
-        // `take - amount`.  The gate bites when buckK is very low
-        // (controller pinning credit issuance during BUCK undervaluation)
-        // or when the holder is highly leveraged.
-        //
-        // Note: this is a much weaker gate than the prior "held BUCK"
-        // formulation.  The holder doesn't need to buy BUCK on the open
-        // market to satisfy funding-factor; they just can't pile new
-        // credit issuance on top of an already-maxed-out position.
-        if (poolPrincipal > 0) {
-            uint256 factor = buckK.fundingFactor();
-            if (factor > 0) {
-                uint256 required = poolPrincipal * factor / BUCKK_SCALE;
-                int256  signedRaw_post = signedBalanceOf(msg.sender);
-                uint256 debt_post = signedRaw_post < 0 ? uint256(-signedRaw_post) : 0;
-                uint256 limit_post = creditLimit(msg.sender);
-                uint256 unusedCredit = limit_post > debt_post ? limit_post - debt_post : 0;
-                require(unusedCredit >= required,
-                        "BUCK: insufficient credit margin");
-            }
         }
 
         // The Minted event keeps its historical shape; `newLimit` now refers
@@ -576,7 +574,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///      gate, which was a Phase-1a-era "burn N from your held
     ///      balance" semantic that doesn't fit the Phase 1b atomic
     ///      activate-pay-draw / deactivate-refund-release model): after
-    ///      the burn, the holder's debt must still fit under the
+    ///      the burn, the holder's credit used must still fit under the
     ///      shrunken credit limit.  If you owe X and want to release
     ///      enough coverage to drop creditLimit below X, repay first.
     ///
@@ -606,15 +604,15 @@ contract Buck is IERC20, IERC20Metadata {
             emit Transfer(insurancePool, address(0), poolRefund);
         }
 
-        // Post-burn solvency: the holder's debt must not exceed their
+        // Post-burn solvency: the holder's used credit must not exceed their
         // shrunken creditLimit.  Computed after settlement so signed raw
         // already reflects the refund (climb toward zero).  Reading
         // creditLimit() picks up the just-invalidated cache, so it
         // reflects the now-deactivated value.
         int256 signedRaw = signedBalanceOf(msg.sender);
-        uint256 debt     = signedRaw < 0 ? uint256(-signedRaw) : 0;
-        require(debt <= creditLimit(msg.sender),
-                "BUCK: post-burn debt exceeds credit limit");
+        uint256 used     = signedRaw < 0 ? uint256(-signedRaw) : 0;
+        require(used <= creditLimit(msg.sender),
+                "BUCK: post-burn credit used exceeds limit");
 
         // Silence the unused-variable warning while keeping the metric
         // available for future event emission.
@@ -929,8 +927,8 @@ contract Buck is IERC20, IERC20Metadata {
         // ---- to ----
         AccountState memory ts = _state[to];
         int256 toRawSigned = ts.balance.asInt();
-        // The recipient may be in debt (raw < 0); receiving BUCK first pays
-        // down their debt before turning positive.  We use _setBalanceSigned-
+        // The recipient may have used credit (raw < 0); receiving BUCK first pays
+        // down their used credit before turning positive.  We use _setBalanceSigned-
         // style accounting for the totalSupply delta but inline the writes
         // here to preserve the carrying-fold-buckSeconds logic.
         uint256 oldToPos = toRawSigned > 0 ? uint256(toRawSigned) : 0;
@@ -938,7 +936,7 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 newToPos = newToSigned > 0 ? uint256(newToSigned) : 0;
 
         // buckSeconds carry-over uses the *positive* portion of the recipient's
-        // history; if the recipient was in debt their buckSeconds is zero and
+        // history; if the recipient was using their credit their buckSeconds is zero and
         // elapsed-rectangle is meaningless.
         uint256 toRawPos  = oldToPos;
         uint256 toElapsed = block.timestamp - uint256(ts.timestamp);
@@ -960,7 +958,7 @@ contract Buck is IERC20, IERC20Metadata {
     function feeOwing(address a) public view returns (uint256) {
         AccountState storage s = _state[a];
         int256 raw = s.balance.asInt();
-        if (raw <= 0) return 0;             // no demurrage on debt or empty
+        if (raw <= 0) return 0;             // no demurrage on used credit or empty
         return _feeOwing(s, uint256(raw));
     }
 
@@ -973,15 +971,15 @@ contract Buck is IERC20, IERC20Metadata {
         return fee >= rawU ? rawU : fee;
     }
 
-    /// @notice Unsigned raw balance.  Clamps negative (debt) accounts to 0
+    /// @notice Unsigned raw balance.  Clamps negative (using credit) accounts to 0
     ///         so legacy ERC-20-style readers see a non-negative number;
-    ///         use `signedRawBalanceOf` if you need to distinguish debt.
+    ///         use `signedRawBalanceOf` if you need to distinguish used credit.
     function rawBalanceOf(address a) external view returns (uint256) {
         int256 raw = _state[a].balance.asInt();
         return raw <= 0 ? 0 : uint256(raw);
     }
 
-    /// @notice Signed raw balance (negative = NFT-backed debt).
+    /// @notice Signed raw balance (negative = NFT-backed used credit).
     function signedRawBalanceOf(address a) external view returns (int256) {
         return _state[a].balance.asInt();
     }
@@ -1014,8 +1012,8 @@ contract Buck is IERC20, IERC20Metadata {
 
     /// @dev Fold the elapsed (balance * dt) rectangle into buckSeconds and
     ///      bump the timestamp.  Idempotent in time: a second call within
-    ///      the same block is a no-op.  No balance change.  Debt-bearing
-    ///      accounts (signed raw < 0) accrue no demurrage -- the rectangle
+    ///      the same block is a no-op.  No balance change.  Accounts using
+    ///      credit (signed raw < 0) accrue no demurrage -- the rectangle
     ///      uses only the positive portion of the balance.
     function _crystallize(address a) internal {
         AccountState memory s = _state[a];
@@ -1074,8 +1072,8 @@ contract Buck is IERC20, IERC20Metadata {
     //
     // holds.  Fresh BUCK enters circulation precisely when an account moves
     // toward more-negative (somebody else is receiving real BUCK against
-    // the debt-payer's credit); BUCK leaves circulation when a negative-raw
-    // account climbs toward zero (the debt is being paid down).
+    // the payer's credit); BUCK leaves circulation when a negative-raw
+    // account climbs toward zero (the used credit is being paid down).
 
     function _addBalance(address a, uint256 amount) internal {
         if (amount == 0) return;

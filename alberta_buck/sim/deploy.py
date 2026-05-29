@@ -1,7 +1,6 @@
 """Deploy + wire the full Direct system, V3 pools, and Universal Router.
 
-Order mirrors test/stabilizer-routing-op47/RoutingSim.t.sol::setUp and
-test/BuckBasket.t.sol::setUp.  Only BUCK-touching contracts (BuckBasket,
+Order mirrors test/BuckBasket.t.sol::setUp.  Only BUCK-touching contracts (BuckBasket,
 each TOKEN/BUCK pool, the Universal Router) get a public bindContract
 Identity; TOKEN/USDC pools and SimLP never custody BUCK so they need none.
 """
@@ -95,6 +94,10 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
                           int(0.50 * E18), int(1.50 * E18), E18, gov)
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
+    # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
+    # activateFromBuck (which requires msg.sender == buck) and so NFT
+    # mutations invalidate Buck's credit-limit cache via onCreditMutation.
+    chain.send(credit.functions.setBuck(buck.address), sender=deployer)
 
     v3f = chain.deploy("UniswapV3Factory")
     basket = chain.deploy("BuckBasket", buck.address, kctrl.address, v3f.address,
@@ -228,11 +231,12 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     now_ts = w3.eth.get_block("latest")["timestamp"]
     cc = credit.functions.createCredit(simlp.address, 0, FACE, 0, 0, 0,
                                        now_ts, 0)              # NONE, premium 0
-    tid = cc.call({"from": deployer})
     chain.send(cc, sender=deployer)
-    # SimLP (the credit owner) activates it and mints BUCK to itself.
-    chain.send(simlp.functions.exec(
-        credit.address, credit.encode_abi("activate", args=[tid, FACE])))
+    # SimLP (the credit owner) mints BUCK to itself.  Minting auto-activates
+    # the pledged credit (activation is collapsed into Buck.mint); the credit
+    # is zero-premium, so poolPrincipal == 0 -- zero-cost insurance -- and the
+    # funding-factor gate is inapplicable, so no prior BUCK reserve is needed
+    # to bootstrap.
     chain.send(simlp.functions.exec(
         buck.address,
         buck.encode_abi("mint(uint256)", args=[TARGET_BUCK_LP])))
