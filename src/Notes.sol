@@ -7,6 +7,7 @@ import {IMintVerifier}   from "./IMintVerifier.sol";
 import {ISpendVerifier}  from "./ISpendVerifier.sol";
 import {ISpendAVerifier} from "./ISpendAVerifier.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
+import {BN254}            from "./BN254.sol";
 
 // (Buck dispatches to the Carrying transfer path automatically when the
 //  sender is registered with isCarrying = true in IdentityRegistry; the
@@ -146,6 +147,11 @@ contract Notes {
         uint256 indexed newRoot
     );
 
+    /// @notice Emitted when a mint carries a verified public-issuer Schnorr
+    ///         binding: the issuer's decrypted Identity is provably bound to
+    ///         every leaf in the batch (Notes mutual-decryptability, Phase 1).
+    event IssuerBound(address indexed issuer, uint256 indexed newRoot);
+
     // ---- constructor / governance -----------------------------------------
 
     constructor(
@@ -262,6 +268,39 @@ contract Notes {
         uint256          totalFace,
         uint256[] calldata cms
     ) external {
+        // Legacy / non-public path.  A registered PUBLIC issuer cannot use this
+        // overload: the zero signature fails the binding check in _mint.
+        _mint(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
+              IdentityRegistry.SchnorrProof(0, 0, BN254.G1Point(0, 0)));
+    }
+
+    /// @notice Mint with a public-issuer Schnorr binding (Notes
+    ///         mutual-decryptability, Phase 1).  A registered Public-Identity
+    ///         issuer MUST use this overload: `issuerSig` binds their decrypted
+    ///         Identity to every leaf so a depositor can later produce a sound
+    ///         receipt naming the payer.  (Private A2 issuers are bound
+    ///         in-SNARK in a later phase.)
+    function mint(
+        bytes   calldata proof,
+        uint256          oldRoot,
+        uint256          newRoot,
+        uint32           nextLeafIndex_,
+        uint256          totalFace,
+        uint256[] calldata cms,
+        IdentityRegistry.SchnorrProof calldata issuerSig
+    ) external {
+        _mint(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms, issuerSig);
+    }
+
+    function _mint(
+        bytes   calldata proof,
+        uint256          oldRoot,
+        uint256          newRoot,
+        uint32           nextLeafIndex_,
+        uint256          totalFace,
+        uint256[] calldata cms,
+        IdentityRegistry.SchnorrProof memory issuerSig
+    ) internal {
         require(cms.length > 0,                            "Notes: empty mint");
         require(uint256(nextLeafIndex_) + cms.length
                 <= (uint256(1) << TREE_DEPTH),             "Notes: tree full");
@@ -287,6 +326,24 @@ contract Notes {
             "Notes: bad mint proof"
         );
 
+        // Public-issuer binding (Notes mutual-decryptability, Phase 1).  When
+        // the minter is a registered PUBLIC Identity, require a Schnorr
+        // signature over keccak256(cms) so the issuer's decrypted Identity is
+        // provably bound to every leaf -- the depositor can then produce a
+        // sound receipt naming the payer.  Non-public minters are not gated
+        // here yet (the private A2 issuer is bound in-SNARK in a later phase),
+        // so a public-issuer bearer/addressed note is the case this closes.
+        bool issuerBound;
+        if (address(identityRegistry) != address(0)
+            && identityRegistry.isPublicIdentity(msg.sender)) {
+            require(
+                identityRegistry.verifyIssuerSchnorr(
+                    msg.sender, keccak256(abi.encodePacked(cms)), issuerSig),
+                "Notes: bad issuer binding"
+            );
+            issuerBound = true;
+        }
+
         // Pull face value before mutating tree state so a failed transfer
         // aborts the whole mint with no leaf-index advancement.
         require(
@@ -301,6 +358,7 @@ contract Notes {
         noteFaceSum       += totalFace;
 
         emit Minted(msg.sender, totalFace, startIndex, N, newRoot);
+        if (issuerBound) emit IssuerBound(msg.sender, newRoot);
     }
 
     // ---- spend ------------------------------------------------------------
