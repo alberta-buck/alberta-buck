@@ -190,20 +190,31 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
     }
 
     function test_compute_amortizes_within_dT() public {
+        // NOTE: solc 0.8.28 optimizer + Foundry vm.warp interact badly --
+        // consecutive `vm.warp(block.timestamp + N)` calls with identical
+        // N get CSE-folded into a single advance.  Track time via a
+        // locally-incremented `t` to sidestep the fold.  See the
+        // BuckKControllerUnitTest::test_multi_step_pid_convergence comment
+        // for the diagnosis.
+        uint256 t = block.timestamp;
+
         // Initial: warp once past dT, run PID cycle to set lastUpdate
-        vm.warp(block.timestamp + 61);
+        t += 61;
+        vm.warp(t);
         uint256 k0 = ctrl.compute();
 
         // Within the next 60s, multiple "mints" share the cached buckK without
         // paying for additional oracle reads.
         for (uint i = 0; i < 5; i++) {
-            vm.warp(block.timestamp + 10);   // 5x10s = 50s, all within dT
+            t += 10;
+            vm.warp(t);                          // 5x10s = 50s, all within dT
             uint256 k = ctrl.compute();
             assertEq(k, k0, "amortization broken: cache miss within dT");
         }
 
         // After dT elapses, next call performs the PID work.
-        vm.warp(block.timestamp + 11);       // total 61s since k0
+        t += 11;
+        vm.warp(t);                              // total 61s since k0
         uint256 lastUpdateBefore = ctrl.lastUpdate();
         ctrl.compute();
         assertGt(ctrl.lastUpdate(), lastUpdateBefore, "PID did not run after dT");
@@ -214,8 +225,10 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
     // -------------------------------------------------------------------- //
 
     function test_drift_buck_undervalued_pushes_buckK_down() public {
+        uint256 t = block.timestamp;
         // First PID cycle at parity to establish baseline lastUpdate / state.
-        vm.warp(block.timestamp + 61);
+        t += 61;
+        vm.warp(t);
         ctrl.compute();
         uint256 baselineK = ctrl.buckK();
 
@@ -231,7 +244,8 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
         // proportional + integral terms accumulate the negative error.
         uint256 prevK = baselineK;
         for (uint i = 0; i < 5; i++) {
-            vm.warp(block.timestamp + 61);
+            t += 61;
+            vm.warp(t);
             uint256 k = ctrl.compute();
             assertLe(k, prevK, "buckK regressed upward mid-drift");
             prevK = k;
@@ -244,7 +258,9 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
     }
 
     function test_drift_buck_overvalued_pushes_buckK_up() public {
-        vm.warp(block.timestamp + 61);
+        uint256 t = block.timestamp;
+        t += 61;
+        vm.warp(t);
         ctrl.compute();
         uint256 baselineK = ctrl.buckK();
 
@@ -258,7 +274,8 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
         // error = BUCK - basket = +0.05 -> buckK expands monotonically.
         uint256 prevK = baselineK;
         for (uint i = 0; i < 5; i++) {
-            vm.warp(block.timestamp + 61);
+            t += 61;
+            vm.warp(t);
             uint256 k = ctrl.compute();
             assertGe(k, prevK, "buckK regressed downward mid-drift");
             prevK = k;
@@ -271,13 +288,16 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
     }
 
     function test_drift_recovery_to_parity() public {
+        uint256 t = block.timestamp;
         // 1) Drive BUCK 5% under, run 3 cycles -> buckK contracts.
-        vm.warp(block.timestamp + 61);
+        t += 61;
+        vm.warp(t);
         ctrl.compute();
 
         _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 0.95e6);
         for (uint i = 0; i < 3; i++) {
-            vm.warp(block.timestamp + 61);
+            t += 61;
+            vm.warp(t);
             ctrl.compute();
         }
         uint256 contractedK = ctrl.buckK();
@@ -288,7 +308,8 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
         //    buckK does NOT instantly snap back; it relaxes upward.
         _moveSpotToPrice(buckUsdt, address(buck), 1e18, address(usdt), 1e6);
         for (uint i = 0; i < 3; i++) {
-            vm.warp(block.timestamp + 61);
+            t += 61;
+            vm.warp(t);
             ctrl.compute();
         }
         // After recovery, P-term contributes ~0, I-term still negative ->
@@ -302,11 +323,13 @@ contract BuckKControllerV3Test is Test, UniswapV3Fixture {
         // Mainnet blocks ~12s -> 5 blocks ~= 60s == dT.  Simulate a stream of
         // mints arriving roughly one per block; PID work should occur ~once
         // every 5 blocks.
+        uint256 t = block.timestamp;
         uint256 pidRuns;
         uint256 lastSeen = ctrl.lastUpdate();
 
         for (uint i = 0; i < 25; i++) {
-            vm.warp(block.timestamp + 12);    // one block
+            t += 12;
+            vm.warp(t);                       // one block
             ctrl.compute();
             if (ctrl.lastUpdate() > lastSeen) {
                 pidRuns++;

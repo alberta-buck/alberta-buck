@@ -3,9 +3,10 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/BuckCredit.sol";
+import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 
 contract BuckCreditTest is Test {
-    BuckCredit public credit;
+    BuckCreditHarness public credit;
 
     address insurer = makeAddr("insurer");
     address alice   = makeAddr("alice");
@@ -14,7 +15,7 @@ contract BuckCreditTest is Test {
     uint256 constant FLOOR      = 100_000e6;  // $100K floor
 
     function setUp() public {
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
     }
 
     function test_createCredit() public {
@@ -47,12 +48,12 @@ contract BuckCreditTest is Test {
 
         // Activate half
         vm.prank(alice);
-        credit.activate(tokenId, 250_000e6);
+        credit.forceActivate(tokenId, 250_000e6);
         assertEq(credit.currentValue(tokenId), 250_000e6);
 
         // Activate rest
         vm.prank(alice);
-        credit.activate(tokenId, 250_000e6);
+        credit.forceActivate(tokenId, 250_000e6);
         assertEq(credit.currentValue(tokenId), 500_000e6);
     }
 
@@ -66,10 +67,16 @@ contract BuckCreditTest is Test {
 
         vm.prank(alice);
         vm.expectRevert("Exceeds face value");
-        credit.activate(tokenId, FACE_VALUE + 1);
+        credit.forceActivate(tokenId, FACE_VALUE + 1);
     }
 
-    function test_activate_reverts_if_not_owner() public {
+    /// @notice Production activation has no public surface: it flows only
+    ///         through Buck.mint() -> activateFromBuck, gated on the caller
+    ///         being the registered Buck contract.  The BuckCredit unit test
+    ///         never wires `buck`, so any caller fails the msg.sender == buck
+    ///         gate.  (Replaces the pre-refactor test of a public activate()
+    ///         that no longer exists.)
+    function test_activateFromBuck_reverts_if_not_buck() public {
         vm.prank(insurer);
         uint256 tokenId = credit.createCredit(
             alice, 1, FACE_VALUE, FLOOR,
@@ -77,9 +84,26 @@ contract BuckCreditTest is Test {
             uint48(block.timestamp), 100
         );
 
-        vm.prank(insurer);  // insurer is not the owner
-        vm.expectRevert("Not credit owner");
-        credit.activate(tokenId, 100e6);
+        vm.prank(insurer);  // not the registered Buck contract
+        vm.expectRevert("BuckCredit: not buck");
+        credit.activateFromBuck(tokenId, alice, 100e6);
+    }
+
+    /// @notice Even the registered Buck contract may only activate coverage on
+    ///         behalf of the NFT's actual owner: the `holder` argument is
+    ///         checked against ownerOf.  Wire this test contract as `buck` to
+    ///         clear the first gate, then fail the holder gate.
+    function test_activateFromBuck_reverts_if_not_holder() public {
+        vm.prank(insurer);
+        uint256 tokenId = credit.createCredit(
+            alice, 1, FACE_VALUE, FLOOR,
+            BuckCredit.DepreciationType.NONE, 0,
+            uint48(block.timestamp), 100
+        );
+
+        credit.setBuck(address(this));  // this test acts as the Buck contract
+        vm.expectRevert("BuckCredit: not holder");
+        credit.activateFromBuck(tokenId, insurer, 100e6);  // insurer != owner
     }
 
     function test_linear_depreciation() public {
@@ -94,7 +118,7 @@ contract BuckCreditTest is Test {
 
         // Activate fully
         vm.prank(alice);
-        credit.activate(tokenId, FACE_VALUE);
+        credit.forceActivate(tokenId, FACE_VALUE);
 
         // At t=0: full value
         assertEq(credit.currentValue(tokenId), FACE_VALUE);
@@ -119,7 +143,7 @@ contract BuckCreditTest is Test {
         );
 
         vm.prank(alice);
-        credit.activate(tokenId, 200_000e6);
+        credit.forceActivate(tokenId, 200_000e6);
 
         // 100 years later: still full value
         vm.warp(block.timestamp + 365.25 days * 100);
@@ -137,7 +161,7 @@ contract BuckCreditTest is Test {
         );
 
         vm.prank(alice);
-        credit.activate(tokenId, 100_000e6);
+        credit.forceActivate(tokenId, 100_000e6);
 
         // Discrete annual compounding: depreciable * (BP - rate)/BP per full year,
         // linearly interpolated across the trailing partial year.
@@ -174,8 +198,8 @@ contract BuckCreditTest is Test {
 
         // Activate both fully
         vm.startPrank(alice);
-        credit.activate(landId, 200_000e6);
-        credit.activate(structId, 300_000e6);
+        credit.forceActivate(landId, 200_000e6);
+        credit.forceActivate(structId, 300_000e6);
         vm.stopPrank();
 
         // At t=0: total = 200K + 300K = 500K
@@ -198,7 +222,7 @@ contract BuckCreditTest is Test {
         );
 
         vm.prank(alice);
-        credit.activate(tokenId, 300_000e6);
+        credit.forceActivate(tokenId, 300_000e6);
 
         // Insurer reappraises: reduce face value below activated
         vm.prank(insurer);
@@ -244,7 +268,7 @@ contract BuckCreditTest is Test {
         );
 
         vm.prank(alice);
-        credit.activate(tokenId, FACE_VALUE);
+        credit.forceActivate(tokenId, FACE_VALUE);
 
         // At t=0: no depreciation (start is in the future).
         assertEq(credit.currentValue(tokenId), FACE_VALUE);
@@ -265,7 +289,7 @@ contract BuckCreditTest is Test {
             100
         );
         vm.prank(alice);
-        credit.activate(tokenId, 100_000e6);
+        credit.forceActivate(tokenId, 100_000e6);
 
         vm.warp(block.timestamp + 365 days * 50);
         // rate=0 means no decline — value stays at face.
@@ -279,7 +303,7 @@ contract BuckCreditTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 100
         );
         vm.prank(alice);
-        credit.activate(tokenId, FACE_VALUE);
+        credit.forceActivate(tokenId, FACE_VALUE);
 
         // Insurer reduces face value below activation.
         vm.prank(insurer);
@@ -298,7 +322,7 @@ contract BuckCreditTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 100
         );
         vm.prank(alice);
-        credit.activate(tokenId, 100_000e6);
+        credit.forceActivate(tokenId, 100_000e6);
 
         // Insurer zeros the face value (total write-off).
         vm.prank(insurer);
@@ -320,7 +344,7 @@ contract BuckCreditTest is Test {
             100
         );
         vm.prank(alice);
-        credit.activate(tokenId, 100_000e6);
+        credit.forceActivate(tokenId, 100_000e6);
 
         vm.warp(block.timestamp + 1);
         assertEq(credit.currentValue(tokenId), 10_000e6, "rate=100% -> immediate floor");

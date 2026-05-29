@@ -16,8 +16,7 @@ fs_permissions = [
     { access = "read-write", path = "./test/vectors" },
     { access = "read", path = "./build/snark" },
     { access = "read", path = "./out" },
-    { access = "read-write", path = "./test/stabilizer-routing-dsv4" },
-    { access = "read", path = "./test/stabilizer-routing-op47" },
+    { access = "read", path = "./alberta_buck/sim/prices" },
     { access = "read", path = "./lib/universal-router/out" },
 ]
 
@@ -31,6 +30,11 @@ remappings = [
     "@uniswap/v2-periphery/=lib/v2-periphery/",
     "@uniswap/lib/=lib/solidity-lib/",
 ]
+
+[profile.v3]
+via_ir = false
+src = "src/uniswap_v3_build"
+out = "out"
 
 [profile.default.fmt]
 line_length = 120

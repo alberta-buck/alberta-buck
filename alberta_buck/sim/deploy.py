@@ -1,7 +1,6 @@
 """Deploy + wire the full Direct system, V3 pools, and Universal Router.
 
-Order mirrors test/stabilizer-routing-op47/RoutingSim.t.sol::setUp and
-test/BuckBasket.t.sol::setUp.  Only BUCK-touching contracts (BuckBasket,
+Order mirrors test/BuckBasket.t.sol::setUp.  Only BUCK-touching contracts (BuckBasket,
 each TOKEN/BUCK pool, the Universal Router) get a public bindContract
 Identity; TOKEN/USDC pools and SimLP never custody BUCK so they need none.
 """
@@ -32,12 +31,15 @@ FEE_BUCK_UB = 500       # BUCK/USDC pool:   0.05% (gauge-breaking, cheap)
 TICK_SPACING = {3000: 60, 500: 10}
 # Common BUCK reserve every TOKEN/BUCK basket pool is seeded to, so no
 # single token's pool depth dominates the shared routing.
-TARGET_BUCK = 10 ** 14  # $10^8 / 10^6-dec = $100 BUCK per pool
+#TARGET_BUCK = 10 ** 14  # $10^14 / 10^6-dec = $100,000,000 BUCK per pool
+TARGET_BUCK = 10 ** 12  # $10^12 / 10^6-dec = $1,000,000 BUCK per pool
 
 DEPOSITED_TOPIC = Web3.keccak(
-    text="Deposited(address,uint256,address,uint256,uint256,uint128)")
+    text="Deposited(address,uint256,address,uint256,uint256,address,uint128)")
 REDEEMED_TOPIC = Web3.keccak(
-    text="Redeemed(address,uint256,address,uint256,uint256,uint256,uint256,uint128)")
+    text="Redeemed(address,uint256,uint256,uint256,uint256)")
+REDEEMED_FROM_POOL_TOPIC = Web3.keccak(
+    text="RedeemedFromPool(uint256,address,address,uint256,uint256,uint128)")
 
 
 @dataclass
@@ -63,7 +65,6 @@ class Deployment:
     pool_buck: list = field(default_factory=list)   # TOKEN/BUCK addrs
     pool_ub: str = ""                               # floating BUCK/USDC pool
     pool_meta: list = field(default_factory=list)   # (pool,owner,lo,hi,group)
-    pool_receipts: dict = field(default_factory=dict)  # token_index -> receiptId
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
@@ -93,6 +94,10 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
                           int(0.50 * E18), int(1.50 * E18), E18, gov)
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
+    # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
+    # activateFromBuck (which requires msg.sender == buck) and so NFT
+    # mutations invalidate Buck's credit-limit cache via onCreditMutation.
+    chain.send(credit.functions.setBuck(buck.address), sender=deployer)
 
     v3f = chain.deploy("UniswapV3Factory")
     basket = chain.deploy("BuckBasket", buck.address, kctrl.address, v3f.address,
@@ -113,8 +118,19 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     simlp = chain.deploy("SimLP", sol_file="SimLP")
     # SimLP will custody BUCK to seed the floating BUCK/USDC pool, so it
     # needs a public Identity (BUCK transfers are identity-gated).
+    #
+    # Bind as Public + NON-Carrying.  Under Phase 1b, buck.mint(N) no
+    # longer delivers N to the holder's raw balance -- it opens NFT-
+    # backed credit headroom that the holder spends INTO pools (raw
+    # goes negative).  A Carrying-flagged SimLP cannot go negative
+    # (_carryingTransfer asserts rawSigned >= value), so the V3 mint
+    # callback that transfers BUCK to the pool reverts with "BUCK:
+    # Carrying amount exceeds raw".  As Non-Carrying, SimLP uses its
+    # creditLimit (held + unusedCredit) as spendable; the transfer to
+    # the pool drives signedRaw to -value and the pool receives freshly
+    # issued BUCK.
     chain.send(reg.functions.bindContract(
-        simlp.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+        simlp.address, idmod.BIND_PK, idmod.BIND_E, True, False), sender=deployer)
     big = 10 ** 30
     chain.send(usdc.functions.mint(simlp.address, big))
     for c in tok:
@@ -180,42 +196,18 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
             print(f"         reserves: {tok_bal/(10**dec[i]):,.6g} {sym}  "
                   f"{usdc_bal/E6:,.2f} USDC")
 
-        # TOKEN/BUCK basket pool via direct mint.
+        # TOKEN/BUCK basket pool (empty — bootstrapped by DM agents).
         chain.send(basket.functions.addBasketToken(
             c.address, dec[i], p0, 0, FEE_BUCK), sender=gov)  # 0 => equal share
         pb = v3f.functions.getPool(c.address, buck.address, FEE_BUCK).call()
         chain.send(reg.functions.bindContract(
             pb, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
-        # Seed every basket pool to a COMMON BUCK depth.  depositToken mints
-        # BUCK = seed*p0/10**dec, so seeding a fixed token count would make
-        # the BUCK reserve scale with p0 (~1000x spread across PAXG/cbBTC/
-        # AOIL) and the deepest pool (cbBTC) would monopolize all routing.
-        # Solve seed so minted BUCK ~= TARGET_BUCK for every token.
-        seed = max(10 ** dec[i], TARGET_BUCK * (10 ** dec[i]) // p0)
-        chain.send(c.functions.mint(deployer, seed))
-        chain.send(c.functions.approve(basket.address, seed))
-        dep_rcpt = chain.send(basket.functions.depositToken(c.address, seed, 0))
         d.pool_buck.append(pb)
 
-        # Extract receiptId from the Deposited event.
-        rid = None
-        for log in dep_rcpt["logs"]:
-            if log["topics"][0] == DEPOSITED_TOPIC:
-                rid = int.from_bytes(log["topics"][2], "big")
-                d.pool_receipts[i] = rid
-                break
-
         if verbose:
-            tok_bal = c.functions.balanceOf(pb).call()
-            buck_bal = buck.functions.balanceOf(pb).call()
-            implied = buck_bal * (10 ** dec[i]) // tok_bal if tok_bal else 0
             print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
                   f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)")
-            print(f"         seed={seed/(10**dec[i]):,.6g} {sym}  "
-                  f"initialPrice={p0/E6:,.2f} BUCK/{sym}")
-            print(f"         reserves: {tok_bal/(10**dec[i]):,.6g} {sym}  "
-                  f"{buck_bal/E18:,.2f} BUCK")
-            print(f"         receiptId={rid}")
+            print(f"         empty pool — bootstrap DM agents will seed")
 
     # --- floating BUCK/USDC pool (gauge-breaking, not a peg) ---------- #
     #
@@ -239,11 +231,12 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     now_ts = w3.eth.get_block("latest")["timestamp"]
     cc = credit.functions.createCredit(simlp.address, 0, FACE, 0, 0, 0,
                                        now_ts, 0)              # NONE, premium 0
-    tid = cc.call({"from": deployer})
     chain.send(cc, sender=deployer)
-    # SimLP (the credit owner) activates it and mints BUCK to itself.
-    chain.send(simlp.functions.exec(
-        credit.address, credit.encode_abi("activate", args=[tid, FACE])))
+    # SimLP (the credit owner) mints BUCK to itself.  Minting auto-activates
+    # the pledged credit (activation is collapsed into Buck.mint); the credit
+    # is zero-premium, so poolPrincipal == 0 -- zero-cost insurance -- and the
+    # funding-factor gate is inapplicable, so no prior BUCK reserve is needed
+    # to bootstrap.
     chain.send(simlp.functions.exec(
         buck.address,
         buck.encode_abi("mint(uint256)", args=[TARGET_BUCK_LP])))

@@ -1,177 +1,222 @@
-"""DirectMintAgent -- staggered entry/exit direct-mint LP providers.
+"""DirectMint agents -- probabilistic direct-mint LP providers.
 
-Each agent enters on a scheduled day (staggered every ~30 days), chooses
-the most underweight TOKEN/BUCK pool based on basket target weights,
-deposits into it via BuckBasket.depositToken(), holds for months, then
-redeems via BuckBasket.redeem().
+Two concrete agent classes share the deposit/redeem machinery:
 
-The staggered entry/exit cadence provides natural rebalancing:
-  * On entry: agents deposit into underweight pools, bringing them toward
-    target by minting BUCK and adding liquidity.
-  * On exit: agents redeem their receipts, withdrawing from pools that
-    were underweight at entry (and may now be closer to target).  The
-    BuckBasket's 50/50 profit split retains half the LP earnings plus
-    any rebalancing edge.
+- ``BootstrapDMAgent`` deposits once at bootstrap (before tick 0) into a
+  fixed token (one agent per basket token) and never exits.  Used to seed
+  empty BuckBasket TOKEN/BUCK pools so any scenario that depends on
+  TOKEN/BUCK liquidity (e.g. routing-arb tests) has live pools by tick 0.
 
-Agents never hold BUCK directly and do not trade on the open market.
-Their ROI comes from the BuckBasket's accumulated LP fees + rebalancing
-profit share returned at redemption.
+- ``DirectMintAgent`` makes per-tick statistical decisions: when IDLE,
+  enter the basket with probability ``ENTER_PROB_PER_TICK``; when
+  ENTERED, exit with probability ``EXIT_PROB_PER_TICK``.  Each agent
+  picks a random target token at entry time.  The population produces a
+  Poisson-ish arrival process and a geometric holding-time distribution
+  without any global schedule.
+
+Each agent's RNG is seeded deterministically from ``(scenario.seed,
+agent.idx)`` so runs are reproducible.
+
+The deposit/redeem path goes through ``BuckBasket.depositToken`` /
+``BuckBasket.redeem`` -- the canonical Phase 1b way to put real backing
+TOKEN into a TOKEN/BUCK pool (BuckBasket mints fresh BUCK against the
+deposit via ``Buck.mintFromBasket``, no NFT-credit machinery involved).
 """
 
 from __future__ import annotations
 
+import random
+
 from alberta_buck.sim.agents import Agent, _register
-from alberta_buck.sim.snapshot import _bal
 
 
-@_register
-class DirectMintAgent(Agent):
-    """Staggered direct-mint LP provider with smart pool selection.
+class _DMBase(Agent):
+    """Shared deposit/redeem state + helpers for DM-family agents.
 
-    Each instance is assigned an entry_day and a random holding period.
-    On entry_day: reads pool value weights, finds the most underweight
-    pool, gets funded with that token, and calls depositToken().
-    On exit_day: calls redeem() and records the result.
-    Between entry and exit: does nothing (act() is a no-op).
+    Subclasses choose when to call ``_enter`` / ``_exit``; this base
+    provides the BuckBasket plumbing and the event-decoded counter
+    bookkeeping (``ctr['dmEntries']``, ``ctr['dmOutstandingBuck']``,
+    ``ctr['treasuryBuck']``, etc.) the loop's teardown and summary
+    expect.
     """
 
-    SEED_USDC = 2_000_000 * 10 ** 6    # ~$2M per agent (day-0 prices)
-    HOLD_MIN = 90                       # minimum hold (days)
-    HOLD_MAX = 180                      # maximum hold (days)
-    ENTRY_INTERVAL = 30                 # new agent every N days
+    SEED_USDC = 2_000_000 * 10 ** 6    # ~$2M per round (day-0 prices)
 
     def __init__(self, idx: int):
         super().__init__(idx)
-        self._entry_day: int | None = None
-        self._exit_day: int | None = None
         self._receipt_id: int | None = None
+        self._principal_tok: int = 0
+        self._principal_buck: int = 0
         self._deposit_token_idx: int | None = None
-        self._principal_tok: int = 0    # raw token units deposited
-        self._principal_buck: int = 0   # BUCK minted at deposit
-        self._entered = False
-        self._exited = False
-
-    def setup(self, d, scenario, rng) -> None:
-        super().setup(d, scenario, rng)
-        # Schedule entry/exit.  First agent enters day 0; subsequent
-        # agents are staggered by ENTRY_INTERVAL.  Each holds for a
-        # random period.
-        entry = (self.idx % 20) * self.ENTRY_INTERVAL  # supports up to 20 agents
-        hold = self.HOLD_MIN + (self.idx * 37 + 13) % (self.HOLD_MAX - self.HOLD_MIN)
-        self._entry_day = min(entry, scenario.days - 1)
-        self._exit_day = min(entry + hold, scenario.days)
-
-    def _pool_price(self, d, i: int) -> int:
-        """Implied BUCK per 1 whole token from the TOKEN/BUCK pool."""
-        tc = d.tokens[i]
-        pb = d.pool_buck[i]
-        rt = _bal(tc, pb)
-        rb = _bal(d.buck, pb)
-        if rt == 0:
-            return 0
-        return rb * (10 ** d.dec[i]) // rt
-
-    def act(self, d, scenario, day, tick, ctr) -> None:
-        # Only act on tick 0 of the relevant day.
-        if tick != 0:
-            return
-
-        if not self._entered and day >= self._entry_day:
-            self._enter(d, scenario, ctr)
-        elif (self._entered and not self._exited
-              and self._receipt_id is not None and day >= self._exit_day):
-            print(f"[dm-{self.idx}] exiting day={day} exit_day={self._exit_day}")
-            self._exit(d, ctr)
-
-    def _enter(self, d, scenario, ctr) -> None:
-        """Choose the most underweight pool and deposit into it."""
-        N = len(d.tokens)
-
-        # Read pool prices and compute target vs actual value weights.
-        prices = [self._pool_price(d, i) for i in range(N)]
-        if any(p == 0 for p in prices):
-            print(f"[dm-{self.idx}] zero prices {prices}")
-            return
-
-        target_val = []
-        for i in range(N):
-            try:
-                c = d.basket.functions.constituents(i).call()
-                ba = c[2]  # basketAmount
-            except Exception:
-                ba = 0
-            target_val.append(ba * prices[i])
-        tv_sum = sum(target_val)
-        if tv_sum == 0:
-            print(f"[dm-{self.idx}] tv_sum=0 target_val={target_val}")
-            return
-
-        actual_val = []
-        for i in range(N):
-            rt = _bal(d.tokens[i], d.pool_buck[i])
-            actual_val.append(rt * prices[i] // (10 ** d.dec[i]))
-        av_sum = sum(actual_val)
-        if av_sum == 0:
-            print(f"[dm-{self.idx}] av_sum=0 actual_val={actual_val}")
-            return
-
-        target_w = [v / tv_sum for v in target_val]
-        actual_w = [v / av_sum for v in actual_val]
-        dev = [actual_w[i] - target_w[i] for i in range(N)]
-
-        # Pick the most underweight pool.
-        tgt_idx = min(range(N), key=lambda i: dev[i])
-
-        # Fund with the target token.
-        tc = d.tokens[tgt_idx]
-        ref0 = scenario.prices.ref(tgt_idx, 0)
-        seed = self.SEED_USDC * (10 ** d.dec[tgt_idx]) // ref0
-        # Mint can be from anyone; approve + depositToken must be from the
-        # agent so transferFrom pulls the agent's tokens.
-        d.chain.send(tc.functions.mint(self.address, seed))
-        d.chain.send(tc.functions.approve(d.basket.address, seed),
-                     sender=self.account)
-        try:
-            rcpt = d.chain.send(
-                d.basket.functions.depositToken(tc.address, seed, 0),
-                sender=self.account)
-            # Extract receiptId from the Deposited event.
-            from alberta_buck.sim.deploy import DEPOSITED_TOPIC
-            for log in rcpt["logs"]:
-                if log["topics"][0] == DEPOSITED_TOPIC:
-                    self._receipt_id = int.from_bytes(log["topics"][2], "big")
-                    break
-            if self._receipt_id is not None:
-                dep = d.basket.functions.deposits(self._receipt_id).call()
-                self._principal_tok = dep[1]
-                self._principal_buck = dep[2]
-                self._deposit_token_idx = tgt_idx
-                self._entered = True
-                ctr["dmEntries"] = ctr.get("dmEntries", 0) + 1
-        except Exception as e:
-            print(f"[dm-{self.idx}] _enter failed: {e!r}")
-            self._receipt_id = None
+        self._entered: bool = False
+        self._exited: bool = False
 
     def deposit_info(self, d) -> tuple | None:
-        """Return (token_idx, principal_tok, principal_buck) for LP value.
-        Returns None once the position has been redeemed (tokens are back in
-        the EOA and counted by _bal())."""
         if (self._receipt_id is None or self._deposit_token_idx is None
                 or self._exited):
             return None
         return (self._deposit_token_idx,
                 self._principal_tok, self._principal_buck)
 
+    def _enter(self, d, scenario, ctr, tok_idx: int) -> None:
+        """Mint TOKEN to self, approve BuckBasket, depositToken."""
+        tc = d.tokens[tok_idx]
+        ref0 = scenario.prices.ref(tok_idx, 0)
+        seed = self.SEED_USDC * (10 ** d.dec[tok_idx]) // ref0
+
+        d.chain.send(tc.functions.mint(self.address, seed))
+        d.chain.send(tc.functions.approve(d.basket.address, seed),
+                     sender=self.account)
+        try:
+            from alberta_buck.sim.deploy import DEPOSITED_TOPIC
+            rcpt = d.chain.send(
+                d.basket.functions.depositToken(tc.address, seed, 0),
+                sender=self.account)
+            for log in rcpt["logs"]:
+                if log["topics"][0] == DEPOSITED_TOPIC:
+                    self._receipt_id = int.from_bytes(log["topics"][2], "big")
+                    break
+            if self._receipt_id is not None:
+                dep = d.basket.functions.deposits(self._receipt_id).call()
+                self._principal_buck = dep[0]
+                self._principal_tok = dep[1]
+                self._deposit_token_idx = tok_idx
+                self._entered = True
+                self._exited = False
+                ctr["dmEntries"] = ctr.get("dmEntries", 0) + 1
+                ctr["dmOutstandingBuck"] = (
+                    ctr.get("dmOutstandingBuck", 0) + self._principal_buck)
+                ctr["dmTotalInvested"] = (
+                    ctr.get("dmTotalInvested", 0) + seed)
+        except Exception as e:
+            print(f"[{type(self).__name__.lower()}-{self.idx}] _enter failed: {e!r}",
+                  flush=True)
+            self._receipt_id = None
+
     def _exit(self, d, ctr) -> None:
-        """Redeem the receipt NFT."""
+        """Redeem the receipt NFT.  Tracks treasury retainedBuck and the
+        TOKEN returned to the holder."""
         self._exited = True
         if self._receipt_id is None:
             return
         try:
-            d.chain.send(d.basket.functions.redeem(self._receipt_id, 0),
-                         sender=self.account)
-            print(f"[dm-{self.idx}] redeemed receiptId={self._receipt_id}")
+            from eth_abi import decode
+            from alberta_buck.sim.deploy import REDEEMED_TOPIC
+            from web3 import Web3
+            RFP_TOPIC = Web3.keccak(text=(
+                "RedeemedFromPool(uint256,address,address,"
+                "uint256,uint256,uint128)"))
+            rcpt = d.chain.send(
+                d.basket.functions.redeem(self._receipt_id, 0, 0),
+                sender=self.account)
+            print(f"[{type(self).__name__.lower()}-{self.idx}] "
+                  f"redeemed receiptId={self._receipt_id}", flush=True)
             ctr["dmExits"] = ctr.get("dmExits", 0) + 1
+            ctr["dmOutstandingBuck"] = (
+                ctr.get("dmOutstandingBuck", 0) - self._principal_buck)
+            for log in rcpt["logs"]:
+                if log["topics"][0] == RFP_TOPIC:
+                    tokToUser, _, _ = decode(
+                        ["uint256", "uint256", "uint128"],
+                        log["data"])
+                    ctr["dmTotalReturned"] = (
+                        ctr.get("dmTotalReturned", 0) + tokToUser)
+                elif log["topics"][0] == REDEEMED_TOPIC:
+                    _, retainedBuck, _ = decode(
+                        ["uint256", "uint256", "uint256"],
+                        log["data"])
+                    ctr["treasuryBuck"] = (
+                        ctr.get("treasuryBuck", 0) + retainedBuck)
+            # Reset state so the agent can re-enter on a later tick
+            # (stochastic DMs).  Bootstrap DMs override _exit to a no-op
+            # so this path is never hit.
+            self._receipt_id = None
+            self._principal_tok = 0
+            self._principal_buck = 0
+            self._deposit_token_idx = None
+            self._entered = False
         except Exception as e:
-            print(f"[dm-{self.idx}] redeem failed: {e!r}")
+            print(f"[{type(self).__name__.lower()}-{self.idx}] redeem failed: {e!r}",
+                  flush=True)
             ctr["dmExitFails"] = ctr.get("dmExitFails", 0) + 1
+
+
+@_register
+class BootstrapDMAgent(_DMBase):
+    """Deposit once at bootstrap into a fixed token (one agent per token
+    by ``idx`` order); never exit.  Used to seed empty TOKEN/BUCK pools
+    so any downstream scenario has live liquidity by tick 0.
+
+    Token assignment is round-robin on the agent's instance index
+    relative to the per-class counter; with N agents and N tokens,
+    agent k deposits into token k.  More agents than tokens cycle round.
+    """
+
+    _counter: int = 0
+
+    def __init__(self, idx: int):
+        super().__init__(idx)
+        self._seq = BootstrapDMAgent._counter
+        BootstrapDMAgent._counter += 1
+
+    def bootstrap(self, d, scenario, ctr) -> None:
+        if self._entered:
+            return
+        tok_idx = self._seq % len(d.tokens)
+        self._enter(d, scenario, ctr, tok_idx)
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        # Bootstrap agents are pinned LPs -- they never exit and never
+        # re-enter.  The deposit is made in bootstrap() before tick 0.
+        return
+
+
+@_register
+class DirectMintAgent(_DMBase):
+    """Probabilistic LP provider.
+
+    On each tick, transitions IDLE <-> ENTERED via Bernoulli trials.
+    With ``ENTER_PROB_PER_TICK = 1e-3`` and ``EXIT_PROB_PER_TICK = 5e-3``,
+    steady-state entered fraction ~17%, mean holding time ~200 ticks
+    (~50 days at 4 ticks/day), and a 50-agent population over a 365-day
+    horizon produces ~50 entries+exits -- matching the prior schedule-
+    based target without any setup-time date math.
+    """
+
+    ENTER_PROB_PER_TICK: float = 1e-3
+    EXIT_PROB_PER_TICK:  float = 5e-3
+
+    _counter: int = 0
+
+    def __init__(self, idx: int):
+        super().__init__(idx)
+        self._seq = DirectMintAgent._counter
+        DirectMintAgent._counter += 1
+        self._rng: random.Random | None = None      # set in setup()
+
+    def setup(self, d, scenario, rng) -> None:
+        super().setup(d, scenario, rng)
+        # Per-agent RNG keyed off (scenario.seed, agent.idx) for
+        # reproducibility independent of the order other agents consume
+        # the shared `rng`.  random.Random rejects tuples -- fold the
+        # key triple into a single 64-bit-safe int by hashing the bytes.
+        import hashlib
+        seed_bytes = (
+            int(scenario.seed).to_bytes(32, "big", signed=False)
+            + b"DirectMintAgent"
+            + int(self._seq).to_bytes(8, "big", signed=False)
+        )
+        self._rng = random.Random(
+            int.from_bytes(hashlib.blake2b(seed_bytes, digest_size=16).digest(),
+                           "big"))
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if self._rng is None:
+            return
+        if not self._entered:
+            if self._rng.random() < self.ENTER_PROB_PER_TICK:
+                tok_idx = self._rng.randrange(len(d.tokens))
+                self._enter(d, scenario, ctr, tok_idx)
+        else:
+            if self._rng.random() < self.EXIT_PROB_PER_TICK:
+                self._exit(d, ctr)

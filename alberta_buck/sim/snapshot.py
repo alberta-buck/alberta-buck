@@ -1,7 +1,7 @@
 """Per-day state capture -> JSON in the existing routing-sim schema.
 
-Schema is byte-compatible with test/stabilizer-routing-op47/
-test_routing_sim_plot.py so the established plot renders this unchanged:
+Schema matches alberta_buck/sim/plot_routing.py so the established plot
+renders this unchanged:
   {"tokens":[sym...], "frames":[{day, refUsd[N], spotUsdc[N], spotBuck[N],
    basketVal, buckK, supply, directTrades, cycleTrades, aggPnl}, ...]}
 """
@@ -50,15 +50,23 @@ def _pool_value_weights(d) -> list[list[float]]:
         rb = _bal(d.buck, d.pool_buck[i])
         prices.append(rb * (10 ** d.dec[i]) // rt if rt else 0)
 
-    # Target values from basket definition.
+    # Target values: basketAmount * initialPriceInBuck * initialPriceInBuck
+    # / spotPrice.  When price doubles, target halves → overweight → sell.
+    #   base = basketAmount * initialPrice_inBuck (= weight/10000)
+    #   targetVal = base * initialPrice_inBuck / spotPrice
     target_val = []
     for i in range(N):
         try:
             c = d.basket.functions.constituents(i).call()
-            ba = c[2]  # Constituent.basketAmount
+            ba = c[2]       # basketAmount
+            ip = c[3]       # initialPriceInBuck
         except Exception:
-            ba = 0
-        target_val.append(ba * prices[i] if prices[i] else 0)
+            ba, ip = 0, 0
+        base = ba * ip // (10 ** 18) if ba and ip else 0
+        if base and prices[i]:
+            target_val.append(base * ip // prices[i])
+        else:
+            target_val.append(base)
     tv_sum = sum(target_val)
 
     # Actual values from pool token-side reserves (normalized by token
@@ -146,6 +154,22 @@ class Snapshotter:
                 v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
         return v
 
+    def _basket_nav(self) -> int:
+        """Total BUCK value of ALL BuckBasket LP positions (token + BUCK
+        sides), in 6-decimal BUCK wei (BUCK uses USDC-compatible
+        decimals).  Empty pools (no reserves) contribute 0."""
+        d = self.d
+        total = 0
+        for i in range(len(d.tokens)):
+            rt = _bal(d.tokens[i], d.pool_buck[i])
+            rb = _bal(d.buck, d.pool_buck[i])
+            if rt == 0 or rb == 0:
+                continue  # empty pool
+            p = rb * (10 ** d.dec[i]) // rt   # BUCK per whole token (18d)
+            total += rt * p // (10 ** d.dec[i])  # token side value in BUCK
+            total += rb                          # BUCK side value
+        return total
+
     def _agent_value(self, agents, day, cls_name: str) -> int:
         """Portfolio value of all agents whose class name matches, including
         the value of any BuckBasket LP deposits (receipt NFTs)."""
@@ -163,7 +187,12 @@ class Snapshotter:
             if di is not None:
                 tok_idx, ptok, pbuck = di
                 v += ptok * self.s.prices.ref(tok_idx, 0) // (10 ** d.dec[tok_idx])
-                v += pbuck // (10 ** 12)  # 1 BUCK = 1 USDC at t=0; 18d→6d
+                # 1 BUCK == 1 USDC at t=0; BUCK is 6-dec just like USDC, so
+                # the BUCK-side principal contributes 1:1 to the USDC-d0
+                # value tally (the old "// 10**12" assumed BUCK was 18-dec
+                # and shrank the deposit value by 12 orders of magnitude,
+                # making DM agent P&L invisible).
+                v += pbuck
         return v
 
     def capture(self, day, ctr, agents, init_val,
@@ -214,6 +243,14 @@ class Snapshotter:
             dm_pnl = self._agent_value(
                 agents, day, "DirectMintAgent") - dm_init_val
 
+        # Basket NAV (total BUCK value of all BuckBasket LP) and
+        # outstanding DM liability (sum of buckPrincipal across active
+        # deposits).  Treasury BUCK tracks retained profit from redemptions.
+        nav = self._basket_nav()
+        out_buck = ctr.get("dmOutstandingBuck", 0)
+        treas_buck = ctr.get("treasuryBuck", 0)
+        treas_frac = treas_buck / nav if nav > 0 else 0.0
+
         self.frames.append({
             "invested": init_val,                      # arb capital (USDC,d0)
             "lp": lp,                                  # group: [feeUsd, capUsd]
@@ -236,6 +273,11 @@ class Snapshotter:
             "directMintPnl": dm_pnl,
             "dmEntries": ctr.get("dmEntries", 0),
             "dmExits": ctr.get("dmExits", 0),
+            "dmExitFails": ctr.get("dmExitFails", 0),
+            "dmTotalInvested": ctr.get("dmTotalInvested", 0),
+            "basketNav": nav,
+            "dmOutstanding": out_buck,
+            "treasuryShare": treas_frac,
         })
 
     def write(self, path=None) -> Path:

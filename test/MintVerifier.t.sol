@@ -7,6 +7,7 @@ import {BN254}                       from "../src/BN254.sol";
 import {IdentityRegistry}            from "../src/IdentityRegistry.sol";
 import {Buck}                        from "../src/Buck.sol";
 import {BuckCredit}                  from "../src/BuckCredit.sol";
+import {BuckCreditHarness}                  from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic}       from "../src/BuckKControllerStatic.sol";
 import {Notes}                       from "../src/Notes.sol";
 import {MintBatchN1Groth16Verifier}  from "../src/MintBatchN1Groth16Verifier.sol";
@@ -27,7 +28,7 @@ import {StubSpendVerifier}           from "../src/StubSpendVerifier.sol";
 contract MintVerifierTest is Test {
 
     Buck                        internal buck;
-    BuckCredit                  internal credit;
+    BuckCreditHarness                  internal credit;
     BuckKControllerStatic       internal kCtrl;
     IdentityRegistry            internal reg;
     Notes                       internal notes;
@@ -66,11 +67,12 @@ contract MintVerifierTest is Test {
         _registerFrom(ij, "alice", alice);
         _registerFrom(ij, "bob",   bob);
 
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         g16N1   = new MintBatchN1Groth16Verifier();
         g16N2   = new MintBatchN2Groth16Verifier();
@@ -188,7 +190,7 @@ contract MintVerifierTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(client);
-        credit.activate(tokenId, faceValue);
+        credit.forceActivate(tokenId, faceValue);
     }
 
     function _approveNotes(address from, uint256 amount) internal {

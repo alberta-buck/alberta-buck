@@ -39,10 +39,9 @@ treated as an arbitrarily-valued, unpegged token (it may sit at any
 value and drift freely); the focus is the routing behaviour of
 BUCK-unaware actors over the RWA TOKENs.
 
-This document describes the system as built.  An in-process Forge
-variant (=test/stabilizer-routing-op47/RoutingSim.t.sol=) is kept
-alongside as a fast CI check; everything below concerns the faithful
-externally-driven (anvil + web3.py) implementation.
+This document describes the system as built: the faithful
+externally-driven (anvil + web3.py) implementation in =alberta_buck/sim/=,
+driven by =make sim-run= / =make sim-run-rebalancing=.
 
 * Architecture
 
@@ -68,7 +67,7 @@ externally-driven (anvil + web3.py) implementation.
    +-----------------------------------------------------------+
         |
         v
-   test/vectors/routing-sim.json  ->  test_routing_sim_plot.py
+   test/vectors/routing-sim.json  ->  alberta_buck/sim/plot_routing.py
                                   ->  images/routing-sim.png
 #+END_SRC
 
@@ -131,8 +130,8 @@ still using the BUCK pools as part of their routes.
 
 The org-doc's historical worry was compiling the V4-era Universal
 Router.  Resolved: =lib/universal-router= compiles cleanly as its own
-sub-project; =test/stabilizer-routing-op47/build_router.sh= builds it
-and stages =artifacts/UniversalRouter.json=, which the Python driver
+sub-project; =scripts/build_router.sh= builds it and stages
+=alberta_buck/sim/artifacts/UniversalRouter.json=, which the Python driver
 deploys via raw bytecode.  No =SimSwapper= fallback is needed -- the
 *real* router executes every routed trade.
 
@@ -216,8 +215,7 @@ v3 artifacts; this is intentional and documented in the Makefile.
 * Snapshots and Plot
 
 One JSON frame per day (=test/vectors/routing-sim.json=), schema
-byte-compatible with the existing
-=test/stabilizer-routing-op47/test_routing_sim_plot.py= so the plot
+matching =alberta_buck/sim/plot_routing.py= so the plot
 renders unchanged: per-token CSV reference, TOKEN/USDC implied price,
 TOKEN/BUCK implied price; =basketValueInBuck=; =buckK=; BUCK
 =totalSupply=; cumulative direct (whale) vs BUCK-routed trade counts;

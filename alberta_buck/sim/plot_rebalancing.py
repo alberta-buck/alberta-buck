@@ -112,33 +112,36 @@ def test_rebalancing_sim_plot():
     ax.grid(True, alpha=0.3)
     ax.set_title("TOKEN/BUCK pool value weights: actual vs basket target")
 
-    # ---- Panel 5: direct-mint P&L + basket value -------------------- #
+    # ---- Panel 5: treasury compounding (NAV, outstanding, treasury) -- #
     ax = axes[4]
     handles5 = []
-    rp = [f.get("rebalancerPnl", 0) / E6 for f in fr]
-    l1, = ax.plot(days, rp, color="tab:cyan", linewidth=1.0, linestyle=":",
-                  label="rebalancer P&L ($)")
+    nav = [f.get("basketNav", 0) / E18 for f in fr]
+    l1, = ax.plot(days, nav, color="tab:blue", linewidth=1.5,
+                  label="basket NAV (total LP BUCK value)")
     handles5.append(l1)
-    dp = [f.get("directMintPnl", 0) / E6 for f in fr]
-    l2, = ax.plot(days, dp, color="tab:blue", linewidth=1.4,
-                  label="direct-mint agents P&L ($)")
+    out = [f.get("dmOutstanding", 0) / E18 for f in fr]
+    l2, = ax.plot(days, out, color="tab:orange", linewidth=1.2,
+                  linestyle="--",
+                  label="DM outstanding (BUCK principal)")
     handles5.append(l2)
-    ax.set_ylabel("agent P&L ($)")
+    tb = [f.get("treasuryBuck", 0) / E18 for f in fr]
+    l3, = ax.plot(days, tb, color="tab:green", linewidth=1.4,
+                  label="treasury BUCK (retained profit)")
+    handles5.append(l3)
+    ax.set_ylabel("BUCK (18d)")
     ax.set_xlabel("Day")
     ax.grid(True, alpha=0.3)
 
     ax2 = ax.twinx()
-    bv = [f.get("basketVal", 0) for f in fr]
-    l3, = ax2.plot(days, [_i(v) / E18 for v in bv], color="tab:green",
-                   linewidth=1.2, label="basketValueInBuck")
-    l4 = ax2.axhline(1.0, color="black", alpha=0.3, linewidth=0.5,
-                     label="target 1.0 BUCK")
-    ax2.set_ylabel("basket value (BUCK)", color="tab:green")
-    ax2.tick_params(axis="y", labelcolor="tab:green")
-    handles5.extend([l3, l4])
+    ts = [f.get("treasuryShare", 0) * 100 for f in fr]
+    l4, = ax2.plot(days, ts, color="tab:red", linewidth=1.0,
+                   linestyle=":", label="treasury share (%)")
+    handles5.append(l4)
+    ax2.set_ylabel("treasury share (%)", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
 
-    ax.legend(handles=handles5, loc="upper left", fontsize=8)
-    ax.set_title("Direct-mint & rebalancer P&L + basket value")
+    ax.legend(handles=handles5, loc="upper left", fontsize=7)
+    ax.set_title("Basket NAV, outstanding, treasury BUCK & share")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -158,10 +161,22 @@ def test_rebalancing_sim_plot():
     last = fr[-1]
     dm_entries = last.get("dmEntries", 0)
     dm_exits = last.get("dmExits", 0)
+    nav_final = last.get("basketNav", 0) / E18
+    out_final = last.get("dmOutstanding", 0) / E18
+    tb_final = last.get("treasuryBuck", 0) / E18
+    ts_final = last.get("treasuryShare", 0) * 100
+    invested = last.get("dmTotalInvested", 0)
+    avg_roi = 100 * tb_final / (invested / E18) if invested else 0
     print(f"  direct trades: {last.get('directTrades',0)}  "
           f"BUCK-routed: {last.get('cycleTrades',0)}  "
           f"rebalance: {last.get('rebalanceTrades',0)}")
+    print(f"  Treasury BUCK: {tb_final:,.2f}  "
+          f"share of NAV: {ts_final:.2f}%  "
+          f"avg DM ROI: {avg_roi:.2f}%")
     print(f"  direct-mint entries: {dm_entries}  exits: {dm_exits}")
+    print(f"  basket NAV: {nav_final:,.2f} BUCK  "
+          f"outstanding: {out_final:,.2f} BUCK  "
+          f"treasury share: {ts_final:.2f}%")
     rp_final = last.get("rebalancerPnl", 0) / E6
     dp_final = last.get("directMintPnl", 0) / E6
     print(f"  rebalancer P&L: ${rp_final:,.0f}  "

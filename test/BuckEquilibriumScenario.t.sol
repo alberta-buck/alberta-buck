@@ -7,6 +7,7 @@ import {BN254}                 from "../src/BN254.sol";
 import {IdentityRegistry}      from "../src/IdentityRegistry.sol";
 import {Buck}                  from "../src/Buck.sol";
 import {BuckCredit}            from "../src/BuckCredit.sol";
+import {BuckCreditHarness}            from "./harness/BuckCreditHarness.sol";
 import {BuckKPeggedHarness}    from "./harness/BuckKPeggedHarness.sol";
 
 /// @dev Mock USDC for the equilibrium scenario.  Name differs from LifecycleUSDC
@@ -111,7 +112,7 @@ contract BuckEquilibriumScenarioTest is Test {
     address internal constant ISSUER = address(0x1551E1);
 
     Buck                internal buck;
-    BuckCredit          internal credit;
+    BuckCreditHarness          internal credit;
     BuckKPeggedHarness  internal kCtrl;
     IdentityRegistry    internal reg;
     address             internal usdc;
@@ -181,11 +182,12 @@ contract BuckEquilibriumScenarioTest is Test {
         alice = address(uint160(_u(".alice.registrant")));
         _registerAlice();
 
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKPeggedHarness(KP, KI, KD, CTRL_DT, BUCKK_MIN, BUCKK_MAX, BUCKK_INIT, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         usdc = address(new EqUSDC());
 
@@ -238,28 +240,36 @@ contract BuckEquilibriumScenarioTest is Test {
     // ---- Main test ------------------------------------------------------- //
 
     function test_equilibrium_18_months() public {
-        uint256 endTime  = block.timestamp + DURATION_DAYS * 1 days;
-        uint256 nextSnap = block.timestamp;
-        uint256 nextReb  = block.timestamp + REBAL_DAYS * 1 days;
-        uint256 nextHankBuy = block.timestamp + REBAL_DAYS * 1 days;
+        // NOTE: solc 0.8.28's Yul-CSE optimizer caches `block.timestamp`
+        // reads across vm.warp -- consecutive `vm.warp(block.timestamp +
+        // TICK)` calls would fold and infinitely loop here (the while
+        // condition would never advance).  Drive every timestamp read
+        // off the local `t` instead; only the cheatcode argument is
+        // computed from `t`, so the optimizer can't fold across it.
+        uint256 t        = block.timestamp;
+        uint256 endTime  = t + DURATION_DAYS * 1 days;
+        uint256 nextSnap = t;
+        uint256 nextReb  = t + REBAL_DAYS * 1 days;
+        uint256 nextHankBuy = t + REBAL_DAYS * 1 days;
 
-        while (block.timestamp < endTime) {
+        while (t < endTime) {
             _processArrivals();
             _processDepartures();
             _processHankArrivals();
-            if (block.timestamp >= nextReb) {
+            if (t >= nextReb) {
                 _rebalance(_monthSeed());
-                nextReb = block.timestamp + REBAL_DAYS * 1 days;
+                nextReb = t + REBAL_DAYS * 1 days;
             }
-            if (block.timestamp >= nextHankBuy) {
+            if (t >= nextHankBuy) {
                 _hankMonthlyBuys();
-                nextHankBuy = block.timestamp + REBAL_DAYS * 1 days;
+                nextHankBuy = t + REBAL_DAYS * 1 days;
             }
-            if (block.timestamp >= nextSnap) {
+            if (t >= nextSnap) {
                 _snap();
-                nextSnap = block.timestamp + SNAP_DAYS * 1 days;
+                nextSnap = t + SNAP_DAYS * 1 days;
             }
-            vm.warp(block.timestamp + TICK_DAYS * 1 days);
+            t += TICK_DAYS * 1 days;
+            vm.warp(t);
         }
         _snap();
         _writeJson();
@@ -347,7 +357,7 @@ contract BuckEquilibriumScenarioTest is Test {
             BuckCredit.DepreciationType.NONE, 0, uint48(block.timestamp), 0
         );
         vm.prank(alice);
-        credit.activate(aliceTokenId, ALICE_FACEVALUE);
+        credit.forceActivate(aliceTokenId, ALICE_FACEVALUE);
 
         // Each Carol's vehicle-style NFT (1.5 %/yr premium, no depreciation
         // to keep the math focused on the funding-factor loop).
@@ -357,7 +367,7 @@ contract BuckEquilibriumScenarioTest is Test {
                 BuckCredit.DepreciationType.NONE, 0, uint48(block.timestamp), CAROL_PREMIUM_BP
             );
             vm.prank(carolAddrs[i]);
-            credit.activate(tid, CAROL_FACEVALUE);
+            credit.forceActivate(tid, CAROL_FACEVALUE);
             carols[i].tokenId = tid;
         }
     }

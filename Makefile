@@ -19,8 +19,13 @@ ANVIL_PORT		?= 8545
 ANVIL_BLOCK_TIME	?= 0
 FORK_BLOCK		?=
 
-# Forge options
-FORGE_OPTS		?= --optimize --optimizer-runs 200
+# Forge options.  --use 0.8.28 sidesteps a solc 0.8.31 IR codegen bug
+# ("Modifiers not implemented yet"); the v2/v3 builds use their own
+# pragmas (=0.5.16, =0.7.6) so we skip them here and they pick up via
+# the FOUNDRY_PROFILE=v3 path / their own solc.
+FORGE_OPTS		?= --optimize --optimizer-runs 200 --use 0.8.28 \
+			   --skip 'src/uniswap_v2_build/**' \
+			   --skip 'src/uniswap_v3_build/**'
 
 # Fork block pinning (deterministic tests): set FORK_BLOCK=12345 to pin
 ifdef FORK_BLOCK
@@ -40,7 +45,7 @@ endif
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
 .PHONY: sim sim-build sim-run sim-test sim-plot
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
-.PHONY: prices-routing vector-routing plot-routing images-routing
+.PHONY: prices-routing plot-routing
 
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -52,6 +57,10 @@ build:
 
 test:
 	forge test $(FORGE_OPTS) -vvv
+unit-%:
+	forge test $(FORGE_OPTS) --match-test $* -vvv
+path-%:
+	forge test $(FORGE_OPTS) --match-path $* -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:
@@ -156,20 +165,17 @@ plots:			plot-lifecycle plot-equilibrium plot-arb
 images:			vectors plots
 
 
-# ── Routing stabilizer simulation ─────────────────────────────────────
+# ── Sim inputs: price CSVs + Universal Router artifact ────────────────
 #
-# Builds the Universal Router artifact, generates price CSVs, runs the
-# Forge test, and renders the plot.  The UR lives in a sub-project with
-# its own foundry.toml (solc 0.8.26, via_ir); we build it separately and
-# stage the artifact, then temporarily disable its foundry.toml during
-# the main project's forge test to avoid test-discovery interference.
+# Shared inputs for the web3-driven simulation (see "Externally-driven
+# sim" below): generate the commodity price CSVs and build the Universal
+# Router artifact.  The UR lives in a sub-project with its own
+# foundry.toml (solc 0.8.26, via_ir), so we build it separately and stage
+# the artifact under alberta_buck/sim/artifacts/.
 #
-#   make images-routing       # prices -> router -> test -> plot (full pipeline)
-#   make vector-routing       # just the forge test (after prices + router)
-#   make plot-routing         # just the Python plot
-#   make prices-routing       # regenerate price CSVs only
+#   make prices-routing       # (re)generate the commodity price CSVs
+#   make plot-routing         # render images/routing-sim.png from the sim JSON
 
-ROUTING_DIR	= test/stabilizer-routing-op47
 SIM_PRICES_DIR  = alberta_buck/sim/prices
 SIM_PLOT_SCRIPT = alberta_buck/sim/plot_routing.py
 SIM_GEN_PRICES  = alberta_buck/sim/gen_prices.py
@@ -182,32 +188,14 @@ ROUTING_IMAGE	= images/routing-sim.png
 
 prices-routing:	$(ROUTING_PRICES)
 
-# Generate price CSVs in alberta_buck/sim/prices/; symlink back to
-# test/stabilizer-routing-op47/ for the legacy Forge test compatibility.
+# Generate the commodity price CSVs in alberta_buck/sim/prices/.
 $(ROUTING_PRICES): $(SIM_GEN_PRICES)
 	python3 $(SIM_GEN_PRICES)
-	mkdir -p $(ROUTING_DIR)
-	cd $(ROUTING_DIR) && \
-		ln -sf ../../$(SIM_PRICES_DIR)/paxg.csv paxg.csv && \
-		ln -sf ../../$(SIM_PRICES_DIR)/cbbtc.csv cbbtc.csv && \
-		ln -sf ../../$(SIM_PRICES_DIR)/aoil.csv aoil.csv
 
 $(ROUTING_ARTIFACT):
 	( cd lib/universal-router && FORK_URL=http://localhost forge build --skip test --skip script )
 	mkdir -p $(SIM_ARTIFACTS)
 	cp lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json $@
-	mkdir -p $(ROUTING_DIR)/artifacts
-	cd $(ROUTING_DIR)/artifacts && ln -sf ../../$(SIM_ARTIFACTS)/UniversalRouter.json UniversalRouter.json
-
-vector-routing:	$(ROUTING_PRICES) $(ROUTING_ARTIFACT)
-	@test -f lib/universal-router/foundry.toml.bak || \
-		cp lib/universal-router/foundry.toml lib/universal-router/foundry.toml.bak 2>/dev/null || true
-	cp lib/universal-router/foundry.toml lib/universal-router/foundry.toml.bak 2>/dev/null; \
-	touch lib/universal-router/foundry.toml 2>/dev/null; \
-	rm lib/universal-router/foundry.toml 2>/dev/null || true; \
-	forge test $(FORGE_OPTS) --match-contract RoutingSimTest --skip 'test/stabilizer-routing-dsv4/*' -vv; \
-	EX=$$?; mv lib/universal-router/foundry.toml.bak lib/universal-router/foundry.toml 2>/dev/null || true; \
-	exit $$EX
 
 plot-routing:	$(ROUTING_VECTOR)
 	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
@@ -215,7 +203,6 @@ plot-routing:	$(ROUTING_VECTOR)
 $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
 
-images-routing:	prices-routing $(ROUTING_ARTIFACT) vector-routing plot-routing
 
 
 # ── Externally-driven sim (anvil + web3.py) ──────────────────────────
@@ -238,11 +225,50 @@ SIM_TICKS	?= 4
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 
-# SimLP + Direct-stack artifacts.  Scoped build skips re-compiling the
-# 0.7.6 v3-core trigger (incompatible with the project's via_ir); the
-# cached v3 artifacts are reused as-is.
-sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES)
+# Two-step Solidity build:
+#  (1) v3 profile: compile 0.7.6 Uniswap V3 core contracts without via_ir.
+#  (2) default profile: compile everything else with via_ir enabled
+#      (required for BuckBasket's deep call stack).  Skips the 0.7.6
+#      trigger to avoid the IR-incompatibility error.
+# Both profiles share the same ``out/`` directory.
+sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) v2-patch-init-code-hash
+	FOUNDRY_PROFILE=v3 forge build --skip test --skip script
 	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
+
+# ── Uniswap V2 init-code-hash patch ──────────────────────────────────────
+#
+# UniswapV2Library.pairFor hardcodes a CREATE2 init-code-hash constant
+# (lib/v2-periphery/contracts/libraries/UniswapV2Library.sol).  The
+# upstream value is for the mainnet-deployed UniswapV2Pair bytecode; when
+# we compile UniswapV2Pair locally (0.5.16, default optimizer) the
+# bytecode -- and therefore its init-code-hash -- differs, so
+# UniswapV2Router02 computes pair addresses the local factory did not
+# deploy and every router call reverts with "call to non-contract
+# address".
+#
+# Fix: after the local UniswapV2Pair artifact exists, compute its
+# init-code-hash with `cast keccak` and patch UniswapV2Library.sol in
+# place.  Subsequent forge builds recompile Router02 against the
+# corrected library so router.pairFor() == factory.getPair().
+#
+# `lib/` is gitignored (forge install --no-git), so this target is also
+# the source of truth for re-applying the patch on a fresh dependency
+# install.  Run `make v2-patch-init-code-hash` (or any `sim-build`
+# derivative) after `forge install` to re-apply.
+.PHONY: v2-patch-init-code-hash
+v2-patch-init-code-hash:
+	@# Phase 1: ensure UniswapV2Pair artifact exists so we can hash it.
+	@test -f out/UniswapV2Pair.sol/UniswapV2Pair.json || \
+		forge build --skip test --skip script --skip 'src/uniswap_v3_build/*' >/dev/null
+	@HASH=$$(cast keccak $$(jq -r '.bytecode.object' out/UniswapV2Pair.sol/UniswapV2Pair.json) | sed 's/^0x//'); \
+		LIB=lib/v2-periphery/contracts/libraries/UniswapV2Library.sol; \
+		CURRENT=$$(grep -oE "hex'[0-9a-f]*' // init code hash" $$LIB | sed -E "s/hex'([0-9a-f]*)'.*/\1/"); \
+		if [ "$$CURRENT" = "$$HASH" ]; then \
+			echo "v2-patch: UniswapV2Library hash already correct ($$HASH)"; \
+		else \
+			sed -i.bak "s/hex'[0-9a-f]*' \/\/ init code hash/hex'$$HASH' \/\/ init code hash/" $$LIB; \
+			echo "v2-patch: patched UniswapV2Library init-code-hash $$CURRENT -> $$HASH"; \
+		fi
 
 sim-run:	sim-build
 	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)

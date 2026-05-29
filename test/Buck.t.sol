@@ -7,6 +7,7 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {MockBasket} from "./mocks/MockBasket.sol";
@@ -15,7 +16,7 @@ import {MockBasket} from "./mocks/MockBasket.sol";
 contract BuckTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
 
@@ -44,11 +45,12 @@ contract BuckTest is Test {
         _registerBob();
 
         // Buck stack.
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);   // BUCK_K = 1.0
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
     }
 
     // ---- JSON helpers (duplicated from IdentityRegistry.t.sol intentionally;
@@ -162,7 +164,19 @@ contract BuckTest is Test {
             premiumRate
         );
         vm.prank(client);
-        credit.activate(tokenId, faceValue);
+        credit.forceActivate(tokenId, faceValue);
+    }
+
+    /// @dev Under Phase 1b semantics, balanceOf(non-Carrying holder) ==
+    ///      held + max(0, creditLimit - debt).  When the holder has been
+    ///      mint()'ed against (signed raw == -principal), this collapses to
+    ///      creditLimit - principal.  Helper for assertions that previously
+    ///      expected `balanceOf == amount` post-mint.
+    function _expectedHolderBalance(address holder, uint256 poolPrincipal)
+        internal view returns (uint256)
+    {
+        uint256 limit = buck.creditLimit(holder);
+        return limit > poolPrincipal ? limit - poolPrincipal : 0;
     }
 
     // ---- constructor -------------------------------------------------------
@@ -196,9 +210,9 @@ contract BuckTest is Test {
     }
 
     function test_mint_revertsWithoutCredit() public {
-        // Alice has no BuckCredit NFT yet -> credit limit = 0.
+        // Alice has no BuckCredit NFT yet -> insufficient credit allocation.
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: exceeds credit limit"));
+        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
         buck.mint(1e6);
     }
 
@@ -213,10 +227,14 @@ contract BuckTest is Test {
         //   denom = BP - 50*10 = 9500
         //   take  = ceil(100e6 * 10000 / 9500) = 105_263_158
         //   pool  = take - amount             =   5_263_158
-        assertEq(buck.balanceOf(alice), amount,            "holder gets exactly amount");
+        // Phase 1b: mint does NOT deliver `amount` to the holder.  It opens
+        // credit headroom: alice's signed raw drops to -poolPrincipal and her
+        // balanceOf (held + unused credit) equals creditLimit - poolPrincipal.
+        assertEq(buck.signedRawBalanceOf(alice), -int256(uint256(5_263_158)),
+                 "alice's signed raw = -principal");
+        assertEq(buck.balanceOf(alice), 1000e6 - 5_263_158, "alice spendable = limit - debt");
         assertEq(buck.balanceOf(POOL),  5_263_158,         "pool principal = annual_premium * 10");
-        assertEq(buck.totalSupply(),    amount + 5_263_158, "total = delivery + principal");
-        assertEq(buck.storedLimit(alice), 1000e6,           "limit ratchet up");
+        assertEq(buck.totalSupply(),    5_263_158,         "total = poolPrincipal (alice contributes 0 positive)");
     }
 
     function test_mint_cheapestFirst_picksLowestRateNFT() public {
@@ -230,10 +248,12 @@ contract BuckTest is Test {
 
         // denom_cheap = 9500, take = ceil(80e6 * 10000/9500) = 84_210_527
         // pool        = take - 80e6 = 4_210_527
+        uint256 limit = buck.creditLimit(alice);    // 200e6 (sum of both activated NFTs)
         assertEq(buck.mintsBacked(cheap), 84_210_527, "cheap NFT consumed first");
         assertEq(buck.mintsBacked(dear),  0,          "dear NFT untouched");
         assertEq(buck.balanceOf(POOL),    4_210_527,  "pool principal");
-        assertEq(buck.balanceOf(alice),   80e6,       "holder gets net amount");
+        assertEq(buck.signedRawBalanceOf(alice), -int256(uint256(4_210_527)), "alice debt = principal");
+        assertEq(buck.balanceOf(alice),   limit - 4_210_527,  "alice spendable = limit - debt");
     }
 
     function test_mint_cheapestFirst_spillsIntoNextNFT() public {
@@ -247,10 +267,12 @@ contract BuckTest is Test {
         // pool_cheap = 5e6, remaining = 150e6 - 95e6 = 55e6.
         // Dear: denom = 8000, take = ceil(55e6 * 10000/8000) = 68_750_000,
         // pool_dear = 68.75e6 - 55e6 = 13_750_000.
+        uint256 limit = buck.creditLimit(alice);
         assertEq(buck.mintsBacked(cheap), 100e6,      "cheap exhausted");
         assertEq(buck.mintsBacked(dear),  68_750_000, "spillover to dear NFT");
         assertEq(buck.balanceOf(POOL),    18_750_000, "pool = 5e6 + 13.75e6");
-        assertEq(buck.balanceOf(alice),   150e6);
+        assertEq(buck.signedRawBalanceOf(alice), -int256(uint256(18_750_000)));
+        assertEq(buck.balanceOf(alice),   limit - 18_750_000);
     }
 
     function test_mint_explicitTokenIds_overridesOrder() public {
@@ -268,10 +290,12 @@ contract BuckTest is Test {
 
         // Dear: denom = 8000, take = ceil(80e6 * 10000/8000) = 100e6 (full cap),
         //        pool_dear = 20e6.  remaining = 80e6 - 80e6 = 0 (full netCap).
+        uint256 limit = buck.creditLimit(alice);
         assertEq(buck.mintsBacked(dear),  100e6, "dear NFT drawn first per caller order");
         assertEq(buck.mintsBacked(cheap), 0);
         assertEq(buck.balanceOf(POOL),    20e6, "100e6 take * 200bp * 10 / BP = 20e6");
-        assertEq(buck.balanceOf(alice),   80e6);
+        assertEq(buck.signedRawBalanceOf(alice), -int256(uint256(20e6)));
+        assertEq(buck.balanceOf(alice),   limit - 20e6);
     }
 
     function test_mint_explicitTokenIds_revertsIfInsufficient() public {
@@ -298,18 +322,18 @@ contract BuckTest is Test {
         buck.mint(10e6, order);
     }
 
-    function test_mint_storedLimitOnlyIncreases() public {
+    function test_creditLimit_tracksBuckK() public {
+        // Phase 1b: creditLimit is live (no storedLimit ratchet).  Lowering
+        // BUCK_K shrinks the holder's credit headroom in proportion.
         _grantCredit(alice, 1000e6);
-        vm.prank(alice);
-        buck.mint(50e6);
-        assertEq(buck.storedLimit(alice), 1000e6);
+        assertEq(buck.creditLimit(alice), 1000e6, "K=1.0: limit == activated");
 
-        // Reduce BUCK_K to half; credit value would imply 500e6 limit, but stored limit holds.
         vm.prank(GOV);
         kCtrl.setBuckK(0.5e18);
-        vm.prank(alice);
-        buck.mint(10e6);
-        assertEq(buck.storedLimit(alice), 1000e6, "stored limit stays at peak");
+        // The cache is per-block; bump the block so the next read recomputes
+        // against the new K.  (BUCK_K changes don't fire BuckCredit hooks.)
+        vm.roll(block.number + 1);
+        assertEq(buck.creditLimit(alice), 500e6, "K=0.5: limit halves");
     }
 
     function test_mint_rejectsWhenAggregatedExceedsLimit() public {
@@ -317,21 +341,34 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(50e6);
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: exceeds credit limit"));
+        // The second mint tries to draw 60e6 net.  At 50bp+10x, that wants
+        // take=63.16e6; combined with the first mint's take=52.63e6 the
+        // total would be 115.79e6 > 100e6 face -> _allocateMint runs out
+        // of capacity before satisfying the remaining draw.
+        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
         buck.mint(60e6);
     }
 
     // ---- burn --------------------------------------------------------------
 
-    function test_burn_reducesBalance() public {
+    function test_burn_reducesDebt() public {
+        // Phase 1b: burn() repays principal -- signed raw climbs toward zero.
+        // The user's spendable (balanceOf) GROWS by `refund_i` because their
+        // unused credit headroom expands as debt shrinks.
         _grantCredit(alice, 1000e6);
         vm.prank(alice);
         buck.mint(100e6);
-        uint256 before_ = buck.balanceOf(alice);
+        int256 signedBefore = buck.signedRawBalanceOf(alice);  // ~ -5_263_158
 
         vm.prank(alice);
         buck.burn(10e6);
-        assertEq(buck.balanceOf(alice), before_ - 10e6);
+
+        // unwind = ceil(10e6 * 10000 / 9500) = 10_526_316
+        // refund = unwind - 10e6              =     526_316
+        // alice's signed raw climbs by refund: -5_263_158 + 526_316 = -4_736_842
+        int256 signedAfter = buck.signedRawBalanceOf(alice);
+        assertEq(signedAfter - signedBefore, int256(uint256(526_316)),
+                 "burn refunds principal: signed raw climbs by refund_i");
     }
 
     function test_burn_refundsPoolPrincipalProportionally() public {
@@ -340,6 +377,7 @@ contract BuckTest is Test {
         buck.mint(100e6);
         uint256 backedAfterMint = buck.mintsBacked(tid);    // 105_263_158
         uint256 poolAfterMint   = buck.balanceOf(POOL);     //   5_263_158
+        int256  signedAfterMint = buck.signedRawBalanceOf(alice);
 
         vm.prank(alice);
         buck.burn(10e6);
@@ -347,7 +385,8 @@ contract BuckTest is Test {
         // Inverse of mint at the same rate:
         //   unwind = ceil(10e6 * 10000 / 9500) = 10_526_316
         //   refund = unwind - 10e6              =     526_316
-        assertEq(buck.balanceOf(alice),   100e6 - 10e6, "holder net burn");
+        assertEq(buck.signedRawBalanceOf(alice), signedAfterMint + int256(uint256(526_316)),
+                 "alice's debt shrinks by refund_i");
         assertEq(buck.balanceOf(POOL),    poolAfterMint - 526_316, "pool refund returned");
         assertEq(buck.mintsBacked(tid),   backedAfterMint - 10_526_316, "coverage unwound");
     }
@@ -370,9 +409,12 @@ contract BuckTest is Test {
 
         // Burn against the cheap NFT (the one with allocation) succeeds.
         order[0] = cheap;
+        int256 signedBefore = buck.signedRawBalanceOf(alice);
         vm.prank(alice);
         buck.burn(10e6, order);
-        assertEq(buck.balanceOf(alice), 50e6 - 10e6);
+        // refund_cheap = ceil(10e6*10000/9500) - 10e6 = 526_316
+        assertEq(buck.signedRawBalanceOf(alice), signedBefore + int256(uint256(526_316)),
+                 "alice debt shrinks by refund_i (cheap-rate unwind)");
     }
 
     function test_burn_mostExpensiveFirst_releasesDearestFirst() public {
@@ -389,6 +431,7 @@ contract BuckTest is Test {
         uint256 backedDearBefore  = buck.mintsBacked(dear);    // 68_750_000
         uint256 poolBefore        = buck.balanceOf(POOL);      // 18_750_000
 
+        int256 signedBefore = buck.signedRawBalanceOf(alice);
         vm.prank(alice);
         buck.burn(50e6);
 
@@ -400,7 +443,8 @@ contract BuckTest is Test {
                  "dear NFT consumed by 62.5e6");
         assertEq(buck.balanceOf(POOL),    poolBefore - 12_500_000,
                  "pool refunds the dear-rate principal first");
-        assertEq(buck.balanceOf(alice),   150e6 - 50e6, "holder net burn");
+        assertEq(buck.signedRawBalanceOf(alice), signedBefore + int256(uint256(12_500_000)),
+                 "alice debt shrinks by dear-rate refund");
     }
 
     function test_burn_mostExpensiveFirst_spillsIntoCheap() public {
@@ -417,12 +461,14 @@ contract BuckTest is Test {
         // Cheap denom = 9500, unwind = ceil(45e6*10000/9500) = 47_368_422,
         // refund_cheap = 47.37e6 - 45e6 = 2_368_422.
         // Total refund = 13_750_000 (dear) + 2_368_422 (cheap) = 16_118_422.
+        int256 signedBefore = buck.signedRawBalanceOf(alice);
         vm.prank(alice);
         buck.burn(100e6);
 
         assertEq(buck.mintsBacked(dear),  0,                          "dear fully unwound");
         assertEq(buck.mintsBacked(cheap), 100e6 - 47_368_422,         "cheap partially unwound");
-        assertEq(buck.balanceOf(alice),   50e6,                        "holder burned 100e6");
+        assertEq(buck.signedRawBalanceOf(alice), signedBefore + int256(uint256(16_118_422)),
+                 "alice debt shrinks by total refund");
         // 18_750_000 minted to pool initially; 16_118_422 refunded.
         assertEq(buck.balanceOf(POOL),    18_750_000 - 16_118_422,    "pool refund spans both NFTs");
     }
@@ -536,73 +582,205 @@ contract BuckTest is Test {
     }
 
     // ---- funding factor gate ------------------------------------------------
+    //
+    // Gate semantic (Buck._mintAllocated, pre-allocation):
+    //     require(balanceOf(minter) >= amount * fundingFactor / 1e18,
+    //             "BUCK: insufficient mint funding")
+    //
+    // balanceOf on a non-Carrying account is `held + unusedCredit`, so the
+    // same line covers both regimes:
+    //   * no prior activation -> unusedCredit = 0; gate forces real held BUCK
+    //     acquired on the open market.
+    //   * already activated -> unusedCredit counts; gate forces "not maxed".
 
+    /// @dev Static controller returns fundingFactor() == 0 -- gate disabled,
+    ///      any mint that fits the credit allocator goes through.  Sanity
+    ///      check that the default test stack does not silently fail.
+    function test_mint_staticControllerDisablesFundingGate() public {
+        _grantCredit(alice, 1000e6);
+        assertEq(kCtrl.fundingFactor(), 0, "static fundingFactor must be 0");
+
+        vm.prank(alice);
+        buck.mint(500e6);                       // no held BUCK; no revert
+    }
+
+    /// @dev With the PID-direct controller signalling BUCK undervaluation
+    ///      (basket > 1.0 BUCK), fundingFactor() rises above 1.0 and the
+    ///      reserve gate bites: minting `amount` requires balanceOf >=
+    ///      amount * factor / 1e18.  Alice has only her unused credit (no
+    ///      held BUCK) and asks for an amount the factor pushes past her
+    ///      headroom -- the gate must reject.
     function test_mint_revertsWhenFundingFactorUnsatisfied() public {
-        // Deploy a fresh stack: new IdentityRegistry, controller with real
-        // funding factor, and Buck.  Alice needs a fresh registration.
+        (Buck b, BuckKControllerDirect kc, BuckCreditHarness c)
+            = _freshStackWithDirectController();
+
+        // Basket > 1.0 BUCK -> BUCK undervalued -> factor pushes above 1.0.
+        // factor = max(0, 1e18 + 10 * (basket - 1.0) * 1e18 / basket)
+        // basket = 1.05e18 -> factor ~= 1 + 10 * 0.05 / 1.05 ~= 1.476e18.
+        MockBasket basket = new MockBasket();
+        basket.setBasketValue(int256(1.05e18));
+        vm.prank(GOV);
+        kc.setBasket(address(basket));
+        vm.warp(block.timestamp + 61);
+        kc.compute();
+        assertGt(kc.fundingFactor(), 1e18, "factor should exceed 1.0");
+
+        // Premium-bearing credit (50bp) that is NOT pre-activated, so alice's
+        // pre-activation balanceOf is zero (no held BUCK, no unused credit).
+        // mint() activates it and incurs poolPrincipal > 0; the reserve gate
+        // then requires balanceOf >= poolPrincipal * factor > 0, which her
+        // zero balance cannot meet.  Counter-cyclical: you cannot bootstrap
+        // *insured* credit from nothing while BUCK is undervalued.
+        c.createCredit(
+            alice, 0, 1000e6, 1000e6,
+            BuckCredit.DepreciationType.NONE, 0, 0, 50   // 50bp premium, unactivated
+        );
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: insufficient mint funding"));
+        b.mint(100e6);
+    }
+
+    /// @dev With factor below 1.0 (basket < 1.0 BUCK -> BUCK overvalued ->
+    ///      PID relaxes the reserve), the same balance suffices for a mint
+    ///      it could not satisfy at factor >= 1.0.  Demonstrates the
+    ///      counter-cyclical direction: the gate eases when the system
+    ///      already wants more BUCK in circulation.
+    function test_mint_passesWhenFundingFactorRelaxed() public {
+        (Buck b, BuckKControllerDirect kc, BuckCreditHarness c)
+            = _freshStackWithDirectController();
+
+        MockBasket basket = new MockBasket();
+        basket.setBasketValue(int256(0.95e18));      // BUCK overvalued
+        vm.prank(GOV);
+        kc.setBasket(address(basket));
+        vm.warp(block.timestamp + 61);
+        kc.compute();
+        uint256 factor = kc.fundingFactor();
+        assertGt(factor, 0,    "factor stays positive");
+        assertLt(factor, 1e18, "factor should be below 1.0");
+
+        // Alice's 100e6 pre-activated unused credit easily covers the tiny
+        // reserve (poolPrincipal * factor, factor < 1) for an 80e6 mint.
+        // (100e6 face at 50bp yields net cap ~95e6, so 80e6 fits the
+        // allocator too.)
+        _grantCreditOn(c, alice, 100e6);
+        vm.prank(alice);
+        b.mint(80e6);                                 // does not revert
+    }
+
+    /// @dev Positive path in the *biting* regime: even with the factor above
+    ///      1.0 (BUCK undervalued), a mint goes through when the minter's
+    ///      balanceOf -- held BUCK plus unused credit -- covers the inflated
+    ///      reserve requirement.  Mirror of
+    ///      test_mint_revertsWhenFundingFactorUnsatisfied: same 1.05 basket /
+    ///      ~1.48 factor, but a credit limit large enough that
+    ///      balanceOf >= amount * factor / 1e18.  Proves the gate gates on the
+    ///      reserve magnitude, not merely on factor > 1.
+    function test_mint_passesWhenFundingFactorSatisfied() public {
+        (Buck b, BuckKControllerDirect kc, BuckCreditHarness c)
+            = _freshStackWithDirectController();
+
+        MockBasket basket = new MockBasket();
+        basket.setBasketValue(int256(1.05e18));       // BUCK undervalued
+        vm.prank(GOV);
+        kc.setBasket(address(basket));
+        vm.warp(block.timestamp + 61);
+        kc.compute();
+        assertGt(kc.fundingFactor(), 1e18, "factor should exceed 1.0");
+
+        // 1000e6 of pre-activated unused credit dwarfs the reserve
+        // requirement (poolPrincipal * factor ~= 5.3e6 * 1.48 ~= 7.8e6), so a
+        // well-reserved minter passes even with the factor above 1.0 -- the
+        // mirror of the unactivated holder denied above.
+        _grantCreditOn(c, alice, 1000e6);
+        vm.prank(alice);
+        b.mint(100e6);                                // does not revert
+        assertGt(b.balanceOf(alice), 0, "alice holds spendable post-mint");
+    }
+
+    /// @dev Zero-cost insurance is exempt from the funding gate.  A
+    ///      zero-premium credit yields poolPrincipal == 0, so even with the
+    ///      factor well above 1.0 (BUCK undervalued) and the minter holding
+    ///      no reserve and no pre-activated credit, the mint succeeds -- the
+    ///      funding factor is effectively zero for uninsured issuance.  This
+    ///      is the SimLP bootstrap path in the web3 sim.
+    function test_mint_zeroPremiumBypassesFundingGate() public {
+        (Buck b, BuckKControllerDirect kc, BuckCreditHarness c)
+            = _freshStackWithDirectController();
+
+        MockBasket basket = new MockBasket();
+        basket.setBasketValue(int256(1.05e18));       // BUCK undervalued -> factor > 1
+        vm.prank(GOV);
+        kc.setBasket(address(basket));
+        vm.warp(block.timestamp + 61);
+        kc.compute();
+        assertGt(kc.fundingFactor(), 1e18, "factor should exceed 1.0");
+
+        // Zero-premium credit (premiumRate = 0), NOT pre-activated.  Alice
+        // holds no BUCK and has zero unused credit, yet mint() auto-activates
+        // and goes through because poolPrincipal == 0.
+        c.createCredit(
+            alice, 0, 1000e6, 1000e6,
+            BuckCredit.DepreciationType.NONE, 0, 0, 0   // premiumRate = 0
+        );
+        vm.prank(alice);
+        b.mint(100e6);                                // not blocked by the gate
+        assertGt(b.balanceOf(alice), 0, "alice has credit headroom post-mint");
+    }
+
+    /// @dev Deploy a fresh Buck stack with a PID-direct controller (real
+    ///      fundingFactor) and re-register Alice on the new identity
+    ///      registry.  A new BuckCreditHarness is also instantiated and
+    ///      wired so that Buck._allocateMint can call activateFromBuck on
+    ///      it.  Returns (b, kc, c); MockBasket wiring is the caller's
+    ///      choice so each test can drive the controller as it needs.
+    function _freshStackWithDirectController()
+        internal returns (Buck b, BuckKControllerDirect kc, BuckCreditHarness c)
+    {
         IdentityRegistry r = new IdentityRegistry(GOV);
-        BuckKControllerDirect kc = new BuckKControllerDirect(
+        kc = new BuckKControllerDirect(
             0.1e18, 0.01e18, 0,
             60,
             0.50e18, 1.50e18,
             1.0e18,
             GOV
         );
-        Buck b = new Buck(address(credit), address(kc), address(r), POOL);
+        c = new BuckCreditHarness();
+        b = new Buck(address(c), address(kc), address(r), POOL);
         vm.prank(GOV);
         r.setBuck(address(b));
+        c.setBuck(address(b));
 
-        // Register Alice on the fresh registry.
-        {
-            BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
-            IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
-            // Need a trusted issuer on the fresh registry.
-            IdentityRegistry.PSPubKey memory ipk;
-            ipk.X.X[0] = _u(".issuer.pk_X.x[0]");
-            ipk.X.X[1] = _u(".issuer.pk_X.x[1]");
-            ipk.X.Y[0] = _u(".issuer.pk_X.y[0]");
-            ipk.X.Y[1] = _u(".issuer.pk_X.y[1]");
-            ipk.Y.X[0] = _u(".issuer.pk_Y.x[0]");
-            ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
-            ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
-            ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
-            vm.prank(GOV);
-            r.trustIssuer(ISSUER, ipk);
-            vm.prank(alice);
-            r.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
-        }
-
-        // Wire a mock basket signalling inflation (basket > 1.0 BUCK).
-        MockBasket basket = new MockBasket();
-        basket.setBasketValue(int256(1.05e18));
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        IdentityRegistry.PSPubKey memory ipk;
+        ipk.X.X[0] = _u(".issuer.pk_X.x[0]");
+        ipk.X.X[1] = _u(".issuer.pk_X.x[1]");
+        ipk.X.Y[0] = _u(".issuer.pk_X.y[0]");
+        ipk.X.Y[1] = _u(".issuer.pk_X.y[1]");
+        ipk.Y.X[0] = _u(".issuer.pk_Y.x[0]");
+        ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
+        ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
+        ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
         vm.prank(GOV);
-        kc.setBasket(address(basket));
-
-        // Advance time past dT so the PID cycle runs.
-        vm.warp(block.timestamp + 61);
-        kc.compute();
-        uint256 factor = kc.fundingFactor();
-        assertGt(factor, 0, "funding factor should be positive");
-
-        // Alice has a credit NFT.  She mints some initial BUCK.
-        uint256 tid = _grantCredit(alice, 1000e6);
+        r.trustIssuer(ISSUER, ipk);
         vm.prank(alice);
-        b.mint(1e6);
+        r.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
+    }
 
-        // Compute again to get a non-zero funding factor.
-        vm.warp(block.timestamp + 61);
-        kc.compute();
-
-        // Now try to mint more — the funding factor requires balanceOf >=
-        // poolPrincipal * factor / 1e18, but alice only has 1e6 BUCK.  The
-        // poolPrincipal from a 100e6 mint at 50bp is ~526k, and with factor
-        // ~1.48, the required balance is ~780k.  Alice only has 1e6 — hmm,
-        // that might actually pass.  Let me mint a larger amount.
-        // poolPrincipal for 500e6 at 50bp = 500e6 * (BP/(BP-500) - 1) ≈ 26.3e6.
-        // required = 26.3e6 * 1.48 / 1e18 ≈ 38.9e6.  Alice only has 1e6 → reverts.
-        vm.prank(alice);
-        vm.expectRevert("BUCK: insufficient mint funding");
-        b.mint(500e6);
+    /// @dev Create + force-activate a credit NFT on the supplied harness
+    ///      (mirrors `_grantCredit` but lets the caller target an alternate
+    ///      BuckCreditHarness, e.g. one wired to a fresh Buck instance).
+    function _grantCreditOn(BuckCreditHarness c, address client, uint256 faceValue)
+        internal returns (uint256 tokenId)
+    {
+        tokenId = c.createCredit(
+            client, 0, faceValue, faceValue,
+            BuckCredit.DepreciationType.NONE,
+            0, 0, 50
+        );
+        vm.prank(client);
+        c.forceActivate(tokenId, faceValue);
     }
 
     // ---- approve -----------------------------------------------------------

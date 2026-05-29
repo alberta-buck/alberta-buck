@@ -1,0 +1,677 @@
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+             THE ALBERTA BUCK - NOTES MUTUAL DECRYPTABILITY
+                              (DRAFT V0.1)
+              Closing the Issuer-Binding Gap so Every BUCK
+                     Note Yields a Provable Receipt
+
+                             Perry Kundert
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+                               2026-05-29
+
+
+<https://perry.kundert.ca/images/dominion-logo.png>
+
+A monetary system can promise privacy or it can promise accountability;
+the Alberta Buck promises both at once, along a single seam.  /Bulk/
+traceability is defeated – no chain-analytics firm can reconstruct who
+paid whom – while /bilateral/ disclosure is preserved: the two parties
+to any payment always retain the cryptographic means to prove, under
+compulsion, exactly who the counterparty was.  The load-bearing half of
+that promise is the *non-deniable-receipt invariant*: there must be no
+path by which someone pays BUCKs to another and keeps cryptographic
+deniability of the act.  Concretely, a recipient who is compelled by a
+court, and who chooses to comply, must be able to produce a
+cryptographically sound receipt naming the payer's /decrypted, KYC-bound
+Identity/.
+
+This document shows that BUCK Notes do not yet satisfy that invariant,
+defines it formally, and specifies the fix.  The shipped spend path
+verifies the /depositor's/ identity (`IdentityRegistry.verifySpendCP'),
+but the mint path verifies /nothing/ about the /issuer's/: the per-leaf
+`issuerData' is folded into the commitment's `idHash' and never checked
+– exactly the "flavor-specific witness verification (Schnorr for A1/B1,
+ElGamal re-randomization well-formedness for A2)" that `mint.circom'
+marked "deferred to a later revision" and that was never re-introduced.
+A dishonest or colluding issuer can therefore mint a note that pays a
+recipient while leaving no recoverable payer Identity.  The remedy is to
+make the /deferred approve handshake/ symmetric and fully verified: bind
+a checked issuer identity at mint (a Schnorr binding for public issuers;
+a recipient-hiding re-encryption proof for the private A2 issuer), and
+add the `E_depositor_for_issuer' payload to B-note deposits.  Each leg
+is stated as a theorem with an executable `py_ecc' check, and the circom
+/ EVM formal-verification tooling that can mechanize the soundness
+arguments is catalogued. ([Notes], [Proofs])
+
+Table of Contents
+─────────────────
+
+1. The Non-Deniable-Receipt Invariant
+.. 1. Statement
+.. 2. Why the asymmetry between flavors
+2. The Receipt as a Proof Chain
+3. What the Shipped Implementation Binds
+4. The Gap, Per Flavor
+.. 1. A2 – addressed, private issuer
+.. 2. A1 – addressed, public issuer
+.. 3. B1 – bearer, public issuer
+.. 4. Summary
+5. The Fix: A Symmetric, Verified Handshake
+.. 1. Issuer half, bound at mint
+.. 2. Depositor half, at deposit
+.. 3. Enforcing bearer => public issuer
+6. Protocol Changes (Implementation Surface)
+.. 1. IdentityRegistry
+.. 2. Notes.sol
+.. 3. Circuits
+.. 4. Wallet (`alberta_buck.wallet')
+7. Provable Correctness
+.. 1. Theorems
+.. 2. Executable sanity checks (`py_ecc' on BN254)
+8. Formal-Verification Approaches
+.. 1. The cryptographic mathematics
+.. 2. The circom circuits (soundness is the hard part)
+.. 3. The Solidity verifiers and Notes.sol
+.. 4. What "provably correct per step" buys
+9. Test Plan
+.. 1. Positive
+.. 2. Negative (these must now fail, and did not before)
+.. 3. Cross-artifact
+10. Phasing and Migration
+11. Open Questions
+
+
+[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes>
+
+[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs>
+
+
+1 The Non-Deniable-Receipt Invariant
+════════════════════════════════════
+
+  The Alberta Buck identity layer is built so that /every/ BUCK transfer
+  leaves both endpoints holding decryptable proof of the other's
+  Identity.  For a direct `transfer', the bilateral `approve' handshake
+  establishes this: each party re-encrypts their KYC-certified
+  credential under the other's key and proves (Chaum-Pedersen) that the
+  re-encryption carries the same Identity point \( M \).  BUCK Notes
+  defer and reorganise that handshake through the commitment pool, and
+  the invariant must survive the reorganisation.
+
+
+1.1 Statement
+─────────────
+
+  Let an /Identity/ be the KYC-certified point \( M \in \mathbb{G}_1 \)
+  bound to a registered account by an issuer's Pointcheval-Sanders
+  credential and stored (ElGamal-encrypted) as \( E_{\text{addr}}[X] =
+  (R_X, C_X) = (r_X G,\ M_X + r_X \cdot pk_X) \), with \( pk_X = sk_X G
+  \).  A /payment/ moves value \( v \) from a payer \( P \) to a
+  recipient \( D \).
+
+  /(Non-deniable receipt.)/ A protocol satisfies the
+  *non-deniable-receipt invariant* if for every accepted payment there
+  exists a /receipt/ \( \mathcal{R} \) and an efficient public predicate
+  \( \mathsf{RcptVerify} \) such that:
+  • *(Completeness.)* The recipient \( D \) can compute \( \mathcal{R}
+    \) from data they hold plus public chain state, and \(
+    \mathsf{RcptVerify}(\mathcal{R}) = 1 \) names a registered Identity
+    \( M_P \) and value \( v \).
+  • *(Soundness / non-frameability.)* No PPT adversary can produce \(
+    \mathcal{R}' \) with \( \mathsf{RcptVerify}(\mathcal{R}') = 1 \)
+    naming an Identity \( M_{P'} \) that did not author the payment.
+  • *(No deniability.)* No PPT payer can cause an accepted payment to \(
+    D \) for which /no/ accepting receipt naming the payer exists – even
+    in collusion with \( D \).
+
+  The third clause is the operative one: it is the collusion-resistant
+  form.  A self-interested recipient who simply wants a record is
+  protected by completeness alone; the invariant additionally forbids a
+  /willing/ pair from constructing an untraceable BUCK payment.
+
+
+1.2 Why the asymmetry between flavors
+─────────────────────────────────────
+
+  Who can be named, and how, depends on what is known at mint time –
+  which is exactly the axis that defines the note flavors:
+
+  • *B (bearer).* The depositor is unknown at mint, so the note cannot
+    carry a recipient-targeted ciphertext.  The /issuer/ must therefore
+    be a *public* Identity: their \( M \) is in the clear and the
+    recipient names them directly.  A bearer note from an /encrypted/
+    issuer is unnameable and must be impossible to mint.
+  • *A (addressed).* The issuer knows the recipient at mint and has
+    already re-encrypted material the eventual depositor can open.  The
+    issuer may stay /private/ (A2) by re-encrypting their /own/ Identity
+    under the recipient's key (`E_iss-for-rec'), which only the
+    recipient can decrypt, or /public/ (A1) by attaching it in the clear
+    with a signature.
+
+  In all cases the recipient must end up holding a path to a /verified/
+  issuer Identity.  The next section shows the shipped code does not
+  provide one.
+
+
+2 The Receipt as a Proof Chain
+══════════════════════════════
+
+  For the recipient to prove "I received \( v \) BUCKs issued by
+  Identity \( M_P \)", the receipt must chain four links, each
+  independently checkable against public chain state:
+
+  ┌────
+  │ (a) OPENING     I hold the opening O; cm = Poseidon5(flavor, v, rho, idHash, predicate)
+  │ (b) MINTED      cm appears in the calldata cms[] of mint tx T            [reveals cm]
+  │ (c) ISSUER      from O (+ my key), recover AND authenticate M_P
+  │ (d) PAID        nullifier = Poseidon3(rho, idHash, tag) in a Spent/SpentA
+  │                 event whose pool->recipient Transfer delivered v to me
+  └────
+
+  Links (a), (b), (d) are already sound in the shipped contracts.  (b)
+  holds because `cms[]' live in the mint transaction's calldata, which
+  is immutable chain history; the recipient reveals \( cm \) to anchor
+  it (accepting the spend\(\leftrightarrow\)mint linkage, which is the
+  price of complying).  (d) holds because the nullifier is a
+  deterministic function of the opening and is emitted by `Notes.Spent'
+  / `Notes.SpentA' alongside the ERC-20 `Transfer' from the pool.
+
+  *The invariant lives or dies on link (c)* – and (c) is precisely the
+  step the implementation never enforces.
+
+
+3 What the Shipped Implementation Binds
+═══════════════════════════════════════
+
+  The spend side verifies the depositor's Identity; the mint side
+  verifies nothing about the issuer's.  This asymmetry is the whole bug.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Leg                  Shipped check                                                           Guarantee                                       
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Depositor (A-spend)  `IdentityRegistry.verifySpendCP(spender, recipient, E_n, pi)'           spender provably /is/ the addressed \(M_{rec}\) 
+   Depositor (B-spend)  none (knowledge of \(\rho\) is the authorization)                       spender is /some/ registered recipient          
+   Issuer  (any mint)   none – `idHash' folds `issuerData' via Poseidon-8, value never checked  *none*                                          
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Concretely, from the source:
+
+  • `circuits/spend_a.circom' constrains `idHash === Poseidon8(eNoteR.x,
+        eNoteR.y, eNoteC.x, eNoteC.y, issuerData[0..3])', where
+        `issuerData' is a /private witness/ holding A1 \(
+        (m_{\text{iss}}, \sigma_R.x, \sigma_R.y, \sigma_s) \) or A2 \(
+        (R_{\text{iss}}, C_{\text{iss}}) = E_{\text{iss-for-rec}} \).
+        The circuit /hashes it in/ but never verifies the signature or
+        the encryption.
+  • `circuits/spend.circom' (the shipped B-spend) leaves `flavor'
+    unconstrained and binds /no/ issuer material at all; `idHash' is
+    opaque.
+  • `circuits/mint_batch.circom' public inputs are `[oldRoot, newRoot,
+    nextLeafIndex, totalFace, cm]' with private `[flavor, v, rho,
+    idHash, predicate, siblings]'.  No issuer key, no signature, no
+    ElGamal well-formedness.  `mint.circom' says so in as many words:
+    /"flavor-specific witness verification (Schnorr for A1/B1, ElGamal
+    re-randomization well-formedness for A2) is deferred to a later
+    revision."/
+  • `src/Notes.sol' `mint()' records `Minted(issuer = msg.sender, ...)'
+    but ties the minting account to the leaves only through transaction
+    authorship, never cryptographically to the committed `issuerData'.
+
+
+4 The Gap, Per Flavor
+═════════════════════
+
+4.1 A2 – addressed, private issuer
+──────────────────────────────────
+
+  The opening carries \( E_{\text{iss-for-rec}} = (R_{\text{iss}},
+  C_{\text{iss}}) \), an ElGamal ciphertext the recipient decrypts with
+  \( sk_{\text{rec}} \) to obtain \( M_{\text{iss}} \).  It is bound
+  into `idHash' but *not* proven to re-encrypt the issuer's /registered/
+  credential.  A malicious issuer commits a random \( (R_{\text{iss}},
+  C_{\text{iss}}) \): the note mints and spends cleanly, the recipient
+  decrypts to a meaningless point, and link (c) yields no registered
+  Identity.  *The payer keeps full deniability.*
+
+
+4.2 A1 – addressed, public issuer
+─────────────────────────────────
+
+  The opening carries \( (m_{\text{iss}}, \sigma) \).  The Schnorr
+  signature \( \sigma \) is never verified, and nothing forces \(
+  m_{\text{iss}} \) to equal the /minting/ account's registered \( M \).
+  A malicious issuer can omit a valid \( \sigma \) (no receipt), or
+  commit a /victim's/ \( m_{\text{iss}} \) and a forged \( \sigma \)
+  (frame), and the note still works.
+
+
+4.3 B1 – bearer, public issuer
+──────────────────────────────
+
+  `spend.circom' binds no issuer Identity whatsoever.  The only issuer
+  signal is `msg.sender' in the `Minted' event.  A receipt is therefore
+  constructible /only if/ the issuer minted from a *public* Identity –
+  and the contract cannot enforce that, because `cms[]' are opaque and
+  it cannot tell a bearer leaf from an addressed one.  A
+  bearer-spendable note minted from an /encrypted/ Identity is
+  unnameable.  *The payer keeps full deniability.*
+
+
+4.4 Summary
+───────────
+
+  In every flavor the issuer Identity is, at best, /committed/ but never
+  /verified/; in B1 it is not even committed.  The depositor half of the
+  handshake is checked (`verifySpendCP'); the issuer half is missing.
+  The fix is to add it.
+
+
+5 The Fix: A Symmetric, Verified Handshake
+══════════════════════════════════════════
+
+  Restore the symmetry the "deferred approve handshake" framing always
+  implied: the /mint/ is the issuer's half of approve and must be
+  /verified/, exactly as the /deposit/ verifies the depositor's half.
+
+
+5.1 Issuer half, bound at mint
+──────────────────────────────
+
+  At mint, the issuer is `msg.sender' – /not/ anonymous (they authored
+  the tx).  So the issuer's registered credential \(
+  E_{\text{addr}}[\text{issuer}] \) may be read as a public input; only
+  the /recipient/ (for A2) must stay hidden.
+
+  • *Public issuer (A1, B1).* Require `msg.sender' to be
+    `isPublicIdentity', and verify a Schnorr signature by their
+    registered key \( pk_{\text{iss}} \) over the batch commitment \(
+    H_{\text{batch}} = \mathrm{keccak}(\texttt{cms}) \).  Bind \(
+    m_{\text{iss}} = M_{\text{iss}} \) (the in-the-clear registered
+    Identity) into `idHash'.  Because the registered Identity of a
+    public account is in the clear, link (c) reduces to a registry read
+    plus the verified signature.
+  • *Private issuer (A2).* The issuer proves `E_iss-for-rec' re-encrypts
+    their /own/ registered \( M_{\text{iss}} \) under the recipient's
+    key \( pk_{\text{rec}} \) – the `verifyApprove' relation with
+    `sender = issuer', `spender = recipient'.  But `verifyApprove' as
+    shipped takes \( pk_{\text{rec}} \) as a verifier input and so
+    /names the recipient/, which A2 must not do.  Two recipient-hiding
+    realisations:
+
+    1. *In-SNARK (mint circuit).* Extend `mint_batch.circom' so each A2
+       leaf proves, with \( pk_{\text{rec}} \) and \( M_{\text{iss}} \)
+       as private witnesses: \[ pk_{\text{iss}} = sk_{\text{iss}}
+       G,\quad M_{\text{iss}} = C^{\text{reg}}_{\text{iss}} -
+       sk_{\text{iss}} R^{\text{reg}}_{\text{iss}},\quad
+       E_{\text{iss-for-rec}} = \bigl(r' G,\ M_{\text{iss}} + r'\,
+       pk_{\text{rec}}\bigr), \] with \( E_{\text{addr}}[\text{issuer}]
+       = (R^{\text{reg}}_{\text{iss}}, C^{\text{reg}}_{\text{iss}}) \) a
+       /public/ input and \( pk_{\text{rec}} \) the same key that
+       re-randomises the note ciphertext \( E_{\text{note}} \).  Cost: a
+       handful of in-circuit \( \mathbb{G}_1 \) scalar muls per A2 leaf
+       – the ~10x the original deferral feared, but bounded and paid
+       only on A2 mints.
+    2. *Recipient-blinded on-chain CP.* Keep verification on-chain
+       (EIP-196, cheap) but blind \( pk_{\text{rec}} \): the issuer
+       proves the re-encryption relation against a /Pedersen commitment/
+       to \( pk_{\text{rec}} \) that also appears (identically
+       committed) in \( E_{\text{note}} \), so the verifier never learns
+       \( pk_{\text{rec}} \).  This is a new sigma protocol (Section
+       /Provable Correctness/), avoiding in-SNARK \( \mathbb{G}_1 \)
+       arithmetic at the cost of a bespoke proof.
+
+  The in-SNARK route (1) is the recommended default: it reuses the
+  trusted setup already in place for the batch mint and keeps the
+  on-chain mint a single verifier call.
+
+
+5.2 Depositor half, at deposit
+──────────────────────────────
+
+  • *A1, A2.* Already shipped: `verifySpendCP' proves the spender is the
+    addressed \( M_{\text{rec}} \).  The issuer, who chose \(
+    M_{\text{rec}} \) at mint, already holds the symmetric knowledge.
+  • *B1.* Add `E_depositor_for_issuer' to the spend: the depositor
+    re-encrypts /their/ registered \( M_{\text{dep}} \) under the public
+    issuer's \( pk_{\text{iss}} \), with a `verifyApprove'-style CP
+    proof (`sender = depositor', `spender = issuer', both
+    public-or-named here so no blinding is needed), emitted in the
+    `SpentB' event.  This closes the symmetric direction – the public
+    bearer issuer can identify who cashed their note.
+
+
+5.3 Enforcing bearer => public issuer
+─────────────────────────────────────
+
+  The contract cannot read `flavor' from an opaque `cm'.  Make the mint
+  flavor-aware for the binding: the mint circuit exposes, per leaf, a
+  public `issuerMode in {PUBLIC, PRIVATE}' and proves the matching
+  binding (Schnorr-bound public \( M \), or in-SNARK re-encryption).
+  `Notes.mint' requires every `PRIVATE' leaf to be an A-flavor
+  (addressed) leaf – a bearer (B) leaf with `issuerMode = PRIVATE' is
+  unsatisfiable – and requires `msg.sender' to be `isPublicIdentity'
+  whenever any `PUBLIC' leaf is present.
+
+
+6 Protocol Changes (Implementation Surface)
+═══════════════════════════════════════════
+
+6.1 IdentityRegistry
+────────────────────
+
+  ┌────
+  │ // Public-issuer binding: Schnorr by msg.sender's registered key over H_batch.
+  │ function verifyIssuerSchnorr(address issuer, bytes32 hBatch, SchnorrProof calldata s)
+  │     external view returns (bool);
+  │ 
+  │ // Private-issuer binding (A2), recipient-blinded sigma variant (option 2):
+  │ // proves E_iss_for_rec re-encrypts E_addr[issuer]'s M under a *committed* pk_rec
+  │ // that the mint SNARK also binds to E_note, without revealing pk_rec.
+  │ function verifyIssuerCPBlinded(address issuer, ElGamalCT calldata eIssForRec,
+  │                                bytes32 pkRecCommit, IssuerCPProof calldata pi)
+  │     external view returns (bool);
+  │ 
+  │ // B-note depositor->issuer (mirror of verifyApprove, both parties named):
+  │ function verifyDepositorForIssuer(address depositor, address issuer,
+  │                                   ElGamalCT calldata eDepForIss, CPProof calldata pi)
+  │     external view returns (bool);
+  └────
+
+  Under the in-SNARK route the A2 binding is discharged inside the mint
+  verifier and `verifyIssuerCPBlinded' is unnecessary; the registry then
+  only gains `verifyIssuerSchnorr' and `verifyDepositorForIssuer'.
+
+
+6.2 Notes.sol
+─────────────
+
+  • `mint(...)' gains per-leaf `issuerMode[]' (public input of the mint
+    SNARK) and, for public leaves, a `SchnorrProof' over `keccak(cms)';
+    it requires `msg.sender' public when any public leaf is present, and
+    rejects `PRIVATE+bearer' leaves.  The A2 re-encryption binding rides
+    inside the mint proof (option 1) or is checked per leaf via
+    `verifyIssuerCPBlinded' (option 2).
+  • `spend(...)' (B) gains `(E_depositor_for_issuer, CPProof)', calls
+    `verifyDepositorForIssuer(msg.sender, issuer, ...)', and emits
+    `SpentB(nullifier, face, recipient, eDepForIss)'.  The issuer
+    address is recovered from the leaf's public-issuer binding revealed
+    at spend.
+  • `spendACP(...)' (A) is unchanged on the depositor side; the issuer
+    guarantee now comes for free from the mint-time binding.
+
+
+6.3 Circuits
+────────────
+
+  • `mint_batch.circom': add the per-leaf `issuerMode' public signal
+    and, for A2 leaves, the re-encryption constraints above (option 1).
+    For public leaves, constrain `idHash''s issuerData prefix to equal
+    the registered public \( M \) so the in-clear identity is the one
+    bound.
+  • `spend.circom' (B): constrain `flavor ==' B1= and reveal enough of
+    the leaf's public-issuer binding to recover the issuer address
+    on-chain.
+  • `spend_a.circom': unchanged (the A2 issuer binding moved to mint).
+
+
+6.4 Wallet (`alberta_buck.wallet')
+──────────────────────────────────
+
+  • Mint: construct the issuer Schnorr proof (public) or the A2
+    re-encryption witness (private), mirroring `notes.id_hash_a1/a2'.
+  • Spend (B): construct `E_depositor_for_issuer' and its CP proof.
+  • Receipt: implement `RcptVerify' as a standalone verifier (opening +
+    mint-tx reference + spend-tx reference + issuer recovery) so a
+    recipient can produce and a third party can check the receipt
+    entirely off-chain from chain data.
+
+
+7 Provable Correctness
+══════════════════════
+
+  We extend the companion /Proofs/ document (Theorems 1-11) with the
+  issuer-binding results.  Each is accompanied – in the proofs
+  document's house style – by an executable `py_ecc' sanity check on
+  BN254.
+
+
+7.1 Theorems
+────────────
+
+  /(Issuer-binding completeness.)/ An honestly generated public-issuer
+  Schnorr proof, and an honestly generated A2 re-encryption proof
+  (in-SNARK or blinded), verify.
+
+  /(Issuer-binding soundness.)/ If `verifyIssuerSchnorr' accepts, the
+  batch commitments were authorised by `issuer''s registered key.  If
+  the A2 re-encryption proof accepts, \( E_{\text{iss-for-rec}} \)
+  decrypts under \( sk_{\text{rec}} \) to the issuer's /registered/ \(
+  M_{\text{iss}} \) (the same \( M \) certified by the issuer's PS
+  credential – /Theorem 6/).  Reduction: special soundness of the
+  underlying sigma protocol (two accepting transcripts sharing
+  commitments extract \( sk_{\text{iss}}, r' \)), as in /Theorems 4, 6/;
+  or Groth16 knowledge-soundness for the in-SNARK route.
+
+  /(Receipt completeness.)/ For every note accepted by the patched
+  `mint' and redeemed by `spend=/=spendACP', the recipient can compute
+  \( \mathcal{R} \) with \( \mathsf{RcptVerify}(\mathcal{R}) = 1 \)
+  naming a registered Identity.  Proof: links (a),(b),(d) hold as
+  before; (c) now holds by issuer-binding soundness (public: registry \(
+  M \) + Schnorr; private: decrypt \( E_{\text{iss-for-rec}} \),
+  validity guaranteed by the accepted binding).
+
+  /(Receipt soundness / non-frameability.)/ No PPT adversary produces an
+  accepting \( \mathcal{R}' \) naming \( M_{P'} \) that did not author
+  the payment.  Reduction: a forged public receipt breaks Schnorr
+  EUF-CMA; a forged private receipt breaks re-encryption soundness
+  (/Theorem 7/) or the binding hash (collision resistance of Poseidon-8
+  in `idHash').
+
+  /(No deniability under collusion.)/ No payer-recipient coalition can
+  produce an accepted payment with /no/ accepting receipt: `mint'
+  rejects any leaf lacking a valid issuer binding, so every spendable
+  leaf carries one, and the binding is recoverable by the holder of the
+  opening.
+
+  /(Recipient privacy preserved.)/ The A2 issuer binding is
+  zero-knowledge in \( pk_{\text{rec}} \) and \( M_{\text{iss}} \): the
+  in-SNARK route reveals only the Groth16 proof; the blinded route
+  reveals only a hiding Pedersen commitment to \( pk_{\text{rec}} \).
+  No observer learns the recipient.  Reduction: HVZK of the sigma
+  protocol (/Theorem 5/) / Groth16 zero-knowledge.
+
+  /(Mutual decryptability.)/ Combining the issuer half (above) with the
+  depositor half (`verifySpendCP' for A; `verifyDepositorForIssuer' for
+  B), both parties can recover the other's registered Identity, and each
+  can prove it under compulsion.  This is the Notes specialisation of
+  the BUCK mutual-decryptability invariant (/Proofs/ Theorem 11), now
+  /enforced/ rather than /assumed/.
+
+
+7.2 Executable sanity checks (`py_ecc' on BN254)
+────────────────────────────────────────────────
+
+  Mirroring the proofs document, each theorem ships a small witnessed
+  check that runs in CI alongside the existing `alberta_buck.wallet'
+  vector generation:
+
+  • *Issuer Schnorr*: sign \( H_{\text{batch}} \) under \(
+    sk_{\text{iss}} \), assert verify; assert a tampered \(
+    H_{\text{batch}} \) or wrong key fails.
+  • *A2 re-encryption*: build \( E_{\text{addr}}[\text{issuer}] \),
+    decrypt to \( M_{\text{iss}} \), form \( E_{\text{iss-for-rec}} \)
+    under \( pk_{\text{rec}} \), run the prover/verifier; assert the
+    recipient's \( sk_{\text{rec}} \)-decryption equals \(
+    M_{\text{iss}} \); assert a random \( E_{\text{iss-for-rec}} \) is
+    rejected (soundness witness) and that the transcript hides \(
+    pk_{\text{rec}} \) (two runs with distinct \( pk_{\text{rec}} \) are
+    indistinguishable to the verifier given the commitment).
+  • *Receipt*: assemble \( \mathcal{R} \) from a synthetic mint+spend
+    and assert `RcptVerify' = 1; assert a frame attempt (swap \( M_P \))
+    fails.
+
+  These vectors double as the canonical inputs the Solidity and circom
+  tests load via `vm.readFile', keeping the on-chain verifier, the
+  circuit, and the reference math in lock-step (the pattern already used
+  for `verifySpendCP').
+
+
+8 Formal-Verification Approaches
+════════════════════════════════
+
+  "Every step provably correct" spans three artifact classes – the
+  sigma-protocol mathematics, the circom circuits, and the Solidity
+  verifiers – each with its own tractable tooling.
+
+
+8.1 The cryptographic mathematics
+─────────────────────────────────
+
+  • *Hand proofs + `py_ecc'*: the existing /Proofs/ methodology –
+    completeness, special-soundness (2-extractability), and HVZK
+    arguments, each pinned by an executable BN254 check.  Low-tech,
+    high-confidence, already in the repo.
+  • *EasyCrypt*: a proof assistant purpose-built for /game-based/
+    cryptographic proofs; the sigma-protocol soundness and ZK lemmas can
+    be mechanised as reductions, giving machine-checked versions of
+    Theorems above.
+  • *CryptoVerif* (computational) or *ProVerif* (symbolic):
+    protocol-level analysis of the full handshake (mint binding +
+    deposit binding) against the non-deniability and recipient-privacy
+    goals stated as queries.
+
+
+8.2 The circom circuits (soundness is the hard part)
+────────────────────────────────────────────────────
+
+  The danger in arithmetic circuits is /under-constraint/ – a witness
+  slot that the prover can set freely, silently widening soundness (the
+  exact failure mode of the unverified `issuerData').  Tooling that
+  targets this directly:
+
+  • *Picus* (Veridise): automated detection of under-constrained
+    signals; run it on the patched `mint_batch.circom' to prove the new
+    issuer-binding signals are /determined/ by the public inputs.
+  • *Circomspect* (Trail of Bits): static analysis / linting for common
+    circom pitfalls (unconstrained signals, `<--' without `<=',=
+    signal-vs-constraint confusion).
+  • *ecne* (0xPARC): proves R1CS systems compute deterministic functions
+    of their inputs – a soundness witness for the binding constraints.
+  • *Coda* / *circom-to-Coq* efforts: full functional-correctness
+    extraction to a proof assistant for the security-critical templates
+    (the re-encryption gate).
+  • Discipline: keep the security-critical constraints (the \(
+    \mathbb{G}_1 \) relations) in small, separately-audited
+    sub-templates with explicit `Num2Bits' range checks, as the
+    value-conservation bound already does.
+
+
+8.3 The Solidity verifiers and Notes.sol
+────────────────────────────────────────
+
+  • *Halmos* (a16z): symbolic-execution property tests in Solidity –
+    assert, for all inputs, e.g. "`mint' reverts unless every leaf
+    carries a valid issuer binding" and "`spend' emits a recoverable
+    issuer for every accepted note."
+  • *Kontrol / KEVM* (Runtime Verification): K-framework formal proofs
+    over EVM bytecode for the highest-assurance properties (the
+    binding-or-revert invariant, nullifier non-reuse).
+  • *Certora Prover*: CVL rules for state invariants (`noteFaceSum'
+    conservation, "no accepted spend without a prior valid mint
+    binding").
+  • *solc SMTChecker*: lightweight, in-compiler assertions and overflow
+    checks on the new code paths.
+  • *Foundry*: fuzz + stateful invariant testing as the always-on
+    backstop; negative tests below are expressed here first.
+
+
+8.4 What "provably correct per step" buys
+─────────────────────────────────────────
+
+  The chain of guarantees is: =py_ecc=/EasyCrypt prove the /math/;
+  Picus/ecne prove the /circuit/ faithfully and exhaustively enforces
+  that math; Halmos/Kontrol prove the /contract/ admits no spend whose
+  mint lacked the binding.  Composed, no accepted Note payment can exist
+  without a recoverable, sound receipt – the invariant, mechanically
+  checked end-to-end.
+
+
+9 Test Plan
+═══════════
+
+9.1 Positive
+────────────
+
+  • A1/A2/B1 honest mint + spend; recipient runs `RcptVerify' and a
+    third party re-checks it – all return 1 naming the correct
+    registered Identity.
+  • A2 recipient privacy: two mints to distinct recipients are
+    observationally indistinguishable on chain.
+
+
+9.2 Negative (these must now fail, and did not before)
+──────────────────────────────────────────────────────
+
+  • A2 issuer commits a random `E_iss-for-rec': `mint' *reverts*
+    (binding fails).
+  • A1 issuer commits a victim's \( m_{\text{iss}} \) / a forged \(
+    \sigma \): `mint' *reverts*.
+  • Bearer leaf with `issuerMode = PRIVATE', or any public leaf from a
+    non-`isPublicIdentity' minter: `mint' *reverts*.
+  • Recipient attempts a forged receipt naming a non-issuer:
+    `RcptVerify' = 0.
+
+
+9.3 Cross-artifact
+──────────────────
+
+  • The `py_ecc' vectors drive both the circom witness tests and the
+    Solidity verifier tests, asserting byte-identical `idHash' / proof
+    encodings (the established `alberta_buck.wallet' -> `vm.readFile'
+    pattern).
+  • Picus run in CI gates merges on "no new under-constrained signals."
+
+
+10 Phasing and Migration
+════════════════════════
+
+  1. *Public issuers first (A1, B1).* Schnorr binding +
+     `isPublicIdentity' enforcement + `verifyDepositorForIssuer' for B.
+     No new circuit setup; pure contract + wallet work.  Closes the gap
+     for the public-issuer flavors, which are the audit-sensitive
+     payroll / cashier-cheque cases.
+  2. *Private issuer (A2).* The in-SNARK re-encryption binding: extend
+     `mint_batch.circom', regenerate the per-N verifiers and trusted
+     setup, wire `issuerMode'.  The larger lift; ship behind a
+     governance-set verifier slot so the new mint verifier can be
+     rotated in (`Notes.setMintVerifier').
+  3. *Mechanisation.* Land Picus/Halmos in CI; mechanise the sigma
+     proofs in EasyCrypt as time allows.
+
+  Notes minted under the old (unbound) verifier remain spendable but do
+  not carry the guarantee; governance announces a cutover root after
+  which only bound mints are accepted, and wallets surface a `UNVERIFIED
+  ISSUER' status for pre-cutover notes (a new wallet status alongside
+  `VALID=/=DEAD=/=FAKE').
+
+
+11 Open Questions
+═════════════════
+
+  1. *In-SNARK vs blinded-CP for A2.* The in-SNARK route is simpler to
+     reason about (one verifier) but enlarges the trusted setup; the
+     blinded-CP route keeps the SNARK small but adds a bespoke sigma
+     protocol to audit.  The recommendation is in-SNARK, but the
+     blinded-CP construction is worth a full soundness/ZK write-up
+     before deciding.
+  2. *Batch vs per-leaf issuer signature.* A single Schnorr over
+     `keccak(cms)' is cheapest but binds the /whole batch/ to one public
+     issuer; mixed-issuer batches need per-leaf signatures or per-issuer
+     sub-batches.
+  3. *Receipt non-repudiation scope.* `RcptVerify' proves the issuer
+     /authored/ the note; tying that to a real-world legal identity
+     still rests on the KYC binding of \( M \) (the PS credential).
+     This document assumes that binding; it does not re-derive it.
+  4. *Predicate-bearing notes.* The `predicate' field is out of scope
+     here; a programmable predicate that itself moves value would need
+     its own receipt analysis.

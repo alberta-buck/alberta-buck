@@ -1,4 +1,4 @@
-#+TITLE: The Alberta Buck - Notes (DRAFT v0.9)
+#+TITLE: The Alberta Buck - Notes (DRAFT v0.93)
 #+SUBTITLE: Private Bearer Instruments on an Identity-Aware Demurrage Currency
 #+author: Perry Kundert
 #+date: 2026-04-18
@@ -9,7 +9,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: BUCK Notes are the Alberta Buck's privacy-preserving bearer-instrument primitive: a single Tornado-style Poseidon Merkle tree of note commitments, a nullifier set, and Groth16 SNARK circuits for mint and spend (the shipped spend circuit is the bearer-shape; an addressed-shape spend_a follows in Phase 4) parameterised along two orthogonal axes: depositor Identity binding (present = addressed, absent = bearer) and issuer visibility (public or private).  The resulting three flavors -- A1 identified cheque, A2 private cheque, B1 bearer cheque -- subsume every bearer-instrument use case the Alberta Buck series has previously explored (self-wormholes between private accounts, signed cheques, targeted gifts, printable paper notes) inside a single commitment-pool primitive.  Demurrage needs no note-side machinery: the Notes Pool is the Notes contract's own ERC-20 balance, and spend uses a single new BUCK primitive -- transferCarrying -- that delivers the full face value and weighted-merges the pool's accumulated demurrage index into the recipient's account.  Donations to the pool freshen its index and subsidise all subsequent spends.  The same commitment can be published on chain, mailed in a letter, or printed on paper with a QR code; counterfeiting is cryptographically impossible, and demurrage makes lost notes return value to the commons rather than extracting it as seigniorage.  Addressed (A1, A2) notes are designed to be cryptographically safe for indefinite holding once Phase 4 (spend_a.circom) ships; B1 bearer cheques are civil-trust instruments meant to be cashed promptly.  Notes defeat bulk on-chain traceability while preserving bilateral disclosure to both named parties and under warrant.  This is the first design where a private bearer instrument is a native, first-class primitive of the monetary system rather than an aftermarket wrapper.
+#+description: BUCK Notes are the Alberta Buck's privacy-preserving bearer-instrument primitive: a single Tornado-style Poseidon Merkle tree of note commitments, a nullifier set, and Groth16 SNARK circuits for mint and spend (both spend circuits are shipped -- the bearer-shape spend and the addressed-shape spend_a) parameterised along two orthogonal axes: depositor Identity binding (present = addressed, absent = bearer) and issuer visibility (public or private).  The resulting three flavors -- A1 identified cheque, A2 private cheque, B1 bearer cheque -- subsume every bearer-instrument use case the Alberta Buck series has previously explored (self-wormholes between private accounts, signed cheques, targeted gifts, printable paper notes) inside a single commitment-pool primitive.  Demurrage needs no note-side machinery: the Notes Pool is the Notes contract's own ERC-20 balance, and spend is an ordinary BUCK transfer out of the pool -- because the pool is a registered Carrying account, BUCK routes it through the Carrying-transfer path, delivering the full face value and apportioning a proportional share of the pool's accumulated buck-seconds (its demurrage age) onto the recipient.  Donations to the pool freshen its index and subsidise all subsequent spends.  The same commitment can be published on chain, mailed in a letter, or printed on paper with a QR code; counterfeiting is cryptographically impossible, and demurrage makes lost notes return value to the commons rather than extracting it as seigniorage.  Addressed (A1, A2) notes are cryptographically safe for indefinite holding (the shipped spend_a.circom binds the recipient's Identity); B1 bearer cheques are civil-trust instruments meant to be cashed promptly.  Notes defeat bulk on-chain traceability while preserving bilateral disclosure to both named parties and under warrant.  This is the first design where a private bearer instrument is a native, first-class primitive of the monetary system rather than an aftermarket wrapper.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-notes
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -208,10 +208,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    (sender pays their own outgoing demurrage fee).  Spend uses a
    /carrying transfer/ unique to the Notes contract's single egress
    path: the recipient's nominal balance rises by the /full/ face
-   value, and their =_indexAtLastTouch= weighted-merges toward the
-   pool's stale index, inheriting the average pool-residence
-   demurrage on the inflowing share.  Donations to the contract
-   freshen the pool's index, directly lowering the demurrage absorbed
+   value, and a share of the pool's accumulated =buckSeconds= (its
+   demurrage age) is apportioned onto them, so they inherit the average
+   pool-residence demurrage on the inflowing share.  Donations to the
+   contract dilute the pool's per-BUCK age, directly lowering the
+   demurrage absorbed
    by all subsequent spends.  Conservation is automatic; the
    Jubilee continues to grow autonomously per BUCK's standard
    accounting.
@@ -239,10 +240,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 * The Core Primitive: One Global Commitment Pool
 
   The entire BUCK Notes design rests on a single on-chain primitive: a
-  Merkle tree of commitments with a nullifier set, accompanied by a
-  /carrying transfer/ (=transferCarrying=) that delivers the opening's
-  face value to a recipient and weighted-merges the pool's
-  accumulated demurrage index into the recipient's account.  Everything
+  Merkle tree of commitments with a nullifier set, drained by an ordinary
+  BUCK =transfer= that -- because the pool is a Carrying account -- BUCK
+  routes through its internal /carrying-transfer/ path, delivering the
+  opening's face value to a recipient and apportioning a share of the
+  pool's accumulated buck-seconds (its demurrage age) onto them.  Everything
   else -- paper notes, addressed cheques, bearer cheques,
   self-wormholes -- is a consequence of varying the /spend predicate/
   inside the commitment.
@@ -283,17 +285,21 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    =poolAge=, or =poolT= state is maintained: the BUCK ledger's own
    per-account balance and demurrage index for =address(notes)= already
    are the pool, and =noteFaceSum= is a pure audit scalar (the total
-   face-value liability outstanding).  The pool is registered
-   =isSystemPublic= in the IdentityRegistry so that identity-bound
-   transfers from any registered party can land at it.
+   face-value liability outstanding).  The pool is bound in the
+   IdentityRegistry as a Public Identity (=isPublicIdentity=) so
+   identity-bound transfers from any registered party can land at it, and
+   =isCarrying= so its egress on spend takes the Carrying-transfer path.
 
    BUCKs transferred to the Notes contract on mint join its ERC-20
    balance through the normal path.  BUCKs transferred out on spend use
-   a single new BUCK primitive -- =transferCarrying= -- which moves both
-   face value and a proportional share of accumulated demurrage (via a
-   weighted-index merge on the recipient's =_indexAtLastTouch=) from the
-   pool to the recipient.  This is the only non-standard BUCK operation
-   in the design; see "Demurrage at the Pool Level" below.
+   the very same ERC-20 =transfer= -- but because the pool is registered
+   =isCarrying= in the IdentityRegistry, BUCK routes the egress through its
+   internal Carrying-transfer path (=Buck._carryingTransfer=), which moves
+   the face value /and/ apportions a proportional share of the pool's
+   accumulated =buckSeconds= (its demurrage age) onto the recipient.  No
+   new BUCK entry point is involved -- the carrying behaviour is dispatched
+   by the sender's =isCarrying= flag; see "Demurrage at the Pool Level"
+   below.
 
 ** The Note Commitment
 
@@ -384,25 +390,26 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
        - ghost-bind public signals (face, recipient, chainId) via x*x
      nullifiers[nullifier] = true
      noteFaceSum -= face
-     # The single new BUCK primitive: pay the face out of the pool to
-     # recipient and merge the pool's demurrage index into recipient's
-     # weighted-average _indexAtLastTouch.  Recipient receives face BUCK
-     # and inherits the pool's average BUCK-age proportional to their
-     # delivered share of the new total balance.
-     buck.transferCarrying(recipient, face)
+     # An ordinary ERC-20 transfer out of the pool.  Because the pool is
+     # an isCarrying account, BUCK auto-routes it through _carryingTransfer:
+     # the recipient receives face BUCK and inherits a proportional share
+     # of the pool's accumulated buckSeconds (its average BUCK-age), scaled
+     # to the inflowing share of their new total balance.
+     buck.transfer(recipient, face)
    #+end_example
 
    Full face value is delivered: the recipient's nominal balance goes
    up by exactly =face=.  The pool's demurrage cost rides along as a
-   weighted-merge of the pool's =_indexAtLastTouch= into the
-   recipient's index, in proportion to the inflowing share of their
-   new total balance.  The recipient bears that demurrage on their
+   proportional share of the pool's live =buckSeconds= integral
+   (=carried = liveBs * face / poolRaw=), merged into the recipient's
+   own =buckSeconds=, in proportion to the inflowing share of their new
+   total balance.  The recipient bears that demurrage on their
    subsequent outgoing transfers through the ordinary BUCK accounting
-   path -- the same path any holder travels, but on an inherited
-   index acquired by accepting the note.  No Jubilee payment is
-   emitted from inside spend; the Jubilee grows autonomously per
-   BUCK's standard =_advanceGlobals= / =_accrueJubilee= machinery,
-   independent of how BUCK is distributed between accounts.
+   path -- the same path any holder travels, but on the inherited
+   buck-age acquired by accepting the note.  No Jubilee payment is
+   emitted from inside spend; the Jubilee grows autonomously per BUCK's
+   standard =_accrueJubilee= machinery, independent of how BUCK is
+   distributed between accounts.
 
 #+LATEX: \clearpage
 * A Note is a Deferred Approve Handshake
@@ -450,9 +457,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
       - completes /their half/ of approve by attaching
         =E_depositor_for_issuer= (the mirror ElGamal ciphertext) as a
         deposit-event payload, and
-      - authorises =transferCarrying(recipient, face)= out of the
-        pool, weighted-merging the pool's demurrage index into the
-        recipient's =_indexAtLastTouch=.
+      - authorises an ordinary =buck.transfer(recipient, face)= out of
+        the pool, which -- the pool being a Carrying account -- BUCK
+        routes through =_carryingTransfer=, apportioning a share of the
+        pool's accumulated buck-seconds (its demurrage age) onto the
+        recipient.
 
    3. *Receipt.*  The issuer later scans deposit events for the
       nullifier of the note she printed and reads
@@ -502,13 +511,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    so observers learn nothing about the opening, the depositor, the
    issuer flavor, or \( \rho \).
 
-   At deposit: a =transferCarrying= of =face= BUCKs from the Notes
-   contract address to the depositor's address, plus a
-   =Deposited(nf, E_depositor_for_issuer)= event.  Observers learn
-   who the depositor is (standard transfer visibility), but not which
-   mint this corresponds to.  The =TransferCarrying= event is
-   distinguishable from a standard =Transfer=, but only as a generic
-   pool-egress signal; it does not link mint to spend.
+   At deposit: a standard ERC-20 =Transfer= of =face= BUCKs from the
+   Notes contract address to the depositor's address (the Carrying
+   demurrage apportionment is internal -- no distinct event), plus the
+   Notes contract's =Spent(nf, face, recipient)= (B-spend) or
+   =SpentA(nf, face, recipient)= (A-spend) event.  Observers learn who
+   the depositor is (standard transfer visibility), but not which mint
+   this corresponds to.  A =Transfer= whose sender is the Notes pool is
+   a generic pool-egress signal; it does not link mint to spend.
 
    The two transactions are decoupled in time and unlinked in the
    chain state.  Any mass-harvest analysis that tries to reconstruct
@@ -953,7 +963,8 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    The Notes contract's own address is a registered account in the
    ordinary sense (system-public in IdentityRegistry).  BUCKs flowing
    in (mints, donations) is a standard incoming transfer; BUCKs
-   flowing out (spends) uses =transferCarrying=.  The only
+   flowing out (spends) are standard transfers BUCK routes through its
+   Carrying path (the pool is =isCarrying=).  The only
    contract-local state not already tracked by the BUCK ledger is the
    Merkle-tree root history (=roots[]=, =nextLeafIndex=), the
    nullifier set (=nullifiers=), and =noteFaceSum= (aggregate live
@@ -965,23 +976,22 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    =approve(alice, bob)= has the following on-chain signature:
 
    - Alice's account: =face= debited from her balance, plus her
-     accumulated fee burned and =_indexAtLastTouch[alice]= reset to
-     =cumIndex_now=.
-   - Bob's account: balance credited by =face=, his
-     =_indexAtLastTouch= weighted-merged toward =cumIndex_now=.
+     accumulated fee burned and her =buckSeconds= re-crystallised from
+     the new balance.
+   - Bob's account: balance credited by =face=; the inflow begins
+     accruing age from now -- clean BUCK, no inherited fee.
    - Edge observable: Alice --> Bob, amount =face=, block \( t \).
 
    The A-flavor Note equivalent (A2 between two anon-valid accounts):
 
    - Alice mints: standard ERC-20 transfer of =totalFace= to the
      Notes contract.  Alice pays her own outgoing-transfer fee and
-     resets her index, exactly as in a regular transfer.  The pool's
-     balance gains =totalFace=; its index weighted-merges forward.
-   - Bob spends at time \( t + \Delta \): the pool's
-     =transferCarrying= delivers =face= to Bob and weighted-merges
-     the pool's stale =_indexAtLastTouch= into Bob's index.  Bob now
-     bears the pool's averaged demurrage on the inflowing share of
-     his balance.
+     re-crystallises her =buckSeconds=, exactly as in a regular
+     transfer.  The pool's balance gains =totalFace=.
+   - Bob spends at time \( t + \Delta \): the pool's Carrying transfer
+     delivers =face= to Bob and apportions a share of the pool's
+     accumulated =buckSeconds= onto Bob.  Bob now bears the pool's
+     averaged demurrage on the inflowing share of his balance.
    - Edge observable: Alice --> pool at \( t \); pool --> Bob at
      \( t + \Delta \).  The edge connecting them is erased.
 
@@ -1064,50 +1074,41 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 * Demurrage at the Pool Level
 
   The central simplification of this design: *the Note Pool is just a
-  regular BUCK account.*  Specifically, it is the BUCK ERC-20 contract's
-  own balance.  BUCKs transferred to the contract's address join the
+  fee "Carrying" BUCK account.*  BUCKs transferred to the contract's address join the
   pool; BUCKs transferred out (as note redemptions) leave the pool.  The
   contract account accumulates BUCK-age like every other account and
   participates in the ordinary demurrage accounting with no special-case
   code.  The only piece of additional state is a single scalar \( F \),
   the sum of face values of live notes.
 
-** Reminder: How BUCK Demurrage Works (Target Design)
+** Reminder: How BUCK Demurrage Works
 
-   *Note:* This section describes the /target/ =cumIndex=-based design
-   that Notes requires for exact fee propagation.  The current =Buck.sol=
-   uses a =buckSeconds + timestamp= approach; see the Ethereum
-   implementation document for a precise description of that interim
-   design and its invariants.
-
-   In the target design, BUCK accounts no longer carry an explicit
-   BUCK-age \( A_X \) state.  The implementation uses a /global
-   cumulative index/, =cumIndex=, that grows at a fixed rate
-   =BASE_RATE_PER_SEC= per second; each account stores only one extra
-   scalar, =_indexAtLastTouch[X]=, the value of =cumIndex= at the
-   account's most recent settlement.
+   BUCK demurrage is a balance-time integral.  Each account stores, in
+   one packed slot, its =buckSeconds= -- the crystallised integral
+   \( \int B_X\,dt \) up to its last touch -- plus the =timestamp= of
+   that touch.  There is no global =cumIndex= and no per-account
+   =_indexAtLastTouch=; the integral itself is the state.
 
    The fee owed by account \( X \) at any moment is
    \[
-   \text{feeOwing}(X) \;=\; B_X \cdot \frac{\text{cumIndex}_{\text{now}} - \text{idx}_X}{\text{SCALE}},
+   \text{feeOwing}(X) \;=\; \text{BASE\_RATE\_PER\_SEC} \cdot \frac{\text{buckSeconds}_X + B_X \cdot \text{elapsed}}{\text{SCALE}},
    \]
-   i.e. the account's nominal balance times the slice of =cumIndex=
-   accumulated since it last touched.  This is mathematically
-   equivalent to the older \( \kappa A_X \) formulation -- BUCK-age
-   \( A_X = B_X \cdot (\text{cumIndex}_{\text{now}} - \text{idx}_X)/(\text{rate} \cdot \text{SCALE}) \) --
-   but stores nothing per-account beyond a single index value.
+   i.e. the rate times the live buck-seconds integral: the crystallised
+   part plus the current rectangle \( B_X \cdot \text{elapsed} \) since the
+   last touch.  This is the \( \kappa A_X \) formulation made concrete --
+   BUCK-age \( A_X \) /is/ the buck-seconds integral.
 
-   On a /standard/ ERC-20 transfer the sender's accumulated fee is
-   first /burned/ (its outgoing balance is reduced and =totalSupply=
-   drops), the sender's =idx= resets to =cumIndex=, and the recipient's
-   =idx= is /weighted-merged/ toward =cumIndex= -- the recipient
-   receives clean BUCK with no inherited age and pays no fee.
+   On a /standard/ ERC-20 transfer the sender's accumulated fee is first
+   /burned/ (its outgoing balance is reduced and =totalSupply= drops) and
+   its =buckSeconds= is re-crystallised from the new balance; the
+   recipient's inflowing BUCK begins accruing age from zero and carries no
+   inherited fee.
 
-   Once per touch, the contract also "accrues the Jubilee": the gap
-   between the Jubilee's required balance (its own accumulated
-   =cumIndex= slice times =totalSupply=) and its actual balance is
-   minted into the Jubilee account, and its =idx= is weighted-merged
-   forward.  This keeps the system-wide invariant
+   Once per touch, the contract also "accrues the Jubilee": the system's
+   demurrage for the elapsed interval (=totalSupply= times the rate-slice)
+   is credited to the Jubilee account's balance via a direct slot write
+   (=totalSupply= itself is not mutated by demurrage).  This keeps the
+   system-wide invariant
 
    \[
    \sum_{\text{all accounts } X} B_X
@@ -1119,50 +1120,48 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** The Pool Account's Demurrage
 
    The Notes pool is an /ordinary/ BUCK account (the Notes contract's
-   own ERC-20 balance).  Its demurrage state is therefore exactly two
-   numbers maintained by the BUCK ledger:
+   own ERC-20 balance).  Its demurrage state is therefore exactly the
+   packed per-account state the BUCK ledger keeps for everyone:
 
    - \( B \) = =balanceOf(notes)= -- BUCK transferred in via mint and
      donations, minus BUCK transferred out via spend.
-   - \( \text{idx}_{\text{pool}} \) = =_indexAtLastTouch[address(notes)]=,
-     the =cumIndex= snapshot at the pool's most recent touch.
+   - \( \text{buckSeconds}_{\text{pool}} \) -- the crystallised
+     \( \int B\,dt \) integral, alongside the =timestamp= of the last touch.
 
    The pool's effective fee-owed at this moment is
-   \( B \cdot (\text{cumIndex}_{\text{now}} - \text{idx}_{\text{pool}})/\text{SCALE} \).
+   \( \text{rate} \cdot (\text{buckSeconds}_{\text{pool}} + B \cdot \text{elapsed})/\text{SCALE} \).
    The Notes contract never reads or writes either value: it lives
-   inside the BUCK ledger just like every other account.  Mints
-   weighted-merge =idx_pool= toward the new =cumIndex=; spends use
-   the carrying primitive defined next.
+   inside the BUCK ledger just like every other account.  Spends drain
+   it through the carrying path described next.
 
 ** The Age-Preserving Redemption
 
-   When a note of face \( v \) is spent, the Notes contract calls the
-   single new BUCK primitive =transferCarrying(recipient, v)=.  Unlike
-   the standard ERC-20 transfer, =transferCarrying= /does not/ burn
-   any sender-side fee: the pool's index is left untouched, the full
-   face value lands in the recipient, and the recipient's
-   =_indexAtLastTouch= is weighted-merged toward the /pool's/ index
-   (which is older than =cumIndex_now=, hence carries fee owed):
+   When a note of face \( v \) is spent, the Notes contract calls an
+   ordinary =buck.transfer(recipient, v)=.  Because the pool is an
+   =isCarrying= account, BUCK routes it through =_carryingTransfer=,
+   which -- unlike a transfer /from/ a non-Carrying account -- does not
+   hand the recipient age-free BUCK: it apportions a proportional slice
+   of the pool's live buck-seconds integral onto the recipient (the full
+   face value still lands):
 
    #+begin_example
-   br        = balanceOf(recipient)                    // before transfer
-   idxFrom   = _indexAtLastTouch[pool]                 // pool's stale index
-   _indexAtLastTouch[recipient]
-       = (br * _indexAtLastTouch[recipient] + v * idxFrom)
-                                / (br + v)
-   _update(pool, recipient, v)                         // ordinary balance move
+   liveBs   = pool.buckSeconds + pool.raw * elapsed    // pool's live integral
+   carried  = liveBs * v / pool.raw                    // proportional share
+   pool.buckSeconds       = liveBs - carried           // pool sheds its share
+   pool.balance          -= v
+   recipient.buckSeconds += carried                    // recipient inherits the age
+   recipient.balance     += v
    #+end_example
 
-   The pool's =_indexAtLastTouch= is /not/ disturbed -- successive
-   spends from the pool draw against the same shared index, so each
-   recipient inherits the same per-BUCK age share as long as the pool
-   keeps minting and spending without an intervening standard
-   transfer.
+   The pool's /per-BUCK/ age is preserved -- its integral and its balance
+   drop by the same proportion -- so successive spends from the pool
+   inherit the same per-BUCK age share as long as the pool keeps minting
+   and spending without an intervening standard transfer.
 
-   The recipient's combined index after the merge corresponds to a
-   weighted average of the two BUCK-ages: the recipient's prior
-   holding ages from its prior =idx=, and the freshly received \( v \)
-   BUCK ages from the pool's =idx=.  When the recipient next makes a
+   The recipient's combined buck-seconds after the merge correspond to a
+   weighted average of the two BUCK-ages: the recipient's prior holding
+   keeps its accrued age, and the freshly received \( v \) BUCK carries
+   the pool's age.  When the recipient next makes a
    standard outgoing transfer they pay the (combined) fee out of their
    balance, exactly as if they had personally held \( v \) BUCK across
    the pool's residence period.
@@ -1176,22 +1175,22 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** Donations Integrate Smoothly
 
    Any BUCK transferred to the Notes contract /without/ minting a
-   corresponding note arrives via a standard ERC-20 transfer, which
-   weighted-merges the pool's =_indexAtLastTouch= toward the current
-   =cumIndex= (i.e. forward in time).  The pool's per-BUCK fee owed
-   drops; subsequent =transferCarrying= spends therefore deliver
-   recipients an index closer to =cumIndex_now=, meaning a smaller
-   inherited fee-share per face unit.  Over a sequence of spends, the
-   donation is consumed as a demurrage subsidy for live noteholders.
+   corresponding note arrives via a standard transfer that credits the
+   pool fresh, low-age BUCK -- diluting the pool's per-BUCK age (its
+   buck-seconds integral grows slower than its balance).  The pool's
+   per-BUCK fee owed drops; subsequent carrying-path spends therefore
+   deliver recipients a smaller inherited fee-share per face unit.  Over
+   a sequence of spends, the donation is consumed as a demurrage subsidy
+   for live noteholders.
 
    Four origin cases, all handled identically:
 
    1. *Accidental transfers.*  A user fat-fingers the Notes contract
-      as a recipient.  Their BUCK is not burned; it freshens
-      =idx_pool=, and future redeemers inherit marginally less fee.
+      as a recipient.  Their BUCK is not burned; it dilutes the pool's
+      per-BUCK age, and future redeemers inherit marginally less fee.
    2. *Philanthropic donations.*  A user deliberately sends BUCK to
       the pool to subsidise noteholders.  The subsidy spreads across
-      all future redemptions until =idx_pool= staleness rebuilds.
+      all future redemptions until the pool's per-BUCK age rebuilds.
    3. *Recovered collateral.*  Mechanism-level refunds (e.g., an
       issuer's collateral unlock) sent to the pool address.
    4. *Rounding / dust.*  Integer-arithmetic residuals.  Self-healing.
@@ -1204,40 +1203,39 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Conservation is Automatic, and Tight
 
-   =transferCarrying= conserves the pool's and recipient's nominal
+   The carrying transfer conserves the pool's and recipient's nominal
    balances exactly:
 
    - \( \Delta B_{\text{pool}} + \Delta B_{\text{recipient}} = 0 \).
 
-   No fee is burned, no =totalSupply= movement happens; the
-   recipient's =idx= weighted-merge is pure bookkeeping.  The next
-   time the recipient makes a standard transfer, the inherited
-   fee-share will be paid out of their balance and into the Jubilee
-   via the ordinary BUCK accounting path.
+   No fee is burned and =totalSupply= is unchanged on the carry itself;
+   the buck-seconds apportionment is pure bookkeeping.  The next time the
+   recipient makes a standard transfer, the inherited fee-share is paid
+   out of their balance and into the Jubilee via the ordinary BUCK
+   accounting path.
 
    Globally, the system-wide invariant
    \( \sum_X B_X = \text{totalSupply (incl. Jubilee)} \) holds across
    every transfer (carrying or standard) by construction.  The
    Jubilee's required-balance growth is independent of how BUCK is
-   distributed between accounts; it depends only on =cumIndex= and
+   distributed between accounts; it depends only on the elapsed time and
    =totalSupply=.  No pool-specific conservation theorem is required.
 
 ** Numeric Example
 
    Suppose the pool holds \( B = 10\,000\,000 \) BUCK and was last
-   touched 0.5 yr ago, so the pool's =idx_pool= lags =cumIndex_now=
-   by an amount corresponding to a 1% fee owed (the BUCK base
-   demurrage rate is 2% per year).  The pool currently owes the
-   Jubilee \( 100\,000 \) BUCK against its \( 10\,000\,000 \) face.
+   touched 0.5 yr ago, so the pool's accumulated buck-seconds correspond
+   to a 1% fee owed per BUCK (the BUCK base demurrage rate is 2% per
+   year).  The pool currently owes the Jubilee \( 100\,000 \) BUCK
+   against its \( 10\,000\,000 \) face.
 
    Alice spends a note of face \( v = 1{,}000 \):
    - Alice's BUCK balance rises by exactly 1,000.
-   - Alice's =_indexAtLastTouch= weighted-merges toward =idx_pool=:
-     if she previously held 0 BUCK, her index is set to =idx_pool=
-     directly (1% of fee per BUCK is now attached to her); if she
-     previously held 9,000 BUCK at =cumIndex_now=, the merge yields
-     an index close to =cumIndex_now= (only 0.1% of fee per BUCK
-     across her now-10,000 balance).
+   - Alice inherits a proportional slice of the pool's buck-seconds:
+     if she previously held 0 BUCK, the full 1%-per-BUCK age attaches to
+     her 1,000; if she previously held 9,000 BUCK of fresh (zero-age)
+     BUCK, the inherited age averages down to ~0.1% of fee per BUCK
+     across her now-10,000 balance.
    - When Alice next makes a standard outgoing transfer of \( v \),
      her accumulated fee on the proportional share is burned out of
      her balance and credited to =totalSupply= such that the Jubilee
@@ -1247,15 +1245,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
      held the BUCK during the pool's residency.
 
    Now suppose an anonymous donor sends 500,000 BUCK to the pool via
-   a standard transfer.  =idx_pool= weighted-merges forward toward
-   =cumIndex_now=; the per-BUCK fee owed by the pool drops.  Alice's
-   next spend now inherits a /smaller/ index-gap and therefore pays
-   less demurrage on her next outgoing transfer -- a direct subsidy
-   from the donor.
+   a standard transfer.  The fresh, zero-age BUCK dilutes the pool's
+   per-BUCK age; the fee owed per BUCK drops.  Alice's next spend now
+   inherits a /smaller/ per-BUCK age and therefore pays less demurrage
+   on her next outgoing transfer -- a direct subsidy from the donor.
 
    The Jubilee's growth schedule is unchanged: it keeps accruing
-   relative to =cumIndex \cdot totalSupply= regardless of how BUCK
-   sloshes between accounts.
+   relative to =rate \cdot totalSupply \cdot elapsed= regardless of how
+   BUCK sloshes between accounts.
 
 ** Who Bears the Demurrage, Really
 
@@ -1271,7 +1268,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    For notes held longer than the pool's average residence, this is
    /cheaper/ than holding the BUCK directly; for notes spent quickly
    into the pool, it is more expensive.  The trade-off is explicit
-   in the resulting =_indexAtLastTouch= on the recipient's account.
+   in the resulting =buckSeconds= on the recipient's account.
 
    Noteholders (while holding) bear no demurrage: they hold a
    cryptographic commitment, not a BUCK balance, and the BUCK they
@@ -1314,29 +1311,29 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    A BUCK Note that is lost in a fire, dropped down a storm drain, or
    hidden in a wall by a paranoid grandparent is /not/ permanently
    extracted from the system.  The face value sits in the pool's
-   ERC-20 balance, with the pool's =_indexAtLastTouch= drifting
-   further behind =cumIndex_now= as the pool sits untouched.  No
+   ERC-20 balance, with the pool's accumulated buck-seconds growing
+   (its per-BUCK age rising) as the pool sits untouched.  No
    spend ever happens.
 
    Two effects balance:
 
    1. The BUCK backing the lost note stays in the pool indefinitely.
       It does not vanish.
-   2. Other live-note spenders, through =transferCarrying=, inherit
-      a share of the pool's stale index at each spend.  Because the
+   2. Other live-note spenders, through the Carrying transfer, inherit
+      a share of the pool's accumulated age at each spend.  Because the
       lost note's backing weighs on =balanceOf(notes)= without a
       corresponding spend to drain it, the lost-note's implicit
       demurrage is paid installment-style by subsequent spenders on
       their next outgoing transfer.
 
-   Over decades, the pool's index-gap (=cumIndex_now - idx_pool=) on
-   the lost-note backing accumulates the demurrage that would have
+   Over decades, the buck-seconds accruing on the lost-note backing
+   accumulate the demurrage that would have
    been owed had the BUCK been held in a regular account.  The
    autonomous Jubilee growth continues regardless.  Net effect: /the
    5-10% of currency that physical cash systems lose forever, BUCK
    Notes returns to the commons within a generation/, via the steady
    demurrage pressure that the lost face value applies to live
-   spenders inheriting the pool's stale index.
+   spenders inheriting the pool's accumulated age.
 
    This has cascading consequences:
 
@@ -2487,8 +2484,9 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    requires =nullifier= unused, verifies the Groth16 proof through
    =SpendVerifierAdapter=, sets =nullifiers[nullifier] = true=,
    decrements =noteFaceSum= by =face=, and finally calls
-   =buck.transferCarrying(recipient, face)= to deliver the funds
-   plus the pool's accumulated demurrage share.
+   =buck.transfer(recipient, face)= -- routed through the Carrying path
+   because the pool is =isCarrying= -- to deliver the funds plus the
+   pool's accumulated demurrage share.
 
    *Bearer semantics for B-shape spends.*  Anyone holding the opening
    \( (\rho, \text{idHash}, \text{flavor}, v, \text{predHash}) \) can
@@ -2649,7 +2647,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Demurrage Conservation as a Contract Invariant
 
-   Because the pool is a regular BUCK account and =transferCarrying=
+   Because the pool is a regular BUCK account and the Carrying transfer
    moves only nominal balance (no fee burn, no =totalSupply= change),
    no Notes-specific demurrage invariant is needed.  The system-wide
    BUCK invariant
@@ -2658,10 +2656,10 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    \sum_{\text{all accounts}} B_X \;=\; \text{totalSupply (incl. Jubilee)}
    \]
 
-   holds trivially through every spend: =transferCarrying= moves
+   holds trivially through every spend: the Carrying transfer moves
    exactly =face= BUCK from pool to recipient, leaving the sum
-   unchanged.  The recipient's =_indexAtLastTouch= weighted-merge is
-   pure bookkeeping; no balance sum is touched.
+   unchanged.  The recipient's =buckSeconds= apportionment is pure
+   bookkeeping; no balance sum is touched.
 
    The Notes contract only needs to maintain two auxiliary local
    invariants:
@@ -2672,10 +2670,10 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
       the Merkle inclusion of \( cm \) binding \( v \), and the
       circuit's \( \text{face} \equiv v \) constraint).
 
-   Both are trivial.  The only new BUCK mechanism is
-   =transferCarrying=, itself a simple state-machine operation
-   weighted-merging the recipient's =_indexAtLastTouch= toward the
-   pool's index.
+   Both are trivial.  The only BUCK mechanism Notes leans on is the
+   Carrying-transfer path (=Buck._carryingTransfer=, auto-dispatched by
+   the pool's =isCarrying= flag), itself a simple state-machine
+   operation apportioning the pool's =buckSeconds= onto the recipient.
 
 #+LATEX: \clearpage
 * Implementation Scope
@@ -2691,7 +2689,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | Component                                                        | Source                                                                                                                          |
    |------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------|
    | Notes contract: roots, nullifiers, mint/spend/spendACP           | =src/Notes.sol=                                                                                                                 |
-   | =transferCarrying= primitive in BUCK                             | =src/Buck.sol= (=transferCarrying=, =_indexAtLastTouch= merge)                                                                  |
+   | Carrying-transfer path in BUCK (auto-dispatched by =isCarrying=) | =src/Buck.sol= (=_carryingTransfer=, =buckSeconds= apportionment)                                                               |
    | Mint Groth16 circuits + per-N verifiers                          | =circuits/mint_batch.circom=, =src/MintGroth16Verifier_N*.sol=                                                                  |
    | Spend Groth16 circuit + verifier (B-shape)                       | =circuits/spend.circom=, =src/SpendGroth16Verifier.sol=                                                                         |
    | Spend_A Groth16 circuit + verifier (V2; Poseidon-8 binding gate) | =circuits/spend_a.circom=, =src/SpendAGroth16Verifier.sol=                                                                      |
@@ -2757,7 +2755,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    |     2 | Mint circuit + on-chain Groth16 verifier (=mint.circom=, N=2)                     | *Shipped* (historical; superseded by 2-bis)                  |
    | 2-bis | Batch-mint circuit: per-leaf Merkle insertion moved into the                      | Active implementation work                                   |
    |       | SNARK (=mint_batch.circom=, pinned N set)                                         |                                                              |
-   |     3 | Spend circuit (B-shape / bearer) + =transferCarrying=                             | *Shipped* (Phase 7 BUCK Notes)                               |
+   |     3 | Spend circuit (B-shape / bearer) + Carrying-transfer egress                       | *Shipped* (Phase 7 BUCK Notes)                               |
    |     4 | =spend_a.circom= V1 (predicate-only A-spend) + V2 (in-circuit EIP-196 precompiles | V1 *Shipped*; V2 *Shipped*; =alberta_buck.wallet.spend_cp=,  |
    |       | Poseidon-8 idHash binding gate; off-chain CP-DLEQ via                             | =IdentityRegistry.verifySpendCP=, =src/ISpendAVerifier.sol=, |
    |       | in =IdentityRegistry.verifySpendCP=, called from =Notes.spendACP=)                | =src/SpendAVerifierAdapter.sol=                              |
@@ -2846,29 +2844,28 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Donation Incidence
 
-   Donations to the Notes contract weighted-merge =idx_pool= forward
-   toward =cumIndex_now=, lowering the per-BUCK fee owed by the pool
-   and therefore reducing the index gap every subsequent redeemer
-   inherits.  The benefit spreads across all future redemptions
-   rather than accruing to a single lucky first-redeemer.  A
-   donation immediately before a large redemption benefits that
-   redemption more (because the merge uses the donation's relative
-   weight against the pool's existing balance), but every subsequent
-   redemption benefits in proportion to the freshened index.  No
-   special smoothing logic is needed.
+   Donations to the Notes contract credit it fresh, zero-age BUCK,
+   diluting the pool's per-BUCK age and therefore reducing the
+   demurrage share every subsequent redeemer inherits.  The benefit
+   spreads across all future redemptions rather than accruing to a
+   single lucky first-redeemer.  A donation immediately before a large
+   redemption benefits that redemption more (the dilution is weighted
+   by the donation's size against the pool's existing balance), but
+   every subsequent redemption benefits in proportion to the lowered
+   age.  No special smoothing logic is needed.
 
    Residual donation principal (after all notes drain) is not
-   lost: it sits in =balanceOf(notes)= with a =_indexAtLastTouch=
-   close to whatever =cumIndex= it last touched at, available to
-   subsidise the next generation of mints, or recoverable by
-   governance sweep per Notes-contract policy.
+   lost: it sits in =balanceOf(notes)= carrying whatever buck-seconds
+   it has accrued since its last touch, available to subsidise the
+   next generation of mints, or recoverable by governance sweep per
+   Notes-contract policy.
 
 ** Stranded Value on Lost Notes
 
    A lost note contributes to =noteFaceSum= indefinitely.  The BUCK
    backing that note sits in the pool, where its share of
-   accumulated demurrage stays attached to =idx_pool=.  Each spend
-   of a live note inherits a slice of that accumulated index gap on
+   accumulated demurrage stays in the pool's =buckSeconds=.  Each spend
+   of a live note inherits a slice of those accumulated buck-seconds on
    its delivered face -- so over time the lost note's implicit
    demurrage is paid instalment-style by subsequent live noteholders
    on their next outgoing transfers.  At 1%/yr loss and 2%/yr
@@ -2883,15 +2880,15 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Integer-Arithmetic Rounding
 
-   The =transferCarrying= weighted-index merge involves one integer
-   division
-   \( ( br \cdot \text{idx}_r + v \cdot \text{idx}_p ) / (br + v) \)
-   for the recipient's new index.  Truncation rounds the recipient's
-   inherited fee /down/ by at most one =cumIndex= unit per spend --
-   trivially small (sub-wei demurrage on any realistic balance) and
-   /not/ drift-accumulating: the lost fraction never exceeds the
-   recipient's prior index gap.  Floor rounding is fine; no banker's
-   logic required.
+   The Carrying transfer's buck-seconds apportionment involves one
+   integer division
+   \( \text{carried} = \text{liveBs} \cdot v / \text{poolRaw} \)
+   for the recipient's inherited share.  Truncation rounds the
+   recipient's inherited fee /down/ by at most one buck-second per
+   spend -- trivially small (sub-wei demurrage on any realistic
+   balance) and /not/ drift-accumulating: the lost fraction never
+   exceeds the pool's per-spend integral slice.  Floor rounding is
+   fine; no banker's logic required.
 
 ** Predicate Programmability vs. Circuit Simplicity
 
@@ -2918,7 +2915,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    A-only public-input overhead.  Two verifiers, two trusted-setup
    ceremonies (both pot15), is the shipped configuration.
 
-** Regulatory Interaction with =transferCarrying=
+** Regulatory Interaction with the Carrying Transfer
 
    Jurisdictional regulators (FINTRAC, OSFI) have rules around
    bearer instruments and tax treatment of negative-interest
@@ -2927,17 +2924,17 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    no pool-specific novelty -- the contract is just another BUCK
    account.
 
-   The one new wrinkle is the =transferCarrying= primitive itself:
-   ordinary BUCK transfers carry only balance (recipient gets "fresh"
-   BUCK and resets =_indexAtLastTouch= to =cumIndex_now=), whereas
-   Note redemptions weighted-merge the recipient's =_indexAtLastTouch=
-   /toward the pool's stale index/.  This means a Note recipient's
-   post-redemption spendable value is less than their nominal
-   balance -- the difference being the demurrage they will pay on
-   their next outgoing transfer.  For tax and reporting purposes,
-   whether the "face" or the "spendable" number should be used as
-   the income figure is a question for tax counsel.  The on-chain
-   state (=balanceOf= and =_indexAtLastTouch=) is fully transparent
+   The one new wrinkle is the Carrying-transfer egress itself: an
+   ordinary transfer from a non-Carrying account hands the recipient
+   "fresh" BUCK (the inflow ages from zero), whereas a Note redemption
+   -- a transfer from the =isCarrying= pool -- apportions a share of
+   the pool's accumulated buck-seconds onto the recipient.  This means
+   a Note recipient's post-redemption spendable value is less than
+   their nominal balance -- the difference being the demurrage they
+   will pay on their next outgoing transfer.  For tax and reporting
+   purposes, whether the "face" or the "spendable" number should be
+   used as the income figure is a question for tax counsel.  The
+   on-chain state (=balanceOf= and =buckSeconds=) is fully transparent
    either way.
 
 #+LATEX: \clearpage
@@ -2956,20 +2953,21 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
   Demurrage needs no note-side machinery: the Notes Pool is the
   Notes contract's own ERC-20 balance -- a regular BUCK account with
-  its single =_indexAtLastTouch[notes]= entry in the BUCK ledger.
-  The only Note-side state beyond the Merkle tree and nullifier set
-  is =noteFaceSum=, the total face value of live notes, kept as an
-  audit scalar.  Spend delivers the /full face value/ to the
-  recipient via =transferCarrying=, weighted-merging the recipient's
-  =_indexAtLastTouch= toward the pool's stale index.  The recipient
-  inherits the average pool BUCK-age and bears the resulting
+  its single packed =buckSeconds= / =timestamp= entry in the BUCK
+  ledger.  The only Note-side state beyond the Merkle tree and
+  nullifier set is =noteFaceSum=, the total face value of live notes,
+  kept as an audit scalar.  Spend delivers the /full face value/ to
+  the recipient with an ordinary =transfer= that BUCK routes through
+  its Carrying path (the pool is =isCarrying=), apportioning a share of
+  the pool's accumulated buck-seconds onto the recipient.  The
+  recipient inherits the average pool BUCK-age and bears the resulting
   demurrage on their next standard outgoing transfer through the
   ordinary BUCK accounting path -- exactly the demurrage they would
   have paid had they held the BUCK personally through the pool's
-  residence period.  The entire mechanism requires a single new
-  primitive, =transferCarrying=, localised to the Notes contract's
-  one egress function.  Donations to the pool freshen =idx_pool= and
-  cheaply subsidise all subsequent redeemers.  Conservation of
+  residence period.  The entire mechanism needs no new BUCK entry
+  point -- it reuses the =_carryingTransfer= path dispatched by the
+  pool's =isCarrying= flag.  Donations to the pool dilute its per-BUCK
+  age and cheaply subsidise all subsequent redeemers.  Conservation of
   nominal balance and Jubilee growth fall out exactly.
 
   The addressed-versus-bearer distinction produces a sharp partition

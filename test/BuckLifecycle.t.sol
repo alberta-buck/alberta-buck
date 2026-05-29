@@ -7,6 +7,7 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 
 /// @dev Stand-in for USDC.  Name differs from MockUSDC in UniswapV2Integration
@@ -50,7 +51,7 @@ interface IUniswapV2Pair {
 contract BuckLifecycleTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
 
@@ -100,11 +101,12 @@ contract BuckLifecycleTest is Test {
         _registerBob();
 
         // BUCK stack.
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         // Mock USDC.
         usdc = address(new LifecycleUSDC());
@@ -166,7 +168,7 @@ contract BuckLifecycleTest is Test {
         );
         creditExists = true;
         vm.prank(alice);
-        credit.activate(tokenId, 10_000e6);
+        credit.forceActivate(tokenId, 10_000e6);
         _snap("credit-created");
 
         // ── 2. Alice mints 5,000 BUCK against the credit ─────────────────────
@@ -175,6 +177,19 @@ contract BuckLifecycleTest is Test {
         _snap("buck-minted");
 
         // ── 3. Alice seeds the BUCK/USDC V2 pool 1:1 ────────────────────────
+        //
+        // NOTE: track time via a locally-incremented `t` instead of
+        // `block.timestamp + N` inside the V2-router deadline argument.
+        // solc 0.8.28's optimizer CSEs block.timestamp across vm.warp,
+        // so `vm.warp(block.timestamp + 30 days)` in the loop below
+        // silently no-ops after the first iteration, AND the deadline
+        // `block.timestamp + 1` re-uses the optimizer's cached pre-warp
+        // value -- so the router sees the deadline as a past timestamp
+        // and reverts with "UniswapV2Router: EXPIRED".  Using a
+        // locally-incremented `t` sidesteps both the warp fold and the
+        // deadline fold.  See test/BuckKController.t.sol's
+        // test_multi_step_pid_convergence comment for the root cause.
+        uint256 t = block.timestamp;
         _setBuckAllowance(alice, router, 5_000e6);
         vm.prank(alice);
         IERC20Like(usdc).approve(router, 5_000e6);
@@ -183,7 +198,7 @@ contract BuckLifecycleTest is Test {
             address(buck), usdc,
             5_000e6, 5_000e6,
             0, 0, alice,
-            block.timestamp + 1
+            t + 1
         );
         _snap("pool-seeded");
 
@@ -193,18 +208,20 @@ contract BuckLifecycleTest is Test {
         path[1] = address(buck);
 
         for (uint256 i = 0; i < 12; i++) {
-            vm.warp(block.timestamp + 30 days);
+            t += 30 days;
+            vm.warp(t);
             vm.prank(bob);
             IERC20Like(usdc).approve(router, 500e6);
             vm.prank(bob);
             IUniswapV2Router02(router).swapExactTokensForTokens(
-                500e6, 0, path, bob, block.timestamp + 1
+                500e6, 0, path, bob, t + 1
             );
             _snap(string.concat("swap-", vm.toString(i + 1)));
         }
 
         // ── 5. Alice removes all liquidity (year end) ────────────────────────
-        vm.warp(block.timestamp + 5 days);   // ~365 days total
+        t += 5 days;
+        vm.warp(t);                          // ~365 days total
         uint256 aliceLp = IERC20Like(pair).balanceOf(alice);
         vm.prank(alice);
         IERC20Like(pair).approve(router, aliceLp);
@@ -212,7 +229,7 @@ contract BuckLifecycleTest is Test {
         IUniswapV2Router02(router).removeLiquidity(
             address(buck), usdc,
             aliceLp, 0, 0, alice,
-            block.timestamp + 1
+            t + 1
         );
         _snap("liquidity-removed");
 

@@ -71,17 +71,23 @@ contract BuckKArbScenarioTest is Test, SimulationFixture {
     }
 
     function _runMainLoop() internal {
-        uint256 endTime  = block.timestamp + DURATION_DAYS * 1 days;
-        uint256 nextSnap = block.timestamp;
-        while (block.timestamp < endTime) {
+        // Drive the loop off a locally-tracked `t` so the
+        // optimizer can't CSE-fold block.timestamp across the
+        // vm.warp inside _advance(); see test_multi_step_pid_convergence
+        // in BuckKController.t.sol for the root cause.
+        uint256 t        = block.timestamp;
+        uint256 endTime  = t + DURATION_DAYS * 1 days;
+        uint256 nextSnap = t;
+        while (t < endTime) {
             _processArrivals();
             _processRetirements();
             _aliceTick();
-            if (block.timestamp >= nextSnap) {
+            if (t >= nextSnap) {
                 _snap();
-                nextSnap = block.timestamp + SNAP_EVERY;
+                nextSnap = t + SNAP_EVERY;
             }
             _advance(TICK_SECONDS);
+            t += TICK_SECONDS;
         }
         _snap();
     }

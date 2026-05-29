@@ -50,6 +50,8 @@ class Chain:
     # -- tx send ------------------------------------------------------- #
 
     def _send(self, fn, sender: Any, gas: int, value: int = 0):
+        from_addr = sender.address if isinstance(sender, LocalAccount) \
+            else Web3.to_checksum_address(sender)
         if isinstance(sender, LocalAccount):
             tx = fn.build_transaction({
                 "from": sender.address,
@@ -63,14 +65,24 @@ class Chain:
             h = self.w3.eth.send_raw_transaction(signed.raw_transaction)
         else:
             h = fn.transact({
-                "from": Web3.to_checksum_address(sender),
+                "from": from_addr,
                 "gas": gas,
                 "gasPrice": 0,
                 "value": value,
             })
         rcpt = self.w3.eth.wait_for_transaction_receipt(h)
         if rcpt["status"] != 1:
-            raise RuntimeError(f"tx reverted: {fn.fn_name if hasattr(fn,'fn_name') else fn}")
+            # Replay via eth_call at the post-block state to extract the
+            # revert reason — anvil returns the Solidity require message
+            # in the call exception.
+            fname = fn.fn_name if hasattr(fn, "fn_name") else str(fn)
+            reason = ""
+            try:
+                fn.call({"from": from_addr, "gas": gas, "value": value},
+                        block_identifier=rcpt["blockNumber"])
+            except Exception as e:
+                reason = str(e)[:400]
+            raise RuntimeError(f"tx reverted: {fname} :: {reason}")
         return rcpt
 
     def send(self, contract_fn_call, sender: Any | None = None, gas: int = _CALL_GAS,

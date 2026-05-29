@@ -7,6 +7,7 @@ import {BN254}                from "../src/BN254.sol";
 import {IdentityRegistry}     from "../src/IdentityRegistry.sol";
 import {Buck}                 from "../src/Buck.sol";
 import {BuckCredit}           from "../src/BuckCredit.sol";
+import {BuckCreditHarness}           from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {Notes}                from "../src/Notes.sol";
 import {IMintVerifier}        from "../src/IMintVerifier.sol";
@@ -28,7 +29,7 @@ contract RejectingMintVerifier is IMintVerifier {
 contract NotesTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
     Notes                 internal notes;
@@ -72,11 +73,12 @@ contract NotesTest is Test {
         _registerBob();
 
         // Buck stack.
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         // Notes stack (no PoseidonT3 dep in Phase 7-bis).
         stub      = new StubMintVerifier(GOV);
@@ -182,7 +184,7 @@ contract NotesTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
         vm.prank(client);
-        credit.activate(tokenId, faceValue);
+        credit.forceActivate(tokenId, faceValue);
     }
 
     /// @dev Approve Notes from `from` to spend `amount` BUCK.  Writes the

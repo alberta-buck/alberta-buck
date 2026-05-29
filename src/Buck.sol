@@ -6,7 +6,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {Math}           from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {BN254}            from "./BN254.sol";
-import {BuckTypes, BuckQty, BuckSeconds, toBuckQty, toBuckSeconds} from "./BuckTypes.sol";
+import {BuckTypes, BuckQty, BuckSeconds, CreditSlice, toBuckQty, toBuckQtySigned, toBuckSeconds} from "./BuckTypes.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 
 /// @title Buck — identity-bound ERC-20 with single-slot per-account state.
@@ -26,8 +26,9 @@ interface IBuckK {
     ///      so user activity drives (and amortizes) PID work.
     function compute() external returns (uint256);
     /// @dev Counter-cyclical insurance funding factor (18-dec; 1e18 == 1.0).
-    ///      Buck.mint gates on
-    ///        balanceOf(minter) >= poolPrincipal * fundingFactor / 1e18.
+    ///      Buck.mint gates on `balanceOf(minter) >= amount * fundingFactor
+    ///      / 1e18` -- the minter must hold (as positive BUCK or unused
+    ///      credit headroom) a reserve scaled to the BUCKs being issued.
     ///      The Static controller returns 0 (gate disabled); the PID
     ///      controller returns max(0, 1e18 + 10*(basket-BUCK)*1e18/basket).
     function fundingFactor() external view returns (uint256);
@@ -40,6 +41,10 @@ interface IBuckCredit {
     function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
     function creditInfo(uint256 tokenId)
         external view returns (uint256 faceValue, uint256 activatedValue, uint32 premiumRate);
+    function batchCreditInfo(uint256[] calldata tokenIds)
+        external view returns (CreditSlice[] memory slices);
+    function activateFromBuck(uint256 tokenId, address holder, uint256 amount) external;
+    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount) external;
 }
 
 contract Buck is IERC20, IERC20Metadata {
@@ -141,6 +146,20 @@ contract Buck is IERC20, IERC20Metadata {
     // `vm.store(..., slot, ...)`) remain unchanged.
     address public basket;
 
+    // ---- Credit-limit cache ------------------------------------------------
+    //
+    // creditLimit(a) = totalCurrentValue(a) * currentBuckK / 1e18 -- live sum
+    // over the holder's BuckCredit NFTs.  Caching per block avoids re-scanning
+    // NFTs in the (common) case where the same account makes multiple
+    // transfers in one block.  BuckCredit invalidates the cache via the
+    // onCreditMutation hook on every NFT mint / burn / transfer / activate /
+    // updateCredit.
+    //
+    // Appended after `basket` so existing slot positions are preserved (see
+    // the `vm.store` consumers enumerated in the Phase-1 plan).
+    mapping(address => uint256) public creditLimitCache;
+    mapping(address => uint64)  public creditLimitBlock;
+
     // ---- premium / mutual-insurance pool model -----------------------------
     //
     // mint(N) delivers N to the holder + a mutual-insurance pool deposit of
@@ -206,12 +225,45 @@ contract Buck is IERC20, IERC20Metadata {
 
     function totalSupply() external view returns (uint256) { return _totalSupply; }
 
+    /// @notice ERC-20 spendable balance.  Includes positive held BUCK (net
+    ///         of demurrage for non-Carrying accounts) plus *unused credit
+    ///         headroom* (creditLimit - used) for non-Carrying accounts.
+    ///         The user-facing semantic: "what alice can spend right now."
+    ///
+    ///         Carrying accounts (AMM pools, Notes, Jubilee) hold no NFT-
+    ///         backed credit and cannot go negative; balanceOf returns
+    ///         raw for them.
     function balanceOf(address a) public view returns (uint256) {
         AccountState storage s = _state[a];
-        uint256 raw = s.balance.asUint();
+        int256 raw = s.balance.asInt();
+        if (identity.isCarrying(a)) {
+            return raw > 0 ? uint256(raw) : 0;
+        }
+        // Non-carrying: held + unused credit.
+        uint256 held = 0;
+        if (raw > 0) {
+            uint256 rawU = uint256(raw);
+            uint256 fee = _feeOwing(s, rawU);
+            held = fee >= rawU ? 0 : rawU - fee;
+        }
+        uint256 used = raw < 0 ? uint256(-raw) : 0;
+        uint256 limit = creditLimit(a);
+        uint256 unusedCredit = limit > used ? limit - used : 0;
+        return held + unusedCredit;
+    }
+
+    /// @notice Signed view of an account's balance after demurrage.  Returns
+    ///         the negative raw value directly for used-credit accounts
+    ///         (those that have spent into BuckCredit-backed headroom).  Does
+    ///         NOT include credit headroom -- use `balanceOf` for the
+    ///         ERC-20 visible "what can I spend" semantic.
+    function signedBalanceOf(address a) public view returns (int256) {
+        AccountState storage s = _state[a];
+        int256 raw = s.balance.asInt();
+        if (raw <= 0) return raw;          // credit used accrues no demurrage (clamped in _feeOwing)
         if (identity.isCarrying(a)) return raw;
-        uint256 fee = _feeOwing(s, raw);
-        return fee >= raw ? 0 : raw - fee;
+        uint256 fee = _feeOwing(s, uint256(raw));
+        return raw - int256(fee);
     }
 
     function allowance(address owner, address spender) external view returns (uint256) {
@@ -280,6 +332,57 @@ contract Buck is IERC20, IERC20Metadata {
         return _receiptFragments[from][to];
     }
 
+    // ---- Credit-limit machinery (NFT-backed negative-balance headroom) ----
+
+    /// @notice Live credit limit (NFT-backed BUCK headroom) for account `a`.
+    /// @dev    Formula: ~totalCurrentValue(a) * currentBuckK / BUCKK_SCALE~.
+    ///         Sum of depreciated activated BuckCredit values scaled by the
+    ///         current PID multiplier.  Cached per block to avoid re-scanning
+    ///         a holder's NFT list across multiple transfers in the same
+    ///         block; the cache is invalidated by BuckCredit via the
+    ///         `onCreditMutation` hook on every NFT mint / burn / transfer /
+    ///         activate / updateCredit.
+    function creditLimit(address a) public view returns (uint256) {
+        if (creditLimitBlock[a] == uint64(block.number)) {
+            return creditLimitCache[a];
+        }
+        return _computeCreditLimit(a);
+    }
+
+    /// @dev Pure computation of the live credit limit; no cache read/write.
+    function _computeCreditLimit(address holder) internal view returns (uint256) {
+        uint256 cv = buckCredit.totalCurrentValue(holder);
+        if (cv == 0) return 0;
+        uint256 bk = buckK.currentBuckK();
+        return cv * bk / BUCKK_SCALE;
+    }
+
+    /// @dev Refresh the per-block cache.  Called from any non-view path that
+    ///      needs the credit limit (mint, burn, negative-going transfer).
+    function _refreshCreditLimit(address holder) internal returns (uint256 limit) {
+        if (creditLimitBlock[holder] == uint64(block.number)) {
+            return creditLimitCache[holder];
+        }
+        limit = _computeCreditLimit(holder);
+        creditLimitCache[holder] = limit;
+        creditLimitBlock[holder] = uint64(block.number);
+    }
+
+    /// @dev Mark the cache stale for `holder` so the next read recomputes.
+    function _invalidateCreditCache(address holder) internal {
+        if (holder == address(0)) return;
+        creditLimitBlock[holder] = 0;
+    }
+
+    /// @notice Hook called by BuckCredit on every NFT state change to
+    ///         invalidate Buck's per-block credit-limit cache.  Restricted
+    ///         to the registered BuckCredit contract.
+    function onCreditMutation(address from, address to) external {
+        require(msg.sender == address(buckCredit), "BUCK: not credit");
+        _invalidateCreditCache(from);
+        _invalidateCreditCache(to);
+    }
+
     // ---- mint / burn -------------------------------------------------------
 
     function mint(uint256 amount) external {
@@ -324,8 +427,10 @@ contract Buck is IERC20, IERC20Metadata {
         if (amount == 0) return;
         _accrueJubilee();
         _crystallize(to);
+        // _addBalance -> _setBalanceSigned tracks _totalSupply.  BuckBasket
+        // is a Carrying account, so its balance always crosses upward through
+        // the positive branch and the invariant grows by exactly `amount`.
         _addBalance(to, amount);
-        _totalSupply += amount;
         emit Transfer(address(0), to, amount);
     }
 
@@ -337,9 +442,12 @@ contract Buck is IERC20, IERC20Metadata {
         if (amount == 0) return;
         _accrueJubilee();
         _crystallize(msg.sender);
-        require(_state[msg.sender].balance.asUint() >= amount, "BUCK: insufficient");
+        int256 raw = _state[msg.sender].balance.asInt();
+        require(raw > 0 && uint256(raw) >= amount, "BUCK: insufficient");
+        // _subBalance -> _setBalanceSigned tracks _totalSupply.  BuckBasket
+        // is Carrying so the post-balance stays >= 0 and the invariant
+        // decrements by exactly `amount`.
         _subBalance(msg.sender, amount);
-        _totalSupply -= amount;
         emit Transfer(msg.sender, address(0), amount);
     }
 
@@ -357,83 +465,158 @@ contract Buck is IERC20, IERC20Metadata {
         return _allocateBurnView(amount, tokenIds);
     }
 
+    /// @dev Mint flow (Phase 1b): one-step activate + draw.  For each NFT in
+    ///      `tokenIds`, _allocateMint computes a `take_i` (insurance-overhead-
+    ///      inclusive) and a `principal_i = take_i - amount_i` per the per-NFT
+    ///      inversion `take = ceil(amount * BP / (BP - rate * POOL_ROI_INV))`.
+    ///      It calls `BuckCredit.activateFromBuck(tid, holder, take_i)` so the
+    ///      holder's NFT-backed credit headroom expands by `take_i`, and writes
+    ///      `mintsBacked[tid] += take_i`.
+    ///
+    ///      Insurance pool gets `poolPrincipal` (= sum principal_i) added; the
+    ///      minter's signed balance is deducted by the same amount, driving it
+    ///      negative (NFT-backed credit used).  _setBalanceSigned tracks `_totalSupply`
+    ///      across both writes -- net effect on totalSupply: `+poolPrincipal`
+    ///      (insurance pool gained positive; minter's positive contribution
+    ///      stayed 0 since they went from 0 toward negative).
+    ///
+    ///      End-state arithmetic:
+    ///          creditLimit(alice)  = sum take_i      (= totalCurrentValue * buckK)
+    ///          signedRawBalance     = -poolPrincipal  (= -sum principal_i)
+    ///          balanceOf            = creditLimit - used
+    ///                               = sum(take_i) - sum(principal_i)
+    ///                               = sum amount_i
+    ///                               = `amount`        (modulo integer rounding)
     function _mintAllocated(uint256 amount, uint256[] memory tokenIds) internal {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
 
+        // PID cadence: compute() advances the PID if dT elapsed (cheap cached
+        // read otherwise).  totalCreditValue and currentBuckK are captured
+        // for the Minted event; the live credit-limit is recomputed below
+        // after _allocateMint has run activateFromBuck.
         uint256 totalCreditValue = buckCredit.totalCurrentValue(msg.sender);
-        // compute() advances the PID if dT has elapsed (cheap cached read
-        // otherwise).  Mint activity is the primary driver of the controller.
         uint256 currentBuckK     = buckK.compute();
-        uint256 maxLimit         = totalCreditValue * currentBuckK / BUCKK_SCALE;
-        if (maxLimit > storedLimit[msg.sender]) {
-            storedLimit[msg.sender] = maxLimit;
-        }
-        uint256 limit = storedLimit[msg.sender];
-        require(_state[msg.sender].balance.asUint() + amount <= limit, "BUCK: exceeds credit limit");
 
+        // Counter-cyclical funding-factor reserve, captured against the
+        // minter's PRE-activation balanceOf (held + unused credit) so the
+        // credit this mint is about to activate cannot itself satisfy the
+        // reserve.  The reserve is scaled to the *insurance principal* this
+        // mint pays into the pool -- NOT the gross BUCK minted:
+        //     balanceOf(minter) >= poolPrincipal * fundingFactor / 1e18
+        // poolPrincipal is the premium-funding overhead (sum of take_i -
+        // amount_i).  A zero-premium credit yields poolPrincipal == 0 --
+        // zero-cost "insurance" -- so the requirement is zero and the mint is
+        // exempt (the SimLP bootstrap and any uninsured pledge mint freely).
+        // Where it bites: you cannot bootstrap *insured* credit from an
+        // inadequate reserve while BUCK is undervalued (factor > 1).  Static
+        // controller returns factor 0 (gate off); the PID controller drives
+        // the factor up when BUCK is undervalued and back to ~1.0 at parity.
+        // Captured before _allocateMint because that activates the pledged
+        // credit; enforced after, once poolPrincipal is known.
+        uint256 factor            = buckK.fundingFactor();
+        uint256 preFundingBalance = factor > 0 ? balanceOf(msg.sender) : 0;
+
+        // Walk the holder's NFTs cheapest-first; activates `take_i` on each
+        // via BuckCredit.activateFromBuck, writes mintsBacked[tid] += take_i,
+        // returns aggregate (totalCoverage = sum take, poolPrincipal = sum
+        // principal).  The cap per NFT is `faceValue - mintsBacked` (auto-
+        // activation may walk into unactivated capacity).
         (uint256 totalCoverage, uint256 poolPrincipal) = _allocateMint(amount, tokenIds);
 
-        require(
-            _state[msg.sender].balance.asUint() + totalCoverage <= limit,
-            "BUCK: exceeds credit limit"
-        );
-
-        // Counter-cyclical insurance funding gate.  The minter must already
-        // hold poolPrincipal * fundingFactor / 1e18 BUCK as a precondition
-        // (the balance is NOT consumed -- it is skin-in-the-game collateral
-        // that throttles new mints when BUCK trades below basket).
-        //
-        // The gate ALWAYS applies when there is a non-zero poolPrincipal:
-        // there is no totalSupply==0 bootstrap exemption, because BUCK can
-        // always first be acquired from the direct-issuance (TOKEN/BUCK)
-        // pools.  Mints with zero poolPrincipal (NFT premium so low it
-        // rounds to 0) still bypass: there is no insurance contribution to
-        // back.
-        if (poolPrincipal > 0) {
-            uint256 factor   = buckK.fundingFactor();
-            if (factor > 0) {
-                uint256 required = poolPrincipal * factor / BUCKK_SCALE;
-                require(
-                    balanceOf(msg.sender) >= required,
-                    "BUCK: insufficient mint funding"
-                );
-            }
+        // Reserve scales with the insurance principal; poolPrincipal == 0
+        // (zero-cost insurance) => zero requirement => exempt.
+        if (factor > 0 && poolPrincipal > 0) {
+            uint256 required = poolPrincipal * factor / BUCKK_SCALE;
+            require(preFundingBalance >= required,
+                    "BUCK: insufficient mint funding");
         }
 
+        // Settlement: insurance pool receives `poolPrincipal`, minter is
+        // debited the same amount.  _setBalanceSigned tracks _totalSupply
+        // across both writes so the invariant
+        //   _totalSupply == sum_a max(0, signedRaw(a))
+        // is maintained.
         _accrueJubilee();
-        _crystallize(msg.sender);
-        _addBalance(msg.sender, amount);
         if (poolPrincipal > 0) {
             _crystallize(insurancePool);
             _addBalance(insurancePool, poolPrincipal);
+            _crystallize(msg.sender);
+            _subBalance(msg.sender, poolPrincipal);
+            // Per-side Transfer events.  The minter→pool transfer is a real
+            // BUCK flow; we emit it as `from -> insurancePool` for
+            // observability (the BUCK is freshly minted into the pool from
+            // the minter's credit, not from a pre-held positive balance).
+            emit Transfer(address(0), insurancePool, poolPrincipal);
         }
-        _totalSupply += amount + poolPrincipal;
 
-        emit Transfer(address(0), msg.sender, amount);
-        if (poolPrincipal > 0) emit Transfer(address(0), insurancePool, poolPrincipal);
-        emit Minted(msg.sender, totalCoverage, poolPrincipal, totalCreditValue, currentBuckK, limit);
+        // The Minted event keeps its historical shape; `newLimit` now refers
+        // to the live creditLimit after activation, not a stored ratchet.
+        emit Minted(
+            msg.sender,
+            totalCoverage,
+            poolPrincipal,
+            totalCreditValue,
+            currentBuckK,
+            creditLimit(msg.sender)
+        );
     }
 
+    /// @dev Burn flow: symmetric to mint -- deactivates and closes NFT-
+    ///      backed credit positions.  For each NFT in `tokenIds` (most-
+    ///      expensive-first by default), _allocateBurn computes the
+    ///      unwind take per NFT, decrements mintsBacked, and calls
+    ///      BuckCredit.deactivateFromBuck(tid, holder, unwind_i) so the
+    ///      activatedValue (and thus creditLimit) shrinks in lockstep.
+    ///      Insurance pool's raw shrinks by `poolRefund` (= sum
+    ///      principal); holder's signed raw grows by `poolRefund`.
+    ///
+    ///      Solvency check (replaces the Phase 1a "amount <= balanceOf"
+    ///      gate, which was a Phase-1a-era "burn N from your held
+    ///      balance" semantic that doesn't fit the Phase 1b atomic
+    ///      activate-pay-draw / deactivate-refund-release model): after
+    ///      the burn, the holder's credit used must still fit under the
+    ///      shrunken credit limit.  If you owe X and want to release
+    ///      enough coverage to drop creditLimit below X, repay first.
+    ///
+    ///      End-state arithmetic:
+    ///          activatedValue, mintsBacked   -= sum unwind_i  (per NFT)
+    ///          creditLimit                   -= sum unwind_i * buckK / 1e18
+    ///          signedRawBalance              += poolRefund
+    ///          balanceOf change              = -(sum amount_i)
+    ///                                          (the user's "spendable"
+    ///                                          shrinks by exactly amount)
     function _burnAllocated(uint256 amount, uint256[] memory tokenIds) internal {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
-        // Burn doesn't consume the K value but still touches the controller
-        // so burn activity also amortizes PID work alongside mints.
+        // Burn activity amortizes the PID; the K value isn't consumed here.
         buckK.compute();
-        (, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
+
+        (uint256 totalUnwind, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
 
         _accrueJubilee();
-        _crystallize(msg.sender);
-        require(amount <= balanceOf(msg.sender), "BUCK: amount exceeds spendable");
-        _subBalance(msg.sender, amount);
         if (poolRefund > 0) {
             _crystallize(insurancePool);
-            require(poolRefund <= balanceOf(insurancePool), "BUCK: pool underfunded");
+            int256 poolRaw = _state[insurancePool].balance.asInt();
+            require(int256(poolRefund) <= poolRaw, "BUCK: pool underfunded");
             _subBalance(insurancePool, poolRefund);
+            _crystallize(msg.sender);
+            _addBalance(msg.sender, poolRefund);
+            // Per-side Transfer event: pool -> holder for the refund.
+            emit Transfer(insurancePool, address(0), poolRefund);
         }
-        _totalSupply -= amount + poolRefund;
 
-        emit Transfer(msg.sender, address(0), amount);
-        if (poolRefund > 0) emit Transfer(insurancePool, address(0), poolRefund);
+        // Post-burn solvency: the holder's used credit must not exceed their
+        // shrunken creditLimit.  Computed after settlement so signed raw
+        // already reflects the refund (climb toward zero).  Reading
+        // creditLimit() picks up the just-invalidated cache, so it
+        // reflects the now-deactivated value.
+        int256 signedRaw = signedBalanceOf(msg.sender);
+        uint256 used     = signedRaw < 0 ? uint256(-signedRaw) : 0;
+        require(used <= creditLimit(msg.sender),
+                "BUCK: post-burn credit used exceeds limit");
+
+        // Silence the unused-variable warning while keeping the metric
+        // available for future event emission.
+        totalUnwind;
     }
 
     // ---- mint/burn allocator (per-NFT cheapest-first inversion) ------------
@@ -446,16 +629,22 @@ contract Buck is IERC20, IERC20Metadata {
         internal returns (uint256 totalCoverage, uint256 poolPrincipal)
     {
         uint256 remaining = amount;
+        // One external call returns (owner, faceValue, activatedValue,
+        // premiumRate) for every NFT -- replaces the prior 2N cross-contract
+        // dispatches (ownerOf + creditInfo per iter).  ~1.1k gas saved/NFT.
+        CreditSlice[] memory slices = buckCredit.batchCreditInfo(tokenIds);
         for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
             uint256 tid = tokenIds[i];
-            require(buckCredit.ownerOf(tid) == msg.sender, "BUCK: not credit owner");
-            (, uint256 activated, uint32 rate) = buckCredit.creditInfo(tid);
-            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            CreditSlice memory s = slices[i];
+            require(s.owner == msg.sender, "BUCK: not credit owner");
+            // Cap is now faceValue (auto-activation can walk into unactivated
+            // capacity); mintsBacked is the running tally of activated take.
+            uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
             require(effRate < BP, "BUCK: NFT rate too high");
 
             uint256 used = mintsBacked[tid];
-            if (activated <= used) continue;
-            uint256 avail  = activated - used;
+            if (s.faceValue <= used) continue;
+            uint256 avail  = s.faceValue - used;
             uint256 denom  = BP - effRate;
             uint256 netCap = avail * denom / BP;
 
@@ -472,6 +661,21 @@ contract Buck is IERC20, IERC20Metadata {
                 remaining -= netCap;
             }
             mintsBacked[tid] = used + take;
+            // Activate `take` more coverage on this NFT -- but only the
+            // delta needed to satisfy `activatedValue >= mintsBacked`.
+            // In production (no public BuckCredit.activate()), the
+            // invariant `mintsBacked == activatedValue` holds at every
+            // observation point, so the delta is always `take`.  In
+            // test harnesses (BuckCreditHarness.forceActivate), the
+            // holder may have pre-activated past mintsBacked, in which
+            // case the existing activatedValue covers the new
+            // mintsBacked = used + take and this call is a no-op
+            // (delta = 0).  Either way the post-mint invariant
+            // `mintsBacked <= activatedValue <= faceValue` holds.
+            uint256 needed = used + take;
+            if (s.activatedValue < needed) {
+                buckCredit.activateFromBuck(tid, msg.sender, needed - s.activatedValue);
+            }
             totalCoverage += take;
             poolPrincipal += principal_i;
         }
@@ -482,14 +686,15 @@ contract Buck is IERC20, IERC20Metadata {
         internal view returns (uint256 totalCoverage, uint256 poolPrincipal)
     {
         uint256 remaining = amount;
+        CreditSlice[] memory slices = buckCredit.batchCreditInfo(tokenIds);
         for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
             uint256 tid = tokenIds[i];
-            (, uint256 activated, uint32 rate) = buckCredit.creditInfo(tid);
-            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            CreditSlice memory s = slices[i];
+            uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
             require(effRate < BP, "BUCK: NFT rate too high");
             uint256 used = mintsBacked[tid];
-            if (activated <= used) continue;
-            uint256 avail  = activated - used;
+            if (s.faceValue <= used) continue;
+            uint256 avail  = s.faceValue - used;
             uint256 denom  = BP - effRate;
             uint256 netCap = avail * denom / BP;
             uint256 take;
@@ -514,11 +719,12 @@ contract Buck is IERC20, IERC20Metadata {
         internal returns (uint256 totalUnwind, uint256 poolRefund)
     {
         uint256 remaining = amount;
+        CreditSlice[] memory slices = buckCredit.batchCreditInfo(tokenIds);
         for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
             uint256 tid = tokenIds[i];
-            require(buckCredit.ownerOf(tid) == msg.sender, "BUCK: not credit owner");
-            (, , uint32 rate) = buckCredit.creditInfo(tid);
-            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            CreditSlice memory s = slices[i];
+            require(s.owner == msg.sender, "BUCK: not credit owner");
+            uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
             uint256 used    = mintsBacked[tid];
             // Silently skip fully-unused or over-rate NFTs rather than reverting: a reappraisal
             // that pushes premiumRate above the pool-ROI threshold must not strand a burn.
@@ -539,6 +745,16 @@ contract Buck is IERC20, IERC20Metadata {
                 remaining -= netCap;
             }
             mintsBacked[tid] = used - unwind;
+            // Deactivate exactly `unwind` coverage on this NFT.  Mirror
+            // of the activateFromBuck call in _allocateMint -- the
+            // invariant mintsBacked[tid] == activatedValue[tid] holds
+            // by construction since public activate() is gone.  Burning
+            // is THE deactivation; it shrinks activatedValue (and thus
+            // creditLimit) in lockstep with mintsBacked and refunds the
+            // proportional pool principal.  BuckCredit fires
+            // onCreditMutation, invalidating Buck's per-block credit-
+            // limit cache.
+            buckCredit.deactivateFromBuck(tid, msg.sender, unwind);
             totalUnwind += unwind;
             poolRefund  += refund_i;
         }
@@ -549,10 +765,10 @@ contract Buck is IERC20, IERC20Metadata {
         internal view returns (uint256 totalUnwind, uint256 poolRefund)
     {
         uint256 remaining = amount;
+        CreditSlice[] memory slices = buckCredit.batchCreditInfo(tokenIds);
         for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
             uint256 tid = tokenIds[i];
-            (, , uint32 rate) = buckCredit.creditInfo(tid);
-            uint256 effRate = uint256(rate) * POOL_ROI_INV;
+            uint256 effRate = uint256(slices[i].premiumRate) * POOL_ROI_INV;
             uint256 used = mintsBacked[tid];
             if (used == 0 || effRate >= BP) continue; // mirrors _allocateBurn skip, not a revert
             uint256 denom  = BP - effRate;
@@ -667,8 +883,13 @@ contract Buck is IERC20, IERC20Metadata {
         emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
     }
 
-    /// @dev Non-Carrying sender keeps locked dust in its own slot; recipient
-    ///      crystallises and receives fresh BUCK with no inherited IOU.
+    /// @dev Non-Carrying sender: spendable = held + unused credit
+    ///      (see balanceOf).  Transferring `value` either consumes held BUCK
+    ///      (raw stays positive) or extends into NFT-backed credit (raw
+    ///      goes negative).  _subBalance is signed-aware and _setBalanceSigned
+    ///      tracks the `_totalSupply` delta -- fresh BUCK enters circulation
+    ///      precisely when the sender's raw crosses from positive (or zero)
+    ///      toward more-negative.
     function _nonCarryingTransfer(address from, address to, uint256 value) internal {
         _crystallize(from);
         require(value <= balanceOf(from), "BUCK: amount exceeds spendable");
@@ -679,52 +900,88 @@ contract Buck is IERC20, IERC20Metadata {
 
     /// @dev Carrying transfer: proportionally apportions the sender's live
     ///      buckSeconds (crystallised + current rectangle) to the recipient.
-    ///      Both sides settle in one SSTORE each.
+    ///      Both sides settle in one SSTORE each.  Carrying accounts hold no
+    ///      NFT-backed credit (creditLimit == 0) and cannot go negative; the
+    ///      `value <= raw` assertion enforces this.
     function _carryingTransfer(address from, address to, uint256 value) internal {
         // ---- from ----
         AccountState memory fs = _state[from];
-        uint256 raw = fs.balance.asUint();
-        // Carrying senders' balanceOf returns raw; checking raw is consistent
-        // with the ERC-20 visible balance and avoids re-reading the carrying flag.
-        require(value <= raw, "BUCK: amount exceeds raw");
+        int256 rawSigned = fs.balance.asInt();
+        require(rawSigned >= int256(value), "BUCK: Carrying amount exceeds raw");
+        uint256 raw = uint256(rawSigned);
 
         uint256 elapsed = block.timestamp - uint256(fs.timestamp);
         uint256 liveBs  = fs.buckSeconds.asUint() + raw * elapsed;
         uint256 carried = raw > 0 ? liveBs * value / raw : 0;
 
-        fs.balance     = toBuckQty(raw - value);
+        // Compute new positive contributions for totalSupply tracking
+        // (Carrying accounts only ever hold raw >= 0, so the deltas are
+        // simple unsigned subtractions/additions in this branch).
+        uint256 newFromRaw = raw - value;
+        fs.balance     = toBuckQtySigned(int256(newFromRaw));
         fs.buckSeconds = toBuckSeconds(liveBs - carried);
         fs.timestamp   = uint40(block.timestamp);
         _state[from] = fs;
+        _totalSupply -= value;     // from's positive contribution dropped by value
 
         // ---- to ----
         AccountState memory ts = _state[to];
-        uint256 toRaw     = ts.balance.asUint();
-        uint256 toElapsed = block.timestamp - uint256(ts.timestamp);
-        uint256 toBs      = ts.buckSeconds.asUint() + toRaw * toElapsed + carried;
+        int256 toRawSigned = ts.balance.asInt();
+        // The recipient may have used credit (raw < 0); receiving BUCK first pays
+        // down their used credit before turning positive.  We use _setBalanceSigned-
+        // style accounting for the totalSupply delta but inline the writes
+        // here to preserve the carrying-fold-buckSeconds logic.
+        uint256 oldToPos = toRawSigned > 0 ? uint256(toRawSigned) : 0;
+        int256  newToSigned = toRawSigned + int256(value);
+        uint256 newToPos = newToSigned > 0 ? uint256(newToSigned) : 0;
 
-        ts.balance     = toBuckQty(toRaw + value);
+        // buckSeconds carry-over uses the *positive* portion of the recipient's
+        // history; if the recipient was using their credit their buckSeconds is zero and
+        // elapsed-rectangle is meaningless.
+        uint256 toRawPos  = oldToPos;
+        uint256 toElapsed = block.timestamp - uint256(ts.timestamp);
+        uint256 toBs      = ts.buckSeconds.asUint() + toRawPos * toElapsed + carried;
+
+        ts.balance     = toBuckQtySigned(newToSigned);
         ts.buckSeconds = toBuckSeconds(toBs);
         ts.timestamp   = uint40(block.timestamp);
         _state[to] = ts;
+        if (newToPos > oldToPos) {
+            _totalSupply += (newToPos - oldToPos);
+        } else if (oldToPos > newToPos) {
+            _totalSupply -= (oldToPos - newToPos);
+        }
     }
 
     // ---- demurrage views ---------------------------------------------------
 
     function feeOwing(address a) public view returns (uint256) {
         AccountState storage s = _state[a];
-        return _feeOwing(s, s.balance.asUint());
+        int256 raw = s.balance.asInt();
+        if (raw <= 0) return 0;             // no demurrage on used credit or empty
+        return _feeOwing(s, uint256(raw));
     }
 
     function balanceOfFees(address a) public view returns (uint256) {
         uint256 fee = feeOwing(a);
         if (identity.isCarrying(a)) return fee;
-        uint256 raw = _state[a].balance.asUint();
-        return fee >= raw ? raw : fee;
+        int256 raw = _state[a].balance.asInt();
+        if (raw <= 0) return 0;
+        uint256 rawU = uint256(raw);
+        return fee >= rawU ? rawU : fee;
     }
 
+    /// @notice Unsigned raw balance.  Clamps negative (using credit) accounts to 0
+    ///         so legacy ERC-20-style readers see a non-negative number;
+    ///         use `signedRawBalanceOf` if you need to distinguish used credit.
     function rawBalanceOf(address a) external view returns (uint256) {
-        return _state[a].balance.asUint();
+        int256 raw = _state[a].balance.asInt();
+        return raw <= 0 ? 0 : uint256(raw);
+    }
+
+    /// @notice Signed raw balance (negative = NFT-backed used credit).
+    function signedRawBalanceOf(address a) external view returns (int256) {
+        return _state[a].balance.asInt();
     }
 
     function jubileeBalance() external view returns (uint256) {
@@ -732,7 +989,8 @@ contract Buck is IERC20, IERC20Metadata {
     }
 
     function jubileeActual() external view returns (uint256) {
-        return _state[address(this)].balance.asUint();
+        int256 raw = _state[address(this)].balance.asInt();
+        return raw <= 0 ? 0 : uint256(raw);
     }
 
     // ---- demurrage internals -----------------------------------------------
@@ -754,11 +1012,14 @@ contract Buck is IERC20, IERC20Metadata {
 
     /// @dev Fold the elapsed (balance * dt) rectangle into buckSeconds and
     ///      bump the timestamp.  Idempotent in time: a second call within
-    ///      the same block is a no-op.  No balance change.
+    ///      the same block is a no-op.  No balance change.  Accounts using
+    ///      credit (signed raw < 0) accrue no demurrage -- the rectangle
+    ///      uses only the positive portion of the balance.
     function _crystallize(address a) internal {
         AccountState memory s = _state[a];
-        uint256 raw     = s.balance.asUint();
-        uint256 elapsed = block.timestamp - uint256(s.timestamp);
+        int256 rawSigned = s.balance.asInt();
+        uint256 raw      = rawSigned > 0 ? uint256(rawSigned) : 0;
+        uint256 elapsed  = block.timestamp - uint256(s.timestamp);
         bool dirty = false;
         if (elapsed != 0 && raw != 0) {
             uint256 newBs = s.buckSeconds.asUint() + raw * elapsed;
@@ -787,26 +1048,59 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 delta = Math.mulDiv(supply, BASE_RATE_PER_SEC * elapsed, SCALE);
         if (delta == 0) return;
         _crystallize(address(this));
-        _addBalance(address(this), delta);
-        emit JubileeAccrued(delta, _state[address(this)].balance.asUint());
+        // Direct balance write: Jubilee accrual is redistribution from
+        // every Carrying/non-Carrying account's already-accounted raw, NOT
+        // a fresh mint.  Going through _addBalance / _setBalanceSigned
+        // would inflate _totalSupply by `delta`, breaking the invariant
+        //   sum_a max(0, signedRaw(a)) == totalSupply + jubileeActual.
+        int256 oldJubSigned = _state[address(this)].balance.asInt();
+        int256 newJubSigned = oldJubSigned + int256(delta);
+        AccountState memory js = _state[address(this)];
+        js.balance = toBuckQtySigned(newJubSigned);
+        _state[address(this)] = js;
+        emit JubileeAccrued(delta, newJubSigned > 0 ? uint256(newJubSigned) : 0);
     }
 
     // ---- balance writes ----------------------------------------------------
+    //
+    // Under the negative-balance model, _addBalance / _subBalance operate on
+    // the *signed* underlying.  _subBalance does NOT revert on underflow --
+    // callers must check creditLimit upstream.  Every state change updates
+    // `_totalSupply` so that the invariant
+    //
+    //     _totalSupply == sum_a max(0, signedRawBalance(a))
+    //
+    // holds.  Fresh BUCK enters circulation precisely when an account moves
+    // toward more-negative (somebody else is receiving real BUCK against
+    // the payer's credit); BUCK leaves circulation when a negative-raw
+    // account climbs toward zero (the used credit is being paid down).
 
     function _addBalance(address a, uint256 amount) internal {
         if (amount == 0) return;
-        AccountState memory s = _state[a];
-        s.balance = toBuckQty(s.balance.asUint() + amount);
-        _state[a] = s;
+        int256 oldSigned = _state[a].balance.asInt();
+        _setBalanceSigned(a, oldSigned + int256(amount));
     }
 
     function _subBalance(address a, uint256 amount) internal {
         if (amount == 0) return;
+        int256 oldSigned = _state[a].balance.asInt();
+        _setBalanceSigned(a, oldSigned - int256(amount));
+    }
+
+    /// @dev Write a new signed balance into the account slot, maintaining
+    ///      the `_totalSupply == sum_a max(0, signedRaw(a))` invariant.
+    function _setBalanceSigned(address a, int256 newSigned) internal {
+        int256 oldSigned = _state[a].balance.asInt();
         AccountState memory s = _state[a];
-        uint256 raw = s.balance.asUint();
-        require(raw >= amount, "BUCK: insufficient balance");
-        unchecked { s.balance = toBuckQty(raw - amount); }
+        s.balance = toBuckQtySigned(newSigned);
         _state[a] = s;
+        int256 oldPos = oldSigned > 0 ? oldSigned : int256(0);
+        int256 newPos = newSigned > 0 ? newSigned : int256(0);
+        if (newPos > oldPos) {
+            _totalSupply += uint256(newPos - oldPos);
+        } else if (oldPos > newPos) {
+            _totalSupply -= uint256(oldPos - newPos);
+        }
     }
 
     // ---- ERC-20 internals --------------------------------------------------

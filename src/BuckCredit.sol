@@ -3,7 +3,16 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
-import {BuckTypes, BuckQty, toBuckQty} from "./BuckTypes.sol";
+import {BuckTypes, BuckQty, toBuckQty, CreditSlice} from "./BuckTypes.sol";
+
+/// @notice Hook surface BuckCredit calls on Buck whenever an NFT mutation
+///         (mint / burn / transfer / activate) changes a holder's
+///         totalCurrentValue.  Buck uses it to invalidate its per-block
+///         credit-limit cache for the affected holders so that subsequent
+///         creditLimit() reads compute against the fresh NFT state.
+interface IBuckHook {
+    function onCreditMutation(address from, address to) external;
+}
 
 /// @title BuckCredit — ERC-721 Insured Asset NFT
 /// @notice Each token represents an insurer's offer of parametric insurance on a
@@ -20,6 +29,41 @@ import {BuckTypes, BuckQty, toBuckQty} from "./BuckTypes.sol";
 /// 6-decimal BUCK amounts and packed into uint80 slots — same storage type as
 /// Buck.sol's ERC-20 balances.  Bounds and precision come from BuckTypes so a
 /// future change propagates to both contracts in lockstep.
+///
+/// === Architectural note: why BuckCredit is its own contract ===
+///
+/// BuckCredit and Buck currently communicate via:
+///   Buck -> BuckCredit: totalCurrentValue, batchCreditInfo, ownerOf,
+///                       balanceOf, tokenOfOwnerByIndex, activateFromBuck
+///   BuckCredit -> Buck: IBuckHook.onCreditMutation (cache invalidation)
+///
+/// It is tempting to collapse the pair into a single Diamond (EIP-2535)
+/// with separate facets, eliminating the cross-contract calls and the
+/// setBuck()/IBuckHook wiring.  This is a dead end:
+///
+///   ERC-20 and ERC-721 share function selectors with incompatible
+///   semantics.  balanceOf(address) is 0x70a08231 in both standards
+///   (BUCK amount vs. NFT count), transferFrom(address,address,uint256)
+///   is 0x23b872dd in both (amount vs. tokenId), and the Transfer event
+///   has different indexed-argument counts.  A Diamond router can
+///   dispatch one of these per selector; whichever loses stops being
+///   standards-compliant and silently breaks wallets, indexers,
+///   marketplaces, and routers.  ERC-1155 exists precisely because no
+///   production system can safely mix raw ERC-20 + ERC-721 on one
+///   address.
+///
+/// What IS available for modularization:
+///   1. Buck as a Diamond (identity / demurrage / mint-burn / ERC-20
+///      facets) -- selectors don't collide within ERC-20.  Future work.
+///   2. Make BuckCredit independently upgradeable (UUPS / Transparent
+///      proxy) without merging into Buck's Diamond -- Buck's
+///      `immutable buckCredit` address stays stable, BuckCredit's logic
+///      can be patched in place.  Also future work.
+///   3. Amortize the cross-contract call cost via batch reads --
+///      batchCreditInfo() below packs the per-NFT view that Buck's
+///      _allocateMint / _allocateBurn loops need into one external call.
+///
+/// === End architectural note ===
 
 contract BuckCredit is ERC721Enumerable {
 
@@ -67,6 +111,13 @@ contract BuckCredit is ERC721Enumerable {
     mapping(uint256 => CreditParams) public credits;
     uint256 private _nextTokenId;
 
+    /// @notice Buck contract that receives credit-mutation callbacks for
+    ///         cache invalidation.  Wired one-shot post-deployment via
+    ///         setBuck(...); zero-address means callbacks are skipped (so
+    ///         BuckCredit can be deployed and exercised before Buck exists,
+    ///         e.g. in older fixtures).
+    address public buck;
+
     // --- Events ---
     event CreditCreated(uint256 indexed tokenId, address indexed insurer,
                         address indexed owner, uint256 faceValue);
@@ -74,8 +125,36 @@ contract BuckCredit is ERC721Enumerable {
                         uint256 newFaceValue, uint32 newDepRate, uint32 newPremiumRate);
     event CreditActivated(uint256 indexed tokenId, address indexed owner,
                           uint256 additionalValue, uint256 totalActivated);
+    event BuckSet(address indexed buck);
 
     constructor() ERC721("BuckCredit", "BUCK_CREDIT") {}
+
+    /// @notice One-shot wiring of the Buck contract for credit-mutation
+    ///         hooks.  Callable by anyone (the Buck address is public and
+    ///         the function is idempotent once set), but immutable after
+    ///         first set.  Mirrors Buck.setBasket(...) for the symmetric
+    ///         BuckBasket wiring style.
+    function setBuck(address _buck) external {
+        require(buck == address(0), "BuckCredit: buck already set");
+        require(_buck != address(0), "BuckCredit: buck=0");
+        buck = _buck;
+        emit BuckSet(_buck);
+    }
+
+    /// @dev Override the OZ ERC721 _update hook so any NFT state change
+    ///      (mint / burn / transfer) invalidates Buck's per-block credit-
+    ///      limit cache for both the previous and new owners.  ERC721Enumerable
+    ///      itself overrides _update; we call super to preserve its
+    ///      enumeration bookkeeping.
+    function _update(address to, uint256 tokenId, address auth)
+        internal override returns (address from)
+    {
+        from = super._update(to, tokenId, auth);
+        address b = buck;
+        if (b != address(0)) {
+            IBuckHook(b).onCreditMutation(from, to);
+        }
+    }
 
     /// @notice Insurer creates a new BUCK_CREDIT NFT for a client.
     /// @dev faceValue / depreciationFloor are accepted as uint256 for ABI
@@ -188,10 +267,56 @@ contract BuckCredit is ERC721Enumerable {
     }
 
     // ── Activation ──────────────────────────────────────────────────
+    //
+    // Activation and deactivation are NOT public operations.  Both are
+    // bundled into the holder's `Buck.mint(N, [tids])` / `Buck.burn(N,
+    // [tids])` calls, which atomically (a) compute the per-NFT take /
+    // unwind via the cheapest-first / most-expensive-first inversion,
+    // (b) move the corresponding pool principal between the holder and
+    // insurancePool, and (c) grow / shrink activatedValue.  The
+    // economic reason: a policy is a one-time purchase.  Paying the
+    // pool principal at activation time and earning the 10%-ROI yield
+    // on it from the insurance pool exactly funds the annual premium
+    // on the activated coverage in perpetuity -- so the activation
+    // doesn't need a recurring fee, but it MUST come with the upfront
+    // principal payment or the pool has no yield to draw from.
+    //
+    // Allowing a free standalone `activate(tid, A)` would let a holder
+    // self-issue arbitrary credit headroom without ever paying the
+    // pool: balanceOf would jump by `A * buckK / 1e18` from "unused
+    // credit" headroom that nothing backs.  That's why this surface
+    // exposes only `activateFromBuck` / `deactivateFromBuck`, restricted
+    // to the registered Buck contract.
 
-    /// @notice Client activates additional credit, up to the current face value.
-    function activate(uint256 tokenId, uint256 amount) external {
-        require(ownerOf(tokenId) == msg.sender, "Not credit owner");
+    /// @notice Activate `amount` of coverage on behalf of `holder`,
+    ///         restricted to the registered Buck contract.  Called from
+    ///         Buck._allocateMint as part of the atomic activate-pay-draw
+    ///         sequence; the funding-factor reserve check runs upstream
+    ///         in Buck._mintAllocated against the holder's pre-mint
+    ///         balanceOf (held + unused credit).
+    function activateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
+        require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
+        require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
+        _activate(tokenId, holder, amount);
+    }
+
+    /// @notice Deactivate `amount` of coverage on behalf of `holder`, restricted
+    ///         to Buck.  Mirror of activateFromBuck for the burn-side unwind.
+    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
+        require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
+        require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
+        CreditParams storage c = credits[tokenId];
+        uint256 current = c.activatedValue.asUint();
+        require(amount <= current, "BuckCredit: deactivate > active");
+        c.activatedValue  = toBuckQty(current - amount);
+        c.lastActivatedAt = uint48(block.timestamp);
+
+        IBuckHook(buck).onCreditMutation(holder, address(0));
+        emit CreditActivated(tokenId, holder, 0, current - amount);
+    }
+
+    function _activate(uint256 tokenId, address holder, uint256 amount) internal {
+        if (amount == 0) return;
         CreditParams storage c = credits[tokenId];
         uint256 newActivated = c.activatedValue.asUint() + amount;
         require(newActivated <= c.faceValue.asUint(), "Exceeds face value");
@@ -199,7 +324,14 @@ contract BuckCredit is ERC721Enumerable {
         c.activatedValue  = toBuckQty(newActivated);
         c.lastActivatedAt = uint48(block.timestamp);
 
-        emit CreditActivated(tokenId, msg.sender, amount, newActivated);
+        // activatedValue feeds totalCurrentValue(), which gates Buck's
+        // credit limit -- invalidate the cache for this holder.
+        address b = buck;
+        if (b != address(0)) {
+            IBuckHook(b).onCreditMutation(holder, address(0));
+        }
+
+        emit CreditActivated(tokenId, holder, amount, newActivated);
     }
 
     /// @notice Compact (faceValue, activatedValue, premiumRate) view used by
@@ -211,6 +343,29 @@ contract BuckCredit is ERC721Enumerable {
     {
         CreditParams storage c = credits[tokenId];
         return (c.faceValue.asUint(), c.activatedValue.asUint(), c.premiumRate);
+    }
+
+    /// @notice Bulk variant of creditInfo + ownerOf: returns one CreditSlice
+    ///         per tokenId, all in a single external call.  Used by
+    ///         Buck._allocateMint / _allocateBurn to walk a holder's NFT
+    ///         list without paying per-NFT cross-contract dispatch overhead
+    ///         (~700 gas warm per call, ~2 calls per NFT in the old per-iter
+    ///         pattern).  Reverts on the first unknown tokenId (via
+    ///         ownerOf), matching the per-iter pattern's failure mode.
+    function batchCreditInfo(uint256[] calldata tokenIds)
+        external view returns (CreditSlice[] memory slices)
+    {
+        slices = new CreditSlice[](tokenIds.length);
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tid = tokenIds[i];
+            CreditParams storage c = credits[tid];
+            slices[i] = CreditSlice({
+                owner:          ownerOf(tid),
+                faceValue:      c.faceValue.asUint(),
+                activatedValue: c.activatedValue.asUint(),
+                premiumRate:    c.premiumRate
+            });
+        }
     }
 
     /// @notice Aggregate current value of all BuckCredits owned by an account.
@@ -255,6 +410,13 @@ contract BuckCredit is ERC721Enumerable {
         c.depStartAt        = newDepStartAt;
         c.premiumRate       = newPremiumRate;
         c.lastUpdated       = uint48(block.timestamp);
+
+        // Insurer reappraisal can change totalCurrentValue of the holder;
+        // invalidate Buck's credit-limit cache for the current owner.
+        address b = buck;
+        if (b != address(0)) {
+            IBuckHook(b).onCreditMutation(ownerOf(tokenId), address(0));
+        }
 
         emit CreditUpdated(tokenId, msg.sender, newFaceValue, newDepRate, newPremiumRate);
     }

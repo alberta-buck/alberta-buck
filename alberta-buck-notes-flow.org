@@ -1,4 +1,4 @@
-#+TITLE: The Alberta Buck - Notes Flow (DRAFT v0.9)
+#+TITLE: The Alberta Buck - Notes Flow (DRAFT v0.93)
 #+SUBTITLE: How One BUCK Transfer Becomes N Unlinkable Notes (Step by Step)
 #+author: Perry Kundert
 #+date: 2026-04-22
@@ -70,7 +70,8 @@ the identity binding via /two cooperating components/ glued by the new
 =Notes.spendACP(proof, root, nullifier, face, recipient, E_n, cpProof)= calls
 both the SpendA Groth16 verifier (which checks the binding gate) and
 =IdentityRegistry.verifySpendCP= (which checks the DLEQ); both must succeed for
-the pool to call =buck.transferCarrying(recipient, face)=.  All A1/A2 identity,
+the pool to call =buck.transfer(recipient, face)= (routed through the Carrying
+path, the pool being =isCarrying=).  All A1/A2 identity,
 security, and privacy properties remain in place; only the DLEQ verification
 /location/ moved.  Exercised end-to-end by 26 forge tests in
 =test/SpendAVerifier.t.sol=.  The B-spend path is /unchanged/ by the mint pivot:
@@ -884,8 +885,8 @@ step:
 - *The BUCK ERC-20 does not verify the SNARK itself.*  The authorization chain
   is: valid SNARK + accepted root + fresh nullifier (+ for A-spends, valid
   CP-DLEQ identity proof) \(\to\) =Notes.spend= or =Notes.spendACP= proceeds
-  \(\to\) the entrypoint invokes =buck.transferCarrying(recipient, face)= from
-  the pool.  The proof is a capability token for entry into the appropriate
+  \(\to\) the entrypoint invokes =buck.transfer(recipient, face)= from
+  the pool (Buck routes it through the Carrying path).  The proof is a capability token for entry into the appropriate
   spend method; the resulting ERC-20 movement is a routine pool-to-recipient
   call gated by that entry.  Since the =Notes= pool is a system-public account in the
   [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][IdentityRegistry]], the pool's outbound transfer does not itself require a
@@ -1079,8 +1080,7 @@ require(identityRegistry.verifySpendCP(
 nullifiers[nullifier] = true;     // mark spent before paying out
 noteFaceSum          -= face;
 
-require(IBuckCarrying(address(buck))
-            .transferCarrying(recipient, face),
+require(buck.transfer(recipient, face),   // pool isCarrying => Carrying path
         "Notes: transfer failed");
 emit SpentA(nullifier, face, recipient);
 #+END_SRC
@@ -1102,7 +1102,8 @@ d. =identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof)=
    sk_dep * G~ and the equal-plaintext relation between =E_n= and =E_reg=,
    verified via 2 ecMul + 2 ecAdd + keccak Fiat-Shamir (~36K gas).
 e. Only after (a)-(d) pass does the contract mark the nullifier and invoke
-   =buck.transferCarrying(bob, 1000e18)= from its own pool balance (see Step 5).
+   =buck.transfer(bob, 1000e18)= from its own pool balance, routed through the
+   Carrying path (see Step 5).
    Because the =Notes= pool was bound under a Public Identity in the
    IdentityRegistry (=bindContract(notes, pk, E, true)=), the pool-side
    receipt fragment falls back to the pool's deterministic =_identityHash=.
@@ -1123,52 +1124,56 @@ the SNARK's =E_n= public inputs and the off-chain CP leg -- B-spends are
 authorised purely by knowledge of the Poseidon-5 opening + Poseidon-3
 nullifier preimage.)
 
-** Step 5: BUCK ERC-20 Pays Out (=transferCarrying=)
+** Step 5: BUCK ERC-20 Pays Out (the Carrying path)
 
-The call inside =Notes.spendACP= is =buck.transferCarrying(bob, 1000e18)=, a small
-extension of the standard BUCK transfer that the =Notes= pool uses on its single
-egress.  (=Notes.spend= calls the same primitive on the B-spend path.)  Nothing else in =Buck.sol= is special-cased for the pool: it is just a
-registered account making an outbound transfer of 1,000 BUCK to a registered
+The call inside =Notes.spendACP= is a plain =buck.transfer(bob, 1000e18)=.
+Because the =Notes= pool is bound =isCarrying= in the IdentityRegistry, BUCK
+routes that transfer through its internal =_carryingTransfer= path on this
+single egress.  (=Notes.spend= takes the same path on the B-spend side.)
+Nothing in =Buck.sol= is special-cased for the pool: it is just a registered,
+=isCarrying= account making an outbound transfer of 1,000 BUCK to a registered
 recipient.  The result on-chain:
 
 - =Buck.balanceOf(Notes)= decreases by exactly 1,000 BUCK -- nominal balance only.
 - =Buck.balanceOf(Bob)= increases by exactly 1,000 BUCK.
-- =Buck.Transfer(Notes, Bob, 1000e18)= is emitted.
-- =Buck.TransferCarrying(Notes, Bob, 1000e18)= is emitted as the carry signal.
+- =Buck.Transfer(Notes, Bob, 1000e18)= is emitted (a standard ERC-20 event;
+  the carrying apportionment is internal, with no distinct event).
 - =Notes.Spent(nullifier, 1000e18, Bob)= is emitted.
 - =Notes.nullifiers[nullifier]= becomes =true=.
 
-*What "carrying" means in the ledger.*  BUCK demurrage uses the standard
-cumulative-index accounting: a global =cumIndex= advances at =BASE_RATE_PER_SEC=
-and each account stores its =_indexAtLastTouch=.  A standard transfer settles the
-sender's accrued fee at transfer time (deducting it as a one-shot burn) and merges
-the recipient's index toward the global =cumIndex= weighted by the incoming
-amount.  =transferCarrying= differs in two surgical ways:
+*What "carrying" means in the ledger.*  BUCK demurrage is a balance-time
+integral: each account stores its =buckSeconds= (the crystallised
+\( \int B\,dt \)) plus the =timestamp= of its last touch.  A transfer /from a
+non-Carrying account/ settles the sender's accrued fee (a one-shot burn) and
+hands the recipient fresh, zero-age BUCK.  A transfer from an =isCarrying=
+account -- the =_carryingTransfer= path -- differs in two surgical ways:
 
-1. *Sender's index is unchanged.*  The sender's remaining balance keeps its
-   pre-transfer age; no fee is burned at the sender on this transfer.
-2. *Recipient absorbs the sender's age.*  The recipient's =_indexAtLastTouch= is
-   updated by a balance-weighted average toward the /sender's/ pre-transfer index
-   (=idxFrom=), not toward the global =cumIndex=:
+1. *No sender-side fee burn.*  The pool sheds a proportional slice of its
+   live buck-seconds rather than burning a fee; its per-BUCK age is preserved.
+2. *Recipient absorbs the pool's age.*  The recipient inherits that slice of
+   buck-seconds (=carried = liveBs * amount / poolRaw=), added to its own:
 
    #+BEGIN_SRC solidity
-   _indexAtLastTouch[to] =
-       (br * _indexAtLastTouch[to] + amount * idxFrom) / (br + amount);
+   liveBs   = pool.buckSeconds + pool.raw * elapsed;
+   carried  = liveBs * amount / pool.raw;
+   pool.buckSeconds       = liveBs - carried;   // pool sheds its share
+   recipient.buckSeconds += carried;            // recipient inherits the age
    #+END_SRC
 
 System-wide BUCK-age is preserved across the call (no fee is burned, no fresh-BUCK
 dilution at the recipient); the demurrage that the pool would have burned on a
-standard outgoing transfer instead rides into Bob's account as a forward index
-shift.  Bob will pay it the next time he makes a standard outgoing transfer.
+standard outgoing transfer instead rides into Bob's account as inherited
+buck-seconds.  Bob will pay it the next time he makes a standard outgoing transfer.
 
 *Why this is the right rule for the pool.*  Per-note age is opaque -- the pool
 holds aggregate BUCK behind opaque commitments and cannot tell Bob's note's age
-from any other note's.  =transferCarrying= collapses the calculation to the pool's
-average index at spend time: every spender of the same =face= absorbs the same
-forward index shift, keeping the spend-time anonymity set intact.  The trade-off
-is that Bob inherits the pool's average age regardless of how long /his specific/
-note sat in the tree.  Anyone whose note rested longer than the pool average comes
-out ahead; this is the cost of anonymity, and the upside for long-term holders.
+from any other note's.  The Carrying path collapses the calculation to the pool's
+average per-BUCK age at spend time: every spender of the same =face= absorbs the
+same buck-seconds slice, keeping the spend-time anonymity set intact.  The
+trade-off is that Bob inherits the pool's average age regardless of how long /his
+specific/ note sat in the tree.  Anyone whose note rested longer than the pool
+average comes out ahead; this is the cost of anonymity, and the upside for
+long-term holders.
 
 The full discussion (one new BUCK method, one new event, no per-account mode flag)
 is in *Demurrage-Carrying Transfers* below.
@@ -1308,35 +1313,33 @@ Merkle membership.
 
 * Demurrage-Carrying Transfers
 
-The Note-spend payout in Step 5 invoked =buck.transferCarrying=, a small sibling
-of the standard BUCK transfer that the =Notes= pool uses on its single egress.
-This section unpacks why one new method -- not a per-account mode flag, not a
-routing decision, not a marker interface -- is sufficient, and what its ledger
+The Note-spend payout in Step 5 went out as a plain =buck.transfer= that BUCK
+routed through its internal carrying path because the =Notes= pool is bound
+=isCarrying=.  This section unpacks why a single per-account flag -- not a
+separate method, not a marker interface -- is sufficient, and what its ledger
 effect looks like.
 
 ** Two Ways to Handle Demurrage at Transfer Time
 
-BUCK demurrage accumulates via a global =cumIndex= advancing at
-=BASE_RATE_PER_SEC= and a per-account =_indexAtLastTouch=.  An account's accrued
-fee is the gap =(cumIndex - _indexAtLastTouch) \cdot balance= at the moment the
-account is "touched" (standard transfer, settle, or carry).  Two ledger responses
-to that accrued fee are distinguishable at transfer time:
+BUCK demurrage is a balance-time integral: each account stores its =buckSeconds=
+(the crystallised \( \int B\,dt \)) plus the =timestamp= of its last touch, and
+its accrued fee is =rate \cdot (buckSeconds + balance \cdot elapsed)=.  Two ledger
+responses to that accrued fee are distinguishable at transfer time, selected by
+the /sender's/ =isCarrying= flag:
 
-- /Deducting transfer (=transfer= / =transferFrom=, the default)./  On a
-  1,000-BUCK outgoing, Alice's accrued fee for the pre-transfer balance is settled
-  at Alice -- one-shot burned against her balance, resetting
-  =_indexAtLastTouch[alice]= to the current =cumIndex=.  The 1,000 BUCK then
-  lands at Bob /fresh/: Bob's index is merged by a balance-weighted average
-  toward =cumIndex=, diluting Bob's effective age.  From a system perspective,
-  accrued fees are burned at each transfer and total BUCK-age drops on Alice's
-  side while the recipient enters fresh.
-- /Carrying transfer (=transferCarrying=, the new variant)./  On the same
-  1,000-BUCK outgoing, nothing settles at the sender: Alice's
-  =_indexAtLastTouch= is unchanged, and her remaining balance keeps its age.
-  Bob's index is merged by a balance-weighted average toward /Alice's/
-  pre-transfer =_indexAtLastTouch=, so Bob inherits the age of the BUCKs he just
-  received.  Nominal balances move by exactly 1,000 on each side; no fee is
-  burned; total system BUCK-age is preserved.
+- /Deducting transfer (sender is non-Carrying, the default)./  On a 1,000-BUCK
+  outgoing, Alice's accrued fee for the pre-transfer balance is settled at
+  Alice -- one-shot burned against her balance, and her =buckSeconds= is
+  re-crystallised from the new balance.  The 1,000 BUCK then lands at Bob
+  /fresh/: his inflow begins accruing age from now, diluting his effective age.
+  From a system perspective, accrued fees are burned at each transfer and the
+  recipient enters fresh.
+- /Carrying transfer (sender is =isCarrying=)./  On the same 1,000-BUCK
+  outgoing, nothing is burned at the sender: the pool sheds a proportional
+  slice of its live buck-seconds (=carried = liveBs \cdot 1000 / poolRaw=) and
+  keeps its per-BUCK age.  Bob inherits that slice (=buckSeconds += carried=),
+  so he absorbs the age of the BUCKs he just received.  Nominal balances move by
+  exactly 1,000 on each side; no fee is burned; total system BUCK-age is preserved.
 
 The invariant the carrying variant keeps is: *nominal BUCK out = nominal BUCK
 in* (no silent burn at the transfer site), with the recipient's forward index
@@ -1366,72 +1369,73 @@ Three structural features of the pool make the deducting default wrong:
    replenish, producing a cumulative insolvency as outstanding notes
    circulate.
 
-=transferCarrying= fixes all three: no per-note age, =face= to payout, no pool
+The carrying path fixes all three: no per-note age, =face= to payout, no pool
 insolvency.
 
 ** Shipped Surface in =Buck.sol=
 
-The entire extension is one method plus one event:
+There is no separate =transferCarrying= method and no =TransferCarrying= event.
+The carrying behaviour is selected by a per-account flag, =isCarrying=, set when
+the account is bound:
 
 #+BEGIN_SRC solidity
-event TransferCarrying(address indexed from, address indexed to, uint256 amount);
-
-/// @notice Transfer `amount` to `to` carrying its accumulated BUCK-age.  No fee
-///         is burned at transfer time; recipient's index is shifted backward by
-///         a balance-weighted average so total system age is preserved.
-function transferCarrying(address to, uint256 amount) external returns (bool);
+// IdentityRegistry: governance sets isCarrying at bind time.
+function bindContract(address t, ..., bool isPublicIdentity_, bool isCarrying_) external;
+mapping(address => bool) public isCarrying;
 #+END_SRC
 
-The preconditions match =transfer=: sender and recipient both =isVerified=
-in the IdentityRegistry, recipient not the Jubilee address (the Jubilee is
-not an accepted carry destination).  The bilateral receipt-fragment check
-applies as on =transfer=: an EOA-to-EOA Encrypted-Identity pair must have
-a prior approve-time CP receipt for every private party; the
-=_identityHash= fallback is only valid for a Public-Identity contract
-(bound via =bindContract(target, pk, E, true)=).  The weighted-merge update on the
-recipient is:
+The standard =transfer= path then dispatches on the /sender's/ flag:
 
 #+BEGIN_SRC solidity
-_indexAtLastTouch[to] =
-    (br * _indexAtLastTouch[to] + amount * _indexAtLastTouch[from]) / (br + amount);
+if (identity.isCarrying(from)) _carryingTransfer(from, to, amount);
+else                           _nonCarryingTransfer(from, to, amount);
+emit Transfer(from, to, amount);     // one standard event either way
 #+END_SRC
 
--- the /sender's/ current =_indexAtLastTouch= is the value merged in, not the
-global =cumIndex=.  The sender's index is left untouched, and the fee burn path
-in =_update= is skipped via the settling flag so the carried merge survives.
+The preconditions are exactly those of any transfer (sender and recipient both
+=isVerified=, the bilateral receipt-fragment / =_identityHash= identity check),
+because it /is/ an ordinary transfer.  =_carryingTransfer= sheds a proportional
+slice of the sender's live buck-seconds onto the recipient rather than burning a
+fee at the sender:
 
-There is deliberately *no per-account mode flag, no marker interface, no
-governance-gated whitelist, and no balance precondition*.  Any registered
-account may invoke =transferCarrying=; it is a strictly additive method.  What
-makes it pool-friendly is the /semantics/ (no settle-at-sender, weighted-merge
-at recipient), not a policy toggle.
+#+BEGIN_SRC solidity
+liveBs   = from.buckSeconds + from.raw * elapsed;
+carried  = liveBs * amount / from.raw;
+from.buckSeconds       = liveBs - carried;   // sender keeps its per-BUCK age
+recipient.buckSeconds += carried;            // recipient inherits the age
+#+END_SRC
 
-** Who Else Might Call It
+Carrying accounts hold no NFT-backed credit and cannot go negative (the path
+asserts =amount <= raw=).  What makes an account pool-friendly is the /flag/, set
+once at bind time; there is no per-call method to invoke and no balance
+precondition beyond that non-negative assertion.
 
-The Note pool is the first and canonical caller, but the method is not
-pool-private.  Any registered account can invoke =transferCarrying= whenever
-carrying demurrage forward to the recipient is the right economic choice --
+** Who Else Is Carrying
+
+The Note pool is the canonical =isCarrying= account, but the flag is not
+pool-private: governance binds AMM pools, the Jubilee, and the Notes pool
+=isCarrying=, and could bind any transitory-holder contract the same way --
 escrow accounts whose beneficiaries are the true owners, payroll contracts
 pulling from an employer, cross-chain bridge egresses.  The semantic invariant
-is "the source is a transitory holder of BUCK earmarked for the recipient," and
-in that case carrying the age forward matches the economic reality.
+is "the account is a transitory holder of BUCK earmarked for its recipients,"
+and in that case carrying the age forward matches the economic reality.
 
-For direct peer-to-peer payments the deducting default remains correct: the
+For ordinary peer-to-peer accounts the deducting default remains correct: the
 sender is paying from their own pocket and is the natural place to burn their
-own accrued fee.
+own accrued fee, so EOAs are bound non-Carrying.
 
 ** Open Question: Identity Receipts on Carry
 
-The shipped =transferCarrying= uses the same identity predicate as
-=transfer= -- both parties =isVerified=, with the receipt-fragment fallback
-to =_identityHash= on the public side when at least one party has
-=isPublicIdentity == true=.  Unlike =approve=, =transferCarrying= does not
-require its own per-call Chaum-Pedersen receipt; the Notes pool side relies
-on its bound Public Identity to satisfy the bilateral check.  Whether
-=transferCarrying= for two Encrypted-Identity counterparties should require
-a per-call CP receipt is an open question; for the Notes pool it is moot
-(the pool is bound under a Public Identity), but if peer-to-peer carry is
-ever opened up an approve-style receipt may be wanted for auditability.
+Because a carrying transfer /is/ an ordinary =transfer=, it uses the same
+identity predicate -- both parties =isVerified=, with the receipt-fragment
+fallback to =_identityHash= on the public side when a party has
+=isPublicIdentity == true=.  The Notes pool side relies on its bound Public
+Identity to satisfy the bilateral check.  Whether a carrying transfer between
+two Encrypted-Identity counterparties should require its own per-call
+Chaum-Pedersen receipt is an open question; for the Notes pool it is moot (the
+pool is bound under a Public Identity), but if transitory-holder carry is ever
+opened to private-to-private pairs an approve-style receipt may be wanted for
+auditability.
 See the *Open Work Items* in [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][alberta-buck-ethereum.org]].
 
 * Putting the Guarantees Side-by-Side
@@ -1462,7 +1466,7 @@ more that become concrete only once the redemption path exists.
   history ring =Notes.sol= already maintained for the spend side.  Spend is
   unchanged by the pivot: =spend.circom= in bearer shape,
   =SpendGroth16Verifier=, =SpendVerifierAdapter=, the on-chain Merkle
-  accumulator, and =buck.transferCarrying=.  The [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][IdentityRegistry]] provides the
+  accumulator, and BUCK's =isCarrying= carrying-transfer path.  The [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][IdentityRegistry]] provides the
   issuer-attestation and recipient-verification legs (now extended with
   =verifySpendCP= for A-flavor identity binding), and the [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][formal proofs]]
   (Theorems 7-11) provide the cryptographic backstop.  The A-flavor identity

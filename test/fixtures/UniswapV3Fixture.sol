@@ -110,8 +110,15 @@ abstract contract UniswapV3Fixture is Test, IUniswapV3MintCallback, IUniswapV3Sw
     function _warmupTwap(address pool, uint32 secondsAgo, uint8 nTouches) internal {
         require(nTouches > 0, "warmup:nTouches=0");
         uint256 step = uint256(secondsAgo) / nTouches + 1;
+        // Locally-tracked timestamp sidesteps the solc 0.8.28 + Foundry
+        // CSE fold on consecutive `vm.warp(block.timestamp + step)` --
+        // without it, only the first iteration advances time and the
+        // pool's observation array never accumulates more than a single
+        // entry, leading to OLD reverts on later `consult(pool, TWAP)`.
+        uint256 t = block.timestamp;
         for (uint8 i = 0; i < nTouches; i++) {
-            vm.warp(block.timestamp + step);
+            t += step;
+            vm.warp(t);
             _touchPool(pool);
         }
     }

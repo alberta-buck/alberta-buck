@@ -7,6 +7,7 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 
 /// @dev Plain ERC-20 stand-in for USDC.  Lives in the test file so it does not
@@ -82,7 +83,7 @@ interface IUniswapV2Pair {
 contract UniswapV2IntegrationTest is Test {
 
     Buck                  internal buck;
-    BuckCredit            internal credit;
+    BuckCreditHarness            internal credit;
     BuckKControllerStatic internal kCtrl;
     IdentityRegistry      internal reg;
 
@@ -116,11 +117,12 @@ contract UniswapV2IntegrationTest is Test {
         _registerBob();
 
         // BUCK stack.
-        credit = new BuckCredit();
+        credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
+        credit.setBuck(address(buck));
 
         // Mock USDC: 18-decimal ERC-20 minted to this test contract.
         usdc = address(new MockUSDC(1_000_000_000e6));
@@ -490,7 +492,7 @@ contract UniswapV2IntegrationTest is Test {
             0, 0, 0
         );
         vm.prank(client);
-        credit.activate(tokenId, faceValue);
+        credit.forceActivate(tokenId, faceValue);
     }
 
     // ---- JSON helpers (mirrors Buck.t.sol) ---------------------------------
