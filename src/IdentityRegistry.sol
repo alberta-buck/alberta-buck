@@ -61,6 +61,17 @@ contract IdentityRegistry {
         BN254.G1Point T2;   // t*(R_reg - R_n)
     }
 
+    /// @notice Schnorr signature over a note-batch commitment by an issuer's
+    ///         registered identity key -- the public-issuer half of the BUCK
+    ///         Notes deferred-approve handshake (mutual-decryptability, Phase 1;
+    ///         see alberta-buck-notes-decryptability.org).  Matches
+    ///         alberta_buck.wallet.schnorr.SchnorrProof.
+    struct SchnorrProof {
+        uint256 e;          // Fiat-Shamir challenge (== _fsIssuerSchnorr)
+        uint256 s;          // response: k + e*sk_iss  (mod R)
+        BN254.G1Point R;    // nonce commitment: k*G
+    }
+
     // ---- storage ------------------------------------------------------------
 
     address public governance;
@@ -382,6 +393,43 @@ contract IdentityRegistry {
         return pi.e == _fsSpendCP(E_n, E_reg, pkDep, pi, recipient, block.chainid);
     }
 
+    // ---- public-issuer note binding (Notes mutual-decryptability, Phase 1) --
+
+    /// @notice Verify a Schnorr signature by `issuer`'s registered identity key
+    ///         over a note-batch commitment `hBatch` (= keccak256 of the minted
+    ///         commitments).  This is the *issuer half* of the BUCK Notes
+    ///         deferred-approve handshake for public issuers: it binds the
+    ///         issuer's decrypted Identity to every leaf in the batch, so a
+    ///         depositor can later produce a cryptographically sound receipt
+    ///         naming the payer (see alberta-buck-notes-decryptability.org).
+    /// @dev    `issuer` must be a registered *public* Identity: a bearer (B)
+    ///         note's issuer must be public because the depositor is unknown at
+    ///         mint, so the in-the-clear M is the only path to a receipt; A1
+    ///         (addressed, public issuer) reuses the same binding.  pk_iss is
+    ///         read from storage so a caller cannot substitute it, and
+    ///         (issuer, chainid) are folded into the Fiat-Shamir transcript so a
+    ///         signature is bound to this issuer and chain and cannot be replayed.
+    function verifyIssuerSchnorr(
+        address issuer,
+        bytes32 hBatch,
+        SchnorrProof calldata sig
+    ) external view returns (bool) {
+        if (!_isRegistered(issuer))    return false;
+        if (!isPublicIdentity[issuer]) return false;
+
+        BN254.G1Point memory pkIss = _pk[issuer];
+
+        // Check 1: s*G == R + e*pk_iss
+        //   s = k + e*sk_iss  =>  s*G = k*G + e*(sk_iss*G) = R + e*pk_iss.
+        if (!BN254.eq(
+            BN254.mul(BN254.g1(), sig.s),
+            BN254.add(sig.R, BN254.mul(pkIss, sig.e))
+        )) return false;
+
+        // Check 2: Fiat-Shamir binds (pk_iss, R, hBatch, issuer, chainid).
+        return sig.e == _fsIssuerSchnorr(pkIss, sig.R, hBatch, issuer, block.chainid);
+    }
+
     // ---- internal verifier helpers (factored to manage stack depth) ---------
 
     function _fsRegister(
@@ -451,6 +499,26 @@ contract IdentityRegistry {
         uint256[] memory scl = new uint256[](2);
         scl[0] = uint256(uint160(recipient));
         scl[1] = chainid;
+        return BN254.fsChallenge(pts, scl);
+    }
+
+    /// @dev Fiat-Shamir challenge for the public-issuer Schnorr binding.
+    ///      Order: points (pk_iss, R) then scalars (hBatch, issuer, chainid).
+    ///      Must match alberta_buck.wallet.schnorr byte-for-byte.
+    function _fsIssuerSchnorr(
+        BN254.G1Point memory pkIss,
+        BN254.G1Point memory R,
+        bytes32 hBatch,
+        address issuer,
+        uint256 chainid
+    ) internal pure returns (uint256) {
+        BN254.G1Point[] memory pts = new BN254.G1Point[](2);
+        pts[0] = pkIss;
+        pts[1] = R;
+        uint256[] memory scl = new uint256[](3);
+        scl[0] = uint256(hBatch);
+        scl[1] = uint256(uint160(issuer));
+        scl[2] = chainid;
         return BN254.fsChallenge(pts, scl);
     }
 
