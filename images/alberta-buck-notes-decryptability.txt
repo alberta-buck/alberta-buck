@@ -690,16 +690,49 @@ Table of Contents
     cms); `vectors.py' emits an `issuer_schnorr' section into
     `test/vectors/identity.json'; the FS transcript matches
     `_fsIssuerSchnorr' byte-for-byte.
-  • `a4b36ba' – `IdentityRegistry.verifyDepositorForIssuer' (extracted
+  • `0f0ab0f' – `IdentityRegistry.verifyDepositorForIssuer' (extracted
     the verifyApprove body into `_verifyApprove'; the alias just
     relabels sender/spender as depositor/issuer).  `Notes.spend' split
     into a 5-arg (legacy) and 8-arg (`+ issuer, eDepForIss, CPProof')
     overload over `_spend'; the 8-arg path checks
     `verifyDepositorForIssuer(recipient, issuer, ...)' and emits
     `SpentB'.
+  • `(working tree)' – `RcptVerify', the off-chain receipt verifier
+    (`alberta_buck/wallet/receipt.py'): a `Receipt' (opening + minted
+    batch + issuer Schnorr + Spent-event nullifier/face) and
+    `receipt_verify' that checks the four-link chain for *public-issuer*
+    notes (A1, B1) and names the issuer's registered Identity, refusing
+    A2 (private issuer, Phase 2).  No secret is needed to verify, so a
+    third party can re-check it.  A canonical `receipt' section was
+    added to `test/vectors/identity.json' (Bob, a public Corporate
+    Identity, mints a B1 bearer note Alice cashes).  This is the Phase 1
+    capstone: links (a),(b),(d) were already sound on-chain and (c) is
+    now bound for public issuers, so the receipt is finally
+    *produceable*.
+  • `(working tree)' – the symmetric *direct EOA-transfer* receipt.  A
+    new `alberta_buck/wallet/verifiable_decrypt.py' primitive (a
+    Chaum-Pedersen DLEQ on bases (G, R), the `spend_cp' shape
+    specialised to (R, C-M)) proves an ElGamal ciphertext decrypts to a
+    *revealed* M under a registered key without exposing sk – the "no
+    deniability under collusion" clause for an encrypted-identity
+    counterparty.  `receipt.py' gains `ApproveReceipt' +
+    `approve_receipt_verify', composing the sender's approve handshake
+    (`chaum_pedersen_verify' / verifyApprove, soundness) with the
+    recipient's verifiable decryption (recovery + provability) to name
+    the sender's registered Identity, third-party-checkable with no
+    secret.  This packages what the wallet previously left a la carte
+    (`chaum_pedersen' + `elgamal_decrypt') and shares
+    `RegisteredIdentity' / `RcptResult' with the Notes verifier.  An
+    `approve_receipt' section (Bob names Alice from the Alice->Bob
+    approve) is added to `identity.json'.  No on-chain verifier ships
+    (off-chain, like RcptVerify); the verifiable-decryption primitive is
+    also the building block the A2 Notes receipt will reuse (decrypt
+    `E_iss-for-rec', prove correctness).
 
   Tests – all green; full forge suite *383 passed, 1 skipped* (the
-  offline-skipped `BuckKControllerForkTest'):
+  offline-skipped `BuckKControllerForkTest'; the receipts are
+  wallet-only so the forge count is unchanged; the wallet pytest set is
+  *131 passed*):
   • `test/IssuerSchnorr.t.sol' – 7 in-Solidity (completeness +
     soundness: tampered batch / response, wrong key, non-public,
     unregistered, cross-issuer replay) + 4 `IssuerSchnorrVectorTest'
@@ -714,6 +747,16 @@ Table of Contents
     5-arg unbound works).
   • `alberta_buck/test/test_schnorr.py' – 6 (round-trip, tamper, keccak
     parity).
+  • `alberta_buck/test/test_receipt.py' – 17 (Notes: completeness names
+    Bob's registered M; third-party recheck needs no secret; soundness:
+    tampered opening, unregistered / non-public / wrong-key issuer,
+    forged batch sig, mismatched nullifier or face all reject; A2
+    refused.  EOA ApproveReceipt: completeness names Alice; third-party
+    recheck; frame-wrong-M, tampered cp/vd proof, substituted sender
+    record, unregistered sender all reject).
+  • `alberta_buck/test/test_verifiable_decrypt.py' – 6 (round-trip;
+    wrong M, wrong key, tampered response, replayed account/chain
+    reject; the real key still cannot name a false M).
 
 
 11.2 Decisions / deviations from the spec text above
@@ -753,7 +796,16 @@ Table of Contents
   3. *A2 private-issuer in-SNARK re-encryption binding* – the central
      Phase 2 item; extend `mint_batch.circom' + regenerate per-N
      verifiers / trusted setup, behind `Notes.setMintVerifier'.
-  4. *`RcptVerify'* off-chain receipt verifier (wallet) – unimplemented.
+  4. *`RcptVerify' for A2* – the public-issuer (A1/B1) verifier and the
+     direct EOA-transfer `ApproveReceipt' are shipped (working tree);
+     the A2 Notes path is refused pending the gap #3 in-SNARK binding
+     that gives it a verified issuer to name.  The `verifiable_decrypt'
+     primitive needed to *reveal* the decrypted A2 issuer
+     (`E_iss-for-rec') now exists, so the A2 receipt reduces to wiring
+     that binding plus reusing the primitive.  An on-chain `RcptVerify'
+     (so a contract, not just an off-chain reader, can gate on a
+     receipt) is out of scope here – Phase 1 keeps verification
+     off-chain from chain data.
   5. *Formal verification* (Picus / Halmos / EasyCrypt) – not started.
 
 

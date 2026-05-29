@@ -32,9 +32,11 @@ from alberta_buck.wallet.nizk import registration_prove, RegistrationProof
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.spend_cp import spend_cp_prove
 from alberta_buck.wallet.notes import (
-    FLAVOR_A2, NoteOpening, note_commitment, nullifier_a, id_hash_a2,
+    FLAVOR_A2, FLAVOR_B1, NoteOpening, note_commitment,
+    nullifier_a, nullifier_b, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.schnorr import issuer_schnorr_sign, batch_commitment
+from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
 
 
 def _g1(P) -> Dict[str, str]:
@@ -218,6 +220,46 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     h_batch     = batch_commitment(schnorr_cms)
     iss_sig     = issuer_schnorr_sign(iss_sk, h_batch, ISSUER_SCHNORR_ADDR, CHAINID, rng=rng)
 
+    # ---- non-deniable receipt (decryptability Phase 1, RcptVerify) --------
+    #
+    # A full B1 (bearer, public-issuer) receipt: Bob -- a registered
+    # *Corporate* Identity, the natural public issuer (cashier's cheque /
+    # payroll) -- mints a bearer note that Alice later cashes.  Alice, the
+    # payee, assembles a receipt naming Bob as the payer.  Bob's registered
+    # identity key (bob.kp) doubles as the Schnorr key the registry checks
+    # (pk_iss = _pk[bob] = bob.kp.pk), so the same record that registers Bob
+    # authenticates the batch binding.
+    #
+    # The B1 idHash commits to Bob's identity material via id_hash_b1; the
+    # per-leaf signature (sigma) is representative only -- Phase 1 binds the
+    # issuer through the *batch* Schnorr over keccak(cms), not the per-leaf
+    # sig (see alberta-buck-notes-decryptability.org, residual gap #2).
+    rcpt_face    = 250
+    rcpt_rho     = rand_scalar(rng)
+    rcpt_sigma_R = mul(G1, rand_scalar(rng))
+    rcpt_sigma_s = rand_scalar(rng)
+    rcpt_idHash  = id_hash_b1(bob.m, rcpt_sigma_R, rcpt_sigma_s)
+    rcpt_opening = NoteOpening(
+        flavor=FLAVOR_B1, v=rcpt_face, rho=rcpt_rho,
+        id_hash=rcpt_idHash, predicate=0,
+    )
+    rcpt_cm      = note_commitment(rcpt_opening)
+    # cm sits inside a representative multi-leaf batch (other leaves random).
+    rcpt_cms     = [rand_scalar(rng) % F_R, rcpt_cm, rand_scalar(rng) % F_R]
+    rcpt_hBatch  = batch_commitment(rcpt_cms)
+    rcpt_sig     = issuer_schnorr_sign(bob.kp.sk, rcpt_hBatch, BOB_ADDR, CHAINID, rng=rng)
+    rcpt_nf      = nullifier_b(rcpt_rho, rcpt_idHash)
+
+    # ---- EOA approve receipt (decryptability Phase 1, verifiable decryption) --
+    #
+    # Bob (spender/recipient) names Alice (sender) from the approve handshake
+    # she published above: =E_for_bob= re-encrypts Alice's registered Identity
+    # under Bob's key (the =cp= proof is the soundness half), and Bob proves --
+    # verifiably, revealing =alice.M= -- that =E_for_bob= decrypts under his
+    # registered key to that point.  The two compose into a third-party-checkable
+    # receipt naming Alice with no secret disclosed.
+    rcpt_vd = verifiable_decrypt_prove(E_for_bob, bob.kp.sk, alice.M, BOB_ADDR, CHAINID, rng=rng)
+
     return {
         "$schema_version": 1,
         "seed":    f"0x{seed:064x}",
@@ -298,6 +340,55 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
                 "e": scalar_to_hex(iss_sig.e),
                 "s": scalar_to_hex(iss_sig.s),
                 "R": _g1(iss_sig.R),
+            },
+        },
+        "receipt": {
+            "flavor":     scalar_to_hex(FLAVOR_B1),
+            "issuer":     scalar_to_hex(BOB_ADDR),     # public Corporate Identity
+            "recipient":  scalar_to_hex(ALICE_ADDR),   # payee assembling the receipt
+            "chainid":    scalar_to_hex(CHAINID),
+            "issuer_pk":  _g1(bob.kp.pk),              # registry _pk[issuer]
+            "issuer_M":   _g1(bob.M),                  # named payer Identity point
+            "opening": {
+                "flavor":    scalar_to_hex(FLAVOR_B1),
+                "v":         scalar_to_hex(rcpt_face),
+                "rho":       scalar_to_hex(rcpt_rho),
+                "idHash":    scalar_to_hex(rcpt_idHash),
+                "predicate": scalar_to_hex(0),
+            },
+            "cm":         scalar_to_hex(rcpt_cm),
+            "cms":        [scalar_to_hex(c) for c in rcpt_cms],
+            "hBatch":     scalar_to_hex(rcpt_hBatch),
+            "issuer_sig": {
+                "e": scalar_to_hex(rcpt_sig.e),
+                "s": scalar_to_hex(rcpt_sig.s),
+                "R": _g1(rcpt_sig.R),
+            },
+            "nullifier":  scalar_to_hex(rcpt_nf),
+            "face":       scalar_to_hex(rcpt_face),
+        },
+        "approve_receipt": {
+            "sender":        scalar_to_hex(ALICE_ADDR),   # named counterparty (payer)
+            "spender":       scalar_to_hex(BOB_ADDR),     # recipient assembling it
+            "chainid":       scalar_to_hex(CHAINID),
+            "sender_pk":     _g1(alice.kp.pk),            # registry _pk[sender]
+            "sender_E_addr": {"R": _g1(alice.E.R), "C": _g1(alice.E.C)},  # _E_addr[sender]
+            "spender_pk":    _g1(bob.kp.pk),              # registry _pk[spender]
+            "E_for_spender": {"R": _g1(E_for_bob.R), "C": _g1(E_for_bob.C)},
+            "cp_proof": {
+                "e":  scalar_to_hex(cp.e),
+                "s1": scalar_to_hex(cp.s1),
+                "s2": scalar_to_hex(cp.s2),
+                "T1": _g1(cp.T1),
+                "T2": _g1(cp.T2),
+                "T3": _g1(cp.T3),
+            },
+            "M_named":  _g1(alice.M),
+            "vd_proof": {
+                "e":  scalar_to_hex(rcpt_vd.e),
+                "s":  scalar_to_hex(rcpt_vd.s),
+                "T1": _g1(rcpt_vd.T1),
+                "T2": _g1(rcpt_vd.T2),
             },
         },
     }

@@ -33,6 +33,16 @@ from alberta_buck.wallet.notes import (
     id_payload_a1, id_payload_a2, id_payload_b1,
     id_hash_a1, id_hash_a2, id_hash_b1,
 )
+from alberta_buck.wallet.schnorr import (
+    SchnorrProof, batch_commitment, issuer_schnorr_sign, issuer_schnorr_verify,
+)
+from alberta_buck.wallet.verifiable_decrypt import (
+    VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
+)
+from alberta_buck.wallet.receipt import (
+    RegisteredIdentity, Receipt, RcptResult, receipt_verify,
+    ApproveReceipt, approve_receipt_verify,
+)
 from alberta_buck.wallet.issuer import (
     Issuer, IssuedCredential, rerandomize_for_registration,
 )
@@ -58,6 +68,10 @@ __all__ = [
     "note_commitment", "nullifier_a", "nullifier_b",
     "id_payload_a1", "id_payload_a2", "id_payload_b1",
     "id_hash_a1", "id_hash_a2", "id_hash_b1",
+    "SchnorrProof", "batch_commitment", "issuer_schnorr_sign", "issuer_schnorr_verify",
+    "VDProof", "verifiable_decrypt_prove", "verifiable_decrypt_verify",
+    "RegisteredIdentity", "Receipt", "RcptResult", "receipt_verify",
+    "ApproveReceipt", "approve_receipt_verify",
     "Issuer", "IssuedCredential", "rerandomize_for_registration",
     "TREE_DEPTH", "ZERO_VALUE", "EMPTY_ROOT",
     "MerkleTree", "merkle_walk",
