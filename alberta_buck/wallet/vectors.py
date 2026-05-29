@@ -34,6 +34,7 @@ from alberta_buck.wallet.spend_cp import spend_cp_prove
 from alberta_buck.wallet.notes import (
     FLAVOR_A2, NoteOpening, note_commitment, nullifier_a, id_hash_a2,
 )
+from alberta_buck.wallet.schnorr import issuer_schnorr_sign, batch_commitment
 
 
 def _g1(P) -> Dict[str, str]:
@@ -89,6 +90,11 @@ BOB_ADDR   = 0x0b0b000000000000000000000000000000000b0b
 # Fiat-Shamir transcript.
 SPEND_RECIPIENT = BOB_ADDR
 CHAINID    = 1
+
+# Public-issuer Schnorr binding (Notes mutual-decryptability, Phase 1).  A
+# distinct address so the Solidity parity test can bind it as an
+# isPublicIdentity contract without colliding with the registered EOAs.
+ISSUER_SCHNORR_ADDR = 0x155EC00000000000000000000000000000155EC0
 
 
 @dataclass
@@ -200,6 +206,18 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     spendA_cm        = note_commitment(spendA_opening)
     spendA_nullifier = nullifier_a(spendA_rho, spendA_idHash)
 
+    # ---- public-issuer Schnorr binding (decryptability Phase 1) -----------
+    #
+    # A public issuer signs hBatch = keccak256(cms) with its registered
+    # identity key; IdentityRegistry.verifyIssuerSchnorr checks
+    # s*G == R + e*pk_iss against the stored pk.  A representative
+    # two-commitment batch (each cm < F_R, as Notes requires).
+    iss_sk      = rand_scalar(rng)
+    iss_pk      = mul(G1, iss_sk)
+    schnorr_cms = [rand_scalar(rng) % F_R, rand_scalar(rng) % F_R]
+    h_batch     = batch_commitment(schnorr_cms)
+    iss_sig     = issuer_schnorr_sign(iss_sk, h_batch, ISSUER_SCHNORR_ADDR, CHAINID, rng=rng)
+
     return {
         "$schema_version": 1,
         "seed":    f"0x{seed:064x}",
@@ -268,6 +286,18 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
                 "s":  scalar_to_hex(spend_cp.s),
                 "T1": _g1(spend_cp.T1),
                 "T2": _g1(spend_cp.T2),
+            },
+        },
+        "issuer_schnorr": {
+            "issuer":  scalar_to_hex(ISSUER_SCHNORR_ADDR),
+            "chainid": scalar_to_hex(CHAINID),
+            "pk":      _g1(iss_pk),
+            "cms":     [scalar_to_hex(c) for c in schnorr_cms],
+            "hBatch":  scalar_to_hex(h_batch),
+            "proof": {
+                "e": scalar_to_hex(iss_sig.e),
+                "s": scalar_to_hex(iss_sig.s),
+                "R": _g1(iss_sig.R),
             },
         },
     }

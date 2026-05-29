@@ -124,3 +124,62 @@ contract IssuerSchnorrTest is Test {
         assertFalse(reg.verifyIssuerSchnorr(issuer2, hBatch, sig), "issuer-bound proof must not replay to issuer2");
     }
 }
+
+/// @notice Cross-artifact parity: the on-chain verifyIssuerSchnorr accepts the
+///         canonical proof emitted by alberta_buck.wallet.schnorr (via
+///         `emit-vectors` -> test/vectors/identity.json), pinning the Solidity
+///         and Python Fiat-Shamir encodings together byte-for-byte.
+contract IssuerSchnorrVectorTest is Test {
+    IdentityRegistry internal reg;
+    address internal constant GOV = address(0xA0);
+    string  internal vj;
+    address internal issuer;
+
+    function setUp() public {
+        vm.chainId(1);                          // wallet transcripts use chainid = 1
+        vj  = vm.readFile("test/vectors/identity.json");
+        reg = new IdentityRegistry(GOV);
+
+        issuer = address(uint160(_u(".issuer_schnorr.issuer")));
+        vm.etch(issuer, hex"60006000fd");
+        IdentityRegistry.ElGamalCT memory E =
+            IdentityRegistry.ElGamalCT(BN254.g1(), BN254.g1());
+        reg.bindContract(issuer, _g1(".issuer_schnorr.pk"), E, true, false);
+    }
+
+    function _u(string memory key) internal view returns (uint256) {
+        return vm.parseJsonUint(vj, key);
+    }
+    function _g1(string memory key) internal view returns (BN254.G1Point memory) {
+        return BN254.G1Point(_u(string.concat(key, ".x")), _u(string.concat(key, ".y")));
+    }
+    function _sig() internal view returns (IdentityRegistry.SchnorrProof memory s) {
+        s.e = _u(".issuer_schnorr.proof.e");
+        s.s = _u(".issuer_schnorr.proof.s");
+        s.R = _g1(".issuer_schnorr.proof.R");
+    }
+    function _hBatch() internal view returns (bytes32) {
+        return bytes32(_u(".issuer_schnorr.hBatch"));
+    }
+
+    function test_vector_validProof_verifies() public view {
+        assertTrue(reg.verifyIssuerSchnorr(issuer, _hBatch(), _sig()),
+                   "python-reference proof must verify on-chain");
+    }
+
+    function test_vector_tamperedBatch_rejected() public view {
+        bytes32 bad = bytes32(uint256(_hBatch()) ^ 1);
+        assertFalse(reg.verifyIssuerSchnorr(issuer, bad, _sig()));
+    }
+
+    function test_vector_tamperedResponse_rejected() public view {
+        IdentityRegistry.SchnorrProof memory s = _sig();
+        s.s = addmod(s.s, 1, BN254.R);
+        assertFalse(reg.verifyIssuerSchnorr(issuer, _hBatch(), s));
+    }
+
+    function test_vector_wrongChainid_rejected() public {
+        vm.chainId(2);                          // FS rebinds chainid -> proof rejects
+        assertFalse(reg.verifyIssuerSchnorr(issuer, _hBatch(), _sig()));
+    }
+}
