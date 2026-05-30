@@ -51,6 +51,7 @@ contract IssuerReencVectorTest is Test {
         p.s_r = _u(".issuer_reenc.proof.s_r");
         p.s_b = _u(".issuer_reenc.proof.s_b");
         p.s_s = _u(".issuer_reenc.proof.s_s");
+        p.s_g = _u(".issuer_reenc.proof.s_g");
         p.A1  = _g1(".issuer_reenc.proof.A1");
         p.A2  = _g1(".issuer_reenc.proof.A2");
         p.A3  = _g1(".issuer_reenc.proof.A3");

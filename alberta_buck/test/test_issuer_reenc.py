@@ -110,7 +110,7 @@ def test_tampered_response_rejected():
     s = _setup(5)
     pf = issuer_reenc_prove(s["sk_iss"], s["r_prime"], s["rec"].pk,
                             s["E_reg"], s["E_iss"], ISSUER, CHAINID, rng=s["rng"])
-    for field in ("s_r", "s_b", "s_s"):
+    for field in ("s_r", "s_b", "s_s", "s_g"):
         bad = IssuerReencProof(**{**pf.__dict__, field: (getattr(pf, field) + 1) % ORDER})
         assert not issuer_reenc_verify(s["pk_iss"], s["E_reg"], s["E_iss"], bad, ISSUER, CHAINID)
 
@@ -138,6 +138,21 @@ def test_replay_other_issuer_or_chain_rejected():
                             s["E_reg"], s["E_iss"], ISSUER, CHAINID, rng=s["rng"])
     assert not issuer_reenc_verify(s["pk_iss"], s["E_reg"], s["E_iss"], pf, ISSUER + 1, CHAINID)
     assert not issuer_reenc_verify(s["pk_iss"], s["E_reg"], s["E_iss"], pf, ISSUER, CHAINID + 1)
+
+
+# ---- issuer privacy: M_iss is blinded in the published T -------------------
+
+def test_issuer_M_not_recoverable_from_T():
+    # The published T is blinded (T = r'*pk_rec + gamma*G), so an observer
+    # cannot recover M_iss = C_i - r'*pk_rec as C_i - T.  C_i - T = M_iss -
+    # gamma*G, a uniformly random offset from the real M_iss.
+    s = _setup(11)
+    pf = issuer_reenc_prove(s["sk_iss"], s["r_prime"], s["rec"].pk,
+                            s["E_reg"], s["E_iss"], ISSUER, CHAINID, rng=s["rng"])
+    leaked = add(s["E_iss"].C, neg(pf.T))   # what an observer would compute
+    assert not eq(leaked, s["M_iss"]), "C_i - T must NOT reveal M_iss"
+    # The recipient, who can decrypt E_iss with sk_rec, still recovers M_iss.
+    assert eq(elgamal_decrypt(s["E_iss"], s["rec"].sk), s["M_iss"])
 
 
 # ---- recipient privacy -----------------------------------------------------
@@ -186,6 +201,7 @@ def test_vector_section_verifies():
     p = r["proof"]
     pf = IssuerReencProof(
         e=_h(p["e"]), s_r=_h(p["s_r"]), s_b=_h(p["s_b"]), s_s=_h(p["s_s"]),
+        s_g=_h(p["s_g"]),
         A1=_pt(p["A1"]), A2=_pt(p["A2"]), A3=_pt(p["A3"]),
         A4=_pt(p["A4"]), A5=_pt(p["A5"]),
         Q=_pt(p["Q"]), U=_pt(p["U"]), T=_pt(p["T"]),

@@ -545,6 +545,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
                 "s_r": scalar_to_hex(a2b_proof.s_r),
                 "s_b": scalar_to_hex(a2b_proof.s_b),
                 "s_s": scalar_to_hex(a2b_proof.s_s),
+                "s_g": scalar_to_hex(a2b_proof.s_g),
                 "A1":  _g1(a2b_proof.A1),
                 "A2":  _g1(a2b_proof.A2),
                 "A3":  _g1(a2b_proof.A3),

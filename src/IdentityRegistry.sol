@@ -77,25 +77,28 @@ contract IdentityRegistry {
     ///         the issuer's registered Identity under the recipient's key,
     ///         without revealing the recipient (Notes mutual-decryptability,
     ///         Phase 2).  Matches alberta_buck.wallet.issuer_reenc.IssuerReencProof.
-    ///         A 5-relation, 3-witness Okamoto sigma over (r', beta, sk_iss):
+    ///         A 5-relation, 4-witness Okamoto sigma over (r', beta, sk_iss, gamma):
     ///           L1 R_i = r'*G        L2 U = r'*H
-    ///           L3 T = r'*Q - beta*U          (=> T = r'*pk_rec)
+    ///           L3 T = r'*Q - beta*U + gamma*G    (=> T = r'*pk_rec + gamma*G)
     ///           L4 pk_iss = sk_iss*G
-    ///           L5 C_reg + T - C_i = sk_iss*R_reg   (=> C_i - T = M_iss)
-    ///         Q = pk_rec + beta*H hides pk_rec; U, T are uniform.
+    ///           L5 C_reg + T - C_i = sk_iss*R_reg + gamma*G
+    ///         Q = pk_rec + beta*H hides pk_rec; the gamma*G blind in T hides
+    ///         M_iss = C_i - r'*pk_rec (else any observer recovers it as C_i - T,
+    ///         de-anonymising the private A2 issuer since msg.sender is public).
     struct IssuerReencProof {
         uint256 e;
         uint256 s_r;        // response for r'
         uint256 s_b;        // response for beta
         uint256 s_s;        // response for sk_iss
+        uint256 s_g;        // response for gamma
         BN254.G1Point A1;   // k_r*G
         BN254.G1Point A2;   // k_r*H
-        BN254.G1Point A3;   // k_r*Q - k_b*U
+        BN254.G1Point A3;   // k_r*Q - k_b*U + k_g*G
         BN254.G1Point A4;   // k_s*G
-        BN254.G1Point A5;   // k_s*R_reg
-        BN254.G1Point Q;    // pk_rec + beta*H   (blinded recipient key)
+        BN254.G1Point A5;   // k_s*R_reg + k_g*G
+        BN254.G1Point Q;    // pk_rec + beta*H            (blinded recipient key)
         BN254.G1Point U;    // r'*H
-        BN254.G1Point T;    // r'*pk_rec
+        BN254.G1Point T;    // T_hat = r'*pk_rec + gamma*G (blinds M_iss)
     }
 
     /// @notice Second generator H for the A2 binding -- a nothing-up-my-sleeve
@@ -534,9 +537,12 @@ contract IdentityRegistry {
             BN254.add(pi.A2, BN254.mul(pi.U, pi.e))
         )) return false;
 
-        // L3: s_r*Q - s_b*U == A3 + e*T   (=> T = r'*pk_rec)
+        // L3: s_r*Q - s_b*U + s_g*G == A3 + e*T   (=> T = r'*pk_rec + gamma*G)
         if (!BN254.eq(
-            BN254.add(BN254.mul(pi.Q, pi.s_r), BN254.neg(BN254.mul(pi.U, pi.s_b))),
+            BN254.add(
+                BN254.add(BN254.mul(pi.Q, pi.s_r), BN254.neg(BN254.mul(pi.U, pi.s_b))),
+                BN254.mul(BN254.g1(), pi.s_g)
+            ),
             BN254.add(pi.A3, BN254.mul(pi.T, pi.e))
         )) return false;
 
@@ -546,11 +552,11 @@ contract IdentityRegistry {
             BN254.add(pi.A4, BN254.mul(pkIss, pi.e))
         )) return false;
 
-        // L5: s_s*R_reg == A5 + e*(C_reg + T - C_i)   (=> C_i - T = M_iss)
+        // L5: s_s*R_reg + s_g*G == A5 + e*(C_reg + T - C_i)
         BN254.G1Point memory Y =
             BN254.add(E_reg.C, BN254.add(pi.T, BN254.neg(eIss.C)));
         if (!BN254.eq(
-            BN254.mul(E_reg.R, pi.s_s),
+            BN254.add(BN254.mul(E_reg.R, pi.s_s), BN254.mul(BN254.g1(), pi.s_g)),
             BN254.add(pi.A5, BN254.mul(Y, pi.e))
         )) return false;
 
