@@ -263,7 +263,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | =nextLeafIndex=    | =uint32=                                       | Next free leaf slot (also = current leaf count)                   |
    | =roots[30]=        | =uint256[ROOT_HISTORY_SIZE]=                   | Recent root ring buffer; spends may use any historical root       |
    | =currentRootIndex= | =uint32=                                       | Newest entry in =roots[]=                                         |
-   | =mintVerifiers[N]= | =mapping(uint256 =\Rightarrow= IMintVerifier)= | Per-N batch-mint verifier dispatch (pinned set, e.g. 16/128/1024) |
+   | =mintVerifier=     | =IMintVerifier= (=MintVerifierAdapter=)        | Batch-mint verifier; the adapter dispatches by =cms.length= to the per-N Groth16 verifier (pinned set 1/2/4/8/16/32) |
    #+LATEX: }
 
    The tree is fixed at depth \( d=20 \) (\(\approx 1{,}048{,}576\) leaves) and
@@ -357,11 +357,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
      # newRoot, and the oldRoot / nextLeafIndex they based the proof on.
      # The per-leaf Poseidon insertion is inside the SNARK, not on chain.
      require cms.length > 0
+     require issuerMode.length == cms.length
      require oldRoot       == roots[currentRootIndex]    # stale-state guard
      require nextLeafIndex == self.nextLeafIndex         # stale-state guard
-     cmBatchHash = keccak256(abi.encodePacked(cms))
-     require mintVerifiers[cms.length].verifyMint(
-               proof, oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash)
+     # cm[] and issuerMode[] are public inputs DIRECTLY (no batch hash); the
+     # MintVerifierAdapter dispatches by cms.length to the per-N verifier.
+     require mintVerifier.verifyMint(
+               proof, issuerMode, oldRoot, newRoot, nextLeafIndex, totalFace, cms)
      # The SNARK has proved, for some witness
      #   (flavor_i, v_i, rho_i, idHash_i, predHash_i, pathSiblings_i)_i:
      #     - cm_i = Poseidon5(flavor_i, v_i, rho_i, idHash_i, predHash_i)
@@ -369,7 +371,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
      #     - sum(v_i) == totalFace
      #     - folding {cm_i} onto oldRoot at nextLeafIndex using pathSiblings_i
      #       yields newRoot
-     #     - cmBatchHash == H(cm_0, ..., cm_{N-1})
+     #     - flavor_i in {A1,A2,B1}; issuerMode_i = (A2 ? PRIVATE : PUBLIC)
+     # Then: if msg.sender is a registered PUBLIC Identity, require a Schnorr
+     # over keccak(cms) (mutual decryptability).  Private (A2) batches instead
+     # route to the mint_batch_a2 verifier and field-match each leaf's eIss to
+     # its re-encryption binding.
      buck.transferFrom(caller, address(this), totalFace)
      # Adopt the SNARK-attested new root and advance the rolling state.
      currentRootIndex = (currentRootIndex + 1) % ROOT_HISTORY_SIZE
@@ -721,9 +727,16 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
   Schnorr signature over the batch (=verifyIssuerSchnorr=), so every
   bearer leaf is provably tied to the issuer's decrypted Identity and the
   depositor can produce a sound receipt naming the payer.
-  (Cryptographically /forbidding/ a bearer leaf from a /non-public/
-  minter -- not merely binding the public ones -- awaits the mint SNARK
-  exposing a verified per-leaf =issuerMode=, in Phase 2.)
+  Phase 2 closes the converse: the mint SNARK now exposes a verified
+  per-leaf =issuerMode= (a bearer leaf provably projects to PUBLIC, and
+  there is no B2 codepoint), so =Notes.mint= /forbids/ a bearer-from-non-
+  public mint outright -- it is unprovable, not merely unbound.  This is
+  the on-chain enforcement of a structural impossibility: a private-issuer
+  bearer note ("B2") cannot exist, because any binding the issuer could
+  make for an /unknown/ future bearer is openable either by the whole
+  bearer chain (no privacy over a public issuer) or by no one (no receipt)
+  -- so a private issuer must address the note (A2).  See the
+  Decryptability companion, /Why B2 is impossible/.
 
 ** Flavor A2: Addressed Cheque, Private Issuer
 

@@ -256,19 +256,25 @@ to Phase-7's =prove_mint.js=).  The =mint_batch.circom= circuit at her chosen pi
 ~N* = 16~ takes a substantially richer witness than the Phase-7 mint did, because
 the Merkle-tree update has moved /into/ the SNARK.
 
-*Public inputs* (5 entries, N-independent):
+*Public signals* (circom emits the circuit OUTPUTS first, then the public
+inputs; arity =2N+4=):
 
 #+BEGIN_SRC text
+issuerMode[i]   # i in 0..N-1: per-leaf PUBLIC=1 / PRIVATE=2 (a circuit OUTPUT,
+                #   the deterministic flavor projection -- Notes.mint gates on it)
 oldRoot         # the live note root she read from chain
 newRoot         # the root after folding her N leaves
 nextLeafIndex   # the live tree size she read from chain
 totalFace       # 1200e18 -- range-bounded to 128 bits
-cmBatchHash     # H(cm_0, cm_1, ..., cm_{N-1}) -- ties calldata to the SNARK
+cm[i]           # i in 0..N-1: the commitments, exposed DIRECTLY (not a batch hash)
 #+END_SRC
 
-The hash =H(...)= is keccak256 (cheap on-chain; the contract recomputes it from
-calldata and asserts equality with the SNARK's bound value), or Poseidon if a
-future deployment chooses to keep the hash inside the field for in-circuit reuse.
+The commitments are exposed as public inputs directly (no =cmBatchHash=): each
+input costs ~6K gas in the EVM verifier, cheaper than recomputing a keccak over
+calldata on-chain, and far cheaper than an in-circuit Poseidon over =N=
+elements.  (A2 / private-issuer batches use a /separate/ circuit, =mint_batch_a2=,
+that exposes each leaf's =eIss= instead of =issuerMode=; see /The Redemption/ and
+the Decryptability companion.)
 
 *Private witness* (per-leaf and per-level):
 
@@ -297,9 +303,11 @@ The =pathSiblings= for leaf =i= are derived by the wallet from its local
    tree using =pathSiblings[i][*]= and =Switcher(...)= per level, advances the
    rolling state, and finally asserts the resulting root equals =newRoot=.
    N x TREE_DEPTH Poseidon-2 hashes (~4.3K constraints per leaf).
-5. *Calldata binding.*  ~cmBatchHash === H(cm[0], cm[1], ..., cm[N-1])~.
-6. (Optional belt-and-suspenders.)  ~cm[i] != 0~ and ~cm[i] != ZERO_VALUE~ per
-   leaf, blocking pathological collisions with empty-tree zeros.
+5. *Flavor range + issuer mode.*  Each =flavor[i] \in {A1=1, A2=2, B1=3}=, and
+   =issuerMode[i]= is the deterministic projection (A2 \to PRIVATE, else PUBLIC),
+   exposed as a public output.  This is what makes a bearer leaf provably
+   public-issuer (and a private-issuer bearer note unmintable -- see the
+   Decryptability companion, /Why B2 is impossible/).
 
 Constraint counts work out to roughly *21,800 R1CS per leaf* (opening +
 range-bound + dual Merkle walk: one path consumed to attest =oldRoot=, one to
@@ -321,7 +329,8 @@ witness exists; zero-knowledge guarantees that the verification equation reveals
 nothing about which witness was used.  Mallory, even with the proof in hand,
 cannot back out =v[i]=, =rho[i]=, =idHash[i]=, =flavor[i]=, =predicate[i]=, or
 the per-leaf Merkle paths -- only =oldRoot=, =newRoot=, =nextLeafIndex=,
-=totalFace=, and =cmBatchHash= leak.
+=totalFace=, the =cm[i]=, and the per-leaf =issuerMode[i]= (flavor-class:
+public vs private, no identity) leak.
 
 ** Step 3: Submit =Notes.mint= On Chain
 
@@ -332,40 +341,52 @@ notes.mint(
     proofBytes,
     oldRoot, newRoot, nextLeafIndex,
     1200e18,                  // totalFace
-    [cm_0, cm_1, ..., cm_15]  // calldata, cms.length === N* (here 16)
+    [cm_0, cm_1, ..., cm_15]  // cms.length === N* (here 16)
 );
+// The 6-arg form is the convenience path: it auto-fills issuerMode = all-PUBLIC
+// (the common public/bearer case) and forwards.  Identity-bound issuers use the
+// gated overloads instead:
+//   notes.mint(..., cms, issuerMode, issuerSig)    // public issuer, Schnorr-bound
+//   notes.mint(..., cms, issuerMode, a2Bindings)   // private (A2) issuer; routes
+//                                                   //   the proof to mint_batch_a2
 #+END_SRC
 
 The honest EVM walks =Notes.mint= (Phase-7-bis surface):
 
 #+BEGIN_SRC solidity
-require(cms.length > 0, "Notes: empty mint");
+// (This overload auto-fills issuerMode = [PUBLIC, ..., PUBLIC] and forwards.)
 
-// Stale-state guards: the prover must have read the live tree state.
-require(oldRoot       == roots[currentRootIndex],   "Notes: stale oldRoot");
-require(nextLeafIndex == self.nextLeafIndex,         "Notes: stale leafIndex");
+// Stale-state guards + field bounds (_verifyMintOrRevert).
+require(cms.length > 0,                            "Notes: empty mint");
+require(issuerMode.length == cms.length,           "Notes: issuerMode/cms length");
+require(oldRoot       == roots[currentRootIndex],  "Notes: stale oldRoot");
+require(nextLeafIndex == self.nextLeafIndex,       "Notes: stale nextLeafIndex");
+require(newRoot != 0 && newRoot < FIELD_R,         "Notes: bad newRoot");
 
-// SNARK verify against the dispatched per-N adapter.
-bytes32 cmBatchHash = keccak256(abi.encodePacked(cms));
-IMintVerifier mintVerifier = mintVerifiers[cms.length];
-require(address(mintVerifier) != address(0),         "Notes: unknown N");
+// SNARK verify: the proof binds issuerMode + cm[] + the roots.  The
+// MintVerifierAdapter dispatches by cms.length to the per-N Groth16 verifier;
+// public-signal vector is [issuerMode[0..N), oldRoot, newRoot, nextLeafIndex,
+// totalFace, cm[0..N)] (outputs lead), arity 2N+4.
 require(mintVerifier.verifyMint(
-            proofBytes, oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash
-        ),                                            "Notes: bad mint proof");
+            proofBytes, issuerMode, oldRoot, newRoot, nextLeafIndex, totalFace, cms
+        ),                                         "Notes: bad mint proof");
 
-// Pull BUCK only after the proof is accepted.
+// Public-issuer binding: when msg.sender is a registered PUBLIC Identity,
+// require a Schnorr over keccak256(cms) (the auto path passes a zero sig, so a
+// public issuer must use the gated overload).  The gated PRIVATE-mode path
+// instead verifies one A2 re-encryption binding per leaf.
+
+// Pull BUCK only after the proof is accepted, then advance (_advanceAndPull).
 require(buck.transferFrom(msg.sender, address(this), totalFace),
-                                                      "Notes: transfer failed");
-
-// Adopt the SNARK-attested new root, advance the rolling state.
+                                                   "Notes: transfer failed");
 currentRootIndex = (currentRootIndex + 1) % ROOT_HISTORY_SIZE;
 roots[currentRootIndex] = newRoot;
 self.nextLeafIndex     += cms.length;
 noteFaceSum            += totalFace;
 
-// Single batch event; per-leaf Appended is gone.  cms[] live in calldata.
+// Single batch event; cms[] live in calldata.
 emit Minted(msg.sender, totalFace, /*startIndex=*/ nextLeafIndex,
-            /*count=*/ uint16(cms.length), newRoot);
+            /*count=*/ cms.length, newRoot);
 #+END_SRC
 
 Five things happen in strict order, and *all of them are atomic* (one transaction,
@@ -500,6 +521,17 @@ witness generator, patch the circom compiler, run Anvil with a malicious
 =MintGroth16Verifier= that always accepts.  None of it matters, because the truth on
 the public chain is determined by what /the honest validators/ run.  Three pillars
 prop up the soundness story:
+
+#+begin_quote
+*Note (shipped detail).*  The pillars below were written when the mint proof
+sealed a single =cmBatchHash = H(cm_0..cm_{N-1})=.  The shipped circuit exposes
+the =cm[i]= *directly* as public inputs (and adds a per-leaf =issuerMode[i]=
+output) -- so wherever a pillar says =cmBatchHash=, read "the =cm[]= (and
+=issuerMode[]=) the proof seals."  The argument is unchanged: the public inputs,
+whatever their exact list, are bound into the proof and re-checked by the
+on-chain verifier.  The public-signal vector is =[issuerMode[0..N), oldRoot,
+newRoot, nextLeafIndex, totalFace, cm[0..N)]=.
+#+end_quote
 
 ** Pillar 1: The On-Chain Verifier Is Fixed Code
 
@@ -1529,12 +1561,14 @@ is not misled about the current state.
    =MintVerifierAdapter= dispatches on =cms.length=.  Adding a new pin means
    running a new trusted-setup ceremony, deploying a new verifier, and
    registering it in =mintVerifiers[N]= -- operationally additive, no protocol
-   change.
-5. *Hash choice for =cmBatchHash= (open).*  Two candidates: keccak256 (cheap
-   on-chain, reconstructed from calldata in a few hundred gas) or Poseidon
-   over the field (in-circuit "free" but ~30-60K gas to recompute on-chain).
-   Default is keccak; see the design memo for the trade-off.  Revisit if an
-   on-chain Poseidon precompile ships.
+   change.  (The shipped =MintVerifierAdapter= holds one =verifiers[N]= mapping,
+   registered per pin.)
+5. *Hash choice for =cmBatchHash= (resolved: no batch hash).*  Rather than
+   keccak vs Poseidon, the shipped circuit exposes the =cm[i]= /directly/ as
+   public inputs (~6K gas each in the verifier) -- cheaper than reconstructing a
+   keccak on-chain and far cheaper than an on-chain Poseidon.  The same EVM-cost
+   logic later picked /raw/ over a Poseidon digest for the A2 =eIss= leaf-tie
+   (Decryptability companion).  Pinned-=N= >> 128 would revisit a hash binding.
 6. *Prover contention (resolved operationally, not protocolly).*  The batch-
    mint pivot makes each mint a rollup-style transaction with a stale-state
    guard on =oldRoot= and =nextLeafIndex=.  Losers in a race re-prove; no BUCK

@@ -823,7 +823,14 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
   per-leaf issuer-payload exposure is the remaining increment on the same
   foundation.
 
-** What the circuit must additionally prove and expose
+** What remains, and the decisions that shaped it
+
+   With =issuerMode= shipped, two items from the original convergence list
+   remain.  This session's design pass *changed how both are done*, under one
+   governing constraint: on-chain EVM cost is paramount, while off-chain wallet
+   compute is effectively free (the wallet has full chain history, Holochain
+   bulk-data access, and ample CPU; expensive checks before-mint and on-receipt-
+   before-deposit are fine).
 
    - *Per-leaf =issuerMode=* (public output) -- *SHIPPED* (=b14e0f0=, =584bb52=,
      =68e5b55=).  =mint_batch.circom= range-constrains =flavor \in {A1,A2,B1}= and
@@ -836,22 +843,60 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
      leaf always projects to =PUBLIC= and there is no B2 codepoint, a
      bearer-from-non-public mint is unprovable -- the on-chain enforcement of
      /Why B2 is impossible/.
-   - *Public-leaf identity binding.*  Constrain the leaf's =idHash= issuerData
-     prefix to equal the minter's in-clear registered \( M \), so the
-     Schnorr-attested public Identity is provably the one committed.
-   - *A2 leaf <-> binding tie.*  Expose each A2 leaf's \( E_{iss\text{-}for\text{-}rec} = (R_i, C_i) \)
-     (as the =spendACP= circuit already exposes \( E_n \)) so =Notes.mint= can pass
-     it to =verifyIssuerReenc=, and constrain it to equal the =idHash= issuerData
-     -- closing the "floating binding" gap so a binding cannot be verified against
-     one ciphertext while a different one sits in the leaf.
+
+   - *Public-leaf identity binding -- decided: OFF-CHAIN, no circuit/contract
+     change.*  The original plan constrained the leaf's committed \( m_{iss} \)
+     to equal the minter's registered \( M \) in-circuit.  Dropped: a public
+     issuer is already named soundly by =msg.sender= + the Schnorr batch binding,
+     and the wallet finds the mint tx from full history (search =Notes.mint=
+     calldata for the =cm=) \to =msg.sender= \to registry \( M \).  The committed
+     \( m_{iss} \) is redundant for naming, so the receipt names =msg.sender='s
+     \( M \) and ignores the committed scalar; there is nothing to enforce on
+     chain.  Bonus: *not* exposing \( m_{iss} \) denies a bulk observer a shared
+     scalar by which to group one public issuer's notes.
+
+   - *A2 leaf <-> binding tie -- decided: RAW exposure via a DEDICATED A2 mint
+     circuit (in progress, circuit shipped =f4c4060=).*  Expose each A2 leaf's
+     \( E_{iss\text{-}for\text{-}rec} = (R_i, C_i) \) as four public outputs and
+     have =Notes.mint= /field-match/ them against the =eIss= in each binding.
+     Two sub-decisions:
+     1. *Raw, not hash-bound.*  A SNARK-friendly digest (Poseidon) is
+        EVM-hostile: matching =H(binding.eIss) == tag[i]= would force the
+        contract to recompute Poseidon /on chain/ (~tens of K gas/leaf, plus a
+        hashing dependency =Notes= does not have today).  Raw =eIss= + a field
+        compare is cheaper and simpler, and =eIss= is already on chain in the
+        binding calldata, so raw exposure leaks nothing new.  (A SNARK-friendly
+        hash is cheap in-circuit but dear on-chain; an EVM-friendly hash
+        (keccak) is the reverse -- there is no hash cheap on both sides, so for a
+        value both must agree on, expose it raw.)
+     2. *A dedicated circuit, not the shared one.*  A Groth16 circuit has fixed
+        public-input arity, so adding =eIss= to =mint_batch= would make /every/
+        public/bearer batch pay for =4N= all-zero inputs.  Instead
+        =circuits/mint_batch_a2.circom= is a separate family used only by the
+        private-mode mint: it constrains =flavor == A2=, opens =idHash= to
+        =Poseidon8(eNote, eIss)= (the V2 A2 layout), and exposes =eIss=
+        (layout =[eIss[0..N)(4 each), oldRoot, newRoot, nextLeafIndex, totalFace,
+        cm[0..N)]=, arity =5N+4=).  Public/bearer batches keep using =mint_batch=
+        unchanged and pay nothing for the A2 machinery.
 
 ** Why this preserves privacy
 
-   =issuerMode= leaks only flavor-class (argued above).  Exposing \( E_{iss\text{-}for\text{-}rec} \)
-   exposes a uniform re-randomised ciphertext -- the same disclosure the A2
-   binding already makes, and the same kind =spendACP= already makes for
-   \( E_n \).  Identities and amounts stay hidden; the value-conservation and
+   In =mint_batch_a2=, =eNote= (the note ciphertext the A-spend later reveals)
+   stays a PRIVATE witness, so mint<->spend remain unlinkable; only =eIss= --
+   already public in the A2 binding -- is exposed.  =issuerMode= leaks only
+   flavor-class.  Amounts and identities stay hidden; value-conservation and the
    Merkle relations are unchanged.
+
+** What the A2 tie buys: collusion-resistance
+
+   Today =Notes.mint= checks one binding /per private leaf/ by *count*, so a
+   willing issuer+recipient pair can submit \( N \) copies of one binding while
+   committing \( N \) different =eIss= -- only the matching leaf is bound, the
+   rest are deniable (the recipient decrypts =eIss= but cannot prove it names the
+   registered issuer), yielding an untraceable A2 payment.  The field-match
+   closes this: every committed =eIss= must carry its own verified binding.  This
+   is exactly the invariant's collusion-resistant clause, and it /must/ be
+   on-chain -- an off-chain receipt check is skippable by a colluding recipient.
 
 ** Cost and migration
 
@@ -862,11 +907,13 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
    verifiers, rotated in via =Notes.setMintVerifier= behind a governance cutover
    root (the migration story in /Phasing/).  The =issuerMode= regen was carried
    out this way (reusing the existing ptau, regenerating
-   =MintBatchN{1,2,4,8,16,32}Groth16Verifier=).  Folding in the remaining
-   per-leaf issuer-payload exposure (public-leaf \( M \) + A2 =eIss= leaf-tie) is
-   a further increment on that same cutover; the cryptographic relations it must
-   enforce are already shipped as the off-chain =verifyIssuerReenc= / Schnorr /
-   depositor bindings.
+   =MintBatchN{1,2,4,8,16,32}Groth16Verifier=).  The A2 =eIss= leaf-tie does not
+   touch =mint_batch= at all -- it ships as the *separate* =mint_batch_a2= family
+   (its own per-N verifiers + ceremony), so the existing public/bearer verifiers
+   stay byte-for-byte as deployed.  The public-leaf \( M \) tie needs no circuit
+   (off-chain, above).  The relation the tie enforces is already shipped as the
+   off-chain =verifyIssuerReenc= binding; =mint_batch_a2= only *exposes* =eIss=
+   so =Notes.mint= can field-match it.
 
 #+LATEX: \clearpage
 * Implementation Status (Phase 1 + Phase 2 A2 binding + issuerMode binding shipped)
@@ -1026,13 +1073,31 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
      =test_mint_rejectedOnTamperedIssuerMode= (a flipped leaf mode fails the
      pairing check).  Forge 408 passed, 1 skipped.
 
-   What this does *not* yet bind: the per-leaf issuer payload (public-leaf \( M \)
-   into =idHash=, and the A2 =eIss= leaf-tie + completeness against the committed
-   leaf set).  Those are the remaining increment in /The Required Mint SNARK
-   Signal/; until then A2 leaf-tie rests on the off-chain note artifact + the
-   recipient's verifiable decryption, and A2-binding completeness is enforced
-   only by /count/ (one binding per declared PRIVATE leaf), not yet tied to which
-   committed leaf is which.
+   What this does *not* yet bind: the A2 =eIss= leaf-tie (completeness against
+   the committed leaf set).  That is Phase 2c, below; the public-leaf \( M \) tie
+   was moved off-chain (see /The Required Mint SNARK Signal/).
+
+** Phase 2c -- A2 =eIss= leaf-tie (in progress)
+
+   Closes A2 collusion-resistance: bind each committed A2 leaf's =eIss= to its
+   own verified re-encryption binding (today =Notes.mint= checks bindings only by
+   /count/, so a colluding pair can float duplicate bindings -- see /What the A2
+   tie buys/).  Decisions: *raw* =eIss= exposure (not a Poseidon digest -- on-
+   chain hashing is EVM-hostile) in a *dedicated* =mint_batch_a2= circuit (so
+   public/bearer batches pay nothing).  Shipped so far:
+
+   - =f4c4060= -- =circuits/mint_batch_a2.circom=: the A2-only mint circuit.  Per
+     leaf it constrains =flavor == A2=, opens =idHash= to =Poseidon8(eNote,
+     eIss)=, and exposes =eIss = (R.x,R.y,C.x,C.y)= as a public output; =eNote=
+     stays a private witness (mint<->spend unlinkability).  Public-signal layout
+     =[eIss[0..N)(4 each), oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N)]=,
+     arity =5N+4=.  Witness-checked at N=2: a valid A2 batch exposes the =eIss=
+     bound into =idHash=; a =flavor != A2= leaf is unsatisfiable.
+
+   Remaining (see /Remaining Work and Approaches/): the A2 per-N ceremony +
+   verifiers, the =Notes= second-verifier dispatch + per-leaf =eIss= field-match,
+   the A2 prover/fixtures, the cross-artifact + collusion tests, and the receipt
+   note.
 
 ** Decisions / deviations from the spec text above
 
@@ -1065,31 +1130,84 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
 
 ** Residual gaps (NOT done)
 
-   1. *The mint-SNARK per-leaf issuer-payload signal* -- the remaining circuit
-      increment.  Part (a), rejecting a bearer-from-non-public leaf, is *DONE*
-      (Phase 2b: =issuerMode= is bound, /Why B2 is impossible/ is enforced on
-      chain).  What remains: (b) tying each A2 =E_iss-for-rec= to its committed
-      leaf and requiring /every/ A2 leaf to carry a binding (collusion-resistant
-      completeness -- today =Notes.mint= enforces only a per-batch /count/ of
-      bindings against the declared PRIVATE leaves, not which committed leaf is
-      which), and (c) binding the public-leaf in-clear \( M \) into =idHash=.
-      Needs a further =mint_batch.circom= signal + a per-N trusted-setup
-      regeneration on the same governance cutover as Phase 2b.  See /The Required
-      Mint SNARK Signal/.
+   1. *A2 =eIss= leaf-tie wiring* -- the circuit is shipped (=f4c4060=); the
+      ceremony, =Notes= dispatch + field-match, prover/fixtures, and tests remain
+      (Phase 2c; detailed in /Remaining Work and Approaches/).  Part (a),
+      bearer-from-non-public, is *DONE* (Phase 2b).  The public-leaf \( M \) tie
+      was *decided off-chain* (no longer a gap -- see /The Required Mint SNARK
+      Signal/).
    2. *Issuer-in-the-B-spend circuit* -- today the B-depositor /names/ the issuer
       at =SpentB= (sound for an honest depositor); revealing the issuer from the
-      leaf in the B-spend circuit removes the honesty assumption.  Folds naturally
-      into the same circuit work as (1).
+      leaf in the B-spend circuit would remove the honesty assumption.  Lower
+      priority -- a B1 issuer is public and already named by =msg.sender= at mint,
+      so the receipt does not depend on this; it only hardens the =SpentB= event.
    3. *Formal verification* (Picus / Halmos / EasyCrypt) -- not started.
+
+#+LATEX: \clearpage
+* Remaining Work and Approaches
+
+  The only open implementation thread is *Phase 2c* (the A2 =eIss= leaf-tie); the
+  circuit is in (=f4c4060=).  The rest is wiring, mirroring the =issuerMode= regen
+  (=68e5b55=) step-for-step.  Recommended order, each step independently green:
+
+  1. *A2 ceremony + verifiers.*  Add a =render_mint_batch_a2_n= + a pin loop to
+     =scripts/snark/setup.sh= (mirror =render_mint_batch_n=), reusing the existing
+     ptau (=pot15..pot20=).  Emits =src/MintBatchA2N{1,2,4,8,16,32}Groth16Verifier.sol=.
+     Run via a new =make snark-a2= target (mirror =make snark=).  ~minutes.
+  2. *Verifier interface + adapter.*  =IMintVerifierA2.verifyMint(proof, eIss[][4],
+     oldRoot, newRoot, nextLeafIndex, totalFace, cms)=; a =MintVerifierA2Adapter=
+     (mirror =MintVerifierAdapter=) that builds the =5N+4= pubSignals
+     =[eIss(outputs, 4N), oldRoot, newRoot, nextLeafIndex, totalFace, cm[N]]= --
+     outputs lead, as before.
+  3. *=Notes= wiring.*  Add an =a2MintVerifier= slot (+ =setA2MintVerifier=
+     governance setter).  The PRIVATE-mode =mint= overload (the
+     =mint(...,issuerMode,A2Binding[])= path) routes its proof to =a2MintVerifier=
+     instead of =mintVerifier=, passes the per-leaf =eIss= it now receives as a
+     parameter, and *field-matches*: for each leaf =i=, require
+     =a2Bindings[i].eIss == eIss[i]= (R and C equal) AND
+     =verifyIssuerReenc(msg.sender, a2Bindings[i].eIss, proof)=.  This /replaces/
+     the count-only completeness with a per-leaf tie; =a2Bindings.length ==
+     cms.length= (one binding per A2 leaf).  Public/bearer paths are untouched.
+     Note: the A2 circuit constrains =flavor==A2=, so =issuerMode= is no longer
+     needed as a separate signal on this path -- the contract knows every leaf is
+     PRIVATE.  Decide whether to keep the =issuerMode[]= parameter on the
+     private-mode overload for symmetry or drop it.
+  4. *Prover + fixtures.*  An A2 prover variant (extend =prove_mint_batch.js= with
+     an =--a2= flag, or =prove_mint_batch_a2.js=): per leaf set =flavor=2=, pick
+     arbitrary =eNote[4]= + =eIss[4]= words (fixtures need no valid ciphertexts),
+     =idHash = Poseidon8(eNote, eIss)=, and emit =eIss= in the public section
+     (outputs lead).  Add an A2 driver to =gen_mint_fixtures.sh=.
+  5. *Tests.*  =test/MintVerifierA2.t.sol= (cross-artifact parity: the A2 fixture
+     verifies on chain; a tampered =eIss= fails the pairing check).  Extend
+     =test/NotesIssuerMode.t.sol= (or a new =NotesA2Tie.t.sol=): the happy A2
+     mint with matching =eIss= succeeds; a *floating binding* (a valid binding
+     whose =eIss= != the leaf's exposed =eIss=) now *reverts* -- the
+     collusion-resistance regression test.  Stub the A2 verifier for the gate
+     tests (mirror =StubMintVerifier=).
+  6. *Receipt.*  In =alberta-buck-receipt.org= and =verify_receipt.py=: the A2
+     leaf-tie is now on-chain, so tier-2 A2 verification can additionally confirm
+     the spent leaf's =eIss= was =eIss=-matched at mint (the =UNVERIFIED ISSUER=
+     path tightens to "issuer supplied no binding for /this leaf/").
+
+  *Off-chain (no code here, but record for the wallet/receipt spec):* the
+  public-leaf issuer is named from =msg.sender= + the Schnorr batch binding, with
+  the wallet locating the mint tx by scanning =Notes.mint= calldata for the =cm=
+  (full chain history).  The committed =m_issuer= is not used for naming.
+
+  *Not in scope / deferred:* the B-spend issuer-in-circuit (gap 2), formal
+  verification (gap 3), and a production trusted-setup ceremony (the dev ptau +
+  per-circuit contributions use fixed dev entropy -- see README.org "SNARK
+  Circuits and Trusted Setup").
 
 ** Cross-references and house conventions
 
-   - =alberta-buck-notes.org= was updated this session: the "Mutual
-     Decryptability" invariant gained an "assumed vs. enforced" note, the "Note
-     Flavors" intro gained a "why bearer forces a public issuer -- and how it is
-     enforced" paragraph, and Flavor B1 gained a Phase-1 status note.  That =.org=
-     edit and the regenerated PDF/TXT exports are *uncommitted*; the Phase 1
-     code/tests above are committed.
+   - =alberta-buck-notes.org= and =alberta-buck-notes-flow.org= are kept current
+     with this doc.  Brought up to date alongside Phase 2b/2c: the stale
+     =cmBatchHash= public-input (the shipped circuit exposes =cm[]= directly +
+     =issuerMode[]=), the =mintVerifier= / =MintVerifierAdapter= dispatch, the
+     per-leaf =issuerMode= gate, and the B2-impossibility framing (notes.org's
+     "why bearer forces a public issuer").  Regenerated PDF/TXT exports may lag
+     the =.org= masters.
    - Conventions in force: a negative signed BUCK balance is *not* "debt" -- it
      is "used credit" / an outstanding claim on the holder's own assets; the
      carrying transfer is the =isCarrying=-dispatched =Buck._carryingTransfer=
