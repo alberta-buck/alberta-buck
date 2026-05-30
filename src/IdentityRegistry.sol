@@ -72,6 +72,41 @@ contract IdentityRegistry {
         BN254.G1Point R;    // nonce commitment: k*G
     }
 
+    /// @notice A2 issuer re-encryption binding -- the recipient-blinded proof
+    ///         that a private issuer's leaf ciphertext E_iss-for-rec re-encrypts
+    ///         the issuer's registered Identity under the recipient's key,
+    ///         without revealing the recipient (Notes mutual-decryptability,
+    ///         Phase 2).  Matches alberta_buck.wallet.issuer_reenc.IssuerReencProof.
+    ///         A 5-relation, 3-witness Okamoto sigma over (r', beta, sk_iss):
+    ///           L1 R_i = r'*G        L2 U = r'*H
+    ///           L3 T = r'*Q - beta*U          (=> T = r'*pk_rec)
+    ///           L4 pk_iss = sk_iss*G
+    ///           L5 C_reg + T - C_i = sk_iss*R_reg   (=> C_i - T = M_iss)
+    ///         Q = pk_rec + beta*H hides pk_rec; U, T are uniform.
+    struct IssuerReencProof {
+        uint256 e;
+        uint256 s_r;        // response for r'
+        uint256 s_b;        // response for beta
+        uint256 s_s;        // response for sk_iss
+        BN254.G1Point A1;   // k_r*G
+        BN254.G1Point A2;   // k_r*H
+        BN254.G1Point A3;   // k_r*Q - k_b*U
+        BN254.G1Point A4;   // k_s*G
+        BN254.G1Point A5;   // k_s*R_reg
+        BN254.G1Point Q;    // pk_rec + beta*H   (blinded recipient key)
+        BN254.G1Point U;    // r'*H
+        BN254.G1Point T;    // r'*pk_rec
+    }
+
+    /// @notice Second generator H for the A2 binding -- a nothing-up-my-sleeve
+    ///         point, H = keccak256("AlbertaBuck:IssuerReenc:H") (mod R) * G.
+    ///         Mirrors alberta_buck.wallet.issuer_reenc.H_POINT.  Used only to
+    ///         hide pk_rec in Q, so a known discrete log is acceptable.
+    uint256 internal constant H_X =
+        6790145969673496972519463000972766565107694238233578011858059027187477289586;
+    uint256 internal constant H_Y =
+        3372178911466361414640845512261989709787490420390555908180501907382229222644;
+
     // ---- storage ------------------------------------------------------------
 
     address public governance;
@@ -458,7 +493,100 @@ contract IdentityRegistry {
         return sig.e == _fsIssuerSchnorr(pkIss, sig.R, hBatch, issuer, block.chainid);
     }
 
+    // ---- A2 issuer re-encryption binding (Notes mutual-decryptability, Phase 2) --
+
+    /// @notice Verify the recipient-blinded A2 issuer re-encryption binding: that
+    ///         `eIss` (= E_iss-for-rec, the leaf ciphertext) re-encrypts the
+    ///         `issuer`'s registered Identity under the recipient's key, without
+    ///         revealing the recipient.  The issuer half of mutual decryptability
+    ///         for the A2 flavor (addressed, private issuer); see
+    ///         alberta-buck-notes-decryptability.org and
+    ///         alberta_buck.wallet.issuer_reenc.
+    /// @dev    Reads the issuer's registered `(pk_iss, E_reg) = (_pk, _E_addr)`
+    ///         from storage so a caller cannot substitute either.  Checks the
+    ///         five Okamoto relations via EIP-196 BN254 precompiles, then the
+    ///         Fiat-Shamir challenge.  `pk_rec` never appears: the verifier sees
+    ///         only the blinded `Q` and the uniform `U`, `T`.
+    ///
+    ///         This binds `eIss` to the key committed in `pi.Q`; proving that key
+    ///         is the addressed recipient's (the `E_note` <-> `Q` coupling) is a
+    ///         separate step keyed off the note ciphertext at spend time.
+    function verifyIssuerReenc(
+        address issuer,
+        ElGamalCT calldata eIss,
+        IssuerReencProof calldata pi
+    ) external view returns (bool) {
+        if (!_isRegistered(issuer)) return false;
+
+        BN254.G1Point memory pkIss = _pk[issuer];
+        ElGamalCT     memory E_reg = _E_addr[issuer];
+        BN254.G1Point memory H     = BN254.G1Point(H_X, H_Y);
+
+        // L1: s_r*G == A1 + e*R_i
+        if (!BN254.eq(
+            BN254.mul(BN254.g1(), pi.s_r),
+            BN254.add(pi.A1, BN254.mul(eIss.R, pi.e))
+        )) return false;
+
+        // L2: s_r*H == A2 + e*U
+        if (!BN254.eq(
+            BN254.mul(H, pi.s_r),
+            BN254.add(pi.A2, BN254.mul(pi.U, pi.e))
+        )) return false;
+
+        // L3: s_r*Q - s_b*U == A3 + e*T   (=> T = r'*pk_rec)
+        if (!BN254.eq(
+            BN254.add(BN254.mul(pi.Q, pi.s_r), BN254.neg(BN254.mul(pi.U, pi.s_b))),
+            BN254.add(pi.A3, BN254.mul(pi.T, pi.e))
+        )) return false;
+
+        // L4: s_s*G == A4 + e*pk_iss
+        if (!BN254.eq(
+            BN254.mul(BN254.g1(), pi.s_s),
+            BN254.add(pi.A4, BN254.mul(pkIss, pi.e))
+        )) return false;
+
+        // L5: s_s*R_reg == A5 + e*(C_reg + T - C_i)   (=> C_i - T = M_iss)
+        BN254.G1Point memory Y =
+            BN254.add(E_reg.C, BN254.add(pi.T, BN254.neg(eIss.C)));
+        if (!BN254.eq(
+            BN254.mul(E_reg.R, pi.s_s),
+            BN254.add(pi.A5, BN254.mul(Y, pi.e))
+        )) return false;
+
+        // Fiat-Shamir
+        return pi.e == _fsIssuerReenc(pkIss, E_reg, eIss, pi, issuer, block.chainid);
+    }
+
     // ---- internal verifier helpers (factored to manage stack depth) ---------
+
+    function _fsIssuerReenc(
+        BN254.G1Point memory pkIss,
+        ElGamalCT memory E_reg,
+        ElGamalCT calldata eIss,
+        IssuerReencProof calldata pi,
+        address issuer,
+        uint256 chainid
+    ) internal pure returns (uint256) {
+        BN254.G1Point[] memory pts = new BN254.G1Point[](13);
+        pts[0]  = pkIss;
+        pts[1]  = E_reg.R;
+        pts[2]  = E_reg.C;
+        pts[3]  = eIss.R;
+        pts[4]  = eIss.C;
+        pts[5]  = pi.Q;
+        pts[6]  = pi.U;
+        pts[7]  = pi.T;
+        pts[8]  = pi.A1;
+        pts[9]  = pi.A2;
+        pts[10] = pi.A3;
+        pts[11] = pi.A4;
+        pts[12] = pi.A5;
+        uint256[] memory scl = new uint256[](2);
+        scl[0] = uint256(uint160(issuer));
+        scl[1] = chainid;
+        return BN254.fsChallenge(pts, scl);
+    }
 
     function _fsRegister(
         PSSig calldata sigma,
