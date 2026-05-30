@@ -110,8 +110,9 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
    - *B (bearer).*  The depositor is unknown at mint, so the note cannot carry a
      recipient-targeted ciphertext.  The /issuer/ must therefore be a *public*
      Identity: their \( M \) is in the clear and the recipient names them
-     directly.  A bearer note from an /encrypted/ issuer is unnameable and must
-     be impossible to mint.
+     directly.  A bearer note from an /encrypted/ issuer (a "B2") is not merely
+     undesirable but /impossible/ -- see /Why B2 is impossible/ below -- and the
+     mint circuit + =Notes.mint= now enforce its absence.
    - *A (addressed).*  The issuer knows the recipient at mint and has already
      re-encrypted material the eventual depositor can open.  The issuer may stay
      /private/ (A2) by re-encrypting their /own/ Identity under the recipient's
@@ -120,6 +121,58 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
 
    In all cases the recipient must end up holding a path to a /verified/ issuer
    Identity.  The next section shows the shipped code does not provide one.
+
+** Why B2 (a private-issuer bearer note) is impossible
+
+   The asymmetry above is not an implementation limitation -- it is a theorem.
+   The only party who could re-encrypt the issuer's Identity material so the
+   /eventual/ recipient can open it is the issuer, and the issuer does not know
+   who that recipient will be.
+
+   #+begin_quote
+   *Claim.*  A /meaningful/ private-issuer bearer note (a "B2") cannot exist.
+
+   *Proof.*  A bearer note's redeemer is unknown at mint: it is whoever comes to
+   hold the bearer secret \( \rho \).  For that redeemer to name the issuer, the
+   note must carry a binding to the issuer's /registered/ Identity that the
+   redeemer can decrypt and prove.  The issuer creates this binding at mint --
+   when the redeemer is unknown -- so it must be openable under a key whose
+   secret the eventual redeemer will hold.  Two cases exhaust the options:
+
+   1. /The key is the redeemer's own registered key./  Impossible: the issuer
+      does not know the redeemer and cannot target a key they have never seen.
+   2. /The key travels with the note/ -- a note-bound key whose secret is
+      derived from \( \rho \).  Then it is openable by *every* holder, because
+      holding \( \rho \) is exactly what makes one a holder; the issuer's
+      Identity is revealed to the entire, freely-circulating bearer chain.  That
+      is no more private than B1 (a public issuer in the clear) -- the issuer
+      gains nothing by being "private".
+
+   A binding openable by /no one/ fails decryptability outright.  Hence the only
+   binding that is both decryptable-by-the-redeemer and private-from-the-world
+   requires a /designated/ recipient -- and a note with a designated recipient
+   is an *addressed* (A) note.  "Private issuer" and "bearer" are therefore
+   mutually exclusive: B2 collapses into A2.  \( \qquad \blacksquare \)
+   #+end_quote
+
+   The contrast with A2 is the whole point.  A2 reveals the issuer to exactly
+   /one/ party -- the recipient the issuer chose -- under the issuer's control;
+   the re-encryption \( E_{\text{iss-for-rec}} \) is openable only with
+   \( sk_{rec} \).  B2 has no chosen party, so any binding it could carry is
+   openable by everyone or by no one.  (The earlier near-miss -- publishing
+   \( T = r' pk_{rec} \), which leaked \( M_{iss} \) -- was a /soundness/ slip
+   inside A2; B2 by contrast is a /structural/ impossibility, independent of any
+   binding construction.)
+
+   The protocol *enforces* the theorem rather than assuming it.  The flavor set
+   is exactly \( \{A1, A2, B1\} \); there is no B2 codepoint.  The mint circuit
+   range-constrains \( \text{flavor} \in \{1,2,3\} \) and projects the per-leaf
+   =issuerMode= (A2 \to PRIVATE, \( \{A1,B1\} \to \) PUBLIC), which the Groth16
+   proof now /binds/; =Notes.mint= requires a registered public issuer + Schnorr
+   for every PUBLIC-mode leaf.  Because a bearer leaf is always PUBLIC-mode, a
+   private issuer simply cannot mint a bearer note -- the on-chain image of the
+   proof above.  See /The Required Mint SNARK Signal/ and /Implementation
+   Status/.
 
 #+LATEX: \clearpage
 * The Receipt as a Proof Chain
@@ -765,15 +818,24 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
   Three of the residual gaps (bearer-from-non-public, the B-spend issuer tie, and
   A2 leaf-binding + completeness) converge on one circuit change: the batch-mint
   circuit must expose, per leaf, a verified public =issuerMode in {PUBLIC,
-  PRIVATE}= and the leaf's issuer payload, so =Notes.mint= can gate on them.
+  PRIVATE}= and the leaf's issuer payload, so =Notes.mint= can gate on them.  The
+  =issuerMode= half is now *shipped* (see below and /Implementation Status/); the
+  per-leaf issuer-payload exposure is the remaining increment on the same
+  foundation.
 
 ** What the circuit must additionally prove and expose
 
-   - *Per-leaf =issuerMode=* (public output).  For each leaf \( i \), constrain
-     =issuerMode[i]= to match the committed =flavor[i]=: a B (bearer) leaf must be
-     =PUBLIC=; an A leaf may be either.  This is the signal =Notes.mint= uses to
-     require =msg.sender= be =isPublicIdentity= for any =PUBLIC= leaf and to reject
-     a =PRIVATE= bearer leaf as unsatisfiable.
+   - *Per-leaf =issuerMode=* (public output) -- *SHIPPED* (=b14e0f0=, =584bb52=,
+     =68e5b55=).  =mint_batch.circom= range-constrains =flavor \in {A1,A2,B1}= and
+     emits =issuerMode[i]= as the deterministic projection (A2 \to PRIVATE,
+     \( \{A1,B1\} \to \) PUBLIC); the regenerated per-N Groth16 verifiers /bind/
+     it (public-signal vector =[issuerMode[0..N), oldRoot, newRoot,
+     nextLeafIndex, totalFace, cm[0..N)]=, arity =2N+4=).  =Notes.mint= gates:
+     every =PUBLIC= leaf needs =msg.sender= =isPublicIdentity= + a Schnorr over
+     =keccak(cms)=; every =PRIVATE= leaf needs an A2 binding.  Because a bearer
+     leaf always projects to =PUBLIC= and there is no B2 codepoint, a
+     bearer-from-non-public mint is unprovable -- the on-chain enforcement of
+     /Why B2 is impossible/.
    - *Public-leaf identity binding.*  Constrain the leaf's =idHash= issuerData
      prefix to equal the minter's in-clear registered \( M \), so the
      Schnorr-attested public Identity is provably the one committed.
@@ -795,15 +857,19 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
 
    The added constraints are a handful of equality checks plus the =issuerMode=
    range/flavor gate per leaf -- cheap relative to the dual Merkle walk already
-   dominating the circuit.  But any circuit change re-runs the per-N trusted
-   setup and redeploys the per-N verifiers, rotated in via
-   =Notes.setMintVerifier= behind a governance cutover root (the migration story
-   in /Phasing/).  This is the one remaining heavy lift; the cryptographic
-   relations it must enforce are already shipped and tested as the off-chain
-   =verifyIssuerReenc= / Schnorr / depositor bindings.
+   dominating the circuit (measured: +6 R1CS/leaf for the =issuerMode= gate).
+   Any circuit change re-runs the per-N trusted setup and redeploys the per-N
+   verifiers, rotated in via =Notes.setMintVerifier= behind a governance cutover
+   root (the migration story in /Phasing/).  The =issuerMode= regen was carried
+   out this way (reusing the existing ptau, regenerating
+   =MintBatchN{1,2,4,8,16,32}Groth16Verifier=).  Folding in the remaining
+   per-leaf issuer-payload exposure (public-leaf \( M \) + A2 =eIss= leaf-tie) is
+   a further increment on that same cutover; the cryptographic relations it must
+   enforce are already shipped as the off-chain =verifyIssuerReenc= / Schnorr /
+   depositor bindings.
 
 #+LATEX: \clearpage
-* Implementation Status (Phase 1 + Phase 2 A2 binding shipped)
+* Implementation Status (Phase 1 + Phase 2 A2 binding + issuerMode binding shipped)
 
   This section records what is *actually shipped* against the spec above, so the
   state is self-contained.  Work proceeds on branch =feature/decryptability=
@@ -935,6 +1001,39 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
    Mint SNARK Signal/), which is enforcement plumbing, not the cryptographic
    binding.
 
+** Phase 2b -- per-leaf =issuerMode= bound in the mint SNARK (shipped)
+
+   The =issuerMode= half of /The Required Mint SNARK Signal/ is shipped, making
+   the bearer => public-issuer gate *inescapable* (the on-chain image of /Why B2
+   is impossible/).  Commits, in order:
+
+   - =b14e0f0= -- =mint_batch.circom= range-constrains =flavor \in {A1,A2,B1}=
+     and emits the per-leaf public output =issuerMode= (A2 \to PRIVATE,
+     \( \{A1,B1\} \to \) PUBLIC).  Witness-checked at N=2: =flavor=[A1,A2]= \to
+     =issuerMode=[1,2]=; =[B1,B1]= \to =[1,1]= (bearer always PUBLIC); a would-be
+     =flavor=4= ("B2") is unsatisfiable (+6 R1CS/leaf).
+   - =584bb52= -- =Notes.mint= per-leaf gate: a PUBLIC-mode overload (Schnorr,
+     registered public =msg.sender=) and a PRIVATE-mode overload (A2 bindings,
+     one per private leaf, count completeness); mixed-mode / bad-mode / length
+     mismatch revert.  =test/NotesIssuerMode.t.sol= -- 14, including the
+     bearer-from-non-public reverts.
+   - =68e5b55= -- regenerate =MintBatchN{1,2,4,8,16,32}Groth16Verifier= (reusing
+     the existing ptau) so the Groth16 proof *binds* =issuerMode= (public-signal
+     vector =[issuerMode[0..N), oldRoot, newRoot, nextLeafIndex, totalFace,
+     cm[0..N)]=, arity =2N+4=); =IMintVerifier= / =MintVerifierAdapter= / =Notes=
+     thread it; =prove_mint_batch.js= emits it; new =gen_mint_fixtures.sh=
+     regenerates every fixture.  =test/MintVerifier.t.sol= gains
+     =test_mint_rejectedOnTamperedIssuerMode= (a flipped leaf mode fails the
+     pairing check).  Forge 408 passed, 1 skipped.
+
+   What this does *not* yet bind: the per-leaf issuer payload (public-leaf \( M \)
+   into =idHash=, and the A2 =eIss= leaf-tie + completeness against the committed
+   leaf set).  Those are the remaining increment in /The Required Mint SNARK
+   Signal/; until then A2 leaf-tie rests on the off-chain note artifact + the
+   recipient's verifiable decryption, and A2-binding completeness is enforced
+   only by /count/ (one binding per declared PRIVATE leaf), not yet tied to which
+   committed leaf is which.
+
 ** Decisions / deviations from the spec text above
 
    - *The Schnorr binding is at mint, gated only on the minter being public.*
@@ -966,15 +1065,17 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
 
 ** Residual gaps (NOT done)
 
-   1. *The mint-SNARK =issuerMode= + leaf-tie signal* -- the one remaining circuit
-      lift, and the convergence point of three things: (a) rejecting a
-      bearer-from-non-public leaf, (b) tying each A2 =E_iss-for-rec= to its
-      committed leaf and requiring /every/ A2 leaf to carry a binding
-      (collusion-resistance -- today =Notes.mint= verifies the bindings supplied
-      but cannot enforce completeness against opaque =cms[]=), and (c) binding the
-      public-leaf in-clear \( M \) into =idHash=.  Needs =mint_batch.circom=
-      changes + per-N trusted-setup regeneration + new verifiers behind
-      =Notes.setMintVerifier=.  See /The Required Mint SNARK Signal/.
+   1. *The mint-SNARK per-leaf issuer-payload signal* -- the remaining circuit
+      increment.  Part (a), rejecting a bearer-from-non-public leaf, is *DONE*
+      (Phase 2b: =issuerMode= is bound, /Why B2 is impossible/ is enforced on
+      chain).  What remains: (b) tying each A2 =E_iss-for-rec= to its committed
+      leaf and requiring /every/ A2 leaf to carry a binding (collusion-resistant
+      completeness -- today =Notes.mint= enforces only a per-batch /count/ of
+      bindings against the declared PRIVATE leaves, not which committed leaf is
+      which), and (c) binding the public-leaf in-clear \( M \) into =idHash=.
+      Needs a further =mint_batch.circom= signal + a per-N trusted-setup
+      regeneration on the same governance cutover as Phase 2b.  See /The Required
+      Mint SNARK Signal/.
    2. *Issuer-in-the-B-spend circuit* -- today the B-depositor /names/ the issuer
       at =SpentB= (sound for an honest depositor); revealing the issuer from the
       leaf in the B-spend circuit removes the honesty assumption.  Folds naturally

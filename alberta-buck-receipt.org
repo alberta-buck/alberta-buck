@@ -244,6 +244,20 @@ recipient-blinded =verifyIssuerReenc= binding).  ([[https://perry.kundert.ca/ran
    prints, with =M_iss= recovered but stamped *UNVERIFIED ISSUER* (the payer leg
    is not provably the registered Identity); the payee and txn legs still verify.
 
+** Why there is no "B2" (private-issuer bearer) receipt
+
+   A2 is the /only/ private-issuer receipt kind because A2 is the only
+   private-issuer note kind.  A private-issuer /bearer/ note ("B2") is
+   impossible, not merely unimplemented: =E_iss-for-rec= is the issuer's Identity
+   re-encrypted under *the recipient's* key, openable only with \( sk_{rec} \) --
+   and a bearer note has no recipient at mint for the issuer to address.  Any
+   binding the issuer could instead attach to "whoever bears the note" would be
+   openable by every holder of the freely-circulating note (no privacy over a
+   public B1 issuer) or by no one (no receipt).  So a private issuer must address
+   the note (A2) and a bearer note must have a public issuer (B1); the mint SNARK
+   now /binds/ this (=issuerMode=, /b14e0f0/, /68e5b55/).  See /Why B2 is
+   impossible/ in the Decryptability companion.
+
 * The Physical Artifact (ESC/POS, 80mm, 203dpi, 576px)
 
   576 dots wide; Font A (12x24) gives *48 columns*, Font B (9x17) gives 64.  The
@@ -375,9 +389,11 @@ recipient-blinded =verifyIssuerReenc= binding).  ([[https://perry.kundert.ca/ran
     blind is load-bearing.  The receipt discloses \( \gamma \) (un-blinding
     \( M_{iss} \)) only here, under compulsion; a slip whose issuer shipped no
     binding still names the /recovered/ point but is stamped =UNVERIFIED ISSUER=
-    (not provably the /registered/ Identity).  Full collusion-resistant
-    enforcement (every A2 leaf must carry a binding) awaits the mint-SNARK
-    =issuerMode= signal -- see the Decryptability companion.
+    (not provably the /registered/ Identity).  The mint-SNARK =issuerMode= signal
+    is now /bound/ (so a PRIVATE leaf must declare itself and the issuer supply
+    one binding per private leaf -- per-batch count completeness); the remaining
+    increment is the per-leaf =eIss= tie, which binds /which/ committed leaf each
+    binding answers to -- see the Decryptability companion.
   - *Trust roots.*  Soundness rests on the proof algebra (tier 1), the on-chain
     registry + event (tier 2), and the KYC issuer's \( m \leftrightarrow \)person
     binding (out of scope; assumed via the PS credential).
@@ -388,12 +404,15 @@ recipient-blinded =verifyIssuerReenc= binding).  ([[https://perry.kundert.ca/ran
      all five kinds.  =eoa-pub=, =eoa-priv=, =note-b1=, =note-a1= are soundly
      bound; the receipt *core* (=envelope.py= / =build_receipt.py= /
      =verify_receipt.py= / =render.py=) is the shipped wallet surface.
-  2. *Phase B (shipped, off-chain).*  =note-a2= is now soundly bound: the
-     =issuer_reenc= binding + \( \gamma \) + the coupling in =verify_receipt= name
-     the private issuer's /registered/ Identity; the slip reads =VALID=.  What
-     remains is on-chain /completeness/ enforcement (the mint-SNARK =issuerMode=
-     gate), so that a binding-less A2 leaf cannot be minted at all -- the
-     =UNVERIFIED ISSUER= path closes only then.
+  2. *Phase B (shipped, off-chain + on-chain issuerMode).*  =note-a2= is soundly
+     bound: the =issuer_reenc= binding + \( \gamma \) + the coupling in
+     =verify_receipt= name the private issuer's /registered/ Identity; the slip
+     reads =VALID=.  The mint-SNARK =issuerMode= gate is now bound on chain
+     (=b14e0f0= / =584bb52= / =68e5b55=), so a PRIVATE batch must carry one
+     binding per private leaf (count completeness) and a bearer leaf cannot be
+     private at all.  The =UNVERIFIED ISSUER= path closes fully with the per-leaf
+     =eIss= tie (the remaining mint-SNARK payload signal), which pins each
+     binding to its committed leaf.
   3. *Later.*  The ESC/POS byte driver (Phase A shipped the plain-text driver;
      a port-9100 thermal driver is a new =Driver= subclass); optional QR
      rendering; payer-side ("I paid X") receipts; on-chain =RcptVerify= if a
