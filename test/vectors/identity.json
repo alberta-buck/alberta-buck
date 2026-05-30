@@ -307,6 +307,72 @@
     "sk_x": "0x2d9dfcc0a58048907908a3697bb7d392d9e2aefa9d4ffafc925bb8dc7cd1aa7e",
     "sk_y": "0x038c1eaeb23b6e68793e4a4b8b27c8c5063dfc848630efbfe2d7f523cb362019"
   },
+  "issuer_reenc": {
+    "E_iss": {
+      "C": {
+        "x": "0x265ca82e2f8ecb6e52c79b81b1e9632c92fff85f1e397b530207638b7f9850aa",
+        "y": "0x1df57721309693fefd6e7e0714053e616aa4608c2f1fe52a4108bacb1674cdc2"
+      },
+      "R": {
+        "x": "0x2434853b2b709dee0110332370d3cee39aaa26b8567c90c65191ff38835bc2e3",
+        "y": "0x0339e1917ffe11a9c80b72c5cd95b2cbc76dee780a4068bbf2df1a5db36475c9"
+      }
+    },
+    "E_reg": {
+      "C": {
+        "x": "0x0c78a21592bcfd7db916b13040a907fc35cd639193963b6e8245ecf009f224a3",
+        "y": "0x1c41a2a8a3cde23e87b65da05e8b889ff567dfb687195523a2c309f1a72d3344"
+      },
+      "R": {
+        "x": "0x0406394b3b819710e757ebe2e76b54f8589670bf10d90e8e874426f3f56167dc",
+        "y": "0x2feacdb28b3296d0781918f7440adf39ccc845804ef5d44fde7e01b835925f8c"
+      }
+    },
+    "chainid": "0x0000000000000000000000000000000000000000000000000000000000000001",
+    "issuer": "0x0000000000000000000000000b0b000000000000000000000000000000000b0b",
+    "pk_iss": {
+      "x": "0x1ddcf7ec92407b9cd465e9ea488b8981a2df7c9ce1dfe92a06b63313720e94eb",
+      "y": "0x1fa6bcdff2254df8bcb963224f6a4552f8188c5e11f30ebb6ab465e6e8e3a1ac"
+    },
+    "proof": {
+      "A1": {
+        "x": "0x290c86e32300b3373a8376c6f8cbd6379cd54aba7597b533a3bcabd944f088bc",
+        "y": "0x08b420f141f56d16f1725d5414e9cee938af7ef028c4583fd35e430e58ee462a"
+      },
+      "A2": {
+        "x": "0x1642becaf1fff6d58bd0149b2e9a0a3daf3b853591fe127b3a5e3353705bf065",
+        "y": "0x00a974850913d03b386bea5047c2bb697e35b2bca91fd98ac22895a1567395c1"
+      },
+      "A3": {
+        "x": "0x035cf501be677b77a6e2cb4a141d1e3d4a9f1db0d4bf0788c84d9ccd26d0c7a4",
+        "y": "0x0c4626de3ac4300b699a07accbffdca3dd18c70b93092b55983a9dccbf3c2fcb"
+      },
+      "A4": {
+        "x": "0x1fed92be3d855cd5f38e7b784c2ccc88da99f57e4e1ed5fd6a86171f5b8fb868",
+        "y": "0x04e4afbd4f06d40e89575078322bd611ff1820cd7a901e50d63f6faccbe2b0f3"
+      },
+      "A5": {
+        "x": "0x15cbaf1254ecabce6398b2a31ed24766c4f7b5716707470f016c3c2b58db7b22",
+        "y": "0x2f6b09e96bff96595f18bdbc0f304d749e871da4839f285761fed89644dad1e2"
+      },
+      "Q": {
+        "x": "0x02982e5383a7937e9bb4b66e8f0a4862d62c1bfdf8dad7b9ae58a6297a7c90f2",
+        "y": "0x19690c1cad62f392553e3a977ceff9fd533dbc63b94c00675618c82837908889"
+      },
+      "T": {
+        "x": "0x0892e980cf273584e8e02918259408e944017a17c5ac1eff1109e2d31a102573",
+        "y": "0x1c2a27be5211d4310594daa66589812b23925d121c87adc79971487c6c088190"
+      },
+      "U": {
+        "x": "0x1d7a278fc6c871f701224bd1c4a3cc2c92e9dbfb69f16ac304e4698f8dce96a9",
+        "y": "0x226f974009badd14341d42902fd2e85035c9a08c0b8228c63b86f0ae0c5912ca"
+      },
+      "e": "0x0576daebc67730f05d064a4affd9e1ce2a928483972012a20c5a915ed1915459",
+      "s_b": "0x23b6abd8b4c9c6dc8f3562f300e7a9d742a23489e0ab42f059d5337536fa6b73",
+      "s_r": "0x0479188d6718f4780160a182abcd15da147a61b1e6f3df8482a349a51cde93c6",
+      "s_s": "0x095f35d8ff20dc421fdd29bcdf7e0f91cd59fdaa927112057a1573209b77333e"
+    }
+  },
   "issuer_schnorr": {
     "chainid": "0x0000000000000000000000000000000000000000000000000000000000000001",
     "cms": [

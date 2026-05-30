@@ -37,6 +37,7 @@ from alberta_buck.wallet.notes import (
 )
 from alberta_buck.wallet.schnorr import issuer_schnorr_sign, batch_commitment
 from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
+from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
 from alberta_buck.wallet.envelope import (
     serialize_core, envelope_text, receipt_id,
 )
@@ -387,6 +388,21 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     a1_bytes       = serialize_core(note_a1_core)
     a2_bytes       = serialize_core(note_a2_core)
 
+    # ---- A2 issuer re-encryption binding (decryptability Phase 2) ----------
+    #
+    # Generated last so its rng draws do not perturb any earlier section.  Bob
+    # (private issuer) mints an A2 note addressed to Alice: E_iss re-encrypts his
+    # OWN registered Identity M under Alice's key.  The recipient-blinded binding
+    # proves E_iss re-encrypts Bob's registered credential (bob.E) without
+    # revealing pk_alice -- verifyApprove with pk_rec hidden via the
+    # U = r'*H / Q = pk_rec + beta*H linearisation.  See issuer_reenc.py.
+    a2b_r_prime = rand_scalar(rng)
+    a2b_E_iss   = elgamal_encrypt(bob.M, alice.kp.pk, a2b_r_prime)
+    a2b_proof   = issuer_reenc_prove(
+        bob.kp.sk, a2b_r_prime, alice.kp.pk, bob.E, a2b_E_iss,
+        BOB_ADDR, CHAINID, rng=rng,
+    )
+
     return {
         "$schema_version": 1,
         "seed":    f"0x{seed:064x}",
@@ -516,6 +532,27 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
                 "s":  scalar_to_hex(rcpt_vd.s),
                 "T1": _g1(rcpt_vd.T1),
                 "T2": _g1(rcpt_vd.T2),
+            },
+        },
+        "issuer_reenc": {
+            "issuer":  scalar_to_hex(BOB_ADDR),       # private A2 issuer (msg.sender)
+            "chainid": scalar_to_hex(CHAINID),
+            "pk_iss":  _g1(bob.kp.pk),                # registry _pk[issuer]
+            "E_reg":   {"R": _g1(bob.E.R), "C": _g1(bob.E.C)},   # _E_addr[issuer]
+            "E_iss":   {"R": _g1(a2b_E_iss.R), "C": _g1(a2b_E_iss.C)},  # leaf E_iss-for-rec
+            "proof": {
+                "e":   scalar_to_hex(a2b_proof.e),
+                "s_r": scalar_to_hex(a2b_proof.s_r),
+                "s_b": scalar_to_hex(a2b_proof.s_b),
+                "s_s": scalar_to_hex(a2b_proof.s_s),
+                "A1":  _g1(a2b_proof.A1),
+                "A2":  _g1(a2b_proof.A2),
+                "A3":  _g1(a2b_proof.A3),
+                "A4":  _g1(a2b_proof.A4),
+                "A5":  _g1(a2b_proof.A5),
+                "Q":   _g1(a2b_proof.Q),
+                "U":   _g1(a2b_proof.U),
+                "T":   _g1(a2b_proof.T),
             },
         },
         "abrcpt": {
