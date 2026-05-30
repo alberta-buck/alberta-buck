@@ -165,6 +165,11 @@ contract Notes {
     ///         every leaf in the batch (Notes mutual-decryptability, Phase 1).
     event IssuerBound(address indexed issuer, uint256 indexed newRoot);
 
+    /// @notice Emitted when a mint anchors `count` verified A2 (private-issuer)
+    ///         recipient-blinded re-encryption bindings (Notes
+    ///         mutual-decryptability, Phase 2; see verifyIssuerReenc).
+    event IssuerReencBound(address indexed issuer, uint256 indexed newRoot, uint256 count);
+
     // ---- constructor / governance -----------------------------------------
 
     constructor(
@@ -303,6 +308,58 @@ contract Notes {
         IdentityRegistry.SchnorrProof calldata issuerSig
     ) external {
         _mint(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms, issuerSig);
+    }
+
+    /// @notice One A2 (addressed, private-issuer) leaf's recipient-blinded
+    ///         re-encryption binding: the leaf ciphertext `eIss` (E_iss-for-rec)
+    ///         plus its proof.  See IdentityRegistry.verifyIssuerReenc and
+    ///         alberta_buck.wallet.issuer_reenc.
+    struct A2Binding {
+        IdentityRegistry.ElGamalCT        eIss;
+        IdentityRegistry.IssuerReencProof proof;
+    }
+
+    /// @notice Mint a private-issuer (A2) batch, anchoring the per-leaf
+    ///         re-encryption bindings on chain (Notes mutual-decryptability,
+    ///         Phase 2).  Each binding is verified against `msg.sender`'s
+    ///         registered credential via IdentityRegistry.verifyIssuerReenc, so
+    ///         an invalid binding reverts the whole mint; the `IssuerReencBound`
+    ///         event anchors them for tier-2 receipt verification.
+    ///
+    /// @dev    *Scope.*  This verifies the bindings the issuer supplies and
+    ///         records that they were anchored at mint.  It does NOT yet (a) tie
+    ///         each `eIss` to a specific committed leaf, nor (b) enforce that
+    ///         every A2 leaf carries a binding -- both require the mint SNARK to
+    ///         expose a per-leaf `issuerMode` and the leaf's `eIss` (the same
+    ///         circuit signal the bearer-from-non-public gate needs).  Until
+    ///         then the binding's leaf-tie rests on the off-chain note artifact
+    ///         + the recipient's verifiable decryption (see the receipt
+    ///         verifier).  The Schnorr path is unused here: an A2 issuer is a
+    ///         registered *private* Identity, so the `_mint` public-issuer gate
+    ///         is skipped (a public minter would revert on the zero signature).
+    function mint(
+        bytes   calldata proof,
+        uint256          oldRoot,
+        uint256          newRoot,
+        uint32           nextLeafIndex_,
+        uint256          totalFace,
+        uint256[] calldata cms,
+        A2Binding[] calldata a2Bindings
+    ) external {
+        require(address(identityRegistry) != address(0),
+                "Notes: identity registry not set");
+        uint256 m = a2Bindings.length;
+        require(m > 0, "Notes: no A2 bindings");
+        for (uint256 i = 0; i < m; i++) {
+            require(
+                identityRegistry.verifyIssuerReenc(
+                    msg.sender, a2Bindings[i].eIss, a2Bindings[i].proof),
+                "Notes: bad A2 binding"
+            );
+        }
+        _mint(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
+              IdentityRegistry.SchnorrProof(0, 0, BN254.G1Point(0, 0)));
+        emit IssuerReencBound(msg.sender, newRoot, m);
     }
 
     function _mint(
