@@ -32,11 +32,18 @@ from alberta_buck.wallet.nizk import registration_prove, RegistrationProof
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.spend_cp import spend_cp_prove
 from alberta_buck.wallet.notes import (
-    FLAVOR_A2, FLAVOR_B1, NoteOpening, note_commitment,
+    FLAVOR_A1, FLAVOR_A2, FLAVOR_B1, NoteOpening, note_commitment,
     nullifier_a, nullifier_b, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.schnorr import issuer_schnorr_sign, batch_commitment
 from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
+from alberta_buck.wallet.envelope import (
+    serialize_core, envelope_text, receipt_id,
+)
+from alberta_buck.wallet.build_receipt import (
+    build_eoa_pub, build_eoa_priv,
+    build_note_b1, build_note_a1, build_note_a2,
+)
 
 
 def _g1(P) -> Dict[str, str]:
@@ -260,6 +267,126 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # receipt naming Alice with no secret disclosed.
     rcpt_vd = verifiable_decrypt_prove(E_for_bob, bob.kp.sk, alice.M, BOB_ADDR, CHAINID, rng=rng)
 
+    # ---- AB-RCPT/1 receipt cores (decryptability Phase 1, envelope) -------
+    #
+    # Build the five receipt kinds from the canonical identity-setup data
+    # (Alice, Bob) plus the approve and note artifacts above.  Each produces
+    # a ReceiptCore, serialized to canonical bytes, and the envelope text.
+    # The bit-identical property: two calls with the same inputs yield the
+    # same canonical bytes, so the receipt_id is deterministic.
+
+    SIMPLE_CONTRACTS = {
+        "registry": "0x" + "1d" * 20,
+        "buck":     "0x" + "b0" * 20,
+        "notes":    "0x" + "70" * 20,
+    }
+
+    def _e(rng):
+        """Shorthand for a receipt-core result struct."""
+        pass
+
+    # -- eoa-pub ---------------------------------------------------------------
+    # Bob (payee, Private) receives an EOA transfer from Alice as a *Public*
+    # Identity.  Bob self-names; Alice is named via her public identity_data.
+    eoa_pub_core = build_eoa_pub(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        payer_addr=ALICE_ADDR, payer_identity=alice.canonical, payer_M=alice.M,
+        payer_pk=alice.kp.pk,
+        payee_addr=BOB_ADDR, payee_identity=bob.canonical, payee_M=bob.M,
+        payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
+        value=500_000000, block_time=1779999000,
+        txhash="0x" + "ea" * 32, block=1234567, logindex=2,
+        rng=rng,
+    )
+
+    # -- eoa-priv --------------------------------------------------------------
+    # Bob (payee, Private) receives from Alice as a *Private* Identity.
+    # Bob uses the approve handshake (cp, E_for_bob) + his vd_proof to name
+    # Alice, and self-names the same way.
+    eoa_priv_core = build_eoa_priv(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        payer_addr=ALICE_ADDR, payer_identity=alice.canonical, payer_M=alice.M,
+        payer_pk=alice.kp.pk, payer_E_addr=alice.E,
+        E_for_payee=E_for_bob, cp_proof=cp,
+        payee_addr=BOB_ADDR, payee_identity=bob.canonical, payee_M=bob.M,
+        payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
+        value=500_000000, block_time=1779999000,
+        txhash="0x" + "ee" * 32, block=1234567, logindex=2,
+        rng=rng,
+    )
+
+    # -- note-b1 ---------------------------------------------------------------
+    # Bob (payee) cashes a B1 bearer note.  The issuer (Bob himself, as a public
+    # Corporate Identity) signed the batch; Alice is the depositor.
+    # Bob's registered identity_key serves as the issuer Schnorr key.
+    note_b1_core = build_note_b1(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
+        issuer_pk=bob.kp.pk,
+        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
+        payee_pk=alice.kp.pk, payee_sk=alice.kp.sk, payee_E_addr=alice.E,
+        opening=rcpt_opening, cms=rcpt_cms, issuer_sig=rcpt_sig,
+        nullifier=rcpt_nf, face=rcpt_face,
+        value=rcpt_face, block_time=1779999000,
+        txhash="0x" + "b1" * 32, block=1234599, logindex=1,
+        mint_txhash="0x" + "bb" * 32, mint_block=1234500,
+        rng=rng,
+    )
+
+    # -- note-a1 ---------------------------------------------------------------
+    # Bob (issuer) mints an A1 addressed note to Alice.  Alice deposits it via
+    # spendACP.  Same structure as B1 but nullifier tag 4243, SpentA event.
+    # We reuse the B1 opening as a template with flavor A1.
+    a1_opening = NoteOpening(
+        flavor=FLAVOR_A1, v=rcpt_face, rho=rcpt_rho,
+        id_hash=rcpt_idHash, predicate=0,
+    )
+    a1_cm = note_commitment(a1_opening)
+    a1_cms = [rand_scalar(rng) % F_R, a1_cm, rand_scalar(rng) % F_R]
+    a1_hBatch = batch_commitment(a1_cms)
+    a1_sig = issuer_schnorr_sign(bob.kp.sk, a1_hBatch, BOB_ADDR, CHAINID, rng=rng)
+    a1_nf = nullifier_a(rcpt_rho, rcpt_idHash)
+    note_a1_core = build_note_a1(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
+        issuer_pk=bob.kp.pk,
+        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
+        payee_pk=alice.kp.pk, payee_sk=alice.kp.sk, payee_E_addr=alice.E,
+        opening=a1_opening, cms=a1_cms, issuer_sig=a1_sig,
+        nullifier=a1_nf, face=rcpt_face,
+        value=rcpt_face, block_time=1779999000,
+        txhash="0x" + "a1" * 32, block=1234599, logindex=1,
+        mint_txhash="0x" + "aa" * 32, mint_block=1234500,
+        rng=rng,
+    )
+
+    # -- note-a2 ---------------------------------------------------------------
+    # Bob (issuer, Private) mints an A2 addressed note to Alice.  The
+    # E_iss_for_rec field is an ElGamal encrypting Bob's M under Alice's pk.
+    a2_E_iss = elgamal_encrypt(bob.M, alice.kp.pk, rand_scalar(rng))
+    a2_nf = nullifier_a(rcpt_rho, rcpt_idHash)
+    note_a2_core = build_note_a2(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
+        issuer_pk=bob.kp.pk, issuer_E_addr=bob.E,
+        E_iss_for_rec=a2_E_iss,
+        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
+        payee_pk=alice.kp.pk, payee_sk=alice.kp.sk, payee_E_addr=alice.E,
+        value=rcpt_face, block_time=1779999000,
+        txhash="0x" + "a2" * 32, block=1234599, logindex=1,
+        mint_txhash="0x" + "aa" * 32, mint_block=1234500,
+        nullifier=a2_nf,
+        rng=rng,
+    )
+
+    # Serialise for the vector file — both the canonical bytes and the envelope
+    # text, so the Solidity / off-chain verifier tests can load them directly.
+    eoa_pub_bytes  = serialize_core(eoa_pub_core)
+    eoa_priv_bytes = serialize_core(eoa_priv_core)
+    b1_bytes       = serialize_core(note_b1_core)
+    a1_bytes       = serialize_core(note_a1_core)
+    a2_bytes       = serialize_core(note_a2_core)
+
     return {
         "$schema_version": 1,
         "seed":    f"0x{seed:064x}",
@@ -389,6 +516,28 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
                 "s":  scalar_to_hex(rcpt_vd.s),
                 "T1": _g1(rcpt_vd.T1),
                 "T2": _g1(rcpt_vd.T2),
+            },
+        },
+        "abrcpt": {
+            "eoa_pub": {
+                "id": receipt_id(eoa_pub_bytes),
+                "envelope": envelope_text(eoa_pub_bytes),
+            },
+            "eoa_priv": {
+                "id": receipt_id(eoa_priv_bytes),
+                "envelope": envelope_text(eoa_priv_bytes),
+            },
+            "note_b1": {
+                "id": receipt_id(b1_bytes),
+                "envelope": envelope_text(b1_bytes),
+            },
+            "note_a1": {
+                "id": receipt_id(a1_bytes),
+                "envelope": envelope_text(a1_bytes),
+            },
+            "note_a2": {
+                "id": receipt_id(a2_bytes),
+                "envelope": envelope_text(a2_bytes),
             },
         },
     }

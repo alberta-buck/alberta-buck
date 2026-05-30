@@ -43,6 +43,20 @@ from alberta_buck.wallet.receipt import (
     RegisteredIdentity, Receipt, RcptResult, receipt_verify,
     ApproveReceipt, approve_receipt_verify,
 )
+from alberta_buck.wallet.envelope import (
+    PartyRecord, TxnRecord, ReceiptCore,
+    serialize_core, deserialize_core,
+    envelope_text, parse_envelope, receipt_id,
+)
+from alberta_buck.wallet.build_receipt import (
+    build_eoa_pub, build_eoa_priv,
+    build_note_b1, build_note_a1, build_note_a2,
+)
+from alberta_buck.wallet.verify_receipt import verify_receipt as verify_receipt_core
+from alberta_buck.wallet.render import (
+    Detail, StyledLine, ReceiptSection, ReceiptDoc,
+    Driver, TextDriver, render_receipt,
+)
 from alberta_buck.wallet.issuer import (
     Issuer, IssuedCredential, rerandomize_for_registration,
 )
@@ -72,6 +86,14 @@ __all__ = [
     "VDProof", "verifiable_decrypt_prove", "verifiable_decrypt_verify",
     "RegisteredIdentity", "Receipt", "RcptResult", "receipt_verify",
     "ApproveReceipt", "approve_receipt_verify",
+    "PartyRecord", "TxnRecord", "ReceiptCore",
+    "serialize_core", "deserialize_core",
+    "envelope_text", "parse_envelope", "receipt_id",
+    "build_eoa_pub", "build_eoa_priv",
+    "build_note_b1", "build_note_a1", "build_note_a2",
+    "verify_receipt_core",
+    "Detail", "StyledLine", "ReceiptSection", "ReceiptDoc",
+    "Driver", "TextDriver", "render_receipt",
     "Issuer", "IssuedCredential", "rerandomize_for_registration",
     "TREE_DEPTH", "ZERO_VALUE", "EMPTY_ROOT",
     "MerkleTree", "merkle_walk",

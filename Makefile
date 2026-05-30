@@ -164,6 +164,23 @@ plots:			plot-lifecycle plot-equilibrium plot-arb
 # One-shot: regenerate vectors then plots in the right order.
 images:			vectors plots
 
+# ── AB-RCPT/1 receipt golden-text renders ────────────────────────────
+#
+# Regenerates test/vectors/receipt-*.golden.txt from the current renderer
+# and the canonical identity.json vectors.  Run whenever the receipt layout
+# changes intentionally; the golden-file tests in test_render.py will fail
+# until these are re-generated.
+
+# Regenerates test/vectors/receipt-*.golden.txt from the current renderer
+# and the canonical identity.json vectors.  Run whenever the receipt layout
+# changes intentionally; the golden-file tests in test_render.py will fail
+# until these are re-generated.
+#
+# Prerequisite: identity.json must be up-to-date (emit-vectors runs first).
+golden-receipts:
+	nix develop --command python -m alberta_buck.wallet.cli emit-vectors
+	nix develop --command python -m alberta_buck.wallet.cli render-golden
+
 
 # ── Sim inputs: price CSVs + Universal Router artifact ────────────────
 #

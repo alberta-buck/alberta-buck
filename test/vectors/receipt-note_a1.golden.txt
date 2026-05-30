@@ -1,0 +1,33 @@
+                 ALBERTA  BUCK                  
+         P A Y M E N T   R E C E I P T          
+------------------------------------------------
+  Receipt  6mxhrbpo67m6
+------------------------------------------------
+FROM (payer) (PUBLIC IDENTITY)
+ Bob Smith
+Corporate Registration - Alberta, Canada
+ acct 0x0b0b000000000000000000000000000000000b0b
+ idpt 0x0cef52e77ea5..0ae1f916d96b
+------------------------------------------------
+TO (payee) (PRIVATE IDENTITY)
+ Alice Johnson
+Alberta Identity Card - Alberta, Canada
+ acct 0x0a11ce00000000000000000000000000000a11ce
+ idpt 0x07a0b762be40..d418d7bf5e7c
+------------------------------------------------
+TRANSACTION
+ Type    Note spend — A1 addressed, public issuer
+ Amount              0.000250  BUCK
+ When        2026-05-28 20:10  UTC
+ Chain                      1
+ Block                1234599
+ Log                        1
+ Tx      0xa1a1a1a1a1a1..a1a1a1a1a1a1
+ Mint    0xaaaaaaaaaaaa..aaaaaaaaaaaa
+------------------------------------------------
+VERIFICATION
+ status @ issue: VALID
+ receipt  6mxhrbpo67m6
+------------------------------------------------
+        a record, not a bearer instrument       
+        github.com/pjkundert/alberta-buck       
