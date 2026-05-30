@@ -18,7 +18,7 @@ import {StubSpendVerifier}    from "../src/StubSpendVerifier.sol";
 ///         without depending on StubMintVerifier's enabled toggle.
 contract RejectingMintVerifier is IMintVerifier {
     function verifyMint(
-        bytes calldata, uint256, uint256, uint256, uint256, uint256[] calldata
+        bytes calldata, uint256[] calldata, uint256, uint256, uint256, uint256, uint256[] calldata
     ) external pure returns (bool) { return false; }
 }
 
@@ -206,6 +206,13 @@ contract NotesTest is Test {
         cms[1] = b;
     }
 
+    /// @dev A length-`n` PUBLIC-mode array (MODE_PUBLIC == 1).  The stub verifier
+    ///      ignores the values; Notes only requires issuerMode.length == cms.length.
+    function _modes(uint256 n) internal pure returns (uint256[] memory mm) {
+        mm = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) mm[i] = 1;
+    }
+
     /// @dev Stub-friendly mint: oldRoot pulled from live state, newRoot is a
     ///      caller-chosen scalar (the stub doesn't bind it; production mint
     ///      requires the SNARK-attested newRoot).
@@ -221,6 +228,7 @@ contract NotesTest is Test {
         // = test contract instead of `from`.
         uint256 oldRoot       = notes.noteRoot();
         uint32  nextLeafIndex = notes.nextLeafIndex();
+        uint256[] memory mode = _modes(cms.length);
         vm.prank(from);
         notes.mint(
             DUMMY_PROOF,
@@ -228,7 +236,8 @@ contract NotesTest is Test {
             newRoot,
             nextLeafIndex,
             totalFace,
-            cms
+            cms,
+            mode
         );
     }
 

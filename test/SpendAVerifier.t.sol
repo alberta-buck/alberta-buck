@@ -231,13 +231,15 @@ contract SpendAVerifierTest is Test {
     function _seedTreeForSpendA() internal {
         uint256[] memory cms = new uint256[](1);
         cms[0] = fxCm;
+        uint256[] memory mode = new uint256[](1);   // stub verifier ignores values
+        mode[0] = notes.MODE_PUBLIC();
         uint256 oldRoot       = notes.noteRoot();
         uint32  nextLeafIndex = notes.nextLeafIndex();
         vm.prank(alice);
         notes.mint(
             hex"deadbeef",
             oldRoot, fxNoteRoot, nextLeafIndex,
-            fxFace, cms
+            fxFace, cms, mode
         );
     }
 

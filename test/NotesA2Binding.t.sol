@@ -80,6 +80,13 @@ contract NotesA2BindingTest is Test {
         cms[0] = 0x1234;
     }
 
+    /// @dev One PRIVATE-mode entry (MODE_PRIVATE == 2).  Literal so it can be
+    ///      hoisted without an external call that would burn vm.prank.
+    function _privMode() internal pure returns (uint256[] memory mm) {
+        mm = new uint256[](1);
+        mm[0] = 2;  // Notes.MODE_PRIVATE
+    }
+
     // ---- tests -------------------------------------------------------------
 
     // Hoist all external-call args to locals: an external call in the mint
@@ -90,9 +97,10 @@ contract NotesA2BindingTest is Test {
         uint256 root = notes.noteRoot();
         uint32  idx  = notes.nextLeafIndex();
         uint256[] memory cms = _cms();
+        uint256[] memory mode = _privMode();
         Notes.A2Binding[] memory a = _bindings();
         vm.prank(issuer);    // msg.sender = the A2 issuer
-        notes.mint(hex"00", root, 999, idx, 1000, cms, a);
+        notes.mint(hex"00", root, 999, idx, 1000, cms, mode, a);
         assertEq(notes.nextLeafIndex(), 1, "leaf appended");
         assertEq(notes.noteFaceSum(), 1000, "face accumulated");
     }
@@ -101,10 +109,11 @@ contract NotesA2BindingTest is Test {
         uint256 root = notes.noteRoot();
         uint32  idx  = notes.nextLeafIndex();
         uint256[] memory cms = _cms();
+        uint256[] memory mode = _privMode();
         Notes.A2Binding[] memory a = _bindings();
         vm.recordLogs();
         vm.prank(issuer);
-        notes.mint(hex"00", root, 999, idx, 1000, cms, a);
+        notes.mint(hex"00", root, 999, idx, 1000, cms, mode, a);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bytes32 topic = keccak256("IssuerReencBound(address,uint256,uint256)");
         bool found;
@@ -118,20 +127,23 @@ contract NotesA2BindingTest is Test {
         uint256 root = notes.noteRoot();
         uint32  idx  = notes.nextLeafIndex();
         uint256[] memory cms = _cms();
+        uint256[] memory mode = _privMode();
         Notes.A2Binding[] memory a = _bindings();
         a[0].proof.s_r = addmod(a[0].proof.s_r, 1, BN254.R);   // tamper
         vm.prank(issuer);
         vm.expectRevert("Notes: bad A2 binding");
-        notes.mint(hex"00", root, 999, idx, 1000, cms, a);
+        notes.mint(hex"00", root, 999, idx, 1000, cms, mode, a);
     }
 
-    function test_mint_emptyA2Bindings_reverts() public {
+    function test_mint_bindingCountMismatch_reverts() public {
+        // One PRIVATE leaf but zero bindings -> count completeness fails.
         uint256 root = notes.noteRoot();
         uint32  idx  = notes.nextLeafIndex();
         uint256[] memory cms = _cms();
+        uint256[] memory mode = _privMode();
         Notes.A2Binding[] memory a = new Notes.A2Binding[](0);
         vm.prank(issuer);
-        vm.expectRevert("Notes: no A2 bindings");
-        notes.mint(hex"00", root, 999, idx, 1000, cms, a);
+        vm.expectRevert("Notes: A2 binding count");
+        notes.mint(hex"00", root, 999, idx, 1000, cms, mode, a);
     }
 }

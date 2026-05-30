@@ -21,15 +21,18 @@ interface IMintBatchGroth16 {
 ///         staticcall (since each N has a different pubSignals arity in the
 ///         snarkjs-generated Solidity verifier).
 ///
-/// @dev    Public inputs for the mint_batch circuit (per circuits/mint_batch.circom):
-///           pub[0]      = oldRoot
-///           pub[1]      = newRoot
-///           pub[2]      = nextLeafIndex
-///           pub[3]      = totalFace
-///           pub[4..4+N) = cm[0..N)
+/// @dev    Public signals for the mint_batch circuit (per circuits/mint_batch.circom).
+///         circom emits the main component's OUTPUTS first, then the public
+///         inputs in declaration order, so the snarkjs verifier's pubSignals is:
+///           pub[0..N)        = issuerMode[0..N)      (circuit outputs)
+///           pub[N]           = oldRoot
+///           pub[N+1]         = newRoot
+///           pub[N+2]         = nextLeafIndex
+///           pub[N+3]         = totalFace
+///           pub[N+4..2N+4)   = cm[0..N)
 ///         The snarkjs-generated verifier expects calldata in the order
 ///           verifyProof(uint256[2] a, uint256[2][2] b, uint256[2] c,
-///                       uint256[4+N] pubSignals) -> bool
+///                       uint256[2N+4] pubSignals) -> bool
 ///         so we encode arguments as a flat ABI tuple by ABI-spec layout.
 contract MintVerifierAdapter is IMintVerifier {
 
@@ -66,6 +69,7 @@ contract MintVerifierAdapter is IMintVerifier {
     /// @inheritdoc IMintVerifier
     function verifyMint(
         bytes calldata proof,
+        uint256[] calldata issuerMode,
         uint256 oldRoot,
         uint256 newRoot,
         uint256 nextLeafIndex,
@@ -73,6 +77,7 @@ contract MintVerifierAdapter is IMintVerifier {
         uint256[] calldata commitments
     ) external view returns (bool) {
         uint256 N = commitments.length;
+        if (issuerMode.length != N) return false;
         address v = verifiers[N];
         if (v == address(0)) return false;
         if (proof.length != 256) return false;  // 8 * 32 (pA, pB, pC)
@@ -81,14 +86,18 @@ contract MintVerifierAdapter is IMintVerifier {
         (uint256[2] memory pA, uint256[2][2] memory pB, uint256[2] memory pC) =
             abi.decode(proof, (uint256[2], uint256[2][2], uint256[2]));
 
-        // Build the public-input array of length 4+N.
-        uint256[] memory pub = new uint256[](4 + N);
-        pub[0] = oldRoot;
-        pub[1] = newRoot;
-        pub[2] = nextLeafIndex;
-        pub[3] = totalFace;
+        // Build the public-signal array of length 2N+4: issuerMode (outputs)
+        // lead, then [oldRoot, newRoot, nextLeafIndex, totalFace], then cm[].
+        uint256[] memory pub = new uint256[](2 * N + 4);
         for (uint256 i = 0; i < N; i++) {
-            pub[4 + i] = commitments[i];
+            pub[i] = issuerMode[i];
+        }
+        pub[N]     = oldRoot;
+        pub[N + 1] = newRoot;
+        pub[N + 2] = nextLeafIndex;
+        pub[N + 3] = totalFace;
+        for (uint256 i = 0; i < N; i++) {
+            pub[N + 4 + i] = commitments[i];
         }
 
         return _verifyN(v, pA, pB, pC, pub);

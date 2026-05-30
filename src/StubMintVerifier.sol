@@ -43,6 +43,7 @@ contract StubMintVerifier is IMintVerifier {
     /// @inheritdoc IMintVerifier
     function verifyMint(
         bytes calldata /*proof*/,
+        uint256[] calldata /*issuerMode*/,
         uint256 /*oldRoot*/,
         uint256 /*newRoot*/,
         uint256 /*nextLeafIndex*/,

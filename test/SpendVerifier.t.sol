@@ -198,6 +198,9 @@ contract SpendVerifierTest is Test {
         uint256[] memory cms = new uint256[](2);
         cms[0] = uint256(keccak256("seedcm0")) % notes.FIELD_R();
         cms[1] = uint256(keccak256("seedcm1")) % notes.FIELD_R();
+        uint256[] memory mode = new uint256[](2);   // stub verifier ignores values
+        mode[0] = notes.MODE_PUBLIC();
+        mode[1] = notes.MODE_PUBLIC();
         // Snapshot live state BEFORE vm.prank so argument-eval calls don't
         // burn the prank.
         uint256 oldRoot       = notes.noteRoot();
@@ -209,7 +212,8 @@ contract SpendVerifierTest is Test {
             fxSpendNoteRoot,        // newRoot = spend fixture's expected root
             nextLeafIndex,
             fxSpendFace,            // pull exactly enough BUCK to cover spend
-            cms
+            cms,
+            mode
         );
     }
 

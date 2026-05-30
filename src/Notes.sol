@@ -289,6 +289,13 @@ contract Notes {
     /// no longer matches live state (rollup-style contention model: the
     /// loser's tx reverts cleanly with no BUCK movement and re-proves
     /// against the new state).
+    /// @notice Convenience mint for an all-PUBLIC-mode batch -- every leaf is a
+    ///         public-issuer flavor (A1/B1), the common case and the shape every
+    ///         mint fixture uses.  Fills issuerMode = [MODE_PUBLIC, ...] and
+    ///         forwards to the raw path; the SNARK still binds issuerMode, so a
+    ///         batch whose proof attests any PRIVATE (A2) leaf is rejected here
+    ///         ("bad mint proof").  Private batches must use the explicit
+    ///         (issuerMode + A2Binding) overload.
     function mint(
         bytes   calldata proof,
         uint256          oldRoot,
@@ -297,18 +304,12 @@ contract Notes {
         uint256          totalFace,
         uint256[] calldata cms
     ) external {
-        // Legacy / non-public path.  A registered PUBLIC issuer cannot use this
-        // overload: the zero signature fails the binding check in _mint.
-        _mint(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
+        uint256[] memory mode = new uint256[](cms.length);
+        for (uint256 i = 0; i < cms.length; i++) mode[i] = MODE_PUBLIC;
+        _mint(proof, mode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
               IdentityRegistry.SchnorrProof(0, 0, BN254.G1Point(0, 0)));
     }
 
-    /// @notice Mint with a public-issuer Schnorr binding (Notes
-    ///         mutual-decryptability, Phase 1).  A registered Public-Identity
-    ///         issuer MUST use this overload: `issuerSig` binds their decrypted
-    ///         Identity to every leaf so a depositor can later produce a sound
-    ///         receipt naming the payer.  (Private A2 issuers are bound
-    ///         in-SNARK in a later phase.)
     function mint(
         bytes   calldata proof,
         uint256          oldRoot,
@@ -316,9 +317,17 @@ contract Notes {
         uint32           nextLeafIndex_,
         uint256          totalFace,
         uint256[] calldata cms,
-        IdentityRegistry.SchnorrProof calldata issuerSig
+        uint256[] calldata issuerMode
     ) external {
-        _mint(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms, issuerSig);
+        // Raw / non-public path: verifies the proof (which binds issuerMode to
+        // each committed flavor) and appends, with no identity gate beyond the
+        // legacy auto-Schnorr -- when msg.sender is a registered PUBLIC Identity
+        // a Schnorr binding is required, so a public issuer must instead use the
+        // (issuerMode + SchnorrProof) overload below (this path passes a zero
+        // signature and would revert for them).  Non-public minters append
+        // unbound here; the gated overloads enforce the per-leaf issuer class.
+        _mint(proof, issuerMode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
+              IdentityRegistry.SchnorrProof(0, 0, BN254.G1Point(0, 0)));
     }
 
     /// @notice One A2 (addressed, private-issuer) leaf's recipient-blinded
@@ -328,49 +337,6 @@ contract Notes {
     struct A2Binding {
         IdentityRegistry.ElGamalCT        eIss;
         IdentityRegistry.IssuerReencProof proof;
-    }
-
-    /// @notice Mint a private-issuer (A2) batch, anchoring the per-leaf
-    ///         re-encryption bindings on chain (Notes mutual-decryptability,
-    ///         Phase 2).  Each binding is verified against `msg.sender`'s
-    ///         registered credential via IdentityRegistry.verifyIssuerReenc, so
-    ///         an invalid binding reverts the whole mint; the `IssuerReencBound`
-    ///         event anchors them for tier-2 receipt verification.
-    ///
-    /// @dev    *Scope.*  This verifies the bindings the issuer supplies and
-    ///         records that they were anchored at mint.  It does NOT yet (a) tie
-    ///         each `eIss` to a specific committed leaf, nor (b) enforce that
-    ///         every A2 leaf carries a binding -- both require the mint SNARK to
-    ///         expose a per-leaf `issuerMode` and the leaf's `eIss` (the same
-    ///         circuit signal the bearer-from-non-public gate needs).  Until
-    ///         then the binding's leaf-tie rests on the off-chain note artifact
-    ///         + the recipient's verifiable decryption (see the receipt
-    ///         verifier).  The Schnorr path is unused here: an A2 issuer is a
-    ///         registered *private* Identity, so the `_mint` public-issuer gate
-    ///         is skipped (a public minter would revert on the zero signature).
-    function mint(
-        bytes   calldata proof,
-        uint256          oldRoot,
-        uint256          newRoot,
-        uint32           nextLeafIndex_,
-        uint256          totalFace,
-        uint256[] calldata cms,
-        A2Binding[] calldata a2Bindings
-    ) external {
-        require(address(identityRegistry) != address(0),
-                "Notes: identity registry not set");
-        uint256 m = a2Bindings.length;
-        require(m > 0, "Notes: no A2 bindings");
-        for (uint256 i = 0; i < m; i++) {
-            require(
-                identityRegistry.verifyIssuerReenc(
-                    msg.sender, a2Bindings[i].eIss, a2Bindings[i].proof),
-                "Notes: bad A2 binding"
-            );
-        }
-        _mint(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
-              IdentityRegistry.SchnorrProof(0, 0, BN254.G1Point(0, 0)));
-        emit IssuerReencBound(msg.sender, newRoot, m);
     }
 
     /// @notice Mint a PUBLIC-issuer batch with per-leaf issuerMode gating
@@ -399,7 +365,7 @@ contract Notes {
         uint256[] calldata issuerMode,
         IdentityRegistry.SchnorrProof calldata issuerSig
     ) external {
-        _verifyMintOrRevert(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
+        _verifyMintOrRevert(proof, issuerMode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
         require(address(identityRegistry) != address(0),
                 "Notes: identity registry not set");
         (uint256 nPublic, uint256 nPrivate) = _classifyModes(issuerMode, cms.length);
@@ -442,7 +408,7 @@ contract Notes {
         uint256[] calldata issuerMode,
         A2Binding[] calldata a2Bindings
     ) external {
-        _verifyMintOrRevert(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
+        _verifyMintOrRevert(proof, issuerMode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
         require(address(identityRegistry) != address(0),
                 "Notes: identity registry not set");
         (uint256 nPublic, uint256 nPrivate) = _classifyModes(issuerMode, cms.length);
@@ -466,6 +432,7 @@ contract Notes {
 
     function _mint(
         bytes   calldata proof,
+        uint256[] memory  issuerMode,
         uint256          oldRoot,
         uint256          newRoot,
         uint32           nextLeafIndex_,
@@ -473,7 +440,7 @@ contract Notes {
         uint256[] calldata cms,
         IdentityRegistry.SchnorrProof memory issuerSig
     ) internal {
-        _verifyMintOrRevert(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
+        _verifyMintOrRevert(proof, issuerMode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
 
         // Public-issuer binding (Notes mutual-decryptability, Phase 1).  When
         // the minter is a registered PUBLIC Identity, require a Schnorr
@@ -510,6 +477,7 @@ contract Notes {
     ///      reads.
     function _verifyMintOrRevert(
         bytes   calldata proof,
+        uint256[] memory  issuerMode,
         uint256          oldRoot,
         uint256          newRoot,
         uint32           nextLeafIndex_,
@@ -517,6 +485,7 @@ contract Notes {
         uint256[] calldata cms
     ) internal view {
         require(cms.length > 0,                            "Notes: empty mint");
+        require(issuerMode.length == cms.length,           "Notes: issuerMode/cms length");
         require(uint256(nextLeafIndex_) + cms.length
                 <= (uint256(1) << TREE_DEPTH),             "Notes: tree full");
         require(oldRoot == roots[currentRootIndex],        "Notes: stale oldRoot");
@@ -531,7 +500,7 @@ contract Notes {
 
         require(
             mintVerifier.verifyMint(
-                proof, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
+                proof, issuerMode, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
             ),
             "Notes: bad mint proof"
         );

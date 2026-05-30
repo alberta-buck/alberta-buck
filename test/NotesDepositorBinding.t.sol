@@ -61,7 +61,9 @@ contract NotesDepositorBindingTest is Test {
         // skipped; MockBuckB.transferFrom is a no-op true.
         uint256[] memory seed = new uint256[](1);
         seed[0] = 0x1234;
-        notes.mint(hex"00", notes.noteRoot(), 999, notes.nextLeafIndex(), 1000, seed);
+        uint256[] memory mode = new uint256[](1);
+        mode[0] = notes.MODE_PUBLIC();
+        notes.mint(hex"00", notes.noteRoot(), 999, notes.nextLeafIndex(), 1000, seed, mode);
     }
 
     // ---- helpers -----------------------------------------------------------

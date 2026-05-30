@@ -55,6 +55,13 @@ contract NotesIssuerBindingTest is Test {
         cms[0] = 0x1234;
     }
 
+    /// @dev One PUBLIC-mode entry (MODE_PUBLIC == 1).  Literal so it can sit in
+    ///      the mint arg list without an external call that would burn vm.prank.
+    function _mode() internal pure returns (uint256[] memory mm) {
+        mm = new uint256[](1);
+        mm[0] = 1;  // Notes.MODE_PUBLIC
+    }
+
     /// @dev Schnorr-sign keccak256(cms) under `sk`, bound to `iss` -- mirrors
     ///      IdentityRegistry._fsIssuerSchnorr.
     function _sign(uint256 sk, uint256 k, uint256[] memory cms, address iss)
@@ -82,7 +89,7 @@ contract NotesIssuerBindingTest is Test {
         IdentityRegistry.SchnorrProof memory sig = _sign(SK, K, cms, issuer);
         uint256 oldRoot = notes.noteRoot();
         vm.prank(issuer);
-        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, sig);
+        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode(), sig);
         assertEq(notes.nextLeafIndex(), 1, "bound mint must append the leaf");
     }
 
@@ -93,17 +100,17 @@ contract NotesIssuerBindingTest is Test {
         uint256 oldRoot = notes.noteRoot();
         vm.prank(issuer);
         vm.expectRevert("Notes: bad issuer binding");
-        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, sig);
+        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode(), sig);
     }
 
-    function test_publicIssuer_legacyOverload_reverts() public {
-        // A public issuer cannot mint through the 6-arg overload: it passes a
-        // zero signature, which fails verifyIssuerSchnorr.
+    function test_publicIssuer_rawOverload_reverts() public {
+        // A public issuer cannot mint through the raw (no-Schnorr) overload: the
+        // legacy auto-Schnorr gate fires with a zero signature -> reverts.
         uint256[] memory cms = _cms();
         uint256 oldRoot = notes.noteRoot();
         vm.prank(issuer);
         vm.expectRevert("Notes: bad issuer binding");
-        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms);
+        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode());
     }
 
     function test_publicIssuer_signatureForOtherBatch_reverts() public {
@@ -115,17 +122,18 @@ contract NotesIssuerBindingTest is Test {
         uint256 oldRoot = notes.noteRoot();
         vm.prank(issuer);
         vm.expectRevert("Notes: bad issuer binding");
-        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, sig);
+        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode(), sig);
     }
 
     function test_nonPublicIssuer_skipsBinding() public {
-        // An unregistered / non-public minter mints via the 6-arg overload;
-        // the binding is skipped (Phase 2 binds private issuers in-SNARK).
+        // An unregistered / non-public minter mints via the raw overload;
+        // the auto-Schnorr binding is skipped (private issuers bind via the
+        // issuerMode + A2 overload instead).
         address eoa = makeAddr("eoaIssuer");
         uint256[] memory cms = _cms();
         uint256 oldRoot = notes.noteRoot();
         vm.prank(eoa);
-        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms);
+        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode());
         assertEq(notes.nextLeafIndex(), 1, "unbound (non-public) mint appended");
     }
 }

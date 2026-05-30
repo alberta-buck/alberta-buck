@@ -268,6 +268,25 @@ contract MintVerifierTest is Test {
         );
     }
 
+    /// @notice The SNARK binds the per-leaf issuerMode public output: the N=16
+    ///         basic fixture is all-A1 (issuerMode == MODE_PUBLIC everywhere), so
+    ///         flipping one leaf to PRIVATE no longer matches the proof and the
+    ///         Groth16 pairing check rejects it.  Routed through the explicit
+    ///         (cms, issuerMode) overload so we can supply the tampered modes;
+    ///         alice is non-public, so the raw path's auto-Schnorr is skipped and
+    ///         the verifier is what does the rejecting.
+    function test_mint_rejectedOnTamperedIssuerMode() public {
+        uint256[] memory mode = new uint256[](16);
+        for (uint256 i = 0; i < 16; i++) mode[i] = notes.MODE_PUBLIC();
+        mode[0] = notes.MODE_PRIVATE();             // tamper one leaf
+        vm.prank(alice);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(
+            fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
+            fxTotalFace, fxCommitments, mode
+        );
+    }
+
     function test_mint_rejectedOnWrongBatchSize() public {
         // The adapter has no verifier registered for N=15 -> returns false.
         uint256[] memory shorter = new uint256[](15);
