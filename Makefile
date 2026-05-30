@@ -40,6 +40,8 @@ endif
 .PHONY: deploy-local deploy-sepolia
 .PHONY: install update
 .PHONY: test-python venv-activate
+.PHONY: golden-receipts
+.PHONY: snark snark-setup snark-fixtures snark-ptau snark-clean
 .PHONY: vectors plots images
 .PHONY: vector-lifecycle vector-equilibrium vector-arb
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
@@ -180,6 +182,63 @@ images:			vectors plots
 golden-receipts:
 	nix develop --command python -m alberta_buck.wallet.cli emit-vectors
 	nix develop --command python -m alberta_buck.wallet.cli render-golden
+
+
+# ── SNARK circuits + trusted setup ───────────────────────────────────
+#
+# The BUCK Notes mint/spend circuits (circuits/*.circom) compile to per-N
+# Groth16 verifiers (src/MintBatchN*Groth16Verifier.sol, dispatched on-chain by
+# cms.length).  A Groth16 setup has two phases:
+#
+#   1. Powers of Tau (build/snark/ptau/pot*.ptau) -- UNIVERSAL and circuit-
+#      INDEPENDENT, and the slow part (the pot15..pot20 set is multi-GB and
+#      takes ~hours).  It depends only on the FFT domain size, so a circuit edit
+#      that does not cross a power-of-two boundary REUSES it untouched.
+#   2. Per-circuit zkey + Solidity verifier -- embeds the R1CS / verification
+#      key; regenerated on every circuit change (~minutes, reusing the ptau).
+#
+# So after editing a circuit you normally run `make snark` (phase 2 + the test
+# fixtures); `make snark-ptau` (phase 1) is needed only to (re)build the ptau,
+# or when a new larger pin crosses into a higher power of two.
+#
+#   make snark            # phase-2 verifiers + fixtures (usual circuit-change path)
+#   make snark-setup      # phase-2 only: per-N zkeys + src/MintBatchN*Verifier.sol
+#   make snark-fixtures   # regenerate build/snark/.../fixtures/*.json for the tests
+#   make snark-ptau       # phase-1: rebuild the dev Powers of Tau from scratch (~hours)
+#   make snark-clean      # drop per-N build dirs (forces a clean phase-2 rebuild)
+#
+# Override the pinned batch sizes (each gets its own circuit + verifier):
+#   make snark SNARK_PINS="1 2 4 8 16"
+#
+# !! DEV ENTROPY !!  scripts/snark/setup.sh contributes FIXED dev-only entropy
+# ("alberta-buck-dev-*"), so every artifact here is a REPRODUCIBLE DEV setup --
+# green in tests, but NOT a secure production setup (the toxic waste is known).
+# Generating production assets requires a real multi-party ceremony; see
+# README.org "SNARK Circuits and Trusted Setup".
+SNARK_PINS ?= 1 2 4 8 16 32
+SNARK_DIRS  = $(addprefix build/snark/mint_batch_n,$(SNARK_PINS))
+# snarkjs lives in node_modules/.bin; prepend it so setup.sh finds it under nix.
+SNARK_PATH  = PATH="$(CURDIR)/node_modules/.bin:$$PATH"
+
+snark:		snark-setup snark-fixtures
+	@echo "snark: verifiers + fixtures regenerated -- run 'make nix-test' to check on-chain parity"
+
+snark-setup:
+	rm -rf $(SNARK_DIRS)
+	nix develop --command bash -c '$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh'
+
+snark-fixtures:
+	nix develop --command bash -c '$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures.sh'
+
+# Full from-scratch regen (phase 1 + phase 2): removes the dev ptau and every
+# circuit build dir so setup.sh rebuilds the Powers of Tau and all verifiers.
+# Hours, dev entropy only.
+snark-ptau:
+	rm -rf build/snark/ptau build/snark/mint build/snark/spend build/snark/spend_a $(SNARK_DIRS)
+	nix develop --command bash -c '$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh'
+
+snark-clean:
+	rm -rf $(SNARK_DIRS)
 
 
 # ── Sim inputs: price CSVs + Universal Router artifact ────────────────
