@@ -109,9 +109,10 @@ def test_all_kinds_render(vectors, kind):
     text = TextDriver(48).render(doc)
     assert len(text) > 0
     assert "ALBERTA  BUCK" in text
-    # A2 has the unverified banner
+    # A2 in the vector is now soundly bound -> VALID (no UNVERIFIED banner).
     if kind == "note_a2":
-        assert "UNVERIFIED" in text
+        assert "UNVERIFIED" not in text
+        assert "VALID" in text
 
 
 # ---- Negative: bad detail values ------------------------------------------

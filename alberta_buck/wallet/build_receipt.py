@@ -42,7 +42,7 @@ from alberta_buck.wallet.envelope import (
     PartyRecord, TxnRecord, ReceiptCore,
     _g1_hex, _ct_hex,
     vd_proof_record, cp_proof_record,
-    schnorr_proof_record, receipts_proof_record,
+    schnorr_proof_record, receipts_proof_record, issuer_reenc_record,
 )
 
 
@@ -282,6 +282,10 @@ def build_note_a2(
     value: int, block_time: int,
     txhash: str, block: int, logindex: int,
     mint_txhash: str, mint_block: int, nullifier: int,
+    # Issuer binding (from the issuer, in the note artifact): the blinded A2
+    # re-encryption proof + the disclosed gamma.  When present the receipt is
+    # soundly bound; when None it falls back to UNVERIFIED ISSUER.
+    binding=None, gamma: Optional[int] = None,
     # Optional
     notes: Optional[List[str]] = None,
     rng=None,
@@ -289,20 +293,22 @@ def build_note_a2(
     """Build a note-a2 receipt (addressed note from a *private* issuer).
 
     The issuer hid behind E_iss-for-rec in the leaf's idHash; the payee
-    verifiably decrypts it to recover issuer_M.  BUT soundness — that
-    E_iss-for_rec re-encrypts the issuer's *registered* credential — needs
-    the Notes Phase-2 in-SNARK binding, so the receipt carries
+    verifiably decrypts it to recover issuer_M.  Soundness — that E_iss-for-rec
+    re-encrypts the issuer's *registered* credential under the payee's key —
+    comes from the ``binding`` (issuer_reenc) the issuer ships with the note;
+    composed with the payee's verifiable decryption it also closes the E_note
+    <-> Q coupling (see verify_receipt).  Without a binding the receipt carries
     ``issuer_binding_status = "unverified"``.
 
     The payee self-names via verifiable decryption of their own E_addr.
     """
     rng = rng or _rng()
 
-    # Verifiable decrypt of E_iss-for_rec → issuer_M
+    # Verifiable decrypt of E_iss-for_rec → issuer_M (recipient recovers it).
     vd_iss, vd_iss_rec = _payee_vd(E_iss_for_rec, payee_sk, issuer_M, payee_addr, chainid, rng)
-
     vd_self, vd_self_rec = _payee_vd(payee_E_addr, payee_sk, payee_M, payee_addr, chainid, rng)
 
+    bound = binding is not None and gamma is not None
     return ReceiptCore(
         v=1, type="note-a2", chainid=chainid, contracts=contracts,
         payer=_party(issuer_addr, "private", issuer_identity, issuer_M, issuer_pk,
@@ -317,7 +323,8 @@ def build_note_a2(
         ),
         vd_issuer=vd_iss_rec,
         payee_vd=vd_self_rec,
-        issuer_binding_status="unverified",
+        issuer_binding_status="bound" if bound else "unverified",
+        issuer_binding=issuer_reenc_record(binding, gamma) if bound else None,
         notes=notes,
     )
 

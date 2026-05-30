@@ -275,3 +275,52 @@ def test_vector_envelope_verifies(vectors, kind):
                          "eoa-priv")
     res = verify_receipt(core)
     assert res.ok, f"{kind}: {res.reason}"
+
+
+# ---- A2 issuer binding: bound receipt is VALID; tampering rejects ----------
+
+def _a2_bound_core(vectors):
+    """The vector's note_a2 envelope -- soundly bound (issuer_binding present)."""
+    return deserialize_core(parse_envelope(vectors["abrcpt"]["note_a2"]["envelope"]))
+
+
+def test_a2_bound_receipt_is_valid(vectors):
+    core = _a2_bound_core(vectors)
+    assert core.issuer_binding_status == "bound"
+    assert core.issuer_binding is not None
+    res = verify_receipt(core)
+    assert res.ok, res.reason
+    assert res.reason == "VALID"                       # not UNVERIFIED ISSUER
+    # Names the issuer (Bob) -- the registered Identity recovered + bound.
+    assert res.identity_M == _pt(vectors["bob"]["M"])
+
+
+def test_a2_unbound_receipt_is_unverified(vectors):
+    # Build an A2 receipt WITHOUT a binding -> UNVERIFIED ISSUER, but still ok.
+    core = _note_a2_core(vectors)              # _note_a2_core passes no binding
+    res = verify_receipt(core)
+    assert res.ok
+    assert "UNVERIFIED" in (res.reason or "")
+
+
+def test_a2_tampered_binding_rejected(vectors):
+    import json
+    from dataclasses import replace
+    core = _a2_bound_core(vectors)
+    bad = dict(core.issuer_binding)
+    bad["s_r"] = hex((int(bad["s_r"], 16) + 1) % ORDER)
+    core2 = replace(core, issuer_binding=bad)
+    res = verify_receipt(core2)
+    assert not res.ok and "binding fails" in res.reason
+
+
+def test_a2_tampered_gamma_rejected(vectors):
+    # A wrong gamma breaks the coupling: M_iss^reg = C_i - (T - gamma*G) no
+    # longer equals the named issuer M.
+    from dataclasses import replace
+    core = _a2_bound_core(vectors)
+    bad = dict(core.issuer_binding)
+    bad["gamma"] = hex((int(bad["gamma"], 16) + 1) % ORDER)
+    core2 = replace(core, issuer_binding=bad)
+    res = verify_receipt(core2)
+    assert not res.ok and "coupling" in res.reason

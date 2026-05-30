@@ -14,7 +14,8 @@ embedded ``pk`` / ``E_addr`` and event references from a node.
 
 from __future__ import annotations
 
-from alberta_buck.wallet.bn254 import G1, mul, eq
+from alberta_buck.wallet.bn254 import G1, mul, add, neg, eq
+from alberta_buck.wallet.issuer_reenc import IssuerReencProof, issuer_reenc_verify
 from alberta_buck.wallet.identity import identity_scalar, canonical_identity_data
 from alberta_buck.wallet.chaum_pedersen import CPProof, chaum_pedersen_verify
 from alberta_buck.wallet.verifiable_decrypt import VDProof, verifiable_decrypt_verify
@@ -154,7 +155,8 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
             return RcptResult(False, None, None, f"{t}: face != note value")
 
     elif t == "note-a2":
-        # Issuer binding: UNVERIFIED pending Phase 2
+        # (1) Recipient recovers the issuer's Identity: verifiable decryption of
+        #     E_iss-for-rec under the payee's key reveals M_iss.
         if core.vd_issuer is None:
             return RcptResult(False, None, None, "note-a2: missing vd_issuer")
         E_iss, M_iss, acct_iss, cid_iss, vd_iss = _vd_from_record(core.vd_issuer)
@@ -163,11 +165,40 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
             return RcptResult(False, None, None, "note-a2: vd_issuer fails")
         if not eq(M_iss, core.payer.M_pt):
             return RcptResult(False, None, None, "note-a2: named M != issuer M")
-        # Soundness of the issuer binding is deferred (Phase 2).  Tier 1
-        # reports the recovered identity but doesn't reject.
-        if core.issuer_binding_status == "unverified":
-            # Accept the receipt; caller inspects the status banner.
-            pass
+
+        # Without an issuer binding the recovered M is not provably the issuer's
+        # *registered* Identity -- UNVERIFIED ISSUER (pre-binding).
+        if core.issuer_binding is None:
+            pass  # accept; status banner set below
+        else:
+            # (2) The binding proves E_iss re-encrypts the issuer's registered
+            #     Identity under the key committed in Q.
+            b = core.issuer_binding
+            binding = IssuerReencProof(
+                e=_h(b["e"]), s_r=_h(b["s_r"]), s_b=_h(b["s_b"]),
+                s_s=_h(b["s_s"]), s_g=_h(b["s_g"]),
+                A1=_g1_from_hex(b["A1"]), A2=_g1_from_hex(b["A2"]),
+                A3=_g1_from_hex(b["A3"]), A4=_g1_from_hex(b["A4"]),
+                A5=_g1_from_hex(b["A5"]),
+                Q=_g1_from_hex(b["Q"]), U=_g1_from_hex(b["U"]), T=_g1_from_hex(b["T"]),
+            )
+            E_reg = core.payer.E_addr_ct
+            if E_reg is None:
+                return RcptResult(False, None, None, "note-a2: issuer E_addr missing")
+            if not issuer_reenc_verify(core.payer.pk_pt, E_reg, E_iss,
+                                       binding, core.payer.addr_int, core.chainid):
+                return RcptResult(False, None, None, "note-a2: issuer binding fails")
+
+            # (3) Coupling + registered-identity tie: the binding's registered
+            #     M_iss^reg = C_i - T = C_i - (T_hat - gamma*G) must equal the
+            #     named M.  Combined with (1)'s M_named == payer.M, this forces
+            #     pk_rec = Q's key (the E_note <-> Q coupling) and ties the named
+            #     Identity to the issuer's *registered* credential.
+            gamma = _h(b["gamma"])
+            T_unblind = add(binding.T, neg(mul(G1, gamma)))   # T_hat - gamma*G = r'*pk_rec
+            M_reg = add(E_iss.C, neg(T_unblind))              # C_i - T = M_iss^reg
+            if not eq(M_reg, core.payer.M_pt):
+                return RcptResult(False, None, None, "note-a2: binding M_iss != named M (coupling)")
 
     else:
         return RcptResult(False, None, None, f"unknown receipt type: {t}")

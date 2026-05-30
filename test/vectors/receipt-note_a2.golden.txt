@@ -1,7 +1,7 @@
                  ALBERTA  BUCK                  
          P A Y M E N T   R E C E I P T          
 ------------------------------------------------
-  Receipt  suttxlom5o4i
+  Receipt  b3mqurgyr27a
 ------------------------------------------------
 FROM (payer) (PRIVATE IDENTITY)
  Bob Smith
@@ -26,8 +26,8 @@ TRANSACTION
  Mint    0xaaaaaaaaaaaa..aaaaaaaaaaaa
 ------------------------------------------------
 VERIFICATION
- status @ issue: UNVERIFIED ISSUER (pre-binding)
- receipt  suttxlom5o4i
+ status @ issue: VALID
+ receipt  b3mqurgyr27a
 ------------------------------------------------
         a record, not a bearer instrument       
         github.com/pjkundert/alberta-buck       

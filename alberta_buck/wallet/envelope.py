@@ -213,6 +213,10 @@ class ReceiptCore:
     # A2 only:
     issuer_binding_status: Optional[str] = None   # "bound" | "unverified"
     vd_issuer:  Optional[Dict[str, Any]] = None   # verifiable decrypt of E_iss-for-rec
+    issuer_binding: Optional[Dict[str, Any]] = None  # IssuerReencProof + gamma (the
+                                                  # blinded A2 re-encryption binding;
+                                                  # gamma discloses M_iss to the
+                                                  # compelled receipt verifier)
     # Free-text line items live /outside/ the core (unverified):
     notes:      Optional[List[str]]       = None
 
@@ -288,6 +292,8 @@ def serialize_core(core: ReceiptCore) -> bytes:
         d["issuer_binding_status"] = core.issuer_binding_status
     if core.vd_issuer is not None:
         d["vd_issuer"] = core.vd_issuer
+    if core.issuer_binding is not None:
+        d["issuer_binding"] = core.issuer_binding
     if core.notes is not None:
         d["notes"] = core.notes
     return _canonical(d)
@@ -306,6 +312,7 @@ def deserialize_core(canonical_bytes: bytes) -> ReceiptCore:
         payee_vd=_opt(d.get("payee_vd")),
         issuer_binding_status=d.get("issuer_binding_status"),
         vd_issuer=_opt(d.get("vd_issuer")),
+        issuer_binding=_opt(d.get("issuer_binding")),
         notes=d.get("notes"),
     )
 
@@ -397,6 +404,28 @@ def cp_proof_record(E_sender: ElGamalCiphertext, E_spender: ElGamalCiphertext,
             "T2": _g1_hex(proof.T2),
             "T3": _g1_hex(proof.T3),
         },
+    }
+
+
+def issuer_reenc_record(proof, gamma: int) -> Dict[str, Any]:
+    """The A2 issuer re-encryption binding (IssuerReencProof) + the disclosed
+    ``gamma``.  ``gamma`` un-blinds T so the compelled receipt verifier recovers
+    M_iss = C_i - (T - gamma*G) and ties it to the named issuer Identity."""
+    return {
+        "e":     scalar_to_hex(proof.e),
+        "s_r":   scalar_to_hex(proof.s_r),
+        "s_b":   scalar_to_hex(proof.s_b),
+        "s_s":   scalar_to_hex(proof.s_s),
+        "s_g":   scalar_to_hex(proof.s_g),
+        "A1":    _g1_hex(proof.A1),
+        "A2":    _g1_hex(proof.A2),
+        "A3":    _g1_hex(proof.A3),
+        "A4":    _g1_hex(proof.A4),
+        "A5":    _g1_hex(proof.A5),
+        "Q":     _g1_hex(proof.Q),
+        "U":     _g1_hex(proof.U),
+        "T":     _g1_hex(proof.T),
+        "gamma": scalar_to_hex(gamma),
     }
 
 

@@ -362,9 +362,16 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     )
 
     # -- note-a2 ---------------------------------------------------------------
-    # Bob (issuer, Private) mints an A2 addressed note to Alice.  The
-    # E_iss_for_rec field is an ElGamal encrypting Bob's M under Alice's pk.
-    a2_E_iss = elgamal_encrypt(bob.M, alice.kp.pk, rand_scalar(rng))
+    # Bob (issuer, Private) mints an A2 addressed note to Alice.  E_iss_for_rec
+    # is an ElGamal encrypting Bob's M under Alice's pk; the issuer ships the
+    # blinded re-encryption binding + gamma so Alice's receipt is soundly bound.
+    a2_r       = rand_scalar(rng)
+    a2_E_iss   = elgamal_encrypt(bob.M, alice.kp.pk, a2_r)
+    a2_gamma   = rand_scalar(rng)
+    a2_binding = issuer_reenc_prove(
+        bob.kp.sk, a2_r, alice.kp.pk, bob.E, a2_E_iss,
+        BOB_ADDR, CHAINID, gamma=a2_gamma, rng=rng,
+    )
     a2_nf = nullifier_a(rcpt_rho, rcpt_idHash)
     note_a2_core = build_note_a2(
         chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
@@ -377,6 +384,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         txhash="0x" + "a2" * 32, block=1234599, logindex=1,
         mint_txhash="0x" + "aa" * 32, mint_block=1234500,
         nullifier=a2_nf,
+        binding=a2_binding, gamma=a2_gamma,
         rng=rng,
     )
 
