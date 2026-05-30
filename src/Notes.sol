@@ -76,6 +76,17 @@ contract Notes {
     uint256 public constant EMPTY_ROOT =
         6959478139657271248173638342125700921600510448444968095526832403890386862787;
 
+    /// @notice Per-leaf issuer-mode labels, mirrored from the mint circuit's
+    ///         `issuerMode` output (circuits/mint_batch.circom).  A leaf is
+    ///         PUBLIC-mode (A1/B1 -> the issuer is a registered public Identity
+    ///         bound by a Schnorr signature) or PRIVATE-mode (A2 -> the issuer
+    ///         is a registered private Identity bound by an A2 re-encryption
+    ///         proof).  Because a bearer (B1) leaf projects to PUBLIC in the
+    ///         circuit, a private issuer cannot route a bearer note through the
+    ///         PUBLIC-mode mint path -- the "bearer => public issuer" invariant.
+    uint256 public constant MODE_PUBLIC  = 1;
+    uint256 public constant MODE_PRIVATE = 2;
+
     // ---- governance + verifier --------------------------------------------
 
     address        public governance;
@@ -362,6 +373,97 @@ contract Notes {
         emit IssuerReencBound(msg.sender, newRoot, m);
     }
 
+    /// @notice Mint a PUBLIC-issuer batch with per-leaf issuerMode gating
+    ///         (Notes mutual-decryptability; The Required Mint SNARK Signal).
+    ///         Every leaf must be PUBLIC-mode (issuerMode[i] == MODE_PUBLIC):
+    ///         `msg.sender` must be a registered PUBLIC Identity and `issuerSig`
+    ///         must bind their decrypted Identity to keccak256(cms).  Because a
+    ///         bearer (B1) leaf projects to PUBLIC in the mint circuit, a bearer
+    ///         note is minted through this path -- and a non-public issuer is
+    ///         rejected here, enforcing "bearer => public issuer".
+    ///
+    /// @dev    Scope.  The gate consumes `issuerMode[]` and is sound for an
+    ///         honest issuer today; the *binding of issuerMode to each leaf's
+    ///         committed flavor* lands with the per-N mint-verifier regen (the
+    ///         circuit already emits issuerMode -- see circuits/mint_batch.circom
+    ///         and alberta-buck-notes-decryptability.org, The Required Mint SNARK
+    ///         Signal).  Until that governance cutover the legacy 6-/7-arg
+    ///         overloads remain for the unbound / batch-Schnorr paths.
+    function mint(
+        bytes   calldata proof,
+        uint256          oldRoot,
+        uint256          newRoot,
+        uint32           nextLeafIndex_,
+        uint256          totalFace,
+        uint256[] calldata cms,
+        uint256[] calldata issuerMode,
+        IdentityRegistry.SchnorrProof calldata issuerSig
+    ) external {
+        _verifyMintOrRevert(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
+        require(address(identityRegistry) != address(0),
+                "Notes: identity registry not set");
+        (uint256 nPublic, uint256 nPrivate) = _classifyModes(issuerMode, cms.length);
+        require(nPrivate == 0, "Notes: private leaf needs A2 overload");
+        require(nPublic  > 0,  "Notes: no public leaves");
+        require(identityRegistry.isPublicIdentity(msg.sender),
+                "Notes: public-mode leaf needs public issuer");
+        require(
+            identityRegistry.verifyIssuerSchnorr(
+                msg.sender, keccak256(abi.encodePacked(cms)), issuerSig),
+            "Notes: bad issuer binding"
+        );
+        uint256 startIndex =
+            _advanceAndPull(newRoot, nextLeafIndex_, totalFace, cms.length);
+        emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
+        emit IssuerBound(msg.sender, newRoot);
+    }
+
+    /// @notice Mint a PRIVATE-issuer (A2) batch with per-leaf issuerMode gating.
+    ///         Every leaf must be PRIVATE-mode (issuerMode[i] == MODE_PRIVATE):
+    ///         `msg.sender` must be a registered PRIVATE Identity and supply one
+    ///         verified A2 re-encryption binding per private leaf (count
+    ///         completeness).  Supersedes the bindings-only A2 overload by also
+    ///         enforcing, via issuerMode, that the batch carries no PUBLIC leaf
+    ///         a private issuer could not bind.
+    ///
+    /// @dev    Count completeness (one binding per private leaf) is enforced
+    ///         here; tying each binding's `eIss` to a *specific* committed leaf
+    ///         still rests on the off-chain note artifact + the recipient's
+    ///         verifiable decryption until the mint SNARK exposes per-leaf
+    ///         `eIss` (The Required Mint SNARK Signal).  issuerMode binding is
+    ///         deferred to the same verifier regen as the PUBLIC path above.
+    function mint(
+        bytes   calldata proof,
+        uint256          oldRoot,
+        uint256          newRoot,
+        uint32           nextLeafIndex_,
+        uint256          totalFace,
+        uint256[] calldata cms,
+        uint256[] calldata issuerMode,
+        A2Binding[] calldata a2Bindings
+    ) external {
+        _verifyMintOrRevert(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
+        require(address(identityRegistry) != address(0),
+                "Notes: identity registry not set");
+        (uint256 nPublic, uint256 nPrivate) = _classifyModes(issuerMode, cms.length);
+        require(nPublic  == 0, "Notes: public leaf needs Schnorr overload");
+        require(nPrivate  > 0, "Notes: no private leaves");
+        require(!identityRegistry.isPublicIdentity(msg.sender),
+                "Notes: private-mode leaf needs private issuer");
+        require(a2Bindings.length == nPrivate, "Notes: A2 binding count");
+        for (uint256 i = 0; i < a2Bindings.length; i++) {
+            require(
+                identityRegistry.verifyIssuerReenc(
+                    msg.sender, a2Bindings[i].eIss, a2Bindings[i].proof),
+                "Notes: bad A2 binding"
+            );
+        }
+        uint256 startIndex =
+            _advanceAndPull(newRoot, nextLeafIndex_, totalFace, cms.length);
+        emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
+        emit IssuerReencBound(msg.sender, newRoot, nPrivate);
+    }
+
     function _mint(
         bytes   calldata proof,
         uint256          oldRoot,
@@ -371,38 +473,15 @@ contract Notes {
         uint256[] calldata cms,
         IdentityRegistry.SchnorrProof memory issuerSig
     ) internal {
-        require(cms.length > 0,                            "Notes: empty mint");
-        require(uint256(nextLeafIndex_) + cms.length
-                <= (uint256(1) << TREE_DEPTH),             "Notes: tree full");
-        require(oldRoot == roots[currentRootIndex],        "Notes: stale oldRoot");
-        require(nextLeafIndex_ == nextLeafIndex,           "Notes: stale nextLeafIndex");
-        require(newRoot != 0,                              "Notes: zero newRoot");
-        require(newRoot < FIELD_R,                         "Notes: newRoot out of field");
-
-        // Cheap field-bound on every commitment (the SNARK already constrains
-        // them via the Poseidon-5 opening, but a malformed cms[] -- e.g. one
-        // entry >= FIELD_R -- would still pass the verifier because the
-        // public input is reduced before binding into the IC[] term).  Bound
-        // them here so off-chain readers get the canonical residue.
-        uint256 N = cms.length;
-        for (uint256 i = 0; i < N; i++) {
-            require(cms[i] < FIELD_R, "Notes: cm out of field");
-        }
-
-        require(
-            mintVerifier.verifyMint(
-                proof, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
-            ),
-            "Notes: bad mint proof"
-        );
+        _verifyMintOrRevert(proof, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
 
         // Public-issuer binding (Notes mutual-decryptability, Phase 1).  When
         // the minter is a registered PUBLIC Identity, require a Schnorr
         // signature over keccak256(cms) so the issuer's decrypted Identity is
         // provably bound to every leaf -- the depositor can then produce a
-        // sound receipt naming the payer.  Non-public minters are not gated
-        // here yet (the private A2 issuer is bound in-SNARK in a later phase),
-        // so a public-issuer bearer/addressed note is the case this closes.
+        // sound receipt naming the payer.  This legacy path gates the whole
+        // batch on `msg.sender` being public; the per-leaf `issuerMode`
+        // overloads below gate each leaf (and reject a bearer-from-non-public).
         bool issuerBound;
         if (address(identityRegistry) != address(0)
             && identityRegistry.isPublicIdentity(msg.sender)) {
@@ -414,21 +493,88 @@ contract Notes {
             issuerBound = true;
         }
 
-        // Pull face value before mutating tree state so a failed transfer
-        // aborts the whole mint with no leaf-index advancement.
+        uint256 startIndex =
+            _advanceAndPull(newRoot, nextLeafIndex_, totalFace, cms.length);
+        emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
+        if (issuerBound) emit IssuerBound(msg.sender, newRoot);
+    }
+
+    /// @dev Shared mint pre-flight: stale-state guards, per-commitment field
+    ///      bound, and the Groth16 mint-proof check.  View-only -- any revert
+    ///      here aborts before BUCK moves or tree state advances.
+    ///
+    ///      The field bound matters even though the SNARK constrains each cm[i]
+    ///      via its Poseidon-5 opening: a malformed cms[] entry >= FIELD_R would
+    ///      still pass the verifier (the public input is reduced before binding
+    ///      into the IC[] term), so we bound it here for canonical off-chain
+    ///      reads.
+    function _verifyMintOrRevert(
+        bytes   calldata proof,
+        uint256          oldRoot,
+        uint256          newRoot,
+        uint32           nextLeafIndex_,
+        uint256          totalFace,
+        uint256[] calldata cms
+    ) internal view {
+        require(cms.length > 0,                            "Notes: empty mint");
+        require(uint256(nextLeafIndex_) + cms.length
+                <= (uint256(1) << TREE_DEPTH),             "Notes: tree full");
+        require(oldRoot == roots[currentRootIndex],        "Notes: stale oldRoot");
+        require(nextLeafIndex_ == nextLeafIndex,           "Notes: stale nextLeafIndex");
+        require(newRoot != 0,                              "Notes: zero newRoot");
+        require(newRoot < FIELD_R,                         "Notes: newRoot out of field");
+
+        uint256 N = cms.length;
+        for (uint256 i = 0; i < N; i++) {
+            require(cms[i] < FIELD_R, "Notes: cm out of field");
+        }
+
+        require(
+            mintVerifier.verifyMint(
+                proof, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
+            ),
+            "Notes: bad mint proof"
+        );
+    }
+
+    /// @dev Shared mint settlement: pull `totalFace` BUCK from the issuer before
+    ///      mutating tree state (a failed transfer aborts with no leaf-index
+    ///      advancement), advance `nextLeafIndex`, install the SNARK-attested
+    ///      `newRoot`, and bump the audit sum.  Returns the first leaf index
+    ///      this batch occupies.  Callers MUST run `_verifyMintOrRevert` and
+    ///      their binding gate first.
+    function _advanceAndPull(
+        uint256 newRoot,
+        uint32  nextLeafIndex_,
+        uint256 totalFace,
+        uint256 count
+    ) internal returns (uint256 startIndex) {
         require(
             buck.transferFrom(msg.sender, address(this), totalFace),
             "Notes: transfer failed"
         );
-
-        uint256 startIndex = nextLeafIndex;
-        nextLeafIndex      = nextLeafIndex_ + uint32(N);
-        currentRootIndex   = (currentRootIndex + 1) % ROOT_HISTORY_SIZE;
+        startIndex       = nextLeafIndex;
+        nextLeafIndex    = nextLeafIndex_ + uint32(count);
+        currentRootIndex = (currentRootIndex + 1) % ROOT_HISTORY_SIZE;
         roots[currentRootIndex] = newRoot;
-        noteFaceSum       += totalFace;
+        noteFaceSum     += totalFace;
+    }
 
-        emit Minted(msg.sender, totalFace, startIndex, N, newRoot);
-        if (issuerBound) emit IssuerBound(msg.sender, newRoot);
+    /// @dev Validate the per-leaf `issuerMode[]` against `expectLen` (== cms
+    ///      length) and tally the PUBLIC/PRIVATE leaves.  Reverts on a bad mode
+    ///      value or a mixed-mode batch: one batch has one `msg.sender`, hence
+    ///      one issuer class, so PUBLIC and PRIVATE leaves cannot co-occur.
+    function _classifyModes(uint256[] calldata issuerMode, uint256 expectLen)
+        internal pure returns (uint256 nPublic, uint256 nPrivate)
+    {
+        require(issuerMode.length == expectLen, "Notes: issuerMode/cms length");
+        for (uint256 i = 0; i < expectLen; i++) {
+            uint256 mode = issuerMode[i];
+            if      (mode == MODE_PUBLIC)  nPublic++;
+            else if (mode == MODE_PRIVATE) nPrivate++;
+            else revert("Notes: bad issuerMode");
+        }
+        require(!(nPublic > 0 && nPrivate > 0), "Notes: mixed issuerMode batch");
     }
 
     // ---- spend ------------------------------------------------------------
