@@ -15,6 +15,7 @@ import {SpendGroth16Verifier}   from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter}   from "../src/SpendVerifierAdapter.sol";
 import {SpendAVerifierAdapter}  from "../src/SpendAVerifierAdapter.sol";
 import {StubMintVerifier}       from "../src/StubMintVerifier.sol";
+import {GatedMint}              from "./helpers/GatedMint.sol";
 
 /// @title SpendAVerifier.t.sol -- end-to-end Groth16-verified A-spend (V2).
 /// @notice Exercises Notes.spendACP() against the spend_a circuit V2.
@@ -50,6 +51,11 @@ contract SpendAVerifierTest is Test {
 
     address internal alice;
     address internal bob;
+
+    // Public issuer for the gated seed mint.
+    address internal pubMinter = address(0x9E27E5);
+    uint256 internal constant SK_PM = 0x1111111111111111111111111111111111111111111111111111111111111111;
+    uint256 internal constant K_PM  = 0x2222222222222222222222222222222222222222222222222222222222222222;
 
     // V2 A-spend fixture (single-leaf tree, leaf 0 -> SPEND_RECIPIENT).
     uint256 internal fxNoteRoot;
@@ -124,6 +130,18 @@ contract SpendAVerifierTest is Test {
         vm.prank(alice);
         buck.mint(500e18);
         _approveNotes(alice, 500e18);
+
+        // Public issuer for the gated seed mint (bound public Identity, funded).
+        vm.etch(pubMinter, hex"60006000fd");
+        reg.bindContract(pubMinter, BN254.mul(BN254.g1(), SK_PM),
+                         IdentityRegistry.ElGamalCT(BN254.g1(), BN254.g1()), true, false);
+        _grantCredit(pubMinter, 1000e18);
+        vm.prank(pubMinter);
+        buck.mint(500e18);
+        _approveNotes(pubMinter, 500e18);
+        vm.store(address(buck),
+                 keccak256(abi.encode(address(notes), keccak256(abi.encode(pubMinter, uint256(5))))),
+                 bytes32(uint256(1)));
 
         // Load the V2 A-spend fixture (single-leaf -> SPEND_RECIPIENT, chainId 1).
         string memory fx =
@@ -231,15 +249,16 @@ contract SpendAVerifierTest is Test {
     function _seedTreeForSpendA() internal {
         uint256[] memory cms = new uint256[](1);
         cms[0] = fxCm;
-        uint256[] memory mode = new uint256[](1);   // stub verifier ignores values
-        mode[0] = notes.MODE_PUBLIC();
         uint256 oldRoot       = notes.noteRoot();
         uint32  nextLeafIndex = notes.nextLeafIndex();
-        vm.prank(alice);
+        uint256[] memory mode = GatedMint.allPublic(1);
+        IdentityRegistry.SchnorrProof memory sig =
+            GatedMint.signPublic(SK_PM, K_PM, cms, pubMinter, block.chainid);
+        vm.prank(pubMinter);
         notes.mint(
             hex"deadbeef",
             oldRoot, fxNoteRoot, nextLeafIndex,
-            fxFace, cms, mode
+            fxFace, cms, mode, sig
         );
     }
 
@@ -507,9 +526,9 @@ contract SpendAVerifierTest is Test {
     }
 
     function test_spendA_disabledWhenIdentityRegistryZeroed() public {
+        _seedTreeForSpendA();            // seed first (the gated mint needs the registry)
         vm.prank(GOV);
         notes.setIdentityRegistry(address(0));
-        _seedTreeForSpendA();
         vm.prank(alice);
         vm.expectRevert(bytes("Notes: identity registry not set"));
         notes.spendACP(

@@ -120,20 +120,6 @@ contract Notes {
     ///         zero `spendAVerifier`).
     IdentityRegistry public identityRegistry;
 
-    /// @notice When true, the unbound mint paths (the 6-arg convenience and
-    ///         7-arg raw overloads) are disabled: every mint must go through a
-    ///         gated overload that binds a nameable issuer Identity to the batch
-    ///         (PUBLIC: a registered public issuer + Schnorr; PRIVATE: a
-    ///         registered private issuer + one verified A2 leaf-tie binding per
-    ///         leaf).  This is the on-chain switch that turns the
-    ///         mutual-decryptability invariant from *available* into *enforced*:
-    ///         with it set, no spendable leaf can be minted without a recoverable
-    ///         issuer.  It also requires every minter to be a registered
-    ///         Identity, so governance flips it only after the cutover described
-    ///         in alberta-buck-notes-decryptability.org (Phasing and Migration).
-    ///         Default false (legacy / migration window).
-    bool public bindingRequired;
-
     // ---- nullifier + audit state ------------------------------------------
 
     /// @notice Spent nullifier set.  Spend SNARK enforces uniqueness here.
@@ -161,7 +147,6 @@ contract Notes {
     event GovernanceTransferred(address indexed previous, address indexed next);
     event MintVerifierUpdated(address indexed previous, address indexed next);
     event A2MintVerifierUpdated(address indexed previous, address indexed next);
-    event BindingRequiredSet(bool required);
     event SpendVerifierUpdated(address indexed previous, address indexed next);
     event SpendAVerifierUpdated(address indexed previous, address indexed next);
     event IdentityRegistryUpdated(address indexed previous, address indexed next);
@@ -260,15 +245,6 @@ contract Notes {
         a2MintVerifier = IMintVerifierA2(next);
     }
 
-    /// @notice Toggle the binding-required enforcement switch (see
-    ///         `bindingRequired`).  Once set, the unbound mint overloads revert;
-    ///         every mint must bind a nameable issuer.
-    function setBindingRequired(bool required) external {
-        require(msg.sender == governance, "not governance");
-        bindingRequired = required;
-        emit BindingRequiredSet(required);
-    }
-
     function setSpendVerifier(address next) external {
         require(msg.sender == governance, "not governance");
         require(next != address(0),       "verifier=0");
@@ -336,48 +312,11 @@ contract Notes {
     /// no longer matches live state (rollup-style contention model: the
     /// loser's tx reverts cleanly with no BUCK movement and re-proves
     /// against the new state).
-    /// @notice Convenience mint for an all-PUBLIC-mode batch -- every leaf is a
-    ///         public-issuer flavor (A1/B1), the common case and the shape every
-    ///         mint fixture uses.  Fills issuerMode = [MODE_PUBLIC, ...] and
-    ///         forwards to the raw path; the SNARK still binds issuerMode, so a
-    ///         batch whose proof attests any PRIVATE (A2) leaf is rejected here
-    ///         ("bad mint proof").  Private batches must use the explicit
-    ///         (issuerMode + A2Binding) overload.
-    function mint(
-        bytes   calldata proof,
-        uint256          oldRoot,
-        uint256          newRoot,
-        uint32           nextLeafIndex_,
-        uint256          totalFace,
-        uint256[] calldata cms
-    ) external {
-        require(!bindingRequired, "Notes: binding required");
-        uint256[] memory mode = new uint256[](cms.length);
-        for (uint256 i = 0; i < cms.length; i++) mode[i] = MODE_PUBLIC;
-        _mint(proof, mode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
-              IdentityRegistry.SchnorrProof(0, 0, BN254.G1Point(0, 0)));
-    }
-
-    function mint(
-        bytes   calldata proof,
-        uint256          oldRoot,
-        uint256          newRoot,
-        uint32           nextLeafIndex_,
-        uint256          totalFace,
-        uint256[] calldata cms,
-        uint256[] calldata issuerMode
-    ) external {
-        require(!bindingRequired, "Notes: binding required");
-        // Raw / non-public path: verifies the proof (which binds issuerMode to
-        // each committed flavor) and appends, with no identity gate beyond the
-        // legacy auto-Schnorr -- when msg.sender is a registered PUBLIC Identity
-        // a Schnorr binding is required, so a public issuer must instead use the
-        // (issuerMode + SchnorrProof) overload below (this path passes a zero
-        // signature and would revert for them).  Non-public minters append
-        // unbound here; the gated overloads enforce the per-leaf issuer class.
-        _mint(proof, issuerMode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
-              IdentityRegistry.SchnorrProof(0, 0, BN254.G1Point(0, 0)));
-    }
+    /// Minting is *gated-only*: every batch binds a nameable issuer Identity.
+    /// A PUBLIC batch (A1/B1) routes through the (issuerMode + SchnorrProof)
+    /// overload from a registered public issuer; a PRIVATE batch (A2) through the
+    /// (issuerMode + A2Binding[]) overload from a registered private issuer.
+    /// There is no unbound mint path -- an unnameable note cannot be created.
 
     /// @notice One A2 (addressed, private-issuer) leaf's recipient-blinded
     ///         re-encryption binding: the leaf ciphertext `eIss` (E_iss-for-rec)
@@ -397,13 +336,10 @@ contract Notes {
     ///         note is minted through this path -- and a non-public issuer is
     ///         rejected here, enforcing "bearer => public issuer".
     ///
-    /// @dev    Scope.  The gate consumes `issuerMode[]` and is sound for an
-    ///         honest issuer today; the *binding of issuerMode to each leaf's
-    ///         committed flavor* lands with the per-N mint-verifier regen (the
-    ///         circuit already emits issuerMode -- see circuits/mint_batch.circom
-    ///         and alberta-buck-notes-decryptability.org, The Required Mint SNARK
-    ///         Signal).  Until that governance cutover the legacy 6-/7-arg
-    ///         overloads remain for the unbound / batch-Schnorr paths.
+    /// @dev    The mint SNARK (mint_batch) binds `issuerMode[]` to each committed
+    ///         flavor, so the verifier rejects any batch whose attested modes do
+    ///         not match the `issuerMode[]` passed here; the contract then gates
+    ///         on it (every leaf PUBLIC, registered public `msg.sender`, Schnorr).
     function mint(
         bytes   calldata proof,
         uint256          oldRoot,
@@ -501,42 +437,6 @@ contract Notes {
             _advanceAndPull(newRoot, nextLeafIndex_, totalFace, cms.length);
         emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
         emit IssuerReencBound(msg.sender, newRoot, nPrivate);
-    }
-
-    function _mint(
-        bytes   calldata proof,
-        uint256[] memory  issuerMode,
-        uint256          oldRoot,
-        uint256          newRoot,
-        uint32           nextLeafIndex_,
-        uint256          totalFace,
-        uint256[] calldata cms,
-        IdentityRegistry.SchnorrProof memory issuerSig
-    ) internal {
-        _verifyMintOrRevert(proof, issuerMode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
-
-        // Public-issuer binding (Notes mutual-decryptability, Phase 1).  When
-        // the minter is a registered PUBLIC Identity, require a Schnorr
-        // signature over keccak256(cms) so the issuer's decrypted Identity is
-        // provably bound to every leaf -- the depositor can then produce a
-        // sound receipt naming the payer.  This legacy path gates the whole
-        // batch on `msg.sender` being public; the per-leaf `issuerMode`
-        // overloads below gate each leaf (and reject a bearer-from-non-public).
-        bool issuerBound;
-        if (address(identityRegistry) != address(0)
-            && identityRegistry.isPublicIdentity(msg.sender)) {
-            require(
-                identityRegistry.verifyIssuerSchnorr(
-                    msg.sender, keccak256(abi.encodePacked(cms)), issuerSig),
-                "Notes: bad issuer binding"
-            );
-            issuerBound = true;
-        }
-
-        uint256 startIndex =
-            _advanceAndPull(newRoot, nextLeafIndex_, totalFace, cms.length);
-        emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
-        if (issuerBound) emit IssuerBound(msg.sender, newRoot);
     }
 
     /// @dev Shared mint pre-flight: stale-state guards, per-commitment field

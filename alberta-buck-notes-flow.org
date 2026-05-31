@@ -337,25 +337,25 @@ public vs private, no identity) leak.
 Alice now broadcasts a single transaction =T_mint= calling
 
 #+BEGIN_SRC solidity
+// Minting is gated-only: a nameable issuer Identity is bound to every batch.
+// Alice (a public Corporate Identity here) uses the PUBLIC overload:
 notes.mint(
     proofBytes,
     oldRoot, newRoot, nextLeafIndex,
-    1200e18,                  // totalFace
-    [cm_0, cm_1, ..., cm_15]  // cms.length === N* (here 16)
+    1200e18,                       // totalFace
+    [cm_0, cm_1, ..., cm_15],      // cms.length === N* (here 16)
+    [PUBLIC, ..., PUBLIC],         // issuerMode (a SNARK public input of mint_batch)
+    issuerSig                      // Schnorr by Alice's registered key over keccak(cms)
 );
-// The 6-arg form is the convenience path: it auto-fills issuerMode = all-PUBLIC
-// (the common public/bearer case) and forwards.  Identity-bound issuers use the
-// gated overloads instead:
-//   notes.mint(..., cms, issuerMode, issuerSig)    // public issuer, Schnorr-bound
-//   notes.mint(..., cms, issuerMode, a2Bindings)   // private (A2) issuer; routes
-//                                                   //   the proof to mint_batch_a2
+// A private (A2) issuer uses the other overload instead:
+//   notes.mint(..., cms, issuerMode, a2Bindings)  // routes the proof to mint_batch_a2
+//                                                  //   and ties each leaf's eIss
+// There is no unbound mint path -- an unnameable note cannot be created.
 #+END_SRC
 
-The honest EVM walks =Notes.mint= (Phase-7-bis surface):
+The honest EVM walks =Notes.mint= (the PUBLIC overload):
 
 #+BEGIN_SRC solidity
-// (This overload auto-fills issuerMode = [PUBLIC, ..., PUBLIC] and forwards.)
-
 // Stale-state guards + field bounds (_verifyMintOrRevert).
 require(cms.length > 0,                            "Notes: empty mint");
 require(issuerMode.length == cms.length,           "Notes: issuerMode/cms length");
@@ -371,10 +371,16 @@ require(mintVerifier.verifyMint(
             proofBytes, issuerMode, oldRoot, newRoot, nextLeafIndex, totalFace, cms
         ),                                         "Notes: bad mint proof");
 
-// Public-issuer binding: when msg.sender is a registered PUBLIC Identity,
-// require a Schnorr over keccak256(cms) (the auto path passes a zero sig, so a
-// public issuer must use the gated overload).  The gated PRIVATE-mode path
-// instead verifies one A2 re-encryption binding per leaf.
+// Public-issuer binding (gated-only): every leaf must be PUBLIC-mode,
+// msg.sender must be a registered PUBLIC Identity, and issuerSig must be a valid
+// Schnorr over keccak256(cms).  (The PRIVATE-mode overload instead routes the
+// proof to mint_batch_a2 and verifies one A2 re-encryption binding per leaf,
+// tying each committed leaf's eIss.)
+require(identityRegistry.isPublicIdentity(msg.sender),
+                                                   "Notes: public-mode leaf needs public issuer");
+require(identityRegistry.verifyIssuerSchnorr(
+            msg.sender, keccak256(abi.encodePacked(cms)), issuerSig),
+                                                   "Notes: bad issuer binding");
 
 // Pull BUCK only after the proof is accepted, then advance (_advanceAndPull).
 require(buck.transferFrom(msg.sender, address(this), totalFace),
@@ -396,16 +402,17 @@ a. *Stale-state guards.*  The contract asserts that =oldRoot= equals the current
    ring-buffer head and =nextLeafIndex= equals the live tree size.  Either fails
    if another mint landed since Alice's wallet snapshotted state (more on this
    under *Prover Contention and the Rollup Race* below).
-b. *Calldata binding.*  The contract recomputes =cmBatchHash =
-   keccak(abi.encodePacked(cms))= over the calldata it just received.  This hash
-   is one of the Groth16 public inputs, so any tampering with =cms[]= en route
-   from the prover to the chain mismatches the SNARK and the verify call rejects.
+b. *Calldata binding.*  The =cms[]= are exposed *directly* as Groth16 public
+   inputs (no =cmBatchHash= digest), alongside the per-leaf =issuerMode[]= the
+   circuit emits, so any tampering with =cms[]= or =issuerMode[]= en route from the
+   prover to the chain mismatches the SNARK and the verify call rejects.
 c. *SNARK verify.*  The =MintVerifierAdapter= dispatches by =cms.length= to the
    per-N verifier (one circuit per pin, one verifier contract per pin), unpacks
-   the 256-byte =proofBytes= into Groth16 form, builds the 5-entry public-signal
-   vector =[oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash]=, and
-   invokes the appropriate =MintGroth16Verifier=.  If the verifier returns false,
-   the entire transaction reverts -- nothing is written, no BUCK moves.
+   the 256-byte =proofBytes= into Groth16 form, builds the =2N+4=-entry
+   public-signal vector =[issuerMode[0..N), oldRoot, newRoot, nextLeafIndex,
+   totalFace, cm[0..N)]= (circuit outputs lead), and invokes the appropriate
+   =MintBatchN${N}Groth16Verifier=.  If the verifier returns false, the entire
+   transaction reverts -- nothing is written, no BUCK moves.
 d. *BUCK escrow.*  =buck.transferFrom= debits =totalFace= from Alice and credits
    the =Notes= pool.  Allowance-driven pull, gated by Alice's prior
    =approve(notes, 1200e18, E_notes, pi_CP)=.  This CP-bound approve is

@@ -13,6 +13,7 @@ import {Notes}                  from "../src/Notes.sol";
 import {SpendGroth16Verifier}   from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter}   from "../src/SpendVerifierAdapter.sol";
 import {StubMintVerifier}       from "../src/StubMintVerifier.sol";
+import {GatedMint}              from "./helpers/GatedMint.sol";
 
 /// @title SpendVerifier.t.sol -- end-to-end Groth16 spend.
 /// @notice The Phase 7-bis pivot moved per-leaf Merkle insertion into the
@@ -44,6 +45,11 @@ contract SpendVerifierTest is Test {
 
     address internal alice;
     address internal bob;
+
+    // Public issuer for the seed mint (gated-only mint surface).
+    address internal pubMinter = address(0x9E27E5);
+    uint256 internal constant SK_PM = 0x1111111111111111111111111111111111111111111111111111111111111111;
+    uint256 internal constant K_PM  = 0x2222222222222222222222222222222222222222222222222222222222222222;
 
     // Spend fixture (leaf 0 -> bob).
     uint256 internal fxSpendNoteRoot;
@@ -80,6 +86,8 @@ contract SpendVerifierTest is Test {
             address(spendAdapter),
             GOV
         );
+        vm.prank(GOV);
+        notes.setIdentityRegistry(address(reg));
 
         // Bind Notes as a Public-Identity contract.
         reg.bindContract(
@@ -105,6 +113,19 @@ contract SpendVerifierTest is Test {
         vm.prank(alice);
         buck.mint(500e18);
         _approveNotes(alice, 500e18);
+
+        // Public issuer for the gated seed mint: a bound public Identity with a
+        // known key (SK_PM), funded to cover the seed face, approved to Notes.
+        vm.etch(pubMinter, hex"60006000fd");
+        reg.bindContract(pubMinter, BN254.mul(BN254.g1(), SK_PM),
+                         IdentityRegistry.ElGamalCT(BN254.g1(), BN254.g1()), true, false);
+        _grantCredit(pubMinter, 1000e18);
+        vm.prank(pubMinter);
+        buck.mint(500e18);
+        _approveNotes(pubMinter, 500e18);
+        vm.store(address(buck),
+                 keccak256(abi.encode(address(notes), keccak256(abi.encode(pubMinter, uint256(5))))),
+                 bytes32(uint256(1)));
 
         // Spend fixture (leaf 0 -> bob).
         string memory spendFx =
@@ -198,22 +219,21 @@ contract SpendVerifierTest is Test {
         uint256[] memory cms = new uint256[](2);
         cms[0] = uint256(keccak256("seedcm0")) % notes.FIELD_R();
         cms[1] = uint256(keccak256("seedcm1")) % notes.FIELD_R();
-        uint256[] memory mode = new uint256[](2);   // stub verifier ignores values
-        mode[0] = notes.MODE_PUBLIC();
-        mode[1] = notes.MODE_PUBLIC();
         // Snapshot live state BEFORE vm.prank so argument-eval calls don't
-        // burn the prank.
+        // burn the prank.  Gated mint: a public issuer + Schnorr over cms.
         uint256 oldRoot       = notes.noteRoot();
         uint32  nextLeafIndex = notes.nextLeafIndex();
-        vm.prank(alice);
+        uint256[] memory mode = GatedMint.allPublic(2);
+        IdentityRegistry.SchnorrProof memory sig =
+            GatedMint.signPublic(SK_PM, K_PM, cms, pubMinter, block.chainid);
+        vm.prank(pubMinter);
         notes.mint(
             hex"deadbeef",
             oldRoot,                // empty tree
             fxSpendNoteRoot,        // newRoot = spend fixture's expected root
             nextLeafIndex,
             fxSpendFace,            // pull exactly enough BUCK to cover spend
-            cms,
-            mode
+            cms, mode, sig
         );
     }
 

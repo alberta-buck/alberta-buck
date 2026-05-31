@@ -180,46 +180,4 @@ contract NotesA2TieTest is Test {
                    fx.totalFace, fx.cms, mode, bindings);
     }
 
-    // ---- bindingRequired enforcement switch (F2) ---------------------------
-
-    function test_bindingRequired_blocksUnboundMint() public {
-        vm.prank(GOV);
-        notes.setBindingRequired(true);
-
-        uint256[] memory cms = new uint256[](1);
-        cms[0] = 0x1234;
-        uint256 root = notes.noteRoot();
-        // 6-arg convenience (unbound) path now reverts.
-        vm.prank(issuer);
-        vm.expectRevert(bytes("Notes: binding required"));
-        notes.mint(hex"00", root, 999, 0, 1000, cms);
-
-        // 7-arg raw (unbound) path too.
-        uint256[] memory mode = _privMode(1);
-        vm.prank(issuer);
-        vm.expectRevert(bytes("Notes: binding required"));
-        notes.mint(hex"00", root, 999, 0, 1000, cms, mode);
-    }
-
-    function test_bindingRequired_allowsGatedA2Mint() public {
-        vm.prank(GOV);
-        notes.setBindingRequired(true);
-
-        // The gated A2 path is unaffected by the switch.
-        Fx memory fx = _loadFx("build/snark/mint_batch_a2_n1/fixtures/tie.json");
-        Notes.A2Binding[] memory bindings = new Notes.A2Binding[](1);
-        bindings[0] = _binding();
-        uint256[] memory mode = _privMode(1);
-
-        vm.prank(issuer);
-        notes.mint(fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
-                   fx.totalFace, fx.cms, mode, bindings);
-        assertEq(notes.nextLeafIndex(), 1, "gated A2 mint still works under bindingRequired");
-    }
-
-    function test_setBindingRequired_onlyGovernance() public {
-        vm.expectRevert(bytes("not governance"));
-        notes.setBindingRequired(true);
-        assertEq(notes.bindingRequired(), false);
-    }
 }

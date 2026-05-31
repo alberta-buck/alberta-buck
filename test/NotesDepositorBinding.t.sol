@@ -7,6 +7,7 @@ import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {BN254} from "../src/BN254.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
+import {GatedMint} from "./helpers/GatedMint.sol";
 
 contract MockBuckB {
     function transferFrom(address, address, uint256) external pure returns (bool) { return true; }
@@ -29,6 +30,11 @@ contract NotesDepositorBindingTest is Test {
     address depositor;   // Alice
     address issuer;      // Bob
 
+    // Bound public issuer for the gated-only seed mint.
+    address pubMinter = address(0x9E27E5);
+    uint256 constant SK_PM = 0x1111111111111111111111111111111111111111111111111111111111111111;
+    uint256 constant K_PM  = 0x2222222222222222222222222222222222222222222222222222222222222222;
+
     function setUp() public {
         vm.chainId(1);                       // approve transcript uses chainid = 1
         vj  = vm.readFile("test/vectors/identity.json");
@@ -49,6 +55,11 @@ contract NotesDepositorBindingTest is Test {
         vm.etch(issuer, hex"60006000fd");
         reg.bindContract(issuer, _g1(".bob.elgamal_kp.pk"), placeholder, true, false);
 
+        // A bound public issuer (known key SK_PM) for the gated-only seed mint.
+        vm.etch(pubMinter, hex"60006000fd");
+        reg.bindContract(pubMinter, BN254.mul(BN254.g1(), SK_PM),
+                         IdentityRegistry.ElGamalCT(BN254.g1(), BN254.g1()), true, false);
+
         StubMintVerifier  m = new StubMintVerifier(GOV);
         StubSpendVerifier s = new StubSpendVerifier(GOV);
         MockBuckB         b = new MockBuckB();
@@ -56,14 +67,16 @@ contract NotesDepositorBindingTest is Test {
         vm.prank(GOV);
         notes.setIdentityRegistry(address(reg));
 
-        // Seed noteFaceSum so the spend tests don't underflow it.  Mint from a
-        // non-public minter (this test contract) -> the Schnorr binding is
-        // skipped; MockBuckB.transferFrom is a no-op true.
+        // Seed noteFaceSum so the spend tests don't underflow it.  Gated public
+        // mint from pubMinter; MockBuckB.transferFrom is a no-op true.
         uint256[] memory seed = new uint256[](1);
         seed[0] = 0x1234;
-        uint256[] memory mode = new uint256[](1);
-        mode[0] = notes.MODE_PUBLIC();
-        notes.mint(hex"00", notes.noteRoot(), 999, notes.nextLeafIndex(), 1000, seed, mode);
+        uint256 root0 = notes.noteRoot();
+        uint32  idx0  = notes.nextLeafIndex();
+        IdentityRegistry.SchnorrProof memory sig =
+            GatedMint.signPublic(SK_PM, K_PM, seed, pubMinter, block.chainid);
+        vm.prank(pubMinter);
+        notes.mint(hex"00", root0, 999, idx0, 1000, seed, GatedMint.allPublic(1), sig);
     }
 
     // ---- helpers -----------------------------------------------------------

@@ -15,11 +15,10 @@ contract MockBuck {
     function transfer(address, uint256) external pure returns (bool) { return true; }
 }
 
-/// @notice Phase 1 wiring: Notes.mint requires a registered PUBLIC issuer to
-///         bind their Identity via the Schnorr overload (verifyIssuerSchnorr).
-///         A public issuer must use the 7-arg overload with a valid signature;
-///         the 6-arg overload and any bad signature revert.  Non-public minters
-///         skip the binding (private A2 issuers are bound in-SNARK later).
+/// @notice Notes.mint is gated-only: a PUBLIC batch requires a registered PUBLIC
+///         issuer to bind their Identity via the Schnorr overload
+///         (verifyIssuerSchnorr).  A bad signature reverts, and a non-public
+///         minter cannot mint a PUBLIC batch at all (there is no unbound path).
 ///         See alberta-buck-notes-decryptability.org.
 contract NotesIssuerBindingTest is Test {
     address constant GOV = address(0x6011);
@@ -103,16 +102,6 @@ contract NotesIssuerBindingTest is Test {
         notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode(), sig);
     }
 
-    function test_publicIssuer_rawOverload_reverts() public {
-        // A public issuer cannot mint through the raw (no-Schnorr) overload: the
-        // legacy auto-Schnorr gate fires with a zero signature -> reverts.
-        uint256[] memory cms = _cms();
-        uint256 oldRoot = notes.noteRoot();
-        vm.prank(issuer);
-        vm.expectRevert("Notes: bad issuer binding");
-        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode());
-    }
-
     function test_publicIssuer_signatureForOtherBatch_reverts() public {
         // Signature is valid but over a different batch -> hBatch mismatch.
         uint256[] memory cms = _cms();
@@ -125,15 +114,15 @@ contract NotesIssuerBindingTest is Test {
         notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode(), sig);
     }
 
-    function test_nonPublicIssuer_skipsBinding() public {
-        // An unregistered / non-public minter mints via the raw overload;
-        // the auto-Schnorr binding is skipped (private issuers bind via the
-        // issuerMode + A2 overload instead).
+    function test_nonPublicIssuer_publicBatch_reverts() public {
+        // Gated-only: an unregistered / non-public minter cannot mint a PUBLIC
+        // batch -- the public overload requires isPublicIdentity(msg.sender).
         address eoa = makeAddr("eoaIssuer");
         uint256[] memory cms = _cms();
+        IdentityRegistry.SchnorrProof memory sig = _sign(SK, K, cms, eoa);
         uint256 oldRoot = notes.noteRoot();
         vm.prank(eoa);
-        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode());
-        assertEq(notes.nextLeafIndex(), 1, "unbound (non-public) mint appended");
+        vm.expectRevert("Notes: public-mode leaf needs public issuer");
+        notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode(), sig);
     }
 }
