@@ -981,6 +981,58 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
    proof at mint -- fails against collusion (a colluding D co-signs the bogus
    key), so the in-SNARK coupling is the principled route.
 
+*** Can it be closed now?  The non-native-curve obstacle
+
+    The cost line above ("a handful of \( \mathbb{G}_1 \) scalar-muls") understates
+    the real obstacle, which is /which curve those muls are on/.  The identities
+    live on *BN254 \( \mathbb{G}_1 \)* -- the same curve the Groth16 proof system
+    is built over.  A circom circuit's native field is BN254's /scalar/ field
+    \( r \); BN254 \( \mathbb{G}_1 \) coordinates live in the /base/ field
+    \( p \neq r \).  So every \( \mathbb{G}_1 \) operation in the coupling
+    (\( sk_{iss}R_{iss} \), \( r'pk_{rec} \), \( r_n pk_{rec} \), the point adds)
+    is /non-native/ \( \mathbb{F}_p \) arithmetic emulated inside an
+    \( \mathbb{F}_r \) circuit -- limb decomposition + =mulmod= with range checks,
+    the circom-pairing / circom-ecdsa style.  circomlib's EC gadgets are
+    *BabyJubjub* (whose base field /is/ \( r \), hence native and cheap), not
+    BN254 \( \mathbb{G}_1 \); there is no drop-in.  Each emulated \( \mathbb{F}_p \)
+    multiply is thousands of \( \mathbb{F}_r \) constraints, so the coupling is
+    realistically \( 10^5\!-\!10^6 \) R1CS /per A2 leaf/ -- pushing =mint_batch_a2=
+    from ~170K total to millions, a larger ptau (\( 2^{22+} \)), and minute-to-hour
+    prove times.  This is exactly the native-\( \mathbb{G}_1 \)-in-circom cost the
+    spend side already declined; it is a *dedicated multi-week phase*, not a now-fix.
+
+    The escapes all hit a wall:
+    - /Move identities to BabyJubjub/ (native in-circuit EC): a ground-up redesign
+      of the identity layer -- the PS credential (a pairing), ElGamal, the
+      registration NIZK, and the on-chain CP-DLEQ / Schnorr / re-enc verifiers all
+      depend on BN254 + the EIP-196/197 precompiles, which BabyJubjub lacks.
+    - /On-chain sigma coupling/ (cheap via EIP-196, like =verifyIssuerReenc=):
+      needs =E_note= as an input, but =E_note= is the spend ciphertext -- putting it
+      (or a deterministic commitment to it) on chain at mint re-links mint to spend,
+      the precise unlinkability we protect.
+    - /Spend-side enforcement/ (prove at =spendACP= that \( sk_{rec} \) decrypts
+      =eIss= to the issuer's registered \( M \)): same non-native \( \mathbb{G}_1 \)
+      in the /spend/ circuit, and it needs \( \gamma \) (disclosed only in the
+      compelled receipt) to know the target point -- revealing it at spend would
+      de-anonymise the issuer publicly.
+
+*** The backstop: the gap degrades to KYC-traceability, not untraceability
+
+    The colluding A2 pair does /not/ obtain untraceable money.  Both parties act
+    under on-chain addresses -- the issuer is =msg.sender= at mint (and the funds
+    pulled trace to them), the recipient is =msg.sender= at =spendACP= -- and each
+    address is a /registered/ Identity whose KYC issuer (the trusted PS-credential
+    signer) can de-anonymise it under subpoena.  So the bogus-=eIss= attack costs
+    the pair only the *bilateral, self-service receipt* (the recipient can no longer
+    /unilaterally/ name the payer); it does /not/ defeat *KYC traceability* (a court
+    compelling the registry's trusted issuer still names both).  The receipt
+    invariant is the stronger, third-party-free guarantee; the gap means A2
+    /collusion/ falls back to the weaker subpoena-the-KYC-issuer path that every
+    registered Identity is subject to anyway.  Whether to spend a multi-week
+    non-native-EC phase to restore the stronger guarantee for the A2-collusion
+    corner, or to accept the KYC backstop there, is a threat-model decision -- it is
+    *not* a silent hole: =verify_receipt= stamps such a note =UNVERIFIED ISSUER=.
+
 ** Cost and migration
 
    The added constraints are a handful of equality checks plus the =issuerMode=
