@@ -968,18 +968,43 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
      E_{iss}=(r'G,\ M_{iss}+r'pk_{rec}),\quad
      E_{note}=(r_nG,\ M_{rec}+r_n pk_{rec}),
    \]
-   the /same/ \( pk_{rec} \) in both.  =E_note='s key is forced to the registered
-   recipient at spend; the shared-key constraint then forces =eIss= under that
-   same registered key, so a compelled \( sk_{rec} \) /must/ recover
-   \( M_{iss} \) -- closing the collusion clause.  Cost: a handful of in-circuit
-   \( \mathbb{G}_1 \) scalar-muls per A2 leaf (the ~hundreds-of-K-R1CS the spend
-   side declined for native G1; bounded, paid only on A2 mints, on top of the
-   dual Merkle walk).  This is the recommended next phase for A2 -- /not/ shipped;
-   Phase 2c deliberately stops at the leaf-tie because it is cheap and a strict
-   prerequisite (the coupling needs the per-leaf =eIss= exposure it adds).  A
-   lighter alternative -- requiring the recipient to co-sign a key-possession
-   proof at mint -- fails against collusion (a colluding D co-signs the bogus
-   key), so the in-SNARK coupling is the principled route.
+   the /same/ \( pk_{rec} \) in both.
+
+   *Correction (found while scoping the phase): the shared-key constraint above is
+   NOT sufficient by itself -- it is vacuous.*  \( M_{rec} \) (and, with it, the
+   recipient credential) is a /free/ witness, so for a bogus note (\( eIss \) under
+   \( pk_{bogus} \), \( E_{note} \) really under the recipient's \( pk_D \)) the
+   issuer witnesses \( pk_{rec} = pk_{bogus} \) and \( M_{rec} = M_D + r_n(pk_D -
+   pk_{bogus}) \): both equations hold, the circuit accepts, the note still spends.
+   The free recipient-side witness absorbs the constraint.  A /sound/ coupling must
+   *pin \( pk_{rec} \) to a real registered key*, which forces an in-circuit
+   *registry set-membership*:
+
+   1. witness the recipient's registered \( (pk_D, E_{\text{addr}}[D]) \) + a Merkle
+      path proving the leaf \( \mathrm{Poseidon}(pk_D, E_{\text{addr}}[D]) \) is in
+      the IdentityRegistry accumulator (root a public input) -- so the credential
+      is /real/, not invented;
+   2. constrain \( E_{note} = \mathrm{rerand}(E_{\text{addr}}[D]) \) under
+      \( pk_D \) (so \( E_{note} \) is genuinely under that registered key -- and
+      hence spendable only by D, which =verifySpendCP= re-confirms at spend);
+   3. constrain \( eIss = (r'G,\ M_{iss} + r' pk_D) \) under the /same/ \( pk_D \).
+
+   Now the spender is provably the holder of the key \( eIss \) is encrypted under,
+   so a compelled \( sk_D \) /must/ recover \( M_{iss} \).  The membership proof
+   reveals only that the recipient is /some/ registered account (the leaf is a
+   private witness; only the root is public), so A2 recipient privacy survives.
+
+   *This is materially heavier than "a handful of G1 muls".*  The identities live
+   on BN254 \( \mathbb{G}_1 \) -- the proof system's own curve -- so every point op
+   (the rerandomisation, the two encryptions, \( sk_{iss}R_{iss} \)) is /non-native/
+   \( \mathbb{F}_p \) arithmetic emulated in an \( \mathbb{F}_r \) circuit
+   (circom-pairing / circom-ecdsa style), realistically \( \sim\!10^6 \) R1CS *per
+   A2 leaf*, plus the new registry accumulator.  This is the recommended next phase
+   for A2 -- /not/ shipped; Phase 2c deliberately stops at the leaf-tie (cheap, and
+   a strict prerequisite: the coupling needs the per-leaf =eIss= exposure it adds).
+   It cannot be moved on-chain: =E_note= is never on chain at mint (exposing it
+   links mint to spend), so the one venue where =E_note=, =eIss=, and \( pk_{rec} \)
+   coexist privately is inside =mint_batch_a2=.  See /Scope: the A2 coupling phase/.
 
 *** Can it be closed now?  The non-native-curve obstacle
 
@@ -1032,6 +1057,58 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
     non-native-EC phase to restore the stronger guarantee for the A2-collusion
     corner, or to accept the KYC backstop there, is a threat-model decision -- it is
     *not* a silent hole: =verify_receipt= stamps such a note =UNVERIFIED ISSUER=.
+
+*** Scope: the A2 coupling phase
+
+    The sound construction (set-membership + the three constraint groups above) is
+    a *major cryptographic-engineering phase*, not an increment.  Workstreams, in
+    dependency order:
+
+    1. *Registry accumulator.*  =IdentityRegistry= gains an incremental Poseidon
+       Merkle tree of registered entries (leaf =Poseidon(addr, pk, E_addr)=),
+       maintained on =register= / =bindContract=, with an on-chain root the mint
+       circuit consumes.  Decision: on-chain Poseidon (gas on each registration --
+       rare, tolerable) vs an off-chain-computed root checked by a small SNARK.
+       Mirrors the Notes pool's tree but over the identity set.
+    2. *Non-native BN254 \( \mathbb{G}_1 \) gadgets.*  Integrate a circom bigint /
+       EC library (circom-pairing / circom-ecdsa lineage) for \( \mathbb{F}_p \)
+       arithmetic + variable-base scalar-mul + point-add over BN254 \( \mathbb{G}_1 \)
+       inside the \( \mathbb{F}_r \) circuit.  This is the dominant cost and the
+       dominant *audit* surface (under-constraint in emulated EC is the classic
+       footgun -- Picus/ecne the sub-templates).  Handle the \( \bmod r \) vs
+       \( \bmod p \) coordinate canonicalisation (the same care =eIss < FIELD_R=
+       already takes, now load-bearing).
+    3. *Circuit =mint_batch_a2_coupled=.*  Extend =mint_batch_a2= per leaf with the
+       Merkle-membership + rerandomisation + dual-encryption constraints; new
+       public inputs (=registryRoot=, the issuer's registered \( E^{reg} \)).  The
+       =eIss= leaf-tie and Merkle insertion stay.
+    4. *Ceremony + sizing.*  At \( \sim\!10^6 \) R1CS/leaf the practical batch sizes
+       *shrink* (N=1,2,4; N=16/32 would need =pot25+=, a multi-day, hundreds-of-GB
+       ceremony).  Expect a separate small-N pin set and a fresh, larger ptau.
+    5. *Verifier + Notes wiring.*  New per-N =MintBatchA2CoupledN*Verifier= +
+       adapter (arity grows by the new public inputs); =Notes= reads the registry
+       root and routes the A2 path to the coupled verifier.
+    6. *Wallet prover + tests.*  The prover supplies the recipient credential +
+       Merkle path + rerand/encryption witnesses (real ciphertexts now, not
+       arbitrary words); a *collusion regression* (=eIss= under a non-recipient key
+       now *reverts at mint*) and a *privacy* test (two mints to distinct recipients
+       indistinguishable).  =verify_receipt= drops the =UNVERIFIED ISSUER= path for
+       coupled mints.
+
+    *Cost / risk envelope.*  Dominant: non-native EC -- \( \sim\!10^6 \) R1CS/leaf,
+    minute-scale proves, big ceremony, heavy audit.  Plus a new registry-accumulator
+    subsystem.  Realistic effort: a /design spike/ (accumulator shape; pick/port the
+    EC library; pin the exact relation) -> an /N=1 proof-of-concept/ (witness-check
+    the collusion + privacy properties end to end) before committing to the per-N
+    ceremony + wiring + audit.  A backend with native non-native support (Halo2 /
+    PLONK lookups, or a 2-cycle like BN254/Grumpkin for native in-circuit EC) would
+    cut the EC cost dramatically but is itself a proving-stack migration.
+
+    *Recommendation.*  Weigh this against the KYC backstop (above) before starting:
+    it restores /bilateral, self-service/ non-deniability for the A2-collusion
+    corner only, at the price of a major phase and shrunken A2 batch sizes.  If
+    greenlit, gate it on the spike + PoC; do not begin the ceremony/wiring/audit
+    until the N=1 PoC confirms the relation is sound and the costs are as modelled.
 
 ** Cost and migration
 
