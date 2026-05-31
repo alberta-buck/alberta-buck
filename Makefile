@@ -41,7 +41,7 @@ endif
 .PHONY: install update
 .PHONY: test-python venv-activate
 .PHONY: golden-receipts
-.PHONY: snark snark-setup snark-fixtures snark-ptau snark-clean
+.PHONY: snark snark-setup snark-fixtures snark-ptau snark-clean snark-a2 snark-a2-setup snark-a2-fixtures
 .PHONY: vectors plots images
 .PHONY: vector-lifecycle vector-equilibrium vector-arb
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
@@ -206,6 +206,8 @@ golden-receipts:
 #   make snark-fixtures   # regenerate build/snark/.../fixtures/*.json for the tests
 #   make snark-ptau       # phase-1: rebuild the dev Powers of Tau from scratch (~hours)
 #   make snark-clean      # drop per-N build dirs (forces a clean phase-2 rebuild)
+#   make snark-a2         # private-issuer A2 mint family: per-N MintBatchA2N*Verifier
+#                         #   + fixtures (reuses the mint_batch ptau; ~minutes)
 #
 # Override the pinned batch sizes (each gets its own circuit + verifier):
 #   make snark SNARK_PINS="1 2 4 8 16"
@@ -217,6 +219,7 @@ golden-receipts:
 # README.org "SNARK Circuits and Trusted Setup".
 SNARK_PINS ?= 1 2 4 8 16 32
 SNARK_DIRS  = $(addprefix build/snark/mint_batch_n,$(SNARK_PINS))
+SNARK_A2_DIRS = $(addprefix build/snark/mint_batch_a2_n,$(SNARK_PINS))
 # snarkjs lives in node_modules/.bin; prepend it so setup.sh finds it under nix.
 SNARK_PATH  = PATH="$(CURDIR)/node_modules/.bin:$$PATH"
 
@@ -238,7 +241,21 @@ snark-ptau:
 	nix develop --command bash -c '$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh'
 
 snark-clean:
-	rm -rf $(SNARK_DIRS)
+	rm -rf $(SNARK_DIRS) $(SNARK_A2_DIRS)
+
+# Private-issuer A2 mint family (circuits/mint_batch_a2.circom).  Reuses the
+# mint_batch ptau (DO_LEGACY=0 DO_MINT_BATCH=0), so this only runs phase-2 for
+# the A2 per-N circuits + their fixtures -- the existing public/bearer verifiers
+# stay byte-for-byte as deployed.
+snark-a2:	snark-a2-setup snark-a2-fixtures
+	@echo "snark-a2: A2 verifiers + fixtures regenerated -- run 'make nix-test' to check parity"
+
+snark-a2-setup:
+	rm -rf $(SNARK_A2_DIRS)
+	nix develop --command bash -c '$(SNARK_PATH) DO_LEGACY=0 DO_MINT_BATCH=0 MINT_BATCH_A2_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh'
+
+snark-a2-fixtures:
+	nix develop --command bash -c '$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures_a2.sh'
 
 
 # ── Sim inputs: price CSVs + Universal Router artifact ────────────────

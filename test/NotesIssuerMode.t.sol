@@ -6,6 +6,7 @@ import {Notes} from "../src/Notes.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {BN254} from "../src/BN254.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
+import {StubMintVerifierA2} from "../src/StubMintVerifierA2.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 
 contract MockBuckMode {
@@ -52,6 +53,10 @@ contract NotesIssuerModeTest is Test {
         notes = new Notes(address(b), address(m), address(s), GOV);
         vm.prank(GOV);
         notes.setIdentityRegistry(address(reg));
+        // PRIVATE-mode (A2) mints route through the A2 verifier; stub it.
+        StubMintVerifierA2 m2 = new StubMintVerifierA2(GOV);
+        vm.prank(GOV);
+        notes.setA2MintVerifier(address(m2));
 
         // Public issuer (pk = SK*G).
         vm.etch(pubIssuer, hex"60006000fd");

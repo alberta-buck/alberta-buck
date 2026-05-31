@@ -128,28 +128,67 @@ render_mint_batch_n() {
         "$SRC" > "$DST"
 }
 
+# Same idea for the A2 (private-issuer) mint circuit, which exposes per-leaf
+# eIss as a public output so Notes.mint can tie each committed leaf to its
+# re-encryption binding (the collusion-resistant A2 leaf-tie).  Reuses the same
+# ptau as mint_batch (the extra Poseidon-8 per leaf is small relative to the
+# dual Merkle walk that dominates).
+render_mint_batch_a2_n() {
+    local N="$1"
+    local SRC="$ROOT/circuits/mint_batch_a2.circom"
+    local DST="$ROOT/circuits/mint_batch_a2_n${N}.circom"
+    sed -e "s|= MintBatchA2(16, 20);|= MintBatchA2(${N}, 20);|" \
+        "$SRC" > "$DST"
+}
+
+# Section guards let `make snark-a2` rebuild only the A2 family (reusing the
+# existing ptau) without re-running the legacy circuits or the base mint_batch.
+DO_LEGACY="${DO_LEGACY:-1}"
+DO_MINT_BATCH="${DO_MINT_BATCH:-1}"
+MINT_BATCH_A2_PINS="${MINT_BATCH_A2_PINS:-}"
+
 # ---- legacy mint + spend (pot15) -----------------------------------------
 
-PTAU15="$(ensure_ptau 15)"
-setup_circuit mint    MintGroth16Verifier   "$PTAU15"
-setup_circuit spend   SpendGroth16Verifier  "$PTAU15"
-# spend_a (Phase 8 V1): same scaffolding as spend, A-tag nullifier + flavor
-# constraint.  Constraint count is essentially the same as spend, so pot15
-# suffices.
-setup_circuit spend_a SpendAGroth16Verifier "$PTAU15"
+if [ "$DO_LEGACY" = "1" ]; then
+    PTAU15="$(ensure_ptau 15)"
+    setup_circuit mint    MintGroth16Verifier   "$PTAU15"
+    setup_circuit spend   SpendGroth16Verifier  "$PTAU15"
+    # spend_a (Phase 8 V1): same scaffolding as spend, A-tag nullifier + flavor
+    # constraint.  Constraint count is essentially the same as spend, so pot15
+    # suffices.
+    setup_circuit spend_a SpendAGroth16Verifier "$PTAU15"
+fi
 
 # ---- mint_batch per-N (Phase 7-bis pivot) --------------------------------
 
-MINT_BATCH_PINS="${MINT_BATCH_PINS:-16}"
-for N in $MINT_BATCH_PINS; do
+if [ "$DO_MINT_BATCH" = "1" ]; then
+    MINT_BATCH_PINS="${MINT_BATCH_PINS:-16}"
+    for N in $MINT_BATCH_PINS; do
+        POW="$(ptau_pow_for_n "$N")"
+        PTAU="$(ensure_ptau "$POW")"
+        render_mint_batch_n "$N"
+        setup_circuit \
+            "mint_batch_n${N}" \
+            "MintBatchN${N}Groth16Verifier" \
+            "$PTAU" \
+            "mint_batch_n${N}"
+    done
+fi
+
+# ---- mint_batch_a2 per-N (private-issuer eIss leaf-tie) -------------------
+# Opt-in via MINT_BATCH_A2_PINS (empty by default, so a plain `make snark` does
+# not rebuild the A2 family).  `make snark-a2` sets it and disables the blocks
+# above.  Reuses the mint_batch ptau (same ptau_pow_for_n mapping).
+
+for N in $MINT_BATCH_A2_PINS; do
     POW="$(ptau_pow_for_n "$N")"
     PTAU="$(ensure_ptau "$POW")"
-    render_mint_batch_n "$N"
+    render_mint_batch_a2_n "$N"
     setup_circuit \
-        "mint_batch_n${N}" \
-        "MintBatchN${N}Groth16Verifier" \
+        "mint_batch_a2_n${N}" \
+        "MintBatchA2N${N}Groth16Verifier" \
         "$PTAU" \
-        "mint_batch_n${N}"
+        "mint_batch_a2_n${N}"
 done
 
 echo "setup complete"

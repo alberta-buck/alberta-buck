@@ -6,6 +6,7 @@ import {Notes} from "../src/Notes.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {BN254} from "../src/BN254.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
+import {StubMintVerifierA2} from "../src/StubMintVerifierA2.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 
 contract MockBuckA2 {
@@ -44,6 +45,11 @@ contract NotesA2BindingTest is Test {
         notes = new Notes(address(b), address(m), address(s), GOV);
         vm.prank(GOV);
         notes.setIdentityRegistry(address(reg));
+        // A2 mints route through the A2 verifier; stub it (the leaf-tie itself
+        // is exercised against the real circuit in NotesA2Tie / MintVerifierA2).
+        StubMintVerifierA2 m2 = new StubMintVerifierA2(GOV);
+        vm.prank(GOV);
+        notes.setA2MintVerifier(address(m2));
     }
 
     // ---- helpers -----------------------------------------------------------

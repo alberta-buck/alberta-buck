@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {IMintVerifier}   from "./IMintVerifier.sol";
+import {IMintVerifierA2} from "./IMintVerifierA2.sol";
 import {ISpendVerifier}  from "./ISpendVerifier.sol";
 import {ISpendAVerifier} from "./ISpendAVerifier.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
@@ -91,6 +92,18 @@ contract Notes {
 
     address        public governance;
     IMintVerifier  public mintVerifier;
+
+    /// @notice Private-issuer (A2) mint verifier -- the mint_batch_a2 circuit
+    ///         family (src/MintBatchA2N*Groth16Verifier via MintVerifierA2Adapter).
+    ///         Distinct from `mintVerifier` because A2 has a different public
+    ///         arity (5N+4: per-leaf eIss exposed as outputs) and is used only by
+    ///         the PRIVATE-mode mint path, where it ties each committed leaf to
+    ///         its re-encryption binding's eIss (the collusion-resistant leaf-tie;
+    ///         see alberta-buck-notes-decryptability.org, The Required Mint SNARK
+    ///         Signal).  Optional at construction; governance wires it via
+    ///         setA2MintVerifier before any A2 mint.
+    IMintVerifierA2 public a2MintVerifier;
+
     ISpendVerifier public spendVerifier;
     /// @notice A-flavor spend verifier (Phase 8 V2 -- spend_a.circom).
     ///         Optional at construction (zero-address means A-spends are
@@ -106,6 +119,20 @@ contract Notes {
     ///         construction (zero-address disables A-spends just like a
     ///         zero `spendAVerifier`).
     IdentityRegistry public identityRegistry;
+
+    /// @notice When true, the unbound mint paths (the 6-arg convenience and
+    ///         7-arg raw overloads) are disabled: every mint must go through a
+    ///         gated overload that binds a nameable issuer Identity to the batch
+    ///         (PUBLIC: a registered public issuer + Schnorr; PRIVATE: a
+    ///         registered private issuer + one verified A2 leaf-tie binding per
+    ///         leaf).  This is the on-chain switch that turns the
+    ///         mutual-decryptability invariant from *available* into *enforced*:
+    ///         with it set, no spendable leaf can be minted without a recoverable
+    ///         issuer.  It also requires every minter to be a registered
+    ///         Identity, so governance flips it only after the cutover described
+    ///         in alberta-buck-notes-decryptability.org (Phasing and Migration).
+    ///         Default false (legacy / migration window).
+    bool public bindingRequired;
 
     // ---- nullifier + audit state ------------------------------------------
 
@@ -133,6 +160,8 @@ contract Notes {
 
     event GovernanceTransferred(address indexed previous, address indexed next);
     event MintVerifierUpdated(address indexed previous, address indexed next);
+    event A2MintVerifierUpdated(address indexed previous, address indexed next);
+    event BindingRequiredSet(bool required);
     event SpendVerifierUpdated(address indexed previous, address indexed next);
     event SpendAVerifierUpdated(address indexed previous, address indexed next);
     event IdentityRegistryUpdated(address indexed previous, address indexed next);
@@ -222,6 +251,24 @@ contract Notes {
         mintVerifier = IMintVerifier(next);
     }
 
+    /// @notice Wire (or rotate) the A2 (private-issuer) mint verifier.  Required
+    ///         before any PRIVATE-mode mint; passing `address(0)` disables A2
+    ///         mints (the next private-mode mint reverts on the verifier check).
+    function setA2MintVerifier(address next) external {
+        require(msg.sender == governance, "not governance");
+        emit A2MintVerifierUpdated(address(a2MintVerifier), next);
+        a2MintVerifier = IMintVerifierA2(next);
+    }
+
+    /// @notice Toggle the binding-required enforcement switch (see
+    ///         `bindingRequired`).  Once set, the unbound mint overloads revert;
+    ///         every mint must bind a nameable issuer.
+    function setBindingRequired(bool required) external {
+        require(msg.sender == governance, "not governance");
+        bindingRequired = required;
+        emit BindingRequiredSet(required);
+    }
+
     function setSpendVerifier(address next) external {
         require(msg.sender == governance, "not governance");
         require(next != address(0),       "verifier=0");
@@ -304,6 +351,7 @@ contract Notes {
         uint256          totalFace,
         uint256[] calldata cms
     ) external {
+        require(!bindingRequired, "Notes: binding required");
         uint256[] memory mode = new uint256[](cms.length);
         for (uint256 i = 0; i < cms.length; i++) mode[i] = MODE_PUBLIC;
         _mint(proof, mode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms,
@@ -319,6 +367,7 @@ contract Notes {
         uint256[] calldata cms,
         uint256[] calldata issuerMode
     ) external {
+        require(!bindingRequired, "Notes: binding required");
         // Raw / non-public path: verifies the proof (which binds issuerMode to
         // each committed flavor) and appends, with no identity gate beyond the
         // legacy auto-Schnorr -- when msg.sender is a registered PUBLIC Identity
@@ -384,20 +433,31 @@ contract Notes {
         emit IssuerBound(msg.sender, newRoot);
     }
 
-    /// @notice Mint a PRIVATE-issuer (A2) batch with per-leaf issuerMode gating.
-    ///         Every leaf must be PRIVATE-mode (issuerMode[i] == MODE_PRIVATE):
-    ///         `msg.sender` must be a registered PRIVATE Identity and supply one
-    ///         verified A2 re-encryption binding per private leaf (count
-    ///         completeness).  Supersedes the bindings-only A2 overload by also
-    ///         enforcing, via issuerMode, that the batch carries no PUBLIC leaf
-    ///         a private issuer could not bind.
+    /// @notice Mint a PRIVATE-issuer (A2) batch with the collusion-resistant
+    ///         per-leaf eIss leaf-tie.  Every leaf must be PRIVATE-mode
+    ///         (issuerMode[i] == MODE_PRIVATE); `msg.sender` must be a registered
+    ///         PRIVATE Identity and supply exactly one A2 re-encryption binding
+    ///         per committed leaf.  The proof is verified by the *A2* mint
+    ///         circuit (mint_batch_a2), which constrains every leaf to flavor ==
+    ///         A2 and exposes each leaf's committed `eIss` as a public output; we
+    ///         pass the bindings' `eIss` as that public input, so a Groth16
+    ///         accept proves each binding's `eIss` *is* the committed leaf's --
+    ///         the leaf-tie that closes the floating-/missing-binding collusion
+    ///         sub-cases (per-batch count alone could not).
     ///
-    /// @dev    Count completeness (one binding per private leaf) is enforced
-    ///         here; tying each binding's `eIss` to a *specific* committed leaf
-    ///         still rests on the off-chain note artifact + the recipient's
-    ///         verifiable decryption until the mint SNARK exposes per-leaf
-    ///         `eIss` (The Required Mint SNARK Signal).  issuerMode binding is
-    ///         deferred to the same verifier regen as the PUBLIC path above.
+    /// @dev    What the leaf-tie does and does NOT close.  It binds each
+    ///         committed leaf to a *verified* re-encryption of the issuer's
+    ///         registered Identity, so no leaf is left without a binding and no
+    ///         binding can float to a different leaf.  It does NOT force the
+    ///         binding's `pk_rec` to be the addressed recipient's registered key
+    ///         (verifyIssuerReenc binds `eIss` to the key committed in the
+    ///         proof's `Q`, which the issuer chooses); a colluding issuer+
+    ///         recipient can still encrypt `eIss` under a throwaway key, leaving
+    ///         the issuer un-nameable while the note stays spendable.  Closing
+    ///         that residual hole needs the eNote<->eIss recipient-key coupling
+    ///         at mint -- see alberta-buck-notes-decryptability.org ("The A2
+    ///         recipient-key coupling gap").  issuerMode here is a caller-facing
+    ///         assertion (the A2 circuit independently constrains flavor == A2).
     function mint(
         bytes   calldata proof,
         uint256          oldRoot,
@@ -408,7 +468,6 @@ contract Notes {
         uint256[] calldata issuerMode,
         A2Binding[] calldata a2Bindings
     ) external {
-        _verifyMintOrRevert(proof, issuerMode, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
         require(address(identityRegistry) != address(0),
                 "Notes: identity registry not set");
         (uint256 nPublic, uint256 nPrivate) = _classifyModes(issuerMode, cms.length);
@@ -417,6 +476,20 @@ contract Notes {
         require(!identityRegistry.isPublicIdentity(msg.sender),
                 "Notes: private-mode leaf needs private issuer");
         require(a2Bindings.length == nPrivate, "Notes: A2 binding count");
+
+        // Leaf-tie: the bindings' eIss are the A2 circuit's public inputs, so a
+        // valid proof ties each committed leaf to the binding answering for it.
+        uint256[4][] memory eIss = new uint256[4][](a2Bindings.length);
+        for (uint256 i = 0; i < a2Bindings.length; i++) {
+            eIss[i][0] = a2Bindings[i].eIss.R.X;
+            eIss[i][1] = a2Bindings[i].eIss.R.Y;
+            eIss[i][2] = a2Bindings[i].eIss.C.X;
+            eIss[i][3] = a2Bindings[i].eIss.C.Y;
+        }
+        _verifyA2MintOrRevert(proof, eIss, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
+
+        // Each committed eIss must carry a valid re-encryption of the issuer's
+        // registered Identity (soundness of the binding itself).
         for (uint256 i = 0; i < a2Bindings.length; i++) {
             require(
                 identityRegistry.verifyIssuerReenc(
@@ -501,6 +574,54 @@ contract Notes {
         require(
             mintVerifier.verifyMint(
                 proof, issuerMode, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
+            ),
+            "Notes: bad mint proof"
+        );
+    }
+
+    /// @dev A2 mint pre-flight: the same stale-state guards as
+    ///      `_verifyMintOrRevert`, plus the per-leaf `eIss` canonical bound, then
+    ///      the A2 Groth16 check.  `eIss` is the per-leaf E_iss-for-rec the
+    ///      bindings carry; passing it as the A2 circuit's public input makes the
+    ///      verifier's accept the leaf-tie (the circuit exposes the *committed*
+    ///      leaf's eIss, so equality with what we pass is a constraint, not a
+    ///      contract-side compare).  View-only -- reverts here abort before BUCK
+    ///      moves or tree state advances.
+    function _verifyA2MintOrRevert(
+        bytes   calldata proof,
+        uint256[4][] memory eIss,
+        uint256          oldRoot,
+        uint256          newRoot,
+        uint32           nextLeafIndex_,
+        uint256          totalFace,
+        uint256[] calldata cms
+    ) internal view {
+        require(cms.length > 0,                            "Notes: empty mint");
+        require(eIss.length == cms.length,                 "Notes: eIss/cms length");
+        require(address(a2MintVerifier) != address(0),     "Notes: a2 verifier not set");
+        require(uint256(nextLeafIndex_) + cms.length
+                <= (uint256(1) << TREE_DEPTH),             "Notes: tree full");
+        require(oldRoot == roots[currentRootIndex],        "Notes: stale oldRoot");
+        require(nextLeafIndex_ == nextLeafIndex,           "Notes: stale nextLeafIndex");
+        require(newRoot != 0,                              "Notes: zero newRoot");
+        require(newRoot < FIELD_R,                         "Notes: newRoot out of field");
+
+        uint256 N = cms.length;
+        for (uint256 i = 0; i < N; i++) {
+            require(cms[i] < FIELD_R, "Notes: cm out of field");
+            // eIss is exposed by the SNARK reduced mod FIELD_R while the binding
+            // uses the full base-field point; require the canonical representative
+            // so the leaf-tie and the binding agree on one value.  (The snarkjs
+            // verifier rejects public inputs >= FIELD_R regardless; honest ElGamal
+            // coordinates are < FIELD_R with overwhelming probability.)
+            require(eIss[i][0] < FIELD_R && eIss[i][1] < FIELD_R
+                 && eIss[i][2] < FIELD_R && eIss[i][3] < FIELD_R,
+                    "Notes: eIss out of field");
+        }
+
+        require(
+            a2MintVerifier.verifyMint(
+                proof, eIss, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
             ),
             "Notes: bad mint proof"
         );
