@@ -101,6 +101,22 @@ contract IdentityRegistry {
         BN254.G1Point T;    // T_hat = r'*pk_rec + gamma*G (blinds M_iss)
     }
 
+    /// @notice Identity-targeted unilateral-A2 deposit coupling proof.  The
+    ///         depositor proves knowledge of (m_rec, sk_dep, b) such that its
+    ///         registered account is bound to the identity m_rec and the leaf's
+    ///         eIss decrypts under m_rec to the point committed (hidden) in P_I.
+    ///         Mirrors alberta_buck.wallet.unilateral_a2.DepositCouplingProof.
+    struct DepositCouplingProof {
+        uint256 e;
+        uint256 s_m;        // response for m_rec (identity scalar)
+        uint256 s_s;        // response for sk_dep (account key)
+        uint256 s_b;        // response for b (P_I blind)
+        BN254.G1Point A2;   // k_m*G + k_s*R_d
+        BN254.G1Point A3;   // k_m*R_e - k_b*H
+        BN254.G1Point A4;   // k_s*G
+        BN254.G1Point P_I;  // M_I + b*H  (hides the decrypted issuer identity)
+    }
+
     /// @notice Second generator H for the A2 binding -- a nothing-up-my-sleeve
     ///         point, H = keccak256("AlbertaBuck:IssuerReenc:H") (mod R) * G.
     ///         Mirrors alberta_buck.wallet.issuer_reenc.H_POINT.  Used only to
@@ -590,6 +606,71 @@ contract IdentityRegistry {
         pts[12] = pi.A5;
         uint256[] memory scl = new uint256[](2);
         scl[0] = uint256(uint160(issuer));
+        scl[1] = chainid;
+        return BN254.fsChallenge(pts, scl);
+    }
+
+    /// @notice Verify an identity-targeted unilateral-A2 deposit coupling.  Reads
+    ///         the depositor's registered (pk_dep, E_addr) and confirms the three
+    ///         Okamoto relations -- without learning any identity (m_rec, M_rec
+    ///         and M_I all stay hidden; M_I is committed, blinded, in P_I).  The
+    ///         companion membership proof of P_I's point in the identity tree
+    ///         (off chain / SNARK) closes the collusion gate.  Mirrors
+    ///         alberta_buck.wallet.unilateral_a2.deposit_couple_verify.
+    function verifyDepositCoupling(
+        address depositor,
+        ElGamalCT calldata eIss,
+        DepositCouplingProof calldata pi
+    ) external view returns (bool) {
+        if (!_isRegistered(depositor)) return false;
+
+        BN254.G1Point memory pkDep = _pk[depositor];
+        ElGamalCT     memory E_dep = _E_addr[depositor];
+        BN254.G1Point memory H     = BN254.G1Point(H_X, H_Y);
+
+        // E4: s_s*G == A4 + e*pk_dep            (sk_dep is the real account key)
+        if (!BN254.eq(
+            BN254.mul(BN254.g1(), pi.s_s),
+            BN254.add(pi.A4, BN254.mul(pkDep, pi.e))
+        )) return false;
+
+        // E2: s_m*G + s_s*R_d == A2 + e*C_d     (account bound to M_rec = m_rec*G)
+        if (!BN254.eq(
+            BN254.add(BN254.mul(BN254.g1(), pi.s_m), BN254.mul(E_dep.R, pi.s_s)),
+            BN254.add(pi.A2, BN254.mul(E_dep.C, pi.e))
+        )) return false;
+
+        // E3: s_m*R_e - s_b*H == A3 + e*(C_e - P_I)   (eIss decrypts under m_rec)
+        BN254.G1Point memory X = BN254.add(eIss.C, BN254.neg(pi.P_I));
+        if (!BN254.eq(
+            BN254.add(BN254.mul(eIss.R, pi.s_m), BN254.neg(BN254.mul(H, pi.s_b))),
+            BN254.add(pi.A3, BN254.mul(X, pi.e))
+        )) return false;
+
+        // Fiat-Shamir
+        return pi.e == _fsDepositCoupling(pkDep, E_dep, eIss, pi, depositor, block.chainid);
+    }
+
+    function _fsDepositCoupling(
+        BN254.G1Point memory pkDep,
+        ElGamalCT memory E_dep,
+        ElGamalCT calldata eIss,
+        DepositCouplingProof calldata pi,
+        address depositor,
+        uint256 chainid
+    ) internal pure returns (uint256) {
+        BN254.G1Point[] memory pts = new BN254.G1Point[](9);
+        pts[0] = pkDep;
+        pts[1] = E_dep.R;
+        pts[2] = E_dep.C;
+        pts[3] = eIss.R;
+        pts[4] = eIss.C;
+        pts[5] = pi.P_I;
+        pts[6] = pi.A2;
+        pts[7] = pi.A3;
+        pts[8] = pi.A4;
+        uint256[] memory scl = new uint256[](2);
+        scl[0] = uint256(uint160(depositor));
         scl[1] = chainid;
         return BN254.fsChallenge(pts, scl);
     }

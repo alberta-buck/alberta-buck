@@ -1104,11 +1104,116 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
     PLONK lookups, or a 2-cycle like BN254/Grumpkin for native in-circuit EC) would
     cut the EC cost dramatically but is itself a proving-stack migration.
 
+    *Where the cost lands -- and a substrate that absorbs it.*  The
+    \( \sim\!10^6 \) R1CS is a /prover/ cost; the on-chain Groth16
+    /verification/ is constant (~250K gas) whatever the circuit size, so EVM
+    cost was never the obstacle.  Since the wallet proves off chain, a
+    free-compute substrate -- /Holochain/, which already holds the wallet's
+    bulk data -- absorbs it: the agent hosts the registry tree (only the
+    /root/ need be on-chain), generates the non-native-EC proof at leisure,
+    and the EVM does one constant-gas verify.  Per-leaf proving with
+    recursive aggregation (one verify for many leaves) sidesteps the
+    hundreds-of-GB batch ceremony and restores the larger \( N \) the line
+    above gives up.  The envelope thus shifts: the /prover-feasibility/
+    objection (minute-scale proves, giant ceremony) largely dissolves on
+    such a substrate, leaving the proving-stack choice (thread 2) and -- the
+    true dominant residual -- the *audit*, which free compute does nothing
+    for.
+
     *Recommendation.*  Weigh this against the KYC backstop (above) before starting:
     it restores /bilateral, self-service/ non-deniability for the A2-collusion
     corner only, at the price of a major phase and shrunken A2 batch sizes.  If
     greenlit, gate it on the spike + PoC; do not begin the ceremony/wiring/audit
     until the N=1 PoC confirms the relation is sound and the costs are as modelled.
+
+*** The identity-targeted alternative: name the identity, not the account
+
+    The account-targeted coupling above is hard because it fights the grain of
+    the system.  A direct EOA transfer /deduces/ the identities from the two
+    accounts in play -- the account is primary, \( M \) is derived.  A Note is
+    the opposite: it /names/ the identities and treats the accounts as
+    incidental envelopes, required only to /match/ the expected \( M \).  The
+    account-targeted construction re-imports the EOA model (pin a specific
+    registered /account/ \( pk_D \)) and pays for it in non-native account-leaf
+    membership.  Targeting the /identity/ directly is the lighter problem, and
+    it is the one that fits the spirit of Notes.
+
+    *The shift.*  Encrypt the issuer payload under the recipient's identity
+    /point/ rather than an account key:
+    \[
+      eIss \;=\; (R_e,\ C_e) \;=\; \bigl(r\,G,\ M_I + r\,M_{\text{rec}}\bigr),
+      \qquad M_{\text{rec}} = m_{\text{rec}} G,
+    \]
+    where \( m_{\text{rec}} = H(\text{id}_{\text{rec}}) \) is the identity scalar
+    that /every/ Fountain account of the recipient shares.  The decryption
+    secret is therefore \( m_{\text{rec}} \), not any account key: the issuer
+    needs only \( M_{\text{rec}} \) (which the recipient revealed off chain), and
+    /any/ account the depositor later uses can open \( eIss \).  This is exactly
+    "the spender knows the recipient's \( M \), not which account will deposit."
+
+    *Anti-framing stays at mint (shipped).*  =verifyIssuerReenc= already forces
+    \( eIss \) to re-encrypt =msg.sender='s /own/ registered \( M_I \) under the
+    committed point, so the decrypted issuer is always the true minter, never a
+    substituted victim.
+
+    *The coupling moves to spend, as a registry-identity membership.*  Maintain
+    a registry accumulator of registered identity /points/ \( M \) with public
+    root \( \mathsf{rt_{id}} \).  The depositor's spend circuit proves, with
+    private witnesses \( (m_{\text{rec}}, M_I, \pi) \) and the committed
+    \( eIss = (R_e, C_e) \):
+    \[
+    \begin{aligned}
+      &\textbf{(N1)} & M_{\text{rec}} &= m_{\text{rec}}\,G
+        &&\text{— I hold the addressed identity's scalar;}\\
+      &\textbf{(N2)} & idHash &= \mathrm{Poseidon}(M_{\text{rec}},\, eIss,\, \ldots)
+        &&\text{— } M_{\text{rec}} \text{ is \emph{this} note's target;}\\
+      &\textbf{(N3)} & M_I &= C_e - m_{\text{rec}}\,R_e
+        &&\text{— decrypt the issuer's identity;}\\
+      &\textbf{(N4)} & 1 &= \mathsf{MerkleVerify}(\mathsf{rt_{id}},\, \pi,\, M_I)
+        &&\text{— the issuer is a registered identity.}
+    \end{aligned}
+    \]
+    The receiving account is separately tied to \( M_{\text{rec}} \) by the
+    existing on-chain =verifySpendCP= (so the KYC-identifiable payout vehicle
+    matches the named identity).
+
+    *Why it closes the gap.*  (N3)+(N4) are /mandatory/ to spend.  A colluding
+    issuer who keys \( eIss \) to anything but \( M_{\text{rec}} \) makes (N3)
+    decrypt to a non-member, (N4) fails, and the *spend reverts* -- there is no
+    spendable-but-unnameable note.  (N1)+(N2) stop the depositor cheating by
+    feeding a convenient \( m_{\text{rec}} \): it must be the scalar of /this
+    note's committed target/.  Everything is in zero knowledge, so \( M_I \) and
+    \( M_{\text{rec}} \) never appear on chain -- this /overcomes the earlier
+    spend-side objection/ (/Can it be closed now?/), which assumed \( M_I \) had
+    to be revealed; a membership proof of the decrypted point reveals nothing.
+
+    *The receipt is unilaterally recipient-produceable.*  The depositor holds the
+    one secret \( m_{\text{rec}} \) that names /both/ parties: their own identity
+    \( M_{\text{rec}} = m_{\text{rec}} G \) trivially, and the issuer's
+    \( M_I = C_e - m_{\text{rec}} R_e \) by decryption.  So even "in a pinch" --
+    with no issuer participation at spend -- the recipient can produce a
+    plaintext receipt naming both, third-party-checkable against
+    \( \mathsf{rt_{id}} \) and the mint =verifyIssuerReenc=.  This is the
+    /recipient-burden/ posture made cryptographically complete rather than merely
+    economic: the always-KYC-identifiable party holds the entire bilateral
+    receipt, and the mandatory (N3)+(N4) make producing it a /precondition of
+    payment/.
+
+    *Why it is the easier problem.*  The expensive account-set-membership over
+    full account leaves \( \mathrm{Poseidon}(pk_D, E_{\text{addr}}[D]) \) is
+    replaced by a /native/ Poseidon-Merkle membership of a single point \( M_I \);
+    the non-native EC collapses to two scalar-muls (\( m_{\text{rec}} G \) and
+    \( m_{\text{rec}} R_e \)) against the account-targeted construction's five-odd
+    (a rerandomisation plus two full encryptions plus \( sk_I R_I \)).  A further
+    split is open: prove (N1),(N3) as an /on-chain blinded sigma/ (EIP-196, the
+    =verifyIssuerReenc= shape, values Pedersen-committed and hidden) and leave
+    /only/ the native membership (N4) to a small SNARK -- removing non-native EC
+    from the circuit entirely.  Residuals are honest: the depositor's
+    own-identity tie (fold into =verifySpendCP= vs. an in-circuit check), the
+    identity accumulator's root maintenance (Holochain holds the tree; only the
+    root is on-chain), and a full cost + audit.  It is a *promising variant to
+    PoC*, not a shipped result -- but it is materially lighter than the
+    account-targeted phase and matches what a Note /is/.
 
 ** Cost and migration
 
@@ -1301,16 +1406,53 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
       with native non-native support -- Halo2/PLONK with lookups, or a 2-cycle
       (BN254/Grumpkin) giving /native/ in-circuit EC on the partner curve -- could
       cut this by an order of magnitude.  Evaluate vs the Groth16 toolchain already
-      in the repo.
+      in the repo.  Orthogonally to the /circuit/ cost, the /prover/ cost is
+      off-loadable: the proof is generated off chain on the wallet's Holochain
+      agent (which already holds the registry tree and has ample compute) and the
+      EVM verifies it in constant gas -- so the stack choice and the substrate
+      compose, a cheaper stack shrinking the circuit and a free substrate
+      absorbing whatever remains.
    3. *Registry accumulator design.*  On-chain incremental Poseidon tree
       (gas on each registration) vs an off-chain-maintained root proven correct by
       a small SNARK; interaction with the existing mapping-based registry.
-   4. *Recipient co-participation.*  Does /any/ 2-party mint (the recipient
-      contributes a blinded verifiable-decryption) escape the unlinkability wall?
-      The wall: such a proof cannot reference \(E_{\text{note}}\) without exposing
-      it (linking mint to spend).  A rigorous treatment of whether a blinded,
-      \(E_{\text{note}}\)-free recipient proof can still pin \(pk_D\) would either
-      yield a cheaper construction or strengthen the impossibility.
+   4. *Recipient co-participation, and where the binding lives.*  The
+      account-targeted coupling (/Scope/) does /not/ actually need the recipient
+      online: the issuer witnesses the recipient's /public/ registry record
+      \((pk_D, E_{\text{addr}}[D],\) Merkle path\()\) -- it is addressing the note
+      to that account -- and the in-SNARK membership needs no \(sk_D\).  So the
+      issuer mints to an /offline/ recipient.  Two richer variants deserve a
+      rigorous treatment:
+      - */Interactive A2./*  If both parties are co-present off chain (Holochain),
+        they run the full bilateral =approve= inside the wallet and prove it at
+        mint -- the EOA transfer's /free/ collusion-resistant mutual
+        decryptability -- while still depositing later, unlinkably.  This buys
+        EOA-grade bilateral non-deniability at the cost of an online recipient
+        (fine for self-wormholes and present counterparties).
+      - */Identity-targeted, spend-side membership./*  Address the note to the
+        recipient's /identity point/ \(M_{\text{rec}}\) rather than a specific
+        account, encrypting \(eIss\) under \(M_{\text{rec}}\) (decryptable by the
+        identity scalar \(m_{\text{rec}}\) that /every/ Fountain account of the
+        recipient shares) -- so the issuer needs only \(M_{\text{rec}}\), never an
+        account.  Enforce the coupling at /spend/: the depositor's circuit
+        /mandatorily/ proves "\(eIss\), decrypted under the identity \(m\) I
+        authenticate as, yields \(M_I\), and \(M_I \in\) the registry-identity
+        tree" -- in ZK, so \(M_I\) stays hidden.  A bogus \(eIss\) decrypts to a
+        non-member and the spend /reverts/; a colluding recipient cannot both
+        spend and decline to name.  This /overcomes the earlier spend-side
+        objection/ (/Can it be closed now?/): that objection assumed \(M_I\) had
+        to be /revealed/ at spend, but a ZK membership proof of the decrypted
+        point reveals nothing.  It needs one non-native scalar-mul (the
+        decryption) plus a /native/ Poseidon-Merkle membership against a tree the
+        Holochain agent already holds -- plausibly cheaper than the mint-side
+        account-targeted coupling, and the recipient's \(m_{\text{rec}}\) is
+        present at spend by construction.  Anti-/framing/ still rides on the
+        mint-side =verifyIssuerReenc= (it forces \(eIss\) over the issuer's /own/
+        registered \(M_I\), so the spend-decrypted member is the true minter,
+        never a substituted victim).  Open: a full circuit cost + audit, and
+        whether the depositor's own identity proof folds into the existing
+        =verifySpendCP= or needs an in-circuit credential check.  Full treatment
+        with the spend relation in display math: /The identity-targeted
+        alternative: name the identity, not the account/.
    5. *Mechanism design as an alternative to crypto.*  Formalise the
       "recipient bears the burden" safeguard: under what audit probability and
       penalty does the recipient-burden deter A2 collusion as effectively as

@@ -9,7 +9,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: BUCK Notes are the Alberta Buck's privacy-preserving bearer-instrument primitive: a single Tornado-style Poseidon Merkle tree of note commitments, a nullifier set, and Groth16 SNARK circuits for mint and spend (both spend circuits are shipped -- the bearer-shape spend and the addressed-shape spend_a) parameterised along two orthogonal axes: depositor Identity binding (present = addressed, absent = bearer) and issuer visibility (public or private).  The resulting three flavors -- A1 identified cheque, A2 private cheque, B1 bearer cheque -- subsume every bearer-instrument use case the Alberta Buck series has previously explored (self-wormholes between private accounts, signed cheques, targeted gifts, printable paper notes) inside a single commitment-pool primitive.  Demurrage needs no note-side machinery: the Notes Pool is the Notes contract's own ERC-20 balance, and spend is an ordinary BUCK transfer out of the pool -- because the pool is a registered Carrying account, BUCK routes it through the Carrying-transfer path, delivering the full face value and apportioning a proportional share of the pool's accumulated buck-seconds (its demurrage age) onto the recipient.  Donations to the pool freshen its index and subsidise all subsequent spends.  The same commitment can be published on chain, mailed in a letter, or printed on paper with a QR code; counterfeiting is cryptographically impossible, and demurrage makes lost notes return value to the commons rather than extracting it as seigniorage.  Addressed (A1, A2) notes are cryptographically safe for indefinite holding (the shipped spend_a.circom binds the recipient's Identity); B1 bearer cheques are civil-trust instruments meant to be cashed promptly.  Notes defeat bulk on-chain traceability while preserving bilateral disclosure to both named parties and under warrant.  This is the first design where a private bearer instrument is a native, first-class primitive of the monetary system rather than an aftermarket wrapper.
+#+description: BUCK Notes are the Alberta Buck's privacy-preserving bearer-instrument primitive: a single Tornado-style Poseidon Merkle tree of note commitments, a nullifier set, and Groth16 SNARK circuits for mint and spend (both spend circuits are shipped -- the bearer-shape spend and the addressed-shape spend_a) parameterised along two orthogonal axes: depositor Identity binding (present = addressed, absent = bearer) and issuer visibility (public or private).  The resulting three flavors -- A1 identified cheque, A2 private cheque, B1 bearer cheque -- subsume every bearer-instrument use case the Alberta Buck series has previously explored (signed cheques, payroll and audited disbursements, printable paper notes, and -- as a reserved private-issuer extension -- self-wormholes between private accounts) inside a single commitment-pool primitive.  Demurrage needs no note-side machinery: the Notes Pool is the Notes contract's own ERC-20 balance, and spend is an ordinary BUCK transfer out of the pool -- because the pool is a registered Carrying account, BUCK routes it through the Carrying-transfer path, delivering the full face value and apportioning a proportional share of the pool's accumulated buck-seconds (its demurrage age) onto the recipient.  Donations to the pool freshen its index and subsidise all subsequent spends.  The same commitment can be published on chain, mailed in a letter, or printed on paper with a QR code; counterfeiting is cryptographically impossible, and demurrage makes lost notes return value to the commons rather than extracting it as seigniorage.  Addressed (A1, A2) notes are cryptographically safe for indefinite holding (the shipped spend_a.circom binds the recipient's Identity); B1 bearer cheques are civil-trust instruments meant to be cashed promptly.  The public-issuer flavors (A1, B1) are the current shipping product -- their bilateral, court-compellable receipt is sound and collusion-resistant; the private-issuer A2 flavor is reserved as a future enhancement, carrying a residual recipient-key coupling gap bounded in the interim by a recipient-burden posture.  Notes defeat bulk on-chain traceability while preserving bilateral disclosure to both named parties and under warrant.  This is the first design where a private bearer instrument is a native, first-class primitive of the monetary system rather than an aftermarket wrapper.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-notes
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -179,27 +179,34 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    these yields three realisable flavors -- the private-bearer cell is
    ruled out by BUCK's mutual-decryptability invariant:
 
-   - *A2 -- Addressed Cheque, Private Issuer.*  The issuer
-     re-randomizes the recipient's registered ElGamal credential into
-     the note payload; the A-spend predicate requires the depositor to
-     produce \( sk_{\text{rec}} \) (the mint-time private key paired
-     with the \( pk_{\text{rec}} \) used for the re-randomization) and
-     prove it decrypts both \( E_{\text{note}} \) and the depositor's
-     own registered credential to the same identity point.  A note
-     Alice issues from a private account to a named recipient
-     (including herself at another of her own accounts) with no
-     on-chain edge visible to third parties.  The canonical
-     /wormhole/ is the degenerate self-issued subcase.
-   - *A1 -- Addressed Cheque, Public Issuer.*  Same addressed binding
-     as A2, plus a Schnorr signature by the issuer over the commitment
-     with their plaintext =M_issuer=.  A cheque whose maker is
-     publicly attributable and whose recipient is named but not
-     visible to third parties -- payroll, audit-friendly disbursement,
-     B2C payment.
+   - *A1 -- Addressed Cheque, Public Issuer.*  An addressed binding
+     (only the named recipient may deposit: the A-spend predicate
+     requires the depositor to produce \( sk_{\text{rec}} \), the
+     mint-time private key paired with the \( pk_{\text{rec}} \) used to
+     re-randomize the recipient's registered credential, and prove it
+     decrypts both \( E_{\text{note}} \) and the depositor's own
+     registered credential to the same identity point), plus a Schnorr
+     signature by the issuer over the commitment with their plaintext
+     =M_issuer=.  A cheque whose maker is publicly attributable and
+     whose recipient is named but not visible to third parties --
+     payroll, audit-friendly disbursement, B2C payment.  *Current
+     shipping product.*
    - *B1 -- Bearer Cheque, Public Issuer.*  Plaintext issuer =M=; no
      recipient binding; first registered holder to publish the
      nullifier \( \rho \) redeems.  A cashier's cheque: maker known,
-     bearer not, cash-on-presentation.
+     bearer not, cash-on-presentation.  *Current shipping product.*
+   - *A2 -- Addressed Cheque, Private Issuer.*  Same addressed binding
+     as A1, but the issuer's Identity is /encrypted/ to the recipient
+     (=E_iss-for-rec=) rather than published in the clear.  A note Alice
+     issues from a private account to a named recipient (including
+     herself at another of her own accounts) with no on-chain edge
+     visible to third parties; the canonical /wormhole/ is the
+     degenerate self-issued subcase.  *Reserved future enhancement:* A2
+     carries a residual recipient-key coupling gap (a colluding
+     issuer+recipient can leave the issuer un-nameable), so it ships
+     only under a recipient-burden posture pending the in-SNARK coupling
+     -- see the staging note in /Note Flavors/ below and the
+     Decryptability companion's /Decision: A1/B1 now, A2 reserved/.
 
    *Demurrage needs no new machinery.*  The Notes Pool /is/ simply the
    Notes contract's own ERC-20 balance -- a regular BUCK account
@@ -509,11 +516,21 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    =isPublicIdentity= issuer to sign the batch commitment with a Schnorr
    signature verified by =IdentityRegistry.verifyIssuerSchnorr= -- and the
    depositor's half is bound at /deposit/ via =verifyDepositorForIssuer=
-   plus the =SpentB= event carrying =E_depositor_for_issuer=.  *Phase 2:*
-   the private (A2) issuer's re-encryption is bound in-circuit at mint,
-   and the B-spend SNARK is extended to bind the issuer to each bearer
-   leaf (so a bearer leaf from a non-public minter becomes impossible,
-   not merely unbound).
+   plus the =SpentB= event carrying =E_depositor_for_issuer=.  *Phase 2
+   (shipped):* the private (A2) issuer's re-encryption is bound at mint
+   by the on-chain blinded-CP =IdentityRegistry.verifyIssuerReenc= (not
+   in-SNARK -- the in-circuit native-G1 route was declined for cost), the
+   mint SNARK now exposes a verified per-leaf =issuerMode= that makes a
+   bearer leaf from a non-public minter /unprovable/ (the on-chain image
+   of B2-impossibility), and a dedicated A2 mint circuit ties each
+   private leaf's =eIss= to its own verified binding.  The one remaining
+   A2 item -- the recipient-key coupling that would make A2
+   collusion-resistant -- is *reserved* (it needs in-SNARK registry
+   set-membership over non-native BN254 \( \mathbb{G}_1 \)); in the
+   interim A2 ships under a recipient-burden posture.  This is why *the
+   public-issuer flavors A1 and B1 are the current product and A2 is a
+   reserved future enhancement* (full treatment, including the decision
+   rationale, in /alberta-buck-notes-decryptability/).
 
    The Notes contract itself is bound under a Public Identity
    (=bindContract(notes, pk_op, E_op, true, true)=).  Both the issuer
@@ -588,9 +605,10 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    accounts) through an out-of-band encrypted channel -- typically the
    wallet's internal storage, or a direct peer-to-peer message between
    wallets.  The note never leaves the issuer's control infrastructure.
-   The canonical self-wormhole case: Alice mints an A2 note targeting
-   her own =M= from a private account and deposits it into a second
-   unlinkable account.
+   The typical self-wormhole case (an A2 note, the reserved
+   private-issuer flavor): Alice mints an A2 note targeting her own =M=
+   from a private account and deposits it into a second unlinkable
+   account.
 
 ** Message Notes
 
@@ -712,6 +730,26 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
   (Chaum-Pedersen equality and Schnorr PoK), distinguished by which
   half of the handshake is carried in the commitment.
 
+  *Shipping status (staging).*  The two /public-issuer/ flavors -- *A1*
+  (addressed) and *B1* (bearer) -- are the *current product*: the issuer
+  is bound at mint by a Schnorr signature over the batch
+  (=verifyIssuerSchnorr=), the depositor's reverse leg is the
+  =verifyApprove=-shaped =verifyDepositorForIssuer=, and the resulting
+  bilateral receipt is /sound, collusion-resistant, and
+  third-party-free/ (the full EOA-transfer guarantee).  The
+  /private-issuer/ flavor -- *A2* -- is *reserved as a future
+  enhancement*: its issuer binding and per-leaf =eIss= leaf-tie are
+  shipped, but a residual /recipient-key coupling gap/ lets a colluding
+  issuer+recipient leave the issuer un-nameable, so A2 ships only under a
+  *recipient-burden* posture (an un-nameable A2 deposit marks the
+  always-KYC-identifiable recipient) until the in-SNARK coupling
+  (registry set-membership over non-native BN254 \( \mathbb{G}_1 \)) is
+  built.  The presentation below details *A2 first for cryptographic
+  continuity* (A1 is "A2 with the issuer in the clear"), but read A1/B1
+  as today's instruments and A2 as the reserved option.  See the
+  Decryptability companion's /The EOA Transfer Mirror/ and /Decision:
+  A1/B1 now, A2 reserved/.
+
   *Why bearer forces a public issuer -- and how it is enforced.*  The B2
   cell is ruled out for a concrete reason, not a stylistic one: a bearer
   note has no pre-known depositor, hence no recipient \( pk \) under
@@ -740,7 +778,9 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Flavor A2: Addressed Cheque, Private Issuer
 
-   The canonical private-to-private transfer.  Subsumes "self-wormhole"
+   *Status: reserved future enhancement (see the staging note above).*
+
+   The private-to-private transfer.  Subsumes "self-wormhole"
    (the degenerate case issuer \(\equiv\) recipient, where Alice mints
    to her own registered \( M \) and later deposits from a different
    registered credential bound to the same \( M \)).
@@ -792,6 +832,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
       witness, so this constraint implicitly forces
       \( pk_{\text{rec}} = pk_{\text{dep}} \) -- the depositor's current
       registered public key must equal the recipient's mint-time key.
+      (Note this binds the /note/ ciphertext \( E_{\text{note}} \) to the
+      depositor's registered key; it does /not/ constrain the separate
+      issuer payload \( E_{\text{iss-for-rec}} \), whose encryption key
+      the issuer chooses freely.  That asymmetry is the residual
+      /recipient-key coupling gap/ that reserves A2 for
+      collusion-resistant use -- see the Decryptability companion.)
    4. =faceValue= \( = v \).
    Simultaneously, the depositor attaches =E_depositor_for_issuer= (an
    ElGamal re-encryption of their own \( M_{\text{dep}} \) under the
@@ -813,6 +859,8 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    below.
 
 ** Flavor A1: Addressed Cheque, Public Issuer
+
+   *Status: current shipping product.*
 
    Identical to A2 except the issuer additionally publishes her own
    \( M_{\text{issuer}} \) in the clear, with a Schnorr signature
@@ -839,6 +887,8 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    cryptographic record that a specific merchant paid them.
 
 ** Flavor B1: Bearer Cheque, Public Issuer
+
+   *Status: current shipping product.*
 
    The classic cashier's cheque.  The issuer does not know the
    depositor at mint time; the note is bearer, and whoever shows up
@@ -890,9 +940,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    optionally completes the reverse leg by passing =E_depositor_for_issuer=
    plus a Chaum-Pedersen proof to =Notes.spend=, checked by
    =verifyDepositorForIssuer= and published in the =SpentB= event.
-   Folding the issuer signature-in-SNARK and the depositor's Schnorr PoK
-   (steps 3-4 above) /into/ the B-spend circuit -- which also lets the
-   contract reject a bearer leaf from a non-public minter -- is Phase 2.
+   Rejecting a bearer leaf from a non-public minter is now enforced at
+   /mint/ by the verified per-leaf =issuerMode= signal (shipped), not by
+   the B-spend circuit.  Folding the issuer signature-in-SNARK and the
+   depositor's Schnorr PoK (steps 3-4 above) /into/ the B-spend circuit
+   remains a lower-priority hardening: it would remove the
+   honest-depositor assumption behind the =SpentB= issuer naming, but a
+   B1 issuer is already named soundly at mint, so the receipt does not
+   depend on it.
 
 ** Comparison of the Three Flavors
 
@@ -917,6 +972,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    A fourth flavor -- bearer notes with no identity hook on either
    side -- is intentionally absent; see "What This Architecture Rules
    Out" below.
+
+   *Reading the table for staging:* the two public-issuer columns (A1,
+   B1) are the shipping product; the A2 column is the reserved
+   private-issuer enhancement.  A2's mutual-decryptability row holds for
+   an /honest/ issuer, but is not collusion-resistant until the in-SNARK
+   recipient-key coupling lands (Decryptability companion); A1/B1 are
+   collusion-resistant today.
 
 #+LATEX: \clearpage
 * The Interaction Matrix: Note Flavor x Depositor Account Mode
@@ -1639,8 +1701,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
    Mapping to use cases:
 
-   - *Long-term savings, cold storage, self-wormhole:* A2 (you are
-     the recipient).
+   - *Long-term savings, cold storage, self-issued notes:* A1
+     (addressed, public issuer -- the shipping flavor; for a self-issued
+     note the "public issuer" is simply you).  The fully-private
+     self-wormhole between encrypted-Identity accounts (A2) is the
+     reserved future enhancement, used only under the recipient-burden
+     posture.
    - *Estate, inheritance, named gifts:* A1 or A2 -- A1 when the
      recipient and heirs want public attribution of the issuer; A2
      when discretion is preferred.
@@ -1739,21 +1805,28 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Walking-Around Money
 
-   For digital "send at the moment of payment," an A2 note targeted to
-   the payee's registered =M= is ideal: the recipient receives a
-   message-note that only they can deposit, and the issuer's Identity
-   is exchanged bilaterally through the commitment payload without any
-   on-chain edge.  For truly paper bearer cash -- a note that anyone
-   who holds the paper can spend -- a B1 cheque with hologram seal
-   fills the role, issued by a trusted public party (credit union,
-   commercial issuer) who publicly warrants erasure of \( \rho \) after
-   printing.
+   For digital "send at the moment of payment," an /addressed/ note
+   targeted to the payee's registered =M= is ideal: the recipient
+   receives a message-note that only they can deposit.  In the shipping
+   product this is an *A1* note -- the payer's Identity is public and
+   attributable (bound at mint by =verifyIssuerSchnorr=) and exchanged
+   to the recipient through the note payload.  The reserved *A2* variant
+   additionally keeps the /payer's/ Identity private from third parties
+   (the issuer's Identity is encrypted to the recipient rather than in
+   the clear), at the cost of the recipient-burden posture that reserves
+   A2.  For truly paper bearer cash -- a note that anyone who holds the
+   paper can spend -- a *B1* cheque with hologram seal fills the role,
+   issued by a trusted public party (credit union, commercial issuer)
+   who publicly warrants erasure of \( \rho \) after printing.
 
-   Most walking-around use cases -- paying for a coffee, tipping, splitting a bill with a friend --
-   are better served by A2 message notes exchanged at the moment of payment.  The paper B1 form is
-   the right choice when one party has no digital wallet at hand or when strict bearer-on-paper
-   semantics are required.  If you are going somewhere that would be best to avoid taking your
-   phone, or just because you want to retain complete anonymity, such a note might be appropriate.
+   Most walking-around use cases -- paying for a coffee, tipping,
+   splitting a bill with a friend -- are served by A1 message notes
+   exchanged at the moment of payment.  The paper B1 form is the right
+   choice when one party has no digital wallet at hand or when strict
+   bearer-on-paper semantics are required.  Where the payer additionally
+   wants their own Identity hidden from third parties -- and is willing
+   to verify the note at delivery under the recipient-burden posture --
+   the reserved A2 form applies.
 
    Notes always yield the current pool demurrage rate, so neither encourage nor discourage rapid
    circulation rather than hoarding.  The wallet-app status codes give immediate VALID / DEAD / FAKE
@@ -1764,10 +1837,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** Cross-Border Remittances
 
    A paper BUCK Note is just paper.  It crosses borders in pockets,
-   envelopes, and parcels at zero marginal cost.  An A2 note targeted
-   to the recipient's registered =M= makes the transfer useless to
-   anyone except the intended recipient, so loss in transit is not a
-   financial risk.
+   envelopes, and parcels at zero marginal cost.  An /addressed/ note
+   (A1 in the shipping product; the reserved private-issuer A2 when the
+   sender's Identity must also stay off-chain) targeted to the
+   recipient's registered =M= makes the transfer useless to anyone
+   except the intended recipient, so loss in transit is not a financial
+   risk.
 
    This compares favorably to the existing remittance industry, which
    extracts roughly 6.5% in fees globally on $700+ billion in annual
@@ -1797,9 +1872,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Cold Storage and Disaster Preparedness
 
-   An A2 self-issued note (issuer = recipient, both the same
+   A self-issued addressed note (issuer = recipient, both the same
    registered =M=), stored in a fireproof safe, is a more durable form
-   of cold storage than a 12-word seed phrase.  The note is
+   of cold storage than a 12-word seed phrase.  In the shipping product
+   this is an *A1* self-issued note (your own public issuer Identity on
+   the note); the fully-private *A2* self-wormhole, which also hides
+   which encrypted account minted it, is the reserved enhancement.  The
+   note is
    /self-evidently/ an instrument of value -- a customs officer, a
    relative, or your future self immediately recognizes a paper labeled
    "1,000 BUCK Note" as something worth keeping safe.  A seed phrase,
@@ -2674,13 +2753,18 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
     CP-equality binds the note to the recipient's =M= and no hologram
     seal is needed.
 
-  The canonical "walking-around money" digital flow is handled by A2
-  notes: Alice targets the payee's registered =M= at the moment of
-  payment, hands over the opening via message or QR, and the
-  recipient deposits into their own account.  This changes the UX
-  relative to paper cash -- payment now involves a brief digital
-  handshake -- but gains a property physical cash lacks: a dropped or
-  intercepted A2 note is useless to anyone but the intended recipient.
+  The "walking-around money" digital flow is handled today by an
+  /addressed/ note: Alice targets the payee's registered =M= at the
+  moment of payment, hands over the opening via message or QR, and the
+  recipient deposits into their own account.  In the shipping product
+  this is an *A1* note (public, attributable issuer -- bound at mint by
+  =verifyIssuerSchnorr=); the reserved *A2* variant additionally hides
+  the /payer's/ Identity from third parties, under the recipient-burden
+  posture.  Either way the UX changes relative to paper cash -- payment
+  now involves a brief digital handshake -- but gains a property
+  physical cash lacks: a dropped or intercepted addressed note is
+  useless to anyone but the intended recipient (the addressed binding,
+  not the issuer-privacy, is what provides this).
 
 #+LATEX: \clearpage
 * Security Assumptions and Theorems Used
@@ -2882,6 +2966,18 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    Phases 5-8 are optional extensions deferred until the core system
    is production-proven.
 
+   *Relation to the issuer-binding phases.*  The phases above track the
+   /pool, circuit, and UX/ surface.  The orthogonal /issuer-binding/
+   work -- which closes the mutual-decryptability gap and determines the
+   A1/B1-vs-A2 staging -- is phased separately in the Decryptability
+   companion (/alberta-buck-notes-decryptability/): its Phase 1 (public
+   issuer Schnorr + depositor reverse leg) and Phase 2/2b/2c (the A2
+   blinded-CP binding, per-leaf =issuerMode=, and =eIss= leaf-tie) are
+   *shipped*, and the A2 recipient-key coupling is *reserved*.  The old
+   "A1 signature-in-payload (Phase 5)" plan is superseded: a public
+   issuer is now bound at /mint/ by the batch Schnorr
+   (=verifyIssuerSchnorr=), not by a signature inside the spend circuit.
+
 ** Regulatory and Legal Engagement
 
    In parallel with engineering, the legal and regulatory work:
@@ -3004,14 +3100,18 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
   BUCK Notes is the Alberta Buck's native private-bearer primitive.  A
   single Merkle tree of commitments, a single nullifier set, and three
-  realisable flavors -- /A2/ (addressed, private issuer; also
-  self-wormhole), /A1/ (addressed, public issuer; payroll and audited
-  cheques), and /B1/ (bearer, public issuer; cashier's cheques) --
-  span every use case the Alberta Buck series needs a bearer
-  instrument to cover, from cold-storage cryptographic self-wormholes
-  to walking-around paper notes to cross-border targeted remittances.
-  The fourth cell, private-bearer, is ruled out by BUCK's
-  mutual-decryptability invariant.
+  realisable flavors -- /A1/ (addressed, public issuer; payroll and
+  audited cheques), /B1/ (bearer, public issuer; cashier's cheques),
+  and /A2/ (addressed, private issuer; the reserved private-issuer
+  self-wormhole) -- span every use case the Alberta Buck series needs a
+  bearer instrument to cover, from walking-around and cross-border
+  targeted payments to cold-storage cryptographic notes.  The
+  public-issuer flavors *A1* and *B1* are the current shipping product
+  -- their bilateral receipt is sound, collusion-resistant, and
+  third-party-free; the private-issuer *A2* flavor is *reserved as a
+  future enhancement* (residual recipient-key coupling gap, bounded by a
+  recipient-burden posture).  The fourth cell, private-bearer, is ruled
+  out by BUCK's mutual-decryptability invariant.
 
   Demurrage needs no note-side machinery: the Notes Pool is the
   Notes contract's own ERC-20 balance -- a regular BUCK account with
@@ -3082,8 +3182,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
   a Schnorr PoK of the depositor's registered secret.  The only new
   circuit-level primitive is Poseidon, which is already standard
   across the SNARK ecosystem.  Implementation scope for Phases 1-4
-  (the full A1/A2/B1 production surface) is 5-7 months for a focused
-  team.
+  (the public-issuer A1/B1 production surface, plus the shipped A2
+  issuer-binding apparatus) is 5-7 months for a focused team; the A2
+  recipient-key coupling that would make private-issuer notes
+  collusion-resistant is a further reserved phase (in-SNARK registry
+  set-membership over non-native BN254 \( \mathbb{G}_1 \)).
 
   BUCK Notes answers the question Chaum was asking in 1982: what does
   digital cash look like when you take "cash" seriously?  The answer,

@@ -994,8 +994,14 @@ secret key and an archival node -- without any counterparty's cooperation.
     | Bob (authorized)        | Learns one account | By design -- the purpose of ~approve~          |
     | Bob + Carol (colluding) | Yes, via \( M \)   | But both already know Alice's name from        |
     |                         |                    | =identity_data= exchange                       |
-    | Issuer (on-chain only)  | NO                 | Cannot extract \( M \) without a secret key    |
-    | Issuer (given \( M \))  | YES                | By design -- regulatory compliance path        |
+    | Issuer (on-chain only)  | NO                 | Knows every \( M \) it issued, yet cannot      |
+    |                         |                    | plaintext-check \( M \) against any on-chain   |
+    |                         |                    | \( E \) (IND-CPA / DDH) nor recognise its      |
+    |                         |                    | rerandomised PS credential (statistical)       |
+    | Issuer (given a receipt)| Names the person   | A surrendered receipt carries account \(       |
+    |                         |                    | \leftrightarrow M \); the issuer maps \( M \)  |
+    |                         |                    | to the real person -- it /verifies/ a link     |
+    |                         |                    | others surrender, never /produces/ one         |
 
     Before ~approve~, Alice's accounts are unlinkable to everyone.
     After ~approve~, only that specific counterparty learns Alice's

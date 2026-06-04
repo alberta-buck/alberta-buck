@@ -1,0 +1,439 @@
+#+TITLE: The Unilateral A2 Note
+#+SUBTITLE: An Identity-Targeted Private Cheque Whose Recipient Alone Can Produce a Plaintext, Bilateral Receipt
+#+author: Perry Kundert
+#+date: 2026-06-03
+#+category: Alberta Buck
+#+series[]: Alberta-Buck
+#+series_order: 19
+#+weight: 20
+#+draft: false
+#+bucky: true
+#+math: true
+#+description: The identity-targeted A2 Note addresses an *identity* (the recipient's KYC-bound point M_rec), not an account.  The issuer encrypts its own registered identity M_I under M_rec, so any Fountain account the recipient holds can open it; the depositor proves eligibility to the EVM with a privacy-preserving Okamoto sigma that hides every identity; and the recipient -- alone, from the single secret m_rec -- decrypts M_I and produces a plaintext receipt naming both parties.  A colluding issuer cannot make a spendable-but-unnameable note: the decrypted issuer identity must be a member of the registry-identity tree.  Implemented and tested end to end (alberta_buck.wallet.unilateral_a2, IdentityRegistry.verifyDepositCoupling): 11 Python + 7 Solidity cross-artifact tests pass.
+#+EXPORT_FILE_NAME: ./images/alberta-buck-notes-unilateral
+#+STARTUP: org-startup-with-inline-images inlineimages
+#+STARTUP: org-latex-tables-centered nil
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+#+OPTIONS: toc:nil
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+#+LATEX_HEADER: \usepackage{amsmath,amsthm,amssymb}
+#+LATEX_HEADER: \newtheorem{theorem}{Theorem}
+#+LATEX_HEADER: \newtheorem{lemma}[theorem]{Lemma}
+#+LATEX_HEADER: \newtheorem{definition}[theorem]{Definition}
+
+#+ATTR_LATEX: :width 10cm
+[[https://perry.kundert.ca/images/dominion-logo.png]]
+
+#+BEGIN_ABSTRACT
+A direct EOA transfer /deduces/ identity from the two accounts in play -- the
+account is primary, the Identity point \( M \) is derived.  A Note is the
+opposite object: it /names/ the identities and treats accounts as interchangeable
+envelopes that need only /match/ the expected \( M \).  This document specifies,
+and reports a working implementation of, the *identity-targeted A2 Note*: a
+private-issuer cheque addressed to the recipient's Identity \( M_{\text{rec}} \)
+rather than to one of the recipient's accounts.  The issuer encrypts its /own/
+registered Identity \( M_I \) under the recipient's Identity /point/, so the one
+secret every Fountain account of the recipient shares -- the identity scalar
+\( m_{\text{rec}} \) -- opens it, and the issuer needs only \( M_{\text{rec}} \),
+never an account.  At deposit the recipient proves eligibility to the EVM with an
+Okamoto sigma that reveals no Identity; and from the same \( m_{\text{rec}} \) the
+recipient /alone/ decrypts \( M_I \) and produces a plaintext receipt naming both
+parties and the amount.  A colluding issuer cannot mint a spendable-but-unnameable
+note, because the decrypted issuer Identity must be a member of the
+registry-Identity tree.  Every step is implemented and tested
+(=alberta_buck.wallet.unilateral_a2=, =IdentityRegistry.verifyDepositCoupling=)
+([[https://perry.kundert.ca/range/finance/alberta-buck-notes][Notes]], [[https://perry.kundert.ca/range/finance/alberta-buck-notes-decryptability][Decryptability]])
+#+END_ABSTRACT
+
+#+LATEX: \clearpage
+#+TOC: headlines 2
+
+#+LATEX: \clearpage
+* The Inversion: Address the Identity, Not the Account
+
+  In the standard A2 construction (/alberta-buck-notes/) the issuer reads /one
+  specific/ registered account of the recipient and re-randomises /that/
+  account's credential; the depositor must then spend from that same account.
+  The identity-targeted construction drops the account from the addressing
+  entirely.  The issuer knows only the recipient's Identity point
+  \( M_{\text{rec}} = m_{\text{rec}} G \) -- learned out of band, exactly as a
+  payer learns "who" they are paying -- and the note is redeemable by /any/
+  account the recipient controls that is bound to \( m_{\text{rec}} \).
+
+  This is not merely more convenient; it is /lighter to make collusion-resistant/
+  and it yields a receipt the recipient can produce /alone/.  The whole design
+  turns on one substitution: the issuer encrypts under the recipient's Identity
+  /point/ \( M_{\text{rec}} \), whose decryption secret \( m_{\text{rec}} \) is
+  shared by every Fountain account of the recipient, instead of under one
+  account's key \( pk_{\text{rec}} \).
+
+  *What was built.*  This document is matched by a working reference:
+  - =alberta_buck/wallet/unilateral_a2.py= -- the mint, the deposit-coupling
+    sigma, the registry-Identity Merkle tree, and the unilateral receipt.
+  - =IdentityRegistry.verifyDepositCoupling= -- the on-chain, EIP-196
+    verification of the deposit-eligibility sigma.
+  - =alberta_buck/test/test_unilateral_a2.py= (11 tests) and
+    =test/UnilateralA2.t.sol= (7 tests) -- the end-to-end flow and the Solidity
+    \( \leftrightarrow \) Python cross-artifact parity.  All pass.
+
+#+LATEX: \clearpage
+* Parties, Keys, and the Identity Tree
+
+  #+begin_definition
+  Notation.  \( G \) is the BN254 \( \mathbb{G}_1 \) generator; \( H \) a second
+  nothing-up-my-sleeve generator (= =issuer_reenc.H_POINT=).  An /Identity/ is a
+  KYC-bound scalar \( m = H(\text{id}) \) and its point \( M = m G \).  A
+  /registered account/ is \( (\text{addr}, pk = sk\,G,\ E_{\text{addr}} =
+  (R, C) = (rG,\ M + r\,pk)) \): an ElGamal encryption of its Identity \( M \)
+  under its own key.  The Identity Fountain lets one \( m \) back unlimited
+  unlinkable accounts \( (sk_i, pk_i, E_{\text{addr},i}) \), all encrypting the
+  same \( M = mG \).
+  #+end_definition
+
+  Two principals:
+
+  - *Issuer* \( I \): identity \( (m_I, M_I) \), with a registered account
+    \( (pk_I, E^{\text{reg}}_I = (R^{\text{reg}}, C^{\text{reg}})) \).  Holds
+    \( sk_I \).  The issuer recovers its own \( M_I = C^{\text{reg}} - sk_I
+    R^{\text{reg}} \).
+  - *Recipient* \( D \): identity \( (m_{\text{rec}}, M_{\text{rec}}) \), with one
+    or more registered accounts.  The depositing account is
+    \( (pk_{\text{dep}}, E_{\text{dep}} = (R_d, C_d)) \); \( D \) holds
+    \( sk_{\text{dep}} \) and \( m_{\text{rec}} \).
+
+  *The identity provider and its tree.*  The registry maintains a Poseidon Merkle
+  tree whose leaves are registered Identity /points/, \( \ell(M) =
+  \mathrm{Poseidon}(M.x, M.y) \) (=identity_leaf=).  Its root \( \mathsf{rt_{id}} \)
+  is published on chain; the full tree lives off chain (the Alberta Buck wallet's
+  Holochain layer -- no size limit).  Membership of a point \( M \) in this tree
+  is the statement "\( M \) is a genuine, KYC-registered Identity," and it is the
+  anchor each party uses to certify the /other's/ decrypted Identity.
+
+#+LATEX: \clearpage
+* The Mint, Step by Step (Issuer)
+
+  The issuer holds \( (sk_I, E^{\text{reg}}_I) \) and knows \( M_{\text{rec}} \).
+  It performs four operations.
+
+** Step M1 -- recover the issuer's own Identity
+
+   \[ M_I \;=\; C^{\text{reg}} - sk_I\, R^{\text{reg}}. \]
+   /Required:/ the issuer's secret \( sk_I \) and its registered credential
+   \( E^{\text{reg}}_I \).  /From the registry:/ nothing new (the issuer reads its
+   own record).
+
+** Step M2 -- encrypt the issuer Identity under the recipient Identity point
+
+   With fresh randomness \( r' \),
+   \[
+     eIss \;=\; (R_e, C_e) \;=\; \bigl(r'\,G,\ \; M_I + r'\,M_{\text{rec}}\bigr).
+   \]
+   This is an ElGamal encryption of \( M_I \) under \( M_{\text{rec}} \) /treated
+   as a public key/.  Its decryption secret is \( m_{\text{rec}} \), since
+   \( M_{\text{rec}} = m_{\text{rec}} G \): for any holder of \( m_{\text{rec}} \),
+   \[
+     C_e - m_{\text{rec}} R_e
+       = M_I + r' M_{\text{rec}} - m_{\text{rec}}(r' G)
+       = M_I + r'(M_{\text{rec}} - m_{\text{rec}}G) = M_I.
+   \]
+   /Required from the issuer:/ \( M_I \), \( r' \).  /Required of the recipient:/
+   only \( M_{\text{rec}} \) -- *not* an account, a key, or which account will
+   deposit.
+
+** Step M3 -- the anti-framing binding (so \( eIss \) names the true minter)
+
+   The issuer proves, with the shipped recipient-blinded re-encryption sigma
+   (=issuer_reenc=, here with the "recipient key" slot fed the Identity point
+   \( M_{\text{rec}} \)), that \( eIss \) re-encrypts the issuer's /own registered/
+   \( M_I \) -- without revealing \( M_I \) or \( M_{\text{rec}} \).  This forecloses
+   /framing/: the issuer cannot key \( eIss \) over a victim's Identity, because the
+   proof is taken against \( E^{\text{reg}}_I = E_{\text{addr}}[\texttt{msg.sender}] \).
+   Verified on chain by =IdentityRegistry.verifyIssuerReenc=.
+
+** Step M4 -- commit the note
+
+   \[
+     idHash = \mathrm{Poseidon}(R_e.x, R_e.y, C_e.x, C_e.y), \qquad
+     cm = \mathrm{Poseidon}(\text{A2},\, v,\, \rho,\, idHash,\, predicate).
+   \]
+   The target Identity is /not/ committed separately -- it is implicit in
+   \( eIss \)'s key, since only \( m_{\text{rec}} \) decrypts \( eIss \) to a
+   registered point (Section /Security/).
+
+** What the mint publishes, holds, and transmits
+
+   #+LATEX: {\scriptsize
+   | Datum                                  | On chain (mint tx)            | Issuer keeps          | Sent to recipient     |
+   |----------------------------------------+-------------------------------+-----------------------+-----------------------|
+   | \( cm \) (opaque Poseidon commitment)  | yes (calldata)                | --                    | (implied by opening)  |
+   | \( eIss = (R_e, C_e) \)                | yes (leaf-tie public output)  | \( r' \)              | yes                   |
+   | anti-framing binding (=verifyIssuerReenc=) | yes                       | --                    | yes (for the receipt) |
+   | opening \( (\text{A2}, v, \rho, idHash, predicate) \) | no              | --                    | yes (off chain)       |
+   | \( M_I, M_{\text{rec}}, sk_I, r' \)    | *never*                       | yes                   | --                    |
+   #+LATEX: }
+
+   To Mallory the mint is: =msg.sender= (the issuer account) escrowed \( v \)
+   BUCK and folded an opaque \( cm \), publishing a ciphertext \( eIss \) and a
+   zero-knowledge binding.  Neither \( M_I \) (issuer Identity) nor
+   \( M_{\text{rec}} \) (recipient Identity) is revealed.
+
+#+LATEX: \clearpage
+* The A2 Note Payload (What Travels)
+
+  The note is the opening tuple plus the issuer payload, delivered off chain
+  (message, QR, or wallet-to-wallet):
+
+  #+begin_example
+  note = (
+     flavor = A2,  v,  rho,  idHash,  predicate,     # the commitment opening
+     eIss   = (R_e, C_e),                            # issuer M under recipient identity point
+     binding,                                        # verifyIssuerReenc anti-framing proof
+     mint_tx_ref,                                    # where cm was folded (anchors the receipt)
+  )
+  #+end_example
+
+  It carries /no/ account address of either party and /no/ plaintext Identity.
+  Anyone intercepting it learns nothing: \( eIss \) is semantically secure absent
+  \( m_{\text{rec}} \), and the binding is zero-knowledge.
+
+#+LATEX: \clearpage
+* Delivery and Recipient Verification (Off Chain, Before Accepting)
+
+  On receipt, \( D \) verifies the note /before/ treating it as money:
+
+  1. *Decrypt the issuer.*  \( M_I = C_e - m_{\text{rec}} R_e \) (=elgamal_decrypt=
+     under \( m_{\text{rec}} \)).
+  2. *Membership.*  Check \( \ell(M_I) \in \mathsf{rt_{id}} \) -- \( M_I \) is a
+     registered Identity (=IdentityTree.contains=).
+  3. *Binding.*  Check =verifyIssuerReenc= accepts the binding against the named
+     issuer account's registry record -- \( eIss \) really re-encrypts /that
+     account's/ registered Identity.
+
+  If any check fails the recipient /rejects/ the note (it is un-nameable, so its
+  value could never be accounted for).  An honest recipient thus only ever accepts
+  notes it can later receipt -- the cryptographic form of the recipient-burden
+  posture.  (Tested: =test_delivery_recipient_decrypts_issuer=.)
+
+#+LATEX: \clearpage
+* The Deposit, Step by Step (Depositor)
+  :PROPERTIES:
+  :CUSTOM_ID: sec:deposit
+  :END:
+
+  \( D \) chooses /any/ registered account bound to \( m_{\text{rec}} \) as the
+  payout vehicle and proves eligibility to the EVM while revealing no Identity.
+
+** The eligibility relation
+
+   The depositor proves knowledge of \( (m_{\text{rec}}, sk_{\text{dep}}, b) \)
+   such that, with \( eIss = (R_e, C_e) \), the chosen account's registered
+   \( E_{\text{dep}} = (R_d, C_d) \), its on-chain key \( pk_{\text{dep}} \), and a
+   published commitment \( P_I = M_I + b H \):
+   \[
+   \begin{aligned}
+     &\textbf{(E4)} & pk_{\text{dep}} &= sk_{\text{dep}}\,G
+       &&\text{— the real account key;}\\
+     &\textbf{(E2)} & C_d &= m_{\text{rec}}\,G + sk_{\text{dep}}\,R_d
+       &&\text{— the account is bound to } M_{\text{rec}} = m_{\text{rec}}G;\\
+     &\textbf{(E3)} & C_e - P_I &= m_{\text{rec}}\,R_e - b\,H
+       &&\text{— } eIss \text{ decrypts under } m_{\text{rec}} \text{ to } P_I - bH.
+   \end{aligned}
+   \]
+   (E4) pins \( sk_{\text{dep}} \) to the registered key; (E2) then pins
+   \( m_{\text{rec}}G \) to the account's Identity; (E3) ties that /same/
+   \( m_{\text{rec}} \) to \( eIss \)'s decryption, with the recovered issuer
+   Identity \( M_I \) /committed and blinded/ in \( P_I \).  This is a five-point
+   Okamoto sigma over EIP-196 (=deposit_couple_prove= / =deposit_couple_verify=,
+   on chain =verifyDepositCoupling=) -- the same family as =verifyApprove= /
+   =issuer_reenc=, and equally cheap.
+
+** The membership half (the SNARK piece)
+
+   \( P_I \) commits the decrypted issuer Identity.  The depositor additionally
+   proves, in zero knowledge, that \( P_I \)'s point is a member of the
+   registry-Identity tree: \( \exists\, b:\ P_I - bH = M_I \wedge \ell(M_I) \in
+   \mathsf{rt_{id}} \).  The membership is a /native/ Poseidon-Merkle proof; the
+   tie to the EC commitment \( P_I \) is the one non-native scalar relation, and
+   the only remaining circuit work (Section /Implementation Status/).  Its effect:
+   a note whose \( eIss \) is keyed to anything but \( M_{\text{rec}} \) decrypts to
+   a non-member and the spend /reverts/.
+
+** Completing the spend
+
+   The deposit calls (schematically) =Notes.spend(proof, root, nullifier, face,
+   recipient, eIss, depositCouplingProof, membershipProof)=, where the contract:
+   verifies the note's Merkle inclusion and nullifier (unspent), calls
+   =verifyDepositCoupling(depositor, eIss, dc)= (E2/E3/E4), checks the membership
+   proof against \( \mathsf{rt_{id}} \), records the nullifier, and pays =face=
+   BUCK out of the pool to the depositor's chosen account via the Carrying path.
+   The nullifier is \( \mathrm{Poseidon}(\rho, idHash, \text{A-tag}) \)
+   (=nullifier_a=), unlinkable to \( cm \).
+
+** What the deposit publishes -- and why Mallory is blind
+
+   #+LATEX: {\scriptsize
+   | Datum                          | Revealed at deposit                | Hidden                          |
+   |--------------------------------+------------------------------------+---------------------------------|
+   | depositor account (=msg.sender=) | yes (it receives the BUCK)        | its Identity \( M_{\text{rec}} \) (DDH in \( E_{\text{dep}} \)) |
+   | \( pk_{\text{dep}}, E_{\text{dep}} \) | yes (already in registry)     | \( sk_{\text{dep}}, m_{\text{rec}} \) |
+   | \( eIss \), \( P_I \)          | yes                                | \( M_I \) (blinded in \( P_I \)), \( M_{\text{rec}} \) |
+   | nullifier, face                | yes                                | which mint this redeems         |
+   | issuer account / tx            | *never* (not an input at deposit)  | the entire issuer side          |
+   #+LATEX: }
+
+   The deposit names /no/ issuer account, tx, or Identity.  \( eIss \) and
+   \( P_I \) are the only Identity-derived values, and both are blinded: \( eIss \)
+   is semantically secure, \( P_I = M_I + bH \) is perfectly hiding.  So Mallory
+   cannot link the depositor's account to the issuer's mint, nor to other accounts
+   of the same recipient.  (Tested: =test_deposit_proof_hides_identities=,
+   =test_two_mints_unlinkable=; soundness:
+   =test_deposit_coupling_{tamper,wrong_account,wrong_chainid}_rejected= and the
+   seven Solidity parity tests.)
+
+#+LATEX: \clearpage
+* The Unilateral Receipt (Recipient Alone)
+  :PROPERTIES:
+  :CUSTOM_ID: sec:receipt
+  :END:
+
+  The recipient holds the /one/ secret \( m_{\text{rec}} \) that names /both/
+  parties, and needs no cooperation from the issuer at spend time.
+
+** Construction
+
+   \[
+     M_I = C_e - m_{\text{rec}} R_e \quad(\text{the issuer Identity});\qquad
+     M_{\text{rec}} = m_{\text{rec}} G \quad(\text{the recipient's own}).
+   \]
+   The recipient attaches a /verifiable decryption/ (=verifiable_decrypt=, a
+   Chaum-Pedersen DLEQ) proving \( eIss \) decrypts under \( M_{\text{rec}} \) to
+   \( M_I \) -- revealing both points but not \( m_{\text{rec}} \).  The receipt is
+   \[
+     \mathcal{R} = \bigl(M_I,\ M_{\text{rec}},\ v,\ eIss,\ \text{vd},\
+       \text{binding},\ \text{issuer addr},\ \text{chainid}\bigr).
+   \]
+
+** Third-party verification (no secret)
+
+   A court, auditor, or counterparty checks four links (=verify_receipt=):
+
+   #+LATEX: {\scriptsize
+   | Link | Check                                                                  | Establishes                                   |
+   |------+------------------------------------------------------------------------+-----------------------------------------------|
+   | 1    | =verifyIssuerReenc= on the binding vs. the issuer account's record     | \( eIss \) re-encrypts the issuer's /registered/ \( M_I \) (no framing) |
+   | 2    | =verifiable_decrypt_verify(eIss, M_rec, M_I)=                          | \( eIss \) decrypts under \( M_{\text{rec}} \) to \( M_I \) |
+   | 3    | \( \ell(M_I) \in \mathsf{rt_{id}} \)                                   | the issuer Identity is registered -- /the coupling/ |
+   | 4    | \( \ell(M_{\text{rec}}) \in \mathsf{rt_{id}} \)                        | the recipient Identity is registered          |
+   #+LATEX: }
+
+   Link 3 is the load-bearing one.  Composing 1 and 2: \( M_I = C_e -
+   r' M_{\text{rec}} \) (link 2, since \( R_e = r'G \)) while the binding gives
+   \( C_e = M_I^{\text{reg}} + r' Q \) for the issuer's registered Identity
+   \( M_I^{\text{reg}} \) and the issuer-chosen point \( Q \).  Hence \( M_I =
+   M_I^{\text{reg}} + r'(Q - M_{\text{rec}}) \).  If \( Q \neq M_{\text{rec}} \)
+   the recovered \( M_I \) is a pseudorandom offset of a registered point and is
+   /not/ itself in the tree; so link 3 /forces/ \( Q = M_{\text{rec}} \) and thus
+   \( M_I = M_I^{\text{reg}} \).  The receipt is therefore VALID exactly when it
+   names the true issuer.  (Tested: =test_unilateral_receipt_names_both=.)
+
+** Why it is unilateral, and why collusion fails
+
+   Completeness needs no issuer participation: \( m_{\text{rec}} \) yields both
+   identities.  Collusion-resistance is the contrapositive of link 3: a colluding
+   issuer who keys \( eIss \) to a throwaway point (so the recipient "cannot"
+   decrypt to a registered Identity) produces a note whose decrypted \( M_I \) is a
+   non-member -- so the /receipt is INVALID/ and the /spend membership reverts/.
+   The pair cannot obtain a spendable-but-unnameable note.  (Tested:
+   =test_collusion_bogus_eiss_unnameable= -- the bogus note's binding still
+   verifies, yet the decrypted point is provably absent from the tree and
+   =verify_receipt= returns INVALID at link 3.)
+
+#+LATEX: \clearpage
+* Security Properties (and the Tests that Witness Them)
+
+  #+begin_theorem
+  /(Completeness.)/  For an honest mint to \( M_{\text{rec}} \), any account of the
+  recipient bound to \( m_{\text{rec}} \) satisfies E2/E3/E4 and the membership;
+  and the recipient produces a VALID receipt naming \( (M_I, M_{\text{rec}}, v) \).
+  #+end_theorem
+
+  #+begin_theorem
+  /(Collusion-resistance.)/  Under the non-grindable-identities assumption
+  (\( M = H(\text{id})G \), \( H \) a random oracle), no issuer/recipient coalition
+  produces a spendable note whose decrypted issuer Identity is absent from the
+  tree: spendability requires \( eIss \) to decrypt, under the depositor's
+  authenticated \( m_{\text{rec}} \), to a tree member, which is nameable.
+  #+end_theorem
+
+  #+begin_theorem
+  /(Non-frameability.)/  The mint binding forces \( eIss \) over the minter's own
+  registered \( M_I \); the only reachable outcomes are "names the true minter"
+  (VALID) or "names no one" (INVALID).  A victim cannot be substituted.
+  #+end_theorem
+
+  #+begin_theorem
+  /(Privacy.)/  The deposit sigma is honest-verifier zero-knowledge and \( P_I \)
+  is perfectly hiding; \( eIss \) is IND-CPA.  No third party learns
+  \( m_{\text{rec}} \), \( M_{\text{rec}} \), or \( M_I \), and the deposit names no
+  issuer account or transaction -- so mint and spend stay unlinkable.
+  #+end_theorem
+
+  The cross-artifact tests pin the Solidity verifier to the Python reference
+  byte-for-byte (the established =alberta_buck.wallet= \( \to \) =vm.readFile=
+  pattern): =scripts/gen_unilateral_a2_vectors.py= emits
+  =test/vectors/unilateral_a2.json=; =test/UnilateralA2.t.sol= reads it and
+  asserts =verifyDepositCoupling= accepts the canonical proof and rejects every
+  tamper.
+
+** Test ledger
+
+   #+LATEX: {\scriptsize
+   | Suite                                  | Count | What it demonstrates                                     |
+   |----------------------------------------+-------+----------------------------------------------------------|
+   | =alberta_buck/test/test_unilateral_a2.py= | 11 | mint binding; delivery decrypt; deposit coupling; unilateral receipt names both; any-account deposit; collusion un-nameable + un-spendable; sigma soundness (tamper / wrong account / wrong chainid); identity-hiding; mint unlinkability |
+   | =test/UnilateralA2.t.sol=              |   7   | on-chain =verifyDepositCoupling= parity + soundness (tampered response / \( P_I \) / \( eIss \), wrong chainid, unregistered / wrong depositor) |
+   #+LATEX: }
+
+   *Status: all 18 pass* (=nix develop --command python -m pytest
+   alberta_buck/test/test_unilateral_a2.py= and =forge test --match-contract
+   UnilateralA2DepositTest=), with no regression in the adjacent identity / A2
+   suites.
+
+#+LATEX: \clearpage
+* Implementation Status and Remaining Work
+
+  *Shipped and tested:*
+  - The mint, payload, off-chain delivery verification, deposit-coupling sigma,
+    and unilateral receipt -- the full cryptographic flow -- in
+    =alberta_buck/wallet/unilateral_a2.py=.
+  - The on-chain deposit-eligibility verifier
+    =IdentityRegistry.verifyDepositCoupling= (EIP-196), with the
+    =DepositCouplingProof= struct and a Fiat-Shamir transcript identical to the
+    wallet's.
+  - The registry-Identity Poseidon Merkle tree (=IdentityTree=) and the receipt
+    verifier (=verify_receipt=), with membership demonstrated in the reference.
+
+  *The one remaining circuit:* the in-ZK proof that \( P_I \)'s committed point is
+  a tree member -- a native Poseidon-Merkle membership tied to the EC commitment by
+  a single non-native scalar relation.  In this implementation the membership is
+  proven in the reference (the receipt and the delivery check both compute it);
+  wiring it as a Groth16 circuit and into =Notes.spend= is the production step.
+  Because the proof is generated off chain (on the wallet's Holochain agent, which
+  already holds the tree) and the EVM verifies a constant-size proof, this is a
+  prover-side cost, not an EVM-cost obstacle (see /alberta-buck-notes-decryptability/,
+  "The identity-targeted alternative" and "Where the cost lands").
+
+  *The registry accumulator:* the Identity tree's root must be maintained on chain
+  on each registration (an incremental Poseidon root, or an off-chain-computed root
+  proven by a small SNARK); the tree body lives off chain.
+
+** Cross-references
+
+   - /alberta-buck-notes-decryptability/ -- the gap this closes (the A2
+     recipient-key coupling) and the "identity-targeted alternative" subsection
+     that this document realises.
+   - /alberta-buck-identity/ -- the Identity Fountain, registration, and the
+     Chaum-Pedersen / ElGamal primitives reused here.
+   - Conventions: a negative signed BUCK balance is /used credit/, not "debt";
+     build/test via =nix develop --command=.

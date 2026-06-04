@@ -112,6 +112,7 @@ Table of Contents
 .. 1. What the Contract Must Enforce
 .. 2. What the Prover Must Enforce
 .. 3. Scope Not Covered Here
+.. 4. The Long-Horizon Threat: Harvest-Now, Decrypt-Later
 
 
 [Identity]
@@ -1322,7 +1323,7 @@ Table of Contents
   │ nf_B_holder = H_nf(b"B", rho)
   │ nf_B_eve    = H_nf(b"B", rho)                 # Eve only needs rho
   │ assert nf_B_holder == nf_B_eve
-  │ assert nf_A_pre != nf_B_holder                # cross-flavor disjoint
+  │ assert nf_A != nf_B_holder                    # cross-flavor disjoint
   │ print("Theorem 10.4 (B-spend nullifier public from rho):      PASS")
   │ 
   │ # --- Theorem 11: mutual decryptability round-trip ---
@@ -1724,6 +1725,64 @@ Table of Contents
     on BN254 has been independently studied and is assumed here.  See
     the Poseidon-hash cryptanalysis literature for current best attacks
     and parameter choices.
+
+
+7.4 The Long-Horizon Threat: Harvest-Now, Decrypt-Later
+───────────────────────────────────────────────────────
+
+  Every unlinkability guarantee in this document that rests on /ElGamal/
+  – cross-account unlinkability, the /issuer-blindness/ of the identity
+  layer (a compelled or breached issuer cannot map its issued identities
+  to chain accounts), and the third-party non-disclosure of A2 Notes –
+  is /computational/, reducing to DDH (hence DLog) on \( \mathbb{G}_1
+  \).  Only Theorem 2 (PS rerandomization unlinkability) is
+  information-theoretic and survives unconditionally.  This asymmetry
+  has a sharp consequence against a powerful, patient adversary (a state
+  or military actor with archival access).
+
+  The on-chain credentials \( E_{\text{addr}} = (rG,\ M + r\,pk) \) are
+  permanent public history.  An adversary who learns the /plaintext/
+  identity points \( \{M_i\} \) – paradigmatically a *compelled or
+  breached issuer*, whose KYC records /are/ exactly that set – cannot
+  link them to chain accounts /today/: testing whether a given \( E \)
+  encrypts a known \( M_i \) is a plaintext-checking attack,
+  i.e. deciding whether \( (G,\ pk,\ R,\ C - M_i) \) is a DDH tuple,
+  infeasible under DDH (this is the load-bearing observation behind the
+  Identity doc's privacy-boundary table and the paper's
+  /Issuer-blindness/ theorem).  But a future discrete-log break – in
+  particular a cryptographically relevant quantum computer running Shor
+  against \( \mathbb{G}_1 \) – collapses that DDH decision into a cheap
+  test, retroactively de-anonymising /all past/ identity and A2-Note
+  traffic from the harvested \( \{M_i\} \) plus the archived chain.  The
+  PS layer's statistical unlinkability is unaffected, but PS
+  unlinkability does not hide the \( M \leftrightarrow E_{\text{addr}}
+  \) relation; only the ElGamal layer does, and only computationally.
+
+  Two points are worth recording for the threat model:
+
+  1. *Epoch expiry does not bound it.* Epoch-based credential renewal
+     (Identity doc) limits the value of breaking a /single/ credential's
+     pairing equation, but the harvest target here is the persistent \(
+     M \leftrightarrow E_{\text{addr}} \) link, which a quantum DLog
+     break recovers wholesale, expired or not.
+
+  2. *The migration is encryption-layer, not pairing-layer.* The
+     BLS12-381 path (EIP-2537, "alt_bn128 Security Horizon" in the
+     Identity doc) hardens /pairing/ security for PS verification; it
+     does nothing for the ElGamal confidentiality that DDH underwrites.
+     Post-quantum unlinkability requires replacing the \( \mathbb{G}_1
+     \) ElGamal credential with a post-quantum encryption (a
+     lattice-based KEM/commitment, with a matching
+     re-encryption-equality argument to preserve the `approve'
+     handshake) – a substantial identity-layer redesign, and the right
+     place to invest if the threat model includes a quantum adversary
+     with archival access to the issuer's records.
+
+  This is a property of /every/ DDH/DLog-based confidential-payment
+  system, not of Alberta Buck specifically; it is recorded here because
+  the issuer-breach corpus makes the harvest concrete and names the one
+  party whose compromise hands an adversary the full plaintext set \(
+  \{M_i\} \).
 
 
 
