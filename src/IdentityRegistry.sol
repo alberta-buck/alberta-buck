@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {BN254} from "./BN254.sol";
+import {IPoseidonT3} from "./IPoseidonT3.sol";
 
 /// @title IdentityRegistry — on-chain registry of identity-bound public keys.
 /// @notice Each Ethereum address binds to (pk, E_addr) where:
@@ -142,6 +143,46 @@ contract IdentityRegistry {
     uint256 internal constant H_Y =
         3372178911466361414640845512261989709787490420390555908180501907382229222644;
 
+    /// @notice Depth of the registry-Identity Merkle accumulator.  Must match
+    ///         the depth used by circuits/identity_membership.circom and the
+    ///         Python alberta_buck.registry.tree.IdentityMerkleTree.
+    uint8   public constant IDENTITY_TREE_DEPTH = 10;
+
+    /// @notice Empty-subtree roots at each depth, precomputed as
+    ///         ZERO_{d+1} = Poseidon([ZERO_d, ZERO_d]) with ZERO_0 = 0.
+    ///         Matches alberta_buck.registry.tree.IdentityMerkleTree._zeros.
+    uint256 internal constant ZERO_0  = 0;
+    uint256 internal constant ZERO_1  = 14744269619966411208579211824598458697587494354926760081771325075741142829156;
+    uint256 internal constant ZERO_2  = 7423237065226347324353380772367382631490014989348495481811164164159255474657;
+    uint256 internal constant ZERO_3  = 11286972368698509976183087595462810875513684078608517520839298933882497716792;
+    uint256 internal constant ZERO_4  = 3607627140608796879659380071776844901612302623152076817094415224584923813162;
+    uint256 internal constant ZERO_5  = 19712377064642672829441595136074946683621277828620209496774504837737984048981;
+    uint256 internal constant ZERO_6  = 20775607673010627194014556968476266066927294572720319469184847051418138353016;
+    uint256 internal constant ZERO_7  = 3396914609616007258851405644437304192397291162432396347162513310381425243293;
+    uint256 internal constant ZERO_8  = 21551820661461729022865262380882070649935529853313286572328683688269863701601;
+    uint256 internal constant ZERO_9  = 6573136701248752079028194407151022595060682063033565181951145966236778420039;
+    uint256 internal constant ZERO_10 = 12413880268183407374852357075976609371175688755676981206018884971008854919922;
+
+    /// @notice Root of the empty tree (depth 10).  Equal to ZERO_10.
+    uint256 public constant EMPTY_IDENTITY_ROOT = ZERO_10;
+
+    /// @notice Convenience: the zero-value at each depth as a Solidity array
+    ///         (can't be constant, so we return from a pure function).
+    function IDENTITY_ZEROS(uint8 d) public pure returns (uint256) {
+        if      (d == 0)  return ZERO_0;
+        else if (d == 1)  return ZERO_1;
+        else if (d == 2)  return ZERO_2;
+        else if (d == 3)  return ZERO_3;
+        else if (d == 4)  return ZERO_4;
+        else if (d == 5)  return ZERO_5;
+        else if (d == 6)  return ZERO_6;
+        else if (d == 7)  return ZERO_7;
+        else if (d == 8)  return ZERO_8;
+        else if (d == 9)  return ZERO_9;
+        else if (d == 10) return ZERO_10;
+        revert("IdentityRegistry: depth out of range");
+    }
+
     // ---- storage ------------------------------------------------------------
 
     address public governance;
@@ -194,15 +235,28 @@ contract IdentityRegistry {
     ///         by governance via setBuck() after Buck is deployed.
     address                           public  buck;
 
-    /// @notice Registry-Identity Merkle accumulator root.  Computed off chain
-    ///         by the CentralMerkleService and posted by governance once per
-    ///         batch of registrations.  Consumed by the identity membership
-    ///         SNARK at Notes spend time to prove "the counterparty identity M
-    ///         is a registered identity" (the commit-before-use discipline).
-    ///         A root of 0 means the accumulator has not been seeded yet;
-    ///         membership proofs against 0 are always rejected.
+    /// @notice Registry-Identity Merkle accumulator root.  Updated on each
+    ///         registration when the incremental accumulator is active
+    ///         (identityPoseidon != address(0) and a non-zero identity leaf
+    ///         is provided).  Also settable by governance for batch updates.
+    ///         Consumed by the identity membership SNARK at Notes spend time
+    ///         to prove "the counterparty identity M is a registered identity".
     ///         See alberta-buck-notes-identity-axis.org.
     uint256                           public  identityRoot;
+
+    /// @notice Poseidon T3 hash contract for incremental Merkle tree updates.
+    ///         Set by governance via setIdentityPoseidon.  When zero, the
+    ///         incremental accumulator is disabled and identityRoot must be
+    ///         managed via governance (setIdentityRoot).
+    address                           public  identityPoseidon;
+
+    /// @notice Number of identity leaves inserted into the incremental
+    ///         accumulator.  Capped at 2**IDENTITY_TREE_DEPTH.
+    uint32                            public  identityNextLeafIndex;
+
+    /// @notice Tornado-style filled subtrees for the incremental accumulator.
+    ///         filledSubtrees[d] is the rightmost known node at depth d.
+    uint256[IDENTITY_TREE_DEPTH]      internal _identityFilledSubtrees;
 
     // ---- events -------------------------------------------------------------
 
@@ -215,12 +269,17 @@ contract IdentityRegistry {
     event CarryingFlagSet(address indexed target, bool isCarrying);
     event CarryingFrozen(address indexed target);
     event IdentityRootUpdated(uint256 indexed previous, uint256 indexed next);
+    event IdentityPoseidonSet(address indexed previous, address indexed next);
 
     // ---- constructor / governance ------------------------------------------
 
     constructor(address _governance) {
         require(_governance != address(0), "governance=0");
         governance = _governance;
+        // Initialize filled subtrees with empty-subtree roots.
+        for (uint8 d = 0; d < IDENTITY_TREE_DEPTH; d++) {
+            _identityFilledSubtrees[d] = IDENTITY_ZEROS(d);
+        }
         emit GovernanceTransferred(address(0), _governance);
     }
 
@@ -263,12 +322,58 @@ contract IdentityRegistry {
     ///         once per batch of registrations.  The new root must be non-zero.
     ///         Emits IdentityRootUpdated so off-chain indexers can track the
     ///         root history for membership proof generation.
-    ///         See alberta-buck-notes-identity-axis.org.
     function setIdentityRoot(uint256 _root) external {
         require(msg.sender == governance, "not governance");
         require(_root != 0,               "root=0");
         emit IdentityRootUpdated(identityRoot, _root);
         identityRoot = _root;
+    }
+
+    /// @notice Set the Poseidon T3 contract used for incremental Merkle tree
+    ///         updates.  When set to a non-zero address, register() and
+    ///         bindContract() overloads that accept an identityLeaf parameter
+    ///         will update the identityRoot incrementally.  Governance may
+    ///         clear it (set to 0) to revert to governance-managed roots.
+    function setIdentityPoseidon(address _poseidon) external {
+        require(msg.sender == governance, "not governance");
+        emit IdentityPoseidonSet(identityPoseidon, _poseidon);
+        identityPoseidon = _poseidon;
+    }
+
+    // ---- incremental accumulator --------------------------------------------
+
+    /// @dev Insert one identity leaf into the incremental Merkle tree and
+    ///      return the new root.  Tornado-style: uses _identityFilledSubtrees
+    ///      to track the rightmost node at each level.  The caller must ensure
+    ///      identityPoseidon is set and the tree is not full.
+    function _insertIdentityLeaf(uint256 leaf) internal returns (uint256) {
+        uint256 index = identityNextLeafIndex;
+        require(index < (uint256(1) << IDENTITY_TREE_DEPTH), "id tree full");
+        uint256 current = leaf;
+        for (uint8 d = 0; d < IDENTITY_TREE_DEPTH; d++) {
+            if (index & 1 == 0) {
+                // Left child: store current as the new filled node.
+                _identityFilledSubtrees[d] = current;
+                current = _hashPair(current, IDENTITY_ZEROS(d));
+            } else {
+                // Right child: fold with the stored left sibling.
+                current = _hashPair(_identityFilledSubtrees[d], current);
+            }
+            index >>= 1;
+        }
+        identityNextLeafIndex++;
+        return current;
+    }
+
+    /// @dev Wrapper around the Poseidon T3 contract call.  Reverts if the
+    ///      poseidon contract is not set.
+    function _hashPair(uint256 left, uint256 right) internal view returns (uint256) {
+        address poseidonAddr = identityPoseidon;
+        require(poseidonAddr != address(0), "poseidon not set");
+        uint256[2] memory inputs;
+        inputs[0] = left;
+        inputs[1] = right;
+        return IPoseidonT3(poseidonAddr).poseidon(inputs);
     }
 
     // ---- views --------------------------------------------------------------
@@ -305,7 +410,8 @@ contract IdentityRegistry {
     /// @notice Register caller's identity binding under issuer-signed credential.
     ///         msg.sender is the registrant -- bound into the Fiat-Shamir
     ///         transcript so a proof valid for one address cannot be replayed
-    ///         under another.
+    ///         under another.  This overload does NOT update the identity
+    ///         Merkle accumulator; use the 6-arg overload with identityLeaf.
     function register(
         address issuer,
         BN254.G1Point calldata pk,
@@ -313,12 +419,42 @@ contract IdentityRegistry {
         PSSig calldata sigma,
         RegistrationProof calldata proof
     ) external {
-        require(!_isRegistered(msg.sender), "already registered");
+        _register(issuer, pk, E, sigma, proof, msg.sender, 0);
+    }
+
+    /// @notice Register with an identity Merkle leaf for incremental
+    ///         accumulator update.  identityLeaf = Poseidon([M.x, M.y] % F_R)
+    ///         where M is the identity point encrypted in E_addr.  Pass 0 to
+    ///         skip the tree update (identical behaviour to the 5-arg overload).
+    function register(
+        address issuer,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        PSSig calldata sigma,
+        RegistrationProof calldata proof,
+        uint256 identityLeaf
+    ) external {
+        _register(issuer, pk, E, sigma, proof, msg.sender, identityLeaf);
+    }
+
+    /// @dev Shared registration logic.  If identityLeaf != 0 and the
+    ///      incremental accumulator is active, inserts the leaf and updates
+    ///      identityRoot.
+    function _register(
+        address issuer,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        PSSig calldata sigma,
+        RegistrationProof calldata proof,
+        address registrant,
+        uint256 identityLeaf
+    ) internal {
+        require(!_isRegistered(registrant), "already registered");
         require(isTrustedIssuer[issuer],    "untrusted issuer");
         require(!BN254.isInfinity(sigma.sigma_1), "sigma_1=O");
 
         // (d) Fiat-Shamir
-        require(proof.e == _fsRegister(sigma, E, pk, proof, msg.sender), "bad FS challenge");
+        require(proof.e == _fsRegister(sigma, E, pk, proof, registrant), "bad FS challenge");
 
         // (b) ElGamal C consistency: s_m*G + s_r*pk == e*C + T_C
         require(_checkElGamalC(proof.s_m, proof.s_r, pk, E.C, proof.T_C, proof.e), "bad NIZK C");
@@ -329,10 +465,16 @@ contract IdentityRegistry {
         // (a) PS pairing product
         require(_checkPSPairing(sigma, proof, _trustedIssuers[issuer]), "bad PS sig");
 
-        _pk[msg.sender]     = pk;
-        _E_addr[msg.sender] = E;
-        issuerOf[msg.sender] = issuer;
-        emit Registered(msg.sender, issuer);
+        _pk[registrant]     = pk;
+        _E_addr[registrant] = E;
+        issuerOf[registrant] = issuer;
+        emit Registered(registrant, issuer);
+
+        if (identityLeaf != 0 && identityPoseidon != address(0)) {
+            uint256 newRoot = _insertIdentityLeaf(identityLeaf);
+            emit IdentityRootUpdated(identityRoot, newRoot);
+            identityRoot = newRoot;
+        }
     }
 
     // ---- contract identity binding -----------------------------------------
@@ -370,6 +512,32 @@ contract IdentityRegistry {
         bool isPublicIdentity_,
         bool isCarrying_
     ) external {
+        _bindContract(target, pk, E, isPublicIdentity_, isCarrying_, 0);
+    }
+
+    /// @notice Bind with an identity Merkle leaf for incremental accumulator
+    ///         update.  identityLeaf = Poseidon([M.x, M.y] % F_R) where M is
+    ///         the identity point encrypted in E_addr.  Pass 0 to skip the
+    ///         tree update (identical behaviour to the 5-arg overload).
+    function bindContract(
+        address target,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_,
+        uint256 identityLeaf
+    ) external {
+        _bindContract(target, pk, E, isPublicIdentity_, isCarrying_, identityLeaf);
+    }
+
+    function _bindContract(
+        address target,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_,
+        uint256 identityLeaf
+    ) internal {
         require(target.code.length > 0,  "target not a deployed contract");
         require(!_isRegistered(target),  "already bound");
 
@@ -380,6 +548,12 @@ contract IdentityRegistry {
         binderOf[target]         = msg.sender;
         emit ContractBound(target, msg.sender, isPublicIdentity_);
         emit CarryingFlagSet(target, isCarrying_);
+
+        if (identityLeaf != 0 && identityPoseidon != address(0)) {
+            uint256 newRoot = _insertIdentityLeaf(identityLeaf);
+            emit IdentityRootUpdated(identityRoot, newRoot);
+            identityRoot = newRoot;
+        }
     }
 
     /// @notice Pre-approval reconfiguration of the carrying flag.  Only the

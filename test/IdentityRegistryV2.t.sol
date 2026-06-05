@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityMembershipVerifier} from "../src/IdentityMembershipVerifier.sol";
+import {PoseidonT3Bytecode} from "../src/PoseidonT3Bytecode.sol";
+import {IPoseidonT3} from "../src/IPoseidonT3.sol";
 import {BN254} from "../src/BN254.sol";
 
 /// @notice Identity-axis V2 test: reads registry-generated vectors
@@ -174,5 +176,109 @@ contract IdentityRegistryV2Test is Test {
         assertEq(reg.identityRoot(), expectedIdentityRoot);
         assertTrue(reg.isVerified(alice));
         assertTrue(reg.isVerified(bob));
+    }
+
+    // ---- incremental accumulator (Phase B) ----------------------------------
+
+    function test_incrementalAccumulator_singleLeaf() public {
+        // Deploy Poseidon and wire it.
+        address poseidonAddr = PoseidonT3Bytecode.deploy();
+        vm.prank(GOV);
+        reg.setIdentityPoseidon(poseidonAddr);
+        assertEq(reg.identityPoseidon(), poseidonAddr);
+
+        // Read alice's identity leaf from vectors.
+        uint256 aliceLeaf = _u(rjAlice, ".leaf");
+
+        // Register alice with the incremental leaf.
+        _registerFromVectorsWithLeaf(rjAlice, alice, aliceLeaf);
+
+        uint256 root = reg.identityRoot();
+        assertTrue(root != 0, "root should be non-zero after insertion");
+        assertEq(reg.identityNextLeafIndex(), 1);
+
+        // Verify with Poseidon directly: single leaf tree, depth 10.
+        uint256[2] memory pair;
+        pair[0] = aliceLeaf;
+        pair[1] = reg.IDENTITY_ZEROS(0);                       // ZERO_0 = 0
+        uint256 cur = IPoseidonT3(poseidonAddr).poseidon(pair); // level 0
+        for (uint8 d = 1; d < reg.IDENTITY_TREE_DEPTH(); d++) {
+            pair[0] = cur;
+            pair[1] = reg.IDENTITY_ZEROS(d);
+            cur = IPoseidonT3(poseidonAddr).poseidon(pair);
+        }
+        assertEq(root, cur,
+                "on-chain incremental root must match direct Poseidon computation");
+    }
+
+    function test_incrementalAccumulator_twoLeavesMatchesAggregator() public {
+        address poseidonAddr = PoseidonT3Bytecode.deploy();
+        vm.prank(GOV);
+        reg.setIdentityPoseidon(poseidonAddr);
+
+        uint256 aliceLeaf = _u(rjAlice, ".leaf");
+        uint256 bobLeaf   = _u(rjBob, ".leaf");
+
+        _registerFromVectorsWithLeaf(rjAlice, alice, aliceLeaf);
+        _registerFromVectorsWithLeaf(rjBob,   bob,   bobLeaf);
+
+        uint256 root = reg.identityRoot();
+        assertEq(reg.identityNextLeafIndex(), 2);
+
+        // The two-leaf on-chain root must match the Python registry sub_root
+        // (which is a depth=10 IdentityMerkleTree with both leaves inserted).
+        uint256 expectedSubRoot = vm.parseJsonUint(rjRoot, ".registry_sub_root");
+        assertEq(root, expectedSubRoot,
+                "two-leaf incremental root must match Python registry sub_root");
+    }
+
+    function test_incrementalAccumulator_governanceCanStillSet() public {
+        // Governance-set root still works even with Poseidon wired.
+        address poseidonAddr = PoseidonT3Bytecode.deploy();
+        vm.prank(GOV);
+        reg.setIdentityPoseidon(poseidonAddr);
+
+        vm.prank(GOV);
+        reg.setIdentityRoot(expectedIdentityRoot);
+        assertEq(reg.identityRoot(), expectedIdentityRoot);
+    }
+
+    function test_incrementalAccumulator_zeroLeafSkipsUpdate() public {
+        address poseidonAddr = PoseidonT3Bytecode.deploy();
+        vm.prank(GOV);
+        reg.setIdentityPoseidon(poseidonAddr);
+
+        // Register WITHOUT a leaf (5-arg overload) — root stays 0.
+        _registerFromVectors(rjAlice, alice);
+        assertEq(reg.identityRoot(), 0,
+                "5-arg register must not update identity root");
+        assertEq(reg.identityNextLeafIndex(), 0,
+                "leaf count must not advance with 5-arg register");
+    }
+
+    // ---- helpers with leaf -------------------------------------------------
+
+    function _registerFromVectorsWithLeaf(
+        string memory j, address who, uint256 leaf
+    ) internal {
+        BN254.G1Point memory pk = _g1j(j, ".elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = IdentityRegistry.ElGamalCT(
+            _g1j(j, ".ciphertext.R"),
+            _g1j(j, ".ciphertext.C")
+        );
+        IdentityRegistry.PSSig memory sigma = IdentityRegistry.PSSig(
+            _g1j(j, ".ps_sig_rerand.sigma_1"),
+            _g1j(j, ".ps_sig_rerand.sigma_2")
+        );
+        IdentityRegistry.RegistrationProof memory proof;
+        proof.e    = _u(j, ".registration_proof.e");
+        proof.s_m  = _u(j, ".registration_proof.s_m");
+        proof.s_r  = _u(j, ".registration_proof.s_r");
+        proof.A_ps = _g1j(j, ".registration_proof.A_ps");
+        proof.T_C  = _g1j(j, ".registration_proof.T_C");
+        proof.T_R  = _g1j(j, ".registration_proof.T_R");
+
+        vm.prank(who);
+        reg.register(ISSUER_ADDR, pk, E, sigma, proof, leaf);
     }
 }

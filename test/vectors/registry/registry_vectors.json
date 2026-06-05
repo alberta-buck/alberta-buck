@@ -1,13 +1,13 @@
 {
   "seed": 41404,
-  "aggregator_root": "0x2b1be837cccc27a8ab397ebd3818ffe3ae3f16fdda0bf9e62bde6d78a5336fa3",
+  "aggregator_root": "0x002d8890d7c5f0fb7aa16cacb5c738306616656abee78c4665f1f9f146b08093",
   "registry": {
     "id": "test-registry",
     "pk": {
       "x": "0x19852d5205e523cdfd3c0899d1e5d5b8a2af51a46c23e5c84abe897d662fb724",
       "y": "0x13d6fa53646b9d2d591e018fcd328091cfa3e7f476cd124622972c9affdb296e"
     },
-    "sub_root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+    "sub_root": "0x008ef118bd50877d04ddd2b5004697ac4b9e95d1406c534cc155d29c486bddd7",
     "identity_count": 2
   },
   "ps_issuer": {
@@ -37,7 +37,7 @@
   "sub_trees": {
     "test-registry": {
       "kind": "kyc",
-      "sub_root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+      "sub_root": "0x008ef118bd50877d04ddd2b5004697ac4b9e95d1406c534cc155d29c486bddd7",
       "aggregator_leaf_index": 0
     }
   },
@@ -101,9 +101,9 @@
       },
       "kyc_membership": {
         "leaf": "0x1e85bbec9de395ef772e62420d3f08c88c52d11955450a54500844b230faff5e",
-        "root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+        "root": "0x008ef118bd50877d04ddd2b5004697ac4b9e95d1406c534cc155d29c486bddd7",
         "leaf_index": 0,
-        "depth": 12,
+        "depth": 10,
         "siblings": [
           "0x2e8c2561fdf643d0385999e4f68354f51b647cb4f5dc314428fe23cb58ec7c8a",
           "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864",
@@ -114,13 +114,9 @@
           "0x2dee93c5a666459646ea7d22cca9e1bcfed71e6951b953611d11dda32ea09d78",
           "0x078295e5a22b84e982cf601eb639597b8b0515a88cb5ac7fa8a4aabe3c87349d",
           "0x2fa5e5f18f6027a6501bec864564472a616b2e274a41211a444cbe3a99f3cc61",
-          "0x0e884376d0d8fd21ecb780389e941f66e45e7acce3e228ab3e2156a614fcd747",
-          "0x1b7201da72494f1e28717ad1a52eb469f95892f957713533de6175e5da190af2",
-          "0x1f8d8822725e36385200c0b201249819a6e6e1e4650808b5bebc6bface7d7636"
+          "0x0e884376d0d8fd21ecb780389e941f66e45e7acce3e228ab3e2156a614fcd747"
         ],
         "index_bits": [
-          0,
-          0,
           0,
           0,
           0,
@@ -195,9 +191,9 @@
       },
       "kyc_membership": {
         "leaf": "0x2e8c2561fdf643d0385999e4f68354f51b647cb4f5dc314428fe23cb58ec7c8a",
-        "root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+        "root": "0x008ef118bd50877d04ddd2b5004697ac4b9e95d1406c534cc155d29c486bddd7",
         "leaf_index": 1,
-        "depth": 12,
+        "depth": 10,
         "siblings": [
           "0x1e85bbec9de395ef772e62420d3f08c88c52d11955450a54500844b230faff5e",
           "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864",
@@ -208,14 +204,10 @@
           "0x2dee93c5a666459646ea7d22cca9e1bcfed71e6951b953611d11dda32ea09d78",
           "0x078295e5a22b84e982cf601eb639597b8b0515a88cb5ac7fa8a4aabe3c87349d",
           "0x2fa5e5f18f6027a6501bec864564472a616b2e274a41211a444cbe3a99f3cc61",
-          "0x0e884376d0d8fd21ecb780389e941f66e45e7acce3e228ab3e2156a614fcd747",
-          "0x1b7201da72494f1e28717ad1a52eb469f95892f957713533de6175e5da190af2",
-          "0x1f8d8822725e36385200c0b201249819a6e6e1e4650808b5bebc6bface7d7636"
+          "0x0e884376d0d8fd21ecb780389e941f66e45e7acce3e228ab3e2156a614fcd747"
         ],
         "index_bits": [
           1,
-          0,
-          0,
           0,
           0,
           0,
