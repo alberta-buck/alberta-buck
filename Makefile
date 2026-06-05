@@ -38,6 +38,7 @@ endif
 .PHONY: all build test clean fmt snapshot
 .PHONY: fork-sepolia fork-mainnet fork-mainnet-cache anvil stop-anvil
 .PHONY: deploy-local deploy-sepolia
+.PHONY: snark-g1tie snark-g1tie-clean
 .PHONY: install update
 .PHONY: test-python venv-activate
 .PHONY: golden-receipts
@@ -256,6 +257,15 @@ snark-a2-setup:
 
 snark-a2-fixtures:
 	nix develop --command bash -c '$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures_a2.sh'
+
+# G1-tie circuit (circuits/identity_membership_g1tie.circom).
+#   make snark-g1tie       # full regen: compile, setup, prove, export verifier + vectors
+#   make snark-g1tie-clean  # drop build dir (forces clean rebuild)
+snark-g1tie:
+	nix develop --command bash -c '$(SNARK_PATH) bash scripts/snark/setup_g1tie.sh'
+
+snark-g1tie-clean:
+	rm -rf build/snark/g1tie
 
 
 # ── Sim inputs: price CSVs + Universal Router artifact ────────────────

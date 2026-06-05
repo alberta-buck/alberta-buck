@@ -2,7 +2,7 @@
   description = "Alberta Buck — Ethereum smart contract development (Foundry/Anvil)";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/16c7794d0a28b5a37904d55bcca36003b9109aaa";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -34,6 +34,7 @@
           cacert
           git
           gnumake
+          gnused
           openssh
           bash
           bash-completion
@@ -48,7 +49,7 @@
           solc
 
           # Node.js (for OpenZeppelin npm deps, Hardhat interop, snarkjs/circomlib)
-          nodejs_20
+          nodejs_22
 
           # SNARK toolchain:
           #   circom  - compiles .circom -> R1CS / WASM witness generator
@@ -61,6 +62,8 @@
         devShells.default = pkgs.mkShell {
           buildInputs = commonInputs ++ [ python3Env ];
           shellHook = ''
+            export SOLC_PATH="${pkgs.solc}/bin/solc"
+
             echo "Alberta Buck — Ethereum Development Environment"
             echo ""
             printf "  %-12s %s\n" "forge"  "$(forge --version 2>/dev/null | head -1)"
