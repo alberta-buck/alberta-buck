@@ -263,10 +263,18 @@ snark-a2-fixtures:
 	$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures_a2.sh
 
 # G1-tie circuit (circuits/identity_membership_g1tie.circom).
-#   make snark-g1tie       # full regen: compile, setup, prove, export verifier + vectors
-#   make snark-g1tie-clean  # drop build dir (forces clean rebuild)
+#   make snark-g1tie       # FULL atomic rebuild (always cleans first)
+#   make snark-g1tie-clean  # drop build dir
+#
+# IMPORTANT: snarkjs groth16 setup is non-deterministic (delta varies per run).
+# The zkey, proof, verifier, and vectors are a MATCHED SET from a single run.
+# Always use `make snark-g1tie` — never run individual steps manually.
+# See alberta-buck-verifier-bug.org.
 snark-g1tie:
+	rm -rf build/snark/g1tie
 	$(SNARK_PATH) bash scripts/snark/setup_g1tie.sh
+
+snark-g1tie-regen: snark-g1tie
 
 snark-g1tie-clean:
 	rm -rf build/snark/g1tie
