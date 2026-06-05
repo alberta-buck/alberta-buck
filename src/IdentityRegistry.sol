@@ -117,6 +117,22 @@ contract IdentityRegistry {
         BN254.G1Point P_I;  // M_I + b*H  (hides the decrypted issuer identity)
     }
 
+    /// @notice B1 depositor binding proof (the dual of the A2 issuer binding).
+    ///         A bearer-note depositor proves it re-encrypted its own registered
+    ///         Identity M_dep under the public issuer's key pk_iss, bound to the
+    ///         Identity of its payout account -- revealing nothing.  Mirrors
+    ///         alberta_buck.wallet.b1_binding.DepositorBindingProof.
+    struct DepositorBindingProof {
+        uint256 e;
+        uint256 s_m;        // response for m_dep (identity scalar)
+        uint256 s_s;        // response for sk_dep (payout-account key)
+        uint256 s_r;        // response for r (E_dep_for_iss randomness)
+        BN254.G1Point A2;   // k_m*G + k_s*R_d
+        BN254.G1Point A4;   // k_s*G
+        BN254.G1Point B1;   // k_r*G
+        BN254.G1Point B2;   // k_m*G + k_r*pk_iss
+    }
+
     /// @notice Second generator H for the A2 binding -- a nothing-up-my-sleeve
     ///         point, H = keccak256("AlbertaBuck:IssuerReenc:H") (mod R) * G.
     ///         Mirrors alberta_buck.wallet.issuer_reenc.H_POINT.  Used only to
@@ -669,6 +685,78 @@ contract IdentityRegistry {
         pts[6] = pi.A2;
         pts[7] = pi.A3;
         pts[8] = pi.A4;
+        uint256[] memory scl = new uint256[](2);
+        scl[0] = uint256(uint160(depositor));
+        scl[1] = chainid;
+        return BN254.fsChallenge(pts, scl);
+    }
+
+    /// @notice Verify a B1 depositor binding.  Reads the depositor's registered
+    ///         (pk_dep, E_addr) and the public issuer's pk_iss, and confirms the
+    ///         four Okamoto relations -- without learning any Identity (M_dep
+    ///         stays hidden from all but the issuer, who decrypts eDepForIss).
+    ///         Mirrors alberta_buck.wallet.b1_binding.b1_bind_verify.
+    function verifyDepositorBinding(
+        address depositor,
+        address issuer,
+        ElGamalCT calldata eDepForIss,
+        DepositorBindingProof calldata pi
+    ) external view returns (bool) {
+        if (!_isRegistered(depositor) || !_isRegistered(issuer)) return false;
+
+        BN254.G1Point memory pkDep = _pk[depositor];
+        ElGamalCT     memory E_dep = _E_addr[depositor];
+        BN254.G1Point memory pkIss = _pk[issuer];
+
+        // E4: s_s*G == A4 + e*pk_dep
+        if (!BN254.eq(
+            BN254.mul(BN254.g1(), pi.s_s),
+            BN254.add(pi.A4, BN254.mul(pkDep, pi.e))
+        )) return false;
+
+        // E2: s_m*G + s_s*R_d == A2 + e*C_d     (payout account bound to M_dep)
+        if (!BN254.eq(
+            BN254.add(BN254.mul(BN254.g1(), pi.s_m), BN254.mul(E_dep.R, pi.s_s)),
+            BN254.add(pi.A2, BN254.mul(E_dep.C, pi.e))
+        )) return false;
+
+        // F1: s_r*G == B1 + e*R_f
+        if (!BN254.eq(
+            BN254.mul(BN254.g1(), pi.s_r),
+            BN254.add(pi.B1, BN254.mul(eDepForIss.R, pi.e))
+        )) return false;
+
+        // F2: s_m*G + s_r*pk_iss == B2 + e*C_f  (eDepForIss encrypts M_dep)
+        if (!BN254.eq(
+            BN254.add(BN254.mul(BN254.g1(), pi.s_m), BN254.mul(pkIss, pi.s_r)),
+            BN254.add(pi.B2, BN254.mul(eDepForIss.C, pi.e))
+        )) return false;
+
+        // Fiat-Shamir
+        return pi.e == _fsDepositorBinding(pkDep, E_dep, pkIss, eDepForIss, pi,
+                                           depositor, block.chainid);
+    }
+
+    function _fsDepositorBinding(
+        BN254.G1Point memory pkDep,
+        ElGamalCT memory E_dep,
+        BN254.G1Point memory pkIss,
+        ElGamalCT calldata eDepForIss,
+        DepositorBindingProof calldata pi,
+        address depositor,
+        uint256 chainid
+    ) internal pure returns (uint256) {
+        BN254.G1Point[] memory pts = new BN254.G1Point[](10);
+        pts[0] = pkDep;
+        pts[1] = E_dep.R;
+        pts[2] = E_dep.C;
+        pts[3] = pkIss;
+        pts[4] = eDepForIss.R;
+        pts[5] = eDepForIss.C;
+        pts[6] = pi.A2;
+        pts[7] = pi.A4;
+        pts[8] = pi.B1;
+        pts[9] = pi.B2;
         uint256[] memory scl = new uint256[](2);
         scl[0] = uint256(uint160(depositor));
         scl[1] = chainid;
