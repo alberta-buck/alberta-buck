@@ -9,7 +9,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: A Note's authority axis is the KYC-bound Identity point M, never the EOA/contract address. Adding a registry-Identity Merkle accumulator (root on chain, committed before a new M is usable) collapses the Notes system onto a single gadget -- "prove a re-encryption of a registered Identity under a target key" -- instantiated three ways: A2 (issuer encrypts under the recipient identity point), A1 (plaintext public issuer), B1 (depositor encrypts under the public issuer key at spend). The A2 and B1 bindings are duals and both are implemented and on-chain-verified (IdentityRegistry.verifyDepositCoupling, verifyDepositorBinding); the B1 dual gives a public issuer collusion-resistant knowledge of its depositors' identities. 19 Python + 13 Solidity tests pass.
+#+description: A Note's authority axis is the KYC-bound Identity point M, never the EOA/contract address. Adding a registry-Identity Merkle accumulator (root on chain, committed before a new M is usable) collapses the Notes system onto a single gadget -- "prove a re-encryption of a registered Identity under a target key" -- instantiated three ways: A2 (issuer encrypts under the recipient identity point), A1 (plaintext public issuer), B1 (depositor encrypts under the public issuer key at spend). The A2 and B1 bindings are duals and both are implemented and on-chain-verified (IdentityRegistry.verifyDepositCoupling, verifyDepositorBinding); the B1 dual gives a public issuer collusion-resistant knowledge of its depositors' identities. The unified membership circuit (circuits/identity_membership.circom) is wired through Groth16 to an on-chain verifier. 34 forge/pytest tests pass.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-notes-identity-axis
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -124,8 +124,8 @@ unknown at mint -- while Mallory learns nothing. ([[https://perry.kundert.ca/ran
   hidden:
 
   \begin{align*}
-    &\textbf{(E4)} & pk_{\text{dep}} &= sk_{\text{dep}} G; &
-    &\textbf{(E2)} & C_d &= m_{\text{rec}} G + sk_{\text{dep}} R_d; &
+    &\textbf{(E4)} & pk_{\text{dep}} &= sk_{\text{dep}} G; \\
+    &\textbf{(E2)} & C_d &= m_{\text{rec}} G + sk_{\text{dep}} R_d; \\
     &\textbf{(E3)} & C_e - P_I &= m_{\text{rec}} R_e - bH.
   \end{align*}
 
@@ -279,26 +279,37 @@ unknown at mint -- while Mallory learns nothing. ([[https://perry.kundert.ca/ran
     =B1Binding.t.sol= (6).
   - The shared =IdentityTree= accumulator and the two unilateral receipts (recipient
     names issuer; issuer names depositor).
+  - *The unified membership circuit* -- =circuits/identity_membership.circom=: the
+    native Poseidon-Merkle proof that the counterparty Identity \( M = (M_x, M_y) \)
+    is a member of \( \mathsf{rt_{id}} \), hashing /byte-for-byte/ with
+    =IdentityTree=.  Compiled (~5.7K R1CS), wired through a Groth16 setup (reusing
+    the dev =pot13= ptau) to the exported =IdentityMembershipVerifier=, and
+    on-chain-verified: a real proof of a Python-tree member verifies (~271K gas,
+    constant), a tampered root is rejected.
 
   *Test ledger.*
 
   #+LATEX: {\scriptsize
-  | Suite                    | Count | Demonstrates                                                        |
-  |--------------------------+-------+---------------------------------------------------------------------|
-  | =test_unilateral_a2.py=  |  11   | A2 mint/coupling/receipt; collusion un-nameable + un-spendable       |
-  | =test_b1_binding.py=     |   8   | B1 binding; issuer-unilateral receipt names depositor; collusion-substitution rejected; Mallory blind; unlinkable |
-  | =UnilateralA2.t.sol=     |   7   | on-chain =verifyDepositCoupling= parity + soundness                  |
-  | =B1Binding.t.sol=        |   6   | on-chain =verifyDepositorBinding= parity + soundness                 |
+  | Suite                       | Count | Demonstrates                                                        |
+  |-----------------------------+-------+---------------------------------------------------------------------|
+  | =test_unilateral_a2.py=     |  11   | A2 mint/coupling/receipt; collusion un-nameable + un-spendable       |
+  | =test_b1_binding.py=        |   8   | B1 binding; issuer-unilateral receipt names depositor; collusion-substitution rejected; Mallory blind; unlinkable |
+  | =UnilateralA2.t.sol=        |   7   | on-chain =verifyDepositCoupling= parity + soundness                  |
+  | =B1Binding.t.sol=           |   6   | on-chain =verifyDepositorBinding= parity + soundness                 |
+  | =IdentityMembership.t.sol=  |   2   | on-chain Groth16 membership proof (Python-tree member) verifies; tampered root rejected |
+  | =test_identity_membership.sh= | (script) | the circuit accepts a genuine member, rejects a wrong root (witness-level) |
   #+LATEX: }
 
-  *Status: all 32 pass*, no regression in the adjacent identity / A2 suites.
+  *Status: all 34 forge/pytest tests pass*, no regression in the adjacent identity
+  / A2 suites.
 
-  *Remaining (the same one circuit, both flavours):* the in-ZK membership of the
-  decrypted/encrypted counterparty Identity in \( \mathsf{rt_{id}} \) -- a native
-  Poseidon-Merkle proof tied to the EC commitment by one non-native scalar
-  relation, proved off chain on the Holochain agent that holds the tree, verified
-  on chain in constant gas.  Plus the accumulator-root maintenance on registration
-  (the /commit-before-use/ discipline).
+  *Remaining (one relation):* only the /non-native/ tie -- proving that the
+  circuit's witnessed \( (M_x, M_y) \) is the very point committed in the on-chain
+  EIP-196 sigma (\( P_I = M + bH \) for A2; the \( eIss \) plaintext for B1).  That
+  is one emulated-\( \mathbb{G}_1 \) relation bolted onto the (now built) native
+  membership; it is proved off chain on the Holochain agent that holds the tree and
+  verified on chain in constant gas.  Plus the accumulator-root maintenance on
+  registration (the /commit-before-use/ discipline).
 
 ** Migration
 

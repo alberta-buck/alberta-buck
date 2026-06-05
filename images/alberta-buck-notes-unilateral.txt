@@ -262,7 +262,8 @@ Table of Contents
   b) \) such that, with \( eIss = (R_e, C_e) \), the chosen account's
   registered \( E_{\text{dep}} = (R_d, C_d) \), its on-chain key \(
   pk_{\text{dep}} \), and a published commitment \( P_I = M_I + b H \):
-  \[
+
+  \begin{equation*}
   \begin{aligned}
     &\textbf{(E4)} & pk_{\text{dep}} &= sk_{\text{dep}}\,G
       &&\text{— the real account key;}\\
@@ -271,14 +272,15 @@ Table of Contents
     &\textbf{(E3)} & C_e - P_I &= m_{\text{rec}}\,R_e - b\,H
       &&\text{— } eIss \text{ decrypts under } m_{\text{rec}} \text{ to } P_I - bH.
   \end{aligned}
-  \] (E4) pins \( sk_{\text{dep}} \) to the registered key; (E2) then
-  pins \( m_{\text{rec}}G \) to the account's Identity; (E3) ties that
-  /same/ \( m_{\text{rec}} \) to \( eIss \)'s decryption, with the
-  recovered issuer Identity \( M_I \) /committed and blinded/ in \( P_I
-  \).  This is a five-point Okamoto sigma over EIP-196
-  (`deposit_couple_prove' / `deposit_couple_verify', on chain
-  `verifyDepositCoupling') – the same family as `verifyApprove' /
-  `issuer_reenc', and equally cheap.
+  \end{equation*}
+
+  (E4) pins \( sk_{\text{dep}} \) to the registered key; (E2) then pins
+  \( m_{\text{rec}}G \) to the account's Identity; (E3) ties that /same/
+  \( m_{\text{rec}} \) to \( eIss \)'s decryption, with the recovered
+  issuer Identity \( M_I \) /committed and blinded/ in \( P_I \).  This
+  is a five-point Okamoto sigma over EIP-196 (`deposit_couple_prove' /
+  `deposit_couple_verify', on chain `verifyDepositCoupling') – the same
+  family as `verifyApprove' / `issuer_reenc', and equally cheap.
 
 
 6.2 The membership half (the SNARK piece)
@@ -343,15 +345,19 @@ Table of Contents
 7.1 Construction
 ────────────────
 
-  \[ M_I = C_e - m_{\text{rec}} R_e \quad(\text{the issuer
-       Identity});\qquad M_{\text{rec}} = m_{\text{rec}} G
-       \quad(\text{the recipient's own}).  \] The recipient attaches a
-       /verifiable decryption/ (`verifiable_decrypt', a Chaum-Pedersen
-       DLEQ) proving \( eIss \) decrypts under \( M_{\text{rec}} \) to
-       \( M_I \) – revealing both points but not \( m_{\text{rec}} \).
-       The receipt is \[ \mathcal{R} = \bigl(M_I,\ M_{\text{rec}},\ v,\
-       eIss,\ \text{vd},\ \text{binding},\ \text{issuer addr},\
-       \text{chainid}\bigr).  \]
+  \begin{align*}
+    M_I            &= C_e - m_{\text{rec}} R_e && (\text{the issuer Identity}); \\
+    M_{\text{rec}} &= m_{\text{rec}} G         && (\text{the recipient's own}).
+  \end{align*}
+
+  The recipient attaches a /verifiable decryption/
+  (`verifiable_decrypt', a Chaum-Pedersen DLEQ) proving \( eIss \)
+  decrypts under \( M_{\text{rec}} \) to \( M_I \) – revealing both
+  points but not \( m_{\text{rec}} \).  The receipt is
+  \begin{align*}
+    \mathcal{R} = \bigl(M_I,\ M_{\text{rec}},\ v,\ eIss,\ \text{vd},\
+      \text{binding},\ \text{issuer addr},\ \text{chainid}\bigr).
+  \end{align*}
 
 
 7.2 Third-party verification (no secret)

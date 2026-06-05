@@ -389,7 +389,7 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
      A2 leaves, the re-encryption constraints above (option 1).  For public
      leaves, constrain =idHash='s issuerData prefix to equal the registered
      public \( M \) so the in-clear identity is the one bound.
-   - =spend.circom= (B): constrain =flavor === B1= and reveal enough of the
+   - =spend.circom= (B): constrain ~flavor === B1~ and reveal enough of the
      leaf's public-issuer binding to recover the issuer address on-chain.
    - =spend_a.circom=: unchanged (the A2 issuer binding moved to mint).
 
@@ -643,14 +643,14 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
    What actually lands on chain, and what stays off it:
 
    #+LATEX: {\scriptsize
-   | Step                     | Published on chain                                                        | Kept off chain (party-held)                          |
-   |--------------------------+---------------------------------------------------------------------------+------------------------------------------------------|
-   | =register= / =bindContract= | addr, =pk=, =E_addr= (ElGamal ct of \(M\) under own =pk=), =isPublicIdentity= | \(m\), \(M\), \(sk\)                                  |
-   | =mint= (any flavor)      | =Minted(issuer, totalFace, startIndex, count, newRoot)=; =cms[]= in calldata (opaque Poseidon) | per-leaf opening \((flavor,v,\rho,idHash,pred)\); \(E_{note}\), issuer payload |
-   | =mint= public (A1/B1)    | + =IssuerBound(issuer,newRoot)=; one Schnorr over =keccak(cms)=            | --                                                   |
-   | =mint= private (A2)      | + =IssuerReencBound(issuer,newRoot,count)=; per-leaf =(Q,U,T_hat,A_1..A_5)= | \(pk_{rec}, M_{iss}, r', \beta, \gamma, sk_{iss}\)   |
-   | B-spend                  | =Spent(nf,face,recipient)= or =SpentB(nf,face,recipient,issuer,eDepForIss)= | \(\rho, idHash\), opening                            |
-   | A-spend                  | =SpentA(nf,face,recipient)=; revealed =E_n=; CP-DLEQ =(e,s,T_1,T_2)=       | \(\rho, idHash, sk_{dep}\)                            |
+   | Step                        | Published on chain                                                                             | Kept off chain (party-held)                                                    |
+   |-----------------------------+------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------|
+   | =register= / =bindContract= | addr, =pk=, =E_addr= (ElGamal ct of \(M\) under own =pk=), =isPublicIdentity=                  | \(m\), \(M\), \(sk\)                                                           |
+   | =mint= (any flavor)         | =Minted(issuer, totalFace, startIndex, count, newRoot)=; =cms[]= in calldata (opaque Poseidon) | per-leaf opening \((flavor,v,\rho,idHash,pred)\); \(E_{note}\), issuer payload |
+   | =mint= public (A1/B1)       | + =IssuerBound(issuer,newRoot)=; one Schnorr over =keccak(cms)=                                | --                                                                             |
+   | =mint= private (A2)         | + =IssuerReencBound(issuer,newRoot,count)=; per-leaf =(Q,U,T_hat,A_1..A_5)=                    | \(pk_{rec}, M_{iss}, r', \beta, \gamma, sk_{iss}\)                             |
+   | B-spend                     | =Spent(nf,face,recipient)= or =SpentB(nf,face,recipient,issuer,eDepForIss)=                    | \(\rho, idHash\), opening                                                      |
+   | A-spend                     | =SpentA(nf,face,recipient)=; revealed =E_n=; CP-DLEQ =(e,s,T_1,T_2)=                           | \(\rho, idHash, sk_{dep}\)                                                     |
    #+LATEX: }
 
    Two facts do the heavy lifting throughout.  First, =cms[]= are Poseidon
@@ -1252,12 +1252,12 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
    handshake plus a compelled verifiable decryption.
 
    #+LATEX: {\scriptsize
-   | Step | Cryptographic step                                                                          | Who is named                              | Guarantee                                                       |
-   |------+---------------------------------------------------------------------------------------------+-------------------------------------------+----------------------------------------------------------------|
-   | E1 =register= | store \((pk, E_{\text{addr}}=\mathrm{Enc}(M,pk))\) + PS credential                  | --                                        | identity \(\leftrightarrow\) KYC                               |
+   | Step                     | Cryptographic step                                                                                              | Who is named                                      | Guarantee                                                                               |
+   |--------------------------+-----------------------------------------------------------------------------------------------------------------+---------------------------------------------------+-----------------------------------------------------------------------------------------|
+   | E1 =register=            | store \((pk, E_{\text{addr}}=\mathrm{Enc}(M,pk))\) + PS credential                                              | --                                                | identity \(\leftrightarrow\) KYC                                                        |
    | E2 =approve= (bilateral) | =verifyApprove=: \(E_{A\to B}=\mathrm{Enc}(M_A,pk_B)\) + Chaum-Pedersen \(E_{A\to B}\equiv E_{\text{addr}}[A]\) | *both* (reads \(E_{\text{addr}}[A], pk_A, pk_B\)) | the re-encryption is /sound/ (same registered \(M\)) under the *named* counterparty key |
-   | E3 =transfer= | value Alice->Bob, gated on the approve                                              | both (link visible)                       | mutual decryptability established                              |
-   | E4 receipt | =verifiable_decrypt= \(E_{X\to\text{me}}\) -> reveal \(M\)                              | --                                        | either party names the other; third-party-checkable           |
+   | E3 =transfer=            | value Alice->Bob, gated on the approve                                                                          | both (link visible)                               | mutual decryptability established                                                       |
+   | E4 receipt               | =verifiable_decrypt= \(E_{X\to\text{me}}\) -> reveal \(M\)                                                      | --                                                | either party names the other; third-party-checkable                                     |
    #+LATEX: }
 
 ** The A2 Note flow (Issuer I -> Recipient D)
@@ -1267,23 +1267,23 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
    and named at spend; they are never co-present.
 
    #+LATEX: {\scriptsize
-   | Step | Cryptographic step                                                                       | Who is named                                | Guarantee                                              |
-   |------+------------------------------------------------------------------------------------------+---------------------------------------------+--------------------------------------------------------|
-   | A1 =register= | identical to E1                                                                 | --                                          | identity \(\leftrightarrow\) KYC                       |
-   | A2 =mint= | =issuer_reenc=: \(eIss=\mathrm{Enc}(M_I,pk_D)\) + CP \(eIss\equiv E_{\text{addr}}[I]\) -- but \(pk_D\) *blinded* (\(Q=pk_D+\beta H\)) | *issuer only* (reads \(E_{\text{addr}}[I], pk_I\); \(pk_D\) /not/ read) | sound on the /issuer/ side, but bound to an issuer-*chosen* key |
-   | A3 =spend= | =verifySpendCP=: \(sk_D\) decrypts \(E_n\) & \(E_{\text{addr}}[D]\) to the same \(M_D\) | *recipient only* (reads \(E_{\text{addr}}[D], pk_D\)) | the spender provably /is/ D                            |
-   | A4 receipt | =verifiable_decrypt= \(eIss\) -> \(M_I\) + the \(\gamma\) coupling                     | --                                          | names I /iff/ \(eIss\) was under D's real key          |
+   | Step          | Cryptographic step                                                                                                                    | Who is named                                                            | Guarantee                                                       |
+   |---------------+---------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------+-----------------------------------------------------------------|
+   | A1 =register= | identical to E1                                                                                                                       | --                                                                      | identity \(\leftrightarrow\) KYC                                |
+   | A2 =mint=     | =issuer_reenc=: \(eIss=\mathrm{Enc}(M_I,pk_D)\) + CP \(eIss\equiv E_{\text{addr}}[I]\) -- but \(pk_D\) *blinded* (\(Q=pk_D+\beta H\)) | *issuer only* (reads \(E_{\text{addr}}[I], pk_I\); \(pk_D\) /not/ read) | sound on the /issuer/ side, but bound to an issuer-*chosen* key |
+   | A3 =spend=    | =verifySpendCP=: \(sk_D\) decrypts \(E_n\) & \(E_{\text{addr}}[D]\) to the same \(M_D\)                                               | *recipient only* (reads \(E_{\text{addr}}[D], pk_D\))                   | the spender provably /is/ D                                     |
+   | A4 receipt    | =verifiable_decrypt= \(eIss\) -> \(M_I\) + the \(\gamma\) coupling                                                                    | --                                                                      | names I /iff/ \(eIss\) was under D's real key                   |
    #+LATEX: }
 
 ** The mapping
 
    #+LATEX: {\scriptsize
-   | EOA step                                  | A2 step                                                       | Same relation?     | The difference                                                  |
-   |-------------------------------------------+---------------------------------------------------------------+--------------------+-----------------------------------------------------------------|
-   | E2 Alice->Bob approve (=verifyApprove=)   | A2 mint =issuer_reenc=                                         | *yes*              | \(pk_D\) *blinded* vs \(pk_B\) *named* -- /the whole gap/        |
-   | E2 Bob->Alice approve (sound, named)      | A2: nothing sound -- D's address revealed at spend + KYC      | *no*               | A2's issuer-names-recipient is address+KYC, not a crypto receipt |
-   | E3 transfer (Alice<->Bob *linked*)        | A2 mint->spend (*unlinked*)                                   | *no*               | A2 adds bulk-surveillance resistance -- /the source of all cost/ |
-   | E4 =verifiable_decrypt=                    | A4 =verifiable_decrypt= + \(\gamma\) coupling                 | *yes* (same prim.) | A2 adds the blinding-undo                                       |
+   | EOA step                                | A2 step                                                  | Same relation?     | The difference                                                   |
+   |-----------------------------------------+----------------------------------------------------------+--------------------+------------------------------------------------------------------|
+   | E2 Alice->Bob approve (=verifyApprove=) | A2 mint =issuer_reenc=                                   | *yes*              | \(pk_D\) *blinded* vs \(pk_B\) *named* -- /the whole gap/        |
+   | E2 Bob->Alice approve (sound, named)    | A2: nothing sound -- D's address revealed at spend + KYC | *no*               | A2's issuer-names-recipient is address+KYC, not a crypto receipt |
+   | E3 transfer (Alice<->Bob *linked*)      | A2 mint->spend (*unlinked*)                              | *no*               | A2 adds bulk-surveillance resistance -- /the source of all cost/ |
+   | E4 =verifiable_decrypt=                 | A4 =verifiable_decrypt= + \(\gamma\) coupling            | *yes* (same prim.) | A2 adds the blinding-undo                                        |
    #+LATEX: }
 
    The first row is the whole story: =issuer_reenc= /is/ =verifyApprove= with the
