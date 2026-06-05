@@ -32,7 +32,7 @@ remappings = [
 ]
 
 [profile.v3]
-via_ir = false
+via_ir = true
 src = "src/uniswap_v3_build"
 out = "out"
 

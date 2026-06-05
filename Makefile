@@ -38,7 +38,7 @@ endif
 .PHONY: all build test clean fmt snapshot
 .PHONY: fork-sepolia fork-mainnet fork-mainnet-cache anvil stop-anvil
 .PHONY: deploy-local deploy-sepolia
-.PHONY: snark-g1tie snark-g1tie-clean snark-update
+.PHONY: snark-g1tie snark-g1tie-clean snark-g1tie-regen snark-test-regression snark-update
 .PHONY: install update
 .PHONY: test-python venv-activate
 .PHONY: golden-receipts
@@ -275,6 +275,13 @@ snark-g1tie:
 	$(SNARK_PATH) bash scripts/snark/setup_g1tie.sh
 
 snark-g1tie-regen: snark-g1tie
+
+# Regression test: regenerates verifier artifacts atomically and tests both
+# freshly-generated AND pre-existing (known-working) verifiers on forge.
+# Designed to isolate ARM vs x86_64 WASM execution differences.
+# See alberta-buck-verifier-bug.org.
+snark-test-regression:
+	$(SNARK_PATH) bash scripts/snark/test_verifier_regression.sh
 
 snark-g1tie-clean:
 	rm -rf build/snark/g1tie
