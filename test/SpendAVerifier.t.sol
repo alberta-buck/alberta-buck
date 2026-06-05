@@ -266,7 +266,7 @@ contract SpendAVerifierTest is Test {
         vm.prank(sender);
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -319,7 +319,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: already spent"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -340,7 +340,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: unknown root"));
         notes.spendACP(
             fxProof, fxNoteRoot ^ 1, fxNullifier, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -350,7 +350,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, alice,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -360,7 +360,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace + 1, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -370,7 +370,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier ^ 1, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -381,7 +381,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -396,7 +396,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            bad, fxCP
+            bad, fxCP, ""
         );
     }
 
@@ -408,7 +408,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad spend proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            bad, fxCP
+            bad, fxCP, ""
         );
     }
 
@@ -418,7 +418,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: zero recipient"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, address(0),
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -428,7 +428,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: zero face"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, 0, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -444,7 +444,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad identity proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -454,7 +454,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad identity proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -467,7 +467,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad identity proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, bad
+            fxEN, bad, ""
         );
     }
 
@@ -479,7 +479,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: bad identity proof"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, bad
+            fxEN, bad, ""
         );
     }
 
@@ -521,7 +521,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: A-spend disabled"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 
@@ -533,7 +533,7 @@ contract SpendAVerifierTest is Test {
         vm.expectRevert(bytes("Notes: identity registry not set"));
         notes.spendACP(
             fxProof, fxNoteRoot, fxNullifier, fxFace, fxRecipient,
-            fxEN, fxCP
+            fxEN, fxCP, ""
         );
     }
 

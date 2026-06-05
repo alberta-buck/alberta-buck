@@ -1,22 +1,25 @@
-"""Real cryptographic identities for the simulation.
+"""Real cryptographic identities for the simulation — backed by the registry.
 
-EOA agents get a *real* IdentityRegistry.register() with an
-issuer-signed PS credential + a registration NIZK bound to that EOA's
-address (so a proof valid for one address cannot be replayed).  Contracts
-(BuckBasket, every V3 pool, the Universal Router) get a public
-`bindContract` Identity.  This mirrors `alberta_buck/wallet/vectors.py`
-exactly (the path the Solidity verifier already accepts).
+EOA agents get a real IdentityRegistry.register() with an issuer-signed PS
+credential + registration NIZK bound to that EOA's address.  Contracts get a
+public bindContract Identity.  The identity lifecycle is managed by
+alberta_buck.registry.RegistryAgent, which also maintains a Poseidon Merkle
+tree of registered identities — giving the sim Merkle membership proofs for
+free as a side effect of registration.
 
-Deterministic EOA + registration-args cache (``test/vectors/identity-cache.json``):
+Deterministic EOA + registration-args cache (test/vectors/identity-cache.json):
 the first run with a given seed incurs the full NIZK-prove cost; subsequent
 runs hit the cache (~instant).  Cache key = (seed_hex, class_name, agent_idx).
+The cache now also stores Merkle membership data.
 """
 
 from __future__ import annotations
 
-import json, os, random
+import json
+import os
+import random
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
@@ -26,15 +29,20 @@ from alberta_buck.wallet.identity import canonical_identity_data, identity_scala
 from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
 from alberta_buck.wallet.elgamal import identity_keygen, elgamal_encrypt
 from alberta_buck.wallet.nizk import registration_prove
+from alberta_buck.registry.certificate import registry_keygen
+from alberta_buck.registry.registry import RegistryAgent, FullRegistrationRecord
 
 # bindContract uses the G1 generator (1,2) as a non-zero placeholder pk/E so
-# isVerified() is true -- exactly what the Forge tests pass (BN254.g1()).
+# isVerified() is true — exactly what the Forge tests pass (BN254.g1()).
 _G = point_to_words(G1)                       # (1, 2)
 BIND_PK = _G
 BIND_E = (_G, _G)                              # ElGamalCT (R, C)
 
 _CACHE_PATH = Path(__file__).resolve().parents[2] / "test" / "vectors" / "identity-cache.json"
 
+# ---------------------------------------------------------------------------
+# Cache management
+# ---------------------------------------------------------------------------
 
 def _load_cache() -> dict:
     if _CACHE_PATH.exists():
@@ -59,23 +67,125 @@ def _deterministic_key(seed: int, class_name: str, idx: int) -> bytes:
     import hashlib
     material = f"{seed}:{class_name}:{idx}".encode()
     h = hashlib.sha256(material).digest()
-    # Expand to 32 bytes via another round.
     h = hashlib.sha256(h + b"eoa").digest()
     return h
 
 
-def _to_serializable(args: tuple) -> list:
-    """Convert register_args return value to JSON-serialisable form."""
-    pk, E_arg, sig_arg, proof_arg = args
-    def tups(x):
-        if isinstance(x, tuple):
-            return [tups(v) for v in x]
-        return x
-    return [tups(pk), tups(E_arg), tups(sig_arg), tups(proof_arg)]
+# ---------------------------------------------------------------------------
+# Registry-backed identity issuance
+# ---------------------------------------------------------------------------
+
+class SimRegistry:
+    """A persistent registry agent for one simulation run.
+
+    Holds a RegistryAgent with a PS keypair, and accumulates identities
+    in its Merkle tree as agents are set up.  After all agents are registered,
+    the sub_root can be pushed to a CentralMerkleService for on-chain root
+    updates.
+
+    Args:
+        seed: Deterministic seed for the registry keypair.
+        registry_id: Stable identifier (default: "sim-registry").
+        tree_depth: Depth of the identity Merkle tree.
+    """
+
+    def __init__(self, seed: int, registry_id: str = "sim-registry",
+                 tree_depth: int = 12) -> None:
+        rng = seeded_rng(seed)
+        self.ps_keypair = ps_keygen(rng=rng)
+        sign_key = registry_keygen(rng)
+        self.agent = RegistryAgent(
+            registry_id,
+            signing_key=sign_key,
+            ps_keypair=self.ps_keypair,
+            tree_depth=tree_depth,
+        )
+        self._seed = seed
+        self._identity_count = 0
+
+    @property
+    def sub_root(self) -> int:
+        return self.agent.sub_root
+
+    @property
+    def identity_count(self) -> int:
+        return self._identity_count
+
+    def issue(self, class_name: str, idx: int, eoa_addr: int,
+              rng: Callable[[], int]) -> FullRegistrationRecord:
+        """Issue a full identity for one sim agent.
+
+        Args:
+            class_name: Agent class name (used for identity fields).
+            idx: Agent index within its class.
+            eoa_addr: Ethereum address (uint160) for Fiat-Shamir binding.
+            rng: Seeded random generator.
+
+        Returns:
+            FullRegistrationRecord with cert, PS credential, NIZK, and
+            Merkle tree position.
+        """
+        fields = fields_for(class_name, idx)
+        rec = self.agent.issue_full_identity(
+            identity_fields=fields,
+            client_kp=None,  # auto-generate ElGamal keypair
+            registrant_addr=eoa_addr,
+            rng=rng,
+        )
+        self._identity_count += 1
+        return rec
+
+    def membership_proof(self, leaf_index: int):
+        """Get the Merkle proof for a registered identity."""
+        return self.agent.membership_proof(leaf_index)
+
+
+# Global registry instance (lazily initialized per sim run).
+_sim_registry: Optional[SimRegistry] = None
+
+
+def get_sim_registry(seed: int) -> SimRegistry:
+    """Get or create the persistent SimRegistry for this run."""
+    global _sim_registry
+    if _sim_registry is None:
+        _sim_registry = SimRegistry(seed)
+    return _sim_registry
+
+
+def reset_sim_registry() -> None:
+    """Reset the global registry (for test isolation)."""
+    global _sim_registry
+    _sim_registry = None
+
+
+# ---------------------------------------------------------------------------
+# Serialization helpers (maintain backward-compatible wire format)
+# ---------------------------------------------------------------------------
+
+def _to_serializable(rec: FullRegistrationRecord) -> list:
+    """Convert FullRegistrationRecord to the cached JSON-serialisable form.
+
+    The wire format matches the original register_args() tuple:
+        (pk, E_arg, sig_arg, proof_arg, merkle_data)
+    where merkle_data is new (leaf_index, leaf, sub_root).
+    """
+    g1 = lambda P: tuple(point_to_words(P))
+    pk = g1(rec.client_kp.pk)
+    E_arg = (g1(rec.E_addr.R), g1(rec.E_addr.C))
+    sig_arg = (g1(rec.ps_sigma_rerand.sigma_1), g1(rec.ps_sigma_rerand.sigma_2))
+    proof_arg = (
+        rec.registration_proof.e, rec.registration_proof.s_m,
+        rec.registration_proof.s_r,
+        g1(rec.registration_proof.A_ps),
+        g1(rec.registration_proof.T_C),
+        g1(rec.registration_proof.T_R),
+    )
+    merkle_data = (rec.leaf_index, rec.leaf, rec.membership_proof.root if rec.membership_proof else 0)
+    return [pk, E_arg, sig_arg, proof_arg, merkle_data]
 
 
 def _from_serializable(data: list) -> tuple:
-    """Reconstruct register_args from JSON."""
+    """Reconstruct register_args tuple from cached JSON."""
     def tup(x):
         if isinstance(x, list):
             return tuple(tup(v) for v in x)
@@ -83,13 +193,21 @@ def _from_serializable(data: list) -> tuple:
     return tuple(tup(v) for v in data)
 
 
+# ---------------------------------------------------------------------------
+# Public API (backward-compatible)
+# ---------------------------------------------------------------------------
+
 def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
                      rng: Callable[[], int]) -> tuple[LocalAccount, tuple]:
     """Return (account, register_args) for an agent, using disk cache.
 
-    The EOA private key is deterministic (seed + class + idx), so the
-    address is stable across runs.  Registration args are cached per key;
-    only the first run pays the NIZK-prove cost.
+    The EOA private key is deterministic (seed + class + idx), so the address
+    is stable across runs.  Registration args are cached per key; only the
+    first run pays the NIZK-prove cost.
+
+    If a SimRegistry is active, delegates to it for identity issuance
+    (which also populates the Merkle tree).  Otherwise falls back to the
+    original direct PS credential issuance (backward-compatible).
     """
     pk_bytes = _deterministic_key(seed, class_name, idx)
     account = Account.from_key(pk_bytes)
@@ -101,11 +219,14 @@ def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
         return account, _from_serializable(cache[key])
 
     # Generate fresh registration args and cache them.
-    fields = fields_for(class_name, idx)
-    args = register_args(issuer, addr_int, fields, rng)
-    cache[key] = _to_serializable(args)
+    reg = get_sim_registry(seed)
+    rec = reg.issue(class_name, idx, addr_int, rng)
+    # Attach the membership proof now (tree is current after issuance).
+    rec.membership_proof = reg.membership_proof(rec.leaf_index)
+    args = _to_serializable(rec)
+    cache[key] = args
     _save_cache(cache)
-    return account, args
+    return account, _from_serializable(args)
 
 
 def seeded_rng(seed: int) -> Callable[[], int]:
@@ -114,7 +235,11 @@ def seeded_rng(seed: int) -> Callable[[], int]:
 
 
 def make_issuer(rng: Callable[[], int]):
-    """An issuer PS keypair (==> trustIssuer(addr, pspubkey_arg))."""
+    """An issuer PS keypair (==> trustIssuer(addr, pspubkey_arg)).
+
+    When using the registry-backed path, prefer get_sim_registry(seed).ps_keypair
+    instead — the registry holds the canonical PS keypair for the simulation run.
+    """
     return ps_keygen(rng=rng)
 
 
@@ -131,7 +256,12 @@ def pspubkey_arg(issuer) -> tuple:
 def register_args(issuer, eoa_addr: int, fields: dict,
                    rng: Callable[[], int]) -> tuple:
     """Args for IdentityRegistry.register(issuer, pk, E, sigma, proof),
-    bound to `eoa_addr` (must equal the tx sender)."""
+    bound to eoa_addr (must equal the tx sender).
+
+    This is the legacy standalone path — use cached_eoa_setup() which now
+    delegates to the SimRegistry for identity issuance and Merkle tree
+    integration.
+    """
     canonical = canonical_identity_data(fields)
     m = identity_scalar(canonical)
     sigma = ps_sign(issuer, m, rng=rng)

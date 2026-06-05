@@ -1,0 +1,95 @@
+{
+  "registry_id": "test-registry",
+  "serial": 2,
+  "canonical_identity_data": "{\"date_of_birth\":\"1990-01-01\",\"epoch\":42,\"family_name\":\"Test-bob\",\"given_name\":\"Bob\",\"id_number\":\"TEST-0000a1bc-0001\",\"id_type\":\"Test Identity\",\"issued_at\":\"2026-06-01T00:00:00Z\",\"issuer_id\":\"test-registry\",\"jurisdiction\":\"Alberta, Canada\"}",
+  "m": "0x118f7e00d6a52c580e45c0fd03c07fdd9625f97178853299b57f513e31953983",
+  "M": {
+    "x": "0x0b2169f23ca6220bb7501dd5223b2f46baa40ace00f5e697c6f8161345dee3d6",
+    "y": "0x2886c961dbf1fb7f5f252d284e8370d7de6c73a45e7c386aae6aa73fb34502b0"
+  },
+  "leaf": "0x2e8c2561fdf643d0385999e4f68354f51b647cb4f5dc314428fe23cb58ec7c8a",
+  "leaf_index": 1,
+  "elgamal_kp": {
+    "sk": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "pk": {
+      "x": "0x1c52fcd9b1a2159de95aca3074424d2aba1965b6e57f45dd73d4b0f2936e61c1",
+      "y": "0x2b6813590c7f36d7cd7cb4eb32247f5be0f754deb02358289657200fe30074c9"
+    }
+  },
+  "ciphertext": {
+    "R": {
+      "x": "0x070c331f6cb3d660ed9a67ca6a9074cff080c71893dc2f6fb4ee35006e5e5cec",
+      "y": "0x12523283afb75580becf9ba20095397f6a99bfa1cda09eb9a7812e6cf69ea6cb"
+    },
+    "C": {
+      "x": "0x1af169087f68dc131ae884ac46207bf8089f0f5be7a837948b999bb4562304f3",
+      "y": "0x0759d0b2442fb580dffb52c7bc3716e3f46bf61e76ffd7f2484e320fde33a54a"
+    }
+  },
+  "registrant": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "ps_sig_raw": null,
+  "ps_sig_rerand": {
+    "sigma_1": {
+      "x": "0x12a68d60ae02e1f98b042eaa01805cb80a8c7eb78ae85b3ffcf52674f0c27b2d",
+      "y": "0x0e5e649635e5a5a925ac0bd8e1a7e802963c222aa3be8a6a337cbd0b9d0483b3"
+    },
+    "sigma_2": {
+      "x": "0x2a17f030fe1a6a60a0520c0326b34948530898c32556fb9b14d65621b6a94cf0",
+      "y": "0x06d349c983e80e48b8bc70381a0214d3284a3be431d6a28cc803282592935495"
+    }
+  },
+  "registration_proof": {
+    "e": "0x28f2414b9920ae4d008e04608b36155ecfb6d2b57bcd1faecde9993e8ec4df03",
+    "s_m": "0x0f18445deaf89baaa7e2434026edbf9f8d03c64404117e48a7ece003e6cffceb",
+    "s_r": "0x070cea8017df812063a2ef6febf418c74a341d10e227577333a841c27afb0461",
+    "A_ps": {
+      "x": "0x29c20f1ab3a7270dda1cb414db491e2f4d591a76df6e9171cd17c4b79e83c17e",
+      "y": "0x158e8e586e0d01343d4b9c3c483f29bc8e761f3d2fe3499c5462f67be581151c"
+    },
+    "T_C": {
+      "x": "0x2a0582703132f0d708395f0410dd0a3f0a38da8291235e87ab9ebc3c990f3c67",
+      "y": "0x2eedcb331b94b20612422d54025d5245af97bdcdfed4c458bae2157ba1a1cb80"
+    },
+    "T_R": {
+      "x": "0x0325892fb003aadbb0495ec5ed171d173f7b9b5bb2afec7064cae7320ce5a055",
+      "y": "0x1f2153aed5b1a652d4d474d71b457a8c58fa6e59a5b54467801065e12388c095"
+    }
+  },
+  "kyc_membership": {
+    "leaf": "0x2e8c2561fdf643d0385999e4f68354f51b647cb4f5dc314428fe23cb58ec7c8a",
+    "root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+    "leaf_index": 1,
+    "depth": 12,
+    "siblings": [
+      "0x1e85bbec9de395ef772e62420d3f08c88c52d11955450a54500844b230faff5e",
+      "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864",
+      "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1",
+      "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238",
+      "0x07f9d837cb17b0d36320ffe93ba52345f1b728571a568265caac97559dbc952a",
+      "0x2b94cf5e8746b3f5c9631f4c5df32907a699c58c94b2ad4d7b5cec1639183f55",
+      "0x2dee93c5a666459646ea7d22cca9e1bcfed71e6951b953611d11dda32ea09d78",
+      "0x078295e5a22b84e982cf601eb639597b8b0515a88cb5ac7fa8a4aabe3c87349d",
+      "0x2fa5e5f18f6027a6501bec864564472a616b2e274a41211a444cbe3a99f3cc61",
+      "0x0e884376d0d8fd21ecb780389e941f66e45e7acce3e228ab3e2156a614fcd747",
+      "0x1b7201da72494f1e28717ad1a52eb469f95892f957713533de6175e5da190af2",
+      "0x1f8d8822725e36385200c0b201249819a6e6e1e4650808b5bebc6bface7d7636"
+    ],
+    "index_bits": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "M_x": "0x0b2169f23ca6220bb7501dd5223b2f46baa40ace00f5e697c6f8161345dee3d6",
+    "M_y": "0x2886c961dbf1fb7f5f252d284e8370d7de6c73a45e7c386aae6aa73fb34502b0"
+  },
+  "aggregator_root": "0x2b1be837cccc27a8ab397ebd3818ffe3ae3f16fdda0bf9e62bde6d78a5336fa3"
+}

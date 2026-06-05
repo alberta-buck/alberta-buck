@@ -1,0 +1,262 @@
+#+TITLE: SILMARILS Evaluation for Alberta Buck Identity Binding
+#+SUBTITLE: Information-Theoretic Tools for Quantum-Resistant Identity Proofs
+#+author: Perry Kundert
+#+date: 2026-06-04
+#+description: Evaluate the SILMARILS IT-secure signature scheme for applicability to improving quantum resistance of the Alberta Buck Identity binding system.  The Shamir Secret Sharing foundation may apply independently to replace elliptic-curve-based Okamoto sigmas with information-theoretic commitments.
+#+draft: false
+#+math: true
+#+options: ^:nil
+
+* What SILMARILS Is
+
+SILMARILS is a cryptographic signature scheme whose security is
+/Information-Theoretic/ (IT) -- it depends on the mathematics of finite fields,
+not on computational hardness assumptions (discrete log, factorization, LWE)
+that quantum algorithms could break.  Its core contributions:
+
+- A signature scheme built on /2-out-of-2 Shamir Secret Sharing/ over
+  \(\mathbb{F}_p\), combined with HMAC and hash functions.  All signatures
+  are /algebraic/ -- they consist of 5 \(\mathbb{F}_p\) scalars.
+
+- Two modes: /two-party/ (Transferable Designated Verifier, TDV) and
+  /three-party/ (broadcast model with signer, holder, verifier).  The TDV
+  mode provides signatures only a designated verifier can verify, with the
+  ability to /simulate/ accepting transcripts indistinguishable from real
+  ones -- making them non-transferable to third parties.
+
+- Security analysis in the Pure IT model, the classical ROM, and the
+  /Quantum Random Oracle Model/ (QROM), with a theorem proving that when
+  the four properties (correctness, unforgeability, transferability, secrecy)
+  are all satisfied with error \(\varepsilon\), the protocol is an
+  \(O(\varepsilon)\)-secure implementation of the ideal three-party digital
+  signature functionality.
+
+| Aspect                  | SILMARILS                                            |
+|-------------------------+------------------------------------------------------|
+| Core primitive          | 2-out-of-2 SSS over \(\mathbb{F}_p\)                 |
+| Security model          | Information-theoretic (unconditional)                |
+| Quantum security        | Yes (no computational assumptions)                   |
+| Signature size          | 5 scalars \(\mathbb{F}_p\) (~160 bytes at 256-bit p) |
+| Key size (long-term)    | 1 scalar K + 2 public weights                        |
+| Assumptions             | TRNG + hash (ROM/QROM) only                          |
+| Post-quantum compatible | Yes -- no EC, no lattice, no code assumptions        |
+
+* The Identity Binding System and Its Quantum Vulnerabilities
+
+The Alberta Buck identity layer uses BN254 (alt_bn128) elliptic curve
+operations extensively:
+
+| Primitive                 | Quantum Risk | Notes                                             |
+|---------------------------+--------------+---------------------------------------------------|
+| ElGamal encryption        | Shor (ECDL)  | Encrypts M = m*G under pk = sk*G                  |
+| Chaum-Pedersen proofs     | Shor (ECDL)  | Used for verifyApprove, verifyDepositorForIssuer  |
+| Okamoto sigma protocols   | Shor (ECDL)  | verifyDepositCoupling, verifyDepositorBinding     |
+| Schnorr signatures        | Shor (ECDL)  | verifyIssuerSchnorr                               |
+| BN254 pairing checks      | Shor (ECDL)  | PS credential verification, Groth16               |
+| Groth16 SNARK             | Shor + KH    | mint_batch, spend_a, identity_membership          |
+| Poseidon hashing          | Grover       | Quantum-safe (hash-based, only quadratic speedup) |
+| Identity scalar m = H(id) | Grover       | Hash function, quantum-safe                       |
+
+** Elliptic curve operations are the primary attack surface.
+
+A large enough quantum computer running Shor's algorithm would recover:
+
+- Any discrete log \(sk\) from a public key \(pk = sk \cdot G\).
+- Any identity secret \(m\) from a registered ElGamal ciphertext \(E_{\text{addr}}\).
+- The ability to forge Chaum-Pedersen proofs, Okamoto sigmas, and Schnorr
+  signatures, breaking the /binding/ between an account and its identity.
+- The ability to decrypt any ElGamal ciphertext, revealing previously private
+  identities from past transactions.
+
+Poseidon hashing and the identity scalar derivation are /not/ at comparable
+risk -- Grover's algorithm on hash preimages gives only a quadratic speedup,
+and for 256-bit outputs the security margin remains adequate.
+
+* How SILMARILS's SSS Foundation Could Help
+
+The key structural insight in SILMARILS is that /Shamir Secret Sharing based
+commitments can be used directly as information-theoretic substitutes for
+EC-based sigma protocols/.  The 2-out-of-2 SSS over \(\mathbb{F}_p\) gives
+perfect secrecy (each share is uniformly random and independent of the secret)
+and enables linear verification.
+
+A /witness/ committed via SSS shares can be verified by reconstructing a linear
+relation -- no elliptic curve operations needed.  The verification constraint is
+just a check that \(V = \mathsf{SSS}^{-1}(V_0, V_1) = 0\), which is purely
+algebraic over \(\mathbb{F}_p\).
+
+** The analogues in the identity binding system:
+
+| EC-based (current)                          | SSS-based alternative                 | Gain             |
+|---------------------------------------------+---------------------------------------+------------------|
+| E4: \(pk_{\text{dep}} = sk_{\text{dep}} G\) | \(V = \mathsf{SSS}^{-1}(\ldots) = 0\) | No EC, IT-secure |
+| E2: \(C_d = m G + sk_{\text{dep}} R_d\)     | Linear SSS check over commitments     | No EC, IT-secure |
+| E3: \(C_e - P_I = m R_e - b H\)             | Linear SSS check over commitments     | No EC, IT-secure |
+| F1 + F2 (B1 depositor binding)              | Linear SSS check over commitments     | No EC, IT-secure |
+| Chaum-Pedersen DLEQ                         | SSS-based DLEQ analogue?              | Open question    |
+
+The fundamental pattern: each EC sigma protocol proves knowledge of scalars
+\( (m, sk, b) \) satisfying a /linear relation/ that the verifier checks via
+EC operations.  With SSS, we commit to each witness using Shamir shares,
+then the verifier reconstructs a value that must equal 0 if and only if the
+relation holds.  This is exactly what SILMARILS does for its 5-element
+signature: the verifier computes \((V_0, V_1) = \mathsf{SSS}(C)\), where \(C\)
+is an algebraic combination of the committed witness, and accepts only if
+\(\mathsf{SSS}^{-1}(V_0, V_1) = 0\).
+
+* A Concrete Proposal: SSS-Okamoto Sigmas
+
+The deposit coupling proof (E2/E3/E4) and depositor binding proof (E2/F1/F2)
+can be /directly/ translated into SSS-based sigma protocols.  The shape is:
+
+1. The prover knows witnesses \((m, sk, b)\) (or \((m, sk, r)\) for B1).
+2. The verifier holds public commitments to these values via SSS shares.
+3. The prover sends a SSS-committed response that the verifier reconstructs.
+4. The verifier checks that the reconstructed value equals 0.
+
+No elliptic curve operations are needed -- everything works over \(\mathbb{F}_p\).
+The security is IT: an adversary with unlimited quantum compute cannot forge
+a proof because the witness is perfectly hidden in each SSS share.
+
+This yields the following quantum-safe equivalents:
+
+| EC operation          | Quantum-safe replacement         | Cost change    |
+|-----------------------+----------------------------------+----------------|
+| ecMul (EC point mult) | Field multiplication             | ~identical     |
+| ecAdd (EC point add)  | Field addition                   | ~identical     |
+| pairing check         | No equivalent needed (SSS-based) | Eliminated     |
+| SPoK over ECDL        | SSS-based linear check           | +2 field mults |
+
+The cost model is favorable: field operations on \(\mathbb{F}_p\) are already
+cheap on the EVM (the MODEXP precompile handles modular exponentiation; field
+mul/add are a few gas each).  The current EIP-196 BN254 precompile adds
+~6K gas per ecMul.  An SSS-based verification would replace those calls with
+a handful of field arithmetic operations -- no precompile dependency.
+
+* What Would Need to Change
+
+| Component                                  | Change required                                            | Difficulty |
+|--------------------------------------------+------------------------------------------------------------+------------|
+| Identity point M                           | Would need SSS-based commitment replaces M = m*G           | High       |
+| E_addr (registered credential)             | ElGamal CT over EC -> SSS-shared credential                | High       |
+| Deposit coupling (verifyDepositCoupling)   | EC sigma -> SSS linear check                               | Medium     |
+| Depositor binding (verifyDepositorBinding) | EC sigma -> SSS linear check                               | Medium     |
+| Notes spend paths                          | Membership circuit stays (Poseidon Merkle, already Q-safe) | Low        |
+| Groth16 SNARK                              | Could be replaced by SSS-based accumulator                 | High       |
+| Identity Merkle tree                       | Poseidon-based, already Q-safe                             | None       |
+| PS credential chain                        | EC pairing -> SSS-based credential                         | High       |
+
+The cleanest migration path:
+1. /Keep/ the Poseidon Merkle tree (it's already quantum-safe).
+2. /Keep/ the identity scalar \(m = H(\text{id}) % \text{ORDER}\) concept.
+3. /Replace/ the EC-based sigma protocols with SSS-based linear checks.
+4. /Replace/ the ElGamal encryption of M in E_addr with an SSS-shared commitment.
+5. /Replace/ the Groth16 membership+tie SNARK with a native Poseidon SSS verifier.
+
+* Relationship to Existing Work
+
+The wallet's /unilateral_a2.py/ already contains IdentityTree, identity_leaf,
+and the deposit coupling proof structure.  The signature is a 3-witness Okamoto
+sigma over EC.  Translating this to SSS replaces the commitment points (A2, A3,
+A4, P_I) from EC points to SSS-shared scalars, and replaces the verification
+equations (E2, E3, E4) from EC linear algebra to SSS reconstruction checking
+that a linear combination equals zero.
+
+The wallet's /b1_binding.py/ is structurally identical and benefits from the
+same translation.
+
+* Limitations and Caveats
+
+1. /SILMARILS itself is not directly applicable to the identity binding problem./
+   It is a signature scheme, not a general-purpose commitment or proof system.
+   What transfers is the /technique/: SSS-based linear verification of committed
+   witnesses.  The signature's 5-element structure does not directly map to the
+   3-witness Okamoto sigma pattern, but the underlying algebraic principle does.
+
+2. /The ElGamal encryption of identity points./  Replacing this with an
+   SSS-based commitment scheme would require rethinking how a registry
+   delivers a certified identity to a client.  The current scheme uses the
+   client's EC public key to encrypt M.  An SSS-based scheme would instead
+   share the identity secret into shares distributed during registration,
+   eliminating the EC dependency.
+
+3. /Groth16 SNARK replacement./  The non-native G1 tie (the remaining circuit
+   work described in identity-axis.org) currently needs BN254 emulated EC
+   arithmetic in circom to prove that the G1 point committed in the on-chain
+   sigma is the same point in the Poseidon Merkle tree.  An all-field approach
+   eliminates the need for non-native arithmetic entirely -- the Poseidon
+   Merkle leaf and the sigma commitment are both \(\mathbb{F}_p\) values, so
+   the tie becomes a native circuit constraint.
+
+4. /EVM feasibility./  Field arithmetic in the EVM is practical via the
+   MODEXP precompile (0x05) for modular reduction and native 256-bit operations
+   for addition.  The current EIP-196 precomile dependency for BN254 operations
+   would be eliminated.  Gas costs are likely comparable or lower for the
+   SSS-based checks.
+
+* The Hylland Option (Structural Hybrid)
+
+A practical near-term path is a /hybrid/ structure using both the existing EC
+primitives AND an SSS-based fallback, giving dual security until the quantum
+threat crystallises:
+
+1. The E_addr credential carries /both/ the ElGamal ciphertext (EC) and an
+   SSS-based identity commitment (IT-Q-safe).
+2. The deposit coupling verifies EITHER the EC sigma /or/ the SSS sigma.
+3. Governance (setMembershipVerifier) upgrades from EC-only to SSS-only when
+   the quantum threat warrants.
+
+This dual-credential approach is similar to how hybrid KEMs work in
+TLS 1.3 post-quantum migration.
+
+* Summary
+
+| Factor                     | Assessment                                                |
+|----------------------------+-----------------------------------------------------------|
+| SILMARILS directly usable  | No -- it is a signature scheme, not a proof system        |
+| SSS technique transferable | Yes -- core IT-secure commitment + linear verification    |
+| Quantum threat addressed   | Yes -- eliminates all EC operations from identity binding |
+| EVM cost impact            | Likely lower (field ops vs EIP-196 precompiles)           |
+| Migration difficulty       | High -- requires rethinking E_addr, PS credentials, SNARK |
+| Cleanest path              | SSS-based Okamoto sigmas for deposit coupling + binding   |
+| Poseidon Merkle tree       | Already quantum-safe, unchanged                           |
+| Identity concept m = H(id) | Already quantum-safe, unchanged                           |
+
+The /single most impactful application/ of the SSS technique: /replacing the
+EI[P-196 Okamoto sigmas/ (verifyDepositCoupling, verifyDepositorBinding) with
+purely algebraic \(\mathbb{F}_p\) checks/.  This addresses the quantum
+vulnerability of the on-chain identity binding without touching the off-chain
+Merkle tree, the identity certificate chain, or the wallet's cryptographic
+primitives.
+
+** Why not also replace the EC-based receipt verification?
+
+The unilateral receipt (Section sec:receipt of alberta-buck-notes-unilateral)
+uses a verifiable decrypt proof -- a Chaum-Pedersen DLEQ that \(eIss\) decrypts
+under \(M_{\text{rec}}\) to \(M_I\).  This is an EC-based proof.  Replacing it
+with an SSS-based receipt would mean proving, in the clear, that an SSS-shared
+ciphertext opens to a specific value.  This is /possible/ (the SSS reconstruction
+already serves as a linear proof), but requires a different receipt format that
+is no longer compatible with the current bilateral receipt structure.  A
+separate evaluation for receipt migration is warranted.
+
+* Open Questions
+
+1. SSS-based sigma vs. Okamoto sigma soundness: Does the SSS-based linear
+   check provide the same /special soundness/ (extractability of the witness)
+   as the EC Okamoto sigma?  Extraction requires rewinding the prover --
+   this works with SSS commitments too, since the commitment is a uniformly
+   random share that perfectly hides the witness (information-theoretic
+   hiding).  Extraction from SSS is simpler than from EC sigma protocols
+   because there is no group-theoretic extraction; the witness is recovered
+   directly from the SSS reconstruction of the response.  A formal proof
+   would follow the same template as SILMARILS Theorem 1 but applied to
+   the 3-witness linear relation.
+
+2. Can the identity Merkle tree leaf be the SSS share itself?  The tree
+   currently stores identity_leaf(M) = Poseidon(M.x, M.y).  If M is no longer
+   an EC point but an SSS-sharing of the identity, the leaf would commit to
+   one share of the SSS-shared identity.  The Poseidon hash would still be
+   quantum-safe.  The non-native G1 tie would become a simple equality check
+   between the Poseidon leaf's preimage and the SSS-shared value -- a native
+   constraint in the circuit.

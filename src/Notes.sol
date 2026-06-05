@@ -3,12 +3,13 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {IMintVerifier}   from "./IMintVerifier.sol";
-import {IMintVerifierA2} from "./IMintVerifierA2.sol";
-import {ISpendVerifier}  from "./ISpendVerifier.sol";
-import {ISpendAVerifier} from "./ISpendAVerifier.sol";
-import {IdentityRegistry} from "./IdentityRegistry.sol";
-import {BN254}            from "./BN254.sol";
+import {IMintVerifier}                 from "./IMintVerifier.sol";
+import {IMintVerifierA2}               from "./IMintVerifierA2.sol";
+import {ISpendVerifier}                from "./ISpendVerifier.sol";
+import {ISpendAVerifier}               from "./ISpendAVerifier.sol";
+import {IIdentityMembershipVerifier}   from "./IIdentityMembershipVerifier.sol";
+import {IdentityRegistry}              from "./IdentityRegistry.sol";
+import {BN254}                         from "./BN254.sol";
 
 // (Buck dispatches to the Carrying transfer path automatically when the
 //  sender is registered with isCarrying = true in IdentityRegistry; the
@@ -120,6 +121,17 @@ contract Notes {
     ///         zero `spendAVerifier`).
     IdentityRegistry public identityRegistry;
 
+    /// @notice Identity membership verifier (Phase 9 -- identity-axis).
+    ///         Verifies a Groth16 proof that the counterparty identity point
+    ///         is a member of the registry-Identity accumulator under
+    ///         identityRegistry.identityRoot().  Required for the full
+    ///         identity-binding spend path (A2 deposit coupling + B1
+    ///         depositor binding).  Optional at construction; governance
+    ///         wires it via setIdentityMembershipVerifier.  A zero address
+    ///         means identity membership checks are skipped (backward-compat
+    ///         during migration).
+    IIdentityMembershipVerifier public identityMembershipVerifier;
+
     // ---- nullifier + audit state ------------------------------------------
 
     /// @notice Spent nullifier set.  Spend SNARK enforces uniqueness here.
@@ -150,6 +162,7 @@ contract Notes {
     event SpendVerifierUpdated(address indexed previous, address indexed next);
     event SpendAVerifierUpdated(address indexed previous, address indexed next);
     event IdentityRegistryUpdated(address indexed previous, address indexed next);
+    event IdentityMembershipVerifierUpdated(address indexed previous, address indexed next);
 
     /// @notice Emitted when a note is successfully spent.
     event Spent(uint256 indexed nullifier, uint256 face, address indexed recipient);
@@ -269,6 +282,18 @@ contract Notes {
         require(msg.sender == governance, "not governance");
         emit IdentityRegistryUpdated(address(identityRegistry), next);
         identityRegistry = IdentityRegistry(next);
+    }
+
+    /// @notice Wire (or rotate) the identity membership verifier consulted
+    ///         by every spend path when identityRegistry.identityRoot() is
+    ///         non-zero.  Passing `address(0)` disables identity membership
+    ///         checks (backward-compat during migration).  When the G1-tie
+    ///         circuit lands, governance swaps the real verifier in.
+    function setIdentityMembershipVerifier(address next) external {
+        require(msg.sender == governance, "not governance");
+        emit IdentityMembershipVerifierUpdated(
+            address(identityMembershipVerifier), next);
+        identityMembershipVerifier = IIdentityMembershipVerifier(next);
     }
 
     // ---- views ------------------------------------------------------------
@@ -577,6 +602,10 @@ contract Notes {
     ///         its public inputs.  On success the pool transferCarrying's
     ///         `face` BUCK to `recipient`.
     ///
+    ///         If an identity membership verifier is wired, additionally
+    ///         verifies `identityMembershipProof` against the registry's
+    ///         identityRoot.  Pass empty bytes to skip (backward-compat).
+    ///
     /// @dev Nullifier and face-sum bookkeeping happen before the external
     ///      transferCarrying call.  If the transfer reverts the whole spend
     ///      reverts, so the nullifier is not "consumed but unpaid".
@@ -591,7 +620,28 @@ contract Notes {
             proof, root, nullifier, face, recipient, address(0),
             IdentityRegistry.ElGamalCT(BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
             IdentityRegistry.CPProof(0, 0, 0,
-                BN254.G1Point(0, 0), BN254.G1Point(0, 0), BN254.G1Point(0, 0))
+                BN254.G1Point(0, 0), BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
+            "" // identityMembershipProof
+        );
+    }
+
+    /// @notice Redeem a note with an identity membership proof (no depositor binding).
+    ///         The membership proof is verified against identityRegistry.identityRoot().
+    ///         Pass empty bytes to skip the check (backward-compat).
+    function spend(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient,
+        bytes   calldata identityMembershipProof
+    ) external {
+        _spend(
+            proof, root, nullifier, face, recipient, address(0),
+            IdentityRegistry.ElGamalCT(BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
+            IdentityRegistry.CPProof(0, 0, 0,
+                BN254.G1Point(0, 0), BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
+            identityMembershipProof
         );
     }
 
@@ -603,9 +653,10 @@ contract Notes {
     ///         SpentB event publishes `eDepForIss` so the issuer can recover who
     ///         cashed the note.  An encrypted-Identity recipient uses this
     ///         overload; a public recipient is already recoverable from the
-    ///         registry via the plain spend.  (Binding the issuer to the note
-    ///         itself awaits the B-spend circuit revealing it; see
-    ///         alberta-buck-notes-decryptability.org.)
+    ///         registry via the plain spend.
+    ///
+    ///         `identityMembershipProof` is a Groth16 proof that the depositor's
+    ///         identity M_dep is a member of the registry-Identity accumulator.
     function spend(
         bytes   calldata proof,
         uint256          root,
@@ -614,10 +665,12 @@ contract Notes {
         address          recipient,
         address          issuer,
         IdentityRegistry.ElGamalCT calldata eDepForIss,
-        IdentityRegistry.CPProof    calldata cpProof
+        IdentityRegistry.CPProof    calldata cpProof,
+        bytes   calldata identityMembershipProof
     ) external {
         require(issuer != address(0), "Notes: zero issuer");
-        _spend(proof, root, nullifier, face, recipient, issuer, eDepForIss, cpProof);
+        _spend(proof, root, nullifier, face, recipient, issuer,
+               eDepForIss, cpProof, identityMembershipProof);
     }
 
     function _spend(
@@ -628,7 +681,8 @@ contract Notes {
         address          recipient,
         address          issuer,
         IdentityRegistry.ElGamalCT memory eDepForIss,
-        IdentityRegistry.CPProof    memory cpProof
+        IdentityRegistry.CPProof    memory cpProof,
+        bytes   memory   identityMembershipProof
     ) internal {
         require(recipient != address(0),  "Notes: zero recipient");
         require(face      > 0,            "Notes: zero face");
@@ -658,6 +712,11 @@ contract Notes {
             );
         }
 
+        // Identity membership (Phase 9 identity-axis): verify that the
+        // counterparty identity point is a registered identity.  Gated on
+        // the verifier being wired; empty proof skips (backward-compat).
+        _verifyIdentityMembership(identityMembershipProof);
+
         require(
             buck.transfer(recipient, face),
             "Notes: transfer failed"
@@ -665,6 +724,28 @@ contract Notes {
 
         if (bound) emit SpentB(nullifier, face, recipient, issuer, eDepForIss);
         else       emit Spent(nullifier, face, recipient);
+    }
+
+    /// @dev Shared identity membership check — called by both spend paths.
+    ///      Reverts if the verifier is wired and the proof is invalid or the
+    ///      registry's identityRoot is zero (unseeded accumulator).  Silently
+    ///      passes if the verifier is not set (address(0)).
+    function _verifyIdentityMembership(bytes memory identityMembershipProof)
+        internal view
+    {
+        IIdentityMembershipVerifier verifier = identityMembershipVerifier;
+        if (address(verifier) == address(0)) return;
+        if (identityMembershipProof.length == 0) return;
+
+        IdentityRegistry reg = identityRegistry;
+        require(address(reg) != address(0), "Notes: identity registry not set");
+        uint256 root = reg.identityRoot();
+        require(root != 0, "Notes: identity root not set");
+
+        require(
+            verifier.verifyMembership(identityMembershipProof, root),
+            "Notes: bad identity membership proof"
+        );
     }
 
     // ---- A-flavor spend (Phase 8 V2) -------------------------------------
@@ -706,7 +787,8 @@ contract Notes {
         uint256          face,
         address          recipient,
         IdentityRegistry.ElGamalCT calldata E_n,
-        IdentityRegistry.SpendCPProof calldata cpProof
+        IdentityRegistry.SpendCPProof calldata cpProof,
+        bytes   calldata identityMembershipProof
     ) external {
         require(address(spendAVerifier)   != address(0), "Notes: A-spend disabled");
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
@@ -733,6 +815,9 @@ contract Notes {
 
         nullifiers[nullifier] = true;
         noteFaceSum          -= face;
+
+        // Identity membership (Phase 9 identity-axis).
+        _verifyIdentityMembership(identityMembershipProof);
 
         require(
             buck.transfer(recipient, face),

@@ -194,6 +194,16 @@ contract IdentityRegistry {
     ///         by governance via setBuck() after Buck is deployed.
     address                           public  buck;
 
+    /// @notice Registry-Identity Merkle accumulator root.  Computed off chain
+    ///         by the CentralMerkleService and posted by governance once per
+    ///         batch of registrations.  Consumed by the identity membership
+    ///         SNARK at Notes spend time to prove "the counterparty identity M
+    ///         is a registered identity" (the commit-before-use discipline).
+    ///         A root of 0 means the accumulator has not been seeded yet;
+    ///         membership proofs against 0 are always rejected.
+    ///         See alberta-buck-notes-identity-axis.org.
+    uint256                           public  identityRoot;
+
     // ---- events -------------------------------------------------------------
 
     event GovernanceTransferred(address indexed previous, address indexed next);
@@ -204,6 +214,7 @@ contract IdentityRegistry {
     event BuckSet(address indexed buck);
     event CarryingFlagSet(address indexed target, bool isCarrying);
     event CarryingFrozen(address indexed target);
+    event IdentityRootUpdated(uint256 indexed previous, uint256 indexed next);
 
     // ---- constructor / governance ------------------------------------------
 
@@ -245,6 +256,19 @@ contract IdentityRegistry {
         require(_buck != address(0),      "buck=0");
         buck = _buck;
         emit BuckSet(_buck);
+    }
+
+    /// @notice Post the current registry-Identity Merkle accumulator root.
+    ///         Called by governance (or an authorised aggregator contract)
+    ///         once per batch of registrations.  The new root must be non-zero.
+    ///         Emits IdentityRootUpdated so off-chain indexers can track the
+    ///         root history for membership proof generation.
+    ///         See alberta-buck-notes-identity-axis.org.
+    function setIdentityRoot(uint256 _root) external {
+        require(msg.sender == governance, "not governance");
+        require(_root != 0,               "root=0");
+        emit IdentityRootUpdated(identityRoot, _root);
+        identityRoot = _root;
     }
 
     // ---- views --------------------------------------------------------------

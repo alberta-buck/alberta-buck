@@ -1,0 +1,129 @@
+ Review: Design Doc vs. Implementation
+
+  I cross-checked the design doc against Buck.sol, BuckCredit.sol, IdentityRegistry.sol, BuckKControllerStatic.sol, and Notes.sol. Findings below, ordered by severity.
+
+  Inconsistencies (doc vs. code)
+
+  1. bindContract argument order is wrong in the doc
+
+  Doc (line 258, and again line 286):
+  function bindContract(address target, G1Point pk, ElGamalCT E,
+                        bool isCarrying, bool isPublicIdentity_);
+  Code (IdentityRegistry.sol:261-267):
+  function bindContract(address target, BN254.G1Point calldata pk,
+                        ElGamalCT calldata E,
+                        bool isPublicIdentity_,    // <-- first
+                        bool isCarrying_)          // <-- second
+  The flag order is swapped. The narrative on line 286 — bindContract(target, pk, E, isCarrying, isPublicIdentity_=true) — would actually bind a Public-Identity-but-Non-Carrying contract under the real ABI. Fix the doc.
+
+  2. IdentityRegistry PSSig field names disagree
+
+  Doc (line 248): struct PSSig { G1Point s1; G1Point s2; }
+  Code: struct PSSig { G1Point sigma_1; G1Point sigma_2; }
+  Cosmetic, but the doc claims to be a faithful Solidity excerpt. The s1/s2 form also collides with the CPProof.s1, s2 scalars two lines above, which is misleading.
+
+  3. BuckCredit monetary units
+
+  Doc (line 144): "All monetary fields are in 6-decimal BUCK-equivalent units (USDC-compatible)."
+  Code (BuckCredit.sol:24): uint256 faceValue; // Maximum insured value (18 decimals)
+  The struct comment in BuckCredit.sol contradicts the doc. The Buck.mint math (maxLimit = totalCreditValue * currentBuckK / 1e18) treats the credit values as having the same decimals as BUCK (6), so the doc is what's actually shipped — but the in-code comment is wrong. Fix
+  the comment in BuckCredit.sol:24.
+
+  4. _expNeg accuracy claim is overstated
+
+  Doc (line 168) and BuckCredit.sol:136: "accurate to <0.01% for x < 3.0".
+  The 6th-order Taylor truncation error of e^-x at x=3 is ~3^7/7! ≈ 0.434, an absolute error of ~43% in a residual value of ~0.0498. Truncated Taylor for e^-x does not hit 0.01% at x=3. The claim is plausible only for much smaller x (around x ≤ 1). Either tighten the bound
+  (e.g. "<0.1% for x < 1.0; for x near 3 swap in PRBMath") or change the series. The contract still cuts off above 10*UNIT, which is harmless but oversold.
+
+  Concretely for the doc's depreciation table: a vehicle at 1500bp/year over 30 years gives x = 0.15 * 30 = 4.5, well past where the 6-term series is meaningful. The claimed $5,633 assumes e^-4.5 ≈ 0.0111 and is off-by-a-lot from what _expNeg(4.5e18) actually returns.
+
+  5. Doc's allocator gate description is slightly off
+
+  Doc (line 374): "Early gate: balanceOf(sender) + amount <= storedLimit"
+  Code (Buck.sol:275): uint256(_state[msg.sender].balance) + amount <= limit
+  The implementation uses raw balance (uint80 packed slot), not balanceOf (which subtracts demurrage fee for non-carrying). This is intentional — using balanceOf would make limit usage shrink as fees accrue, which would let users mint extra. But the doc should say "raw
+  balance" to match.
+
+  Same issue at line 378: "Tight gate: balanceOf(sender) + totalCoverage <= storedLimit" — code is _state[msg.sender].balance (raw).
+
+  6. Notes constructor signature mismatch
+
+  Doc (line 662): "constructed with (buck, mintVerifierRegistry, spendVerifier, spendAVerifier, identityRegistry, governance)"
+  Code (Notes.sol:151-156):
+  constructor(address _buck, address _mintVerifier,
+              address _spendVerifier, address _governance)
+  Only 4 args; spendAVerifier and identityRegistry are wired post-construction via setSpendAVerifier / setIdentityRegistry. Also, _mintVerifier is a single IMintVerifier — there is no per-N mintVerifierRegistry in Notes.sol at all. The "dispatches by cms.length to
+  mintVerifiers[N]" claim (lines 567, 656, 666, 678) is not implemented in the contract reviewed: Notes.mint calls mintVerifier.verifyMint(...) unconditionally, with no length-based dispatch.
+
+  If per-N dispatch lives in the verifier adapter (one IMintVerifier with internal switch) the doc should say so; otherwise this is a real spec/code gap.
+
+  7. Notes mint signature mismatch
+
+  Doc (line 636-638):
+  function verifyMint(bytes proof, ..., uint256 cmBatchHash)
+  Code (Notes.sol:284):
+  mintVerifier.verifyMint(proof, oldRoot, newRoot,
+                          nextLeafIndex, totalFace, cms /* uint256[] */)
+  The on-chain call passes the full cms[] array, not a cmBatchHash. The contract never computes cmBatchHash (despite the doc on line 676 saying "recomputes cmBatchHash"). Either the verifier adapter hashes internally and the doc/IMintVerifier interface should reflect that, or
+   the contract is missing a hash step.
+
+
+  8. BuckTransferReceipt audit-trail asymmetry not as documented
+
+  Doc (lines 414-420): "For the to side: ... falls back to _identityHash(to) only if isPublicIdentity(from) || isPublicIdentity(to) -- otherwise reverts. ... For the from side: tries _receiptFragments[to][from]; falls back unconditionally to _identityHash(from)."
+  Code (Buck.sol:493-502): matches the doc.
+
+  But the receipt event field naming is inverted from the doc's narrative: toHash is built from _receiptFragments[from][to] (the to-side ciphertext that Alice re-encrypted to Bob at approve time). That's the correct identity-of-the-recipient hash, so the event name is fine,
+  but reading lines 416 vs. line 510 in tandem requires the reader to figure out the from/to-of-receipts indexing. Worth a one-line clarification.
+
+  9. Demurrage invariant claim isn't quite right
+
+  Doc (lines 463-474): "The 'extra' raw stored on Jubilee precisely matches the sum of locked fees hidden in Non-Carrying balanceOf results, so spendable supply across all Non-Carrying accounts equals totalSupply up to per-account rounding."
+
+  The Jubilee accrues totalSupply * RATE * elapsed / SCALE per _accrueJubilee call (Buck.sol:622), independent of which holders are Carrying. The locked-fee-hidden-in-balanceOf is summed only over Non-Carrying accounts (Carrying accounts return raw, so no fee hidden). The doc
+   acknowledges this on line 471-474 ("Carrying accounts retain visible balance ... a small enrichment of the Jubilee fund"), so the earlier "precisely matches" sentence on line 469 is contradicted by the qualifier four lines later. Soften the earlier sentence —
+  "approximately matches; Carrying accounts contribute extra".
+
+  Also: _accrueJubilee is called only from _mintAllocated and _burnAllocated, not from transfers. So the Jubilee accrual is lumpy. The doc says "On every mint or burn" (line 455), which is correct. Good.
+
+  10. BuckK interface name mismatch
+
+  The doc's diagram (line 60) calls it BUCK_K and the contract is BuckKControllerStatic / BuckKController. Buck imports it as IBuckK (Buck.sol:21). Minor; just naming drift.
+
+  Code-only issues
+
+  A. BuckCredit.balanceOf signature collision in Buck's view
+
+  IBuckCredit.balanceOf(address) (Buck.sol:28) shadows ERC-20 balanceOf. Foundry/etherscan won't be confused (different contracts), but human readers might. Cosmetic.
+
+  B. BuckCredit.totalCurrentValue quadratic gas
+
+  Walks tokenOfOwnerByIndex (O(n) per step on ERC721Enumerable's implementation). The Security Considerations section on "Credit Enumeration DoS" (line 840) flags this — well-documented, not a bug.
+
+  C. _burnAllocated skips the isVerified check
+
+  _mintAllocated requires identity.isVerified(msg.sender) (Buck.sol:266). _burnAllocated does not. Burning is destructive-only and recovers principal from insurancePool, which already requires _state[msg.sender].balance > 0 to have anything to burn — and getting that balance
+  requires having been isVerified at mint time. So functionally safe today. But once governance disbursement to non-verified addresses lands, this gate disappears. Either add the check to _burnAllocated for symmetry, or document why not.
+
+  D. _burnAllocated allows partial-credit-rate NFTs to silently skip
+
+  _allocateBurn has if (used == 0 || effRate >= BP) continue; (line 400) — silently skipping any NFT with effRate >= BP. _allocateMint reverts in the same case (line 331: require(effRate < BP)). The asymmetry is reasonable (don't strand burns when one NFT was reappraised by
+  the insurer), but document it. Currently the doc is silent.
+
+  E. BuckCredit.activate doesn't check that c.faceValue > 0
+
+  A token with faceValue == 0 still activates fine (0 + amount <= 0 only passes if amount is 0, so this is moot in practice — but currentValue divides by faceValue on line 99). If a malicious sequence ever lands a credit at faceValue=0 with activatedValue > 0 (currently
+  impossible, but updateCredit doesn't bound newFaceValue against zero), currentValue panics on division-by-zero. Add require(c.faceValue > 0, "zero face") in updateCredit or guard currentValue.
+
+  In updateCredit: if (newFaceValue < c.activatedValue) c.activatedValue = newFaceValue; — if newFaceValue == 0, both go to zero. Then currentValue early-returns 0 on line 91 because activatedValue == 0. So the divide-by-zero is currently unreachable. Tight, but easy to break
+   later. Add an assert.
+
+  F. _carryingTransfer overflow check is on raw, not on spendable
+
+  Line 531: require(value <= uint256(_state[from].balance), "BUCK: amount exceeds raw"); — Carrying senders can move BUCK up to raw balance even if conceptually some of it should be locked. Since Carrying senders' balanceOf returns raw anyway, this is consistent. Worth a
+  comment confirming intent.
+
+  G. Status section claims 245 unit tests
+
+  Doc (line 905): 245 unit tests pass across 13 suites
+  Worth re-running forge test and updating; with the additions/deletions implied by the spec/code gaps above, this number likely drifts. (

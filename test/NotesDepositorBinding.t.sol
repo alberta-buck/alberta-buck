@@ -121,7 +121,7 @@ contract NotesDepositorBindingTest is Test {
     function test_spend_withDepositorBinding_emitsSpentB() public {
         uint256 root = notes.noteRoot();     // EMPTY_ROOT, accepted at genesis
         vm.prank(depositor);
-        notes.spend(hex"00", root, 0x111, 100, depositor, issuer, _eDepForIss(), _cp());
+        notes.spend(hex"00", root, 0x111, 100, depositor, issuer, _eDepForIss(), _cp(), "");
         assertTrue(notes.nullifiers(0x111), "bound bearer spend consumes the nullifier");
     }
 
@@ -131,7 +131,7 @@ contract NotesDepositorBindingTest is Test {
         pi.s1 = addmod(pi.s1, 1, BN254.R);   // tamper
         vm.prank(depositor);
         vm.expectRevert("Notes: bad depositor binding");
-        notes.spend(hex"00", root, 0x222, 100, depositor, issuer, _eDepForIss(), pi);
+        notes.spend(hex"00", root, 0x222, 100, depositor, issuer, _eDepForIss(), pi, "");
     }
 
     function test_spend_legacy5arg_unbound_succeeds() public {
