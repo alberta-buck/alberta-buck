@@ -38,7 +38,7 @@ endif
 .PHONY: all build test clean fmt snapshot
 .PHONY: fork-sepolia fork-mainnet fork-mainnet-cache anvil stop-anvil
 .PHONY: deploy-local deploy-sepolia
-.PHONY: snark-g1tie snark-g1tie-clean
+.PHONY: snark-g1tie snark-g1tie-clean snark-update
 .PHONY: install update
 .PHONY: test-python venv-activate
 .PHONY: golden-receipts
@@ -57,6 +57,10 @@ all:			build test
 
 build:
 	forge build $(FORGE_OPTS)
+
+# Run nix-emacs to start an emacs inside the Nix-supplied environment
+emacs:
+	emacs -nw
 
 test:
 	forge test $(FORGE_OPTS) -vvv
@@ -180,9 +184,9 @@ images:			vectors plots
 # until these are re-generated.
 #
 # Prerequisite: identity.json must be up-to-date (emit-vectors runs first).
-golden-receipts:
-	nix develop --command python -m alberta_buck.wallet.cli emit-vectors
-	nix develop --command python -m alberta_buck.wallet.cli render-golden
+golden-receipts:  # requires nix-
+	python -m alberta_buck.wallet.cli emit-vectors
+	python -m alberta_buck.wallet.cli render-golden
 
 
 # ── SNARK circuits + trusted setup ───────────────────────────────────
@@ -227,19 +231,19 @@ SNARK_PATH  = PATH="$(CURDIR)/node_modules/.bin:$$PATH"
 snark:		snark-setup snark-fixtures
 	@echo "snark: verifiers + fixtures regenerated -- run 'make nix-test' to check on-chain parity"
 
-snark-setup:
+snark-setup:  # requires nix-
 	rm -rf $(SNARK_DIRS)
-	nix develop --command bash -c '$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh'
+	$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
 
 snark-fixtures:
-	nix develop --command bash -c '$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures.sh'
+	$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures.sh
 
 # Full from-scratch regen (phase 1 + phase 2): removes the dev ptau and every
 # circuit build dir so setup.sh rebuilds the Powers of Tau and all verifiers.
 # Hours, dev entropy only.
 snark-ptau:
 	rm -rf build/snark/ptau build/snark/mint build/snark/spend build/snark/spend_a $(SNARK_DIRS)
-	nix develop --command bash -c '$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh'
+	$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
 
 snark-clean:
 	rm -rf $(SNARK_DIRS) $(SNARK_A2_DIRS)
@@ -253,19 +257,25 @@ snark-a2:	snark-a2-setup snark-a2-fixtures
 
 snark-a2-setup:
 	rm -rf $(SNARK_A2_DIRS)
-	nix develop --command bash -c '$(SNARK_PATH) DO_LEGACY=0 DO_MINT_BATCH=0 MINT_BATCH_A2_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh'
+	$(SNARK_PATH) DO_LEGACY=0 DO_MINT_BATCH=0 MINT_BATCH_A2_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
 
 snark-a2-fixtures:
-	nix develop --command bash -c '$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures_a2.sh'
+	$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures_a2.sh
 
 # G1-tie circuit (circuits/identity_membership_g1tie.circom).
 #   make snark-g1tie       # full regen: compile, setup, prove, export verifier + vectors
 #   make snark-g1tie-clean  # drop build dir (forces clean rebuild)
 snark-g1tie:
-	nix develop --command bash -c '$(SNARK_PATH) bash scripts/snark/setup_g1tie.sh'
+	$(SNARK_PATH) bash scripts/snark/setup_g1tie.sh
 
 snark-g1tie-clean:
 	rm -rf build/snark/g1tie
+
+# Update npm dependencies (snarkjs, circomlib, etc.)
+#   make snark-update       # npm install --save snarkjs@latest
+snark-update:
+	npm install snarkjs@latest --no-audit --no-fund --loglevel=error
+	@echo "snarkjs: $$(node_modules/.bin/snarkjs --version 2>/dev/null)"
 
 
 # ── Sim inputs: price CSVs + Universal Router artifact ────────────────

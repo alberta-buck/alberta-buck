@@ -27,5 +27,5 @@ interface IIdentityMembershipVerifier {
     function verifyMembership(
         bytes calldata proof,
         uint256 identityRoot
-    ) external view returns (bool);
+    ) external returns (bool);
 }

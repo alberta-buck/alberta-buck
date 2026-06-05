@@ -4,7 +4,7 @@
   "private": true,
   "description": "SNARK toolchain (snarkjs + circomlib) for Alberta Buck Notes circuits",
   "scripts": {
-    "snarkjs": "snarkjs"
+    "snarkjs": "0.7.5"
   },
   "devDependencies": {
     "circomlib": "2.0.5",

@@ -64,21 +64,21 @@ contract UnilateralA2DepositTest is Test {
 
     // ---- completeness -------------------------------------------------------
 
-    function test_vector_validDepositCoupling_verifies() public view {
+    function test_vector_validDepositCoupling_verifies() public {
         assertTrue(reg.verifyDepositCoupling(depositor, _eIss(), _proof()),
                    "python-reference deposit coupling must verify on-chain");
     }
 
     // ---- soundness ----------------------------------------------------------
 
-    function test_vector_tamperedResponse_rejected() public view {
+    function test_vector_tamperedResponse_rejected() public {
         // Perturbing s_m breaks E2/E3.
         IdentityRegistry.DepositCouplingProof memory p = _proof();
         p.s_m = addmod(p.s_m, 1, BN254.R);
         assertFalse(reg.verifyDepositCoupling(depositor, _eIss(), p));
     }
 
-    function test_vector_tamperedPI_rejected() public view {
+    function test_vector_tamperedPI_rejected() public {
         // Perturbing the committed issuer identity P_I breaks E3 -- the
         // collusion case where eIss is keyed to the wrong point.
         IdentityRegistry.DepositCouplingProof memory p = _proof();
@@ -86,7 +86,7 @@ contract UnilateralA2DepositTest is Test {
         assertFalse(reg.verifyDepositCoupling(depositor, _eIss(), p));
     }
 
-    function test_vector_tamperedEIss_rejected() public view {
+    function test_vector_tamperedEIss_rejected() public {
         // A different leaf ciphertext no longer decrypts under m_rec to P_I.
         IdentityRegistry.ElGamalCT memory bad = _eIss();
         bad.C = BN254.add(bad.C, BN254.g1());

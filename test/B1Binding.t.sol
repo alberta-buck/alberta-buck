@@ -63,20 +63,20 @@ contract B1BindingTest is Test {
 
     // ---- completeness -------------------------------------------------------
 
-    function test_vector_validDepositorBinding_verifies() public view {
+    function test_vector_validDepositorBinding_verifies() public {
         assertTrue(reg.verifyDepositorBinding(depositor, issuer, _eDepForIss(), _proof()),
                    "python-reference B1 depositor binding must verify on-chain");
     }
 
     // ---- soundness ----------------------------------------------------------
 
-    function test_vector_tamperedResponse_rejected() public view {
+    function test_vector_tamperedResponse_rejected() public {
         IdentityRegistry.DepositorBindingProof memory p = _proof();
         p.s_m = addmod(p.s_m, 1, BN254.R);          // breaks E2/F2
         assertFalse(reg.verifyDepositorBinding(depositor, issuer, _eDepForIss(), p));
     }
 
-    function test_vector_substitutedCiphertext_rejected() public view {
+    function test_vector_substitutedCiphertext_rejected() public {
         // A ciphertext over a different identity breaks F2 (coupled to E2 via m_dep)
         // -- the depositor cannot hide/frame.
         IdentityRegistry.ElGamalCT memory bad = _eDepForIss();

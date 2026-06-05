@@ -57,7 +57,7 @@ contract IssuerSchnorrTest is Test {
 
     // ---- completeness ------------------------------------------------------
 
-    function test_validSignature_verifies() public view {
+    function test_validSignature_verifies() public {
         bytes32 hBatch = keccak256(abi.encodePacked(uint256(0xC0FFEE), uint256(0xBEEF)));
         IdentityRegistry.SchnorrProof memory sig = _sign(SK, K, hBatch, issuer);
         assertTrue(reg.verifyIssuerSchnorr(issuer, hBatch, sig), "honest signature must verify");
@@ -65,21 +65,21 @@ contract IssuerSchnorrTest is Test {
 
     // ---- soundness: every tampered input is rejected -----------------------
 
-    function test_tamperedBatch_rejected() public view {
+    function test_tamperedBatch_rejected() public {
         bytes32 hBatch = keccak256(abi.encodePacked(uint256(0xC0FFEE)));
         IdentityRegistry.SchnorrProof memory sig = _sign(SK, K, hBatch, issuer);
         bytes32 other = keccak256(abi.encodePacked(uint256(0xDECAF)));
         assertFalse(reg.verifyIssuerSchnorr(issuer, other, sig), "signature must not verify for a different batch");
     }
 
-    function test_tamperedResponse_rejected() public view {
+    function test_tamperedResponse_rejected() public {
         bytes32 hBatch = keccak256(abi.encodePacked(uint256(1)));
         IdentityRegistry.SchnorrProof memory sig = _sign(SK, K, hBatch, issuer);
         sig.s = addmod(sig.s, 1, BN254.R);          // perturb the response
         assertFalse(reg.verifyIssuerSchnorr(issuer, hBatch, sig), "perturbed s must fail Check 1");
     }
 
-    function test_wrongKey_rejected() public view {
+    function test_wrongKey_rejected() public {
         // Sign with a different secret than the one bound to `issuer`.
         bytes32 hBatch = keccak256(abi.encodePacked(uint256(7)));
         uint256 wrongSk = SK + 1;
@@ -102,7 +102,7 @@ contract IssuerSchnorrTest is Test {
         assertFalse(reg.verifyIssuerSchnorr(priv, hBatch, sig), "non-public issuer must be rejected");
     }
 
-    function test_unregisteredIssuer_rejected() public view {
+    function test_unregisteredIssuer_rejected() public {
         address ghost = address(0xDEAD);
         bytes32 hBatch = keccak256(abi.encodePacked(uint256(3)));
         IdentityRegistry.SchnorrProof memory sig = _sign(SK, K, hBatch, ghost);
@@ -162,17 +162,17 @@ contract IssuerSchnorrVectorTest is Test {
         return bytes32(_u(".issuer_schnorr.hBatch"));
     }
 
-    function test_vector_validProof_verifies() public view {
+    function test_vector_validProof_verifies() public {
         assertTrue(reg.verifyIssuerSchnorr(issuer, _hBatch(), _sig()),
                    "python-reference proof must verify on-chain");
     }
 
-    function test_vector_tamperedBatch_rejected() public view {
+    function test_vector_tamperedBatch_rejected() public {
         bytes32 bad = bytes32(uint256(_hBatch()) ^ 1);
         assertFalse(reg.verifyIssuerSchnorr(issuer, bad, _sig()));
     }
 
-    function test_vector_tamperedResponse_rejected() public view {
+    function test_vector_tamperedResponse_rejected() public {
         IdentityRegistry.SchnorrProof memory s = _sig();
         s.s = addmod(s.s, 1, BN254.R);
         assertFalse(reg.verifyIssuerSchnorr(issuer, _hBatch(), s));

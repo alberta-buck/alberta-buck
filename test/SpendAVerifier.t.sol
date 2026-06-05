@@ -272,7 +272,7 @@ contract SpendAVerifierTest is Test {
 
     // ---- happy path -------------------------------------------------------
 
-    function test_fixtureLoaded() public view {
+    function test_fixtureLoaded() public {
         assertEq(fxChainId, 1, "fixture chainId is 1");
         assertGt(fxFace, 0);
         assertEq(fxProof.length, 256);

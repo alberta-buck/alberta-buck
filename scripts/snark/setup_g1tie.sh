@@ -66,6 +66,7 @@ snarkjs zkey contribute "$BUILD_DIR/g1tie_0000.zkey" "$BUILD_DIR/g1tie_0001.zkey
     --name="alberta-buck-dev-g1tie" -v -e="alberta-buck-dev-g1tie-entropy"
 echo "  Contribution done"
 
+# Export verification key BEFORE proving (needed for verify step)
 snarkjs zkey export verificationkey "$BUILD_DIR/g1tie_0001.zkey" \
     "$BUILD_DIR/verification_key.json"
 echo "  Verification key exported"

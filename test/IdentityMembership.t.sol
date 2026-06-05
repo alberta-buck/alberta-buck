@@ -41,13 +41,13 @@ contract IdentityMembershipTest is Test {
         pub = [pv[0]];
     }
 
-    function test_member_proof_verifies() public view {
+    function test_member_proof_verifies() public {
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[1] memory pub) = _proof();
         assertTrue(verifier.verifyProof(a, b, c, pub),
                    "Groth16 membership proof of a Python-tree member must verify on-chain");
     }
 
-    function test_tampered_root_rejected() public view {
+    function test_tampered_root_rejected() public {
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[1] memory pub) = _proof();
         pub[0] = pub[0] ^ 1;     // a different public root must not verify this proof
         assertFalse(verifier.verifyProof(a, b, c, pub));

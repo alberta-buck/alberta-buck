@@ -9,7 +9,7 @@ pragma circom 2.1.6;
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
-include "../lib/circom-lib/circuits/ec/curve.circom";
+include "./ec_add_bn254.circom";
 
 // BN254 curve params
 function P0() { return 4332616871279656263; }

@@ -64,20 +64,20 @@ contract IssuerReencVectorTest is Test {
 
     // ---- completeness -------------------------------------------------------
 
-    function test_vector_validProof_verifies() public view {
+    function test_vector_validProof_verifies() public {
         assertTrue(reg.verifyIssuerReenc(issuer, _eIss(), _proof()),
                    "python-reference A2 binding must verify on-chain");
     }
 
     // ---- soundness ----------------------------------------------------------
 
-    function test_vector_tamperedResponse_rejected() public view {
+    function test_vector_tamperedResponse_rejected() public {
         IdentityRegistry.IssuerReencProof memory p = _proof();
         p.s_r = addmod(p.s_r, 1, BN254.R);           // breaks L1/L2/L3
         assertFalse(reg.verifyIssuerReenc(issuer, _eIss(), p));
     }
 
-    function test_vector_tamperedT_rejected() public view {
+    function test_vector_tamperedT_rejected() public {
         // Perturbing the published T (= r'*pk_rec) breaks L3 and L5 -- the
         // colluding-issuer attack (a leaf the recipient cannot decrypt to M).
         IdentityRegistry.IssuerReencProof memory p = _proof();
@@ -85,7 +85,7 @@ contract IssuerReencVectorTest is Test {
         assertFalse(reg.verifyIssuerReenc(issuer, _eIss(), p));
     }
 
-    function test_vector_tamperedEIss_rejected() public view {
+    function test_vector_tamperedEIss_rejected() public {
         // A different leaf ciphertext no longer matches the bound issuer M.
         IdentityRegistry.ElGamalCT memory bad = _eIss();
         bad.C = BN254.add(bad.C, BN254.g1());

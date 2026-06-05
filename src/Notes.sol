@@ -481,7 +481,7 @@ contract Notes {
         uint32           nextLeafIndex_,
         uint256          totalFace,
         uint256[] calldata cms
-    ) internal view {
+    ) internal {
         require(cms.length > 0,                            "Notes: empty mint");
         require(issuerMode.length == cms.length,           "Notes: issuerMode/cms length");
         require(uint256(nextLeafIndex_) + cms.length
@@ -520,7 +520,7 @@ contract Notes {
         uint32           nextLeafIndex_,
         uint256          totalFace,
         uint256[] calldata cms
-    ) internal view {
+    ) internal {
         require(cms.length > 0,                            "Notes: empty mint");
         require(eIss.length == cms.length,                 "Notes: eIss/cms length");
         require(address(a2MintVerifier) != address(0),     "Notes: a2 verifier not set");
@@ -731,7 +731,7 @@ contract Notes {
     ///      registry's identityRoot is zero (unseeded accumulator).  Silently
     ///      passes if the verifier is not set (address(0)).
     function _verifyIdentityMembership(bytes memory identityMembershipProof)
-        internal view
+        internal
     {
         IIdentityMembershipVerifier verifier = identityMembershipVerifier;
         if (address(verifier) == address(0)) return;

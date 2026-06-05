@@ -23,7 +23,7 @@ contract IdentityMembershipG1TieVerifierAdapter is IIdentityMembershipVerifier {
     function verifyMembership(
         bytes calldata proof,
         uint256 identityRoot
-    ) external view returns (bool) {
+    ) external returns (bool) {
         // Decode: proof = a(2) + b(4) + c(2) + pubSignals(9)
         // = 8 uint256 for Groth16 + 9 uint256 for public inputs = 17 total
         require(proof.length == 17 * 32, "G1TieAdapter: bad proof length");
