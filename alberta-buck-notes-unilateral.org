@@ -417,19 +417,37 @@ registry-Identity tree.  Every step is implemented and tested
   - The registry-Identity Poseidon Merkle tree (=IdentityTree=) and the receipt
     verifier (=verify_receipt=), with membership demonstrated in the reference.
 
-  *The one remaining circuit:* the in-ZK proof that \( P_I \)'s committed point is
-  a tree member -- a native Poseidon-Merkle membership tied to the EC commitment by
-  a single non-native scalar relation.  In this implementation the membership is
-  proven in the reference (the receipt and the delivery check both compute it);
-  wiring it as a Groth16 circuit and into =Notes.spend= is the production step.
-  Because the proof is generated off chain (on the wallet's Holochain agent, which
-  already holds the tree) and the EVM verifies a constant-size proof, this is a
-  prover-side cost, not an EVM-cost obstacle (see /alberta-buck-notes-decryptability/,
-  "The identity-targeted alternative" and "Where the cost lands").
+  *Built and on-chain verified (Phase C, 2026-06-06):*
+  - The G1-tie circuit (=circuits/identity_membership_g1tie.circom=) --
+    39K constraints, proving =P_I = M + bH= in the G1 group over BN254
+    via circom-lib's =EllipticCurveAddOptimised=.  Compiled with circom 2.2.3,
+    proved with snarkjs 0.7.5, Groth16 verifier exported to Solidity
+    (=src/IdentityMembershipG1TieVerifier.sol=).
+  - On-chain verification: all 3 Forge tests pass (valid proof accepted,
+    tampered root rejected, tampered =P_I= rejected) at ~350K gas.
+  - EIP-197 G2 encoding bug discovered and worked around: snarkjs stores
+    G2 points as =[x_re, x_im, y_re, y_im]= but EIP-197 expects
+    =[x_im, x_re, y_im, y_re]=.  Post-processor =fix_verifier_g2.py=
+    applies the swap automatically (see =alberta-buck-verifier-bug.org=).
+  - The incremental registry-Identity accumulator is deployed on chain
+    (=IdentityRegistry.identityRoot=), updated on each =register()= /
+    =bindContract()= call via on-chain Poseidon hashing.
+  - The identity membership verifier is wired into =Notes.sol= spend paths
+    (=IIdentityMembershipVerifier=, =_verifyIdentityMembership=), gated
+    by governance.
 
-  *The registry accumulator:* the Identity tree's root must be maintained on chain
-  on each registration (an incremental Poseidon root, or an off-chain-computed root
-  proven by a small SNARK); the tree body lives off chain.
+  *Remaining for full Identity-M Notes:*
+  - The A2 deposit-coupling sigma (=verifyDepositCoupling=) is verified
+    on chain via EIP-196; the companion G1-tie membership proof must be
+    wired into the spend transaction alongside the sigma.  The contract
+    plumbing (=identityMembershipVerifier= governance slot,
+    =_verifyIdentityMembership= gate) is ready; the remaining step is
+    linking the =DepositCouplingProof= struct's =P_I= into the
+    membership verifier's public inputs.
+  - The B1 depositor-binding sigma (=verifyDepositorBinding=) similarly
+    needs its membership counterpart wired at spend time.
+  - Production deployment requires a proper Powers of Tau ceremony
+    (the current ptaus use dev-only entropy).
 
 ** Cross-references
 

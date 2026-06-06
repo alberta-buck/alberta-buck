@@ -122,16 +122,43 @@ The =scripts/snark/fix_verifier_g2.py= post-processor handles this:
 
 Applied in =setup_g1tie.sh= and =test_verifier_regression.sh= after =zkesv=.
 
-* Current Status
+* Current Status — FIXED
 
-| Verifier                        | G2 Fix | Status |
-|---------------------------------+--------+--------|
-| =ManualVerifier.sol= (flat)     | Yes    | PASS (453K gas) |
-| Regression test (flat)          | Yes    | PASS (454K gas) |
-| =IdentityMembershipVerifier.sol= | No     | PASS (271K gas) — legacy, from commit =7d2f686= |
-| =IdentityMembershipG1TieVerifier.sol= | Yes | FAIL (PrecompileError) — circom-lib template interaction suspected |
+| Verifier                          | G2 Fix | On-Chain |
+|-----------------------------------+--------+----------|
+| =ManualVerifier.sol= (flat, 1 in) | Yes    | PASS (453K gas) |
+| Regression test (flat, 1 in)      | Yes    | PASS (454K gas) |
+| =IdentityMembershipVerifier.sol=   | No     | PASS (271K gas) — legacy, commit =7d2f686= |
+| =IdentityMembershipG1TieVerifier.sol= (39K constraints, 9 in) | Yes | PASS (all 3 tests) |
+
+All tests pass on both ARM (Apple Silicon, macOS) and x86_64 (Linux).
+The workaround (=fix_verifier_g2.py=) is applied automatically by
+=make snark-g1tie= and =make snark-test-regression=.
 
 * Bug Report — snarkjs (iden3/snarkjs)
+
+** Summary
+
+snarkjs =zkey export solidityverifier= produces Solidity verifiers whose
+G2 point encoding does not match EIP-197, causing the =bn256Pairing=
+precompile to reject valid Groth16 proofs on-chain.
+
+** Severity
+
+All freshly exported verifiers are affected.  Off-chain verification
+(=snarkjs groth16 verify=) passes because =ffjavascript= uses the same
+convention for both proving and verifying.  On-chain verification fails
+because revm/EIP-197 expects the opposite convention.
+
+** Reproduction
+
+#+begin_src bash
+# Any circuit; any ptau.  Off-chain verify passes, on-chain fails:
+make snark-test-regression
+# Output:
+#   FAIL test_freshVerifier_acceptsFreshProof
+#   PASS test_knownVerifier_acceptsKnownProof
+#+end_src
 
 **Location of the bug**
 
