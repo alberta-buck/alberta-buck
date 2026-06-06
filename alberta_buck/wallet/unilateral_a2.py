@@ -65,91 +65,58 @@ from alberta_buck.wallet.issuer_reenc import (
 from alberta_buck.wallet.verifiable_decrypt import (
     VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
 )
+from alberta_buck.registry.tree import IdentityMerkleTree, identity_leaf
 
 
 # ========================= Identity registry tree ===========================
+#
+# The registry-Identity accumulator -- the Poseidon Merkle tree of registered
+# identity *points* -- has one canonical implementation,
+# :class:`alberta_buck.registry.tree.IdentityMerkleTree`.  It is the same tree
+# the IdentityRegistry contract maintains on chain (IDENTITY_TREE_DEPTH = 10) and
+# that ``circuits/identity_membership_g1tie.circom`` proves membership against.
+# ``IdentityTree`` below is a thin *point-centric* facade over it for the
+# unilateral-A2 receipt flow; the Merkle algorithm itself is not duplicated.
 
-def identity_leaf(M) -> int:
-    """Leaf for a registered identity point ``M``: ``Poseidon([M.x, M.y] % F_R)``.
+# On-chain depth: IdentityRegistry.IDENTITY_TREE_DEPTH and the
+# identity_membership_g1tie circuit both fix depth 10, so a wallet-built root
+# matches the contract's identityRoot and a path verifies in the circuit.
+IDENTITY_TREE_DEPTH = 10
 
-    The registry-identity accumulator commits *identity points*, not accounts,
-    so membership of ``M`` is a single native Poseidon-Merkle proof -- the cheap
-    half of the coupling.
+
+class IdentityTree(IdentityMerkleTree):
+    """Point-centric facade over the canonical registry IdentityMerkleTree.
+
+    Adds the identity-*point* conveniences the unilateral-A2 receipt flow uses
+    (``insert(M)``, ``contains(M[, root])``) so callers work in identity points
+    rather than pre-hashed leaves.  The accumulator itself -- zeros, incremental
+    insertion, path, root -- is the single canonical implementation in
+    :mod:`alberta_buck.registry.tree`, matched byte-for-byte by the on-chain
+    IdentityRegistry accumulator and the membership circuit.  Defaults to the
+    on-chain depth (10).
     """
-    x, y = point_to_words(M)
-    return poseidon([x % F_R, y % F_R])
 
-
-class IdentityTree:
-    """Fixed-depth Poseidon Merkle tree of registered identity points.
-
-    Mirrors the Notes pool tree but over the identity set.  Lives off chain
-    (Holochain holds the full tree); only :meth:`root` is published on chain and
-    consumed as a public input by the membership proof.
-    """
-
-    def __init__(self, depth: int = 12) -> None:
-        self.depth = depth
-        self.leaves: List[int] = []
-        # zeros[d] = root of an all-zero subtree of height d
-        self.zeros: List[int] = [0] * (depth + 1)
-        for d in range(1, depth + 1):
-            self.zeros[d] = poseidon([self.zeros[d - 1], self.zeros[d - 1]])
+    def __init__(self, depth: int = IDENTITY_TREE_DEPTH) -> None:
+        super().__init__(depth=depth)
 
     def insert(self, M) -> int:
-        """Append a registered identity point; returns its leaf index."""
-        idx = len(self.leaves)
-        self.leaves.append(identity_leaf(M))
-        return idx
-
-    def _next_layer(self, nodes: List[int], d: int) -> List[int]:
-        out: List[int] = []
-        for i in range(0, len(nodes), 2):
-            left = nodes[i]
-            right = nodes[i + 1] if i + 1 < len(nodes) else self.zeros[d]
-            out.append(poseidon([left, right]))
-        return out
-
-    def root(self) -> int:
-        nodes = list(self.leaves) if self.leaves else [self.zeros[0]]
-        for d in range(self.depth):
-            nodes = self._next_layer(nodes, d)
-        return nodes[0]
-
-    def path(self, index: int) -> Tuple[List[int], List[int]]:
-        """Authentication path for leaf ``index`` as ``(siblings, index_bits)``."""
-        siblings: List[int] = []
-        bits: List[int] = []
-        nodes = list(self.leaves)
-        idx = index
-        for d in range(self.depth):
-            if len(nodes) % 2 == 1:
-                nodes = nodes + [self.zeros[d]]
-            sib = nodes[idx ^ 1]
-            siblings.append(sib)
-            bits.append(idx & 1)
-            nodes = self._next_layer(nodes, d)
-            idx >>= 1
-        return siblings, bits
-
-    @staticmethod
-    def verify_path(leaf: int, siblings: List[int], bits: List[int], root: int) -> bool:
-        """The in-circuit membership relation, in the clear: fold ``leaf`` up the
-        path and compare to ``root``."""
-        cur = leaf
-        for sib, bit in zip(siblings, bits):
-            cur = poseidon([cur, sib]) if bit == 0 else poseidon([sib, cur])
-        return cur == root
-
-    def index_of(self, M) -> int:
-        return self.leaves.index(identity_leaf(M))
+        """Append a registered identity *point*; returns its leaf index."""
+        return self.insert_identity(M)
 
     def contains(self, M, root: Optional[int] = None) -> bool:
+        """True iff identity point ``M`` is in the tree.
+
+        With ``root`` given, additionally require a membership path to fold to
+        that root (the in-circuit relation, in the clear) -- so a stale or wrong
+        root is rejected, mirroring the on-chain membership gate.
+        """
         leaf = identity_leaf(M)
         if leaf not in self.leaves:
             return False
-        sib, bits = self.path(self.leaves.index(leaf))
-        return IdentityTree.verify_path(leaf, sib, bits, self.root() if root is None else root)
+        if root is None:
+            return True
+        proof = self.path(self.leaves.index(leaf))
+        return proof.verify() and proof.root == root
 
 
 # ================================ Mint ======================================

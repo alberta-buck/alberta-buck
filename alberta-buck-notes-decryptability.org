@@ -1694,16 +1694,23 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
 
 ** Residual gaps (NOT done)
 
-   1. *A2 recipient-key coupling* (the private-issuer collusion corner) -- =eIss=
-      is bound to /a/ key the issuer chose, not provably the recipient's, so a
-      colluding issuer+recipient can leave the issuer un-nameable while the note
-      stays spendable (/The A2 recipient-key coupling gap/).  The leaf-tie (Phase
-      2c, *DONE*) and bearer-from-non-public (Phase 2b, *DONE*) are closed; this
-      one is *reserved, not on the critical path* (/The EOA Transfer Mirror/): it
-      affects only /private-issuer/ notes under /collusion/, the fix is the
-      set-membership + non-native-\( \mathbb{G}_1 \) premium, and in the interim
-      the *recipient-burden* posture bounds it (an un-nameable A2 deposit marks the
-      recipient, who is KYC-identifiable and was obliged to verify at delivery).
+   1. *A2 recipient-key coupling* (the private-issuer collusion corner) -- the
+      account-targeted form (=eIss= keyed to a specific registered /account/) is
+      bound to /a/ key the issuer chose, so a colluding pair could leave the
+      issuer un-nameable while the note stays spendable (/The A2 recipient-key
+      coupling gap/).  The leaf-tie (Phase 2c, *DONE*) and bearer-from-non-public
+      (Phase 2b, *DONE*) are closed; the account-targeted closure remains the
+      heavier set-membership + non-native-\( \mathbb{G}_1 \) /premium/.
+      *Update (2026-06-06): the lighter /identity-targeted/ realisation is now
+      shipped and bound* (/The identity-targeted alternative/; full treatment in
+      /alberta-buck-notes-unilateral/).  =Notes.spendCoupledA2= co-verifies the
+      deposit-coupling sigma and a G1-tie membership proof, feeding the sigma's
+      committed point \( P_I \) to /both/ -- so a bogus =eIss= makes \( P_I \)'s
+      point a non-member and the deposit reverts.  This closes the collusion
+      corner for identity-targeted A2 notes (the membership is /native/ Poseidon
+      over a tree the registry already maintains, not the non-native-EC premium);
+      where it is not used, the *recipient-burden* posture still bounds the gap
+      (an un-nameable A2 deposit marks the KYC-identifiable recipient).
       Public-issuer notes (A1/B1) have no such gap.
    2. *Issuer-in-the-B-spend circuit* -- today the B-depositor /names/ the issuer
       at =SpentB= (sound for an honest depositor); revealing the issuer from the

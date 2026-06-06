@@ -68,6 +68,8 @@ unit-%:
 	forge test $(FORGE_OPTS) --match-test $* -vvv
 path-%:
 	forge test $(FORGE_OPTS) --match-path $* -vvv
+match-%:
+	forge test $(FORGE_OPTS) --match-contract $* -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:

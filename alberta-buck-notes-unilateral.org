@@ -9,7 +9,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: The identity-targeted A2 Note addresses an *identity* (the recipient's KYC-bound point M_rec), not an account.  The issuer encrypts its own registered identity M_I under M_rec, so any Fountain account the recipient holds can open it; the depositor proves eligibility to the EVM with a privacy-preserving Okamoto sigma that hides every identity; and the recipient -- alone, from the single secret m_rec -- decrypts M_I and produces a plaintext receipt naming both parties.  A colluding issuer cannot make a spendable-but-unnameable note: the decrypted issuer identity must be a member of the registry-identity tree.  Implemented and tested end to end (alberta_buck.wallet.unilateral_a2, IdentityRegistry.verifyDepositCoupling): 11 Python + 7 Solidity cross-artifact tests pass.
+#+description: The identity-targeted A2 Note addresses an *identity* (the recipient's KYC-bound point M_rec), not an account.  The issuer encrypts its own registered identity M_I under M_rec, so any Fountain account the recipient holds can open it; the depositor proves eligibility to the EVM with a privacy-preserving Okamoto sigma that hides every identity; and the recipient -- alone, from the single secret m_rec -- decrypts M_I and produces a plaintext receipt naming both parties.  A colluding issuer cannot make a spendable-but-unnameable note: the decrypted issuer identity must be a member of the registry-identity tree.  Implemented, bound, and tested end to end (alberta_buck.wallet.unilateral_a2, IdentityRegistry.verifyDepositCoupling, Notes.spendCoupledA2): the on-chain deposit reads the coupling sigma's committed point P_I once and feeds it to BOTH the sigma and the G1-tie membership verifier, so a colluding pair cannot answer one with a point the other rejects -- closing the A2 recipient-key gap.  11 Python + 20 Solidity cross-artifact tests pass.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-notes-unilateral
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -70,12 +70,20 @@ registry-Identity tree.  Every step is implemented and tested
 
   *What was built.*  This document is matched by a working reference:
   - =alberta_buck/wallet/unilateral_a2.py= -- the mint, the deposit-coupling
-    sigma, the registry-Identity Merkle tree, and the unilateral receipt.
+    sigma, and the unilateral receipt (the registry-Identity Merkle tree is the
+    canonical =alberta_buck.registry.tree.IdentityMerkleTree=, with =IdentityTree=
+    here a thin point-centric facade over it).
   - =IdentityRegistry.verifyDepositCoupling= -- the on-chain, EIP-196
     verification of the deposit-eligibility sigma.
-  - =alberta_buck/test/test_unilateral_a2.py= (11 tests) and
-    =test/UnilateralA2.t.sol= (7 tests) -- the end-to-end flow and the Solidity
-    \( \leftrightarrow \) Python cross-artifact parity.  All pass.
+  - =Notes.spendCoupledA2= -- the deposit entrypoint that co-verifies the
+    coupling sigma and the \( P_I \)-bound G1-tie membership, then pays out.
+  - =circuits/identity_membership_g1tie.circom= +
+    =IdentityMembershipG1TieVerifier(Adapter)= -- the membership SNARK and the
+    on-chain limb-binding of \( P_I \).
+  - =alberta_buck/test/test_unilateral_a2.py= (11) plus =test/UnilateralA2.t.sol=
+    (7), =test/IdentityMembershipBinding.t.sol= (5), and
+    =test/NotesCoupledA2.t.sol= (8) -- the end-to-end flow, the Solidity
+    \( \leftrightarrow \) Python cross-artifact parity, and the binding.  All pass.
 
 #+LATEX: \clearpage
 * Parties, Keys, and the Identity Tree
@@ -396,12 +404,16 @@ registry-Identity tree.  Every step is implemented and tested
    |----------------------------------------+-------+----------------------------------------------------------|
    | =alberta_buck/test/test_unilateral_a2.py= | 11 | mint binding; delivery decrypt; deposit coupling; unilateral receipt names both; any-account deposit; collusion un-nameable + un-spendable; sigma soundness (tamper / wrong account / wrong chainid); identity-hiding; mint unlinkability |
    | =test/UnilateralA2.t.sol=              |   7   | on-chain =verifyDepositCoupling= parity + soundness (tampered response / \( P_I \) / \( eIss \), wrong chainid, unregistered / wrong depositor) |
+   | =test/IdentityMembershipBinding.t.sol= |   5   | the \( P_I \) binding: the bound point verifies; a mismatched \( P_I_x \) / \( P_I_y \) / root is rejected; bad proof length reverts |
+   | =test/NotesCoupledA2.t.sol=            |   8   | end-to-end =spendCoupledA2=: completeness + payout + =SpentCoupledA2=; bad coupling / tampered \( P_I \) / unregistered depositor / rejected membership / double-spend revert; empty-proof skip |
    #+LATEX: }
 
-   *Status: all 18 pass* (=nix develop --command python -m pytest
-   alberta_buck/test/test_unilateral_a2.py= and =forge test --match-contract
-   UnilateralA2DepositTest=), with no regression in the adjacent identity / A2
-   suites.
+   *Status: all 31 pass* (=make nix-match-NotesCoupledA2=,
+   =make nix-match-IdentityMembershipBinding=,
+   =make nix-match-UnilateralA2=, and =nix develop --command python -m pytest
+   alberta_buck/test/test_unilateral_a2.py=), with no regression in the adjacent
+   identity / A2 suites (=make nix-test=: 425 forge passed; the 8 failures are
+   the pre-existing uniswap-artifact and manual-fixture env tests).
 
 #+LATEX: \clearpage
 * Implementation Status and Remaining Work
@@ -436,16 +448,33 @@ registry-Identity tree.  Every step is implemented and tested
     (=IIdentityMembershipVerifier=, =_verifyIdentityMembership=), gated
     by governance.
 
+  *The deposit is now bound and routed (2026-06-06):*
+  - =Notes.spendCoupledA2= is the identity-M-bound A2 deposit entrypoint: it
+    calls =verifyDepositCoupling(msg.sender, eIss, dc)= and then
+    =_verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y)=, *reading
+    =dc.P_I= once and feeding it to both*.  Emits
+    =SpentCoupledA2(nullifier, face, recipient, P_I.X, P_I.Y)=.
+  - *The binding* -- the step the earlier draft called "remaining": the
+    membership verifier no longer trusts the prover's public inputs.
+    =IIdentityMembershipVerifier.verifyMembership(proof, identityRoot, px, py)=
+    takes the committed point, and =IdentityMembershipG1TieVerifierAdapter=
+    derives the circuit's nine public signals (the 64-bit
+    \( \mathbb{F}_q \) limbs of \( P_I \)) on chain from =(px, py)=, so the
+    =membershipProof= bytes carry only the Groth16 triple \( (a, b, c) \).
+    A Groth16 accept therefore proves membership of /exactly/ the point the
+    coupling sigma decrypted =eIss= to -- the two halves cannot be decoupled.
+  - Tests: =test/IdentityMembershipBinding.t.sol= (5 -- the bound point
+    verifies; a mismatched \( P_I \) or root is rejected) and
+    =test/NotesCoupledA2.t.sol= (8 -- the full deposit against the canonical
+    coupling vector + the stub membership: completeness, bad coupling /
+    tampered \( P_I \) / unregistered depositor / rejected membership /
+    double-spend all revert).  =make nix-test= stays green (no regressions).
+
   *Remaining for full Identity-M Notes:*
-  - The A2 deposit-coupling sigma (=verifyDepositCoupling=) is verified
-    on chain via EIP-196; the companion G1-tie membership proof must be
-    wired into the spend transaction alongside the sigma.  The contract
-    plumbing (=identityMembershipVerifier= governance slot,
-    =_verifyIdentityMembership= gate) is ready; the remaining step is
-    linking the =DepositCouplingProof= struct's =P_I= into the
-    membership verifier's public inputs.
   - The B1 depositor-binding sigma (=verifyDepositorBinding=) similarly
-    needs its membership counterpart wired at spend time.
+    needs its membership counterpart wired at spend time -- the one symmetric
+    increment still open (lower priority: a B1 issuer is public and named at
+    mint, so the receipt does not depend on it).
   - Production deployment requires a proper Powers of Tau ceremony
     (the current ptaus use dev-only entropy).
 

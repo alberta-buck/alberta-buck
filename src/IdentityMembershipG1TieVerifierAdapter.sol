@@ -4,70 +4,74 @@ pragma solidity ^0.8.20;
 import {IIdentityMembershipVerifier} from "./IIdentityMembershipVerifier.sol";
 import {IdentityMembershipG1TieVerifier} from "./IdentityMembershipG1TieVerifier.sol";
 
-/// @title IdentityMembershipG1TieVerifierAdapter — wraps the generated Groth16 verifier for the
-///        identity_membership_g1tie circuit behind IIdentityMembershipVerifier.
-/// @notice The circuit has 9 public inputs:
-///          identityRoot (1), PI_x[4], PI_y[4].
-///         This adapter unpacks the proof bytes and delegates to IdentityMembershipG1TieVerifier.
+/// @title IdentityMembershipG1TieVerifierAdapter — wraps the generated Groth16 verifier
+///        for the identity_membership_g1tie circuit behind IIdentityMembershipVerifier.
+/// @notice The circuit has 9 public inputs, in order:
+///           pub[0]     = identityRoot
+///           pub[1..4]  = PI_x[0..3]   (64-bit little-endian F_q limbs)
+///           pub[5..8]  = PI_y[0..3]
+///         All nine are derived on-chain from the (identityRoot, px, py) arguments;
+///         the `proof` bytes carry ONLY the Groth16 triple (a, b, c).  This is the
+///         binding: the prover cannot choose the public inputs, so a membership
+///         accept is necessarily about the caller's committed point P_I = (px, py).
 contract IdentityMembershipG1TieVerifierAdapter is IIdentityMembershipVerifier {
     IdentityMembershipG1TieVerifier internal immutable _verifier;
+
+    /// @dev Groth16 triple: a(2) + b(4) + c(2) = 8 words.
+    uint256 internal constant PROOF_WORDS = 8;
+    uint256 internal constant MASK64 = type(uint64).max;
 
     constructor() {
         _verifier = new IdentityMembershipG1TieVerifier();
     }
 
-    /// @notice Verify a G1-tie membership proof.
-    /// @param proof ABI-encoded Groth16 proof: (uint256[2] a, uint256[2][2] b, uint256[2] c)
-    ///        followed by 9 public inputs as uint256[9].
-    /// @param identityRoot The Poseidon Merkle root to verify against.
+    /// @inheritdoc IIdentityMembershipVerifier
+    /// @param proof abi-packed Groth16 triple: a[2], b[2][2], c[2] = 8 words = 256 bytes.
     function verifyMembership(
         bytes calldata proof,
-        uint256 identityRoot
+        uint256 identityRoot,
+        uint256 px,
+        uint256 py
     ) external returns (bool) {
-        // Decode: proof = a(2) + b(4) + c(2) + pubSignals(9)
-        // = 8 uint256 for Groth16 + 9 uint256 for public inputs = 17 total
-        require(proof.length == 17 * 32, "G1TieAdapter: bad proof length");
+        require(proof.length == PROOF_WORDS * 32, "G1TieAdapter: bad proof length");
 
         uint256[2] memory a;
         uint256[2][2] memory b;
         uint256[2] memory c;
+
+        a[0]    = _word(proof, 0);
+        a[1]    = _word(proof, 1);
+        b[0][0] = _word(proof, 2);
+        b[0][1] = _word(proof, 3);
+        b[1][0] = _word(proof, 4);
+        b[1][1] = _word(proof, 5);
+        c[0]    = _word(proof, 6);
+        c[1]    = _word(proof, 7);
+
+        // Public inputs derived from the caller's committed point — the binding.
+        // PI_x / PI_y are the 64-bit little-endian limbs of the F_q coordinates,
+        // matching scripts/snark/gen_g1tie_input.py:to_limbs and the circuit's
+        // PI_x = PI_x[0] + PI_x[1]·2^64 + PI_x[2]·2^128 + PI_x[3]·2^192.
         uint256[9] memory pub;
-
-        // Unpack from calldata.
-        // Calldata layout after the first 4 bytes (selector): proof bytes.
-        // ABI encoding of bytes: 32-byte length prefix + data.
-        // The data is packed as a[0], a[1], b[0][0], b[0][1], b[1][0], b[1][1], c[0], c[1],
-        // then pub[0]..pub[8].
-        uint256 offset = 32; // skip length prefix
-        a[0] = _readUint256(proof, offset); offset += 32;
-        a[1] = _readUint256(proof, offset); offset += 32;
-        b[0][0] = _readUint256(proof, offset); offset += 32;
-        b[0][1] = _readUint256(proof, offset); offset += 32;
-        b[1][0] = _readUint256(proof, offset); offset += 32;
-        b[1][1] = _readUint256(proof, offset); offset += 32;
-        c[0] = _readUint256(proof, offset); offset += 32;
-        c[1] = _readUint256(proof, offset); offset += 32;
-
-        // Public inputs: the 8 remaining values are PI_x[0..3], PI_y[0..3].
-        // The FIRST public input is identityRoot (passed as argument).
-        // The remaining 8 are packed in the proof.
         pub[0] = identityRoot;
-        for (uint256 i = 1; i < 9; i++) {
-            pub[i] = _readUint256(proof, offset);
-            offset += 32;
-        }
-
-        // Verify PI_x and PI_y are provided (non-zero check for safety).
-        // In production, these come from the deposit coupling proof's P_I.
+        pub[1] =  px            & MASK64;
+        pub[2] = (px >> 64)     & MASK64;
+        pub[3] = (px >> 128)    & MASK64;
+        pub[4] = (px >> 192)    & MASK64;
+        pub[5] =  py            & MASK64;
+        pub[6] = (py >> 64)     & MASK64;
+        pub[7] = (py >> 128)    & MASK64;
+        pub[8] = (py >> 192)    & MASK64;
 
         return _verifier.verifyProof(a, b, c, pub);
     }
 
-    function _readUint256(bytes memory data, uint256 offset)
+    /// @dev Read the `i`-th 32-byte word from a calldata bytes blob.
+    function _word(bytes calldata data, uint256 i)
         internal pure returns (uint256 v)
     {
         assembly {
-            v := mload(add(add(data, 32), offset))
+            v := calldataload(add(data.offset, mul(i, 32)))
         }
     }
 }

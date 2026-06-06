@@ -185,6 +185,20 @@ contract Notes {
         IdentityRegistry.ElGamalCT eDepForIss
     );
 
+    /// @notice Emitted on an identity-M-bound (unilateral) A2 deposit.  Publishes
+    ///         the committed point `P_I = (piX, piY)` that the deposit-coupling
+    ///         sigma constrained and the membership proof certified as a member of
+    ///         the registry-Identity accumulator — so an auditor can re-check the
+    ///         binding against the on-chain identityRoot.  Reveals no Identity:
+    ///         `P_I` is the perfectly-hiding blind `M_iss + b·H`.
+    event SpentCoupledA2(
+        uint256 indexed nullifier,
+        uint256 face,
+        address indexed recipient,
+        uint256 piX,
+        uint256 piY
+    );
+
     /// @notice Emitted once per successful mint.  `cms` calldata carries the
     ///         per-leaf commitments in insertion order; offline provers
     ///         reconstruct the tree by replaying Minted events plus the tx
@@ -712,10 +726,10 @@ contract Notes {
             );
         }
 
-        // Identity membership (Phase 9 identity-axis): verify that the
-        // counterparty identity point is a registered identity.  Gated on
-        // the verifier being wired; empty proof skips (backward-compat).
-        _verifyIdentityMembership(identityMembershipProof);
+        // Identity membership (generic plumbing): no committed point on this
+        // path, so (0, 0) — stub-honoured; the real G1-tie verifier fails closed.
+        // The bound membership lives in spendCoupledA2.
+        _verifyIdentityMembership(identityMembershipProof, 0, 0);
 
         require(
             buck.transfer(recipient, face),
@@ -726,11 +740,26 @@ contract Notes {
         else       emit Spent(nullifier, face, recipient);
     }
 
-    /// @dev Shared identity membership check — called by both spend paths.
+    /// @dev Shared identity membership check — called by the spend paths.
+    ///      Verifies that the committed point `P_I = (px, py)` is a member of the
+    ///      registry-Identity accumulator under the current root.  The point is
+    ///      supplied by the caller (the coupled-A2 path passes the deposit-coupling
+    ///      sigma's `dc.P_I`), so the membership proof is bound to the SAME point
+    ///      the sigma decrypted `eIss` to — a colluding pair cannot answer the
+    ///      coupling with one point and the membership with another.
+    ///
     ///      Reverts if the verifier is wired and the proof is invalid or the
     ///      registry's identityRoot is zero (unseeded accumulator).  Silently
-    ///      passes if the verifier is not set (address(0)).
-    function _verifyIdentityMembership(bytes memory identityMembershipProof)
+    ///      passes if the verifier is not set (address(0)) or the proof is empty
+    ///      (backward-compat skip).  The generic spend paths pass `(0, 0)`: with
+    ///      the stub verifier that is plumbing-only; the real G1-tie verifier has
+    ///      no valid proof for the point (0, 0) and so fails closed there — the
+    ///      bound membership is reachable only through `spendCoupledA2`.
+    function _verifyIdentityMembership(
+        bytes memory identityMembershipProof,
+        uint256 px,
+        uint256 py
+    )
         internal
     {
         IIdentityMembershipVerifier verifier = identityMembershipVerifier;
@@ -743,7 +772,7 @@ contract Notes {
         require(root != 0, "Notes: identity root not set");
 
         require(
-            verifier.verifyMembership(identityMembershipProof, root),
+            verifier.verifyMembership(identityMembershipProof, root, px, py),
             "Notes: bad identity membership proof"
         );
     }
@@ -816,8 +845,11 @@ contract Notes {
         nullifiers[nullifier] = true;
         noteFaceSum          -= face;
 
-        // Identity membership (Phase 9 identity-axis).
-        _verifyIdentityMembership(identityMembershipProof);
+        // Identity membership (generic plumbing): the V1 account-targeted A-spend
+        // names the depositor by account (verifySpendCP), so there is no P_I to
+        // bind here — (0, 0), stub-honoured.  The identity-M-bound A2 deposit is
+        // spendCoupledA2 below.
+        _verifyIdentityMembership(identityMembershipProof, 0, 0);
 
         require(
             buck.transfer(recipient, face),
@@ -825,5 +857,81 @@ contract Notes {
         );
 
         emit SpentA(nullifier, face, recipient);
+    }
+
+    // ---- Identity-M-bound A2 spend (unilateral A2) -----------------------
+
+    /// @notice Redeem an identity-targeted (unilateral) A2 note: the
+    ///         identity-M-bound deposit that closes the A2 recipient-key
+    ///         coupling gap.  See alberta-buck-notes-unilateral.org.
+    ///
+    ///         The note was minted addressed to the recipient's Identity *point*
+    ///         M_rec (not an account): `eIss = (r'G, M_iss + r'·M_rec)` encrypts
+    ///         the issuer's own registered Identity under M_rec.  At deposit the
+    ///         depositor — *any* account bound to the identity scalar m_rec —
+    ///         proves eligibility while revealing no Identity, via two co-bound
+    ///         checks over the single committed point `dc.P_I = M_iss + b·H`:
+    ///
+    ///           1. verifyDepositCoupling(msg.sender, eIss, dc): an Okamoto sigma
+    ///              proving the account is bound to m_rec AND `eIss` decrypts
+    ///              under m_rec to the point committed (blinded) in `dc.P_I`.
+    ///           2. _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y):
+    ///              a Groth16 proof that `dc.P_I`'s underlying point M_iss is a
+    ///              member of the registry-Identity accumulator.
+    ///
+    ///         Because the SAME `dc.P_I` flows into both, the membership is bound
+    ///         to exactly the point the coupling decrypted `eIss` to.  A colluding
+    ///         issuer+recipient who key `eIss` to a throwaway point make `dc.P_I`'s
+    ///         underlying point a non-member, so the membership proof cannot exist
+    ///         and the deposit reverts: no spendable-but-unnameable note.
+    ///
+    ///         The note's commitment + nullifier are proven by the generic spend
+    ///         SNARK (cm in the pool tree, nullifier well-formed); the Identity-M
+    ///         binding is the coupling + membership gate above.
+    function spendCoupledA2(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient,
+        IdentityRegistry.ElGamalCT          calldata eIss,
+        IdentityRegistry.DepositCouplingProof calldata dc,
+        bytes   calldata membershipProof
+    ) external {
+        require(address(identityRegistry) != address(0), "Notes: identity registry not set");
+        require(recipient != address(0),  "Notes: zero recipient");
+        require(face      > 0,            "Notes: zero face");
+        require(_isAcceptedRoot(root),    "Notes: unknown root");
+        require(!nullifiers[nullifier],   "Notes: already spent");
+
+        // Note commitment + nullifier: cm in the pool tree, nullifier well-formed.
+        require(
+            spendVerifier.verifySpend(
+                proof, root, nullifier, face, recipient, block.chainid
+            ),
+            "Notes: bad spend proof"
+        );
+
+        // Identity-M binding, half 1: the deposit-coupling sigma.  msg.sender is
+        // the depositing account; it proves account<->m_rec binding and that eIss
+        // decrypts under m_rec to dc.P_I (all identities hidden).
+        require(
+            identityRegistry.verifyDepositCoupling(msg.sender, eIss, dc),
+            "Notes: bad deposit coupling"
+        );
+
+        nullifiers[nullifier] = true;
+        noteFaceSum          -= face;
+
+        // Identity-M binding, half 2: membership of dc.P_I's point, bound to the
+        // SAME dc.P_I the coupling just constrained.
+        _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
+
+        require(
+            buck.transfer(recipient, face),
+            "Notes: transfer failed"
+        );
+
+        emit SpentCoupledA2(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
     }
 }

@@ -16,7 +16,9 @@ contract StubIdentityMembershipVerifier is IIdentityMembershipVerifier {
 
     function verifyMembership(
         bytes calldata /*proof*/,
-        uint256 /*identityRoot*/
+        uint256 /*identityRoot*/,
+        uint256 /*px*/,
+        uint256 /*py*/
     ) external view returns (bool) {
         return enabled;
     }
