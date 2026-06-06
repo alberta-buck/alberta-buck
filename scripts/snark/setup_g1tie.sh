@@ -86,15 +86,19 @@ echo "  Off-chain verification: PASSED"
 echo "--- Exporting Solidity verifier ---"
 snarkjs zkey export solidityverifier "$BUILD_DIR/g1tie_0001.zkey" \
     "$BUILD_DIR/Groth16Verifier.sol"
-# Rename to avoid collision with other generated verifiers
-sed -i 's/contract Groth16Verifier/contract IdentityMembershipG1TieVerifier/g' \
+# Rename + view fix using explicit backup extension (macOS sed -i requires it)
+sed -i.bak 's/contract Groth16Verifier/contract IdentityMembershipG1TieVerifier/g' \
     "$BUILD_DIR/Groth16Verifier.sol"
+sed -i.bak 's/public view returns/public returns/g' \
+    "$BUILD_DIR/Groth16Verifier.sol"
+rm -f "$BUILD_DIR/Groth16Verifier.sol.bak"
 cp "$BUILD_DIR/Groth16Verifier.sol" \
     "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
-# Fix EIP-197 G2 encoding swap (snarkjs stores real-first, EIP-197 expects im-first)
+# EIP-197 G2 encoding fix: MUST run after cp to avoid macOS sed temp-file issues
+# (sed -i uses atomic rename; python must open the file after sed completes)
 python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" \
     "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
-echo "  -> src/IdentityMembershipG1TieVerifier.sol"
+echo "  -> src/IdentityMembershipG1TieVerifier.sol (EIP-197 G2 fix applied)"
 
 # ---- Step 6: Generate Forge test vectors ----
 echo "--- Generating Forge test vectors ---"
