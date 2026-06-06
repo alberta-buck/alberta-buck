@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {ManualVerifier} from "../src/ManualVerifier.sol";
+
 contract ManualVerifierTest is Test {
     function test_manual_verifies() public {
-        string memory vj = vm.readFile("test/vectors/regen/proof.json");
+        string memory vj = vm.readFile("test/vectors/manual/proof.json");
         uint256[] memory av = vm.parseJsonUintArray(vj, ".a");
         uint256[] memory bv = vm.parseJsonUintArray(vj, ".b");
         uint256[] memory cv = vm.parseJsonUintArray(vj, ".c");
