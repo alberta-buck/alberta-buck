@@ -162,44 +162,58 @@ make snark-test-regression
 
 **Location of the bug**
 
-The bug is in the Solidity verifier template embedded in snarkjs's
-=zkey export solidityverifier= command.  The relevant source file is:
+The bug is in the Groth16 Solidity verifier template:
+=templates/verifier_groth16.sol.ejs= (lines 108-111).
 
-=cli/zkey_export_solidityverifier.js=
+The VK constants (lines 32-43) were correctly swapped for EIP-197 in
+commit =62a3b9e= (March 2023) by Xavier Pinsach — using
+=vk_beta_2[0][1]= for =betax1=, etc.  But the B component assembly
+was never updated to match.
 
-This template generates a Solidity contract with hardcoded verification
-key constants and inline assembly for the Groth16 pairing check.  The
-G2 point encoding in the assembly does not match EIP-197.
+Two other files had manual JavaScript workarounds to compensate:
+- =smart_contract_tests/test/smart_contracts.test.js= — swapped =pi_b=
+  components before calling =verifyProof()=
+- =src/groth16_exportsoliditycalldata.js= — same swap in calldata output
 
-**Specific code location**
+**Git history**
 
-In the generated Solidity assembly, G2 points are stored at pairing
-offsets 256-352 (beta), 448-544 (gamma), and 640-736 (delta).  The
-VK constants come from the zkey binary (=vk_beta_2=, =vk_gamma_2=,
-=vk_delta_2=) which use =ffjavascript='s convention: =[x_re, x_im,
-y_re, y_im]=.
+| Commit | Date | What |
+|--------+------+------|
+| =62a3b9e= | 2023-03 | Template created: VK constants swapped for EIP-197, B NOT swapped |
+| =96b7d27= | 2023-03 | Test added with manual proofB swap to work around template bug |
+| =d5a179c= | 2023-03 | Calldata export added with same manual swap |
+| =78b0503= | 2026-06-06 | FIX: template B assembly swapped; test + calldata workarounds removed |
 
-EIP-197 requires: =[x_im, x_re, y_im, y_re]=.
+**Fix applied** (branch =fix/verifier_groth16= at =~/src/snarkjs=):
 
-The template passes these constants directly to the pairing precompile
-without swapping the real/imaginary components.
+1. =templates/verifier_groth16.sol.ejs= — swapped 4 =mstore= lines in B assembly
+2. =smart_contract_tests/...= — =proofB = [proof.pi_b[0], proof.pi_b[1]]= (no manual swap)
+3. =src/groth16_exportsoliditycalldata.js= — native =pi_b= order
 
-The same issue affects the proof's =B= component (stored at offsets
-64-160), which comes from =pi_b= in the proof JSON (=ffjavascript=
-convention) and is passed to the precompile without swapping.
+**Artifacts modified by this fix**
 
-**Fix**
+| Artifact | Change |
+|----------+--------|
+| Exported Solidity verifier (=zkesv=) | B component now EIP-197 compliant |
+| Calldata export (=zkesc=) | No longer swaps =pi_b= components |
+| All previously-exported verifiers | Must be regenerated or patched with =fix_verifier_g2.py= |
 
-The fix swaps both the VK constants and the =B= component before
-writing them to the pairing input buffer.  Our post-processing script
-(=scripts/snark/fix_verifier_g2.py=) applies these swaps to the
-exported Solidity file.
+**BREAKING CHANGE for snarkjs users**
 
-**Reproduction**
+Existing code that manually swaps proofB before calling =verifyProof()=,
+matching the old smart contract test pattern:
+#+begin_src javascript
+// OLD (broken template, manual workaround):
+const proofB = [[proof.pi_b[0][1], proof.pi_b[0][0]],
+                [proof.pi_b[1][1], proof.pi_b[1][0]]];
 
-#+begin_src bash
-# Any circuit generates a verifier that fails on-chain:
-make snark-test-regression
-# Verdict: test_freshVerifier_acceptsFreshProof FAILS
-#          test_knownVerifier_acceptsKnownProof PASSES (legacy verifier)
+// NEW (fixed template, no workaround needed):
+const proofB = [proof.pi_b[0], proof.pi_b[1]];
 #+end_src
+
+Any previously-exported Solidity verifiers that were patched with the
+old workaround (manual proofB swap in calling code) will BREAK when
+used with newly-exported verifiers from the fixed template, because
+the swap would be applied twice.  All exported verifiers must be
+regenerated from the fixed template, and calling code must pass =pi_b=
+in native =ffjavascript= order.
