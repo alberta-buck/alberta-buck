@@ -65,7 +65,7 @@ fi
 # Fix contract name + solc 0.8.33 view issue
 perl -i -pe 's/contract Groth16Verifier/contract RegressVerifier/g; s/public view returns/public returns/g' "$BUILD/RegressVerifier.sol"
 	# Fix EIP-197 G2 encoding (snarkjs stores real-first, EIP-197 expects im-first)
-	python3 "$ROOT/scripts/snark/fix_verifier_g2.py" "$BUILD/RegressVerifier.sol" 2>/dev/null
+	python3 "$ROOT/scripts/snark/fix_verifier_g2.py" "$BUILD/RegressVerifier.sol"
 echo "  Solidity verifier exported"
 
 # ---- Step 2: Generate Forge test vectors ------------------------------------
