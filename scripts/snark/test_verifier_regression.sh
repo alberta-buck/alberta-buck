@@ -62,8 +62,9 @@ fi
 
 # Export Solidity verifier (rename to avoid collision with source-tree verifier)
 "$SNARKJS" zkesv "$BUILD/z1.zkey" "$BUILD/RegressVerifier.sol" 2>/dev/null
-# Fix contract name + solc 0.8.33 view issue
-perl -i -pe 's/contract Groth16Verifier/contract RegressVerifier/g; s/public view returns/public returns/g' "$BUILD/RegressVerifier.sol"
+# G2 fix first (match snarkjs raw output), then rename
+python3 "$ROOT/scripts/snark/fix_verifier_g2.py" "$BUILD/RegressVerifier.sol"
+	perl -i -pe 's/contract Groth16Verifier/contract RegressVerifier/g; s/public view returns/public returns/g' "$BUILD/RegressVerifier.sol"
 	# Fix EIP-197 G2 encoding (snarkjs stores real-first, EIP-197 expects im-first)
 	python3 "$ROOT/scripts/snark/fix_verifier_g2.py" "$BUILD/RegressVerifier.sol"
 echo "  Solidity verifier exported"
@@ -162,6 +163,8 @@ echo "  Test harness written to test/RegressionTest.sol"
 
 echo "=== [4/5] Run Forge tests ==="
 export SOLC_PATH="${SOLC_PATH:-$(which solc)}"
+
+rm -rf "$ROOT/out"
 
 # Helper: run a forge test and report pass/fail
 run_forge_test() {
