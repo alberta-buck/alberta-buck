@@ -3,15 +3,13 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-    nixpkgs-node.url = "github:NixOS/nixpkgs/16c7794d0a28b5a37904d55bcca36003b9109aaa"; # pin nodejs 20.19.6
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-node, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        pkgs-node = nixpkgs-node.legacyPackages.${system};
 
         python3Env = pkgs.python3.withPackages (ps: with ps; [
           ipykernel
@@ -50,10 +48,8 @@
           # Solidity compiler (for IDE/LSP support; Forge also bundles solc)
           solc
 
-          # Node.js — pinned to old nixpkgs for node-gyp 20.19.6 headers
-          # (native addon compilation must match the toolchain that produced
-          # the working on-chain Groth16 verifier)
-          pkgs-node.nodejs_20
+          # Node.js (for OpenZeppelin npm deps, Hardhat interop, snarkjs/circomlib)
+          nodejs_22
 
           # SNARK toolchain:
           #   circom  - compiles .circom -> R1CS / WASM witness generator

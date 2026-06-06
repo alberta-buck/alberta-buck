@@ -91,6 +91,9 @@ sed -i 's/contract Groth16Verifier/contract IdentityMembershipG1TieVerifier/g' \
     "$BUILD_DIR/Groth16Verifier.sol"
 cp "$BUILD_DIR/Groth16Verifier.sol" \
     "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
+# Fix EIP-197 G2 encoding swap (snarkjs stores real-first, EIP-197 expects im-first)
+python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" \
+    "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
 echo "  -> src/IdentityMembershipG1TieVerifier.sol"
 
 # ---- Step 6: Generate Forge test vectors ----
