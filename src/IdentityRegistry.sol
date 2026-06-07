@@ -53,15 +53,6 @@ contract IdentityRegistry {
         BN254.G1Point T3;
     }
 
-    /// @notice 4-element CP-DLEQ proof for the A-spend identity binding (Phase 8 V2).
-    ///         Matches alberta_buck.wallet.spend_cp.SpendCPProof.
-    struct SpendCPProof {
-        uint256 e;
-        uint256 s;
-        BN254.G1Point T1;   // t*G
-        BN254.G1Point T2;   // t*(R_reg - R_n)
-    }
-
     /// @notice Schnorr signature over a note-batch commitment by an issuer's
     ///         registered identity key -- the public-issuer half of the BUCK
     ///         Notes deferred-approve handshake (mutual-decryptability, Phase 1;
@@ -595,25 +586,6 @@ contract IdentityRegistry {
         return _verifyApprove(sender, spender, E_bob, pi);
     }
 
-    /// @notice The depositor->issuer half of the BUCK Notes mutual-decryptability
-    ///         handshake: proves `eDepForIss` re-encrypts the depositor's
-    ///         registered Identity under the (public) issuer's key, so the
-    ///         issuer can recover who cashed a bearer note from the Notes SpentB
-    ///         event.  Identical relation to verifyApprove (sender = depositor,
-    ///         spender = issuer), named for the deposit context.  The
-    ///         Fiat-Shamir transcript binds (depositor, issuer, chainid); the
-    ///         specific note is tied in by the SpentB event emitting the
-    ///         nullifier and `eDepForIss` atomically.  See
-    ///         alberta-buck-notes-decryptability.org.
-    function verifyDepositorForIssuer(
-        address depositor,
-        address issuer,
-        ElGamalCT calldata eDepForIss,
-        CPProof calldata pi
-    ) external view returns (bool) {
-        return _verifyApprove(depositor, issuer, eDepForIss, pi);
-    }
-
     function _verifyApprove(
         address sender,
         address spender,
@@ -645,51 +617,6 @@ contract IdentityRegistry {
 
         // Check 3: Fiat-Shamir
         return pi.e == _fsApprove(E_a, E_bob, pkA, pkB, pi, sender, spender, block.chainid);
-    }
-
-    // ---- A-spend CP-DLEQ verification (Phase 8 V2) -------------------------
-
-    /// @notice Verify spender's CP-DLEQ proof that ``E_n`` and the registered
-    ///         ciphertext ``E_addr[spender]`` both encrypt the same identity
-    ///         point M under spender's registered pk -- the V2 cryptographic
-    ///         gate that makes A-notes unspendable after sk_rec loss/re-issuance
-    ///         (Theorem 10.1 invariant).
-    /// @dev    Reads E_reg = _E_addr[spender] and pk_dep = _pk[spender] from
-    ///         storage so a caller cannot substitute either; binds (recipient,
-    ///         chainid) into the Fiat-Shamir transcript so a proof valid for
-    ///         one (recipient, chain) tuple cannot be replayed against another.
-    ///         Spender address is implicitly bound through which storage slot
-    ///         is read -- a proof tied to pk_A cannot satisfy the algebraic
-    ///         checks against pk_B.
-    function verifySpendCP(
-        address spender,
-        address recipient,
-        ElGamalCT calldata E_n,
-        SpendCPProof calldata pi
-    ) external view returns (bool) {
-        if (!_isRegistered(spender)) return false;
-
-        ElGamalCT memory E_reg     = _E_addr[spender];
-        BN254.G1Point memory pkDep = _pk[spender];
-
-        // H = R_reg - R_n;  X2 = C_reg - C_n
-        BN254.G1Point memory H  = BN254.add(E_reg.R, BN254.neg(E_n.R));
-        BN254.G1Point memory X2 = BN254.add(E_reg.C, BN254.neg(E_n.C));
-
-        // Check 1: s*G == T1 + e*pk_dep
-        if (!BN254.eq(
-            BN254.mul(BN254.g1(), pi.s),
-            BN254.add(pi.T1, BN254.mul(pkDep, pi.e))
-        )) return false;
-
-        // Check 2: s*(R_reg - R_n) == T2 + e*(C_reg - C_n)
-        if (!BN254.eq(
-            BN254.mul(H, pi.s),
-            BN254.add(pi.T2, BN254.mul(X2, pi.e))
-        )) return false;
-
-        // Check 3: Fiat-Shamir
-        return pi.e == _fsSpendCP(E_n, E_reg, pkDep, pi, recipient, block.chainid);
     }
 
     // ---- public-issuer note binding (Notes mutual-decryptability, Phase 1) --
@@ -1020,28 +947,6 @@ contract IdentityRegistry {
         scl[0] = uint256(uint160(sender));
         scl[1] = uint256(uint160(spender));
         scl[2] = chainid;
-        return BN254.fsChallenge(pts, scl);
-    }
-
-    function _fsSpendCP(
-        ElGamalCT calldata E_n,
-        ElGamalCT memory E_reg,
-        BN254.G1Point memory pkDep,
-        SpendCPProof calldata pi,
-        address recipient,
-        uint256 chainid
-    ) internal pure returns (uint256) {
-        BN254.G1Point[] memory pts = new BN254.G1Point[](7);
-        pts[0] = E_n.R;
-        pts[1] = E_n.C;
-        pts[2] = E_reg.R;
-        pts[3] = E_reg.C;
-        pts[4] = pkDep;
-        pts[5] = pi.T1;
-        pts[6] = pi.T2;
-        uint256[] memory scl = new uint256[](2);
-        scl[0] = uint256(uint160(recipient));
-        scl[1] = chainid;
         return BN254.fsChallenge(pts, scl);
     }
 

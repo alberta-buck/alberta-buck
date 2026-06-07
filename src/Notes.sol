@@ -6,7 +6,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IMintVerifier}                 from "./IMintVerifier.sol";
 import {IMintVerifierA2}               from "./IMintVerifierA2.sol";
 import {ISpendVerifier}                from "./ISpendVerifier.sol";
-import {ISpendAVerifier}               from "./ISpendAVerifier.sol";
 import {IIdentityMembershipVerifier}   from "./IIdentityMembershipVerifier.sol";
 import {IdentityRegistry}              from "./IdentityRegistry.sol";
 import {BN254}                         from "./BN254.sol";
@@ -106,19 +105,17 @@ contract Notes {
     IMintVerifierA2 public a2MintVerifier;
 
     ISpendVerifier public spendVerifier;
-    /// @notice A-flavor spend verifier (Phase 8 V2 -- spend_a.circom).
-    ///         Optional at construction (zero-address means A-spends are
-    ///         disabled until governance wires it).  Distinct interface from
-    ///         `spendVerifier` because spend_a V2 has 9 public inputs (the
-    ///         5-tuple plus the four BN254 G1 coordinates of the publicly
-    ///         revealed note ciphertext E_n), bound to the leaf via the
-    ///         in-circuit Poseidon-8 idHash gate.
-    ISpendAVerifier public spendAVerifier;
 
-    /// @notice Identity registry consulted on every A-spend for the off-chain
-    ///         CP-DLEQ identity binding (Phase 8 V2).  Optional at
-    ///         construction (zero-address disables A-spends just like a
-    ///         zero `spendAVerifier`).
+    /// @dev Storage slot retained as a placeholder.  This was
+    ///      `ISpendAVerifier public spendAVerifier` -- the legacy account-pinned
+    ///      A-spend path (spend_a.circom + spendACP), removed in the Identity-M
+    ///      consolidation.  Kept (address-sized, like the verifier it replaced)
+    ///      so the storage layout below -- identityRegistry, noteFaceSum, the
+    ///      roots ring, ... -- is unperturbed.  Do not reuse without a migration.
+    address private _removedSpendAVerifier;
+
+    /// @notice Identity registry consulted by the Identity-M-bound spends for the
+    ///         deposit-coupling / depositor-binding sigmas and the membership root.
     IdentityRegistry public identityRegistry;
 
     /// @notice Identity membership verifier (Phase 9 -- identity-axis).
@@ -160,30 +157,8 @@ contract Notes {
     event MintVerifierUpdated(address indexed previous, address indexed next);
     event A2MintVerifierUpdated(address indexed previous, address indexed next);
     event SpendVerifierUpdated(address indexed previous, address indexed next);
-    event SpendAVerifierUpdated(address indexed previous, address indexed next);
     event IdentityRegistryUpdated(address indexed previous, address indexed next);
     event IdentityMembershipVerifierUpdated(address indexed previous, address indexed next);
-
-    /// @notice Emitted when a note is successfully spent.
-    event Spent(uint256 indexed nullifier, uint256 face, address indexed recipient);
-
-    /// @notice Emitted when an A-flavor note is successfully spent.  The
-    ///         nullifier domain (tag 4243) is disjoint from B-spend (tag
-    ///         4242) so off-chain indexers can dedupe on `nullifier` alone.
-    event SpentA(uint256 indexed nullifier, uint256 face, address indexed recipient);
-
-    /// @notice Emitted on a bearer-note spend that completes the
-    ///         depositor->issuer half of the mutual-decryptability handshake:
-    ///         `eDepForIss` re-encrypts the recipient's registered Identity
-    ///         under the issuer's key (verified via verifyDepositorForIssuer),
-    ///         so the public issuer can recover who cashed the note.
-    event SpentB(
-        uint256 indexed nullifier,
-        uint256 face,
-        address indexed recipient,
-        address indexed issuer,
-        IdentityRegistry.ElGamalCT eDepForIss
-    );
 
     /// @notice Emitted on an identity-M-bound (unilateral) A2 deposit.  Publishes
     ///         the committed point `P_I = (piX, piY)` that the deposit-coupling
@@ -302,19 +277,9 @@ contract Notes {
         spendVerifier = ISpendVerifier(next);
     }
 
-    /// @notice Wire (or rotate) the A-flavor spend verifier.  Passing
-    ///         `address(0)` *disables* A-spends (the next `spendACP()` call
-    ///         will revert on the verifier dispatch); use that path during
-    ///         emergency lockdowns rather than redeploying Notes.
-    function setSpendAVerifier(address next) external {
-        require(msg.sender == governance, "not governance");
-        emit SpendAVerifierUpdated(address(spendAVerifier), next);
-        spendAVerifier = ISpendAVerifier(next);
-    }
-
-    /// @notice Wire (or rotate) the identity registry consulted by
-    ///         `spendACP`.  Passing `address(0)` disables A-spends just like
-    ///         a zero `spendAVerifier`; emergency lockdowns may flip either.
+    /// @notice Wire (or rotate) the identity registry consulted by the
+    ///         Identity-M-bound spends (deposit-coupling / depositor-binding and
+    ///         the membership root).  Passing `address(0)` disables those spends.
     function setIdentityRegistry(address next) external {
         require(msg.sender == governance, "not governance");
         emit IdentityRegistryUpdated(address(identityRegistry), next);
@@ -629,139 +594,7 @@ contract Notes {
         require(!(nPublic > 0 && nPrivate > 0), "Notes: mixed issuerMode batch");
     }
 
-    // ---- spend ------------------------------------------------------------
-
-    /// @notice Redeem a note.  Verifies that the spender knows a Poseidon-5
-    ///         opening of a commitment included under `noteRoot` (which must
-    ///         still be in the recent-roots window), that the nullifier has
-    ///         not been burned, and that the Groth16 spend proof binds
-    ///         `(noteRoot, nullifier, face, recipient, block.chainid)` in
-    ///         its public inputs.  On success the pool transferCarrying's
-    ///         `face` BUCK to `recipient`.
-    ///
-    ///         If an identity membership verifier is wired, additionally
-    ///         verifies `identityMembershipProof` against the registry's
-    ///         identityRoot.  Pass empty bytes to skip (backward-compat).
-    ///
-    /// @dev Nullifier and face-sum bookkeeping happen before the external
-    ///      transferCarrying call.  If the transfer reverts the whole spend
-    ///      reverts, so the nullifier is not "consumed but unpaid".
-    function spend(
-        bytes   calldata proof,
-        uint256          root,
-        uint256          nullifier,
-        uint256          face,
-        address          recipient
-    ) external {
-        _spend(
-            proof, root, nullifier, face, recipient, address(0),
-            IdentityRegistry.ElGamalCT(BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
-            IdentityRegistry.CPProof(0, 0, 0,
-                BN254.G1Point(0, 0), BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
-            "" // identityMembershipProof
-        );
-    }
-
-    /// @notice Redeem a note with an identity membership proof (no depositor binding).
-    ///         The membership proof is verified against identityRegistry.identityRoot().
-    ///         Pass empty bytes to skip the check (backward-compat).
-    function spend(
-        bytes   calldata proof,
-        uint256          root,
-        uint256          nullifier,
-        uint256          face,
-        address          recipient,
-        bytes   calldata identityMembershipProof
-    ) external {
-        _spend(
-            proof, root, nullifier, face, recipient, address(0),
-            IdentityRegistry.ElGamalCT(BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
-            IdentityRegistry.CPProof(0, 0, 0,
-                BN254.G1Point(0, 0), BN254.G1Point(0, 0), BN254.G1Point(0, 0)),
-            identityMembershipProof
-        );
-    }
-
-    /// @notice Spend a bearer (B) note and complete the depositor->issuer half
-    ///         of the mutual-decryptability handshake.  `eDepForIss`
-    ///         re-encrypts the recipient's registered Identity under the public
-    ///         `issuer`'s key; `cpProof` (a Chaum-Pedersen re-encryption proof)
-    ///         is checked via IdentityRegistry.verifyDepositorForIssuer, and the
-    ///         SpentB event publishes `eDepForIss` so the issuer can recover who
-    ///         cashed the note.  An encrypted-Identity recipient uses this
-    ///         overload; a public recipient is already recoverable from the
-    ///         registry via the plain spend.
-    ///
-    ///         `identityMembershipProof` is a Groth16 proof that the depositor's
-    ///         identity M_dep is a member of the registry-Identity accumulator.
-    function spend(
-        bytes   calldata proof,
-        uint256          root,
-        uint256          nullifier,
-        uint256          face,
-        address          recipient,
-        address          issuer,
-        IdentityRegistry.ElGamalCT calldata eDepForIss,
-        IdentityRegistry.CPProof    calldata cpProof,
-        bytes   calldata identityMembershipProof
-    ) external {
-        require(issuer != address(0), "Notes: zero issuer");
-        _spend(proof, root, nullifier, face, recipient, issuer,
-               eDepForIss, cpProof, identityMembershipProof);
-    }
-
-    function _spend(
-        bytes   calldata proof,
-        uint256          root,
-        uint256          nullifier,
-        uint256          face,
-        address          recipient,
-        address          issuer,
-        IdentityRegistry.ElGamalCT memory eDepForIss,
-        IdentityRegistry.CPProof    memory cpProof,
-        bytes   memory   identityMembershipProof
-    ) internal {
-        require(recipient != address(0),  "Notes: zero recipient");
-        require(face      > 0,            "Notes: zero face");
-        require(_isAcceptedRoot(root),    "Notes: unknown root");
-        require(!nullifiers[nullifier],   "Notes: already spent");
-        require(
-            spendVerifier.verifySpend(
-                proof, root, nullifier, face, recipient, block.chainid
-            ),
-            "Notes: bad spend proof"
-        );
-
-        nullifiers[nullifier] = true;
-        noteFaceSum          -= face;
-
-        bool bound = issuer != address(0);
-        if (bound) {
-            // Depositor->issuer binding: the recipient re-encrypts their
-            // registered Identity under the issuer's key so the issuer can
-            // recover who cashed the note from the SpentB event.
-            require(address(identityRegistry) != address(0),
-                    "Notes: identity registry not set");
-            require(
-                identityRegistry.verifyDepositorForIssuer(
-                    recipient, issuer, eDepForIss, cpProof),
-                "Notes: bad depositor binding"
-            );
-        }
-
-        // Identity membership (generic plumbing): no committed point on this
-        // path, so (0, 0) — stub-honoured; the real G1-tie verifier fails closed.
-        // The bound membership lives in spendCoupledA2.
-        _verifyIdentityMembership(identityMembershipProof, 0, 0);
-
-        require(
-            buck.transfer(recipient, face),
-            "Notes: transfer failed"
-        );
-
-        if (bound) emit SpentB(nullifier, face, recipient, issuer, eDepForIss);
-        else       emit Spent(nullifier, face, recipient);
-    }
+    // ---- identity membership (shared by the coupled spends) ------------
 
     /// @dev Shared identity membership check — called by the spend paths.
     ///      Verifies that the committed point `P_I = (px, py)` is a member of the
@@ -798,88 +631,6 @@ contract Notes {
             verifier.verifyMembership(identityMembershipProof, root, px, py),
             "Notes: bad identity membership proof"
         );
-    }
-
-    // ---- A-flavor spend (Phase 8 V2) -------------------------------------
-
-    /// @notice Redeem an A-flavor note (spend_a.circom V2).
-    ///
-    /// The A-spend SNARK is structurally identical to spend (same Merkle
-    /// path + Poseidon-5 opening + face binding) with three A-specific
-    /// differentiators:
-    ///   - flavor in {1,2}: spend_a rejects B-flavor openings, where spend
-    ///     accepts any flavor;
-    ///   - nullifier tag = 4243 (vs 4242 for spend), so the nullifier
-    ///     preimage spaces are disjoint and the same `nullifiers` mapping
-    ///     can serve both flavors with no cross-flavor collision risk;
-    ///   - the publicly-revealed note ciphertext E_n = (R_n, C_n) is bound
-    ///     to the leaf via Poseidon-8(eNoteR, eNoteC, issuerData[4]) ===
-    ///     idHash, so the on-chain CP-DLEQ verifier sees the same E_n that
-    ///     was committed at mint time.
-    ///
-    /// V2 ships the cryptographic "must be the registered recipient to
-    /// spend" binding *off-chain* relative to the SNARK -- the spender
-    /// (msg.sender) provides a 4-element Chaum-Pedersen DLEQ proof showing
-    /// that their wallet's secret key sk_dep decrypts both the registered
-    /// E_addr[msg.sender] and the freshly-revealed E_n to the same
-    /// identity point M.  IdentityRegistry.verifySpendCP runs that check
-    /// using EIP-196 BN254 precompiles (~36K gas) and binds (recipient,
-    /// chainid) into the Fiat-Shamir transcript so a proof tied to one
-    /// (recipient, chain) tuple cannot be replayed against another.  The
-    /// Poseidon-8 idHash gate inside the SNARK forces the prover to reveal
-    /// the same E_n the credential was minted against -- a spender who
-    /// substitutes a different ciphertext (so they can satisfy the CP-DLEQ
-    /// with their own key) would fail the in-circuit binding.  Together
-    /// the two checks reject every spender other than the address whose
-    /// (pk, E_addr) the credential was issued to.
-    function spendACP(
-        bytes   calldata proof,
-        uint256          root,
-        uint256          nullifier,
-        uint256          face,
-        address          recipient,
-        IdentityRegistry.ElGamalCT calldata E_n,
-        IdentityRegistry.SpendCPProof calldata cpProof,
-        bytes   calldata identityMembershipProof
-    ) external {
-        require(address(spendAVerifier)   != address(0), "Notes: A-spend disabled");
-        require(address(identityRegistry) != address(0), "Notes: identity registry not set");
-        require(recipient != address(0),  "Notes: zero recipient");
-        require(face      > 0,            "Notes: zero face");
-        require(_isAcceptedRoot(root),    "Notes: unknown root");
-        require(!nullifiers[nullifier],   "Notes: already spent");
-
-        // SNARK: 9 public inputs bind the 5-tuple plus E_n's coords.
-        require(
-            spendAVerifier.verifySpendA(
-                proof, root, nullifier, face, recipient, block.chainid,
-                E_n.R.X, E_n.R.Y, E_n.C.X, E_n.C.Y
-            ),
-            "Notes: bad spend proof"
-        );
-
-        // Off-chain identity binding: msg.sender must own the sk_dep that
-        // decrypts both E_n and their registered E_addr to the same M.
-        require(
-            identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof),
-            "Notes: bad identity proof"
-        );
-
-        nullifiers[nullifier] = true;
-        noteFaceSum          -= face;
-
-        // Identity membership (generic plumbing): the V1 account-targeted A-spend
-        // names the depositor by account (verifySpendCP), so there is no P_I to
-        // bind here — (0, 0), stub-honoured.  The identity-M-bound A2 deposit is
-        // spendCoupledA2 below.
-        _verifyIdentityMembership(identityMembershipProof, 0, 0);
-
-        require(
-            buck.transfer(recipient, face),
-            "Notes: transfer failed"
-        );
-
-        emit SpentA(nullifier, face, recipient);
     }
 
     // ---- Identity-M-bound addressed spend (unilateral A1 / A2) -----------

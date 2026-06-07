@@ -63,11 +63,6 @@ from alberta_buck.wallet.render import (
 from alberta_buck.wallet.issuer import (
     Issuer, IssuedCredential, rerandomize_for_registration,
 )
-from alberta_buck.wallet.spend_a import (
-    TREE_DEPTH, ZERO_VALUE, EMPTY_ROOT,
-    MerkleTree, merkle_walk,
-    SpendAWitness, make_spend_a_witness, spend_a_satisfied,
-)
 
 __all__ = [
     "G1", "G2", "ORDER", "add", "mul", "neg", "eq", "pairing", "is_inf",
@@ -99,7 +94,4 @@ __all__ = [
     "Detail", "StyledLine", "ReceiptSection", "ReceiptDoc",
     "Driver", "TextDriver", "render_receipt",
     "Issuer", "IssuedCredential", "rerandomize_for_registration",
-    "TREE_DEPTH", "ZERO_VALUE", "EMPTY_ROOT",
-    "MerkleTree", "merkle_walk",
-    "SpendAWitness", "make_spend_a_witness", "spend_a_satisfied",
 ]

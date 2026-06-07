@@ -244,7 +244,7 @@ snark-fixtures:
 # circuit build dir so setup.sh rebuilds the Powers of Tau and all verifiers.
 # Hours, dev entropy only.
 snark-ptau:
-	rm -rf build/snark/ptau build/snark/mint build/snark/spend build/snark/spend_a $(SNARK_DIRS)
+	rm -rf build/snark/ptau build/snark/mint build/snark/spend $(SNARK_DIRS)
 	$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
 
 snark-clean:

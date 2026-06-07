@@ -30,7 +30,6 @@ from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
 from alberta_buck.wallet.elgamal import identity_keygen, elgamal_encrypt
 from alberta_buck.wallet.nizk import registration_prove, RegistrationProof
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
-from alberta_buck.wallet.spend_cp import spend_cp_prove
 from alberta_buck.wallet.notes import (
     FLAVOR_A1, FLAVOR_A2, FLAVOR_B1, NoteOpening, note_commitment,
     nullifier_a, nullifier_b, id_hash_a2, id_hash_b1,
@@ -176,45 +175,15 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         rng=rng,
     )
 
-    # Phase 8 V2 A-spend CP-DLEQ: an A-note ciphertext encrypts Alice's
-    # identity point M under Alice's pk with fresh randomness; Alice spends
-    # it by proving her registered (sk, pk) matches.
-    r_note = rand_scalar(rng)
-    E_n_alice = elgamal_encrypt(alice.M, alice.kp.pk, r_note)
-    spend_cp = spend_cp_prove(
-        E_n_alice, alice.E, alice.kp.pk, alice.kp.sk,
-        SPEND_RECIPIENT, CHAINID,
-        rng=rng,
-    )
-
-    # ---- A2 leaf for the spend_a V2 SNARK fixture --------------------------
-    #
-    # The leaf encodes a A2 (addressed, private-issuer) note for Alice with
-    # ``idHash = Poseidon-8(E_n.R, E_n.C, E_iss.R, E_iss.C)`` (each word
-    # reduced mod F_R, mirroring the in-circuit signal reduction).  The
-    # mock ``E_iss_alice`` is just a freshly-randomized ElGamal ciphertext
-    # of Alice's identity point under her own pk -- the SNARK's binding
-    # gate (I) only constrains that the prover supplies the same four
-    # ``issuerData`` words at idHash compute time and as the (private)
-    # spend witness, so any 4-tuple suffices for the test.  The same
-    # ``E_n_alice`` flows through both the in-circuit binding and the
-    # off-chain CP-DLEQ verifier (IdentityRegistry.verifySpendCP), which
-    # is the V2 invariant: SNARK and identity check agree on the same E_n.
-    r_iss_mock = rand_scalar(rng)
-    E_iss_alice = elgamal_encrypt(alice.M, alice.kp.pk, r_iss_mock)
-    spendA_face       = 100
-    spendA_rho        = rand_scalar(rng)
-    spendA_predicate  = 0
-    spendA_idHash     = id_hash_a2(E_n_alice, E_iss_alice)
-    spendA_opening    = NoteOpening(
-        flavor=FLAVOR_A2,
-        v=spendA_face,
-        rho=spendA_rho,
-        id_hash=spendA_idHash,
-        predicate=spendA_predicate,
-    )
-    spendA_cm        = note_commitment(spendA_opening)
-    spendA_nullifier = nullifier_a(spendA_rho, spendA_idHash)
+    # Stream-preservation: the legacy Phase-8 A-spend vectors (spend_cp +
+    # spend_a_v2) were removed with the spend_a / spend_cp modules in the
+    # Identity-M consolidation, but they consumed four rng scalars here
+    # (r_note, the CP-DLEQ `t`, r_iss_mock, spendA_rho).  Reserve the same
+    # four so every downstream vector (issuer_schnorr, receipt, issuer_reenc,
+    # ...) -- and the committed fixtures / golden files pinned to them -- stays
+    # byte-identical.
+    for _ in range(4):
+        rand_scalar(rng)
 
     # ---- public-issuer Schnorr binding (decryptability Phase 1) -----------
     #
@@ -438,47 +407,6 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
                 "T1": _g1(cp.T1),
                 "T2": _g1(cp.T2),
                 "T3": _g1(cp.T3),
-            },
-        },
-        "spend_cp": {
-            "spender":   scalar_to_hex(ALICE_ADDR),
-            "recipient": scalar_to_hex(SPEND_RECIPIENT),
-            "chainid":   scalar_to_hex(CHAINID),
-            "r_note":    scalar_to_hex(r_note),
-            "E_n":       {"R": _g1(E_n_alice.R), "C": _g1(E_n_alice.C)},
-            "proof": {
-                "e":  scalar_to_hex(spend_cp.e),
-                "s":  scalar_to_hex(spend_cp.s),
-                "T1": _g1(spend_cp.T1),
-                "T2": _g1(spend_cp.T2),
-            },
-        },
-        "spend_a_v2": {
-            "spender":   scalar_to_hex(ALICE_ADDR),
-            "recipient": scalar_to_hex(SPEND_RECIPIENT),
-            "chainid":   scalar_to_hex(CHAINID),
-            "flavor":    scalar_to_hex(FLAVOR_A2),
-            "face":      scalar_to_hex(spendA_face),
-            "rho":       scalar_to_hex(spendA_rho),
-            "predicate": scalar_to_hex(spendA_predicate),
-            "idHash":    scalar_to_hex(spendA_idHash),
-            "cm":        scalar_to_hex(spendA_cm),
-            "nullifier": scalar_to_hex(spendA_nullifier),
-            "E_n":       {"R": _g1(E_n_alice.R), "C": _g1(E_n_alice.C)},
-            "E_iss":     {"R": _g1(E_iss_alice.R), "C": _g1(E_iss_alice.C)},
-            # issuerData = (R_iss.x, R_iss.y, C_iss.x, C_iss.y), each
-            # auto-reduced mod F_R to match the circom signal coercion.
-            "issuerData": [
-                scalar_to_hex(point_to_words(E_iss_alice.R)[0] % F_R),
-                scalar_to_hex(point_to_words(E_iss_alice.R)[1] % F_R),
-                scalar_to_hex(point_to_words(E_iss_alice.C)[0] % F_R),
-                scalar_to_hex(point_to_words(E_iss_alice.C)[1] % F_R),
-            ],
-            "cp_proof": {
-                "e":  scalar_to_hex(spend_cp.e),
-                "s":  scalar_to_hex(spend_cp.s),
-                "T1": _g1(spend_cp.T1),
-                "T2": _g1(spend_cp.T2),
             },
         },
         "issuer_schnorr": {
