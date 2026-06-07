@@ -48,32 +48,40 @@ from alberta_buck.wallet.verifiable_decrypt import (
     VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
 )
 from alberta_buck.wallet.unilateral_a2 import IdentityTree, RcptResult
+from alberta_buck.wallet.issuer_reenc import H_POINT
 
 
 # ========================= Depositor binding ================================
 
 @dataclass(frozen=True)
 class DepositorBindingProof:
-    """Four-relation Okamoto sigma for the B1 depositor binding.
+    """Five-relation Okamoto sigma for the B1 depositor binding.
 
     ``E_dep_for_iss`` is published (in the SpentB event) and is a public input;
-    the proof attests it encrypts the depositor's registered Identity.
+    the proof attests it encrypts the depositor's registered Identity.  ``P_dep``
+    is a perfectly-hiding Pedersen commitment to that same Identity ``M_dep``,
+    published so the G1-tie membership proof can certify ``M_dep`` is a registered
+    member *bound to this binding* -- the P relation below ties ``P_dep``'s scalar
+    to the same ``m_dep`` as E2/F2 (shared response ``s_m``).
     """
     e:   int
-    s_m: int    # response for m_dep (identity scalar)
-    s_s: int    # response for sk_dep (payout-account key)
-    s_r: int    # response for r (E_dep_for_iss randomness)
-    A2:  Tuple  # k_m*G + k_s*R_d
-    A4:  Tuple  # k_s*G
-    B1:  Tuple  # k_r*G
-    B2:  Tuple  # k_m*G + k_r*pk_iss
+    s_m: int      # response for m_dep (identity scalar)
+    s_s: int      # response for sk_dep (payout-account key)
+    s_r: int      # response for r (E_dep_for_iss randomness)
+    s_b: int      # response for b (P_dep blind)
+    A2:  Tuple    # k_m*G + k_s*R_d
+    A4:  Tuple    # k_s*G
+    B1:  Tuple    # k_r*G
+    B2:  Tuple    # k_m*G + k_r*pk_iss
+    A_p: Tuple    # k_m*G + k_b*H              (P-relation commitment)
+    P_dep: Tuple  # M_dep + b*H                (blinded commitment of M_dep)
 
 
 def _db_transcript(pk_dep, E_dep: ElGamalCiphertext, pk_iss,
-                   eDepForIss: ElGamalCiphertext, A2, A4, B1, B2,
+                   eDepForIss: ElGamalCiphertext, A2, A4, B1, B2, A_p, P_dep,
                    account: int, chainid: int) -> int:
     pts = [pk_dep, E_dep.R, E_dep.C, pk_iss, eDepForIss.R, eDepForIss.C,
-           A2, A4, B1, B2]
+           A2, A4, B1, B2, A_p, P_dep]
     words: List[int] = []
     for P in pts:
         x, y = point_to_words(P)
@@ -92,13 +100,17 @@ def b1_bind_prove(
     account: int,                 # depositor account address (msg.sender at spend)
     chainid: int,
     r:       Optional[int] = None,
+    b:       Optional[int] = None,
     rng=None,
 ) -> Tuple[DepositorBindingProof, ElGamalCiphertext]:
     """Build ``E_dep_for_iss`` and prove it encrypts the depositor's registered
-    Identity under ``pk_iss``, all Identities hidden.  Returns (proof, E_dep_for_iss)."""
+    Identity under ``pk_iss``, all Identities hidden.  Also publishes ``P_dep =
+    M_dep + b*H`` (blinded) so the membership proof can bind ``M_dep`` to this
+    binding.  Returns (proof, E_dep_for_iss)."""
     pk_dep = mul(G1, sk_dep % ORDER)
     R_d, C_d = E_dep.R, E_dep.C
     M_dep = mul(G1, m_dep % ORDER)
+    H = H_POINT
 
     # Sanity: the payout account must be bound to identity m_dep.
     assert eq(C_d, add(M_dep, mul(R_d, sk_dep % ORDER))), \
@@ -106,23 +118,28 @@ def b1_bind_prove(
 
     r = rand_scalar(rng) if r is None else (r % ORDER)
     eDepForIss = elgamal_encrypt(M_dep, pk_iss, r)        # (r*G, M_dep + r*pk_iss)
-    R_f, C_f = eDepForIss.R, eDepForIss.C
+
+    b = rand_scalar(rng) if b is None else (b % ORDER)
+    P_dep = add(M_dep, mul(H, b))                         # M_dep + b*H (membership commitment)
 
     k_m = rand_scalar(rng)
     k_s = rand_scalar(rng)
     k_r = rand_scalar(rng)
+    k_b = rand_scalar(rng)
     A4 = mul(G1, k_s)                                     # k_s*G
     A2 = add(mul(G1, k_m), mul(R_d, k_s))                 # k_m*G + k_s*R_d
     B1 = mul(G1, k_r)                                     # k_r*G
     B2 = add(mul(G1, k_m), mul(pk_iss, k_r))              # k_m*G + k_r*pk_iss
+    A_p = add(mul(G1, k_m), mul(H, k_b))                  # k_m*G + k_b*H
 
-    e = _db_transcript(pk_dep, E_dep, pk_iss, eDepForIss, A2, A4, B1, B2,
+    e = _db_transcript(pk_dep, E_dep, pk_iss, eDepForIss, A2, A4, B1, B2, A_p, P_dep,
                        account, chainid)
     s_m = (k_m + e * (m_dep % ORDER)) % ORDER
     s_s = (k_s + e * (sk_dep % ORDER)) % ORDER
     s_r = (k_r + e * r) % ORDER
-    return (DepositorBindingProof(e=e, s_m=s_m, s_s=s_s, s_r=s_r,
-                                  A2=A2, A4=A4, B1=B1, B2=B2),
+    s_b = (k_b + e * b) % ORDER
+    return (DepositorBindingProof(e=e, s_m=s_m, s_s=s_s, s_r=s_r, s_b=s_b,
+                                  A2=A2, A4=A4, B1=B1, B2=B2, A_p=A_p, P_dep=P_dep),
             eDepForIss)
 
 
@@ -139,7 +156,8 @@ def b1_bind_verify(
     ``pk_iss``, the Identity bound to the payout account -- revealing nothing."""
     R_d, C_d = E_dep.R, E_dep.C
     R_f, C_f = eDepForIss.R, eDepForIss.C
-    e, s_m, s_s, s_r = proof.e, proof.s_m, proof.s_s, proof.s_r
+    e, s_m, s_s, s_r, s_b = proof.e, proof.s_m, proof.s_s, proof.s_r, proof.s_b
+    H = H_POINT
 
     # E4: s_s*G == A4 + e*pk_dep
     if not eq(mul(G1, s_s), add(proof.A4, mul(pk_dep, e))):
@@ -153,10 +171,13 @@ def b1_bind_verify(
     # F2: s_m*G + s_r*pk_iss == B2 + e*C_f
     if not eq(add(mul(G1, s_m), mul(pk_iss, s_r)), add(proof.B2, mul(C_f, e))):
         return False
+    # P:  s_m*G + s_b*H == A_p + e*P_dep   (P_dep = m_dep*G + b*H, same m_dep)
+    if not eq(add(mul(G1, s_m), mul(H, s_b)), add(proof.A_p, mul(proof.P_dep, e))):
+        return False
     # Fiat-Shamir
     return proof.e == _db_transcript(pk_dep, E_dep, pk_iss, eDepForIss,
                                      proof.A2, proof.A4, proof.B1, proof.B2,
-                                     account, chainid)
+                                     proof.A_p, proof.P_dep, account, chainid)
 
 
 # ====================== Issuer-unilateral receipt ===========================

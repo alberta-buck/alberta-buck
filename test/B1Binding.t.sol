@@ -51,14 +51,17 @@ contract B1BindingTest is Test {
         return _ct(".eDepForIss");
     }
     function _proof() internal view returns (IdentityRegistry.DepositorBindingProof memory p) {
-        p.e   = _u(".depositor_binding.e");
-        p.s_m = _u(".depositor_binding.s_m");
-        p.s_s = _u(".depositor_binding.s_s");
-        p.s_r = _u(".depositor_binding.s_r");
-        p.A2  = _g1(".depositor_binding.A2");
-        p.A4  = _g1(".depositor_binding.A4");
-        p.B1  = _g1(".depositor_binding.B1");
-        p.B2  = _g1(".depositor_binding.B2");
+        p.e     = _u(".depositor_binding.e");
+        p.s_m   = _u(".depositor_binding.s_m");
+        p.s_s   = _u(".depositor_binding.s_s");
+        p.s_r   = _u(".depositor_binding.s_r");
+        p.s_b   = _u(".depositor_binding.s_b");
+        p.A2    = _g1(".depositor_binding.A2");
+        p.A4    = _g1(".depositor_binding.A4");
+        p.B1    = _g1(".depositor_binding.B1");
+        p.B2    = _g1(".depositor_binding.B2");
+        p.A_p   = _g1(".depositor_binding.A_p");
+        p.P_dep = _g1(".depositor_binding.P_dep");
     }
 
     // ---- completeness -------------------------------------------------------

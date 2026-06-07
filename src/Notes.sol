@@ -199,6 +199,29 @@ contract Notes {
         uint256 piY
     );
 
+    /// @notice Emitted on an identity-M-bound A1 deposit (addressed, public
+    ///         issuer).  Same shape as SpentCoupledA2; here `P_I = (piX, piY)`
+    ///         commits the *recipient* identity M_rec the membership certified.
+    event SpentCoupledA1(
+        uint256 indexed nullifier,
+        uint256 face,
+        address indexed recipient,
+        uint256 piX,
+        uint256 piY
+    );
+
+    /// @notice Emitted on an identity-M-bound B1 deposit (bearer, public issuer):
+    ///         the depositor's binding-certified membership of M_dep, plus the
+    ///         `eDepForIss` the issuer alone decrypts to name the depositor.  The
+    ///         membership-bound counterpart of `SpentB`.
+    event SpentCoupledB1(
+        uint256 indexed nullifier,
+        uint256 face,
+        address indexed recipient,
+        address indexed issuer,
+        IdentityRegistry.ElGamalCT eDepForIss
+    );
+
     /// @notice Emitted once per successful mint.  `cms` calldata carries the
     ///         per-leaf commitments in insertion order; offline provers
     ///         reconstruct the tree by replaying Minted events plus the tx
@@ -859,45 +882,40 @@ contract Notes {
         emit SpentA(nullifier, face, recipient);
     }
 
-    // ---- Identity-M-bound A2 spend (unilateral A2) -----------------------
+    // ---- Identity-M-bound addressed spend (unilateral A1 / A2) -----------
 
-    /// @notice Redeem an identity-targeted (unilateral) A2 note: the
-    ///         identity-M-bound deposit that closes the A2 recipient-key
-    ///         coupling gap.  See alberta-buck-notes-unilateral.org.
+    /// @dev Shared identity-M-bound deposit for the *addressed* flavors (A1, A2).
+    ///      Both close their respective naming gap with the SAME on-chain gadget:
+    ///      a deposit-coupling sigma + a membership proof bound to the single
+    ///      committed point `dc.P_I`.  The flavors differ only in what the note
+    ///      ciphertext `eEnc` encrypts (hence what `dc.P_I`'s underlying point is):
     ///
-    ///         The note was minted addressed to the recipient's Identity *point*
-    ///         M_rec (not an account): `eIss = (r'G, M_iss + r'·M_rec)` encrypts
-    ///         the issuer's own registered Identity under M_rec.  At deposit the
-    ///         depositor — *any* account bound to the identity scalar m_rec —
-    ///         proves eligibility while revealing no Identity, via two co-bound
-    ///         checks over the single committed point `dc.P_I = M_iss + b·H`:
+    ///        A2:  eEnc = eIss = (r'G, M_iss + r'·M_rec)  -> dc.P_I = M_iss + b·H
+    ///             (membership of the private *issuer*; closes the A2 collusion gap)
+    ///        A1:  eEnc = eRec = (r'G, M_rec + r'·M_rec)  -> dc.P_I = M_rec + b·H
+    ///             (membership of the *recipient*; the issuer is public, named at mint)
     ///
-    ///           1. verifyDepositCoupling(msg.sender, eIss, dc): an Okamoto sigma
-    ///              proving the account is bound to m_rec AND `eIss` decrypts
-    ///              under m_rec to the point committed (blinded) in `dc.P_I`.
-    ///           2. _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y):
-    ///              a Groth16 proof that `dc.P_I`'s underlying point M_iss is a
-    ///              member of the registry-Identity accumulator.
+    ///      1. verifyDepositCoupling(msg.sender, eEnc, dc): the account is bound to
+    ///         m_rec AND `eEnc` decrypts under m_rec to the point committed
+    ///         (blinded) in `dc.P_I`.
+    ///      2. _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y): a
+    ///         Groth16 proof that `dc.P_I`'s underlying point is a registered
+    ///         Identity.  The SAME `dc.P_I` flows into both, so the membership is
+    ///         bound to exactly the point the coupling decrypted `eEnc` to -- a
+    ///         colluding pair cannot key `eEnc` to a non-member and still spend.
     ///
-    ///         Because the SAME `dc.P_I` flows into both, the membership is bound
-    ///         to exactly the point the coupling decrypted `eIss` to.  A colluding
-    ///         issuer+recipient who key `eIss` to a throwaway point make `dc.P_I`'s
-    ///         underlying point a non-member, so the membership proof cannot exist
-    ///         and the deposit reverts: no spendable-but-unnameable note.
-    ///
-    ///         The note's commitment + nullifier are proven by the generic spend
-    ///         SNARK (cm in the pool tree, nullifier well-formed); the Identity-M
-    ///         binding is the coupling + membership gate above.
-    function spendCoupledA2(
+    ///      The note's commitment + nullifier are proven by the generic spend
+    ///      SNARK (cm in the pool tree, nullifier well-formed).
+    function _spendCoupled(
         bytes   calldata proof,
         uint256          root,
         uint256          nullifier,
         uint256          face,
         address          recipient,
-        IdentityRegistry.ElGamalCT          calldata eIss,
+        IdentityRegistry.ElGamalCT          calldata eEnc,
         IdentityRegistry.DepositCouplingProof calldata dc,
         bytes   calldata membershipProof
-    ) external {
+    ) internal {
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
         require(recipient != address(0),  "Notes: zero recipient");
         require(face      > 0,            "Notes: zero face");
@@ -912,11 +930,9 @@ contract Notes {
             "Notes: bad spend proof"
         );
 
-        // Identity-M binding, half 1: the deposit-coupling sigma.  msg.sender is
-        // the depositing account; it proves account<->m_rec binding and that eIss
-        // decrypts under m_rec to dc.P_I (all identities hidden).
+        // Identity-M binding, half 1: the deposit-coupling sigma.
         require(
-            identityRegistry.verifyDepositCoupling(msg.sender, eIss, dc),
+            identityRegistry.verifyDepositCoupling(msg.sender, eEnc, dc),
             "Notes: bad deposit coupling"
         );
 
@@ -931,7 +947,117 @@ contract Notes {
             buck.transfer(recipient, face),
             "Notes: transfer failed"
         );
+    }
 
+    /// @notice Redeem an identity-targeted (unilateral) A2 note -- addressed,
+    ///         *private* issuer.  `eIss` encrypts the issuer's own registered
+    ///         Identity under the recipient identity point M_rec; the membership
+    ///         certifies the decrypted issuer is registered, closing the A2
+    ///         recipient-key collusion gap.  See alberta-buck-notes-unilateral.org.
+    function spendCoupledA2(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient,
+        IdentityRegistry.ElGamalCT          calldata eIss,
+        IdentityRegistry.DepositCouplingProof calldata dc,
+        bytes   calldata membershipProof
+    ) external {
+        _spendCoupled(proof, root, nullifier, face, recipient, eIss, dc, membershipProof);
         emit SpentCoupledA2(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
+    }
+
+    /// @notice Redeem an identity-targeted A1 note -- addressed, *public* issuer.
+    ///         `eRec` encrypts the recipient's identity under itself, so the SAME
+    ///         deposit coupling proves the spender is the addressed identity and
+    ///         the membership certifies that recipient identity is registered.
+    ///         The issuer is public and named at mint (the batch Schnorr); the
+    ///         recipient produces a bilateral receipt off chain
+    ///         (alberta_buck.wallet.unilateral_a1).  On-chain logic is identical
+    ///         to spendCoupledA2 -- only the committed point's meaning differs.
+    function spendCoupledA1(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient,
+        IdentityRegistry.ElGamalCT          calldata eRec,
+        IdentityRegistry.DepositCouplingProof calldata dc,
+        bytes   calldata membershipProof
+    ) external {
+        _spendCoupled(proof, root, nullifier, face, recipient, eRec, dc, membershipProof);
+        emit SpentCoupledA1(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
+    }
+
+    // ---- Identity-M-bound B1 spend (bearer, public issuer) ---------------
+
+    /// @notice Redeem an identity-M-bound B1 note -- bearer, *public* issuer.
+    ///         The depositor (= `recipient`, the payout account) re-encrypts its
+    ///         own registered Identity M_dep under the public issuer's key
+    ///         (`eDepForIss`) and proves, hiding every Identity, that the
+    ///         ciphertext encrypts the Identity its account is bound to AND that
+    ///         that Identity is a registered member -- via two co-bound checks
+    ///         over the single committed point `b1Proof.P_dep = M_dep + b·H`:
+    ///
+    ///           1. verifyDepositorBinding(recipient, issuer, eDepForIss, b1Proof):
+    ///              the Okamoto sigma (E2/E4/F1/F2) coupling the payout account to
+    ///              m_dep and `eDepForIss` to the same m_dep, plus the P relation
+    ///              committing `P_dep`.
+    ///           2. _verifyIdentityMembership(membershipProof, P_dep.X, P_dep.Y):
+    ///              the G1-tie proof that `P_dep`'s underlying M_dep is registered.
+    ///
+    ///         The SAME `P_dep` flows into both, so the depositor is provably a
+    ///         registered Identity the issuer can name (it decrypts `eDepForIss`
+    ///         with sk_iss off chain).  Membership-bound counterpart of the
+    ///         `verifyDepositorForIssuer`-based B-spend overload, which it does not
+    ///         disturb.  See alberta-buck-notes-identity-axis.org (the B1 dual).
+    function spendCoupledB1(
+        bytes   calldata proof,
+        uint256          root,
+        uint256          nullifier,
+        uint256          face,
+        address          recipient,
+        address          issuer,
+        IdentityRegistry.ElGamalCT            calldata eDepForIss,
+        IdentityRegistry.DepositorBindingProof calldata b1Proof,
+        bytes   calldata membershipProof
+    ) external {
+        require(address(identityRegistry) != address(0), "Notes: identity registry not set");
+        require(recipient != address(0),  "Notes: zero recipient");
+        require(issuer    != address(0),  "Notes: zero issuer");
+        require(face      > 0,            "Notes: zero face");
+        require(_isAcceptedRoot(root),    "Notes: unknown root");
+        require(!nullifiers[nullifier],   "Notes: already spent");
+
+        // Note commitment + nullifier.
+        require(
+            spendVerifier.verifySpend(
+                proof, root, nullifier, face, recipient, block.chainid
+            ),
+            "Notes: bad spend proof"
+        );
+
+        // Identity-M binding, half 1: the depositor binding sigma (incl. the
+        // P_dep commitment).
+        require(
+            identityRegistry.verifyDepositorBinding(
+                recipient, issuer, eDepForIss, b1Proof),
+            "Notes: bad depositor binding"
+        );
+
+        nullifiers[nullifier] = true;
+        noteFaceSum          -= face;
+
+        // Identity-M binding, half 2: membership of P_dep's point M_dep, bound to
+        // the SAME P_dep the binding just constrained.
+        _verifyIdentityMembership(membershipProof, b1Proof.P_dep.X, b1Proof.P_dep.Y);
+
+        require(
+            buck.transfer(recipient, face),
+            "Notes: transfer failed"
+        );
+
+        emit SpentCoupledB1(nullifier, face, recipient, issuer, eDepForIss);
     }
 }

@@ -147,3 +147,47 @@ def test_two_deposits_unlinkable(world):
     _, b = b1_bind_prove(dep.m, dep.sk, dep.E, issuer.pk, DEPOSIT_ADDR, CHAINID, rng=world["rng"])
     assert not eq(a.R, b.R)
     assert not eq(a.C, b.C)
+
+
+# --------------------------------------------------------------------------- #
+# P_dep: the membership commitment that binds M_dep to the spend's membership.
+# --------------------------------------------------------------------------- #
+
+from alberta_buck.wallet.issuer_reenc import H_POINT
+
+
+def test_p_dep_commits_m_dep_and_is_member(world):
+    """The binding publishes P_dep = M_dep + b*H; subtracting the (known to the
+    depositor) blind recovers M_dep, a tree member.  This is the point the spend's
+    G1-tie membership proof certifies -- bound to the same m_dep as F2."""
+    dep, issuer, tree = world["dep"], world["issuer"], world["tree"]
+    b = rand_scalar(world["rng"])
+    proof, eDepForIss = b1_bind_prove(dep.m, dep.sk, dep.E, issuer.pk,
+                                      DEPOSIT_ADDR, CHAINID, b=b, rng=world["rng"])
+    assert b1_bind_verify(dep.pk, dep.E, issuer.pk, eDepForIss, proof,
+                          DEPOSIT_ADDR, CHAINID)
+    # P_dep - b*H == M_dep, and M_dep is a registered member.
+    M_dep_recovered = add(proof.P_dep, neg(mul(H_POINT, b)))
+    assert eq(M_dep_recovered, dep.M)
+    assert tree.contains(dep.M)
+
+
+def test_tampered_p_dep_rejected(world):
+    """Perturbing P_dep breaks the P relation (s_m*G + s_b*H == A_p + e*P_dep)."""
+    dep, issuer = world["dep"], world["issuer"]
+    proof, eDepForIss = b1_bind_prove(dep.m, dep.sk, dep.E, issuer.pk,
+                                      DEPOSIT_ADDR, CHAINID, rng=world["rng"])
+    import dataclasses
+    bad = dataclasses.replace(proof, P_dep=add(proof.P_dep, G1))
+    assert not b1_bind_verify(dep.pk, dep.E, issuer.pk, eDepForIss, bad,
+                              DEPOSIT_ADDR, CHAINID)
+
+
+def test_tampered_s_b_rejected(world):
+    dep, issuer = world["dep"], world["issuer"]
+    proof, eDepForIss = b1_bind_prove(dep.m, dep.sk, dep.E, issuer.pk,
+                                      DEPOSIT_ADDR, CHAINID, rng=world["rng"])
+    import dataclasses
+    bad = dataclasses.replace(proof, s_b=(proof.s_b + 1) % ORDER)
+    assert not b1_bind_verify(dep.pk, dep.E, issuer.pk, eDepForIss, bad,
+                              DEPOSIT_ADDR, CHAINID)

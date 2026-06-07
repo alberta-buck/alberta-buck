@@ -128,10 +128,13 @@ contract IdentityRegistry {
         uint256 s_m;        // response for m_dep (identity scalar)
         uint256 s_s;        // response for sk_dep (payout-account key)
         uint256 s_r;        // response for r (E_dep_for_iss randomness)
+        uint256 s_b;        // response for b (P_dep blind)
         BN254.G1Point A2;   // k_m*G + k_s*R_d
         BN254.G1Point A4;   // k_s*G
         BN254.G1Point B1;   // k_r*G
         BN254.G1Point B2;   // k_m*G + k_r*pk_iss
+        BN254.G1Point A_p;  // k_m*G + k_b*H            (P-relation commitment)
+        BN254.G1Point P_dep;// M_dep + b*H             (blinded commitment of M_dep)
     }
 
     /// @notice Second generator H for the A2 binding -- a nothing-up-my-sleeve
@@ -930,6 +933,15 @@ contract IdentityRegistry {
             BN254.add(pi.B2, BN254.mul(eDepForIss.C, pi.e))
         )) return false;
 
+        // P: s_m*G + s_b*H == A_p + e*P_dep  (P_dep = m_dep*G + b*H, same m_dep)
+        {
+            BN254.G1Point memory H = BN254.G1Point(H_X, H_Y);
+            if (!BN254.eq(
+                BN254.add(BN254.mul(BN254.g1(), pi.s_m), BN254.mul(H, pi.s_b)),
+                BN254.add(pi.A_p, BN254.mul(pi.P_dep, pi.e))
+            )) return false;
+        }
+
         // Fiat-Shamir
         return pi.e == _fsDepositorBinding(pkDep, E_dep, pkIss, eDepForIss, pi,
                                            depositor, block.chainid);
@@ -944,7 +956,7 @@ contract IdentityRegistry {
         address depositor,
         uint256 chainid
     ) internal pure returns (uint256) {
-        BN254.G1Point[] memory pts = new BN254.G1Point[](10);
+        BN254.G1Point[] memory pts = new BN254.G1Point[](12);
         pts[0] = pkDep;
         pts[1] = E_dep.R;
         pts[2] = E_dep.C;
@@ -955,6 +967,8 @@ contract IdentityRegistry {
         pts[7] = pi.A4;
         pts[8] = pi.B1;
         pts[9] = pi.B2;
+        pts[10] = pi.A_p;
+        pts[11] = pi.P_dep;
         uint256[] memory scl = new uint256[](2);
         scl[0] = uint256(uint160(depositor));
         scl[1] = chainid;
