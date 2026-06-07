@@ -9,7 +9,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: BUCK Notes are the Alberta Buck's privacy-preserving bearer-instrument primitive: a single Tornado-style Poseidon Merkle tree of note commitments, a nullifier set, and Groth16 SNARK circuits for mint and identity membership.  The authority axis is the KYC-bound Identity point M, never an EOA address: notes /name/ identities and treat accounts as interchangeable envelopes that need only /match/ the expected M.  The system collapses onto one gadget -- "prove a re-encryption of a registered Identity under a target key" -- instantiated three ways: A2 (issuer encrypts its Identity under the recipient identity point, at mint), A1 (public issuer, in the clear with a Schnorr signature), and B1 (depositor encrypts its Identity under the public issuer key, at spend).  All three are implemented and on-chain-verified: A2 via verifyDepositCoupling (11 Python + 7 Solidity tests), B1 via verifyDepositorBinding (8 Python + 6 Solidity tests), the unified membership circuit via IdentityMembershipVerifier (circuits/identity_membership.circom, 2 tests), and the identity Merkle tree via the CentralMerkleService + RegistryAgent prototype (49 tests).  Demurrage needs no note-side machinery: the Notes Pool is the Notes contract's own ERC-20 balance, and spend is an ordinary BUCK transfer out of the pool -- because the pool is a registered Carrying account, BUCK routes it through the Carrying-transfer path, delivering the full face value and apportioning a proportional share of the pool's accumulated buck-seconds (its demurrage age) onto the recipient.  Donations to the pool freshen its index and subsidise all subsequent spends.  The same commitment can be published on chain, mailed in a letter, or printed on paper with a QR code; counterfeiting is cryptographically impossible, and demurrage makes lost notes return value to the commons rather than extracting it as seigniorage.  Addressed (A1, A2) notes are cryptographically safe for indefinite holding (the identity-pinned deposit gate binds the recipient's Identity); B1 bearer cheques are civil-trust instruments meant to be cashed promptly.  Notes defeat bulk on-chain traceability while preserving bilateral disclosure to both named parties and under warrant.  This is the first design where a private bearer instrument is a native, first-class primitive of the monetary system rather than an aftermarket wrapper.
+#+description: BUCK Notes are the Alberta Buck's privacy-preserving bearer-instrument primitive: a single Tornado-style Poseidon Merkle tree of note commitments, a nullifier set, and Groth16 SNARK circuits for mint and identity membership.  The authority axis is the KYC-bound Identity point M, never an EOA address: notes /name/ identities and treat accounts as interchangeable envelopes that need only /match/ the expected M.  The system collapses onto one gadget -- "prove a re-encryption of a registered Identity under a target key" -- instantiated three ways: A2 (issuer encrypts its Identity under the recipient identity point, at mint), A1 (public issuer, in the clear with a Schnorr signature), and B1 (depositor encrypts its Identity under the public issuer key, at spend).  All three are wired end to end through Notes.spendCoupled{A1,A2,B1}: A1/A2 via verifyDepositCoupling, B1 via verifyDepositorBinding, each composed with a membership proof bound to the sigma's committed point (identity_membership_g1tie.circom + IdentityMembershipG1TieVerifier) so the spender is provably a registered Identity and an un-nameable counterparty is un-spendable; the identity Merkle accumulator is maintained on chain (IdentityRegistry.identityRoot, commit-before-use).  Demurrage needs no note-side machinery: the Notes Pool is the Notes contract's own ERC-20 balance, and spend is an ordinary BUCK transfer out of the pool -- because the pool is a registered Carrying account, BUCK routes it through the Carrying-transfer path, delivering the full face value and apportioning a proportional share of the pool's accumulated buck-seconds (its demurrage age) onto the recipient.  Donations to the pool freshen its index and subsidise all subsequent spends.  The same commitment can be published on chain, mailed in a letter, or printed on paper with a QR code; counterfeiting is cryptographically impossible, and demurrage makes lost notes return value to the commons rather than extracting it as seigniorage.  Addressed (A1, A2) notes are cryptographically safe for indefinite holding (the identity-pinned deposit gate binds the recipient's Identity); B1 bearer cheques are civil-trust instruments meant to be cashed promptly.  Notes defeat bulk on-chain traceability while preserving bilateral disclosure to both named parties and under warrant.  This is the first design where a private bearer instrument is a native, first-class primitive of the monetary system rather than an aftermarket wrapper.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-notes
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -549,13 +549,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    binding primitives are implemented and tested in =IdentityRegistry=:
    =verifyDepositCoupling= (A2 deposit eligibility) and
    =verifyDepositorBinding= (the B1 dual), both EIP-196 sigmas that hide
-   every Identity, plus the membership circuit
-   (=circuits/identity_membership.circom=) and its exported Groth16
-   verifier, cross-checked byte-for-byte against the wallet accumulator.
-   /Remaining is substrate, not cryptography/: maintaining the
-   \( \mathsf{rt_{id}} \) root on chain at each registration (the
-   /commit-before-use/ discipline), and routing =Notes.spend= through
-   these primitives in place of the prior account-pinned spend.
+   every Identity, plus the P-bound membership circuit
+   (=circuits/identity_membership_g1tie.circom=) and its exported Groth16
+   verifier, cross-checked byte-for-byte against the wallet accumulator.  The
+   on-chain \( \mathsf{rt_{id}} \) root (commit-before-use) and the three coupled
+   spend entrypoints (=spendCoupled{A1,A2,B1}=) are now /shipped/; only a production
+   ptau ceremony remains.
 
    The Notes contract itself is bound under a Public Identity
    (=bindContract(notes, pk_op, E_op, true, true)=).  Both the issuer
@@ -578,8 +577,8 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    At deposit: a standard ERC-20 =Transfer= of =face= BUCKs from the
    Notes contract address to the depositor's address (the Carrying
    demurrage apportionment is internal -- no distinct event), plus the
-   Notes contract's =Spent(nf, face, recipient)= (B-spend) or
-   =SpentA(nf, face, recipient)= (A-spend) event.  Observers learn who
+   Notes contract's =SpentCoupledA1= / =SpentCoupledA2= / =SpentCoupledB1=
+   event.  Observers learn who
    the depositor is (standard transfer visibility), but not which mint
    this corresponds to.  A =Transfer= whose sender is the Notes pool is
    a generic pool-egress signal; it does not link mint to spend.
@@ -1471,13 +1470,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
     demurrage is the final backstop -- value in genuinely-lost notes
     decays back to the commons rather than being stranded as seigniorage.
 
-    *Status (on chain).*  The Identity-M deposit gate is shipped as the
-    binding primitive =IdentityRegistry.verifyDepositCoupling= and the
-    membership circuit (=circuits/identity_membership.circom=) + its
-    Groth16 verifier.  Routing =Notes.spend= through them (replacing the
-    prior account-pinned =spendACP= / =verifySpendCP= path) and maintaining
-    the accumulator root on each registration are the remaining wiring; see
-    /Mutual Decryptability/ and /Implementation Scope/.
+    *Status (on chain).*  Shipped: the binding sigma
+    =IdentityRegistry.verifyDepositCoupling=, the P-bound membership
+    (=circuits/identity_membership_g1tie.circom= + its verifier), the on-chain
+    accumulator root (commit-before-use), and the =spendCoupledA2= entrypoint that
+    co-verifies the two.  The account-pinned =spendACP= / =verifySpendCP= path is
+    removed; see /Implementation Scope/.
 
 ** B1 (Bearer): Civil-Trust, Not Cryptographic
 
@@ -2303,10 +2301,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    \( M_{\text{rec}} = m_{\text{rec}} G \) /and/ \( eIss \) decrypts under
    \( m_{\text{rec}} \) to a point committed (blinded) in \( P_I \) --
    revealing no Identity.  A companion /membership proof/
-   (=identity_membership.circom=, native Poseidon-Merkle) shows the
-   decrypted issuer Identity lies in \( \mathsf{rt_{id}} \); a bogus
-   \( eIss \) lands on a non-member and the spend reverts.  Together these
-   replace the prior account-pinned Chaum-Pedersen-equality A-spend.
+   (=identity_membership_g1tie.circom=, native Poseidon-Merkle + one G1 tie),
+   bound to the same \( P_I \), shows the decrypted issuer Identity lies in
+   \( \mathsf{rt_{id}} \); a bogus \( eIss \) lands on a non-member and the spend
+   reverts.  Together these replace the prior account-pinned
+   Chaum-Pedersen-equality A-spend.
 
 ** Deposit Gate (B1) -- Depositor Binding (the A2 dual)
 
@@ -2344,16 +2343,16 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
   The Notes implementation uses two BN254 Groth16 circuit families:
   =mint_batch.circom= (the rolling-tree batch mint, parameterised by
-  pinned N) and =identity_membership.circom= (the unified deposit
+  pinned N) and =identity_membership_g1tie.circom= (the P-bound deposit
   membership -- "the spent note's counterparty Identity is a registered
-  member of \( \mathsf{rt_{id}} \)").  The remaining deposit checks are
+  member of \( \mathsf{rt_{id}} \), tied to the deposit sigma's committed point").  The remaining deposit checks are
   /not/ circuits: the deposit-coupling (A1/A2) and depositor-binding (B1)
   gates are cheap EIP-196 Okamoto sigmas verified directly in
   =IdentityRegistry= (=verifyDepositCoupling= / =verifyDepositorBinding=,
-  constant gas).  This unified pair supersedes the prior /two divergent/
-  spend circuits -- the bearer =spend.circom= and the account-pinned
-  =spend_a.circom= V2 with its off-chain CP-DLEQ -- which remain in the
-  tree but are not the Identity-M spend path.
+  constant gas).  This unified pair replaced the prior /two divergent/
+  spend circuits: the account-pinned =spend_a.circom= V2 (and its off-chain
+  CP-DLEQ) is /removed/, and the flavour-agnostic bearer =spend.circom= survives
+  only as the note proof shared by all three coupled spends.
 
 ** Mint Circuit (=circuits/mint_batch.circom=)
 
@@ -2449,30 +2448,31 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
      replayed against a different recipient or chain (replay
      protection by Fiat-Shamir on the public inputs).
 
-   *Contract side.*  =Notes.spend(proof, root, nullifier, face,
-   recipient)= requires =root= to be in the recent =roots= ring,
-   requires =nullifier= unused, verifies the Groth16 proof through
-   =SpendVerifierAdapter=, sets =nullifiers[nullifier] = true=,
-   decrements =noteFaceSum= by =face=, and finally calls
-   =buck.transfer(recipient, face)= -- routed through the Carrying path
-   because the pool is =isCarrying= -- to deliver the funds plus the
-   pool's accumulated demurrage share.
+   *Contract side.*  Each flavour's entrypoint -- =spendCoupledA1= /
+   =spendCoupledA2= / =spendCoupledB1= -- requires =root= in the recent =roots=
+   ring and =nullifier= unused, verifies this note proof through
+   =SpendVerifierAdapter= (=spendVerifier.verifySpend=, shared by all three),
+   runs the Identity gate below, sets =nullifiers[nullifier] = true=, decrements
+   =noteFaceSum=, and calls =buck.transfer(recipient, face)= -- routed through the
+   Carrying path because the pool is =isCarrying=.
 
    *The Identity-M deposit gate (all flavours).*  The opening proof above
    establishes /that/ a valid note is spent; the Identity gate establishes
    /who/, by composing two cheap checks with it:
-   - a /membership proof/ (=identity_membership.circom=) that the
+   - a /membership proof/ (=identity_membership_g1tie.circom=) that the
      counterparty Identity recovered at deposit is a registered member of
-     \( \mathsf{rt_{id}} \) -- native Poseidon-Merkle, ~5.7K R1CS; and
+     \( \mathsf{rt_{id}} \), bound to the sigma's committed point \( P \)
+     (native Poseidon-Merkle + one BN254 G1 tie); and
    - an EIP-196 /deposit sigma/ -- =verifyDepositCoupling= for an addressed
      (A1/A2) note (the depositor /is/ the addressed Identity, and \( eIss \)
      decrypts to the issuer), or =verifyDepositorBinding= for a bearer (B1)
      note (the depositor reveals /its/ Identity to the public issuer).
    A bogus payload decrypts to a non-member and the membership reverts, so
-   no flavour admits an un-nameable spend.  This unified gate supersedes
-   the prior B-shape =spend.circom= / A-shape =spend_a.circom= V2 split
-   (which remain in the tree but are not the Identity-M path); see
-   /Implementation Scope/ for the integration status.
+   no flavour admits an un-nameable spend.  This unified gate /replaced/ the
+   earlier two-circuit split: the account-pinned A-shape (=spend_a.circom= + the
+   off-chain CP-DLEQ =verifySpendCP=) is removed, and the flavour-agnostic
+   =spend.circom= survives only as the note proof above, shared by all three
+   coupled spends.
 
 ** Circuit Engineering Budget
 
@@ -2481,7 +2481,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    #+LATEX: {\scriptsize
    | Circuit                                                | R1CS (total)                 | PTAU pow |
    |--------------------------------------------------------+------------------------------+----------|
-   | =identity_membership.circom= (depth-10; the deposit gate) | ~5,700                    | 2^{13}   |
+   | =identity_membership_g1tie.circom= (depth-10 + G1 tie; deposit gate) | ~39,000           | 2^{16}   |
    | =mint_batch.circom= (N=1)   M                          | 21,914                       | 2^{15}   |
    | =mint_batch.circom= (Phase-7-bis; N=2)   M             | 43,701                       | 2^{16}   |
    | =mint_batch.circom= (Phase-7-bis; N=4)   M             | 87,273                       | 2^{17}   |
@@ -2490,8 +2490,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | =mint_batch.circom= (Phase-7-bis; N=32)  M             | 697,281                      | 2^{20}   |
    | =mint_batch.circom= (Phase-7-bis; N=128) P             | ~2,800,000                   | 2^{22}   |
    | =mint_batch.circom= (Phase-7-bis; N=1024) P            | ~22,000,000                  | 2^{25}   |
-   | =spend.circom= (prior B-shape; depth-20 Merkle)        | ~12,000                      | 2^{15}   |
-   | =spend_a.circom= V2 (prior A-shape; account-pinned)    | ~13,300 (6152 nl + 7140 lin) | 2^{15}   |
+   | =spend.circom= (the flavour-agnostic note proof; depth-20 Merkle) | ~12,000           | 2^{15}   |
 #+LATEX: }
 
    Measured (M) via =snarkjs r1cs info build/snark/mint_batch_n${N}.r1cs=
@@ -2521,14 +2520,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    - Tornado-style Merkle inclusion (Switcher + Poseidon at each level)
    - =Num2Bits= range proofs on field elements
 
-   =spend_a.circom= V2 adds two extras on top of this base: an A-tag
-   nullifier domain separator and a Poseidon-8 binding gate that
-   pins =E_n= to the committed =idHash= (~265 R1CS).  The
-   Chaum-Pedersen equality between =E_n= and the depositor's
-   registered =E_reg= is verified /off-chain/ by =Notes.spendACP=
-   via =IdentityRegistry.verifySpendCP= using EIP-196 BN254
-   precompiles (~36K gas), avoiding the prohibitive ~+250K R1CS
-   cost of non-native G1 arithmetic in circom.
+   The =identity_membership_g1tie= gate adds one emulated BN254 \( \mathbb{G}_1 \)
+   point addition (the \( P = M + bH \) tie) on top of the native Poseidon-Merkle
+   walk, keeping the heavy /identity/ arithmetic out of the EVM: the EIP-196 deposit
+   sigma is ~36K gas and the membership is a single constant-gas Groth16 verify,
+   versus the ~+250K R1CS that native \( \mathbb{G}_1 \) equality inside the spend
+   SNARK would have cost.
 
 #+LATEX: \clearpage
 * What This Architecture Rules Out: Pure-Bearer Cryptographic Notes
@@ -2666,57 +2663,42 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    #+LATEX: {\scriptsize
    | Component                                                        | Source                                                                                                                         |
    |------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------|
-   | Notes contract: roots, nullifiers, mint/spend/spendACP           | =src/Notes.sol=                                                                                                                 |
+   | Notes contract: roots, nullifiers, mint + spendCoupled{A1,A2,B1}  | =src/Notes.sol=                                                                                                                 |
    | Carrying-transfer path in BUCK                                    | =src/Buck.sol= (=_carryingTransfer=, =buckSeconds= apportionment)                                                               |
    | Mint Groth16 circuits + per-N verifiers (PUBLIC + PRIVATE modes) | =circuits/mint_batch.circom=, =circuits/mint_batch_a2.circom=, =src/MintGroth16Verifier_*.sol=                                  |
    | A2 deposit coupling (EIP-196 Okamoto sigma)                       | =IdentityRegistry.verifyDepositCoupling=, =alberta_buck.wallet.unilateral_a2=, =test/UnilateralA2.t.sol= (7)                    |
    | B1 depositor binding (EIP-196 Okamoto sigma, A2 dual)            | =IdentityRegistry.verifyDepositorBinding=, =alberta_buck.wallet.b1_binding=, =test/B1Binding.t.sol= (6)                        |
    | A2 issuer re-encryption binding (anti-framing)                    | =IdentityRegistry.verifyIssuerReenc=, =test/IssuerReenc.t.sol=                                                                  |
    | Public-issuer Schnorr binding (A1/B1 mint)                        | =IdentityRegistry.verifyIssuerSchnorr=, =test/IssuerSchnorr.t.sol=                                                              |
-   | Identity-membership circuit + Groth16 verifier (native Poseidon)  | =circuits/identity_membership.circom=, =src/IdentityMembershipVerifier.sol=, =test/IdentityMembership.t.sol= (2)                |
+   | Identity-membership circuit + verifier, P-bound (G1 tie)          | =circuits/identity_membership_g1tie.circom=, =src/IdentityMembershipG1TieVerifier(Adapter).sol=, =test/IdentityMembershipBinding.t.sol= (5) |
    | Identity registry prototype (certificates, trees, aggregator)     | =alberta_buck/registry/=, =test/test_registry.py= (49)                                                                          |
    | Python ↔ Solidity cross-artifact vectors                          | =scripts/gen_unilateral_a2_vectors.py=, =scripts/gen_b1_binding_vectors.py=, =test/vectors/=                                    |
    | Registry-backed sim identity issuance                             | =alberta_buck/sim/identity.py=                                                                                                  |
    | Poseidon-T3 precompile (in-EVM bytecode)                         | =src/PoseidonT3Bytecode.sol=                                                                                                    |
-   | Verifier adapters (proof plumbing, per-N mint dispatch)           | =src/MintVerifierAdapter.sol=, =src/MintVerifierA2Adapter.sol=, =src/SpendVerifierAdapter.sol=, =src/SpendAVerifierAdapter.sol= |
-   | End-to-end forge tests (real Groth16 fixtures)                   | =test/MintVerifier.t.sol=, =test/SpendVerifier.t.sol=, =test/SpendAVerifier.t.sol=                                             |
+   | Verifier adapters (proof plumbing, per-N mint dispatch)           | =src/MintVerifierAdapter.sol=, =src/MintVerifierA2Adapter.sol=, =src/SpendVerifierAdapter.sol=                                  |
+   | Identity-M-bound spend entrypoints (A1/A2/B1) + e2e tests         | =Notes.spendCoupled{A1,A2,B1}=, =alberta_buck.wallet.unilateral_a1=, =test/NotesCoupled{A1,A2,B1}.t.sol=, =test/SpendVerifier.t.sol= |
    | Prover scripts (witness gen + ptau ceremony)                     | =scripts/snark/prove_*=, =scripts/snark/setup.sh=                                                                              |
    #+LATEX: }
 
-** Remaining (to complete the Identity-M spend path)
+** Status: the Identity-M spend path is complete
 
-   The binding sigmas, membership circuit, and registry prototype are shipped.
-   What remains is /integration across layers/:
+   The binding sigmas, the P-bound membership circuit + verifier, the on-chain
+   incremental \( \mathsf{rt_{id}} \) accumulator (=IdentityRegistry.identityRoot=,
+   commit-before-use), and the three coupled spend entrypoints (=spendCoupledA1=,
+   =spendCoupledA2=, =spendCoupledB1=) are all shipped and tested end to end.  The
+   membership is /bound/ to each sigma's committed point \( P \) (the verifier
+   derives its public inputs from \( P \), not the prover's bytes), so the two
+   halves cannot be decoupled.  The only remaining pre-deployment item is a
+   production Powers-of-Tau ceremony (the dev ptaus use dev-only entropy).
 
-   - *On-chain identity accumulator.*  Maintain \( \mathsf{rt_{id}} \) in
-     =IdentityRegistry= (incremental Poseidon root on each =register= /
-     =bindContract=), so the on-chain root reflects newly issued identities
-     with the /commit-before-use/ discipline.  Prototype: =CentralMerkleService=
-     (49 tests).
-   - *Non-native \( \mathbb{G}_1 \) tie.*  Bind the membership circuit's
-     witnessed \( (M_x, M_y) \) to the point already committed in the EIP-196
-     sigma (\( P_I = M + bH \) for A2; the =eDepForIss= plaintext for B1) --
-     one emulated-\( \mathbb{G}_1 \) scalar mult bolted onto the native
-     membership path, proved off chain, verified on chain in constant gas.
-   - *Route =Notes.spend= through the Identity-M gates.*  Replace the
-     account-pinned =spendACP= / =verifyDepositorForIssuer= path with the
-     deposit-coupling (A1/A2) and depositor-binding (B1) sigmas plus the
-     membership check, rotated in via the governance verifier slots.
+** Retired: the Account-Pinned A-Spend
 
-** Legacy Account-Pinned Circuits (transitioning)
-
-   The prior account-pinned designs remain in the tree for backward compatibility:
-
-   | Circuit                           | Status                  |
-   |-----------------------------------+-------------------------|
-   | =spend.circom= (bearer B-spend)   | superseded by B1 member |
-   | =spend_a.circom= V2 (A-spend)     | superseded by A2 sigma  |
-   | =SpendAGroth16Verifier.sol=       | retained for compat     |
-   | =IdentityRegistry.verifySpendCP=  | retained for compat     |
-
-   Both are superseded by the identity-axis model but not removed; governance
-   rotates the verifier slots (=setSpendVerifier= / =setSpendAVerifier=) when
-   migration is complete.
+   The earlier account-pinned designs are /removed/ -- =spend_a.circom= and its
+   verifier (=SpendAGroth16Verifier=, =SpendAVerifierAdapter=, =ISpendAVerifier=),
+   =Notes.spendACP=, =IdentityRegistry.verifySpendCP=, the unbound generic
+   =Notes.spend=, and the =spend_a= / =spend_cp= wallet modules.  Only the
+   flavour-agnostic =spend.circom= note proof survives, now shared by all three
+   coupled spends.
 
 ** Wallet & UX (post-migration)
 
@@ -2751,9 +2733,9 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
    /The per-flavor phasing below is historical./  The current
    shipped-vs-remaining state for the Identity-M model is in
-   /Implementation Scope/ above (the binding primitives, the membership
-   circuit, and the verifiers are shipped; the on-chain accumulator and the
-   =Notes.spend= rewiring remain).  The table below records the original
+   /Implementation Scope/ above (the whole Identity-M spend path -- binding
+   sigmas, P-bound membership, on-chain accumulator, and the =spendCoupled{A1,A2,B1}=
+   entrypoints -- is shipped).  The table below records the original
    pool/circuit rollout, retained for provenance.
 
    The engineering work was naturally phaseable:
@@ -2766,66 +2748,21 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | 2-bis | Batch-mint circuit: per-leaf Merkle insertion moved into the                      | Active implementation work                                   |
    |       | SNARK (=mint_batch.circom=, pinned N set)                                         |                                                              |
    |     3 | Spend circuit (B-shape / bearer) + Carrying-transfer egress                       | *Shipped* (Phase 7 BUCK Notes)                               |
-   |     4 | =spend_a.circom= V1 (predicate-only A-spend) + V2 (in-circuit EIP-196 precompiles | V1 *Shipped*; V2 *Shipped*; =alberta_buck.wallet.spend_cp=,  |
-   |       | Poseidon-8 idHash binding gate; off-chain CP-DLEQ via                             | =IdentityRegistry.verifySpendCP=, =src/ISpendAVerifier.sol=, |
-   |       | in =IdentityRegistry.verifySpendCP=, called from =Notes.spendACP=)                | =src/SpendAVerifierAdapter.sol=                              |
+   |     4 | Account-pinned A-spend (=spend_a.circom= V2 + off-chain CP-DLEQ)                  | *Superseded and removed*; replaced by the Identity-M coupled |
+   |       |                                                                                   | spend (deposit-coupling sigma + P-bound membership)          |
    |     5 | A1 public-issuer signature-in-payload + auditable payroll UX                      | Pending (depends on Phase 4)                                 |
    |     6 | Sealed-QR print flow for B1 walking-around notes                                  | Pending (hologram-vendor integration)                        |
    |     7 | Programmable =predicate= field (bounded predicate DSL)                            | Deferred (Aztec Noir / Halo2 toolchain)                      |
    |     8 | Optional: off-chain re-targeting via proxy re-encryption                          | Deferred (Identity Guardians)                                |
    #+LATEX: }
 
-   Phases 1-4 are *shipped* and exercised end-to-end by the test
-   suite (=test/MintVerifier.t.sol=, =test/MintBatchVerifier.t.sol=,
-   =test/SpendVerifier.t.sol=, =test/SpendAVerifier.t.sol=) on real
-   Groth16 fixtures.  The B-shape spend circuit is a single
-   flavor-agnostic verifier: any commitment the prover knows the
-   opening for can be redeemed to any IdentityRegistry-verified or
-   system-public recipient (the correct semantics for B1 bearer
-   notes).  The A-shape =spend_a.circom= V2 adds the in-circuit
-   Poseidon-8 idHash binding gate that pins =E_n= to the leaf at
-   mint time, paired with off-chain CP-DLEQ verification in
-   =IdentityRegistry.verifySpendCP=, called from =Notes.spendACP=.
-
-   Phase 4 closes the A-flavor gap in two layers, both shipped.  V1
-   ships =spend_a.circom= (A-tag nullifier, flavor constraint) without
-   the identity gate.  V2 layers the identity binding using two
-   cooperating components:
-
-   1. *In-circuit Poseidon-8 binding gate* (constraint (I) in the
-      revised =spend_a.circom=): the SNARK now publishes =E_n.R= and
-      =E_n.C= as four additional public inputs (the spender's note
-      ciphertext, in BN254 G1 affine coordinates), and enforces
-
-      \[
-        \mathsf{Poseidon\text{-}8}(\mathsf{E_n.R.x}, \mathsf{E_n.R.y},
-                                  \mathsf{E_n.C.x}, \mathsf{E_n.C.y},
-                                  \mathsf{issuerData}[0..3]) \;\equiv\; \mathsf{idHash} \pmod{F_R}.
-      \]
-
-      This pins the publicly-revealed =E_n= to the leaf at mint time
-      (~265 R1CS) without requiring any non-native BN254 arithmetic in
-      the circuit.
-
-   2. *Off-chain Chaum-Pedersen DLEQ verification* in
-      =IdentityRegistry.verifySpendCP=, called from =Notes.spendACP=
-      via the EIP-196 BN254 precompiles (~36K gas).  The verifier
-      reads the spender's registered =(pk_dep, E_reg)= from storage
-      and confirms a single =sk_dep= satisfies both ~pk_dep === sk_dep
-      * G~ and the equal-plaintext relation between =E_n= and =E_reg=.
-
-   This split is forced by the prohibitive cost of non-native BN254
-   G1 arithmetic in circom (~+250K R1CS per CP constraint set);
-   moving the DLEQ verification on-chain costs ~36K gas via precompiles
-   instead.  =Notes.spendACP(proof, root, nullifier, face, recipient,
-   E_n, cpProof)= calls both the Groth16 verifier (which checks the
-   binding gate) and =IdentityRegistry.verifySpendCP= (which checks
-   the equality of plaintexts) atomically.  All A1/A2 identity,
-   security, and privacy properties documented above -- including the
-   Theorem 10.1 invariant -- remain in force; only the verification
-   /location/ moved (off-chain CP via precompiles, not non-native G1
-   in circuit).  End-to-end exercised by 26 forge tests in
-   =test/SpendAVerifier.t.sol=.
+   Phases 1-3 are *shipped*.  Phase 4's account-pinned A-spend
+   (=spend_a.circom= V2 plus an off-chain Chaum-Pedersen DLEQ in =verifySpendCP=,
+   called from =Notes.spendACP=) was the original way to add an identity gate to an
+   A-note; it has since been /superseded and removed/ in favour of the Identity-M
+   coupled spend -- the deposit-coupling / depositor-binding sigma plus the
+   P-bound membership -- which is account-agnostic (recovery, not finality) and
+   closes the collusion gap.  See /Retired: the Account-Pinned A-Spend/ above.
 
    Phases 5-8 are optional extensions deferred until the core system
    is production-proven.
@@ -2925,14 +2862,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Universal Spend Circuit (resolved by the Identity-M gadget)
 
-   The earlier design carried two divergent spend verifiers
-   (=spend.circom= B-shape, =spend_a.circom= V2 A-shape).  The Identity-M
-   reframe /resolves/ this: all flavours share one membership circuit
-   (=identity_membership.circom=) plus the cheap EIP-196 deposit sigmas, so
-   there is a single spend shape parameterised by flavour rather than two
-   circuit families.  The open item is now the integration -- routing
-   =Notes.spend= through the gadget and maintaining \( \mathsf{rt_{id}} \)
-   (/Implementation Scope/) -- not a circuit-architecture choice.
+   The earlier design carried two divergent spend verifiers (a bearer
+   =spend.circom= and an account-pinned =spend_a.circom= V2).  The Identity-M
+   reframe /resolves/ this: =spend_a= is removed, and all flavours share the one
+   flavour-agnostic =spend.circom= note proof plus the P-bound membership
+   (=identity_membership_g1tie.circom=) and the cheap EIP-196 deposit sigmas -- a
+   single spend shape parameterised by flavour, wired through
+   =spendCoupled{A1,A2,B1}=.
 
 ** Regulatory Interaction with the Carrying Transfer
 
@@ -2967,12 +2903,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
   self-wormhole) -- span every use case the Alberta Buck series needs a
   bearer instrument to cover, from walking-around and cross-border
   targeted payments to cold-storage cryptographic notes.  The
-  public-issuer flavors *A1* and *B1* are the current shipping product
-  -- their bilateral receipt is sound, collusion-resistant, and
-  third-party-free; the private-issuer *A2* flavor is *reserved as a
-  future enhancement* (residual recipient-key coupling gap, bounded by a
-  recipient-burden posture).  The fourth cell, private-bearer, is ruled
-  out by BUCK's mutual-decryptability invariant.
+  all three flavors -- *A1*, *A2*, *B1* -- are shipped, each with a sound,
+  collusion-resistant, third-party-free bilateral receipt.  The A2
+  recipient-key collusion gap is closed by the /identity-targeted/ spend: the
+  membership certifies the issuer's decrypted Identity, so a bogus =eIss=
+  decrypts to a non-member and the deposit /reverts/ (an un-nameable note is
+  un-spendable, not merely un-receiptable).  The fourth cell, private-bearer
+  (B2), is ruled out by BUCK's mutual-decryptability invariant.
 
   Demurrage needs no note-side machinery: the Notes Pool is the
   Notes contract's own ERC-20 balance -- a regular BUCK account with
