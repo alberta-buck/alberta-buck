@@ -1,4 +1,4 @@
-#+title: The Alberta Buck - Identity and Receipts (v1.0)
+#+title: The Alberta Buck - Identity and Receipts (v1.1)
 #+author: Perry Kundert
 #+date: 2026-04-08
 #+category: Alberta Buck
@@ -67,13 +67,13 @@ secret key and an archival node -- without any counterparty's cooperation.
   surveil transactions at O(1) cost.
 
   The expectation to be able to transact Alberta BUCKs in complete freedom (no one else can prevent
-  it) and anonymity (no one else can identify the parties) is paramount.  This is consistent with
+  you) and anonymity (no one else can identify the parties) is paramount.  This is consistent with
   the expectation that one is innocent until proven guilty.  Asking permission from anyone before we
   can buy, sell or trade is unacceptable to any free people.  Anything less turns a free citizen
   into a serf.  If the government or some regulator can lock your account and freeze you on a park
   bench at will, how free are you?
 
-  The expectation that I can be certain of my counterparty's identity, and that it is /at least/ as
+  The expectation to be certain of your counterparty's identity, and that it is /at least/ as
   reliable as the group(s) issuing it is also critical.  Millions of financial fraud phone calls
   flood Albertans' phones daily, pillaging our neighbours and grand-parents, each carrying the
   government issued identity of the Canadian phone number it "originates" from -- under the cover of

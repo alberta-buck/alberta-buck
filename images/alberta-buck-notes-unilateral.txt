@@ -91,14 +91,24 @@ Table of Contents
 
   *What was built.* This document is matched by a working reference:
   • `alberta_buck/wallet/unilateral_a2.py' – the mint, the
-    deposit-coupling sigma, the registry-Identity Merkle tree, and the
-    unilateral receipt.
+    deposit-coupling sigma, and the unilateral receipt (the
+    registry-Identity Merkle tree is the canonical
+    `alberta_buck.registry.tree.IdentityMerkleTree', with `IdentityTree'
+    here a thin point-centric facade over it).
   • `IdentityRegistry.verifyDepositCoupling' – the on-chain, EIP-196
     verification of the deposit-eligibility sigma.
-  • `alberta_buck/test/test_unilateral_a2.py' (11 tests) and
-    `test/UnilateralA2.t.sol' (7 tests) – the end-to-end flow and the
-    Solidity \( \leftrightarrow \) Python cross-artifact parity.  All
-    pass.
+  • `Notes.spendCoupledA2' – the deposit entrypoint that co-verifies the
+    coupling sigma and the \( P_I \)-bound G1-tie membership, then pays
+    out.
+  • `circuits/identity_membership_g1tie.circom' +
+    `IdentityMembershipG1TieVerifier(Adapter)' – the membership SNARK
+    and the on-chain limb-binding of \( P_I \).
+  • `alberta_buck/test/test_unilateral_a2.py' (11) plus
+    `test/UnilateralA2.t.sol' (7),
+    `test/IdentityMembershipBinding.t.sol' (5), and
+    `test/NotesCoupledA2.t.sol' (8) – the end-to-end flow, the Solidity
+    \( \leftrightarrow \) Python cross-artifact parity, and the binding.
+    All pass.
 
 
 2 Parties, Keys, and the Identity Tree
@@ -444,11 +454,16 @@ Table of Contents
   ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
    `alberta_buck/test/test_unilateral_a2.py'     11  mint binding; delivery decrypt; deposit coupling; unilateral receipt names both; any-account deposit; collusion un-nameable + un-spendable; sigma soundness (tamper / wrong account / wrong chainid); identity-hiding; mint unlinkability 
    `test/UnilateralA2.t.sol'                      7  on-chain `verifyDepositCoupling' parity + soundness (tampered response / \( P_I \) / \( eIss \), wrong chainid, unregistered / wrong depositor)                                                                                           
+   `test/IdentityMembershipBinding.t.sol'         5  the \( P_I \) binding: the bound point verifies; a mismatched \( P_I_x \) / \( P_I_y \) / root is rejected; bad proof length reverts                                                                                                      
+   `test/NotesCoupledA2.t.sol'                    8  end-to-end `spendCoupledA2': completeness + payout + `SpentCoupledA2'; bad coupling / tampered \( P_I \) / unregistered depositor / rejected membership / double-spend revert; empty-proof skip                                           
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  *Status: all 18 pass* (`nix develop --command python -m pytest
-     alberta_buck/test/test_unilateral_a2.py' and `forge test
-     --match-contract UnilateralA2DepositTest'), with no regression in
-     the adjacent identity / A2 suites.
+  *Status: all 31 pass* (`make nix-match-NotesCoupledA2', `make
+  nix-match-IdentityMembershipBinding', `make nix-match-UnilateralA2',
+  and `nix develop --command python -m pytest
+  alberta_buck/test/test_unilateral_a2.py'), with no regression in the
+  adjacent identity / A2 suites (`make nix-test': 425 forge passed; the
+  8 failures are the pre-existing uniswap-artifact and manual-fixture
+  env tests).
 
 
 9 Implementation Status and Remaining Work
@@ -466,22 +481,56 @@ Table of Contents
     receipt verifier (`verify_receipt'), with membership demonstrated in
     the reference.
 
-  *The one remaining circuit:* the in-ZK proof that \( P_I \)'s
-  committed point is a tree member – a native Poseidon-Merkle membership
-  tied to the EC commitment by a single non-native scalar relation.  In
-  this implementation the membership is proven in the reference (the
-  receipt and the delivery check both compute it); wiring it as a
-  Groth16 circuit and into `Notes.spend' is the production step.
-  Because the proof is generated off chain (on the wallet's Holochain
-  agent, which already holds the tree) and the EVM verifies a
-  constant-size proof, this is a prover-side cost, not an EVM-cost
-  obstacle (see /alberta-buck-notes-decryptability/, "The
-  identity-targeted alternative" and "Where the cost lands").
+  *Built and on-chain verified (Phase C, 2026-06-06):*
+  • The G1-tie circuit (`circuits/identity_membership_g1tie.circom') –
+    39K constraints, proving `P_I = M + bH' in the G1 group over BN254
+    via circom-lib's `EllipticCurveAddOptimised'.  Compiled with circom
+    2.2.3, proved with snarkjs 0.7.5, Groth16 verifier exported to
+    Solidity (`src/IdentityMembershipG1TieVerifier.sol').
+  • On-chain verification: all 3 Forge tests pass (valid proof accepted,
+    tampered root rejected, tampered `P_I' rejected) at ~350K gas.
+  • EIP-197 G2 encoding bug discovered and worked around: snarkjs stores
+    G2 points as `[x_re, x_im, y_re, y_im]' but EIP-197 expects `[x_im,
+    x_re, y_im, y_re]'.  Post-processor `fix_verifier_g2.py' applies the
+    swap automatically (see `alberta-buck-verifier-bug.org').
+  • The incremental registry-Identity accumulator is deployed on chain
+    (`IdentityRegistry.identityRoot'), updated on each `register()' /
+    `bindContract()' call via on-chain Poseidon hashing.
+  • The identity membership verifier is wired into `Notes.sol' spend
+    paths (`IIdentityMembershipVerifier', `_verifyIdentityMembership'),
+    gated by governance.
 
-  *The registry accumulator:* the Identity tree's root must be
-  maintained on chain on each registration (an incremental Poseidon
-  root, or an off-chain-computed root proven by a small SNARK); the tree
-  body lives off chain.
+  *The deposit is now bound and routed (2026-06-06):*
+  • `Notes.spendCoupledA2' is the identity-M-bound A2 deposit
+    entrypoint: it calls `verifyDepositCoupling(msg.sender, eIss, dc)'
+    and then `_verifyIdentityMembership(membershipProof, dc.P_I.X,
+    dc.P_I.Y)', *reading `dc.P_I' once and feeding it to both*.  Emits
+    `SpentCoupledA2(nullifier, face, recipient, P_I.X, P_I.Y)'.
+  • *The binding* – the step the earlier draft called "remaining": the
+    membership verifier no longer trusts the prover's public inputs.
+    `IIdentityMembershipVerifier.verifyMembership(proof, identityRoot,
+    px, py)' takes the committed point, and
+    `IdentityMembershipG1TieVerifierAdapter' derives the circuit's nine
+    public signals (the 64-bit \( \mathbb{F}_q \) limbs of \( P_I \)) on
+    chain from `(px, py)', so the `membershipProof' bytes carry only the
+    Groth16 triple \( (a, b, c) \).  A Groth16 accept therefore proves
+    membership of /exactly/ the point the coupling sigma decrypted
+    `eIss' to – the two halves cannot be decoupled.
+  • Tests: `test/IdentityMembershipBinding.t.sol' (5 – the bound point
+    verifies; a mismatched \( P_I \) or root is rejected) and
+    `test/NotesCoupledA2.t.sol' (8 – the full deposit against the
+    canonical coupling vector + the stub membership: completeness, bad
+    coupling / tampered \( P_I \) / unregistered depositor / rejected
+    membership / double-spend all revert).  `make nix-test' stays green
+    (no regressions).
+
+  *Remaining for full Identity-M Notes:*
+  • The B1 depositor-binding sigma (`verifyDepositorBinding') similarly
+    needs its membership counterpart wired at spend time – the one
+    symmetric increment still open (lower priority: a B1 issuer is
+    public and named at mint, so the receipt does not depend on it).
+  • Production deployment requires a proper Powers of Tau ceremony (the
+    current ptaus use dev-only entropy).
 
 
 9.1 Cross-references

@@ -503,12 +503,6 @@ Table of Contents
   │ print(f"G_2 generator:     (pair of FQ2 elements)")
   └────
 
-  ┌────
-  │ BN254 curve order: 21888242871839275222246405745257275088548364400416034343698204186575808495617
-  │ G_1 generator:     (     1...,      2...)
-  │ G_2 generator:     (pair of FQ2 elements)
-  └────
-
 
 3 Issuer Key Generation
 ═══════════════════════
@@ -534,12 +528,6 @@ Table of Contents
   │ print(f"  PK = (X, Y) in G_2      -- published in TrustedIssuersRegistry")
   └────
 
-  ┌────
-  │ Issuer PS key pair generated.
-  │   sk = (x, y)             -- two secret scalars
-  │   PK = (X, Y) in G_2      -- published in TrustedIssuersRegistry
-  └────
-
 
 3.1 Same Operation via the Wallet API
 ─────────────────────────────────────
@@ -561,11 +549,6 @@ Table of Contents
   │ )
   │ print(f"Wallet API: {issuer_obj.issuer_id!r} @ 0x{issuer_obj.issuer_addr:040x}")
   │ print(f"  pk_X, pk_Y match the raw G_2 points above.")
-  └────
-
-  ┌────
-  │ Wallet API: 'atb-financial-ca' @ 0xa7b00000000000000000000000000000000a7b00
-  │   pk_X, pk_Y match the raw G_2 points above.
   └────
 
 
@@ -635,14 +618,6 @@ Table of Contents
   │ print(f"  sigma_2 = {pt(sigma[1])}")
   └────
 
-  ┌────
-  │ Identity scalar m = H(identity_data):
-  │   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
-  │ PS signature sigma:
-  │   sigma_1 = ( 88610..., 792207...)
-  │   sigma_2 = (194575..., 765247...)
-  └────
-
 
 4.3 Verify the PS Signature (Issuer Self-Check)
 ───────────────────────────────────────────────
@@ -671,16 +646,6 @@ Table of Contents
   │ print(f"  identity_data  = '{alice_identity_data[:40]}...'")
   └────
 
-  ┌────
-  │ PS signature verified: e(sigma_1, X + m*Y) == e(sigma_2, g_2)
-  │ 
-  │ Issuer gives Alice:
-  │   m              = 6446313962173165014188361468977035479170665192834402473818305319846425860127
-  │   sigma          = (sigma_1, sigma_2)  -- PS signature
-  │   identity_data  = '{"date_of_birth":"1992-03-15","epoch":42...'
-  └────
-
-
   *How to read the output:* "PS signature verified" means both sides of
   the pairing equation produce the same element in \( G_T \).  If \( m
   \) were wrong (e.g., tampered identity data), the two pairings would
@@ -705,13 +670,6 @@ Table of Contents
   │ print(f"  (The two G_T elements differ -- the pairing detects the mismatch.)")
   │ print(f"  Any change to identity_data produces a different m, which")
   │ print(f"  makes the pairing equation fail.  The signature is unforgeable.")
-  └────
-
-  ┌────
-  │ PS verify with wrong m: False
-  │   (The two G_T elements differ -- the pairing detects the mismatch.)
-  │   Any change to identity_data produces a different m, which
-  │   makes the pairing equation fail.  The signature is unforgeable.
   └────
 
 
@@ -747,12 +705,6 @@ Table of Contents
   │ print(f"Wallet API: cred.m == m_alice : {cred.m == m_alice}")
   │ print(f"  ps_verify(sigma, m_alice)   : {ok}")
   │ print(f"  ps_verify(sigma, m_fake)    : {ok_bad}")
-  └────
-
-  ┌────
-  │ Wallet API: cred.m == m_alice : True
-  │   ps_verify(sigma, m_alice)   : True
-  │   ps_verify(sigma, m_fake)    : False
   └────
 
 
@@ -804,18 +756,6 @@ Table of Contents
   │ print(f"  (No algorithm can correlate them.)")
   └────
 
-  ┌────
-  │ Rerandomized PS signature verified.
-  │   sigma'_1 = ( 67832..., 771071...)
-  │   sigma'_2 = (333674..., 861487...)
-  │ 
-  │ Original and rerandomized signatures are unlinkable:
-  │   sigma_1  = ( 88610..., 792207...)
-  │   sigma'_1 = ( 67832..., 771071...)
-  │   (No algorithm can correlate them.)
-  └────
-
-
   *How to read the output:* Two things to check: (1) "Rerandomized PS
   signature verified" confirms \( \sigma' \) still satisfies the pairing
   equation.  (2) Compare the coordinate fragments of `sigma_1' vs.
@@ -865,21 +805,6 @@ Table of Contents
   │ print(f"\nAlice decrypts: C - sk*R = {pt(M_check)}  (matches M)")
   └────
 
-  ┌────
-  │ Fresh key pair for this Ethereum account:
-  │   sk_alice = 20231369833315013210713445653707796716036686244922709017984837504131458083290
-  │   pk_alice = (453836..., 322664...)
-  │ 
-  │ ElGamal ciphertext E_alice = (R, C):
-  │   R = r*G    = (661369..., 401098...)
-  │   C = m*G+r*pk = (511029..., 113164...)
-  │ 
-  │ Message point M = m*G:
-  │   M = (739132..., 937433...)
-  │ 
-  │ Alice decrypts: C - sk*R = (739132..., 937433...)  (matches M)
-  └────
-
   *How to read the output:* The last two lines show the decrypted point
   \( C - sk \cdot R \) and the original \( M \).  Their coordinate
   fragments must match – this confirms the ciphertext is well-formed.
@@ -901,14 +826,6 @@ Table of Contents
   │ print(f"  M_real  = {pt(M_alice)}")
   │ print(f"  Match: {eq(M_wrong, M_alice)}")
   │ print(f"  (Completely different point -- no information about m is leaked.)")
-  └────
-
-  ┌────
-  │ Eve decrypts with wrong key:
-  │   M_wrong = (105292..., 906472...)
-  │   M_real  = (739132..., 937433...)
-  │   Match: False
-  │   (Completely different point -- no information about m is leaked.)
   └────
 
 
@@ -959,13 +876,6 @@ Table of Contents
   │ print(f"  challenge e = {e}")
   │ print(f"  response s_m = {s_m}")
   │ print(f"  response s_r = {s_r}")
-  └────
-
-  ┌────
-  │ NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-  │   challenge e = 16699332785644010028891616760337010489470497548771352803664033722644793553032
-  │   response s_m = 16260404861950836581621365366162580312782174235780949093282878591346635591399
-  │   response s_r = 19338456120994742791452423529793647467663128357091056664087690402004020003133
   └────
 
 
@@ -1098,18 +1008,6 @@ Table of Contents
   │ print("\n==> Registration PASSED. isVerified(alice) = true")
   └────
 
-  ┌────
-  │ (b) ElGamal C check passed: s_m*G + s_r*pk == e*C + T_C
-  │ (c) ElGamal R check passed: s_r*G == e*R + T_R
-  │ (a) PS pairing check passed:
-  │     e(s_m*s'_1, Y) * e(-A_ps, Y) * e(e*s'_1, X) * e(-e*s'_2, g_2) == 1
-  │ (d) Fiat-Shamir challenge verified (binds all public inputs)
-  │ (e) sigma'_1 != O (non-trivial signature)
-  │ 
-  │ ==> Registration PASSED. isVerified(alice) = true
-  └────
-
-
   *How to read the output:* All five checks must print "passed".  If any
   prints "FAILED", the proof is invalid.  A counter-example follows
   showing what happens when Alice tries to register a ciphertext
@@ -1152,12 +1050,6 @@ Table of Contents
   │ print(f"   encrypts m_fake.  The NIZK forces both to be identical.)")
   └────
 
-  ┌────
-  │ Forged proof -- ElGamal C check: False
-  │   (The check FAILS because s_m encodes m_real but C_fake
-  │    encrypts m_fake.  The NIZK forces both to be identical.)
-  └────
-
 
 6.2 Same Operation via the Wallet API
 ─────────────────────────────────────
@@ -1195,11 +1087,6 @@ Table of Contents
   │ )
   │ print(f"Wallet API: registration_verify (correct registrant)  : {ok}")
   │ print(f"            registration_verify (replayed registrant) : {ok_replay}")
-  └────
-
-  ┌────
-  │ Wallet API: registration_verify (correct registrant)  : True
-  │             registration_verify (replayed registrant) : False
   └────
 
 
@@ -1269,19 +1156,6 @@ Table of Contents
   │ print(f"fragment exists.  Bob himself never needs to approve his own pool.")
   └────
 
-  ┌────
-  │ Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:
-  │   pk_bob = (707936..., 828340...)
-  │   E_bob  = (R, C) -- ElGamal ciphertext on-chain
-  │   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
-  │   isVerified(bob)             = true
-  │   isVerified(pool)            = true   (set by bindContract)
-  │   isPublicIdentity(pool)      = true   (set by bindContract)
-  │ 
-  │ The pool's identity hash falls back into receipts when no per-pair
-  │ fragment exists.  Bob himself never needs to approve his own pool.
-  └────
-
 
 7.1 Same Operation via the Wallet API
 ─────────────────────────────────────
@@ -1311,12 +1185,6 @@ Table of Contents
   │ print(f"Wallet API: cred_bob.m == m_bob    : {cred_bob.m == m_bob}")
   │ print(f"  ps_verify(cred_bob.sigma, m_bob) : True")
   │ print(f"  Issuer log now has 2 entries: {len(issuer_obj.issuance_log())}")
-  └────
-
-  ┌────
-  │ Wallet API: cred_bob.m == m_bob    : True
-  │   ps_verify(cred_bob.sigma, m_bob) : True
-  │   Issuer log now has 2 entries: 2
   └────
 
 
@@ -1374,17 +1242,6 @@ Table of Contents
   │ print(f"Matches Alice's M:             {pt(M_alice)}")
   └────
 
-  ┌────
-  │ Alice re-encrypts her identity for Bob:
-  │   E_bob = (R', C') where:
-  │     R' = r'*G     = (175249..., 210374...)
-  │     C' = M+r'*pk  = (277331..., 976322...)
-  │ 
-  │ Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
-  │ Matches Alice's M:             (739132..., 937433...)
-  └────
-
-
   *How to read the output:* The last two lines show Bob's decrypted
   point and Alice's original \( M \).  The coordinate fragments must be
   identical – same point, different ciphertext wrapping it.
@@ -1439,13 +1296,6 @@ Table of Contents
   │ print(f"  e  = {e_cp}")
   │ print(f"  s1 = {s1_cp}")
   │ print(f"  s2 = {s2_cp}")
-  └────
-
-  ┌────
-  │ Chaum-Pedersen proof:
-  │   e  = 5596751279191186461534123889349773904504374024109163222508494078492561705840
-  │   s1 = 19751743035010847347826955486381159546028165420231482675518202447903497503604
-  │   s2 = 9812103603689235284089272695285502441698429721236778546012023233115162880805
   └────
 
 
@@ -1510,18 +1360,6 @@ Table of Contents
   │ print("    _receiptFragments[alice][bob] = keccak256(E_bob)")
   └────
 
-  ┌────
-  │ Check 1 passed: s2*G == T3 + e*R_bob
-  │   (Proves r' is consistent with R_bob)
-  │ Check 2 passed: s1*R_a - s2*pk_b == (T1-T2) + e*(C_a - C_b)
-  │   (Proves both ciphertexts encrypt the same M)
-  │ Check 3 passed: Fiat-Shamir challenge verified
-  │ 
-  │ ==> approve() PASSED. Alice's re-encrypted identity stored for Bob.
-  │     _receiptFragments[alice][bob] = keccak256(E_bob)
-  └────
-
-
   *How to read the output:* All three "passed" lines must appear.  If
   Alice re-encrypted for a /different/ public key or used a different \(
   M \), Check 2 would fail.  A counter-example follows.
@@ -1561,12 +1399,6 @@ Table of Contents
   │ print(f"  (The contract rejects the approve() call.)")
   └────
 
-  ┌────
-  │ Forged re-encryption -- Check 2: False
-  │   (FAILS: C_bad encrypts a different M than C_alice.)
-  │   (The contract rejects the approve() call.)
-  └────
-
 
 8.4 Same Operation via the Wallet API
 ─────────────────────────────────────
@@ -1603,11 +1435,6 @@ Table of Contents
   │ )
   │ print(f"Wallet API: chaum_pedersen_verify(honest E_for_bob)  : {ok_good}")
   │ print(f"            chaum_pedersen_verify(forged wrong-M)    : {ok_bad}")
-  └────
-
-  ┌────
-  │ Wallet API: chaum_pedersen_verify(honest E_for_bob)  : True
-  │             chaum_pedersen_verify(forged wrong-M)    : False
   └────
 
 
@@ -1713,24 +1540,6 @@ Table of Contents
   │ print(f"    and Alice registered on-chain.")
   └────
 
-  ┌────
-  │ Bob decrypts E_bob from on-chain IdentityExchange event:
-  │   M = C' - sk_bob * R' = (739132..., 937433...)
-  │ 
-  │ Bob receives identity_data via Holochain:
-  │   '{"date_of_birth":"1992-03-15","epoch":42,"family_name":"John...'
-  │ 
-  │ Two-channel verification:
-  │   m = H(identity_data) = 6446313962173165014188361468977035479170665192834402473818305319846425860127
-  │   m * G = (739132..., 937433...)
-  │   M     = (739132..., 937433...)
-  │   H(identity_data) * G == M : True
-  │ 
-  │ ==> Bob has cryptographic proof that the identity_data
-  │     he received is the same identity the issuer certified
-  │     and Alice registered on-chain.
-  └────
-
   *How to read the output:* The coordinate fragments of `m * G' and `M'
   (decrypted from on-chain) must be identical.  A counter-example
   follows showing what Bob sees if the Holochain data is tampered.
@@ -1754,14 +1563,6 @@ Table of Contents
   │ print(f"  M (from chain)  = {pt(M_from_bob)}")
   │ print(f"  Match: {eq(M_tampered, M_from_bob)}")
   │ print(f"  (Bob rejects: the off-chain data doesn't match the on-chain point.)")
-  └────
-
-  ┌────
-  │ Tampered identity_data: ...given_name: 'Mallory'...
-  │   H(tampered) * G = (722726..., 633711...)
-  │   M (from chain)  = (739132..., 937433...)
-  │   Match: False
-  │   (Bob rejects: the off-chain data doesn't match the on-chain point.)
   └────
 
 
@@ -1812,16 +1613,6 @@ Table of Contents
   │ print(f"  Match: {h_alice == h_bob}")
   │ print(f"\nReceipt stored (encrypted) on each party's Holochain source chain.")
   │ print(f"The receipt hash anchors the off-chain record to the on-chain transfer.")
-  └────
-
-  ┌────
-  │ Receipt construction (independent, canonical):
-  │   Alice's H(receipt) = 21535858141339728776948445993719093154923735092821067258494283187515610795617
-  │   Bob's   H(receipt) = 21535858141339728776948445993719093154923735092821067258494283187515610795617
-  │   Match: True
-  │ 
-  │ Receipt stored (encrypted) on each party's Holochain source chain.
-  │ The receipt hash anchors the off-chain record to the on-chain transfer.
   └────
 
 
@@ -1935,29 +1726,6 @@ Table of Contents
   │ print()
   │ print("  Both credentials verify under the same issuer public key,")
   │ print("  but zero bits of mutual information exist between them.")
-  └────
-
-  ┌────
-  │ Second credential derived (same identity, fresh account):
-  │   pk_alice_2 = (971275..., 775747...)
-  │   E_alice_2  = (R, C) -- independent ciphertext
-  │   sigma'_2   = (556213..., 105172...)
-  │ 
-  │ Unlinkability check:
-  │   sigma'_1 (acct 1) = ( 67832..., 771071...)
-  │   sigma'_1 (acct 2) = (556213..., 105172...)
-  │   pk (acct 1)       = (453836..., 322664...)
-  │   pk (acct 2)       = (971275..., 775747...)
-  │   E.R (acct 1)      = (661369..., 401098...)
-  │   E.R (acct 2)      = (504210..., 615656...)
-  │ 
-  │   All values are independent.  No shared structure.
-  │   PS rerandomization is STATISTICALLY unlinkable --
-  │   not merely computationally hard, but information-
-  │   theoretically impossible to correlate.
-  │ 
-  │   Both credentials verify under the same issuer public key,
-  │   but zero bits of mutual information exist between them.
   └────
 
   *How to read the output:* Compare the coordinate fragments between

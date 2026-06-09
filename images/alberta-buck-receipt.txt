@@ -49,6 +49,7 @@ Table of Contents
 .. 2. eoa-priv – EOA transfer from a private counterparty
 .. 3. note-b1 / note-a1 – Note from a public issuer
 .. 4. note-a2 – Note from a private issuer
+.. 5. Why there is no "B2" (private-issuer bearer) receipt
 6. The Physical Artifact (ESC/POS, 80mm, 203dpi, 576px)
 7. Verification Procedure
 8. Wallet UX and Storage
@@ -288,6 +289,23 @@ Table of Contents
   verify.
 
 
+5.5 Why there is no "B2" (private-issuer bearer) receipt
+────────────────────────────────────────────────────────
+
+  A2 is the /only/ private-issuer receipt kind because A2 is the only
+  private-issuer note kind.  A private-issuer /bearer/ note ("B2") is
+  impossible, not merely unimplemented: `E_iss-for-rec' is the issuer's
+  Identity re-encrypted under *the recipient's* key, openable only with
+  \( sk_{rec} \) – and a bearer note has no recipient at mint for the
+  issuer to address.  Any binding the issuer could instead attach to
+  "whoever bears the note" would be openable by every holder of the
+  freely-circulating note (no privacy over a public B1 issuer) or by no
+  one (no receipt).  So a private issuer must address the note (A2) and
+  a bearer note must have a public issuer (B1); the mint SNARK now
+  /binds/ this (`issuerMode', /b14e0f0/, /68e5b55/).  See /Why B2 is
+  impossible/ in the Decryptability companion.
+
+
 6 The Physical Artifact (ESC/POS, 80mm, 203dpi, 576px)
 ══════════════════════════════════════════════════════
 
@@ -437,9 +455,20 @@ Table of Contents
         (un-blinding \( M_{iss} \)) only here, under compulsion; a slip
         whose issuer shipped no binding still names the /recovered/
         point but is stamped `UNVERIFIED ISSUER' (not provably the
-        /registered/ Identity).  Full collusion-resistant enforcement
-        (every A2 leaf must carry a binding) awaits the mint-SNARK
-        `issuerMode' signal – see the Decryptability companion.
+        /registered/ Identity).  The mint-SNARK `issuerMode' signal is
+        /bound/, and the per-leaf `eIss' tie is now on chain too (Phase
+        2c): the dedicated `mint_batch_a2' circuit exposes each
+        committed leaf's `eIss', which `Notes.mint' matches to its
+        binding, so every PRIVATE leaf provably carries its /own/
+        verified binding (no floating or duplicate bindings).  One
+        residual hole remains, and a receipt cannot paper over it: the
+        binding ties `eIss' to a key the /issuer/ chose, not provably
+        the recipient's, so a colluding issuer+ recipient can encrypt
+        `eIss' under a throwaway key – the recipient then cannot decrypt
+        it to \( M_{iss} \) at all, and the slip is honestly stamped
+        `UNVERIFIED ISSUER'.  Closing that needs the in-SNARK
+        `E_note'\(\leftrightarrow\)=eIss= coupling (see /The A2
+        recipient-key coupling gap/ in the Decryptability companion).
   • *Trust roots.* Soundness rests on the proof algebra (tier 1), the
     on-chain registry + event (tier 2), and the KYC issuer's \( m
     \leftrightarrow \)person binding (out of scope; assumed via the PS
@@ -454,14 +483,23 @@ Table of Contents
      `note-a1' are soundly bound; the receipt *core* (`envelope.py' /
      `build_receipt.py' / `verify_receipt.py' / `render.py') is the
      shipped wallet surface.
-  2. *Phase B (shipped, off-chain).* `note-a2' is now soundly bound: the
-     `issuer_reenc' binding + \( \gamma \) + the coupling in
-     `verify_receipt' name the private issuer's /registered/ Identity;
-     the slip reads `VALID'.  What remains is on-chain /completeness/
-     enforcement (the mint-SNARK `issuerMode' gate), so that a
-     binding-less A2 leaf cannot be minted at all – the `UNVERIFIED
-     ISSUER' path closes only then.
-  3. *Later.* The ESC/POS byte driver (Phase A shipped the plain-text
+  2. *Phase B (shipped, off-chain + on-chain issuerMode + A2 leaf-tie).*
+     `note-a2' is soundly bound: the `issuer_reenc' binding + \( \gamma
+     \) + the coupling in `verify_receipt' name the private issuer's
+     /registered/ Identity; the slip reads `VALID'.  The mint-SNARK
+     `issuerMode' gate is bound on chain (`b14e0f0' / `584bb52' /
+     `68e5b55'), so a bearer leaf cannot be private at all; and the
+     per-leaf `eIss' tie (Phase 2c, `mint_batch_a2' +
+     `MintVerifierA2Adapter') now pins each binding to its committed
+     leaf, so a PRIVATE batch cannot float or duplicate bindings.
+     `UNVERIFIED ISSUER' therefore narrows to two cases: an issuer who
+     supplied /no/ binding for the leaf, or – the residual collusion
+     hole – one who encrypted `eIss' under a non-recipient key (closed
+     only by the in-SNARK recipient-key coupling, the next A2 phase).
+  3. *Phase C (next).* The in-SNARK `E_note'\(\leftrightarrow\)=eIss=
+     coupling, so a compelled recipient /must/ recover \( M_{iss} \) –
+     removing the last `UNVERIFIED ISSUER' case for a spendable A2 note.
+  4. *Later.* The ESC/POS byte driver (Phase A shipped the plain-text
      driver; a port-9100 thermal driver is a new `Driver' subclass);
      optional QR rendering; payer-side ("I paid X") receipts; on-chain
      `RcptVerify' if a contract ever needs to gate on a receipt.
