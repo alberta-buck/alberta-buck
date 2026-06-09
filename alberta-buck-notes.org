@@ -565,6 +565,40 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    Outside observers see only opaque hashes of independently-randomised
    ElGamal ciphertexts — no link between mint and deposit.
 
+** The Non-Deniable-Receipt Invariant
+
+   Mutual decryptability is the mechanism; the /non-deniable receipt/ is the
+   guarantee it buys, and it is the system's headline property.  Every BUCK
+   transfer -- direct or through the Notes pool -- leaves the recipient able
+   to produce a /receipt/: a plaintext, publicly-checkable statement naming a
+   /registered/ counterparty Identity and the value, derivable from data the
+   recipient holds plus public chain state.  Three clauses make it
+   load-bearing:
+
+   - *Completeness.*  For every accepted payment the recipient can compute a
+     receipt that verifies and names the payer's registered Identity (A1/B1:
+     the in-clear \( M_{\text{iss}} \) plus the issuer Schnorr; A2: decrypt
+     \( eIss \) under \( m_{\text{rec}} \)).
+   - *Soundness / non-frameability.*  No one can forge a receipt naming an
+     Identity that did /not/ author the payment.  The mint-binding forces the
+     issuer ciphertext over the /actual minter's/ registered record, so an
+     innocent third party can never be framed.
+   - *No deniability under collusion.*  Even a willing payer-recipient pair
+     cannot construct an accepted payment with /no/ valid receipt: the deposit
+     gate reverts unless the decrypted counterparty Identity is a registry
+     member, so an un-nameable counterparty is /un-spendable/.  This
+     on-chain-at-mint enforcement is what separates the shipped design from
+     "sound for an honest party only."
+
+   The non-frameability asymmetry is the subtle, important part: a colluding
+   pair can /deny or obscure/ the issuer -- render a deposited note
+   un-nameable, in which case it simply will not spend -- but they can never
+   /substitute/ a false issuer.  The only reachable outcomes are "names the
+   true minter" and "names no one"; under audit the un-nameable case puts the
+   burden on the (always KYC-identifiable) depositor, not on an innocent.
+   (Full development: /alberta-buck-notes-decryptability/, "The
+   Non-Deniable-Receipt Invariant.")
+
 ** What the On-Chain Observer Sees
 
    At mint: a transfer of \( v \) BUCKs from Alice's address to the
@@ -933,8 +967,8 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
   2. *Cashier's cheques are B1* and are the only flavor where the
      recipient identity is /not/ determined at mint time.  All other
-     flavors bind a specific recipient via the re-randomized =E_note=
-     payload.  This is also the only flavor exposed to issuer
+     flavors bind a specific recipient by addressing the recipient
+     Identity point \( M_{\text{rec}} \).  This is also the only flavor exposed to issuer
      race-condition risk -- whoever publishes the nullifier \( \rho \)
      first takes the value.
 
@@ -950,8 +984,8 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
      never what the counterparties see of each other.
 
   5. *The B2 cell (private issuer + bearer) does not exist.*  A
-     private issuer must re-randomize for a specific recipient's
-     =pk_rec= so both parties can decrypt each other's =M=; there is
+     private issuer must encrypt under a specific recipient's Identity
+     point =M_rec= so both parties can decrypt each other's =M=; there is
      no recipient to key against in a bearer construction.  Attempting
      a "private bearer" instrument violates the BUCK
      mutual-decryptability invariant.
@@ -1060,17 +1094,62 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    semantics (deferred recipient choice, pre-signed cheque, paper
    distribution) are themselves the point.
 
+** Why A2 Costs More: Anonymity Is the Cost
+
+   A direct private-to-private =transfer= already achieves the
+   mutual-decryptability invariant -- /without/ a SNARK and with
+   collusion-resistance for free -- because the bilateral =approve= reads
+   /both/ parties' registered records in one call: both Identity anchors are
+   co-present and named at one moment.  Splitting that transfer into
+   mint \( \to \) spend through an A2 note is what makes it expensive, and it
+   is worth being explicit about /why/.
+
+   - *The two anchors are never co-present.*  The issuer's registered record
+     exists only at /mint/ (issuer = =msg.sender=); the recipient's only at
+     /spend/ (recipient = =msg.sender=).  No single on-chain call can read
+     both the way =approve= does, so A2 must /blind/ the recipient key at mint
+     and re-unite the anchors with the deposit-coupling proof.  That bridging
+     -- the mint SNARK, the blinding, the coupling -- /is/ the entire extra
+     cost, and it buys exactly one thing: mint \( \leftrightarrow \) spend
+     unlinkability.  There is no free lunch: cheap collusion-resistant mutual
+     decryptability /requires/ naming both parties at once, which anonymity
+     forbids.
+
+   - *A2 is asymmetric.*  The recipient-names-issuer direction is
+     collusion-resistant and self-provable on chain; the
+     issuer-names-recipient direction rests on the recipient's own registered
+     address being =msg.sender= at spend plus the KYC backstop -- not a crypto
+     receipt.  A B1 (public issuer) note is the /cheap/ path: its depositor
+     binding is literally the =approve= handshake, collusion-resistant because
+     the issuer is named.  So A2's hardness is specifically /issuer anonymity/.
+
+   - *The recipient bears the burden.*  An honest recipient verifies an A2
+     note /at delivery/ -- decrypt \( eIss \), check it yields the issuer's
+     /registered/ Identity -- before accepting it; a bogus note fails this
+     check and is rejected.  So a recipient who deposits a note that later
+     proves un-nameable was negligent or colluding: the suspicion falls on the
+     (always KYC-identifiable) recipient, never on the anonymous issuer.
+
+   *Shipping consequence.*  Public-issuer notes (A1, B1) are cheap /and/ fully
+   sound today; A2 is the premium option whose extra apparatus is justified
+   only when the payer needs to hide /its own/ Identity behind the
+   mint \( \to \) spend split.  (Full treatment:
+   /alberta-buck-notes-decryptability/, "The EOA Transfer Mirror: Anonymity Is
+   the Cost.")
+
 ** Composability
 
    Notes compose transparently with the rest of BUCK:
 
    - /Identity Fountain re-issuance/ applies to Note mints and
-     deposits identically to regular transfers.  *A-flavor notes
-     do not benefit from re-issuance recovery:* they are bound to
-     the recipient's mint-time \( sk_{\text{rec}} \) via single-key
-     ElGamal, so a fresh keypair cannot decrypt an
-     \( E_{\text{note}} \) printed against the previous
-     \( pk_{\text{rec}} \).
+     deposits identically to regular transfers.  *A-flavor notes are
+     recoverable under re-issuance:* the issuer addresses the recipient's
+     Identity /point/ \( M_{\text{rec}} \), whose decryption secret is the
+     identity scalar \( m_{\text{rec}} \) shared by /every/ Fountain account
+     of that Identity -- so a lost account key is recovered by re-registering
+     a fresh account on the same \( M_{\text{rec}} \) and depositing (see
+     /Long-Term Holding Safety: Identity-Pinning and Recovery/).  Only an
+     explicit account-pinned opt-in treats key loss as terminal.
    - /Sanctions/ and /Jubilee/ operate at the account level and
      reach the pool through its own account state, requiring no
      Notes-specific logic.
@@ -1412,9 +1491,10 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** What the Issuer Knows
 
    At mint time the issuer holds the full commitment preimage
-   \( (v, \rho, \text{id-payload}, \text{predicate}) \) including any
-   randomness \( r' \) it generated to re-randomize the recipient's
-   encrypted Identity.  The question is whether that knowledge, by
+   \( (v, \rho, \text{id-payload}, \text{predicate}) \) including, for
+   addressed notes, any randomness \( r' \) it used to encrypt the issuer
+   payload under the recipient's Identity point \( M_{\text{rec}} \).  The
+   question is whether that knowledge, by
    itself or combined with any later-acquired secret, lets anyone
    other than the intended recipient spend the note.
 
@@ -1557,7 +1637,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    |-------------------------+--------------------------------------------------+-----------------------------------------------------------------|
    | Inner: secret           | The cryptographic ability to spend               | QR code containing \( \rho \)                                   |
    | Middle: physical seal   | Bearer (B1) publication-exclusivity              | Hologram, scratch-off, laminate sleeve                          |
-   | Outer: identity binding | Addressed (A1/A2) targeting (only named spender) | CP-equality on the recipient's re-randomized ElGamal credential |
+   | Outer: identity binding | Addressed (A1/A2) targeting (only named spender) | Encryption under the recipient Identity point \( M_{\text{rec}} \); deposit-coupling at spend |
    #+LATEX: }
 
    The /inner/ layer is the cryptographic core: as long as \( \rho \) (and
@@ -2155,7 +2235,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | *DURABILITY*                    |                            |                           |                                             |
    | Survives infrastructure failure | Yes                        | No                        | Yes (paper); chain on recovery              |
    | Counterfeit-resistant           | Partial (printed security) | Yes                       | Yes (cryptographic)                         |
-   | Recoverable if lost             | No                         | Yes (issuer can re-issue) | No; A-notes require mint-time sk_rec        |
+   | Recoverable if lost             | No                         | Yes (issuer can re-issue) | A-notes yes (re-register on same Identity); B1 no |
    |                                 |                            |                           |                                             |
    | *ECONOMIC BEHAVIOR*             |                            |                           |                                             |
    | Lost notes extracted forever    | Yes                        | No                        | No (returned via demurrage)                 |
@@ -2210,8 +2290,10 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    2. *ElGamal registered credential*
       \( E = (R, C) = (r G, M + r \cdot pk) \) where
       \( M = m \cdot G \).  Continues to be the on-chain identity
-      witness, re-randomized by the issuer at mint time to produce
-      \( E_{\text{note}} \) bound to a specific recipient.  No change.
+      witness.  At mint the issuer now /addresses the recipient Identity
+      point/ \( M_{\text{rec}} \) -- encrypting its own \( M_{\text{iss}} \)
+      under \( M_{\text{rec}} \) (A2), or naming it in the clear (A1) --
+      rather than re-randomising the recipient's account credential.
    3. *Chaum-Pedersen equality of discrete logs (Theorem 6).*  Used
       verbatim by the A-spend predicate to prove that the depositor's
       /current/ registered credential decrypts to the same =M= that
@@ -2229,10 +2311,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
       isPublicIdentity flags set by ~bindContract~).
 
    Notably absent: a stealth-address construction is /not/ used by
-   Notes.  Recipient binding is handled directly by re-randomizing the
-   recipient's registered ElGamal credential and verifying via
-   CP-equality -- the same mechanism Identity already uses to defeat
-   the BUCK mutual-decryptability requirement.
+   Notes.  Recipient binding is handled by encrypting the issuer payload
+   under the recipient's Identity /point/ \( M_{\text{rec}} \) and proving
+   deposit-coupling at spend (the recipient decrypts under the shared
+   identity scalar \( m_{\text{rec}} \)), with registry membership of the
+   decrypted Identity -- the Identity-M gadget, not a re-randomized account
+   credential.
 
 ** New Primitive: The Note Commitment Hash
 
@@ -2932,13 +3016,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
   The addressed-versus-bearer distinction produces a sharp partition
   of which flavors are safe for long-term holding: /A1/ and /A2/ are
-  cryptographically safe against third-party theft (CP-equality binds
-  the note to the recipient's \( sk_{\text{rec}} \) via single-key
-  ElGamal under \( pk_{\text{rec}} \)), with the key-management
-  corollary that the mint-time \( sk_{\text{rec}} \) itself must be
-  preserved -- Identity re-issuance rotates the Identity scalar's
-  keypair but does /not/ recover notes bound to a lost
-  \( sk_{\text{rec}} \).
+  cryptographically safe against third-party theft (only the recipient
+  Identity \( M_{\text{rec}} \) can deposit, proven by the deposit-coupling
+  to the shared identity scalar \( m_{\text{rec}} \) plus registry
+  membership), and -- because authority is the /Identity/, not one account
+  key -- a lost account key is /recoverable/ by re-registering a fresh
+  account on the same \( M_{\text{rec}} \); only an explicit account-pinned
+  opt-in treats key loss as terminal.
   /B1/ is a civil-trust instrument: the issuer necessarily knows
   \( \rho \), so B1 cheques are meant to be cashed promptly and backed by
   the issuer's legal standing rather than by cryptography alone.
@@ -2973,11 +3057,12 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
   stronger compliance than physical cash provides today, and stronger
   privacy than any CBDC has ever proposed.
 
-  No novel cryptographic assumption is introduced.  Theorem 6 of the
-  Proofs document ([[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Proofs]]) applies verbatim to the A-spend
-  predicate (CP-equality on the recipient's re-randomized
-  credential); B-spend reduces to Schnorr signature verification plus
-  a Schnorr PoK of the depositor's registered secret.  The only new
+  No novel cryptographic assumption is introduced.  Theorems 6 and 8 of the
+  Proofs document ([[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Proofs]]) apply to the A-spend predicate (the same
+  Chaum-Pedersen re-encryption algebra, lifted to address the recipient
+  Identity point \( M_{\text{rec}} \) and bound to registry membership);
+  B-spend reduces to Schnorr signature verification plus a Schnorr PoK of
+  the depositor's registered secret.  The only new
   circuit-level primitive is Poseidon, which is already standard
   across the SNARK ecosystem.  Implementation scope for Phases 1-4
   (the public-issuer A1/B1 production surface, plus the shipped A2
@@ -3090,8 +3175,9 @@ with disproportionate concentrations in low-income countries, women,
 rural populations, and the elderly.
 
 [fn:proofs-doc] See [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][("The Alberta Buck
-- Formal Correctness Proofs")]] for Theorem 6 (CP-equality on
-re-randomized ElGamal) on which the A-spend predicate rests.
+- Formal Correctness Proofs")]] for Theorem 6 (Chaum-Pedersen re-encryption)
+and Theorem 8 (Identity-M deposit-coupling) on which the A-spend predicate
+rests.
 
 [fn:identity-doc] See [[https://perry.kundert.ca/range/finance/alberta-buck-identity/][("The Alberta
 Buck - Identity")]] for the PS signature, ElGamal credential, and

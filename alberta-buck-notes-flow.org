@@ -1907,7 +1907,18 @@ more that become concrete only once the redemption path exists.
   committed point -- costs ~36K gas for the sigma plus a constant ~350K-gas
   membership verify, much cheaper than proving native BN254 \( \mathbb{G}_1 \)
   equality inside the spend SNARK (~+250K R1CS).
-  
+
+  *Why the spend carries this apparatus at all -- anonymity is the cost.*  A
+  direct =transfer= reaches the same mutual-decryptability guarantee with no
+  SNARK, because the bilateral =approve= names both parties at once.  The Notes
+  detour pays the mint SNARK, the recipient-key blinding, and the
+  deposit-coupling purely to buy mint <-> spend unlinkability: the issuer's
+  registered anchor lives at mint, the recipient's at spend, and they are never
+  co-present, so the apparatus is what bridges them.  Public-issuer notes
+  (A1/B1) keep the cheap, fully-sound path; A2 is the premium that hides the
+  issuer too.  See /alberta-buck-notes/ ("Why A2 Costs More: Anonymity Is the
+  Cost") and /alberta-buck-notes-decryptability/ ("The EOA Transfer Mirror").
+
 * Open Questions and the Identity-M Transition
 
 The redemption walk above /is/ the identity-M spend -- the only spend path.  The
