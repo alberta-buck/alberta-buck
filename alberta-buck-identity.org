@@ -236,13 +236,18 @@ secret key and an archival node -- without any counterparty's cooperation.
      Alice registers the derived credential in the IdentityRegistry:
 
      #+begin_example
-     identityRegistry.registerCredential(
-         alice_new_address,
+     // Real entry point: register(issuer, pk, E, sigma, proof).  The
+     // registrant is msg.sender (NOT a passed address) -- it is folded into
+     // the proof's Fiat-Shamir challenge, so a proof valid for one address
+     // cannot be replayed under another.  (A 6-arg overload also takes a
+     // uint256 identityLeaf for the registry-Identity accumulator.)
+     identityRegistry.register(
+         issuer,          // trusted issuer whose PS key signed the credential
          pk_new,          // identity public key
          E_new,           // ElGamal ciphertext (4 uint256)
          sigma_prime,     // rerandomized PS signature (2 G_1 points)
          pi               // NIZK proof linking sigma' to E_new
-     )
+     )                    // (msg.sender == the new account being registered)
      #+end_example
 
      The contract verifies the PS signature and NIZK proof using the
@@ -447,8 +452,9 @@ secret key and an archival node -- without any counterparty's cooperation.
    The Chaum-Pedersen protocol[fn:7] is a sigma protocol (Schnorr family) that
    proves two ElGamal ciphertexts encrypt the same message point, without
    revealing the message.  Made non-interactive via the Fiat-Shamir heuristic, the proof is
-   compact (~128 bytes: two scalars and two curve points) and verification
-   requires only 3-4 multi-scalar multiplications.
+   compact (the on-chain ~CPProof~ carries three scalars ~(e, s1, s2)~ and
+   three G1 commitment points ~(T1, T2, T3)~) and verification requires only
+   3-4 multi-scalar multiplications.
 
 *** Setup
 
@@ -490,7 +496,8 @@ secret key and an archival node -- without any counterparty's cooperation.
       E_bob   = (R_b, C_b)     -- from Alice's approve() calldata
       pk_alice                 -- from IdentityRegistry
       pk_bob                   -- from IdentityRegistry
-      proof   = (e, s1, s2)    -- Fiat-Shamir challenge and responses
+      proof   = (e, s1, s2, T1, T2, T3)  -- challenge, two responses, and the
+                                         -- three G1 commitments (CPProof struct)
 
     Verify:
       Recompute challenge e from commitments
@@ -1430,25 +1437,36 @@ secret key and an archival node -- without any counterparty's cooperation.
    /// Bind a deployed contract address to an operator-controlled identity.
    /// First-binder-wins; deployers protect against front-running by binding
    /// atomically alongside the deploy (BuckAwareDeployer.deployAndBind).
-   /// `isPublicIdentity_` selects the receipt-fragment fallback policy: if
+   /// `isPublicIdentity_` selects the receipt-fragment fallback policy; if
    /// true, transfers may use the bound _identityHash on this side when no
    /// per-pair CP fragment exists; if false (Encrypted-Identity contract)
    /// the contract participates exactly like an EOA (no fallback).
+   /// `isCarrying_` selects the demurrage transfer flavour (service
+   /// contracts -- AMM pools, the Notes pool -- bind isCarrying_=true).
+   /// (A second overload also takes a uint256 identityLeaf to update the
+   /// registry-Identity accumulator; pass 0 to skip it.)
    function bindContract(
-       address target,
-       Point   calldata pk,
-       Cipher  calldata E,
-       bool             isPublicIdentity_
+       address              target,
+       BN254.G1Point calldata pk,
+       ElGamalCT     calldata E,
+       bool                 isPublicIdentity_,
+       bool                 isCarrying_
    ) external {
-       require(target.code.length > 0, "not a contract");
-       require(!isVerified[target],    "already bound");
-       _pks[target]                = pk;
-       _ciphers[target]            = E;
-       isVerified[target]          = true;
-       isPublicIdentity[target]    = isPublicIdentity_;
+       require(target.code.length > 0, "target not a deployed contract");
+       require(!_isRegistered(target), "already bound");
+       _pk[target]              = pk;
+       _E_addr[target]          = E;
+       isPublicIdentity[target] = isPublicIdentity_;
+       isCarrying[target]       = isCarrying_;
+       binderOf[target]         = msg.sender;
        emit ContractBound(target, msg.sender, isPublicIdentity_);
    }
    #+end_example
+
+   (=isVerified(target)= is a view returning true once =pk= is written --
+   both =register= and =bindContract= set it; reads use =pkOf= /
+   =ciphertextOf=, not the illustrative =getCredential= / =getIdentityKey=
+   names used elsewhere in this document.)
 
    No ~register~ for the contract address (no PS signature is needed
    because the contract has no underlying KYC credential of its own);
@@ -1733,44 +1751,46 @@ secret key and an archival node -- without any counterparty's cooperation.
    re-encrypted ElGamal ciphertext and the Chaum-Pedersen proof:
 
    #+begin_example
+   // Real signature: E_spender is an ElGamalCT struct (R, C) and the proof
+   // is a CPProof struct (e, s1, s2, T1, T2, T3) -- three scalars and three
+   // G1 commitment points, not a bare (e, s1, s2) triple.
    function approve(
        address spender,
        uint256 amount,
-       uint256[4] calldata E_spender,       // ElGamal ciphertext (R.x, R.y, C.x, C.y)
-       uint256[3] calldata chaumPedersen     // Fiat-Shamir proof (e, s1, s2)
+       ElGamalCT calldata E_spender,         // (R, C)
+       CPProof   calldata chaumPedersen      // (e, s1, s2, T1, T2, T3)
    ) public returns (bool) {
-       _approve(msg.sender, spender, amount);
-
        // Read the caller's registered credential from the registry
-       // CRITICAL: read from storage, never from calldata
-       uint256[4] memory E_caller = identityRegistry.getCredential(msg.sender);
-       uint256[2] memory pk_caller = identityRegistry.getIdentityKey(msg.sender);
-       uint256[2] memory pk_spender = identityRegistry.getIdentityKey(spender);
-
-       // Verify Chaum-Pedersen proof: E_spender encrypts same M as E_caller
-       require(
-           _verifyChaumPedersen(
-               E_caller, E_spender, pk_caller, pk_spender, chaumPedersen
-           ),
-           "Re-encryption proof invalid"
-       );
+       // CRITICAL: read from storage, never from calldata.  (Real names:
+       // ciphertextOf(msg.sender) / pkOf(spender); verifyApprove reads
+       // E_alice itself from storage and binds (sender, spender, chainid).)
+       require(identityRegistry.verifyApprove(
+                   msg.sender, spender, E_spender, chaumPedersen),
+               "BUCK: bad CP proof");
 
        // Store hash of the verified re-encrypted ciphertext for this pair
-       _receiptFragments[msg.sender][spender] = keccak256(
-           abi.encodePacked(E_spender)
-       );
+       bytes32 receipt = keccak256(abi.encode(E_spender));
+       _receiptFragments[msg.sender][spender] = receipt;
+       identity.markApproved(spender);
+       _approve(msg.sender, spender, amount);
 
-       // Emit ONLY the opaque ElGamal ciphertext (4 uint256 curve coordinates)
-       emit IdentityExchange(msg.sender, spender, E_spender);
+       // Emit ONLY the hash -- NOT the ciphertext itself.
+       emit ApproveReceipt(msg.sender, spender, receipt);
        return true;
    }
    #+end_example
 
-   What the public sees in the ~IdentityExchange~ event:
+   What the public sees in the ~ApproveReceipt~ event:
    - Alice's address approved a spender (same as standard ERC-20 Approval)
-   - Four ~uint256~ values encoding an ElGamal ciphertext -- opaque curve
-     point coordinates that only the spender can decrypt
+   - A single ~bytes32~ hash of the re-encrypted ElGamal ciphertext
    - *No* identity address, *no* public key, *no* linkable identifier
+
+   The opaque ciphertext ~E_spender~ itself is /not/ emitted; it lives in
+   the ~approve~ transaction's calldata, which is equally permanent and
+   publicly recoverable on-chain.  (This document elsewhere refers to an
+   ~IdentityExchange~ event carrying the ciphertext; read that as shorthand
+   for "the ciphertext recoverable from the approve calldata, anchored by
+   the ~ApproveReceipt~ hash.")
 
    What the contract verified (in ~29,000 gas):
    - The ciphertext contains Alice's real identity (Chaum-Pedersen proof passed
@@ -1885,30 +1905,30 @@ secret key and an archival node -- without any counterparty's cooperation.
        require(identityRegistry.isVerified(to),         "Receiver not verified");
        require(compliance.canTransfer(msg.sender, to, amount), "Compliance");
 
-       // Bilateral identity check.  Every transfer must carry identity
-       // material for both sides.  If a side has no per-pair CP receipt
-       // fragment, at least one party must be bound under a Public
-       // Identity so the fallback to the bound _identityHash is valid.
-       // EOA<->EOA private transfers MUST have prior CP receipts (no
-       // fallback -- neither side is public).
-       bytes32 fromHash = _receiptFragments[msg.sender][to];
-       bytes32 toHash   = _receiptFragments[to][msg.sender];
+       // Bilateral identity check.  Each side's identity must be recoverable
+       // from the receipt: a private endpoint must have laid down its OWN CP
+       // fragment toward the counterparty; only a Public-Identity side may
+       // fall back to its bound _identityHash.  The guard is per-side and
+       // single-party (NOT an OR over both): the sender-fragment branch keys
+       // on isPublicIdentity(sender), the recipient-fragment branch on
+       // isPublicIdentity(recipient).  So a private party always needs its
+       // own fragment, even against a public counterparty.
+       bytes32 fromHash = _receiptFragments[msg.sender][to];   // sender's identity, for `to`
+       bytes32 toHash   = _receiptFragments[to][msg.sender];   // recipient's identity, for sender
 
-       if (toHash == 0) {
-           require(
-               identityRegistry.isPublicIdentity(msg.sender)
-                || identityRegistry.isPublicIdentity(to),
-               "sender must identity-approve recipient (both private)"
-           );
-           toHash = identityRegistry.identityHash(to);
-       }
        if (fromHash == 0) {
            require(
-               identityRegistry.isPublicIdentity(msg.sender)
-                || identityRegistry.isPublicIdentity(to),
-               "recipient must identity-approve sender (both private)"
+               identityRegistry.isPublicIdentity(msg.sender),
+               "BUCK: sender must identity-approve recipient"
            );
            fromHash = identityRegistry.identityHash(msg.sender);
+       }
+       if (toHash == 0) {
+           require(
+               identityRegistry.isPublicIdentity(to),
+               "BUCK: recipient must identity-approve sender"
+           );
+           toHash = identityRegistry.identityHash(to);
        }
 
        _transfer(msg.sender, to, amount);
@@ -1924,19 +1944,20 @@ secret key and an archival node -- without any counterparty's cooperation.
    #+end_example
 
    The bilateral identity check enforces that both sides of the receipt
-   event carry identity material.  A *Public-Identity contract* (pool,
-   router, treasury bound via ~bindContract(target, pk, E, true)~)
-   satisfies either direction's fallback — when no per-pair CP fragment
-   exists, the public side's bound ~_identityHash~ is a valid identity
-   commitment.  Approvals are always CP-bound; there is no
-   ~isPublicIdentity~ shortcut at approve time.
+   event carry identity material.  The fallback to a bound ~_identityHash~
+   is available *only on the side that is bound under a Public Identity*;
+   a private endpoint must always supply its own per-pair CP fragment.  In
+   particular, a private EOA receiving BUCK out of a Public-Identity pool
+   must itself have CP-approved that pool first -- being a /public sender/
+   does not exempt the private /recipient/.  Approvals are always CP-bound;
+   there is no ~isPublicIdentity~ shortcut at approve time.
 
-   | Sender | Receiver | Minimum for transfer                            |
-   |--------+----------+--------------------------------------------------|
-   | EOA    | EOA      | Both must CP-approve each other                 |
-   | EOA    | Pub-Id   | Sender CP-approves; pool side falls back        |
-   | Pub-Id | EOA      | Neither needs CP; pool is public, guards pass   |
-   | Pub-Id | Pub-Id   | Neither needs CP; both public, guards pass      |
+   | Sender | Receiver | Minimum for transfer                              |
+   |--------+----------+---------------------------------------------------|
+   | EOA    | EOA      | Both must CP-approve each other                   |
+   | EOA    | Pub-Id   | Sender CP-approves; pool side falls back          |
+   | Pub-Id | EOA      | Recipient must CP-approve the (public) sender     |
+   | Pub-Id | Pub-Id   | Neither needs CP; both public, guards pass        |
 
    The ~transferFrom~ path applies the same bilateral check.  Receipt
    fragments were stored during ~approve~, so no additional identity
@@ -2384,18 +2405,15 @@ secret key and an archival node -- without any counterparty's cooperation.
         require(identityRegistry.isVerified(to),   "Receiver not verified");
         require(compliance.canTransfer(from, to, amount), "Compliance");
 
-        bytes32 fromHash = _receiptFragments[from][to];   // keccak256(E_pool from Alice)
+        bytes32 fromHash = _receiptFragments[from][to];   // Alice's fragment for the pool
         bytes32 toHash   = _receiptFragments[to][from];    // 0 -- pool never approved Alice
-        if (toHash == 0) {
-            require(
-                identityRegistry.isPublicIdentity(from)
-                 || identityRegistry.isPublicIdentity(to),
-                "no receipt fragment and no public side"
-            );
-            toHash = identityRegistry.identityHash(to);    // _identityHash(0xPOOL)
-        }
-        if (fromHash == 0) {
+        if (fromHash == 0) {                               // single-party guard
+            require(identityRegistry.isPublicIdentity(from), "...");
             fromHash = identityRegistry.identityHash(from);
+        }
+        if (toHash == 0) {                                 // pool is public -> fallback ok
+            require(identityRegistry.isPublicIdentity(to),   "...");
+            toHash = identityRegistry.identityHash(to);    // _identityHash(0xPOOL)
         }
 
         _transfer(from, to, amount);

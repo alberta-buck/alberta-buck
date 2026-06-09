@@ -6,6 +6,7 @@ import {Test} from "forge-std/Test.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {StubIdentityMembershipVerifier} from "../src/StubIdentityMembershipVerifier.sol";
+import {StubNoteBindingVerifier} from "../src/StubNoteBindingVerifier.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
@@ -38,6 +39,7 @@ contract NotesCoupledA2Test is Test {
     StubMintVerifier internal mintStub;
     StubSpendVerifier internal spendStub;
     StubIdentityMembershipVerifier internal idMemStub;
+    StubNoteBindingVerifier internal bindStub;
 
     address internal constant GOV  = address(0xA0);
     address internal constant POOL = address(0xBA51C);
@@ -87,6 +89,11 @@ contract NotesCoupledA2Test is Test {
         idMemStub = new StubIdentityMembershipVerifier();
         vm.prank(GOV);
         notes.setIdentityMembershipVerifier(address(idMemStub));
+
+        // Note<->eEnc tie verifier wired (stub) — exercises the binding call.
+        bindStub = new StubNoteBindingVerifier();
+        vm.prank(GOV);
+        notes.setNoteBindingVerifier(address(bindStub));
 
         // The pool->depositor payout requires the depositor's receipt fragment
         // for the notes sender (mutual-decryptability gate).  _receiptFragments
@@ -155,7 +162,7 @@ contract NotesCoupledA2Test is Test {
 
         vm.prank(depositor);
         notes.spendCoupledA2(hex"00", root, nf, 100, depositor,
-                             _eIss(), _dc(), hex"cafe");
+                             _eIss(), _dc(), hex"cafe", hex"beef");
 
         assertTrue(notes.nullifiers(nf), "nullifier consumed");
         assertEq(buck.balanceOf(depositor), balBefore + 100, "payout delivered");
@@ -167,7 +174,7 @@ contract NotesCoupledA2Test is Test {
         vm.expectEmit(true, true, false, true, address(notes));
         emit Notes.SpentCoupledA2(0xC1, 100, depositor, p.P_I.X, p.P_I.Y);
         vm.prank(depositor);
-        notes.spendCoupledA2(hex"00", root, 0xC1, 100, depositor, _eIss(), p, hex"cafe");
+        notes.spendCoupledA2(hex"00", root, 0xC1, 100, depositor, _eIss(), p, hex"cafe", hex"beef");
     }
 
     // ---- soundness: the coupling half ---------------------------------------
@@ -180,7 +187,7 @@ contract NotesCoupledA2Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad deposit coupling"));
-        notes.spendCoupledA2(hex"00", root, 0xC2, 100, depositor, _eIss(), p, hex"cafe");
+        notes.spendCoupledA2(hex"00", root, 0xC2, 100, depositor, _eIss(), p, hex"cafe", hex"beef");
     }
 
     function test_coupledA2_tamperedPI_reverts() public {
@@ -191,7 +198,7 @@ contract NotesCoupledA2Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad deposit coupling"));
-        notes.spendCoupledA2(hex"00", root, 0xC3, 100, depositor, _eIss(), p, hex"cafe");
+        notes.spendCoupledA2(hex"00", root, 0xC3, 100, depositor, _eIss(), p, hex"cafe", hex"beef");
     }
 
     function test_coupledA2_unregisteredDepositor_reverts() public {
@@ -201,7 +208,7 @@ contract NotesCoupledA2Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(other);
         vm.expectRevert(bytes("Notes: bad deposit coupling"));
-        notes.spendCoupledA2(hex"00", root, 0xC4, 100, other, _eIss(), _dc(), hex"cafe");
+        notes.spendCoupledA2(hex"00", root, 0xC4, 100, other, _eIss(), _dc(), hex"cafe", hex"beef");
     }
 
     // ---- soundness: the membership half -------------------------------------
@@ -212,14 +219,14 @@ contract NotesCoupledA2Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad identity membership proof"));
-        notes.spendCoupledA2(hex"00", root, 0xC5, 100, depositor, _eIss(), _dc(), hex"cafe");
+        notes.spendCoupledA2(hex"00", root, 0xC5, 100, depositor, _eIss(), _dc(), hex"cafe", hex"beef");
     }
 
     function test_coupledA2_emptyMembershipProof_skips() public {
         // Empty membership proof: backward-compat skip (the coupling still gates).
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
-        notes.spendCoupledA2(hex"00", root, 0xC6, 100, depositor, _eIss(), _dc(), "");
+        notes.spendCoupledA2(hex"00", root, 0xC6, 100, depositor, _eIss(), _dc(), "", hex"beef");
         assertTrue(notes.nullifiers(0xC6), "nullifier consumed");
     }
 
@@ -228,9 +235,32 @@ contract NotesCoupledA2Test is Test {
     function test_coupledA2_doubleSpend_reverts() public {
         uint256 root = notes.noteRoot();
         vm.startPrank(depositor);
-        notes.spendCoupledA2(hex"00", root, 0xC7, 100, depositor, _eIss(), _dc(), hex"cafe");
+        notes.spendCoupledA2(hex"00", root, 0xC7, 100, depositor, _eIss(), _dc(), hex"cafe", hex"beef");
         vm.expectRevert(bytes("Notes: already spent"));
-        notes.spendCoupledA2(hex"00", root, 0xC7, 100, depositor, _eIss(), _dc(), hex"cafe");
+        notes.spendCoupledA2(hex"00", root, 0xC7, 100, depositor, _eIss(), _dc(), hex"cafe", hex"beef");
         vm.stopPrank();
+    }
+
+    // ---- soundness: the note<->eEnc tie (RESERVED stub) ---------------------
+
+    function test_coupledA2_noteBindingRejected_reverts() public {
+        // Disable the note-binding stub: the tie check fails closed.  (When the
+        // real INoteBindingVerifier ships, this is the branch that rejects a
+        // depositor-substituted eEnc.)
+        bindStub.setEnabled(false);
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: bad note binding"));
+        notes.spendCoupledA2(hex"00", root, 0xC8, 100, depositor, _eIss(), _dc(), hex"cafe", hex"beef");
+    }
+
+    function test_coupledA2_emptyNoteBinding_skips() public {
+        // Empty note-binding proof: backward-compat skip (the coupling + membership
+        // still gate).  Documents the RESERVED status: with no tie, the spend
+        // proceeds even though eEnc is not bound to the note.
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        notes.spendCoupledA2(hex"00", root, 0xC9, 100, depositor, _eIss(), _dc(), hex"cafe", "");
+        assertTrue(notes.nullifiers(0xC9), "nullifier consumed");
     }
 }

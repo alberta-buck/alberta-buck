@@ -7,6 +7,7 @@ import {IMintVerifier}                 from "./IMintVerifier.sol";
 import {IMintVerifierA2}               from "./IMintVerifierA2.sol";
 import {ISpendVerifier}                from "./ISpendVerifier.sol";
 import {IIdentityMembershipVerifier}   from "./IIdentityMembershipVerifier.sol";
+import {INoteBindingVerifier}          from "./INoteBindingVerifier.sol";
 import {IdentityRegistry}              from "./IdentityRegistry.sol";
 import {BN254}                         from "./BN254.sol";
 
@@ -151,6 +152,28 @@ contract Notes {
     uint256[ROOT_HISTORY_SIZE] public roots;
     uint8   public currentRootIndex;
 
+    /// @notice Note<->eEnc re-encryption-tie verifier (RESERVED — see
+    ///         INoteBindingVerifier).  Binds the deposit-coupling ciphertext
+    ///         `eEnc` to the SPECIFIC addressed (A1/A2) note being spent, so a
+    ///         depositor cannot substitute a self-addressed ciphertext for the
+    ///         note's committed one.  This closes the two gaps the flavor-
+    ///         agnostic spend proof leaves open:
+    ///           * addressed-binding — "only the recipient Identity M_rec can
+    ///             spend an A1/A2 note"; and
+    ///           * A2 collusion — "an un-nameable note is un-spendable".
+    ///         Optional at construction; governance wires it via
+    ///         setNoteBindingVerifier.  A zero address (or an empty per-spend
+    ///         proof) SKIPS the tie (backward-compat) — and, crucially, while
+    ///         skipped those two guarantees are NOT enforced on-chain.  The
+    ///         shipped StubNoteBindingVerifier returns true (plumbing only); no
+    ///         production circuit for the relation exists yet.  Wired only into
+    ///         the addressed spends; B1 (bearer) needs no tie (the depositor
+    ///         binding names the depositor directly).
+    /// @dev    Appended at the END of storage so the existing slot positions
+    ///         (nullifiers, noteFaceSum, nextLeafIndex, roots, ...) that tests
+    ///         reach via `vm.store` stay unperturbed.
+    INoteBindingVerifier public noteBindingVerifier;
+
     // ---- events -----------------------------------------------------------
 
     event GovernanceTransferred(address indexed previous, address indexed next);
@@ -159,6 +182,7 @@ contract Notes {
     event SpendVerifierUpdated(address indexed previous, address indexed next);
     event IdentityRegistryUpdated(address indexed previous, address indexed next);
     event IdentityMembershipVerifierUpdated(address indexed previous, address indexed next);
+    event NoteBindingVerifierUpdated(address indexed previous, address indexed next);
 
     /// @notice Emitted on an identity-M-bound (unilateral) A2 deposit.  Publishes
     ///         the committed point `P_I = (piX, piY)` that the deposit-coupling
@@ -296,6 +320,18 @@ contract Notes {
         emit IdentityMembershipVerifierUpdated(
             address(identityMembershipVerifier), next);
         identityMembershipVerifier = IIdentityMembershipVerifier(next);
+    }
+
+    /// @notice Wire (or rotate) the note<->eEnc re-encryption-tie verifier
+    ///         (INoteBindingVerifier) consulted by the addressed (A1/A2) spends.
+    ///         Passing `address(0)` disables the tie (backward-compat skip) — and
+    ///         while disabled the addressed-binding / A2-collusion guarantees are
+    ///         NOT enforced.  When the reserved tie circuit lands, governance
+    ///         swaps the real verifier in here.
+    function setNoteBindingVerifier(address next) external {
+        require(msg.sender == governance, "not governance");
+        emit NoteBindingVerifierUpdated(address(noteBindingVerifier), next);
+        noteBindingVerifier = INoteBindingVerifier(next);
     }
 
     // ---- views ------------------------------------------------------------
@@ -633,6 +669,39 @@ contract Notes {
         );
     }
 
+    /// @dev Shared note<->eEnc tie check — called by the ADDRESSED (A1/A2)
+    ///      spend path only.  Verifies that `eEnc` (the deposit-coupling
+    ///      ciphertext) re-encrypts, under the recipient Identity M_rec, the
+    ///      ciphertext the spent note committed in its idHash — binding the
+    ///      deposit gate to THIS note (handle: `nullifier`; shared point:
+    ///      `dc.P_I`).  See INoteBindingVerifier for the relation.
+    ///
+    ///      Reverts if the verifier is wired and the proof is invalid.  Silently
+    ///      passes if the verifier is not set (address(0)) or the proof is empty
+    ///      (backward-compat skip).  RESERVED: no production verifier exists yet;
+    ///      the stub returns true, so while skipped/stubbed the addressed-binding
+    ///      and A2-collusion guarantees are NOT enforced.
+    function _verifyNoteBinding(
+        bytes memory noteBindingProof,
+        uint256 nullifier,
+        IdentityRegistry.ElGamalCT calldata eEnc,
+        uint256 piX,
+        uint256 piY
+    )
+        internal
+    {
+        INoteBindingVerifier verifier = noteBindingVerifier;
+        if (address(verifier) == address(0)) return;
+        if (noteBindingProof.length == 0) return;
+
+        require(
+            verifier.verifyNoteBinding(
+                noteBindingProof, nullifier,
+                eEnc.R.X, eEnc.R.Y, eEnc.C.X, eEnc.C.Y, piX, piY),
+            "Notes: bad note binding"
+        );
+    }
+
     // ---- Identity-M-bound addressed spend (unilateral A1 / A2) -----------
 
     /// @dev Shared identity-M-bound deposit for the *addressed* flavors (A1, A2).
@@ -654,9 +723,22 @@ contract Notes {
     ///         Identity.  The SAME `dc.P_I` flows into both, so the membership is
     ///         bound to exactly the point the coupling decrypted `eEnc` to -- a
     ///         colluding pair cannot key `eEnc` to a non-member and still spend.
+    ///      3. _verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I): the
+    ///         note<->eEnc re-encryption tie (INoteBindingVerifier) — proves
+    ///         `eEnc` re-encrypts the ciphertext the SPENT note committed, so the
+    ///         coupling is bound to THIS note, not a depositor-substituted one.
     ///
     ///      The note's commitment + nullifier are proven by the generic spend
     ///      SNARK (cm in the pool tree, nullifier well-formed).
+    ///
+    ///      CAVEAT (RESERVED).  Steps 1-2 establish that `eEnc` decrypts (under
+    ///      the depositor's authenticated m_rec) to a registered member — but
+    ///      NOT that `eEnc` is the note's committed ciphertext: the spend SNARK
+    ///      is flavor-agnostic and exposes no idHash.  Until a real
+    ///      INoteBindingVerifier is wired (step 3), the addressed-binding ("only
+    ///      M_rec can spend") and A2-collusion ("un-nameable note un-spendable")
+    ///      guarantees are NOT enforced — any registered holder of a note opening
+    ///      can redeem it with a self-addressed `eEnc`.  See INoteBindingVerifier.
     function _spendCoupled(
         bytes   calldata proof,
         uint256          root,
@@ -665,7 +747,8 @@ contract Notes {
         address          recipient,
         IdentityRegistry.ElGamalCT          calldata eEnc,
         IdentityRegistry.DepositCouplingProof calldata dc,
-        bytes   calldata membershipProof
+        bytes   calldata membershipProof,
+        bytes   calldata noteBindingProof
     ) internal {
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
         require(recipient != address(0),  "Notes: zero recipient");
@@ -694,6 +777,10 @@ contract Notes {
         // SAME dc.P_I the coupling just constrained.
         _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
 
+        // Identity-M binding, half 3: the note<->eEnc re-encryption tie, binding
+        // `eEnc` to THIS note (RESERVED — stub returns true; see _verifyNoteBinding).
+        _verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I.X, dc.P_I.Y);
+
         require(
             buck.transfer(recipient, face),
             "Notes: transfer failed"
@@ -713,9 +800,11 @@ contract Notes {
         address          recipient,
         IdentityRegistry.ElGamalCT          calldata eIss,
         IdentityRegistry.DepositCouplingProof calldata dc,
-        bytes   calldata membershipProof
+        bytes   calldata membershipProof,
+        bytes   calldata noteBindingProof
     ) external {
-        _spendCoupled(proof, root, nullifier, face, recipient, eIss, dc, membershipProof);
+        _spendCoupled(proof, root, nullifier, face, recipient, eIss, dc,
+                      membershipProof, noteBindingProof);
         emit SpentCoupledA2(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
     }
 
@@ -735,9 +824,11 @@ contract Notes {
         address          recipient,
         IdentityRegistry.ElGamalCT          calldata eRec,
         IdentityRegistry.DepositCouplingProof calldata dc,
-        bytes   calldata membershipProof
+        bytes   calldata membershipProof,
+        bytes   calldata noteBindingProof
     ) external {
-        _spendCoupled(proof, root, nullifier, face, recipient, eRec, dc, membershipProof);
+        _spendCoupled(proof, root, nullifier, face, recipient, eRec, dc,
+                      membershipProof, noteBindingProof);
         emit SpentCoupledA1(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
     }
 

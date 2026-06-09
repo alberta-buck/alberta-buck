@@ -6,6 +6,7 @@ import {Test} from "forge-std/Test.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {StubIdentityMembershipVerifier} from "../src/StubIdentityMembershipVerifier.sol";
+import {StubNoteBindingVerifier} from "../src/StubNoteBindingVerifier.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
@@ -34,6 +35,7 @@ contract NotesCoupledA1Test is Test {
     StubMintVerifier internal mintStub;
     StubSpendVerifier internal spendStub;
     StubIdentityMembershipVerifier internal idMemStub;
+    StubNoteBindingVerifier internal bindStub;
 
     address internal constant GOV  = address(0xA0);
     address internal constant POOL = address(0xBA51C);
@@ -76,6 +78,10 @@ contract NotesCoupledA1Test is Test {
         idMemStub = new StubIdentityMembershipVerifier();
         vm.prank(GOV);
         notes.setIdentityMembershipVerifier(address(idMemStub));
+
+        bindStub = new StubNoteBindingVerifier();
+        vm.prank(GOV);
+        notes.setNoteBindingVerifier(address(bindStub));
 
         bytes32 fragSlot = keccak256(
             abi.encode(address(notes), keccak256(abi.encode(depositor, uint256(5))))
@@ -137,7 +143,7 @@ contract NotesCoupledA1Test is Test {
         uint256 balBefore = buck.balanceOf(depositor);
         vm.prank(depositor);
         notes.spendCoupledA1(hex"00", root, nf, 100, depositor,
-                             _eRec(), _dc(), hex"cafe");
+                             _eRec(), _dc(), hex"cafe", hex"beef");
         assertTrue(notes.nullifiers(nf), "nullifier consumed");
         assertEq(buck.balanceOf(depositor), balBefore + 100, "payout delivered");
     }
@@ -148,7 +154,7 @@ contract NotesCoupledA1Test is Test {
         vm.expectEmit(true, true, false, true, address(notes));
         emit Notes.SpentCoupledA1(0xA11, 100, depositor, p.P_I.X, p.P_I.Y);
         vm.prank(depositor);
-        notes.spendCoupledA1(hex"00", root, 0xA11, 100, depositor, _eRec(), p, hex"cafe");
+        notes.spendCoupledA1(hex"00", root, 0xA11, 100, depositor, _eRec(), p, hex"cafe", hex"beef");
     }
 
     // ---- soundness ----------------------------------------------------------
@@ -159,7 +165,7 @@ contract NotesCoupledA1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad deposit coupling"));
-        notes.spendCoupledA1(hex"00", root, 0xA12, 100, depositor, _eRec(), p, hex"cafe");
+        notes.spendCoupledA1(hex"00", root, 0xA12, 100, depositor, _eRec(), p, hex"cafe", hex"beef");
     }
 
     function test_coupledA1_unregisteredDepositor_reverts() public {
@@ -168,7 +174,7 @@ contract NotesCoupledA1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(other);
         vm.expectRevert(bytes("Notes: bad deposit coupling"));
-        notes.spendCoupledA1(hex"00", root, 0xA13, 100, other, _eRec(), _dc(), hex"cafe");
+        notes.spendCoupledA1(hex"00", root, 0xA13, 100, other, _eRec(), _dc(), hex"cafe", hex"beef");
     }
 
     function test_coupledA1_membershipRejected_reverts() public {
@@ -176,15 +182,32 @@ contract NotesCoupledA1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad identity membership proof"));
-        notes.spendCoupledA1(hex"00", root, 0xA14, 100, depositor, _eRec(), _dc(), hex"cafe");
+        notes.spendCoupledA1(hex"00", root, 0xA14, 100, depositor, _eRec(), _dc(), hex"cafe", hex"beef");
     }
 
     function test_coupledA1_doubleSpend_reverts() public {
         uint256 root = notes.noteRoot();
         vm.startPrank(depositor);
-        notes.spendCoupledA1(hex"00", root, 0xA15, 100, depositor, _eRec(), _dc(), hex"cafe");
+        notes.spendCoupledA1(hex"00", root, 0xA15, 100, depositor, _eRec(), _dc(), hex"cafe", hex"beef");
         vm.expectRevert(bytes("Notes: already spent"));
-        notes.spendCoupledA1(hex"00", root, 0xA15, 100, depositor, _eRec(), _dc(), hex"cafe");
+        notes.spendCoupledA1(hex"00", root, 0xA15, 100, depositor, _eRec(), _dc(), hex"cafe", hex"beef");
         vm.stopPrank();
+    }
+
+    // ---- soundness: the note<->eEnc tie (RESERVED stub) ---------------------
+
+    function test_coupledA1_noteBindingRejected_reverts() public {
+        bindStub.setEnabled(false);
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: bad note binding"));
+        notes.spendCoupledA1(hex"00", root, 0xA16, 100, depositor, _eRec(), _dc(), hex"cafe", hex"beef");
+    }
+
+    function test_coupledA1_emptyNoteBinding_skips() public {
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        notes.spendCoupledA1(hex"00", root, 0xA17, 100, depositor, _eRec(), _dc(), hex"cafe", "");
+        assertTrue(notes.nullifiers(0xA17), "nullifier consumed");
     }
 }

@@ -584,11 +584,18 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
      issuer ciphertext over the /actual minter's/ registered record, so an
      innocent third party can never be framed.
    - *No deniability under collusion.*  Even a willing payer-recipient pair
-     cannot construct an accepted payment with /no/ valid receipt: the deposit
-     gate reverts unless the decrypted counterparty Identity is a registry
-     member, so an un-nameable counterparty is /un-spendable/.  This
-     on-chain-at-mint enforcement is what separates the shipped design from
-     "sound for an honest party only."
+     should not be able to construct an accepted payment with /no/ valid
+     receipt: the deposit gate reverts unless the decrypted counterparty
+     Identity is a registry member, so an un-nameable counterparty is meant to
+     be /un-spendable/.  For B1 (bearer) this holds today: =verifyDepositorBinding=
+     ties the depositor's /own/ Identity to its account, so it names itself.  For
+     *A2 it is not yet enforced on chain*: closing it requires the note
+     \( \leftrightarrow \) \( eEnc \) tie (=INoteBindingVerifier=), which is
+     /plumbed with a stub but whose production circuit is unimplemented/ (see
+     /Status: the Identity-M spend path, and the one piece still stubbed/).  Until
+     that verifier is wired, a colluding pair can spend an un-nameable A2 note by
+     supplying a substitute \( eEnc \); the property is designed and plumbed, not
+     yet guaranteed.
 
    The non-frameability asymmetry is the subtle, important part: a colluding
    pair can /deny or obscure/ the issuer -- render a deposited note
@@ -2764,15 +2771,43 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | Prover scripts (witness gen + ptau ceremony)                     | =scripts/snark/prove_*=, =scripts/snark/setup.sh=                                                                              |
    #+LATEX: }
 
-** Status: the Identity-M spend path is complete
+** Status: the Identity-M spend path, and the one piece still stubbed
 
    The binding sigmas, the P-bound membership circuit + verifier, the on-chain
    incremental \( \mathsf{rt_{id}} \) accumulator (=IdentityRegistry.identityRoot=,
    commit-before-use), and the three coupled spend entrypoints (=spendCoupledA1=,
    =spendCoupledA2=, =spendCoupledB1=) are all shipped and tested end to end.  The
    membership is /bound/ to each sigma's committed point \( P \) (the verifier
-   derives its public inputs from \( P \), not the prover's bytes), so the two
-   halves cannot be decoupled.  The only remaining pre-deployment item is a
+   derives its public inputs from \( P \), not the prover's bytes), so /those two
+   halves/ cannot be decoupled.
+
+   *One binding is plumbed but not yet enforced: the note \( \leftrightarrow \)
+   \( eEnc \) tie.*  The flavour-agnostic spend proof (=spend.circom=) proves only
+   that /some/ opening is in the tree and that its nullifier is well-formed; it
+   exposes no \( idHash \), so nothing on chain ties the deposit-coupling
+   ciphertext \( eEnc \) to the /specific note being spent/.  Without that tie the
+   two addressed guarantees below are /not/ enforced:
+   - *addressed-binding* -- "only the recipient Identity \( M_{\text{rec}} \) can
+     spend an A1/A2 note": any registered account holding the opening can redeem
+     it by supplying its /own/ self-addressed \( eEnc \) (the coupling + membership
+     pass on /its/ Identity); and
+   - *A2 collusion* -- "an un-nameable note is un-spendable": a colluding pair can
+     spend a note whose committed \( eIss \) is un-nameable by attaching a
+     /different/, nameable \( eEnc \).
+   The fix is an /in-SNARK re-encryption tie/ (=INoteBindingVerifier=): a proof that
+   \( eEnc \) /re-encrypts/, under \( M_{\text{rec}} \), the ciphertext the note
+   committed in its \( idHash \) -- *re-encryption equivalence*, not equality,
+   because re-using the exact committed \( eIss \) (which =Notes.mint= exposes as a
+   public input) would link spend to mint and destroy A2 anonymity.  The on-chain
+   *plumbing is shipped* -- a governance-settable verifier slot
+   (=Notes.setNoteBindingVerifier=) wired into the addressed spends, with a
+   =StubNoteBindingVerifier= (returns true) exercised by the coupled-spend tests --
+   but the *production circuit + trusted setup are unimplemented (reserved)*, and it
+   first needs the two A2 \( idHash \) layouts in the repo reconciled
+   (=mint_batch_a2= commits \( \mathrm{Poseidon}_8(eNote, eIss) \);
+   =wallet.unilateral_a2= commits \( \mathrm{Poseidon}_4(eIss) \)).  Until that
+   verifier is wired, treat the addressed-binding and A2-collusion properties as
+   /designed and plumbed, not yet enforced/.  The other pre-deployment item is a
    production Powers-of-Tau ceremony (the dev ptaus use dev-only entropy).
 
 ** Retired: the Account-Pinned A-Spend
@@ -2986,14 +3021,19 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
   and /A2/ (addressed, private issuer; the reserved private-issuer
   self-wormhole) -- span every use case the Alberta Buck series needs a
   bearer instrument to cover, from walking-around and cross-border
-  targeted payments to cold-storage cryptographic notes.  The
-  all three flavors -- *A1*, *A2*, *B1* -- are shipped, each with a sound,
-  collusion-resistant, third-party-free bilateral receipt.  The A2
-  recipient-key collusion gap is closed by the /identity-targeted/ spend: the
-  membership certifies the issuer's decrypted Identity, so a bogus =eIss=
-  decrypts to a non-member and the deposit /reverts/ (an un-nameable note is
-  un-spendable, not merely un-receiptable).  The fourth cell, private-bearer
-  (B2), is ruled out by BUCK's mutual-decryptability invariant.
+  targeted payments to cold-storage cryptographic notes.  All
+  three flavors -- *A1*, *A2*, *B1* -- are shipped.  A1 and B1 have a sound,
+  collusion-resistant, third-party-free bilateral receipt today.  For *A2 the
+  collusion-resistant naming is not yet enforced on chain*: the deposit gate
+  proves the supplied =eEnc= decrypts to a registered member, but nothing yet
+  ties that =eEnc= to the /specific note/ being spent, so a colluding pair could
+  substitute a nameable =eEnc= for an un-nameable note's =eIss=.  Closing it
+  needs the note \( \leftrightarrow \) =eEnc= re-encryption tie
+  (=INoteBindingVerifier=), which is /plumbed with a stub/ in =Notes= but whose
+  production circuit + trusted setup are /unimplemented (reserved)/.  Until then,
+  treat A2's "un-nameable note is un-spendable" and "only \( M_{\text{rec}} \)
+  can spend" as designed-and-plumbed, not enforced.  The fourth cell,
+  private-bearer (B2), is ruled out by BUCK's mutual-decryptability invariant.
 
   Demurrage needs no note-side machinery: the Notes Pool is the
   Notes contract's own ERC-20 balance -- a regular BUCK account with

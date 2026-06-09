@@ -594,9 +594,6 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   #+END_SRC
 
   #+RESULTS:
-  : BN254 curve order: 21888242871839275222246405745257275088548364400416034343698204186575808495617
-  : G_1 generator:     (     1...,      2...)
-  : G_2 generator:     (pair of FQ2 elements)
 
   #+LATEX: }
 
