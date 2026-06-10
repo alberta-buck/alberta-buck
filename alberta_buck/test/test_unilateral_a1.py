@@ -47,6 +47,14 @@ class Account:
         self.E = elgamal_encrypt(self.M, self.pk, rand_scalar(rng))
 
 
+def _mock_schnorr(rng):
+    """Return (sigma_R, sigma_s) for a synthetic Schnorr signature."""
+    k = rand_scalar(rng)
+    sigma_R = mul(G1, k)
+    sigma_s = (k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
+    return sigma_R, sigma_s
+
+
 @pytest.fixture
 def world():
     rng = _seeded_rng()
@@ -55,13 +63,15 @@ def world():
     issuer = Account(m_iss, rng)        # public issuer, named at mint
     rec0 = Account(m_rec, rng)
     rec1 = Account(m_rec, rng)          # same identity, second account
+    sigma_R, sigma_s = _mock_schnorr(rng)
     tree = IdentityTree(depth=10)
     for _ in range(2):
         tree.insert(mul(G1, rand_scalar(rng)))
     tree.insert(issuer.M)
     tree.insert(rec0.M)
     return dict(rng=rng, m_iss=m_iss, m_rec=m_rec,
-                issuer=issuer, rec0=rec0, rec1=rec1, tree=tree)
+                issuer=issuer, rec0=rec0, rec1=rec1, tree=tree,
+                sigma_R=sigma_R, sigma_s=sigma_s)
 
 
 # --------------------------------------------------------------------------- #
@@ -74,6 +84,8 @@ def test_mint_addresses_recipient_identity(world):
     m_rec = world["m_rec"]
     M_rec = mul(G1, m_rec)
     note = mint_unilateral_a1(M_rec, v=1000, rho=rand_scalar(world["rng"]),
+                              m_issuer=world["m_iss"],
+                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=world["rng"])
     assert eq(elgamal_decrypt(note.eRec, m_rec), M_rec)
 
@@ -84,6 +96,8 @@ def test_deposit_coupling_commits_recipient_identity(world):
     m_rec, rec0 = world["m_rec"], world["rec0"]
     M_rec = mul(G1, m_rec)
     note = mint_unilateral_a1(M_rec, v=1, rho=rand_scalar(world["rng"]),
+                              m_issuer=world["m_iss"],
+                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=world["rng"])
     dc = deposit_couple_prove(m_rec, rec0.sk, rec0.E, note.eRec,
                               DEPOSIT_ADDR, CHAINID, rng=world["rng"])
@@ -99,6 +113,8 @@ def test_any_account_can_deposit(world):
     m_rec, rec0, rec1 = world["m_rec"], world["rec0"], world["rec1"]
     M_rec = mul(G1, m_rec)
     note = mint_unilateral_a1(M_rec, v=5, rho=rand_scalar(world["rng"]),
+                              m_issuer=world["m_iss"],
+                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=world["rng"])
     for acct in (rec0, rec1):
         dc = deposit_couple_prove(m_rec, acct.sk, acct.E, note.eRec,
@@ -112,6 +128,8 @@ def test_unilateral_receipt_names_both(world):
     m_rec, issuer, tree = world["m_rec"], world["issuer"], world["tree"]
     M_rec = mul(G1, m_rec)
     note = mint_unilateral_a1(M_rec, v=2500, rho=rand_scalar(world["rng"]),
+                              m_issuer=world["m_iss"],
+                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=world["rng"])
     receipt = make_receipt_a1(m_rec, note, issuer.M, ISSUER_ADDR, CHAINID, tree,
                               rng=world["rng"])
@@ -130,6 +148,8 @@ def test_deposit_coupling_tamper_rejected(world):
     m_rec, rec0 = world["m_rec"], world["rec0"]
     M_rec = mul(G1, m_rec)
     note = mint_unilateral_a1(M_rec, v=1, rho=rand_scalar(world["rng"]),
+                              m_issuer=world["m_iss"],
+                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=world["rng"])
     dc = deposit_couple_prove(m_rec, rec0.sk, rec0.E, note.eRec,
                               DEPOSIT_ADDR, CHAINID, rng=world["rng"])
@@ -143,6 +163,8 @@ def test_deposit_coupling_wrong_account_rejected(world):
     m_rec, rec0, rec1 = world["m_rec"], world["rec0"], world["rec1"]
     M_rec = mul(G1, m_rec)
     note = mint_unilateral_a1(M_rec, v=1, rho=rand_scalar(world["rng"]),
+                              m_issuer=world["m_iss"],
+                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=world["rng"])
     dc = deposit_couple_prove(m_rec, rec0.sk, rec0.E, note.eRec,
                               DEPOSIT_ADDR, CHAINID, rng=world["rng"])
@@ -156,7 +178,10 @@ def test_unregistered_recipient_receipt_invalid(world):
     issuer, tree, rng = world["issuer"], world["tree"], world["rng"]
     m_rec_unreg = rand_scalar(rng)             # never inserted
     M_rec = mul(G1, m_rec_unreg)
-    note = mint_unilateral_a1(M_rec, v=1, rho=rand_scalar(rng), rng=rng)
+    note = mint_unilateral_a1(M_rec, v=1, rho=rand_scalar(rng),
+                              m_issuer=world["m_iss"],
+                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
+                              rng=rng)
     receipt = make_receipt_a1(m_rec_unreg, note, issuer.M, ISSUER_ADDR, CHAINID,
                               tree, rng=rng)
     res = verify_receipt_a1(receipt, tree.root(), tree)

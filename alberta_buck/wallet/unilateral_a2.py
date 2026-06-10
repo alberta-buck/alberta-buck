@@ -125,27 +125,33 @@ class IdentityTree(IdentityMerkleTree):
 class MintedA2:
     """Everything the issuer produces for one identity-targeted A2 note.
 
-    ``eIss``/``binding`` go on chain (the binding anchors anti-framing at mint);
-    the full ``opening`` + ``eIss`` travel to the recipient off chain.
+    ``eNote`` encrypts the note value ``v`` under ``M_rec``; ``eIss`` encrypts the
+    issuer identity ``M_I`` under ``M_rec``.  Both are committed in ``idHash``
+    (Poseidon8, matching ``mint_batch_a2.circom``).  ``eIss``/``binding`` go on
+    chain (the binding anchors anti-framing at mint); the full ``opening`` +
+    ``eNote`` + ``eIss`` travel to the recipient off chain.
     """
-    eIss:    ElGamalCiphertext   # (r'*G, M_I + r'*M_rec)  -- issuer M under recipient identity point
+    eNote:   ElGamalCiphertext   # (r_n*G, v*G + r_n*M_rec) -- note value under recipient identity point
+    eIss:    ElGamalCiphertext   # (r'*G, M_I + r'*M_rec)    -- issuer M under recipient identity point
     M_I:     Tuple               # issuer's registered identity (issuer-side only)
     idHash:  int
     cm:      int
     opening: NoteOpening
     binding: IssuerReencProof    # issuer_reenc with pk_rec := M_rec (anti-framing)
     r_prime: int                 # issuer-held randomness (off chain)
+    r_note:  int                 # note-value encryption randomness (off chain)
 
 
-def a2_id_hash(eIss: ElGamalCiphertext) -> int:
-    """``idHash = Poseidon([eIss.R.x, eIss.R.y, eIss.C.x, eIss.C.y] % F_R)``.
+def a2_id_hash(eNote: ElGamalCiphertext, eIss: ElGamalCiphertext) -> int:
+    """``idHash = Poseidon8(eNote, eIss)`` — 8 field elements reduced mod F_R.
 
-    The target identity is *not* committed separately: it is implicit in
-    ``eIss``'s key, since only ``m_rec`` decrypts ``eIss`` to a registered point.
+    Matches the on-chain layout in ``mint_batch_a2.circom`` and
+    :func:`alberta_buck.wallet.notes.id_hash_a2`.  Both ciphertexts are committed
+    so the note-binding circuit can open ``idHash`` and re-encrypt ``eIss`` under
+    the recipient identity, proving the spend's ``eEnc`` binds to THIS note.
     """
-    Rx, Ry = point_to_words(eIss.R)
-    Cx, Cy = point_to_words(eIss.C)
-    return poseidon([Rx % F_R, Ry % F_R, Cx % F_R, Cy % F_R])
+    from alberta_buck.wallet.notes import id_hash_a2
+    return id_hash_a2(eNote, eIss)
 
 
 def mint_unilateral_a2(
@@ -171,6 +177,10 @@ def mint_unilateral_a2(
     # Issuer's registered identity, recovered from its own credential.
     M_I = elgamal_decrypt(E_reg, sk_iss)
 
+    # eNote = (r_n*G, v*G + r_n*M_rec): note value encrypted for the recipient.
+    r_note = rand_scalar(rng)
+    eNote = elgamal_encrypt(mul(G1, v), M_rec, r_note)
+
     # eIss = (r'*G, M_I + r'*M_rec): issuer identity under the recipient point.
     eIss = elgamal_encrypt(M_I, M_rec, r_prime)
 
@@ -181,11 +191,12 @@ def mint_unilateral_a2(
         sk_iss, r_prime, M_rec, E_reg, eIss, issuer, chainid, rng=rng,
     )
 
-    idHash = a2_id_hash(eIss)
+    idHash = a2_id_hash(eNote, eIss)
     opening = NoteOpening(FLAVOR_A2, v, rho, idHash, predicate)
     cm = note_commitment(opening)
-    return MintedA2(eIss=eIss, M_I=M_I, idHash=idHash, cm=cm,
-                    opening=opening, binding=binding, r_prime=r_prime)
+    return MintedA2(eNote=eNote, eIss=eIss, M_I=M_I, idHash=idHash, cm=cm,
+                    opening=opening, binding=binding, r_prime=r_prime,
+                    r_note=r_note)
 
 
 # ========================== Deposit coupling ================================

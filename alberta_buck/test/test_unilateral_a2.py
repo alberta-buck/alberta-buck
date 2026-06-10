@@ -188,11 +188,13 @@ def test_collusion_bogus_eiss_unnameable(world):
         MintedA2, a2_id_hash, make_receipt as mk, verify_receipt as vr,
     )
     from alberta_buck.wallet.notes import NoteOpening, note_commitment, FLAVOR_A2
-    idh = a2_id_hash(eIss_bogus)
+    M_rec = mul(G1, m_rec)
+    eNote_bogus = elgamal_encrypt(mul(G1, 1000), M_rec, rand_scalar(rng))
+    idh = a2_id_hash(eNote_bogus, eIss_bogus)
     opening = NoteOpening(FLAVOR_A2, 1000, rand_scalar(rng), idh, 0)
-    minted_bogus = MintedA2(eIss=eIss_bogus, M_I=iss.M, idHash=idh,
+    minted_bogus = MintedA2(eNote=eNote_bogus, eIss=eIss_bogus, M_I=iss.M, idHash=idh,
                             cm=note_commitment(opening), opening=opening,
-                            binding=binding, r_prime=r_prime)
+                            binding=binding, r_prime=r_prime, r_note=rand_scalar(rng))
     receipt = mk(m_rec, minted_bogus, ISSUER_ADDR, CHAINID, tree, rng=rng)
     res = vr(receipt, iss.pk, iss.E, tree.root(), tree)
     assert not res.valid

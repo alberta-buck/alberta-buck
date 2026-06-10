@@ -34,6 +34,17 @@ else
   ANVIL_FORK_OPTS	=
 endif
 
+# 
+# Python alberta_buck venv; requires Nix environment
+#
+PYTHON			:= python3
+PYTHON_V		= $(shell $(PYTHON) -c "import sys; print('-'.join((next(iter(filter(None,sys.executable.split('/')))),sys.platform,sys.implementation.cache_tag)))" 2>/dev/null )
+
+BUCK_PYTHON		= $(CURDIR)
+BUCK_VERSION		= $(shell sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$(BUCK_PYTHON)/pyproject.toml" | head -1)
+VENV			= "$(BUCK_PYTHON).venv-$(BUCK_VERSION)-$(PYTHON_V)"
+VENV_OPTS		=
+
 
 .PHONY: all build test clean fmt snapshot
 .PHONY: fork-sepolia fork-mainnet fork-mainnet-cache anvil stop-anvil
@@ -127,9 +138,6 @@ deploy-sepolia:
 
 test-python:
 	python -m pytest alberta_buck/test/ -v -s
-
-venv-activate:
-	pip install -e ".[tests]"
 
 
 # ── Worked-example vectors and plots ─────────────────────────────────
@@ -287,6 +295,50 @@ snark-test-regression:
 
 snark-g1tie-clean:
 	rm -rf build/snark/g1tie
+
+# rapidsnark: prebuilt Groth16 prover/verifier binaries (iden3).  Used by
+# setup_note_binding.sh for fast proving of the 2.4M-constraint circuit
+# (snarkjs is the fallback, but takes many minutes per proof).
+RAPIDSNARK_ZIP	= lib/rapidsnark-macOS-arm64-v0.0.8.zip
+RAPIDSNARK_BIN	= lib/rapidsnark-macOS-arm64-v0.0.8/bin
+
+$(RAPIDSNARK_ZIP):
+	wget -O $@ https://github.com/iden3/rapidsnark/releases/download/v0.0.8/rapidsnark-macOS-arm64-v0.0.8.zip
+
+$(RAPIDSNARK_BIN)/prover:	$(RAPIDSNARK_ZIP)
+	cd lib && unzip -o $(notdir $(RAPIDSNARK_ZIP))
+	touch $@
+
+.PHONY: rapidsnark
+rapidsnark:	$(RAPIDSNARK_BIN)/prover
+
+# Note-binding circuit (circuits/note_binding.circom).
+#   make snark-note-binding       # FULL atomic rebuild (always cleans first)
+#   make snark-note-binding-clean  # drop build dir
+#
+# Witness generation uses the circom C++ calculator (--no_asm); the WASM
+# calculator cannot handle the ~5.9M-wire circuit.  The C++ build REQUIRES
+# -fno-strict-aliasing (uint64_t* vs mp_limb_t* aliasing UB in the generic
+# fr.cpp silently corrupts field comparisons under gcc -O3) and a 64 MB
+# stack (the G-powers table expansion lives in ~5.4 MB template stack
+# frames); both are handled inside setup_note_binding.sh.  Groth16 setup
+# needs pot22+ (bootstrapped with dev entropy if absent; see
+# !! DEV ENTROPY !! above).
+snark-note-binding:	rapidsnark
+	rm -rf build/snark/note_binding
+	$(SNARK_PATH) bash scripts/snark/setup_note_binding.sh
+
+snark-note-binding-clean:
+	rm -rf build/snark/note_binding
+
+# BN254 G-generator stride-8 powers table for note_binding.circom.
+# The circom-lib EC library lacks a precomputed power table for BN254's
+# generator G=(1,2); without it the optimised scalar multiplication silently
+# produces garbage.  This target regenerates circuits/ec/powers/bn254_g_pows.circom
+# (8214 lines, 2.7 MB) from the Python wallet's EC primitives.
+snark-g-pows:
+	$(SNARK_PATH) python3 scripts/snark/gen_bn254_g_pows.py > circuits/ec/powers/bn254_g_pows.circom
+	@echo "Generated circuits/ec/powers/bn254_g_pows.circom"
 
 # Update npm dependencies (snarkjs, circomlib, etc.)
 #   make snark-update       # npm install --save snarkjs@latest
@@ -455,6 +507,31 @@ update:
 clean:
 	forge clean
 	rm -rf cache out broadcast
+
+
+#
+# venv:		Create a Virtual Env containing the installed repo
+#
+.PHONY: venv
+venv:			"$(VENV)"
+	@echo; echo "*** Activating $< VirtualEnv for Interactive $(SHELL)"
+	@bash --init-file "$</bin/activate" -i
+
+venv-%:			"$(VENV)"
+	@echo; echo "*** Running in $< VirtualEnv: make $*"
+	@bash --init-file "$</bin/activate" -ic "make $*"
+
+"$(VENV)":
+	@[[ "$(PYTHON_V)" =~ "^venv" ]] && ( echo -e "\n\n!!! $@ Cannot start a venv within a venv"; false ) || true
+	@echo; echo "*** Building $@ VirtualEnv..."
+	@rm -rf $@ && $(PYTHON) -m venv $(VENV_OPTS) "$@" && sed -i -e '1s:^:. $$HOME/.bashrc\n:' "$@/bin/activate" \
+	    && source $@/bin/activate \
+	    && python -m pip install --no-user --upgrade "$(BUCK_PYTHON)[tests,dev]"
+
+venv-activate:
+	pip install -e ".[tests]"
+
+
 
 #
 # nix-...:

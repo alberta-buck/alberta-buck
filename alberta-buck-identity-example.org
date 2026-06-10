@@ -594,6 +594,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   #+END_SRC
 
   #+RESULTS:
+  : BN254 curve order: 21888242871839275222246405745257275088548364400416034343698204186575808495617
+  : G_1 generator:     (     1...,      2...)
+  : G_2 generator:     (pair of FQ2 elements)
 
   #+LATEX: }
 
@@ -728,8 +731,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    : Identity scalar m = H(identity_data):
    :   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
    : PS signature sigma:
-   :   sigma_1 = (560596..., 287434...)
-   :   sigma_2 = (402774..., 878515...)
+   :   sigma_1 = (881640..., 729678...)
+   :   sigma_2 = (  3283..., 753753...)
 
    #+LATEX: }
 
@@ -890,12 +893,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : Rerandomized PS signature verified.
-   :   sigma'_1 = (539138..., 266809...)
-   :   sigma'_2 = (539101..., 761475...)
+   :   sigma'_1 = (950306..., 567283...)
+   :   sigma'_2 = (572272...,  72680...)
    : 
    : Original and rerandomized signatures are unlinkable:
-   :   sigma_1  = (560596..., 287434...)
-   :   sigma'_1 = (539138..., 266809...)
+   :   sigma_1  = (881640..., 729678...)
+   :   sigma'_1 = (950306..., 567283...)
    :   (No algorithm can correlate them.)
 
    #+LATEX: }
@@ -949,12 +952,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    #+begin_example
    Fresh key pair for this Ethereum account:
-     sk_alice = 17656501342919947689425166631216593915044204395769132793830933956062246086248
-     pk_alice = (705596..., 904153...)
+     sk_alice = 13020046620739270822808852165527435162492082813876016870670025566997292544924
+     pk_alice = (946215...,   4627...)
 
    ElGamal ciphertext E_alice = (R, C):
-     R = r*G    = (134854..., 205675...)
-     C = m*G+r*pk = (  1003..., 751051...)
+     R = r*G    = (838255..., 576708...)
+     C = m*G+r*pk = (843221..., 997309...)
 
    Message point M = m*G:
      M = (739132..., 937433...)
@@ -988,7 +991,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
     #+RESULTS:
     : Eve decrypts with wrong key:
-    :   M_wrong = (129083..., 904518...)
+    :   M_wrong = (330162..., 562674...)
     :   M_real  = (739132..., 937433...)
     :   Match: False
     :   (Completely different point -- no information about m is leaked.)
@@ -1046,9 +1049,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-   :   challenge e = 3302830308396304002653668269922542838047585376795629305184675404776168815288
-   :   response s_m = 21758217814482381121133968405136042285287040198889942739112310640577920257568
-   :   response s_r = 17348539354624016392891535998248089333481744948487728707762695261742851666234
+   :   challenge e = 6313831634337497653779451666069696695924818843808622649399960998575233797598
+   :   response s_m = 1765779872177778000375911485005768483238341554604657039587861934738118140695
+   :   response s_r = 1175865806945372938845003679021355806708678967532982733573773880119086928862
 
    #+LATEX: }
 
@@ -1351,7 +1354,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   #+RESULTS:
   #+begin_example
   Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:
-    pk_bob = (613191..., 404884...)
+    pk_bob = (615055..., 546682...)
     E_bob  = (R, C) -- ElGamal ciphertext on-chain
     identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
     isVerified(bob)             = true
@@ -1455,8 +1458,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    : Alice re-encrypts her identity for Bob:
    :   E_bob = (R', C') where:
-   :     R' = r'*G     = (938758..., 709406...)
-   :     C' = M+r'*pk  = (962793..., 875784...)
+   :     R' = r'*G     = (372663..., 997130...)
+   :     C' = M+r'*pk  = (621525..., 992967...)
    : 
    : Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
    : Matches Alice's M:             (739132..., 937433...)
@@ -1520,9 +1523,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : Chaum-Pedersen proof:
-   :   e  = 3465884801475147257076628364797886372025382294494255885756032322936727869033
-   :   s1 = 3455545936215862227904537473089006310977562967026133666131863887429669645915
-   :   s2 = 753961153188157389598980689019313109051647669468625216179335337395266884542
+   :   e  = 20738151736972499920026051737490153479275840277635227010856562690095819020600
+   :   s1 = 9214164059675763254874417436790050769081659332656294131831163089156845468783
+   :   s2 = 5615718812423481217042211992247368821858461818162606324085806779497271328473
 
    #+LATEX: }
 
@@ -2022,17 +2025,17 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   #+RESULTS:
   #+begin_example
   Second credential derived (same identity, fresh account):
-    pk_alice_2 = (349320..., 611711...)
+    pk_alice_2 = (886197..., 512100...)
     E_alice_2  = (R, C) -- independent ciphertext
-    sigma'_2   = ( 66335..., 570123...)
+    sigma'_2   = (585597..., 608527...)
 
   Unlinkability check:
-    sigma'_1 (acct 1) = (539138..., 266809...)
-    sigma'_1 (acct 2) = ( 66335..., 570123...)
-    pk (acct 1)       = (705596..., 904153...)
-    pk (acct 2)       = (349320..., 611711...)
-    E.R (acct 1)      = (134854..., 205675...)
-    E.R (acct 2)      = (528942..., 303483...)
+    sigma'_1 (acct 1) = (107577..., 508257...)
+    sigma'_1 (acct 2) = (585597..., 608527...)
+    pk (acct 1)       = (946215...,   4627...)
+    pk (acct 2)       = (886197..., 512100...)
+    E.R (acct 1)      = (838255..., 576708...)
+    E.R (acct 2)      = (924229..., 696195...)
 
     All values are independent.  No shared structure.
     PS rerandomization is STATISTICALLY unlinkable --

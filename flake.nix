@@ -57,6 +57,13 @@
           #             (installed via npm; see package.json)
           #   circomlib - Poseidon/Merkle/Schnorr gadget library (npm)
           circom
+
+          # C++ toolchain for SNARK verifier testing
+          gcc14
+          pkg-config
+          nlohmann_json
+          gmp
+          nasm
         ];
       in {
         devShells.default = pkgs.mkShell {

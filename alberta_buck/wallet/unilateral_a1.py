@@ -44,7 +44,7 @@ from alberta_buck.wallet.verifiable_decrypt import (
 )
 # Reuse the A2 gadgets verbatim -- A1's spend IS the A2 coupling + membership.
 from alberta_buck.wallet.unilateral_a2 import (
-    IdentityTree, RcptResult, a2_id_hash,
+    IdentityTree, RcptResult,
     deposit_couple_prove, deposit_couple_verify,           # noqa: F401 (re-export)
 )
 
@@ -55,42 +55,57 @@ from alberta_buck.wallet.unilateral_a2 import (
 class MintedA1:
     """Everything the (public) issuer produces for one identity-targeted A1 note.
 
-    ``eRec`` goes on chain (as the leaf-tie public output, like A2's ``eIss``); the
-    full ``opening`` + ``eRec`` travel to the recipient off chain.  The issuer is
-    public, so its Identity is *not* part of the note -- it is named at the batch
-    level (the mint Schnorr + the registry record of ``msg.sender``).
+    ``eNote`` encrypts the note value ``v`` under ``M_rec``; ``eRec`` encrypts the
+    recipient identity under itself.  ``idHash`` commits to ``(eNote, m_issuer,
+    sigma_R, sigma_s)`` via Poseidon8 (matching ``id_hash_a1``), binding the note
+    to the public issuer's identity and Schnorr signature.  ``eRec`` goes on chain
+    (as the leaf-tie public output); the full ``opening`` + ``eNote`` + ``eRec``
+    travel to the recipient off chain.
     """
+    eNote:   ElGamalCiphertext   # (r_n*G, v*G + r_n*M_rec)  -- note value under recipient identity
     eRec:    ElGamalCiphertext   # (r'*G, M_rec + r'*M_rec)  -- recipient identity under itself
     idHash:  int
     cm:      int
     opening: NoteOpening
     r_prime: int                 # issuer-held randomness (off chain)
+    r_note:  int                 # note-value encryption randomness (off chain)
 
 
 def mint_unilateral_a1(
     M_rec,                        # recipient's identity POINT (learned out of band)
     v:       int,
     rho:     int,
+    m_issuer: int,                # issuer's registered identity scalar
+    sigma_R,                      # issuer's Schnorr signature nonce
+    sigma_s: int,                 # issuer's Schnorr signature response
     r_prime: Optional[int] = None,
     predicate: int = 0,
     rng=None,
 ) -> MintedA1:
     """Public issuer mints an identity-targeted A1 note addressed to identity ``M_rec``.
 
-    Encrypts the recipient's identity ``M_rec`` under *itself*, so any Fountain
-    account bound to ``m_rec`` can open and spend it via the shared deposit
-    coupling.  No issuer secret is needed here -- the issuer is named publicly at
-    mint, separately from the note.
+    Encrypts the note value under ``M_rec`` (``eNote``) and the recipient's identity
+    ``M_rec`` under *itself* (``eRec``), so any Fountain account bound to ``m_rec``
+    can open and spend it via the shared deposit coupling.  ``idHash`` commits to
+    ``(eNote, m_issuer, sigma_R, sigma_s)`` via Poseidon8, binding the note to the
+    public issuer.
     """
+    from alberta_buck.wallet.notes import id_hash_a1
+
     r_prime = rand_scalar(rng) if r_prime is None else (r_prime % ORDER)
+
+    # eNote = (r_n*G, v*G + r_n*M_rec): note value encrypted for the recipient.
+    r_note = rand_scalar(rng)
+    eNote = elgamal_encrypt(mul(G1, v), M_rec, r_note)
 
     # eRec = (r'*G, M_rec + r'*M_rec): the recipient identity under itself.
     eRec = elgamal_encrypt(M_rec, M_rec, r_prime)
 
-    idHash = a2_id_hash(eRec)                      # Poseidon over the 4 ciphertext coords
+    idHash = id_hash_a1(eNote, m_issuer, sigma_R, sigma_s)
     opening = NoteOpening(FLAVOR_A1, v, rho, idHash, predicate)
     cm = note_commitment(opening)
-    return MintedA1(eRec=eRec, idHash=idHash, cm=cm, opening=opening, r_prime=r_prime)
+    return MintedA1(eNote=eNote, eRec=eRec, idHash=idHash, cm=cm,
+                    opening=opening, r_prime=r_prime, r_note=r_note)
 
 
 # =============================== Receipt ====================================
