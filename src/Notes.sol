@@ -152,23 +152,23 @@ contract Notes {
     uint256[ROOT_HISTORY_SIZE] public roots;
     uint8   public currentRootIndex;
 
-    /// @notice Note<->eEnc re-encryption-tie verifier (RESERVED — see
-    ///         INoteBindingVerifier).  Binds the deposit-coupling ciphertext
-    ///         `eEnc` to the SPECIFIC addressed (A1/A2) note being spent, so a
-    ///         depositor cannot substitute a self-addressed ciphertext for the
-    ///         note's committed one.  This closes the two gaps the flavor-
-    ///         agnostic spend proof leaves open:
+    /// @notice Note<->eEnc re-encryption-tie verifier (see
+    ///         INoteBindingVerifier; relation: circuits/note_binding.circom,
+    ///         verified by NoteBindingGroth16Verifier behind
+    ///         NoteBindingVerifierAdapter).  Binds the deposit-coupling
+    ///         ciphertext `eEnc` to the SPECIFIC addressed (A1/A2) note being
+    ///         spent, so a depositor cannot substitute a self-addressed
+    ///         ciphertext for the note's committed one.  This closes the two
+    ///         gaps the flavor-agnostic spend proof leaves open:
     ///           * addressed-binding — "only the recipient Identity M_rec can
     ///             spend an A1/A2 note"; and
     ///           * A2 collusion — "an un-nameable note is un-spendable".
     ///         Optional at construction; governance wires it via
     ///         setNoteBindingVerifier.  A zero address (or an empty per-spend
     ///         proof) SKIPS the tie (backward-compat) — and, crucially, while
-    ///         skipped those two guarantees are NOT enforced on-chain.  The
-    ///         shipped StubNoteBindingVerifier returns true (plumbing only); no
-    ///         production circuit for the relation exists yet.  Wired only into
-    ///         the addressed spends; B1 (bearer) needs no tie (the depositor
-    ///         binding names the depositor directly).
+    ///         skipped those two guarantees are NOT enforced on-chain.  Wired
+    ///         only into the addressed spends; B1 (bearer) needs no tie (the
+    ///         depositor binding names the depositor directly).
     /// @dev    Appended at the END of storage so the existing slot positions
     ///         (nullifiers, noteFaceSum, nextLeafIndex, roots, ...) that tests
     ///         reach via `vm.store` stay unperturbed.
@@ -326,8 +326,8 @@ contract Notes {
     ///         (INoteBindingVerifier) consulted by the addressed (A1/A2) spends.
     ///         Passing `address(0)` disables the tie (backward-compat skip) — and
     ///         while disabled the addressed-binding / A2-collusion guarantees are
-    ///         NOT enforced.  When the reserved tie circuit lands, governance
-    ///         swaps the real verifier in here.
+    ///         NOT enforced.  The production verifier is the generated
+    ///         NoteBindingGroth16Verifier behind NoteBindingVerifierAdapter.
     function setNoteBindingVerifier(address next) external {
         require(msg.sender == governance, "not governance");
         emit NoteBindingVerifierUpdated(address(noteBindingVerifier), next);
@@ -678,9 +678,9 @@ contract Notes {
     ///
     ///      Reverts if the verifier is wired and the proof is invalid.  Silently
     ///      passes if the verifier is not set (address(0)) or the proof is empty
-    ///      (backward-compat skip).  RESERVED: no production verifier exists yet;
-    ///      the stub returns true, so while skipped/stubbed the addressed-binding
-    ///      and A2-collusion guarantees are NOT enforced.
+    ///      (backward-compat skip) — while skipped, the addressed-binding and
+    ///      A2-collusion guarantees are NOT enforced.  The production relation
+    ///      is circuits/note_binding.circom (soundness: Proofs Theorem 12).
     function _verifyNoteBinding(
         bytes memory noteBindingProof,
         uint256 nullifier,
@@ -731,14 +731,15 @@ contract Notes {
     ///      The note's commitment + nullifier are proven by the generic spend
     ///      SNARK (cm in the pool tree, nullifier well-formed).
     ///
-    ///      CAVEAT (RESERVED).  Steps 1-2 establish that `eEnc` decrypts (under
-    ///      the depositor's authenticated m_rec) to a registered member — but
-    ///      NOT that `eEnc` is the note's committed ciphertext: the spend SNARK
-    ///      is flavor-agnostic and exposes no idHash.  Until a real
-    ///      INoteBindingVerifier is wired (step 3), the addressed-binding ("only
-    ///      M_rec can spend") and A2-collusion ("un-nameable note un-spendable")
-    ///      guarantees are NOT enforced — any registered holder of a note opening
-    ///      can redeem it with a self-addressed `eEnc`.  See INoteBindingVerifier.
+    ///      CAVEAT.  Steps 1-2 establish that `eEnc` decrypts (under the
+    ///      depositor's authenticated m_rec) to a registered member — but NOT
+    ///      that `eEnc` is the note's committed ciphertext: the spend SNARK is
+    ///      flavor-agnostic and exposes no idHash.  Step 3 is what makes the
+    ///      addressed-binding ("only M_rec can spend") and A2-collusion
+    ///      ("un-nameable note un-spendable") guarantees hold; if governance
+    ///      leaves the binding verifier unset (or a spend passes an empty
+    ///      proof), they are NOT enforced for that spend.  See
+    ///      INoteBindingVerifier and Proofs Theorem 12.
     function _spendCoupled(
         bytes   calldata proof,
         uint256          root,
@@ -778,7 +779,7 @@ contract Notes {
         _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
 
         // Identity-M binding, half 3: the note<->eEnc re-encryption tie, binding
-        // `eEnc` to THIS note (RESERVED — stub returns true; see _verifyNoteBinding).
+        // `eEnc` to THIS note (skipped only if governance left the slot unset).
         _verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I.X, dc.P_I.Y);
 
         require(

@@ -147,7 +147,7 @@ Table of Contents
 .. 1. Demurrage Conservation as a Contract Invariant
 19. Implementation Scope
 .. 1. Shipped (Identify-M core)
-.. 2. Status: the Identity-M spend path is complete
+.. 2. Status: the Identity-M spend path, complete
 .. 3. Retired: the Account-Pinned A-Spend
 .. 4. Wallet & UX (post-migration)
 .. 5. Cross-Checks and Audit
@@ -159,8 +159,9 @@ Table of Contents
 .. 2. Stranded Value on Lost Notes
 .. 3. Integer-Arithmetic Rounding
 .. 4. Predicate Programmability vs. Circuit Simplicity
-.. 5. Universal Spend Circuit (resolved by the Identity-M gadget)
-.. 6. Regulatory Interaction with the Carrying Transfer
+.. 5. Serialized B1 Sub-Notes (forward design)
+.. 6. Universal Spend Circuit (resolved by the Identity-M gadget)
+.. 7. Regulatory Interaction with the Carrying Transfer
 21. Summary
 
 
@@ -729,8 +730,16 @@ Table of Contents
     pair cannot construct an accepted payment with /no/ valid receipt:
     the deposit gate reverts unless the decrypted counterparty Identity
     is a registry member, so an un-nameable counterparty is
-    /un-spendable/.  This on-chain-at-mint enforcement is what separates
-    the shipped design from "sound for an honest party only."
+    /un-spendable/.  For B1 (bearer), `verifyDepositorBinding' ties the
+    depositor's /own/ Identity to its account, so it names itself.  For
+    A1/A2 (addressed), the note \( \leftrightarrow \) \( eEnc \) tie
+    (`INoteBindingVerifier', realised by the `note_binding' Groth16
+    circuit) forces the ciphertext verified at spend to be a
+    /re-encryption of the one the spent note committed/ – so a colluding
+    pair cannot substitute a nameable \( eEnc \) for an un-nameable
+    committed \( eIss \), and a stolen opening cannot be redeemed with a
+    self-addressed one (/Proofs/, Theorem 12; see /Status/ below for the
+    deployment caveat on the trusted setup).
 
   The non-frameability asymmetry is the subtle, important part: a
   colluding pair can /deny or obscure/ the issuer – render a deposited
@@ -738,9 +747,8 @@ Table of Contents
   can never /substitute/ a false issuer.  The only reachable outcomes
   are "names the true minter" and "names no one"; under audit the
   un-nameable case puts the burden on the (always KYC-identifiable)
-  depositor, not on an innocent.  (Full development:
-  /alberta-buck-notes-decryptability/, "The Non-Deniable-Receipt
-  Invariant.")
+  depositor, not on an innocent.  (Formal statement and proofs:
+  /alberta-buck-proofs/, Part IV.)
 
 
 3.5 What the On-Chain Observer Sees
@@ -940,9 +948,9 @@ Table of Contents
   ways.  Membership of the decrypted counterparty Identity in the
   accumulator \( \mathsf{rt_{id}} \) makes every direction
   collusion-resistant.  The sketches below give each flavour's shape;
-  the full mechanics, proofs, and tests are in
-  /alberta-buck-notes-identity-axis/ and
-  /alberta-buck-notes-unilateral/.
+  the full mechanics and executable walkthroughs are in
+  /alberta-buck-notes-flow/, and the formal proofs in
+  /alberta-buck-proofs/ (Part IV).
 
   *Why bearer forces a public issuer (B2 is impossible).* A bearer note
   has no recipient key at mint, so the unknown future depositor can
@@ -3040,8 +3048,8 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-19.2 Status: the Identity-M spend path is complete
-──────────────────────────────────────────────────
+19.2 Status: the Identity-M spend path, complete
+────────────────────────────────────────────────
 
   The binding sigmas, the P-bound membership circuit + verifier, the
   on-chain incremental \( \mathsf{rt_{id}} \) accumulator
@@ -3050,9 +3058,40 @@ Table of Contents
   `spendCoupledB1') are all shipped and tested end to end.  The
   membership is /bound/ to each sigma's committed point \( P \) (the
   verifier derives its public inputs from \( P \), not the prover's
-  bytes), so the two halves cannot be decoupled.  The only remaining
-  pre-deployment item is a production Powers-of-Tau ceremony (the dev
-  ptaus use dev-only entropy).
+  bytes), so /those two halves/ cannot be decoupled.
+
+  *The note \( \leftrightarrow \) \( eEnc \) tie is implemented.* The
+  flavour-agnostic spend proof (`spend.circom') proves only that /some/
+  opening is in the tree and that its nullifier is well-formed; it
+  exposes no \( idHash \), so on its own nothing ties the
+  deposit-coupling ciphertext \( eEnc \) to the /specific note being
+  spent/.  The closing piece is the /in-SNARK re-encryption tie/
+  (`INoteBindingVerifier', realised by `circuits/note_binding.circom'):
+  a Groth16 proof that \( eEnc \) /re-encrypts/, under \( M_{\text{rec}}
+  \), the ciphertext the note committed in its \( idHash \) –
+  *re-encryption equivalence*, not equality, because re-using the exact
+  committed \( eIss \) (which `Notes.mint' exposes as a public input)
+  would link spend to mint and destroy A2 anonymity.  This enforces the
+  two addressed guarantees:
+  • *addressed-binding* – only the recipient Identity \( M_{\text{rec}}
+    \) can spend an A1/A2 note (a holder of a stolen opening cannot
+    redeem with a self-addressed \( eEnc \)); and
+  • *A2 collusion* – an un-nameable note is un-spendable, even against a
+    pair substituting a different, nameable \( eEnc \).
+  The circuit (~2.4M non-linear constraints; ElGamal-structure
+  exploitation keeps all EC work fixed-base) verifies behind
+  `NoteBindingVerifierAdapter', which derives all 25 public inputs on
+  chain from the caller's nullifier, \( eEnc \), and the sigma's
+  committed \( P_I \) – the proof bytes carry only the Groth16 triple,
+  so an accept is necessarily about /this/ spend.  Witness generation,
+  proving (rapidsnark), and the exported Solidity verifier are wired end
+  to end; engineering details and the toolchain root-cause history are
+  in /alberta-buck-verifier-implementation.org/.  Soundness statement:
+  /Proofs/, Theorem 12.
+
+  The remaining pre-deployment item is a production Powers-of-Tau
+  ceremony – the dev ptaus (including the pot22 used by the note-binding
+  setup) use dev-only entropy.
 
 
 19.3 Retired: the Account-Pinned A-Spend
@@ -3092,15 +3131,43 @@ Table of Contents
 19.6 Document Series
 ────────────────────
 
-  • /alberta-buck-notes-unilateral/ – the A2 corner in full
-  • /alberta-buck-notes-identity-axis/ – the unified gadget, all three
-    flavours
-  • /alberta-buck-notes-flow/ – narrative walkthrough of mint +
-    identity-M spend
-  • /alberta-buck-notes-decryptability/ – the gap this closes
+  The Notes documentation has two living references; everything else is
+  either a sibling reference, a forward design, or a historical memo
+  whose load-bearing content has been promoted here or into the flow
+  document.
+
+  /Primary (living):/
+  • /alberta-buck-notes/ (this document) – why Notes exist and the
+    architecture at a high level.
+  • /alberta-buck-notes-flow/ – the worked walkthrough: every flavour's
+    mint, delivery, and deposit, with the cryptography demonstrated in
+    executable Python against `alberta_buck.wallet'.
+
+  /Siblings (living):/
+  • /alberta-buck-proofs/ – formal statements and proofs (Notes: Part
+    IV, Theorems 7-12).
   • /alberta-buck-identity/ – the Fountain, registration, ElGamal / CP
-    primitives
-  • End-to-end fuzz and property-based testing: 2 weeks.
+    primitives.
+  • /alberta-buck-ethereum/ – the Solidity surface.
+  • /alberta-buck-verifier-implementation/ – SNARK toolchain engineering
+    status (witness generation, trusted setups, verifier exports).
+
+  /Forward design (not yet implemented):/
+  • /alberta-buck-notes-serialized/ – serialized B1 sub-notes: N
+    micro-denomination bearer notes per leaf.
+
+  /Historical memos (superseded; retained for provenance):/
+  • /alberta-buck-notes-unilateral/ – the A2 corner as first built; now
+    flow's "A2 Identity-Targeted Spend" + Proofs Theorems 7-8.
+  • /alberta-buck-notes-identity-axis/ – the Identity-M inversion memo;
+    now this document's "Mutual Decryptability" + flow's "Identity-M
+    Spend Path".
+  • /alberta-buck-notes-decryptability/ – the invariant, the gap
+    analysis, and the fix design; the invariant lives here, the privacy
+    audit in flow, the theorems in Proofs, and the fix is implemented
+    (`note_binding.circom').
+  • /alberta-buck-notes-rollup-mint/ – the batch-mint design memo;
+    shipped as Phase 7-bis, hostile-issuer ledger promoted into flow.
 
 
 19.7 Phased Rollout
@@ -3249,7 +3316,22 @@ Table of Contents
   programmable-predicate use cases while keeping the verifier compact.
 
 
-20.5 Universal Spend Circuit (resolved by the Identity-M gadget)
+20.5 Serialized B1 Sub-Notes (forward design)
+─────────────────────────────────────────────
+
+  Bearer (B1) notes invite micro-denomination use – walking-around
+  money, tip jars – where one leaf per note is wasteful.  The serialized
+  design (/alberta-buck-notes-serialized/) packs \( N \) sub-notes under
+  a single commitment leaf with a per-parent spent-bitmap on chain,
+  amortising the mint cost across the family while keeping each sub-note
+  independently spendable and double-spend-protected.  It applies to B1
+  only (an addressed note's recipient-targeted ciphertexts cannot be
+  shared across siblings without linking them).  Designed but not
+  implemented; the design memo carries the construction, the per-field
+  security analysis, and the migration phasing.
+
+
+20.6 Universal Spend Circuit (resolved by the Identity-M gadget)
 ────────────────────────────────────────────────────────────────
 
   The earlier design carried two divergent spend verifiers (a bearer
@@ -3261,7 +3343,7 @@ Table of Contents
   flavour, wired through `spendCoupled{A1,A2,B1}'.
 
 
-20.6 Regulatory Interaction with the Carrying Transfer
+20.7 Regulatory Interaction with the Carrying Transfer
 ──────────────────────────────────────────────────────
 
   Jurisdictional regulators (FINTRAC, OSFI) have rules around bearer
@@ -3293,15 +3375,18 @@ Table of Contents
   /A2/ (addressed, private issuer; the reserved private-issuer
   self-wormhole) – span every use case the Alberta Buck series needs a
   bearer instrument to cover, from walking-around and cross-border
-  targeted payments to cold-storage cryptographic notes.  The all three
+  targeted payments to cold-storage cryptographic notes.  All three
   flavors – *A1*, *A2*, *B1* – are shipped, each with a sound,
-  collusion-resistant, third-party-free bilateral receipt.  The A2
-  recipient-key collusion gap is closed by the /identity-targeted/
-  spend: the membership certifies the issuer's decrypted Identity, so a
-  bogus `eIss' decrypts to a non-member and the deposit /reverts/ (an
-  un-nameable note is un-spendable, not merely un-receiptable).  The
-  fourth cell, private-bearer (B2), is ruled out by BUCK's
-  mutual-decryptability invariant.
+  collusion-resistant, third-party-free bilateral receipt.  The
+  addressed spends are completed by the note \( \leftrightarrow \)
+  `eEnc' re-encryption tie (`INoteBindingVerifier',
+  `circuits/note_binding.circom'): the deposit gate proves not only that
+  the supplied `eEnc' decrypts to a registered member, but that it
+  re-encrypts the ciphertext /the spent note committed/ – so
+  "un-nameable is un-spendable" and "only \( M_{\text{rec}} \) can
+  spend" hold even against a colluding pair substituting ciphertexts
+  (/Proofs/, Theorem 12).  The fourth cell, private-bearer (B2), is
+  ruled out by BUCK's mutual-decryptability invariant.
 
   Demurrage needs no note-side machinery: the Notes Pool is the Notes
   contract's own ERC-20 balance – a regular BUCK account with its single

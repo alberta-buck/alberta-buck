@@ -50,6 +50,15 @@ registry-Identity tree.  Every step is implemented and tested
 #+TOC: headlines 2
 
 #+LATEX: \clearpage
+#+begin_quote
+*STATUS (2026-06-10): historical -- superseded.*  The A2 corner documented
+here is shipped and now lives in /alberta-buck-notes-flow/ ("A2
+Identity-Targeted Spend", "A2 in Code" -- an executable transcript of this
+memo's flow) with formal statements in /alberta-buck-proofs/ (Theorems 7-8,
+12).  The implementation-status section below reflects June 2026 and is no
+longer maintained.
+#+end_quote
+
 * The Inversion: Address the Identity, Not the Account
 
   In the standard A2 construction (/alberta-buck-notes/) the issuer reads /one

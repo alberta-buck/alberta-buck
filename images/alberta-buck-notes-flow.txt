@@ -1,19 +1,19 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                  THE ALBERTA BUCK - NOTES FLOW (V1.0)
+                  THE ALBERTA BUCK - NOTES FLOW (V1.1)
             How One BUCK Transfer Becomes N Unlinkable Notes
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-                               2026-06-04
+                               2026-06-10
 
 
 <https://perry.kundert.ca/images/dominion-logo.png>
 
-This document is the /narrative/ companion to [alberta-buck-notes.org]
-(architectural overview), [alberta-buck-notes-identity-axis.org] (the
-unified identity-M model), and [alberta-buck-ethereum.org] (Solidity
+This document is the /narrative and executable/ companion to
+[alberta-buck-notes.org] (architectural overview; together they are the
+two living Notes references) and [alberta-buck-ethereum.org] (Solidity
 surface).  It walks one concrete example – Alice mints a 1,200-BUCK
 transfer into six notes of denominations `[1000, 100, 25, 25, 25, 25]' –
 end-to-end through the *Phase-7-bis SNARK-verified batch-mint pipeline*,
@@ -44,11 +44,23 @@ the recipient's own Identity is committed), and `spendCoupledB1'
 earlier account-pinned `spendACP' / CP-DLEQ path and the unbound generic
 `Notes.spend'.  The membership closes the collusion gap: a note whose
 committed Identity decrypts to a non-member reverts at spend.  All three
-are wired and tested end to end
-(`alberta_buck.wallet.{unilateral_a2,unilateral_a1,b1_binding}';
-`IdentityRegistry.{verifyDepositCoupling,verifyDepositorBinding}'; the
-G1-tie membership verifier; the on-chain incremental `identityRoot').
+are wired and tested end to end (`alberta_buck.wallet.unilateral_a2',
+`.unilateral_a1', `.b1_binding';
+`IdentityRegistry.verifyDepositCoupling', `.verifyDepositorBinding'; the
+G1-tie membership verifier; the on-chain incremental `identityRoot').  A
+fourth gate completes the addressed spends: the note \( \leftrightarrow
+\) \( eEnc \) /re-encryption tie/ (`circuits/note_binding.circom' behind
+`INoteBindingVerifier') proves the deposit-coupling ciphertext
+re-encrypts, under \( M_{\text{rec}} \), the ciphertext /the spent note
+committed in its/ \( idHash \) – enforcing addressed-binding (a stolen
+opening cannot be redeemed with a self-addressed \( eEnc \)) and closing
+A2 collusion against ciphertext substitution (/Proofs/, Theorem 12).
 Only a production Powers-of-Tau ceremony remains before deployment.
+
+The cryptographic walkthroughs in this document are /executable/: the
+Python blocks run against the shipped `alberta_buck.wallet' modules in
+one seeded, deterministic session, and their printed output is captured
+below each block.
 
 The aim is to show, by walking the path, that the system delivers five
 concrete guarantees:
@@ -130,8 +142,10 @@ Table of Contents
 .. 1. The Shared Primitives
 .. 2. A2 Identity-Targeted Spend (The Unilateral Receipt Flow)
 .. 3. A2 in Code: The Full Cycle, End to End
-.. 4. B1 Bearer Spend with Depositor Naming (The A2 Dual)
-.. 5. Summary: What the Observer Sees (Mallory)
+.. 4. A1 in Code: The Public-Issuer Addressed Cycle
+.. 5. B1 Bearer Spend with Depositor Naming (The A2 Dual)
+.. 6. B1 in Code: The Issuer Names the Depositor
+.. 7. Summary: What the Observer Sees (Mallory)
 12. Demurrage-Carrying Transfers
 .. 1. Two Ways to Handle Demurrage at Transfer Time
 .. 2. Why the Note Pool Needs It
@@ -140,14 +154,19 @@ Table of Contents
 .. 5. Open Question: Identity Receipts on Carry
 13. Putting the Guarantees Side-by-Side
 14. Open Questions and the Identity-M Transition
-15. Cross-References
+15. Privacy Audit: Data Revealed Per Step
+.. 1. Requirements and adversaries
+.. 2. The on-chain footprint of each step
+.. 3. Why bulk-tracing and third-party privacy hold
+.. 4. Why mutual decryptability holds – the final data set
+.. 5. The colluding pair, and where each escape is closed
+16. Appendix: The Hostile-Issuer Mint Ledger
+17. Security Properties and the Tests That Witness Them
+18. Cross-References
 
 
 [alberta-buck-notes.org]
 <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
-
-[alberta-buck-notes-identity-axis.org]
-<https://perry.kundert.ca/range/finance/alberta-buck-notes-identity-axis/>
 
 [alberta-buck-ethereum.org]
 <https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
@@ -236,7 +255,6 @@ Table of Contents
   │ opening_i = ( flavor_i, v_i, rho_i, idHash_i, predicate_i )
   │ cm_i      = Poseidon5( flavor_i, v_i, rho_i, idHash_i, predicate_i )
   └────
-
   • `flavor_i' – which note variant (A1 identified cheque, A2 private
     cheque, B1 bearer cheque); see [Notes] for the menu.
   • `v_i' – the face value in BUCK base units (18-decimal scaled
@@ -309,7 +327,6 @@ Table of Contents
   ┌────
   │ cm_i = Poseidon5( flavor_i, v_i, rho_i, idHash_i, predicate_i )
   └────
-
   This is pure off-chain Poseidon arithmetic in
   `alberta_buck.wallet.notes'.  Sixteen `uint256' field elements drop
   out.  Their order in the eventual on-chain array is fixed by Alice's
@@ -350,7 +367,6 @@ Table of Contents
   │ totalFace       # 1200e18 -- range-bounded to 128 bits
   │ cm[i]           # i in 0..N-1: the commitments, exposed DIRECTLY (not a batch hash)
   └────
-
   The commitments are exposed as public inputs directly (no
   `cmBatchHash'): each input costs ~6K gas in the EVM verifier, cheaper
   than recomputing a keccak over calldata on-chain, and far cheaper than
@@ -366,7 +382,6 @@ Table of Contents
   │   flavor[i], v[i], rho[i], idHash[i], predicate[i]    # the opening
   │   pathSiblings[i][d] for d in 0..TREE_DEPTH-1         # 20 siblings per leaf
   └────
-
   The `pathSiblings' for leaf `i' are derived by the wallet from its
   local `filledSubtrees' mirror plus the previously-folded leaves of
   /this same batch/ (leaves `0..i-1' sit at known positions and
@@ -444,7 +459,6 @@ Table of Contents
   │ //                                                  //   and ties each leaf's eIss
   │ // There is no unbound mint path -- an unnameable note cannot be created.
   └────
-
   The honest EVM walks `Notes.mint' (the PUBLIC overload):
 
   ┌────
@@ -486,7 +500,6 @@ Table of Contents
   │ emit Minted(msg.sender, totalFace, /*startIndex=*/ nextLeafIndex,
   │             /*count=*/ cms.length, newRoot);
   └────
-
   Five things happen in strict order, and *all of them are atomic* (one
   transaction, one EVM state transition):
 
@@ -565,7 +578,6 @@ Table of Contents
   │   meta:      { issuer: Alice's IdentityRegistry handle, batchSize: N*, ... },
   │ }
   └────
-
   The chain itself never sees `opening'.  `cm_i' is already folded into
   `newRoot'; the artifact carries it explicitly only as a convenience so
   the recipient does not have to recompute it before locating it in the
@@ -835,7 +847,6 @@ Table of Contents
   │   Buck.Transfer(Alice, Notes, 1200e18)
   │   Notes.Minted(Alice, 1200e18, startIndex=K, count=16, newRoot)
   └────
-
   The batch-mint contract emits one `Minted' event per batch rather than
   per-leaf `Appended' events; the commitments themselves live in
   calldata for off-chain provers and wallets to read.  (Calldata is
@@ -1166,7 +1177,6 @@ Table of Contents
   │   meta:      { issuer: Alice, ... },
   │ }
   └────
-
   He has independently confirmed that `cm_0' is in `Notes.commitments[]'
   at index `K' and that `Poseidon5(opening)' reproduces it.  The opening
   has been sitting in his wallet for weeks, months, or years – addressed
@@ -1271,7 +1281,6 @@ Table of Contents
   │ private pathElements[depth];      # depth-20 sibling hashes
   │ private pathIndices[depth];       # left/right bit per level
   └────
-
   The shipped circuit enforces five relation groups:
 
   1. *Range bounds and value match.* Both the public `face' and the
@@ -1310,16 +1319,18 @@ Table of Contents
 ───────────────────────────────────────────────────
 
   Bob's note is A2 (private issuer), so he deposits via
-  `spendCoupledA2'.  Beyond the Step 1–3 note proof he supplies the leaf
-  ciphertext `eIss', the deposit-coupling sigma `dc'
-  (`alberta_buck.wallet.unilateral_a2.deposit_couple_prove'), and the
-  G1-tie membership proof `membershipProof':
+  `spendCoupledA2'.  Beyond the Step 1–3 note proof he supplies `eEnc' –
+  a /fresh re-encryption/ of the leaf ciphertext \( eIss \) under \(
+  M_{\text{rec}} \) (same plaintext, new randomness, so the chain never
+  sees the mint-time ciphertext again) – the deposit-coupling sigma `dc'
+  (`alberta_buck.wallet.unilateral_a2.deposit_couple_prove'), the G1-tie
+  membership proof `membershipProof', and the note-binding proof
+  `noteBindingProof' (`alberta_buck.wallet.note_binding'):
 
   ┌────
   │ notes.spendCoupledA2(proofBytes, noteRoot, nullifier, 1000e18, bob,
-  │                      eIss, dc, membershipProof);
+  │                      eEnc, dc, membershipProof, noteBindingProof);
   └────
-
   The honest EVM walks `Notes.spendCoupledA2' (the function as it ships
   – a thin wrapper over the shared `_spendCoupled'):
 
@@ -1335,26 +1346,30 @@ Table of Contents
   │     proof, root, nullifier, face, recipient, block.chainid
   │ ),                                "Notes: bad spend proof");
   │ 
-  │ // (2) Identity binding, half 1 -- the deposit-coupling sigma.  msg.sender is
+  │ // (2) Identity-M binding, half 1 -- the deposit-coupling sigma.  msg.sender is
   │ //     Bob's deposit account; it proves the account is bound to m_rec AND that
-  │ //     eIss decrypts under m_rec to the point committed (blinded) in dc.P_I.
-  │ require(identityRegistry.verifyDepositCoupling(msg.sender, eIss, dc),
+  │ //     eEnc decrypts under m_rec to the point committed (blinded) in dc.P_I.
+  │ require(identityRegistry.verifyDepositCoupling(msg.sender, eEnc, dc),
   │                                   "Notes: bad deposit coupling");
   │ 
   │ nullifiers[nullifier] = true;     // mark spent before paying out
   │ noteFaceSum          -= face;
   │ 
-  │ // (3) Identity binding, half 2 -- membership of dc.P_I's point, bound to the
+  │ // (3) Identity-M binding, half 2 -- membership of dc.P_I's point, bound to the
   │ //     SAME dc.P_I the coupling just constrained (the verifier derives its
   │ //     public-input limbs from dc.P_I, not from the proof bytes).
   │ _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
+  │ 
+  │ // (4) Identity-M binding, half 3 -- the note<->eEnc re-encryption tie, binding
+  │ //     eEnc to THIS note: the Groth16 proof's public inputs are derived from
+  │ //     the caller's nullifier, eEnc, and dc.P_I.
+  │ _verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I.X, dc.P_I.Y);
   │ 
   │ require(buck.transfer(recipient, face),   // pool isCarrying => Carrying path
   │         "Notes: transfer failed");
   │ emit SpentCoupledA2(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
   └────
-
-  Five invariants are enforced in order:
+  Six invariants are enforced in order:
 
   a. `root' appears in the recent-roots window.  A root that has rotated
      out is stale – Bob must rebuild the proof against a fresher root.
@@ -1365,9 +1380,9 @@ Table of Contents
      `[root, nullifier, face, recipient, chainid]' into the
      public-signal vector.  By soundness Bob holds a Poseidon-5 opening
      of a `cm' under `root', with `nullifier = Poseidon3(rho, idHash,
-     tag)'.  d. `verifyDepositCoupling(msg.sender, eIss, dc)' succeeds:
+     tag)'.  d. `verifyDepositCoupling(msg.sender, eEnc, dc)' succeeds:
      msg.sender's registered account is bound to the identity scalar \(
-     m_{\text{rec}} \) and `eIss' decrypts under it to `dc.P_I' – an
+     m_{\text{rec}} \) and `eEnc' decrypts under it to `dc.P_I' – an
      EIP-196 Okamoto sigma, all Identities hidden (\( M_{\text{iss}} \)
      is blinded in \( P_I = M_{\text{iss}} + bH \)).
      e. `_verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y)'
@@ -1375,11 +1390,25 @@ Table of Contents
      a member of the on-chain `identityRoot'.  Because the contract
      feeds `dc.P_I' (not the proof bytes) as the public input, the
      membership is bound to /exactly/ the point the coupling decrypted
-     `eIss' to – a colluding pair cannot key `eIss' to a non-member and
-     still spend.  Only after (a)-(e) does the contract pay out and emit
+     `eEnc' to – a colluding pair cannot key the ciphertext to a
+     non-member and still spend.
+     f. `_verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I)'
+     succeeds: the note-binding Groth16 (`circuits/note_binding.circom')
+     proves `eEnc' is a re-encryption, under \( M_{\text{rec}} \), of
+     the ciphertext committed in /this note's/ `idHash' – the same
+     `idHash' inside the nullifier gate (b) just consumed – and that its
+     decryption is the same point `dc.P_I' commits.  The adapter
+     (`NoteBindingVerifierAdapter') derives all 25 public inputs from
+     the caller's `nullifier' / `eEnc' / `dc.P_I', so the proof bytes
+     carry only the Groth16 triple: an accept is necessarily about
+     /this/ spend.  Without (f), gates (d)-(e) verify a ciphertext of
+     the depositor's choosing; with it, only the addressed \(
+     M_{\text{rec}} \) can spend, and an un-nameable A2 note stays
+     un-spendable even under ciphertext substitution (/Proofs/, Theorem
+     12).  Only after (a)-(f) does the contract pay out and emit
      `SpentCoupledA2(nullifier, face, recipient, P_I.X, P_I.Y)'.
 
-  If any of (a)-(e) reverts, the whole transaction reverts: no BUCK
+  If any of (a)-(f) reverts, the whole transaction reverts: no BUCK
   moves, the nullifier bit is never set, `noteFaceSum' is unchanged.
   *Bob gets one attempt per root window*; a failed spend retries with a
   refreshed proof, but never consumes a nullifier without paying out the
@@ -1477,7 +1506,6 @@ Table of Contents
   │   Buck.Transfer(Notes, Bob, 1000e18)
   │   Notes.SpentCoupledA2(nullifier, 1000e18, Bob, P_I.x, P_I.y)
   └────
-
   What she infers:
 
   • *That a note was spent.* Yes – the nullifier is fresh and the pool
@@ -1655,6 +1683,18 @@ Table of Contents
   derives its public inputs from \( P \), not from the prover's bytes,
   so the two halves cannot be decoupled.
 
+  The /addressed/ flavours (A1, A2) add a fourth gate: the note \(
+  \leftrightarrow \) \( eEnc \) /re-encryption tie/
+  (`circuits/note_binding.circom' behind `INoteBindingVerifier').  The
+  flavour-agnostic note proof exposes no \( idHash \), so without the
+  tie nothing binds the deposit-coupling ciphertext to the /specific
+  note being spent/ – a holder of a stolen opening could supply a
+  self-addressed \( eEnc \), and an A2 coalition could substitute a
+  nameable one.  The tie proves, in one Groth16 proof, that the spend's
+  \( eEnc \) re-encrypts the ciphertext committed in the `idHash' behind
+  /this spend's nullifier/, and that its decryption is the very point \(
+  P_I \) the sigma committed (/Proofs/, Theorem 12).
+
 
 11.1 The Shared Primitives
 ──────────────────────────
@@ -1718,7 +1758,6 @@ Table of Contents
   │   mint_tx_ref,                                              # where cm was folded
   │ )
   └────
-
   `====' Step A1: Bob Chooses a Deposit Account `===='
 
   Bob selects /any/ registered Fountain account bound to his identity
@@ -1786,7 +1825,6 @@ Table of Contents
   │     membershipProof,                  // G1-tie Groth16 (a,b,c) bytes; P_I supplied by the contract
   │ );
   └────
-
   `eIss', `dc', and `membershipProof' are the identity-M additions.
   Crucially, `membershipProof' carries /only/ the Groth16 triple; the
   committed point \( P_I \) it is checked against is read by the
@@ -1865,21 +1903,24 @@ Table of Contents
 ───────────────────────────────────────────
 
   The cryptography above is small enough to run.  This section is a
-  complete, real transcript against the shipped wallet
+  complete, /executing/ transcript against the shipped wallet
   (`alberta_buck.wallet.unilateral_a2' over BN254 \( \mathbb{G}_1 \)) –
-  mirroring `test_unilateral_a2.py' – so a reader can paste it into a
-  `nix develop' shell and watch every claim hold.
+  mirroring `test_unilateral_a2.py'.  The blocks below are org-babel
+  source blocks sharing one Python session: re-exporting this document
+  re-runs them top to bottom, and the printed `RESULTS' are regenerated.
+  The session is seeded, so a re-run reproduces this transcript byte for
+  byte – and fails loudly if the wallet API drifts.
 
-  `====' The cast: two Identities, one of them with two accounts `===='
-
-  An /Identity/ is a KYC-bound scalar \( m \) and its point \( M = mG
-  \).  The Identity Fountain lets one \( m \) back unlimited unlinkable
+  *The cast: two Identities, one of them with two accounts.* An
+  /Identity/ is a KYC-bound scalar \( m \) and its point \( M = mG \).
+  The Identity Fountain lets one \( m \) back unlimited unlinkable
   /accounts/, each an ElGamal encryption \( E_{\text{addr}} = (R, C) =
   (rG,\ M + r\,pk) \) of the /same/ \( M \) under that account's own
   key.
 
   ┌────
-  │ from alberta_buck.wallet.bn254 import G1, mul, eq, rand_scalar
+  │ import random
+  │ from alberta_buck.wallet.bn254 import G1, ORDER, mul, add, neg, eq, rand_scalar
   │ from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
   │ from alberta_buck.wallet.unilateral_a2 import (
   │     IdentityTree, mint_unilateral_a2,
@@ -1887,111 +1928,288 @@ Table of Contents
   │     make_receipt, verify_receipt,
   │ )
   │ 
+  │ _seed = random.Random(0xA1BE27AB0CC)     # ONE deterministic transcript
+  │ rng   = lambda: _seed.getrandbits(256)
+  │ 
   │ CHAINID = 1
-  │ def account(m):                   # one Fountain account bound to identity m
-  │     sk = rand_scalar(); pk = mul(G1, sk)
-  │     M  = mul(G1, m)               # the shared Identity point
-  │     E  = elgamal_encrypt(M, pk, rand_scalar())      # registered credential
+  │ def account(m):                    # one Fountain account bound to identity m
+  │     sk = rand_scalar(rng); pk = mul(G1, sk)
+  │     M  = mul(G1, m)                # the shared Identity point
+  │     E  = elgamal_encrypt(M, pk, rand_scalar(rng))    # registered credential
   │     return dict(m=m, M=M, sk=sk, pk=pk, E=E)
   │ 
-  │ m_iss, m_rec = rand_scalar(), rand_scalar()
+  │ def pt(P):                         # compact point display
+  │     return f"({int(P[0]) % 10**8:>8d}..., {int(P[1]) % 10**8:>8d}...)"
+  │ 
+  │ m_iss, m_rec = rand_scalar(rng), rand_scalar(rng)
   │ issuer = account(m_iss)                      # the payer (private issuer)
   │ rec0   = account(m_rec)                      # recipient account #0
   │ rec1   = account(m_rec)                      # recipient account #1 (SAME identity)
   │ M_rec  = mul(G1, m_rec)                      # what the issuer learns out of band
   │ 
   │ tree = IdentityTree()                        # the registry-Identity accumulator
-  │ for a in (issuer, rec0):                      # one leaf per *identity*
+  │ for a in (issuer, rec0):                     # one leaf per *identity*
   │     tree.insert(a["M"])
+  │ 
+  │ print(f"issuer Identity    M_I   = {pt(issuer['M'])}")
+  │ print(f"recipient Identity M_rec = {pt(M_rec)}  (accounts rec0, rec1)")
+  │ print(f"identity tree root        = {hex(tree.root())[:20]}...")
   └────
 
-  `====' Mint: encrypt the issuer's own Identity under the recipient's
-  point `===='
+  ┌────
+  │ issuer Identity    M_I   = (34794633..., 55370756...)
+  │ recipient Identity M_rec = (78777287...,  1501867...)  (accounts rec0, rec1)
+  │ identity tree root        = 0x1b94c62584dc6075ad...
+  └────
 
+  *Mint: encrypt the issuer's own Identity under the recipient's point.*
   The issuer addresses the note to /the Identity/ \( M_{\text{rec}} \),
   not an account.  It encrypts its /own/ registered \( M_I \) under \(
-  M_{\text{rec}} \) used as a public key:
+  M_{\text{rec}} \) used as a public key; the anti-framing binding
+  (`verifyIssuerReenc') proves \( eIss \) re-encrypts the issuer's OWN
+  registered \( M_I \) – it cannot name a victim.
 
   ┌────
   │ note = mint_unilateral_a2(issuer["sk"], issuer["E"], M_rec,
-  │                           v=1000, rho=rand_scalar(),
-  │                           issuer=0xA11CE, chainid=CHAINID)
-  │ # note.eIss = (r'*G, M_I + r'*M_rec);  note.binding proves eIss re-encrypts
-  │ # the issuer's OWN registered M_I (anti-framing -- it cannot name a victim).
+  │                           v=1000, rho=rand_scalar(rng),
+  │                           issuer=0xA11CE, chainid=CHAINID, rng=rng)
   │ assert eq(note.M_I, issuer["M"])
+  │ print(f"minted A2 note: v = {note.opening.v}")
+  │ print(f"  cm     = {hex(note.cm)[:20]}...       (the only on-chain artifact)")
+  │ print(f"  idHash = {hex(note.idHash)[:20]}...   (Poseidon8(eNote, eIss))")
+  │ print(f"  eIss   = ElGamal(M_I under M_rec)  R = {pt(note.eIss.R)}")
   └────
 
-  The decryption secret is \( m_{\text{rec}} \) – shared by /every/
-  account the recipient owns – because \( M_{\text{rec}} =
-  m_{\text{rec}}G \): \[ C_e - m_{\text{rec}} R_e = (M_I + r'
-  M_{\text{rec}}) - m_{\text{rec}}(r'G) = M_I.  \]
+  ┌────
+  │ minted A2 note: v = 1000
+  │   cm     = 0x119e5f967cfb3426ea...       (the only on-chain artifact)
+  │   idHash = 0x5c689616da10e765ed...   (Poseidon8(eNote, eIss))
+  │   eIss   = ElGamal(M_I under M_rec)  R = (24688725..., 93913945...)
+  └────
 
-  `====' Deliver + deposit from ANY account bound to \( m_{\text{rec}}
-  \) `===='
-
-  The issuer never knew which account would cash the note.  Both `rec0'
-  and `rec1' can, because both share \( m_{\text{rec}} \):
+  *Delivery: the recipient names the issuer with one secret.* The
+  decryption secret is \( m_{\text{rec}} \) – shared by /every/ account
+  the recipient owns – because \( M_{\text{rec}} = m_{\text{rec}}G \):
+  \[ C_e - m_{\text{rec}} R_e = (M_I + r' M_{\text{rec}}) -
+  m_{\text{rec}}(r'G) = M_I.  \]
 
   ┌────
-  │ for acct in (rec0, rec1):
+  │ M_I = elgamal_decrypt(note.eIss, m_rec)
+  │ assert eq(M_I, issuer["M"])
+  │ print("recipient decrypts eIss with m_rec -> the issuer's registered Identity:")
+  │ print(f"  C_e - m_rec*R_e = {pt(M_I)} == M_I")
+  └────
+
+  ┌────
+  │ recipient decrypts eIss with m_rec -> the issuer's registered Identity:
+  │   C_e - m_rec*R_e = (34794633..., 55370756...) == M_I
+  └────
+
+  *Deposit from ANY account bound to \( m_{\text{rec}} \).* The issuer
+  never knew which account would cash the note.  Both `rec0' and `rec1'
+  can, because both share \( m_{\text{rec}} \).  The blind \( b \) is
+  drawn once here because the note-binding SNARK below must commit the
+  /same/ \( P_I = M_I + bH \) the sigma publishes.
+
+  ┌────
+  │ b = rand_scalar(rng)              # the P_I blind -- shared with the SNARK below
+  │ for name, acct in (("rec0", rec0), ("rec1", rec1)):
   │     dc = deposit_couple_prove(m_rec, acct["sk"], acct["E"], note.eIss,
-  │                               account=0xB0B, chainid=CHAINID)
-  │     assert deposit_couple_verify(acct["pk"], acct["E"], note.eIss, dc,
-  │                                  account=0xB0B, chainid=CHAINID)
+  │                               account=0xB0B, chainid=CHAINID, b=b, rng=rng)
+  │     ok = deposit_couple_verify(acct["pk"], acct["E"], note.eIss, dc,
+  │                                account=0xB0B, chainid=CHAINID)
+  │     print(f"deposit-coupling sigma from {name}: verifies = {ok}  "
+  │           f"P_I = {pt(dc.P_I)}")
+  └────
+
+  ┌────
+  │ deposit-coupling sigma from rec0: verifies = True  P_I = (74064912..., 52659236...)
+  │ deposit-coupling sigma from rec1: verifies = True  P_I = (74064912..., 52659236...)
   └────
 
   `dc' is the EIP-196 Okamoto sigma (E4/E2/E3 of Step A2).  Its only
   Identity-derived public value is \( P_I = M_I + bH \), /perfectly
   hidden/ by the fresh blind \( b \).  On chain, `Notes.spendCoupledA2'
-  hands this same `dc.P_I' to the membership verifier – the binding:
+  hands this same `dc.P_I' to the membership verifier /and/ to the
+  note-binding verifier – the binding:
 
   ┌────
   │ // inside Notes.spendCoupledA2 (abridged):
-  │ require(reg.verifyDepositCoupling(msg.sender, eIss, dc), "bad deposit coupling");
-  │ //                                                  dc.P_I  --- the same point ---v
-  │ _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);  // membership of dc.P_I
+  │ require(reg.verifyDepositCoupling(msg.sender, eEnc, dc), "bad deposit coupling");
+  │ //                                                  dc.P_I --- the same point ---v
+  │ _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
+  │ _verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I.X, dc.P_I.Y);
+  └────
+  *The note-binding witness: tie \( eEnc \) to THIS note.* The spend
+  supplies \( eEnc \), a /fresh re-encryption/ of the leaf's \( eIss \)
+  (same plaintext, new randomness \( s \)) – the chain never sees the
+  mint-time ciphertext again.  The `note_binding' SNARK proves \( eEnc
+  \) re-encrypts the ciphertext committed in the \( idHash \) behind
+  this spend's nullifier, and that its decryption is the \( P_I \) point
+  the sigma committed.  The witness builder runs the whole relation in
+  Python (every constraint is asserted before anything is proved):
+
+  ┌────
+  │ from alberta_buck.wallet.note_binding import make_note_binding_witness
+  │ 
+  │ s = rand_scalar(rng)                      # fresh re-encryption randomness
+  │ witness = make_note_binding_witness(
+  │     rho=note.opening.rho, eNote=note.eNote, eIssCommitted=note.eIss,
+  │     s=s, m_rec=m_rec, b=b, M_I=note.M_I, r_iss=note.r_prime,
+  │ )
+  │ print(f"binding witness built: {len(witness)} signals, all relations asserted")
+  │ print(f"  public nullifier = {hex(int(witness['nullifier']))[:20]}...")
+  │ print(f"  eEnc.R limb0     = {witness['eEncRx'][0]}  (fresh -- not the leaf's eIss.R)")
+  │ R0x_leaf = witness["R0_limb"][0][0]
+  │ print(f"  eIss.R limb0     = {R0x_leaf}")
+  │ assert witness["eEncRx"][0] != R0x_leaf   # re-encryption, not reuse
   └────
 
-  `====' The unilateral receipt: the recipient names BOTH parties, alone
-  `===='
+  ┌────
+  │ binding witness built: 20 signals, all relations asserted
+  │   public nullifier = 0x315cd0f43dcbfc5235...
+  │   eEnc.R limb0     = 7194077872496329669  (fresh -- not the leaf's eIss.R)
+  │   eIss.R limb0     = 13585057060835952469
+  └────
 
+  Proving and verifying this witness is the heavyweight step – a
+  2.4M-constraint Groth16 circuit – so it runs in the build pipeline
+  rather than in this document's session.  The real transcript (Apple
+  Silicon, `make nix-snark-note-binding'):
+
+  ┌────
+  │ $ make nix-snark-note-binding
+  │ --- Compiling circuit (circom --c --no_asm --O2) ---
+  │   R1CS: 471M   (2.4M constraints, 0 linear after --O2, 25 public inputs)
+  │ --- Building C++ witness generator ---     (~9 min, gcc -O3 -fno-strict-aliasing)
+  │ --- Generating witness ---                 (~9 s, 73 MB witness.wtns)
+  │ --- Checking witness (snarkjs wtns check) ---
+  │ [INFO]  snarkJS: WITNESS IS CORRECT
+  │ --- Groth16 setup (ptau: pot22_final.ptau) ---   (1.3 GB zkey)
+  │ --- Proving (rapidsnark) ---               (seconds, vs ~33 s for snarkjs)
+  │ [INFO]  snarkJS: OK!
+  │ Result: Valid proof                        (rapidsnark verifier agrees)
+  │   -> src/NoteBindingGroth16Verifier.sol (EIP-197 proof-B swap applied)
+  │   -> test/vectors/note_binding/proof.json
+  │ $ forge test --match-contract NoteBindingVerifier
+  │ Suite result: ok. 9 passed; 0 failed       (~501K gas raw, ~508K via adapter)
+  └────
+
+  *The unilateral receipt: the recipient names BOTH parties, alone.*
   From \( m_{\text{rec}} \) /alone/ – no issuer cooperation – the
   recipient recovers both Identities and produces a
   third-party-checkable receipt:
 
   ┌────
-  │ receipt = make_receipt(m_rec, note, issuer=0xA11CE, chainid=CHAINID, tree=tree)
+  │ receipt = make_receipt(m_rec, note, issuer=0xA11CE, chainid=CHAINID,
+  │                        tree=tree, rng=rng)
   │ res = verify_receipt(receipt, issuer["pk"], issuer["E"], tree.root(), tree)
   │ assert res.valid
   │ assert eq(res.issuer_M, issuer["M"])     # the payer, named
   │ assert eq(res.recipient_M, M_rec)        # the payee, named
   │ assert res.value == 1000
+  │ print(f"unilateral receipt: {res.reason}")
+  │ print(f"  names issuer    {pt(res.issuer_M)}")
+  │ print(f"  names recipient {pt(res.recipient_M)}")
+  │ print(f"  value           {res.value}")
   └────
 
-  `====' Collusion fails: a bogus \( eIss \) is un-spendable `===='
+  ┌────
+  │ unilateral receipt: VALID
+  │   names issuer    (34794633..., 55370756...)
+  │   names recipient (78777287...,  1501867...)
+  │   value           1000
+  └────
 
-  Now the adversarial case.  A colluding issuer keys \( eIss \) to a
-  /throwaway/ point so the recipient "cannot" decrypt to a registered
-  Identity.  The mint anti-framing binding /still/ accepts (it only
-  forces \( eIss \) over the issuer's own \( M_I \)).  But the recovered
-  point is then /not/ a tree member – so the receipt is INVALID and, on
-  chain, the membership proof cannot exist and the deposit /reverts/:
+  *Collusion fails twice: un-nameable is un-spendable, and substitution
+  cannot bind.* First the classic collusion: an issuer keys \( eIss \)
+  to a /throwaway/ point.  The mint anti-framing binding still accepts
+  (it only forces \( eIss \) over the issuer's own \( M_I \)), but the
+  recovered point is not a tree member – the receipt is INVALID and the
+  membership proof cannot exist.  Second, the substitution escape the
+  note-binding closes: the colluders /can/ build a binding witness over
+  their bogus ciphertext (they know its randomness), but its \( idHash
+  \) is not the spent note's – the SNARK's nullifier disagrees with the
+  one the spend consumed, and the on-chain public-input derivation
+  rejects the proof.
 
   ┌────
-  │ pk_bogus = mul(G1, rand_scalar())                    # a key the recipient lacks
-  │ eIss_bogus = elgamal_encrypt(issuer["M"], pk_bogus, rand_scalar())
-  │ M_I_bogus = elgamal_decrypt(eIss_bogus, m_rec)       # garbage, not issuer["M"]
-  │ assert not tree.contains(M_I_bogus)                  # NOT a registered Identity
-  │ # => verify_receipt returns INVALID at the membership link; spendCoupledA2's
-  │ #    gate 3 has no satisfying Groth16 proof, so the deposit reverts.
+  │ pk_bogus = mul(G1, rand_scalar(rng))                  # a key the recipient lacks
+  │ r_bogus  = rand_scalar(rng)                           # colluders know their own r
+  │ eIss_bogus = elgamal_encrypt(issuer["M"], pk_bogus, r_bogus)
+  │ M_I_bogus = elgamal_decrypt(eIss_bogus, m_rec)        # garbage, not issuer["M"]
+  │ print(f"colluding mint: eIss keyed to a throwaway -- decrypts to {pt(M_I_bogus)}")
+  │ print(f"  registered identity?  {tree.contains(M_I_bogus)}  -> membership unprovable")
+  │ 
+  │ b_bogus = rand_scalar(rng)
+  │ witness_sub = make_note_binding_witness(
+  │     rho=note.opening.rho, eNote=note.eNote, eIssCommitted=eIss_bogus,
+  │     s=rand_scalar(rng), m_rec=m_rec, b=b_bogus, M_I=M_I_bogus, r_iss=r_bogus,
+  │ )
+  │ print(f"substitute-ciphertext nullifier = {hex(int(witness_sub['nullifier']))[:20]}...")
+  │ print(f"the spent note's nullifier      = {hex(int(witness['nullifier']))[:20]}...")
+  │ assert witness_sub["nullifier"] != witness["nullifier"]
+  │ print("  -> public-input mismatch: the substitute proof cannot bind THIS spend")
+  └────
+
+  ┌────
+  │ colluding mint: eIss keyed to a throwaway -- decrypts to (27018772..., 43291458...)
+  │   registered identity?  False  -> membership unprovable
+  │ substitute-ciphertext nullifier = 0x271cc47267f3952333...
+  │ the spent note's nullifier      = 0x315cd0f43dcbfc5235...
+  │   -> public-input mismatch: the substitute proof cannot bind THIS spend
   └────
 
   That is the whole guarantee in one screen: /the recipient holds the
   single secret that names both parties, and the issuer cannot make a
-  spendable note that the recipient is unable to name/.
+  spendable note that the recipient is unable to name – nor can any
+  holder bind a different ciphertext to it/.
 
 
-11.4 B1 Bearer Spend with Depositor Naming (The A2 Dual)
+11.4 A1 in Code: The Public-Issuer Addressed Cycle
+──────────────────────────────────────────────────
+
+  A1 is A2 with the issuer in the clear: \( idHash \) commits the
+  issuer's public Identity and batch Schnorr instead of an encrypted \(
+  eIss \), and the leaf ciphertext `eRec' encrypts \( M_{\text{rec}} \)
+  /under itself/ – so the deposit coupling commits the /recipient's/
+  Identity and the membership certifies /them/.  (The batch Schnorr is
+  checked at the mint transaction level – `verifyIssuerSchnorr'; here it
+  is a synthetic signature, since the session has no chain.)
+
+  ┌────
+  │ from alberta_buck.wallet.unilateral_a1 import (
+  │     mint_unilateral_a1, make_receipt_a1, verify_receipt_a1,
+  │ )
+  │ 
+  │ k = rand_scalar(rng)
+  │ sigma_R, sigma_s = mul(G1, k), (k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
+  │ 
+  │ note_a1 = mint_unilateral_a1(M_rec, v=100, rho=rand_scalar(rng),
+  │                              m_issuer=m_iss, sigma_R=sigma_R, sigma_s=sigma_s,
+  │                              rng=rng)
+  │ print(f"minted A1 note: v = {note_a1.opening.v}")
+  │ print(f"  idHash = Poseidon8(eNote, m_issuer, sigma)  = {hex(note_a1.idHash)[:20]}...")
+  │ print(f"  eRec   = ElGamal(M_rec under M_rec)         R = {pt(note_a1.eRec.R)}")
+  │ 
+  │ rcpt_a1 = make_receipt_a1(m_rec, note_a1, issuer["M"], issuer=0xA11CE,
+  │                           chainid=CHAINID, tree=tree, rng=rng)
+  │ res_a1 = verify_receipt_a1(rcpt_a1, tree.root(), tree)
+  │ assert res_a1.valid and res_a1.value == 100
+  │ print(f"A1 receipt: {res_a1.reason} -- issuer public, recipient proves the note")
+  │ print(f"  addressed THEIR identity: eRec decrypts under m_rec to M_rec")
+  └────
+
+  ┌────
+  │ minted A1 note: v = 100
+  │   idHash = Poseidon8(eNote, m_issuer, sigma)  = 0x2ff6525153c4aa14df...
+  │   eRec   = ElGamal(M_rec under M_rec)         R = (98448865..., 79624823...)
+  │ A1 receipt: VALID -- issuer public, recipient proves the note
+  │   addressed THEIR identity: eRec decrypts under m_rec to M_rec
+  └────
+
+
+11.5 B1 Bearer Spend with Depositor Naming (The A2 Dual)
 ────────────────────────────────────────────────────────
 
   Carol holds a B1 note from a public issuer.  She has never been
@@ -2050,7 +2268,6 @@ Table of Contents
   │     membershipProof,                 // membership of M_Carol, bound to P_dep
   │ );
   └────
-
   The contract verifies the binding, then the membership of
   `b1Proof.P_dep' (the /same/ point the binding committed), and emits
   `SpentCoupledB1(nullifier, face, recipient, issuer, eDepForIss)' with
@@ -2072,7 +2289,71 @@ Table of Contents
   (`make_issuer_receipt' in `alberta_buck.wallet.b1_binding'.)
 
 
-11.5 Summary: What the Observer Sees (Mallory)
+11.6 B1 in Code: The Issuer Names the Depositor
+───────────────────────────────────────────────
+
+  The same session, continued.  Carol is a registered Identity the
+  (public) issuer has never met; she holds a bearer note's opening.  At
+  spend she builds `eDepForIss' – her own \( M_{\text{dep}} \) encrypted
+  under the issuer's key – and the five-relation depositor-binding sigma
+  couples it to her payout account and to the blinded membership
+  commitment \( P_{\text{dep}} \):
+
+  ┌────
+  │ from alberta_buck.wallet.b1_binding import (
+  │     b1_bind_prove, b1_bind_verify, make_issuer_receipt, verify_issuer_receipt,
+  │ )
+  │ 
+  │ m_carol = rand_scalar(rng)
+  │ carol   = account(m_carol)
+  │ tree.insert(carol["M"])
+  │ 
+  │ pk_iss = issuer["pk"]
+  │ binding, eDepForIss = b1_bind_prove(m_carol, carol["sk"], carol["E"], pk_iss,
+  │                                     account=0xCA801, chainid=CHAINID, rng=rng)
+  │ ok = b1_bind_verify(carol["pk"], carol["E"], pk_iss, eDepForIss, binding,
+  │                     account=0xCA801, chainid=CHAINID)
+  │ print(f"B1 depositor binding from Carol: verifies = {ok}")
+  │ print(f"  eDepForIss = ElGamal(M_carol under pk_iss)  R = {pt(eDepForIss.R)}")
+  │ print(f"  P_dep      = {pt(binding.P_dep)}  (blinded; membership binds it)")
+  └────
+
+  ┌────
+  │ B1 depositor binding from Carol: verifies = True
+  │   eDepForIss = ElGamal(M_carol under pk_iss)  R = (71317108..., 92478725...)
+  │   P_dep      = (15608053..., 69485306...)  (blinded; membership binds it)
+  └────
+
+  The issuer alone – reading `eDepForIss' from the `SpentCoupledB1'
+  event – decrypts and /proves/ the depositor's Identity, the dual of
+  the A2 unilateral receipt.  And the collusion-substitution is
+  rejected: a ciphertext under any other key breaks the coupled sigma,
+  so the depositor cannot mis-name itself.
+
+  ┌────
+  │ rcpt_iss = make_issuer_receipt(issuer["sk"], issuer["M"], eDepForIss,
+  │                                value=25, issuer=0xA11CE, chainid=CHAINID,
+  │                                tree=tree, rng=rng)
+  │ res_b1 = verify_issuer_receipt(rcpt_iss, tree.root(), tree)
+  │ assert res_b1.valid
+  │ assert eq(res_b1.recipient_M, carol["M"])
+  │ print(f"issuer-unilateral receipt: {res_b1.reason}")
+  │ print(f"  names depositor {pt(res_b1.recipient_M)} == M_carol")
+  │ 
+  │ eDep_sub = elgamal_encrypt(carol["M"], mul(G1, rand_scalar(rng)), rand_scalar(rng))
+  │ ok_sub = b1_bind_verify(carol["pk"], carol["E"], pk_iss, eDep_sub, binding,
+  │                         account=0xCA801, chainid=CHAINID)
+  │ print(f"substituted eDepForIss verifies = {ok_sub}  (collusion-substitution rejected)")
+  └────
+
+  ┌────
+  │ issuer-unilateral receipt: VALID
+  │   names depositor (55296567..., 79403012...) == M_carol
+  │ substituted eDepForIss verifies = False  (collusion-substitution rejected)
+  └────
+
+
+11.7 Summary: What the Observer Sees (Mallory)
 ──────────────────────────────────────────────
 
   In all three flows the chain reveals:
@@ -2175,7 +2456,6 @@ Table of Contents
   │ function bindContract(address t, ..., bool isPublicIdentity_, bool isCarrying_) external;
   │ mapping(address => bool) public isCarrying;
   └────
-
   The standard `transfer' path then dispatches on the /sender's/ flag:
 
   ┌────
@@ -2183,7 +2463,6 @@ Table of Contents
   │ else                           _nonCarryingTransfer(from, to, amount);
   │ emit Transfer(from, to, amount);     // one standard event either way
   └────
-
   The preconditions are exactly those of any transfer (sender and
   recipient both `isVerified', the bilateral receipt-fragment /
   `_identityHash' identity check), because it /is/ an ordinary transfer.
@@ -2197,7 +2476,6 @@ Table of Contents
   │ from.buckSeconds       = liveBs - carried;   // sender keeps its per-BUCK age
   │ recipient.buckSeconds += carried;            // recipient inherits the age
   └────
-
   Carrying accounts hold no NFT-backed credit and cannot go negative
   (the path asserts `amount <' raw=).  What makes an account
   pool-friendly is the /flag/, set once at bind time; there is no
@@ -2352,14 +2630,32 @@ Table of Contents
      counterpart is implemented: `spendCoupledB1' binds
      `verifyDepositorBinding''s committed point `P_dep' to the
      membership exactly as A2 binds `dc.P_I' (`NotesCoupledB1.t.sol').
+  5. *The note \( \leftrightarrow \) \( eEnc \) re-encryption tie –
+     DONE.* The flavour-agnostic note proof exposes no \( idHash \), so
+     gates 1–4 alone verified a ciphertext /of the depositor's choosing/
+     – leaving addressed-binding ("only \( M_{\text{rec}} \) can spend")
+     and the A2 substitution escape ("attach a different, nameable \(
+     eEnc \)") unenforced.  `circuits/note_binding.circom' (~2.4M
+     non-linear constraints; the ElGamal-structure optimisation keeps
+     every EC operation fixed-base) proves the spend's \( eEnc \)
+     re-encrypts the ciphertext committed in the \( idHash \) behind
+     /this spend's nullifier/, and that its decryption is the sigma's
+     own committed \( P_I \) point.  `NoteBindingVerifierAdapter'
+     derives all 25 public inputs on chain from the caller's `nullifier'
+     / `eEnc' / `dc.P_I'; the governance slot
+     `Notes.setNoteBindingVerifier' rotates the verifier.  (/Proofs/,
+     Theorem 12; toolchain history in
+     /alberta-buck-verifier-implementation/.)
 
-  With items 1–4 shipped the transition is *complete*: every mint and
+  With items 1–5 shipped the transition is *complete*: every mint and
   spend is Identity-M-bound, the on-chain `identityRoot' gates every
   spend, and the note's counterparty Identity is always recoverable and
-  – because the membership is /bound/ to the sigma's committed point –
-  always nameable, even under collusion.  The only remaining
-  pre-deployment item is a proper Powers-of-Tau ceremony (the dev ptau
-  uses dev-only entropy).
+  – because the membership is /bound/ to the sigma's committed point,
+  and the verified ciphertext is /bound to the spent note/ – always
+  nameable, even under collusion and ciphertext substitution.  The only
+  remaining pre-deployment item is a proper Powers-of-Tau ceremony (the
+  dev ptaus, including the pot22 behind the note-binding verifier, use
+  dev-only entropy).
 
   Additional items tracked across the series:
 
@@ -2380,46 +2676,312 @@ Table of Contents
     real-world contention warrants it.
 
 
-15 Cross-References
+15 Privacy Audit: Data Revealed Per Step
+════════════════════════════════════════
+
+  The whole construction threads one needle: publish enough that each
+  party can /name/ the other under compulsion, while publishing so
+  little that no /third party/ can name either, or link payments in
+  bulk.  This section consolidates the per-step disclosure analysis for
+  the shipped Identity-M surface.  (It originated as the gap analysis in
+  /alberta-buck-notes-decryptability/; the gaps it tracked are closed,
+  and this is the surviving reference form.)
+
+
+15.1 Requirements and adversaries
+─────────────────────────────────
+
+  Three properties, against three adversaries:
+
+  • *(Bulk-tracing resistance.)* /Mallory/, a passive observer with the
+    full chain history and unbounded compute but no party's secrets,
+    cannot reconstruct who paid whom, how much, or link a mint to its
+    spend(s).
+  • *(Third-party non-disclosure.)* Nothing on chain reveals either
+    party's KYC-bound Identity point \( M \) to a non-participant – not
+    even to the /counterparty's/ counterparty, and not in aggregate
+    across many payments.
+  • *(Mutual decryptability.)* Each of the two participants, from data
+    they hold plus public chain state, can produce a sound receipt
+    naming the other's registered \( M \) – and a /colluding/ pair
+    cannot arrange a payment for which no such receipt exists (the
+    non-deniable-receipt invariant).
+
+  The first two are /confidentiality/ against outsiders; the third is
+  /accountability/ between insiders.  They pull in opposite directions,
+  so every published datum below is justified against all three.
+
+
+15.2 The on-chain footprint of each step
+────────────────────────────────────────
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Step                         Published on chain                                                                                                                               Kept off chain (party-held)                                                 
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `register' / `bindContract'  addr, `pk', `E_addr' (ElGamal ct of \(M\) under own `pk'), `isPublicIdentity', `identityRoot'                                                    \(m\), \(M\), \(sk\)                                                        
+   `mint' (any flavor)          `Minted(issuer, totalFace, startIndex, count, newRoot)'; `cms[]' in calldata (opaque Poseidon)                                                   per-leaf opening \((flavor,v,\rho,idHash,pred)\); \(eNote\), issuer payload 
+   `mint' public (A1/B1)        + `IssuerBound(issuer, newRoot)'; one Schnorr over `keccak(cms)'                                                                                 –                                                                           
+   `mint' private (A2)          + `IssuerReencBound(issuer, newRoot, count)'; per-leaf blinded binding \((Q,U,\hat{T},A_1..A_5)\)                                                \(M_{iss}, r', \beta, \gamma, sk_{iss}\); the recipient point \(M_{rec}\)   
+   A1/A2 spend                  `SpentCoupledA1/A2(nf, face, recipient, P_I)'; \(eEnc\) (fresh re-encryption), the coupling sigma, the membership + note-binding Groth16 proofs  \(\rho, idHash, m_{rec}, sk_{dep}, b, s\); the decrypted \(M_I\)            
+   B1 spend                     `SpentCoupledB1(nf, face, recipient, P_{dep})'; \(eDepForIss\), the depositor-binding sigma, the membership proof                                \(\rho, idHash, m_{dep}, sk_{dep}, r, b\)                                   
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Two facts do the heavy lifting throughout.  First, `cms[]' are
+  Poseidon commitments: a leaf reveals /nothing/ about \( (flavor, v,
+  \rho, idHash, predicate) \) without \( \rho \).  Second, the spend
+  nullifier \( nf = \mathrm{Poseidon}_3(\rho, idHash, tag) \) is a PRF
+  output over secret material, so it is unlinkable to any `cm' without
+  the opening (/Proofs/, Theorem 10).
+
+
+15.3 Why bulk-tracing and third-party privacy hold
+──────────────────────────────────────────────────
+
+  *Mint is opaque; spend is unlinkable to mint.* At mint Mallory sees
+  opaque `cms[]' and a `totalFace'; she cannot read any \( v_i \),
+  recipient, or flavor (Poseidon hiding).  At spend she sees a fresh \(
+  nf \), a `face', and a `recipient'; \( nf \) is a PRF over \( (\rho,
+  idHash) \), so inverting it to a specific `cm' is pre-image
+  resistance.  No field of a spend points back to a mint: the spend's \(
+  eEnc \) is a /fresh re-encryption/ of the leaf ciphertext (uniformly
+  re-randomised; the note-binding relation deliberately proves
+  re-encryption /equivalence/, never equality with the public mint-time
+  \( eIss \)).  The only residual linkage surfaces are the two that
+  /must/ be public for the ERC-20 to pay out – `face' and `recipient' –
+  mitigated by fixed denominations and relayed payouts, orthogonal to
+  this document.
+
+  *Identities never appear on chain – the load-bearing check.* A
+  registered \( E_{addr} \) is an ElGamal /ciphertext/ of \( M \);
+  reading it yields nothing without \( sk \).  The danger is in the
+  /bindings/, which manipulate \( M \) and the recipient point
+  algebraically.  Concretely, the A2 mint binding must publish enough to
+  prove "\( eIss \) re-encrypts the issuer's registered \( M_{iss} \)
+  under the recipient's point" without revealing either.  This is
+  exactly where the first draft failed – the canonical near-miss, kept
+  here because it is the clearest way to see the invariant:
+
+  ┌────
+  │ Near-miss (rejected draft).  The binding published T = r' * pk_rec.
+  │ But the leaf is C_i = M_iss + r' * pk_rec, so ANY observer computes
+  │     M_iss = C_i - T.
+  │ At mint msg.sender IS the issuer, so this publicly bound the issuer's
+  │ address to its Identity -- collapsing A2 to A1 and breaking BOTH
+  │ third-party non-disclosure and bulk unlinkability (every A2 mint by the
+  │ same issuer now carries the same recoverable M_iss).
+  └────
+
+  The shipped binding blinds it: it publishes \( \hat{T} = r' pk_{rec} +
+     \gamma G \) for a fresh \( \gamma \).  Now \( C_i - \hat{T} =
+     M_{iss} - \gamma G \), a uniformly random offset from \( M_{iss} \)
+     – so \( \hat{T} \) reveals nothing.  The recipient's point is
+     likewise hidden (inside the perfectly-hiding \( Q \) and the
+     uniform \( U, \hat{T} \)), and soundness is undisturbed because \(
+     \gamma \) cancels in the verification relations.  An A2 mint's
+     on-chain footprint is, to Mallory, a vector of
+     uniformly-distributed group elements.
+
+  *The spend-side sigmas reveal the spender's action, not any Identity.*
+  The deposit-coupling and depositor-binding sigmas are HVZK; their only
+  Identity-derived public values are the blinded commitments \( P_I =
+  M_I + bH \) / \( P_{dep} = M_{dep} + bH \), perfectly hiding for
+  uniform \( b \).  The membership and note-binding Groth16 proofs are
+  zero-knowledge; their public inputs are the nullifier (PRF), \( eEnc
+  \) (uniform), and \( P \) (hiding).  `msg.sender' is visible – exactly
+  as the sender of any ERC-20 transfer is – but no /Identity/ is.
+
+
+15.4 Why mutual decryptability holds – the final data set
+─────────────────────────────────────────────────────────
+
+  For each flavor, the data each party ends up holding, and the
+  predicate it satisfies (the receipt verifiers in `alberta_buck.wallet'
+  are the public predicate \( \mathsf{RcptVerify} \); see the executable
+  sections above):
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Flavor  Recipient names issuer via                                                                                 Issuer names depositor via                                              
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   B1      in-clear \(M_{iss}\) + batch Schnorr (`verifyIssuerSchnorr')                                               `SpentCoupledB1': decrypt \(eDepForIss\) with \(sk_{iss}\) (B1 in Code) 
+   A1      in-clear \(M_{iss}\) + batch Schnorr                                                                       chose \(M_{rec}\) at mint (symmetric knowledge)                         
+   A2      decrypt \(eIss\) under \(m_{rec}\); binding + membership prove it is the *registered* minter (A2 in Code)  chose \(M_{rec}\) at mint                                               
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The A2 row is the subtle one.  The recipient's receipt composes three
+  facts: the mint anti-framing binding (the ciphertext re-encrypts the
+  issuer's /registered/ record), their own verifiable decryption (it
+  opens under \( m_{rec} \) to the named point), and the membership of
+  that point in \( \mathsf{rt_{id}} \).  No issuer cooperation is needed
+  – the receipt is /unilateral/ – and no new proof is needed at receipt
+  time: the coupling falls out of composing the mint binding with the
+  recipient's own decryption.
+
+
+15.5 The colluding pair, and where each escape is closed
+────────────────────────────────────────────────────────
+
+  Completeness (an honest recipient /can/ produce a receipt) is met off
+  chain.  The third clause – no deniability even when payer and payee
+  /collude/ – needs the binding to be /unavoidable/.  Three escapes
+  existed on the road here, each now closed at a specific gate:
+
+  1. /A binding-less leaf./ Closed at *mint*: `Notes.mint' requires a
+     verified issuer binding (Schnorr or re-encryption) for every leaf;
+     the SNARK's per-leaf `issuerMode' signal makes a private-issuer
+     bearer leaf unprovable (no B2 codepoint).
+  2. /A nameable note deposited by the wrong Identity./ Closed at
+     *spend* by the coupling sigma + bound membership: the depositing
+     account must hold the Identity scalar that decrypts the verified
+     ciphertext.
+  3. /An un-nameable note made spendable by ciphertext substitution./
+     Closed at *spend* by the note-binding tie: the verified \( eEnc \)
+     must re-encrypt the ciphertext committed behind /this spend's
+     nullifier/ (/Proofs/, Theorem 12) – demonstrated executably in the
+     A2 in Code counter-example above.
+
+
+16 Appendix: The Hostile-Issuer Mint Ledger
+═══════════════════════════════════════════
+
+  The batch-mint design memo (/alberta-buck-notes-rollup-mint/) audited
+  every attack vector available to a hostile minter under the
+  Phase-7-bis pivot (duplicate-`cm' detection moved from an on-chain
+  check to economic self-enforcement).  The ledger survives as the
+  soundness reference for the shipped mint path:
+
+  • *A1. Underpay `totalFace'.* `totalFace' is a public input bound by
+    the sum constraint and `Num2Bits(128)'; `transferFrom' pulls exactly
+    `totalFace'.  /Intact./
+  • *A2. Field-overflow on sum.* `Num2Bits(128)' on each \( v_i \) and
+    on `totalFace' leaves 62-bit margin against field wrap at \( N \le
+    2^{64} \).  /Intact./
+  • *A3. Duplicate `cm' across mints.* Insertion succeeds at a new leaf;
+    the nullifier is deterministic in the opening, so exactly one copy
+    is spendable.  The duplicate-minter paid twice for one spend; no one
+    else is harmed.  /Economically self-enforcing./
+  • *A4. `cm' collision with `ZERO_VALUE' or 0.* Domain-separated keccak
+    vs.  the Poseidon-5 commitment space: \( 2^{-254} \).  /Intact./
+  • *A5. Lying about `oldRoot'.* Contract asserts equality with the
+    recorded root; revert.  /Intact./
+  • *A6. Lying about `newRoot'.* The SNARK derives `newRoot' from
+    `oldRoot' plus the folded leaves; unsatisfiable.  /Intact./
+  • *A7. Front-running to invalidate a pending mint.* The loser's
+    `oldRoot' check fails before any BUCK moves; re-prove and retry.
+    /No value loss; operational concern only (see Prover Contention)./
+  • *A8. Mint with an `idHash' naming someone else.* The mint-side
+    issuer bindings (Schnorr for public, `verifyIssuerReenc' for
+    private) force the identity payload over the minter's own registered
+    record – the anti-framing half of Theorem 7.  A self-harming junk
+    `idHash' remains possible and remains the minter's own loss.
+    /Intact./
+  • *A9. Mint junk leaves with unknown openings.* The circuit requires
+    knowledge of every opening; junk is a paid donation to the pool.
+    /Intact./
+  • *A10. Spend nullifier reuse.* `nullifiers[nf]' set-once; second
+    spend reverts.  /Intact./
+  • *A11. Spend front-running.* `recipient' is bound in the spend
+    SNARK's public inputs; a proof cannot be replayed toward a different
+    recipient.  /Intact./
+  • *A12. Lying about `nextLeafIndex'.* Asserted against on-chain state
+    and consumed by the SNARK's insertion paths; either reverts or
+    produces an unhonoured root.  /Intact./
+
+  *Headline:* every hostile-minter guarantee holds under the batch-mint
+  pivot.  Buggy /wallets/ (e.g., a \( \rho \) RNG collision) are no
+  longer caught by the chain, but the failure mode is "wallet owner
+  forfeits one note", not "pool drains".
+
+
+17 Security Properties and the Tests That Witness Them
+══════════════════════════════════════════════════════
+
+  Every property claimed in this document is pinned by an executable
+  witness – the Python suites exercise the wallet reference, the Forge
+  suites the on-chain verifiers, and the cross-artifact vectors
+  (`alberta_buck.wallet' \( \to \) `vm.readFile') keep the two
+  byte-for-byte aligned.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Suite                                      Count  What it demonstrates                                                                                                                                                                                 
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `alberta_buck/test/test_unilateral_a2.py'     11  A2 mint binding; delivery decrypt; deposit coupling (any account); unilateral receipt names both parties; collusion un-nameable + un-spendable; sigma soundness; identity-hiding; mint unlinkability 
+   `alberta_buck/test/test_unilateral_a1.py'      7  A1 mint; `idHash' binds the public issuer + Schnorr; recipient-side receipt names both; tamper rejection                                                                                             
+   `alberta_buck/test/test_b1_binding.py'        11  B1 depositor binding; issuer-unilateral receipt names the depositor; collusion-substitution rejected; Mallory blind; unlinkability                                                                   
+   `test/UnilateralA2.t.sol'                      7  on-chain `verifyDepositCoupling' parity + soundness (tampered response / \(P_I\) / ciphertext, wrong chainid, unregistered depositor)                                                                
+   `test/B1Binding.t.sol'                         6  on-chain `verifyDepositorBinding' parity + soundness                                                                                                                                                 
+   `test/IdentityMembershipBinding.t.sol'         5  the \(P\) binding: bound point verifies; mismatched \(P_x\)/\(P_y\)/root rejected                                                                                                                    
+   `test/NotesCoupledA1.t.sol'                    8  end-to-end `spendCoupledA1': completeness + payout; tamper/double-spend reverts                                                                                                                      
+   `test/NotesCoupledA2.t.sol'                   10  end-to-end `spendCoupledA2': completeness + payout + `SpentCoupledA2'; bad coupling / tampered \(P_I\) / unregistered / rejected membership / double-spend revert                                    
+   `test/NotesCoupledB1.t.sol'                    6  end-to-end `spendCoupledB1': the depositor-binding + bound membership path                                                                                                                           
+   `test/NoteBindingVerifier.t.sol'               9  the note \(\leftrightarrow\) \(eEnc\) tie: real Groth16 proof verifies (raw + adapter); tampered nullifier / point / proof rejected; proof-length gating                                             
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Build/test entry points: `make nix-test' (Forge), `make
+  nix-test-python' (wallet reference), `make nix-snark-note-binding'
+  (note-binding circuit + trusted setup + vectors).
+
+
+18 Cross-References
 ═══════════════════
 
   • [alberta-buck-notes.org] – architectural overview of the Notes
     primitive (flavors, Merkle tree, demurrage interaction).  Identity-M
-    edition.
-  • [alberta-buck-notes-identity-axis.org] – the unified identity-M
-    model: one gadget, three flavours, the registry-Identity
-    accumulator, 34 tests.
-  • [alberta-buck-notes-unilateral.org] – the A2 corner in full:
-    identity-targeted encryption, deposit-coupling sigma, unilateral
-    receipt naming both parties.
-  • [alberta-buck-notes-decryptability.org] – the gap this closes
-    (issuer-binding at mint) and the "identity-targeted alternative"
-    that the identity-M model generalises.
-  • [alberta-buck-notes-rollup-mint.org] – Phase-7-bis batch-mint design
-    memo: R1CS counts per N, gas projections, per-attack-vector
-    hostile-Alice audit (A1-A12), concurrency model, migration plan.
+    edition.  The other living half of the Notes documentation pair
+    (this document is the worked, executable half); its /Document
+    Series/ section is the canonical map of which satellite memos are
+    living, forward designs, or historical.
   • [alberta-buck-proofs.org] – formal correctness arguments (Theorems
-    7-11; Open Questions in Part IV).
+    7-12; Open Questions in Part IV).
+  • /alberta-buck-verifier-implementation.org/ – SNARK toolchain
+    engineering: the witness-generation root cause, rapidsnark
+    integration, trusted setups.
   • [alberta-buck-ethereum.org] – Solidity surface, gas costs,
     phase-by-phase implementation status, Open Work Items.
   • [alberta-buck-identity.org] – IdentityRegistry, PS credentials, and
     the bilateral ElGamal handshake that anchors `msg.sender' to a
     verifiable identity.
+  • [alberta-buck-notes-identity-axis.org] – /historical/: the unified
+    identity-M design memo; absorbed into this document and the notes
+    overview.
+  • [alberta-buck-notes-unilateral.org] – /historical/: the A2 corner as
+    first built; absorbed into "A2 Identity-Targeted Spend" / "A2 in
+    Code" above.
+  • [alberta-buck-notes-decryptability.org] – /historical/: the
+    non-deniable-receipt gap analysis and fix design; the invariant
+    lives in the notes overview, the privacy audit above, the theorems
+    in Proofs, and the fix is implemented (`note_binding.circom').
+  • [alberta-buck-notes-rollup-mint.org] – /historical/: Phase-7-bis
+    batch-mint design memo (R1CS counts per N, gas projections,
+    concurrency model); its hostile-issuer audit survives as the
+    appendix above.
   • `circuits/mint_batch.circom' – the Phase-7-bis batch-mint circuit
     (one compile per pinned N).
   • `circuits/spend.circom' – the Phase-7 spend circuit (bearer-shape).
+  • `circuits/note_binding.circom' – the note \( \leftrightarrow \) \(
+    eEnc \) re-encryption tie (A1/A2 spends).
   • `src/Notes.sol', `src/MintGroth16Verifier*.sol',
     `src/MintVerifierAdapter.sol', `src/SpendGroth16Verifier.sol',
-    `src/SpendVerifierAdapter.sol' – the on-chain code paths walked
-    above.
+    `src/SpendVerifierAdapter.sol',
+    `src/NoteBindingGroth16Verifier.sol',
+    `src/NoteBindingVerifierAdapter.sol' – the on-chain code paths
+    walked above.
   • `scripts/snark/prove_mint_batch.js', `scripts/snark/prove_spend.js'
-    – the reference provers used in tests.
-  • `test/MintVerifier.t.sol', `test/SpendVerifier.t.sol' – the Foundry
-    tests that pin the soundness stories to executable assertions.
+    – the reference provers used in tests;
+    `scripts/snark/setup_note_binding.sh' – the note-binding circuit +
+    trusted-setup pipeline.
+  • `test/MintVerifier.t.sol', `test/SpendVerifier.t.sol',
+    `test/NoteBindingVerifier.t.sol' – the Foundry tests that pin the
+    soundness stories to executable assertions.
 
 
 [alberta-buck-notes.org]
 <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
+
+[alberta-buck-proofs.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
+
+[alberta-buck-ethereum.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
+
+[alberta-buck-identity.org]
+<https://perry.kundert.ca/range/finance/alberta-buck-identity/>
 
 [alberta-buck-notes-identity-axis.org]
 <https://perry.kundert.ca/range/finance/alberta-buck-notes-identity-axis/>
@@ -2432,12 +2994,3 @@ Table of Contents
 
 [alberta-buck-notes-rollup-mint.org]
 <https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
-
-[alberta-buck-proofs.org]
-<https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
-
-[alberta-buck-ethereum.org]
-<https://perry.kundert.ca/range/finance/alberta-buck-ethereum/>
-
-[alberta-buck-identity.org]
-<https://perry.kundert.ca/range/finance/alberta-buck-identity/>

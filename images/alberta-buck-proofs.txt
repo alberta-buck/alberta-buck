@@ -63,13 +63,20 @@ of the series relies on:
   counterparties name the other as a /registered/ Identity, /enforced/
   by the membership half (an un-nameable counterparty is un-spendable) –
   while no third party names either or links mint to spend.
+• *Theorem 12* (note-binding re-encryption tie, A1/A2): the ciphertext a
+  depositor supplies at spend is provably a re-encryption – under the
+  authenticated recipient Identity – of the ciphertext the /spent note
+  itself/ committed at mint.  This pins Theorems 8 and 11 to the
+  specific note: a stolen opening cannot be redeemed with a
+  self-addressed substitute, and an un-nameable A2 note stays
+  un-spendable even against active ciphertext substitution.
 
 Every theorem is accompanied by an executable `py_ecc' sanity check on
 BN254.  The proofs assume only the q-SDH assumption (for PS signature
 unforgeability), the discrete logarithm assumption on \(
 \text{alt\_bn128}\ G_1 \), the random oracle model (for the Fiat-Shamir
 transform and Poseidon hashing), and knowledge soundness of the
-underlying SNARK proof system (for Theorems 8-9) – all standard
+underlying SNARK proof system (for Theorems 8-9 and 12) – all standard
 assumptions that Ethereum's security or any zk-SNARK rollup already
 requires. ([PDF], [Text])
 
@@ -105,9 +112,10 @@ Table of Contents
 .. 4. Theorem 9 (Depositor-Binding Soundness – B1)
 .. 5. Theorem 10 (Nullifier and Double-Spend Prevention)
 .. 6. Theorem 11 (Mutual Decryptability and Transaction-Graph Privacy)
-.. 7. Sanity Check (py_ecc on BN254)
-.. 8. Worked Example: An Identity-M Spend End to End
-.. 9. Mint-Circuit Status: Phase 7-bis Closure of the Earlier Open Questions
+.. 7. Theorem 12 (Note-Binding Re-Encryption Tie – A1, A2)
+.. 8. Sanity Check (py_ecc on BN254)
+.. 9. Worked Example: An Identity-M Spend End to End
+.. 10. Mint-Circuit Status: Phase 7-bis Closure of the Earlier Open Questions
 ..... 1. Closure 1 (Field-Overflow / Value-Conservation Range Check) – /Discharged in circuit/
 ..... 2. Closure 2 (Single `transferFrom' \(\leftrightarrow\) \( N \) Commitments) – /Discharged by SNARK binding/
 ..... 3. Closure 3 (Spend-Circuit Trio) – /Mint half discharged; nullifier + spend-side value conservation deferred to `spend.circom'/
@@ -1016,7 +1024,10 @@ Table of Contents
   • *Collusion closed (A2).* If a colluding issuer keys \( eIss \) to a
     throwaway point, \( M^\ast \) is a non-member: no membership proof
     exists (4 fails) and the deposit /reverts/.  No
-    spendable-but-unnameable note can be created.
+    spendable-but-unnameable note can be created.  (Clause (3) concerns
+    the \( eEnc \) /supplied at spend/; Theorem 12 ties that \( eEnc \)
+    to the ciphertext the spent note committed, closing the
+    substitute-\( eEnc \) escape.)
   • *Issuer cannot self-redeem.* The issuer holds \( M_{\text{rec}} \)
     but not \( m_{\text{rec}} \); it cannot satisfy (2) for any account
     it controls – unless it /is/ the recipient (self-wormhole).
@@ -1112,9 +1123,11 @@ Table of Contents
   • /A2 (private)/: the recipient decrypts \( eIss \) under \(
     m_{\text{rec}} \) to \( M_{\text{iss}} \) (Theorem 7.1), and Theorem
     8's membership certifies it is registered; anti-framing (Theorem
-    7.2) forces it to be the true minter.  This is the close of the
-    recipient-key collusion gap – an issuer cannot produce a /spendable/
-    note the recipient cannot /name/.
+    7.2) forces it to be the true minter, and the note-binding tie
+    (Theorem 12) forces the spend's verified ciphertext to be the one
+    /this note/ committed.  This is the close of the recipient-key
+    collusion gap – an issuer cannot produce a /spendable/ note the
+    recipient cannot /name/.
 
   *Issuer names the depositor.*
   • /A1, A2 (addressed)/: the issuer chose \( M_{\text{rec}} \) at mint
@@ -1142,7 +1155,94 @@ Table of Contents
   \blacksquare \)
 
 
-5.7 Sanity Check (py_ecc on BN254)
+5.7 Theorem 12 (Note-Binding Re-Encryption Tie – A1, A2)
+────────────────────────────────────────────────────────
+
+  Theorems 8 and 11 reason about /the ciphertext the depositor supplies
+  at spend/ (\( eEnc \)).  On their own they leave one degree of
+  freedom: nothing yet forces that \( eEnc \) to be /about the note
+  being spent/.  A depositor holding a stolen opening could attach its
+  /own/ self-addressed \( eEnc \) (defeating addressed binding), and an
+  A2 coalition could attach a /nameable/ substitute for an un-nameable
+  committed \( eIss \) (re-opening the collusion gap).  The note-binding
+  relation (`circuits/note_binding.circom', verified behind
+  `INoteBindingVerifier' in the addressed spends) closes both.
+
+  *Statement.* Suppose the contract accepts an addressed spend with the
+  note-binding verifier active: in addition to the note proof, the
+  deposit-coupling sigma, and the membership proof (Theorem 8), the
+  Groth16 binding proof verifies with public inputs /derived on chain/
+  from the caller's nullifier \( nf \), the supplied \( eEnc = (R_e,
+  C_e) \), and the sigma's committed point \( dc.P_I \) (the adapter
+  decomposes the six point coordinates into 64-bit limbs; the proof
+  bytes carry only the Groth16 triple).  Then under Groth16
+  knowledge-soundness, the ROM (Poseidon), and the independence of the
+  NUMS point \( H \) (no known \( \log_G H \)), an extractor produces \(
+  (\rho,\ idHash,\ eNote,\ eIss_0,\ s,\ r,\ m_{\text{rec}},\ b,\ M_I) \)
+  such that:
+
+  1. *(Same note.)* \( nf = \mathrm{Poseidon}_3(\rho,\ idHash,\
+     \mathrm{tag}) \) – the very nullifier this spend consumed – and \(
+     idHash = \mathrm{Poseidon}_8(eNote,\ eIss_0) \) – the identity
+     payload the spent note committed at mint.
+  2. *(Re-encryption equivalence.)* With \( eIss_0 = (R_0, C_0) \): \(
+     R_e = R_0 + sG \) and \( C_e = C_0 + (s \cdot m_{\text{rec}})G \) –
+     the supplied \( eEnc \) is a re-randomisation of the /committed/
+     ciphertext under \( M_{\text{rec}} = m_{\text{rec}}G \), carrying
+     the same plaintext.
+  3. *(ElGamal structure.)* \( R_0 = rG \) and \( C_0 = M_I + (r \cdot
+     m_{\text{rec}})G \): the committed ciphertext decrypts under \(
+     m_{\text{rec}} \) to \( M_I \).
+  4. *(Committed point.)* \( P_I = M_I + bH \) – the same blinded point
+     the coupling sigma opened and the membership proof certified.
+
+  *Proof.* Constraints (1) are the two Poseidon openings; (2)-(4) are
+  fixed-base scalar-multiplication relations checked in-circuit over
+  4-limb \( \mathbb{F}_q \) arithmetic; knowledge-soundness extracts the
+  witnesses.  The sigma's extractor (Theorem 8) independently gives \(
+  (m'_{\text{rec}}, sk_{\text{dep}}, b') \) with \( eEnc \) decrypting
+  under \( m'_{\text{rec}} \) to \( M^\ast \) and \( P_I = M^\ast + b'H
+  \).  Since re-encryption preserves the plaintext, clause (2)+(3) give
+  \( eEnc \) decrypting under \( m_{\text{rec}} \) to \( M_I \);
+  equating the two openings of \( P_I \), \( M_I + bH = M^\ast + b'H \).
+  If \( (M_I, b) \neq (M^\ast, b') \) this yields \( \log_G H \),
+  contradicting the NUMS assumption.  Hence \( M_I = M^\ast \) and the
+  SNARK's decrypted point /is/ the point the sigma authenticated and the
+  membership certified.  \( \blacksquare \)
+
+  *Implications.*
+
+  • *Addressed binding enforced.* Clause (2) forces the spend's \( eEnc
+    \) to re-encrypt the committed \( eIss_0 \) under the /same/ \(
+    m_{\text{rec}} \) the coupling sigma authenticated (E2: the
+    depositing account's registered Identity scalar).  An account
+    holding a stolen A1/A2 opening cannot redeem with a self-addressed
+    \( eEnc \): its own \( m \neq m_{\text{rec}} \) cannot satisfy (2)
+    and (3) for the committed ciphertext.  Only the addressed Identity
+    spends – from any of its Fountain accounts.
+  • *A2 collusion closed against substitution.* Theorem 8's "collusion
+    closed" implication assumed the verified \( eEnc \) was about the
+    spent note; Theorem 12 makes that an extractable fact.  A coalition
+    minting an un-nameable \( eIss \) (keyed to a throwaway point) can
+    no longer attach a nameable substitute: the binding forces \( M_I \)
+    to be the committed ciphertext's decryption, the membership then has
+    no satisfying witness, and the deposit reverts.  Un-nameable \(
+    \Rightarrow \) un-spendable, now against /active substitution/, not
+    merely honest provers.
+  • *Unlinkability preserved.* The relation is re-encryption
+    /equivalence/, not equality: requiring the literal mint-time \( eIss
+    \) (a public input of `Notes.mint') would link spend to mint and
+    destroy A2 anonymity.  The supplied \( eEnc \) is a fresh uniform
+    re-randomisation (IND-CPA), the nullifier is a PRF output (Theorem
+    10), and \( P_I \) is perfectly hiding – the spend's public
+    footprint gains no new linkage surface.
+  • *Grounding.* Theorem 8 clause (3) and Theorem 11's A2 naming clause
+    are stated over the supplied \( eEnc \); Theorem 12 is the bridge
+    that makes them statements about /the spent note's/ committed
+    ciphertext.
+
+
+5.8 Sanity Check (py_ecc on BN254)
 ──────────────────────────────────
 
   ┌────
@@ -1219,7 +1319,7 @@ Table of Contents
   mutual decryptability, both ends KYC-bound.
 
 
-5.8 Worked Example: An Identity-M Spend End to End
+5.9 Worked Example: An Identity-M Spend End to End
 ──────────────────────────────────────────────────
 
   Theorems 7-11 in one A2 transfer – Alice issues privately to Bob, who
@@ -1261,8 +1361,8 @@ Table of Contents
   3 and reverted at step 4 (Theorem 8).
 
 
-5.9 Mint-Circuit Status: Phase 7-bis Closure of the Earlier Open Questions
-──────────────────────────────────────────────────────────────────────────
+5.10 Mint-Circuit Status: Phase 7-bis Closure of the Earlier Open Questions
+───────────────────────────────────────────────────────────────────────────
 
   An earlier draft of this document (v0.4) flagged three open
   correctness obligations against the Phase-6 placeholder mint circuit
@@ -1278,8 +1378,8 @@ Table of Contents
 [alberta-buck-notes-rollup-mint.org]
 <https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
-5.9.1 Closure 1 (Field-Overflow / Value-Conservation Range Check) – /Discharged in circuit/
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+5.10.1 Closure 1 (Field-Overflow / Value-Conservation Range Check) – /Discharged in circuit/
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The Phase-6 draft's value-conservation constraint \( \sum_{i=1}^{N}
   v_i \;===\; \texttt{totalFace} \) is an equation in \( \mathbb{F}_r \)
@@ -1293,8 +1393,8 @@ Table of Contents
   escrowed by an integer-vs-field-arithmetic mismatch on the mint side.
 
 
-5.9.2 Closure 2 (Single `transferFrom' \(\leftrightarrow\) \( N \) Commitments) – /Discharged by SNARK binding/
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+5.10.2 Closure 2 (Single `transferFrom' \(\leftrightarrow\) \( N \) Commitments) – /Discharged by SNARK binding/
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Phase 7-bis makes the `totalFace' public input of the mint SNARK both
   (i) the value passed to `buck.transferFrom' and (ii) the value the
@@ -1313,8 +1413,8 @@ Table of Contents
 <https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
-5.9.3 Closure 3 (Spend-Circuit Trio) – /Mint half discharged; nullifier + spend-side value conservation deferred to `spend.circom'/
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+5.10.3 Closure 3 (Spend-Circuit Trio) – /Mint half discharged; nullifier + spend-side value conservation deferred to `spend.circom'/
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The earlier draft's three coupled obligations – Merkle membership,
   nullifier determinism, and value conservation – now split cleanly

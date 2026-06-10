@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-/// @title INoteBindingVerifier — the note<->eEnc re-encryption tie (RESERVED).
+/// @title INoteBindingVerifier — the note<->eEnc re-encryption tie.
 /// @notice Verifies, in zero knowledge, that the deposit-coupling ciphertext
 ///         `eEnc` supplied at spend is a *re-encryption*, under the recipient
 ///         Identity point M_rec, of the issuer/recipient ciphertext that the
@@ -31,30 +31,34 @@ pragma solidity ^0.8.20;
 ///         re-encryption *equivalence*, not equality — hence a SNARK, not an
 ///         on-chain Poseidon compare (Poseidon-4/8 is not an EVM precompile).
 ///
-///         THE RELATION (production circuit — UNIMPLEMENTED, see below).
-///         Public:  nullifier, eEnc=(R,C), P_I=(piX,piY).
-///         Private: rho, idHash, eIssCommitted=(R0,C0), s (re-rand scalar),
-///                  b (P_I blind), m_rec (recipient identity scalar).
+///         THE RELATION (circuits/note_binding.circom, ~2.4M non-linear
+///         constraints; all EC operations fixed-base via the ElGamal-structure
+///         optimization).
+///         Public:  nullifier, eEnc=(R,C), P_I=(piX,piY)  (25 signals: the six
+///                  point coordinates as 4x64-bit limbs).
+///         Private: rho, idHash, eNote, eIssCommitted=(R0,C0), s (re-rand
+///                  scalar), r (ElGamal randomness), b (P_I blind), m_rec
+///                  (recipient identity scalar), M_I (decrypted issuer point).
 ///         Constraints:
 ///           (1) nullifier      = Poseidon3(rho, idHash, TAG)        // ties to THE note
-///           (2) idHash         = Poseidon(eIssCommitted-payload)     // opens idHash
-///           (3) eEnc.R = R0 + s*G,  eEnc.C = C0 + s*(m_rec*G)         // re-encryption under M_rec
-///           (4) P_I = (C0 - m_rec*R0) + b*H                          // same M committed by the coupling
+///           (2) idHash         = Poseidon8(eNote, eIssCommitted)     // opens idHash
+///           (3) eEnc.R = R0 + s*G,  eEnc.C = C0 + (s*m_rec)*G        // re-encryption under M_rec
+///           (4) R0 = r*G,  C0 = M_I + (r*m_rec)*G,  P_I = M_I + b*H  // ElGamal structure + committed point
 ///         (1) reuses the nullifier the spend SNARK already attests, so the tie
 ///         is to the SPECIFIC spent note without revealing `idHash`; (4) shares
 ///         m_rec / P_I with `IdentityRegistry.verifyDepositCoupling`, so the two
 ///         halves cannot be answered with different points.
 ///
-///         RESERVED — NOT YET IMPLEMENTED.  No production circuit/verifier for
-///         this relation ships today; `StubNoteBindingVerifier` returns true
-///         (plumbing only).  Building it requires reconciling the two A2 `idHash`
-///         layouts in the repo (mint_batch_a2 commits `Poseidon8(eNote, eIss)`;
-///         alberta_buck.wallet.unilateral_a2 commits `Poseidon4(eIss)`), a fresh
-///         trusted setup, and circuit review.  Until governance wires a real
-///         verifier via `Notes.setNoteBindingVerifier`, the addressed-binding and
-///         A2-collusion guarantees above are documented-but-unenforced.  See
-///         alberta-buck-notes.org ("The note<->eEnc tie") and
-///         alberta-buck-proofs.org (Theorem 8 hypothesis).
+///         IMPLEMENTATION.  The generated Groth16 verifier is
+///         `NoteBindingGroth16Verifier` behind `NoteBindingVerifierAdapter`
+///         (which derives all 25 public inputs on chain from the caller's
+///         nullifier / eEnc / P_I; the proof bytes carry only the Groth16
+///         triple).  `StubNoteBindingVerifier` remains for plumbing tests; a
+///         deployment where governance has not wired the real verifier leaves
+///         the addressed-binding and A2-collusion guarantees unenforced.  See
+///         alberta-buck-notes.org ("Status"), alberta-buck-proofs.org
+///         (Theorem 12), and alberta-buck-verifier-implementation.org
+///         (toolchain).
 ///
 /// @dev    Import-free (no BN254 / IdentityRegistry types) so the governance
 ///         slot in Notes.sol can swap a stub for the real verifier without

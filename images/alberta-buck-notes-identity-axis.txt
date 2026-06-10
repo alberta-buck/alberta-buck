@@ -51,6 +51,17 @@ Table of Contents
 .. 1. Migration
 .. 2. Cross-references
 
+      *STATUS (2026-06-10): historical – superseded.* This design
+      memo's content is absorbed: the identity-axis inversion and
+      one-gadget model live in /alberta-buck-notes/ ("Mutual
+      Decryptability", "Long-Term Holding Safety"); the
+      per-flavour mechanics and executable walkthroughs in
+      /alberta-buck-notes-flow/ ("The Identity-M Spend Path", the
+      "in Code" sections); the formal statements in
+      /alberta-buck-proofs/ (Part IV, Theorems 7-12).  The
+      implementation-status section below reflects June 2026 and
+      is no longer maintained.
+
 
 [Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes>
 

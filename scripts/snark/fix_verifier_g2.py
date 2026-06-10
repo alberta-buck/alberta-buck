@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
 """Fix snarkjs-generated Solidity verifier: apply EIP-197 G2 encoding swap.
 
-snarkjs stores G2 as [x_re, x_im, y_re, y_im] but EIP-197 expects
-[x_im, x_re, y_im, y_re].  This script swaps the embedded VK constants
-(beta, gamma, delta) and fixes the B component in the assembly.
+Older snarkjs exports stored the embedded VK G2 constants (beta, gamma,
+delta) as [x_re, x_im, y_re, y_im] while EIP-197 expects
+[x_im, x_re, y_im, y_re]; the default mode swaps both the VK constants and
+the proof-B component in the assembly.
 
-Usage: python scripts/snark/fix_verifier_g2.py <verifier.sol>
+IMPORTANT -- snarkjs 0.7.5 (current) already emits the VK constants in
+EIP-197 order; swapping them CORRUPTS the verifier (the pairing precompile
+rejects the malformed G2 points and every proof "fails").  Only the proof-B
+swap is still wanted, because the repo convention stores/packs pi_b in
+snarkjs proof.json natural order (the caller-side swap that
+`snarkjs generatecall` would otherwise perform).  For verifiers exported by
+snarkjs 0.7.5+, pass --b-only.
+
+Usage: python scripts/snark/fix_verifier_g2.py [--b-only] <verifier.sol>
 """
 import sys, re
+
+b_only = "--b-only" in sys.argv
+args = [a for a in sys.argv[1:] if a != "--b-only"]
+sys.argv = [sys.argv[0]] + args
 
 with open(sys.argv[1]) as f:
     sol = f.read()
@@ -15,7 +28,7 @@ with open(sys.argv[1]) as f:
 changes = 0
 
 # 1. Swap VK constant pairs using temporary placeholder
-for prefix in ['beta', 'gamma', 'delta']:
+for prefix in ([] if b_only else ['beta', 'gamma', 'delta']):
     for xy in ['x', 'y']:
         p1 = rf'uint256 constant {prefix}{xy}1\s*=\s*(\d+);'
         p2 = rf'uint256 constant {prefix}{xy}2\s*=\s*(\d+);'
@@ -60,4 +73,5 @@ else:
 with open(sys.argv[1], 'w') as f:
     f.write(sol)
 
-print(f"Fixed {sys.argv[1]}: {changes} changes applied (VK pairs + B swap) for EIP-197")
+mode = "B swap only" if b_only else "VK pairs + B swap"
+print(f"Fixed {sys.argv[1]}: {changes} changes applied ({mode}) for EIP-197")

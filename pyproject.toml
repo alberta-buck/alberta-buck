@@ -16,6 +16,7 @@ dependencies = [
     "web3		>=7,<8",
     "matplotlib		>=3.8",
     "python-dotenv	>=1.0,<2",
+    "py_ecc		>=8.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,12 @@ zip-safe		= true
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["alberta_buck*"]
+
+[tool.setuptools.package-data]
+# Poseidon round constants / MDS matrices (vendored byte-identical copy of
+# node_modules/circomlibjs/src/poseidon_constants.json) -- required at runtime
+# by alberta_buck.wallet.poseidon, so it must ship in wheels and sdists.
+"alberta_buck.wallet" = ["poseidon_constants.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["alberta_buck/test"]

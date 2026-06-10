@@ -51,13 +51,18 @@ echo "Build:   $BUILD_DIR"
 mkdir -p "$BUILD_DIR" "$POT_DIR"
 
 # ---- Step 1: Compile circuit (R1CS + C++ witness generator) ----
+# --O2 (full linear-constraint simplification) is REQUIRED: at the default
+# --O1 the R1CS carries ~3.5M linear constraints alongside the ~2.4M
+# non-linear ones, and snarkjs sizes the Groth16 domain on the TOTAL
+# (6.1M -> needs pot23).  --O2 substitutes the linear constraints away,
+# fitting the pot22 domain (2^22 = 4.19M) and shrinking the prover's work.
 if [ -f "$BUILD_DIR/note_binding.r1cs" ] \
         && [ -f "$BUILD_DIR/note_binding_cpp/note_binding.cpp" ] \
         && [ "$BUILD_DIR/note_binding.r1cs" -nt "$CIRCUIT" ]; then
     echo "--- Circuit up to date (skipping circom) ---"
 else
-    echo "--- Compiling circuit (circom --c --no_asm) ---"
-    circom "$CIRCUIT" --r1cs --c --no_asm --output "$BUILD_DIR"
+    echo "--- Compiling circuit (circom --c --no_asm --O2) ---"
+    circom "$CIRCUIT" --r1cs --c --no_asm --O2 --output "$BUILD_DIR"
 fi
 echo "  R1CS: $(ls -lh $BUILD_DIR/note_binding.r1cs | awk '{print $5}')"
 
@@ -105,6 +110,12 @@ echo "--- Groth16 setup (ptau: $PTAU) ---"
 
 snarkjs groth16 setup "$BUILD_DIR/note_binding.r1cs" "$PTAU" \
     "$BUILD_DIR/note_binding_0000.zkey"
+# snarkjs exits 0 even on "circuit too big for this power of tau"; guard on
+# the artifact actually existing and being non-trivial.
+if [ ! -s "$BUILD_DIR/note_binding_0000.zkey" ]; then
+    echo "ERROR: groth16 setup produced no zkey (circuit too big for $PTAU?)" >&2
+    exit 1
+fi
 echo "  Phase-2 setup done"
 
 # DEV ENTROPY
@@ -151,9 +162,13 @@ sed -i.bak 's/public view returns/public returns/g' \
 rm -f "$BUILD_DIR/Groth16Verifier.sol.bak"
 cp "$BUILD_DIR/Groth16Verifier.sol" \
     "$REPO_ROOT/src/NoteBindingGroth16Verifier.sol"
-python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" \
+# --b-only: snarkjs 0.7.5 already emits the VK G2 constants in EIP-197 order
+# (swapping them corrupts the verifier -- the pairing precompile rejects the
+# malformed points).  Only the proof-B swap is wanted, so the repo convention
+# of storing/packing pi_b in proof.json natural order keeps working.
+python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" --b-only \
     "$REPO_ROOT/src/NoteBindingGroth16Verifier.sol"
-echo "  -> src/NoteBindingGroth16Verifier.sol (EIP-197 G2 fix applied)"
+echo "  -> src/NoteBindingGroth16Verifier.sol (EIP-197 proof-B swap applied)"
 
 # ---- Step 9: Generate Forge test vectors ----
 VECTORS_DIR="$REPO_ROOT/test/vectors/note_binding"

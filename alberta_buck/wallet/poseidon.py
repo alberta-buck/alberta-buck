@@ -3,9 +3,12 @@
 Why this exists: the Phase 6/7/7-bis circuits (mint, mint_batch, spend) all
 hash with circomlib's Poseidon, and we want Python-side witness emitters and
 test oracles whose commitments / nullifiers / Merkle nodes agree exactly with
-those circuits.  The circomlibjs JSON constants ship with the repo (under
-node_modules/circomlibjs/src/poseidon_constants.json) so we read them directly
-rather than re-deriving from the Hades parameter generator.
+those circuits.  The circomlibjs JSON constants are vendored as package data
+(``alberta_buck/wallet/poseidon_constants.json``, a byte-identical copy of
+``node_modules/circomlibjs/src/poseidon_constants.json``) so they ship with a
+pip install rather than requiring an npm-installed repo checkout; when running
+from a checkout that has ``node_modules``, the circomlibjs original is used as
+a fallback if the vendored copy is missing.
 
 What this matches: this is the *unoptimized* Poseidon algorithm (full M matrix,
 per-round full C vector).  It is mathematically equivalent to the optimized
@@ -40,10 +43,19 @@ _N_ROUNDS_P = [56, 57, 56, 60, 60, 63, 64, 63, 60, 66, 60, 65, 70, 60, 64, 68]
 _C: List[List[int]] | None = None  # _C[t-2][round*t + i]   round constants
 _M: List[List[List[int]]] | None = None  # _M[t-2][i][j]         MDS matrix
 
-_CONSTS_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "..", "..",
-    "node_modules", "circomlibjs", "src", "poseidon_constants.json",
+# Vendored package-data copy (shipped by pip; see pyproject.toml
+# [tool.setuptools.package-data]), with the circomlibjs original from a
+# repo checkout's node_modules as fallback.
+_CONSTS_PATHS = (
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "poseidon_constants.json",
+    ),
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..",
+        "node_modules", "circomlibjs", "src", "poseidon_constants.json",
+    ),
 )
 
 
@@ -58,8 +70,15 @@ def _load() -> None:
     global _C, _M
     if _C is not None:
         return
-    with open(_CONSTS_PATH) as fh:
-        data = json.load(fh)
+    for path in _CONSTS_PATHS:
+        if os.path.exists(path):
+            with open(path) as fh:
+                data = json.load(fh)
+            break
+    else:
+        raise FileNotFoundError(
+            f"poseidon_constants.json not found in any of: {_CONSTS_PATHS}"
+        )
     _C = [[_to_int(s) for s in row] for row in data["C"]]
     _M = [[[_to_int(s) for s in row] for row in mat] for mat in data["M"]]
 

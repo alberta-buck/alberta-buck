@@ -46,6 +46,17 @@ unknown at mint -- while Mallory learns nothing. ([[https://perry.kundert.ca/ran
 #+TOC: headlines 2
 
 #+LATEX: \clearpage
+#+begin_quote
+*STATUS (2026-06-10): historical -- superseded.*  This design memo's content
+is absorbed: the identity-axis inversion and one-gadget model live in
+/alberta-buck-notes/ ("Mutual Decryptability", "Long-Term Holding Safety");
+the per-flavour mechanics and executable walkthroughs in
+/alberta-buck-notes-flow/ ("The Identity-M Spend Path", the "in Code"
+sections); the formal statements in /alberta-buck-proofs/ (Part IV, Theorems
+7-12).  The implementation-status section below reflects June 2026 and is no
+longer maintained.
+#+end_quote
+
 * The Authority Axis Is Identity, Not the Account
 
   The shipped Notes design is /account-centric/: the A-spend pins the note to a

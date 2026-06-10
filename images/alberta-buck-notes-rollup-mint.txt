@@ -82,6 +82,16 @@ Table of Contents
 6. Related Work: Serialized B1 Sub-Notes
 7. Open Questions
 
+      *STATUS (2026-06-10): historical – shipped as Phase 7-bis.*
+      The batch-mint design proposed here is implemented
+      (`circuits/mint_batch.circom', pinned-N verifiers,
+      `MintVerifierAdapter'); the narrative walkthrough is
+      /alberta-buck-notes-flow/ "The Mint, Step by Step", and the
+      hostile-issuer audit (A1-A12) survives there as "Appendix:
+      The Hostile-Issuer Mint Ledger".  The cost projections,
+      concurrency model, and migration plan below reflect the
+      April 2026 design state and are retained for provenance.
+
 
 1 Motivation
 ════════════

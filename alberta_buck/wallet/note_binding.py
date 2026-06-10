@@ -4,11 +4,14 @@ Generates the witness and Groth16 proof that the deposit-coupling ciphertext
 ``eEnc`` re-encrypts, under ``M_rec``, the ciphertext ``eIssCommitted``
 committed in the spent note's ``idHash``.
 
-RESERVED — the production trusted setup is not yet run
-(``scripts/snark/setup_note_binding.sh``), so ``prove_note_binding`` raises
-``FileNotFoundError`` until the zkey and WASM artifacts exist.  The witness
-generation helper ``make_note_binding_witness`` works from the compiled
-circuit (``circuits/note_binding.circom``).
+``prove_note_binding`` requires the trusted-setup artifacts produced by
+``scripts/snark/setup_note_binding.sh`` (``make nix-snark-note-binding``): the
+compiled C++ witness generator and the phase-2 zkey.  Witness generation uses
+the circom C++ calculator -- the WASM calculator cannot handle the ~5.9M-wire
+circuit -- run with a 64 MB stack (the generated template frames hold the
+G-powers table expansion).  Proving prefers the vendored rapidsnark binary
+(``lib/rapidsnark-macOS-arm64-v0.0.8/bin/prover``; seconds at 2.4M
+constraints) and falls back to snarkjs.
 
 Circuit: circuits/note_binding.circom
 Verifier: src/NoteBindingGroth16Verifier.sol (auto-generated)
@@ -129,18 +132,19 @@ def prove_note_binding(
 ) -> bytes:
     """Generate a Groth16 note-binding proof.
 
-    RESERVED — requires the trusted-setup artifacts (zkey, WASM) that are
-    produced by ``scripts/snark/setup_note_binding.sh``.  Raises
+    Requires the trusted-setup artifacts (the compiled C++ witness generator
+    and the zkey) produced by ``scripts/snark/setup_note_binding.sh``.  Raises
     ``FileNotFoundError`` until that setup has been run.
 
     Returns the proof as 256 bytes (abi-packed Groth16 triple: a[2],
     b[2][2], c[2] = 8 words) suitable for ``NoteBindingVerifierAdapter``.
     """
-    wasm = os.path.join(_BUILD, "note_binding_js", "note_binding.wasm")
+    witness_gen = os.path.join(_BUILD, "note_binding_cpp", "note_binding")
     zkey = os.path.join(_BUILD, "note_binding_0001.zkey")
-    if not os.path.exists(wasm):
+    if not os.path.exists(witness_gen):
         raise FileNotFoundError(
-            f"WASM not found at {wasm}; run scripts/snark/setup_note_binding.sh"
+            f"C++ witness generator not found at {witness_gen}; "
+            "run scripts/snark/setup_note_binding.sh"
         )
     if not os.path.exists(zkey):
         raise FileNotFoundError(
@@ -149,27 +153,36 @@ def prove_note_binding(
 
     witness = make_note_binding_witness(rho, eNote, eIssCommitted, s, m_rec, b, M_I, r_iss)
 
-    # Write witness JSON
-    witness_path = os.path.join(_BUILD, "witness.json")
-    with open(witness_path, "w") as f:
+    # Write witness input JSON
+    input_path = os.path.join(_BUILD, "prove_input.json")
+    with open(input_path, "w") as f:
         json.dump(witness, f)
 
-    # Generate witness
-    wtns_path = os.path.join(_BUILD, "witness.wtns")
+    # Generate witness via the circom C++ calculator.  64 MB stack: the
+    # generated template-run functions hold ~5.4 MB frames (G-powers table).
+    wtns_path = os.path.join(_BUILD, "prove_witness.wtns")
     subprocess.run(
-        ["node", "node_modules/.bin/snarkjs", "wtns", "calculate", wasm,
-         witness_path, wtns_path],
+        ["bash", "-c",
+         f"ulimit -s 65520 && '{witness_gen}' '{input_path}' '{wtns_path}'"],
         cwd=_REPO, check=True,
     )
 
-    # Generate proof
+    # Generate proof: rapidsnark when vendored (seconds), snarkjs fallback.
     proof_path = os.path.join(_BUILD, "proof.json")
     public_path = os.path.join(_BUILD, "public.json")
-    subprocess.run(
-        ["node", "node_modules/.bin/snarkjs", "groth16", "prove", zkey,
-         wtns_path, proof_path, public_path],
-        cwd=_REPO, check=True,
-    )
+    rapidsnark = os.path.join(
+        _REPO, "lib", "rapidsnark-macOS-arm64-v0.0.8", "bin", "prover")
+    if os.path.exists(rapidsnark):
+        subprocess.run(
+            [rapidsnark, zkey, wtns_path, proof_path, public_path],
+            cwd=_REPO, check=True,
+        )
+    else:
+        subprocess.run(
+            ["node", "node_modules/.bin/snarkjs", "groth16", "prove", zkey,
+             wtns_path, proof_path, public_path],
+            cwd=_REPO, check=True,
+        )
 
     # Pack proof into 256 bytes (8 uint256 words)
     with open(proof_path) as f:

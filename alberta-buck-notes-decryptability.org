@@ -62,6 +62,20 @@ arguments is catalogued. ([[https://perry.kundert.ca/range/finance/alberta-buck-
 #+TOC: headlines 3
 
 #+LATEX: \clearpage
+#+begin_quote
+*STATUS (2026-06-10): historical -- superseded.*  The non-deniable-receipt
+invariant defined here is stated in /alberta-buck-notes/ ("The
+Non-Deniable-Receipt Invariant"); the per-step disclosure analysis survives,
+updated to the Identity-M surface, as /alberta-buck-notes-flow/ "Privacy
+Audit: Data Revealed Per Step"; the theorems were modernised into
+/alberta-buck-proofs/ Part IV (Theorems 7-12).  The gaps this memo analysed
+are closed: the mint-side issuer bindings and -- the final piece -- the note
+<-> eEnc re-encryption tie (=circuits/note_binding.circom=,
+=INoteBindingVerifier=).  The fix-design, protocol-changes, test-plan, and
+phasing sections below reflect the pre-implementation state and are no longer
+maintained.
+#+end_quote
+
 * The Non-Deniable-Receipt Invariant
 
   The Alberta Buck identity layer is built so that /every/ BUCK transfer leaves
