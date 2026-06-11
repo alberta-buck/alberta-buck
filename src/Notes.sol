@@ -152,9 +152,10 @@ contract Notes {
     uint256[ROOT_HISTORY_SIZE] public roots;
     uint8   public currentRootIndex;
 
-    /// @notice Note<->eEnc re-encryption-tie verifier (see
-    ///         INoteBindingVerifier; relation: circuits/note_binding.circom,
-    ///         verified by NoteBindingGroth16Verifier behind
+    /// @notice Note<->eEnc tie verifier (see INoteBindingVerifier; relations:
+    ///         circuits/note_binding.circom for A2 and
+    ///         circuits/note_binding_a1.circom for A1, verified by the two
+    ///         generated Groth16 verifiers behind one
     ///         NoteBindingVerifierAdapter).  Binds the deposit-coupling
     ///         ciphertext `eEnc` to the SPECIFIC addressed (A1/A2) note being
     ///         spent, so a depositor cannot substitute a self-addressed
@@ -322,12 +323,13 @@ contract Notes {
         identityMembershipVerifier = IIdentityMembershipVerifier(next);
     }
 
-    /// @notice Wire (or rotate) the note<->eEnc re-encryption-tie verifier
+    /// @notice Wire (or rotate) the note<->eEnc tie verifier
     ///         (INoteBindingVerifier) consulted by the addressed (A1/A2) spends.
     ///         Passing `address(0)` disables the tie (backward-compat skip) — and
     ///         while disabled the addressed-binding / A2-collusion guarantees are
-    ///         NOT enforced.  The production verifier is the generated
-    ///         NoteBindingGroth16Verifier behind NoteBindingVerifierAdapter.
+    ///         NOT enforced.  The production verifiers are the generated
+    ///         NoteBindingGroth16Verifier (A2) and NoteBindingA1Groth16Verifier
+    ///         (A1) behind one NoteBindingVerifierAdapter.
     function setNoteBindingVerifier(address next) external {
         require(msg.sender == governance, "not governance");
         emit NoteBindingVerifierUpdated(address(noteBindingVerifier), next);
@@ -670,20 +672,29 @@ contract Notes {
     }
 
     /// @dev Shared note<->eEnc tie check — called by the ADDRESSED (A1/A2)
-    ///      spend path only.  Verifies that `eEnc` (the deposit-coupling
-    ///      ciphertext) re-encrypts, under the recipient Identity M_rec, the
-    ///      ciphertext the spent note committed in its idHash — binding the
-    ///      deposit gate to THIS note (handle: `nullifier`; shared point:
-    ///      `dc.P_I`).  See INoteBindingVerifier for the relation.
+    ///      spend path only.  A2 layout: verifies that `eEnc` (the
+    ///      deposit-coupling ciphertext) re-encrypts, under the recipient
+    ///      Identity M_rec, the ciphertext the spent note committed in its
+    ///      idHash.  A1 layout (`a1Layout` true): verifies that the spent
+    ///      note's value ciphertext eNote = (rn*G, face*G + rn*M_rec) is keyed
+    ///      to the SAME M_rec that keys `eEnc` and opens `dc.P_I` — `face`
+    ///      MUST be the spend's public face (it pins the eNote plaintext,
+    ///      making the addressed identity unique; ignored for A2).  Either way
+    ///      the deposit gate is bound to THIS note (handle: `nullifier`;
+    ///      shared point: `dc.P_I`).  See INoteBindingVerifier for both
+    ///      relations.
     ///
     ///      Reverts if the verifier is wired and the proof is invalid.  Silently
     ///      passes if the verifier is not set (address(0)) or the proof is empty
     ///      (backward-compat skip) — while skipped, the addressed-binding and
-    ///      A2-collusion guarantees are NOT enforced.  The production relation
-    ///      is circuits/note_binding.circom (soundness: Proofs Theorem 12).
+    ///      A2-collusion guarantees are NOT enforced.  The production relations
+    ///      are circuits/note_binding.circom and circuits/note_binding_a1.circom
+    ///      (soundness: Proofs Theorem 12).
     function _verifyNoteBinding(
         bytes memory noteBindingProof,
         uint256 nullifier,
+        bool    a1Layout,
+        uint256 face,
         IdentityRegistry.ElGamalCT calldata eEnc,
         uint256 piX,
         uint256 piY
@@ -694,12 +705,14 @@ contract Notes {
         if (address(verifier) == address(0)) return;
         if (noteBindingProof.length == 0) return;
 
-        require(
-            verifier.verifyNoteBinding(
+        bool ok = a1Layout
+            ? verifier.verifyNoteBindingA1(
+                noteBindingProof, nullifier, face,
+                eEnc.R.X, eEnc.R.Y, eEnc.C.X, eEnc.C.Y, piX, piY)
+            : verifier.verifyNoteBinding(
                 noteBindingProof, nullifier,
-                eEnc.R.X, eEnc.R.Y, eEnc.C.X, eEnc.C.Y, piX, piY),
-            "Notes: bad note binding"
-        );
+                eEnc.R.X, eEnc.R.Y, eEnc.C.X, eEnc.C.Y, piX, piY);
+        require(ok, "Notes: bad note binding");
     }
 
     // ---- Identity-M-bound addressed spend (unilateral A1 / A2) -----------
@@ -723,10 +736,13 @@ contract Notes {
     ///         Identity.  The SAME `dc.P_I` flows into both, so the membership is
     ///         bound to exactly the point the coupling decrypted `eEnc` to -- a
     ///         colluding pair cannot key `eEnc` to a non-member and still spend.
-    ///      3. _verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I): the
-    ///         note<->eEnc re-encryption tie (INoteBindingVerifier) — proves
-    ///         `eEnc` re-encrypts the ciphertext the SPENT note committed, so the
-    ///         coupling is bound to THIS note, not a depositor-substituted one.
+    ///      3. _verifyNoteBinding(noteBindingProof, nullifier, ..., eEnc, dc.P_I):
+    ///         the note<->eEnc tie (INoteBindingVerifier) — A2: proves `eEnc`
+    ///         re-encrypts the ciphertext the SPENT note committed; A1: proves
+    ///         the spent note's eNote was addressed to the SAME M_rec keying
+    ///         `eEnc` (with the spend's `face` pinning the eNote plaintext).
+    ///         Either way the coupling is bound to THIS note, not a
+    ///         depositor-substituted one.
     ///
     ///      The note's commitment + nullifier are proven by the generic spend
     ///      SNARK (cm in the pool tree, nullifier well-formed).
@@ -749,7 +765,8 @@ contract Notes {
         IdentityRegistry.ElGamalCT          calldata eEnc,
         IdentityRegistry.DepositCouplingProof calldata dc,
         bytes   calldata membershipProof,
-        bytes   calldata noteBindingProof
+        bytes   calldata noteBindingProof,
+        bool             a1Layout
     ) internal {
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
         require(recipient != address(0),  "Notes: zero recipient");
@@ -778,9 +795,10 @@ contract Notes {
         // SAME dc.P_I the coupling just constrained.
         _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
 
-        // Identity-M binding, half 3: the note<->eEnc re-encryption tie, binding
-        // `eEnc` to THIS note (skipped only if governance left the slot unset).
-        _verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I.X, dc.P_I.Y);
+        // Identity-M binding, half 3: the note<->eEnc tie, binding `eEnc` to
+        // THIS note (skipped only if governance left the slot unset).
+        _verifyNoteBinding(noteBindingProof, nullifier, a1Layout, face,
+                           eEnc, dc.P_I.X, dc.P_I.Y);
 
         require(
             buck.transfer(recipient, face),
@@ -805,7 +823,7 @@ contract Notes {
         bytes   calldata noteBindingProof
     ) external {
         _spendCoupled(proof, root, nullifier, face, recipient, eIss, dc,
-                      membershipProof, noteBindingProof);
+                      membershipProof, noteBindingProof, false);
         emit SpentCoupledA2(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
     }
 
@@ -815,8 +833,11 @@ contract Notes {
     ///         the membership certifies that recipient identity is registered.
     ///         The issuer is public and named at mint (the batch Schnorr); the
     ///         recipient produces a bilateral receipt off chain
-    ///         (alberta_buck.wallet.unilateral_a1).  On-chain logic is identical
-    ///         to spendCoupledA2 -- only the committed point's meaning differs.
+    ///         (alberta_buck.wallet.unilateral_a1).  On-chain logic mirrors
+    ///         spendCoupledA2; the committed point's meaning differs, and the
+    ///         note<->eEnc tie uses the A1-layout circuit (note_binding_a1.circom,
+    ///         with `face` public) since an A1 idHash commits (eNote, m_issuer,
+    ///         sigma) rather than a second ciphertext.
     function spendCoupledA1(
         bytes   calldata proof,
         uint256          root,
@@ -829,7 +850,7 @@ contract Notes {
         bytes   calldata noteBindingProof
     ) external {
         _spendCoupled(proof, root, nullifier, face, recipient, eRec, dc,
-                      membershipProof, noteBindingProof);
+                      membershipProof, noteBindingProof, true);
         emit SpentCoupledA1(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
     }
 

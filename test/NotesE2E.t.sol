@@ -26,18 +26,12 @@ import {NoteBindingVerifierAdapter} from "../src/NoteBindingVerifierAdapter.sol"
 ///         scripts/snark/gen_e2e_fixtures.sh): real batch-mint Groth16, real
 ///         spend Groth16 against the replayed note tree, real deposit sigma
 ///         pinned to (depositor, chainid=1), real G1-tie membership proof
-///         against the registry's incrementally-built identityRoot, and (A2)
-///         the real note<->eEnc binding proof.  Confirms operation end to end
-///         and measures the per-phase on-chain cost that the docs' cost
-///         model quotes.
-///
-///         A1 BINDING GAP: the note-binding circuit opens
-///         idHash = Poseidon8(eNote, eIss) -- the A2 payload layout.  A1's
-///         idHash commits (eNote, m_issuer, sigma) instead, so no binding
-///         proof is constructible for A1 notes today; the A1 spend passes an
-///         empty proof (the documented backward-compat skip), meaning A1's
-///         addressed-binding rests on the coupling sigma alone until an
-///         A1-layout binding circuit variant lands.
+///         against the registry's incrementally-built identityRoot, and (A1,
+///         A2) the real note<->eEnc binding proof -- A2 via the
+///         re-encryption-tie circuit (note_binding.circom), A1 via the
+///         A1-layout circuit (note_binding_a1.circom, face public).
+///         Confirms operation end to end and measures the per-phase on-chain
+///         cost that the docs' cost model quotes.
 abstract contract NotesE2EBase is Test {
     address internal constant GOV  = address(0x60);
 
@@ -309,23 +303,24 @@ abstract contract NotesE2EBase is Test {
             console2.log(string.concat("[gas:", _flavor(), "] deposit coupling sigma:"), sigGas);
         }
 
-        // The note<->eEnc binding (A2 only; A1 carries the documented skip).
+        // The note<->eEnc binding (addressed flavors; layout-matched circuit).
         if (!_isBearer()) {
             bytes memory nb = _b(".noteBinding.proofBytes");
-            if (nb.length > 0) {
-                uint256 nfOpen = _u(".opening.nullifier");
-                uint256 eRx = _u(".sigma.eEnc.R.x");
-                uint256 eRy = _u(".sigma.eEnc.R.y");
-                uint256 eCx = _u(".sigma.eEnc.C.x");
-                uint256 eCy = _u(".sigma.eEnc.C.y");
-                uint256 pix = _u(".sigma.dc.P_I.x");
-                uint256 piy = _u(".sigma.dc.P_I.y");
-                uint256 g3 = gasleft();
-                bool okNb = bindAdapter.verifyNoteBinding(nb, nfOpen, eRx, eRy, eCx, eCy, pix, piy);
-                uint256 nbGas = g3 - gasleft();
-                assertTrue(okNb, "note binding must verify");
-                console2.log(string.concat("[gas:", _flavor(), "] note binding:"), nbGas);
-            }
+            uint256 nfOpen = _u(".opening.nullifier");
+            uint256 eRx = _u(".sigma.eEnc.R.x");
+            uint256 eRy = _u(".sigma.eEnc.R.y");
+            uint256 eCx = _u(".sigma.eEnc.C.x");
+            uint256 eCy = _u(".sigma.eEnc.C.y");
+            uint256 pix = _u(".sigma.dc.P_I.x");
+            uint256 piy = _u(".sigma.dc.P_I.y");
+            bool isA1 = keccak256(bytes(_flavorPure())) == keccak256("a1");
+            uint256 g3 = gasleft();
+            bool okNb = isA1
+                ? bindAdapter.verifyNoteBindingA1(nb, nfOpen, face, eRx, eRy, eCx, eCy, pix, piy)
+                : bindAdapter.verifyNoteBinding(nb, nfOpen, eRx, eRy, eCx, eCy, pix, piy);
+            uint256 nbGas = g3 - gasleft();
+            assertTrue(okNb, "note binding must verify");
+            console2.log(string.concat("[gas:", _flavor(), "] note binding:"), nbGas);
         }
     }
 
@@ -390,7 +385,7 @@ contract NotesE2E_A1 is NotesE2EBase {
         IdentityRegistry.ElGamalCT memory eEnc = _ct(".sigma.eEnc");
         IdentityRegistry.DepositCouplingProof memory dc = _dc();
         bytes memory memProof = _b(".membership.proofBytes");
-        bytes memory nbProof = _b(".noteBinding.proofBytes");   // "0x": documented A1 gap
+        bytes memory nbProof = _b(".noteBinding.proofBytes");   // real A1-layout tie
         vm.prank(depositor);
         uint256 g = gasleft();
         notes.spendCoupledA1(proof, root, nf, face, payout, eEnc, dc, memProof, nbProof);

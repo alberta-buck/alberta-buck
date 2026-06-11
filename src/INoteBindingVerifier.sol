@@ -31,7 +31,7 @@ pragma solidity ^0.8.20;
 ///         re-encryption *equivalence*, not equality — hence a SNARK, not an
 ///         on-chain Poseidon compare (Poseidon-4/8 is not an EVM precompile).
 ///
-///         THE RELATION (circuits/note_binding.circom, ~2.4M non-linear
+///         THE A2 RELATION (circuits/note_binding.circom, ~2.4M non-linear
 ///         constraints; all EC operations fixed-base via the ElGamal-structure
 ///         optimization).
 ///         Public:  nullifier, eEnc=(R,C), P_I=(piX,piY)  (25 signals: the six
@@ -49,13 +49,36 @@ pragma solidity ^0.8.20;
 ///         m_rec / P_I with `IdentityRegistry.verifyDepositCoupling`, so the two
 ///         halves cannot be answered with different points.
 ///
-///         IMPLEMENTATION.  The generated Groth16 verifier is
-///         `NoteBindingGroth16Verifier` behind `NoteBindingVerifierAdapter`
-///         (which derives all 25 public inputs on chain from the caller's
-///         nullifier / eEnc / P_I; the proof bytes carry only the Groth16
-///         triple).  `StubNoteBindingVerifier` remains for plumbing tests; a
-///         deployment where governance has not wired the real verifier leaves
-///         the addressed-binding and A2-collusion guarantees unenforced.  See
+///         THE A1 RELATION (circuits/note_binding_a1.circom, ~2.9M non-linear
+///         constraints).  An A1 note's idHash commits (eNote, m_issuer, sigma)
+///         — the public-issuer layout — so there is no committed second
+///         ciphertext to re-encrypt; the tie is instead through the note's own
+///         value ciphertext eNote = (rn*G, v*G + rn*M_rec), which is keyed to
+///         the SAME M_rec that keys eEnc and opens P_I:
+///         Public:  nullifier, v (= the spend's `face`), eEnc, P_I (26 signals).
+///         Private: rho, idHash, eNote, (m_issuer, sigma) payload words,
+///                  rn (eNote randomness), t (eEnc randomness), b, m_rec.
+///         Constraints:
+///           (1) nullifier = Poseidon3(rho, idHash, TAG)              // ties to THE note
+///           (2) idHash    = Poseidon8(eNote, m_issuer, sigma)         // opens idHash (A1 layout)
+///           (3) eNote.R = rn*G,  eNote.C = (v + rn*m_rec)*G           // eNote addressed to M_rec
+///           (4) eEnc.R = t*G,  eEnc.C = (m_rec + t*m_rec)*G           // eEnc keyed to the same M_rec
+///           (5) P_I = m_rec*G + b*H                                   // committed point
+///         `v` MUST be the spend's public `face`: ElGamal is not key-committing,
+///         and a prover holding the opening (incl. rn) could open eNote.C
+///         against ANY identity by absorbing the difference into a free
+///         plaintext.  Pinning the plaintext to v*G — with v bound to the
+///         note's committed value by the spend SNARK over the same nullifier —
+///         makes m_rec = (dlog(eNote.C) - v)/rn unique.
+///
+///         IMPLEMENTATION.  The generated Groth16 verifiers are
+///         `NoteBindingGroth16Verifier` (A2) and `NoteBindingA1Groth16Verifier`
+///         (A1) behind one `NoteBindingVerifierAdapter` (which derives all
+///         public inputs on chain from the caller's nullifier / face / eEnc /
+///         P_I; the proof bytes carry only the Groth16 triple).
+///         `StubNoteBindingVerifier` remains for plumbing tests; a deployment
+///         where governance has not wired the real verifier leaves the
+///         addressed-binding and A2-collusion guarantees unenforced.  See
 ///         alberta-buck-notes.org ("Status"), alberta-buck-proofs.org
 ///         (Theorem 12), and alberta-buck-verifier-implementation.org
 ///         (toolchain).
@@ -65,8 +88,8 @@ pragma solidity ^0.8.20;
 ///         touching the spend-path logic.  Coordinates are passed as raw
 ///         uint256 base-field words, matching the on-chain ElGamal layout.
 interface INoteBindingVerifier {
-    /// @notice Verify the re-encryption tie binding `eEnc` to the spent note.
-    /// @param proof   Groth16 proof bytes for the reserved tie circuit.
+    /// @notice Verify the A2 re-encryption tie binding `eEnc` to the spent note.
+    /// @param proof   Groth16 proof bytes for the re-encryption tie circuit.
     /// @param nullifier The spent note's nullifier (Poseidon3(rho, idHash, tag));
     ///        the public handle the spend SNARK already bound to (rho, idHash),
     ///        so the proof is tied to THIS note without revealing idHash.
@@ -80,6 +103,32 @@ interface INoteBindingVerifier {
     function verifyNoteBinding(
         bytes calldata proof,
         uint256 nullifier,
+        uint256 eEncRx,
+        uint256 eEncRy,
+        uint256 eEncCx,
+        uint256 eEncCy,
+        uint256 piX,
+        uint256 piY
+    ) external returns (bool);
+
+    /// @notice Verify the A1 addressed tie binding `eEnc` to the spent note.
+    /// @param proof   Groth16 proof bytes for the A1-layout tie circuit.
+    /// @param nullifier The spent note's nullifier — same handle as the A2 path.
+    /// @param face    The spend's public face; the circuit's `v`.  Callers MUST
+    ///        pass the SAME face the spend SNARK verified for this nullifier —
+    ///        it pins the eNote plaintext, making the addressed identity unique.
+    /// @param eEncRx  eEnc.R.x  (the deposit-coupling ciphertext's R coords)
+    /// @param eEncRy  eEnc.R.y
+    /// @param eEncCx  eEnc.C.x
+    /// @param eEncCy  eEnc.C.y
+    /// @param piX     coupling commitment P_I.x (shares the m_rec witness)
+    /// @param piY     coupling commitment P_I.y
+    /// @return True iff the note's eNote and the supplied `eEnc` / P_I are all
+    ///         keyed to one recipient Identity M_rec.
+    function verifyNoteBindingA1(
+        bytes calldata proof,
+        uint256 nullifier,
+        uint256 face,
         uint256 eEncRx,
         uint256 eEncRy,
         uint256 eEncCx,

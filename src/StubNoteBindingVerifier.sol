@@ -32,4 +32,18 @@ contract StubNoteBindingVerifier is INoteBindingVerifier {
     ) external view returns (bool) {
         return enabled;
     }
+
+    function verifyNoteBindingA1(
+        bytes calldata /*proof*/,
+        uint256 /*nullifier*/,
+        uint256 /*face*/,
+        uint256 /*eEncRx*/,
+        uint256 /*eEncRy*/,
+        uint256 /*eEncCx*/,
+        uint256 /*eEncCy*/,
+        uint256 /*piX*/,
+        uint256 /*piY*/
+    ) external view returns (bool) {
+        return enabled;
+    }
 }

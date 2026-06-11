@@ -140,6 +140,34 @@ test-python:
 	python -m pytest alberta_buck/test/ -v -s
 
 
+# ── Documentation rendering ─────────────────────────────────────────
+#
+# The org-mode masters live in the repo root and export into images/
+# via each document's #+EXPORT_FILE_NAME.  Render one with batch emacs:
+#
+#   make nix-doc-alberta-buck-notes   # -> images/alberta-buck-notes.{txt,pdf}
+#   make doc-alberta-buck-proofs      # (inside an emacs+LaTeX environment)
+#
+# Notes:
+#   - org-ascii-charset utf-8 matches the committed .txt renders (the
+#     batch default is plain ascii, which reflows every heading rule).
+#   - emacs >= 30 refuses remote resources in batch mode; the logo host
+#     must be allowed explicitly (org-safe-remote-resources).
+#   - "PDF file produced with errors" is the usual LaTeX cross-reference
+#     noise; check the page count if in doubt.
+
+DOC_RENDER_EVAL	= (progn							\
+		    (require (quote ox-ascii)) (require (quote ox-latex))	\
+		    (setq org-ascii-charset (quote utf-8))			\
+		    (setq org-safe-remote-resources				\
+			  (list "\\`https://perry\\.kundert\\.ca/"))		\
+		    (org-ascii-export-to-ascii)					\
+		    (org-latex-export-to-pdf))
+
+doc-%:		%.org
+	emacs --batch $< --eval '$(DOC_RENDER_EVAL)'
+
+
 # ── Worked-example vectors and plots ─────────────────────────────────
 #
 # `images` regenerates every artifact referenced by
@@ -330,6 +358,16 @@ snark-note-binding:	rapidsnark
 
 snark-note-binding-clean:
 	rm -rf build/snark/note_binding
+
+# A1-layout note-binding circuit (circuits/note_binding_a1.circom): the A1
+# sibling of snark-note-binding (same toolchain requirements; ~2.9M
+# non-linear constraints, five ScalarMulG + one ScalarMulH).
+snark-note-binding-a1:	rapidsnark
+	rm -rf build/snark/note_binding_a1
+	$(SNARK_PATH) bash scripts/snark/setup_note_binding_a1.sh
+
+snark-note-binding-a1-clean:
+	rm -rf build/snark/note_binding_a1
 
 # End-to-end Notes fixtures: one mutually-consistent world per flavor (A1,
 # A2, B1) with REAL proofs at every gate, consumed by test/NotesE2E.t.sol.

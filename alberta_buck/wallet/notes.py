@@ -11,21 +11,25 @@ Wire formats::
 
     cm    = Poseidon([flavor, v, rho, id_hash, predicate])    # spend.circom L90
     nf_b  = Poseidon([rho, id_hash, 4242])                    # spend.circom L113-117
-    nf_a  = Poseidon([rho, id_hash, 4243])                    # planned spend_a.circom
+    nf_a  = Poseidon([rho, id_hash, 4243])                    # reserved; unused on chain
 
-The 4242 / 4243 tags domain-separate B- and A-flavor nullifiers so the same
-``(rho, id_hash)`` pair cannot collide cross-flavor.
+The shipped unified ``spend.circom`` derives the 4242-tagged nullifier for
+EVERY flavor; the 4243 tag is reserved in case a future flavor-split
+derivation is wanted (it would keep the namespaces disjoint for the same
+``(rho, id_hash)`` pair).
 
-A-flavor identity binding: the circuit does **not** learn the recipient's
-``pk_rec`` from ``id_hash`` alone -- ``id_hash`` is opaque to the circuit.
-The actual identity check is the in-circuit Chaum-Pedersen / ElGamal
-equality bind described in the Phase 8 section of
-:file:`alberta-buck-ethereum.org`: a single ``sk_dep`` witness must satisfy
-``C_n - sk_dep * R_n === C_reg - sk_dep * R_reg``, forcing
-``pk_rec_mint === pk_dep_current`` at constraint time.  Per the 2026-04
-Deepseek R4 review, the consequence is that A-note loss-recovery via
-identity re-issuance is **impossible by design** -- ``sk_rec`` must be
-backed up like a hardware-wallet seed; loss is terminal.
+A-flavor identity binding: the spend circuit does **not** learn the
+recipient from ``id_hash`` -- it is opaque to the circuit.  The addressed
+(A1/A2) binding is enforced by the Identity-M deposit gate at spend: the
+deposit-coupling sigma plus the bound membership proof, plus the
+note<->eEnc binding SNARK (:file:`circuits/note_binding.circom` for the A2
+payload layout, :file:`circuits/note_binding_a1.circom` for A1), which
+re-derives this same nullifier in-circuit from ``(rho, id_hash)`` to tie
+the gate to the specific spent note.  Authorization keys on the recipient
+*identity* ``m_rec``, not on any mint-time account key-pair, so key loss
+is recoverable by binding a new account to the same identity.  (The
+earlier account-pinned design -- an in-circuit Chaum-Pedersen equality on
+the mint-time ``sk_rec``, making loss terminal -- is retired.)
 
 ``id_hash`` is the wallet's deterministic Poseidon-of-payload commitment to
 the identity material, so two notes for the same recipient/issuer hash to the
@@ -118,15 +122,15 @@ def nullifier_b(rho: int, id_hash: int) -> int:
 
 
 def nullifier_a(rho: int, id_hash: int) -> int:
-    """A-spend nullifier: ``Poseidon([rho, id_hash, 4243])``.
+    """RESERVED A-tag nullifier: ``Poseidon([rho, id_hash, 4243])``.
 
-    Matches the planned :file:`circuits/spend_a.circom` per Phase 8 of
-    :file:`alberta-buck-ethereum.org`.  Identity binding is **not** carried
-    by this hash -- it is enforced by the in-circuit Chaum-Pedersen equality
-    ``C_n - sk_dep * R_n === C_reg - sk_dep * R_reg`` on a single ``sk_dep``
-    witness.  The nullifier derivation here only domain-separates the A-path
-    from the B-path (tag 4243 vs 4242) so a cross-flavor replay is
-    structurally impossible.
+    NOT used by the shipped unified :file:`circuits/spend.circom`, which
+    derives the 4242-tagged nullifier for every flavor; kept for a possible
+    future flavor-split derivation (the distinct tag would make cross-flavor
+    replay structurally impossible for the same ``(rho, id_hash)``).
+    Identity binding is **not** carried by the nullifier either way -- it is
+    enforced by the Identity-M deposit gate (coupling sigma + membership +
+    the note<->eEnc binding SNARK); see the module docstring.
     """
     if not (0 < rho < ORDER):
         raise ValueError("rho must be a non-zero scalar mod ORDER")

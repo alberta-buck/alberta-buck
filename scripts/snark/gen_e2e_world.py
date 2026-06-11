@@ -16,12 +16,11 @@ Subcommands:
 
 The driver is scripts/snark/gen_e2e_fixtures.sh.
 
-NOTE (A1 binding gap): the note-binding circuit opens
-idHash = Poseidon8(eNote, eIss) -- the A2 payload layout.  A1's idHash
-commits (eNote, m_issuer, sigma) instead, so a binding proof is NOT
-constructible for A1 notes with the current circuit; the A1 fixture carries
-an empty binding proof (Notes' backward-compat skip) and the E2E test
-documents the gap.  Closing it needs an A1-layout binding circuit variant.
+The note binding uses the layout-matched circuit per flavor: A2 opens
+idHash = Poseidon8(eNote, eIss) (circuits/note_binding.circom); A1's idHash
+commits (eNote, m_issuer, sigma), so its tie is through the note's own value
+ciphertext with the face public (circuits/note_binding_a1.circom,
+make_note_binding_a1_witness).  B1 is bearer -- no tie.
 """
 
 import argparse
@@ -46,7 +45,9 @@ from alberta_buck.wallet.unilateral_a2 import (
     IdentityTree, mint_unilateral_a2, deposit_couple_prove, deposit_couple_verify,
 )
 from alberta_buck.wallet.b1_binding import b1_bind_prove, b1_bind_verify
-from alberta_buck.wallet.note_binding import make_note_binding_witness
+from alberta_buck.wallet.note_binding import (
+    make_note_binding_witness, make_note_binding_a1_witness,
+)
 from alberta_buck.registry.tree import identity_leaf
 
 CHAINID  = 1
@@ -244,13 +245,28 @@ def build_world(flavor: str):
     with open(os.path.join(out_dir, "g1tie_input.json"), "w") as f:
         json.dump(g1tie_input, f, indent=2)
 
-    # ---- note-binding input (A2 only; A1 layout unsupported -- see header) ----
-    if flavor == "a2":
-        nb = make_note_binding_witness(
-            rho=opening.rho, eNote=eNote, eIssCommitted=eCommitted,
-            s=s, m_rec=m_ctr, b=b, M_I=M_named, r_iss=r_committed,
-        )
+    # ---- note-binding input (layout-matched circuit per addressed flavor) ----
+    if flavor in ("a1", "a2"):
+        if flavor == "a2":
+            nb = make_note_binding_witness(
+                rho=opening.rho, eNote=eNote, eIssCommitted=eCommitted,
+                s=s, m_rec=m_ctr, b=b, M_I=M_named, r_iss=r_committed,
+            )
+        else:
+            # A1: the tie is through eNote itself (face public); eEnc's total
+            # randomness is the mint r' plus the deposit re-randomization s.
+            nb = make_note_binding_a1_witness(
+                rho=opening.rho, eNote=eNote, v=FACE, m_issuer=m_iss,
+                sigma_R=sigma_R, sigma_s=sigma_s, r_note=note.r_note,
+                m_rec=m_ctr, t=(note.r_prime + s) % ORDER, b=b,
+            )
         assert int(nb["nullifier"]) == nf, "binding/spend nullifier mismatch"
+        # The builder's public eEnc / P_I must be the exact on-chain points the
+        # sigma carries (the contract derives the proof's publics from them).
+        recompose = lambda limbs: sum(int(w) << (64 * i) for i, w in enumerate(limbs))
+        assert (recompose(nb["eEncRx"]), recompose(nb["eEncRy"])) == point_to_words(eEnc.R)
+        assert (recompose(nb["eEncCx"]), recompose(nb["eEncCy"])) == point_to_words(eEnc.C)
+        assert (recompose(nb["piX"]), recompose(nb["piY"])) == point_to_words(P_committed)
         with open(os.path.join(out_dir, "note_binding_input.json"), "w") as f:
             json.dump(nb, f, indent=2)
 
@@ -364,8 +380,8 @@ def assemble(flavor: str):
         "public": g1_public,
     }
 
-    # Note-binding proof (A2: rapidsnark output; A1: empty = skip, see header).
-    if flavor == "a2":
+    # Note-binding proof (rapidsnark output; layout-matched circuit per flavor).
+    if flavor in ("a1", "a2"):
         nb_proof = json.load(open(os.path.join(out_dir, "note_binding_proof.json")))
         world["noteBinding"] = {
             "proofBytes": "0x" + "".join(
@@ -376,8 +392,6 @@ def assemble(flavor: str):
                     nb_proof["pi_c"][0], nb_proof["pi_c"][1],
                 ]),
         }
-    elif flavor == "a1":
-        world["noteBinding"] = {"proofBytes": "0x"}   # documented A1 layout gap
 
     world["mint"] = {
         "proofBytes": mint["proofBytes"],

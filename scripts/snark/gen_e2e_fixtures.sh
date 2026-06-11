@@ -10,6 +10,7 @@
 #   build/snark/spend             -- setup.sh
 #   build/snark/g1tie             -- make snark-g1tie
 #   build/snark/note_binding      -- make snark-note-binding
+#   build/snark/note_binding_a1   -- make snark-note-binding-a1
 #
 # Usage:
 #   make nix-snark-e2e-fixtures
@@ -22,6 +23,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 E2E="$ROOT/build/snark/e2e"
 G1TIE="$ROOT/build/snark/g1tie"
 NB="$ROOT/build/snark/note_binding"
+NB_A1="$ROOT/build/snark/note_binding_a1"
 RAPIDSNARK="$ROOT/lib/rapidsnark-macOS-arm64-v0.0.8/bin/prover"
 CHAINID=1
 
@@ -61,15 +63,22 @@ import json; print(json.load(open('$OUT/world.json'))['payout'])")
     npx snarkjs groth16 verify "$G1TIE/verification_key.json" \
         "$OUT/g1tie_public.json" "$OUT/g1tie_proof.json"
 
-    # ---- 5. Note-binding proof (A2 only; A1's idHash layout is unsupported
-    #         by the current binding circuit -- the fixture carries an empty
-    #         proof and NotesE2E documents the gap) ----
-    if [ "$FLAVOR" = "a2" ]; then
-        bash -c "ulimit -s 65520 && '$NB/note_binding_cpp/note_binding' \
+    # ---- 5. Note-binding proof (layout-matched circuit per addressed
+    #         flavor: A2 -> note_binding, A1 -> note_binding_a1; B1 is
+    #         bearer -- no tie) ----
+    if [ "$FLAVOR" = "a2" ] || [ "$FLAVOR" = "a1" ]; then
+        if [ "$FLAVOR" = "a2" ]; then
+            NB_DIR="$NB";    NB_GEN="$NB/note_binding_cpp/note_binding"
+            NB_ZKEY="$NB/note_binding_0001.zkey"
+        else
+            NB_DIR="$NB_A1"; NB_GEN="$NB_A1/note_binding_a1_cpp/note_binding_a1"
+            NB_ZKEY="$NB_A1/note_binding_a1_0001.zkey"
+        fi
+        bash -c "ulimit -s 65520 && '$NB_GEN' \
             '$OUT/note_binding_input.json' '$OUT/note_binding_witness.wtns'"
-        "$RAPIDSNARK" "$NB/note_binding_0001.zkey" "$OUT/note_binding_witness.wtns" \
+        "$RAPIDSNARK" "$NB_ZKEY" "$OUT/note_binding_witness.wtns" \
             "$OUT/note_binding_proof.json" "$OUT/note_binding_public.json"
-        npx snarkjs groth16 verify "$NB/verification_key.json" \
+        npx snarkjs groth16 verify "$NB_DIR/verification_key.json" \
             "$OUT/note_binding_public.json" "$OUT/note_binding_proof.json"
     fi
 
