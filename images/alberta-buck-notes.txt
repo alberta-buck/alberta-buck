@@ -659,7 +659,10 @@ Table of Contents
   the identity scalar \( m \) that /every/ Fountain account of that
   Identity shares – rather than under one account's key \( pk \).  So
   the issuer needs only the recipient's \( M \) (not an account), and
-  /any/ of the recipient's accounts can later redeem.
+  /any/ of the recipient's accounts can later redeem.  Because \( m \)
+  alone cannot register accounts or authorize spends (only the PS
+  credential \( \sigma \) can), disclosing \( m \) to counterparties is
+  safe: they gain the ability to name you, not to act as you.
 
   *One gadget, three instances.* Both halves of the handshake are the
   /same/ relation: prove a re-encryption of a /registered/ Identity
@@ -2610,6 +2613,21 @@ Table of Contents
   6. *IdentityRegistry* mapping between on-chain addresses and
      registered credentials (PS signatures, ElGamal ciphertexts,
      isPublicIdentity flags set by `bindContract').
+
+  These six components carry two distinct kinds of authority.  The
+  identity scalar \( m = H(\mathrm{id}) \) (from which \( M = mG \) and
+  the ElGamal credential are derived) grants /read/ capability: decrypt
+  ciphertexts addressed to an Identity, verify receipts, name a
+  counterparty.  It is disclosed to every counterparty by design – Alice
+  learns Bob's \( m \) when he re-encrypts his credential for her, and
+  vice versa.  The PS signature \( \sigma \) (component 1), in contrast,
+  grants /write/ capability: register accounts, authorize note spends.
+  It is held only by its owner and never revealed to counterparties.
+  The system's security rests on this separation: \( m \) alone, without
+  \( \sigma \), is insufficient for any mutating operation.  A
+  counterparty who knows \( m \) can name the Identity but cannot
+  impersonate it – exactly the boundary the non-deniable-receipt
+  invariant requires.
 
   Notably absent: a stealth-address construction is /not/ used by Notes.
   Recipient binding is handled by encrypting the issuer payload under

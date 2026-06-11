@@ -1,7 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                  ACCOUNTABLE ANONYMITY FOR PUBLIC MONEY
-               Identity-Bound Bearer Payments: Mandatory
-              Bilateral Non-Deniability Without a Trusted
+             Identity-Bound Bearer Payments with No Trusted
                                  Opener
 
                              Perry Kundert
@@ -13,34 +12,29 @@
 
 <https://perry.kundert.ca/images/dominion-logo.png>
 
-Public money is going programmable, and programmability invites
-surveillance: every proposed central-bank digital currency couples the
-convenience of digital cash to a ledger its issuer can read, freeze, and
-mine.  Physical cash resists this but offers the opposite extreme – no
-accountability, no issuance trail, no recourse.  This paper presents
-BUCK Notes, a bearer-instrument layer for an identity-aware stablecoin
-that occupies neither pole.  /Bulk/ traceability is defeated – no
-analytics firm, no omnibus subpoena, not even the system's own KYC
-issuer can reconstruct who paid whom – while /bilateral/ disclosure is
-preserved: the two parties to any payment, and provably only they,
-retain the cryptographic means to prove under compulsion exactly who the
-counterparty was.  The load-bearing security notion is the
-*non-deniable-receipt invariant*: there is no path, even for a
-/colluding/ payer and payee, to construct an accepted payment for which
-no court-compellable receipt naming the KYC-bound counterparty exists.
-The invariant induces what we call a *compulsion calculus*: evidence of
-any payment always exists, is held exclusively and individually by its
-direct participants, and can be surrendered – or refused, or destroyed –
-only by them; no institution can be compelled to produce what it
-provably does not hold.  The enabling primitive is *Identity-M binding*:
-payments name KYC-certified identity /points/, never account keys,
-realised by a single re-encryption gadget instantiated three ways across
-the full realisable design space of note flavours – all shipped and
-measured on Ethereum.  We prove the fourth flavour structurally
-impossible, prove the obvious cheaper couplings vacuous, show that the
-doubly-anonymous flavour requires zero-knowledge registry set-membership
-under a stated restriction, and observe that the shipped construction
-lands on exactly the branch the necessity argument predicts.  Every
+Public money is going digital, and every design on the table pays for
+the convenience with a ledger its issuer can read, freeze, and mine.
+Cash resists surveillance, but only by keeping no evidence at all: no
+proof of payment, no recourse, no trail.  This paper presents BUCK
+Notes, a bearer-payment layer for an identity-aware stablecoin that
+refuses both defaults.  No one can trace payments in bulk – not an
+analytics firm, not an omnibus subpoena, not even the system's own KYC
+issuer.  Yet the two parties to any payment can always prove exactly who
+the other was, with evidence sound enough to convict on.  The guarantee
+is the *non-deniable receipt*: even a /colluding/ payer and payee cannot
+complete a payment without each holding evidence that names the other.
+The consequences read like due process implemented in mathematics (the
+*compulsion calculus*): evidence of every payment exists; only the
+participants hold it; each may surrender, refuse, or destroy their copy;
+and no institution can be compelled to produce what it provably never
+had.  One design choice makes this work: payments bind KYC-certified
+/identities/, never account keys (*Identity-M binding*).  A single
+re-encryption gadget, instantiated three ways, yields every realisable
+note flavour (addressed or bearer, public or private issuer), all
+shipped and measured on Ethereum.  We prove the fourth flavour
+impossible, the obvious cheap binding vacuous, and zero-knowledge
+registry membership necessary for the doubly-anonymous flavour under a
+stated restriction; exactly the branch the shipped system takes.  Every
 theorem carries an executable witness.
 
 Table of Contents
@@ -89,114 +83,114 @@ Table of Contents
 
   The choice a society makes about the privacy of its money is a choice
   about the balance of power between the individual and the institutions
-  that watch over them.
+  that watch over them.  This paper is about a way to make that choice
+  deliberately: payments no institution can read in bulk, where the two
+  parties (and only they) always hold court-grade proof of who dealt
+  with whom.
 
-  That choice is now being made, mostly by default.  Every central-bank
-  digital currency under design or deployment couples the convenience of
-  digital payment to a ledger that some institution can read in bulk –
-  and the visibility is not an accident of engineering but the explicit
-  pitch to the governments funding it[1].  Physical cash is the only
-  payment instrument in wide use that resists bulk observation, and it
-  resists by carrying /no/ information at all: no issuance trail, no
-  proof of payment a court could rely on, no recourse when it is stolen,
-  and no per-instrument compliance hook.  The public debate treats these
-  as the only two points on offer – total legibility or total opacity –
-  and forty years of cryptographic work has not yet displaced that false
-  dichotomy from policy.  Chaum asked the right question in 1982[2]; his
-  answer stalled on institutional grounds, not cryptographic ones.  The
-  anonymity line that followed – Zerocash and its descendants, the mixer
-  contracts, the compliance-retrofitted privacy pools[3][4][5] –
-  delivered unlinkability and discarded accountability.  The
-  auditable-CBDC line that answered it – PRCash, UTT, PEReDi,
-  Platypus[6][7][8][9] – restored accountability, but in every case by
-  vesting a /designated authority/ (an auditor, a committee, the central
-  bank itself) with the power to open transactions.  No prior system
-  provides both unlinkable payments and mandatory accountability with
-  /no opener at all/.
+  That choice is currently being made by default.  Every central-bank
+  digital currency in design or deployment couples digital convenience
+  to a ledger some institution reads in bulk; the visibility is not an
+  engineering accident; it is the pitch to the governments funding
+  it[1].  Cash is the only widely used instrument that resists bulk
+  observation, and it resists by carrying no information at all: no
+  issuance trail, no proof a court can rely on, no recourse when stolen.
+  The public debate treats these as the only two options: total
+  legibility or total opacity.  Forty years of cryptography has not yet
+  dislodged that false dichotomy from policy.
+
+  Chaum asked the right question in 1982[2]; his answer stalled on
+  institutional grounds, not cryptographic ones.  The anonymity line
+  that followed (Zerocash and its descendants, the mixers, the privacy
+  pools[3][4][5]) made payments untraceable and unaccountable in the
+  same stroke.  The auditable-CBDC line that answered it (PRCash, UTT,
+  PEReDi, Platypus[6][7][8][9]) restored accountability by handing a
+  designated authority the power to open transactions: an auditor, a
+  committee, the central bank itself.  No prior system provides both
+  untraceable payments and mandatory accountability with /no opener at
+  all/.
 
   This paper presents a system that does, and locates precisely what it
-  costs.  The design goal is civic before it is cryptographic, so we
-  state it plainly:
+  costs.  The design goal is civic before it is cryptographic:
 
   • *Justice must work.* When a payment is implicated in a crime, the
-    legal system must be able to obtain /cryptographically sound/
-    evidence of exactly who paid whom – evidence strong enough to
-    convict on and impossible to forge against an innocent party.  The
-    evidence must be guaranteed to /exist/: two colluding criminals must
-    not be able to arrange an untraceable payment between themselves.
-  • *Compulsion must be targeted.* That evidence is held by – and may be
-    demanded from – /only/ the citizens directly party to the
-    transactions at issue.  There is no registry, exchange, issuer, or
-    validator that a warrant (or a breach, or a purchase) can compel
-    into revealing the financial actions of citizens in bulk, because no
-    such party holds the information in any usable form.
-  • *Refusal must be possible.* If the legal order itself turns unjust –
-    an authoritarian government criminalising beliefs, associations,
-    donations – a citizen retains the physical ability to refuse: to
+    legal system must be able to obtain cryptographically sound evidence
+    of exactly who paid whom (strong enough to convict on, impossible to
+    forge against the innocent).  And the evidence must be guaranteed to
+    /exist/: two colluding criminals must not be able to arrange an
+    untraceable payment.
+  • *Compulsion must be targeted.* That evidence is held by (and can be
+    demanded from) only the people party to the payment.  There is no
+    registry, exchange, issuer, or validator that a warrant, a breach,
+    or a purchase can turn into bulk surveillance, because no such party
+    holds the information in any usable form.
+  • *Refusal must be possible.* If the legal order itself turns unjust
+    (an authoritarian government criminalising beliefs, associations,
+    donations), a citizen retains the physical ability to refuse: to
     withhold, or irreversibly destroy, their own keys.  The data then
-    /remains private/, against any coalition of compelled institutions
-    and archived chain history, regardless of the preferences of the
-    judiciary of the day.  Surveillance of the unwilling is not
-    available at any institutional price; it requires coercing
-    individual human beings, one at a time, in the open.
+    stays private against any coalition of compelled institutions and
+    archived chain history.  Surveillance of the unwilling is not
+    available at any institutional price; it requires coercing human
+    beings, one at a time, in the open.
 
   These three goals are usually presumed to be in tension.  The central
-  claim of this paper is that they are simultaneously satisfiable, that
-  a system satisfying them is practical today on a public blockchain,
-  and that the property making it possible is a specific and somewhat
-  counter-intuitive design inversion: payments must bind /identities/ –
-  KYC-certified curve points held by persons – and never the /account
-  keys/ that hold funds.  We call this *Identity-M binding*.  Everything
-  in the paper flows from it: the receipt that always exists, the
-  recovery of lost keys without any custodian, the impossibility of one
-  whole quadrant of the design space, and the exact location of the
-  boundary where accountability stops being cheap.
+  claim of this paper is that they are simultaneously satisfiable,
+  practically, on a public blockchain today; what makes it possible is
+  one counter-intuitive inversion: payments must bind /identities/ –
+  certified once, at KYC, and held by persons – never the /account keys/
+  that hold funds.  We call this *Identity-M binding*.  Everything else
+  follows from it: the receipt that always exists, key recovery without
+  any custodian, the impossibility of one whole quadrant of the design
+  space, and the exact place where accountability stops being cheap.
 
 
 1.1 Contributions
 ─────────────────
 
+  Seven contributions, in the order the paper builds them:
+
   • *The non-deniable-receipt invariant* (Def. 4.2): a security
-    definition for payment systems whose operative, novel clause forbids
-    a /colluding/ payer/payee pair from constructing a payment with no
-    accepting receipt.  Accountability is *bilateral* and held by the
-    counterparties; there is no system-wide opening authority.
+    definition for payment systems whose new clause is collusion
+    resistance: even a /willing/ payer and payee cannot construct an
+    accepted payment with no receipt.  Accountability is *bilateral*,
+    held by the counterparties; there is no system-wide opener.
   • *The compulsion calculus* (Sec. 4.4): the invariant, composed with
-    issuer-blindness, yields three properties we believe are jointly new
-    for a payment system – evidence /exists/ for every payment, is held
-    /exclusively/ by the direct participants, and is /refusable/: absent
-    the participants' voluntary or compelled keys, the ledger is
-    computationally silent forever.  We argue this is the correct
-    cryptographic substrate for due process, and the correct failure
-    mode under unjust process.
+    issuer-blindness (the KYC issuer cannot trace even its own certified
+    clients; Thm. 4.3), yields three properties we believe are jointly
+    new for a payment system: evidence /exists/ for every payment;
+    /only/ the direct participants hold it; and it is /refusable/:
+    without a participant's keys, surrendered or compelled, the ledger
+    is computationally silent forever.  We argue this is the right
+    cryptographic substrate for due process, and the right failure mode
+    under unjust process.
   • *Identity-M binding* (Sec. 5): the inversion that makes the rest
-    practical.  One gadget – "prove a re-encryption of a registered
-    Identity under a target identity point" – instantiated three ways
-    covers the full realisable design space; spend authorization keys on
-    identity, so account-key loss is recoverable with no custodian, and
-    the binding survives across the time gap that separates an anonymous
-    payer from an anonymous payee.
-  • *A complete, shipped construction* for all three realisable flavours
+    practical.  One gadget (prove a re-encryption of a registered
+    Identity under a target identity point) instantiated three ways
+    covers the whole realisable design space.  Note spend authorization
+    keys on identity, so a lost account key is recoverable with no
+    custodian, and the binding survives the time gap between an
+    anonymous payer and an anonymous payee.
+  • *A complete, shipped construction* of all three realisable flavours
     – addressed/public (A1), addressed/private (A2), bearer/public (B1)
-    – on Ethereum: Groth16 batch mint, flavour-agnostic spend,
+    – on Ethereum: Groth16 batch mint, flavour-agnostic spend, and
     spend-time composition of a deposit sigma, a bound set-membership
-    proof, and a note-to-ciphertext tie, with every verifier real and
+    proof, and a note-to-ciphertext tie, every verifier real and
     measured (Sec. 10).
   • *The forced taxonomy* (Thm. 7): the fourth flavour – a bearer note
-    with a private issuer – is structurally impossible, by an
-    information-theoretic argument.
-  • *A characterisation of the cost of anonymity* (Sec. 9): the receipt
-    is nearly free when one party is named at the binding instant; when
-    both are anonymous, the obvious cheap coupling is /vacuous/
-    (Lem. 9.2) and a collusion-resistant receipt requires zero-knowledge
-    registry set-membership under a single-binding-step restriction
-    (Prop. 9.3).  The shipped system takes exactly the spend-side branch
-    the proposition permits, and we measure what it costs.
-  • *A reproducible, executable artifact*: the contracts, circuits, and
-    verifiers are open and test-covered (over 400 Foundry tests, 330
-    wallet tests, an end-to-end suite in which every verifier is the
-    real Groth16 artifact); the paper's own claims carry executable
-    witnesses (Appendix 12) that run in this document's build.
+    from a hidden issuer – is impossible, by an information-theoretic
+    argument.
+  • *The cost of anonymity, located* (Sec. 9): the receipt is nearly
+    free when one party is named at the binding moment.  When both are
+    anonymous, the obvious cheap coupling is /vacuous/ (Lem. 9.2), and a
+    collusion-resistant receipt requires zero-knowledge registry
+    set-membership under a single-binding-step restriction (Prop. 9.3).
+    The shipped system takes exactly the branch the proposition permits,
+    and we measure it.
+  • *A reproducible artifact*: contracts, circuits, and verifiers, open
+    and test-covered – over 400 Foundry tests, 330 wallet tests, an
+    end-to-end suite where every verifier is the real Groth16 artifact –
+    and the paper's own claims carry executable witnesses (Appendix 12)
+    that re-run on each build.
 
 
 2 The Shape of the System, in Plain Language
@@ -204,26 +198,27 @@ Table of Contents
 
   Before the formalism, the experience.
 
-  Alice owes Bob one hundred dollars.  She opens her wallet and mints a
+  Alice owes Bob one hundred BUCKs.  She opens her wallet and mints a
   /note/: her wallet burns one hundred of her BUCKs into a shared pool
-  and publishes a single opaque number – a cryptographic commitment –
-  onto the public chain.  The commitment reveals nothing: not the
-  amount, not Bob, not (for the private flavour) even that it was Alice.
-  Alice then hands Bob the note's /opening/ – a few hundred bytes – by
-  any channel she likes: a message, a QR code on her phone's screen, a
-  slip of paper.  Days or months later, from any account he controls,
-  Bob /deposits/ the opening: his wallet proves, in zero knowledge, that
-  some unspent note in the pool is his to claim, and the pool pays him
-  one hundred BUCKs.  An observer watching the chain sees a commitment
-  appear at one moment and an unrelated-looking payout occur at another,
-  with nothing connecting them – not the amounts (they're standard
-  denominations shared by many Notes), not the parties, not the timing.
+  and publishes a single opaque number (a cryptographic commitment) onto
+  the public chain.  The commitment reveals nothing: not the amount, not
+  Bob, not (for the private flavour) even that it was Alice.  Alice then
+  hands Bob the note's /opening/ (a few hundred bytes) by any channel
+  she likes: a message, a QR code on her phone's screen, a slip of
+  paper.  Days or months later, from any account he controls, Bob
+  /deposits/ the opening: his wallet proves (in /zero knowledge/,
+  revealing nothing about which note) that some unspent note in the pool
+  is his to claim, and the pool pays him one hundred BUCKs.  An observer
+  watching the chain sees a commitment appear at one moment and an
+  unrelated-looking payout occur at another, with nothing connecting
+  them – not the amounts, not the parties, not the timing.
 
-  Three further facts make this different from a mixer, and they are the
-  subject of this paper.
+  Three further facts make this different from a mixer (a pool that
+  breaks payment trails and does nothing else), and they are the subject
+  of this paper.
 
   *First, the payment writes its own sealed receipt.* Built into every
-  note – enforced by the chain's verifiers, impossible to omit – is the
+  note (enforced by the chain's verifiers, impossible to omit) is the
   cryptographic material from which each party can produce a proof
   naming the /other party's certified legal identity/.  Bob can prove
   "this payment came from Alice"; Alice can prove "Bob is the one who
@@ -238,11 +233,11 @@ Table of Contents
   *Second, only Alice and Bob hold the seal.* The receipt is not
   deposited with any registrar.  It does not exist in any database.  The
   KYC office that once certified Alice's identity cannot reconstruct her
-  payments – we prove (Theorem 4.3) that even a /fully breached/
-  identity office, holding every certificate it ever issued plus the
-  entire blockchain, learns nothing about who transacted with whom.  A
-  court that needs the receipt has exactly one place to get it: from
-  Alice, or from Bob, by lawful order directed at that person.
+  payments; we prove (Theorem 4.3) that even a /fully breached/ identity
+  office, holding every certificate it ever issued plus the entire
+  blockchain, learns nothing about who transacted with whom.  A court
+  that needs the receipt has exactly one place to get it: from Alice, or
+  from Bob, by lawful order directed at that person.
 
   *Third, the seal answers to its holders – and only its holders.*
   Served with a lawful order, Bob can comply: he surrenders his receipt,
@@ -260,7 +255,7 @@ Table of Contents
   seizure of every server the system runs on.  The mathematics does not
   know who is in power.
 
-  This is, we will argue, the correct shape for the money of a free
+  This is, we will argue, the right shape for the money of a free
   society: per-payment accountability /stronger/ than paper cash (which
   offers none), surveillance resistance /stronger/ than bank money
   (which offers none), and a default the citizen controls with their own
@@ -270,17 +265,17 @@ Table of Contents
   The system comes in three flavours, fixed by who is named when:
 
   • *A1 – addressed cheque, public payer.* The note names its recipient
-    cryptographically (only Bob's identity can deposit it – a thief who
+    cryptographically (only Bob's identity can deposit it; a thief who
     photographs the paper gains nothing) and its issuer openly (payroll,
     invoices, audited disbursements).
   • *A2 – addressed cheque, private payer.* As A1, but Alice's identity
-    is hidden from everyone /except Bob/ – the flavour for paying
+    is hidden from everyone /except Bob/; the flavour for paying
     privately while still handing the recipient a receipt that names
-    you.  This is the cryptographically expensive flavour, and Sections
-    9–10 are the story of what it costs and why.
+    you.  This is the cryptographically expensive flavour; Sections 9–10
+    locate the cost and explain it.
   • *B1 – bearer cheque, public payer.* Whoever holds the opening can
     deposit it (walking-around money; the paper surface), and the
-    depositor's identity is delivered – encrypted, bilaterally – to the
+    depositor's identity is delivered (encrypted, bilaterally) to the
     issuer.  The fourth combination, a bearer note from a /hidden/
     issuer, is not merely undesirable; it is impossible (Theorem 7).
 
@@ -288,10 +283,10 @@ Table of Contents
 3 Related Work
 ══════════════
 
-  We place BUCK Notes in the lineage of digital cash and
-  privacy-preserving payment systems, and isolate the property no
-  predecessor provides: a /mandatory, bilateral, collusion-resistant/
-  receipt with /no system-wide opener/.
+  Every predecessor gives up one of the two goods.  The anonymity line
+  gives up accountability; the auditable line gives up doing without an
+  opener.  No prior system provides a /mandatory, bilateral,
+  collusion-resistant/ receipt with /no system-wide opener/:
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    System                          Unlinkable    Mandatory receipt  Collusion-resistant  Trusted opener?      Bearer/paper 
@@ -306,48 +301,76 @@ Table of Contents
    CBDC (e-CNY, digital euro) [1]  no            n/a                n/a                  issuer sees all      no           
    *BUCK Notes (A1, A2, B1)*       *yes*         *yes*              *yes*                *no*                 *yes*        
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  The auditable-privacy line (PRCash, UTT, PEReDi, Platypus) is closest
-  in spirit and the right comparison for a financial-cryptography
-  audience: all four restore accountability to unlinkable payments, but
-  all four vest a /designated authority/ – an auditor, a committee, the
-  central bank – with the power to de-anonymise, and that authority is
-  exactly what a breached, purchased, or repurposed institution turns
-  into a population-scale surveillance instrument.  BUCK's
-  accountability is /counterparty-held/: the only institutional anchor
-  is the per-identity KYC issuer, which (Theorem 4.3) can map a
+  The auditable-privacy line (PRCash, UTT, PEReDi, Platypus) is the
+  closest comparison.  All four restore accountability to unlinkable
+  payments, and all four do it by appointing an authority (an auditor, a
+  committee, the central bank) with the power to de-anonymise.  That
+  authority is exactly what a breached, purchased, or repurposed
+  institution turns into a population-scale surveillance instrument.
+  BUCK's accountability is /counterparty-held/.  The only institutional
+  anchor is the per-identity KYC issuer, which (Theorem 4.3) can map a
   /surrendered/ identity to a person but can never produce the link
-  itself – compulsion runs depth-first through named individuals, never
-  breadth-first across the system.
+  itself: compulsion runs depth-first, through named individuals – never
+  breadth-first, across the system.
 
   On the anonymity line, Zerocash-style view keys are /optional/ and
   payer-controlled – precisely not mandatory – and the innocence-proving
   of Privacy Pools is voluntary exculpation, not compellable evidence.
   On the bearer axis, prior physical-form digital cash (Casascius coins,
   BIP-38 paper wallets) wraps a bearer secret with no identity semantics
-  at all; BUCK's addressed flavours make the paper artifact itself
+  at all.  BUCK's addressed flavours make the paper artifact itself
   useless to anyone but the named recipient.
 
 
 4 Model, Adversaries, and the Invariant
 ═══════════════════════════════════════
 
-  An /Identity/ is a KYC-certified point \( M = m\,G \in \mathbb{G}_1 \)
-  (BN254), where the scalar \( m = H(\mathrm{id}) \) is derived by a
-  preimage-resistant hash from the certified attribute record \(
-  \mathrm{id} \).  A person registers any number of on-chain /accounts/;
-  each account \( X \) stores its identity ElGamal-encrypted under its
-  own key, \( E_{\mathrm{addr}}[X] = (R_X, C_X) = (r_X G,\ M_X
-  ⁃ r_X\, pk_X) \) with \( pk_X = sk_X G \), accompanied by a
-  rerandomised Pointcheval-Sanders credential proving the identity was
-  certified – without revealing which certificate.  The registry
-  additionally maintains an incremental Merkle accumulator over identity
-  points (root \( \mathsf{rt_{id}} \), Poseidon leaves), updated
-  commit-before-use as accounts register.  A /payment/ moves value \( v
-  \) from payer \( P \) to recipient \( D \).
+  The terms, in brief: a person's /Identity/ is a single curve point
+  derived from their KYC record; /accounts/ are disposable key pairs,
+  each carrying an encrypted copy of its owner's Identity and a
+  credential that proves certification without identifying the
+  certificate; and a /registry/ accumulates the set of certified
+  Identities so that membership in it can later be proven in zero
+  knowledge.
+
+  Formally: an Identity is a KYC-certified point \( M = m\,G \in
+    \mathbb{G}_1 \) (BN254), where the scalar \( m = H(\mathrm{id}) \)
+    is a preimage-resistant hash of the certified attribute record \(
+    \mathrm{id} \).  A person registers any number of on-chain accounts.
+    Each account \( X \) stores its owner's Identity ElGamal-encrypted
+    under its own key (ElGamal: the standard public-key scheme whose
+    ciphertexts can be freshly re-randomised) as \( E_{\mathrm{addr}}[X]
+    = (R_X, C_X) = (r_X G,\ M_X + r_X\, pk_X) \) with \( pk_X = sk_X G
+    \).  Alongside it sits a Pointcheval-Sanders (PS) credential: the
+    issuer's signature over \( m \), re-randomised by the client so that
+    not even the issuer can recognise it, proving the Identity was
+    certified without revealing which certificate.  The registry also
+    maintains an incremental Merkle accumulator over identity points,
+    yielding one compact root \( \mathsf{rt_{id}} \) (Poseidon leaves)
+    standing for the whole set, membership provable against it – updated
+    commit-before-use as accounts register.
+
+  These two secrets carry different authority.  The identity scalar \( m
+  \) grants /read/ capability (decrypt ciphertexts addressed to \( M =
+  mG \), verify receipts, name a counterparty) and is disclosed to every
+  counterparty by design: Bob learns Alice's \( m \) when she pays him,
+  and vice versa.  The PS credential \( \sigma \), in contrast, grants
+  /write/ capability (register accounts, authorize spends) and is held
+  only by its owner.  The system's security rests on the fact that \( m
+  \) alone, without \( \sigma \), is insufficient for any mutating
+  operation: an adversary who knows \( m \) can name the Identity but
+  cannot impersonate it.  A /payment/ moves value \( v \) from payer \(
+  P \) to recipient \( D \).
 
 
 4.1 Adversaries and privacy goals
 ─────────────────────────────────
+
+  The model's three properties: no one can reconstruct who paid whom
+  from the chain; nothing on chain reveals either party's Identity to
+  outsiders; and the two parties can always identify each other.  The
+  first two must hold against the strongest adversary available: the
+  issuer itself, which knows every identity it ever certified.
 
   Three properties, held against adversaries of increasing power:
   • *(Bulk-tracing resistance.)* /Mallory/, a passive observer with full
@@ -355,7 +378,7 @@ Table of Contents
     reconstruct who paid whom, how much, or link a mint to its spend(s).
   • *(Third-party non-disclosure.)* Nothing on chain reveals either
     party's Identity point \( M \) to a non-participant, even in
-    aggregate across many payments – /including to the issuer/ (below).
+    aggregate across many payments (/including to the issuer/, below).
   • *(Mutual decryptability / accountability.)* Each of the two
     participants, from data they hold plus public chain state, can
     produce a sound receipt naming the other's registered \( M \); and a
@@ -364,13 +387,19 @@ Table of Contents
   The first two properties must hold against the strongest realistic
   deanonymiser, the *Issuer*: the KYC trust anchor that holds, for every
   client it certified, the plaintext identity \( (\mathrm{id}_i, m_i,
-  M_i) \) and the credential \( \sigma_i \) it issued – strictly more
+  M_i) \) and the credential \( \sigma_i \) it issued, strictly more
   than Mallory knows.  We treat a /compelled or wholly breached/ issuer
   in Sec. 4.3.
 
 
 4.2 The non-deniable-receipt invariant
 ──────────────────────────────────────
+
+  One definition carries the accountability half of the paper.  Its
+  first two clauses are standard: receipts can always be produced, and
+  never forged.  The third is the new one: even a payer and payee
+  working together cannot make an accepted payment that leaves no
+  receipt.
 
 
   /(Non-deniable receipt.)/ A protocol satisfies the
@@ -388,12 +417,10 @@ Table of Contents
     D \) for which /no/ accepting receipt naming the payer exists – even
     in collusion with \( D \).
 
-  The third clause is the operative one and the departure from prior
-  art: it is the collusion-resistant form.  Completeness alone protects
-  a self-interested recipient; the invariant additionally forbids a
-  /willing/ pair from constructing an untraceable payment.  Symmetric
-  statements bind the recipient's identity toward the payer (the exact
-  per-flavour content is Theorem 8).
+  Completeness alone protects a self-interested recipient; the third
+  clause is what forbids a /willing/ pair.  Symmetric statements bind
+  the recipient's identity toward the payer (Theorem 8 gives the
+  per-flavour content).
 
 
 4.3 Issuer-blindness: accountability without a bulk opener
@@ -403,22 +430,21 @@ Table of Contents
   objection to any /accountable privacy/ claim is that the issuer is a
   bulk-deanonymisation backdoor.  It is not.  Issuance is
   /address-blind/: the issuer signs the identity scalar \( m =
-  H(\mathrm{id}) \) once (a Pointcheval-Sanders credential over \( m \)
-  alone) and is thereafter done; the client derives each on-chain
-  account /offline/ – a fresh key pair \( (sk, pk) \), a self-formed
-  ElGamal credential \( E_{\mathrm{addr}} = (rG,\ M + r\,pk) \), and a
-  /rerandomised/ credential \( \sigma' \) – without the issuer ever
-  seeing \( pk \).  The issuer's view is therefore, per certified client
-  \( i \), the tuple \( (\mathrm{id}_i, m_i, M_i, \sigma_i) \) – the
-  plaintext identity – plus public chain state; it holds /no/ chain
-  addresses.
+  H(\mathrm{id}) \) once (a PS credential over \( m \) alone) and is
+  thereafter done.  The client derives each on-chain account /offline/
+  (a fresh key pair \( (sk, pk) \), a self-formed ElGamal credential \(
+  E_{\mathrm{addr}} = (rG,\ M + r\,pk) \), and a /rerandomised/
+  credential \( \sigma' \)), without the issuer ever seeing \( pk \).
+  The issuer's view is therefore, per certified client \( i \), the
+  tuple \( (\mathrm{id}_i, m_i, M_i, \sigma_i) \) (the plaintext
+  identity) plus public chain state.  It holds /no/ chain addresses.
 
 
   /(Issuer-blindness.)/ Under statistical unlinkability of PS
   rerandomisation and IND-CPA security of ElGamal on \( \mathbb{G}_1 \)
-  (equivalently DDH), an issuer – even one compelled or wholly breached,
+  (equivalently DDH), an issuer (even one compelled or wholly breached,
   in possession of \( \{(\mathrm{id}_i, m_i, M_i, \sigma_i)\}_i \) and
-  the entire chain – has negligible advantage in matching any issued
+  the entire chain) has negligible advantage in matching any issued
   identity \( M_i \) to its on-chain registration \( (pk_j, E_j,
   \sigma'_j) \).  Compulsion or breach yields the /set/ of certified
   identities but no /map/ to chain accounts; deanonymisation remains
@@ -437,12 +463,11 @@ Table of Contents
   and no stored \( pk \), the issuer is reduced to an independent DDH
   decision per (identity, account) pair.
 
-  This is the load-bearing form of /no trusted opener/: the closest
-  thing to an authority cannot open transactions in bulk, even against
-  itself – under compulsion it can only /verify/ a link some party
-  surrenders (map a receipt-disclosed \( M \) to the real person), never
-  /produce/ one.  Two caveats bound the theorem, and we state rather
-  than bury them:
+  This is what /no trusted opener/ means here: the closest thing to an
+  authority cannot open transactions in bulk, even against itself.
+  Under compulsion it can only /verify/ a link some party surrenders –
+  map a receipt-disclosed \( M \) to the real person – never /produce/
+  one.  Two caveats bound the theorem:
 
   • *Computational, not information-theoretic.* The plaintext lock is
     DDH; only the credential lock is statistical.  A discrete-log break
@@ -501,24 +526,24 @@ Table of Contents
   participants' custody.
 
   Propositions 4.4–4.4 follow from the privacy theorems (Sec. 8) plus
-  issuer-blindness; their content is the /composition/, which is worth
-  reading as constitutional design rather than cryptography:
+  issuer-blindness.  Their content is the /composition/ – constitutional
+  design more than cryptography:
 
   • *Due process is fully served.* Evidence exists for every payment (no
     colluding pair can prevent it), it convicts only the guilty
     (non-frameability: a receipt cannot be forged against an innocent
-    party – Corollary 8), and a court always has a /specific person/ to
+    party; Corollary 8), and a court always has a /specific person/ to
     direct an order at.  Investigation proceeds the way warrants are
     supposed to work: from a known participant, one named counterparty
     at a time, each step producing sound evidence.
   • *Bulk surveillance is not for sale.* There is no database to
     subpoena, breach, or buy.  The marginal cost of surveilling one more
-    citizen is coercing one more citizen – publicly, individually,
+    citizen is coercing one more citizen: publicly, individually,
     through legal process directed at a person who can see it happening.
     The system makes population-scale financial monitoring not illegal
     but /unimplementable/.
   • *The last word belongs to the citizen.* Refusal has personal legal
-    cost (contempt, adverse inference) – as it should, under legitimate
+    cost (contempt, adverse inference), as it should, under legitimate
     process.  But it is /effective/: a citizen facing an unjust order,
     or a population facing a judiciary that has begun criminalising
     beliefs, can withhold or destroy keys, and the archived ledger stays
@@ -527,11 +552,11 @@ Table of Contents
     institution was ever load-bearing.
 
   Two honest edges.  First, receipts are bilateral: your counterparty's
-  copy is beyond your control – /by design/.  A criminal cannot silence
-  their victim's receipt by destroying their own; refusal protects a
-  payment only when every participant elects it, which is exactly the
-  case (consensual acts the regime of the day has criminalised) the
-  property is for.  Second, destroying your keys also destroys /your/
+  copy is beyond your control, /by design/.  A criminal cannot silence
+  their victim's receipt by destroying their own.  Refusal protects a
+  payment only when every participant elects it; exactly the case the
+  property is for: consensual acts the regime of the day has
+  criminalised.  Second, destroying your keys also destroys /your/
   evidence: the standing ability to prove what you paid and to whom.
   Refusal-resilience is an option with a price, chosen by its holder –
   not a default that degrades accountability for anyone else (Def. 4.2
@@ -543,16 +568,15 @@ Table of Contents
 
   The properties above are only as good as the binding that produces the
   receipt, and the central design decision is /what/ a payment binds.
-  The obvious answer – the counterparty's account public key, the thing
-  that actually signs transactions – is wrong, and the system's history
-  includes the scar: an early account-pinned design bound A-flavour
-  notes to the recipient's mint-time key pair via an in-circuit
-  Chaum-Pedersen equality, with the consequence that losing that one key
-  made the note permanently unspendable, and any key rotation or
-  multi-device custody broke addressing.  Worse, Sec. 9 shows the cheap
-  forms of key binding are not merely brittle but /vacuous/: an ElGamal
-  ciphertext does not commit to its key, so "encrypted under the same
-  key" constraints are absorbed by free witnesses (Lem. 9.2).
+  The obvious answer (the counterparty's account public key, the thing
+  that actually signs transactions) is wrong.  The system's history
+  includes the scar: an early design bound addressed notes to the
+  recipient's mint-time key pair, so losing that one key made the note
+  permanently unspendable, and any key rotation or multi-device custody
+  broke addressing.  Worse, Sec. 9 shows the cheap forms of key binding
+  are not merely brittle but /vacuous/: an ElGamal ciphertext does not
+  commit to its key, so "encrypted under the same key" constraints are
+  absorbed by witness values the prover may choose freely (Lem. 9.2).
 
   The correct authority axis is the *identity point* \( M =
   H(\mathrm{id})\,G \):
@@ -602,19 +626,31 @@ Table of Contents
   identity is encrypted under /whose/ point, and at which moment –
   produce the three realisable flavours (Table in Sec. 6).  The same
   inversion gives the spend path its shape: at deposit, the depositor
-  proves /their account is bound to the identity the note addresses/ – a
-  statement about \( m \), checked by a cheap sigma protocol against the
-  account's registered ciphertext, composed with a set-membership proof
-  that the named point is real, and a SNARK tie that the whole gate is
-  about /this/ note.  Authorization keys on the identity; the account
-  merely carries it.
+  proves /their account is bound to the identity the note addresses/.
+  That is a statement about \( m \), checked by a sigma protocol (a
+  classical three-move proof of knowledge, a few curve operations to
+  verify) against the account's registered ciphertext, composed with a
+  set-membership proof that the named point is real, and a SNARK tie (a
+  succinct zero-knowledge proof, constant cost to verify) that the whole
+  gate is about /this/ note.  Authorization keys on the identity; the
+  account merely carries it.  And because the identity scalar \( m \)
+  conveys no write authority – only the PS credential \( \sigma \) can
+  authorize account registration or spend – \( m \) is safe to disclose
+  to every counterparty: the receipt names a person, not a capability.
 
 
 6 Construction
 ══════════════
 
-  A standard transfer between two registered identities is a synchronous
-  bilateral handshake: each party re-encrypts their credential under the
+  The construction in one paragraph: a note is a hidden commitment in a
+  shared pool.  Minting proves the pool received the money and that the
+  note names its issuer.  Spending proves – without revealing which note
+  – that some note is yours, that your account is bound to the identity
+  it addresses, that this identity is registered, and that all of these
+  statements are about the /same/ note.
+
+  The starting point is the system's ordinary transfer: a synchronous
+  handshake in which each party re-encrypts their credential under the
   other's key and proves (Chaum-Pedersen) the re-encryption carries the
   same \( M \).  Both identity anchors are co-present in one call;
   mutual decryptability is free.  A Note reorganises the same handshake
@@ -626,9 +662,12 @@ Table of Contents
 6.1 The pool, the commitment, the nullifier
 ───────────────────────────────────────────
 
-  The pool is a Tornado-style Poseidon Merkle tree of note commitments
-  with a rolling root window and a nullifier set.  A note is the opening
-  tuple; its on-chain commitment is
+  The pool is a Tornado-style Merkle tree of note commitments, hashed
+  with Poseidon (a hash designed to be cheap inside proof circuits),
+  keeping a rolling window of recent roots and a set of spent
+  /nullifiers/ – one-way serial numbers, revealed only at spend, that
+  make a double-spend detectable without linking the spend to its note.
+  A note is the opening tuple; its on-chain commitment is
 
   \[ cm = \mathrm{Poseidon}_5(\mathrm{flavor},\ v,\ \rho,\ idHash,\
   \mathrm{predicate}), \]
@@ -636,10 +675,11 @@ Table of Contents
   where \( \rho \) is the note's secret randomness and \( idHash \) is a
   Poseidon hash of the flavour's /identity payload/ – the commitment to
   everything the note says about its parties.  Batch mints are proven by
-  a Groth16 circuit (per pinned batch size \( N \)) that opens every
-  commitment, range-checks values, sums them to the public escrowed
-  total, and folds the leaves into the SNARK-attested new root; the
-  contract escrows exactly the proven total in the same atomic call.
+  a Groth16 SNARK (proofs a few hundred bytes, constant gas to verify;
+  one circuit per pinned batch size \( N \)) that opens every
+  commitment, range-checks the values, sums them to the public escrowed
+  total, and folds the leaves into the attested new root.  The contract
+  escrows exactly the proven total in the same atomic call.
 
   Spends are proven by a single flavour-agnostic circuit: the prover
   shows knowledge of an opening of /some/ tree leaf under a recent root,
@@ -648,13 +688,13 @@ Table of Contents
 
   \[ nf = \mathrm{Poseidon}_3(\rho,\ idHash,\ 4242) \]
 
-  is one derivation for every flavour (the constant domain-separates
-  nullifier preimages from commitment preimages).  Double-spends are
+  is one derivation for every flavour (the constant keeps nullifier
+  preimages distinct from commitment preimages).  Double-spends are
   rejected by set membership.  No account key enters the hash: spend
-  /authorization/ is layered per flavour on top of the nullifier, which
+  /authorization/ is layered per flavour on top of the nullifier.  That
   is what makes key-loss recovery and account-agnostic deposit possible
-  (Sec. 5) – and what creates the binding obligation the remainder of
-  this section discharges.
+  (Sec. 5) – and what creates the binding obligation the rest of this
+  section meets.
 
 
 6.2 Three flavours, one gadget
@@ -679,8 +719,8 @@ Table of Contents
     G,\ vG + r_n M_{\mathrm{rec}}) \).  At mint, a blinded re-encryption
     sigma (`verifyIssuerReenc') proves \( eIss \) re-encrypts the
     /minting account's registered/ identity – the anti-framing anchor –
-    without revealing it; each leaf's \( eIss \) is also a public input
-    of the A2 mint SNARK (the /leaf-tie/), so no leaf can lack a binding
+    without revealing it.  Each leaf's \( eIss \) is also a public input
+    of the A2 mint SNARK (the /leaf-tie/): no leaf can lack a binding,
     and no binding can float to another leaf.
   • *A1 (addressed, public issuer).* The issuer is named openly (a
     Schnorr signature over the batch under their registered key, checked
@@ -702,15 +742,15 @@ Table of Contents
   in one transaction, the flavour-agnostic note proof plus three
   mutually-bound gates:
 
-  1. *The deposit-coupling sigma* (`verifyDepositCoupling', EIP-196
-     arithmetic): the depositing account `msg.sender' is registered and
-     bound to a scalar \( m \), and the supplied ciphertext \( eEnc \)
-     decrypts under \( m \) to the point blinded inside the commitment
-     \( P_I = M + bH \) – a perfectly-hiding Pedersen-style point
-     published by the sigma.
+  1. *The deposit-coupling sigma* (`verifyDepositCoupling'; EIP-196,
+     Ethereum's native curve arithmetic): the depositing account
+     `msg.sender' is registered and bound to a scalar \( m \), and the
+     supplied ciphertext \( eEnc \) decrypts under \( m \) to the point
+     blinded inside the commitment \( P_I = M + bH \) – a
+     perfectly-hiding Pedersen-style point published by the sigma.
   2. *The bound membership proof* (`identity_membership_g1tie',
      Groth16): \( P_I \)'s underlying point is a member of the registry
-     accumulator \( \mathsf{rt_{id}} \).  /Bound/ is load-bearing: the
+     accumulator \( \mathsf{rt_{id}} \).  /Bound/ does the work: the
      verifier derives its public inputs from the same \( P_I \) the
      sigma committed, so the two gates cannot be answered with different
      points.
@@ -733,8 +773,8 @@ Table of Contents
   The composition discipline – every proof's public inputs derived on
   chain from the same objects (`msg.sender', \( eEnc \), \( P_I \), the
   nullifier, the face), never taken from the prover's bytes – is what
-  makes the gates impossible to decouple under collusion, and it is the
-  pattern we commend to designers beyond this system.  For B1 the
+  makes the gates impossible to decouple under collusion.  We commend
+  the pattern to designers beyond this system.  For B1 the
   depositor-binding sigma (an Okamoto-style proof coupling the payout
   account, \( eDepForIss \), and \( P_{\mathrm{dep}} = M_{\mathrm{dep}}
   + bH \)) replaces gate 1, the same bound membership is gate 2, and no
@@ -786,8 +826,8 @@ Table of Contents
   decrypted-and-membership-certified \( eIss \)); (d) /paid/ – the
   nullifier consumed and face transferred.  The recipient-naming
   direction is the spend-side composition above.  Link (c) is where the
-  invariant historically lives or dies, and the whole of Sec. 9 is the
-  anatomy of keeping it alive when the issuer is anonymous.
+  invariant lives or dies; Sec. 9 is about keeping it alive when the
+  issuer is anonymous.
 
 
 7 The Forced Taxonomy
@@ -837,14 +877,19 @@ Table of Contents
 8 Security
 ══════════
 
-  We state the results at the level a reader needs to audit the claims
-  of Secs. 4–6; the full reductions are Theorems 1–12 of the companion
-  /Proofs/ document, and each result here carries an executable witness
-  (Appendix 12).  Assumptions: discrete log / DDH on BN254 \(
-  \mathbb{G}_1 \); Poseidon collision-resistance and PRF behaviour
-  (ROM); Groth16 knowledge-soundness and zero-knowledge; Schnorr/Okamoto
-  special soundness; an independent NUMS point \( H \) (no known \(
-  \log_G H \)); and Assumption 1.
+  Five results carry the system: the deposit gate is sound (a depositor
+  really is bound to the identity they claim); the tie is sound (the
+  claim is about the very note being spent); every payment yields
+  receipts in both directions; no coalition can avoid them; and nothing
+  else leaks.  The only available cheat is self-sabotage: a coalition
+  can un-name its own note – making it unspendable – never frame an
+  innocent.  Full reductions are Theorems 1–12 of the companion /Proofs/
+  document; each result here carries an executable witness (Appendix
+  12).  Assumptions: discrete log / DDH on BN254 \( \mathbb{G}_1 \);
+  Poseidon collision-resistance and PRF behaviour (ROM); Groth16
+  knowledge-soundness and zero-knowledge; Schnorr/Okamoto special
+  soundness; an independent NUMS point \( H \) (no known \( \log_G H
+  \)); and Assumption 1.
 
 
   /(Deposit gate soundness.)/ If a coupled spend is accepted, then
@@ -941,31 +986,33 @@ Table of Contents
 ═══════════════════════
 
   The public-issuer flavours bind the issuer with a signature and the
-  depositor with sigma protocols – cheap EIP-196 arithmetic, no SNARK
-  over identities at all beyond the shared membership proof.  What makes
-  the doubly-anonymous flavour (A2: issuer named only at mint, recipient
-  only at spend, the two unlinkable) categorically harder?  This section
-  locates the boundary exactly: first the structural diagnosis, then the
-  vacuity of the obvious fix, then the necessity result, and finally the
-  observation that the shipped architecture is the necessity result's
-  permitted branch, made practical.
+  depositor with sigma protocols (cheap EIP-196 arithmetic, no SNARK
+  over identities beyond the shared membership proof).  What makes the
+  doubly-anonymous flavour (A2: issuer named only at mint, recipient
+  only at spend, the two unlinkable) categorically harder?  In short:
+  when nobody is named in the clear at the binding moment, the cheap
+  bindings prove nothing, and a zero-knowledge proof of registry
+  membership becomes unavoidable.  This section locates that boundary:
+  the diagnosis, the vacuity of the obvious fix, the necessity result,
+  and the shipped architecture as the branch the necessity result
+  permits.
 
 
 9.1 The EOA-transfer mirror: the cost /is/ the anonymity
 ────────────────────────────────────────────────────────
 
-  A direct transfer between registered accounts achieves mutual
-  decryptability with free collusion-resistance because the mandatory
-  Chaum-Pedersen-bound approve reads /both/ parties' registered records
-  in a single call: both anchors co-present, both named.  A2 splits the
-  anchors in time /by demand of its privacy goal/: the issuer's anchor
-  is live only at mint, the recipient's only at spend, and unlinkability
-  forbids any public value from bridging them.  The A2 mint binding is,
-  line for line, the approve handshake with one change: the recipient's
-  identity is /blinded/.  That one change is the entire gap – it
-  surrenders the phrase "under the recipient's /registered/ key" – and
-  everything that follows is the price of buying the phrase back without
-  un-blinding anything.
+  A direct transfer between registered accounts gets
+  collusion-resistance free: the mandatory approve handshake reads
+  /both/ parties' registered records in a single call – both anchors
+  co-present, both named.  A2 splits the anchors in time /by demand of
+  its privacy goal/: the issuer's anchor is live only at mint, the
+  recipient's only at spend, and unlinkability forbids any public value
+  from bridging them.  The A2 mint binding is, line for line, the
+  approve handshake with one change: the recipient's identity is
+  /blinded/.  That one change is the entire gap – it surrenders the
+  phrase "under the recipient's /registered/ key" – and everything that
+  follows is the price of buying the phrase back without un-blinding
+  anything.
 
 
 9.2 The obvious fix is vacuous
@@ -993,12 +1040,12 @@ Table of Contents
   witness \( M_{\mathrm{rec}} \) absorbs the constraint.  (Executable
   witness: Appendix 12.)
 
-  The lemma is the formal autopsy of an entire class of cheap designs –
+  The lemma is the formal autopsy of an entire class of cheap designs,
   and the second motivation (after key loss) for the Identity-M
-  inversion: binding to /a/ key is worthless because keys are free and
+  inversion: binding to /a/ key is worthless, because keys are free and
   ElGamal does not commit to them.  The binding must reach a
-  /registered/ identity, and the issuer – who holds no recipient secret
-  – can assert registration only as a set-membership statement.
+  /registered/ identity ; the issuer, holding no recipient secret, can
+  assert registration only as a set-membership statement.
 
 
 9.3 Necessity: set-membership, at one of exactly two moments
@@ -1081,16 +1128,17 @@ Table of Contents
 
   Before the tie circuits shipped, the design contemplated an economic
   backstop: an honest A2 recipient verifies the binding /at delivery/
-  (decrypt \( eIss \), check the registered identity) before accepting,
-  so an audit regime with penalty \( L \) and probability \( q \) makes
-  verify-then-accept dominant whenever \( qL \) exceeds the collusion
-  benefit – and, by Corollary 8, the residual off-equilibrium outcome is
-  only ever an un-nameable note held by an always-identifiable
-  depositor, never a framed third party.  With the tie enforced on chain
-  the mechanism is no longer load-bearing, but we record it:
-  delivery-time verification remains correct wallet practice, and the
-  analysis explains why even a deployment that lags the verifier rollout
-  degrades to a bounded, recipient-borne risk rather than an open hole.
+  (decrypt \( eIss \), check the registered identity) before accepting.
+  An audit regime with penalty \( L \) and probability \( q \) then
+  makes verify-then-accept dominant whenever \( qL \) exceeds the
+  collusion benefit – and, by Corollary 8, the residual off-equilibrium
+  outcome is only ever an un-nameable note held by an
+  always-identifiable depositor, never a framed third party.  With the
+  tie enforced on chain the mechanism no longer carries weight, but we
+  record it: delivery-time verification remains good wallet practice,
+  and the analysis explains why even a deployment that lags the verifier
+  rollout degrades to a bounded, recipient-borne risk rather than an
+  open hole.
 
 
 10 Implementation and Evaluation
@@ -1152,12 +1200,13 @@ Table of Contents
   re-encryption binding): A2's spend is within half a percent of A1's.
   Set-membership, the provably necessary ingredient, is one constant
   253K Groth16 verify regardless of registry size.  Prover side: the tie
-  circuits are 2.4M (A2) and 2.86M (A1) non-linear R1CS (fixed-base-only
-  EC arithmetic; the A1 relation needs no witnessed point limbs at all
-  since every point is a known multiple of \( G \)), proving in seconds
-  under rapidsnark on commodity Apple-silicon hardware, witness
-  generation via the circom C++ calculator.  All verification is
-  constant-gas on chain; no participant ever waits on another's prover.
+  circuits are 2.4M (A2) and 2.86M (A1) non-linear R1CS constraints –
+  the unit of circuit size – in fixed-base-only EC arithmetic (the A1
+  relation needs no witnessed point limbs at all, since every point is a
+  known multiple of \( G \)).  They prove in seconds under rapidsnark on
+  commodity Apple-silicon hardware, witness generation via the circom
+  C++ calculator.  All verification is constant-gas on chain; no
+  participant ever waits on another's prover.
 
 
 10.3 Verification methodology and artifact
@@ -1171,15 +1220,20 @@ Table of Contents
   lifecycle) and 330 wallet tests.  The companion documents are
   executable: the walkthrough document runs every cryptographic step of
   all three flavours in one seeded session, and this paper's appendix
-  witnesses re-run on each build.  Honesty items: the Groth16 trusted
-  setups currently use development entropy (a production Powers-of-Tau
-  ceremony is a deployment prerequisite); formal verification of the
+  witnesses re-run on each build.  Honesty items: Groth16 needs a
+  one-time trusted setup whose secret randomness must be destroyed, and
+  ours currently uses development entropy – a production Powers-of-Tau
+  ceremony is a deployment prerequisite.  Formal verification of the
   circuits (beyond witness/constraint testing) is planned, not
   performed.
 
 
 11 Discussion, Limitations, and Future Work
 ═══════════════════════════════════════════
+
+  What remains: one open theory question (is the set-membership SNARK
+  truly unavoidable?), a short list of limitations, and the civic
+  argument restated with the system in hand.
 
   *Open problem (the necessity lower bound).* Proposition 9.3 is
   conditional on a single-binding-step restriction.  The unconditional
@@ -1193,10 +1247,10 @@ Table of Contents
   selective escrow – a strictly weaker trust model we reject for this
   system, since it reintroduces an opener).
 
-  *Limitations, stated plainly.*
+  *Limitations.*
   • The spend's `face' and recipient account are public (an ERC-20 must
-    pay someone a known amount); mitigations are operational – fixed
-    denominations, relayed payouts – not cryptographic.
+    pay someone a known amount); mitigations are operational (fixed
+    denominations, relayed payouts), not cryptographic.
   • Refusal-resilience and issuer-blindness are computational (DDH);
     archived ciphertexts are exposed to future cryptanalysis, and the
     KYC corpus is a harvest-now-decrypt-later target.  A
@@ -1212,8 +1266,8 @@ Table of Contents
 
   *The autonomy thesis, restated.* A jurisdiction adopting this design
   gets per-instrument compliance /stronger/ than physical cash ever
-  offered – every payment carries court-grade evidence, held by exactly
-  the parties a lawful investigation would approach anyway – while
+  offered: every payment carries court-grade evidence, held by exactly
+  the parties a lawful investigation would approach anyway, while
   forgoing the one thing every CBDC design quietly includes: the
   standing technical capability of population-scale financial
   surveillance.  We contend the forgone capability is the point.
@@ -1223,10 +1277,10 @@ Table of Contents
   citizens withhold their keys is the cryptographic shape of the
   presumption that free people's affairs are their own.  The mathematics
   here does not decide which laws are just; it decides only that
-  enforcing them runs through citizens, not over them – and that choice,
-  once deployed, is not revocable by the preferences of any subsequent
-  administration, because there is nothing left standing in the middle
-  to compel.
+  enforcing them runs through citizens, not over them.  And that choice,
+  once deployed, is not revocable by the preferences of any later
+  administration: there is nothing left standing in the middle to
+  compel.
 
 
 12 Appendix A: Executable Theorem Witnesses

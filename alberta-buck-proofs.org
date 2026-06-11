@@ -111,20 +111,20 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 ** Notation
 
    #+LATEX: {\scriptsize
-   | Symbol                                        | Meaning                                                      |
-   |-----------------------------------------------+--------------------------------------------------------------|
-   | \( q \)                                       | Prime order of \( G_1, G_2, G_T \) on BN254                  |
-   | \( G, g_2 \)                                  | Generators of \( G_1 \) and \( G_2 \)                        |
-   | \( e : G_1 \times G_2 \to G_T \)              | Bilinear, non-degenerate pairing (type-3)                    |
-   | \( O \)                                       | Point at infinity (group identity)                           |
-   | \( \mathbb{Z}_q^\ast \)                       | Non-zero scalars mod \( q \)                                 |
-   | \( (x, y) / (X, Y) \)                         | Issuer secret / public key: \( X = x g_2,\ Y = y g_2 \)      |
-   | \( m \in \mathbb{Z}_q \)                      | Identity scalar, \( m = H(\text{identity\_data}) \bmod q \)  |
-   | \( M = m \cdot G \in G_1 \)                   | Identity point (the value every ElGamal ciphertext encrypts) |
-   | \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \) | PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)    |
-   | \( (sk, pk) \)                                | Identity key pair on \( G_1 \): \( pk = sk \cdot G \)        |
-   | \( E = (R, C) \in G_1^2 \)                    | ElGamal ciphertext: \( R = r G,\ C = M + r \cdot pk \)       |
-   | \( H(\cdot) \)                                | Cryptographic hash modelled as a random oracle (Fiat-Shamir) |
+   | Symbol                                        | Meaning                                                                                                                                                                                                                                                                 |
+   |-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+   | \( q \)                                       | Prime order of \( G_1, G_2, G_T \) on BN254                                                                                                                                                                                                                             |
+   | \( G, g_2 \)                                  | Generators of \( G_1 \) and \( G_2 \)                                                                                                                                                                                                                                   |
+   | \( e : G_1 \times G_2 \to G_T \)              | Bilinear, non-degenerate pairing (type-3)                                                                                                                                                                                                                               |
+   | \( O \)                                       | Point at infinity (group identity)                                                                                                                                                                                                                                      |
+   | \( \mathbb{Z}_q^\ast \)                       | Non-zero scalars mod \( q \)                                                                                                                                                                                                                                            |
+   | \( (x, y) / (X, Y) \)                         | Issuer secret / public key: \( X = x g_2,\ Y = y g_2 \)                                                                                                                                                                                                                 |
+   | \( m \in \mathbb{Z}_q \)                      | Identity scalar: \( m = H(\text{identity\_data}) \bmod q \) [fn::Read-capability secret: decrypts ciphertexts under \( M = mG \), verifies receipts.  Disclosed to counterparties by design; insufficient for registration or spend authorization without \( \sigma \)] |
+   | \( M = m \cdot G \in G_1 \)                   | Identity point: the value every ElGamal ciphertext encrypts [fn::Public (recoverable from \( m \)); the KYC-registered anchor]                                                                                                                                          |
+   | \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \) | PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)   [fn::Write-capability secret: authorizes account registration.  Held only by the Identity owner; never disclosed to counterparties]                                                                         |
+   | \( (sk, pk) \)                                | Identity key pair on \( G_1 \): \( pk = sk \cdot G \)                                                                                                                                                                                                                   |
+   | \( E = (R, C) \in G_1^2 \)                    | ElGamal ciphertext: \( R = r G,\ C = M + r \cdot pk \)                                                                                                                                                                                                                  |
+   | \( H(\cdot) \)                                | Cryptographic hash modelled as a random oracle (Fiat-Shamir)                                                                                                                                                                                                            |
    #+LATEX: }
 
    All group operations in this document are written additively.  BN254

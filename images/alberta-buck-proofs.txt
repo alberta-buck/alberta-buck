@@ -149,22 +149,22 @@ Table of Contents
 1.1 Notation
 ────────────
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Symbol                                         Meaning                                                      
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   \( q \)                                        Prime order of \( G_1, G_2, G_T \) on BN254                  
-   \( G, g_2 \)                                   Generators of \( G_1 \) and \( G_2 \)                        
-   \( e : G_1 \times G_2 \to G_T \)               Bilinear, non-degenerate pairing (type-3)                    
-   \( O \)                                        Point at infinity (group identity)                           
-   \( \mathbb{Z}_q^\ast \)                        Non-zero scalars mod \( q \)                                 
-   \( (x, y) / (X, Y) \)                          Issuer secret / public key: \( X = x g_2,\ Y = y g_2 \)      
-   \( m \in \mathbb{Z}_q \)                       Identity scalar, \( m = H(\text{identity\_data}) \bmod q \)  
-   \( M = m \cdot G \in G_1 \)                    Identity point (the value every ElGamal ciphertext encrypts) 
-   \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \)  PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)    
-   \( (sk, pk) \)                                 Identity key pair on \( G_1 \): \( pk = sk \cdot G \)        
-   \( E = (R, C) \in G_1^2 \)                     ElGamal ciphertext: \( R = r G,\ C = M + r \cdot pk \)       
-   \( H(\cdot) \)                                 Cryptographic hash modelled as a random oracle (Fiat-Shamir) 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Symbol                                         Meaning                                                         
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   \( q \)                                        Prime order of \( G_1, G_2, G_T \) on BN254                     
+   \( G, g_2 \)                                   Generators of \( G_1 \) and \( G_2 \)                           
+   \( e : G_1 \times G_2 \to G_T \)               Bilinear, non-degenerate pairing (type-3)                       
+   \( O \)                                        Point at infinity (group identity)                              
+   \( \mathbb{Z}_q^\ast \)                        Non-zero scalars mod \( q \)                                    
+   \( (x, y) / (X, Y) \)                          Issuer secret / public key: \( X = x g_2,\ Y = y g_2 \)         
+   \( m \in \mathbb{Z}_q \)                       Identity scalar: \( m = H(\text{identity\_data}) \bmod q \) [1] 
+   \( M = m \cdot G \in G_1 \)                    Identity point: the value every ElGamal ciphertext encrypts [2] 
+   \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \)  PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)   [3] 
+   \( (sk, pk) \)                                 Identity key pair on \( G_1 \): \( pk = sk \cdot G \)           
+   \( E = (R, C) \in G_1^2 \)                     ElGamal ciphertext: \( R = r G,\ C = M + r \cdot pk \)          
+   \( H(\cdot) \)                                 Cryptographic hash modelled as a random oracle (Fiat-Shamir)    
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   All group operations in this document are written additively.  BN254
   has cofactor 1 on \( G_1 \), so every non-identity \( P \in G_1 \) has
   order \( q \); there are no small-subgroup elements.
@@ -185,7 +185,7 @@ Table of Contents
 
   2. *q-Strong Diffie-Hellman (q-SDH)*: the PS signature scheme is
      existentially unforgeable under chosen-message attack (EUF-CMA)
-     assuming q-SDH[1].  We use this only as a *stated* assumption about
+     assuming q-SDH[4].  We use this only as a *stated* assumption about
      the PS primitive; none of our proofs below reduce to it directly.
 
   3. *Random Oracle Model (ROM)*: the Fiat-Shamir transform is applied
@@ -523,7 +523,7 @@ Table of Contents
   constant number of group operations.  \( \blacksquare \)
 
   *Remark (implication for cheating provers).* Special soundness lifts,
-  via the forking lemma[2], to a reduction from any efficient prover
+  via the forking lemma[5], to a reduction from any efficient prover
   that convinces the verifier on a false statement to an efficient
   solver for discrete logarithms on \( G_1 \).  Under the DLog
   assumption on \( \text{alt\_bn128} \), no such prover exists.  In
@@ -566,7 +566,7 @@ Table of Contents
   *Corollary (NIZK via Fiat-Shamir in the ROM).* Model \( H \) as a
   programmable random oracle.  The Fiat-Shamir transform replaces the
   verifier's challenge with \( e = H(\text{public inputs}, T_1, T_2,
-  T_3, \text{context}) \).  Standard arguments[3] promote:
+  T_3, \text{context}) \).  Standard arguments[6] promote:
 
   • HVZK \( \Rightarrow \) NIZK (the simulator programs \( H \) so that
     \( H(\text{public inputs}, T_1, T_2, T_3, \ldots) = e \) for the \(
@@ -1046,7 +1046,7 @@ Table of Contents
   (`spendCoupledB1'): the note proof, `verifyDepositorBinding(depositor,
   issuer, eDepForIss, pi)', and the membership proof of \(
   pi.P_{\text{dep}} \).  Then under the same assumptions plus Schnorr
-  EUF-CMA[4], an extractor produces \( (m_{\text{dep}}, sk_{\text{dep}},
+  EUF-CMA[7], an extractor produces \( (m_{\text{dep}}, sk_{\text{dep}},
   r, b) \) such that:
 
   1. \( cm = \mathrm{Poseidon}_5(B1, v, \rho, idHash, \cdot) \) lies
@@ -1661,26 +1661,35 @@ Table of Contents
 Footnotes
 ─────────
 
-[1] Pointcheval, D. and Sanders, O.  "Short Randomizable Signatures."
+[1] Read-capability secret: decrypts ciphertexts under \( M = mG \),
+verifies receipts.  Disclosed to counterparties by design; insufficient
+for registration or spend authorization without \( \sigma \)
+
+[2] Public (recoverable from \( m \)); the KYC-registered anchor
+
+[3] Write-capability secret: authorizes account registration.  Held only
+by the Identity owner; never disclosed to counterparties
+
+[4] Pointcheval, D. and Sanders, O.  "Short Randomizable Signatures."
 CT-RSA 2016, LNCS 9610, pp. 111-126.  Theorem 4.2 establishes EUF-CMA
 security under the q-SDH assumption in bilinear groups.
 
-[2] Pointcheval, D. and Stern, J.  "Security Arguments for Digital
+[5] Pointcheval, D. and Stern, J.  "Security Arguments for Digital
 Signatures and Blind Signatures."  Journal of Cryptology 13(3),
 1. The forking lemma: an adversary that convinces a sigma-protocol
 verifier with non-negligible probability can be rewound to produce two
 accepting transcripts with distinct challenges, from which the witness
 is extracted.
 
-[3] Fiat, A. and Shamir, A.  "How to Prove Yourself: Practical
+[6] Fiat, A. and Shamir, A.  "How to Prove Yourself: Practical
 Solutions to Identification and Signature Problems."  CRYPTO 1986.
 The transform replacing an interactive verifier's challenge with a
 hash of the transcript, analyzed in the random oracle model of Bellare
 and Rogaway (CCS 1993).
 
-[4] Schnorr, C.-P.  "Efficient Signature Generation by Smart Cards."
+[7] Schnorr, C.-P.  "Efficient Signature Generation by Smart Cards."
 Journal of Cryptology 4(3), 1991, pp. 161-174.  The Schnorr signature
 scheme is EUF-CMA secure under the discrete logarithm assumption in
-the random oracle model; see Pointcheval and Stern (2000) [2] for the
+the random oracle model; see Pointcheval and Stern (2000) [5] for the
 forking-lemma reduction, and Bellare and Neven, "Multi-signatures in
 the Plain Public-Key Model" (CCS 2006) for tightened security bounds.
