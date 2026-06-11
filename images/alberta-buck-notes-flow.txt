@@ -49,13 +49,17 @@ are wired and tested end to end (`alberta_buck.wallet.unilateral_a2',
 `IdentityRegistry.verifyDepositCoupling', `.verifyDepositorBinding'; the
 G1-tie membership verifier; the on-chain incremental `identityRoot').  A
 fourth gate completes the addressed spends: the note \( \leftrightarrow
-\) \( eEnc \) /re-encryption tie/ (`circuits/note_binding.circom' behind
-`INoteBindingVerifier') proves the deposit-coupling ciphertext
-re-encrypts, under \( M_{\text{rec}} \), the ciphertext /the spent note
-committed in its/ \( idHash \) – enforcing addressed-binding (a stolen
-opening cannot be redeemed with a self-addressed \( eEnc \)) and closing
-A2 collusion against ciphertext substitution (/Proofs/, Theorem 12).
-Only a production Powers-of-Tau ceremony remains before deployment.
+\) \( eEnc \) /tie/ (`circuits/note_binding.circom' for A2 and
+`note_binding_a1.circom' for A1, behind one `INoteBindingVerifier')
+proves the deposit-coupling ciphertext is keyed to the identity material
+/the spent note committed in its/ \( idHash \) – A2: a re-encryption,
+under \( M_{\text{rec}} \), of the committed \( eIss \); A1: keyed to
+the same \( M_{\text{rec}} \) the note's \( eNote \) was addressed to,
+the spend's public `face' pinning the plaintext – enforcing
+addressed-binding (a stolen opening cannot be redeemed with a
+self-addressed \( eEnc \)) and closing A2 collusion against ciphertext
+substitution (/Proofs/, Theorem 12).  Only a production Powers-of-Tau
+ceremony remains before deployment.
 
 The cryptographic walkthroughs in this document are /executable/: the
 Python blocks run against the shipped `alberta_buck.wallet' modules in
@@ -1684,16 +1688,20 @@ Table of Contents
   so the two halves cannot be decoupled.
 
   The /addressed/ flavours (A1, A2) add a fourth gate: the note \(
-  \leftrightarrow \) \( eEnc \) /re-encryption tie/
-  (`circuits/note_binding.circom' behind `INoteBindingVerifier').  The
-  flavour-agnostic note proof exposes no \( idHash \), so without the
-  tie nothing binds the deposit-coupling ciphertext to the /specific
-  note being spent/ – a holder of a stolen opening could supply a
-  self-addressed \( eEnc \), and an A2 coalition could substitute a
-  nameable one.  The tie proves, in one Groth16 proof, that the spend's
-  \( eEnc \) re-encrypts the ciphertext committed in the `idHash' behind
-  /this spend's nullifier/, and that its decryption is the very point \(
-  P_I \) the sigma committed (/Proofs/, Theorem 12).
+  \leftrightarrow \) \( eEnc \) /tie/ (`circuits/note_binding.circom'
+  for the A2 payload layout, `circuits/note_binding_a1.circom' for A1,
+  behind one `INoteBindingVerifier').  The flavour-agnostic note proof
+  exposes no \( idHash \), so without the tie nothing binds the
+  deposit-coupling ciphertext to the /specific note being spent/ – a
+  holder of a stolen opening could supply a self-addressed \( eEnc \),
+  and an A2 coalition could substitute a nameable one.  The tie proves,
+  in one Groth16 proof, that the spend's \( eEnc \) is keyed to the
+  identity material committed in the `idHash' behind /this spend's
+  nullifier/ (A2: \( eEnc \) re-encrypts the committed \( eIss \); A1:
+  \( eEnc \) and the note's own \( eNote \) share one \( M_{\text{rec}}
+  \), the spend's public `face' pinning the \( eNote \) plaintext), and
+  that the decrypted point is the very \( P_I \) the sigma committed
+  (/Proofs/, Theorem 12).
 
 
 11.1 The Shared Primitives
@@ -2034,11 +2042,13 @@ Table of Contents
   note-binding verifier – the binding:
 
   ┌────
-  │ // inside Notes.spendCoupledA2 (abridged):
+  │ // inside Notes._spendCoupled (abridged; spendCoupledA2 passes a1Layout=false,
+  │ // spendCoupledA1 true -- selecting which binding circuit answers):
   │ require(reg.verifyDepositCoupling(msg.sender, eEnc, dc), "bad deposit coupling");
   │ //                                                  dc.P_I --- the same point ---v
   │ _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
-  │ _verifyNoteBinding(noteBindingProof, nullifier, eEnc, dc.P_I.X, dc.P_I.Y);
+  │ _verifyNoteBinding(noteBindingProof, nullifier, a1Layout, face,
+  │                    eEnc, dc.P_I.X, dc.P_I.Y);
   └────
   *The note-binding witness: tie \( eEnc \) to THIS note.* The spend
   supplies \( eEnc \), a /fresh re-encryption/ of the leaf's \( eIss \)
@@ -2207,6 +2217,72 @@ Table of Contents
   │ A1 receipt: VALID -- issuer public, recipient proves the note
   │   addressed THEIR identity: eRec decrypts under m_rec to M_rec
   └────
+
+  *The A1 note-binding witness: tie \( eEnc \) to THIS note, face
+  public.* An A1 \( idHash \) commits \( (eNote, m_{\text{issuer}},
+  \sigma) \) – no second ciphertext – so the A2 binding relation is not
+  constructible for it; A1 spends carry the sibling circuit
+  `note_binding_a1.circom' instead.  The tie runs through the note's
+  /own/ value ciphertext \( eNote = (r_nG,\ vG + r_nM_{\text{rec}}) \):
+  the SNARK proves \( eNote \) was addressed to the /same/ \(
+  M_{\text{rec}} \) that keys the spend's \( eEnc \) and opens the
+  sigma's \( P_I \).  The note face \( v \) is a /public/ input –
+  `Notes.spendCoupledA1' passes the spend's `face', itself bound to the
+  note's committed value by the spend SNARK over the same nullifier.
+  That public pin is load-bearing: ElGamal is not key-committing, and
+  the opening (including \( r_n \)) travels to the spender, so with a
+  free plaintext a thief could re-key \( eNote \) to /any/ identity by
+  absorbing the difference; fixing the plaintext at \( vG \) makes \(
+  m_{\text{rec}} = (\log_G C_n - v)\,r_n^{-1} \) unique (/Proofs/,
+  Theorem 12, A1 statement).  The witness builder asserts the whole
+  relation (a fresh local generator keeps the shared transcript
+  untouched):
+
+  ┌────
+  │ from alberta_buck.wallet.note_binding import make_note_binding_a1_witness
+  │ 
+  │ _seed_a1 = random.Random(0xA1B1D)         # local; does not perturb the session rng
+  │ rng_a1   = lambda: _seed_a1.getrandbits(256)
+  │ 
+  │ t  = rand_scalar(rng_a1)                  # eEnc total randomness (r' + s)
+  │ b1 = rand_scalar(rng_a1)                  # the P_I blind
+  │ witness_a1 = make_note_binding_a1_witness(
+  │     rho=note_a1.opening.rho, eNote=note_a1.eNote, v=note_a1.opening.v,
+  │     m_issuer=m_iss, sigma_R=sigma_R, sigma_s=sigma_s,
+  │     r_note=note_a1.r_note, m_rec=m_rec, t=t, b=b1,
+  │ )
+  │ print(f"A1 binding witness built: {len(witness_a1)} signals, all relations asserted")
+  │ print(f"  public face v    = {witness_a1['v']}  (pins the addressed identity)")
+  │ print(f"  public nullifier = {hex(int(witness_a1['nullifier']))[:20]}...")
+  │ 
+  │ # The re-keying escape the public face closes: a thief holding the full
+  │ # opening (rho, eNote, r_note, sigma...) but a different identity m' has
+  │ # no satisfying witness -- eNote.C != v*G + r_note*(m'*G) for m' != m_rec.
+  │ m_thief = rand_scalar(rng_a1)
+  │ try:
+  │     make_note_binding_a1_witness(
+  │         rho=note_a1.opening.rho, eNote=note_a1.eNote, v=note_a1.opening.v,
+  │         m_issuer=m_iss, sigma_R=sigma_R, sigma_s=sigma_s,
+  │         r_note=note_a1.r_note, m_rec=m_thief, t=t, b=b1)
+  │     print("thief witness with m' != m_rec: BUILT (must not happen!)")
+  │ except AssertionError as exc:
+  │     print(f"thief witness with m' != m_rec: REFUSED ({exc})")
+  └────
+
+  ┌────
+  │ A1 binding witness built: 20 signals, all relations asserted
+  │   public face v    = 100  (pins the addressed identity)
+  │   public nullifier = 0x15cdafc732324264d6...
+  │ thief witness with m' != m_rec: REFUSED (eNote.C != v*G + rn*M_rec)
+  └────
+
+  Proving runs in the build pipeline (`make nix-snark-note-binding-a1';
+  ~2.86M non-linear constraints, every EC operation fixed-base because
+  each point in the relation is a known multiple of \( G \)); the
+  exported `NoteBindingA1Groth16Verifier' answers
+  `INoteBindingVerifier.verifyNoteBindingA1' behind the same adapter as
+  the A2 tie, and `test/NotesE2E.t.sol' verifies a real A1 binding proof
+  on chain inside the full lifecycle (~377K gas).
 
 
 11.5 B1 Bearer Spend with Depositor Naming (The A2 Dual)
@@ -2630,21 +2706,26 @@ Table of Contents
      counterpart is implemented: `spendCoupledB1' binds
      `verifyDepositorBinding''s committed point `P_dep' to the
      membership exactly as A2 binds `dc.P_I' (`NotesCoupledB1.t.sol').
-  5. *The note \( \leftrightarrow \) \( eEnc \) re-encryption tie –
-     DONE.* The flavour-agnostic note proof exposes no \( idHash \), so
-     gates 1–4 alone verified a ciphertext /of the depositor's choosing/
-     – leaving addressed-binding ("only \( M_{\text{rec}} \) can spend")
-     and the A2 substitution escape ("attach a different, nameable \(
-     eEnc \)") unenforced.  `circuits/note_binding.circom' (~2.4M
-     non-linear constraints; the ElGamal-structure optimisation keeps
-     every EC operation fixed-base) proves the spend's \( eEnc \)
+  5. *The note \( \leftrightarrow \) \( eEnc \) tie – DONE, both
+     layouts.* The flavour-agnostic note proof exposes no \( idHash \),
+     so gates 1–4 alone verified a ciphertext /of the depositor's
+     choosing/ – leaving addressed-binding ("only \( M_{\text{rec}} \)
+     can spend") and the A2 substitution escape ("attach a different,
+     nameable \( eEnc \)") unenforced.  `circuits/note_binding.circom'
+     (~2.4M non-linear constraints; the ElGamal-structure optimisation
+     keeps every EC operation fixed-base) proves the spend's \( eEnc \)
      re-encrypts the ciphertext committed in the \( idHash \) behind
      /this spend's nullifier/, and that its decryption is the sigma's
-     own committed \( P_I \) point.  `NoteBindingVerifierAdapter'
-     derives all 25 public inputs on chain from the caller's `nullifier'
-     / `eEnc' / `dc.P_I'; the governance slot
-     `Notes.setNoteBindingVerifier' rotates the verifier.  (/Proofs/,
-     Theorem 12; toolchain history in
+     own committed \( P_I \) point.  `circuits/note_binding_a1.circom'
+     (~2.86M constraints) is the A1-layout sibling: an A1 \( idHash \)
+     commits \( (eNote, m_{\text{issuer}}, \sigma) \), so the tie runs
+     through the note's own \( eNote \), with the spend's public `face'
+     pinning the plaintext (and hence the addressed identity).
+     `NoteBindingVerifierAdapter' derives all public inputs on chain (25
+     for A2; 26 for A1, `face' at index
+     1) from the caller's `nullifier' / `face' / `eEnc' / `dc.P_I'; the
+     governance slot `Notes.setNoteBindingVerifier' rotates the
+     verifier.  (/Proofs/, Theorem 12; toolchain history in
      /alberta-buck-verifier-implementation/.)
 
   With items 1–5 shipped the transition is *complete*: every mint and
@@ -2833,9 +2914,11 @@ Table of Contents
      ciphertext.
   3. /An un-nameable note made spendable by ciphertext substitution./
      Closed at *spend* by the note-binding tie: the verified \( eEnc \)
-     must re-encrypt the ciphertext committed behind /this spend's
-     nullifier/ (/Proofs/, Theorem 12) – demonstrated executably in the
-     A2 in Code counter-example above.
+     must be keyed to the identity material committed behind /this
+     spend's nullifier/ (A2: re-encrypt the committed \( eIss \); A1:
+     share the \( eNote \)'s \( M_{\text{rec}} \), the public `face'
+     pinning the plaintext) (/Proofs/, Theorem 12) – demonstrated
+     executably in the A2 and A1 in Code counter-examples above.
 
 
 16 Appendix: The Hostile-Issuer Mint Ledger
@@ -2911,11 +2994,14 @@ Table of Contents
    `test/NotesCoupledA1.t.sol'                    8  end-to-end `spendCoupledA1': completeness + payout; tamper/double-spend reverts                                                                                                                      
    `test/NotesCoupledA2.t.sol'                   10  end-to-end `spendCoupledA2': completeness + payout + `SpentCoupledA2'; bad coupling / tampered \(P_I\) / unregistered / rejected membership / double-spend revert                                    
    `test/NotesCoupledB1.t.sol'                    6  end-to-end `spendCoupledB1': the depositor-binding + bound membership path                                                                                                                           
-   `test/NoteBindingVerifier.t.sol'               9  the note \(\leftrightarrow\) \(eEnc\) tie: real Groth16 proof verifies (raw + adapter); tampered nullifier / point / proof rejected; proof-length gating                                             
+   `test/NoteBindingVerifier.t.sol'              18  the note \(\leftrightarrow\) \(eEnc\) tie, both layouts: real Groth16 proofs verify (raw + adapter); tampered nullifier / face / point / proof rejected; proof-length gating                         
+   `test/NotesE2E.t.sol'                          9  the full lifecycle per flavor with EVERY verifier real (batch mint, spend, sigma, membership, A1/A2 note binding); double-spend reverts; per-phase gas                                               
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Build/test entry points: `make nix-test' (Forge), `make
-  nix-test-python' (wallet reference), `make nix-snark-note-binding'
-  (note-binding circuit + trusted setup + vectors).
+  nix-test-python' (wallet reference), `make nix-snark-note-binding' /
+  `nix-snark-note-binding-a1' (note-binding circuits + trusted setups +
+  vectors), `make nix-snark-e2e-fixtures' (the all-real-verifier
+  lifecycle fixtures).
 
 
 18 Cross-References
@@ -2954,18 +3040,21 @@ Table of Contents
   • `circuits/mint_batch.circom' – the Phase-7-bis batch-mint circuit
     (one compile per pinned N).
   • `circuits/spend.circom' – the Phase-7 spend circuit (bearer-shape).
-  • `circuits/note_binding.circom' – the note \( \leftrightarrow \) \(
-    eEnc \) re-encryption tie (A1/A2 spends).
+  • `circuits/note_binding.circom', `circuits/note_binding_a1.circom' –
+    the note \( \leftrightarrow \) \( eEnc \) tie (A2 and A1 payload
+    layouts).
   • `src/Notes.sol', `src/MintGroth16Verifier*.sol',
     `src/MintVerifierAdapter.sol', `src/SpendGroth16Verifier.sol',
     `src/SpendVerifierAdapter.sol',
     `src/NoteBindingGroth16Verifier.sol',
+    `src/NoteBindingA1Groth16Verifier.sol',
     `src/NoteBindingVerifierAdapter.sol' – the on-chain code paths
     walked above.
   • `scripts/snark/prove_mint_batch.js', `scripts/snark/prove_spend.js'
     – the reference provers used in tests;
-    `scripts/snark/setup_note_binding.sh' – the note-binding circuit +
-    trusted-setup pipeline.
+    `scripts/snark/setup_note_binding.sh',
+    `scripts/snark/setup_note_binding_a1.sh' – the note-binding circuits
+    + trusted-setup pipelines.
   • `test/MintVerifier.t.sol', `test/SpendVerifier.t.sol',
     `test/NoteBindingVerifier.t.sol' – the Foundry tests that pin the
     soundness stories to executable assertions.

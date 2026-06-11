@@ -81,13 +81,16 @@ rest of the series relies on:
   counterparties name the other as a /registered/ Identity, /enforced/ by
   the membership half (an un-nameable counterparty is un-spendable) -- while
   no third party names either or links mint to spend.
-- *Theorem 12* (note-binding re-encryption tie, A1/A2): the ciphertext a
-  depositor supplies at spend is provably a re-encryption -- under the
-  authenticated recipient Identity -- of the ciphertext the /spent note
-  itself/ committed at mint.  This pins Theorems 8 and 11 to the specific
-  note: a stolen opening cannot be redeemed with a self-addressed
-  substitute, and an un-nameable A2 note stays un-spendable even against
-  active ciphertext substitution.
+- *Theorem 12* (note-binding tie, A1/A2): the ciphertext a depositor
+  supplies at spend is provably keyed to /the spent note's/ committed
+  identity material -- A2: a re-encryption, under the authenticated
+  recipient Identity, of the ciphertext the note committed at mint; A1: an
+  encryption keyed to the same recipient Identity the note's value
+  ciphertext was addressed to, the spend's public face pinning the
+  plaintext.  This pins Theorems 8 and 11 to the specific note: a stolen
+  opening cannot be redeemed with a self-addressed substitute, and an
+  un-nameable A2 note stays un-spendable even against active ciphertext
+  substitution.
 
 Every theorem is accompanied by an executable =py_ecc= sanity check on
 BN254.  The proofs assume only the q-SDH assumption (for PS signature
@@ -1070,8 +1073,9 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    holding a stolen opening could attach its /own/ self-addressed \( eEnc \)
    (defeating addressed binding), and an A2 coalition could attach a /nameable/
    substitute for an un-nameable committed \( eIss \) (re-opening the collusion
-   gap).  The note-binding relation (=circuits/note_binding.circom=, verified
-   behind =INoteBindingVerifier= in the addressed spends) closes both.
+   gap).  The note-binding relations (=circuits/note_binding.circom= for the
+   A2 payload layout, =circuits/note_binding_a1.circom= for A1; both verified
+   behind =INoteBindingVerifier= in the addressed spends) close both.
 
    *Statement.*  Suppose the contract accepts an addressed spend with the
    note-binding verifier active: in addition to the note proof, the
@@ -1114,6 +1118,44 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    point /is/ the point the sigma authenticated and the membership certified.
    \( \blacksquare \)
 
+   *Statement (A1 layout).*  An A1 note's \( idHash \) commits
+   \( (eNote,\ m_{\text{issuer}},\ \sigma) \) -- the public-issuer payload, no
+   second ciphertext -- so the A1 spends verify the sibling relation
+   (=circuits/note_binding_a1.circom=) with one additional /public/ input: the
+   note face \( v \), which the contract sets to the spend's =face= (itself
+   bound to the note's committed value by the spend SNARK over the same
+   nullifier).  The extractor produces
+   \( (\rho,\ idHash,\ eNote,\ m_{\text{issuer}},\ \sigma,\ r_n,\ t,\
+   m_{\text{rec}},\ b) \) such that:
+
+   1. *(Same note.)*  \( nf = \mathrm{Poseidon}_3(\rho,\ idHash,\ \mathrm{tag}) \)
+      and \( idHash = \mathrm{Poseidon}_8(eNote,\ m_{\text{issuer}},\
+      \sigma_R,\ \sigma_s) \) -- the A1 payload the spent note committed.
+   2. *(Addressed eNote.)*  \( eNote = (r_nG,\ vG + (r_n m_{\text{rec}})G) \):
+      the note's own value ciphertext is a well-formed ElGamal encryption of
+      \( vG \) under \( M_{\text{rec}} = m_{\text{rec}}G \).
+   3. *(Keyed eEnc.)*  \( R_e = tG \) and
+      \( C_e = M_{\text{rec}} + (t \cdot m_{\text{rec}})G \): the supplied
+      \( eEnc \) is a fresh encryption of \( M_{\text{rec}} \) under itself --
+      exactly a re-randomisation of the note's delivered \( eRec \).
+   4. *(Committed point.)*  \( P_I = M_{\text{rec}} + bH \) -- the same
+      blinded point the coupling sigma opened and the membership certified.
+
+   *Proof (A1).*  Extraction and the NUMS argument run as above, equating the
+   SNARK's \( M_{\text{rec}} \) with the point the sigma authenticated and the
+   membership certified.  /Uniqueness/ of the addressed identity is where the
+   public face does the work: ElGamal is not key-committing, and the opening
+   (including \( r_n \)) travels to the spender, so a relation with a /free/
+   plaintext \( V \) could be re-keyed to any \( m' \) by absorbing the
+   difference (\( V' = C_n - (r_n m')G \)).  Pinning the plaintext to
+   \( vG \) with \( v \) public removes that freedom: clause (2) forces
+   \( m_{\text{rec}} = (\log_G C_n - v)\, r_n^{-1} \) with
+   \( r_n = \log_G R_n \neq 0 \), both determined by the committed
+   \( eNote \) (clause (1), Poseidon binding) and the spend-verified
+   \( v \).  A holder of a stolen A1 opening whose identity
+   \( m' \neq m_{\text{rec}} \) has no satisfying witness.
+   \( \blacksquare \)
+
    *Implications.*
 
    - *Addressed binding enforced.*  Clause (2) forces the spend's \( eEnc \) to
@@ -1123,7 +1165,8 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
      opening cannot redeem with a self-addressed \( eEnc \): its own
      \( m \neq m_{\text{rec}} \) cannot satisfy (2) and (3) for the committed
      ciphertext.  Only the addressed Identity spends -- from any of its
-     Fountain accounts.
+     Fountain accounts.  (For A1, clauses (2)-(4) of the A1 statement play
+     the same role, the public face pinning the addressed identity.)
    - *A2 collusion closed against substitution.*  Theorem 8's "collusion
      closed" implication assumed the verified \( eEnc \) was about the spent
      note; Theorem 12 makes that an extractable fact.  A coalition minting an

@@ -123,6 +123,38 @@ Both contracts compile cleanly with =forge build=.
   =test/NotesCoupledA2.t.sol= (10 tests) continue to pass with the stub
   binding verifier.
 
+** A1-Layout Circuit (=circuits/note_binding_a1.circom=)
+   :PROPERTIES:
+   :STATUS: DONE
+   :END:
+
+An A1 note's =idHash= commits =(eNote, m_issuer, sigma)= — the
+public-issuer payload, no second ciphertext — so the A2 circuit's
+relation is not constructible for A1 notes.  The A1 sibling ties the
+note's /own/ value ciphertext instead: every point in the relation is a
+known multiple of G (=eNote.C = (v + rn·m_rec)*G=,
+=eEnc.C = (m_rec + t·m_rec)*G=), so the circuit needs no witnessed point
+limbs at all.  The note face =v= is a /public/ input (the contract
+passes the spend's =face=): ElGamal is not key-committing, and pinning
+the plaintext publicly is what makes the addressed identity unique
+(Proofs, Theorem 12, A1 statement).
+
+Result: ~2.86M non-linear constraints, 558 MB R1CS, 26 public inputs
+(face at index 1).  Same toolchain requirements as the A2 circuit
+(C++ witness calculator, =-fno-strict-aliasing=, 64 MB stack, --O2,
+pot22); same rapidsnark proving path.
+
+Circuit constraints:
+| Constraint | Description                                  | EC ops                   |
+|------------+----------------------------------------------+--------------------------|
+| (1)        | nullifier = Poseidon3(rho, idHash, 4242)     | —                        |
+| (2)        | idHash = Poseidon8(eNote, mIss, sigR, sigS)  | —                        |
+| (3)        | eNote.R = rn*G                               | rn*G (fixed-base)        |
+| (4)        | eNote.C = u*G, u = v + rn·m_rec              | u*G (fixed-base)         |
+| (5)        | eEnc.R = t*G                                 | t*G (fixed-base)         |
+| (6)        | eEnc.C = m_rec*G + tm*G, tm = t·m_rec        | 2 fixed-base + 1 add     |
+| (7)        | P_I = m_rec*G + b*H                          | b*H (fixed-base) + 1 add |
+
 ** Supporting Scripts
    :PROPERTIES:
    :STATUS: DONE
@@ -130,12 +162,17 @@ Both contracts compile cleanly with =forge build=.
 
 - =scripts/snark/gen_note_binding_input.py= — generates test witness JSON
   from random valid values.
+- =scripts/snark/gen_note_binding_a1_input.py= — A1 sibling; delegates to
+  the production witness builder.
 - =scripts/snark/gen_bn254_g_pows.py= — generates the G-powers table.
 - =scripts/snark/setup_note_binding.sh= — full setup pipeline (circuit
   compilation, witness generation, Groth16 setup, verifier export, test
   vector generation).
+- =scripts/snark/setup_note_binding_a1.sh= — A1 sibling
+  (=make nix-snark-note-binding-a1=).
 - =alberta_buck/wallet/note_binding.py= — Python prover module
-  (=make_note_binding_witness=, =prove_note_binding=).
+  (=make_note_binding_witness=, =prove_note_binding=,
+  =make_note_binding_a1_witness=, =prove_note_binding_a1=).
 
 ** Witness Generation — ROOT CAUSE FOUND AND FIXED
    :PROPERTIES:
@@ -306,18 +343,22 @@ binaries under =lib/= are used directly (see rapidsnark Integration).
 | File                                                            | Status            |
 |-----------------------------------------------------------------+-------------------|
 | =circuits/note_binding.circom=                                  | Done              |
+| =circuits/note_binding_a1.circom=                               | Done              |
 | =circuits/ec/bn254_g_scalarmul.circom=                          | Done              |
 | =circuits/ec/powers/bn254_g_pows.circom=                        | Done (generated)  |
 | =scripts/snark/gen_note_binding_input.py=                       | Done              |
+| =scripts/snark/gen_note_binding_a1_input.py=                    | Done              |
 | =scripts/snark/gen_bn254_g_pows.py=                             | Done              |
 | =scripts/snark/setup_note_binding.sh=                           | Done (rewritten)  |
+| =scripts/snark/setup_note_binding_a1.sh=                        | Done              |
 | =scripts/snark/debug_witness.js=                                | Debug             |
 | =lib/rapidsnark-macOS-arm64-v0.0.8/=                            | Vendored binaries |
-| =src/INoteBindingVerifier.sol=                                  | Done (prior)      |
-| =src/StubNoteBindingVerifier.sol=                               | Done (prior)      |
-| =src/NoteBindingVerifierAdapter.sol=                            | Done              |
-| =src/NoteBindingGroth16Verifier.sol=                            | Stub placeholder  |
-| =test/NoteBindingVerifier.t.sol=                                | Done              |
+| =src/INoteBindingVerifier.sol=                                  | Done (A1 + A2)    |
+| =src/StubNoteBindingVerifier.sol=                               | Done (A1 + A2)    |
+| =src/NoteBindingVerifierAdapter.sol=                            | Done (A1 + A2)    |
+| =src/NoteBindingGroth16Verifier.sol=                            | Done (generated)  |
+| =src/NoteBindingA1Groth16Verifier.sol=                          | Done (generated)  |
+| =test/NoteBindingVerifier.t.sol=                                | Done (A1 + A2)    |
 | =test/NotesCoupledA1.t.sol=                                     | Done (prior)      |
 | =test/NotesCoupledA2.t.sol=                                     | Done (prior)      |
 | =alberta_buck/wallet/note_binding.py=                           | Done              |

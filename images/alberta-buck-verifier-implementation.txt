@@ -18,12 +18,13 @@ Table of Contents
 .. 3. BN254 G-Generator Powers Table
 .. 4. Solidity Contracts
 .. 5. Tests
-.. 6. Supporting Scripts
-.. 7. Witness Generation — ROOT CAUSE FOUND AND FIXED
+.. 6. A1-Layout Circuit (`circuits/note_binding_a1.circom')
+.. 7. Supporting Scripts
+.. 8. Witness Generation — ROOT CAUSE FOUND AND FIXED
 ..... 1. Diagnosis trail
 ..... 2. Fix
-.. 8. rapidsnark Integration
-.. 9. Groth16 Trusted Setup — COMPLETE; two more toolchain discoveries
+.. 9. rapidsnark Integration
+.. 10. Groth16 Trusted Setup — COMPLETE; two more toolchain discoveries
 ..... 1. Discovery 1 — snarkjs sizes the Groth16 domain on TOTAL constraints
 ..... 2. Discovery 2 — snarkjs 0.7.5 exports the VK already EIP-197-ordered
 ..... 3. Final results
@@ -159,20 +160,58 @@ Table of Contents
     stub binding verifier.
 
 
-2.6 Supporting Scripts
+2.6 A1-Layout Circuit (`circuits/note_binding_a1.circom')
+─────────────────────────────────────────────────────────
+
+  An A1 note's `idHash' commits `(eNote, m_issuer, sigma)' — the
+  public-issuer payload, no second ciphertext — so the A2 circuit's
+  relation is not constructible for A1 notes.  The A1 sibling ties the
+  note's /own/ value ciphertext instead: every point in the relation is
+  a known multiple of G (`eNote.C = (v + rn·m_rec)*G', `eEnc.C = (m_rec
+  + t·m_rec)*G'), so the circuit needs no witnessed point limbs at all.
+  The note face `v' is a /public/ input (the contract passes the spend's
+  `face'): ElGamal is not key-committing, and pinning the plaintext
+  publicly is what makes the addressed identity unique (Proofs, Theorem
+  12, A1 statement).
+
+  Result: ~2.86M non-linear constraints, 558 MB R1CS, 26 public inputs
+  (face at index 1).  Same toolchain requirements as the A2 circuit (C++
+  witness calculator, `-fno-strict-aliasing', 64 MB stack, –O2, pot22);
+  same rapidsnark proving path.
+
+  Circuit constraints:
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Constraint  Description                                  EC ops                   
+  ───────────────────────────────────────────────────────────────────────────────────
+   (1)         nullifier = Poseidon3(rho, idHash, 4242)     —                        
+   (2)         idHash = Poseidon8(eNote, mIss, sigR, sigS)  —                        
+   (3)         eNote.R = rn*G                               rn*G (fixed-base)        
+   (4)         eNote.C = u*G, u = v + rn·m_rec              u*G (fixed-base)         
+   (5)         eEnc.R = t*G                                 t*G (fixed-base)         
+   (6)         eEnc.C = m_rec*G + tm*G, tm = t·m_rec        2 fixed-base + 1 add     
+   (7)         P_I = m_rec*G + b*H                          b*H (fixed-base) + 1 add 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+2.7 Supporting Scripts
 ──────────────────────
 
   • `scripts/snark/gen_note_binding_input.py' — generates test witness
     JSON from random valid values.
+  • `scripts/snark/gen_note_binding_a1_input.py' — A1 sibling; delegates
+    to the production witness builder.
   • `scripts/snark/gen_bn254_g_pows.py' — generates the G-powers table.
   • `scripts/snark/setup_note_binding.sh' — full setup pipeline (circuit
     compilation, witness generation, Groth16 setup, verifier export,
     test vector generation).
+  • `scripts/snark/setup_note_binding_a1.sh' — A1 sibling (`make
+    nix-snark-note-binding-a1').
   • `alberta_buck/wallet/note_binding.py' — Python prover module
-    (`make_note_binding_witness', `prove_note_binding').
+    (`make_note_binding_witness', `prove_note_binding',
+    `make_note_binding_a1_witness', `prove_note_binding_a1').
 
 
-2.7 Witness Generation — ROOT CAUSE FOUND AND FIXED
+2.8 Witness Generation — ROOT CAUSE FOUND AND FIXED
 ───────────────────────────────────────────────────
 
   The "Assertion failed: (Fr_isTrue(&expaux[0]))" abort on the
@@ -182,7 +221,7 @@ Table of Contents
   `fr.cpp' field-arithmetic runtime, miscompiled by gcc at `-O3'.
 
 
-2.7.1 Diagnosis trail
+2.8.1 Diagnosis trail
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   1. The G-powers table and `ScalarMulG()' were validated independently:
@@ -213,7 +252,7 @@ Table of Contents
      constraint involving a mixed-representation compare.
 
 
-2.7.2 Fix
+2.8.2 Fix
 ╌╌╌╌╌╌╌╌╌
 
   Two build requirements, both now encoded in
@@ -241,7 +280,7 @@ Table of Contents
   C++-witness + rapidsnark-prove.
 
 
-2.8 rapidsnark Integration
+2.9 rapidsnark Integration
 ──────────────────────────
 
   rapidsnark v0.0.8 prebuilt macOS-arm64 binaries are vendored as
@@ -260,8 +299,8 @@ Table of Contents
   • No flake.nix change needed — the prebuilt binaries are used as-is.
 
 
-2.9 Groth16 Trusted Setup — COMPLETE; two more toolchain discoveries
-────────────────────────────────────────────────────────────────────
+2.10 Groth16 Trusted Setup — COMPLETE; two more toolchain discoveries
+─────────────────────────────────────────────────────────────────────
 
   The full pipeline now runs end to end (`make nix-snark-note-binding')
   and the real verifier is exported and on-chain verified.  Getting
@@ -269,8 +308,8 @@ Table of Contents
   scripts:
 
 
-2.9.1 Discovery 1 — snarkjs sizes the Groth16 domain on TOTAL constraints
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+2.10.1 Discovery 1 — snarkjs sizes the Groth16 domain on TOTAL constraints
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The circuit's ~2.4M /non-linear/ constraints exceeded pot20, so a
   *pot22* dev ptau (4.19M domain) was generated (`snarkjs ptn/ptc/pt2'
@@ -288,8 +327,8 @@ Table of Contents
   0 even on "circuit too big".)
 
 
-2.9.2 Discovery 2 — snarkjs 0.7.5 exports the VK already EIP-197-ordered
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+2.10.2 Discovery 2 — snarkjs 0.7.5 exports the VK already EIP-197-ordered
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   With the verifier exported and the proof verifying off-chain (snarkjs
   AND rapidsnark), the on-chain test still rejected it – `ecpairing'
@@ -310,8 +349,8 @@ Table of Contents
   snark-test-regression' exists to catch exactly this.
 
 
-2.9.3 Final results
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+2.10.3 Final results
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Step                         Result                                                                                                       
@@ -354,29 +393,33 @@ Table of Contents
 4 File Inventory
 ════════════════
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   File                                       Status            
-  ──────────────────────────────────────────────────────────────
-   `circuits/note_binding.circom'             Done              
-   `circuits/ec/bn254_g_scalarmul.circom'     Done              
-   `circuits/ec/powers/bn254_g_pows.circom'   Done (generated)  
-   `scripts/snark/gen_note_binding_input.py'  Done              
-   `scripts/snark/gen_bn254_g_pows.py'        Done              
-   `scripts/snark/setup_note_binding.sh'      Done (rewritten)  
-   `scripts/snark/debug_witness.js'           Debug             
-   `lib/rapidsnark-macOS-arm64-v0.0.8/'       Vendored binaries 
-   `src/INoteBindingVerifier.sol'             Done (prior)      
-   `src/StubNoteBindingVerifier.sol'          Done (prior)      
-   `src/NoteBindingVerifierAdapter.sol'       Done              
-   `src/NoteBindingGroth16Verifier.sol'       Stub placeholder  
-   `test/NoteBindingVerifier.t.sol'           Done              
-   `test/NotesCoupledA1.t.sol'                Done (prior)      
-   `test/NotesCoupledA2.t.sol'                Done (prior)      
-   `alberta_buck/wallet/note_binding.py'      Done              
-   `alberta_buck/wallet/unilateral_a2.py'     Modified          
-   `alberta_buck/wallet/unilateral_a1.py'     Modified          
-   `Makefile'                                 Modified          
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   File                                          Status            
+  ─────────────────────────────────────────────────────────────────
+   `circuits/note_binding.circom'                Done              
+   `circuits/note_binding_a1.circom'             Done              
+   `circuits/ec/bn254_g_scalarmul.circom'        Done              
+   `circuits/ec/powers/bn254_g_pows.circom'      Done (generated)  
+   `scripts/snark/gen_note_binding_input.py'     Done              
+   `scripts/snark/gen_note_binding_a1_input.py'  Done              
+   `scripts/snark/gen_bn254_g_pows.py'           Done              
+   `scripts/snark/setup_note_binding.sh'         Done (rewritten)  
+   `scripts/snark/setup_note_binding_a1.sh'      Done              
+   `scripts/snark/debug_witness.js'              Debug             
+   `lib/rapidsnark-macOS-arm64-v0.0.8/'          Vendored binaries 
+   `src/INoteBindingVerifier.sol'                Done (A1 + A2)    
+   `src/StubNoteBindingVerifier.sol'             Done (A1 + A2)    
+   `src/NoteBindingVerifierAdapter.sol'          Done (A1 + A2)    
+   `src/NoteBindingGroth16Verifier.sol'          Done (generated)  
+   `src/NoteBindingA1Groth16Verifier.sol'        Done (generated)  
+   `test/NoteBindingVerifier.t.sol'              Done (A1 + A2)    
+   `test/NotesCoupledA1.t.sol'                   Done (prior)      
+   `test/NotesCoupledA2.t.sol'                   Done (prior)      
+   `alberta_buck/wallet/note_binding.py'         Done              
+   `alberta_buck/wallet/unilateral_a2.py'        Modified          
+   `alberta_buck/wallet/unilateral_a1.py'        Modified          
+   `Makefile'                                    Modified          
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 5 Build Commands
