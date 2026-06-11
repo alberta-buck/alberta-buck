@@ -60,7 +60,7 @@ function mkRng(seed) {
 function parseArgs() {
     const out = {
         name: "basic", n: 2, seed: 1n, startLeaf: 0n,
-        initialState: null, liveLeaves: null, eiss: {},
+        initialState: null, liveLeaves: null, eiss: {}, enote: {}, rho: {},
     };
     for (const a of process.argv.slice(2)) {
         const m = a.match(/^--([^=]+)=(.*)$/);
@@ -76,6 +76,21 @@ function parseArgs() {
             case "eiss": {
                 const [idx, words] = v.split(":");
                 out.eiss[parseInt(idx, 10)] = words.split(",").map((w) => fieldFrom(w));
+                break;
+            }
+            case "enote": {
+                // --enote=i:Rx,Ry,Cx,Cy — pin leaf i's eNote (e2e fixtures:
+                // the wallet's real value ciphertext, so idHash matches the
+                // delivered note).  Repeatable.
+                const [idx, words] = v.split(":");
+                out.enote[parseInt(idx, 10)] = words.split(",").map((w) => fieldFrom(w));
+                break;
+            }
+            case "rho": {
+                // --rho=i:value — pin leaf i's rho (e2e fixtures: the wallet
+                // note's opening randomness, so the nullifier matches).
+                const [idx, val] = v.split(":");
+                out.rho[parseInt(idx, 10)] = BigInt(val);
                 break;
             }
             default: throw new Error(`unknown arg: --${k}`);
@@ -157,9 +172,9 @@ async function main() {
         v[i]         = (i < liveCount)
             ? (args.liveLeaves ? args.liveLeaves[i] : BigInt(i + 1) * 1000000000000000000n)
             : 0n;
-        rho[i]       = rng();
+        rho[i]       = args.rho[i] !== undefined ? args.rho[i] : rng();
         predicate[i] = 0n;
-        eNote[i]     = [rng(), rng(), rng(), rng()];
+        eNote[i]     = args.enote[i] ? args.enote[i].slice() : [rng(), rng(), rng(), rng()];
         eIss[i]      = args.eiss[i] ? args.eiss[i].slice() : [rng(), rng(), rng(), rng()];
         idHash[i]    = P([...eNote[i], ...eIss[i]]);  // Poseidon-8(eNote, eIss)
     }

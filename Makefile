@@ -331,6 +331,17 @@ snark-note-binding:	rapidsnark
 snark-note-binding-clean:
 	rm -rf build/snark/note_binding
 
+# End-to-end Notes fixtures: one mutually-consistent world per flavor (A1,
+# A2, B1) with REAL proofs at every gate, consumed by test/NotesE2E.t.sol.
+# Requires the mint/spend/g1tie/note-binding setups to exist (see the
+# prerequisites comment in scripts/snark/gen_e2e_fixtures.sh).
+snark-e2e-fixtures:
+	rm -rf build/snark/e2e
+	$(SNARK_PATH) bash scripts/snark/gen_e2e_fixtures.sh
+
+snark-e2e-clean:
+	rm -rf build/snark/e2e test/vectors/e2e
+
 # BN254 G-generator stride-8 powers table for note_binding.circom.
 # The circom-lib EC library lacks a precomputed power table for BN254's
 # generator G=(1,2); without it the optimised scalar multiplication silently

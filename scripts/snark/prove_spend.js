@@ -61,7 +61,12 @@ async function main() {
         throw new Error(`Missing spend artifacts; run scripts/snark/setup.sh first`);
     }
 
-    const mintFixturePath = path.join(MINT, "fixtures", `${MINT_NAME}.json`);
+    // MINT_NAME containing "/" is a fixture path relative to the repo root
+    // (e2e fixtures live under other circuits' build dirs); otherwise it
+    // names a fixture in the legacy build/snark/mint/fixtures dir.
+    const mintFixturePath = MINT_NAME.includes("/")
+        ? path.join(ROOT, MINT_NAME)
+        : path.join(MINT, "fixtures", `${MINT_NAME}.json`);
     const mintFixture = JSON.parse(fs.readFileSync(mintFixturePath, "utf8"));
 
     const poseidon = await buildPoseidon();
