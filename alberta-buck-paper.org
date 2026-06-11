@@ -238,18 +238,18 @@ predicts.  Every theorem carries an executable witness.
   Before the formalism, the experience.
 
   Alice owes Bob one hundred dollars.  She opens her wallet and mints a
-  /note/: her wallet burns one hundred of her BUCK into a shared pool and
+  /note/: her wallet burns one hundred of her BUCKs into a shared pool and
   publishes a single opaque number -- a cryptographic commitment -- onto
   the public chain.  The commitment reveals nothing: not the amount, not
   Bob, not (for the private flavour) even that it was Alice.  Alice then
   hands Bob the note's /opening/ -- a few hundred bytes -- by any channel
   she likes: a message, a QR code on her phone's screen, a slip of paper.
   Days or months later, from any account he controls, Bob /deposits/ the
-  opening: his wallet proves, in zero knowledge, that some unspent note
-  in the pool is his to claim, and the pool pays him one hundred BUCK.
-  An observer watching the chain sees a commitment appear at one moment
-  and an unrelated-looking payout occur at another, with nothing
-  connecting them -- not the amounts, not the parties, not the timing.
+  opening: his wallet proves, in zero knowledge, that some unspent note in
+  the pool is his to claim, and the pool pays him one hundred BUCKs.  An
+  observer watching the chain sees a commitment appear at one moment and an
+  unrelated-looking payout occur at another, with nothing connecting them
+  -- no the amounts, not the parties, not the timing.
 
   Three further facts make this different from a mixer, and they are the
   subject of this paper.
