@@ -12,12 +12,35 @@ import json
 from pathlib import Path
 from typing import Any
 
+import os
+
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
-REPO = Path(__file__).resolve().parents[2]
-OUT = REPO / "out"
+
+def repo_root() -> Path:
+    """The repository checkout root -- needed for the Foundry artifacts
+    (out/) and contract sources the live-EVM helpers consume.
+
+    Resolution order: the ``ALBERTA_BUCK_REPO`` env var; walking up from this
+    file (a repo checkout / editable install); walking up from the cwd (a
+    venv-installed package run from inside the repo).  ``foundry.toml`` is
+    the marker.  Raises FileNotFoundError when no repo is reachable -- the
+    fixture-only paths (package data) do not need one.
+    """
+    env = os.environ.get("ALBERTA_BUCK_REPO")
+    candidates = ([Path(env)] if env else []) + [
+        Path(__file__).resolve(), Path.cwd().resolve()]
+    for start in candidates:
+        for p in (start, *start.parents):
+            if (p / "foundry.toml").exists():
+                return p
+    raise FileNotFoundError(
+        "alberta-buck repo root not found (looked for foundry.toml from "
+        f"{[str(c) for c in candidates]}); set ALBERTA_BUCK_REPO or run "
+        "from inside the repo checkout")
+
 
 # Gas big enough for the largest deploy (Universal Router) without estimation.
 _DEPLOY_GAS = 55_000_000
@@ -26,7 +49,7 @@ _CALL_GAS = 12_000_000
 
 def load_artifact(name: str, sol_file: str | None = None) -> tuple[list, str]:
     """Return (abi, bytecode) for out/<sol_file or name>.sol/<name>.json."""
-    f = OUT / f"{sol_file or name}.sol" / f"{name}.json"
+    f = repo_root() / "out" / f"{sol_file or name}.sol" / f"{name}.json"
     art = json.loads(f.read_text())
     return art["abi"], art["bytecode"]["object"]
 
@@ -108,7 +131,7 @@ class Chain:
         return self.w3.eth.contract(address=rcpt["contractAddress"], abi=abi)
 
     def deploy_from_path(self, artifact_path: str, *args):
-        art = json.loads((REPO / artifact_path).read_text())
+        art = json.loads((repo_root() / artifact_path).read_text())
         return self.deploy("", *args, abi=art["abi"],
                            bytecode=art["bytecode"]["object"])
 

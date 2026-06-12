@@ -14,6 +14,7 @@ evm_version = "cancun"
 ffi = false
 fs_permissions = [
     { access = "read-write", path = "./test/vectors" },
+    { access = "read", path = "./alberta_buck/test/vectors" },
     { access = "read", path = "./build/snark" },
     { access = "read", path = "./out" },
     { access = "read", path = "./alberta_buck/sim/prices" },

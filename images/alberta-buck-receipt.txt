@@ -1,6 +1,5 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-              THE ALBERTA BUCK - PRINTABLE RECEIPT (DRAFT
-                                 V0.2)
+              THE ALBERTA BUCK - PRINTABLE RECEIPT (V1.0)
             A Plain-Text, Independently Re-Verifiable Record
                    of an Identity-Bound BUCK Payment
 
@@ -24,8 +23,8 @@ wallet's verifiers.  The receipt closes two gaps the on-chain proofs
 leave open: it carries each party's `canonical_identity_data' so a point
 \( M \) resolves to a human name (verified by recomputing \( M =
 \mathrm{keccak}( \text{data}) \cdot G \)), and it states which on-chain
-facts (registry records, the `Transfer' / `Spent*' event) anchor the
-proof.  Verification is two-tier: /offline/, re-running the proof
+facts (registry records, the `Transfer' / `SpentCoupled*' event) anchor
+the proof.  Verification is two-tier: /offline/, re-running the proof
 algebra and the point\(\to\)human bridge from the embedded payload
 alone; and /chain-anchored/, confirming the embedded records against a
 node.  Five receipt kinds are specified – an EOA transfer from a public
@@ -59,9 +58,21 @@ Table of Contents
 6. The Physical Artifact (ESC/POS, 80mm, 203dpi, 576px)
 7. Verification Procedure
 8. Wallet UX and Storage
-9. Security Considerations
-10. Phasing
-11. Open Questions
+9. The Whole Flow, Executed: Live EVM, Real Proofs, Both Receipts
+.. 1. Boot: a chain whose id the proofs demand
+.. 2. The A2 world: a private issuer pays an addressed recipient
+.. 3. Deploy the real stack; bind the Identities (Merkle updates on the EVM)
+.. 4. Fund, and the identity-bound approve (the real CP handshake)
+.. 5. Mint (the issuer's act)
+.. 6. Transmission verification (the recipient's act, offline)
+.. 7. Deposit (the recipient's act, on chain)
+.. 8. The two receipts, side by side
+.. 9. Tier-2: anchoring both slips to the live chain
+.. 10. All three flavors: the cost of each step
+.. 11. Shutdown
+10. Security Considerations
+11. Phasing
+12. Open Questions
 
 
 [Decryptability]
@@ -376,51 +387,38 @@ Table of Contents
   from what a verifier checks.  Only the NOTES section is free text.
 
   ┌────
-  │ ================================================
-  │               ALBERTA  BUCK
-  │             P A Y M E N T   R E C E I P T
-  │ ================================================
-  │  Receipt  ab1q7x...4f9        (sha256 handle)
-  │  Issued   2026-05-29 14:32 MST    AB-RCPT/1
-  │  ------------------------------------------------
-  │  FROM (payer)               [PRIVATE IDENTITY]
-  │    Alice Johnson
-  │    Alberta Identity Card - Alberta, Canada
-  │    acct  0xa11ce...a11ce
-  │    id pt 8f3a..1c   (point->name VERIFIED)
-  │  ------------------------------------------------
-  │  TO (payee - you)           [PRIVATE IDENTITY]
-  │    Bob Smith
-  │    Corporate Registration - Alberta, Canada
-  │    acct  0x0b0b...0b0b
-  │    id pt 2d77..9a   (point->name VERIFIED)
-  │  ------------------------------------------------
-  │  TRANSACTION
-  │    Type    EOA transfer (Identity-bound)
-  │    Amount  $   250.00  BUCK
-  │    When    2026-05-29 14:30 MST
-  │    Chain 1   Block 1234567   Log #3
-  │    Tx  0x9c2f...e1
-  │  ------------------------------------------------
-  │  NOTES (informational - NOT verified)
-  │    Invoice INV-2026-0042
-  │    Consulting services, May 2026
-  │  ------------------------------------------------
-  │  VERIFICATION         status @ issue: VALID
-  │    Re-verify: scan the payload below into
-  │      albertabuck verify -
-  │    (offline checks proofs + names; add --rpc
-  │     to anchor to chain)
-  │ 
-  │  AB-RCPT/1.
-  │  o7VkdHlwZWVvYS1wcml2ZGNoYWluAWhjb250cmFjdHOj
-  │  aHJlZ2lzdHJ5VAr..Q3R4ZWVidWNrV... (wrapped,
-  │  Font B, ~30-50 lines depending on kind)
-  │  .END
-  │ ================================================
-  │      a record, not a bearer instrument
-  │      github.com/pjkundert/alberta-buck
-  │ ================================================
+  │                  ALBERTA  BUCK                  
+  │          P A Y M E N T   R E C E I P T          
+  │ ------------------------------------------------
+  │   Receipt  a2cg5sgjwfur
+  │ ------------------------------------------------
+  │ FROM (payer) (PRIVATE IDENTITY)
+  │  Alice Johnson
+  │ Alberta Identity Card - Alberta, Canada
+  │  acct 0x0a11ce00000000000000000000000000000a11ce
+  │  idpt 0x07a0b762be40..d418d7bf5e7c
+  │ ------------------------------------------------
+  │ TO (payee - you) (PRIVATE IDENTITY)
+  │  Bob Smith
+  │ Corporate Registration - Alberta, Canada
+  │  acct 0x0b0b000000000000000000000000000000000b0b
+  │  idpt 0x0cef52e77ea5..0ae1f916d96b
+  │ ------------------------------------------------
+  │ TRANSACTION
+  │  Type    EOA xfer (Identity-bound, private payer)
+  │  Amount            500.000000  BUCK
+  │  When        2026-05-28 20:10  UTC
+  │  Chain                      1
+  │  Block                1234567
+  │  Log                        2
+  │  Tx      0xeeeeeeeeeeee..eeeeeeeeeeee
+  │ ------------------------------------------------
+  │ VERIFICATION
+  │  status @ issue: VALID
+  │  receipt  a2cg5sgjwfur
+  │ ------------------------------------------------
+  │         a record, not a bearer instrument       
+  │         github.com/pjkundert/alberta-buck       
   └────
 
 
@@ -506,8 +504,409 @@ Table of Contents
     `verify' has no wallet-secret dependency (a third party runs it).
 
 
-9 Security Considerations
-═════════════════════════
+9 The Whole Flow, Executed: Live EVM, Real Proofs, Both Receipts
+════════════════════════════════════════════════════════════════
+
+  Everything this document specifies *runs*.  The blocks below are
+  org-babel source blocks sharing one Python session: re-exporting this
+  document (`make nix-venv-doc-receipt') re-runs them top to bottom
+  against a freshly spawned local EVM, and the printed `RESULTS' are
+  regenerated.  The worlds come from the committed end-to-end fixtures
+  (`alberta_buck/test/vectors/e2e/{a1,a2,b1}.json', built by `make
+  nix-snark-e2e-fixtures' and shipped as package data): one
+  mutually-consistent world per Note flavor with a *real Groth16 proof
+  at every gate* – batch mint, spend, bound G1-tie membership, and
+  (A1/A2) the note\(\leftrightarrow\)=eEnc= tie – and *real named
+  identities*: the canonical Alice Johnson / Bob Smith KYC data of the
+  wallet's identity vectors.  Proof generation happened when the
+  fixtures were built (a wallet does it the same way; the measured
+  prover wall-times ride along in each fixture, and the flow companion's
+  /Prover Bill of Materials/ prices the artifacts and proving per flavor
+  and role); everything below – registry Merkle updates, the
+  identity-bound approve handshake, Groth16 verification, escrow and
+  payout – is live EVM execution, exactly the path `test/NotesE2E.t.sol'
+  drives under forge.
+
+
+9.1 Boot: a chain whose id the proofs demand
+────────────────────────────────────────────
+
+  Every Fiat-Shamir transcript and SNARK public input in the fixtures
+  binds `chainid=1', so the session runs anvil with chain-id 1; the
+  pinned genesis timestamp (plus a fixed 12s block cadence below) makes
+  the whole transcript – including the receipt bytes – reproducible run
+  to run.
+
+  ┌────
+  │ import random
+  │ from alberta_buck.sim.anvil import Anvil
+  │ from alberta_buck.sim.notes_stack import E2EFixture, NotesStack
+  │ from alberta_buck.wallet.envelope import serialize_core, deserialize_core, receipt_id
+  │ from alberta_buck.wallet.verify_receipt import verify_receipt
+  │ from alberta_buck.wallet.render import render_receipt, TextDriver
+  │ 
+  │ _seed = random.Random(0xAB12C97)          # ONE deterministic transcript
+  │ rng = lambda: _seed.getrandbits(256)
+  │ 
+  │ anvil = Anvil(chain_id=1, auto_impersonate=True, timestamp=1780000000).start()
+  │ blk = anvil.w3.eth.get_block("latest")
+  │ print(f"anvil up: chain-id {anvil.w3.eth.chain_id}, genesis timestamp {blk['timestamp']}")
+  └────
+
+  ┌────
+  │ anvil up: chain-id 1, genesis timestamp 1780000000
+  └────
+
+
+9.2 The A2 world: a private issuer pays an addressed recipient
+──────────────────────────────────────────────────────────────
+
+  The hardest flavor first.  Bob Smith (a private Corporate Identity)
+  minted a 250-BUCK note addressed to Alice Johnson's identity *point* –
+  not to any account she owns.
+
+  ┌────
+  │ import json
+  │ fx = E2EFixture.load("a2")
+  │ iss, dep = json.loads(fx.issuer.identity), json.loads(fx.depositor.identity)
+  │ print(f"flavor     {fx.flavor} (addressed, PRIVATE issuer); face {fx.face/1e6:.6f} BUCK")
+  │ print(f"issuer     {iss['given_name']} {iss['family_name']} ({iss['id_type']})"
+  │       f"  acct 0x{fx.issuer.addr:040x}")
+  │ print(f"depositor  {dep['given_name']} {dep['family_name']} ({dep['id_type']})"
+  │       f"  acct 0x{fx.depositor.addr:040x}")
+  │ print(f"prover wall-times (offline, at mint/spend): {fx.timings}")
+  └────
+
+  ┌────
+  │ flavor     a2 (addressed, PRIVATE issuer); face 250.000000 BUCK
+  │ issuer     Bob Smith (Corporate Registration)  acct 0x0a11ce00000000000000000000000000000a11ce
+  │ depositor  Alice Johnson (Alberta Identity Card)  acct 0xde9051700000000000000000000000000de90517
+  │ prover wall-times (offline, at mint/spend): {'mint_prove_s': 0.959, 'spend_prove_s': 0.76, 'membership_prove_s': 1.556, 'note_binding_prove_s': 11.7}
+  └────
+
+
+9.3 Deploy the real stack; bind the Identities (Merkle updates on the EVM)
+──────────────────────────────────────────────────────────────────────────
+
+  The full contract stack – `IdentityRegistry' with the incremental
+  Poseidon identity accumulator, the `Buck' stack, `Notes', and the
+  *real* generated Groth16 verifiers behind their adapters – then the
+  two identity binds.  Each bind appends the party's identity leaf; the
+  contract's incrementally-maintained root must replay the wallet
+  tree's.
+
+  ┌────
+  │ stack = NotesStack(anvil, fx, rng=rng, block_time=12)
+  │ binds = stack.bind_identities()
+  │ for s in binds:
+  │     print(f"{s.name:26s} gas={s.gas:>9,}")
+  │ onchain = stack.reg.functions.identityRoot().call()
+  │ print(f"identityRoot (EVM-incremental Poseidon) = {hex(onchain)[:20]}...")
+  │ print(f"  == the wallet's IdentityTree root:    {onchain == int(fx.raw['identityRoot'])}")
+  └────
+
+  ┌────
+  │ bind issuer                gas=  594,779
+  │ bind depositor             gas=  557,628
+  │ identityRoot (EVM-incremental Poseidon) = 0xab29ff540f4d0a25d9...
+  │   == the wallet's IdentityTree root:    True
+  └────
+
+
+9.4 Fund, and the identity-bound approve (the real CP handshake)
+────────────────────────────────────────────────────────────────
+
+  The issuer is granted BuckCredit and mints BUCK; then each private
+  party identity-approves the Notes pool with the *real* Chaum-Pedersen
+  re-encryption proof (`Buck.approve' /
+  `IdentityRegistry.verifyApprove') – the same mutual-decryptability
+  handshake an EOA transfer uses, here providing the escrow allowance
+  and the pool's receipt fragments.  No storage hacks: every step is the
+  legitimate path.
+
+  ┌────
+  │ for s in stack.fund_issuer():
+  │     print(f"{s.name:26s} gas={s.gas:>9,}")
+  │ for party, amount, name in ((fx.issuer, 2 * fx.face, "approve issuer->pool"),
+  │                             (fx.depositor, 0, "approve depositor->pool")):
+  │     s = stack.approve_pool(party, amount, name)
+  │     print(f"{s.name:26s} gas={s.gas:>9,}   (CP proof: verifyApprove)")
+  └────
+
+  ┌────
+  │ createCredit               gas=  202,935
+  │ activateCredit             gas=   42,349
+  │ buck.mint                  gas=   97,850
+  │ approve issuer->pool       gas=  179,302   (CP proof: verifyApprove)
+  │ approve depositor->pool    gas=  137,964   (CP proof: verifyApprove)
+  └────
+
+
+9.5 Mint (the issuer's act)
+───────────────────────────
+
+  The issuer submits the real `mint_batch_a2' Groth16 proof with the
+  per-leaf re-encryption binding; the contract verifies both, escrows
+  the face, and installs the SNARK-attested new note root.
+
+  ┌────
+  │ mint = stack.mint()
+  │ print(f"Notes.mint  tx {mint.txhash[:20]}..  block {mint.block}  "
+  │       f"gas {mint.gas:,}  ({mint.seconds:.3f}s on anvil)")
+  │ print(f"  proof was generated offline by the issuer in "
+  │       f"{fx.timings['mint_prove_s']}s (Groth16, mint_batch_a2 N=1)")
+  │ pool = stack.buck.functions.balanceOf(stack.notes.address).call()
+  │ print(f"  escrowed: pool balance = {pool/1e6:.6f} BUCK")
+  └────
+
+  ┌────
+  │ Notes.mint  tx 0xc2fba76c99295fee9e..  block 32  gas 650,915  (0.106s on anvil)
+  │   proof was generated offline by the issuer in 0.959s (Groth16, mint_batch_a2 N=1)
+  │   escrowed: pool balance = 250.000000 BUCK
+  └────
+
+
+9.6 Transmission verification (the recipient's act, offline)
+────────────────────────────────────────────────────────────
+
+  Alice receives the note off chain – the opening, the Identity-M
+  payload `(eNote, eIss)', the binding, and the mint reference – and
+  verifies it with *one secret she already owns*: her identity scalar \(
+  m_{rec} \).  These are the same deterministic checks any receipt
+  verifier later re-runs.
+
+  ┌────
+  │ from alberta_buck.wallet.bn254 import G1, mul, eq
+  │ from alberta_buck.wallet.elgamal import elgamal_decrypt
+  │ from alberta_buck.wallet.notes import id_hash_a2, note_commitment
+  │ from alberta_buck.wallet.issuer_reenc import issuer_reenc_verify
+  │ 
+  │ nc = fx.note_cts()
+  │ m_rec = fx.depositor.m
+  │ print(f"idHash == Poseidon8(eNote, eIss):     "
+  │       f"{id_hash_a2(nc['eNote'], nc['eIss']) == fx.opening.id_hash}")
+  │ print(f"Dec(eNote, m_rec) == v*G:             "
+  │       f"{eq(elgamal_decrypt(nc['eNote'], m_rec), mul(G1, fx.opening.v))}")
+  │ print(f"Dec(eIss, m_rec) == issuer's M:       "
+  │       f"{eq(elgamal_decrypt(nc['eIss'], m_rec), fx.issuer.M)}   (the coupling)")
+  │ print(f"mint binding (anti-framing) verifies: "
+  │       f"{issuer_reenc_verify(fx.issuer.pk, fx.issuer.E, nc['eIss'], fx.binding, fx.issuer.addr, fx.chainid)}")
+  │ print(f"cm in the Minted batch:               "
+  │       f"{note_commitment(fx.opening) in fx.cms}")
+  └────
+
+  ┌────
+  │ idHash == Poseidon8(eNote, eIss):     True
+  │ Dec(eNote, m_rec) == v*G:             True
+  │ Dec(eIss, m_rec) == issuer's M:       True   (the coupling)
+  │ mint binding (anti-framing) verifies: True
+  │ cm in the Minted batch:               True
+  └────
+
+
+9.7 Deposit (the recipient's act, on chain)
+───────────────────────────────────────────
+
+  Alice spends from her registered account: the real spend Groth16
+  against the replayed note tree, the deposit-coupling sigma, the
+  *bound* G1-tie membership proof over the same committed point, and the
+  note\(\leftrightarrow\)=eEnc= tie – one atomic `spendCoupledA2'.
+
+  ┌────
+  │ spend = stack.spend()
+  │ t = fx.timings
+  │ print(f"Notes.spendCoupledA2  tx {spend.txhash[:20]}..  block {spend.block}  "
+  │       f"gas {spend.gas:,}  ({spend.seconds:.3f}s on anvil)")
+  │ print(f"  proofs offline: spend {t['spend_prove_s']}s + membership "
+  │       f"{t['membership_prove_s']}s + note-tie {t['note_binding_prove_s']}s")
+  │ print(f"  nullifier burned: "
+  │       f"{stack.notes.functions.nullifiers(fx.nullifier).call()}")
+  │ from web3 import Web3
+  │ bal = stack.buck.functions.balanceOf(
+  │     Web3.to_checksum_address(f'0x{fx.payout:040x}')).call()
+  │ print(f"  paid out: depositor balance = {bal/1e6:.6f} BUCK")
+  └────
+
+  ┌────
+  │ Notes.spendCoupledA2  tx 0xed88f3c35b57eefcb8..  block 33  gas 1,076,632  (0.111s on anvil)
+  │   proofs offline: spend 0.76s + membership 1.556s + note-tie 11.7s
+  │   nullifier burned: True
+  │   paid out: depositor balance = 249.999999 BUCK
+  └────
+
+
+9.8 The two receipts, side by side
+──────────────────────────────────
+
+  Both parties now print their slips from the material each already
+  holds – Alice her copy, Bob his payer-side "I paid X" copy – anchored
+  to the live chain's real transaction hashes, blocks, and timestamps.
+  The deterministic note legs are byte-identical between the two; only
+  the self-naming proof (and the "- you" marker) differs.
+
+  ┌────
+  │ anchors = stack.anchors(mint, spend)
+  │ dep_core = fx.build_receipt("recipient", stack.contracts, rng=rng, **anchors)
+  │ iss_core = fx.build_receipt("issuer",    stack.contracts, rng=rng, **anchors)
+  │ for label, core in (("depositor (Alice)", dep_core), ("issuer (Bob)", iss_core)):
+  │     b = serialize_core(core)
+  │     res = verify_receipt(deserialize_core(b))
+  │     print(f"{label:18s} receipt {receipt_id(b)}  tier-1: {res.reason}"
+  │           f"   ({len(b):,} B payload)")
+  └────
+
+  ┌────
+  │ depositor (Alice)  receipt 4egxeqphrl63  tier-1: VALID   (6,606 B payload)
+  │ issuer (Bob)       receipt 4kymncsgb4jc  tier-1: VALID   (6,603 B payload)
+  └────
+
+
+  ┌────
+  │ def side_by_side(a, b, gap=4):
+  │     la, lb = a.rstrip().split("\n"), b.rstrip().split("\n")
+  │     w, n = max(map(len, la)), max(len(la), len(lb))
+  │     la += [""] * (n - len(la)); lb += [""] * (n - len(lb))
+  │     return "\n".join(f"{x:<{w}}{' ' * gap}{y}".rstrip() for x, y in zip(la, lb))
+  │ 
+  │ render = lambda c: TextDriver(48).render(render_receipt(c))
+  │ print(side_by_side(render(dep_core), render(iss_core)))
+  └────
+
+  ┌────
+  │ 		    ALBERTA  BUCK                                         ALBERTA  BUCK
+  │ 	    P A Y M E N T   R E C E I P T                         P A Y M E N T   R E C E I P T
+  │ ------------------------------------------------      ------------------------------------------------
+  │   Receipt  4egxeqphrl63                                 Receipt  4kymncsgb4jc
+  │ ------------------------------------------------      ------------------------------------------------
+  │ FROM (payer) (PRIVATE IDENTITY)                       FROM (payer - you) (PRIVATE IDENTITY)
+  │  Bob Smith                                             Bob Smith
+  │ Corporate Registration - Alberta, Canada              Corporate Registration - Alberta, Canada
+  │  acct 0x0a11ce00000000000000000000000000000a11ce       acct 0x0a11ce00000000000000000000000000000a11ce
+  │  idpt 0x0cef52e77ea5..0ae1f916d96b                     idpt 0x0cef52e77ea5..0ae1f916d96b
+  │ ------------------------------------------------      ------------------------------------------------
+  │ TO (payee - you) (PRIVATE IDENTITY)                   TO (payee) (PRIVATE IDENTITY)
+  │  Alice Johnson                                         Alice Johnson
+  │ Alberta Identity Card - Alberta, Canada               Alberta Identity Card - Alberta, Canada
+  │  acct 0xde9051700000000000000000000000000de90517       acct 0xde9051700000000000000000000000000de90517
+  │  idpt 0x07a0b762be40..d418d7bf5e7c                     idpt 0x07a0b762be40..d418d7bf5e7c
+  │ ------------------------------------------------      ------------------------------------------------
+  │ TRANSACTION                                           TRANSACTION
+  │  Type    Note spend — A2 addressed, private issuer     Type    Note spend — A2 addressed, private issuer
+  │  Amount            250.000000  BUCK                    Amount            250.000000  BUCK
+  │  When        2026-05-28 20:28  UTC                     When        2026-05-28 20:28  UTC
+  │  Chain                      1                          Chain                      1
+  │  Block                     33                          Block                     33
+  │  Log                        2                          Log                        2
+  │  Tx      0xed88f3c35b57..d91308f0aced                  Tx      0xed88f3c35b57..d91308f0aced
+  │  Mint    0xc2fba76c9929..f00d5f89e9ac                  Mint    0xc2fba76c9929..f00d5f89e9ac
+  │ ------------------------------------------------      ------------------------------------------------
+  │ VERIFICATION                                          VERIFICATION
+  │  status @ issue: VALID                                 status @ issue: VALID
+  │  receipt  4egxeqphrl63                                 receipt  4kymncsgb4jc
+  │ ------------------------------------------------      ------------------------------------------------
+  │ 	   a record, not a bearer instrument                     a record, not a bearer instrument
+  │ 	   github.com/pjkundert/alberta-buck                     github.com/pjkundert/alberta-buck
+  └────
+
+
+9.9 Tier-2: anchoring both slips to the live chain
+──────────────────────────────────────────────────
+
+  A verifier with an RPC node confirms the embedded registry records and
+  the event anchor are the genuine on-chain ones.
+
+  ┌────
+  │ from web3 import Web3
+  │ dep_addr = Web3.to_checksum_address(f"0x{fx.depositor.addr:040x}")
+  │ pk_onchain = stack.reg.functions.pkOf(dep_addr).call()
+  │ print(f"registry _pk[depositor] == receipt payee.pk:  "
+  │       f"{pk_onchain[0] == int(dep_core.payee.pk['x'], 16)}")
+  │ rcpt = anvil.w3.eth.get_transaction_receipt(dep_core.txn.txhash)
+  │ print(f"spend tx mined in block {rcpt['blockNumber']} "
+  │       f"(receipt says {dep_core.txn.block}); "
+  │       f"log #{dep_core.txn.logindex} present: "
+  │       f"{dep_core.txn.logindex in [l['logIndex'] for l in rcpt['logs']]}")
+  │ print(f"issuer acct in receipt == Minted.issuer:      "
+  │       f"{dep_core.payer.addr[-40:] == f'{fx.issuer.addr:040x}'}")
+  └────
+
+  ┌────
+  │ registry _pk[depositor] == receipt payee.pk:  True
+  │ spend tx mined in block 33 (receipt says 33); log #2 present: True
+  │ issuer acct in receipt == Minted.issuer:      True
+  └────
+
+
+9.10 All three flavors: the cost of each step
+─────────────────────────────────────────────
+
+  The same lifecycle for B1 (bearer, public issuer) and A1 (addressed,
+  public issuer), then the per-flavor cost table: on-chain gas for the
+  two lifecycle transactions (full-call, as a node bills them) and the
+  offline prover wall-times each party paid.  Every flavor yields a
+  VALID receipt for *both* parties.
+
+  ┌────
+  │ runs = {"a2": (stack, mint, spend)}
+  │ for flavor in ("b1", "a1"):
+  │     f2 = E2EFixture.load(flavor)
+  │     st = NotesStack(anvil, f2, rng=rng, block_time=12)
+  │     steps = st.run_lifecycle()
+  │     runs[flavor] = (st, steps["mint"], steps["spend"])
+  │ 
+  │ hdr = (f"{'flavor':8s} {'mint gas':>10s} {'spend gas':>10s} "
+  │        f"{'mint prove':>11s} {'spend proves':>13s} {'receipts (dep / iss)':>22s}")
+  │ print(hdr); print("-" * len(hdr))
+  │ for flavor in ("b1", "a1", "a2"):
+  │     st, m, s = runs[flavor]
+  │     f2, t = st.fx, st.fx.timings
+  │     prove_spend = (t["spend_prove_s"] + t["membership_prove_s"]
+  │                    + t.get("note_binding_prove_s", 0.0))
+  │     a = st.anchors(m, s)
+  │     rcpts = []
+  │     for role in ("recipient", "issuer"):
+  │         core = f2.build_receipt(role, st.contracts, rng=rng, **a)
+  │         rcpts.append(verify_receipt(deserialize_core(serialize_core(core))).reason)
+  │     print(f"{flavor:8s} {m.gas:>10,} {s.gas:>10,} "
+  │           f"{t['mint_prove_s']:>10.2f}s {prove_spend:>12.2f}s "
+  │           f"{rcpts[0]:>11s} / {rcpts[1]}")
+  └────
+
+  ┌────
+  │ flavor     mint gas  spend gas  mint prove  spend proves   receipts (dep / iss)
+  │ -------------------------------------------------------------------------------
+  │ b1          520,944    751,313       0.94s         2.32s       VALID / VALID
+  │ a1          520,908  1,083,066       1.07s        16.39s       VALID / VALID
+  │ a2          650,915  1,076,632       0.96s        14.02s       VALID / VALID
+  └────
+
+
+  The mint gas difference (A2 over B1/A1) is the on-chain verification
+  of the per-leaf re-encryption binding – the price of an /anonymous/
+  issuer; the spend difference (A1/A2 over B1) is the
+  note\(\leftrightarrow\)=eEnc= tie – the price of /addressed/ ("only \(
+  M_{rec} \) can spend").  The prover cost is dominated by the tie
+  circuits (~2.4M-2.9M constraints); all on-chain verification is
+  constant-gas.
+
+
+9.11 Shutdown
+─────────────
+
+  ┌────
+  │ anvil.stop()
+  │ print("anvil stopped.  The receipts above remain verifiable offline --")
+  │ print("tier 1 needs no chain at all, only the slip's own text payload.")
+  └────
+
+  ┌────
+  │ anvil stopped.  The receipts above remain verifiable offline --
+  │ tier 1 needs no chain at all, only the slip's own text payload.
+  └────
+
+
+10 Security Considerations
+══════════════════════════
 
   • *PII on paper.* The slip is a deliberate disclosure: anyone holding
     it can name both parties.  The display subset (name / id_type /
@@ -560,7 +959,7 @@ Table of Contents
     credential).
 
 
-10 Phasing
+11 Phasing
 ══════════
 
   1. *Phase A (shipped).* Envelope + `verify' CLI + the plain-text
@@ -597,7 +996,7 @@ Table of Contents
      `RcptVerify' if a contract ever needs to gate on a receipt.
 
 
-11 Open Questions
+12 Open Questions
 ═════════════════
 
   1. *Encoding for OCR.* base64url is compact but OCR-hostile (l/1/I,

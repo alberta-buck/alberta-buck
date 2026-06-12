@@ -22,7 +22,7 @@ import {NoteBindingVerifierAdapter} from "../src/NoteBindingVerifierAdapter.sol"
 
 /// @title NotesE2E -- the full Note lifecycle, every verifier REAL.
 /// @notice One mutually-consistent fixture per flavor
-///         (test/vectors/e2e/{a1,a2,b1}.json, from
+///         (alberta_buck/test/vectors/e2e/{a1,a2,b1}.json, from
 ///         scripts/snark/gen_e2e_fixtures.sh): real batch-mint Groth16, real
 ///         spend Groth16 against the replayed note tree, real deposit sigma
 ///         pinned to (depositor, chainid=1), real G1-tie membership proof
@@ -72,7 +72,10 @@ abstract contract NotesE2EBase is Test {
 
     function setUp() public {
         vm.chainId(1);                       // every fixture transcript binds chainid=1
-        vj = vm.readFile(string.concat("test/vectors/e2e/", _flavor(), ".json"));
+        // The fixture worlds live in the Python package tree (they ship as
+        // alberta_buck package data so the wallet's E2E receipt tests run
+        // from an installed wheel); forge reads the same files here.
+        vj = vm.readFile(string.concat("alberta_buck/test/vectors/e2e/", _flavor(), ".json"));
 
         issuer    = _addr(".issuer");
         depositor = _addr(".depositor");

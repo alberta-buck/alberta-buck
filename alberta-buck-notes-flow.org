@@ -2123,7 +2123,7 @@ Merkle membership.
    cannot mis-name itself.
 
    #+LATEX: {\scriptsize
-   #+BEGIN_SRC python
+   #+BEGIN_SRC python :session notesflow :results output
    rcpt_iss = make_issuer_receipt(issuer["sk"], issuer["M"], eDepForIss,
                                   value=25, issuer=0xA11CE, chainid=CHAINID,
                                   tree=tree, rng=rng)
@@ -2158,6 +2158,261 @@ Merkle membership.
      revealing nothing about which identities are active).
    - /No/ plaintext Identities, /no/ link between the spend and any specific
      commitment in the tree, and /no/ link between mint and spend events.
+
+* The Prover Bill of Materials: Bandwidth, Storage, Time
+
+  Everything above /names/ the proofs; this section prices them.  The short
+  answer to "is wallet-side proving expensive?" is *no -- proving is seconds;
+  distribution is the cost*.  A Groth16 wallet never performs the trusted
+  setup (the multi-GB Powers-of-Tau and the hours of zkey ceremony are a
+  one-time, project-side event); it downloads two finished artifacts per
+  circuit -- the *proving key* (=.zkey=) and the *witness generator* (a wasm
+  module, or a faster platform C++ binary plus its =.dat= constants) -- and
+  should pin their hashes against the published release.  Verification costs
+  a wallet /nothing/ to distribute: the verifiers are contracts already on
+  chain.  And note the asymmetry that matters for UX: *receipts need no SNARK
+  at all* -- both parties' AB-RCPT/1 slips ([[https://perry.kundert.ca/range/finance/alberta-buck-receipt][Receipt]]) are sigma proofs and
+  decryptions, milliseconds of wallet math -- the SNARKs are paid only at
+  mint and spend, once per note.
+
+  Who proves what:
+
+  - *Issuer, at mint*: one batch-mint proof -- =mint_batch= (B1/A1) or
+    =mint_batch_a2= (A2) at the chosen batch pin \( N \in \{1,2,4,8,16,32\} \)
+    -- plus artifact-free wallet sigmas (the batch Schnorr for B1/A1; the
+    per-leaf =issuer_reenc= binding for A2; sub-millisecond each).
+  - *Depositor, at spend*: the flavor-agnostic =spend= proof, the bound
+    =identity_membership_g1tie= proof, and -- for the /addressed/ flavors
+    only -- the note\(\leftrightarrow\)=eEnc= tie (=note_binding= for A2,
+    =note_binding_a1= for A1); plus the artifact-free deposit sigma
+    (deposit-coupling / depositor-binding) and the =eEnc= re-encryption.
+  - *B1 is the light flavor twice over*: no tie circuit at spend, and no
+    addressed ciphertexts at mint.
+
+  The blocks below are *live*: they read the artifact sizes from the local
+  SNARK build (=build/snark/=, produced by =make snark= and friends) and then
+  /actually run/ every wallet prover once over the committed e2e fixture
+  worlds, timing each.  (The printed timing lines vary with hardware --
+  Apple-silicon laptop here; every other line is deterministic.)
+
+** What the wallet downloads and stores
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session notesflow :results output
+   from pathlib import Path
+   SNARK = Path("build/snark")
+
+   def mb(*paths):
+       return sum(Path(p).stat().st_size for p in paths) / 1e6
+
+   ARTIFACTS = [
+       # circuit                          consumer    zkey                                          witness generator (+ .dat)
+       ("mint_batch N=1   (B1/A1 mint)",  "issuer",
+        "mint_batch_n1/mint_batch_n1_final.zkey",
+        ["mint_batch_n1/mint_batch_n1_js/mint_batch_n1.wasm"]),
+       ("mint_batch N=32  (B1/A1 mint)",  "issuer",
+        "mint_batch_n32/mint_batch_n32_final.zkey",
+        ["mint_batch_n32/mint_batch_n32_js/mint_batch_n32.wasm"]),
+       ("mint_batch_a2 N=1  (A2 mint)",   "issuer",
+        "mint_batch_a2_n1/mint_batch_a2_n1_final.zkey",
+        ["mint_batch_a2_n1/mint_batch_a2_n1_js/mint_batch_a2_n1.wasm"]),
+       ("mint_batch_a2 N=32 (A2 mint)",   "issuer",
+        "mint_batch_a2_n32/mint_batch_a2_n32_final.zkey",
+        ["mint_batch_a2_n32/mint_batch_a2_n32_js/mint_batch_a2_n32.wasm"]),
+       ("spend            (all spends)",  "depositor",
+        "spend/spend_final.zkey",
+        ["spend/spend_js/spend.wasm"]),
+       ("g1tie membership (all spends)",  "depositor",
+        "g1tie/g1tie_0001.zkey",
+        ["g1tie/identity_membership_g1tie_js/identity_membership_g1tie.wasm"]),
+       ("note_binding     (A2 spend)",    "depositor",
+        "note_binding/note_binding_0001.zkey",
+        ["note_binding/note_binding_cpp/note_binding",
+         "note_binding/note_binding_cpp/note_binding.dat"]),
+       ("note_binding_a1  (A1 spend)",    "depositor",
+        "note_binding_a1/note_binding_a1_0001.zkey",
+        ["note_binding_a1/note_binding_a1_cpp/note_binding_a1",
+         "note_binding_a1/note_binding_a1_cpp/note_binding_a1.dat"]),
+   ]
+   print(f"{'circuit':34s} {'consumer':10s} {'zkey':>10s} {'witness gen':>12s}")
+   print("-" * 70)
+   sizes = {}
+   for name, who, zkey, gens in ARTIFACTS:
+       zs = mb(SNARK / zkey)
+       gs = mb(*(SNARK / g for g in gens))
+       sizes[name] = (zs, gs)
+       print(f"{name:34s} {who:10s} {zs:>8.1f}MB {gs:>10.1f}MB")
+   #+END_SRC
+
+   #+RESULTS:
+   #+begin_example
+   circuit                            consumer         zkey  witness gen
+   ----------------------------------------------------------------------
+   mint_batch N=1   (B1/A1 mint)      issuer         10.0MB        2.6MB
+   mint_batch N=32  (B1/A1 mint)      issuer        319.6MB        5.3MB
+   mint_batch_a2 N=1  (A2 mint)       issuer         10.5MB        3.8MB
+   mint_batch_a2 N=32 (A2 mint)       issuer        332.8MB        6.7MB
+   spend            (all spends)      depositor       5.5MB        2.9MB
+   g1tie membership (all spends)      depositor      18.8MB        2.3MB
+   note_binding     (A2 spend)        depositor    1432.7MB       31.6MB
+   note_binding_a1  (A1 spend)        depositor    1645.9MB       35.1MB
+   #+end_example
+
+   #+LATEX: }
+
+   The two tie zkeys dominate -- they are the proving keys for the ~2.4M
+   (A2) / ~2.86M (A1) constraint circuits, and Groth16 proving keys scale
+   with constraint count.  Everything else a wallet ever fetches is 2-19 MB;
+   the small circuits (=mint_batch= N=1 at ~22K constraints, =spend= at
+   ~12K, =g1tie= at ~39K) have correspondingly small keys.
+
+** Running every wallet prover, timed
+
+   One real proof per circuit, over the same fixture worlds the live-EVM
+   transcript spends ([[https://perry.kundert.ca/range/finance/alberta-buck-receipt][Receipt]], /The Whole Flow, Executed/): snarkjs (wasm
+   witness + prove) for the small circuits, the circom C++ witness generator
+   + rapidsnark for the big ties -- exactly the pipeline
+   =scripts/snark/gen_e2e_fixtures.sh= runs.
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session notesflow :results output
+   import json, shlex, subprocess, tempfile, time
+
+   E2E    = SNARK / "e2e"
+   FIX    = Path("alberta_buck/test/vectors/e2e")
+   RAPID  = next(Path("lib").glob("rapidsnark-*/bin/prover"))
+   tmp    = Path(tempfile.mkdtemp(prefix="docflow-prove-"))
+
+   def timed(cmd):
+       t0 = time.monotonic()
+       subprocess.run(cmd, check=True, capture_output=True)
+       return time.monotonic() - t0
+
+   times = {}
+
+   # Issuer: the batch-mint proofs (witness + Groth16 via snarkjs).
+   for flavor, script in (("b1", "prove_mint_batch.js"),
+                          ("a2", "prove_mint_batch_a2.js")):
+       args = json.loads((FIX / f"{flavor}.json").read_text())["mint_args"]
+       args = [a.replace(f"e2e_{flavor}", f"docflow_{flavor}") for a in args]
+       times[f"mint {flavor} (issuer)"] = timed(
+           ["node", f"scripts/snark/{script}", *args])
+
+   # Depositor: the flavor-agnostic spend proof (against the docflow mint).
+   payout = json.loads((FIX / "a2.json").read_text())["payout"]
+   times["spend (depositor, all)"] = timed(
+       ["node", "scripts/snark/prove_spend.js",
+        "build/snark/mint_batch_a2_n1/fixtures/docflow_a2.json",
+        "0", payout, "1", "docflow_a2"])
+
+   # Depositor: the bound G1-tie membership proof.
+   g1 = SNARK / "g1tie"
+   times["membership (depositor, all)"] = (
+       timed(["npx", "snarkjs", "wtns", "calculate",
+              str(g1 / "identity_membership_g1tie_js/identity_membership_g1tie.wasm"),
+              str(E2E / "a2/g1tie_input.json"), str(tmp / "g1tie.wtns")])
+     + timed(["npx", "snarkjs", "groth16", "prove", str(g1 / "g1tie_0001.zkey"),
+              str(tmp / "g1tie.wtns"),
+              str(tmp / "g1tie_proof.json"), str(tmp / "g1tie_public.json")]))
+
+   # Depositor, addressed flavors: the note<->eEnc tie (C++ witness gen +
+   # rapidsnark -- the wasm path works too, several times slower).
+   for flavor, nb in (("a2", "note_binding"), ("a1", "note_binding_a1")):
+       gen  = SNARK / nb / f"{nb}_cpp" / nb
+       zkey = next((SNARK / nb).glob("*_0001.zkey"))
+       wit  = timed(["bash", "-c",
+                     f"ulimit -s 65520 && {shlex.quote(str(gen))} "
+                     f"{shlex.quote(str(E2E / flavor / 'note_binding_input.json'))} "
+                     f"{tmp}/{nb}.wtns"])
+       prv  = timed([str(RAPID), str(zkey), f"{tmp}/{nb}.wtns",
+                     f"{tmp}/{nb}_proof.json", f"{tmp}/{nb}_public.json"])
+       times[f"note tie {flavor} (depositor)"] = wit + prv
+
+   for k, v in times.items():
+       print(f"{k:30s} {v:6.2f}s")
+   #+END_SRC
+
+   #+RESULTS:
+   : mint b1 (issuer)                 0.98s
+   : mint a2 (issuer)                 0.98s
+   : spend (depositor, all)           0.78s
+   : membership (depositor, all)      1.70s
+   : note tie a2 (depositor)         11.98s
+   : note tie a1 (depositor)         14.57s
+
+   #+LATEX: }
+
+** The bill, per flavor and role
+
+   Download = first-run fetch (zkey + witness generator); prove = wall time
+   for every SNARK that party runs for one note, from the measurements above.
+   The artifact-free sigma legs (Schnorr / issuer_reenc / deposit coupling /
+   depositor binding / eEnc re-encryption / receipt vd proofs) add
+   milliseconds and nothing to download.
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session notesflow :results output
+   BILL = [
+       ("issuer    b1/a1 (N=1)", ["mint_batch N=1   (B1/A1 mint)"],
+        ["mint b1 (issuer)"]),
+       ("issuer    a2    (N=1)", ["mint_batch_a2 N=1  (A2 mint)"],
+        ["mint a2 (issuer)"]),
+       ("depositor b1",          ["spend            (all spends)",
+                                  "g1tie membership (all spends)"],
+        ["spend (depositor, all)", "membership (depositor, all)"]),
+       ("depositor a1",          ["spend            (all spends)",
+                                  "g1tie membership (all spends)",
+                                  "note_binding_a1  (A1 spend)"],
+        ["spend (depositor, all)", "membership (depositor, all)",
+         "note tie a1 (depositor)"]),
+       ("depositor a2",          ["spend            (all spends)",
+                                  "g1tie membership (all spends)",
+                                  "note_binding     (A2 spend)"],
+        ["spend (depositor, all)", "membership (depositor, all)",
+         "note tie a2 (depositor)"]),
+   ]
+   print(f"{'party / flavor':24s} {'download+store':>15s} {'prove (per note)':>17s}")
+   print("-" * 58)
+   for who, arts, ts in BILL:
+       dl = sum(sum(sizes[a]) for a in arts)
+       pt = sum(times[t] for t in ts)
+       print(f"{who:24s} {dl:>13.1f}MB {pt:>16.2f}s")
+   #+END_SRC
+
+   #+RESULTS:
+   : party / flavor            download+store  prove (per note)
+   : ----------------------------------------------------------
+   : issuer    b1/a1 (N=1)             12.7MB             0.98s
+   : issuer    a2    (N=1)             14.3MB             0.98s
+   : depositor b1                      29.5MB             2.49s
+   : depositor a1                    1710.5MB            17.06s
+   : depositor a2                    1493.7MB            14.47s
+
+   #+LATEX: }
+
+** What this means for the wallet UX
+
+   - *Lazy, tiered artifact fetch.*  A receive-and-hold wallet needs /zero/
+     SNARK artifacts.  A B1-spending wallet needs ~25 MB (=spend= +
+     =g1tie=).  The 1.4-1.7 GB tie keys are needed only to /spend an
+     addressed note/, so fetch them in the background on first A1/A2
+     receipt (the user will plausibly spend later), with hash-pinned,
+     resumable downloads.  An issuer wallet sizes its mint key to its batch
+     habit: 10 MB at \( N{=}1 \), ~330 MB at \( N{=}32 \).
+   - *One progress bar that matters.*  Every proof except the tie is under
+     ~2 s -- below UX-noticeable for a payment flow.  The tie's ~10-15 s is
+     the one moment to design for: prove in the background between "note
+     received and verified" and "deposit", or show explicit progress at
+     spend.  Proving is local and private -- nothing leaves the device --
+     and never blocks the counterparty (the issuer's proof is done before
+     delivery; the depositor's at their leisure).
+   - *Per-payment chain bandwidth is negligible* next to the artifacts: the
+     depositor replays the commitment tree from =Minted= calldata (32 B per
+     leaf in the pool plus log overhead) and reads one identity-tree path;
+     both are KB-scale at today's pool sizes and cacheable incrementally.
+   - *Verification is free to distribute*: the Groth16 verifiers are on
+     chain, and the bilateral receipts re-verify with no SNARK artifacts at
+     all -- a third party checks a slip with the pure-Python wallet alone.
 
 * Demurrage-Carrying Transfers
 

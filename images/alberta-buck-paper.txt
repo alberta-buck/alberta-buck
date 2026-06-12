@@ -1270,8 +1270,8 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Flavour                  `mint'   `spendCoupled*' 
   ───────────────────────────────────────────────────
-   A1 (addressed, public)   487,875  1,047,486       
-   A2 (addressed, private)  607,639  1,041,100       
+   A1 (addressed, public)   487,875  1,035,486       
+   A2 (addressed, private)  607,639  1,029,100       
    B1 (bearer, public)      487,875  701,474         
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Isolated per-phase verification gas:
@@ -1286,7 +1286,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   The cost structure tells the paper's story in numbers.  Both
   /addressed/ flavours pay the tie – the price of "only \(
-  M_{\mathrm{rec}} \) can spend", about 340K over bearer – while issuer
+  M_{\mathrm{rec}} \) can spend", about 330K over bearer – while issuer
   /anonymity/ costs only the mint-side delta (~120K, the blinded
   re-encryption binding): A2's spend is within half a percent of A1's.
   Set-membership, the provably necessary ingredient, is one constant
@@ -1296,8 +1296,12 @@ Table of Contents
   relation needs no witnessed point limbs at all, since every point is a
   known multiple of \( G \)).  They prove in seconds under rapidsnark on
   commodity Apple-silicon hardware, witness generation via the circom
-  C++ calculator.  All verification is constant-gas on chain; no
-  participant ever waits on another's prover.
+  C++ calculator.  Distribution cost concentrates the same way: the tie
+  /proving keys/ are 1.4 GB (A2) and 1.6 GB (A1) one-time wallet
+  downloads, while every other prover artifact (mint, spend, membership
+  keys and witness generators) is 2–19 MB – and the trusted-setup
+  transcript never ships to wallets at all.  All verification is
+  constant-gas on chain; no participant ever waits on another's prover.
 
 
 10.4 Verification methodology and artifact

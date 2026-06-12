@@ -1,0 +1,138 @@
+"""Both-party AB-RCPT/1 receipts over the REAL-proof e2e worlds.
+
+Two layers:
+
+1. Fixture-only (fast): load the alberta_buck/test/vectors/e2e/{a1,a2,b1}.json
+   worlds -- shipped as package data, so this layer runs from a
+   venv-installed wheel -- whose every proof is the real Groth16 / sigma
+   artifact the NotesE2E forge suite verifies on chain -- and build + verify
+   the issuer-side and recipient-side receipts from exactly that material.
+   This pins the claim that the receipt layer composes with the artifacts the
+   real verifier chain consumed, with no extra exchange between the parties.
+
+2. Live-EVM (anvil): deploy the full real-verifier stack, bind the fixture
+   identities into the registry's incremental Poseidon accumulator (real
+   Merkle updates on the EVM), run the identity-bound approves (real
+   Chaum-Pedersen), the real mint and coupled spend, then build BOTH parties'
+   receipts from the real chain anchors and tier-2-check them against the
+   node.  Skipped when no repo checkout with forge artifacts (out/) is
+   reachable (run from inside the repo, or set ALBERTA_BUCK_REPO).
+"""
+
+from __future__ import annotations
+
+import random
+
+import pytest
+
+from alberta_buck.sim.notes_stack import E2EFixture
+from alberta_buck.wallet.envelope import (
+    serialize_core, deserialize_core, envelope_text, parse_envelope, receipt_id,
+)
+from alberta_buck.wallet.verify_receipt import verify_receipt
+
+FLAVORS = ["b1", "a1", "a2"]
+ROLES = ["recipient", "issuer"]
+
+CONTRACTS = {"registry": "0x" + "1d" * 20, "buck": "0x" + "b0" * 20,
+             "notes": "0x" + "70" * 20}
+# Synthetic anchors for the fixture-only layer (tier 1 does not read chain).
+ANCHORS = {
+    "mint":  {"txhash": "0x" + "aa" * 32, "block": 100},
+    "spend": {"txhash": "0x" + "bb" * 32, "block": 105, "logindex": 3,
+              "timestamp": 1779999000},
+}
+
+
+def _rng(seed=0xE2E):
+    r = random.Random(seed)
+    return lambda: r.getrandbits(256)
+
+
+@pytest.fixture(scope="module", params=FLAVORS)
+def fx(request):
+    return E2EFixture.load(request.param)
+
+
+# ---- fixture-only: receipts from the exact real-proof world -----------------
+
+@pytest.mark.parametrize("role", ROLES)
+def test_fixture_receipt_verifies(fx, role):
+    core = fx.build_receipt(role, CONTRACTS, rng=_rng(), **ANCHORS)
+    b = serialize_core(core)
+    core2 = deserialize_core(parse_envelope(envelope_text(b)))
+    assert serialize_core(core2) == b                 # bit-identical round-trip
+    res = verify_receipt(core2)
+    assert res.ok, f"{fx.flavor}/{role}: {res.reason}"
+    assert res.reason == "VALID"
+    assert res.value == fx.face
+
+
+def test_both_parties_share_note_payload(fx):
+    """The deterministic legs are identical from either side; only the
+    generator's self-naming differs."""
+    rec = fx.build_receipt("recipient", CONTRACTS, rng=_rng(1), **ANCHORS)
+    iss = fx.build_receipt("issuer", CONTRACTS, rng=_rng(2), **ANCHORS)
+    assert rec.note == iss.note
+    assert rec.proof == iss.proof
+    assert rec.issuer_binding == iss.issuer_binding
+    assert (rec.role, iss.role) == ("recipient", "issuer")
+
+
+def test_fixture_carries_prover_timings(fx):
+    t = fx.timings
+    assert t["mint_prove_s"] > 0 and t["spend_prove_s"] > 0 \
+        and t["membership_prove_s"] > 0
+    if fx.flavor in ("a1", "a2"):
+        assert t["note_binding_prove_s"] > 0
+
+
+# ---- live EVM: the anvil lifecycle, receipts anchored to real txs ----------
+
+def _have_forge_artifacts() -> bool:
+    try:
+        from alberta_buck.sim.chain import repo_root
+        return (repo_root() / "out" / "Notes.sol" / "Notes.json").exists()
+    except FileNotFoundError:
+        return False
+
+
+needs_artifacts = pytest.mark.skipif(
+    not _have_forge_artifacts(),
+    reason="no repo checkout with forge artifacts reachable "
+           "(make nix-build inside the repo, or set ALBERTA_BUCK_REPO)")
+
+
+@needs_artifacts
+def test_anvil_lifecycle_and_receipts():
+    from alberta_buck.sim.anvil import Anvil
+    from alberta_buck.sim.notes_stack import NotesStack
+
+    rng = _rng(0xC4A1)
+    with Anvil(chain_id=1, auto_impersonate=True) as anvil:
+        for flavor in FLAVORS:
+            fixture = E2EFixture.load(flavor)
+            stack = NotesStack(anvil, fixture, rng=rng)
+            steps = stack.run_lifecycle()
+            anchors = stack.anchors(steps["mint"], steps["spend"])
+
+            # The spend burned the nullifier and paid the face on chain.
+            assert stack.notes.functions.nullifiers(fixture.nullifier).call()
+            assert stack.buck.functions.balanceOf(
+                stack._addr(fixture.payout)).call() >= fixture.face
+
+            for role in ROLES:
+                core = fixture.build_receipt(role, stack.contracts,
+                                             rng=rng, **anchors)
+                res = verify_receipt(deserialize_core(serialize_core(core)))
+                assert res.ok and res.reason == "VALID", \
+                    f"{flavor}/{role}: {res.reason}"
+
+                # Tier-2 spot checks against the live node: the registry
+                # records and the event anchor are the receipt's.
+                pk = stack.reg.functions.pkOf(
+                    stack._addr(fixture.depositor.addr)).call()
+                assert pk[0] == int(core.payee.pk["x"], 16)
+                rcpt = anvil.w3.eth.get_transaction_receipt(core.txn.txhash)
+                assert rcpt["blockNumber"] == core.txn.block
+                assert core.txn.logindex in [l["logIndex"] for l in rcpt["logs"]]

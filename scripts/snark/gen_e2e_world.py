@@ -12,7 +12,7 @@ test/NotesE2E.t.sol can drive the full real-verifier lifecycle:
 
 Subcommands:
     world    --flavor {a1,a2,b1}   emit world.json + prover inputs
-    assemble --flavor {a1,a2,b1}   merge all proofs -> test/vectors/e2e/<flavor>.json
+    assemble --flavor {a1,a2,b1}   merge all proofs -> alberta_buck/test/vectors/e2e/<flavor>.json
 
 The driver is scripts/snark/gen_e2e_fixtures.sh.
 
@@ -35,6 +35,7 @@ sys.path.insert(0, REPO)
 from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, point_to_words, rand_scalar
 from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_encrypt
 from alberta_buck.wallet.poseidon import F_R
+from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
 from alberta_buck.wallet.issuer_reenc import H_POINT
 from alberta_buck.wallet.notes import (
     FLAVOR_A1, FLAVOR_B1, NoteOpening, note_commitment, id_hash_b1, nullifier_b,
@@ -48,16 +49,24 @@ from alberta_buck.wallet.b1_binding import b1_bind_prove, b1_bind_verify
 from alberta_buck.wallet.note_binding import (
     make_note_binding_witness, make_note_binding_a1_witness,
 )
+from alberta_buck.wallet.vectors import ALICE_FIELDS, BOB_FIELDS
 from alberta_buck.registry.tree import identity_leaf
 
 CHAINID  = 1
-FACE     = 100 * 10**18
+FACE     = 250_000000                                # 250.000000 BUCK (6 dp)
 ISSUER   = 0xA11CE00000000000000000000000000000A11CE
 DEPOSIT  = 0xDE9051700000000000000000000000000DE90517
-PAYOUT   = 0x0B0B000000000000000000000000000000000B0B
+PAYOUT   = DEPOSIT       # the depositor's own registered account receives the
+                         # payout in every flavor (B1 requires it -- the
+                         # depositor binding is verified against `recipient` --
+                         # and using it for A1/A2 keeps the receipt's payee
+                         # account, the sigma's account, and the event's
+                         # recipient one and the same)
 
 E2E_DIR  = os.path.join(REPO, "build", "snark", "e2e")
-VEC_DIR  = os.path.join(REPO, "test", "vectors", "e2e")
+# The assembled fixtures live in the Python package tree (shipped as
+# alberta_buck package data); test/NotesE2E.t.sol reads the same files.
+VEC_DIR  = os.path.join(REPO, "alberta_buck", "test", "vectors", "e2e")
 
 SEEDS = {"a1": 0xE2EA1, "a2": 0xE2EA2, "b1": 0xE2EB1}
 
@@ -107,13 +116,17 @@ def build_world(flavor: str):
     os.makedirs(out_dir, exist_ok=True)
 
     # ---- Identities and registered accounts --------------------------------
-    m_iss = rand_scalar(rng)
-    issuer_acct = account(m_iss, rng)
+    # REAL named identities (the canonical Alice/Bob KYC data the wallet's
+    # identity vectors use), so the receipts the fixture supports can name
+    # humans via the point->human bridge: m = keccak(canonical_identity_data).
+    # Bob (a Corporate Registration) is the natural Note issuer; Alice is the
+    # addressed recipient (A1/A2) / bearer depositor (B1).
+    iss_canonical = canonical_identity_data(BOB_FIELDS)
+    ctr_canonical = canonical_identity_data(ALICE_FIELDS)
+    m_iss = identity_scalar(iss_canonical)
+    m_ctr = identity_scalar(ctr_canonical)
 
-    if flavor in ("a1", "a2"):
-        m_ctr = rand_scalar(rng)                 # counterparty = recipient
-    else:
-        m_ctr = rand_scalar(rng)                 # counterparty = bearer depositor
+    issuer_acct = account(m_iss, rng)
     dep_acct = account(m_ctr, rng)               # the depositing account
     M_ctr = mul(G1, m_ctr)
 
@@ -149,6 +162,7 @@ def build_world(flavor: str):
         M_named = note.M_I                       # the membership target (issuer)
         r_committed = note.r_prime
         eNote = note.eNote
+        note_payload = {"eNote": ct(eNote), "eIss": ct(eCommitted)}
     elif flavor == "a1":
         # The in-payload (sigma_R, sigma_s) is the issuer's identity-binding
         # signature over the delivery payload (synthetic domain here, as in
@@ -163,6 +177,8 @@ def build_world(flavor: str):
         M_named = M_ctr                          # membership target (recipient)
         r_committed = note.r_prime
         eNote = note.eNote
+        note_payload = {"eNote": ct(eNote), "eRec": ct(note.eRec),
+                        "sigma_R": pt(sigma_R), "sigma_s": str(sigma_s)}
     else:  # b1
         k = rand_scalar(rng)
         sigma_R = mul(G1, k)
@@ -174,6 +190,7 @@ def build_world(flavor: str):
         M_named = M_ctr                          # membership target (depositor)
         r_committed = None
         eNote = None
+        note_payload = {"sigma_R": pt(sigma_R), "sigma_s": str(sigma_s)}
 
     cm = note_commitment(opening)
     nf = nullifier_b(opening.rho, opening.id_hash)
@@ -290,11 +307,7 @@ def build_world(flavor: str):
         ]
 
     # ---- world manifest ---------------------------------------------------------
-    # B1: the payout account IS the depositor -- Notes.spendCoupledB1 verifies
-    # the depositor binding against `recipient` (the bearer's registered payout
-    # account), so the spend proof must name it.  A1/A2: any payout address the
-    # depositor chooses (bound in the spend proof's public inputs).
-    payout = DEPOSIT if flavor == "b1" else PAYOUT
+    payout = PAYOUT
     world = {
         "flavor": flavor,
         "chainid": CHAINID,
@@ -311,6 +324,32 @@ def build_world(flavor: str):
         },
         "sigma": sigma_json,
         "mint_args": mint_args,
+        # The two wallets, in full -- canonical KYC preimages, identity
+        # scalars, and account keys.  TEST identities (the same published
+        # Alice/Bob the canonical identity.json vectors commit), retained so
+        # the AB-RCPT/1 receipt layer can be exercised over this exact
+        # real-proof world (test_receipt_e2e.py and the executable receipt
+        # document) -- the receipts' point->human bridge needs the preimages,
+        # and the role-dependent self-naming proofs need the account secrets.
+        "parties": {
+            "issuer": {
+                "addr": f"0x{ISSUER:040x}",
+                "identity": iss_canonical, "m": str(m_iss),
+                "M": pt(issuer_acct["M"]), "pk": pt(issuer_acct["pk"]),
+                "sk": str(issuer_acct["sk"]), "E": ct(issuer_acct["E"]),
+            },
+            "depositor": {
+                "addr": f"0x{DEPOSIT:040x}",
+                "identity": ctr_canonical, "m": str(m_ctr),
+                "M": pt(dep_acct["M"]), "pk": pt(dep_acct["pk"]),
+                "sk": str(dep_acct["sk"]), "E": ct(dep_acct["E"]),
+            },
+        },
+        # The Identity-M note payload (the idHash preimage material) that
+        # travels off chain with the note -- exactly what an AB-RCPT/1
+        # receipt's `note` record conveys.  (B1's eDepForIss is spend-side
+        # material and lives in sigma.eDepForIss.)
+        "notePayload": note_payload,
     }
     if flavor == "a2":
         world["a2Binding"] = {
@@ -329,11 +368,6 @@ def build_world(flavor: str):
     with open(os.path.join(out_dir, "world.json"), "w") as f:
         json.dump(world, f, indent=2)
 
-    # Secrets needed by `assemble` (Schnorr over keccak(cms) -- cms exist only
-    # after the mint prover runs).  Build-dir only; never committed.
-    with open(os.path.join(out_dir, "world-secrets.json"), "w") as f:
-        json.dump({"sk_iss_acct": str(issuer_acct["sk"])}, f)
-
     print(f"[world:{flavor}] cm={hex(cm)[:18]}... nf={hex(nf)[:18]}... "
           f"identityRoot={hex(tree.root())[:18]}...")
     print(f"[world:{flavor}] mint args: {' '.join(mint_args)}")
@@ -343,18 +377,18 @@ def assemble(flavor: str):
     out_dir = os.path.join(E2E_DIR, flavor)
     os.makedirs(VEC_DIR, exist_ok=True)
     world = json.load(open(os.path.join(out_dir, "world.json")))
-    secrets = json.load(open(os.path.join(out_dir, "world-secrets.json")))
 
     # Mint fixture (from prove_mint_batch[_a2].js).
     nd = "mint_batch_a2_n1" if flavor == "a2" else "mint_batch_n1"
     mint = json.load(open(os.path.join(
         REPO, "build", "snark", nd, "fixtures", f"e2e_{flavor}.json")))
 
-    # The batch Schnorr (public-issuer mints only).
+    # The batch Schnorr (public-issuer mints only; the issuer's account key is
+    # carried in the world's `parties` record).
     if flavor != "a2":
         cms = [int(c) for c in mint["public"]["cm"]]
         h_batch = batch_commitment(cms)
-        sig = issuer_schnorr_sign(int(secrets["sk_iss_acct"]), h_batch,
+        sig = issuer_schnorr_sign(int(world["parties"]["issuer"]["sk"]), h_batch,
                                   int(world["issuer"], 16), CHAINID)
         world["issuerSchnorr"] = {
             "e": str(sig.e), "s": str(sig.s), "R": pt(sig.R),
@@ -398,6 +432,11 @@ def assemble(flavor: str):
         "public": mint["public"],
     }
     world["spend"] = spend["spend"]
+
+    # Prover wall times (gen_e2e_fixtures.sh records them around each prover).
+    timings_path = os.path.join(out_dir, "timings.json")
+    if os.path.exists(timings_path):
+        world["timings"] = json.load(open(timings_path))
 
     out = os.path.join(VEC_DIR, f"{flavor}.json")
     with open(out, "w") as f:

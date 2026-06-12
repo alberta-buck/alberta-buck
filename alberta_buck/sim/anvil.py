@@ -26,10 +26,21 @@ def _free_port() -> int:
 class Anvil:
     """A handle to a spawned anvil process + a connected Web3."""
 
-    def __init__(self, port: Optional[int] = None, gas_limit: int = 0):
+    def __init__(self, port: Optional[int] = None, gas_limit: int = 0,
+                 chain_id: Optional[int] = None, auto_impersonate: bool = False,
+                 timestamp: Optional[int] = None):
         self.port = port or _free_port()
         # gas_limit 0 -> anvil default (30M); we deploy big contracts so bump.
         self._gas = gas_limit or 60_000_000
+        # chain_id None -> anvil default (31337).  The Notes e2e fixtures bind
+        # every Fiat-Shamir transcript and SNARK public input to chainid=1, so
+        # the notes_stack flow runs with chain_id=1.  auto_impersonate lets
+        # txs originate from the fixture's pre-baked world addresses.
+        # `timestamp` pins the genesis block time, making a transcript's
+        # block timestamps (hence receipt bytes) reproducible run to run.
+        self.chain_id = chain_id
+        self.auto_impersonate = auto_impersonate
+        self.timestamp = timestamp
         self.proc: Optional[subprocess.Popen] = None
         self.w3: Optional[Web3] = None
 
@@ -46,15 +57,22 @@ class Anvil:
         # No --block-time => anvil mines a block per tx (instant); we also
         # mine explicitly on warp.  Disable code-size + block-gas limits
         # (the Universal Router is a very large contract; deploys are big).
+        args = [
+            "anvil",
+            "--port", str(self.port),
+            "--base-fee", "0",
+            "--gas-price", "0",
+            "--disable-code-size-limit",
+            "--disable-block-gas-limit",
+        ]
+        if self.chain_id is not None:
+            args += ["--chain-id", str(self.chain_id)]
+        if self.auto_impersonate:
+            args += ["--auto-impersonate"]
+        if self.timestamp is not None:
+            args += ["--timestamp", str(self.timestamp)]
         self.proc = subprocess.Popen(
-            [
-                "anvil",
-                "--port", str(self.port),
-                "--base-fee", "0",
-                "--gas-price", "0",
-                "--disable-code-size-limit",
-                "--disable-block-gas-limit",
-            ],
+            args,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

@@ -2670,8 +2670,9 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
    The full Note lifecycle is exercised by =test/NotesE2E.t.sol=, which
    drives one mutually-consistent fixture per flavour
-   (=test/vectors/e2e/{a1,a2,b1}.json=, built by
-   =scripts/snark/gen_e2e_fixtures.sh=) through /every gate as a real
+   (=alberta_buck/test/vectors/e2e/{a1,a2,b1}.json=, built by
+   =scripts/snark/gen_e2e_fixtures.sh= and shipped as Python package
+   data) through /every gate as a real
    proof/: the batch-mint Groth16, the flavour-agnostic spend Groth16
    against the replayed note tree, the EIP-196 deposit sigma pinned to
    (depositor, chainid=1), the G1-tie membership proof against the
