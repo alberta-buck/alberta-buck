@@ -50,7 +50,7 @@ derive the identity scalars and re-check it deterministically.  The remaining
 proofs are the primitives already shipped (the approve handshake +
 =verifiable_decrypt= for EOA, the batch Schnorr for public issuers, and for
 the private-issuer A2 case the recipient-blinded =verifyIssuerReenc= binding
-the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-buck-notes-decryptability][Decryptability]], [[https://perry.kundert.ca/range/finance/alberta-buck-identity-example][Identity]])
+the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-buck-notes-flow/][Decryptability]], [[https://perry.kundert.ca/range/finance/alberta-buck-identity-example/][Identity]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -208,7 +208,7 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   registered =E_addr= revealing one's =M= -- and, for the issuer-side B1
   receipt, the issuer's verifiable decryption of the event's =eDepForIss=
   naming the depositor.  The Note legs themselves need *no* party proof: the
-  disclosed identity preimages let any verifier derive =m_iss=/=m_rec=,
+  disclosed identity preimages let any verifier derive =m_iss= / =m_rec=,
   recompute the =idHash=, and decrypt the addressed ciphertexts directly --
   which is exactly why both parties can generate the same receipt core.
 
@@ -243,7 +243,7 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
    the payee (=E_for_spender=) and proved it (=cp_proof= = =verifyApprove=); the
    payee verifiably decrypts it to =payer.M= (=vd_proof=).  Payload = both
    Parties (private) + =ApproveReceipt= proofs + payee self =vd_proof= +
-   =Transfer= anchor + registry =pk=/=E_addr= for both (tier 2).
+   =Transfer= anchor + registry =pk= / =E_addr= for both (tier 2).
 
 ** note-b1 / note-a1 -- Note from a public issuer
 
@@ -255,7 +255,7 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
    whose Fiat-Shamir transcript folds in the issuer /account/ + chainid -- so
    the printed =acct= is provably the mint's =msg.sender=, the account whose
    BUCK funded the note), and the nullifier was burned in the
-   =SpentCoupledB1=/=SpentCoupledA1= event paying the payee.
+   =SpentCoupledB1= / =SpentCoupledA1= event paying the payee.
 
    The payee leg differs by flavor.  *A1* is addressed: =eNote= encrypts the
    face under the recipient identity point and =eRec= the recipient identity
@@ -393,7 +393,7 @@ VERIFICATION
   3. *Tier 2 (=--rpc=).*  For each named address read =_pk=, =_E_addr=,
      =isPublicIdentity= and assert equality with the payload; read the log at
      =(txhash, logIndex)= and assert the =event= (=Transfer= /
-     =SpentCoupled*=), =value=/=face=, =recipient=/=from=/=to=, and (for
+     =SpentCoupled*=), =value= / =face=, =recipient= / =from= / =to=, and (for
      Notes) =nullifier= match, the =Minted= event at =mint_txhash= carries
      =cms[]= from the printed issuer =acct= (= the =transferFrom= source that
      funded the note), and (B1) the spend's =eDepForIss= equals the payload's;
@@ -411,7 +411,7 @@ VERIFICATION
      =issuer= address and decrypting each =eDepForIss=).
   2. *Gather* per the scenario table: a registry read (public payer), stored
      approve material (private EOA), or the stored note artifact -- the
-     =opening=, the Identity-M payload (=eNote=/=eRec=/=eIss=, =sigma=), and
+     =opening=, the Identity-M payload (=eNote= / =eRec= / =eIss=, =sigma=), and
      the mint reference; plus each party's =canonical_identity_data= from
      wallet storage.
   3. *Self-name*: =verifiable_decrypt= the owner's own =E_addr= (and, B1
@@ -459,7 +459,7 @@ VERIFICATION
 ** Boot: a chain whose id the proofs demand
 
    Every Fiat-Shamir transcript and SNARK public input in the fixtures binds
-   =chainid=1=, so the session runs anvil with chain-id 1; the pinned genesis
+   ~chainid=1~, so the session runs anvil with chain-id 1; the pinned genesis
    timestamp (plus a fixed 12s block cadence below) makes the whole
    transcript -- including the receipt bytes -- reproducible run to run.
 
@@ -895,7 +895,7 @@ VERIFICATION
   3. *Phase C (shipped, Identity-M).*  The note kinds re-built on the
      identity-targeted payloads: =idHash= preimages (=id_hash_b1/a1/a2=) are
      conveyed in the envelope and re-checked against the disclosed identity
-     preimages; the addressed ciphertexts (=eNote=/=eRec=/=eIss=) decrypt
+     preimages; the addressed ciphertexts (=eNote= / =eRec= / =eIss=) decrypt
      under the derivable \( m_{rec} \), closing the recipient-key coupling at
      the receipt while the on-chain Identity-M spend gate (deposit-coupling +
      bound membership + note\(\leftrightarrow\)=eEnc= tie) closes it at spend

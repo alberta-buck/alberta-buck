@@ -30,13 +30,41 @@
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
 #+BEGIN_ABSTRACT
+One =Notes.mint= transaction takes 1,200 BUCK from Alice and splits it,
+atomically, into six notes of denominations =[1000, 100, 25, 25, 25, 25]= --
+and the public chain learns nothing about who received what.  This document
+walks that example end to end, executably: the SNARK-verified batch mint that
+folds the note commitments into the on-chain Merkle tree, the off-chain
+delivery and offline verification of each recipient's opening, and the three
+/Identity-M/ redemption flows -- =spendCoupledA2= (addressed, private issuer),
+=spendCoupledA1= (addressed, public issuer), and =spendCoupledB1= (bearer,
+public issuer) -- by which a note is deposited by proving, in zero knowledge,
+both /which Identity may spend it/ and /that the Identity is a registered
+member/ of the on-chain accumulator.
+
+The walkthrough demonstrates five concrete guarantees -- atomic value
+conservation, recipient-blinded commitments, per-note disclosure to recipients
+only, offline receipt reconstruction from the transaction ID alone, and
+soundness against an arbitrarily hostile issuer-side EVM and prover -- and
+audits the privacy surface step by step: each party can /name/ its counterparty
+under compulsion, while no third party can name either, or link mint to spend.
+Every cryptographic step is exercised by the shipped =alberta_buck.wallet= code
+in one seeded, deterministic session, with the output captured in place. ([[https://perry.kundert.ca/images/alberta-buck-notes-flow.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-notes-flow.txt][Text]])
+#+END_ABSTRACT
+
+#+LATEX: \clearpage
+#+TOC: headlines 3
+
+#+LATEX: \clearpage
+* Introduction
+
 This document is the /narrative and executable/ companion to
 [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][alberta-buck-notes.org]] (architectural overview; together they are the two
 living Notes references) and [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][alberta-buck-ethereum.org]] (Solidity surface).
 It walks one concrete example
 -- Alice mints a 1,200-BUCK transfer into six notes of denominations
-=[1000, 100, 25, 25, 25, 25]= -- end-to-end through the *Phase-7-bis SNARK-verified
-batch-mint pipeline*, and then walks the /inverse/ flows: A2 deposit (Bob redeems
+=[1000, 100, 25, 25, 25, 25]= -- end-to-end through the SNARK-verified
+batch-mint pipeline, and then walks the /inverse/ flows: A2 deposit (Bob redeems
 his identity-targeted note via the deposit-coupling sigma + membership proof) and
 B1 deposit (Carol redeems a bearer note while the issuer learns who cashed it).
 Every actor, every artifact, and every check is named.
@@ -45,19 +73,15 @@ The mint pipeline uses SNARK-verified batch minting: the circuit takes =oldRoot=
 as a public input, folds N commitments into the rolling tree using witness sibling
 paths, and emits a SNARK-attested =newRoot= for the contract to record.  On-chain
 mint cost is essentially constant in N -- ~380K plus ~500 gas per leaf of calldata.
-The full design memo, including R1CS counts, gas projections, and a per-attack-vector
-hostile-Alice analysis, is [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]].
 
-The /identity-M/ spend model supersedes the prior Phase-7/8 account-pinned
-circuits.  Under the identity-M model the authority axis is the KYC-bound
-Identity point M, not the EOA.  Every spend is one gadget -- an EIP-196 Okamoto
+The /identity-M/ spend model makes the KYC-bound Identity point M, not the EOA,
+the authority axis.  Every spend is one gadget -- an EIP-196 Okamoto
 sigma producing a committed point \( P \), plus a Poseidon-Merkle membership
 proof /bound to that same \( P \)/ (=identity_membership_g1tie.circom=, ~350K
 gas on chain) -- instantiated three ways: =Notes.spendCoupledA2= (addressed,
 private issuer, =verifyDepositCoupling=), =spendCoupledA1= (addressed, public
 issuer; the recipient's own Identity is committed), and =spendCoupledB1=
-(bearer, public issuer, =verifyDepositorBinding=).  This /retires/ the earlier
-account-pinned =spendACP= / CP-DLEQ path and the unbound generic =Notes.spend=.
+(bearer, public issuer, =verifyDepositorBinding=).
 The membership closes the collusion gap: a note whose committed Identity
 decrypts to a non-member reverts at spend.  All three are wired and tested end
 to end (=alberta_buck.wallet.unilateral_a2=, =.unilateral_a1=, =.b1_binding=;
@@ -99,21 +123,10 @@ guarantees:
    =Notes.sol= and =MintGroth16Verifier.sol= reject every batch that does not satisfy
    the mint relation.  The on-chain truth is what governs.
 
-The remaining caveat (the pinned-N dispatch set under =mint_batch.circom=) is
-addressed at the end and cross-referenced into the proofs and implementation
-docs.  The mint-circuit field-overflow concern from earlier drafts has been
-closed by the =Num2Bits(128)= range bounds in =mint_batch.circom= and the
-matching bounds in =spend.circom=.  The identity-binding gap that earlier drafts
-flagged as deferred is now closed: each spend's deposit-coupling /
-depositor-binding sigma proves the spender is the Identity the note names, and the
-membership proof -- bound to the sigma's own committed point \( P \) -- proves that
-Identity is a registered member of the on-chain accumulator.
-#+END_ABSTRACT
+The one structural caveat (the pinned-N dispatch set under =mint_batch.circom=)
+is addressed at the end and cross-referenced into the proofs and implementation
+docs.
 
-#+LATEX: \clearpage
-#+TOC: headlines 3
-
-#+LATEX: \clearpage
 * Cast of Characters
 
 The example uses concrete names so the message flow is easy to track:
@@ -204,6 +217,9 @@ whole flow work:
 The on-chain contract stores only =cm_i=.  Openings live exclusively off-chain.
 
 * The Mint, Step by Step
+  :PROPERTIES:
+  :CUSTOM_ID: the-mint
+  :END:
 
 ** Step 0: Pre-flight (Off-Chain, In Alice's Wallet)
 
@@ -249,15 +265,15 @@ Tornado-style Merkle tree the contract maintains is parameterised by the standar
 at each level.  The wallet snapshots this state from the chain (or replays it from
 the mint event log) immediately before assembling the proof, then derives, for each
 of the 16 leaves /in submission order/, the depth-20 sibling sequence the in-circuit
-insertion will consume.  That derivation is the only delicate piece of new wallet
-code; everything else is unchanged from Phase-7.
+insertion will consume.  That derivation is the one delicate piece of wallet-side
+mint code; everything else is straightforward Poseidon arithmetic.
 
 ** Step 2: Generate the Batch-Mint Groth16 Proof
 
-Alice's wallet runs =scripts/snark/prove_mint_batch.js= (the Phase-7-bis successor
-to Phase-7's =prove_mint.js=).  The =mint_batch.circom= circuit at her chosen pin
-~N* = 16~ takes a substantially richer witness than the Phase-7 mint did, because
-the Merkle-tree update has moved /into/ the SNARK.
+Alice's wallet runs =scripts/snark/prove_mint_batch.js=.  The =mint_batch.circom=
+circuit at her chosen pin ~N* = 16~ takes a witness that covers not just the
+openings but the tree update itself, because the Merkle insertion lives /inside/
+the SNARK.
 
 *Public signals* (circom emits the circuit OUTPUTS first, then the public
 inputs; arity =2N+4=):
@@ -274,7 +290,7 @@ cm[i]           # i in 0..N-1: the commitments, exposed DIRECTLY (not a batch ha
 #+END_SRC
 #+LATEX: }
 
-The commitments are exposed as public inputs directly (no =cmBatchHash=): each
+The commitments are exposed as public inputs directly (no batch digest): each
 input costs ~6K gas in the EVM verifier, cheaper than recomputing a keccak over
 calldata on-chain, and far cheaper than an in-circuit Poseidon over =N=
 elements.  (A2 / private-issuer batches use a /separate/ circuit, =mint_batch_a2=,
@@ -305,8 +321,8 @@ The =pathSiblings= for leaf =i= are derived by the wallet from its local
 2. *Range bounds.*  Each =v[i]= and =totalFace= passes through =Num2Bits(128)=.
 3. *Sum conservation.*  ~sum(v[0..N-1]) === totalFace~.
 4. *Rolling Merkle insertion.*  The circuit threads =oldRoot= and =nextLeafIndex=
-   through N successive single-leaf insertions, mirroring the on-chain Phase-7
-   =Notes._insert= logic but in-circuit: at each step it folds =cm[i]= up the
+   through N successive single-leaf insertions -- the standard Tornado-style
+   incremental-tree fold, performed in-circuit: at each step it folds =cm[i]= up the
    tree using =pathSiblings[i][*]= and =Switcher(...)= per level, advances the
    rolling state, and finally asserts the resulting root equals =newRoot=.
    N x TREE_DEPTH Poseidon-2 hashes (~4.3K constraints per leaf).
@@ -414,7 +430,7 @@ a. *Stale-state guards.*  The contract asserts that =oldRoot= equals the current
    if another mint landed since Alice's wallet snapshotted state (more on this
    under *Prover Contention and the Rollup Race* below).
 b. *Calldata binding.*  The =cms[]= are exposed *directly* as Groth16 public
-   inputs (no =cmBatchHash= digest), alongside the per-leaf =issuerMode[]= the
+   inputs (no batch digest), alongside the per-leaf =issuerMode[]= the
    circuit emits, so any tampering with =cms[]= or =issuerMode[]= en route from the
    prover to the chain mismatches the SNARK and the verify call rejects.
 c. *SNARK verify.*  The =MintVerifierAdapter= dispatches by =cms.length= to the
@@ -445,18 +461,15 @@ BUCK, missing approval -- the entire transaction reverts and the chain state is
 indistinguishable from no submission at all.  *Alice gets one shot per
 transaction*; she cannot retry a partial state.
 
-*Note on duplicate commitments.*  Phase-7 carried an explicit
-=commitmentExists[cm]= mapping that reverted on duplicate insertion.  The
-batch-mint contract drops it -- not because duplicates are harmless, but because
-they are now /economically self-punishing/: if Alice submits the same opening
+*Note on duplicate commitments.*  The contract carries no
+=commitmentExists[cm]= duplicate check -- not because duplicates are harmless,
+but because they are /economically self-punishing/: if Alice submits the same opening
 twice (whether across two batches or twice in one), she pays =totalFace= on each
 occurrence, the leaves land at distinct tree indices, but the spend nullifier
 =Poseidon3(rho, idHash, 4242)= is /deterministic in the opening/.  After the
 first spend nullifies =cm=, the second copy is unspendable forever.  Net result:
 Alice burns BUCK she could have kept.  The chain's job is value conservation, not
-saving Alice from a buggy =rho= RNG.  See *Why Outside Observers Cannot Link*
-below and the per-attack-vector audit in
-[[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]].
+saving Alice from a buggy =rho= RNG.
 
 ** Step 4: Off-Chain Note Delivery
 
@@ -512,10 +525,9 @@ any help from an indexer, he runs:
    which means ~sum(v[0..N-1]) === totalFace~ holds in the witness.  Bob does not
    need to re-verify the proof; the EVM already did.  But if he wants
    belt-and-suspenders, he can re-run
-   =MintGroth16Verifier.verify(proofBytes, [oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash])=
-   locally against the same on-chain bytecode -- and =cmBatchHash= he recomputes
-   from the calldata =cms[]= using the same =keccak256(abi.encodePacked(cms))= the
-   contract uses.
+   =MintGroth16Verifier.verify(proofBytes, [issuerMode[0..N), oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N)])=
+   locally against the same on-chain bytecode, assembling the public-signal
+   vector from the calldata exactly as the contract does.
 
 After (1)-(5) Bob knows:
 
@@ -542,28 +554,17 @@ witness generator, patch the circom compiler, run Anvil with a malicious
 the public chain is determined by what /the honest validators/ run.  Three pillars
 prop up the soundness story:
 
-#+begin_quote
-*Note (shipped detail).*  The pillars below were written when the mint proof
-sealed a single =cmBatchHash = H(cm_0..cm_{N-1})=.  The shipped circuit exposes
-the =cm[i]= *directly* as public inputs (and adds a per-leaf =issuerMode[i]=
-output) -- so wherever a pillar says =cmBatchHash=, read "the =cm[]= (and
-=issuerMode[]=) the proof seals."  The argument is unchanged: the public inputs,
-whatever their exact list, are bound into the proof and re-checked by the
-on-chain verifier.  The public-signal vector is =[issuerMode[0..N), oldRoot,
-newRoot, nextLeafIndex, totalFace, cm[0..N)]=.
-#+end_quote
-
 ** Pillar 1: The On-Chain Verifier Is Fixed Code
 
 =MintGroth16Verifier.sol= (one per pinned N) was emitted from the Groth16
-verification key produced by the trusted setup ([[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][Phase 9]] for production; dev-only
-entropy in =scripts/snark/setup.sh= today).  Its bytecode is deployed once and
-immutable.  Validators run whatever bytecode sits at that address; Alice cannot
-tamper with it without consensus-breaking the chain.
+verification key produced by the trusted setup (production ceremony pending;
+dev-only entropy in =scripts/snark/setup.sh= today).  Its bytecode is deployed
+once and immutable.  Validators run whatever bytecode sits at that address;
+Alice cannot tamper with it without consensus-breaking the chain.
 
 Knowledge soundness of Groth16 means: for every =proofBytes= the verifier accepts
-on public inputs =[oldRoot, newRoot, nextLeafIndex, totalFace, cmBatchHash]=,
-there exists a witness
+on public inputs =[issuerMode[0..N), oldRoot, newRoot, nextLeafIndex, totalFace,
+cm[0..N)]=, there exists a witness
 =(flavor[i], v[i], rho[i], idHash[i], predicate[i], pathSiblings[i][*])_i= such
 that:
 
@@ -572,7 +573,8 @@ that:
 - folding =cm[0..N-1]= into the tree rooted at =oldRoot=, starting at position
   =nextLeafIndex=, using =pathSiblings[i][*]= as the right-of-insert context,
   yields exactly =newRoot=
-- ~cmBatchHash = H(cm[0], ..., cm[N-1])~.
+- each =issuerMode[i]= is the deterministic flavor projection (A2 \to PRIVATE,
+  else PUBLIC) of the witness =flavor[i]=.
 
 Alice is free to /find/ such a witness any way she likes -- she's the prover.
 But she cannot find a witness for a /false/ statement; that's what soundness
@@ -593,7 +595,8 @@ This means Alice cannot, for instance:
   =newRoot= is SNARK-attested as the deterministic fold of =all= of =cms[]= onto
   =oldRoot= at =nextLeafIndex=, and the contract writes it in one store.
 - Replay a prior =proofBytes= -- the SNARK is bound to =(oldRoot, newRoot,
-  nextLeafIndex, totalFace, cmBatchHash)= and the contract's stale-state guards
+  nextLeafIndex, totalFace)= and the =cm[]= / =issuerMode[]= vectors, and the
+  contract's stale-state guards
   reject any submission whose =oldRoot= no longer matches the live root or whose
   =nextLeafIndex= no longer matches the live tree size.
 - Submit the same opening twice /in one batch/ to double-spend at spend time --
@@ -603,17 +606,17 @@ This means Alice cannot, for instance:
 
 ** Pillar 3: Public Inputs Are Sealed Into the Proof
 
-The Groth16 verifier consumes the public-signal vector =[oldRoot, newRoot,
-nextLeafIndex, totalFace, cmBatchHash]=.  The proof was generated against the
-specific values Alice committed to before submission.  If Alice tries to submit
-the proof with a different =totalFace=, a different =newRoot=, a different
-=nextLeafIndex=, or a permuted =cms[]= whose keccak no longer matches
-=cmBatchHash=, the verifier rejects.
+The Groth16 verifier consumes the public-signal vector =[issuerMode[0..N),
+oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N)]=.  The proof was generated
+against the specific values Alice committed to before submission.  If Alice
+tries to submit the proof with a different =totalFace=, a different =newRoot=, a
+different =nextLeafIndex=, or a permuted or tampered =cms[]=, the verifier
+rejects.
 
-Note that =cms[]= itself is *not* a public input to the SNARK -- the proof binds
-only to its hash =cmBatchHash=.  The contract is the component that recomputes
-that hash from calldata on every call, so any mismatch between the proved hash
-and the recomputed hash reverts at verify time.
+The =cm[i]= are public inputs to the SNARK directly: the contract passes the
+calldata =cms[]= straight into the verifier's public-signal vector, so any
+mismatch between the commitments the proof sealed and the commitments the
+transaction carries reverts at verify time.
 
 The refreshed =test/MintVerifier.t.sol= should cover at least these tamper paths,
 each expected to revert with =Notes: bad mint proof= or =Notes: stale oldRoot= or
@@ -674,13 +677,6 @@ does not need a =commitmentExists= check because the nullifier mechanism already
 collapses duplicate openings to one spend, and Alice bears the cost of any
 duplication.
 
-Full per-attack-vector analysis (twelve attack vectors A1-A12) is in the pivot
-design memo [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]].  Every hostile-Alice guarantee
-from the Phase-7 per-leaf insertion design survives under the batch-mint pivot;
-the only behavioural change is that duplicate-commitment rejection moves from an
-explicit on-chain check to economic self-enforcement via the deterministic
-nullifier.
-
 * Why Outside Observers Cannot Link
 
 Mallory has full read access to the chain after =T_mint= confirms.  What does she see?
@@ -736,7 +732,7 @@ unlinkability of recipients and amounts, not of issuers.
 
 ** Spend-Time Unlinkability
 
-The shipped spend circuit ([[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][Phase 7]]) lets Bob deposit his note without revealing
+The shipped spend circuit (=spend.circom=; see [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][alberta-buck-ethereum.org]]) lets Bob deposit his note without revealing
 /which/ =cm= in the on-chain set he opened.  The spend SNARK proves "I know an
 opening to /some/ commitment in the Merkle tree under the public =noteRoot= that
 hashes to this nullifier", with =cm= as a private witness rather than a public
@@ -775,16 +771,15 @@ a. *Stale-state guards.*  The contract checks ~oldRoot == roots[currentRootIndex
 b. *SNARK binding.*  Even if a future minter coincidentally re-created the same
    =oldRoot= and =nextLeafIndex= state (which is prohibited by the monotonic
    advancement of =nextLeafIndex=), the SNARK was bound to the specific
-   =(cmBatchHash, newRoot)= pair of the prior batch.  A replay would fold the
+   =(cms[], newRoot)= pair of the prior batch.  A replay would fold the
    same =cms[]= a second time and produce a different =newRoot= than the SNARK
    attested to, breaking the rolling-tree relation.
 c. *Allowance and balance.*  Even setting the above aside, the second mint would
    re-debit Alice's BUCK and re-consume her allowance to the =Notes= pool --
    economic-level double-escrow protection on top of the structural guards.
 
-/Replay of the same opening across batches/ (the replacement of the Phase-7
-=commitmentExists= check) is structurally allowed but economically
-self-punishing: Alice escrows =totalFace= again, the duplicate commitment lands
+/Replay of the same opening across batches/ is structurally allowed but
+economically self-punishing: Alice escrows =totalFace= again, the duplicate commitment lands
 at a fresh leaf index, and the deterministic nullifier =Poseidon3(rho, idHash,
 4242)= means the first spend nullifies every copy.  Alice pays twice for a
 spend-once outcome.
@@ -803,9 +798,8 @@ verification keys, which the production setup ceremony precludes by construction
 
 * Prover Contention and the Rollup Race
 
-The batch-mint pivot introduces one genuinely new operational concern that did
-not exist in the Phase-7 per-leaf insertion design: a mint transaction is now a
-/rollup-style/ transaction.  Alice's proof is bound to the specific =oldRoot=
+Batch minting carries one genuinely operational concern: a mint transaction is
+a /rollup-style/ transaction.  Alice's proof is bound to the specific =oldRoot=
 and =nextLeafIndex= she snapshotted when she began proving; if any other mint
 lands between her snapshot and her submission, those values go stale and her
 transaction reverts at one of the stale-state guards.
@@ -883,10 +877,11 @@ legitimately issued.  He needs no help from Alice and no live indexer:
    equality.
 5. He recomputes ~Poseidon5(flavor, v, rho, idHash, predicate) == cm~ from the
    opening.
-6. (Optional.)  He recomputes ~cmBatchHash = keccak256(abi.encodePacked(cms))~
-   and re-runs =MintGroth16Verifier.verify(proofBytes, [oldRoot, newRoot,
-   nextLeafIndex, totalFace, cmBatchHash])= against the per-N verifier keyed by
-   =cms.length=, convincing himself the EVM did its job.
+6. (Optional.)  He re-runs =MintGroth16Verifier.verify(proofBytes,
+   [issuerMode[0..N), oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N)])=
+   against the per-N verifier keyed by =cms.length=, assembling the
+   public-signal vector from the calldata exactly as the contract does,
+   convincing himself the EVM did its job.
 
 The "receipt" Carol receives is therefore =(T_mint, opening, idHash mapping)=.
 Its validity is independently checkable against the public chain.  Nothing here
@@ -917,12 +912,6 @@ receipt should have.
      (A1/B1).  This is detailed per-flavor in
      [[The Identity-M Spend Path (A1, A2, B1)]]; the walk below uses Bob's *A2*
      note (addressed, private issuer) as the running example.
-
-  The earlier account-pinned A-spend (the Phase-8 =spend_a.circom= +
-  =Notes.spendACP= + =verifySpendCP= CP-DLEQ, and the unbound generic
-  =Notes.spend=) has been *retired*: every note is A1, A2, or B1, and every
-  spend goes through a coupled, membership-bound deposit.  Only the
-  flavor-agnostic =spend.circom= note proof survives, now shared by all three.
 
 Three properties of the flow are worth stating up front, because they shape every
 step:
@@ -975,7 +964,7 @@ indefinite holding ([[https://perry.kundert.ca/range/finance/alberta-buck-notes/
 ** Step 1: Fetch the Commitment Tree and Build a Merkle Path
 
 =Notes.sol= maintains a Tornado-style incremental Poseidon-T3 Merkle tree of
-~TREE_DEPTH = 20~ (max ~1M leaves).  Under Phase-7-bis the per-leaf insertion
+~TREE_DEPTH = 20~ (max ~1M leaves).  The per-leaf insertion
 math lives inside the mint SNARK; the contract just records the SNARK-attested
 =newRoot= at each =mint()= call.  The current root is exposed as =noteRoot()=.
 Two things happen:
@@ -1341,7 +1330,7 @@ under the public issuer's key, coupled to its payout account) plus a membership
 proof of \( M_{\text{dep}} \).  Knowledge of the Poseidon-5 opening is still the
 /bearer/ authorisation -- if two parties hold copies of the same B1 opening
 (a paper note photographed and forwarded), whichever submits first wins, the
-intended civil-trust semantics of bearer cash -- but the depositor is now
+intended civil-trust semantics of bearer cash -- but the depositor is
 additionally proven to be a registered Identity the issuer can name (see
 [[The Identity-M Spend Path (A1, A2, B1)]]).
 
@@ -1367,12 +1356,11 @@ accepted spend of a given mint batch, the cumulative BUCK released equals at mos
 the =totalFace= escrowed -- property C follows from mint-side value conservation
 plus spend-side nullifier uniqueness.
 
-The earlier caveat about a missing =Num2Bits= range check on =v[i]= at mint time
-is closed: =mint_batch.circom= range-bounds each =v[i]= to 128 bits and
-=spend.circom= range-bounds both =face= and the witness =v= identically, so an
-integer overshoot of =totalFace= by a multiple of =r= is structurally impossible
-at either end.
-Property C now rests on those range bounds plus the nullifier-uniqueness check and
+Field wrap-around is foreclosed by range bounds: =mint_batch.circom=
+range-bounds each =v[i]= to 128 bits and =spend.circom= range-bounds both
+=face= and the witness =v= identically, so an integer overshoot of =totalFace=
+by a multiple of =r= is structurally impossible at either end.
+Property C rests on those range bounds plus the nullifier-uniqueness check and
 Merkle membership.
 
 #+LATEX: \clearpage
@@ -2566,15 +2554,12 @@ more that become concrete only once the redemption path exists.
   | Spend | Value conservation across mint<->spend | Range-bounded mint =v[i]= + spend ~face === v~; cumulative payouts \le =totalFace= per batch    |
   #+LATEX: }
 
-  All nine rows are enforced by code in the tree.  Mint landed in two phases:
-  Phase 5 (=Notes.sol= with a stub verifier) and Phase 7 (per-leaf on-chain
-  Poseidon insertion with =mint.circom=, =MintGroth16Verifier=,
-  =MintVerifierAdapter=).  Phase 7-bis moves the Merkle insertion /into/ the
-  SNARK (=mint_batch.circom=, per-N Groth16 verifiers, per-N adapter dispatch);
-  the chain writes the SNARK-attested =newRoot= into the same 30-slot root-
-  history ring =Notes.sol= already maintained for the spend side.  Spend is
-  unchanged by the pivot: =spend.circom= in bearer shape,
-  =SpendGroth16Verifier=, =SpendVerifierAdapter=, the on-chain Merkle
+  All nine rows are enforced by code in the tree.  On the mint side the Merkle
+  insertion lives /inside/ the SNARK (=mint_batch.circom=, per-N Groth16
+  verifiers, per-N adapter dispatch); the chain writes the SNARK-attested
+  =newRoot= into the 30-slot root-history ring =Notes.sol= maintains for the
+  spend side.  On the spend side: the flavor-agnostic =spend.circom= note
+  proof, =SpendGroth16Verifier=, =SpendVerifierAdapter=, the on-chain Merkle
   accumulator, and BUCK's =isCarrying= carrying-transfer path.  The [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][IdentityRegistry]] provides the
   issuer-attestation and recipient-verification legs (extended with the
   Identity-M deposit gates -- =verifyDepositCoupling= for A1/A2,
@@ -2597,16 +2582,14 @@ more that become concrete only once the redemption path exists.
   issuer too.  See /alberta-buck-notes/ ("Why A2 Costs More: Anonymity Is the
   Cost") and /alberta-buck-notes-decryptability/ ("The EOA Transfer Mirror").
 
-* Open Questions and the Identity-M Transition
+* Deployment Status and Open Questions
 
-The redemption walk above /is/ the identity-M spend -- the only spend path.  The
-legacy account-pinned A-spend (=spend_a.circom=, =Notes.spendACP=, =verifySpendCP=)
-and the unbound generic =Notes.spend= have been *removed*; what remains is one
+The redemption walk above /is/ the identity-M spend -- the only spend path: one
 gadget (=verifyDepositCoupling= / =verifyDepositorBinding= + the G1-tie membership
-=identity_membership_g1tie.circom=, wired through =spendCoupled{A1,A2,B1}=), and
-all its load-bearing pieces are /shipped/:
+=identity_membership_g1tie.circom=, wired through =spendCoupled{A1,A2,B1}=).
+All of its load-bearing pieces are /shipped/:
 
-1. *On-chain identity accumulator -- DONE.*  =IdentityRegistry.identityRoot= is
+1. *On-chain identity accumulator.*  =IdentityRegistry.identityRoot= is
    an incremental Poseidon accumulator (depth 10, Tornado-style
    =filledSubtrees=) updated on every =register()= / =bindContract()=, with the
    /commit-before-use/ discipline so a newly issued \( M \) is usable only once
@@ -2614,31 +2597,25 @@ all its load-bearing pieces are /shipped/:
    (=alberta_buck.registry.tree.IdentityMerkleTree=, shared by the wallet and
    the sim) matches it byte-for-byte; the =CentralMerkleService= aggregator (49
    tests) feeds sub-roots in.
-2. *Non-native \( \mathbb{G}_1 \) tie in the membership circuit -- DONE.*
+2. *Non-native \( \mathbb{G}_1 \) tie in the membership circuit.*
    =identity_membership_g1tie.circom= proves the native Poseidon-Merkle
    membership /and/ the G1 tie \( P_I = M + bH \) in one Groth16 proof (one
    BN254 \( \mathbb{G}_1 \) addition via circom-lib), exported to
    =IdentityMembershipG1TieVerifier.sol= (on-chain verified, ~350K gas).
-3. *Route the spend through the Identity-M gates, with the binding -- DONE.*
+3. *The spend routed through the Identity-M gates, with the binding.*
    =Notes.spendCoupledA2= calls =verifyDepositCoupling= and the membership
    verifier, *passing =dc.P_I= to both* so the two halves are bound to the same
    committed point (the verifier derives its public-input limbs from =dc.P_I=,
    not from the proof bytes -- =IdentityMembershipBinding.t.sol=,
-   =NotesCoupledA2.t.sol=).  This is the step that closes the A2 recipient-key
+   =NotesCoupledA2.t.sol=).  This is the gate that closes the A2 recipient-key
    /collusion/ gap: a bogus \( eIss \) makes \( P_I \)'s point a non-member, so
    no membership proof exists and the deposit reverts.  A1 and B1 take the
-   identical bound-membership path (=spendCoupledA1= / =spendCoupledB1=).
-4. *Legacy retirement and the B1 counterpart -- DONE.*  The account-pinned
-   A-spend (=spend_a.circom= + its verifier, =Notes.spendACP=, =verifySpendCP=,
-   and the =spend_a= / =spend_cp= wallet modules) and the unbound generic
-   =Notes.spend= are removed; only the flavor-agnostic =spend.circom= note proof
-   survives, shared by all three coupled spends.  The B1 depositor-side membership
-   counterpart is implemented: =spendCoupledB1= binds =verifyDepositorBinding='s
-   committed point =P_dep= to the membership exactly as A2 binds =dc.P_I=
-   (=NotesCoupledB1.t.sol=).
-5. *The note \( \leftrightarrow \) \( eEnc \) tie -- DONE, both layouts.*  The
-   flavour-agnostic note proof exposes no \( idHash \), so gates 1--4 alone
-   verified a ciphertext /of the depositor's choosing/ -- leaving
+   identical bound-membership path: =spendCoupledA1=, and =spendCoupledB1=,
+   which binds =verifyDepositorBinding='s committed point =P_dep= to the
+   membership exactly as A2 binds =dc.P_I= (=NotesCoupledB1.t.sol=).
+4. *The note \( \leftrightarrow \) \( eEnc \) tie, both layouts.*  The
+   flavour-agnostic note proof exposes no \( idHash \), so the gates above
+   alone would verify a ciphertext /of the depositor's choosing/ -- leaving
    addressed-binding ("only \( M_{\text{rec}} \) can spend") and the A2
    substitution escape ("attach a different, nameable \( eEnc \)") unenforced.
    =circuits/note_binding.circom= (~2.4M non-linear constraints; the
@@ -2656,7 +2633,7 @@ all its load-bearing pieces are /shipped/:
    (/Proofs/, Theorem 12; toolchain history in
    /alberta-buck-verifier-implementation/.)
 
-With items 1--5 shipped the transition is *complete*: every mint and spend is
+With all four pieces shipped, every mint and spend is
 Identity-M-bound, the on-chain =identityRoot= gates every spend, and the note's
 counterparty Identity is always recoverable and -- because the membership is
 /bound/ to the sigma's committed point, and the verified ciphertext is /bound to
@@ -2676,8 +2653,8 @@ Additional items tracked across the series:
   set (recommended {16, 128, 1024}), padding with ~v = 0~ dummy openings.
   Each pinned N has its own verifier contract; =MintVerifierAdapter= dispatches
   on =cms.length=.
-- *Prover contention (resolved operationally, not protocolly).*  The batch-
-  mint pivot makes each mint a rollup-style transaction with a stale-state
+- *Prover contention (resolved operationally, not protocolly).*  Batch
+  minting makes each mint a rollup-style transaction with a stale-state
   guard on =oldRoot= and =nextLeafIndex=.  Losers in a race re-prove; no BUCK
   is lost.  Initial deployment uses wallet-side optimistic retry; a
   sequencer/aggregator is deferred until real-world contention warrants it.
@@ -2687,9 +2664,7 @@ Additional items tracked across the series:
   The whole construction threads one needle: publish enough that each party can
   /name/ the other under compulsion, while publishing so little that no /third
   party/ can name either, or link payments in bulk.  This section consolidates
-  the per-step disclosure analysis for the shipped Identity-M surface.  (It
-  originated as the gap analysis in /alberta-buck-notes-decryptability/; the
-  gaps it tracked are closed, and this is the surviving reference form.)
+  the per-step disclosure analysis for the shipped Identity-M surface.
 
 ** Requirements and adversaries
 
@@ -2829,56 +2804,6 @@ Additional items tracked across the series:
       A2 and A1 in Code counter-examples above.
 
 #+LATEX: \clearpage
-* Appendix: The Hostile-Issuer Mint Ledger
-
-  The batch-mint design memo (/alberta-buck-notes-rollup-mint/) audited every
-  attack vector available to a hostile minter under the Phase-7-bis pivot
-  (duplicate-=cm= detection moved from an on-chain check to economic
-  self-enforcement).  The ledger survives as the soundness reference for the
-  shipped mint path:
-
-  - *A1. Underpay =totalFace=.*  =totalFace= is a public input bound by the
-    sum constraint and =Num2Bits(128)=; =transferFrom= pulls exactly
-    =totalFace=.  /Intact./
-  - *A2. Field-overflow on sum.*  =Num2Bits(128)= on each \( v_i \) and on
-    =totalFace= leaves 62-bit margin against field wrap at \( N \le 2^{64} \).
-    /Intact./
-  - *A3. Duplicate =cm= across mints.*  Insertion succeeds at a new leaf; the
-    nullifier is deterministic in the opening, so exactly one copy is
-    spendable.  The duplicate-minter paid twice for one spend; no one else is
-    harmed.  /Economically self-enforcing./
-  - *A4. =cm= collision with =ZERO_VALUE= or 0.*  Domain-separated keccak vs.
-    the Poseidon-5 commitment space: \( 2^{-254} \).  /Intact./
-  - *A5. Lying about =oldRoot=.*  Contract asserts equality with the recorded
-    root; revert.  /Intact./
-  - *A6. Lying about =newRoot=.*  The SNARK derives =newRoot= from =oldRoot=
-    plus the folded leaves; unsatisfiable.  /Intact./
-  - *A7. Front-running to invalidate a pending mint.*  The loser's =oldRoot=
-    check fails before any BUCK moves; re-prove and retry.  /No value loss;
-    operational concern only (see Prover Contention)./
-  - *A8. Mint with an =idHash= naming someone else.*  The mint-side issuer
-    bindings (Schnorr for public, =verifyIssuerReenc= for private) force the
-    identity payload over the minter's own registered record -- the
-    anti-framing half of Theorem 7.  A self-harming junk =idHash= remains
-    possible and remains the minter's own loss.  /Intact./
-  - *A9. Mint junk leaves with unknown openings.*  The circuit requires
-    knowledge of every opening; junk is a paid donation to the pool.
-    /Intact./
-  - *A10. Spend nullifier reuse.*  =nullifiers[nf]= set-once; second spend
-    reverts.  /Intact./
-  - *A11. Spend front-running.*  =recipient= is bound in the spend SNARK's
-    public inputs; a proof cannot be replayed toward a different recipient.
-    /Intact./
-  - *A12. Lying about =nextLeafIndex=.*  Asserted against on-chain state and
-    consumed by the SNARK's insertion paths; either reverts or produces an
-    unhonoured root.  /Intact./
-
-  *Headline:* every hostile-minter guarantee holds under the batch-mint
-  pivot.  Buggy /wallets/ (e.g., a \( \rho \) RNG collision) are no longer
-  caught by the chain, but the failure mode is "wallet owner forfeits one
-  note", not "pool drains".
-
-#+LATEX: \clearpage
 * Security Properties and the Tests That Witness Them
 
   Every property claimed in this document is pinned by an executable witness
@@ -2934,12 +2859,9 @@ Additional items tracked across the series:
   non-deniable-receipt gap analysis and fix design; the invariant lives in the
   notes overview, the privacy audit above, the theorems in Proofs, and the
   fix is implemented (=note_binding.circom=).
-- [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]] -- /historical/: Phase-7-bis batch-mint
-  design memo (R1CS counts per N, gas projections, concurrency model); its
-  hostile-issuer audit survives as the appendix above.
-- =circuits/mint_batch.circom= -- the Phase-7-bis batch-mint circuit (one
+- =circuits/mint_batch.circom= -- the batch-mint circuit (one
   compile per pinned N).
-- =circuits/spend.circom= -- the Phase-7 spend circuit (bearer-shape).
+- =circuits/spend.circom= -- the flavor-agnostic spend (note-proof) circuit.
 - =circuits/note_binding.circom=, =circuits/note_binding_a1.circom= -- the
   note \( \leftrightarrow \) \( eEnc \) tie (A2 and A1 payload layouts).
 - =src/Notes.sol=, =src/MintGroth16Verifier*.sol=, =src/MintVerifierAdapter.sol=,

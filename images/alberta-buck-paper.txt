@@ -24,19 +24,20 @@ issuer.  Yet the two parties to any payment can always prove exactly who
 the other was, with evidence sound enough to convict on.  The guarantee
 is the *non-deniable receipt*: even a /colluding/ payer and payee cannot
 complete a payment without each holding evidence that names the other.
+
 The consequences read like due process implemented in mathematics (the
 *compulsion calculus*): evidence of every payment exists; only the
 participants hold it; each may surrender, refuse, or destroy their copy;
 and no institution can be compelled to produce what it provably never
 had.  One design choice makes this work: payments bind KYC-certified
-/identities/, never account keys (*Identity-M binding*).  A single
+/identities/, not just account keys (*Identity-M binding*).  A single
 re-encryption gadget, instantiated three ways, yields every realisable
 note flavour (addressed or bearer, public or private issuer), all
 shipped and measured on Ethereum.  We prove the fourth flavour
 impossible, the obvious cheap binding vacuous, and zero-knowledge
 registry membership necessary for the doubly-anonymous flavour under a
 stated restriction; exactly the branch the shipped system takes.  Every
-theorem carries an executable witness.
+theorem carries an executable witness. ([PDF], [Text])
 
 Table of Contents
 ─────────────────
@@ -78,6 +79,11 @@ Table of Contents
 .. 4. Witness: Theorem 8 (A2 layout – substitution cannot bind)
 .. 5. Witness: Theorem 8 (A1 layout – the public face pins the identity)
 .. 6. Reproducing the full system
+
+
+[PDF] <https://perry.kundert.ca/images/alberta-buck-paper.pdf>
+
+[Text] <https://perry.kundert.ca/images/alberta-buck-paper-flow.txt>
 
 
 1 Introduction
@@ -137,13 +143,19 @@ Table of Contents
 
   These three goals are usually presumed to be in tension.  The central
   claim of this paper is that they are simultaneously satisfiable,
-  practically, on a public blockchain today; what makes it possible is
-  one counter-intuitive inversion: payments must bind /identities/ –
-  certified once, at KYC, and held by persons – never the /account keys/
-  that hold funds.  We call this *Identity-M binding*.  Everything else
-  follows from it: the receipt that always exists, key recovery without
-  any custodian, the impossibility of one whole quadrant of the design
-  space, and the exact place where accountability stops being cheap.
+  practically, on a public blockchain today.
+
+  What makes all three possible is one /counter-intuitive inversion/:
+  payments must bind /identities/ – certified once, at KYC, and held by
+  persons – not just the /account keys/ that hold funds.  We call this
+  *Identity-M binding*.  Everything else follows from it: the receipt
+  that always exists, key recovery without any custodian, the
+  impossibility of one whole quadrant of the design space, and the exact
+  place where accountability stops being cheap.
+
+  The unexpected result of adding /more/ identity binding to the
+  blockchain is that /less/ of our identity leaks, and /more/ of our
+  rights and privacies are protected.
 
 
 1.1 Contributions

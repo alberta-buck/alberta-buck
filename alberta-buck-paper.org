@@ -4,9 +4,9 @@
 #+date: 2026-06-11
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
-#+series_order: 18
-#+weight: 19
-#+draft: true
+#+series_order: 20
+#+weight: 21
+#+draft: false
 #+bucky: true
 #+math: true
 #+description: BUCK Notes are digital cash with a carbon-copy receipt: one copy for the payer, one for the payee, none for anyone else.  Payments cannot be traced in bulk -- not by analytics firms, not by subpoena, not by the KYC issuer itself -- yet every payment leaves both parties able to prove, with court-grade evidence, exactly who the other was.  Not even the two of them, colluding, can prevent it.  We ship all three possible note flavours on Ethereum, prove the fourth impossible, and measure exactly what anonymity costs.  Every theorem in the paper runs.
@@ -26,50 +26,6 @@
 #+LATEX_HEADER: \newtheorem{corollary}[theorem]{Corollary}
 #+LATEX_HEADER: \newtheorem{definition}[theorem]{Definition}
 
-#+begin_comment
-========================================================================
-DRAFTING MAP -- not exported (org comment block).
-
-Target venue: Financial Cryptography and Data Security (FC), Springer
-LNCS.  Secondary: PoPETs.  FC-first framing: lead with the public-money
-privacy/autonomy mission, THEN deliver the cryptographic contributions.
-
-Build path:
-  - DRAFT / ePrint: this neutral article+amsthm class (as-is).
-  - FC camera-ready: register `llncs` in org-latex-classes, set
-    #+LATEX_CLASS: llncs, move citations from [fn:] footnotes to BibTeX
-    with the splncs04.bst style.  Math + theorem envs are class-independent.
-
-History: the original drafting skeleton (alberta-buck-paper-draft.org,
-retired 2026-06-11) was staged around "A1/B1 complete, A2 reserved" and
-presented a mint-side account-keyed coupling (C*) as future work.  The
-shipped system replaced that with the Identity-M architecture: binding
-relocated from account keys to identity points, and from mint-time
-per-leaf SNARKs to spend-time composition (sigma + bound membership +
-note<->eEnc tie).  This rewrite presents the COMPLETED system.  Promoted
-from the skeleton: issuer-blindness (Thm), vacuity (Lem), conditional
-necessity (Prop), the related-work table, citation stubs.
-
-Source masters (the extraction provenance):
-  D = alberta-buck-notes-decryptability.org   (invariant, gap analysis)
-  N = alberta-buck-notes.org                  (architecture, flavours, gas)
-  I = alberta-buck-identity.org               (ElGamal/PS substrate)
-  P = alberta-buck-proofs.org                 (Theorems 1-12)
-  F = alberta-buck-notes-flow.org             (executable walkthrough)
-
-Executable blocks: ONE seeded python session (:session notespaper),
-self-contained, runs against the installed alberta_buck wallet package.
-Regenerate RESULTS + render with `make nix-venv-doc-paper` (requires the
-repo venv; see scripts/render-exec-doc.el).
-
-Remaining TODO before submission:
-  - Verify/complete the [fn:] citation stubs; port to BibTeX for FC.
-  - The burden-mechanism remark (Sec 9.6) cites a game-theoretic model
-    that remains informal; formalise or soften before camera-ready.
-  - Production Powers-of-Tau ceremony (Sec 10/11 honesty items).
-========================================================================
-#+end_comment
-
 #+ATTR_LATEX: :width 10cm
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
@@ -85,19 +41,20 @@ issuer.  Yet the two parties to any payment can always prove exactly
 who the other was, with evidence sound enough to convict on.  The
 guarantee is the *non-deniable receipt*: even a /colluding/ payer and
 payee cannot complete a payment without each holding evidence that
-names the other.  The consequences read like due process implemented in
-mathematics (the *compulsion calculus*): evidence of every payment
-exists; only the participants hold it; each may surrender, refuse, or
-destroy their copy; and no institution can be compelled to produce what
-it provably never had.  One design choice makes this work: payments
-bind KYC-certified /identities/, never account keys (*Identity-M
-binding*).  A single re-encryption gadget, instantiated three ways,
-yields every realisable note flavour (addressed or bearer, public or
-private issuer), all shipped and measured on Ethereum.  We prove the
-fourth flavour impossible, the obvious cheap binding vacuous, and
-zero-knowledge registry membership necessary for the doubly-anonymous
-flavour under a stated restriction; exactly the branch the shipped
-system takes.  Every theorem carries an executable witness.
+names the other.
+
+The consequences read like due process implemented in mathematics (the
+*compulsion calculus*): evidence of every payment exists; only the
+participants hold it; each may surrender, refuse, or destroy their copy;
+and no institution can be compelled to produce what it provably never had.
+One design choice makes this work: payments bind KYC-certified
+/identities/, not just account keys (*Identity-M binding*).  A single
+re-encryption gadget, instantiated three ways, yields every realisable note
+flavour (addressed or bearer, public or private issuer), all shipped and
+measured on Ethereum.  We prove the fourth flavour impossible, the obvious
+cheap binding vacuous, and zero-knowledge registry membership necessary for
+the doubly-anonymous flavour under a stated restriction; exactly the branch
+the shipped system takes.  Every theorem carries an executable witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-paper-flow.txt][Text]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -105,6 +62,9 @@ system takes.  Every theorem carries an executable witness.
 
 #+LATEX: \clearpage
 * Introduction
+  :PROPERTIES:
+  :CUSTOM_ID: sec:intro
+  :END:
 
   The choice a society makes about the privacy of its money is a choice
   about the balance of power between the individual and the institutions
@@ -161,24 +121,24 @@ system takes.  Every theorem carries an executable witness.
 
   These three goals are usually presumed to be in tension.  The central
   claim of this paper is that they are simultaneously satisfiable,
-  practically, on a public blockchain today; what makes it
-  possible is one counter-intuitive inversion: payments must bind
-  /identities/ -- certified once, at KYC, and held by persons -- never
-  the /account keys/ that hold funds.  We call this *Identity-M
-  binding*.  Everything else follows from it: the receipt that always
-  exists, key recovery without any custodian, the impossibility of one
-  whole quadrant of the design space, and the exact place where
+  practically, on a public blockchain today.
+
+  What makes all three possible is one /counter-intuitive inversion/:
+  payments must bind /identities/ -- certified once, at KYC, and held by
+  persons -- not just the /account keys/ that hold funds.  We call this
+  *Identity-M binding*.  Everything else follows from it: the receipt that
+  always exists, key recovery without any custodian, the impossibility of
+  one whole quadrant of the design space, and the exact place where
   accountability stops being cheap.
 
-** Contributions
+  The unexpected result of adding /more/ identity binding to the blockchain
+  is that /less/ of our identity leaks, and /more/ of our rights and
+  privacies are protected.
 
-   #+begin_comment
-   Calibrate the claim defensively.  "No trusted opener" = no *bulk*
-   opening authority; the KYC issuer (PS-credential signer) remains the
-   per-identity anchor, compellable only to map an ALREADY-SURRENDERED
-   identity point to a person (Thm issuer-blind).  Say this explicitly so
-   a reviewer cannot read it as "no trusted party at all".
-   #+end_comment
+** Contributions
+   :PROPERTIES:
+   :CUSTOM_ID: sec:contributions
+   :END:
 
    Seven contributions, in the order the paper builds them:
 
@@ -434,6 +394,9 @@ system takes.  Every theorem carries an executable witness.
    #+end_definition
 
 ** The non-deniable-receipt invariant
+   :PROPERTIES:
+   :CUSTOM_ID: sec:non-deniable-receipt
+   :END:
 
    One definition carries the accountability half of the paper.  Its
    first two clauses are standard: receipts can always be produced, and
@@ -1694,13 +1657,6 @@ system takes.  Every theorem carries an executable witness.
    #+LATEX: }
 
 * Footnotes
-
-#+begin_comment
-Citation policy: org [fn:] footnotes for the DRAFT/ePrint (house style,
-matches the rest of the series).  For FC camera-ready, port to BibTeX +
-splncs04.bst.  Fill exact bibliographic details before submission --
-stubs below.
-#+end_comment
 
 [fn:chaum82] Chaum, D.  "Blind Signatures for Untraceable Payments."  CRYPTO 1982.  [TODO exact cite]
 
