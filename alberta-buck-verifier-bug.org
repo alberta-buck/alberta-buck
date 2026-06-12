@@ -1,0 +1,219 @@
+#+TITLE: On-Chain Groth16 Verifier Export Bug — ROOT CAUSE FOUND
+#+SUBTITLE: EIP-197 G2 Point Encoding Mismatch in snarkjs Solidity Verifier Export
+#+author: Perry Kundert
+#+date: 2026-06-06
+#+description: snarkjs stores G2 points as [x_re, x_im, y_re, y_im] but EIP-197 expects [x_im, x_re, y_im, y_re]. The Solidity verifier does not swap, causing the bn256Pairing precompile to reject the proof.
+
+* Root Cause
+
+EIP-197 (bn256Pairing precompile) requires G2 points encoded as:
+
+#+begin_example
+[x_im, x_re, y_im, y_re]
+#+end_example
+
+where =x = x_re + x_im * i= in the quadratic extension field F_p^2.
+
+snarkjs stores G2 points in the opposite convention:
+
+#+begin_example
+pi_b = [[x_re, x_im], [y_re, y_im]]
+VK JSON: [[x_re, x_im], [y_re, y_im]]
+#+end_example
+
+The exported Solidity verifier embeds VK constants (=beta=, =gamma=, =delta=)
+and passes the proof's =B= component to the pairing precompile /without/
+swapping the real/imaginary components.  revm strictly enforces the EIP-197
+encoding and rejects the proof with =PrecompileError=.
+
+* Why the Old Verifier Worked
+
+The =IdentityMembershipVerifier.sol= from commit =7d2f686= (2026-06-04)
+has the same encoding pattern as the failing verifiers.  It passed because
+its specific VK delta constants and the specific proof =B= component it was
+tested with happened to be /consistent/ — both had the same (wrong) ordering
+relative to each other.
+
+When we regenerate a new zkey, the delta constants change (non-deterministic
+=g16s= setup), and the new constants + proof may produce a valid or
+invalid pairing result depending on the specific values.
+
+The /structure/ of the bug is:
+- beta, gamma come from the ptau (stable across runs)
+- delta comes from zkey setup (varies per run)
+- The proof's A, B, C change with every proof
+- When ALL G2 elements happen to be self-consistent (same re/im ordering),
+  the pairing works despite both being "wrong" relative to EIP-197
+- When delta values change, the self-consistency breaks
+
+* The Fix
+
+The Solidity verifier must swap =x_re ↔ x_im= and =y_re ↔ y_im= for ALL
+G2 points passed to the pairing precompile:
+
+1. VK constants (=beta=, =gamma=, =delta=): swap when embedding in Solidity
+2. Proof =B= component: swap when constructing the pairing input
+
+In the generated Solidity verifier assembly, this means:
+
+#+begin_src solidity
+// Before (broken):
+mstore(add(_pPairing, 64),  calldataload(pB))             // b[0][0] = x_re
+mstore(add(_pPairing, 96),  calldataload(add(pB, 32)))    // b[0][1] = x_im
+mstore(add(_pPairing, 128), calldataload(add(pB, 64)))    // b[1][0] = y_re
+mstore(add(_pPairing, 160), calldataload(add(pB, 96)))    // b[1][1] = y_im
+
+// After (fixed — EIP-197 compliant):
+mstore(add(_pPairing, 64),  calldataload(add(pB, 32)))    // b[0][1] = x_im
+mstore(add(_pPairing, 96),  calldataload(pB))             // b[0][0] = x_re
+mstore(add(_pPairing, 128), calldataload(add(pB, 96)))    // b[1][1] = y_im
+mstore(add(_pPairing, 160), calldataload(add(pB, 64)))    // b[1][0] = y_re
+#+end_src
+
+And for VK constants (=beta=, =gamma=, =delta=), swap at embed time:
+
+#+begin_src solidity
+// VK JSON: beta = [[x_re, x_im], [y_re, y_im]]
+// EIP-197:  [x_im, x_re, y_im, y_re]
+uint256 constant betax1 = {beta[0][1]};  // x_im (was beta[0][0])
+uint256 constant betax2 = {beta[0][0]};  // x_re (was beta[0][1])
+uint256 constant betay1 = {beta[1][1]};  // y_im (was beta[1][0])
+uint256 constant betay2 = {beta[1][0]};  // y_re (was beta[1][1])
+#+end_src
+
+* Verification
+
+A manually-generated Solidity verifier (src/ManualVerifier.sol) with:
+1. Correct EIP-197 G2 swap for VK constants (=beta=, =gamma=, =delta=)
+2. Correct EIP-197 G2 swap for proof =B= component (in Forge test)
+...verifies successfully on-chain: =test_manual_verifies()= PASS (gas: 453,694).
+
+The same proof with the unswapped (snarkjs-default) encoding fails with
+=PrecompileError=.
+
+* Elimination Log
+
+| Hypothesis                                 | Result        |
+|--------------------------------------------+---------------|
+| circom version (2.2.2 vs 2.2.3)            | Eliminated    |
+| snarkjs version (0.7.5 vs 0.7.6)           | Eliminated    |
+| forge/revm version (1.5.1 vs 1.7.1)        | Eliminated    |
+| solc version (0.8.28 vs 0.8.33)            | Eliminated    |
+| npm transitive deps (locked, hashes match) | Eliminated    |
+| Node.js version (20.19.6 vs 22.22.3)       | Eliminated    |
+| node-gyp native addon compilation          | Eliminated    |
+| CPU architecture (ARM vs x86_64)           | Eliminated    |
+| JS/WASM prover (rapidsnark C++ also fails) | Eliminated    |
+| ptau files (unchanged, deterministic)      | Eliminated    |
+| circuit complexity (flat vs circom-lib)    | Eliminated    |
+| groth16 setup non-determinism              | Workaround    |
+| Memory allocation (8GB heap)               | Eliminated    |
+| **EIP-197 G2 encoding**                    | **CONFIRMED** |
+
+* Fix Implementation
+
+All verifiers exported by snarkjs =zkesv= need the G2 swap applied.
+The =scripts/snark/fix_verifier_g2.py= post-processor handles this:
+
+1. Swaps VK constant pairs: =betax1↔betax2=, =betay1↔betay2=,
+   =gammax1↔gammax2=, =gammay1↔gammay2=, =deltax1↔deltax2=, =deltay1↔deltay2=
+2. Swaps =B= component in assembly: =calldataload(pB)↔calldataload(add(pB,32))=
+   and =calldataload(add(pB,64))↔calldataload(add(pB,96))=
+
+Applied in =setup_g1tie.sh= and =test_verifier_regression.sh= after =zkesv=.
+
+* Current Status — FIXED
+
+| Verifier                          | G2 Fix | On-Chain |
+|-----------------------------------+--------+----------|
+| =ManualVerifier.sol= (flat, 1 in) | Yes    | PASS (453K gas) |
+| Regression test (flat, 1 in)      | Yes    | PASS (454K gas) |
+| =IdentityMembershipVerifier.sol=   | No     | PASS (271K gas) — legacy, commit =7d2f686= |
+| =IdentityMembershipG1TieVerifier.sol= (39K constraints, 9 in) | Yes | PASS (all 3 tests) |
+
+All tests pass on both ARM (Apple Silicon, macOS) and x86_64 (Linux).
+The workaround (=fix_verifier_g2.py=) is applied automatically by
+=make snark-g1tie= and =make snark-test-regression=.
+
+* Bug Report — snarkjs (iden3/snarkjs)
+
+** Summary
+
+snarkjs =zkey export solidityverifier= produces Solidity verifiers whose
+G2 point encoding does not match EIP-197, causing the =bn256Pairing=
+precompile to reject valid Groth16 proofs on-chain.
+
+** Severity
+
+All freshly exported verifiers are affected.  Off-chain verification
+(=snarkjs groth16 verify=) passes because =ffjavascript= uses the same
+convention for both proving and verifying.  On-chain verification fails
+because revm/EIP-197 expects the opposite convention.
+
+** Reproduction
+
+#+begin_src bash
+# Any circuit; any ptau.  Off-chain verify passes, on-chain fails:
+make snark-test-regression
+# Output:
+#   FAIL test_freshVerifier_acceptsFreshProof
+#   PASS test_knownVerifier_acceptsKnownProof
+#+end_src
+
+**Location of the bug**
+
+The bug is in the Groth16 Solidity verifier template:
+=templates/verifier_groth16.sol.ejs= (lines 108-111).
+
+The VK constants (lines 32-43) were correctly swapped for EIP-197 in
+commit =62a3b9e= (March 2023) by Xavier Pinsach — using
+=vk_beta_2[0][1]= for =betax1=, etc.  But the B component assembly
+was never updated to match.
+
+Two other files had manual JavaScript workarounds to compensate:
+- =smart_contract_tests/test/smart_contracts.test.js= — swapped =pi_b=
+  components before calling =verifyProof()=
+- =src/groth16_exportsoliditycalldata.js= — same swap in calldata output
+
+**Git history**
+
+| Commit | Date | What |
+|--------+------+------|
+| =62a3b9e= | 2023-03 | Template created: VK constants swapped for EIP-197, B NOT swapped |
+| =96b7d27= | 2023-03 | Test added with manual proofB swap to work around template bug |
+| =d5a179c= | 2023-03 | Calldata export added with same manual swap |
+| =78b0503= | 2026-06-06 | FIX: template B assembly swapped; test + calldata workarounds removed |
+
+**Fix applied** (branch =fix/verifier_groth16= at =~/src/snarkjs=):
+
+1. =templates/verifier_groth16.sol.ejs= — swapped 4 =mstore= lines in B assembly
+2. =smart_contract_tests/...= — =proofB = [proof.pi_b[0], proof.pi_b[1]]= (no manual swap)
+3. =src/groth16_exportsoliditycalldata.js= — native =pi_b= order
+
+**Artifacts modified by this fix**
+
+| Artifact | Change |
+|----------+--------|
+| Exported Solidity verifier (=zkesv=) | B component now EIP-197 compliant |
+| Calldata export (=zkesc=) | No longer swaps =pi_b= components |
+| All previously-exported verifiers | Must be regenerated or patched with =fix_verifier_g2.py= |
+
+**BREAKING CHANGE for snarkjs users**
+
+Existing code that manually swaps proofB before calling =verifyProof()=,
+matching the old smart contract test pattern:
+#+begin_src javascript
+// OLD (broken template, manual workaround):
+const proofB = [[proof.pi_b[0][1], proof.pi_b[0][0]],
+                [proof.pi_b[1][1], proof.pi_b[1][0]]];
+
+// NEW (fixed template, no workaround needed):
+const proofB = [proof.pi_b[0], proof.pi_b[1]];
+#+end_src
+
+Any previously-exported Solidity verifiers that were patched with the
+old workaround (manual proofB swap in calling code) will BREAK when
+used with newly-exported verifiers from the fixed template, because
+the swap would be applied twice.  All exported verifiers must be
+regenerated from the fixed template, and calling code must pass =pi_b=
+in native =ffjavascript= order.

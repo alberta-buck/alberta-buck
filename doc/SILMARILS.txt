@@ -1,0 +1,1780 @@
+                                     SILMARILS: Information-Theoretic and
+                                Quantum-Secure Designated-Verifier Signatures
+                                                   1                  1            1                     2
+                               Hassan Khodaiemehr , Khadijeh Bagheri , Chen Feng , and Dariia Porechna
+                                 1 Faculty of Applied Science, School of Engineering, The University of British
+                                          Columbia (UBC) Okanagan Campus, Kelowna, BC, Canada
+                                           {hassan.khodaiemehr,khadijeh.bagheri,chen.feng}@ubc.ca
+                                                             2 EternaX Labs
+                                                            dariia.p@eternax.ai
+                                    Abstract. SILMARILS follows the principle of Secure Information-
+                                    theory-Leveraged Mechanism for Authentication and Receipt-Integrated
+                                    Lightweight Signatures. It is built from a minimal algebraic core over
+                                    Fp using true randomness and perfect 2-out-of-2 Shamir secret sharing.
+                                    The framework supports both two-party and three-party modes. In the
+                                    two-party setting, SILMARILS realizes a transferable designated-verifier
+                                    (TDV) signature scheme. The designated verifier can simulate accepting
+                                    transcripts indistinguishable from real ones, achieving Jakobsson–Sako–
+                                    Impagliazzo DV security. The verifier may publish a receipt r enabling
+                                    public verification, yet even with r, no external party can tell whether a
+                                    transcript was signed or simulated. As DV signatures permit simulation,
+                                    standard EUF-CMA cannot hold for the designated verifier; instead,
+                                    we prove EUF-CMA¬DV security for all non-designated verifiers in both
+                                    the random oracle model (ROM) and quantum random oracle model
+                                    (QROM). In the three-party mode, adopting the broadcast model of
+                                    Fitzi et al. [26,27,45], we obtain a statistically secure signature protocol
+                                    with simulation-based security and error 1/p. We analyze security in the
+                                    Pure IT model, the IT+ROM, and the QROM, extending the Fitzi et al.
+                                    framework to quantum adversaries with classical I/O. Correctness, se-
+                                    crecy, transferability, and unforgeability for non-designated parties remain
+                                    equivalent to simulation-based security. Thanks to its simple algebraic
+                                    structure, SILMARILS offers very compact keys and signatures for the
+                                    blockchain settings we target, where standardized PQC schemes are al-
+                                    ready more than sufÏcient. Our goal is not to compare SILMARILS with
+                                    PQC, but to highlight its suitability for lightweight TDV authentication.
+                                    Afair comparison with other DV schemes is omitted due to space and
+        arXiv:2605.03230v2  [cs.CR]  18 May 2026the complexity of aligning models.
+                              Keywords: IT security · Digital signatures · MPC · QROM · Quantum-safe
+                              1    Introduction
+                              Digital signatures ensure authenticity in distributed systems, with constructions
+                              spanning classical schemes [1,9,32,33] and post-quantum alternatives [2,6–8,
+                            2      Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                            14,19,28,37,39,40]. Information-theoretic (IT) signatures provide unconditional
+                            security [3,12,29], but current schemes often lack full simulation-based guarantees
+                            or remain inefÏcient.
+                               The study of digital signatures is deeply intertwined with the theory of broad-
+                            cast and Byzantine agreement [45]. The foundational works of Pease, Shostak,
+                            andLamport[36,42] introduced the broadcast and Byzantine agreement problems
+                            and established both feasibility and impossibility results under various adversarial
+                            models. The attack-coupling argument of Fischer, Lynch, and Merritt [22] has
+                            since become a standard tool for proving impossibility results in distributed
+                            computing [13,24]. A comprehensive treatment of distributed algorithms can be
+                            found in [38]. Digital signatures play a crucial role in enabling authenticated
+                            broadcast. Dolev and Strong [18] showed that broadcast is possible for any
+                            number of dishonest parties if signatures are available along arbitrary transfer
+                            paths. Conversely, signatures can be constructed from broadcast via information-
+                            checking protocols [15,16,45]. The minimal requirements for broadcast were
+                            further studied in [24]. Randomized and variable-round protocols were introduced
+                            to overcome deterministic lower bounds [5,43], with optimal expected-round
+                            protocols developed in [21,34]. In asynchronous networks, impossibility results
+                            such as [23] motivated randomized protocols for consensus [4].
+                            1.1   Motivation and Contribution
+                            Although IT digital signatures are known to be possible, existing constructions do
+                            not provide efÏcient, reusable, and simulation-secure signatures in the multi-party,
+                            multi-use setting. The central challenge is achieving unconditional security while
+                            retaining efÏciency, scalability, and practical deployability. Our work is motivated
+                            by the intersection of several research directions: IT security, secure multiparty
+                            computation (MPC), long-term quantum resilience, and the authentication re-
+                            quirements of modern distributed systems such as blockchains. In particular,
+                            SILMARILS addresses two complementary settings: a two-party TDV mode
+                                                        ¬DV
+                            that yields efÏcient EUF-CMA    signatures in the ROM and QROM, and a
+                            three-party broadcast-model construction that achieves full simulation-based
+                            security in the sense of Fitzi et al. notion.
+                               IT signatures are appealing in MPC settings, where using computational
+                            signatures would break end-to-end IT security. In practice, these guarantees
+                            are instantiated via hash functions, either as injective encodings in the Pure
+                            IT model or as random oracles in the IT+ROM and QROM settings, which
+                            requires analyzing the algebraic core in the ROM/QROM. Thus, unlike post-
+                            quantum signatures that rely on hardness assumptions (e.g., LWE or hash-based
+                            security), our two-party construction achieves computational security in the
+                            ROM/QROM using IT tools, while the three-party construction achieves IT
+                            security in the Pure IT model (replacing hashes with IT authentication codes).
+                            In the three-party setting with at most one dishonest party, the classical lower
+                            bound shows that any ε-secure digital signature from scratch which uses only
+                            noiseless channels and no setup, must satisfy ε ≥ 1/3 [45, Corollary 18.7]. The
+                            ε = 1/p construction of [45, Theorem 18.18] avoids this bound only by working
+                                                                                                        Title Suppressed Due to Excessive Length                                   3
+                                                                        Table 1: Comparison of major digital signature families.
+                                                    Family                          Assumption                                   Key Sizes     Signature Sizes Quantum Security
+                                                    Classical (RSA, ECDSA)          Factoring, DL, ECDL                          Small–Medium Small             No
+                                                    Hash-Based (SPHINCS+)           Hash functions                               Small         Large            Yes
+                                                    Code-Based (CFS)                Decoding random codes                        Large         Medium           Yes
+                                                    Lattice-Based (Dilithium, Falcon) M-SIS/M-LWE, SIS over NTRU Lattices        Medium        Small–Medium     Yes
+                                                    Multivariate (UOV)              MQhardness                                   Large         Small            Yes
+                                                    Isogeny-Based (SQISign)         Isogeny problems                             Small         Small            Yes (emerging)
+                                                    IT-Based (SILMARILS)            Signer–Verifier shared randomness (TDV) Very Small         Very small       Yes
+                                                   in a richer setup with authenticated channels, pre-shared keys, or correlated
+                                                   randomness. This motivates our move to the TDV framework. Although TDV
+                                                   signatures superficially resemble MACs due to shared randomness, they are
+                                                   fundamentally different: MACs are symmetric, two-party, and non-transferable,
+                                                   whereas TDV schemes are publicly readable and verifiable only by a designated
+                                                   verifier who may choose to reveal validity evidences. In our two-party setting,
+                                                   the shared randomness is ephemeral rather than a long-term secret key, and
+                                                   is used solely to enable controlled transferability of signatures rather than to
+                                                   authenticate messages. This distinction ensures that our model and impossibility
+                                                   results remain fully consistent with the broader landscape of three-party signature
+                                                   constructions. Hence, our goal is to develop an information-theoretic signature
+                                                   framework that is efÏcient, reusable, and compatible with both classical and
+                                                   quantum settings. SILMARILS achieves this by combining a minimal algebraic
+                                                   core over F with perfect 2-out-of-2 Shamir secret sharing. The framework
+                                                                       p
+                                                   supports two complementary modes.
+                                                         Two-party mode: We obtain a transferable designated-verifier (TDV) signa-
+                                                   ture scheme with computational designated-verifier simulatability in the sense of
+                                                                                                                           ¬DV
+                                                   Jakobsson–Sako–Impagliazzo and EUF-CMA                                          security for all non-designated
+                                                   verifiers in both the ROM and QROM. This mode provides lightweight authenti-
+                                                   cation suitable for user–validator interactions and other two-party settings where
+                                                   public verifiability is not required.
+                                                         Three-party mode: Adopting the broadcast model of Fitzi et al., we con-
+                                                   struct a statistically secure signature protocol achieving full simulation-based
+                                                   security with error 1/p. Because practical instantiations rely on hash functions,
+                                                   we analyze security in the Pure IT, IT+ROM, and QROM models and extend
+                                                   the Fitzi simulation framework to a quantum setting with classical I/O.
+                                                         These two modes together capture the full range of practical and theoretical
+                                                   requirements: efÏcient two-party authentication, and a three-party information-
+                                                   checking (IC) structure supporting correctness, unforgeability, transferability,
+                                                   and secrecy. Table 1 summarizes the comparison of SILMARILS and other
+                                                   signature families.
+                                                   1.2       Applications to PQ Blockchain Architectures
+                                                   The properties of SILMARILS align naturally with the needs of blockchain sys-
+                                                   tems. Constant-time verification, compact receipts, and IT security allow PQ-safe
+                                                   architectures without the heavy onchain footprint of standardized PQ signatures.
+                                                   Wedeveloped a PQ-safe blockchain protocol where SILMARILS replaces both
+                             4      Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                             validator signatures during consensus and user transaction message authentica-
+                             tion, demonstrating that IT techniques can deliver practical, high-performance
+                             authentication in both classical and post-quantum distributed systems. The key
+                             achievements of our architecture include: 1) The TLS-derived per-pair secrets elim-
+                             inate the need for large user-facing PQ signatures in high-frequency interactions,
+                             while designated-verifier receipts preserve public auditability. 2) Validator-to-
+                             validator authentication becomes cheaper, consensus protocols simplify, and
+                             randomness generation can be implemented via lightweight commit–reveal mech-
+                             anisms. The concrete ledger integration is outside the scope of this paper since
+                             we intend a companion publication.
+                                The rest of this paper is organized as follows. Section 2 presents the necessary
+                             preliminaries, including notation, ideal functionalities, and the security framework
+                             used throughout the paper. Section 3 introduces the quantum-information tools
+                             usedinouranalysis.Section4describesourdigitalsignatureschemeSILMARILS
+                             in its two-party and three-party modes, detailing the key generation, signing,
+                             and verification procedures. Section 5 and Section 6 provide a rigorous security
+                             analysis of the two-party mode of SILMARILS under both the Jakobsson–Sako–
+                             Impagliazzo designated-verifier framework and the EUF-CMA¬DV unforgeability
+                             notion, while Section 7 analyzes the security of the three-party mode. Section 8
+                             evaluates the efÏciency of our scheme. Finally, Section 9 concludes the paper.
+                             2   Preliminaries
+                             Let p be a prime and let F denote the finite field of order p. We write F∗ = F \{0}
+                                                    p                                      p     p
+                                                                                ∗                $   ∗
+                             for its multiplicative group. Sampling uniformly from Fp is denoted by x ←− Fp.
+                             For a random variable X over a finite set X, we write PX for its distribution.
+                             For two distributions P and Q over X, the total variation distance is
+                                        dvar(P,Q) = 1 X |P(x)−Q(x)| = max|P(A)−Q(A)|.              (1)
+                                                    2 x∈X                A⊆X
+                             Afunction µ : N → [0,1] is negligible if for every polynomial q(·) there exists
+                             k ∈Nsuchthat µ(k)≤1/q(k) for all k ≥ k . We use boldface to denote vectors
+                              0                                      0
+                             and tuples when needed, and we use Viewi to denote the view of party Pi in a
+                             protocol execution. We use the perfect 2-out-of-2 Shamir secret sharing scheme
+                             SSS   over F [44]. Given a secret s ∈ F , the dealer chooses a random slope
+                                2,2      p                         p
+                               $
+                             a ←− F and defines the degree-1 polynomial f(x) = s+ax. Let w ,w ∈ F be
+                                   p                                                      0  1    p
+                             fixed, distinct, public interpolation points or weights. The shares are s0 = f(w0)
+                             and s =f(w ). Now, given the shares (s ,s ) = SSS   (s), and public weights
+                                  1      1                         0  1       2,2
+                                                              −1
+                             w ,w , reconstruction function SSS  is defined by Lagrange interpolation:
+                              0   1                           2,2
+                                                  s = SSS−1(s ,s ) = w0s1 −w1s0.
+                                                         2,2 0  1      w −w
+                                                                        0    1
+                             Each individual share is uniformly distributed over F and independent of the
+                                                                              p
+                             secret s, so SSS  is a perfect secret-sharing scheme [44]. Since its security is
+                                            2,2
+                                                                                                                                                         Title Suppressed Due to Excessive Length                                                                      5
+                                                                           purely information-theoretic, Shamir’s Secret Sharing enjoys a natural form of
+                                                                           quantum resilience: its guarantees do not rely on computational assumptions that
+                                                                           could be broken by quantum algorithms, and remain valid even in the presence
+                                                                           of quantum adversaries [35].
+                                                                           2.1           Ideal Functionality for Three-Party IT-Based Digital Signatures
+                                                                          Weanalyze our construction in the standard synchronous MPC model [45], the
+                                                                           minimal setting supporting IT-based authentication [30]. The system consists
+                                                                           of three parties: the signer P , the holder P , and the verifier P . Parties com-
+                                                                                                                                                 1                                   2                                                3
+                                                                           municate over pairwise private and authenticated channels and have access to
+                                                                           authenticated broadcast. Pairwise channels ensure confidentiality and integrity
+                                                                           of point-to-point messages, while broadcast prevents equivocation. This matches
+                                                                           the communication assumptions of the three-party SILMARILS protocol and
+                                                                           the IC-based framework of [45, Protocol 18.7]. We consider a static, active ad-
+                                                                           versary corrupting at most one party. Upon corruption, the adversary obtains
+                                                                           full control of that party and may arbitrarily deviate from the protocol. The
+                                                                           one-corruption threshold is the minimal requirement for IT-based authentication
+                                                                           in the three-party setting [45].
+                                                                           Definition 1. For a protocol Π and adversary A corrupting party P , the view
+                                                                                                                                                                                                                                                i
+                                                                           ViewΠ consists of: 1) the input of P , 2) the private randomness of P , 3) all
+                                                                                      i                                                                            i                                                                                  i
+                                                                          messages received by Pi, 4) all oracle answers observed by Pi.
+                                                                           Athree-party digital-signature scheme with transfer involves parties P (signer),
+                                                                                                                                                                                                                                                  1
+                                                                           P (holder), and P (verifier), communicating over pairwise private authenticated
+                                                                               2                                      3
+                                                                           channels and an authenticated broadcast primitive [45]. Let x1 = M be the input
+                                                                           to the scheme, which is defined by five polynomial-time algorithms:
+                                                                              – KeyGen(1k): run by P , outputs (pk,sk).
+                                                                                                                                         1
+                                                                              – Sign (M): run by P , outputs a signature σ to P .
+                                                                                              sk                                     1                                                                     2
+                                                                              – Extract(M,σ): run by P in the signing phase, outputs z ∈ X ∪{⊥}, where
+                                                                                                                                             2                                                                            2
+                                                                                    z2 is the authenticated value associated with (M,σ).
+                                                                              – Transfer(z2,σ): run by P2, outputs (M′,σ′) to P3.
+                                                                              – ExtractTransfer(M′,σ′): run by P , outputs z ∈ X ∪{⊥}, representing the
+                                                                                                                                                                    3                            3
+                                                                                    verifier’s recovered authenticated value.
+                                                                          Weformalize security using the three-party ideal functionality f                                                                                              =(f               , f         ),
+                                                                                                                                                                                                                                 DS               DS1          DS2
+                                                                           originally introduced by Fitzi et al. [25–27,45] and illustrated in Fig. 1. The
+                                                                           functionality captures the minimal guarantees required from an IT-DS scheme
+                                                                           with transfer.
+                                                                           Signing Phase (fDS1): The signer P1 provides an input x1 ∈ X ∪{⊥} to the
+                                                                           functionality. The value x1 represents the authenticated value associated with the
+                                                                                                           P                                       P                                            P
+                                                                                                             1                                       2                                            3
+                                                                                                                                                                                                                
+                                                                                                                                                                                                                z       if z  =x ,
+                                                                                                          x                            x                        z                              z                    2        2     1
+                                                                                                            1          f                 1                       2           f                  3         z =
+                                                                                                                         DS1                                                  DS2                          3    ⊥ else.
+                                                                                                                                                    x
+                                                                                                                                                     1
+                                                                                                            Fig.1: Ideal three-party digital-signature functionality.
+                                   6        Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                                   message. The functionality forwards x to the holder P and stores it internally
+                                                                              1                  2
+                                   for use in the transfer phase. No other party receives information at this stage.
+                                   Transfer Phase (f         ): To transfer a signature, P submits a value z ∈ X to
+                                                          DS2                                2                     2
+                                                                                              (
+                                                                                                z ,   if z =x ,
+                                   the functionality and P receives z = f          (x ,z ) =     2       2     1 The ideal
+                                                             3           3     DS2   1  2       ⊥,    otherwise.
+                                   functionality enforces the three core guarantees of IT-DS:
+                                     – Correctness: honest executions always yield the authenticated value x1.
+                                     – Unforgeability:neithertheholdernortheverifiercancausethefunctionality
+                                        to output any value other than x1.
+                                     – Transferability: any honest verifier must accept a value previously authen-
+                                        ticated by an honest signer and forwarded by an honest holder.
+                                   2.2    Real-World Security Definition and Supporting Notions
+                                   Weformalize security using the standard real or ideal paradigm. Let fDS denote
+                                   the three-party ideal functionality for digital signatures introduced by Fitzi et
+                                   al. [45]. A real protocol Π is said to ε-securely implement fDS if every real-
+                                   world attack can be simulated in the ideal world with at most ε statistical
+                                   distinguishability. For any adversary A corrupting at most one party, there must
+                                   exist a simulator S such that the adversary’s real-world view when interacting
+                                   with Π is statistically close to its ideal-world view when interacting with S
+                                                                                       real           ideal         
+                                   and the ideal functionality fDS, i.e., dvar ViewA (Π), ViewA            (S ◦ fDS)    ≤ε.
+                                   This definition captures the strongest form of information-theoretic security: the
+                                   adversary must not be able to distinguish whether it is interacting with the real
+                                   protocol or with the ideal functionality, except with probability ε.
+                                   Characterization via Local Properties: Fitzi et al. [45] established a fun-
+                                   damental equivalence that reduces simulation-based security to four concrete
+                                   properties of a protocol.
+                                   Theorem 1 ( [45], Lemma 18.15). A three-party protocol Π is a 2ε-secure
+                                   implementation of f       with error ε against one active adversary if the following
+                                                          DS
+                                   conditions hold for any attack by the dishonest party:
+                                     – ε     −correctness: with honest P and P , Pr(z = x ) ≥ 1−ε                 ,
+                                         corr                               1        2       2     1          corr
+                                     – ε −unforgeability: with honest P and P , Pr(z ̸= x ,z ̸= ⊥) ≤ ε ,
+                                         uf                                   1       3       3     1   3           uf
+                                     – ε      −transferability: with honest P and P , Pr(z ̸= z ,z ̸= ⊥) ≤ ε               ,
+                                         trans                                   2       3       2     3   2           trans
+                                     – ε    −secrecy: with honest P and P , ViewΠ(x ) of P in the signing phase
+                                         sec                           1        2       3   1       3
+                                       is almost independent of P ’s input x , which implies the existence of Q            Π
+                                                                     1           1                                     View3
+                                        such that d    (P    Π     , Q    Π) ≤ ε    , for every x ,
+                                                    var   View3 (x1)  View3       sec             1
+                                   where ε = max{ε        , ε , ε    , ε   }.
+                                                      corr  uf   trans  sec
+                                   Thus, to prove that a protocol securely realizes f       , it sufÏces to establish these
+                                                                                          DS
+                                   four properties. This modular approach greatly simplifies the security analysis in
+                                   Section 7.
+                                                                  Title Suppressed Due to Excessive Length      7
+                                3    Quantum Generalization of Theorem 1
+                                Weanalyze our constructions under three models for the hash function H: the
+                                Pure IT model, where H : X → Fp is a deterministic encoding; the IT+ROM,
+                                                  ∗
+                                where H : {0,1} → F is a classical random oracle; and the IT+QROM,
+                                                          p
+                                where H is accessible to quantum adversaries. In this section we lift Theorem 1
+                                (cf. [45, Lemma 18.15]) to the quantum setting. This extension is necessary be-
+                                cause many classical ROM techniques fail in the QROM—e.g., classical rewinding,
+                                inspecting superposition queries, classical oracle programming, and the forking
+                                lemma [10,46,47,50]. In contrast, the proof of Theorem 1 never interacts with
+                                the adversary algorithmically; it reasons only about the joint distributions of
+                                (X ,Z ,Z ,View ,View ,View ), where X is the signer’s input, Z ,Z are out-
+                                   1  2   3      1      2      3           1                        2   3
+                                puts, and each Viewi is the corresponding party’s view. The simulators are defined
+                                at the level of distributions (or, in the quantum case, density operators), not
+                                as black-box procedures that manipulate a quantum adversary. The proof uses
+                                only standard IT tools—triangle inequality, conditioning/averaging, and coupling
+                                (including maximal couplings)—all of which lift directly to the quantum setting
+                                by replacing variational distance with trace distance and interpreting views as
+                                quantum states. No rewinding, forking, or oracle programming is required [47,48].
+                                3.1   Quantum Preliminaries
+                                Webriefly recall the quantum-information concepts required for our analysis. All
+                                Hilbert spaces are finite-dimensional. For a Hilbert space H, we write D(H) for
+                                the set of density operators on H, i.e., positive semidefinite operators of trace 1.
+                                Trace of an Operator and Partial Trace: Let T be a linear operator acting on
+                                a finite-dimensional Hilbert space H. The trace of T is defined as Tr[T] :=
+                                P⟨i|T|i⟩, where {|i⟩} is any orthonormal basis of H. This quantity is basis
+                                   i
+                                independent and equals the sum of the eigenvalues of T. Now, let HA and HB be
+                                Hilbert spaces describing subsystems A and B, and let ρ     be a density operator
+                                                                                         AB
+                                on the composite system H ⊗H . The partial trace over B, denoted Tr , is
+                                                            A      B                                       B
+                                                            X
+                                              Tr [ρ    ] :=     I ⊗⟨j| ρ        I ⊗|j⟩ ≡ρ ,                  (2)
+                                                 B AB            A      B   AB A         B      A
+                                                             j
+                                where {|j⟩ } is any orthonormal basis of H . The resulting operator ρ          :=
+                                           B                                   B                             A
+                                Tr [ρ    ] is the reduced state of subsystem A. The partial trace over A is
+                                   B AB
+                                                            X
+                                               Tr [ρ   ] :=     ⟨i|  ⊗I ρ       |i⟩ ⊗I ≡ρ .                  (3)
+                                                 A AB              A    B   AB     A     B      B
+                                                             i
+                                Trace Distance: For density operators ρ,σ ∈ D(H), the trace distance is ∆(ρ,σ) :=
+                                1                            √ †
+                                  ∥ρ−σ∥ , where ∥A∥ = Tr A A denotes the trace norm. Trace distance is the
+                                2        1             1
+                                quantum analogue of variational distance and satisfies the triangle inequality.
+                                Definition 2 (Bipartite States, [41]). A bipartite quantum state over registers
+                                Aand B is a density operator ρ       =ρ ⊗ρ ∈D(H ⊗H ).
+                                                                 AB     A     B        A      B
+                                 8       Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                                Classical–Quantum States: A classical–quantum (cq) state over a classical register
+                                                                                    P                x
+                                 Xandaquantum register Q has the form ρ           =     p |x⟩⟨x|⊗ρ , where {p }
+                                                                              XQ       x x           Q           x
+                                 is a probability distribution and ρx are density operators. The trace distance
+                                                                     Q
+                                 between two cq-states decomposes as follows.
+                                 Lemma 1 (Trace-Distance Decomposition, [48]). Let ρ              =P p |x⟩⟨x|⊗
+                                                  P                                           XQ       x x
+                                  x                                x
+                                 ρ   and σ     =      p |x⟩⟨x| ⊗ σ , be classical–quantum states with the same
+                                  Q        XQ       x x            Q                          P
+                                classical marginal distribution {p }. Then ∆(ρ      , σ   ) ≤     p ∆(ρx,σx).
+                                                                   x             XQ XQ           x x     Q Q
+                                CPTP Maps: A linear map Φ : D(H) → D(H′) is completely positive and
+                                trace-preserving (CPTP) if Φ ⊗ IK is positive for every auxiliary space K and
+                                 Tr(Φ(ρ)) = 1 for all ρ [11]. CPTP maps model all physically admissible quantum
+                                 operations, including unitary evolution, measurement, discarding registers, and
+                                 interaction with an environment.
+                                 Lemma 2 (Contractivity of CPTP Maps, [48]). For any CPTP map Φ and
+                                any density operators ρ,σ, we have ∆ Φ(ρ),Φ(σ) ≤ ∆(ρ,σ).
+                                Quantum Coupling: The following lemma is the quantum analogue of the clas-
+                                 sical coupling argument used to relate the probability of “bad” events in two
+                                 distributions.
+                                 Lemma 3 (Quantum Coupling Lemma, [49]). Let ρ                and σ     be bipartite
+                                                                                           AB       AB
+                                 states. If an event E has probability 0 under σ   , then Pr [E] ≤ ∆(ρ      , σ   ).
+                                                                                AB          ρ            AB AB
+                                 These tools sufÏce to lift the classical characterization of digital-signature security
+                                 to the quantum setting. Every step in the quantum generalization of Theorem 1
+                                 consists only of applying CPTP maps (e.g., tracing out registers, simulating
+                                 views), conditioning on classical events, and using the triangle inequality for
+                                 trace distance. Since CPTP maps are contractive, all classical arguments that
+                                 bound variational distance extend directly by replacing it with trace distance
+                                 and interpreting views as quantum states. No rewinding, forking, or oracle
+                                 programming is used, so none of the classical ROM techniques that fail in the
+                                 QROMarise here.
+                                 3.2   Quantum Security of fDS
+                                 Weconsider a three-party digital signature functionality f    =(f      , f   ), P ,
+                                                                                            DS      DS,1  DS,2    1
+                                 P and P as before. A protocol Π implementing f          is an interactive protocol
+                                  2       3                                           DS
+                                 among P ,P ,P (and possibly an environment and a quantum adversary) with
+                                          1   2  3
+                                 classical inputs and outputs but potentially quantum internal computation
+                                 and access to a quantum random oracle. In our setting, each party P has a
+                                                                                                            i
+                                 classical output Zi and a quantum view Viewi consisting of all quantum registers
+                                 and classical transcripts observed during the protocol. The joint state of all
+                                 registers in the real execution is denoted by ρ                   , with lowercase
+                                                                               x1Z2Z3View1View2View3
+                                 symbols (e.g., x ) representing fixed inputs and uppercase symbols (e.g., Z ,Z )
+                                                 1                                                            2  3
+                                 representing random variables produced during the execution. All CPTP maps
+                                 are contractive with respect to trace distance, and the triangle inequality holds.
+                                 We adopt a standard simulation-based definition in the quantum setting (see,
+                                 e.g., [11]).
+                                                                       Title Suppressed Due to Excessive Length          9
+                                   Definition 3 (ε-Security in Quantum). A protocol Π is ε-securely imple-
+                                  menting fDS against one active quantum adversary if, for each corrupted party,
+                                  there exists a quantum polynomial-time simulator such that the real and ideal
+                                  executions are ε-close in trace distance (as joint states of the environment and
+                                   honest parties).
+                                   Wenowrestate the four properties in the quantum setting. All probabilities are
+                                   taken over the randomness of the protocol, the adversary, and any oracles.
+                                   Correctness: With honest P and P , Pr[Z ̸= x ] ≤ ε, for all x ∈ X.
+                                                                    1       2       2     1                1
+                                   Unforgeability: With honest P and P , Pr[Z ∈/ {x ,⊥}] ≤ ε, for all x ∈ X.
+                                                                       1        3      3      1                    1
+                                   Transferability: If P and P are honest, then Pr[Z ̸= Z ∧ Z ̸= ⊥] ≤ ε.
+                                                            2       3                         2     3      2
+                                   Secrecy: If P and P are honest, then the view of P in the signing phase is
+                                                   1       2                                   3
+                                       almost independent of x and there exists a state σ            such that for all x ,
+                                                                1                             View3                     1
+                                       ∆ ρ          , σ       ≤ε.
+                                           View (x )   View3
+                                               3  1
+                                   Theorem 2 (Quantum Security of Digital Signatures). Let Π be a three-
+                                   party protocol for fDS against quantum adversaries. If Π satisfies correctness,
+                                  unforgeability, transferability, and secrecy with error at most ε, then it is an
+                                   O(ε)-secure implementation of fDS; conversely, any ε-secure implementation of
+                                   f   satisfies these four properties with error O(ε). The hidden constants arise
+                                    DS
+                                   from a constant number of triangle-inequality applications.
+                                   Proof. (⇐) If the four properties hold, then Π is secure.
+                                      Case 1: P and P honest. When P and P behave honestly, the only
+                                                  1         2                    1        2
+                                   potentially corrupted party is P . The simulator for P must therefore reproduce
+                                                                     3                       3
+                                   the joint distribution of (X ,Z ,View ) as seen in the real protocol. By secrecy,
+                                                                 1   2      3
+                                   the adversary controlling P learns essentially nothing about the signer’s input
+                                                                 3
+                                   x . Formally, there exists a fixed state σ           (independent of x ) such that
+                                    1                                             View3                     1
+                                                        
+                                   ∆ ρView3(x1), σView3   ≤ ε. Thus, in the ideal world the simulator may simply
+                                   output σ        as the view of P . Correctness ensures that the honest verifier
+                                             View3                    3
+                                   P outputs the signer’s input except with small probability: Pr[Z ̸= x ] ≤ ε.
+                                    2                                                                        2     1
+                                   Hence, the real joint state of (x ,Z ) is ε-close to the ideal joint state in which
+                                                                      1   2
+                                   Z2 is deterministically equal to x1. We now compare the full real state ρx Z View
+                                                                                                                  1 2    3
+                                   with the ideal state σ          , where the ideal state is defined by: Z = x , and
+                                                          x1Z2View3                                           2     1
+                                   View ∼ σ        . Applying Lemma 1 to decompose the trace distance over the
+                                        3     View3
+                                   classical registers (x ,Z ), and then using the triangle inequality, we obtain
+                                                         1   2
+                                        ∆(ρ           , σ         ) ≤ Pr[Z ̸= x ] + ∆ ρ             , σ      ≤ 2ε.
+                                            x1Z2View3   x1Z2View3          2     1          View (x )  View3
+                                                                      |    {z     }             3 1
+                                                                           ≤ε          |         {z         }
+                                                                                                 ≤ε
+                                   Thus, the simulator for P can reproduce the ideal joint state up to trace distance
+                                                              3
+                                   at most 2ε, and therefore achieves simulation error O(ε) in this case.
+                                      Case 2: P and P honest. Here P and P behave honestly, while P may be
+                                                 1        3                 1       3                           2
+                                   corrupted. In the ideal world, the functionality guarantees that the output of P
+                                                                                                                         3
+                                   is always either the correct message x or the distinguished symbol ⊥ indicating
+                                                                            1
+                                   rejection. Thus, the ideal joint distribution of (x1,Z3) is supported on the set
+                                   10      Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                                   {(x ,x ),(x ,⊥)}. In the real protocol, an honest P should never accept an
+                                      1   1     1                                             3
+                                   incorrect message. Unforgeability therefore ensures that Pr[Z3 ∈/ {x1,⊥}] ≤ ε.
+                                   Equivalently, the real distribution of (x ,Z ) is ε-close to the ideal distribution
+                                                                              1   3
+                                   in which Z3 is always either x1 or ⊥. Lemma 3 states that whenever two classical–
+                                   quantum states differ only in a classical register with error probability at most ε,
+                                   there exists a joint coupling whose trace distance is at most ε. Applying this lemma
+                                   to the pair of states ρ    (real) and σ      (ideal), we obtain ∆(ρ      , σ     ) ≤ ε.
+                                                         x Z               x Z                          x Z    x Z
+                                                          1 3               1 3                          1 3     1 3
+                                   The corrupted party P obtains its view by applying some CPTP map to the
+                                                            2
+                                   registers (x ,Z ). Formally, there exists a CPTP map Φ such that
+                                               1   3
+                                               ρ          =Φ(ρ       ),     and       σ          =Φ(σ        ).
+                                                x Z View         x Z                   x Z View         x Z
+                                                 1 3    2         1 3                   1 3    2         1 3
+                                   By Lemma 2, CPTP maps cannot increase trace distance. Therefore,
+                                                    ∆(ρ           , σ         ) ≤ ∆(ρ      , σ    ) ≤ ε.
+                                                         x Z View    x Z View          x Z    x Z
+                                                          1 3    2    1 3    2          1 3    1 3
+                                   Thus, the simulator for the corrupted party P can reproduce the ideal joint
+                                                                                       2
+                                   state of (x ,Z ,View ) up to trace distance at most ε, achieving simulation error
+                                              1   3      2
+                                   O(ε) in this case.
+                                      Case 3: P and P honest. Here P and P behave honestly, while P may
+                                                  2       3                  2        3                             1
+                                   be corrupted. In the ideal functionality, whenever the verifier outputs a valid
+                                   message Z2 ̸= ⊥, the transfer recipient must output the same message. Thus, in
+                                   the ideal world the joint distribution of (Z ,Z ) satisfies Z ̸= ⊥ =⇒ Z = Z .
+                                                                                 2   3             2              3     2
+                                   In the real protocol, transferability guarantees that an honest P cannot be
+                                                                                                             3
+                                   convinced to output a message different from the one accepted by the honest P .
+                                                                                                                         2
+                                   Formally, Pr[Z2 ̸= Z3 ∧ Z2 ̸= ⊥] ≤ ε. Equivalently, the real joint distribution of
+                                  (Z2,Z3) is ε-close to the ideal distribution in which Z3 always equals Z2 whenever
+                                   Z2 ̸= ⊥. Lemma 3 states that if two classical–quantum states differ only in a
+                                   classical register with error probability at most ε, then there exists a coupling
+                                   whose trace distance is at most ε. Applying this lemma to the real and ideal
+                                   states of the pair (Z ,Z ) yields ∆(ρ         , σ    ) ≤ ε. The corrupted party P
+                                                         2   3              Z Z    Z Z                                   1
+                                                                             2 3     2 3
+                                   obtains its view by applying some CPTP map to the registers (x ,Z ,Z ). Thus,
+                                                                                                         1   2   3
+                                   there exists a CPTP map Φ such that
+                                          ρ             =Φ(ρ          )     and      σ             =Φ(σ          ).
+                                            x Z Z View         x Z Z                  x Z Z View          x Z Z
+                                             1 2 3    1         1 2 3                   1 2 3    1         1 2 3
+                                   By Lemma 2, CPTP maps cannot increase trace distance. Therefore,
+                                                  ∆(ρ             , σ           ) ≤ ∆(ρ       , σ    ) ≤ ε.
+                                                      x Z Z View    x Z Z View           Z Z    Z Z
+                                                       1 2 3     1   1 2 3     1          2 3     2 3
+                                   Hence, the simulator for the corrupted signer P can reproduce the ideal joint
+                                                                                        1
+                                   state up to trace distance at most ε, achieving simulation error O(ε) in this case.
+                                      (⇒) If Π is secure, then the four properties hold.
+                                      Correctness: Assume that P and P behave honestly. In the ideal world, the
+                                                                     1       2
+                                   functionality fDS always delivers the signer’s input to the honest verifier; that is,
+                                   the ideal output satisfies Z2 = x1 with probability 1. Security of Π means that
+                                   for every environment, the real execution of the protocol is ε-indistinguishable
+                                                                       Title Suppressed Due to Excessive Length         11
+                                   from the ideal execution. In particular, the joint real and ideal distributions
+                                   of (x ,Z ) are within trace distance at most ε. Since the ideal distribution
+                                        1   2
+                                   assigns zero probability to the event {Z2 ̸= x1}, indistinguishability implies
+                                   that the real execution can assign at most ε probability to this event. Formally,
+                                                             real   ideal 
+                                   Pr    [ Z ̸= x ] ≤ ∆ ρ         , ρ       ≤ ε. Thus, an honest verifier outputs the
+                                     real   2     1          x Z    x Z
+                                                              1 2    1 2
+                                   correct message except with probability at most ε, establishing correctness.
+                                      Unforgeability: Assume that P and P behave honestly. In the ideal world, the
+                                                                       1       3
+                                   functionality f    guarantees that an honest P can never be made to accept an
+                                                   DS                                3
+                                   incorrect message: its output is always either the true message x1 or the rejection
+                                   symbol ⊥. Thus, the ideal distribution of Z3 is supported entirely on the set
+                                   {x1,⊥}. Security of Π means that the real execution must be ε-indistinguishable
+                                   from the ideal execution. In particular, the real and ideal distributions of the
+                                   classical register Z3 must be within trace distance at most ε. Since the ideal
+                                   distribution assigns zero probability to the event {Z ∈/ {x ,⊥}}, any deviation
+                                                                                            3      1
+                                   from this event in the real world must be bounded by the distinguishing advantage.
+                                   Formally, by Lemma 3, whenever two classical–quantum states differ only on a
+                                   classical register with error probability at most ε, there exists a coupling whose
+                                   trace distance is at most ε. Applying this lemma to the real and ideal states of Z3
+                                                                         real  ideal
+                                   yields Pr    [ Z ∈/ {x ,⊥}] ≤ ∆ ρ         , ρ      ≤ ε. Thus, an honest P outputs
+                                            real  3      1               Z3    Z3                               3
+                                   an invalid message with probability at most ε, establishing unforgeability.
+                                      Transferability: Assume that P and P behave honestly. In the ideal world,
+                                                                         2       3
+                                   the functionality fDS enforces perfect transferability and whenever the verifier
+                                   accepts a message, i.e., whenever Z2 ̸= ⊥, the transfer recipient must output the
+                                   same message. Formally, the ideal distribution satisfies Z2 ̸= ⊥ =⇒ Z3 = Z2.
+                                   Security of Π means that the real execution must be ε-indistinguishable from the
+                                   ideal execution. Since the ideal distribution assigns zero probability to the event
+                                   {Z ̸=Z ∧ Z ̸=⊥},therealexecution can assign at most ε probability to this
+                                      2     3      2
+                                   event. Indeed, if the real protocol caused an honest P to output a value different
+                                                                                            3
+                                   from the one accepted by the honest P with probability greater than ε, then
+                                                                               2
+                                   an environment could distinguish the real and ideal executions with advantage
+                                   exceeding ε, contradicting security. Thus, indistinguishability immediately yields
+                                   Pr    [ Z ̸= Z   ∧ Z ̸=⊥] ≤ ε. This establishes transferability.
+                                     real   2     3      2
+                                      Secrecy. Assume that P and P behave honestly. In this setting, the only
+                                                                 1        2
+                                   potentially corrupted party is P . In the ideal world, the functionality f      reveals
+                                                                     3                                          DS
+                                   no information about the signer’s input x to P . Consequently, the ideal view of
+                                                                               1      3
+                                   P is a fixed state, independent of x . Let us denote this state by σ         . Security
+                                    3                                    1                                 View3
+                                   of Π means that for every environment, the real execution is ε-indistinguishable
+                                   from the ideal execution. In particular, the real and ideal distributions of the
+                                   adversary’s view must be within trace distance at most ε. Since the ideal view
+                                   does not depend on x , this indistinguishability condition implies that the real
+                                                           1
+                                   view of P —which may in principle depend on x —cannot vary with x by more
+                                             3                                         1                       1
+                                   than ε in trace distance. Formally, letting ρ             denote the real view of P
+                                                                                   View3(x1)                            3
+                                   whenthesigner’s input is x , we obtain ∆ ρ              , σ      ≤ε.Thus,anhonest
+                                                                1                 View (x )  View3
+                                                                                      3  1
+                                   P learns at most ε information about the signer’s input, establishing secrecy.
+                                    3
+                                   This completes the proof.                                                            □
+                              12     Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                              3.3   Implications for QROM Analysis
+                              Theorem 2 shows that Theorem 1 is robust to the quantum setting: once we
+                              establish correctness, unforgeability, transferability, and secrecy against quantum
+                              adversaries in the QROM (with respect to classical inputs/outputs and possibly
+                              quantum internal computation), we may soundly conclude simulation-based
+                              security of our implementation of fDS. The known issues that invalidate some
+                              classical ROM reductions in the QROM (e.g., forking-lemma based proofs) do
+                              not apply here, since the lemma and its proof are purely information-theoretic
+                              and metric in nature.
+                                 When we prove that a scheme is unforgeable against quantum adversaries in
+                                                   ∗
+                              the QROM, H : {0,1} → F is modeled as a uniformly random function, and
+                                                         p
+                              the adversary may query H in superposition |x,y⟩ 7→ |x,y ⊕H(x)⟩.
+                              Definition 4 (Forgery event in quantum). A forgery occurs if a (quantum)
+                              adversary A outputs a pair (M∗,σ∗ ) such that M∗ was never submitted to
+                                                                alg
+                              the signing oracle, and the verification algorithm accepts (M∗,σ∗ ) as a valid
+                              signature. We denote this event by Forge.                     alg
+                              Wecan prove that a quantum adversary making qH queries to a random oracle
+                                       ∗
+                              H:{0,1} →Fp can cause a collision in the oracle outputs with probability at
+                              most O(q2 /p). The key technical tool is the recording (compressed-oracle) lemma,
+                                       H
+                              which says that the interaction of a quantum algorithm with a random oracle
+                              can be represented as a distribution over classical query–answer transcripts [51].
+                              Definition 5 (Collision Event). Let H : {0,1}∗ → Fp be a random function,
+                              and let A be a (possibly quantum) oracle algorithm. We say that a collision occurs
+                              if there exist distinct inputs x ̸= x′ such that H(x) = H(x′) and both x and x′
+                              appear in the (compressed) oracle transcript associated with A’s execution. We
+                              denote this event by Coll.
+                              Lemma 4 (Recording/Compressed-Oracle Lemma [51]). Let the hash
+                                                 ∗
+                              function H : {0,1} → F be a uniformly random function, and let A be a
+                                                        p
+                              quantum oracle algorithm making at most q   queries to H. Then, there exists a
+                                                                       H
+                              classical random variable T (the transcript) such that T is a finite sequence of
+                                                                   
+                              pairs T = (x ,H(x )),...,(x ,H(x )) with t ≤ q , where the x are (classical)
+                                           1     1        t     t             H            i
+                              inputs and H(xi) are the corresponding oracle outputs. The distribution of T is
+                              identical to the distribution of the query–answer transcript in a classical lazy-
+                              sampling experiment where a classical algorithm makes at most q   (adaptive)
+                                                                                             H
+                              queries to a random oracle H : {0,1}∗ → Fp. In particular, any event that
+                              depends only on the multiset {(x ,H(x ))} (such as the existence of a collision
+                                                             i     i  i
+                              among the values H(x )) has the same probability in the quantum execution as in
+                                                   i
+                              this classical transcript model.
+                              Using Lemma 4, the quantum birthday bound reduces to a purely classical
+                              probability calculation.
+                                                                                              ∗
+                              Theorem 3 (Quantum Birthday Bound [50]). Let H : {0,1} → Fp be a
+                              uniformly random function, and let A be a quantum oracle algorithm making
+                                                                         Title Suppressed Due to Excessive Length            13
+                                    Algorithm 1 KeyGen(1k)
+                                     1: Choose a prime p ≈ 2k and work over F∗.
+                                                                                  p
+                                     2: Select hash function H and SSS2,2 with public weights w0,w1.
+                                                    $   ∗
+                                     3: Sample K ←− F and compute (K ,K ) = SSS             (K).
+                                                        p                   0   1        2,2
+                                     4: Output: private key sk = K, public key (w0,w1).
+                                    Algorithm 2 Signsk(M)
+                                    Require: Secret key sk = K and ephemeral session key k .
+                                                                                                 sig
+                                     1: n ← HMACk (M) and r ←H(M,n).
+                                                      sig
+                                                           $  ∗
+                                     2: Sample α,β,b,d ←− Fp.
+                                     3: Compute ε = αβ and (ε ,ε ) = SSS         (ε).
+                                                                  0  1        2,2
+                                     4: Compute K′ = HMAC (M) and (K′,K′) = SSS (K′).
+                                                                K              0   1         2,2
+                                     5: Compute the algebraic signature components:
+                                                          σ =b(K′−r),σ =db−1,                      σ =K′d,
+                                                           1                2                       3     1                 (4)
+                                                                  −1                 ′     −1
+                                                          σ =dε ε , σ =d(K −rε ε ).
+                                                           4          1     5        0         0
+                                     6: Output: σ       =(σ ,...,σ ).
+                                                     alg     1       5
+                                    at most qH queries to H. Let Coll be the event that there exist distinct inputs
+                                    x≠  x′ in the (compressed) transcript such that H(x) = H(x′). Then Pr[Coll] ≤
+                                    q (q −1)       q2
+                                     H H        ≤ H. In particular, Pr[Coll] = O(q2 /p).
+                                        2p          2p                                   H
+                                    4    Construction of SILMARILS
+                                    Wenowgive the full specification of our IT-secure signature scheme. The scheme
+                                    operates over a prime field Fp and uses perfect 2-out-of-2 Shamir secret sharing
+                                    SSS     for all shared values. All randomness comes from a TRNG, and H is either
+                                        2,2
+                                    a fixed injective encoding (pure IT model) or a random oracle (IT+ROM). Verifi-
+                                    cation reconstructs a value that must equal 0 for valid signatures. Unforgeability
+                                    Algorithm 3 Verify(M,σ )
+                                                                    alg
+                                    Require: Ephemeral session key ksig.
+                                     1: Parse σ = (σ ,σ ,σ ,σ ,σ ).
+                                                      1  2   3  4   5
+                                     2: Compute n ← HMACk (M) and r ←H(M,n).
+                                                                sig
+                                     3: if σ4 = 0 then return 0
+                                     4: else
+                                     5:     Compute V =σ σ −σ , and V =σ σ −σ +rσ .
+                                                        0    1 2     5        1     1 2     3      4
+                                                                  −1
+                                     6:     Reconstruct V = SSS      (V0,V1).
+                                                                  2,2
+                                     7:     if V = 0 then return 1
+                                     8:     else return 0
+                                     9:     end if
+                                    10: end if
+                               14     Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                               follows from the algebraic fact that any deviation from the honest equations
+                               introduces a nonzero term that is uniformly distributed in F∗, since the verifica-
+                                                                                          p
+                               tion constraints form a linear system satisfied by exactly one tuple—the honest
+                               signature—and any modification yields a uniformly random nonzero output.
+                               4.1   Three-Party SILMARILS
+                               In this section, we present SILMARILS construction in three-party mode. The
+                               goal is to enable a signer P to authenticate a message M so that a holder P can
+                                                         1                                              2
+                               extract an authenticated value and subsequently transfer it to a verifier P , while
+                                                                                                      3
+                               ensuring correctness, unforgeability, and transferability with error at most ε = 1/p.
+                               Our construction implements an IC mechanism based on afÏne authentication
+                               over Fp [45, Protocol 18.7]. In our setting, the IC mechanism is applied not to
+                               the message itself but to the authenticated value x := H(M,σ    ) ∈ F , where
+                                                                                             alg     p
+                               σ   = (σ ,...,σ ) is the algebraic part of SILMARILS signature produced
+                                alg     1      5
+                               by Algorithm 2. The IC layer ensures that P and P agree on a unique afÏne
+                                                                            2      3
+                               authentication pair (x,σ) satisfying σ = k x + k , for secret coefÏcients (k ,k )
+                                                                        1     2                         1  2
+                               held by P . Any attempt by a malicious P to cause P and P to disagree on
+                                         3                               1           2       3
+                               the authenticated value is detected with probability at least 1 − 1/p. Hence, the
+                               resulting three-party SILMARILS protocol consists of two phases:
+                               Signing phase: The signer P computes σ         using Algorithm 2, derives x =
+                                                             1             alg
+                               H(M,σ ), and initiates the IC protocol with P and P to authenticate x. The
+                                      alg                                     2      3
+                               IC protocol consists of a challenge phase (run by P ) and a consistency-check
+                                                                                  2
+                               phase (run by P and P ). At the end of this phase, the holder P obtains an
+                                               1       3                                         2
+                               authenticated pair (x,σ) consistent with the verifier’s secret line σ = k1x + k2
+                               except with probability 1/p.
+                               Transfer phase: The holder P sends (x,σ) to P , who checks whether the
+                                                               2                  3
+                               afÏne relation holds. If so, it outputs z  = x; otherwise, it outputs ⊥. To
+                                                                        3
+                               interpret x as a signature on M, the verifier recomputes σalg from M, checks
+                                                                                               −1
+                               that H(M,σ )=x, and verifies the algebraic predicate V = SSS      (V ,V ) = 0
+                                           alg                                                 2,2  0  1
+                               from Algorithm 3; both conditions hold for all honest signatures, so the protocol
+                               realizes the ideal three-party functionality with error 1/p. Algorithms 1, 2, and 4
+                               give key generation, signing, and three-party extraction. Each algebraic signature
+                               σ   =(σ ,...,σ ) consists of masked encodings of K′, the randomness d, and
+                                alg     1      5
+                               Shamir shares of K′ and ε = αβ, ensuring that V = 0 for honest executions.
+                               In the three-party setting, Algorithm 4 computes x = H(M,σ      ) and initiates
+                                                                                             alg
+                               the IC protocol with P and P , where the challenge and consistency checks
+                                                      2       3
+                               (Algorithms 5–6) authenticate x by producing an afÏne pair (x,σ) satisfying
+                               σ = k x + k for verifier-held coefÏcients. The holder outputs z = x, which
+                                     1     2                                                    2
+                               is consistent with the verifier’s line except with probability 1/p. Any malicious
+                               deviation violates an algebraic or afÏne relation, causing the reconstructed value
+                               at the verifier to be uniformly random in Fp, so a forgery is accepted with
+                               probability at most 1/p. Finally, the holder transfers (x,σ) to P (Algorithm 7),
+                                                                                             3
+                               and the verifier applies Algorithm 8 to output z ∈ {x,⊥} depending on whether
+                                                                             3
+                               the afÏne check holds.
+                                                                       Title Suppressed Due to Excessive Length         15
+                                   Algorithm 4 Sign(3)(M) (run by P )
+                                                        sk                  1
+                                    1: Compute σalg using Algorithm 2.
+                                    2: Compute x := H(M,σ ).
+                                                              alg
+                                                       ′  ′ $
+                                    3: Sample k1,k2,x ,k ←− Fp.
+                                                          2
+                                    4: Compute σ = k x+k and σ′ = k x′ +k′.
+                                                      1      2            1      2
+                                                 ′    ′                     ′
+                                    5: Send (x,x ,σ,σ ) to P and (k ,k ,k ) to P .
+                                                             2        1  2  2       3
+                                    6: Proceed to the IC challenge phase.
+                                   Algorithm 5 IC Challenge Phase (run by P2)
+                                                 $
+                                    1: Sample e ←− Fp. ′                   ′
+                                    2: Compute xe := x +ex and σe := σ +eσ.
+                                    3: Broadcast (e,xe,σe).
+                                      Upon receiving x, the verifier recomputes σalg from M and checks that
+                                   H(M,σ )=xandV(P,M,σ )=0.Ifbothhold, the signature is accepted.
+                                           alg                      alg
+                                   4.2   Two-Party SILMARILS
+                                                 ∗                   k
+                                   Let H : {0,1} → Fp with p ≈ 2 , be a hash function modeled as a random oracle,
+                                   and let HMAC be a pseudorandom function keyed by the long-term signing key
+                                   K. The two-party signature scheme SILMARILS = (KeyGen,Sign,Verify) between
+                                   P and P is defined as follows. We have also provided an open-source reference
+                                    1        3
+                                   implementation in Rust [20].
+                                              k                           k                   ∗
+                                   KeyGen(1 ): Choose a prime p ≈ 2 and work over F . Fix H and SSS                 (with
+                                                                                              p                  2,2
+                                                                                                                     $   ∗
+                                       fresh internal randomness each use). Sample public weights w0,w1 ←− F
+                                                                                                                         p
+                                                                    $   ∗
+                                       and a long-term key K ←− F . Signer and verifier share ksig for deriving
+                                                                        p
+                                       n=HMAC (M).Outputsk=K andpk=(w ,w ).
+                                                    k                                       0   1
+                                                     sig
+                                                                                                     $   ∗
+                                   Sign (M): On input M and sk = K, sample α,β,b,d ←− F and set ε =
+                                        sk                                                               p
+                                       αβ, (ε ,ε ) = SSS       (ε). Compute the shared nonce n := HMAC               (M),
+                                              0   1         2,2                                                   k
+                                                                                                                   sig
+                                       and compute r := H(M,n). Derive the per-message signing key K′ :=
+                                       HMAC (M),andcomputeits shares (K′,K′) = SSS                  (K′). Then compute
+                                               K                                   0    1        2,2
+                                       the algebraic signature σ     =(σ ,σ ,σ ,σ ,σ ) using (4).
+                                                                  alg      1  2   3   4  5
+                                   Verify (M,σ ): On input (M,σ ) and public key (w ,w ), parse σ                       =
+                                         pk       alg                    alg                       0    1           alg
+                                       (σ ,σ ,σ ,σ ,σ ). Compute n := HMAC              (M), r := H(M,n). If σ = 0,
+                                         1   2  3   4   5                            ksig                           4
+                                       output 0 (reject). Compute
+                                                         V =σ σ −σ ,            V =σ σ −σ +rσ .                        (5)
+                                                          0     1 2     5        1     1 2     3       4
+                                       Reconstruct V = SSS−1(V ,V ). If V = 0 output 1, otherwise output 0.
+                                                               2,2  0   1
+                                   Remark 1 (Relationship Between Modes). The two-party TDV and three-party
+                                   modes are distinct primitives with different assumptions and guarantees; we
+                                   present them in a common algebraic framework but do not claim any reduction
+                                   between them.
+                               16     Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                               Algorithm 6 IC Consistency Checks (run by P and P )
+                                                                              1      3
+                                  Checks by P on P ’s broadcast:
+                                               1     2
+                                1: Verify x = x′ +ex and σ = σ′ +eσ.
+                                         e               e
+                                2: if either check fails then
+                                3:   Broadcast “P corrupt” and broadcast (x,σ).
+                                                 2
+                                4:   P sets (x,σ) to the broadcasted pair.
+                                       2
+                                5:   P updates k so that σ = k x+k .
+                                       3         2             1     2
+                                6:   Terminate signing phase with z2 = x.
+                                7: else
+                                8:   Broadcast “accept”.
+                                9: end if
+                                  Checks by P :
+                                               3
+                                           ?         ′
+                               10: Verify σ = k x +k +ek .
+                                          e   1 e    2    2
+                               11: Broadcast “accept” or “reject” accordingly.
+                                  Checks by P on P ’s broadcast:
+                                               1     3
+                               12: Using (k ,k ,k′), verify whether P ’s broadcast (“accept” or “reject”) is consistent
+                                          1  2  2                 3
+                                  with the equation above.
+                               13: if P3’s broadcast is inconsistent then
+                               14:   Broadcast “P corrupt”.
+                                                 3
+                               15: end if
+                               16: if P says “accept” and P says “accept” then
+                                      3                  1
+                               17:   Terminate signing phase with z2 = x.
+                               18: else if P says “reject” and P says “accept” then
+                                           3                 1
+                               19:   P broadcasts (x,σ).
+                                       1
+                               20:   P sets (x,σ) to the broadcasted pair.
+                                       2
+                               21:   P updates k so that σ = k x+k .
+                                       3         2             1     2
+                               22:   Terminate signing phase with z2 = x.
+                               23: else if P says “P corrupt” then
+                                           1       3
+                               24:   P broadcasts (k ,k ).
+                                       1             1  2
+                               25:   P sets (k ,k ) to the broadcasted pair.
+                                       3      1  2
+                               26:   P updates σ so that σ = k x+k .
+                                       2                      1     2
+                               27:   Terminate signing phase with z2 = x.
+                               28: end if
+                               5 Designated-Verifier Security of Two-Party SILMARILS
+                               In this section we formalize the DV security of the two-party SILMARILS mode
+                               and prove that it satisfies the Jakobsson–Sako–Impagliazzo (JSI) notion of DV
+                               proofs [31]. Intuitively, a designated-verifier signature (DVS) scheme is one in
+                               which the DV can always simulate accepting transcripts that are indistinguishable
+                               from real ones, so that no third party can be convinced that the signer actually
+                               produced a given transcript.
+                                  Jakobsson et al. motivate designated verification as reconciling authenticity
+                               with privacy: “we designate a verifier when we ensure that nobody but this
+                               participant can be convinced by the proof.” Their core idea is that Alice proves
+                               the disjunction ”either φ is true, or I am Bob,” which convinces Bob but is useless
+                               to any third party, since Bob can always simulate being Bob. This captures the
+                                                                          Title Suppressed Due to Excessive Length            17
+                                    Algorithm 7 Transfer(x,σ) (run by P )
+                                                                                     2
+                                     1: Send (x,σ) to P3.
+                                    Algorithm 8 ExtractTransfer(x,σ) (run by P )
+                                                                                                3
+                                     1: if σ = k x+k then
+                                                 1      2
+                                     2:     Output z := x.
+                                                      3
+                                     3: else
+                                     4:     Output z := ⊥.
+                                                      3
+                                     5: end if
+                                    requirement that any transcript convincing to the designated verifier must be
+                                    simulatable by that verifier alone, and therefore non-transferable.
+                                        We adopt the JSI model with three parties: a prover P (the signer), a
+                                    designated verifier V, and a third party C (Cindy). Let φ be the statement
+                                    “σ is a valid SILMARILS signature on message M under the shared long-
+                                    term key K and per-pair key k ”. A (possibly interactive) protocol (P ,P ) is a
+                                                                       sig                                           P   V
+                                    designated-verifier proof of φ if the following two properties hold: 1) Correctness
+                                    for the DV: If P is honest and φ is true, then an honest V accepts with
+                                    overwhelming probability; 2) Simulatability for the DV: For any (possibly
+                                    malicious) prover P∗, there exists a probabilistic polynomial-time (PPT) simulator
+                                    SV that, given only V’s secret key and the public inputs, outputs transcripts that
+                                    are computationally indistinguishable from those produced by an interaction
+                                    between P∗ and an honest V.
+                                        Following JSI, we say that V is a designated verifier if for any protocol
+                                    (P ,P ,P ) in which V attempts to convince C of φ, there exists a protocol
+                                       P    V   C
+                                    (P′ ,P ) such that V alone can generate transcripts that C cannot distinguish from
+                                       V   C
+                                    those of the original three-party protocol. In particular, a hidden verifier C cannot
+                                    obtain transferable conviction, since any transcript she sees could have been
+                                    generated entirely by V. In the sequel, we first analyze the algebraic structure
+                                    of the verification equations, showing that any party who can compute the per-
+                                    message value r = H(M,HMACk (M)) can generate accepting transcripts and
+                                                                           sig
+                                    extract the hidden parameters a and s = K′. We then show that this capability
+                                    is exactly the JSI designated-verifier simulation property and therefore a security
+                                    feature, not a flaw.
+                                    5.1    Algebraic Structure and Simulator Construction
+                                    Using Shamir shares K′ = K′ + a w , K′ = K′ + a w , ε = ε + a w ,
+                                                                 0             K 0       1             K 1     0            ε  0
+                                                                                                                          −1
+                                    ε =ε+a w , the verifier computes V = σ σ −σ = d(−a w −r+rε ε )
+                                      1         ε  1                             0      1 2     5          K 0                 0
+                                                                                            −1               −1            a w
+                                    and V = σ σ −σ +rσ = d(−a w −r+rε ε ). Using ε ε = 1+ ε i,
+                                           1      1 2      3      4          K 1                 1               i           ε
+                                    we obtain V = dw C, V = dw C, and C := −a + raε. Thus (V ,V ) are
+                                                   0        0     1        1                    K       ε             0   1
+                                    evaluations of f(x) = dCx, and reconstruction yields f(0) = 0, guaranteeing
+                                    acceptance.
+                                    18       Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                                    Simulator (DV Forgery): Any party knowing r can generate a valid transcript.
+                                    Compute n = HMAC (M)andr=H(M,n),choosearbitraryK′∗,a ,a ∈F
+                                                             k                                                       K ε       p
+                                                              sig
+                                                    ∗                ′∗     ′∗              ′∗      ′∗            ∗
+                                    and d,ε,b ∈ F , and form K         =K +a w ,K =K +a w ,ε =ε+a w ,
+                                                    p                0             K 0      1             K 1 0             ε  0
+                                      ∗
+                                    ε =ε+a w .Substitute these values into the signature equations (4) and output
+                                      1         ε  1
+                                    the resulting σ∗ = (σ∗,...,σ∗).
+                                                             1        5
+                                    5.2    Extraction of the Hidden Parameters
+                                                                                                 −1
+                                    From the signature equations σ = b(s−r), σ = db                 , σ =d(aw +s), σ =
+                                                                         1                2             3         1          4
+                                                                                         −1
+                                    du , σ = d(aw + s − ru ), with u = ε ε , the verifier forms the ratio
+                                       1    5           0            0           i           i
+                                    R = σ1σ2 = s−r , yielding s(R − 1) + aw R + r = 0. From reconstruction,
+                                            σ3      aw1+s                               1
+                                    aC =rC , C =λ w +λ w , with C =λ (u −1)+λ (u −1) and
+                                        w       ε    w      0 0      1 1          ε      0  0           1   1
+                                                                                                 aw +s−σ aw1+s
+                                                                              aw +s                  0         5
+                                                                                 1                                 σ
+                                             d = σ /(aw +s),        u =σ               ,   u =                      3   .
+                                                   3      1           1     4    σ          0               r
+                                                                                  3
+                                    Thus C =α a+α s+α , giving the linear system
+                                             ε     a       s      0
+                                                  (Cw −rαa)a−rαss=rα0,                 w1Ra+(R−1)s=−r.
+                                    Solving yields explicit closed forms for a and s. If R ̸= 1, then s = −aw1R−r.
+                                    Once s is known, K′ = aw +s and K′ = aw +s.                                          R−1
+                                                           0       0             1       1
+                                    Theorem 4 (DV Security of Two-Party SILMARILS). The two-party
+                                    SILMARILS is a DV signature scheme in the sense of JSI notion. In particular,
+                                    for every message M and every honestly generated transcript (M,σ,r), the
+                                    designated verifier—and only the designated verifier—can (i) verify correctness
+                                    and (ii) generate transcripts that are computationally indistinguishable from
+                                    honestly generated ones. Consequently, no third party can obtain transferable
+                                    conviction that the signer produced the transcript.
+                                    Proof. Let P be the signer, P the DV, and C an arbitrary third party. The signer
+                                                   1                  3
+                                    and DV share the per-pair key k , enabling P to compute n = HMAC                        (M)
+                                                                           sig             3                             k
+                                                                                                                          sig
+                                    and r = H(M,n) for any M. Knowledge of r is the trapdoor enabling simulation,
+                                    analogous to the trapdoor commitment key in JSI.
+                                    Correctness: For an honestly generated signature σ = (σ ,...,σ ), the verifier
+                                                                                                       1        5
+                                                                                                a
+                                    computes V = dw C, V = dw C, C = −a +r ε, which interpolate to the
+                                                  0       0      1        1             K       ε
+                                    afÏne polynomial f(x) = dCx with f(0) = 0. Thus the verification algorithm
+                                    always accepts honest signatures.
+                                    Simulatability: Given any message M, the DV can generate an accepting transcript
+                                    without interacting with the signer. It computes r = H(M,HMACk (M)),
+                                                                                                                        sig
+                                                           ′∗                               ∗                ′∗      ′∗
+                                    chooses arbitrary K ,a ,a ∈ F and d,ε,b ∈ F , and forms K                   =K +a w ,
+                                                               K ε        p                 p                0             K 0
+                                       ′∗      ′∗            ∗                ∗
+                                    K =K +a w ,ε =ε+a w ,ε =ε+a w .Substitutingintothesignature
+                                       1             K 1 0             ε  0   1         ε  1
+                                    equations (4) yields σ∗ = (σ∗,...,σ∗). Verification of σ∗ produces the same
+                                                                       1        5
+                                    (V ,V ) structure as an honest signature and reconstructs f(0) = 0, so σ∗ is
+                                       0   1
+                                    always accepted.
+                                    Indistinguishability: In honest signing, the parameters (K′,a ,a ,d,ε,b) are
+                                                                                                              K ε
+                                    uniformly random in the same domains as in simulation. The only difference is
+                                                                       Title Suppressed Due to Excessive Length         19
+                                   that K′ is derived as HMACK(M), whereas K′∗ is chosen uniformly. Since K
+                                   is unknown to any external observer, the distributions of honest and simulated
+                                   transcripts are identical. Hence no algorithm can distinguish them.
+                                  Non-transferability: Let C receive (M,σ,r) from P . Because P can generate
+                                                                                           3              3
+                                   such transcripts without interacting with P , C cannot determine whether the
+                                                                                   1
+                                   transcript originated from the signer or from the DV. This matches the JSI
+                                   definition: for any three-party protocol (P ,P ,P ), there exists a two-party
+                                               ′                                  P    V   C
+                                   protocol (P ,P ) producing indistinguishable transcripts.
+                                               V   C
+                                      Hence, only the DV can be convinced by a transcript, and any transcript that
+                                   convinces them is simulatable by them alone. Therefore, two-party SILMARILS
+                                   satisfies the JSI designated-verifier definition.                                    □
+                                   6 EUF-CMASecurity of Two-Party SILMARILS Against
+                                        Non-Designated Parties
+                                   In this section we prove that two-party SILMARILS is EUF-CMA secure in
+                                   the ROM and QROM against non-designated parties. In the two-party mode
+                                   of SILMARILS, the designated verifier holds the shared secret ksig and can
+                                   therefore compute the per-message nonce n = HMACk (M) and the receipt
+                                                                                                 sig
+                                   r = H(M,n) for any message M. This enables the designated verifier to simulate
+                                   accepting transcripts that are indistinguishable from honestly generated ones, as
+                                   required by JSI notion. Consequently, standard EUF-CMA unforgeability cannot
+                                   hold for the designated verifier. Instead, we prove unforgeability against all non-
+                                  designated parties, who do not know ksig and therefore cannot compute r for new
+                                   messages. We emphasize that in the TDV setting the designated verifier may
+                                   publish a receipt r enabling third-party verification, but verification is impossible
+                                   without r, and even with r no external party can determine whether a valid
+                                   transcript was produced by the signer or simulated by the designated verifier.
+                                   Definition 6 (EUF-CMA Security for Non-Designated Verifiers). We
+                                  write EUF-CMA¬DV to denote existential unforgeability under chosen-message
+                                  attack for all parties except the designated verifier. An adversary A is given the
+                                   public parameters (w ,w ) and oracle access to Sign (·). It outputs (M⋆,σ⋆).
+                                                          0   1                               sk
+                                  We say that A wins if Verify (M⋆,σ⋆) = 1 and M⋆ was never queried to the
+                                                                   pk
+                                  signing oracle. The designated verifier is excluded from this game, as it must be
+                                  able to simulate signatures.
+                                   Weisolate the algebraic core used to analyze unforgeability for non-designated
+                                   verifiers. Here the only value depending on ksig is the receipt r = H(M,n),
+                                   sampled uniformly per query; the adversary never learns n or k .
+                                                                                                         sig
+                                                                                                         A k
+                                   Definition 7 (Algebraic Core Experiment). In CoreForge (1 ), the chal-
+                                                       $   ∗
+                                  lenger samples K ←− F , gives (w ,w ) to A, and for each signing query M sam-
+                                                           p           0   1
+                                                  $   ∗                                                        $
+                                   ples α,β,b,d ←− F , sets ε = αβ with (ε ,ε ) = SSS         (ε), samples r ←− F , com-
+                                                      p                       0  1         2,2                    p
+                                   putes K′ = HMAC (M) with (K′,K′) = SSS                (K′), and returns (σ ,...,σ )
+                                                        K               0    1        2,2                       1       5
+                                   20      Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                                                             ⋆   ⋆       ⋆                             ⋆ $
+                                  as in (4). On output (M ,σ ,...,σ ), the challenger samples r ←− F , computes
+                                                                 1       5                                    p
+                                     ⋆        ⋆                                  ⋆       −1    ⋆    ⋆
+                                   V and V as in (5), and reconstructs V = SSS              (V ,V ), and outputs 1 iff
+                                    0        1                                           2,2   0   1
+                                     ⋆                             ⋆                                        A k
+                                   M was never queried and V = 0. The advantage is Pr[CoreForge (1 ) = 1].
+                                   Lemma 5 (Algebraic Core Unforgeability). If r⋆ is sampled uniformly
+                                  independent of the adversary’s view after the PPT adversary outputs its forgery,
+                                                      A k            1
+                                  then Pr[CoreForge (1 ) = 1] ≤ p, which is negligible in k.
+                                   Proof. Fix any view of A up to the moment it outputs (M⋆,σ⋆,...,σ⋆). The value
+                                                                                                    1       5
+                                   r⋆ used in verification is sampled after the forgery is output and is uniform in Fp,
+                                   independent of A’s view. The verification equations define V ⋆ independently of
+                                                                                      −1             0
+                                   r⋆ and V⋆ as an afÏne function of r⋆. Since SSS        is linear, the predicate V ⋆ = 0
+                                            1                                         2,2
+                                   holds for at most one value of r⋆. Thus the probability that V ⋆ = 0 is at most
+                                   1/p, even for an unbounded adversary.                                                □
+                                   Remark 2. Ifthereceiptwerepublic,i.e.r = H(M)withoutthehiddennoncen =
+                                   HMAC (M),then the verification equations V = σ σ −σ and V = σ σ −
+                                          k                                             0    1 2      5       1     1 2
+                                            sig
+                                   σ +rσ become public linear constraints on (σ ,...,σ ), making the algebraic
+                                    3      4                                           1        5
+                                   core deterministically forgeable: for any new M′ ̸= M, an adversary may choose
+                                   arbitrary σ′,σ′,σ′,σ′ ∈ F , compute V′ = σ′σ′ −σ′ +r′σ′ with r′ = H(M′),
+                                               1   2  3   4     p              1     1 2     3       4
+                                             ′    ′  ′              ′                        ′        −1   ′   ′
+                                   and set σ = σ σ −(w /w )V , which always yields V = SSS              (V ,V ) = 0 and
+                                             5    1 2      0    1  1                                  2,2  0   1
+                                   thus a perfect forgery. To prevent this, SILMARILS derives a secret per-message
+                                   nonce n = HMACksig(M) and defines r = H(M,n), ensuring r is unpredictable
+                                   for new messages and eliminating the algebraic forgery.
+                                   Definition 8. Let Π        =(KeyGen,Sign,Verify) denote the two-party algebraic
+                                                          core
+                                  core of SILMARILS. We say that Π               is ε   -correct if, for all messages M
+                                                                            core    corr
+                                  and all honestly generated key pairs (pk,sk) ← KeyGen,
+                                                                                            
+                                               Pr Verify (M,σ ) = 1  σ         ←Sign (M) ≥ 1−ε              .
+                                                         pk      alg         alg        sk                corr
+                                  If ε     =0, the algebraic core is said to be perfectly correct.
+                                      corr
+                                   Theorem 5 (1/p−Correctness). For any message M and every honestly gen-
+                                  erated key pair (pk,sk), an honestly generated signature σ            ←Sign (M) is
+                                                                                                     alg         sk
+                                  rejected with probability at most 1/p.
+                                   Proof. Let M be arbitrary and let σ          = (σ ,σ ,σ ,σ ,σ ) be the signature
+                                                                             alg      1  2   3   4  5
+                                   produced by Sign (M). Let n = HMACk (M),r = H(M,n), and let K′ =
+                                                      sk                          sig
+                                                     ′    ′              ′                                               $
+                                   HMAC (M),(K ,K )=SSS (K ).Thesigningalgorithmsamplesα,β,b,d←−
+                                          K          0    1        2,2
+                                    ∗
+                                   F , sets ε = αβ and (ε ,ε ) = SSS         (ε), and computes (σ ,...,σ ) as in (4).
+                                    p                        0  1         2,2                        1       5
+                                                                                                          −1
+                                   The verifier computes V ,V as in (5) and reconstructs V = SSS             (V ,V ). We
+                                                h            0   1           i             h              2,2  0   1     i
+                                   have V = d (K′ −r)−(K′ −rε−1ε ) and V = d (K′−r)−(K′ −rε−1ε ) .
+                                          0                     0          0         1                      1          1
+                                                                                                             w K′−w K′
+                                   Since (K′,K′) are the Shamir shares of K′ at points (w ,w ), K′ =           0  1   1 0 .
+                                            0    1                                             0   1            w −w
+                                                                                          w ε −w ε                0   1
+                                   Similarly, since (ε ,ε ) are the shares of ε, ε =       0 1   1 0. Reconstructing V
+                                                       0  1                                 w −w
+                                                                                             0   1
+                                              w V −w V
+                                   gives V =    0 1   1 0. Substituting the expressions for V and V and simplifying
+                                                 w0−w1                                         0        1
+                                                                       Title Suppressed Due to Excessive Length         21
+                                   using the identities above yields V = 0. Considering the case σ4 = 0, which
+                                   causes the verification to reject, the verification predicate evaluates to zero with
+                                   probability 1 − 1/p for honestly generated signatures.                               □
+                                                     ¬DV
+                                   6.1   EUF-CMA           Security of Two-Party SILMARILS in the ROM
+                                   Wenowprove that the two-party mode of SILMARILS is EUF-CMA¬DV secure
+                                   in the ROM, using Lemma 5. Recall that non-designated verifiers do not know
+                                   the shared secret ksig and therefore cannot compute the per-message nonce
+                                   n=HMACk (M)orthereceipt r =H(M,n) for new messages. This prevents
+                                                sig
+                                   them from mounting the deterministic algebraic forgery described in the previous
+                                   remark.
+                                   Theorem 6. Assume H is modeled as a random oracle and is collision resistant,
+                                  and HMAC is a PRF keyed by ksig. Then the two-party SILMARILS scheme is
+                                              ¬DV
+                                   EUF-CMA         secure. More precisely, for any PPT adversary A there exist PPT
+                                  algorithms B ,B ,B such that
+                                                1   2   3
+                                         AdvEUF-CMA¬DV(A) ≤ Advcore(B )+AdvPRF             (B )+AdvCR(B )+ 1.
+                                             SILMARILS                     1         HMAC 2            H    3     p
+                                                                                           ¬DV
+                                   Proof. Let A be a PPT adversary in the EUF-CMA               game. We proceed via a
+                                   sequence of games.
+                                                                             ¬DV
+                                   Game 0: This is the real EUF-CMA               experiment for SILMARILS. The
+                                   adversary receives (w0,w1), has access to the signing oracle, and interacts with
+                                   Hasarandomoracle. Let Succ0 denote the event that A outputs a valid forgery
+                                  (M⋆,σ⋆ ) on a message M⋆ not previously signed.
+                                          alg
+                                                                                                             ∗
+                                   Game 1: Replace HMACk by a truly random function F : {0,1} → Fp. All
+                                                                 sig
+                                   other aspects remain unchanged. Let Succ be the forgery event in Game 1.
+                                                                                   1
+                                   By a standard PRF reduction, there exists a PPT distinguisher B such that
+                                                                                                            2
+                                                                    PRF
+                                   Pr[Succ ] − Pr[Succ ]      ≤ Adv          (B ). From now on we analyze Game 1,
+                                            0            1            HMAC 2
+                                   where n := F(M) and r := H(M,n).
+                                   Game 2: We now make explicit how the simulator programs the random oracle
+                                   H. A simulator B maintains a table TH. On a signing query M, it: 1) samples
+                                      $                                  $
+                                   n ←− F as F(M); 2) samples r ←− F ; 3) programs H(M,n) := r in T ; 4)
+                                          p                                  p                                       H
+                                                        $   ∗
+                                   samples α,β,b,d ←− F , sets ε = αβ and (ε ,ε ) = SSS                (ε); 5) computes
+                                                            p                         0   1         2,2
+                                   K′ =HMAC (M)and(K′,K′)=SSS (K′);6)computes(σ ,...,σ ) exactly
+                                                 K              0   1         2,2                       1       5
+                                   as in Sign; 7) returns σalg to A. For any other H-query (x,y) not equal to (M,n)
+                                   for a signed message, B returns a fresh uniform value in F , consistent with T .
+                                                                                                   p                    H
+                                   This perfectly simulates Game 1, so Pr[Succ1] = Pr[Succ2].
+                                   Analysis of a forgery in Game 2: Suppose A outputs a forgery (M⋆,σ⋆ ) with
+                                                                                                                 alg
+                                   σ⋆ = (σ⋆,...,σ⋆). Let n⋆ := F(M⋆) and r⋆ := H(M⋆,n⋆). Since verification
+                                    alg      1       5
+                                   accepts, the algebraic predicate V ⋆ = σ⋆σ⋆−σ⋆,, V ⋆ = σ⋆σ⋆−σ⋆+r⋆σ⋆, satisfies
+                                       −1                             0      1 2     5   1      1 2     3      4
+                                   SSS (V⋆,V⋆)=0. We distinguish two cases.
+                                       2,2  0   1
+                                                                        ⋆   ⋆          ⋆
+                                  Case 1: A never queried H on (M ,n ). Then r is uniform and independent of
+                                   A’s view. For any fixed (σ⋆,...,σ⋆), the algebraic predicate holds for at most
+                                                                1       5
+                                   one value of r⋆, so Pr[Succ ∧Case 1] ≤ 1.
+                                                                2               p
+                               22      Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                                                             ⋆   ⋆
+                               Case 2: A queried H on (M ,n ). Let this be the first such query. At that
+                               moment, the simulator chooses r⋆ uniformly. Conditioned on this choice, the
+                               distribution of (σ⋆,...,σ⋆) is identical to that in the algebraic core experiment.
+                                                 1      5
+                               Define B as the algebraic-core adversary that runs A and outputs the forgery in
+                                        1
+                               Case 2. Then Pr[Succ ∧Case 2] ≤ Advcore(B ).
+                                                     2                       1
+                                   If A ever forces H(x) = H(x′) for x ≠    x′, then we obtain a collision in
+                               H. Define B3 to output such a pair. Then Pr[A causes a collision in H]        ≤
+                               AdvCR(B ). Combining the two cases, Pr[Succ ] ≤ Advcore(B )+ 1 +AdvCR(B ).
+                                   H    3                                   2              1    p      H    3
+                               Together with the transition from Game 0 to Game 1,
+                                     AdvEUF-CMA¬DV(A) ≤ AdvPRF      (B )+Advcore(B )+AdvCR(B )+ 1.
+                                         SILMARILS             HMAC 2                1       H    3    p
+                               By Lemma 5 and the assumed security of HMAC and H, the right-hand side is
+                                                                            ¬DV
+                               negligible. Hence SILMARILS is EUF-CMA           secure.                      □
+                                                ¬DV
+                               6.2   EUF-CMA         Security of Two-Party SILMARILS in the QROM
+                               Wenowextend the EUF-CMA¬DV analysis of SILMARILS to the QROM. The
+                               classical ROM proof relies on lazy sampling and post-hoc programming of the
+                               random oracle at points (M,n), where n is the output of a PRF. In the QROM,
+                               the adversary may query the random oracle in superposition, and therefore the
+                               classical programming argument is no longer sound. To obtain a valid security
+                               proof, we rely on the measure-and-reprogram technique of Zhandry [50] and
+                               Unruh [47], which allows programming the random oracle at a single point while
+                               bounding the adversary’s distinguishing advantage.
+                               Lemma 6 (Quantum Measure-and-Reprogram [50], [47]). Let A be a
+                               quantum algorithm that makes at most qH queries to a random oracle H : X → Y,
+                                                                                             H
+                               where Y is a finite set. On input public parameters PP, A        outputs a pair
+                                 ⋆                            ⋆        ⋆
+                               (x ,z) ∈ X × Z. Let V(PP,x ,z,H(x )) ∈ {0,1} be a (classical) predicate.
+                               Consider the following two experiments:
+                                                                                                       ⋆
+                               Real experiment (E1): Sample a random oracle H : X → Y, run (x ,z) ←
+                                   AH(PP), and output (x⋆,z,H(x⋆)).
+                               Measure-and-reprogram experiment (E2): Sample a random oracle H and
+                                   run AH(PP), but let a simulator S do the following: at one adaptively chosen
+                                   oracle query (among at most q ), measure the query register to obtain x˜;
+                                                                   H
+                                   choose any y⋆ ∈ Y; define H′(x˜) = y⋆ and H′(x) = H(x) for x ≠   x˜; and let
+                                   Acontinue with H′. If (x⋆,z) is the final output, return (x⋆,z,H′(x⋆)).
+                               Then a simulator S exists making at most qH +O(1) oracle queries and         
+                                                                                                  q2
+                                           ⋆       ⋆                        ⋆     ′  ⋆                 H
+                               Pr V(PP,x ,z,H(x )) = 1 E1 −Pr V(PP,x ,z,H (x )) = 1 E2  ≤ O |Y| .
+                               In particular, from the adversary’s point of view, programming the random oracle
+                               at a single point x˜ (chosen by measuring one of its queries) and assigning it an
+                               arbitrary value y⋆ is indistinguishable from the original random-oracle experiment
+                               up to statistical distance O(q2 /|Y|).
+                                                            H
+                                                                       Title Suppressed Due to Excessive Length         23
+                                                              ¬DV
+                                   Theorem 7 (EUF-CMA              Security in the QROM). Assume H is modeled
+                                  as a quantum-accessible random oracle and is collision-resistant against quantum
+                                  adversaries and HMAC is a quantum-secure PRF keyed by ksig. Then, SILMAR-
+                                   ILS is EUF-CMA¬DV secure in the QROM. More precisely, for any quantum
+                                   polynomial time (QPT) adversary A making at most qH quantum queries to H,
+                                  there exist QPT algorithms B ,B ,B such that
+                                                                   1   2   3
+                                         EUF-CMA¬DV               core           PRF               CR           q2 
+                                     Adv             (A) ≤ Adv       (B )+Adv          (B )+Adv (B )+O             H .
+                                         SILMARILS                     1         HMAC 2            H    3          p
+                                                                                                                      ¬DV
+                                   Proof. Let A be a QPT adversary against SILMARILS in the EUF-CMA
+                                   game, making at most qH quantum queries to the random oracle H. We show
+                                   how to bound AdvEUF-CMA¬DV(A) via a sequence of games and reductions.
+                                                       SILMARILS
+                                                                          ¬DV
+                                   Game0(Real QROMEUF-CMA                      game): In Game 0, we run the standard
+                                              ¬DV
+                                   EUF-CMA         experiment for SILMARILS in the QROM: 1) A key pair (pk,sk)
+                                   is generated honestly. 2) The adversary A has quantum oracle access to H and
+                                   classical access to a signing oracle Sign (·). 3) Eventually, A outputs a pair
+                                                                               sk
+                                  (M⋆,σ⋆ ). 4) The experiment outputs 1 (success) if Verify (M⋆,σ⋆ ) = 1 and
+                                          alg                                                       pk       alg
+                                   M⋆wasneverqueried to the signing oracle. Let Adv0 := Pr[Game 0 outputs 1] =
+                                   AdvEUF-CMA¬DV(A).
+                                       SILMARILS
+                                   Game1(Replace HMAC by a quantum-secure PRF): In the real scheme,
+                                   the value n used to derive r is computed as n = HMACk (M). By assumption,
+                                                                                                 sig
+                                   HMAC is a quantum-secure PRF. We define Game 1 as follows: 1) Replace
+                                                                                      ∗
+                                   HMACk byatrulyrandomfunctionF :{0,1} →Fp.2)Foreachsigning query
+                                            sig
+                                   M,set n := F(M) and then derive r := H(M,n) as in the real scheme. By the
+                                   quantum PRF security of HMAC, there exists a QPT distinguisher B such that
+                                                                                                              2
+                                   |Adv −Adv | ≤ AdvPRF          (B ), where Adv is the success probability of A in
+                                        1       0          HMAC 2                  1
+                                   Game1. Hence it sufÏces to bound Adv1 and consider the idealized setting where
+                                   F is a truly random function, independent of H.
+                                   Game 2 (Measure-and-reprogram H at signing points). In Game 1,
+                                   for each signing query M, the scheme computes n := F(M) and then sets
+                                   r := H(M,n). In the QROM, A may have queried H on superpositions that
+                                   include (M,n), so we cannot naively program H(M,n) after the fact. We now
+                                   define Game 2, where a simulator S uses the measure-and-reprogram lemma
+                                  (Lemma 6) to program H at points of the form (M,n) for signing queries M:
+                                   1) For each signing query M, the simulator samples n := F(M) and a fresh
+                                      $
+                                   r ←− Fp. 2) The simulator applies the measure-and-reprogram procedure to the
+                                   quantum random oracle H at the point (M,n), reprogramming H(M,n) to r. 3)
+                                   It then computes the algebraic signature components (σ1,...,σ5) exactly as in
+                                   the real signing algorithm, using this r, and returns σ      =(σ ,...,σ ) to A. By
+                                                                                             alg      1       5
+                                   Lemma 6, for each programmed point (M,n), the statistical distance between
+                                   the real QROM experiment and the measure-and-reprogram experiment is at
+                                   most O(q2 /|Y|), where Y is the output space of H. In our setting, H outputs
+                                             H
+                                   elements of Fp, so |Y| = p. Since the number of signing queries is polynomial
+                                   and qH bounds the total number of quantum queries, a union bound yields
+                               24      Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                                                   q2 
+                               |Adv2−Adv1| ≤ O H , where Adv2 is the success probability of A in Game 2.
+                                                     p
+                               In Game 2, the distribution of signatures seen by A is identical to the real scheme:
+                               for each signing query M, the value r = H(M,n) is uniform in Fp (from A’s
+                               point of view) and the signature is computed honestly from r.
+                               Game 3 (Explicit simulation of signatures): We now make explicit the fact
+                                                                        $
+                               that in Game 2, the simulator chooses r ←− Fp and then programs H(M,n) to r.
+                               Thus, we can equivalently define Game 3 as: 1) For each signing query M, sample
+                                                  $
+                               n:=F(M)andr←−Fp. 2) Program H(M,n):=r via measure-and-reprogram.
+                               3) Compute (σ ,...,σ ) exactly as in the real signing algorithm using this r.
+                                               1      5
+                               By construction, Adv3 = Adv2. We emphasize that in Game 3, for each signed
+                               message M, the pair (n,r) is uniform and independent of A’s view, conditioned
+                               only on the fact that H(M,n) has been programmed to r.
+                                   Let (M⋆,σ⋆ )betheforgeryoutputbyAinGame3,whereσ⋆ =(σ⋆,...,σ⋆)
+                                             alg                                              alg    1       5
+                                               ⋆  ⋆              ⋆         ⋆       ⋆         ⋆   ⋆
+                               and Verifypk(M ,σ    ) = 1. Let n := F(M ) and r := H(M ,n ). We distin-
+                                                  alg
+                                                                                                   ⋆  ⋆
+                               guish two cases, depending on whether A has queried H on (M ,n ). Case
+                               1: A never queried H on (M⋆,n⋆). In this case, from A’s point of view, r⋆
+                               is uniform in Fp and independent of its entire view (including all signatures
+                               and oracle answers), because: 1) F is a truly random function, so n⋆ = F(M⋆)
+                               is uniform and independent of all other values; 2) H is a random oracle, and
+                                  ⋆   ⋆                               ⋆  ⋆
+                               (M ,n ) was never queried, so H(M ,n ) is uniform and independent. The
+                               algebraic verification predicate of SILMARILS is a system of equations over
+                               F that, for fixed (σ⋆,...,σ⋆), is satisfied by at most one value of r⋆. Therefore,
+                                 p                 1       5
+                               Pr[verification accepts in Case 1] ≤ 1. Case 2: A queried H on (M⋆,n⋆). Let
+                                                                     p
+                               (M⋆,n⋆) be the first such query. At the moment this query is made, the simulator
+                                                   ⋆                                                     ⋆   ⋆
+                               in Game 3 chooses r as a fresh uniform element of F and programs H(M ,n )
+                                                                                    p
+                               to r⋆ via measure-and-reprogram. By Lemma 6, the joint state of A and the
+                               oracle after this programming step is statistically close to the state in the ideal
+                               random-oracle experiment, with distinguishing advantage at most O(q2 /p). Con-
+                                                                                                    H
+                               ditioned on this, the distribution of (σ⋆,...,σ⋆,r⋆) in A’s view is identical to
+                                                                       1      5
+                               that in the algebraic core experiment, where r⋆ is uniform and independent of
+                               the adversary’s internal randomness. Hence, any non-negligible probability that
+                               Aoutputs a new tuple (M⋆,σ⋆,...,σ⋆) such that the algebraic predicate holds
+                                                             1       5
+                               for r⋆ yields a non-negligible advantage for a QPT adversary B in the algebraic
+                                                                                             1
+                               core game. By Lemma 5, this probability is bounded by Advcore(B )+1/p.
+                                                                                                 1
+                                   In both cases, we have implicitly assumed that A does not exploit collisions
+                               in H. If A can force H(x) = H(x′) for distinct x ̸= x′ with non-negligible proba-
+                               bility, then we obtain a quantum collision-finder B against H, with advantage
+                                                                                  3
+                               AdvCR(B ). Now, let Adv be the success probability of A in Game 3. From the
+                                   H    3               3                                                  
+                                                                           core          CR       1      q2
+                               case analysis above, we obtain Adv   ≤ Adv     (B )+Adv (B )+ +O H .
+                                                                  3             1        H   3    p       p
+                               Combining the game transitions, we have
+                                AdvEUF-CMA¬DV(A) = Adv ≤ Adv +AdvPRF          (B ) ≤ Adv +AdvPRF      (B )+
+                                    SILMARILS            0       1      HMAC 2           3       HMAC 2
+                                           q2          core          PRF             CR         q2 
+                                          O H ≤Adv (B )+Adv                 (B )+Adv (B )+O          H .
+                                              p               1        HMAC 2          H    3        p
+                                                                  Title Suppressed Due to Excessive Length     25
+                                ByLemma5andtheassumedquantumsecurityof HMACandH,theright-hand
+                                side is negligible in the security parameter.                                   □
+                                7    Security Analysis of Three-Party SILMARILS
+                                We now state the main security theorem for our three-party SILMARILS
+                                protocol. The theorem asserts that the protocol implements the ideal three-party
+                                digital signature functionality fDS with error ε = 1/p.
+                                Theorem 8 (Security of Three-Party SILMARILS). Let p be a prime
+                                and let all parties operate over F . Let H be any function (deterministic, classical
+                                                                 p
+                                random oracle, or quantum-accessible random oracle) with range Fp, and define
+                                x := H(M,σalg). Consider the three-party SILMARILS protocol consisting of
+                                Algorithms 2–8. Then, for any (classical or quantum) adversary corrupting at most
+                                one party, the protocol realizes the ideal digital-signature functionality fDS with
+                                distinguishing advantage ε = 1. In particular, the protocol satisfies the previously
+                                                              p
+                                defined notions of correctness, unforgeability, transferability, and secrecy, each
+                                with error at most 1/p, uniformly across the ROM, QROM, and Pure-IT models.
+                                Proof. Fix a prime p and let all parties operate over F . Let H be any function
+                                                                                        p
+                                with range Fp (deterministic, classical random oracle, or quantum-accessible
+                                randomoracle).ForagivenmessageM andhonestlygeneratedalgebraicsignature
+                                σ    = (σ ,...,σ ) produced by Algorithm 2, the signer P computes x :=
+                                  alg     1       5                                            1
+                                H(M,σ )∈F and then runs Algorithms 4–6 to authenticate x using an IC
+                                        alg     p
+                                protocol of the same form as Protocol 18.7 in [45].
+                                Reduction to the IC functionality: Condition on a fixed value of x ∈ F and
+                                                                                                            p
+                                on fixed secret coefÏcients (k ,k ) ∈ F2 held by P . From the point of view of
+                                                              1   2     p           3
+                                the IC layer, the three-party SILMARILS protocol is exactly an execution of
+                                Protocol 18.7 in [45] on the message x, where P plays the role of the sender,
+                                                                                   1
+                                holding x and the afÏne authentication pair (x,σ) with σ = k x+k ; P plays
+                                                                                                1     2   2
+                                the role of the receiver, who should obtain z = x; P plays the role of the verifier,
+                                                                            2       3
+                                who holds (k ,k ) and outputs z ∈ {x,⊥}. Algorithms 4–6 implement exactly
+                                             1   2                3
+                                the challenge, consistency checks, and resolution rules of Protocol 18.7 in [45],
+                                specialized to the afÏne line σ = k x + k over F . Crucially, the IC security
+                                                                     1      2       p
+                                properties (correctness, unforgeability, transferability, secrecy) depend only on the
+                                algebraic structure of the protocol over F and on the randomness of the IC coins
+                                                                         p
+                                         ′  ′
+                                (k ,k ,x ,k ,e), and not on how x was obtained. In particular, the adversary
+                                  1  2      2
+                                never interacts with H through the IC interface: x is simply a field element fixed
+                                by P before the IC protocol starts. Therefore, the analysis of [45, Protocol 18.7]
+                                     1
+                                applies verbatim in all three models (ROM, QROM, Pure-IT).
+                                Correctness: If P and P are honest, then by the correctness guarantee of
+                                                    1        2
+                                Protocol 18.7, the IC protocol ensures that P and P both output x except with
+                                                                             2       3
+                                probability at most 1/p. In our instantiation, the resolution rules in Algorithm 6
+                                guarantee that whenever the IC protocol accepts, we have z = x and z = x.
+                                                                                               2            3
+                                Thus the previously defined correctness notion holds with error at most 1/p.
+                                26      Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                                Unforgeability: If P and P are honest, then a malicious P attempts to
+                                                       1        3                                 2
+                                cause P to output some z ∈/ {x ,⊥}, where x is the value authenticated by
+                                        3                   3     1              1
+                                P . In the IC abstraction, this corresponds to the receiver trying to change
+                                  1
+                                the authenticated message while still passing the verifier’s afÏne check. By the
+                                soundness (unforgeability) guarantee of Protocol 18.7 and Lemma 18.15 in [45],
+                                the probability that a cheating receiver can make the verifier accept a value
+                                different from the sender’s input is at most 1/p. Hence the previously defined
+                                unforgeability condition holds with error at most 1/p.
+                                Transferability: If P and P are honest, then a malicious P may try to
+                                                       2        3                                  1
+                                make them disagree on the authenticated value. In the IC abstraction, this is
+                                exactly the cheating-sender case: the sender attempts to cause the receiver and
+                                verifier to output different values. Protocol 18.7 guarantees that this happens
+                                with probability at most 1/p. Therefore, the previously defined transferability
+                                notion holds with error at most 1/p.
+                                Secrecy: If P and P are honest, then the view of P during the IC protocol
+                                              1        2                                3
+                                consists only of the afÏne authentication data and the challenge transcript, which,
+                                by the privacy guarantee of Protocol 18.7, is statistically independent of the
+                                authenticated value x1. Thus the previously defined secrecy notion holds with
+                                error 0 (and hence at most 1/p).
+                                   In all of the above arguments, the value x is treated as an arbitrary element
+                                of F fixed before the IC protocol begins. The correctness, unforgeability, trans-
+                                    p
+                                ferability, and secrecy proofs for Protocol 18.7 and Lemma 18.15 in [45] rely
+                                only on the fact that H outputs elements of Fp; they do not depend on any
+                                further structural property of H. As a result, the same bounds apply whether
+                                H is instantiated as a deterministic function, a classical random oracle, or a
+                                quantum-accessible random oracle. The distinguishing advantage between the real
+                                three-party SILMARILS protocol and the ideal digital-signature functionality
+                                f   is therefore at most 1/p in all three models. This completes the proof.    □
+                                 DS
+                                8    Performance Evaluation
+                                We now evaluate the efÏciency of two-party SILMARILS, covering key and
+                                signature sizes, computational costs of signing and verification, and overall commu-
+                                nication overhead, and we compare these metrics to leading PQ signature schemes
+                                to contextualize practical performance. As SILMARILS in two-party TDV mode
+                                is not a public-verifier signature scheme, these comparisons to Dilithium, Fal-
+                                con, and SPHINCS+ reflect size and efÏciency only, not equivalent security or
+                                functionality.
+                                   Let p ≈ 2k denote the prime defining the field Fp. All public, secret, and
+                                signature components are single field elements, and thus occupy log2(p) ≈ k bits.
+                                This yields exceptionally compact keys. The secret key consists of a single field
+                                element, giving |sk| = k bits. The public key contains two field elements giving
+                                |pk| = 2k bits. A signature consists of five field elements giving |σ| = 5k bits.
+                                Over a 256-bit prime field, we have |sk| = 256 bits = 32B, |pk| = 512 bits = 64B
+                                and |σ| = 1280 bits = 160B. Thus, even at the 256-bit security level, the public
+                                                                                                                                                                    Title Suppressed Due to Excessive Length                                                                          27
+                                                                                          Table 2: Comparison of SILMARILS with other digital signature schemes.
+                                                                                 Scheme                                              Security Type             PKSize (B)SK Size (B) Sig Size (B) Who Can Verify and Cost                                  Key Assumptions
+                                                                                 SILMARILS                                           Information-Theoretic             64            32             160     TDV,≈5−6field mults + 1 SSS recon              TRNG+SSS
+                                                                                 sr25519                                             Classical, Like Schnorr           32            64              64     Public Verifier, 1 scalar mult + 1 hash        ECDLPover Curve2551
+                                                                                                                                                  NIST Post-Quantum Candidates
+                                                                                 Dilithium-2 (L2)                                    Computational PQ               1312           2528           2420      Public Verifier, 1 matrix-vector mult + 1 hash Module-LWE
+                                                                                                                                                                                        *
+                                                                                 Dilithium-3 (L3)                                    Computational PQ               1952           4000           3293      Public Verifier, matrix–vector mult            Module-LWE
+                                                                                 Falcon-512 (L1)                                     Computational PQ                897           1281             690     Public Verifier, FFT + lattice decoding        SIS over NTRU lattices
+                                                                                 SPHINCS+ (Gen.)                                     Computational PQ                  64           128          49856      Public Verifier, Many hashing + tree traversal Hash-based (QROM)
+                                                                                 SPHINCS+-128s (L1)                                  Computational PQ                  32           64*           7856      Public Verifier, hash tree traversal           Hash-based
+                                                                                 SPHINCS+-128f (L1)                                  Computational PQ                  32           64*          17088      Public Verifier, hash tree traversal           Hash-based
+                                                                                 SPHINCS+-192s (L3)                                  Computational PQ                  48            96          16224      Public Verifier, hash tree traversal           Hash-based
+                                                                                 SPHINCS+-192f (L3)                                  Computational PQ                  48            96          35664      Public Verifier, hash tree traversal           Hash-based
+                                                                                                                    **
+                                                                                 SLH-DSA-(SHA2/SHAKE)-128-24           (L1, 224 sigs) Computational PQ                 32            48           3856      Public Verifier, hash-based tree traversal     Hash-based (limited-signature)
+                                                                                                                    **
+                                                                                 SLH-DSA-(SHA2/SHAKE)-192-24           (L3, 224 sigs) Computational PQ                 48            72           7752      Public Verifier, hash-based tree traversal     Hash-based (limited-signature)
+                                                                                                                    **
+                                                                                 SLH-DSA-(SHA2/SHAKE)-256-24           (L5, 224 sigs) Computational PQ                 64            96          14944      Public Verifier, hash-based tree traversal     Hash-based (limited-signature)
+                                                                                 *SK Size for Dilithium-3 assumed to scale with security level (not explicitly in original tables). SK Size for SPHINCS+ variants assumed to be 64B (seed size
+                                                                                 for 128-bit security level, not explicitly in original tables). See https://asecuritysite.com/pqc/pqc_sig for more details.
+                                                                                                                                                24
+                                                                                 **NIST SP 800-230 [17]: reduced-size SLH-DSA variants for 2 -signature use cases.
+                                                                                and secret keys remain extremely compact, and the signature size remains close
+                                                                                to that of ECDSA signature. In addition, all arithmetic is carried out in F with
+                                                                                                                                                                                                                                                                           p
+                                                                                               256
+                                                                                p ≈ 2                 , so a field multiplication costs roughly the same as a constant-time
+                                                                                256-bit modular multiply (e.g., via Montgomery reduction). Signing requires
+                                                                                about 10–12 such multiplications, while verification needs only 5–6, making
+                                                                                both operations far lighter than those in lattice or hash-based PQ schemes.
+                                                                                Table 2 compares our concrete instantiation to standardized PQ signatures at
+                                                                                the 128- and 192-bit security levels. Since SILMARILS is a TDV scheme with a
+                                                                                different threat model, this comparison is not meant to suggest equivalence, but
+                                                                                to illustrate efÏciency in blockchain settings where PQC is more than sufÏcient
+                                                                                but still expensive. A fair comparison with other DV schemes is omitted due
+                                                                                to space and the complexity of aligning models. Additional benchmarks appear
+                                                                                in [20].
+                                                                                9           Conclusion
+                                                                                SILMARILSis a unified framework for lightweight TDV authentication built
+                                                                                from a minimal algebraic core over F and perfect 2-out-of-2 Shamir sharing,
+                                                                                                                                                                                  p
+                                                                                rather than a conventional digital signature. Its two-party mode yields a TDV
+                                                                                signature scheme: we prove designated-verifier simulatability in the sense of
+                                                                                                                                                                                                                            ¬DV
+                                                                                Jakobsson–Sako–Impagliazzo and establish EUF-CMA                                                                                                        security for all non-
+                                                                                designated verifiers in both the ROM and QROM. In the three-party setting,
+                                                                                adopting the broadcast model of Fitzi et al., we obtain a statistically secure
+                                                                                information-checking protocol with full simulation-based security and error 1/p.
+                                                                                Practical instantiations rely on hash functions, motivating a unified analysis
+                                                                                across the Pure IT, IT+ROM, and QROM models and a quantum extension
+                                                                                of the Fitzi simulation framework. We show that correctness, secrecy, transfer-
+                                                                                ability, and non-designated unforgeability remain equivalent to simulation-based
+                                                                                security even against quantum adversaries. Thanks to its structural simplicity,
+                                                                                SILMARILSachieves much smaller keys and signatures than standardized PQC
+                                                                                schemes. This is not a comparison of primitives—TDV authentication and PQC
+                                                                                signatures address different threat models—but in blockchain settings where PQC
+                                                                                is already more than sufÏcient yet expensive, lightweight TDV mechanisms such
+                                                                                as SILMARILS offer a compelling alternative for reducing on-chain overhead.
+                28 Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                References
+                1. Digital signature standard (DSS). Federal Information Processing Standard FIPS
+                  186-1, National Institute of Standards and Technology, Gaithersburg, MD, USA
+                 (Dec 1998), https://csrc.nist.gov/pubs/fips/186-1/final, supersedes FIPS
+                  186 (1996); Withdrawn January 27, 2000
+                2. Aardal, M.A., Adj, G., Aranha, D.F., Basso, A., Canales Martínez, I.A., Chávez-
+                  Saab, J., Corte-Real Santos, M., Dartois, P., De Feo, L., Duparc, M., Eriksen,
+                  J.K., Fouotsa, T.B., Gazzoni Filho, D.L., Hess, B., Kohel, D., Leroux, A., Longa,
+                  P., Maino, L., Meyer, M., Nakagawa, K., Onuki, H., Panny, L., Patranabis, S.,
+                  Petit, C., Pope, G., Reijnders, K., Robert, D., Rodríguez Henríquez, F., SchaefÒer,
+                  S., Wesolowski, B.: SQIsign: Algorithm specifications and supporting documen-
+                  tation (round 2). Tech. rep., NIST Post-Quantum Cryptography Project (Feb
+                  2025), https://csrc.nist.gov/csrc/media/Projects/pqc-dig-sig/documents/
+                  round-2/spec-files/sqisign-spec-round2-web.pdf, accessed 2026-01-12
+                3. Amiri, R., Abidin, A., Wallden, P., Andersson, E.: EfÏcient unconditionally secure
+                  signatures using universal hashing. In: Applied Cryptography and Network Security.
+                  Lecture Notes in Computer Science, vol. 10892, pp. 143–162. Springer (2018)
+                4. Aspnes, J.: Randomized protocols for asynchronous consensus. Distributed Com-
+                  puting 16, 165–175 (2003)
+                5. Ben-Or, M.: Another advantage of free choice: Completely asynchronous protocols.
+                  In: Proceedings of the ACM Symposium on Principles of Distributed Computing.
+                  pp. 27–30. ACM (1983)
+                6. Bernstein, D.J., Hülsing, A., Kölbl, S., Niederhagen, R., Rijneveld, J., Schwabe, P.:
+                  The SPHINCS+ signature framework. In: Proceedings of the 2019 ACM SIGSAC
+                  Conference on Computer and Communications Security. p. 2129–2146. Association
+                  for Computing Machinery, New York, NY, USA (2019). https://doi.org/10.1145/
+                  3319535.3363229, https://doi.org/10.1145/3319535.3363229
+                7. Beullens, W.: Breaking Rainbow takes a weekend on a laptop. In: Dodis, Y., Shrimp-
+                  ton, T. (eds.) Advances in Cryptology – CRYPTO 2022. pp. 464–479. Springer Na-
+                  ture Switzerland, Cham (2022). https://doi.org/10.1007/978-3-031-15979-4_
+                  16
+                8. Beullens, W., Chen, M.S., Ding, J., Gong, B., Kannwischer, M.J., Patarin,
+                  J., Peng, B.Y., Schmidt, D., Shih, C.J., Tao, C., Yang, B.Y.: UOV: Unbal-
+                  anced oil and vinegar — algorithm specifications and supporting documenta-
+                  tion (round 2). Tech. rep., NIST Post-Quantum Cryptography Project (Feb
+                  2025), https://csrc.nist.gov/csrc/media/Projects/pqc-dig-sig/documents/
+                  round-2/spec-files/uov-spec-round2-web.pdf, accessed 2026-01-12
+                9. Boneh, D.: Schnorr digital signature scheme. In: van Tilborg, H.C.A. (ed.) En-
+                  cyclopedia of Cryptography and Security. Springer, Boston, MA (2005). https:
+                  //doi.org/10.1007/0-387-23483-7_369
+                10. Boneh, D., Zhandry, M.: Secure signatures and chosen ciphertext security in
+                  a quantum computing world. In: CRYPTO 2013. Lecture Notes in Computer
+                  Science, vol. 8043, pp. 361–379. Springer (2013). https://doi.org/10.1007/
+                  978-3-642-40084-1_21
+                11. Cao, N., Fitzsimmons, M., Mann, Z., Pereira, R., Laflamme, R.: Quantum maps
+                  between CPTP and HPTP (2023), https://arxiv.org/abs/2308.01894
+                12. Chaum, D., Roijakkers, S.: Unconditionally-secure digital signatures. In: Advances
+                  in Cryptology – CRYPTO ’90. Lecture Notes in Computer Science, vol. 537, pp.
+                  206–214. Springer (1990)
+                                                                  Title Suppressed Due to Excessive Length     29
+                                13. Considine, J., Fitzi, M., Franklin, M., Levin, L.A., Maurer, U., Metcalf, D.: Byzan-
+                                    tine agreement given partial broadcast. Journal of Cryptology 18, 191–217 (2005)
+                                14. Courtois, N., Finiasz, M., Sendrier, N.: How to achieve a McEliece-based digital
+                                    signature scheme. In: Boyd, C. (ed.) Advances in Cryptology – ASIACRYPT 2001.
+                                    Lecture Notes in Computer Science, vol. 2248, pp. 157–174. Springer (2001)
+                                15. Cramer, R., Damgård, I., Dziembowski, S., Hirt, M., Rabin, T.: EfÏcient multiparty
+                                    computations secure against an adaptive adversary. In: Advances in Cryptology
+                                    – EUROCRYPT’99. Lecture Notes in Computer Science, vol. 1592, pp. 311–326.
+                                    Springer (1999)
+                                16. Cramer, R., Damgård, I., Nielsen, J.: Secure Multiparty Computation and Secret
+                                    Sharing. Cambridge University Press (2015)
+                                17. Dang, Q., Moody, D.: Additional SLH-DSA parameter sets for limited-signature
+                                    use cases. NIST Special Publication 800-230 (Initial Public Draft), National Insti-
+                                    tute of Standards and Technology (Apr 2026). https://doi.org/10.6028/NIST.
+                                    SP.800-230.ipd,https://doi.org/10.6028/NIST.SP.800-230.ipd,initialPublic
+                                    Draft
+                                18. Dolev, D., Strong, R.: Authenticated algorithms for Byzantine agreement. SIAM
+                                    Journal on Computing 12(4), 656–666 (1983)
+                                19. Ducas, L., Kiltz, E., Lepoint, T., Lyubashevsky, V., Schwabe, P., Seiler, G., Stehlé,
+                                    D.: CRYSTALS-Dilithium: A lattice-based digital signature scheme. IACR Transac-
+                                    tions on Cryptographic Hardware and Embedded Systems 2018(1), 238–268 (Feb
+                                    2018). https://doi.org/10.13154/tches.v2018.i1.238-268
+                                20. Eternax Labs: SILMARILS implementation repository. https://github.com/
+                                    eternax-ai/silmarils-paper (2026), accessed: 2026-04-24
+                                21. Feldman, P., Micali, S.: An optimal probabilistic protocol for synchronous Byzantine
+                                    agreement. SIAM Journal on Computing 26(4), 873–933 (1997)
+                                22. Fischer, M.J., Lynch, N.A., Merritt, M.: Easy impossibility proofs for distributed
+                                    consensus problems. Distributed Computing 1(1), 26–39 (1986)
+                                23. Fischer, M.J., Lynch, N.A., Paterson, M.S.: Impossibility of distributed consensus
+                                    with one faulty process. Journal of the ACM 32(2), 374–382 (1985)
+                                24. Fitzi, M., Garay, J.A., Maurer, U., Ostrovsky, R.: Minimal complete primitive for
+                                    secure multi-party computation. Journal of Cryptology 18, 37–61 (2005)
+                                25. Fitzi, M., Gisin, N., Maurer, U., Rotz, O.V.: Unconditional byzantine agreement
+                                    and multi-party computation secure against dishonest minorities from scratch. In:
+                                    Advances in Cryptology – EUROCRYPT 2002. Lecture Notes in Computer Science,
+                                    vol. 2332, pp. 482–501. Springer (2002)
+                                26. Fitzi, M., Wolf, S., Wullschleger, J.: Pseudo-signatures, broadcast, and multiparty
+                                    computation from correlated randomness. In: Advances in Cryptology – CRYPTO
+                                    2004. Lecture Notes in Computer Science, vol. 3152, pp. 562–578. Springer (2004)
+                                27. Fitzi, M., Hirt, M., Maurer, U.: Trading correctness for privacy in uncondi-
+                                    tional multi-party computation. In: Krawczyk, H. (ed.) Advances in Cryptology —
+                                    CRYPTO1998. pp. 121–136. Springer Berlin Heidelberg, Berlin, Heidelberg (1998)
+                                28. Fouque, P.A., Hoffstein, J., Kirchner, P., Lyubashevsky, V., Pornin, T., Prest, T.,
+                                    Ricosset, T., Seiler, G., Whyte, W., Zhang, Z.: Falcon: Fast-fourier lattice-based
+                                    compact signatures over NTRU. https://research.ibm.com/publications/
+                                    falcon-fast-fourier-lattice-based-compact-signatures-over-ntru           (Jan-
+                                    uary 2020), iBM Research
+                                29. Hanaoka, G., Shikata, J., Zheng, Y., Imai, H.: Unconditionally secure digital signa-
+                                    ture schemes admitting transferability. In: Advances in Cryptology – ASIACRYPT
+                                    2000. Lecture Notes in Computer Science, vol. 1976, pp. 130–142. Springer (2000)
+                30 Hassan Khodaiemehr, Khadijeh Bagheri, Chen Feng, and Dariia Porechna
+                30. Iwamura, K., Kamal, A.A.A.M.: Secure user authentication with information
+                  theoretic security using secret sharing-based secure computation. IEEE Access 13,
+                  9015–9031 (2025). https://doi.org/10.1109/ACCESS.2025.3526632
+                31. Jakobsson, M., Sako, K., Impagliazzo, R.: Designated verifier proofs and their
+                  applications. In: Advances in Cryptology – EUROCRYPT ’96. Lecture Notes in
+                  Computer Science, vol. 1070, pp. 143–154. Springer (1996)
+                32. Johnson, D., Menezes, A., Vanstone, S.: The elliptic curve digital signature algorithm
+                 (ECDSA). Int. J. Inf. Secur. 1(1), 36–63 (Aug 2001). https://doi.org/10.1007/
+                  s102070100002, https://doi.org/10.1007/s102070100002
+                33. Jonsson, J., Kaliski, B.: Public-key cryptography standards (pkcs) #1: Rsa cryp-
+                  tography specifications version 2.1. RFC 3447, Internet Engineering Task Force
+                 (IETF) (Feb 2003), https://datatracker.ietf.org/doc/html/rfc3447
+                34. Katz, J., Koo, C.Y.: On expected constant-round protocols for byzantine agreement.
+                  Journal of Computer and System Sciences 75(2), 91–112 (2009)
+                35. Krotou, A.: Shamir’s secret sharing (sss) for quantum-safe data storage (October
+                  2025), https://vault12.com/learn/advanced-crypto-security/cryptography/
+                  quantum-safe-data/, vault12
+                36. Lamport, L., Shostak, R., Pease, M.: The byzantine generals problem. ACM Trans-
+                  actions on Programming Languages and Systems 4(3), 382–401 (1982)
+                37. Lamport, L.: Constructing digital signatures from a one way function. Tech. Rep.
+                  CSL-98, SRI International, Computer Science Laboratory, Menlo Park, California
+                 (Oct 1979), https://lamport.azurewebsites.net/pubs/dig-sig.pdf
+                38. Lynch, N.A.: Distributed Algorithms. Morgan Kaufmann (1996)
+                39. McEliece, R.J.: A public-key cryptosystem based on algebraic coding theory.
+                  Deep Space Network Progress Report 44, 114–116 (Jan 1978), https://ui.
+                  adsabs.harvard.edu/abs/1978DSNPR..44..114M, provided by the SAO/NASA As-
+                  trophysics Data System
+                40. Merkle, R.: A certified digital signature. In: CRYPTO. pp. 218–238. Springer (1989)
+                41. Nielsen, M.A., Chuang, I.L.: Quantum Computation and Quantum Information.
+                  Cambridge University Press, 10th anniversary edition edn. (2010)
+                42. Pease, M., Shostak, R., Lamport, L.: Reaching agreement in the presence of faults.
+                  Journal of the ACM 27(2), 228–234 (1980)
+                43. Rabin, M.O.: Randomized Byzantine generals. In: 24th Annual Symposium on
+                  Foundations of Computer Science (FOCS). pp. 403–409. IEEE Computer Society
+                 (1983)
+                44. Shamir, A.: How to share a secret. Commun. ACM 22(11), 612–613 (Nov 1979).
+                  https://doi.org/10.1145/359168.359176
+                45. Tyagi, H., Watanabe, S.: Information-theoretic Cryptography. Cambridge University
+                  Press (2023)
+                46. Unruh, D.: Universally composable quantum multi-party computation. In: EURO-
+                  CRYPT2010. Lecture Notes in Computer Science, vol. 6110, pp. 486–505. Springer
+                 (2010). https://doi.org/10.1007/978-3-642-13190-5_25
+                47. Unruh, D.: Non-interactive zero-knowledge proofs in the quantum random oracle
+                  model. In: Advances in Cryptology — EUROCRYPT 2015. LNCS, vol. 9057, pp.
+                  755–784. Springer (2015)
+                48. Watrous, J.: The Theory of Quantum Information. Cambridge University Press
+                 (2018). https://doi.org/10.1017/9781316848142
+                49. Winter, A.: Tight uniform continuity bounds for quantum entropies. Communi-
+                  cations in Mathematical Physics 347(1), 291–313 (2016). https://doi.org/10.
+                  1007/s00220-016-2609-8
+                                                                  Title Suppressed Due to Excessive Length     31
+                                50. Zhandry, M.: How to construct quantum random functions. In: 2012 IEEE 53rd
+                                    Annual Symposium on Foundations of Computer Science. pp. 679–687 (2012).
+                                    https://doi.org/10.1109/FOCS.2012.37
+                                51. Zhandry, M.: How to record quantum queries, and applications to quantum in-
+                                    differentiability. In: Boldyreva, A., Micciancio, D. (eds.) Advances in Cryptology
+                                    – CRYPTO 2019. Lecture Notes in Computer Science, vol. 11693, pp. 239–268.
+                                    Springer (2019)

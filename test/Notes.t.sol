@@ -13,12 +13,13 @@ import {Notes}                from "../src/Notes.sol";
 import {IMintVerifier}        from "../src/IMintVerifier.sol";
 import {StubMintVerifier}     from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier}    from "../src/StubSpendVerifier.sol";
+import {GatedMint}            from "./helpers/GatedMint.sol";
 
 /// @notice IMintVerifier that always rejects -- exercises the negative path
 ///         without depending on StubMintVerifier's enabled toggle.
 contract RejectingMintVerifier is IMintVerifier {
     function verifyMint(
-        bytes calldata, uint256, uint256, uint256, uint256, uint256[] calldata
+        bytes calldata, uint256[] calldata, uint256, uint256, uint256, uint256, uint256[] calldata
     ) external pure returns (bool) { return false; }
 }
 
@@ -42,6 +43,15 @@ contract NotesTest is Test {
 
     address internal alice;
     address internal bob;
+
+    // Gated-only mint: alice and bob are bound PUBLIC issuers with known keys so
+    // the seed/bookkeeping mints route through the public (Schnorr) path.
+    uint256 internal constant SK_A = 0x1111111111111111111111111111111111111111111111111111111111111111;
+    uint256 internal constant K_A  = 0x2222222222222222222222222222222222222222222222222222222222222222;
+    uint256 internal constant SK_B = 0x3333333333333333333333333333333333333333333333333333333333333333;
+    uint256 internal constant K_B  = 0x4444444444444444444444444444444444444444444444444444444444444444;
+    BN254.G1Point internal pkA; BN254.G1Point internal RA;
+    BN254.G1Point internal pkB; BN254.G1Point internal RB;
 
     string  internal vj;
 
@@ -69,8 +79,18 @@ contract NotesTest is Test {
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
         bob   = address(uint160(_u(".bob.registrant")));
-        _registerAlice();
-        _registerBob();
+        // Gated-only mint surface: bind alice & bob as PUBLIC issuers with known
+        // keys (SK_A/SK_B) so their mints carry a valid issuer Schnorr.
+        vm.etch(alice, hex"60006000fd");
+        reg.bindContract(alice, BN254.mul(BN254.g1(), SK_A),
+                         IdentityRegistry.ElGamalCT(BN254.g1(), BN254.g1()), true, false);
+        vm.etch(bob, hex"60006000fd");
+        reg.bindContract(bob, BN254.mul(BN254.g1(), SK_B),
+                         IdentityRegistry.ElGamalCT(BN254.g1(), BN254.g1()), true, false);
+        // Precompute pk = sk*G and R = k*G so the call-time Schnorr does no ecMul
+        // (safe inside mint arg lists after vm.prank / vm.expectRevert).
+        pkA = BN254.mul(BN254.g1(), SK_A);  RA = BN254.mul(BN254.g1(), K_A);
+        pkB = BN254.mul(BN254.g1(), SK_B);  RB = BN254.mul(BN254.g1(), K_B);
 
         // Buck stack.
         credit = new BuckCreditHarness();
@@ -86,6 +106,8 @@ contract NotesTest is Test {
         notes     = new Notes(
             address(buck), address(stub), address(spendStub), GOV
         );
+        vm.prank(GOV);
+        notes.setIdentityRegistry(address(reg));
         EMPTY_ROOT_ = notes.EMPTY_ROOT();
 
         // Notes is a BUCK-aware contract operated by GOV; bind it as a
@@ -206,6 +228,13 @@ contract NotesTest is Test {
         cms[1] = b;
     }
 
+    /// @dev A length-`n` PUBLIC-mode array (MODE_PUBLIC == 1).  The stub verifier
+    ///      ignores the values; Notes only requires issuerMode.length == cms.length.
+    function _modes(uint256 n) internal pure returns (uint256[] memory mm) {
+        mm = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) mm[i] = 1;
+    }
+
     /// @dev Stub-friendly mint: oldRoot pulled from live state, newRoot is a
     ///      caller-chosen scalar (the stub doesn't bind it; production mint
     ///      requires the SNARK-attested newRoot).
@@ -215,21 +244,38 @@ contract NotesTest is Test {
         uint256 totalFace,
         uint256 newRoot
     ) internal {
-        // Snapshot live state BEFORE vm.prank: any external call after the
-        // prank consumes it.  argument-eval order would otherwise burn the
-        // prank on `notes.noteRoot()` and notes.mint() would see msg.sender
-        // = test contract instead of `from`.
+        // Snapshot live state BEFORE the gated mint (which pranks `from`).
         uint256 oldRoot       = notes.noteRoot();
         uint32  nextLeafIndex = notes.nextLeafIndex();
+        _pubMint(from, DUMMY_PROOF, oldRoot, newRoot, nextLeafIndex, totalFace, cms);
+    }
+
+    /// @dev Schnorr for `from` (a bound public issuer) over keccak256(cms),
+    ///      using the precomputed pk/R so it does NO ecMul at call time.
+    function _sigFor(address from, uint256[] memory cms)
+        internal view returns (IdentityRegistry.SchnorrProof memory)
+    {
+        if (from == bob) return GatedMint.signWith(pkB, RB, SK_B, K_B, cms, from, block.chainid);
+        return GatedMint.signWith(pkA, RA, SK_A, K_A, cms, from, block.chainid);
+    }
+
+    /// @dev Gated PUBLIC mint as `from`: all-PUBLIC issuerMode + Schnorr.  The
+    ///      sig + mode are built BEFORE vm.prank (no external call burns the
+    ///      prank, and the ecMul-free signWith is safe under vm.expectRevert);
+    ///      callers pass deliberately-bad oldRoot/newRoot/idx to exercise guards.
+    function _pubMint(
+        address from,
+        bytes memory proof,
+        uint256 oldRoot,
+        uint256 newRoot,
+        uint32  idx,
+        uint256 totalFace,
+        uint256[] memory cms
+    ) internal {
+        IdentityRegistry.SchnorrProof memory sig = _sigFor(from, cms);
+        uint256[] memory mode = GatedMint.allPublic(cms.length);
         vm.prank(from);
-        notes.mint(
-            DUMMY_PROOF,
-            oldRoot,
-            newRoot,
-            nextLeafIndex,
-            totalFace,
-            cms
-        );
+        notes.mint(proof, oldRoot, newRoot, idx, totalFace, cms, mode, sig);
     }
 
     // ---- constructor -------------------------------------------------------
@@ -332,18 +378,16 @@ contract NotesTest is Test {
     function test_mint_rejectsEmptyBatch() public {
         _approveNotes(alice, 0);
         uint256[] memory empty;
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: empty mint"));
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, EMPTY_ROOT_, 0, 0, empty);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, EMPTY_ROOT_, 0, 0, empty);
     }
 
     function test_mint_rejectsStaleOldRoot() public {
         _approveNotes(alice, 100e18);
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: stale oldRoot"));
-        notes.mint(DUMMY_PROOF, uint256(0xdeadbeef), 1, 0, 100e18, cms);
+        _pubMint(alice, DUMMY_PROOF, uint256(0xdeadbeef), 1, 0, 100e18, cms);
     }
 
     function test_mint_rejectsStaleNextLeafIndex() public {
@@ -351,18 +395,16 @@ contract NotesTest is Test {
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
         // oldRoot is correct, nextLeafIndex is wrong (claim 5 instead of 0).
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: stale nextLeafIndex"));
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 5, 100e18, cms);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, 1, 5, 100e18, cms);
     }
 
     function test_mint_rejectsZeroNewRoot() public {
         _approveNotes(alice, 100e18);
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: zero newRoot"));
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 0, 0, 100e18, cms);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, 0, 0, 100e18, cms);
     }
 
     function test_mint_rejectsNewRootOutOfField() public {
@@ -370,18 +412,16 @@ contract NotesTest is Test {
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
         uint256 fieldR = notes.FIELD_R();
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: newRoot out of field"));
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, fieldR, 0, 100e18, cms);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, fieldR, 0, 100e18, cms);
     }
 
     function test_mint_rejectsCommitmentOutOfField() public {
         _approveNotes(alice, 100e18);
         uint256[] memory bad = new uint256[](1);
         bad[0] = notes.FIELD_R();  // exactly r is out of [0, r)
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: cm out of field"));
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, bad);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, bad);
     }
 
     function test_mint_rejectedByDisabledStub() public {
@@ -392,9 +432,8 @@ contract NotesTest is Test {
         _approveNotes(alice, 100e18);
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
     }
 
     function test_mint_rejectedByExternalRejectingVerifier() public {
@@ -405,18 +444,16 @@ contract NotesTest is Test {
         _approveNotes(alice, 100e18);
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
     }
 
     function test_mint_revertsOnMissingApproval() public {
         // No allowance set.
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
-        vm.prank(alice);
         vm.expectRevert(); // OZ ERC20InsufficientAllowance
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
     }
 
     function test_mint_revertsWhenIssuerLacksBalance() public {
@@ -424,17 +461,15 @@ contract NotesTest is Test {
         _approveNotes(bob, 100e18);
         uint256[] memory cms = new uint256[](1);
         cms[0] = CM1;
-        vm.prank(bob);
         vm.expectRevert(); // OZ ERC20InsufficientBalance
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
+        _pubMint(bob, DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
     }
 
     function test_mint_failedTransferLeavesNoStateMutation() public {
         _approveNotes(alice, 50e18);
         uint256[] memory cms = _cms(CM1, CM2);
-        vm.prank(alice);
         vm.expectRevert();
-        notes.mint(DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, 1, 0, 100e18, cms);
 
         // No advancement.
         assertEq(notes.nextLeafIndex(), 0);
@@ -544,20 +579,15 @@ contract NotesTest is Test {
         // unchanged, no leaf-index advancement beyond Bob's contribution.
         uint256[] memory aliceCms = _cms(CM1, CM2);
         uint256 aliceRoot = uint256(keccak256("aliceloses")) % notes.FIELD_R();
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: stale oldRoot"));
-        notes.mint(DUMMY_PROOF, staleOldRoot, aliceRoot, staleNextLeafIndex, 200e18, aliceCms);
+        _pubMint(alice, DUMMY_PROOF, staleOldRoot, aliceRoot, staleNextLeafIndex, 200e18, aliceCms);
         assertEq(buck.balanceOf(alice), aliceBalBefore);
 
         // Alice re-syncs and re-mints against the new live state.
         uint256 aliceRoot2 = uint256(keccak256("aliceretries")) % notes.FIELD_R();
         uint256 liveOldRoot       = notes.noteRoot();
         uint32  liveNextLeafIndex = notes.nextLeafIndex();
-        vm.prank(alice);
-        notes.mint(
-            DUMMY_PROOF, liveOldRoot, aliceRoot2, liveNextLeafIndex,
-            200e18, aliceCms
-        );
+        _pubMint(alice, DUMMY_PROOF, liveOldRoot, aliceRoot2, liveNextLeafIndex, 200e18, aliceCms);
         assertEq(notes.nextLeafIndex(), 3);
         assertEq(notes.noteRoot(),      aliceRoot2);
         assertEq(buck.balanceOf(alice), aliceBalBefore - 200e18);

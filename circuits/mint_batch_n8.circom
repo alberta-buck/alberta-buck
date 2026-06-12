@@ -3,6 +3,7 @@ pragma circom 2.1.4;
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/bitify.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
+include "../node_modules/circomlib/circuits/comparators.circom";
 
 // Mint-batch circuit -- Phase 7-bis pivot for BUCK Notes.
 //
@@ -12,13 +13,24 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 // on-chain mint cost essentially constant in N -- one Groth16 verify, three
 // SSTOREs, and the calldata to publish cms[].
 //
-// Public:  oldRoot, newRoot, nextLeafIndex, totalFace, cm[N]
+// Public:  issuerMode[N] (outputs), oldRoot, newRoot, nextLeafIndex,
+//          totalFace, cm[N]
 // Private: flavor[N], v[N], rho[N], idHash[N], predicate[N],
 //          siblings[N][TREE_DEPTH]
 //
 // Constraints (per leaf i):
 //   (O) cm[i] = Poseidon-5(flavor[i], v[i], rho[i], idHash[i], predicate[i])
 //   (R) v[i] in [0, 2^128); totalFace == sum_i v[i] (with totalFace also <2^128)
+//   (P) flavor[i] in {A1=1, A2=2, B1=3}, and issuerMode[i] is the deterministic
+//       flavor->mode projection (A2 -> PRIVATE=2, else PUBLIC=1).  issuerMode is
+//       a PUBLIC OUTPUT the Notes contract gates on: every PUBLIC-mode leaf must
+//       be covered by a public-issuer Schnorr binding from a registered public
+//       msg.sender, and every PRIVATE-mode leaf must carry an A2 re-encryption
+//       binding.  Because a bearer (B1) leaf projects to PUBLIC, a bearer note
+//       from a non-public issuer is unmintable -- the "bearer => public issuer"
+//       invariant (alberta-buck-notes-decryptability.org, The Required Mint
+//       SNARK Signal).  issuerMode leaks only flavor-CLASS (public vs private),
+//       never A-vs-B nor any identity/amount.
 //   (M) walking ZERO_VALUE up the tree at index (nextLeafIndex+i), using
 //       siblings[i][.], reproduces the rolling root *before* this leaf is
 //       inserted (oldRoot for i=0, the previous post-insert root for i>0).
@@ -94,6 +106,14 @@ template MerkleWalk(depth) {
     root <== levels[depth];
 }
 
+// Flavor labels (mirror alberta_buck.wallet.notes.FLAVOR_*) and issuer-mode
+// labels (mirror Notes.sol / IdentityRegistry semantics).
+function FLAVOR_A1() { return 1; }
+function FLAVOR_A2() { return 2; }
+function FLAVOR_B1() { return 3; }
+function MODE_PUBLIC()  { return 1; }
+function MODE_PRIVATE() { return 2; }
+
 template MintBatch(N, DEPTH) {
     // ---- public inputs ----
     signal input oldRoot;
@@ -101,6 +121,11 @@ template MintBatch(N, DEPTH) {
     signal input nextLeafIndex;
     signal input totalFace;
     signal input cm[N];
+
+    // ---- public outputs ----
+    // Per-leaf issuer mode (MODE_PUBLIC=1 / MODE_PRIVATE=2), derived in-circuit
+    // from the committed flavor.  Notes.mint gates on these (see (P)).
+    signal output issuerMode[N];
 
     // ---- private witness ----
     signal input flavor[N];
@@ -120,6 +145,29 @@ template MintBatch(N, DEPTH) {
         cmH[i].inputs[3] <== idHash[i];
         cmH[i].inputs[4] <== predicate[i];
         cm[i] === cmH[i].out;
+    }
+
+    // (P) Per-leaf flavor range + issuer-mode projection.  flavor is already
+    //     bound into cm[i] by (O); here we (1) pin it to a known flavor so the
+    //     mode projection is well-defined, and (2) expose issuerMode[i] as the
+    //     deterministic class A2 -> PRIVATE, {A1,B1} -> PUBLIC.  A bearer (B1)
+    //     leaf therefore *always* projects to PUBLIC: there is no flavor that
+    //     is both bearer and private, so a private issuer cannot mint a bearer
+    //     note that the contract will accept (it would have to present a leaf
+    //     whose issuerMode is PUBLIC, which the contract refuses without a
+    //     registered-public-issuer Schnorr binding it cannot produce).
+    signal flavorRange[N];        // (flavor-1)(flavor-2), must zero out at *3
+    component isA2[N];
+    for (var i = 0; i < N; i++) {
+        // flavor in {1,2,3}: (f-1)(f-2)(f-3) === 0, factored into two quadratics.
+        flavorRange[i] <== (flavor[i] - FLAVOR_A1()) * (flavor[i] - FLAVOR_A2());
+        flavorRange[i] * (flavor[i] - FLAVOR_B1()) === 0;
+
+        // issuerMode = MODE_PUBLIC + [flavor == A2]  (1 -> public, 2 -> private)
+        isA2[i] = IsEqual();
+        isA2[i].in[0] <== flavor[i];
+        isA2[i].in[1] <== FLAVOR_A2();
+        issuerMode[i] <== MODE_PUBLIC() + isA2[i].out;
     }
 
     // (R) Range-bound totalFace and each v[i] to 128 bits.

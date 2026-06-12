@@ -33,13 +33,35 @@ from alberta_buck.wallet.notes import (
     id_payload_a1, id_payload_a2, id_payload_b1,
     id_hash_a1, id_hash_a2, id_hash_b1,
 )
+from alberta_buck.wallet.schnorr import (
+    SchnorrProof, batch_commitment, issuer_schnorr_sign, issuer_schnorr_verify,
+)
+from alberta_buck.wallet.verifiable_decrypt import (
+    VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
+)
+from alberta_buck.wallet.issuer_reenc import (
+    IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify, H_POINT,
+)
+from alberta_buck.wallet.receipt import (
+    RegisteredIdentity, Receipt, RcptResult, receipt_verify,
+    ApproveReceipt, approve_receipt_verify,
+)
+from alberta_buck.wallet.envelope import (
+    PartyRecord, TxnRecord, ReceiptCore,
+    serialize_core, deserialize_core,
+    envelope_text, parse_envelope, receipt_id,
+)
+from alberta_buck.wallet.build_receipt import (
+    build_eoa_pub, build_eoa_priv,
+    build_note_b1, build_note_a1, build_note_a2,
+)
+from alberta_buck.wallet.verify_receipt import verify_receipt as verify_receipt_core
+from alberta_buck.wallet.render import (
+    Detail, StyledLine, ReceiptSection, ReceiptDoc,
+    Driver, TextDriver, render_receipt,
+)
 from alberta_buck.wallet.issuer import (
     Issuer, IssuedCredential, rerandomize_for_registration,
-)
-from alberta_buck.wallet.spend_a import (
-    TREE_DEPTH, ZERO_VALUE, EMPTY_ROOT,
-    MerkleTree, merkle_walk,
-    SpendAWitness, make_spend_a_witness, spend_a_satisfied,
 )
 
 __all__ = [
@@ -58,8 +80,18 @@ __all__ = [
     "note_commitment", "nullifier_a", "nullifier_b",
     "id_payload_a1", "id_payload_a2", "id_payload_b1",
     "id_hash_a1", "id_hash_a2", "id_hash_b1",
+    "SchnorrProof", "batch_commitment", "issuer_schnorr_sign", "issuer_schnorr_verify",
+    "VDProof", "verifiable_decrypt_prove", "verifiable_decrypt_verify",
+    "IssuerReencProof", "issuer_reenc_prove", "issuer_reenc_verify", "H_POINT",
+    "RegisteredIdentity", "Receipt", "RcptResult", "receipt_verify",
+    "ApproveReceipt", "approve_receipt_verify",
+    "PartyRecord", "TxnRecord", "ReceiptCore",
+    "serialize_core", "deserialize_core",
+    "envelope_text", "parse_envelope", "receipt_id",
+    "build_eoa_pub", "build_eoa_priv",
+    "build_note_b1", "build_note_a1", "build_note_a2",
+    "verify_receipt_core",
+    "Detail", "StyledLine", "ReceiptSection", "ReceiptDoc",
+    "Driver", "TextDriver", "render_receipt",
     "Issuer", "IssuedCredential", "rerandomize_for_registration",
-    "TREE_DEPTH", "ZERO_VALUE", "EMPTY_ROOT",
-    "MerkleTree", "merkle_walk",
-    "SpendAWitness", "make_spend_a_witness", "spend_a_satisfied",
 ]

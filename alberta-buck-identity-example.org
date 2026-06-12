@@ -731,8 +731,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    : Identity scalar m = H(identity_data):
    :   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
    : PS signature sigma:
-   :   sigma_1 = ( 20005...,  22484...)
-   :   sigma_2 = (313886..., 372935...)
+   :   sigma_1 = (881640..., 729678...)
+   :   sigma_2 = (  3283..., 753753...)
 
    #+LATEX: }
 
@@ -846,7 +846,6 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+LATEX: }
 
-
 * The Identity Fountain -- Alice Derives a Fresh Credential
 
   Alice wants to create a new Ethereum account.  Her Holochain wallet
@@ -894,12 +893,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : Rerandomized PS signature verified.
-   :   sigma'_1 = (877575..., 460253...)
-   :   sigma'_2 = (493874..., 405235...)
+   :   sigma'_1 = (950306..., 567283...)
+   :   sigma'_2 = (572272...,  72680...)
    : 
    : Original and rerandomized signatures are unlinkable:
-   :   sigma_1  = ( 20005...,  22484...)
-   :   sigma'_1 = (877575..., 460253...)
+   :   sigma_1  = (881640..., 729678...)
+   :   sigma'_1 = (950306..., 567283...)
    :   (No algorithm can correlate them.)
 
    #+LATEX: }
@@ -953,12 +952,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    #+begin_example
    Fresh key pair for this Ethereum account:
-     sk_alice = 6930439595792189231300284107883031400324093761849875043740363699103850858621
-     pk_alice = (196916..., 490613...)
+     sk_alice = 13020046620739270822808852165527435162492082813876016870670025566997292544924
+     pk_alice = (946215...,   4627...)
 
    ElGamal ciphertext E_alice = (R, C):
-     R = r*G    = (317411..., 873776...)
-     C = m*G+r*pk = (733114..., 194976...)
+     R = r*G    = (838255..., 576708...)
+     C = m*G+r*pk = (843221..., 997309...)
 
    Message point M = m*G:
      M = (739132..., 937433...)
@@ -992,7 +991,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
     #+RESULTS:
     : Eve decrypts with wrong key:
-    :   M_wrong = (340865..., 428413...)
+    :   M_wrong = (330162..., 562674...)
     :   M_real  = (739132..., 937433...)
     :   Match: False
     :   (Completely different point -- no information about m is leaked.)
@@ -1050,9 +1049,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-   :   challenge e = 17178887482363216326737571073487103897263396493046265050513872580020101789190
-   :   response s_m = 16259379493728893246422565722561224351352440146527786176118906873141582162403
-   :   response s_r = 6117324858485391315596214213924667359609104574359392933756936595300596616114
+   :   challenge e = 6313831634337497653779451666069696695924818843808622649399960998575233797598
+   :   response s_m = 1765779872177778000375911485005768483238341554604657039587861934738118140695
+   :   response s_r = 1175865806945372938845003679021355806708678967532982733573773880119086928862
 
    #+LATEX: }
 
@@ -1153,9 +1152,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
      # e(s_m*sigma'_1, Y) * e(-A_ps, Y) * e(e*sigma'_1, X) * e(-e*sigma'_2, g_2) == 1
      check = (
          pairing(IPK_Y, mul(sigma_p[0], s_m_v))       # e(s_m*s'_1, Y)
-       * pairing(IPK_Y, neg(A_ps_v))                   # e(-A_ps, Y)
-       * pairing(IPK_X, mul(sigma_p[0], e_v))          # e(e*s'_1, X)
-       * pairing(G2,    neg(mul(sigma_p[1], e_v)))      # e(-e*s'_2, g_2)
+       * pairing(IPK_Y, neg(A_ps_v))                  # e(-A_ps, Y)
+       * pairing(IPK_X, mul(sigma_p[0], e_v))         # e(e*s'_1, X)
+       * pairing(G2,    neg(mul(sigma_p[1], e_v)))    # e(-e*s'_2, g_2)
      )
      assert check == bp.FQ12.one(), "PS pairing check FAILED"
      print("(a) PS pairing check passed:")
@@ -1355,7 +1354,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   #+RESULTS:
   #+begin_example
   Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:
-    pk_bob = (  2756..., 869638...)
+    pk_bob = (615055..., 546682...)
     E_bob  = (R, C) -- ElGamal ciphertext on-chain
     identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
     isVerified(bob)             = true
@@ -1404,7 +1403,6 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    :   Issuer log now has 2 entries: 2
 
    #+LATEX: }
-
 
 * Alice Approves Bob -- Re-Encryption + Chaum-Pedersen Proof
 
@@ -1460,8 +1458,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    : Alice re-encrypts her identity for Bob:
    :   E_bob = (R', C') where:
-   :     R' = r'*G     = (806944..., 939093...)
-   :     C' = M+r'*pk  = (150241..., 623844...)
+   :     R' = r'*G     = (372663..., 997130...)
+   :     C' = M+r'*pk  = (621525..., 992967...)
    : 
    : Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
    : Matches Alice's M:             (739132..., 937433...)
@@ -1525,9 +1523,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+RESULTS:
    : Chaum-Pedersen proof:
-   :   e  = 7007377908732927999168957863997131114474306579403933658700448136936800967087
-   :   s1 = 5865837094385340442069181236385922137618819184855376084939248084806139088474
-   :   s2 = 12088396958355473142176449452854428721993497027823390067447915409194597637942
+   :   e  = 20738151736972499920026051737490153479275840277635227010856562690095819020600
+   :   s1 = 9214164059675763254874417436790050769081659332656294131831163089156845468783
+   :   s2 = 5615718812423481217042211992247368821858461818162606324085806779497271328473
 
    #+LATEX: }
 
@@ -1691,7 +1689,6 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+LATEX: }
 
-
 * Transfer -- Bilateral Identity Check
 
   With Alice's =approve= completed and the pool bound under a Public
@@ -1744,9 +1741,9 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   : Bilateral identity check:
   :   toHash   (Alice->Pool): H(E_pool)
   :   fromHash (Pool->Alice): _identityHash(alice)
-  :
+  : 
   :   both hashes present => transfer SUCCEEDS
-  :
+  : 
   : ==> transfer(alice, pool, 500 BUCK) SUCCEEDS
   :     BuckTransferReceipt(fromHash=_identityHash(alice), toHash=H(E_pool))
 
@@ -2028,17 +2025,17 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   #+RESULTS:
   #+begin_example
   Second credential derived (same identity, fresh account):
-    pk_alice_2 = (759747..., 182614...)
+    pk_alice_2 = (886197..., 512100...)
     E_alice_2  = (R, C) -- independent ciphertext
-    sigma'_2   = (162356...,  42652...)
+    sigma'_2   = (585597..., 608527...)
 
   Unlinkability check:
-    sigma'_1 (acct 1) = (877575..., 460253...)
-    sigma'_1 (acct 2) = (162356...,  42652...)
-    pk (acct 1)       = (196916..., 490613...)
-    pk (acct 2)       = (759747..., 182614...)
-    E.R (acct 1)      = (317411..., 873776...)
-    E.R (acct 2)      = (600886..., 886064...)
+    sigma'_1 (acct 1) = (107577..., 508257...)
+    sigma'_1 (acct 2) = (585597..., 608527...)
+    pk (acct 1)       = (946215...,   4627...)
+    pk (acct 2)       = (886197..., 512100...)
+    E.R (acct 1)      = (838255..., 576708...)
+    E.R (acct 2)      = (924229..., 696195...)
 
     All values are independent.  No shared structure.
     PS rerandomization is STATISTICALLY unlinkable --

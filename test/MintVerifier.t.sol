@@ -18,6 +18,7 @@ import {MintBatchN16Groth16Verifier} from "../src/MintBatchN16Groth16Verifier.so
 import {MintBatchN32Groth16Verifier} from "../src/MintBatchN32Groth16Verifier.sol";
 import {MintVerifierAdapter}         from "../src/MintVerifierAdapter.sol";
 import {StubSpendVerifier}           from "../src/StubSpendVerifier.sol";
+import {GatedMint}                   from "./helpers/GatedMint.sol";
 
 /// @title MintVerifier.t.sol -- end-to-end Groth16-verified batch mint.
 /// @notice Builds the full Buck + Identity + Notes stack with a *real* mint
@@ -44,6 +45,12 @@ contract MintVerifierTest is Test {
     address internal constant ISSUER = address(0x1551E1);
     address internal constant POOL   = address(0xBA51C);
 
+    // Gated-only mint: alice is a bound PUBLIC issuer with a known key, so the
+    // batch mints carry a valid issuer Schnorr over keccak256(cms).
+    uint256 internal constant SK_A = 0x1111111111111111111111111111111111111111111111111111111111111111;
+    uint256 internal constant K_A  = 0x2222222222222222222222222222222222222222222222222222222222222222;
+    BN254.G1Point internal pkA; BN254.G1Point internal RA;  // precomputed sk*G, k*G
+
     address internal alice;
     address internal bob;
 
@@ -64,7 +71,11 @@ contract MintVerifierTest is Test {
         _trustIssuer(ij);
         alice = address(uint160(vm.parseJsonUint(ij, ".alice.registrant")));
         bob   = address(uint160(vm.parseJsonUint(ij, ".bob.registrant")));
-        _registerFrom(ij, "alice", alice);
+        // Gated-only mint: alice is a bound PUBLIC issuer (known key SK_A).
+        vm.etch(alice, hex"60006000fd");
+        reg.bindContract(alice, BN254.mul(BN254.g1(), SK_A),
+                         IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}), true, false);
+        pkA = BN254.mul(BN254.g1(), SK_A);  RA = BN254.mul(BN254.g1(), K_A);
         _registerFrom(ij, "bob",   bob);
 
         credit = new BuckCreditHarness();
@@ -94,6 +105,8 @@ contract MintVerifierTest is Test {
         notes   = new Notes(
             address(buck), address(adapter), address(spendStub), GOV
         );
+        vm.prank(GOV);
+        notes.setIdentityRegistry(address(reg));
 
         // Bind Notes as a Public-Identity contract.
         reg.bindContract(
@@ -201,6 +214,10 @@ contract MintVerifierTest is Test {
         vm.store(address(buck), slot, bytes32(amount));
     }
 
+    /// @dev Gated PUBLIC mint as alice (a bound public issuer): all-PUBLIC
+    ///      issuerMode + a Schnorr over keccak256(cms).  Tamper tests pass
+    ///      deliberately-bad args; the guards / verifier fire in
+    ///      _verifyMintOrRevert before the identity + Schnorr checks.
     function _mint(
         bytes memory proof,
         uint256 oldRoot,
@@ -209,8 +226,11 @@ contract MintVerifierTest is Test {
         uint256 totalFace,
         uint256[] memory cms
     ) internal {
+        IdentityRegistry.SchnorrProof memory sig =
+            GatedMint.signWith(pkA, RA, SK_A, K_A, cms, alice, block.chainid);
+        uint256[] memory mode = GatedMint.allPublic(cms.length);
         vm.prank(alice);
-        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms, mode, sig);
     }
 
     // ---- tests -------------------------------------------------------------
@@ -238,9 +258,8 @@ contract MintVerifierTest is Test {
     }
 
     function test_mint_rejectedOnTamperedTotalFace() public {
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
             fxTotalFace + 1, fxCommitments
         );
@@ -248,9 +267,8 @@ contract MintVerifierTest is Test {
 
     function test_mint_rejectedOnTamperedNewRoot() public {
         uint256 bogusRoot = uint256(keccak256("bogus")) % notes.FIELD_R();
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             fxProofBytes, fxOldRoot, bogusRoot, uint32(fxNextLeafIndex),
             fxTotalFace, fxCommitments
         );
@@ -260,11 +278,30 @@ contract MintVerifierTest is Test {
         uint256[] memory bad = new uint256[](16);
         for (uint256 i = 0; i < 16; i++) bad[i] = fxCommitments[i];
         bad[0] = fxCommitments[0] ^ 1;
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        _mint(
+            fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
+            fxTotalFace, bad
+        );
+    }
+
+    /// @notice The SNARK binds the per-leaf issuerMode public output: the N=16
+    ///         basic fixture is all-A1 (issuerMode == MODE_PUBLIC everywhere), so
+    ///         flipping one leaf to PRIVATE no longer matches the proof and
+    ///         _verifyMintOrRevert's Groth16 check rejects it -- before the
+    ///         contract's mode classification.  Uses the public overload with a
+    ///         valid Schnorr; the rejection comes from the verifier, not the gate.
+    function test_mint_rejectedOnTamperedIssuerMode() public {
+        uint256[] memory mode = new uint256[](16);
+        for (uint256 i = 0; i < 16; i++) mode[i] = notes.MODE_PUBLIC();
+        mode[0] = notes.MODE_PRIVATE();             // tamper one leaf
+        IdentityRegistry.SchnorrProof memory sig =
+            GatedMint.signWith(pkA, RA, SK_A, K_A, fxCommitments, alice, block.chainid);
         vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
         notes.mint(
             fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
-            fxTotalFace, bad
+            fxTotalFace, fxCommitments, mode, sig
         );
     }
 
@@ -272,9 +309,8 @@ contract MintVerifierTest is Test {
         // The adapter has no verifier registered for N=15 -> returns false.
         uint256[] memory shorter = new uint256[](15);
         for (uint256 i = 0; i < 15; i++) shorter[i] = fxCommitments[i];
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
             fxTotalFace, shorter
         );
@@ -296,9 +332,8 @@ contract MintVerifierTest is Test {
         // verifier; pairing check rejects.
         uint256[] memory eight = new uint256[](8);
         for (uint256 i = 0; i < 8; i++) eight[i] = fxCommitments[i];
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
             fxTotalFace, eight
         );
@@ -308,9 +343,8 @@ contract MintVerifierTest is Test {
         // oldRoot != live root -> stale-state guard catches it before the
         // verifier is even called.
         uint256 bogusOld = uint256(keccak256("notlive")) % notes.FIELD_R();
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: stale oldRoot"));
-        notes.mint(
+        _mint(
             fxProofBytes, bogusOld, fxNewRoot, uint32(fxNextLeafIndex),
             fxTotalFace, fxCommitments
         );
@@ -318,9 +352,8 @@ contract MintVerifierTest is Test {
 
     function test_mint_rejectedOnTamperedNextLeafIndex() public {
         // nextLeafIndex != live -> stale-state guard.
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: stale nextLeafIndex"));
-        notes.mint(
+        _mint(
             fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex + 1),
             fxTotalFace, fxCommitments
         );
@@ -329,9 +362,8 @@ contract MintVerifierTest is Test {
     function test_mint_rejectedOnMalformedProofBytes() public {
         // Adapter rejects proof.length != 256 by returning false; Notes
         // surfaces that as the verifier-rejection error.
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             hex"dead", fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
             fxTotalFace, fxCommitments
         );
@@ -363,8 +395,7 @@ contract MintVerifierTest is Test {
         uint256 aliceBefore = buck.balanceOf(alice);
         uint256 poolBefore  = buck.balanceOf(address(notes));
 
-        vm.prank(alice);
-        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+        _mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
 
         assertEq(buck.balanceOf(alice),          aliceBefore - totalFace);
         assertEq(buck.balanceOf(address(notes)), poolBefore + totalFace);
@@ -413,8 +444,7 @@ contract MintVerifierTest is Test {
         uint256 aliceBefore = buck.balanceOf(alice);
         uint256 poolBefore  = buck.balanceOf(address(notes));
 
-        vm.prank(alice);
-        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+        _mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
 
         assertEq(buck.balanceOf(alice),          aliceBefore - totalFace);
         assertEq(buck.balanceOf(address(notes)), poolBefore + totalFace);
@@ -468,9 +498,8 @@ contract MintVerifierTest is Test {
         // After mint: noteRoot == fxNewRoot, nextLeafIndex == 16.  The same
         // proof's public oldRoot == EMPTY_ROOT no longer matches; the guard
         // reverts before re-running the Groth16 verifier.
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: stale oldRoot"));
-        notes.mint(
+        _mint(
             fxProofBytes, fxOldRoot, fxNewRoot, uint32(fxNextLeafIndex),
             fxTotalFace, fxCommitments
         );
@@ -503,8 +532,7 @@ contract MintVerifierTest is Test {
         assertEq(oldRoot,       fxNewRoot, "after_n16.oldRoot must equal basic.newRoot");
         assertEq(nextLeafIndex, 16);
 
-        vm.prank(alice);
-        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+        _mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
 
         // Tree advanced by 32 leaves on top of the first 16 -> 48 total.
         assertEq(notes.nextLeafIndex(), 48);
@@ -540,8 +568,7 @@ contract MintVerifierTest is Test {
         uint256 poolBefore = buck.balanceOf(address(notes));
         uint256 sumBefore  = notes.noteFaceSum();
 
-        vm.prank(alice);
-        notes.mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
+        _mint(proof, oldRoot, newRoot, uint32(nextLeafIndex), totalFace, cms);
 
         assertEq(notes.nextLeafIndex(), 32);
         assertEq(notes.noteRoot(),      newRoot);
@@ -587,9 +614,8 @@ contract MintVerifierTest is Test {
 
     function _rejectTamperTotalFace(string memory path) internal {
         Fx memory fx = _loadFx(path);
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
             fx.totalFace + 1, fx.cms
         );
@@ -598,9 +624,8 @@ contract MintVerifierTest is Test {
     function _rejectTamperNewRoot(string memory path) internal {
         Fx memory fx = _loadFx(path);
         uint256 bogus = uint256(keccak256("bogus")) % notes.FIELD_R();
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             fx.proof, fx.oldRoot, bogus, uint32(fx.nextLeafIndex),
             fx.totalFace, fx.cms
         );
@@ -609,9 +634,8 @@ contract MintVerifierTest is Test {
     function _rejectTamperCommitment(string memory path) internal {
         Fx memory fx = _loadFx(path);
         fx.cms[0] ^= 1;
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
             fx.totalFace, fx.cms
         );
@@ -619,16 +643,14 @@ contract MintVerifierTest is Test {
 
     function _replayRejected(string memory path) internal {
         Fx memory fx = _loadFx(path);
-        vm.prank(alice);
-        notes.mint(
+        _mint(
             fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
             fx.totalFace, fx.cms
         );
         // After accepted mint: live oldRoot has advanced; same proof must be
         // caught by the stale-state guard before the verifier is even called.
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: stale oldRoot"));
-        notes.mint(
+        _mint(
             fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
             fx.totalFace, fx.cms
         );
@@ -638,8 +660,7 @@ contract MintVerifierTest is Test {
         string memory basicPath, string memory successivePath
     ) internal {
         Fx memory a = _loadFx(basicPath);
-        vm.prank(alice);
-        notes.mint(
+        _mint(
             a.proof, a.oldRoot, a.newRoot, uint32(a.nextLeafIndex),
             a.totalFace, a.cms
         );
@@ -653,8 +674,7 @@ contract MintVerifierTest is Test {
 
         uint256 sumBefore  = notes.noteFaceSum();
         uint256 poolBefore = buck.balanceOf(address(notes));
-        vm.prank(alice);
-        notes.mint(
+        _mint(
             b.proof, b.oldRoot, b.newRoot, uint32(b.nextLeafIndex),
             b.totalFace, b.cms
         );
@@ -752,16 +772,14 @@ contract MintVerifierTest is Test {
     // the per-N verifier dispatch + stale-state guards cooperate to reject.
     function test_mint_crossNReplayRejected() public {
         Fx memory n4 = _loadFx("build/snark/mint_batch_n4/fixtures/basic.json");
-        vm.prank(alice);
-        notes.mint(
+        _mint(
             n4.proof, n4.oldRoot, n4.newRoot, uint32(n4.nextLeafIndex),
             n4.totalFace, n4.cms
         );
         // Live nextLeafIndex == 4, live root == n4.newRoot.  Replaying with
         // N=4's public oldRoot = EMPTY_ROOT must hit the stale-state guard.
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: stale oldRoot"));
-        notes.mint(
+        _mint(
             n4.proof, n4.oldRoot, n4.newRoot, uint32(n4.nextLeafIndex),
             n4.totalFace, n4.cms
         );
@@ -796,8 +814,7 @@ contract MintVerifierTest is Test {
         uint256 aliceBefore = buck.balanceOf(alice);
         uint256 poolBefore  = buck.balanceOf(address(notes));
 
-        vm.prank(alice);
-        notes.mint(
+        _mint(
             fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
             fx.totalFace, fx.cms
         );
@@ -815,9 +832,8 @@ contract MintVerifierTest is Test {
 
     function _partialBatchRejectsInflatedTotalFace(string memory path) internal {
         Fx memory fx = _loadFx(path);
-        vm.prank(alice);
         vm.expectRevert(bytes("Notes: bad mint proof"));
-        notes.mint(
+        _mint(
             fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
             fx.totalFace + 1, fx.cms
         );
@@ -869,8 +885,7 @@ contract MintVerifierTest is Test {
     function test_mint_successivePartialBatch_N4() public {
         // First mint: basic N=4 (4 live leaves at v=[1,2,3,4] => totalFace=10).
         Fx memory a = _loadFx("build/snark/mint_batch_n4/fixtures/basic.json");
-        vm.prank(alice);
-        notes.mint(
+        _mint(
             a.proof, a.oldRoot, a.newRoot, uint32(a.nextLeafIndex),
             a.totalFace, a.cms
         );
@@ -889,8 +904,7 @@ contract MintVerifierTest is Test {
         uint256 sumBefore  = notes.noteFaceSum();
         uint256 poolBefore = buck.balanceOf(address(notes));
 
-        vm.prank(alice);
-        notes.mint(
+        _mint(
             b.proof, b.oldRoot, b.newRoot, uint32(b.nextLeafIndex),
             b.totalFace, b.cms
         );
@@ -928,8 +942,7 @@ contract MintVerifierTest is Test {
         uint256 poolBefore  = buck.balanceOf(address(notes));
         uint256 sumBefore   = notes.noteFaceSum();
 
-        vm.prank(alice);
-        notes.mint(
+        _mint(
             fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
             fx.totalFace, fx.cms
         );

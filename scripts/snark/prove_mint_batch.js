@@ -86,6 +86,7 @@ function parseArgs() {
         startLeaf: 0n,
         initialState: null,
         liveLeaves: null,
+        pin: {},
     };
     for (const a of process.argv.slice(2)) {
         const m = a.match(/^--([^=]+)=(.*)$/);
@@ -100,6 +101,16 @@ function parseArgs() {
             case "live-leaves":
                 out.liveLeaves = v.split(",").map((s) => BigInt(s));
                 break;
+            case "pin": {
+                // --pin=i:flavor,v,rho,idHash — pin leaf i's FULL opening to a
+                // wallet-generated note (e2e fixtures), overriding the seeded
+                // RNG.  Repeatable.
+                const [idx, words] = v.split(":");
+                const w = words.split(",").map((s) => BigInt(s));
+                if (w.length !== 4) throw new Error(`--pin wants flavor,v,rho,idHash`);
+                out.pin[parseInt(idx, 10)] = { flavor: w[0], v: w[1], rho: w[2], idHash: w[3] };
+                break;
+            }
             default: throw new Error(`unknown arg: --${k}`);
         }
     }
@@ -206,9 +217,22 @@ async function main() {
     const idHash    = new Array(N);
     const predicate = new Array(N);
     for (let i = 0; i < N; i++) {
-        if (i < liveCount) {
-            // "Real" leaf
-            flavor[i]    = 2n;  // A2/B convention; circuit doesn't constrain
+        if (args.pin[i]) {
+            // Pinned to a wallet-generated opening (e2e fixtures).  Counts as
+            // a live leaf; rng() calls below keep the stream aligned for any
+            // unpinned siblings.
+            flavor[i]    = args.pin[i].flavor;
+            v[i]         = args.pin[i].v;
+            rho[i]       = args.pin[i].rho;
+            idHash[i]    = args.pin[i].idHash;
+            predicate[i] = 0n;
+            rng(); rng();   // consume the rho/idHash draws this leaf would have used
+        } else if (i < liveCount) {
+            // "Real" leaf.  flavor must lie in {A1=1, A2=2, B1=3} (the mint
+            // circuit now range-constrains it and projects issuerMode).  This
+            // generic fixture uses A1 (addressed, public issuer) for every
+            // leaf so issuerMode is uniformly PUBLIC.
+            flavor[i]    = 1n;
             v[i]         = args.liveLeaves
                 ? args.liveLeaves[i]
                 : BigInt(i + 1) * 1000000000000000000n; // (i+1) * 1e18
@@ -218,13 +242,18 @@ async function main() {
         } else {
             // "Dummy" leaf padding the batch up to N.  v=0 contributes nothing
             // to totalFace; rho/idHash distinct so the commitment is unique.
-            flavor[i]    = 0n;
+            // flavor still must be a valid label -- use A1 like the live leaves.
+            flavor[i]    = 1n;
             v[i]         = 0n;
             rho[i]       = rng();
             idHash[i]    = rng();
             predicate[i] = 0n;
         }
     }
+
+    // issuerMode[i] mirrors the circuit's flavor->mode projection (A2 -> 2,
+    // else 1); it is a PUBLIC OUTPUT that leads the proof's publicSignals.
+    const issuerMode = flavor.map((f) => (f === 2n ? 2n : 1n));
 
     // Compute commitments.
     const cm = [];
@@ -281,9 +310,11 @@ async function main() {
     const t1 = Date.now();
     console.log(`        proof in ${(t1 - t0) / 1000}s`);
 
-    // publicSignals order matches the `public [...]` declaration in the circuit:
-    //   [oldRoot, newRoot, nextLeafIndex, totalFace, cm[0], ..., cm[N-1]]
+    // publicSignals order: circom emits main-component OUTPUTS first, then the
+    // public inputs in declaration order, so:
+    //   [issuerMode[0..N-1], oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N-1]]
     const expectPub = [
+        ...issuerMode.map((x) => x.toString()),
         input.oldRoot,
         input.newRoot,
         input.nextLeafIndex,
@@ -319,6 +350,7 @@ async function main() {
         N,
         depth: DEPTH,
         public: {
+            issuerMode:    issuerMode.map((x) => x.toString()),
             oldRoot:       input.oldRoot,
             newRoot:       input.newRoot,
             nextLeafIndex: input.nextLeafIndex,

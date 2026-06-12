@@ -54,6 +54,78 @@ Or enter the shell interactively for ad-hoc commands:
   forge test --match-contract BuckCredit   # All tests in a contract
 #+END_SRC
 
+** SNARK Circuits and Trusted Setup
+
+The BUCK Notes mint/spend circuits (=circuits/*.circom=) compile to per-N Groth16
+verifiers (=src/MintBatchN*Groth16Verifier.sol=, dispatched on-chain by
+=cms.length=).  A Groth16 setup has two phases, and they differ enormously in
+cost:
+
+1. *Powers of Tau* (=build/snark/ptau/pot*.ptau=) -- the /universal/,
+   circuit-*independent* structured reference string.  This is the slow part
+   (the =pot15..pot20= set is multi-GB and takes ~hours to generate).  It
+   depends only on the FFT domain size, so a circuit edit that does not cross a
+   power-of-two boundary *reuses* it untouched.
+2. *Per-circuit zkey + Solidity verifier* -- embeds the R1CS / verification key.
+   Regenerated on every circuit change, in ~minutes, reusing the ptau.
+
+So after editing a circuit you normally only regenerate phase 2:
+
+#+BEGIN_SRC bash
+  make snark            # phase-2 verifiers + test fixtures (usual circuit-change path)
+  make snark-setup      # phase-2 only: per-N zkeys + src/MintBatchN*Verifier.sol
+  make snark-fixtures   # regenerate build/snark/.../fixtures/*.json the forge tests load
+  make snark-ptau       # phase-1: rebuild the dev Powers of Tau from scratch (~hours)
+  make snark-clean      # drop per-N build dirs (forces a clean phase-2 rebuild)
+
+  make nix-test         # confirm on-chain parity (MintVerifier.t.sol et al.)
+#+END_SRC
+
+Each pinned batch size gets its own circuit + verifier; override the set with
+=make snark SNARK_PINS="1 2 4 8 16"=.  =make snark-ptau= auto-bootstraps a larger
+ptau if a new pin crosses into a higher power of two (=N=64= needs =pot21=,
+=N=128= needs =pot22=, ...).
+
+*** Dev setup vs. production assets
+
+All of the above use *fixed dev-only entropy* (=scripts/snark/setup.sh=
+contributes =alberta-buck-dev-*=).  The result is a *reproducible dev setup* --
+deterministic and green in tests, but *NOT secure*: the toxic waste \( \tau \) is
+public, so anyone can forge proofs.  *Never deploy the committed dev verifiers to
+a real network.*
+
+Generating *production* assets requires a real multi-party ceremony, where the
+setup is sound as long as /at least one/ participant destroyed their secret:
+
+1. *Phase 1 (Powers of Tau).*  Either reuse a trustworthy existing universal
+   ceremony -- the Hermez "Perpetual Powers of Tau" finals
+   (=powersOfTau28_hez_final_NN.ptau=) are the standard for BN254/Groth16 --
+   choosing the size whose domain \( \ge \) your largest circuit (=pot20= for
+   =N=32=) and verifying it:
+   #+BEGIN_SRC bash
+     snarkjs powersoftau verify powersOfTau28_hez_final_20.ptau
+   #+END_SRC
+   or coordinate a fresh phase-1 MPC: =powersoftau new= \(\to\) many independent
+   =powersoftau contribute= (distinct parties, real hardware entropy) \(\to\)
+   =powersoftau beacon= (a public randomness beacon) \(\to\) =powersoftau
+   prepare phase2=.  Install the verified file as
+   =build/snark/ptau/potNN_final.ptau=.
+2. *Phase 2 (per circuit).*  For each =circuit.r1cs=: =groth16 setup= against the
+   production ptau, then collect *multiple independent* =zkey contribute= from
+   distinct parties (real entropy, not the piped dev strings), apply a
+   =zkey beacon=, =zkey verify=, and export the verification key +
+   =solidityverifier=.  =scripts/snark/setup.sh= shows the exact command shapes
+   (replace the dev-entropy contributions).
+3. *Deploy + rotate.*  Deploy the production =MintBatchN*Groth16Verifier= and
+   register them via =MintVerifierAdapter.registerVerifier= /
+   =Notes.setMintVerifier= behind governance, cutting over from the dev
+   verifiers.  Publish the ceremony transcript and each contributor's attestation
+   so the 1-of-\( n \) honest assumption is auditable.
+
+See the Makefile =SNARK circuits + trusted setup= section and
+=alberta-buck-notes-decryptability.org= ("The Required Mint SNARK Signal") for
+the circuit-level details.
+
 ** RPC Configuration
 
 Two environment variables control how tools connect to Ethereum:

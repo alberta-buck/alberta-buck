@@ -1,0 +1,560 @@
+"""The AB-RCPT/1 receipt envelope — a deterministic, bit-identical, verifiable
+data record for a BUCK payment.
+
+Reference: alberta-buck-receipt.org ("The AB-RCPT/1 Envelope").
+
+Every receipt is a single canonical JSON map (=canonical_identity_data= style:
+sorted keys, compact separators, no whitespace).  Serialization:
+
+    1. Build the Python dict for the receipt core.
+    2. ``json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)``
+       → canonical UTF-8 bytes.
+    3. The receipt id is ``base32(sha256(canonical_bytes))`` truncated to a short handle.
+    4. The text envelope is ``AB-RCPT/1.`` followed by base64url of the bytes,
+       wrapped to the caller's width, terminated by ``.END``.
+
+Deserialize: reverse the text envelope → canonical bytes → ``json.loads``.
+
+Bit-identical property: two parties holding the same underlying data (chain events,
+registry records, identity preimages, and the generated proofs) produce exactly the
+same canonical bytes — the proofs embed no randomness in the serialized witness
+(the ``t`` nonce is a field serialized as a hex scalar, fixed once generated).
+
+Both-party generation (Identity-M Notes): the ``note`` payload carries the
+Identity-M-bound idHash preimage material *both* Note parties hold — the issuer
+created it at mint, the recipient received it with the note (and the
+``SpentCoupled*`` event publishes the spend-side ciphertext).  Because the
+receipt also discloses each party's ``canonical_identity_data``, the identity
+scalars ``m_iss``/``m_rec`` are derivable by ANY verifier, so the note-leg
+checks (idHash recomputation, ``eNote``/``eRec``/``eIss`` decryption) are
+deterministic — no party secret is needed for them.  Only the generator's
+self-naming verifiable decryption (account ↔ Identity tie) differs by ``role``:
+a ``"recipient"`` receipt carries ``payee_vd``, an ``"issuer"`` receipt carries
+``payer_vd`` (private issuer) and, for B1, ``vd_payee`` (the issuer's
+verifiable decryption of the event's ``eDepForIss``, naming the depositor).
+See :mod:`alberta_buck.wallet.verify_receipt` for the verification predicates.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, List, Optional, Tuple
+
+from alberta_buck.wallet.bn254 import point_to_words, scalar_to_hex, words_to_point
+from alberta_buck.wallet.elgamal import ElGamalCiphertext
+from alberta_buck.wallet.chaum_pedersen import CPProof
+from alberta_buck.wallet.verifiable_decrypt import VDProof
+from alberta_buck.wallet.schnorr import SchnorrProof
+from alberta_buck.wallet.notes import NoteOpening, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1
+
+# ---------------------------------------------------------------------------
+# Canonical JSON helpers — the same house style as canonical_identity_data
+# ---------------------------------------------------------------------------
+
+def _canonical(obj) -> bytes:
+    """Deterministic JSON bytes of *obj* (sorted keys, compact, UTF-8)."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
+
+
+def _g1_hex(pt) -> Dict[str, str]:
+    """A G1 point as ``{"x": "0x...", "y": "0x..."}`` — the wallet's standard."""
+    x, y = point_to_words(pt)
+    return {"x": scalar_to_hex(x), "y": scalar_to_hex(y)}
+
+
+def _g1_from_hex(d: dict):
+    """Inverse of _g1_hex."""
+    return words_to_point(int(d["x"], 16), int(d["y"], 16))
+
+
+def _ct_hex(ct: ElGamalCiphertext) -> Dict[str, Dict[str, str]]:
+    return {"R": _g1_hex(ct.R), "C": _g1_hex(ct.C)}
+
+
+def _ct_from_hex(d: dict) -> ElGamalCiphertext:
+    return ElGamalCiphertext(R=_g1_from_hex(d["R"]), C=_g1_from_hex(d["C"]))
+
+
+# ---------------------------------------------------------------------------
+# Receipt handle
+# ---------------------------------------------------------------------------
+
+def receipt_id(canonical_bytes: bytes, prefix_len: int = 12) -> str:
+    """``base32(sha256(canonical_bytes))[:prefix_len]`` — the receipt handle."""
+    import base64 as _b64
+    h = hashlib.sha256(canonical_bytes).digest()
+    return _b64.b32encode(h).decode("ascii").rstrip("=").lower()[:prefix_len]
+
+
+# ---------------------------------------------------------------------------
+# Core data model
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PartyRecord:
+    """One party's data in a receipt.
+
+    ``identity`` is the canonical UTF-8 JSON preimage of ``M`` (the full KYC
+    datum).  ``M`` is the identity point; verification recomputes ``keccak(
+    identity) · G == M``.  ``pk`` and ``E_addr`` are the on-chain registry
+    record (tier-2 anchor).  For a *public* identity ``E_addr`` may be omitted
+    (the ``identity`` preimage is the sole name of ``M``).
+    """
+    addr:     str                         # 0x... address
+    kind:     str                         # "public" | "private"
+    identity: str                         # canonical_identity_data (UTF-8 JSON)
+    M:        Dict[str, str]              # G1: the named identity point
+    pk:       Dict[str, str]              # G1: registered _pk
+    E_addr:   Optional[Dict[str, Dict[str, str]]] = None  # registered ct (tier 2)
+
+    @property
+    def addr_int(self) -> int:
+        return int(self.addr, 16)
+
+    @property
+    def M_pt(self):
+        return _g1_from_hex(self.M)
+
+    @property
+    def pk_pt(self):
+        return _g1_from_hex(self.pk)
+
+    @property
+    def E_addr_ct(self) -> Optional[ElGamalCiphertext]:
+        if self.E_addr is None:
+            return None
+        return _ct_from_hex(self.E_addr)
+
+
+@dataclass(frozen=True)
+class TxnRecord:
+    """Transaction anchor — the on-chain event a receipt is about.
+
+    For a note-spend, ``mint_txhash`` and ``mint_block`` are the corresponding
+    mint transaction (from the wallet's stored note reference), and ``nullifier``
+    is the spent nullifier.
+    """
+    kind:      str                         # "eoa-transfer" | "note-spend"
+    value:     int                         # BUCK base units (6 dp)
+    timestamp: int                         # block unix time
+    event:     str                         # "Transfer" | "Spent" | "SpentA" | "SpentB"
+    txhash:    str                         # 0x...
+    block:     int
+    logindex:  int
+    mint_txhash: Optional[str]   = None    # note-spend only
+    mint_block:  Optional[int]   = None
+    nullifier:   Optional[str]   = None    # 0x...  (note-spend only)
+
+
+# ---------------------------------------------------------------------------
+# Proofs — type-specific witnesses consumed by the verifiers
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class VdProofRecord:
+    """A verifiable-decryption proof over ``(E_ct, M)`` naming ``account``."""
+    E_ct:     Dict[str, Dict[str, str]]    # ElGamal ciphertext being decrypted
+    M_named:  Dict[str, str]               # revealed plaintext point
+    account:  str                          # 0x... address whose key decrypts
+    chainid:  int
+    proof:    Dict[str, Any]               # {"e": "0x..", "s": "0x..", "T1": .., "T2": ..}
+
+
+@dataclass(frozen=True)
+class CpProofRecord:
+    """A Chaum-Pedersen approve proof (re-encryption of a registered credential)."""
+    E_a:      Dict[str, Dict[str, str]]    # sender's registered E_addr
+    E_b:      Dict[str, Dict[str, str]]    # re-encryption for spender
+    pk_a:     Dict[str, str]               # sender's pk
+    pk_b:     Dict[str, str]               # spender's pk
+    sender:   str                          # 0x...
+    spender:  str
+    chainid:  int
+    proof:    Dict[str, Any]               # {"e": "0x..", "s1": "0x..", "s2": .., "T1": .., "T2": .., "T3": ..}
+
+
+@dataclass(frozen=True)
+class SchnorrProofRecord:
+    """A Schnorr batch binding (public-issuer mint)."""
+    issuer:   str                          # 0x...
+    pk_iss:   Dict[str, str]               # G1
+    h_batch:  str                          # 0x... keccak256(cms)
+    chainid:  int
+    proof:    Dict[str, Any]               # {"e": "0x..", "s": "0x..", "R": {"x": "..", "y": ".."}}
+
+
+@dataclass(frozen=True)
+class ReceiptProofs:
+    """Notes Receipt witness (A1/B1)."""
+    opening:     Dict[str, Any]            # {"flavor": "0x..", "v": "0x..", ...}
+    cms:         List[str]                 # the full minted batch
+    issuer_sig:  Dict[str, Any]            # Schnorr over keccak256(cms)
+    nullifier:   str                       # 0x...
+    face:        str                       # 0x...
+
+
+# ---------------------------------------------------------------------------
+# Top-level receipt core
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ReceiptCore:
+    """The verified payload of an AB-RCPT/1 receipt.
+
+    ``payer`` is the party funds came FROM (for a Note, the issuer); ``payee``
+    the party they went TO (the depositor/recipient).  ``role`` says which of
+    the two generated this receipt — ``"recipient"`` (the payee; every kind) or
+    ``"issuer"`` (the payer; Note kinds only, the payer-side "I paid X" slip).
+
+    ``note`` is the Identity-M-bound note payload — the idHash preimage
+    material both Note parties hold (see :func:`note_payload_record`); with the
+    disclosed identity preimages it makes the note-leg checks deterministic, so
+    issuer- and recipient-generated receipts verify identically there.
+
+    Self-naming (the account ↔ Identity tie only the generator can prove):
+    ``payee_vd`` for a recipient receipt; ``payer_vd`` for an issuer receipt
+    whose issuer is a private Identity (A2); ``vd_payee`` for an issuer B1
+    receipt (the issuer's verifiable decryption of the ``SpentCoupledB1``
+    event's ``eDepForIss``, naming the depositor).
+
+    For A2 (private issuer), ``issuer_binding_status`` indicates whether the
+    issuer leg is soundly bound to the *registered* credential (``"bound"``
+    when ``issuer_binding`` carries the mint's verified re-encryption binding;
+    ``"unverified"`` otherwise).
+    """
+    v:          int                         # 1
+    type:       str                         # "eoa-pub"|"eoa-priv"|"note-b1"|"note-a1"|"note-a2"
+    chainid:    int
+    contracts:  Dict[str, str]              # {"registry": "0x..", "buck": "0x..", "notes": "0x.."}
+    payer:      PartyRecord
+    payee:      PartyRecord
+    txn:        TxnRecord
+    role:       str = "recipient"           # generating party: "recipient" | "issuer"
+    note:       Optional[Dict[str, Any]] = None   # Identity-M note payload (idHash preimage)
+    proof:      Optional[Dict[str, Any]] = None   # type-specific (see below)
+    payee_vd:   Optional[Dict[str, Any]] = None   # payee self-naming vd (role=recipient)
+    payer_vd:   Optional[Dict[str, Any]] = None   # payer self-naming vd (role=issuer, private payer)
+    vd_payee:   Optional[Dict[str, Any]] = None   # issuer-role B1 payee naming: vd of eDepForIss
+    # A2 only:
+    issuer_binding_status: Optional[str] = None   # "bound" | "unverified"
+    issuer_binding: Optional[Dict[str, Any]] = None  # blinded A2 re-encryption binding
+                                                  # (IssuerReencProof; no un-blinding scalar is
+                                                  # disclosed — the named issuer is recovered by
+                                                  # decrypting eIss under the payee identity
+                                                  # scalar m_rec, itself derivable from the
+                                                  # disclosed payee identity preimage)
+    # Free-text line items live /outside/ the core (unverified):
+    notes:      Optional[List[str]]       = None
+
+
+# ---------------------------------------------------------------------------
+# Serialize / deserialize
+# ---------------------------------------------------------------------------
+
+def _party_to_dict(p: PartyRecord) -> Dict[str, Any]:
+    d: Dict[str, Any] = {
+        "addr":     p.addr,
+        "kind":     p.kind,
+        "identity": p.identity,
+        "M":        p.M,
+        "pk":       p.pk,
+    }
+    if p.E_addr is not None:
+        d["E_addr"] = p.E_addr
+    return d
+
+
+def _party_from_dict(d: dict) -> PartyRecord:
+    return PartyRecord(
+        addr=d["addr"], kind=d["kind"], identity=d["identity"],
+        M=d["M"], pk=d["pk"], E_addr=d.get("E_addr"),
+    )
+
+
+def _txn_to_dict(t: TxnRecord) -> Dict[str, Any]:
+    d: Dict[str, Any] = {
+        "kind": t.kind, "value": t.value, "timestamp": t.timestamp,
+        "event": t.event, "txhash": t.txhash, "block": t.block,
+        "logindex": t.logindex,
+    }
+    if t.mint_txhash is not None:
+        d["mint_txhash"] = t.mint_txhash
+        d["mint_block"]  = t.mint_block
+        d["nullifier"]   = t.nullifier
+    return d
+
+
+def _txn_from_dict(d: dict) -> TxnRecord:
+    return TxnRecord(
+        kind=d["kind"], value=d["value"], timestamp=d["timestamp"],
+        event=d["event"], txhash=d["txhash"], block=d["block"],
+        logindex=d["logindex"],
+        mint_txhash=d.get("mint_txhash"), mint_block=d.get("mint_block"),
+        nullifier=d.get("nullifier"),
+    )
+
+
+def _opt(d: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return None for an empty dict — strip absent optional fields."""
+    return d if d else None
+
+
+def serialize_core(core: ReceiptCore) -> bytes:
+    """Canonical JSON bytes of *core* (sorted keys, compact, UTF-8)."""
+    d: Dict[str, Any] = {
+        "v":          core.v,
+        "type":       core.type,
+        "chainid":    core.chainid,
+        "contracts":  core.contracts,
+        "payer":      _party_to_dict(core.payer),
+        "payee":      _party_to_dict(core.payee),
+        "txn":        _txn_to_dict(core.txn),
+        "role":       core.role,
+    }
+    if core.note is not None:
+        d["note"] = core.note
+    if core.proof is not None:
+        d["proof"] = core.proof
+    if core.payee_vd is not None:
+        d["payee_vd"] = core.payee_vd
+    if core.payer_vd is not None:
+        d["payer_vd"] = core.payer_vd
+    if core.vd_payee is not None:
+        d["vd_payee"] = core.vd_payee
+    if core.issuer_binding_status is not None:
+        d["issuer_binding_status"] = core.issuer_binding_status
+    if core.issuer_binding is not None:
+        d["issuer_binding"] = core.issuer_binding
+    if core.notes is not None:
+        d["notes"] = core.notes
+    return _canonical(d)
+
+
+def deserialize_core(canonical_bytes: bytes) -> ReceiptCore:
+    """Parse canonical JSON bytes → ReceiptCore."""
+    d = json.loads(canonical_bytes.decode("utf-8"))
+    return ReceiptCore(
+        v=d["v"], type=d["type"], chainid=d["chainid"],
+        contracts=d["contracts"],
+        payer=_party_from_dict(d["payer"]),
+        payee=_party_from_dict(d["payee"]),
+        txn=_txn_from_dict(d["txn"]),
+        role=d.get("role", "recipient"),
+        note=_opt(d.get("note")),
+        proof=_opt(d.get("proof")),
+        payee_vd=_opt(d.get("payee_vd")),
+        payer_vd=_opt(d.get("payer_vd")),
+        vd_payee=_opt(d.get("vd_payee")),
+        issuer_binding_status=d.get("issuer_binding_status"),
+        issuer_binding=_opt(d.get("issuer_binding")),
+        notes=d.get("notes"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Text envelope
+# ---------------------------------------------------------------------------
+
+ENVELOPE_HEADER = "AB-RCPT/1."
+ENVELOPE_FOOTER = ".END"
+
+
+def wrap_text(payload: str, width: int = 64) -> str:
+    """Wrap *payload* to *width* columns (for the printed envelope)."""
+    return "\n".join(payload[i:i + width] for i in range(0, len(payload), width))
+
+
+def envelope_text(canonical_bytes: bytes, width: int = 64) -> str:
+    """The printable receipt envelope.
+
+    Returns::
+
+        AB-RCPT/1.
+        <base64url of canonical_bytes, wrapped to width>
+        .END
+    """
+    import base64 as _b64
+    b64 = _b64.urlsafe_b64encode(canonical_bytes).decode("ascii").rstrip("=")
+    return f"{ENVELOPE_HEADER}\n{wrap_text(b64, width)}\n{ENVELOPE_FOOTER}"
+
+
+def parse_envelope(text: str) -> bytes:
+    """Extract canonical bytes from an envelope.
+
+    Strips everything outside ``AB-RCPT/1.`` … ``.END``, removes whitespace
+    from the base64url block, decodes.
+    """
+    import base64 as _b64
+    # Find the payload block between the header and footer.
+    text = text.replace("\r\n", "\n")
+    start = text.find(ENVELOPE_HEADER)
+    end = text.find(ENVELOPE_FOOTER, start + len(ENVELOPE_HEADER)) if start >= 0 else -1
+    if start < 0 or end < 0:
+        raise ValueError("envelope: missing AB-RCPT/1. header or .END footer")
+    b64 = text[start + len(ENVELOPE_HEADER):end]
+    b64 = "".join(b64.split())  # drop all whitespace
+    # base64url → canonical bytes
+    return _b64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4))
+
+
+# ---------------------------------------------------------------------------
+# Prove helpers — convert wallet primitive dataclasses to the canonical
+# dict shapes the envelope serializes
+# ---------------------------------------------------------------------------
+
+def vd_proof_record(E_ct: ElGamalCiphertext, M, account: int,
+                    chainid: int, proof: VDProof) -> Dict[str, Any]:
+    return {
+        "E_ct":    _ct_hex(E_ct),
+        "M_named": _g1_hex(M),
+        "account": scalar_to_hex(account),
+        "chainid": chainid,
+        "proof": {
+            "e":  scalar_to_hex(proof.e),
+            "s":  scalar_to_hex(proof.s),
+            "T1": _g1_hex(proof.T1),
+            "T2": _g1_hex(proof.T2),
+        },
+    }
+
+
+def cp_proof_record(E_sender: ElGamalCiphertext, E_spender: ElGamalCiphertext,
+                    pk_sender, pk_spender,
+                    sender: int, spender: int, chainid: int,
+                    proof: CPProof) -> Dict[str, Any]:
+    return {
+        "E_a":     _ct_hex(E_sender),
+        "E_b":     _ct_hex(E_spender),
+        "pk_a":    _g1_hex(pk_sender),
+        "pk_b":    _g1_hex(pk_spender),
+        "sender":  scalar_to_hex(sender),
+        "spender": scalar_to_hex(spender),
+        "chainid": chainid,
+        "proof": {
+            "e":  scalar_to_hex(proof.e),
+            "s1": scalar_to_hex(proof.s1),
+            "s2": scalar_to_hex(proof.s2),
+            "T1": _g1_hex(proof.T1),
+            "T2": _g1_hex(proof.T2),
+            "T3": _g1_hex(proof.T3),
+        },
+    }
+
+
+def issuer_reenc_record(proof) -> Dict[str, Any]:
+    """The A2 issuer re-encryption binding (IssuerReencProof) the issuer
+    shipped at mint (verified on chain by ``Notes.mint``'s A2 overload).  It
+    proves ``eIss`` re-encrypts the issuer's *registered* credential; the
+    receipt verifier recovers and couples the named issuer by decrypting
+    ``eIss`` under the payee identity scalar ``m_rec`` (derivable from the
+    disclosed payee identity preimage) — no un-blinding scalar is disclosed."""
+    return {
+        "e":     scalar_to_hex(proof.e),
+        "s_r":   scalar_to_hex(proof.s_r),
+        "s_b":   scalar_to_hex(proof.s_b),
+        "s_s":   scalar_to_hex(proof.s_s),
+        "s_g":   scalar_to_hex(proof.s_g),
+        "A1":    _g1_hex(proof.A1),
+        "A2":    _g1_hex(proof.A2),
+        "A3":    _g1_hex(proof.A3),
+        "A4":    _g1_hex(proof.A4),
+        "A5":    _g1_hex(proof.A5),
+        "Q":     _g1_hex(proof.Q),
+        "U":     _g1_hex(proof.U),
+        "T":     _g1_hex(proof.T),
+    }
+
+
+def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
+                        eRec:  Optional[ElGamalCiphertext] = None,
+                        eIss:  Optional[ElGamalCiphertext] = None,
+                        sigma_R=None, sigma_s: Optional[int] = None,
+                        eDepForIss: Optional[ElGamalCiphertext] = None,
+                        ) -> Dict[str, Any]:
+    """The Identity-M-bound note payload — the idHash preimage material both
+    Note parties hold, per flavor:
+
+    * B1:  ``sigma_R``/``sigma_s`` (the issuer-signature words of
+      ``id_hash_b1(m_iss, sigma_R, sigma_s)``) plus, once spent, the
+      ``SpentCoupledB1`` event's ``eDepForIss`` (the depositor's Identity
+      encrypted under the public issuer's registered key).
+    * A1:  ``eNote`` (value under M_rec), ``eRec`` (recipient Identity under
+      itself), ``sigma_R``/``sigma_s`` — ``id_hash_a1(eNote, m_iss, sigma)``.
+    * A2:  ``eNote`` and ``eIss`` (issuer Identity under M_rec) —
+      ``id_hash_a2(eNote, eIss)``.
+
+    With the parties' identity preimages disclosed in the receipt, a verifier
+    derives ``m_iss``/``m_rec`` and re-checks every ciphertext directly.
+    """
+    d: Dict[str, Any] = {}
+    if eNote is not None:
+        d["eNote"] = _ct_hex(eNote)
+    if eRec is not None:
+        d["eRec"] = _ct_hex(eRec)
+    if eIss is not None:
+        d["eIss"] = _ct_hex(eIss)
+    if sigma_R is not None:
+        d["sigma_R"] = _g1_hex(sigma_R)
+    if sigma_s is not None:
+        d["sigma_s"] = scalar_to_hex(sigma_s)
+    if eDepForIss is not None:
+        d["eDepForIss"] = _ct_hex(eDepForIss)
+    return d
+
+
+def schnorr_proof_record(issuer: int, pk_iss, h_batch: int, chainid: int,
+                         proof: SchnorrProof) -> Dict[str, Any]:
+    return {
+        "issuer":  scalar_to_hex(issuer),
+        "pk_iss":  _g1_hex(pk_iss),
+        "h_batch": scalar_to_hex(h_batch),
+        "chainid": chainid,
+        "proof": {
+            "e": scalar_to_hex(proof.e),
+            "s": scalar_to_hex(proof.s),
+            "R": _g1_hex(proof.R),
+        },
+    }
+
+
+def receipts_proof_record(opening: NoteOpening, cms,
+                          issuer_sig: Optional[SchnorrProof],
+                          nullifier: int, face: int) -> Dict[str, Any]:
+    """The Note opening/anchor record.  ``issuer_sig`` (the public issuer's
+    batch Schnorr) is present for B1/A1; an A2 (private-issuer) mint has no
+    public signature — its issuer binding is the per-leaf ``issuer_reenc``."""
+    d: Dict[str, Any] = {
+        "opening": {
+            "flavor":    scalar_to_hex(opening.flavor),
+            "v":         scalar_to_hex(opening.v),
+            "rho":       scalar_to_hex(opening.rho),
+            "idHash":    scalar_to_hex(opening.id_hash),
+            "predicate": scalar_to_hex(opening.predicate),
+        },
+        "cms":       [scalar_to_hex(c) for c in cms],
+        "nullifier": scalar_to_hex(nullifier),
+        "face":      scalar_to_hex(face),
+    }
+    if issuer_sig is not None:
+        d["issuer_sig"] = {
+            "e": scalar_to_hex(issuer_sig.e),
+            "s": scalar_to_hex(issuer_sig.s),
+            "R": _g1_hex(issuer_sig.R),
+        }
+    return d
+
+
+__all__ = [
+    "PartyRecord", "TxnRecord",
+    "VdProofRecord", "CpProofRecord", "SchnorrProofRecord",
+    "ReceiptProofs", "ReceiptCore",
+    "serialize_core", "deserialize_core",
+    "envelope_text", "parse_envelope", "receipt_id",
+    "vd_proof_record", "cp_proof_record",
+    "schnorr_proof_record", "receipts_proof_record",
+    "issuer_reenc_record", "note_payload_record",
+    "_canonical", "_g1_hex", "_ct_hex",
+]

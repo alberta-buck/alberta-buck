@@ -1,5 +1,5 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            THE ALBERTA BUCK - IDENTITY AND RECEIPTS (V1.0)
+            THE ALBERTA BUCK - IDENTITY AND RECEIPTS (V1.1)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -130,7 +130,7 @@ Table of Contents
   transactions at O(1) cost.
 
   The expectation to be able to transact Alberta BUCKs in complete
-  freedom (no one else can prevent it) and anonymity (no one else can
+  freedom (no one else can prevent you) and anonymity (no one else can
   identify the parties) is paramount.  This is consistent with the
   expectation that one is innocent until proven guilty.  Asking
   permission from anyone before we can buy, sell or trade is
@@ -138,21 +138,21 @@ Table of Contents
   into a serf.  If the government or some regulator can lock your
   account and freeze you on a park bench at will, how free are you?
 
-  The expectation that I can be certain of my counterparty's identity,
-  and that it is /at least/ as reliable as the group(s) issuing it is
-  also critical.  Millions of financial fraud phone calls flood
-  Albertans' phones daily, pillaging our neighbours and grand-parents,
-  each carrying the government issued identity of the Canadian phone
-  number it "originates" from – under the cover of regulators.
-  /Everyone/ involved knows where the call is coming from (the
-  termination contract with the VoIP carrier), who is carrying it into
-  our phone system (the VoIP carrier's contract with phone system
-  providers), and who they are calling - except for /you/.  Allowing
-  government-approved hostile groups to ravage citizens under the cover
-  of darkness has been used throughout history to subjugate free people.
-  If the government can issue identity documents to whomever they wish,
-  and you are forced to trust them and use them to identify yourself as
-  a participant in every transaction, how free are you?
+  The expectation to be certain of your counterparty's identity, and
+  that it is /at least/ as reliable as the group(s) issuing it is also
+  critical.  Millions of financial fraud phone calls flood Albertans'
+  phones daily, pillaging our neighbours and grand-parents, each
+  carrying the government issued identity of the Canadian phone number
+  it "originates" from – under the cover of regulators.  /Everyone/
+  involved knows where the call is coming from (the termination contract
+  with the VoIP carrier), who is carrying it into our phone system (the
+  VoIP carrier's contract with phone system providers), and who they are
+  calling - except for /you/.  Allowing government-approved hostile
+  groups to ravage citizens under the cover of darkness has been used
+  throughout history to subjugate free people.  If the government can
+  issue identity documents to whomever they wish, and you are forced to
+  trust them and use them to identify yourself as a participant in every
+  transaction, how free are you?
 
   The Alberta Buck enforces /these/ principles:
   • The freedom to /transact in privacy and peace/ by keeping your
@@ -1170,17 +1170,23 @@ Table of Contents
 
   The privacy boundary is:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Observer                 Can link accounts?  Why?                                        
-  ──────────────────────────────────────────────────────────────────────────────────────────
-   Eve (passive, on-chain)  NO                  All public artifacts are independent random 
-                                                values (statistical unlinkability)          
-   Bob (authorized)         Learns one account  By design – the purpose of `approve'        
-   Bob + Carol (colluding)  Yes, via \( M \)    But both already know Alice's name from     
-                                                `identity_data' exchange                    
-   Issuer (on-chain only)   NO                  Cannot extract \( M \) without a secret key 
-   Issuer (given \( M \))   YES                 By design – regulatory compliance path      
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Observer                  Can link accounts?  Why?                                         
+  ────────────────────────────────────────────────────────────────────────────────────────────
+   Eve (passive, on-chain)   NO                  All public artifacts are independent random  
+                                                 values (statistical unlinkability)           
+   Bob (authorized)          Learns one account  By design – the purpose of `approve'         
+   Bob + Carol (colluding)   Yes, via \( M \)    But both already know Alice's name from      
+                                                 `identity_data' exchange                     
+   Issuer (on-chain only)    NO                  Knows every \( M \) it issued, yet cannot    
+                                                 plaintext-check \( M \) against any on-chain 
+                                                 \( E \) (IND-CPA / DDH) nor recognise its    
+                                                 rerandomised PS credential (statistical)     
+   Issuer (given a receipt)  Names the person    A surrendered receipt carries account \(     
+                                                 ↔ M \); the issuer maps \( M \)              
+                                                 to the real person – it /verifies/ a link    
+                                                 others surrender, never /produces/ one       
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   Before `approve', Alice's accounts are unlinkable to everyone.  After
   `approve', only that specific counterparty learns Alice's identity for
