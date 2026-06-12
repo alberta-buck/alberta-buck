@@ -226,15 +226,14 @@ images:			vectors plots
 
 # ── AB-RCPT/1 receipt golden-text renders ────────────────────────────
 #
-# Regenerates test/vectors/receipt-*.golden.txt from the current renderer
-# and the canonical identity.json vectors.  Run whenever the receipt layout
-# changes intentionally; the golden-file tests in test_render.py will fail
-# until these are re-generated.
-
-# Regenerates test/vectors/receipt-*.golden.txt from the current renderer
-# and the canonical identity.json vectors.  Run whenever the receipt layout
-# changes intentionally; the golden-file tests in test_render.py will fail
-# until these are re-generated.
+# Regenerates alberta_buck/test/vectors/receipt-*.golden.txt (all eight
+# kinds: the five recipient-side receipts plus the three issuer-side Note
+# receipts) from the current renderer and the canonical identity.json
+# vectors.  The goldens are consumed only by the Python tests, so they live
+# in the Python tree; test/vectors/ holds the artifacts the forge tests
+# read.  Run whenever the receipt layout changes intentionally; the
+# golden-file tests in test_render.py will fail until these are
+# re-generated.
 #
 # Prerequisite: identity.json must be up-to-date (emit-vectors runs first).
 golden-receipts:  # requires nix-

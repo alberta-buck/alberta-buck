@@ -32,7 +32,7 @@ from alberta_buck.wallet.nizk import registration_prove, RegistrationProof
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.notes import (
     FLAVOR_A1, FLAVOR_A2, FLAVOR_B1, NoteOpening, note_commitment,
-    nullifier_a, nullifier_b, id_hash_a2, id_hash_b1,
+    nullifier_b, id_hash_a1, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.schnorr import issuer_schnorr_sign, batch_commitment
 from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
@@ -237,133 +237,21 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # receipt naming Alice with no secret disclosed.
     rcpt_vd = verifiable_decrypt_prove(E_for_bob, bob.kp.sk, alice.M, BOB_ADDR, CHAINID, rng=rng)
 
-    # ---- AB-RCPT/1 receipt cores (decryptability Phase 1, envelope) -------
-    #
-    # Build the five receipt kinds from the canonical identity-setup data
-    # (Alice, Bob) plus the approve and note artifacts above.  Each produces
-    # a ReceiptCore, serialized to canonical bytes, and the envelope text.
-    # The bit-identical property: two calls with the same inputs yield the
-    # same canonical bytes, so the receipt_id is deterministic.
-
     SIMPLE_CONTRACTS = {
         "registry": "0x" + "1d" * 20,
         "buck":     "0x" + "b0" * 20,
         "notes":    "0x" + "70" * 20,
     }
 
-    def _e(rng):
-        """Shorthand for a receipt-core result struct."""
-        pass
-
-    # -- eoa-pub ---------------------------------------------------------------
-    # Bob (payee, Private) receives an EOA transfer from Alice as a *Public*
-    # Identity.  Bob self-names; Alice is named via her public identity_data.
-    eoa_pub_core = build_eoa_pub(
-        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
-        payer_addr=ALICE_ADDR, payer_identity=alice.canonical, payer_M=alice.M,
-        payer_pk=alice.kp.pk,
-        payee_addr=BOB_ADDR, payee_identity=bob.canonical, payee_M=bob.M,
-        payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
-        value=500_000000, block_time=1779999000,
-        txhash="0x" + "ea" * 32, block=1234567, logindex=2,
-        rng=rng,
-    )
-
-    # -- eoa-priv --------------------------------------------------------------
-    # Bob (payee, Private) receives from Alice as a *Private* Identity.
-    # Bob uses the approve handshake (cp, E_for_bob) + his vd_proof to name
-    # Alice, and self-names the same way.
-    eoa_priv_core = build_eoa_priv(
-        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
-        payer_addr=ALICE_ADDR, payer_identity=alice.canonical, payer_M=alice.M,
-        payer_pk=alice.kp.pk, payer_E_addr=alice.E,
-        E_for_payee=E_for_bob, cp_proof=cp,
-        payee_addr=BOB_ADDR, payee_identity=bob.canonical, payee_M=bob.M,
-        payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
-        value=500_000000, block_time=1779999000,
-        txhash="0x" + "ee" * 32, block=1234567, logindex=2,
-        rng=rng,
-    )
-
-    # -- note-b1 ---------------------------------------------------------------
-    # Bob (payee) cashes a B1 bearer note.  The issuer (Bob himself, as a public
-    # Corporate Identity) signed the batch; Alice is the depositor.
-    # Bob's registered identity_key serves as the issuer Schnorr key.
-    note_b1_core = build_note_b1(
-        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
-        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
-        issuer_pk=bob.kp.pk,
-        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
-        payee_pk=alice.kp.pk, payee_sk=alice.kp.sk, payee_E_addr=alice.E,
-        opening=rcpt_opening, cms=rcpt_cms, issuer_sig=rcpt_sig,
-        nullifier=rcpt_nf, face=rcpt_face,
-        value=rcpt_face, block_time=1779999000,
-        txhash="0x" + "b1" * 32, block=1234599, logindex=1,
-        mint_txhash="0x" + "bb" * 32, mint_block=1234500,
-        rng=rng,
-    )
-
-    # -- note-a1 ---------------------------------------------------------------
-    # Bob (issuer) mints an A1 addressed note to Alice.  Alice deposits it via
-    # spendACP.  Same structure as B1 but nullifier tag 4243, SpentA event.
-    # We reuse the B1 opening as a template with flavor A1.
-    a1_opening = NoteOpening(
-        flavor=FLAVOR_A1, v=rcpt_face, rho=rcpt_rho,
-        id_hash=rcpt_idHash, predicate=0,
-    )
-    a1_cm = note_commitment(a1_opening)
-    a1_cms = [rand_scalar(rng) % F_R, a1_cm, rand_scalar(rng) % F_R]
-    a1_hBatch = batch_commitment(a1_cms)
-    a1_sig = issuer_schnorr_sign(bob.kp.sk, a1_hBatch, BOB_ADDR, CHAINID, rng=rng)
-    a1_nf = nullifier_a(rcpt_rho, rcpt_idHash)
-    note_a1_core = build_note_a1(
-        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
-        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
-        issuer_pk=bob.kp.pk,
-        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
-        payee_pk=alice.kp.pk, payee_sk=alice.kp.sk, payee_E_addr=alice.E,
-        opening=a1_opening, cms=a1_cms, issuer_sig=a1_sig,
-        nullifier=a1_nf, face=rcpt_face,
-        value=rcpt_face, block_time=1779999000,
-        txhash="0x" + "a1" * 32, block=1234599, logindex=1,
-        mint_txhash="0x" + "aa" * 32, mint_block=1234500,
-        rng=rng,
-    )
-
-    # -- note-a2 ---------------------------------------------------------------
-    # Bob (issuer, Private) mints an A2 addressed note to Alice.  E_iss_for_rec
-    # is an ElGamal encrypting Bob's M under Alice's pk; the issuer ships the
-    # blinded re-encryption binding + gamma so Alice's receipt is soundly bound.
-    a2_r       = rand_scalar(rng)
-    a2_E_iss   = elgamal_encrypt(bob.M, alice.kp.pk, a2_r)
-    a2_gamma   = rand_scalar(rng)
-    a2_binding = issuer_reenc_prove(
-        bob.kp.sk, a2_r, alice.kp.pk, bob.E, a2_E_iss,
-        BOB_ADDR, CHAINID, gamma=a2_gamma, rng=rng,
-    )
-    a2_nf = nullifier_a(rcpt_rho, rcpt_idHash)
-    note_a2_core = build_note_a2(
-        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
-        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
-        issuer_pk=bob.kp.pk, issuer_E_addr=bob.E,
-        E_iss_for_rec=a2_E_iss,
-        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
-        payee_pk=alice.kp.pk, payee_sk=alice.kp.sk, payee_E_addr=alice.E,
-        value=rcpt_face, block_time=1779999000,
-        txhash="0x" + "a2" * 32, block=1234599, logindex=1,
-        mint_txhash="0x" + "aa" * 32, mint_block=1234500,
-        nullifier=a2_nf,
-        binding=a2_binding, gamma=a2_gamma,
-        rng=rng,
-    )
-
-    # Serialise for the vector file — both the canonical bytes and the envelope
-    # text, so the Solidity / off-chain verifier tests can load them directly.
-    eoa_pub_bytes  = serialize_core(eoa_pub_core)
-    eoa_priv_bytes = serialize_core(eoa_priv_core)
-    b1_bytes       = serialize_core(note_b1_core)
-    a1_bytes       = serialize_core(note_a1_core)
-    a2_bytes       = serialize_core(note_a2_core)
+    # Stream-preservation: the original (account-key) AB-RCPT/1 cores were
+    # built here and consumed exactly 17 scalars (five payee-vd nonces, the
+    # A1 cms/sig draws, and the A2 r/gamma/binding draws).  The Identity-M
+    # receipt cores are now built AFTER the issuer_reenc (a2b) section below,
+    # whose values are pinned by committed SNARK fixtures (the `tie` fixture
+    # of test/NotesA2Tie.t.sol embeds .issuer_reenc.E_iss); reserve the same
+    # 17 draws so every a2b value stays byte-identical.
+    for _ in range(17):
+        rand_scalar(rng)
 
     # ---- A2 issuer re-encryption binding (decryptability Phase 2) ----------
     #
@@ -379,6 +267,161 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         bob.kp.sk, a2b_r_prime, alice.kp.pk, bob.E, a2b_E_iss,
         BOB_ADDR, CHAINID, rng=rng,
     )
+
+    # ---- AB-RCPT/1 Identity-M receipt cores ---------------------------------
+    #
+    # The receipt envelopes for all five kinds, plus the issuer-side ("I paid
+    # X") variants of the three Note flavors -- both Note parties hold the
+    # Identity-M note payload (the idHash preimage material created at mint
+    # plus the SpentCoupled* event data), so both can build a receipt naming
+    # both parties.  Bob is the issuer throughout (a public Corporate Identity
+    # for B1/A1; a private Identity for A2); Alice is the addressed recipient/
+    # depositor.  Bit-identical property: same inputs, same canonical bytes,
+    # deterministic receipt_id.  Built after the pinned a2b section, so the
+    # draws here are free to evolve.
+
+    RCPT_TIME = 1779999000
+
+    # -- eoa-pub: Bob (payee, Private) receives from Alice as a Public Identity.
+    eoa_pub_core = build_eoa_pub(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        payer_addr=ALICE_ADDR, payer_identity=alice.canonical, payer_M=alice.M,
+        payer_pk=alice.kp.pk,
+        payee_addr=BOB_ADDR, payee_identity=bob.canonical, payee_M=bob.M,
+        payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
+        value=500_000000, block_time=RCPT_TIME,
+        txhash="0x" + "ea" * 32, block=1234567, logindex=2,
+        rng=rng,
+    )
+
+    # -- eoa-priv: Bob (payee) names Alice (Private) via the approve handshake.
+    eoa_priv_core = build_eoa_priv(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        payer_addr=ALICE_ADDR, payer_identity=alice.canonical, payer_M=alice.M,
+        payer_pk=alice.kp.pk, payer_E_addr=alice.E,
+        E_for_payee=E_for_bob, cp_proof=cp,
+        payee_addr=BOB_ADDR, payee_identity=bob.canonical, payee_M=bob.M,
+        payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
+        value=500_000000, block_time=RCPT_TIME,
+        txhash="0x" + "ee" * 32, block=1234567, logindex=2,
+        rng=rng,
+    )
+
+    # -- note-b1: the `receipt` vector above IS the Identity-M B1 note (its
+    # idHash = id_hash_b1(bob.m, rcpt_sigma_R, rcpt_sigma_s) binds Bob into
+    # the leaf).  At spend, Alice (the depositor) published eDepForIss -- her
+    # Identity re-encrypted under Bob's registered public-issuer key -- in the
+    # SpentCoupledB1 event; Bob alone decrypts it to name her.
+    b1_eDepForIss = elgamal_encrypt(alice.M, bob.kp.pk, rand_scalar(rng))
+
+    _b1_common = dict(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
+        issuer_pk=bob.kp.pk,
+        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
+        payee_pk=alice.kp.pk, payee_E_addr=alice.E,
+        opening=rcpt_opening, cms=rcpt_cms, issuer_sig=rcpt_sig,
+        sigma_R=rcpt_sigma_R, sigma_s=rcpt_sigma_s,
+        nullifier=rcpt_nf, face=rcpt_face,
+        value=rcpt_face, block_time=RCPT_TIME,
+        txhash="0x" + "b1" * 32, block=1234599, logindex=1,
+        mint_txhash="0x" + "bb" * 32, mint_block=1234500,
+        eDepForIss=b1_eDepForIss,
+    )
+    note_b1_core = build_note_b1(
+        role="recipient", payee_sk=alice.kp.sk, rng=rng, **_b1_common)
+    note_b1_iss_core = build_note_b1(
+        role="issuer", issuer_sk=bob.kp.sk, rng=rng, **_b1_common)
+
+    # -- note-a1: identity-targeted (unilateral A1).  Bob, the public issuer,
+    # addresses the note to Alice's identity POINT M_rec: eNote encrypts the
+    # face under M_rec, eRec the recipient identity under itself, and
+    # idHash = id_hash_a1(eNote, m_iss, sigma) binds both parties into the leaf.
+    a1m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice.M, rand_scalar(rng))
+    a1m_eRec    = elgamal_encrypt(alice.M, alice.M, rand_scalar(rng))
+    a1m_idHash  = id_hash_a1(a1m_eNote, bob.m, rcpt_sigma_R, rcpt_sigma_s)
+    a1m_opening = NoteOpening(flavor=FLAVOR_A1, v=rcpt_face, rho=rcpt_rho,
+                              id_hash=a1m_idHash, predicate=0)
+    a1m_cm      = note_commitment(a1m_opening)
+    a1m_cms     = [rand_scalar(rng) % F_R, a1m_cm, rand_scalar(rng) % F_R]
+    a1m_sig     = issuer_schnorr_sign(bob.kp.sk, batch_commitment(a1m_cms),
+                                      BOB_ADDR, CHAINID, rng=rng)
+    a1m_nf      = nullifier_b(rcpt_rho, a1m_idHash)
+
+    _a1_common = dict(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
+        issuer_pk=bob.kp.pk,
+        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
+        payee_pk=alice.kp.pk, payee_E_addr=alice.E,
+        opening=a1m_opening, cms=a1m_cms, issuer_sig=a1m_sig,
+        eNote=a1m_eNote, eRec=a1m_eRec,
+        sigma_R=rcpt_sigma_R, sigma_s=rcpt_sigma_s,
+        nullifier=a1m_nf, face=rcpt_face,
+        value=rcpt_face, block_time=RCPT_TIME,
+        txhash="0x" + "a1" * 32, block=1234599, logindex=1,
+        mint_txhash="0x" + "aa" * 32, mint_block=1234500,
+    )
+    note_a1_core = build_note_a1(
+        role="recipient", payee_sk=alice.kp.sk, rng=rng, **_a1_common)
+    note_a1_iss_core = build_note_a1(role="issuer", rng=rng, **_a1_common)
+
+    # -- note-a2: identity-targeted (unilateral A2).  Bob, the PRIVATE issuer,
+    # encrypts his own registered Identity under Alice's identity point
+    # (eIss) and the face under the same point (eNote); the blinded
+    # re-encryption binding (verified at mint by Notes' A2 overload) makes the
+    # recovered issuer provably the registered minter.
+    a2m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice.M, rand_scalar(rng))
+    a2m_r_prime = rand_scalar(rng)
+    a2m_eIss    = elgamal_encrypt(bob.M, alice.M, a2m_r_prime)
+    a2m_binding = issuer_reenc_prove(
+        bob.kp.sk, a2m_r_prime, alice.M, bob.E, a2m_eIss,
+        BOB_ADDR, CHAINID, rng=rng,
+    )
+    a2m_idHash  = id_hash_a2(a2m_eNote, a2m_eIss)
+    a2m_opening = NoteOpening(flavor=FLAVOR_A2, v=rcpt_face, rho=rcpt_rho,
+                              id_hash=a2m_idHash, predicate=0)
+    a2m_cm      = note_commitment(a2m_opening)
+    a2m_cms     = [rand_scalar(rng) % F_R, a2m_cm, rand_scalar(rng) % F_R]
+    a2m_nf      = nullifier_b(rcpt_rho, a2m_idHash)
+
+    _a2_common = dict(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        issuer_addr=BOB_ADDR, issuer_identity=bob.canonical, issuer_M=bob.M,
+        issuer_pk=bob.kp.pk, issuer_E_addr=bob.E,
+        payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
+        payee_pk=alice.kp.pk, payee_E_addr=alice.E,
+        opening=a2m_opening, cms=a2m_cms,
+        eNote=a2m_eNote, eIss=a2m_eIss, binding=a2m_binding,
+        nullifier=a2m_nf, face=rcpt_face,
+        value=rcpt_face, block_time=RCPT_TIME,
+        txhash="0x" + "a2" * 32, block=1234599, logindex=1,
+        mint_txhash="0x" + "aa" * 32, mint_block=1234500,
+    )
+    note_a2_core = build_note_a2(
+        role="recipient", payee_sk=alice.kp.sk, rng=rng, **_a2_common)
+    note_a2_iss_core = build_note_a2(
+        role="issuer", issuer_sk=bob.kp.sk, rng=rng, **_a2_common)
+
+    # Serialise for the vector file — both the canonical bytes and the envelope
+    # text, so the off-chain verifier tests can load them directly.
+    abrcpt_cores = {
+        "eoa_pub":        eoa_pub_core,
+        "eoa_priv":       eoa_priv_core,
+        "note_b1":        note_b1_core,
+        "note_a1":        note_a1_core,
+        "note_a2":        note_a2_core,
+        "note_b1_issuer": note_b1_iss_core,
+        "note_a1_issuer": note_a1_iss_core,
+        "note_a2_issuer": note_a2_iss_core,
+    }
+    abrcpt = {}
+    for kind, core in abrcpt_cores.items():
+        core_bytes = serialize_core(core)
+        abrcpt[kind] = {
+            "id":       receipt_id(core_bytes),
+            "envelope": envelope_text(core_bytes),
+        }
 
     return {
         "$schema_version": 1,
@@ -492,28 +535,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
                 "T":   _g1(a2b_proof.T),
             },
         },
-        "abrcpt": {
-            "eoa_pub": {
-                "id": receipt_id(eoa_pub_bytes),
-                "envelope": envelope_text(eoa_pub_bytes),
-            },
-            "eoa_priv": {
-                "id": receipt_id(eoa_priv_bytes),
-                "envelope": envelope_text(eoa_priv_bytes),
-            },
-            "note_b1": {
-                "id": receipt_id(b1_bytes),
-                "envelope": envelope_text(b1_bytes),
-            },
-            "note_a1": {
-                "id": receipt_id(a1_bytes),
-                "envelope": envelope_text(a1_bytes),
-            },
-            "note_a2": {
-                "id": receipt_id(a2_bytes),
-                "envelope": envelope_text(a2_bytes),
-            },
-        },
+        "abrcpt": abrcpt,
     }
 
 

@@ -313,7 +313,7 @@ def _verify_lines(core: ReceiptCore, receipt_id_str: str,
 
     status = core.issuer_binding_status or ""
     if status == "unverified":
-        banner = "UNVERIFIED ISSUER (pre-binding)"
+        banner = "UNVERIFIED ISSUER (no binding)"
     else:
         banner = "VALID"
 
@@ -378,12 +378,17 @@ def render_receipt(
     ]))
 
     # --- parties ----------------------------------------------------------
+    # The generating side (core.role) is marked "- you": a recipient-built
+    # receipt is the payee's copy, an issuer-built one the payer's.
+    payer_label = "FROM (payer - you)" if core.role == "issuer" else "FROM (payer)"
+    payee_label = "TO (payee - you)" if core.role == "recipient" else "TO (payee)"
+
     doc.sections.append(ReceiptSection(
-        _identity_lines(core.payer, payer_detail, "FROM (payer)")
+        _identity_lines(core.payer, payer_detail, payer_label)
     ))
 
     doc.sections.append(ReceiptSection(
-        _identity_lines(core.payee, payee_detail, "TO (payee)")
+        _identity_lines(core.payee, payee_detail, payee_label)
     ))
 
     # --- transaction ------------------------------------------------------

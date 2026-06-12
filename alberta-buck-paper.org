@@ -1,4 +1,4 @@
-#+TITLE: Accountable Anonymity for Public Money
+#+TITLE: Accountable Anonymity for Public Money (DRAFT v0.1)
 #+SUBTITLE: Identity-Bound Bearer Payments with No Trusted Opener
 #+author: Perry Kundert
 #+date: 2026-06-11
@@ -328,17 +328,17 @@ system takes.  Every theorem carries an executable witness.
   collusion-resistant/ receipt with /no system-wide opener/:
 
   #+LATEX: {\scriptsize
-  | System                              | Unlinkable | Mandatory receipt | Collusion-resistant | Trusted opener? | Bearer/paper |
-  |-------------------------------------+------------+-------------------+---------------------+-----------------+--------------|
-  | Chaum e-cash [fn:chaum82]           | issuer-blind | no              | no                  | central bank    | no           |
-  | Zerocash / Zcash [fn:zerocash]      | yes        | no (opt. viewkey) | no                  | no              | no           |
-  | Tornado / Privacy Pools [fn:privacypool] | yes   | no (innocence)    | no                  | no              | no           |
-  | PRCash [fn:prcash]                  | yes        | regulator-facing  | via auditor         | *yes* (auditor) | no           |
-  | UTT [fn:utt]                        | yes        | budget-gated      | via committee       | *yes* (committee)| no          |
-  | PEReDi [fn:peredi]                  | yes        | regulator-facing  | via threshold       | *yes* (maintainers)| no        |
-  | Platypus [fn:platypus]              | yes        | regulator-facing  | via central bank    | *yes* (cen. bank)| no          |
-  | CBDC (e-CNY, digital euro) [fn:cbdc]| no         | n/a               | n/a                 | issuer sees all | no           |
-  | *BUCK Notes (A1, A2, B1)*           | *yes*      | *yes*             | *yes*               | *no*            | *yes*        |
+  | System                                   | Unlinkable   | Mandatory receipt | Collusion-resistant | Trusted opener?     | Bearer/paper |
+  |------------------------------------------+--------------+-------------------+---------------------+---------------------+--------------|
+  | Chaum e-cash [fn:chaum82]                | issuer-blind | no                | no                  | central bank        | no           |
+  | Zerocash / Zcash [fn:zerocash]           | yes          | no (opt. viewkey) | no                  | no                  | no           |
+  | Tornado / Privacy Pools [fn:privacypool] | yes          | no (innocence)    | no                  | no                  | no           |
+  | PRCash [fn:prcash]                       | yes          | regulator-facing  | via auditor         | *yes* (auditor)     | no           |
+  | UTT [fn:utt]                             | yes          | budget-gated      | via committee       | *yes* (committee)   | no           |
+  | PEReDi [fn:peredi]                       | yes          | regulator-facing  | via threshold       | *yes* (maintainers) | no           |
+  | Platypus [fn:platypus]                   | yes          | regulator-facing  | via central bank    | *yes* (cen. bank)   | no           |
+  | CBDC (e-CNY, digital euro) [fn:cbdc]     | no           | n/a               | n/a                 | issuer sees all     | no           |
+  | *BUCK Notes (A1, A2, B1)*                | *yes*        | *yes*             | *yes*               | *no*                | *yes*        |
   #+LATEX: }
 
   The auditable-privacy line (PRCash, UTT, PEReDi, Platypus) is the
@@ -768,11 +768,11 @@ system takes.  Every theorem carries an executable witness.
    which moment, defines the flavour:
 
    #+LATEX: {\scriptsize
-   | Flavour | idHash commits                                          | Issuer named...                          | Recipient named...                                  |
-   |---------+---------------------------------------------------------+------------------------------------------+------------------------------------------------------|
-   | A1      | \( (eNote,\ m_{\mathrm{iss}},\ \sigma_{\mathrm{Schnorr}}) \) | at mint, in the clear (batch Schnorr) | at spend: coupling to \( M_{\mathrm{rec}} \) via \( eRec \) |
-   | A2      | \( (eNote,\ eIss) \)                                    | at spend, to recipient alone: decrypt \( eIss \) | at spend: same coupling, target \( M_{\mathrm{rec}} \) |
-   | B1      | \( (m_{\mathrm{iss}},\ \sigma_{\mathrm{Schnorr}}) \)   | at mint, in the clear                    | at spend: depositor binding \( eDepForIss \) to issuer |
+   | Flavour | idHash commits                                               | Issuer named...                                  | Recipient named...                                          |
+   |---------+--------------------------------------------------------------+--------------------------------------------------+-------------------------------------------------------------|
+   | A1      | \( (eNote,\ m_{\mathrm{iss}},\ \sigma_{\mathrm{Schnorr}}) \) | at mint, in the clear (batch Schnorr)            | at spend: coupling to \( M_{\mathrm{rec}} \) via \( eRec \) |
+   | A2      | \( (eNote,\ eIss) \)                                         | at spend, to recipient alone: decrypt \( eIss \) | at spend: same coupling, target \( M_{\mathrm{rec}} \)      |
+   | B1      | \( (m_{\mathrm{iss}},\ \sigma_{\mathrm{Schnorr}}) \)         | at mint, in the clear                            | at spend: depositor binding \( eDepForIss \) to issuer      |
    #+LATEX: }
 
    with the per-flavour ciphertexts (all ElGamal over identity points):
@@ -891,6 +891,18 @@ system takes.  Every theorem carries an executable witness.
    direction is the spend-side composition above.  Link (c) is where
    the invariant lives or dies; Sec. [[#sec:cost]] is about keeping it
    alive when the issuer is anonymous.
+
+   Because the material behind the chain is held by /both/ parties --
+   the issuer created the identity payload at mint, the recipient was
+   handed it with the note, and the spend event publishes the rest --
+   either party can assemble the receipt: the depositor's copy and the
+   issuer's "I paid X" copy differ only in who proves their own
+   account-to-identity tie.  Once the parties' identity preimages are
+   disclosed /in/ the receipt, every note-side check is deterministic
+   (re-hash the payload, decrypt the addressed ciphertexts), which is
+   what makes the two copies verify identically.  The end-user
+   serialization of this chain -- a printable, re-scannable slip -- is
+   Sec. [[#sec:receipt-artifact]].
 
 #+LATEX: \clearpage
 * The Forced Taxonomy
@@ -1248,16 +1260,98 @@ system takes.  Every theorem carries an executable witness.
 ** What is shipped
 
    #+LATEX: {\scriptsize
-   | Component                          | Realisation                                                      |
-   |------------------------------------+------------------------------------------------------------------|
-   | Identity substrate                 | =IdentityRegistry=: ElGamal credentials, PS verification, incremental Poseidon identity accumulator (commit-before-use) |
-   | Batch mint                         | =mint_batch[_a2].circom= per pinned N; issuer Schnorr (public) / blinded re-encryption binding + leaf-tie (private)     |
-   | Spend                              | =spend.circom= (flavour-agnostic, depth 20); nullifier =Poseidon3(rho, idHash, 4242)=                                   |
-   | Deposit sigmas                     | =verifyDepositCoupling= (A1/A2), =verifyDepositorBinding= (B1); EIP-196                                                 |
-   | Bound membership                   | =identity_membership_g1tie.circom=; public inputs derived from the sigma's P                                            |
-   | Note tie                           | =note_binding.circom= (A2, 25 public inputs), =note_binding_a1.circom= (A1, 26: face at index 1)                        |
-   | Spend entrypoints                  | =spendCoupledA1= / =A2= / =B1=                                                                                          |
+   | Component          | Realisation                                                                                                             |
+   |--------------------+-------------------------------------------------------------------------------------------------------------------------|
+   | Identity substrate | =IdentityRegistry=: ElGamal credentials, PS verification, incremental Poseidon identity accumulator (commit-before-use) |
+   | Batch mint         | =mint_batch[_a2].circom= per pinned N; issuer Schnorr (public) / blinded re-encryption binding + leaf-tie (private)     |
+   | Spend              | =spend.circom= (flavour-agnostic, depth 20); nullifier =Poseidon3(rho, idHash, 4242)=                                   |
+   | Deposit sigmas     | =verifyDepositCoupling= (A1/A2), =verifyDepositorBinding= (B1); EIP-196                                                 |
+   | Bound membership   | =identity_membership_g1tie.circom=; public inputs derived from the sigma's P                                            |
+   | Note tie           | =note_binding.circom= (A2, 25 public inputs), =note_binding_a1.circom= (A1, 26: face at index 1)                        |
+   | Spend entrypoints  | =spendCoupledA1= / =A2= / =B1=                                                                                          |
+   | Receipts           | =AB-RCPT/1= envelope + verifier + renderer; all flavours, generated by /either/ Note party (Sec. [[#sec:receipt-artifact]]) |
    #+LATEX: }
+
+** The receipt in hand
+   :PROPERTIES:
+   :CUSTOM_ID: sec:receipt-artifact
+   :END:
+
+   The invariant's deliverable is not a theorem but an artifact a
+   citizen can hold.  The wallet serializes the verified proof chain as
+   =AB-RCPT/1=: a canonical, bit-reproducible byte string, wrapped into
+   a plain-text payload sized for an 80mm thermal printer -- a literal
+   cash-register slip whose face names both parties in the clear and
+   whose payload re-verifies /offline/ from its own re-scanned text
+   (=albertabuck verify -=), or anchors to any node for the chain facts.
+
+   Two design points carry the civic claims.  First, the slip names
+   *persons*, not keys: it embeds each party's full
+   =canonical_identity_data= preimage, and verification recomputes
+   \( M = \mathrm{keccak}(\text{data}) \cdot G \) against the named
+   identity point -- so "my counterparty is who they say they are" is a
+   hash check, not a promise, and the accounts printed beside the names
+   are pinned by the same proofs (the issuer bindings fold the minting
+   account into their transcripts; the spend event anchors the payout
+   account).  Second, for Notes the receipt is *bilateral by
+   construction*: the Identity-M payload behind the leaf's =idHash= is
+   held by both parties, so the depositor prints their copy and the
+   issuer prints an "I paid X" copy -- for B1, naming the depositor by
+   verifiably decrypting the spend event's =eDepForIss= -- and both
+   verify identically, because once the receipt has disclosed the
+   identity preimages every note leg is a deterministic re-check.
+   Eight golden renders (the five kinds plus the three issuer-side Note
+   receipts) are pinned byte-for-byte in the test suite; the
+   recipient's copy for an A2 note -- a payment whose issuer no
+   observer, subpoena, or breached KYC issuer could name -- reads:
+
+   #+LATEX: {\scriptsize
+   #+begin_example
+                    ALBERTA  BUCK
+            P A Y M E N T   R E C E I P T
+   ------------------------------------------------
+     Receipt  fo6idsp2dmel
+   ------------------------------------------------
+   FROM (payer) (PRIVATE IDENTITY)
+    Bob Smith
+   Corporate Registration - Alberta, Canada
+    acct 0x0b0b000000000000000000000000000000000b0b
+    idpt 0x0cef52e77ea5..0ae1f916d96b
+   ------------------------------------------------
+   TO (payee - you) (PRIVATE IDENTITY)
+    Alice Johnson
+   Alberta Identity Card - Alberta, Canada
+    acct 0x0a11ce00000000000000000000000000000a11ce
+    idpt 0x07a0b762be40..d418d7bf5e7c
+   ------------------------------------------------
+   TRANSACTION
+    Type    Note spend - A2 addressed, private issuer
+    Amount              0.000250  BUCK
+    When        2026-05-28 20:10  UTC
+    Chain 1    Block 1234599    Log 1
+    Tx      0xa2a2a2a2a2a2..a2a2a2a2a2a2
+    Mint    0xaaaaaaaaaaaa..aaaaaaaaaaaa
+   ------------------------------------------------
+   VERIFICATION
+    status @ issue: VALID
+    receipt  fo6idsp2dmel
+   ------------------------------------------------
+         a record, not a bearer instrument
+   #+end_example
+   #+LATEX: }
+
+   This is the compulsion calculus (Sec. [[#sec:compulsion]]) made
+   tangible: standing, court-grade provenance for every payment a
+   citizen was party to -- against fraud, theft, or commerce conducted
+   with their stolen credentials -- produced from their own records,
+   without anyone's permission, forgeable by no one; while the same
+   payment remains noise to every non-party, from the chain-analytics
+   firm to the compelled issuer.  That pairing is the shift the system
+   exists to make: the capability to /prove/ moves to the individuals
+   who transacted, and the capability to /watch/ is withdrawn from
+   everyone else.  The slip itself is a record, not a bearer
+   instrument: it moves no funds, and discloses only what its holder
+   chooses to disclose, one payment at a time.
 
 ** Costs (measured)
 
@@ -1275,12 +1369,12 @@ system takes.  Every theorem carries an executable witness.
    Isolated per-phase verification gas:
 
    #+LATEX: {\scriptsize
-   | Verification phase                       | A1      | A2      | B1      |
-   |------------------------------------------+---------+---------+---------|
-   | note proof (=spend.circom=, shared)      | 227,256 | 227,256 | 227,256 |
-   | bound membership (=g1tie=)               | 253,120 | 253,120 | 253,120 |
-   | deposit sigma (EIP-196)                  | 89,866  | 89,866  | 128,734 |
-   | note tie (=note_binding[_a1]=)           | 377,257 | 368,457 | --      |
+   | Verification phase                  | A1      | A2      | B1      |
+   |-------------------------------------+---------+---------+---------|
+   | note proof (=spend.circom=, shared) | 227,256 | 227,256 | 227,256 |
+   | bound membership (=g1tie=)          | 253,120 | 253,120 | 253,120 |
+   | deposit sigma (EIP-196)             | 89,866  | 89,866  | 128,734 |
+   | note tie (=note_binding[_a1]=)      | 377,257 | 368,457 | --      |
    #+LATEX: }
 
    The cost structure tells the paper's story in numbers.  Both
@@ -1306,7 +1400,9 @@ system takes.  Every theorem carries an executable witness.
    circom witness generators, and the Solidity verifiers -- and the test
    suites assert byte-for-byte agreement: over 400 Foundry tests
    (including 18 on the tie verifiers alone and the 9-test
-   all-real-verifier end-to-end lifecycle) and 330 wallet tests.  The companion documents
+   all-real-verifier end-to-end lifecycle) and 350+ wallet tests
+   (among them byte-pinned golden renders of all eight receipt kinds,
+   from both Note parties' sides).  The companion documents
    are executable: the walkthrough document runs every cryptographic
    step of all three flavours in one seeded session, and this paper's
    appendix witnesses re-run on each build.  Honesty items: Groth16
@@ -1584,12 +1680,14 @@ system takes.  Every theorem carries an executable witness.
    suites; the end-to-end lifecycle (real batch mint, real spend, real
    sigma, real bound membership, real tie, per flavour) reproduces with:
 
+   #+LATEX: {\scriptsize
    #+BEGIN_EXAMPLE
    $ make nix-snark-note-binding nix-snark-note-binding-a1   # tie circuits + setups
    $ make nix-snark-e2e-fixtures                             # all-real-verifier fixtures
    $ nix develop --command forge test --match-contract NotesE2E -vv
    [PASS] ... 9 tests: lifecycle, double-spend revert, per-phase gas, x3 flavours
    #+END_EXAMPLE
+   #+LATEX: }
 
 * Footnotes
 

@@ -111,11 +111,13 @@ def _cmd_render_golden(args: argparse.Namespace) -> int:
     from alberta_buck.wallet.vectors import build_vectors
 
     v = build_vectors()
-    for kind in ["eoa_pub", "eoa_priv", "note_b1", "note_a1", "note_a2"]:
+    # Golden receipts are consumed only by the Python tests, so they live in
+    # the Python tree (test/vectors/ holds the artifacts the forge tests read).
+    for kind in sorted(v["abrcpt"]):
         env = v["abrcpt"][kind]["envelope"]
         core = deserialize_core(parse_envelope(env))
         text = TextDriver(48).render(render_receipt(core))
-        dest = f"test/vectors/receipt-{kind}.golden.txt"
+        dest = f"alberta_buck/test/vectors/receipt-{kind}.golden.txt"
         with open(dest, "w") as f:
             f.write(text)
         print(f"  wrote {dest}  ({len(text)} B)")
@@ -143,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     pv.set_defaults(func=_cmd_verify)
 
     prg = sub.add_parser("render-golden",
-                           help="(re)generate test/vectors/receipt-*.golden.txt")
+                           help="(re)generate alberta_buck/test/vectors/receipt-*.golden.txt")
     prg.set_defaults(func=_cmd_render_golden)
 
     pr = sub.add_parser("receipt", help="render an AB-RCPT/1 envelope as a receipt")

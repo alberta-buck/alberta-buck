@@ -3,10 +3,31 @@
 Reference: alberta-buck-receipt.org ("Verification Procedure").
 
 Consumes a deserialized receipt core (no chain access needed for tier 1) and
-re-runs every proof: the point→human bridge (keccak(identity)·G == M) for each
-party, the type-specific payer-naming verifier, and the payee self-naming
-verifiable decryption.  Returns :class:`RcptResult` naming the parties and
-value on success.
+re-runs every check: the point→human bridge (keccak(identity)·G == M) for each
+party, the generating side's self-naming verifiable decryption, and the
+type-specific naming of both parties.
+
+For the Note kinds the naming is *deterministic* — the receipt discloses both
+identity preimages, so the verifier derives the identity scalars m_iss/m_rec
+itself, recomputes the Identity-M ``idHash`` from the embedded note payload
+(``id_hash_b1/a1/a2``), and decrypts the payload ciphertexts directly:
+
+* note-b1:  idHash == id_hash_b1(m_iss, sigma_R, sigma_s) — the issuer is
+  bound INTO the leaf; the batch Schnorr binds the registered issuer key over
+  keccak(cms).  An issuer-generated receipt additionally names the depositor
+  via the verifiable decryption of the SpentCoupledB1 event's eDepForIss.
+* note-a1:  idHash == id_hash_a1(eNote, m_iss, sigma_R, sigma_s);
+  Dec(eNote, m_rec) == v·G and Dec(eRec, m_rec) == M_rec — both parties bound
+  into the leaf (only the addressed identity satisfies the eNote relation).
+* note-a2:  idHash == id_hash_a2(eNote, eIss); Dec(eNote, m_rec) == v·G;
+  Dec(eIss, m_rec) == the named issuer M — which algebraically forces eIss's
+  key to BE M_rec (the coupling) — and the mint's issuer_reenc binding proves
+  eIss re-encrypts the issuer's *registered* credential (anti-framing).
+  Without a binding the receipt still verifies but is stamped
+  UNVERIFIED ISSUER.
+
+All flavors use the unified spend nullifier ``Poseidon3(rho, idHash, 4242)``
+(the shipped spend.circom tag) anchored at the ``SpentCoupled*`` event.
 
 Tier 2 (chain anchoring) is out of scope — the verifier would read the
 embedded ``pk`` / ``E_addr`` and event references from a node.
@@ -15,14 +36,16 @@ embedded ``pk`` / ``E_addr`` and event references from a node.
 from __future__ import annotations
 
 from alberta_buck.wallet.bn254 import G1, mul, add, neg, eq
+from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_decrypt
 from alberta_buck.wallet.issuer_reenc import IssuerReencProof, issuer_reenc_verify
-from alberta_buck.wallet.identity import identity_scalar, canonical_identity_data
+from alberta_buck.wallet.identity import identity_scalar
 from alberta_buck.wallet.chaum_pedersen import CPProof, chaum_pedersen_verify
 from alberta_buck.wallet.verifiable_decrypt import VDProof, verifiable_decrypt_verify
 from alberta_buck.wallet.schnorr import SchnorrProof, batch_commitment, issuer_schnorr_verify
 from alberta_buck.wallet.notes import (
-    NoteOpening, note_commitment, nullifier_a, nullifier_b,
+    NoteOpening, note_commitment, nullifier_b,
     FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
+    id_hash_a1, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.receipt import RcptResult
 from alberta_buck.wallet.envelope import (
@@ -56,35 +79,75 @@ def _vd_from_record(rec: dict) -> tuple:
     return E_ct, M, account, chainid, vd
 
 
+def _ct_eq(a: ElGamalCiphertext, b: ElGamalCiphertext) -> bool:
+    return eq(a.R, b.R) and eq(a.C, b.C)
+
+
+def _self_naming_ok(vd_rec: dict, party, chainid: int) -> str:
+    """Check a self-naming vd record against *party*'s registered record.
+
+    Returns "" on success, else the failure reason.  The record must decrypt
+    the party's own registered E_addr, under their registered key, to their
+    named M, bound to their address and this chain.
+    """
+    E, M, acct, cid, vd = _vd_from_record(vd_rec)
+    if cid != chainid:
+        return "chainid mismatch"
+    if acct != party.addr_int:
+        return "account mismatch"
+    if not eq(M, party.M_pt):
+        return "named M mismatch"
+    E_reg = party.E_addr_ct
+    if E_reg is None or not _ct_eq(E, E_reg):
+        return "ciphertext is not the registered E_addr"
+    if not verifiable_decrypt_verify(E, party.pk_pt, M, vd, acct, cid):
+        return "vd fails"
+    return ""
+
+
 def verify_receipt(core: ReceiptCore) -> RcptResult:
     """Tier-1 offline verification of an AB-RCPT/1 receipt core.
 
     Checks:
       1. Point→human bridge for both payer and payee.
-      2. Type-specific payer-naming proof.
-      3. Payee self-naming verifiable decryption.
-      4. Named parties and value match the human-readable fields.
+      2. The generating side's self-naming (per ``core.role``).
+      3. Type-specific naming of both parties (deterministic for Notes).
+      4. The note anchor: cm ∈ cms, idHash preimage, nullifier, face.
 
     Tier 2 (chain anchoring) requires an RPC node and is not run here.
     """
+    t = core.type
+    role = core.role
+
+    if role not in ("recipient", "issuer"):
+        return RcptResult(False, None, None, f"unknown receipt role: {role}")
+    if role == "issuer" and t not in ("note-b1", "note-a1", "note-a2"):
+        return RcptResult(False, None, None, f"{t}: issuer-side receipts exist for Notes only")
+
     # 1. Point→human bridge
     if not _check_point_identity(core.payer.M_pt, core.payer.identity):
         return RcptResult(False, None, None, "payer M != keccak(identity)·G")
     if not _check_point_identity(core.payee.M_pt, core.payee.identity):
         return RcptResult(False, None, None, "payee M != keccak(identity)·G")
 
-    # 2. Payee self-naming (always present — every receipt kind)
-    if core.payee_vd is None:
-        return RcptResult(False, None, None, "missing payee self-naming proof")
-    E_payee, M_payee, acct_payee, cid_payee, vd_payee = _vd_from_record(core.payee_vd)
-    if not verifiable_decrypt_verify(E_payee, core.payee.pk_pt, M_payee,
-                                     vd_payee, acct_payee, cid_payee):
-        return RcptResult(False, None, None, "payee self-naming: vd fails")
-    if acct_payee != core.payee.addr_int:
-        return RcptResult(False, None, None, "payee self-naming: account mismatch")
+    # 2. Generator self-naming (the account ↔ Identity tie)
+    if role == "recipient":
+        if core.payee_vd is None:
+            return RcptResult(False, None, None, "missing payee self-naming proof")
+        why = _self_naming_ok(core.payee_vd, core.payee, core.chainid)
+        if why:
+            return RcptResult(False, None, None, f"payee self-naming: {why}")
+    else:
+        # issuer-side: a private payer must self-name; a public payer's
+        # Identity is the public record (+ the batch Schnorr below).
+        if core.payer.kind == "private":
+            if core.payer_vd is None:
+                return RcptResult(False, None, None, "missing payer self-naming proof")
+            why = _self_naming_ok(core.payer_vd, core.payer, core.chainid)
+            if why:
+                return RcptResult(False, None, None, f"payer self-naming: {why}")
 
-    # 3. Type-specific payer naming
-    t = core.type
+    # 3. Type-specific naming
 
     if t == "eoa-pub":
         # No payer proof — the payer's identity preimage → M is the naming.
@@ -121,93 +184,138 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
         if not eq(M_vd, core.payer.M_pt):
             return RcptResult(False, None, None, "eoa-priv: named M != payer M")
 
-    elif t in ("note-b1", "note-a1"):
+    elif t in ("note-b1", "note-a1", "note-a2"):
         if core.proof is None:
             return RcptResult(False, None, None, f"{t}: missing proof")
+        if core.note is None:
+            return RcptResult(False, None, None, f"{t}: missing Identity-M note payload")
         rp = core.proof
+        np = core.note
         o = rp["opening"]
         opening = NoteOpening(
             flavor=_h(o["flavor"]), v=_h(o["v"]), rho=_h(o["rho"]),
             id_hash=_h(o["idHash"]), predicate=_h(o["predicate"]),
         )
+        expect_flavor = {"note-b1": FLAVOR_B1, "note-a1": FLAVOR_A1,
+                         "note-a2": FLAVOR_A2}[t]
+        if opening.flavor != expect_flavor:
+            return RcptResult(False, None, None, f"{t}: opening flavor mismatch")
         cms = [_h(c) for c in rp["cms"]]
-        # (a) cm is in the batch
+
+        # (a) cm is in the minted batch
         cm = note_commitment(opening)
         if cm not in cms:
             return RcptResult(False, None, None, f"{t}: opening cm not in minted batch")
-        # (b)+(c) batch Schnorr
-        sig = rp["issuer_sig"]
-        h_batch = batch_commitment(cms)
-        iss_sig = SchnorrProof(e=_h(sig["e"]), s=_h(sig["s"]),
-                               R=_g1_from_hex(sig["R"]))
-        if not issuer_schnorr_verify(core.payer.pk_pt, iss_sig, h_batch,
-                                      core.payer.addr_int, core.chainid):
-            return RcptResult(False, None, None, f"{t}: issuer batch binding fails")
-        # (d) nullifier and face
+
+        # The identity scalars — derivable by ANY verifier from the disclosed
+        # preimages (step 1 already tied them to the named M points).
+        m_iss = identity_scalar(core.payer.identity)
+        m_rec = identity_scalar(core.payee.identity)
+
+        # (b) Identity-M idHash preimage: the named parties are bound INTO the
+        #     leaf the spend SNARK consumed.
+        if t == "note-b1":
+            sigma_R = _g1_from_hex(np["sigma_R"])
+            sigma_s = _h(np["sigma_s"])
+            if id_hash_b1(m_iss, sigma_R, sigma_s) != opening.id_hash:
+                return RcptResult(False, None, None,
+                                  "note-b1: idHash != id_hash_b1(m_iss, sigma)")
+        elif t == "note-a1":
+            eNote = _ct_from_hex(np["eNote"])
+            eRec  = _ct_from_hex(np["eRec"])
+            sigma_R = _g1_from_hex(np["sigma_R"])
+            sigma_s = _h(np["sigma_s"])
+            if id_hash_a1(eNote, m_iss, sigma_R, sigma_s) != opening.id_hash:
+                return RcptResult(False, None, None,
+                                  "note-a1: idHash != id_hash_a1(eNote, m_iss, sigma)")
+            # The addressed-recipient legs: only m_rec satisfies these.
+            if not eq(elgamal_decrypt(eNote, m_rec), mul(G1, opening.v)):
+                return RcptResult(False, None, None,
+                                  "note-a1: eNote does not decrypt to v·G under m_rec")
+            if not eq(elgamal_decrypt(eRec, m_rec), core.payee.M_pt):
+                return RcptResult(False, None, None,
+                                  "note-a1: eRec does not decrypt to M_rec under m_rec")
+        else:  # note-a2
+            eNote = _ct_from_hex(np["eNote"])
+            eIss  = _ct_from_hex(np["eIss"])
+            if id_hash_a2(eNote, eIss) != opening.id_hash:
+                return RcptResult(False, None, None,
+                                  "note-a2: idHash != id_hash_a2(eNote, eIss)")
+            if not eq(elgamal_decrypt(eNote, m_rec), mul(G1, opening.v)):
+                return RcptResult(False, None, None,
+                                  "note-a2: eNote does not decrypt to v·G under m_rec")
+            # Decrypting eIss under m_rec to the NAMED issuer M is the
+            # coupling: it forces eIss's key to be M_rec.
+            if not eq(elgamal_decrypt(eIss, m_rec), core.payer.M_pt):
+                return RcptResult(False, None, None,
+                                  "note-a2: eIss does not decrypt to issuer M under m_rec")
+
+        # (c) Issuer binding over the batch / leaf.
+        if t in ("note-b1", "note-a1"):
+            sig = rp.get("issuer_sig")
+            if sig is None:
+                return RcptResult(False, None, None, f"{t}: missing issuer batch Schnorr")
+            h_batch = batch_commitment(cms)
+            iss_sig = SchnorrProof(e=_h(sig["e"]), s=_h(sig["s"]),
+                                   R=_g1_from_hex(sig["R"]))
+            if not issuer_schnorr_verify(core.payer.pk_pt, iss_sig, h_batch,
+                                          core.payer.addr_int, core.chainid):
+                return RcptResult(False, None, None, f"{t}: issuer batch binding fails")
+        else:  # note-a2: the mint's per-leaf re-encryption binding (anti-framing)
+            if core.issuer_binding is not None:
+                b = core.issuer_binding
+                binding = IssuerReencProof(
+                    e=_h(b["e"]), s_r=_h(b["s_r"]), s_b=_h(b["s_b"]),
+                    s_s=_h(b["s_s"]), s_g=_h(b["s_g"]),
+                    A1=_g1_from_hex(b["A1"]), A2=_g1_from_hex(b["A2"]),
+                    A3=_g1_from_hex(b["A3"]), A4=_g1_from_hex(b["A4"]),
+                    A5=_g1_from_hex(b["A5"]),
+                    Q=_g1_from_hex(b["Q"]), U=_g1_from_hex(b["U"]),
+                    T=_g1_from_hex(b["T"]),
+                )
+                E_reg = core.payer.E_addr_ct
+                if E_reg is None:
+                    return RcptResult(False, None, None, "note-a2: issuer E_addr missing")
+                if not issuer_reenc_verify(core.payer.pk_pt, E_reg, eIss,
+                                           binding, core.payer.addr_int, core.chainid):
+                    return RcptResult(False, None, None, "note-a2: issuer binding fails")
+            # else: accept; UNVERIFIED ISSUER banner set below.
+
+        # (d) Spend anchor: the unified 4242 nullifier + the paid face.
         nf = _h(rp["nullifier"])
         face = _h(rp["face"])
-        expected_nf = (nullifier_a(opening.rho, opening.id_hash)
-                       if t == "note-a1" else
-                       nullifier_b(opening.rho, opening.id_hash))
-        if nf != expected_nf:
+        if nf != nullifier_b(opening.rho, opening.id_hash):
             return RcptResult(False, None, None, f"{t}: nullifier mismatch")
         if face != opening.v:
             return RcptResult(False, None, None, f"{t}: face != note value")
+        if core.txn.value != face:
+            return RcptResult(False, None, None, f"{t}: txn value != face")
 
-    elif t == "note-a2":
-        # (1) Recipient recovers the issuer's Identity: verifiable decryption of
-        #     E_iss-for-rec under the payee's key reveals M_iss.
-        if core.vd_issuer is None:
-            return RcptResult(False, None, None, "note-a2: missing vd_issuer")
-        E_iss, M_iss, acct_iss, cid_iss, vd_iss = _vd_from_record(core.vd_issuer)
-        if not verifiable_decrypt_verify(E_iss, core.payee.pk_pt, M_iss,
-                                          vd_iss, acct_iss, cid_iss):
-            return RcptResult(False, None, None, "note-a2: vd_issuer fails")
-        if not eq(M_iss, core.payer.M_pt):
-            return RcptResult(False, None, None, "note-a2: named M != issuer M")
-
-        # Without an issuer binding the recovered M is not provably the issuer's
-        # *registered* Identity -- UNVERIFIED ISSUER (pre-binding).
-        if core.issuer_binding is None:
-            pass  # accept; status banner set below
-        else:
-            # (2) The binding proves E_iss re-encrypts the issuer's registered
-            #     Identity under the key committed in Q.
-            b = core.issuer_binding
-            binding = IssuerReencProof(
-                e=_h(b["e"]), s_r=_h(b["s_r"]), s_b=_h(b["s_b"]),
-                s_s=_h(b["s_s"]), s_g=_h(b["s_g"]),
-                A1=_g1_from_hex(b["A1"]), A2=_g1_from_hex(b["A2"]),
-                A3=_g1_from_hex(b["A3"]), A4=_g1_from_hex(b["A4"]),
-                A5=_g1_from_hex(b["A5"]),
-                Q=_g1_from_hex(b["Q"]), U=_g1_from_hex(b["U"]), T=_g1_from_hex(b["T"]),
-            )
-            E_reg = core.payer.E_addr_ct
-            if E_reg is None:
-                return RcptResult(False, None, None, "note-a2: issuer E_addr missing")
-            if not issuer_reenc_verify(core.payer.pk_pt, E_reg, E_iss,
-                                       binding, core.payer.addr_int, core.chainid):
-                return RcptResult(False, None, None, "note-a2: issuer binding fails")
-
-            # (3) Coupling + registered-identity tie: the binding's registered
-            #     M_iss^reg = C_i - T = C_i - (T_hat - gamma*G) must equal the
-            #     named M.  Combined with (1)'s M_named == payer.M, this forces
-            #     pk_rec = Q's key (the E_note <-> Q coupling) and ties the named
-            #     Identity to the issuer's *registered* credential.
-            gamma = _h(b["gamma"])
-            T_unblind = add(binding.T, neg(mul(G1, gamma)))   # T_hat - gamma*G = r'*pk_rec
-            M_reg = add(E_iss.C, neg(T_unblind))              # C_i - T = M_iss^reg
-            if not eq(M_reg, core.payer.M_pt):
-                return RcptResult(False, None, None, "note-a2: binding M_iss != named M (coupling)")
+        # (e) Issuer-side B1: the depositor naming via the SpentCoupledB1
+        #     event's eDepForIss (the only leg needing a proof — the issuer's
+        #     verifiable decryption under their registered key).
+        if t == "note-b1" and role == "issuer":
+            eDep_hex = np.get("eDepForIss")
+            if eDep_hex is None or core.vd_payee is None:
+                return RcptResult(False, None, None,
+                                  "note-b1: issuer receipt needs eDepForIss + vd_payee")
+            eDep = _ct_from_hex(eDep_hex)
+            E, M, acct, cid, vd = _vd_from_record(core.vd_payee)
+            if cid != core.chainid or acct != core.payer.addr_int:
+                return RcptResult(False, None, None, "note-b1: vd_payee context mismatch")
+            if not _ct_eq(E, eDep):
+                return RcptResult(False, None, None, "note-b1: vd_payee ciphertext != eDepForIss")
+            if not eq(M, core.payee.M_pt):
+                return RcptResult(False, None, None, "note-b1: vd_payee names a different M")
+            if not verifiable_decrypt_verify(eDep, core.payer.pk_pt, M, vd, acct, cid):
+                return RcptResult(False, None, None, "note-b1: vd_payee fails")
 
     else:
         return RcptResult(False, None, None, f"unknown receipt type: {t}")
 
-    # 4. Value consistency: txn value matches the human-readable field
-    # (no additional check — the value is recorded in txn.value, and the
-    # type-specific checks above already bind it to the proofs)
-
-    status = "UNVERIFIED ISSUER" if (t == "note-a2" and core.issuer_binding_status == "unverified") else "VALID"
+    status = ("UNVERIFIED ISSUER"
+              if (t == "note-a2" and core.issuer_binding is None)
+              else "VALID")
     return RcptResult(True, core.payer.M_pt, core.txn.value, status)
 
 

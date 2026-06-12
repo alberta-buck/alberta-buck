@@ -1,9 +1,9 @@
                  ALBERTA  BUCK                  
          P A Y M E N T   R E C E I P T          
 ------------------------------------------------
-  Receipt  b3mqurgyr27a
+  Receipt  6gke5ejgn6tx
 ------------------------------------------------
-FROM (payer) (PRIVATE IDENTITY)
+FROM (payer - you) (PUBLIC IDENTITY)
  Bob Smith
 Corporate Registration - Alberta, Canada
  acct 0x0b0b000000000000000000000000000000000b0b
@@ -16,18 +16,18 @@ Alberta Identity Card - Alberta, Canada
  idpt 0x07a0b762be40..d418d7bf5e7c
 ------------------------------------------------
 TRANSACTION
- Type    Note spend — A2 addressed, private issuer
+ Type    Note spend — A1 addressed, public issuer
  Amount              0.000250  BUCK
  When        2026-05-28 20:10  UTC
  Chain                      1
  Block                1234599
  Log                        1
- Tx      0xa2a2a2a2a2a2..a2a2a2a2a2a2
+ Tx      0xa1a1a1a1a1a1..a1a1a1a1a1a1
  Mint    0xaaaaaaaaaaaa..aaaaaaaaaaaa
 ------------------------------------------------
 VERIFICATION
  status @ issue: VALID
- receipt  b3mqurgyr27a
+ receipt  6gke5ejgn6tx
 ------------------------------------------------
         a record, not a bearer instrument       
         github.com/pjkundert/alberta-buck       

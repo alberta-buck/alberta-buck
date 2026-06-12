@@ -100,19 +100,40 @@ def test_text_driver_width_respected(vectors):
     assert any(len(l) == 32 for l in sep32)
 
 
-# ---- All five receipt kinds render without error --------------------------
+# ---- All receipt kinds (both Note parties) render without error -----------
 
-@pytest.mark.parametrize("kind", ["eoa_pub", "eoa_priv", "note_b1", "note_a1", "note_a2"])
+ALL_KINDS = ["eoa_pub", "eoa_priv",
+             "note_b1", "note_a1", "note_a2",
+             "note_b1_issuer", "note_a1_issuer", "note_a2_issuer"]
+
+
+@pytest.mark.parametrize("kind", ALL_KINDS)
 def test_all_kinds_render(vectors, kind):
     core = _core(vectors, kind)
     doc = render_receipt(core)
     text = TextDriver(48).render(doc)
     assert len(text) > 0
     assert "ALBERTA  BUCK" in text
-    # A2 in the vector is now soundly bound -> VALID (no UNVERIFIED banner).
-    if kind == "note_a2":
+    # A2 in the vectors carries the mint's issuer binding -> VALID.
+    if kind.startswith("note_a2"):
         assert "UNVERIFIED" not in text
         assert "VALID" in text
+
+
+# ---- Role marker: the generating side is labelled "- you" -----------------
+
+@pytest.mark.parametrize("kind", ["note_b1", "note_a1", "note_a2"])
+def test_recipient_role_marks_payee(vectors, kind):
+    text = TextDriver(48).render(render_receipt(_core(vectors, kind)))
+    assert "TO (payee - you)" in text
+    assert "FROM (payer)" in text
+
+
+@pytest.mark.parametrize("kind", ["note_b1_issuer", "note_a1_issuer", "note_a2_issuer"])
+def test_issuer_role_marks_payer(vectors, kind):
+    text = TextDriver(48).render(render_receipt(_core(vectors, kind)))
+    assert "FROM (payer - you)" in text
+    assert "TO (payee)" in text
 
 
 # ---- Negative: bad detail values ------------------------------------------
@@ -184,30 +205,20 @@ def test_small_amount_shows_full_precision(vectors):
 
 
 # ---- Golden-file tests: exact rendered output (deterministic vectors) ------
-# Golden files live at test/vectors/receipt-<kind>.golden.txt — the exact
-# default-detail render (NAME, NORMAL, NORMAL) at 48 columns.  Any intentional
-# change to receipt layout requires regenerating these files via:
-#   nix develop --command python -c "
-#   from alberta_buck.wallet.render import render_receipt, TextDriver
-#   from alberta_buck.wallet.envelope import deserialize_core, parse_envelope
-#   from alberta_buck.wallet.vectors import build_vectors
-#   v = build_vectors()
-#   for kind in ['eoa_pub','eoa_priv','note_b1','note_a1','note_a2']:
-#       env = v['abrcpt'][kind]['envelope']
-#       core = deserialize_core(parse_envelope(env))
-#       text = TextDriver(48).render(render_receipt(core))
-#       open(f'test/vectors/receipt-{kind}.golden.txt','w').write(text)
-#   "
+# Golden files live at alberta_buck/test/vectors/receipt-<kind>.golden.txt —
+# the exact default-detail render (NAME, NORMAL, NORMAL) at 48 columns, for
+# all eight kinds (five recipient-side + three issuer-side Note receipts).
+# Any intentional change to receipt layout requires regenerating them via:
+#   make nix-golden-receipts
 from pathlib import Path as _Path
-# Repo root is 3 levels up from this file: test_render.py -> test -> alberta_buck -> repo
-_VECTORS = _Path(__file__).resolve().parent.parent.parent / "test" / "vectors"
+_VECTORS = _Path(__file__).resolve().parent / "vectors"
 
 
 def _golden(kind: str) -> str:
     return (_VECTORS / f"receipt-{kind}.golden.txt").read_text()
 
 
-@pytest.mark.parametrize("kind", ["eoa_pub", "eoa_priv", "note_b1", "note_a1", "note_a2"])
+@pytest.mark.parametrize("kind", ALL_KINDS)
 def test_golden_render(vectors, kind):
     """Default-detail render must match the golden file byte-for-byte."""
     core = _core(vectors, kind)
