@@ -1,5 +1,5 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                  THE ALBERTA BUCK - NOTES FLOW (V1.1)
+                  THE ALBERTA BUCK - NOTES FLOW (V1.2)
             How One BUCK Transfer Becomes N Unlinkable Notes
 
                              Perry Kundert
@@ -134,11 +134,11 @@ Table of Contents
   N – ~380K plus ~500 gas per leaf of calldata.
 
   The /identity-M/ spend model makes the KYC-bound Identity point M, not
-  the EOA, the authority axis.  Every spend is one gadget – an EIP-196
-  Okamoto sigma producing a committed point \( P \), plus a
-  Poseidon-Merkle membership proof /bound to that same \( P \)/
-  (`identity_membership_g1tie.circom', ~350K gas on chain) –
-  instantiated three ways: `Notes.spendCoupledA2' (addressed, private
+  the EOA, the authority axis (the notes-identity-axis model).  Every
+  spend is one gadget – an EIP-196 Okamoto sigma producing a committed
+  point \( P \), plus a Poseidon-Merkle membership proof /bound to that
+  same \( P \)/ (`identity_membership_g1tie.circom', ~350K gas on chain)
+  – instantiated three ways: `Notes.spendCoupledA2' (addressed, private
   issuer, `verifyDepositCoupling'), `spendCoupledA1' (addressed, public
   issuer; the recipient's own Identity is committed), and
   `spendCoupledB1' (bearer, public issuer, `verifyDepositorBinding').
@@ -1634,13 +1634,14 @@ Table of Contents
 ═════════════════════════════════════════
 
   Step 4 above showed the A2 deposit in the redemption walk; this
-  section gives the per-flavour detail for all three.  The spend is /one
-  gadget/, parameterised by flavour: an EIP-196 Okamoto sigma producing
-  a single committed point \( P \), plus a Poseidon-Merkle membership
-  proof /bound to that same \( P \)/, directly enforcing "the
-  counterparty Identity is a registered KYC Identity" at spend time –
-  without the circuit overhead of non-native \( \mathbb{G}_1 \)
-  arithmetic.  Three entrypoints instantiate it:
+  section gives the per-flavour detail for all three (the
+  notes-identity-axis unification).  The spend is /one gadget/,
+  parameterised by flavour: an EIP-196 Okamoto sigma producing a single
+  committed point \( P \), plus a Poseidon-Merkle membership proof
+  /bound to that same \( P \)/, directly enforcing "the counterparty
+  Identity is a registered KYC Identity" at spend time – without the
+  circuit overhead of non-native \( \mathbb{G}_1 \) arithmetic.  Three
+  entrypoints instantiate it:
 
   • *A2 (addressed, private issuer)* – `Notes.spendCoupledA2'.  The
     recipient deposits via `verifyDepositCoupling', proving its account
@@ -1697,8 +1698,9 @@ Table of Contents
     `IdentityRegistry.identityRoot', updated incrementally by each
     `register()' / `bindContract()' (the Tornado-style `filledSubtrees'
     pattern, depth 10).  A newly issued \( M \) is usable only after its
-    insertion – the /commit-before-use/ discipline from
-    /alberta-buck-notes-identity-axis/.  The one canonical tree is
+    insertion – the /commit-before-use/ discipline from the
+    identity-axis unification (now "Mutual Decryptability" in notes.org
+    and this "Identity-M" section).  The one canonical tree is
     `alberta_buck.registry.tree.IdentityMerkleTree' (the wallet and the
     sim share it; `alberta_buck.wallet.unilateral_a2.IdentityTree' is a
     thin point-centric facade over it), matched byte-for-byte by the
@@ -2608,12 +2610,12 @@ Table of Contents
   └────
 
   ┌────
-  │ mint b1 (issuer)                 0.92s
-  │ mint a2 (issuer)                 0.94s
-  │ spend (depositor, all)           0.74s
-  │ membership (depositor, all)      1.56s
-  │ note tie a2 (depositor)         10.58s
-  │ note tie a1 (depositor)         11.87s
+  │ mint b1 (issuer)                 1.10s
+  │ mint a2 (issuer)                 0.96s
+  │ spend (depositor, all)           0.77s
+  │ membership (depositor, all)      1.73s
+  │ note tie a2 (depositor)         11.93s
+  │ note tie a1 (depositor)         13.63s
   └────
 
 
@@ -2661,11 +2663,11 @@ Table of Contents
   ┌────
   │ party / flavor            download+store  prove (per note)
   │ ----------------------------------------------------------
-  │ issuer    b1/a1 (N=1)             12.7MB             0.92s
-  │ issuer    a2    (N=1)             14.3MB             0.94s
-  │ depositor b1                      29.5MB             2.30s
-  │ depositor a1                    1710.5MB            14.17s
-  │ depositor a2                    1493.7MB            12.88s
+  │ issuer    b1/a1 (N=1)             12.7MB             1.10s
+  │ issuer    a2    (N=1)             14.3MB             0.96s
+  │ depositor b1                      29.5MB             2.50s
+  │ depositor a1                    1710.5MB            16.13s
+  │ depositor a2                    1493.7MB            14.43s
   └────
 
 
@@ -2896,7 +2898,7 @@ Table of Contents
   is what bridges them.  Public-issuer notes (A1/B1) keep the cheap,
   fully-sound path; A2 is the premium that hides the issuer too.  See
   /alberta-buck-notes/ ("Why A2 Costs More: Anonymity Is the Cost") and
-  /alberta-buck-notes-decryptability/ ("The EOA Transfer Mirror").
+  the privacy audit below ("The EOA Transfer Mirror").
 
 
 [IdentityRegistry]
@@ -3205,16 +3207,20 @@ Table of Contents
   • [alberta-buck-identity.org] – IdentityRegistry, PS credentials, and
     the bilateral ElGamal handshake that anchors `msg.sender' to a
     verifiable identity.
-  • [alberta-buck-notes-identity-axis.org] – /historical/: the unified
-    identity-M design memo; absorbed into this document and the notes
-    overview.
+  • The unified identity-M / "one gadget" / Registry-Identity
+    accumulator design (commit-before-use) is now in
+    alberta-buck-notes.org ("Mutual Decryptability", "one gadget") and
+    here in "The Identity-M Spend Path" + accumulator
+    sections. (Superseded the original memo.)
   • [alberta-buck-notes-unilateral.org] – /historical/: the A2 corner as
     first built; absorbed into "A2 Identity-Targeted Spend" / "A2 in
     Code" above.
-  • [alberta-buck-notes-decryptability.org] – /historical/: the
-    non-deniable-receipt gap analysis and fix design; the invariant
-    lives in the notes overview, the privacy audit above, the theorems
-    in Proofs, and the fix is implemented (`note_binding.circom').
+  • Non-deniable-receipt invariant: see alberta-buck-notes.org "The
+    Non-Deniable-Receipt Invariant"; per-step privacy audit and "EOA
+    Transfer Mirror" are above in this document; theorems in
+    alberta-buck-proofs.org. The mint-side issuer bindings and note <->
+    eEnc tie are implemented via note_binding circuits (see "A2
+    Identity-Targeted Spend" etc.).
   • `circuits/mint_batch.circom' – the batch-mint circuit (one compile
     per pinned N).
   • `circuits/spend.circom' – the flavor-agnostic spend (note-proof)
@@ -3251,11 +3257,5 @@ Table of Contents
 [alberta-buck-identity.org]
 <https://perry.kundert.ca/range/finance/alberta-buck-identity/>
 
-[alberta-buck-notes-identity-axis.org]
-<https://perry.kundert.ca/range/finance/alberta-buck-notes-identity-axis/>
-
 [alberta-buck-notes-unilateral.org]
 <https://perry.kundert.ca/range/finance/alberta-buck-notes-unilateral/>
-
-[alberta-buck-notes-decryptability.org]
-<https://perry.kundert.ca/range/finance/alberta-buck-notes-decryptability/>
