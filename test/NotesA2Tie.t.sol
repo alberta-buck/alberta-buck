@@ -31,7 +31,7 @@ contract MockBuckTie {
 ///         NOTE on scope: the leaf-tie binds each committed leaf to a verified
 ///         re-encryption of the issuer's registered Identity.  It does NOT force
 ///         the binding's pk_rec to be the addressed recipient's key (see
-///         alberta-buck-notes-decryptability.org, "The A2 recipient-key coupling
+///         alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant", A2 recipient-key coupling / note-binding tie) and notes-flow.org (A2 flows)
 ///         gap"); that residual collusion hole is out of scope here.
 contract NotesA2TieTest is Test {
     address constant GOV = address(0xB0);

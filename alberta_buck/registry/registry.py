@@ -10,9 +10,9 @@ to counterparties), and inserts M into its local identity tree.
 The registry periodically pushes its updated sub-root to the CentralMerkleService,
 which aggregates it into the on-chain identityRoot.  An identity is usable only
 after its sub-root reaches the aggregator (the "commit-before-use" discipline
-from alberta-buck-notes-identity-axis.org).
+from alberta-buck-notes.org "Mutual Decryptability" / one-gadget model).
 
-Reference: alberta-buck-notes-identity-axis.org, Section "The Registry-Identity
+Reference: alberta-buck-notes.org ("Mutual Decryptability"); see also alberta-buck-notes-flow.org for the accumulator implementation. The Registry-Identity
 Accumulator".
 """
 

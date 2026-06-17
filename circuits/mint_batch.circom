@@ -28,8 +28,7 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 //       msg.sender, and every PRIVATE-mode leaf must carry an A2 re-encryption
 //       binding.  Because a bearer (B1) leaf projects to PUBLIC, a bearer note
 //       from a non-public issuer is unmintable -- the "bearer => public issuer"
-//       invariant (alberta-buck-notes-decryptability.org, The Required Mint
-//       SNARK Signal).  issuerMode leaks only flavor-CLASS (public vs private),
+//       invariant (alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" -- the "Required Mint SNARK Signal" for the bearer => public-issuer rule).  issuerMode leaks only flavor-CLASS (public vs private),
 //       never A-vs-B nor any identity/amount.
 //   (M) walking ZERO_VALUE up the tree at index (nextLeafIndex+i), using
 //       siblings[i][.], reproduces the rolling root *before* this leaf is

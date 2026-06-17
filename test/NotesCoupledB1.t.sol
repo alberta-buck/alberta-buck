@@ -23,7 +23,7 @@ import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 ///         the membership half uses the stub (the real G1-tie limb-binding is
 ///         proven in IdentityMembershipBinding.t.sol).  This is the
 ///         membership-bound B1 spender path that completes the Identity-M design
-///         for bearer notes.  See alberta-buck-notes-identity-axis.org.
+///         for bearer notes.  See alberta-buck-notes.org ("Mutual Decryptability", B1) and notes-flow "Identity-M Spend Path".
 contract NotesCoupledB1Test is Test {
     Buck internal buck;
     BuckCreditHarness internal credit;

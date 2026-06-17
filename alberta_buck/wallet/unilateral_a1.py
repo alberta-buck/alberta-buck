@@ -1,6 +1,6 @@
 """Identity-targeted A1 Note -- addressed, *public* issuer.
 
-Reference: alberta-buck-notes-identity-axis.org (the "one gadget", A1 row), and
+Reference: alberta-buck-notes.org ("Mutual Decryptability", "one gadget", A1 row), and
 the unilateral A2 corner it reuses (:mod:`alberta_buck.wallet.unilateral_a2`).
 
 A1 and A2 are the *addressed* flavours; they differ only in whether the issuer is

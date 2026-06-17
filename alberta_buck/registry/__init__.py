@@ -8,7 +8,7 @@ A central Merkle service aggregates sub-tree roots from all registries and
 feature authorities; the single combined root is posted on chain and consumed
 by Notes spend-path identity-membership proofs.
 
-Reference: alberta-buck-notes-identity-axis.org.
+Reference: alberta-buck-notes.org ("Mutual Decryptability", "one gadget" / Identity-M model); see also alberta-buck-notes-flow.org "The Identity-M Spend Path".
 """
 
 from alberta_buck.registry.certificate import (

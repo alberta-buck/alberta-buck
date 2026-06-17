@@ -10,7 +10,7 @@
 #+bucky: true
 #+math: true
 #+description: The identity-targeted A2 Note addresses an *identity* (the recipient's KYC-bound point M_rec), not an account.  The issuer encrypts its own registered identity M_I under M_rec, so any Fountain account the recipient holds can open it; the depositor proves eligibility to the EVM with a privacy-preserving Okamoto sigma that hides every identity; and the recipient -- alone, from the single secret m_rec -- decrypts M_I and produces a plaintext receipt naming both parties.  A colluding issuer cannot make a spendable-but-unnameable note: the decrypted issuer identity must be a member of the registry-identity tree.  Implemented, bound, and tested end to end (alberta_buck.wallet.unilateral_a2, IdentityRegistry.verifyDepositCoupling, Notes.spendCoupledA2): the on-chain deposit reads the coupling sigma's committed point P_I once and feeds it to BOTH the sigma and the G1-tie membership verifier, so a colluding pair cannot answer one with a point the other rejects -- closing the A2 recipient-key gap.  11 Python + 20 Solidity cross-artifact tests pass.
-#+EXPORT_FILE_NAME: ./images/alberta-buck-notes-unilateral
+#+EXPORT_FILE_NAME: ./doc/historical/alberta-buck-notes-unilateral
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works

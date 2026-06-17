@@ -8,7 +8,7 @@ import {IdentityMembershipG1TieVerifier} from "../src/IdentityMembershipG1TieVer
 ///         (circuits/identity_membership_g1tie.circom): a Groth16 proof
 ///         generated from a Python-generated witness verifies on chain;
 ///         a tampered public root is rejected.
-///         See alberta-buck-notes-identity-axis.org.
+///         See alberta-buck-notes.org and alberta-buck-notes-flow.org (Identity-M / one-gadget accumulator).
 contract IdentityMembershipG1TieVerifierTest is Test {
     IdentityMembershipG1TieVerifier internal verifier;
     string internal vj;

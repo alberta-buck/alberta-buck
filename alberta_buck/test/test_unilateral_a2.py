@@ -1,6 +1,6 @@
 """Identity-targeted unilateral A2 Note -- end-to-end demonstration.
 
-Exercises the full flow of alberta-buck-notes-unilateral.org:
+Exercises the full flow of doc/historical/alberta-buck-notes-unilateral.org:
 
   mint (issuer)  ->  off-chain delivery + verify  ->  deposit coupling (EVM gate)
                  ->  unilateral recipient receipt naming BOTH identities

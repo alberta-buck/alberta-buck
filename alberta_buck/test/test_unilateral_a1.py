@@ -4,7 +4,7 @@ A1 reuses the A2 deposit coupling verbatim: the note encrypts the recipient's
 identity under itself (eRec = Enc(M_rec, M_rec)), so the same gadget proves the
 spender is the addressed identity and the membership certifies M_rec is a
 registered member.  The issuer is public (named at mint).  See
-alberta-buck-notes-identity-axis.org (the A1 row of "the one gadget").
+alberta-buck-notes.org ("Mutual Decryptability", A1 row of the one-gadget); see also notes-flow "Identity-M Spend Path".
 """
 
 import pytest

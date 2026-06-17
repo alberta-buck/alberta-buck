@@ -123,7 +123,7 @@ setup is sound as long as /at least one/ participant destroyed their secret:
    so the 1-of-\( n \) honest assumption is auditable.
 
 See the Makefile =SNARK circuits + trusted setup= section and
-=alberta-buck-notes-decryptability.org= ("The Required Mint SNARK Signal") for
+alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") for the "Required Mint SNARK Signal" (issuer binding at mint).
 the circuit-level details.
 
 ** RPC Configuration

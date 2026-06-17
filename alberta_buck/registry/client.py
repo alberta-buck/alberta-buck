@@ -9,7 +9,7 @@ The client also tracks which feature authorities have certified it for which
 attributes, enabling AND-composed proofs at spend time ("I am registered AND
 I am over 18").
 
-Reference: alberta-buck-notes-identity-axis.org.
+Reference: alberta-buck-notes.org ("Mutual Decryptability", "one gadget" / Identity-M model); see also alberta-buck-notes-flow.org "The Identity-M Spend Path".
 """
 
 from __future__ import annotations

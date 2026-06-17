@@ -100,7 +100,7 @@ contract Notes {
     ///         arity (5N+4: per-leaf eIss exposed as outputs) and is used only by
     ///         the PRIVATE-mode mint path, where it ties each committed leaf to
     ///         its re-encryption binding's eIss (the collusion-resistant leaf-tie;
-    ///         see alberta-buck-notes-decryptability.org, The Required Mint SNARK
+    ///         see alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant"), the Required Mint SNARK Signal for issuer binding at mint
     ///         Signal).  Optional at construction; governance wires it via
     ///         setA2MintVerifier before any A2 mint.
     IMintVerifierA2 public a2MintVerifier;
@@ -456,7 +456,7 @@ contract Notes {
     ///         recipient can still encrypt `eIss` under a throwaway key, leaving
     ///         the issuer un-nameable while the note stays spendable.  Closing
     ///         that residual hole needs the eNote<->eIss recipient-key coupling
-    ///         at mint -- see alberta-buck-notes-decryptability.org ("The A2
+    ///         at mint -- see alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant", A2 issuer binding at mint) ("The A2
     ///         recipient-key coupling gap").  issuerMode here is a caller-facing
     ///         assertion (the A2 circuit independently constrains flavor == A2).
     function mint(
@@ -810,7 +810,7 @@ contract Notes {
     ///         *private* issuer.  `eIss` encrypts the issuer's own registered
     ///         Identity under the recipient identity point M_rec; the membership
     ///         certifies the decrypted issuer is registered, closing the A2
-    ///         recipient-key collusion gap.  See alberta-buck-notes-unilateral.org.
+    ///         recipient-key collusion gap.  See doc/historical/alberta-buck-notes-unilateral.org.
     function spendCoupledA2(
         bytes   calldata proof,
         uint256          root,
@@ -875,7 +875,7 @@ contract Notes {
     ///         registered Identity the issuer can name (it decrypts `eDepForIss`
     ///         with sk_iss off chain).  Membership-bound counterpart of the
     ///         `verifyDepositorForIssuer`-based B-spend overload, which it does not
-    ///         disturb.  See alberta-buck-notes-identity-axis.org (the B1 dual).
+    ///         disturb.  See alberta-buck-notes.org ("Mutual Decryptability", B1 dual of the one-gadget) and alberta-buck-notes-flow.org "The Identity-M Spend Path".
     function spendCoupledB1(
         bytes   calldata proof,
         uint256          root,

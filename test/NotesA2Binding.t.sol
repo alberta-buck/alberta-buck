@@ -19,7 +19,7 @@ contract MockBuckA2 {
 ///         A valid binding (the canonical issuer_reenc vector) mints and emits
 ///         IssuerReencBound; a tampered binding reverts the whole mint.  Leaf
 ///         tie / per-leaf completeness await the mint SNARK's issuerMode (see
-///         alberta-buck-notes-decryptability.org).
+///         alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" (A2 binding / note <-> eEnc tie) and notes-flow.org.
 contract NotesA2BindingTest is Test {
     address constant GOV = address(0xB0);
 

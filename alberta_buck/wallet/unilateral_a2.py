@@ -1,7 +1,6 @@
 """Identity-targeted *unilateral* A2 Note -- the recipient-reproducible receipt.
 
-Reference: alberta-buck-notes-unilateral.org, and the "identity-targeted
-alternative" subsection of alberta-buck-notes-decryptability.org.
+Reference: alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant", unilateral receipt) and alberta-buck-notes-flow.org ("A2 Identity-Targeted Spend"). See also the identity-axis unification in notes.org.
 
 A direct EOA transfer *deduces* identities from the two accounts in play.  A Note
 is the opposite object: it *names* the identities and treats accounts as

@@ -20,7 +20,7 @@
 #+math: true
 #+description: A bearer-instrument layer for an identity-aware stablecoin that defeats bulk on-chain traceability while guaranteeing that the two parties to any payment retain the cryptographic means to prove, under compulsion and with no trusted third party, exactly who the counterparty was.  We define the non-deniable-receipt invariant (no colluding pair can construct a payment lacking a court-compellable receipt naming the KYC-bound counterparty), give a construction meeting it for public-issuer notes (shipped on Ethereum), prove its security, and characterise the boundary at which the guarantee stops being free: when both parties are anonymous at their respective binding moments, a collusion-resistant receipt provably requires in-circuit registry set-membership.
 
-#+EXPORT_FILE_NAME: ./images/alberta-buck-paper-draft
+#+EXPORT_FILE_NAME: ./doc/historical/alberta-buck-paper-draft
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works

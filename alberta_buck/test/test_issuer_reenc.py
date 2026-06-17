@@ -1,5 +1,5 @@
 """Reference-math tests for the A2 issuer re-encryption binding
-(alberta-buck-notes-decryptability.org, recipient-blinded on-chain CP).
+(alberta-buck-notes.org "The Non-Deniable-Receipt Invariant", A2 issuer re-encryption / recipient-blinded CP binding).
 
 Completeness (an honestly formed binding verifies) and soundness:
   - a leaf whose E_iss does NOT re-encrypt the issuer's registered M is

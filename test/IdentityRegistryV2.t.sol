@@ -19,7 +19,7 @@ import {BN254} from "../src/BN254.sol";
 ///         from the vector file.  In production, governance or a batched
 ///         update function posts the root.
 ///
-///         See alberta-buck-notes-identity-axis.org.
+///         See alberta-buck-notes.org ("Mutual Decryptability") and alberta-buck-notes-flow.org "The Identity-M Spend Path" (one-gadget / accumulator).
 contract IdentityRegistryV2Test is Test {
     IdentityRegistry internal reg;
     address internal constant GOV = address(0xA0);

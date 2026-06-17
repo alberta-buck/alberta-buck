@@ -80,7 +80,7 @@ pragma solidity ^0.8.20;
 ///         where governance has not wired the real verifier leaves the
 ///         addressed-binding and A2-collusion guarantees unenforced.  See
 ///         alberta-buck-notes.org ("Status"), alberta-buck-proofs.org
-///         (Theorem 12), and alberta-buck-verifier-implementation.org
+///         (Theorem 12), and doc/historical/alberta-buck-verifier-implementation.org
 ///         (toolchain).
 ///
 /// @dev    Import-free (no BN254 / IdentityRegistry types) so the governance

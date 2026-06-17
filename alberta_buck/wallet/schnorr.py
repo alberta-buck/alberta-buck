@@ -2,7 +2,7 @@
 identity key -- the public-issuer half of the BUCK Notes deferred-approve
 handshake (mutual-decryptability, Phase 1).
 
-Reference: alberta-buck-notes-decryptability.org.
+Reference: alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" (public issuer Schnorr binding at mint).
 
 A public issuer (A1 / B1) signs the batch commitment ``hBatch = keccak256(cms)``
 so a depositor can later produce a cryptographically sound receipt naming the

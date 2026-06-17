@@ -25,7 +25,7 @@ import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 ///         (scripts/gen_unilateral_a1_vectors.py -> test/vectors/unilateral_a1.json);
 ///         the membership half uses the stub (the real G1-tie limb-binding is
 ///         proven in IdentityMembershipBinding.t.sol).  See
-///         alberta-buck-notes-identity-axis.org.
+///         alberta-buck-notes.org ("Mutual Decryptability", one-gadget / A1) and notes-flow "Identity-M Spend Path".
 contract NotesCoupledA1Test is Test {
     Buck internal buck;
     BuckCreditHarness internal credit;

@@ -19,7 +19,7 @@ contract MockBuck {
 ///         issuer to bind their Identity via the Schnorr overload
 ///         (verifyIssuerSchnorr).  A bad signature reverts, and a non-public
 ///         minter cannot mint a PUBLIC batch at all (there is no unbound path).
-///         See alberta-buck-notes-decryptability.org.
+///         See alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant").
 contract NotesIssuerBindingTest is Test {
     address constant GOV = address(0x6011);
 

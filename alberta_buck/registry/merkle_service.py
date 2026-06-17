@@ -24,7 +24,7 @@ This federates identity attributes: registries and feature authorities operate
 independently.  The central service aggregates periodically; only the final root
 touches the chain.  An identity is usable only after its sub-root is committed
 to the aggregator and the aggregator root is posted on chain (the "commit-before-use"
-discipline from alberta-buck-notes-identity-axis.org).
+discipline from the identity-axis design (now in alberta-buck-notes.org "Mutual Decryptability" and notes-flow "commit-before-use").).
 
 Design trade-off vs. N independent roots on-chain:
 
@@ -33,7 +33,7 @@ Design trade-off vs. N independent roots on-chain:
 | N independent roots | O(N) slots       | O(N * updates)       | Revealed (which root) |
 | Single aggregator   | 1 slot           | O(1) per batch       | Hidden (one root)     |
 
-Reference: alberta-buck-notes-identity-axis.org, Section "The Registry-Identity
+Reference: alberta-buck-notes.org and alberta-buck-notes-flow.org (Registry-Identity Accumulator, commit-before-use). Section "The Registry-Identity
 Accumulator".
 """
 

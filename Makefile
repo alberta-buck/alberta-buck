@@ -46,7 +46,7 @@ VENV			= "$(BUCK_PYTHON).venv-$(BUCK_VERSION)-$(PYTHON_V)"
 VENV_OPTS		=
 
 
-.PHONY: all build test clean fmt snapshot
+.PHONY: all build test clean fmt snapshot build-uniswap-artifacts
 .PHONY: fork-sepolia fork-mainnet fork-mainnet-cache anvil stop-anvil
 .PHONY: deploy-local deploy-sepolia
 .PHONY: snark-g1tie snark-g1tie-clean snark-g1tie-regen snark-test-regression snark-update
@@ -73,7 +73,7 @@ build:
 emacs:
 	emacs -nw
 
-test:
+test: build-uniswap-artifacts
 	forge test $(FORGE_OPTS) -vvv
 unit-%:
 	forge test $(FORGE_OPTS) --match-test $* -vvv
@@ -100,6 +100,16 @@ fmt:
 fmt-check:
 	forge fmt --check
 
+# Build the Uniswap V2/V3 artifacts (via their compile-trigger stubs under
+# src/uniswap_v*_build and the v3 foundry profile) into the shared out/
+# directory.  Tests that use vm.deployCode("out/Uniswap*.json") (e.g.
+# BuckBasket, BuckLifecycle, UniswapV2Integration, BuckK*V3*, equilibrium/arb
+# scenarios) require these.  Also ensures the critical V2 init-code-hash patch
+# has been applied so UniswapV2Router02 computes the same pair addresses as the
+# locally-built V2Factory.
+build-uniswap-artifacts: v2-patch-init-code-hash
+	FOUNDRY_VIA_IR=false FOUNDRY_PROFILE=v3 forge build --skip test --skip script
+	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
 
 # ── Local Anvil Node ─────────────────────────────────────────────────
 
@@ -325,7 +335,7 @@ snark-a2-fixtures:
 # IMPORTANT: snarkjs groth16 setup is non-deterministic (delta varies per run).
 # The zkey, proof, verifier, and vectors are a MATCHED SET from a single run.
 # Always use `make snark-g1tie` — never run individual steps manually.
-# See alberta-buck-verifier-bug.org.
+# See doc/historical/alberta-buck-verifier-bug.org.
 snark-g1tie:
 	rm -rf build/snark/g1tie
 	$(SNARK_PATH) bash scripts/snark/setup_g1tie.sh
@@ -335,7 +345,7 @@ snark-g1tie-regen: snark-g1tie
 # Regression test: regenerates verifier artifacts atomically and tests both
 # freshly-generated AND pre-existing (known-working) verifiers on forge.
 # Designed to isolate ARM vs x86_64 WASM execution differences.
-# See alberta-buck-verifier-bug.org.
+# See doc/historical/alberta-buck-verifier-bug.org.
 snark-test-regression:
 	$(SNARK_PATH) bash scripts/snark/test_verifier_regression.sh
 
@@ -481,7 +491,7 @@ SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 #      trigger to avoid the IR-incompatibility error.
 # Both profiles share the same ``out/`` directory.
 sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) v2-patch-init-code-hash
-	FOUNDRY_PROFILE=v3 forge build --skip test --skip script
+	FOUNDRY_VIA_IR=false FOUNDRY_PROFILE=v3 forge build --skip test --skip script
 	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
 
 # ── Uniswap V2 init-code-hash patch ──────────────────────────────────────

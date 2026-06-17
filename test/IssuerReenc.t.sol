@@ -11,7 +11,7 @@ import {BN254} from "../src/BN254.sol";
 ///         test/vectors/identity.json), pinning the Solidity and Python
 ///         Okamoto sigma + Fiat-Shamir encodings together byte-for-byte.  Also
 ///         exercises the soundness rejections (Notes mutual-decryptability,
-///         Phase 2; see alberta-buck-notes-decryptability.org).
+///         Phase 2; see alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant", A2 issuer binding) and notes-flow.
 contract IssuerReencVectorTest is Test {
     IdentityRegistry internal reg;
     address internal constant GOV = address(0xA0);

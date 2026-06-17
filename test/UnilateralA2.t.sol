@@ -15,7 +15,7 @@ import {BN254} from "../src/BN254.sol";
 ///         collusion-resistance) is demonstrated in
 ///         alberta_buck/test/test_unilateral_a2.py; this suite pins the one piece
 ///         that lands on the EVM -- the deposit-eligibility gate.  See
-///         alberta-buck-notes-unilateral.org.
+///         doc/historical/alberta-buck-notes-unilateral.org (see also alberta-buck-notes.org and notes-flow.org "A2 Identity-Targeted Spend").
 contract UnilateralA2DepositTest is Test {
     IdentityRegistry internal reg;
     address internal constant GOV = address(0xA0);
