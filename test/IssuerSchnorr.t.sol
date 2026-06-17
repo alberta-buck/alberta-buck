@@ -10,7 +10,7 @@ import {BN254} from "../src/BN254.sol";
 ///         real Schnorr signatures over the BN254 G1 generator in-test, using
 ///         the same Fiat-Shamir encoding as the contract, and checks
 ///         completeness (honest sig verifies) and soundness (every tampered
-///         input is rejected).  See alberta-buck-notes-decryptability.org.
+///         input is rejected).  See alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" (public issuer Schnorr binding at mint).
 contract IssuerSchnorrTest is Test {
     IdentityRegistry reg;
 

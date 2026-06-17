@@ -1,7 +1,7 @@
 """Verifiable decryption -- prove an ElGamal ciphertext decrypts to a *revealed*
 identity point M under a registered key, without exposing the secret key.
 
-Reference: alberta-buck-notes-decryptability.org (the "no deniability under
+Reference: alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" (no deniability under compulsion for the counterparty Identity).
 collusion" clause of the non-deniable-receipt invariant).
 
 For a direct Identity-bound EOA transfer the approve handshake

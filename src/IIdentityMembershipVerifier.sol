@@ -24,7 +24,7 @@ pragma solidity ^0.8.20;
 /// @dev    The interface is intentionally minimal and free of the BN254 import —
 ///         the governance slot in Notes.sol can be upgraded from a stub to the
 ///         real verifier without changing the spend-path logic.  See
-///         alberta-buck-notes-unilateral.org and alberta-buck-notes-identity-axis.org.
+///         alberta-buck-notes.org and alberta-buck-notes-flow.org (the unified one-gadget / Identity-M model; see also historical unilateral for original A2).
 interface IIdentityMembershipVerifier {
     /// @notice Verify that the committed identity point P_I = (px, py) is a member
     ///         of the registry-Identity accumulator under `identityRoot`.

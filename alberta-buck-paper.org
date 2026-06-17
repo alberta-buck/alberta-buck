@@ -1,4 +1,4 @@
-#+TITLE: Accountable Anonymity for Public Money (DRAFT v0.1)
+#+TITLE: Accountable Anonymity for Public Money (DRAFT v0.2)
 #+SUBTITLE: Identity-Bound Bearer Payments with No Trusted Opener
 #+author: Perry Kundert
 #+date: 2026-06-11
@@ -9,7 +9,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: BUCK Notes are digital cash with a carbon-copy receipt: one copy for the payer, one for the payee, none for anyone else.  Payments cannot be traced in bulk -- not by analytics firms, not by subpoena, not by the KYC issuer itself -- yet every payment leaves both parties able to prove, with court-grade evidence, exactly who the other was.  Not even the two of them, colluding, can prevent it.  We ship all three possible note flavours on Ethereum, prove the fourth impossible, and measure exactly what anonymity costs.  Every theorem in the paper runs.
+#+description: BUCK Notes are digital cash with a carbon-copy receipt: one copy for the payer, one for the payee, none for anyone else.  Payments cannot be traced in bulk -- not by analytics firms, not by subpoena, not by the KYC issuer itself---yet every payment leaves both parties able to prove, with court-grade evidence, exactly who the other was. Not even the two of them, colluding, can prevent it.  We ship all three possible note flavours on Ethereum, prove the fourth impossible, and measure exactly what anonymity costs.  Every theorem in the paper runs.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-paper
 #+PROPERTY: header-args:python :session notespaper :exports both :results output
 #+STARTUP: org-startup-with-inline-images inlineimages
@@ -35,10 +35,10 @@ the convenience with a ledger its issuer can read, freeze, and mine.
 Cash resists surveillance, but only by keeping no evidence at all: no
 proof of payment, no recourse, no trail.  This paper presents BUCK
 Notes, a bearer-payment layer for an identity-aware stablecoin that
-refuses both defaults.  No one can trace payments in bulk -- not an
+refuses both defaults.  No one can trace payments in bulk---not an
 analytics firm, not an omnibus subpoena, not even the system's own KYC
-issuer.  Yet the two parties to any payment can always prove exactly
-who the other was, with evidence sound enough to convict on.  The
+issuer. Yet the two parties to any payment can always prove exactly
+who the other was, with evidence sound enough to convict on. The
 guarantee is the *non-deniable receipt*: even a /colluding/ payer and
 payee cannot complete a payment without each holding evidence that
 names the other.
@@ -48,13 +48,17 @@ The consequences read like due process implemented in mathematics (the
 participants hold it; each may surrender, refuse, or destroy their copy;
 and no institution can be compelled to produce what it provably never had.
 One design choice makes this work: payments bind KYC-certified
-/identities/, not just account keys (*Identity-M binding*).  A single
-re-encryption gadget, instantiated three ways, yields every realisable note
-flavour (addressed or bearer, public or private issuer), all shipped and
-measured on Ethereum.  We prove the fourth flavour impossible, the obvious
-cheap binding vacuous, and zero-knowledge registry membership necessary for
-the doubly-anonymous flavour under a stated restriction; exactly the branch
-the shipped system takes.  Every theorem carries an executable witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-paper-flow.txt][Text]])
+/identities/---not just account keys---(*Identity-M binding* [fn::The
+binding of payments to a KYC-certified identity point \(M\), rather than
+to disposable account keys.]). A single re-encryption gadget, instantiated
+three ways, yields every realisable note flavour (addressed or bearer,
+public or private issuer). All three are shipped and measured on Ethereum.
+We prove the fourth flavour impossible, show that the obvious cheap binding
+is vacuous, and prove that zero-knowledge registry membership is necessary
+for the doubly-anonymous case under a stated restriction. This is exactly
+the branch the shipped system takes. Every theorem carries an executable
+witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]],
+[[https://perry.kundert.ca/images/alberta-buck-paper-flow.txt][Text]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -84,17 +88,16 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
   total legibility or total opacity.  Forty years of cryptography
   has not yet dislodged that false dichotomy from policy.
 
-  Chaum asked the right question in 1982[fn:chaum82]; his answer
-  stalled on institutional grounds, not cryptographic ones.  The
-  anonymity line that followed (Zerocash and its descendants, the
-  mixers, the privacy pools[fn:zerocash][fn:tornado][fn:privacypool])
-  made payments untraceable and unaccountable in the same stroke.  The
-  auditable-CBDC line that answered it (PRCash, UTT, PEReDi,
-  Platypus[fn:prcash][fn:utt][fn:peredi][fn:platypus]) restored
-  accountability by handing a designated authority the power to open
-  transactions: an auditor, a committee, the central bank itself.  No
-  prior system provides both untraceable payments and mandatory
-  accountability with /no opener at all/.
+  Chaum asked the right question in 1982[fn:chaum82]. His answer stalled on
+  institutional grounds, not cryptographic ones. The anonymity line that
+  followed (Zerocash and its descendants, mixers, and privacy pools
+  [fn:zerocash][fn:tornado][fn:privacypool]) made payments untraceable
+  and unaccountable in one stroke. The auditable-CBDC line (PRCash, UTT,
+  PEReDi, Platypus [fn:prcash][fn:utt][fn:peredi][fn:platypus]) restored
+  accountability by giving a designated authority (auditor, committee, or
+  central bank) the power to open transactions. No prior system provides
+  both untraceable payments and mandatory accountability with /no opener
+  at all/.
 
   This paper presents a system that does, and locates precisely what it
   costs.  The design goal is civic before it is cryptographic:
@@ -124,8 +127,8 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
   practically, on a public blockchain today.
 
   What makes all three possible is one /counter-intuitive inversion/:
-  payments must bind /identities/ -- certified once, at KYC, and held by
-  persons -- not just the /account keys/ that hold funds.  We call this
+  payments must bind /identities/---certified once, at KYC, and held by
+  persons---not just the /account keys/ that hold funds. We call this
   *Identity-M binding*.  Everything else follows from it: the receipt that
   always exists, key recovery without any custodian, the impossibility of
   one whole quadrant of the design space, and the exact place where
@@ -169,8 +172,8 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
      spend-time composition of a deposit sigma, a bound set-membership
      proof, and a note-to-ciphertext tie, every verifier real and
      measured (Sec. [[#sec:eval]]).
-   - *The forced taxonomy* (Thm. [[thm:b2]]): the fourth flavour -- a
-     bearer note from a hidden issuer -- is impossible, by an
+   - *The forced taxonomy* (Thm. [[thm:b2]]): the fourth flavour---a
+     bearer note from a hidden issuer---is impossible, by an
      information-theoretic argument.
    - *The cost of anonymity, located* (Sec. [[#sec:cost]]): the receipt
      is nearly free when one party is named at the binding moment.  When
@@ -180,9 +183,9 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
      restriction (Prop. [[prop:necessity]]).  The shipped system takes
      exactly the branch the proposition permits, and we measure it.
    - *A reproducible artifact*: contracts, circuits, and verifiers, open
-     and test-covered -- over 400 Foundry tests, 330 wallet tests, an
+     and test-covered---over 400 Foundry tests, 330 wallet tests, an
      end-to-end suite where every verifier is the real Groth16 artifact
-     -- and the paper's own claims carry executable witnesses
+     ---and the paper's own claims carry executable witnesses
      (Appendix [[#sec:appendix]]) that re-run on each build.
 
 #+LATEX: \clearpage
@@ -201,9 +204,11 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
   hands Bob the note's /opening/ (a few hundred bytes) by any channel
   she likes: a message, a QR code on her phone's screen, a slip of paper.
   Days or months later, from any account he controls, Bob /deposits/ the
-  opening: his wallet proves (in /zero knowledge/, revealing nothing
-  about which note) that some unspent note in the pool is his to
-  claim, and the pool pays him one hundred BUCKs.  An
+  opening: his wallet proves (in /zero knowledge/ [fn::a cryptographic
+  technique allowing one party to prove a statement is true without
+  revealing any information beyond the validity of the statement itself]),
+  revealing nothing about which note, that some unspent note in the pool is
+  his to claim, and the pool pays him one hundred BUCKs.  An
   observer watching the chain sees a commitment appear at one moment and an
   unrelated-looking payout occur at another, with nothing connecting them
   -- not the amounts, not the parties, not the timing.
@@ -235,21 +240,20 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
   whom.  A court that needs the receipt has exactly one place to get it:
   from Alice, or from Bob, by lawful order directed at that person.
 
-  *Third, the seal answers to its holders -- and only its holders.*
-  Served with a lawful order, Bob can comply: he surrenders his receipt,
-  and the court obtains evidence strong enough to convict on, evidence
-  that mathematics -- not testimony -- ties to Alice.  This is how the
-  system serves justice: the victim of a fraud, the honest counterparty
-  of a criminal, can always prove exactly whom they dealt with.  But if
-  the order is the instrument of an unjust regime -- if the "crime" is a
-  donation to a dissident, membership in a church, a purchase the state
-  has decided to punish retroactively -- Bob can refuse.  He can decline
-  to produce his key, accepting the personal legal consequence of that
-  refusal; or he can have destroyed it long before, after verifying the
-  payment, as a standing practice.  Then /no one on earth/ can open that
-  payment: not the identity office, not the chain's operators, not a
-  seizure of every server the system runs on.  The mathematics does not
-  know who is in power.
+  *Third, the seal answers to its holders---and only its holders.*
+  Served with a lawful order, Bob can comply by surrendering his receipt.
+  The court then obtains evidence (strong enough to convict on) that
+  mathematics---not testimony---ties to Alice. This serves justice: the
+  victim of a fraud or the honest counterparty of a criminal can always
+  prove exactly whom they dealt with.
+
+  Yet if the order comes from an unjust regime (e.g., criminalising a
+  donation, membership, or purchase), Bob can refuse. He can decline to
+  produce his key (accepting the personal consequence) or destroy it
+  beforehand as standard practice. Then no one on earth can open that
+  payment---not the identity office, not the chain operators, not even a
+  full server seizure. The mathematics simply does not know who is in
+  power.
 
   This is, we will argue, the right shape for the money of a free
   society: per-payment accountability /stronger/ than paper cash (which
@@ -260,21 +264,90 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
 
   The system comes in three flavours, fixed by who is named when:
 
-  - *A1 -- addressed cheque, public payer.*  The note names its recipient
+  - *A1: addressed cheque, public payer.* The note names its recipient
     cryptographically (only Bob's identity can deposit it; a thief who
     photographs the paper gains nothing) and its issuer openly (payroll,
     invoices, audited disbursements).
-  - *A2 -- addressed cheque, private payer.*  As A1, but Alice's identity
-    is hidden from everyone /except Bob/; the flavour for paying
-    privately while still handing the recipient a receipt that names you.
-    This is the cryptographically expensive flavour; Sections
-    [[#sec:cost]]--[[#sec:eval]] locate the cost and explain it.
-  - *B1 -- bearer cheque, public payer.*  Whoever holds the opening can
+  - *A2: addressed cheque, private payer.* As A1, but Alice's identity is
+    hidden from everyone except Bob; the flavour for paying privately while
+    still handing the recipient a receipt that names you. This is the
+    cryptographically expensive flavour; Sections [[#sec:cost]]--[[#sec:eval]]
+    locate the cost and explain it.
+  - *B1: bearer cheque, public payer.* Whoever holds the opening can
     deposit it (walking-around money; the paper surface), and the
     depositor's identity is delivered (encrypted, bilaterally) to the
-    issuer.  The fourth combination, a bearer note from a /hidden/
-    issuer, is not merely undesirable; it is impossible (Theorem
-    [[thm:b2]]).
+    issuer. The fourth combination, a bearer note from a hidden issuer, is
+    not merely undesirable; it is impossible (Theorem [[thm:b2]]).
+
+  The design space is therefore the four combinations of /addressed vs.
+  bearer/ and /public vs. private issuer/:
+
+  #+LATEX: {\scriptsize
+  |                                                     | Public issuer (named in clear at mint) | Private issuer (hidden at mint)    |
+  |-----------------------------------------------------+----------------------------------------+------------------------------------|
+  | *Addressed* (recipient named at spend via coupling) | **A1**: cheap (batch Schnorr)          | **A2**: requires ZK set-membership |
+  | *Bearer* (depositor named at spend)                 | **B1**: cheap (depositor binding)      | **B2**: impossible                 |
+  #+LATEX: }
+
+  When both parties must stay anonymous at the moment their identity is
+  bound (the lower-right cell), cheap couplings are vacuous (Sec.
+  [[#sec:cost]]).  Set-membership in the registry accumulator becomes
+  necessary.  This is the source of the "cost of anonymity" measured
+  later.  (The upper-left and lower-left cells are the cheap cases; see
+  [[#sec:binding-moments]] for why the binding moments matter.)
+
+#+LATEX: \clearpage
+* Binding Moments and the Split Handshake
+  :PROPERTIES:
+  :CUSTOM_ID: sec:binding-moments
+  :END:
+
+  A direct transfer between two registered accounts performs the
+  bilateral identity handshake in a single on-chain call: both parties'
+  identity anchors are live at the same moment.  A note payment
+  deliberately splits that handshake across time.  Alice mints (naming
+  or hiding the payer) now; Bob deposits (naming or hiding the payee)
+  later.  Unlinkability forbids any public value from bridging the two
+  moments.  This /split-handshake/ or /binding-moment asymmetry/ is the
+  root technical problem the rest of the design must solve.
+
+* The Identity Fountain
+  :PROPERTIES:
+  :CUSTOM_ID: sec:fountain
+  :END:
+
+  A single KYC ceremony produces one scarce root of trust per person: an
+  identity scalar \( m = H(\mathrm{id}) \) and a Pointcheval-Sanders
+  [fn::Pointcheval-Sanders (PS) signatures: a type of structure-preserving
+  signature that supports efficient rerandomization, allowing the holder to
+  produce unlinkable fresh versions of the credential without the issuer's
+  involvement] signature on it.  From that master credential the owner can, entirely
+  offline, derive an arbitrary number of fresh on-chain accounts:
+
+  - A new key pair \((sk, pk)\).
+  - A fresh ElGamal [fn::ElGamal encryption: a public-key encryption
+  scheme over elliptic curve points that supports re-randomization and is
+  semantically secure under the DDH assumption] encryption \( E = (rG, M + r
+  \cdot pk) \) of the same \( M = mG \).
+  - A statistically unlinkable rerandomization of the PS signature.
+
+  The rerandomized credential is independently verifiable as having come
+  from the same issuer, yet carries no information linking it to any
+  other derived credential or to the original KYC record.  Even the
+  issuer itself, holding every signature it ever issued plus the entire
+  blockchain, cannot cluster the on-chain accounts back to the same
+  person.  The only people who can recover \( M \) are those to whom it
+  is deliberately disclosed (via the bilateral approve handshake or a
+  note payload); they also receive the off-chain plaintext
+  \( \mathrm{id} \) so they can confirm it matches the issuer's
+  certification.
+
+  This "one KYC, unlimited unlinkable personas" capability (the
+  /Identity Fountain/) is what supplies stable identity anchors across
+  the mint-to-spend time gap without forcing all of a person's activity
+  to be linkable.  It is the mechanism that makes issuer-blindness
+  (Theorem [[thm:issuer-blind]]) and the targeted nature of compulsion
+  practical.
 
 #+LATEX: \clearpage
 * Related Work
@@ -335,22 +408,20 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
   Identities so that membership in it can later be proven in zero
   knowledge.
 
-  Formally: an Identity is a KYC-certified point \( M = m\,G \in
-  \mathbb{G}_1 \) (BN254), where the scalar \( m = H(\mathrm{id}) \) is
-  a preimage-resistant hash of the certified attribute record
-  \( \mathrm{id} \).  A person registers any number of on-chain
+  Formally (see Sec. [[#sec:fountain]] for the mechanism): an Identity is
+  a KYC-certified point \( M = m\,G \in \mathbb{G}_1 \) (BN254), where the
+  scalar \( m = H(\mathrm{id}) \) is a preimage-resistant hash of the
+  certified attribute record \( \mathrm{id} \).  Using the Identity
+  Fountain, a person derives and registers any number of on-chain
   accounts.  Each account \( X \) stores its owner's Identity
-  ElGamal-encrypted under its own key (ElGamal: the standard
-  public-key scheme whose ciphertexts can be freshly re-randomised)
-  as \( E_{\mathrm{addr}}[X] = (R_X, C_X) = (r_X G,\ M_X + r_X\, pk_X) \)
+  ElGamal-encrypted under its own key as
+  \( E_{\mathrm{addr}}[X] = (R_X, C_X) = (r_X G,\ M_X + r_X\, pk_X) \)
   with \( pk_X = sk_X G \).  Alongside it sits a Pointcheval-Sanders
-  (PS) credential: the issuer's signature over \( m \), re-randomised
-  by the client so that not even the issuer can recognise it, proving
-  the Identity was certified without revealing which certificate.  The
-  registry also maintains an incremental Merkle accumulator over
-  identity points, yielding one compact root \( \mathsf{rt_{id}} \) (Poseidon
-  leaves) standing for the whole set, membership provable against it --
-  updated commit-before-use as accounts register.
+  (PS) credential over \( m \), rerandomised by the client so that not
+  even the issuer can recognise it.  The registry maintains an
+  incremental Merkle accumulator over identity points (root
+  \( \mathsf{rt_{id}} \)), with membership provable in zero knowledge
+  and updated commit-before-use.
 
   These two secrets carry different authority.  The identity scalar
   \( m \) grants /read/ capability (decrypt ciphertexts addressed to
@@ -592,18 +663,27 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
 
   The properties above are only as good as the binding that produces
   the receipt, and the central design decision is /what/ a payment
-  binds.  The obvious answer (the counterparty's account public key,
-  the thing that actually signs transactions) is wrong.  The system's
-  history includes the scar: an early design bound addressed notes to
-  the recipient's mint-time key pair, so losing that one key made the
-  note permanently unspendable, and any key rotation or multi-device
-  custody broke addressing.  Worse, Sec. [[#sec:cost]] shows the cheap
-  forms of key binding are not merely brittle but /vacuous/: an ElGamal
-  ciphertext does not commit to its key, so "encrypted under the same
-  key" constraints are absorbed by witness values the prover may choose
-  freely (Lem. [[lem:vacuous]]).
+  binds and /at which moment/.
 
-  The correct authority axis is the *identity point* \( M = H(\mathrm{id})\,G \):
+  The obvious answer---bind to the counterparty's account public key,
+  the thing that actually signs transactions---fails for notes.  (See
+  [[#sec:binding-moments]].)  An early design bound addressed notes to
+  the recipient's mint-time key pair; losing that key stranded the
+  note forever, and key rotation broke addressing.  More
+  fundamentally, when the two anchors are split across time (payer
+  named only at mint, payee only at spend) and unlinkability forbids
+  any public bridge, binding to a disposable key is not merely brittle
+  but /vacuous/: an ElGamal ciphertext does not commit to its key, so
+  "encrypted under the same key" constraints can be satisfied with a
+  bogus key while the intended recipient can still spend (see
+  Lemma [[lem:vacuous]]).  Account keys also cannot survive the gap
+  between an anonymous payer today and an anonymous payee tomorrow.
+
+  The Fountain (Sec. [[#sec:fountain]]) gives us a different kind of
+  anchor: the stable, scarce, non-grindable identity point \( M \).
+
+  The correct authority axis is therefore the *identity point*
+  \( M = H(\mathrm{id})\,G \):
 
   - *Identities are scarce and non-grindable; keys are free.*  Anyone
     can mint key pairs at will, so key possession proves nothing about
@@ -638,6 +718,15 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
     technical heart of the system -- /everything a note must say about
     its parties can be said as an ElGamal re-encryption statement about
     identity points/.
+
+  If the goal is to name a specific registered person to that person
+  (and only that person) without naming them to the pool or the
+  public, the natural cryptographic move is to hand them a ciphertext
+  that only they can open.  When the name must be certified once by
+  KYC and the proof must survive unlinkability across a time gap, the
+  move becomes a re-encryption of the certified point under the
+  recipient's (or issuer's) public key.  That is exactly the
+  primitive the system uses.
 
   The last observation collapses the construction into *one gadget*:
 
@@ -691,7 +780,15 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
 
 ** The pool, the commitment, the nullifier
 
-   The pool is a Tornado-style Merkle tree of note commitments, hashed
+   The pool is a Tornado-style [fn::Tornado-style: a privacy mixer using
+Merkle trees of commitments and nullifiers to hide which input corresponds
+to which output, as pioneered by Tornado Cash] Merkle tree of note
+commitments, hashed with Poseidon (a hash designed to be cheap inside proof
+circuits), keeping a rolling window of recent roots and a set of spent
+/nullifiers/ [fn::nullifier: a one-way serial number derived from the note's
+secret randomness; it lets the system detect double-spends while preserving
+unlinkability]---one-way serial numbers, revealed only at spend, that make a
+double-spend detectable without linking the spend to its note.
    with Poseidon (a hash designed to be cheap inside proof circuits),
    keeping a rolling window of recent roots and a set of spent
    /nullifiers/ -- one-way serial numbers, revealed only at spend, that
@@ -768,7 +865,7 @@ the shipped system takes.  Every theorem carries an executable witness. ([[https
    in one transaction, the flavour-agnostic note proof plus three
    mutually-bound gates:
 
-   1. *The deposit-coupling sigma* (=verifyDepositCoupling=; EIP-196,
+   1. *The deposit-coupling sigma* (=verifyDepositCoupling=; EIP-196 [fn::EIP-196: Ethereum precompiles for efficient elliptic curve operations on the alt_bn128 curve],
       Ethereum's native curve arithmetic): the depositing account
       =msg.sender= is registered and
       bound to a scalar \( m \), and the supplied ciphertext \( eEnc \)

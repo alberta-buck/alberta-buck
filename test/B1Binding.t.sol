@@ -12,7 +12,7 @@ import {BN254} from "../src/BN254.sol";
 ///         The full flow (bearer spend, the issuer scanning SpentB and decrypting
 ///         the depositor's Identity into an issuer-unilateral receipt) is
 ///         demonstrated in alberta_buck/test/test_b1_binding.py; this suite pins
-///         the EVM gate.  See alberta-buck-notes-identity-axis.org.
+///         the EVM gate.  See alberta-buck-notes.org ("Mutual Decryptability", B1) and notes-flow "Identity-M Spend Path".
 contract B1BindingTest is Test {
     IdentityRegistry internal reg;
     address internal constant GOV = address(0xA0);

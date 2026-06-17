@@ -210,7 +210,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # The B1 idHash commits to Bob's identity material via id_hash_b1; the
     # per-leaf signature (sigma) is representative only -- Phase 1 binds the
     # issuer through the *batch* Schnorr over keccak(cms), not the per-leaf
-    # sig (see alberta-buck-notes-decryptability.org, residual gap #2).
+    # sig (see alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" -- B1 uses batch Schnorr for the issuer binding).
     rcpt_face    = 250
     rcpt_rho     = rand_scalar(rng)
     rcpt_sigma_R = mul(G1, rand_scalar(rng))

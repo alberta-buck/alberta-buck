@@ -10,7 +10,7 @@
 #+bucky: true
 #+math: true
 #+description: A Note's authority axis is the KYC-bound Identity point M, never the EOA/contract address. Adding a registry-Identity Merkle accumulator (root on chain, committed before a new M is usable) collapses the Notes system onto a single gadget -- "prove a re-encryption of a registered Identity under a target key" -- instantiated three ways: A2 (issuer encrypts under the recipient identity point), A1 (plaintext public issuer), B1 (depositor encrypts under the public issuer key at spend). The A2 and B1 bindings are duals and both are implemented and on-chain-verified (IdentityRegistry.verifyDepositCoupling, verifyDepositorBinding); the B1 dual gives a public issuer collusion-resistant knowledge of its depositors' identities. The unified membership circuit (circuits/identity_membership.circom) is wired through Groth16 to an on-chain verifier. 34 forge/pytest tests pass.
-#+EXPORT_FILE_NAME: ./images/alberta-buck-notes-identity-axis
+#+EXPORT_FILE_NAME: ./doc/historical/alberta-buck-notes-identity-axis
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works

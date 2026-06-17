@@ -1,5 +1,5 @@
 """Reference-math tests for verifiable decryption -- the compelled-disclosure
-primitive behind the EOA ApproveReceipt (alberta-buck-notes-decryptability.org).
+primitive behind the EOA ApproveReceipt (alberta-buck-notes.org "Mutual Decryptability" / "The Non-Deniable-Receipt Invariant").
 
 Completeness (the true decryption verifies) and soundness/non-frameability (a
 false M, wrong key, tampered response, or replayed context all reject -- in

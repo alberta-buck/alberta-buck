@@ -16,7 +16,7 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 // exposed as a PUBLIC OUTPUT.  Notes.mint field-matches each exposed eIss
 // against the eIss in the leaf's recipient-blinded re-encryption binding, so a
 // binding cannot float to a different leaf -- the collusion-resistant A2 tie
-// (alberta-buck-notes-decryptability.org, The Required Mint SNARK Signal).
+// (alberta-buck-notes.org, "The Non-Deniable-Receipt Invariant" -- the Required Mint SNARK Signal for issuer binding at mint; note <-> eEnc tie).
 //
 // The note ciphertext eNote stays a PRIVATE witness: it is the value the A-spend
 // later reveals, so keeping it out of the mint proof preserves mint<->spend

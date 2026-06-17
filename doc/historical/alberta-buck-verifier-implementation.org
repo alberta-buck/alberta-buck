@@ -1,7 +1,7 @@
 #+title: Note-Binding Verifier Implementation Status
 #+date: 2026-06-10
 
-#+EXPORT_FILE_NAME: ./images/alberta-buck-verifier-implementation
+#+EXPORT_FILE_NAME: ./doc/historical/alberta-buck-verifier-implementation
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 

@@ -18,7 +18,7 @@ At spend time, the prover selects which features to prove; the SNARK hides
 which feature trees were used (all aggregator paths lead to the same public
 identityRoot).
 
-Reference: alberta-buck-notes-identity-axis.org.
+Reference: alberta-buck-notes.org ("Mutual Decryptability", "one gadget" / Identity-M model); see also alberta-buck-notes-flow.org "The Identity-M Spend Path".
 """
 
 from __future__ import annotations

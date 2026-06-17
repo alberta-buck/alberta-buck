@@ -1,7 +1,6 @@
 """B1 depositor binding -- the dual of the A2 issuer binding.
 
-Reference: alberta-buck-notes-identity-axis.org, and the "Depositor half, at
-deposit" / B1 treatment of alberta-buck-notes-decryptability.org.
+Reference: alberta-buck-notes.org ("Mutual Decryptability", B1 / identity-axis, "The Non-Deniable-Receipt Invariant", B1 depositor binding) and alberta-buck-notes-flow.org (B1 flows and depositor binding).
 
 A B1 note is *bearer* (authorised by knowledge of the opening secret rho) from a
 *public* issuer.  The recipient is unknown at mint, so the issuer-names-depositor

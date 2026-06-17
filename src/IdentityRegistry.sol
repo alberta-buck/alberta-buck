@@ -56,7 +56,7 @@ contract IdentityRegistry {
     /// @notice Schnorr signature over a note-batch commitment by an issuer's
     ///         registered identity key -- the public-issuer half of the BUCK
     ///         Notes deferred-approve handshake (mutual-decryptability, Phase 1;
-    ///         see alberta-buck-notes-decryptability.org).  Matches
+    ///         see alberta-buck-notes.org "The Non-Deniable-Receipt Invariant").  Matches
     ///         alberta_buck.wallet.schnorr.SchnorrProof.
     struct SchnorrProof {
         uint256 e;          // Fiat-Shamir challenge (== _fsIssuerSchnorr)
@@ -235,7 +235,7 @@ contract IdentityRegistry {
     ///         is provided).  Also settable by governance for batch updates.
     ///         Consumed by the identity membership SNARK at Notes spend time
     ///         to prove "the counterparty identity M is a registered identity".
-    ///         See alberta-buck-notes-identity-axis.org.
+    ///         See alberta-buck-notes.org ("Mutual Decryptability", "one gadget") and alberta-buck-notes-flow.org "The Identity-M Spend Path".
     uint256                           public  identityRoot;
 
     /// @notice Poseidon T3 hash contract for incremental Merkle tree updates.
@@ -627,7 +627,7 @@ contract IdentityRegistry {
     ///         deferred-approve handshake for public issuers: it binds the
     ///         issuer's decrypted Identity to every leaf in the batch, so a
     ///         depositor can later produce a cryptographically sound receipt
-    ///         naming the payer (see alberta-buck-notes-decryptability.org).
+    ///         naming the payer (see alberta-buck-notes.org "The Non-Deniable-Receipt Invariant").
     /// @dev    `issuer` must be a registered *public* Identity: a bearer (B)
     ///         note's issuer must be public because the depositor is unknown at
     ///         mint, so the in-the-clear M is the only path to a receipt; A1
@@ -663,7 +663,7 @@ contract IdentityRegistry {
     ///         `issuer`'s registered Identity under the recipient's key, without
     ///         revealing the recipient.  The issuer half of mutual decryptability
     ///         for the A2 flavor (addressed, private issuer); see
-    ///         alberta-buck-notes-decryptability.org and
+    ///         alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" and
     ///         alberta_buck.wallet.issuer_reenc.
     /// @dev    Reads the issuer's registered `(pk_iss, E_reg) = (_pk, _E_addr)`
     ///         from storage so a caller cannot substitute either.  Checks the

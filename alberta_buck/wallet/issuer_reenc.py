@@ -2,8 +2,7 @@
 issuer's note ciphertext E_iss-for-rec re-encrypts the issuer's *registered*
 Identity under the recipient's key, WITHOUT revealing the recipient.
 
-Reference: alberta-buck-notes-decryptability.org ("The Fix: Issuer half, bound
-at mint", Private issuer (A2), option 2 -- recipient-blinded on-chain CP).
+Reference: alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant", A2 issuer re-encryption binding at mint) and alberta-buck-notes-flow.org (A2 flows, note <-> eEnc tie). The fix for the issuer half at mint is implemented via the recipient-blinded re-encryption proof.
 
 Problem.  For an A2 (addressed, private-issuer) note the issuer attaches
 ``E_iss-for-rec = (R_i, C_i) = (r'*G, M_iss + r'*pk_rec)``, an ElGamal

@@ -7,7 +7,7 @@ and soundness/non-frameability (tampered opening, wrong/non-public issuer,
 forged batch binding, mismatched nullifier or face all reject), plus the A2
 private-issuer refusal that awaits Phase 2.
 
-See alberta-buck-notes-decryptability.org ("The Receipt as a Proof Chain").
+See alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") and alberta-buck-receipt.org (receipts as verifiable proofs / AB-RCPT/1 "proof chain").
 """
 
 from __future__ import annotations

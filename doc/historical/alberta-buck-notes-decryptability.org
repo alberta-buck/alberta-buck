@@ -10,7 +10,7 @@
 #+bucky: true
 #+math: true
 #+description: BUCK Notes are meant to satisfy a mutual-decryptability invariant -- no party can pay BUCKs to another and retain cryptographic deniability of having done so: a compelled recipient can always produce a cryptographically sound receipt naming the payer's decrypted, KYC-bound Identity.  This document shows that the shipped implementation does NOT yet guarantee that invariant: the spend path verifies the depositor's identity (verifySpendCP) but the mint path verifies nothing about the issuer's -- the per-leaf issuerData is hashed into the commitment but never checked, a verification mint.circom explicitly deferred.  We define the non-deniable-receipt invariant formally, exhibit the gap per flavor (A1, A2, B1), and specify the fix: a symmetric, verified deferred-approve handshake whose issuer half is bound at mint (a Schnorr binding for public issuers; a recipient-hiding re-encryption proof for the private A2 issuer) and whose depositor half adds the B-note E_depositor_for_issuer payload.  Every leg is stated as a theorem with a py_ecc sanity check, and we document the circom and EVM formal-verification tooling (Picus, Circomspect, ecne, Halmos, Kontrol/KEVM, Certora, EasyCrypt) that can mechanize the soundness arguments.
-#+EXPORT_FILE_NAME: ./images/alberta-buck-notes-decryptability
+#+EXPORT_FILE_NAME: ./doc/historical/alberta-buck-notes-decryptability
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works

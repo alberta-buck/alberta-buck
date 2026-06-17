@@ -1,5 +1,5 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                    THE ALBERTA BUCK - NOTES (V1.0)
+                    THE ALBERTA BUCK - NOTES (V1.2)
             Private Bearer Instruments on an Identity-Aware
                            Demurrage Currency
 
@@ -323,8 +323,9 @@ Table of Contents
   A2 and B1 are duals; A1 drops the encryption.  Each direction is
   collusion-resistant by membership of the decrypted counterparty
   Identity, and each party can produce /alone/ a plaintext receipt
-  naming both counterparties.  (Full model:
-  /alberta-buck-notes-identity-axis/.)
+  naming both counterparties.  (Full model: see the "one gadget" and
+  "Mutual Decryptability" sections below (the identity-axis
+  unification).)
 
   *Demurrage needs no new machinery.* The Notes Pool /is/ simply the
   Notes contract's own ERC-20 balance – a regular BUCK account tracked
@@ -698,9 +699,9 @@ Table of Contents
   non-member and the spend reverts, so a colluding pair cannot construct
   a spendable note whose counterparty is un-nameable.  (This same
   invariant kills the private-issuer bearer "B2"; see /What This
-  Architecture Rules Out/.)  Full construction and proofs:
-  /alberta-buck-notes-identity-axis/ and
-  /alberta-buck-notes-unilateral/.
+  Architecture Rules Out/.)  Full construction and proofs: the "Mutual
+  Decryptability" and "one gadget" below (identity-axis unification) and
+  unilateral details (now in flow "A2 Identity-Targeted Spend").
 
   *What is on chain today (shipped vs. remaining).* The Identity-M
   binding primitives are implemented and tested in `IdentityRegistry':
@@ -1008,7 +1009,8 @@ Table of Contents
   un-nameable.  From \( m_{\text{rec}} \) /alone/ the recipient decrypts
   \( M_{\text{issuer}} \) and produces a plaintext receipt naming /both/
   parties – the *unilateral receipt*.  Full construction, proofs, and
-  tests: /alberta-buck-notes-unilateral/.
+  tests in the flow document under "A2 Identity-Targeted Spend" and
+  "unilateral".
 
 
 5.2 Flavor A1: Addressed Cheque, Public Issuer
@@ -1053,7 +1055,8 @@ Table of Contents
   shared witness couples "account bound to \( M_{\text{depositor}} \)"
   and "ciphertext encrypts \( M_{\text{depositor}} \)", so a depositor
   cannot cash a B1 note and stay un-nameable.  Full construction +
-  tests: /alberta-buck-notes-identity-axis/.
+  tests: the notes-identity-axis unification (see "Mutual
+  Decryptability" and the one-gadget definition below).
 
   *Civil-trust caveat (not cryptographic).* The issuer knows \( \rho \)
   and can race the bearer to deposit – but any such deposit names the
@@ -1079,12 +1082,24 @@ Table of Contents
    Collusion-resistant naming      yes (membership)                             yes                                      yes (membership)                        
    Civil-trust caveat              none                                         none                                     issuer knows \(\rho\) (cash promptly)   
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  /(Registered re-encryption, the one gadget.)/ Given a target key \( K
+  \) and a published ciphertext \( E = (R, C) \), prove knowledge of a
+  scalar \( m \) (and randomness \( r \)) such that
+  \begin{equation*}
+    R = r\,G, \qquad C = m\,G + r\,K, \qquad \ell(m\,G) \in \mathsf{rt_{id}}
+  \end{equation*}
+  i.e. \( E \) encrypts, under \( K \), a /registered/ Identity \( M =
+  mG \) the prover controls (revealing neither \( m \) nor \( M \)).
+  The EC half is a cheap Okamoto sigma; the membership is a native
+  Poseidon-Merkle proof bound to the same point.  (This is the unifying
+  "notes-identity-axis" / one-gadget model.)
+
   The taxonomy collapses to *one gadget* – a registry-Identity
   membership plus a re-encryption – instantiated by /which party
-  encrypts, when, and toward what key/.  A2 and B1 are duals; A1 is the
-  degenerate public-issuer case.  A fourth flavour – bearer with no
-  identity hook on either side – is intentionally absent (see /What This
-  Architecture Rules Out/).
+  encrypts, when, and toward what key/ (the identity-axis model).  A2
+  and B1 are duals; A1 is the degenerate public-issuer case.  A fourth
+  flavour – bearer with no identity hook on either side – is
+  intentionally absent (see /What This Architecture Rules Out/).
 
 
 6 The Interaction Matrix: Note Flavor x Depositor Account Mode
@@ -1337,9 +1352,8 @@ Table of Contents
   addressed flavours pay a ~370K-gas note-binding Groth16 (A2's
   re-encryption tie or A1's addressed tie) – that is the price of "only
   \( M_{\text{rec}} \) can spend", not of issuer anonymity; bearer B1
-  skips it (see /On-Chain Gas/).  (Full treatment:
-  /alberta-buck-notes-decryptability/, "The EOA Transfer Mirror:
-  Anonymity Is the Cost.")
+  skips it (see /On-Chain Gas/).  (Full treatment in flow "Privacy
+  Audit" (EOA Transfer Mirror).)
 
 
 7.7 Composability
@@ -2749,8 +2763,9 @@ Table of Contents
   No novel hardness assumption is introduced.  The membership plus the
   binding sigmas are the /one gadget/; the receipts compose a blinded
   re-encryption (or the public issuer's signature) with a verifiable
-  decryption.  Full proofs: /alberta-buck-notes-identity-axis/,
-  /alberta-buck-notes-unilateral/, and the companion /Proofs/.
+  decryption.  Full proofs in alberta-buck-proofs.org; the identity-axis
+  unification in the "one gadget" and Mutual Decryptability sections
+  here, /alberta-buck-notes-unilateral/, and the companion /Proofs/.
 
 
 16 The SNARK Circuits
@@ -2936,15 +2951,15 @@ Table of Contents
 
   The full Note lifecycle is exercised by `test/NotesE2E.t.sol', which
   drives one mutually-consistent fixture per flavour
-  (`test/vectors/e2e/{a1,a2,b1}.json', built by
-  `scripts/snark/gen_e2e_fixtures.sh') through /every gate as a real
-  proof/: the batch-mint Groth16, the flavour-agnostic spend Groth16
-  against the replayed note tree, the EIP-196 deposit sigma pinned to
-  (depositor, chainid=1), the G1-tie membership proof against the
-  registry's incrementally-built `identityRoot', and – for A2 – the
-  in-SNARK note \( \leftrightarrow eEnc \) binding.  Gas below is the
-  measured cost under solc 0.8.28, optimizer 200 runs (`make
-  nix-match-NotesE2E').
+  (`alberta_buck/test/vectors/e2e/{a1,a2,b1}.json', built by
+  `scripts/snark/gen_e2e_fixtures.sh' and shipped as Python package
+  data) through /every gate as a real proof/: the batch-mint Groth16,
+  the flavour-agnostic spend Groth16 against the replayed note tree, the
+  EIP-196 deposit sigma pinned to (depositor, chainid=1), the G1-tie
+  membership proof against the registry's incrementally-built
+  `identityRoot', and – for A2 – the in-SNARK note \( \leftrightarrow
+  eEnc \) binding.  Gas below is the measured cost under solc 0.8.28,
+  optimizer 200 runs (`make nix-match-NotesE2E').
 
   /Per-flavour lifecycle (one mint + one coupled spend, full call gas):/
 
@@ -3272,26 +3287,37 @@ Table of Contents
   • /alberta-buck-identity/ – the Fountain, registration, ElGamal / CP
     primitives.
   • /alberta-buck-ethereum/ – the Solidity surface.
-  • /alberta-buck-verifier-implementation/ – SNARK toolchain engineering
-    status (witness generation, trusted setups, verifier exports).
+  • /alberta-buck-verifier-implementation/ – (moved to doc/historical/)
+    SNARK toolchain engineering status.
 
   /Forward design (not yet implemented):/
   • /alberta-buck-notes-serialized/ – serialized B1 sub-notes: N
     micro-denomination bearer notes per leaf.
 
   /Historical memos (superseded; retained for provenance):/
-  • /alberta-buck-notes-unilateral/ – the A2 corner as first built; now
+  • [alberta-buck-notes-unilateral] – the A2 corner as first built; now
     flow's "A2 Identity-Targeted Spend" + Proofs Theorems 7-8.
-  • /alberta-buck-notes-identity-axis/ – the Identity-M inversion memo;
-    now this document's "Mutual Decryptability" + flow's "Identity-M
-    Spend Path".
-  • /alberta-buck-notes-decryptability/ – the invariant, the gap
-    analysis, and the fix design; the invariant lives here, the privacy
-    audit in flow, the theorems in Proofs, and the fix is implemented
-    (`note_binding.circom', `note_binding_a1.circom').
-  • /alberta-buck-notes-rollup-mint/ – the batch-mint design memo;
+  • The identity-axis / "one gadget" / Registry-Identity accumulator
+    unification is now fully described in the "Mutual Decryptability"
+    and "one gadget" sections above, and in notes-flow.org "The
+    Identity-M Spend Path" + accumulator explanations. (Original memo
+    was superseded by these integrations.)
+  • The non-deniable-receipt invariant (including issuer binding
+    "Required Mint SNARK Signal" at mint, EOA Transfer Mirror, receipt
+    proofs, A2 coupling gaps) is now covered in "The
+    Non-Deniable-Receipt Invariant" section here, the privacy audit and
+    detailed bindings in notes-flow.org, and theorems in Proofs. The
+    note <-> eEnc tie is implemented in `note_binding*.circom'.
+  • [alberta-buck-notes-rollup-mint] – the batch-mint design memo;
     shipped as `mint_batch.circom', hostile-issuer ledger promoted into
     flow.
+
+
+[alberta-buck-notes-unilateral]
+<file:doc/historical/alberta-buck-notes-unilateral.org>
+
+[alberta-buck-notes-rollup-mint]
+<file:doc/historical/alberta-buck-notes-rollup-mint.org>
 
 
 19.6 Regulatory and Legal Engagement

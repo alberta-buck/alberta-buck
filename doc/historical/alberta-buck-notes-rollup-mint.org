@@ -4,7 +4,7 @@
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
 
-#+EXPORT_FILE_NAME: ./images/alberta-buck-notes-rollup-mint
+#+EXPORT_FILE_NAME: ./doc/historical/alberta-buck-notes-rollup-mint
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works

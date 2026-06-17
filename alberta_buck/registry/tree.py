@@ -17,7 +17,7 @@ sub-root, plus a path from the sub-root to the aggregator root.
 Reference:
 - alberta_buck.wallet.unilateral_a2.IdentityTree (reference implementation)
 - circuits/identity_membership.circom (the in-circuit verifier)
-- alberta-buck-notes-identity-axis.org, Section "The Registry-Identity Accumulator"
+- alberta-buck-notes.org ("Mutual Decryptability", registry-Identity accumulator); see also alberta-buck-notes-flow.org "commit-before-use". Section "The Registry-Identity Accumulator" concept from the identity-axis design.
 """
 
 from __future__ import annotations

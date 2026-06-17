@@ -11,7 +11,7 @@ import {IdentityMembershipVerifier} from "../src/IdentityMembershipVerifier.sol"
 ///         test/vectors/identity_membership.json), verifies on chain; a tampered
 ///         public root is rejected.  This is the native Poseidon-Merkle half of
 ///         the A2 deposit coupling / B1 depositor binding gate.  See
-///         alberta-buck-notes-identity-axis.org.
+///         alberta-buck-notes.org ("Mutual Decryptability", one gadget) and notes-flow.org "The Identity-M Spend Path".
 contract IdentityMembershipTest is Test {
     IdentityMembershipVerifier internal verifier;
     string internal vj;

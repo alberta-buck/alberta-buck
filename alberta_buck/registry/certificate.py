@@ -20,7 +20,7 @@ Sealed envelope wire format:
     R.x (32B BE) || R.y (32B BE) || C.x (32B BE) || C.y (32B BE) ||
     signed_cert_len (u32 BE) || signed_cert_bytes
 
-Reference: alberta-buck-notes-identity-axis.org, Section "The Registry-Identity
+Reference: alberta-buck-notes.org ("Mutual Decryptability"); see also alberta-buck-notes-flow.org. The Registry-Identity
 Accumulator" -- "commit-before-use" discipline.
 """
 

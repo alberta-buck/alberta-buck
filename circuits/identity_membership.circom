@@ -23,7 +23,7 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 // What this pins: the membership itself, in zero knowledge.  What remains (the
 // one non-native G1 relation) is the tie of (Mx,My) to the point committed in
 // the on-chain EIP-196 sigma -- P_I = M + b*H for A2, or E_dep_for_iss's
-// plaintext for B1.  See alberta-buck-notes-identity-axis.org.
+// plaintext for B1.  See alberta-buck-notes.org and alberta-buck-notes-flow.org (the identity-axis / one-gadget unification and accumulator).
 
 template MerkleProof(depth) {
     signal input  leaf;

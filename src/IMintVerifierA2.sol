@@ -10,7 +10,7 @@ pragma solidity ^0.8.20;
 ///         public input, so a Groth16 accept *is* the leaf-tie: the binding's
 ///         eIss provably equals the committed leaf's eIss (closing the floating-
 ///         /missing-binding collusion sub-cases -- see
-///         alberta-buck-notes-decryptability.org, The Required Mint SNARK Signal).
+///         alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" (Required Mint SNARK Signal for issuer binding)).
 ///
 ///         Public signals (circom emits OUTPUTS first, then public inputs in
 ///         declaration order):
