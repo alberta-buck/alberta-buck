@@ -59,6 +59,7 @@ VENV_OPTS		=
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
 .PHONY: sim sim-build sim-run sim-test sim-plot
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
+.PHONY: sim-run-flow sim-plot-flow sim-flow
 .PHONY: prices-routing plot-routing
 
 
@@ -563,6 +564,32 @@ sim-plot-rebalancing:	$(REBALANCING_VECTOR)
 	python -m pytest $(SIM_REB_PLOT) -v -s
 
 sim-rebalancing:	sim-run-rebalancing sim-plot-rebalancing
+
+
+# ── Pure price-flow basket simulator (no Anvil) ───────────────────────
+#
+# Ad-hoc check of investor flow rebalancing against the generated
+# PAXG/cbBTC/AOIL price CSVs.
+#
+#   make sim-flow        # run -> plot
+#   make sim-run-flow    # write test/vectors/basket-flow-sim.json
+#   make sim-plot-flow   # render images/basket-flow-sim.png
+
+FLOW_VECTOR	= test/vectors/basket-flow-sim.json
+FLOW_IMAGE	= images/basket-flow-sim.png
+SIM_FLOW_PLOT	= alberta_buck/sim/plot_basket_flow.py
+
+$(FLOW_VECTOR):	$(ROUTING_PRICES) alberta_buck/sim/basket_flow.py
+	python -m alberta_buck.sim.basket_flow
+
+sim-run-flow:	$(ROUTING_PRICES)
+	python -m alberta_buck.sim.basket_flow
+
+sim-plot-flow:	$(FLOW_VECTOR) $(SIM_FLOW_PLOT)
+	python -m alberta_buck.sim.plot_basket_flow
+
+sim-flow:	sim-run-flow
+	python -m alberta_buck.sim.plot_basket_flow
 
 
 # ── Dependencies ─────────────────────────────────────────────────────
