@@ -8,6 +8,10 @@ JSON schema extends routing-sim.json with:
   poolWeights[i] = [actualWeight, targetWeight]
   rebalancerPnl: value of rebalancer portfolio - initial (USDC micro, day-0)
   rebalanceTrades: cumulative rebalance operations
+  directMintPnl: current DirectMint agent value - initial value (USDC micro,
+                 day-0 accounting)
+  dmTotalInvested: cumulative DirectMint entry capital (USDC micro, day-0)
+  treasuryBuck: retained basket profit from redeemed DirectMint receipts
 """
 
 import json
@@ -55,10 +59,16 @@ def test_rebalancing_sim_plot():
     def col(key, t):
         return [f.get(key, [])[t] for f in fr]
 
-    fig, axes = plt.subplots(5, 1, figsize=(13, 18), sharex=True)
+    fig, axes = plt.subplots(6, 1, figsize=(13, 21), sharex=True)
 
     # buckUsd = USDC-micro per 1 BUCK from the floating BUCK/USDC pool.
     bu = [f.get("buckUsd", 0) for f in fr]
+
+    def treasury_buck(f):
+        """Raw retained treasury BUCK, with fallback for older vectors."""
+        if "treasuryBuck" in f:
+            return f["treasuryBuck"]
+        return int(f.get("treasuryShare", 0.0) * f.get("basketNav", 0))
 
     # ---- Panels 1-3: per token, both pools vs market reference -------- #
     for t in range(3):
@@ -133,7 +143,7 @@ def test_rebalancing_sim_plot():
                   linestyle="--",
                   label="DM outstanding (BUCK principal)")
     handles5.append(l2)
-    tb = [f.get("treasuryBuck", 0) / E6 for f in fr]
+    tb = [treasury_buck(f) / E6 for f in fr]
     l3, = ax.plot(days, tb, color="tab:green", linewidth=1.4,
                   label="treasury BUCK (retained profit)")
     handles5.append(l3)
@@ -151,6 +161,46 @@ def test_rebalancing_sim_plot():
 
     ax.legend(handles=handles5, loc="upper left", fontsize=7)
     ax.set_title("Basket NAV, outstanding, treasury BUCK & share")
+
+    # ---- Panel 6: BuckBasket investment ROI -------------------------- #
+    #
+    # Current sim accounting is day-0 value based: DirectMint agents invest
+    # commodity TOKEN, receive BuckBasket receipts, and later redeem TOKEN.
+    # This is useful for diagnosing the present commodity-depositor sim, but
+    # a later idle-BUCK savings-account model should add receipt claim value,
+    # BUCK demurrage avoided, and current BUCK/USD mark-to-market fields.
+    ax = axes[5]
+    invested = [f.get("dmTotalInvested", 0) for f in fr]
+
+    def pct_of_invested(key):
+        vals = []
+        for f, inv in zip(fr, invested):
+            vals.append(100.0 * f.get(key, 0) / inv if inv else 0.0)
+        return vals
+
+    dm_roi = pct_of_invested("directMintPnl")
+    treasury_roi = [
+        100.0 * treasury_buck(f) / inv if inv else 0.0
+        for f, inv in zip(fr, invested)
+    ]
+    total_roi = [
+        100.0 * (
+            f.get("directMintPnl", 0) + treasury_buck(f)
+        ) / inv if inv else 0.0
+        for f, inv in zip(fr, invested)
+    ]
+    ax.axhline(0, color="black", alpha=0.25, linewidth=0.8)
+    ax.plot(days, dm_roi, color="tab:blue", linewidth=1.4,
+            label="DirectMint sim-accounting ROI")
+    ax.plot(days, treasury_roi, color="tab:green", linewidth=1.2,
+            linestyle="--", label="treasury retained / invested")
+    ax.plot(days, total_roi, color="tab:purple", linewidth=1.0,
+            linestyle=":", label="DirectMint + treasury ROI")
+    ax.set_ylabel("ROI (%)")
+    ax.set_xlabel("Day")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left", fontsize=7)
+    ax.set_title("BuckBasket investment ROI (current DirectMint accounting)")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -172,16 +222,22 @@ def test_rebalancing_sim_plot():
     dm_exits = last.get("dmExits", 0)
     nav_final = last.get("basketNav", 0) / E6
     out_final = last.get("dmOutstanding", 0) / E6
-    tb_final = last.get("treasuryBuck", 0) / E6
+    tb_final = treasury_buck(last) / E6
     ts_final = last.get("treasuryShare", 0) * 100
     invested = last.get("dmTotalInvested", 0)
-    avg_roi = 100 * tb_final / (invested / E6) if invested else 0
+    dm_roi_final = (
+        100 * last.get("directMintPnl", 0) / invested if invested else 0)
+    treasury_roi_final = (
+        100 * treasury_buck(last) / invested if invested else 0)
+    total_roi_final = dm_roi_final + treasury_roi_final
     print(f"  direct trades: {last.get('directTrades',0)}  "
           f"BUCK-routed: {last.get('cycleTrades',0)}  "
           f"rebalance: {last.get('rebalanceTrades',0)}")
     print(f"  Treasury BUCK: {tb_final:,.2f}  "
           f"share of NAV: {ts_final:.2f}%  "
-          f"avg DM ROI: {avg_roi:.2f}%")
+          f"treasury ROI: {treasury_roi_final:.2f}%")
+    print(f"  DirectMint sim-accounting ROI: {dm_roi_final:.2f}%  "
+          f"DirectMint+treasury ROI: {total_roi_final:.2f}%")
     print(f"  direct-mint entries: {dm_entries}  exits: {dm_exits}")
     print(f"  basket NAV: {nav_final:,.2f} BUCK  "
           f"outstanding: {out_final:,.2f} BUCK  "

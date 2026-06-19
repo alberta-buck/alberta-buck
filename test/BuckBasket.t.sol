@@ -433,6 +433,69 @@ contract BuckBasketTest is Test {
         receipt.ownerOf(ridPaxg);
     }
 
+    function test_depositBuck_afterBootstrapUsesBalancedPath() public {
+        _setupTwoPoolBasket();
+
+        address pPaxg = IV3Factory(v3Factory).getPool(
+            address(buck), address(paxg), 500);
+        address pCbbtc = IV3Factory(v3Factory).getPool(
+            address(buck), address(cbbtc), 500);
+        uint256 paxgBuckBefore = buck.balanceOf(pPaxg);
+        uint256 cbbtcBuckBefore = buck.balanceOf(pCbbtc);
+
+        uint256 buckAmt = 40_000e18;
+        vm.prank(address(basketC));
+        buck.mintFromBasket(alice, buckAmt);
+
+        vm.startPrank(alice);
+        buck.approve(address(basketC), buckAmt);
+        uint256 rid = basketC.depositToken(address(buck), buckAmt, 0);
+        vm.stopPrank();
+
+        assertTrue(
+            buck.balanceOf(pPaxg) > paxgBuckBefore
+                || buck.balanceOf(pCbbtc) > cbbtcBuckBefore,
+            "deposit added BUCK-side LP to a basket pool"
+        );
+
+        (uint256 principalBuck, uint256 principalToken, address guardToken,) =
+            basketC.deposits(rid);
+        assertGt(principalBuck, 0, "BUCK principal recorded");
+        assertEq(principalToken, 0, "BUCK deposit has no TOKEN principal");
+        assertTrue(
+            guardToken == address(paxg) || guardToken == address(cbbtc),
+            "guard token is a basket constituent"
+        );
+    }
+
+    function test_depositToken_afterBootstrapUsesBalancedPath() public {
+        _setupTwoPoolBasket();
+
+        address pPaxg = IV3Factory(v3Factory).getPool(
+            address(buck), address(paxg), 500);
+        address pCbbtc = IV3Factory(v3Factory).getPool(
+            address(buck), address(cbbtc), 500);
+        uint256 paxgBefore = paxg.balanceOf(pPaxg);
+        uint256 cbbtcBefore = cbbtc.balanceOf(pCbbtc);
+
+        vm.prank(alice);
+        paxg.approve(address(basketC), 1e18);
+        vm.prank(alice);
+        uint256 rid = basketC.depositToken(address(paxg), 1e18, 0);
+
+        assertTrue(
+            paxg.balanceOf(pPaxg) > paxgBefore
+                || cbbtc.balanceOf(pCbbtc) > cbbtcBefore,
+            "deposit routed into at least one pool"
+        );
+
+        (uint256 principalBuck, uint256 principalToken, address guardToken,) =
+            basketC.deposits(rid);
+        assertGt(principalBuck, 0, "BUCK principal recorded");
+        assertEq(principalToken, 1e18, "input TOKEN principal recorded");
+        assertEq(guardToken, address(paxg), "redeem guard uses input token");
+    }
+
     /// @dev Partial multi-pool redemption: 50% of the principal redeemed,
     ///      remainder remains as an active deposit.
     function test_redeem_multiPool_partial() public {

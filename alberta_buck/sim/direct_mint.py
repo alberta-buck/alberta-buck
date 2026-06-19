@@ -19,8 +19,11 @@ agent.idx)`` so runs are reproducible.
 
 The deposit/redeem path goes through ``BuckBasket.depositToken`` /
 ``BuckBasket.redeem`` -- the canonical Phase 1b way to put real backing
-TOKEN into a TOKEN/BUCK pool (BuckBasket mints fresh BUCK against the
-deposit via ``Buck.mintFromBasket``, no NFT-credit machinery involved).
+TOKEN into the BuckBasket.  Cold TOKEN deposits seed their own empty pools;
+after bootstrap, ``depositToken`` normalizes incoming BUCK or basket TOKENs
+into BUCK and re-LPs that value toward the underweight pool mix.  BuckBasket
+mints fresh BUCK against the deposited value via ``Buck.mintFromBasket``; no
+NFT-credit machinery is involved.
 """
 
 from __future__ import annotations

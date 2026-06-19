@@ -61,10 +61,10 @@ REBALANCING = Scenario(
             # arb-stabilization narrative is well-defined from tick 0.
             "BootstrapDMAgent": 3,
             # 50 stochastic LPs: per-tick Bernoulli enter/exit with tuned
-            # probabilities (see DirectMintAgent.{ENTER,EXIT}_PROB).  These
-            # agents enter with random commodity TOKENs, so entry LPs into
-            # that token's own pool; the basket-side rebalance effect comes
-            # from redemption allocation selling overweight pools.
+            # probabilities (see DirectMintAgent.{ENTER,EXIT}_PROB).  After
+            # bootstrap, random commodity TOKEN entries are normalized by
+            # BuckBasket.depositToken into BUCK and re-LP'd toward the
+            # underweight pool mix; redemptions sell overweight pools.
             "DirectMintAgent": 50},
     days=365,
     ticks_per_day=4,

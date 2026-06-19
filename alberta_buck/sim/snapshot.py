@@ -277,6 +277,7 @@ class Snapshotter:
             "dmTotalInvested": ctr.get("dmTotalInvested", 0),
             "basketNav": nav,
             "dmOutstanding": out_buck,
+            "treasuryBuck": treas_buck,
             "treasuryShare": treas_frac,
         })
 
