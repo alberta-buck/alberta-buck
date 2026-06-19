@@ -14,7 +14,6 @@ from alberta_buck.sim.direct_mint import BootstrapDMAgent, DirectMintAgent
 from alberta_buck.sim.snapshot import Snapshotter
 
 E6 = 10 ** 6
-E18 = 10 ** 18
 
 
 def run(scenario, anvil, out_path=None, verbose=True) -> dict:
@@ -73,15 +72,21 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
 
     n_tok = len(d.tokens)
     for day in range(scenario.days):
-        # One market maker snaps ONE random token at one random tick/day.
+        # One market-maker intervention per day, but it updates every
+        # TOKEN/USDC truth pool.  Updating only one random token let the
+        # floating BUCK/USDC gauge be dominated by whichever asset was most
+        # recently snapped, making TOKEN/BUCK->USD plots look cross-wired.
         whale_tick = prng.randrange(scenario.ticks_per_day)
-        whale_tok = prng.randrange(n_tok)
+        whale_order = list(range(n_tok))
+        prng.shuffle(whale_order)
         for tick in range(scenario.ticks_per_day):
             ts += tick_secs
             anvil.warp_to(ts)
+            d.chain.clear_balance_cache()
             if tick == whale_tick:
                 for wagent in whales:
-                    wagent.snap(d, scenario, day, whale_tok, ctr)
+                    for whale_tok in whale_order:
+                        wagent.snap(d, scenario, day, whale_tok, ctr)
             order = arbs[:]
             prng.shuffle(order)
             for a in order:

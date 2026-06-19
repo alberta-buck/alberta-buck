@@ -144,26 +144,27 @@ class AnonymousArbAgent(Agent):
 
     def act(self, d, scenario, day, tick, ctr) -> None:
         w3, ab = d.w3, d.erc20_abi
+        balance_of = lambda token, holder: d.chain.balance_of(token, holder, ab)
         # Act on the best opportunity *per token* every tick -- NOT a single
         # global winner.  Otherwise the deepest pool's larger absolute
         # profit makes the agent always trade that one token and the other
         # TOKEN/BUCK pools never get arbed (the BUCK/USDC pool then only
         # tracks the dominant token).
         for x in range(len(d.tokens)):
-            bal = d.usdc.functions.balanceOf(self.address).call()
+            bal = d.chain.balance_of(d.usdc, self.address)
             if bal == 0:
                 return
-            usdc_res = d.usdc.functions.balanceOf(d.pool_usdc[x]).call()
-            buck_res = d.buck.functions.balanceOf(d.pool_buck[x]).call()
+            usdc_res = d.chain.balance_of(d.usdc, d.pool_usdc[x])
+            buck_res = d.chain.balance_of(d.buck, d.pool_buck[x])
             binders = [usdc_res, buck_res]
             if d.pool_ub:
-                binders.append(d.usdc.functions.balanceOf(d.pool_ub).call())
+                binders.append(d.chain.balance_of(d.usdc, d.pool_ub))
             amt = min(bal, min(binders) * self.POOL_FRAC_BP // 10_000)
             if amt == 0:
                 continue
             best = None
             for toks, hops, uses_ub in self._candidates(d, amt, x):
-                o = quote_path(w3, ab, hops, amt)
+                o = quote_path(w3, ab, hops, amt, balance_of)
                 if o > amt * (10_000 + self.MARGIN_BP) // 10_000:
                     if best is None or o - amt > best[0]:
                         best = (o - amt, toks, uses_ub)
@@ -174,11 +175,10 @@ class AnonymousArbAgent(Agent):
 @_register
 class MarketMakerWhale(Agent):
     """A single market maker with ~unlimited resources.  Once per day, at a
-    random tick, it snaps exactly ONE (randomly chosen) TOKEN/USDC pool to
-    that day's CSV close -- never all of them at once.  Executed through the
-    SimLP helper (holds ~unlimited TOKEN+USDC); the whale EOA is still
-    registered for identity fidelity.  The arbs propagate the move to the
-    other pools via optimized routing between whale interventions."""
+    random tick, it snaps every TOKEN/USDC pool to that day's CSV close.
+    Executed through the SimLP helper (holds ~unlimited TOKEN+USDC); the
+    whale EOA is still registered for identity fidelity.  BUCK-route arbs
+    then propagate those exogenous truth moves into TOKEN/BUCK pools."""
 
     HUGE = (1 << 127) - 1
 
@@ -236,16 +236,17 @@ class TokenAccumulatorAgent(Agent):
         if not d.pool_ub:
             return
         w3, ab = d.w3, d.erc20_abi
+        balance_of = lambda token, holder: d.chain.balance_of(token, holder, ab)
         t = self.tgt
         tc = d.tokens[t]
         T, B, U = tc.address, d.buck.address, d.usdc.address
         fu, fb, fub = d.fee_usdc, d.fee_buck, d.fee_ub
-        bal = tc.functions.balanceOf(self.address).call()
+        bal = d.chain.balance_of(tc, self.address)
         if bal == 0:
             return
         # Size off the token side of the pools the cycle traverses.
-        binders = [tc.functions.balanceOf(d.pool_buck[t]).call(),
-                   tc.functions.balanceOf(d.pool_usdc[t]).call()]
+        binders = [d.chain.balance_of(tc, d.pool_buck[t]),
+                   d.chain.balance_of(tc, d.pool_usdc[t])]
         amt = min(bal, min(binders) * self.POOL_FRAC_BP // 10_000)
         if amt == 0:
             return
@@ -261,7 +262,7 @@ class TokenAccumulatorAgent(Agent):
         ]
         best = None
         for toks, hops in cands:
-            o = quote_path(w3, ab, hops, amt)
+            o = quote_path(w3, ab, hops, amt, balance_of)
             if o > amt * (10_000 + self.MARGIN_BP) // 10_000:
                 if best is None or o - amt > best[0]:
                     best = (o - amt, toks)

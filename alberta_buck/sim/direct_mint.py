@@ -86,8 +86,9 @@ class _DMBase(Agent):
                 ctr["dmEntries"] = ctr.get("dmEntries", 0) + 1
                 ctr["dmOutstandingBuck"] = (
                     ctr.get("dmOutstandingBuck", 0) + self._principal_buck)
+                seed_value = seed * ref0 // (10 ** d.dec[tok_idx])
                 ctr["dmTotalInvested"] = (
-                    ctr.get("dmTotalInvested", 0) + seed)
+                    ctr.get("dmTotalInvested", 0) + seed_value)
         except Exception as e:
             print(f"[{type(self).__name__.lower()}-{self.idx}] _enter failed: {e!r}",
                   flush=True)

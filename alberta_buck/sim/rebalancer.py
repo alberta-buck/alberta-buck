@@ -61,8 +61,8 @@ class BuckBasketRebalancerAgent(Agent):
         in 18-dec fixed-point.  Returns 0 if the pool has no reserves."""
         tc = d.tokens[i]
         pb = d.pool_buck[i]
-        rt = tc.functions.balanceOf(pb).call()
-        rb = d.buck.functions.balanceOf(pb).call()
+        rt = d.chain.balance_of(tc, pb)
+        rb = d.chain.balance_of(d.buck, pb)
         if rt == 0:
             return 0
         return rb * (10 ** d.dec[i]) // rt
@@ -88,7 +88,7 @@ class BuckBasketRebalancerAgent(Agent):
         for i in range(N):
             tc = d.tokens[i]
             pb = d.pool_buck[i]
-            rt = tc.functions.balanceOf(pb).call()
+            rt = d.chain.balance_of(tc, pb)
             actual_val.append(rt * prices[i] // (10 ** d.dec[i]))
         av_sum = sum(actual_val)
         if av_sum == 0:
@@ -116,10 +116,10 @@ class BuckBasketRebalancerAgent(Agent):
             return
 
         # Cap at agent's balance.
-        bal = d.tokens[ov_i].functions.balanceOf(self.address).call()
+        bal = d.chain.balance_of(d.tokens[ov_i], self.address)
         move_amt = min(move_amt, bal)
         # Cap at pool depth fraction.
-        pool_tok_res = d.tokens[ov_i].functions.balanceOf(d.pool_buck[ov_i]).call()
+        pool_tok_res = d.chain.balance_of(d.tokens[ov_i], d.pool_buck[ov_i])
         max_amt = pool_tok_res * self.POOL_FRAC_BP // 10_000
         move_amt = min(move_amt, max_amt)
         if move_amt == 0:
@@ -138,7 +138,8 @@ class BuckBasketRebalancerAgent(Agent):
 
         # Only enter if the fill is profitable (net >0, after fees).
         w3, ab = d.w3, d.erc20_abi
-        out_amt = quote_path(w3, ab, hops, move_amt)
+        balance_of = lambda token, holder: d.chain.balance_of(token, holder, ab)
+        out_amt = quote_path(w3, ab, hops, move_amt, balance_of)
         if out_amt == 0:
             return
 

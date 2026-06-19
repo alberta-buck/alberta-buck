@@ -472,13 +472,17 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 # BuckBasket / IdentityRegistry stack + real Uniswap V3 + Universal
 # Router.  EOA agents get REAL cryptographic IdentityRegistry identities.
 #
-#   make sim                # full pipeline: build -> run -> plot
-#   make sim-build          # emit SimLP + stack artifacts (+ UR artifact)
-#   make sim-run            # run the routing scenario (SIM_DAYS=120)
-#   make sim-test           # the pytest smoke wrapper
-#   make sim-plot           # render images/routing-sim.png from the JSON
+# Run these through Nix, e.g. `make nix-sim-run-rebalancing`, or from inside
+# `nix develop`; the system shell may not have Foundry, Anvil, Web3, or the
+# project Python dependencies.
 #
-# Override horizon:  make sim-run SIM_DAYS=365 SIM_TICKS=4
+#   make nix-sim                # full pipeline: build -> run -> plot
+#   make nix-sim-build          # emit SimLP + stack artifacts (+ UR artifact)
+#   make nix-sim-run            # run the routing scenario (SIM_DAYS=120)
+#   make nix-sim-test           # the pytest smoke wrapper
+#   make nix-sim-plot           # render images/routing-sim.png from the JSON
+#
+# Override horizon:  make nix-sim-run SIM_DAYS=365 SIM_TICKS=4
 
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
@@ -544,15 +548,16 @@ sim:		sim-run sim-plot
 
 # ── Rebalancing simulation (Phase 1: staggered direct-mint agents) ──────
 #
-# DirectMintAgents enter on a staggered cadence (every ~30 days), each
-# depositing into the most-underweight TOKEN/BUCK pool and holding for
-# months.  The entry/exit flow naturally rebalances pools toward target
-# weights.  BuckBasket has been fixed so equal weightBp yields equal
-# target weights (0 => default 1/N share).
+# DirectMintAgents enter/exit stochastically.  Current TOKEN deposits LP into
+# the deposited token's own TOKEN/BUCK pool; redemption allocation is the
+# basket-side "sell overweight" leg.  BUCK deposits route to the most
+# underweight pool, but this scenario's agents do not currently enter with
+# BUCK.  BuckBasket has been fixed so equal weightBp yields equal target
+# weights (0 => default 1/N share).
 #
-#   make sim-rebalancing         # build -> run -> plot (365 days)
-#   make sim-run-rebalancing     # run the rebalancing scenario
-#   make sim-plot-rebalancing    # render images/rebalancing-sim.png
+#   make nix-sim-rebalancing         # build -> run -> plot (365 days)
+#   make nix-sim-run-rebalancing     # run the rebalancing scenario
+#   make nix-sim-plot-rebalancing    # render images/rebalancing-sim.png
 
 REBALANCING_VECTOR   = test/vectors/rebalancing-sim.json
 SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
@@ -571,9 +576,9 @@ sim-rebalancing:	sim-run-rebalancing sim-plot-rebalancing
 # Ad-hoc check of investor flow rebalancing against the generated
 # PAXG/cbBTC/AOIL price CSVs.
 #
-#   make sim-flow        # run -> plot
-#   make sim-run-flow    # write test/vectors/basket-flow-sim.json
-#   make sim-plot-flow   # render images/basket-flow-sim.png
+#   make nix-sim-flow        # run -> plot
+#   make nix-sim-run-flow    # write test/vectors/basket-flow-sim.json
+#   make nix-sim-plot-flow   # render images/basket-flow-sim.png
 
 FLOW_VECTOR	= test/vectors/basket-flow-sim.json
 FLOW_IMAGE	= images/basket-flow-sim.png

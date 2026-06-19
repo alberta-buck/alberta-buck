@@ -37,14 +37,21 @@ def full_range_ticks(tick_spacing: int) -> tuple[int, int]:
 # ---- exact constant-product quote ----------------------------------- #
 
 def quote_hop(w3: Web3, erc20_abi: list, pool: str,
-              token_in: str, token_out: str, amt_in: int, fee: int) -> int:
+              token_in: str, token_out: str, amt_in: int, fee: int,
+              balance_of=None) -> int:
     """Exact xy=k output for a single full-range V3 hop, net of `fee`."""
     if amt_in == 0:
         return 0
-    ti = w3.eth.contract(address=Web3.to_checksum_address(token_in), abi=erc20_abi)
-    to = w3.eth.contract(address=Web3.to_checksum_address(token_out), abi=erc20_abi)
-    r_in = ti.functions.balanceOf(pool).call()
-    r_out = to.functions.balanceOf(pool).call()
+    if balance_of is None:
+        ti = w3.eth.contract(address=Web3.to_checksum_address(token_in),
+                             abi=erc20_abi)
+        to = w3.eth.contract(address=Web3.to_checksum_address(token_out),
+                             abi=erc20_abi)
+        r_in = ti.functions.balanceOf(pool).call()
+        r_out = to.functions.balanceOf(pool).call()
+    else:
+        r_in = balance_of(token_in, pool)
+        r_out = balance_of(token_out, pool)
     if r_in == 0 or r_out == 0:
         return 0
     eff = amt_in * (FEE_DEN - fee) // FEE_DEN
@@ -52,11 +59,11 @@ def quote_hop(w3: Web3, erc20_abi: list, pool: str,
 
 
 def quote_path(w3, erc20_abi, hops: list[tuple[str, str, str, int]],
-               amt_in: int) -> int:
+               amt_in: int, balance_of=None) -> int:
     """hops = [(pool, token_in, token_out, fee), ...] chained."""
     amt = amt_in
     for pool, ti, to, fee in hops:
-        amt = quote_hop(w3, erc20_abi, pool, ti, to, amt, fee)
+        amt = quote_hop(w3, erc20_abi, pool, ti, to, amt, fee, balance_of)
         if amt == 0:
             return 0
     return amt

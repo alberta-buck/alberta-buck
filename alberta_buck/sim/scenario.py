@@ -60,11 +60,11 @@ REBALANCING = Scenario(
             # Three pinned LPs floor the pools at bootstrap so the
             # arb-stabilization narrative is well-defined from tick 0.
             "BootstrapDMAgent": 3,
-            # 50 stochastic LPs: per-tick Bernoulli enter/exit with
-            # tuned probabilities (see DirectMintAgent.{ENTER,EXIT}_PROB)
-            # produce ~50 entries+exits across the year — enough churn
-            # to observe treasury share accumulating without the brittle
-            # setup-time schedule machinery.
+            # 50 stochastic LPs: per-tick Bernoulli enter/exit with tuned
+            # probabilities (see DirectMintAgent.{ENTER,EXIT}_PROB).  These
+            # agents enter with random commodity TOKENs, so entry LPs into
+            # that token's own pool; the basket-side rebalance effect comes
+            # from redemption allocation selling overweight pools.
             "DirectMintAgent": 50},
     days=365,
     ticks_per_day=4,
