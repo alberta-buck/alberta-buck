@@ -1,0 +1,257 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma solidity ^0.8.20;
+
+import {Test}    from "forge-std/Test.sol";
+import {ERC20}   from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20}  from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+import {BuckBasketProRata} from "../../src/basket/BuckBasketProRata.sol";
+import {BuckBasketReceipt} from "../../src/basket/BuckBasketReceipt.sol";
+
+/// @dev Minimal BUCK: plain ERC-20 + the basket mint/burn hooks.  Avoids the
+///      identity/carrying machinery of the production Buck so the pro-rata
+///      redeem logic can be exercised in isolation.
+contract MockBuck is ERC20 {
+    address public basket;
+    constructor() ERC20("Buck", "BUCK") {}
+    function setBasket(address b) external { basket = b; }
+    function mintFromBasket(address to, uint256 amt) external {
+        require(msg.sender == basket, "!basket"); _mint(to, amt);
+    }
+    function burnFromBasket(uint256 amt) external {
+        require(msg.sender == basket, "!basket"); _burn(msg.sender, amt);
+    }
+    function mint(address to, uint256 amt) external { _mint(to, amt); }   // test helper
+}
+
+contract MockController {
+    function compute() external returns (uint256) { return 1e18; }
+    function reprime() external {}
+}
+
+contract BBToken is ERC20 {
+    uint8 immutable _dec;
+    constructor(string memory n, string memory s, uint8 d) ERC20(n, s) { _dec = d; }
+    function decimals() public view override returns (uint8) { return _dec; }
+    function mint(address to, uint256 amount) external { _mint(to, amount); }
+}
+
+interface IV3Factory {
+    function feeAmountTickSpacing(uint24 fee) external view returns (int24);
+}
+
+interface IV3Pool {
+    function token0() external view returns (address);
+    function token1() external view returns (address);
+    function liquidity() external view returns (uint128);
+    function swap(address recipient, bool zeroForOne, int256 amountSpecified,
+                  uint160 sqrtPriceLimitX96, bytes calldata data)
+        external returns (int256 amount0, int256 amount1);
+}
+
+/// @title Pro-rata redeem scaffold tests.
+contract BuckBasketProRataTest is Test {
+
+    uint160 internal constant MIN_SQRT_RATIO = 4295128739;
+    uint160 internal constant MAX_SQRT_RATIO =
+        1461446703485210103287273052203988822378723970342;
+
+    address constant GOV = address(0xA0);
+
+    MockBuck       internal buck;
+    MockController internal ctrl;
+    BuckBasketProRata internal basketC;
+    BuckBasketReceipt internal receipt;
+    address        internal v3Factory;
+
+    BBToken internal paxg;    // 18-dec
+    BBToken internal cbbtc;   // 8-dec
+
+    address internal alice = address(0xA11CE);
+    address internal bob   = address(0xB0B);
+
+    uint256 constant PAXG_PRICE  = 4000e18;     // 1 PAXG = 4000 BUCK
+    uint256 constant CBBTC_PRICE = 100000e18;   // 1 cbBTC = 100000 BUCK
+
+    function setUp() public {
+        buck = new MockBuck();
+        ctrl = new MockController();
+        v3Factory = deployCode("out/UniswapV3Factory.sol/UniswapV3Factory.json");
+
+        basketC = new BuckBasketProRata(
+            address(buck), address(ctrl), v3Factory, GOV,
+            500,    // fee tier 0.05%
+            600,    // twap window
+            64,     // observation cardinality
+            0,      // default max deviation (off)
+            1e3     // min seed liquidity
+        );
+        buck.setBasket(address(basketC));
+        receipt = basketC.receipt();
+
+        paxg  = new BBToken("PAX Gold",   "PAXG",  18);
+        cbbtc = new BBToken("cbBTC",      "cbBTC",  8);
+
+        paxg.mint(alice, 1_000e18);
+        paxg.mint(bob,   1_000e18);
+        cbbtc.mint(alice, 1_000e8);
+
+        // Test contract holds reserves to act as an external arb on the pools.
+        paxg.mint(address(this), 1_000_000e18);
+        buck.mint(address(this), 1_000_000_000e18);
+    }
+
+    // ---- helpers --------------------------------------------------------- //
+
+    function _addPaxg() internal returns (address pool) {
+        vm.prank(GOV);
+        pool = basketC.addConstituent(address(paxg), 18, PAXG_PRICE, 0, 500);
+    }
+
+    function _depositPaxg(address who, uint256 amt) internal returns (uint256 rid) {
+        vm.prank(who); paxg.approve(address(basketC), amt);
+        vm.prank(who); rid = basketC.depositToken(address(paxg), amt, 0);
+    }
+
+    /// @dev Push the pool price by swapping `amountIn` of `tokenIn` into it.
+    ///      tokenIn = BUCK ⇒ buys TOKEN ⇒ pool BUCK-heavy (inflation).
+    ///      tokenIn = TOKEN ⇒ sells TOKEN ⇒ pool BUCK-light (deflation).
+    function _arb(address pool, address tokenIn, uint256 amountIn) internal {
+        bool zeroForOne = IV3Pool(pool).token0() == tokenIn;
+        uint160 limit = zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1;
+        IV3Pool(pool).swap(address(this), zeroForOne, int256(amountIn), limit, "");
+    }
+
+    function uniswapV3SwapCallback(int256 a0, int256 a1, bytes calldata) external {
+        if (a0 > 0) IERC20(IV3Pool(msg.sender).token0()).transfer(msg.sender, uint256(a0));
+        if (a1 > 0) IERC20(IV3Pool(msg.sender).token1()).transfer(msg.sender, uint256(a1));
+    }
+
+    // ---- tests ----------------------------------------------------------- //
+
+    function test_deposit_mints_and_issues_receipt() public {
+        _addPaxg();
+        uint256 rid = _depositPaxg(alice, 1e18);   // 1 PAXG
+        (uint256 principal,,,) = basketC.deposits(rid);
+        assertApproxEqRel(principal, PAXG_PRICE, 0.01e18, "principal ~ 4000 BUCK");
+        assertEq(basketC.totalOutstandingBuck(), principal, "outstanding tracks principal");
+        assertEq(receipt.ownerOf(rid), alice, "alice owns receipt");
+    }
+
+    function test_redeem_stable_burnsPrincipal_returnsToken() public {
+        _addPaxg();
+        uint256 rid = _depositPaxg(alice, 1e18);
+        uint256 paxgBefore = paxg.balanceOf(alice);
+
+        vm.prank(alice);
+        basketC.redeem(rid, 0);
+
+        assertEq(basketC.totalOutstandingBuck(), 0, "outstanding cleared");
+        // Stable: no profit; depositor gets ~all PAXG back (minus dust).
+        assertApproxEqRel(paxg.balanceOf(alice), paxgBefore + 1e18, 0.01e18, "PAXG returned");
+        vm.expectRevert();
+        receipt.ownerOf(rid);   // burned
+    }
+
+    function test_redeem_partial_halvesPrincipal() public {
+        _addPaxg();
+        uint256 rid = _depositPaxg(alice, 1e18);
+        uint256 outBefore = basketC.totalOutstandingBuck();
+
+        vm.prank(alice);
+        basketC.redeem(rid, 5000);   // 50%
+
+        (uint256 principal,,,) = basketC.deposits(rid);
+        assertApproxEqRel(principal, outBefore / 2, 0.001e18, "principal halved");
+        assertApproxEqRel(basketC.totalOutstandingBuck(), outBefore / 2, 0.001e18, "outstanding halved");
+        assertEq(receipt.ownerOf(rid), alice, "receipt survives partial");
+    }
+
+    function test_redeem_thinSecondPool_stillSucceeds() public {
+        // PAXG pool deeply seeded; cbBTC pool seeded very thin.  A pro-rata
+        // redeem must touch both without reverting.
+        _addPaxg();
+        vm.prank(GOV);
+        basketC.addConstituent(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
+
+        _depositPaxg(alice, 10e18);                 // deep PAXG
+        vm.prank(alice); cbbtc.approve(address(basketC), 1e5);
+        vm.prank(alice); basketC.depositToken(address(cbbtc), 1e5, 0);  // thin cbBTC (0.001)
+
+        uint256 ridPaxg = 1;   // first receipt
+        uint256 paxgBefore = paxg.balanceOf(alice);
+        uint256 cbbtcBefore = cbbtc.balanceOf(alice);
+
+        vm.prank(alice);
+        basketC.redeem(ridPaxg, 0);
+
+        // Pro-rata across both pools ⇒ alice receives PAXG and a sliver of cbBTC.
+        assertGt(paxg.balanceOf(alice), paxgBefore, "got PAXG");
+        assertGt(cbbtc.balanceOf(alice), cbbtcBefore, "got cbBTC from thin pool");
+    }
+
+    function test_redeem_inflation_splitsProfitWithTreasury() public {
+        address pool = _addPaxg();
+        uint256 rid = _depositPaxg(alice, 1e18);
+
+        // Inflation: external arb buys PAXG with BUCK ⇒ pool BUCK-heavy.
+        _arb(pool, address(buck), 2000e18);
+
+        uint256 buckBefore = buck.balanceOf(alice);
+        vm.prank(alice);
+        basketC.redeem(rid, 0);
+
+        assertEq(basketC.totalOutstandingBuck(), 0, "principal retired");
+        assertGt(buck.balanceOf(alice), buckBefore, "depositor got BUCK profit share");
+        assertGt(basketC.treasuryBuckPending(), 0, "treasury accrued its share");
+    }
+
+    function test_redeem_deflation_coversShortfall() public {
+        address pool = _addPaxg();
+        // Two depositors so alice's redeem (θ<1) leaves pool liquidity for the
+        // shortfall-cover swap.
+        uint256 ridA = _depositPaxg(alice, 1e18);
+        _depositPaxg(bob, 1e18);
+
+        // Mild deflation: arb sells PAXG for BUCK ⇒ pool BUCK-light.
+        _arb(pool, address(paxg), 0.4e18);
+
+        uint256 outBefore = basketC.totalOutstandingBuck();
+        (uint256 principalA,,,) = basketC.deposits(ridA);
+
+        uint256 paxgBefore = paxg.balanceOf(alice);
+        vm.prank(alice);
+        basketC.redeem(ridA, 0);   // must not revert
+
+        assertApproxEqAbs(basketC.totalOutstandingBuck(), outBefore - principalA, 1e9,
+            "principal fully retired");
+        assertGt(paxg.balanceOf(alice), paxgBefore, "depositor still gets (reduced) PAXG");
+    }
+
+    function test_redeem_underwater_reverts() public {
+        address pool = _addPaxg();
+        uint256 ridA = _depositPaxg(alice, 1e18);
+        _depositPaxg(bob, 1e18);
+
+        // Extreme deflation: dump a large PAXG amount so BUCK in the pool is
+        // crushed far below principal — even selling the whole slice can't burn R.
+        _arb(pool, address(paxg), 50e18);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("underwater"));
+        basketC.redeem(ridA, 0);
+    }
+
+    function test_receipt_tokenURI_returnsDataUri() public {
+        _addPaxg();
+        uint256 rid = _depositPaxg(alice, 1e18);
+
+        // Exercises the receipt -> basket.deposits() cross-read.
+        bytes memory uri = bytes(receipt.tokenURI(rid));
+        bytes memory prefix = bytes("data:application/json;base64,");
+        assertGt(uri.length, prefix.length, "non-empty data uri");
+        for (uint256 i = 0; i < prefix.length; i++) {
+            assertEq(uri[i], prefix[i], "data uri prefix");
+        }
+    }
+}

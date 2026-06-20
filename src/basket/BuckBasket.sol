@@ -6,7 +6,7 @@ import {IERC20}            from "@openzeppelin/contracts/token/ERC20/IERC20.sol"
 import {IERC721}           from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Math}              from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {UniswapV3OracleLib} from "./lib/UniswapV3OracleLib.sol";
+import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 
 interface IUniswapV3Factory {

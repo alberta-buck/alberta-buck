@@ -5,14 +5,14 @@ import {Test}                  from "forge-std/Test.sol";
 import {ERC20}                 from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20}                from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {BN254}                 from "../src/BN254.sol";
-import {IdentityRegistry}      from "../src/IdentityRegistry.sol";
-import {Buck}                  from "../src/Buck.sol";
-import {BuckCredit}            from "../src/BuckCredit.sol";
-import {BuckCreditHarness}            from "./harness/BuckCreditHarness.sol";
-import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
-import {BuckBasket}            from "../src/BuckBasket.sol";
-import {BuckBasketReceipt}     from "../src/BuckBasketReceipt.sol";
+import {BN254}                 from "../../src/BN254.sol";
+import {IdentityRegistry}      from "../../src/IdentityRegistry.sol";
+import {Buck}                  from "../../src/Buck.sol";
+import {BuckCredit}            from "../../src/BuckCredit.sol";
+import {BuckCreditHarness}            from "../harness/BuckCreditHarness.sol";
+import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
+import {BuckBasket}            from "../../src/basket/BuckBasket.sol";
+import {BuckBasketReceipt}     from "../../src/basket/BuckBasketReceipt.sol";
 
 contract BBToken is ERC20 {
     uint8 immutable _dec;
