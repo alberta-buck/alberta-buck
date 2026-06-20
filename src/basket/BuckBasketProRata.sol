@@ -85,6 +85,45 @@ interface IBuckMintBurn {
 ///   * BUCK-side deposits and the full migration handoff are not yet built.
 contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
+    // --- Errors (custom errors save bytecode vs require-strings) ----------- //
+    error AlreadyPresent();   // already present
+    error Amount0();   // amount=0
+    error BUCKDepositTODO();   // BUCK deposit: TODO
+    error BadCallback();   // bad callback
+    error BadPrice();   // bad price
+    error BadSwapCallback();   // bad swap callback
+    error BadTargetWeight();   // bad target weight
+    error BadToken();   // bad token
+    error BadWeight();   // bad weight
+    error Bp10000();   // bp>10000
+    error Buck0();   // buck=0
+    error BuckIn0();   // buckIn=0
+    error ConversionLoss();   // conversion loss
+    error EmptyDeposit();   // empty deposit
+    error EmptyPool();   // empty pool
+    error ExceedsPending();   // exceeds pending
+    error Gov0();   // gov=0
+    error InvalidRescale();   // invalid rescale
+    error L0();   // L=0
+    error NoLPWithdrawn();   // no LP withdrawn
+    error NoOutstanding();   // no outstanding
+    error NoValue();   // no value
+    error NotGovernance();   // Not governance
+    error NotInBasket();   // not in basket
+    error NotOwner();   // not owner
+    error PayoutToken0();   // payoutToken=0
+    error RedeemZero();   // redeem zero
+    error ReinvestL0();   // reinvest L=0
+    error ScaledWeightsIncorrect();   // scaled weights incorrect
+    error SeedTooSmall();   // seed too small
+    error Slippage();   // slippage
+    error SwapDeltaSign();   // swap delta sign
+    error To0();   // to=0
+    error TokenIn0();   // tokenIn=0
+    error TokenTooThin();   // token too thin
+    error TreasuryBpTooHigh();   // treasuryBp too high
+    error Underwater();   // underwater
+
     // --- Constituents ----------------------------------------------------- //
 
     // Field order matches the legacy BuckBasket.Constituent so the public
@@ -203,14 +242,14 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     }
 
     modifier onlyGov() {
-        require(msg.sender == governance, "Not governance");
+        if (!(msg.sender == governance)) revert NotGovernance();
         _;
     }
 
     // --- Governance ------------------------------------------------------- //
 
     function setGovernance(address _governance) external onlyGov {
-        require(_governance != address(0), "gov=0");
+        if (!(_governance != address(0))) revert Gov0();
         governance = _governance;
     }
 
@@ -220,15 +259,15 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     }
 
     function setTreasuryBp(uint16 _treasuryBp) external onlyGov {
-        require(_treasuryBp <= MAX_TREASURY_BP, "treasuryBp too high");
+        if (!(_treasuryBp <= MAX_TREASURY_BP)) revert TreasuryBpTooHigh();
         treasuryBp = _treasuryBp;
         emit TreasuryBpSet(_treasuryBp);
     }
 
     /// @notice Draw accumulated treasury BUCK profit to fund operations.
     function treasuryWithdraw(address to, uint256 amount) external onlyGov {
-        require(to != address(0), "to=0");
-        require(amount <= treasuryBuckPending, "exceeds pending");
+        if (!(to != address(0))) revert To0();
+        if (!(amount <= treasuryBuckPending)) revert ExceedsPending();
         treasuryBuckPending -= amount;
         IERC20(address(buck)).transfer(to, amount);
         emit TreasuryWithdrawn(to, amount);
@@ -262,26 +301,26 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         uint256 weightBp,
         uint24  feeTier
     ) external onlyGov returns (address pool) {
-        require(token != address(0) && token != address(buck), "bad token");
-        require(weightBp <= 10000, "bad weight");
-        require(indexOf[token] == 0, "already present");
-        require(initialPriceInBuck > 0, "bad price");
+        if (!(token != address(0) && token != address(buck))) revert BadToken();
+        if (!(weightBp <= 10000)) revert BadWeight();
+        if (!(indexOf[token] == 0)) revert AlreadyPresent();
+        if (!(initialPriceInBuck > 0)) revert BadPrice();
 
         uint256 N = constituents.length + 1;
         uint256 newW = weightBp > 0 ? weightBp : 10000 / N;
-        require(newW <= 10000 && newW > 0, "bad target weight");
+        if (!(newW <= 10000 && newW > 0)) revert BadTargetWeight();
 
         uint256 oldW = 10000 - newW;
         uint256 oldSumW = 0;
         for (uint256 i = 0; i < constituents.length; i++) {
             Constituent storage c = constituents[i];
             c.targetWeightBp = UniswapV3OracleLib.mulDiv(c.targetWeightBp, oldW, 10000);
-            require(c.targetWeightBp > 0 && c.targetWeightBp < 10000, "invalid rescale");
+            if (!(c.targetWeightBp > 0 && c.targetWeightBp < 10000)) revert InvalidRescale();
             oldSumW += c.targetWeightBp;
             c.basketAmount = UniswapV3OracleLib.mulDiv(c.basketAmount, oldW, 10000);
         }
         if (constituents.length > 0) {
-            require(oldSumW < 10000, "scaled weights incorrect");
+            if (!(oldSumW < 10000)) revert ScaledWeightsIncorrect();
             newW = 10000 - oldSumW;
         }
 
@@ -343,10 +382,10 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     function depositToken(address token, uint256 tokenAmount, uint256 maxDeviationBp)
         external returns (uint256 receiptId)
     {
-        require(tokenAmount > 0, "amount=0");
-        require(token != address(buck), "BUCK deposit: TODO");
+        if (!(tokenAmount > 0)) revert Amount0();
+        if (!(token != address(buck))) revert BUCKDepositTODO();
         uint256 idx = indexOf[token];
-        require(idx > 0, "not in basket");
+        if (!(idx > 0)) revert NotInBasket();
         Constituent storage c = constituents[idx - 1];
 
         _enforceSlippageGuard(c, _readPoolPrice(c, 0), maxDeviationBp);
@@ -357,21 +396,21 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         // principal; a full redemption recovers it modulo a couple wei of V3
         // burn rounding (absorbed by MAX_DUST_WEI on redeem).
         (uint160 sqrtP,,,,,,) = IUniswapV3Pool(c.pool).slot0();
-        uint160 sqrtLow  = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickLower);
-        uint160 sqrtHigh = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickUpper);
+        uint160 sqrtLow  = BasketMath.getSqrtRatioAtTick(c.tickLower);
+        uint160 sqrtHigh = BasketMath.getSqrtRatioAtTick(c.tickUpper);
         uint128 liquidity;
         uint256 buckToMint;
         if (c.buckIsToken0) {
-            liquidity  = UniswapV3OracleLib.getLiquidityForAmount1(sqrtLow, sqrtP, tokenAmount);
-            buckToMint = UniswapV3OracleLib.getAmount0ForLiquidity(sqrtP, sqrtHigh, liquidity);
+            liquidity  = BasketMath.getLiquidityForAmount1(sqrtLow, sqrtP, tokenAmount);
+            buckToMint = BasketMath.getAmount0ForLiquidity(sqrtP, sqrtHigh, liquidity);
         } else {
-            liquidity  = UniswapV3OracleLib.getLiquidityForAmount0(sqrtP, sqrtHigh, tokenAmount);
-            buckToMint = UniswapV3OracleLib.getAmount1ForLiquidity(sqrtLow, sqrtP, liquidity);
+            liquidity  = BasketMath.getLiquidityForAmount0(sqrtP, sqrtHigh, tokenAmount);
+            buckToMint = BasketMath.getAmount1ForLiquidity(sqrtLow, sqrtP, liquidity);
         }
-        require(liquidity > 0, "L=0");
-        require(buckToMint > 0, "buck=0");
+        if (!(liquidity > 0)) revert L0();
+        if (!(buckToMint > 0)) revert Buck0();
         if (_isFirstPositionInPool(c)) {
-            require(liquidity >= minSeedLiquidity, "seed too small");
+            if (!(liquidity >= minSeedLiquidity)) revert SeedTooSmall();
         }
 
         // Mint principal + 1 wei: V3 mint rounds the owed BUCK up past the floor
@@ -420,7 +459,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
                     address payoutToken, uint256 maxConversionLossBp)
         external
     {
-        require(payoutToken != address(0), "payoutToken=0");
+        if (!(payoutToken != address(0))) revert PayoutToken0();
         _redeem(receiptId, redeemBp, maxConversionLossBp, payoutToken);
     }
 
@@ -433,17 +472,17 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
                      uint256 maxConversionLossBp, address payoutToken)
         internal
     {
-        require(receipt.ownerOf(receiptId) == msg.sender, "not owner");
+        if (!(receipt.ownerOf(receiptId) == msg.sender)) revert NotOwner();
         Deposit memory d = deposits[receiptId];
-        require(d.buckPrincipal > 0, "empty deposit");
+        if (!(d.buckPrincipal > 0)) revert EmptyDeposit();
         uint256 redeemShare = redeemBp == 0 ? 10000 : redeemBp;
-        require(redeemShare <= 10000, "bp>10000");
-        require(totalOutstandingBuck > 0, "no outstanding");
+        if (!(redeemShare <= 10000)) revert Bp10000();
+        if (!(totalOutstandingBuck > 0)) revert NoOutstanding();
 
         uint256 R = redeemShare == 10000
             ? d.buckPrincipal
             : d.buckPrincipal * redeemShare / 10000;
-        require(R > 0, "redeem zero");
+        if (!(R > 0)) revert RedeemZero();
 
         // Phase 1: allocate (balanced sell-high, or all from one pool), withdraw.
         (uint256[] memory burnL, uint256 V) = payoutToken == address(0)
@@ -460,7 +499,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             Bw += b;
             anyWithdrawn = true;
         }
-        require(anyWithdrawn, "no LP withdrawn");
+        if (!(anyWithdrawn)) revert NoLPWithdrawn();
 
         // Phase 2: settle the burn.  Sell-high collects from BUCK-rich pools, so
         // `Bw >= R` is the common case (no conversion).  Under deflation, cover
@@ -478,9 +517,9 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             // Revert path 1: burn unsatisfiable within the loss budget.
             // maxConversionLossBp == 0 means "unlimited" (skip the loss cap) so
             // `redeem(id, bp, 0)` matches the legacy basket's no-guard call.
-            require(R - burned <= MAX_DUST_WEI, "underwater");
-            require(maxConversionLossBp == 0
-                    || lossValue * 10000 <= maxConversionLossBp * V, "conversion loss");
+            if (!(R - burned <= MAX_DUST_WEI)) revert Underwater();
+            if (!(maxConversionLossBp == 0
+                  || lossValue * 10000 <= maxConversionLossBp * V)) revert ConversionLoss();
             treasuryBuck = have - burned;   // over-swap excess; no depositor profit
         }
 
@@ -563,15 +602,15 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         internal view returns (uint256[] memory burnL, uint256 V)
     {
         uint256 ix = indexOf[token];
-        require(ix > 0, "not in basket");
+        if (!(ix > 0)) revert NotInBasket();
         ix -= 1;
 
         (uint256[] memory bv, uint128[] memory depL, uint256 B) = _poolBuckValues();
-        require(bv[ix] > 0, "empty pool");
+        if (!(bv[ix] > 0)) revert EmptyPool();
 
         V = UniswapV3OracleLib.mulDiv(R, 2 * B, totalOutstandingBuck);   // θ·NAV
         uint256 dvX = 2 * bv[ix];                                        // pool value
-        require(V <= dvX, "token too thin");                            // f ≤ 1
+        if (!(V <= dvX)) revert TokenTooThin();                            // f ≤ 1
 
         burnL = new uint256[](constituents.length);
         uint256 bl = UniswapV3OracleLib.mulDiv(uint256(depL[ix]), V, dvX);
@@ -600,7 +639,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             bv[i] = uint256(depL[i]) * poolBuck / totalL;
             B += bv[i];
         }
-        require(B > 0, "no value");
+        if (!(B > 0)) revert NoValue();
     }
 
     // --- Shortfall cover (scaffold: internal TOKEN/BUCK pools) ------------ //
@@ -676,7 +715,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     function _swapTokenForBuckExactIn(Constituent storage c, uint256 tokenIn)
         internal returns (uint256 spent, uint256 received)
     {
-        require(tokenIn > 0, "tokenIn=0");
+        if (!(tokenIn > 0)) revert TokenIn0();
         _swapCallbackPool = c.pool;
         (int256 d0, int256 d1) = IUniswapV3Pool(c.pool).swap(
             address(this),
@@ -688,7 +727,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         _swapCallbackPool = address(0);
         int256 buckDelta = c.buckIsToken0 ? d0 : d1;
         int256 tokDelta  = c.buckIsToken0 ? d1 : d0;
-        require(buckDelta <= 0 && tokDelta >= 0, "swap delta sign");
+        if (!(buckDelta <= 0 && tokDelta >= 0)) revert SwapDeltaSign();
         spent    = uint256(tokDelta);
         received = uint256(-buckDelta);
     }
@@ -711,7 +750,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         uint256 buckForLp = buckAmount - buckSpent;        // remainder pairs with TOKEN
 
         uint128 liquidity = _liquidityForAmounts(c, tok, buckForLp);
-        require(liquidity > 0, "reinvest L=0");
+        if (!(liquidity > 0)) revert ReinvestL0();
 
         _callbackPool = c.pool;
         (uint256 a0, uint256 a1) = IUniswapV3Pool(c.pool).mint(
@@ -728,7 +767,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     function _swapBuckForTokenExactIn(Constituent storage c, uint256 buckIn)
         internal returns (uint256 spent, uint256 received)
     {
-        require(buckIn > 0, "buckIn=0");
+        if (!(buckIn > 0)) revert BuckIn0();
         _swapCallbackPool = c.pool;
         (int256 d0, int256 d1) = IUniswapV3Pool(c.pool).swap(
             address(this),
@@ -740,7 +779,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         _swapCallbackPool = address(0);
         int256 buckDelta = c.buckIsToken0 ? d0 : d1;
         int256 tokDelta  = c.buckIsToken0 ? d1 : d0;
-        require(buckDelta >= 0 && tokDelta <= 0, "swap delta sign");
+        if (!(buckDelta >= 0 && tokDelta <= 0)) revert SwapDeltaSign();
         spent    = uint256(buckDelta);
         received = uint256(-tokDelta);
     }
@@ -775,12 +814,12 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         internal view returns (uint128)
     {
         (uint160 sqrtP,,,,,,) = IUniswapV3Pool(c.pool).slot0();
-        uint160 sqrtLow  = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickLower);
-        uint160 sqrtHigh = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickUpper);
+        uint160 sqrtLow  = BasketMath.getSqrtRatioAtTick(c.tickLower);
+        uint160 sqrtHigh = BasketMath.getSqrtRatioAtTick(c.tickUpper);
         (uint256 amount0, uint256 amount1) = c.buckIsToken0
             ? (buckAmount, tokenAmount)
             : (tokenAmount, buckAmount);
-        return UniswapV3OracleLib.getLiquidityForAmounts(sqrtP, sqrtLow, sqrtHigh, amount0, amount1);
+        return BasketMath.getLiquidityForAmounts(sqrtP, sqrtLow, sqrtHigh, amount0, amount1);
     }
 
     // --- Migration / unwind ----------------------------------------------- //
@@ -796,7 +835,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data)
         external override
     {
-        require(msg.sender == _callbackPool, "bad callback");
+        if (!(msg.sender == _callbackPool)) revert BadCallback();
         address token = abi.decode(data, (address));
         Constituent storage c = constituents[indexOf[token] - 1];
         if (c.buckIsToken0) {
@@ -811,7 +850,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data)
         external override
     {
-        require(msg.sender == _swapCallbackPool, "bad swap callback");
+        if (!(msg.sender == _swapCallbackPool)) revert BadSwapCallback();
         address token = abi.decode(data, (address));
         Constituent storage c = constituents[indexOf[token] - 1];
         if (c.buckIsToken0) {
@@ -855,12 +894,12 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
                 (, tick,,,,,) = IUniswapV3Pool(c.pool).slot0();
             }
         }
-        priceInBuck = UniswapV3OracleLib.getQuoteAtTick(
+        priceInBuck = BasketMath.getQuoteAtTick(
             tick, uint128(10 ** c.decimals), c.token, address(buck));
     }
 
     function consultTickExternal(address pool, uint32 secondsAgo) external view returns (int24) {
-        return UniswapV3OracleLib.consult(pool, secondsAgo);
+        return BasketMath.consult(pool, secondsAgo);
     }
 
     function _enforceSlippageGuard(Constituent storage c, uint256 spotPrice, uint256 maxDeviationBp)
@@ -870,16 +909,16 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         try this.peekTwap(c.pool, twapWindow) returns (uint256 twapPrice) {
             if (twapPrice == 0) return;
             uint256 dev = spotPrice > twapPrice ? spotPrice - twapPrice : twapPrice - spotPrice;
-            require(dev * 10000 <= twapPrice * maxDeviationBp, "slippage");
+            if (!(dev * 10000 <= twapPrice * maxDeviationBp)) revert Slippage();
         } catch {
             return;
         }
     }
 
     function peekTwap(address pool, uint32 secondsAgo) external view returns (uint256) {
-        int24 tick = UniswapV3OracleLib.consult(pool, secondsAgo);
+        int24 tick = BasketMath.consult(pool, secondsAgo);
         Constituent storage c = constituents[indexOf[_poolToToken(pool)] - 1];
-        return UniswapV3OracleLib.getQuoteAtTick(
+        return BasketMath.getQuoteAtTick(
             tick, uint128(10 ** c.decimals), c.token, address(buck));
     }
 

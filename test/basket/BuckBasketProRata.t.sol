@@ -247,7 +247,7 @@ contract BuckBasketProRataTest is Test {
         _arb(pool, address(paxg), 0.4e18);
 
         vm.prank(alice);
-        vm.expectRevert(bytes("conversion loss"));
+        vm.expectRevert(BuckBasketProRata.ConversionLoss.selector);
         basketC.redeem(ridA, 0);   // default 1% budget
     }
 
@@ -261,7 +261,7 @@ contract BuckBasketProRataTest is Test {
         _arb(pool, address(paxg), 50e18);
 
         vm.prank(alice);
-        vm.expectRevert(bytes("underwater"));
+        vm.expectRevert(BuckBasketProRata.Underwater.selector);
         basketC.redeem(ridA, 0);
     }
 
@@ -326,7 +326,7 @@ contract BuckBasketProRataTest is Test {
 
         // cbBTC pool can't source the ~4000 claim → f > 1.
         vm.prank(alice);
-        vm.expectRevert(bytes("token too thin"));
+        vm.expectRevert(BuckBasketProRata.TokenTooThin.selector);
         basketC.redeem(ridPaxg, 0, address(cbbtc), 2000);
     }
 
@@ -357,7 +357,7 @@ contract BuckBasketProRataTest is Test {
         _arb(pool, address(buck), 3000e18);
 
         vm.prank(alice);
-        vm.expectRevert(bytes("slippage"));
+        vm.expectRevert(BuckBasketProRata.Slippage.selector);
         basketC.redeem(rid, 0);
     }
 

@@ -26,7 +26,7 @@ library BasketMath {
     ///         (default 5000 = 50/50).  Depositor takes the remainder so the
     ///         two always sum to `profit` exactly (no rounding leak).
     function splitProfit(uint256 profit, uint16 treasuryBp)
-        internal pure returns (uint256 toTreasury, uint256 toDepositor)
+        public pure returns (uint256 toTreasury, uint256 toDepositor)
     {
         toTreasury  = profit * treasuryBp / 10000;
         toDepositor = profit - toTreasury;
@@ -34,7 +34,7 @@ library BasketMath {
 
     /// @notice Full-range tick bounds snapped to a pool's tick spacing.
     function fullRangeTicks(int24 spacing)
-        internal pure returns (int24 lower, int24 upper)
+        public pure returns (int24 lower, int24 upper)
     {
         lower = (MIN_TICK / spacing) * spacing;
         upper = (MAX_TICK / spacing) * spacing;
@@ -46,7 +46,7 @@ library BasketMath {
         bool    buckIsToken0,
         uint256 priceInBuck,        // 18-dec; BUCK per 1 whole TOKEN
         uint8   tokenDecimals
-    ) internal pure returns (uint160) {
+    ) public pure returns (uint160) {
         uint256 buckRaw  = priceInBuck;           // 18-dec
         uint256 tokenRaw = 10 ** tokenDecimals;   // raw
         uint256 amount0  = buckIsToken0 ? buckRaw  : tokenRaw;
@@ -55,5 +55,57 @@ library BasketMath {
         uint256 sqrtRoot  = Math.sqrt(ratioX192);
         require(sqrtRoot <= type(uint160).max, "sqrtP:overflow");
         return uint160(sqrtRoot);
+    }
+
+    // --- External V3-math wrappers ---------------------------------------- //
+    //
+    // These are `public` (not `internal`) on purpose: the heavy V3 tick / L
+    // arithmetic from UniswapV3OracleLib then lives in this *separately
+    // deployed* library and is reached via DELEGATECALL, instead of being
+    // inlined into the (size-constrained) basket.  `mulDiv` stays inline (tiny,
+    // hot).
+
+    function getSqrtRatioAtTick(int24 tick) public pure returns (uint160) {
+        return UniswapV3OracleLib.getSqrtRatioAtTick(tick);
+    }
+
+    function getQuoteAtTick(int24 tick, uint128 baseAmount, address baseToken, address quoteToken)
+        public pure returns (uint256)
+    {
+        return UniswapV3OracleLib.getQuoteAtTick(tick, baseAmount, baseToken, quoteToken);
+    }
+
+    function consult(address pool, uint32 secondsAgo) public view returns (int24) {
+        return UniswapV3OracleLib.consult(pool, secondsAgo);
+    }
+
+    function getLiquidityForAmounts(
+        uint160 sqrtP, uint160 sqrtA, uint160 sqrtB, uint256 amount0, uint256 amount1
+    ) public pure returns (uint128) {
+        return UniswapV3OracleLib.getLiquidityForAmounts(sqrtP, sqrtA, sqrtB, amount0, amount1);
+    }
+
+    function getLiquidityForAmount0(uint160 sqrtA, uint160 sqrtB, uint256 amount0)
+        public pure returns (uint128)
+    {
+        return UniswapV3OracleLib.getLiquidityForAmount0(sqrtA, sqrtB, amount0);
+    }
+
+    function getLiquidityForAmount1(uint160 sqrtA, uint160 sqrtB, uint256 amount1)
+        public pure returns (uint128)
+    {
+        return UniswapV3OracleLib.getLiquidityForAmount1(sqrtA, sqrtB, amount1);
+    }
+
+    function getAmount0ForLiquidity(uint160 sqrtA, uint160 sqrtB, uint128 liquidity)
+        public pure returns (uint256)
+    {
+        return UniswapV3OracleLib.getAmount0ForLiquidity(sqrtA, sqrtB, liquidity);
+    }
+
+    function getAmount1ForLiquidity(uint160 sqrtA, uint160 sqrtB, uint128 liquidity)
+        public pure returns (uint256)
+    {
+        return UniswapV3OracleLib.getAmount1ForLiquidity(sqrtA, sqrtB, liquidity);
     }
 }
