@@ -83,7 +83,7 @@ contract BuckBasketProRataTest is Test {
             500,    // fee tier 0.05%
             600,    // twap window
             64,     // observation cardinality
-            0,      // default max deviation (off)
+            500,    // 5% spot/TWAP manipulation guard (cold pools self-skip)
             1e3     // min seed liquidity
         );
         buck.setBasket(address(basketC));
@@ -125,6 +125,13 @@ contract BuckBasketProRataTest is Test {
     function uniswapV3SwapCallback(int256 a0, int256 a1, bytes calldata) external {
         if (a0 > 0) IERC20(IV3Pool(msg.sender).token0()).transfer(msg.sender, uint256(a0));
         if (a1 > 0) IERC20(IV3Pool(msg.sender).token1()).transfer(msg.sender, uint256(a1));
+    }
+
+    /// @dev Age the pool past the TWAP window.  The deposit's mint already wrote
+    ///      an observation; V3 `observe` forward-extrapolates from it, so warping
+    ///      > twapWindow is enough for `consult` to return a real TWAP.
+    function _warmTwap() internal {
+        vm.warp(block.timestamp + 700);   // > 600s window
     }
 
     // ---- tests ----------------------------------------------------------- //
@@ -282,6 +289,86 @@ contract BuckBasketProRataTest is Test {
 
         assertGt(paxg.balanceOf(alice), paxgBefore, "drew from overweight PAXG");
         assertEq(cbbtc.balanceOf(alice), cbbtcBefore, "left underweight cbBTC untouched");
+    }
+
+    // ---- single-TOKEN payout --------------------------------------------- //
+
+    function test_redeem_singleToken_drawsOnlyFromThatPool() public {
+        _addPaxg();
+        vm.prank(GOV);
+        basketC.addConstituent(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
+
+        uint256 ridPaxg = _depositPaxg(alice, 1e18);          // ~4000 claim
+        // Deep cbBTC pool (bob) so it can source alice's claim (f < 1).
+        cbbtc.mint(bob, 1_000e8);
+        vm.prank(bob); cbbtc.approve(address(basketC), 40e6);
+        vm.prank(bob); basketC.depositToken(address(cbbtc), 40e6, 0);  // ~40000
+
+        uint256 paxgBefore  = paxg.balanceOf(alice);
+        uint256 cbbtcBefore = cbbtc.balanceOf(alice);
+
+        // Redeem the PAXG receipt entirely into cbBTC — only the cbBTC pool is touched.
+        vm.prank(alice);
+        basketC.redeem(ridPaxg, 0, address(cbbtc), 2000);
+
+        assertGt(cbbtc.balanceOf(alice), cbbtcBefore, "paid out in cbBTC");
+        assertEq(paxg.balanceOf(alice), paxgBefore, "PAXG pool untouched");
+    }
+
+    function test_redeem_singleToken_tooThinReverts() public {
+        _addPaxg();
+        vm.prank(GOV);
+        basketC.addConstituent(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
+
+        uint256 ridPaxg = _depositPaxg(alice, 1e18);          // ~4000 claim
+        vm.prank(alice); cbbtc.approve(address(basketC), 1e5);
+        vm.prank(alice); basketC.depositToken(address(cbbtc), 1e5, 0);  // ~100 pool
+
+        // cbBTC pool can't source the ~4000 claim → f > 1.
+        vm.prank(alice);
+        vm.expectRevert(bytes("token too thin"));
+        basketC.redeem(ridPaxg, 0, address(cbbtc), 2000);
+    }
+
+    function test_redeem_singleToken_deflationWithinPoolConversion() public {
+        address pool = _addPaxg();
+        uint256 ridA = _depositPaxg(alice, 1e18);
+        _depositPaxg(bob, 1e18);
+
+        _arb(pool, address(paxg), 0.4e18);   // deflate the PAXG pool
+
+        // Single-token into PAXG covers the burn by converting PAXG->BUCK on the
+        // PAXG pool itself (within-pool), under a generous budget.
+        uint256 paxgBefore = paxg.balanceOf(alice);
+        vm.prank(alice);
+        basketC.redeem(ridA, 0, address(paxg), 2000);
+
+        assertGt(paxg.balanceOf(alice), paxgBefore, "got PAXG via within-pool conversion");
+    }
+
+    // ---- TWAP manipulation guard ----------------------------------------- //
+
+    function test_redeem_guardReverts_onSpotManipulation() public {
+        address pool = _addPaxg();
+        uint256 rid = _depositPaxg(alice, 1e18);
+        _warmTwap();   // establish TWAP history at the deposit price
+
+        // Sandwich the value read: push spot far off TWAP just before redeem.
+        _arb(pool, address(buck), 3000e18);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("slippage"));
+        basketC.redeem(rid, 0);
+    }
+
+    function test_redeem_guardPasses_warmPoolNoManipulation() public {
+        _addPaxg();
+        uint256 rid = _depositPaxg(alice, 1e18);
+        _warmTwap();   // spot == TWAP, no manipulation
+
+        vm.prank(alice);
+        basketC.redeem(rid, 0);
+        assertEq(basketC.totalOutstandingBuck(), 0, "guard passes, redeemed");
     }
 
     function test_sweepTreasury_reinvestsProfit() public {

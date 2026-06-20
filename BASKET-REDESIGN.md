@@ -16,14 +16,16 @@ into the org master and the `BUG #N` list is retired.
 > `BuckBasketProRata` has TOKEN deposit, the **sell-high `redeem`** (§5.1
 > closed-form overweight-first allocation degenerating to pro-rata; treasury
 > split; deflation shortfall cover under a `maxConversionLossBp` budget, default
-> 1%; the two revert paths), and **`sweepTreasury`** (recycle-to-buy-low). Both
-> the shortfall cover and the treasury re-LP swap on the **internal** TOKEN/BUCK
-> pools for now — FX multi-hop routing via the rebalancer + `ISwapRouter` is a
-> separate pass, as is TWAP-hardening the allocation's value read (it currently
-> uses spot BUCK reserves). Still stubbed: the **single-TOKEN payout mode**,
-> BUCK-side deposits, standalone `rebalance()`, and the full migration handoff.
-> The underwater check carries a `MAX_DUST_WEI = 1e9` tolerance for V3
-> burn-rounding on a fully-drained pool.
+> 1%; the two revert paths), the **single-TOKEN payout** (`payoutToken`, one-pool
+> draw with within-pool conversion), the **spot/TWAP manipulation guard** on the
+> value read, and **`sweepTreasury`** (recycle-to-buy-low). The shortfall cover,
+> within-pool conversion, and treasury re-LP all swap on the **internal**
+> TOKEN/BUCK pools for now — FX multi-hop routing via the rebalancer +
+> `ISwapRouter` is the next pass. Still stubbed: BUCK-side deposits, standalone
+> `rebalance()`, and the full migration handoff. The underwater check carries a
+> `MAX_DUST_WEI = 1e9` tolerance for V3 burn-rounding on a fully-drained pool.
+> Tests: `BuckBasketProRata.t.sol` 17/17, legacy `BuckBasket.t.sol` 18/18 —
+> 35/35.
 
 ## 1. Goals
 
@@ -201,8 +203,17 @@ fᵢ  = (aᵢ⁺ / Σaⱼ⁺) · V / (2·buckᵢ)             (liquidity fractio
 most overweight pool is drawn first and, if its excess covers `V`, supplies the
 whole claim ("return 100 from the most overweight pool") — driving it to target.
 
-> **Manipulation note.** `buckᵢ` is read at the **TWAP** price (spot BUCK reserve
-> moves with price), keeping the single-calculation form sandwich-resistant.
+> **Manipulation guard.** `buckᵢ` is read at **spot** (keeping the elegant
+> single-calculation form), but every pool entering the computation must sit
+> within `defaultMaxDeviationBp` of its **TWAP** — a flash-loan sandwich that
+> moves a pool's spot to inflate the claim or steer the skew reverts the redeem
+> (`_poolBuckValues` → `_enforceSlippageGuard`). Rationale: value-conservation +
+> fractional-liquidity withdrawal already blunt the attack to ~break-even (the
+> manipulator funds their own inflation and loses the shared `(1−θ)`); the guard
+> caps the residual surface to the divergence tolerance without paying to
+> reconstruct value-at-TWAP from `L`. Cold pools (no TWAP history) skip the guard
+> — the bootstrap window. This is cheaper than, and a close approximation of,
+> valuing via the price-invariant `L` at TWAP.
 
 Then burn `fᵢ · Lᵢ` in each pool, collect `(Tᵢ, Bkᵢ)`, `Bw = Σ Bkᵢ`, and settle:
 
@@ -250,16 +261,26 @@ treasury are the two halves of one balancing loop.
 ### 5.3 Single-TOKEN mode, the loss budget, and the two revert paths
 
 There is **no arbitrary per-pool override** — only the balanced allocation (§5.1)
-and an optional single-TOKEN payout. `payoutToken != 0` consolidates the entire
-claim into that one TOKEN (converting the other pools' shares to it), the
-deposit-side twin of pledging a specific TOKEN; it reverts if infeasible within
-the loss budget.
+and an optional single-TOKEN payout. `payoutToken != 0` draws the entire claim
+from **that token's pool only** (`f = V / depositorValue_X`; revert `token too
+thin` if `f > 1`) — *no cross-pool routing*, the deposit-side twin of pledging a
+specific TOKEN. The burn is covered from that one pool's BUCK side, and under
+deflation by converting some of the withdrawn token X → BUCK **on the same pool**
+(within-pool, bounded by `maxConversionLossBp`).
+
+A useful identity: a full-range pool is 50/50 by value, so the BUCK side of the
+withdrawal is exactly `V/2`. And direct-mint pairs TOKEN worth `P` with a fresh
+`P` BUCK, so a fresh basket has `D = 2·O` — **baseline coverage is 2**.
+Single-TOKEN therefore covers the burn outright (`V/2 ≥ R ⟺ coverage ≥ 2`) at par
+and under inflation; only under deflation (coverage < 2) does it need the
+within-pool conversion, and it falls back to balanced if that exceeds the budget.
 
 **`maxConversionLossBp`** (default `100` = 1 %) caps the value lost to forced
-TOKEN→BUCK conversion — slippage + fee, measured at TWAP — as a fraction of the
-redemption value `V`. It protects the average caller from being silently dumped
-through a thin pool at a large haircut: rather than realize a big loss, the call
-reverts and they wait, switch tokens, or *explicitly* raise the budget.
+TOKEN→BUCK conversion — slippage + fee, the spent TOKEN valued at its pre-swap
+spot price minus the BUCK received — as a fraction of the redemption value `V`.
+It protects the average caller from being silently dumped through a thin pool at
+a large haircut: rather than realize a big loss, the call reverts and they wait,
+switch tokens, or *explicitly* raise the budget.
 
 **The two (and only) economic revert paths** — both the same feasibility test
 ("source the needed BUCK within the loss budget?") applied to each mode:
@@ -268,8 +289,9 @@ reverts and they wait, switch tokens, or *explicitly* raise the budget.
    shortfall costs more than `maxConversionLossBp · V`, or is impossible even
    converting all `ΣTᵢ`. *Underwater* (NAV < principal) is the budget-maxed
    extreme of this, not a separate path.
-2. **Single-TOKEN target unsatisfiable within budget** — consolidating into
-   `payoutToken` (plus covering the burn) exceeds the budget or is impossible.
+2. **Single-TOKEN pool can't source the claim** — `payoutToken`'s pool is
+   smaller than the claim (`f > 1` ⇒ `token too thin`), or under deflation its
+   within-pool conversion to cover the burn exceeds the budget.
 
 When no conversion is needed (`Bw ≥ R`, the normal/inflation case) redemption
 never reverts. Input-validation reverts (not owner, bad bp) are separate and

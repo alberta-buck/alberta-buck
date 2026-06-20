@@ -40,10 +40,12 @@ interface IBuckMintBurn {
 ///         reserves (full-range ⇒ pool value = 2·buckReserve), drawing from the
 ///         most *overweight* pools first and degenerating to pure pro-rata at
 ///         equilibrium.  Value-conservation preserves the coverage ratio, so the
-///         tail stays solvent regardless of which pools are drawn.  The two
-///         economic reverts are (1) the burn unsatisfiable within the caller's
-///         `maxConversionLossBp` budget (underwater being its extreme) and
-///         (2) a single-TOKEN payout that can't be delivered (not yet built).
+///         tail stays solvent regardless of which pools are drawn.  An optional
+///         `payoutToken` instead draws the whole claim from one pool (no
+///         cross-pool routing).  The two economic reverts are (1) the burn
+///         unsatisfiable within the caller's `maxConversionLossBp` budget
+///         (underwater being its extreme) and (2) a single-TOKEN payout whose
+///         pool can't source the claim (`token too thin`).
 ///
 /// # Two kinds of liquidity
 ///
@@ -63,18 +65,24 @@ interface IBuckMintBurn {
 ///     covered first from withdrawn BUCK, then from selling the depositor's
 ///     own TOKEN; the treasury never takes TOKEN.
 ///
+/// # Manipulation guard
+///
+///   The allocation reads spot BUCK reserves (value = 2·buckReserve).  To stop a
+///   sandwich from moving spot to distort the value read / claim, every pool
+///   whose reserves enter the computation must sit within `defaultMaxDeviationBp`
+///   of its TWAP (`_poolBuckValues` → `_enforceSlippageGuard`); a manipulated
+///   pool reverts the redeem.  Cold pools without TWAP history skip the guard
+///   (bootstrap window).
+///
 /// # Scaffold notes
 ///
 ///   * Shortfall conversion + treasury re-LP route through the internal
 ///     TOKEN/BUCK pools (`_coverShortfall`, `_reinvestTreasury`).  FX multi-hop
 ///     routing via `rebalancer` + Uniswap `ISwapRouter` is a follow-up; the
 ///     `IBasketRebalancer` wiring is already in place.
-///   * The single-TOKEN payout mode (redeem into one requested TOKEN) and
-///     BUCK-side deposits are not yet built.
 ///   * Treasury re-LP (`sweepTreasury`) recycles accrued profit into the most
 ///     underweight pool as treasury-owned liquidity ("buy low").
-///   * The allocation reads spot BUCK reserves; TWAP-hardening of the value
-///     read (manipulation resistance, §5.1 of BASKET-REDESIGN.md) is pending.
+///   * BUCK-side deposits and the full migration handoff are not yet built.
 contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Constituents ----------------------------------------------------- //
@@ -387,17 +395,39 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Redemption (sell-high value-claim exit) -------------------------- //
 
-    /// @notice Redeem with the default conversion-loss budget (1%).
+    /// @notice Balanced redeem with the default conversion-loss budget (1%).
     function redeem(uint256 receiptId, uint256 redeemBp) external {
-        redeem(receiptId, redeemBp, DEFAULT_CONVERSION_LOSS_BP);
+        _redeem(receiptId, redeemBp, DEFAULT_CONVERSION_LOSS_BP, address(0));
     }
 
-    /// @notice Redeem all (`redeemBp == 0`) or a bp fraction of a receipt with
-    ///         the balanced sell-high allocation (§5).  `maxConversionLossBp`
-    ///         caps the value lost to forced TOKEN->BUCK conversion under
-    ///         deflation; the call reverts rather than realize a larger loss.
+    /// @notice Balanced redeem with an explicit conversion-loss budget.
     function redeem(uint256 receiptId, uint256 redeemBp, uint256 maxConversionLossBp)
-        public
+        external
+    {
+        _redeem(receiptId, redeemBp, maxConversionLossBp, address(0));
+    }
+
+    /// @notice Single-TOKEN redeem: source the whole claim from `payoutToken`'s
+    ///         pool only (no cross-pool routing).  Reverts if that pool can't
+    ///         supply the claim (`token too thin`) or, under deflation, if the
+    ///         within-pool TOKEN->BUCK conversion needed to cover the burn
+    ///         exceeds `maxConversionLossBp` (`conversion loss`).
+    function redeem(uint256 receiptId, uint256 redeemBp,
+                    address payoutToken, uint256 maxConversionLossBp)
+        external
+    {
+        require(payoutToken != address(0), "payoutToken=0");
+        _redeem(receiptId, redeemBp, maxConversionLossBp, payoutToken);
+    }
+
+    /// @notice Shared redeem body.  `payoutToken == 0` ⇒ balanced sell-high
+    ///         allocation (§5.1); otherwise the whole claim is drawn from that
+    ///         token's pool.  `maxConversionLossBp` caps the value lost to forced
+    ///         TOKEN->BUCK conversion under deflation; the call reverts rather
+    ///         than realize a larger loss.
+    function _redeem(uint256 receiptId, uint256 redeemBp,
+                     uint256 maxConversionLossBp, address payoutToken)
+        internal
     {
         require(receipt.ownerOf(receiptId) == msg.sender, "not owner");
         Deposit memory d = deposits[receiptId];
@@ -411,8 +441,10 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             : d.buckPrincipal * redeemShare / 10000;
         require(R > 0, "redeem zero");
 
-        // Phase 1: closed-form sell-high allocation, then withdraw it.
-        (uint256[] memory burnL, uint256 V) = _allocateSellHigh(R);
+        // Phase 1: allocate (balanced sell-high, or all from one pool), withdraw.
+        (uint256[] memory burnL, uint256 V) = payoutToken == address(0)
+            ? _allocateSellHigh(R)
+            : _allocateSingleToken(R, payoutToken);
         uint256 N = constituents.length;
         uint256[] memory perPoolTok = new uint256[](N);
         uint256 Bw = 0;
@@ -487,21 +519,9 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     function _allocateSellHigh(uint256 R)
         internal view returns (uint256[] memory burnL, uint256 V)
     {
+        (uint256[] memory bv, uint128[] memory depL, uint256 B) = _poolBuckValues();
         uint256 N = constituents.length;
         burnL = new uint256[](N);
-        uint256[] memory bv = new uint256[](N);    // depositor BUCK per pool
-        uint128[] memory depL = new uint128[](N);
-        uint256 B = 0;
-        for (uint256 i = 0; i < N; i++) {
-            Constituent storage c = constituents[i];
-            uint128 totalL = _positionLiquidity(c);
-            if (totalL <= c.treasuryLiquidity) continue;
-            depL[i] = totalL - c.treasuryLiquidity;
-            uint256 poolBuck = IERC20(address(buck)).balanceOf(c.pool);
-            bv[i] = uint256(depL[i]) * poolBuck / totalL;
-            B += bv[i];
-        }
-        require(B > 0, "no value");
 
         uint256 O = totalOutstandingBuck;
         V = UniswapV3OracleLib.mulDiv(R, 2 * B, O);             // θ·NAV
@@ -525,6 +545,55 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             uint256 bl = UniswapV3OracleLib.mulDiv(uint256(depL[i]), allocBv, bv[i]);
             burnL[i] = bl > depL[i] ? depL[i] : bl;   // cap for rounding safety
         }
+    }
+
+    /// @notice Single-TOKEN allocation: draw the entire value claim `V = θ·NAV`
+    ///         from `token`'s pool alone.  Reverts `token too thin` if that pool
+    ///         can't source the claim (f > 1).  The burn is then covered from
+    ///         that one pool's BUCK side (+ within-pool conversion if deflation),
+    ///         so no other pool is ever touched.
+    function _allocateSingleToken(uint256 R, address token)
+        internal view returns (uint256[] memory burnL, uint256 V)
+    {
+        uint256 ix = indexOf[token];
+        require(ix > 0, "not in basket");
+        ix -= 1;
+
+        (uint256[] memory bv, uint128[] memory depL, uint256 B) = _poolBuckValues();
+        require(bv[ix] > 0, "empty pool");
+
+        V = UniswapV3OracleLib.mulDiv(R, 2 * B, totalOutstandingBuck);   // θ·NAV
+        uint256 dvX = 2 * bv[ix];                                        // pool value
+        require(V <= dvX, "token too thin");                            // f ≤ 1
+
+        burnL = new uint256[](constituents.length);
+        uint256 bl = UniswapV3OracleLib.mulDiv(uint256(depL[ix]), V, dvX);
+        burnL[ix] = bl > depL[ix] ? depL[ix] : bl;
+    }
+
+    /// @notice Per-pool depositor BUCK reserve (the value sufficient statistic:
+    ///         full-range ⇒ pool value = 2·buckReserve) plus the total `B`.
+    ///         Each touched pool's spot must sit within `defaultMaxDeviationBp`
+    ///         of its TWAP — the manipulation guard on the value read (a sandwich
+    ///         that moves spot to distort the allocation reverts here).  Cold
+    ///         pools without TWAP history skip the guard (bootstrap window).
+    function _poolBuckValues()
+        internal view returns (uint256[] memory bv, uint128[] memory depL, uint256 B)
+    {
+        uint256 N = constituents.length;
+        bv   = new uint256[](N);
+        depL = new uint128[](N);
+        for (uint256 i = 0; i < N; i++) {
+            Constituent storage c = constituents[i];
+            uint128 totalL = _positionLiquidity(c);
+            if (totalL <= c.treasuryLiquidity) continue;
+            _enforceSlippageGuard(c, _readPoolPrice(c, 0), defaultMaxDeviationBp);
+            depL[i] = totalL - c.treasuryLiquidity;
+            uint256 poolBuck = IERC20(address(buck)).balanceOf(c.pool);
+            bv[i] = uint256(depL[i]) * poolBuck / totalL;
+            B += bv[i];
+        }
+        require(B > 0, "no value");
     }
 
     // --- Shortfall cover (scaffold: internal TOKEN/BUCK pools) ------------ //
