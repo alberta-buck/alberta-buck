@@ -29,10 +29,17 @@ FEE_USDC = 3000
 FEE_BUCK = 3000         # TOKEN/BUCK pools: 0.30% (direct-mint LP profit)
 FEE_BUCK_UB = 500       # BUCK/USDC pool:   0.05% (gauge-breaking, cheap)
 TICK_SPACING = {3000: 60, 500: 10}
+
 # Common BUCK reserve every TOKEN/BUCK basket pool is seeded to, so no
 # single token's pool depth dominates the shared routing.
 #TARGET_BUCK = 10 ** 14  # $10^14 / 10^6-dec = $100,000,000 BUCK per pool
-TARGET_BUCK = 10 ** 12  # $10^12 / 10^6-dec = $1,000,000 BUCK per pool
+TARGET_BUCK = 10 ** 13   # $10^13 / 10^6-dec =  $10,000,000 BUCK per pool
+#TARGET_BUCK = 10 ** 12  # $10^13 / 10^6-dec =   $1,000,000 BUCK per pool - too small (spikes)
+
+# The BUCK/USDC pool should be similarly large; BUCK-unaware arb and token accumulator agents will
+# move this as they choose USDC->TOKEN vs. USDC->BUCK->TOKEN routes
+#TARGET_BUCK_LP = 4 * TARGET_BUCK
+TARGET_BUCK_LP = TARGET_BUCK
 
 DEPOSITED_TOPIC = Web3.keccak(
     text="Deposited(address,uint256,address,uint256,uint256,address,uint128)")
@@ -53,6 +60,7 @@ class Deployment:
     issuer_kp: Any
     reg: Any
     buck: Any
+    credit: Any
     kctrl: Any
     basket: Any
     router: Any
@@ -154,8 +162,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
         router.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
 
     d = Deployment(w3, chain, anvil, gov, pool_acct, issuer_addr, issuer_kp,
-                   reg, buck, kctrl, basket, router, simlp, usdc, erc20_abi,
-                   tok, dec)
+                   reg, buck, credit, kctrl, basket, router, simlp, usdc,
+                   erc20_abi, tok, dec)
 
     # --- pools: TOKEN/USDC (truth) + TOKEN/BUCK (basket) ------------- #
     pool_v3_abi, _ = load_artifact("UniswapV3Pool")
@@ -171,6 +179,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
         t0 = pool.functions.token0().call()
         t1 = pool.functions.token1().call()
         lo, hi = full_range_ticks(TICK_SPACING[FEE_USDC])
+
         # Seed to a COMMON USDC-side depth (== TARGET_BUCK), NOT a fixed L.
         # A fixed L makes real reserves scale with decimals/price, leaving
         # 18-dec PAXG/AOIL pools shallow while 8-dec cbBTC is unmovably
@@ -225,7 +234,6 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     # BUCK transfer is SimLP(public) -> pool(public).  No private EOA, no
     # storage fakery, and no existing pool is drained.
     Q96 = 1 << 96
-    TARGET_BUCK_LP = 4 * TARGET_BUCK
     FACE = 2 * TARGET_BUCK_LP
 
     now_ts = w3.eth.get_block("latest")["timestamp"]

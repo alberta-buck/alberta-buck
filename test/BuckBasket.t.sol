@@ -433,7 +433,7 @@ contract BuckBasketTest is Test {
         receipt.ownerOf(ridPaxg);
     }
 
-    function test_depositBuck_afterBootstrapUsesBalancedPath() public {
+    function test_depositBuck_afterBootstrapUsesUnderweightPath() public {
         _setupTwoPoolBasket();
 
         address pPaxg = IV3Factory(v3Factory).getPool(
@@ -443,7 +443,7 @@ contract BuckBasketTest is Test {
         uint256 paxgBuckBefore = buck.balanceOf(pPaxg);
         uint256 cbbtcBuckBefore = buck.balanceOf(pCbbtc);
 
-        uint256 buckAmt = 40_000e18;
+        uint256 buckAmt = 10e18;
         vm.prank(address(basketC));
         buck.mintFromBasket(alice, buckAmt);
 
@@ -461,14 +461,28 @@ contract BuckBasketTest is Test {
         (uint256 principalBuck, uint256 principalToken, address guardToken,) =
             basketC.deposits(rid);
         assertGt(principalBuck, 0, "BUCK principal recorded");
-        assertEq(principalToken, 0, "BUCK deposit has no TOKEN principal");
+        assertGt(principalToken, 0, "BUCK deposit records LP TOKEN principal");
         assertTrue(
             guardToken == address(paxg) || guardToken == address(cbbtc),
             "guard token is a basket constituent"
         );
     }
 
-    function test_depositToken_afterBootstrapUsesBalancedPath() public {
+    function test_depositBuck_largeDepositRevertsOnSlippage() public {
+        _setupTwoPoolBasket();
+
+        uint256 buckAmt = 40_000e18;
+        vm.prank(address(basketC));
+        buck.mintFromBasket(alice, buckAmt);
+
+        vm.startPrank(alice);
+        buck.approve(address(basketC), buckAmt);
+        vm.expectRevert(bytes("buck slippage"));
+        basketC.depositToken(address(buck), buckAmt, 0);
+        vm.stopPrank();
+    }
+
+    function test_depositToken_afterBootstrapDepositsOwnPool() public {
         _setupTwoPoolBasket();
 
         address pPaxg = IV3Factory(v3Factory).getPool(
@@ -483,10 +497,11 @@ contract BuckBasketTest is Test {
         vm.prank(alice);
         uint256 rid = basketC.depositToken(address(paxg), 1e18, 0);
 
-        assertTrue(
-            paxg.balanceOf(pPaxg) > paxgBefore
-                || cbbtc.balanceOf(pCbbtc) > cbbtcBefore,
-            "deposit routed into at least one pool"
+        assertGt(paxg.balanceOf(pPaxg), paxgBefore, "PAXG pool got PAXG");
+        assertEq(
+            cbbtc.balanceOf(pCbbtc),
+            cbbtcBefore,
+            "TOKEN deposit does not route into cbBTC pool"
         );
 
         (uint256 principalBuck, uint256 principalToken, address guardToken,) =

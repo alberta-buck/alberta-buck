@@ -39,7 +39,11 @@ contract SimLP {
         external returns (bytes memory)
     {
         (bool ok, bytes memory ret) = target.call(data);
-        require(ok, "SimLP: exec failed");
+        if (!ok) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
         return ret;
     }
 
@@ -76,6 +80,15 @@ contract SimLP {
         (address t0, address t1) = abi.decode(data, (address, address));
         if (amount0Delta > 0) IERC20(t0).transfer(msg.sender, uint256(amount0Delta));
         if (amount1Delta > 0) IERC20(t1).transfer(msg.sender, uint256(amount1Delta));
+    }
+
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    ) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
     }
 }
 

@@ -10,7 +10,9 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
-from alberta_buck.sim.direct_mint import BootstrapDMAgent, DirectMintAgent
+from alberta_buck.sim.direct_mint import (
+    BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
+)
 from alberta_buck.sim.snapshot import Snapshotter
 
 E6 = 10 ** 6
@@ -34,6 +36,7 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
     # bootstrap-token assignment depends on `seq < N`).
     BootstrapDMAgent._counter = 0
     DirectMintAgent._counter = 0
+    DirectMintBuckAgent._counter = 0
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
         cls = REGISTRY[cls_name]
@@ -45,7 +48,10 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
     whales = [a for a in agents if isinstance(a, MarketMakerWhale)]
     arbs = [a for a in agents if a not in whales]
     if verbose:
-        print(f"[sim] registered {len(agents)} EOA identities "
+        eoa_count = sum(1 for a in agents if getattr(a, "is_eoa", True))
+        public_agents = len(agents) - eoa_count
+        print(f"[sim] registered {eoa_count} EOA identities "
+              f"+ {public_agents} public agent contracts "
               f"({len(arbs)} arb, {len(whales)} whale); deploy done.")
 
     # --- pre-tick bootstrap phase ----------------------------------- #
@@ -65,7 +71,8 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
     # by the bootstrap principal).
     init_val = snap.agg_value(agents, 0)
     reb_init = snap._agent_value(agents, 0, "BuckBasketRebalancerAgent")
-    dm_init = snap._agent_value(agents, 0, "DirectMintAgent")
+    dm_init = snap._agent_value(
+        agents, 0, ("DirectMintAgent", "DirectMintBuckAgent"))
 
     ts = w3.eth.get_block("latest")["timestamp"] + 10
     tick_secs = max(60, 86_400 // scenario.ticks_per_day)
