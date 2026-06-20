@@ -280,7 +280,15 @@ TOKEN→BUCK conversion — slippage + fee, the spent TOKEN valued at its pre-sw
 spot price minus the BUCK received — as a fraction of the redemption value `V`.
 It protects the average caller from being silently dumped through a thin pool at
 a large haircut: rather than realize a big loss, the call reverts and they wait,
-switch tokens, or *explicitly* raise the budget.
+switch tokens, or *explicitly* raise the budget. **`0` means unlimited** (skip
+the cap), so the legacy-style `redeem(id, bp, 0)` works on both baskets.
+
+**Sim drop-in compatibility.** `BuckBasketProRata` keeps three things aligned
+with the legacy `BuckBasket` so one (web3) sim can drive either: the
+`addBasketToken(token,dec,price,wbp,fee)` name/signature; the `Constituent`
+struct field order (so `constituents(i)[2] == basketAmount`); and the
+`redeem(id, bp, 0)` semantics above. Everything pro-rata adds (treasury,
+`sweepTreasury`, single-TOKEN payout, the guard) is additive — the sim ignores it.
 
 **The two (and only) economic revert paths** — both the same feasibility test
 ("source the needed BUCK within the loss budget?") applied to each mode:
@@ -403,7 +411,7 @@ or treasury withdrawal, so the basket can never be replaced. Fixes:
 5. **`treasuryWithdraw(amount, to)`** (governance): the R&D/ops funding tap on
    accumulated treasury equity.
 
-Bootstrap is the inverse: `addConstituent` then seed deposits fill each pool;
+Bootstrap is the inverse: `addBasketToken` then seed deposits fill each pool;
 `minSeedLiquidity` floor unchanged; a `seeded(i)` view exposes per-pool readiness
 for the UI.
 
@@ -411,7 +419,7 @@ for the UI.
 
 | Keep | Replace / delete |
 |---|---|
-| `Constituent` registry, `addBasketToken` → `addConstituent` | fused `redeem` 9-phase pipeline |
+| `Constituent` registry + `addBasketToken` (name/sig kept for sim compat) | fused `redeem` 9-phase pipeline |
 | `totalOutstandingBuck`, receipts, deposits | `_allocateRedemption` 2-pass allocator → closed-form BUCK-balance allocation (§5.1) |
 | treasury + adjustable split + treasury re-LP | hand-rolled swap path: `uniswapV3SwapCallback`, `_swapTokenForBuckExactIn`, `_tokenInForBuckOut`, `_coverShortfallAggregate` |
 | `uniswapV3MintCallback`, raw-pool LP custody | `MAX_ORPHAN_DUST_WEI` dust orphaning (replaced by clean underwater revert) |

@@ -87,17 +87,20 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Constituents ----------------------------------------------------- //
 
+    // Field order matches the legacy BuckBasket.Constituent so the public
+    // `constituents(i)` getter is positionally compatible (the sim reads
+    // `c[2] == basketAmount`); `treasuryLiquidity` is appended.
     struct Constituent {
         address token;
         uint8   decimals;
+        uint256 basketAmount;         // 18-dec; Σ basketAmount*price = 1 BUCK at init
+        uint256 initialPriceInBuck;   // 18-dec
         uint24  feeTier;
         address pool;
         int24   tickLower;
         int24   tickUpper;
         bool    buckIsToken0;
         uint256 targetWeightBp;       // declared weight, sums to 10000 across all
-        uint256 basketAmount;         // 18-dec; Σ basketAmount*price = 1 BUCK at init
-        uint256 initialPriceInBuck;   // 18-dec
         uint128 treasuryLiquidity;    // treasury-owned L slice in this pool
     }
 
@@ -163,7 +166,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Events ----------------------------------------------------------- //
 
-    event ConstituentAdded(address indexed token, uint256 weightBp, uint256 initialPriceInBuck, address pool);
+    event BasketTokenAdded(address indexed token, uint256 weightBp, uint256 initialPriceInBuck, address pool);
     event Deposited(address indexed who, uint256 indexed receiptId, address token, uint256 tokenAmount, uint256 buckMinted, uint128 liquidity);
     event Redeemed(address indexed who, uint256 indexed receiptId, uint256 burned, uint256 depositorBuck, uint256 treasuryBuck, uint256 remainingBp);
     event TreasuryAccrued(uint256 amount, uint256 pending);
@@ -250,8 +253,9 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     /// @notice Register a basket constituent.  Renormalizes existing declared
     ///         weights to keep Σ targetWeightBp == 10000, preserving each
     ///         existing constituent's price (basketAmount scaled by the same
-    ///         ratio, not re-priced at current spot).
-    function addConstituent(
+    ///         ratio, not re-priced at current spot).  Name + signature match
+    ///         the legacy `BuckBasket.addBasketToken` for sim drop-in compat.
+    function addBasketToken(
         address token,
         uint8   decimals,
         uint256 initialPriceInBuck,
@@ -310,7 +314,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         indexOf[token] = constituents.length;
 
         controller.reprime();
-        emit ConstituentAdded(token, newW, initialPriceInBuck, pool);
+        emit BasketTokenAdded(token, newW, initialPriceInBuck, pool);
     }
 
     function constituentsLength() external view returns (uint256) {
@@ -472,8 +476,11 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             uint256 have = Bw + gained;
             burned = have >= R ? R : have;
             // Revert path 1: burn unsatisfiable within the loss budget.
+            // maxConversionLossBp == 0 means "unlimited" (skip the loss cap) so
+            // `redeem(id, bp, 0)` matches the legacy basket's no-guard call.
             require(R - burned <= MAX_DUST_WEI, "underwater");
-            require(lossValue * 10000 <= maxConversionLossBp * V, "conversion loss");
+            require(maxConversionLossBp == 0
+                    || lossValue * 10000 <= maxConversionLossBp * V, "conversion loss");
             treasuryBuck = have - burned;   // over-swap excess; no depositor profit
         }
 

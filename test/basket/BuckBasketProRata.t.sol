@@ -105,7 +105,7 @@ contract BuckBasketProRataTest is Test {
 
     function _addPaxg() internal returns (address pool) {
         vm.prank(GOV);
-        pool = basketC.addConstituent(address(paxg), 18, PAXG_PRICE, 0, 500);
+        pool = basketC.addBasketToken(address(paxg), 18, PAXG_PRICE, 0, 500);
     }
 
     function _depositPaxg(address who, uint256 amt) internal returns (uint256 rid) {
@@ -179,7 +179,7 @@ contract BuckBasketProRataTest is Test {
         // redeem must touch both without reverting.
         _addPaxg();
         vm.prank(GOV);
-        basketC.addConstituent(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
+        basketC.addBasketToken(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
 
         _depositPaxg(alice, 10e18);                 // deep PAXG
         vm.prank(alice); cbbtc.approve(address(basketC), 1e5);
@@ -268,7 +268,7 @@ contract BuckBasketProRataTest is Test {
     function test_redeem_sellHigh_drawsFromOverweightPool() public {
         address pPaxg = _addPaxg();
         vm.prank(GOV);
-        basketC.addConstituent(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
+        basketC.addBasketToken(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
 
         // Equal-value deposits → 50/50 at target.
         uint256 ridPaxg = _depositPaxg(alice, 1e18);              // ~4000 BUCK
@@ -296,7 +296,7 @@ contract BuckBasketProRataTest is Test {
     function test_redeem_singleToken_drawsOnlyFromThatPool() public {
         _addPaxg();
         vm.prank(GOV);
-        basketC.addConstituent(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
+        basketC.addBasketToken(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
 
         uint256 ridPaxg = _depositPaxg(alice, 1e18);          // ~4000 claim
         // Deep cbBTC pool (bob) so it can source alice's claim (f < 1).
@@ -318,7 +318,7 @@ contract BuckBasketProRataTest is Test {
     function test_redeem_singleToken_tooThinReverts() public {
         _addPaxg();
         vm.prank(GOV);
-        basketC.addConstituent(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
+        basketC.addBasketToken(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
 
         uint256 ridPaxg = _depositPaxg(alice, 1e18);          // ~4000 claim
         vm.prank(alice); cbbtc.approve(address(basketC), 1e5);
@@ -369,6 +369,32 @@ contract BuckBasketProRataTest is Test {
         vm.prank(alice);
         basketC.redeem(rid, 0);
         assertEq(basketC.totalOutstandingBuck(), 0, "guard passes, redeemed");
+    }
+
+    // ---- legacy/sim compatibility ---------------------------------------- //
+
+    function test_redeem_zeroBudgetMeansUnlimited() public {
+        // `redeem(id, bp, 0)` matches the legacy 3-arg call: 0 = unlimited loss
+        // budget, so a deflation conversion that the 1% default would reject
+        // goes through.
+        address pool = _addPaxg();
+        uint256 ridA = _depositPaxg(alice, 1e18);
+        _depositPaxg(bob, 1e18);
+        _arb(pool, address(paxg), 0.4e18);
+
+        uint256 paxgBefore = paxg.balanceOf(alice);
+        vm.prank(alice);
+        basketC.redeem(ridA, 0, 0);   // 0 = unlimited
+
+        assertGt(paxg.balanceOf(alice), paxgBefore, "unlimited budget covers shortfall");
+    }
+
+    function test_constituents_legacyFieldOrder() public {
+        _addPaxg();
+        // The sim reads `constituents(i)[2]` as basketAmount; the struct order
+        // matches the legacy basket so this stays true.
+        ( , , uint256 basketAmount, , , , , , , , ) = basketC.constituents(0);
+        assertGt(basketAmount, 0, "c[2] == basketAmount");
     }
 
     function test_sweepTreasury_reinvestsProfit() public {
