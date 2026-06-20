@@ -10,22 +10,20 @@ into the org master and the `BUG #N` list is retired.
 > `BuckBasketReceipt.sol` (used by *both*, now with on-chain `tokenURI`),
 > `BasketMath.sol`, `IBasketRebalancer.sol` + stub `BasketRebalancer.sol`. The
 > shared controller surface is `src/IBuckKController.sol`. Tests:
-> `test/basket/BuckBasketProRata.t.sol` (8/8) and the retained
-> `test/basket/BuckBasket.t.sol` (18/18) — 26/26.
+> `test/basket/BuckBasketProRata.t.sol` (12/12) and the retained
+> `test/basket/BuckBasket.t.sol` (18/18) — 30/30.
 >
-> `BuckBasketProRata` has TOKEN deposit, `redeem` (treasury split, deflation
-> shortfall cover, underwater revert), and **`sweepTreasury`** (recycle-to-buy-low:
-> re-LP accrued treasury profit into the most underweight pool as treasury-owned
-> liquidity). The redeem currently implements the **pure pro-rata special case**
-> of §5.1 (withdraw `θ` of every pool); the overweight-first value-claim
-> allocation (sell-high) and the optional single-TOKEN payout are the next
-> redemption pass.
-> Both the shortfall cover and the treasury re-LP swap on the **internal**
-> TOKEN/BUCK pools for now — FX multi-hop routing via the rebalancer + `ISwapRouter`
-> is a separate pass. Still stubbed: BUCK-side deposits, standalone `rebalance()`,
-> and the full migration handoff. The underwater revert carries a
-> `MAX_DUST_WEI = 1e9` (1e-9 BUCK) tolerance to absorb V3 burn-rounding on a
-> fully-drained pool (distinct from the genuine underwater gap).
+> `BuckBasketProRata` has TOKEN deposit, the **sell-high `redeem`** (§5.1
+> closed-form overweight-first allocation degenerating to pro-rata; treasury
+> split; deflation shortfall cover under a `maxConversionLossBp` budget, default
+> 1%; the two revert paths), and **`sweepTreasury`** (recycle-to-buy-low). Both
+> the shortfall cover and the treasury re-LP swap on the **internal** TOKEN/BUCK
+> pools for now — FX multi-hop routing via the rebalancer + `ISwapRouter` is a
+> separate pass, as is TWAP-hardening the allocation's value read (it currently
+> uses spot BUCK reserves). Still stubbed: the **single-TOKEN payout mode**,
+> BUCK-side deposits, standalone `rebalance()`, and the full migration handoff.
+> The underwater check carries a `MAX_DUST_WEI = 1e9` tolerance for V3
+> burn-rounding on a fully-drained pool.
 
 ## 1. Goals
 

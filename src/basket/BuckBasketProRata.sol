@@ -34,14 +34,16 @@ interface IBuckMintBurn {
 ///
 /// @notice Custodies one full-range Buck-owned Uniswap V3 LP position per
 ///         TOKEN/BUCK constituent pool and mints BUCK against deposited TOKEN.
-///         Redemption is a **pro-rata in-kind exit**: a receipt redeeming a
-///         fraction `θ = redeemBuck / totalOutstandingBuck` withdraws `θ` of
-///         every pool's *depositor-owned* liquidity, burns its BUCK principal,
-///         and returns the TOKEN side.  Because it only ever removes the
-///         redeemer's own slice, it is solvent at any individual pool depth
-///         (thin pools simply yield thin slices); the only revert is the
-///         transient whole-basket "underwater" case (NAV < principal under deep
-///         BUCK deflation), which the BuckCredit/BuckK backstop quenches.
+///         Redemption is a **sell-high value-claim exit**: a receipt's claim
+///         `V = θ·NAV` (θ = redeemBuck / totalOutstandingBuck) is allocated
+///         across pools by a single closed-form over the per-pool depositor BUCK
+///         reserves (full-range ⇒ pool value = 2·buckReserve), drawing from the
+///         most *overweight* pools first and degenerating to pure pro-rata at
+///         equilibrium.  Value-conservation preserves the coverage ratio, so the
+///         tail stays solvent regardless of which pools are drawn.  The two
+///         economic reverts are (1) the burn unsatisfiable within the caller's
+///         `maxConversionLossBp` budget (underwater being its extreme) and
+///         (2) a single-TOKEN payout that can't be delivered (not yet built).
 ///
 /// # Two kinds of liquidity
 ///
@@ -63,15 +65,16 @@ interface IBuckMintBurn {
 ///
 /// # Scaffold notes
 ///
-///   * Shortfall conversion currently routes through the internal TOKEN/BUCK
-///     pool (`_coverShortfall`).  FX multi-hop routing via `rebalancer` +
-///     Uniswap `ISwapRouter` is a follow-up; the `IBasketRebalancer` wiring is
-///     already in place.
-///   * `RedeemPlan` (optimizer / specific-token API) and BUCK-side deposits are
-///     stubbed pending the routing pass.
+///   * Shortfall conversion + treasury re-LP route through the internal
+///     TOKEN/BUCK pools (`_coverShortfall`, `_reinvestTreasury`).  FX multi-hop
+///     routing via `rebalancer` + Uniswap `ISwapRouter` is a follow-up; the
+///     `IBasketRebalancer` wiring is already in place.
+///   * The single-TOKEN payout mode (redeem into one requested TOKEN) and
+///     BUCK-side deposits are not yet built.
 ///   * Treasury re-LP (`sweepTreasury`) recycles accrued profit into the most
-///     underweight pool as treasury-owned liquidity ("buy low"), swapping the
-///     TOKEN side on the internal pool for now (FX routing is the follow-up).
+///     underweight pool as treasury-owned liquidity ("buy low").
+///   * The allocation reads spot BUCK reserves; TWAP-hardening of the value
+///     read (manipulation resistance, §5.1 of BASKET-REDESIGN.md) is pending.
 contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Constituents ----------------------------------------------------- //
@@ -140,6 +143,11 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     /// @notice Floor for treasury re-LP: below this, profit stays as pending
     ///         BUCK (V3 mint of a dust position can fail / waste gas).
     uint256 internal constant MIN_REINVEST_BUCK = 1e15;    // 0.001 BUCK
+    /// @notice Default cap on the value lost to forced TOKEN->BUCK conversion
+    ///         when redeeming under deflation, as bp of the redemption value.
+    ///         Protects the average caller from a thin-pool haircut; raise it to
+    ///         force an exit through a costly pool.
+    uint256 public constant DEFAULT_CONVERSION_LOSS_BP = 100;   // 1%
 
     // --- Callback guards -------------------------------------------------- //
     address internal _callbackPool;
@@ -377,14 +385,20 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         emit Deposited(msg.sender, receiptId, token, tokenAmount, buckToMint, liquidity);
     }
 
-    // --- Redemption (pro-rata in-kind exit) ------------------------------- //
+    // --- Redemption (sell-high value-claim exit) -------------------------- //
 
-    /// @notice Redeem all (`redeemBp == 0`) or a basis-point fraction of a
-    ///         receipt.  Withdraws θ of every pool's depositor-owned liquidity,
-    ///         burns the BUCK principal (covering any deflation shortfall from
-    ///         the withdrawn TOKEN), splits BUCK profit with the treasury, and
-    ///         returns the TOKEN side to the redeemer.
-    function redeem(uint256 receiptId, uint256 redeemBp) public {
+    /// @notice Redeem with the default conversion-loss budget (1%).
+    function redeem(uint256 receiptId, uint256 redeemBp) external {
+        redeem(receiptId, redeemBp, DEFAULT_CONVERSION_LOSS_BP);
+    }
+
+    /// @notice Redeem all (`redeemBp == 0`) or a bp fraction of a receipt with
+    ///         the balanced sell-high allocation (§5).  `maxConversionLossBp`
+    ///         caps the value lost to forced TOKEN->BUCK conversion under
+    ///         deflation; the call reverts rather than realize a larger loss.
+    function redeem(uint256 receiptId, uint256 redeemBp, uint256 maxConversionLossBp)
+        public
+    {
         require(receipt.ownerOf(receiptId) == msg.sender, "not owner");
         Deposit memory d = deposits[receiptId];
         require(d.buckPrincipal > 0, "empty deposit");
@@ -397,53 +411,38 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             : d.buckPrincipal * redeemShare / 10000;
         require(R > 0, "redeem zero");
 
-        // Phase 1: pro-rata withdraw θ = R/totalOutstandingBuck of every pool's
-        // depositor liquidity (computed per pool as depositorL*R/outstanding to
-        // avoid a fixed-point intermediate).
+        // Phase 1: closed-form sell-high allocation, then withdraw it.
+        (uint256[] memory burnL, uint256 V) = _allocateSellHigh(R);
         uint256 N = constituents.length;
         uint256[] memory perPoolTok = new uint256[](N);
         uint256 Bw = 0;
         bool anyWithdrawn = false;
         for (uint256 i = 0; i < N; i++) {
-            Constituent storage c = constituents[i];
-            uint128 totalL = _positionLiquidity(c);
-            if (totalL <= c.treasuryLiquidity) continue;
-            uint128 depositorL = totalL - c.treasuryLiquidity;
-            uint128 burnL = uint128(uint256(depositorL) * R / totalOutstandingBuck);
-            if (burnL == 0) continue;
-            (uint256 tok, uint256 b) = _decreaseAndCollect(c, burnL);
+            if (burnL[i] == 0) continue;
+            (uint256 tok, uint256 b) = _decreaseAndCollect(constituents[i], uint128(burnL[i]));
             perPoolTok[i] = tok;
             Bw += b;
             anyWithdrawn = true;
         }
         require(anyWithdrawn, "no LP withdrawn");
 
-        // Phase 2: settle the burn against withdrawn BUCK, covering any
-        // deflation shortfall by selling withdrawn TOKEN.
+        // Phase 2: settle the burn.  Sell-high collects from BUCK-rich pools, so
+        // `Bw >= R` is the common case (no conversion).  Under deflation, cover
+        // the shortfall within the loss budget.
         uint256 depositorBuck = 0;
         uint256 treasuryBuck  = 0;
-        uint256 have;
-        bool    isShort;
+        uint256 burned;
         if (Bw >= R) {
-            have = Bw;
+            burned = R;
+            (treasuryBuck, depositorBuck) = BasketMath.splitProfit(Bw - R, treasuryBp);
         } else {
-            have = Bw + _coverShortfall(perPoolTok, R - Bw);
-            isShort = true;
-        }
-        uint256 burned = have >= R ? R : have;
-        // Gaps beyond V3 burn-rounding dust mean the whole basket is
-        // underwater (NAV < principal under deep deflation): revert, wait for
-        // the BuckCredit/BuckK backstop.
-        require(R - burned <= MAX_DUST_WEI, "underwater");
-        uint256 excess = have - burned;
-        if (excess > 0) {
-            if (isShort) {
-                // No depositor BUCK profit under deflation; over-swap excess
-                // is treasury equity.
-                treasuryBuck = excess;
-            } else {
-                (treasuryBuck, depositorBuck) = BasketMath.splitProfit(excess, treasuryBp);
-            }
+            (uint256 gained, uint256 lossValue) = _coverShortfall(perPoolTok, R - Bw);
+            uint256 have = Bw + gained;
+            burned = have >= R ? R : have;
+            // Revert path 1: burn unsatisfiable within the loss budget.
+            require(R - burned <= MAX_DUST_WEI, "underwater");
+            require(lossValue * 10000 <= maxConversionLossBp * V, "conversion loss");
+            treasuryBuck = have - burned;   // over-swap excess; no depositor profit
         }
 
         // Phase 3: burn principal, pay out.
@@ -461,7 +460,8 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             }
         }
 
-        // Phase 4: finalize bookkeeping.
+        // Phase 4: finalize bookkeeping (outstanding drops by R; any dust gap
+        // R-burned is a bounded supply leak, not double-counted).
         if (redeemShare == 10000) {
             delete deposits[receiptId];
             receipt.burn(receiptId);
@@ -477,16 +477,68 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             redeemShare == 10000 ? 0 : 10000 - redeemShare);
     }
 
+    /// @notice Closed-form sell-high allocation in BUCK value.  Full-range ⇒
+    ///         pool value = 2·buckReserve, so this is a function of the per-pool
+    ///         *depositor* BUCK reserves alone: draw the value claim
+    ///         `V = θ·NAV` from the most overweight pools first, degenerating to
+    ///         pro-rata at equilibrium.
+    /// @return burnL  liquidity to burn per pool (∑ value = V, each ≤ depositorL).
+    /// @return V      the value claim in BUCK (the loss-budget base).
+    function _allocateSellHigh(uint256 R)
+        internal view returns (uint256[] memory burnL, uint256 V)
+    {
+        uint256 N = constituents.length;
+        burnL = new uint256[](N);
+        uint256[] memory bv = new uint256[](N);    // depositor BUCK per pool
+        uint128[] memory depL = new uint128[](N);
+        uint256 B = 0;
+        for (uint256 i = 0; i < N; i++) {
+            Constituent storage c = constituents[i];
+            uint128 totalL = _positionLiquidity(c);
+            if (totalL <= c.treasuryLiquidity) continue;
+            depL[i] = totalL - c.treasuryLiquidity;
+            uint256 poolBuck = IERC20(address(buck)).balanceOf(c.pool);
+            bv[i] = uint256(depL[i]) * poolBuck / totalL;
+            B += bv[i];
+        }
+        require(B > 0, "no value");
+
+        uint256 O = totalOutstandingBuck;
+        V = UniswapV3OracleLib.mulDiv(R, 2 * B, O);             // θ·NAV
+        uint256 claimBv = UniswapV3OracleLib.mulDiv(R, B, O);   // θ·B (BUCK half of V)
+
+        // Ideal sell-high draw per pool: aᵢ = bvᵢ − wᵢ·B·(O−R)/O.  Positive ⇒
+        // overweight; clamp negatives (underweight pools draw 0).
+        uint256[] memory pos = new uint256[](N);
+        uint256 sumPos = 0;
+        for (uint256 i = 0; i < N; i++) {
+            if (bv[i] == 0) continue;
+            uint256 tgt = UniswapV3OracleLib.mulDiv(
+                uint256(constituents[i].targetWeightBp) * B, O - R, 10000 * O);
+            if (bv[i] > tgt) { pos[i] = bv[i] - tgt; sumPos += pos[i]; }
+        }
+        if (sumPos == 0) return (burnL, V);    // unreachable: ∑aᵢ = claimBv > 0
+
+        for (uint256 i = 0; i < N; i++) {
+            if (pos[i] == 0) continue;
+            uint256 allocBv = UniswapV3OracleLib.mulDiv(pos[i], claimBv, sumPos);
+            uint256 bl = UniswapV3OracleLib.mulDiv(uint256(depL[i]), allocBv, bv[i]);
+            burnL[i] = bl > depL[i] ? depL[i] : bl;   // cap for rounding safety
+        }
+    }
+
     // --- Shortfall cover (scaffold: internal TOKEN/BUCK pools) ------------ //
 
     /// @notice Raise `shortfall` BUCK by greedily swapping the withdrawn TOKEN
     ///         (most-TOKEN pool first) into BUCK on the internal pools.
-    ///         Mutates `perPoolTok` to reflect TOKEN spent.  Returns BUCK
-    ///         gained; the caller checks `Bw + gained >= R` (else underwater).
+    ///         Mutates `perPoolTok` to reflect TOKEN spent.
+    /// @return gained     BUCK obtained from the conversions.
+    /// @return lossValue  BUCK value lost to slippage + fee (spent TOKEN valued
+    ///                    at its pre-swap spot price, minus BUCK received).
     /// @dev    FX multi-hop routing via `rebalancer` is the follow-up; for now
     ///         this is internal-pool only.
     function _coverShortfall(uint256[] memory perPoolTok, uint256 shortfall)
-        internal returns (uint256 gained)
+        internal returns (uint256 gained, uint256 lossValue)
     {
         uint256 N = constituents.length;
         uint256 remaining = shortfall;
@@ -509,6 +561,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             if (bestIdx == type(uint256).max) break;
 
             Constituent storage c = constituents[bestIdx];
+            uint256 priceBefore = _readPoolPrice(c, 0);   // spot, for loss accounting
             uint256 tokenIn = _tokenInForBuckOut(c, remaining);
             if (tokenIn == 0 || tokenIn > perPoolTok[bestIdx]) {
                 tokenIn = perPoolTok[bestIdx];   // sell all available here
@@ -516,6 +569,9 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             (uint256 spent, uint256 received) = _swapTokenForBuckExactIn(c, tokenIn);
             perPoolTok[bestIdx] -= spent;
             gained += received;
+            uint256 spentValue = UniswapV3OracleLib.mulDiv(
+                spent, priceBefore, 10 ** c.decimals);
+            if (spentValue > received) lossValue += spentValue - received;
             remaining = received >= remaining ? 0 : remaining - received;
             if (received == 0) break;   // no progress; avoid spinning
         }

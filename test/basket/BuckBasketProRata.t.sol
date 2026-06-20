@@ -220,12 +220,28 @@ contract BuckBasketProRataTest is Test {
         (uint256 principalA,,,) = basketC.deposits(ridA);
 
         uint256 paxgBefore = paxg.balanceOf(alice);
+        // Generous loss budget (20%): the thinned-pool conversion is costly, but
+        // the caller opts in to confirm the cover mechanism works.
         vm.prank(alice);
-        basketC.redeem(ridA, 0);   // must not revert
+        basketC.redeem(ridA, 0, 2000);
 
         assertApproxEqAbs(basketC.totalOutstandingBuck(), outBefore - principalA, 1e9,
             "principal fully retired");
         assertGt(paxg.balanceOf(alice), paxgBefore, "depositor still gets (reduced) PAXG");
+    }
+
+    function test_redeem_deflation_defaultBudgetReverts() public {
+        address pool = _addPaxg();
+        uint256 ridA = _depositPaxg(alice, 1e18);
+        _depositPaxg(bob, 1e18);
+
+        // Same deflation, but the default 1% budget refuses the costly thin-pool
+        // conversion — protecting the caller from a large haircut.
+        _arb(pool, address(paxg), 0.4e18);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("conversion loss"));
+        basketC.redeem(ridA, 0);   // default 1% budget
     }
 
     function test_redeem_underwater_reverts() public {
@@ -240,6 +256,32 @@ contract BuckBasketProRataTest is Test {
         vm.prank(alice);
         vm.expectRevert(bytes("underwater"));
         basketC.redeem(ridA, 0);
+    }
+
+    function test_redeem_sellHigh_drawsFromOverweightPool() public {
+        address pPaxg = _addPaxg();
+        vm.prank(GOV);
+        basketC.addConstituent(address(cbbtc), 8, CBBTC_PRICE, 0, 500);
+
+        // Equal-value deposits → 50/50 at target.
+        uint256 ridPaxg = _depositPaxg(alice, 1e18);              // ~4000 BUCK
+        vm.prank(alice); cbbtc.approve(address(basketC), 4e6);
+        vm.prank(alice); basketC.depositToken(address(cbbtc), 4e6, 0);  // ~4000 BUCK
+
+        // Inflate the PAXG pool (arb buys PAXG with BUCK) → PAXG overweight,
+        // cbBTC underweight.
+        _arb(pPaxg, address(buck), 4000e18);
+
+        uint256 paxgBefore  = paxg.balanceOf(alice);
+        uint256 cbbtcBefore = cbbtc.balanceOf(alice);
+
+        // Small redemption: sell-high draws entirely from the overweight PAXG
+        // pool, leaving the underweight cbBTC pool untouched.
+        vm.prank(alice);
+        basketC.redeem(ridPaxg, 1000, 2000);   // 10%
+
+        assertGt(paxg.balanceOf(alice), paxgBefore, "drew from overweight PAXG");
+        assertEq(cbbtc.balanceOf(alice), cbbtcBefore, "left underweight cbBTC untouched");
     }
 
     function test_sweepTreasury_reinvestsProfit() public {
