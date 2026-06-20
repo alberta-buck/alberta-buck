@@ -4,29 +4,52 @@ Working draft. Supersedes the fused "sell-high / recycle-to-buy-low" redemption
 described in `alberta-buck-ethereum.org` §BuckBasket. Once settled this folds back
 into the org master and the `BUG #N` list is retired.
 
-> **Scaffold status.** The module lives in `src/basket/`:
-> `BuckBasketProRata.sol` (the new pro-rata core), `BuckBasket.sol` (the legacy
-> fused implementation, moved here and retained), shared adoptable
-> `BuckBasketReceipt.sol` (used by *both*, now with on-chain `tokenURI`),
-> `BasketMath.sol`, `IBasketRebalancer.sol` (`pathFor`) + `BasketRebalancer.sol`
-> (governance FX-route registry). The
-> shared controller surface is `src/IBuckKController.sol`. Tests:
-> `test/basket/BuckBasketProRata.t.sol` (12/12) and the retained
-> `test/basket/BuckBasket.t.sol` (18/18) — 30/30.
+> **Status (as of the storage-base refactor).** `src/basket/`:
+> `BuckBasketProRata.sol` (new pro-rata core, **deployable** at 24,552 / 24,576 B),
+> `BuckBasket.sol` (legacy fused impl, moved here + retained), shared
+> `BuckBasketStorage.sol` (the storage layout base both the shell and any facet
+> inherit), shared adoptable `BuckBasketReceipt.sol` (used by *both*, on-chain
+> `tokenURI`), `BasketMath.sol` (math lib; its V3-math + helpers are `public` so
+> they deploy separately and are `DELEGATECALL`'d off the size-constrained
+> basket), `IBasketRebalancer.sol` (`pathFor`) + `BasketRebalancer.sol`
+> (governance FX-route registry — *to be repurposed as the delegatecall facet*,
+> see Next steps). Shared controller surface `src/IBuckKController.sol`.
+> Tests: `BuckBasketProRata.t.sol` 19, legacy `BuckBasket.t.sol` 18,
+> `BasketRebalancer.t.sol` 6 — **43/43**.
 >
-> `BuckBasketProRata` has TOKEN deposit, the **sell-high `redeem`** (§5.1
+> `BuckBasketProRata` has: TOKEN deposit; the **sell-high `redeem`** (§5.1
 > closed-form overweight-first allocation degenerating to pro-rata; treasury
 > split; deflation shortfall cover under a `maxConversionLossBp` budget, default
-> 1%; the two revert paths), the **single-TOKEN payout** (`payoutToken`, one-pool
-> draw with within-pool conversion), the **spot/TWAP manipulation guard** on the
-> value read, and **`sweepTreasury`** (recycle-to-buy-low). The shortfall cover,
-> within-pool conversion, and treasury re-LP all swap on the **internal**
-> TOKEN/BUCK pools for now — FX multi-hop routing via the rebalancer +
-> `ISwapRouter` is the next pass. Still stubbed: BUCK-side deposits, standalone
-> `rebalance()`, and the full migration handoff. The underwater check carries a
-> `MAX_DUST_WEI = 1e9` tolerance for V3 burn-rounding on a fully-drained pool.
-> Tests: `BuckBasketProRata.t.sol` 17/17, legacy `BuckBasket.t.sol` 18/18 —
-> 35/35.
+> 1%, `0 = unlimited`; the two revert paths); the **single-TOKEN payout**
+> (`payoutToken`, one-pool draw + within-pool conversion); the **spot/TWAP
+> manipulation guard** on the value read; and **`sweepTreasury`**
+> (recycle-to-buy-low). Reverts are **custom errors** (size). The shortfall
+> cover, within-pool conversion, and treasury re-LP all swap on the **internal**
+> TOKEN/BUCK pools — FX multi-hop routing via the rebalancer + `ISwapRouter` is
+> a follow-up. Still stubbed: BUCK-side deposits, standalone `rebalance()`, the
+> full migration handoff. `MAX_DUST_WEI = 1e9` absorbs V3 burn-rounding on a
+> fully-drained pool.
+>
+> **Sim compatibility:** kept drop-in-compatible with the legacy `BuckBasket`
+> for the web3 sim — same `addBasketToken` name/signature, same `Constituent`
+> field order (`constituents(i)[2] == basketAmount`), `redeem(id, bp, 0)` works
+> on both. **Identical constructor signature**, so it's a drop-in for the deploy
+> call — *except* `BuckBasketProRata` needs `BasketMath` **library-linked** (10
+> placeholders in its bytecode), which the sim's `chain.deploy` doesn't do yet.
+>
+> **Next steps** (in rough order):
+> 1. **Sim refit** — add library-linking to `sim/chain.py` (deploy `BasketMath`,
+>    substitute its address for the `__$…$__` placeholder), and a selector to
+>    deploy `BuckBasket` vs `BuckBasketProRata`. Then A/B a purpose-built arb
+>    agent vs deposit/redeem agents harvesting the basket's constant-mix flow.
+> 2. **Treasury delegatecall facet (step 2)** — move `sweepTreasury` + its re-LP
+>    helpers into `BasketRebalancer` (delegatecall, runs in the basket's storage
+>    context via `BuckBasketStorage`); lower-risk first facet, buys ~1.5 KB of
+>    headroom (current margin is ~24 B) and lands the rebalancer-as-brain split.
+> 3. **Redeem facet** — move the sell-high allocation + conversion into the facet
+>    (the heaviest block; one delegatecall, scalar args, no array marshalling).
+> 4. **FX-routed conversion** — wire `pathFor` + `ISwapRouter` (needs SwapRouter
+>    test infra), and `receipt.tokenURI`'s richer metadata.
 
 ## 1. Goals
 
