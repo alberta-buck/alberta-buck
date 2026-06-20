@@ -242,6 +242,48 @@ contract BuckBasketProRataTest is Test {
         basketC.redeem(ridA, 0);
     }
 
+    function test_sweepTreasury_reinvestsProfit() public {
+        address pool = _addPaxg();
+        uint256 ridA = _depositPaxg(alice, 1e18);
+        _depositPaxg(bob, 1e18);   // keeps pool liquid after alice exits
+
+        // Inflation: arb buys PAXG with BUCK ⇒ pool BUCK-heavy ⇒ alice's redeem
+        // yields BUCK profit, half of which the treasury keeps.
+        _arb(pool, address(buck), 2000e18);
+
+        vm.prank(alice);
+        basketC.redeem(ridA, 0);
+
+        uint256 pendingBefore = basketC.treasuryBuckPending();
+        assertGt(pendingBefore, 0, "treasury accrued profit");
+        assertEq(basketC.treasuryLiquidityOf(0), 0, "no treasury LP yet");
+
+        basketC.sweepTreasury();   // permissionless keeper call
+
+        assertGt(basketC.treasuryLiquidityOf(0), 0, "treasury re-LP'd into pool");
+        assertLt(basketC.treasuryBuckPending(), pendingBefore, "pending consumed");
+    }
+
+    function test_sweepTreasury_excludedFromDepositorRedeem() public {
+        address pool = _addPaxg();
+        uint256 ridA = _depositPaxg(alice, 1e18);
+        uint256 ridB = _depositPaxg(bob, 1e18);
+        _arb(pool, address(buck), 2000e18);
+
+        vm.prank(alice);
+        basketC.redeem(ridA, 0);
+        basketC.sweepTreasury();
+        uint128 trL = basketC.treasuryLiquidityOf(0);
+        assertGt(trL, 0, "treasury L present");
+
+        // Bob (last depositor) exits fully; the treasury L is NOT part of his
+        // pro-rata claim, so it stays in the pool.
+        vm.prank(bob);
+        basketC.redeem(ridB, 0);
+        assertEq(basketC.totalOutstandingBuck(), 0, "all depositors out");
+        assertEq(basketC.treasuryLiquidityOf(0), trL, "treasury L preserved");
+    }
+
     function test_receipt_tokenURI_returnsDataUri() public {
         _addPaxg();
         uint256 rid = _depositPaxg(alice, 1e18);

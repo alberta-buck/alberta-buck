@@ -13,14 +13,16 @@ into the org master and the `BUG #N` list is retired.
 > `test/basket/BuckBasketProRata.t.sol` (8/8) and the retained
 > `test/basket/BuckBasket.t.sol` (18/18) — 26/26.
 >
-> `BuckBasketProRata` has TOKEN deposit + the **pro-rata `redeem`** (treasury
-> split, deflation shortfall cover, underwater revert). Still stubbed vs. the
-> spec below: shortfall conversion + treasury re-LP route through the internal
-> TOKEN/BUCK pools (FX/`ISwapRouter` via the rebalancer is the next pass);
-> BUCK-side deposits, `RedeemPlan`, `rebalance()`, and the full migration handoff.
-> The underwater revert carries a `MAX_DUST_WEI = 1e9` (1e-9 BUCK) tolerance to
-> absorb V3 burn-rounding on a fully-drained pool (distinct from the genuine
-> underwater gap).
+> `BuckBasketProRata` has TOKEN deposit, the **pro-rata `redeem`** (treasury
+> split, deflation shortfall cover, underwater revert), and **`sweepTreasury`**
+> (recycle-to-buy-low: re-LP accrued treasury profit into the most underweight
+> pool as treasury-owned liquidity). Both the shortfall cover and the treasury
+> re-LP swap on the **internal** TOKEN/BUCK pools for now — FX multi-hop routing
+> via the rebalancer + `ISwapRouter` is the next pass. Still stubbed: BUCK-side
+> deposits, `RedeemPlan`, standalone `rebalance()`, and the full migration
+> handoff. The underwater revert carries a `MAX_DUST_WEI = 1e9` (1e-9 BUCK)
+> tolerance to absorb V3 burn-rounding on a fully-drained pool (distinct from the
+> genuine underwater gap).
 
 ## 1. Goals
 

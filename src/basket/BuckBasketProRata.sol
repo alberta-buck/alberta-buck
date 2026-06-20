@@ -69,8 +69,9 @@ interface IBuckMintBurn {
 ///     already in place.
 ///   * `RedeemPlan` (optimizer / specific-token API) and BUCK-side deposits are
 ///     stubbed pending the routing pass.
-///   * Treasury re-LP is deferred to a `rebalancer` sweep; profit accrues as
-///     `treasuryBuckPending` for now.
+///   * Treasury re-LP (`sweepTreasury`) recycles accrued profit into the most
+///     underweight pool as treasury-owned liquidity ("buy low"), swapping the
+///     TOKEN side on the internal pool for now (FX routing is the follow-up).
 contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Constituents ----------------------------------------------------- //
@@ -136,6 +137,9 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     ///         is still fully retired from `totalOutstandingBuck`; the unburned
     ///         dust is a bounded supply leak (≤ MAX_DUST_WEI per redemption).
     uint256 internal constant MAX_DUST_WEI = 1e9;          // 1e-9 BUCK
+    /// @notice Floor for treasury re-LP: below this, profit stays as pending
+    ///         BUCK (V3 mint of a dust position can fail / waste gas).
+    uint256 internal constant MIN_REINVEST_BUCK = 1e15;    // 0.001 BUCK
 
     // --- Callback guards -------------------------------------------------- //
     address internal _callbackPool;
@@ -148,6 +152,7 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     event Redeemed(address indexed who, uint256 indexed receiptId, uint256 burned, uint256 depositorBuck, uint256 treasuryBuck, uint256 remainingBp);
     event TreasuryAccrued(uint256 amount, uint256 pending);
     event TreasuryWithdrawn(address indexed to, uint256 amount);
+    event TreasuryReinvested(uint256 indexed poolIdx, uint256 buckConsumed, uint128 liquidity);
     event RebalancerSet(address indexed rebalancer);
     event TreasuryBpSet(uint16 treasuryBp);
 
@@ -208,6 +213,22 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         treasuryBuckPending -= amount;
         IERC20(address(buck)).transfer(to, amount);
         emit TreasuryWithdrawn(to, amount);
+    }
+
+    /// @notice Recycle accrued treasury BUCK profit into the most underweight
+    ///         pool as treasury-owned liquidity -- the "buy low" leg, decoupled
+    ///         from redemption.  Permissionless (any keeper); no-op below the
+    ///         re-LP floor.
+    function sweepTreasury() external {
+        if (treasuryBuckPending >= MIN_REINVEST_BUCK) {
+            _reinvestTreasury(treasuryBuckPending);
+        }
+    }
+
+    /// @notice Treasury-owned liquidity in constituent `i` (excluded from the
+    ///         depositor pro-rata claim base).
+    function treasuryLiquidityOf(uint256 i) external view returns (uint128) {
+        return constituents[i].treasuryLiquidity;
     }
 
     /// @notice Register a basket constituent.  Renormalizes existing declared
@@ -538,6 +559,96 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         require(buckDelta <= 0 && tokDelta >= 0, "swap delta sign");
         spent    = uint256(tokDelta);
         received = uint256(-buckDelta);
+    }
+
+    // --- Treasury re-LP (recycle-to-buy-low) ------------------------------ //
+
+    /// @notice Convert `buckAmount` treasury BUCK into a treasury-owned LP
+    ///         position in the most underweight pool: swap ~half for the pool's
+    ///         TOKEN, LP both sides, and tag the minted L as treasury.  Only
+    ///         the BUCK actually consumed leaves `treasuryBuckPending`; any
+    ///         remainder stays pending for the next sweep.
+    /// @dev    The TOKEN-side swap uses the internal BUCK/TOKEN pool.  When an
+    ///         FX route is registered this is where the rebalancer plugs in a
+    ///         deeper external path (see `BASKET-REDESIGN.md` §7).
+    function _reinvestTreasury(uint256 buckAmount) internal {
+        uint256 i = _mostUnderweightPool();
+        Constituent storage c = constituents[i];
+
+        (uint256 buckSpent, uint256 tok) = _swapBuckForTokenExactIn(c, buckAmount / 2);
+        uint256 buckForLp = buckAmount - buckSpent;        // remainder pairs with TOKEN
+
+        uint128 liquidity = _liquidityForAmounts(c, tok, buckForLp);
+        require(liquidity > 0, "reinvest L=0");
+
+        _callbackPool = c.pool;
+        (uint256 a0, uint256 a1) = IUniswapV3Pool(c.pool).mint(
+            address(this), c.tickLower, c.tickUpper, liquidity, abi.encode(c.token));
+        _callbackPool = address(0);
+
+        c.treasuryLiquidity += liquidity;
+        uint256 consumed = buckSpent + (c.buckIsToken0 ? a0 : a1);   // swap + LP BUCK side
+        treasuryBuckPending -= consumed;
+        emit TreasuryReinvested(i, consumed, liquidity);
+    }
+
+    /// @notice Exact-input BUCK→TOKEN swap on `c.pool`.
+    function _swapBuckForTokenExactIn(Constituent storage c, uint256 buckIn)
+        internal returns (uint256 spent, uint256 received)
+    {
+        require(buckIn > 0, "buckIn=0");
+        _swapCallbackPool = c.pool;
+        (int256 d0, int256 d1) = IUniswapV3Pool(c.pool).swap(
+            address(this),
+            c.buckIsToken0,                                  // zeroForOne for BUCK→TOKEN
+            int256(buckIn),                                  // positive ⇒ exact-input
+            c.buckIsToken0 ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
+            abi.encode(c.token)
+        );
+        _swapCallbackPool = address(0);
+        int256 buckDelta = c.buckIsToken0 ? d0 : d1;
+        int256 tokDelta  = c.buckIsToken0 ? d1 : d0;
+        require(buckDelta >= 0 && tokDelta <= 0, "swap delta sign");
+        spent    = uint256(buckDelta);
+        received = uint256(-tokDelta);
+    }
+
+    /// @notice Index of the pool most underweight by value/target ratio (empty
+    ///         pools, ratio 0, sort first).  Target = basketAmount * spot price.
+    function _mostUnderweightPool() internal view returns (uint256 idx) {
+        int256 best = type(int256).max;
+        for (uint256 i = 0; i < constituents.length; i++) {
+            Constituent storage c = constituents[i];
+            uint256 v = _poolLpValue(c);
+            uint256 p = _readPoolPrice(c, 0);
+            uint256 tgt = UniswapV3OracleLib.mulDiv(c.basketAmount, p, 1e18);
+            int256 ratio = tgt > 0 ? int256(v * 1e18 / tgt) : type(int256).max;
+            if (ratio < best) { best = ratio; idx = i; }
+        }
+    }
+
+    /// @notice BUCK value of a pool's reserves (full-range ⇒ pool balances are
+    ///         the virtual reserves).  0 if unseeded.
+    function _poolLpValue(Constituent storage c) internal view returns (uint256 valueBuck) {
+        uint256 tokBal = IERC20(c.token).balanceOf(c.pool);
+        if (tokBal == 0) return 0;
+        uint256 spotPrice = _readPoolPrice(c, 0);
+        uint256 buckBal = IERC20(address(buck)).balanceOf(c.pool);
+        valueBuck = UniswapV3OracleLib.mulDiv(tokBal, spotPrice, 10 ** c.decimals) + buckBal;
+    }
+
+    /// @notice V3 liquidity for (tokenAmount, buckAmount) at the pool's current
+    ///         price -- min of the two sides (leftover stays in the basket).
+    function _liquidityForAmounts(Constituent storage c, uint256 tokenAmount, uint256 buckAmount)
+        internal view returns (uint128)
+    {
+        (uint160 sqrtP,,,,,,) = IUniswapV3Pool(c.pool).slot0();
+        uint160 sqrtLow  = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickLower);
+        uint160 sqrtHigh = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickUpper);
+        (uint256 amount0, uint256 amount1) = c.buckIsToken0
+            ? (buckAmount, tokenAmount)
+            : (tokenAmount, buckAmount);
+        return UniswapV3OracleLib.getLiquidityForAmounts(sqrtP, sqrtLow, sqrtHigh, amount0, amount1);
     }
 
     // --- Migration / unwind ----------------------------------------------- //
