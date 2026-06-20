@@ -8,7 +8,8 @@ into the org master and the `BUG #N` list is retired.
 > `BuckBasketProRata.sol` (the new pro-rata core), `BuckBasket.sol` (the legacy
 > fused implementation, moved here and retained), shared adoptable
 > `BuckBasketReceipt.sol` (used by *both*, now with on-chain `tokenURI`),
-> `BasketMath.sol`, `IBasketRebalancer.sol` + stub `BasketRebalancer.sol`. The
+> `BasketMath.sol`, `IBasketRebalancer.sol` (`pathFor`) + `BasketRebalancer.sol`
+> (governance FX-route registry). The
 > shared controller surface is `src/IBuckKController.sol`. Tests:
 > `test/basket/BuckBasketProRata.t.sol` (12/12) and the retained
 > `test/basket/BuckBasket.t.sol` (18/18) — 30/30.
@@ -341,42 +342,43 @@ Net: the split + pro-rata-burn design makes withdrawal pressure *pro-cyclical
 with the system's own corrective need* — people pull BUCK out (burn) under
 inflation and leave it in under deflation.
 
-## 7. Rebalancer sub-contract
+## 7. Rebalancer sub-contract — a route provider
 
 The N **TOKEN/BUCK** V3 pools are the owned foundation — *sufficient* for
-solvency but possibly thin. The replaceable `BasketRebalancer` additionally knows
-about **FX pools** it never custodies:
+solvency but possibly thin. The replaceable `BasketRebalancer` is **not** the
+market weight-balancer (that is external arbs + the basket's own sell-high redeem
+and buy-low `sweepTreasury`); it is the **BUCK↔TOKEN route provider** for the
+basket's own conversions, so they can use deep external FX pools instead of the
+thin internal one:
 
 ```
 BUCK/USDC, BUCK/USDT            (BUCK <-> stable)
 USDC/<TOKEN>, USDT/<TOKEN>      (stable <-> commodity, deep external pools)
 ```
 
-It owns the route registry and the planning logic:
+The whole interface is one function — a **governance-curated route registry**:
 
 ```solidity
 interface IBasketRebalancer {
-    function planSellTokenForBuck(address token, uint256 buckOut, uint256 maxTokenIn)
-        external view returns (SwapStep[] memory steps);          // redeem shortfall
-    function planTreasuryReinvest(uint256 buckAmount)
-        external view returns (SwapStep[] memory steps, uint256 poolIdx);
-    function planRebalance(PoolState[] calldata pools)
-        external view returns (SwapStep[] memory steps);          // constant-mix
+    // V3-encoded path tokenIn -> ... -> tokenOut, or empty bytes => internal pool.
+    function pathFor(address tokenIn, address tokenOut) external view returns (bytes memory);
 }
 ```
 
-`SwapStep` is an `ISwapRouter` exact-in/out call (single or encoded multi-hop
-path). The basket executes each step (`approve` + `exactOutput`/`exactInput`),
-keeping intermediates (USDC/USDT) from ever resting in the basket. FX routes are
-pure optimization: absent/disabled ⇒ fall back to the internal pool ⇒ ultimately
-the §5.1 underwater check.
+Routing is curated off-chain (which path is cheapest) and stored per ordered
+`(tokenIn, tokenOut)` pair — the registry serves it, it does **not** search
+(`ISwapRouter` only executes a given path; we don't reinvent a router). Division
+of labour: the **rebalancer** returns the path (no funds, no amounts, no
+execution); the **basket** holds the amount + exact-in/out and executes via
+`ISwapRouter.exactInput`/`exactOutput`, falling back to its internal `pool.swap`
+when the path is empty or no rebalancer/router is set — so it never bricks.
 
-```
-rebalance(uint256 maxNotionalBuck)   // permissionless keeper entry on the basket
-```
-asks `planRebalance`, executes bounded moves from overweight → underweight pools.
-Not on the redeem hot path. Governance `setRebalancer(addr)` swaps the whole
-strategy — the pre-Diamond replaceability the user wants.
+`setRebalancer(addr)` (governance) swaps the whole strategy — the pre-Diamond
+replaceability path. The basket-side execution (consult `pathFor`, run it through
+`ISwapRouter` for `_coverShortfall` / `_reinvestTreasury` / a future
+`rebalance()`, else internal) is the next increment; it needs `ISwapRouter` test
+infrastructure (no `SwapRouter` artifact is built today). The single-TOKEN
+*within-pool* conversion deliberately stays internal.
 
 ## 8. Deposits
 
@@ -448,8 +450,8 @@ for the UI.
    stay in basket) vs. privileged **executor** (more Diamond-like, more surface).
 2. Router: `ISwapRouter` (recommended, vendored) vs. Universal Router + Permit2.
 3. `treasuryBp` default 5000 and bounds (cap to prevent governance over-extraction?).
-4. FX route representation: encoded `bytes` path (router-native, recommended) vs.
-   structured hops.
+4. ~~FX route representation~~ — decided: encoded `bytes` path (router-native),
+   served by the `BasketRebalancer` registry keyed on `(tokenIn, tokenOut)`.
 5. Migration LP handoff: withdraw-all-and-re-LP (clean cut, recommended) vs.
    incremental.
 6. Underwater threshold telemetry: emit a `BasketUnderwater` signal for the K

@@ -3,49 +3,64 @@ pragma solidity ^0.8.20;
 
 import {IBasketRebalancer} from "./IBasketRebalancer.sol";
 
-/// @title BasketRebalancer -- stub strategy (scaffold).
+/// @title BasketRebalancer -- governance-curated FX route registry.
 ///
-/// @notice Minimal first cut: every plan resolves to "use the internal
-///         TOKEN/BUCK pool".  The FX-route registry and ISwapRouter multi-hop
-///         planning land in a later pass; until then the core's internal-pool
-///         routing is the fallback and this contract just satisfies the
-///         interface so the wiring (`BuckBasket.setRebalancer`) is exercised.
+/// @notice The replaceable route provider for BuckBasket's BUCK<->TOKEN
+///         conversions.  Governance registers, per ordered (tokenIn, tokenOut)
+///         pair, a Uniswap V3 encoded path through deep external pools (e.g.
+///         TOKEN -> USDC -> BUCK).  The basket reads `pathFor` and executes the
+///         path via `ISwapRouter`; an unregistered pair returns empty bytes and
+///         the basket falls back to its internal TOKEN/BUCK pool.
 ///
-/// @dev    Governance-owned so route registration can be added without
-///         touching the core.
+///         Routing is curated off-chain (which path is cheapest), not searched
+///         on-chain -- the registry just stores and serves the chosen paths.
+///         Replacing the whole strategy is a single `BuckBasket.setRebalancer`.
 contract BasketRebalancer is IBasketRebalancer {
 
     address public governance;
 
-    /// @dev token -> encoded V3 path TOKEN->...->BUCK (FX route). Empty =
-    ///      fall back to the internal pool.  Populated in a later pass.
-    mapping(address => bytes) public buckOutPath;
+    /// @dev keccak256(tokenIn, tokenOut) => encoded V3 path.
+    mapping(bytes32 => bytes) private _route;
+
+    event RouteSet(address indexed tokenIn, address indexed tokenOut, bytes path);
+    event GovernanceTransferred(address indexed from, address indexed to);
 
     constructor(address _governance) {
         require(_governance != address(0), "gov=0");
         governance = _governance;
     }
 
-    function planSellTokenForBuck(address token, uint256 buckOut, uint256 maxTokenIn)
-        external pure returns (SwapStep[] memory steps)
-    {
-        // Scaffold: signal the basket to use its internal pool.
-        token; buckOut; maxTokenIn;
-        steps = new SwapStep[](0);
+    modifier onlyGov() {
+        require(msg.sender == governance, "not governance");
+        _;
     }
 
-    function planTreasuryReinvest(uint256 buckAmount)
-        external pure returns (SwapStep[] memory steps, uint256 poolIdx)
+    /// @notice Register (or clear, with empty `path`) the route for swapping
+    ///         `tokenIn` into `tokenOut`.  Path is a Uniswap V3 encoded path
+    ///         whose first token is `tokenIn` and last is `tokenOut`.
+    function setRoute(address tokenIn, address tokenOut, bytes calldata path)
+        external onlyGov
     {
-        buckAmount;
-        steps = new SwapStep[](0);
-        poolIdx = 0;
+        require(tokenIn != address(0) && tokenOut != address(0), "zero token");
+        require(tokenIn != tokenOut, "same token");
+        _route[_key(tokenIn, tokenOut)] = path;
+        emit RouteSet(tokenIn, tokenOut, path);
     }
 
-    function planRebalance(uint256 maxNotionalBuck)
-        external pure returns (SwapStep[] memory steps)
+    /// @inheritdoc IBasketRebalancer
+    function pathFor(address tokenIn, address tokenOut)
+        external view returns (bytes memory)
     {
-        maxNotionalBuck;
-        steps = new SwapStep[](0);
+        return _route[_key(tokenIn, tokenOut)];
+    }
+
+    function transferGovernance(address to) external onlyGov {
+        require(to != address(0), "gov=0");
+        emit GovernanceTransferred(governance, to);
+        governance = to;
+    }
+
+    function _key(address tokenIn, address tokenOut) private pure returns (bytes32) {
+        return keccak256(abi.encodePacked(tokenIn, tokenOut));
     }
 }
