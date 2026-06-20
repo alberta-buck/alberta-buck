@@ -9,26 +9,8 @@ import {IBuckKController}    from "../IBuckKController.sol";
 import {BasketMath}         from "./BasketMath.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 import {IBasketRebalancer}  from "./IBasketRebalancer.sol";
-
-interface IUniswapV3Factory {
-    function createPool(address tokenA, address tokenB, uint24 fee) external returns (address pool);
-    function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool);
-    function feeAmountTickSpacing(uint24 fee) external view returns (int24);
-}
-
-interface IUniswapV3MintCallback {
-    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external;
-}
-
-interface IUniswapV3SwapCallback {
-    function uniswapV3SwapCallback(int256, int256, bytes calldata) external;
-}
-
-interface IBuckMintBurn {
-    function mintFromBasket(address to, uint256 amount) external;
-    function burnFromBasket(uint256 amount) external;
-    function balanceOf(address) external view returns (uint256);
-}
+import {BuckBasketStorage, IUniswapV3Factory, IUniswapV3MintCallback,
+        IUniswapV3SwapCallback, IBuckMintBurn} from "./BuckBasketStorage.sol";
 
 /// @title BuckBasketProRata -- pro-rata exit + treasury-split direct-mint orchestrator.
 ///
@@ -83,136 +65,8 @@ interface IBuckMintBurn {
 ///   * Treasury re-LP (`sweepTreasury`) recycles accrued profit into the most
 ///     underweight pool as treasury-owned liquidity ("buy low").
 ///   * BUCK-side deposits and the full migration handoff are not yet built.
-contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
+contract BuckBasketProRata is BuckBasketStorage, IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
-    // --- Errors (custom errors save bytecode vs require-strings) ----------- //
-    error AlreadyPresent();   // already present
-    error Amount0();   // amount=0
-    error BUCKDepositTODO();   // BUCK deposit: TODO
-    error BadCallback();   // bad callback
-    error BadPrice();   // bad price
-    error BadSwapCallback();   // bad swap callback
-    error BadTargetWeight();   // bad target weight
-    error BadToken();   // bad token
-    error BadWeight();   // bad weight
-    error Bp10000();   // bp>10000
-    error Buck0();   // buck=0
-    error BuckIn0();   // buckIn=0
-    error ConversionLoss();   // conversion loss
-    error EmptyDeposit();   // empty deposit
-    error EmptyPool();   // empty pool
-    error ExceedsPending();   // exceeds pending
-    error Gov0();   // gov=0
-    error InvalidRescale();   // invalid rescale
-    error L0();   // L=0
-    error NoLPWithdrawn();   // no LP withdrawn
-    error NoOutstanding();   // no outstanding
-    error NoValue();   // no value
-    error NotGovernance();   // Not governance
-    error NotInBasket();   // not in basket
-    error NotOwner();   // not owner
-    error PayoutToken0();   // payoutToken=0
-    error RedeemZero();   // redeem zero
-    error ReinvestL0();   // reinvest L=0
-    error ScaledWeightsIncorrect();   // scaled weights incorrect
-    error SeedTooSmall();   // seed too small
-    error Slippage();   // slippage
-    error SwapDeltaSign();   // swap delta sign
-    error To0();   // to=0
-    error TokenIn0();   // tokenIn=0
-    error TokenTooThin();   // token too thin
-    error TreasuryBpTooHigh();   // treasuryBp too high
-    error Underwater();   // underwater
-
-    // --- Constituents ----------------------------------------------------- //
-
-    // Field order matches the legacy BuckBasket.Constituent so the public
-    // `constituents(i)` getter is positionally compatible (the sim reads
-    // `c[2] == basketAmount`); `treasuryLiquidity` is appended.
-    struct Constituent {
-        address token;
-        uint8   decimals;
-        uint256 basketAmount;         // 18-dec; Σ basketAmount*price = 1 BUCK at init
-        uint256 initialPriceInBuck;   // 18-dec
-        uint24  feeTier;
-        address pool;
-        int24   tickLower;
-        int24   tickUpper;
-        bool    buckIsToken0;
-        uint256 targetWeightBp;       // declared weight, sums to 10000 across all
-        uint128 treasuryLiquidity;    // treasury-owned L slice in this pool
-    }
-
-    Constituent[] public constituents;
-    mapping(address => uint256) public indexOf;   // token -> 1+index (0 = absent)
-
-    struct Deposit {
-        uint256 buckPrincipal;     // BUCK minted at deposit (the share unit)
-        uint256 tokenPrincipal;    // native-dec TOKEN deposited (ROI telemetry)
-        address token;             // original deposit token
-        uint64  depositTime;
-    }
-    mapping(uint256 => Deposit) public deposits;
-
-    /// @notice Total outstanding BUCK principal == Σ buckPrincipal.
-    uint256 public totalOutstandingBuck;
-
-    /// @notice Treasury BUCK profit awaiting re-LP by the rebalancer.
-    uint256 public treasuryBuckPending;
-
-    /// @notice BUCK profit share to treasury, in basis points (default 50%).
-    uint16 public treasuryBp;
-
-    // --- Wiring ----------------------------------------------------------- //
-
-    IBuckMintBurn     public immutable buck;
-    BuckBasketReceipt public immutable receipt;
-    IBuckKController  public immutable controller;
-    IUniswapV3Factory public immutable v3Factory;
-    IBasketRebalancer public rebalancer;
-    address           public governance;
-
-    uint24  public defaultFeeTier;
-    uint32  public twapWindow;
-    uint16  public observationCardinality;
-    uint256 public defaultMaxDeviationBp;
-    uint256 public minSeedLiquidity;
-
-    // --- Constants -------------------------------------------------------- //
-
-    uint160 internal constant MIN_SQRT_RATIO = 4295128739;
-    uint160 internal constant MAX_SQRT_RATIO =
-        1461446703485210103287273052203988822378723970342;
-    uint16  public  constant  MAX_TREASURY_BP = 9000;      // cap governance take
-    /// @notice Residual burn gap tolerated as V3 burn-rounding dust (not the
-    ///         underwater case): single-depositor full redemption drains its
-    ///         pool, so the last few wei can't be swap-covered.  The principal
-    ///         is still fully retired from `totalOutstandingBuck`; the unburned
-    ///         dust is a bounded supply leak (≤ MAX_DUST_WEI per redemption).
-    uint256 internal constant MAX_DUST_WEI = 1e9;          // 1e-9 BUCK
-    /// @notice Floor for treasury re-LP: below this, profit stays as pending
-    ///         BUCK (V3 mint of a dust position can fail / waste gas).
-    uint256 internal constant MIN_REINVEST_BUCK = 1e15;    // 0.001 BUCK
-    /// @notice Default cap on the value lost to forced TOKEN->BUCK conversion
-    ///         when redeeming under deflation, as bp of the redemption value.
-    ///         Protects the average caller from a thin-pool haircut; raise it to
-    ///         force an exit through a costly pool.
-    uint256 public constant DEFAULT_CONVERSION_LOSS_BP = 100;   // 1%
-
-    // --- Callback guards -------------------------------------------------- //
-    address internal _callbackPool;
-    address internal _swapCallbackPool;
-
-    // --- Events ----------------------------------------------------------- //
-
-    event BasketTokenAdded(address indexed token, uint256 weightBp, uint256 initialPriceInBuck, address pool);
-    event Deposited(address indexed who, uint256 indexed receiptId, address token, uint256 tokenAmount, uint256 buckMinted, uint128 liquidity);
-    event Redeemed(address indexed who, uint256 indexed receiptId, uint256 burned, uint256 depositorBuck, uint256 treasuryBuck, uint256 remainingBp);
-    event TreasuryAccrued(uint256 amount, uint256 pending);
-    event TreasuryWithdrawn(address indexed to, uint256 amount);
-    event TreasuryReinvested(uint256 indexed poolIdx, uint256 buckConsumed, uint128 liquidity);
-    event RebalancerSet(address indexed rebalancer);
-    event TreasuryBpSet(uint16 treasuryBp);
 
     constructor(
         address _buck,
@@ -239,11 +93,6 @@ contract BuckBasketProRata is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         treasuryBp             = 5000;
 
         receipt = new BuckBasketReceipt(address(this));
-    }
-
-    modifier onlyGov() {
-        if (!(msg.sender == governance)) revert NotGovernance();
-        _;
     }
 
     // --- Governance ------------------------------------------------------- //

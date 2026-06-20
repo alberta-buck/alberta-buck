@@ -7,6 +7,7 @@ import {IERC20}  from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {BuckBasketProRata} from "../../src/basket/BuckBasketProRata.sol";
 import {BuckBasketReceipt} from "../../src/basket/BuckBasketReceipt.sol";
+import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
 
 /// @dev Minimal BUCK: plain ERC-20 + the basket mint/burn hooks.  Avoids the
 ///      identity/carrying machinery of the production Buck so the pro-rata
@@ -247,7 +248,7 @@ contract BuckBasketProRataTest is Test {
         _arb(pool, address(paxg), 0.4e18);
 
         vm.prank(alice);
-        vm.expectRevert(BuckBasketProRata.ConversionLoss.selector);
+        vm.expectRevert(BuckBasketStorage.ConversionLoss.selector);
         basketC.redeem(ridA, 0);   // default 1% budget
     }
 
@@ -261,7 +262,7 @@ contract BuckBasketProRataTest is Test {
         _arb(pool, address(paxg), 50e18);
 
         vm.prank(alice);
-        vm.expectRevert(BuckBasketProRata.Underwater.selector);
+        vm.expectRevert(BuckBasketStorage.Underwater.selector);
         basketC.redeem(ridA, 0);
     }
 
@@ -326,7 +327,7 @@ contract BuckBasketProRataTest is Test {
 
         // cbBTC pool can't source the ~4000 claim → f > 1.
         vm.prank(alice);
-        vm.expectRevert(BuckBasketProRata.TokenTooThin.selector);
+        vm.expectRevert(BuckBasketStorage.TokenTooThin.selector);
         basketC.redeem(ridPaxg, 0, address(cbbtc), 2000);
     }
 
@@ -357,7 +358,7 @@ contract BuckBasketProRataTest is Test {
         _arb(pool, address(buck), 3000e18);
 
         vm.prank(alice);
-        vm.expectRevert(BuckBasketProRata.Slippage.selector);
+        vm.expectRevert(BuckBasketStorage.Slippage.selector);
         basketC.redeem(rid, 0);
     }
 
