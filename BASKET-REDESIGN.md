@@ -13,27 +13,35 @@ into the org master and the `BUG #N` list is retired.
 > `test/basket/BuckBasketProRata.t.sol` (8/8) and the retained
 > `test/basket/BuckBasket.t.sol` (18/18) — 26/26.
 >
-> `BuckBasketProRata` has TOKEN deposit, the **pro-rata `redeem`** (treasury
-> split, deflation shortfall cover, underwater revert), and **`sweepTreasury`**
-> (recycle-to-buy-low: re-LP accrued treasury profit into the most underweight
-> pool as treasury-owned liquidity). Both the shortfall cover and the treasury
-> re-LP swap on the **internal** TOKEN/BUCK pools for now — FX multi-hop routing
-> via the rebalancer + `ISwapRouter` is the next pass. Still stubbed: BUCK-side
-> deposits, `RedeemPlan`, standalone `rebalance()`, and the full migration
-> handoff. The underwater revert carries a `MAX_DUST_WEI = 1e9` (1e-9 BUCK)
-> tolerance to absorb V3 burn-rounding on a fully-drained pool (distinct from the
-> genuine underwater gap).
+> `BuckBasketProRata` has TOKEN deposit, `redeem` (treasury split, deflation
+> shortfall cover, underwater revert), and **`sweepTreasury`** (recycle-to-buy-low:
+> re-LP accrued treasury profit into the most underweight pool as treasury-owned
+> liquidity). The redeem currently implements the **pure pro-rata special case**
+> of §5.1 (withdraw `θ` of every pool); the overweight-first value-claim
+> allocation (sell-high) and `RedeemPlan` overrides are the next redemption pass.
+> Both the shortfall cover and the treasury re-LP swap on the **internal**
+> TOKEN/BUCK pools for now — FX multi-hop routing via the rebalancer + `ISwapRouter`
+> is a separate pass. Still stubbed: BUCK-side deposits, standalone `rebalance()`,
+> and the full migration handoff. The underwater revert carries a
+> `MAX_DUST_WEI = 1e9` (1e-9 BUCK) tolerance to absorb V3 burn-rounding on a
+> fully-drained pool (distinct from the genuine underwater gap).
 
 ## 1. Goals
 
 1. **Thin-funding-proof redemption.** Burning a receipt's share always succeeds
-   regardless of how thin any individual pool is — a near-empty pool simply
-   contributes a near-empty slice. The *only* revert is the transient
-   **deep-deflation underwater** case (whole-basket NAV < principal), which the
-   BuckCredit/`BuckKController` backstop quenches almost immediately (§6).
-   *Thin ≠ underwater* — the two are orthogonal.
-2. **Constant-mix by construction.** Proportional withdrawal preserves the
-   basket's weights; rebalancing is a *separate, replaceable* sub-contract.
+   regardless of how thin any individual pool is. Redemption allocates a position's
+   value claim (in BUCK, §2.1) across pools; because the allocation always sums to
+   the claim and **conserves value**, the coverage ratio is preserved and the tail
+   stays solvent (§5.2). The *only* revert is the transient **deep-deflation
+   underwater** case (whole-basket NAV < principal), quenched by the
+   BuckCredit/`BuckKController` backstop (§6). *Thin ≠ underwater.* Pure pro-rata
+   is always available as the maximally-live floor.
+2. **Redemption rebalances (sell-high); the treasury recycles (buy-low).** The
+   default redemption draws from the *most overweight* pools first, nudging the
+   basket toward target weights, and degenerates to pure pro-rata at equilibrium.
+   `sweepTreasury` re-LPs profit into the *most underweight* pools. Together with
+   external arbs (and a future standalone `rebalance()`), these keep weights from
+   drifting — value-conservation (§5.2) makes the sell-high reliable.
 3. **Treasury is a primary product.** Direct-mint pairs the depositor's TOKEN
    with freshly-minted BUCK, so the deposit puts ~2× the liquidity to work. The
    yield is split (default 50/50, governance-adjustable): the depositor keeps the
@@ -52,7 +60,7 @@ into the org master and the `BUG #N` list is retired.
    API where an off-chain optimizer (or a client wanting a *specific* TOKEN in or
    out) supplies an explicit plan/route for better execution.
 
-## 2. The invariant
+## 2. The invariant and the unit of account
 
 The hard constraint: **the basket must eventually burn exactly the BUCK it
 minted.** `totalOutstandingBuck == Σ buckPrincipal` over all live receipts; a
@@ -62,6 +70,43 @@ NAV above outstanding is **treasury equity** — accumulated AMM fees + retained
 BUCK profit + unclaimed external-arb BUCK. It is tracked, not commingled into
 depositor claims, via a per-pool `treasuryLiquidity` counter (§3). Depositor
 pro-rata claims span only `depositorLiquidity = totalLiquidity − treasuryLiquidity`.
+
+### 2.1 Everything is measured in BUCK value, never TOKEN amounts
+
+The basket holds N heterogeneous constituents — different ERC-20 decimals
+(cbBTC 8, PAXG 18, …) and unit prices spanning orders of magnitude (1 cbBTC ≈
+65 000 BUCK vs 1 PAXG ≈ 2 600 BUCK). **Raw TOKEN amounts are incommensurable** —
+you cannot add, compare, or weight them against one another. So *every decision*
+in the basket is computed in **BUCK value**, the system's native unit of account
+(and exactly the controller's process variable, `basketValueInBuck`). The basket
+needs no external USD oracle: BUCK is the numéraire.
+
+Computed in BUCK value:
+
+| Quantity | Definition (BUCK, 18-dec) |
+|---|---|
+| Pool value | `tokenReserve · priceInBuck + buckReserve` |
+| Actual weight | pool value / total basket value |
+| Target value | `basketAmount · priceInBuck` (the pool's share of 1.0 BUCK) |
+| Over/under-weight | actual value vs. target value |
+| Position claim fraction | `θ = buckPrincipal / totalOutstandingBuck` (= share of depositor NAV *by value*) |
+| Redemption value claim | `θ · NAV` |
+| Per-pool redemption allocation | distributed by each pool's BUCK-value excess over target (§5) |
+
+TOKEN amounts appear **only as physical quantities, never as a basis for
+comparison**: the raw reserves custodied (native decimals), the V3 *liquidity*
+`L` used to execute a withdrawal (itself neither BUCK nor TOKEN), and the raw
+TOKEN the redeemer receives.
+
+**The value ↔ liquidity bridge.** A decision yields a BUCK-value target per pool;
+execution converts it to a liquidity fraction `fᵢ = valueToWithdrawᵢ /
+poolDepositorValueᵢ`, burns `fᵢ · Lᵢ`, and pays out the resulting raw TOKEN +
+BUCK. Pure pro-rata is the special case `fᵢ = θ` for all pools; a skewed
+(sell-high) allocation uses different `fᵢ` but conserves total value (§5).
+
+**Price source.** `priceInBuck` is the V3 pool's own quote — the TOKEN→BUCK
+conversion factor — read as **TWAP for decisions** (weights, claim sizing;
+manipulation-resistant) and spot for the final amount arithmetic.
 
 ## 3. Economic model
 
@@ -129,51 +174,84 @@ Design rules:
 redeem(receiptId, redeemBp, RedeemPlan plan)
 ```
 
-### 5.1 Default path (empty plan)
+### 5.1 Default path — value-claim allocation (sell-high)
 
-1. `R = buckPrincipal · redeemBp / 10000`           (burn obligation)
+1. `R = buckPrincipal · redeemBp / 10000`           (burn obligation, BUCK)
 2. `θ = R / totalOutstandingBuck`                    (claim fraction)
-3. For **every** pool i: withdraw `θ · depositorLiquidity_i` → collect
-   `(T_i, Bk_i)`. (Full-range V3 ⇒ exactly `θ` of the depositor-owned reserves at
-   any price; withdrawal doesn't move price; weights preserved ⇒ constant-mix.)
-4. `Bw = Σ Bk_i`.
-   - **`Bw ≥ R`** (inflation/normal): burn `R`. Profit `prof = Bw − R`. Pay
-     depositor all `T_i` + `prof·(1−treasuryBp/10000)` BUCK. Treasury keeps
-     `prof·treasuryBp/10000`, re-LP'd via the rebalancer into the underweight
-     pool (→ `treasuryLiquidity`).
-   - **`Bw < R`** (deflation): shortfall `S = R − Bw`. Ask the rebalancer to plan
-     the cheapest TOKEN→BUCK conversion (internal pool first, else FX route),
-     sell the **minimum** `T_i` for `S`, burn `R`, pay depositor the leftover
-     `T_i`. No BUCK profit this round.
-   - **Underwater** (selling the *entire* withdrawn `ΣT_i` still can't raise `S`,
-     i.e. NAV < principal): **revert** `"underwater"`. This is the transient
-     deep-deflation tail; the redeemer waits for the BuckCredit/K backstop (§6).
-5. Decrement `buckPrincipal` and `totalOutstandingBuck` by `R`; burn the receipt
-   NFT on full redemption.
+3. **Value claim** `V = θ · NAV` (NAV = depositor-backed value, in BUCK).
+4. **Allocate `V` across pools by overweight (in BUCK value):**
+   - Draw from the **most overweight pool first** — up to its excess over target.
+     If that pool's excess covers `V`, the whole claim comes from it ("return
+     100 from the most overweight pool"); it is driven toward target = *sell high*.
+   - Otherwise take its full excess and **spill** to the next-overweight pool,
+     and so on. The remainder beyond all positive excesses (the equilibrium /
+     anti-rebalancing case) is taken **proportional to pool value** — i.e. when
+     every pool is already at target, the allocation degenerates to **pure
+     pro-rata** (`fᵢ = θ` everywhere). The allocation always sums to exactly `V`,
+     so it is always satisfiable.
+5. Convert each pool's BUCK-value allocation to a liquidity fraction
+   `fᵢ = allocᵢ / poolDepositorValueᵢ`, burn `fᵢ · Lᵢ`, collect `(Tᵢ, Bkᵢ)`.
+   `Bw = Σ Bkᵢ`.
+6. Settle the burn:
+   - **`Bw ≥ R`** (the common case — overweight pools are BUCK-rich, so skewing
+     toward them *over-collects* BUCK): burn `R`; split profit `Bw − R`
+     (depositor `1−treasuryBp`, treasury `treasuryBp` → `treasuryBuckPending`,
+     recycled by `sweepTreasury`).
+   - **`Bw < R`** (deflation): sell the **minimum** withdrawn `Tᵢ` for the
+     shortfall via the rebalancer (internal pool now, FX route later), burn `R`.
+   - **Underwater** (even selling all withdrawn `ΣTᵢ` can't raise `R`, i.e.
+     NAV < principal): **revert** `"underwater"` — transient deep deflation,
+     quenched by the BuckCredit/K backstop (§6).
+7. Pay the depositor the surviving `Tᵢ`; decrement `buckPrincipal` and
+   `totalOutstandingBuck` by `R`; burn the receipt on full redemption.
 
-Step 3 only ever removes the redeemer's own slice and step 4 only sells assets
-that slice already contains, so a thin pool can never starve another position or
-block redemption — it just yields a thin slice. **Thin-pool liveness is
-unconditional; only whole-basket underwater reverts.**
+### 5.2 Why a skewed (non-pro-rata) withdrawal stays reliable
 
-### 5.2 Optimizer / specific-token plan
+The skew only changes *which* pools supply the claim, never its total: the
+allocation in step 4 sums to exactly `V = θ · NAV`. That **value-conservation
+preserves the coverage ratio** for everyone left behind:
 
-`RedeemPlan` (all optional; empty ⇒ §5.1):
+```
+D' = D − θ·D,  O' = O − θ·O   ⇒   D'/O' = D/O   (D = depositor NAV, O = outstanding)
+```
+
+So a sell-high redemption cannot push the remaining (including the *last*) holders
+underwater — if the basket was solvent before, it is solvent after, regardless of
+which pools were drawn down. Two reliability axes, and their guards:
+
+| Axis | Risk under skew | Guard |
+|---|---|---|
+| Value / solvency | over-claim value ⇒ dilute others | `Σ allocᵢ = θ·NAV`, valued at **TWAP** |
+| Physical liveness | pool too thin to supply its allocation / conversion | per-pool cap `fᵢ ≤ 1`; spill + proportional remainder always reaches `V`; burn covered or `underwater` revert |
+
+Sell-high is in fact **burn-positive**: overweight pools are the BUCK-rich ones,
+so skewing toward them collects *more* BUCK than pro-rata and needs *less*
+TOKEN→BUCK conversion — strictly easier on the solvency-critical resource. The one
+cost is **composition drift**: serial sell-high redemptions leave later holders
+holding relatively more of the underweight pools. They stay solvent (coverage
+preserved); the thinned pools are replenished by `sweepTreasury` (buy-low),
+external arbs, and a future `rebalance()`. Sell-high redemption and buy-low
+treasury are the two halves of one balancing loop.
+
+### 5.3 Optimizer / specific-token plan
+
+`RedeemPlan` (all optional; empty ⇒ §5.1's default allocation):
 
 ```solidity
 struct RedeemPlan {
-    uint16[] poolBps;       // per-pool withdrawal weighting; default = pro-rata
+    uint16[] poolBps;       // OVERRIDE the per-pool allocation (e.g. force pure pro-rata)
     bytes[]  convertRoutes; // explicit V3 paths for shortfall conversion (FX, multi-hop)
     address  payoutToken;   // consolidate entire payout into ONE token (specific-withdraw)
     uint256  minPayoutValue;// slippage floor, in BUCK
 }
 ```
 
-The basket executes the plan, then asserts: exactly `R` burned, and depositor
-value `≥ max(minPayoutValue, fairValue·(1−maxBp))`. A failing plan reverts; the
-caller retries empty (the solvent floor is always available). `poolBps` skewed to
-overweight pools ⇒ redemption *also* rebalances; `payoutToken` ⇒ "give me my exit
-in PAXG", symmetric with specific-TOKEN deposit.
+A plan is executed then **asserted**: `Σ allocᵢ = θ·NAV` (value-conservation),
+exactly `R` burned, and depositor value `≥ max(minPayoutValue, V·(1−maxBp))`. A
+failing plan reverts; the caller can always fall back to the empty plan. Passing
+`poolBps = θ` everywhere forces **pure pro-rata** — the maximally-live floor that
+shares thin pools equally; `payoutToken` ⇒ "give me my exit in PAXG", symmetric
+with a specific-TOKEN deposit.
 
 ## 6. Outflow effects across regimes
 
