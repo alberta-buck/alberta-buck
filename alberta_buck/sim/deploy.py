@@ -173,8 +173,11 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     chain.send(credit.functions.setBuck(buck.address), sender=deployer)
 
     v3f = chain.deploy("UniswapV3Factory")
-    # Constructor is identical for both implementations (drop-in).
-    ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, 64, 50, 1000)
+    # Constructor is identical for both implementations (drop-in).  The
+    # spot/TWAP guard tolerance is 5% (500 bp): legacy uses it only for BUCK
+    # deposits, ProRata also for the redeem value read; 5% keeps ordinary
+    # inter-tick commodity moves (6h ticks vs 600s TWAP) from tripping it.
+    ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, 64, 500, 1000)
     venue = None
     if basket_impl == "prorata":
         basket = chain.deploy("BuckBasketProRata", *ctor)
