@@ -190,7 +190,12 @@ def _from_serializable(data: list) -> tuple:
         if isinstance(x, list):
             return tuple(tup(v) for v in x)
         return x
-    return tuple(tup(v) for v in data)
+    args = tuple(tup(v) for v in data)
+    if len(args) == 5 and isinstance(args[4], tuple) and len(args[4]) == 3:
+        # Cache format stores (leaf_index, identity_leaf, sub_root); the
+        # on-chain 6-arg register overload expects only identityLeaf.
+        return (*args[:4], args[4][1])
+    return args
 
 
 # ---------------------------------------------------------------------------

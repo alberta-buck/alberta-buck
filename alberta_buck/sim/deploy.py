@@ -29,17 +29,84 @@ FEE_USDC = 3000
 FEE_BUCK = 3000         # TOKEN/BUCK pools: 0.30% (direct-mint LP profit)
 FEE_BUCK_UB = 500       # BUCK/USDC pool:   0.05% (gauge-breaking, cheap)
 TICK_SPACING = {3000: 60, 500: 10}
+
 # Common BUCK reserve every TOKEN/BUCK basket pool is seeded to, so no
 # single token's pool depth dominates the shared routing.
 #TARGET_BUCK = 10 ** 14  # $10^14 / 10^6-dec = $100,000,000 BUCK per pool
-TARGET_BUCK = 10 ** 12  # $10^12 / 10^6-dec = $1,000,000 BUCK per pool
+TARGET_BUCK = 10 ** 13   # $10^13 / 10^6-dec =  $10,000,000 BUCK per pool
+#TARGET_BUCK = 10 ** 12  # $10^13 / 10^6-dec =   $1,000,000 BUCK per pool - too small (spikes)
 
-DEPOSITED_TOPIC = Web3.keccak(
+# The BUCK/USDC pool should be similarly large; BUCK-unaware arb and token accumulator agents will
+# move this as they choose USDC->TOKEN vs. USDC->BUCK->TOKEN routes
+#TARGET_BUCK_LP = 4 * TARGET_BUCK
+TARGET_BUCK_LP = TARGET_BUCK
+
+# --- Event topics, per basket implementation ------------------------------- #
+#
+# Both baskets index (who, receiptId) so `topics[2]` is the receiptId on either,
+# but the signatures (hence topic[0]) differ -- legacy BuckBasket carries an
+# extra `address` in Deposited and a 5-arg Redeemed + per-pool RedeemedFromPool;
+# BuckBasketProRata pays out via ERC20 transfers and emits a 6-arg Redeemed.
+LEGACY_DEPOSITED_TOPIC = Web3.keccak(
     text="Deposited(address,uint256,address,uint256,uint256,address,uint128)")
-REDEEMED_TOPIC = Web3.keccak(
+LEGACY_REDEEMED_TOPIC = Web3.keccak(
     text="Redeemed(address,uint256,uint256,uint256,uint256)")
 REDEEMED_FROM_POOL_TOPIC = Web3.keccak(
     text="RedeemedFromPool(uint256,address,address,uint256,uint256,uint128)")
+
+PRORATA_DEPOSITED_TOPIC = Web3.keccak(
+    text="Deposited(address,uint256,address,uint256,uint256,uint128)")
+PRORATA_REDEEMED_TOPIC = Web3.keccak(
+    text="Redeemed(address,uint256,uint256,uint256,uint256,uint256)")
+
+ERC20_TRANSFER_TOPIC = Web3.keccak(text="Transfer(address,address,uint256)")
+
+# Back-compat aliases (legacy is the default; older imports keep working).
+DEPOSITED_TOPIC = LEGACY_DEPOSITED_TOPIC
+REDEEMED_TOPIC = LEGACY_REDEEMED_TOPIC
+
+
+def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
+    """(token_to_user, treasury_buck) from a redeem receipt, impl-aware.
+
+    Legacy BuckBasket emits one RedeemedFromPool per pool (sum `tokToUser`) and
+    Redeemed(..., retainedBuck, ...).  BuckBasketProRata has no per-pool event:
+    it pays the holder via ERC20 transfers, so sum the basket-TOKEN transfers
+    basket->holder, and read `treasuryBuck` from its 6-arg Redeemed.
+    """
+    from eth_abi import decode
+    holder = Web3.to_checksum_address(holder)
+    holder_bytes = bytes.fromhex(holder[2:])
+    token_to_user = 0
+    treasury_buck = 0
+
+    if d.basket_impl == "prorata":
+        basket_tokens = {c.address.lower() for c in d.tokens}
+        for log in rcpt["logs"]:
+            t0 = log["topics"][0]
+            if (t0 == ERC20_TRANSFER_TOPIC
+                    and log["address"].lower() in basket_tokens
+                    and len(log["topics"]) >= 3
+                    and bytes(log["topics"][2])[-20:] == holder_bytes):
+                token_to_user += decode(["uint256"], bytes(log["data"]))[0]
+            elif t0 == d.redeemed_topic:
+                # (burned, depositorBuck, treasuryBuck, remainingBp)
+                _, _, tb, _ = decode(
+                    ["uint256", "uint256", "uint256", "uint256"],
+                    bytes(log["data"]))
+                treasury_buck += tb
+    else:
+        for log in rcpt["logs"]:
+            t0 = log["topics"][0]
+            if t0 == REDEEMED_FROM_POOL_TOPIC:
+                tok_to_user, _, _ = decode(
+                    ["uint256", "uint256", "uint128"], bytes(log["data"]))
+                token_to_user += tok_to_user
+            elif t0 == d.redeemed_topic:
+                _, retained, _ = decode(
+                    ["uint256", "uint256", "uint256"], bytes(log["data"]))
+                treasury_buck += retained
+    return token_to_user, treasury_buck
 
 
 @dataclass
@@ -53,6 +120,7 @@ class Deployment:
     issuer_kp: Any
     reg: Any
     buck: Any
+    credit: Any
     kctrl: Any
     basket: Any
     router: Any
@@ -68,6 +136,10 @@ class Deployment:
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
+    basket_impl: str = "legacy"   # "legacy" (BuckBasket) | "prorata"
+    venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
+    deposited_topic: bytes = DEPOSITED_TOPIC
+    redeemed_topic: bytes = REDEEMED_TOPIC
 
 
 def _erc20_abi() -> list:
@@ -75,7 +147,8 @@ def _erc20_abi() -> list:
     return abi
 
 
-def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
+def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
+           basket_impl="legacy") -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, pool_acct, issuer_addr = accts[0], accts[1], accts[2], accts[3]
@@ -100,8 +173,27 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     chain.send(credit.functions.setBuck(buck.address), sender=deployer)
 
     v3f = chain.deploy("UniswapV3Factory")
-    basket = chain.deploy("BuckBasket", buck.address, kctrl.address, v3f.address,
-                           gov, FEE_BUCK, 600, 64, 50, 1000)
+    # Constructor is identical for both implementations (drop-in).  The
+    # spot/TWAP guard tolerance is 5% (500 bp): legacy uses it only for BUCK
+    # deposits, ProRata also for the redeem value read; 5% keeps ordinary
+    # inter-tick commodity moves (6h ticks vs 600s TWAP) from tripping it.
+    ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, 64, 500, 1000)
+    venue = None
+    if basket_impl == "prorata":
+        basket = chain.deploy("BuckBasketProRata", *ctor)
+        # Install the Uniswap V3 venue facet (the shell delegatecalls it) and
+        # re-wrap the basket handle with the union ABI so Python can call facet
+        # views (basketValueInBuck) that the shell serves via its fallback.
+        venue = chain.deploy("BuckBasketUniswapV3")
+        chain.send(basket.functions.setVenue(venue.address), sender=gov)
+        shell_abi, _ = load_artifact("BuckBasketProRata")
+        facet_abi, _ = load_artifact("BuckBasketUniswapV3")
+        union = shell_abi + [e for e in facet_abi if e not in shell_abi]
+        basket = w3.eth.contract(address=basket.address, abi=union)
+        deposited_topic, redeemed_topic = PRORATA_DEPOSITED_TOPIC, PRORATA_REDEEMED_TOPIC
+    else:
+        basket = chain.deploy("BuckBasket", *ctor)
+        deposited_topic, redeemed_topic = LEGACY_DEPOSITED_TOPIC, LEGACY_REDEEMED_TOPIC
     chain.send(buck.functions.setBasket(basket.address), sender=pool_acct)
     chain.send(kctrl.functions.setBasket(basket.address), sender=gov)
     chain.send(reg.functions.bindContract(
@@ -154,8 +246,10 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
         router.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
 
     d = Deployment(w3, chain, anvil, gov, pool_acct, issuer_addr, issuer_kp,
-                   reg, buck, kctrl, basket, router, simlp, usdc, erc20_abi,
-                   tok, dec)
+                   reg, buck, credit, kctrl, basket, router, simlp, usdc,
+                   erc20_abi, tok, dec,
+                   basket_impl=basket_impl, venue=venue,
+                   deposited_topic=deposited_topic, redeemed_topic=redeemed_topic)
 
     # --- pools: TOKEN/USDC (truth) + TOKEN/BUCK (basket) ------------- #
     pool_v3_abi, _ = load_artifact("UniswapV3Pool")
@@ -171,6 +265,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
         t0 = pool.functions.token0().call()
         t1 = pool.functions.token1().call()
         lo, hi = full_range_ticks(TICK_SPACING[FEE_USDC])
+
         # Seed to a COMMON USDC-side depth (== TARGET_BUCK), NOT a fixed L.
         # A fixed L makes real reserves scale with decimals/price, leaving
         # 18-dec PAXG/AOIL pools shallow while 8-dec cbBTC is unmovably
@@ -225,7 +320,6 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True) -> Deployment:
     # BUCK transfer is SimLP(public) -> pool(public).  No private EOA, no
     # storage fakery, and no existing pool is drained.
     Q96 = 1 << 96
-    TARGET_BUCK_LP = 4 * TARGET_BUCK
     FACE = 2 * TARGET_BUCK_LP
 
     now_ts = w3.eth.get_block("latest")["timestamp"]

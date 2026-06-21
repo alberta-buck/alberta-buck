@@ -5,14 +5,14 @@ import {Test}                  from "forge-std/Test.sol";
 import {ERC20}                 from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20}                from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {BN254}                 from "../src/BN254.sol";
-import {IdentityRegistry}      from "../src/IdentityRegistry.sol";
-import {Buck}                  from "../src/Buck.sol";
-import {BuckCredit}            from "../src/BuckCredit.sol";
-import {BuckCreditHarness}            from "./harness/BuckCreditHarness.sol";
-import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
-import {BuckBasket}            from "../src/BuckBasket.sol";
-import {BuckBasketReceipt}     from "../src/BuckBasketReceipt.sol";
+import {BN254}                 from "../../src/BN254.sol";
+import {IdentityRegistry}      from "../../src/IdentityRegistry.sol";
+import {Buck}                  from "../../src/Buck.sol";
+import {BuckCredit}            from "../../src/BuckCredit.sol";
+import {BuckCreditHarness}            from "../harness/BuckCreditHarness.sol";
+import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
+import {BuckBasket}            from "../../src/basket/BuckBasket.sol";
+import {BuckBasketReceipt}     from "../../src/basket/BuckBasketReceipt.sol";
 
 contract BBToken is ERC20 {
     uint8 immutable _dec;
@@ -431,6 +431,84 @@ contract BuckBasketTest is Test {
         // Receipt deleted (full redemption).
         vm.expectRevert();
         receipt.ownerOf(ridPaxg);
+    }
+
+    function test_depositBuck_afterBootstrapUsesUnderweightPath() public {
+        _setupTwoPoolBasket();
+
+        address pPaxg = IV3Factory(v3Factory).getPool(
+            address(buck), address(paxg), 500);
+        address pCbbtc = IV3Factory(v3Factory).getPool(
+            address(buck), address(cbbtc), 500);
+        uint256 paxgBuckBefore = buck.balanceOf(pPaxg);
+        uint256 cbbtcBuckBefore = buck.balanceOf(pCbbtc);
+
+        uint256 buckAmt = 10e18;
+        vm.prank(address(basketC));
+        buck.mintFromBasket(alice, buckAmt);
+
+        vm.startPrank(alice);
+        buck.approve(address(basketC), buckAmt);
+        uint256 rid = basketC.depositToken(address(buck), buckAmt, 0);
+        vm.stopPrank();
+
+        assertTrue(
+            buck.balanceOf(pPaxg) > paxgBuckBefore
+                || buck.balanceOf(pCbbtc) > cbbtcBuckBefore,
+            "deposit added BUCK-side LP to a basket pool"
+        );
+
+        (uint256 principalBuck, uint256 principalToken, address guardToken,) =
+            basketC.deposits(rid);
+        assertGt(principalBuck, 0, "BUCK principal recorded");
+        assertGt(principalToken, 0, "BUCK deposit records LP TOKEN principal");
+        assertTrue(
+            guardToken == address(paxg) || guardToken == address(cbbtc),
+            "guard token is a basket constituent"
+        );
+    }
+
+    function test_depositBuck_largeDepositRevertsOnSlippage() public {
+        _setupTwoPoolBasket();
+
+        uint256 buckAmt = 40_000e18;
+        vm.prank(address(basketC));
+        buck.mintFromBasket(alice, buckAmt);
+
+        vm.startPrank(alice);
+        buck.approve(address(basketC), buckAmt);
+        vm.expectRevert(bytes("buck slippage"));
+        basketC.depositToken(address(buck), buckAmt, 0);
+        vm.stopPrank();
+    }
+
+    function test_depositToken_afterBootstrapDepositsOwnPool() public {
+        _setupTwoPoolBasket();
+
+        address pPaxg = IV3Factory(v3Factory).getPool(
+            address(buck), address(paxg), 500);
+        address pCbbtc = IV3Factory(v3Factory).getPool(
+            address(buck), address(cbbtc), 500);
+        uint256 paxgBefore = paxg.balanceOf(pPaxg);
+        uint256 cbbtcBefore = cbbtc.balanceOf(pCbbtc);
+
+        vm.prank(alice);
+        paxg.approve(address(basketC), 1e18);
+        vm.prank(alice);
+        uint256 rid = basketC.depositToken(address(paxg), 1e18, 0);
+
+        assertGt(paxg.balanceOf(pPaxg), paxgBefore, "PAXG pool got PAXG");
+        assertEq(
+            cbbtc.balanceOf(pCbbtc),
+            cbbtcBefore,
+            "TOKEN deposit does not route into cbBTC pool"
+        );
+
+        (uint256 principalBuck, uint256 principalToken, address guardToken,) =
+            basketC.deposits(rid);
+        assertGt(principalBuck, 0, "BUCK principal recorded");
+        assertEq(principalToken, 1e18, "input TOKEN principal recorded");
+        assertEq(guardToken, address(paxg), "redeem guard uses input token");
     }
 
     /// @dev Partial multi-pool redemption: 50% of the principal redeemed,

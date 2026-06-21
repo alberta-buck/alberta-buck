@@ -59,6 +59,40 @@ class Chain:
         self.w3 = w3
         self.deployer = Web3.to_checksum_address(deployer)  # unlocked anvil acct
         self.chain_id = w3.eth.chain_id
+        self._balance_cache: dict[tuple[str, str], int] = {}
+
+    # -- hot read cache ------------------------------------------------ #
+
+    def clear_balance_cache(self) -> None:
+        """Drop memoized ERC20 balanceOf reads.
+
+        The externally-driven sim runs against instant-mined Anvil blocks.
+        Within a stable block, repeated reserve reads are pure and safe to
+        memoize; after a tx/deploy/explicit mine we clear the cache.
+        """
+        self._balance_cache.clear()
+
+    def balance_of(self, token: Any, holder: str, abi: list | None = None) -> int:
+        """Memoized ERC20 `balanceOf(holder)`.
+
+        `token` may be a web3 contract or an address string.  Address strings
+        need `abi` so we can build a local contract wrapper on cache miss.
+        """
+        token_addr = Web3.to_checksum_address(
+            token.address if hasattr(token, "address") else token)
+        holder_addr = Web3.to_checksum_address(holder)
+        key = (token_addr.lower(), holder_addr.lower())
+        if key in self._balance_cache:
+            return self._balance_cache[key]
+        if hasattr(token, "functions"):
+            contract = token
+        else:
+            if abi is None:
+                raise ValueError("abi required for address-only balance_of")
+            contract = self.w3.eth.contract(address=token_addr, abi=abi)
+        value = contract.functions.balanceOf(holder_addr).call()
+        self._balance_cache[key] = value
+        return value
 
     # -- account helpers ---------------------------------------------- #
 
@@ -94,6 +128,7 @@ class Chain:
                 "value": value,
             })
         rcpt = self.w3.eth.wait_for_transaction_receipt(h)
+        self.clear_balance_cache()
         if rcpt["status"] != 1:
             # Replay via eth_call at the post-block state to extract the
             # revert reason — anvil returns the Solidity require message
@@ -126,6 +161,7 @@ class Chain:
             "from": self.deployer, "gas": _DEPLOY_GAS, "gasPrice": 0,
         })
         rcpt = self.w3.eth.wait_for_transaction_receipt(h)
+        self.clear_balance_cache()
         if rcpt["status"] != 1:
             raise RuntimeError(f"deploy {name} reverted")
         return self.w3.eth.contract(address=rcpt["contractAddress"], abi=abi)

@@ -59,6 +59,7 @@ VENV_OPTS		=
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
 .PHONY: sim sim-build sim-run sim-test sim-plot
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
+.PHONY: sim-run-flow sim-plot-flow sim-flow
 .PHONY: prices-routing plot-routing
 
 
@@ -471,16 +472,21 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 # BuckBasket / IdentityRegistry stack + real Uniswap V3 + Universal
 # Router.  EOA agents get REAL cryptographic IdentityRegistry identities.
 #
-#   make sim                # full pipeline: build -> run -> plot
-#   make sim-build          # emit SimLP + stack artifacts (+ UR artifact)
-#   make sim-run            # run the routing scenario (SIM_DAYS=120)
-#   make sim-test           # the pytest smoke wrapper
-#   make sim-plot           # render images/routing-sim.png from the JSON
+# Run these through Nix, e.g. `make nix-sim-run-rebalancing`, or from inside
+# `nix develop`; the system shell may not have Foundry, Anvil, Web3, or the
+# project Python dependencies.
 #
-# Override horizon:  make sim-run SIM_DAYS=365 SIM_TICKS=4
+#   make nix-sim                # full pipeline: build -> run -> plot
+#   make nix-sim-build          # emit SimLP + stack artifacts (+ UR artifact)
+#   make nix-sim-run            # run the routing scenario (SIM_DAYS=120)
+#   make nix-sim-test           # the pytest smoke wrapper
+#   make nix-sim-plot           # render images/routing-sim.png from the JSON
+#
+# Override horizon:  make nix-sim-run SIM_DAYS=365 SIM_TICKS=4
 
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
+SIM_BASKET	?= legacy        # legacy (BuckBasket) | prorata (BuckBasketProRata)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 
@@ -530,7 +536,7 @@ v2-patch-init-code-hash:
 		fi
 
 sim-run:	sim-build
-	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET)
 
 sim-test:	sim-build
 	python -m pytest $(SIM_TEST) -v -s
@@ -543,26 +549,97 @@ sim:		sim-run sim-plot
 
 # ── Rebalancing simulation (Phase 1: staggered direct-mint agents) ──────
 #
-# DirectMintAgents enter on a staggered cadence (every ~30 days), each
-# depositing into the most-underweight TOKEN/BUCK pool and holding for
-# months.  The entry/exit flow naturally rebalances pools toward target
-# weights.  BuckBasket has been fixed so equal weightBp yields equal
-# target weights (0 => default 1/N share).
+# DirectMintAgents enter/exit stochastically.  Current TOKEN deposits LP into
+# the deposited token's own TOKEN/BUCK pool; redemption allocation is the
+# basket-side "sell overweight" leg.  BUCK deposits route to the most
+# underweight pool, but this scenario's agents do not currently enter with
+# BUCK.  BuckBasket has been fixed so equal weightBp yields equal target
+# weights (0 => default 1/N share).
 #
-#   make sim-rebalancing         # build -> run -> plot (365 days)
-#   make sim-run-rebalancing     # run the rebalancing scenario
-#   make sim-plot-rebalancing    # render images/rebalancing-sim.png
+#   make nix-sim-rebalancing         # build -> run -> plot (365 days)
+#   make nix-sim-run-rebalancing     # run the rebalancing scenario
+#   make nix-sim-plot-rebalancing    # render images/rebalancing-sim.png
 
 REBALANCING_VECTOR   = test/vectors/rebalancing-sim.json
 SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
 
 sim-run-rebalancing:	sim-build
-	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET)
 
 sim-plot-rebalancing:	$(REBALANCING_VECTOR)
 	python -m pytest $(SIM_REB_PLOT) -v -s
 
 sim-rebalancing:	sim-run-rebalancing sim-plot-rebalancing
+
+
+# ── Rebalancing A/B: BuckBasketProRata vs the traditional BuckBasket ────
+#
+# Two independent targets, each writing its own vector + image so the runs
+# can be compared side by side.  The hypothesis: BUCK direct-mint agents +
+# the rebalancing effect of BuckBasketProRata redemptions yield a smoother
+# holder ROI than the traditional basket.
+#
+#   make nix-sim-rebalancing-prorata        # build -> run (prorata) -> plot
+#   make nix-sim-rebalancing-traditional    # build -> run (legacy)  -> plot
+#   make nix-sim-run-rebalancing-prorata    # just the run
+#
+# Horizon override applies as usual:  ... SIM_DAYS=365 SIM_TICKS=4
+
+REBALANCING_VECTOR_PRORATA      = test/vectors/rebalancing-sim-prorata.json
+REBALANCING_VECTOR_TRADITIONAL  = test/vectors/rebalancing-sim-traditional.json
+
+.PHONY: sim-run-rebalancing-prorata sim-run-rebalancing-traditional
+.PHONY: sim-plot-rebalancing-prorata sim-plot-rebalancing-traditional
+.PHONY: sim-rebalancing-prorata sim-rebalancing-traditional
+
+sim-run-rebalancing-prorata:	sim-build
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
+		--ticks-per-day $(SIM_TICKS) --basket prorata \
+		--out $(REBALANCING_VECTOR_PRORATA)
+
+sim-run-rebalancing-traditional:	sim-build
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
+		--ticks-per-day $(SIM_TICKS) --basket legacy \
+		--out $(REBALANCING_VECTOR_TRADITIONAL)
+
+sim-plot-rebalancing-prorata:	$(REBALANCING_VECTOR_PRORATA)
+	REB_VECTOR=$(REBALANCING_VECTOR_PRORATA) \
+		REB_OUT=images/rebalancing-sim-prorata.png \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-plot-rebalancing-traditional:	$(REBALANCING_VECTOR_TRADITIONAL)
+	REB_VECTOR=$(REBALANCING_VECTOR_TRADITIONAL) \
+		REB_OUT=images/rebalancing-sim-traditional.png \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing-prorata:	sim-run-rebalancing-prorata sim-plot-rebalancing-prorata
+sim-rebalancing-traditional:	sim-run-rebalancing-traditional sim-plot-rebalancing-traditional
+
+
+# ── Pure price-flow basket simulator (no Anvil) ───────────────────────
+#
+# Ad-hoc check of investor flow rebalancing against the generated
+# PAXG/cbBTC/AOIL price CSVs.
+#
+#   make nix-sim-flow        # run -> plot
+#   make nix-sim-run-flow    # write test/vectors/basket-flow-sim.json
+#   make nix-sim-plot-flow   # render images/basket-flow-sim.png
+
+FLOW_VECTOR	= test/vectors/basket-flow-sim.json
+FLOW_IMAGE	= images/basket-flow-sim.png
+SIM_FLOW_PLOT	= alberta_buck/sim/plot_basket_flow.py
+
+$(FLOW_VECTOR):	$(ROUTING_PRICES) alberta_buck/sim/basket_flow.py
+	python -m alberta_buck.sim.basket_flow
+
+sim-run-flow:	$(ROUTING_PRICES)
+	python -m alberta_buck.sim.basket_flow
+
+sim-plot-flow:	$(FLOW_VECTOR) $(SIM_FLOW_PLOT)
+	python -m alberta_buck.sim.plot_basket_flow
+
+sim-flow:	sim-run-flow
+	python -m alberta_buck.sim.plot_basket_flow
 
 
 # ── Dependencies ─────────────────────────────────────────────────────

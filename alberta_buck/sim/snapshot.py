@@ -170,29 +170,32 @@ class Snapshotter:
             total += rb                          # BUCK side value
         return total
 
-    def _agent_value(self, agents, day, cls_name: str) -> int:
-        """Portfolio value of all agents whose class name matches, including
-        the value of any BuckBasket LP deposits (receipt NFTs)."""
+    def _agent_value(self, agents, day, cls_name) -> int:
+        """Portfolio value of matching agents, including the value of any
+        BuckBasket LP deposits (receipt NFTs)."""
         d = self.d
+        names = {cls_name} if isinstance(cls_name, str) else set(cls_name)
         v = 0
         for ag in agents:
-            if type(ag).__name__ != cls_name:
-                continue
-            if not getattr(ag, "is_eoa", False) or ag.account is None:
+            if type(ag).__name__ not in names:
                 continue
             for i, tc in enumerate(d.tokens):
                 v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
-            # Include BuckBasket deposit value (LP position principal).
+            # Include the BuckBasket deposit at the depositor's *own* economic
+            # stake -- what they contributed and can redeem -- NOT the doubled
+            # LP position.  For a TOKEN deposit the depositor owns the TOKEN
+            # side; the paired BUCK was system-minted seigniorage that is burned
+            # on redeem and is never the depositor's wealth (counting it roughly
+            # doubled DM value and manufactured phantom ROI).  For a BUCK-side
+            # deposit (tokenPrincipal == 0) the contributed BUCK is their stake
+            # (1 BUCK == 1 USDC at t=0; both 6-dec).
             di = ag.deposit_info(d) if hasattr(ag, "deposit_info") else None
             if di is not None:
                 tok_idx, ptok, pbuck = di
-                v += ptok * self.s.prices.ref(tok_idx, 0) // (10 ** d.dec[tok_idx])
-                # 1 BUCK == 1 USDC at t=0; BUCK is 6-dec just like USDC, so
-                # the BUCK-side principal contributes 1:1 to the USDC-d0
-                # value tally (the old "// 10**12" assumed BUCK was 18-dec
-                # and shrank the deposit value by 12 orders of magnitude,
-                # making DM agent P&L invisible).
-                v += pbuck
+                if ptok > 0:
+                    v += ptok * self.s.prices.ref(tok_idx, 0) // (10 ** d.dec[tok_idx])
+                else:
+                    v += pbuck
         return v
 
     def capture(self, day, ctr, agents, init_val,
@@ -241,7 +244,8 @@ class Snapshotter:
         dm_pnl = 0
         if dm_init_val is not None:
             dm_pnl = self._agent_value(
-                agents, day, "DirectMintAgent") - dm_init_val
+                agents, day, ("DirectMintAgent", "DirectMintBuckAgent")
+            ) - dm_init_val
 
         # Basket NAV (total BUCK value of all BuckBasket LP) and
         # outstanding DM liability (sum of buckPrincipal across active
@@ -277,6 +281,7 @@ class Snapshotter:
             "dmTotalInvested": ctr.get("dmTotalInvested", 0),
             "basketNav": nav,
             "dmOutstanding": out_buck,
+            "treasuryBuck": treas_buck,
             "treasuryShare": treas_frac,
         })
 

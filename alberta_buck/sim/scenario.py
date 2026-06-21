@@ -39,11 +39,11 @@ ROUTING = Scenario(
     agents={"AnonymousArbAgent": 3,
             "TokenAccumulatorAgent": 3,    # one per token (idx % N)
             "MarketMakerWhale": 1,
-            # One BootstrapDMAgent per token seeds the TOKEN/BUCK pools
-            # before tick 0 (deposit-once-never-exit), giving arbs real
-            # liquidity to route through.  No stochastic churn here --
-            # ROUTING isolates arb dynamics, not LP turnover.
-            "BootstrapDMAgent": 3},
+            # Small pinned TOKEN LPs seed the TOKEN/BUCK pools before tick
+            # 0 (deposit-once-never-exit), giving arbs real liquidity to
+            # route through.  No stochastic churn here -- ROUTING isolates
+            # arb dynamics, not LP turnover.
+            "BootstrapDMAgent": 12},
     days=120,
     ticks_per_day=4,
 )
@@ -57,15 +57,17 @@ REBALANCING = Scenario(
     agents={"AnonymousArbAgent": 3,
             "TokenAccumulatorAgent": 3,
             "MarketMakerWhale": 1,
-            # Three pinned LPs floor the pools at bootstrap so the
-            # arb-stabilization narrative is well-defined from tick 0.
-            "BootstrapDMAgent": 3,
-            # 50 stochastic LPs: per-tick Bernoulli enter/exit with
-            # tuned probabilities (see DirectMintAgent.{ENTER,EXIT}_PROB)
-            # produce ~50 entries+exits across the year — enough churn
-            # to observe treasury share accumulating without the brittle
-            # setup-time schedule machinery.
-            "DirectMintAgent": 50},
+            # Many smaller pinned TOKEN LPs floor the pools at bootstrap so
+            # the arb-stabilization narrative is well-defined from tick 0.
+            "BootstrapDMAgent": 24,
+            # Smaller stochastic TOKEN LPs: each buys its chosen commodity
+            # from the deep TOKEN/USDC pool, then pledges that TOKEN into
+            # its own TOKEN/BUCK pool.
+            "DirectMintAgent": 300,
+            # Smaller stochastic BUCK holders: mint externally backed BUCK
+            # and deposit it into the currently most-underweight pool, with
+            # BuckBasket enforcing its BUCK->TOKEN slippage guard.
+            "DirectMintBuckAgent": 75},
     days=365,
     ticks_per_day=4,
 )

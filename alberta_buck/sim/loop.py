@@ -10,24 +10,25 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
-from alberta_buck.sim.direct_mint import BootstrapDMAgent, DirectMintAgent
+from alberta_buck.sim.direct_mint import (
+    BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
+)
 from alberta_buck.sim.snapshot import Snapshotter
 
 E6 = 10 ** 6
-E18 = 10 ** 18
 
 
-def run(scenario, anvil, out_path=None, verbose=True) -> dict:
+def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> dict:
     w3 = anvil.w3
     chain = Chain(w3, w3.eth.accounts[0])
     rng = idmod.seeded_rng(scenario.seed)
     prng = random.Random(scenario.seed)
 
     if verbose:
-        print(f"[sim] deploying '{scenario.name}' "
+        print(f"[sim] deploying '{scenario.name}' with {basket_impl} basket "
               f"({scenario.days}d x {scenario.ticks_per_day} ticks)...",
               flush=True)
-    d = deploy(chain, anvil, scenario, rng)
+    d = deploy(chain, anvil, scenario, rng, basket_impl=basket_impl)
 
     # --- build + register the agent population ----------------------- #
     # Reset per-class counters defensively so back-to-back sim runs in
@@ -35,6 +36,7 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
     # bootstrap-token assignment depends on `seq < N`).
     BootstrapDMAgent._counter = 0
     DirectMintAgent._counter = 0
+    DirectMintBuckAgent._counter = 0
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
         cls = REGISTRY[cls_name]
@@ -46,7 +48,10 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
     whales = [a for a in agents if isinstance(a, MarketMakerWhale)]
     arbs = [a for a in agents if a not in whales]
     if verbose:
-        print(f"[sim] registered {len(agents)} EOA identities "
+        eoa_count = sum(1 for a in agents if getattr(a, "is_eoa", True))
+        public_agents = len(agents) - eoa_count
+        print(f"[sim] registered {eoa_count} EOA identities "
+              f"+ {public_agents} public agent contracts "
               f"({len(arbs)} arb, {len(whales)} whale); deploy done.")
 
     # --- pre-tick bootstrap phase ----------------------------------- #
@@ -66,22 +71,33 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
     # by the bootstrap principal).
     init_val = snap.agg_value(agents, 0)
     reb_init = snap._agent_value(agents, 0, "BuckBasketRebalancerAgent")
-    dm_init = snap._agent_value(agents, 0, "DirectMintAgent")
+    dm_init = snap._agent_value(
+        agents, 0, ("DirectMintAgent", "DirectMintBuckAgent"))
 
     ts = w3.eth.get_block("latest")["timestamp"] + 10
     tick_secs = max(60, 86_400 // scenario.ticks_per_day)
 
     n_tok = len(d.tokens)
     for day in range(scenario.days):
-        # One market maker snaps ONE random token at one random tick/day.
+        # Current day + reference USD prices, for the agents' realized-return
+        # accounting (deposit/redeem valuation) and the throughput meter.
+        ctr["day"] = day
+        ctr["refUsd"] = [scenario.prices.ref(i, day) for i in range(n_tok)]
+        # One market-maker intervention per day, but it updates every
+        # TOKEN/USDC truth pool.  Updating only one random token let the
+        # floating BUCK/USDC gauge be dominated by whichever asset was most
+        # recently snapped, making TOKEN/BUCK->USD plots look cross-wired.
         whale_tick = prng.randrange(scenario.ticks_per_day)
-        whale_tok = prng.randrange(n_tok)
+        whale_order = list(range(n_tok))
+        prng.shuffle(whale_order)
         for tick in range(scenario.ticks_per_day):
             ts += tick_secs
             anvil.warp_to(ts)
+            d.chain.clear_balance_cache()
             if tick == whale_tick:
                 for wagent in whales:
-                    wagent.snap(d, scenario, day, whale_tok, ctr)
+                    for whale_tok in whale_order:
+                        wagent.snap(d, scenario, day, whale_tok, ctr)
             order = arbs[:]
             prng.shuffle(order)
             for a in order:
@@ -192,6 +208,20 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
                 for fr in tail) / len(tail)
         track.append(e)
     verified = all(d.reg.functions.isVerified(a.address).call() for a in agents)
+    # Arb throughput vs basket fee income: validate that the DM return scale
+    # is consistent with actual BUCK volume crossing the pools, not a trade
+    # count.  Each routed cycle crosses ~2 TOKEN/BUCK pool hops at fee_buck,
+    # so the basket's gross fee take ~ volume * 2 * fee_buck.
+    cycle_vol = ctr.get("cycleVolumeUsdc", 0)
+    fee_take = cycle_vol * 2 * d.fee_buck // 1_000_000   # fee_buck is in pip (1e6)
+    dm_invested = ctr.get("dmTotalInvested", 0)
+    # Realized return: dollar-day-weighted APR over completed deposit->redeem
+    # round-trips -- profit per dollar per day, annualised.  This is the honest
+    # holder ROI (USD redeemed vs USD deposited), flow-adjusted so new deposits
+    # are never mistaken for gains.
+    profit_usd = ctr.get("dmProfitUsd", 0)
+    dollar_days = ctr.get("dmDollarDays", 0)
+    realized_apr = (365.0 * profit_usd / dollar_days) if dollar_days else 0.0
     summary = {
         "json": str(path),
         "days": len(snap.frames),
@@ -200,6 +230,12 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
         "cycle_trades": ctr["cycleTrades"],
         "ub_trades": ctr["ubTrades"],
         "direct_trades": ctr["directTrades"],
+        "cycle_volume_usdc": cycle_vol,
+        "basket_fee_estimate": fee_take,
+        "dm_total_invested": dm_invested,
+        "dm_realized_apr": realized_apr,
+        "dm_round_trips": ctr.get("dmRoundTrips", 0),
+        "dm_profit_usd": profit_usd,
         "all_eoa_verified": verified,
         "n_agents": len(agents),
     }
@@ -212,6 +248,15 @@ def run(scenario, anvil, out_path=None, verbose=True) -> dict:
               f"attempts: {ctr.get('cycle_attempt', 0)})  "
               f"whale snaps: {ctr['directTrades']}  "
               f"all EOAs verified: {verified}")
+        # Honest holder return: realized dollar-day-weighted APR over completed
+        # round-trips, plus the arb throughput + implied basket fee that bounds
+        # it (gross BUCK volume crossing the pools, USD-valued).
+        rt = ctr.get("dmRoundTrips", 0)
+        print(f"[sim] DM realized return: {100*realized_apr:+.2f}% APR  "
+              f"({rt} round-trips, ${profit_usd/E6:,.0f} profit on "
+              f"${ctr.get('dmDollarDays',0)/E6:,.0f} dollar-days)")
+        print(f"[sim] arb throughput: ${cycle_vol/E6:,.0f} routed  "
+              f"=> basket fee ~${fee_take/E6:,.0f}")
         if ctr.get("cycle_err"):
             print(f"[sim] last cycle exec error: {ctr['cycle_err']}")
     return summary

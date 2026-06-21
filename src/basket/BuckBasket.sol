@@ -6,7 +6,7 @@ import {IERC20}            from "@openzeppelin/contracts/token/ERC20/IERC20.sol"
 import {IERC721}           from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Math}              from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {UniswapV3OracleLib} from "./lib/UniswapV3OracleLib.sol";
+import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 
 interface IUniswapV3Factory {
@@ -101,8 +101,6 @@ interface IBuckKControllerDirect {
 ///       prices; should use TWAP to resist manipulation.
 /// * #8  `_reinvestBuck` LPs into a single most-underweight pool;
 ///       should mirror the redemption's proportional allocation.
-/// * #9  TOKEN deposits LP into the deposited token's own pool with no
-///       underweight-routing — asymmetric with the BUCK-deposit path.
 /// * #10 `Buck.mintFromBasket` bypasses BuckK's `fundingFactor` gate;
 ///       document or fold basket-minted BUCKs into the PID's accounting.
 /// * #11 `_reinvestBuck` emits no event; downstream observers can't
@@ -502,20 +500,21 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
 
     // --- Direct mint ----------------------------------------------------- //
 
-    /// @notice Deposit a basket token.  Mints BUCK at the token's current
-    ///         pool spot price and adds (token, BUCK) liquidity to that
-    ///         pool.  The depositor receives an NFT representing their
-    ///         share of total basket value.
+    /// @notice Deposit BUCK or a basket TOKEN.  TOKEN deposits mint BUCK at
+    ///         the token's current pool spot price and add (TOKEN, BUCK)
+    ///         liquidity to that token's own pool.  BUCK deposits are swapped
+    ///         into the most-underweight pool's TOKEN, then LP'd there.
     ///
-    ///         Cross-pool rebalancing ("buy low, sell high") is deferred
-    ///         to a follow-up change.  The helpers _mostUnderweightPool(),
-    ///         _mostOverweightPool(), _reinvestBuck(), and the swap callback
-    ///         are already in place for that work.
+    ///         Commodity routing is intentionally out of scope here: callers
+    ///         that want to pledge a specific commodity are assumed to have
+    ///         chosen and acquired that TOKEN externally.
     ///
     /// @param  maxDeviationBp 0 = skip TWAP guard (bootstrap / cold pool).
     ///         Non-zero rejects the deposit if |spot - TWAP| exceeds
     ///         maxDeviationBp / 10000 of TWAP, protecting large deposits
-    ///         from being front-run at a stale pool price.
+    ///         from being front-run at a stale pool price.  For BUCK
+    ///         deposits, 0 uses `defaultMaxDeviationBp` as a max BUCK->TOKEN
+    ///         price-impact bound; non-zero overrides it.
     function depositToken(
         address token,
         uint256 tokenAmount,
@@ -523,28 +522,22 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     ) external returns (uint256 receiptId) {
         require(tokenAmount > 0, "amount=0");
 
-	uint128 liquidity = 0;
-	uint256 buckToMint = 0;
-	uint256 tokenPrincipal;          // native-dec amount on c.token side of LP
-	Constituent storage c;
-	if (token == address(buck)) {
-	    // --- BUCK deposit: swap BUCK -> underweight token, then LP ------ //
-	    //
-            // Pull user's already-minted, fully-backed BUCKs.  The
-	    // Constituent liquidity token is selected automatically.  The
-	    // bucksToMint might be lower than tokenAmount due to fees.
+        uint128 liquidity = 0;
+        uint256 buckToMint = 0;
+        uint256 tokenPrincipal;          // native-dec amount on c.token side of LP
+        Constituent storage c;
+
+        if (token == address(buck)) {
             IERC20(address(buck)).transferFrom(
                 msg.sender, address(this), tokenAmount);
-            // tokenPrincipal here is the swap output (`tgtTok`) in c.token's
-            // native decimals -- NOT the user's BUCK input -- so it matches
-            // the units `_settleRedemption` and `_finalizeDeposit` expect.
-            (c, liquidity, buckToMint, tokenPrincipal) = _buckToLp(tokenAmount);
+            uint256 maxBuckSwapSlippageBp = maxDeviationBp == 0
+                ? defaultMaxDeviationBp
+                : maxDeviationBp;
+            // tokenPrincipal here is the swap output (`tokenPrincipal`) in
+            // c.token's native decimals, not the user's BUCK input.
+            (c, liquidity, buckToMint, tokenPrincipal) =
+                _buckToLp(tokenAmount, maxBuckSwapSlippageBp);
         } else {
-            // --- TOKEN deposit: standard single-pool LP ---------------------- //
-	    //
-	    // Pull user's backing liquidity; The Constituent liquidity
-	    // token is as supplied, and the bucksToMint is computed by
-	    // their current value.
             uint256 depositIdx = indexOf[token];
             require(depositIdx > 0, "not in basket");
             c = constituents[depositIdx - 1];
@@ -552,12 +545,12 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             uint256 spotPrice = _readPoolPrice(c, 0);
             _enforceSlippageGuard(c, spotPrice, maxDeviationBp);
 
+            IERC20(token).transferFrom(msg.sender, address(this), tokenAmount);
             buckToMint = UniswapV3OracleLib.mulDiv(
                 tokenAmount, spotPrice, 10 ** c.decimals
             );
             require(buckToMint > 0, "buck=0");
 
-            IERC20(token).transferFrom(msg.sender, address(this), tokenAmount);
             buck.mintFromBasket(address(this), buckToMint);
 
             liquidity = _liquidityForAmounts(c, tokenAmount, buckToMint);
@@ -573,22 +566,27 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             );
             _callbackPool = address(0);
             tokenPrincipal = tokenAmount;
-	}
-	receiptId = receipt.mint(msg.sender);
-	// Record details of actual token deposited, and what it was worth in BUCKs
-	deposits[receiptId] = Deposit({
-	    buckPrincipal: buckToMint,
-	    tokenPrincipal: tokenPrincipal,
-	    token: c.token,
-	    depositTime: uint64(block.timestamp)
+        }
+
+        require(buckToMint > 0, "buck=0");
+        receiptId = receipt.mint(msg.sender);
+        deposits[receiptId] = Deposit({
+            buckPrincipal: buckToMint,
+            tokenPrincipal: tokenPrincipal,
+            token: c.token,
+            depositTime: uint64(block.timestamp)
         });
-	totalOutstandingBuck += buckToMint;
-	controller.compute();
-	// Record of account's TOKENs -> BUCKs -> LP and the resultant BuckBasket receipt
-	emit Deposited(msg.sender, receiptId,
-		       token, tokenAmount,   // The token supplied
-		       buckToMint,           // The BUCKs it represents
-		       c.token, liquidity);  // And the LP token selected
+        totalOutstandingBuck += buckToMint;
+        controller.compute();
+        emit Deposited(
+            msg.sender,
+            receiptId,
+            token,
+            tokenAmount,
+            buckToMint,
+            c.token,
+            liquidity
+        );
     }
 
     // --- Redemption allocation ------------------------------------------- //
@@ -966,10 +964,30 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
             uint256 tgtTok
         )
     {
+        return _buckToLp(buckAmount, 0);
+    }
+
+    function _buckToLp(uint256 buckAmount, uint256 maxSlippageBp)
+        internal
+        returns (
+            Constituent storage tgtC,
+            uint128 liquidity,
+            uint256 buckToMint,
+            uint256 tgtTok
+        )
+    {
         require(buckAmount > 0, "buckAmount=0");
+        require(maxSlippageBp <= 10000, "bad slippage");
 
         uint256 tgtIdx = _mostUnderweightPool();
         tgtC = constituents[tgtIdx];
+        uint256 minTokenOut = 0;
+        if (maxSlippageBp > 0) {
+            uint256 spotPrice = _readPoolPrice(tgtC, 0);
+            uint256 idealTokenOut = UniswapV3OracleLib.mulDiv(
+                buckAmount, 10 ** tgtC.decimals, spotPrice);
+            minTokenOut = idealTokenOut * (10000 - maxSlippageBp) / 10000;
+        }
 
         // Swap BUCK -> target token on the target pool.  Callback data
         // carries the constituent token address; the callback uses
@@ -995,6 +1013,7 @@ contract BuckBasket is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         int256 tokenDelta = tgtC.buckIsToken0 ? d1 : d0;
         require(tokenDelta < 0, "swap BUCK->token failed");
         tgtTok = uint256(-tokenDelta);
+        require(tgtTok >= minTokenOut, "buck slippage");
 
         // Derive `buckToMint` and `liquidity` from a SINGLE sqrtPriceX96
         // read so the resulting V3 mint amounts match what we hold
