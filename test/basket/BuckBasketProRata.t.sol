@@ -5,9 +5,10 @@ import {Test}    from "forge-std/Test.sol";
 import {ERC20}   from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20}  from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {BuckBasketProRata} from "../../src/basket/BuckBasketProRata.sol";
-import {BuckBasketReceipt} from "../../src/basket/BuckBasketReceipt.sol";
-import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
+import {BuckBasketProRata}  from "../../src/basket/BuckBasketProRata.sol";
+import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
+import {BuckBasketReceipt}  from "../../src/basket/BuckBasketReceipt.sol";
+import {BuckBasketStorage}  from "../../src/basket/BuckBasketStorage.sol";
 
 /// @dev Minimal BUCK: plain ERC-20 + the basket mint/burn hooks.  Avoids the
 ///      identity/carrying machinery of the production Buck so the pro-rata
@@ -61,7 +62,8 @@ contract BuckBasketProRataTest is Test {
 
     MockBuck       internal buck;
     MockController internal ctrl;
-    BuckBasketProRata internal basketC;
+    BuckBasketProRata  internal basketC;
+    BuckBasketUniswapV3 internal venueFacet;
     BuckBasketReceipt internal receipt;
     address        internal v3Factory;
 
@@ -87,6 +89,11 @@ contract BuckBasketProRataTest is Test {
             500,    // 5% spot/TWAP manipulation guard (cold pools self-skip)
             1e3     // min seed liquidity
         );
+        // Install the Uniswap V3 venue facet (delegatecall target).
+        venueFacet = new BuckBasketUniswapV3();
+        vm.prank(GOV);
+        basketC.setVenue(address(venueFacet));
+
         buck.setBasket(address(basketC));
         receipt = basketC.receipt();
 

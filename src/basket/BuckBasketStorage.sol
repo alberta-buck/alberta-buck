@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IBuckKController}    from "../IBuckKController.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
-import {IBasketRebalancer}  from "./IBasketRebalancer.sol";
+import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 
 interface IUniswapV3Factory {
     function createPool(address tokenA, address tokenB, uint24 fee) external returns (address pool);
@@ -70,7 +70,7 @@ abstract contract BuckBasketStorage {
     /// @notice Total outstanding BUCK principal == Σ buckPrincipal.
     uint256 public totalOutstandingBuck;
 
-    /// @notice Treasury BUCK profit awaiting re-LP by the rebalancer.
+    /// @notice Treasury BUCK profit awaiting re-LP by the venue facet.
     uint256 public treasuryBuckPending;
 
     /// @notice BUCK profit share to treasury, in basis points (default 50%).
@@ -82,7 +82,7 @@ abstract contract BuckBasketStorage {
     BuckBasketReceipt public receipt;
     IBuckKController  public controller;
     IUniswapV3Factory public v3Factory;
-    IBasketRebalancer public rebalancer;   // the delegatecall facet address
+    IBuckBasketVenue  public venue;        // the delegatecall AMM-venue facet
     address           public governance;
 
     uint24  public defaultFeeTier;
@@ -113,7 +113,7 @@ abstract contract BuckBasketStorage {
     event TreasuryAccrued(uint256 amount, uint256 pending);
     event TreasuryWithdrawn(address indexed to, uint256 amount);
     event TreasuryReinvested(uint256 indexed poolIdx, uint256 buckConsumed, uint128 liquidity);
-    event RebalancerSet(address indexed rebalancer);
+    event VenueSet(address indexed venue);
     event TreasuryBpSet(uint16 treasuryBp);
 
     // --- Errors (custom errors save bytecode vs require-strings) ----------- //
@@ -142,6 +142,7 @@ abstract contract BuckBasketStorage {
     error NotGovernance();
     error NotInBasket();
     error NotOwner();
+    error NotSelf();
     error PayoutToken0();
     error RedeemZero();
     error ReinvestL0();
@@ -154,6 +155,7 @@ abstract contract BuckBasketStorage {
     error TokenTooThin();
     error TreasuryBpTooHigh();
     error Underwater();
+    error VenueUnset();
 
     modifier onlyGov() {
         if (!(msg.sender == governance)) revert NotGovernance();

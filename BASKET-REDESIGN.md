@@ -4,52 +4,65 @@ Working draft. Supersedes the fused "sell-high / recycle-to-buy-low" redemption
 described in `alberta-buck-ethereum.org` §BuckBasket. Once settled this folds back
 into the org master and the `BUG #N` list is retired.
 
-> **Status (as of the storage-base refactor).** `src/basket/`:
-> `BuckBasketProRata.sol` (new pro-rata core, **deployable** at 24,552 / 24,576 B),
-> `BuckBasket.sol` (legacy fused impl, moved here + retained), shared
-> `BuckBasketStorage.sol` (the storage layout base both the shell and any facet
-> inherit), shared adoptable `BuckBasketReceipt.sol` (used by *both*, on-chain
-> `tokenURI`), `BasketMath.sol` (math lib; its V3-math + helpers are `public` so
-> they deploy separately and are `DELEGATECALL`'d off the size-constrained
-> basket), `IBasketRebalancer.sol` (`pathFor`) + `BasketRebalancer.sol`
-> (governance FX-route registry — *to be repurposed as the delegatecall facet*,
-> see Next steps). Shared controller surface `src/IBuckKController.sol`.
-> Tests: `BuckBasketProRata.t.sol` 19, legacy `BuckBasket.t.sol` 18,
-> `BasketRebalancer.t.sol` 6 — **43/43**.
+> **Status (as of the shell/venue-facet refactor).** `src/basket/` now splits the
+> pro-rata basket along the **AMM-venue seam** (§4):
+> - `BuckBasketProRata.sol` — the **venue-agnostic shell** (economic policy:
+>   allocation math, treasury split, accounting, governance) at **12,275 / 24,576 B**;
+> - `BuckBasketUniswapV3.sol` — the **Uniswap V3 venue facet** (pool setup,
+>   liquidity in/out, price/TWAP reads, conversions, the V3 callbacks; all V3
+>   tick/L/sqrt math inline) at **14,270 B**, reached by `delegatecall`;
+> - `IBuckBasketVenue.sol` — the seam: `setupPool` · `provideForToken` ·
+>   `withdrawLiquidity` · `investFromBucks` · `convertIntoBucks` + two value reads;
+> - `BuckBasketStorage.sol` — the storage base both inherit (the `venue` facet
+>   slot, the callback guards, all errors/events) so their layouts are provably
+>   identical under delegatecall;
+> - `BuckBasket.sol` (legacy fused impl, retained), shared adoptable
+>   `BuckBasketReceipt.sol`, and `IBasketRebalancer.sol` + `BasketRebalancer.sol`
+>   (the standalone governance FX-route registry, now **decoupled** from the
+>   basket — for the FX follow-up). Shared controller surface `src/IBuckKController.sol`.
 >
-> `BuckBasketProRata` has: TOKEN deposit; the **sell-high `redeem`** (§5.1
-> closed-form overweight-first allocation degenerating to pro-rata; treasury
-> split; deflation shortfall cover under a `maxConversionLossBp` budget, default
-> 1%, `0 = unlimited`; the two revert paths); the **single-TOKEN payout**
-> (`payoutToken`, one-pool draw + within-pool conversion); the **spot/TWAP
-> manipulation guard** on the value read; and **`sweepTreasury`**
-> (recycle-to-buy-low). Reverts are **custom errors** (size). The shortfall
-> cover, within-pool conversion, and treasury re-LP all swap on the **internal**
-> TOKEN/BUCK pools — FX multi-hop routing via the rebalancer + `ISwapRouter` is
-> a follow-up. Still stubbed: BUCK-side deposits, standalone `rebalance()`, the
-> full migration handoff. `MAX_DUST_WEI = 1e9` absorbs V3 burn-rounding on a
-> fully-drained pool.
+> `BasketMath.sol` is **deleted** — splitting by venue dissolved it (the V3 math
+> migrated into the facet as plain inline `UniswapV3OracleLib`; `splitProfit`
+> inlined into the shell). Neither contract needs library linking.
 >
-> **Sim compatibility:** kept drop-in-compatible with the legacy `BuckBasket`
-> for the web3 sim — same `addBasketToken` name/signature, same `Constituent`
-> field order (`constituents(i)[2] == basketAmount`), `redeem(id, bp, 0)` works
-> on both. **Identical constructor signature**, so it's a drop-in for the deploy
-> call — *except* `BuckBasketProRata` needs `BasketMath` **library-linked** (10
-> placeholders in its bytecode), which the sim's `chain.deploy` doesn't do yet.
+> The shell calls the facet via `IBuckBasketVenue(address(this)).fn(...)` — a
+> self-call routed by the shell's **`fallback`** into the facet (the degenerate
+> Diamond; a real Diamond just swaps the single facet for a selector→facet map).
+> The pool's V3 mint/swap callbacks land on the basket address and route in the
+> same way. Facet mutators are **`onlySelf`** (only the basket's own routed
+> self-call may drive them); callbacks authenticate the calling pool via the
+> shared `_callbackPool` / `_swapCallbackPool` guards.
+>
+> Tests: `BuckBasketProRata.t.sol` 19 (now deploys the facet + `setVenue`),
+> legacy `BuckBasket.t.sol` 18, `BasketRebalancer.t.sol` 6 — **whole repo 484/484**.
+>
+> Behaviour is unchanged: TOKEN deposit; the **sell-high `redeem`** (§5.1
+> closed-form, treasury split, deflation shortfall cover under
+> `maxConversionLossBp`, default 1%, `0 = unlimited`; the two revert paths); the
+> **single-TOKEN payout**; the **spot/TWAP manipulation guard**; **`sweepTreasury`**
+> (recycle-to-buy-low). The two generic verbs `investFromBucks` /
+> `convertIntoBucks` (§4) already subsume treasury re-LP and shortfall cover and
+> are the hooks for the deferred BUCK-side deposit and FX-routed conversion.
+> Still on the internal TOKEN/BUCK pools (FX is a follow-up). Still stubbed:
+> BUCK-side deposits, standalone `rebalance()`, the full migration handoff.
+>
+> **Sim compatibility:** still drop-in with the legacy `BuckBasket` — same
+> `addBasketToken` name/signature, `Constituent` field order
+> (`constituents(i)[2] == basketAmount`), `redeem(id, bp, 0)`, **identical
+> constructor**. The library-linking complication is *gone*; the only new step is
+> deploying `BuckBasketUniswapV3` and calling `setVenue(facet)` after construction.
 >
 > **Next steps** (in rough order):
-> 1. **Sim refit** — add library-linking to `sim/chain.py` (deploy `BasketMath`,
->    substitute its address for the `__$…$__` placeholder), and a selector to
->    deploy `BuckBasket` vs `BuckBasketProRata`. Then A/B a purpose-built arb
->    agent vs deposit/redeem agents harvesting the basket's constant-mix flow.
-> 2. **Treasury delegatecall facet (step 2)** — move `sweepTreasury` + its re-LP
->    helpers into `BasketRebalancer` (delegatecall, runs in the basket's storage
->    context via `BuckBasketStorage`); lower-risk first facet, buys ~1.5 KB of
->    headroom (current margin is ~24 B) and lands the rebalancer-as-brain split.
-> 3. **Redeem facet** — move the sell-high allocation + conversion into the facet
->    (the heaviest block; one delegatecall, scalar args, no array marshalling).
-> 4. **FX-routed conversion** — wire `pathFor` + `ISwapRouter` (needs SwapRouter
->    test infra), and `receipt.tokenURI`'s richer metadata.
+> 1. **Sim refit** — selector in `sim/chain.py`/`deploy.py` to deploy `BuckBasket`
+>    vs `BuckBasketProRata` (+ its venue facet + `setVenue`). Then A/B a
+>    purpose-built arb agent vs deposit/redeem agents harvesting the basket's
+>    constant-mix flow.
+> 2. **FX-routed conversion** — wire `pathFor` + `ISwapRouter` *behind*
+>    `convertIntoBucks` in the venue facet (needs SwapRouter test infra).
+> 3. **BUCK-side deposits** — `investFromBucks` + a depositor receipt (the same
+>    primitive `sweepTreasury` already uses, different bookkeeping).
+> 4. **Migration handoff** + richer `receipt.tokenURI`; eventual EIP-2535 Diamond
+>    (the shell already routes through a fallback).
 
 ## 1. Goals
 
@@ -168,31 +181,63 @@ mapping(uint256 pool => uint128) treasuryLiquidity;   // treasury-owned L per po
 struct Deposit { uint256 buckPrincipal; uint256 tokenPrincipal; uint64 depositTime; }
 ```
 
-## 4. Module layout
+## 4. Module layout — the shell / venue-facet split
 
 `src/basket/`
 
 ```
-BuckBasket.sol          core: state, deposit, redeem, governance, LP custody, swap execution
-BasketMath.sol          library (pure): shares, weight errors, sqrtPrice/L helpers
-IBasketRebalancer.sol   strategy interface (plan structs)
-BasketRebalancer.sol    SEPARATE, REPLACEABLE: FX-route registry + routing/rebalance intelligence
-BuckBasketReceipt.sol   ~unchanged; `basket` made adoptable for migration
+BuckBasketStorage.sol     storage layout base (state, constants, events, errors); both inherit only this
+BuckBasketProRata.sol     SHELL (venue-agnostic): deposit, redeem, treasury split, accounting, governance,
+                          allocation policy, the fallback router  (12.3 KB)
+IBuckBasketVenue.sol      the AMM seam (setupPool/provide/withdraw/invest/convert + value reads)
+BuckBasketUniswapV3.sol   VENUE FACET (Uniswap V3): pool setup, LP custody, price/TWAP, swaps,
+                          V3 callbacks, all tick/L/sqrt math  (14.3 KB), reached by delegatecall
+IBasketRebalancer.sol     FX-route registry interface (`pathFor`); standalone, for the FX follow-up
+BasketRebalancer.sol      SEPARATE, REPLACEABLE: governance FX-route registry
+BuckBasketReceipt.sol     shared adoptable ERC-721 receipt (on-chain tokenURI)
+BuckBasket.sol            legacy fused impl, retained for the sim A/B
 ```
 
+The shell and the facet inherit **only** `BuckBasketStorage` and add no state, so
+their storage layouts are provably identical — the requirement for sharing slots
+under `delegatecall`. Wiring addresses (`buck`, `v3Factory`, `venue`, …) are plain
+storage (not `immutable`) precisely so the facet reads them through the shared
+storage rather than its own code.
+
+**The venue seam** (`IBuckBasketVenue`) is the abstraction that lets the same
+foundational basket back onto different AMMs (Uniswap V3 today; a v4 / Balancer
+facet later) — four mechanical verbs plus two value reads, all venue-neutral in
+name:
+
+| Verb | What it does | Used by |
+|---|---|---|
+| `setupPool` | create/init the (BUCK,token) pool, return its venue fields | `addBasketToken` |
+| `provideForToken` | LP an exact TOKEN, **minting** the partner BUCK | `depositToken` |
+| `withdrawLiquidity` | burn `L`, collect both sides to the basket | `redeem` |
+| `investFromBucks` | from BUCK: swap-balance + LP into a pool | `sweepTreasury` (+ future BUCK deposit) |
+| `convertIntoBucks` | TOKEN → BUCK, best route, with loss accounting | `redeem` shortfall (+ future FX route) |
+
+The facet returns *what it did*; the **shell books ownership** (treasury slice vs
+depositor receipt) and the BUCK ledger. So `investFromBucks` serves both treasury
+re-LP and (deferred) BUCK-side deposits, and `convertIntoBucks` serves both the
+deflation shortfall cover and (deferred) FX-routed conversion — one primitive each.
+
 Design rules:
-- **Swaps** (TOKEN↔BUCK, multi-hop FX) execute through Uniswap **`ISwapRouter`**
-  (v3-periphery, already vendored). The hand-rolled `uniswapV3SwapCallback`,
-  `_swapTokenForBuckExactIn`, `_tokenInForBuckOut`, recursive
-  `_coverShortfallAggregate` are **deleted**.
-- **LP custody** stays raw-pool `mint`/`burn`/`collect` with the existing
-  `uniswapV3MintCallback` (well-tested; avoids NonfungiblePositionManager gas).
-  Only retained callback.
-- **The rebalancer is a separate contract**, replaceable by governance
-  (`setRebalancer`). It *plans* (the FX-routing intelligence); the **basket
-  executes**, so funds never leave the basket's control. This is the safe
-  pre-Diamond shape — it migrates cleanly to a Diamond facet later (open
-  decision §12: advisor vs. privileged executor).
+- **Custody** stays at the shell. The facet is code-only (holds nothing); every
+  method runs in the shell's storage context via `delegatecall`, so tokens and LP
+  live at the basket address.
+- **Dispatch** is a degenerate Diamond: the shell's `fallback` `delegatecall`s the
+  configured `venue` facet for any selector it doesn't implement — the facet's
+  methods (invoked by the shell as `IBuckBasketVenue(address(this)).fn(...)`) *and*
+  the V3 mint/swap callbacks the pool fires at the basket. A real EIP-2535 Diamond
+  swaps the single facet for a selector→facet map; nothing else changes.
+- **Authorization**: facet *mutators* are `onlySelf` (`msg.sender == address(this)`
+  — only the basket's own routed self-call), so the fallback can't expose them to
+  the world; *callbacks* authenticate the calling pool via the shared
+  `_callbackPool` / `_swapCallbackPool` guards.
+- **The FX rebalancer** (`BasketRebalancer`) remains a separate, governance-swappable
+  route *registry* (§7); it plans, the venue facet executes behind
+  `convertIntoBucks`. Funds never leave the basket.
 
 ## 5. Redemption
 
