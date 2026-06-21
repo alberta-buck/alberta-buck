@@ -85,12 +85,21 @@ class Agent:
             d.chain.send(d.router.functions.execute(cmds, inputs, deadline),
                          sender=self.account, gas=3_000_000)
             ctr["cycleTrades"] += 1
-            # Gross arb volume routed (input-token units; USDC for these
-            # cycles) -- lets us validate basket fee income against actual
-            # throughput rather than a trade count.  Each cycle crosses the
-            # TOKEN/BUCK pool(s) at fee_buck, so basket fee ~ volume * fee_buck
-            # per BUCK-pool hop.
-            ctr["cycleVolumeUsdc"] = ctr.get("cycleVolumeUsdc", 0) + amt
+            # Gross arb volume routed, valued in USD so the meter is
+            # unit-consistent (the input is USDC for arb cycles but an 18-/8-dec
+            # commodity for accumulator cycles -- summing raw amounts mixes
+            # decimals).  Lets us validate basket fee income against actual
+            # throughput rather than a trade count.
+            if in_tok_c.address.lower() == d.usdc.address.lower():
+                vol_usd = amt
+            else:
+                vol_usd = 0
+                refs = ctr.get("refUsd", [])
+                for j, tc in enumerate(d.tokens):
+                    if tc.address.lower() == in_tok_c.address.lower() and j < len(refs):
+                        vol_usd = amt * refs[j] // (10 ** d.dec[j])
+                        break
+            ctr["cycleVolumeUsdc"] = ctr.get("cycleVolumeUsdc", 0) + vol_usd
             if uses_ub:
                 ctr["ubTrades"] = ctr.get("ubTrades", 0) + 1
             return True

@@ -1,18 +1,24 @@
-#+title: Alberta Buck -- The BuckBasket: A High-Inertia Anchor for Generational Value
+#+title: The Alberta Buck -- The BuckBasket (v1.0)
+#+SUBTITLE: A High-Inertia Anchor for Generational Value
 #+author: Perry Kundert
 #+date: 2026-06-20
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
-#+series_order: 40
+#+series_order: 21
+#+weight: 22
 #+draft: false
 #+bucky: true
 #+description: Why a stable currency needs a heavy, physical anchor -- and how the BuckBasket builds one out of base commodities, the laws of thermodynamics, and the planet's collective arbitrage appetite.  A liquid savings facility that harvests reversion-to-the-mean instead of promising it.
 
 #+EXPORT_FILE_NAME: ./images/alberta-buck-ethereum-basket
 #+STARTUP: org-startup-with-inline-images inlineimages
+#+STARTUP: org-latex-tables-centered nil
 #+OPTIONS: ^:nil toc:nil
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+
+#+ATTR_LATEX: :width 10cm
+[[https://perry.kundert.ca/images/dominion-logo.png]]
 
 #+BEGIN_ABSTRACT
 A currency is only as stable as the thing it is anchored to.  Fiat money
@@ -22,17 +28,23 @@ commodities is pinned, in the long run, not by anyone's promise but by the
 crust of the Earth and the laws of thermodynamics.  This article explains
 why such an anchor must be /heavy/ -- high in inertia, deep in liquidity,
 and disciplined in what it admits -- and how the *BuckBasket* assembles
-one on-chain.  The basket does something a central bank cannot: it lets
-idle balances earn a return by harvesting the volatility of mean-reverting
-commodities, using fees paid by the world's own arbitrageurs, while
-remaining fully liquid.  It is not a managed fund and it makes no
-forecasts.  It is a facility -- a savings account whose yield comes from
-physics and arbitrage rather than a counterparty's good intentions -- and
-its single real risk is precisely characterised: an asset that deflates
-forever and never reverts.  The discipline that follows from that risk is
-the heart of the design.
+one on-chain.
+
+The basket does something a central bank cannot: it lets idle balances earn a
+return by harvesting the volatility of mean-reverting commodities, using fees
+paid by the world's own arbitrageurs, while remaining fully liquid.  It is not a
+managed fund and it makes no forecasts.
+
+It is a facility -- a savings account whose yield comes from physics and
+arbitrage rather than a counterparty's good intentions -- and its single real
+risk is precisely characterised: an asset that deflates forever and never
+reverts.  The discipline that follows from that risk is the heart of the design.
 #+END_ABSTRACT
 
+#+LATEX: \clearpage
+#+TOC: headlines 2
+
+#+LATEX: \clearpage
 * The problem: money needs a heavy anchor
 
 Every monetary design eventually answers one question: /anchored to what?/

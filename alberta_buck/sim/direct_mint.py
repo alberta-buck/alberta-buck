@@ -57,6 +57,31 @@ class _DMBase(Agent):
         self._deposit_token_idx: int | None = None
         self._entered: bool = False
         self._exited: bool = False
+        # Realized-return accounting: USD committed at deposit, and the day.
+        self._deposit_value_usd: int = 0
+        self._deposit_day: int = 0
+
+    def _token_portfolio_usd(self, d, holder, ctr) -> int:
+        """USD (6-dec) value of `holder`'s TOKEN balances at the current day's
+        reference prices (`ctr['refUsd']`, set by the loop each day)."""
+        refs = ctr.get("refUsd", [])
+        v = 0
+        for i, tc in enumerate(d.tokens):
+            if i < len(refs) and refs[i]:
+                v += d.chain.balance_of(tc, holder) * refs[i] // (10 ** d.dec[i])
+        return v
+
+    def _record_roundtrip(self, d, ctr, holder, before_usd) -> None:
+        """Book a completed deposit->redeem: realized USD profit and the
+        capital*days it earned over, for the dollar-day-weighted APR."""
+        after_usd = self._token_portfolio_usd(d, holder, ctr)
+        redeem_usd = after_usd - before_usd
+        days = max(1, ctr.get("day", 0) - self._deposit_day)
+        ctr["dmProfitUsd"] = ctr.get("dmProfitUsd", 0) + (redeem_usd - self._deposit_value_usd)
+        ctr["dmDollarDays"] = ctr.get("dmDollarDays", 0) + self._deposit_value_usd * days
+        ctr["dmRoundTrips"] = ctr.get("dmRoundTrips", 0) + 1
+        ctr["dmRedeemedUsd"] = ctr.get("dmRedeemedUsd", 0) + redeem_usd
+        ctr["dmDepositedUsd"] = ctr.get("dmDepositedUsd", 0) + self._deposit_value_usd
 
     def deposit_info(self, d) -> tuple | None:
         if (self._receipt_id is None or self._deposit_token_idx is None
@@ -107,6 +132,18 @@ class _DMBase(Agent):
         self._deposit_token_idx = token_idx
         self._entered = True
         self._exited = False
+        # Value of the assets actually deposited into the basket, in USD at the
+        # day's reference price -- the basket boundary the redeem is compared to
+        # (NOT the USDC the agent spent acquiring the token in a prior swap).
+        # TOKEN deposit: tokenPrincipal * ref; BUCK deposit (ptok==0): the BUCK
+        # contributed (1 BUCK ~ 1 USDC at t0, both 6-dec).
+        refs = ctr.get("refUsd", [])
+        ti = self._deposit_token_idx
+        if self._principal_tok > 0 and ti is not None and ti < len(refs) and refs[ti]:
+            self._deposit_value_usd = self._principal_tok * refs[ti] // (10 ** d.dec[ti])
+        else:
+            self._deposit_value_usd = self._principal_buck
+        self._deposit_day = ctr.get("day", 0)
         ctr["dmEntries"] = ctr.get("dmEntries", 0) + 1
         ctr["dmOutstandingBuck"] = (
             ctr.get("dmOutstandingBuck", 0) + self._principal_buck)
@@ -147,6 +184,7 @@ class _DMBase(Agent):
             return
         try:
             from alberta_buck.sim.deploy import parse_redeem
+            before_usd = self._token_portfolio_usd(d, self.address, ctr)
             rcpt = d.chain.send(
                 d.basket.functions.redeem(self._receipt_id, 0, 0),
                 sender=self.account)
@@ -158,6 +196,7 @@ class _DMBase(Agent):
             tok_to_user, treasury_buck = parse_redeem(d, rcpt, self.address)
             ctr["dmTotalReturned"] = ctr.get("dmTotalReturned", 0) + tok_to_user
             ctr["treasuryBuck"] = ctr.get("treasuryBuck", 0) + treasury_buck
+            self._record_roundtrip(d, ctr, self.address, before_usd)
             # Reset state so the agent can re-enter on a later tick
             # (stochastic DMs).  Bootstrap DMs override _exit to a no-op
             # so this path is never hit.
@@ -354,6 +393,7 @@ class DirectMintBuckAgent(_DMBase):
             return
         try:
             from alberta_buck.sim.deploy import parse_redeem
+            before_usd = self._token_portfolio_usd(d, self.proxy.address, ctr)
             rcpt = self._proxy_exec(
                 d, d.basket.address,
                 d.basket.encode_abi(
@@ -367,6 +407,7 @@ class DirectMintBuckAgent(_DMBase):
             tok_to_user, treasury_buck = parse_redeem(d, rcpt, self.proxy.address)
             ctr["dmTotalReturned"] = ctr.get("dmTotalReturned", 0) + tok_to_user
             ctr["treasuryBuck"] = ctr.get("treasuryBuck", 0) + treasury_buck
+            self._record_roundtrip(d, ctr, self.proxy.address, before_usd)
             self._receipt_id = None
             self._principal_tok = 0
             self._principal_buck = 0

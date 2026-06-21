@@ -79,6 +79,10 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
 
     n_tok = len(d.tokens)
     for day in range(scenario.days):
+        # Current day + reference USD prices, for the agents' realized-return
+        # accounting (deposit/redeem valuation) and the throughput meter.
+        ctr["day"] = day
+        ctr["refUsd"] = [scenario.prices.ref(i, day) for i in range(n_tok)]
         # One market-maker intervention per day, but it updates every
         # TOKEN/USDC truth pool.  Updating only one random token let the
         # floating BUCK/USDC gauge be dominated by whichever asset was most
@@ -211,6 +215,13 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
     cycle_vol = ctr.get("cycleVolumeUsdc", 0)
     fee_take = cycle_vol * 2 * d.fee_buck // 1_000_000   # fee_buck is in pip (1e6)
     dm_invested = ctr.get("dmTotalInvested", 0)
+    # Realized return: dollar-day-weighted APR over completed deposit->redeem
+    # round-trips -- profit per dollar per day, annualised.  This is the honest
+    # holder ROI (USD redeemed vs USD deposited), flow-adjusted so new deposits
+    # are never mistaken for gains.
+    profit_usd = ctr.get("dmProfitUsd", 0)
+    dollar_days = ctr.get("dmDollarDays", 0)
+    realized_apr = (365.0 * profit_usd / dollar_days) if dollar_days else 0.0
     summary = {
         "json": str(path),
         "days": len(snap.frames),
@@ -222,6 +233,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
         "cycle_volume_usdc": cycle_vol,
         "basket_fee_estimate": fee_take,
         "dm_total_invested": dm_invested,
+        "dm_realized_apr": realized_apr,
+        "dm_round_trips": ctr.get("dmRoundTrips", 0),
+        "dm_profit_usd": profit_usd,
         "all_eoa_verified": verified,
         "n_agents": len(agents),
     }
@@ -234,13 +248,15 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
               f"attempts: {ctr.get('cycle_attempt', 0)})  "
               f"whale snaps: {ctr['directTrades']}  "
               f"all EOAs verified: {verified}")
-        # Throughput sanity check: gross arb volume crossing the pools, the
-        # implied basket fee take, and what that fee is as a return on DM
-        # capital -- the realistic ceiling on passive LP ROI from fees.
-        fee_roi = 100 * fee_take / dm_invested if dm_invested else 0.0
+        # Honest holder return: realized dollar-day-weighted APR over completed
+        # round-trips, plus the arb throughput + implied basket fee that bounds
+        # it (gross BUCK volume crossing the pools, USD-valued).
+        rt = ctr.get("dmRoundTrips", 0)
+        print(f"[sim] DM realized return: {100*realized_apr:+.2f}% APR  "
+              f"({rt} round-trips, ${profit_usd/E6:,.0f} profit on "
+              f"${ctr.get('dmDollarDays',0)/E6:,.0f} dollar-days)")
         print(f"[sim] arb throughput: ${cycle_vol/E6:,.0f} routed  "
-              f"=> basket fee ~${fee_take/E6:,.0f}  "
-              f"(~{fee_roi:.2f}% on ${dm_invested/E6:,.0f} DM capital)")
+              f"=> basket fee ~${fee_take/E6:,.0f}")
         if ctr.get("cycle_err"):
             print(f"[sim] last cycle exec error: {ctr['cycle_err']}")
     return summary
