@@ -204,6 +204,13 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
                 for fr in tail) / len(tail)
         track.append(e)
     verified = all(d.reg.functions.isVerified(a.address).call() for a in agents)
+    # Arb throughput vs basket fee income: validate that the DM return scale
+    # is consistent with actual BUCK volume crossing the pools, not a trade
+    # count.  Each routed cycle crosses ~2 TOKEN/BUCK pool hops at fee_buck,
+    # so the basket's gross fee take ~ volume * 2 * fee_buck.
+    cycle_vol = ctr.get("cycleVolumeUsdc", 0)
+    fee_take = cycle_vol * 2 * d.fee_buck // 1_000_000   # fee_buck is in pip (1e6)
+    dm_invested = ctr.get("dmTotalInvested", 0)
     summary = {
         "json": str(path),
         "days": len(snap.frames),
@@ -212,6 +219,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
         "cycle_trades": ctr["cycleTrades"],
         "ub_trades": ctr["ubTrades"],
         "direct_trades": ctr["directTrades"],
+        "cycle_volume_usdc": cycle_vol,
+        "basket_fee_estimate": fee_take,
+        "dm_total_invested": dm_invested,
         "all_eoa_verified": verified,
         "n_agents": len(agents),
     }
@@ -224,6 +234,13 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
               f"attempts: {ctr.get('cycle_attempt', 0)})  "
               f"whale snaps: {ctr['directTrades']}  "
               f"all EOAs verified: {verified}")
+        # Throughput sanity check: gross arb volume crossing the pools, the
+        # implied basket fee take, and what that fee is as a return on DM
+        # capital -- the realistic ceiling on passive LP ROI from fees.
+        fee_roi = 100 * fee_take / dm_invested if dm_invested else 0.0
+        print(f"[sim] arb throughput: ${cycle_vol/E6:,.0f} routed  "
+              f"=> basket fee ~${fee_take/E6:,.0f}  "
+              f"(~{fee_roi:.2f}% on ${dm_invested/E6:,.0f} DM capital)")
         if ctr.get("cycle_err"):
             print(f"[sim] last cycle exec error: {ctr['cycle_err']}")
     return summary
