@@ -40,10 +40,13 @@ interface IBuckBasketVenue {
 
     /// @notice Per-pool *depositor* BUCK reserve (full-range ⇒ pool value =
     ///         2·buckReserve, the value sufficient statistic), the depositor
-    ///         liquidity slice, and their total `B`.  Carries the spot/TWAP
-    ///         manipulation guard on every touched pool.
+    ///         liquidity slice, their total `B`, and each pool's spot price (BUCK
+    ///         per whole TOKEN) -- the shell needs spot to scale the basket's
+    ///         fixed-quantity target weights by initialPrice/spot.  Carries the
+    ///         spot/TWAP manipulation guard on every touched pool.
     function poolBuckValues()
-        external view returns (uint256[] memory bv, uint128[] memory depL, uint256 B);
+        external view
+        returns (uint256[] memory bv, uint128[] memory depL, uint256 B, uint256[] memory prices);
 
     // --- Liquidity in/out ------------------------------------------------- //
 

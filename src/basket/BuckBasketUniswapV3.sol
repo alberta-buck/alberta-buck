@@ -68,16 +68,20 @@ contract BuckBasketUniswapV3 is
     }
 
     function poolBuckValues()
-        external view override returns (uint256[] memory bv, uint128[] memory depL, uint256 B)
+        external view override
+        returns (uint256[] memory bv, uint128[] memory depL, uint256 B, uint256[] memory prices)
     {
         uint256 N = constituents.length;
-        bv   = new uint256[](N);
-        depL = new uint128[](N);
+        bv     = new uint256[](N);
+        depL   = new uint128[](N);
+        prices = new uint256[](N);
         for (uint256 i = 0; i < N; i++) {
             Constituent storage c = constituents[i];
             uint128 totalL = _positionLiquidity(c);
             if (totalL <= c.treasuryLiquidity) continue;
-            _enforceSlippageGuard(c, _readPoolPrice(c, 0), defaultMaxDeviationBp);
+            uint256 spot = _readPoolPrice(c, 0);
+            _enforceSlippageGuard(c, spot, defaultMaxDeviationBp);
+            prices[i] = spot;
             depL[i] = totalL - c.treasuryLiquidity;
             uint256 poolBuck = IERC20(address(buck)).balanceOf(c.pool);
             bv[i] = uint256(depL[i]) * poolBuck / totalL;
@@ -299,16 +303,21 @@ contract BuckBasketUniswapV3 is
 
     // --- Pool math / reads ------------------------------------------------ //
 
-    /// @notice Index of the pool most underweight by value/target ratio (empty
-    ///         pools sort first).  Target = basketAmount * spot price.
+    /// @notice Index of the pool most underweight against the basket's
+    ///         *fixed-quantity* target, whose value share scales by
+    ///         initialPrice/spot (hold less BUCK value of a token as it
+    ///         appreciates).  Relative target share s = basketAmount *
+    ///         initialPrice² / spot; rank pools by actual-value / s (lowest =
+    ///         most underweight; empty pools, ratio 0, sort first).
     function _mostUnderweightPool() internal view returns (uint256 idx) {
         int256 best = type(int256).max;
         for (uint256 i = 0; i < constituents.length; i++) {
             Constituent storage c = constituents[i];
             uint256 v = _poolLpValue(c);
             uint256 p = _readPoolPrice(c, 0);
-            uint256 tgt = UniswapV3OracleLib.mulDiv(c.basketAmount, p, 1e18);
-            int256 ratio = tgt > 0 ? int256(v * 1e18 / tgt) : type(int256).max;
+            uint256 base = UniswapV3OracleLib.mulDiv(c.basketAmount, c.initialPriceInBuck, 1e18);
+            uint256 s = p > 0 ? UniswapV3OracleLib.mulDiv(base, c.initialPriceInBuck, p) : 0;
+            int256 ratio = s > 0 ? int256(UniswapV3OracleLib.mulDiv(v, 1e18, s)) : type(int256).max;
             if (ratio < best) { best = ratio; idx = i; }
         }
     }

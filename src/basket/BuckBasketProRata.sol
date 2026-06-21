@@ -320,9 +320,10 @@ contract BuckBasketProRata is BuckBasketStorage {
 
         // Phase 1: read venue value statistics, allocate (balanced sell-high or
         // all from one pool), and withdraw.
-        (uint256[] memory bv, uint128[] memory depL, uint256 B) = _venue().poolBuckValues();
+        (uint256[] memory bv, uint128[] memory depL, uint256 B, uint256[] memory prices) =
+            _venue().poolBuckValues();
         (uint256[] memory burnL, uint256 V) = payoutToken == address(0)
-            ? _allocateSellHigh(R, bv, depL, B)
+            ? _allocateSellHigh(R, bv, depL, B, prices)
             : _allocateSingleToken(R, payoutToken, bv, depL, B);
         uint256 N = constituents.length;
         uint256[] memory perPoolTok = new uint256[](N);
@@ -393,14 +394,24 @@ contract BuckBasketProRata is BuckBasketStorage {
     }
 
     /// @notice Closed-form sell-high allocation in BUCK value, over the venue's
-    ///         per-pool *depositor* BUCK reserves (`bv`, `depL`, total `B`): draw
-    ///         the value claim `V = θ·NAV` from the most overweight pools first,
-    ///         degenerating to pro-rata at equilibrium.  Venue-neutral policy.
+    ///         per-pool *depositor* BUCK reserves (`bv`, `depL`, total `B`) and
+    ///         spot `prices`: draw the value claim `V = θ·NAV` from the most
+    ///         overweight pools first, degenerating to the basket's target mix at
+    ///         equilibrium.  Venue-neutral policy.
+    ///
+    /// @dev    The basket is a *fixed-quantity* commodity index, so a pool's
+    ///         target *value* share scales by `initialPrice/spot`: as a token
+    ///         appreciates the basket should hold less BUCK value of it.  The
+    ///         per-pool relative target is `sᵢ = basketAmountᵢ·initialPriceᵢ² /
+    ///         spotᵢ` (= the declared weight scaled by initialPrice/spot),
+    ///         normalised by `Σsⱼ`; the post-redemption target reserve is then
+    ///         `tgtᵢ = (sᵢ/Σs)·B·(O−R)/O`.  At spot == initialPrice this reduces
+    ///         to the flat declared weights.
     /// @return burnL  liquidity to burn per pool (∑ value = V, each ≤ depositorL).
     /// @return V      the value claim in BUCK (the loss-budget base).
-    function _allocateSellHigh(uint256 R, uint256[] memory bv, uint128[] memory depL, uint256 B)
-        internal view returns (uint256[] memory burnL, uint256 V)
-    {
+    function _allocateSellHigh(
+        uint256 R, uint256[] memory bv, uint128[] memory depL, uint256 B, uint256[] memory prices
+    ) internal view returns (uint256[] memory burnL, uint256 V) {
         uint256 N = constituents.length;
         burnL = new uint256[](N);
 
@@ -408,17 +419,29 @@ contract BuckBasketProRata is BuckBasketStorage {
         V = UniswapV3OracleLib.mulDiv(R, 2 * B, O);             // θ·NAV
         uint256 claimBv = UniswapV3OracleLib.mulDiv(R, B, O);   // θ·B (BUCK half of V)
 
-        // Ideal sell-high draw per pool: aᵢ = bvᵢ − wᵢ·B·(O−R)/O.  Positive ⇒
-        // overweight; clamp negatives (underweight pools draw 0).
+        // Price-scaled target shares sᵢ (hold less value of an appreciated token).
+        uint256[] memory s = new uint256[](N);
+        uint256 sumS = 0;
+        for (uint256 i = 0; i < N; i++) {
+            if (bv[i] == 0 || prices[i] == 0) continue;
+            Constituent storage c = constituents[i];
+            uint256 base = UniswapV3OracleLib.mulDiv(c.basketAmount, c.initialPriceInBuck, 1e18);
+            s[i] = UniswapV3OracleLib.mulDiv(base, c.initialPriceInBuck, prices[i]);
+            sumS += s[i];
+        }
+        if (sumS == 0) return (burnL, V);
+
+        // Ideal sell-high draw per pool: aᵢ = bvᵢ − tgtᵢ.  Positive ⇒ overweight;
+        // clamp negatives (underweight pools draw 0).
         uint256[] memory pos = new uint256[](N);
         uint256 sumPos = 0;
         for (uint256 i = 0; i < N; i++) {
-            if (bv[i] == 0) continue;
+            if (s[i] == 0) continue;
             uint256 tgt = UniswapV3OracleLib.mulDiv(
-                uint256(constituents[i].targetWeightBp) * B, O - R, 10000 * O);
+                UniswapV3OracleLib.mulDiv(s[i], B, sumS), O - R, O);
             if (bv[i] > tgt) { pos[i] = bv[i] - tgt; sumPos += pos[i]; }
         }
-        if (sumPos == 0) return (burnL, V);    // unreachable: ∑aᵢ = claimBv > 0
+        if (sumPos == 0) return (burnL, V);    // basket already at/under target mix
 
         for (uint256 i = 0; i < N; i++) {
             if (pos[i] == 0) continue;

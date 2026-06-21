@@ -271,8 +271,24 @@ everyone else gets the computed sell-high mix.
 
 Because every position is full-range, **pool value (BUCK) = 2 · buckReserve** — the
 TOKEN reserve and price drop out. So the entire sell-high allocation is a
-closed-form function of the N BUCK reserves `{buckᵢ}`, the declared weights
-`{wᵢ}`, and θ (no iteration, no TOKEN amounts):
+closed-form function of the N BUCK reserves `{buckᵢ}`, the per-pool target weights
+`{wᵢ}`, and θ (no iteration, no TOKEN amounts).
+
+**The target weights are price-scaled.** The basket is a *fixed-quantity*
+commodity index — so many units of each TOKEN — and the intent is to hold *less*
+BUCK value of a constituent as it appreciates (and more as it cheapens). Since
+external arbs drive each pool's spot to the market price, a pool's target *value*
+share is its declared weight scaled by `initialPrice/spot` and renormalised:
+
+```
+sᵢ  = weightᵢ · (initialPriceᵢ / spotᵢ)         (relative target; ∝ basketAmountᵢ·initialPriceᵢ²/spotᵢ)
+wᵢ  = sᵢ / Σ sⱼ                                  (normalised target value share)
+```
+
+E.g. PAXG at 1/3 declared weight, initial 3000, spot 4000 ⇒ sᴾᴬˣᴳ ∝ ⅓·(3000/4000),
+so its target share falls below ⅓ — the basket leans out of the winner and into
+the laggard. At spot = initialPrice this reduces to the flat declared weights.
+Then:
 
 ```
 R   = buckPrincipal · redeemBp / 10000        (burn obligation, BUCK)
@@ -283,10 +299,13 @@ aᵢ⁺ = max(0, aᵢ)                               (underweight pools draw 0)
 fᵢ  = (aᵢ⁺ / Σaⱼ⁺) · V / (2·buckᵢ)             (liquidity fraction to burn in pool i)
 ```
 
-`Σaᵢ = V` exactly, so the positive parts always cover `V`; at equilibrium every
-`aᵢ⁺` is proportional and `fᵢ → θ` (pure pro-rata) falls out automatically. The
-most overweight pool is drawn first and, if its excess covers `V`, supplies the
-whole claim ("return 100 from the most overweight pool") — driving it to target.
+`Σaᵢ = V` exactly (Σwᵢ = 1), so the positive parts always cover `V`; at equilibrium
+every `aᵢ⁺` is proportional and `fᵢ → θ` falls out automatically. The most
+overweight pool — measured against the *price-scaled* target — is drawn first and,
+if its excess covers `V`, supplies the whole claim ("return 100 from the most
+overweight pool"), driving the basket toward its fixed-quantity target mix. The
+deposit/treasury "buy-low" leg (`investFromBucks` → most-underweight pool) uses the
+*same* price-scaled target, so both legs balance toward one definition.
 
 > **Manipulation guard.** `buckᵢ` is read at **spot** (keeping the elegant
 > single-calculation form), but every pool entering the computation must sit
