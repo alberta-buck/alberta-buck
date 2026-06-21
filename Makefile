@@ -57,7 +57,7 @@ VENV_OPTS		=
 .PHONY: vectors plots images
 .PHONY: vector-lifecycle vector-equilibrium vector-arb
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
-.PHONY: sim sim-build sim-run sim-test sim-plot
+.PHONY: sim sim-build sim-run sim-test sim-plot sim-tui
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
 .PHONY: sim-run-flow sim-plot-flow sim-flow
 .PHONY: prices-routing plot-routing
@@ -487,6 +487,7 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
 SIM_BASKET	?= legacy        # legacy (BuckBasket) | prorata (BuckBasketProRata)
+SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 
@@ -545,6 +546,26 @@ sim-plot:	$(ROUTING_VECTOR)
 	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
 
 sim:		sim-run sim-plot
+
+# ── Interactive curses inspector (live component / agent viewer) ────────
+#
+# A navigable TUI over a live sim: deploy + step the timeline yourself and
+# inspect every on-chain component and agent (summary -> detail).  This is
+# the display-only first layer; parameter adjustment comes later.
+#
+#   make nix-sim-tui                                       # rebalancing/prorata
+#   make nix-sim-tui SIM_SCENARIO=routing SIM_BASKET=legacy   # lighter, fast deploy
+#
+# In the UI:  arrows/PgUp/PgDn move; Right/Left expand/collapse; [space] step
+# a tick, [d] step a day, [r] run/pause, [w]rite a snapshot vector, [q]uit.
+sim-tui:	sim-build
+	@echo "sim-tui: scenario: $(SIM_SCENARIO)"
+	@echo "sim-tui: basket:   $(SIM_BASKET)"
+	python -m $(SIM_PKG).tui --scenario $(SIM_SCENARIO) --basket $(SIM_BASKET) \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+
+sim-tui-prorata: SIM_BASKET=prorata
+sim-tui-prorata: sim-tui
 
 
 # ── Rebalancing simulation (Phase 1: staggered direct-mint agents) ──────
