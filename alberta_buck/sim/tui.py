@@ -70,6 +70,7 @@ class TuiApp:
         self.running = False
         self.status = "ready -- [space] step tick  [d] step day  [r] run  [q] quit"
         self.cap = _LineCapture()
+        self._first = True     # paint the first frame synchronously (no blanks)
 
     # -- geometry ------------------------------------------------------ #
 
@@ -97,9 +98,10 @@ class TuiApp:
     def _draw_header(self, scr, cols):
         d = self.drv
         state = "DONE " if d.done else ("RUN  " if self.running else "PAUSE")
+        sync = " sync" if d.proxy.busy else ""    # background reads in flight
         title = (f" Alberta Buck Sim  |  {d.scenario.name} [{d.basket_impl}]  "
                  f"|  day {d.day}/{d.days}  tick {d.tick}/{d.ticks_per_day}  "
-                 f"|  {state}  {100 * d.progress:5.1f}% ")
+                 f"|  {state}  {100 * d.progress:5.1f}%{sync} ")
         self._put(scr, 0, 0, title.ljust(cols), curses.A_REVERSE | curses.A_BOLD)
         keys = ("  Nav: arrows/PgUp/PgDn/Home/End   Right/Left expand/collapse"
                 "   Step: [space]tick [d]day [r]run   [w]rite  [q]uit")
@@ -274,22 +276,32 @@ class TuiApp:
         scr.keypad(True)
         old_out, old_err = sys.stdout, sys.stderr
         sys.stdout = sys.stderr = self.cap
+        # First frame: read synchronously so nothing renders as a placeholder.
+        self.drv.proxy.default_blocking = True
         try:
             while True:
                 self._render(scr)
-                scr.timeout(0 if self.running else -1)
+                if self._first:
+                    self.drv.proxy.default_blocking = False
+                    self._first = False
+                # Block for a key when idle; poll while the sim is running or a
+                # background refresh is in flight (so fresher values land soon).
+                busy = self.drv.proxy.busy
+                scr.timeout(40 if (self.running or busy) else -1)
                 ch = scr.getch()
                 if ch == -1:
-                    # No key: in run mode, advance one tick and loop to redraw.
+                    # No key: step in run mode, else just loop to repaint with
+                    # whatever the worker has refreshed since the last frame.
                     if self.running and not self.drv.done:
                         self._step_tick()
                     continue
-                if ch in (curses.KEY_RESIZE,):
+                if ch == curses.KEY_RESIZE:
                     continue
                 if not self._handle(scr, ch):
                     break
         finally:
             sys.stdout, sys.stderr = old_out, old_err
+            self.drv.close()
 
 
 def main(argv=None) -> int:

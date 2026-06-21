@@ -30,6 +30,7 @@ import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
 from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )
+from alberta_buck.sim.proxy import ChainProxy
 from alberta_buck.sim.snapshot import Snapshotter
 
 
@@ -84,6 +85,12 @@ class SimDriver:
             self.agents, 0, "BuckBasketRebalancerAgent")
         self.dm_init = self.snap._agent_value(
             self.agents, 0, ("DirectMintAgent", "DirectMintBuckAgent"))
+
+        # --- async display-read proxy ------------------------------- #
+        # The UI reads live state through this (memoized, refreshed off the
+        # UI thread).  It is read-only and on its own connection, so it never
+        # touches the timeline writes above.
+        self.proxy = ChainProxy(self.d)
 
         # --- timeline cursor ---------------------------------------- #
         self.ts = w3.eth.get_block("latest")["timestamp"] + 10
@@ -154,6 +161,9 @@ class SimDriver:
             self.day += 1
             if self.day >= s.days:
                 self.done = True
+        # The chain advanced: mark every memoized display read stale so the
+        # next render refreshes it in the background.
+        self.proxy.bump()
         return not self.done
 
     def step_day(self) -> bool:
@@ -174,3 +184,7 @@ class SimDriver:
     def write(self, path=None):
         """Persist captured day-end frames as the standard sim JSON vector."""
         return self.snap.write(path)
+
+    def close(self) -> None:
+        """Stop the proxy's background worker (call on UI teardown)."""
+        self.proxy.stop()

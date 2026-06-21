@@ -7,9 +7,11 @@ one-line `summary()` (for the navigable list) and a multi-line `details()`
 
 This is the extension seam: to surface a new component or a new agent field,
 add a `Node` (or extend a builder below) -- the curses front-end is agnostic
-to what it is displaying.  Reads are deliberately light (cheap `balanceOf` +
-a few `view` calls); the heavyweight LP-fee accounting lives in Snapshotter
-and is not needed for a live glance.
+to what it is displaying.
+
+Every chain read goes through `drv.proxy` (see proxy.py): a memoized, async
+read-through cache.  Renders return last-known values instantly and the
+underlying `eth_call`s happen off the UI thread, so navigation stays snappy.
 
 All BUCK/USDC magnitudes are 6-dec (E6); buckK is 18-dec (E18); per-token
 amounts use that token's decimals (`d.dec[i]`).
@@ -18,10 +20,6 @@ amounts use that token's decimals (`d.dec[i]`).
 from __future__ import annotations
 
 from typing import Callable
-
-from web3 import Web3
-
-from alberta_buck.sim.snapshot import _bal, _implied, _pool_value_weights
 
 E6 = 10 ** 6
 E18 = 10 ** 18
@@ -80,23 +78,84 @@ def _usd(v: int) -> str:
     return f"${v / E6:,.2f}"
 
 
-def _pool_price_buck(d, i: int) -> int:
+# All reads go through the async proxy (drv.proxy); they return last-known
+# values immediately and refresh in the background.
+
+def _bal(drv, token, holder) -> int:
+    return drv.proxy.balance_of(token, holder)
+
+
+def _view(drv, contract, fn, *args, default=0):
+    return drv.proxy.view(contract, fn, *args, default=default)
+
+
+def _implied(drv, pool, token, dec: int, quote) -> int:
+    """Implied quote-units per 1 whole token from live pool reserves."""
+    rt = _bal(drv, token, pool)
+    rq = _bal(drv, quote, pool)
+    return rq * (10 ** dec) // rt if rt else 0
+
+
+def _pool_price_buck(drv, i: int) -> int:
     """Implied BUCK per whole token from the TOKEN/BUCK pool (0 if empty).
 
     BUCK is 6-dec, so the result is 6-dec BUCK-per-token (divide by E6 to
     display whole BUCK)."""
-    rt = _bal(d.tokens[i], d.pool_buck[i])
-    rb = _bal(d.buck, d.pool_buck[i])
+    d = drv.d
+    rt = _bal(drv, d.tokens[i], d.pool_buck[i])
+    rb = _bal(drv, d.buck, d.pool_buck[i])
     return rb * (10 ** d.dec[i]) // rt if rt else 0
 
 
-def _buck_usd(d) -> int:
+def _buck_usd(drv) -> int:
     """Implied USDC-micro per 1 BUCK from the floating BUCK/USDC pool."""
+    d = drv.d
     if not d.pool_ub:
         return 0
-    ru = _bal(d.usdc, d.pool_ub)
-    rb = _bal(d.buck, d.pool_ub)
+    ru = _bal(drv, d.usdc, d.pool_ub)
+    rb = _bal(drv, d.buck, d.pool_ub)
     return ru * E6 // rb if rb else 0
+
+
+def _basket_nav(drv) -> int:
+    """Total BUCK value (6-dec) of every TOKEN/BUCK LP position (both sides)."""
+    d = drv.d
+    total = 0
+    for i in range(len(d.tokens)):
+        rt = _bal(drv, d.tokens[i], d.pool_buck[i])
+        rb = _bal(drv, d.buck, d.pool_buck[i])
+        if rt == 0 or rb == 0:
+            continue
+        p = rb * (10 ** d.dec[i]) // rt          # 6-dec BUCK per whole token
+        total += rt * p // (10 ** d.dec[i]) + rb  # token side + BUCK side
+    return total
+
+
+def _pool_value_weights(drv) -> list[tuple[float, float]]:
+    """Per-token (actual_weight, target_weight) from the TOKEN/BUCK pools.
+
+    Target = basketAmount*initPx^2/spot (a fixed-quantity index holds less
+    BUCK value of a token as it appreciates); actual = tokenReserve*spot.
+    Both normalised to sum to 1.0."""
+    d = drv.d
+    N = len(d.tokens)
+    prices = [_pool_price_buck(drv, i) for i in range(N)]
+    target_val = []
+    for i in range(N):
+        con = _view(drv, d.basket, "constituents", i, default=None)
+        ba = con[2] if con else 0          # basketAmount
+        ip = con[3] if con else 0          # initialPriceInBuck
+        base = ba * ip // (10 ** 18) if ba and ip else 0
+        target_val.append(base * ip // prices[i] if base and prices[i] else base)
+    tv = sum(target_val)
+    actual_val = [
+        _bal(drv, d.tokens[i], d.pool_buck[i]) * prices[i] // (10 ** d.dec[i])
+        if prices[i] else 0
+        for i in range(N)
+    ]
+    av = sum(actual_val)
+    return [(actual_val[i] / av if av else 0.0,
+             target_val[i] / tv if tv else 0.0) for i in range(N)]
 
 
 # --------------------------------------------------------------------------- #
@@ -143,12 +202,12 @@ def _overview_node() -> Node:
 def _buck_node() -> Node:
     def summ(drv):
         d = drv.d
-        supply = d.buck.functions.totalSupply().call()
-        return f"supply {supply / E6:,.0f}   1 BUCK = {_usd(_buck_usd(d))}"
+        supply = _view(drv, d.buck, "totalSupply")
+        return f"supply {supply / E6:,.0f}   1 BUCK = {_usd(_buck_usd(drv))}"
 
     def det(drv):
         d = drv.d
-        supply = d.buck.functions.totalSupply().call()
+        supply = _view(drv, d.buck, "totalSupply")
         out = [
             f"Buck (ERC-20)  {_short(d.buck.address)}",
             f"total supply   {supply / E6:,.2f} BUCK",
@@ -157,11 +216,11 @@ def _buck_node() -> Node:
             f"address        {_short(d.pool_ub)}" if d.pool_ub else "  (no pool)",
         ]
         if d.pool_ub:
-            rb = _bal(d.buck, d.pool_ub)
-            ru = _bal(d.usdc, d.pool_ub)
+            rb = _bal(drv, d.buck, d.pool_ub)
+            ru = _bal(drv, d.usdc, d.pool_ub)
             out += [
                 f"reserves       {rb / E6:,.0f} BUCK / {ru / E6:,.0f} USDC",
-                f"implied price  1 BUCK = {_usd(_buck_usd(d))}",
+                f"implied price  1 BUCK = {_usd(_buck_usd(drv))}",
             ]
         return out
 
@@ -171,26 +230,14 @@ def _buck_node() -> Node:
 def _controller_node() -> Node:
     def summ(drv):
         d = drv.d
-        try:
-            k = d.kctrl.functions.buckK().call()
-        except Exception:
-            k = 0
-        try:
-            bv = d.basket.functions.basketValueInBuck().call()
-        except Exception:
-            bv = 0
+        k = _view(drv, d.kctrl, "buckK")
+        bv = _view(drv, d.basket, "basketValueInBuck")
         return f"K {k / E18:.5f}   index {bv / E18:.4f}"
 
     def det(drv):
         d = drv.d
-        try:
-            k = d.kctrl.functions.buckK().call()
-        except Exception:
-            k = 0
-        try:
-            bv = int(d.basket.functions.basketValueInBuck().call())
-        except Exception:
-            bv = 0
+        k = _view(drv, d.kctrl, "buckK")
+        bv = int(_view(drv, d.basket, "basketValueInBuck"))
         return [
             f"BuckKController {_short(d.kctrl.address)}",
             f"buckK          {k / E18:.6f}  (18-dec PID output)",
@@ -205,16 +252,15 @@ def _controller_node() -> Node:
 
 def _basket_node() -> Node:
     def summ(drv):
-        d = drv.d
-        nav = drv.snap._basket_nav()
+        nav = _basket_nav(drv)
         treas = drv.ctr.get("treasuryBuck", 0)
         return f"NAV {nav / E6:,.0f}   treasury {treas / E6:,.0f}"
 
     def det(drv):
         d = drv.d
-        nav = drv.snap._basket_nav()
+        nav = _basket_nav(drv)
         c = drv.ctr
-        weights = _pool_value_weights(d)
+        weights = _pool_value_weights(drv)
         out = [
             f"{'BuckBasketProRata' if d.basket_impl == 'prorata' else 'BuckBasket'}"
             f"  {_short(d.basket.address)}",
@@ -229,7 +275,7 @@ def _basket_node() -> Node:
         for i in range(len(d.tokens)):
             sym = drv.scenario.tokens[i][0]
             init = drv.scenario.prices.day0(i)        # 6-dec USDC/token at t0
-            px = _pool_price_buck(d, i)               # 6-dec BUCK/token (live)
+            px = _pool_price_buck(drv, i)             # 6-dec BUCK/token (live)
             aw, tw = weights[i]
             out.append(
                 f"  {sym:<6} {init / E6:>9,.2f} {px / E6:>13,.4f}   "
@@ -243,9 +289,9 @@ def _token_node(i: int) -> Node:
     def summ(drv):
         d, s = drv.d, drv.scenario
         ref = s.prices.ref(i, drv.day)
-        su = _implied(d, d.pool_usdc[i], d.tokens[i], d.dec[i], d.usdc)
+        su = _implied(drv, d.pool_usdc[i], d.tokens[i], d.dec[i], d.usdc)
         err = (su - ref) / ref if ref else 0.0
-        aw, tw = _pool_value_weights(d)[i]
+        aw, tw = _pool_value_weights(drv)[i]
         return (f"spot {_usd(su)} ref {_usd(ref)} ({err:+.1%})  "
                 f"wt {aw:.3f}/{tw:.3f}")
 
@@ -253,14 +299,14 @@ def _token_node(i: int) -> Node:
         d, s = drv.d, drv.scenario
         sym = s.tokens[i][0]
         ref = s.prices.ref(i, drv.day)
-        su = _implied(d, d.pool_usdc[i], d.tokens[i], d.dec[i], d.usdc)
+        su = _implied(drv, d.pool_usdc[i], d.tokens[i], d.dec[i], d.usdc)
         err = (su - ref) / ref if ref else 0.0
-        aw, tw = _pool_value_weights(d)[i]
-        pxb = _pool_price_buck(d, i)
-        ut = _bal(d.tokens[i], d.pool_usdc[i])
-        uu = _bal(d.usdc, d.pool_usdc[i])
-        bt = _bal(d.tokens[i], d.pool_buck[i])
-        bb = _bal(d.buck, d.pool_buck[i])
+        aw, tw = _pool_value_weights(drv)[i]
+        pxb = _pool_price_buck(drv, i)
+        ut = _bal(drv, d.tokens[i], d.pool_usdc[i])
+        uu = _bal(drv, d.usdc, d.pool_usdc[i])
+        bt = _bal(drv, d.tokens[i], d.pool_buck[i])
+        bb = _bal(drv, d.buck, d.pool_buck[i])
         return [
             f"{sym} ({s.tokens[i][1]})  {d.dec[i]}-dec  {_short(d.tokens[i].address)}",
             "",
@@ -294,13 +340,8 @@ def _identity_node() -> Node:
         d = drv.d
         eoa = [a for a in drv.agents
                if getattr(a, "is_eoa", False) and a.account is not None]
-        ok = 0
-        for a in eoa:
-            try:
-                if d.reg.functions.isVerified(a.address).call():
-                    ok += 1
-            except Exception:
-                pass
+        ok = sum(1 for a in eoa
+                 if _view(drv, d.reg, "isVerified", a.address, default=False))
         return [
             f"IdentityRegistry {_short(d.reg.address)}",
             f"issuer           {_short(d.issuer_addr)}",
@@ -334,11 +375,11 @@ def _agent_balances(drv, a) -> tuple[int, list[tuple[int, int]], int]:
     """(usdc, [(tok_idx, raw)...nonzero], buck) for an agent's holder addr."""
     d = drv.d
     holder = a.address
-    usdc = _bal(d.usdc, holder)
-    buck = _bal(d.buck, holder)
+    usdc = _bal(drv, d.usdc, holder)
+    buck = _bal(drv, d.buck, holder)
     toks = []
     for i, tc in enumerate(d.tokens):
-        raw = _bal(tc, holder)
+        raw = _bal(drv, tc, holder)
         if raw:
             toks.append((i, raw))
     return usdc, toks, buck
@@ -357,7 +398,7 @@ def _agent_summary(drv, a) -> str:
             state = f"  IN {_usd(pbuck)} BUCK"
     elif getattr(a, "_exited", False):
         state = "  (exited)"
-    usdc = _bal(d.usdc, a.address)
+    usdc = _bal(drv, d.usdc, a.address)
     return f"{_short(a.address)}  USDC {usdc / E6:,.0f}{state}"
 
 
