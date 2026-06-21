@@ -22,12 +22,19 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+
+
+def _resolve(p: Path) -> Path:
+    """Anchor a possibly-relative override against the repo root."""
+    return p if p.is_absolute() else (REPO / p)
+
+
 # Input vector / output image are overridable so the prorata vs traditional
 # rebalancing runs can each be plotted independently (REB_VECTOR / REB_OUT).
-DATA = Path(os.environ.get("REB_VECTOR",
-                           REPO / "test" / "vectors" / "rebalancing-sim.json"))
-OUT = Path(os.environ.get("REB_OUT",
-                          REPO / "images" / "rebalancing-sim.png"))
+DATA = _resolve(Path(os.environ.get("REB_VECTOR",
+                                    REPO / "test" / "vectors" / "rebalancing-sim.json")))
+OUT = _resolve(Path(os.environ.get("REB_OUT",
+                                   REPO / "images" / "rebalancing-sim.png")))
 
 # BUCK is USDC-compatible 6-decimal accounting (see BuckTypes.DECIMALS).
 # Basket constituent TOKEN balances still use each token's own decimals from
