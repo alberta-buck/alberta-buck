@@ -58,9 +58,9 @@ Table of Contents
   good as the mass behind it – its resistance to being moved.
 
   The Alberta Buck takes its anchor from a basket of base commodities
-  (see the companion /Direct Embodiment/, which defines BUCK directly
-  against commodity/BUCK pools with no dollar intermediary).  The
-  on-chain `BuckKController' reads the basket's value as its process
+  (see the companion /Direct Embodiment/, which defines the BUCK
+  directly against commodity/BUCK pools with no dollar intermediary).
+  The on-chain `BuckKController' reads the basket's value as its process
   variable and nudges BUCK's supply to track it.  The basket /is/ the
   reference mass.
 
@@ -191,7 +191,7 @@ Table of Contents
   Each basket constituent lives in a TOKEN/BUCK Uniswap pool.  Those
   pools sit in the open sea of decentralised finance, wired to global
   markets through ordinary routing.  An arbitrageur scanning for
-  mispricings does not know or care what BUCK is.  They see that a
+  mispricings does not know or care what a BUCK is.  They see that a
   commodity token is a hair cheaper inside a BUCK pool than on the wider
   market, and they route flow through it to pocket the difference:
 
@@ -238,10 +238,10 @@ Table of Contents
   mechanical, fully on-chain process that any holder can use without
   trusting a manager:
 
-  • *Deposit* a base commodity token (or idle BUCK) and receive a
+  • *Deposit* a base commodity token (or idle BUCKs) and receive a
     redemption receipt.
   • Your capital is put to work as full-range liquidity, doubled by
-    system-minted BUCK (Section 6), earning fees and the rebalancing
+    system-minted BUCKs (Section 6), earning fees and the rebalancing
     premium.
   • *Redeem* whenever you like.  The position is always liquid and
     always solvent; there is no lockup and no gate.
@@ -266,11 +266,11 @@ Table of Contents
   "no manager required" credible.
 
   *Direct mint, 2x liquidity.* Deposit a commodity TOKEN worth /P/ in
-  BUCK.  The basket mints /P/ BUCK to pair with it and provides both,
+  BUCKs.  The basket mints /P/ BUCKs to pair with it and provides both,
   full-range, into that token's TOKEN/BUCK pool.  Your /P/ of commodity
-  now backs *2P* of working liquidity – the system's freshly-minted BUCK
-  is the other half.  That doubled depth is what earns the fees, and it
-  is the depositor's reward.
+  now backs *2P* of working liquidity – the system's freshly-minted
+  BUCKs is the other half.  That doubled depth is what earns the fees,
+  and it is the depositor's reward.
 
   *Rebalancing in two directions.* Redemption is /sell-high/: it draws a
   departing holder's claim preferentially from the pools that are
@@ -282,15 +282,15 @@ Table of Contents
   At equilibrium, redemption degrades gracefully to a plain pro-rata
   exit.
 
-  *The depositor keeps the TOKEN; the basket keeps the BUCK.* At
+  *The depositor keeps the TOKEN; the basket keeps the BUCKs.* At
   redemption the depositor is paid in commodity TOKEN only – their asset
   back, plus its price change, plus the fees the doubled depth captured
-  – and *never in BUCK*.  The BUCK that was minted (and is burned again
-  on exit) was the system's own seigniorage; it provided half the
+  – and *never in BUCKs*.  The BUCKs that were minted (and are burned
+  again on exit) were the system's own seigniorage; it provided half the
   liquidity on the depositor's behalf, and it rightly returns to the
   system as treasury equity.  A neat practical consequence falls out:
-  because no BUCK is ever paid to a depositor, a commodity LP *needs no
-  identity credentials at all* to participate.  Anyone can deposit a
+  because no BUCKs are ever paid to a depositor, a commodity LP *needs
+  no identity credentials at all* to participate.  Anyone can deposit a
   commodity and harvest the premium.
 
   *Always redeemable.* The exit is /thin-funding-proof/: a holder can
@@ -343,8 +343,9 @@ Table of Contents
   • *A savings account equivalent* – the default home for a household's
     reserve, earning the commodity-basket premium instead of leaking
     demurrage, redeemable on demand.
-  • *Idle-balance ROI for citizens* on either BUCK or commodity holdings
-    – put your buffer to work without surrendering access to it.
+  • *Idle-balance ROI for citizens* on either BUCKs or commodity
+    holdings – put your buffer to work without surrendering access to
+    it.
   • *Treasury management for businesses* – operating cash that must stay
     liquid for payroll and suppliers, parked productively between uses.
   • *Reserve management for insurers* – capital that regulation and
@@ -370,7 +371,7 @@ Table of Contents
   monotonically more valuable and never comes back – then rebalancing
   becomes a trap.  The basket keeps dutifully *selling the asset that
   keeps appreciating*, trimming the very position it should have ridden.
-  A holder of that single asset (or of raw BUCK, if BUCK tracks it)
+  A holder of that single asset (or of raw BUCKs, if BUCK tracks it)
   would have done strictly better.  The basket *permanently
   underperforms* a buy-and-hold of the runaway.
 
@@ -439,4 +440,4 @@ Footnotes
 ─────────
 
 [1] The BUCK is the Bitcoin Maxi's best friend; accumulate BTC and issue
-BUCK credit against it to pay expenses adn accumulate /more/ Bitcoin.
+BUCK credit against it to pay expenses and accumulate /more/ Bitcoin.
