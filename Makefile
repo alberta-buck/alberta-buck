@@ -486,6 +486,7 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
+SIM_BASKET	?= legacy        # legacy (BuckBasket) | prorata (BuckBasketProRata)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 
@@ -535,7 +536,7 @@ v2-patch-init-code-hash:
 		fi
 
 sim-run:	sim-build
-	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET)
 
 sim-test:	sim-build
 	python -m pytest $(SIM_TEST) -v -s
@@ -563,12 +564,56 @@ REBALANCING_VECTOR   = test/vectors/rebalancing-sim.json
 SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
 
 sim-run-rebalancing:	sim-build
-	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET)
 
 sim-plot-rebalancing:	$(REBALANCING_VECTOR)
 	python -m pytest $(SIM_REB_PLOT) -v -s
 
 sim-rebalancing:	sim-run-rebalancing sim-plot-rebalancing
+
+
+# ── Rebalancing A/B: BuckBasketProRata vs the traditional BuckBasket ────
+#
+# Two independent targets, each writing its own vector + image so the runs
+# can be compared side by side.  The hypothesis: BUCK direct-mint agents +
+# the rebalancing effect of BuckBasketProRata redemptions yield a smoother
+# holder ROI than the traditional basket.
+#
+#   make nix-sim-rebalancing-prorata        # build -> run (prorata) -> plot
+#   make nix-sim-rebalancing-traditional    # build -> run (legacy)  -> plot
+#   make nix-sim-run-rebalancing-prorata    # just the run
+#
+# Horizon override applies as usual:  ... SIM_DAYS=365 SIM_TICKS=4
+
+REBALANCING_VECTOR_PRORATA      = test/vectors/rebalancing-sim-prorata.json
+REBALANCING_VECTOR_TRADITIONAL  = test/vectors/rebalancing-sim-traditional.json
+
+.PHONY: sim-run-rebalancing-prorata sim-run-rebalancing-traditional
+.PHONY: sim-plot-rebalancing-prorata sim-plot-rebalancing-traditional
+.PHONY: sim-rebalancing-prorata sim-rebalancing-traditional
+
+sim-run-rebalancing-prorata:	sim-build
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
+		--ticks-per-day $(SIM_TICKS) --basket prorata \
+		--out $(REBALANCING_VECTOR_PRORATA)
+
+sim-run-rebalancing-traditional:	sim-build
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
+		--ticks-per-day $(SIM_TICKS) --basket legacy \
+		--out $(REBALANCING_VECTOR_TRADITIONAL)
+
+sim-plot-rebalancing-prorata:	$(REBALANCING_VECTOR_PRORATA)
+	REB_VECTOR=$(REBALANCING_VECTOR_PRORATA) \
+		REB_OUT=images/rebalancing-sim-prorata.png \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-plot-rebalancing-traditional:	$(REBALANCING_VECTOR_TRADITIONAL)
+	REB_VECTOR=$(REBALANCING_VECTOR_TRADITIONAL) \
+		REB_OUT=images/rebalancing-sim-traditional.png \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing-prorata:	sim-run-rebalancing-prorata sim-plot-rebalancing-prorata
+sim-rebalancing-traditional:	sim-run-rebalancing-traditional sim-plot-rebalancing-traditional
 
 
 # ── Pure price-flow basket simulator (no Anvil) ───────────────────────

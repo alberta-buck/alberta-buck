@@ -153,6 +153,30 @@ contract BuckBasketProRataTest is Test {
         assertEq(receipt.ownerOf(rid), alice, "alice owns receipt");
     }
 
+    function test_deposit_buck_routesAndRedeems() public {
+        _addPaxg();
+        _depositPaxg(bob, 10e18);          // seed the pool so invest can swap+LP
+
+        // Alice deposits BUCK directly; it is swap-balanced + LP'd into the
+        // (only) pool and she receives a receipt against the consumed BUCK.
+        buck.mint(alice, 5_000e18);
+        vm.prank(alice); buck.approve(address(basketC), 5_000e18);
+        vm.prank(alice);
+        uint256 rid = basketC.depositToken(address(buck), 5_000e18, 0);
+
+        (uint256 principal, uint256 tokPrincipal, address tok,) = basketC.deposits(rid);
+        assertGt(principal, 0, "buck principal recorded");
+        assertEq(tokPrincipal, 0, "no token principal on a BUCK deposit");
+        assertEq(tok, address(paxg), "receipt records the routed-into constituent");
+        assertEq(receipt.ownerOf(rid), alice, "alice owns receipt");
+
+        // She can redeem it like any other position.
+        vm.prank(alice);
+        basketC.redeem(rid, 0, 0);
+        vm.expectRevert();
+        receipt.ownerOf(rid);   // burned
+    }
+
     function test_redeem_stable_burnsPrincipal_returnsToken() public {
         _addPaxg();
         uint256 rid = _depositPaxg(alice, 1e18);
@@ -205,7 +229,7 @@ contract BuckBasketProRataTest is Test {
         assertGt(cbbtc.balanceOf(alice), cbbtcBefore, "got cbBTC from thin pool");
     }
 
-    function test_redeem_inflation_splitsProfitWithTreasury() public {
+    function test_redeem_inflation_profitToTreasury() public {
         address pool = _addPaxg();
         uint256 rid = _depositPaxg(alice, 1e18);
 
@@ -217,8 +241,10 @@ contract BuckBasketProRataTest is Test {
         basketC.redeem(rid, 0);
 
         assertEq(basketC.totalOutstandingBuck(), 0, "principal retired");
-        assertGt(buck.balanceOf(alice), buckBefore, "depositor got BUCK profit share");
-        assertGt(basketC.treasuryBuckPending(), 0, "treasury accrued its share");
+        // Depositor is paid in TOKEN only -- no BUCK leaves to them, so commodity
+        // LPs need no BUCK identity; all BUCK profit accrues to the treasury.
+        assertEq(buck.balanceOf(alice), buckBefore, "depositor receives no BUCK");
+        assertGt(basketC.treasuryBuckPending(), 0, "treasury keeps all BUCK profit");
     }
 
     function test_redeem_deflation_coversShortfall() public {

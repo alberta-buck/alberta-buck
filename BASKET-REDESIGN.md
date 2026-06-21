@@ -33,35 +33,33 @@ into the org master and the `BUG #N` list is retired.
 > self-call may drive them); callbacks authenticate the calling pool via the
 > shared `_callbackPool` / `_swapCallbackPool` guards.
 >
-> Tests: `BuckBasketProRata.t.sol` 19 (now deploys the facet + `setVenue`),
-> legacy `BuckBasket.t.sol` 18, `BasketRebalancer.t.sol` 6 — **whole repo 484/484**.
+> Tests: `BuckBasketProRata.t.sol` 20 (deploys the facet + `setVenue`; covers
+> BUCK-side deposit), legacy `BuckBasket.t.sol` 18, `BasketRebalancer.t.sol` 6.
 >
-> Behaviour is unchanged: TOKEN deposit; the **sell-high `redeem`** (§5.1
-> closed-form, treasury split, deflation shortfall cover under
-> `maxConversionLossBp`, default 1%, `0 = unlimited`; the two revert paths); the
-> **single-TOKEN payout**; the **spot/TWAP manipulation guard**; **`sweepTreasury`**
-> (recycle-to-buy-low). The two generic verbs `investFromBucks` /
-> `convertIntoBucks` (§4) already subsume treasury re-LP and shortfall cover and
-> are the hooks for the deferred BUCK-side deposit and FX-routed conversion.
-> Still on the internal TOKEN/BUCK pools (FX is a follow-up). Still stubbed:
-> BUCK-side deposits, standalone `rebalance()`, the full migration handoff.
+> Behaviour: TOKEN deposit **and BUCK-side deposit** (`investFromBucks` into the
+> underweight pool); the **sell-high `redeem`** (§5.1 closed-form, deflation
+> shortfall cover under `maxConversionLossBp`, default 1%, `0 = unlimited`; the two
+> revert paths); the **single-TOKEN payout**; the **spot/TWAP manipulation guard**;
+> **`sweepTreasury`** (recycle-to-buy-low). **The depositor is paid in TOKEN only;
+> the basket keeps the entire BUCK profit** as treasury equity (§3) — so the
+> 50/50 split (and `treasuryBp`) is **removed**, and commodity LPs need no BUCK
+> identity. The two generic verbs `investFromBucks` / `convertIntoBucks` (§4)
+> subsume treasury re-LP, BUCK deposits, and shortfall cover, and are the hook for
+> FX-routed conversion. Still on the internal TOKEN/BUCK pools (FX is a
+> follow-up). Still stubbed: standalone `rebalance()`, the full migration handoff.
 >
-> **Sim compatibility:** still drop-in with the legacy `BuckBasket` — same
-> `addBasketToken` name/signature, `Constituent` field order
-> (`constituents(i)[2] == basketAmount`), `redeem(id, bp, 0)`, **identical
-> constructor**. The library-linking complication is *gone*; the only new step is
-> deploying `BuckBasketUniswapV3` and calling `setVenue(facet)` after construction.
+> **Sim:** drives **either** basket — `--basket {legacy,prorata}` /
+> `SIM_BASKET=`, with independent `make sim-rebalancing-{prorata,traditional}`
+> targets. ProRata deploys the facet + `setVenue` (no library linking) and a union
+> ABI lets Python reach facet views; impl-aware event parsing handles the
+> differing `Deposited`/`Redeemed` shapes. Still drop-in: identical constructor,
+> `addBasketToken` signature, `Constituent` field order, `redeem(id, bp, 0)`.
 >
 > **Next steps** (in rough order):
-> 1. **Sim refit** — selector in `sim/chain.py`/`deploy.py` to deploy `BuckBasket`
->    vs `BuckBasketProRata` (+ its venue facet + `setVenue`). Then A/B a
->    purpose-built arb agent vs deposit/redeem agents harvesting the basket's
->    constant-mix flow.
+> 1. **A/B the runs** — compare holder-ROI smoothness, prorata vs traditional.
 > 2. **FX-routed conversion** — wire `pathFor` + `ISwapRouter` *behind*
 >    `convertIntoBucks` in the venue facet (needs SwapRouter test infra).
-> 3. **BUCK-side deposits** — `investFromBucks` + a depositor receipt (the same
->    primitive `sweepTreasury` already uses, different bookkeeping).
-> 4. **Migration handoff** + richer `receipt.tokenURI`; eventual EIP-2535 Diamond
+> 3. **Migration handoff** + richer `receipt.tokenURI`; eventual EIP-2535 Diamond
 >    (the shell already routes through a fallback).
 
 ## 1. Goals
@@ -82,10 +80,12 @@ into the org master and the `BUG #N` list is retired.
    drifting — value-conservation (§5.2) makes the sell-high reliable.
 3. **Treasury is a primary product.** Direct-mint pairs the depositor's TOKEN
    with freshly-minted BUCK, so the deposit puts ~2× the liquidity to work. The
-   yield is split (default 50/50, governance-adjustable): the depositor keeps the
-   TOKEN side, the treasury keeps the BUCK side. The treasury funds BUCK-system
-   R&D and operations, and its take is *largest exactly under inflation* — when
-   the peg most needs defending (§6).
+   depositor keeps the **TOKEN side** (their commodity + its price change + AMM
+   fees); the **entire BUCK side** — the seigniorage the basket minted on their
+   behalf — stays with the treasury (§3). The treasury funds BUCK-system R&D and
+   operations, and its take is *largest exactly under inflation* — when the peg
+   most needs defending (§6). A depositor never touches BUCK, so commodity LPs
+   need no identity binding to participate.
 4. **Clean establishment / bootstrap / unwind.** Governance can seed, add,
    re-weight, remove constituents, and **migrate to a successor basket** with all
    LP, treasury equity, and outstanding-BUCK accounting carried over. Receipts
@@ -147,38 +147,54 @@ BUCK. Pure pro-rata is the special case `fᵢ = θ` for all pools; a skewed
 conversion factor — read as **TWAP for decisions** (weights, claim sizing;
 manipulation-resistant) and spot for the final amount arithmetic.
 
-## 3. Economic model
+## 3. Economic model — the depositor keeps the TOKEN, the basket keeps the BUCK
 
 A deposit of TOKEN worth `P` BUCK at spot `p0`:
 
-- Mints `P` BUCK (`buckPrincipal = P`, the receipt's share unit).
+- Mints `P` BUCK (`buckPrincipal = P`, the receipt's share unit) **on the
+  depositor's behalf**.
 - LPs `(tok0, P)` — `tok0 = P/p0` of TOKEN plus `P` of BUCK — so **2·P of
   liquidity works** while the depositor's TOKEN is on deposit. The depositor
-  supplied `P`; the basket-minted `P` doubles their working liquidity. Splitting
-  the yield is just.
+  supplied `P` of TOKEN; the basket-minted `P` of BUCK doubles their working
+  liquidity.
 
 Who keeps what, realized at redemption:
 
-| | Depositor | Treasury |
+| | Depositor | Basket / treasury |
 |---|---|---|
-| TOKEN side (principal + AMM fees) | **100 %** | 0 % |
-| BUCK profit (BUCK above principal) | `1 − treasuryBp` (default 50 %) | `treasuryBp` (default 50 %) |
+| TOKEN side (principal + price change + AMM fees) | **100 %** | 0 % |
+| BUCK profit (BUCK above principal) | 0 % | **100 %** (treasury equity) |
 | BUCK principal | — | **burned** |
 
-The burn obligation is **senior** to the split: principal is retired first from
-the withdrawn BUCK, then (deflation only) from the depositor's TOKEN. The treasury
-takes no TOKEN ever; under deflation it simply earns no BUCK profit that round.
-Treasury BUCK profit is **re-LP'd** (via the rebalancer, into the underweight
-pool) so it compounds as `treasuryLiquidity`; governance may `treasuryWithdraw`
-to fund operations.
+**The depositor is paid in TOKEN only; the BUCK half stays with the basket.** The
+BUCK was minted — and is burned again at redemption — *on the depositor's behalf*:
+it provided the other half of every position's liquidity, amplifying the AMM fees
+and rebalancing flow the depositor's TOKEN earned. That 2×-liquidity leverage **is**
+the depositor's reward: they get their commodity back with its price change plus
+the fees the doubled depth captured. The BUCK half of the equation is the system's
+own seigniorage and rightly stays with the basket as treasury equity. The burn
+obligation is **senior**: principal is retired first from the withdrawn BUCK, then
+(deflation only) from the depositor's TOKEN — the treasury takes no TOKEN, ever.
+
+Two consequences follow:
+
+1. **No depositor ever touches BUCK**, so commodity LPs need **no BUCK identity**
+   to participate. (BUCK transfers are identity-gated — sender and recipient must
+   be public or have CP-proof-approved one another; paying depositors BUCK would
+   force every participant to be identity-bound. Only BUCK-*side* depositors, who
+   are inherently BUCK-capable, ever handle BUCK.)
+2. The treasury — the BUCK-system's R&D/ops funding, a *primary product* of the
+   basket — captures the **entire** seigniorage profit, not half of it. It is
+   re-LP'd (`sweepTreasury`, into the underweight pool) so it compounds as
+   `treasuryLiquidity`; governance may `treasuryWithdraw` to fund operations.
 
 State:
 
 ```solidity
-uint256 public totalOutstandingBuck;          // Σ buckPrincipal
-uint256 public treasuryBp = 5000;             // governance-adjustable split
+uint256 public totalOutstandingBuck;          // Σ buckPrincipal (the burn obligation)
+uint256 public treasuryBuckPending;           // BUCK profit retained, awaiting re-LP
 mapping(uint256 pool => uint128) treasuryLiquidity;   // treasury-owned L per pool
-struct Deposit { uint256 buckPrincipal; uint256 tokenPrincipal; uint64 depositTime; }
+struct Deposit { uint256 buckPrincipal; uint256 tokenPrincipal; address token; uint64 depositTime; }
 ```
 
 ## 4. Module layout — the shell / venue-facet split
@@ -187,7 +203,7 @@ struct Deposit { uint256 buckPrincipal; uint256 tokenPrincipal; uint64 depositTi
 
 ```
 BuckBasketStorage.sol     storage layout base (state, constants, events, errors); both inherit only this
-BuckBasketProRata.sol     SHELL (venue-agnostic): deposit, redeem, treasury split, accounting, governance,
+BuckBasketProRata.sol     SHELL (venue-agnostic): deposit, redeem, treasury retention, accounting, governance,
                           allocation policy, the fallback router  (12.3 KB)
 IBuckBasketVenue.sol      the AMM seam (setupPool/provide/withdraw/invest/convert + value reads)
 BuckBasketUniswapV3.sol   VENUE FACET (Uniswap V3): pool setup, LP custody, price/TWAP, swaps,
@@ -219,7 +235,7 @@ name:
 
 The facet returns *what it did*; the **shell books ownership** (treasury slice vs
 depositor receipt) and the BUCK ledger. So `investFromBucks` serves both treasury
-re-LP and (deferred) BUCK-side deposits, and `convertIntoBucks` serves both the
+re-LP and BUCK-side deposits, and `convertIntoBucks` serves both the
 deflation shortfall cover and (deferred) FX-routed conversion — one primitive each.
 
 Design rules:
@@ -287,9 +303,9 @@ whole claim ("return 100 from the most overweight pool") — driving it to targe
 Then burn `fᵢ · Lᵢ` in each pool, collect `(Tᵢ, Bkᵢ)`, `Bw = Σ Bkᵢ`, and settle:
 
 - **`Bw ≥ R`** (the common case — overweight pools are BUCK-rich, so skewing
-  toward them *over-collects* BUCK): burn `R`; split profit `Bw − R` (depositor
-  `1−treasuryBp`, treasury `treasuryBp` → `treasuryBuckPending`, recycled by
-  `sweepTreasury`). **Never reverts.**
+  toward them *over-collects* BUCK): burn `R`; the entire profit `Bw − R` accrues
+  to the treasury (`treasuryBuckPending`, recycled by `sweepTreasury`) — the
+  depositor is paid in TOKEN only (§3). **Never reverts.**
 - **`Bw < R`** (deflation): cover the shortfall `S = R − Bw` by converting the
   **minimum** withdrawn `Tᵢ` → BUCK via the rebalancer (internal pool now, FX
   later). If the conversion loss (slippage + fee, at TWAP) would exceed
@@ -381,11 +397,13 @@ Single-pool, full-range ≈ CPMM (invariant `k`), deposit `P` at `p0`, price mov
 to `p1`, redeem in full. LP value at `p1` is `2P·√(p1/p0)`; BUCK withdrawn is
 `Bw = P·√(p1/p0)`.
 
-| Regime | `p1/p0` | `Bw` | Burn | BUCK profit | Depositor gets | Treasury | System effect |
+Depositor is paid **TOKEN only**; the basket keeps the full BUCK profit (§3).
+
+| Regime | `p1/p0` | `Bw` | Burn | BUCK profit | Depositor gets (TOKEN) | Treasury (BUCK) | System effect |
 |---|---|---|---|---|---|---|---|
-| Stable | 1.0 | `P` | `P` | ~0 (+fees) | `tok0` + fee/2 BUCK | fee/2 (re-LP) | supply-neutral over cycle |
-| Mild inflation | 1.21 | `1.1P` | `P` | `0.1P` | `0.91·tok0` + `0.05P` BUCK | `0.05P` (re-LP) | burns `P`; exit incentive ⇒ **contracts supply** |
-| Strong inflation | 4.0 | `2P` | `P` | `P` | `0.5·tok0` + `0.5P` BUCK | `0.5P` (re-LP) | max treasury revenue *when peg most stressed* |
+| Stable | 1.0 | `P` | `P` | ~0 (+fees) | `tok0` (+ TOKEN fees) | ~0 + fee BUCK (re-LP) | supply-neutral over cycle |
+| Mild inflation | 1.21 | `1.1P` | `P` | `0.1P` | `0.91·tok0` | `0.1P` (re-LP) | burns `P`; exit incentive ⇒ **contracts supply** |
+| Strong inflation | 4.0 | `2P` | `P` | `P` | `0.5·tok0` | `P` (re-LP) | max treasury revenue *when peg most stressed* |
 | Mild deflation | 0.81 | `0.9P` | `P` | none (cover) | ~`0.99·tok0` (sold 0.1P worth) | 0 | exit costly (value down) ⇒ **holds, supply stays high** |
 | Strong deflation | 0.25 | `0.5P` | `P` | none | ~0 TOKEN left (boundary) | 0 | exit maximally costly ⇒ holds |
 | Extreme (`p1 < p0/4`) | <0.25 | <`0.5P` | `P` | — | **revert** | — | forced hold; BuckCredit floods in |
@@ -491,7 +509,7 @@ for the UI.
 |---|---|
 | `Constituent` registry + `addBasketToken` (name/sig kept for sim compat) | fused `redeem` 9-phase pipeline |
 | `totalOutstandingBuck`, receipts, deposits | `_allocateRedemption` 2-pass allocator → closed-form BUCK-balance allocation (§5.1) |
-| treasury + adjustable split + treasury re-LP | hand-rolled swap path: `uniswapV3SwapCallback`, `_swapTokenForBuckExactIn`, `_tokenInForBuckOut`, `_coverShortfallAggregate` |
+| treasury (keeps 100% of BUCK profit) + treasury re-LP | hand-rolled swap path: `uniswapV3SwapCallback`, `_swapTokenForBuckExactIn`, `_tokenInForBuckOut`, `_coverShortfallAggregate` |
 | `uniswapV3MintCallback`, raw-pool LP custody | `MAX_ORPHAN_DUST_WEI` dust orphaning (replaced by clean underwater revert) |
 | `basketValueInBuck()` PV for the controller | in-redeem "buy low" recycling (split is now realize-on-redeem) |
 | `_readPoolPrice` TWAP/spot, slippage guard, tick/L math → `BasketMath` | one-shot `Buck.setBasket` immutability |
@@ -517,7 +535,9 @@ for the UI.
 1. Rebalancer access: **advisor** (plans; basket executes — recommended, funds
    stay in basket) vs. privileged **executor** (more Diamond-like, more surface).
 2. Router: `ISwapRouter` (recommended, vendored) vs. Universal Router + Permit2.
-3. `treasuryBp` default 5000 and bounds (cap to prevent governance over-extraction?).
+3. ~~`treasuryBp` split~~ — decided: **removed**.  The depositor is paid in TOKEN
+   only; the basket retains 100% of the BUCK profit (§3).  No depositor BUCK
+   payout ⇒ commodity LPs need no BUCK identity.
 4. ~~FX route representation~~ — decided: encoded `bytes` path (router-native),
    served by the `BasketRebalancer` registry keyed on `(tokenIn, tokenOut)`.
 5. Migration LP handoff: withdraw-all-and-re-LP (clean cut, recommended) vs.

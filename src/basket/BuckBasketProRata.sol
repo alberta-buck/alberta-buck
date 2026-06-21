@@ -45,11 +45,22 @@ import {BuckBasketStorage, IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketS
 ///     (AMM fees, retained BUCK profit).  Funds BUCK-system R&D/ops; re-LP'd by
 ///     the venue facet; never part of a depositor's pro-rata claim.
 ///
-/// # Profit split (realized at redeem; `treasuryBp`, default 50/50)
+/// # The depositor keeps the TOKEN; the BUCK stays with the basket
 ///
-///   * Depositor keeps 100% of the withdrawn TOKEN side + `(1-treasuryBp)` of any
-///     BUCK profit (`Bw - R`); treasury keeps `treasuryBp` (accrued to
-///     `treasuryBuckPending`).  The principal burn is *senior* to the split.
+///   At redemption the depositor is paid in **TOKEN only** -- their withdrawn
+///   commodity (principal + AMM fees + price change) -- and **never in BUCK**.
+///   The entire BUCK profit (`Bw - R`) accrues to the treasury
+///   (`treasuryBuckPending`, re-LP'd by `sweepTreasury`).  Rationale: the BUCK
+///   the basket minted (and burns again at redemption) was created *on the
+///   depositor's behalf* -- it provided the other half of every position's
+///   liquidity, amplifying the fees and rebalancing flow the depositor's TOKEN
+///   earned.  That leverage is the depositor's reward (a 2x-liquidity commodity
+///   LP); the BUCK half of the position is the system's own seigniorage and
+///   rightly stays with the basket.  The practical dividend: a depositor touches
+///   BUCK zero times, so commodity LPs need **no BUCK identity** to participate
+///   (BUCK transfers are identity-gated; paying depositors BUCK would force every
+///   participant to be identity-bound).  The principal burn is senior to all of
+///   this.
 contract BuckBasketProRata is BuckBasketStorage {
 
     constructor(
@@ -74,7 +85,6 @@ contract BuckBasketProRata is BuckBasketStorage {
         observationCardinality = _observationCardinality;
         defaultMaxDeviationBp  = _defaultMaxDeviationBp;
         minSeedLiquidity       = _minSeedLiquidity;
-        treasuryBp             = 5000;
 
         receipt = new BuckBasketReceipt(address(this));
     }
@@ -95,12 +105,6 @@ contract BuckBasketProRata is BuckBasketStorage {
     function setVenue(address _venue_) external onlyGov {
         venue = IBuckBasketVenue(_venue_);
         emit VenueSet(_venue_);
-    }
-
-    function setTreasuryBp(uint16 _treasuryBp) external onlyGov {
-        if (!(_treasuryBp <= MAX_TREASURY_BP)) revert TreasuryBpTooHigh();
-        treasuryBp = _treasuryBp;
-        emit TreasuryBpSet(_treasuryBp);
     }
 
     /// @notice Draw accumulated treasury BUCK profit to fund operations.
@@ -202,16 +206,17 @@ contract BuckBasketProRata is BuckBasketStorage {
 
     // --- Direct mint ------------------------------------------------------ //
 
-    /// @notice Deposit a registered basket TOKEN: mint BUCK at the pool's spot
-    ///         price and LP the (TOKEN, BUCK) pair full-range.  Returns an
-    ///         ERC-721 receipt.
-    /// @dev    BUCK-side deposits (underweight routing via `investFromBucks`) are
-    ///         a follow-up.
+    /// @notice Deposit into the basket and receive an ERC-721 receipt.
+    ///         `token == constituent`: mint BUCK at the pool's spot price and LP
+    ///         the (TOKEN, BUCK) pair full-range. `token == BUCK`: deploy the
+    ///         BUCK into the most-underweight pool as a depositor position
+    ///         (constant-mix injection, §8) -- see `_depositBuck`.
     function depositToken(address token, uint256 tokenAmount, uint256 maxDeviationBp)
         external returns (uint256 receiptId)
     {
         if (!(tokenAmount > 0)) revert Amount0();
-        if (!(token != address(buck))) revert BUCKDepositTODO();
+        if (token == address(buck)) return _depositBuck(tokenAmount);
+
         uint256 idx = indexOf[token];
         if (!(idx > 0)) revert NotInBasket();
 
@@ -232,6 +237,37 @@ contract BuckBasketProRata is BuckBasketStorage {
 
         controller.compute();
         emit Deposited(msg.sender, receiptId, token, tokenAmount, buckToMint, liquidity);
+    }
+
+    /// @notice BUCK-side deposit: deploy the caller's BUCK into the most
+    ///         underweight pool as a depositor position via `investFromBucks`
+    ///         (swap-balance + LP), mint a receipt against the BUCK actually
+    ///         consumed, and refund any unconsumed remainder.  The principal is
+    ///         the consumed BUCK (the burn obligation); the receipt records the
+    ///         routed-into constituent as its `token`.  The same `investFromBucks`
+    ///         primitive `sweepTreasury` uses -- only the bookkeeping differs
+    ///         (depositor receipt vs treasury slice).
+    function _depositBuck(uint256 buckAmount) internal returns (uint256 receiptId) {
+        IERC20(address(buck)).transferFrom(msg.sender, address(this), buckAmount);
+        (uint256 idx, uint128 liquidity, uint256 consumed) =
+            _venue().investFromBucks(buckAmount, type(uint256).max);
+        if (!(consumed > 0)) revert Buck0();
+        if (buckAmount > consumed) {
+            IERC20(address(buck)).transfer(msg.sender, buckAmount - consumed);
+        }
+
+        address routed = constituents[idx].token;
+        receiptId = receipt.mint(msg.sender);
+        deposits[receiptId] = Deposit({
+            buckPrincipal: consumed,
+            tokenPrincipal: 0,
+            token: routed,
+            depositTime: uint64(block.timestamp)
+        });
+        totalOutstandingBuck += consumed;
+
+        controller.compute();
+        emit Deposited(msg.sender, receiptId, routed, buckAmount, consumed, liquidity);
     }
 
     // --- Redemption (sell-high value-claim exit) -------------------------- //
@@ -303,15 +339,14 @@ contract BuckBasketProRata is BuckBasketStorage {
 
         // Phase 2: settle the burn.  Sell-high collects from BUCK-rich pools, so
         // `Bw >= R` is the common case (no conversion).  Under deflation, cover
-        // the shortfall within the loss budget.
-        uint256 depositorBuck = 0;
-        uint256 treasuryBuck  = 0;
+        // the shortfall within the loss budget.  All BUCK profit is treasury
+        // equity -- the depositor is paid in TOKEN only (below), so no BUCK ever
+        // leaves to a depositor and commodity LPs need no BUCK identity.
+        uint256 treasuryBuck = 0;
         uint256 burned;
         if (Bw >= R) {
             burned = R;
-            uint256 profit = Bw - R;
-            treasuryBuck  = profit * treasuryBp / 10000;
-            depositorBuck = profit - treasuryBuck;
+            treasuryBuck = Bw - R;          // all BUCK profit -> treasury
         } else {
             (uint256 gained, uint256 lossValue, uint256[] memory inv) =
                 _venue().convertIntoBucks(perPoolTok, R - Bw);
@@ -324,17 +359,15 @@ contract BuckBasketProRata is BuckBasketStorage {
             if (!(R - burned <= MAX_DUST_WEI)) revert Underwater();
             if (!(maxConversionLossBp == 0
                   || lossValue * 10000 <= maxConversionLossBp * V)) revert ConversionLoss();
-            treasuryBuck = have - burned;   // over-swap excess; no depositor profit
+            treasuryBuck = have - burned;   // over-swap excess
         }
 
-        // Phase 3: burn principal, pay out.
+        // Phase 3: burn principal, pay out.  Treasury BUCK stays in the basket
+        // (accrued, re-LP'd by sweepTreasury); the depositor receives TOKEN only.
         if (burned > 0) buck.burnFromBasket(burned);
         if (treasuryBuck > 0) {
             treasuryBuckPending += treasuryBuck;
             emit TreasuryAccrued(treasuryBuck, treasuryBuckPending);
-        }
-        if (depositorBuck > 0) {
-            IERC20(address(buck)).transfer(msg.sender, depositorBuck);
         }
         for (uint256 i = 0; i < N; i++) {
             if (perPoolTok[i] > 0) {
@@ -355,7 +388,7 @@ contract BuckBasketProRata is BuckBasketStorage {
 
         controller.compute();
         emit Redeemed(
-            msg.sender, receiptId, burned, depositorBuck, treasuryBuck,
+            msg.sender, receiptId, burned, 0, treasuryBuck,
             redeemShare == 10000 ? 0 : 10000 - redeemShare);
     }
 

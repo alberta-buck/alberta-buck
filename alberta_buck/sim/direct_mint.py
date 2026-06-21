@@ -123,12 +123,11 @@ class _DMBase(Agent):
         d.chain.send(tc.functions.approve(d.basket.address, seed),
                      sender=self.account)
         try:
-            from alberta_buck.sim.deploy import DEPOSITED_TOPIC
             rcpt = d.chain.send(
                 d.basket.functions.depositToken(tc.address, seed, 0),
                 sender=self.account)
             for log in rcpt["logs"]:
-                if log["topics"][0] == DEPOSITED_TOPIC:
+                if log["topics"][0] == d.deposited_topic:
                     self._receipt_id = int.from_bytes(log["topics"][2], "big")
                     break
             if self._receipt_id is not None:
@@ -147,12 +146,7 @@ class _DMBase(Agent):
         if self._receipt_id is None:
             return
         try:
-            from eth_abi import decode
-            from alberta_buck.sim.deploy import REDEEMED_TOPIC
-            from web3 import Web3
-            RFP_TOPIC = Web3.keccak(text=(
-                "RedeemedFromPool(uint256,address,address,"
-                "uint256,uint256,uint128)"))
+            from alberta_buck.sim.deploy import parse_redeem
             rcpt = d.chain.send(
                 d.basket.functions.redeem(self._receipt_id, 0, 0),
                 sender=self.account)
@@ -161,19 +155,9 @@ class _DMBase(Agent):
             ctr["dmExits"] = ctr.get("dmExits", 0) + 1
             ctr["dmOutstandingBuck"] = (
                 ctr.get("dmOutstandingBuck", 0) - self._principal_buck)
-            for log in rcpt["logs"]:
-                if log["topics"][0] == RFP_TOPIC:
-                    tokToUser, _, _ = decode(
-                        ["uint256", "uint256", "uint128"],
-                        log["data"])
-                    ctr["dmTotalReturned"] = (
-                        ctr.get("dmTotalReturned", 0) + tokToUser)
-                elif log["topics"][0] == REDEEMED_TOPIC:
-                    _, retainedBuck, _ = decode(
-                        ["uint256", "uint256", "uint256"],
-                        log["data"])
-                    ctr["treasuryBuck"] = (
-                        ctr.get("treasuryBuck", 0) + retainedBuck)
+            tok_to_user, treasury_buck = parse_redeem(d, rcpt, self.address)
+            ctr["dmTotalReturned"] = ctr.get("dmTotalReturned", 0) + tok_to_user
+            ctr["treasuryBuck"] = ctr.get("treasuryBuck", 0) + treasury_buck
             # Reset state so the agent can re-enter on a later tick
             # (stochastic DMs).  Bootstrap DMs override _exit to a no-op
             # so this path is never hit.
@@ -340,7 +324,6 @@ class DirectMintBuckAgent(_DMBase):
             d.buck.encode_abi(
                 "approve(address,uint256)", args=[d.basket.address, buck_amt]))
         try:
-            from alberta_buck.sim.deploy import DEPOSITED_TOPIC
             rcpt = self._proxy_exec(
                 d, d.basket.address,
                 d.basket.encode_abi(
@@ -351,7 +334,7 @@ class DirectMintBuckAgent(_DMBase):
                         self.MAX_DEPOSIT_SLIPPAGE_BP,
                     ]))
             for log in rcpt["logs"]:
-                if log["topics"][0] == DEPOSITED_TOPIC:
+                if log["topics"][0] == d.deposited_topic:
                     self._receipt_id = int.from_bytes(log["topics"][2], "big")
                     break
             if self._receipt_id is not None:
@@ -370,12 +353,7 @@ class DirectMintBuckAgent(_DMBase):
         if self._receipt_id is None:
             return
         try:
-            from eth_abi import decode
-            from alberta_buck.sim.deploy import REDEEMED_TOPIC
-            from web3 import Web3
-            RFP_TOPIC = Web3.keccak(text=(
-                "RedeemedFromPool(uint256,address,address,"
-                "uint256,uint256,uint128)"))
+            from alberta_buck.sim.deploy import parse_redeem
             rcpt = self._proxy_exec(
                 d, d.basket.address,
                 d.basket.encode_abi(
@@ -386,19 +364,9 @@ class DirectMintBuckAgent(_DMBase):
             ctr["dmExits"] = ctr.get("dmExits", 0) + 1
             ctr["dmOutstandingBuck"] = (
                 ctr.get("dmOutstandingBuck", 0) - self._principal_buck)
-            for log in rcpt["logs"]:
-                if log["topics"][0] == RFP_TOPIC:
-                    tokToUser, _, _ = decode(
-                        ["uint256", "uint256", "uint128"],
-                        log["data"])
-                    ctr["dmTotalReturned"] = (
-                        ctr.get("dmTotalReturned", 0) + tokToUser)
-                elif log["topics"][0] == REDEEMED_TOPIC:
-                    _, retainedBuck, _ = decode(
-                        ["uint256", "uint256", "uint256"],
-                        log["data"])
-                    ctr["treasuryBuck"] = (
-                        ctr.get("treasuryBuck", 0) + retainedBuck)
+            tok_to_user, treasury_buck = parse_redeem(d, rcpt, self.proxy.address)
+            ctr["dmTotalReturned"] = ctr.get("dmTotalReturned", 0) + tok_to_user
+            ctr["treasuryBuck"] = ctr.get("treasuryBuck", 0) + treasury_buck
             self._receipt_id = None
             self._principal_tok = 0
             self._principal_buck = 0

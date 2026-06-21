@@ -70,11 +70,11 @@ abstract contract BuckBasketStorage {
     /// @notice Total outstanding BUCK principal == Σ buckPrincipal.
     uint256 public totalOutstandingBuck;
 
-    /// @notice Treasury BUCK profit awaiting re-LP by the venue facet.
+    /// @notice Treasury BUCK profit awaiting re-LP by the venue facet.  The
+    ///         depositor is paid in TOKEN only; the entire BUCK profit (the
+    ///         seigniorage the basket minted and burned on the depositor's
+    ///         behalf) stays with the basket as treasury equity.
     uint256 public treasuryBuckPending;
-
-    /// @notice BUCK profit share to treasury, in basis points (default 50%).
-    uint16 public treasuryBp;
 
     // --- Wiring (plain storage so facets see it via delegatecall) ---------- //
 
@@ -96,7 +96,6 @@ abstract contract BuckBasketStorage {
     uint160 internal constant MIN_SQRT_RATIO = 4295128739;
     uint160 internal constant MAX_SQRT_RATIO =
         1461446703485210103287273052203988822378723970342;
-    uint16  public  constant  MAX_TREASURY_BP = 9000;      // cap governance take
     uint256 internal constant MAX_DUST_WEI = 1e9;          // 1e-9 BUCK
     uint256 internal constant MIN_REINVEST_BUCK = 1e15;    // 0.001 BUCK
     uint256 public  constant  DEFAULT_CONVERSION_LOSS_BP = 100;   // 1%
@@ -114,12 +113,10 @@ abstract contract BuckBasketStorage {
     event TreasuryWithdrawn(address indexed to, uint256 amount);
     event TreasuryReinvested(uint256 indexed poolIdx, uint256 buckConsumed, uint128 liquidity);
     event VenueSet(address indexed venue);
-    event TreasuryBpSet(uint16 treasuryBp);
 
     // --- Errors (custom errors save bytecode vs require-strings) ----------- //
     error AlreadyPresent();
     error Amount0();
-    error BUCKDepositTODO();
     error BadCallback();
     error BadPrice();
     error BadSwapCallback();
@@ -153,7 +150,6 @@ abstract contract BuckBasketStorage {
     error To0();
     error TokenIn0();
     error TokenTooThin();
-    error TreasuryBpTooHigh();
     error Underwater();
     error VenueUnset();
 

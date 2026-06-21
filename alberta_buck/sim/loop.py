@@ -18,17 +18,17 @@ from alberta_buck.sim.snapshot import Snapshotter
 E6 = 10 ** 6
 
 
-def run(scenario, anvil, out_path=None, verbose=True) -> dict:
+def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> dict:
     w3 = anvil.w3
     chain = Chain(w3, w3.eth.accounts[0])
     rng = idmod.seeded_rng(scenario.seed)
     prng = random.Random(scenario.seed)
 
     if verbose:
-        print(f"[sim] deploying '{scenario.name}' "
+        print(f"[sim] deploying '{scenario.name}' with {basket_impl} basket "
               f"({scenario.days}d x {scenario.ticks_per_day} ticks)...",
               flush=True)
-    d = deploy(chain, anvil, scenario, rng)
+    d = deploy(chain, anvil, scenario, rng, basket_impl=basket_impl)
 
     # --- build + register the agent population ----------------------- #
     # Reset per-class counters defensively so back-to-back sim runs in

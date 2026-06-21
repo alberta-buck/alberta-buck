@@ -22,8 +22,12 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-DATA = REPO / "test" / "vectors" / "rebalancing-sim.json"
-OUT = REPO / "images" / "rebalancing-sim.png"
+# Input vector / output image are overridable so the prorata vs traditional
+# rebalancing runs can each be plotted independently (REB_VECTOR / REB_OUT).
+DATA = Path(os.environ.get("REB_VECTOR",
+                           REPO / "test" / "vectors" / "rebalancing-sim.json"))
+OUT = Path(os.environ.get("REB_OUT",
+                          REPO / "images" / "rebalancing-sim.png"))
 
 # BUCK is USDC-compatible 6-decimal accounting (see BuckTypes.DECIMALS).
 # Basket constituent TOKEN balances still use each token's own decimals from
