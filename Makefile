@@ -663,6 +663,27 @@ sim-flow:	sim-run-flow
 	python -m alberta_buck.sim.plot_basket_flow
 
 
+# ── Historical commodity & labour quote source ───────────────────────
+#
+# Builds NRGY/BULN/FOOD (from Bank of Canada BCPI sub-indices) and a
+# synthesized LABR series as inflation-neutralized real-CAD quotes, then
+# fills hourly samples between monthly anchors with seeded Brownian bridges.
+# Data is vendored under alberta_buck/sim/quotes/data (self-contained).
+#
+#   make nix-sim-quotes-plot   # render images/commodity-quotes-sim.png
+#   make nix-test-quotes       # run the quote-source property tests
+
+QUOTES_IMAGE	= images/commodity-quotes-sim.png
+
+.PHONY: sim-quotes-plot test-quotes
+
+sim-quotes-plot:
+	python -m alberta_buck.sim.quotes.plot_quotes
+
+test-quotes:
+	python -m pytest alberta_buck/test/test_quotes.py -v
+
+
 # ── Dependencies ─────────────────────────────────────────────────────
 
 install:
