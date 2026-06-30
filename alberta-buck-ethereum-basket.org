@@ -1,4 +1,4 @@
-#+title: The Alberta Buck -- The BuckBasket (v1.0)
+#+title: The Alberta Buck - The BuckBasket (v1.0)
 #+SUBTITLE: A High-Inertia Anchor for Generational Value
 #+author: Perry Kundert
 #+date: 2026-06-20
@@ -39,6 +39,7 @@ It is a facility -- a savings account whose yield comes from physics and
 arbitrage rather than a counterparty's good intentions -- and its single real
 risk is precisely characterised: an asset that deflates forever and never
 reverts.  The discipline that follows from that risk is the heart of the design.
+([[https://perry.kundert.ca/images/alberta-buck-ethereum-basket.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-ethereum-basket.txt][Text]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -46,6 +47,9 @@ reverts.  The discipline that follows from that risk is the heart of the design.
 
 #+LATEX: \clearpage
 * The problem: money needs a heavy anchor
+:PROPERTIES:
+:CUSTOM_ID: heavy-anchor
+:END:
 
 Every monetary design eventually answers one question: /anchored to what?/
 Gold standards anchored paper to a metal.  Modern fiat anchors a number to
@@ -79,6 +83,9 @@ Two things follow, and they are the subject of this article:
    collect that yield without ever managing a position.
 
 * Why base commodities revert: an argument from physics
+:PROPERTIES:
+:CUSTOM_ID: argument-from-physics
+:END:
 
 Financial assets can drift anywhere.  A stock can compound to the moon or
 fall to zero; nothing in nature forbids either.  *Civilizationally-basic
@@ -123,6 +130,9 @@ the future.  It is the default behaviour of the physical economy, and only
 violence suspends it.
 
 * From reversion to return: the rebalancing premium
+:PROPERTIES:
+:CUSTOM_ID: shannons-demon
+:END:
 
 Here is the part that surprises people.  Mean reversion is usually sold as
 /capital preservation/ -- a way to not lose.  But a basket of volatile,
@@ -162,6 +172,9 @@ pools, the direct mint, the sell-high redemption, the buy-low treasury --
 is machinery for rebalancing a commodity basket continuously and cheaply.
 
 * The engine: the world's arbitrageurs, working for free
+:PROPERTIES:
+:CUSTOM_ID: arbitrage-engine
+:END:
 
 Rebalancing has to be /done/ by someone, and trading costs money.  A
 managed fund pays a desk to rebalance.  The BUCK system has no desk and
@@ -205,6 +218,9 @@ as deep, honest, well-connected liquidity* that the rest of DeFi cannot
 help but use.
 
 * A facility, not a fund
+:PROPERTIES:
+:CUSTOM_ID: facility-not-fund
+:END:
 
 It must be said plainly: *the BUCK system cannot offer professional asset
 management, and should never pretend to.*  There is no portfolio manager,
@@ -233,6 +249,9 @@ appropriate as *base-layer infrastructure* for the BUCK economy rather than
 a product sold by a sponsor.
 
 * How the BuckBasket works
+:PROPERTIES:
+:CUSTOM_ID: how-it-works
+:END:
 
 The mechanism is deliberately simple, because simplicity is what makes
 "no manager required" credible.
@@ -272,6 +291,9 @@ The user-facing behaviour is exactly what a savings facility should be:
 *deposit, earn, withdraw,* with no trust in a manager and no forecast required.
 
 * Yield against demurrage; liquidity without lockup
+:PROPERTIES:
+:CUSTOM_ID: yield-vs-demurrage
+:END:
 
 The BUCK is designed to /circulate/.  Idle balances carry *demurrage* -- a
 small, deliberate holding cost that discourages hoarding or idleness and keeps
@@ -297,6 +319,9 @@ diversification, which is exactly the behaviour a stable monetary base should
 encourage.
 
 * What it is for
+:PROPERTIES:
+:CUSTOM_ID: what-its-for
+:END:
 
 Because the facility is permissionless, liquid, and mechanical, it slots
 naturally into the places an economy keeps capital that must stay available
@@ -318,6 +343,9 @@ otherwise-idle value to harvest the inertia of the physical economy and the
 flow of global arbitrage, with no manager to trust and no lockup to fear.
 
 * The one real risk: the asset that never reverts
+:PROPERTIES:
+:CUSTOM_ID: the-asset-that-never-reverts
+:END:
 
 Every honest design states the case in which it loses, and the BuckBasket's
 is sharp and singular.
@@ -340,10 +368,12 @@ a non-reverting component into a machine whose every gear assumes reversion, and
 it would drag the basket's return below a naive holder's for as long as the
 deflation persisted.  The rebalancing premium and the deflationary-store thesis
 are *mathematically opposed*; the basket must not bet against the very behaviour
-that funds it. [fn::The BUCK is the Bitcoin Maxi's best friend; accumulate BTC
-and issue BUCK credit against it to pay expenses and accumulate /more/ Bitcoin.]
+that funds it[fn::The BUCK is the Bitcoin Maxi's best friend; accumulate BTC and issue BUCK credit against it to pay expenses and accumulate /more/ Bitcoin].
 
 * The discipline: only civilizational basics
+:PROPERTIES:
+:CUSTOM_ID: civilizational-basics
+:END:
 
 The risk above dictates the membership rule, and the rule is strict.
 
@@ -366,6 +396,9 @@ monetary base must have and a speculative asset can never offer: *the near
 certainty of coming back*.
 
 * Conclusion: an anchor of stone, kept honest by the crowd
+:PROPERTIES:
+:CUSTOM_ID: anchor-of-stone
+:END:
 
 The BuckBasket is, in one sentence, a *heavy, transparent, liquid,
 self-rebalancing mass of civilizational basics, kept pinned to global
