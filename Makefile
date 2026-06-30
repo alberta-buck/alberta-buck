@@ -684,6 +684,43 @@ test-quotes:
 	python -m pytest alberta_buck/test/test_quotes.py -v
 
 
+# ── Historical basket simulation (real macro data) ───────────────────
+#
+# Runs the full BUCK stack on Anvil against REAL historical prices --
+#   PAXG (gold, USD), cbBTC (bitcoin, USD), NRGC (energy, CAD), LABR
+#   (labour, CAD) -- initialized to equal weights by value on the start day.
+# Window defaults to the last SIM_YEARS years of available data (~2025-09).
+#
+#   make nix-sim-gen-historical               # write the daily CSVs only
+#   make nix-sim-historical                   # build -> run -> plot
+#   make nix-sim-run-historical SIM_YEARS=1   # just the run (smaller window)
+#   make nix-sim-historical SIM_YEARS=2 HIST_TICKS=1
+#
+# A 5-year daily run is large (1800+ days x agent population); start with
+# SIM_YEARS=1 to smoke-test before committing to the full horizon.
+
+HISTORICAL_VECTOR	= test/vectors/historical-sim.json
+HISTORICAL_IMAGE	= images/historical-sim.png
+SIM_YEARS		?= 5
+HIST_TICKS		?= 1
+
+.PHONY: sim-gen-historical sim-run-historical sim-plot-historical sim-historical
+
+sim-gen-historical:
+	python -m alberta_buck.sim.gen_historical --years $(SIM_YEARS)
+
+sim-run-historical:	sim-build
+	python -m $(SIM_PKG) --scenario historical --years $(SIM_YEARS) \
+		--ticks-per-day $(HIST_TICKS) --basket $(SIM_BASKET) \
+		--out $(HISTORICAL_VECTOR)
+
+sim-plot-historical:	$(HISTORICAL_VECTOR)
+	REB_VECTOR=$(HISTORICAL_VECTOR) REB_OUT=$(HISTORICAL_IMAGE) \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-historical:	sim-run-historical sim-plot-historical
+
+
 # ── Dependencies ─────────────────────────────────────────────────────
 
 install:

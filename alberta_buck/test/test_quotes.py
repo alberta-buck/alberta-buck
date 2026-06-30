@@ -175,6 +175,27 @@ def test_labour_gross_windfall_is_kept():
 
 # --------------------------------------------------------------- Prices adapter
 
+def test_load_btc_daily_sorted():
+    btc = ingest.load_btc()
+    assert len(btc) > 3000                       # daily since 2010
+    assert btc[0][0] < btc[-1][0]                # chronological
+    assert all(v > 0 for _, v in btc[:200])
+
+
+def test_gen_historical_writes_aligned_csvs(tmp_path):
+    import csv as _csv
+    from alberta_buck.sim import gen_historical
+    files, n, s, e = gen_historical.gen(years=1.0, out_dir=tmp_path)
+    assert len(files) == 4 and n > 360
+    lengths = set()
+    for fn in files:
+        with (tmp_path / fn).open() as f:
+            rows = list(_csv.reader(f))[1:]
+            lengths.add(len(rows))
+            assert all(int(x[1]) > 0 for x in rows)   # positive scaled prices
+    assert lengths == {n}                              # all aligned to one grid
+
+
 def test_prices_adapter_self_consistent(qs):
     p = qs.as_prices(hours_per_step=1)
     assert p.tokens == TOKENS

@@ -28,6 +28,7 @@ CPI_CSV = DATA_DIR / "STATIC_INFLATIONCALC.csv"        # Canadian CPI
 USCPI_CSV = DATA_DIR / "CPI-USD.csv"                    # US CPI
 USD_CAD_CSV = DATA_DIR / "USD_CAD_1972.csv"
 GOLD_CSV = DATA_DIR / "AU-USD.csv"
+BTC_CSV = DATA_DIR / "BTC-USD.csv"
 
 # Commodity token -> BCPI sub-index column (all USD-native indices, 100 at 1972).
 COMMODITY_COLS = {
@@ -81,6 +82,16 @@ def load_gold() -> list[tuple[date, float]]:
     """Gold spot, USD per troy oz, monthly (full history from 1833)."""
     out: list[tuple[date, float]] = []
     with GOLD_CSV.open(encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            out.append((_parse_date(row["Date"]), float(row["Price"])))
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def load_btc() -> list[tuple[date, float]]:
+    """Bitcoin spot, USD, DAILY (from 2010-07).  Real high-frequency series."""
+    out: list[tuple[date, float]] = []
+    with BTC_CSV.open(encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             out.append((_parse_date(row["Date"]), float(row["Price"])))
     out.sort(key=lambda r: r[0])
