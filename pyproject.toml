@@ -49,6 +49,10 @@ include = ["alberta_buck*"]
 # the E2E Notes receipt tests run from a venv-installed wheel, not only from
 # the repo checkout.
 "alberta_buck.test" = ["vectors/*.golden.txt", "vectors/e2e/*.json"]
+# Vendored Bank of Canada / StatCan source series (BCPI, CPI, USD/CAD, wages)
+# consumed at runtime by alberta_buck.sim.quotes to build the historical
+# commodity & labour quote source; shipped so the module is self-contained.
+"alberta_buck.sim.quotes" = ["data/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["alberta_buck/test"]

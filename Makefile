@@ -57,7 +57,7 @@ VENV_OPTS		=
 .PHONY: vectors plots images
 .PHONY: vector-lifecycle vector-equilibrium vector-arb
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
-.PHONY: sim sim-build sim-run sim-test sim-plot
+.PHONY: sim sim-build sim-run sim-test sim-plot sim-tui
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
 .PHONY: sim-run-flow sim-plot-flow sim-flow
 .PHONY: prices-routing plot-routing
@@ -487,6 +487,7 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
 SIM_BASKET	?= legacy        # legacy (BuckBasket) | prorata (BuckBasketProRata)
+SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 
@@ -545,6 +546,26 @@ sim-plot:	$(ROUTING_VECTOR)
 	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
 
 sim:		sim-run sim-plot
+
+# ── Interactive curses inspector (live component / agent viewer) ────────
+#
+# A navigable TUI over a live sim: deploy + step the timeline yourself and
+# inspect every on-chain component and agent (summary -> detail).  This is
+# the display-only first layer; parameter adjustment comes later.
+#
+#   make nix-sim-tui                                       # rebalancing/prorata
+#   make nix-sim-tui SIM_SCENARIO=routing SIM_BASKET=legacy   # lighter, fast deploy
+#
+# In the UI:  arrows/PgUp/PgDn move; Right/Left expand/collapse; [space] step
+# a tick, [d] step a day, [r] run/pause, [w]rite a snapshot vector, [q]uit.
+sim-tui:	sim-build
+	@echo "sim-tui: scenario: $(SIM_SCENARIO)"
+	@echo "sim-tui: basket:   $(SIM_BASKET)"
+	python -m $(SIM_PKG).tui --scenario $(SIM_SCENARIO) --basket $(SIM_BASKET) \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
+
+sim-tui-prorata: SIM_BASKET=prorata
+sim-tui-prorata: sim-tui
 
 
 # ── Rebalancing simulation (Phase 1: staggered direct-mint agents) ──────
@@ -640,6 +661,64 @@ sim-plot-flow:	$(FLOW_VECTOR) $(SIM_FLOW_PLOT)
 
 sim-flow:	sim-run-flow
 	python -m alberta_buck.sim.plot_basket_flow
+
+
+# ── Historical commodity & labour quote source ───────────────────────
+#
+# Builds NRGY/BULN/FOOD (from Bank of Canada BCPI sub-indices) and a
+# synthesized LABR series as inflation-neutralized real-CAD quotes, then
+# fills hourly samples between monthly anchors with seeded Brownian bridges.
+# Data is vendored under alberta_buck/sim/quotes/data (self-contained).
+#
+#   make nix-sim-quotes-plot   # render images/commodity-quotes-sim.png
+#   make nix-test-quotes       # run the quote-source property tests
+
+QUOTES_IMAGE	= images/commodity-quotes-sim.png
+
+.PHONY: sim-quotes-plot test-quotes
+
+sim-quotes-plot:
+	python -m alberta_buck.sim.quotes.plot_quotes
+
+test-quotes:
+	python -m pytest alberta_buck/test/test_quotes.py -v
+
+
+# ── Historical basket simulation (real macro data) ───────────────────
+#
+# Runs the full BUCK stack on Anvil against REAL historical prices --
+#   PAXG (gold, USD), cbBTC (bitcoin, USD), NRGC (energy, CAD), LABR
+#   (labour, CAD) -- initialized to equal weights by value on the start day.
+# Window defaults to the last SIM_YEARS years of available data (~2025-09).
+#
+#   make nix-sim-gen-historical               # write the daily CSVs only
+#   make nix-sim-historical                   # build -> run -> plot
+#   make nix-sim-run-historical SIM_YEARS=1   # just the run (smaller window)
+#   make nix-sim-historical SIM_YEARS=2 HIST_TICKS=1
+#
+# A 5-year daily run is large (1800+ days x agent population); start with
+# SIM_YEARS=1 to smoke-test before committing to the full horizon.
+
+HISTORICAL_VECTOR	= test/vectors/historical-sim.json
+HISTORICAL_IMAGE	= images/historical-sim.png
+SIM_YEARS		?= 5
+HIST_TICKS		?= 1
+
+.PHONY: sim-gen-historical sim-run-historical sim-plot-historical sim-historical
+
+sim-gen-historical:
+	python -m alberta_buck.sim.gen_historical --years $(SIM_YEARS)
+
+sim-run-historical:	sim-build
+	python -m $(SIM_PKG) --scenario historical --years $(SIM_YEARS) \
+		--ticks-per-day $(HIST_TICKS) --basket $(SIM_BASKET) \
+		--out $(HISTORICAL_VECTOR)
+
+sim-plot-historical:	$(HISTORICAL_VECTOR)
+	REB_VECTOR=$(HISTORICAL_VECTOR) REB_OUT=$(HISTORICAL_IMAGE) \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-historical:	sim-run-historical sim-plot-historical
 
 
 # ── Dependencies ─────────────────────────────────────────────────────

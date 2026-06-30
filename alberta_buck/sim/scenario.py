@@ -73,3 +73,37 @@ REBALANCING = Scenario(
 )
 
 SCENARIOS = {ROUTING.name: ROUTING, REBALANCING.name: REBALANCING}
+
+
+def build_historical(start=None, end=None, years=5.0, ticks_per_day=1,
+                     seed=0xA1BC):
+    """Rebalancing-style scenario backed by REAL historical data.
+
+    Generates daily CSVs (gen_historical) for a window (default: the last
+    `years` of available data) over PAXG (gold, USD), cbBTC (bitcoin, USD),
+    NRGC (energy, CAD) and LABR (labour, CAD), then returns a Scenario the
+    normal loop/deploy pipeline can run.  The basket targets equal shares
+    (addBasketToken share 0) and pools seed to a common quote-depth, so the
+    basket starts at equal weights by value on the start day.
+
+    Imported lazily so importing this module never requires the quote source.
+    """
+    from alberta_buck.sim.gen_historical import gen
+    files, n_days, _s, _e = gen(start=start, end=end, years=years)
+    return Scenario(
+        name="historical",
+        tokens=[("PAXG", "PAX Gold", 18),
+                ("cbBTC", "Coinbase Wrapped BTC", 8),
+                ("NRGC", "Energy (CAD)", 18),
+                ("LABR", "Labour (CAD)", 18)],
+        csv_files=files,
+        agents={"AnonymousArbAgent": 3,
+                "TokenAccumulatorAgent": 4,     # one per token
+                "MarketMakerWhale": 1,
+                "BootstrapDMAgent": 24,
+                "DirectMintAgent": 120,
+                "DirectMintBuckAgent": 40},
+        days=n_days,
+        ticks_per_day=ticks_per_day,
+        seed=seed,
+    )

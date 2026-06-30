@@ -1,5 +1,5 @@
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                THE ALBERTA BUCK – THE BUCKBASKET (V1.0)
+                THE ALBERTA BUCK - THE BUCKBASKET (V1.0)
               A High-Inertia Anchor for Generational Value
 
                              Perry Kundert
@@ -30,7 +30,7 @@ It is a facility – a savings account whose yield comes from physics and
 arbitrage rather than a counterparty's good intentions – and its single
 real risk is precisely characterised: an asset that deflates forever and
 never reverts.  The discipline that follows from that risk is the heart
-of the design.
+of the design.  ([PDF], [Text])
 
 Table of Contents
 ─────────────────
@@ -46,6 +46,12 @@ Table of Contents
 9. The one real risk: the asset that never reverts
 10. The discipline: only civilizational basics
 11. Conclusion: an anchor of stone, kept honest by the crowd
+
+
+[PDF] <https://perry.kundert.ca/images/alberta-buck-ethereum-basket.pdf>
+
+[Text]
+<https://perry.kundert.ca/images/alberta-buck-ethereum-basket.txt>
 
 
 1 The problem: money needs a heavy anchor
@@ -384,7 +390,7 @@ Table of Contents
   would drag the basket's return below a naive holder's for as long as
   the deflation persisted.  The rebalancing premium and the
   deflationary-store thesis are *mathematically opposed*; the basket
-  must not bet against the very behaviour that funds it. [1]
+  must not bet against the very behaviour that funds it[1].
 
 
 10 The discipline: only civilizational basics
@@ -440,4 +446,4 @@ Footnotes
 ─────────
 
 [1] The BUCK is the Bitcoin Maxi's best friend; accumulate BTC and issue
-BUCK credit against it to pay expenses and accumulate /more/ Bitcoin.
+BUCK credit against it to pay expenses and accumulate /more/ Bitcoin
