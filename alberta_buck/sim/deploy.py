@@ -330,7 +330,17 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # BUCK transfer is SimLP(public) -> pool(public).  No private EOA, no
     # storage fakery, and no existing pool is drained.
     Q96 = 1 << 96
-    FACE = 2 * TARGET_BUCK_LP
+    # A zero-premium mint yields *spendable* BUCK == amount * buckK
+    # (creditLimit = activatedValue * buckK / 1e18), so at a resting LTV of
+    # K0 < 1.0 minting TARGET_BUCK_LP no longer frees TARGET_BUCK_LP to LP.
+    # Size the mint (and the backing credit face) off the live K0 so the SimLP
+    # can seed ~TARGET_BUCK_LP BUCK at any resting K -- with a 20% margin so
+    # full-range rounding never trips "amount exceeds spendable".  Only the LP
+    # transfer (~TARGET_BUCK_LP) actually enters supply; the surplus headroom
+    # is inert, so downstream pool depth / totalSupply are unchanged.
+    k0 = kctrl.functions.buckK().call()
+    mint_amt = (TARGET_BUCK_LP * E18 // max(1, k0)) * 12 // 10
+    FACE = max(2 * TARGET_BUCK_LP, mint_amt * 12 // 10)
 
     now_ts = w3.eth.get_block("latest")["timestamp"]
     cc = credit.functions.createCredit(simlp.address, 0, FACE, 0, 0, 0,
@@ -343,7 +353,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # to bootstrap.
     chain.send(simlp.functions.exec(
         buck.address,
-        buck.encode_abi("mint(uint256)", args=[TARGET_BUCK_LP])))
+        buck.encode_abi("mint(uint256)", args=[mint_amt])))
 
     chain.send(v3f.functions.createPool(buck.address, usdc.address, FEE_BUCK_UB))
     pub = v3f.functions.getPool(buck.address, usdc.address, FEE_BUCK_UB).call()
