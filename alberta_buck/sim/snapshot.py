@@ -222,6 +222,22 @@ class Snapshotter:
             bk = int(d.kctrl.functions.buckK().call())
         except Exception:
             bk = 0
+        # PID internals (ppm error, ppm*s integral, ppm dError) -- additive
+        # observability for the equilibrium experiment; 0 if unavailable.
+        try:
+            pid_p = int(d.kctrl.functions.P().call())
+            pid_i = int(d.kctrl.functions.I().call())
+            pid_d = int(d.kctrl.functions.D().call())
+        except Exception:
+            pid_p = pid_i = pid_d = 0
+        # Idle-BUCK held by savers (sum over any SaverAgent proxies present).
+        saver_hold = 0
+        for ag in agents:
+            if type(ag).__name__ == "SaverAgent" and getattr(ag, "proxy", None):
+                try:
+                    saver_hold += _bal(d.buck, ag.address)
+                except Exception:
+                    pass
         lg = self._lp_groups()
         if self._lp_cap is None:                       # freeze capital basis
             self._lp_cap = {g: lg[g][1] for g in lg}
@@ -264,6 +280,10 @@ class Snapshotter:
             "spotBuck": sb,
             "basketVal": bv,
             "buckK": bk,
+            "pid_p": pid_p,
+            "pid_i": pid_i,
+            "pid_d": pid_d,
+            "saver_hold": saver_hold,
             "supply": int(d.buck.functions.totalSupply().call()),
             "directTrades": ctr["directTrades"],
             "cycleTrades": ctr["cycleTrades"],

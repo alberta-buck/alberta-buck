@@ -7,13 +7,15 @@ import sys
 
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.loop import run
-from alberta_buck.sim.scenario import SCENARIOS, build_historical
+from alberta_buck.sim.scenario import (
+    SCENARIOS, build_historical, build_equilibrium,
+)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="alberta_buck.sim")
     ap.add_argument("--scenario", default="routing",
-                    choices=sorted(SCENARIOS) + ["historical"])
+                    choices=sorted(SCENARIOS) + ["historical", "equilibrium"])
     ap.add_argument("--basket", default="legacy", choices=["legacy", "prorata"],
                     help="basket implementation: BuckBasket (legacy) or BuckBasketProRata")
     ap.add_argument("--days", type=int, default=None)
@@ -24,14 +26,19 @@ def main(argv=None) -> int:
     # historical-scenario window (real macro data)
     ap.add_argument("--start", default=None, help="historical: ISO start date")
     ap.add_argument("--end", default=None, help="historical: ISO end date")
-    ap.add_argument("--years", type=float, default=5.0,
-                    help="historical: window length if --start omitted (default 5)")
+    ap.add_argument("--years", type=float, default=None,
+                    help="historical/equilibrium: window length if --start "
+                         "omitted (default 5 historical, 1.5 equilibrium)")
     a = ap.parse_args(argv)
 
+    seed0 = a.seed if a.seed is not None else 0xA1BC
     if a.scenario == "historical":
-        sc = build_historical(start=a.start, end=a.end, years=a.years,
-                              ticks_per_day=a.ticks_per_day or 1,
-                              seed=a.seed if a.seed is not None else 0xA1BC)
+        sc = build_historical(start=a.start, end=a.end,
+                              years=a.years if a.years is not None else 5.0,
+                              ticks_per_day=a.ticks_per_day or 1, seed=seed0)
+    elif a.scenario == "equilibrium":
+        sc = build_equilibrium(start=a.start, end=a.end, years=a.years,
+                               ticks_per_day=a.ticks_per_day or 48, seed=seed0)
     else:
         sc = SCENARIOS[a.scenario]
     if a.days is not None:

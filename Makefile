@@ -721,6 +721,42 @@ sim-plot-historical:	$(HISTORICAL_VECTOR)
 sim-historical:	sim-run-historical sim-plot-historical
 
 
+# ── Equilibrium basket simulation (BUCK-K feedback loop) ─────────────
+#
+# Same real macro price feeds as the historical scenario, plus the MONETARY
+# feedback the BuckKControllerDirect PID defends: FatCreditBorrower agents
+# issue/retire BUCK against K-scaled credit limits, pushing basketValueInBuck
+# around 1.0 while the controller trims buckK to hold parity.  A PidKeeper
+# advances the PID on the 30-min (ticks_per_day=48) money cadence.
+#
+#   make nix-sim-equilibrium                 # build -> run (short) -> plot
+#   make nix-sim-run-equilibrium             # just the run
+#   make nix-sim-plot-equilibrium            # render images/equilibrium-sim.png
+#   make nix-sim-equilibrium EQ_DAYS=60 EQ_YEARS=1.5
+#
+# Start short (EQ_DAYS=30) to smoke-test the loop before a long horizon.
+
+EQUILIBRIUM_VECTOR	= test/vectors/equilibrium-sim.json
+EQUILIBRIUM_IMAGE	= images/equilibrium-sim.png
+SIM_EQ_PLOT		= alberta_buck/sim/plot_equilibrium.py
+EQ_YEARS		?= 1.5
+EQ_TICKS		?= 48
+EQ_DAYS			?= 20
+
+.PHONY: sim-run-equilibrium sim-plot-equilibrium sim-equilibrium
+
+sim-run-equilibrium:	sim-build
+	python -m $(SIM_PKG) --scenario equilibrium --years $(EQ_YEARS) \
+		--days $(EQ_DAYS) --ticks-per-day $(EQ_TICKS) --basket $(SIM_BASKET) \
+		--out $(EQUILIBRIUM_VECTOR)
+
+sim-plot-equilibrium:	$(EQUILIBRIUM_VECTOR)
+	EQ_VECTOR=$(EQUILIBRIUM_VECTOR) EQ_OUT=$(EQUILIBRIUM_IMAGE) \
+		python -m pytest $(SIM_EQ_PLOT) -v -s
+
+sim-equilibrium:	sim-run-equilibrium sim-plot-equilibrium
+
+
 # ── Dependencies ─────────────────────────────────────────────────────
 
 install:
