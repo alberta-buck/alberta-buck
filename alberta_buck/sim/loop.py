@@ -107,6 +107,12 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
         except Exception:
             pass
         snap.capture(day, ctr, agents, init_val, reb_init, dm_init)
+        # Incremental checkpoint: flush the vector periodically so a long run
+        # killed mid-flight still yields usable partial data (and can be
+        # plotted).  Cheap relative to a day's on-chain work; final write below
+        # still produces the complete vector.
+        if out_path and day > 0 and day % 25 == 0:
+            snap.write(out_path)
         if verbose and (day % 20 == 0 or day == scenario.days - 1):
             f = snap.frames[-1]
             errs = [abs(f["spotUsdc"][i] - f["refUsd"][i]) / max(1, f["refUsd"][i])
