@@ -58,20 +58,62 @@ for the passive rebalancing harvest from their independent dynamics).
 at 10-day steps ~= 183 iterations) to fit a bounded runtime; the loop checkpoints
 the vector every 25 days for kill-resilience.
 
-## Results so far
-- **Loop closes.** With slow PID + two-sided basket-anchored savers, basketValue
-  mean-reverts around parity instead of diverging.
+## Results (banked milestone)
+Over this work the system went from **diverging + bang-banging + flooding** to
+**closed, tight, and flood-free**:
+- **Loop closes:** slow integral-dominant PID + two-sided basket-anchored savers
+  mean-revert basketValue instead of diverging.
 - **Startup flood fixed** by the lifecycle borrower's pre-funding toll: day-0
-  basketValue 1.0 (was ~2.5 spike), max 1.29 (was 3.47), buck_usd max 8 (was 42),
-  and overall volatility 3x tighter (stdev 0.30 -> 0.09).
-- **Open tuning issue:** the lifecycle borrower *over-corrects* -- basketValue
-  settles ~0.92 (BUCK chronically rich) with K railed near the ceiling (0.93) --
-  because the funding reserve is **cumulative and never released**, so the
-  adoption ramp leaves a standing net BUCK demand.
-  - *Fix in progress:* make the reserve a **rolling** requirement proportional to
-    *outstanding* drawn credit, released on retirement, so pre-funding demand
-    unwinds over the lifecycle (net-neutral) and only spikes during rapid uptake.
-    Expected to re-center basketValue on 1.0 with K resting ~0.75.
+  basketValue 1.0 (was a ~2.5 spike), max 1.29 (was 3.47), buck_usd max 8
+  (was 42).
+- **Volatility 3x tighter** (basketValue stdev 0.30 -> 0.09).
+
+**Accepted residual (banked):** basketValue settles ~0.92 (BUCK mildly *rich*
+vs the basket) with K riding high (~0.93).  BUCK mildly appreciating vs the
+basket is deflationary money -- arguably on-design for a high-inertia anchor
+that "deflates forever."  The one caveat is that K rides near its ceiling: the
+controller is pinned high rather than holding an interior equilibrium.  We bank
+this state; refinements are catalogued below.
+
+Reference: `images/equilibrium-lifecycle.png` (+ its vector) is this milestone.
+
+## Approaches forward
+The recurring reason parity isn't hit *exactly* is structural: basketValueInBuck
+is read from the **TOKEN/BUCK** pools, but the stabilizing agents (savers, the
+borrower's reserve) trade on **BUCK/USDC** -- the two are linked only by arbs,
+which lag at the coarse macro cadence.  Demand-side control of the exact
+observable is therefore always indirect.  Refinements, in increasing effort:
+
+- **(B) Reserve-accounting rework.**  Make the borrower's pre-issuance funding
+  reserve a *rolling* requirement tied to OUTSTANDING drawn credit, released
+  (sold back into the **TOKEN/BUCK** pools) as credit is retired -- so the
+  adoption-ramp pre-demand unwinds instead of leaving a standing net demand.
+  Target: basketValue on 1.0 with K settling in the interior ~0.75.  (A first
+  attempt keyed the release off the tangled `drawn = reserve_held - signed`
+  accounting and sold into BUCK/USDC; it regressed and was reverted.)
+- **(C) Direct TOKEN/BUCK stabilization channel.**  Give savers/borrowers a
+  direct channel on the controlled pool so demand acts on the observable without
+  waiting for arbs.  Most principled, biggest change.
+
+### Economic direction (beyond the current sim)
+The current sim fights *deflation* (BUCK richer than the basket).  In reality,
+demand for BUCK credit will out-strip deflationary tendencies, so the harder
+regime is the opposite one:
+
+- **Issuance limiting needs BOTH a primary and a backstop function.**
+  *Primary:* the counter-cyclical insurance **funding factor** as a
+  market-driven, valuation-sensitive pre-issuance demand toll (currently
+  *simulated* in the agent, because zero-premium BuckCredit bypasses the
+  on-chain gate).  *Backstop:* a hard supply-relative cap (new credit <= X% of
+  BUCK supply per period) against pathological floods.
+- **At civilization scale**, when BuckCredit issuance and FX-mediated debt
+  retirement (BUCK credit -> USDC to retire fiat mortgages) really hit, the
+  primary problems flip to **inflation and BUCK/fiat pool depth** -- the system
+  must absorb enormous issuance without draining the fiat gateways.
+- A **richer agent simulator** (heterogeneous per-actor credit lifecycles,
+  non-zero-premium insurance so the funding factor is enforced on-chain, and
+  explicit fiat-gateway liquidity) would model these regimes; future modelling
+  will refine this.
 
 ## Key files
 - `src/BuckKControllerDirect.sol` -- the PID.
