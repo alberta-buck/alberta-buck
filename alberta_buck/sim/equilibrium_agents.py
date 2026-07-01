@@ -49,6 +49,7 @@ K-scaled creditLimit.  This is economically identical to the negotiated design
 from __future__ import annotations
 
 import hashlib
+import math
 import random
 
 from alberta_buck.sim import identity as idmod
@@ -211,12 +212,50 @@ class PidKeeperAgent(Agent):
 
 @_register
 class FatCreditBorrowerAgent(_ProxyAgent):
-    """Models many actors issuing/redeeming BUCK against a pool of BuckCredit
-    "properties".  Levers toward `util_target * creditLimit`; the controller
-    tightening K forces deleverage.  See module docstring for the loop."""
+    """A realistic BUCK issuer/redeemer lifecycle against a pool of BuckCredit
+    "properties".  Three mechanisms shape the standing draw, since the on-chain
+    funding-factor gate is bypassed for zero-premium credit (poolPrincipal == 0)
+    and would otherwise let issuance flood at t=0:
+
+      (A) ADOPTION RAMP + SHOCK.  The pooled creditable capacity is not all
+          available at once: `cap_frac(day)` is a logistic S-curve rising from
+          ~0.15 to 1.0 over the sim horizon, so society takes up the credit
+          gradually.  A minority of agents also get a one-off STEP shock at a
+          seeded mid-run day (`+shock_mag`), a sudden society-wide uptake.  The
+          effective target draw is `util_target * creditLimit * cap_frac(day)`,
+          so issuance ramps IN instead of flooding, and a shock injects a wave.
+
+      (B) PRE-ISSUANCE FUNDING FACTOR (simulated).  Before issuing `delta` net
+          BUCK the agent must first HOLD a locked funding reserve, topping it up
+          by BUYING BUCK (this is the pre-issuance demand the real funding gate
+          would compel).  The reserve requirement scales with a funding factor
+              ff = (1 + FF_CYC*max(0, basketValueInBuck-1))
+                   * (1 + FF_AMP*(issue_rate**FF_POW))
+          that is counter-cyclical in the basket premium AND super-linear in the
+          SYSTEM-WIDE issuance rate (totalSupply delta since last step).  A hot
+          uptake makes ff blow up, demanding heavy pre-BUCK demand; if the agent
+          cannot fund the shortfall it issues LESS (the throttle).  The reserve
+          is sequestered like insurance -- the issuance sell only ever touches
+          freshly-issued `delta`, never the reserve (tracked logically so the
+          bought reserve BUCK and the drawn credit stay separate accounts).
+
+      (C) DISCOUNT-DRIVEN REDEMPTION ("money at a discount").  The retire/
+          buy-back leg accelerates with the discount:
+              retire_eff = retire_rate * (1 + DISC_GAIN*max(0, basketValueInBuck-1))
+          so when BUCK is cheap vs the basket, redeemers buy BUCK hard --
+          counter-cyclical demand -- on top of the forced deleverage when K
+          tightens and the K-scaled creditLimit shrinks below the current draw.
+
+    Net dynamic: strong issuance -> large ff -> pre-buy dominates the issuance
+    sell -> net BUCK demand -> BUCK bid up -> the wave self-limits, and the
+    ramp keeps the day-0 draw small, so basketValueInBuck no longer spikes at
+    t=0.  See module docstring for the surrounding loop."""
 
     N_CREDITS = 8                 # pool of "property" NFTs
     # aggregate face sized ~$2-5M (6-dec BUCK wei), chosen per-agent in setup.
+
+    CAP_FLOOR = 0.15              # adoption S-curve starts here (t=0)
+    CAP_CEIL = 1.50              # cap on cap_frac (headroom for a shock)
 
     _regime_counter = 0           # per-class seq (reset in build_equilibrium)
 
@@ -235,6 +274,32 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         self.band = 0.05                            # deadband
         face_total = r.randint(2, 5) * 1_000_000 * 10 ** 6   # $2-5M, 6-dec
 
+        # (A) Adoption ramp: logistic cap_frac(day) from CAP_FLOOR -> ~1.0.
+        # `growth_slope` steepens the S; `mid_frac` places its midpoint as a
+        # fraction of the horizon.  A minority (~1/3) get a one-off step shock.
+        self.growth_slope = r.uniform(8.0, 14.0)
+        self.mid_frac = r.uniform(0.35, 0.55)
+        self.shock_day = -1
+        self.shock_mag = 0.0
+        horizon = max(1, int(getattr(scenario, "days", 1)))
+        if r.random() < 0.34:
+            self.shock_day = r.randint(int(0.25 * horizon), int(0.70 * horizon))
+            self.shock_mag = r.uniform(0.20, 0.40)
+        self._shock_logged = False
+
+        # (B) Pre-issuance funding-factor knobs.  Super-linear in issue_rate,
+        # counter-cyclical in the basket premium.  Seeded within the design
+        # ranges so a rapid uptake makes ff blow up (strong pre-BUCK demand).
+        self.ff_cyc = r.uniform(5.0, 10.0)
+        self.ff_amp = r.uniform(50.0, 200.0)
+        self.ff_pow = r.uniform(1.5, 2.0)
+        self.reserve_target = 0     # cumulative BUCK reserve required
+        self.reserve_held = 0       # cumulative BUCK reserve actually bought
+        self._supply_prev = 0       # last-step system BUCK totalSupply
+
+        # (C) Redemption discount gain.
+        self.disc_gain = r.uniform(3.0, 8.0)
+
         self._bind_proxy(d)
 
         # Create the pool of BuckCredit NFTs (no depreciation, zero premium).
@@ -247,7 +312,8 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         # Activate the WHOLE face once: mint face_total (zero premium => this
         # only activates credit headroom; no BUCK enters circulation, raw
         # stays 0, drawn stays 0).  creditLimit is now face * buckK and moves
-        # live with the controller.
+        # live with the controller.  The RAMP is applied to the TARGET, not the
+        # NFT creation -- simpler and equivalent.
         self._face = per * self.N_CREDITS
         try:
             self._proxy_exec(
@@ -255,6 +321,18 @@ class FatCreditBorrowerAgent(_ProxyAgent):
                 d.buck.encode_abi("mint(uint256)", args=[self._face]))
         except Exception as e:
             print(f"[fatborrower-{self.idx}] activate mint failed: {e!r}",
+                  flush=True)
+
+        # Seed a USDC funding budget so the agent can front the pre-issuance
+        # BUCK demand (its reserve).  Issuance sells recycle USDC back in; when
+        # the budget + recycled flow can't cover a hot reserve shortfall, the
+        # throttle bites and the agent issues less.
+        self.fund_budget = r.randint(3, 6) * 1_000_000 * 10 ** 6
+        try:
+            d.chain.send(d.usdc.functions.mint(self.proxy.address,
+                                               self.fund_budget))
+        except Exception as e:
+            print(f"[fatborrower-{self.idx}] fund mint failed: {e!r}",
                   flush=True)
 
     # -- market primitives ------------------------------------------------- #
@@ -277,6 +355,22 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         """Sell BUCK into `pool_addr`, receiving the other token back to the
         proxy (drives signed raw negative == draws credit == issues BUCK)."""
         self._swap_via_simlp(d, pool_addr, d.buck, buck_amt, self.proxy.address)
+
+    def _sell_capped(self, d, pool_addr: str, buck_amt: int) -> int:
+        """Sell BUCK into `pool_addr`, first capping the amount to the
+        contract's own live spendable (balanceOf == held-net-of-demurrage +
+        unused credit) read right before the transfer.  Returns BUCK sold."""
+        if buck_amt <= 0:
+            return 0
+        try:
+            sp = d.buck.functions.balanceOf(self.proxy.address).call()
+        except Exception:
+            sp = buck_amt
+        amt = min(buck_amt, max(0, sp))
+        if amt < 10 ** 6:
+            return 0
+        self._sell_buck(d, pool_addr, amt)
+        return amt
 
     def _buy_buck(self, d, pool_addr: str, input_c, want_buck: int,
                   fee: int) -> int:
@@ -305,6 +399,19 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         return (f"day{day} borrower#{self.idx} util_target "
                 f"{old:.3f}->{self.util_target:.3f}")
 
+    # -- adoption ramp ----------------------------------------------------- #
+
+    def _cap_frac(self, day, horizon) -> float:
+        """(A) Logistic adoption S-curve in [CAP_FLOOR, ~1.0] over the horizon,
+        plus a one-off step (`+shock_mag`) once `shock_day` is reached."""
+        h = max(1, int(horizon))
+        x = day / h
+        lg = 1.0 / (1.0 + math.exp(-self.growth_slope * (x - self.mid_frac)))
+        cf = self.CAP_FLOOR + (1.0 - self.CAP_FLOOR) * lg
+        if self.shock_day >= 0 and day >= self.shock_day:
+            cf += self.shock_mag
+        return max(0.0, min(self.CAP_CEIL, cf))
+
     # -- the loop ---------------------------------------------------------- #
 
     def act(self, d, scenario, day, tick, ctr) -> None:
@@ -314,41 +421,113 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         try:
             limit = d.buck.functions.creditLimit(self.proxy.address).call()
             signed = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+            supply_now = d.buck.functions.totalSupply().call()
+            bvib = d.basket.functions.basketValueInBuck().call() / 1e18
         except Exception as e:
             ctr["fat_err"] = repr(e)[:200]
             return
-        drawn = -signed if signed < 0 else 0
-        target = int(self.util_target * limit)
+
+        # System-wide issuance rate since our last step -- the pre-issuance
+        # demand signal.  totalSupply == sum_a max(0, signedRaw(a)), so it
+        # rises exactly as BUCK is sold into circulation.
+        prev = self._supply_prev if self._supply_prev else supply_now
+        issue_rate = max(0.0, (supply_now - prev) / max(1, prev))
+        self._supply_prev = supply_now
+
+        # One-off shock bookkeeping (observability).
+        if self.shock_day >= 0 and day >= self.shock_day and not self._shock_logged:
+            self._shock_logged = True
+            ctr["fatShocksFired"] = ctr.get("fatShocksFired", 0) + 1
+        if self.shock_day >= 0 and day == 0:
+            ctr["fatShockSeeded"] = ctr.get("fatShockSeeded", 0) + 1
+
+        # Logical draw: issuance sold BEYOND the sequestered reserve.  The
+        # reserve BUCK we bought sits positive in the same signed balance, so
+        # `drawn = reserve_held - signed` keeps reserve and drawn as separate
+        # accounts (the sell leg only ever touches fresh `delta`).
+        drawn = self.reserve_held - signed
+        if drawn < 0:
+            drawn = 0
+
+        # (A) Adoption ramp (+ optional shock) scales the effective target.
+        cap = self._cap_frac(day, getattr(scenario, "days", 1))
+        target = int(self.util_target * limit * cap)
         dead = int(self.band * max(1, limit))
         n = len(d.tokens)
 
         if drawn < target - dead:
-            # Lever up: sell fresh BUCK.  Never sell more than currently
-            # spendable headroom (creditLimit - drawn).
+            # Lever up.  Never issue past currently spendable headroom.
             delta = target - drawn
             spendable = max(0, limit - drawn)
             delta = min(delta, spendable)
             if delta < 10 ** 6:            # sub-$1 moves: skip
                 return
+
+            # (B) Pre-issuance funding factor: counter-cyclical (basket
+            # premium) x super-linear in the system issuance rate.  A hot
+            # uptake -> huge ff -> heavy pre-buy demanded before we may issue.
+            ff = ((1.0 + self.ff_cyc * max(0.0, bvib - 1.0))
+                  * (1.0 + self.ff_amp * (issue_rate ** self.ff_pow)))
+            need_add = int(delta * ff)
+            # Top the locked reserve up toward (target + this issuance) by
+            # BUYING BUCK -- the pre-issuance demand.  Never sells the reserve.
+            shortfall = (self.reserve_target + need_add) - self.reserve_held
+            if shortfall > 10 ** 6 and d.pool_ub:
+                try:
+                    got = self._buy_buck(d, d.pool_ub, d.usdc, shortfall,
+                                         d.fee_ub)
+                except Exception as e:
+                    ctr["fat_prefund_err"] = repr(e)[:200]
+                    got = 0
+                if got > 0:
+                    self.reserve_held += got
+                    ctr["fatPreFundBought"] = (
+                        ctr.get("fatPreFundBought", 0) + got)
+
+            # Throttle: only issue as much as the funded reserve supports.
+            avail = self.reserve_held - self.reserve_target
+            if avail < need_add:
+                delta_funded = int(max(0, avail) / ff) if ff > 0 else 0
+                if delta_funded < delta:
+                    ctr["fatThrottled"] = ctr.get("fatThrottled", 0) + 1
+                delta = min(delta, delta_funded)
+            if delta < 10 ** 6:
+                return
+            # Commit the reserve requirement for the (possibly throttled) delta.
+            self.reserve_target += int(delta * ff)
+
             internal = int(self.internal_share * delta)
             external = delta - internal
             i = self._rng.randrange(n)     # which TOKEN/BUCK pool to push
             try:
-                if internal > 0:
-                    self._sell_buck(d, d.pool_buck[i], internal)
-                if external > 0 and d.pool_ub:
-                    self._sell_buck(d, d.pool_ub, external)
-                ctr["fatEntries"] = ctr.get("fatEntries", 0) + 1
-                ctr["fatIssued"] = ctr.get("fatIssued", 0) + delta
+                # Each leg is capped to the contract's own live spendable read
+                # immediately before its transfer (held-net-of-demurrage +
+                # unused credit).  The proxy is non-carrying, so its positive
+                # reserve BUCK accrues demurrage and creditLimit is a per-block
+                # cache -- capping per-leg keeps the borrower's own transfer
+                # within spendable and never loosens the reserve sequestration.
+                # (A rare "exceeds spendable" can still surface from the shared
+                # SimLP swap leg under heavy flow; it is caught below, benign.)
+                sold = self._sell_capped(d, d.pool_buck[i], internal)
+                if d.pool_ub:
+                    sold += self._sell_capped(d, d.pool_ub, external)
+                if sold > 0:
+                    ctr["fatEntries"] = ctr.get("fatEntries", 0) + 1
+                    ctr["fatIssued"] = ctr.get("fatIssued", 0) + sold
             except Exception as e:
                 ctr["fat_sell_err"] = repr(e)[:200]
 
         elif drawn > target + dead:
-            # Deleverage: K tightened, limit shrank, we are over-utilized.
-            # Buy BUCK back (removing it from the TOKEN/BUCK pool pulls
-            # basketValue back toward 1.0) and burn what we can.
+            # (C) Deleverage / redemption.  K tightened (limit shrank) or the
+            # ramp pulled the target down -> we are over-utilized.  Buy BUCK
+            # back (removing it from the TOKEN/BUCK pool pulls basketValue
+            # toward 1.0) and burn what we can.  The buy-back accelerates with
+            # the discount -- "money at a discount": when BUCK is cheap vs the
+            # basket, redeemers bid it back hard (counter-cyclical demand).
             excess = drawn - target
-            want = int(self.retire_rate * excess)
+            retire_eff = self.retire_rate * (
+                1.0 + self.disc_gain * max(0.0, bvib - 1.0))
+            want = int(retire_eff * excess)
             if want < 10 ** 6:
                 return
             i = self._rng.randrange(n)
