@@ -380,20 +380,21 @@ class FatCreditBorrowerAgent(_ProxyAgent):
 
 @_register
 class SaverAgent(_ProxyAgent):
-    """Counter-cyclical BUCK saver -- "buy the dip, sell the rip" against a
-    savings goal, providing the stabilizing private BUCK demand that damps
-    the borrower-driven oscillation.
+    """Counter-cyclical BUCK saver -- "buy below value, spend above value",
+    providing the stabilizing private BUCK demand that pulls BUCK toward the
+    basket (the same peg the controller defends).
 
-    Each tick it reads BUCK/USDC spot from the floating pool (d.pool_ub,
-    micro-USDC per BUCK; parity = 1_000_000) and computes:
-        discount = max(0, parity-spot)/parity
-        premium  = max(0, spot-parity)/parity
-    Below parity it ACCUMULATES toward `savings_goal`, spending USDC at
-    base_rate*(1 + disc_gain*discount) -- the deeper the discount, the
-    faster it buys.  Above parity it SELLS BUCK back to USDC (spending the
-    premium) at ~base_rate*(1 + prem_gain*premium) worth, but never below
-    `reserve` (BUCK kept for a future obligation).  Selling replenishes the
-    USDC budget so the cycle can repeat.  Otherwise it holds."""
+    The value reference is the BASKET, not the US dollar: BUCK is cheap when
+    one basket costs MORE than 1 BUCK (basketValueInBuck > 1).  Each step it
+    reads basketValueInBuck (18-dec) and computes:
+        discount = max(0, basketValueInBuck - 1.0)   # BUCK below basket value
+        premium  = max(0, 1.0 - basketValueInBuck)   # BUCK above basket value
+    On a discount it ACCUMULATES toward `savings_goal`, spending USDC on BUCK
+    at base_rate*(1 + disc_gain*discount) -- the cheaper BUCK is vs the basket,
+    the harder it buys (bidding BUCK up toward the basket).  On a premium it
+    SELLS BUCK back to USDC at ~base_rate*(1 + prem_gain*premium) worth, never
+    below `reserve` (BUCK kept for a future obligation).  This leans INTO the
+    divergence the controller is also fighting, instead of anchoring to $1."""
 
     _regime_counter = 0           # per-class seq (reset in build_equilibrium)
 
@@ -405,13 +406,15 @@ class SaverAgent(_ProxyAgent):
         slot = type(self)._regime_counter
         type(self)._regime_counter += 1
         self._init_regime(slot, N_REGIME_BORROWERS, N_REGIME_SAVERS)
-        # Heterogeneous, seeded knobs.
-        self.savings_goal = r.randint(1, 3) * 1_000_000 * 10 ** 6  # BUCK target
-        self.base_rate = r.randint(20_000, 60_000) * 10 ** 6       # USDC/step
+        # Heterogeneous, seeded knobs.  Scaled ~10x the first cut: private
+        # demand has to be comparable to BUCK supply (~15-20M) to actually
+        # bid BUCK toward the basket, not a rounding error against it.
+        self.savings_goal = r.randint(10, 30) * 1_000_000 * 10 ** 6  # BUCK target
+        self.base_rate = r.randint(200_000, 600_000) * 10 ** 6       # USDC/step
         self.disc_gain = r.uniform(5.0, 15.0)     # accelerate buys on the dip
         self.prem_gain = r.uniform(5.0, 15.0)     # accelerate sells on the rip
-        self.reserve = int(self.savings_goal * r.uniform(0.30, 0.60))
-        self.budget = r.randint(1, 3) * 1_000_000 * 10 ** 6        # USDC pool
+        self.reserve = int(self.savings_goal * r.uniform(0.20, 0.40))
+        self.budget = r.randint(20, 60) * 1_000_000 * 10 ** 6        # USDC pool
         self._spent = 0                            # net USDC deployed into BUCK
         self._bind_proxy(d)
         # Seed the proxy with its USDC budget to deploy over the run.
@@ -429,19 +432,18 @@ class SaverAgent(_ProxyAgent):
         if self.proxy is None or not d.pool_ub:
             return
         try:
-            ru = d.chain.balance_of(d.usdc, d.pool_ub)
-            rb = d.chain.balance_of(d.buck, d.pool_ub)
-            if rb == 0:
-                return
-            spot = ru * PARITY // rb             # micro-USDC per 1 BUCK
-            discount = max(0, PARITY - spot) / PARITY
-            premium = max(0, spot - PARITY) / PARITY
+            # Value reference is the BASKET: BUCK is cheap when a basket costs
+            # more than 1 BUCK (basketValueInBuck > 1).  This is the same
+            # observable the controller defends, so buying leans into the peg.
+            bvib = d.basket.functions.basketValueInBuck().call() / 1e18
+            discount = max(0.0, bvib - 1.0)      # BUCK below basket value -> buy
+            premium = max(0.0, 1.0 - bvib)       # BUCK above basket value -> sell
             holding = d.chain.balance_of(d.buck, self.proxy.address)
             held_usdc = d.chain.balance_of(d.usdc, self.proxy.address)
 
             if discount > 0 and holding < self.savings_goal \
                     and self._spent < self.budget:
-                # Buy the dip: accelerate accumulation with the discount.
+                # Buy below value: accelerate accumulation with the discount.
                 rate = int(self.base_rate * (1.0 + self.disc_gain * discount))
                 amt = min(rate, held_usdc, self.budget - self._spent)
                 if amt < 10 ** 6:               # sub-$1 move: skip
@@ -453,7 +455,10 @@ class SaverAgent(_ProxyAgent):
                 ctr["saverSpent"] = ctr.get("saverSpent", 0) + amt
 
             elif premium > 0 and holding > self.reserve:
-                # Sell the rip: spend the premium, down to `reserve`.
+                # Spend above value: sell BUCK for USDC, down to `reserve`.
+                ru = d.chain.balance_of(d.usdc, d.pool_ub)
+                rb = d.chain.balance_of(d.buck, d.pool_ub)
+                spot = ru * PARITY // rb if rb else 0
                 want_usdc = int(self.base_rate * (1.0 + self.prem_gain * premium))
                 # BUCK to sell to realize ~want_usdc of USDC at current spot.
                 sell = want_usdc * PARITY // spot if spot else 0

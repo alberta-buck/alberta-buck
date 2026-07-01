@@ -154,7 +154,7 @@ def build_equilibrium(start=None, end=None, years=None, ticks_per_day=48,
                 "TokenAccumulatorAgent": 4,      # one per token
                 "BootstrapDMAgent": 24,          # seed TOKEN/BUCK pools
                 "FatCreditBorrowerAgent": 5,     # K-gated BUCK issuers
-                "SaverAgent": 2,                 # idle-BUCK demand
+                "SaverAgent": 4,                 # basket-anchored BUCK demand
                 "PidKeeperAgent": 1},            # advances the PID each tick
         days=n_days,
         ticks_per_day=ticks_per_day,
