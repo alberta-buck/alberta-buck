@@ -22,6 +22,7 @@ class Scenario:
     days: int = 120
     ticks_per_day: int = 4
     seed: int = 0xA1BC
+    day_step: int = 1                  # calendar days advanced per iteration
     prices: Prices = field(init=False)
 
     def __post_init__(self):

@@ -21,6 +21,9 @@ def main(argv=None) -> int:
     ap.add_argument("--days", type=int, default=None)
     ap.add_argument("--ticks-per-day", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--day-step", type=int, default=None,
+                    help="calendar days advanced per iteration (coarse macro "
+                         "mode for long horizons; default 1)")
     ap.add_argument("--out", default=None, help="output JSON path")
     ap.add_argument("--port", type=int, default=None, help="anvil port")
     # historical-scenario window (real macro data)
@@ -47,6 +50,8 @@ def main(argv=None) -> int:
         sc.ticks_per_day = a.ticks_per_day
     if a.seed is not None:
         sc.seed = a.seed
+    if a.day_step is not None:
+        sc.day_step = a.day_step
 
     with Anvil(port=a.port) as anvil:
         summary = run(sc, anvil, out_path=a.out, basket_impl=a.basket)

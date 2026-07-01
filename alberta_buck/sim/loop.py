@@ -75,10 +75,15 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
         agents, 0, ("DirectMintAgent", "DirectMintBuckAgent"))
 
     ts = w3.eth.get_block("latest")["timestamp"] + 10
-    tick_secs = max(60, 86_400 // scenario.ticks_per_day)
+    # `day_step` advances the calendar (and on-chain clock) more than one day
+    # per iteration -- a coarse macro mode so multi-year horizons fit a bounded
+    # run.  Default 1 == unchanged.  Each iteration still advances a full
+    # `day_step` days of wall-clock time across its inner ticks.
+    step = max(1, getattr(scenario, "day_step", 1))
+    tick_secs = max(60, (86_400 * step) // scenario.ticks_per_day)
 
     n_tok = len(d.tokens)
-    for day in range(scenario.days):
+    for day in range(0, scenario.days, step):
         # Current day + reference USD prices, for the agents' realized-return
         # accounting (deposit/redeem valuation) and the throughput meter.
         ctr["day"] = day
