@@ -22,7 +22,7 @@ TOKENS = ["NRGY", "BULN", "FOOD", "XAU", "LABR"]
 # US-real feeds (FRED, native USD).  Registered alongside the defaults but kept
 # OUT of the default TOKENS basket so the existing sim/adapter/tests are
 # unchanged; select them explicitly via QuoteSource(tokens=US_TOKENS).
-US_TOKENS = ["CNST", "LABR_US", "NRGC"]
+US_TOKENS = ["CNST", "LABR_US", "NRGC", "FOOD_US"]
 
 
 @dataclass
@@ -43,4 +43,5 @@ def load_metrics() -> dict[str, Metric]:
         out["CNST"] = Metric("CNST", "USD", ingest.load_construction_us())  # index
         out["LABR_US"] = Metric("LABR_US", "USD", ingest.load_labour_us())  # $/hr
         out["NRGC"] = Metric("NRGC", "USD", ingest.load_energy_us())        # index
+        out["FOOD_US"] = Metric("FOOD_US", "USD", ingest.load_food_us())    # index
     return out

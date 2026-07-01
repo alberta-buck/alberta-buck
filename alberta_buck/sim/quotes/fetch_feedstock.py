@@ -20,6 +20,10 @@ and the Cantillon lag check run reproducibly offline.
         gasoline     APU000074714
         electricity  APU000072610   ($/kWh)
         natural gas  APU000072620   (utility piped gas, $/therm)
+    FOOD (US retail food composite, monthly avg price):
+        ground beef  APU0000703112  ($/lb, 1984+)
+        white bread  APU0000702111  ($/lb, 1980+)
+        bananas      APU0000711211  ($/lb, 1980+)
     references:
         M2SL     (money supply)   CPIAUCSL (all-items CPI)
 
@@ -56,6 +60,10 @@ SERIES: dict[str, str] = {
     "energy_gasoline": "APU000074714",     # gasoline, $/gal          (1976+)
     "energy_electricity": "APU000072610",  # electricity, $/kWh    (1978-11+)
     "energy_natgas": "APU000072620",       # utility gas, $/therm  (1978-11+)
+    # -- FOOD US retail food composite (avg price, monthly) --
+    "food_beef": "APU0000703112",          # ground beef, $/lb        (1984+)
+    "food_bread": "APU0000702111",         # white bread, $/lb        (1980+)
+    "food_bananas": "APU0000711211",       # bananas, $/lb            (1980+)
     # -- references (M2 lag check + normalization sanity) --
     "m2": "M2SL",                # M2 money stock, $B          (1959+)
     "cpi": "CPIAUCSL",           # CPI-U all items             (1947+)

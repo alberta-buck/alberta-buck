@@ -135,6 +135,7 @@ def load_fx() -> dict[date, float]:
 # Composite component sets and the documented (equal) weights.
 CNST_COMPONENTS = ["ppi_steel", "ppi_lumber", "ppi_cement", "ppi_gravel"]
 NRGC_COMPONENTS = ["energy_gasoline", "energy_electricity", "energy_natgas"]
+FOOD_COMPONENTS = ["food_beef", "food_bread", "food_bananas"]
 
 
 def us_data_available() -> bool:
@@ -205,6 +206,18 @@ def load_energy_us() -> list[tuple[date, float]]:
     return series
 
 
+def load_food_us() -> list[tuple[date, float]]:
+    """FOOD: equal-weight US retail-food index (100 = base, USD).
+
+    Components (equal 1/3 weight): ground beef APU0000703112 ($/lb), white bread
+    APU0000702111 ($/lb), bananas APU0000711211 ($/lb).  Base month = earliest
+    shared (1984-01, ground-beef-limited).
+    """
+    comps = [_load_us_csv(n) for n in FOOD_COMPONENTS]
+    series, _ = _equal_weight_index(comps)
+    return series
+
+
 if __name__ == "__main__":
     bcpi = load_bcpi()
     for token, s in bcpi.items():
@@ -217,7 +230,8 @@ if __name__ == "__main__":
     if us_data_available():
         for tok, s in (("CNST", load_construction_us()),
                        ("LABR_US", load_labour_us()),
-                       ("NRGC", load_energy_us())):
+                       ("NRGC", load_energy_us()),
+                       ("FOOD_US", load_food_us())):
             unit = "$/hr" if tok == "LABR_US" else "index"
             print(f"{tok:7}: {len(s)} mo  {s[0][0]}={s[0][1]:.2f} -> "
                   f"{s[-1][0]}={s[-1][1]:.2f}  (USD {unit})")

@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""Generate daily price CSVs for the HISTORICAL scenario from real macro data.
+"""Generate daily price CSVs for the HISTORICAL / EQUILIBRIUM scenarios.
 
 Writes one `day,close_usd_micro` CSV per token into the sim prices dir, sampling
 the historical quote source (alberta_buck.sim.quotes) once per calendar day over
-a chosen window:
+a chosen window.  The recomposed M2-laggard basket (real-economy anchors + a
+small hard/crypto satellite), ALL native USD:
 
-  PAXG  <- gold (AU-USD), USD            monthly real, bridged to daily
-  cbBTC <- bitcoin (BTC-USD), USD        REAL daily series (used directly)
-  NRGC  <- energy (BCPI M.ENER), CAD     monthly real, bridged to daily
-  LABR  <- labour (synth wage), CAD      monthly, bridged to daily
+  LABR  <- US wage (AHETPI, $/hr)           US feed, monthly, bridged to daily
+  CNST  <- US construction PPI index        US feed, monthly, bridged to daily
+  FOOD  <- US retail-food index             US feed, monthly, bridged to daily
+  NRGC  <- US retail-energy index           US feed, monthly, bridged to daily
+  PAXG  <- gold (AU-USD, $/oz)              default source, monthly, bridged
+  cbBTC <- bitcoin (BTC-USD, $)             REAL daily series (used directly)
 
-PAXG/cbBTC are USD; NRGC/LABR are CAD (the Canadian basket legs carry USD/CAD FX
-dynamics).  The sim's numeraire is the pool quote (USDC): each token's CSV is its
-price in its own unit, taken at face value as the pool price -- so "equal weights
-by value at start" (deploy seeds every pool to a common quote-depth and the
-basket targets equal shares) holds in that numeraire.
+Two quote sources feed the bindings by `source` tag:
+  "us"  -> QuoteSource(tokens=US_TOKENS)  (CNST/LABR_US/NRGC/FOOD_US, native USD)
+  "xau" -> default QuoteSource()          (gold, native USD)
+  "btc" -> real daily BTC series          (ingest.load_btc)
+
+The CAD legs are gone -- every token is USD-native now.  The sim's numeraire is
+the pool quote (USDC): each token's CSV is its price in USD, taken at face value
+as the pool price; explicit per-token weights (Scenario.tokens weightBp, threaded
+into addBasketToken at deploy) set the basket composition.
 
 Run:  python -m alberta_buck.sim.gen_historical --years 5
 """
@@ -29,15 +36,21 @@ from datetime import date, timedelta
 from alberta_buck.sim.prices import CSV_DIR
 from alberta_buck.sim.quotes import QuoteSource, Unit
 from alberta_buck.sim.quotes import ingest
+from alberta_buck.sim.quotes.metrics import US_TOKENS
 
 USDC = 1_000_000  # micro-dollars per $1 (matches gen_prices schema)
 
-# (symbol, csv filename, quote metric, unit).  cbBTC is special: real daily BTC.
+# (symbol, csv filename, quote metric, source tag).  All native USD.
+#   "us"  -> US real-economy QuoteSource(tokens=US_TOKENS)
+#   "xau" -> default QuoteSource() (gold)
+#   "btc" -> real daily BTC (metric ignored)
 BINDINGS = [
-    ("PAXG",  "hist-paxg.csv",  "XAU",  Unit.USD),
-    ("cbBTC", "hist-cbbtc.csv", None,   None),     # real daily series
-    ("NRGC",  "hist-nrgc.csv",  "NRGY", Unit.CAD),
-    ("LABR",  "hist-labr.csv",  "LABR", Unit.CAD),
+    ("LABR",  "hist-labr.csv",  "LABR_US", "us"),
+    ("CNST",  "hist-cnst.csv",  "CNST",    "us"),
+    ("FOOD",  "hist-food.csv",  "FOOD_US", "us"),
+    ("NRGC",  "hist-nrgc.csv",  "NRGC",    "us"),
+    ("PAXG",  "hist-paxg.csv",  "XAU",     "xau"),
+    ("cbBTC", "hist-cbbtc.csv", None,      "btc"),   # real daily series
 ]
 
 
@@ -63,31 +76,40 @@ def resolve_window(start, end, years, data_start, data_end):
 
 
 def gen(start=None, end=None, years=5.0, out_dir=CSV_DIR):
-    """Write the four historical CSVs; return (filenames, n_days, start, end)."""
-    qs = {Unit.USD: QuoteSource(Unit.USD), Unit.CAD: QuoteSource(Unit.CAD)}
+    """Write the historical CSVs (one per BINDINGS token); return
+    (filenames, n_days, start, end).
+
+    Samples two USD QuoteSources -- the default (gold) and a US real-economy
+    source (CNST/LABR/NRGC/FOOD) -- plus the real daily BTC series, once per
+    calendar day over the shared window.
+    """
+    qs_xau = QuoteSource(Unit.USD)                       # default TOKENS (gold)
+    qs_us = QuoteSource(Unit.USD, tokens=US_TOKENS)      # US real-economy feeds
     btc_at, btc_lo, btc_hi = _daily_carry(ingest.load_btc())
 
-    data_end = min(qs[Unit.USD].end.date(), btc_hi)
-    data_start = max(qs[Unit.USD].start.date(), btc_lo)
+    data_end = min(qs_xau.end.date(), qs_us.end.date(), btc_hi)
+    data_start = max(qs_xau.start.date(), qs_us.start.date(), btc_lo)
     s, e = resolve_window(start, end, years, data_start, data_end)
     dates = [s + timedelta(days=k) for k in range((e - s).days + 1)]
 
-    def price(sym, metric, unit, d):
-        if sym == "cbBTC":
+    sources = {"us": qs_us, "xau": qs_xau}
+
+    def price(metric, src, d):
+        if src == "btc":
             return btc_at(d)
-        return qs[unit].at(metric, d)
+        return sources[src].at(metric, d)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     files = []
-    for sym, fname, metric, unit in BINDINGS:
+    for sym, fname, metric, src in BINDINGS:
         with (out_dir / fname).open("w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["day", "close_usd_micro"])
             for k, d in enumerate(dates):
-                w.writerow([k, round(price(sym, metric, unit, d) * USDC)])
+                w.writerow([k, round(price(metric, src, d) * USDC)])
         files.append(fname)
-        first = price(*( (sym, metric, unit, dates[0]) ))
-        last = price(sym, metric, unit, dates[-1])
+        first = price(metric, src, dates[0])
+        last = price(metric, src, dates[-1])
         print(f"  {fname}: {len(dates)} days  {first:,.2f} -> {last:,.2f}")
     return files, len(dates), s, e
 

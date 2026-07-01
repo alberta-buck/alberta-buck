@@ -164,11 +164,13 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     credit = chain.deploy("BuckCredit")
     # Rescaled direct PID (ppm process/error, dt in seconds).  Gains stored as
     # real_gain * 1e12.  K is the LTV cap => max system leverage 1/(1-K):
-    # K0=0.5 rests at 2x, rails (0, 1.0) span "no credit" .. spiral boundary.
+    # K0~0.75 rests at ~4x, rails (0, 1.0) span "no credit" .. spiral boundary.
     # Ki sized for a target "max variance before the rail":
     #   Ki_real = dK_rail / (e_max * tau_I)   [ per (fractional error * second) ]
     # so a sustained e_max basket deviation rails K over tau_I.
-    K0, KMIN, KMAX = int(0.50 * E18), 0, E18
+    # Initialize at the observed equilibrium (~0.75, 4x leverage) rather than
+    # 0.5, so K starts where the loop settles instead of gliding up to it.
+    K0, KMIN, KMAX = int(0.75 * E18), 0, E18
     # Deliberately SLOW: K is a structural lever, not a market maker.  It
     # glides over months while private demand (savers) does the fast
     # stabilization -- a sustained e_max deviation takes ~tau_I to reach a
@@ -216,10 +218,32 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
 
     # --- tokens ------------------------------------------------------ #
     usdc = chain.deploy("MockERC20", "USD Coin", "USDC", 6)
-    tok, dec = [], []
-    for (sym, name, d) in scenario.tokens:
+    tok, dec, wbp = [], [], []
+    for t in scenario.tokens:
+        # tokens are (sym, name, decimals[, weightBp]); the optional 4th element
+        # is the DESIRED FINAL basket target weight in basis points (0 => equal
+        # 1/N share).  The weights across the basket sum to 10000.
+        sym, name, d = t[0], t[1], t[2]
+        w = t[3] if len(t) > 3 else 0
         c = chain.deploy("MockERC20", name, sym, d)
-        tok.append(c); dec.append(d)
+        tok.append(c); dec.append(d); wbp.append(w)
+
+    # Translate DESIRED FINAL weights -> the SEQUENTIAL weights addBasketToken
+    # expects.  addBasketToken renormalizes existing constituents on every add
+    # (stick-breaking): the value passed for a token is its share of the whole
+    # basket AT THE MOMENT it is added, when tokens 0..i already sum to 10000.
+    # So token i's passed weight = 10000 * f_i / (f_0 + ... + f_i); this makes
+    # the STORED targetWeightBp land on the desired f_i (verified below).  A raw
+    # pass-through would badly distort them (the first token balloons to fill
+    # 10000).  Unweighted baskets (all f == 0) pass 0 throughout (equal 1/N
+    # share) -- byte-identical to the previous behaviour.
+    pass_wbp, acc = [], 0
+    if any(w > 0 for w in wbp):
+        for w in wbp:
+            acc += w
+            pass_wbp.append(round(10000 * w / acc) if acc > 0 else 0)
+    else:
+        pass_wbp = [0] * len(wbp)
 
     # --- SimLP (V3 mint/swap callback helper) ------------------------ #
     simlp = chain.deploy("SimLP", sol_file="SimLP")
@@ -307,8 +331,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                   f"{usdc_bal/E6:,.2f} USDC")
 
         # TOKEN/BUCK basket pool (empty — bootstrapped by DM agents).
+        # pass_wbp[i] is the sequential (stick-breaking) weight; 0 => equal share.
         chain.send(basket.functions.addBasketToken(
-            c.address, dec[i], p0, 0, FEE_BUCK), sender=gov)  # 0 => equal share
+            c.address, dec[i], p0, pass_wbp[i], FEE_BUCK), sender=gov)
         pb = v3f.functions.getPool(c.address, buck.address, FEE_BUCK).call()
         chain.send(reg.functions.bindContract(
             pb, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
@@ -316,8 +341,23 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
 
         if verbose:
             print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
-                  f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)")
+                  f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)  "
+                  f"targetBp={wbp[i]} (passed {pass_wbp[i]})")
             print(f"         empty pool — bootstrap DM agents will seed")
+
+    # Read back the basket's realized target weights (legacy exposes the
+    # `constituents` array getter; targetWeightBp is the last struct field).
+    # addBasketToken renormalizes existing constituents on each add, so the
+    # stored weights are the SEQUENTIAL result of the passed bp, summing to
+    # 10000 -- this confirms the per-token weightBp actually took effect.
+    if verbose and basket_impl == "legacy":
+        n = basket.functions.constituentsLength().call()
+        parts, wsum = [], 0
+        for i in range(n):
+            w = basket.functions.constituents(i).call()[-1]  # targetWeightBp
+            wsum += w
+            parts.append(f"{scenario.tokens[i][0]}={w}")
+        print(f"[deploy] basket target weightBp (sum={wsum}): " + "  ".join(parts))
 
     # --- floating BUCK/USDC pool (gauge-breaking, not a peg) ---------- #
     #
