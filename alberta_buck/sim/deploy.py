@@ -169,8 +169,13 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     #   Ki_real = dK_rail / (e_max * tau_I)   [ per (fractional error * second) ]
     # so a sustained e_max basket deviation rails K over tau_I.
     K0, KMIN, KMAX = int(0.50 * E18), 0, E18
-    DK_RAIL, E_MAX, TAU_I = 0.5, 0.05, 5 * 86400     # rail 0.5, 5% over 5 days
-    KP = int(round((0.05 * DK_RAIL / E_MAX) * 1e12))  # P = 5% of rail at e_max
+    # Deliberately SLOW: K is a structural lever, not a market maker.  It
+    # glides over months while private demand (savers) does the fast
+    # stabilization -- a sustained e_max deviation takes ~tau_I to reach a
+    # rail and the proportional kick is tiny.  Prevents the relay/bang-bang
+    # oscillation seen when K reacts as hard as the agents do.
+    DK_RAIL, E_MAX, TAU_I = 0.5, 0.10, 90 * 86400    # rail 0.5, 10% over ~90 days
+    KP = int(round((0.02 * DK_RAIL / E_MAX) * 1e12))  # P = 2% of rail at e_max
     KI = int(round((DK_RAIL / (E_MAX * TAU_I)) * 1e12))
     KD = 0
     kctrl = chain.deploy("BuckKControllerDirect",

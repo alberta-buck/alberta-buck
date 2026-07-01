@@ -411,9 +411,14 @@ class SaverAgent(_ProxyAgent):
         # bid BUCK toward the basket, not a rounding error against it.
         self.savings_goal = r.randint(10, 30) * 1_000_000 * 10 ** 6  # BUCK target
         self.base_rate = r.randint(200_000, 600_000) * 10 ** 6       # USDC/step
-        self.disc_gain = r.uniform(5.0, 15.0)     # accelerate buys on the dip
-        self.prem_gain = r.uniform(5.0, 15.0)     # accelerate sells on the rip
-        self.reserve = int(self.savings_goal * r.uniform(0.20, 0.40))
+        # Gentler reactivity: big capital with hot gains over-corrected into
+        # oscillation, so temper the discount/premium acceleration.
+        self.disc_gain = r.uniform(2.0, 6.0)      # accelerate buys on the dip
+        self.prem_gain = r.uniform(2.0, 6.0)      # accelerate sells on the rip
+        # Reserve is a fraction of CURRENT holdings, not the goal -- a
+        # goal-relative reserve was unreachable once BUCK got expensive, so
+        # the sell leg never fired and the saver was buy-only.
+        self.reserve_frac = r.uniform(0.30, 0.50)
         self.budget = r.randint(20, 60) * 1_000_000 * 10 ** 6        # USDC pool
         self._spent = 0                            # net USDC deployed into BUCK
         self._bind_proxy(d)
@@ -454,15 +459,16 @@ class SaverAgent(_ProxyAgent):
                 ctr["saverBuys"] = ctr.get("saverBuys", 0) + 1
                 ctr["saverSpent"] = ctr.get("saverSpent", 0) + amt
 
-            elif premium > 0 and holding > self.reserve:
-                # Spend above value: sell BUCK for USDC, down to `reserve`.
+            elif premium > 0 and holding > 10 ** 6:
+                # Spend above value: sell BUCK for USDC, keeping reserve_frac.
                 ru = d.chain.balance_of(d.usdc, d.pool_ub)
                 rb = d.chain.balance_of(d.buck, d.pool_ub)
                 spot = ru * PARITY // rb if rb else 0
                 want_usdc = int(self.base_rate * (1.0 + self.prem_gain * premium))
                 # BUCK to sell to realize ~want_usdc of USDC at current spot.
                 sell = want_usdc * PARITY // spot if spot else 0
-                sell = min(sell, holding - self.reserve)
+                keep = int(self.reserve_frac * holding)   # reserve vs holdings
+                sell = min(sell, holding - keep)
                 if sell < 10 ** 6:              # sub-$1 move: skip
                     return
                 before = d.chain.balance_of(d.usdc, self.proxy.address)
