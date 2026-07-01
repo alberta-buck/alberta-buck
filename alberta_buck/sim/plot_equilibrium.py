@@ -4,14 +4,18 @@ Workflow:
   1.  make sim-run-equilibrium    # writes test/vectors/equilibrium-sim.json
   2.  make sim-plot-equilibrium   # reads JSON, writes images/equilibrium-sim.png
 
-Three panels tell the BUCK-K feedback story:
-  (A) basketValueInBuck vs the 1.0 parity setpoint, with buckK (the K-scaled
-      LTV cap the controller moves) on a twin axis.  Equilibrium = basketVal
-      hugging 1.0 with buckK settled.
-  (B) the PID internals P (ppm error), I (ppm*s integral), D (ppm dError) --
-      the integral is the dominant, slow-moving term that trims K.
-  (C) monetary aggregates: BUCK totalSupply, DM outstanding principal, and
-      idle BUCK held by savers.
+Six stacked panes (shared x = Day) tell the BUCK-K feedback story of a run
+that is repeatedly perturbed by periodic regime changes and re-settles:
+
+  1. basketValueInBuck vs the 1.0 parity setpoint, with buckK (the K-scaled
+     LTV cap the controller moves) on a twin axis -- the headline.
+  2. buck_usd: the floating BUCK/USDC spot vs 1.0 parity -- the
+     discount/premium the counter-cyclical savers trade against.
+  3. PID internals P (ppm error), D (ppm dError) left + I (ppm*s) twin.
+  4. Monetary aggregates: BUCK supply / DM outstanding / saver-held BUCK.
+  5. Regime timeline: mean borrower util_target + mean saver base_rate, with
+     light vertical lines every REGIME_DAYS marking the regime windows.
+  6. Per-token TOKEN/USDC tracking error (spot vs CSV reference).
 
 Input vector / output image are overridable via EQ_VECTOR / EQ_OUT so a
 short smoke run and a long run can be plotted independently.
@@ -26,6 +30,10 @@ import pytest
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 
+# 6-month regime window (mirrors equilibrium_agents.REGIME_DAYS); kept as a
+# local literal so plotting never imports/registers the agent module.
+REGIME_DAYS = 182
+
 
 def _resolve(p: Path) -> Path:
     return p if p.is_absolute() else (REPO / p)
@@ -38,6 +46,23 @@ OUT = _resolve(Path(os.environ.get(
 
 E6 = 10 ** 6
 E18 = 10 ** 18
+
+
+def _cols(frames):
+    """Return (n, col) where col(key, default) extracts a column regardless
+    of whether `frames` is a list-of-frames or a dict-of-arrays."""
+    if isinstance(frames, dict):
+        n = len(frames.get("day", []))
+
+        def col(key, default=0):
+            v = frames.get(key)
+            return list(v) if v is not None else [default] * n
+    else:
+        n = len(frames)
+
+        def col(key, default=0):
+            return [f.get(key, default) for f in frames]
+    return n, col
 
 
 @pytest.mark.skipif(
@@ -56,37 +81,50 @@ def test_equilibrium_sim_plot():
     import matplotlib.pyplot as plt
 
     d = json.loads(DATA.read_text())
-    fr = d["frames"]
-    days = [f["day"] for f in fr]
+    tokens = d.get("tokens", [])
+    n, col = _cols(d["frames"])
+    days = col("day")
 
-    fig, axes = plt.subplots(3, 1, figsize=(13, 12), sharex=True)
+    fig, axes = plt.subplots(6, 1, figsize=(13, 22), sharex=True)
 
-    # ---- Panel A: basketValue vs parity + buckK ---------------------- #
+    # ---- Pane 1: basketValue vs parity + buckK ----------------------- #
     ax = axes[0]
-    bval = [f.get("basketVal", 0) / E18 for f in fr]
+    bval = [v / E18 for v in col("basketVal")]
     ax.axhline(1.0, color="black", linestyle="--", linewidth=1.2,
                label="parity setpoint (1.0)")
     ax.plot(days, bval, color="tab:blue", linewidth=1.5,
             label="basketValueInBuck")
     ax.set_ylabel("basket value (BUCK)")
     ax.grid(True, alpha=0.3)
-
     ax2 = ax.twinx()
-    bk = [f.get("buckK", 0) / E18 for f in fr]
+    bk = [v / E18 for v in col("buckK")]
     ax2.plot(days, bk, color="tab:red", linewidth=1.4, label="buckK (LTV cap)")
     ax2.set_ylabel("buckK", color="tab:red")
     ax2.tick_params(axis="y", labelcolor="tab:red")
-
     l1, la1 = ax.get_legend_handles_labels()
     l2, la2 = ax2.get_legend_handles_labels()
     ax.legend(l1 + l2, la1 + la2, loc="upper left", fontsize=8)
-    ax.set_title("BUCK-K feedback: basket value defended toward parity by buckK")
+    ax.set_title("(1) BUCK-K feedback: basket value defended toward parity "
+                 "by buckK")
 
-    # ---- Panel B: PID internals -------------------------------------- #
+    # ---- Pane 2: BUCK/USDC spot vs parity ---------------------------- #
     ax = axes[1]
-    p = [f.get("pid_p", 0) for f in fr]
-    i = [f.get("pid_i", 0) for f in fr]
-    dd = [f.get("pid_d", 0) for f in fr]
+    bu = [v / E6 for v in col("buck_usd")]     # USDC per BUCK
+    ax.axhline(1.0, color="black", linestyle="--", linewidth=1.2,
+               label="parity (1.0)")
+    ax.plot(days, bu, color="tab:cyan", linewidth=1.4,
+            label="BUCK/USDC spot")
+    ax.set_ylabel("USDC per BUCK")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left", fontsize=8)
+    ax.set_title("(2) BUCK/USDC spot: the discount (buy) / premium (sell) "
+                 "the savers trade")
+
+    # ---- Pane 3: PID internals --------------------------------------- #
+    ax = axes[2]
+    p = col("pid_p")
+    i = col("pid_i")
+    dd = col("pid_d")
     ax.axhline(0, color="black", alpha=0.3, linewidth=0.8)
     ax.plot(days, p, color="tab:green", linewidth=1.2, label="P (ppm error)")
     ax.plot(days, dd, color="tab:purple", linewidth=1.0, linestyle=":",
@@ -101,13 +139,13 @@ def test_equilibrium_sim_plot():
     l1, la1 = ax.get_legend_handles_labels()
     l2, la2 = ax3.get_legend_handles_labels()
     ax.legend(l1 + l2, la1 + la2, loc="upper left", fontsize=8)
-    ax.set_title("PID internals (integral-dominant K trim)")
+    ax.set_title("(3) PID internals (integral-dominant K trim)")
 
-    # ---- Panel C: monetary aggregates -------------------------------- #
-    ax = axes[2]
-    supply = [f.get("supply", 0) / E6 for f in fr]
-    outb = [f.get("dmOutstanding", 0) / E6 for f in fr]
-    sav = [f.get("saver_hold", 0) / E6 for f in fr]
+    # ---- Pane 4: monetary aggregates --------------------------------- #
+    ax = axes[3]
+    supply = [v / E6 for v in col("supply")]
+    outb = [v / E6 for v in col("dmOutstanding")]
+    sav = [v / E6 for v in col("saver_hold")]
     ax.plot(days, supply, color="tab:blue", linewidth=1.5,
             label="BUCK total supply")
     ax.plot(days, outb, color="tab:orange", linewidth=1.2, linestyle="--",
@@ -115,10 +153,61 @@ def test_equilibrium_sim_plot():
     ax.plot(days, sav, color="tab:green", linewidth=1.2,
             label="saver-held BUCK")
     ax.set_ylabel("BUCK")
-    ax.set_xlabel("Day")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="upper left", fontsize=8)
-    ax.set_title("Monetary aggregates: supply, outstanding, idle savings")
+    ax.set_title("(4) Monetary aggregates: supply, outstanding, idle savings")
+
+    # ---- Pane 5: regime timeline ------------------------------------- #
+    ax = axes[4]
+    rutil = col("regime_util")
+    rsav = [v / E6 for v in col("regime_saver")]     # USDC/step
+    ax.step(days, rutil, where="post", color="tab:red", linewidth=1.4,
+            label="mean borrower util_target")
+    ax.set_ylabel("util_target", color="tab:red")
+    ax.tick_params(axis="y", labelcolor="tab:red")
+    ax.grid(True, alpha=0.3)
+    ax5 = ax.twinx()
+    ax5.step(days, rsav, where="post", color="tab:brown", linewidth=1.2,
+             label="mean saver base_rate")
+    ax5.set_ylabel("base_rate (USDC/step)", color="tab:brown")
+    ax5.tick_params(axis="y", labelcolor="tab:brown")
+    # Light vertical lines every REGIME_DAYS mark the regime windows.
+    if days:
+        dmax = days[-1]
+        k = REGIME_DAYS
+        while k <= dmax:
+            ax.axvline(k, color="grey", alpha=0.25, linewidth=0.9)
+            k += REGIME_DAYS
+    l1, la1 = ax.get_legend_handles_labels()
+    l2, la2 = ax5.get_legend_handles_labels()
+    ax.legend(l1 + l2, la1 + la2, loc="upper left", fontsize=8)
+    ax.set_title("(5) Regime timeline: primary knobs shift every "
+                 f"{REGIME_DAYS} days (grey lines)")
+
+    # ---- Pane 6: per-token TOKEN/USDC tracking error ----------------- #
+    ax = axes[5]
+    spot = col("spotUsdc")
+    ref = col("refUsd")
+    ntok = len(tokens)
+    if ntok == 0 and spot and isinstance(spot[0], list):
+        ntok = len(spot[0])
+    plotted = False
+    for j in range(ntok):
+        errs = []
+        for t in range(n):
+            sv = spot[t][j] if t < len(spot) and j < len(spot[t]) else 0
+            rv = ref[t][j] if t < len(ref) and j < len(ref[t]) else 0
+            errs.append(100.0 * (sv - rv) / max(1, rv))
+        label = tokens[j] if j < len(tokens) else f"tok{j}"
+        ax.plot(days, errs, linewidth=1.0, label=label)
+        plotted = True
+    ax.axhline(0, color="black", alpha=0.3, linewidth=0.8)
+    ax.set_ylabel("tracking err (%)")
+    ax.set_xlabel("Day")
+    ax.grid(True, alpha=0.3)
+    if plotted:
+        ax.legend(loc="upper left", fontsize=8, ncol=2)
+    ax.set_title("(6) TOKEN/USDC tracking error (spot vs CSV reference)")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -130,20 +219,26 @@ def test_equilibrium_sim_plot():
         shown = OUT.relative_to(REPO)
     except ValueError:
         shown = OUT
-    print(f"\nWrote {shown}  ({len(days)} days)")
+    print(f"\nWrote {shown}  ({len(days)} days, 6 panes)")
 
-    def _at(idx):
-        f = fr[idx]
-        return (f.get("basketVal", 0) / E18, f.get("buckK", 0) / E18,
-                f.get("pid_i", 0), f.get("supply", 0) / E6,
-                f.get("saver_hold", 0) / E6)
+    bval_c = [v / E18 for v in col("basketVal")]
+    buckk_c = [v / E18 for v in col("buckK")]
+    pidi_c = col("pid_i")
+    supply_c = [v / E6 for v in col("supply")]
+    sav_c = [v / E6 for v in col("saver_hold")]
 
-    for label, idx in (("first", 0), ("mid", len(fr) // 2), ("last", -1)):
-        bv, k, pi, sup, sh = _at(idx)
-        print(f"  {label:5s} day {fr[idx]['day']:4d}  "
-              f"basketVal={bv:.6f}  buckK={k:.6f}  I={pi:,}  "
-              f"supply={sup:,.0f}  saverHold={sh:,.0f}")
-    print(f"  final basketVal deviation {100*(_at(-1)[0]-1.0):+.3f}% from parity")
+    def _row(label, idx):
+        print(f"  {label:5s} day {days[idx]:4d}  "
+              f"basketVal={bval_c[idx]:.6f}  buckK={buckk_c[idx]:.6f}  "
+              f"I={pidi_c[idx]:,}  supply={supply_c[idx]:,.0f}  "
+              f"saverHold={sav_c[idx]:,.0f}")
+
+    if n:
+        _row("first", 0)
+        _row("mid", n // 2)
+        _row("last", n - 1)
+        print(f"  final basketVal deviation "
+              f"{100 * (bval_c[-1] - 1.0):+.3f}% from parity")
 
 
 if __name__ == "__main__":

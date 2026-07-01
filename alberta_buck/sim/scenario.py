@@ -132,7 +132,12 @@ def build_equilibrium(start=None, end=None, years=None, ticks_per_day=48,
     Imports the equilibrium agents lazily (registers them in the agent
     REGISTRY) and gen_historical lazily so plain imports stay cheap.
     """
-    import alberta_buck.sim.equilibrium_agents  # noqa: F401  (registers agents)
+    import alberta_buck.sim.equilibrium_agents as eqm  # registers agents
+    # Reset per-class regime-slot counters so back-to-back builds in one
+    # process assign slots from 0 (loop.py resets DM counters but does not
+    # know about these equilibrium agents).
+    eqm.FatCreditBorrowerAgent._regime_counter = 0
+    eqm.SaverAgent._regime_counter = 0
     from alberta_buck.sim.gen_historical import gen
     files, n_days, _s, _e = gen(start=start, end=end,
                                 years=1.5 if years is None else years)

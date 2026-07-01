@@ -20,9 +20,16 @@ Three agent classes close the BUCK-K loop:
                            back out of those pools (pushing basketValue back
                            toward 1.0).  That negative feedback is the whole
                            point of the experiment.
-  * SaverAgent          -- a price-aware BUCK accumulator: buys BUCK from the
-                           floating BUCK/USDC pool while it is at/under parity
-                           and HOLDS it (idle-BUCK demand).
+  * SaverAgent          -- a counter-cyclical BUCK saver: "buys the dip,
+                           sells the rip" on the floating BUCK/USDC pool
+                           against a savings goal (buy below parity, sell
+                           above, always keeping a reserve).  This is the
+                           stabilizing private BUCK demand that damps the
+                           borrower-driven oscillation.
+
+A small set of "regime agents" (the first few borrowers and savers) also
+redraw ONE knob every REGIME_DAYS, staggered so exactly one changes per
+6-month window -- so a long run is repeatedly perturbed and re-settles.
 
 All three self-register via @_register and are selected by build_equilibrium.
 
@@ -50,6 +57,24 @@ from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim.router import MIN_SQRT_RATIO, MAX_SQRT_RATIO
 
 FEE_DEN = 1_000_000
+PARITY = 1_000_000                # micro-USDC per 1 BUCK at parity (1:1)
+
+# -- regime-change scheduling ------------------------------------------- #
+# A SMALL set of "regime agents" each redraw ONE primary knob once every
+# REGIME_DAYS, staggered round-robin so exactly ONE agent changes per
+# 6-month window (spaced far enough that the loop re-settles between
+# shocks).  Over a 5-year run (~1826 days) this fires ~10 isolated events.
+#
+# Regime agents are the FIRST N_REGIME_BORROWERS FatCreditBorrowerAgents
+# and the FIRST N_REGIME_SAVERS SaverAgents (assigned in setup() via a
+# per-class counter).  Each is given a `global_regime_slot` in
+# [0, N_REGIME_AGENTS); the agent scheduled for `period` is the one whose
+# slot == period % N_REGIME_AGENTS.  All redraws come off the per-agent
+# seeded RNG -- fully deterministic, no wall-clock.
+REGIME_DAYS = 182
+N_REGIME_BORROWERS = 3
+N_REGIME_SAVERS = 1
+N_REGIME_AGENTS = N_REGIME_BORROWERS + N_REGIME_SAVERS
 
 # module-level cache of pool (token0, token1) so we don't re-read them on
 # every swap across thousands of ticks.
@@ -90,12 +115,53 @@ class _ProxyAgent(Agent):
         super().__init__(idx)
         self._rng: random.Random | None = None
         self.proxy = None
+        self.is_regime = False
+        self.global_regime_slot = -1
+        self._last_period = 0
 
     @property
     def address(self) -> str:
         if self.proxy is not None:
             return self.proxy.address
         return "0x" + "0" * 40
+
+    # -- regime-change scaffolding ---------------------------------------- #
+
+    def _init_regime(self, slot_in_class: int, class_offset: int,
+                     n_regime_in_class: int) -> None:
+        """Decide whether this instance is a regime agent and, if so, its
+        global round-robin slot.  Called once from setup()."""
+        if slot_in_class < n_regime_in_class:
+            self.is_regime = True
+            self.global_regime_slot = class_offset + slot_in_class
+        else:
+            self.is_regime = False
+            self.global_regime_slot = -1
+        self._last_period = 0
+
+    def _maybe_regime(self, d, day, ctr) -> None:
+        """If this regime agent is the one scheduled for the current
+        6-month period, redraw its primary knob (subclass _apply_regime).
+        Deterministic off self._rng; never raises."""
+        if not self.is_regime:
+            return
+        period = day // REGIME_DAYS
+        if period <= self._last_period:
+            return
+        # Advance our own clock every period so a later period still fires
+        # even when this period was not our turn.
+        self._last_period = period
+        if period % N_REGIME_AGENTS != self.global_regime_slot:
+            return
+        try:
+            note = self._apply_regime(day)
+            ctr["regimeEvents"] = ctr.get("regimeEvents", 0) + 1
+            ctr["regimeNote"] = note
+        except Exception as e:
+            ctr["regime_err"] = repr(e)[:200]
+
+    def _apply_regime(self, day) -> str:  # pragma: no cover - overridden
+        return ""
 
     def _bind_proxy(self, d) -> None:
         """Deploy a SimLP proxy and bind it public + NON-carrying (so BUCK it
@@ -152,9 +218,16 @@ class FatCreditBorrowerAgent(_ProxyAgent):
     N_CREDITS = 8                 # pool of "property" NFTs
     # aggregate face sized ~$2-5M (6-dec BUCK wei), chosen per-agent in setup.
 
+    _regime_counter = 0           # per-class seq (reset in build_equilibrium)
+
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
         r = self._rng
+        # Regime slot: the first N_REGIME_BORROWERS borrowers are regime
+        # agents (global slots 0..N_REGIME_BORROWERS-1).
+        slot = type(self)._regime_counter
+        type(self)._regime_counter += 1
+        self._init_regime(slot, 0, N_REGIME_BORROWERS)
         # Heterogeneous knobs per agent.
         self.util_target = r.uniform(0.60, 0.80)   # draw this frac of limit
         self.internal_share = r.uniform(0.30, 0.60)  # sold into TOKEN/BUCK
@@ -222,9 +295,20 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         self._swap_via_simlp(d, pool_addr, input_c, spend, self.proxy.address)
         return d.chain.balance_of(d.buck, self.proxy.address) - before
 
+    # -- regime change ----------------------------------------------------- #
+
+    def _apply_regime(self, day) -> str:
+        """Primary knob = util_target (target leverage).  A fresh target in
+        [0.40, 0.85] shifts how hard this borrower pushes basketValue."""
+        old = self.util_target
+        self.util_target = self._rng.uniform(0.40, 0.85)
+        return (f"day{day} borrower#{self.idx} util_target "
+                f"{old:.3f}->{self.util_target:.3f}")
+
     # -- the loop ---------------------------------------------------------- #
 
     def act(self, d, scenario, day, tick, ctr) -> None:
+        self._maybe_regime(d, day, ctr)
         if self.proxy is None:
             return
         try:
@@ -296,42 +380,94 @@ class FatCreditBorrowerAgent(_ProxyAgent):
 
 @_register
 class SaverAgent(_ProxyAgent):
-    """Price-aware BUCK accumulator (like the forge test's "Hank").  Each
-    tick, reads BUCK spot from the floating BUCK/USDC pool; while spot is at
-    or under `ceiling` (near parity) and budget remains, swaps a fixed slice
-    of USDC into BUCK and HOLDS it."""
+    """Counter-cyclical BUCK saver -- "buy the dip, sell the rip" against a
+    savings goal, providing the stabilizing private BUCK demand that damps
+    the borrower-driven oscillation.
+
+    Each tick it reads BUCK/USDC spot from the floating pool (d.pool_ub,
+    micro-USDC per BUCK; parity = 1_000_000) and computes:
+        discount = max(0, parity-spot)/parity
+        premium  = max(0, spot-parity)/parity
+    Below parity it ACCUMULATES toward `savings_goal`, spending USDC at
+    base_rate*(1 + disc_gain*discount) -- the deeper the discount, the
+    faster it buys.  Above parity it SELLS BUCK back to USDC (spending the
+    premium) at ~base_rate*(1 + prem_gain*premium) worth, but never below
+    `reserve` (BUCK kept for a future obligation).  Selling replenishes the
+    USDC budget so the cycle can repeat.  Otherwise it holds."""
+
+    _regime_counter = 0           # per-class seq (reset in build_equilibrium)
 
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
         r = self._rng
-        self.savings_rate = r.randint(20_000, 60_000) * 10 ** 6   # USDC/step
-        self.ceiling = int(r.uniform(1.00, 1.02) * 1_000_000)     # micro/BUCK
-        self.budget = r.randint(1, 3) * 1_000_000 * 10 ** 6       # $1-3M
-        self._spent = 0
+        # Regime slot: the first N_REGIME_SAVERS savers are regime agents
+        # (global slots N_REGIME_BORROWERS .. N_REGIME_AGENTS-1).
+        slot = type(self)._regime_counter
+        type(self)._regime_counter += 1
+        self._init_regime(slot, N_REGIME_BORROWERS, N_REGIME_SAVERS)
+        # Heterogeneous, seeded knobs.
+        self.savings_goal = r.randint(1, 3) * 1_000_000 * 10 ** 6  # BUCK target
+        self.base_rate = r.randint(20_000, 60_000) * 10 ** 6       # USDC/step
+        self.disc_gain = r.uniform(5.0, 15.0)     # accelerate buys on the dip
+        self.prem_gain = r.uniform(5.0, 15.0)     # accelerate sells on the rip
+        self.reserve = int(self.savings_goal * r.uniform(0.30, 0.60))
+        self.budget = r.randint(1, 3) * 1_000_000 * 10 ** 6        # USDC pool
+        self._spent = 0                            # net USDC deployed into BUCK
         self._bind_proxy(d)
         # Seed the proxy with its USDC budget to deploy over the run.
         d.chain.send(d.usdc.functions.mint(self.proxy.address, self.budget))
 
+    def _apply_regime(self, day) -> str:
+        """Primary knob = base_rate (savings cadence)."""
+        old = self.base_rate
+        self.base_rate = self._rng.randint(20_000, 60_000) * 10 ** 6
+        return (f"day{day} saver#{self.idx} base_rate "
+                f"{old // 10 ** 6}->{self.base_rate // 10 ** 6}")
+
     def act(self, d, scenario, day, tick, ctr) -> None:
+        self._maybe_regime(d, day, ctr)
         if self.proxy is None or not d.pool_ub:
             return
-        if self._spent >= self.budget:
-            return
-        ru = d.chain.balance_of(d.usdc, d.pool_ub)
-        rb = d.chain.balance_of(d.buck, d.pool_ub)
-        if rb == 0:
-            return
-        spot = ru * 1_000_000 // rb          # USDC-micro per 1 BUCK
-        if spot > self.ceiling:
-            return                            # too rich; wait for parity
-        held_usdc = d.chain.balance_of(d.usdc, self.proxy.address)
-        amt = min(self.savings_rate, held_usdc, self.budget - self._spent)
-        if amt < 10 ** 6:
-            return
         try:
-            self._swap_via_simlp(d, d.pool_ub, d.usdc, amt, self.proxy.address)
-            self._spent += amt
-            ctr["saverBuys"] = ctr.get("saverBuys", 0) + 1
-            ctr["saverSpent"] = ctr.get("saverSpent", 0) + amt
+            ru = d.chain.balance_of(d.usdc, d.pool_ub)
+            rb = d.chain.balance_of(d.buck, d.pool_ub)
+            if rb == 0:
+                return
+            spot = ru * PARITY // rb             # micro-USDC per 1 BUCK
+            discount = max(0, PARITY - spot) / PARITY
+            premium = max(0, spot - PARITY) / PARITY
+            holding = d.chain.balance_of(d.buck, self.proxy.address)
+            held_usdc = d.chain.balance_of(d.usdc, self.proxy.address)
+
+            if discount > 0 and holding < self.savings_goal \
+                    and self._spent < self.budget:
+                # Buy the dip: accelerate accumulation with the discount.
+                rate = int(self.base_rate * (1.0 + self.disc_gain * discount))
+                amt = min(rate, held_usdc, self.budget - self._spent)
+                if amt < 10 ** 6:               # sub-$1 move: skip
+                    return
+                self._swap_via_simlp(d, d.pool_ub, d.usdc, amt,
+                                     self.proxy.address)
+                self._spent += amt
+                ctr["saverBuys"] = ctr.get("saverBuys", 0) + 1
+                ctr["saverSpent"] = ctr.get("saverSpent", 0) + amt
+
+            elif premium > 0 and holding > self.reserve:
+                # Sell the rip: spend the premium, down to `reserve`.
+                want_usdc = int(self.base_rate * (1.0 + self.prem_gain * premium))
+                # BUCK to sell to realize ~want_usdc of USDC at current spot.
+                sell = want_usdc * PARITY // spot if spot else 0
+                sell = min(sell, holding - self.reserve)
+                if sell < 10 ** 6:              # sub-$1 move: skip
+                    return
+                before = d.chain.balance_of(d.usdc, self.proxy.address)
+                self._swap_via_simlp(d, d.pool_ub, d.buck, sell,
+                                     self.proxy.address)
+                recv = d.chain.balance_of(d.usdc, self.proxy.address) - before
+                # Selling replenishes the deployable USDC budget.
+                self._spent = max(0, self._spent - recv)
+                ctr["saverSells"] = ctr.get("saverSells", 0) + 1
+                ctr["saverSold"] = ctr.get("saverSold", 0) + recv
+            # else: hold.
         except Exception as e:
             ctr["saver_err"] = repr(e)[:200]

@@ -238,6 +238,17 @@ class Snapshotter:
                     saver_hold += _bal(d.buck, ag.address)
                 except Exception:
                     pass
+        # Regime knobs (mean over each class present) -- track how the
+        # periodic regime shocks move the population's primary knobs.  Read
+        # off the live agent objects; guarded so non-equilibrium runs are 0.
+        uts = [getattr(ag, "util_target", None) for ag in agents
+               if type(ag).__name__ == "FatCreditBorrowerAgent"]
+        uts = [u for u in uts if u is not None]
+        regime_util = sum(uts) / len(uts) if uts else 0.0
+        brs = [getattr(ag, "base_rate", None) for ag in agents
+               if type(ag).__name__ == "SaverAgent"]
+        brs = [b for b in brs if b is not None]
+        regime_saver = sum(brs) / len(brs) if brs else 0.0
         lg = self._lp_groups()
         if self._lp_cap is None:                       # freeze capital basis
             self._lp_cap = {g: lg[g][1] for g in lg}
@@ -284,6 +295,12 @@ class Snapshotter:
             "pid_i": pid_i,
             "pid_d": pid_d,
             "saver_hold": saver_hold,
+            "buck_usd": buck_usd,                      # BUCK/USDC spot (micro)
+            "regime_util": regime_util,                # mean borrower util_target
+            "regime_saver": regime_saver,              # mean saver base_rate (USDC)
+            "saver_buys": ctr.get("saverBuys", 0),     # cumulative dip buys
+            "saver_sells": ctr.get("saverSells", 0),   # cumulative rip sells
+            "regime_events": ctr.get("regimeEvents", 0),   # cumulative shocks
             "supply": int(d.buck.functions.totalSupply().call()),
             "directTrades": ctr["directTrades"],
             "cycleTrades": ctr["cycleTrades"],
