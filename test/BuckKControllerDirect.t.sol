@@ -11,12 +11,18 @@ contract BuckKControllerDirectTest is Test {
 
     address GOV = makeAddr("governance");
 
+    // Rescaled ppm gains (real_gain * 1e12).  Kp_real=0.5, Ki_real~2e-5,
+    // Kd_real=0 -- the same integral-dominant defaults the sim deploys.
+    int256 constant KP = 5e11;
+    int256 constant KI = 2e7;
+    int256 constant KD = 0;
+
     BuckKControllerDirect internal ctrl;
     MockBasket            internal basket;
 
     function setUp() public {
         ctrl = new BuckKControllerDirect(
-            0.1e18, 0.01e18, 0,
+            KP, KI, KD,
             3600,
             0.50e18, 1.50e18,
             1.0e18,
@@ -31,7 +37,7 @@ contract BuckKControllerDirectTest is Test {
 
     function test_set_basket_only_governance() public {
         BuckKControllerDirect fresh = new BuckKControllerDirect(
-            0.1e18, 0.01e18, 0, 3600, 0.50e18, 1.50e18, 1.0e18, GOV
+            KP, KI, KD, 3600, 0.50e18, 1.50e18, 1.0e18, GOV
         );
         vm.prank(makeAddr("attacker"));
         vm.expectRevert("Not governance");
@@ -46,7 +52,7 @@ contract BuckKControllerDirectTest is Test {
 
     function test_pre_setBasket_returns_steady_state_at_unit() public {
         BuckKControllerDirect fresh = new BuckKControllerDirect(
-            0.1e18, 0.01e18, 0, 3600, 0.50e18, 1.50e18, 1.20e18, GOV
+            KP, KI, KD, 3600, 0.50e18, 1.50e18, 1.20e18, GOV
         );
         // No basket wired -> _readReferences returns (UNIT, UNIT) -> error 0.
         vm.warp(block.timestamp + 3601);

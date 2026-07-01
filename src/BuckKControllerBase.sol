@@ -136,7 +136,7 @@ abstract contract BuckKControllerBase {
 
     /// @notice Run (or cache) one PID cycle and return the current BUCK_K.
     /// @dev    Permissionless; cheap cached-read when dT has not elapsed.
-    function compute() external returns (uint256) {
+    function compute() external virtual returns (uint256) {
         uint256 elapsed = block.timestamp - lastUpdate;
         if (elapsed < dT) {
             return buckK;

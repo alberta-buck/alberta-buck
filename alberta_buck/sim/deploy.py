@@ -162,9 +162,19 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
 
     # --- Direct BUCK stack ------------------------------------------- #
     credit = chain.deploy("BuckCredit")
+    # Rescaled direct PID (ppm process/error, dt in seconds).  Gains stored as
+    # real_gain * 1e12.  K is the LTV cap => max system leverage 1/(1-K):
+    # K0=0.5 rests at 2x, rails (0, 1.0) span "no credit" .. spiral boundary.
+    # Ki sized for a target "max variance before the rail":
+    #   Ki_real = dK_rail / (e_max * tau_I)   [ per (fractional error * second) ]
+    # so a sustained e_max basket deviation rails K over tau_I.
+    K0, KMIN, KMAX = int(0.50 * E18), 0, E18
+    DK_RAIL, E_MAX, TAU_I = 0.5, 0.05, 5 * 86400     # rail 0.5, 5% over 5 days
+    KP = int(round((0.05 * DK_RAIL / E_MAX) * 1e12))  # P = 5% of rail at e_max
+    KI = int(round((DK_RAIL / (E_MAX * TAU_I)) * 1e12))
+    KD = 0
     kctrl = chain.deploy("BuckKControllerDirect",
-                          int(0.1 * E18), int(0.01 * E18), 0, 60,
-                          int(0.50 * E18), int(1.50 * E18), E18, gov)
+                          KP, KI, KD, 1800, KMIN, KMAX, K0, gov)
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
