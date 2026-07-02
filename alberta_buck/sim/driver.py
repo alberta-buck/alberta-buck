@@ -42,7 +42,7 @@ class SimDriver:
     so the chain is at "tick 0, day 0, nothing acted yet" when it returns.
     """
 
-    def __init__(self, scenario, anvil, basket_impl="legacy", verbose=False):
+    def __init__(self, scenario, anvil, basket_impl="prorata", verbose=False):
         self.scenario = scenario
         self.anvil = anvil
         self.basket_impl = basket_impl

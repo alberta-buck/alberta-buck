@@ -136,7 +136,7 @@ class Deployment:
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
-    basket_impl: str = "legacy"   # "legacy" (BuckBasket) | "prorata"
+    basket_impl: str = "prorata"  # "prorata" (BuckBasketProRata, default) | "legacy"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
@@ -148,7 +148,7 @@ def _erc20_abi() -> list:
 
 
 def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
-           basket_impl="legacy") -> Deployment:
+           basket_impl="prorata") -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, pool_acct, issuer_addr = accts[0], accts[1], accts[2], accts[3]

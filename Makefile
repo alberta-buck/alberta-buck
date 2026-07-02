@@ -486,7 +486,7 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
-SIM_BASKET	?= legacy        # legacy (BuckBasket) | prorata (BuckBasketProRata)
+SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | legacy (BuckBasket)
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py

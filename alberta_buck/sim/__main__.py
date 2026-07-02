@@ -16,8 +16,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="alberta_buck.sim")
     ap.add_argument("--scenario", default="routing",
                     choices=sorted(SCENARIOS) + ["historical", "equilibrium"])
-    ap.add_argument("--basket", default="legacy", choices=["legacy", "prorata"],
-                    help="basket implementation: BuckBasket (legacy) or BuckBasketProRata")
+    ap.add_argument("--basket", default=None, choices=["legacy", "prorata"],
+                    help="basket implementation: BuckBasketProRata (prorata, "
+                         "default) or BuckBasket (legacy)")
     ap.add_argument("--days", type=int, default=None)
     ap.add_argument("--ticks-per-day", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)
@@ -43,7 +44,7 @@ def main(argv=None) -> int:
                          "(repeatable; usable without --experiment)")
     a = ap.parse_args(argv)
 
-    basket_impl = a.basket
+    basket_impl = a.basket or "prorata"
     seed0 = a.seed if a.seed is not None else 0xA1BC
     if a.experiment or a.sets:
         from alberta_buck.sim import experiment as expmod
@@ -64,8 +65,8 @@ def main(argv=None) -> int:
             s["day_step"] = a.day_step
         if a.days is not None:
             s["days"] = a.days
-        if a.basket == "legacy":                    # CLI default: exp wins
-            basket_impl = s.get("basket", "legacy")
+        if a.basket is None:                        # no CLI flag: exp wins
+            basket_impl = s.get("basket", "prorata")
         sc = expmod.build(exp)
         if a.out is None:
             a.out = f"test/vectors/eq-{exp.name}.json"
