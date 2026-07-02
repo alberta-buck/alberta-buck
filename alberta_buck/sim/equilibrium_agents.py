@@ -55,6 +55,7 @@ import random
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.chain import load_artifact
+from alberta_buck.sim.experiment import draw as _draw, spec as _spec, sample as _sample
 from alberta_buck.sim.router import MIN_SQRT_RATIO, MAX_SQRT_RATIO
 
 FEE_DEN = 1_000_000
@@ -167,18 +168,24 @@ class _ProxyAgent(Agent):
     def _bind_proxy(self, d) -> None:
         """Deploy a SimLP proxy and bind it public + NON-carrying (so BUCK it
         holds can go negative == draw credit; matches the SimLP binding)."""
-        self.proxy = d.chain.deploy("SimLP", sol_file="SimLP")
-        d.chain.send(d.reg.functions.bindContract(
-            self.proxy.address, idmod.BIND_PK, idmod.BIND_E, True, False))
+        self.proxy = self._new_proxy(d)
 
-    def _proxy_exec(self, d, target: str, data: bytes):
-        return d.chain.send(self.proxy.functions.exec(target, data))
+    def _new_proxy(self, d):
+        """Deploy + bind (public, non-carrying) one SimLP proxy contract."""
+        proxy = d.chain.deploy("SimLP", sol_file="SimLP")
+        d.chain.send(d.reg.functions.bindContract(
+            proxy.address, idmod.BIND_PK, idmod.BIND_E, True, False))
+        return proxy
+
+    def _proxy_exec(self, d, target: str, data: bytes, proxy=None):
+        return d.chain.send((proxy or self.proxy).functions.exec(target, data))
 
     def _swap_via_simlp(self, d, pool_addr: str, input_c, amount: int,
-                        recipient: str) -> None:
+                        recipient: str, from_proxy=None) -> None:
         """Swap exactly `amount` of `input_c` into `pool_addr`, output to
-        `recipient`.  The proxy first transfers the input to SimLP (whose
-        swap callback pays the pool from its own balance)."""
+        `recipient`.  The paying proxy (default self.proxy) first transfers
+        the input to SimLP (whose swap callback pays the pool from its own
+        balance)."""
         if amount <= 0:
             return
         t0, t1 = _pool_tokens(d, pool_addr)
@@ -187,7 +194,8 @@ class _ProxyAgent(Agent):
         self._proxy_exec(
             d, input_c.address,
             input_c.encode_abi("transfer(address,uint256)",
-                               args=[d.simlp.address, int(amount)]))
+                               args=[d.simlp.address, int(amount)]),
+            proxy=from_proxy)
         d.chain.send(d.simlp.functions.swap(
             pool_addr, recipient, zero_for_one, int(amount),
             sqrt_limit, t0, t1))
@@ -225,19 +233,35 @@ class FatCreditBorrowerAgent(_ProxyAgent):
           effective target draw is `util_target * creditLimit * cap_frac(day)`,
           so issuance ramps IN instead of flooding, and a shock injects a wave.
 
-      (B) PRE-ISSUANCE FUNDING FACTOR (simulated).  Before issuing `delta` net
-          BUCK the agent must first HOLD a locked funding reserve, topping it up
-          by BUYING BUCK (this is the pre-issuance demand the real funding gate
-          would compel).  The reserve requirement scales with a funding factor
-              ff = (1 + FF_CYC*max(0, basketValueInBuck-1))
+      (B) ROLLING PRE-ISSUANCE FUNDING RESERVE (simulated).  Before issuing
+          `delta` net BUCK the agent must HOLD a funding reserve in a separate
+          ESCROW proxy, topping it up by BUYING BUCK (the pre-issuance demand
+          the real funding gate would compel).  The per-issuance requirement
+          scales with a funding factor
+              ff = max(0, 1 + FF_CYC*(basketValueInBuck-1)/basketValueInBuck)
                    * (1 + FF_AMP*(issue_rate**FF_POW))
-          that is counter-cyclical in the basket premium AND super-linear in the
-          SYSTEM-WIDE issuance rate (totalSupply delta since last step).  A hot
-          uptake makes ff blow up, demanding heavy pre-BUCK demand; if the agent
-          cannot fund the shortfall it issues LESS (the throttle).  The reserve
-          is sequestered like insurance -- the issuance sell only ever touches
-          freshly-issued `delta`, never the reserve (tracked logically so the
-          bought reserve BUCK and the drawn credit stay separate accounts).
+          counter-cyclical in BOTH directions -- the same shape as the
+          on-chain fundingFactor(), which SATURATES AT ZERO in deflation --
+          and super-linear in the SYSTEM-WIDE issuance rate (totalSupply
+          delta since last step).  Above parity a hot uptake makes ff blow
+          up, demanding heavy pre-BUCK demand (the throttle bites when the
+          agent cannot fund it); below parity the toll melts away, so
+          issuance is cheap exactly when new supply pushes TOWARD parity.
+
+          The requirement is ROLLING, tied to OUTSTANDING drawn credit: each
+          issuance pushes a (outstanding, ff) tranche; retiring credit pops
+          tranches FIFO and moves their ff-scaled reserve to a PENDING-RELEASE
+          buffer.  Pending reserve is sold back into the TOKEN/BUCK pools
+          (the controlled observable) counter-cyclically -- only while
+          basketValueInBuck <= ~parity, i.e. exactly when unwinding pushes
+          TOWARD parity -- and the TOKEN proceeds are recycled to USDC via
+          the deep truth pools, replenishing the funding budget.  This kills
+          the two failure modes of the first (reverted) attempt AND of the
+          cumulative design it replaces: the reserve no longer ratchets to a
+          permanent net demand (which froze issuance for whole runs once
+          budgets exhausted, leaving the PID open-loop), and the accounting
+          is untangled -- drawn credit is read from the borrowing proxy's own
+          signed balance (the escrow's holdings never contaminate it).
 
       (C) DISCOUNT-DRIVEN REDEMPTION ("money at a discount").  The retire/
           buy-back leg accelerates with the discount:
@@ -267,40 +291,57 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         slot = type(self)._regime_counter
         type(self)._regime_counter += 1
         self._init_regime(slot, 0, N_REGIME_BORROWERS)
-        # Heterogeneous knobs per agent.
-        self.util_target = r.uniform(0.60, 0.80)   # draw this frac of limit
-        self.internal_share = r.uniform(0.30, 0.60)  # sold into TOKEN/BUCK
-        self.retire_rate = r.uniform(0.20, 0.35)   # frac of excess retired/step
-        self.band = 0.05                            # deadband
-        face_total = r.randint(2, 5) * 1_000_000 * 10 ** 6   # $2-5M, 6-dec
+        # Heterogeneous knobs per agent.  Every draw goes through the
+        # experiment layer: an attached experiment's [agents.FatCreditBorrowerAgent]
+        # section overrides the coded default ([lo,hi] range or scalar).
+        cls = type(self).__name__
+        self.util_target = _draw(scenario, cls, "util_target", r, (0.60, 0.80))
+        self.internal_share = _draw(scenario, cls, "internal_share", r, (0.30, 0.60))
+        self.retire_rate = _draw(scenario, cls, "retire_rate", r, (0.20, 0.35))
+        self.band = _draw(scenario, cls, "band", r, 0.05)   # deadband
+        self._util_regime = _spec(scenario, cls, "util_regime", (0.40, 0.85))
+        face_total = _draw(scenario, cls, "face_m", r, (2, 5)) * 1_000_000 * 10 ** 6
 
         # (A) Adoption ramp: logistic cap_frac(day) from CAP_FLOOR -> ~1.0.
         # `growth_slope` steepens the S; `mid_frac` places its midpoint as a
-        # fraction of the horizon.  A minority (~1/3) get a one-off step shock.
-        self.growth_slope = r.uniform(8.0, 14.0)
-        self.mid_frac = r.uniform(0.35, 0.55)
+        # fraction of the horizon.  A minority (~shock_prob) get a one-off
+        # step shock at a seeded day in the shock_window horizon fraction.
+        self.growth_slope = _draw(scenario, cls, "growth_slope", r, (8.0, 14.0))
+        self.mid_frac = _draw(scenario, cls, "mid_frac", r, (0.35, 0.55))
         self.shock_day = -1
         self.shock_mag = 0.0
+        self.extra_cap = 0.0        # uptake_shock intervention adds here
         horizon = max(1, int(getattr(scenario, "days", 1)))
-        if r.random() < 0.34:
-            self.shock_day = r.randint(int(0.25 * horizon), int(0.70 * horizon))
-            self.shock_mag = r.uniform(0.20, 0.40)
+        if r.random() < _draw(scenario, cls, "shock_prob", r, 0.34):
+            wlo, whi = _spec(scenario, cls, "shock_window", (0.25, 0.70))
+            self.shock_day = r.randint(int(wlo * horizon), int(whi * horizon))
+            self.shock_mag = _draw(scenario, cls, "shock_mag", r, (0.20, 0.40))
         self._shock_logged = False
 
-        # (B) Pre-issuance funding-factor knobs.  Super-linear in issue_rate,
+        # (B) Rolling funding-reserve knobs.  ff super-linear in issue_rate,
         # counter-cyclical in the basket premium.  Seeded within the design
         # ranges so a rapid uptake makes ff blow up (strong pre-BUCK demand).
-        self.ff_cyc = r.uniform(5.0, 10.0)
-        self.ff_amp = r.uniform(50.0, 200.0)
-        self.ff_pow = r.uniform(1.5, 2.0)
-        self.reserve_target = 0     # cumulative BUCK reserve required
-        self.reserve_held = 0       # cumulative BUCK reserve actually bought
+        self.ff_cyc = _draw(scenario, cls, "ff_cyc", r, (5.0, 10.0))
+        self.ff_amp = _draw(scenario, cls, "ff_amp", r, (50.0, 200.0))
+        self.ff_pow = _draw(scenario, cls, "ff_pow", r, (1.5, 2.0))
+        # Reserve tranches: FIFO of [outstanding, ff]; requirement is
+        # sum(outstanding * ff).  Retirement pops tranches into the
+        # pending-release buffer, drip-sold back counter-cyclically.
+        self._tranches: list[list] = []
+        self.pending_release = 0
+        self.release_rate = _draw(scenario, cls, "release_rate", r, (0.25, 0.50))
+        self.release_eps = _draw(scenario, cls, "release_eps", r, 0.02)
         self._supply_prev = 0       # last-step system BUCK totalSupply
 
         # (C) Redemption discount gain.
-        self.disc_gain = r.uniform(3.0, 8.0)
+        self.disc_gain = _draw(scenario, cls, "disc_gain", r, (3.0, 8.0))
 
         self._bind_proxy(d)
+        # Escrow proxy: holds the funding reserve SEPARATE from the borrowing
+        # account.  Drawn credit is then simply -signed(proxy) and the live
+        # reserve simply balanceOf(escrow) -- chain truth (demurrage and all),
+        # never entangled with the credit accounting.
+        self.escrow = self._new_proxy(d)
 
         # Create the pool of BuckCredit NFTs (no depreciation, zero premium).
         now_ts = d.w3.eth.get_block("latest")["timestamp"]
@@ -327,7 +368,8 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         # BUCK demand (its reserve).  Issuance sells recycle USDC back in; when
         # the budget + recycled flow can't cover a hot reserve shortfall, the
         # throttle bites and the agent issues less.
-        self.fund_budget = r.randint(3, 6) * 1_000_000 * 10 ** 6
+        self.fund_budget = _draw(scenario, cls, "fund_budget_m", r,
+                                 (3, 6)) * 1_000_000 * 10 ** 6
         try:
             d.chain.send(d.usdc.functions.mint(self.proxy.address,
                                                self.fund_budget))
@@ -373,9 +415,12 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         return amt
 
     def _buy_buck(self, d, pool_addr: str, input_c, want_buck: int,
-                  fee: int) -> int:
-        """Spend held `input_c` to buy ~`want_buck` BUCK back into the proxy
-        (climbs raw toward 0 == retires drawn credit).  Returns BUCK bought."""
+                  fee: int, recipient: str = "") -> int:
+        """Spend `input_c` held by the borrowing proxy to buy ~`want_buck`
+        BUCK, delivered to `recipient` (default: the borrowing proxy, which
+        climbs raw toward 0 == retires drawn credit; the escrow address
+        funds the reserve instead).  Returns BUCK bought."""
+        recipient = recipient or self.proxy.address
         held = d.chain.balance_of(input_c, self.proxy.address)
         if held == 0 or want_buck <= 0:
             return 0
@@ -385,17 +430,18 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         spend = min(held, need) if need else min(held, r_in // 10)
         if spend <= 0:
             return 0
-        before = d.chain.balance_of(d.buck, self.proxy.address)
-        self._swap_via_simlp(d, pool_addr, input_c, spend, self.proxy.address)
-        return d.chain.balance_of(d.buck, self.proxy.address) - before
+        before = d.chain.balance_of(d.buck, recipient)
+        self._swap_via_simlp(d, pool_addr, input_c, spend, recipient)
+        return d.chain.balance_of(d.buck, recipient) - before
 
     # -- regime change ----------------------------------------------------- #
 
     def _apply_regime(self, day) -> str:
-        """Primary knob = util_target (target leverage).  A fresh target in
-        [0.40, 0.85] shifts how hard this borrower pushes basketValue."""
+        """Primary knob = util_target (target leverage).  A fresh target from
+        the util_regime spec (default [0.40, 0.85]) shifts how hard this
+        borrower pushes basketValue."""
         old = self.util_target
-        self.util_target = self._rng.uniform(0.40, 0.85)
+        self.util_target = _sample(self._util_regime, self._rng)
         return (f"day{day} borrower#{self.idx} util_target "
                 f"{old:.3f}->{self.util_target:.3f}")
 
@@ -403,14 +449,103 @@ class FatCreditBorrowerAgent(_ProxyAgent):
 
     def _cap_frac(self, day, horizon) -> float:
         """(A) Logistic adoption S-curve in [CAP_FLOOR, ~1.0] over the horizon,
-        plus a one-off step (`+shock_mag`) once `shock_day` is reached."""
+        plus a one-off step (`+shock_mag`) once `shock_day` is reached, plus
+        any uptake_shock interventions accumulated in `extra_cap`."""
         h = max(1, int(horizon))
         x = day / h
         lg = 1.0 / (1.0 + math.exp(-self.growth_slope * (x - self.mid_frac)))
         cf = self.CAP_FLOOR + (1.0 - self.CAP_FLOOR) * lg
         if self.shock_day >= 0 and day >= self.shock_day:
             cf += self.shock_mag
+        cf += self.extra_cap
         return max(0.0, min(self.CAP_CEIL, cf))
+
+    # -- rolling reserve ----------------------------------------------------- #
+
+    @property
+    def reserve_req(self) -> int:
+        """Rolling requirement: sum over open tranches of outstanding * ff
+        (6-dec BUCK).  Falls as credit retires -- never a ratchet."""
+        return int(sum(o * f for o, f in self._tranches))
+
+    def _reserve_balance(self, d) -> int:
+        """Live escrow BUCK (chain truth: demurrage-decayed)."""
+        try:
+            return d.chain.balance_of(d.buck, self.escrow.address)
+        except Exception:
+            return 0
+
+    def _pop_tranches(self, retired: int) -> int:
+        """Retire `retired` outstanding credit FIFO across tranches; return
+        the ff-scaled reserve those tranches release (to pending)."""
+        released, left = 0, retired
+        while left > 0 and self._tranches:
+            o, f = self._tranches[0]
+            take = min(left, o)
+            released += int(take * f)
+            left -= take
+            if take >= o:
+                self._tranches.pop(0)
+            else:
+                self._tranches[0][0] = o - take
+        return released
+
+    def _release_pending(self, d, bvib: float, ctr) -> None:
+        """Counter-cyclically unwind the pending-release reserve: sell a
+        chunk of escrow BUCK into a TOKEN/BUCK pool -- which pushes
+        basketValue UP -- only while bvib <= 1 + release_eps, i.e. exactly
+        when that push is TOWARD parity.  TOKEN proceeds recycle to USDC via
+        the deep truth pool, replenishing the borrowing proxy's funding
+        budget for future pre-buys."""
+        if self.pending_release < 10 ** 6:
+            return
+        if bvib > 1.0 + self.release_eps:
+            return                     # unwinding now would push AWAY from parity
+        bal = self._reserve_balance(d)
+        avail = max(0, bal - self.reserve_req)   # requirement keeps first claim
+        amt = min(self.pending_release, avail,
+                  int(max(10 ** 6, self.pending_release * self.release_rate)))
+        if amt < 10 ** 6:
+            return
+        i = self._rng.randrange(len(d.tokens))
+        tok = d.tokens[i]
+        before_tok = d.chain.balance_of(tok, self.escrow.address)
+        try:
+            self._swap_via_simlp(d, d.pool_buck[i], d.buck, amt,
+                                 self.escrow.address, from_proxy=self.escrow)
+        except Exception as e:
+            ctr["fat_release_err"] = repr(e)[:200]
+            return
+        self.pending_release -= amt
+        ctr["fatReleased"] = ctr.get("fatReleased", 0) + amt
+        got_tok = d.chain.balance_of(tok, self.escrow.address) - before_tok
+        if got_tok > 0:
+            try:
+                self._swap_via_simlp(d, d.pool_usdc[i], tok, got_tok,
+                                     self.proxy.address, from_proxy=self.escrow)
+            except Exception as e:
+                ctr["fat_recycle_err"] = repr(e)[:200]
+
+    # -- observability ------------------------------------------------------ #
+
+    def channel_state(self, d) -> dict | None:
+        """Live issuance-channel state for the snapshotter: the K-scaled
+        limit, chain-truth drawn credit, and the reserve accounts.  Keeps
+        snapshot.py decoupled from this agent's internal accounting."""
+        if self.proxy is None:
+            return None
+        try:
+            limit = d.buck.functions.creditLimit(self.proxy.address).call()
+            signed = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        except Exception:
+            return None
+        return {
+            "limit": limit,
+            "drawn": max(0, -signed),
+            "reserve_held": self._reserve_balance(d),
+            "reserve_req": self.reserve_req,
+            "pending": self.pending_release,
+        }
 
     # -- the loop ---------------------------------------------------------- #
 
@@ -441,13 +576,14 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         if self.shock_day >= 0 and day == 0:
             ctr["fatShockSeeded"] = ctr.get("fatShockSeeded", 0) + 1
 
-        # Logical draw: issuance sold BEYOND the sequestered reserve.  The
-        # reserve BUCK we bought sits positive in the same signed balance, so
-        # `drawn = reserve_held - signed` keeps reserve and drawn as separate
-        # accounts (the sell leg only ever touches fresh `delta`).
-        drawn = self.reserve_held - signed
-        if drawn < 0:
-            drawn = 0
+        # Drawn credit is chain truth: the borrowing proxy's own negative
+        # signed balance.  The reserve lives in the separate escrow proxy and
+        # can never contaminate this reading.
+        drawn = max(0, -signed)
+
+        # Counter-cyclical unwind of any pending-release reserve happens
+        # every step, whatever branch the draw target selects below.
+        self._release_pending(d, bvib, ctr)
 
         # (A) Adoption ramp (+ optional shock) scales the effective target.
         cap = self._cap_frac(day, getattr(scenario, "days", 1))
@@ -463,57 +599,80 @@ class FatCreditBorrowerAgent(_ProxyAgent):
             if delta < 10 ** 6:            # sub-$1 moves: skip
                 return
 
-            # (B) Pre-issuance funding factor: counter-cyclical (basket
-            # premium) x super-linear in the system issuance rate.  A hot
-            # uptake -> huge ff -> heavy pre-buy demanded before we may issue.
-            ff = ((1.0 + self.ff_cyc * max(0.0, bvib - 1.0))
-                  * (1.0 + self.ff_amp * (issue_rate ** self.ff_pow)))
+            # (B) Funding factor for THIS tranche: counter-cyclical in BOTH
+            # directions (mirroring the on-chain fundingFactor(), which
+            # SATURATES AT ZERO in deflation: base = max(0, 1 + cyc*(bv-1)/bv))
+            # x super-linear in the system issuance rate.  Above parity a hot
+            # uptake demands a heavy pre-buy toll; BELOW parity (BUCK rich,
+            # the system starving for supply) the toll melts away, so
+            # issuance is cheap exactly when it pushes TOWARD parity.  An
+            # always->=1 floor here was the deflation trap: budgets drained
+            # buying reserve BUCK at a premium, the issuance plant saturated
+            # below the setpoint, and K pinned at its ceiling.
+            base = max(0.0, 1.0 + self.ff_cyc * (bvib - 1.0) / max(bvib, 1e-9))
+            ff = base * (1.0 + self.ff_amp * (issue_rate ** self.ff_pow))
+            req = self.reserve_req
+            bal = self._reserve_balance(d)
             need_add = int(delta * ff)
-            # Top the locked reserve up toward (target + this issuance) by
-            # BUYING BUCK -- the pre-issuance demand.  Never sells the reserve.
-            shortfall = (self.reserve_target + need_add) - self.reserve_held
+            # Top the escrow up toward (rolling requirement + this tranche)
+            # by BUYING BUCK straight into the escrow -- the pre-issuance
+            # demand.  Pending-release stock already in the escrow counts
+            # toward the requirement, so a re-lever after a retire REUSES it
+            # instead of double-buying.
+            shortfall = (req + need_add) - bal
             if shortfall > 10 ** 6 and d.pool_ub:
                 try:
                     got = self._buy_buck(d, d.pool_ub, d.usdc, shortfall,
-                                         d.fee_ub)
+                                         d.fee_ub,
+                                         recipient=self.escrow.address)
                 except Exception as e:
                     ctr["fat_prefund_err"] = repr(e)[:200]
                     got = 0
                 if got > 0:
-                    self.reserve_held += got
+                    bal += got
                     ctr["fatPreFundBought"] = (
                         ctr.get("fatPreFundBought", 0) + got)
 
-            # Throttle: only issue as much as the funded reserve supports.
-            avail = self.reserve_held - self.reserve_target
+            # Throttle: only issue as much as the funded escrow supports
+            # BEYOND the rolling requirement.  Unlike the old cumulative
+            # design this recovers: retirement shrinks the requirement, so
+            # the channel re-arms instead of ratcheting shut for good.
+            # A zero toll (ff saturated at 0 in deflation) NEVER binds --
+            # even when demurrage has nudged the escrow below the standing
+            # requirement (avail < 0 == need_add).
+            avail = bal - req
             if avail < need_add:
-                delta_funded = int(max(0, avail) / ff) if ff > 0 else 0
+                if ff > 0:
+                    delta_funded = int(max(0, avail) / ff)
+                else:
+                    delta_funded = delta      # zero toll: funding can't bind
                 if delta_funded < delta:
                     ctr["fatThrottled"] = ctr.get("fatThrottled", 0) + 1
                 delta = min(delta, delta_funded)
             if delta < 10 ** 6:
                 return
-            # Commit the reserve requirement for the (possibly throttled) delta.
-            self.reserve_target += int(delta * ff)
 
             internal = int(self.internal_share * delta)
             external = delta - internal
             i = self._rng.randrange(n)     # which TOKEN/BUCK pool to push
             try:
-                # Each leg is capped to the contract's own live spendable read
-                # immediately before its transfer (held-net-of-demurrage +
-                # unused credit).  The proxy is non-carrying, so its positive
-                # reserve BUCK accrues demurrage and creditLimit is a per-block
-                # cache -- capping per-leg keeps the borrower's own transfer
-                # within spendable and never loosens the reserve sequestration.
-                # (A rare "exceeds spendable" can still surface from the shared
-                # SimLP swap leg under heavy flow; it is caught below, benign.)
+                # Each leg is capped to the borrowing proxy's live spendable
+                # (== unused credit; it holds no reserve BUCK any more) read
+                # immediately before its transfer.  (A rare "exceeds
+                # spendable" can still surface from the shared SimLP swap leg
+                # under heavy flow; it is caught below, benign.)
                 sold = self._sell_capped(d, d.pool_buck[i], internal)
                 if d.pool_ub:
                     sold += self._sell_capped(d, d.pool_ub, external)
                 if sold > 0:
                     ctr["fatEntries"] = ctr.get("fatEntries", 0) + 1
                     ctr["fatIssued"] = ctr.get("fatIssued", 0) + sold
+                    # Commit a tranche for what actually sold; whatever part
+                    # of the escrow now backs it is no longer pending.
+                    self._tranches.append([sold, ff])
+                    self.pending_release = min(
+                        self.pending_release,
+                        max(0, bal - self.reserve_req))
             except Exception as e:
                 ctr["fat_sell_err"] = repr(e)[:200]
 
@@ -545,9 +704,13 @@ class FatCreditBorrowerAgent(_ProxyAgent):
                 ctr["fatRetired"] = ctr.get("fatRetired", 0) + got
             except Exception as e:
                 ctr["fat_buy_err"] = repr(e)[:200]
-            # Best-effort burn to actually contract supply (deactivates a
-            # sliver of credit; skipped if it would break post-burn solvency).
             if got > 0:
+                # Roll the reserve: retired tranches release their ff-scaled
+                # reserve into the pending buffer (unwound counter-cyclically
+                # by _release_pending), instead of standing as dead demand.
+                self.pending_release += self._pop_tranches(got)
+                # Best-effort burn to actually contract supply (deactivates a
+                # sliver of credit; skipped if it would break solvency).
                 try:
                     self._proxy_exec(
                         d, d.buck.address,
@@ -585,29 +748,37 @@ class SaverAgent(_ProxyAgent):
         slot = type(self)._regime_counter
         type(self)._regime_counter += 1
         self._init_regime(slot, N_REGIME_BORROWERS, N_REGIME_SAVERS)
-        # Heterogeneous, seeded knobs.  Scaled ~10x the first cut: private
-        # demand has to be comparable to BUCK supply (~15-20M) to actually
-        # bid BUCK toward the basket, not a rounding error against it.
-        self.savings_goal = r.randint(10, 30) * 1_000_000 * 10 ** 6  # BUCK target
-        self.base_rate = r.randint(200_000, 600_000) * 10 ** 6       # USDC/step
+        # Heterogeneous, seeded knobs -- all experiment-overridable via
+        # [agents.SaverAgent].  Scaled ~10x the first cut: private demand has
+        # to be comparable to BUCK supply (~15-20M) to actually bid BUCK
+        # toward the basket, not a rounding error against it.
+        cls = type(self).__name__
+        self.savings_goal = _draw(scenario, cls, "savings_goal_m", r,
+                                  (10, 30)) * 1_000_000 * 10 ** 6  # BUCK target
+        self._base_rate_spec = _spec(scenario, cls, "base_rate_k", (200, 600))
+        self.base_rate = _sample(self._base_rate_spec, r) * 1_000 * 10 ** 6
         # Gentler reactivity: big capital with hot gains over-corrected into
         # oscillation, so temper the discount/premium acceleration.
-        self.disc_gain = r.uniform(2.0, 6.0)      # accelerate buys on the dip
-        self.prem_gain = r.uniform(2.0, 6.0)      # accelerate sells on the rip
+        self.disc_gain = _draw(scenario, cls, "disc_gain", r, (2.0, 6.0))
+        self.prem_gain = _draw(scenario, cls, "prem_gain", r, (2.0, 6.0))
         # Reserve is a fraction of CURRENT holdings, not the goal -- a
         # goal-relative reserve was unreachable once BUCK got expensive, so
         # the sell leg never fired and the saver was buy-only.
-        self.reserve_frac = r.uniform(0.30, 0.50)
-        self.budget = r.randint(20, 60) * 1_000_000 * 10 ** 6        # USDC pool
+        self.reserve_frac = _draw(scenario, cls, "reserve_frac", r, (0.30, 0.50))
+        self.budget = _draw(scenario, cls, "budget_m", r,
+                            (20, 60)) * 1_000_000 * 10 ** 6        # USDC pool
         self._spent = 0                            # net USDC deployed into BUCK
         self._bind_proxy(d)
         # Seed the proxy with its USDC budget to deploy over the run.
         d.chain.send(d.usdc.functions.mint(self.proxy.address, self.budget))
 
     def _apply_regime(self, day) -> str:
-        """Primary knob = base_rate (savings cadence)."""
+        """Primary knob = base_rate (savings cadence).  Redraw from the SAME
+        spec as setup() -- an earlier pre-rescale range here (20k-60k vs the
+        200k-600k setup range) cut a regime saver's demand 10x permanently
+        and destabilized long runs."""
         old = self.base_rate
-        self.base_rate = self._rng.randint(20_000, 60_000) * 10 ** 6
+        self.base_rate = _sample(self._base_rate_spec, self._rng) * 1_000 * 10 ** 6
         return (f"day{day} saver#{self.idx} base_rate "
                 f"{old // 10 ** 6}->{self.base_rate // 10 ** 6}")
 
@@ -616,8 +787,8 @@ class SaverAgent(_ProxyAgent):
         if self.proxy is None or not d.pool_ub:
             return
         try:
-            # Value reference is the BASKET: BUCK is cheap when a basket costs
-            # more than 1 BUCK (basketValueInBuck > 1).  This is the same
+            # Value reference is the BASKET: BUCK is discounted when a basket costs
+            # less than 1 BUCK (basketValueInBuck < 1).  This is the same
             # observable the controller defends, so buying leans into the peg.
             bvib = d.basket.functions.basketValueInBuck().call() / 1e18
             discount = max(0.0, bvib - 1.0)      # BUCK below basket value -> buy
