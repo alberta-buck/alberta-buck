@@ -154,6 +154,22 @@ through the sweep).  The named Makefile incantations are
 `make nix-sim-sweep-{baseline,shocks,savers2x,capacity}` and
 `make nix-sim-plot-eq-<name>` for the plots.
 
+**Prorata head-to-head** (canonical seed, identical window/knobs;
+`test/vectors/eq-baseline-5yr-prorata.json`,
+`images/equilibrium-baseline-5yr-prorata.png`):
+
+| basket  | bv tail (sd)   | K tail | rail% | iss/ret $M | thr% | verdict |
+|---------|----------------|--------|-------|------------|------|---------|
+| legacy  | 1.0016 (0.032) | 0.748  | 0%    | 1.34/3.66  | 13%  | PASS    |
+| prorata | 0.9926 (0.027) | 0.819  | 0%    | 1.73/1.52  | 36%  | PASS    |
+
+Same verdict, different operating point: prorata settles ~0.7% lean with
+a *tighter* spread, K rests higher (0.82, still interior), and the tail
+issue/retire flows are near-balanced where legacy was net-retiring.  The
+funding throttle engages more often (36%) because the leaner bv keeps
+ff off its deflation floor less of the time.  Equilibrium does not
+depend on the basket implementation -- the loop closes on both.
+
 **Baseline x 5 seeds** (`images/equilibrium-baseline-5yr.png` = s41404):
 
 | seed  | bv tail (sd)    | K tail | rail% | thr% | verdict |
