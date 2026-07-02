@@ -76,6 +76,7 @@ contract BuckKControllerDirect is BuckKControllerBase {
 
     event BasketSet(address indexed basket);
     event Reprimed(int256 newP, int256 newI);
+    event BuckK0Updated(uint256 buckK0, int256 newI);
 
     constructor(
         int256 _Kp, int256 _Ki, int256 _Kd,
@@ -111,6 +112,28 @@ contract BuckKControllerDirect is BuckKControllerBase {
         basketValue = (address(basket) != address(0))
                     ? basket.basketValueInBuck()
                     : UNIT;
+    }
+
+    /// @dev Bumpless-transfer algebra for the ppm embodiment:
+    ///      buckK == buckK0 + Kp*P + Ki*I  (gains real*1e12, P in ppm,
+    ///      I in ppm*s), so the I that holds the current output is
+    ///      (buckK - buckK0 - Kp*P) / Ki -- the same form reprime() uses.
+    function _rederiveI() internal view override returns (int256) {
+        return (int256(buckK) - int256(buckK0) - Kp * P) / Ki;
+    }
+
+    /// @notice Governance: move the neutral feed-forward LTV.  Bumpless --
+    ///         I is re-derived so the live buckK is unchanged; the
+    ///         integrator then trims from the new resting point.
+    function setBuckK0(uint256 _buckK0) external {
+        require(msg.sender == governance, "Not governance");
+        require(buckKMin <= _buckK0 && _buckK0 <= buckKMax,
+                "buckK0 out of bounds");
+        buckK0 = _buckK0;
+        if (Ki != 0) {
+            I = _rederiveI();
+        }
+        emit BuckK0Updated(_buckK0, I);
     }
 
     /// @notice Run (or cache) one PID cycle in ppm space and return buckK.

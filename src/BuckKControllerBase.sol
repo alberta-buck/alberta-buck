@@ -84,6 +84,8 @@ abstract contract BuckKControllerBase {
 
     event BuckKUpdated(uint256 newBuckK, int256 error, int256 P, int256 I, int256 D);
     event GainsUpdated(int256 Kp, int256 Ki, int256 Kd);
+    event RailsUpdated(uint256 buckKMin, uint256 buckKMax);
+    event Retuned(int256 Kp, int256 Ki, int256 Kd, int256 I);
 
     constructor(
         int256 _Kp, int256 _Ki, int256 _Kd,
@@ -241,6 +243,43 @@ abstract contract BuckKControllerBase {
         require(msg.sender == governance, "Not governance");
         Kp = _Kp; Ki = _Ki; Kd = _Kd;
         emit GainsUpdated(_Kp, _Ki, _Kd);
+    }
+
+    /// @notice Governance gain change with BUMPLESS TRANSFER: the integrator
+    ///         is re-derived under the new gains so the controller's output
+    ///         is continuous across the retune (the next cycle with an
+    ///         unchanged error reproduces the current buckK).  Standard PID
+    ///         practice for retuning a live loop -- a raw setGains() with a
+    ///         wound-up integrator would step buckK by I*(Ki_new - Ki_old).
+    /// @dev    Requires _Ki != 0 for continuity (with no integrator there is
+    ///         nothing to absorb the step; use setGains for I/PD-less modes).
+    function retune(int256 _Kp, int256 _Ki, int256 _Kd) external {
+        require(msg.sender == governance, "Not governance");
+        require(_Ki != 0, "retune needs Ki");
+        Kp = _Kp; Ki = _Ki; Kd = _Kd;
+        I = _rederiveI();
+        emit GainsUpdated(_Kp, _Ki, _Kd);
+        emit Retuned(_Kp, _Ki, _Kd, I);
+    }
+
+    /// @dev Output-continuity algebra: the I that reproduces the current
+    ///      buckK under the CURRENT gains and last error P (the D transient
+    ///      is treated as 0).  Embodiments with different output scaling
+    ///      (e.g. the ppm-rescaled direct controller) override this.
+    function _rederiveI() internal view virtual returns (int256) {
+        return ((int256(buckK) - UNIT) * UNIT - P * Kp) / Ki;
+    }
+
+    /// @notice Governance: move the output rails.  The live buckK is clamped
+    ///         into the new range; the anti-windup takes over from there.
+    function setRails(uint256 _buckKMin, uint256 _buckKMax) external {
+        require(msg.sender == governance, "Not governance");
+        require(_buckKMin <= _buckKMax, "min>max");
+        buckKMin = _buckKMin;
+        buckKMax = _buckKMax;
+        if (buckK < _buckKMin) buckK = _buckKMin;
+        if (buckK > _buckKMax) buckK = _buckKMax;
+        emit RailsUpdated(_buckKMin, _buckKMax);
     }
 
     function setDT(uint256 _dT) external {
