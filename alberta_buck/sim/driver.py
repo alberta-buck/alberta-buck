@@ -78,8 +78,25 @@ class SimDriver:
         for a in self.agents:
             a.bootstrap(self.d, scenario, self.ctr)
 
+        # --- experiment: price overlay + scripted interventions ------ #
+        # Mirrors loop.run(): interventions fire at each day start, so a
+        # driven (TUI) run reproduces a batch run's schedule.  (day_step
+        # coarse mode is a loop.run concern; the driver steps single days.)
+        exp = getattr(scenario, "experiment", None)
+        self._iv = None
+        if exp is not None:
+            from alberta_buck.sim.experiment import Interventions, PriceOverlay
+            if not isinstance(scenario.prices, PriceOverlay):
+                scenario.prices = PriceOverlay(scenario.prices)
+            self._iv = Interventions(exp, self.d, scenario, self.agents,
+                                     self.arbs, self.ctr, self._rng)
+
         # --- snapshot + capital baselines --------------------------- #
         self.snap = Snapshotter(self.d, scenario)
+        if exp is not None:
+            self.snap.meta["experiment"] = exp.resolved()
+            if self._iv is not None:
+                self.snap.meta["interventions_applied"] = self._iv.applied
         self.init_val = self.snap.agg_value(self.agents, 0)
         self.reb_init = self.snap._agent_value(
             self.agents, 0, "BuckBasketRebalancerAgent")
@@ -116,6 +133,8 @@ class SimDriver:
     def _begin_day(self) -> None:
         s = self.scenario
         n_tok = len(self.d.tokens)
+        if self._iv is not None:
+            self._iv.apply_due(self.day)
         self.ctr["day"] = self.day
         self.ctr["refUsd"] = [s.prices.ref(i, self.day) for i in range(n_tok)]
         self._whale_tick = self._prng.randrange(s.ticks_per_day)

@@ -91,6 +91,10 @@ class Snapshotter:
         self.d = d
         self.s = scenario
         self.frames: list[dict] = []
+        # Run-level metadata (resolved experiment config, applied
+        # interventions, ...) embedded in the written vector.  Callers may
+        # store live references here (e.g. a growing intervention log).
+        self.meta: dict = {}
         self.tokens = [t[0] for t in scenario.tokens]
         self._pool_abi, _ = load_artifact("UniswapV3Pool")
         # address -> day-0 USDC-micro value per RAW unit helper key
@@ -238,6 +242,18 @@ class Snapshotter:
                     saver_hold += _bal(d.buck, ag.address)
                 except Exception:
                     pass
+        # Borrower issuance-channel state (equilibrium scenario): summed
+        # K-scaled limit / drawn / funding-reserve accounts across the
+        # FatCreditBorrower population, plus the cumulative flow counters.
+        # This is the observability that shows WHY issuance lives or dies
+        # (e.g. the reserve throttle clamping the channel shut).
+        fat = {"limit": 0, "drawn": 0, "reserve_held": 0, "reserve_req": 0,
+               "pending": 0}
+        for ag in agents:
+            cs = ag.channel_state(d) if hasattr(ag, "channel_state") else None
+            if cs:
+                for k in fat:
+                    fat[k] += cs.get(k, 0)
         # Regime knobs (mean over each class present) -- track how the
         # periodic regime shocks move the population's primary knobs.  Read
         # off the live agent objects; guarded so non-equilibrium runs are 0.
@@ -301,6 +317,19 @@ class Snapshotter:
             "saver_buys": ctr.get("saverBuys", 0),     # cumulative dip buys
             "saver_sells": ctr.get("saverSells", 0),   # cumulative rip sells
             "regime_events": ctr.get("regimeEvents", 0),   # cumulative shocks
+            # Borrower issuance channel: summed live state + cumulative flows.
+            "fat_limit": fat["limit"],
+            "fat_drawn": fat["drawn"],
+            "fat_reserve_held": fat["reserve_held"],
+            "fat_reserve_req": fat["reserve_req"],
+            "fat_pending": fat["pending"],
+            "fat_issued": ctr.get("fatIssued", 0),         # cum BUCK sold
+            "fat_retired": ctr.get("fatRetired", 0),       # cum BUCK bought back
+            "fat_burned": ctr.get("fatBurned", 0),         # cum BUCK burned
+            "fat_prefund": ctr.get("fatPreFundBought", 0), # cum reserve buys
+            "fat_throttled": ctr.get("fatThrottled", 0),   # cum throttle hits
+            "fat_released": ctr.get("fatReleased", 0),     # cum reserve released
+            "iv_events": ctr.get("ivEvents", 0),           # cum interventions
             "supply": int(d.buck.functions.totalSupply().call()),
             "directTrades": ctr["directTrades"],
             "cycleTrades": ctr["cycleTrades"],
@@ -326,6 +355,9 @@ class Snapshotter:
         p = Path(path) if path else (
             DEFAULT_VECTORS / f"{self.s.name}-sim.json")
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"tokens": self.tokens, "decimals": self.d.dec,
-                                 "frames": self.frames}))
+        out = {"tokens": self.tokens, "decimals": self.d.dec,
+               "frames": self.frames}
+        if self.meta:
+            out["meta"] = self.meta
+        p.write_text(json.dumps(out))
         return p

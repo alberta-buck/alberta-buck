@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import csv
+import json
 from datetime import date, timedelta
 
 from alberta_buck.sim.prices import CSV_DIR
@@ -92,6 +93,23 @@ def gen(start=None, end=None, years=5.0, out_dir=CSV_DIR):
     s, e = resolve_window(start, end, years, data_start, data_end)
     dates = [s + timedelta(days=k) for k in range((e - s).days + 1)]
 
+    # Manifest cache: when the resolved window matches the last generation
+    # and every CSV exists, skip rewriting.  Besides speed, this keeps
+    # PARALLEL sweep runs (which all call gen() with the same window) from
+    # racing writes on the shared prices dir.
+    manifest = out_dir / "hist-manifest.json"
+    want_files = [fname for _, fname, _, _ in BINDINGS]
+    if manifest.exists():
+        try:
+            have = json.loads(manifest.read_text())
+            if (have.get("start") == s.isoformat()
+                    and have.get("end") == e.isoformat()
+                    and have.get("files") == want_files
+                    and all((out_dir / f).exists() for f in want_files)):
+                return want_files, have["n_days"], s, e
+        except Exception:
+            pass
+
     sources = {"us": qs_us, "xau": qs_xau}
 
     def price(metric, src, d):
@@ -111,6 +129,9 @@ def gen(start=None, end=None, years=5.0, out_dir=CSV_DIR):
         first = price(metric, src, dates[0])
         last = price(metric, src, dates[-1])
         print(f"  {fname}: {len(dates)} days  {first:,.2f} -> {last:,.2f}")
+    manifest.write_text(json.dumps({
+        "start": s.isoformat(), "end": e.isoformat(),
+        "files": files, "n_days": len(dates)}))
     return files, len(dates), s, e
 
 

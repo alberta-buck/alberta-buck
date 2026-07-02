@@ -1,0 +1,33 @@
+# Population churn: the largest early borrower winds down (util_target -> 0,
+# retiring its whole book through the rolling-release path) at day 700; two
+# fresh borrowers enter at day 1000; a saver exits hard (holdings frozen) at
+# day 1300.  Structural demand shrinks, grows, and loses a stabilizer.
+
+name = "population-churn"
+notes = "wind_down borrower0 @700; +2 borrowers @1000; hard-remove saver3 @1300"
+
+[scenario]
+years = 5.0
+ticks_per_day = 1
+day_step = 10
+seed = 0xA1BC
+
+[[interventions]]
+day = 700
+action = "remove_agents"
+cls = "FatCreditBorrowerAgent"
+idx = [0]
+mode = "wind_down"
+
+[[interventions]]
+day = 1000
+action = "add_agents"
+cls = "FatCreditBorrowerAgent"
+n = 2
+
+[[interventions]]
+day = 1300
+action = "remove_agents"
+cls = "SaverAgent"
+idx = [3]
+mode = "hard"

@@ -9,6 +9,7 @@ are scenario-agnostic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from alberta_buck.sim.prices import Prices
 
@@ -23,6 +24,8 @@ class Scenario:
     ticks_per_day: int = 4
     seed: int = 0xA1BC
     day_step: int = 1                  # calendar days advanced per iteration
+    experiment: Any = None             # attached Experiment (deploy/agent/
+                                       # intervention overrides); None = defaults
     prices: Prices = field(init=False)
 
     def __post_init__(self):

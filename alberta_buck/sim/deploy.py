@@ -164,24 +164,26 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     credit = chain.deploy("BuckCredit")
     # Rescaled direct PID (ppm process/error, dt in seconds).  Gains stored as
     # real_gain * 1e12.  K is the LTV cap => max system leverage 1/(1-K):
-    # K0~0.75 rests at ~4x, rails (0, 1.0) span "no credit" .. spiral boundary.
+    # K0~0.75 rests at ~4x; the default KMAX 0.95 keeps a railed K solvent
+    # (20x) instead of sitting on the 1/(1-K) spiral boundary.
     # Ki sized for a target "max variance before the rail":
     #   Ki_real = dK_rail / (e_max * tau_I)   [ per (fractional error * second) ]
     # so a sustained e_max basket deviation rails K over tau_I.
-    # Initialize at the observed equilibrium (~0.75, 4x leverage) rather than
-    # 0.5, so K starts where the loop settles instead of gliding up to it.
-    K0, KMIN, KMAX = int(0.75 * E18), 0, E18
     # Deliberately SLOW: K is a structural lever, not a market maker.  It
     # glides over months while private demand (savers) does the fast
     # stabilization -- a sustained e_max deviation takes ~tau_I to reach a
     # rail and the proportional kick is tiny.  Prevents the relay/bang-bang
     # oscillation seen when K reacts as hard as the agents do.
-    DK_RAIL, E_MAX, TAU_I = 0.5, 0.10, 90 * 86400    # rail 0.5, 10% over ~90 days
-    KP = int(round((0.02 * DK_RAIL / E_MAX) * 1e12))  # P = 2% of rail at e_max
-    KI = int(round((DK_RAIL / (E_MAX * TAU_I)) * 1e12))
-    KD = 0
+    # All of these come from experiment.deploy_params: coded defaults, or the
+    # attached experiment's [deploy] section when one is present.
+    from alberta_buck.sim.experiment import deploy_params
+    dp = deploy_params(getattr(scenario, "experiment", None))
+    K0, KMIN, KMAX = dp.k0_wei, dp.kmin_wei, dp.kmax_wei
+    KP, KI, KD = dp.kp_scaled, dp.ki_scaled, dp.kd_scaled
     kctrl = chain.deploy("BuckKControllerDirect",
-                          KP, KI, KD, 1800, KMIN, KMAX, K0, gov)
+                          KP, KI, KD, dp.dt, KMIN, KMAX, K0, gov)
+    if dp.dtmax_secs:
+        chain.send(kctrl.functions.setDTMax(dp.dtmax_secs), sender=gov)
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
@@ -305,7 +307,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         t1 = pool.functions.token1().call()
         lo, hi = full_range_ticks(TICK_SPACING[FEE_USDC])
 
-        # Seed to a COMMON USDC-side depth (== TARGET_BUCK), NOT a fixed L.
+        # Seed to a COMMON USDC-side depth (== dp.target_buck), NOT a fixed L.
         # A fixed L makes real reserves scale with decimals/price, leaving
         # 18-dec PAXG/AOIL pools shallow while 8-dec cbBTC is unmovably
         # deep -- so routed flow churns the thin pools faster than the
@@ -314,9 +316,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # (USDC=token0); invert to hit TARGET_BUCK USDC raw.
         Q96 = 1 << 96
         if usdc.address.lower() == t0.lower():     # USDC is token0
-            Lusdc = TARGET_BUCK * sp // Q96
+            Lusdc = dp.target_buck * sp // Q96
         else:                                       # USDC is token1
-            Lusdc = TARGET_BUCK * Q96 // sp
+            Lusdc = dp.target_buck * Q96 // sp
         rcpt = chain.send(simlp.functions.mint(pu, lo, hi, max(1, Lusdc), t0, t1))
         d.pool_usdc.append(pu)
 
@@ -384,8 +386,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # transfer (~TARGET_BUCK_LP) actually enters supply; the surplus headroom
     # is inert, so downstream pool depth / totalSupply are unchanged.
     k0 = kctrl.functions.buckK().call()
-    mint_amt = (TARGET_BUCK_LP * E18 // max(1, k0)) * 12 // 10
-    FACE = max(2 * TARGET_BUCK_LP, mint_amt * 12 // 10)
+    mint_amt = (dp.target_buck_lp * E18 // max(1, k0)) * 12 // 10
+    FACE = max(2 * dp.target_buck_lp, mint_amt * 12 // 10)
 
     now_ts = w3.eth.get_block("latest")["timestamp"]
     cc = credit.functions.createCredit(simlp.address, 0, FACE, 0, 0, 0,
@@ -412,9 +414,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     chain.send(reg.functions.bindContract(
         pub, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
     if usdc.address.lower() == u0.lower():
-        Lub = TARGET_BUCK * spU // Q96
+        Lub = dp.target_buck * spU // Q96
     else:
-        Lub = TARGET_BUCK * Q96 // spU
+        Lub = dp.target_buck * Q96 // spU
     lo_ub, hi_ub = full_range_ticks(TICK_SPACING[FEE_BUCK_UB])
     chain.send(simlp.functions.mint(pub, lo_ub, hi_ub, max(1, Lub), u0, u1))
     d.pool_ub = pub

@@ -4,21 +4,27 @@ Workflow:
   1.  make sim-run-equilibrium    # writes test/vectors/equilibrium-sim.json
   2.  make sim-plot-equilibrium   # reads JSON, writes images/equilibrium-sim.png
 
-Six stacked panes (shared x = Day) tell the BUCK-K feedback story of a run
+Seven stacked panes (shared x = Day) tell the BUCK-K feedback story of a run
 that is repeatedly perturbed by periodic regime changes and re-settles:
 
   1. basketValueInBuck vs the 1.0 parity setpoint, with buckK (the K-scaled
-     LTV cap the controller moves) on a twin axis -- the headline.
+     LTV cap the controller moves) on a twin axis -- the headline.  Applied
+     experiment interventions are marked as labelled vertical lines.
   2. buck_usd: the floating BUCK/USDC spot vs 1.0 parity -- the
      discount/premium the counter-cyclical savers trade against.
   3. PID internals P (ppm error), D (ppm dError) left + I (ppm*s) twin.
   4. Monetary aggregates: BUCK supply / DM outstanding / saver-held BUCK.
-  5. Regime timeline: mean borrower util_target + mean saver base_rate, with
+  5. Borrower issuance channel: drawn vs K-scaled limit, the rolling reserve
+     (held / required / pending) + cumulative throttle hits -- shows WHY
+     issuance lives or dies.
+  6. Regime timeline: mean borrower util_target + mean saver base_rate, with
      light vertical lines every REGIME_DAYS marking the regime windows.
-  6. Per-token TOKEN/USDC tracking error (spot vs CSV reference).
+  7. Per-token TOKEN/USDC tracking error (spot vs CSV reference).
 
-Input vector / output image are overridable via EQ_VECTOR / EQ_OUT so a
-short smoke run and a long run can be plotted independently.
+A vector with meta.experiment also gets the eqmetrics acceptance verdict
+printed after the plot.  Input vector / output image are overridable via
+EQ_VECTOR / EQ_OUT so a short smoke run and a long run can be plotted
+independently.
 """
 
 import json
@@ -82,10 +88,12 @@ def test_equilibrium_sim_plot():
 
     d = json.loads(DATA.read_text())
     tokens = d.get("tokens", [])
+    meta = d.get("meta", {})
+    ivs = [iv for iv in meta.get("interventions_applied", [])]
     n, col = _cols(d["frames"])
     days = col("day")
 
-    fig, axes = plt.subplots(6, 1, figsize=(13, 22), sharex=True)
+    fig, axes = plt.subplots(7, 1, figsize=(13, 26), sharex=True)
 
     # ---- Pane 1: basketValue vs parity + buckK ----------------------- #
     ax = axes[0]
@@ -104,8 +112,20 @@ def test_equilibrium_sim_plot():
     l1, la1 = ax.get_legend_handles_labels()
     l2, la2 = ax2.get_legend_handles_labels()
     ax.legend(l1 + l2, la1 + la2, loc="upper left", fontsize=8)
+    # Applied experiment interventions: labelled vertical markers.
+    for iv in ivs:
+        dd = iv.get("applied_day", iv.get("day", 0))
+        ok = iv.get("ok", True)
+        ax.axvline(dd, color="tab:red" if not ok else "tab:olive",
+                   alpha=0.55, linewidth=1.0, linestyle="-.")
+        ax.annotate(iv.get("action", "?"), xy=(dd, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(2, -2), textcoords="offset points",
+                    rotation=90, va="top", ha="left", fontsize=6.5,
+                    color="tab:red" if not ok else "tab:olive")
     ax.set_title("(1) BUCK-K feedback: basket value defended toward parity "
-                 "by buckK")
+                 "by buckK"
+                 + (f"  [{len(ivs)} interventions]" if ivs else ""))
 
     # ---- Pane 2: BUCK/USDC spot vs parity ---------------------------- #
     ax = axes[1]
@@ -157,8 +177,38 @@ def test_equilibrium_sim_plot():
     ax.legend(loc="upper left", fontsize=8)
     ax.set_title("(4) Monetary aggregates: supply, outstanding, idle savings")
 
-    # ---- Pane 5: regime timeline ------------------------------------- #
+    # ---- Pane 5: borrower issuance channel ---------------------------- #
     ax = axes[4]
+    f_lim = [v / E6 for v in col("fat_limit")]
+    f_drw = [v / E6 for v in col("fat_drawn")]
+    f_res = [v / E6 for v in col("fat_reserve_held")]
+    f_req = [v / E6 for v in col("fat_reserve_req")]
+    f_pnd = [v / E6 for v in col("fat_pending")]
+    ax.plot(days, f_lim, color="tab:red", linewidth=1.2, linestyle="--",
+            label="creditLimit (K-scaled)")
+    ax.plot(days, f_drw, color="tab:blue", linewidth=1.5, label="drawn")
+    ax.plot(days, f_res, color="tab:green", linewidth=1.1,
+            label="reserve held (escrow)")
+    ax.plot(days, f_req, color="tab:olive", linewidth=1.0, linestyle=":",
+            label="reserve required (rolling)")
+    ax.plot(days, f_pnd, color="tab:purple", linewidth=1.0, linestyle=":",
+            label="pending release")
+    ax.set_ylabel("BUCK")
+    ax.grid(True, alpha=0.3)
+    ax5c = ax.twinx()
+    thr = col("fat_throttled")
+    ax5c.step(days, thr, where="post", color="tab:brown", linewidth=1.0,
+              label="throttle hits (cum)")
+    ax5c.set_ylabel("throttled", color="tab:brown")
+    ax5c.tick_params(axis="y", labelcolor="tab:brown")
+    l1, la1 = ax.get_legend_handles_labels()
+    l2, la2 = ax5c.get_legend_handles_labels()
+    ax.legend(l1 + l2, la1 + la2, loc="upper left", fontsize=8, ncol=2)
+    ax.set_title("(5) Borrower issuance channel: drawn vs limit, the rolling "
+                 "funding reserve, throttle")
+
+    # ---- Pane 6: regime timeline ------------------------------------- #
+    ax = axes[5]
     rutil = col("regime_util")
     rsav = [v / E6 for v in col("regime_saver")]     # USDC/step
     ax.step(days, rutil, where="post", color="tab:red", linewidth=1.4,
@@ -181,11 +231,11 @@ def test_equilibrium_sim_plot():
     l1, la1 = ax.get_legend_handles_labels()
     l2, la2 = ax5.get_legend_handles_labels()
     ax.legend(l1 + l2, la1 + la2, loc="upper left", fontsize=8)
-    ax.set_title("(5) Regime timeline: primary knobs shift every "
+    ax.set_title("(6) Regime timeline: primary knobs shift every "
                  f"{REGIME_DAYS} days (grey lines)")
 
-    # ---- Pane 6: per-token TOKEN/USDC tracking error ----------------- #
-    ax = axes[5]
+    # ---- Pane 7: per-token TOKEN/USDC tracking error ----------------- #
+    ax = axes[6]
     spot = col("spotUsdc")
     ref = col("refUsd")
     ntok = len(tokens)
@@ -207,7 +257,7 @@ def test_equilibrium_sim_plot():
     ax.grid(True, alpha=0.3)
     if plotted:
         ax.legend(loc="upper left", fontsize=8, ncol=2)
-    ax.set_title("(6) TOKEN/USDC tracking error (spot vs CSV reference)")
+    ax.set_title("(7) TOKEN/USDC tracking error (spot vs CSV reference)")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -219,7 +269,7 @@ def test_equilibrium_sim_plot():
         shown = OUT.relative_to(REPO)
     except ValueError:
         shown = OUT
-    print(f"\nWrote {shown}  ({len(days)} days, 6 panes)")
+    print(f"\nWrote {shown}  ({len(days)} days, 7 panes)")
 
     bval_c = [v / E18 for v in col("basketVal")]
     buckk_c = [v / E18 for v in col("buckK")]
@@ -239,6 +289,18 @@ def test_equilibrium_sim_plot():
         _row("last", n - 1)
         print(f"  final basketVal deviation "
               f"{100 * (bval_c[-1] - 1.0):+.3f}% from parity")
+
+    # ---- Acceptance verdict (parity-with-interior-K gate) ------------ #
+    from alberta_buck.sim import eqmetrics
+    st = eqmetrics.summarize(DATA)
+    ok, reasons = eqmetrics.accept(st)
+    print(f"  tail: basketVal {st['bv_tail_mean']:.4f} +/- "
+          f"{st['bv_tail_std']:.4f}  K {st['k_tail_mean']:.3f} "
+          f"(railed {100 * st['k_tail_rail_frac']:.0f}%)  "
+          f"issued ${st['issued_tail_m']:.2f}M retired "
+          f"${st['retired_tail_m']:.2f}M throttled "
+          f"{100 * st['throttle_tail_frac']:.0f}%")
+    print("  ACCEPTANCE: " + ("PASS" if ok else "FAIL -- " + "; ".join(reasons)))
 
 
 if __name__ == "__main__":

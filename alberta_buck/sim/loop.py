@@ -65,7 +65,26 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
         print(f"[sim] bootstrap: {ctr['dmEntries']} DM deposits seeded "
               f"basket pools before tick 0", flush=True)
 
+    # --- experiment: price overlay + scripted interventions ---------- #
+    # When an Experiment is attached, wrap the price source so price_shock
+    # interventions can overlay multipliers (the whale then re-pins pools to
+    # the shocked reference), and stand up the Interventions engine over the
+    # LIVE agent/arb lists (population changes mutate them in place).
+    exp = getattr(scenario, "experiment", None)
+    iv = None
+    if exp is not None:
+        from alberta_buck.sim.experiment import Interventions, PriceOverlay
+        if not isinstance(scenario.prices, PriceOverlay):
+            scenario.prices = PriceOverlay(scenario.prices)
+        iv = Interventions(exp, d, scenario, agents, arbs, ctr, rng)
+
     snap = Snapshotter(d, scenario)
+    if exp is not None:
+        # Live references: iv.applied keeps growing; every checkpoint write
+        # (and the final one) embeds the up-to-date log + resolved config.
+        snap.meta["experiment"] = exp.resolved()
+        if iv is not None:
+            snap.meta["interventions_applied"] = iv.applied
     # Capital baselines: computed AFTER bootstrap so the dm baseline
     # includes the bootstrap deposits (otherwise day-0 P&L would jump
     # by the bootstrap principal).
@@ -84,6 +103,10 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
 
     n_tok = len(d.tokens)
     for day in range(0, scenario.days, step):
+        # Scripted interventions fire first, so a price shock scheduled for
+        # this day is already visible in refUsd / the whale's snap below.
+        if iv is not None:
+            iv.apply_due(day)
         # Current day + reference USD prices, for the agents' realized-return
         # accounting (deposit/redeem valuation) and the throughput meter.
         ctr["day"] = day

@@ -1,0 +1,155 @@
+# Equilibrium experiment TEMPLATE -- documented reference for every knob.
+#
+# Run:   python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/<file>.toml
+# Tweak: --set deploy.k0=0.8 --set scenario.seed=7   (dotted overrides)
+#
+# Everything here is optional; omitted keys take the defaults shown, which
+# reproduce the standard macro run (5y window, 10-day steps, 1 tick/step).
+# The RESOLVED config is embedded in the output vector under meta.experiment,
+# so a vector always documents the run that produced it.
+
+name = "template"
+notes = "reference template; copy me"
+
+# ---------------------------------------------------------------------------
+# [scenario] -- window + cadence + population
+# ---------------------------------------------------------------------------
+[scenario]
+years = 5.0               # data window (back from last available day) ...
+start = ""                # ... or pin explicit ISO dates for reproducibility
+end = ""
+days = 0                  # truncate the run (0 = full window)
+ticks_per_day = 1         # money ticks per iteration
+day_step = 10             # calendar days per iteration (coarse macro mode)
+seed = 0xA1BC
+basket = "legacy"         # or "prorata"
+
+[scenario.agents]         # population counts (merged over defaults)
+# MarketMakerWhale = 1
+# AnonymousArbAgent = 3
+# TokenAccumulatorAgent = 6
+# BootstrapDMAgent = 24
+FatCreditBorrowerAgent = 5
+SaverAgent = 4
+# PidKeeperAgent = 1
+
+# ---------------------------------------------------------------------------
+# [deploy] -- controller + pool-depth initial conditions
+# ---------------------------------------------------------------------------
+[deploy]
+k0 = 0.75                 # neutral feed-forward LTV (max leverage 1/(1-K))
+kmin = 0.0                # output rails; kmax 0.95 keeps a railed K solvent
+kmax = 0.95               # (20x) instead of the 1/(1-K) spiral boundary at 1.0
+dk_rail = 0.5             # Ki sizing: rail authority ...
+e_max = 0.10              # ... consumed by a sustained e_max deviation ...
+tau_i_days = 90.0         # ... over the integral time
+kp_frac = 0.02            # P kick as a fraction of rail authority at e_max
+kd = 0.0
+# kp = 0.1                # RAW real-gain overrides win over the derived form
+# ki = 6.43e-8
+dt = 1800                 # min seconds between PID updates
+dtmax_days = 0.0          # clamp on a single integration step (0 = unclamped)
+target_buck_m = 10.0      # $M common TOKEN/BUCK pool seed depth
+target_buck_lp_m = 10.0   # $M BUCK/USDC pool seed
+
+# ---------------------------------------------------------------------------
+# [agents.<Class>] -- setup() knob overrides: [lo, hi] seeded range
+# (int pair -> randint, float pair -> uniform) or scalar -> constant.
+# Defaults shown.  Units noted per knob.
+# ---------------------------------------------------------------------------
+[agents.FatCreditBorrowerAgent]
+util_target = [0.60, 0.80]     # target draw as frac of creditLimit
+util_regime = [0.40, 0.85]     # regime-event redraw range
+internal_share = [0.30, 0.60]  # issuance frac sold into TOKEN/BUCK pools
+retire_rate = [0.20, 0.35]     # frac of excess retired per step
+band = 0.05                    # deadband around the target (frac of limit)
+face_m = [2, 5]                # $M BuckCredit face per borrower (int)
+growth_slope = [8.0, 14.0]     # adoption S-curve steepness
+mid_frac = [0.35, 0.55]        # S-curve midpoint (frac of horizon)
+shock_prob = 0.34              # chance of a seeded one-off uptake step
+shock_window = [0.25, 0.70]    # when it can land (frac of horizon)
+shock_mag = [0.20, 0.40]       # its size (adds to cap_frac)
+ff_cyc = [5.0, 10.0]           # funding factor: counter-cyclical gain
+ff_amp = [50.0, 200.0]         # funding factor: issue-rate amplitude
+ff_pow = [1.5, 2.0]            # funding factor: issue-rate exponent
+disc_gain = [3.0, 8.0]         # discount-driven redemption acceleration
+fund_budget_m = [3, 6]         # $M USDC pre-issuance funding budget (int)
+
+[agents.SaverAgent]
+savings_goal_m = [10, 30]      # $M BUCK accumulation target (int)
+base_rate_k = [200, 600]       # $K USDC deployed per step (int; regime too)
+disc_gain = [2.0, 6.0]         # buy acceleration on the discount
+prem_gain = [2.0, 6.0]         # sell acceleration on the premium
+reserve_frac = [0.30, 0.50]    # frac of holdings never sold
+budget_m = [20, 60]            # $M USDC lifetime budget (int)
+
+# ---------------------------------------------------------------------------
+# [[interventions]] -- day-indexed scripted actions (fire at the first
+# iteration whose day >= the given day; logged into meta.interventions_applied)
+# ---------------------------------------------------------------------------
+
+# -- controller / governance ------------------------------------------------
+# [[interventions]]
+# day = 600
+# action = "retune"            # BUMPLESS gain change (no output step)
+# tau_i_days = 45.0            # any of dk_rail/e_max/tau_i_days/kp_frac/kd,
+#                              # or raw kp/ki/kd
+
+# [[interventions]]
+# day = 700
+# action = "set_rails"
+# kmin = 0.0
+# kmax = 0.90
+
+# [[interventions]]
+# day = 800
+# action = "set_k0"            # bumpless feed-forward move
+# k0 = 0.70
+
+# [[interventions]]
+# day = 850
+# action = "set_dtmax"
+# days = 10.0
+
+# -- agent knobs --------------------------------------------------------------
+# [[interventions]]
+# day = 900
+# action = "set_knob"
+# cls = "SaverAgent"
+# idx = "all"                  # or 0, or [0, 2] (per-class creation order)
+# knob = "base_rate"
+# scale = 0.5                  # or value = 300000000000 (native units)
+
+# [[interventions]]
+# day = 950
+# action = "fund"              # top up USDC budgets
+# cls = "SaverAgent"
+# idx = "all"
+# usdc_m = 20.0
+
+# -- exogenous shocks ---------------------------------------------------------
+# [[interventions]]
+# day = 1000
+# action = "price_shock"       # multiply the CSV reference from that day on
+# token = "NRGC"
+# mult = 1.30
+
+# [[interventions]]
+# day = 1100
+# action = "uptake_shock"      # society-wide adoption wave (adds to cap_frac)
+# idx = "all"
+# mag = 0.25
+
+# -- population ---------------------------------------------------------------
+# [[interventions]]
+# day = 1200
+# action = "add_agents"
+# cls = "FatCreditBorrowerAgent"
+# n = 2
+
+# [[interventions]]
+# day = 1400
+# action = "remove_agents"
+# cls = "FatCreditBorrowerAgent"
+# idx = [0]
+# mode = "wind_down"           # util_target -> 0 (retires); or "hard" (freezes)
