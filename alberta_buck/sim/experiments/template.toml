@@ -22,7 +22,7 @@ days = 0                  # truncate the run (0 = full window)
 ticks_per_day = 1         # money ticks per iteration
 day_step = 10             # calendar days per iteration (coarse macro mode)
 seed = 0xA1BC
-basket = "legacy"         # or "prorata"
+basket = "prorata"        # or "legacy" (the pre-ProRata BuckBasket)
 
 [scenario.agents]         # population counts (merged over defaults)
 # MarketMakerWhale = 1

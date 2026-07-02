@@ -91,7 +91,7 @@ DEFAULTS: dict = {
         "ticks_per_day": 1,
         "day_step": 10,
         "seed": 0xA1BC,
-        "basket": "legacy",
+        "basket": "prorata",
         "agents": {},              # count overrides
     },
     "deploy": {
