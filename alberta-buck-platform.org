@@ -3,13 +3,15 @@
 #+date: 2026-07-03 12:00:00
 #+category: Alberta Buck
 #+series[]: Alberta-Buck
-#+series_order: 10
-#+weight: 10
+#+series_order: 22
+#+weight: 23
 #+draft: true
 #+description: The multi-language platform underlying BUCK system bootstrap: a backend-agnostic ChainSession testing API with expectation journaling (anvil, testnets, Tenderly, Tevm), a Rust kernel for bit-identical monetary and identity mathematics with WASM/JS and Python bindings, and peer Python and JavaScript agent-simulation platforms culminating in live-interactive browser demos and partner SDKs for identity registries, insurers, and credit unions.
-
-#+OPTIONS: ^:nil
-#+OPTIONS: toc:2
+#+EXPORT_FILE_NAME: ./images/alberta-buck-platform
+#+STARTUP: org-startup-with-inline-images inlineimages
+#+STARTUP: org-latex-tables-centered nil
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+#+OPTIONS: toc:nil
 
 #+BEGIN_ABSTRACT
 Bootstrapping the BUCK monetary system requires three deliverables that share
@@ -37,6 +39,10 @@ for JavaScript and bound natively for Python, so every platform predicts
 bit-identical fees, demurrage, depreciation, and proofs.
 #+END_ABSTRACT
 
+#+LATEX: \clearpage
+#+TOC: headlines 3
+
+#+LATEX: \clearpage
 * Decisions of record
 
 Settled 2026-07-02/03; revisit deliberately, not accidentally.
