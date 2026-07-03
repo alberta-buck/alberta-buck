@@ -15,13 +15,8 @@ file's draws is an ABI-break-level event for the three suites).
 
 from __future__ import annotations
 
-import os
-
-# The reference path MUST emit these vectors: force the pure-Python backend
-# before any wallet module is imported (the kernel shims read this env).
-os.environ["BUCK_IDENTITY_BACKEND"] = "py"
-
 import json
+import os
 import random
 from typing import Any, Callable, Dict, List
 
@@ -83,6 +78,21 @@ def _ct(E) -> Dict[str, Any]:
 
 
 def build_kernel_vectors(seed: int = 0x1DE47B0CA) -> Dict[str, Any]:
+    # The reference path MUST emit these vectors: force the pure-Python
+    # backend for the duration of the build (the kernel shims read this
+    # env at call time), restoring the caller's setting afterwards.
+    prev = os.environ.get("BUCK_IDENTITY_BACKEND")
+    os.environ["BUCK_IDENTITY_BACKEND"] = "py"
+    try:
+        return _build_kernel_vectors(seed)
+    finally:
+        if prev is None:
+            os.environ.pop("BUCK_IDENTITY_BACKEND", None)
+        else:
+            os.environ["BUCK_IDENTITY_BACKEND"] = prev
+
+
+def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     rng = _seeded_rng(seed)
     draw = lambda: rand_scalar(rng)
 

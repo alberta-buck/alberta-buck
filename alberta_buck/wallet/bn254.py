@@ -2,6 +2,13 @@
 
 Thin wrappers around py_ecc.bn128 plus encoding helpers that produce the exact
 byte layout the BN254.sol Solidity helper consumes.
+
+G1 ``add``/``mul``/``neg`` dispatch to the compiled buck-identity kernel
+when it is built (see :mod:`alberta_buck.wallet._kernel`): same group law,
+same points, ~1000x faster -- proven bit-identical by the kernel vector
+suites.  Points keep their py_ecc types either way (``FQ`` tuples, ``None``
+at infinity); ``pairing`` stays py_ecc here (the pairing-heavy verifiers in
+``ps``/``nizk`` dispatch whole checks to the kernel instead).
 """
 
 from __future__ import annotations
@@ -13,6 +20,8 @@ from py_ecc.bn128 import bn128_curve as _bc
 from py_ecc.bn128 import bn128_pairing as _bp
 from py_ecc.bn128.bn128_curve import FQ as _FQ
 
+from alberta_buck.wallet._kernel import kernel as _kernel
+
 # Re-exports — keep the same names the identity-example.org Python uses.
 G1 = _bc.G1
 G2 = _bc.G2
@@ -20,13 +29,39 @@ Z1 = _bc.Z1
 Z2 = _bc.Z2
 ORDER = _bc.curve_order
 
-add = _bc.add
-mul = _bc.multiply
-neg = _bc.neg
 eq = _bc.eq
 is_inf = _bc.is_inf
 pairing = _bp.pairing
 FQ12_one = _bp.FQ12.one
+
+
+def _is_g1(P) -> bool:
+    """True for a G1 affine point (or infinity-as-None; Z2 is also None,
+    but the group law agrees there, so the ambiguity is harmless)."""
+    if P is None:
+        return True
+    return isinstance(P, tuple) and len(P) == 2 and isinstance(P[0], _FQ)
+
+
+def add(P, Q):
+    k = _kernel()
+    if k is not None and _is_g1(P) and _is_g1(Q):
+        return words_to_point(*k.g1_add(point_to_words(P), point_to_words(Q)))
+    return _bc.add(P, Q)
+
+
+def mul(P, n):
+    k = _kernel()
+    if k is not None and _is_g1(P) and isinstance(n, int) and n >= 0:
+        return words_to_point(*k.g1_mul(point_to_words(P), n))
+    return _bc.multiply(P, n)
+
+
+def neg(P):
+    k = _kernel()
+    if k is not None and _is_g1(P):
+        return words_to_point(*k.g1_neg(point_to_words(P)))
+    return _bc.neg(P)
 
 
 def rand_scalar(rng=None) -> int:
@@ -75,6 +110,20 @@ def scalar_to_word(s: int) -> int:
 
 def word_to_scalar(w: int) -> int:
     return w % ORDER
+
+
+def g2_to_words(P) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    """G2 point -> ((x_c0, x_c1), (y_c0, y_c1)) uint256s (FQ2 coeffs order)."""
+    return (
+        (int(P[0].coeffs[0]), int(P[0].coeffs[1])),
+        (int(P[1].coeffs[0]), int(P[1].coeffs[1])),
+    )
+
+
+def words_to_g2(xw: Tuple[int, int], yw: Tuple[int, int]):
+    """((x_c0, x_c1), (y_c0, y_c1)) -> py_ecc G2 point (FQ2 tuple)."""
+    from py_ecc.bn128.bn128_curve import FQ2 as _FQ2
+    return (_FQ2([xw[0], xw[1]]), _FQ2([yw[0], yw[1]]))
 
 
 def point_to_hex(P) -> Tuple[str, str]:

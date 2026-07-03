@@ -10,9 +10,9 @@ Python package keeps working and transitions onto these incrementally.
     core/
       python/     buck_core package: ChainSession API (session.py) --
                   send/call/deploy with expect=OK|REVERT + JSONL journal --
-                  Foundry artifact helpers, and the compiled buck-math
-                  kernel (import buck_core.buck_math; built by
-                  make nix-core-build-py).
+                  Foundry artifact helpers, and the compiled kernels
+                  (import buck_core.buck_math / buck_core.buck_identity;
+                  built by make nix-core-build-py).
       js/         @alberta-buck/core (ESM): the JS ChainSession (session.js,
                   over any viem client), backends.js (anvilSession joins a
                   running anvil -- e.g. one a Python sim deployed into --
@@ -27,10 +27,19 @@ Python package keeps working and transitions onto these incrementally.
                   buckSeconds apportionment, BuckKControllerDirect ppm PID +
                   fundingFactor + bumpless governance algebra), no_std and
                   dependency-free (wide.rs hand-rolls the 256-bit mulDiv);
-                  bindings/py (PyO3 cdylib -> buck_core.buck_math) and
-                  bindings/js (wasm-bindgen -> core/js/wasm, BigInt API).
-                  Later: buck-identity, buck-wallet.  Kernel crates stay
-                  no_std (Holochain zomes consume them).
+                  buck-identity -- the BN254 identity kernel (arkworks
+                  curve/pairing, keccak Fiat-Shamir transcripts, circomlib
+                  Poseidon, PS credentials, ElGamal, registration NIZK,
+                  Chaum-Pedersen approve, issuer Schnorr, verifiable
+                  decryption, A2 issuer re-encryption binding, deposit
+                  coupling, B1 depositor binding, note commitments /
+                  nullifiers / id-hashes; every nonce an explicit argument
+                  -- no randomness in the kernel).  bindings/py{,-identity}
+                  (PyO3 cdylibs -> buck_core.*) and bindings/js{,-identity}
+                  (wasm-bindgen -> core/js/wasm).  buck-math stays no_std
+                  (Holochain zomes); buck-identity is std over arkworks
+                  (wasm-clean; no_std flip is mechanical if a zome needs
+                  it).  Later: buck-wallet.
       vectors/    cross-language fixtures.  journal-sample.jsonl pins the
                   journal schema; the Python and JS suites assert the same
                   facts about the same file.
@@ -67,6 +76,25 @@ from the REAL contract code paths by `make nix-match-MathVectors` and
 asserted bit-identically by all three suites.  The Tevm-backed JS tests,
 kernel-binding tests, and the mixed-language join test skip cleanly when
 their artifacts aren't built.
+
+The identity kernel's ground truth is the executable Python reference in
+`alberta_buck/wallet` (py_ecc):
+
+- `core/vectors/identity-kernel-vectors.json` -- emitted by the reference
+  (`make nix-venv-core-identity-vectors`; regeneration is an
+  ABI-break-level event) with EVERY prove nonce recorded; the cargo,
+  pytest, and node suites replay each prove call byte-for-byte.
+- `test/vectors/identity.json` -- the forge fixture; the kernel suites
+  re-verify every recorded proof and recompute every deterministic value.
+- `alberta_buck/wallet` dispatches its G1 arithmetic, Poseidon, and
+  pairing verifiers to `buck_core.buck_identity` when built
+  (`BUCK_IDENTITY_BACKEND=py` forces the reference; `=kernel` requires
+  the binding); `alberta_buck/test/test_kernel_backend.py` proves the
+  flip changes nothing emitted, and `test_identity_cache_regen.py` that
+  sim identity regeneration is backend-invariant end-to-end on anvil.
+- `core/js/src/identity.js` wraps the wasm kernel in the BigInt API
+  (including `canonicalIdentity()`, the exact `canonical_identity_data`
+  bytes -- note: ASCII-escaped, unlike the envelope's raw UTF-8).
 
 ## Journal schema (v1)
 

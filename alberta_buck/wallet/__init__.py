@@ -7,6 +7,7 @@ re-encryption proofs.  Doubles as the test-vector emitter for the Solidity tests
 The reference for the protocol details is alberta-buck-identity-example.org.
 """
 
+from alberta_buck.wallet._kernel import kernel_active, backend
 from alberta_buck.wallet.bn254 import (
     G1, G2, ORDER, add, mul, neg, eq, pairing, is_inf,
     point_to_words, words_to_point, scalar_to_word, word_to_scalar,
@@ -65,6 +66,7 @@ from alberta_buck.wallet.issuer import (
 )
 
 __all__ = [
+    "kernel_active", "backend",
     "G1", "G2", "ORDER", "add", "mul", "neg", "eq", "pairing", "is_inf",
     "point_to_words", "words_to_point", "scalar_to_word", "word_to_scalar",
     "keccak_scalar", "keccak_bytes",

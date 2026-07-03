@@ -36,6 +36,16 @@ class PSSignature:
 def ps_keygen(rng=None) -> PSKeyPair:
     x = rand_scalar(rng)
     y = rand_scalar(rng)
+    from alberta_buck.wallet._kernel import kernel as _kernel
+    k = _kernel()
+    if k is not None:
+        from alberta_buck.wallet.bn254 import g2_to_words, words_to_g2
+        g2w = g2_to_words(G2)
+        return PSKeyPair(
+            sk_x=x, sk_y=y,
+            pk_X=words_to_g2(*k.g2_mul(g2w, x)),
+            pk_Y=words_to_g2(*k.g2_mul(g2w, y)),
+        )
     return PSKeyPair(sk_x=x, sk_y=y, pk_X=mul(G2, x), pk_Y=mul(G2, y))
 
 
@@ -48,7 +58,21 @@ def ps_sign(kp: PSKeyPair, m: int, rng=None) -> PSSignature:
 
 
 def ps_verify(pk_X, pk_Y, sigma: PSSignature, m: int) -> bool:
-    """Check e(sigma_1, X + m*Y) == e(sigma_2, g_2) and sigma_1 != O."""
+    """Check e(sigma_1, X + m*Y) == e(sigma_2, g_2) and sigma_1 != O.
+
+    Dispatches the whole pairing check to the compiled kernel when built
+    (py_ecc pairings cost seconds); the py_ecc computation below remains
+    the executable spec.
+    """
+    from alberta_buck.wallet._kernel import kernel as _kernel
+    k = _kernel()
+    if k is not None:
+        from alberta_buck.wallet.bn254 import g2_to_words, point_to_words
+        return k.ps_verify(
+            g2_to_words(pk_X), g2_to_words(pk_Y),
+            point_to_words(sigma.sigma_1), point_to_words(sigma.sigma_2),
+            m % ORDER,
+        )
     if is_inf(sigma.sigma_1):
         return False
     lhs = pairing(add(pk_X, mul(pk_Y, m % ORDER)), sigma.sigma_1)

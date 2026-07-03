@@ -94,8 +94,14 @@ def poseidon(inputs: Sequence[int]) -> int:
 
     Matches `circomlibjs.buildPoseidon()(inputs)` (which is the same hash
     the circomlib *circuit* Poseidon computes, just via different but
-    equivalent constants).
+    equivalent constants).  Dispatches to the compiled buck-identity kernel
+    when built (same constants, compiled in; proven bit-identical) -- the
+    pure-Python rounds below remain the executable spec.
     """
+    from alberta_buck.wallet._kernel import kernel as _kernel
+    k = _kernel()
+    if k is not None and 1 <= len(inputs) <= 16:
+        return k.poseidon([_to_int(x) % F_R for x in inputs])
     _load()
     assert _C is not None and _M is not None  # for type-checkers
     n = len(inputs)
