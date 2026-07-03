@@ -109,14 +109,16 @@ class QuoteSource:
     """
 
     def __init__(self, unit: Unit = Unit.USD, amp: float = DEFAULT_AMP,
-                 vol_window: int = DEFAULT_VOL_WINDOW, base_date: date = BASE_DATE):
+                 vol_window: int = DEFAULT_VOL_WINDOW, base_date: date = BASE_DATE,
+                 tokens: list[str] | None = None):
         self.unit = unit
+        self.tokens = list(tokens) if tokens is not None else list(TOKENS)
         lib = walks.library()
         conv = Converter(ingest.load_fx(), ingest.load_cacpi(),
                          ingest.load_uscpi(), base_date)
         metrics = load_metrics()
         self.models: dict[str, _TokenModel] = {}
-        for name in TOKENS:
+        for name in self.tokens:
             m = metrics[name]
             anchors = [(d, conv.convert(v, m.currency, unit, d))
                        for d, v in m.anchors if conv.dmin <= d <= conv.dmax]

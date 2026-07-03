@@ -11,12 +11,18 @@ contract BuckKControllerDirectTest is Test {
 
     address GOV = makeAddr("governance");
 
+    // Rescaled ppm gains (real_gain * 1e12).  Kp_real=0.5, Ki_real~2e-5,
+    // Kd_real=0 -- the same integral-dominant defaults the sim deploys.
+    int256 constant KP = 5e11;
+    int256 constant KI = 2e7;
+    int256 constant KD = 0;
+
     BuckKControllerDirect internal ctrl;
     MockBasket            internal basket;
 
     function setUp() public {
         ctrl = new BuckKControllerDirect(
-            0.1e18, 0.01e18, 0,
+            KP, KI, KD,
             3600,
             0.50e18, 1.50e18,
             1.0e18,
@@ -31,7 +37,7 @@ contract BuckKControllerDirectTest is Test {
 
     function test_set_basket_only_governance() public {
         BuckKControllerDirect fresh = new BuckKControllerDirect(
-            0.1e18, 0.01e18, 0, 3600, 0.50e18, 1.50e18, 1.0e18, GOV
+            KP, KI, KD, 3600, 0.50e18, 1.50e18, 1.0e18, GOV
         );
         vm.prank(makeAddr("attacker"));
         vm.expectRevert("Not governance");
@@ -46,7 +52,7 @@ contract BuckKControllerDirectTest is Test {
 
     function test_pre_setBasket_returns_steady_state_at_unit() public {
         BuckKControllerDirect fresh = new BuckKControllerDirect(
-            0.1e18, 0.01e18, 0, 3600, 0.50e18, 1.50e18, 1.20e18, GOV
+            KP, KI, KD, 3600, 0.50e18, 1.50e18, 1.20e18, GOV
         );
         // No basket wired -> _readReferences returns (UNIT, UNIT) -> error 0.
         vm.warp(block.timestamp + 3601);
@@ -116,5 +122,63 @@ contract BuckKControllerDirectTest is Test {
         ctrl.compute();
         // factor = 1 + 10 * (0.85 - 1)/0.85 ~ -0.76 -> clamped 0
         assertEq(ctrl.fundingFactor(), 0);
+    }
+
+    // ---- retune (bumpless, ppm algebra) --------------------------------- //
+
+    function test_retune_bumpless_ppm() public {
+        // Wind the loop off neutral with a sustained 5% deflation.
+        basket.setBasketValue(int256(0.95e18));
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        uint256 kBefore = ctrl.buckK();
+        assertGt(kBefore, 1.0e18);
+
+        // Quadruple Ki through retune: the output must NOT step.  (Raw
+        // setGains would multiply the whole uI contribution by 4.)
+        vm.prank(GOV);
+        ctrl.retune(KP, KI * 4, KD);
+
+        // Next cycle, process unchanged: the only movement is the fresh
+        // integral increment Ki*err*dt (= 4*2e7 * 50_000ppm * 3601s
+        // ~ 0.0144e18), NOT a 4x re-scale of the wound integral.
+        vm.warp(block.timestamp + 3601);
+        uint256 kAfter = ctrl.compute();
+        assertApproxEqRel(kAfter, kBefore, 0.02e18,
+            "retune stepped the ppm output (not bumpless)");
+    }
+
+    // ---- setBuckK0 ------------------------------------------------------- //
+
+    function test_set_buckK0_only_governance() public {
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert("Not governance");
+        ctrl.setBuckK0(0.8e18);
+    }
+
+    function test_set_buckK0_bounds() public {
+        vm.prank(GOV);
+        vm.expectRevert("buckK0 out of bounds");
+        ctrl.setBuckK0(0.4e18);          // below buckKMin = 0.5
+    }
+
+    function test_set_buckK0_bumpless() public {
+        // Wind the loop off neutral, then move the feed-forward: the live
+        // buckK must be unchanged at the setter and (to within one integral
+        // increment) across the next cycle.
+        basket.setBasketValue(int256(0.95e18));
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        uint256 kBefore = ctrl.buckK();
+
+        vm.prank(GOV);
+        ctrl.setBuckK0(0.80e18);
+        assertEq(ctrl.buckK(), kBefore, "setter itself moved buckK");
+        assertEq(ctrl.buckK0(), 0.80e18);
+
+        vm.warp(block.timestamp + 3601);
+        uint256 kAfter = ctrl.compute();
+        assertApproxEqRel(kAfter, kBefore, 0.02e18,
+            "setBuckK0 stepped the output (not bumpless)");
     }
 }

@@ -29,22 +29,15 @@ except Exception:
 @pytest.mark.skipif(anvil_missing or web3_missing,
                     reason="anvil or web3 not available")
 def test_routing_sim_web3():
+    import dataclasses
+
     from alberta_buck.sim.anvil import Anvil
     from alberta_buck.sim.loop import run
-    from alberta_buck.sim.scenario import Scenario
+    from alberta_buck.sim.scenario import SCENARIOS
 
-    sc = Scenario(
-        name="routing",
-        tokens=[("PAXG", "PAX Gold", 18),
-                ("cbBTC", "Coinbase Wrapped BTC", 8),
-                ("AOIL", "Alberta Oil", 18)],
-        csv_files=["paxg.csv", "cbbtc.csv", "aoil.csv"],
-        agents={"AnonymousArbAgent": 2,
-                "TokenAccumulatorAgent": 3,
-                "MarketMakerWhale": 1},
-        days=30,
-        ticks_per_day=3,
-    )
+    # The canonical routing scenario (agents incl. the BootstrapDMAgents
+    # that seed the TOKEN/BUCK pools), shortened to smoke-test length.
+    sc = dataclasses.replace(SCENARIOS["routing"], days=30, ticks_per_day=3)
     with Anvil() as anvil:
         s = run(sc, anvil, verbose=True)
 

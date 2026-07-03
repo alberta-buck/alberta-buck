@@ -486,7 +486,7 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
-SIM_BASKET	?= legacy        # legacy (BuckBasket) | prorata (BuckBasketProRata)
+SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | legacy (BuckBasket)
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
@@ -719,6 +719,132 @@ sim-plot-historical:	$(HISTORICAL_VECTOR)
 		python -m pytest $(SIM_REB_PLOT) -v -s
 
 sim-historical:	sim-run-historical sim-plot-historical
+
+
+# ── Equilibrium basket simulation (BUCK-K feedback loop) ─────────────
+#
+# Same real macro price feeds as the historical scenario, plus the MONETARY
+# feedback the BuckKControllerDirect PID defends: FatCreditBorrower agents
+# issue/retire BUCK against K-scaled credit limits, pushing basketValueInBuck
+# around 1.0 while the controller trims buckK to hold parity.  A PidKeeper
+# advances the PID on the 30-min (ticks_per_day=48) money cadence.
+#
+#   make nix-sim-equilibrium                 # build -> run (short) -> plot
+#   make nix-sim-run-equilibrium             # just the run
+#   make nix-sim-plot-equilibrium            # render images/equilibrium-sim.png
+#   make nix-sim-equilibrium EQ_DAYS=60 EQ_YEARS=1.5
+#
+# Start short (EQ_DAYS=30) to smoke-test the loop before a long horizon.
+
+EQUILIBRIUM_VECTOR	= test/vectors/equilibrium-sim.json
+EQUILIBRIUM_IMAGE	= images/equilibrium-sim.png
+SIM_EQ_PLOT		= alberta_buck/sim/plot_equilibrium.py
+EQ_YEARS		?= 1.5
+EQ_TICKS		?= 48
+EQ_DAYS			?= 20
+
+.PHONY: sim-run-equilibrium sim-plot-equilibrium sim-equilibrium
+
+sim-run-equilibrium:	sim-build
+	python -m $(SIM_PKG) --scenario equilibrium --years $(EQ_YEARS) \
+		--days $(EQ_DAYS) --ticks-per-day $(EQ_TICKS) --basket $(SIM_BASKET) \
+		--out $(EQUILIBRIUM_VECTOR)
+
+sim-plot-equilibrium:	$(EQUILIBRIUM_VECTOR)
+	EQ_VECTOR=$(EQUILIBRIUM_VECTOR) EQ_OUT=$(EQUILIBRIUM_IMAGE) \
+		python -m pytest $(SIM_EQ_PLOT) -v -s
+
+sim-equilibrium:	sim-run-equilibrium sim-plot-equilibrium
+
+# -- Experiment harness over the equilibrium scenario ------------------
+#
+# Declarative initial conditions + day-indexed scripted interventions
+# (controller retunes, agent knobs, price/uptake shocks, population
+# changes) from a TOML file; see alberta_buck/sim/experiments/template.toml.
+#
+#   make nix-sim-experiment                                    # baseline
+#   make nix-sim-experiment EQ_EXPERIMENT=path/to/exp.toml EQ_SETS="--set deploy.k0=0.8"
+#   make nix-sim-experiment-shock-price                        # by TOML name
+#   make nix-sim-plot-eq-shock-price                           # its 7-pane plot
+#   make nix-sim-sweep EQ_EXPERIMENTS="a.toml b.toml" EQ_SEEDS=1,2,3 EQ_JOBS=3
+#   make nix-sim-metrics EQ_VECTORS="test/vectors/eq-*.json"
+
+EQ_EXPERIMENT	?= alberta_buck/sim/experiments/baseline-5yr.toml
+EQ_EXPERIMENTS	?= $(EQ_EXPERIMENT)
+EQ_SETS		?=
+EQ_SEEDS	?=
+EQ_JOBS		?= 3
+EQ_SWEEP_DIR	?= test/vectors/sweep
+EQ_VECTORS	?= test/vectors/eq-*.json
+
+.PHONY: sim-experiment sim-sweep sim-metrics
+
+sim-experiment:	sim-build
+	python -m $(SIM_PKG) --experiment $(EQ_EXPERIMENT) $(EQ_SETS)
+
+# Run any experiment by TOML basename: make sim-experiment-<name> runs
+# alberta_buck/sim/experiments/<name>.toml -> test/vectors/eq-<name>.json.
+sim-experiment-%:	sim-build
+	python -m $(SIM_PKG) \
+		--experiment alberta_buck/sim/experiments/$*.toml $(EQ_SETS)
+
+sim-sweep:	sim-build
+	python -m alberta_buck.sim.sweep $(EQ_EXPERIMENTS) \
+		$(if $(EQ_SEEDS),--seeds $(EQ_SEEDS)) --jobs $(EQ_JOBS) \
+		--outdir $(EQ_SWEEP_DIR) $(EQ_SETS)
+
+sim-metrics:
+	python -m alberta_buck.sim.eqmetrics $(EQ_VECTORS)
+
+# -- Named sweeps: the banked campaign incantations --------------------
+#
+# Each reproduces one campaign from EQUILIBRIUM.md: experiment file(s) x
+# seeds run in parallel (each with its own anvil), the eqmetrics table is
+# printed, and vectors + summary.json land in test/vectors/sweep-<name>/.
+# Override seeds per-run with EQ_SEEDS=..., parallelism with EQ_JOBS=N.
+#
+#   make nix-sim-sweep-baseline   # baseline-5yr x 5 seeds (parity campaign)
+#   make nix-sim-sweep-shocks     # intervention suite, canonical seed each
+#   make nix-sim-sweep-savers2x   # saver-demand probe on the failing seeds
+#   make nix-sim-sweep-capacity   # capacity+demand probe on the worst seed
+
+EQ_EXP_DIR		 = alberta_buck/sim/experiments
+SWEEP_baseline_EXPS	 = $(EQ_EXP_DIR)/baseline-5yr.toml
+SWEEP_baseline_SEEDS	 = 41404,1337,2025,7,99
+SWEEP_shocks_EXPS	 = $(EQ_EXP_DIR)/retune-mid.toml \
+			   $(EQ_EXP_DIR)/shock-price.toml \
+			   $(EQ_EXP_DIR)/shock-uptake.toml \
+			   $(EQ_EXP_DIR)/shock-demand.toml \
+			   $(EQ_EXP_DIR)/population-churn.toml
+SWEEP_shocks_SEEDS	 =
+SWEEP_savers2x_EXPS	 = $(EQ_EXP_DIR)/baseline-savers2x.toml
+SWEEP_savers2x_SEEDS	 = 1337,2025,99
+SWEEP_capacity_EXPS	 = $(EQ_EXP_DIR)/baseline-capacity.toml
+SWEEP_capacity_SEEDS	 = 99
+
+sim-sweep-%:	sim-build
+	$(if $(SWEEP_$*_EXPS),,$(error unknown sweep '$*'; defined: baseline shocks savers2x capacity))
+	python -m alberta_buck.sim.sweep $(SWEEP_$*_EXPS) \
+		$(if $(or $(EQ_SEEDS),$(SWEEP_$*_SEEDS)),--seeds $(or $(EQ_SEEDS),$(SWEEP_$*_SEEDS))) \
+		--jobs $(EQ_JOBS) --outdir test/vectors/sweep-$*
+
+# -- Named plots: 7-pane equilibrium render for any vector -------------
+#
+# make sim-plot-eq-<name> renders EQ_VECTOR (default test/vectors/
+# eq-<name>.json, i.e. what sim-experiment-<name> wrote) to
+# images/equilibrium-<name>.png.  The milestone images map to campaign
+# vectors explicitly:
+#
+#   make nix-sim-plot-eq-baseline-5yr       # canonical-seed baseline
+#   make nix-sim-plot-eq-population-churn   # worst shock run
+
+PLOT_baseline-5yr_VECTOR	= test/vectors/sweep-baseline/eq-baseline-5yr-s41404.json
+PLOT_population-churn_VECTOR	= test/vectors/sweep-shocks/eq-population-churn.json
+
+sim-plot-eq-%:
+	EQ_VECTOR=$(or $(EQ_VECTOR),$(PLOT_$*_VECTOR),test/vectors/eq-$*.json) \
+	EQ_OUT=images/equilibrium-$*.png \
+		python -m pytest $(SIM_EQ_PLOT) -v -s
 
 
 # ── Dependencies ─────────────────────────────────────────────────────

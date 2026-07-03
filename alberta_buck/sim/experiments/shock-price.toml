@@ -1,0 +1,25 @@
+# Exogenous price shocks: an energy spike (+30% NRGC, ~20% basket weight) at
+# day 900, then a crypto bull leg (+50% cbBTC satellite) at day 1300.  The
+# whale re-pins TOKEN/USDC to the shocked references; arbs propagate into the
+# TOKEN/BUCK observable; the controller + demand agents must re-find parity.
+
+name = "shock-price"
+notes = "NRGC x1.30 @900, cbBTC x1.50 @1300"
+
+[scenario]
+years = 5.0
+ticks_per_day = 1
+day_step = 10
+seed = 0xA1BC
+
+[[interventions]]
+day = 900
+action = "price_shock"
+token = "NRGC"
+mult = 1.30
+
+[[interventions]]
+day = 1300
+action = "price_shock"
+token = "cbBTC"
+mult = 1.50

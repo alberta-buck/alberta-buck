@@ -136,7 +136,7 @@ class Deployment:
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
-    basket_impl: str = "legacy"   # "legacy" (BuckBasket) | "prorata"
+    basket_impl: str = "prorata"  # "prorata" (BuckBasketProRata, default) | "legacy"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
@@ -148,7 +148,7 @@ def _erc20_abi() -> list:
 
 
 def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
-           basket_impl="legacy") -> Deployment:
+           basket_impl="prorata") -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, pool_acct, issuer_addr = accts[0], accts[1], accts[2], accts[3]
@@ -162,9 +162,28 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
 
     # --- Direct BUCK stack ------------------------------------------- #
     credit = chain.deploy("BuckCredit")
+    # Rescaled direct PID (ppm process/error, dt in seconds).  Gains stored as
+    # real_gain * 1e12.  K is the LTV cap => max system leverage 1/(1-K):
+    # K0~0.75 rests at ~4x; the default KMAX 0.95 keeps a railed K solvent
+    # (20x) instead of sitting on the 1/(1-K) spiral boundary.
+    # Ki sized for a target "max variance before the rail":
+    #   Ki_real = dK_rail / (e_max * tau_I)   [ per (fractional error * second) ]
+    # so a sustained e_max basket deviation rails K over tau_I.
+    # Deliberately SLOW: K is a structural lever, not a market maker.  It
+    # glides over months while private demand (savers) does the fast
+    # stabilization -- a sustained e_max deviation takes ~tau_I to reach a
+    # rail and the proportional kick is tiny.  Prevents the relay/bang-bang
+    # oscillation seen when K reacts as hard as the agents do.
+    # All of these come from experiment.deploy_params: coded defaults, or the
+    # attached experiment's [deploy] section when one is present.
+    from alberta_buck.sim.experiment import deploy_params
+    dp = deploy_params(getattr(scenario, "experiment", None))
+    K0, KMIN, KMAX = dp.k0_wei, dp.kmin_wei, dp.kmax_wei
+    KP, KI, KD = dp.kp_scaled, dp.ki_scaled, dp.kd_scaled
     kctrl = chain.deploy("BuckKControllerDirect",
-                          int(0.1 * E18), int(0.01 * E18), 0, 60,
-                          int(0.50 * E18), int(1.50 * E18), E18, gov)
+                          KP, KI, KD, dp.dt, KMIN, KMAX, K0, gov)
+    if dp.dtmax_secs:
+        chain.send(kctrl.functions.setDTMax(dp.dtmax_secs), sender=gov)
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
@@ -201,10 +220,32 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
 
     # --- tokens ------------------------------------------------------ #
     usdc = chain.deploy("MockERC20", "USD Coin", "USDC", 6)
-    tok, dec = [], []
-    for (sym, name, d) in scenario.tokens:
+    tok, dec, wbp = [], [], []
+    for t in scenario.tokens:
+        # tokens are (sym, name, decimals[, weightBp]); the optional 4th element
+        # is the DESIRED FINAL basket target weight in basis points (0 => equal
+        # 1/N share).  The weights across the basket sum to 10000.
+        sym, name, d = t[0], t[1], t[2]
+        w = t[3] if len(t) > 3 else 0
         c = chain.deploy("MockERC20", name, sym, d)
-        tok.append(c); dec.append(d)
+        tok.append(c); dec.append(d); wbp.append(w)
+
+    # Translate DESIRED FINAL weights -> the SEQUENTIAL weights addBasketToken
+    # expects.  addBasketToken renormalizes existing constituents on every add
+    # (stick-breaking): the value passed for a token is its share of the whole
+    # basket AT THE MOMENT it is added, when tokens 0..i already sum to 10000.
+    # So token i's passed weight = 10000 * f_i / (f_0 + ... + f_i); this makes
+    # the STORED targetWeightBp land on the desired f_i (verified below).  A raw
+    # pass-through would badly distort them (the first token balloons to fill
+    # 10000).  Unweighted baskets (all f == 0) pass 0 throughout (equal 1/N
+    # share) -- byte-identical to the previous behaviour.
+    pass_wbp, acc = [], 0
+    if any(w > 0 for w in wbp):
+        for w in wbp:
+            acc += w
+            pass_wbp.append(round(10000 * w / acc) if acc > 0 else 0)
+    else:
+        pass_wbp = [0] * len(wbp)
 
     # --- SimLP (V3 mint/swap callback helper) ------------------------ #
     simlp = chain.deploy("SimLP", sol_file="SimLP")
@@ -266,7 +307,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         t1 = pool.functions.token1().call()
         lo, hi = full_range_ticks(TICK_SPACING[FEE_USDC])
 
-        # Seed to a COMMON USDC-side depth (== TARGET_BUCK), NOT a fixed L.
+        # Seed to a COMMON USDC-side depth (== dp.target_buck), NOT a fixed L.
         # A fixed L makes real reserves scale with decimals/price, leaving
         # 18-dec PAXG/AOIL pools shallow while 8-dec cbBTC is unmovably
         # deep -- so routed flow churns the thin pools faster than the
@@ -275,9 +316,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # (USDC=token0); invert to hit TARGET_BUCK USDC raw.
         Q96 = 1 << 96
         if usdc.address.lower() == t0.lower():     # USDC is token0
-            Lusdc = TARGET_BUCK * sp // Q96
+            Lusdc = dp.target_buck * sp // Q96
         else:                                       # USDC is token1
-            Lusdc = TARGET_BUCK * Q96 // sp
+            Lusdc = dp.target_buck * Q96 // sp
         rcpt = chain.send(simlp.functions.mint(pu, lo, hi, max(1, Lusdc), t0, t1))
         d.pool_usdc.append(pu)
 
@@ -292,8 +333,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                   f"{usdc_bal/E6:,.2f} USDC")
 
         # TOKEN/BUCK basket pool (empty — bootstrapped by DM agents).
+        # pass_wbp[i] is the sequential (stick-breaking) weight; 0 => equal share.
         chain.send(basket.functions.addBasketToken(
-            c.address, dec[i], p0, 0, FEE_BUCK), sender=gov)  # 0 => equal share
+            c.address, dec[i], p0, pass_wbp[i], FEE_BUCK), sender=gov)
         pb = v3f.functions.getPool(c.address, buck.address, FEE_BUCK).call()
         chain.send(reg.functions.bindContract(
             pb, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
@@ -301,8 +343,23 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
 
         if verbose:
             print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
-                  f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)")
+                  f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)  "
+                  f"targetBp={wbp[i]} (passed {pass_wbp[i]})")
             print(f"         empty pool — bootstrap DM agents will seed")
+
+    # Read back the basket's realized target weights (legacy exposes the
+    # `constituents` array getter; targetWeightBp is the last struct field).
+    # addBasketToken renormalizes existing constituents on each add, so the
+    # stored weights are the SEQUENTIAL result of the passed bp, summing to
+    # 10000 -- this confirms the per-token weightBp actually took effect.
+    if verbose and basket_impl == "legacy":
+        n = basket.functions.constituentsLength().call()
+        parts, wsum = [], 0
+        for i in range(n):
+            w = basket.functions.constituents(i).call()[-1]  # targetWeightBp
+            wsum += w
+            parts.append(f"{scenario.tokens[i][0]}={w}")
+        print(f"[deploy] basket target weightBp (sum={wsum}): " + "  ".join(parts))
 
     # --- floating BUCK/USDC pool (gauge-breaking, not a peg) ---------- #
     #
@@ -320,7 +377,17 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # BUCK transfer is SimLP(public) -> pool(public).  No private EOA, no
     # storage fakery, and no existing pool is drained.
     Q96 = 1 << 96
-    FACE = 2 * TARGET_BUCK_LP
+    # A zero-premium mint yields *spendable* BUCK == amount * buckK
+    # (creditLimit = activatedValue * buckK / 1e18), so at a resting LTV of
+    # K0 < 1.0 minting TARGET_BUCK_LP no longer frees TARGET_BUCK_LP to LP.
+    # Size the mint (and the backing credit face) off the live K0 so the SimLP
+    # can seed ~TARGET_BUCK_LP BUCK at any resting K -- with a 20% margin so
+    # full-range rounding never trips "amount exceeds spendable".  Only the LP
+    # transfer (~TARGET_BUCK_LP) actually enters supply; the surplus headroom
+    # is inert, so downstream pool depth / totalSupply are unchanged.
+    k0 = kctrl.functions.buckK().call()
+    mint_amt = (dp.target_buck_lp * E18 // max(1, k0)) * 12 // 10
+    FACE = max(2 * dp.target_buck_lp, mint_amt * 12 // 10)
 
     now_ts = w3.eth.get_block("latest")["timestamp"]
     cc = credit.functions.createCredit(simlp.address, 0, FACE, 0, 0, 0,
@@ -333,7 +400,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # to bootstrap.
     chain.send(simlp.functions.exec(
         buck.address,
-        buck.encode_abi("mint(uint256)", args=[TARGET_BUCK_LP])))
+        buck.encode_abi("mint(uint256)", args=[mint_amt])))
 
     chain.send(v3f.functions.createPool(buck.address, usdc.address, FEE_BUCK_UB))
     pub = v3f.functions.getPool(buck.address, usdc.address, FEE_BUCK_UB).call()
@@ -347,9 +414,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     chain.send(reg.functions.bindContract(
         pub, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
     if usdc.address.lower() == u0.lower():
-        Lub = TARGET_BUCK * spU // Q96
+        Lub = dp.target_buck * spU // Q96
     else:
-        Lub = TARGET_BUCK * Q96 // spU
+        Lub = dp.target_buck * Q96 // spU
     lo_ub, hi_ub = full_range_ticks(TICK_SPACING[FEE_BUCK_UB])
     chain.send(simlp.functions.mint(pub, lo_ub, hi_ub, max(1, Lub), u0, u1))
     d.pool_ub = pub

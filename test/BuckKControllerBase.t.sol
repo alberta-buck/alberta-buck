@@ -160,4 +160,85 @@ contract BuckKControllerBaseTest is Test {
         // factor = 1 + 10 * (1 - 1.2) / 1 = -1, clamped to 0
         assertEq(ctrl.fundingFactor(), 0);
     }
+
+    // ---- setRails ------------------------------------------------------- //
+
+    function test_set_rails_only_governance() public {
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert("Not governance");
+        ctrl.setRails(0.4e18, 1.6e18);
+    }
+
+    function test_set_rails_rejects_inverted() public {
+        vm.prank(GOV);
+        vm.expectRevert("min>max");
+        ctrl.setRails(1.6e18, 0.4e18);
+    }
+
+    function test_set_rails_clamps_live_buckK() public {
+        // buckK sits at 1.0; a new ceiling below it must clamp the output.
+        vm.prank(GOV);
+        ctrl.setRails(0.50e18, 0.90e18);
+        assertEq(ctrl.buckK(), 0.90e18, "buckK not clamped to new max");
+        assertEq(ctrl.buckKMax(), 0.90e18);
+        // And a floor above it clamps upward.
+        vm.prank(GOV);
+        ctrl.setRails(0.95e18, 1.50e18);
+        assertEq(ctrl.buckK(), 0.95e18, "buckK not clamped to new min");
+    }
+
+    // ---- retune (bumpless transfer) -------------------------------------- //
+
+    function test_retune_only_governance() public {
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert("Not governance");
+        ctrl.retune(0.1e18, 0.02e18, 0);
+    }
+
+    function test_retune_requires_Ki() public {
+        vm.prank(GOV);
+        vm.expectRevert("retune needs Ki");
+        ctrl.retune(0.1e18, 0, 0);
+    }
+
+    function test_retune_is_bumpless_where_setGains_steps() public {
+        // Start at buckK = 1.20 (constructor primes I = 20e18 with Ki=0.01).
+        BuckKControllerBaseHarness fresh = new BuckKControllerBaseHarness(
+            0.1e18, 0.01e18, 0,
+            3600,
+            0.50e18, 1.50e18,
+            1.20e18,
+            GOV
+        );
+        fresh.setReferences(1.0e18, 1.0e18);   // hold parity (error 0)
+
+        // Raw setGains doubling Ki would step the output:
+        //   I*Ki_new/UNIT = 20e18*0.02 = 0.40e18  (vs 0.20e18 before).
+        // retune() must re-derive I so the output is continuous.
+        vm.prank(GOV);
+        fresh.retune(0.1e18, 0.02e18, 0);
+        vm.warp(block.timestamp + 3601);
+        uint256 k = fresh.compute();
+        assertApproxEqRel(k, 1.20e18, 0.001e18,
+            "retune stepped the output (not bumpless)");
+    }
+
+    function test_setGains_steps_output_control_case() public {
+        // The contrast case for the bumpless test above: an identical gain
+        // change through raw setGains DOES step the output.
+        BuckKControllerBaseHarness fresh = new BuckKControllerBaseHarness(
+            0.1e18, 0.01e18, 0,
+            3600,
+            0.50e18, 1.50e18,
+            1.20e18,
+            GOV
+        );
+        fresh.setReferences(1.0e18, 1.0e18);
+        vm.prank(GOV);
+        fresh.setGains(0.1e18, 0.02e18, 0);
+        vm.warp(block.timestamp + 3601);
+        uint256 k = fresh.compute();
+        assertApproxEqRel(k, 1.40e18, 0.001e18,
+            "expected the raw setGains step (I unchanged, Ki doubled)");
+    }
 }

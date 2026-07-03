@@ -1,0 +1,13 @@
+# The standard 5-year macro run, no interventions: the reference the shock
+# suite is judged against.  Acceptance (parity-with-interior-K): tail
+# basketValueInBuck within 1.00 +/- 0.02, K interior (never railed in the
+# tail), issuance + redemption channels alive throughout.
+
+name = "baseline-5yr"
+notes = "5y macro window, rolling-reserve borrowers, no interventions"
+
+[scenario]
+years = 5.0
+ticks_per_day = 1
+day_step = 10
+seed = 0xA1BC

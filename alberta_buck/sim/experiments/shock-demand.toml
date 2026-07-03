@@ -1,0 +1,27 @@
+# Demand recession + recovery: saver demand cut 60% at day 900 (base_rate
+# x0.4), then budgets refreshed (+$20M each) at day 1300.  Tests the loop's
+# dependence on private counter-cyclical demand and its recovery path.
+
+name = "shock-demand"
+notes = "saver base_rate x0.4 @900; fund +$20M each @1300"
+
+[scenario]
+years = 5.0
+ticks_per_day = 1
+day_step = 10
+seed = 0xA1BC
+
+[[interventions]]
+day = 900
+action = "set_knob"
+cls = "SaverAgent"
+idx = "all"
+knob = "base_rate"
+scale = 0.4
+
+[[interventions]]
+day = 1300
+action = "fund"
+cls = "SaverAgent"
+idx = "all"
+usdc_m = 20.0

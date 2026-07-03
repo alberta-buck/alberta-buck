@@ -186,7 +186,7 @@ def test_gen_historical_writes_aligned_csvs(tmp_path):
     import csv as _csv
     from alberta_buck.sim import gen_historical
     files, n, s, e = gen_historical.gen(years=1.0, out_dir=tmp_path)
-    assert len(files) == 4 and n > 360
+    assert len(files) == 6 and n > 360
     lengths = set()
     for fn in files:
         with (tmp_path / fn).open() as f:

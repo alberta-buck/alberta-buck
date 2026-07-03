@@ -22,6 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "data"
+US_DIR = DATA_DIR / "us"          # vendored FRED pulls (fetch_feedstock.py)
 
 BCPI_CSV = DATA_DIR / "BCPI_MONTHLY-sd-1972-01-01.csv"
 CPI_CSV = DATA_DIR / "STATIC_INFLATIONCALC.csv"        # Canadian CPI
@@ -124,6 +125,99 @@ def load_fx() -> dict[date, float]:
     return out
 
 
+# ------------------------------------------------------ US real feeds (FRED)
+#
+# Vendored by fetch_feedstock.py under data/us/<name>.csv (header: date,value).
+# CNST and NRGC are equal-weight INDEX composites (each component normalized to
+# 100 at the earliest month all its components share, then averaged); LABR_US is
+# a single $/hr wage series used as-is.  All are USD-native, monthly.
+
+# Composite component sets and the documented (equal) weights.
+CNST_COMPONENTS = ["ppi_steel", "ppi_lumber", "ppi_cement", "ppi_gravel"]
+NRGC_COMPONENTS = ["energy_gasoline", "energy_electricity", "energy_natgas"]
+FOOD_COMPONENTS = ["food_beef", "food_bread", "food_bananas"]
+
+
+def us_data_available() -> bool:
+    """True when the vendored FRED pulls are present (else US feeds are skipped)."""
+    return US_DIR.is_dir() and (US_DIR / "wage_ahetpi.csv").exists()
+
+
+def _load_us_csv(name: str) -> list[tuple[date, float]]:
+    """A vendored FRED series (header date,value) -> sorted monthly points."""
+    out: list[tuple[date, float]] = []
+    with (US_DIR / f"{name}.csv").open(encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            if row.get("value") not in (None, "", "."):
+                out.append((_parse_date(row["date"]), float(row["value"])))
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def _equal_weight_index(
+    components: list[list[tuple[date, float]]],
+    base: date | None = None,
+) -> tuple[list[tuple[date, float]], date]:
+    """Equal-weight composite INDEX (=100 at `base`) over aligned components.
+
+    Each component is normalized to 100 at the common base month, then the
+    components are equal-weight averaged.  Only months present in EVERY
+    component contribute; the base defaults to the earliest such shared month.
+    """
+    luts = [dict(c) for c in components]
+    common = sorted(set(luts[0]).intersection(*(set(l) for l in luts[1:])))
+    if not common:
+        raise ValueError("components share no common month")
+    if base is None:
+        base = common[0]
+    bases = [l[base] for l in luts]
+    series = [
+        (m, sum(100.0 * l[m] / b for l, b in zip(luts, bases)) / len(luts))
+        for m in common
+    ]
+    return series, base
+
+
+def load_construction_us() -> list[tuple[date, float]]:
+    """CNST: equal-weight US construction-PPI index (100 = base, USD).
+
+    Components (equal 1/4 weight): steel WPU101, lumber WPU081, cement WPU1322,
+    gravel/stone WPU1321.  Base month = earliest shared (cement-limited, 1971-01).
+    """
+    comps = [_load_us_csv(n) for n in CNST_COMPONENTS]
+    series, _ = _equal_weight_index(comps)
+    return series
+
+
+def load_labour_us() -> list[tuple[date, float]]:
+    """LABR_US: US average hourly earnings, $/hr, monthly (AHETPI, 1964+, USD)."""
+    return _load_us_csv("wage_ahetpi")
+
+
+def load_energy_us() -> list[tuple[date, float]]:
+    """NRGC: equal-weight US retail-energy index (100 = base, USD).
+
+    Components (equal 1/3 weight): gasoline APU000074714 ($/gal), electricity
+    APU000072610 ($/kWh), utility gas APU000072620 ($/therm).  Base month =
+    earliest shared (1978-11, gas/electricity-limited).
+    """
+    comps = [_load_us_csv(n) for n in NRGC_COMPONENTS]
+    series, _ = _equal_weight_index(comps)
+    return series
+
+
+def load_food_us() -> list[tuple[date, float]]:
+    """FOOD: equal-weight US retail-food index (100 = base, USD).
+
+    Components (equal 1/3 weight): ground beef APU0000703112 ($/lb), white bread
+    APU0000702111 ($/lb), bananas APU0000711211 ($/lb).  Base month = earliest
+    shared (1984-01, ground-beef-limited).
+    """
+    comps = [_load_us_csv(n) for n in FOOD_COMPONENTS]
+    series, _ = _equal_weight_index(comps)
+    return series
+
+
 if __name__ == "__main__":
     bcpi = load_bcpi()
     for token, s in bcpi.items():
@@ -133,3 +227,11 @@ if __name__ == "__main__":
     fx = load_fx()
     cpi = load_cacpi()
     print(f"FX  : {min(fx)}..{max(fx)}   CPI: {min(cpi)}..{max(cpi)}")
+    if us_data_available():
+        for tok, s in (("CNST", load_construction_us()),
+                       ("LABR_US", load_labour_us()),
+                       ("NRGC", load_energy_us()),
+                       ("FOOD_US", load_food_us())):
+            unit = "$/hr" if tok == "LABR_US" else "index"
+            print(f"{tok:7}: {len(s)} mo  {s[0][0]}={s[0][1]:.2f} -> "
+                  f"{s[-1][0]}={s[-1][1]:.2f}  (USD {unit})")

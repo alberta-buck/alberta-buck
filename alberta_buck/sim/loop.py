@@ -18,7 +18,7 @@ from alberta_buck.sim.snapshot import Snapshotter
 E6 = 10 ** 6
 
 
-def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> dict:
+def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata") -> dict:
     w3 = anvil.w3
     chain = Chain(w3, w3.eth.accounts[0])
     rng = idmod.seeded_rng(scenario.seed)
@@ -65,7 +65,26 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
         print(f"[sim] bootstrap: {ctr['dmEntries']} DM deposits seeded "
               f"basket pools before tick 0", flush=True)
 
+    # --- experiment: price overlay + scripted interventions ---------- #
+    # When an Experiment is attached, wrap the price source so price_shock
+    # interventions can overlay multipliers (the whale then re-pins pools to
+    # the shocked reference), and stand up the Interventions engine over the
+    # LIVE agent/arb lists (population changes mutate them in place).
+    exp = getattr(scenario, "experiment", None)
+    iv = None
+    if exp is not None:
+        from alberta_buck.sim.experiment import Interventions, PriceOverlay
+        if not isinstance(scenario.prices, PriceOverlay):
+            scenario.prices = PriceOverlay(scenario.prices)
+        iv = Interventions(exp, d, scenario, agents, arbs, ctr, rng)
+
     snap = Snapshotter(d, scenario)
+    if exp is not None:
+        # Live references: iv.applied keeps growing; every checkpoint write
+        # (and the final one) embeds the up-to-date log + resolved config.
+        snap.meta["experiment"] = exp.resolved()
+        if iv is not None:
+            snap.meta["interventions_applied"] = iv.applied
     # Capital baselines: computed AFTER bootstrap so the dm baseline
     # includes the bootstrap deposits (otherwise day-0 P&L would jump
     # by the bootstrap principal).
@@ -75,10 +94,19 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
         agents, 0, ("DirectMintAgent", "DirectMintBuckAgent"))
 
     ts = w3.eth.get_block("latest")["timestamp"] + 10
-    tick_secs = max(60, 86_400 // scenario.ticks_per_day)
+    # `day_step` advances the calendar (and on-chain clock) more than one day
+    # per iteration -- a coarse macro mode so multi-year horizons fit a bounded
+    # run.  Default 1 == unchanged.  Each iteration still advances a full
+    # `day_step` days of wall-clock time across its inner ticks.
+    step = max(1, getattr(scenario, "day_step", 1))
+    tick_secs = max(60, (86_400 * step) // scenario.ticks_per_day)
 
     n_tok = len(d.tokens)
-    for day in range(scenario.days):
+    for day in range(0, scenario.days, step):
+        # Scripted interventions fire first, so a price shock scheduled for
+        # this day is already visible in refUsd / the whale's snap below.
+        if iv is not None:
+            iv.apply_due(day)
         # Current day + reference USD prices, for the agents' realized-return
         # accounting (deposit/redeem valuation) and the throughput meter.
         ctr["day"] = day
@@ -107,6 +135,12 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="legacy") -> d
         except Exception:
             pass
         snap.capture(day, ctr, agents, init_val, reb_init, dm_init)
+        # Incremental checkpoint: flush the vector periodically so a long run
+        # killed mid-flight still yields usable partial data (and can be
+        # plotted).  Cheap relative to a day's on-chain work; final write below
+        # still produces the complete vector.
+        if out_path and day > 0 and day % 25 == 0:
+            snap.write(out_path)
         if verbose and (day % 20 == 0 or day == scenario.days - 1):
             f = snap.frames[-1]
             errs = [abs(f["spotUsdc"][i] - f["refUsd"][i]) / max(1, f["refUsd"][i])

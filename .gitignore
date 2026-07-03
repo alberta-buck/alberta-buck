@@ -32,6 +32,10 @@ __pycache__/
 .pytest_cache/
 
 
+# Default equilibrium-sweep scratch output (named campaigns live in
+# test/vectors/sweep-<name>/ and ARE committed)
+/test/vectors/sweep/
+
 # Coverage
 lcov.info
 *.aux

@@ -1,0 +1,17 @@
+# Governance retune mid-run: halve the integral time (90d -> 45d) at day 900
+# via the BUMPLESS retune -- the loop must absorb a 2x-faster integrator with
+# no output step and re-settle on parity.
+
+name = "retune-mid"
+notes = "bumpless tau_I 90d->45d at day 900"
+
+[scenario]
+years = 5.0
+ticks_per_day = 1
+day_step = 10
+seed = 0xA1BC
+
+[[interventions]]
+day = 900
+action = "retune"
+tau_i_days = 45.0
