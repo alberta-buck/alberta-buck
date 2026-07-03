@@ -384,12 +384,52 @@ its raw =py_ecc= curve-pedagogy cells move to the binding's curve ops.
 =alberta-buck-proofs.org= (hand-rolled sigma pedagogy on raw =py_ecc=, no
 wallet imports) is explicitly out of scope.
 
-** Phase 4: JS sim platform + live-interactive demos
+** Phase 4: JS sim platform + live-interactive demos  [status: IN PROGRESS]
 Agent API + simulated time + price feeds on Tevm-in-browser; the demo
 scenario (interactive agent creation, BuckCredit mint, identity-signed
 transfers, background AMM rebalancing); slide-deck/web embedding.
 - /Accept/: the demo scenario runs wholly in-browser with real identities;
   a canonical mini-scenario's JS and Python journals agree.
+
+*** Design of record (banked 2026-07-03)
+
+*Risk killed first* (spike, now the Stage-0 test): Tevm's EVM ships the
+BN254 precompiles -- =IdentityRegistry.register= verified a
+wasm-kernel-generated registration NIZK ON-CHAIN in-process in ~180 ms
+(a unicode identity, at that), replay from another account reverted as
+expected, and =evm_setNextBlockTimestamp= + =evm_mine= give simulated
+time.  No custom-precompile shim needed: the full identity ceremony --
+kernel proving, real Solidity verification -- runs wholly in JS.
+Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
+(viem needs object keys to match exactly).
+
+*Stages*:
+1. *Buckworld on Tevm* (node-gated): an artifacts bundle build step
+   (=out/*.json= -> one importable module: nodefs stays node-only, the
+   browser imports the bundle -- =buildOnePool= already takes an
+   injected =artifacts(name)=); a =buildBuckWorld= scenario builder
+   deploying the REAL stack (IdentityRegistry + BuckCredit +
+   BuckKControllerDirect + Buck, then TOKEN/USDC V3 pools via SimLP)
+   mirroring =deploy.py='s order; identity onboarding helper (kernel
+   ceremony -> register); simulated-time helpers (day ticks ->
+   timestamp jumps; demurrage becomes VISIBLE, cross-checked against
+   =buck_math= wasm predictions).
+2. *Browser demo v1*: the interactive page -- create agents (real
+   registrations), mint BuckCredit, identity-gated BUCK transfers,
+   time controls, live balances with demurrage -- the whole Stage-1
+   world compiled for the browser (tevm is browser-capable by design;
+   wasm kernels already web-target).
+3. *Background agents + prices*: whale pin + roundtrip traders (Phase 1
+   agents) driving the pools on a seeded price stream while the user
+   interacts; play/pause/speed.
+4. *Journal parity* (the acceptance gate): a canonical mini-scenario
+   defined once (=core/vectors/mini-scenario.json=: seeds, targets,
+   trade sizes, days) and driven by BOTH platforms -- Python
+   (Web3Session -> anvil) and JS (Session -> tevm AND -> the same
+   anvil) -- with journals compared field-by-field (semantic fields
+   exactly; gas exact where backends agree).
+5. *Embedding*: single-file build of the demo for slide decks / web
+   pages; docs.
 
 ** Phase 5: scale-up
 10^3 - 10^4 agent populations (extensive-margin adoption experiments from
