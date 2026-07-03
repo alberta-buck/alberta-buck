@@ -1,0 +1,19 @@
+[package]
+name = "buck-identity-wasm"
+version = "0.0.1"
+edition = "2021"
+description = "WASM/JS binding for the buck-identity kernel (browser + Node)"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+kernel = { path = "../../buck-identity", package = "buck-identity" }
+# 256-bit words cross the ABI as 0x-hex strings; core/js/src/identity.js
+# wraps this in the BigInt-native API.
+wasm-bindgen = "0.2"
+
+[package.metadata.wasm-pack.profile.release]
+# Skip the wasm-opt download/pass: one less moving part.
+wasm-opt = false

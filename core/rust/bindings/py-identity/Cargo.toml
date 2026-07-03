@@ -1,0 +1,18 @@
+[package]
+name = "buck-identity-py"
+version = "0.0.1"
+edition = "2021"
+description = "Python binding for the buck-identity kernel (import buck_core.buck_identity)"
+license = "MIT"
+
+[lib]
+name = "buck_identity"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Aliased: the cdylib itself is named buck_identity (the Python module),
+# which would shadow the kernel crate's name in paths.
+kernel = { path = "../../buck-identity", package = "buck-identity" }
+# num-bigint: 256-bit scalars/coordinates cross as plain Python ints.
+num-bigint = "0.4"
+pyo3 = { version = "0.24", features = ["extension-module", "abi3-py311", "num-bigint"] }

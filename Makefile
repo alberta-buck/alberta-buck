@@ -880,21 +880,30 @@ core-identity-vectors:
 core-js-deps:
 	cd core/js && npm ci
 
-# The Python kernel binding: a PyO3 cdylib built with plain cargo (the
+# The Python kernel bindings: PyO3 cdylibs built with plain cargo (the
 # .cargo/config.toml link flags stand in for maturin) and placed inside
-# the buck_core package -- import buck_core.buck_math.
+# the buck_core package -- import buck_core.buck_math /
+# buck_core.buck_identity.
 core-build-py:
-	cd core/rust && cargo build --release -p buck-math-py
+	cd core/rust && cargo build --release -p buck-math-py -p buck-identity-py
 	cp core/rust/target/release/libbuck_math.dylib \
 	   core/python/buck_core/buck_math.so
+	cp core/rust/target/release/libbuck_identity.dylib \
+	   core/python/buck_core/buck_identity.so
 
-# The JS kernel binding: wasm-pack (npm devDependency of core/js) emits a
-# nodejs-target package into core/js/wasm/.  BigInt in, BigInt out.
+# The JS kernel bindings: wasm-pack (npm devDependency of core/js) emits
+# nodejs-target packages into core/js/wasm/ (flat: buck_math.* and
+# buck_identity.* coexist; the shared package.json is cosmetic until the
+# npm packaging phase).  buck_math: BigInt ABI.  buck_identity: 0x-hex
+# ABI wrapped by core/js/src/identity.js into the BigInt-native API.
 core-build-wasm:
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target nodejs \
 		--out-dir ../../../js/wasm --out-name buck_math
+	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
+		build --release --target nodejs \
+		--out-dir ../../../js/wasm --out-name buck_identity
 
 core-build:	core-build-py core-build-wasm
 

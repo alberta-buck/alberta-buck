@@ -13,6 +13,8 @@ members = [
     "buck-identity",
     "bindings/py",
     "bindings/js",
+    "bindings/py-identity",
+    "bindings/js-identity",
 ]
 
 [profile.release]
