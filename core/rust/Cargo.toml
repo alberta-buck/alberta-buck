@@ -2,13 +2,15 @@
 #
 # Crates land by phase: buck-math (Phase 2), buck-identity (Phase 3),
 # buck-wallet + bindings/js (wasm-bindgen) + bindings/py (PyO3) alongside.
-# Keep kernel crates no_std-compatible: the same code must compile into
-# Holochain zomes (the holo-mutualcredit pattern).
+# buck-math stays no_std/zero-dep; buck-identity is std over arkworks
+# (wasm-clean; the no_std flip is mechanical if a Holochain zome needs it
+# -- the holo-mutualcredit pattern still applies).
 
 [workspace]
 resolver = "2"
 members = [
     "buck-math",
+    "buck-identity",
     "bindings/py",
     "bindings/js",
 ]

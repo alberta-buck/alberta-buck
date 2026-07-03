@@ -1,0 +1,24 @@
+[package]
+name = "buck-identity"
+version = "0.0.1"
+edition = "2021"
+description = "Alberta Buck identity kernel: BN254 sigma protocols matching the alberta_buck.wallet reference bit-for-bit"
+license = "MIT"
+
+[dependencies]
+# Unlike zero-dep buck-math, this crate takes arkworks: hand-rolling a
+# correct optimal-ate pairing is not a good risk (design of record,
+# alberta-buck-platform.org Phase 3).  std build; the no_std flip stays
+# mechanical (default-features = false) if a Holochain zome needs it.
+ark-bn254 = "0.5"
+ark-ec = "0.5"
+ark-ff = "0.5"
+tiny-keccak = { version = "2", features = ["keccak"] }
+
+[build-dependencies]
+# Build-time only (constants codegen); does not ship in any artifact.
+serde_json = "1"
+
+[dev-dependencies]
+# Test-only (golden-vector JSON); does not ship in any artifact.
+serde_json = "1"

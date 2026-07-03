@@ -860,9 +860,22 @@ sim-plot-eq-%:
 # make nix-match-MathVectors) are asserted bit-identically by all three;
 # the journal fixture (core/vectors/) by Python and JS -- change either
 # only with every consuming suite in hand.
+#
+# Identity kernel vectors: core/vectors/identity-kernel-vectors.json is
+# emitted by the pure-Python py_ecc REFERENCE path (the executable spec)
+# and replayed nonce-for-nonce by all three suites.  Regenerating it is an
+# ABI-break-level event -- do so only with the cargo/pytest/node suites in
+# hand:
+#
+#   make nix-venv-core-identity-vectors
 
 .PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps
-.PHONY: core-build core-build-py core-build-wasm
+.PHONY: core-build core-build-py core-build-wasm core-identity-vectors
+
+# Emit from the py_ecc reference (kernel_vectors.py forces
+# BUCK_IDENTITY_BACKEND=py itself; the binding need not be built).
+core-identity-vectors:
+	python -m alberta_buck.wallet.kernel_vectors core/vectors/identity-kernel-vectors.json
 
 core-js-deps:
 	cd core/js && npm ci
