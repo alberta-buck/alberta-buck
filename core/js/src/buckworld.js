@@ -10,10 +10,11 @@
 // ElGamal -> registration NIZK) and the real Solidity verifier accepts it
 // on-chain -- the capability the in-browser demo rests on.
 //
-// Deterministic by injection: pass opts.rng (a () => bigint scalar drawer)
-// to reproduce a world; the default draws WebCrypto.
-
-import * as id from "./identity.js";
+// Environment-free by injection (the artifacts(name) pattern): pass the
+// identity kernel API as opts.identity -- node code loads it from
+// ./identity.js, the browser from ./identity-web.js -- and optionally
+// opts.rng (a () => bigint scalar drawer) to reproduce a world; the
+// default draws WebCrypto.
 
 // BN254.sol struct components are UPPERCASE X/Y at the ABI.
 const g = (p) => ({ X: p.x, Y: p.y });
@@ -41,14 +42,22 @@ export const DAY = 86_400;
  *
  * @param session   a Session (deployer = session.account)
  * @param artifacts (name) => {abi, bytecode}
+ * @param opts.identity the buck-identity kernel API (REQUIRED: import
+ *                  from ./identity.js in node, loadIdentity() in the browser)
  * @param opts.gov      governance address    (default: deployer)
  * @param opts.poolAcct funding-pool address  (default: deployer)
  * @param opts.params   controller overrides over DEPLOY_DEFAULTS
  * @param opts.rng      scalar drawer for the issuer PS keypair
- * @returns world {session, artifacts, reg, credit, kctrl, buck, gov,
+ * @returns world {session, artifacts, id, reg, credit, kctrl, buck, gov,
  *                 poolAcct, issuer:{addr, skX, skY, pkX, pkY}}
  */
 export async function buildBuckWorld(session, artifacts, opts = {}) {
+  const id = opts.identity;
+  if (!id) {
+    throw new Error(
+      "buildBuckWorld needs opts.identity (the buck-identity kernel API: " +
+      "import from src/identity.js in node, loadIdentity() in the browser)");
+  }
   const gas = 15_000_000n;
   const gov = opts.gov ?? session.account.address;
   const poolAcct = opts.poolAcct ?? session.account.address;
@@ -81,7 +90,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   await session.send(reg, "setBuck", [buck.address], { tag: "world:reg.setBuck" });
   await session.send(credit, "setBuck", [buck.address], { tag: "world:credit.setBuck" });
 
-  return { session, artifacts, reg, credit, kctrl, buck, gov, poolAcct, issuer };
+  return { session, artifacts, id, reg, credit, kctrl, buck, gov, poolAcct, issuer };
 }
 
 /**
@@ -95,6 +104,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
  * @returns handle {account, fields, canonical, m, M, kp:{sk, pk}, E}
  */
 export async function onboard(world, account, fields, opts = {}) {
+  const id = world.id;
   const rng = opts.rng ?? id.randScalar;
   const full = { ...fields, issuer_id: fields.issuer_id ?? "atb-financial-ca" };
   const canonical = id.canonicalIdentity(full);
@@ -132,6 +142,7 @@ export async function onboard(world, account, fields, opts = {}) {
  *          recovers `from.M` -- the bilateral-disclosure half).
  */
 export async function identityApprove(world, from, to, opts = {}) {
+  const id = world.id;
   const rng = opts.rng ?? id.randScalar;
   const chainid = BigInt(await world.session.client.getChainId());
   const rPrime = rng();
@@ -163,6 +174,16 @@ export async function createCredit(world, holder, face, opts = {}) {
     { tag: "world:createCredit" });
   await world.session.send(world.buck, "mint", [face],
     { tag: "world:activate", account: holder.account, gas: 3_000_000n });
+}
+
+/** Fund a fresh account with ETH from the deployer (plain value transfer:
+ *  works on tevm and anvil alike; new demo citizens need gas money). */
+export async function fundAccount(world, to, wei = 10n ** 19n) {
+  const hash = await world.session.client.sendTransaction({
+    account: world.session.account, to, value: wei,
+    gas: 21_000n, chain: null, ...world.session.txOverrides,
+  });
+  await world.session.client.waitForTransactionReceipt({ hash });
 }
 
 /** Jump the chain clock forward and mine one block. */

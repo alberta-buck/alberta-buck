@@ -403,7 +403,7 @@ kernel proving, real Solidity verification -- runs wholly in JS.
 Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
 (viem needs object keys to match exactly).
 
-*Stages*:
+*Stages* (1-2 DONE 2026-07-03):
 1. *Buckworld on Tevm* (node-gated): an artifacts bundle build step
    (=out/*.json= -> one importable module: nodefs stays node-only, the
    browser imports the bundle -- =buildOnePool= already takes an
@@ -418,7 +418,17 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    registrations), mint BuckCredit, identity-gated BUCK transfers,
    time controls, live balances with demurrage -- the whole Stage-1
    world compiled for the browser (tevm is browser-capable by design;
-   wasm kernels already web-target).
+   wasm kernels already web-target).  Met by
+   =core/js/demo/buckworld.html= (=make nix-core-demo-buckworld=): a
+   DOM-free controller (=demo/src/app.js=) drives the story and is
+   gated twice -- once with node-loaded deps (=app.tevm.test.js=), and
+   once as the EXACT shipped esbuild bundle executed headless under a
+   minimal DOM stub (=demo.bundle.test.js=), which must complete the
+   scripted opening (two kernel-ceremony citizens, credit line,
+   bilateral handshake, payment, 30 simulated days) and light the
+   bit-exact demurrage badge.  Browser shims: npm =buffer= polyfill +
+   an empty =fs= (an =@tevm/node= persistence path the browser never
+   takes); bundle ~4.3 MB + the two web-target wasm kernels.
 3. *Background agents + prices*: whale pin + roundtrip traders (Phase 1
    agents) driving the pools on a seeded price stream while the user
    interacts; play/pause/speed.

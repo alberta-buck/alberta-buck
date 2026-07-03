@@ -913,20 +913,38 @@ core-build-wasm:
 		build --release --target nodejs \
 		--out-dir ../../../js/wasm --out-name buck_identity
 
-# Browser (web-target) build of the identity kernel + the Phase 3 proof
-# demo page.  Serve the demo (ES modules need http, not file://):
-#   make nix-core-demo-identity
+# Browser (web-target) builds of BOTH kernels + the demo pages.  Serve
+# the demos (ES modules need http, not file://):
+#   make nix-core-demo-identity     # Phase 3: in-browser proof ceremony
+#   make nix-core-demo-buckworld    # Phase 4: the interactive buckworld
 #   python3 -m http.server -d core/js/demo 8000
-#   open http://localhost:8000/identity-proofs.html
+#   open http://localhost:8000/identity-proofs.html   (or buckworld.html)
 core-build-wasm-web:
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target web \
 		--out-dir ../../../js/demo/wasm-web --out-name buck_identity
+	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
+		build --release --target web \
+		--out-dir ../../../js/demo/wasm-web --out-name buck_math
 
 core-demo-identity:	core-build-wasm-web
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
 	@echo "       then open http://localhost:8000/identity-proofs.html"
+
+# The interactive buckworld page: bundle the controller + platform +
+# viem/tevm into demo/app.js (the wasm binaries stay separate files the
+# page fetches from wasm-web/).  Browser shims: the npm `buffer` polyfill
+# (string_decoder in tevm's tree), and an empty `fs` (an @tevm/node
+# state-persistence path the browser never takes).
+core-demo-buckworld:	core-build-wasm-web core-js-artifacts
+	cd core/js && npx esbuild demo/src/main.js --bundle --format=esm \
+		--platform=browser --outfile=demo/app.js \
+		--alias:buffer=buffer \
+		--alias:fs=./demo/src/shims/fs-empty.js \
+		--log-limit=8
+	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
+	@echo "       then open http://localhost:8000/buckworld.html"
 
 core-build:	core-build-py core-build-wasm
 

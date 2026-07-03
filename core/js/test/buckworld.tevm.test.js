@@ -44,7 +44,7 @@ test("buckworld: onboard, activate credit, transfer, demurrage == kernel", { ski
   };
 
   const session = await tevmSession();
-  const world = await buildBuckWorld(session, loadArtifact, { rng });
+  const world = await buildBuckWorld(session, loadArtifact, { identity: id, rng });
 
   // Two real identities: the unicode payer and an ASCII counterparty.
   const alice = await onboard(world, session.account, {

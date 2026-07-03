@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<!--
+  Alberta Buck: the interactive buckworld demo (Phase 4 Stage 2).
+
+  A REAL BUCK stack -- IdentityRegistry, BuckCredit, BuckKControllerDirect,
+  Buck -- deployed on an in-browser EVM (Tevm), with citizens onboarded
+  through the full wasm-kernel identity ceremony, the bilateral
+  identity-approve handshake, credit-drawing payments, and demurrage
+  ticking against a simulated clock (bit-exact with the buck-math kernel).
+  Nothing leaves this tab.
+
+  Build + serve:
+
+      make nix-core-demo-buckworld
+      python3 -m http.server -d core/js/demo 8000
+      open http://localhost:8000/buckworld.html
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Alberta Buck &mdash; buckworld</title>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+           max-width: 72rem; margin: 1.5rem auto; padding: 0 1rem;
+           background: #101418; color: #d7dde4; }
+    h1 { font-size: 1.25rem; } h1 small { color: #7d8a97; font-weight: normal; }
+    #status { color: #8fb4d8; margin: .4rem 0; }
+    #badge.ok { color: #55c47a; } #badge.bad { color: #e05555; }
+    #clock { color: #7d8a97; }
+    .row { display: flex; gap: 1rem; align-items: flex-start; margin-top: 1rem; }
+    .col { flex: 1; min-width: 0; }
+    .card { border: 1px solid #2a3540; padding: .5rem .7rem; margin: .4rem 0; }
+    .card .addr { color: #7d8a97; } .card .drawn { color: #d8b46a; }
+    #controls { border: 1px solid #2a3540; padding: .6rem; }
+    #controls div { margin: .35rem 0; }
+    button { background: #1c2833; color: #d7dde4; border: 1px solid #33465a;
+             padding: .3rem .7rem; cursor: pointer; }
+    button:hover { background: #24354a; }
+    select, input { background: #151b21; color: #d7dde4;
+                    border: 1px solid #33465a; padding: .25rem; }
+    #log { max-height: 26rem; overflow-y: auto; font-size: .8rem; }
+    #log div { padding: .1rem 0; border-bottom: 1px solid #1c232b; }
+    .j-ok::before   { content: "\2713 "; color: #55c47a; }
+    .j-miss::before { content: "\2717 "; color: #e05555; }
+  </style>
+</head>
+<body>
+  <h1>Alberta Buck &mdash; buckworld
+    <small>&mdash; a real BUCK economy in THIS browser tab</small></h1>
+  <div id="status">loading&hellip;</div>
+  <div id="badge"></div>
+  <div id="clock"></div>
+
+  <div class="row">
+    <div class="col">
+      <div id="controls">
+        <div>
+          <button id="add">Add citizen</button>
+          <button id="credit">Insure credit line +1000 for &ldquo;from&rdquo;</button>
+        </div>
+        <div>
+          from <select id="from"></select>
+          to <select id="to"></select>
+          <button id="handshake">Identity handshake &harr;</button>
+        </div>
+        <div>
+          <input id="amount" value="25" size="8"> BUCK
+          <button id="pay">Pay</button>
+        </div>
+        <div>
+          simulated time:
+          <button id="h1">+1 hour</button>
+          <button id="d1">+1 day</button>
+          <button id="d30">+30 days</button>
+        </div>
+      </div>
+      <div id="roster"></div>
+    </div>
+    <div class="col">
+      <b>journal</b> (declared expectation vs outcome, live)
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
