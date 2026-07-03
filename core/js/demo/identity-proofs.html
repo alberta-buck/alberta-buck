@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<!--
+  Alberta Buck: in-browser identity proof generation (Phase 3 demo).
+
+  The COMPLETE registration ceremony -- identity canonicalization, issuer
+  Pointcheval-Sanders signature, credential rerandomization, ElGamal
+  encryption, the registration NIZK, its pairing-product verification, and
+  the Chaum-Pedersen approve re-encryption -- runs client-side in this
+  page, on the same buck-identity kernel (compiled to wasm) that the
+  Python wallet and the Rust suite prove bit-identical to the executable
+  py_ecc specification.
+
+  Build + serve (ES modules require http, not file://):
+
+      make nix-core-demo-identity
+      python3 -m http.server -d core/js/demo 8000
+      open http://localhost:8000/identity-proofs.html
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Alberta Buck &mdash; in-browser identity proofs</title>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+           max-width: 60rem; margin: 2rem auto; padding: 0 1rem;
+           background: #101418; color: #d7dde4; }
+    h1 { font-size: 1.3rem; } h1 small { color: #7d8a97; font-weight: normal; }
+    #log div { padding: .15rem 0; border-bottom: 1px solid #1c232b; }
+    .ok::before   { content: "\2713 "; color: #55c47a; }
+    .fail::before { content: "\2717 "; color: #e05555; }
+    .step         { color: #8fb4d8; }
+    .t            { color: #7d8a97; float: right; }
+    #summary { margin-top: 1rem; padding: .6rem; border: 1px solid #2a3540; }
+  </style>
+</head>
+<body>
+  <h1>Alberta Buck identity proofs
+    <small>&mdash; generated in THIS browser tab by the buck-identity wasm kernel</small></h1>
+  <div id="log"></div>
+  <div id="summary">loading kernel&hellip;</div>
+
+  <script type="module">
+    import init, * as wasm from "./wasm-web/buck_identity.js";
+
+    const log = document.getElementById("log");
+    const summary = document.getElementById("summary");
+    const hex = (v) => "0x" + BigInt(v).toString(16).padStart(64, "0");
+    const short = (h) => h.slice(0, 12) + "…" + h.slice(-6);
+
+    function line(cls, text, ms) {
+      const d = document.createElement("div");
+      d.className = cls;
+      d.textContent = text;
+      if (ms !== undefined) {
+        const t = document.createElement("span");
+        t.className = "t";
+        t.textContent = `${ms.toFixed(1)} ms`;
+        d.appendChild(t);
+      }
+      log.appendChild(d);
+    }
+
+    function step(name, fn) {
+      const t0 = performance.now();
+      const out = fn();
+      line("ok", name, performance.now() - t0);
+      return out;
+    }
+
+    // Random non-zero scalar mod ORDER via WebCrypto (nonces are always
+    // caller-supplied: the kernel itself contains no randomness).
+    let ORDER;
+    function rand() {
+      for (;;) {
+        const b = new Uint8Array(32);
+        crypto.getRandomValues(b);
+        let v = 0n;
+        for (const x of b) v = (v << 8n) | BigInt(x);
+        v %= ORDER;
+        if (v) return v;
+      }
+    }
+
+    // canonical_identity_data: sorted keys, compact, ASCII-escaped.
+    const canonical = (fields) =>
+      JSON.stringify(Object.fromEntries(Object.keys(fields).sort()
+        .map((k) => [k, fields[k]])))
+        .replace(/[\u007f-\uffff]/g,
+          (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"));
+
+    try {
+      const t0 = performance.now();
+      await init();
+      ORDER = BigInt(wasm.order());
+      line("ok", "buck_identity.wasm initialized", performance.now() - t0);
+
+      // ---- the cast -----------------------------------------------------
+      const alice = {
+        given_name: "Alice", family_name: "Johnson",
+        jurisdiction: "Alberta, Canada", id_type: "Alberta Identity Card",
+        id_number: "AIC-2026-4839201", date_of_birth: "1992-03-15",
+        issuer_id: "atb-financial-ca", issued_at: new Date().toISOString(),
+        epoch: 42,
+      };
+
+      // ---- issuance ceremony ---------------------------------------------
+      line("step", "1. Issuance: the issuer KYCs Alice and signs her identity scalar");
+      const canon = step("canonical_identity_data (sorted-key compact JSON)",
+        () => canonical(alice));
+      const m = step("m = keccak256(canonical) mod ORDER",
+        () => BigInt(wasm.identity_scalar(canon)));
+      const [skX, skY] = [rand(), rand()];
+      const G2 = wasm.g2_generator();
+      const pkX = step("issuer PS public key X = x*G2",
+        () => wasm.g2_mul(...G2, hex(skX)));
+      const pkY = step("issuer PS public key Y = y*G2",
+        () => wasm.g2_mul(...G2, hex(skY)));
+      const sigma = step("PS signature sigma = (h, (x + m*y)*h)",
+        () => wasm.ps_sign(hex(skX), hex(skY), hex(m), hex(rand())));
+      const psOk = step("PS verify: e(sigma_1, X + m*Y) == e(sigma_2, g2)  [pairing]",
+        () => wasm.ps_verify(pkX, pkY, ...sigma, hex(m)));
+      if (!psOk) throw new Error("PS verification failed");
+
+      // ---- wallet-side derivation ---------------------------------------
+      line("step", "2. Identity Fountain: rerandomize; fresh account; encrypt M under it");
+      const sigmaP = step("sigma' = (t*sigma_1, t*sigma_2)  (unlinkable credential)",
+        () => wasm.ps_rerandomize(...sigma, hex(rand())));
+      const sk = rand();
+      const pk = step("account key pk = sk*G",
+        () => wasm.g1_mul("0x1", "0x2", hex(sk)));
+      const M = step("identity point M = m*G",
+        () => wasm.g1_mul("0x1", "0x2", hex(m)));
+      const r = rand();
+      const E = step("E_addr = (r*G, M + r*pk)  (ElGamal)",
+        () => wasm.elgamal_encrypt(...M, ...pk, hex(r)));
+
+      // ---- registration NIZK ---------------------------------------------
+      line("step", "3. Registration: prove sigma' signs the SAME m that E encrypts");
+      const registrant = "0x" + "a11ce".padStart(40, "0");
+      const proof = step("registration NIZK (IdentityRegistry.register calldata)",
+        () => wasm.registration_prove(sigmaP, hex(m), hex(r), ...pk, E,
+                                      registrant, hex(rand()), hex(rand())));
+      const regOk = step("registration verify: 2 ElGamal checks + 4-term pairing product",
+        () => wasm.registration_verify(sigmaP, E, ...pk, pkX, pkY, proof, registrant));
+      if (!regOk) throw new Error("registration NIZK rejected");
+      const regBad = step("counter-example: same proof, different registrant -> rejected",
+        () => !wasm.registration_verify(sigmaP, E, ...pk, pkX, pkY, proof,
+                                        "0x" + "bad".padStart(40, "0")));
+      if (!regBad) throw new Error("tampered registrant accepted!");
+
+      // ---- approve handshake ---------------------------------------------
+      line("step", "4. Approve: re-encrypt M for Bob + Chaum-Pedersen equality proof");
+      const skB = rand();
+      const pkB = wasm.g1_mul("0x1", "0x2", hex(skB));
+      const rP = rand();
+      const EB = step("E_for_bob = (r'*G, M + r'*pk_bob)",
+        () => wasm.elgamal_encrypt(...M, ...pkB, hex(rP)));
+      const spender = "0x" + "b0b".padStart(40, "0");
+      const cp = step("Chaum-Pedersen proof (IdentityRegistry.verifyApprove calldata)",
+        () => wasm.chaum_pedersen_prove(E, EB, ...pk, ...pkB, hex(sk), hex(rP),
+                                        registrant, spender, "0x1",
+                                        hex(rand()), hex(rand())));
+      const cpOk = step("Chaum-Pedersen verify (3 checks)",
+        () => wasm.chaum_pedersen_verify(E, EB, ...pk, ...pkB, cp,
+                                         registrant, spender, "0x1"));
+      if (!cpOk) throw new Error("approve handshake rejected");
+      const dec = step("Bob decrypts: M = C - sk_bob*R  (recovers Alice's M)",
+        () => wasm.elgamal_decrypt(...EB, hex(skB)));
+      if (dec[0] !== M[0] || dec[1] !== M[1]) throw new Error("decryption mismatch");
+
+      summary.innerHTML =
+        `<span style="color:#55c47a">all proofs generated and verified in-browser</span><br>` +
+        `m = ${short(hex(m))}<br>M = (${short(M[0])}, ${short(M[1])})<br>` +
+        `registration proof e = ${short(proof[0])}<br>` +
+        `kernel: buck_core.buck_identity (wasm, arkworks BN254) &mdash; ` +
+        `bit-identical to the py_ecc executable spec ` +
+        `(core/vectors/identity-kernel-vectors.json)`;
+    } catch (e) {
+      line("fail", String(e));
+      summary.textContent = "FAILED: " + e;
+      throw e;
+    }
+  </script>
+</body>
+</html>

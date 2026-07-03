@@ -32,6 +32,7 @@ node_modules/
 # Built kernel bindings (make nix-core-build)
 /core/python/buck_core/*.so
 /core/js/wasm/
+/core/js/demo/wasm-web/
 
 # Python
 __pycache__/

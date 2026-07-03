@@ -188,6 +188,9 @@ doc-%:		%.org
 #   make nix-venv-doc-flow     # execute the transcript + render .txt/.pdf
 #   make nix-venv-doc-paper
 #   make nix-venv-doc-receipt  # spawns anvil; needs forge artifacts (nix-build)
+doc-identity-example:
+	emacs --batch -l scripts/render-exec-doc.el alberta-buck-identity-example.org
+
 doc-flow:
 	emacs --batch -l scripts/render-exec-doc.el alberta-buck-notes-flow.org
 
@@ -904,6 +907,21 @@ core-build-wasm:
 	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target nodejs \
 		--out-dir ../../../js/wasm --out-name buck_identity
+
+# Browser (web-target) build of the identity kernel + the Phase 3 proof
+# demo page.  Serve the demo (ES modules need http, not file://):
+#   make nix-core-demo-identity
+#   python3 -m http.server -d core/js/demo 8000
+#   open http://localhost:8000/identity-proofs.html
+core-build-wasm-web:
+	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
+	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
+		build --release --target web \
+		--out-dir ../../../js/demo/wasm-web --out-name buck_identity
+
+core-demo-identity:	core-build-wasm-web
+	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
+	@echo "       then open http://localhost:8000/identity-proofs.html"
 
 core-build:	core-build-py core-build-wasm
 
