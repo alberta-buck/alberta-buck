@@ -104,7 +104,8 @@ def test_text_driver_width_respected(vectors):
 
 ALL_KINDS = ["eoa_pub", "eoa_priv",
              "note_b1", "note_a1", "note_a2",
-             "note_b1_issuer", "note_a1_issuer", "note_a2_issuer"]
+             "note_b1_issuer", "note_a1_issuer", "note_a2_issuer",
+             "eoa_pub_unicode"]
 
 
 @pytest.mark.parametrize("kind", ALL_KINDS)

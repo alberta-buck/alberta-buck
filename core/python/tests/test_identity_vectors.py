@@ -308,6 +308,13 @@ def test_identity_fixture(iv):
             iss_x, iss_y, proof, _i(p["registrant"]),
         )
 
+    # Unicode canonical-dialect pin: raw UTF-8 (accents + CJK) hashes to m.
+    up = iv["unicode_party"]
+    canonical = up["canonical_identity_data"]
+    assert "Chloé" in canonical and "李" in canonical and "\\u" not in canonical
+    assert bi.identity_scalar(canonical) == _i(up["m"])
+    assert bi.g1_mul(bi.G1, _i(up["m"])) == _pt(up["M"])
+
     ap = iv["approve"]
     assert bi.elgamal_encrypt(
         _pt(iv["alice"]["M"]), _pt(iv["bob"]["elgamal_kp"]["pk"]), _i(ap["r_prime"]),

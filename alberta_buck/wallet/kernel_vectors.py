@@ -154,6 +154,10 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     idents = [
         {"given_name": "Alice", "epoch": 42},
         {"given_name": "Zoë", "café": True, "n": 7},
+        # Astral-plane coverage: the maple emoji is a surrogate pair in
+        # UTF-16 hosts (JS) and 4 UTF-8 bytes -- external implementations
+        # must hash the raw UTF-8, not escapes.
+        {"city": "Sainte-Thérèse", "note": "🍁 maple", "李": "CJK key"},
         {},
     ]
     out["identity_scalar"] = []

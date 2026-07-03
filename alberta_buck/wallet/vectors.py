@@ -116,6 +116,23 @@ CHAINID    = 1
 # isPublicIdentity contract without colliding with the registered EOAs.
 ISSUER_SCHNORR_ADDR = 0x155EC00000000000000000000000000000155EC0
 
+# The unicode payer (eoa-pub-unicode receipt): a plausible franco-Albertan
+# identity whose canonical form pins the raw-UTF-8 dialect -- Latin-1
+# accents plus a CJK character -- through the identity scalar, the receipt
+# envelope, and the rendered golden text.
+UNICODE_FIELDS = {
+    "given_name":    "Chloé",
+    "family_name":   "Bélanger-李",
+    "jurisdiction":  "Alberta, Canada",
+    "id_type":       "Alberta Identity Card",
+    "id_number":     "AIC-2026-0007744",
+    "date_of_birth": "1994-11-02",
+    "issuer_id":     "atb-financial-ca",
+    "issued_at":     "2026-03-01T08:00:00Z",
+    "epoch":         42,
+}
+UNICODE_ADDR = 0xC10E00000000000000000000000000000000C10E
+
 
 @dataclass
 class _Party:
@@ -414,17 +431,41 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     note_a2_iss_core = build_note_a2(
         role="issuer", issuer_sk=bob.kp.sk, rng=rng, **_a2_common)
 
+    # -- eoa-pub-unicode: the canonical-dialect torture split.  A payer whose
+    # identity exercises the raw-UTF-8 canonical dialect (Latin accents +
+    # CJK; the kernel vectors add an astral-emoji row), so the WHOLE pipeline
+    # -- canonical bytes -> m -> receipt core -> base64url envelope ->
+    # receipt_id -> rendered golden text -- pins unicode handling, and an
+    # external implementation that escapes or mangles encodings fails the
+    # fixtures loudly.  Built last: its draws stay clear of every pinned
+    # section above.
+    uni_canonical = canonical_identity_data(UNICODE_FIELDS)
+    uni_m = identity_scalar(uni_canonical)
+    uni_M = mul(G1, uni_m)
+    uni_kp = identity_keygen(rng=rng)
+    eoa_pub_unicode_core = build_eoa_pub(
+        chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
+        payer_addr=UNICODE_ADDR, payer_identity=uni_canonical, payer_M=uni_M,
+        payer_pk=uni_kp.pk,
+        payee_addr=BOB_ADDR, payee_identity=bob.canonical, payee_M=bob.M,
+        payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
+        value=1_250000, block_time=RCPT_TIME,
+        txhash="0x" + "1f" * 32, block=1234601, logindex=3,
+        rng=rng,
+    )
+
     # Serialise for the vector file — both the canonical bytes and the envelope
     # text, so the off-chain verifier tests can load them directly.
     abrcpt_cores = {
-        "eoa_pub":        eoa_pub_core,
-        "eoa_priv":       eoa_priv_core,
-        "note_b1":        note_b1_core,
-        "note_a1":        note_a1_core,
-        "note_a2":        note_a2_core,
-        "note_b1_issuer": note_b1_iss_core,
-        "note_a1_issuer": note_a1_iss_core,
-        "note_a2_issuer": note_a2_iss_core,
+        "eoa_pub":         eoa_pub_core,
+        "eoa_priv":        eoa_priv_core,
+        "note_b1":         note_b1_core,
+        "note_a1":         note_a1_core,
+        "note_a2":         note_a2_core,
+        "note_b1_issuer":  note_b1_iss_core,
+        "note_a1_issuer":  note_a1_iss_core,
+        "note_a2_issuer":  note_a2_iss_core,
+        "eoa_pub_unicode": eoa_pub_unicode_core,
     }
     abrcpt = {}
     for kind, core in abrcpt_cores.items():
@@ -447,6 +488,14 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         },
         "alice": _party_to_json(alice),
         "bob":   _party_to_json(bob),
+        # Unicode canonical-dialect pin: external implementations must
+        # reproduce m over the raw UTF-8 bytes of this canonical string.
+        "unicode_party": {
+            "fields":    UNICODE_FIELDS,
+            "canonical_identity_data": uni_canonical,
+            "m":         scalar_to_hex(uni_m),
+            "M":         _g1(uni_M),
+        },
         "approve": {
             "sender":   scalar_to_hex(ALICE_ADDR),
             "spender":  scalar_to_hex(BOB_ADDR),

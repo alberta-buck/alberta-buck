@@ -322,7 +322,8 @@ def test_parse_envelope_rejects_missing_footer():
 # ---- verify the vector-emitted envelopes parse and verify -------------------
 
 ALL_VECTOR_KINDS = ["eoa_pub", "eoa_priv", "note_b1", "note_a1", "note_a2",
-                    "note_b1_issuer", "note_a1_issuer", "note_a2_issuer"]
+                    "note_b1_issuer", "note_a1_issuer", "note_a2_issuer",
+                    "eoa_pub_unicode"]
 
 
 @pytest.mark.parametrize("kind", ALL_VECTOR_KINDS)
@@ -336,6 +337,41 @@ def test_vector_envelope_verifies(vectors, kind):
     res = verify_receipt(core)
     assert res.ok, f"{kind}: {res.reason}"
     assert res.reason == "VALID"
+
+
+def test_unicode_receipt_pins_the_canonical_dialect(vectors):
+    """The eoa-pub-unicode receipt forces raw-UTF-8 handling end to end:
+    the payer's canonical preimage (Latin accents + CJK) must be a
+    canonical_json fixpoint, recompute to the named m/M, survive the
+    base64url envelope round-trip byte-for-byte, and render its name."""
+    import json as _json
+
+    from alberta_buck.wallet.identity import canonical_json, identity_scalar
+    from alberta_buck.wallet.bn254 import G1, mul, point_to_words
+    from alberta_buck.wallet.envelope import envelope_text, serialize_core, receipt_id
+    from alberta_buck.wallet.render import render_receipt, TextDriver
+
+    entry = vectors["abrcpt"]["eoa_pub_unicode"]
+    core = deserialize_core(parse_envelope(entry["envelope"]))
+
+    # The preimage really is non-ASCII, raw (no \\uXXXX escape sequences).
+    canonical = core.payer.identity
+    assert "Chloé" in canonical and "Bélanger-李" in canonical
+    assert "\\u" not in canonical
+
+    # Canonical fixpoint + m/M recomputation over the UTF-8 bytes.
+    assert canonical_json(_json.loads(canonical)) == canonical
+    m = identity_scalar(canonical)
+    assert mul(G1, m) == core.payer.M_pt
+
+    # Envelope round-trip is byte-identical; receipt_id matches.
+    b = serialize_core(core)
+    assert envelope_text(b) == entry["envelope"]
+    assert receipt_id(b) == entry["id"]
+
+    # The rendered slip names the unicode payer.
+    text = TextDriver(48).render(render_receipt(core))
+    assert "Chloé" in text and "李" in text
 
 
 # ---- Identity-M binding negatives -------------------------------------------

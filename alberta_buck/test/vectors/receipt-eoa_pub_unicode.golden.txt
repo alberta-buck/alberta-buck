@@ -1,0 +1,32 @@
+                 ALBERTA  BUCK                  
+         P A Y M E N T   R E C E I P T          
+------------------------------------------------
+  Receipt  62vgyjooke6m
+------------------------------------------------
+FROM (payer) (PUBLIC IDENTITY)
+ Chloé Bélanger-李
+Alberta Identity Card - Alberta, Canada
+ acct 0xc10e00000000000000000000000000000000c10e
+ idpt 0x19ec0621f492..a25ea38585bf
+------------------------------------------------
+TO (payee - you) (PRIVATE IDENTITY)
+ Bob Smith
+Corporate Registration - Alberta, Canada
+ acct 0x0b0b000000000000000000000000000000000b0b
+ idpt 0x0cef52e77ea5..0ae1f916d96b
+------------------------------------------------
+TRANSACTION
+ Type    EOA xfer (Identity-bound, public payer)
+ Amount              1.250000  BUCK
+ When        2026-05-28 20:10  UTC
+ Chain                      1
+ Block                1234601
+ Log                        3
+ Tx      0x1f1f1f1f1f1f..1f1f1f1f1f1f
+------------------------------------------------
+VERIFICATION
+ status @ issue: VALID
+ receipt  62vgyjooke6m
+------------------------------------------------
+        a record, not a bearer instrument       
+        github.com/pjkundert/alberta-buck       

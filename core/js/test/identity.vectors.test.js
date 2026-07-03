@@ -262,6 +262,16 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
       sigR, ct(p.ciphertext), pt(p.elgamal_kp.pk), issX, issY, proof, B(p.registrant)));
   }
 
+  // unicode canonical-dialect pin: raw UTF-8 (accents + CJK + sorted keys)
+  const up = IV.unicode_party;
+  assert.ok(up.canonical_identity_data.includes("Chloé"));
+  assert.ok(up.canonical_identity_data.includes("李"));
+  assert.ok(!up.canonical_identity_data.includes("\\u"));
+  assert.equal(id.identityScalar(up.canonical_identity_data), B(up.m));
+  assert.equal(id.canonicalIdentity(JSON.parse(up.canonical_identity_data)),
+    up.canonical_identity_data);
+  assert.deepEqual(id.g1Mul(id.G1, B(up.m)), pt(up.M));
+
   // approve
   const ap = IV.approve;
   assert.deepEqual(

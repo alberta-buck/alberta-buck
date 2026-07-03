@@ -361,6 +361,10 @@
    "m": "0x0e52037e0f39f637edcefc8c08133f6a6af99e83b7bd30255c915c131579356c"
   },
   {
+   "canonical": "{\"city\":\"Sainte-Th\u00e9r\u00e8se\",\"note\":\"\ud83c\udf41 maple\",\"\u674e\":\"CJK key\"}",
+   "m": "0x2108601acd57c2fc7ca156b2f7e20fd0748e972f3ca83a2d0e473521aa565508"
+  },
+  {
    "canonical": "{}",
    "m": "0x23604da09b1527c30b0b884d3b12dc424aa094029aac37f7350ef583c590739a"
   }

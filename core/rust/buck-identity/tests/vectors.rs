@@ -264,6 +264,21 @@ fn golden_identity_fixture() {
         .unwrap());
     }
 
+    // ---- unicode canonical-dialect pin ----------------------------------
+    //
+    // Raw UTF-8 (Latin accents + CJK, no \uXXXX escapes) must hash to the
+    // recorded identity scalar -- an implementation that escapes or
+    // re-encodes the canonical bytes fails here.
+    let up = &v["unicode_party"];
+    let canonical = up["canonical_identity_data"].as_str().unwrap();
+    assert!(canonical.contains("Chloé") && canonical.contains("李"));
+    assert!(!canonical.contains("\\u"));
+    assert_eq!(keccak::identity_scalar(canonical.as_bytes()), jw(&up["m"]));
+    assert_eq!(
+        g1_mul(&g1_generator(), &jw(&up["m"])).unwrap(),
+        jg1(&up["M"])
+    );
+
     // ---- approve: Chaum-Pedersen re-encryption -------------------------
     let ap = &v["approve"];
     let e_alice = jct(&ap["E_alice"]);
