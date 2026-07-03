@@ -48,7 +48,7 @@ Table of Contents
 4. Phase plan
 .. 1. Phase 0: seam + scaffold  [status: DONE 2026-07-03]
 .. 2. Phase 1: JS ChainSession + walking-skeleton agents  [status: DONE 2026-07-03]
-.. 3. Phase 2: `buck-math' + bindings
+.. 3. Phase 2: `buck-math' + bindings  [status: DONE 2026-07-03]
 .. 4. Phase 3: `buck-identity' port
 .. 5. Phase 4: JS sim platform + live-interactive demos
 .. 6. Phase 5: scale-up
@@ -309,13 +309,28 @@ Table of Contents
     `data.errorName').
 
 
-4.3 Phase 2: `buck-math' + bindings
-───────────────────────────────────
+4.3 Phase 2: `buck-math' + bindings  [status: DONE 2026-07-03]
+──────────────────────────────────────────────────────────────
 
   Integer kernel (depreciation, demurrage/buckSeconds, fundingFactor,
   PID ppm, fees); forge-generated golden vectors; wasm-pack npm package;
   PyO3 wheel; `alberta_buck' sim mirrors (e.g. the agents'
   fundingFactor) and wallet fee math flip to the binding.
+  • /Met/: `test/MathVectors.t.sol' drives the REAL code paths
+    (`_depreciate', public `feeOwing' incl. its raw<=0 gate,
+    `_carryingTransfer', Direct `compute()' with
+    cache/dTMax/anti-windup, `fundingFactor') into 347 golden rows; the
+    `buck-math' crate (no_std, dependency-free, hand-rolled 256-bit
+    mulDiv, overflow-checks in every profile) reproduces all of them, as
+    do the PyO3 binding (`buck_core.buck_math', plain-cargo cdylib) and
+    the wasm-bindgen package (`core/js/wasm', BigInt API) – suites:
+    cargo 16, pytest 15, node 12.  NOTE: no exact-integer mirror existed
+    in the Python sim to flip (the agents' funding factor is
+    deliberately BEHAVIORAL float math with stochastic knobs), so the
+    "canonical vector unchanged" gate was vacuous; the kernel is the
+    canonical prediction surface for partner SDKs, wallets, and future
+    sim/eqmetrics uses.  Builds: `make nix-core-build{,-py,-wasm}'; the
+    repo venv hosts alberta_buck AND -e core/python together.
   • /Accept/: Rust/Python/JS byte-equal on the forge vectors; canonical
     equilibrium vector unchanged after the sim flips to the binding.
 
@@ -326,10 +341,21 @@ Table of Contents
   arkworks BN254 + Poseidon + PS + ElGamal + Schnorr + Chaum-Pedersen +
   NIZK transcripts; PyO3 + wasm bindings; `alberta_buck/wallet'
   delegates.
+
+  Includes the PAPERS: the org design docs that demonstrate
+  identity-related proofs with Python example code (the executable
+  transcript docs – `alberta-buck-identity-example.org' and the
+  notes/receipt/paper family rendered via `make nix-venv-doc-%' – plus
+  any inline identity examples) are updated to exercise the NEW
+  implementation through the `buck_core.buck_math'-style identity
+  binding, so the published documents demonstrate the production kernel,
+  not the py_ecc reference.  The Python reference in
+  `alberta_buck/wallet' remains during the port as the executable spec.
   • /Accept/: existing wallet vectors (`alberta_buck/wallet/vectors.py',
     SNARK fixtures) reproduce bit-identically; on-chain registration in
     the sim verifies; identity-cache regeneration matches; in-browser
-    proof generation demonstrated.
+    proof generation demonstrated; the executable identity papers render
+    green against the new binding.
 
 
 4.5 Phase 4: JS sim platform + live-interactive demos

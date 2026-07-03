@@ -283,10 +283,21 @@ wallet fee math flip to the binding.
 ** Phase 3: =buck-identity= port
 arkworks BN254 + Poseidon + PS + ElGamal + Schnorr + Chaum-Pedersen + NIZK
 transcripts; PyO3 + wasm bindings; =alberta_buck/wallet= delegates.
+
+Includes the PAPERS: the org design docs that demonstrate identity-related
+proofs with Python example code (the executable transcript docs --
+=alberta-buck-identity-example.org= and the notes/receipt/paper family
+rendered via =make nix-venv-doc-%= -- plus any inline identity examples)
+are updated to exercise the NEW implementation through the
+=buck_core.buck_math=-style identity binding, so the published documents
+demonstrate the production kernel, not the py_ecc reference.  The Python
+reference in =alberta_buck/wallet= remains during the port as the
+executable spec.
 - /Accept/: existing wallet vectors (=alberta_buck/wallet/vectors.py=,
   SNARK fixtures) reproduce bit-identically; on-chain registration in the
   sim verifies; identity-cache regeneration matches; in-browser proof
-  generation demonstrated.
+  generation demonstrated; the executable identity papers render green
+  against the new binding.
 
 ** Phase 4: JS sim platform + live-interactive demos
 Agent API + simulated time + price feeds on Tevm-in-browser; the demo
