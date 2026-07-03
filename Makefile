@@ -847,6 +847,28 @@ sim-plot-eq-%:
 		python -m pytest $(SIM_EQ_PLOT) -v -s
 
 
+# ── Core platform (core/: kernel + sessions; alberta-buck-platform.org) ──
+#
+#   make nix-core-test          # all three suites (Python, JS, Rust)
+#
+# Tests are minimal in Rust (kernel is vector-driven), primary in Python
+# and JS.  The journal fixture (core/vectors/) is asserted by BOTH the
+# Python and JS suites -- change it only with both in hand.
+
+.PHONY: core-test core-test-py core-test-js core-test-rust
+
+core-test-py:
+	python -m pytest core/python/tests -q
+
+core-test-js:
+	cd core/js && node --test
+
+core-test-rust:
+	cd core/rust && cargo test --quiet
+
+core-test:	core-test-py core-test-js core-test-rust
+
+
 # ── Dependencies ─────────────────────────────────────────────────────
 
 install:

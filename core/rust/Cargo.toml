@@ -1,0 +1,16 @@
+# Alberta Buck core kernel workspace (see alberta-buck-platform.org, Layer 2).
+#
+# Crates land by phase: buck-math (Phase 2), buck-identity (Phase 3),
+# buck-wallet + bindings/js (wasm-bindgen) + bindings/py (PyO3) alongside.
+# Keep kernel crates no_std-compatible: the same code must compile into
+# Holochain zomes (the holo-mutualcredit pattern).
+
+[workspace]
+resolver = "2"
+members = [
+    "buck-math",
+]
+
+[profile.release]
+lto = true
+opt-level = "s"

@@ -25,6 +25,10 @@
 # Node (if used for tooling)
 node_modules/
 
+# Rust (core/rust workspace; lockfile committed once binding crates land)
+/core/rust/target/
+/core/rust/Cargo.lock
+
 # Python
 __pycache__/
 *.pyc
@@ -44,3 +48,4 @@ lcov.info
 *.fls
 *.log
 foundry.lock
+/raw-materials-price/
