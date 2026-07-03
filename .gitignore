@@ -29,6 +29,10 @@ node_modules/
 /core/rust/target/
 /core/rust/Cargo.lock
 
+# Built kernel bindings (make nix-core-build)
+/core/python/buck_core/*.so
+/core/js/wasm/
+
 # Python
 __pycache__/
 *.pyc

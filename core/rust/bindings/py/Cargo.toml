@@ -1,0 +1,17 @@
+[package]
+name = "buck-math-py"
+version = "0.0.1"
+edition = "2021"
+description = "Python binding for the buck-math kernel (import buck_math)"
+license = "MIT"
+
+[lib]
+name = "buck_math"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Aliased: the cdylib itself is named buck_math (the Python module), which
+# would shadow the kernel crate's name in paths.
+kernel = { path = "../../buck-math", package = "buck-math" }
+# abi3-py311: one artifact serves CPython >= 3.11.
+pyo3 = { version = "0.24", features = ["extension-module", "abi3-py311"] }

@@ -257,11 +257,26 @@ the shared schema; a whale + one arb agent in TS/JS.
   =e.walk(ContractFunctionRevertedError)= (=reason= or
   =data.errorName=).
 
-** Phase 2: =buck-math= + bindings
+** Phase 2: =buck-math= + bindings  [status: DONE 2026-07-03]
 Integer kernel (depreciation, demurrage/buckSeconds, fundingFactor, PID
 ppm, fees); forge-generated golden vectors; wasm-pack npm package; PyO3
 wheel; =alberta_buck= sim mirrors (e.g. the agents' fundingFactor) and
 wallet fee math flip to the binding.
+- /Met/: =test/MathVectors.t.sol= drives the REAL code paths
+  (=_depreciate=, public =feeOwing= incl. its raw<=0 gate,
+  =_carryingTransfer=, Direct =compute()= with cache/dTMax/anti-windup,
+  =fundingFactor=) into 347 golden rows; the =buck-math= crate (no_std,
+  dependency-free, hand-rolled 256-bit mulDiv, overflow-checks in every
+  profile) reproduces all of them, as do the PyO3 binding
+  (=buck_core.buck_math=, plain-cargo cdylib) and the wasm-bindgen
+  package (=core/js/wasm=, BigInt API) -- suites: cargo 16, pytest 15,
+  node 12.  NOTE: no exact-integer mirror existed in the Python sim to
+  flip (the agents' funding factor is deliberately BEHAVIORAL float math
+  with stochastic knobs), so the "canonical vector unchanged" gate was
+  vacuous; the kernel is the canonical prediction surface for partner
+  SDKs, wallets, and future sim/eqmetrics uses.  Builds:
+  =make nix-core-build{,-py,-wasm}=; the repo venv hosts alberta_buck
+  AND -e core/python together.
 - /Accept/: Rust/Python/JS byte-equal on the forge vectors; canonical
   equilibrium vector unchanged after the sim flips to the binding.
 

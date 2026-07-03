@@ -9,8 +9,13 @@
 resolver = "2"
 members = [
     "buck-math",
+    "bindings/py",
+    "bindings/js",
 ]
 
 [profile.release]
 lto = true
 opt-level = "s"
+# Kernel correctness over speed: Solidity 0.8 checked arithmetic reverts
+# on overflow; the kernel must panic there too, in every profile.
+overflow-checks = true

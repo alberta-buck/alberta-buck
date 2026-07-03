@@ -1,0 +1,9 @@
+# Link flags for building Python extension modules (bindings/py) with
+# plain cargo -- what maturin/setuptools-rust would otherwise inject.
+# Python symbols resolve at import time from the hosting interpreter.
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

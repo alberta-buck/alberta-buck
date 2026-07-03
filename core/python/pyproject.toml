@@ -20,3 +20,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["buck_core*"]
+
+[tool.setuptools.package-data]
+# The compiled buck-math kernel (built by `make nix-core-build-py`) ships
+# inside the package: import buck_core.buck_math.
+buck_core = ["*.so"]

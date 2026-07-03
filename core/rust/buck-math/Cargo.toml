@@ -6,3 +6,6 @@ description = "Alberta Buck integer monetary arithmetic, bit-identical to the So
 license = "MIT"
 
 [dependencies]
+
+[dev-dependencies]
+serde_json = "1"

@@ -849,16 +849,41 @@ sim-plot-eq-%:
 
 # ── Core platform (core/: kernel + sessions; alberta-buck-platform.org) ──
 #
+#   make nix-core-build         # kernel bindings: Python .so + JS wasm pkg
 #   make nix-core-test          # all three suites (Python, JS, Rust)
+#   make nix-venv-core-test-py  # the Python suite inside the repo venv
+#                               # (which installs alberta_buck AND -e
+#                               #  core/python; see the venv recipe)
 #
 # Tests are minimal in Rust (kernel is vector-driven), primary in Python
-# and JS.  The journal fixture (core/vectors/) is asserted by BOTH the
-# Python and JS suites -- change it only with both in hand.
+# and JS.  The golden math vectors (test/vectors/math-vectors.json, from
+# make nix-match-MathVectors) are asserted bit-identically by all three;
+# the journal fixture (core/vectors/) by Python and JS -- change either
+# only with every consuming suite in hand.
 
 .PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps
+.PHONY: core-build core-build-py core-build-wasm
 
 core-js-deps:
 	cd core/js && npm ci
+
+# The Python kernel binding: a PyO3 cdylib built with plain cargo (the
+# .cargo/config.toml link flags stand in for maturin) and placed inside
+# the buck_core package -- import buck_core.buck_math.
+core-build-py:
+	cd core/rust && cargo build --release -p buck-math-py
+	cp core/rust/target/release/libbuck_math.dylib \
+	   core/python/buck_core/buck_math.so
+
+# The JS kernel binding: wasm-pack (npm devDependency of core/js) emits a
+# nodejs-target package into core/js/wasm/.  BigInt in, BigInt out.
+core-build-wasm:
+	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
+	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
+		build --release --target nodejs \
+		--out-dir ../../../js/wasm --out-name buck_math
+
+core-build:	core-build-py core-build-wasm
 
 core-test-py:
 	python -m pytest core/python/tests -q
@@ -911,7 +936,8 @@ venv-%:			"$(VENV)"
 	@echo; echo "*** Building $@ VirtualEnv..."
 	@rm -rf $@ && $(PYTHON) -m venv $(VENV_OPTS) "$@" && sed -i -e '1s:^:. $$HOME/.bashrc\n:' "$@/bin/activate" \
 	    && source $@/bin/activate \
-	    && python -m pip install --no-user --upgrade "$(BUCK_PYTHON)[tests,dev]"
+	    && python -m pip install --no-user --upgrade "$(BUCK_PYTHON)[tests,dev]" \
+	    && python -m pip install --no-user -e "$(BUCK_PYTHON)/core/python"
 
 venv-activate:
 	pip install -e ".[tests]"

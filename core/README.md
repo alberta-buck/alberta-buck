@@ -10,7 +10,9 @@ Python package keeps working and transitions onto these incrementally.
     core/
       python/     buck_core package: ChainSession API (session.py) --
                   send/call/deploy with expect=OK|REVERT + JSONL journal --
-                  and Foundry artifact helpers.  Later: PyO3 kernel bindings.
+                  Foundry artifact helpers, and the compiled buck-math
+                  kernel (import buck_core.buck_math; built by
+                  make nix-core-build-py).
       js/         @alberta-buck/core (ESM): the JS ChainSession (session.js,
                   over any viem client), backends.js (anvilSession joins a
                   running anvil -- e.g. one a Python sim deployed into --
@@ -20,9 +22,15 @@ Python package keeps working and transitions onto these incrementally.
                   scenario, and bin/join-sim.mjs.  Deps: viem + tevm
                   (`npm ci` in core/js).  Later: WASM kernel bindings,
                   browser demo harness.
-      rust/       cargo workspace: buck-math seed (integer bp/ppm scaling).
-                  Later: full buck-math, buck-identity, buck-wallet,
-                  bindings/{js,py}.  Kernel crates stay no_std (Holochain).
+      rust/       cargo workspace: buck-math -- the integer monetary kernel
+                  (BuckCredit depreciation, Buck demurrage fee + carrying
+                  buckSeconds apportionment, BuckKControllerDirect ppm PID +
+                  fundingFactor + bumpless governance algebra), no_std and
+                  dependency-free (wide.rs hand-rolls the 256-bit mulDiv);
+                  bindings/py (PyO3 cdylib -> buck_core.buck_math) and
+                  bindings/js (wasm-bindgen -> core/js/wasm, BigInt API).
+                  Later: buck-identity, buck-wallet.  Kernel crates stay
+                  no_std (Holochain zomes consume them).
       vectors/    cross-language fixtures.  journal-sample.jsonl pins the
                   journal schema; the Python and JS suites assert the same
                   facts about the same file.
@@ -41,14 +49,24 @@ Python package keeps working and transitions onto these incrementally.
 ## Build / test
 
     make nix-core-js-deps       # one-time: npm ci in core/js
+    make nix-core-build         # kernel bindings: Python .so + JS wasm pkg
     make nix-core-test          # all three suites
     make nix-core-test-py       # python -m pytest core/python/tests
     make nix-core-test-js       # cd core/js && node --test
     make nix-core-test-rust     # cd core/rust && cargo test
+    make nix-venv-core-test-py  # Python suite inside the repo venv
 
-The Tevm-backed JS tests and the mixed-language join test
-(`alberta_buck/test/test_js_join_web3.py`) need the Foundry artifacts
-(`make nix-sim-build`) and skip cleanly without them.
+The repo venv (`make venv` machinery) hosts BOTH packages: it installs
+`alberta_buck[tests,dev]` and `-e core/python`, so `import alberta_buck`
+and `import buck_core` coexist; the editable core install sees kernel
+rebuilds immediately.  Nothing is ever pip-installed into the global or
+user site-packages.
+
+The golden math vectors (`test/vectors/math-vectors.json`) are generated
+from the REAL contract code paths by `make nix-match-MathVectors` and
+asserted bit-identically by all three suites.  The Tevm-backed JS tests,
+kernel-binding tests, and the mixed-language join test skip cleanly when
+their artifacts aren't built.
 
 ## Journal schema (v1)
 
