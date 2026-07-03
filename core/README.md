@@ -11,9 +11,15 @@ Python package keeps working and transitions onto these incrementally.
       python/     buck_core package: ChainSession API (session.py) --
                   send/call/deploy with expect=OK|REVERT + JSONL journal --
                   and Foundry artifact helpers.  Later: PyO3 kernel bindings.
-      js/         @alberta-buck/core (ESM, zero deps today): journal
-                  reader/rollup.  Later: viem ChainSession over Tevm/anvil,
-                  agent API, WASM kernel bindings.
+      js/         @alberta-buck/core (ESM): the JS ChainSession (session.js,
+                  over any viem client), backends.js (anvilSession joins a
+                  running anvil -- e.g. one a Python sim deployed into --
+                  tevmSession runs the in-process EVM), the shared journal
+                  reader/writer, V3 price math (v3.js), the agent loop
+                  (world.js) with PinWhale + RoundTripTrader, the one-pool
+                  scenario, and bin/join-sim.mjs.  Deps: viem + tevm
+                  (`npm ci` in core/js).  Later: WASM kernel bindings,
+                  browser demo harness.
       rust/       cargo workspace: buck-math seed (integer bp/ppm scaling).
                   Later: full buck-math, buck-identity, buck-wallet,
                   bindings/{js,py}.  Kernel crates stay no_std (Holochain).
@@ -34,10 +40,15 @@ Python package keeps working and transitions onto these incrementally.
 
 ## Build / test
 
+    make nix-core-js-deps       # one-time: npm ci in core/js
     make nix-core-test          # all three suites
     make nix-core-test-py       # python -m pytest core/python/tests
     make nix-core-test-js       # cd core/js && node --test
     make nix-core-test-rust     # cd core/rust && cargo test
+
+The Tevm-backed JS tests and the mixed-language join test
+(`alberta_buck/test/test_js_join_web3.py`) need the Foundry artifacts
+(`make nix-sim-build`) and skip cleanly without them.
 
 ## Journal schema (v1)
 

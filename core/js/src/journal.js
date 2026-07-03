@@ -6,10 +6,35 @@
 //   i, tag, op, fn, sender, expect, outcome, matched, gas, tx, block, err
 // Unknown fields are ignored; extra whitespace/blank lines are tolerated.
 //
-// The reader comes first (JS consumes Python-produced journals for demos
-// and cross-platform diffing); the writer lands with the JS ChainSession.
+// JournalWriter mirrors buck_core.session.Journal: entries in FIELDS
+// order, compact separators, missing fields as "" -- so identical runs
+// produce byte-identical lines across languages.  It writes through a
+// caller-supplied sink so this module stays environment-agnostic; use
+// nodefs.js fileJournalWriter() for a file sink in Node.
 
 const REQUIRED = ["i", "op", "fn", "expect", "outcome", "matched"];
+
+export const FIELDS = ["i", "tag", "op", "fn", "sender", "expect", "outcome",
+                       "matched", "gas", "tx", "block", "err"];
+
+export class JournalWriter {
+  /** @param {(line: string) => void} sink called with one JSONL line per entry */
+  constructor(sink) {
+    this.sink = sink;
+    this.seq = 0;
+  }
+
+  /** Record one entry; fills schema order, returns the entry object. */
+  record(fields) {
+    this.seq += 1;
+    const entry = { i: this.seq };
+    for (const f of FIELDS) {
+      if (f !== "i") entry[f] = fields[f] ?? "";
+    }
+    this.sink(JSON.stringify(entry) + "\n");
+    return entry;
+  }
+}
 
 /** Parse JSONL journal text into an array of entry objects. */
 export function parseJournal(text) {

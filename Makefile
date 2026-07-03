@@ -855,12 +855,16 @@ sim-plot-eq-%:
 # and JS.  The journal fixture (core/vectors/) is asserted by BOTH the
 # Python and JS suites -- change it only with both in hand.
 
-.PHONY: core-test core-test-py core-test-js core-test-rust
+.PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps
+
+core-js-deps:
+	cd core/js && npm ci
 
 core-test-py:
 	python -m pytest core/python/tests -q
 
 core-test-js:
+	@test -d core/js/node_modules || { echo "core/js deps missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/js && node --test
 
 core-test-rust:

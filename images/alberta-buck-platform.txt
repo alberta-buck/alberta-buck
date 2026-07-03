@@ -46,8 +46,8 @@ Table of Contents
 .. 3. Layer 3: agent platforms – Python today, JS as a peer
 3. Repository layout and transition strategy
 4. Phase plan
-.. 1. Phase 0: seam + scaffold  [status: IN PROGRESS 2026-07-03]
-.. 2. Phase 1: JS ChainSession + walking-skeleton agents
+.. 1. Phase 0: seam + scaffold  [status: DONE 2026-07-03]
+.. 2. Phase 1: JS ChainSession + walking-skeleton agents  [status: DONE 2026-07-03]
 .. 3. Phase 2: `buck-math' + bindings
 .. 4. Phase 3: `buck-identity' port
 .. 5. Phase 4: JS sim platform + live-interactive demos
@@ -274,8 +274,8 @@ Table of Contents
   criteria, and is banked with vectors/journals before the next begins.
 
 
-4.1 Phase 0: seam + scaffold  [status: IN PROGRESS 2026-07-03]
-──────────────────────────────────────────────────────────────
+4.1 Phase 0: seam + scaffold  [status: DONE 2026-07-03]
+───────────────────────────────────────────────────────
 
   `core/' scaffold; Python `ChainSession' (expectation + journal)
   extracted from `sim/chain.py', which becomes a delegating subclass; JS
@@ -284,16 +284,29 @@ Table of Contents
   • /Accept/: routing smoke green on the new session; core
     Python/JS/Rust tests green; the same journal fixture parses
     identically in Python & JS.
+  • /Met/: routing smoke green; suites 9 py / 5 js / 3 rust; a journaled
+    live sim run (491 ops, 153M gas, zero mismatches) summarized by the
+    JS reader.
 
 
-4.2 Phase 1: JS ChainSession + walking-skeleton agents
-──────────────────────────────────────────────────────
+4.2 Phase 1: JS ChainSession + walking-skeleton agents  [status: DONE 2026-07-03]
+─────────────────────────────────────────────────────────────────────────────────
 
   viem-based session with Tevm and anvil transports; journal writer
   emitting the shared schema; a whale + one arb agent in TS/JS.
   • /Accept/: the JS agent pair runs (a) against a Python-deployed anvil
     sim (mixed-language) and (b) standalone on Tevm in Node; journals
     validate.
+  • /Met/: (a) `test_js_join_web3.py' – Python deploys the routing
+    stack, the JS `PinWhale' snaps the real TOKEN/USDC pool along a
+    +/-5% path and the `RoundTripTrader' round-trips through it (incl. a
+    DECLARED `SPL' revert), journal validated by the Python reader,
+    final spot within 2% of target; (b) `onepool.tevm.test.js' – the
+    same agents on a V3 pool built wholly in-process on Tevm (~2.7s).
+    Tevm notes: pass `chain: null' + explicit gas with local accounts;
+    keep deploy gas <= ~15M (block gas limit); decode revert reasons via
+    `e.walk(ContractFunctionRevertedError)' (`reason' or
+    `data.errorName').
 
 
 4.3 Phase 2: `buck-math' + bindings

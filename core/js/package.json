@@ -8,6 +8,11 @@
     "test": "node --test test/"
   },
   "exports": {
-    "./journal": "./src/journal.js"
+    ".": "./src/index.js",
+    "./*": "./src/*.js"
+  },
+  "dependencies": {
+    "tevm": "^1.0.0-next.149",
+    "viem": "^2.54.2"
   }
 }
