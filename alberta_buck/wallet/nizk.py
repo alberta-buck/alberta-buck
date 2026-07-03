@@ -117,7 +117,26 @@ def registration_verify(
     proof: RegistrationProof,
     registrant: int,
 ) -> bool:
-    """Mirror of the Solidity verifier; returns True iff all five checks pass."""
+    """Mirror of the Solidity verifier; returns True iff all five checks pass.
+
+    Dispatches wholesale to the compiled kernel when built (the pairing
+    product costs seconds under py_ecc); the py_ecc computation below
+    remains the executable spec.
+    """
+    from alberta_buck.wallet._kernel import kernel as _kernel
+    k = _kernel()
+    if k is not None:
+        from alberta_buck.wallet.bn254 import g2_to_words
+        return k.registration_verify(
+            point_to_words(sigma_p.sigma_1), point_to_words(sigma_p.sigma_2),
+            (point_to_words(E.R), point_to_words(E.C)),
+            point_to_words(pk),
+            g2_to_words(issuer_X), g2_to_words(issuer_Y),
+            (proof.e, proof.s_m, proof.s_r,
+             point_to_words(proof.A_ps), point_to_words(proof.T_C),
+             point_to_words(proof.T_R)),
+            registrant,
+        )
     # (e) Non-triviality
     if is_inf(sigma_p.sigma_1):
         return False

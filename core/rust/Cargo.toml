@@ -1,0 +1,25 @@
+# Alberta Buck core kernel workspace (see alberta-buck-platform.org, Layer 2).
+#
+# Crates land by phase: buck-math (Phase 2), buck-identity (Phase 3),
+# buck-wallet + bindings/js (wasm-bindgen) + bindings/py (PyO3) alongside.
+# buck-math stays no_std/zero-dep; buck-identity is std over arkworks
+# (wasm-clean; the no_std flip is mechanical if a Holochain zome needs it
+# -- the holo-mutualcredit pattern still applies).
+
+[workspace]
+resolver = "2"
+members = [
+    "buck-math",
+    "buck-identity",
+    "bindings/py",
+    "bindings/js",
+    "bindings/py-identity",
+    "bindings/js-identity",
+]
+
+[profile.release]
+lto = true
+opt-level = "s"
+# Kernel correctness over speed: Solidity 0.8 checked arithmetic reverts
+# on overflow; the kernel must panic there too, in every profile.
+overflow-checks = true

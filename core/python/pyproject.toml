@@ -1,0 +1,27 @@
+# buck-core: the Alberta Buck core platform, Python side.
+#
+# Not yet published; during the transition the alberta_buck package makes
+# this importable from a repo checkout via a sys.path shim (see
+# alberta_buck/__init__.py and alberta-buck-platform.org, Phase 0/2).
+# `pip install -e core/python` works today for external consumers.
+
+[project]
+name = "buck-core"
+version = "0.0.1"
+description = "Alberta Buck core platform: ChainSession testing API, journal, kernel bindings"
+requires-python = ">=3.11"
+dependencies = [
+    "web3>=7",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["buck_core*"]
+
+[tool.setuptools.package-data]
+# The compiled buck-math kernel (built by `make nix-core-build-py`) ships
+# inside the package: import buck_core.buck_math.
+buck_core = ["*.so"]

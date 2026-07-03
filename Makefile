@@ -188,6 +188,9 @@ doc-%:		%.org
 #   make nix-venv-doc-flow     # execute the transcript + render .txt/.pdf
 #   make nix-venv-doc-paper
 #   make nix-venv-doc-receipt  # spawns anvil; needs forge artifacts (nix-build)
+doc-identity-example:
+	emacs --batch -l scripts/render-exec-doc.el alberta-buck-identity-example.org
+
 doc-flow:
 	emacs --batch -l scripts/render-exec-doc.el alberta-buck-notes-flow.org
 
@@ -847,6 +850,94 @@ sim-plot-eq-%:
 		python -m pytest $(SIM_EQ_PLOT) -v -s
 
 
+# ── Core platform (core/: kernel + sessions; alberta-buck-platform.org) ──
+#
+#   make nix-core-build         # kernel bindings: Python .so + JS wasm pkg
+#   make nix-core-test          # all three suites (Python, JS, Rust)
+#   make nix-venv-core-test-py  # the Python suite inside the repo venv
+#                               # (which installs alberta_buck AND -e
+#                               #  core/python; see the venv recipe)
+#
+# Tests are minimal in Rust (kernel is vector-driven), primary in Python
+# and JS.  The golden math vectors (test/vectors/math-vectors.json, from
+# make nix-match-MathVectors) are asserted bit-identically by all three;
+# the journal fixture (core/vectors/) by Python and JS -- change either
+# only with every consuming suite in hand.
+#
+# Identity kernel vectors: core/vectors/identity-kernel-vectors.json is
+# emitted by the pure-Python py_ecc REFERENCE path (the executable spec)
+# and replayed nonce-for-nonce by all three suites.  Regenerating it is an
+# ABI-break-level event -- do so only with the cargo/pytest/node suites in
+# hand:
+#
+#   make nix-venv-core-identity-vectors
+
+.PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps
+.PHONY: core-build core-build-py core-build-wasm core-identity-vectors
+
+# Emit from the py_ecc reference (kernel_vectors.py forces
+# BUCK_IDENTITY_BACKEND=py itself; the binding need not be built).
+core-identity-vectors:
+	python -m alberta_buck.wallet.kernel_vectors core/vectors/identity-kernel-vectors.json
+
+core-js-deps:
+	cd core/js && npm ci
+
+# The Python kernel bindings: PyO3 cdylibs built with plain cargo (the
+# .cargo/config.toml link flags stand in for maturin) and placed inside
+# the buck_core package -- import buck_core.buck_math /
+# buck_core.buck_identity.
+core-build-py:
+	cd core/rust && cargo build --release -p buck-math-py -p buck-identity-py
+	cp core/rust/target/release/libbuck_math.dylib \
+	   core/python/buck_core/buck_math.so
+	cp core/rust/target/release/libbuck_identity.dylib \
+	   core/python/buck_core/buck_identity.so
+
+# The JS kernel bindings: wasm-pack (npm devDependency of core/js) emits
+# nodejs-target packages into core/js/wasm/ (flat: buck_math.* and
+# buck_identity.* coexist; the shared package.json is cosmetic until the
+# npm packaging phase).  buck_math: BigInt ABI.  buck_identity: 0x-hex
+# ABI wrapped by core/js/src/identity.js into the BigInt-native API.
+core-build-wasm:
+	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
+	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
+		build --release --target nodejs \
+		--out-dir ../../../js/wasm --out-name buck_math
+	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
+		build --release --target nodejs \
+		--out-dir ../../../js/wasm --out-name buck_identity
+
+# Browser (web-target) build of the identity kernel + the Phase 3 proof
+# demo page.  Serve the demo (ES modules need http, not file://):
+#   make nix-core-demo-identity
+#   python3 -m http.server -d core/js/demo 8000
+#   open http://localhost:8000/identity-proofs.html
+core-build-wasm-web:
+	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
+	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
+		build --release --target web \
+		--out-dir ../../../js/demo/wasm-web --out-name buck_identity
+
+core-demo-identity:	core-build-wasm-web
+	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
+	@echo "       then open http://localhost:8000/identity-proofs.html"
+
+core-build:	core-build-py core-build-wasm
+
+core-test-py:
+	python -m pytest core/python/tests -q
+
+core-test-js:
+	@test -d core/js/node_modules || { echo "core/js deps missing; run: make nix-core-js-deps"; exit 1; }
+	cd core/js && node --test
+
+core-test-rust:
+	cd core/rust && cargo test --quiet
+
+core-test:	core-test-py core-test-js core-test-rust
+
+
 # ── Dependencies ─────────────────────────────────────────────────────
 
 install:
@@ -885,7 +976,8 @@ venv-%:			"$(VENV)"
 	@echo; echo "*** Building $@ VirtualEnv..."
 	@rm -rf $@ && $(PYTHON) -m venv $(VENV_OPTS) "$@" && sed -i -e '1s:^:. $$HOME/.bashrc\n:' "$@/bin/activate" \
 	    && source $@/bin/activate \
-	    && python -m pip install --no-user --upgrade "$(BUCK_PYTHON)[tests,dev]"
+	    && python -m pip install --no-user --upgrade "$(BUCK_PYTHON)[tests,dev]" \
+	    && python -m pip install --no-user -e "$(BUCK_PYTHON)/core/python"
 
 venv-activate:
 	pip install -e ".[tests]"

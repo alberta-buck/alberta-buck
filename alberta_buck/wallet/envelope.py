@@ -3,8 +3,9 @@ data record for a BUCK payment.
 
 Reference: alberta-buck-receipt.org ("The AB-RCPT/1 Envelope").
 
-Every receipt is a single canonical JSON map (=canonical_identity_data= style:
-sorted keys, compact separators, no whitespace).  Serialization:
+Every receipt is a single canonical JSON map -- THE canonical dialect
+(identity.canonical_json: sorted keys, compact separators, raw UTF-8), the
+same one the identity preimage uses.  Serialization:
 
     1. Build the Python dict for the receipt core.
     2. ``json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)``
@@ -54,9 +55,10 @@ from alberta_buck.wallet.notes import NoteOpening, FLAVOR_A1, FLAVOR_A2, FLAVOR_
 # ---------------------------------------------------------------------------
 
 def _canonical(obj) -> bytes:
-    """Deterministic JSON bytes of *obj* (sorted keys, compact, UTF-8)."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False).encode("utf-8")
+    """Deterministic JSON bytes of *obj* -- THE canonical dialect
+    (identity.canonical_json: sorted keys, compact, raw UTF-8)."""
+    from alberta_buck.wallet.identity import canonical_json
+    return canonical_json(obj).encode("utf-8")
 
 
 def _g1_hex(pt) -> Dict[str, str]:

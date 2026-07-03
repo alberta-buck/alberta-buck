@@ -1542,22 +1542,30 @@ double-spend detectable without linking the spend to its note.
   :END:
 
   Each witness below executes, in this document's build, against the
-  same =alberta_buck.wallet= reference implementation whose vectors
-  drive the circom and Solidity test suites; the printed =RESULTS=
-  blocks are regenerated on export (one seeded, deterministic session).
-  They are sanity witnesses, not proofs: each exhibits the object whose
-  existence (or impossibility-of-construction) the named result claims.
+  same =alberta_buck.wallet= implementation whose vectors drive the
+  circom and Solidity test suites -- its curve arithmetic running on the
+  compiled =buck-identity= kernel (=buck_core.buck_identity=, arkworks
+  BN254; the setup block asserts it, and the pure-Python =py_ecc= path
+  remains the executable specification the kernel is proven bit-identical
+  against).  The printed =RESULTS= blocks are regenerated on export (one
+  seeded, deterministic session).  They are sanity witnesses, not proofs:
+  each exhibits the object whose existence (or
+  impossibility-of-construction) the named result claims.
 
 ** Setup: identities, accounts, registry
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python
    import random
+   from alberta_buck.wallet import backend
    from alberta_buck.wallet.bn254 import G1, ORDER, mul, add, neg, eq, rand_scalar
    from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
    from alberta_buck.wallet.unilateral_a2 import (
        IdentityTree, mint_unilateral_a2, make_receipt, verify_receipt,
    )
+
+   assert backend() == "kernel", "witnesses must run the production kernel"
+   print(f"wallet crypto backend    = {backend()} (buck_core.buck_identity)")
 
    _seed = random.Random(0xACC0)                # one deterministic transcript
    rng   = lambda: _seed.getrandbits(256)
@@ -1584,6 +1592,7 @@ double-spend detectable without linking the spend to its note.
    #+END_SRC
 
    #+RESULTS:
+   : wallet crypto backend    = kernel (buck_core.buck_identity)
    : issuer Identity    M_I   = (24518486..., 10011201...)
    : recipient Identity M_rec = (48294773..., 86086204...)
    : registry root            = 0x21b0a34077b3d8355c...

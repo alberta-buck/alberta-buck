@@ -1,0 +1,21 @@
+{
+  "name": "@alberta-buck/core",
+  "version": "0.0.1",
+  "description": "Alberta Buck core platform (JS): journal today; ChainSession (viem over Tevm/anvil), agents, and WASM kernel bindings as the phases land (see alberta-buck-platform.org)",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./*": "./src/*.js"
+  },
+  "dependencies": {
+    "tevm": "^1.0.0-next.149",
+    "viem": "^2.54.2"
+  },
+  "devDependencies": {
+    "wasm-pack": "^0.15.0"
+  }
+}

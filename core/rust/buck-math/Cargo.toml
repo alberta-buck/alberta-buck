@@ -1,0 +1,11 @@
+[package]
+name = "buck-math"
+version = "0.0.1"
+edition = "2021"
+description = "Alberta Buck integer monetary arithmetic, bit-identical to the Solidity contracts"
+license = "MIT"
+
+[dependencies]
+
+[dev-dependencies]
+serde_json = "1"

@@ -16,9 +16,12 @@ each piece of identity data resides – Ethereum contract storage,
 Holochain DHT, or local wallet – at each step of the protocol, using
 mermaid sequence diagrams to trace registration, approval, transfer, and
 regulatory compliance flows.  Second, a complete worked cryptographic
-example implements every step in Python on the alt_bn128 (BN254) curve
-via `py_ecc', with counter-examples demonstrating what each verification
-check looks like when it fails.
+example implements every step in Python on the alt_bn128 (BN254) curve –
+executing on the compiled `buck-identity' production kernel
+(`buck_core.buck_identity', arkworks-backed) through the
+`alberta_buck.wallet' primitives, with the pure-Python `py_ecc' path
+retained as the executable specification – with counter-examples
+demonstrating what each verification check looks like when it fails.
 
 The scenario is a transfer from Private Alice to Public Bob (an AMM
 pool).  Alice obtains a Pointcheval-Sanders signed identity from an
@@ -461,29 +464,46 @@ Table of Contents
 
   All operations use BN254, the curve behind Ethereum's `ecAdd' (0x06),
   `ecMul' (0x07), and `ecPairing' (0x08) precompiles.  The
-  `py_ecc.bn128' library provides exactly these primitives.  Helper
-  functions for random scalar generation, `keccak256' hashing, and point
-  formatting are defined here; all subsequent code blocks share a single
-  `:session abid' so that variables persist across steps.
+  `alberta_buck.wallet.bn254' primitives provide exactly these
+  operations, executing on the compiled `buck-identity' kernel
+  (`buck_core.buck_identity', arkworks BN254) – the first block asserts
+  it, so this worked example demonstrates the production cryptography.
+  The pure-Python `py_ecc' path remains the executable specification the
+  kernel is proven bit-identical against
+  (`core/vectors/identity-kernel-vectors.json').  Helper functions for
+  seeded random scalar generation (one deterministic transcript, so the
+  printed `RESULTS' reproduce byte for byte), `keccak256' hashing, and
+  point formatting are defined here; all subsequent code blocks share a
+  single `:session abid' so that variables persist across steps.
 
   ┌────
-  │ import secrets
-  │ from py_ecc.bn128 import bn128_curve as bc, bn128_pairing as bp
+  │ import random
   │ from web3 import Web3
+  │ from alberta_buck.wallet import backend
+  │ from alberta_buck.wallet.bn254 import (
+  │     G1,       # Generator of G_1
+  │     G2,       # Generator of G_2
+  │     Z1,       # Point at infinity (G_1 identity)
+  │     ORDER,    # Curve group order (prime)
+  │     mul,      # Scalar multiplication in G_1 or G_2
+  │     add,      # Point addition
+  │     neg,      # Point negation
+  │     eq,       # Point equality
+  │     pairing,  # Optimal Ate pairing: G_2 x G_1 -> G_T
+  │     is_inf,   # Point-at-infinity test
+  │     FQ12_one, # G_T identity (pairing-product checks)
+  │ )
   │ 
-  │ G1      = bc.G1               # Generator of G_1
-  │ G2      = bc.G2               # Generator of G_2
-  │ Z1      = bc.Z1               # Point at infinity (G_1 identity)
-  │ ORDER   = bc.curve_order      # Curve group order (prime)
-  │ mul     = bc.multiply         # Scalar multiplication in G_1 or G_2
-  │ add     = bc.add              # Point addition
-  │ neg     = bc.neg              # Point negation
-  │ eq      = bc.eq               # Point equality
-  │ pairing = bp.pairing          # Optimal Ate pairing: G_2 x G_1 -> G_T
+  │ assert backend() == "kernel", "worked example must run the production kernel"
+  │ 
+  │ _seed = random.Random(0xAB1DE7A1)   # ONE deterministic transcript
   │ 
   │ def rand():
-  │     """Random non-zero scalar mod ORDER."""
-  │     return secrets.randbelow(ORDER - 1) + 1
+  │     """Random non-zero scalar mod ORDER (seeded; the transcript reproduces)."""
+  │     while True:
+  │         v = _seed.getrandbits(256) % ORDER
+  │         if v:
+  │             return v
   │ 
   │ def keccak(*args):
   │     """keccak256 over concatenated big-endian 32-byte words, reduced mod ORDER."""
@@ -494,16 +514,18 @@ Table of Contents
   │ 
   │ def pt(P, label=""):
   │     """Format a G_1 point for display."""
-  │     if bc.is_inf(P):
+  │     if is_inf(P):
   │         return f"{label}O (infinity)"
   │     return f"{label}({int(P[0]) % 10**6:>6d}..., {int(P[1]) % 10**6:>6d}...)"
   │ 
+  │ print(f"wallet crypto backend: {backend()} (buck_core.buck_identity)")
   │ print(f"BN254 curve order: {ORDER}")
   │ print(f"G_1 generator:     {pt(G1)}")
   │ print(f"G_2 generator:     (pair of FQ2 elements)")
   └────
 
   ┌────
+  │ wallet crypto backend: kernel (buck_core.buck_identity)
   │ BN254 curve order: 21888242871839275222246405745257275088548364400416034343698204186575808495617
   │ G_1 generator:     (     1...,      2...)
   │ G_2 generator:     (pair of FQ2 elements)
@@ -574,8 +596,9 @@ Table of Contents
 
   Alice presents her identity documents to the issuer, who verifies
   them, constructs a canonical `identity_data' JSON structure (sorted
-  keys, no whitespace), and computes the identity scalar \( m =
-  \text{keccak256}(\text{identity\_data}) \mod \text{ORDER} \).  The
+  keys, compact separators, raw UTF-8 – the one canonical JSON dialect,
+  shared with the receipt envelope), and computes the identity scalar \(
+  m = \text{keccak256}(\text{identity\_data}) \mod \text{ORDER} \).  The
   issuer then produces a PS signature \( \sigma = (h, (x + m \cdot y)
   \cdot h) \) binding \( m \) to the issuer's secret key.  The bilinear
   pairing equation verifies the signature, and a counter-example
@@ -639,8 +662,8 @@ Table of Contents
   │ Identity scalar m = H(identity_data):
   │   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
   │ PS signature sigma:
-  │   sigma_1 = (939891..., 162164...)
-  │   sigma_2 = (261923..., 672679...)
+  │   sigma_1 = (194876..., 629808...)
+  │   sigma_2 = (359670..., 936863...)
   └────
 
 
@@ -794,7 +817,7 @@ Table of Contents
   │ lhs = pairing(add(IPK_X, mul(IPK_Y, m_alice)), sigma_p[0])
   │ rhs = pairing(G2, sigma_p[1])
   │ assert lhs == rhs, "Rerandomized PS signature FAILED"
-  │ assert not bc.is_inf(sigma_p[0]), "sigma'_1 must not be point at infinity"
+  │ assert not is_inf(sigma_p[0]), "sigma'_1 must not be point at infinity"
   │ print("Rerandomized PS signature verified.")
   │ print(f"  sigma'_1 = {pt(sigma_p[0])}")
   │ print(f"  sigma'_2 = {pt(sigma_p[1])}")
@@ -806,12 +829,12 @@ Table of Contents
 
   ┌────
   │ Rerandomized PS signature verified.
-  │   sigma'_1 = (822891..., 515673...)
-  │   sigma'_2 = (746159..., 319341...)
+  │   sigma'_1 = (535940..., 905792...)
+  │   sigma'_2 = (910155..., 120231...)
   │ 
   │ Original and rerandomized signatures are unlinkable:
-  │   sigma_1  = (939891..., 162164...)
-  │   sigma'_1 = (822891..., 515673...)
+  │   sigma_1  = (194876..., 629808...)
+  │   sigma'_1 = (535940..., 905792...)
   │   (No algorithm can correlate them.)
   └────
 
@@ -867,12 +890,12 @@ Table of Contents
 
   ┌────
   │ Fresh key pair for this Ethereum account:
-  │   sk_alice = 11898280029496555813270455302588237005024328432247290005940600757876767706410
-  │   pk_alice = (607322..., 523946...)
+  │   sk_alice = 5853602929117522300044283728179877301168089966161974641852420948211988999617
+  │   pk_alice = (768650..., 708008...)
   │ 
   │ ElGamal ciphertext E_alice = (R, C):
-  │   R = r*G    = (592385...,  79846...)
-  │   C = m*G+r*pk = (242841..., 554615...)
+  │   R = r*G    = (541750..., 964600...)
+  │   C = m*G+r*pk = (839900..., 618183...)
   │ 
   │ Message point M = m*G:
   │   M = (739132..., 937433...)
@@ -905,7 +928,7 @@ Table of Contents
 
   ┌────
   │ Eve decrypts with wrong key:
-  │   M_wrong = ( 51294..., 175270...)
+  │   M_wrong = (974635..., 723566...)
   │   M_real  = (739132..., 937433...)
   │   Match: False
   │   (Completely different point -- no information about m is leaked.)
@@ -963,9 +986,9 @@ Table of Contents
 
   ┌────
   │ NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-  │   challenge e = 17802682739058714374777682945122342922929210281239609795222879600563901385501
-  │   response s_m = 3075338815962746687847541319313626151874431906647223398897819093612631311916
-  │   response s_r = 699343262137404530197628416536720765359084549657344678501835495603587077442
+  │   challenge e = 12615994228586388765523545681733720930989366795720612968293977787490490112203
+  │   response s_m = 4217153474935780478390783944691099623562767229827754028263164365552340570794
+  │   response s_r = 4236353551663949048403459822365234084964300001236929881682317196053395211750
   └────
 
 
@@ -1073,7 +1096,7 @@ Table of Contents
   │   * pairing(IPK_X, mul(sigma_p[0], e_v))         # e(e*s'_1, X)
   │   * pairing(G2,    neg(mul(sigma_p[1], e_v)))    # e(-e*s'_2, g_2)
   │ )
-  │ assert check == bp.FQ12.one(), "PS pairing check FAILED"
+  │ assert check == FQ12_one(), "PS pairing check FAILED"
   │ print("(a) PS pairing check passed:")
   │ print("    e(s_m*s'_1, Y) * e(-A_ps, Y) * e(e*s'_1, X) * e(-e*s'_2, g_2) == 1")
   │ 
@@ -1092,7 +1115,7 @@ Table of Contents
   │ print("(d) Fiat-Shamir challenge verified (binds all public inputs)")
   │ 
   │ # --- sigma'_1 != O check ---
-  │ assert not bc.is_inf(sigma_p[0]), "sigma'_1 is point at infinity (trivial forgery)"
+  │ assert not is_inf(sigma_p[0]), "sigma'_1 is point at infinity (trivial forgery)"
   │ print("(e) sigma'_1 != O (non-trivial signature)")
   │ 
   │ print("\n==> Registration PASSED. isVerified(alice) = true")
@@ -1271,7 +1294,7 @@ Table of Contents
 
   ┌────
   │ Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:
-  │   pk_bob = (183115..., 972251...)
+  │   pk_bob = (526409..., 440871...)
   │   E_bob  = (R, C) -- ElGamal ciphertext on-chain
   │   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
   │   isVerified(bob)             = true
@@ -1377,8 +1400,8 @@ Table of Contents
   ┌────
   │ Alice re-encrypts her identity for Bob:
   │   E_bob = (R', C') where:
-  │     R' = r'*G     = (904166..., 447947...)
-  │     C' = M+r'*pk  = (141266..., 611820...)
+  │     R' = r'*G     = (267498..., 938054...)
+  │     C' = M+r'*pk  = (800475..., 323191...)
   │ 
   │ Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
   │ Matches Alice's M:             (739132..., 937433...)
@@ -1443,9 +1466,9 @@ Table of Contents
 
   ┌────
   │ Chaum-Pedersen proof:
-  │   e  = 19309517289523837917676923481952755718861322786749055282488582041725757988670
-  │   s1 = 9992988106682756129239432227347680777387634997719001595011902857575843886411
-  │   s2 = 2770242788002837841273315089666398893605701944302474533033998804020588086413
+  │   e  = 14378772904067346594783517297323694132494991636875492543911908544441565839885
+  │   s1 = 2860978974404099266579051656691559822630565129132352136033122135978334130412
+  │   s2 = 9187154717567526848339382794930799696889831885288870801048333603562597232786
   └────
 
 
@@ -1939,17 +1962,17 @@ Table of Contents
 
   ┌────
   │ Second credential derived (same identity, fresh account):
-  │   pk_alice_2 = ( 30371..., 834915...)
+  │   pk_alice_2 = (612024..., 269464...)
   │   E_alice_2  = (R, C) -- independent ciphertext
-  │   sigma'_2   = (128159..., 800486...)
+  │   sigma'_2   = (305680..., 907120...)
   │ 
   │ Unlinkability check:
-  │   sigma'_1 (acct 1) = (822891..., 515673...)
-  │   sigma'_1 (acct 2) = (128159..., 800486...)
-  │   pk (acct 1)       = (607322..., 523946...)
-  │   pk (acct 2)       = ( 30371..., 834915...)
-  │   E.R (acct 1)      = (592385...,  79846...)
-  │   E.R (acct 2)      = (540181..., 841574...)
+  │   sigma'_1 (acct 1) = (535940..., 905792...)
+  │   sigma'_1 (acct 2) = (305680..., 907120...)
+  │   pk (acct 1)       = (768650..., 708008...)
+  │   pk (acct 2)       = (612024..., 269464...)
+  │   E.R (acct 1)      = (541750..., 964600...)
+  │   E.R (acct 2)      = (419877..., 391978...)
   │ 
   │   All values are independent.  No shared structure.
   │   PS rerandomization is STATISTICALLY unlinkable --
