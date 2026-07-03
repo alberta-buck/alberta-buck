@@ -93,8 +93,10 @@ The identity kernel's ground truth is the executable Python reference in
   flip changes nothing emitted, and `test_identity_cache_regen.py` that
   sim identity regeneration is backend-invariant end-to-end on anvil.
 - `core/js/src/identity.js` wraps the wasm kernel in the BigInt API
-  (including `canonicalIdentity()`, the exact `canonical_identity_data`
-  bytes -- note: ASCII-escaped, unlike the envelope's raw UTF-8).
+  (including `canonicalIdentity()` -- THE canonical JSON dialect: sorted
+  keys, compact separators, raw UTF-8, string/integer values only --
+  shared by the identity preimage and the AB-RCPT/1 receipt core, and
+  byte-identical to Python's `canonical_json()`).
 
 ## Journal schema (v1)
 

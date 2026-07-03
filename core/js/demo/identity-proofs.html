@@ -81,12 +81,11 @@
       }
     }
 
-    // canonical_identity_data: sorted keys, compact, ASCII-escaped.
+    // canonical_identity_data: sorted keys, compact separators, raw UTF-8
+    // (the one canonical dialect; JSON.stringify emits it natively).
     const canonical = (fields) =>
       JSON.stringify(Object.fromEntries(Object.keys(fields).sort()
-        .map((k) => [k, fields[k]])))
-        .replace(/[\u007f-\uffff]/g,
-          (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"));
+        .map((k) => [k, fields[k]])));
 
     try {
       const t0 = performance.now();

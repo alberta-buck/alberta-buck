@@ -596,8 +596,9 @@ Table of Contents
 
   Alice presents her identity documents to the issuer, who verifies
   them, constructs a canonical `identity_data' JSON structure (sorted
-  keys, no whitespace), and computes the identity scalar \( m =
-  \text{keccak256}(\text{identity\_data}) \mod \text{ORDER} \).  The
+  keys, compact separators, raw UTF-8 – the one canonical JSON dialect,
+  shared with the receipt envelope), and computes the identity scalar \(
+  m = \text{keccak256}(\text{identity\_data}) \mod \text{ORDER} \).  The
   issuer then produces a PS signature \( \sigma = (h, (x + m \cdot y)
   \cdot h) \) binding \( m \) to the issuer's secret key.  The bilinear
   pairing equation verifies the signature, and a counter-example

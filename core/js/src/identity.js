@@ -67,13 +67,14 @@ export function randScalar() {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical identity JSON (Python json.dumps sort_keys/compact equivalent)
+// Canonical JSON (the one dialect, shared with Python's canonical_json)
 // ---------------------------------------------------------------------------
 
-/** Canonical identity-data JSON: sorted keys, compact separators, and
- *  ASCII-only output (non-ASCII as lowercase \uXXXX escapes, Python's
- *  json.dumps default) -- byte-identical to canonical_identity_data().
- *  NOTE: the AB-RCPT/1 envelope canonicalization differs (raw UTF-8). */
+/** THE canonical JSON dialect: sorted keys, compact separators, raw
+ *  UTF-8 -- byte-identical to Python's canonical_json(), shared by the
+ *  identity preimage (canonical_identity_data) and the AB-RCPT/1 receipt
+ *  core.  Values must be strings and integers (floats are not canonical).
+ *  JSON.stringify emits this natively once keys are sorted. */
 export function canonicalIdentity(fields) {
   const sort = (v) => {
     if (Array.isArray(v)) return v.map(sort);
@@ -84,13 +85,7 @@ export function canonicalIdentity(fields) {
     }
     return v;
   };
-  // Python escapes every char outside 0x20..0x7E; JSON.stringify already
-  // handles < 0x20, so escape 0x7F..0xFFFF code units (surrogate halves
-  // escape individually, matching Python's astral-pair behavior).
-  return JSON.stringify(sort(fields)).replace(
-    /[\u007f-\uffff]/g,
-    (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"),
-  );
+  return JSON.stringify(sort(fields));
 }
 
 // ---------------------------------------------------------------------------

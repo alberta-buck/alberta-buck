@@ -13,7 +13,9 @@ from alberta_buck.wallet.bn254 import (
     point_to_words, words_to_point, scalar_to_word, word_to_scalar,
 )
 from alberta_buck.wallet.transcript import keccak_scalar, keccak_bytes
-from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
+from alberta_buck.wallet.identity import (
+    canonical_json, canonical_identity_data, identity_scalar,
+)
 from alberta_buck.wallet.ps import (
     PSKeyPair, PSSignature, ps_keygen, ps_sign, ps_verify, ps_rerandomize,
 )
@@ -70,7 +72,7 @@ __all__ = [
     "G1", "G2", "ORDER", "add", "mul", "neg", "eq", "pairing", "is_inf",
     "point_to_words", "words_to_point", "scalar_to_word", "word_to_scalar",
     "keccak_scalar", "keccak_bytes",
-    "canonical_identity_data", "identity_scalar",
+    "canonical_json", "canonical_identity_data", "identity_scalar",
     "PSKeyPair", "PSSignature", "ps_keygen", "ps_sign", "ps_verify", "ps_rerandomize",
     "ElGamalCiphertext", "IdentityKeyPair", "identity_keygen",
     "elgamal_encrypt", "elgamal_decrypt",

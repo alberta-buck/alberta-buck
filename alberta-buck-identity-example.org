@@ -688,7 +688,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
   Alice presents her identity documents to the issuer, who verifies
   them, constructs a canonical =identity_data= JSON structure (sorted
-  keys, no whitespace), and computes the identity scalar
+  keys, compact separators, raw UTF-8 -- the one canonical JSON dialect,
+  shared with the receipt envelope), and computes the identity scalar
   \( m = \text{keccak256}(\text{identity\_data}) \mod \text{ORDER} \).
   The issuer then produces a PS signature
   \( \sigma = (h, (x + m \cdot y) \cdot h) \) binding \( m \) to the

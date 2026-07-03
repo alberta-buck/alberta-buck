@@ -357,8 +357,8 @@
    "m": "0x2a92a738733b22188c0963eacb374c6edce34e5efaab523132e90ce096ae14ff"
   },
   {
-   "canonical": "{\"caf\\u00e9\":true,\"given_name\":\"Zo\\u00eb\",\"n\":7}",
-   "m": "0x07cde54be421bfd0cb178e94f581496afacf99f8228b69e73fadd62d5922c758"
+   "canonical": "{\"caf\u00e9\":true,\"given_name\":\"Zo\u00eb\",\"n\":7}",
+   "m": "0x0e52037e0f39f637edcefc8c08133f6a6af99e83b7bd30255c915c131579356c"
   },
   {
    "canonical": "{}",
