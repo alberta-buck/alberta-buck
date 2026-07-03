@@ -34,6 +34,9 @@ node_modules/
 /core/js/wasm/
 /core/js/demo/wasm-web/
 
+# Bundled forge artifacts for the JS platform (make nix-core-js-artifacts)
+/core/js/artifacts/
+
 # Python
 __pycache__/
 *.pyc

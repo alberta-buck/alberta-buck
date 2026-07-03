@@ -883,6 +883,11 @@ core-identity-vectors:
 core-js-deps:
 	cd core/js && npm ci
 
+# Bundle the forge artifacts the JS platform needs into one importable
+# module (core/js/artifacts/bundle.mjs) -- the browser cannot read out/.
+core-js-artifacts:
+	node core/js/bin/bundle-artifacts.mjs
+
 # The Python kernel bindings: PyO3 cdylibs built with plain cargo (the
 # .cargo/config.toml link flags stand in for maturin) and placed inside
 # the buck_core package -- import buck_core.buck_math /
