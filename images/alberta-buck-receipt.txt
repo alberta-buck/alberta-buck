@@ -541,9 +541,13 @@ Table of Contents
   │ import random
   │ from alberta_buck.sim.anvil import Anvil
   │ from alberta_buck.sim.notes_stack import E2EFixture, NotesStack
+  │ from alberta_buck.wallet import backend
   │ from alberta_buck.wallet.envelope import serialize_core, deserialize_core, receipt_id
   │ from alberta_buck.wallet.verify_receipt import verify_receipt
   │ from alberta_buck.wallet.render import render_receipt, TextDriver
+  │ 
+  │ assert backend() == "kernel", "receipts must verify on the production kernel"
+  │ print(f"wallet crypto backend: {backend()} (buck_core.buck_identity)")
   │ 
   │ _seed = random.Random(0xAB12C97)          # ONE deterministic transcript
   │ rng = lambda: _seed.getrandbits(256)
@@ -554,6 +558,7 @@ Table of Contents
   └────
 
   ┌────
+  │ wallet crypto backend: kernel (buck_core.buck_identity)
   │ anvil up: chain-id 1, genesis timestamp 1780000000
   └────
 
@@ -660,7 +665,7 @@ Table of Contents
   └────
 
   ┌────
-  │ Notes.mint  tx 0xc2fba76c99295fee9e..  block 32  gas 650,915  (0.107s on anvil)
+  │ Notes.mint  tx 0xc2fba76c99295fee9e..  block 32  gas 650,915  (0.106s on anvil)
   │   proof was generated offline by the issuer in 0.959s (Groth16, mint_batch_a2 N=1)
   │   escrowed: pool balance = 250.000000 BUCK
   └────
@@ -728,7 +733,7 @@ Table of Contents
   └────
 
   ┌────
-  │ Notes.spendCoupledA2  tx 0xed88f3c35b57eefcb8..  block 33  gas 1,076,632  (0.111s on anvil)
+  │ Notes.spendCoupledA2  tx 0xed88f3c35b57eefcb8..  block 33  gas 1,076,632  (0.106s on anvil)
   │   proofs offline: spend 0.76s + membership 1.556s + note-tie 11.7s
   │   nullifier burned: True
   │   paid out: depositor balance = 249.999999 BUCK

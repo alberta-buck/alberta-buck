@@ -1615,7 +1615,12 @@ Merkle membership.
    blocks sharing one Python session: re-exporting this document re-runs them
    top to bottom, and the printed =RESULTS= are regenerated.  The session is
    seeded, so a re-run reproduces this transcript byte for byte -- and fails
-   loudly if the wallet API drifts.
+   loudly if the wallet API drifts.  The wallet's curve arithmetic executes
+   on the compiled =buck-identity= kernel (=buck_core.buck_identity=,
+   arkworks BN254); the first block asserts it, so this document renders
+   only against the production cryptography.  The pure-Python =py_ecc= path
+   remains the executable specification the kernel is proven bit-identical
+   against (=core/vectors/identity-kernel-vectors.json=).
 
    *The cast: two Identities, one of them with two accounts.*
    An /Identity/ is a KYC-bound scalar \( m \) and its point \( M = mG \).  The
@@ -1626,6 +1631,7 @@ Merkle membership.
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
    import random
+   from alberta_buck.wallet import backend
    from alberta_buck.wallet.bn254 import G1, ORDER, mul, add, neg, eq, rand_scalar
    from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
    from alberta_buck.wallet.unilateral_a2 import (
@@ -1633,6 +1639,9 @@ Merkle membership.
        deposit_couple_prove, deposit_couple_verify,
        make_receipt, verify_receipt,
    )
+
+   assert backend() == "kernel", "transcript must run the production kernel"
+   print(f"wallet crypto backend     = {backend()} (buck_core.buck_identity)")
 
    _seed = random.Random(0xA1BE27AB0CC)     # ONE deterministic transcript
    rng   = lambda: _seed.getrandbits(256)
@@ -1663,6 +1672,7 @@ Merkle membership.
    #+END_SRC
 
    #+RESULTS:
+   : wallet crypto backend     = kernel (buck_core.buck_identity)
    : issuer Identity    M_I   = (34794633..., 55370756...)
    : recipient Identity M_rec = (78777287...,  1501867...)  (accounts rec0, rec1)
    : identity tree root        = 0x1b94c62584dc6075ad...
@@ -2322,12 +2332,12 @@ Merkle membership.
    #+END_SRC
 
    #+RESULTS:
-   : mint b1 (issuer)                 0.98s
-   : mint a2 (issuer)                 0.98s
-   : spend (depositor, all)           0.78s
-   : membership (depositor, all)      1.70s
-   : note tie a2 (depositor)         11.98s
-   : note tie a1 (depositor)         14.57s
+   : mint b1 (issuer)                 1.04s
+   : mint a2 (issuer)                 0.96s
+   : spend (depositor, all)           0.74s
+   : membership (depositor, all)      1.78s
+   : note tie a2 (depositor)         11.78s
+   : note tie a1 (depositor)         13.89s
 
    #+LATEX: }
 
@@ -2371,11 +2381,11 @@ Merkle membership.
    #+RESULTS:
    : party / flavor            download+store  prove (per note)
    : ----------------------------------------------------------
-   : issuer    b1/a1 (N=1)             12.7MB             0.98s
-   : issuer    a2    (N=1)             14.3MB             0.98s
-   : depositor b1                      29.5MB             2.49s
-   : depositor a1                    1710.5MB            17.06s
-   : depositor a2                    1493.7MB            14.47s
+   : issuer    b1/a1 (N=1)             12.7MB             1.04s
+   : issuer    a2    (N=1)             14.3MB             0.96s
+   : depositor b1                      29.5MB             2.52s
+   : depositor a1                    1710.5MB            16.41s
+   : depositor a2                    1493.7MB            14.29s
 
    #+LATEX: }
 

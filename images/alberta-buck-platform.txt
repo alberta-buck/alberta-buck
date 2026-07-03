@@ -49,7 +49,8 @@ Table of Contents
 .. 1. Phase 0: seam + scaffold  [status: DONE 2026-07-03]
 .. 2. Phase 1: JS ChainSession + walking-skeleton agents  [status: DONE 2026-07-03]
 .. 3. Phase 2: `buck-math' + bindings  [status: DONE 2026-07-03]
-.. 4. Phase 3: `buck-identity' port
+.. 4. Phase 3: `buck-identity' port  [status: DONE 2026-07-03]
+..... 1. Design of record (banked 2026-07-03)
 .. 5. Phase 4: JS sim platform + live-interactive demos
 .. 6. Phase 5: scale-up
 .. 7. Phase 6: partner SDKs + wallet productization
@@ -335,8 +336,8 @@ Table of Contents
     equilibrium vector unchanged after the sim flips to the binding.
 
 
-4.4 Phase 3: `buck-identity' port
-─────────────────────────────────
+4.4 Phase 3: `buck-identity' port  [status: DONE 2026-07-03]
+────────────────────────────────────────────────────────────
 
   arkworks BN254 + Poseidon + PS + ElGamal + Schnorr + Chaum-Pedersen +
   NIZK transcripts; PyO3 + wasm bindings; `alberta_buck/wallet'
@@ -356,6 +357,99 @@ Table of Contents
     the sim verifies; identity-cache regeneration matches; in-browser
     proof generation demonstrated; the executable identity papers render
     green against the new binding.
+  • /Met/ (2026-07-03): `test/vectors/identity.json' regenerates
+    BYTE-identically under the kernel backend and the full forge suite
+    (497) stays green against it, incl. the SNARK-fixture-pinned
+    `issuer_reenc' section; the routing smoke registers every EOA agent
+    on-chain with real NIZKs, and a dedicated gate proves cold
+    identity-cache regeneration BACKEND-INVARIANT end-to-end on anvil
+    (`test_identity_cache_regen.py'; the committed cache itself is an
+    append-only mix of code epochs, so cross-epoch byte-equality is
+    explicitly not the invariant); the browser demo
+    (`core/js/demo/identity-proofs.html', `make nix-core-demo-identity')
+    generates and verifies the full registration ceremony client-side,
+    headlessly smoke-tested over the exact web bundle; all four
+    executable papers assert `backend() =' "kernel"= in their
+    transcripts and render green (`alberta-buck-identity-example.org'
+    gained its exec-render target and a seeded deterministic transcript;
+    `alberta-buck-proofs.org' stays py_ecc by design).  Cross-language
+    ground truth: `core/vectors/identity-kernel-vectors.json' (nonce
+    -inclusive, emitted by the py reference) replayed byte-for-byte by
+    cargo (3 tests), pytest (30), and node (27) suites.
+
+
+4.4.1 Design of record (banked 2026-07-03)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  *Kernel scope* (`core/rust/buck-identity'): the deterministic crypto
+  core – BN254 G1/G2 arithmetic and pairing checks (EVM `ecPairing'
+  semantics: `pairing_check([(G1,G2),...]) -> bool'), keccak Fiat-Shamir
+  transcripts (`keccak_scalar=/=identity_scalar'), circomlib Poseidon
+  (constants build-generated from a vendored byte-identical
+  `poseidon_constants.json'), and every sigma protocol the wallet
+  implements: PS sign/verify/rerandomize, ElGamal, registration NIZK,
+  Chaum-Pedersen approve, issuer Schnorr batch binding, verifiable
+  decryption, A2 issuer re-encryption binding, deposit coupling, B1
+  depositor binding, note commitments / nullifiers / id-hashes /
+  `identity_leaf'.  NOT kernel: canonical-JSON identity serialization,
+  the AB-RCPT/1 envelope, receipt build/verify orchestration, rendering,
+  the Merkle tree container (Python/JS keep those; the tree's Poseidon
+  calls hit the kernel), and Groth16 SNARK proving (stays
+  snarkjs/rapidsnark).
+
+  *Determinism rule*: kernel functions take EVERY nonce/blind as an
+  explicit argument – no rng inside the kernel.  Randomness stays
+  language-side, so the pinned Python `random.Random' streams
+  (`vectors.py', seeded sims, paper sessions) are preserved
+  draw-for-draw and the emitted artifacts stay byte-identical.
+
+  *Delegation architecture*: each `alberta_buck/wallet' module keeps its
+  exact public API and dataclasses; provers draw their nonces in Python
+  (in today's order, BEFORE branching), then either call the kernel
+  (default when the binding is importable) or fall through to the
+  retained py_ecc reference (forced via `BUCK_IDENTITY_BACKEND=py').
+  `bn254.add/mul/neg' gain a G1 fast path (py_ecc FQ tuple in, FQ tuple
+  out); `pairing' stays py_ecc at the bn254 level (protocol verifiers
+  use kernel pairing checks wholesale).  `poseidon.poseidon()' delegates
+  the same way.
+
+  *Dependency decision*: unlike zero-dep `buck-math', `buck-identity'
+  takes `ark-bn254=/=ark-ec=/=ark-ff' 0.5 (hand-rolling a correct
+  optimal-ate pairing is not a good risk) plus `tiny-keccak'; std (not
+  `no_std') – arkworks is wasm-clean, and the `no_std' flip stays
+  mechanical (`default-features = false') if a Holochain zome ever needs
+  it.
+
+  *Binding surface*: PyO3 module `buck_core.buck_identity' (plain-cargo
+  build like `buck_math'; `num-bigint' feature so Python ints cross the
+  boundary; points as `(x, y)' int tuples, G2 as coefficient-pair
+  tuples, proofs as flat tuples the Python shims wrap back into
+  dataclasses).  wasm package `core/js/wasm/buck_identity' with 0x-hex
+  strings at the ABI and a `core/js/src/identity.js' wrapper exposing
+  the BigInt-native API (plus the canonical-JSON identity serializer for
+  in-browser registration).
+
+  *Vector gates* (in addition to the acceptance list above):
+  1. Regenerating `test/vectors/identity.json' (`emit-vectors'), the
+     golden receipt texts, and `identity-cache.json' under the kernel
+     backend produces ZERO git diff; the full forge suite stays green.
+  2. A new nonce-inclusive cross-language fixture,
+     `core/vectors/identity-kernel-vectors.json', emitted by the py_ecc
+     REFERENCE path (`BUCK_IDENTITY_BACKEND=py'), replayed
+     bit-identically by the cargo, pytest, and node suites (every prove
+     call with recorded nonces, verify + negative cases,
+     poseidon/keccak/curve-op rows).
+
+  *Papers plan*: `alberta-buck-notes-flow.org',
+  `alberta-buck-paper.org', `alberta-buck-receipt.org' call the wallet
+  API, so kernel delegation flips their executed sessions automatically;
+  each gains a visible production-kernel assertion in its transcript.
+  `alberta-buck-identity-example.org' additionally gets an executable
+  render target (today it renders committed RESULTS via the generic
+  `doc-%') and its raw `py_ecc' curve-pedagogy cells move to the
+  binding's curve ops.  `alberta-buck-proofs.org' (hand-rolled sigma
+  pedagogy on raw `py_ecc', no wallet imports) is explicitly out of
+  scope.
 
 
 4.5 Phase 4: JS sim platform + live-interactive demos

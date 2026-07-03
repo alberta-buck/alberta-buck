@@ -280,7 +280,7 @@ wallet fee math flip to the binding.
 - /Accept/: Rust/Python/JS byte-equal on the forge vectors; canonical
   equilibrium vector unchanged after the sim flips to the binding.
 
-** Phase 3: =buck-identity= port
+** Phase 3: =buck-identity= port  [status: DONE 2026-07-03]
 arkworks BN254 + Poseidon + PS + ElGamal + Schnorr + Chaum-Pedersen + NIZK
 transcripts; PyO3 + wasm bindings; =alberta_buck/wallet= delegates.
 
@@ -298,6 +298,25 @@ executable spec.
   sim verifies; identity-cache regeneration matches; in-browser proof
   generation demonstrated; the executable identity papers render green
   against the new binding.
+- /Met/ (2026-07-03): =test/vectors/identity.json= regenerates
+  BYTE-identically under the kernel backend and the full forge suite
+  (497) stays green against it, incl. the SNARK-fixture-pinned
+  =issuer_reenc= section; the routing smoke registers every EOA agent
+  on-chain with real NIZKs, and a dedicated gate proves cold
+  identity-cache regeneration BACKEND-INVARIANT end-to-end on anvil
+  (=test_identity_cache_regen.py=; the committed cache itself is an
+  append-only mix of code epochs, so cross-epoch byte-equality is
+  explicitly not the invariant); the browser demo
+  (=core/js/demo/identity-proofs.html=, =make nix-core-demo-identity=)
+  generates and verifies the full registration ceremony client-side,
+  headlessly smoke-tested over the exact web bundle; all four
+  executable papers assert =backend() == "kernel"= in their transcripts
+  and render green (=alberta-buck-identity-example.org= gained its
+  exec-render target and a seeded deterministic transcript;
+  =alberta-buck-proofs.org= stays py_ecc by design).  Cross-language
+  ground truth: =core/vectors/identity-kernel-vectors.json= (nonce
+  -inclusive, emitted by the py reference) replayed byte-for-byte by
+  cargo (3 tests), pytest (30), and node (27) suites.
 
 *** Design of record (banked 2026-07-03)
 
