@@ -300,14 +300,13 @@ fn golden_identity_fixture() {
 
     // ---- issuer Schnorr batch binding ----------------------------------
     //
-    // batch_commitment returns the UNREDUCED keccak word (what the Schnorr
-    // transcript hashes); the fixture's hBatch field went through
-    // scalar_to_hex, i.e. `% ORDER` -- compare accordingly and verify the
-    // signature against the raw value, exactly as receipt_verify recomputes.
+    // batch_commitment returns the UNREDUCED keccak word -- what the
+    // Schnorr transcript signs and exactly what the chain computes; the
+    // fixture stores it raw.
     let is = &v["issuer_schnorr"];
     let cms: Vec<W256> = is["cms"].as_array().unwrap().iter().map(jw).collect();
     let h_batch = schnorr::batch_commitment(&cms);
-    assert_eq!(reduce_mod_order(&h_batch), jw(&is["hBatch"]));
+    assert_eq!(h_batch, jw(&is["hBatch"]));
     let sp = schnorr::SchnorrProof {
         e: jw(&is["proof"]["e"]),
         s: jw(&is["proof"]["s"]),
@@ -346,9 +345,8 @@ fn golden_identity_fixture() {
     assert_eq!(cm, jw(&rc["cm"]));
     let rcpt_cms: Vec<W256> = rc["cms"].as_array().unwrap().iter().map(jw).collect();
     assert!(rcpt_cms.contains(&cm));
-    // hBatch stored reduced; the signature is over the raw keccak word.
     let rcpt_h_batch = schnorr::batch_commitment(&rcpt_cms);
-    assert_eq!(reduce_mod_order(&rcpt_h_batch), jw(&rc["hBatch"]));
+    assert_eq!(rcpt_h_batch, jw(&rc["hBatch"]));
     assert_eq!(
         notes::nullifier_b(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
         jw(&rc["nullifier"])

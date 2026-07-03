@@ -46,6 +46,17 @@ from alberta_buck.wallet.build_receipt import (
 )
 
 
+def _u256(v: int) -> str:
+    """Full-width uint256 hex, NO reduction mod ORDER.
+
+    For raw keccak words (hBatch): the Schnorr transcript signs the full
+    bytes32 exactly as IdentityRegistry._fsIssuerSchnorr packs it on-chain,
+    so the fixture must store what the chain computes -- scalar_to_hex's
+    `% ORDER` would silently corrupt any value >= ORDER (~81% of digests).
+    """
+    return f"0x{v:064x}"
+
+
 def _g1(P) -> Dict[str, str]:
     x, y = point_to_words(P)
     return {"x": scalar_to_hex(x), "y": scalar_to_hex(y)}
@@ -457,7 +468,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             "chainid": scalar_to_hex(CHAINID),
             "pk":      _g1(iss_pk),
             "cms":     [scalar_to_hex(c) for c in schnorr_cms],
-            "hBatch":  scalar_to_hex(h_batch),
+            "hBatch":  _u256(h_batch),
             "proof": {
                 "e": scalar_to_hex(iss_sig.e),
                 "s": scalar_to_hex(iss_sig.s),
@@ -480,7 +491,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             },
             "cm":         scalar_to_hex(rcpt_cm),
             "cms":        [scalar_to_hex(c) for c in rcpt_cms],
-            "hBatch":     scalar_to_hex(rcpt_hBatch),
+            "hBatch":     _u256(rcpt_hBatch),
             "issuer_sig": {
                 "e": scalar_to_hex(rcpt_sig.e),
                 "s": scalar_to_hex(rcpt_sig.s),

@@ -276,10 +276,10 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
     pt(IV.alice.elgamal_kp.pk), pt(IV.bob.elgamal_kp.pk),
     cpp, B(ap.sender), B(ap.spender), chainid));
 
-  // issuer schnorr (hBatch stored reduced; signature is over the raw word)
+  // issuer schnorr (hBatch stored raw: what the chain computes and signs)
   const is = IV.issuer_schnorr;
   const hBatch = id.batchCommitment(is.cms.map(B));
-  assert.equal(id.reduceModOrder(hBatch), B(is.hBatch));
+  assert.equal(hBatch, B(is.hBatch));
   assert.ok(id.issuerSchnorrVerify(
     pt(is.pk),
     { e: B(is.proof.e), s: B(is.proof.s), R: pt(is.proof.R) },
@@ -292,7 +292,7 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
   assert.equal(cm, B(rc.cm));
   assert.ok(rc.cms.map(B).includes(cm));
   const rcptHBatch = id.batchCommitment(rc.cms.map(B));
-  assert.equal(id.reduceModOrder(rcptHBatch), B(rc.hBatch));
+  assert.equal(rcptHBatch, B(rc.hBatch));
   assert.equal(id.nullifierB(B(op.rho), B(op.idHash)), B(rc.nullifier));
   assert.ok(id.issuerSchnorrVerify(
     pt(rc.issuer_pk),

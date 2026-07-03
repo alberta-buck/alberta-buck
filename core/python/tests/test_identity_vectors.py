@@ -322,7 +322,7 @@ def test_identity_fixture(iv):
 
     isch = iv["issuer_schnorr"]
     h_batch = bi.batch_commitment([_i(c) for c in isch["cms"]])
-    assert bi.reduce_mod_order(h_batch) == _i(isch["hBatch"])
+    assert h_batch == _i(isch["hBatch"])  # stored raw: what the chain computes
     assert bi.issuer_schnorr_verify(
         _pt(isch["pk"]),
         (_i(isch["proof"]["e"]), _i(isch["proof"]["s"]), _pt(isch["proof"]["R"])),
@@ -336,7 +336,7 @@ def test_identity_fixture(iv):
     )
     assert cm == _i(rc["cm"]) and cm in [_i(c) for c in rc["cms"]]
     rcpt_h = bi.batch_commitment([_i(c) for c in rc["cms"]])
-    assert bi.reduce_mod_order(rcpt_h) == _i(rc["hBatch"])
+    assert rcpt_h == _i(rc["hBatch"])
     assert bi.nullifier_b(_i(op["rho"]), _i(op["idHash"])) == _i(rc["nullifier"])
     assert bi.issuer_schnorr_verify(
         _pt(rc["issuer_pk"]),
