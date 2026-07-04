@@ -37,8 +37,9 @@ node_modules/
 # Bundled forge artifacts for the JS platform (make nix-core-js-artifacts)
 /core/js/artifacts/
 
-# The bundled buckworld demo app (make nix-core-demo-buckworld)
+# The bundled demo apps (make nix-core-demo-buckworld / -eqworld)
 /core/js/demo/app.js
+/core/js/demo/eqapp.js
 
 # Python
 __pycache__/

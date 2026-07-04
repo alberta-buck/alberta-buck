@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<!--
+  Alberta Buck: the equilibrium demo (Phase 4 Stages 5-7).
+
+  The minimal BUCK equilibrium world - IdentityRegistry, BuckCredit,
+  BuckKControllerDirect, Buck, BuckBasketProRata + venue, TOKEN/USDC +
+  TOKEN/BUCK + floating BUCK/USDC pools, and the REAL Universal Router -
+  deployed on an in-browser EVM (Tevm).  A whale pins TOKEN/USDC to a
+  seeded reference walk, a parity arb ties the pool triangle together,
+  the PID advances permissionlessly, and you add savers (basket
+  deposits for a term, full identity ceremony in this tab) and debtors
+  (mortgages retired opportunistically against BuckCredit) while the
+  charts track BUCK K, basket value, the floating BUCK price, and every
+  agent's returns.  Nothing leaves this tab.
+
+  Build + serve:
+
+      make nix-core-demo-eqworld
+      python3 -m http.server -d core/js/demo 8000
+      open http://localhost:8000/eqworld.html
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Alberta Buck &mdash; equilibrium</title>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+           max-width: 76rem; margin: 1.5rem auto; padding: 0 1rem;
+           background: #101418; color: #d7dde4; }
+    h1 { font-size: 1.25rem; } h1 small { color: #7d8a97; font-weight: normal; }
+    #status { color: #8fb4d8; margin: .4rem 0; }
+    #statusbar { color: #d8b46a; margin: .2rem 0 .6rem; }
+    .row { display: flex; gap: 1rem; align-items: flex-start; margin-top: 1rem; }
+    .col { flex: 1; min-width: 0; }
+    .card { border: 1px solid #2a3540; padding: .5rem .7rem; margin: .4rem 0; }
+    .card .addr { color: #7d8a97; }
+    .chart { background: #fff; margin: .4rem 0; line-height: 0; }
+    #controls { border: 1px solid #2a3540; padding: .6rem; }
+    #controls div { margin: .35rem 0; }
+    button { background: #1c2833; color: #d7dde4; border: 1px solid #33465a;
+             padding: .3rem .7rem; cursor: pointer; }
+    button:hover { background: #24354a; }
+    select, input { background: #151b21; color: #d7dde4;
+                    border: 1px solid #33465a; padding: .25rem; }
+    #log { max-height: 22rem; overflow-y: auto; font-size: .8rem; }
+    #log div { padding: .1rem 0; border-bottom: 1px solid #1c232b; }
+    .j-ok::before   { content: "\2713 "; color: #55c47a; }
+    .j-miss::before { content: "\2717 "; color: #e05555; }
+  </style>
+</head>
+<body>
+  <h1>Alberta Buck &mdash; equilibrium
+    <small>&mdash; the BUCK-K loop, live in THIS browser tab</small></h1>
+  <div id="status">loading&hellip;</div>
+  <div id="statusbar"></div>
+
+  <div id="controls">
+    <div>
+      simulated time:
+      <button id="step">step +1 day</button>
+      <button id="play">&#9654; play</button>
+      <button id="pause">&#9646;&#9646; pause</button>
+      <select id="speed">
+        <option value="3000">1 day / 3s</option>
+        <option value="1500" selected>1 day / 1.5s</option>
+        <option value="600">1 day / 0.6s</option>
+      </select>
+    </div>
+    <div>
+      <button id="addsaver">Add saver</button>
+      budget $<input id="sbudget" value="25000" size="7">
+      term <input id="shold" value="60" size="4"> days
+      <span class="addr">(basket deposit via the best-quoted route)</span>
+    </div>
+    <div>
+      <button id="adddebtor">Add debtor</button>
+      mortgage $<input id="dhouse" value="400000" size="8">
+      payment $<input id="dpay" value="3000" size="6">/mo
+      <span class="addr">(BuckCredit against insured assets; sells high, buys low)</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col" id="charts"></div>
+    <div class="col">
+      <div id="roster"></div>
+      <b>journal</b> (declared expectation vs outcome, live)
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./eqapp.js"></script>
+</body>
+</html>

@@ -538,8 +538,10 @@ Table of Contents
      numbers to time series.  First slice 2026-07-04: `src/chart.js'
      (dependency-free SVG lines, node + browser) + `world.record(day)'
      series in the equilibrium world + `bin/eqsim.mjs' writing the K /
-     basketValueInBuck / BUCK-price / debtor-net-worth charts; the PAGE
-     panels remain.
+     basketValueInBuck / BUCK-price / debtor-net-worth charts.  Page
+     panels landed the same day: `eqworld.html' re-renders five live
+     chart panels per tick (K, bvib, BUCK price, per-debtor net worth vs
+     counterfactual, per-saver position value).
   6. *The equilibrium world in JS*: `buildEquilibriumWorld' ports
      deploy.py's basket world – BuckBasketProRata + TOKEN/BUCK pools +
      the floating BUCK/USDC pool, CSV reference feeds bundled for the
@@ -595,8 +597,18 @@ Table of Contents
      principal on the deflation signal.  Prototype hardening en route: a
      0.5% deadband + a year-of-payments tranche cap (the lumpy-agent
      mitigations, now in the exemplar), and the ledger's `drawn' column
-     books the post-leg position.  REMAINING: dynamic add-agent
-     controls, the ROI panels on the page, journal parity.
+     books the post-leg position.  Dynamic add-saver / add-debtor
+     controls + the LIVE PAGE landed 2026-07-04: `demo/eqworld.html'
+     over a DOM-free `EqWorldApp' controller (`demo/src/eqapp.js'; boot
+     -> tick -> addSaver/addDebtor mid-run -> status/roster/charts),
+     built by `make nix-core-demo-eqworld' (~4.4 MB bundle incl. the
+     vendored Universal Router artifact) and gated twice –
+     `eqapp.tevm.test.js' (controller with node deps: dynamic adds, a
+     completed saver cycle, all five panels render) and
+     `eqdemo.bundle.test.js' (the EXACT shipped bundle headless: the
+     opening cast boots live, the page's own controls add agents and
+     step days).  REMAINING: the py/js journal-parity transcription
+     (stage 6's exit gate).
   8. *The participating user*: swap panel (USDC <-> BUCK <-> TOKENs via
      the real router), basket deposit/redeem with a receipt/NFT viewer,
      pledge form (createCredit).

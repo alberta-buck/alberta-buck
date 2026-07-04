@@ -946,6 +946,17 @@ core-demo-buckworld:	core-build-wasm-web core-js-artifacts
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
 	@echo "       then open http://localhost:8000/buckworld.html"
 
+# The equilibrium page: the two-agent BUCK-K loop with live charts and
+# dynamic add-saver/add-debtor controls (demo/eqapp.js).
+core-demo-eqworld:	core-build-wasm-web core-js-artifacts
+	cd core/js && npx esbuild demo/src/eqmain.js --bundle --format=esm \
+		--platform=browser --outfile=demo/eqapp.js \
+		--alias:buffer=buffer \
+		--alias:fs=./demo/src/shims/fs-empty.js \
+		--log-limit=8
+	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
+	@echo "       then open http://localhost:8000/eqworld.html"
+
 core-build:	core-build-py core-build-wasm
 
 core-test-py:

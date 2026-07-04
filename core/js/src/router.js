@@ -48,8 +48,11 @@ export async function deployUniversalRouter(session, urArtifact,
                     `params; the deploy.py recipe wires ${vals.length}`);
   }
   const params = Object.fromEntries(comps.map((c, i) => [c.name, vals[i]]));
+  // Accept the raw forge-artifact shape ({bytecode: {object}}) and the
+  // flattened bundle shape ({bytecode: "0x.."}) alike.
+  const bytecode = urArtifact.bytecode.object ?? urArtifact.bytecode;
   return session.deploy(
-    { abi: urArtifact.abi, bytecode: urArtifact.bytecode.object },
+    { abi: urArtifact.abi, bytecode },
     [params], { name: "UniversalRouter", gas });
 }
 

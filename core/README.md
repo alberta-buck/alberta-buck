@@ -23,10 +23,17 @@ Python package keeps working and transitions onto these incrementally.
                   with PinWhale + RoundTripTrader, the one-pool scenario,
                   and bin/join-sim.mjs.  prototypes/ holds the agent
                   doctrine's structural exemplars (basket investor,
-                  mortgage retiree), gated by test/prototypes.test.js
-                  until their world lands.  Deps: viem + tevm
-                  (`npm ci` in core/js).  Later: WASM kernel bindings,
-                  browser demo harness.
+                  mortgage retiree -- the latter runs LIVE in the
+                  equilibrium world).  scenarios/eqworld.js builds the
+                  minimal equilibrium world (basket + pools + router +
+                  agent-facing op helpers); bin/eqsim.mjs runs it
+                  headless with SVG charts (src/chart.js).  demo/
+                  hosts the interactive pages -- buckworld.html
+                  (citizens + market) and eqworld.html (the BUCK-K
+                  loop: live chart panels, dynamic add-saver /
+                  add-debtor) -- each gated headlessly over the exact
+                  shipped esbuild bundle.  Deps: viem + tevm
+                  (`npm ci` in core/js).
       rust/       cargo workspace: buck-math -- the integer monetary kernel
                   (BuckCredit depreciation, Buck demurrage fee + carrying
                   buckSeconds apportionment, BuckKControllerDirect ppm PID +

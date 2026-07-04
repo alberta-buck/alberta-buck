@@ -9,12 +9,13 @@
 // Regenerate whenever the contracts change (the bundle test compares a
 // hash against out/ and fails stale).
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { loadArtifact, repoRoot } from "../src/nodefs.js";
 
-// Stage 1-3 surface: identity + BUCK stack + the V3 pool world.
+// Stage 1-3 surface: identity + BUCK stack + the V3 pool world;
+// stages 5-7 add the equilibrium world's basket + real periphery.
 export const NEEDED = [
   "MockERC20",
   "UniswapV3Factory",
@@ -24,11 +25,22 @@ export const NEEDED = [
   "BuckCredit",
   "BuckKControllerDirect",
   "Buck",
+  "WETH9",
+  "BuckBasketProRata",
+  "BuckBasketUniswapV3",
 ];
 
 const out = {};
 for (const name of NEEDED) {
   out[name] = loadArtifact(name);
+}
+// The Universal Router ships as a vendored artifact (not forge-built);
+// flatten it to the bundle's {abi, bytecode} shape.
+{
+  const ur = JSON.parse(readFileSync(join(
+    repoRoot(), "alberta_buck", "sim", "artifacts",
+    "UniversalRouter.json"), "utf8"));
+  out.UniversalRouter = { abi: ur.abi, bytecode: ur.bytecode.object };
 }
 
 const dest = join(repoRoot(), "core", "js", "artifacts", "bundle.mjs");
