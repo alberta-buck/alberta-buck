@@ -84,7 +84,8 @@ console.log(JSON.stringify({
   saver: { events: saver.ledger.filter((r) => r.event !== "mark").length,
            profitUsd: f6(saver.profitUsd),
            roiAnnualPct: saver.dollarDays > 0n
-             ? Number(saver.profitUsd * 365_00n / saver.dollarDays) / 100 : null },
+             ? Number(saver.profitUsd) * 365 * 100 / Number(saver.dollarDays)
+             : null },
   debtor: debtor.ledger.length ? {
     months: debtor.ledger.length,
     mortgageOwing: f6(debtor.mortgageOwing),
