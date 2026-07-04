@@ -24,7 +24,7 @@ test("prototypes: the agent contract shape", () => {
     token: {}, amount: 10n ** 18n, account: { address: "0x0" } });
   const retiree = new MortgageRetiree({
     house: 400_000n * 10n ** 6n, mortgageBp: 550n, premiumBp: 50n,
-    income: 3_000n * 10n ** 6n, account: { address: "0x0" } });
+    payment: 3_000n * 10n ** 6n, account: { address: "0x0" } });
 
   for (const agent of [investor, retiree]) {
     assert.equal(typeof agent.setup, "function", "setup(world)");
@@ -45,27 +45,32 @@ test("prototypes: the one-screen doctrine budget", () => {
   }
 });
 
-test("prototypes: the counterfactual mortgage amortizes", async () => {
-  // The retiree's off-chain arithmetic is pure and runnable today.  A
-  // stub world reports a settled position (drawn == 0), so act() books
-  // only the insurer's bill and the counterfactual mortgage column:
-  // $400k at 5.5% against $3k/month income must amortize.
+test("prototypes: the debtor's mortgage arithmetic amortizes", async () => {
+  // The debtor's off-chain arithmetic is pure and runnable today.  A
+  // stub world reports no signals (drawn == limit == 0, bvib == 0), so
+  // no BUCK legs fire: the actual and counterfactual mortgages must
+  // amortize IDENTICALLY -- $400k at 5.5% against a $3k fixed payment
+  // -- and the buckUsd column carries exactly the insurer's bill.
   const r = new MortgageRetiree({
     house: 400_000n * 10n ** 6n, mortgageBp: 550n, premiumBp: 50n,
-    income: 3_000n * 10n ** 6n, account: { address: "0x0" } });
+    payment: 3_000n * 10n ** 6n, account: { address: "0x0" } });
   const world = { session: { call: async () => 0n }, buck: {}, basket: {} };
 
   for (let m = 0; m < 12; m++) {
-    const owing = r.hypoOwing;
+    const owing = r.mortgageOwing;
     await r.act(world, m * 30, 0);
-    assert.ok(r.hypoOwing < owing, "principal must fall every month");
+    assert.ok(r.mortgageOwing < owing, "principal must fall every month");
   }
-  const interest = r.ledger.map((row) => row.mortgageUsd);
-  assert.ok(interest[11] < interest[0], "interest declines as principal retires");
-  assert.ok(interest[0] > 1_800n * 10n ** 6n && interest[0] < 1_850n * 10n ** 6n,
-    "400k at 5.5%/12 is ~$1,833 first-month interest");
-  // The insurer's bill books every month, even while the position idles.
+  const rows = r.ledger;
+  assert.ok(rows.every((row) => row.mortgageOwing === row.hypoOwing),
+    "with no BUCK legs, actual == counterfactual trajectory");
+  // $400k at 5.5%/12 accrues ~$1,833 the first month; the $3k payment
+  // retires ~$1,167 of principal.
+  const firstDrop = 400_000n * 10n ** 6n - rows[0].mortgageOwing;
+  assert.ok(firstDrop > 1_150n * 10n ** 6n && firstDrop < 1_200n * 10n ** 6n,
+    `first month retires ~$1,167 of principal (got ${firstDrop})`);
   const premium = 400_000n * 10n ** 6n * 50n / 10_000n / 12n;
-  assert.ok(r.ledger.every((row) => row.buckUsd === premium),
-    "buckUsd column carries exactly the premium when no buys fire");
+  assert.ok(rows.every((row) => row.buckUsd === premium),
+    "buckUsd column carries exactly the premium when no legs fire");
+  assert.equal(rows[0].banked, 0n, "the payment is fully consumed early on");
 });

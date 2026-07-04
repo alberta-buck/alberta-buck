@@ -15,8 +15,9 @@
 //   world.receiptValueUsd(receiptId, day)              -> instantaneous value
 //
 // BasketInvestor: puts real backing into the BUCK system and books the
-// round trip.  depositToken() mints BUCK against the deposited TOKEN and
-// issues a receipt (the NFT the demo shows); redeem() later pays out
+// round trip.  depositToken() takes the TOKEN, mints BUCK against it,
+// and LPs the pair into the TOKEN/BUCK pool -- the depositor holds only
+// the receipt NFT (the claim the demo shows); redeem() later pays out
 // pro-rata.  ROI accounting follows the Python DM agents: USD committed
 // at deposit-day reference prices vs USD received at redemption, with
 // dollar-days so returns annualize.
@@ -42,8 +43,9 @@ export class BasketInvestor {
     if (tick !== 0) return;
 
     if (!this.position) {
-      // TOKEN in -> BUCK + receipt out.  The basket is a public
-      // identity-bound contract, so no bilateral handshake is needed.
+      // TOKEN in -> receipt out (the basket mints BUCK and LPs the
+      // pair itself).  The basket is a public identity-bound contract,
+      // so no bilateral handshake is needed.
       const { receiptId } = await world.basketDeposit(
         this.token, this.amount, this.account,
         { tag: `invest:deposit:d${day}` });

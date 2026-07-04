@@ -468,10 +468,29 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    driving the controller -- on the REAL routing periphery (see the
    SimLP risk note: =router.tevm.test.js= already proves the router
    on Tevm).  Gate: a mini-equilibrium scenario's py/js journals
-   agree (the Stage-4 transcription pattern).
-7. *Economic agents*: the prototype agents (=core/js/prototypes/=) go
-   live -- basket investor, mortgage retiree, plus a saver -- with
-   their ROI / cost-comparison chart panels.
+   agree (the Stage-4 transcription pattern).  Deploy-weight risk
+   KILLED 2026-07-04 (=eqworld.tevm.test.js=): the one-token minimal
+   world -- full identity+Direct stack, basket + venue + wiring +
+   binds, TOKEN/USDC + TOKEN/BUCK + floating BUCK/USDC pools (SimLP
+   as the public BUCK-backed LP, per deploy.py), bound Universal
+   Router -- deploys and RUNS on Tevm: 38 ops, ~49M total gas,
+   ~4.2 s wall; largest single deploy 5.37M (the V3 factory;
+   basket shell 4.32M, venue 3.16M, UR 5.35M).  The bootstrap
+   =depositToken= (mints BUCK into the basket pool, LPs the pair)
+   and the PidKeeper's permissionless =compute()= both execute
+   in-process.  Scope decision: stage 6 builds this MINIMAL world
+   (1-2 tokens); the full multi-token research world stays in
+   Python (decision of record).
+7. *Economic agents*: the minimal TWO-AGENT equilibrium (design
+   refined 2026-07-04) -- a *saver* (USDC wealth; acquires TOKENs or
+   BUCK, whichever route quotes the best after-swap valuation, and
+   deposits to the basket for a term) and the *debtor* (below) --
+   closing the loop the controller defends, with ROI and
+   net-worth-vs-counterfactual chart panels.  Known risk: two lumpy
+   agents may oscillate where the Python sim's heterogeneous
+   population damps -- mitigate with deadbands, trade sizes small
+   against pool depth, and the whale-pinned TOKEN/USDC anchor;
+   research-grade equilibrium remains the Python harness's job.
 8. *The participating user*: swap panel (USDC <-> BUCK <-> TOKENs via
    the real router), basket deposit/redeem with a receipt/NFT viewer,
    pledge form (createCredit).
@@ -511,16 +530,21 @@ caps file length) and substantively by review.
 *Prototypes* (=core/js/prototypes/=, banked ahead of the world that
 runs them; Stage 7 wires them live):
 - =basket-investor.js= -- deposits a constituent TOKEN into BuckBasket
-  (BUCK + receipt out), marks the receipt to market daily, redeems at
-  a horizon; books USD cost/mark/redeem rows for the ROI chart
-  (dollar-days accounting mirroring the Python DM agents).
-- =mortgage-retiree.js= -- retires an amortizing mortgage with
-  BuckCredit: pledge -> activate -> draw -> pay out the bank; monthly
-  income then buys discounted BUCK (=basketValueInBuck= > 1) to
-  retire the draw, with forced deleverage when the controller
-  tightens K past the position.  Books BOTH columns of the
-  mortgage-vs-BuckCredit cost chart from one ledger (counterfactual
-  amortizing interest vs premium + spreads + forced costs).
+  (the basket mints BUCK against it and LPs the pair; the depositor
+  holds the receipt NFT -- the claim), marks the receipt to market
+  daily, redeems at a horizon; books USD cost/mark/redeem rows for
+  the ROI chart (dollar-days accounting mirroring the Python DM
+  agents).
+- =mortgage-retiree.js= -- the two-sided debtor (refined 2026-07-04):
+  holds a USDC mortgage AND insured assets; pledges for BuckCredit
+  headroom; on BUCK DEFLATION (=basketValueInBuck= < 1) draws by
+  selling BUCK HIGH and retires mortgage principal early; banks the
+  freed payments; on INFLATION (> 1) buys discounted BUCK to retire
+  the draw; forced-deleverages when the controller tightens K past
+  the position.  One ledger carries the actual AND counterfactual
+  trajectories -- the net-worth-vs-original-mortgage chart falls out
+  (actual: house + banked - mortgage - drawn; hypo: house +
+  hypoBanked - hypoOwing).
 
 ** Phase 5: scale-up
 10^3 - 10^4 agent populations (extensive-margin adoption experiments from
