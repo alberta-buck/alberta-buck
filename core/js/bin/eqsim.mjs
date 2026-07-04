@@ -33,6 +33,10 @@ const { values: a } = parseArgs({ options: {
   step:    { type: "string", default: "80" },     // walk step, bp/day
   seed:    { type: "string", default: "61445" },  // 0xF005
   hold:    { type: "string", default: "60" },     // saver term, days
+  house:   { type: "string", default: "400000" }, // debtor face, $
+  rate:    { type: "string", default: "550" },    // mortgage bp/yr
+  payment: { type: "string", default: "3000" },   // $/month
+  budget:  { type: "string", default: "25000" },  // saver stake, $
   plot:    { type: "string", default: "" },
   journal: { type: "string", default: "" },
 } });
@@ -47,15 +51,16 @@ const world = await buildEquilibriumWorld(session, loadArtifact, {
   identity: id, urArtifact,
   feedSeed: Number(a.seed), stepBp: Number(a.step) });
 
-const HOUSE = 400_000n * 10n ** 6n;
-const PAYMENT = 3_000n * 10n ** 6n;
+const HOUSE = BigInt(a.house) * 10n ** 6n;
+const PAYMENT = BigInt(a.payment) * 10n ** 6n;
 const debtorAcct = privateKeyToAccount(generatePrivateKey());
 const saver = new BasketSaver({
   account: privateKeyToAccount(generatePrivateKey()),
+  budget: BigInt(a.budget) * 10n ** 6n,
   holdDays: Number(a.hold) });
 const debtor = new MortgageRetiree({
-  house: HOUSE, mortgageBp: 550n, premiumBp: 50n, payment: PAYMENT,
-  account: debtorAcct });
+  house: HOUSE, mortgageBp: BigInt(a.rate), premiumBp: 50n,
+  payment: PAYMENT, account: debtorAcct });
 
 const agents = [
   new DayClock(),
