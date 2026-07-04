@@ -539,9 +539,18 @@ Table of Contents
      (dependency-free SVG lines, node + browser) + `world.record(day)'
      series in the equilibrium world + `bin/eqsim.mjs' writing the K /
      basketValueInBuck / BUCK-price / debtor-net-worth charts.  Page
-     panels landed the same day: `eqworld.html' re-renders five live
-     chart panels per tick (K, bvib, BUCK price, per-debtor net worth vs
-     counterfactual, per-saver position value).
+     panels landed the same day and grew into TABBED instrument panels:
+     `eqworld.html' – Overview (headline charts + compact roster), Pools
+     (per-pool cards: spot vs reference, triangle divergence in bp, live
+     reserves; spot/divergence/float charts), BUCK K & PID (controller
+     card: K, fundingFactor, lastBasketCost, gains + rails; K and
+     fundingFactor charts), Basket (bvib, receipts issued,
+     per-constituent backing), Savers and Debtors (add controls plus a
+     selector driving per-agent detail – position value with cost basis;
+     net-worth-vs-counterfactual and mortgage/drawn/banked) and Journal.
+     `world.record' samples fundingFactor, TOKEN/BUCK spots, and
+     references for the new panels; both demo gates drive the tab bar
+     itself.
   6. *The equilibrium world in JS*: `buildEquilibriumWorld' ports
      deploy.py's basket world – BuckBasketProRata + TOKEN/BUCK pools +
      the floating BUCK/USDC pool, CSV reference feeds bundled for the
@@ -613,7 +622,17 @@ Table of Contents
      the real router), basket deposit/redeem with a receipt/NFT viewer,
      pledge form (createCredit).
   9. *Embedding*: single-file build of the demo for slide decks / web
-     pages; docs.
+     pages; docs.  Deployment finding (2026-07-04): the built demo is
+     ALREADY a fully static artifact – `eqworld.html' + `eqapp.js' (~4.7
+     MB raw, ~1 MB compressed) + two wasm kernels (846 KB + 43 KB), no
+     server, no COOP/COEP (tevm is single-threaded JS) – so Cloudflare
+     Pages serves it as-is (the 25 MiB/file limit is far away; `.wasm'
+     gets the right content-type; perry-kundert.ca's `_headers' sets no
+     CSP today – if one is ever added, `script-src' needs
+     `'wasm-unsafe-eval'').  Embedding therefore reduces to a staging
+     target copying the built demo into the Hugo site's `static/' tree
+     plus an iframe shortcode for pages and reveal decks; the
+     single-file variant remains optional polish.
 
 
 4.5.2 The JS agent doctrine (banked 2026-07-04)

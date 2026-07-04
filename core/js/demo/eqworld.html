@@ -10,8 +10,8 @@
   the PID advances permissionlessly, and you add savers (basket
   deposits for a term, full identity ceremony in this tab) and debtors
   (mortgages retired opportunistically against BuckCredit) while the
-  charts track BUCK K, basket value, the floating BUCK price, and every
-  agent's returns.  Nothing leaves this tab.
+  tabbed panels instrument every area: pools, the controller, the
+  basket, and each agent's returns.  Nothing leaves this tab.
 
   Build + serve:
 
@@ -30,19 +30,20 @@
     h1 { font-size: 1.25rem; } h1 small { color: #7d8a97; font-weight: normal; }
     #status { color: #8fb4d8; margin: .4rem 0; }
     #statusbar { color: #d8b46a; margin: .2rem 0 .6rem; }
-    .row { display: flex; gap: 1rem; align-items: flex-start; margin-top: 1rem; }
-    .col { flex: 1; min-width: 0; }
     .card { border: 1px solid #2a3540; padding: .5rem .7rem; margin: .4rem 0; }
-    .card .addr { color: #7d8a97; }
+    .addr { color: #7d8a97; }
     .chart { background: #fff; margin: .4rem 0; line-height: 0; }
-    #controls { border: 1px solid #2a3540; padding: .6rem; }
-    #controls div { margin: .35rem 0; }
+    #controls { border: 1px solid #2a3540; padding: .6rem; margin-bottom: .6rem; }
     button { background: #1c2833; color: #d7dde4; border: 1px solid #33465a;
              padding: .3rem .7rem; cursor: pointer; }
     button:hover { background: #24354a; }
+    #tabbar { margin: .8rem 0 .4rem; }
+    #tabbar button { border-bottom: none; }
+    #tabbar button.tabon { background: #2c4257; border-color: #4a6a8a; }
+    .tabctl { border: 1px solid #2a3540; padding: .5rem .7rem; margin: .4rem 0; }
     select, input { background: #151b21; color: #d7dde4;
                     border: 1px solid #33465a; padding: .25rem; }
-    #log { max-height: 22rem; overflow-y: auto; font-size: .8rem; }
+    #log { max-height: 30rem; overflow-y: auto; font-size: .8rem; }
     #log div { padding: .1rem 0; border-bottom: 1px solid #1c232b; }
     .j-ok::before   { content: "\2713 "; color: #55c47a; }
     .j-miss::before { content: "\2717 "; color: #e05555; }
@@ -55,38 +56,72 @@
   <div id="statusbar"></div>
 
   <div id="controls">
-    <div>
-      simulated time:
-      <button id="step">step +1 day</button>
-      <button id="play">&#9654; play</button>
-      <button id="pause">&#9646;&#9646; pause</button>
-      <select id="speed">
-        <option value="3000">1 day / 3s</option>
-        <option value="1500" selected>1 day / 1.5s</option>
-        <option value="600">1 day / 0.6s</option>
-      </select>
-    </div>
-    <div>
+    simulated time:
+    <button id="step">step +1 day</button>
+    <button id="play">&#9654; play</button>
+    <button id="pause">&#9646;&#9646; pause</button>
+    <select id="speed">
+      <option value="3000">1 day / 3s</option>
+      <option value="1500" selected>1 day / 1.5s</option>
+      <option value="600">1 day / 0.6s</option>
+    </select>
+  </div>
+
+  <div id="tabbar">
+    <button id="tab-overview" class="tabon">Overview</button>
+    <button id="tab-pools">Pools</button>
+    <button id="tab-controller">BUCK K &amp; PID</button>
+    <button id="tab-basket">Basket</button>
+    <button id="tab-savers">Savers</button>
+    <button id="tab-debtors">Debtors</button>
+    <button id="tab-journal">Journal</button>
+  </div>
+
+  <div id="view-overview">
+    <div id="charts"></div>
+    <div id="roster"></div>
+  </div>
+
+  <div id="view-pools" style="display:none">
+    <div id="poolcards"></div>
+    <div id="poolcharts"></div>
+  </div>
+
+  <div id="view-controller" style="display:none">
+    <div id="ctrlcard"></div>
+    <div id="ctrlcharts"></div>
+  </div>
+
+  <div id="view-basket" style="display:none">
+    <div id="basketcard"></div>
+    <div id="basketcharts"></div>
+  </div>
+
+  <div id="view-savers" style="display:none">
+    <div class="tabctl">
       <button id="addsaver">Add saver</button>
       budget $<input id="sbudget" value="25000" size="7">
       term <input id="shold" value="60" size="4"> days
-      <span class="addr">(basket deposit via the best-quoted route)</span>
+      <span class="addr">(acquires via the best-quoted route, deposits to the basket)</span>
+      &nbsp;&nbsp;detail: <select id="saversel"></select>
     </div>
-    <div>
+    <div id="saverdetail"></div>
+  </div>
+
+  <div id="view-debtors" style="display:none">
+    <div class="tabctl">
       <button id="adddebtor">Add debtor</button>
       mortgage $<input id="dhouse" value="400000" size="8">
       payment $<input id="dpay" value="3000" size="6">/mo
       <span class="addr">(BuckCredit against insured assets; sells high, buys low)</span>
+      &nbsp;&nbsp;detail: <select id="debtorsel"></select>
     </div>
+    <div id="debtordetail"></div>
   </div>
 
-  <div class="row">
-    <div class="col" id="charts"></div>
-    <div class="col">
-      <div id="roster"></div>
-      <b>journal</b> (declared expectation vs outcome, live)
-      <div id="log"></div>
-    </div>
+  <div id="view-journal" style="display:none">
+    <b>journal</b> (declared expectation vs outcome, live)
+    <div id="log"></div>
   </div>
 
   <script type="module" src="./eqapp.js"></script>

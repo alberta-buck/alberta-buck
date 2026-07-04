@@ -191,6 +191,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   Object.assign(world, {
     v3f, basket, usdc, simlp, tokens, poolUB, router, weth, feeds,
     fees: FEES, series: [], _proxies: new Map(),
+    receipts: tokens.length,        // the bootstrap deposits' receipts
   });
 
   // ==== agent-facing op helpers (the doctrine's plumbing layer) ========
@@ -303,6 +304,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     const log = rcpt.logs.find((l) =>
       l.address.toLowerCase() === basket.address.toLowerCase()
       && l.topics[0] === DEPOSITED_TOPIC);
+    world.receipts += 1;
     return { receiptId: BigInt(log.topics[2]) };
   };
 
@@ -338,12 +340,17 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     return usd;
   };
 
-  /** Sample the loop's observables into world.series (chart food). */
+  /** Sample the loop's observables into world.series (chart food):
+   *  the controller pair (K, fundingFactor), the peg observable, and
+   *  every pool's spot beside its reference. */
   world.record = async (day) => {
-    const [K, bvib, spotUB] = await Promise.all(
-      [world.K(), world.bvib(), world.spotUB()]);
+    const [K, bvib, spotUB, ff] = await Promise.all(
+      [world.K(), world.bvib(), world.spotUB(),
+       session.call(kctrl, "fundingFactor")]);
     const spots = await Promise.all(tokens.map((_, i) => world.spotUsd(i)));
-    world.series.push({ day, K, bvib, spotUB, spots });
+    const spotsBuck = await Promise.all(tokens.map((_, i) => world.spotBuck(i)));
+    const refs = tokens.map((_, i) => feeds[i][day % feeds[i].length]);
+    world.series.push({ day, K, bvib, spotUB, ff, spots, spotsBuck, refs });
   };
 
   return world;

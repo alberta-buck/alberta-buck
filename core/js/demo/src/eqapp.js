@@ -1,13 +1,15 @@
 // The eqworld demo CONTROLLER -- the minimal two-agent equilibrium,
 // interactive: boot the world on the in-browser EVM, tick simulated
-// days, ADD savers and debtors mid-run, and feed the live chart panels
-// from world.series and the agents' own ledgers.
+// days, ADD savers and debtors mid-run, and feed the page's tabbed
+// instrument panels -- overview, pools, controller (K + PID), basket,
+// per-saver and per-debtor detail -- from world.series, live chain
+// reads, and the agents' own ledgers.
 //
 // All the logic, none of the DOM: eqmain.js (the page) constructs it
 // with browser-loaded dependencies; the node gate (eqapp.tevm.test.js)
 // drives the SAME class with node-loaded ones.
 
-import { advanceTime, DAY } from "../../src/buckworld.js";
+import { advanceTime, DAY, DEPLOY_DEFAULTS } from "../../src/buckworld.js";
 import { buildEquilibriumWorld, MonthlyIncome, PidKeeper }
   from "../../src/scenarios/eqworld.js";
 import { PinWhale } from "../../src/agents/whale.js";
@@ -18,6 +20,7 @@ import { lineChart } from "../../src/chart.js";
 
 export const SAVER_NAMES = ["Sana", "Liam", "Aiko", "Ravi", "Zoë"];
 const f6 = (v) => Number(v) / 1e6;
+const f18 = (v) => Number(v) / 1e18;
 
 export class EqWorldApp {
   /**
@@ -105,15 +108,18 @@ export class EqWorldApp {
     return d;
   }
 
-  /** Live chain reads for the status bar. */
+  // ==== the status bar ==================================================
+
   async status() {
     const w = this.world;
     const [K, bvib, spotUB] = await Promise.all([w.K(), w.bvib(), w.spotUB()]);
-    return { day: this.day, K: Number(K) / 1e18, bvib: Number(bvib) / 1e18,
+    return { day: this.day, K: f18(K), bvib: f18(bvib),
              price: f6(spotUB), mismatches: this.session.mismatches.length };
   }
 
-  /** Agent summary rows for the roster panel. */
+  // ==== overview ========================================================
+
+  /** Agent summary rows for the compact roster. */
   roster() {
     const rows = [];
     for (const { name, agent: a } of this.savers) {
@@ -142,47 +148,188 @@ export class EqWorldApp {
     return rows;
   }
 
-  /** SVG strings for the chart panels (null before the first tick). */
-  charts({ width = 640, height = 190 } = {}) {
+  /** The overview panels (null before the first tick). */
+  charts({ width = 840, height = 190 } = {}) {
     const S = this.world?.series ?? [];
     if (!S.length) return null;
-    const out = {
+    return {
       k: lineChart({ title: "BUCK K", width, height, refY: 0.75,
         series: [{ label: "buckK",
-                   points: S.map((r) => [r.day, Number(r.K) / 1e18]) }] }),
+                   points: S.map((r) => [r.day, f18(r.K)]) }] }),
       bvib: lineChart({ title: "basketValueInBuck (the observable the PID defends)",
         width, height, refY: 1.0,
         series: [{ label: "bvib",
-                   points: S.map((r) => [r.day, Number(r.bvib) / 1e18]) }] }),
+                   points: S.map((r) => [r.day, f18(r.bvib)]) }] }),
       price: lineChart({ title: "BUCK price, floating BUCK/USDC pool ($)",
         width, height, refY: 1.0,
         series: [{ label: "BUCK/USDC",
                    points: S.map((r) => [r.day, f6(r.spotUB)]) }] }),
-      debtors: null, savers: null,
     };
-    const dSeries = this.debtors.flatMap(({ name, agent: a, house }) =>
-      a.ledger.length ? [
-        { label: name, points: a.ledger.map((r) =>
-            [r.day, f6(house + r.banked - r.mortgageOwing - r.drawn)]) },
-        { label: `${name} hypo`, points: a.ledger.map((r) =>
-            [r.day, f6(house - r.hypoOwing)]) },
-      ] : []);
-    if (dSeries.length) {
-      out.debtors = lineChart({
-        title: "debtors: net worth vs untouched-mortgage counterfactual ($)",
-        width, height, series: dSeries });
+  }
+
+  // ==== pools ===========================================================
+
+  /** Live per-pool state for the pool cards. */
+  async poolsSnapshot() {
+    const w = this.world, s = w.session;
+    const bal = (t, holder) => s.call(t, "balanceOf", [holder]);
+    const spotUB = await w.spotUB();
+    const out = { tokens: [], ub: null };
+    for (let i = 0; i < w.tokens.length; i++) {
+      const t = w.tokens[i];
+      const [spotUsd, spotBuck] = await Promise.all(
+        [w.spotUsd(i), w.spotBuck(i)]);
+      const implied = (spotUsd * 1_000_000n) / spotUB;
+      out.tokens.push({
+        sym: t.sym, dec: t.dec,
+        usdcPool: {
+          address: t.poolUsdc.address, spot: f6(spotUsd),
+          ref: f6(w.feeds[i][Math.max(0, this.day - 1) % w.feeds[i].length]),
+          tok: Number(await bal(t.erc20, t.poolUsdc.address)) / 10 ** t.dec,
+          usdc: f6(await bal(w.usdc, t.poolUsdc.address)),
+        },
+        buckPool: {
+          address: t.poolBuck.address, spot: f6(spotBuck),
+          implied: f6(implied),
+          divBp: Number(((spotBuck - implied) * 10_000n) / implied),
+          tok: Number(await bal(t.erc20, t.poolBuck.address)) / 10 ** t.dec,
+          buck: f6(await bal(w.buck, t.poolBuck.address)),
+        },
+      });
     }
-    const sSeries = this.savers.flatMap(({ name, agent: a }) => {
-      const pts = a.ledger.filter((r) => r.event !== "deposit")
-                          .map((r) => [r.day, f6(r.usd)]);
-      return pts.length ? [{ label: name, points: pts }] : [];
-    });
-    if (sSeries.length) {
-      out.savers = lineChart({
-        title: "savers: basket position value ($)",
-        width, height, series: sSeries });
-    }
+    out.ub = {
+      address: w.poolUB.address, spot: f6(spotUB),
+      buck: f6(await bal(w.buck, w.poolUB.address)),
+      usdc: f6(await bal(w.usdc, w.poolUB.address)),
+    };
     return out;
+  }
+
+  poolCharts({ width = 840, height = 190 } = {}) {
+    const S = this.world?.series ?? [];
+    if (!S.length) return null;
+    const w = this.world;
+    const spotVsRef = lineChart({
+      title: "TOKEN/USDC: pool spot vs the reference walk ($)",
+      width, height,
+      series: w.tokens.flatMap((t, i) => [
+        { label: `${t.sym} spot`,
+          points: S.map((r) => [r.day, f6(r.spots[i])]) },
+        { label: `${t.sym} ref`,
+          points: S.map((r) => [r.day, f6(r.refs[i])]) },
+      ]) });
+    const divergence = lineChart({
+      title: "TOKEN/BUCK: divergence from the implied triangle price (bp)",
+      width, height, refY: 0,
+      series: w.tokens.map((t, i) => ({
+        label: `${t.sym}/BUCK`,
+        points: S.map((r) => {
+          const implied = (r.spots[i] * 1_000_000n) / r.spotUB;
+          return [r.day,
+                  Number(((r.spotsBuck[i] - implied) * 10_000n) / implied)];
+        }) })) });
+    const float = lineChart({
+      title: "BUCK/USDC: the floating pool ($, never controlled)",
+      width, height, refY: 1.0,
+      series: [{ label: "BUCK/USDC",
+                 points: S.map((r) => [r.day, f6(r.spotUB)]) }] });
+    return { spotVsRef, divergence, float };
+  }
+
+  // ==== controller (BUCK K + PID) =======================================
+
+  async controllerSnapshot() {
+    const w = this.world, s = w.session;
+    const [K, ff, lastBasketCost] = await Promise.all([
+      s.call(w.kctrl, "buckK"), s.call(w.kctrl, "fundingFactor"),
+      s.call(w.kctrl, "lastBasketCost")]);
+    return { K: f18(K), ff: f18(ff), lastBasketCost: f18(lastBasketCost),
+             config: DEPLOY_DEFAULTS };
+  }
+
+  controllerCharts({ width = 840, height = 190 } = {}) {
+    const S = this.world?.series ?? [];
+    if (!S.length) return null;
+    return {
+      k: lineChart({ title: "BUCK K (the LTV lever the PID moves)",
+        width, height, refY: 0.75,
+        series: [{ label: "buckK",
+                   points: S.map((r) => [r.day, f18(r.K)]) }] }),
+      ff: lineChart({ title: "fundingFactor (counter-cyclical mint gate; 1.0 = neutral)",
+        width, height, refY: 1.0,
+        series: [{ label: "fundingFactor",
+                   points: S.map((r) => [r.day, f18(r.ff)]) }] }),
+    };
+  }
+
+  // ==== basket ==========================================================
+
+  async basketSnapshot() {
+    const w = this.world, s = w.session;
+    const bvib = f18(await w.bvib());
+    const constituents = [];
+    for (const t of w.tokens) {
+      constituents.push({
+        sym: t.sym,
+        tok: Number(await s.call(t.erc20, "balanceOf", [t.poolBuck.address]))
+             / 10 ** t.dec,
+        buck: f6(await s.call(w.buck, "balanceOf", [t.poolBuck.address])),
+      });
+    }
+    return { bvib, receipts: w.receipts, constituents };
+  }
+
+  basketChart({ width = 840, height = 220 } = {}) {
+    const S = this.world?.series ?? [];
+    if (!S.length) return null;
+    return lineChart({
+      title: "basketValueInBuck (>1: BUCK below basket value -- inflation side)",
+      width, height, refY: 1.0,
+      series: [{ label: "bvib",
+                 points: S.map((r) => [r.day, f18(r.bvib)]) }] });
+  }
+
+  // ==== per-agent detail ================================================
+
+  saverChart(i, { width = 840, height = 200 } = {}) {
+    const s = this.savers[i];
+    if (!s) return null;
+    const pts = s.agent.ledger.filter((r) => r.event !== "deposit")
+                              .map((r) => [r.day, f6(r.usd)]);
+    if (!pts.length) return null;
+    const dep = s.agent.ledger.find((r) => r.event === "deposit");
+    return lineChart({
+      title: `${s.name}: basket position value ($; dashed = cost basis)`,
+      width, height, refY: dep ? f6(-dep.usd) : null,
+      series: [{ label: "position value", points: pts }] });
+  }
+
+  debtorCharts(i, { width = 840, height = 200 } = {}) {
+    const d = this.debtors[i];
+    if (!d || !d.agent.ledger.length) return null;
+    const L = d.agent.ledger, house = d.house;
+    return {
+      net: lineChart({
+        title: `${d.name}: net worth vs the untouched-mortgage counterfactual ($)`,
+        width, height,
+        series: [
+          { label: "BuckCredit route", points: L.map((r) =>
+              [r.day, f6(house + r.banked - r.mortgageOwing - r.drawn)]) },
+          { label: "hypo (mortgage kept)", points: L.map((r) =>
+              [r.day, f6(house - r.hypoOwing)]) },
+        ] }),
+      position: lineChart({
+        title: `${d.name}: mortgage / credit drawn / banked ($)`,
+        width, height,
+        series: [
+          { label: "mortgage owing", points: L.map((r) =>
+              [r.day, f6(r.mortgageOwing)]) },
+          { label: "BUCK credit drawn", points: L.map((r) =>
+              [r.day, f6(r.drawn)]) },
+          { label: "banked USDC", points: L.map((r) =>
+              [r.day, f6(r.banked)]) },
+        ] }),
+    };
   }
 
   static DAY = DAY;

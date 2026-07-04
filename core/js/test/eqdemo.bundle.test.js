@@ -34,7 +34,7 @@ class El {
   }
   set innerHTML(v) { this._html = v; this.children = []; this.options = []; }
   get innerHTML() { return this._html; }
-  appendChild(c) { this.children.push(c); return c; }
+  appendChild(c) { this.children.push(c); this.options.push(c); return c; }
   prepend(c) { this.children.unshift(c); return c; }
 }
 
@@ -87,4 +87,43 @@ test("shipped eq bundle: boots live, adds agents, steps a day", { skip }, async 
   await byId("step").onclick();
   await new Promise((r) => setTimeout(r, 50));   // tickOnce refresh settles
   assert.match(byId("statusbar").textContent, /day 3/);
+
+  // The tabbed instrument panels, through the page's own tab bar.
+  // showTab fires its render without awaiting; poll each panel in.
+  const until = async (fn, what) => {
+    const end = Date.now() + 10_000;
+    while (!fn() && Date.now() < end) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(fn(), what);
+  };
+  byId("tab-pools").onclick();
+  await until(() => /BUCK\/USDC/.test(byId("poolcards").innerHTML)
+                 && /divergence/.test(byId("poolcharts").innerHTML),
+              "pools tab: cards + charts");
+  byId("tab-controller").onclick();
+  await until(() => /fundingFactor/.test(byId("ctrlcard").innerHTML)
+                 && /<svg/.test(byId("ctrlcharts").innerHTML),
+              "controller tab: card + charts");
+  byId("tab-basket").onclick();
+  await until(() => /receipts issued/.test(byId("basketcard").innerHTML)
+                 && /<svg/.test(byId("basketcharts").innerHTML),
+              "basket tab: card + chart");
+  // Pin the FIRST saver (the just-added one has no marks yet, so no
+  // chart); its position has daily marks and renders the detail SVG.
+  byId("saversel").value = "0";
+  byId("tab-savers").onclick();
+  await until(() => byId("saversel").options.length === 2
+                 && /<svg/.test(byId("saverdetail").innerHTML),
+              "savers tab: selector + detail");
+  byId("tab-debtors").onclick();
+  await until(() => byId("debtorsel").options.length === 2
+                 && /counterfactual/.test(byId("debtordetail").innerHTML),
+              "debtors tab: selector + detail");
+
+  // Select the FIRST debtor explicitly and re-render via the tab.
+  byId("debtorsel").value = "0";
+  byId("tab-debtors").onclick();
+  await until(() => /Debtor-1/.test(byId("debtordetail").innerHTML),
+              "debtor selector drives the detail view");
 });

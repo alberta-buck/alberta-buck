@@ -74,12 +74,34 @@ test("eqapp: dynamic savers/debtors + live chart panels", { skip }, async () => 
   assert.ok(debtor.hypoNet <= 400_000, "counterfactual amortizing");
   assert.ok(debtor.net > 0, "net worth computed");
 
-  // Charts: all five panels render SVG once there is data.
+  // Every tab's data source renders once there is data.
   const ch = app.charts();
-  for (const key of ["k", "bvib", "price", "debtors", "savers"]) {
-    assert.ok(ch[key]?.includes("<svg"), `${key} chart renders`);
+  for (const key of ["k", "bvib", "price"]) {
+    assert.ok(ch[key]?.includes("<svg"), `overview ${key} chart renders`);
   }
-  assert.ok(ch.debtors.includes("hypo"), "counterfactual series labeled");
+  const pch = app.poolCharts();
+  for (const key of ["spotVsRef", "divergence", "float"]) {
+    assert.ok(pch[key]?.includes("<svg"), `pool ${key} chart renders`);
+  }
+  const cch = app.controllerCharts();
+  assert.ok(cch.k.includes("<svg") && cch.ff.includes("fundingFactor"),
+    "controller charts render");
+  assert.ok(app.basketChart()?.includes("basketValueInBuck"));
+  assert.ok(app.saverChart(0)?.includes("<svg"), "saver detail chart");
+  const dch = app.debtorCharts(0);
+  assert.ok(dch.net.includes("hypo"), "counterfactual series labeled");
+  assert.ok(dch.position.includes("mortgage owing"), "position chart");
+
+  // The live snapshots behind the pool/controller/basket cards.
+  const ps = await app.poolsSnapshot();
+  assert.ok(Math.abs(ps.tokens[0].buckPool.divBp) < 200,
+    `arb-tied divergence (${ps.tokens[0].buckPool.divBp}bp)`);
+  assert.ok(ps.ub.buck > 0 && ps.ub.usdc > 0, "floating pool reserves");
+  const cs = await app.controllerSnapshot();
+  assert.ok(cs.ff > 0 && cs.config.dt === 1800n, "controller snapshot");
+  const bs = await app.basketSnapshot();
+  assert.ok(bs.receipts >= 2, "bootstrap + saver receipts counted");
+  assert.equal(bs.constituents[0].sym, "CNST");
 
   // A second saver mid-run: the roster grows and the next tick engages it.
   await app.addSaver({ holdDays: 30 });
