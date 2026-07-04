@@ -17,9 +17,14 @@ Python package keeps working and transitions onto these incrementally.
                   over any viem client), backends.js (anvilSession joins a
                   running anvil -- e.g. one a Python sim deployed into --
                   tevmSession runs the in-process EVM), the shared journal
-                  reader/writer, V3 price math (v3.js), the agent loop
-                  (world.js) with PinWhale + RoundTripTrader, the one-pool
-                  scenario, and bin/join-sim.mjs.  Deps: viem + tevm
+                  reader/writer, V3 price math (v3.js), the REAL Uniswap
+                  periphery (router.js: Universal Router deploy recipe +
+                  V3_SWAP_EXACT_IN encoding), the agent loop (world.js)
+                  with PinWhale + RoundTripTrader, the one-pool scenario,
+                  and bin/join-sim.mjs.  prototypes/ holds the agent
+                  doctrine's structural exemplars (basket investor,
+                  mortgage retiree), gated by test/prototypes.test.js
+                  until their world lands.  Deps: viem + tevm
                   (`npm ci` in core/js).  Later: WASM kernel bindings,
                   browser demo harness.
       rust/       cargo workspace: buck-math -- the integer monetary kernel

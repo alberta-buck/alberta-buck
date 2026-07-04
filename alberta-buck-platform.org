@@ -117,30 +117,30 @@ plus two ideas from the bootstrap requirements:
 
 Journal entry schema (one JSON object per line; unknown fields ignored):
 
-| field    | type   | meaning                                            |
-|----------+--------+----------------------------------------------------|
-| =i=      | int    | 1-based sequence number within the session         |
-| =tag=    | str    | caller-supplied label ("deploy:Buck", "saver3:buy") |
-| =op=     | str    | =send= / =deploy= (calls are not journaled)        |
-| =fn=     | str    | contract function name or "constructor"           |
-| =sender= | str    | from-address                                       |
-| =expect= | str    | =ok= / =revert=                                    |
-| =outcome=| str    | =ok= / =revert=                                    |
-| =matched=| bool   | outcome == expectation                             |
-| =gas=    | int    | gasUsed from the receipt                           |
-| =tx=     | str    | transaction hash (hex)                             |
-| =block=  | int    | block number                                       |
-| =err=    | str    | revert reason when outcome is =revert=             |
+| field     | type | meaning                                             |
+|-----------+------+-----------------------------------------------------|
+| =i=       | int  | 1-based sequence number within the session          |
+| =tag=     | str  | caller-supplied label ("deploy:Buck", "saver3:buy") |
+| =op=      | str  | =send= / =deploy= (calls are not journaled)         |
+| =fn=      | str  | contract function name or "constructor"             |
+| =sender=  | str  | from-address                                        |
+| =expect=  | str  | =ok= / =revert=                                     |
+| =outcome= | str  | =ok= / =revert=                                     |
+| =matched= | bool | outcome == expectation                              |
+| =gas=     | int  | gasUsed from the receipt                            |
+| =tx=      | str  | transaction hash (hex)                              |
+| =block=   | int  | block number                                        |
+| =err=     | str  | revert reason when outcome is =revert=              |
 
 Backends, fidelity-vs-speed:
 
-| backend                | runs in        | role                                  |
-|------------------------+----------------+---------------------------------------|
-| anvil (foundry)        | local process  | PRIMARY sim backend; fidelity anchor  |
-| public testnets        | remote         | staging, partner integration          |
-| Tenderly virtual nets  | remote         | shared demos, partner staging         |
-| Tevm (JS, ethereumjs)  | browser / node | live-interactive demos, JS sim        |
-| pyrevm (optional)      | in-process     | acceleration, iff vectors identical   |
+| backend               | runs in        | role                                 |
+|-----------------------+----------------+--------------------------------------|
+| anvil (foundry)       | local process  | PRIMARY sim backend; fidelity anchor |
+| public testnets       | remote         | staging, partner integration         |
+| Tenderly virtual nets | remote         | shared demos, partner staging        |
+| Tevm (JS, ethereumjs) | browser / node | live-interactive demos, JS sim       |
+| pyrevm (optional)     | in-process     | acceleration, iff vectors identical  |
 
 ** Layer 2: the deterministic kernel -- one Rust workspace, two bindings
 
@@ -457,8 +457,70 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    =_revert_reason= now journals the BARE Solidity reason ("SPL"),
    the schema's documented form -- the pinned journal-sample fixture
    had always specified it; the implementation finally conforms.
-5. *Embedding*: single-file build of the demo for slide decks / web
+5. *Instrument + charts*: a per-tick recorder in the demo controller
+   (pool spots vs references, citizen balances/fees, K and basket
+   value) and in-page SVG charts; the market panel graduates from
+   numbers to time series.
+6. *The equilibrium world in JS*: =buildEquilibriumWorld= ports
+   deploy.py's basket world -- BuckBasketProRata + TOKEN/BUCK pools +
+   the floating BUCK/USDC pool, CSV reference feeds bundled for the
+   browser, whales pinning TOKEN/USDC to the feeds, a PidKeeper
+   driving the controller -- on the REAL routing periphery (see the
+   SimLP risk note: =router.tevm.test.js= already proves the router
+   on Tevm).  Gate: a mini-equilibrium scenario's py/js journals
+   agree (the Stage-4 transcription pattern).
+7. *Economic agents*: the prototype agents (=core/js/prototypes/=) go
+   live -- basket investor, mortgage retiree, plus a saver -- with
+   their ROI / cost-comparison chart panels.
+8. *The participating user*: swap panel (USDC <-> BUCK <-> TOKENs via
+   the real router), basket deposit/redeem with a receipt/NFT viewer,
+   pledge form (createCredit).
+9. *Embedding*: single-file build of the demo for slide decks / web
    pages; docs.
+
+*** The JS agent doctrine (banked 2026-07-04)
+
+*Audience*: the JS platform is written for a senior integration
+developer at a credit union or payments processor -- someone who wires
+account systems to card networks and will use our JS/Python/Rust SDKs
+to build back-office BUCK services: deposit and credit product account
+values, investment values and histories, statements, web interfaces.
+Their first contact is the example agents, so THE AGENTS ARE THE
+PRODUCT: SDK documentation that happens to run.
+
+*The agent contract* (all of it): a plain object with =setup(world)=
+and =act(world, day, tick)=; every chain mutation goes through
+=session.send(contract, fn, args, {tag, account, expect})= --
+journaled, expectation-declared, refusals first-class; analytics
+accumulate in a plain =this.ledger= array the chart panels read.  No
+framework, no base class, no hidden state.
+
+*The world builder carries the plumbing*: scenario builders provide
+labeled op helpers (=onboard= / =identityApprove= / =createCredit=
+today; =buyBuck= / =sellBuck= / =basketDeposit= / =basketRedeem= /
+=pledge= / =refUsd= / =receiptValueUsd= with the equilibrium world) so
+agents never touch custody mechanics, identity binding, or router
+encoding.  Plumbing decisions (SimLP vs router, proxy vs EOA) change
+the world builder, never the agents.
+
+*Acceptance criterion (developer experience)*: every shipped example
+agent fits on one screen and reads cold to that developer.  Enforced
+mechanically by the prototype gate (=core/js/test/prototypes.test.js=
+caps file length) and substantively by review.
+
+*Prototypes* (=core/js/prototypes/=, banked ahead of the world that
+runs them; Stage 7 wires them live):
+- =basket-investor.js= -- deposits a constituent TOKEN into BuckBasket
+  (BUCK + receipt out), marks the receipt to market daily, redeems at
+  a horizon; books USD cost/mark/redeem rows for the ROI chart
+  (dollar-days accounting mirroring the Python DM agents).
+- =mortgage-retiree.js= -- retires an amortizing mortgage with
+  BuckCredit: pledge -> activate -> draw -> pay out the bank; monthly
+  income then buys discounted BUCK (=basketValueInBuck= > 1) to
+  retire the draw, with forced deleverage when the controller
+  tightens K past the position.  Books BOTH columns of the
+  mortgage-vs-BuckCredit cost chart from one ledger (counterfactual
+  amortizing interest vs premium + spreads + forced costs).
 
 ** Phase 5: scale-up
 10^3 - 10^4 agent populations (extensive-margin adoption experiments from
@@ -471,9 +533,22 @@ caching); OPTIONAL pyrevm backend behind the identical-vector gate.
 =buck-wallet= (fountain management, tx signing) packaged for JS/Python/
 native; registrar/insurer/credit-union integration SDKs (same crates, thin
 service shims); Holochain zomes consuming =buck-identity=/=buck-wallet=.
+
+A named deliverable (banked 2026-07-04): the *back-office BUCK service*
+-- a Node process an integrator runs beside their account system,
+exposing the BUCK endpoints their products need: balances and
+statements, deposit/credit product values, investment values and
+histories, an identity fountain isolating pools of back-office
+holdings, and Notes flows that shelter idle BUCK from demurrage and
+hide monetary-flow footprints from third parties.  Stress-tested by
+pointing its =ChainSession= at a Tevm-hosted sim, anvil, or a testnet.
+The Notes cryptography is already in the wasm kernel (commitments,
+nullifiers, A2/B1 bindings, replayed by the JS suite); this
+productizes its orchestration.
 - /Accept/: an end-to-end partner flow (sign Identity -> mint BuckCredit ->
   BUCK account product) driven purely through the SDKs on a Tenderly or
-  testnet =ChainSession=.
+  testnet =ChainSession=; the back-office service survives a stress
+  scenario against a Tevm or anvil sim.
 
 * Risks and open questions
 
@@ -481,6 +556,23 @@ service shims); Holochain zomes consuming =buck-identity=/=buck-wallet=.
   anvil-compat surface is partial.  Mitigation: demos are small
   populations; the identical-journal gate (Phase 4) catches semantic
   drift; anvil remains the fidelity anchor.
+- *Thin periphery vs real routing tools* (SimLP): the pools were always
+  real (=UniswapV3Factory=/=UniswapV3Pool=); SimLP only simulated the
+  PERIPHERY (mint/swap callbacks).  RESOLVED 2026-07-04
+  (=core/js/test/router.tevm.test.js=): the Python sim's Universal
+  Router recipe -- the vendored artifact wired with a dummy Permit2
+  (pre-fund route, =payerIsUser=false=), OUR pool init-code-hash
+  (locally compiled bytecode hashes differently than mainnet's), real
+  WETH9 -- deploys on Tevm at 5,346,812 gas (under the ~15M block
+  budget) and routes a real V3_SWAP_EXACT_IN;
+  =core/js/src/router.js= mirrors =alberta_buck/sim/router.py=.
+  Doctrine: agent and USER swaps go through the real router (the code
+  path integrators copy, and the surface real JS AMM tooling can be
+  pointed at); SimLP remains for simulation god-modes only -- whale
+  pinning and liquidity seeding.  In BUCK worlds the router is
+  identity-bound public+carrying (deploy.py shows the bind).  Real
+  Permit2 (its canonical CREATE2 deploy) is optional follow-up for
+  signature-based approvals.
 - *Two agent platforms drifting*: mitigated by shared kernels, shared
   scenario vocabulary, shared journal diffing -- and by keeping agents
   deliberately simple (a decision of record).
