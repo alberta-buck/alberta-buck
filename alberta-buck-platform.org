@@ -460,7 +460,11 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
 5. *Instrument + charts*: a per-tick recorder in the demo controller
    (pool spots vs references, citizen balances/fees, K and basket
    value) and in-page SVG charts; the market panel graduates from
-   numbers to time series.
+   numbers to time series.  First slice 2026-07-04: =src/chart.js=
+   (dependency-free SVG lines, node + browser) + =world.record(day)=
+   series in the equilibrium world + =bin/eqsim.mjs= writing the
+   K / basketValueInBuck / BUCK-price / debtor-net-worth charts; the
+   PAGE panels remain.
 6. *The equilibrium world in JS*: =buildEquilibriumWorld= ports
    deploy.py's basket world -- BuckBasketProRata + TOKEN/BUCK pools +
    the floating BUCK/USDC pool, CSV reference feeds bundled for the
@@ -480,7 +484,19 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    and the PidKeeper's permissionless =compute()= both execute
    in-process.  Scope decision: stage 6 builds this MINIMAL world
    (1-2 tokens); the full multi-token research world stays in
-   Python (decision of record).
+   Python (decision of record).  Landed 2026-07-04
+   (=scenarios/eqworld.js=): =buildEquilibriumWorld= with the
+   doctrine's op-helper surface (=pledge= / =route= / =buyBuck= /
+   =sellBuck= / =buyTokenBest= / =basketDeposit= / =basketRedeem= /
+   =refUsd= / =receiptValueUsd= / =fiatIn= / =record=; lazy public
+   NON-carrying holder proxies for credit drawers -- carrying
+   accounts cannot draw negative), seeded reference walks, and the
+   Python sim's pre-tick bootstrap mirrored: a targetBuck-scale
+   deposit gives every basket pool real depth.  (The loop gate found
+   the thin-pool failure first: with only an agent-scale deposit as
+   liquidity, the arb's daily corrections swing the pool percent-wise
+   and the redeem path's spot/TWAP guard reverts =Slippage()=.)  The
+   py/js journal-parity transcription remains this stage's exit gate.
 7. *Economic agents*: the minimal TWO-AGENT equilibrium (design
    refined 2026-07-04) -- a *saver* (USDC wealth; acquires TOKENs or
    BUCK, whichever route quotes the best after-swap valuation, and
@@ -491,6 +507,21 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    population damps -- mitigate with deadbands, trade sizes small
    against pool depth, and the whale-pinned TOKEN/USDC anchor;
    research-grade equilibrium remains the Python harness's job.
+   First slice 2026-07-04 (=eqsim.tevm.test.js=, the suite's
+   heaviest gate, ~2 min): DayClock + PinWhale + ParityArb (the
+   triangle-consistency arb routes through the REAL router and needs
+   NO identity -- BUCK passes only through the bound router mid-hop)
+   + PidKeeper + BasketSaver (best-route acquisition, live
+   onboarding ceremony) + MonthlyIncome + the MortgageRetiree
+   prototype LIVE.  35 days: every op matched; TOKEN/BUCK held
+   within 150 bp of the implied triangle price (73 triangles); K
+   interior 0.75 -> 0.774; bvib 0.978; the saver completed a full
+   deposit -> term -> redeem cycle; the debtor retired ~$37k of
+   mortgage principal on the deflation signal.  Prototype hardening
+   en route: a 0.5% deadband + a year-of-payments tranche cap (the
+   lumpy-agent mitigations, now in the exemplar), and the ledger's
+   =drawn= column books the post-leg position.  REMAINING: dynamic
+   add-agent controls, the ROI panels on the page, journal parity.
 8. *The participating user*: swap panel (USDC <-> BUCK <-> TOKENs via
    the real router), basket deposit/redeem with a receipt/NFT viewer,
    pledge form (createCredit).

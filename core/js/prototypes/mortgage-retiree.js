@@ -8,11 +8,14 @@
 //   actual net worth: house + banked - mortgageOwing - drawn
 //   counterfactual:   house + hypoBanked - hypoOwing
 //
-// Awaits the equilibrium-world builder (Stage 6) for these helpers:
+// Runs on the equilibrium world (scenarios/eqworld.js) via its helpers:
 //   world.pledge(account, face, {tag})     createCredit: headroom, no draw
 //   world.sellBuck(buckIn, account, {tag}) -> USDC received (draws credit)
 //   world.buyBuck(usdcIn, account, {tag})  -> BUCK received (retires draw)
 //   world.usdcForBuck(buckOut)             -> USDC needed at current spot
+//   world.holderAddress(account)           -> the on-chain position holder
+//     (credit-drawers act through a public NON-carrying proxy the world
+//     creates at pledge(); carrying accounts cannot draw negative)
 // plus world.session / world.buck / world.basket contract handles.
 //
 // The debtor holds a USDC mortgage AND insured assets.  Day 0: pledge
@@ -33,6 +36,7 @@
 const BP = 10_000n;
 const MONTH = 30;
 const E18 = 10n ** 18n;
+const BAND = E18 / 200n;   // 0.5% deadband: don't churn on parity noise
 const min = (a, b) => (a < b ? a : b);
 
 export class MortgageRetiree {
@@ -60,7 +64,7 @@ export class MortgageRetiree {
 
   async act(world, day, tick) {
     if (tick !== 0 || day % MONTH !== 0) return;
-    const s = world.session, me = this.account.address;
+    const s = world.session, me = world.holderAddress(this.account);
     let buckUsd = this.house * this.premiumBp / BP / 12n;   // insurer's bill
     let budget = this.payment;
 
@@ -76,31 +80,39 @@ export class MortgageRetiree {
     const drawn = -(await s.call(world.buck, "signedBalanceOf", [me]));
     const limit = await s.call(world.buck, "creditLimit", [me]);
     const bvib = await s.call(world.basket, "basketValueInBuck");
+    let pos = drawn;               // ledger-accurate position after the legs
 
     if (drawn > limit) {
       // Forced deleverage: the controller tightened K past our draw.
-      const spend = min(this.usdc, world.usdcForBuck(drawn - limit));
+      const need = await world.usdcForBuck(drawn - limit);
+      const spend = min(this.usdc, need);
       const got = await world.buyBuck(spend, this.account,
                                       { tag: `debtor:forced:d${day}` });
       this.usdc -= spend;
       buckUsd += spend - got;
-    } else if (bvib < E18 && this.mortgageOwing > 0n && drawn < limit) {
+      pos -= got;
+    } else if (bvib < E18 - BAND && this.mortgageOwing > 0n && drawn < limit) {
       // DEFLATION: sell BUCK high; retire expensive mortgage principal.
-      const draw = min(limit - drawn, this.mortgageOwing);
+      // Tranche-capped (a year of payments) so one lumpy agent cannot
+      // slam the floating pool in a single act.
+      const draw = min(min(limit - drawn, this.mortgageOwing),
+                       this.payment * 12n);
       const got = await world.sellBuck(draw, this.account,
                                        { tag: `debtor:draw:d${day}` });
       this.mortgageOwing -= min(got, this.mortgageOwing);
       buckUsd += draw - got;            // NEGATIVE when sold above par
-    } else if (bvib > E18 && drawn > 0n && this.usdc >= 10n ** 6n) {
+      pos += draw;
+    } else if (bvib > E18 + BAND && drawn > 0n && this.usdc >= 10n ** 6n) {
       // INFLATION: buy discounted BUCK; retire the draw toward zero.
       const spend = min(this.usdc, drawn);
       const got = await world.buyBuck(spend, this.account,
                                       { tag: `debtor:paydown:d${day}` });
       this.usdc -= spend;
       buckUsd += spend - got;           // NEGATIVE when bought below par
+      pos -= got;
     }
 
-    this.ledger.push({ day, drawn, buckUsd,
+    this.ledger.push({ day, drawn: pos, buckUsd,
                        mortgageOwing: this.mortgageOwing,
                        banked: this.usdc,
                        hypoOwing: this.#hypoMonth() });

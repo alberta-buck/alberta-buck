@@ -54,7 +54,9 @@ test("prototypes: the debtor's mortgage arithmetic amortizes", async () => {
   const r = new MortgageRetiree({
     house: 400_000n * 10n ** 6n, mortgageBp: 550n, premiumBp: 50n,
     payment: 3_000n * 10n ** 6n, account: { address: "0x0" } });
-  const world = { session: { call: async () => 0n }, buck: {}, basket: {} };
+  const world = { session: { call: async () => 0n }, buck: {}, basket: {},
+                  holderAddress: (a) => a.address,
+                  usdcForBuck: async () => 0n };
 
   for (let m = 0; m < 12; m++) {
     const owing = r.mortgageOwing;
