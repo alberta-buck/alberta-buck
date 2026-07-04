@@ -73,7 +73,20 @@
           <button id="d1">+1 day</button>
           <button id="d30">+30 days</button>
         </div>
+        <div>
+          market:
+          <button id="openmkt">Open TOKEN/USDC market</button>
+          <button id="mtick" disabled>tick +1 day</button>
+          <button id="play" disabled>&#9654; play</button>
+          <button id="pause" disabled>&#9646;&#9646; pause</button>
+          <select id="speed">
+            <option value="2000">1 day / 2s</option>
+            <option value="1000" selected>1 day / 1s</option>
+            <option value="400">1 day / 0.4s</option>
+          </select>
+        </div>
       </div>
+      <div id="market" class="card" style="display:none"></div>
       <div id="roster"></div>
     </div>
     <div class="col">

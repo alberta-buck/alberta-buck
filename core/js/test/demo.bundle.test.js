@@ -34,6 +34,7 @@ class El {
     this.selectedIndex = 0;
     this.disabled = false;
     this.onclick = null;
+    this.style = {};
     this._html = "";
   }
   set innerHTML(v) { this._html = v; this.children = []; this.options = []; }
@@ -77,4 +78,13 @@ test("shipped bundle: the opening story runs headless, badge bit-exact", { skip 
   assert.match(names, /Bob Smith/);
   // The journal streamed the story into the page.
   assert.ok(byId("log").children.length > 10, "journal panel populated");
+
+  // Stage 3 through the SAME shipped bundle: open the market via the
+  // page's own (stubbed) controls and tick two simulated days -- the
+  // whale + trader run in the background and the panel renders.
+  await byId("openmkt").onclick();
+  await byId("mtick").onclick();
+  await byId("mtick").onclick();
+  assert.match(byId("market").innerHTML, /simulated day 2/);
+  assert.match(byId("market").innerHTML, /pool spot/);
 });

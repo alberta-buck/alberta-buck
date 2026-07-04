@@ -10,6 +10,11 @@ import {
   buildBuckWorld, onboard, identityApprove, createCredit,
   fundAccount, advanceTime, DAY,
 } from "../../src/buckworld.js";
+import { buildOnePool } from "../../src/scenarios/onepool.js";
+import { PinWhale } from "../../src/agents/whale.js";
+import { RoundTripTrader } from "../../src/agents/trader.js";
+import { seededWalk } from "../../src/prices.js";
+import { spotFromSqrtPriceX96 } from "../../src/v3.js";
 
 /** Rotating sample identities (unicode deliberately represented). */
 export const SAMPLE_CITIZENS = [
@@ -44,6 +49,10 @@ export class BuckWorldApp {
     this.world = null;
     this.citizens = [];            // {name, fields, handle, touched:{}}
     this.approved = new Set();     // "from->to" fragments recorded
+    this.market = null;            // {token, usdc, pool, simlp} once open
+    this.agents = [];              // background whale + trader
+    this.walk = null;              // the seeded reference path
+    this.marketDay = 0;
   }
 
   async boot() {
@@ -136,6 +145,64 @@ export class BuckWorldApp {
    *  the receipt block): the page's bit-exact badge.  null without math. */
   predictFee(raw, elapsed) {
     return this.math ? this.math.fee_owing(0n, raw, elapsed) : null;
+  }
+
+  /**
+   * Open the background market: a real TOKEN/USDC V3 pool (buildOnePool),
+   * a PinWhale snapping it to a seeded synthetic reference walk, and a
+   * RoundTripTrader arbing through it -- the Phase-1 agents, composed
+   * into the citizen world.
+   */
+  async openMarket({ seed = 0x90071, price = 2_500_000n,
+                     usdcDepth = 10_000_000n * 10n ** 6n,
+                     walkDays = 3650, stepBp = 150 } = {}) {
+    this.market = await buildOnePool(this.session, this.artifacts,
+      { price, usdcDepth });
+    this.walk = seededWalk({ seed, start: price, stepBp, steps: walkDays });
+    this.marketDay = 0;
+
+    const { token, usdc, pool, simlp } = this.market;
+    this.agents = [
+      new PinWhale({
+        simlp, pool, token: token.address, tokenDec: 18, quote: usdc.address,
+        refPrice: (day) => this.walk[day % this.walk.length],
+      }),
+      new RoundTripTrader({
+        simlp, pool, token, quote: usdc, amount: 5n * 10n ** 18n,
+      }),
+    ];
+    // Stock the trader's base-asset wallet.
+    await this.session.send(token, "mint",
+      [this.session.account.address, 10_000n * 10n ** 18n],
+      { tag: "market:stock-trader" });
+    for (const a of this.agents) {
+      if (a.setup) await a.setup({ session: this.session });
+    }
+    return this.market;
+  }
+
+  /** One market day: advance the clock, whale snaps to the walk, the
+   *  trader round-trips.  The citizens' demurrage ticks with it. */
+  async marketTick() {
+    if (!this.market) throw new Error("openMarket first");
+    await this.jump(DAY);
+    const day = this.marketDay++;
+    for (const a of this.agents) {
+      await a.act({ session: this.session }, day, 0);
+    }
+    return day;
+  }
+
+  /** Pool spot vs the walk's last-applied reference, for the market panel. */
+  async marketSnapshot() {
+    const { token, usdc, pool } = this.market;
+    const slot0 = await this.session.call(pool, "slot0");
+    const applied = Math.max(0, this.marketDay - 1);
+    return {
+      day: this.marketDay,
+      spot: spotFromSqrtPriceX96(slot0[0], token.address, 18, usdc.address),
+      ref: this.walk[applied % this.walk.length],
+    };
   }
 
   static DAY = DAY;

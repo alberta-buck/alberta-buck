@@ -37,6 +37,15 @@ async function refresh() {
   const snap = await app.snapshot();
   $("clock").textContent = new Date(Number(snap.clock) * 1000)
     .toISOString().replace("T", " ").slice(0, 19) + " (simulated)";
+  if (app.market) {
+    const m = await app.marketSnapshot();
+    $("market").style.display = "";
+    $("market").innerHTML =
+      `<b>TOKEN/USDC market</b> · simulated day ${m.day}<br>` +
+      `pool spot <b>$${(Number(m.spot) / 1e6).toFixed(4)}</b> · ` +
+      `reference $${(Number(m.ref) / 1e6).toFixed(4)} ` +
+      `<span class="addr">(whale pins the seeded walk; a trader round-trips daily)</span>`;
+  }
   const roster = $("roster");
   roster.innerHTML = "";
   for (const c of snap.citizens) {
@@ -135,6 +144,30 @@ async function main() {
                              ["d30", 30 * BuckWorldApp.DAY]]) {
     $(id_).onclick = () => act("time", () => app.jump(secs));
   }
+
+  // The background market: open once, then tick by button or by timer.
+  let timer = null;
+  let ticking = false;
+  const tickOnce = async () => {
+    if (ticking || !app.market) return;
+    ticking = true;
+    try { await app.marketTick(); } finally { ticking = false; }
+    await refresh();
+  };
+  $("openmkt").onclick = () => act("open market", async () => {
+    await app.openMarket();
+    $("openmkt").textContent = "market open";
+    for (const b of ["mtick", "play", "pause"]) $(b).disabled = false;
+  });
+  $("mtick").onclick = () => tickOnce();
+  $("play").onclick = () => {
+    if (timer) return;
+    timer = setInterval(tickOnce, Number($("speed").value));
+  };
+  $("pause").onclick = () => {
+    clearInterval(timer);
+    timer = null;
+  };
 
   await refresh();
 }
