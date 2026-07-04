@@ -403,7 +403,7 @@ kernel proving, real Solidity verification -- runs wholly in JS.
 Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
 (viem needs object keys to match exactly).
 
-*Stages* (1-2 DONE 2026-07-03):
+*Stages* (1-4 DONE 2026-07-03):
 1. *Buckworld on Tevm* (node-gated): an artifacts bundle build step
    (=out/*.json= -> one importable module: nodefs stays node-only, the
    browser imports the bundle -- =buildOnePool= already takes an
@@ -431,13 +431,32 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    takes); bundle ~4.3 MB + the two web-target wasm kernels.
 3. *Background agents + prices*: whale pin + roundtrip traders (Phase 1
    agents) driving the pools on a seeded price stream while the user
-   interacts; play/pause/speed.
+   interacts; play/pause/speed.  Met by =openMarket()=/=marketTick()=
+   in the demo controller (a real TOKEN/USDC pool beside the BUCK
+   stack; =src/prices.js= seeded BigInt walk) + the page's market
+   panel and tick/play/pause/speed controls; gated by
+   =market.tevm.test.js= (pool tracks the walk to <= 50 bp with the
+   trader churning, EXACT pin with the whale alone, every snap and
+   round-trip journaled by tag, demurrage bit-exact at the ACTUAL
+   elapsed time) and the extended bundle gate.
 4. *Journal parity* (the acceptance gate): a canonical mini-scenario
-   defined once (=core/vectors/mini-scenario.json=: seeds, targets,
-   trade sizes, days) and driven by BOTH platforms -- Python
-   (Web3Session -> anvil) and JS (Session -> tevm AND -> the same
-   anvil) -- with journals compared field-by-field (semantic fields
-   exactly; gas exact where backends agree).
+   defined once (=core/vectors/mini-scenario.json=: fixed targets --
+   no cross-language RNG at all) and driven op-for-op, tag-for-tag by
+   BOTH platforms -- =alberta_buck.sim.mini= (python -> anvil) and
+   =core/js= =scenarios/mini.js= via =bin/mini-sim.mjs= (node -> tevm
+   AND -> a fresh anvil).  Met (=test_mini_parity.py=): python-anvil
+   vs js-anvil journals are BYTE-EQUAL on every record -- all semantic
+   fields AND gas (26 records: 4 deploys, the one-pool build, 3 days
+   of whale pins + round trips incl. the declared-revert SPL demo).
+   js-tevm vs js-anvil: semantics exactly; tevm's ethereumjs EVM
+   prices a 4/26 minority differently (the callback-bearing SimLP
+   liquidity mint + whale swaps, +~3.9k gas each) -- summarized and
+   bounded by the gate; anvil remains the fidelity anchor.  Two
+   session fixes landed en route: the Python =deploy()= gained the
+   instance-label =tag=- seam the JS session already had, and
+   =_revert_reason= now journals the BARE Solidity reason ("SPL"),
+   the schema's documented form -- the pinned journal-sample fixture
+   had always specified it; the implementation finally conforms.
 5. *Embedding*: single-file build of the demo for slide decks / web
    pages; docs.
 

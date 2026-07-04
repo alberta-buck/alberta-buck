@@ -1,0 +1,12 @@
+{
+  "$schema_version": 1,
+  "name": "mini",
+  "description": "The canonical journal-parity mini-scenario (platform doc, Phase 4 Stage 4): a one-pool TOKEN/USDC world, a whale pinning three fixed daily targets, and a round-trip trader (day-0 SPL demo included, DECLARED expect=revert).  Driven op-for-op, tag-for-tag by BOTH platforms -- alberta_buck.sim.mini (python -> anvil) and core/js scenarios/mini.js (node -> tevm and anvil); the journals must agree field-by-field.  All integers are strings (they exceed JSON number precision).",
+  "price": "2500000",
+  "usdcDepth": "10000000000000",
+  "tokenDec": 18,
+  "traderStock": "10000000000000000000000",
+  "tradeTokens": "5000000000000000000",
+  "days": 3,
+  "targets": ["2513000", "2482000", "2505000"]
+}
