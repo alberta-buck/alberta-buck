@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession } from "../src/backends.js";
+import { anvilSession, tevmSession } from "../src/backends.js";
 import { loadArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
 import { buildEquilibriumWorld, DayClock, PidKeeper, MonthlyIncome }
   from "../src/scenarios/eqworld.js";
@@ -29,6 +29,8 @@ import { lineChart, svgDoc } from "../src/chart.js";
 import id from "../src/identity.js";
 
 const { values: a } = parseArgs({ options: {
+  backend: { type: "string", default: "tevm" },   // tevm | anvil (long runs)
+  rpc:     { type: "string", default: "http://127.0.0.1:8545" },
   days:    { type: "string", default: "180" },
   step:    { type: "string", default: "80" },     // walk step, bp/day
   seed:    { type: "string", default: "61445" },  // 0xF005
@@ -42,8 +44,13 @@ const { values: a } = parseArgs({ options: {
 } });
 const days = Number(a.days);
 
-const session = await tevmSession(
-  a.journal ? { journal: fileJournalWriter(a.journal) } : {});
+// tevm keeps every block in JS memory: fine for demo-scale runs, OOM
+// around multi-year ones.  Long runs point at a fresh anvil (the
+// fidelity anchor), which holds chain state in its own process.
+const jopt = a.journal ? { journal: fileJournalWriter(a.journal) } : {};
+const session = a.backend === "anvil"
+  ? await anvilSession(a.rpc, jopt)
+  : await tevmSession(jopt);
 const urArtifact = JSON.parse(readFileSync(
   join(repoRoot(), "alberta_buck", "sim", "artifacts", "UniversalRouter.json"),
   "utf8"));
