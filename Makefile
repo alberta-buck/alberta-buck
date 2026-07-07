@@ -666,6 +666,40 @@ sim-flow:	sim-run-flow
 	python -m alberta_buck.sim.plot_basket_flow
 
 
+# ── Rebalance-policy model (no Anvil) ─────────────────────────────────
+#
+# Deviation x MA-acceleration rebalancing factor over the hist-*.csv
+# constituents plus a synthetic M2-lag driver; compares hold / prop /
+# band / factor policies.  --sweep adds the per-constituent MA-window
+# coordinate sweep (slower).
+#
+#   make nix-sim-policy        # run -> plot
+#   make nix-sim-run-policy    # write test/vectors/rebalance-policy.json
+#   make nix-sim-plot-policy   # render images/rebalance-policy.png
+
+POLICY_VECTOR	= test/vectors/rebalance-policy.json
+POLICY_IMAGE	= images/rebalance-policy.png
+POLICY_OPTS	?=
+
+$(POLICY_VECTOR):	alberta_buck/sim/rebalance_policy.py
+	python -m alberta_buck.sim.rebalance_policy $(POLICY_OPTS)
+
+sim-run-policy:
+	python -m alberta_buck.sim.rebalance_policy $(POLICY_OPTS)
+
+sim-run-policy-sweep:
+	python -m alberta_buck.sim.rebalance_policy --sweep $(POLICY_OPTS)
+
+sim-plot-policy:	$(POLICY_VECTOR) alberta_buck/sim/plot_rebalance_policy.py
+	python -m alberta_buck.sim.plot_rebalance_policy
+
+sim-policy:	sim-run-policy
+	python -m alberta_buck.sim.plot_rebalance_policy
+
+sim-policy-sweep:	sim-run-policy-sweep
+	python -m alberta_buck.sim.plot_rebalance_policy
+
+
 # ── Historical commodity & labour quote source ───────────────────────
 #
 # Builds NRGY/BULN/FOOD (from Bank of Canada BCPI sub-indices) and a
