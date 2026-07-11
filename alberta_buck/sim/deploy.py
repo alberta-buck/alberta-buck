@@ -8,6 +8,7 @@ Identity; TOKEN/USDC pools and SimLP never custody BUCK so they need none.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,7 @@ class Deployment:
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
     basket_impl: str = "prorata"  # "prorata" (BuckBasketProRata, default) | "legacy"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
+    director: Any = None          # BasketRebalanceDirector (prorata only)
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
 
@@ -441,4 +443,25 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         + [(d.pool_buck[i], basket.address, lob_tok, hib_tok, "buck") for i in range(len(tok))]
         + [(d.pool_ub, simlp.address, lob_ub, hib_ub, "ub")]
     )
+
+    # --- BasketRebalanceDirector (standalone advisor; prorata only) ------- #
+    # Amortized rebalance-signal state machine: agents poke() it with a small
+    # work budget; hints direct deposit routing and redemption draws.  Params:
+    # daily epochs, 15-epoch MA window (sim-scale), rho=3, deadband 1.5%,
+    # epsFrac 0.25, leash 30%/25%, cap 50bp NAV/epoch.  DIRECTOR_WINDOW /
+    # DIRECTOR_DEADBAND_BP env overrides let short smoke sims exercise the
+    # trade path (small window + tight deadband => efforts fire on pool noise).
+    if basket_impl == "prorata":
+        dir_window = int(os.environ.get("DIRECTOR_WINDOW", "15"))
+        dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
+        director = chain.deploy(
+            "BasketRebalanceDirector", basket.address, gov,
+            (86400, dir_window, 3_000_000_000, dir_deadband * 100_000,
+             250_000_000, 300_000_000, 250_000_000, 50))
+        chain.send(director.functions.syncConstituents())
+        d.director = director
+        if verbose:
+            print(f"[deploy] BasketRebalanceDirector {director.address[:10]}..."
+                  f"  window={dir_window}d deadband={dir_deadband}bp"
+                  f" rho=3 cap=50bp/epoch")
     return d

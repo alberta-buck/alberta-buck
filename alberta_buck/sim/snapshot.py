@@ -340,6 +340,8 @@ class Snapshotter:
             "poolWeights": pool_weights,
             "rebalancerPnl": reb_pnl,
             "rebalanceTrades": ctr.get("rebalanceTrades", 0),
+            "directorPokes": ctr.get("directorPokes", 0),
+            "directorTrades": ctr.get("directorTrades", 0),
             "directMintPnl": dm_pnl,
             "dmEntries": ctr.get("dmEntries", 0),
             "dmExits": ctr.get("dmExits", 0),

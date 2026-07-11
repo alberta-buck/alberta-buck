@@ -71,7 +71,11 @@ REBALANCING = Scenario(
             # Smaller stochastic BUCK holders: mint externally backed BUCK
             # and deposit it into the currently most-underweight pool, with
             # BuckBasket enforcing its BUCK->TOKEN slippage guard.
-            "DirectMintBuckAgent": 75},
+            "DirectMintBuckAgent": 75,
+            # Advances the BasketRebalanceDirector's amortized MA signals a
+            # bounded slice per tick and executes its advisory efforts
+            # (sell-side hint -> BUCK -> buy-side hint) through the router.
+            "DirectorKeeperAgent": 1},
     days=365,
     ticks_per_day=4,
 )

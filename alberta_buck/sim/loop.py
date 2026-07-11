@@ -10,6 +10,7 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
+import alberta_buck.sim.director_agent  # noqa: F401  triggers @_register
 from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )
