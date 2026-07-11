@@ -19,8 +19,9 @@ POLICY_STYLE = {
     "band": dict(color="tab:purple", linewidth=1.2),
     "factor": dict(color="tab:blue", linewidth=1.8),
     "vrate": dict(color="tab:green", linewidth=1.8),
+    "pairs": dict(color="tab:red", linewidth=1.8),
 }
-ACTIVE = ("prop", "band", "factor", "vrate")
+ACTIVE = ("prop", "band", "factor", "vrate", "pairs")
 
 
 def render(data_path: Path = DATA, out_path: Path = OUT) -> None:

@@ -101,6 +101,52 @@ policies (-676bp) even while its NAV loss stays comparable to prop's on
 maximally right (+514bp capture90, the best).  The factor gate is the more
 trend-robust of the two; vrate is the more efficient harvester.
 
+## 2c. The differential-mode multi-scale variant (`pairs`)
+
+Perry's reconception (2026-07-11): the single-window share-vs-target signal
+harvests only the macro (M2) scale and concedes every mid-size swing to
+continuous rebalancing; and shares measured from pool BUCK reserves carry
+numeraire/flow noise. Work instead in *differential mode* — the 3-phase-power
+analogy: profit lives in the differentials between commodity legs; the common
+mode (BUCK/USDC valuation) is the K-controller's job and cancels exactly in
+cross-commodity log price ratios.
+
+- **Per-leg EMA ladder**: K=7 windows (5..320d geometric) of EMAs on log
+  spot. EMA linearity ⇒ every PAIR's MA/velocity/curvature at every scale is
+  the difference of two legs' ladders — the full N(N-1)/2 differential graph
+  from O(N*K) state.
+- **Quorum turn detector**: per pair, each scale votes iff its MA-gap agrees
+  in sign with the raw pairwise imbalance AND its curvature points back
+  toward equilibrium (the factor gate, per scale). votes >= quorum (default
+  4/7) opens the pair. Short windows catch mid-size swings; long windows the
+  M2 excursions; no single scale can fire alone.
+- **Effort** = kappa(0.5) x |pairwise imbalance d_ij| x votes/K, capped,
+  pairwise leash 30%/25%. `d_ij = ln((1+delta_i)/(1+delta_j))` — also
+  numeraire-free.
+- **Matched pair trades** (sell rich leg, buy poor leg, equal value):
+  self-financing, no cash residue, structurally wash-proof. Per-leg nets
+  capped with proportional pair rescale.
+- Progressive warmup: short windows vote from ~day 20 (no 116-day silence).
+
+**Results (synthetic 20y x 5 seeds, quorum=4):**
+
+| cost/leg | prop | band | factor | vrate | pairs |
+|---|---|---|---|---|---|
+| 30bp | +430 | +417 | +393 | +340 | **+496** |
+| 100bp | +365 | +308 | +357 | +313 | **+422** |
+| 250bp | +228 | +89 | **+283** | +271 | +262 |
+
+pairs **beats prop's gross harvest** (multi-scale coverage recovered the
+mid-size swings AND the pair-matched execution harvests more per unit
+imbalance) and dominates every policy through ~200bp/leg costs; factor
+retakes the lead only at extreme costs. Turnover 0.96/yr, TE 5.4%,
+capture90 +201. Historical (2020-25 trend): CAGR 17.9% — better than vrate
+(18.1%→ comparable) but still below factor (19.3%)/prop (18.4%): the quorum
+fires on BTC's consolidations during a relentless trend; the leash bounds
+it. Quorum scan: q3 max premium (+508, turnover 1.39); q5 min turnover
+(0.65, +460); **q4 the knee**. factor remains the trend-regime pick; pairs
+the reverting-regime pick.
+
 ## 3. Window selection
 
 `derive_windows()`: a constituent's share-excursion timescale is its M2 lag

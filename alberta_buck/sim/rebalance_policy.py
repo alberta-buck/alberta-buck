@@ -42,10 +42,25 @@ half-the-gap-in-one-window prior while level.  Self-calibrating (no kappa, no
 acceleration normalizer) and self-limiting (its own flow feeds the observed
 closure rate, so raising rho saturates rather than overshoots).
 
+A third gated variant, `pairs`, works in *differential mode*: instead of each
+constituent's share vs its own target (which, measured on-chain from pool
+reserves, carries BUCK-side flow noise), it watches the full graph of
+CROSS-COMMODITY log price ratios -- the common numeraire cancels exactly --
+through a per-leg ladder of K EMAs at geometric timescales (5..320d).  EMA
+linearity means every pair's moving average at every scale is just the
+difference of two legs' ladders (O(N*K) state, not O(N^2*K)).  A pair trades
+when a QUORUM of scales votes that its divergence is decelerating back toward
+equilibrium (the factor gate, per scale, voted): short windows catch the
+mid-size swings a single long MA concedes to prop, long windows catch the
+macro M2 excursions, and no single noisy scale can fire the gate alone.
+Effort = kappa x |pairwise imbalance| x votes/K, executed as a matched pair
+trade (sell rich leg, buy poor leg) -- self-financing, no cash residue, no
+wash risk by construction.
+
 Policies compared: hold (never rebalance), prop (continuous proportional to
 instantaneous deviation -- what spot-based flow routing approximates), band
-(threshold 5%, the BuckBasketRebalancerAgent approach), factor and vrate
-(this model).
+(threshold 5%, the BuckBasketRebalancerAgent approach), factor, vrate, and
+pairs (this model).
 
 Run:
 
@@ -281,7 +296,8 @@ class FactorPolicy:
         self.leash_inner = leash_inner
         self.leashed = [False] * len(SYMS)
 
-    def efforts(self, deltas: Sequence[float]) -> list[float]:
+    def efforts(self, deltas: Sequence[float],
+                prices: Sequence[float] | None = None) -> list[float]:
         out = []
         for i, (st, d) in enumerate(zip(self.states, deltas)):
             gate = st.update(d)
@@ -305,6 +321,132 @@ class FactorPolicy:
             e = min(self.kappa * abs(d) * gate * gate, self.cap)
             out.append(-math.copysign(e, d))
         return out
+
+
+PAIR_LADDER = [5, 10, 20, 40, 80, 160, 320]     # geometric window ladder
+
+
+class _EmaLadder:
+    """Per-leg K-window EMA ladder over log price, with strided curvature.
+
+    EMAs are linear, so any PAIR's moving average / velocity / curvature at
+    any scale is the difference of two legs' ladders -- the full cross-
+    commodity differential graph from O(N*K) state.
+    """
+
+    def __init__(self, windows: Sequence[int] = PAIR_LADDER):
+        self.windows = list(windows)
+        self.strides = [max(1, w // 8) for w in self.windows]
+        self.emas: list[float | None] = [None] * len(self.windows)
+        self.hist = [deque(maxlen=2 * s + 1) for s in self.strides]
+        self.n = 0
+
+    def update(self, logp: float) -> None:
+        self.n += 1
+        for k, w in enumerate(self.windows):
+            beta = 2.0 / (w + 1)
+            e = self.emas[k]
+            e = logp if e is None else e + (logp - e) * beta
+            self.emas[k] = e
+            self.hist[k].append(e)
+
+    def ready(self, k: int) -> bool:
+        return (self.n >= self.windows[k]
+                and len(self.hist[k]) == (self.hist[k].maxlen or 0))
+
+    def ma(self, k: int) -> float:
+        return self.hist[k][-1]
+
+    def accel(self, k: int) -> float:
+        s = self.strides[k]
+        h = self.hist[k]
+        return (h[-1] - 2.0 * h[-1 - s] + h[0]) / (s * s)
+
+
+class PairsPolicy:
+    """Differential-mode multi-scale turn harvester.
+
+    Signals live on cross-commodity log price ratios (numeraire cancels);
+    each pair (i,j) is voted on by K timescales: a window votes when the
+    pair's MA-gap deviation agrees in sign with the current pairwise
+    imbalance AND its curvature points back toward equilibrium (the factor
+    gate, per scale).  votes >= quorum opens the pair; effort is
+    kappa x |imbalance| x votes/K, executed as a matched pair trade.
+    A pairwise leash (with hysteresis) enforces the mandate through trends.
+    """
+
+    name = "pairs"
+
+    def __init__(self, windows_ladder: Sequence[int] = PAIR_LADDER,
+                 quorum: int = 4, kappa: float = 0.5, cap: float = 0.005,
+                 deadband: float = 0.015, leash: float = 0.30,
+                 leash_inner: float = 0.25):
+        self.legs = [_EmaLadder(windows_ladder) for _ in SYMS]
+        self.K = len(windows_ladder)
+        self.quorum = quorum
+        self.kappa = kappa
+        self.cap = cap
+        self.deadband = deadband
+        self.leash = leash
+        self.leash_inner = leash_inner
+        self.p0: list[float] | None = None
+        self.leashed: dict[tuple[int, int], bool] = {}
+
+    def _pair_effort(self, i: int, j: int, d: float) -> float:
+        """Unsigned effort for pair (i,j) with pairwise imbalance d."""
+        key = (i, j)
+        was = self.leashed.get(key, False)
+        self.leashed[key] = abs(d) > (self.leash_inner if was else self.leash)
+        if self.leashed[key]:
+            return self.cap
+        if abs(d) < self.deadband:
+            return 0.0
+        li, lj = self.legs[i], self.legs[j]
+        ref = self.p0[i] - self.p0[j]
+        votes = 0
+        for k in range(self.K):
+            if not (li.ready(k) and lj.ready(k)):
+                continue
+            g = (li.ma(k) - lj.ma(k)) - ref
+            if g * d <= 0.0:                      # scale disagrees with raw
+                continue
+            a = li.accel(k) - lj.accel(k)
+            if a * math.copysign(1.0, d) < 0.0:   # divergence decelerating
+                votes += 1
+        if votes < self.quorum:
+            return 0.0
+        return min(self.kappa * abs(d) * votes / self.K, self.cap)
+
+    def efforts(self, deltas: Sequence[float],
+                prices: Sequence[float] | None = None) -> list[float]:
+        n = len(SYMS)
+        logp = [math.log(p) for p in prices]
+        if self.p0 is None:
+            self.p0 = logp[:]
+        for leg, lp in zip(self.legs, logp):
+            leg.update(lp)
+
+        # Pair efforts, then net per token; rescale any leg whose net
+        # exceeds the cap (keeping every pair trade matched).
+        pair_e: dict[tuple[int, int], float] = {}
+        net = [0.0] * n
+        for i in range(n):
+            for j in range(i + 1, n):
+                d = math.log((1.0 + deltas[i]) / (1.0 + deltas[j]))
+                e = self._pair_effort(i, j, d)
+                if e <= 0.0:
+                    continue
+                e = math.copysign(e, d)           # >0: i rich, sell i buy j
+                pair_e[(i, j)] = e
+                net[i] -= e
+                net[j] += e
+        scale = [1.0 if abs(v) <= self.cap else self.cap / abs(v) for v in net]
+        net = [0.0] * n
+        for (i, j), e in pair_e.items():
+            s = min(scale[i], scale[j])
+            net[i] -= e * s
+            net[j] += e * s
+        return net
 
 
 class VratePolicy:
@@ -341,7 +483,8 @@ class VratePolicy:
         self.leash_inner = leash_inner
         self.leashed = [False] * len(SYMS)
 
-    def efforts(self, deltas: Sequence[float]) -> list[float]:
+    def efforts(self, deltas: Sequence[float],
+                prices: Sequence[float] | None = None) -> list[float]:
         out = []
         for i, (st, d) in enumerate(zip(self.states, deltas)):
             st.update(d)
@@ -390,7 +533,8 @@ class PropPolicy:
         self.cap = cap
         self.deadband = deadband
 
-    def efforts(self, deltas: Sequence[float]) -> list[float]:
+    def efforts(self, deltas: Sequence[float],
+                prices: Sequence[float] | None = None) -> list[float]:
         return [0.0 if abs(d) < self.deadband
                 else -math.copysign(min(self.kappa * abs(d), self.cap), d)
                 for d in deltas]
@@ -408,7 +552,8 @@ class BandPolicy:
         self.cap = cap
         self.engaged = [False] * len(SYMS)
 
-    def efforts(self, deltas: Sequence[float]) -> list[float]:
+    def efforts(self, deltas: Sequence[float],
+                prices: Sequence[float] | None = None) -> list[float]:
         out = []
         for i, d in enumerate(deltas):
             if self.engaged[i]:
@@ -422,7 +567,8 @@ class BandPolicy:
 class HoldPolicy:
     name = "hold"
 
-    def efforts(self, deltas: Sequence[float]) -> list[float]:
+    def efforts(self, deltas: Sequence[float],
+                prices: Sequence[float] | None = None) -> list[float]:
         return [0.0] * len(deltas)
 
 
@@ -466,7 +612,7 @@ def simulate(prices: list[list[float]], policy, weights: Sequence[float],
         V = sum(q[i] * P[i] for i in range(n)) + cash
         deltas = [q[i] * P[i] / V / weights[i] - 1.0 for i in range(n)]
         meanabs.append(sum(abs(d) for d in deltas) / n)
-        efforts = policy.efforts(deltas)
+        efforts = policy.efforts(deltas, P)
 
         if ti >= 0:
             st = policy.states[ti] if hasattr(policy, "states") else None
@@ -556,7 +702,8 @@ def simulate(prices: list[list[float]], policy, weights: Sequence[float],
 
 def _policies(windows: dict[str, int], kappa: float, cap: float,
               deadband: float, weights: Sequence[float],
-              rho: float = 3.0) -> dict[str, Callable[[], object]]:
+              rho: float = 3.0, quorum: int = 4,
+              pairs_kappa: float = 0.5) -> dict[str, Callable[[], object]]:
     return {
         "hold": lambda: HoldPolicy(),
         "prop": lambda: PropPolicy(cap=cap, deadband=deadband),
@@ -565,12 +712,15 @@ def _policies(windows: dict[str, int], kappa: float, cap: float,
                                        deadband=deadband),
         "vrate": lambda: VratePolicy(windows, weights, rho=rho, cap=cap,
                                      deadband=deadband),
+        "pairs": lambda: PairsPolicy(quorum=quorum, kappa=pairs_kappa,
+                                     cap=cap, deadband=deadband),
     }
 
 
 # --------------------------------------------------------------------- modes
 
 def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
+                   quorum=4, pairs_kappa=0.5,
                    trace_sym="cbBTC", trace_policy="vrate") -> dict:
     prices = load_hist_prices()
     weights = [1.0 / len(SYMS)] * len(SYMS)
@@ -579,7 +729,8 @@ def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
            "series": {}, "metrics": {}, "showcaseSym": trace_sym,
            "showcasePolicy": trace_policy}
     for name, mk in _policies(windows, kappa, cap, deadband, weights,
-                              rho=rho).items():
+                              rho=rho, quorum=quorum,
+                              pairs_kappa=pairs_kappa).items():
         r = simulate(prices, mk(), weights, cost_bp=cost_bp,
                      trace_sym=trace_sym if name == trace_policy else None)
         out["series"][name] = r["series"]
@@ -590,14 +741,15 @@ def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
 
 
 def run_synthetic(windows, kappa, cap, deadband, cost_bp, years, seeds,
-                  rho=3.0) -> dict:
+                  rho=3.0, quorum=4, pairs_kappa=0.5) -> dict:
     weights = [1.0 / len(SYMS)] * len(SYMS)
     per_seed: dict[str, list[dict]] = {}
     example: dict[str, dict] = {}
     for k in range(seeds):
         prices = synth_prices(seed=0xB0C + k, years=years)
         for name, mk in _policies(windows, kappa, cap, deadband, weights,
-                                  rho=rho).items():
+                                  rho=rho, quorum=quorum,
+                                  pairs_kappa=pairs_kappa).items():
             r = simulate(prices, mk(), weights, cost_bp=cost_bp)
             per_seed.setdefault(name, []).append(r["metrics"])
             if k == 0:
@@ -712,7 +864,8 @@ def _print_metrics(title: str, metrics: dict[str, dict]) -> None:
 
 def run(mode: str = "both", years: float = 20.0, seeds: int = 5,
         cost_bp: float = 30.0, cap_bp: float = 50.0, kappa: float = 0.08,
-        rho: float = 3.0, deadband: float = 0.015, sweep: bool = False,
+        rho: float = 3.0, quorum: int = 4, pairs_kappa: float = 0.5,
+        deadband: float = 0.015, sweep: bool = False,
         sweep_policy: str = "factor",
         windows_override: dict[str, int] | None = None,
         out: Path = DEFAULT_OUT) -> dict:
@@ -738,12 +891,15 @@ def run(mode: str = "both", years: float = 20.0, seeds: int = 5,
     }
     if mode in ("both", "historical"):
         result["historical"] = run_historical(windows, kappa, cap, deadband,
-                                              cost_bp, rho=rho)
+                                              cost_bp, rho=rho, quorum=quorum,
+                                              pairs_kappa=pairs_kappa)
         _print_metrics("historical (2020-09 .. 2025-09, 6 constituents):",
                        result["historical"]["metrics"])
     if mode in ("both", "synthetic"):
         result["synthetic"] = run_synthetic(windows, kappa, cap, deadband,
-                                            cost_bp, years, seeds, rho=rho)
+                                            cost_bp, years, seeds, rho=rho,
+                                            quorum=quorum,
+                                            pairs_kappa=pairs_kappa)
         _print_metrics(
             f"synthetic ({years:.0f}y x {seeds} seeds, mean):",
             result["synthetic"]["metrics"])
@@ -782,6 +938,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--rho", type=float, default=3.0,
                         help="vrate match ratio: trade at rho x the observed "
                              "natural closure rate")
+    parser.add_argument("--quorum", type=int, default=4,
+                        help="pairs policy: scales that must vote the turn")
+    parser.add_argument("--pairs-kappa", type=float, default=0.5)
     parser.add_argument("--deadband", type=float, default=0.015)
     parser.add_argument("--sweep", action="store_true",
                         help="coordinate window sweep on synthetic paths")
@@ -807,7 +966,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     run(mode=args.mode, years=args.years, seeds=args.seeds,
         cost_bp=args.cost_bp, cap_bp=args.cap_bp, kappa=args.kappa,
-        rho=args.rho, deadband=args.deadband, sweep=args.sweep,
+        rho=args.rho, quorum=args.quorum, pairs_kappa=args.pairs_kappa,
+        deadband=args.deadband, sweep=args.sweep,
         sweep_policy=args.sweep_policy,
         windows_override=overrides, out=Path(args.out))
     return 0
