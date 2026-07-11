@@ -159,6 +159,20 @@ basket whose deviations are the harvest, not the harm.
 
 ## 5. Solidity state machine
 
+> **Status: IMPLEMENTED** as `src/basket/BasketRebalanceDirector.sol` — a
+> standalone advisor with exact closed-form EMA catch-up (m, vEma, ddotEma),
+> the round-robin `poke(maxWork)` work wheel, cached per-pool observations
+> with running sums, and O(1)-cached `depositHint()`/`redeemHint()`/
+> `effortOf(i)` advisory reads. Tests: `make nix-test-director` (10 tests
+> incl. a 256-run fuzz of the lazy==diligent invariant),
+> `make nix-test-director-regimes` (parallel window x rho matrix — it caught
+> a real velocity-catch-up approximation bug), `make nix-sim-director`
+> (30-day Anvil sim; `DirectorKeeperAgent` pokes + executes advice).
+> Measured gas: ~36.5k/poke (1-epoch gap), ~19.9k (50-epoch gap — flat in
+> gap size), ~3.1k fresh-epoch guard. Article:
+> `alberta-buck-rebalance.org`. The section below is the original design
+> sketch; the vrate variant is what shipped.
+
 Everything above is O(1) state and O(1) work per constituent per step; no
 history arrays needed on-chain:
 
