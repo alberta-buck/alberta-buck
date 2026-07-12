@@ -44,7 +44,8 @@ interface IBuckCredit {
     function batchCreditInfo(uint256[] calldata tokenIds)
         external view returns (CreditSlice[] memory slices);
     function activateFromBuck(uint256 tokenId, address holder, uint256 amount) external;
-    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount) external;
+    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount)
+        external returns (uint256 jubileeRelief);
 }
 
 contract Buck is IERC20, IERC20Metadata {
@@ -195,6 +196,7 @@ contract Buck is IERC20, IERC20Metadata {
         bytes32 toCipherHash
     );
     event JubileeAccrued(uint256 delta, uint256 newJubileeBalance);
+    event JubileeRedeemed(address indexed account, uint256 relief);
 
     // ---- constructor -------------------------------------------------------
 
@@ -590,7 +592,8 @@ contract Buck is IERC20, IERC20Metadata {
         // Burn activity amortizes the PID; the K value isn't consumed here.
         buckK.compute();
 
-        (uint256 totalUnwind, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
+        (uint256 totalUnwind, uint256 poolRefund, uint256 jubRelief) =
+            _allocateBurn(amount, tokenIds);
 
         _accrueJubilee();
         if (poolRefund > 0) {
@@ -602,6 +605,29 @@ contract Buck is IERC20, IERC20Metadata {
             _addBalance(msg.sender, poolRefund);
             // Per-side Transfer event: pool -> holder for the refund.
             emit Transfer(insurancePool, address(0), poolRefund);
+        }
+
+        // Jubilee settlement: the redeemed coverage's accrued relief (aged
+        // in BuckCredit, ~2%/yr) rebates the holder from the fund's balance,
+        // capped by what the fund actually holds.  Fund side mirrors
+        // _accrueJubilee (direct slot write -- its accrual was never counted
+        // in totalSupply); holder side goes through _addBalance.  Both sides
+        // of the invariant
+        //     sum_a max(0, signedRaw(a)) == totalSupply + jubileeActual
+        // move by exactly `jubRelief`, so it holds across settlement.
+        if (jubRelief > 0) {
+            _crystallize(address(this));
+            int256 jubRaw = _state[address(this)].balance.asInt();
+            uint256 avail = jubRaw > 0 ? uint256(jubRaw) : 0;
+            if (jubRelief > avail) jubRelief = avail;
+            if (jubRelief > 0) {
+                AccountState memory js = _state[address(this)];
+                js.balance = toBuckQtySigned(jubRaw - int256(jubRelief));
+                _state[address(this)] = js;
+                _crystallize(msg.sender);
+                _addBalance(msg.sender, jubRelief);
+                emit JubileeRedeemed(msg.sender, jubRelief);
+            }
         }
 
         // Post-burn solvency: the holder's used credit must not exceed their
@@ -716,7 +742,7 @@ contract Buck is IERC20, IERC20Metadata {
     }
 
     function _allocateBurn(uint256 amount, uint256[] memory tokenIds)
-        internal returns (uint256 totalUnwind, uint256 poolRefund)
+        internal returns (uint256 totalUnwind, uint256 poolRefund, uint256 jubRelief)
     {
         uint256 remaining = amount;
         CreditSlice[] memory slices = buckCredit.batchCreditInfo(tokenIds);
@@ -754,7 +780,10 @@ contract Buck is IERC20, IERC20Metadata {
             // proportional pool principal.  BuckCredit fires
             // onCreditMutation, invalidating Buck's per-block credit-
             // limit cache.
-            buckCredit.deactivateFromBuck(tid, msg.sender, unwind);
+            // deactivateFromBuck reports the Jubilee relief carried by the
+            // unwound coverage (aged ~2%/yr in BuckCredit's coverage-
+            // seconds); _burnAllocated settles it from the fund.
+            jubRelief   += buckCredit.deactivateFromBuck(tid, msg.sender, unwind);
             totalUnwind += unwind;
             poolRefund  += refund_i;
         }
@@ -992,6 +1021,15 @@ contract Buck is IERC20, IERC20Metadata {
         int256 raw = _state[address(this)].balance.asInt();
         return raw <= 0 ? 0 : uint256(raw);
     }
+
+    // ---- Jubilee lien relief ------------------------------------------------
+    //
+    // The aging that melts a credit position's redemption cost lives in
+    // BuckCredit (coverage-seconds per NFT: jubileeRelief / redeemCost) --
+    // the money contract carries NO per-account relief state.  Buck's only
+    // involvement is settlement inside the existing burn path: the fund's
+    // accrued balance rebates the relief BuckCredit reports for the
+    // coverage being unwound (see _burnAllocated).
 
     // ---- demurrage internals -----------------------------------------------
 
