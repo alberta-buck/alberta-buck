@@ -16,9 +16,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="alberta_buck.sim")
     ap.add_argument("--scenario", default="routing",
                     choices=sorted(SCENARIOS) + ["historical", "equilibrium"])
-    ap.add_argument("--backend", default="anvil", choices=["anvil", "pyrevm"],
-                    help="EVM backend: anvil subprocess (RPC-faithful) or "
-                         "in-process pyrevm (~1000x faster; see pyrevm_backend)")
+    ap.add_argument("--backend", default="pyrevm", choices=["anvil", "pyrevm"],
+                    help="EVM backend: in-process pyrevm (default; ~1000x "
+                         "faster, see pyrevm_backend) or the anvil subprocess "
+                         "(RPC-faithful; needs anvil on PATH -- fork tests)")
     ap.add_argument("--director", default="pairs", choices=["vrate", "pairs"],
                     help="rebalance-director signal engine (prorata only)")
     ap.add_argument("--basket", default=None, choices=["legacy", "prorata"],
