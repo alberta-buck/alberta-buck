@@ -679,7 +679,13 @@ class FatCreditBorrowerAgent(_ProxyAgent):
 
         elif drawn > target + dead:
             # (C) Deleverage / redemption.  K tightened (limit shrank) or the
-            # ramp pulled the target down -> we are over-utilized.  Buy BUCK
+            # ramp pulled the target down -> we are over-utilized.  DOCTRINE
+            # NOTE: nothing on-chain forces this recovery -- an overdrawn
+            # account simply cannot extend more credit, and the Jubilee fund
+            # unwinds excess over time.  This buy-back is the borrower's own
+            # VOLUNTARY utilization policy (the negative feedback the
+            # equilibrium loop measures); `retire_rate` is its effort knob
+            # (TOML-tunable to 0 to model a purely passive borrower).  Buy BUCK
             # back (removing it from the TOKEN/BUCK pool pulls basketValue
             # toward 1.0) and burn what we can.  The buy-back accelerates with
             # the discount -- "money at a discount": when BUCK is cheap vs the
@@ -894,6 +900,10 @@ class OptimalControlDebtorAgent(_ProxyAgent):
         face = int(_draw(scenario, cls, "face_k", r, 900) * m6)
         self.retire_disc = _draw(scenario, cls, "retire_disc", r, 0.02)
         self.cash_buffer = int(_draw(scenario, cls, "buffer_k", r, 20) * m6)
+        # Voluntary overdraw recovery effort (0 = doctrine: none needed).
+        self.overdraw_effort = _draw(scenario, cls, "overdraw_effort", r, 0.0)
+        self.jubilee_rate = _draw(scenario, cls, "jubilee_rate", r, 0.02)
+        self.jubilee_relief = 0    # accrued lien dissolution (6-dec BUCK)
         # 25-year annuity payment on the initial principal.
         mrate = self.apr / 12.0
         self.payment = int(self.mortgage * mrate / (1.0 - (1.0 + mrate) ** -300))
@@ -960,7 +970,10 @@ class OptimalControlDebtorAgent(_ProxyAgent):
         px = ru * PARITY // rb if rb else PARITY      # micro-USDC per BUCK
         drawn = max(0, -signed)
         held = max(0, signed)
-        nw = cash + held * px // PARITY - self.mortgage - drawn * px // PARITY
+        # The Jubilee fund melts the obligation ~2%/yr: value the liability
+        # net of accrued relief (the system dissolves that much of the lien).
+        eff_drawn = max(0, drawn - self.jubilee_relief)
+        nw = cash + held * px // PARITY - self.mortgage - eff_drawn * px // PARITY
         hypo_nw = self.hypo_cash - self.hypo_mortgage
         try:
             limit = d.buck.functions.creditLimit(self.proxy.address).call()
@@ -969,7 +982,7 @@ class OptimalControlDebtorAgent(_ProxyAgent):
         return {"idx": self.idx, "theta": self.theta, "pattern": self.pattern,
                 "nw": nw, "hypo": hypo_nw, "cash": cash, "limit": limit,
                 "mortgage": self.mortgage, "drawn": drawn,
-                "deploys": self.deploys}
+                "jub": self.jubilee_relief, "deploys": self.deploys}
 
     # -- the loop ------------------------------------------------------------ #
 
@@ -997,6 +1010,12 @@ class OptimalControlDebtorAgent(_ProxyAgent):
             ctr["octl_err"] = repr(e)[:200]
             return
         drawn = max(0, -signed)
+
+        # 0. Jubilee relief: the fund melts outstanding obligations ~2%/yr.
+        self.jubilee_relief = min(
+            drawn,
+            self.jubilee_relief + int(drawn * self.jubilee_rate
+                                      * (months * self.MONTH) / 365.0))
 
         # 1. Income (both ledgers earn identically).
         inc = self._income(d, months, day)
@@ -1039,8 +1058,10 @@ class OptimalControlDebtorAgent(_ProxyAgent):
         # 4. Unwind: forced when K tightens past the limit; opportunistic
         #    when the mortgage is gone and BUCK is at a discount (cheap).
         want = 0
-        if drawn > limit:
-            want = drawn - limit
+        if drawn > limit and self.overdraw_effort > 0:
+            # Voluntary only: on-chain nothing forces recovery -- the account
+            # just cannot extend more credit while over the K-scaled limit.
+            want = int((drawn - limit) * self.overdraw_effort)
         elif self.mortgage <= 10 ** 6 and drawn > 0 and disc >= self.retire_disc:
             cash = d.chain.balance_of(d.usdc, self.proxy.address)
             spare = max(0, cash - self.cash_buffer)

@@ -46,9 +46,25 @@ export class MortgageRetiree {
    * @param opts.premiumBp  annual insurance premium on the face (e.g. 50n)
    * @param opts.payment    fixed monthly mortgage payment, USDC base units
    * @param opts.account    funded account with a REAL registered identity
+   * @param opts.recoverBp  voluntary overdraw-recovery effort, bp of the
+   *                        excess bought back per month when K tightens
+   *                        past the draw.  DEFAULT 0n -- the doctrine: an
+   *                        overdrawn account faces no forced recovery
+   *                        on-chain; it just cannot extend more credit,
+   *                        and the Jubilee fund unwinds the excess over
+   *                        time.  10000n restores the old full buy-back.
+   * @param opts.aggrBp     optimal-control aggressiveness: the basket
+   *                        DISCOUNT (bvib - 1, in bp) this debtor will
+   *                        still deploy credit into, because the interest
+   *                        drain outweighs it.  0n (default) = the
+   *                        conservative deploy-only-at-premium policy;
+   *                        550n tolerates ~1 year of 5.5% interest.
    */
-  constructor({ house, mortgageBp, premiumBp, payment, account }) {
-    Object.assign(this, { house, mortgageBp, premiumBp, payment, account });
+  constructor({ house, mortgageBp, premiumBp, payment, account,
+                aggrBp = 0n, recoverBp = 0n }) {
+    Object.assign(this, { house, mortgageBp, premiumBp, payment, account,
+                          aggrBp, recoverBp });
+    this.jubileeRelief = 0n;  // accrued lien dissolution (2%/yr on drawn)
     this.mortgageOwing = house;
     this.hypoOwing = house;   // the counterfactual: the mortgage untouched
     this.usdc = 0n;           // banked payments awaiting a discount
@@ -82,19 +98,34 @@ export class MortgageRetiree {
     const bvib = await s.call(world.basket, "basketValueInBuck");
     let pos = drawn;               // ledger-accurate position after the legs
 
-    if (drawn > limit) {
-      // Forced deleverage: the controller tightened K past our draw.
-      const need = await world.usdcForBuck(drawn - limit);
+    // Jubilee: the fund (2%/yr of supply, dedicated to lien redemption)
+    // melts the outstanding obligation; accrue our pro-rata relief.
+    const JUB_BP = 200n;
+    if (drawn > 0n) {
+      this.jubileeRelief = min(drawn,
+        this.jubileeRelief + drawn * JUB_BP / BP / 12n);
+    }
+
+    if (drawn > limit && this.recoverBp > 0n) {
+      // VOLUNTARY overdraw recovery (doctrine: nothing on-chain forces
+      // this -- an overdrawn account simply cannot extend more credit;
+      // recoverBp scales how hard this debtor chooses to normalize).
+      const need = await world.usdcForBuck(
+        (drawn - limit) * this.recoverBp / BP);
       const spend = min(this.usdc, need);
       const got = await world.buyBuck(spend, this.account,
                                       { tag: `debtor:forced:d${day}` });
       this.usdc -= spend;
       buckUsd += spend - got;
       pos -= got;
-    } else if (bvib < E18 - BAND && this.mortgageOwing > 0n && drawn < limit) {
-      // DEFLATION: sell BUCK high; retire expensive mortgage principal.
-      // Tranche-capped (a year of payments) so one lumpy agent cannot
-      // slam the floating pool in a single act.
+    } else if (bvib < E18 + (this.aggrBp * E18) / BP - BAND
+               && this.mortgageOwing > 0n && drawn < limit) {
+      // DEFLATION (or a tolerable discount, when aggrBp > 0): sell BUCK
+      // and retire expensive mortgage principal.  The optimal-control
+      // insight: paying the basket discount now can still win when the
+      // interest saved on the retired principal exceeds it.  Tranche-
+      // capped (a year of payments) so one lumpy agent cannot slam the
+      // floating pool in a single act.
       const draw = min(min(limit - drawn, this.mortgageOwing),
                        this.payment * 12n);
       const got = await world.sellBuck(draw, this.account,
@@ -113,6 +144,7 @@ export class MortgageRetiree {
     }
 
     this.ledger.push({ day, drawn: pos, buckUsd,
+                       jubileeRelief: this.jubileeRelief,
                        mortgageOwing: this.mortgageOwing,
                        banked: this.usdc,
                        hypoOwing: this.#hypoMonth() });

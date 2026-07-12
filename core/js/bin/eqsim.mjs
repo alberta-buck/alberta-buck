@@ -37,6 +37,7 @@ const { values: a } = parseArgs({ options: {
   hold:    { type: "string", default: "60" },     // saver term, days
   house:   { type: "string", default: "400000" }, // debtor face, $
   rate:    { type: "string", default: "550" },    // mortgage bp/yr
+  aggr:    { type: "string", default: "0" },      // deploy-tolerance bp (theta*apr)
   payment: { type: "string", default: "3000" },   // $/month
   budget:  { type: "string", default: "25000" },  // saver stake, $
   plot:    { type: "string", default: "" },
@@ -67,6 +68,7 @@ const saver = new BasketSaver({
   holdDays: Number(a.hold) });
 const debtor = new MortgageRetiree({
   house: HOUSE, mortgageBp: BigInt(a.rate), premiumBp: 50n,
+  aggrBp: BigInt(a.aggr),
   payment: PAYMENT, account: debtorAcct });
 
 const agents = [
@@ -101,6 +103,7 @@ console.log(JSON.stringify({
   debtor: debtor.ledger.length ? {
     months: debtor.ledger.length,
     mortgageOwing: f6(debtor.mortgageOwing),
+  jubileeRelief: f6(debtor.jubileeRelief),
     hypoOwing: f6(debtor.hypoOwing),
     drawn: f6(debtor.ledger[debtor.ledger.length - 1].drawn),
     banked: f6(debtor.ledger[debtor.ledger.length - 1].banked),
