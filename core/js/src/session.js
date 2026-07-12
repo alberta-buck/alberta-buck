@@ -59,6 +59,9 @@ export class Session {
     this.lastRevertReason = err;
     const entry = this.#journalOp(
       "send", functionName, acct.address, expect, ok, rcpt, err, tag);
+    // expect "either": a legitimately-uncertain send (e.g. a funding-gate
+    // mint that reverting IS the signal) -- journaled, never a mismatch;
+    // the caller reads rcpt.status.
     if (ok && expect === "revert") {
       console.warn(`expected REVERT but ${functionName} succeeded ` +
                    `(tag=${tag} tx=${rcpt.transactionHash})`);

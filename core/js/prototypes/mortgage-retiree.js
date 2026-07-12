@@ -1,90 +1,66 @@
-// PROTOTYPE -- a structural exemplar, not yet wired to a world.
+// The two-sided mortgage debtor, AUDITED: the JS port of the Python
+// BuckCreditDebtorAgent, proven by the isolation-world ledger audit to
+// exactness:  adv = interest_saved + jubilee - premium - trade_loss.
 //
-// The flagship example story for the JS platform (alberta-buck-platform.org,
-// "The JS agent doctrine"), refined 2026-07-04 to the two-sided debtor:
-// one screen, plain object, every send tagged, and the agent is its own
-// accountant -- this.ledger carries the actual AND counterfactual
-// trajectories, so the net-worth-vs-original-mortgage chart falls out:
-//   actual net worth: house + banked - mortgageOwing - drawn
-//   counterfactual:   house + hypoBanked - hypoOwing
+// What the audit taught, now doctrine here:
+//   * credits carry a REAL premium, so Buck.mint's funding gate bites;
+//     the SAVE leg buys the required BUCK buffer ahead of each tranche
+//     (a revert is the gate saying "save more" -- counted, retried);
+//   * the liability is the chain's own melting quote: drawn net of
+//     BuckCredit.jubileeRelief (~2%/yr aging; never force-closed);
+//   * the unwind buys ONLY below USD par (the basket signal says nothing
+//     about USD price) and never lifts the pool past par -- profitable.
 //
-// Runs on the equilibrium world (scenarios/eqworld.js) via its helpers:
-//   world.pledge(account, face, {tag})     createCredit: headroom, no draw
-//   world.sellBuck(buckIn, account, {tag}) -> USDC received (draws credit)
-//   world.buyBuck(usdcIn, account, {tag})  -> BUCK received (retires draw)
-//   world.usdcForBuck(buckOut)             -> USDC needed at current spot
-//   world.holderAddress(account)           -> the on-chain position holder
-//     (credit-drawers act through a public NON-carrying proxy the world
-//     creates at pledge(); carrying accounts cannot draw negative)
-// plus world.session / world.buck / world.basket contract handles.
-//
-// The debtor holds a USDC mortgage AND insured assets.  Day 0: pledge
-// the assets for BuckCredit headroom (a draw costs no interest and no
-// demurrage -- only the insurance premium; it is an outstanding claim
-// on the debtor's own assets).  Monthly:
-//   * service the mortgage with the fixed payment while it lasts; once
-//     it is gone, the same payment banks as USDC savings.
-//   * BUCK DEFLATION (basketValueInBuck < 1e18: BUCK above value): draw
-//     by selling BUCK HIGH for USDC and retire mortgage principal early
-//     -- swapping interest-bearing debt for the interest-free claim.
-//   * BUCK INFLATION (> 1e18: BUCK below value): buy discounted BUCK
-//     with banked USDC and retire the draw toward zero.
-//   * forced deleverage stays real: if the controller tightens K past
-//     the draw, buy BUCK at whatever the market asks -- booked as the
-//     cost a credit-union analyst needs to see.
+// Plumbing lives in the world (pledgeInsured / creditState / buyBuck /
+// gateShortfall / mintTranche / sellBuckCapped / unwindBite); the agent
+// is its own accountant: ledger rows carry both trajectories plus the
+// cost telemetry, so nw chart and conservation identity both fall out.
 
 const BP = 10_000n;
 const MONTH = 30;
 const E18 = 10n ** 18n;
-const BAND = E18 / 200n;   // 0.5% deadband: don't churn on parity noise
+const E6 = 10n ** 6n;
 const min = (a, b) => (a < b ? a : b);
 
 export class MortgageRetiree {
   /**
    * @param opts.house      insured-asset face == mortgage principal (6-dec)
    * @param opts.mortgageBp mortgage annual rate (e.g. 550n = 5.50%)
-   * @param opts.premiumBp  annual insurance premium on the face (e.g. 50n)
-   * @param opts.payment    fixed monthly mortgage payment, USDC base units
-   * @param opts.account    funded account with a REAL registered identity
-   * @param opts.recoverBp  voluntary overdraw-recovery effort, bp of the
-   *                        excess bought back per month when K tightens
-   *                        past the draw.  DEFAULT 0n -- the doctrine: an
-   *                        overdrawn account faces no forced recovery
-   *                        on-chain; it just cannot extend more credit,
-   *                        and the Jubilee fund unwinds the excess over
-   *                        time.  10000n restores the old full buy-back.
-   * @param opts.aggrBp     optimal-control aggressiveness: the basket
-   *                        DISCOUNT (bvib - 1, in bp) this debtor will
-   *                        still deploy credit into, because the interest
-   *                        drain outweighs it.  0n (default) = the
-   *                        conservative deploy-only-at-premium policy;
-   *                        550n tolerates ~1 year of 5.5% interest.
+   * @param opts.premiumBp  REAL annual insurance premium (funding gate!)
+   * @param opts.payment    fixed monthly payment / income, USDC base units
+   * @param opts.account    funded account with a registered identity
+   * @param opts.aggrBp     tolerated basket discount, bp (theta * apr):
+   *                        deploy while bvib <= 1 + aggrBp
+   * @param opts.saveRate   pct of spare cash routed to the gate buffer
+   * @param opts.retireDiscBp unwind when the pool spot is this far below par
+   * @param opts.cashBuffer floor the unwind never spends into
    */
   constructor({ house, mortgageBp, premiumBp, payment, account,
-                aggrBp = 0n, recoverBp = 0n }) {
+                aggrBp = 0n, saveRate = 50n, retireDiscBp = 200n,
+                cashBuffer = 20_000n * E6 }) {
     Object.assign(this, { house, mortgageBp, premiumBp, payment, account,
-                          aggrBp, recoverBp });
-    this.jubileeRelief = 0n;  // accrued lien dissolution (2%/yr on drawn)
+                          aggrBp, saveRate, retireDiscBp, cashBuffer });
     this.mortgageOwing = house;
     this.hypoOwing = house;   // the counterfactual: the mortgage untouched
-    this.usdc = 0n;           // banked payments awaiting a discount
+    this.usdc = 0n;           // banked income awaiting the legs
     this.hypoBanked = 0n;
-    this.ledger = [];         // {day, drawn, mortgageOwing, banked,
-                              //  hypoOwing, buckUsd} per month
+    this.premiumPaid = 0n;    // insurance principal drawn at each mint
+    this.tradeLoss = 0n;      // par-value cost of crossing the pool (+/-)
+    this.throttled = 0;       // funding-gate refusals
+    this.jub = 0n;            // the chain's melting-liability quote
+    this.ledger = [];
   }
 
   async setup(world) {
-    // Pledge once: BuckCredit headroom only.  Draws happen on signal.
-    await world.pledge(this.account, this.house, { tag: "debtor:pledge" });
+    const per = this.house / 4n;   // tranche-faced credits, real premium
+    await world.pledgeInsured(this.account,
+      [per, per, per, this.house - 3n * per], this.premiumBp,
+      { tag: "debtor:pledge" });
   }
 
   async act(world, day, tick) {
     if (tick !== 0 || day % MONTH !== 0) return;
-    const s = world.session, me = world.holderAddress(this.account);
-    let buckUsd = this.house * this.premiumBp / BP / 12n;   // insurer's bill
     let budget = this.payment;
-
-    // Service the mortgage first; whatever it no longer eats, bank.
     if (this.mortgageOwing > 0n) {
       const interest = this.mortgageOwing * this.mortgageBp / BP / 12n;
       const pay = min(budget, this.mortgageOwing + interest);
@@ -93,61 +69,58 @@ export class MortgageRetiree {
     }
     this.usdc += budget;
 
-    const drawn = -(await s.call(world.buck, "signedBalanceOf", [me]));
-    const limit = await s.call(world.buck, "creditLimit", [me]);
-    const bvib = await s.call(world.basket, "basketValueInBuck");
-    let pos = drawn;               // ledger-accurate position after the legs
+    const cs = await world.creditState(this.account);
+    const bvib = await world.session.call(world.basket, "basketValueInBuck");
+    this.jub = min(cs.jub, cs.drawn);
+    const spare = this.usdc > this.cashBuffer
+      ? this.usdc - this.cashBuffer : 0n;
+    const tranche = min(min(this.payment * 12n, cs.headroom),
+                        this.mortgageOwing);
+    const deployOk = bvib <= (E18 * (BP + this.aggrBp)) / BP;
 
-    // Jubilee: the fund (2%/yr of supply, dedicated to lien redemption)
-    // melts the outstanding obligation; accrue our pro-rata relief.
-    const JUB_BP = 200n;
-    if (drawn > 0n) {
-      this.jubileeRelief = min(drawn,
-        this.jubileeRelief + drawn * JUB_BP / BP / 12n);
+    if (tranche >= E6 && this.mortgageOwing > E6 && deployOk) {
+      // SAVE for the real gate, preferring cheap BUCK (deployOk window).
+      const { shortfall } = await world.gateShortfall(this.account, tranche);
+      const spend = min(shortfall, (spare * this.saveRate) / 100n);
+      if (spend >= E6) {
+        const got = await world.buyBuck(spend, this.account,
+                                        { tag: `debtor:save:d${day}` });
+        this.usdc -= spend;
+        this.tradeLoss += spend - got;
+      }
+      // DEPLOY: activate a tranche through the gate, sell, retire.
+      const m = await world.mintTranche(this.account,
+        min(tranche, cs.unactivated), { tag: `debtor:mint:d${day}` });
+      if (!m.ok) {
+        this.throttled += 1;
+      } else {
+        this.premiumPaid += m.premium;
+        const { sold, got } = await world.sellBuckCapped(tranche,
+          this.account, { tag: `debtor:draw:d${day}` });
+        this.tradeLoss += sold - got;
+        this.mortgageOwing -= min(got, this.mortgageOwing);
+      }
+    } else if (this.mortgageOwing <= E6 && cs.drawn > 0n && spare >= E6) {
+      // UNWIND, spot-gated + impact-capped: only below USD par, only
+      // what cannot lift the pool past par.  Never urgent, never forced.
+      const { spot, capBuck } = await world.unwindBite();
+      if (spot <= (E6 * (BP - this.retireDiscBp)) / BP && capBuck >= E6) {
+        const spend = min(spare, min(cs.drawn, capBuck) * spot / E6);
+        if (spend >= E6) {
+          const got = await world.buyBuck(spend, this.account,
+                                          { tag: `debtor:unwind:d${day}` });
+          this.usdc -= spend;
+          this.tradeLoss += spend - got;
+        }
+      }
     }
 
-    if (drawn > limit && this.recoverBp > 0n) {
-      // VOLUNTARY overdraw recovery (doctrine: nothing on-chain forces
-      // this -- an overdrawn account simply cannot extend more credit;
-      // recoverBp scales how hard this debtor chooses to normalize).
-      const need = await world.usdcForBuck(
-        (drawn - limit) * this.recoverBp / BP);
-      const spend = min(this.usdc, need);
-      const got = await world.buyBuck(spend, this.account,
-                                      { tag: `debtor:forced:d${day}` });
-      this.usdc -= spend;
-      buckUsd += spend - got;
-      pos -= got;
-    } else if (bvib < E18 + (this.aggrBp * E18) / BP - BAND
-               && this.mortgageOwing > 0n && drawn < limit) {
-      // DEFLATION (or a tolerable discount, when aggrBp > 0): sell BUCK
-      // and retire expensive mortgage principal.  The optimal-control
-      // insight: paying the basket discount now can still win when the
-      // interest saved on the retired principal exceeds it.  Tranche-
-      // capped (a year of payments) so one lumpy agent cannot slam the
-      // floating pool in a single act.
-      const draw = min(min(limit - drawn, this.mortgageOwing),
-                       this.payment * 12n);
-      const got = await world.sellBuck(draw, this.account,
-                                       { tag: `debtor:draw:d${day}` });
-      this.mortgageOwing -= min(got, this.mortgageOwing);
-      buckUsd += draw - got;            // NEGATIVE when sold above par
-      pos += draw;
-    } else if (bvib > E18 + BAND && drawn > 0n && this.usdc >= 10n ** 6n) {
-      // INFLATION: buy discounted BUCK; retire the draw toward zero.
-      const spend = min(this.usdc, drawn);
-      const got = await world.buyBuck(spend, this.account,
-                                      { tag: `debtor:paydown:d${day}` });
-      this.usdc -= spend;
-      buckUsd += spend - got;           // NEGATIVE when bought below par
-      pos -= got;
-    }
-
-    this.ledger.push({ day, drawn: pos, buckUsd,
-                       jubileeRelief: this.jubileeRelief,
+    const post = await world.creditState(this.account);
+    this.ledger.push({ day, drawn: post.drawn, jub: this.jub,
+                       premiumPaid: this.premiumPaid,
+                       tradeLoss: this.tradeLoss,
                        mortgageOwing: this.mortgageOwing,
-                       banked: this.usdc,
-                       hypoOwing: this.#hypoMonth() });
+                       banked: this.usdc, hypoOwing: this.#hypoMonth() });
   }
 
   #hypoMonth() {

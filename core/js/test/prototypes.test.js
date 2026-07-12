@@ -17,7 +17,13 @@ const protoDir = join(dirname(new URL(import.meta.url).pathname),
 
 // Generous: a screen and a half INCLUDING the doctrine header comments.
 // If a prototype outgrows this, the plumbing is leaking into the agent.
-const LINE_BUDGET = 140;
+// The farmer runs TWO debts, a revolving line, and an investing leg on
+// the same chassis -- it gets an explicit larger allowance.
+const LINE_BUDGETS = {
+  "basket-investor.js": 140,
+  "mortgage-retiree.js": 140,
+  "farmer.js": 190,
+};
 
 test("prototypes: the agent contract shape", () => {
   const investor = new BasketInvestor({
@@ -37,26 +43,33 @@ test("prototypes: the agent contract shape", () => {
 });
 
 test("prototypes: the one-screen doctrine budget", () => {
-  for (const f of ["basket-investor.js", "mortgage-retiree.js"]) {
+  for (const [f, budget] of Object.entries(LINE_BUDGETS)) {
     const lines = readFileSync(join(protoDir, f), "utf8").split("\n").length;
-    assert.ok(lines <= LINE_BUDGET,
-      `${f} is ${lines} lines (> ${LINE_BUDGET}): plumbing is leaking ` +
+    assert.ok(lines <= budget,
+      `${f} is ${lines} lines (> ${budget}): plumbing is leaking ` +
       "into the agent -- move it into the world builder");
   }
 });
 
 test("prototypes: the debtor's mortgage arithmetic amortizes", async () => {
   // The debtor's off-chain arithmetic is pure and runnable today.  A
-  // stub world reports no signals (drawn == limit == 0, bvib == 0), so
+  // stub world reports no signals (empty credit state, bvib == 0), so
   // no BUCK legs fire: the actual and counterfactual mortgages must
   // amortize IDENTICALLY -- $400k at 5.5% against a $3k fixed payment
-  // -- and the buckUsd column carries exactly the insurer's bill.
+  // -- with zero cost telemetry (no mints, no pool crossings).
   const r = new MortgageRetiree({
     house: 400_000n * 10n ** 6n, mortgageBp: 550n, premiumBp: 50n,
     payment: 3_000n * 10n ** 6n, account: { address: "0x0" } });
+  const zeroCredit = { drawn: 0n, limit: 0n, held: 0n, unactivated: 0n,
+                       jub: 0n, headroom: 0n };
   const world = { session: { call: async () => 0n }, buck: {}, basket: {},
                   holderAddress: (a) => a.address,
-                  usdcForBuck: async () => 0n };
+                  creditState: async () => zeroCredit,
+                  gateShortfall: async () => ({ required: 0n, shortfall: 0n }),
+                  mintTranche: async () => ({ ok: false, premium: 0n }),
+                  sellBuckCapped: async () => ({ sold: 0n, got: 0n }),
+                  unwindBite: async () => ({ spot: 10n ** 6n, capBuck: 0n }),
+                  buyBuck: async () => 0n };
 
   for (let m = 0; m < 12; m++) {
     const owing = r.mortgageOwing;
@@ -71,8 +84,8 @@ test("prototypes: the debtor's mortgage arithmetic amortizes", async () => {
   const firstDrop = 400_000n * 10n ** 6n - rows[0].mortgageOwing;
   assert.ok(firstDrop > 1_150n * 10n ** 6n && firstDrop < 1_200n * 10n ** 6n,
     `first month retires ~$1,167 of principal (got ${firstDrop})`);
-  const premium = 400_000n * 10n ** 6n * 50n / 10_000n / 12n;
-  assert.ok(rows.every((row) => row.buckUsd === premium),
-    "buckUsd column carries exactly the premium when no legs fire");
+  assert.ok(rows.every((row) => row.premiumPaid === 0n
+                             && row.tradeLoss === 0n && row.jub === 0n),
+    "zero cost telemetry when no legs fire");
   assert.equal(rows[0].banked, 0n, "the payment is fully consumed early on");
 });

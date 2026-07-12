@@ -48,6 +48,15 @@ const DEFAULT_TOKENS = [
   { sym: "CNST", name: "Construction", dec: 18, p0: 2_500_000n },
 ];
 
+/** Integer square root (Newton), for the unwind's impact cap. */
+function isqrt(n) {
+  if (n < 2n) return n;
+  let x = n;
+  let y = (x + 1n) / 2n;
+  while (y < x) { x = y; y = (x + n / x) / 2n; }
+  return x;
+}
+
 /**
  * @param session    a Session (deployer = session.account)
  * @param artifacts  (name) => {abi, bytecode}
@@ -247,6 +256,106 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     return p;
   };
 
+  // ==== insured-credit ops: the AUDITED debtor's plumbing ==============
+  //
+  // The honest issuance channel proven by the Python ledger audit
+  // (test_debtor_ledger.py): premium-bearing credits make Buck.mint's
+  // funding-factor gate REAL, tranches activate against unactivated
+  // face, the liability is quoted net of BuckCredit's Jubilee aging,
+  // and the unwind bites only below USD par, sized so the buy itself
+  // cannot lift the pool past par.
+
+  world._credits = new Map();
+
+  /** Pledge insured assets as PREMIUM-BEARING credits (no upfront mint:
+   *  tranches activate later through the live funding gate). */
+  world.pledgeInsured = async (account, faces, premiumBp, { tag } = {}) => {
+    const p = await world.proxyFor(account);
+    const ts = (await session.client.getBlock()).timestamp;
+    for (const face of faces) {
+      await session.send(credit, "createCredit",
+        [p.address, 0, face, 0n, 0, 0, ts, Number(premiumBp)],
+        { tag: `${tag}:credit` });
+    }
+    const ids = [];
+    for (let i = 0; i < faces.length; i++) {
+      ids.push(await session.call(credit, "tokenOfOwnerByIndex",
+                                  [p.address, BigInt(i)]));
+    }
+    world._credits.set(account.address, ids);
+    return p;
+  };
+
+  /** The debtor's chain truth in one read: drawn / limit / held /
+   *  unactivated face / the Jubilee relief quote (liability melts). */
+  world.creditState = async (account) => {
+    const me = world.holderAddress(account);
+    const ids = world._credits.get(account.address) ?? [];
+    const [signed, limit] = await Promise.all([
+      session.call(buck, "signedBalanceOf", [me]),
+      session.call(buck, "creditLimit", [me])]);
+    let unactivated = 0n;
+    let jub = 0n;
+    for (const tid of ids) {
+      const info = await session.call(credit, "creditInfo", [tid]);
+      const [face, act] = [info[0], info[1]];
+      unactivated += face > act ? face - act : 0n;
+      jub += await session.call(credit, "jubileeRelief", [tid]);
+    }
+    const drawn = signed < 0n ? -signed : 0n;
+    return { drawn, limit, held: signed > 0n ? signed : 0n, unactivated, jub,
+             headroom: (limit > drawn ? limit - drawn : 0n) + unactivated };
+  };
+
+  /** What the funding gate demands for the next tranche: quoteMint's
+   *  insurance principal scaled by the live fundingFactor, less what
+   *  the holder's balanceOf already covers. */
+  world.gateShortfall = async (account, tranche) => {
+    const me = world.holderAddress(account);
+    const ids = world._credits.get(account.address) ?? [];
+    const quote = await session.call(buck, "quoteMint", [tranche, ids]);
+    const ff = await session.call(kctrl, "fundingFactor");
+    const required = (quote[1] * ff) / E18;
+    const bal = await session.call(buck, "balanceOf", [me]);
+    return { required, shortfall: required > bal ? required - bal : 0n };
+  };
+
+  /** Activate a tranche through the REAL gate.  Returns {ok, premium}
+   *  -- premium is the insurance principal drawn (signed delta); a
+   *  revert is the gate saying "save more" (the caller's throttle). */
+  world.mintTranche = async (account, amount, { tag } = {}) => {
+    const p = world._proxies.get(account.address);
+    const before = await session.call(buck, "signedBalanceOf", [p.address]);
+    const rcpt = await session.send(p, "exec",
+      [buck.address, encodeFunctionData(
+        { abi: buck.abi, functionName: "mint", args: [amount] })],
+      { tag, gas: 3_000_000n, expect: "either" });
+    if (rcpt.status !== "success") return { ok: false, premium: 0n };
+    const after = await session.call(buck, "signedBalanceOf", [p.address]);
+    return { ok: true, premium: before > after ? before - after : 0n };
+  };
+
+  /** Sell capped by the live spendable balance (held + unused credit). */
+  world.sellBuckCapped = async (buckIn, account, opts2 = {}) => {
+    const me = world.holderAddress(account);
+    const sp = await session.call(buck, "balanceOf", [me]);
+    const amt = buckIn < sp ? buckIn : sp;
+    if (amt < 10n ** 6n) return { sold: 0n, got: 0n };
+    return { sold: amt, got: await world.sellBuck(amt, account, opts2) };
+  };
+
+  /** The unwind bite: the pool's USDC spot and the largest BUCK buy
+   *  that cannot lift it past par -- buying x of reserve r moves spot p
+   *  to p*(r/(r-x))^2, which stays <= 1 for x <= r*(1-sqrt(p)). */
+  world.unwindBite = async () => {
+    const spot = await world.spotUB();
+    const reserve = await session.call(buck, "balanceOf", [poolUB.address]);
+    const E6 = 10n ** 6n;
+    if (spot >= E6) return { spot, capBuck: 0n };
+    const cap = (reserve * (E6 - isqrt(spot * E6))) / E6;
+    return { spot, capBuck: cap };
+  };
+
   /** Swap along a [token, fee, token, ...] path through the REAL router
    *  (pre-fund route); returns the output-token delta at the holder. */
   world.route = async (path, amountIn, account, { tag } = {}) => {
@@ -301,6 +410,28 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     const rcpt = await session.send(basket, "depositToken",
       [t.erc20.address, amount, 0n],
       { account, tag, gas: 3_000_000n });
+    const log = rcpt.logs.find((l) =>
+      l.address.toLowerCase() === basket.address.toLowerCase()
+      && l.topics[0] === DEPOSITED_TOPIC);
+    world.receipts += 1;
+    return { receiptId: BigInt(log.topics[2]) };
+  };
+
+  /** basketDeposit for proxy holders (credit-drawing debtors): the
+   *  tokens live at the proxy, so approval and deposit exec through it;
+   *  the receipt lands on the proxy.  EOA holders fall through. */
+  world.basketDepositAs = async (i, amount, account, { tag } = {}) => {
+    const p = world._proxies.get(account.address);
+    if (!p) return world.basketDeposit(i, amount, account, { tag });
+    const t = tokens[i];
+    await session.send(p, "exec",
+      [t.erc20.address, encodeFunctionData({ abi: erc20Art.abi,
+        functionName: "approve", args: [basket.address, amount] })],
+      { tag: `${tag}:approve` });
+    const rcpt = await session.send(p, "exec",
+      [basket.address, encodeFunctionData({ abi: basket.abi,
+        functionName: "depositToken", args: [t.erc20.address, amount, 0n] })],
+      { tag, gas: 3_000_000n });
     const log = rcpt.logs.find((l) =>
       l.address.toLowerCase() === basket.address.toLowerCase()
       && l.topics[0] === DEPOSITED_TOPIC);

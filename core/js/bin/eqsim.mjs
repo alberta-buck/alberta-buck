@@ -103,7 +103,7 @@ console.log(JSON.stringify({
   debtor: debtor.ledger.length ? {
     months: debtor.ledger.length,
     mortgageOwing: f6(debtor.mortgageOwing),
-  jubileeRelief: f6(debtor.jubileeRelief),
+    jub: f6(debtor.jub),
     hypoOwing: f6(debtor.hypoOwing),
     drawn: f6(debtor.ledger[debtor.ledger.length - 1].drawn),
     banked: f6(debtor.ledger[debtor.ledger.length - 1].banked),
@@ -124,7 +124,7 @@ if (a.plot) {
     lineChart({ title: "debtor net worth vs the untouched-mortgage counterfactual ($)",
       series: [
         { label: "BuckCredit route", points: debtor.ledger.map((r) =>
-            [r.day, f6(HOUSE + r.banked - r.mortgageOwing - r.drawn)]) },
+            [r.day, f6(HOUSE + r.banked - r.mortgageOwing - r.drawn + r.jub)]) },
         { label: "counterfactual", points: debtor.ledger.map((r) =>
             [r.day, f6(HOUSE - r.hypoOwing)]) },
       ] }),
