@@ -7,6 +7,7 @@ import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 import {IBuckKController}    from "../IBuckKController.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
+import {IRebalanceDirector} from "./IRebalanceDirector.sol";
 import {BuckBasketStorage, IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketStorage.sol";
 
 /// @title BuckBasketProRata -- venue-agnostic pro-rata exit + treasury-split shell.
@@ -107,6 +108,35 @@ contract BuckBasketProRata is BuckBasketStorage {
         emit VenueSet(_venue_);
     }
 
+    /// @notice Install/replace/clear the optional rebalance-director advisor.
+    ///         Zero address restores undirected behavior everywhere.
+    function setDirector(address _director) external onlyGov {
+        director = _director;
+        emit DirectorSet(_director);
+    }
+
+    /// @dev Carry a bounded work slice for the director's signal state
+    ///      machine -- the amortization pattern: every basket activation
+    ///      advances one constituent's signals.  Advisory: never lets a
+    ///      failing director block deposits, redemptions, or sweeps.
+    function _pokeDirector() internal {
+        address dir = director;
+        if (dir == address(0)) return;
+        try IRebalanceDirector(dir).poke(1) {} catch {}
+    }
+
+    /// @dev The director's deposit routing advice, guarded: sentinel or
+    ///      out-of-range hints (constituent set may have grown since sync)
+    ///      fall back to the venue's default most-underweight routing.
+    function _depositHintOr() internal view returns (uint256 hint) {
+        hint = type(uint256).max;
+        address dir = director;
+        if (dir == address(0)) return hint;
+        try IRebalanceDirector(dir).depositHint() returns (uint256 h) {
+            if (h < constituents.length) hint = h;
+        } catch {}
+    }
+
     /// @notice Draw accumulated treasury BUCK profit to fund operations.
     function treasuryWithdraw(address to, uint256 amount) external onlyGov {
         if (!(to != address(0))) revert To0();
@@ -122,13 +152,60 @@ contract BuckBasketProRata is BuckBasketStorage {
     ///         re-LP floor.  The venue does the swap+LP mechanics; the shell tags
     ///         the resulting liquidity as treasury and adjusts the BUCK ledger.
     function sweepTreasury() external {
+        _pokeDirector();
         if (treasuryBuckPending >= MIN_REINVEST_BUCK) {
             (uint256 idx, uint128 liquidity, uint256 consumed) =
-                _venue().investFromBucks(treasuryBuckPending, type(uint256).max);
+                _venue().investFromBucks(treasuryBuckPending, _depositHintOr());
             constituents[idx].treasuryLiquidity += liquidity;
             treasuryBuckPending -= consumed;
             emit TreasuryReinvested(idx, consumed, liquidity);
         }
+    }
+
+    /// @notice One bounded, permissionless, director-guided rebalance step:
+    ///         withdraw the advised slice of depositor liquidity from the
+    ///         strongest sell-side pool, convert its TOKEN leg to BUCK, and
+    ///         reinvest the whole into the strongest buy-side pool.  At most
+    ///         one step per director epoch; the advisory effort (bp of NAV
+    ///         per epoch) bounds the size; the venue's TWAP/liquidity guards
+    ///         re-verify everything.  Value moves between pools -- depositor
+    ///         claims are by value over all pools, so solvency is preserved
+    ///         exactly as in deposit/redeem flow routing.
+    function rebalanceStep() external {
+        address dir = director;
+        if (!(dir != address(0))) revert DirectorUnset();
+        uint32 e = IRebalanceDirector(dir).epochNow();
+        if (!(e + 1 > lastRebalanceStepEpoch)) revert StepAlreadyDone();
+        _pokeDirector();
+
+        uint256 sell = IRebalanceDirector(dir).redeemHint();
+        uint256 buy = IRebalanceDirector(dir).depositHint();
+        uint256 N = constituents.length;
+        if (!(sell < N && buy < N && sell != buy)) revert NoAdvice();
+        int256 eBp = IRebalanceDirector(dir).effortOf(sell);
+        if (!(eBp < 0)) revert NoAdvice();
+        lastRebalanceStepEpoch = e + 1;
+
+        // Size the slice: |effort| bp of NAV (= 2B) per epoch, capped at half
+        // the sell pool's depositor value for rounding/liquidity safety.
+        (uint256[] memory bv, uint128[] memory depL, uint256 B,) =
+            _venue().poolBuckValues();
+        uint256 val = UniswapV3OracleLib.mulDiv(2 * B, uint256(-eBp), 10000);
+        if (val > bv[sell]) val = bv[sell];              // <= half pool value
+        uint128 L = uint128(UniswapV3OracleLib.mulDiv(
+            uint256(depL[sell]), val, 2 * bv[sell]));
+        if (!(L > 0)) revert NoAdvice();
+
+        (uint256 tok, uint256 b) = _venue().withdrawLiquidity(sell, L);
+        uint256[] memory inv = new uint256[](N);
+        inv[sell] = tok;
+        (uint256 gained,,) = _venue().convertIntoBucks(inv, type(uint256).max);
+        uint256 total = b + gained;
+        (, uint128 liq, uint256 consumed) = _venue().investFromBucks(total, buy);
+        if (total > consumed) {                          // bounded dust
+            treasuryBuckPending += total - consumed;
+        }
+        emit RebalanceStepped(sell, buy, val, consumed, liq);
     }
 
     /// @notice Treasury-owned liquidity in constituent `i` (excluded from the
@@ -248,9 +325,10 @@ contract BuckBasketProRata is BuckBasketStorage {
     ///         primitive `sweepTreasury` uses -- only the bookkeeping differs
     ///         (depositor receipt vs treasury slice).
     function _depositBuck(uint256 buckAmount) internal returns (uint256 receiptId) {
+        _pokeDirector();
         IERC20(address(buck)).transferFrom(msg.sender, address(this), buckAmount);
         (uint256 idx, uint128 liquidity, uint256 consumed) =
-            _venue().investFromBucks(buckAmount, type(uint256).max);
+            _venue().investFromBucks(buckAmount, _depositHintOr());
         if (!(consumed > 0)) revert Buck0();
         if (buckAmount > consumed) {
             IERC20(address(buck)).transfer(msg.sender, buckAmount - consumed);
@@ -306,6 +384,7 @@ contract BuckBasketProRata is BuckBasketStorage {
                      uint256 maxConversionLossBp, address payoutToken)
         internal
     {
+        _pokeDirector();
         if (!(receipt.ownerOf(receiptId) == msg.sender)) revert NotOwner();
         Deposit memory d = deposits[receiptId];
         if (!(d.buckPrincipal > 0)) revert EmptyDeposit();
