@@ -1079,3 +1079,256 @@ class OptimalControlDebtorAgent(_ProxyAgent):
                     ctr["octlRetired"] = ctr.get("octlRetired", 0) + got
             except Exception as e:
                 ctr["octl_buy_err"] = repr(e)[:200]
+
+
+@_register
+class BuckCreditDebtorAgent(_ProxyAgent):
+    """The HONEST mortgage debtor: fakes as little of the BUCK system as
+    possible.  Where OptimalControlDebtorAgent (and FatCreditBorrowerAgent's
+    escrow/tranche machinery) SIMULATED the funding reserve and Jubilee, this
+    agent simply plays the real contracts:
+
+      * its BuckCredit NFTs carry a REAL premiumRate, so Buck.mint's
+        funding-factor gate applies for real: balanceOf(minter) must cover
+        poolPrincipal * fundingFactor/1e18 BEFORE activation, and the
+        insurance principal is genuinely paid to the insurance pool;
+      * it SAVES for that gate: monthly, it accumulates a BUCK buffer by
+        buying on the open market (the real pre-issuance demand the gate is
+        designed to compel) -- preferring to buy when BUCK is at/below value;
+      * it issues in TRANCHES: mint (activate) just before selling, so each
+        tranche re-faces the live gate at the live fundingFactor;
+      * Jubilee is NOT simulated: the fund accrues on-chain; this agent's
+        obligations are pure chain truth (drawn = -signedBalanceOf), valued
+        at par.
+
+    The optimal control is the same theta law -- deploy while
+    max(0, bvib-1) <= theta*apr and the mortgage remains -- plus a
+    save_rate knob (fraction of spare cash routed to the BUCK buffer) and a
+    staggered arrival day, so a population arrives over time with varying
+    models.  Doctrine: no forced overdraw recovery (overdraw_effort,
+    default 0).
+    """
+
+    MONTH = 30
+    HARVEST_MONTHS = (8, 9)
+    SINK = "0x000000000000000000000000000000000000dEaD"
+    N_CREDITS = 4
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        m6 = 1_000 * 10 ** 6
+        self.theta = _draw(scenario, cls, "theta", r, (0.0, 3.0))
+        self.pattern = "salary" if r.random() < 0.5 else "lumpy"
+        self.apr = _draw(scenario, cls, "apr", r, (0.045, 0.065))
+        self.mortgage = int(_draw(scenario, cls, "mortgage_k", r,
+                                  (600, 1400)) * m6)
+        self.income_annual = int(_draw(scenario, cls, "income_k", r,
+                                       (180, 320)) * m6)
+        face = int(_draw(scenario, cls, "face_k", r, (600, 1200)) * m6)
+        self.premium_rate = int(_draw(scenario, cls, "premium_bp", r,
+                                      (50, 150)))
+        self.save_rate = _draw(scenario, cls, "save_rate", r, (0.25, 0.75))
+        self.retire_disc = _draw(scenario, cls, "retire_disc", r, 0.02)
+        self.cash_buffer = int(_draw(scenario, cls, "buffer_k", r, 20) * m6)
+        self.overdraw_effort = _draw(scenario, cls, "overdraw_effort", r, 0.0)
+        horizon = max(1, int(getattr(scenario, "days", 1)))
+        self.arrive_day = int(_draw(scenario, cls, "arrive_frac", r,
+                                    (0.0, 0.5)) * horizon)
+        mrate = self.apr / 12.0
+        self.payment = int(self.mortgage * mrate
+                           / (1.0 - (1.0 + mrate) ** -300))
+        self.tranche_cap = self.payment * 12
+
+        self.hypo_mortgage = self.mortgage
+        self.hypo_cash = 0
+        self._last_day = self.arrive_day
+        self._last_month_day = self.arrive_day - self.MONTH
+        self.deploys = 0
+        self.throttled = 0
+
+        self._bind_proxy(d)
+        now_ts = d.w3.eth.get_block("latest")["timestamp"]
+        per = max(1, face // self.N_CREDITS)
+        for _ in range(self.N_CREDITS):
+            d.chain.send(d.credit.functions.createCredit(
+                self.proxy.address, 0, per, 0, 0, 0, now_ts,
+                self.premium_rate))
+        self._face = per * self.N_CREDITS
+        self._token_ids = [
+            d.credit.functions.tokenOfOwnerByIndex(
+                self.proxy.address, i).call()
+            for i in range(self.N_CREDITS)]
+
+    # -- off-chain fiat legs (income + bank payments) ----------------------- #
+
+    def _income(self, d, months: int, day) -> int:
+        if self.pattern == "salary":
+            amt = self.income_annual * months // 12
+        else:
+            month = (day // self.MONTH) % 12
+            amt = (self.income_annual // len(self.HARVEST_MONTHS)
+                   if month in self.HARVEST_MONTHS else 0)
+        if amt > 0:
+            d.chain.send(d.usdc.functions.mint(self.proxy.address, amt))
+        return amt
+
+    def _pay_bank(self, d, amt: int) -> int:
+        held = d.chain.balance_of(d.usdc, self.proxy.address)
+        pay = min(amt, held)
+        if pay > 0:
+            self._proxy_exec(
+                d, d.usdc.address,
+                d.usdc.encode_abi("transfer(address,uint256)",
+                                  args=[self.SINK, int(pay)]))
+        return pay
+
+    # -- observability ------------------------------------------------------- #
+
+    def octl_state(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        try:
+            cash = d.chain.balance_of(d.usdc, self.proxy.address)
+            signed = d.buck.functions.signedBalanceOf(
+                self.proxy.address).call()
+            limit = d.buck.functions.creditLimit(self.proxy.address).call()
+        except Exception:
+            return None
+        drawn = max(0, -signed)
+        held = max(0, signed)
+        # Pure chain truth at par; Jubilee is the chain's business.
+        nw = cash + held - self.mortgage - drawn
+        return {"idx": self.idx, "theta": round(self.theta, 2),
+                "pattern": self.pattern, "nw": nw,
+                "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
+                "limit": limit, "mortgage": self.mortgage, "drawn": drawn,
+                "jub": 0, "deploys": self.deploys,
+                "throttled": self.throttled}
+
+    # -- the loop -------------------------------------------------------------- #
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None or day < self.arrive_day:
+            return
+        days = day - self._last_day
+        self._last_day = day
+        if days > 0:
+            g = (1.0 + self.apr / 365.0) ** days
+            self.mortgage = int(self.mortgage * g)
+            self.hypo_mortgage = int(self.hypo_mortgage * g)
+        if day - self._last_month_day < self.MONTH:
+            return
+        months = max(1, (day - self._last_month_day) // self.MONTH)
+        self._last_month_day = day
+
+        try:
+            bvib = d.basket.functions.basketValueInBuck().call() / 1e18
+            ff = d.kctrl.functions.fundingFactor().call()
+            signed = d.buck.functions.signedBalanceOf(
+                self.proxy.address).call()
+            limit = d.buck.functions.creditLimit(self.proxy.address).call()
+        except Exception as e:
+            ctr["bcd_err"] = repr(e)[:200]
+            return
+        drawn = max(0, -signed)
+
+        # 1. Income + mandatory mortgage service, both ledgers.
+        inc = self._income(d, months, day)
+        self.hypo_cash += inc
+        due = min(self.payment * months, self.mortgage)
+        self.mortgage -= self._pay_bank(d, due)
+        hdue = min(self.payment * months, self.hypo_mortgage)
+        hpaid = min(hdue, self.hypo_cash)
+        self.hypo_cash -= hpaid
+        self.hypo_mortgage -= hpaid
+
+        disc = max(0.0, bvib - 1.0)
+
+        # Tranche capacity comes from UNACTIVATED face: creditLimit only
+        # reflects credit already activated by a mint, and the mint itself
+        # is what activates -- so size against faceValue - activatedValue
+        # (real chain reads), plus any already-activated unused headroom.
+        unactivated = 0
+        try:
+            for tid in self._token_ids:
+                face_v, act_v, _ = d.credit.functions.creditInfo(tid).call()
+                unactivated += max(0, face_v - act_v)
+        except Exception:
+            unactivated = 0
+        headroom = max(0, limit - drawn) + unactivated
+
+        # 2. SAVE for the real funding gate: estimate the next tranche's
+        #    insurance principal via quoteMint and top the BUCK buffer up to
+        #    the fundingFactor-scaled requirement -- buying preferentially
+        #    when BUCK is at/below its basket value (disc small).
+        want_tranche = min(self.tranche_cap, headroom, self.mortgage)
+        if want_tranche >= 10 ** 6 and self.mortgage > 10 ** 6:
+            try:
+                _, principal = d.buck.functions.quoteMint(
+                    want_tranche, self._token_ids).call()
+            except Exception:
+                principal = 0
+            required = principal * ff // 10 ** 18 if ff else 0
+            bal = d.buck.functions.balanceOf(self.proxy.address).call()
+            short = required - bal
+            if short > 10 ** 6 and disc <= max(self.theta * self.apr, 0.01):
+                cash = d.chain.balance_of(d.usdc, self.proxy.address)
+                budget = int(max(0, cash - self.cash_buffer)
+                             * self.save_rate)
+                if budget > 10 ** 6 and d.pool_ub:
+                    try:
+                        self._buy_buck(d, d.pool_ub, d.usdc,
+                                       min(short, budget), d.fee_ub)
+                        ctr["bcdSaved"] = ctr.get("bcdSaved", 0) + 1
+                    except Exception as e:
+                        ctr["bcd_save_err"] = repr(e)[:200]
+
+        # 3. THE CONTROL: activate a tranche through the REAL gate, then
+        #    deploy it against the mortgage.
+        if self.mortgage > 10 ** 6 and disc <= self.theta * self.apr \
+                and want_tranche >= 10 ** 6:
+            mint_amt = min(want_tranche, unactivated)
+            try:
+                if mint_amt >= 10 ** 6:
+                    self._proxy_exec(
+                        d, d.buck.address,
+                        d.buck.encode_abi("mint(uint256)", args=[mint_amt]))
+                minted = True
+            except Exception:
+                minted = False       # gate said no: save more, retry later
+                self.throttled += 1
+                ctr["bcdThrottled"] = ctr.get("bcdThrottled", 0) + 1
+            if minted and d.pool_ub:
+                before = d.chain.balance_of(d.usdc, self.proxy.address)
+                try:
+                    sold = self._sell_capped(d, d.pool_ub, want_tranche)
+                except Exception as e:
+                    ctr["bcd_sell_err"] = repr(e)[:200]
+                    sold = 0
+                if sold > 0:
+                    got = d.chain.balance_of(
+                        d.usdc, self.proxy.address) - before
+                    principal = min(got, self.mortgage)
+                    self._pay_bank(d, principal)
+                    self.mortgage -= principal
+                    self.deploys += 1
+                    ctr["bcdDeploys"] = ctr.get("bcdDeploys", 0) + 1
+
+        # 4. Voluntary unwind only (doctrine: overdraw is not an emergency).
+        want = 0
+        if drawn > limit and self.overdraw_effort > 0:
+            want = int((drawn - limit) * self.overdraw_effort)
+        elif self.mortgage <= 10 ** 6 and drawn > 0 \
+                and disc >= self.retire_disc:
+            cash = d.chain.balance_of(d.usdc, self.proxy.address)
+            if cash - self.cash_buffer > 10 ** 6:
+                want = drawn
+        if want > 10 ** 6 and d.pool_ub:
+            try:
+                got = self._buy_buck(d, d.pool_ub, d.usdc, want, d.fee_ub)
+                if got > 0:
+                    ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + got
+            except Exception as e:
+                ctr["bcd_buy_err"] = repr(e)[:200]

@@ -22,6 +22,7 @@ DATA = REPO / "test" / "vectors" / "eq-eq-debtors.json"
 OUT = REPO / "images" / "equilibrium-debtors.png"
 
 THETA_COLOR = {0.0: "#2a78d6", 0.25: "#1baf7a", 1.0: "#eda100", 3.0: "#e34948"}
+THETA_MAX = 3.0
 INK, INK2 = "#0b0b0b", "#52514e"
 
 
@@ -55,8 +56,17 @@ def render(data_path: Path = DATA, out_path: Path = OUT) -> None:
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
 
+    import matplotlib.pyplot as _plt
+    _cmap = _plt.get_cmap("plasma")
+
+    def _color(theta):
+        # Exact ladder thetas keep their assigned colors; continuous draws
+        # (the realistic experiment) map onto the colormap.
+        return THETA_COLOR.get(theta,
+                               _cmap(0.85 * min(1.0, theta / THETA_MAX)))
+
     def _style(a):
-        return dict(color=THETA_COLOR.get(a["theta"], INK2),
+        return dict(color=_color(a["theta"]),
                     linestyle="-" if a["pattern"] == "salary" else "--",
                     linewidth=1.8)
 
@@ -97,7 +107,7 @@ def render(data_path: Path = DATA, out_path: Path = OUT) -> None:
     labels = [f"{a['theta']}\n{a['pattern'][:3]}" for a in order]
     vals = [a["adv"][-1] for a in order]
     bars = ax.bar(range(len(order)), vals,
-                  color=[THETA_COLOR.get(a["theta"], INK2) for a in order])
+                  color=[_color(a["theta"]) for a in order])
     for b, a in zip(bars, order):
         b.set_alpha(1.0 if a["pattern"] == "salary" else 0.55)
     ax.set_xticks(range(len(order)), labels, fontsize=8)

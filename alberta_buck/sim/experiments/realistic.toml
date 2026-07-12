@@ -1,0 +1,42 @@
+# The REALISTIC equilibrium world: fake as little of the BUCK system as
+# possible and observe how equilibrium is maintained.  The issuance channel
+# is a population of HONEST BuckCreditDebtorAgents -- real premium-bearing
+# BuckCredit, the real on-chain fundingFactor mint gate satisfied by
+# genuinely saved BUCK, tranche-wise activation, obligations as pure chain
+# truth (Jubilee left to the chain) -- arriving staggered over the first
+# year with heterogeneous mortgages, incomes, aggressiveness (theta) and
+# savings discipline.  Savers (with the standing regime-shock machinery),
+# basket investors (direct-mint TOKEN + BUCK), arbs, accumulators, and the
+# pin whale complete the cast; the PID defends the loop.
+#
+#   make sim-experiment-realistic SIM_BACKEND=pyrevm
+#   python -m alberta_buck.sim.plot_octl --data test/vectors/eq-eq-realistic.json \
+#       --out images/equilibrium-realistic.png
+
+name = "eq-realistic"
+
+[scenario]
+years = 2.0
+ticks_per_day = 12
+seed = 0xA1BC
+
+[scenario.agents]
+MarketMakerWhale = 1
+AnonymousArbAgent = 3
+TokenAccumulatorAgent = 6
+BootstrapDMAgent = 24
+SaverAgent = 5
+PidKeeperAgent = 1
+DirectMintAgent = 24
+DirectMintBuckAgent = 8
+BuckCreditDebtorAgent = 12
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]          # aggressiveness: tolerated discount, yrs of apr
+apr = [0.045, 0.065]
+mortgage_k = [600, 1400]
+income_k = [180, 320]
+face_k = [600, 1200]
+premium_bp = [50, 150]      # REAL insurance premium -> real funding gate
+save_rate = [0.25, 0.75]
+arrive_frac = [0.0, 0.5]    # staggered arrival over the first year
