@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {BasketRebalanceDirector} from "../../src/basket/BasketRebalanceDirector.sol";
+import {RebalanceDirectorBase} from "../../src/basket/RebalanceDirectorBase.sol";
 
 // --- Self-contained mocks ---------------------------------------------------- //
 //
@@ -164,8 +165,8 @@ contract BasketRebalanceDirectorTest is Test {
         lazy.pokeAll();                     // lazy twin: one catch-up poke
 
         for (uint256 i = 0; i < 3; i++) {
-            (int128 mD, int128 vD, int128 ddD,,,,,,,) = dir.signalOf(i);
-            (int128 mL, int128 vL, int128 ddL,,,,,,,) = lazy.signalOf(i);
+            (int128 mD, int128 vD, int128 ddD,,,,,) = dir.signalOf(i);
+            (int128 mL, int128 vL, int128 ddL,,,,,) = lazy.signalOf(i);
             assertApproxEqAbs(mD, mL, 1e9,
                 "EMA catch-up == per-epoch pokes (to rounding)");
             assertApproxEqAbs(vD, vL, 1e9, "velocity closed form exact");
@@ -223,7 +224,7 @@ contract BasketRebalanceDirectorTest is Test {
         _warpToEpoch(e++);
         dir.pokeAll();
         assertLt(dir.deviationOf(0), -15e15, "now raw-underweight");
-        (int128 m,,,,,,,,,) = dir.signalOf(0);
+        (int128 m,,,,,,,) = dir.signalOf(0);
         assertGt(m, 0, "MA still remembers the overweight");
         assertEq(_effort(0), 0, "sign disagreement: no wrong-way trade");
     }
@@ -306,7 +307,7 @@ contract BasketRebalanceDirectorTest is Test {
         // Nothing synced -> poke reverts; sync of an empty basket also guards.
         BasketRebalanceDirector fresh =
             new BasketRebalanceDirector(address(basket), GOV, _params());
-        vm.expectRevert(BasketRebalanceDirector.NotSynced.selector);
+        vm.expectRevert(RebalanceDirectorBase.NotSynced.selector);
         fresh.poke(1);
     }
 
@@ -334,8 +335,8 @@ contract BasketRebalanceDirectorTest is Test {
         lazy.pokeAll();
 
         for (uint256 i = 0; i < 3; i++) {
-            (int128 mD,,, int128 pdD,,,,,,) = dir.signalOf(i);
-            (int128 mL,,, int128 pdL,,,,,,) = lazy.signalOf(i);
+            (int128 mD,,, int128 pdD,,,,) = dir.signalOf(i);
+            (int128 mL,,, int128 pdL,,,,) = lazy.signalOf(i);
             assertApproxEqAbs(mD, mL, 1e12, "m: lazy == diligent");
             assertEq(pdD, pdL, "prevDelta identical");
         }
@@ -344,7 +345,7 @@ contract BasketRebalanceDirectorTest is Test {
     function test_params_onlyGov() public {
         BasketRebalanceDirector.Params memory p = _params();
         p.capBpPerEpoch = 10;
-        vm.expectRevert(BasketRebalanceDirector.NotGovernance.selector);
+        vm.expectRevert(RebalanceDirectorBase.NotGovernance.selector);
         dir.setParams(p);
         vm.prank(GOV);
         dir.setParams(p);

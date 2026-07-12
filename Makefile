@@ -112,7 +112,7 @@ DIRECTOR_WINDOWS	?= 6 8 16
 DIRECTOR_RHOS		?= 1500000000 3000000000 6000000000
 
 test-director:	build
-	forge test $(FORGE_OPTS) --match-contract BasketRebalanceDirector -vv
+	forge test $(FORGE_OPTS) --match-contract 'RebalanceDirector' -vv
 
 test-director-regimes:	build
 	@rc=0; pids=""; \
@@ -743,9 +743,12 @@ sim-plot-article:	$(POLICY_VECTOR)
 # 30-day Anvil smoke sim exercising the BasketRebalanceDirector end to end:
 # the rebalancing scenario's DirectorKeeperAgent pokes the director's work
 # wheel each tick and executes its advisory efforts through the router.
+SIM_DIRECTOR	?= vrate
+
 sim-run-director:
 	python -m $(SIM_PKG) --scenario rebalancing --days 30 \
 		--ticks-per-day $(SIM_TICKS) --basket prorata \
+		--director $(SIM_DIRECTOR) \
 		--out test/vectors/director-smoke.json
 
 sim-director:	sim-build sim-run-director
