@@ -972,8 +972,13 @@ class OptimalControlDebtorAgent(_ProxyAgent):
         held = max(0, signed)
         # The Jubilee fund melts the obligation ~2%/yr: value the liability
         # net of accrued relief (the system dissolves that much of the lien).
+        # BUCK legs are valued AT PAR: the obligation is BUCK-denominated,
+        # retirement timing is the holder's option, and Jubilee melts it --
+        # instantaneous pool spot injects pure mark-to-market noise into a
+        # long-horizon wealth comparison (measured: +/- $0.5-3M swings on a
+        # ~$600k draw).  `px` stays in the record for MTM diagnostics.
         eff_drawn = max(0, drawn - self.jubilee_relief)
-        nw = cash + held * px // PARITY - self.mortgage - eff_drawn * px // PARITY
+        nw = cash + held - self.mortgage - eff_drawn
         hypo_nw = self.hypo_cash - self.hypo_mortgage
         try:
             limit = d.buck.functions.creditLimit(self.proxy.address).call()
@@ -981,7 +986,7 @@ class OptimalControlDebtorAgent(_ProxyAgent):
             limit = -1
         return {"idx": self.idx, "theta": self.theta, "pattern": self.pattern,
                 "nw": nw, "hypo": hypo_nw, "cash": cash, "limit": limit,
-                "mortgage": self.mortgage, "drawn": drawn,
+                "px": px, "mortgage": self.mortgage, "drawn": drawn,
                 "jub": self.jubilee_relief, "deploys": self.deploys}
 
     # -- the loop ------------------------------------------------------------ #

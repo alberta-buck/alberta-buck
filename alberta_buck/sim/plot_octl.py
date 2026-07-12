@@ -96,9 +96,10 @@ def render(data_path: Path = DATA, out_path: Path = OUT) -> None:
     order = sorted(agents.values(), key=lambda a: (a["theta"], a["pattern"]))
     labels = [f"{a['theta']}\n{a['pattern'][:3]}" for a in order]
     vals = [a["adv"][-1] for a in order]
-    ax.bar(range(len(order)), vals,
-           color=[THETA_COLOR.get(a["theta"], INK2) for a in order],
-           alpha=[1.0 if a["pattern"] == "salary" else 0.55 for a in order])
+    bars = ax.bar(range(len(order)), vals,
+                  color=[THETA_COLOR.get(a["theta"], INK2) for a in order])
+    for b, a in zip(bars, order):
+        b.set_alpha(1.0 if a["pattern"] == "salary" else 0.55)
     ax.set_xticks(range(len(order)), labels, fontsize=8)
     ax.axhline(0, color=INK, linewidth=0.8, alpha=0.4)
     ax.set_title("terminal advantage by strategy")
