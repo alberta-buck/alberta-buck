@@ -526,6 +526,25 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
 SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | legacy (BuckBasket)
+#
+# Every Anvil-style sim below composes from a common matrix:
+#
+#   SIM_BACKEND  = anvil (subprocess, RPC-faithful; default)
+#                | pyrevm (in-process revm: identical outputs, ~6.5x wall
+#                  on short runs, far more on long ones -- see
+#                  alberta_buck/sim/pyrevm_backend.py)
+#   SIM_BASKET   = prorata (BuckBasketProRata + UniswapV3 venue facet)
+#                | legacy (fused BuckBasket)
+#   SIM_DIRECTOR = pairs (PairsRebalanceDirector: differential-mode
+#                  tick-EMA ladders, quorum turn votes; default)
+#                | vrate (BasketRebalanceDirector: share-deviation regime)
+#   Env knobs (deploy-time director params, for short smoke runs):
+#     DIRECTOR_DEADBAND_BP=10  DIRECTOR_QUORUM=2|3 (pairs)  DIRECTOR_WINDOW=3 (vrate)
+#
+#   e.g.  make nix-sim-rebalancing SIM_BACKEND=pyrevm SIM_DIRECTOR=vrate
+#         SIM_BACKEND=pyrevm make nix-sim-historical SIM_YEARS=5
+SIM_BACKEND	?= anvil         # anvil (default) | pyrevm (in-process, fast)
+SIM_DIRECTOR	?= pairs        # pairs (default) | vrate
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
@@ -576,7 +595,8 @@ v2-patch-init-code-hash:
 		fi
 
 sim-run:	sim-build
-	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET)
+	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) --director $(SIM_DIRECTOR)
 
 sim-test:	sim-build
 	python -m pytest $(SIM_TEST) -v -s
@@ -624,7 +644,8 @@ REBALANCING_VECTOR   = test/vectors/rebalancing-sim.json
 SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
 
 sim-run-rebalancing:	sim-build
-	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET)
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) --director $(SIM_DIRECTOR)
 
 sim-plot-rebalancing:	$(REBALANCING_VECTOR)
 	python -m pytest $(SIM_REB_PLOT) -v -s
@@ -655,11 +676,13 @@ REBALANCING_VECTOR_TRADITIONAL  = test/vectors/rebalancing-sim-traditional.json
 sim-run-rebalancing-prorata:	sim-build
 	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
 		--ticks-per-day $(SIM_TICKS) --basket prorata \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
 		--out $(REBALANCING_VECTOR_PRORATA)
 
 sim-run-rebalancing-traditional:	sim-build
 	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
 		--ticks-per-day $(SIM_TICKS) --basket legacy \
+		--backend $(SIM_BACKEND) \
 		--out $(REBALANCING_VECTOR_TRADITIONAL)
 
 sim-plot-rebalancing-prorata:	$(REBALANCING_VECTOR_PRORATA)
@@ -743,12 +766,10 @@ sim-plot-article:	$(POLICY_VECTOR)
 # 30-day Anvil smoke sim exercising the BasketRebalanceDirector end to end:
 # the rebalancing scenario's DirectorKeeperAgent pokes the director's work
 # wheel each tick and executes its advisory efforts through the router.
-SIM_DIRECTOR	?= pairs
-
 sim-run-director:
 	python -m $(SIM_PKG) --scenario rebalancing --days 30 \
 		--ticks-per-day $(SIM_TICKS) --basket prorata \
-		--director $(SIM_DIRECTOR) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
 		--out test/vectors/director-smoke.json
 
 sim-director:	sim-build sim-run-director
@@ -803,6 +824,7 @@ sim-gen-historical:
 sim-run-historical:	sim-build
 	python -m $(SIM_PKG) --scenario historical --years $(SIM_YEARS) \
 		--ticks-per-day $(HIST_TICKS) --basket $(SIM_BASKET) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
 		--out $(HISTORICAL_VECTOR)
 
 sim-plot-historical:	$(HISTORICAL_VECTOR)
@@ -838,6 +860,7 @@ EQ_DAYS			?= 20
 
 sim-run-equilibrium:	sim-build
 	python -m $(SIM_PKG) --scenario equilibrium --years $(EQ_YEARS) \
+		--backend $(SIM_BACKEND) \
 		--days $(EQ_DAYS) --ticks-per-day $(EQ_TICKS) --basket $(SIM_BASKET) \
 		--out $(EQUILIBRIUM_VECTOR)
 
@@ -871,13 +894,25 @@ EQ_VECTORS	?= test/vectors/eq-*.json
 .PHONY: sim-experiment sim-sweep sim-metrics
 
 sim-experiment:	sim-build
-	python -m $(SIM_PKG) --experiment $(EQ_EXPERIMENT) $(EQ_SETS)
+	python -m $(SIM_PKG) --experiment $(EQ_EXPERIMENT) --backend $(SIM_BACKEND) $(EQ_SETS)
 
 # Run any experiment by TOML basename: make sim-experiment-<name> runs
 # alberta_buck/sim/experiments/<name>.toml -> test/vectors/eq-<name>.json.
 sim-experiment-%:	sim-build
-	python -m $(SIM_PKG) \
+	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
 		--experiment alberta_buck/sim/experiments/$*.toml $(EQ_SETS)
+
+# Optimal-control debtors: theta-ladder mortgage debtors deploying BUCK
+# credit against the interest drain, in the full equilibrium world.
+# pyrevm recommended (a 2y run is ~15 min in-process vs hours on anvil).
+#
+#   make nix-sim-debtors SIM_BACKEND=pyrevm
+sim-run-debtors:	sim-build
+	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
+		--experiment alberta_buck/sim/experiments/debtors.toml
+sim-plot-debtors:
+	python -m alberta_buck.sim.plot_octl
+sim-debtors:	sim-run-debtors sim-plot-debtors
 
 sim-sweep:	sim-build
 	python -m alberta_buck.sim.sweep $(EQ_EXPERIMENTS) \

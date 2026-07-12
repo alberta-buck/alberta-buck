@@ -254,6 +254,14 @@ class Snapshotter:
             if cs:
                 for k in fat:
                     fat[k] += cs.get(k, 0)
+        # Optimal-control debtors: per-agent net worth + counterfactual (the
+        # strategy-comparison observability; a handful of small dicts/frame).
+        octl = []
+        for ag in agents:
+            if hasattr(ag, "octl_state"):
+                st = ag.octl_state(d)
+                if st:
+                    octl.append(st)
         # Regime knobs (mean over each class present) -- track how the
         # periodic regime shocks move the population's primary knobs.  Read
         # off the live agent objects; guarded so non-equilibrium runs are 0.
@@ -329,6 +337,10 @@ class Snapshotter:
             "fat_prefund": ctr.get("fatPreFundBought", 0), # cum reserve buys
             "fat_throttled": ctr.get("fatThrottled", 0),   # cum throttle hits
             "fat_released": ctr.get("fatReleased", 0),     # cum reserve released
+            "octl": octl,                                  # per-debtor states
+            "octl_deploys": ctr.get("octlDeploys", 0),
+            "octl_deployed": ctr.get("octlDeployed", 0),
+            "octl_retired": ctr.get("octlRetired", 0),
             "iv_events": ctr.get("ivEvents", 0),           # cum interventions
             "supply": int(d.buck.functions.totalSupply().call()),
             "directTrades": ctr["directTrades"],

@@ -1,0 +1,35 @@
+# Optimal-control debtors: WHO RETIRES DEBT BEST?  A theta ladder of
+# mortgage debtors (deploy BUCK credit while the basket discount is
+# <= theta * apr) x two income patterns (salary / lumpy harvest), all in
+# one equilibrium world so every strategy faces identical prices.  Each
+# agent carries a no-BUCK counterfactual ledger; the per-agent nw - hypo
+# advantage isolates the strategy.  Run:
+#
+#   python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/debtors.toml \
+#       --backend pyrevm
+#   python -m alberta_buck.sim.plot_octl        # images/equilibrium-debtors.png
+
+name = "eq-debtors"
+
+[scenario]
+years = 2.0
+ticks_per_day = 12
+seed = 0xA1BC
+
+[scenario.agents]
+MarketMakerWhale = 1
+AnonymousArbAgent = 3
+TokenAccumulatorAgent = 6
+BootstrapDMAgent = 24
+FatCreditBorrowerAgent = 5
+SaverAgent = 4
+PidKeeperAgent = 1
+OptimalControlDebtorAgent = 8
+
+[agents.OptimalControlDebtorAgent]
+apr = 0.055            # mortgage rate (5.5%/yr)
+mortgage_k = 1000      # $1.0M principal
+income_k = 240         # $240k/yr gross (same total, both patterns)
+face_k = 900           # $900k property face pledged as BuckCredit
+retire_disc = 0.02
+buffer_k = 20
