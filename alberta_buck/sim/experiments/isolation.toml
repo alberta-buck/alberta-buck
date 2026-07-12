@@ -1,0 +1,42 @@
+# The ISOLATION world: exactly ONE honest BuckCreditDebtorAgent with every
+# knob pinned to a scalar, in the standard supporting cast (whale pin, arbs,
+# PID, direct-mint depth), so the BUCK-vs-counterfactual net-worth accounting
+# can be audited against a pure-Python replica of the agent's ledgers:
+#
+#     adv(t) = nw(t) - hypo(t)
+#            = interest_saved(t) - premium_paid(t) - trade_loss(t)
+#
+# Run + audit:
+#   make nix-venv-sim-isolation
+#   (python -m alberta_buck.sim --experiment .../isolation.toml --backend pyrevm
+#    then pytest alberta_buck/test/test_debtor_ledger.py)
+
+name = "eq-isolation"
+
+[scenario]
+years = 2.0
+ticks_per_day = 6
+day_step = 5
+seed = 0xA1BC
+
+[scenario.agents]
+MarketMakerWhale = 1
+AnonymousArbAgent = 3
+BootstrapDMAgent = 24
+SaverAgent = 3
+PidKeeperAgent = 1
+DirectMintAgent = 16
+DirectMintBuckAgent = 6
+BuckCreditDebtorAgent = 1
+
+[agents.BuckCreditDebtorAgent]
+theta = 1.0                 # deploy while discount <= 5.5%
+apr = 0.055
+mortgage_k = 800            # $800k principal, 25y amortization
+income_k = 260              # $260k/yr salary (monthly)
+face_k = 900                # 4 credits x $225k face
+premium_bp = 100            # 1% insurance premium -> real funding gate
+save_rate = 0.5
+buffer_k = 20
+arrive_frac = 0.0           # day-0 arrival: full-horizon ledgers
+pattern = "salary"          # deterministic income stream for the replica

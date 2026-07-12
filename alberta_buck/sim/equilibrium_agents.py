@@ -1005,7 +1005,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self._class_count = getattr(scenario, "agents", {}).get(cls, 1)
         m6 = 1_000 * 10 ** 6
         self.theta = _draw(scenario, cls, "theta", r, (0.0, 3.0))
-        self.pattern = "salary" if r.random() < 0.5 else "lumpy"
+        flip = "salary" if r.random() < 0.5 else "lumpy"
+        self.pattern = str(_spec(scenario, cls, "pattern", "")) or flip
         self.apr = _draw(scenario, cls, "apr", r, (0.045, 0.065))
         self.mortgage = int(_draw(scenario, cls, "mortgage_k", r,
                                   (600, 1400)) * m6)
@@ -1041,6 +1042,16 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self._last_month_day = start - self.MONTH
         self.deploys = 0
         self.throttled = 0
+        # Cost telemetry (par-valued, 6-dec dollars): what the BUCK path
+        # actually pays vs the counterfactual -- insurance principal
+        # surrendered at mint, and the par-value lost (or gained, negative)
+        # crossing the pool in either direction.  unwound/unwind_loss
+        # isolate the voluntary-buyback leg (so passive Jubilee melt can be
+        # distinguished from the agent's own purchases).
+        self.premium_paid = 0
+        self.trade_loss = 0
+        self.unwound = 0
+        self.unwind_loss = 0
 
         self._bind_proxy(d)
         now_ts = d.w3.eth.get_block("latest")["timestamp"]
@@ -1054,6 +1065,18 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             d.credit.functions.tokenOfOwnerByIndex(
                 self.proxy.address, i).call()
             for i in range(self.N_CREDITS)]
+
+    # -- instrumented market legs ------------------------------------------- #
+
+    def _buy_track(self, d, want_buck: int) -> int:
+        """_buy_buck through the BUCK/USDC pool, accumulating the par-value
+        cost (USDC spent minus BUCK received; negative = bought below par)
+        into trade_loss.  Returns BUCK bought."""
+        before = d.chain.balance_of(d.usdc, self.proxy.address)
+        got = self._buy_buck(d, d.pool_ub, d.usdc, want_buck, d.fee_ub)
+        spent = before - d.chain.balance_of(d.usdc, self.proxy.address)
+        self.trade_loss += spent - got
+        return got
 
     # -- off-chain fiat legs (income + bank payments) ----------------------- #
 
@@ -1092,14 +1115,30 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             return None
         drawn = max(0, -signed)
         held = max(0, signed)
-        # Pure chain truth at par; Jubilee is the chain's business.
-        nw = cash + held - self.mortgage - drawn
+        # Pure chain truth at par; the liability side is the chain's OWN
+        # close-cost quote: drawn net of the accrued Jubilee relief on the
+        # credits (BuckCredit.jubileeRelief -- the redemption discount that
+        # melts ~2%/yr while the position is carried).
+        jub = 0
+        try:
+            for tid in self._token_ids:
+                jub += d.credit.functions.jubileeRelief(tid).call()
+        except Exception:
+            jub = 0
+        jub = min(jub, drawn)
+        nw = cash + held - self.mortgage - drawn + jub
         return {"idx": self.idx, "theta": round(self.theta, 2),
                 "pattern": self.pattern, "nw": nw,
                 "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
                 "limit": limit, "mortgage": self.mortgage, "drawn": drawn,
-                "jub": 0, "deploys": self.deploys,
+                "jub": jub, "deploys": self.deploys,
                 "throttled": self.throttled,
+                "premium_paid": self.premium_paid,
+                "trade_loss": self.trade_loss,
+                "unwound": self.unwound,
+                "unwind_loss": self.unwind_loss,
+                "apr": self.apr, "payment": self.payment,
+                "income": self.income_annual,
                 "active": bool(getattr(self, "_growth_arrived", False))}
 
     # -- the loop -------------------------------------------------------------- #
@@ -1182,8 +1221,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                              * self.save_rate)
                 if budget > 10 ** 6 and d.pool_ub:
                     try:
-                        self._buy_buck(d, d.pool_ub, d.usdc,
-                                       min(short, budget), d.fee_ub)
+                        self._buy_track(d, min(short, budget))
                         ctr["bcdSaved"] = ctr.get("bcdSaved", 0) + 1
                     except Exception as e:
                         ctr["bcd_save_err"] = repr(e)[:200]
@@ -1195,9 +1233,19 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             mint_amt = min(want_tranche, unactivated)
             try:
                 if mint_amt >= 10 ** 6:
+                    pre = d.buck.functions.signedBalanceOf(
+                        self.proxy.address).call()
                     self._proxy_exec(
                         d, d.buck.address,
                         d.buck.encode_abi("mint(uint256)", args=[mint_amt]))
+                    post = d.buck.functions.signedBalanceOf(
+                        self.proxy.address).call()
+                    # mint activates credit (creditLimit += coverage) and
+                    # debits the SIGNED balance by exactly poolPrincipal --
+                    # the insurance premium is paid by drawing credit, so it
+                    # surfaces in `drawn` (and hence nw); track it here so
+                    # the advantage decomposition can separate it out.
+                    self.premium_paid += max(0, pre - post)
                 minted = True
             except Exception:
                 minted = False       # gate said no: save more, retry later
@@ -1213,6 +1261,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 if sold > 0:
                     got = d.chain.balance_of(
                         d.usdc, self.proxy.address) - before
+                    self.trade_loss += sold - got
                     principal = min(got, self.mortgage)
                     self._pay_bank(d, principal)
                     self.mortgage -= principal
@@ -1223,19 +1272,39 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             self._retired_flagged = True
             ctr["neighborsRetired"] = ctr.get("neighborsRetired", 0) + 1
 
-        # 4. Voluntary unwind only (doctrine: overdraw is not an emergency).
+        # 4. Voluntary unwind only (doctrine: overdraw is not an emergency,
+        #    and the drawn balance is an outstanding claim on OWN assets --
+        #    there is never urgency to buy it back).  The obligation is
+        #    par-valued at $1/BUCK, so a buyback creates value ONLY when the
+        #    pool's USDC spot is BELOW par; the basket-relative discount
+        #    (bvib) says nothing about the USD price actually paid.  Gate on
+        #    spot <= 1 - retire_disc and size the bite so the buy itself
+        #    cannot lift the pool past par: buying x out of reserve r_out
+        #    moves spot p to p*(r_out/(r_out-x))^2, which stays <= 1 for
+        #    x <= r_out*(1 - sqrt(p)).  (The old want=drawn slammed the
+        #    whole obligation through the pool regardless of price and
+        #    burned the cash pile: cash-for-slippage, adv collapse.)
         want = 0
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        spare = cash - self.cash_buffer
         if drawn > limit and self.overdraw_effort > 0:
             want = int((drawn - limit) * self.overdraw_effort)
-        elif self.mortgage <= 10 ** 6 and drawn > 0 \
-                and disc >= self.retire_disc:
-            cash = d.chain.balance_of(d.usdc, self.proxy.address)
-            if cash - self.cash_buffer > 10 ** 6:
-                want = drawn
-        if want > 10 ** 6 and d.pool_ub:
-            try:
-                got = self._buy_buck(d, d.pool_ub, d.usdc, want, d.fee_ub)
-                if got > 0:
-                    ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + got
-            except Exception as e:
-                ctr["bcd_buy_err"] = repr(e)[:200]
+        elif self.mortgage <= 10 ** 6 and drawn > 0:
+            want = drawn
+        if want > 10 ** 6 and spare > 10 ** 6 and d.pool_ub:
+            r_in = d.chain.balance_of(d.usdc, d.pool_ub)
+            r_out = d.chain.balance_of(d.buck, d.pool_ub)
+            spot = r_in / r_out if r_out else 10.0
+            if spot <= 1.0 - self.retire_disc:
+                want = min(want, spare,
+                           int(r_out * (1.0 - math.sqrt(spot))))
+                if want > 10 ** 6:
+                    try:
+                        tl0 = self.trade_loss
+                        got = self._buy_track(d, want)
+                        self.unwound += got
+                        self.unwind_loss += self.trade_loss - tl0
+                        if got > 0:
+                            ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + got
+                    except Exception as e:
+                        ctr["bcd_buy_err"] = repr(e)[:200]

@@ -917,6 +917,18 @@ sim-plot-debtors:
 		--out images/equilibrium-realistic.png
 sim-debtors:	sim-run-debtors sim-plot-debtors
 
+# The debtor-ledger AUDIT: one pinned-knob honest debtor in isolation, then
+# assert the BUCK-vs-counterfactual accounting against a pure-Python ledger
+# replica (amortization exactness, the conservation identity
+# adv = interest_saved - premium - trade_loss, uniform superiority net of
+# costs, and the xfail'd Jubilee-melt doctrine gap).
+#
+#   make nix-venv-sim-isolation      # pyrevm lives in the repo venv
+sim-isolation:	sim-build
+	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
+		--experiment alberta_buck/sim/experiments/isolation.toml
+	python -m pytest alberta_buck/test/test_debtor_ledger.py -v -s
+
 sim-sweep:	sim-build
 	python -m alberta_buck.sim.sweep $(EQ_EXPERIMENTS) \
 		$(if $(EQ_SEEDS),--seeds $(EQ_SEEDS)) --jobs $(EQ_JOBS) \
