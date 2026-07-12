@@ -219,19 +219,30 @@ basket whose deviations are the harvest, not the harm.
 
 ## 5. Solidity state machine
 
-> **Status: IMPLEMENTED** as `src/basket/BasketRebalanceDirector.sol` — a
-> standalone advisor with exact closed-form EMA catch-up (m, vEma, ddotEma),
-> the round-robin `poke(maxWork)` work wheel, cached per-pool observations
-> with running sums, and O(1)-cached `depositHint()`/`redeemHint()`/
-> `effortOf(i)` advisory reads. Tests: `make nix-test-director` (10 tests
-> incl. a 256-run fuzz of the lazy==diligent invariant),
-> `make nix-test-director-regimes` (parallel window x rho matrix — it caught
-> a real velocity-catch-up approximation bug), `make nix-sim-director`
-> (30-day Anvil sim; `DirectorKeeperAgent` pokes + executes advice).
-> Measured gas: ~36.5k/poke (1-epoch gap), ~19.9k (50-epoch gap — flat in
-> gap size), ~3.1k fresh-epoch guard. Article:
+> **Status: IMPLEMENTED, two engines on a shared chassis.**
+> `src/basket/IRebalanceDirector.sol` (the advisory interface) +
+> `RebalanceDirectorBase.sol` (the policy-agnostic chassis: epoch clock,
+> poke(maxWork) work wheel, metadata sync, cached bv/s observations with
+> running sums, `_pow1e18`, and the depositHint/redeemHint/effortOf surface
+> over the engine's `effortOf`) + two signal engines:
+>
+> - `BasketRebalanceDirector.sol` — vrate: share-deviation EMA + velocity
+>   regime + rate-matched sizing. 10-test suite incl. 256-run catch-up fuzz;
+>   window x rho regime matrix (`make nix-test-director-regimes`).
+> - `PairsRebalanceDirector.sol` — differential mode: per-leg 7-window EMA
+>   ladders run directly on the pool TICK (a tick is a log price — no ln()
+>   on-chain), pair quorum votes on the confirmed turn (vel), arithmetic
+>   weight-ratio differential, pairwise leash bitmask, cached pair + net
+>   efforts, `bestPair()` for keepers. 8-test suite (catch-up equivalence,
+>   diverge/plateau/revert quorum, leash hysteresis, hints, wheel, gas).
+>
+> Gas per one-constituent slice: vrate 37.6k, pairs 60.7k; both flat in gap
+> size; 3.0k fresh-epoch guard. `make nix-test-director` runs both suites.
+> Sim: `--director vrate|pairs` (`SIM_DIRECTOR=` for make targets;
+> `DIRECTOR_QUORUM`/`DIRECTOR_DEADBAND_BP`/`DIRECTOR_WINDOW` env knobs);
+> `DirectorKeeperAgent` is engine-agnostic via the interface. Article:
 > `alberta-buck-rebalance.org`. The section below is the original design
-> sketch; the vrate variant is what shipped.
+> sketch.
 
 Everything above is O(1) state and O(1) work per constituent per step; no
 history arrays needed on-chain:

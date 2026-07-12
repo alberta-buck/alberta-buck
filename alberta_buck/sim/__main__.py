@@ -16,6 +16,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="alberta_buck.sim")
     ap.add_argument("--scenario", default="routing",
                     choices=sorted(SCENARIOS) + ["historical", "equilibrium"])
+    ap.add_argument("--director", default="vrate", choices=["vrate", "pairs"],
+                    help="rebalance-director signal engine (prorata only)")
     ap.add_argument("--basket", default=None, choices=["legacy", "prorata"],
                     help="basket implementation: BuckBasketProRata (prorata, "
                          "default) or BuckBasket (legacy)")
@@ -89,7 +91,8 @@ def main(argv=None) -> int:
         sc.day_step = a.day_step
 
     with Anvil(port=a.port) as anvil:
-        summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl)
+        summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl,
+                      director_impl=a.director)
     ok = summary["cycle_trades"] > 0 and summary["all_eoa_verified"]
     return 0 if ok else 1
 

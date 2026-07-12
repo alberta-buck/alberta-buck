@@ -43,7 +43,8 @@ class SimDriver:
     so the chain is at "tick 0, day 0, nothing acted yet" when it returns.
     """
 
-    def __init__(self, scenario, anvil, basket_impl="prorata", verbose=False):
+    def __init__(self, scenario, anvil, basket_impl="prorata",
+                 director_impl="vrate", verbose=False):
         self.scenario = scenario
         self.anvil = anvil
         self.basket_impl = basket_impl
@@ -54,7 +55,8 @@ class SimDriver:
         self._prng = random.Random(scenario.seed)
 
         self.d = deploy(self.chain, anvil, scenario, self._rng,
-                        basket_impl=basket_impl, verbose=verbose)
+                        basket_impl=basket_impl,
+                        director_impl=director_impl, verbose=verbose)
 
         # --- build + register the agent population ------------------- #
         # Reset per-class counters so back-to-back runs in one process do
