@@ -44,7 +44,7 @@ class SimDriver:
     """
 
     def __init__(self, scenario, anvil, basket_impl="prorata",
-                 director_impl="vrate", verbose=False):
+                 director_impl="pairs", verbose=False):
         self.scenario = scenario
         self.anvil = anvil
         self.basket_impl = basket_impl

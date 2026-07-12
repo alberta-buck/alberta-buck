@@ -140,7 +140,7 @@ class Deployment:
     basket_impl: str = "prorata"  # "prorata" (BuckBasketProRata, default) | "legacy"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     director: Any = None          # rebalance director (prorata only)
-    director_impl: str = "vrate"  # "vrate" | "pairs"
+    director_impl: str = "pairs"  # "pairs" (default) | "vrate"
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
 
@@ -151,7 +151,7 @@ def _erc20_abi() -> list:
 
 
 def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
-           basket_impl="prorata", director_impl="vrate") -> Deployment:
+           basket_impl="prorata", director_impl="pairs") -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, pool_acct, issuer_addr = accts[0], accts[1], accts[2], accts[3]

@@ -743,7 +743,7 @@ sim-plot-article:	$(POLICY_VECTOR)
 # 30-day Anvil smoke sim exercising the BasketRebalanceDirector end to end:
 # the rebalancing scenario's DirectorKeeperAgent pokes the director's work
 # wheel each tick and executes its advisory efforts through the router.
-SIM_DIRECTOR	?= vrate
+SIM_DIRECTOR	?= pairs
 
 sim-run-director:
 	python -m $(SIM_PKG) --scenario rebalancing --days 30 \

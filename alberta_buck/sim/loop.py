@@ -20,7 +20,7 @@ E6 = 10 ** 6
 
 
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
-        director_impl="vrate") -> dict:
+        director_impl="pairs") -> dict:
     w3 = anvil.w3
     chain = Chain(w3, w3.eth.accounts[0])
     rng = idmod.seeded_rng(scenario.seed)

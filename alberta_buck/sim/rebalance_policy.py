@@ -385,7 +385,7 @@ class PairsPolicy:
     def __init__(self, windows_ladder: Sequence[int] = PAIR_LADDER,
                  quorum: int = 4, kappa: float = 0.5, cap: float = 0.005,
                  deadband: float = 0.015, leash: float = 0.30,
-                 leash_inner: float = 0.25, vote: str = "curv"):
+                 leash_inner: float = 0.25, vote: str = "vel"):
         self.legs = [_EmaLadder(windows_ladder) for _ in SYMS]
         self.K = len(windows_ladder)
         self.quorum = quorum
@@ -714,7 +714,7 @@ def _policies(windows: dict[str, int], kappa: float, cap: float,
               deadband: float, weights: Sequence[float],
               rho: float = 3.0, quorum: int = 4,
               pairs_kappa: float = 0.5,
-              pairs_vote: str = "curv") -> dict[str, Callable[[], object]]:
+              pairs_vote: str = "vel") -> dict[str, Callable[[], object]]:
     return {
         "hold": lambda: HoldPolicy(),
         "prop": lambda: PropPolicy(cap=cap, deadband=deadband),
@@ -732,7 +732,7 @@ def _policies(windows: dict[str, int], kappa: float, cap: float,
 # --------------------------------------------------------------------- modes
 
 def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
-                   quorum=4, pairs_kappa=0.5, pairs_vote="curv",
+                   quorum=4, pairs_kappa=0.5, pairs_vote="vel",
                    trace_sym="cbBTC", trace_policy="vrate") -> dict:
     prices = load_hist_prices()
     weights = [1.0 / len(SYMS)] * len(SYMS)
@@ -754,7 +754,7 @@ def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
 
 
 def run_synthetic(windows, kappa, cap, deadband, cost_bp, years, seeds,
-                  rho=3.0, quorum=4, pairs_kappa=0.5, pairs_vote="curv") -> dict:
+                  rho=3.0, quorum=4, pairs_kappa=0.5, pairs_vote="vel") -> dict:
     weights = [1.0 / len(SYMS)] * len(SYMS)
     per_seed: dict[str, list[dict]] = {}
     example: dict[str, dict] = {}
@@ -879,7 +879,7 @@ def _print_metrics(title: str, metrics: dict[str, dict]) -> None:
 def run(mode: str = "both", years: float = 20.0, seeds: int = 5,
         cost_bp: float = 30.0, cap_bp: float = 50.0, kappa: float = 0.08,
         rho: float = 3.0, quorum: int = 4, pairs_kappa: float = 0.5,
-        pairs_vote: str = "curv",
+        pairs_vote: str = "vel",
         deadband: float = 0.015, sweep: bool = False,
         sweep_policy: str = "factor",
         windows_override: dict[str, int] | None = None,
@@ -959,7 +959,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="pairs policy: scales that must vote the turn")
     parser.add_argument("--pairs-kappa", type=float, default=0.5)
     parser.add_argument("--pairs-vote", choices=("curv", "vel"),
-                        default="curv",
+                        default="vel",
                         help="pair turn vote: divergence decelerating (curv, "
                              "early) or gap already closing (vel, confirmed)")
     parser.add_argument("--deadband", type=float, default=0.015)

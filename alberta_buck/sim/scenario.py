@@ -112,7 +112,10 @@ def build_historical(start=None, end=None, years=5.0, ticks_per_day=1,
                 "MarketMakerWhale": 1,
                 "BootstrapDMAgent": 24,
                 "DirectMintAgent": 120,
-                "DirectMintBuckAgent": 40},
+                "DirectMintBuckAgent": 40,
+                # Advances the rebalance director's amortized signals a
+                # bounded slice per tick and executes its advisory efforts.
+                "DirectorKeeperAgent": 1},
         days=n_days,
         ticks_per_day=ticks_per_day,
         seed=seed,
