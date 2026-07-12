@@ -362,6 +362,11 @@ class _EmaLadder:
         h = self.hist[k]
         return (h[-1] - 2.0 * h[-1 - s] + h[0]) / (s * s)
 
+    def vel(self, k: int) -> float:
+        s = self.strides[k]
+        h = self.hist[k]
+        return (h[-1] - h[-1 - s]) / s
+
 
 class PairsPolicy:
     """Differential-mode multi-scale turn harvester.
@@ -380,10 +385,12 @@ class PairsPolicy:
     def __init__(self, windows_ladder: Sequence[int] = PAIR_LADDER,
                  quorum: int = 4, kappa: float = 0.5, cap: float = 0.005,
                  deadband: float = 0.015, leash: float = 0.30,
-                 leash_inner: float = 0.25):
+                 leash_inner: float = 0.25, vote: str = "curv"):
         self.legs = [_EmaLadder(windows_ladder) for _ in SYMS]
         self.K = len(windows_ladder)
         self.quorum = quorum
+        self.vote = vote          # "curv": divergence decelerating (early);
+                                  # "vel": gap already closing (confirmed)
         self.kappa = kappa
         self.cap = cap
         self.deadband = deadband
@@ -410,8 +417,11 @@ class PairsPolicy:
             g = (li.ma(k) - lj.ma(k)) - ref
             if g * d <= 0.0:                      # scale disagrees with raw
                 continue
-            a = li.accel(k) - lj.accel(k)
-            if a * math.copysign(1.0, d) < 0.0:   # divergence decelerating
+            if self.vote == "vel":                # gap already closing
+                x = li.vel(k) - lj.vel(k)
+            else:                                 # divergence decelerating
+                x = li.accel(k) - lj.accel(k)
+            if x * math.copysign(1.0, d) < 0.0:
                 votes += 1
         if votes < self.quorum:
             return 0.0
@@ -703,7 +713,8 @@ def simulate(prices: list[list[float]], policy, weights: Sequence[float],
 def _policies(windows: dict[str, int], kappa: float, cap: float,
               deadband: float, weights: Sequence[float],
               rho: float = 3.0, quorum: int = 4,
-              pairs_kappa: float = 0.5) -> dict[str, Callable[[], object]]:
+              pairs_kappa: float = 0.5,
+              pairs_vote: str = "curv") -> dict[str, Callable[[], object]]:
     return {
         "hold": lambda: HoldPolicy(),
         "prop": lambda: PropPolicy(cap=cap, deadband=deadband),
@@ -713,14 +724,15 @@ def _policies(windows: dict[str, int], kappa: float, cap: float,
         "vrate": lambda: VratePolicy(windows, weights, rho=rho, cap=cap,
                                      deadband=deadband),
         "pairs": lambda: PairsPolicy(quorum=quorum, kappa=pairs_kappa,
-                                     cap=cap, deadband=deadband),
+                                     cap=cap, deadband=deadband,
+                                     vote=pairs_vote),
     }
 
 
 # --------------------------------------------------------------------- modes
 
 def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
-                   quorum=4, pairs_kappa=0.5,
+                   quorum=4, pairs_kappa=0.5, pairs_vote="curv",
                    trace_sym="cbBTC", trace_policy="vrate") -> dict:
     prices = load_hist_prices()
     weights = [1.0 / len(SYMS)] * len(SYMS)
@@ -730,7 +742,8 @@ def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
            "showcasePolicy": trace_policy}
     for name, mk in _policies(windows, kappa, cap, deadband, weights,
                               rho=rho, quorum=quorum,
-                              pairs_kappa=pairs_kappa).items():
+                              pairs_kappa=pairs_kappa,
+                              pairs_vote=pairs_vote).items():
         r = simulate(prices, mk(), weights, cost_bp=cost_bp,
                      trace_sym=trace_sym if name == trace_policy else None)
         out["series"][name] = r["series"]
@@ -741,7 +754,7 @@ def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
 
 
 def run_synthetic(windows, kappa, cap, deadband, cost_bp, years, seeds,
-                  rho=3.0, quorum=4, pairs_kappa=0.5) -> dict:
+                  rho=3.0, quorum=4, pairs_kappa=0.5, pairs_vote="curv") -> dict:
     weights = [1.0 / len(SYMS)] * len(SYMS)
     per_seed: dict[str, list[dict]] = {}
     example: dict[str, dict] = {}
@@ -749,7 +762,8 @@ def run_synthetic(windows, kappa, cap, deadband, cost_bp, years, seeds,
         prices = synth_prices(seed=0xB0C + k, years=years)
         for name, mk in _policies(windows, kappa, cap, deadband, weights,
                                   rho=rho, quorum=quorum,
-                                  pairs_kappa=pairs_kappa).items():
+                                  pairs_kappa=pairs_kappa,
+                                  pairs_vote=pairs_vote).items():
             r = simulate(prices, mk(), weights, cost_bp=cost_bp)
             per_seed.setdefault(name, []).append(r["metrics"])
             if k == 0:
@@ -865,6 +879,7 @@ def _print_metrics(title: str, metrics: dict[str, dict]) -> None:
 def run(mode: str = "both", years: float = 20.0, seeds: int = 5,
         cost_bp: float = 30.0, cap_bp: float = 50.0, kappa: float = 0.08,
         rho: float = 3.0, quorum: int = 4, pairs_kappa: float = 0.5,
+        pairs_vote: str = "curv",
         deadband: float = 0.015, sweep: bool = False,
         sweep_policy: str = "factor",
         windows_override: dict[str, int] | None = None,
@@ -892,14 +907,16 @@ def run(mode: str = "both", years: float = 20.0, seeds: int = 5,
     if mode in ("both", "historical"):
         result["historical"] = run_historical(windows, kappa, cap, deadband,
                                               cost_bp, rho=rho, quorum=quorum,
-                                              pairs_kappa=pairs_kappa)
+                                              pairs_kappa=pairs_kappa,
+                                              pairs_vote=pairs_vote)
         _print_metrics("historical (2020-09 .. 2025-09, 6 constituents):",
                        result["historical"]["metrics"])
     if mode in ("both", "synthetic"):
         result["synthetic"] = run_synthetic(windows, kappa, cap, deadband,
                                             cost_bp, years, seeds, rho=rho,
                                             quorum=quorum,
-                                            pairs_kappa=pairs_kappa)
+                                            pairs_kappa=pairs_kappa,
+                                            pairs_vote=pairs_vote)
         _print_metrics(
             f"synthetic ({years:.0f}y x {seeds} seeds, mean):",
             result["synthetic"]["metrics"])
@@ -941,6 +958,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--quorum", type=int, default=4,
                         help="pairs policy: scales that must vote the turn")
     parser.add_argument("--pairs-kappa", type=float, default=0.5)
+    parser.add_argument("--pairs-vote", choices=("curv", "vel"),
+                        default="curv",
+                        help="pair turn vote: divergence decelerating (curv, "
+                             "early) or gap already closing (vel, confirmed)")
     parser.add_argument("--deadband", type=float, default=0.015)
     parser.add_argument("--sweep", action="store_true",
                         help="coordinate window sweep on synthetic paths")
@@ -967,6 +988,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run(mode=args.mode, years=args.years, seeds=args.seeds,
         cost_bp=args.cost_bp, cap_bp=args.cap_bp, kappa=args.kappa,
         rho=args.rho, quorum=args.quorum, pairs_kappa=args.pairs_kappa,
+        pairs_vote=args.pairs_vote,
         deadband=args.deadband, sweep=args.sweep,
         sweep_policy=args.sweep_policy,
         windows_override=overrides, out=Path(args.out))

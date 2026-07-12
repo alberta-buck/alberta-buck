@@ -147,6 +147,20 @@ it. Quorum scan: q3 max premium (+508, turnover 1.39); q5 min turnover
 (0.65, +460); **q4 the knee**. factor remains the trend-regime pick; pairs
 the reverting-regime pick.
 
+**Vote mode** (`--pairs-vote`, one enum knob — Perry's spec vs the
+implementation's default, measured at quorum 4):
+
+| vote | synth premium | turnover | capture90 | hist CAGR |
+|---|---|---|---|---|
+| `curv` (divergence *decelerating* — early, at the top) | +496 | 0.96 | +201 | 17.9% |
+| `vel` (gap *already closing* — confirmed turn; the spec) | +421 | 0.60 | +270 | **18.4%** |
+
+`curv` buys ~75bp/yr more gross harvest with 60% more turnover and worse
+trend bleed; `vel` trades later and less, with better per-trade capture and
+prop-level trend robustness — net premiums cross at ~235bp/leg costs.
+`vel` is the better-balanced deployment default; `curv` the aggressive
+setting for cheap-trading, reverting conditions.
+
 ## 3. Window selection
 
 `derive_windows()`: a constituent's share-excursion timescale is its M2 lag
