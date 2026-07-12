@@ -18,8 +18,8 @@ from typing import Sequence
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-DATA = REPO / "test" / "vectors" / "eq-eq-debtors.json"
-OUT = REPO / "images" / "equilibrium-debtors.png"
+DATA = REPO / "test" / "vectors" / "eq-eq-realistic.json"
+OUT = REPO / "images" / "equilibrium-realistic.png"
 
 THETA_COLOR = {0.0: "#2a78d6", 0.25: "#1baf7a", 1.0: "#eda100", 3.0: "#e34948"}
 THETA_MAX = 3.0

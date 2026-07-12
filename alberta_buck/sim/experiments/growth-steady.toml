@@ -1,0 +1,37 @@
+# STEADY GROWTH: the BUCK ecosystem compounds ~25%/yr.  Debtor and saver
+# ceilings arrive on exponential schedules (n0 = 25% active at t0), savers
+# lagging debtors slightly (20%/yr) -- observe stability under sustained
+# organic load.  Neighbor attraction on: each retired mortgage speeds the
+# community clock 5%.
+#
+#   make sim-experiment-growth-steady
+
+name = "eq-growth-steady"
+
+[scenario]
+years = 3.0
+ticks_per_day = 12
+seed = 0xA1BC
+
+[scenario.agents]
+MarketMakerWhale = 1
+AnonymousArbAgent = 3
+TokenAccumulatorAgent = 6
+BootstrapDMAgent = 24
+SaverAgent = 10
+PidKeeperAgent = 1
+DirectMintAgent = 24
+DirectMintBuckAgent = 8
+BuckCreditDebtorAgent = 24
+
+[agents.BuckCreditDebtorAgent]
+arrive_mode = "steady"
+arrive_n0 = 0.25
+arrive_rate = 0.25
+attract_gain = 0.05
+theta = [0.0, 3.0]
+
+[agents.SaverAgent]
+arrive_mode = "steady"
+arrive_n0 = 0.30
+arrive_rate = 0.20

@@ -1,0 +1,39 @@
+# FAST GROWTH: an adoption S-curve peaking at ~200%/yr relative growth at
+# mid-run before tapering -- the stress case: a wave of debtors arrives in
+# a compressed window while savers lag on a gentler curve (peak 100%/yr,
+# later midpoint).  Observe whether the PID + funding gate + saver demand
+# absorb the issuance wave.
+#
+#   make sim-experiment-growth-scurve
+
+name = "eq-growth-scurve"
+
+[scenario]
+years = 3.0
+ticks_per_day = 12
+seed = 0xA1BC
+
+[scenario.agents]
+MarketMakerWhale = 1
+AnonymousArbAgent = 3
+TokenAccumulatorAgent = 6
+BootstrapDMAgent = 24
+SaverAgent = 10
+PidKeeperAgent = 1
+DirectMintAgent = 24
+DirectMintBuckAgent = 8
+BuckCreditDebtorAgent = 32
+
+[agents.BuckCreditDebtorAgent]
+arrive_mode = "scurve"
+arrive_n0 = 0.10
+arrive_peak = 2.0          # ~200%/yr relative growth at the midpoint
+arrive_mid = 0.45
+attract_gain = 0.05
+theta = [0.0, 3.0]
+
+[agents.SaverAgent]
+arrive_mode = "scurve"
+arrive_n0 = 0.20
+arrive_peak = 1.0
+arrive_mid = 0.60          # savers lag the debtor wave

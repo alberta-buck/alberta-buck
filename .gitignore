@@ -61,3 +61,7 @@ lcov.info
 *.log
 foundry.lock
 /raw-materials-price/
+
+# window-stamped historical CSVs are generated caches
+alberta_buck/sim/prices/hist-*-*d.csv
+alberta_buck/sim/prices/hist-manifest-*.json

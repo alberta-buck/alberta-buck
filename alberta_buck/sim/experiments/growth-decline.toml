@@ -1,0 +1,32 @@
+# DECLINE: the reducing regime.  Debtor arrivals cease (small fixed cohort),
+# savers DEPART on an exponential schedule (-35%/yr), liquidating their BUCK
+# on the way out -- observe the loop unwinding: does bvib hold as private
+# demand drains and the Jubilee/PID absorb the contraction?
+#
+#   make sim-experiment-growth-decline
+
+name = "eq-growth-decline"
+
+[scenario]
+years = 3.0
+ticks_per_day = 12
+seed = 0xA1BC
+
+[scenario.agents]
+MarketMakerWhale = 1
+AnonymousArbAgent = 3
+TokenAccumulatorAgent = 6
+BootstrapDMAgent = 24
+SaverAgent = 10
+PidKeeperAgent = 1
+DirectMintAgent = 24
+DirectMintBuckAgent = 8
+BuckCreditDebtorAgent = 8
+
+[agents.BuckCreditDebtorAgent]
+arrive_frac = [0.0, 0.1]   # small early cohort, no further growth
+theta = [0.0, 3.0]
+
+[agents.SaverAgent]
+arrive_mode = "decline"
+arrive_rate = 0.35

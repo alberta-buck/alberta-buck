@@ -154,7 +154,7 @@ def build_equilibrium(start=None, end=None, years=None, ticks_per_day=48,
     # know about these equilibrium agents).
     eqm.FatCreditBorrowerAgent._regime_counter = 0
     eqm.SaverAgent._regime_counter = 0
-    eqm.OptimalControlDebtorAgent._seq = 0
+    eqm.BuckCreditDebtorAgent._arrival_seq = 0
     from alberta_buck.sim.gen_historical import gen
     files, n_days, _s, _e = gen(start=start, end=end,
                                 years=1.5 if years is None else years)

@@ -93,12 +93,16 @@ def gen(start=None, end=None, years=5.0, out_dir=CSV_DIR):
     s, e = resolve_window(start, end, years, data_start, data_end)
     dates = [s + timedelta(days=k) for k in range((e - s).days + 1)]
 
-    # Manifest cache: when the resolved window matches the last generation
-    # and every CSV exists, skip rewriting.  Besides speed, this keeps
-    # PARALLEL sweep runs (which all call gen() with the same window) from
-    # racing writes on the shared prices dir.
-    manifest = out_dir / "hist-manifest.json"
-    want_files = [fname for _, fname, _, _ in BINDINGS]
+    # WINDOW-STAMPED outputs: every distinct window gets its own file set
+    # (hist-<sym>-<end>-<Nd>.csv) and manifest, so scenarios with different
+    # horizons (1y historical, 2y realistic, 3y growth, 5y canonical) never
+    # clobber each other or the COMMITTED base-name CSVs (hist-<sym>.csv --
+    # the canonical 5-year snapshot the rebalance-policy model reads; those
+    # are only ever rewritten explicitly by a human running this module).
+    tag = f"{e.isoformat()}-{len(dates)}d"
+    want_files = [fname.replace(".csv", f"-{tag}.csv")
+                  for _, fname, _, _ in BINDINGS]
+    manifest = out_dir / f"hist-manifest-{tag}.json"
     if manifest.exists():
         try:
             have = json.loads(manifest.read_text())
@@ -119,7 +123,7 @@ def gen(start=None, end=None, years=5.0, out_dir=CSV_DIR):
 
     out_dir.mkdir(parents=True, exist_ok=True)
     files = []
-    for sym, fname, metric, src in BINDINGS:
+    for (sym, base, metric, src), fname in zip(BINDINGS, want_files):
         with (out_dir / fname).open("w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["day", "close_usd_micro"])
@@ -140,9 +144,19 @@ def main(argv=None):
     ap.add_argument("--start", default=None, help="ISO date (default: end - years)")
     ap.add_argument("--end", default=None, help="ISO date (default: last data month)")
     ap.add_argument("--years", type=float, default=5.0)
+    ap.add_argument("--base", action="store_true",
+                    help="ALSO rewrite the committed base-name CSVs "
+                         "(hist-<sym>.csv) to this window -- the canonical "
+                         "snapshot; do this deliberately and commit it")
     a = ap.parse_args(argv)
     files, n, s, e = gen(a.start, a.end, a.years)
     print(f"wrote {len(files)} CSVs, {n} days, {s} .. {e}")
+    if a.base:
+        import shutil
+        from alberta_buck.sim.prices import CSV_DIR as _dir
+        for (sym, base, _m, _s), fname in zip(BINDINGS, files):
+            shutil.copyfile(_dir / fname, _dir / base)
+            print(f"  canonical: {fname} -> {base}")
 
 
 if __name__ == "__main__":

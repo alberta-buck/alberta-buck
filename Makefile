@@ -543,8 +543,8 @@ SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | legacy (Buc
 #
 #   e.g.  make nix-sim-rebalancing SIM_BACKEND=pyrevm SIM_DIRECTOR=vrate
 #         SIM_BACKEND=pyrevm make nix-sim-historical SIM_YEARS=5
-SIM_BACKEND	?= anvil         # anvil (default) | pyrevm (in-process, fast)
-SIM_DIRECTOR	?= pairs        # pairs (default) | vrate
+SIM_BACKEND	?= pyrevm        # pyrevm (default: in-process, fast) | anvil
+SIM_DIRECTOR	?= pairs         # pairs (default) | vrate
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
@@ -902,16 +902,19 @@ sim-experiment-%:	sim-build
 	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
 		--experiment alberta_buck/sim/experiments/$*.toml $(EQ_SETS)
 
-# Optimal-control debtors: theta-ladder mortgage debtors deploying BUCK
-# credit against the interest drain, in the full equilibrium world.
-# pyrevm recommended (a 2y run is ~15 min in-process vs hours on anvil).
+# The realistic observation world: honest BuckCreditDebtorAgents (real
+# premium credit + real funding gate) as the issuance channel, with
+# savers/investors/arbs/whale/PID; growth regimes via arrive_mode knobs
+# (see experiments/growth-*.toml).  pyrevm recommended.
 #
-#   make nix-sim-debtors SIM_BACKEND=pyrevm
+#   make sim-debtors                 # run + plot the realistic world
 sim-run-debtors:	sim-build
 	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
-		--experiment alberta_buck/sim/experiments/debtors.toml
+		--experiment alberta_buck/sim/experiments/realistic.toml
 sim-plot-debtors:
-	python -m alberta_buck.sim.plot_octl
+	python -m alberta_buck.sim.plot_octl \
+		--data test/vectors/eq-eq-realistic.json \
+		--out images/equilibrium-realistic.png
 sim-debtors:	sim-run-debtors sim-plot-debtors
 
 sim-sweep:	sim-build

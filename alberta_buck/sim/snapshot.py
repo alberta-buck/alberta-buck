@@ -338,9 +338,12 @@ class Snapshotter:
             "fat_throttled": ctr.get("fatThrottled", 0),   # cum throttle hits
             "fat_released": ctr.get("fatReleased", 0),     # cum reserve released
             "octl": octl,                                  # per-debtor states
-            "octl_deploys": ctr.get("octlDeploys", 0),
-            "octl_deployed": ctr.get("octlDeployed", 0),
-            "octl_retired": ctr.get("octlRetired", 0),
+            "bcd_deploys": ctr.get("bcdDeploys", 0),
+            "bcd_throttled": ctr.get("bcdThrottled", 0),
+            "bcd_saved": ctr.get("bcdSaved", 0),
+            "growth_arrivals": ctr.get("growthArrivals", 0),
+            "growth_departures": ctr.get("growthDepartures", 0),
+            "neighbors_retired": ctr.get("neighborsRetired", 0),
             "iv_events": ctr.get("ivEvents", 0),           # cum interventions
             "supply": int(d.buck.functions.totalSupply().call()),
             "directTrades": ctr["directTrades"],
