@@ -1,0 +1,52 @@
+# The discount-arb A/B world: Perry's test case -- how does buying and
+# HOLDING discount BUCKs (awaiting the K-quench recovery) affect the
+# market, versus buying and PARKING them in the BuckBasket (out of
+# circulation, into TOKEN/BUCK pool inventory, harvesting rebalancing)?
+#
+# Three honest debtors provide the inflation pressure (issuance into the
+# floating pool); the A/B toggles which time-arb absorbs the discounts:
+#
+#   baseline:   make nix-venv-sim-experiment-backdrop-ab
+#   holders:    ... EQ_SETS="--set scenario.agents.DiscountBuckArbAgent=2"
+#   basketeers: ... EQ_SETS="--set scenario.agents.DiscountBasketArbAgent=2"
+#
+# Compare: buckUsd sag depth + recovery speed, bvib, K trajectory, and
+# each arb's inventory/PnL (frames: arb2[], dba_*/dbb_* counters).
+
+name = "eq-backdrop-ab"
+
+[scenario]
+years = 1.0
+ticks_per_day = 2
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+MarketMakerWhale = 1
+AnonymousArbAgent = 1
+BootstrapDMAgent = 12
+SaverAgent = 1
+PidKeeperAgent = 1
+DirectMintAgent = 4
+DirectMintBuckAgent = 2
+BuckCreditDebtorAgent = 3
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.5, 2.0]
+apr = 0.055
+mortgage_k = [700, 1000]
+income_k = [220, 300]
+face_k = [800, 1100]
+premium_bp = 100
+save_rate = 0.5
+arrive_frac = [0.0, 0.1]
+
+[agents.DiscountBuckArbAgent]
+endow_k = 500
+buy_disc = 0.02
+sell_prem = 0.0
+
+[agents.DiscountBasketArbAgent]
+endow_k = 500
+buy_disc = 0.02
+sell_prem = 0.0

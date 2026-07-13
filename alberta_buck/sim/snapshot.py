@@ -262,6 +262,14 @@ class Snapshotter:
                 st = ag.octl_state(d)
                 if st:
                     octl.append(st)
+        # Discount-BUCK time arbs (holder/basketeer A/B): per-agent
+        # inventory so PnL and parked positions chart per frame.
+        arbs2 = []
+        for ag in agents:
+            if hasattr(ag, "arb_state"):
+                st = ag.arb_state(d)
+                if st:
+                    arbs2.append(st)
         # Regime knobs (mean over each class present) -- track how the
         # periodic regime shocks move the population's primary knobs.  Read
         # off the live agent objects; guarded so non-equilibrium runs are 0.
@@ -338,6 +346,17 @@ class Snapshotter:
             "fat_throttled": ctr.get("fatThrottled", 0),   # cum throttle hits
             "fat_released": ctr.get("fatReleased", 0),     # cum reserve released
             "octl": octl,                                  # per-debtor states
+            "arb2": arbs2,                                 # discount-arb states
+            "dba_bought": ctr.get("dbaBought", 0),
+            "dba_sold": ctr.get("dbaSold", 0),
+            "dba_spent": ctr.get("dbaSpent", 0),
+            "dba_recv": ctr.get("dbaRecv", 0),
+            "dbb_bought": ctr.get("dbbBought", 0),
+            "dbb_sold": ctr.get("dbbSold", 0),
+            "dbb_spent": ctr.get("dbbSpent", 0),
+            "dbb_recv": ctr.get("dbbRecv", 0),
+            "dbb_parked": ctr.get("dbbParked", 0),
+            "dbb_harvests": ctr.get("dbbHarvests", 0),
             "bcd_deploys": ctr.get("bcdDeploys", 0),
             "bcd_throttled": ctr.get("bcdThrottled", 0),
             "bcd_saved": ctr.get("bcdSaved", 0),

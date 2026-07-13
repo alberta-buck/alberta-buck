@@ -1308,3 +1308,163 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                             ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + got
                     except Exception as e:
                         ctr["bcd_buy_err"] = repr(e)[:200]
+
+
+@_register
+class DiscountBuckArbAgent(_ProxyAgent):
+    """The time-for-profit BUCK arb (HOLDER variant): buys BUCK below USD
+    par and simply holds.  Every issued BUCK has a forced future buyer --
+    the issuer's own redemption, or the Jubilee fund over ~50 years --
+    and the K-controller quenches inflation, so below-par BUCK is a
+    claim bought at a discount to its recovery.  Sells at/above par.
+    Both legs are impact-capped (a bite never pushes the pool past the
+    band that justified it: x <= r*(1-sqrt(p)) buying, r*(sqrt(p)-1)
+    selling), so the arb stabilizes without ever overshooting.
+
+    Telemetry (ctr, per class): dbaBought / dbaSold (6-dec BUCK),
+    dbaSpent / dbaRecv (6-dec USDC) -- PnL and inventory fall out.
+    """
+
+    CTR = "dba"
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        m6 = 1_000 * 10 ** 6
+        self.endow = int(_draw(scenario, cls, "endow_k", r, 500) * m6)
+        self.buy_disc = _draw(scenario, cls, "buy_disc", r, 0.02)
+        self.sell_prem = _draw(scenario, cls, "sell_prem", r, 0.0)
+        self._bind_proxy(d)
+        d.chain.send(d.usdc.functions.mint(self.proxy.address, self.endow))
+
+    def _spot_ub(self, d):
+        r_in = d.chain.balance_of(d.usdc, d.pool_ub)
+        r_out = d.chain.balance_of(d.buck, d.pool_ub)
+        return ((r_in / r_out) if r_out else 1.0), r_in, r_out
+
+    def _held(self, d) -> int:
+        s = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        return max(0, s)
+
+    def _buy_leg(self, d, day, ctr) -> int:
+        spot, _, r_out = self._spot_ub(d)
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        if spot > 1.0 - self.buy_disc or cash < 10 ** 6:
+            return 0
+        cap = int(r_out * (1.0 - math.sqrt(spot)))
+        want = min(cap, int(cash / max(spot, 1e-9)))
+        if want < 10 ** 6:
+            return 0
+        pre = cash
+        got = self._buy_buck(d, d.pool_ub, d.usdc, want, d.fee_ub)
+        spent = pre - d.chain.balance_of(d.usdc, self.proxy.address)
+        k = self.CTR
+        ctr[k + "Bought"] = ctr.get(k + "Bought", 0) + got
+        ctr[k + "Spent"] = ctr.get(k + "Spent", 0) + spent
+        return got
+
+    def _sell_leg(self, d, day, ctr, amount=None) -> int:
+        spot, _, r_out = self._spot_ub(d)
+        held = self._held(d)
+        if spot < 1.0 + self.sell_prem or held < 10 ** 6:
+            return 0
+        cap = int(r_out * (math.sqrt(spot) - 1.0)) if spot > 1.0 else held
+        amt = min(held, cap if cap > 0 else held)
+        if amount is not None:
+            amt = min(amt, amount)
+        if amt < 10 ** 6:
+            return 0
+        pre = d.chain.balance_of(d.usdc, self.proxy.address)
+        sold = self._sell_capped(d, d.pool_ub, amt)
+        recv = d.chain.balance_of(d.usdc, self.proxy.address) - pre
+        k = self.CTR
+        ctr[k + "Sold"] = ctr.get(k + "Sold", 0) + sold
+        ctr[k + "Recv"] = ctr.get(k + "Recv", 0) + recv
+        return sold
+
+    def arb_state(self, d) -> dict | None:
+        """Per-frame inventory for the snapshot: cash + BUCK held (par)."""
+        if self.proxy is None:
+            return None
+        return {"cls": self.CTR, "idx": self.idx,
+                "cash": d.chain.balance_of(d.usdc, self.proxy.address),
+                "held": self._held(d), "endow": self.endow,
+                "receipts": len(getattr(self, "_receipts", []))}
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None:
+            return
+        if not self._buy_leg(d, day, ctr):
+            self._sell_leg(d, day, ctr)
+
+
+@_register
+class DiscountBasketArbAgent(DiscountBuckArbAgent):
+    """BASKETEER variant: buys discount BUCK like the holder, then PARKS
+    it -- swaps BUCK -> TOKEN through the TOKEN/BUCK basket pools (the
+    BUCK leaves circulation into pool inventory, lifting the BUCK/TOKEN
+    ratios) and deposits the TOKEN into the BuckBasket for an LP receipt
+    (rebalancing revenue on top of the recovery).  Harvests when BUCK
+    trades at/above par: redeem the oldest receipt and sell the returned
+    BUCK into the premium.
+
+    Extra telemetry: dbbParked (BUCK swapped into basket pools),
+    dbbReceipts (open LP positions).
+    """
+
+    CTR = "dbb"
+
+    def setup(self, d, scenario, rng) -> None:
+        super().setup(d, scenario, rng)
+        self._receipts: list[int] = []
+
+    def _park_leg(self, d, day, ctr) -> None:
+        held = self._held(d)
+        if held < 25_000 * 10 ** 6:
+            return
+        i = (day + self.idx) % len(d.tokens)
+        tc = d.tokens[i]
+        pool = d.pool_buck[i]
+        pre_tok = d.chain.balance_of(tc, self.proxy.address)
+        # BUCK -> TOKEN in the basket pool: the parked BUCK becomes pool
+        # inventory; cap the bite at ~5% of the pool's BUCK side.
+        r_buck = d.chain.balance_of(d.buck, pool)
+        amt = min(held, max(10 ** 6, r_buck // 20))
+        self._swap_via_simlp(d, pool, d.buck, amt, self.proxy.address)
+        got_tok = d.chain.balance_of(tc, self.proxy.address) - pre_tok
+        if got_tok <= 0:
+            return
+        self._proxy_exec(d, tc.address, tc.encode_abi(
+            "approve(address,uint256)", args=[d.basket.address, got_tok]))
+        rcpt = self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+            "depositToken(address,uint256,uint256)",
+            args=[tc.address, got_tok, 0]))
+        for log in rcpt["logs"]:
+            if log["topics"][0] == d.deposited_topic:
+                self._receipts.append(int.from_bytes(log["topics"][2], "big"))
+                break
+        ctr["dbbParked"] = ctr.get("dbbParked", 0) + amt
+        ctr["dbbReceipts"] = ctr.get("dbbReceipts", 0) + 1
+
+    def _harvest_leg(self, d, day, ctr) -> None:
+        spot, _, _ = self._spot_ub(d)
+        if spot < 1.0 + self.sell_prem or not self._receipts:
+            return
+        rid = self._receipts.pop(0)
+        try:
+            self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+                "redeem(uint256,uint256)", args=[rid, 10_000]))
+            ctr["dbbHarvests"] = ctr.get("dbbHarvests", 0) + 1
+        except Exception as e:
+            self._receipts.append(rid)
+            ctr["dbb_err"] = repr(e)[:200]
+            return
+        self._sell_leg(d, day, ctr)
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None:
+            return
+        if not self._buy_leg(d, day, ctr):
+            self._harvest_leg(d, day, ctr)
+        self._park_leg(d, day, ctr)

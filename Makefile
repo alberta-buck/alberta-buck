@@ -929,6 +929,25 @@ sim-isolation:	sim-build
 		--experiment alberta_buck/sim/experiments/isolation.toml
 	python -m pytest alberta_buck/test/test_debtor_ledger.py -v -s
 
+# The LIVE simulation server: pyrevm worlds (one per client session) with
+# WS /s/<sid>/{frames,control,rpc} on SIM_SERVER_PORT and a viem-ready
+# HTTP JSON-RPC on SIM_SERVER_PORT+1.  Provision + start:
+#
+#   make nix-venv-sim-server              # the ~/.screenrc BuckSim screen
+#   SIM_SERVER_EXPERIMENT=alberta_buck/sim/experiments/backdrop-ab.toml \
+#       make nix-venv-sim-server          # serve a different world
+#
+# NB: 8797/8798 -- bucky.kundert.ca's MLX bot owns 8787.
+SIM_SERVER_PORT       ?= 8797
+SIM_SERVER_EXPERIMENT ?= alberta_buck/sim/experiments/backdrop.toml
+SIM_SERVER_PACE       ?= 0
+
+.PHONY: sim-server
+sim-server:	sim-build
+	python -m alberta_buck.sim.server \
+		--experiment $(SIM_SERVER_EXPERIMENT) \
+		--port $(SIM_SERVER_PORT) --pace $(SIM_SERVER_PACE)
+
 sim-sweep:	sim-build
 	python -m alberta_buck.sim.sweep $(EQ_EXPERIMENTS) \
 		$(if $(EQ_SEEDS),--seeds $(EQ_SEEDS)) --jobs $(EQ_JOBS) \
