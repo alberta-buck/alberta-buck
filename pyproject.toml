@@ -18,6 +18,7 @@ dependencies = [
     "python-dotenv	>=1.0,<2",
     "py_ecc		>=8.0",
     "pyrevm		>=0.3",     # in-process EVM backend for alberta_buck.sim
+    "websockets		>=12",      # alberta_buck.sim.server frame/control/rpc
 ]
 
 [project.optional-dependencies]
