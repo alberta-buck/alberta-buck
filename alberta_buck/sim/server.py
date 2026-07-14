@@ -43,6 +43,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from queue import Queue, Empty
 
+from websockets.exceptions import ConnectionClosed
+
 from alberta_buck.sim import experiment as expmod
 from alberta_buck.sim.loop import run
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
@@ -241,6 +243,8 @@ class SimServer:
             try:
                 while True:
                     await ws.send(await q.get())
+            except ConnectionClosed:
+                pass                        # browser navigated away: normal
             finally:
                 s.subscribers.discard(q)
 
