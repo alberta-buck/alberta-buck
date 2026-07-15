@@ -37,13 +37,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from queue import Queue, Empty
 
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidMessage
 
 from alberta_buck.sim import experiment as expmod
 from alberta_buck.sim.loop import run
@@ -250,6 +251,7 @@ class SimServer:
 
     async def serve(self, host, port):
         import websockets
+        logging.getLogger("websockets.server").addFilter(_HandshakeProbes())
         self.loop = asyncio.get_running_loop()
         httpd = ThreadingHTTPServer((host, port + 1), _make_rpc_handler(self))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -259,6 +261,17 @@ class SimServer:
                   f"/s/<sid>/rpc (POST)")
             while True:
                 await asyncio.sleep(3600)
+
+
+class _HandshakeProbes(logging.Filter):
+    """Drop the traceback websockets logs when a connection closes before
+    sending a valid HTTP request: port probes (nc -z), scanners and health
+    checks all connect and hang up without a byte.  Anything that got far
+    enough to be a websocket still logs normally."""
+
+    def filter(self, record):
+        exc = record.exc_info[1] if record.exc_info else None
+        return not isinstance(exc, InvalidMessage)
 
 
 def _make_rpc_handler(server: SimServer):
