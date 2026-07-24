@@ -1,0 +1,43 @@
+# The BACKDROP world: the smallest cast that holds BUCK equilibrium at
+# interactive speed -- the swarm served live by alberta_buck.sim.server
+# (Perry's solution-buck-k-sim slide, backed by real contracts on
+# pyrevm).  Findings from the JS farmsim minimal-cast matrix: whale +
+# ONE arb + PID are load-bearing; a recurring demand-side investor
+# keeps the controller K-neutral (without it a sole-issuer world
+# starves K down); one honest debtor exercises the issuance channel.
+#
+# years = 10: a served session must outlive any demo audience (a
+# finished world sends {"done": true} and the deck falls back to its
+# built-in model).  The throughput probe overrides it down:
+#
+#   time make nix-venv-sim-experiment-backdrop \
+#       EQ_SETS="--set scenario.years=0.25"
+
+name = "eq-backdrop"
+
+[scenario]
+years = 10.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+MarketMakerWhale = 1
+AnonymousArbAgent = 1
+BootstrapDMAgent = 12
+SaverAgent = 1
+PidKeeperAgent = 1
+DirectMintAgent = 4
+DirectMintBuckAgent = 2
+BuckCreditDebtorAgent = 1
+
+[agents.BuckCreditDebtorAgent]
+theta = 1.0
+apr = 0.055
+mortgage_k = 800
+income_k = 260
+face_k = 900
+premium_bp = 100
+save_rate = 0.5
+arrive_frac = 0.0
+pattern = "salary"

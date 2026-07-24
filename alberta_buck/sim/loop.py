@@ -10,6 +10,7 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
+import alberta_buck.sim.director_agent  # noqa: F401  triggers @_register
 from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )
@@ -18,7 +19,12 @@ from alberta_buck.sim.snapshot import Snapshotter
 E6 = 10 ** 6
 
 
-def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata") -> dict:
+def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
+        director_impl="pairs", on_day_start=None, on_frame=None) -> dict:
+    """on_day_start(day, d, agents, ctr): a mutation window before the
+    day's ticks (the sim server applies population/knob controls here).
+    on_frame(frame): called with each just-captured snapshot frame (the
+    sim server streams these to its clients)."""
     w3 = anvil.w3
     chain = Chain(w3, w3.eth.accounts[0])
     rng = idmod.seeded_rng(scenario.seed)
@@ -28,7 +34,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata") -> 
         print(f"[sim] deploying '{scenario.name}' with {basket_impl} basket "
               f"({scenario.days}d x {scenario.ticks_per_day} ticks)...",
               flush=True)
-    d = deploy(chain, anvil, scenario, rng, basket_impl=basket_impl)
+    d = deploy(chain, anvil, scenario, rng, basket_impl=basket_impl,
+               director_impl=director_impl)
 
     # --- build + register the agent population ----------------------- #
     # Reset per-class counters defensively so back-to-back sim runs in
@@ -107,6 +114,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata") -> 
         # this day is already visible in refUsd / the whale's snap below.
         if iv is not None:
             iv.apply_due(day)
+        if on_day_start is not None:
+            on_day_start(day, d, agents, ctr)
         # Current day + reference USD prices, for the agents' realized-return
         # accounting (deposit/redeem valuation) and the throughput meter.
         ctr["day"] = day
@@ -135,6 +144,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata") -> 
         except Exception:
             pass
         snap.capture(day, ctr, agents, init_val, reb_init, dm_init)
+        if on_frame is not None:
+            on_frame(snap.frames[-1])
         # Incremental checkpoint: flush the vector periodically so a long run
         # killed mid-flight still yields usable partial data (and can be
         # plotted).  Cheap relative to a day's on-chain work; final write below

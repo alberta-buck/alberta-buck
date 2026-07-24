@@ -176,4 +176,7 @@ def test_lifecycle_plot():
     # Basic sanity assertions.
     assert max(pool_usdc) > 10_000, "Pool USDC should exceed initial deposit after 12 swaps"
     assert min(v for v in credit_val if v > 0) < 10_000, "Credit should have depreciated"
-    assert jubilee[-1] > 0, "Jubilee should have accrued"
+    # The fund accrues over the hold, then the burn REBATES it as Jubilee
+    # relief on the redeemed coverage -- so assert it accrued at some point;
+    # the final balance may be zero (fully consumed by the rebate).
+    assert max(jubilee) > 0, "Jubilee should have accrued"

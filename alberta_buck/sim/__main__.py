@@ -16,6 +16,12 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="alberta_buck.sim")
     ap.add_argument("--scenario", default="routing",
                     choices=sorted(SCENARIOS) + ["historical", "equilibrium"])
+    ap.add_argument("--backend", default="pyrevm", choices=["anvil", "pyrevm"],
+                    help="EVM backend: in-process pyrevm (default; ~1000x "
+                         "faster, see pyrevm_backend) or the anvil subprocess "
+                         "(RPC-faithful; needs anvil on PATH -- fork tests)")
+    ap.add_argument("--director", default="pairs", choices=["vrate", "pairs"],
+                    help="rebalance-director signal engine (prorata only)")
     ap.add_argument("--basket", default=None, choices=["legacy", "prorata"],
                     help="basket implementation: BuckBasketProRata (prorata, "
                          "default) or BuckBasket (legacy)")
@@ -88,8 +94,13 @@ def main(argv=None) -> int:
     if a.day_step is not None:
         sc.day_step = a.day_step
 
-    with Anvil(port=a.port) as anvil:
-        summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl)
+    if a.backend == "pyrevm":
+        from alberta_buck.sim.pyrevm_backend import PyrevmAnvil as Backend
+    else:
+        Backend = Anvil
+    with Backend(port=a.port) as anvil:
+        summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl,
+                      director_impl=a.director)
     ok = summary["cycle_trades"] > 0 and summary["all_eoa_verified"]
     return 0 if ok else 1
 

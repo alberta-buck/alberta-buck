@@ -201,11 +201,20 @@ class Web3Session:
                        block: int) -> str:
         """Replay via eth_call at the post-block state to extract the revert
         reason -- anvil returns the Solidity require message in the call
-        exception."""
+        exception.  Journal the BARE reason ("SPL", "BUCK: ..."), the
+        schema's documented form (core/vectors/journal-sample.jsonl) and
+        what the JS session extracts -- not web3's exception repr."""
         try:
             fn.call({"from": from_addr, "gas": gas, "value": value},
                     block_identifier=block)
         except Exception as e:
+            msg = getattr(e, "message", None)
+            if not isinstance(msg, str) and e.args and isinstance(e.args[0], str):
+                msg = e.args[0]
+            if isinstance(msg, str):
+                if msg.startswith("execution reverted: "):
+                    msg = msg[len("execution reverted: "):]
+                return msg[:400]
             return str(e)[:400]
         return ""
 
@@ -249,7 +258,8 @@ class Web3Session:
     # -- deploy -------------------------------------------------------- #
 
     def deploy(self, name: str, *args, sol_file: str | None = None,
-               bytecode: str | None = None, abi: list | None = None):
+               bytecode: str | None = None, abi: list | None = None,
+               tag: str | None = None):
         if abi is None or bytecode is None:
             abi, bytecode = load_artifact(name, sol_file)
         c = self.w3.eth.contract(abi=abi, bytecode=bytecode)
@@ -259,9 +269,11 @@ class Web3Session:
         rcpt = self.w3.eth.wait_for_transaction_receipt(h)
         self.clear_balance_cache()
         ok = rcpt["status"] == 1
+        # `tag` labels the INSTANCE (the JS session's {name} option is the
+        # same seam); the default remains the contract name.
         self._journal_op("deploy", "constructor", self.deployer, Expect.OK,
                          ok, rcpt, "" if ok else "deploy reverted",
-                         tag=f"deploy:{name}")
+                         tag=tag or f"deploy:{name}")
         if not ok:
             raise RuntimeError(f"deploy {name} reverted")
         return self.w3.eth.contract(address=rcpt["contractAddress"], abi=abi)

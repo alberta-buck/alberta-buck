@@ -106,6 +106,100 @@ def _agent_rng(seed: int, class_name: str, idx: int) -> random.Random:
                        "big"))
 
 
+
+# -- ecosystem growth: arrival / departure schedules ---------------------- #
+#
+# "Scaling up" the BUCK ecosystem: a class's TOML count is its population
+# CEILING; a per-class growth regime decides WHEN each ordinal arrives (or,
+# for decline, departs).  Curves are exact and deterministic -- the ordinal-s
+# agent activates on the first day the target active count reaches s+1 --
+# plus an ENDOGENOUS neighbor-attraction term: every fully retired mortgage
+# speeds the community clock (pending arrivals check a warped day), so
+# success recruits.  Per-class knobs (all [agents.<Class>] overridable):
+#
+#   arrive_mode  = "immediate" (default) | "steady" | "scurve" | "decline"
+#   arrive_n0    = fraction of the ceiling active at t0        (0.25)
+#   arrive_rate  = steady/decline annual rate                  (0.25 = 25%/yr)
+#   arrive_peak  = scurve peak RELATIVE growth, per year       (2.0 = 200%/yr)
+#   arrive_mid   = scurve midpoint, fraction of horizon        (0.5)
+#   attract_gain = clock speed-up per retired neighbor         (0.05)
+
+def _growth_target(mode: str, t: float, n0: float, rate: float,
+                   peak: float, mid: float, years: float) -> float:
+    """Target ACTIVE fraction of the class ceiling at horizon-fraction t."""
+    if mode == "steady":
+        return min(1.0, n0 * math.exp(rate * years * t))
+    if mode == "scurve":
+        k = 2.0 * peak * years          # peak relative growth k/2 per t-unit
+        a = (1.0 - n0) / max(n0, 1e-9)
+        return 1.0 / (1.0 + a * math.exp(-k * (t - mid)))
+    if mode == "decline":
+        return max(0.0, math.exp(-rate * years * t))
+    return 1.0                          # immediate
+
+
+def _growth_params(scenario, cls: str) -> tuple:
+    mode = _spec(scenario, cls, "arrive_mode", "immediate")
+    n0 = float(_spec(scenario, cls, "arrive_n0", 0.25))
+    rate = float(_spec(scenario, cls, "arrive_rate", 0.25))
+    peak = float(_spec(scenario, cls, "arrive_peak", 2.0))
+    mid = float(_spec(scenario, cls, "arrive_mid", 0.5))
+    return mode, n0, rate, peak, mid
+
+
+def _growth_arrival_day(seq: int, count: int, scenario, cls: str,
+                        r: random.Random) -> int | None:
+    """First day ordinal `seq` (0-based) is active; None = never (ceiling
+    not reached inside the window).  +-10d seeded jitter de-synchronizes
+    same-day cohorts."""
+    mode, n0, rate, peak, mid = _growth_params(scenario, cls)
+    if mode == "immediate":
+        return 0
+    horizon = max(1, int(getattr(scenario, "days", 1)))
+    years = horizon / 365.0
+    if mode == "decline":
+        return 0                        # decline: all start active; departures below
+    for day in range(horizon + 1):
+        if _growth_target(mode, day / horizon, n0, rate, peak, mid,
+                          years) * count >= seq + 1:
+            return max(0, day + r.randint(-10, 10)) if day > 0 else 0
+    return None
+
+
+def _growth_departure_day(seq: int, count: int, scenario, cls: str,
+                          r: random.Random) -> int | None:
+    """Decline mode: highest ordinals depart first as the target shrinks."""
+    mode, n0, rate, peak, mid = _growth_params(scenario, cls)
+    if mode != "decline":
+        return None
+    horizon = max(1, int(getattr(scenario, "days", 1)))
+    years = horizon / 365.0
+    for day in range(horizon + 1):
+        if _growth_target(mode, day / horizon, n0, rate, peak, mid,
+                          years) * count < seq + 1:
+            return max(1, day + r.randint(-10, 10))
+    return None
+
+
+def _growth_active(agent, day: int, ctr) -> bool:
+    """Arrival gate with the neighbor-attraction warped clock."""
+    if getattr(agent, "_growth_arrived", False):
+        dep = getattr(agent, "depart_day", None)
+        return dep is None or day < dep
+    arrive = getattr(agent, "arrive_day", 0)
+    if arrive is None:
+        # Never scheduled -- but a thriving neighborhood can still recruit:
+        # treat as "beyond horizon", reachable only via the warped clock.
+        arrive = 10 ** 9
+    gain = float(getattr(agent, "attract_gain", 0.0))
+    eff = day * (1.0 + gain * ctr.get("neighborsRetired", 0))
+    if eff >= arrive:
+        agent._growth_arrived = True
+        ctr["growthArrivals"] = ctr.get("growthArrivals", 0) + 1
+        return True
+    return False
+
+
 class _ProxyAgent(Agent):
     """Base for the two proxy (SimLP-backed, identity-bound) agents.  Holds
     the deploy+bind boilerplate and the transfer-to-simlp + simlp.swap
@@ -199,6 +293,64 @@ class _ProxyAgent(Agent):
         d.chain.send(d.simlp.functions.swap(
             pool_addr, recipient, zero_for_one, int(amount),
             sqrt_limit, t0, t1))
+
+    # -- market primitives ------------------------------------------------- #
+
+    def _amount_in_for_out(self, r_in: int, r_out: int, want_out: int,
+                           fee: int) -> int:
+        """Constant-product input needed to receive ~`want_out` of the output
+        token, net of `fee` (pip).  Capped so we never ask for the whole
+        reserve."""
+        if want_out <= 0 or r_in == 0 or r_out == 0:
+            return 0
+        cap = r_out * 9 // 10
+        out = min(want_out, cap)
+        if out >= r_out:
+            return 0
+        eff = out * r_in // (r_out - out)
+        return eff * FEE_DEN // (FEE_DEN - fee) + 1
+
+    def _sell_buck(self, d, pool_addr: str, buck_amt: int) -> None:
+        """Sell BUCK into `pool_addr`, receiving the other token back to the
+        proxy (drives signed raw negative == draws credit == issues BUCK)."""
+        self._swap_via_simlp(d, pool_addr, d.buck, buck_amt, self.proxy.address)
+
+    def _sell_capped(self, d, pool_addr: str, buck_amt: int) -> int:
+        """Sell BUCK into `pool_addr`, first capping the amount to the
+        contract's own live spendable (balanceOf == held-net-of-demurrage +
+        unused credit) read right before the transfer.  Returns BUCK sold."""
+        if buck_amt <= 0:
+            return 0
+        try:
+            sp = d.buck.functions.balanceOf(self.proxy.address).call()
+        except Exception:
+            sp = buck_amt
+        amt = min(buck_amt, max(0, sp))
+        if amt < 10 ** 6:
+            return 0
+        self._sell_buck(d, pool_addr, amt)
+        return amt
+
+    def _buy_buck(self, d, pool_addr: str, input_c, want_buck: int,
+                  fee: int, recipient: str = "") -> int:
+        """Spend `input_c` held by the borrowing proxy to buy ~`want_buck`
+        BUCK, delivered to `recipient` (default: the borrowing proxy, which
+        climbs raw toward 0 == retires drawn credit; the escrow address
+        funds the reserve instead).  Returns BUCK bought."""
+        recipient = recipient or self.proxy.address
+        held = d.chain.balance_of(input_c, self.proxy.address)
+        if held == 0 or want_buck <= 0:
+            return 0
+        r_in = d.chain.balance_of(input_c, pool_addr)
+        r_out = d.chain.balance_of(d.buck, pool_addr)
+        need = self._amount_in_for_out(r_in, r_out, want_buck, fee)
+        spend = min(held, need) if need else min(held, r_in // 10)
+        if spend <= 0:
+            return 0
+        before = d.chain.balance_of(d.buck, recipient)
+        self._swap_via_simlp(d, pool_addr, input_c, spend, recipient)
+        return d.chain.balance_of(d.buck, recipient) - before
+
 
 
 @_register
@@ -376,63 +528,6 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         except Exception as e:
             print(f"[fatborrower-{self.idx}] fund mint failed: {e!r}",
                   flush=True)
-
-    # -- market primitives ------------------------------------------------- #
-
-    def _amount_in_for_out(self, r_in: int, r_out: int, want_out: int,
-                           fee: int) -> int:
-        """Constant-product input needed to receive ~`want_out` of the output
-        token, net of `fee` (pip).  Capped so we never ask for the whole
-        reserve."""
-        if want_out <= 0 or r_in == 0 or r_out == 0:
-            return 0
-        cap = r_out * 9 // 10
-        out = min(want_out, cap)
-        if out >= r_out:
-            return 0
-        eff = out * r_in // (r_out - out)
-        return eff * FEE_DEN // (FEE_DEN - fee) + 1
-
-    def _sell_buck(self, d, pool_addr: str, buck_amt: int) -> None:
-        """Sell BUCK into `pool_addr`, receiving the other token back to the
-        proxy (drives signed raw negative == draws credit == issues BUCK)."""
-        self._swap_via_simlp(d, pool_addr, d.buck, buck_amt, self.proxy.address)
-
-    def _sell_capped(self, d, pool_addr: str, buck_amt: int) -> int:
-        """Sell BUCK into `pool_addr`, first capping the amount to the
-        contract's own live spendable (balanceOf == held-net-of-demurrage +
-        unused credit) read right before the transfer.  Returns BUCK sold."""
-        if buck_amt <= 0:
-            return 0
-        try:
-            sp = d.buck.functions.balanceOf(self.proxy.address).call()
-        except Exception:
-            sp = buck_amt
-        amt = min(buck_amt, max(0, sp))
-        if amt < 10 ** 6:
-            return 0
-        self._sell_buck(d, pool_addr, amt)
-        return amt
-
-    def _buy_buck(self, d, pool_addr: str, input_c, want_buck: int,
-                  fee: int, recipient: str = "") -> int:
-        """Spend `input_c` held by the borrowing proxy to buy ~`want_buck`
-        BUCK, delivered to `recipient` (default: the borrowing proxy, which
-        climbs raw toward 0 == retires drawn credit; the escrow address
-        funds the reserve instead).  Returns BUCK bought."""
-        recipient = recipient or self.proxy.address
-        held = d.chain.balance_of(input_c, self.proxy.address)
-        if held == 0 or want_buck <= 0:
-            return 0
-        r_in = d.chain.balance_of(input_c, pool_addr)
-        r_out = d.chain.balance_of(d.buck, pool_addr)
-        need = self._amount_in_for_out(r_in, r_out, want_buck, fee)
-        spend = min(held, need) if need else min(held, r_in // 10)
-        if spend <= 0:
-            return 0
-        before = d.chain.balance_of(d.buck, recipient)
-        self._swap_via_simlp(d, pool_addr, input_c, spend, recipient)
-        return d.chain.balance_of(d.buck, recipient) - before
 
     # -- regime change ----------------------------------------------------- #
 
@@ -678,7 +773,13 @@ class FatCreditBorrowerAgent(_ProxyAgent):
 
         elif drawn > target + dead:
             # (C) Deleverage / redemption.  K tightened (limit shrank) or the
-            # ramp pulled the target down -> we are over-utilized.  Buy BUCK
+            # ramp pulled the target down -> we are over-utilized.  DOCTRINE
+            # NOTE: nothing on-chain forces this recovery -- an overdrawn
+            # account simply cannot extend more credit, and the Jubilee fund
+            # unwinds excess over time.  This buy-back is the borrower's own
+            # VOLUNTARY utilization policy (the negative feedback the
+            # equilibrium loop measures); `retire_rate` is its effort knob
+            # (TOML-tunable to 0 to model a purely passive borrower).  Buy BUCK
             # back (removing it from the TOKEN/BUCK pool pulls basketValue
             # toward 1.0) and burn what we can.  The buy-back accelerates with
             # the discount -- "money at a discount": when BUCK is cheap vs the
@@ -753,6 +854,18 @@ class SaverAgent(_ProxyAgent):
         # to be comparable to BUCK supply (~15-20M) to actually bid BUCK
         # toward the basket, not a rounding error against it.
         cls = type(self).__name__
+        self._class_seq = slot                      # regime counter == ordinal
+        self._class_count = getattr(scenario, "agents", {}).get(cls, 1)
+        if _spec(scenario, cls, "arrive_mode", "immediate") != "immediate":
+            self.arrive_day = _growth_arrival_day(
+                self._class_seq, self._class_count, scenario, cls, r)
+            self.depart_day = _growth_departure_day(
+                self._class_seq, self._class_count, scenario, cls, r)
+        else:
+            self.arrive_day = 0
+            self.depart_day = None
+        self.attract_gain = float(_spec(scenario, cls, "attract_gain", 0.05))
+        self._departed = False
         self.savings_goal = _draw(scenario, cls, "savings_goal_m", r,
                                   (10, 30)) * 1_000_000 * 10 ** 6  # BUCK target
         self._base_rate_spec = _spec(scenario, cls, "base_rate_k", (200, 600))
@@ -785,6 +898,20 @@ class SaverAgent(_ProxyAgent):
     def act(self, d, scenario, day, tick, ctr) -> None:
         self._maybe_regime(d, day, ctr)
         if self.proxy is None or not d.pool_ub:
+            return
+        if not _growth_active(self, day, ctr):
+            # Departure (decline regimes): liquidate BUCK savings once.
+            if (self.depart_day is not None and day >= self.depart_day
+                    and not self._departed):
+                self._departed = True
+                try:
+                    holding = d.chain.balance_of(d.buck, self.proxy.address)
+                    if holding > 10 ** 6:
+                        self._swap_via_simlp(d, d.pool_ub, d.buck, holding,
+                                             self.proxy.address)
+                    ctr["growthDepartures"] = ctr.get("growthDepartures", 0) + 1
+                except Exception as e:
+                    ctr["saver_depart_err"] = repr(e)[:200]
             return
         try:
             # Value reference is the BASKET: BUCK is discounted when a basket costs
@@ -832,3 +959,512 @@ class SaverAgent(_ProxyAgent):
             # else: hold.
         except Exception as e:
             ctr["saver_err"] = repr(e)[:200]
+
+
+@_register
+class BuckCreditDebtorAgent(_ProxyAgent):
+    """The HONEST mortgage debtor: fakes as little of the BUCK system as
+    possible.  Where earlier debtor models (and FatCreditBorrowerAgent's
+    escrow/tranche machinery) SIMULATED the funding reserve and Jubilee, this
+    agent simply plays the real contracts:
+
+      * its BuckCredit NFTs carry a REAL premiumRate, so Buck.mint's
+        funding-factor gate applies for real: balanceOf(minter) must cover
+        poolPrincipal * fundingFactor/1e18 BEFORE activation, and the
+        insurance principal is genuinely paid to the insurance pool;
+      * it SAVES for that gate: monthly, it accumulates a BUCK buffer by
+        buying on the open market (the real pre-issuance demand the gate is
+        designed to compel) -- preferring to buy when BUCK is at/below value;
+      * it issues in TRANCHES: mint (activate) just before selling, so each
+        tranche re-faces the live gate at the live fundingFactor;
+      * Jubilee is NOT simulated: the fund accrues on-chain; this agent's
+        obligations are pure chain truth (drawn = -signedBalanceOf), valued
+        at par.
+
+    The optimal control is the same theta law -- deploy while
+    max(0, bvib-1) <= theta*apr and the mortgage remains -- plus a
+    save_rate knob (fraction of spare cash routed to the BUCK buffer) and a
+    staggered arrival day, so a population arrives over time with varying
+    models.  Doctrine: no forced overdraw recovery (overdraw_effort,
+    default 0).
+    """
+
+    MONTH = 30
+    HARVEST_MONTHS = (8, 9)
+    SINK = "0x000000000000000000000000000000000000dEaD"
+    N_CREDITS = 4
+
+    _arrival_seq = 0              # class ordinal (reset in build_equilibrium)
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        self._class_seq = type(self)._arrival_seq
+        type(self)._arrival_seq += 1
+        self._class_count = getattr(scenario, "agents", {}).get(cls, 1)
+        m6 = 1_000 * 10 ** 6
+        self.theta = _draw(scenario, cls, "theta", r, (0.0, 3.0))
+        flip = "salary" if r.random() < 0.5 else "lumpy"
+        self.pattern = str(_spec(scenario, cls, "pattern", "")) or flip
+        self.apr = _draw(scenario, cls, "apr", r, (0.045, 0.065))
+        self.mortgage = int(_draw(scenario, cls, "mortgage_k", r,
+                                  (600, 1400)) * m6)
+        self.income_annual = int(_draw(scenario, cls, "income_k", r,
+                                       (180, 320)) * m6)
+        face = int(_draw(scenario, cls, "face_k", r, (600, 1200)) * m6)
+        self.premium_rate = int(_draw(scenario, cls, "premium_bp", r,
+                                      (50, 150)))
+        self.save_rate = _draw(scenario, cls, "save_rate", r, (0.25, 0.75))
+        self.retire_disc = _draw(scenario, cls, "retire_disc", r, 0.02)
+        self.cash_buffer = int(_draw(scenario, cls, "buffer_k", r, 20) * m6)
+        self.overdraw_effort = _draw(scenario, cls, "overdraw_effort", r, 0.0)
+        horizon = max(1, int(getattr(scenario, "days", 1)))
+        # Arrival: growth-regime schedule when arrive_mode is set; else the
+        # legacy uniform stagger over arrive_frac of the horizon.
+        if _spec(scenario, cls, "arrive_mode", "immediate") != "immediate":
+            self.arrive_day = _growth_arrival_day(
+                self._class_seq, self._class_count, scenario, cls, r)
+        else:
+            self.arrive_day = int(_draw(scenario, cls, "arrive_frac", r,
+                                        (0.0, 0.5)) * horizon)
+        self.attract_gain = float(_spec(scenario, cls, "attract_gain", 0.05))
+        self._retired_flagged = False
+        mrate = self.apr / 12.0
+        self.payment = int(self.mortgage * mrate
+                           / (1.0 - (1.0 + mrate) ** -300))
+        self.tranche_cap = self.payment * 12
+
+        self.hypo_mortgage = self.mortgage
+        self.hypo_cash = 0
+        start = self.arrive_day if self.arrive_day is not None else 0
+        self._last_day = start
+        self._last_month_day = start - self.MONTH
+        self.deploys = 0
+        self.throttled = 0
+        # Cost telemetry (par-valued, 6-dec dollars): what the BUCK path
+        # actually pays vs the counterfactual -- insurance principal
+        # surrendered at mint, and the par-value lost (or gained, negative)
+        # crossing the pool in either direction.  unwound/unwind_loss
+        # isolate the voluntary-buyback leg (so passive Jubilee melt can be
+        # distinguished from the agent's own purchases).
+        self.premium_paid = 0
+        self.trade_loss = 0
+        self.unwound = 0
+        self.unwind_loss = 0
+
+        self._bind_proxy(d)
+        now_ts = d.w3.eth.get_block("latest")["timestamp"]
+        per = max(1, face // self.N_CREDITS)
+        for _ in range(self.N_CREDITS):
+            d.chain.send(d.credit.functions.createCredit(
+                self.proxy.address, 0, per, 0, 0, 0, now_ts,
+                self.premium_rate))
+        self._face = per * self.N_CREDITS
+        self._token_ids = [
+            d.credit.functions.tokenOfOwnerByIndex(
+                self.proxy.address, i).call()
+            for i in range(self.N_CREDITS)]
+
+    # -- instrumented market legs ------------------------------------------- #
+
+    def _buy_track(self, d, want_buck: int) -> int:
+        """_buy_buck through the BUCK/USDC pool, accumulating the par-value
+        cost (USDC spent minus BUCK received; negative = bought below par)
+        into trade_loss.  Returns BUCK bought."""
+        before = d.chain.balance_of(d.usdc, self.proxy.address)
+        got = self._buy_buck(d, d.pool_ub, d.usdc, want_buck, d.fee_ub)
+        spent = before - d.chain.balance_of(d.usdc, self.proxy.address)
+        self.trade_loss += spent - got
+        return got
+
+    # -- off-chain fiat legs (income + bank payments) ----------------------- #
+
+    def _income(self, d, months: int, day) -> int:
+        if self.pattern == "salary":
+            amt = self.income_annual * months // 12
+        else:
+            month = (day // self.MONTH) % 12
+            amt = (self.income_annual // len(self.HARVEST_MONTHS)
+                   if month in self.HARVEST_MONTHS else 0)
+        if amt > 0:
+            d.chain.send(d.usdc.functions.mint(self.proxy.address, amt))
+        return amt
+
+    def _pay_bank(self, d, amt: int) -> int:
+        held = d.chain.balance_of(d.usdc, self.proxy.address)
+        pay = min(amt, held)
+        if pay > 0:
+            self._proxy_exec(
+                d, d.usdc.address,
+                d.usdc.encode_abi("transfer(address,uint256)",
+                                  args=[self.SINK, int(pay)]))
+        return pay
+
+    # -- observability ------------------------------------------------------- #
+
+    def octl_state(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        try:
+            cash = d.chain.balance_of(d.usdc, self.proxy.address)
+            signed = d.buck.functions.signedBalanceOf(
+                self.proxy.address).call()
+            limit = d.buck.functions.creditLimit(self.proxy.address).call()
+        except Exception:
+            return None
+        drawn = max(0, -signed)
+        held = max(0, signed)
+        # Pure chain truth at par; the liability side is the chain's OWN
+        # close-cost quote: drawn net of the accrued Jubilee relief on the
+        # credits (BuckCredit.jubileeRelief -- the redemption discount that
+        # melts ~2%/yr while the position is carried).
+        jub = 0
+        try:
+            for tid in self._token_ids:
+                jub += d.credit.functions.jubileeRelief(tid).call()
+        except Exception:
+            jub = 0
+        jub = min(jub, drawn)
+        nw = cash + held - self.mortgage - drawn + jub
+        return {"idx": self.idx, "theta": round(self.theta, 2),
+                "pattern": self.pattern, "nw": nw,
+                "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
+                "limit": limit, "mortgage": self.mortgage, "drawn": drawn,
+                "jub": jub, "deploys": self.deploys,
+                "throttled": self.throttled,
+                "premium_paid": self.premium_paid,
+                "trade_loss": self.trade_loss,
+                "unwound": self.unwound,
+                "unwind_loss": self.unwind_loss,
+                "apr": self.apr, "payment": self.payment,
+                "income": self.income_annual,
+                "active": bool(getattr(self, "_growth_arrived", False))}
+
+    # -- the loop -------------------------------------------------------------- #
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None:
+            return
+        if not _growth_active(self, day, ctr):
+            return
+        if not getattr(self, "_started", False):
+            # First active step (scheduled or attraction-warped arrival):
+            # anchor the ledgers to the ACTUAL arrival day.
+            self._started = True
+            self._last_day = day
+            self._last_month_day = day - self.MONTH
+        days = max(0, day - self._last_day)
+        self._last_day = day
+        if days > 0:
+            g = (1.0 + self.apr / 365.0) ** days
+            self.mortgage = int(self.mortgage * g)
+            self.hypo_mortgage = int(self.hypo_mortgage * g)
+        if day - self._last_month_day < self.MONTH:
+            return
+        months = max(1, (day - self._last_month_day) // self.MONTH)
+        self._last_month_day = day
+
+        try:
+            bvib = d.basket.functions.basketValueInBuck().call() / 1e18
+            ff = d.kctrl.functions.fundingFactor().call()
+            signed = d.buck.functions.signedBalanceOf(
+                self.proxy.address).call()
+            limit = d.buck.functions.creditLimit(self.proxy.address).call()
+        except Exception as e:
+            ctr["bcd_err"] = repr(e)[:200]
+            return
+        drawn = max(0, -signed)
+
+        # 1. Income + mandatory mortgage service, both ledgers.
+        inc = self._income(d, months, day)
+        self.hypo_cash += inc
+        due = min(self.payment * months, self.mortgage)
+        self.mortgage -= self._pay_bank(d, due)
+        hdue = min(self.payment * months, self.hypo_mortgage)
+        hpaid = min(hdue, self.hypo_cash)
+        self.hypo_cash -= hpaid
+        self.hypo_mortgage -= hpaid
+
+        disc = max(0.0, bvib - 1.0)
+
+        # Tranche capacity comes from UNACTIVATED face: creditLimit only
+        # reflects credit already activated by a mint, and the mint itself
+        # is what activates -- so size against faceValue - activatedValue
+        # (real chain reads), plus any already-activated unused headroom.
+        unactivated = 0
+        try:
+            for tid in self._token_ids:
+                face_v, act_v, _ = d.credit.functions.creditInfo(tid).call()
+                unactivated += max(0, face_v - act_v)
+        except Exception:
+            unactivated = 0
+        headroom = max(0, limit - drawn) + unactivated
+
+        # 2. SAVE for the real funding gate: estimate the next tranche's
+        #    insurance principal via quoteMint and top the BUCK buffer up to
+        #    the fundingFactor-scaled requirement -- buying preferentially
+        #    when BUCK is at/below its basket value (disc small).
+        want_tranche = min(self.tranche_cap, headroom, self.mortgage)
+        if want_tranche >= 10 ** 6 and self.mortgage > 10 ** 6:
+            try:
+                _, principal = d.buck.functions.quoteMint(
+                    want_tranche, self._token_ids).call()
+            except Exception:
+                principal = 0
+            required = principal * ff // 10 ** 18 if ff else 0
+            bal = d.buck.functions.balanceOf(self.proxy.address).call()
+            short = required - bal
+            if short > 10 ** 6 and disc <= max(self.theta * self.apr, 0.01):
+                cash = d.chain.balance_of(d.usdc, self.proxy.address)
+                budget = int(max(0, cash - self.cash_buffer)
+                             * self.save_rate)
+                if budget > 10 ** 6 and d.pool_ub:
+                    try:
+                        self._buy_track(d, min(short, budget))
+                        ctr["bcdSaved"] = ctr.get("bcdSaved", 0) + 1
+                    except Exception as e:
+                        ctr["bcd_save_err"] = repr(e)[:200]
+
+        # 3. THE CONTROL: activate a tranche through the REAL gate, then
+        #    deploy it against the mortgage.
+        if self.mortgage > 10 ** 6 and disc <= self.theta * self.apr \
+                and want_tranche >= 10 ** 6:
+            mint_amt = min(want_tranche, unactivated)
+            try:
+                if mint_amt >= 10 ** 6:
+                    pre = d.buck.functions.signedBalanceOf(
+                        self.proxy.address).call()
+                    self._proxy_exec(
+                        d, d.buck.address,
+                        d.buck.encode_abi("mint(uint256)", args=[mint_amt]))
+                    post = d.buck.functions.signedBalanceOf(
+                        self.proxy.address).call()
+                    # mint activates credit (creditLimit += coverage) and
+                    # debits the SIGNED balance by exactly poolPrincipal --
+                    # the insurance premium is paid by drawing credit, so it
+                    # surfaces in `drawn` (and hence nw); track it here so
+                    # the advantage decomposition can separate it out.
+                    self.premium_paid += max(0, pre - post)
+                minted = True
+            except Exception:
+                minted = False       # gate said no: save more, retry later
+                self.throttled += 1
+                ctr["bcdThrottled"] = ctr.get("bcdThrottled", 0) + 1
+            if minted and d.pool_ub:
+                before = d.chain.balance_of(d.usdc, self.proxy.address)
+                try:
+                    sold = self._sell_capped(d, d.pool_ub, want_tranche)
+                except Exception as e:
+                    ctr["bcd_sell_err"] = repr(e)[:200]
+                    sold = 0
+                if sold > 0:
+                    got = d.chain.balance_of(
+                        d.usdc, self.proxy.address) - before
+                    self.trade_loss += sold - got
+                    principal = min(got, self.mortgage)
+                    self._pay_bank(d, principal)
+                    self.mortgage -= principal
+                    self.deploys += 1
+                    ctr["bcdDeploys"] = ctr.get("bcdDeploys", 0) + 1
+        if self.mortgage <= 10 ** 6 and not self._retired_flagged:
+            # The attraction signal: a neighbor just became mortgage-free.
+            self._retired_flagged = True
+            ctr["neighborsRetired"] = ctr.get("neighborsRetired", 0) + 1
+
+        # 4. Voluntary unwind only (doctrine: overdraw is not an emergency,
+        #    and the drawn balance is an outstanding claim on OWN assets --
+        #    there is never urgency to buy it back).  The obligation is
+        #    par-valued at $1/BUCK, so a buyback creates value ONLY when the
+        #    pool's USDC spot is BELOW par; the basket-relative discount
+        #    (bvib) says nothing about the USD price actually paid.  Gate on
+        #    spot <= 1 - retire_disc and size the bite so the buy itself
+        #    cannot lift the pool past par: buying x out of reserve r_out
+        #    moves spot p to p*(r_out/(r_out-x))^2, which stays <= 1 for
+        #    x <= r_out*(1 - sqrt(p)).  (The old want=drawn slammed the
+        #    whole obligation through the pool regardless of price and
+        #    burned the cash pile: cash-for-slippage, adv collapse.)
+        want = 0
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        spare = cash - self.cash_buffer
+        if drawn > limit and self.overdraw_effort > 0:
+            want = int((drawn - limit) * self.overdraw_effort)
+        elif self.mortgage <= 10 ** 6 and drawn > 0:
+            want = drawn
+        if want > 10 ** 6 and spare > 10 ** 6 and d.pool_ub:
+            r_in = d.chain.balance_of(d.usdc, d.pool_ub)
+            r_out = d.chain.balance_of(d.buck, d.pool_ub)
+            spot = r_in / r_out if r_out else 10.0
+            if spot <= 1.0 - self.retire_disc:
+                want = min(want, spare,
+                           int(r_out * (1.0 - math.sqrt(spot))))
+                if want > 10 ** 6:
+                    try:
+                        tl0 = self.trade_loss
+                        got = self._buy_track(d, want)
+                        self.unwound += got
+                        self.unwind_loss += self.trade_loss - tl0
+                        if got > 0:
+                            ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + got
+                    except Exception as e:
+                        ctr["bcd_buy_err"] = repr(e)[:200]
+
+
+@_register
+class DiscountBuckArbAgent(_ProxyAgent):
+    """The time-for-profit BUCK arb (HOLDER variant): buys BUCK below USD
+    par and simply holds.  Every issued BUCK has a forced future buyer --
+    the issuer's own redemption, or the Jubilee fund over ~50 years --
+    and the K-controller quenches inflation, so below-par BUCK is a
+    claim bought at a discount to its recovery.  Sells at/above par.
+    Both legs are impact-capped (a bite never pushes the pool past the
+    band that justified it: x <= r*(1-sqrt(p)) buying, r*(sqrt(p)-1)
+    selling), so the arb stabilizes without ever overshooting.
+
+    Telemetry (ctr, per class): dbaBought / dbaSold (6-dec BUCK),
+    dbaSpent / dbaRecv (6-dec USDC) -- PnL and inventory fall out.
+    """
+
+    CTR = "dba"
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        m6 = 1_000 * 10 ** 6
+        self.endow = int(_draw(scenario, cls, "endow_k", r, 500) * m6)
+        self.buy_disc = _draw(scenario, cls, "buy_disc", r, 0.02)
+        self.sell_prem = _draw(scenario, cls, "sell_prem", r, 0.0)
+        self._bind_proxy(d)
+        d.chain.send(d.usdc.functions.mint(self.proxy.address, self.endow))
+
+    def _spot_ub(self, d):
+        r_in = d.chain.balance_of(d.usdc, d.pool_ub)
+        r_out = d.chain.balance_of(d.buck, d.pool_ub)
+        return ((r_in / r_out) if r_out else 1.0), r_in, r_out
+
+    def _held(self, d) -> int:
+        s = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        return max(0, s)
+
+    def _buy_leg(self, d, day, ctr) -> int:
+        spot, _, r_out = self._spot_ub(d)
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        if spot > 1.0 - self.buy_disc or cash < 10 ** 6:
+            return 0
+        cap = int(r_out * (1.0 - math.sqrt(spot)))
+        want = min(cap, int(cash / max(spot, 1e-9)))
+        if want < 10 ** 6:
+            return 0
+        pre = cash
+        got = self._buy_buck(d, d.pool_ub, d.usdc, want, d.fee_ub)
+        spent = pre - d.chain.balance_of(d.usdc, self.proxy.address)
+        k = self.CTR
+        ctr[k + "Bought"] = ctr.get(k + "Bought", 0) + got
+        ctr[k + "Spent"] = ctr.get(k + "Spent", 0) + spent
+        return got
+
+    def _sell_leg(self, d, day, ctr, amount=None) -> int:
+        spot, _, r_out = self._spot_ub(d)
+        held = self._held(d)
+        if spot < 1.0 + self.sell_prem or held < 10 ** 6:
+            return 0
+        cap = int(r_out * (math.sqrt(spot) - 1.0)) if spot > 1.0 else held
+        amt = min(held, cap if cap > 0 else held)
+        if amount is not None:
+            amt = min(amt, amount)
+        if amt < 10 ** 6:
+            return 0
+        pre = d.chain.balance_of(d.usdc, self.proxy.address)
+        sold = self._sell_capped(d, d.pool_ub, amt)
+        recv = d.chain.balance_of(d.usdc, self.proxy.address) - pre
+        k = self.CTR
+        ctr[k + "Sold"] = ctr.get(k + "Sold", 0) + sold
+        ctr[k + "Recv"] = ctr.get(k + "Recv", 0) + recv
+        return sold
+
+    def arb_state(self, d) -> dict | None:
+        """Per-frame inventory for the snapshot: cash + BUCK held (par)."""
+        if self.proxy is None:
+            return None
+        return {"cls": self.CTR, "idx": self.idx,
+                "cash": d.chain.balance_of(d.usdc, self.proxy.address),
+                "held": self._held(d), "endow": self.endow,
+                "receipts": len(getattr(self, "_receipts", []))}
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None:
+            return
+        if not self._buy_leg(d, day, ctr):
+            self._sell_leg(d, day, ctr)
+
+
+@_register
+class DiscountBasketArbAgent(DiscountBuckArbAgent):
+    """BASKETEER variant: buys discount BUCK like the holder, then PARKS
+    it -- swaps BUCK -> TOKEN through the TOKEN/BUCK basket pools (the
+    BUCK leaves circulation into pool inventory, lifting the BUCK/TOKEN
+    ratios) and deposits the TOKEN into the BuckBasket for an LP receipt
+    (rebalancing revenue on top of the recovery).  Harvests when BUCK
+    trades at/above par: redeem the oldest receipt and sell the returned
+    BUCK into the premium.
+
+    Extra telemetry: dbbParked (BUCK swapped into basket pools),
+    dbbReceipts (open LP positions).
+    """
+
+    CTR = "dbb"
+
+    def setup(self, d, scenario, rng) -> None:
+        super().setup(d, scenario, rng)
+        self._receipts: list[int] = []
+
+    def _park_leg(self, d, day, ctr) -> None:
+        held = self._held(d)
+        if held < 25_000 * 10 ** 6:
+            return
+        i = (day + self.idx) % len(d.tokens)
+        tc = d.tokens[i]
+        pool = d.pool_buck[i]
+        pre_tok = d.chain.balance_of(tc, self.proxy.address)
+        # BUCK -> TOKEN in the basket pool: the parked BUCK becomes pool
+        # inventory; cap the bite at ~5% of the pool's BUCK side.
+        r_buck = d.chain.balance_of(d.buck, pool)
+        amt = min(held, max(10 ** 6, r_buck // 20))
+        self._swap_via_simlp(d, pool, d.buck, amt, self.proxy.address)
+        got_tok = d.chain.balance_of(tc, self.proxy.address) - pre_tok
+        if got_tok <= 0:
+            return
+        self._proxy_exec(d, tc.address, tc.encode_abi(
+            "approve(address,uint256)", args=[d.basket.address, got_tok]))
+        rcpt = self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+            "depositToken(address,uint256,uint256)",
+            args=[tc.address, got_tok, 0]))
+        for log in rcpt["logs"]:
+            if log["topics"][0] == d.deposited_topic:
+                self._receipts.append(int.from_bytes(log["topics"][2], "big"))
+                break
+        ctr["dbbParked"] = ctr.get("dbbParked", 0) + amt
+        ctr["dbbReceipts"] = ctr.get("dbbReceipts", 0) + 1
+
+    def _harvest_leg(self, d, day, ctr) -> None:
+        spot, _, _ = self._spot_ub(d)
+        if spot < 1.0 + self.sell_prem or not self._receipts:
+            return
+        rid = self._receipts.pop(0)
+        try:
+            self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+                "redeem(uint256,uint256)", args=[rid, 10_000]))
+            ctr["dbbHarvests"] = ctr.get("dbbHarvests", 0) + 1
+        except Exception as e:
+            self._receipts.append(rid)
+            ctr["dbb_err"] = repr(e)[:200]
+            return
+        self._sell_leg(d, day, ctr)
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None:
+            return
+        if not self._buy_leg(d, day, ctr):
+            self._harvest_leg(d, day, ctr)
+        self._park_leg(d, day, ctr)

@@ -58,6 +58,8 @@ VENV_OPTS		=
 .PHONY: vector-lifecycle vector-equilibrium vector-arb
 .PHONY: plot-lifecycle plot-equilibrium plot-arb
 .PHONY: sim sim-build sim-run sim-test sim-plot sim-tui
+.PHONY: test-director test-director-regimes sim-run-director sim-director
+.PHONY: sim-run-policy sim-run-policy-sweep sim-plot-policy sim-policy sim-policy-sweep
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
 .PHONY: sim-run-flow sim-plot-flow sim-flow
 .PHONY: prices-routing plot-routing
@@ -93,6 +95,40 @@ test-fork-mainnet:
 # Gas snapshots
 snapshot:
 	forge snapshot $(FORGE_OPTS)
+
+# ── BasketRebalanceDirector tests ────────────────────────────────────
+#
+# The director's Forge suite reads DIR_WINDOW / DIR_RHO1E9 from the
+# environment, so the same assertions can be exercised across a window x
+# rho parameter matrix.  The regimes target runs the whole matrix in
+# parallel (one forge process per regime; `build` first so they share a
+# warm compile cache).
+#
+#   make nix-test-director           # unit + fuzz suite, default regime
+#   make nix-test-director-regimes   # parallel window x rho matrix
+#   make nix-sim-director            # 30-day Anvil smoke sim (keeper agent)
+
+DIRECTOR_WINDOWS	?= 6 8 16
+DIRECTOR_RHOS		?= 1500000000 3000000000 6000000000
+
+test-director:	build
+	forge test $(FORGE_OPTS) --match-contract 'RebalanceDirector' -vv
+
+test-director-regimes:	build
+	@rc=0; pids=""; \
+	for w in $(DIRECTOR_WINDOWS); do \
+	  for r in $(DIRECTOR_RHOS); do \
+	    log="out/director-w$$w-r$$r.log"; \
+	    ( DIR_WINDOW=$$w DIR_RHO1E9=$$r forge test $(FORGE_OPTS) \
+	        --match-contract BasketRebalanceDirector > "$$log" 2>&1 ) & \
+	    pids="$$pids $$!=w$$w-r$$r"; \
+	  done; \
+	done; \
+	for pr in $$pids; do \
+	  p=$${pr%%=*}; tag=$${pr##*=}; \
+	  if wait "$$p"; then echo "director regime $$tag  PASS"; \
+	  else echo "director regime $$tag  FAIL  (see out/director-$$tag.log)"; rc=1; fi; \
+	done; exit $$rc
 
 # Formatting and linting
 fmt:
@@ -490,6 +526,25 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
 SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | legacy (BuckBasket)
+#
+# Every Anvil-style sim below composes from a common matrix:
+#
+#   SIM_BACKEND  = anvil (subprocess, RPC-faithful; default)
+#                | pyrevm (in-process revm: identical outputs, ~6.5x wall
+#                  on short runs, far more on long ones -- see
+#                  alberta_buck/sim/pyrevm_backend.py)
+#   SIM_BASKET   = prorata (BuckBasketProRata + UniswapV3 venue facet)
+#                | legacy (fused BuckBasket)
+#   SIM_DIRECTOR = pairs (PairsRebalanceDirector: differential-mode
+#                  tick-EMA ladders, quorum turn votes; default)
+#                | vrate (BasketRebalanceDirector: share-deviation regime)
+#   Env knobs (deploy-time director params, for short smoke runs):
+#     DIRECTOR_DEADBAND_BP=10  DIRECTOR_QUORUM=2|3 (pairs)  DIRECTOR_WINDOW=3 (vrate)
+#
+#   e.g.  make nix-sim-rebalancing SIM_BACKEND=pyrevm SIM_DIRECTOR=vrate
+#         SIM_BACKEND=pyrevm make nix-sim-historical SIM_YEARS=5
+SIM_BACKEND	?= pyrevm        # pyrevm (default: in-process, fast) | anvil
+SIM_DIRECTOR	?= pairs         # pairs (default) | vrate
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
@@ -540,7 +595,8 @@ v2-patch-init-code-hash:
 		fi
 
 sim-run:	sim-build
-	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET)
+	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) --director $(SIM_DIRECTOR)
 
 sim-test:	sim-build
 	python -m pytest $(SIM_TEST) -v -s
@@ -588,7 +644,8 @@ REBALANCING_VECTOR   = test/vectors/rebalancing-sim.json
 SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
 
 sim-run-rebalancing:	sim-build
-	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET)
+	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) --director $(SIM_DIRECTOR)
 
 sim-plot-rebalancing:	$(REBALANCING_VECTOR)
 	python -m pytest $(SIM_REB_PLOT) -v -s
@@ -619,11 +676,13 @@ REBALANCING_VECTOR_TRADITIONAL  = test/vectors/rebalancing-sim-traditional.json
 sim-run-rebalancing-prorata:	sim-build
 	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
 		--ticks-per-day $(SIM_TICKS) --basket prorata \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
 		--out $(REBALANCING_VECTOR_PRORATA)
 
 sim-run-rebalancing-traditional:	sim-build
 	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
 		--ticks-per-day $(SIM_TICKS) --basket legacy \
+		--backend $(SIM_BACKEND) \
 		--out $(REBALANCING_VECTOR_TRADITIONAL)
 
 sim-plot-rebalancing-prorata:	$(REBALANCING_VECTOR_PRORATA)
@@ -664,6 +723,56 @@ sim-plot-flow:	$(FLOW_VECTOR) $(SIM_FLOW_PLOT)
 
 sim-flow:	sim-run-flow
 	python -m alberta_buck.sim.plot_basket_flow
+
+
+# ── Rebalance-policy model (no Anvil) ─────────────────────────────────
+#
+# Deviation x MA-acceleration rebalancing factor over the hist-*.csv
+# constituents plus a synthetic M2-lag driver; compares hold / prop /
+# band / factor policies.  --sweep adds the per-constituent MA-window
+# coordinate sweep (slower).
+#
+#   make nix-sim-policy        # run -> plot
+#   make nix-sim-run-policy    # write test/vectors/rebalance-policy.json
+#   make nix-sim-plot-policy   # render images/rebalance-policy.png
+
+POLICY_VECTOR	= test/vectors/rebalance-policy.json
+POLICY_IMAGE	= images/rebalance-policy.png
+POLICY_OPTS	?=
+
+$(POLICY_VECTOR):	alberta_buck/sim/rebalance_policy.py
+	python -m alberta_buck.sim.rebalance_policy $(POLICY_OPTS)
+
+sim-run-policy:
+	python -m alberta_buck.sim.rebalance_policy $(POLICY_OPTS)
+
+sim-run-policy-sweep:
+	python -m alberta_buck.sim.rebalance_policy --sweep $(POLICY_OPTS)
+
+sim-plot-policy:	$(POLICY_VECTOR) alberta_buck/sim/plot_rebalance_policy.py
+	python -m alberta_buck.sim.plot_rebalance_policy
+
+sim-policy:	sim-run-policy
+	python -m alberta_buck.sim.plot_rebalance_policy
+
+sim-policy-sweep:	sim-run-policy-sweep
+	python -m alberta_buck.sim.plot_rebalance_policy
+
+# Article figures for alberta-buck-rebalance.org (mechanism, vs-hold,
+# vs-prop, frontier) from the same rebalance-policy vector.
+sim-plot-article:	$(POLICY_VECTOR)
+	python -m alberta_buck.sim.plot_rebalance_article
+
+# 30-day Anvil smoke sim exercising the BasketRebalanceDirector end to end:
+# the rebalancing scenario's DirectorKeeperAgent pokes the director's work
+# wheel each tick and executes its advisory efforts through the router.
+sim-run-director:
+	python -m $(SIM_PKG) --scenario rebalancing --days 30 \
+		--ticks-per-day $(SIM_TICKS) --basket prorata \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--out test/vectors/director-smoke.json
+
+sim-director:	sim-build sim-run-director
 
 
 # ── Historical commodity & labour quote source ───────────────────────
@@ -715,6 +824,7 @@ sim-gen-historical:
 sim-run-historical:	sim-build
 	python -m $(SIM_PKG) --scenario historical --years $(SIM_YEARS) \
 		--ticks-per-day $(HIST_TICKS) --basket $(SIM_BASKET) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
 		--out $(HISTORICAL_VECTOR)
 
 sim-plot-historical:	$(HISTORICAL_VECTOR)
@@ -750,6 +860,7 @@ EQ_DAYS			?= 20
 
 sim-run-equilibrium:	sim-build
 	python -m $(SIM_PKG) --scenario equilibrium --years $(EQ_YEARS) \
+		--backend $(SIM_BACKEND) \
 		--days $(EQ_DAYS) --ticks-per-day $(EQ_TICKS) --basket $(SIM_BASKET) \
 		--out $(EQUILIBRIUM_VECTOR)
 
@@ -783,13 +894,59 @@ EQ_VECTORS	?= test/vectors/eq-*.json
 .PHONY: sim-experiment sim-sweep sim-metrics
 
 sim-experiment:	sim-build
-	python -m $(SIM_PKG) --experiment $(EQ_EXPERIMENT) $(EQ_SETS)
+	python -m $(SIM_PKG) --experiment $(EQ_EXPERIMENT) --backend $(SIM_BACKEND) $(EQ_SETS)
 
 # Run any experiment by TOML basename: make sim-experiment-<name> runs
 # alberta_buck/sim/experiments/<name>.toml -> test/vectors/eq-<name>.json.
 sim-experiment-%:	sim-build
-	python -m $(SIM_PKG) \
+	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
 		--experiment alberta_buck/sim/experiments/$*.toml $(EQ_SETS)
+
+# The realistic observation world: honest BuckCreditDebtorAgents (real
+# premium credit + real funding gate) as the issuance channel, with
+# savers/investors/arbs/whale/PID; growth regimes via arrive_mode knobs
+# (see experiments/growth-*.toml).  pyrevm recommended.
+#
+#   make sim-debtors                 # run + plot the realistic world
+sim-run-debtors:	sim-build
+	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
+		--experiment alberta_buck/sim/experiments/realistic.toml
+sim-plot-debtors:
+	python -m alberta_buck.sim.plot_octl \
+		--data test/vectors/eq-eq-realistic.json \
+		--out images/equilibrium-realistic.png
+sim-debtors:	sim-run-debtors sim-plot-debtors
+
+# The debtor-ledger AUDIT: one pinned-knob honest debtor in isolation, then
+# assert the BUCK-vs-counterfactual accounting against a pure-Python ledger
+# replica (amortization exactness, the conservation identity
+# adv = interest_saved - premium - trade_loss, uniform superiority net of
+# costs, and the xfail'd Jubilee-melt doctrine gap).
+#
+#   make nix-venv-sim-isolation      # pyrevm lives in the repo venv
+sim-isolation:	sim-build
+	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
+		--experiment alberta_buck/sim/experiments/isolation.toml
+	python -m pytest alberta_buck/test/test_debtor_ledger.py -v -s
+
+# The LIVE simulation server: pyrevm worlds (one per client session) with
+# WS /s/<sid>/{frames,control,rpc} on SIM_SERVER_PORT and a viem-ready
+# HTTP JSON-RPC on SIM_SERVER_PORT+1.  Provision + start:
+#
+#   make nix-venv-sim-server              # the ~/.screenrc BuckSim screen
+#   SIM_SERVER_EXPERIMENT=alberta_buck/sim/experiments/backdrop-ab.toml \
+#       make nix-venv-sim-server          # serve a different world
+#
+# NB: 8797/8798 -- bucky.kundert.ca's MLX bot owns 8787.
+SIM_SERVER_PORT       ?= 8797
+SIM_SERVER_EXPERIMENT ?= alberta_buck/sim/experiments/backdrop.toml
+SIM_SERVER_PACE       ?= 0
+
+.PHONY: sim-server
+sim-server:	sim-build
+	python -m alberta_buck.sim.server \
+		--experiment $(SIM_SERVER_EXPERIMENT) \
+		--port $(SIM_SERVER_PORT) --pace $(SIM_SERVER_PACE)
 
 sim-sweep:	sim-build
 	python -m alberta_buck.sim.sweep $(EQ_EXPERIMENTS) \
@@ -883,6 +1040,11 @@ core-identity-vectors:
 core-js-deps:
 	cd core/js && npm ci
 
+# Bundle the forge artifacts the JS platform needs into one importable
+# module (core/js/artifacts/bundle.mjs) -- the browser cannot read out/.
+core-js-artifacts:
+	node core/js/bin/bundle-artifacts.mjs
+
 # The Python kernel bindings: PyO3 cdylibs built with plain cargo (the
 # .cargo/config.toml link flags stand in for maturin) and placed inside
 # the buck_core package -- import buck_core.buck_math /
@@ -908,20 +1070,49 @@ core-build-wasm:
 		build --release --target nodejs \
 		--out-dir ../../../js/wasm --out-name buck_identity
 
-# Browser (web-target) build of the identity kernel + the Phase 3 proof
-# demo page.  Serve the demo (ES modules need http, not file://):
-#   make nix-core-demo-identity
+# Browser (web-target) builds of BOTH kernels + the demo pages.  Serve
+# the demos (ES modules need http, not file://):
+#   make nix-core-demo-identity     # Phase 3: in-browser proof ceremony
+#   make nix-core-demo-buckworld    # Phase 4: the interactive buckworld
 #   python3 -m http.server -d core/js/demo 8000
-#   open http://localhost:8000/identity-proofs.html
+#   open http://localhost:8000/identity-proofs.html   (or buckworld.html)
 core-build-wasm-web:
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target web \
 		--out-dir ../../../js/demo/wasm-web --out-name buck_identity
+	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
+		build --release --target web \
+		--out-dir ../../../js/demo/wasm-web --out-name buck_math
 
 core-demo-identity:	core-build-wasm-web
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
 	@echo "       then open http://localhost:8000/identity-proofs.html"
+
+# The interactive buckworld page: bundle the controller + platform +
+# viem/tevm into demo/app.js (the wasm binaries stay separate files the
+# page fetches from wasm-web/).  Browser shims: the npm `buffer` polyfill
+# (string_decoder in tevm's tree), and an empty `fs` (an @tevm/node
+# state-persistence path the browser never takes).
+core-demo-buckworld:	core-build-wasm-web core-js-artifacts
+	cd core/js && npx esbuild demo/src/main.js --bundle --format=esm \
+		--platform=browser --outfile=demo/app.js \
+		--alias:buffer=buffer \
+		--alias:fs=./demo/src/shims/fs-empty.js \
+		--log-limit=8
+	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
+	@echo "       then open http://localhost:8000/buckworld.html"
+
+# The equilibrium page: the two-agent BUCK-K loop with live charts and
+# dynamic add-saver/add-debtor controls (demo/eqapp.js).
+core-demo-eqworld:	core-build-wasm-web core-js-artifacts
+	cd core/js && npx esbuild demo/src/eqmain.js --bundle --format=esm \
+		--platform=browser --outfile=demo/eqapp.js \
+		--alias:buffer=buffer \
+		--alias:fs=./demo/src/shims/fs-empty.js \
+		--log-limit=8
+	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
+	@echo "       then open http://localhost:8000/eqworld.html"
 
 core-build:	core-build-py core-build-wasm
 

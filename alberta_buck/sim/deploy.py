@@ -8,6 +8,7 @@ Identity; TOKEN/USDC pools and SimLP never custody BUCK so they need none.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,8 @@ class Deployment:
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
     basket_impl: str = "prorata"  # "prorata" (BuckBasketProRata, default) | "legacy"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
+    director: Any = None          # rebalance director (prorata only)
+    director_impl: str = "pairs"  # "pairs" (default) | "vrate"
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
 
@@ -148,7 +151,7 @@ def _erc20_abi() -> list:
 
 
 def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
-           basket_impl="prorata") -> Deployment:
+           basket_impl="prorata", director_impl="pairs") -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, pool_acct, issuer_addr = accts[0], accts[1], accts[2], accts[3]
@@ -441,4 +444,39 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         + [(d.pool_buck[i], basket.address, lob_tok, hib_tok, "buck") for i in range(len(tok))]
         + [(d.pool_ub, simlp.address, lob_ub, hib_ub, "ub")]
     )
+
+    # --- Rebalance director (standalone advisor; prorata only) ------------ #
+    # Amortized rebalance-signal state machine: agents poke() it with a small
+    # work budget; hints direct deposit routing and redemption draws.  Two
+    # signal engines share the chassis (IRebalanceDirector-compatible):
+    #   vrate -- per-constituent share-deviation regime + rate-matched sizing
+    #            (window 15d, rho 3);
+    #   pairs -- differential-mode: per-leg tick-EMA ladders (5..320d), pair
+    #            quorum votes on the confirmed turn, matched pair trades.
+    # DIRECTOR_WINDOW / DIRECTOR_DEADBAND_BP / DIRECTOR_QUORUM env overrides
+    # let short smoke sims exercise the trade path (pairs quorum 4 needs the
+    # 40-epoch window warm -- pass DIRECTOR_QUORUM=2|3 for a 30-day run).
+    if basket_impl == "prorata":
+        dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
+        if director_impl == "pairs":
+            dir_quorum = int(os.environ.get("DIRECTOR_QUORUM", "4"))
+            director = chain.deploy(
+                "PairsRebalanceDirector", basket.address, gov,
+                (86400, dir_quorum, 500_000_000, dir_deadband * 100_000,
+                 300_000_000, 250_000_000, 50))
+            desc = f"quorum={dir_quorum}/7 kappa=0.5"
+        else:
+            dir_window = int(os.environ.get("DIRECTOR_WINDOW", "15"))
+            director = chain.deploy(
+                "BasketRebalanceDirector", basket.address, gov,
+                (86400, dir_window, 3_000_000_000, dir_deadband * 100_000,
+                 250_000_000, 300_000_000, 250_000_000, 50))
+            desc = f"window={dir_window}d rho=3"
+        chain.send(director.functions.syncConstituents())
+        d.director = director
+        d.director_impl = director_impl
+        if verbose:
+            print(f"[deploy] {director_impl} rebalance director "
+                  f"{director.address[:10]}...  {desc}"
+                  f" deadband={dir_deadband}bp cap=50bp/epoch")
     return d

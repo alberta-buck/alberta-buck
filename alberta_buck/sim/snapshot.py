@@ -254,6 +254,22 @@ class Snapshotter:
             if cs:
                 for k in fat:
                     fat[k] += cs.get(k, 0)
+        # Optimal-control debtors: per-agent net worth + counterfactual (the
+        # strategy-comparison observability; a handful of small dicts/frame).
+        octl = []
+        for ag in agents:
+            if hasattr(ag, "octl_state"):
+                st = ag.octl_state(d)
+                if st:
+                    octl.append(st)
+        # Discount-BUCK time arbs (holder/basketeer A/B): per-agent
+        # inventory so PnL and parked positions chart per frame.
+        arbs2 = []
+        for ag in agents:
+            if hasattr(ag, "arb_state"):
+                st = ag.arb_state(d)
+                if st:
+                    arbs2.append(st)
         # Regime knobs (mean over each class present) -- track how the
         # periodic regime shocks move the population's primary knobs.  Read
         # off the live agent objects; guarded so non-equilibrium runs are 0.
@@ -329,6 +345,24 @@ class Snapshotter:
             "fat_prefund": ctr.get("fatPreFundBought", 0), # cum reserve buys
             "fat_throttled": ctr.get("fatThrottled", 0),   # cum throttle hits
             "fat_released": ctr.get("fatReleased", 0),     # cum reserve released
+            "octl": octl,                                  # per-debtor states
+            "arb2": arbs2,                                 # discount-arb states
+            "dba_bought": ctr.get("dbaBought", 0),
+            "dba_sold": ctr.get("dbaSold", 0),
+            "dba_spent": ctr.get("dbaSpent", 0),
+            "dba_recv": ctr.get("dbaRecv", 0),
+            "dbb_bought": ctr.get("dbbBought", 0),
+            "dbb_sold": ctr.get("dbbSold", 0),
+            "dbb_spent": ctr.get("dbbSpent", 0),
+            "dbb_recv": ctr.get("dbbRecv", 0),
+            "dbb_parked": ctr.get("dbbParked", 0),
+            "dbb_harvests": ctr.get("dbbHarvests", 0),
+            "bcd_deploys": ctr.get("bcdDeploys", 0),
+            "bcd_throttled": ctr.get("bcdThrottled", 0),
+            "bcd_saved": ctr.get("bcdSaved", 0),
+            "growth_arrivals": ctr.get("growthArrivals", 0),
+            "growth_departures": ctr.get("growthDepartures", 0),
+            "neighbors_retired": ctr.get("neighborsRetired", 0),
             "iv_events": ctr.get("ivEvents", 0),           # cum interventions
             "supply": int(d.buck.functions.totalSupply().call()),
             "directTrades": ctr["directTrades"],
@@ -340,6 +374,8 @@ class Snapshotter:
             "poolWeights": pool_weights,
             "rebalancerPnl": reb_pnl,
             "rebalanceTrades": ctr.get("rebalanceTrades", 0),
+            "directorPokes": ctr.get("directorPokes", 0),
+            "directorTrades": ctr.get("directorTrades", 0),
             "directMintPnl": dm_pnl,
             "dmEntries": ctr.get("dmEntries", 0),
             "dmExits": ctr.get("dmExits", 0),

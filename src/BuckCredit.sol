@@ -108,8 +108,19 @@ contract BuckCredit is ERC721Enumerable {
     /// indistinguishable from `floor` for any rate >= a few hundred bps.
     uint256 internal constant MAX_DEP_YEARS     = 100;
 
+    // ── Jubilee aging constants (Buck.sol BASE_RATE parity) ─────────
+    uint256 internal constant JUB_SCALE         = 1e27;
+    uint256 internal constant JUB_RATE_PER_SEC  = 2e25 / SECONDS_PER_YEAR;  // 0.02/yr
+
     mapping(uint256 => CreditParams) public credits;
     uint256 private _nextTokenId;
+
+    /// @dev Jubilee aging: the integral of (activatedValue * dt) per credit,
+    ///      folded at every activatedValue mutation (activate / deactivate /
+    ///      insurer clamp) using lastActivatedAt as the fold anchor.  The
+    ///      basis of jubileeRelief: coverage carried T years redeems at a
+    ///      ~2%/yr discount, settled from the Jubilee fund at burn.
+    mapping(uint256 => uint256) internal _covSeconds;
 
     /// @notice Buck contract that receives credit-mutation callbacks for
     ///         cache invalidation.  Wired one-shot post-deployment via
@@ -302,12 +313,27 @@ contract BuckCredit is ERC721Enumerable {
 
     /// @notice Deactivate `amount` of coverage on behalf of `holder`, restricted
     ///         to Buck.  Mirror of activateFromBuck for the burn-side unwind.
-    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
+    ///         Returns the Jubilee relief carried out by the unwound coverage:
+    ///         its pro-rata share of the credit's accrued coverage-seconds,
+    ///         valued at ~2%/yr and capped at the coverage itself.  Buck
+    ///         settles the relief from the fund inside the burn.
+    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount)
+        external returns (uint256 relief)
+    {
         require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
         require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
         CreditParams storage c = credits[tokenId];
         uint256 current = c.activatedValue.asUint();
         require(amount <= current, "BuckCredit: deactivate > active");
+        _foldCoverage(tokenId, c);
+        uint256 cs = _covSeconds[tokenId];
+        if (amount > 0 && cs > 0) {
+            // Each unit of coverage carries its average age out with it.
+            uint256 csShare = cs * amount / current;
+            relief = csShare * JUB_RATE_PER_SEC / JUB_SCALE;
+            if (relief > amount) relief = amount;
+            _covSeconds[tokenId] = cs - csShare;
+        }
         c.activatedValue  = toBuckQty(current - amount);
         c.lastActivatedAt = uint48(block.timestamp);
 
@@ -321,6 +347,7 @@ contract BuckCredit is ERC721Enumerable {
         uint256 newActivated = c.activatedValue.asUint() + amount;
         require(newActivated <= c.faceValue.asUint(), "Exceeds face value");
 
+        _foldCoverage(tokenId, c);
         c.activatedValue  = toBuckQty(newActivated);
         c.lastActivatedAt = uint48(block.timestamp);
 
@@ -332,6 +359,51 @@ contract BuckCredit is ERC721Enumerable {
         }
 
         emit CreditActivated(tokenId, holder, amount, newActivated);
+    }
+
+    /// @dev Fold the elapsed (activatedValue * dt) rectangle into the
+    ///      credit's coverage-seconds.  Callers mutate activatedValue and
+    ///      set lastActivatedAt = now immediately after.
+    function _foldCoverage(uint256 tokenId, CreditParams storage c) internal {
+        uint256 last = c.lastActivatedAt;
+        if (last != 0 && block.timestamp > last) {
+            uint256 active = c.activatedValue.asUint();
+            if (active > 0) {
+                _covSeconds[tokenId] += active * (block.timestamp - last);
+            }
+        }
+    }
+
+    /// @dev Live coverage-seconds: folded accumulator plus the current
+    ///      (activatedValue * dt) rectangle.
+    function _covSecondsLive(uint256 tokenId) internal view returns (uint256) {
+        CreditParams storage c = credits[tokenId];
+        uint256 cs = _covSeconds[tokenId];
+        uint256 last = c.lastActivatedAt;
+        if (last != 0 && block.timestamp > last) {
+            cs += c.activatedValue.asUint() * (block.timestamp - last);
+        }
+        return cs;
+    }
+
+    /// @notice Accrued Jubilee relief on this credit's activated coverage:
+    ///         the portion the Jubilee fund will rebate at redemption.
+    ///         Accrues at ~2%/yr of the outstanding coverage, capped at the
+    ///         coverage itself -- carried ~50 years, a position redeems free.
+    function jubileeRelief(uint256 tokenId) public view returns (uint256) {
+        uint256 active = credits[tokenId].activatedValue.asUint();
+        if (active == 0) return 0;
+        uint256 relief = _covSecondsLive(tokenId) * JUB_RATE_PER_SEC / JUB_SCALE;
+        return relief > active ? active : relief;
+    }
+
+    /// @notice The amount required to close this credit position, including
+    ///         the Jubilee benefit: activated coverage net of accrued
+    ///         relief.  THE liability-side quote for a BUCK position -- it
+    ///         declines year by year while the position is carried, and is
+    ///         never called due (closure only ever by the holder's burn).
+    function redeemCost(uint256 tokenId) external view returns (uint256) {
+        return credits[tokenId].activatedValue.asUint() - jubileeRelief(tokenId);
     }
 
     /// @notice Compact (faceValue, activatedValue, premiumRate) view used by
@@ -400,7 +472,17 @@ contract BuckCredit is ERC721Enumerable {
 
         BuckQty newFace = toBuckQty(newFaceValue);  // bound-check up front
         if (newFaceValue < c.activatedValue.asUint()) {
-            c.activatedValue = newFace;
+            // Reappraisal clamp mutates activatedValue: fold the Jubilee
+            // aging first and scale it to the surviving coverage (the
+            // clamped-away coverage takes its share of aging with it).
+            _foldCoverage(tokenId, c);
+            uint256 cur = c.activatedValue.asUint();
+            if (cur > 0) {
+                _covSeconds[tokenId] =
+                    _covSeconds[tokenId] * newFaceValue / cur;
+            }
+            c.activatedValue  = newFace;
+            c.lastActivatedAt = uint48(block.timestamp);
         }
 
         c.faceValue         = newFace;

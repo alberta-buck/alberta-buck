@@ -51,7 +51,9 @@ Table of Contents
 .. 3. Phase 2: `buck-math' + bindings  [status: DONE 2026-07-03]
 .. 4. Phase 3: `buck-identity' port  [status: DONE 2026-07-03]
 ..... 1. Design of record (banked 2026-07-03)
-.. 5. Phase 4: JS sim platform + live-interactive demos
+.. 5. Phase 4: JS sim platform + live-interactive demos  [status: IN PROGRESS]
+..... 1. Design of record (banked 2026-07-03)
+..... 2. The JS agent doctrine (banked 2026-07-04)
 .. 6. Phase 5: scale-up
 .. 7. Phase 6: partner SDKs + wallet productization
 5. Risks and open questions
@@ -452,8 +454,8 @@ Table of Contents
   scope.
 
 
-4.5 Phase 4: JS sim platform + live-interactive demos
-─────────────────────────────────────────────────────
+4.5 Phase 4: JS sim platform + live-interactive demos  [status: IN PROGRESS]
+────────────────────────────────────────────────────────────────────────────
 
   Agent API + simulated time + price feeds on Tevm-in-browser; the demo
   scenario (interactive agent creation, BuckCredit mint, identity-signed
@@ -461,6 +463,226 @@ Table of Contents
   • /Accept/: the demo scenario runs wholly in-browser with real
     identities; a canonical mini-scenario's JS and Python journals
     agree.
+
+
+4.5.1 Design of record (banked 2026-07-03)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  *Risk killed first* (spike, now the Stage-0 test): Tevm's EVM ships
+  the BN254 precompiles – `IdentityRegistry.register' verified a
+  wasm-kernel-generated registration NIZK ON-CHAIN in-process in ~180 ms
+  (a unicode identity, at that), replay from another account reverted as
+  expected, and `evm_setNextBlockTimestamp' + `evm_mine' give simulated
+  time.  No custom-precompile shim needed: the full identity ceremony –
+  kernel proving, real Solidity verification – runs wholly in JS.
+  Gotcha: `BN254.sol' struct components are UPPERCASE `X=/=Y' at the ABI
+  (viem needs object keys to match exactly).
+
+  *Stages* (1-4 DONE 2026-07-03):
+  1. *Buckworld on Tevm* (node-gated): an artifacts bundle build step
+     (`out/*.json' -> one importable module: nodefs stays node-only, the
+     browser imports the bundle – `buildOnePool' already takes an
+     injected `artifacts(name)'); a `buildBuckWorld' scenario builder
+     deploying the REAL stack (IdentityRegistry + BuckCredit +
+     BuckKControllerDirect + Buck, then TOKEN/USDC V3 pools via SimLP)
+     mirroring `deploy.py''s order; identity onboarding helper (kernel
+     ceremony -> register); simulated-time helpers (day ticks ->
+     timestamp jumps; demurrage becomes VISIBLE, cross-checked against
+     `buck_math' wasm predictions).
+  2. *Browser demo v1*: the interactive page – create agents (real
+     registrations), mint BuckCredit, identity-gated BUCK transfers,
+     time controls, live balances with demurrage – the whole Stage-1
+     world compiled for the browser (tevm is browser-capable by design;
+     wasm kernels already web-target).  Met by
+     `core/js/demo/buckworld.html' (`make nix-core-demo-buckworld'): a
+     DOM-free controller (`demo/src/app.js') drives the story and is
+     gated twice – once with node-loaded deps (`app.tevm.test.js'), and
+     once as the EXACT shipped esbuild bundle executed headless under a
+     minimal DOM stub (`demo.bundle.test.js'), which must complete the
+     scripted opening (two kernel-ceremony citizens, credit line,
+     bilateral handshake, payment, 30 simulated days) and light the
+     bit-exact demurrage badge.  Browser shims: npm `buffer' polyfill +
+     an empty `fs' (an `@tevm/node' persistence path the browser never
+     takes); bundle ~4.3 MB + the two web-target wasm kernels.
+  3. *Background agents + prices*: whale pin + roundtrip traders (Phase
+     1 agents) driving the pools on a seeded price stream while the user
+     interacts; play/pause/speed.  Met by `openMarket()=/=marketTick()'
+     in the demo controller (a real TOKEN/USDC pool beside the BUCK
+     stack; `src/prices.js' seeded BigInt walk) + the page's market
+     panel and tick/play/pause/speed controls; gated by
+     `market.tevm.test.js' (pool tracks the walk to <= 50 bp with the
+     trader churning, EXACT pin with the whale alone, every snap and
+     round-trip journaled by tag, demurrage bit-exact at the ACTUAL
+     elapsed time) and the extended bundle gate.
+  4. *Journal parity* (the acceptance gate): a canonical mini-scenario
+     defined once (`core/vectors/mini-scenario.json': fixed targets – no
+     cross-language RNG at all) and driven op-for-op, tag-for-tag by
+     BOTH platforms – `alberta_buck.sim.mini' (python -> anvil) and
+     `core/js' `scenarios/mini.js' via `bin/mini-sim.mjs' (node -> tevm
+     AND -> a fresh anvil).  Met (`test_mini_parity.py'): python-anvil
+     vs js-anvil journals are BYTE-EQUAL on every record – all semantic
+     fields AND gas (26 records: 4 deploys, the one-pool build, 3 days
+     of whale pins + round trips incl. the declared-revert SPL demo).
+     js-tevm vs js-anvil: semantics exactly; tevm's ethereumjs EVM
+     prices a 4/26 minority differently (the callback-bearing SimLP
+     liquidity mint + whale swaps, +~3.9k gas each) – summarized and
+     bounded by the gate; anvil remains the fidelity anchor.  Two
+     session fixes landed en route: the Python `deploy()' gained the
+     instance-label `tag'- seam the JS session already had, and
+     `_revert_reason' now journals the BARE Solidity reason ("SPL"), the
+     schema's documented form – the pinned journal-sample fixture had
+     always specified it; the implementation finally conforms.
+  5. *Instrument + charts*: a per-tick recorder in the demo controller
+     (pool spots vs references, citizen balances/fees, K and basket
+     value) and in-page SVG charts; the market panel graduates from
+     numbers to time series.  First slice 2026-07-04: `src/chart.js'
+     (dependency-free SVG lines, node + browser) + `world.record(day)'
+     series in the equilibrium world + `bin/eqsim.mjs' writing the K /
+     basketValueInBuck / BUCK-price / debtor-net-worth charts.  Page
+     panels landed the same day and grew into TABBED instrument panels:
+     `eqworld.html' – Overview (headline charts + compact roster), Pools
+     (per-pool cards: spot vs reference, triangle divergence in bp, live
+     reserves; spot/divergence/float charts), BUCK K & PID (controller
+     card: K, fundingFactor, lastBasketCost, gains + rails; K and
+     fundingFactor charts), Basket (bvib, receipts issued,
+     per-constituent backing), Savers and Debtors (add controls plus a
+     selector driving per-agent detail – position value with cost basis;
+     net-worth-vs-counterfactual and mortgage/drawn/banked) and Journal.
+     `world.record' samples fundingFactor, TOKEN/BUCK spots, and
+     references for the new panels; both demo gates drive the tab bar
+     itself.
+  6. *The equilibrium world in JS*: `buildEquilibriumWorld' ports
+     deploy.py's basket world – BuckBasketProRata + TOKEN/BUCK pools +
+     the floating BUCK/USDC pool, CSV reference feeds bundled for the
+     browser, whales pinning TOKEN/USDC to the feeds, a PidKeeper
+     driving the controller – on the REAL routing periphery (see the
+     SimLP risk note: `router.tevm.test.js' already proves the router on
+     Tevm).  Gate: a mini-equilibrium scenario's py/js journals agree
+     (the Stage-4 transcription pattern).  Deploy-weight risk KILLED
+     2026-07-04 (`eqworld.tevm.test.js'): the one-token minimal world –
+     full identity+Direct stack, basket + venue + wiring + binds,
+     TOKEN/USDC + TOKEN/BUCK + floating BUCK/USDC pools (SimLP as the
+     public BUCK-backed LP, per deploy.py), bound Universal Router –
+     deploys and RUNS on Tevm: 38 ops, ~49M total gas, ~4.2 s wall;
+     largest single deploy 5.37M (the V3 factory; basket shell 4.32M,
+     venue 3.16M, UR 5.35M).  The bootstrap `depositToken' (mints BUCK
+     into the basket pool, LPs the pair) and the PidKeeper's
+     permissionless `compute()' both execute in-process.  Scope
+     decision: stage 6 builds this MINIMAL world (1-2 tokens); the full
+     multi-token research world stays in Python (decision of record).
+     Landed 2026-07-04 (`scenarios/eqworld.js'): `buildEquilibriumWorld'
+     with the doctrine's op-helper surface (`pledge' / `route' /
+     `buyBuck' / `sellBuck' / `buyTokenBest' / `basketDeposit' /
+     `basketRedeem' / `refUsd' / `receiptValueUsd' / `fiatIn' /
+     `record'; lazy public NON-carrying holder proxies for credit
+     drawers – carrying accounts cannot draw negative), seeded reference
+     walks, and the Python sim's pre-tick bootstrap mirrored: a
+     targetBuck-scale deposit gives every basket pool real depth.  (The
+     loop gate found the thin-pool failure first: with only an
+     agent-scale deposit as liquidity, the arb's daily corrections swing
+     the pool percent-wise and the redeem path's spot/TWAP guard reverts
+     `Slippage()'.)  The py/js journal-parity transcription remains this
+     stage's exit gate.
+  7. *Economic agents*: the minimal TWO-AGENT equilibrium (design
+     refined 2026-07-04) – a *saver* (USDC wealth; acquires TOKENs or
+     BUCK, whichever route quotes the best after-swap valuation, and
+     deposits to the basket for a term) and the *debtor* (below) –
+     closing the loop the controller defends, with ROI and
+     net-worth-vs-counterfactual chart panels.  Known risk: two lumpy
+     agents may oscillate where the Python sim's heterogeneous
+     population damps – mitigate with deadbands, trade sizes small
+     against pool depth, and the whale-pinned TOKEN/USDC anchor;
+     research-grade equilibrium remains the Python harness's job.  First
+     slice 2026-07-04 (`eqsim.tevm.test.js', the suite's heaviest gate,
+     ~2 min): DayClock + PinWhale + ParityArb (the triangle-consistency
+     arb routes through the REAL router and needs NO identity – BUCK
+     passes only through the bound router mid-hop)
+     ⁃ PidKeeper + BasketSaver (best-route acquisition, live
+     onboarding ceremony) + MonthlyIncome + the MortgageRetiree
+     prototype LIVE.  35 days: every op matched; TOKEN/BUCK held within
+     150 bp of the implied triangle price (73 triangles); K interior
+     0.75 -> 0.774; bvib 0.978; the saver completed a full deposit ->
+     term -> redeem cycle; the debtor retired ~$37k of mortgage
+     principal on the deflation signal.  Prototype hardening en route: a
+     0.5% deadband + a year-of-payments tranche cap (the lumpy-agent
+     mitigations, now in the exemplar), and the ledger's `drawn' column
+     books the post-leg position.  Dynamic add-saver / add-debtor
+     controls + the LIVE PAGE landed 2026-07-04: `demo/eqworld.html'
+     over a DOM-free `EqWorldApp' controller (`demo/src/eqapp.js'; boot
+     -> tick -> addSaver/addDebtor mid-run -> status/roster/charts),
+     built by `make nix-core-demo-eqworld' (~4.4 MB bundle incl. the
+     vendored Universal Router artifact) and gated twice –
+     `eqapp.tevm.test.js' (controller with node deps: dynamic adds, a
+     completed saver cycle, all five panels render) and
+     `eqdemo.bundle.test.js' (the EXACT shipped bundle headless: the
+     opening cast boots live, the page's own controls add agents and
+     step days).  REMAINING: the py/js journal-parity transcription
+     (stage 6's exit gate).
+  8. *The participating user*: swap panel (USDC <-> BUCK <-> TOKENs via
+     the real router), basket deposit/redeem with a receipt/NFT viewer,
+     pledge form (createCredit).
+  9. *Embedding*: single-file build of the demo for slide decks / web
+     pages; docs.  Deployment finding (2026-07-04): the built demo is
+     ALREADY a fully static artifact – `eqworld.html' + `eqapp.js' (~4.7
+     MB raw, ~1 MB compressed) + two wasm kernels (846 KB + 43 KB), no
+     server, no COOP/COEP (tevm is single-threaded JS) – so Cloudflare
+     Pages serves it as-is (the 25 MiB/file limit is far away; `.wasm'
+     gets the right content-type; perry-kundert.ca's `_headers' sets no
+     CSP today – if one is ever added, `script-src' needs
+     `'wasm-unsafe-eval'').  Embedding therefore reduces to a staging
+     target copying the built demo into the Hugo site's `static/' tree
+     plus an iframe shortcode for pages and reveal decks; the
+     single-file variant remains optional polish.
+
+
+4.5.2 The JS agent doctrine (banked 2026-07-04)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  *Audience*: the JS platform is written for a senior integration
+  developer at a credit union or payments processor – someone who wires
+  account systems to card networks and will use our JS/Python/Rust SDKs
+  to build back-office BUCK services: deposit and credit product account
+  values, investment values and histories, statements, web interfaces.
+  Their first contact is the example agents, so THE AGENTS ARE THE
+  PRODUCT: SDK documentation that happens to run.
+
+  *The agent contract* (all of it): a plain object with `setup(world)'
+  and `act(world, day, tick)'; every chain mutation goes through
+  `session.send(contract, fn, args, {tag, account, expect})' –
+  journaled, expectation-declared, refusals first-class; analytics
+  accumulate in a plain `this.ledger' array the chart panels read.  No
+  framework, no base class, no hidden state.
+
+  *The world builder carries the plumbing*: scenario builders provide
+  labeled op helpers (`onboard' / `identityApprove' / `createCredit'
+  today; `buyBuck' / `sellBuck' / `basketDeposit' / `basketRedeem' /
+  `pledge' / `refUsd' / `receiptValueUsd' with the equilibrium world) so
+  agents never touch custody mechanics, identity binding, or router
+  encoding.  Plumbing decisions (SimLP vs router, proxy vs EOA) change
+  the world builder, never the agents.
+
+  *Acceptance criterion (developer experience)*: every shipped example
+  agent fits on one screen and reads cold to that developer.  Enforced
+  mechanically by the prototype gate (`core/js/test/prototypes.test.js'
+  caps file length) and substantively by review.
+
+  *Prototypes* (`core/js/prototypes/', banked ahead of the world that
+  runs them; Stage 7 wires them live):
+  • `basket-investor.js' – deposits a constituent TOKEN into BuckBasket
+    (the basket mints BUCK against it and LPs the pair; the depositor
+    holds the receipt NFT – the claim), marks the receipt to market
+    daily, redeems at a horizon; books USD cost/mark/redeem rows for the
+    ROI chart (dollar-days accounting mirroring the Python DM agents).
+  • `mortgage-retiree.js' – the two-sided debtor (refined 2026-07-04):
+    holds a USDC mortgage AND insured assets; pledges for BuckCredit
+    headroom; on BUCK DEFLATION (`basketValueInBuck' < 1) draws by
+    selling BUCK HIGH and retires mortgage principal early; banks the
+    freed payments; on INFLATION (> 1) buys discounted BUCK to retire
+    the draw; forced-deleverages when the controller tightens K past the
+    position.  One ledger carries the actual AND counterfactual
+    trajectories – the net-worth-vs-original-mortgage chart falls out
+    (actual: house + banked - mortgage - drawn; hypo: house + hypoBanked
+    - hypoOwing).
 
 
 4.6 Phase 5: scale-up
@@ -482,9 +704,22 @@ Table of Contents
   JS/Python/ native; registrar/insurer/credit-union integration SDKs
   (same crates, thin service shims); Holochain zomes consuming
   `buck-identity=/=buck-wallet'.
+
+  A named deliverable (banked 2026-07-04): the *back-office BUCK
+  service* – a Node process an integrator runs beside their account
+  system, exposing the BUCK endpoints their products need: balances and
+  statements, deposit/credit product values, investment values and
+  histories, an identity fountain isolating pools of back-office
+  holdings, and Notes flows that shelter idle BUCK from demurrage and
+  hide monetary-flow footprints from third parties.  Stress-tested by
+  pointing its `ChainSession' at a Tevm-hosted sim, anvil, or a testnet.
+  The Notes cryptography is already in the wasm kernel (commitments,
+  nullifiers, A2/B1 bindings, replayed by the JS suite); this
+  productizes its orchestration.
   • /Accept/: an end-to-end partner flow (sign Identity -> mint
     BuckCredit -> BUCK account product) driven purely through the SDKs
-    on a Tenderly or testnet `ChainSession'.
+    on a Tenderly or testnet `ChainSession'; the back-office service
+    survives a stress scenario against a Tevm or anvil sim.
 
 
 5 Risks and open questions
@@ -494,6 +729,23 @@ Table of Contents
     its anvil-compat surface is partial.  Mitigation: demos are small
     populations; the identical-journal gate (Phase 4) catches semantic
     drift; anvil remains the fidelity anchor.
+  • *Thin periphery vs real routing tools* (SimLP): the pools were
+    always real (`UniswapV3Factory=/=UniswapV3Pool'); SimLP only
+    simulated the PERIPHERY (mint/swap callbacks).  RESOLVED 2026-07-04
+    (`core/js/test/router.tevm.test.js'): the Python sim's Universal
+    Router recipe – the vendored artifact wired with a dummy Permit2
+    (pre-fund route, `payerIsUser=false'), OUR pool init-code-hash
+    (locally compiled bytecode hashes differently than mainnet's), real
+    WETH9 – deploys on Tevm at 5,346,812 gas (under the ~15M block
+    budget) and routes a real V3_SWAP_EXACT_IN; `core/js/src/router.js'
+    mirrors `alberta_buck/sim/router.py'.  Doctrine: agent and USER
+    swaps go through the real router (the code path integrators copy,
+    and the surface real JS AMM tooling can be pointed at); SimLP
+    remains for simulation god-modes only – whale pinning and liquidity
+    seeding.  In BUCK worlds the router is identity-bound
+    public+carrying (deploy.py shows the bind).  Real Permit2 (its
+    canonical CREATE2 deploy) is optional follow-up for signature-based
+    approvals.
   • *Two agent platforms drifting*: mitigated by shared kernels, shared
     scenario vocabulary, shared journal diffing – and by keeping agents
     deliberately simple (a decision of record).

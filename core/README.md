@@ -17,11 +17,23 @@ Python package keeps working and transitions onto these incrementally.
                   over any viem client), backends.js (anvilSession joins a
                   running anvil -- e.g. one a Python sim deployed into --
                   tevmSession runs the in-process EVM), the shared journal
-                  reader/writer, V3 price math (v3.js), the agent loop
-                  (world.js) with PinWhale + RoundTripTrader, the one-pool
-                  scenario, and bin/join-sim.mjs.  Deps: viem + tevm
-                  (`npm ci` in core/js).  Later: WASM kernel bindings,
-                  browser demo harness.
+                  reader/writer, V3 price math (v3.js), the REAL Uniswap
+                  periphery (router.js: Universal Router deploy recipe +
+                  V3_SWAP_EXACT_IN encoding), the agent loop (world.js)
+                  with PinWhale + RoundTripTrader, the one-pool scenario,
+                  and bin/join-sim.mjs.  prototypes/ holds the agent
+                  doctrine's structural exemplars (basket investor,
+                  mortgage retiree -- the latter runs LIVE in the
+                  equilibrium world).  scenarios/eqworld.js builds the
+                  minimal equilibrium world (basket + pools + router +
+                  agent-facing op helpers); bin/eqsim.mjs runs it
+                  headless with SVG charts (src/chart.js).  demo/
+                  hosts the interactive pages -- buckworld.html
+                  (citizens + market) and eqworld.html (the BUCK-K
+                  loop: live chart panels, dynamic add-saver /
+                  add-debtor) -- each gated headlessly over the exact
+                  shipped esbuild bundle.  Deps: viem + tevm
+                  (`npm ci` in core/js).
       rust/       cargo workspace: buck-math -- the integer monetary kernel
                   (BuckCredit depreciation, Buck demurrage fee + carrying
                   buckSeconds apportionment, BuckKControllerDirect ppm PID +

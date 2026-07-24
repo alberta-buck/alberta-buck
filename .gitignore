@@ -34,6 +34,13 @@ node_modules/
 /core/js/wasm/
 /core/js/demo/wasm-web/
 
+# Bundled forge artifacts for the JS platform (make nix-core-js-artifacts)
+/core/js/artifacts/
+
+# The bundled demo apps (make nix-core-demo-buckworld / -eqworld)
+/core/js/demo/app.js
+/core/js/demo/eqapp.js
+
 # Python
 __pycache__/
 *.pyc
@@ -54,3 +61,7 @@ lcov.info
 *.log
 foundry.lock
 /raw-materials-price/
+
+# window-stamped historical CSVs are generated caches
+alberta_buck/sim/prices/hist-*-*d.csv
+alberta_buck/sim/prices/hist-manifest-*.json

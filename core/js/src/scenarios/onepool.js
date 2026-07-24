@@ -15,7 +15,7 @@ const TICK_SPACING = 60;
  *                  bundled map in the browser)
  * @param opts.price      USDC base units (1e6) per whole TOKEN (default $2.50)
  * @param opts.usdcDepth  USDC base units of full-range depth (default $10M)
- * @returns world {session, usdc, token, pool, simlp}
+ * @returns world {session, usdc, token, pool, simlp, factory}
  */
 export async function buildOnePool(session, artifacts,
                                    { price = 2_500_000n,
@@ -55,5 +55,5 @@ export async function buildOnePool(session, artifacts,
   await session.send(simlp, "mint",
     [pool.address, lo, hi, L, t0, t1], { tag: "onepool:mint-liquidity" });
 
-  return { session, usdc, token, pool, simlp };
+  return { session, usdc, token, pool, simlp, factory };
 }

@@ -16,6 +16,8 @@
     "viem": "^2.54.2"
   },
   "devDependencies": {
+    "buffer": "^6.0.3",
+    "esbuild": "^0.28.1",
     "wasm-pack": "^0.15.0"
   }
 }

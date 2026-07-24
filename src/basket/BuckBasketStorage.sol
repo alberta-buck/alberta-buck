@@ -84,6 +84,8 @@ abstract contract BuckBasketStorage {
     IUniswapV3Factory public v3Factory;
     IBuckBasketVenue  public venue;        // the delegatecall AMM-venue facet
     address           public governance;
+    address           public director;     // optional IRebalanceDirector advisor
+    uint32            public lastRebalanceStepEpoch;   // +1-encoded; 0 = never
 
     uint24  public defaultFeeTier;
     uint32  public twapWindow;
@@ -113,6 +115,9 @@ abstract contract BuckBasketStorage {
     event TreasuryWithdrawn(address indexed to, uint256 amount);
     event TreasuryReinvested(uint256 indexed poolIdx, uint256 buckConsumed, uint128 liquidity);
     event VenueSet(address indexed venue);
+    event DirectorSet(address indexed director);
+    event RebalanceStepped(uint256 indexed sellIdx, uint256 indexed buyIdx,
+                           uint256 valueMoved, uint256 buckReinvested, uint128 liquidity);
 
     // --- Errors (custom errors save bytecode vs require-strings) ----------- //
     error AlreadyPresent();
@@ -127,12 +132,14 @@ abstract contract BuckBasketStorage {
     error Buck0();
     error BuckIn0();
     error ConversionLoss();
+    error DirectorUnset();
     error EmptyDeposit();
     error EmptyPool();
     error ExceedsPending();
     error Gov0();
     error InvalidRescale();
     error L0();
+    error NoAdvice();
     error NoLPWithdrawn();
     error NoOutstanding();
     error NoValue();
@@ -146,6 +153,7 @@ abstract contract BuckBasketStorage {
     error ScaledWeightsIncorrect();
     error SeedTooSmall();
     error Slippage();
+    error StepAlreadyDone();
     error SwapDeltaSign();
     error To0();
     error TokenIn0();

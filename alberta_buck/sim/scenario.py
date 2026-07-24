@@ -71,7 +71,11 @@ REBALANCING = Scenario(
             # Smaller stochastic BUCK holders: mint externally backed BUCK
             # and deposit it into the currently most-underweight pool, with
             # BuckBasket enforcing its BUCK->TOKEN slippage guard.
-            "DirectMintBuckAgent": 75},
+            "DirectMintBuckAgent": 75,
+            # Advances the BasketRebalanceDirector's amortized MA signals a
+            # bounded slice per tick and executes its advisory efforts
+            # (sell-side hint -> BUCK -> buy-side hint) through the router.
+            "DirectorKeeperAgent": 1},
     days=365,
     ticks_per_day=4,
 )
@@ -108,7 +112,10 @@ def build_historical(start=None, end=None, years=5.0, ticks_per_day=1,
                 "MarketMakerWhale": 1,
                 "BootstrapDMAgent": 24,
                 "DirectMintAgent": 120,
-                "DirectMintBuckAgent": 40},
+                "DirectMintBuckAgent": 40,
+                # Advances the rebalance director's amortized signals a
+                # bounded slice per tick and executes its advisory efforts.
+                "DirectorKeeperAgent": 1},
         days=n_days,
         ticks_per_day=ticks_per_day,
         seed=seed,
@@ -147,6 +154,7 @@ def build_equilibrium(start=None, end=None, years=None, ticks_per_day=48,
     # know about these equilibrium agents).
     eqm.FatCreditBorrowerAgent._regime_counter = 0
     eqm.SaverAgent._regime_counter = 0
+    eqm.BuckCreditDebtorAgent._arrival_seq = 0
     from alberta_buck.sim.gen_historical import gen
     files, n_days, _s, _e = gen(start=start, end=end,
                                 years=1.5 if years is None else years)
