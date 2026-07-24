@@ -1,0 +1,13 @@
+[package]
+name = "buck-registry"
+version = "0.0.1"
+edition = "2021"
+description = "Alberta Buck registry kernel: identity Merkle accumulators, certificates and the central aggregator matching the alberta_buck.registry reference bit-for-bit"
+license = "MIT"
+
+[dependencies]
+buck-identity = { path = "../buck-identity" }
+
+[dev-dependencies]
+# Test-only (golden-vector JSON); does not ship in any artifact.
+serde_json = "1"

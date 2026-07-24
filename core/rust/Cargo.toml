@@ -11,6 +11,8 @@ resolver = "2"
 members = [
     "buck-math",
     "buck-identity",
+    "buck-registry",
+    "buck-wallet",
     "bindings/py",
     "bindings/js",
     "bindings/py-identity",

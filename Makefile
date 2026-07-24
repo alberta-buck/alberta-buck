@@ -1031,11 +1031,20 @@ sim-plot-eq-%:
 
 .PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
+.PHONY: core-wallet-vectors core-registry-vectors
 
 # Emit from the py_ecc reference (kernel_vectors.py forces
 # BUCK_IDENTITY_BACKEND=py itself; the binding need not be built).
 core-identity-vectors:
 	python -m alberta_buck.wallet.kernel_vectors core/vectors/identity-kernel-vectors.json
+
+# Wallet + registry kernel vectors (same doctrine: py reference emits,
+# cargo/pytest/node replay; regenerating is an ABI-break-level event).
+core-wallet-vectors:
+	python -m alberta_buck.wallet.wallet_kernel_vectors core/vectors/wallet-kernel-vectors.json
+
+core-registry-vectors:
+	python -m alberta_buck.registry.kernel_vectors core/vectors/registry-kernel-vectors.json
 
 core-js-deps:
 	cd core/js && npm ci

@@ -1,0 +1,17 @@
+[package]
+name = "buck-wallet"
+version = "0.0.1"
+edition = "2021"
+description = "Alberta Buck wallet kernel: canonical identity JSON, the AB-RCPT/1 envelope, receipt build/verify and the Notes flows matching the alberta_buck.wallet reference bit-for-bit"
+license = "MIT"
+
+[dependencies]
+buck-identity = { path = "../buck-identity" }
+buck-registry = { path = "../buck-registry" }
+# arbitrary_precision keeps integer tokens as their exact text, so the
+# canonical writer can enforce the dialect (ints of any size, no floats)
+# without ever routing a value through f64.
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+# Receipt ids are base32(sha256(canonical_bytes)); RustCrypto sha2 is the
+# one non-arkworks crypto dependency (std, wasm-clean).
+sha2 = "0.10"
