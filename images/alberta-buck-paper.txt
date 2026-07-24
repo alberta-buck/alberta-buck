@@ -30,7 +30,7 @@ The consequences read like due process implemented in mathematics (the
 participants hold it; each may surrender, refuse, or destroy their copy;
 and no institution can be compelled to produce what it provably never
 had.  One design choice makes this work: payments bind KYC-certified
-/identities/—not just account keys—(*Identity-M binding* [1]). A single
+/identities/—not just account keys—(*Identity-M binding*[1]). A single
 re-encryption gadget, instantiated three ways, yields every realisable
 note flavour (addressed or bearer, public or private issuer). All three
 are shipped and measured on Ethereum.  We prove the fourth flavour
@@ -222,7 +222,7 @@ Table of Contents
   hands Bob the note's /opening/ (a few hundred bytes) by any channel
   she likes: a message, a QR code on her phone's screen, a slip of
   paper.  Days or months later, from any account he controls, Bob
-  /deposits/ the opening: his wallet proves (in /zero knowledge/ [11]),
+  /deposits/ the opening: his wallet proves (in /zero knowledge/[11]),
   revealing nothing about which note, that some unspent note in the pool
   is his to claim, and the pool pays him one hundred BUCKs.  An observer
   watching the chain sees a commitment appear at one moment and an
@@ -334,10 +334,8 @@ Table of Contents
   accounts:
 
   • A new key pair \((sk, pk)\).
-  • A fresh ElGamal [fn::ElGamal encryption: a public-key encryption
-  scheme over elliptic curve points that supports re-randomization and
-  is semantically secure under the DDH assumption] encryption \( E =
-  (rG, M + r \cdot pk) \) of the same \( M = mG \).
+  • A fresh ElGamal[13] encryption \( E = (rG, M + r \cdot pk) \) of the
+    same \( M = mG \).
   • A statistically unlinkable rerandomization of the PS signature.
 
   The rerandomized credential is independently verifiable as having come
@@ -377,7 +375,7 @@ Table of Contents
    PEReDi [9]                      yes           regulator-facing   via threshold        *yes* (maintainers)  no           
    Platypus [10]                   yes           regulator-facing   via central bank     *yes* (cen. bank)    no           
    CBDC (e-CNY, digital euro) [2]  no            n/a                n/a                  issuer sees all      no           
-   *BUCK Notes (A1, A2, B1)*       *yes*         *yes*              *yes*                *no*                 *yes*        
+   *BUCK Notes*                    *yes*         *yes*              *yes*                *no*                 *yes*        
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   The auditable-privacy line (PRCash, UTT, PEReDi, Platypus) is the
   closest comparison.  All four restore accountability to unlinkable
@@ -753,10 +751,10 @@ Table of Contents
 8.1 The pool, the commitment, the nullifier
 ───────────────────────────────────────────
 
-     The pool is a Tornado-style [13] Merkle tree of note commitments,
+  The pool is a Tornado-style[14] Merkle tree of note commitments,
   hashed with Poseidon (a hash designed to be cheap inside proof
   circuits), keeping a rolling window of recent roots and a set of spent
-  /nullifiers/ [14]—one-way serial numbers, revealed only at spend, that
+  /nullifiers/[15]—one-way serial numbers, revealed only at spend, that
   make a double-spend detectable without linking the spend to its note.
   with Poseidon (a hash designed to be cheap inside proof circuits),
   keeping a rolling window of recent roots and a set of spent
@@ -837,8 +835,8 @@ Table of Contents
   in one transaction, the flavour-agnostic note proof plus three
   mutually-bound gates:
 
-  1. *The deposit-coupling sigma* (`verifyDepositCoupling'; EIP-196
-     [15], Ethereum's native curve arithmetic): the depositing account
+  1. *The deposit-coupling sigma* (`verifyDepositCoupling'; EIP-196[16]
+     Ethereum's native curve arithmetic): the depositing account
      `msg.sender' is registered and bound to a scalar \( m \), and the
      supplied ciphertext \( eEnc \) decrypts under \( m \) to the point
      blinded inside the commitment \( P_I = M + bH \) – a
@@ -1735,22 +1733,26 @@ Currencies."  ACM CCS 2022.  [TODO verify]
 Central Bank Digital Currency with Unlinkable Transactions and
 Privacy-Preserving Regulation."  ACM CCS 2022.  [TODO verify]
 
-[11] a cryptographic technique allowing one party to prove a statement
+[11] A cryptographic technique allowing one party to prove a statement
 is true without revealing any information beyond the validity of the
-statement itself
+statement itself.
 
-[12] Pointcheval-Sanders (PS) signatures: a type of structure-preserving
-signature that supports efficient rerandomization, allowing the holder
-to produce unlinkable fresh versions of the credential without the
-issuer's involvement
+[12] Pointcheval-Sanders (PS) signatures: a type of
+structure-preserving signature that supports efficient
+rerandomization, allowing the holder to produce unlinkable fresh
+versions of the credential without the issuer's involvement.
 
-[13] Tornado-style: a privacy mixer using Merkle trees of commitments
-and nullifiers to hide which input corresponds to which output, as
-pioneered by Tornado Cash
+[13] ElGamal encryption: a public-key encryption scheme over elliptic
+curve points that supports re-randomization and is semantically secure
+under the DDH assumption.
 
-[14] nullifier: a one-way serial number derived from the note's secret
+[14] A privacy mixer using Merkle trees of commitments and nullifiers
+to hide which input corresponds to which output, as pioneered by
+Tornado Cash.
+
+[15] A one-way serial number derived from the note's secret
 randomness; it lets the system detect double-spends while preserving
-unlinkability
+unlinkability.
 
-[15] EIP-196: Ethereum precompiles for efficient elliptic curve
-operations on the alt_bn128 curve
+[16] Ethereum precompiles for efficient elliptic curve operations on
+the alt_bn128 curve.

@@ -44,21 +44,18 @@ payee cannot complete a payment without each holding evidence that
 names the other.
 
 The consequences read like due process implemented in mathematics (the
-*compulsion calculus*): evidence of every payment exists; only the
-participants hold it; each may surrender, refuse, or destroy their copy;
-and no institution can be compelled to produce what it provably never had.
-One design choice makes this work: payments bind KYC-certified
-/identities/---not just account keys---(*Identity-M binding* [fn::The
-binding of payments to a KYC-certified identity point \(M\), rather than
-to disposable account keys.]). A single re-encryption gadget, instantiated
-three ways, yields every realisable note flavour (addressed or bearer,
-public or private issuer). All three are shipped and measured on Ethereum.
-We prove the fourth flavour impossible, show that the obvious cheap binding
-is vacuous, and prove that zero-knowledge registry membership is necessary
-for the doubly-anonymous case under a stated restriction. This is exactly
-the branch the shipped system takes. Every theorem carries an executable
-witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]],
-[[https://perry.kundert.ca/images/alberta-buck-paper-flow.txt][Text]])
+*compulsion calculus*): evidence of every payment exists; only the participants
+hold it; each may surrender, refuse, or destroy their copy; and no institution
+can be compelled to produce what it provably never had.  One design choice makes
+this work: payments bind KYC-certified /identities/---not just account
+keys---(*Identity-M binding*[fn:m-binding]). A single re-encryption gadget,
+instantiated three ways, yields every realisable note flavour (addressed or
+bearer, public or private issuer). All three are shipped and measured on
+Ethereum.  We prove the fourth flavour impossible, show that the obvious cheap
+binding is vacuous, and prove that zero-knowledge registry membership is
+necessary for the doubly-anonymous case under a stated restriction. This is
+exactly the branch the shipped system takes. Every theorem carries an executable
+witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-paper-flow.txt][Text]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -204,9 +201,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]],
   hands Bob the note's /opening/ (a few hundred bytes) by any channel
   she likes: a message, a QR code on her phone's screen, a slip of paper.
   Days or months later, from any account he controls, Bob /deposits/ the
-  opening: his wallet proves (in /zero knowledge/ [fn::a cryptographic
-  technique allowing one party to prove a statement is true without
-  revealing any information beyond the validity of the statement itself]),
+  opening: his wallet proves (in /zero knowledge/[fn:zeroknowledge]),
   revealing nothing about which note, that some unspent note in the pool is
   his to claim, and the pool pays him one hundred BUCKs.  An
   observer watching the chain sees a commitment appear at one moment and an
@@ -317,18 +312,14 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]],
   :END:
 
   A single KYC ceremony produces one scarce root of trust per person: an
-  identity scalar \( m = H(\mathrm{id}) \) and a Pointcheval-Sanders
-  [fn::Pointcheval-Sanders (PS) signatures: a type of structure-preserving
-  signature that supports efficient rerandomization, allowing the holder to
-  produce unlinkable fresh versions of the credential without the issuer's
-  involvement] signature on it.  From that master credential the owner can, entirely
-  offline, derive an arbitrary number of fresh on-chain accounts:
+  identity scalar \( m = H(\mathrm{id}) \) and a
+  Pointcheval-Sanders [fn:Pointcheval-Sanders] signature on it.  From that
+  master credential the owner can, entirely offline, derive an arbitrary number
+  of fresh on-chain accounts:
 
   - A new key pair \((sk, pk)\).
-  - A fresh ElGamal [fn::ElGamal encryption: a public-key encryption
-  scheme over elliptic curve points that supports re-randomization and is
-  semantically secure under the DDH assumption] encryption \( E = (rG, M + r
-  \cdot pk) \) of the same \( M = mG \).
+  - A fresh ElGamal[fn:ElGamal] encryption \( E = (rG, M + r \cdot pk) \)
+    of the same \( M = mG \).
   - A statistically unlinkable rerandomization of the PS signature.
 
   The rerandomized credential is independently verifiable as having come
@@ -371,7 +362,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]],
   | PEReDi [fn:peredi]                       | yes          | regulator-facing  | via threshold       | *yes* (maintainers) | no           |
   | Platypus [fn:platypus]                   | yes          | regulator-facing  | via central bank    | *yes* (cen. bank)   | no           |
   | CBDC (e-CNY, digital euro) [fn:cbdc]     | no           | n/a               | n/a                 | issuer sees all     | no           |
-  | *BUCK Notes (A1, A2, B1)*                | *yes*        | *yes*             | *yes*               | *no*                | *yes*        |
+  | *BUCK Notes*                             | *yes*        | *yes*             | *yes*               | *no*                | *yes*        |
   #+LATEX: }
 
   The auditable-privacy line (PRCash, UTT, PEReDi, Platypus) is the
@@ -780,15 +771,11 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]],
 
 ** The pool, the commitment, the nullifier
 
-   The pool is a Tornado-style [fn::Tornado-style: a privacy mixer using
-Merkle trees of commitments and nullifiers to hide which input corresponds
-to which output, as pioneered by Tornado Cash] Merkle tree of note
-commitments, hashed with Poseidon (a hash designed to be cheap inside proof
-circuits), keeping a rolling window of recent roots and a set of spent
-/nullifiers/ [fn::nullifier: a one-way serial number derived from the note's
-secret randomness; it lets the system detect double-spends while preserving
-unlinkability]---one-way serial numbers, revealed only at spend, that make a
-double-spend detectable without linking the spend to its note.
+   The pool is a Tornado-style[fn:Tornado] Merkle tree of note
+   commitments, hashed with Poseidon (a hash designed to be cheap inside proof
+   circuits), keeping a rolling window of recent roots and a set of spent
+   /nullifiers/[fn:nullifier]---one-way serial numbers, revealed only at spend, that make a
+   double-spend detectable without linking the spend to its note.
    with Poseidon (a hash designed to be cheap inside proof circuits),
    keeping a rolling window of recent roots and a set of spent
    /nullifiers/ -- one-way serial numbers, revealed only at spend, that
@@ -865,7 +852,7 @@ double-spend detectable without linking the spend to its note.
    in one transaction, the flavour-agnostic note proof plus three
    mutually-bound gates:
 
-   1. *The deposit-coupling sigma* (=verifyDepositCoupling=; EIP-196 [fn::EIP-196: Ethereum precompiles for efficient elliptic curve operations on the alt_bn128 curve],
+   1. *The deposit-coupling sigma* (=verifyDepositCoupling=; EIP-196[fn:EIP-196]
       Ethereum's native curve arithmetic): the depositing account
       =msg.sender= is registered and
       bound to a scalar \( m \), and the supplied ciphertext \( eEnc \)
@@ -1781,3 +1768,28 @@ double-spend detectable without linking the spend to its note.
 [fn:peredi] Kiayias, A., Kohlweiss, M., Sarencheh, A.  "PEReDi: Privacy-Enhanced, Regulated and Distributed Central Bank Digital Currencies."  ACM CCS 2022.  [TODO verify]
 
 [fn:platypus] Wuest, K., Kostiainen, K., Delius, N., Capkun, S.  "Platypus: A Central Bank Digital Currency with Unlinkable Transactions and Privacy-Preserving Regulation."  ACM CCS 2022.  [TODO verify]
+
+[fn:zeroknowledge] A cryptographic technique allowing one party to prove a statement is true without
+revealing any information beyond the validity of the statement itself.
+
+[fn:m-binding] The binding of payments to a KYC-certified identity point \(M\),
+rather than to disposable account keys.
+
+[fn:Pointcheval-Sanders] Pointcheval-Sanders (PS) signatures: a type of
+structure-preserving signature that supports efficient rerandomization, allowing
+the holder to produce unlinkable fresh versions of the credential without the
+issuer's involvement.
+
+[fn:ElGamal] ElGamal encryption: a public-key encryption scheme over elliptic
+curve points that supports re-randomization and is semantically secure under the
+DDH assumption.
+
+[fn:Tornado] A privacy mixer using Merkle trees of commitments and nullifiers to
+hide which input corresponds to which output, as pioneered by Tornado Cash.
+
+[fn:nullifier] A one-way serial number derived from the note's secret
+randomness; it lets the system detect double-spends while preserving
+unlinkability.
+
+[fn:EIP-196] Ethereum precompiles for efficient elliptic curve operations on the
+alt_bn128 curve.
