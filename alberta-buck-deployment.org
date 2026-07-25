@@ -108,36 +108,114 @@ sim and the equilibrium findings (=EQUILIBRIUM.md=, the sweep vectors,
 =rebalance_policy.py=) are ready to be read by anyone.  The papers are the
 natural gate: publish the package when the paper it accompanies is out.
 
-** D2: licence
+** D2: licence -- CAL-1.0 for the kernels
 
-Currently inconsistent, and there is *no =LICENSE= file in the repository at
-all*:
+*Rule (settled 2026-07-25): start restrictive and relax deliberately.*  A
+licence can always be loosened later, or granted separately to a specific
+counterparty; it can never be tightened on a version already published.
+Every ambiguity therefore resolves toward the more restrictive choice.
+
+The repository state this replaces -- inconsistent, and with *no =LICENSE=
+file at all*:
 
 | where                            | says                       |
 |----------------------------------+----------------------------|
+| =src/*.sol= (49 files)           | GPL-3.0 / GPL-3.0-or-later |
 | =pyproject.toml=                 | GPL-3.0-or-later           |
 | =core/rust/*/Cargo.toml= (all 4) | MIT                        |
 | =core/js/package.json=           | MIT                        |
 | =core/python/pyproject.toml=     | (nothing)                  |
 | repository root                  | no =LICENSE=, no =COPYING= |
 
-/Recommendation/: keep the split, make it deliberate, and write the files.
+*** What we are actually trying to accomplish
 
-- *Kernels, platform libraries and contracts*: MIT OR Apache-2.0 (the Rust
-  ecosystem norm; dual licensing matters to corporate adopters, and these
-  are exactly the artifacts a registrar, insurer or credit union embeds).  A
-  GPL kernel makes the Phase 6 partner SDKs a non-starter, and a GPL
-  contract ABI is meaningless friction.
+The goal is that an organization intending to use the Alberta Buck to build
+a /liberty-restricting/ system -- custodial control of other people's keys,
+freezable or seizable balances, users denied their own records -- is at
+minimum operating out of licence.
+
+No OSI-approved licence can do this by restricting /purpose/: OSD 6
+forbids discrimination against fields of endeavour, and the ethical-licence
+family (Hippocratic and relatives) is closer to a statement of values than a
+working legal instrument.
+
+The *Cryptographic Autonomy License* (CAL-1.0, OSI-approved 2020, drafted
+for Holochain) does it by restricting /architecture/ instead, which is both
+enforceable and self-executing.  Its distinguishing obligations:
+
+| section | obligation                                                                              |
+|---------+-----------------------------------------------------------------------------------------|
+| 4.1     | provide Recipients the Source Code (or unrestricted network access to it)                |
+| 4.1.2   | modifications go out under CAL-1.0 or a compatible licence                               |
+| 4.1.3   | 90-day embargo permitted for coordinated vulnerability disclosure                        |
+| 4.2.1   | give each Recipient a no-charge copy of *their own User Data*                            |
+| 4.2.2   | *no cryptographic or technological measure* that limits a Recipient's access to functionality or control of their data |
+| 4.2.3   | no contractual restriction on a Recipient exercising the same permissions independently  |
+| 4.5     | *Combined Work Exception*: per-file opt-in permitting combination into a larger work under any terms, provided notices, source access and full user-data control still reach Recipients |
+
+A system that holds users' keys, can freeze their balances, or withholds
+their records *cannot comply with 4.2 while using CAL-covered code*.  It is
+out of licence the day it ships -- no intent needs to be proven, and no
+field of endeavour is discriminated against.  This is the mechanism we want,
+and it is what CAL was commissioned to do.
+
+*** The layers
+
+- *Kernels (=alberta-buck-{math,identity,wallet,registry}=), the wasm/PyO3
+  bindings, and both platform libraries*: *CAL-1.0*.  This is where the
+  leverage is.  Anyone building a control system needs the identity, wallet
+  and Notes kernels; nobody needs our sim.  CAL anywhere else is decorative.
+- *Contracts and their artifacts*: *GPL-3.0-or-later* -- already true, and
+  not a change: all 49 =src/*.sol= files declare it today.  See P2.5 for the
+  third-party artifacts (Uniswap) that must not be redistributed under it.
 - *=alberta_buck=* (sim, research, tooling): GPL-3.0-or-later, as
-  =pyproject.toml= already claims.  Nothing embeds it; it is the research
-  platform.
+  =pyproject.toml= already claims.  It is research; it is not deployed at
+  users, so CAL's user-data machinery has nothing to bite on.
+- *Papers and documents*: separate decision, not blocking any upload.
 
-That combination is legal in the direction it needs to be: GPL code may
-depend on MIT code.
+*** Consequences to plan for
 
-Deliverables: =LICENSE= (root, GPL-3), =core/LICENSE-MIT= +
-=core/LICENSE-APACHE=, =license= / =license-files= keys in every manifest,
-and =license = "MIT OR Apache-2.0"= in the four crates.
+- *The Combined Work Exception is the partner path, and it is one-way.*
+  Marking a file CWE cannot be undone for a published version.  So mark it
+  narrowly and late -- at the /binding and API surface/ (=bindings/py=,
+  =bindings/js=, the =core/js= public entry points) if and when a real
+  integrator needs it -- never across the kernels wholesale.  A credit union
+  can then link the kernel into a proprietary back office and still owe its
+  members their keys and their data, which is exactly the trade we want.
+- *Dual licensing is the enforcement lever*, and it works only because you
+  hold the copyright.  An organization that cannot comply must come and ask,
+  and you may decline.  This requires a *CLA* the moment the repository is
+  public and outside contributions arrive (P7) -- without it, contributed
+  code is not yours to relicense.
+- *Expect friction, and budget for it.*  CAL is young, has thin case law,
+  and every institutional counsel will have to read it rather than
+  recognize it.  That friction is the instrument working, not a defect --
+  but it is a real cost against Phase 6 adoption.
+- *The licence governs code, not ideas.*  The papers are public; a
+  determined actor can reimplement the mechanism from them.  What CAL buys
+  is that they cannot do it /with our code/ while denying their users
+  autonomy.
+- *Why not Apache-2.0* (the runner-up, and the choice if CAL ever proves
+  unworkable): its substantive advantage over MIT is the express patent
+  grant with retaliation-termination, plus an explicit trademark
+  non-grant -- both of which matter to a bank's legal review.  MIT is
+  silent on patents.  CAL, drafted by a patent attorney, carries its own
+  patent provisions; confirm their scope with counsel before relying on
+  them.
+- *No dependency conflict*: our Rust stack (arkworks, pyo3, wasm-bindgen,
+  serde, sha2) is uniformly MIT/Apache, so copyleft on top is clean.
+
+*** Deliverables
+
+- =LICENSE= at the root (GPL-3.0), =core/LICENSE= (CAL-1.0), and a
+  =NOTICE= recording third-party licences (OpenZeppelin MIT; Uniswap
+  v3-core BUSL-1.1 -> GPL-2.0-or-later since its 2023-04-01 change date;
+  v3-periphery GPL-2.0; universal-router GPL-3.0).
+- SPDX identifiers in every manifest and file header: =CAL-1.0=,
+  =CAL-1.0-Combined-Work-Exception=, =GPL-3.0-or-later= -- all valid SPDX,
+  so cargo, npm and PyPI metadata accept them unchanged.
+- =license= / =license-files= keys in all nine manifests; the four crates
+  move from =MIT= to =CAL-1.0=.
 
 ** D3: names
 
@@ -307,8 +385,9 @@ papers, the equilibrium sweep vectors, =circuits/=.
 Everything here is a prerequisite for the /first/ upload of anything, and
 none of it depends on which registry goes first.
 
-1. *Licence files* (D2).  Root =LICENSE=; =core/LICENSE-MIT=,
-   =core/LICENSE-APACHE=; =license= keys in all manifests.
+1. *Licence files* (D2).  Root =LICENSE= (GPL-3.0), =core/LICENSE=
+   (CAL-1.0), =NOTICE= for the third-party terms; SPDX identifiers and
+   =license= keys in all manifests.
 2. *Commit =core/rust/Cargo.lock=.*  It is currently gitignored ("lockfile
    committed once binding crates land" -- they have landed).  Published
    wheels and wasm must be reproducible from a tag.
@@ -510,6 +589,25 @@ The contract set is the =NEEDED= list already in =bundle-artifacts.mjs=:
 =BuckBasketProRata=, =BuckBasketUniswapV3=, plus the vendored
 =UniversalRouter= (not forge-built -- flag its distinct provenance in the
 package README).
+
+*Ship only the contracts we own.*  Four of those entries are other people's
+copyleft code, and publishing their compiled artifacts is redistribution
+under their terms, not ours:
+
+| dependency        | licence in =lib/=                                        |
+|-------------------+----------------------------------------------------------|
+| =openzeppelin=    | MIT (fine, attribution only)                             |
+| =v3-core=         | BUSL-1.1, Change Date 2023-04-01 -> now GPL-2.0-or-later  |
+| =v3-periphery=    | GPL-2.0                                                  |
+| =universal-router=| GPL-3.0                                                  |
+
+The clean fix costs nothing: consume Uniswap's *own* published artifact
+packages (=@uniswap/v3-core=, =@uniswap/v3-periphery=,
+=@uniswap/universal-router=) as dependencies of
+=alberta-buck-contracts=, and ship only our own GPL-3.0-or-later contracts
+in it.  A =NOTICE= file records the rest.  Bundling everything into one
+tarball would make us the redistributor of four licences we do not control,
+for no benefit to anyone.
 
 ** Reproducibility: pin the compiler
 
@@ -730,6 +828,12 @@ you choose.  Checklist for when you do:
   will eventually deploy them anyway.  Consider whether the package should
   ship a constructor-level "testnet chain ids only" guard in the sim
   helpers rather than the contracts themselves.
+- *CAL is an unfamiliar licence* (D2).  Institutional counsel will read it
+  rather than recognize it, and some will decline on unfamiliarity alone.
+  Accepted deliberately -- the friction is the instrument -- but it makes
+  the dual-licensing path (and therefore the CLA, and therefore your time
+  answering licence questions) part of the operating cost, not an
+  afterthought.
 - *Binary wheel maintenance* is a standing tax: every new CPython, every new
   manylinux baseline.  abi3 removes the per-version half of it; the
   per-platform half remains.  The mitigation is that =alberta-buck-kernel=
@@ -759,7 +863,8 @@ Updated as phases complete; =-= is not started.
 |   # | artifact / step                       | registry  | version | status  |
 |-----+---------------------------------------+-----------+---------+---------|
 |   - | D1 public-code boundary               |           |         | -       |
-|   - | D2 licence decision + files           |           |         | -       |
+|   - | D2 licence (CAL-1.0 kernels)          |           |         | settled |
+|   - | D2 licence files written              |           |         | -       |
 |   - | D3 names (prefix rule)                |           |         | settled |
 |   - | D4 version + tag scheme               |           |         | -       |
 |   - | D5 pure/binary split                  |           |         | -       |
