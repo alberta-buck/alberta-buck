@@ -938,3 +938,406 @@ pub fn id_hash_a2(e_note: Vec<String>, e_iss: Vec<String>) -> Result<String, JsE
 pub fn identity_leaf(mx: &str, my: &str) -> Result<String, JsError> {
     Ok(hx(&kernel::notes::identity_leaf(&g1(mx, my)?).map_err(err)?))
 }
+
+// ---------------------------------------------------------------------------
+// buck-wallet: canonical dialect, AB-RCPT/1 envelope, receipt build /
+// verify, unilateral flows, issuer ceremony.  Structured inputs cross as
+// ONE JSON text of named args (the vector-fixture shapes); receipt cores
+// cross as their canonical text -- see buck-wallet's `args` module.
+// ---------------------------------------------------------------------------
+
+fn werr(e: kernel::IdError) -> JsError {
+    JsError::new(e.0)
+}
+
+fn parse_args(args_json: &str) -> Result<serde_json::Value, JsError> {
+    serde_json::from_str(args_json).map_err(|e| JsError::new(&format!("args: invalid JSON: {e}")))
+}
+
+#[wasm_bindgen]
+pub fn wallet_canonical_json(text: &str) -> Result<String, JsError> {
+    wallet::canonical::canonical_json(text).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_canonical_identity_data(fields_json: &str) -> Result<String, JsError> {
+    wallet::canonical::canonical_identity_data(fields_json).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_receipt_id(canonical: &[u8], prefix_len: usize) -> String {
+    wallet::envelope::receipt_id(canonical, prefix_len)
+}
+
+#[wasm_bindgen]
+pub fn wallet_envelope_text(canonical: &[u8], width: usize) -> String {
+    wallet::envelope::envelope_text(canonical, width)
+}
+
+#[wasm_bindgen]
+pub fn wallet_parse_envelope(text: &str) -> Result<Vec<u8>, JsError> {
+    wallet::envelope::parse_envelope(text).map_err(werr)
+}
+
+/// Tier-1 verify of a canonical receipt text; returns the RcptResult as
+/// a JSON text `{"ok", "reason", "identity_M", "value"}`.
+#[wasm_bindgen]
+pub fn wallet_verify_receipt(core_text: &str) -> Result<String, JsError> {
+    wallet::args::verify_receipt_args(core_text).map_err(werr)
+}
+
+/// Build any receipt kind from named JSON args; returns the canonical
+/// receipt text.
+#[wasm_bindgen]
+pub fn wallet_build_receipt(args_json: &str) -> Result<String, JsError> {
+    wallet::args::build_receipt_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_mint_unilateral_a2(args_json: &str) -> Result<String, JsError> {
+    wallet::args::mint_unilateral_a2_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_make_receipt_a2(args_json: &str) -> Result<String, JsError> {
+    wallet::args::make_receipt_a2_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_verify_receipt_a2(args_json: &str) -> Result<String, JsError> {
+    wallet::args::verify_receipt_a2_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_mint_unilateral_a1(args_json: &str) -> Result<String, JsError> {
+    wallet::args::mint_unilateral_a1_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_make_receipt_a1(args_json: &str) -> Result<String, JsError> {
+    wallet::args::make_receipt_a1_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_verify_receipt_a1(args_json: &str) -> Result<String, JsError> {
+    wallet::args::verify_receipt_a1_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_issue_credential(args_json: &str) -> Result<String, JsError> {
+    wallet::args::issue_credential_args(&parse_args(args_json)?).map_err(werr)
+}
+
+// ---------------------------------------------------------------------------
+// buck-registry: certificates cross as their wire bytes; the trees and
+// the central aggregator are exported CLASSES so a browser wallet can
+// hold real accumulator state.
+// ---------------------------------------------------------------------------
+
+fn msg32(msg_hash_hex: &str) -> Result<[u8; 32], JsError> {
+    Ok(w(msg_hash_hex)?)
+}
+
+#[wasm_bindgen]
+pub fn registry_schnorr_sign(
+    sk: &str,
+    msg_hash: &str,
+    registry_id: &str,
+    chainid: &str,
+    k: &str,
+) -> Result<Vec<String>, JsError> {
+    let p = registry::certificate::registry_schnorr_sign(
+        &w(sk)?,
+        &msg32(msg_hash)?,
+        registry_id,
+        &w(chainid)?,
+        &w(k)?,
+    )
+    .map_err(werr)?;
+    Ok(vec![hx(&p.e), hx(&p.s), hx(&p.r.0), hx(&p.r.1)])
+}
+
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn registry_schnorr_verify(
+    pkx: &str,
+    pky: &str,
+    e: &str,
+    s: &str,
+    rx: &str,
+    ry: &str,
+    msg_hash: &str,
+    registry_id: &str,
+    chainid: &str,
+) -> Result<bool, JsError> {
+    let proof = registry::certificate::RegistrySchnorrProof {
+        e: w(e)?,
+        s: w(s)?,
+        r: g1(rx, ry)?,
+    };
+    registry::certificate::registry_schnorr_verify(
+        &g1(pkx, pky)?,
+        &proof,
+        &msg32(msg_hash)?,
+        registry_id,
+        &w(chainid)?,
+    )
+    .map_err(werr)
+}
+
+/// Create + sign a certificate; returns the SignedCertificate WIRE bytes.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn registry_sign_certificate(
+    registry_sk: &str,
+    registry_id: &str,
+    canonical_identity: &str,
+    serial: u64,
+    issued_at: i64,
+    expires_at: i64,
+    chainid: &str,
+    k: &str,
+) -> Result<Vec<u8>, JsError> {
+    let signed = registry::certificate::registry_sign_certificate(
+        &w(registry_sk)?,
+        registry_id,
+        canonical_identity,
+        serial,
+        issued_at,
+        expires_at,
+        &w(chainid)?,
+        &w(k)?,
+    )
+    .map_err(werr)?;
+    Ok(signed.serialize())
+}
+
+#[wasm_bindgen]
+pub fn registry_verify_certificate(signed_wire: &[u8], chainid: &str) -> Result<bool, JsError> {
+    let signed =
+        registry::certificate::SignedCertificate::deserialize(signed_wire).map_err(werr)?;
+    registry::certificate::registry_verify_certificate(&signed, &w(chainid)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn registry_seal_certificate(
+    signed_wire: &[u8],
+    client_pkx: &str,
+    client_pky: &str,
+    r: &str,
+) -> Result<Vec<u8>, JsError> {
+    let signed =
+        registry::certificate::SignedCertificate::deserialize(signed_wire).map_err(werr)?;
+    let sealed =
+        registry::certificate::seal_certificate(&signed, &g1(client_pkx, client_pky)?, &w(r)?)
+            .map_err(werr)?;
+    Ok(sealed.envelope())
+}
+
+#[wasm_bindgen]
+pub fn registry_unseal_certificate(envelope: &[u8], client_sk: &str) -> Result<Vec<u8>, JsError> {
+    let sealed =
+        registry::certificate::SealedCertificate::from_envelope(envelope).map_err(werr)?;
+    let signed =
+        registry::certificate::unseal_certificate(&sealed, &w(client_sk)?).map_err(werr)?;
+    Ok(signed.serialize())
+}
+
+fn proof_json(p: &registry::tree::MembershipProof) -> String {
+    let sibs: Vec<String> = p.siblings.iter().map(|s| format!("\"{}\"", hx(s))).collect();
+    let bits: Vec<String> = p.index_bits.iter().map(|b| b.to_string()).collect();
+    format!(
+        "{{\"leaf\":\"{}\",\"siblings\":[{}],\"index_bits\":[{}],\"root\":\"{}\",\"leaf_index\":{}}}",
+        hx(&p.leaf),
+        sibs.join(","),
+        bits.join(","),
+        hx(&p.root),
+        p.leaf_index
+    )
+}
+
+/// The identity Merkle accumulator as a stateful JS class.
+#[wasm_bindgen]
+pub struct MerkleTree(registry::tree::IdentityMerkleTree);
+
+#[wasm_bindgen]
+impl MerkleTree {
+    #[wasm_bindgen(constructor)]
+    pub fn new(depth: usize) -> Result<MerkleTree, JsError> {
+        Ok(MerkleTree(
+            registry::tree::IdentityMerkleTree::new(depth).map_err(werr)?,
+        ))
+    }
+
+    pub fn from_leaves(leaves: Vec<String>, depth: usize) -> Result<MerkleTree, JsError> {
+        let ls: Result<Vec<_>, JsError> = leaves.iter().map(|l| w(l)).collect();
+        Ok(MerkleTree(
+            registry::tree::IdentityMerkleTree::from_leaves(&ls?, depth).map_err(werr)?,
+        ))
+    }
+
+    pub fn depth(&self) -> usize {
+        self.0.depth()
+    }
+
+    pub fn count(&self) -> usize {
+        self.0.count()
+    }
+
+    pub fn root(&self) -> Result<String, JsError> {
+        Ok(hx(&self.0.root().map_err(werr)?))
+    }
+
+    pub fn leaves(&self) -> Vec<String> {
+        self.0.leaves().iter().map(hx).collect()
+    }
+
+    pub fn insert_leaf(&mut self, leaf: &str) -> Result<usize, JsError> {
+        Ok(self.0.insert_leaf(w(leaf)?))
+    }
+
+    pub fn insert_identity(&mut self, mx: &str, my: &str) -> Result<usize, JsError> {
+        self.0.insert_identity(&g1(mx, my)?).map_err(werr)
+    }
+
+    pub fn set_leaf(&mut self, index: usize, leaf: &str) -> Result<(), JsError> {
+        self.0.set_leaf(index, w(leaf)?).map_err(werr)
+    }
+
+    pub fn contains_leaf(&self, leaf: &str) -> Result<bool, JsError> {
+        Ok(self.0.contains(&w(leaf)?))
+    }
+
+    /// Membership check for an identity point; pass a root hex to also
+    /// require the path to fold to it.
+    pub fn contains_identity(&self, mx: &str, my: &str, root: Option<String>) -> Result<bool, JsError> {
+        let r = match &root {
+            Some(s) => Some(w(s)?),
+            None => None,
+        };
+        self.0
+            .contains_identity(&g1(mx, my)?, r.as_ref())
+            .map_err(werr)
+    }
+
+    /// The authentication path at `index`, as a JSON text
+    /// `{leaf, siblings, index_bits, root, leaf_index}`.
+    pub fn path(&self, index: usize) -> Result<String, JsError> {
+        Ok(proof_json(&self.0.path(index).map_err(werr)?))
+    }
+}
+
+/// The central sub-root aggregator as a stateful JS class.
+#[wasm_bindgen]
+pub struct Aggregator(registry::aggregator::CentralMerkleService);
+
+#[wasm_bindgen]
+impl Aggregator {
+    #[wasm_bindgen(constructor)]
+    pub fn new(depth: usize) -> Result<Aggregator, JsError> {
+        Ok(Aggregator(
+            registry::aggregator::CentralMerkleService::new(depth).map_err(werr)?,
+        ))
+    }
+
+    pub fn identity_root(&self) -> Result<String, JsError> {
+        Ok(hx(&self.0.identity_root().map_err(werr)?))
+    }
+
+    pub fn enroll(
+        &mut self,
+        sub_tree_id: &str,
+        kind: &str,
+        initial_sub_root: &str,
+        timestamp: f64,
+    ) -> Result<usize, JsError> {
+        let rec = self
+            .0
+            .enroll(sub_tree_id, kind, w(initial_sub_root)?, timestamp)
+            .map_err(werr)?;
+        Ok(rec.aggregator_leaf_index)
+    }
+
+    pub fn update_sub_root(
+        &mut self,
+        sub_tree_id: &str,
+        new_sub_root: &str,
+        timestamp: f64,
+    ) -> Result<String, JsError> {
+        Ok(hx(&self
+            .0
+            .update_sub_root(sub_tree_id, w(new_sub_root)?, timestamp)
+            .map_err(werr)?))
+    }
+
+    /// Aggregator path for a sub-tree, as a JSON text
+    /// `{sub_root, siblings, index_bits, aggregator_root, sub_tree_id,
+    /// aggregator_leaf_index}`.
+    pub fn aggregator_proof(&self, sub_tree_id: &str) -> Result<String, JsError> {
+        let p = self.0.aggregator_proof(sub_tree_id).map_err(werr)?;
+        let sibs: Vec<String> = p.siblings.iter().map(|s| format!("\"{}\"", hx(s))).collect();
+        let bits: Vec<String> = p.index_bits.iter().map(|b| b.to_string()).collect();
+        Ok(format!(
+            "{{\"sub_root\":\"{}\",\"siblings\":[{}],\"index_bits\":[{}],\"aggregator_root\":\"{}\",\"sub_tree_id\":{},\"aggregator_leaf_index\":{}}}",
+            hx(&p.sub_root),
+            sibs.join(","),
+            bits.join(","),
+            hx(&p.aggregator_root),
+            serde_json::to_string(&p.sub_tree_id).unwrap(),
+            p.aggregator_leaf_index
+        ))
+    }
+}
+
+/// Verify a full (sub-tree + aggregator) membership proof pair; the two
+/// JSON texts are the `MerkleTree.path` / `Aggregator.aggregator_proof`
+/// outputs.
+#[wasm_bindgen]
+pub fn registry_verify_full_proof(
+    sub_proof_json: &str,
+    aggregator_proof_json: &str,
+) -> Result<bool, JsError> {
+    let sp: serde_json::Value = serde_json::from_str(sub_proof_json)
+        .map_err(|e| JsError::new(&format!("sub proof: {e}")))?;
+    let ap: serde_json::Value = serde_json::from_str(aggregator_proof_json)
+        .map_err(|e| JsError::new(&format!("aggregator proof: {e}")))?;
+    let jw = |v: &serde_json::Value| -> Result<kernel::W256, JsError> {
+        w(v.as_str().ok_or_else(|| JsError::new("expected hex string"))?)
+    };
+    let arr = |v: &serde_json::Value| -> Result<Vec<kernel::W256>, JsError> {
+        v.as_array()
+            .ok_or_else(|| JsError::new("expected array"))?
+            .iter()
+            .map(&jw)
+            .collect()
+    };
+    let bits = |v: &serde_json::Value| -> Result<Vec<u8>, JsError> {
+        Ok(v.as_array()
+            .ok_or_else(|| JsError::new("expected array"))?
+            .iter()
+            .map(|b| b.as_u64().unwrap_or(0) as u8)
+            .collect())
+    };
+    let sub = registry::tree::MembershipProof {
+        leaf: jw(&sp["leaf"])?,
+        siblings: arr(&sp["siblings"])?,
+        index_bits: bits(&sp["index_bits"])?,
+        root: jw(&sp["root"])?,
+        leaf_index: sp["leaf_index"].as_u64().unwrap_or(0) as usize,
+    };
+    let agg = registry::aggregator::AggregatorMembershipProof {
+        sub_root: jw(&ap["sub_root"])?,
+        siblings: arr(&ap["siblings"])?,
+        index_bits: bits(&ap["index_bits"])?,
+        aggregator_root: jw(&ap["aggregator_root"])?,
+        sub_tree_id: ap["sub_tree_id"].as_str().unwrap_or("").to_string(),
+        aggregator_leaf_index: ap["aggregator_leaf_index"].as_u64().unwrap_or(0) as usize,
+    };
+    let full = registry::aggregator::FullMembershipProof {
+        sub_tree_proof: sub,
+        aggregator_proof: agg,
+        m_x: [0u8; 32],
+        m_y: [0u8; 32],
+    };
+    full.verify().map_err(werr)
+}

@@ -1057,13 +1057,27 @@ core-js-artifacts:
 # The Python kernel bindings: PyO3 cdylibs built with plain cargo (the
 # .cargo/config.toml link flags stand in for maturin) and placed inside
 # the buck_core package -- import buck_core.buck_math /
-# buck_core.buck_identity.
+# buck_core.buck_identity / buck_core.buck_wallet / buck_core.buck_registry.
+# The identity dylib defines THREE #[pymodule] entry points; copying the
+# one artifact under each module filename gives three imports from one
+# compiled kernel (Python calls the PyInit_<basename> matching the file).
+# rm before cp: overwriting a .so in place keeps its inode, and macOS
+# caches code signatures by inode -- a stale cache SIGKILLs (Killed: 9)
+# the next import.  A fresh inode per copy sidesteps it.
 core-build-py:
 	cd core/rust && cargo build --release -p buck-math-py -p buck-identity-py
+	rm -f core/python/buck_core/buck_math.so \
+	      core/python/buck_core/buck_identity.so \
+	      core/python/buck_core/buck_wallet.so \
+	      core/python/buck_core/buck_registry.so
 	cp core/rust/target/release/libbuck_math.dylib \
 	   core/python/buck_core/buck_math.so
 	cp core/rust/target/release/libbuck_identity.dylib \
 	   core/python/buck_core/buck_identity.so
+	cp core/rust/target/release/libbuck_identity.dylib \
+	   core/python/buck_core/buck_wallet.so
+	cp core/rust/target/release/libbuck_identity.dylib \
+	   core/python/buck_core/buck_registry.so
 
 # The JS kernel bindings: wasm-pack (npm devDependency of core/js) emits
 # nodejs-target packages into core/js/wasm/ (flat: buck_math.* and

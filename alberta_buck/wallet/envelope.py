@@ -85,7 +85,16 @@ def _ct_from_hex(d: dict) -> ElGamalCiphertext:
 # ---------------------------------------------------------------------------
 
 def receipt_id(canonical_bytes: bytes, prefix_len: int = 12) -> str:
-    """``base32(sha256(canonical_bytes))[:prefix_len]`` — the receipt handle."""
+    """``base32(sha256(canonical_bytes))[:prefix_len]`` — the receipt handle.
+
+    Dispatches to the compiled buck-wallet kernel when built (see
+    :mod:`alberta_buck.wallet._kernel`); the Python below remains the
+    executable spec, proven bit-identical by the wallet kernel vectors.
+    """
+    from alberta_buck.wallet._kernel import kernel_wallet as _kw
+    k = _kw()
+    if k is not None:
+        return k.receipt_id(canonical_bytes, prefix_len)
     import base64 as _b64
     h = hashlib.sha256(canonical_bytes).digest()
     return _b64.b32encode(h).decode("ascii").rstrip("=").lower()[:prefix_len]
@@ -378,6 +387,10 @@ def envelope_text(canonical_bytes: bytes, width: int = 64) -> str:
         <base64url of canonical_bytes, wrapped to width>
         .END
     """
+    from alberta_buck.wallet._kernel import kernel_wallet as _kw
+    k = _kw()
+    if k is not None:
+        return k.envelope_text(canonical_bytes, width)
     import base64 as _b64
     b64 = _b64.urlsafe_b64encode(canonical_bytes).decode("ascii").rstrip("=")
     return f"{ENVELOPE_HEADER}\n{wrap_text(b64, width)}\n{ENVELOPE_FOOTER}"
@@ -389,6 +402,10 @@ def parse_envelope(text: str) -> bytes:
     Strips everything outside ``AB-RCPT/1.`` … ``.END``, removes whitespace
     from the base64url block, decodes.
     """
+    from alberta_buck.wallet._kernel import kernel_wallet as _kw
+    k = _kw()
+    if k is not None:
+        return k.parse_envelope(text)
     import base64 as _b64
     # Find the payload block between the header and footer.
     text = text.replace("\r\n", "\n")

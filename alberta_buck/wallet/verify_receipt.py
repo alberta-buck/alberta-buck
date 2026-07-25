@@ -115,7 +115,26 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
       4. The note anchor: cm ∈ cms, idHash preimage, nullifier, face.
 
     Tier 2 (chain anchoring) requires an RPC node and is not run here.
+
+    Dispatches wholesale to the compiled buck-wallet kernel when built
+    (one FFI call instead of dozens of primitive ones); the Python below
+    remains the executable spec, proven check-for-check and
+    reason-for-reason by the wallet kernel vectors.
     """
+    from alberta_buck.wallet._kernel import kernel_wallet as _kw
+    k = _kw()
+    if k is not None:
+        import json as _json
+        from alberta_buck.wallet.envelope import serialize_core
+        res = _json.loads(k.verify_receipt(serialize_core(core).decode("utf-8")))
+        return RcptResult(
+            ok=res["ok"],
+            identity_M=(_g1_from_hex(res["identity_M"])
+                        if res.get("identity_M") else None),
+            value=(int(res["value"], 16) if res.get("value") else None),
+            reason=res["reason"],
+        )
+
     t = core.type
     role = core.role
 

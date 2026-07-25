@@ -32,10 +32,11 @@ reproduces the same named identities and amount with no secret needed.
 
 from __future__ import annotations
 
+import json
 import random
 from typing import List, Optional, Tuple
 
-from alberta_buck.wallet.bn254 import scalar_to_hex
+from alberta_buck.wallet.bn254 import rand_scalar, scalar_to_hex
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.chaum_pedersen import CPProof
 from alberta_buck.wallet.verifiable_decrypt import VDProof, verifiable_decrypt_prove
@@ -44,14 +45,63 @@ from alberta_buck.wallet.notes import NoteOpening
 from alberta_buck.wallet.envelope import (
     PartyRecord, TxnRecord, ReceiptCore,
     _g1_hex, _ct_hex,
+    deserialize_core,
     vd_proof_record, cp_proof_record,
     receipts_proof_record, issuer_reenc_record, note_payload_record,
 )
+from alberta_buck.wallet._kernel import kernel_wallet as _kernel_wallet
 
 
 def _rng(seed: int = 0):
     r = random.Random(seed)
     return lambda: r.getrandbits(256)
+
+
+def _replay(vals):
+    """Hand back exactly `vals` -- feeds pre-drawn nonces to the py path
+    so kernel dispatch and the reference consume the caller's rng
+    identically (the nonces are hoisted BEFORE branching)."""
+    it = iter(vals)
+    return lambda: next(it)
+
+
+# ---------------------------------------------------------------------------
+# Kernel dispatch: named-args JSON for buck_core.buck_wallet.build_receipt
+# (the canonical-bytes ABI; see buck-wallet's `args` module).  The Python
+# builders below remain the executable spec -- nonces are drawn in their
+# exact order before branching, so both paths emit identical bytes.
+# ---------------------------------------------------------------------------
+
+def _args_party(addr: int, identity: str, M, pk,
+                E: Optional[ElGamalCiphertext] = None,
+                sk: Optional[int] = None) -> dict:
+    d = {"addr": scalar_to_hex(addr), "identity": identity,
+         "M": _g1_hex(M), "pk": _g1_hex(pk)}
+    if E is not None:
+        d["E"] = _ct_hex(E)
+    if sk is not None:
+        d["sk"] = scalar_to_hex(sk)
+    return d
+
+
+def _args_opening(o: NoteOpening) -> dict:
+    return {"flavor": scalar_to_hex(o.flavor), "v": scalar_to_hex(o.v),
+            "rho": scalar_to_hex(o.rho), "idHash": scalar_to_hex(o.id_hash),
+            "predicate": scalar_to_hex(o.predicate)}
+
+
+def _args_schnorr(s: SchnorrProof) -> dict:
+    return {"e": scalar_to_hex(s.e), "s": scalar_to_hex(s.s), "R": _g1_hex(s.R)}
+
+
+def _args_cp(p: CPProof) -> dict:
+    return {"e": scalar_to_hex(p.e), "s1": scalar_to_hex(p.s1),
+            "s2": scalar_to_hex(p.s2), "T1": _g1_hex(p.T1),
+            "T2": _g1_hex(p.T2), "T3": _g1_hex(p.T3)}
+
+
+def _kernel_build(kernel, args: dict) -> ReceiptCore:
+    return deserialize_core(kernel.build_receipt(json.dumps(args)).encode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +153,21 @@ def build_eoa_pub(
     verifiable decryption.
     """
     rng = rng or _rng()
+    t_self = rand_scalar(rng)
+    k = _kernel_wallet()
+    if k is not None:
+        return _kernel_build(k, {
+            "kind": "eoa-pub", "role": "recipient",
+            "chainid": chainid, "contracts": contracts,
+            "payer": _args_party(payer_addr, payer_identity, payer_M, payer_pk),
+            "payee": _args_party(payee_addr, payee_identity, payee_M, payee_pk,
+                                 E=payee_E_addr, sk=payee_sk),
+            "txn": {"value": value, "block_time": block_time, "txhash": txhash,
+                    "block": block, "logindex": logindex},
+            "notes": notes,
+            "nonces": {"t_self": scalar_to_hex(t_self)},
+        })
+    rng = _replay([t_self])
     vd_self_rec = _self_vd(payee_E_addr, payee_sk, payee_M, payee_addr, chainid, rng)
 
     return ReceiptCore(
@@ -146,6 +211,26 @@ def build_eoa_priv(
     verifiably decrypts it to ``payer_M``.
     """
     rng = rng or _rng()
+    t_vd_payer = rand_scalar(rng)
+    t_self = rand_scalar(rng)
+    k = _kernel_wallet()
+    if k is not None:
+        return _kernel_build(k, {
+            "kind": "eoa-priv", "role": "recipient",
+            "chainid": chainid, "contracts": contracts,
+            "payer": _args_party(payer_addr, payer_identity, payer_M, payer_pk,
+                                 E=payer_E_addr),
+            "payee": _args_party(payee_addr, payee_identity, payee_M, payee_pk,
+                                 E=payee_E_addr, sk=payee_sk),
+            "E_for_payee": _ct_hex(E_for_payee),
+            "cp_proof": _args_cp(cp_proof),
+            "txn": {"value": value, "block_time": block_time, "txhash": txhash,
+                    "block": block, "logindex": logindex},
+            "notes": notes,
+            "nonces": {"t_vd_payer": scalar_to_hex(t_vd_payer),
+                       "t_self": scalar_to_hex(t_self)},
+        })
+    rng = _replay([t_vd_payer, t_self])
 
     # Approve receipt: cp_proof (soundness) + vd (reveals M)
     vd_payer = verifiable_decrypt_prove(E_for_payee, payee_sk, payer_M,
@@ -217,6 +302,29 @@ def build_note_b1(
     """
     _check_role(role)
     rng = rng or _rng()
+    t_vd = rand_scalar(rng)
+    k = _kernel_wallet()
+    if k is not None:
+        return _kernel_build(k, {
+            "kind": "note-b1", "role": role,
+            "chainid": chainid, "contracts": contracts,
+            "payer": _args_party(issuer_addr, issuer_identity, issuer_M,
+                                 issuer_pk, sk=issuer_sk),
+            "payee": _args_party(payee_addr, payee_identity, payee_M, payee_pk,
+                                 E=payee_E_addr, sk=payee_sk),
+            "opening": _args_opening(opening),
+            "cms": [scalar_to_hex(c) for c in cms],
+            "issuer_sig": _args_schnorr(issuer_sig),
+            "sigma_R": _g1_hex(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
+            "eDepForIss": _ct_hex(eDepForIss) if eDepForIss is not None else None,
+            "nullifier": scalar_to_hex(nullifier), "face": scalar_to_hex(face),
+            "txn": {"value": value, "block_time": block_time, "txhash": txhash,
+                    "block": block, "logindex": logindex,
+                    "mint_txhash": mint_txhash, "mint_block": mint_block},
+            "notes": notes,
+            "nonces": {"t_vd": scalar_to_hex(t_vd)},
+        })
+    rng = _replay([t_vd])
 
     rec_proof = receipts_proof_record(opening, cms, issuer_sig, nullifier, face)
     payload = note_payload_record(sigma_R=sigma_R, sigma_s=sigma_s,
@@ -294,6 +402,28 @@ def build_note_a1(
     """
     _check_role(role)
     rng = rng or _rng()
+    t_vd = rand_scalar(rng) if role == "recipient" else None
+    k = _kernel_wallet()
+    if k is not None:
+        return _kernel_build(k, {
+            "kind": "note-a1", "role": role,
+            "chainid": chainid, "contracts": contracts,
+            "payer": _args_party(issuer_addr, issuer_identity, issuer_M, issuer_pk),
+            "payee": _args_party(payee_addr, payee_identity, payee_M, payee_pk,
+                                 E=payee_E_addr, sk=payee_sk),
+            "opening": _args_opening(opening),
+            "cms": [scalar_to_hex(c) for c in cms],
+            "issuer_sig": _args_schnorr(issuer_sig),
+            "eNote": _ct_hex(eNote), "eRec": _ct_hex(eRec),
+            "sigma_R": _g1_hex(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
+            "nullifier": scalar_to_hex(nullifier), "face": scalar_to_hex(face),
+            "txn": {"value": value, "block_time": block_time, "txhash": txhash,
+                    "block": block, "logindex": logindex,
+                    "mint_txhash": mint_txhash, "mint_block": mint_block},
+            "notes": notes,
+            "nonces": ({"t_vd": scalar_to_hex(t_vd)} if t_vd is not None else {}),
+        })
+    rng = _replay([t_vd] if t_vd is not None else [])
 
     rec_proof = receipts_proof_record(opening, cms, issuer_sig, nullifier, face)
     payload = note_payload_record(eNote=eNote, eRec=eRec,
@@ -369,6 +499,28 @@ def build_note_a2(
     """
     _check_role(role)
     rng = rng or _rng()
+    t_vd = rand_scalar(rng)
+    k = _kernel_wallet()
+    if k is not None:
+        return _kernel_build(k, {
+            "kind": "note-a2", "role": role,
+            "chainid": chainid, "contracts": contracts,
+            "payer": _args_party(issuer_addr, issuer_identity, issuer_M,
+                                 issuer_pk, E=issuer_E_addr, sk=issuer_sk),
+            "payee": _args_party(payee_addr, payee_identity, payee_M, payee_pk,
+                                 E=payee_E_addr, sk=payee_sk),
+            "opening": _args_opening(opening),
+            "cms": [scalar_to_hex(c) for c in cms],
+            "eNote": _ct_hex(eNote), "eIss": _ct_hex(eIss),
+            "binding": issuer_reenc_record(binding) if binding is not None else None,
+            "nullifier": scalar_to_hex(nullifier), "face": scalar_to_hex(face),
+            "txn": {"value": value, "block_time": block_time, "txhash": txhash,
+                    "block": block, "logindex": logindex,
+                    "mint_txhash": mint_txhash, "mint_block": mint_block},
+            "notes": notes,
+            "nonces": {"t_vd": scalar_to_hex(t_vd)},
+        })
+    rng = _replay([t_vd])
 
     rec_proof = receipts_proof_record(opening, cms, None, nullifier, face)
     payload = note_payload_record(eNote=eNote, eIss=eIss)

@@ -13,6 +13,13 @@ crate-type = ["cdylib"]
 # Aliased: the cdylib itself is named buck_identity (the Python module),
 # which would shadow the kernel crate's name in paths.
 kernel = { path = "../../buck-identity", package = "buck-identity" }
+# The wallet + registry kernels ride in the SAME cdylib: this crate
+# defines three #[pymodule] entry points (buck_identity, buck_wallet,
+# buck_registry) and the build copies the one dylib under each module
+# filename -- one compiled artifact, three imports, zero duplication.
+wallet = { path = "../../buck-wallet", package = "buck-wallet" }
+registry = { path = "../../buck-registry", package = "buck-registry" }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
 # num-bigint: 256-bit scalars/coordinates cross as plain Python ints.
 num-bigint = "0.4"
 pyo3 = { version = "0.24", features = ["extension-module", "abi3-py311", "num-bigint"] }
