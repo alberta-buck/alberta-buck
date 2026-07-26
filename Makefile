@@ -1110,6 +1110,7 @@ contracts-dist-build:
 
 contracts-dist:		contracts-dist-build
 	python3 scripts/contracts-dist.py --emit
+	@echo "  npm:  core/contracts   pypi: core/contracts/python"
 
 contracts-dist-check:	contracts-dist-build
 	python3 scripts/contracts-dist.py --check

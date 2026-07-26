@@ -34,7 +34,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 BUILD = REPO / "out"                          # [profile.default] out
-DEST = REPO / "dist" / "contracts"
+# Two destinations, one build: the npm package and the Python package data.
+# Emitting both from a single collect() is what keeps them from drifting --
+# the same bytes, the same compiler record, the same sha256.
+NPM = REPO / "core" / "contracts"
+PY_ = REPO / "core" / "contracts" / "python" / "buck_contracts"
 
 # The pin lives in foundry.toml; this is the value --check asserts against
 # every emitted artifact.  Read from the config rather than duplicated, so
@@ -164,15 +168,18 @@ def main() -> int:
         print(f"    {n:24s} {len(c['bytecode'])//2:>7} bytes")
 
     if args.emit:
-        DEST.mkdir(parents=True, exist_ok=True)
-        (DEST / "contracts.json").write_text(json.dumps(bundle, indent=1) + "\n")
-        (DEST / "compiler.json").write_text(json.dumps(meta, indent=2) + "\n")
-        # The slot exists so that adding a real deployment later is not a
-        # breaking change to the package's shape.
-        dep = DEST / "deployments.json"
-        if not dep.exists():
-            dep.write_text("{}\n")
-        print(f"  wrote {DEST.relative_to(REPO)}/")
+        contracts_txt = json.dumps(bundle, indent=1) + "\n"
+        compiler_txt = json.dumps(meta, indent=2) + "\n"
+        for dest in (NPM, PY_):
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "contracts.json").write_text(contracts_txt)
+            (dest / "compiler.json").write_text(compiler_txt)
+            # The slot exists so adding a real deployment later is not a
+            # breaking change to the package's shape.
+            dep = dest / "deployments.json"
+            if not dep.exists():
+                dep.write_text("{}\n")
+            print(f"  wrote {dest.relative_to(REPO)}/")
 
     return 0
 
