@@ -1,5 +1,6 @@
 # Foundry build artifacts
 /out/
+/out-dist/
 /cache/
 /broadcast/
 /.anvil-cache/
@@ -62,7 +63,6 @@ lcov.info
 *.tex
 *.fls
 *.log
-foundry.lock
 /raw-materials-price/
 
 # window-stamped historical CSVs are generated caches

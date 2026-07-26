@@ -37,6 +37,33 @@ via_ir = true
 src = "src/uniswap_v3_build"
 out = "out"
 
+# The reproducible build behind the published alberta-buck-contracts
+# package.  Everything that can drift is pinned HERE rather than passed on
+# a command line, so the emitted bytecode is a function of the repository
+# state alone (alberta-buck-deployment.org, P2.5).
+#
+# Why this profile has to exist: `make build` passes --use 0.8.28, but
+# `make build-uniswap-artifacts` runs a bare `forge build`, and both write
+# out/.  With auto_detect_solc the second one picks the newest compiler
+# installed, so out/ held 0.8.31 artifacts -- the very version the 0.8.28
+# pin exists to avoid ("Modifiers not implemented yet", an IR codegen bug).
+# Which compiler produced out/ depended on which target ran last.  A
+# published artifact cannot be decided that way.
+#
+#   solc  exact, overriding auto_detect_solc: no ambient choice.
+#   out   a separate directory: a dev build cannot contaminate a published
+#         one, and vice versa.
+#
+# Moving the solc pin changes every byte of the output.  It is a package
+# version event, not a maintenance detail.
+[profile.dist]
+solc = "0.8.28"
+out = "out-dist"
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+evm_version = "cancun"
+
 [profile.default.fmt]
 line_length = 120
 tab_width = 4

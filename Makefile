@@ -1082,6 +1082,32 @@ poseidon-constants:
 poseidon-constants-check:
 	python3 $(POSEIDON_GEN) --check $(if $(wildcard $(CIRCOMLIB_JSON)),--check-against $(CIRCOMLIB_JSON))
 
+# ── Published contract artifacts (alberta-buck-contracts) ────────────
+#
+# The reproducible build behind the published package.  [profile.dist] in
+# foundry.toml pins the compiler and writes to its own out-dist/, so a dev
+# build can never decide what gets published; scripts/contracts-dist.py
+# emits only the contracts we own and asserts the pin held.
+#
+#   make contracts-dist          # build + emit dist/contracts/
+#   make contracts-dist-check    # verify the build (CI release gate)
+#
+# The Uniswap implementations are deliberately absent: they are BUSL-1.1 /
+# GPL-2.0 / GPL-3.0 and consumers take them from Uniswap's own packages.
+.PHONY: contracts-dist contracts-dist-build contracts-dist-check
+
+DIST_SKIP = --skip test --skip script \
+	    --skip 'src/uniswap_v2_build/**' --skip 'src/uniswap_v3_build/**'
+
+contracts-dist-build:
+	FOUNDRY_PROFILE=dist forge build $(DIST_SKIP)
+
+contracts-dist:		contracts-dist-build
+	python3 scripts/contracts-dist.py --emit
+
+contracts-dist-check:	contracts-dist-build
+	python3 scripts/contracts-dist.py --check
+
 core-js-deps:
 	cd core/js && npm ci
 
@@ -1209,13 +1235,18 @@ core-test:	core-test-py core-test-js core-test-rust
 
 # ── Dependencies ─────────────────────────────────────────────────────
 
+# Dependencies are PINNED to exact tags.  An unpinned `forge install`
+# fetches whatever HEAD is that day, and these libraries are compiled INTO
+# our contracts -- so the published bytecode would change underneath us with
+# no commit to show for it (alberta-buck-deployment.org, P2.5).  Bumping a
+# pin is deliberate: rebuild, re-run contracts-dist-check, new version.
 install:
-	forge install OpenZeppelin/openzeppelin-contracts --no-git
-	forge install smartcontractkit/chainlink-brownie-contracts --no-git
-	forge install Uniswap/v3-core --no-git
-	forge install Uniswap/v3-periphery --no-git
-	forge install Uniswap/universal-router --no-git
-	forge install foundry-rs/forge-std --no-git
+	forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+	forge install smartcontractkit/chainlink-brownie-contracts@v1.3.0 --no-git
+	forge install Uniswap/v3-core@v1.0.1 --no-git
+	forge install Uniswap/v3-periphery@v1.4.4 --no-git
+	forge install Uniswap/universal-router@v2.1.0 --no-git
+	forge install foundry-rs/forge-std@v1.16.1 --no-git
 
 update:
 	forge update
