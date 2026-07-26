@@ -13,9 +13,9 @@ import { fileURLToPath } from "node:url";
 
 let wasm = null;
 try {
-  wasm = await import("../demo/wasm-web/buck_identity.js");
+  wasm = await import("alberta-buck-kernel/web/identity");
   const bytes = readFileSync(
-    fileURLToPath(new URL("../demo/wasm-web/buck_identity_bg.wasm", import.meta.url)));
+    fileURLToPath(new URL("../kernel/web/buck_identity_bg.wasm", import.meta.url)));
   await wasm.default({ module_or_path: bytes });
 } catch {
   wasm = null;

@@ -1,9 +1,34 @@
 {
-  "name": "@alberta-buck/core",
-  "version": "0.0.1",
-  "description": "Alberta Buck core platform (JS): journal today; ChainSession (viem over Tevm/anvil), agents, and WASM kernel bindings as the phases land (see alberta-buck-platform.org)",
+  "name": "alberta-buck-core",
+  "version": "0.1.0",
+  "description": "Alberta Buck core platform (JS): the ChainSession API over Tevm/anvil/testnets with expectation journaling, the agent simulation platform, and the BigInt-native wrappers around the WebAssembly kernels",
   "type": "module",
-  "license": "MIT",
+  "license": "CAL-1.0",
+  "author": "Perry Kundert <perry@dominionrnd.com>",
+  "homepage": "https://github.com/alberta-buck/alberta-buck",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alberta-buck/alberta-buck.git",
+    "directory": "core/js"
+  },
+  "bugs": "https://github.com/alberta-buck/alberta-buck/issues",
+  "keywords": [
+    "ethereum",
+    "stablecoin",
+    "simulation",
+    "viem",
+    "tevm"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "workspaces": [
+    "kernel"
+  ],
   "scripts": {
     "test": "node --test test/"
   },
@@ -12,6 +37,7 @@
     "./*": "./src/*.js"
   },
   "dependencies": {
+    "alberta-buck-kernel": "0.1.0",
     "tevm": "^1.0.0-next.149",
     "viem": "^2.54.2"
   },

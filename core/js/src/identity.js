@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { wrapIdentity } from "./identity-core.js";
 
 const require = createRequire(import.meta.url);
-const api = wrapIdentity(require("../wasm/buck_identity.js"));
+const api = wrapIdentity(require("alberta-buck-kernel/identity"));
 
 export default api;
 export const {

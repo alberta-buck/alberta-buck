@@ -22,7 +22,7 @@ let id = null;
 let math = null;
 try {
   id = await import("../src/identity.js");
-  math = require("../wasm/buck_math.js");
+  math = require("alberta-buck-kernel/math");
 } catch {
   // kernels not built
 }

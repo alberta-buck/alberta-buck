@@ -1116,18 +1116,29 @@ core-build-py:
 	   core/python/buck_core/buck_registry.so
 
 # The JS kernel bindings: wasm-pack (npm devDependency of core/js) emits
-# nodejs-target packages into core/js/wasm/ (flat: buck_math.* and
-# buck_identity.* coexist; the shared package.json is cosmetic until the
-# npm packaging phase).  buck_math: BigInt ABI.  buck_identity: 0x-hex
+# nodejs-target packages into core/js/kernel/node/ (flat: buck_math.* and
+# buck_identity.* coexist).  buck_math: BigInt ABI.  buck_identity: 0x-hex
 # ABI wrapped by core/js/src/identity.js into the BigInt-native API.
+#
+# core/js/kernel IS the published npm package alberta-buck-kernel: node/ is
+# its CommonJS half, web/ (core-build-wasm-web) its ES-module half, selected
+# by the exports map in core/js/kernel/package.json.  wasm-pack drops its own
+# package.json into each out-dir naming whichever crate built last; we
+# overwrite both with the one field that must be right -- the module type
+# governing how Node parses the .js files in that directory.
 core-build-wasm:
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target nodejs \
-		--out-dir ../../../js/wasm --out-name buck_math
+		--out-dir ../../../js/kernel/node --out-name buck_math
 	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target nodejs \
-		--out-dir ../../../js/wasm --out-name buck_identity
+		--out-dir ../../../js/kernel/node --out-name buck_identity
+	@# wasm-pack writes a .gitignore of "*" into its out-dir; npm honours
+	@# it even against the files allowlist, which would publish a package
+	@# with no wasm in it at all.  Drop it.
+	rm -f core/js/kernel/node/.gitignore
+	echo '{ "type": "commonjs" }' > core/js/kernel/node/package.json
 
 # Browser (web-target) builds of BOTH kernels + the demo pages.  Serve
 # the demos (ES modules need http, not file://):
@@ -1139,10 +1150,18 @@ core-build-wasm-web:
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target web \
-		--out-dir ../../../js/demo/wasm-web --out-name buck_identity
+		--out-dir ../../../js/kernel/web --out-name buck_identity
 	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target web \
-		--out-dir ../../../js/demo/wasm-web --out-name buck_math
+		--out-dir ../../../js/kernel/web --out-name buck_math
+	rm -f core/js/kernel/web/.gitignore
+	echo '{ "type": "module" }' > core/js/kernel/web/package.json
+	@# The demo pages fetch the web build from their own directory over
+	@# http; they are static HTML with no bundler to resolve a package
+	@# name, so they get a copy rather than a resolution.
+	mkdir -p core/js/demo/wasm-web
+	cp core/js/kernel/web/buck_*.js core/js/kernel/web/buck_*.wasm \
+	   core/js/kernel/web/buck_*.d.ts core/js/demo/wasm-web/
 
 core-demo-identity:	core-build-wasm-web
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"

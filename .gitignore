@@ -29,9 +29,12 @@ node_modules/
 # and wasm must be reproducible from a tag (alberta-buck-deployment.org, P0).
 /core/rust/target/
 
-# Built kernel bindings (make nix-core-build)
+# Built kernel bindings (make nix-core-build).  core/js/kernel/{node,web}
+# are the wasm halves of the published alberta-buck-kernel package; its
+# package.json and README are tracked, the build outputs are not.
 /core/python/buck_core/*.so
-/core/js/wasm/
+/core/js/kernel/node/
+/core/js/kernel/web/
 /core/js/demo/wasm-web/
 
 # Bundled forge artifacts for the JS platform (make nix-core-js-artifacts)

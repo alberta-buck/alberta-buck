@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { wrapWallet } from "./wallet-core.js";
 
 const require = createRequire(import.meta.url);
-const api = wrapWallet(require("../wasm/buck_identity.js"));
+const api = wrapWallet(require("alberta-buck-kernel/identity"));
 
 export default api;
 export const {

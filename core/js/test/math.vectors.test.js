@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 let wasm = null;
 try {
-  wasm = require("../wasm/buck_math.js");
+  wasm = require("alberta-buck-kernel/math");
 } catch {
   // not built; tests below skip
 }

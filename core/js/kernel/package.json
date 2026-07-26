@@ -1,0 +1,46 @@
+{
+  "name": "alberta-buck-kernel",
+  "version": "0.1.0",
+  "description": "Alberta Buck monetary and identity kernels as WebAssembly: integer money arithmetic bit-identical to the Solidity contracts, and the BN254 identity/wallet cryptography, for Node and the browser",
+  "license": "CAL-1.0",
+  "author": "Perry Kundert <perry@dominionrnd.com>",
+  "homepage": "https://github.com/alberta-buck/alberta-buck",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alberta-buck/alberta-buck.git",
+    "directory": "core/js/kernel"
+  },
+  "bugs": "https://github.com/alberta-buck/alberta-buck/issues",
+  "keywords": [
+    "ethereum",
+    "stablecoin",
+    "wasm",
+    "bn254",
+    "zero-knowledge"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "//files": "node/ and web/ are build outputs and therefore gitignored; npm falls back to .gitignore when there is no .npmignore, so they MUST be listed here or the published tarball ships no wasm at all.",
+  "files": [
+    "node",
+    "web",
+    "README.md"
+  ],
+  "//exports": "Two builds of the same kernels: node/ is CommonJS (wasm-pack --target nodejs, loaded with createRequire), web/ is ESM (--target web, awaits an explicit wasm source). The bare subpaths pick by environment; the node/ and web/ subpaths force one.",
+  "exports": {
+    "./math": {
+      "node": "./node/buck_math.js",
+      "default": "./web/buck_math.js"
+    },
+    "./identity": {
+      "node": "./node/buck_identity.js",
+      "default": "./web/buck_identity.js"
+    },
+    "./node/math": "./node/buck_math.js",
+    "./node/identity": "./node/buck_identity.js",
+    "./web/math": "./web/buck_math.js",
+    "./web/identity": "./web/buck_identity.js",
+    "./package.json": "./package.json"
+  }
+}
