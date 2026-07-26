@@ -865,7 +865,7 @@ Updated as phases complete; =-= is not started.
 |-----+---------------------------------------+-----------+---------+---------|
 |   - | D1 public-code boundary               |           |         | -       |
 |   - | D2 licence (CAL-1.0 kernels)          |           |         | settled |
-|   - | D2 licence files written              |           |         | -       |
+|   - | D2 licence files written              |           |         | DONE    |
 |   - | D3 names (prefix rule)                |           |         | settled |
 |   - | D4 version + tag scheme               |           |         | -       |
 |   - | D5 pure/binary split                  |           |         | -       |
