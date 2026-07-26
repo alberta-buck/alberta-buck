@@ -290,22 +290,24 @@ bump would have changed published bytecode with no commit to show for it.
 Every dependency now pins an exact tag; =foundry.lock= and =Cargo.lock= are
 committed.
 
-* Remaining decisions
+* The public-code boundary
 
-** D1: does the sim's source go public?
+** D1: the sim's source goes public  [settled 2026-07-26]
 
 Publishing a Python package publishes its source: an sdist is a tarball of
 the package directory, a wheel a zip of =.py= files.  There is no meaningful
-"binary only" for Python.
+"binary only" for Python.  So publishing =alberta_buck= publishes the sim,
+the equilibrium findings (=EQUILIBRIUM.md=, the sweep vectors,
+=rebalance_policy.py=) and the quote sources.
 
-The kernels, platform libraries and contract artifacts are published and
-that is settled.  What remains is =alberta_buck= itself -- the sim, the
-equilibrium findings (=EQUILIBRIUM.md=, the sweep vectors,
-=rebalance_policy.py=), the quote sources.
+*Settled: yes, publish it.*  P5 is unblocked; every planned PyPI
+distribution can now ship.
 
-/Recommendation/: hold it until the paper it accompanies is out.  This is a
-strategic decision, not a technical one, and the item most likely to be
-regretted if made by default.  It blocks P5 and nothing else.
+What this does not decide: the repository itself stays private until P7 is
+taken deliberately, and the *papers* keep their own schedule.  Publishing
+the package makes the code readable; it does not make the writing done.
+
+* Remaining decisions
 
 ** D2: where the game's authority lives
 

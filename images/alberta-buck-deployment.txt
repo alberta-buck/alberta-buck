@@ -50,17 +50,18 @@ Table of Contents
 .. 1. The first publish is always manual
 .. 2. Build outputs are not published by default
 .. 3. Dependencies must be pinned to be reproducible
-4. Remaining decisions
-.. 1. D1: does the sim's source go public?
-.. 2. D2: where the game's authority lives
-5. The way forward
+4. The public-code boundary
+.. 1. D1: the sim's source goes public  [settled 2026-07-26]
+5. Remaining decisions
+.. 1. D2: where the game's authority lives
+6. The way forward
 .. 1. P2.5b: `alberta-buck-contracts' on PyPI
 .. 2. P3: `alberta-buck-core' on PyPI, and the pure/binary split
 .. 3. P4: `alberta-buck-kernel' wheels
 .. 4. P5: `alberta-buck' on PyPI
 .. 5. P6: what the game adds
 .. 6. P7: making the repository public
-6. Risks
+7. Risks
 
 
 1 Status
@@ -356,27 +357,32 @@ Table of Contents
   `foundry.lock' and `Cargo.lock' are committed.
 
 
-4 Remaining decisions
-═════════════════════
+4 The public-code boundary
+══════════════════════════
 
-4.1 D1: does the sim's source go public?
-────────────────────────────────────────
+4.1 D1: the sim's source goes public  [settled 2026-07-26]
+──────────────────────────────────────────────────────────
 
   Publishing a Python package publishes its source: an sdist is a
   tarball of the package directory, a wheel a zip of `.py' files.  There
-  is no meaningful "binary only" for Python.
+  is no meaningful "binary only" for Python.  So publishing
+  `alberta_buck' publishes the sim, the equilibrium findings
+  (`EQUILIBRIUM.md', the sweep vectors, `rebalance_policy.py') and the
+  quote sources.
 
-  The kernels, platform libraries and contract artifacts are published
-  and that is settled.  What remains is `alberta_buck' itself – the sim,
-  the equilibrium findings (`EQUILIBRIUM.md', the sweep vectors,
-  `rebalance_policy.py'), the quote sources.
+  *Settled: yes, publish it.* P5 is unblocked; every planned PyPI
+  distribution can now ship.
 
-  /Recommendation/: hold it until the paper it accompanies is out.  This
-  is a strategic decision, not a technical one, and the item most likely
-  to be regretted if made by default.  It blocks P5 and nothing else.
+  What this does not decide: the repository itself stays private until
+  P7 is taken deliberately, and the *papers* keep their own schedule.
+  Publishing the package makes the code readable; it does not make the
+  writing done.
 
 
-4.2 D2: where the game's authority lives
+5 Remaining decisions
+═════════════════════
+
+5.1 D2: where the game's authority lives
 ────────────────────────────────────────
 
   Three places the mechanics could be authoritative:
@@ -408,10 +414,10 @@ Table of Contents
   this on a real chain" moment needs them.
 
 
-5 The way forward
+6 The way forward
 ═════════════════
 
-5.1 P2.5b: `alberta-buck-contracts' on PyPI
+6.1 P2.5b: `alberta-buck-contracts' on PyPI
 ───────────────────────────────────────────
 
   The package builds and installs; only a credential is missing.  Either
@@ -426,7 +432,7 @@ Table of Contents
   any checkout returns `Buck''s ABI and 16,158 bytes of bytecode.
 
 
-5.2 P3: `alberta-buck-core' on PyPI, and the pure/binary split
+6.2 P3: `alberta-buck-core' on PyPI, and the pure/binary split
 ──────────────────────────────────────────────────────────────
 
   `core/python/buck_core/' holds four `.so' files, three of them
@@ -474,7 +480,7 @@ Table of Contents
   times – is wasteful, not broken.
 
 
-5.3 P4: `alberta-buck-kernel' wheels
+6.3 P4: `alberta-buck-kernel' wheels
 ────────────────────────────────────
 
   The only phase with real engineering.  abi3-py311 is already set in
@@ -493,7 +499,7 @@ Table of Contents
   `pyrevm' today, and ARM servers are where a cheap game backend lives.
 
 
-5.4 P5: `alberta-buck' on PyPI
+6.4 P5: `alberta-buck' on PyPI
 ──────────────────────────────
 
   Blocked on P3 (hard `buck_core' import) and D1.  The contract blocker
@@ -520,7 +526,7 @@ Table of Contents
      tag-matches-version CI guard.
 
 
-5.5 P6: what the game adds
+6.5 P6: what the game adds
 ──────────────────────────
 
   Under D2/(3):
@@ -550,7 +556,7 @@ Table of Contents
     and say so out loud.
 
 
-5.6 P7: making the repository public
+6.6 P7: making the repository public
 ────────────────────────────────────
 
   Independent of everything above.  Checklist:
@@ -570,7 +576,7 @@ Table of Contents
      can then carry a source-verification link.
 
 
-6 Risks
+7 Risks
 ═══════
 
   • *Publishing precedes the papers* (D1).  Source on PyPI is source in
