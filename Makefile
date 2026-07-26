@@ -23,7 +23,15 @@ FORK_BLOCK		?=
 # and the uniswap_v*_build skips now live in [profile.default] in
 # foundry.toml -- on a command line they applied only where somebody
 # remembered them, and the bare builds below are exactly where nobody did.
-FORGE_OPTS		?= --optimize --optimizer-runs 200
+FORGE_OPTS		?= --optimize --optimizer-runs 200 $(FORGE_SKIP_GENERATED)
+
+# test/RegressionTest.sol imports a Groth16 verifier that the SNARK
+# toolchain GENERATES into build/snark/ (gitignored).  foundry resolves the
+# whole project graph before it applies any --skip name filter, so when that
+# file is absent every `forge build` fails at parse time -- which is exactly
+# what a fresh clone and CI see.  Skip that one path when the generated
+# verifier is not present, and run it normally when it is.
+FORGE_SKIP_GENERATED	= $(if $(wildcard build/snark/regression/RegressVerifier.sol),,--skip 'test/RegressionTest.sol')
 
 # Fork block pinning (deterministic tests): set FORK_BLOCK=12345 to pin
 ifdef FORK_BLOCK
@@ -75,7 +83,18 @@ emacs:
 	emacs -nw
 
 test: build-uniswap-artifacts
-	forge test $(FORGE_OPTS) -vvv
+	forge test $(FORGE_OPTS) $(FORGE_SKIP_SNARK_TESTS) -vvv
+
+# The SNARK suites read proof fixtures the circom/snarkjs toolchain
+# GENERATES into build/snark/ (gitignored, and a trusted setup away).  With
+# the fixtures present they run; without them they fail at vm.readFile, so a
+# fresh clone or a CI runner that has not built the circuits skips them --
+# deliberately and visibly, rather than by pretending the suite is green.
+#
+#   make snark-...      # generate the fixtures, then these run too
+SNARK_TEST_SUITES	= MintVerifierTest|MintVerifierA2Test|NotesA2TieTest|SpendVerifierTest
+FORGE_SKIP_SNARK_TESTS	= $(if $(wildcard build/snark/mint_batch_a2_n1/fixtures/basic.json),,\
+			     --no-match-contract '$(SNARK_TEST_SUITES)')
 unit-%:
 	forge test $(FORGE_OPTS) --match-test $* -vvv
 path-%:
@@ -143,7 +162,7 @@ fmt-check:
 # has been applied so UniswapV2Router02 computes the same pair addresses as the
 # locally-built V2Factory.
 build-uniswap-artifacts: stage-uniswap
-	forge build --skip test --skip script
+	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
 
 # The third-party artifacts come from Uniswap's own published npm packages,
 # pinned exactly in package.json.  We no longer compile them: their pragmas
@@ -566,7 +585,7 @@ SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 #      trigger to avoid the IR-incompatibility error.
 # Both profiles share the same ``out/`` directory.
 sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
-	forge build --skip test --skip script
+	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
 
 # ── Uniswap V2 init-code-hash patch ──────────────────────────────────────
 #
@@ -1106,7 +1125,7 @@ poseidon-constants-check:
 .PHONY: contracts-dist contracts-dist-build contracts-dist-check
 
 contracts-dist-build:
-	forge build --skip test --skip script
+	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
 
 contracts-dist:		contracts-dist-build
 	python3 scripts/contracts-dist.py --emit
