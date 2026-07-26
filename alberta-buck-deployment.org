@@ -870,11 +870,12 @@ Updated as phases complete; =-= is not started.
 |   - | D4 version + tag scheme               |           |         | -       |
 |   - | D5 pure/binary split                  |           |         | -       |
 |   - | D6 game authority                     |           |         | -       |
-|   0 | P0 pre-flight (metadata, vectors, CI) |           |         | -       |
-|   1 | =alberta-buck-math=                   | crates.io |   0.1.0 | -       |
-|   1 | =alberta-buck-identity=               | crates.io |   0.1.0 | -       |
-|   1 | =alberta-buck-registry=               | crates.io |   0.1.0 | -       |
-|   1 | =alberta-buck-wallet=                 | crates.io |   0.1.0 | -       |
+|   0 | P0 pre-flight (metadata, vectors, CI) |           |         | CI left |
+|   1 | =alberta-buck-math=                   | crates.io |   0.1.0 | PUBLISHED |
+|   1 | =alberta-buck-identity=               | crates.io |   0.1.0 | PUBLISHED |
+|   1 | =alberta-buck-registry=               | crates.io |   0.1.0 | PUBLISHED |
+|   1 | =alberta-buck-wallet=                 | crates.io |   0.1.0 | PUBLISHED |
+|   1 | team ownership + trusted publishing   | crates.io |         | -       |
 |   2 | =alberta-buck-kernel=                 | npm       |   0.1.0 | -       |
 |   2 | =alberta-buck-core=                   | npm       |   0.1.0 | -       |
 | 2.5 | =alberta-buck-contracts=              | npm       |   0.1.0 | -       |
