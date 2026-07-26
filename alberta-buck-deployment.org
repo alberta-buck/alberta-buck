@@ -897,7 +897,7 @@ Updated as phases complete; =-= is not started.
 |   1 | team ownership + trusted publishing   | crates.io |         | -       |
 |   2 | =alberta-buck-kernel=                 | npm       |   0.1.1 | PUBLISHED |
 |   2 | =alberta-buck-core=                   | npm       |   0.1.1 | PUBLISHED |
-| 2.5 | =alberta-buck-contracts=              | npm       |   0.1.0 | -       |
+| 2.5 | =alberta-buck-contracts=              | npm       |   0.1.0 | PUBLISHED |
 | 2.5 | =alberta-buck-contracts=              | PyPI      |   0.1.0 | -       |
 |   3 | =alberta-buck-core=                   | PyPI      |   0.1.0 | -       |
 |   4 | =alberta-buck-kernel=                 | PyPI      |   0.1.0 | -       |
