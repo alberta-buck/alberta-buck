@@ -1,0 +1,129 @@
+# Publish the Alberta Buck Python packages to PyPI.
+#
+# Trigger: a py-v* tag, e.g.
+#
+#     git tag py-v0.1.0 && git push origin py-v0.1.0
+#
+# Authentication is OIDC trusted publishing -- no API token anywhere.
+#
+# PyPI differs from crates.io and npm in the one way that matters here: a
+# *pending publisher* can be configured for a project that does not exist
+# yet, and the first successful upload creates it.  So unlike the other two
+# registries, this needs no manual token bootstrap -- but the pending
+# publisher must be configured first, at
+# https://pypi.org/manage/account/publishing/ :
+#
+#     PyPI project name : alberta-buck-contracts
+#     Owner             : alberta-buck
+#     Repository        : alberta-buck
+#     Workflow name     : release-pypi.yml
+#     Environment       : pypi          (must match `environment:` below)
+#
+# A pending publisher does not reserve the name; it is claimed on first use.
+#
+# Only alberta-buck-contracts ships today.  alberta-buck-core,
+# alberta-buck-kernel and alberta-buck join this workflow as their phases
+# land (alberta-buck-deployment.org, P3/P4/P5); each needs its own pending
+# publisher configured the same way.
+
+name: Release PyPI
+
+on:
+  push:
+    tags:
+      - 'py-v*'
+
+concurrency:
+  group: release-pypi
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Publish alberta-buck-contracts
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/alberta-buck-contracts
+    permissions:
+      contents: read
+      id-token: write          # required for PyPI trusted publishing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Tag matches the package version
+        run: |
+          python3 - <<'EOF'
+          import os, sys, tomllib
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("py-v")
+          ver = tomllib.load(open("core/contracts/python/pyproject.toml", "rb"))["project"]["version"]
+          if tag != ver:
+              print(f"::error::tag py-v{tag} does not match package version {ver}")
+              sys.exit(1)
+          print(f"alberta-buck-contracts {ver} matches the tag")
+          EOF
+
+      # Pinned solidity dependencies; they compile INTO our contracts, so
+      # the exact tags in `make install` are part of the published bytecode.
+      - name: Install Solidity dependencies
+        run: make install
+
+      # The Uniswap artifacts our test worlds deploy are taken from
+      # Uniswap's own npm packages, not rebuilt -- their pre-0.8 pragmas
+      # need compilers foundry cannot resolve on every platform.
+      - name: Install JS dependencies
+        run: npm ci --no-audit --no-fund
+
+      # The release gate: the artifact we publish must be the artifact the
+      # suite exercises.  529 tests, no forked network needed.
+      - name: Test
+        run: make test
+
+      - name: Build the contracts bundle
+        run: make contracts-dist
+
+      # Asserts every artifact records the pinned compiler and that no
+      # third-party contract carried bytecode into the bundle.
+      - name: Verify the bundle
+        run: python3 scripts/contracts-dist.py --check
+
+      - name: Build the wheel and sdist
+        run: |
+          python -m pip install --quiet build
+          python -m build core/contracts/python --outdir dist/
+
+      - name: Check the wheel actually contains the bundle
+        # package-data is generated and therefore gitignored; a wheel that
+        # quietly shipped without contracts.json would install and then fail
+        # on first use.
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, zipfile
+          whl = glob.glob("dist/*.whl")
+          if not whl:
+              print("::error::no wheel built"); sys.exit(1)
+          names = zipfile.ZipFile(whl[0]).namelist()
+          need = ["buck_contracts/contracts.json", "buck_contracts/compiler.json"]
+          missing = [n for n in need if n not in names]
+          if missing:
+              print(f"::error::wheel {whl[0]} is missing {missing}"); sys.exit(1)
+          print(f"{whl[0]}: bundle present ({len(names)} files)")
+          EOF
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

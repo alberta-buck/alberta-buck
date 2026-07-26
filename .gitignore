@@ -77,3 +77,4 @@ alberta_buck/sim/prices/hist-manifest-*.json
 /core/contracts/python/buck_contracts/*.json
 /core/contracts/python/build/
 /core/python/build/
+/dist/
