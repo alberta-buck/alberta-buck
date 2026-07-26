@@ -1,6 +1,5 @@
 # Foundry build artifacts
 /out/
-/out-dist/
 /cache/
 /broadcast/
 /.anvil-cache/

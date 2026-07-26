@@ -11,8 +11,8 @@ deployment registry.
 Reproducibility is the whole point of this script, and it is enforced
 rather than hoped for:
 
-  * the compiler is pinned by [profile.dist] in foundry.toml, and --check
-    asserts every artifact records that exact version;
+  * the compiler is pinned by [profile.default] in foundry.toml, and
+    --check asserts every artifact records that exact version;
   * only contracts WE own are emitted (see CONTRACTS below) -- the Uniswap
     implementations are BUSL-1.1/GPL-2.0/GPL-3.0 and consumers take them
     from Uniswap's own published packages, so we never become the
@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BUILD = REPO / "out-dist"                     # [profile.dist] out
+BUILD = REPO / "out"                          # [profile.default] out
 DEST = REPO / "dist" / "contracts"
 
 # The pin lives in foundry.toml; this is the value --check asserts against
@@ -41,19 +41,19 @@ DEST = REPO / "dist" / "contracts"
 # the two cannot drift apart.
 def pinned_solc() -> str:
     txt = (REPO / "foundry.toml").read_text()
-    in_dist = False
+    in_default = False
     for line in txt.splitlines():
         s = line.strip()
         if s.startswith("["):
-            in_dist = s == "[profile.dist]"
-        elif in_dist and s.startswith("solc"):
+            in_default = s == "[profile.default]"
+        elif in_default and s.startswith("solc"):
             return s.split("=", 1)[1].strip().strip('"')
-    raise SystemExit("foundry.toml: [profile.dist] has no solc pin")
+    raise SystemExit("foundry.toml: [profile.default] has no solc pin")
 
 
 # Contracts we own and publish.  Deliberately an allowlist: a wildcard over
-# out-dist/ would sweep in interface stubs, test fixtures and -- the moment
-# someone adds a build dir -- third-party implementations.
+# out/ would sweep in interface stubs, test fixtures and the vendored
+# Uniswap implementations, which share the directory.
 CONTRACTS = [
     "Buck",                    # ERC-20, demurrage + credit limits
     "BuckCredit",              # ERC-721, insured asset with depreciation

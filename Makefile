@@ -19,13 +19,11 @@ ANVIL_PORT		?= 8545
 ANVIL_BLOCK_TIME	?= 0
 FORK_BLOCK		?=
 
-# Forge options.  --use 0.8.28 sidesteps a solc 0.8.31 IR codegen bug
-# ("Modifiers not implemented yet"); the v2/v3 builds use their own
-# pragmas (=0.5.16, =0.7.6) so we skip them here and they pick up via
-# the FOUNDRY_PROFILE=v3 path / their own solc.
-FORGE_OPTS		?= --optimize --optimizer-runs 200 --use 0.8.28 \
-			   --skip 'src/uniswap_v2_build/**' \
-			   --skip 'src/uniswap_v3_build/**'
+# Forge options.  The solc pin (0.8.28, avoiding a 0.8.31 IR codegen bug)
+# and the uniswap_v*_build skips now live in [profile.default] in
+# foundry.toml -- on a command line they applied only where somebody
+# remembered them, and the bare builds below are exactly where nobody did.
+FORGE_OPTS		?= --optimize --optimizer-runs 200
 
 # Fork block pinning (deterministic tests): set FORK_BLOCK=12345 to pin
 ifdef FORK_BLOCK
@@ -144,9 +142,21 @@ fmt-check:
 # scenarios) require these.  Also ensures the critical V2 init-code-hash patch
 # has been applied so UniswapV2Router02 computes the same pair addresses as the
 # locally-built V2Factory.
-build-uniswap-artifacts: v2-patch-init-code-hash
-	FOUNDRY_VIA_IR=false FOUNDRY_PROFILE=v3 forge build --skip test --skip script
-	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
+build-uniswap-artifacts: stage-uniswap v2-patch-init-code-hash
+	forge build --skip test --skip script
+
+# The third-party artifacts come from Uniswap's own published npm packages,
+# pinned exactly in package.json.  We no longer compile them: their pragmas
+# are =0.5.16 / =0.6.6 / =0.7.6, which foundry cannot resolve at all on
+# arm64 macOS, and the copies that used to sit in out/ were stale leftovers
+# from a toolchain that no longer exists -- reproducible on no fresh clone
+# and in no CI runner.  See scripts/stage-uniswap.mjs.
+.PHONY: stage-uniswap stage-uniswap-check
+stage-uniswap:
+	node scripts/stage-uniswap.mjs
+
+stage-uniswap-check:
+	node scripts/stage-uniswap.mjs --check
 
 # ── Local Anvil Node ─────────────────────────────────────────────────
 
@@ -555,9 +565,8 @@ SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 #      (required for BuckBasket's deep call stack).  Skips the 0.7.6
 #      trigger to avoid the IR-incompatibility error.
 # Both profiles share the same ``out/`` directory.
-sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) v2-patch-init-code-hash
-	FOUNDRY_VIA_IR=false FOUNDRY_PROFILE=v3 forge build --skip test --skip script
-	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
+sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) stage-uniswap v2-patch-init-code-hash
+	forge build --skip test --skip script
 
 # ── Uniswap V2 init-code-hash patch ──────────────────────────────────────
 #
@@ -583,7 +592,7 @@ sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) v2-patch-init-code-hash
 v2-patch-init-code-hash:
 	@# Phase 1: ensure UniswapV2Pair artifact exists so we can hash it.
 	@test -f out/UniswapV2Pair.sol/UniswapV2Pair.json || \
-		forge build --skip test --skip script --skip 'src/uniswap_v3_build/*' >/dev/null
+		node scripts/stage-uniswap.mjs >/dev/null
 	@HASH=$$(cast keccak $$(jq -r '.bytecode.object' out/UniswapV2Pair.sol/UniswapV2Pair.json) | sed 's/^0x//'); \
 		LIB=lib/v2-periphery/contracts/libraries/UniswapV2Library.sol; \
 		CURRENT=$$(grep -oE "hex'[0-9a-f]*' // init code hash" $$LIB | sed -E "s/hex'([0-9a-f]*)'.*/\1/"); \
@@ -1096,11 +1105,8 @@ poseidon-constants-check:
 # GPL-2.0 / GPL-3.0 and consumers take them from Uniswap's own packages.
 .PHONY: contracts-dist contracts-dist-build contracts-dist-check
 
-DIST_SKIP = --skip test --skip script \
-	    --skip 'src/uniswap_v2_build/**' --skip 'src/uniswap_v3_build/**'
-
 contracts-dist-build:
-	FOUNDRY_PROFILE=dist forge build $(DIST_SKIP)
+	forge build --skip test --skip script
 
 contracts-dist:		contracts-dist-build
 	python3 scripts/contracts-dist.py --emit
