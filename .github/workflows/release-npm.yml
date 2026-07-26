@@ -1,0 +1,139 @@
+# Publish the Alberta Buck JS packages to npm.
+#
+# Trigger: a js-v* tag, e.g.
+#
+#     git tag js-v0.1.1 && git push origin js-v0.1.1
+#
+# Authentication is OIDC trusted publishing -- no NPM_TOKEN anywhere.  It
+# requires a Trusted Publisher configured on npmjs.com for EACH package
+# (Settings -> Trusted Publisher -> GitHub Actions): organization
+# alberta-buck, repository alberta-buck, workflow release-npm.yml.  npm only
+# offers that configuration once the package exists, which is why 0.1.0 goes
+# out by hand (alberta-buck-deployment.org, P2).
+#
+# Requirements npm enforces for OIDC: npm >= 11.5.1, Node >= 22.14.0, and a
+# GitHub-hosted runner.  ubuntu-latest ships an older npm than that, so the
+# first step upgrades it.
+#
+# Provenance attestations are generated automatically for public packages
+# from PUBLIC repositories.  While this repository is private, publishes
+# succeed but carry no provenance -- do not add --provenance, which fails
+# outright rather than degrading.
+
+name: Release npm
+
+on:
+  push:
+    tags:
+      - 'js-v*'
+
+concurrency:
+  group: release-npm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish kernel + core to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # required for npm trusted publishing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: npm >= 11.5.1 (OIDC support)
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install JS dependencies
+        working-directory: core/js
+        run: npm ci
+
+      - name: Tag matches both package versions
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const read = p => JSON.parse(fs.readFileSync(p, "utf8"));
+          const tag    = process.env.GITHUB_REF_NAME.replace(/^js-v/, "");
+          const kernel = read("core/js/kernel/package.json");
+          const core   = read("core/js/package.json");
+          const errs = [];
+          if (kernel.version !== tag) errs.push(`kernel ${kernel.version} != tag ${tag}`);
+          if (core.version   !== tag) errs.push(`core ${core.version} != tag ${tag}`);
+          // core depends on the kernel by EXACT version; a stale pin would
+          // publish a core that installs the previous kernel beside it.
+          const pin = core.dependencies["alberta-buck-kernel"];
+          if (pin !== tag) errs.push(`core depends on alberta-buck-kernel ${pin}, expected ${tag}`);
+          if (errs.length) {
+            console.error("::error::version mismatch:\n  " + errs.join("\n  "));
+            process.exit(1);
+          }
+          console.log(`kernel, core and the kernel pin all at ${tag}`);
+          EOF
+
+      - name: Build both wasm targets
+        run: make core-build-wasm core-build-wasm-web
+
+      - name: The published tarballs actually contain the wasm
+        # wasm-pack writes a .gitignore of "*" into its out-dir and npm
+        # honours it over the files allowlist; the build removes it, and
+        # this asserts the removal worked rather than trusting it.
+        working-directory: core/js
+        run: |
+          set -euo pipefail
+          n=$(npm pack --dry-run --json -w alberta-buck-kernel |
+              node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));
+                       console.log(p[0].files.filter(f=>f.path.endsWith(".wasm")).length)')
+          echo "wasm files in the kernel tarball: $n"
+          [ "$n" -eq 4 ] || { echo "::error::expected 4 .wasm files, found $n" >&2; exit 1; }
+
+      - name: Test
+        working-directory: core/js
+        run: |
+          node --test \
+            test/math.vectors.test.js \
+            test/identity.vectors.test.js \
+            test/wallet.vectors.test.js \
+            test/registry.vectors.test.js \
+            test/identity.web.test.js \
+            test/journal.test.js
+
+      - name: Publish alberta-buck-kernel
+        working-directory: core/js
+        run: npm publish -w alberta-buck-kernel
+
+      - name: Wait for the kernel to be installable
+        # core pins the kernel exactly; publishing core before the registry
+        # serves that version leaves a window where `npm i alberta-buck-core`
+        # fails for everyone.
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#js-v}"
+          for i in $(seq 1 30); do
+            if npm view "alberta-buck-kernel@$ver" version >/dev/null 2>&1; then
+              echo "alberta-buck-kernel@$ver is available"
+              exit 0
+            fi
+            echo "waiting for alberta-buck-kernel@$ver ($i/30)"
+            sleep 10
+          done
+          echo "::error::alberta-buck-kernel@$ver never became available" >&2
+          exit 1
+
+      - name: Publish alberta-buck-core
+        working-directory: core/js
+        run: npm publish
