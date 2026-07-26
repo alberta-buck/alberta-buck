@@ -262,11 +262,30 @@ three release workflows breaks the moment one artifact is unchanged
 | =js-v*= | =release-npm.yml=    | =alberta-buck-kernel=, =-contracts=, =-core=                 |
 | =py-v*= | =release-pypi.yml=   | =alberta-buck-core=, =-contracts=, =-kernel=, =alberta-buck= |
 
-The kernels move as *one* version across all three languages -- they are one
-artifact compiled three ways, and a bit-identical guarantee that spans
-versions is not a guarantee.  =alberta-buck-contracts= is the exception: it
-versions with the /contracts/, not the kernels (P2.5).  =0.0.1= everywhere
-today is a placeholder; start public life at *0.1.0*.
+*Lockstep at major.minor; patch floats* (settled 2026-07-26).  The kernels
+are one artifact compiled three ways, so the bit-identical guarantee has to
+be anchored to a version -- but it is a claim about /semantics/, and only
+major.minor can change semantics.  Therefore:
+
+- =alberta-buck-math 0.1.*= in Rust, JS and Python compute identically.
+  The cross-language vector suites are the enforcement, and they may assume
+  it.
+- A patch release in one language does *not* oblige the others.  Packaging
+  fixes are the common case and they are language-local: the JS packages
+  went to 0.1.1 for a =wasm-opt= size pass that did not touch a line of
+  Rust, and forcing four identical crates to 0.1.1 to match would have been
+  ceremony, not information.
+- A major or minor bump is a cross-language event.  It lands everywhere, or
+  the guarantee above stops being true.
+
+Consequences worth stating: the inter-crate requirements stay caret
+(="0.1"=, so 0.1.x siblings resolve), and =release-crates.yml= guards that
+they track the workspace major.minor rather than pinning exact patches.
+Skew /within/ a minor is expected and fine; skew /across/ one is a bug.
+
+=alberta-buck-contracts= is outside this entirely: it versions with the
+/contracts/, not the kernels (P2.5).  =0.0.1= everywhere was a placeholder;
+public life starts at *0.1.0*.
 
 Add a CI guard that the tag matches the manifest version (a released
 =py-v0.1.0= that uploads =0.0.1= is a burned filename).  Take the =slip39=
@@ -867,7 +886,7 @@ Updated as phases complete; =-= is not started.
 |   - | D2 licence (CAL-1.0 kernels)          |           |         | settled |
 |   - | D2 licence files written              |           |         | DONE    |
 |   - | D3 names (prefix rule)                |           |         | settled |
-|   - | D4 version + tag scheme               |           |         | -       |
+|   - | D4 version + tag scheme               |           |         | settled |
 |   - | D5 pure/binary split                  |           |         | -       |
 |   - | D6 game authority                     |           |         | -       |
 |   0 | P0 pre-flight (metadata, vectors, CI) |           |         | CI left |
@@ -876,8 +895,8 @@ Updated as phases complete; =-= is not started.
 |   1 | =alberta-buck-registry=               | crates.io |   0.1.0 | PUBLISHED |
 |   1 | =alberta-buck-wallet=                 | crates.io |   0.1.0 | PUBLISHED |
 |   1 | team ownership + trusted publishing   | crates.io |         | -       |
-|   2 | =alberta-buck-kernel=                 | npm       |   0.1.0 | -       |
-|   2 | =alberta-buck-core=                   | npm       |   0.1.0 | -       |
+|   2 | =alberta-buck-kernel=                 | npm       |   0.1.1 | 0.1.0 up |
+|   2 | =alberta-buck-core=                   | npm       |   0.1.1 | -       |
 | 2.5 | =alberta-buck-contracts=              | npm       |   0.1.0 | -       |
 | 2.5 | =alberta-buck-contracts=              | PyPI      |   0.1.0 | -       |
 |   3 | =alberta-buck-core=                   | PyPI      |   0.1.0 | -       |
