@@ -142,7 +142,7 @@ fmt-check:
 # scenarios) require these.  Also ensures the critical V2 init-code-hash patch
 # has been applied so UniswapV2Router02 computes the same pair addresses as the
 # locally-built V2Factory.
-build-uniswap-artifacts: stage-uniswap v2-patch-init-code-hash
+build-uniswap-artifacts: stage-uniswap
 	forge build --skip test --skip script
 
 # The third-party artifacts come from Uniswap's own published npm packages,
@@ -565,7 +565,7 @@ SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 #      (required for BuckBasket's deep call stack).  Skips the 0.7.6
 #      trigger to avoid the IR-incompatibility error.
 # Both profiles share the same ``out/`` directory.
-sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) stage-uniswap v2-patch-init-code-hash
+sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
 	forge build --skip test --skip script
 
 # ── Uniswap V2 init-code-hash patch ──────────────────────────────────────
@@ -1247,13 +1247,26 @@ core-test:	core-test-py core-test-js core-test-rust
 # our contracts -- so the published bytecode would change underneath us with
 # no commit to show for it (alberta-buck-deployment.org, P2.5).  Bumping a
 # pin is deliberate: rebuild, re-run contracts-dist-check, new version.
+# These four are the only Solidity dependencies src/ and test/ actually
+# import -- v3-core for its interfaces, chainlink for AggregatorV3Interface,
+# OpenZeppelin for the token bases, forge-std for the harness.  The Uniswap
+# IMPLEMENTATIONS are no longer dependencies at all: their compiled
+# artifacts come from Uniswap's npm packages (scripts/stage-uniswap.mjs).
+#
+# Tags are exact and are the GIT tag, which for these repositories is NOT
+# the npm version -- Uniswap v3-core publishes npm 1.0.1 from a repository
+# whose latest tag is v1.0.0, and chainlink tags without a leading "v".
+# Guessing from package.json is how CI first failed here.
 install:
 	forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
-	forge install smartcontractkit/chainlink-brownie-contracts@v1.3.0 --no-git
-	forge install Uniswap/v3-core@v1.0.1 --no-git
-	forge install Uniswap/v3-periphery@v1.4.4 --no-git
-	forge install Uniswap/universal-router@v2.1.0 --no-git
+	forge install smartcontractkit/chainlink-brownie-contracts@1.3.0 --no-git
+	forge install Uniswap/v3-core@v1.0.0 --no-git
 	forge install foundry-rs/forge-std@v1.16.1 --no-git
+
+# Additionally required by the Python routing sim, which builds the
+# Universal Router as its own sub-project for its artifact.
+install-sim:	install
+	forge install Uniswap/universal-router@v1.6.0 --no-git
 
 update:
 	forge update
