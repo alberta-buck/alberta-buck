@@ -1,4 +1,4 @@
-// @alberta-buck/core -- the JS side of the Alberta Buck platform.
+// alberta-buck-core -- the JS side of the Alberta Buck platform.
 // See alberta-buck-platform.org and core/README.md.
 
 export { FIELDS, JournalWriter, parseJournal, mismatches, totalGas,

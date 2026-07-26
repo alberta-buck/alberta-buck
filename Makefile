@@ -1031,11 +1031,56 @@ sim-plot-eq-%:
 
 .PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
+.PHONY: core-wallet-vectors core-registry-vectors
+.PHONY: core-vectors-sync core-vectors-check
+.PHONY: poseidon-constants poseidon-constants-check
 
 # Emit from the py_ecc reference (kernel_vectors.py forces
 # BUCK_IDENTITY_BACKEND=py itself; the binding need not be built).
 core-identity-vectors:
 	python -m alberta_buck.wallet.kernel_vectors core/vectors/identity-kernel-vectors.json
+
+# Wallet + registry kernel vectors (same doctrine: py reference emits,
+# cargo/pytest/node replay; regenerating is an ABI-break-level event).
+core-wallet-vectors:
+	python -m alberta_buck.wallet.wallet_kernel_vectors core/vectors/wallet-kernel-vectors.json
+
+core-registry-vectors:
+	python -m alberta_buck.registry.kernel_vectors core/vectors/registry-kernel-vectors.json
+
+# Each published crate carries its OWN copy of the vectors it replays:
+# `cargo package` includes only files under the crate directory, so a crate
+# whose tests reached ../../../test/vectors would ship a suite that cannot
+# run for anyone downstream (alberta-buck-deployment.org, P0/4).  -sync
+# refreshes the copies after regenerating the canonical files; -check fails
+# on drift and gates core-test-rust, so a stale copy cannot ship.
+core-vectors-sync:
+	cp test/vectors/math-vectors.json            core/rust/buck-math/tests/vectors/
+	cp test/vectors/identity.json                core/rust/buck-identity/tests/vectors/
+	cp core/vectors/identity-kernel-vectors.json core/rust/buck-identity/tests/vectors/
+	cp core/vectors/registry-kernel-vectors.json core/rust/buck-registry/tests/vectors/
+	cp core/vectors/wallet-kernel-vectors.json   core/rust/buck-wallet/tests/vectors/
+
+core-vectors-check:
+	@cmp test/vectors/math-vectors.json            core/rust/buck-math/tests/vectors/math-vectors.json
+	@cmp test/vectors/identity.json                core/rust/buck-identity/tests/vectors/identity.json
+	@cmp core/vectors/identity-kernel-vectors.json core/rust/buck-identity/tests/vectors/identity-kernel-vectors.json
+	@cmp core/vectors/registry-kernel-vectors.json core/rust/buck-registry/tests/vectors/registry-kernel-vectors.json
+	@cmp core/vectors/wallet-kernel-vectors.json   core/rust/buck-wallet/tests/vectors/wallet-kernel-vectors.json
+	@echo "vendored crate vectors match the canonical files"
+
+# Poseidon round constants and MDS matrices, DERIVED from the Poseidon
+# specification's Grain LFSR rather than copied from circomlib -- see NOTICE
+# and the generator's docstring.  The output is byte-identical to circomlib's
+# file, which -check proves whenever node_modules/circomlibjs is installed.
+POSEIDON_GEN	= core/rust/buck-identity/constants/generate.py
+CIRCOMLIB_JSON	= node_modules/circomlibjs/src/poseidon_constants.json
+
+poseidon-constants:
+	python3 $(POSEIDON_GEN) --write
+
+poseidon-constants-check:
+	python3 $(POSEIDON_GEN) --check $(if $(wildcard $(CIRCOMLIB_JSON)),--check-against $(CIRCOMLIB_JSON))
 
 core-js-deps:
 	cd core/js && npm ci
@@ -1048,27 +1093,52 @@ core-js-artifacts:
 # The Python kernel bindings: PyO3 cdylibs built with plain cargo (the
 # .cargo/config.toml link flags stand in for maturin) and placed inside
 # the buck_core package -- import buck_core.buck_math /
-# buck_core.buck_identity.
+# buck_core.buck_identity / buck_core.buck_wallet / buck_core.buck_registry.
+# The identity dylib defines THREE #[pymodule] entry points; copying the
+# one artifact under each module filename gives three imports from one
+# compiled kernel (Python calls the PyInit_<basename> matching the file).
+# rm before cp: overwriting a .so in place keeps its inode, and macOS
+# caches code signatures by inode -- a stale cache SIGKILLs (Killed: 9)
+# the next import.  A fresh inode per copy sidesteps it.
 core-build-py:
 	cd core/rust && cargo build --release -p buck-math-py -p buck-identity-py
+	rm -f core/python/buck_core/buck_math.so \
+	      core/python/buck_core/buck_identity.so \
+	      core/python/buck_core/buck_wallet.so \
+	      core/python/buck_core/buck_registry.so
 	cp core/rust/target/release/libbuck_math.dylib \
 	   core/python/buck_core/buck_math.so
 	cp core/rust/target/release/libbuck_identity.dylib \
 	   core/python/buck_core/buck_identity.so
+	cp core/rust/target/release/libbuck_identity.dylib \
+	   core/python/buck_core/buck_wallet.so
+	cp core/rust/target/release/libbuck_identity.dylib \
+	   core/python/buck_core/buck_registry.so
 
 # The JS kernel bindings: wasm-pack (npm devDependency of core/js) emits
-# nodejs-target packages into core/js/wasm/ (flat: buck_math.* and
-# buck_identity.* coexist; the shared package.json is cosmetic until the
-# npm packaging phase).  buck_math: BigInt ABI.  buck_identity: 0x-hex
+# nodejs-target packages into core/js/kernel/node/ (flat: buck_math.* and
+# buck_identity.* coexist).  buck_math: BigInt ABI.  buck_identity: 0x-hex
 # ABI wrapped by core/js/src/identity.js into the BigInt-native API.
+#
+# core/js/kernel IS the published npm package alberta-buck-kernel: node/ is
+# its CommonJS half, web/ (core-build-wasm-web) its ES-module half, selected
+# by the exports map in core/js/kernel/package.json.  wasm-pack drops its own
+# package.json into each out-dir naming whichever crate built last; we
+# overwrite both with the one field that must be right -- the module type
+# governing how Node parses the .js files in that directory.
 core-build-wasm:
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target nodejs \
-		--out-dir ../../../js/wasm --out-name buck_math
+		--out-dir ../../../js/kernel/node --out-name buck_math
 	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target nodejs \
-		--out-dir ../../../js/wasm --out-name buck_identity
+		--out-dir ../../../js/kernel/node --out-name buck_identity
+	@# wasm-pack writes a .gitignore of "*" into its out-dir; npm honours
+	@# it even against the files allowlist, which would publish a package
+	@# with no wasm in it at all.  Drop it.
+	rm -f core/js/kernel/node/.gitignore
+	echo '{ "type": "commonjs" }' > core/js/kernel/node/package.json
 
 # Browser (web-target) builds of BOTH kernels + the demo pages.  Serve
 # the demos (ES modules need http, not file://):
@@ -1080,10 +1150,18 @@ core-build-wasm-web:
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target web \
-		--out-dir ../../../js/demo/wasm-web --out-name buck_identity
+		--out-dir ../../../js/kernel/web --out-name buck_identity
 	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target web \
-		--out-dir ../../../js/demo/wasm-web --out-name buck_math
+		--out-dir ../../../js/kernel/web --out-name buck_math
+	rm -f core/js/kernel/web/.gitignore
+	echo '{ "type": "module" }' > core/js/kernel/web/package.json
+	@# The demo pages fetch the web build from their own directory over
+	@# http; they are static HTML with no bundler to resolve a package
+	@# name, so they get a copy rather than a resolution.
+	mkdir -p core/js/demo/wasm-web
+	cp core/js/kernel/web/buck_*.js core/js/kernel/web/buck_*.wasm \
+	   core/js/kernel/web/buck_*.d.ts core/js/demo/wasm-web/
 
 core-demo-identity:	core-build-wasm-web
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
@@ -1123,7 +1201,7 @@ core-test-js:
 	@test -d core/js/node_modules || { echo "core/js deps missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/js && node --test
 
-core-test-rust:
+core-test-rust:	core-vectors-check poseidon-constants-check
 	cd core/rust && cargo test --quiet
 
 core-test:	core-test-py core-test-js core-test-rust

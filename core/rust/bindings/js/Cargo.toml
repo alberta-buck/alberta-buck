@@ -1,19 +1,25 @@
 [package]
+# A build artifact, not a library: the wasm package is what ships (npm
+# alberta-buck-kernel), never this crate.
 name = "buck-math-wasm"
-version = "0.0.1"
-edition = "2021"
 description = "WASM/JS binding for the buck-math kernel (browser + Node)"
-license = "MIT"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-kernel = { path = "../../buck-math", package = "buck-math" }
+kernel = { path = "../../buck-math", package = "alberta-buck-math" }
 # u128/i128 cross as JS BigInt.
 wasm-bindgen = "0.2"
 
 [package.metadata.wasm-pack.profile.release]
-# Skip the wasm-opt download/pass: one less moving part; the kernel is
-# tiny integer math and needs no size heroics.
-wasm-opt = false
+# Size pass for the published package: binaryen comes from the dev shell
+# (flake.nix), so wasm-pack finds wasm-opt on PATH instead of downloading
+# it.  -Os took buck_math from 42,946 to 30,230 bytes.
+wasm-opt = ["-Os"]

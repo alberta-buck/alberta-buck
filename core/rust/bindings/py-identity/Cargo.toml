@@ -1,9 +1,14 @@
 [package]
+# A build artifact, not a library: the wheel is what ships (PyPI
+# alberta-buck-kernel), never this crate.
 name = "buck-identity-py"
-version = "0.0.1"
-edition = "2021"
 description = "Python binding for the buck-identity kernel (import buck_core.buck_identity)"
-license = "MIT"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [lib]
 name = "buck_identity"
@@ -12,7 +17,14 @@ crate-type = ["cdylib"]
 [dependencies]
 # Aliased: the cdylib itself is named buck_identity (the Python module),
 # which would shadow the kernel crate's name in paths.
-kernel = { path = "../../buck-identity", package = "buck-identity" }
+kernel = { path = "../../buck-identity", package = "alberta-buck-identity" }
+# The wallet + registry kernels ride in the SAME cdylib: this crate
+# defines three #[pymodule] entry points (buck_identity, buck_wallet,
+# buck_registry) and the build copies the one dylib under each module
+# filename -- one compiled artifact, three imports, zero duplication.
+wallet = { path = "../../buck-wallet", package = "alberta-buck-wallet" }
+registry = { path = "../../buck-registry", package = "alberta-buck-registry" }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
 # num-bigint: 256-bit scalars/coordinates cross as plain Python ints.
 num-bigint = "0.4"
 pyo3 = { version = "0.24", features = ["extension-module", "abi3-py311", "num-bigint"] }

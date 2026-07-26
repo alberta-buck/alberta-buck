@@ -1,0 +1,24 @@
+[package]
+# Published as alberta-buck-registry; imported as buck_registry.
+name = "alberta-buck-registry"
+description = "Alberta Buck registry kernel: identity Merkle accumulators, certificates and the central aggregator matching the alberta_buck.registry reference bit-for-bit"
+keywords = ["merkle", "accumulator", "identity", "registry", "ethereum"]
+categories = ["cryptography::cryptocurrencies", "data-structures"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "buck_registry"
+
+[dependencies]
+# Keyed to the import name: crates.io needs the prefixed package name, the
+# source keeps saying `use buck_identity::`.  Path AND version -- crates.io
+# rejects a bare path dependency.
+buck_identity = { package = "alberta-buck-identity", path = "../buck-identity", version = "0.1" }
+
+[dev-dependencies]
+# Test-only (golden-vector JSON); does not ship in any artifact.
+serde_json = "1"

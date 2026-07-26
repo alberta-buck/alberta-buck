@@ -42,6 +42,15 @@ from alberta_buck.wallet.elgamal import (
     elgamal_encrypt,
     elgamal_decrypt,
 )
+from alberta_buck.wallet._kernel import kernel_registry as _kernel_registry
+
+
+def _replay(vals):
+    """Hand back exactly `vals` -- feeds pre-drawn nonces to the py path
+    so kernel dispatch and the reference consume the caller's rng
+    identically (the nonces are hoisted BEFORE branching)."""
+    it = iter(vals)
+    return lambda: next(it)
 
 
 # ---------------------------------------------------------------------------
@@ -237,8 +246,13 @@ def registry_schnorr_sign(
     Returns:
         RegistrySchnorrProof with (e, s, R).
     """
-    pk_registry = mul(G1, sk_registry % ORDER)
     k = rand_scalar(rng)
+    kr = _kernel_registry()
+    if kr is not None:
+        e, s, R = kr.registry_schnorr_sign(
+            sk_registry % ORDER, msg_hash, registry_id, chainid, k)
+        return RegistrySchnorrProof(e=e, s=s, R=words_to_point(*R))
+    pk_registry = mul(G1, sk_registry % ORDER)
     R = mul(G1, k)
     e = _registry_schnorr_transcript(pk_registry, R, msg_hash, registry_id, chainid)
     s = (k + e * (sk_registry % ORDER)) % ORDER
@@ -264,6 +278,11 @@ def registry_schnorr_verify(
     Returns:
         True iff s*G == R + e*pk_registry and the Fiat-Shamir challenge matches.
     """
+    kr = _kernel_registry()
+    if kr is not None:
+        return kr.registry_schnorr_verify(
+            point_to_words(pk_registry), proof.e, proof.s,
+            point_to_words(proof.R), msg_hash, registry_id, chainid)
     if not eq(mul(G1, proof.s), add(proof.R, mul(pk_registry, proof.e))):
         return False
     return proof.e == _registry_schnorr_transcript(
@@ -375,6 +394,13 @@ def registry_sign_certificate(
     Returns:
         SignedCertificate ready for ElGamal-encrypted delivery.
     """
+    k = rand_scalar(rng)
+    kr = _kernel_registry()
+    if kr is not None:
+        wire = kr.registry_sign_certificate(
+            registry_sk % ORDER, registry_id, canonical_identity,
+            serial, issued_at, expires_at, chainid, k)
+        return SignedCertificate.deserialize(wire)
     M = mul(G1, identity_scalar(canonical_identity))
     cert = IdentityCertificate(
         registry_id=registry_id, serial=serial,
@@ -382,7 +408,8 @@ def registry_sign_certificate(
         issued_at=issued_at, expires_at=expires_at,
     )
     sig = registry_schnorr_sign(
-        registry_sk, cert.to_hash_bytes(), registry_id, chainid, rng=rng,
+        registry_sk, cert.to_hash_bytes(), registry_id, chainid,
+        rng=_replay([k]),
     )
     pk_registry = mul(G1, registry_sk % ORDER)
     return SignedCertificate(cert=cert, signature=sig, registry_pk=pk_registry)
@@ -398,6 +425,9 @@ def registry_verify_certificate(signed: SignedCertificate, chainid: int = 0) -> 
     Returns:
         True iff the signature is valid and M matches the canonical identity.
     """
+    kr = _kernel_registry()
+    if kr is not None:
+        return kr.registry_verify_certificate(signed.serialize(), chainid)
     M_calc = mul(G1, identity_scalar(signed.cert.canonical_identity))
     if not eq(signed.cert.M, M_calc):
         return False
@@ -486,12 +516,12 @@ def seal_certificate(
     Returns:
         SealedCertificate with the ElGamal ciphertext and the signed certificate.
     """
-    M = signed.cert.M
-    r = rand_scalar(rng) if rng is not None else None
-    # Use a deterministic r if rng was provided, otherwise random.
-    if rng is None:
-        r = rand_scalar()
-    ct = elgamal_encrypt(M, client_pk, r)
+    r = rand_scalar(rng) if rng is not None else rand_scalar()
+    kr = _kernel_registry()
+    if kr is not None:
+        env = kr.seal_certificate(signed.serialize(), point_to_words(client_pk), r)
+        return SealedCertificate.from_envelope(env)
+    ct = elgamal_encrypt(signed.cert.M, client_pk, r)
     return SealedCertificate(ct=ct, signed_cert=signed)
 
 
@@ -516,6 +546,10 @@ def unseal_certificate(
         ValueError: If the decrypted M does not match the certificate's M
             (the envelope was not encrypted for this client, or is corrupted).
     """
+    kr = _kernel_registry()
+    if kr is not None:
+        wire = kr.unseal_certificate(sealed.envelope, client_sk % ORDER)
+        return SignedCertificate.deserialize(wire)
     M_recovered = elgamal_decrypt(sealed.ct, client_sk)
     if not eq(M_recovered, sealed.signed_cert.cert.M):
         raise ValueError(

@@ -20,7 +20,7 @@
           tabulate
           pytest
           pip
-          web3               # Ethereum JSON-RPC client
+          web3                # Ethereum JSON-RPC client
           eth-abi             # ABI encoding/decoding
           eth-account         # Account/key management
           matplotlib          # Plotting / visualization
@@ -58,6 +58,22 @@
           #   circomlib - Poseidon/Merkle/Schnorr gadget library (npm)
           circom
 
+          # Rust: the core/rust kernel workspace (buck-math, buck-identity,
+          # buck-registry, buck-wallet) and its PyO3 / wasm-bindgen bindings.
+          # Previously absent, which meant `nix develop` silently borrowed
+          # cargo from whatever the developer happened to have in
+          # ~/.nix-profile -- so `make nix-core-build` worked here and
+          # nowhere else.
+          rustc
+          cargo
+          # wasm32-unknown-unknown links with lld; nixpkgs rustc ships the
+          # target's std but not a linker for it, and cargo fails with
+          # "linker `lld` not found" without this.
+          lld
+          # binaryen = wasm-opt, the size pass wasm-pack shells out to for
+          # the published alberta-buck-kernel package.
+          binaryen
+
           # C++ toolchain for SNARK verifier testing
           gcc14
           pkg-config
@@ -80,6 +96,8 @@
             printf "  %-12s %s\n" "python" "$(python3 --version 2>/dev/null)"
             printf "  %-12s %s\n" "node"   "$(node --version 2>/dev/null)"
             printf "  %-12s %s\n" "circom" "$(circom --version 2>/dev/null | head -1)"
+            printf "  %-12s %s\n" "cargo"  "$(cargo --version 2>/dev/null)"
+            printf "  %-12s %s\n" "wasm-opt" "$(wasm-opt --version 2>/dev/null)"
             # snarkjs and circomlib come from npm; bootstrap on first entry.
             if [ ! -d node_modules ] && [ -f package.json ]; then
               echo ""

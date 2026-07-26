@@ -25,12 +25,20 @@ import os
 
 _kernel = None
 _checked = False
+_kernel_wallet = None
+_checked_wallet = False
+_kernel_registry = None
+_checked_registry = False
+
+
+def _mode() -> str:
+    return os.environ.get("BUCK_IDENTITY_BACKEND", "").strip().lower()
 
 
 def kernel():
     """The ``buck_core.buck_identity`` module, or ``None`` (py path)."""
     global _kernel, _checked
-    mode = os.environ.get("BUCK_IDENTITY_BACKEND", "").strip().lower()
+    mode = _mode()
     if mode == "py":
         return None
     if not _checked:
@@ -46,6 +54,52 @@ def kernel():
             " built (make nix-core-build-py)"
         )
     return _kernel
+
+
+def kernel_wallet():
+    """The ``buck_core.buck_wallet`` module, or ``None`` (py path).
+
+    Same selector, same env var: the three kernel modules are one
+    compiled artifact, so they are present or absent together.
+    """
+    global _kernel_wallet, _checked_wallet
+    mode = _mode()
+    if mode == "py":
+        return None
+    if not _checked_wallet:
+        _checked_wallet = True
+        try:
+            import buck_core.buck_wallet as _k
+            _kernel_wallet = _k
+        except ImportError:
+            _kernel_wallet = None
+    if mode == "kernel" and _kernel_wallet is None:
+        raise ImportError(
+            "BUCK_IDENTITY_BACKEND=kernel but buck_core.buck_wallet is not"
+            " built (make nix-core-build-py)"
+        )
+    return _kernel_wallet
+
+
+def kernel_registry():
+    """The ``buck_core.buck_registry`` module, or ``None`` (py path)."""
+    global _kernel_registry, _checked_registry
+    mode = _mode()
+    if mode == "py":
+        return None
+    if not _checked_registry:
+        _checked_registry = True
+        try:
+            import buck_core.buck_registry as _k
+            _kernel_registry = _k
+        except ImportError:
+            _kernel_registry = None
+    if mode == "kernel" and _kernel_registry is None:
+        raise ImportError(
+            "BUCK_IDENTITY_BACKEND=kernel but buck_core.buck_registry is not"
+            " built (make nix-core-build-py)"
+        )
+    return _kernel_registry
 
 
 def kernel_active() -> bool:

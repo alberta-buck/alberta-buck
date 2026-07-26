@@ -54,8 +54,10 @@ Table of Contents
 .. 5. Phase 4: JS sim platform + live-interactive demos  [status: IN PROGRESS]
 ..... 1. Design of record (banked 2026-07-03)
 ..... 2. The JS agent doctrine (banked 2026-07-04)
-.. 6. Phase 5: scale-up
-.. 7. Phase 6: partner SDKs + wallet productization
+.. 6. Phase 4.5: `buck-wallet' + `buck-registry'  [status: DONE 2026-07-24]
+..... 1. Design of record (banked 2026-07-24; amends Phase 3's NOT-kernel list)
+.. 7. Phase 5: scale-up
+.. 8. Phase 6: partner SDKs + wallet productization
 5. Risks and open questions
 
 
@@ -685,7 +687,77 @@ Table of Contents
     - hypoOwing).
 
 
-4.6 Phase 5: scale-up
+4.6 Phase 4.5: `buck-wallet' + `buck-registry'  [status: DONE 2026-07-24]
+─────────────────────────────────────────────────────────────────────────
+
+  Phase 6's core pulled forward: the full identity-management, wallet
+  and receipt infrastructure moves to Rust, so JS demos can run the
+  complete client lifecycle (issue -> certify -> tree insert -> root
+  push -> register -> note mint/spend -> receipt build -> third-party
+  verify) against the bucksim EVM backend.
+
+
+4.6.1 Design of record (banked 2026-07-24; amends Phase 3's NOT-kernel list)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  *What moved into the kernel* (revising the Phase-3 boundary):
+  `buck-registry' – the incremental Poseidon identity Merkle tree
+  (stepwise insertion, paths, leaf replacement, event-log rebuild), the
+  certificate family (signing hash, both wire formats, registry Schnorr
+  over arbitrary 32-byte messages, ElGamal seal/unseal), the central
+  aggregator (enroll/update, full + AND-composed membership proofs), the
+  feature authority.  `buck-wallet' – THE canonical JSON dialect (an
+  explicit dialect-enforcing writer: ints of any size pass through as
+  their exact tokens, floats rejected), the AB-RCPT/1 envelope, tier-1
+  receipt verification (reason-for-reason with `verify_receipt.py'), all
+  five receipt-core builders from both generating sides, the
+  public-issuer/approve verifiers, the unilateral A1/A2 flows, the
+  issuer ceremony.  Crate layering mirrors the Python import graph:
+  `buck-identity' <- `buck-registry' <- `buck-wallet'.
+
+  *Still NOT kernel*: Groth16 proving (snarkjs/rapidsnark), chain I/O
+  (web3.py / viem `ChainSession'), rendering/CLI, the vector emitters
+  (the Python reference REMAINS the executable spec and sole emitter),
+  and the host-side agent bookkeeping (`RegistryAgent=/=ClientAgent'
+  classes keep their Python APIs, internals dispatching to the kernel).
+
+  *ABI doctrine for the structured layer*: canonical bytes in, canonical
+  bytes out.  Receipt cores cross as their canonical text (the
+  serialization IS the object); structured inputs cross as ONE JSON text
+  of named args in the vector-fixture shapes (`buck-wallet''s `args'
+  module, shared by both bindings so they cannot drift); certificates as
+  their Python-pinned wire bytes.  One compiled artifact everywhere: the
+  identity cdylib exports three pymodules (`buck_core.buck_identity' /
+  `buck_wallet' / `buck_registry' – the build copies one dylib under
+  each module filename), and ONE wasm blob (one arkworks copy) carries
+  all three kernels plus `MerkleTree=/=Aggregator' as stateful classes
+  (`core/js/src/wallet-core.js' wraps).
+
+  *Determinism doctrine extended*: nonces explicit and hoisted in the
+  Python shims BEFORE branching (in the reference draw order, so kernel
+  and py paths consume a caller rng identically); timestamps explicit
+  (`attested_at=/=updated_at' are arguments – no clock in the kernel);
+  tree state as explicit leaf lists.
+
+  *Vector gates*: `core/vectors/wallet-kernel-vectors.json' (canonical
+  dialect incl. control-char/astral/big-int rows, envelope mechanics, 9
+  receipt builds incl. the UNVERIFIED-ISSUER row, tampered rejections,
+  unilateral flows, issuer ceremony) and `registry-kernel-vectors.json'
+  (tree/certificate/aggregator/feature scenarios), emitted by new Python
+  reference emitters on fresh rng streams (the pinned
+  `vectors.py=/=kernel_vectors.py' streams untouched; `make
+  nix-venv-core-wallet-vectors' / `core-registry-vectors'), replayed by
+  cargo (12) / pytest (9) / node (11); `test_wallet_kernel_backend.py'
+  gates vector currency + cross-backend byte parity of seeded receipt
+  and certificate flows.
+  • /Met/ (2026-07-24): all suites green first run after port – cargo
+    12, pytest 39 (core), node 30, alberta_buck 227 under the kernel
+    backend / 224 forced-py / 13 receipt e2e on anvil.  macOS gotcha
+    banked in `core-build-py': rm-before-cp for the .so copies (code
+    signatures cache by inode; a stale cache SIGKILLs the import).
+
+
+4.7 Phase 5: scale-up
 ─────────────────────
 
   10^3 - 10^4 agent populations (extensive-margin adoption experiments
@@ -697,7 +769,7 @@ Table of Contents
     still passes.
 
 
-4.7 Phase 6: partner SDKs + wallet productization
+4.8 Phase 6: partner SDKs + wallet productization
 ─────────────────────────────────────────────────
 
   `buck-wallet' (fountain management, tx signing) packaged for

@@ -1,6 +1,6 @@
 // Browser entry for the buck-identity kernel: initializes the WEB-target
 // wasm package (built by `make nix-core-build-wasm-web` into
-// demo/wasm-web/) and wraps it in the same BigInt-native API node code
+// the alberta-buck-kernel package) and wraps it in the same BigInt-native API node code
 // gets from identity.js.
 //
 // Always pass an explicit wasm source -- a URL string the page serves
@@ -11,7 +11,7 @@
 import { wrapIdentity } from "./identity-core.js";
 
 export async function loadIdentity(wasmSource) {
-  const mod = await import("../demo/wasm-web/buck_identity.js");
+  const mod = await import("alberta-buck-kernel/web/identity");
   await mod.default(
     wasmSource !== undefined ? { module_or_path: wasmSource } : undefined,
   );

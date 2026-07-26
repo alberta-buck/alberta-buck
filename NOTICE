@@ -1,0 +1,74 @@
+Alberta Buck
+Copyright (c) 2026 Perry Kundert
+
+This file records third-party components used by this repository and the
+licences they carry.  It does not alter the licences of the Alberta Buck
+works themselves -- see LICENSING.md for which licence applies where.
+
+Every entry below was verified against the component's own metadata or
+LICENSE file in this checkout, not assumed from memory.
+
+
+SOLIDITY DEPENDENCIES (installed into lib/ by forge; build-time only)
+
+  openzeppelin-contracts        MIT
+  chainlink-brownie-contracts   MIT (AggregatorV3Interface only)
+  uniswap v3-core               BUSL-1.1, Change Date 2023-04-01,
+                                Change License GPL-2.0-or-later.  The change
+                                date has passed, so the released versions are
+                                available under GPL-2.0-or-later.
+  uniswap v3-periphery          GPL-2.0-or-later
+  uniswap universal-router      GPL-3.0-or-later
+  uniswap solidity-lib          GPL-3.0
+
+  The compiled artifacts of the Uniswap contracts are deliberately NOT
+  bundled into the alberta-buck-contracts distribution: consumers take them
+  from Uniswap's own published packages, so we never become the
+  redistributor of four licences we do not control.  See
+  alberta-buck-deployment.org, Phase P2.5.
+
+
+RUST DEPENDENCIES (fetched from crates.io by the consumer; linked, not
+redistributed in source form by any Alberta Buck package)
+
+  ark-bn254, ark-ec, ark-ff     MIT OR Apache-2.0
+  tiny-keccak                   CC0-1.0
+  serde_json                    MIT OR Apache-2.0
+  sha2                          MIT OR Apache-2.0
+  num-bigint                    MIT OR Apache-2.0
+  pyo3                          MIT OR Apache-2.0
+  wasm-bindgen                  MIT OR Apache-2.0
+
+
+POSEIDON CONSTANTS -- DERIVED, NOT COPIED (resolved 2026-07-25)
+
+  core/rust/buck-identity/constants/poseidon_constants.json
+  alberta_buck/wallet/poseidon_constants.json
+
+  These files were previously copies of
+  node_modules/circomlibjs/src/poseidon_constants.json; circomlibjs 0.1.7
+  declares "license": "GPL-3.0" (circomlib 2.0.5, the circuit library,
+  likewise), which sits badly with distributing them inside a CAL-1.0 crate.
+
+  They are now GENERATED from the Poseidon specification by
+
+      core/rust/buck-identity/constants/generate.py
+
+  which implements the Grain LFSR of the reference parameter generator
+  (80-bit seeded state, 160 discarded bits, self-shrinking output; round
+  constants by rejection sampling, MDS x/y values by reduction mod p; the
+  MDS is the Cauchy matrix over those 2t values).  For every state width
+  t = 2..17 the emitted round constants and MDS matrix reproduce
+  circomlib's exactly, and the rendered file is byte-identical to the one
+  that was previously vendored -- so nothing downstream changed and nothing
+  of circomlib's is redistributed.
+
+      make poseidon-constants          # regenerate both copies
+      make poseidon-constants-check    # regenerate and compare; also
+                                       # compares against circomlibjs when
+                                       # node_modules is present
+
+  The check gates core-test-rust.  Equality with circomlib remains a
+  verified property -- it must, since the circuits, the Solidity verifier,
+  the Rust kernel and the Python reference all have to hash alike -- but it
+  is now a test result rather than a redistribution.

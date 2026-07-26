@@ -1,9 +1,17 @@
 [package]
-name = "buck-identity"
-version = "0.0.1"
-edition = "2021"
+# Published as alberta-buck-identity; imported as buck_identity.
+name = "alberta-buck-identity"
 description = "Alberta Buck identity kernel: BN254 sigma protocols matching the alberta_buck.wallet reference bit-for-bit"
-license = "MIT"
+keywords = ["bn254", "zero-knowledge", "identity", "ethereum", "pairing"]
+categories = ["cryptography::cryptocurrencies", "cryptography", "mathematics"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "buck_identity"
 
 [dependencies]
 # Unlike zero-dep buck-math, this crate takes arkworks: hand-rolling a

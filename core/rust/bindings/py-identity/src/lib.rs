@@ -760,6 +760,252 @@ fn identity_leaf(m_point: PyG1) -> PyResult<BigUint> {
 }
 
 // ---------------------------------------------------------------------------
+// buck_wallet: canonical dialect, AB-RCPT/1 envelope, receipt build /
+// verify and the unilateral flows.  Structured inputs cross as ONE JSON
+// text of named args (the vector-fixture shapes); receipt cores cross as
+// their canonical text -- see buck-wallet's `args` module.
+// ---------------------------------------------------------------------------
+
+use pyo3::types::PyBytes;
+
+fn jerr(e: kernel::IdError) -> PyErr {
+    PyValueError::new_err(e.0)
+}
+
+fn parse_args(args_json: &str) -> PyResult<serde_json::Value> {
+    serde_json::from_str(args_json)
+        .map_err(|e| PyValueError::new_err(format!("args: invalid JSON: {e}")))
+}
+
+#[pyfunction]
+fn canonical_json(text: &str) -> PyResult<String> {
+    wallet::canonical::canonical_json(text).map_err(jerr)
+}
+
+#[pyfunction]
+fn canonical_identity_data(fields_json: &str) -> PyResult<String> {
+    wallet::canonical::canonical_identity_data(fields_json).map_err(jerr)
+}
+
+#[pyfunction]
+#[pyo3(signature = (canonical, prefix_len = 12))]
+fn receipt_id(canonical: &[u8], prefix_len: usize) -> String {
+    wallet::envelope::receipt_id(canonical, prefix_len)
+}
+
+#[pyfunction]
+#[pyo3(signature = (canonical, width = 64))]
+fn envelope_text(canonical: &[u8], width: usize) -> String {
+    wallet::envelope::envelope_text(canonical, width)
+}
+
+#[pyfunction]
+fn parse_envelope(py: Python<'_>, text: &str) -> PyResult<Py<PyBytes>> {
+    let bytes = wallet::envelope::parse_envelope(text).map_err(jerr)?;
+    Ok(PyBytes::new(py, &bytes).into())
+}
+
+/// Tier-1 verify of a canonical receipt text; returns the RcptResult as
+/// a JSON text `{"ok", "reason", "identity_M", "value"}`.
+#[pyfunction]
+fn verify_receipt(core_text: &str) -> PyResult<String> {
+    wallet::args::verify_receipt_args(core_text).map_err(jerr)
+}
+
+/// Build any receipt kind from named JSON args; returns the canonical
+/// receipt text.
+#[pyfunction]
+fn build_receipt(args_json: &str) -> PyResult<String> {
+    wallet::args::build_receipt_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn mint_unilateral_a2(args_json: &str) -> PyResult<String> {
+    wallet::args::mint_unilateral_a2_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn make_receipt_a2(args_json: &str) -> PyResult<String> {
+    wallet::args::make_receipt_a2_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn verify_receipt_a2(args_json: &str) -> PyResult<String> {
+    wallet::args::verify_receipt_a2_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn mint_unilateral_a1(args_json: &str) -> PyResult<String> {
+    wallet::args::mint_unilateral_a1_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn make_receipt_a1(args_json: &str) -> PyResult<String> {
+    wallet::args::make_receipt_a1_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn verify_receipt_a1(args_json: &str) -> PyResult<String> {
+    wallet::args::verify_receipt_a1_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn issue_credential(args_json: &str) -> PyResult<String> {
+    wallet::args::issue_credential_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pymodule]
+fn buck_wallet(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("ENVELOPE_HEADER", wallet::envelope::ENVELOPE_HEADER)?;
+    m.add("ENVELOPE_FOOTER", wallet::envelope::ENVELOPE_FOOTER)?;
+    m.add_function(wrap_pyfunction!(canonical_json, m)?)?;
+    m.add_function(wrap_pyfunction!(canonical_identity_data, m)?)?;
+    m.add_function(wrap_pyfunction!(receipt_id, m)?)?;
+    m.add_function(wrap_pyfunction!(envelope_text, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_envelope, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_receipt, m)?)?;
+    m.add_function(wrap_pyfunction!(build_receipt, m)?)?;
+    m.add_function(wrap_pyfunction!(mint_unilateral_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(make_receipt_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_receipt_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(mint_unilateral_a1, m)?)?;
+    m.add_function(wrap_pyfunction!(make_receipt_a1, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_receipt_a1, m)?)?;
+    m.add_function(wrap_pyfunction!(issue_credential, m)?)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// buck_registry: certificates cross as their wire bytes (vector-pinned),
+// the registry Schnorr as tuples in the wallet's word convention.
+// ---------------------------------------------------------------------------
+
+fn msg32(msg_hash: &[u8]) -> PyResult<[u8; 32]> {
+    msg_hash
+        .try_into()
+        .map_err(|_| PyValueError::new_err("msg_hash must be exactly 32 bytes"))
+}
+
+#[pyfunction]
+fn registry_schnorr_sign(
+    sk: BigUint,
+    msg_hash: &[u8],
+    registry_id: &str,
+    chainid: BigUint,
+    k: BigUint,
+) -> PyResult<(BigUint, BigUint, PyG1)> {
+    let p = registry::certificate::registry_schnorr_sign(
+        &w(&sk)?,
+        &msg32(msg_hash)?,
+        registry_id,
+        &w(&chainid)?,
+        &w(&k)?,
+    )
+    .map_err(jerr)?;
+    Ok((big(&p.e), big(&p.s), pyg1(&p.r)))
+}
+
+#[pyfunction]
+fn registry_schnorr_verify(
+    pk: PyG1,
+    e: BigUint,
+    s: BigUint,
+    r_point: PyG1,
+    msg_hash: &[u8],
+    registry_id: &str,
+    chainid: BigUint,
+) -> PyResult<bool> {
+    let proof = registry::certificate::RegistrySchnorrProof {
+        e: w(&e)?,
+        s: w(&s)?,
+        r: wg1(&r_point)?,
+    };
+    registry::certificate::registry_schnorr_verify(
+        &wg1(&pk)?,
+        &proof,
+        &msg32(msg_hash)?,
+        registry_id,
+        &w(&chainid)?,
+    )
+    .map_err(jerr)
+}
+
+/// Create + sign a certificate; returns the SignedCertificate WIRE bytes
+/// (`e,s,R,pk` header + certificate payload) -- the format
+/// `alberta_buck.registry.certificate.SignedCertificate.serialize` pins.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn registry_sign_certificate(
+    py: Python<'_>,
+    registry_sk: BigUint,
+    registry_id: &str,
+    canonical_identity: &str,
+    serial: u64,
+    issued_at: i64,
+    expires_at: i64,
+    chainid: BigUint,
+    k: BigUint,
+) -> PyResult<Py<PyBytes>> {
+    let signed = registry::certificate::registry_sign_certificate(
+        &w(&registry_sk)?,
+        registry_id,
+        canonical_identity,
+        serial,
+        issued_at,
+        expires_at,
+        &w(&chainid)?,
+        &w(&k)?,
+    )
+    .map_err(jerr)?;
+    Ok(PyBytes::new(py, &signed.serialize()).into())
+}
+
+/// Verify a SignedCertificate from its wire bytes (signature + the
+/// M/canonical-identity consistency).
+#[pyfunction]
+fn registry_verify_certificate(signed_wire: &[u8], chainid: BigUint) -> PyResult<bool> {
+    let signed =
+        registry::certificate::SignedCertificate::deserialize(signed_wire).map_err(jerr)?;
+    registry::certificate::registry_verify_certificate(&signed, &w(&chainid)?).map_err(jerr)
+}
+
+/// ElGamal-seal a signed certificate (wire bytes) for a client; returns
+/// the SealedCertificate envelope bytes.
+#[pyfunction]
+fn seal_certificate(
+    py: Python<'_>,
+    signed_wire: &[u8],
+    client_pk: PyG1,
+    r: BigUint,
+) -> PyResult<Py<PyBytes>> {
+    let signed =
+        registry::certificate::SignedCertificate::deserialize(signed_wire).map_err(jerr)?;
+    let sealed = registry::certificate::seal_certificate(&signed, &wg1(&client_pk)?, &w(&r)?)
+        .map_err(jerr)?;
+    Ok(PyBytes::new(py, &sealed.envelope()).into())
+}
+
+/// Unseal a SealedCertificate envelope; returns the SignedCertificate
+/// wire bytes (raises if the envelope was not sealed for this client).
+#[pyfunction]
+fn unseal_certificate(py: Python<'_>, envelope: &[u8], client_sk: BigUint) -> PyResult<Py<PyBytes>> {
+    let sealed = registry::certificate::SealedCertificate::from_envelope(envelope).map_err(jerr)?;
+    let signed = registry::certificate::unseal_certificate(&sealed, &w(&client_sk)?).map_err(jerr)?;
+    Ok(PyBytes::new(py, &signed.serialize()).into())
+}
+
+#[pymodule]
+fn buck_registry(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(registry_schnorr_sign, m)?)?;
+    m.add_function(wrap_pyfunction!(registry_schnorr_verify, m)?)?;
+    m.add_function(wrap_pyfunction!(registry_sign_certificate, m)?)?;
+    m.add_function(wrap_pyfunction!(registry_verify_certificate, m)?)?;
+    m.add_function(wrap_pyfunction!(seal_certificate, m)?)?;
+    m.add_function(wrap_pyfunction!(unseal_certificate, m)?)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Module
 // ---------------------------------------------------------------------------
 

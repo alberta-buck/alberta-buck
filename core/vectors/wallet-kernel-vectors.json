@@ -1,0 +1,1191 @@
+{
+ "$schema_version": 1,
+ "backend": "py",
+ "canonical_json": [
+  {
+   "canonical": "{\"Z\":3,\"a\":2,\"aa\":{\"x\":null,\"y\":[1,2,{\"q\":\"x\"}]},\"b\":1}",
+   "input": "{\n  \"b\": 1,\n  \"a\": 2,\n  \"Z\": 3,\n  \"aa\": {\n    \"y\": [\n      1,\n      2,\n      {\n        \"q\": \"x\"\n      }\n    ],\n    \"x\": null\n  }\n}",
+   "m": "0x0566e52c3c23157745c1b0647eb002889fa5724d4ce3789dfbfb7692f9d8e09d"
+  },
+  {
+   "canonical": "{\"café\":true,\"given_name\":\"Zoë\",\"n\":7}",
+   "input": "{\n  \"given_name\": \"Zoë\",\n  \"café\": true,\n  \"n\": 7\n}",
+   "m": "0x0e52037e0f39f637edcefc8c08133f6a6af99e83b7bd30255c915c131579356c"
+  },
+  {
+   "canonical": "{\"city\":\"Sainte-Thérèse\",\"note\":\"🍁 maple\",\"李\":\"CJK key\"}",
+   "input": "{\n  \"city\": \"Sainte-Thérèse\",\n  \"note\": \"🍁 maple\",\n  \"李\": \"CJK key\"\n}",
+   "m": "0x2108601acd57c2fc7ca156b2f7e20fd0748e972f3ca83a2d0e473521aa565508"
+  },
+  {
+   "canonical": "{\"ctrl\":\"line1\\nline2\\ttabbed\\u0001unit\\bbs\\fff\\r\",\"quote\":\"say \\\"hi\\\" \\\\ done\"}",
+   "input": "{\n  \"ctrl\": \"line1\\nline2\\ttabbed\\u0001unit\\bbs\\fff\\r\",\n  \"quote\": \"say \\\"hi\\\" \\\\ done\"\n}",
+   "m": "0x00d2e27561ca7379f6bb4373f4a395a1bd4ac76af3ee12b4637f1d493e40ef2b"
+  },
+  {
+   "canonical": "{\"big\":1208925819614629174706183,\"bool_f\":false,\"neg\":-1152921504606846976,\"small\":0}",
+   "input": "{\n  \"big\": 1208925819614629174706183,\n  \"neg\": -1152921504606846976,\n  \"small\": 0,\n  \"bool_f\": false\n}",
+   "m": "0x1914abf55cc2ee521e2d5cac13bfaeeeccca17705e5b4079bab800240a5fc1b6"
+  },
+  {
+   "canonical": "{}",
+   "input": "{}",
+   "m": "0x23604da09b1527c30b0b884d3b12dc424aa094029aac37f7350ef583c590739a"
+  }
+ ],
+ "chainid": 1,
+ "contracts": {
+  "buck": "0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+  "notes": "0x7070707070707070707070707070707070707070",
+  "registry": "0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d"
+ },
+ "envelope": [
+  {
+   "canonical": "{\"hello\":\"wörld 🍁\",\"v\":1}",
+   "envelope64": "AB-RCPT/1.\neyJoZWxsbyI6InfDtnJsZCDwn42BIiwidiI6MX0\n.END",
+   "envelope8": "AB-RCPT/1.\neyJoZWxs\nbyI6InfD\ntnJsZCDw\nn42BIiwi\ndiI6MX0\n.END",
+   "id12": "3leaj3ir4ihb",
+   "id20": "3leaj3ir4ihbbexefchf",
+   "noisy": "Dear payer,\r\n  keep this!\r\nAB-RCPT/1.\neyJoZWxsbyI6I\nnfDtnJsZCDwn4\n2BIiwidiI6MX0\n.END\r\n-- sincerely, the wallet\r\n"
+  },
+  {
+   "canonical": "{\"n\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39],\"v\":1}",
+   "envelope64": "AB-RCPT/1.\neyJuIjpbMCwxLDIsMyw0LDUsNiw3LDgsOSwxMCwxMSwxMiwxMywxNCwxNSwxNiwx\nNywxOCwxOSwyMCwyMSwyMiwyMywyNCwyNSwyNiwyNywyOCwyOSwzMCwzMSwzMiwz\nMywzNCwzNSwzNiwzNywzOCwzOV0sInYiOjF9\n.END",
+   "envelope8": "AB-RCPT/1.\neyJuIjpb\nMCwxLDIs\nMyw0LDUs\nNiw3LDgs\nOSwxMCwx\nMSwxMiwx\nMywxNCwx\nNSwxNiwx\nNywxOCwx\nOSwyMCwy\nMSwyMiwy\nMywyNCwy\nNSwyNiwy\nNywyOCwy\nOSwzMCwz\nMSwzMiwz\nMywzNCwz\nNSwzNiwz\nNywzOCwz\nOV0sInYi\nOjF9\n.END",
+   "id12": "z2dhqi6zs54s",
+   "id20": "z2dhqi6zs54shvstybkd",
+   "noisy": "Dear payer,\r\n  keep this!\r\nAB-RCPT/1.\neyJuIjpbMCwxL\nDIsMyw0LDUsNi\nw3LDgsOSwxMCw\nxMSwxMiwxMywx\nNCwxNSwxNiwxN\nywxOCwxOSwyMC\nwyMSwyMiwyMyw\nyNCwyNSwyNiwy\nNywyOCwyOSwzM\nCwzMSwzMiwzMy\nwzNCwzNSwzNiw\nzNywzOCwzOV0s\nInYiOjF9\n.END\r\n-- sincerely, the wallet\r\n"
+  }
+ ],
+ "issuer": {
+  "applicant_pk": {
+   "x": "0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b",
+   "y": "0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb"
+  },
+  "canonical": "{\"given_name\":\"Carol\",\"issuer_id\":\"atb-financial-ca\",\"surname\":\"Mill\"}",
+  "delivery": {
+   "C": {
+    "x": "0x2c03e9eb770f8a8a1329e99ba3eb4c9b994b5904ac4d967952f0d4be1b50619c",
+    "y": "0x162f669cffbf53531868c7aaffa49749ade0fb8eaf1623853507e902d937cc2d"
+   },
+   "R": {
+    "x": "0x1cf7b84ce7108ee5bb1ac14270640b764894499dd8d2c3cbaa1e27d53bb0ddd3",
+    "y": "0x2fb31028704f7068edf024eeba58d50435520e17b65b3806195d0a624fa2e266"
+   }
+  },
+  "fields": {
+   "given_name": "Carol",
+   "issuer_id": "IGNORED-overwritten",
+   "surname": "Mill"
+  },
+  "issuer_id": "atb-financial-ca",
+  "m": "0x2c63c567ded9302b5a1d8d0f5a8e10e1a1ba28ab89bdad9ceb813e8aa85981d7",
+  "pk_X": {
+   "x": [
+    "0x17af53d97af72fee5849120984ac9c6c4211fb45d2c5387703d0a98558788265",
+    "0x17e86603309bba1353deb9d90bd52b3668fe6ab5dde13205058cc2da4d71750b"
+   ],
+   "y": [
+    "0x2ba4c7c4d32be8a7b9d4f45502c2030dad44b54365ae564944e160cfafd42149",
+    "0x0631b481abadb30aac213eadf129494f17b1c0e53d903f2ce11cf64975fba363"
+   ]
+  },
+  "pk_Y": {
+   "x": [
+    "0x23f547ea74312a3394473c1eb2622be71d5b8d71caa9630b9b5bbf33b94bbd51",
+    "0x24f9c816fc382c603e79a23b1030ebd7072fd856c82d5a19e89cfea457564ee7"
+   ],
+   "y": [
+    "0x2bb398d11f04c2e83b3f1570562b1e94eba5fcd5d7a672123336c1b18247d27c",
+    "0x13605a6dfe2138c92ff84030d1be80252f1382dbba0a9cb69f9eb678497ebc1d"
+   ]
+  },
+  "r_delivery": "0x2bb37b82b74bd5a1b5f7ba2c7eceafb2bf4382fd0110adde7b67b7bd1b547540",
+  "sigma_1": {
+   "x": "0x0bd682f772a88afc1ab80134c07a3cb1460549b2b9afe58b53c459d8197a447b",
+   "y": "0x1b3fb23aa38bbceb1515b75ddecfed4506bffe80fc020531c94fd3df262355e3"
+  },
+  "sigma_2": {
+   "x": "0x1362032eb6c1f89f055ebdc2f45c5cd52a4c6167aa04a37d972e6769410a81d5",
+   "y": "0x0c62eac6f2ab4a12df9ccafc0919ab87bec08b5a264c792864d524933ec8710d"
+  },
+  "sk_x": "0x0ee6d83fc9e425b27101a7a7ebc5ac8081208ecad4276123ffe1874260e4b431",
+  "sk_y": "0x268b9c0958d33ed1c979a691eddad8c24e1e5cdd074c55f8e2fee5cf47839800",
+  "t_sig": "0x24b623a63bcaada090aabbaaffc6bfefe7a94aa1f21ad9c170e0712b91c0a908"
+ },
+ "parties": {
+  "alice": {
+   "E": {
+    "C": {
+     "x": "0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd",
+     "y": "0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d"
+    },
+    "R": {
+     "x": "0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4",
+     "y": "0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154"
+    }
+   },
+   "M": {
+    "x": "0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9",
+    "y": "0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8"
+   },
+   "addr": "0x0000000000000000000000000a11ce00000000000000000000000000000a11ce",
+   "identity": "{\"dob\":\"1970-04-01\",\"given_name\":\"Alice\",\"issuer_id\":\"svc-alberta\",\"surname\":\"Ranch\"}",
+   "m": "0x0fee1b0ce9ec2aacb7278f41ff6314874f5b01d9429e1d7cf7a4b45ac376a8e1",
+   "pk": {
+    "x": "0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b",
+    "y": "0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb"
+   },
+   "r_E": "0x1dc2be63d00e594983b67e265da5b7a17d9cf4ae994ba254fc505f963111e0ca",
+   "sk": "0x1e868f34b69f8af1d0752ec4a9fa84eded556dcb5d233d1de887e2792df63d39"
+  },
+  "bob": {
+   "E": {
+    "C": {
+     "x": "0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba",
+     "y": "0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862"
+    },
+    "R": {
+     "x": "0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f",
+     "y": "0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab"
+    }
+   },
+   "M": {
+    "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+    "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+   },
+   "addr": "0x0000000000000000000000000b0b000000000000000000000000000000000b0b",
+   "identity": "{\"dob\":\"1968-11-11\",\"given_name\":\"Bob\",\"issuer_id\":\"svc-alberta\",\"surname\":\"Granary\"}",
+   "m": "0x24fe47d3f01f9464980ac88d204e3d1bb582b593d3f6ac48ac0b99bb57738336",
+   "pk": {
+    "x": "0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a",
+    "y": "0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183"
+   },
+   "r_E": "0x2d079ff9353337ec18a371b66d28a12825dc9e8fd080529f8ec0340895983eef",
+   "sk": "0x0e3623f8ce6b556cf4f35325b91f1f8e9ab20003db1553392a3ae1f4edeeef9a"
+  }
+ },
+ "receipts": [
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba\",\"y\":\"0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862\"},\"R\":{\"x\":\"0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f\",\"y\":\"0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab\"}},\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba\",\"y\":\"0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862\"},\"R\":{\"x\":\"0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f\",\"y\":\"0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab\"}},\"M_named\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"account\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x26559ce62e915cc9e90eae669ec906295e59edb786931706259adce455750206\",\"y\":\"0x10e579f9b42166b6ee9d0c18b7d2227f808b068c646d981ff3d1ca490bdab3fe\"},\"T2\":{\"x\":\"0x1b6e38063848f7a8251236e96a9448ec7f4dc69ecf950e63bc4ce213677633f2\",\"y\":\"0x09a62b6ae35f9b2894eed953dfe2837d943c750fde4134c70b8f39c3c9aed12e\"},\"e\":\"0x1907febc4c3a4c71d93ae07bad3d15d3c637a0abecefcd3f7c488b666d9aa5b9\",\"s\":\"0x192eee9819c6d916d1048c1835ba9b1b0658ecb4c999aa45776d08d3426968d1\"}},\"payer\":{\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"public\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"role\":\"recipient\",\"txn\":{\"block\":1234567,\"event\":\"Transfer\",\"kind\":\"eoa-transfer\",\"logindex\":2,\"timestamp\":1779999000,\"txhash\":\"0xeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea\",\"value\":500000000},\"type\":\"eoa-pub\",\"v\":1}",
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwicGF5\nZWUiOnsiRV9hZGRyIjp7IkMiOnsieCI6IjB4MWU2MTQwZDYzYWVkNDBlNGQwNDY0\nOGQ3Mjc1MWU1YWVjYmM1YzIzYzlhMmNkY2ZhNzA5ODM2NjA2NWFkNzNiYSIsInki\nOiIweDAyNTQwNjlhNWE5NDBjZmNmMDlhY2NkYmI4M2ExYTI4YTZjZmYwY2ExNDgw\nMjgyY2MwYzJmMmRjNzg5NWY4NjIifSwiUiI6eyJ4IjoiMHgwZWM2MTRkZjYzNTZj\nNTFhNzNkMzZkMGEyY2I1MzFjODRkOWJkYzNiNjQ4YWQwMDQxNGNhOTg0Y2M4ZjJj\nNzRmIiwieSI6IjB4MDk4ZmE4MzlkOWRhOGFjZmIwODdhZGM0OTY3ZjU1Yjk4ZmZk\nZjM0YWM3NjZmYTg0NWI3NDQ5YTU2YjU2MzlhYiJ9fSwiTSI6eyJ4IjoiMHgyMTNi\nMTk3MTA3NWFjZWU0ZThjNjdlODFhNTg0MDBhMmZkZjVhOTdmMjZjYmZiNjQ4OWI1\nZDYwZDIxYTNhMDA2IiwieSI6IjB4Mjk4OWE5ODIzOGUzYzRlZTNmYWJhNjIxNTcy\nYjhkYWNhYThhYzNhZDE1MjE4YjFiZjM1ZDBhYjhhNDRhMzBkNiJ9LCJhZGRyIjoi\nMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwYjBiMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwYjBiIiwiaWRlbnRpdHkiOiJ7XCJkb2JcIjpcIjE5Njgt\nMTEtMTFcIixcImdpdmVuX25hbWVcIjpcIkJvYlwiLFwiaXNzdWVyX2lkXCI6XCJz\ndmMtYWxiZXJ0YVwiLFwic3VybmFtZVwiOlwiR3JhbmFyeVwifSIsImtpbmQiOiJw\ncml2YXRlIiwicGsiOnsieCI6IjB4MGYxZTczMGViODUwYWFmYjA3OGVkODcxYzc4\nZGE2ZWRmNWUwODRiOThjYzM3ZTRmMTJkOTVhZmY4ZjYwYjI3YSIsInkiOiIweDIz\nZjU4NmMzODg2ZTc1ZmYyZGI4YWZjMDI0YjliOTA5NDI2NmFhNDEwMWMzZjZmOWQ5\nZDMxMjY2ZGU3MGYxODMifX0sInBheWVlX3ZkIjp7IkVfY3QiOnsiQyI6eyJ4Ijoi\nMHgxZTYxNDBkNjNhZWQ0MGU0ZDA0NjQ4ZDcyNzUxZTVhZWNiYzVjMjNjOWEyY2Rj\nZmE3MDk4MzY2MDY1YWQ3M2JhIiwieSI6IjB4MDI1NDA2OWE1YTk0MGNmY2YwOWFj\nY2RiYjgzYTFhMjhhNmNmZjBjYTE0ODAyODJjYzBjMmYyZGM3ODk1Zjg2MiJ9LCJS\nIjp7IngiOiIweDBlYzYxNGRmNjM1NmM1MWE3M2QzNmQwYTJjYjUzMWM4NGQ5YmRj\nM2I2NDhhZDAwNDE0Y2E5ODRjYzhmMmM3NGYiLCJ5IjoiMHgwOThmYTgzOWQ5ZGE4\nYWNmYjA4N2FkYzQ5NjdmNTViOThmZmRmMzRhYzc2NmZhODQ1Yjc0NDlhNTZiNTYz\nOWFiIn19LCJNX25hbWVkIjp7IngiOiIweDIxM2IxOTcxMDc1YWNlZTRlOGM2N2U4\nMWE1ODQwMGEyZmRmNWE5N2YyNmNiZmI2NDg5YjVkNjBkMjFhM2EwMDYiLCJ5Ijoi\nMHgyOTg5YTk4MjM4ZTNjNGVlM2ZhYmE2MjE1NzJiOGRhY2FhOGFjM2FkMTUyMThi\nMWJmMzVkMGFiOGE0NGEzMGQ2In0sImFjY291bnQiOiIweDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDBiMGIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBi\nMGIiLCJjaGFpbmlkIjoxLCJwcm9vZiI6eyJUMSI6eyJ4IjoiMHgyNjU1OWNlNjJl\nOTE1Y2M5ZTkwZWFlNjY5ZWM5MDYyOTVlNTllZGI3ODY5MzE3MDYyNTlhZGNlNDU1\nNzUwMjA2IiwieSI6IjB4MTBlNTc5ZjliNDIxNjZiNmVlOWQwYzE4YjdkMjIyN2Y4\nMDhiMDY4YzY0NmQ5ODFmZjNkMWNhNDkwYmRhYjNmZSJ9LCJUMiI6eyJ4IjoiMHgx\nYjZlMzgwNjM4NDhmN2E4MjUxMjM2ZTk2YTk0NDhlYzdmNGRjNjllY2Y5NTBlNjNi\nYzRjZTIxMzY3NzYzM2YyIiwieSI6IjB4MDlhNjJiNmFlMzVmOWIyODk0ZWVkOTUz\nZGZlMjgzN2Q5NDNjNzUwZmRlNDEzNGM3MGI4ZjM5YzNjOWFlZDEyZSJ9LCJlIjoi\nMHgxOTA3ZmViYzRjM2E0YzcxZDkzYWUwN2JhZDNkMTVkM2M2MzdhMGFiZWNlZmNk\nM2Y3YzQ4OGI2NjZkOWFhNWI5IiwicyI6IjB4MTkyZWVlOTgxOWM2ZDkxNmQxMDQ4\nYzE4MzViYTliMWIwNjU4ZWNiNGM5OTlhYTQ1Nzc2ZDA4ZDM0MjY5NjhkMSJ9fSwi\ncGF5ZXIiOnsiTSI6eyJ4IjoiMHgxNTRhOTA4N2JkMGE0ZmY2ZDYyMzkxMTQ5MDNi\nYWQ4OGYwYTQ3NWFiMWUzZmU1YjZjZGFiZDMzODViNjYwY2Y5IiwieSI6IjB4MWIz\nNGNmMTY0YzA4NjVjM2E0OTY2NjM0YmFhMzZmYjVhNGVjMzdiOTNhZWI1MjVmOGNj\nYjJmNmFkNGU5YWZmOCJ9LCJhZGRyIjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwYTExY2UwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGExMWNlIiwiaWRl\nbnRpdHkiOiJ7XCJkb2JcIjpcIjE5NzAtMDQtMDFcIixcImdpdmVuX25hbWVcIjpc\nIkFsaWNlXCIsXCJpc3N1ZXJfaWRcIjpcInN2Yy1hbGJlcnRhXCIsXCJzdXJuYW1l\nXCI6XCJSYW5jaFwifSIsImtpbmQiOiJwdWJsaWMiLCJwayI6eyJ4IjoiMHgwZjg1\nZTM3NjgyZTFlYmMwNWU0MGExZmI1OTk2OTAxMWUyMzJkYzA5NDQ4OWFkMGVhZmZh\nOWI0YWI1ZDA4OTViIiwieSI6IjB4MTkyMGQyNTdjNzMzZTRhZjJmZWM3MTQyNjEx\nY2VmZTVjMTNjZWFjYmRkYWU0NGUyMTZkM2NmYmViMDk3OTRjYiJ9fSwicm9sZSI6\nInJlY2lwaWVudCIsInR4biI6eyJibG9jayI6MTIzNDU2NywiZXZlbnQiOiJUcmFu\nc2ZlciIsImtpbmQiOiJlb2EtdHJhbnNmZXIiLCJsb2dpbmRleCI6MiwidGltZXN0\nYW1wIjoxNzc5OTk5MDAwLCJ0eGhhc2giOiIweGVhZWFlYWVhZWFlYWVhZWFlYWVh\nZWFlYWVhZWFlYWVhZWFlYWVhZWFlYWVhZWFlYWVhZWFlYWVhZWFlYWVhZWEiLCJ2\nYWx1ZSI6NTAwMDAwMDAwfSwidHlwZSI6ImVvYS1wdWIiLCJ2IjoxfQ\n.END",
+   "kind": "eoa-pub",
+   "nonces": {
+    "t_self": "0x0b5d3d6ed1154b024a6c879d900fa461638e615a876070f4402b00063091eb7e"
+   },
+   "payee": "bob",
+   "payer": "alice",
+   "receipt_id": "63qqrjymzur5",
+   "role": "recipient",
+   "txn": {
+    "block": 1234567,
+    "block_time": 1779999000,
+    "logindex": 2,
+    "txhash": "0xeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea",
+    "value": 500000000
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9",
+     "y": "0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8"
+    },
+    "ok": true,
+    "reason": "VALID",
+    "value": 500000000
+   }
+  },
+  {
+   "E_for_payee": {
+    "C": {
+     "x": "0x2dfdc95716040d5e153ac6e7f44496dc1ca87aa66fd467fa81f490283c42046c",
+     "y": "0x10f42b00055bd99da495342e24e6aa82c18578b8fa2f6534da8a4fdcb0512244"
+    },
+    "R": {
+     "x": "0x2342c94064a038dfc732750c4f29d2facd8a12d4b74c3a7f46706aa89dd9782d",
+     "y": "0x1697c358234412f6ea922d577d25ee64bbbb4f63890d24af910eaa8c38cf66b0"
+    }
+   },
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba\",\"y\":\"0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862\"},\"R\":{\"x\":\"0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f\",\"y\":\"0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab\"}},\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba\",\"y\":\"0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862\"},\"R\":{\"x\":\"0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f\",\"y\":\"0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab\"}},\"M_named\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"account\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x0182edec1de94302758d1e6cb20210116cc1d7019c035341c8187d938ecbc529\",\"y\":\"0x298496283e991cc98cfdc597daeedcb29a5ae44ee32166b842e118688f5273e1\"},\"T2\":{\"x\":\"0x1291da8bf0cc0d7db002cf9a3045bcf49dcbe64a7ad194c60d28a64cc072c76d\",\"y\":\"0x1088ca66bb464594bc69b424d6302c37ba38d9ee78090e0a888d2c17f007fe35\"},\"e\":\"0x0f2a1078e0dcca77e3ab65d76d0d3e9a7f1b9304c7bece6a3c44370996caa251\",\"s\":\"0x13746b907dd19be913dc7f9bfd8c3ba164548a8460ab634d6930f5f00389fc09\"}},\"payer\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"proof\":{\"approve\":{\"E_a\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"E_b\":{\"C\":{\"x\":\"0x2dfdc95716040d5e153ac6e7f44496dc1ca87aa66fd467fa81f490283c42046c\",\"y\":\"0x10f42b00055bd99da495342e24e6aa82c18578b8fa2f6534da8a4fdcb0512244\"},\"R\":{\"x\":\"0x2342c94064a038dfc732750c4f29d2facd8a12d4b74c3a7f46706aa89dd9782d\",\"y\":\"0x1697c358234412f6ea922d577d25ee64bbbb4f63890d24af910eaa8c38cf66b0\"}},\"chainid\":1,\"pk_a\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"},\"pk_b\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"},\"proof\":{\"T1\":{\"x\":\"0x0832800f1e2fd0e649f7f46fee86011b59e50363b96aaac222d82884476c191f\",\"y\":\"0x0f4465fb0f2697d67ce814493ecfdcc2c7ec6fea7ec6bc4d15cae963271aa2e1\"},\"T2\":{\"x\":\"0x24b6d046c58f12fb671decea542b0bf79b56e77229771af45329a910c472f47d\",\"y\":\"0x298b4b0733576707d2bf7b621c889dafab99e7926279069427da7d5430ab5023\"},\"T3\":{\"x\":\"0x132d543103bdfb2a514c8805c5ecdea7bb25a52782374251789b141a58ac8fd0\",\"y\":\"0x0649a2d7de57cb3be8cdbe271c593b6d66edd4f45535c7c69a02e1e99691f2bb\"},\"e\":\"0x1edb063aed6590f4f0b90dd86a4141a965128cb3a00500dec8b8990496c7c2c1\",\"s1\":\"0x15c435e4d9a0b9f131a2f184d983867066c543d2af28e089a35d2ae4376ef63d\",\"s2\":\"0x1dd3b0bb3f9908b6b5f8fa3a6314424f7a127d711ca661aaa3b2ac66ed7cad50\"},\"sender\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"spender\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\"},\"vd_payer\":{\"E_ct\":{\"C\":{\"x\":\"0x2dfdc95716040d5e153ac6e7f44496dc1ca87aa66fd467fa81f490283c42046c\",\"y\":\"0x10f42b00055bd99da495342e24e6aa82c18578b8fa2f6534da8a4fdcb0512244\"},\"R\":{\"x\":\"0x2342c94064a038dfc732750c4f29d2facd8a12d4b74c3a7f46706aa89dd9782d\",\"y\":\"0x1697c358234412f6ea922d577d25ee64bbbb4f63890d24af910eaa8c38cf66b0\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x0ef9c0960a20bcdb5f3c8b6273a5ff0b9f2a70ca0cc067d2e771c407eaa020a0\",\"y\":\"0x1ceda4b27e9fbe5da0546b12df22fef5cf4a20569044553c68404c09410572ea\"},\"T2\":{\"x\":\"0x171f9224bf94e05dcbdc2d5dcc664e04cf7ce5b0da81ec4e7cef6ebd62d26263\",\"y\":\"0x017afd5da7e2865ff491de5946d5e3fd49a0648f2afe694e1163123566d45f56\"},\"e\":\"0x0231876d0ce4bfad1b2e980a4139b7fdc1bc95ac5d12ad66cbf716a44f9960a2\",\"s\":\"0x2fc5ceb9e36d3793874a4cff82d186c851ffcfa7f7f3fd3ea34e0fd2c27ecab7\"}}},\"role\":\"recipient\",\"txn\":{\"block\":1234567,\"event\":\"Transfer\",\"kind\":\"eoa-transfer\",\"logindex\":2,\"timestamp\":1779999000,\"txhash\":\"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"value\":500000000},\"type\":\"eoa-priv\",\"v\":1}",
+   "cp_proof": {
+    "T1": {
+     "x": "0x0832800f1e2fd0e649f7f46fee86011b59e50363b96aaac222d82884476c191f",
+     "y": "0x0f4465fb0f2697d67ce814493ecfdcc2c7ec6fea7ec6bc4d15cae963271aa2e1"
+    },
+    "T2": {
+     "x": "0x24b6d046c58f12fb671decea542b0bf79b56e77229771af45329a910c472f47d",
+     "y": "0x298b4b0733576707d2bf7b621c889dafab99e7926279069427da7d5430ab5023"
+    },
+    "T3": {
+     "x": "0x132d543103bdfb2a514c8805c5ecdea7bb25a52782374251789b141a58ac8fd0",
+     "y": "0x0649a2d7de57cb3be8cdbe271c593b6d66edd4f45535c7c69a02e1e99691f2bb"
+    },
+    "e": "0x1edb063aed6590f4f0b90dd86a4141a965128cb3a00500dec8b8990496c7c2c1",
+    "s1": "0x15c435e4d9a0b9f131a2f184d983867066c543d2af28e089a35d2ae4376ef63d",
+    "s2": "0x1dd3b0bb3f9908b6b5f8fa3a6314424f7a127d711ca661aaa3b2ac66ed7cad50"
+   },
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwicGF5\nZWUiOnsiRV9hZGRyIjp7IkMiOnsieCI6IjB4MWU2MTQwZDYzYWVkNDBlNGQwNDY0\nOGQ3Mjc1MWU1YWVjYmM1YzIzYzlhMmNkY2ZhNzA5ODM2NjA2NWFkNzNiYSIsInki\nOiIweDAyNTQwNjlhNWE5NDBjZmNmMDlhY2NkYmI4M2ExYTI4YTZjZmYwY2ExNDgw\nMjgyY2MwYzJmMmRjNzg5NWY4NjIifSwiUiI6eyJ4IjoiMHgwZWM2MTRkZjYzNTZj\nNTFhNzNkMzZkMGEyY2I1MzFjODRkOWJkYzNiNjQ4YWQwMDQxNGNhOTg0Y2M4ZjJj\nNzRmIiwieSI6IjB4MDk4ZmE4MzlkOWRhOGFjZmIwODdhZGM0OTY3ZjU1Yjk4ZmZk\nZjM0YWM3NjZmYTg0NWI3NDQ5YTU2YjU2MzlhYiJ9fSwiTSI6eyJ4IjoiMHgyMTNi\nMTk3MTA3NWFjZWU0ZThjNjdlODFhNTg0MDBhMmZkZjVhOTdmMjZjYmZiNjQ4OWI1\nZDYwZDIxYTNhMDA2IiwieSI6IjB4Mjk4OWE5ODIzOGUzYzRlZTNmYWJhNjIxNTcy\nYjhkYWNhYThhYzNhZDE1MjE4YjFiZjM1ZDBhYjhhNDRhMzBkNiJ9LCJhZGRyIjoi\nMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwYjBiMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwYjBiIiwiaWRlbnRpdHkiOiJ7XCJkb2JcIjpcIjE5Njgt\nMTEtMTFcIixcImdpdmVuX25hbWVcIjpcIkJvYlwiLFwiaXNzdWVyX2lkXCI6XCJz\ndmMtYWxiZXJ0YVwiLFwic3VybmFtZVwiOlwiR3JhbmFyeVwifSIsImtpbmQiOiJw\ncml2YXRlIiwicGsiOnsieCI6IjB4MGYxZTczMGViODUwYWFmYjA3OGVkODcxYzc4\nZGE2ZWRmNWUwODRiOThjYzM3ZTRmMTJkOTVhZmY4ZjYwYjI3YSIsInkiOiIweDIz\nZjU4NmMzODg2ZTc1ZmYyZGI4YWZjMDI0YjliOTA5NDI2NmFhNDEwMWMzZjZmOWQ5\nZDMxMjY2ZGU3MGYxODMifX0sInBheWVlX3ZkIjp7IkVfY3QiOnsiQyI6eyJ4Ijoi\nMHgxZTYxNDBkNjNhZWQ0MGU0ZDA0NjQ4ZDcyNzUxZTVhZWNiYzVjMjNjOWEyY2Rj\nZmE3MDk4MzY2MDY1YWQ3M2JhIiwieSI6IjB4MDI1NDA2OWE1YTk0MGNmY2YwOWFj\nY2RiYjgzYTFhMjhhNmNmZjBjYTE0ODAyODJjYzBjMmYyZGM3ODk1Zjg2MiJ9LCJS\nIjp7IngiOiIweDBlYzYxNGRmNjM1NmM1MWE3M2QzNmQwYTJjYjUzMWM4NGQ5YmRj\nM2I2NDhhZDAwNDE0Y2E5ODRjYzhmMmM3NGYiLCJ5IjoiMHgwOThmYTgzOWQ5ZGE4\nYWNmYjA4N2FkYzQ5NjdmNTViOThmZmRmMzRhYzc2NmZhODQ1Yjc0NDlhNTZiNTYz\nOWFiIn19LCJNX25hbWVkIjp7IngiOiIweDIxM2IxOTcxMDc1YWNlZTRlOGM2N2U4\nMWE1ODQwMGEyZmRmNWE5N2YyNmNiZmI2NDg5YjVkNjBkMjFhM2EwMDYiLCJ5Ijoi\nMHgyOTg5YTk4MjM4ZTNjNGVlM2ZhYmE2MjE1NzJiOGRhY2FhOGFjM2FkMTUyMThi\nMWJmMzVkMGFiOGE0NGEzMGQ2In0sImFjY291bnQiOiIweDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDBiMGIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBi\nMGIiLCJjaGFpbmlkIjoxLCJwcm9vZiI6eyJUMSI6eyJ4IjoiMHgwMTgyZWRlYzFk\nZTk0MzAyNzU4ZDFlNmNiMjAyMTAxMTZjYzFkNzAxOWMwMzUzNDFjODE4N2Q5Mzhl\nY2JjNTI5IiwieSI6IjB4Mjk4NDk2MjgzZTk5MWNjOThjZmRjNTk3ZGFlZWRjYjI5\nYTVhZTQ0ZWUzMjE2NmI4NDJlMTE4Njg4ZjUyNzNlMSJ9LCJUMiI6eyJ4IjoiMHgx\nMjkxZGE4YmYwY2MwZDdkYjAwMmNmOWEzMDQ1YmNmNDlkY2JlNjRhN2FkMTk0YzYw\nZDI4YTY0Y2MwNzJjNzZkIiwieSI6IjB4MTA4OGNhNjZiYjQ2NDU5NGJjNjliNDI0\nZDYzMDJjMzdiYTM4ZDllZTc4MDkwZTBhODg4ZDJjMTdmMDA3ZmUzNSJ9LCJlIjoi\nMHgwZjJhMTA3OGUwZGNjYTc3ZTNhYjY1ZDc2ZDBkM2U5YTdmMWI5MzA0YzdiZWNl\nNmEzYzQ0MzcwOTk2Y2FhMjUxIiwicyI6IjB4MTM3NDZiOTA3ZGQxOWJlOTEzZGM3\nZjliZmQ4YzNiYTE2NDU0OGE4NDYwYWI2MzRkNjkzMGY1ZjAwMzg5ZmMwOSJ9fSwi\ncGF5ZXIiOnsiRV9hZGRyIjp7IkMiOnsieCI6IjB4MWViN2M3NWZhNGEzNDBhY2Vl\nN2Q2MGNkZDRmODUzNjNiNTM3ZDVhYjUwNTNkYWFjMzM3OTk4Njc2ZGI2M2RmZCIs\nInkiOiIweDA2ZDk0MDBkYmRmNjBkZjBjYzc0ZmRlNzQ0NDQyZTFlYzEyZDZmZGU4\nYjUyY2Q0ZTcxZjAzYTlkYmYzNGJlN2QifSwiUiI6eyJ4IjoiMHgyOTJjZGMxZjcx\nY2Y4MjlhMjcxNmRhZmQwYTE3MTU3NjgxYTc5ZDQ1NWJmMmRjMmM3NzY5MGUwZjJi\nMjE1OGI0IiwieSI6IjB4MWUxNjZkN2ZjYjg3MmQ2ZDdiZDI2OGU3MWRiOWJlYjBk\nYTNmZTJkNmEyY2JlNzBhNWMxNTExY2YzYjdlNzE1NCJ9fSwiTSI6eyJ4IjoiMHgx\nNTRhOTA4N2JkMGE0ZmY2ZDYyMzkxMTQ5MDNiYWQ4OGYwYTQ3NWFiMWUzZmU1YjZj\nZGFiZDMzODViNjYwY2Y5IiwieSI6IjB4MWIzNGNmMTY0YzA4NjVjM2E0OTY2NjM0\nYmFhMzZmYjVhNGVjMzdiOTNhZWI1MjVmOGNjYjJmNmFkNGU5YWZmOCJ9LCJhZGRy\nIjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwYTExY2UwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMGExMWNlIiwiaWRlbnRpdHkiOiJ7XCJkb2JcIjpcIjE5\nNzAtMDQtMDFcIixcImdpdmVuX25hbWVcIjpcIkFsaWNlXCIsXCJpc3N1ZXJfaWRc\nIjpcInN2Yy1hbGJlcnRhXCIsXCJzdXJuYW1lXCI6XCJSYW5jaFwifSIsImtpbmQi\nOiJwcml2YXRlIiwicGsiOnsieCI6IjB4MGY4NWUzNzY4MmUxZWJjMDVlNDBhMWZi\nNTk5NjkwMTFlMjMyZGMwOTQ0ODlhZDBlYWZmYTliNGFiNWQwODk1YiIsInkiOiIw\neDE5MjBkMjU3YzczM2U0YWYyZmVjNzE0MjYxMWNlZmU1YzEzY2VhY2JkZGFlNDRl\nMjE2ZDNjZmJlYjA5Nzk0Y2IifX0sInByb29mIjp7ImFwcHJvdmUiOnsiRV9hIjp7\nIkMiOnsieCI6IjB4MWViN2M3NWZhNGEzNDBhY2VlN2Q2MGNkZDRmODUzNjNiNTM3\nZDVhYjUwNTNkYWFjMzM3OTk4Njc2ZGI2M2RmZCIsInkiOiIweDA2ZDk0MDBkYmRm\nNjBkZjBjYzc0ZmRlNzQ0NDQyZTFlYzEyZDZmZGU4YjUyY2Q0ZTcxZjAzYTlkYmYz\nNGJlN2QifSwiUiI6eyJ4IjoiMHgyOTJjZGMxZjcxY2Y4MjlhMjcxNmRhZmQwYTE3\nMTU3NjgxYTc5ZDQ1NWJmMmRjMmM3NzY5MGUwZjJiMjE1OGI0IiwieSI6IjB4MWUx\nNjZkN2ZjYjg3MmQ2ZDdiZDI2OGU3MWRiOWJlYjBkYTNmZTJkNmEyY2JlNzBhNWMx\nNTExY2YzYjdlNzE1NCJ9fSwiRV9iIjp7IkMiOnsieCI6IjB4MmRmZGM5NTcxNjA0\nMGQ1ZTE1M2FjNmU3ZjQ0NDk2ZGMxY2E4N2FhNjZmZDQ2N2ZhODFmNDkwMjgzYzQy\nMDQ2YyIsInkiOiIweDEwZjQyYjAwMDU1YmQ5OWRhNDk1MzQyZTI0ZTZhYTgyYzE4\nNTc4YjhmYTJmNjUzNGRhOGE0ZmRjYjA1MTIyNDQifSwiUiI6eyJ4IjoiMHgyMzQy\nYzk0MDY0YTAzOGRmYzczMjc1MGM0ZjI5ZDJmYWNkOGExMmQ0Yjc0YzNhN2Y0Njcw\nNmFhODlkZDk3ODJkIiwieSI6IjB4MTY5N2MzNTgyMzQ0MTJmNmVhOTIyZDU3N2Qy\nNWVlNjRiYmJiNGY2Mzg5MGQyNGFmOTEwZWFhOGMzOGNmNjZiMCJ9fSwiY2hhaW5p\nZCI6MSwicGtfYSI6eyJ4IjoiMHgwZjg1ZTM3NjgyZTFlYmMwNWU0MGExZmI1OTk2\nOTAxMWUyMzJkYzA5NDQ4OWFkMGVhZmZhOWI0YWI1ZDA4OTViIiwieSI6IjB4MTky\nMGQyNTdjNzMzZTRhZjJmZWM3MTQyNjExY2VmZTVjMTNjZWFjYmRkYWU0NGUyMTZk\nM2NmYmViMDk3OTRjYiJ9LCJwa19iIjp7IngiOiIweDBmMWU3MzBlYjg1MGFhZmIw\nNzhlZDg3MWM3OGRhNmVkZjVlMDg0Yjk4Y2MzN2U0ZjEyZDk1YWZmOGY2MGIyN2Ei\nLCJ5IjoiMHgyM2Y1ODZjMzg4NmU3NWZmMmRiOGFmYzAyNGI5YjkwOTQyNjZhYTQx\nMDFjM2Y2ZjlkOWQzMTI2NmRlNzBmMTgzIn0sInByb29mIjp7IlQxIjp7IngiOiIw\neDA4MzI4MDBmMWUyZmQwZTY0OWY3ZjQ2ZmVlODYwMTFiNTllNTAzNjNiOTZhYWFj\nMjIyZDgyODg0NDc2YzE5MWYiLCJ5IjoiMHgwZjQ0NjVmYjBmMjY5N2Q2N2NlODE0\nNDkzZWNmZGNjMmM3ZWM2ZmVhN2VjNmJjNGQxNWNhZTk2MzI3MWFhMmUxIn0sIlQy\nIjp7IngiOiIweDI0YjZkMDQ2YzU4ZjEyZmI2NzFkZWNlYTU0MmIwYmY3OWI1NmU3\nNzIyOTc3MWFmNDUzMjlhOTEwYzQ3MmY0N2QiLCJ5IjoiMHgyOThiNGIwNzMzNTc2\nNzA3ZDJiZjdiNjIxYzg4OWRhZmFiOTllNzkyNjI3OTA2OTQyN2RhN2Q1NDMwYWI1\nMDIzIn0sIlQzIjp7IngiOiIweDEzMmQ1NDMxMDNiZGZiMmE1MTRjODgwNWM1ZWNk\nZWE3YmIyNWE1Mjc4MjM3NDI1MTc4OWIxNDFhNThhYzhmZDAiLCJ5IjoiMHgwNjQ5\nYTJkN2RlNTdjYjNiZThjZGJlMjcxYzU5M2I2ZDY2ZWRkNGY0NTUzNWM3YzY5YTAy\nZTFlOTk2OTFmMmJiIn0sImUiOiIweDFlZGIwNjNhZWQ2NTkwZjRmMGI5MGRkODZh\nNDE0MWE5NjUxMjhjYjNhMDA1MDBkZWM4Yjg5OTA0OTZjN2MyYzEiLCJzMSI6IjB4\nMTVjNDM1ZTRkOWEwYjlmMTMxYTJmMTg0ZDk4Mzg2NzA2NmM1NDNkMmFmMjhlMDg5\nYTM1ZDJhZTQzNzZlZjYzZCIsInMyIjoiMHgxZGQzYjBiYjNmOTkwOGI2YjVmOGZh\nM2E2MzE0NDI0ZjdhMTI3ZDcxMWNhNjYxYWFhM2IyYWM2NmVkN2NhZDUwIn0sInNl\nbmRlciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGExMWNlMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDBhMTFjZSIsInNwZW5kZXIiOiIweDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDBiMGIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDBiMGIifSwidmRfcGF5ZXIiOnsiRV9jdCI6eyJDIjp7IngiOiIweDJkZmRj\nOTU3MTYwNDBkNWUxNTNhYzZlN2Y0NDQ5NmRjMWNhODdhYTY2ZmQ0NjdmYTgxZjQ5\nMDI4M2M0MjA0NmMiLCJ5IjoiMHgxMGY0MmIwMDA1NWJkOTlkYTQ5NTM0MmUyNGU2\nYWE4MmMxODU3OGI4ZmEyZjY1MzRkYThhNGZkY2IwNTEyMjQ0In0sIlIiOnsieCI6\nIjB4MjM0MmM5NDA2NGEwMzhkZmM3MzI3NTBjNGYyOWQyZmFjZDhhMTJkNGI3NGMz\nYTdmNDY3MDZhYTg5ZGQ5NzgyZCIsInkiOiIweDE2OTdjMzU4MjM0NDEyZjZlYTky\nMmQ1NzdkMjVlZTY0YmJiYjRmNjM4OTBkMjRhZjkxMGVhYThjMzhjZjY2YjAifX0s\nIk1fbmFtZWQiOnsieCI6IjB4MTU0YTkwODdiZDBhNGZmNmQ2MjM5MTE0OTAzYmFk\nODhmMGE0NzVhYjFlM2ZlNWI2Y2RhYmQzMzg1YjY2MGNmOSIsInkiOiIweDFiMzRj\nZjE2NGMwODY1YzNhNDk2NjYzNGJhYTM2ZmI1YTRlYzM3YjkzYWViNTI1ZjhjY2Iy\nZjZhZDRlOWFmZjgifSwiYWNjb3VudCI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMGIwYjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGIwYiIsImNo\nYWluaWQiOjEsInByb29mIjp7IlQxIjp7IngiOiIweDBlZjljMDk2MGEyMGJjZGI1\nZjNjOGI2MjczYTVmZjBiOWYyYTcwY2EwY2MwNjdkMmU3NzFjNDA3ZWFhMDIwYTAi\nLCJ5IjoiMHgxY2VkYTRiMjdlOWZiZTVkYTA1NDZiMTJkZjIyZmVmNWNmNGEyMDU2\nOTA0NDU1M2M2ODQwNGMwOTQxMDU3MmVhIn0sIlQyIjp7IngiOiIweDE3MWY5MjI0\nYmY5NGUwNWRjYmRjMmQ1ZGNjNjY0ZTA0Y2Y3Y2U1YjBkYTgxZWM0ZTdjZWY2ZWJk\nNjJkMjYyNjMiLCJ5IjoiMHgwMTdhZmQ1ZGE3ZTI4NjVmZjQ5MWRlNTk0NmQ1ZTNm\nZDQ5YTA2NDhmMmFmZTY5NGUxMTYzMTIzNTY2ZDQ1ZjU2In0sImUiOiIweDAyMzE4\nNzZkMGNlNGJmYWQxYjJlOTgwYTQxMzliN2ZkYzFiYzk1YWM1ZDEyYWQ2NmNiZjcx\nNmE0NGY5OTYwYTIiLCJzIjoiMHgyZmM1Y2ViOWUzNmQzNzkzODc0YTRjZmY4MmQx\nODZjODUxZmZjZmE3ZjdmM2ZkM2VhMzRlMGZkMmMyN2VjYWI3In19fSwicm9sZSI6\nInJlY2lwaWVudCIsInR4biI6eyJibG9jayI6MTIzNDU2NywiZXZlbnQiOiJUcmFu\nc2ZlciIsImtpbmQiOiJlb2EtdHJhbnNmZXIiLCJsb2dpbmRleCI6MiwidGltZXN0\nYW1wIjoxNzc5OTk5MDAwLCJ0eGhhc2giOiIweGVlZWVlZWVlZWVlZWVlZWVlZWVl\nZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWUiLCJ2\nYWx1ZSI6NTAwMDAwMDAwfSwidHlwZSI6ImVvYS1wcml2IiwidiI6MX0\n.END",
+   "kind": "eoa-priv",
+   "nonces": {
+    "k1": "0x2c82125a425a88cbfdba157f49a6a4da4060cea27ceb7e6530393a64ec07716b",
+    "k2": "0x0592c1ca26c63fd509327cb32f8b48982e7b17e29352fed291ca89296908293a",
+    "r_prime": "0x1086d37015c94ecbb502ade7dce536cbeda11c0944c53d8deab311ce100205cb",
+    "t_self": "0x1722c421b1388966e262e2e819a15f8b1945ba9b300d1903517d73c2e9ac9468",
+    "t_vd_payer": "0x25bec623c48dc67f5cc0cf22df3801da4750e7e199856fb4a02c64aed073c456"
+   },
+   "payee": "bob",
+   "payer": "alice",
+   "receipt_id": "g2amwbwte43h",
+   "role": "recipient",
+   "txn": {
+    "block": 1234567,
+    "block_time": 1779999000,
+    "logindex": 2,
+    "txhash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "value": 500000000
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9",
+     "y": "0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8"
+    },
+    "ok": true,
+    "reason": "VALID",
+    "value": 500000000
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"note\":{\"eDepForIss\":{\"C\":{\"x\":\"0x1b9bf0c47482e7cc5c21fb2a8a747078a29cc9f32d955c3b0e73f4ba676a76a8\",\"y\":\"0x2fffdd90dc43b8c6475924c51465eaf4e07ad2716afde15b8a595271f4bd76b0\"},\"R\":{\"x\":\"0x2224ab17c1b9f37ea97aadb3995959fe580c55223fde03753c7ed4b1fb9af893\",\"y\":\"0x205ab08f03a7ba40fb8d37db8a237b9533e30f2a2551c6540ac0f19ea8e37b7f\"}},\"sigma_R\":{\"x\":\"0x0e9dbfb852f1ccb53689740a363acf884e5eff120606b40e2f22956f464ca57e\",\"y\":\"0x02f1cb78f0ebef0a8c15eeb1d3fee97c7862446e1163aab9675f0a66866f8253\"},\"sigma_s\":\"0x2e9dbeed92485edcad62d9685c8cbe1924efbc1990675d173d048f445598b010\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x25d7bea9a9bcfcef5660572b5067158c6912cfcade6adcdfe1eef92a00e0d81e\",\"y\":\"0x20a74ebaa7f7fd4c8f87fe513c6a58a13c02b0ef5eae5b1d26ca554eada73167\"},\"T2\":{\"x\":\"0x0098c73b395b5a818926da702d3fc0befd405c58173e115e7e5ecf533fd6e9bc\",\"y\":\"0x1126c897ca91bf43379e8d5f36276e02b55888cfb9c19e2a413e487eb62e110b\"},\"e\":\"0x229b051960fcc587f8f15e5cde4092de5bbfb3cb3950264d81faa2445c5e8fc9\",\"s\":\"0x1c3809dc1c57caabe1e856e7ccfd7ffe8c17a79cb55418b94d635e9f0726fad4\"}},\"payer\":{\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"public\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x2fb7d821197a8647669dd6e0254c35912fa585ea606b2caa660e4ec57dcdfded\",\"0x03fa5b9d2e4801154e64ac3345192c56343df762a1a6d7cdf3e158167255fc3a\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"issuer_sig\":{\"R\":{\"x\":\"0x14935096e975be4d86d8903034b238913dbf50a5105e3c3a7769654af239804a\",\"y\":\"0x29b3fed52aefe0c65de6ba62872515fb7d7d07e9bb595672599141d8c40a493d\"},\"e\":\"0x2f766f71eb2cfed3317f13c6b44e4b0e3795ad5f0bd4174886f1295a1f10de1f\",\"s\":\"0x0b23e55b2f3da26aa65d3ea35a3254b43e7785a64735983499c99f35f04fda23\"},\"nullifier\":\"0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000003\",\"idHash\":\"0x07666197cf73750f37911027eff06eedf5b7601b0c5a66451097c05e5bf2a426\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x10d2333418f734cf2cd7b5738010694c06919fc620d65b403fd6e715b1e901e7\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"recipient\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledB1\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22\",\"timestamp\":1779999000,\"txhash\":\"0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1\",\"value\":250},\"type\":\"note-b1\",\"v\":1}",
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwibm90\nZSI6eyJlRGVwRm9ySXNzIjp7IkMiOnsieCI6IjB4MWI5YmYwYzQ3NDgyZTdjYzVj\nMjFmYjJhOGE3NDcwNzhhMjljYzlmMzJkOTU1YzNiMGU3M2Y0YmE2NzZhNzZhOCIs\nInkiOiIweDJmZmZkZDkwZGM0M2I4YzY0NzU5MjRjNTE0NjVlYWY0ZTA3YWQyNzE2\nYWZkZTE1YjhhNTk1MjcxZjRiZDc2YjAifSwiUiI6eyJ4IjoiMHgyMjI0YWIxN2Mx\nYjlmMzdlYTk3YWFkYjM5OTU5NTlmZTU4MGM1NTIyM2ZkZTAzNzUzYzdlZDRiMWZi\nOWFmODkzIiwieSI6IjB4MjA1YWIwOGYwM2E3YmE0MGZiOGQzN2RiOGEyMzdiOTUz\nM2UzMGYyYTI1NTFjNjU0MGFjMGYxOWVhOGUzN2I3ZiJ9fSwic2lnbWFfUiI6eyJ4\nIjoiMHgwZTlkYmZiODUyZjFjY2I1MzY4OTc0MGEzNjNhY2Y4ODRlNWVmZjEyMDYw\nNmI0MGUyZjIyOTU2ZjQ2NGNhNTdlIiwieSI6IjB4MDJmMWNiNzhmMGViZWYwYThj\nMTVlZWIxZDNmZWU5N2M3ODYyNDQ2ZTExNjNhYWI5Njc1ZjBhNjY4NjZmODI1MyJ9\nLCJzaWdtYV9zIjoiMHgyZTlkYmVlZDkyNDg1ZWRjYWQ2MmQ5Njg1YzhjYmUxOTI0\nZWZiYzE5OTA2NzVkMTczZDA0OGY0NDU1OThiMDEwIn0sInBheWVlIjp7IkVfYWRk\nciI6eyJDIjp7IngiOiIweDFlYjdjNzVmYTRhMzQwYWNlZTdkNjBjZGQ0Zjg1MzYz\nYjUzN2Q1YWI1MDUzZGFhYzMzNzk5ODY3NmRiNjNkZmQiLCJ5IjoiMHgwNmQ5NDAw\nZGJkZjYwZGYwY2M3NGZkZTc0NDQ0MmUxZWMxMmQ2ZmRlOGI1MmNkNGU3MWYwM2E5\nZGJmMzRiZTdkIn0sIlIiOnsieCI6IjB4MjkyY2RjMWY3MWNmODI5YTI3MTZkYWZk\nMGExNzE1NzY4MWE3OWQ0NTViZjJkYzJjNzc2OTBlMGYyYjIxNThiNCIsInkiOiIw\neDFlMTY2ZDdmY2I4NzJkNmQ3YmQyNjhlNzFkYjliZWIwZGEzZmUyZDZhMmNiZTcw\nYTVjMTUxMWNmM2I3ZTcxNTQifX0sIk0iOnsieCI6IjB4MTU0YTkwODdiZDBhNGZm\nNmQ2MjM5MTE0OTAzYmFkODhmMGE0NzVhYjFlM2ZlNWI2Y2RhYmQzMzg1YjY2MGNm\nOSIsInkiOiIweDFiMzRjZjE2NGMwODY1YzNhNDk2NjYzNGJhYTM2ZmI1YTRlYzM3\nYjkzYWViNTI1ZjhjY2IyZjZhZDRlOWFmZjgifSwiYWRkciI6IjB4MDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMGExMWNlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDBhMTFjZSIsImlkZW50aXR5Ijoie1wiZG9iXCI6XCIxOTcwLTA0LTAxXCIsXCJn\naXZlbl9uYW1lXCI6XCJBbGljZVwiLFwiaXNzdWVyX2lkXCI6XCJzdmMtYWxiZXJ0\nYVwiLFwic3VybmFtZVwiOlwiUmFuY2hcIn0iLCJraW5kIjoicHJpdmF0ZSIsInBr\nIjp7IngiOiIweDBmODVlMzc2ODJlMWViYzA1ZTQwYTFmYjU5OTY5MDExZTIzMmRj\nMDk0NDg5YWQwZWFmZmE5YjRhYjVkMDg5NWIiLCJ5IjoiMHgxOTIwZDI1N2M3MzNl\nNGFmMmZlYzcxNDI2MTFjZWZlNWMxM2NlYWNiZGRhZTQ0ZTIxNmQzY2ZiZWIwOTc5\nNGNiIn19LCJwYXllZV92ZCI6eyJFX2N0Ijp7IkMiOnsieCI6IjB4MWViN2M3NWZh\nNGEzNDBhY2VlN2Q2MGNkZDRmODUzNjNiNTM3ZDVhYjUwNTNkYWFjMzM3OTk4Njc2\nZGI2M2RmZCIsInkiOiIweDA2ZDk0MDBkYmRmNjBkZjBjYzc0ZmRlNzQ0NDQyZTFl\nYzEyZDZmZGU4YjUyY2Q0ZTcxZjAzYTlkYmYzNGJlN2QifSwiUiI6eyJ4IjoiMHgy\nOTJjZGMxZjcxY2Y4MjlhMjcxNmRhZmQwYTE3MTU3NjgxYTc5ZDQ1NWJmMmRjMmM3\nNzY5MGUwZjJiMjE1OGI0IiwieSI6IjB4MWUxNjZkN2ZjYjg3MmQ2ZDdiZDI2OGU3\nMWRiOWJlYjBkYTNmZTJkNmEyY2JlNzBhNWMxNTExY2YzYjdlNzE1NCJ9fSwiTV9u\nYW1lZCI6eyJ4IjoiMHgxNTRhOTA4N2JkMGE0ZmY2ZDYyMzkxMTQ5MDNiYWQ4OGYw\nYTQ3NWFiMWUzZmU1YjZjZGFiZDMzODViNjYwY2Y5IiwieSI6IjB4MWIzNGNmMTY0\nYzA4NjVjM2E0OTY2NjM0YmFhMzZmYjVhNGVjMzdiOTNhZWI1MjVmOGNjYjJmNmFk\nNGU5YWZmOCJ9LCJhY2NvdW50IjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nYTExY2UwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGExMWNlIiwiY2hhaW5p\nZCI6MSwicHJvb2YiOnsiVDEiOnsieCI6IjB4MjVkN2JlYTlhOWJjZmNlZjU2NjA1\nNzJiNTA2NzE1OGM2OTEyY2ZjYWRlNmFkY2RmZTFlZWY5MmEwMGUwZDgxZSIsInki\nOiIweDIwYTc0ZWJhYTdmN2ZkNGM4Zjg3ZmU1MTNjNmE1OGExM2MwMmIwZWY1ZWFl\nNWIxZDI2Y2E1NTRlYWRhNzMxNjcifSwiVDIiOnsieCI6IjB4MDA5OGM3M2IzOTVi\nNWE4MTg5MjZkYTcwMmQzZmMwYmVmZDQwNWM1ODE3M2UxMTVlN2U1ZWNmNTMzZmQ2\nZTliYyIsInkiOiIweDExMjZjODk3Y2E5MWJmNDMzNzllOGQ1ZjM2Mjc2ZTAyYjU1\nODg4Y2ZiOWMxOWUyYTQxM2U0ODdlYjYyZTExMGIifSwiZSI6IjB4MjI5YjA1MTk2\nMGZjYzU4N2Y4ZjE1ZTVjZGU0MDkyZGU1YmJmYjNjYjM5NTAyNjRkODFmYWEyNDQ1\nYzVlOGZjOSIsInMiOiIweDFjMzgwOWRjMWM1N2NhYWJlMWU4NTZlN2NjZmQ3ZmZl\nOGMxN2E3OWNiNTU0MThiOTRkNjM1ZTlmMDcyNmZhZDQifX0sInBheWVyIjp7Ik0i\nOnsieCI6IjB4MjEzYjE5NzEwNzVhY2VlNGU4YzY3ZTgxYTU4NDAwYTJmZGY1YTk3\nZjI2Y2JmYjY0ODliNWQ2MGQyMWEzYTAwNiIsInkiOiIweDI5ODlhOTgyMzhlM2M0\nZWUzZmFiYTYyMTU3MmI4ZGFjYWE4YWMzYWQxNTIxOGIxYmYzNWQwYWI4YTQ0YTMw\nZDYifSwiYWRkciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGIwYjAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGIwYiIsImlkZW50aXR5Ijoie1wi\nZG9iXCI6XCIxOTY4LTExLTExXCIsXCJnaXZlbl9uYW1lXCI6XCJCb2JcIixcImlz\nc3Vlcl9pZFwiOlwic3ZjLWFsYmVydGFcIixcInN1cm5hbWVcIjpcIkdyYW5hcnlc\nIn0iLCJraW5kIjoicHVibGljIiwicGsiOnsieCI6IjB4MGYxZTczMGViODUwYWFm\nYjA3OGVkODcxYzc4ZGE2ZWRmNWUwODRiOThjYzM3ZTRmMTJkOTVhZmY4ZjYwYjI3\nYSIsInkiOiIweDIzZjU4NmMzODg2ZTc1ZmYyZGI4YWZjMDI0YjliOTA5NDI2NmFh\nNDEwMWMzZjZmOWQ5ZDMxMjY2ZGU3MGYxODMifX0sInByb29mIjp7ImNtcyI6WyIw\neDJmYjdkODIxMTk3YTg2NDc2NjlkZDZlMDI1NGMzNTkxMmZhNTg1ZWE2MDZiMmNh\nYTY2MGU0ZWM1N2RjZGZkZWQiLCIweDAzZmE1YjlkMmU0ODAxMTU0ZTY0YWMzMzQ1\nMTkyYzU2MzQzZGY3NjJhMWE2ZDdjZGYzZTE1ODE2NzI1NWZjM2EiXSwiZmFjZSI6\nIjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDBmYSIsImlzc3Vlcl9zaWciOnsiUiI6eyJ4IjoiMHgx\nNDkzNTA5NmU5NzViZTRkODZkODkwMzAzNGIyMzg5MTNkYmY1MGE1MTA1ZTNjM2E3\nNzY5NjU0YWYyMzk4MDRhIiwieSI6IjB4MjliM2ZlZDUyYWVmZTBjNjVkZTZiYTYy\nODcyNTE1ZmI3ZDdkMDdlOWJiNTk1NjcyNTk5MTQxZDhjNDBhNDkzZCJ9LCJlIjoi\nMHgyZjc2NmY3MWViMmNmZWQzMzE3ZjEzYzZiNDRlNGIwZTM3OTVhZDVmMGJkNDE3\nNDg4NmYxMjk1YTFmMTBkZTFmIiwicyI6IjB4MGIyM2U1NWIyZjNkYTI2YWE2NWQz\nZWEzNWEzMjU0YjQzZTc3ODVhNjQ3MzU5ODM0OTljOTlmMzVmMDRmZGEyMyJ9LCJu\ndWxsaWZpZXIiOiIweDExMzQ2NWNiMGZlYTkzMmQ1OTA5ZjNhZDVjZDYzMWMwYjdm\nYWY1YzhkODU1OGE5MDg5YWM1YzNlNjk1YjdiMjIiLCJvcGVuaW5nIjp7ImZsYXZv\nciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMyIsImlkSGFzaCI6IjB4MDc2NjYxOTdjZjcz\nNzUwZjM3OTExMDI3ZWZmMDZlZWRmNWI3NjAxYjBjNWE2NjQ1MTA5N2MwNWU1YmYy\nYTQyNiIsInByZWRpY2F0ZSI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInJobyI6IjB4\nMTBkMjMzMzQxOGY3MzRjZjJjZDdiNTczODAxMDY5NGMwNjkxOWZjNjIwZDY1YjQw\nM2ZkNmU3MTViMWU5MDFlNyIsInYiOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwZmEifX0sInJv\nbGUiOiJyZWNpcGllbnQiLCJ0eG4iOnsiYmxvY2siOjEyMzQ1OTksImV2ZW50Ijoi\nU3BlbnRDb3VwbGVkQjEiLCJraW5kIjoibm90ZS1zcGVuZCIsImxvZ2luZGV4Ijox\nLCJtaW50X2Jsb2NrIjoxMjM0NTAwLCJtaW50X3R4aGFzaCI6IjB4Y2NjY2NjY2Nj\nY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj\nY2NjY2NjYyIsIm51bGxpZmllciI6IjB4MTEzNDY1Y2IwZmVhOTMyZDU5MDlmM2Fk\nNWNkNjMxYzBiN2ZhZjVjOGQ4NTU4YTkwODlhYzVjM2U2OTViN2IyMiIsInRpbWVz\ndGFtcCI6MTc3OTk5OTAwMCwidHhoYXNoIjoiMHhiMWIxYjFiMWIxYjFiMWIxYjFi\nMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFiMWIxIiwi\ndmFsdWUiOjI1MH0sInR5cGUiOiJub3RlLWIxIiwidiI6MX0\n.END",
+   "kind": "note-b1",
+   "mint": {
+    "cm": "0x03fa5b9d2e4801154e64ac3345192c56343df762a1a6d7cdf3e158167255fc3a",
+    "cms": [
+     "0x2fb7d821197a8647669dd6e0254c35912fa585ea606b2caa660e4ec57dcdfded",
+     "0x03fa5b9d2e4801154e64ac3345192c56343df762a1a6d7cdf3e158167255fc3a"
+    ],
+    "eDepForIss": {
+     "C": {
+      "x": "0x1b9bf0c47482e7cc5c21fb2a8a747078a29cc9f32d955c3b0e73f4ba676a76a8",
+      "y": "0x2fffdd90dc43b8c6475924c51465eaf4e07ad2716afde15b8a595271f4bd76b0"
+     },
+     "R": {
+      "x": "0x2224ab17c1b9f37ea97aadb3995959fe580c55223fde03753c7ed4b1fb9af893",
+      "y": "0x205ab08f03a7ba40fb8d37db8a237b9533e30f2a2551c6540ac0f19ea8e37b7f"
+     }
+    },
+    "issuer_sig": {
+     "R": {
+      "x": "0x14935096e975be4d86d8903034b238913dbf50a5105e3c3a7769654af239804a",
+      "y": "0x29b3fed52aefe0c65de6ba62872515fb7d7d07e9bb595672599141d8c40a493d"
+     },
+     "e": "0x2f766f71eb2cfed3317f13c6b44e4b0e3795ad5f0bd4174886f1295a1f10de1f",
+     "s": "0x0b23e55b2f3da26aa65d3ea35a3254b43e7785a64735983499c99f35f04fda23"
+    },
+    "nonces": {
+     "k_sig": "0x25df3a105205fade7fa8be16238c9ba82e7759543a8e578895ec901a33be901e",
+     "r_dep": "0x2b6171eb3d24a78fff17d422e695f11779d7e400a39b4241a3242e0d63774ce8",
+     "rho": "0x10d2333418f734cf2cd7b5738010694c06919fc620d65b403fd6e715b1e901e7",
+     "sigma_R_k": "0x25e01b58fbf016fc1beb6bff9ac64bfd34b2809b3e664074b2a058e6d140bedd",
+     "sigma_s": "0x2e9dbeed92485edcad62d9685c8cbe1924efbc1990675d173d048f445598b010"
+    },
+    "nullifier": "0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22",
+    "opening": {
+     "flavor": "0x0000000000000000000000000000000000000000000000000000000000000003",
+     "idHash": "0x07666197cf73750f37911027eff06eedf5b7601b0c5a66451097c05e5bf2a426",
+     "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "rho": "0x10d2333418f734cf2cd7b5738010694c06919fc620d65b403fd6e715b1e901e7",
+     "v": "0x00000000000000000000000000000000000000000000000000000000000000fa"
+    },
+    "sigma_R": {
+     "x": "0x0e9dbfb852f1ccb53689740a363acf884e5eff120606b40e2f22956f464ca57e",
+     "y": "0x02f1cb78f0ebef0a8c15eeb1d3fee97c7862446e1163aab9675f0a66866f8253"
+    },
+    "sigma_s": "0x2e9dbeed92485edcad62d9685c8cbe1924efbc1990675d173d048f445598b010"
+   },
+   "nonces": {
+    "t_vd": "0x142fadbae1c68d9809c7a8f47be1673b2d586ff8271ef6af5a13ce1e0cf48a9e"
+   },
+   "payee": "alice",
+   "payer": "bob",
+   "receipt_id": "jkb75z3cspd2",
+   "role": "recipient",
+   "txn": {
+    "block": 1234599,
+    "block_time": 1779999000,
+    "logindex": 1,
+    "mint_block": 1234500,
+    "mint_txhash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "txhash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+    "value": 250
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+     "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+    },
+    "ok": true,
+    "reason": "VALID",
+    "value": 250
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"note\":{\"eDepForIss\":{\"C\":{\"x\":\"0x1b9bf0c47482e7cc5c21fb2a8a747078a29cc9f32d955c3b0e73f4ba676a76a8\",\"y\":\"0x2fffdd90dc43b8c6475924c51465eaf4e07ad2716afde15b8a595271f4bd76b0\"},\"R\":{\"x\":\"0x2224ab17c1b9f37ea97aadb3995959fe580c55223fde03753c7ed4b1fb9af893\",\"y\":\"0x205ab08f03a7ba40fb8d37db8a237b9533e30f2a2551c6540ac0f19ea8e37b7f\"}},\"sigma_R\":{\"x\":\"0x0e9dbfb852f1ccb53689740a363acf884e5eff120606b40e2f22956f464ca57e\",\"y\":\"0x02f1cb78f0ebef0a8c15eeb1d3fee97c7862446e1163aab9675f0a66866f8253\"},\"sigma_s\":\"0x2e9dbeed92485edcad62d9685c8cbe1924efbc1990675d173d048f445598b010\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payer\":{\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"public\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x2fb7d821197a8647669dd6e0254c35912fa585ea606b2caa660e4ec57dcdfded\",\"0x03fa5b9d2e4801154e64ac3345192c56343df762a1a6d7cdf3e158167255fc3a\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"issuer_sig\":{\"R\":{\"x\":\"0x14935096e975be4d86d8903034b238913dbf50a5105e3c3a7769654af239804a\",\"y\":\"0x29b3fed52aefe0c65de6ba62872515fb7d7d07e9bb595672599141d8c40a493d\"},\"e\":\"0x2f766f71eb2cfed3317f13c6b44e4b0e3795ad5f0bd4174886f1295a1f10de1f\",\"s\":\"0x0b23e55b2f3da26aa65d3ea35a3254b43e7785a64735983499c99f35f04fda23\"},\"nullifier\":\"0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000003\",\"idHash\":\"0x07666197cf73750f37911027eff06eedf5b7601b0c5a66451097c05e5bf2a426\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x10d2333418f734cf2cd7b5738010694c06919fc620d65b403fd6e715b1e901e7\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"issuer\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledB1\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22\",\"timestamp\":1779999000,\"txhash\":\"0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1\",\"value\":250},\"type\":\"note-b1\",\"v\":1,\"vd_payee\":{\"E_ct\":{\"C\":{\"x\":\"0x1b9bf0c47482e7cc5c21fb2a8a747078a29cc9f32d955c3b0e73f4ba676a76a8\",\"y\":\"0x2fffdd90dc43b8c6475924c51465eaf4e07ad2716afde15b8a595271f4bd76b0\"},\"R\":{\"x\":\"0x2224ab17c1b9f37ea97aadb3995959fe580c55223fde03753c7ed4b1fb9af893\",\"y\":\"0x205ab08f03a7ba40fb8d37db8a237b9533e30f2a2551c6540ac0f19ea8e37b7f\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x2410e43a99de1aff0cb343ae7dcecf142c80f9c9c749f9ad87a793f785e54ad7\",\"y\":\"0x0687eb271814d945bc8b5aecd6ffa0731c176aae55bb51b88a0ba46783b82be6\"},\"T2\":{\"x\":\"0x296cbaec25549a0b5937aaae3d8a3894aa32154796c11a4baacf1e832b22c52c\",\"y\":\"0x143a34c5aaaedfd95667e2bb847988ba6085e5cfea190724c08528fa561865f1\"},\"e\":\"0x0c43dbc0a1a7e64c5b28e1e9851f86bd029f330d584c575ea21e3122669ac2cb\",\"s\":\"0x0ed6e2b35b4bc38d359e18074eb332c1ff3c21f0ecb9633f48d83a5b69b99e1f\"}}}",
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwibm90\nZSI6eyJlRGVwRm9ySXNzIjp7IkMiOnsieCI6IjB4MWI5YmYwYzQ3NDgyZTdjYzVj\nMjFmYjJhOGE3NDcwNzhhMjljYzlmMzJkOTU1YzNiMGU3M2Y0YmE2NzZhNzZhOCIs\nInkiOiIweDJmZmZkZDkwZGM0M2I4YzY0NzU5MjRjNTE0NjVlYWY0ZTA3YWQyNzE2\nYWZkZTE1YjhhNTk1MjcxZjRiZDc2YjAifSwiUiI6eyJ4IjoiMHgyMjI0YWIxN2Mx\nYjlmMzdlYTk3YWFkYjM5OTU5NTlmZTU4MGM1NTIyM2ZkZTAzNzUzYzdlZDRiMWZi\nOWFmODkzIiwieSI6IjB4MjA1YWIwOGYwM2E3YmE0MGZiOGQzN2RiOGEyMzdiOTUz\nM2UzMGYyYTI1NTFjNjU0MGFjMGYxOWVhOGUzN2I3ZiJ9fSwic2lnbWFfUiI6eyJ4\nIjoiMHgwZTlkYmZiODUyZjFjY2I1MzY4OTc0MGEzNjNhY2Y4ODRlNWVmZjEyMDYw\nNmI0MGUyZjIyOTU2ZjQ2NGNhNTdlIiwieSI6IjB4MDJmMWNiNzhmMGViZWYwYThj\nMTVlZWIxZDNmZWU5N2M3ODYyNDQ2ZTExNjNhYWI5Njc1ZjBhNjY4NjZmODI1MyJ9\nLCJzaWdtYV9zIjoiMHgyZTlkYmVlZDkyNDg1ZWRjYWQ2MmQ5Njg1YzhjYmUxOTI0\nZWZiYzE5OTA2NzVkMTczZDA0OGY0NDU1OThiMDEwIn0sInBheWVlIjp7IkVfYWRk\nciI6eyJDIjp7IngiOiIweDFlYjdjNzVmYTRhMzQwYWNlZTdkNjBjZGQ0Zjg1MzYz\nYjUzN2Q1YWI1MDUzZGFhYzMzNzk5ODY3NmRiNjNkZmQiLCJ5IjoiMHgwNmQ5NDAw\nZGJkZjYwZGYwY2M3NGZkZTc0NDQ0MmUxZWMxMmQ2ZmRlOGI1MmNkNGU3MWYwM2E5\nZGJmMzRiZTdkIn0sIlIiOnsieCI6IjB4MjkyY2RjMWY3MWNmODI5YTI3MTZkYWZk\nMGExNzE1NzY4MWE3OWQ0NTViZjJkYzJjNzc2OTBlMGYyYjIxNThiNCIsInkiOiIw\neDFlMTY2ZDdmY2I4NzJkNmQ3YmQyNjhlNzFkYjliZWIwZGEzZmUyZDZhMmNiZTcw\nYTVjMTUxMWNmM2I3ZTcxNTQifX0sIk0iOnsieCI6IjB4MTU0YTkwODdiZDBhNGZm\nNmQ2MjM5MTE0OTAzYmFkODhmMGE0NzVhYjFlM2ZlNWI2Y2RhYmQzMzg1YjY2MGNm\nOSIsInkiOiIweDFiMzRjZjE2NGMwODY1YzNhNDk2NjYzNGJhYTM2ZmI1YTRlYzM3\nYjkzYWViNTI1ZjhjY2IyZjZhZDRlOWFmZjgifSwiYWRkciI6IjB4MDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMGExMWNlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDBhMTFjZSIsImlkZW50aXR5Ijoie1wiZG9iXCI6XCIxOTcwLTA0LTAxXCIsXCJn\naXZlbl9uYW1lXCI6XCJBbGljZVwiLFwiaXNzdWVyX2lkXCI6XCJzdmMtYWxiZXJ0\nYVwiLFwic3VybmFtZVwiOlwiUmFuY2hcIn0iLCJraW5kIjoicHJpdmF0ZSIsInBr\nIjp7IngiOiIweDBmODVlMzc2ODJlMWViYzA1ZTQwYTFmYjU5OTY5MDExZTIzMmRj\nMDk0NDg5YWQwZWFmZmE5YjRhYjVkMDg5NWIiLCJ5IjoiMHgxOTIwZDI1N2M3MzNl\nNGFmMmZlYzcxNDI2MTFjZWZlNWMxM2NlYWNiZGRhZTQ0ZTIxNmQzY2ZiZWIwOTc5\nNGNiIn19LCJwYXllciI6eyJNIjp7IngiOiIweDIxM2IxOTcxMDc1YWNlZTRlOGM2\nN2U4MWE1ODQwMGEyZmRmNWE5N2YyNmNiZmI2NDg5YjVkNjBkMjFhM2EwMDYiLCJ5\nIjoiMHgyOTg5YTk4MjM4ZTNjNGVlM2ZhYmE2MjE1NzJiOGRhY2FhOGFjM2FkMTUy\nMThiMWJmMzVkMGFiOGE0NGEzMGQ2In0sImFkZHIiOiIweDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDBiMGIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBi\nMGIiLCJpZGVudGl0eSI6IntcImRvYlwiOlwiMTk2OC0xMS0xMVwiLFwiZ2l2ZW5f\nbmFtZVwiOlwiQm9iXCIsXCJpc3N1ZXJfaWRcIjpcInN2Yy1hbGJlcnRhXCIsXCJz\ndXJuYW1lXCI6XCJHcmFuYXJ5XCJ9Iiwia2luZCI6InB1YmxpYyIsInBrIjp7Ingi\nOiIweDBmMWU3MzBlYjg1MGFhZmIwNzhlZDg3MWM3OGRhNmVkZjVlMDg0Yjk4Y2Mz\nN2U0ZjEyZDk1YWZmOGY2MGIyN2EiLCJ5IjoiMHgyM2Y1ODZjMzg4NmU3NWZmMmRi\nOGFmYzAyNGI5YjkwOTQyNjZhYTQxMDFjM2Y2ZjlkOWQzMTI2NmRlNzBmMTgzIn19\nLCJwcm9vZiI6eyJjbXMiOlsiMHgyZmI3ZDgyMTE5N2E4NjQ3NjY5ZGQ2ZTAyNTRj\nMzU5MTJmYTU4NWVhNjA2YjJjYWE2NjBlNGVjNTdkY2RmZGVkIiwiMHgwM2ZhNWI5\nZDJlNDgwMTE1NGU2NGFjMzM0NTE5MmM1NjM0M2RmNzYyYTFhNmQ3Y2RmM2UxNTgx\nNjcyNTVmYzNhIl0sImZhY2UiOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwZmEiLCJpc3N1ZXJf\nc2lnIjp7IlIiOnsieCI6IjB4MTQ5MzUwOTZlOTc1YmU0ZDg2ZDg5MDMwMzRiMjM4\nOTEzZGJmNTBhNTEwNWUzYzNhNzc2OTY1NGFmMjM5ODA0YSIsInkiOiIweDI5YjNm\nZWQ1MmFlZmUwYzY1ZGU2YmE2Mjg3MjUxNWZiN2Q3ZDA3ZTliYjU5NTY3MjU5OTE0\nMWQ4YzQwYTQ5M2QifSwiZSI6IjB4MmY3NjZmNzFlYjJjZmVkMzMxN2YxM2M2YjQ0\nZTRiMGUzNzk1YWQ1ZjBiZDQxNzQ4ODZmMTI5NWExZjEwZGUxZiIsInMiOiIweDBi\nMjNlNTViMmYzZGEyNmFhNjVkM2VhMzVhMzI1NGI0M2U3Nzg1YTY0NzM1OTgzNDk5\nYzk5ZjM1ZjA0ZmRhMjMifSwibnVsbGlmaWVyIjoiMHgxMTM0NjVjYjBmZWE5MzJk\nNTkwOWYzYWQ1Y2Q2MzFjMGI3ZmFmNWM4ZDg1NThhOTA4OWFjNWMzZTY5NWI3YjIy\nIiwib3BlbmluZyI6eyJmbGF2b3IiOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDMiLCJpZEhh\nc2giOiIweDA3NjY2MTk3Y2Y3Mzc1MGYzNzkxMTAyN2VmZjA2ZWVkZjViNzYwMWIw\nYzVhNjY0NTEwOTdjMDVlNWJmMmE0MjYiLCJwcmVkaWNhdGUiOiIweDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAiLCJyaG8iOiIweDEwZDIzMzM0MThmNzM0Y2YyY2Q3YjU3MzgwMTA2\nOTRjMDY5MTlmYzYyMGQ2NWI0MDNmZDZlNzE1YjFlOTAxZTciLCJ2IjoiMHgwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMGZhIn19LCJyb2xlIjoiaXNzdWVyIiwidHhuIjp7ImJsb2NrIjox\nMjM0NTk5LCJldmVudCI6IlNwZW50Q291cGxlZEIxIiwia2luZCI6Im5vdGUtc3Bl\nbmQiLCJsb2dpbmRleCI6MSwibWludF9ibG9jayI6MTIzNDUwMCwibWludF90eGhh\nc2giOiIweGNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj\nY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MiLCJudWxsaWZpZXIiOiIweDExMzQ2NWNi\nMGZlYTkzMmQ1OTA5ZjNhZDVjZDYzMWMwYjdmYWY1YzhkODU1OGE5MDg5YWM1YzNl\nNjk1YjdiMjIiLCJ0aW1lc3RhbXAiOjE3Nzk5OTkwMDAsInR4aGFzaCI6IjB4YjFi\nMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFiMWIxYjFi\nMWIxYjFiMWIxYjFiMSIsInZhbHVlIjoyNTB9LCJ0eXBlIjoibm90ZS1iMSIsInYi\nOjEsInZkX3BheWVlIjp7IkVfY3QiOnsiQyI6eyJ4IjoiMHgxYjliZjBjNDc0ODJl\nN2NjNWMyMWZiMmE4YTc0NzA3OGEyOWNjOWYzMmQ5NTVjM2IwZTczZjRiYTY3NmE3\nNmE4IiwieSI6IjB4MmZmZmRkOTBkYzQzYjhjNjQ3NTkyNGM1MTQ2NWVhZjRlMDdh\nZDI3MTZhZmRlMTViOGE1OTUyNzFmNGJkNzZiMCJ9LCJSIjp7IngiOiIweDIyMjRh\nYjE3YzFiOWYzN2VhOTdhYWRiMzk5NTk1OWZlNTgwYzU1MjIzZmRlMDM3NTNjN2Vk\nNGIxZmI5YWY4OTMiLCJ5IjoiMHgyMDVhYjA4ZjAzYTdiYTQwZmI4ZDM3ZGI4YTIz\nN2I5NTMzZTMwZjJhMjU1MWM2NTQwYWMwZjE5ZWE4ZTM3YjdmIn19LCJNX25hbWVk\nIjp7IngiOiIweDE1NGE5MDg3YmQwYTRmZjZkNjIzOTExNDkwM2JhZDg4ZjBhNDc1\nYWIxZTNmZTViNmNkYWJkMzM4NWI2NjBjZjkiLCJ5IjoiMHgxYjM0Y2YxNjRjMDg2\nNWMzYTQ5NjY2MzRiYWEzNmZiNWE0ZWMzN2I5M2FlYjUyNWY4Y2NiMmY2YWQ0ZTlh\nZmY4In0sImFjY291bnQiOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBiMGIw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBiMGIiLCJjaGFpbmlkIjox\nLCJwcm9vZiI6eyJUMSI6eyJ4IjoiMHgyNDEwZTQzYTk5ZGUxYWZmMGNiMzQzYWU3\nZGNlY2YxNDJjODBmOWM5Yzc0OWY5YWQ4N2E3OTNmNzg1ZTU0YWQ3IiwieSI6IjB4\nMDY4N2ViMjcxODE0ZDk0NWJjOGI1YWVjZDZmZmEwNzMxYzE3NmFhZTU1YmI1MWI4\nOGEwYmE0Njc4M2I4MmJlNiJ9LCJUMiI6eyJ4IjoiMHgyOTZjYmFlYzI1NTQ5YTBi\nNTkzN2FhYWUzZDhhMzg5NGFhMzIxNTQ3OTZjMTFhNGJhYWNmMWU4MzJiMjJjNTJj\nIiwieSI6IjB4MTQzYTM0YzVhYWFlZGZkOTU2NjdlMmJiODQ3OTg4YmE2MDg1ZTVj\nZmVhMTkwNzI0YzA4NTI4ZmE1NjE4NjVmMSJ9LCJlIjoiMHgwYzQzZGJjMGExYTdl\nNjRjNWIyOGUxZTk4NTFmODZiZDAyOWYzMzBkNTg0YzU3NWVhMjFlMzEyMjY2OWFj\nMmNiIiwicyI6IjB4MGVkNmUyYjM1YjRiYzM4ZDM1OWUxODA3NGViMzMyYzFmZjNj\nMjFmMGVjYjk2MzNmNDhkODNhNWI2OWI5OWUxZiJ9fX0\n.END",
+   "kind": "note-b1",
+   "mint": {
+    "cm": "0x03fa5b9d2e4801154e64ac3345192c56343df762a1a6d7cdf3e158167255fc3a",
+    "cms": [
+     "0x2fb7d821197a8647669dd6e0254c35912fa585ea606b2caa660e4ec57dcdfded",
+     "0x03fa5b9d2e4801154e64ac3345192c56343df762a1a6d7cdf3e158167255fc3a"
+    ],
+    "eDepForIss": {
+     "C": {
+      "x": "0x1b9bf0c47482e7cc5c21fb2a8a747078a29cc9f32d955c3b0e73f4ba676a76a8",
+      "y": "0x2fffdd90dc43b8c6475924c51465eaf4e07ad2716afde15b8a595271f4bd76b0"
+     },
+     "R": {
+      "x": "0x2224ab17c1b9f37ea97aadb3995959fe580c55223fde03753c7ed4b1fb9af893",
+      "y": "0x205ab08f03a7ba40fb8d37db8a237b9533e30f2a2551c6540ac0f19ea8e37b7f"
+     }
+    },
+    "issuer_sig": {
+     "R": {
+      "x": "0x14935096e975be4d86d8903034b238913dbf50a5105e3c3a7769654af239804a",
+      "y": "0x29b3fed52aefe0c65de6ba62872515fb7d7d07e9bb595672599141d8c40a493d"
+     },
+     "e": "0x2f766f71eb2cfed3317f13c6b44e4b0e3795ad5f0bd4174886f1295a1f10de1f",
+     "s": "0x0b23e55b2f3da26aa65d3ea35a3254b43e7785a64735983499c99f35f04fda23"
+    },
+    "nonces": {
+     "k_sig": "0x25df3a105205fade7fa8be16238c9ba82e7759543a8e578895ec901a33be901e",
+     "r_dep": "0x2b6171eb3d24a78fff17d422e695f11779d7e400a39b4241a3242e0d63774ce8",
+     "rho": "0x10d2333418f734cf2cd7b5738010694c06919fc620d65b403fd6e715b1e901e7",
+     "sigma_R_k": "0x25e01b58fbf016fc1beb6bff9ac64bfd34b2809b3e664074b2a058e6d140bedd",
+     "sigma_s": "0x2e9dbeed92485edcad62d9685c8cbe1924efbc1990675d173d048f445598b010"
+    },
+    "nullifier": "0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22",
+    "opening": {
+     "flavor": "0x0000000000000000000000000000000000000000000000000000000000000003",
+     "idHash": "0x07666197cf73750f37911027eff06eedf5b7601b0c5a66451097c05e5bf2a426",
+     "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "rho": "0x10d2333418f734cf2cd7b5738010694c06919fc620d65b403fd6e715b1e901e7",
+     "v": "0x00000000000000000000000000000000000000000000000000000000000000fa"
+    },
+    "sigma_R": {
+     "x": "0x0e9dbfb852f1ccb53689740a363acf884e5eff120606b40e2f22956f464ca57e",
+     "y": "0x02f1cb78f0ebef0a8c15eeb1d3fee97c7862446e1163aab9675f0a66866f8253"
+    },
+    "sigma_s": "0x2e9dbeed92485edcad62d9685c8cbe1924efbc1990675d173d048f445598b010"
+   },
+   "nonces": {
+    "t_vd": "0x27301a352b15ea303fe9ab8d80c62218e7b778db80b86a49a58a9d57e9a9e366"
+   },
+   "payee": "alice",
+   "payer": "bob",
+   "receipt_id": "wiygzjyio5ni",
+   "role": "issuer",
+   "txn": {
+    "block": 1234599,
+    "block_time": 1779999000,
+    "logindex": 1,
+    "mint_block": 1234500,
+    "mint_txhash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "txhash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+    "value": 250
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+     "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+    },
+    "ok": true,
+    "reason": "VALID",
+    "value": 250
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"note\":{\"eNote\":{\"C\":{\"x\":\"0x1b4d663bf1ba60d6b937f96b785e9fd2b5e4175a45ff176efa85e369b479dfdd\",\"y\":\"0x0326893e440090e9c8678a8419ff80df51468cbf37b91e819e9c3a2bd2865509\"},\"R\":{\"x\":\"0x1b9b3aeaa7cadb200b60d04f4af4b37304fb0cf9d0dfede602afba7b84234255\",\"y\":\"0x06b1781f67e45508271c5c4b46453245ee89cf5e6381cbf679d8a8367469165a\"}},\"eRec\":{\"C\":{\"x\":\"0x17e9fe2f89a9d18d57e9685da6423fb88d80b0257baf57242bd35a54ae61113f\",\"y\":\"0x1a0fd91e011bf86f904f234422e3100441b9b07f4471df4f35eb9c39739b1661\"},\"R\":{\"x\":\"0x17f9ecf10655b2f7703ff32b67b8bdc8bce0c4634384cb529b7077a3663d841a\",\"y\":\"0x1229585ab01a2d5c29c66ea6a5cd0994b521bb428c7033754c6d69bbb4264a1f\"}},\"sigma_R\":{\"x\":\"0x14b38ac83c93bdd164850e0cf9abd6e4525cdf679a0a97301e0f195ba4db9ab4\",\"y\":\"0x01b258784b0db419f1c1c230133383a2dcd6ff482d960ec49da87bf8c30c7ff2\"},\"sigma_s\":\"0x17b74afb071a9ee5a465457953857e24dde4e7f337df4e25b89a5eafedcdeaf6\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x10ef2902a786c5a3e694a7c9784662fac2e6daa27dc1a8b4e29ce624410b56b7\",\"y\":\"0x20ad18a178b9a2f9bcc58899e6ab048f16725f6439742752eeae0c3dea3128be\"},\"T2\":{\"x\":\"0x237cf018a14cdee90c13b972e35334513d0044901f241ecccdb2d41da686a9ad\",\"y\":\"0x1584ef383a98b608f3fa11036545e37045c3e1334d29ea7f903542e109de9392\"},\"e\":\"0x0fa1ce7e162591a57553d4adaaf66b8209640ed10ed9ca76ff95ec216c82a530\",\"s\":\"0x1af370a390771c316376d4c19a9b38d18ca5f3996b83eba8f3e4fcbd538d9ed6\"}},\"payer\":{\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"public\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x02ea8b700e8d7dadc6293021f65facf1e12e4213c4e4631fc3bddb42a2bce46b\",\"0x2c2d715a981316ae2701bed3179815f938e1e4bb5bce5182c6a332ec2f027f83\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"issuer_sig\":{\"R\":{\"x\":\"0x22bc1131b0f04b1c48fd474ea651ca4a4200d439dbc2958efdab9de543b8001a\",\"y\":\"0x1e215ff7446bdac3155b4acced51fb914eb9ac7292b6b5c1bbc423fd615d9dcc\"},\"e\":\"0x14e3be1e0746e2bb90dcf43d0eab7be7b30d54b30117a8399fe24a038ba2d4c4\",\"s\":\"0x2f84b5de5ce03b97dd8ed73b0d38129622e3f6f2fa79cd39871238691a2f119d\"},\"nullifier\":\"0x2165a582d4d0a0638da36f51f3e88d0c034a05b42cae599033501815f562a85f\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"idHash\":\"0x1e8ee828fdfd56cec12dbbcbdf2acb0e67d3b0f4b99eb5843935d22b3d6c7adf\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x11b6717d116d4c3e939abcf0f830379ba967a67d7f4f80f9b8d6cba90793a45b\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"recipient\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledA1\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x2165a582d4d0a0638da36f51f3e88d0c034a05b42cae599033501815f562a85f\",\"timestamp\":1779999000,\"txhash\":\"0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"value\":250},\"type\":\"note-a1\",\"v\":1}",
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwibm90\nZSI6eyJlTm90ZSI6eyJDIjp7IngiOiIweDFiNGQ2NjNiZjFiYTYwZDZiOTM3Zjk2\nYjc4NWU5ZmQyYjVlNDE3NWE0NWZmMTc2ZWZhODVlMzY5YjQ3OWRmZGQiLCJ5Ijoi\nMHgwMzI2ODkzZTQ0MDA5MGU5Yzg2NzhhODQxOWZmODBkZjUxNDY4Y2JmMzdiOTFl\nODE5ZTljM2EyYmQyODY1NTA5In0sIlIiOnsieCI6IjB4MWI5YjNhZWFhN2NhZGIy\nMDBiNjBkMDRmNGFmNGIzNzMwNGZiMGNmOWQwZGZlZGU2MDJhZmJhN2I4NDIzNDI1\nNSIsInkiOiIweDA2YjE3ODFmNjdlNDU1MDgyNzFjNWM0YjQ2NDUzMjQ1ZWU4OWNm\nNWU2MzgxY2JmNjc5ZDhhODM2NzQ2OTE2NWEifX0sImVSZWMiOnsiQyI6eyJ4Ijoi\nMHgxN2U5ZmUyZjg5YTlkMThkNTdlOTY4NWRhNjQyM2ZiODhkODBiMDI1N2JhZjU3\nMjQyYmQzNWE1NGFlNjExMTNmIiwieSI6IjB4MWEwZmQ5MWUwMTFiZjg2ZjkwNGYy\nMzQ0MjJlMzEwMDQ0MWI5YjA3ZjQ0NzFkZjRmMzVlYjljMzk3MzliMTY2MSJ9LCJS\nIjp7IngiOiIweDE3ZjllY2YxMDY1NWIyZjc3MDNmZjMyYjY3YjhiZGM4YmNlMGM0\nNjM0Mzg0Y2I1MjliNzA3N2EzNjYzZDg0MWEiLCJ5IjoiMHgxMjI5NTg1YWIwMWEy\nZDVjMjljNjZlYTZhNWNkMDk5NGI1MjFiYjQyOGM3MDMzNzU0YzZkNjliYmI0MjY0\nYTFmIn19LCJzaWdtYV9SIjp7IngiOiIweDE0YjM4YWM4M2M5M2JkZDE2NDg1MGUw\nY2Y5YWJkNmU0NTI1Y2RmNjc5YTBhOTczMDFlMGYxOTViYTRkYjlhYjQiLCJ5Ijoi\nMHgwMWIyNTg3ODRiMGRiNDE5ZjFjMWMyMzAxMzMzODNhMmRjZDZmZjQ4MmQ5NjBl\nYzQ5ZGE4N2JmOGMzMGM3ZmYyIn0sInNpZ21hX3MiOiIweDE3Yjc0YWZiMDcxYTll\nZTVhNDY1NDU3OTUzODU3ZTI0ZGRlNGU3ZjMzN2RmNGUyNWI4OWE1ZWFmZWRjZGVh\nZjYifSwicGF5ZWUiOnsiRV9hZGRyIjp7IkMiOnsieCI6IjB4MWViN2M3NWZhNGEz\nNDBhY2VlN2Q2MGNkZDRmODUzNjNiNTM3ZDVhYjUwNTNkYWFjMzM3OTk4Njc2ZGI2\nM2RmZCIsInkiOiIweDA2ZDk0MDBkYmRmNjBkZjBjYzc0ZmRlNzQ0NDQyZTFlYzEy\nZDZmZGU4YjUyY2Q0ZTcxZjAzYTlkYmYzNGJlN2QifSwiUiI6eyJ4IjoiMHgyOTJj\nZGMxZjcxY2Y4MjlhMjcxNmRhZmQwYTE3MTU3NjgxYTc5ZDQ1NWJmMmRjMmM3NzY5\nMGUwZjJiMjE1OGI0IiwieSI6IjB4MWUxNjZkN2ZjYjg3MmQ2ZDdiZDI2OGU3MWRi\nOWJlYjBkYTNmZTJkNmEyY2JlNzBhNWMxNTExY2YzYjdlNzE1NCJ9fSwiTSI6eyJ4\nIjoiMHgxNTRhOTA4N2JkMGE0ZmY2ZDYyMzkxMTQ5MDNiYWQ4OGYwYTQ3NWFiMWUz\nZmU1YjZjZGFiZDMzODViNjYwY2Y5IiwieSI6IjB4MWIzNGNmMTY0YzA4NjVjM2E0\nOTY2NjM0YmFhMzZmYjVhNGVjMzdiOTNhZWI1MjVmOGNjYjJmNmFkNGU5YWZmOCJ9\nLCJhZGRyIjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwYTExY2UwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGExMWNlIiwiaWRlbnRpdHkiOiJ7XCJkb2Jc\nIjpcIjE5NzAtMDQtMDFcIixcImdpdmVuX25hbWVcIjpcIkFsaWNlXCIsXCJpc3N1\nZXJfaWRcIjpcInN2Yy1hbGJlcnRhXCIsXCJzdXJuYW1lXCI6XCJSYW5jaFwifSIs\nImtpbmQiOiJwcml2YXRlIiwicGsiOnsieCI6IjB4MGY4NWUzNzY4MmUxZWJjMDVl\nNDBhMWZiNTk5NjkwMTFlMjMyZGMwOTQ0ODlhZDBlYWZmYTliNGFiNWQwODk1YiIs\nInkiOiIweDE5MjBkMjU3YzczM2U0YWYyZmVjNzE0MjYxMWNlZmU1YzEzY2VhY2Jk\nZGFlNDRlMjE2ZDNjZmJlYjA5Nzk0Y2IifX0sInBheWVlX3ZkIjp7IkVfY3QiOnsi\nQyI6eyJ4IjoiMHgxZWI3Yzc1ZmE0YTM0MGFjZWU3ZDYwY2RkNGY4NTM2M2I1Mzdk\nNWFiNTA1M2RhYWMzMzc5OTg2NzZkYjYzZGZkIiwieSI6IjB4MDZkOTQwMGRiZGY2\nMGRmMGNjNzRmZGU3NDQ0NDJlMWVjMTJkNmZkZThiNTJjZDRlNzFmMDNhOWRiZjM0\nYmU3ZCJ9LCJSIjp7IngiOiIweDI5MmNkYzFmNzFjZjgyOWEyNzE2ZGFmZDBhMTcx\nNTc2ODFhNzlkNDU1YmYyZGMyYzc3NjkwZTBmMmIyMTU4YjQiLCJ5IjoiMHgxZTE2\nNmQ3ZmNiODcyZDZkN2JkMjY4ZTcxZGI5YmViMGRhM2ZlMmQ2YTJjYmU3MGE1YzE1\nMTFjZjNiN2U3MTU0In19LCJNX25hbWVkIjp7IngiOiIweDE1NGE5MDg3YmQwYTRm\nZjZkNjIzOTExNDkwM2JhZDg4ZjBhNDc1YWIxZTNmZTViNmNkYWJkMzM4NWI2NjBj\nZjkiLCJ5IjoiMHgxYjM0Y2YxNjRjMDg2NWMzYTQ5NjY2MzRiYWEzNmZiNWE0ZWMz\nN2I5M2FlYjUyNWY4Y2NiMmY2YWQ0ZTlhZmY4In0sImFjY291bnQiOiIweDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDBhMTFjZTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwYTExY2UiLCJjaGFpbmlkIjoxLCJwcm9vZiI6eyJUMSI6eyJ4IjoiMHgx\nMGVmMjkwMmE3ODZjNWEzZTY5NGE3Yzk3ODQ2NjJmYWMyZTZkYWEyN2RjMWE4YjRl\nMjljZTYyNDQxMGI1NmI3IiwieSI6IjB4MjBhZDE4YTE3OGI5YTJmOWJjYzU4ODk5\nZTZhYjA0OGYxNjcyNWY2NDM5NzQyNzUyZWVhZTBjM2RlYTMxMjhiZSJ9LCJUMiI6\neyJ4IjoiMHgyMzdjZjAxOGExNGNkZWU5MGMxM2I5NzJlMzUzMzQ1MTNkMDA0NDkw\nMWYyNDFlY2NjZGIyZDQxZGE2ODZhOWFkIiwieSI6IjB4MTU4NGVmMzgzYTk4YjYw\nOGYzZmExMTAzNjU0NWUzNzA0NWMzZTEzMzRkMjllYTdmOTAzNTQyZTEwOWRlOTM5\nMiJ9LCJlIjoiMHgwZmExY2U3ZTE2MjU5MWE1NzU1M2Q0YWRhYWY2NmI4MjA5NjQw\nZWQxMGVkOWNhNzZmZjk1ZWMyMTZjODJhNTMwIiwicyI6IjB4MWFmMzcwYTM5MDc3\nMWMzMTYzNzZkNGMxOWE5YjM4ZDE4Y2E1ZjM5OTZiODNlYmE4ZjNlNGZjYmQ1Mzhk\nOWVkNiJ9fSwicGF5ZXIiOnsiTSI6eyJ4IjoiMHgyMTNiMTk3MTA3NWFjZWU0ZThj\nNjdlODFhNTg0MDBhMmZkZjVhOTdmMjZjYmZiNjQ4OWI1ZDYwZDIxYTNhMDA2Iiwi\neSI6IjB4Mjk4OWE5ODIzOGUzYzRlZTNmYWJhNjIxNTcyYjhkYWNhYThhYzNhZDE1\nMjE4YjFiZjM1ZDBhYjhhNDRhMzBkNiJ9LCJhZGRyIjoiMHgwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwYjBiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nYjBiIiwiaWRlbnRpdHkiOiJ7XCJkb2JcIjpcIjE5NjgtMTEtMTFcIixcImdpdmVu\nX25hbWVcIjpcIkJvYlwiLFwiaXNzdWVyX2lkXCI6XCJzdmMtYWxiZXJ0YVwiLFwi\nc3VybmFtZVwiOlwiR3JhbmFyeVwifSIsImtpbmQiOiJwdWJsaWMiLCJwayI6eyJ4\nIjoiMHgwZjFlNzMwZWI4NTBhYWZiMDc4ZWQ4NzFjNzhkYTZlZGY1ZTA4NGI5OGNj\nMzdlNGYxMmQ5NWFmZjhmNjBiMjdhIiwieSI6IjB4MjNmNTg2YzM4ODZlNzVmZjJk\nYjhhZmMwMjRiOWI5MDk0MjY2YWE0MTAxYzNmNmY5ZDlkMzEyNjZkZTcwZjE4MyJ9\nfSwicHJvb2YiOnsiY21zIjpbIjB4MDJlYThiNzAwZThkN2RhZGM2MjkzMDIxZjY1\nZmFjZjFlMTJlNDIxM2M0ZTQ2MzFmYzNiZGRiNDJhMmJjZTQ2YiIsIjB4MmMyZDcx\nNWE5ODEzMTZhZTI3MDFiZWQzMTc5ODE1ZjkzOGUxZTRiYjViY2U1MTgyYzZhMzMy\nZWMyZjAyN2Y4MyJdLCJmYWNlIjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGZhIiwiaXNzdWVy\nX3NpZyI6eyJSIjp7IngiOiIweDIyYmMxMTMxYjBmMDRiMWM0OGZkNDc0ZWE2NTFj\nYTRhNDIwMGQ0MzlkYmMyOTU4ZWZkYWI5ZGU1NDNiODAwMWEiLCJ5IjoiMHgxZTIx\nNWZmNzQ0NmJkYWMzMTU1YjRhY2NlZDUxZmI5MTRlYjlhYzcyOTJiNmI1YzFiYmM0\nMjNmZDYxNWQ5ZGNjIn0sImUiOiIweDE0ZTNiZTFlMDc0NmUyYmI5MGRjZjQzZDBl\nYWI3YmU3YjMwZDU0YjMwMTE3YTgzOTlmZTI0YTAzOGJhMmQ0YzQiLCJzIjoiMHgy\nZjg0YjVkZTVjZTAzYjk3ZGQ4ZWQ3M2IwZDM4MTI5NjIyZTNmNmYyZmE3OWNkMzk4\nNzEyMzg2OTFhMmYxMTlkIn0sIm51bGxpZmllciI6IjB4MjE2NWE1ODJkNGQwYTA2\nMzhkYTM2ZjUxZjNlODhkMGMwMzRhMDViNDJjYWU1OTkwMzM1MDE4MTVmNTYyYTg1\nZiIsIm9wZW5pbmciOnsiZmxhdm9yIjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAxIiwiaWRI\nYXNoIjoiMHgxZThlZTgyOGZkZmQ1NmNlYzEyZGJiY2JkZjJhY2IwZTY3ZDNiMGY0\nYjk5ZWI1ODQzOTM1ZDIyYjNkNmM3YWRmIiwicHJlZGljYXRlIjoiMHgwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwIiwicmhvIjoiMHgxMWI2NzE3ZDExNmQ0YzNlOTM5YWJjZjBmODMw\nMzc5YmE5NjdhNjdkN2Y0ZjgwZjliOGQ2Y2JhOTA3OTNhNDViIiwidiI6IjB4MDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDBmYSJ9fSwicm9sZSI6InJlY2lwaWVudCIsInR4biI6eyJibG9j\nayI6MTIzNDU5OSwiZXZlbnQiOiJTcGVudENvdXBsZWRBMSIsImtpbmQiOiJub3Rl\nLXNwZW5kIiwibG9naW5kZXgiOjEsIm1pbnRfYmxvY2siOjEyMzQ1MDAsIm1pbnRf\ndHhoYXNoIjoiMHhjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj\nY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIiwibnVsbGlmaWVyIjoiMHgyMTY1\nYTU4MmQ0ZDBhMDYzOGRhMzZmNTFmM2U4OGQwYzAzNGEwNWI0MmNhZTU5OTAzMzUw\nMTgxNWY1NjJhODVmIiwidGltZXN0YW1wIjoxNzc5OTk5MDAwLCJ0eGhhc2giOiIw\neGExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFh\nMWExYTFhMWExYTFhMWExYTEiLCJ2YWx1ZSI6MjUwfSwidHlwZSI6Im5vdGUtYTEi\nLCJ2IjoxfQ\n.END",
+   "kind": "note-a1",
+   "mint": {
+    "cm": "0x02ea8b700e8d7dadc6293021f65facf1e12e4213c4e4631fc3bddb42a2bce46b",
+    "cms": [
+     "0x02ea8b700e8d7dadc6293021f65facf1e12e4213c4e4631fc3bddb42a2bce46b",
+     "0x2c2d715a981316ae2701bed3179815f938e1e4bb5bce5182c6a332ec2f027f83"
+    ],
+    "eNote": {
+     "C": {
+      "x": "0x1b4d663bf1ba60d6b937f96b785e9fd2b5e4175a45ff176efa85e369b479dfdd",
+      "y": "0x0326893e440090e9c8678a8419ff80df51468cbf37b91e819e9c3a2bd2865509"
+     },
+     "R": {
+      "x": "0x1b9b3aeaa7cadb200b60d04f4af4b37304fb0cf9d0dfede602afba7b84234255",
+      "y": "0x06b1781f67e45508271c5c4b46453245ee89cf5e6381cbf679d8a8367469165a"
+     }
+    },
+    "eRec": {
+     "C": {
+      "x": "0x17e9fe2f89a9d18d57e9685da6423fb88d80b0257baf57242bd35a54ae61113f",
+      "y": "0x1a0fd91e011bf86f904f234422e3100441b9b07f4471df4f35eb9c39739b1661"
+     },
+     "R": {
+      "x": "0x17f9ecf10655b2f7703ff32b67b8bdc8bce0c4634384cb529b7077a3663d841a",
+      "y": "0x1229585ab01a2d5c29c66ea6a5cd0994b521bb428c7033754c6d69bbb4264a1f"
+     }
+    },
+    "issuer_sig": {
+     "R": {
+      "x": "0x22bc1131b0f04b1c48fd474ea651ca4a4200d439dbc2958efdab9de543b8001a",
+      "y": "0x1e215ff7446bdac3155b4acced51fb914eb9ac7292b6b5c1bbc423fd615d9dcc"
+     },
+     "e": "0x14e3be1e0746e2bb90dcf43d0eab7be7b30d54b30117a8399fe24a038ba2d4c4",
+     "s": "0x2f84b5de5ce03b97dd8ed73b0d38129622e3f6f2fa79cd39871238691a2f119d"
+    },
+    "nonces": {
+     "k_sig": "0x2d98a9c77499a1cb4ff54b4b6ff10d1c59d2db0d2b1326c759de36eb5dfcf8f5",
+     "r_note": "0x0a470a70463cbe923fd12af08c806c97202ccc6005b313f4a0a62b5524063244",
+     "r_rec": "0x13c79ebd824200dca411b073a8043c004c7c0c4cf48de955d6601cb7b8d593df",
+     "rho": "0x11b6717d116d4c3e939abcf0f830379ba967a67d7f4f80f9b8d6cba90793a45b",
+     "sigma_R_k": "0x0fb114df03615ce196d5e3ee6d46bcf9fa24db68e462373bb2d0ff980a29365c",
+     "sigma_s": "0x17b74afb071a9ee5a465457953857e24dde4e7f337df4e25b89a5eafedcdeaf6"
+    },
+    "nullifier": "0x2165a582d4d0a0638da36f51f3e88d0c034a05b42cae599033501815f562a85f",
+    "opening": {
+     "flavor": "0x0000000000000000000000000000000000000000000000000000000000000001",
+     "idHash": "0x1e8ee828fdfd56cec12dbbcbdf2acb0e67d3b0f4b99eb5843935d22b3d6c7adf",
+     "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "rho": "0x11b6717d116d4c3e939abcf0f830379ba967a67d7f4f80f9b8d6cba90793a45b",
+     "v": "0x00000000000000000000000000000000000000000000000000000000000000fa"
+    },
+    "sigma_R": {
+     "x": "0x14b38ac83c93bdd164850e0cf9abd6e4525cdf679a0a97301e0f195ba4db9ab4",
+     "y": "0x01b258784b0db419f1c1c230133383a2dcd6ff482d960ec49da87bf8c30c7ff2"
+    },
+    "sigma_s": "0x17b74afb071a9ee5a465457953857e24dde4e7f337df4e25b89a5eafedcdeaf6"
+   },
+   "nonces": {
+    "t_vd": "0x020dc2072dffa62f7dac8b842fce3caaa9e803e23e116341e5e438ce3536d683"
+   },
+   "payee": "alice",
+   "payer": "bob",
+   "receipt_id": "p5joaslptmlg",
+   "role": "recipient",
+   "txn": {
+    "block": 1234599,
+    "block_time": 1779999000,
+    "logindex": 1,
+    "mint_block": 1234500,
+    "mint_txhash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "txhash": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "value": 250
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+     "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+    },
+    "ok": true,
+    "reason": "VALID",
+    "value": 250
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"note\":{\"eNote\":{\"C\":{\"x\":\"0x1b4d663bf1ba60d6b937f96b785e9fd2b5e4175a45ff176efa85e369b479dfdd\",\"y\":\"0x0326893e440090e9c8678a8419ff80df51468cbf37b91e819e9c3a2bd2865509\"},\"R\":{\"x\":\"0x1b9b3aeaa7cadb200b60d04f4af4b37304fb0cf9d0dfede602afba7b84234255\",\"y\":\"0x06b1781f67e45508271c5c4b46453245ee89cf5e6381cbf679d8a8367469165a\"}},\"eRec\":{\"C\":{\"x\":\"0x17e9fe2f89a9d18d57e9685da6423fb88d80b0257baf57242bd35a54ae61113f\",\"y\":\"0x1a0fd91e011bf86f904f234422e3100441b9b07f4471df4f35eb9c39739b1661\"},\"R\":{\"x\":\"0x17f9ecf10655b2f7703ff32b67b8bdc8bce0c4634384cb529b7077a3663d841a\",\"y\":\"0x1229585ab01a2d5c29c66ea6a5cd0994b521bb428c7033754c6d69bbb4264a1f\"}},\"sigma_R\":{\"x\":\"0x14b38ac83c93bdd164850e0cf9abd6e4525cdf679a0a97301e0f195ba4db9ab4\",\"y\":\"0x01b258784b0db419f1c1c230133383a2dcd6ff482d960ec49da87bf8c30c7ff2\"},\"sigma_s\":\"0x17b74afb071a9ee5a465457953857e24dde4e7f337df4e25b89a5eafedcdeaf6\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payer\":{\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"public\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x02ea8b700e8d7dadc6293021f65facf1e12e4213c4e4631fc3bddb42a2bce46b\",\"0x2c2d715a981316ae2701bed3179815f938e1e4bb5bce5182c6a332ec2f027f83\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"issuer_sig\":{\"R\":{\"x\":\"0x22bc1131b0f04b1c48fd474ea651ca4a4200d439dbc2958efdab9de543b8001a\",\"y\":\"0x1e215ff7446bdac3155b4acced51fb914eb9ac7292b6b5c1bbc423fd615d9dcc\"},\"e\":\"0x14e3be1e0746e2bb90dcf43d0eab7be7b30d54b30117a8399fe24a038ba2d4c4\",\"s\":\"0x2f84b5de5ce03b97dd8ed73b0d38129622e3f6f2fa79cd39871238691a2f119d\"},\"nullifier\":\"0x2165a582d4d0a0638da36f51f3e88d0c034a05b42cae599033501815f562a85f\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"idHash\":\"0x1e8ee828fdfd56cec12dbbcbdf2acb0e67d3b0f4b99eb5843935d22b3d6c7adf\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x11b6717d116d4c3e939abcf0f830379ba967a67d7f4f80f9b8d6cba90793a45b\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"issuer\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledA1\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x2165a582d4d0a0638da36f51f3e88d0c034a05b42cae599033501815f562a85f\",\"timestamp\":1779999000,\"txhash\":\"0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"value\":250},\"type\":\"note-a1\",\"v\":1}",
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwibm90\nZSI6eyJlTm90ZSI6eyJDIjp7IngiOiIweDFiNGQ2NjNiZjFiYTYwZDZiOTM3Zjk2\nYjc4NWU5ZmQyYjVlNDE3NWE0NWZmMTc2ZWZhODVlMzY5YjQ3OWRmZGQiLCJ5Ijoi\nMHgwMzI2ODkzZTQ0MDA5MGU5Yzg2NzhhODQxOWZmODBkZjUxNDY4Y2JmMzdiOTFl\nODE5ZTljM2EyYmQyODY1NTA5In0sIlIiOnsieCI6IjB4MWI5YjNhZWFhN2NhZGIy\nMDBiNjBkMDRmNGFmNGIzNzMwNGZiMGNmOWQwZGZlZGU2MDJhZmJhN2I4NDIzNDI1\nNSIsInkiOiIweDA2YjE3ODFmNjdlNDU1MDgyNzFjNWM0YjQ2NDUzMjQ1ZWU4OWNm\nNWU2MzgxY2JmNjc5ZDhhODM2NzQ2OTE2NWEifX0sImVSZWMiOnsiQyI6eyJ4Ijoi\nMHgxN2U5ZmUyZjg5YTlkMThkNTdlOTY4NWRhNjQyM2ZiODhkODBiMDI1N2JhZjU3\nMjQyYmQzNWE1NGFlNjExMTNmIiwieSI6IjB4MWEwZmQ5MWUwMTFiZjg2ZjkwNGYy\nMzQ0MjJlMzEwMDQ0MWI5YjA3ZjQ0NzFkZjRmMzVlYjljMzk3MzliMTY2MSJ9LCJS\nIjp7IngiOiIweDE3ZjllY2YxMDY1NWIyZjc3MDNmZjMyYjY3YjhiZGM4YmNlMGM0\nNjM0Mzg0Y2I1MjliNzA3N2EzNjYzZDg0MWEiLCJ5IjoiMHgxMjI5NTg1YWIwMWEy\nZDVjMjljNjZlYTZhNWNkMDk5NGI1MjFiYjQyOGM3MDMzNzU0YzZkNjliYmI0MjY0\nYTFmIn19LCJzaWdtYV9SIjp7IngiOiIweDE0YjM4YWM4M2M5M2JkZDE2NDg1MGUw\nY2Y5YWJkNmU0NTI1Y2RmNjc5YTBhOTczMDFlMGYxOTViYTRkYjlhYjQiLCJ5Ijoi\nMHgwMWIyNTg3ODRiMGRiNDE5ZjFjMWMyMzAxMzMzODNhMmRjZDZmZjQ4MmQ5NjBl\nYzQ5ZGE4N2JmOGMzMGM3ZmYyIn0sInNpZ21hX3MiOiIweDE3Yjc0YWZiMDcxYTll\nZTVhNDY1NDU3OTUzODU3ZTI0ZGRlNGU3ZjMzN2RmNGUyNWI4OWE1ZWFmZWRjZGVh\nZjYifSwicGF5ZWUiOnsiRV9hZGRyIjp7IkMiOnsieCI6IjB4MWViN2M3NWZhNGEz\nNDBhY2VlN2Q2MGNkZDRmODUzNjNiNTM3ZDVhYjUwNTNkYWFjMzM3OTk4Njc2ZGI2\nM2RmZCIsInkiOiIweDA2ZDk0MDBkYmRmNjBkZjBjYzc0ZmRlNzQ0NDQyZTFlYzEy\nZDZmZGU4YjUyY2Q0ZTcxZjAzYTlkYmYzNGJlN2QifSwiUiI6eyJ4IjoiMHgyOTJj\nZGMxZjcxY2Y4MjlhMjcxNmRhZmQwYTE3MTU3NjgxYTc5ZDQ1NWJmMmRjMmM3NzY5\nMGUwZjJiMjE1OGI0IiwieSI6IjB4MWUxNjZkN2ZjYjg3MmQ2ZDdiZDI2OGU3MWRi\nOWJlYjBkYTNmZTJkNmEyY2JlNzBhNWMxNTExY2YzYjdlNzE1NCJ9fSwiTSI6eyJ4\nIjoiMHgxNTRhOTA4N2JkMGE0ZmY2ZDYyMzkxMTQ5MDNiYWQ4OGYwYTQ3NWFiMWUz\nZmU1YjZjZGFiZDMzODViNjYwY2Y5IiwieSI6IjB4MWIzNGNmMTY0YzA4NjVjM2E0\nOTY2NjM0YmFhMzZmYjVhNGVjMzdiOTNhZWI1MjVmOGNjYjJmNmFkNGU5YWZmOCJ9\nLCJhZGRyIjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwYTExY2UwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGExMWNlIiwiaWRlbnRpdHkiOiJ7XCJkb2Jc\nIjpcIjE5NzAtMDQtMDFcIixcImdpdmVuX25hbWVcIjpcIkFsaWNlXCIsXCJpc3N1\nZXJfaWRcIjpcInN2Yy1hbGJlcnRhXCIsXCJzdXJuYW1lXCI6XCJSYW5jaFwifSIs\nImtpbmQiOiJwcml2YXRlIiwicGsiOnsieCI6IjB4MGY4NWUzNzY4MmUxZWJjMDVl\nNDBhMWZiNTk5NjkwMTFlMjMyZGMwOTQ0ODlhZDBlYWZmYTliNGFiNWQwODk1YiIs\nInkiOiIweDE5MjBkMjU3YzczM2U0YWYyZmVjNzE0MjYxMWNlZmU1YzEzY2VhY2Jk\nZGFlNDRlMjE2ZDNjZmJlYjA5Nzk0Y2IifX0sInBheWVyIjp7Ik0iOnsieCI6IjB4\nMjEzYjE5NzEwNzVhY2VlNGU4YzY3ZTgxYTU4NDAwYTJmZGY1YTk3ZjI2Y2JmYjY0\nODliNWQ2MGQyMWEzYTAwNiIsInkiOiIweDI5ODlhOTgyMzhlM2M0ZWUzZmFiYTYy\nMTU3MmI4ZGFjYWE4YWMzYWQxNTIxOGIxYmYzNWQwYWI4YTQ0YTMwZDYifSwiYWRk\nciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGIwYjAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMGIwYiIsImlkZW50aXR5Ijoie1wiZG9iXCI6XCIx\nOTY4LTExLTExXCIsXCJnaXZlbl9uYW1lXCI6XCJCb2JcIixcImlzc3Vlcl9pZFwi\nOlwic3ZjLWFsYmVydGFcIixcInN1cm5hbWVcIjpcIkdyYW5hcnlcIn0iLCJraW5k\nIjoicHVibGljIiwicGsiOnsieCI6IjB4MGYxZTczMGViODUwYWFmYjA3OGVkODcx\nYzc4ZGE2ZWRmNWUwODRiOThjYzM3ZTRmMTJkOTVhZmY4ZjYwYjI3YSIsInkiOiIw\neDIzZjU4NmMzODg2ZTc1ZmYyZGI4YWZjMDI0YjliOTA5NDI2NmFhNDEwMWMzZjZm\nOWQ5ZDMxMjY2ZGU3MGYxODMifX0sInByb29mIjp7ImNtcyI6WyIweDAyZWE4Yjcw\nMGU4ZDdkYWRjNjI5MzAyMWY2NWZhY2YxZTEyZTQyMTNjNGU0NjMxZmMzYmRkYjQy\nYTJiY2U0NmIiLCIweDJjMmQ3MTVhOTgxMzE2YWUyNzAxYmVkMzE3OTgxNWY5Mzhl\nMWU0YmI1YmNlNTE4MmM2YTMzMmVjMmYwMjdmODMiXSwiZmFjZSI6IjB4MDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDBmYSIsImlzc3Vlcl9zaWciOnsiUiI6eyJ4IjoiMHgyMmJjMTEzMWIw\nZjA0YjFjNDhmZDQ3NGVhNjUxY2E0YTQyMDBkNDM5ZGJjMjk1OGVmZGFiOWRlNTQz\nYjgwMDFhIiwieSI6IjB4MWUyMTVmZjc0NDZiZGFjMzE1NWI0YWNjZWQ1MWZiOTE0\nZWI5YWM3MjkyYjZiNWMxYmJjNDIzZmQ2MTVkOWRjYyJ9LCJlIjoiMHgxNGUzYmUx\nZTA3NDZlMmJiOTBkY2Y0M2QwZWFiN2JlN2IzMGQ1NGIzMDExN2E4Mzk5ZmUyNGEw\nMzhiYTJkNGM0IiwicyI6IjB4MmY4NGI1ZGU1Y2UwM2I5N2RkOGVkNzNiMGQzODEy\nOTYyMmUzZjZmMmZhNzljZDM5ODcxMjM4NjkxYTJmMTE5ZCJ9LCJudWxsaWZpZXIi\nOiIweDIxNjVhNTgyZDRkMGEwNjM4ZGEzNmY1MWYzZTg4ZDBjMDM0YTA1YjQyY2Fl\nNTk5MDMzNTAxODE1ZjU2MmE4NWYiLCJvcGVuaW5nIjp7ImZsYXZvciI6IjB4MDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMSIsImlkSGFzaCI6IjB4MWU4ZWU4MjhmZGZkNTZjZWMxMmRi\nYmNiZGYyYWNiMGU2N2QzYjBmNGI5OWViNTg0MzkzNWQyMmIzZDZjN2FkZiIsInBy\nZWRpY2F0ZSI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInJobyI6IjB4MTFiNjcxN2Qx\nMTZkNGMzZTkzOWFiY2YwZjgzMDM3OWJhOTY3YTY3ZDdmNGY4MGY5YjhkNmNiYTkw\nNzkzYTQ1YiIsInYiOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwZmEifX0sInJvbGUiOiJpc3N1\nZXIiLCJ0eG4iOnsiYmxvY2siOjEyMzQ1OTksImV2ZW50IjoiU3BlbnRDb3VwbGVk\nQTEiLCJraW5kIjoibm90ZS1zcGVuZCIsImxvZ2luZGV4IjoxLCJtaW50X2Jsb2Nr\nIjoxMjM0NTAwLCJtaW50X3R4aGFzaCI6IjB4Y2NjY2NjY2NjY2NjY2NjY2NjY2Nj\nY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYyIsIm51\nbGxpZmllciI6IjB4MjE2NWE1ODJkNGQwYTA2MzhkYTM2ZjUxZjNlODhkMGMwMzRh\nMDViNDJjYWU1OTkwMzM1MDE4MTVmNTYyYTg1ZiIsInRpbWVzdGFtcCI6MTc3OTk5\nOTAwMCwidHhoYXNoIjoiMHhhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFh\nMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExIiwidmFsdWUiOjI1MH0s\nInR5cGUiOiJub3RlLWExIiwidiI6MX0\n.END",
+   "kind": "note-a1",
+   "mint": {
+    "cm": "0x02ea8b700e8d7dadc6293021f65facf1e12e4213c4e4631fc3bddb42a2bce46b",
+    "cms": [
+     "0x02ea8b700e8d7dadc6293021f65facf1e12e4213c4e4631fc3bddb42a2bce46b",
+     "0x2c2d715a981316ae2701bed3179815f938e1e4bb5bce5182c6a332ec2f027f83"
+    ],
+    "eNote": {
+     "C": {
+      "x": "0x1b4d663bf1ba60d6b937f96b785e9fd2b5e4175a45ff176efa85e369b479dfdd",
+      "y": "0x0326893e440090e9c8678a8419ff80df51468cbf37b91e819e9c3a2bd2865509"
+     },
+     "R": {
+      "x": "0x1b9b3aeaa7cadb200b60d04f4af4b37304fb0cf9d0dfede602afba7b84234255",
+      "y": "0x06b1781f67e45508271c5c4b46453245ee89cf5e6381cbf679d8a8367469165a"
+     }
+    },
+    "eRec": {
+     "C": {
+      "x": "0x17e9fe2f89a9d18d57e9685da6423fb88d80b0257baf57242bd35a54ae61113f",
+      "y": "0x1a0fd91e011bf86f904f234422e3100441b9b07f4471df4f35eb9c39739b1661"
+     },
+     "R": {
+      "x": "0x17f9ecf10655b2f7703ff32b67b8bdc8bce0c4634384cb529b7077a3663d841a",
+      "y": "0x1229585ab01a2d5c29c66ea6a5cd0994b521bb428c7033754c6d69bbb4264a1f"
+     }
+    },
+    "issuer_sig": {
+     "R": {
+      "x": "0x22bc1131b0f04b1c48fd474ea651ca4a4200d439dbc2958efdab9de543b8001a",
+      "y": "0x1e215ff7446bdac3155b4acced51fb914eb9ac7292b6b5c1bbc423fd615d9dcc"
+     },
+     "e": "0x14e3be1e0746e2bb90dcf43d0eab7be7b30d54b30117a8399fe24a038ba2d4c4",
+     "s": "0x2f84b5de5ce03b97dd8ed73b0d38129622e3f6f2fa79cd39871238691a2f119d"
+    },
+    "nonces": {
+     "k_sig": "0x2d98a9c77499a1cb4ff54b4b6ff10d1c59d2db0d2b1326c759de36eb5dfcf8f5",
+     "r_note": "0x0a470a70463cbe923fd12af08c806c97202ccc6005b313f4a0a62b5524063244",
+     "r_rec": "0x13c79ebd824200dca411b073a8043c004c7c0c4cf48de955d6601cb7b8d593df",
+     "rho": "0x11b6717d116d4c3e939abcf0f830379ba967a67d7f4f80f9b8d6cba90793a45b",
+     "sigma_R_k": "0x0fb114df03615ce196d5e3ee6d46bcf9fa24db68e462373bb2d0ff980a29365c",
+     "sigma_s": "0x17b74afb071a9ee5a465457953857e24dde4e7f337df4e25b89a5eafedcdeaf6"
+    },
+    "nullifier": "0x2165a582d4d0a0638da36f51f3e88d0c034a05b42cae599033501815f562a85f",
+    "opening": {
+     "flavor": "0x0000000000000000000000000000000000000000000000000000000000000001",
+     "idHash": "0x1e8ee828fdfd56cec12dbbcbdf2acb0e67d3b0f4b99eb5843935d22b3d6c7adf",
+     "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "rho": "0x11b6717d116d4c3e939abcf0f830379ba967a67d7f4f80f9b8d6cba90793a45b",
+     "v": "0x00000000000000000000000000000000000000000000000000000000000000fa"
+    },
+    "sigma_R": {
+     "x": "0x14b38ac83c93bdd164850e0cf9abd6e4525cdf679a0a97301e0f195ba4db9ab4",
+     "y": "0x01b258784b0db419f1c1c230133383a2dcd6ff482d960ec49da87bf8c30c7ff2"
+    },
+    "sigma_s": "0x17b74afb071a9ee5a465457953857e24dde4e7f337df4e25b89a5eafedcdeaf6"
+   },
+   "nonces": {},
+   "payee": "alice",
+   "payer": "bob",
+   "receipt_id": "4qddhyia3hrt",
+   "role": "issuer",
+   "txn": {
+    "block": 1234599,
+    "block_time": 1779999000,
+    "logindex": 1,
+    "mint_block": 1234500,
+    "mint_txhash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "txhash": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "value": 250
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+     "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+    },
+    "ok": true,
+    "reason": "VALID",
+    "value": 250
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"issuer_binding\":{\"A1\":{\"x\":\"0x25e8b37a737c0946442883fd4c212d77fd8e4d65373475d79eacca4dcf99205e\",\"y\":\"0x011bb71955674230822077a5aaef6384733be0c2ac1ec03c509272bf3fb58bbd\"},\"A2\":{\"x\":\"0x130f43206b409b653465dbb324bdbadbab5b4a9b4a4eda2240166e37d0f98534\",\"y\":\"0x00b6dac36aab4533ed26ef5e54322fff2cbf658a2c1d91c9a85e2af181188e65\"},\"A3\":{\"x\":\"0x04072c88e088c244a43d6ff849fae18a219bf144928a330afbd43f12f2def295\",\"y\":\"0x00d8497e63fd3f1492064c762d025e2b7046d70113c56f446766bb5c2af1775c\"},\"A4\":{\"x\":\"0x0a6a9256c10f3b7e8afdfbd958261df61b25d69996354719499ac0fdf831a166\",\"y\":\"0x28f375040252a11e7e68a9759a2bcaf35882d741ae2e1b9e79546bc15f2a1e3e\"},\"A5\":{\"x\":\"0x0e49d5c1200dbb91a789dce2c01f0b699fff4db920f53ce4fadc52b8cf321999\",\"y\":\"0x19f0d7d95915cf4cb5b39bd71a9343b0ff5c664cbef2bc3ff13a11ac9d8d6920\"},\"Q\":{\"x\":\"0x0f0a553dbe4702d07b7bb985b51ce9a88791da37d9e096dd41548bc51ed9cd08\",\"y\":\"0x10bca2c162f0f7b5a8bf1a1a2c4944e3db0d318b2a3af9f116f893577f2f1e32\"},\"T\":{\"x\":\"0x2cb8900c483cbe6a6358b0f52129f4483fb7b834b043380be7638f7100e99167\",\"y\":\"0x0817b0011c930fa45b4fc2958023389634ddee3f2ca88f4007a6e933aea57d26\"},\"U\":{\"x\":\"0x096a739f4af152b6fd90a45d2812b3e06dde556a5308abfd65c07f9975227eac\",\"y\":\"0x2428c4d511b32d53891e17fe25bbc35d72e06bc117c48886ed9d56d87aa5d216\"},\"e\":\"0x082eb31bfa7e1a9abab415e180c17ad8d927cb8728562bab0c1bd4af087837ad\",\"s_b\":\"0x275de37197e4b422a9abdc7aac461f2473fb716f6a22db2b598ae87c7de31689\",\"s_g\":\"0x28708b719db1d59102480c2187fcb2e7e93f3a2e4794402b4ed6b60bb71497b4\",\"s_r\":\"0x1a1771ed8cae523e4024c727bc9492790647beb6d92ee1cb769556304ca9a879\",\"s_s\":\"0x2fe6f2aaab9d04772e35f6e18195393c7ecf8467bc260e6334e03c1df02320f1\"},\"issuer_binding_status\":\"bound\",\"note\":{\"eIss\":{\"C\":{\"x\":\"0x2f27a73213212e007b407015e77cb82943e55a8fe7bb85d60d0f7d5d84719b59\",\"y\":\"0x06ed96a038cd5e0c132a94e7cda6e07ee8591e46771919fc72035bc68d17ae8a\"},\"R\":{\"x\":\"0x19704e212f98c15928f934c15c1d5735bb32cba51e54ea79c5ce6569e47e28fa\",\"y\":\"0x03af0201f4ad7eeb60fea8702457b64c83772812838d6b7d6762ca38175a3659\"}},\"eNote\":{\"C\":{\"x\":\"0x12b56b0829fd4532f54dcc45266df4e78f0c224b7440bd79fc3781729d32a5be\",\"y\":\"0x00c4dffeeaa66147cc93935644f4b0687824ef35afdff0bcc4840d04e737d361\"},\"R\":{\"x\":\"0x2cc449c56a494037af68089feac4c7678ea66fe3d57694cf9aa73997ff989992\",\"y\":\"0x04f55d604577b46be6fd7c07f5d9fb286dd98ba0c68bc1ca8b74bb10f5b34768\"}}},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x1439b0aa8baed849401442807e7fd5ec7a99af76b9527af0d2653ded43deee97\",\"y\":\"0x18daf46c238869b168f21f208d6c9e53fbdf607343835132026c012c8634606d\"},\"T2\":{\"x\":\"0x2e9dd7faa2372257de93545f9786c21592169d00c3cdfd400cde5a410852a638\",\"y\":\"0x1bc668d389b079871b986113f15a377ab15caa96298e35b2b6f745778b1b3af9\"},\"e\":\"0x2d89857ec6ef9b0f944a7af4f0cb461d2bea6e11aa060b1492ab089f61ce7358\",\"s\":\"0x05533b2006e96532b614eedfd4eff493b2436ce295faf9330612d97e5af7dda3\"}},\"payer\":{\"E_addr\":{\"C\":{\"x\":\"0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba\",\"y\":\"0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862\"},\"R\":{\"x\":\"0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f\",\"y\":\"0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab\"}},\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"nullifier\":\"0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"idHash\":\"0x0624f06b0637ef2f58559041f4fdc59a6dc1d0125911e4d6824e5036201d758c\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"recipient\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledA2\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309\",\"timestamp\":1779999000,\"txhash\":\"0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2\",\"value\":250},\"type\":\"note-a2\",\"v\":1}",
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwiaXNz\ndWVyX2JpbmRpbmciOnsiQTEiOnsieCI6IjB4MjVlOGIzN2E3MzdjMDk0NjQ0Mjg4\nM2ZkNGMyMTJkNzdmZDhlNGQ2NTM3MzQ3NWQ3OWVhY2NhNGRjZjk5MjA1ZSIsInki\nOiIweDAxMWJiNzE5NTU2NzQyMzA4MjIwNzdhNWFhZWY2Mzg0NzMzYmUwYzJhYzFl\nYzAzYzUwOTI3MmJmM2ZiNThiYmQifSwiQTIiOnsieCI6IjB4MTMwZjQzMjA2YjQw\nOWI2NTM0NjVkYmIzMjRiZGJhZGJhYjViNGE5YjRhNGVkYTIyNDAxNjZlMzdkMGY5\nODUzNCIsInkiOiIweDAwYjZkYWMzNmFhYjQ1MzNlZDI2ZWY1ZTU0MzIyZmZmMmNi\nZjY1OGEyYzFkOTFjOWE4NWUyYWYxODExODhlNjUifSwiQTMiOnsieCI6IjB4MDQw\nNzJjODhlMDg4YzI0NGE0M2Q2ZmY4NDlmYWUxOGEyMTliZjE0NDkyOGEzMzBhZmJk\nNDNmMTJmMmRlZjI5NSIsInkiOiIweDAwZDg0OTdlNjNmZDNmMTQ5MjA2NGM3NjJk\nMDI1ZTJiNzA0NmQ3MDExM2M1NmY0NDY3NjZiYjVjMmFmMTc3NWMifSwiQTQiOnsi\neCI6IjB4MGE2YTkyNTZjMTBmM2I3ZThhZmRmYmQ5NTgyNjFkZjYxYjI1ZDY5OTk2\nMzU0NzE5NDk5YWMwZmRmODMxYTE2NiIsInkiOiIweDI4ZjM3NTA0MDI1MmExMWU3\nZTY4YTk3NTlhMmJjYWYzNTg4MmQ3NDFhZTJlMWI5ZTc5NTQ2YmMxNWYyYTFlM2Ui\nfSwiQTUiOnsieCI6IjB4MGU0OWQ1YzEyMDBkYmI5MWE3ODlkY2UyYzAxZjBiNjk5\nZmZmNGRiOTIwZjUzY2U0ZmFkYzUyYjhjZjMyMTk5OSIsInkiOiIweDE5ZjBkN2Q5\nNTkxNWNmNGNiNWIzOWJkNzFhOTM0M2IwZmY1YzY2NGNiZWYyYmMzZmYxM2ExMWFj\nOWQ4ZDY5MjAifSwiUSI6eyJ4IjoiMHgwZjBhNTUzZGJlNDcwMmQwN2I3YmI5ODVi\nNTFjZTlhODg3OTFkYTM3ZDllMDk2ZGQ0MTU0OGJjNTFlZDljZDA4IiwieSI6IjB4\nMTBiY2EyYzE2MmYwZjdiNWE4YmYxYTFhMmM0OTQ0ZTNkYjBkMzE4YjJhM2FmOWYx\nMTZmODkzNTc3ZjJmMWUzMiJ9LCJUIjp7IngiOiIweDJjYjg5MDBjNDgzY2JlNmE2\nMzU4YjBmNTIxMjlmNDQ4M2ZiN2I4MzRiMDQzMzgwYmU3NjM4ZjcxMDBlOTkxNjci\nLCJ5IjoiMHgwODE3YjAwMTFjOTMwZmE0NWI0ZmMyOTU4MDIzMzg5NjM0ZGRlZTNm\nMmNhODhmNDAwN2E2ZTkzM2FlYTU3ZDI2In0sIlUiOnsieCI6IjB4MDk2YTczOWY0\nYWYxNTJiNmZkOTBhNDVkMjgxMmIzZTA2ZGRlNTU2YTUzMDhhYmZkNjVjMDdmOTk3\nNTIyN2VhYyIsInkiOiIweDI0MjhjNGQ1MTFiMzJkNTM4OTFlMTdmZTI1YmJjMzVk\nNzJlMDZiYzExN2M0ODg4NmVkOWQ1NmQ4N2FhNWQyMTYifSwiZSI6IjB4MDgyZWIz\nMWJmYTdlMWE5YWJhYjQxNWUxODBjMTdhZDhkOTI3Y2I4NzI4NTYyYmFiMGMxYmQ0\nYWYwODc4MzdhZCIsInNfYiI6IjB4Mjc1ZGUzNzE5N2U0YjQyMmE5YWJkYzdhYWM0\nNjFmMjQ3M2ZiNzE2ZjZhMjJkYjJiNTk4YWU4N2M3ZGUzMTY4OSIsInNfZyI6IjB4\nMjg3MDhiNzE5ZGIxZDU5MTAyNDgwYzIxODdmY2IyZTdlOTNmM2EyZTQ3OTQ0MDJi\nNGVkNmI2MGJiNzE0OTdiNCIsInNfciI6IjB4MWExNzcxZWQ4Y2FlNTIzZTQwMjRj\nNzI3YmM5NDkyNzkwNjQ3YmViNmQ5MmVlMWNiNzY5NTU2MzA0Y2E5YTg3OSIsInNf\ncyI6IjB4MmZlNmYyYWFhYjlkMDQ3NzJlMzVmNmUxODE5NTM5M2M3ZWNmODQ2N2Jj\nMjYwZTYzMzRlMDNjMWRmMDIzMjBmMSJ9LCJpc3N1ZXJfYmluZGluZ19zdGF0dXMi\nOiJib3VuZCIsIm5vdGUiOnsiZUlzcyI6eyJDIjp7IngiOiIweDJmMjdhNzMyMTMy\nMTJlMDA3YjQwNzAxNWU3N2NiODI5NDNlNTVhOGZlN2JiODVkNjBkMGY3ZDVkODQ3\nMTliNTkiLCJ5IjoiMHgwNmVkOTZhMDM4Y2Q1ZTBjMTMyYTk0ZTdjZGE2ZTA3ZWU4\nNTkxZTQ2NzcxOTE5ZmM3MjAzNWJjNjhkMTdhZThhIn0sIlIiOnsieCI6IjB4MTk3\nMDRlMjEyZjk4YzE1OTI4ZjkzNGMxNWMxZDU3MzViYjMyY2JhNTFlNTRlYTc5YzVj\nZTY1NjllNDdlMjhmYSIsInkiOiIweDAzYWYwMjAxZjRhZDdlZWI2MGZlYTg3MDI0\nNTdiNjRjODM3NzI4MTI4MzhkNmI3ZDY3NjJjYTM4MTc1YTM2NTkifX0sImVOb3Rl\nIjp7IkMiOnsieCI6IjB4MTJiNTZiMDgyOWZkNDUzMmY1NGRjYzQ1MjY2ZGY0ZTc4\nZjBjMjI0Yjc0NDBiZDc5ZmMzNzgxNzI5ZDMyYTViZSIsInkiOiIweDAwYzRkZmZl\nZWFhNjYxNDdjYzkzOTM1NjQ0ZjRiMDY4NzgyNGVmMzVhZmRmZjBiY2M0ODQwZDA0\nZTczN2QzNjEifSwiUiI6eyJ4IjoiMHgyY2M0NDljNTZhNDk0MDM3YWY2ODA4OWZl\nYWM0Yzc2NzhlYTY2ZmUzZDU3Njk0Y2Y5YWE3Mzk5N2ZmOTg5OTkyIiwieSI6IjB4\nMDRmNTVkNjA0NTc3YjQ2YmU2ZmQ3YzA3ZjVkOWZiMjg2ZGQ5OGJhMGM2OGJjMWNh\nOGI3NGJiMTBmNWIzNDc2OCJ9fX0sInBheWVlIjp7IkVfYWRkciI6eyJDIjp7Ingi\nOiIweDFlYjdjNzVmYTRhMzQwYWNlZTdkNjBjZGQ0Zjg1MzYzYjUzN2Q1YWI1MDUz\nZGFhYzMzNzk5ODY3NmRiNjNkZmQiLCJ5IjoiMHgwNmQ5NDAwZGJkZjYwZGYwY2M3\nNGZkZTc0NDQ0MmUxZWMxMmQ2ZmRlOGI1MmNkNGU3MWYwM2E5ZGJmMzRiZTdkIn0s\nIlIiOnsieCI6IjB4MjkyY2RjMWY3MWNmODI5YTI3MTZkYWZkMGExNzE1NzY4MWE3\nOWQ0NTViZjJkYzJjNzc2OTBlMGYyYjIxNThiNCIsInkiOiIweDFlMTY2ZDdmY2I4\nNzJkNmQ3YmQyNjhlNzFkYjliZWIwZGEzZmUyZDZhMmNiZTcwYTVjMTUxMWNmM2I3\nZTcxNTQifX0sIk0iOnsieCI6IjB4MTU0YTkwODdiZDBhNGZmNmQ2MjM5MTE0OTAz\nYmFkODhmMGE0NzVhYjFlM2ZlNWI2Y2RhYmQzMzg1YjY2MGNmOSIsInkiOiIweDFi\nMzRjZjE2NGMwODY1YzNhNDk2NjYzNGJhYTM2ZmI1YTRlYzM3YjkzYWViNTI1Zjhj\nY2IyZjZhZDRlOWFmZjgifSwiYWRkciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMGExMWNlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBhMTFjZSIsImlk\nZW50aXR5Ijoie1wiZG9iXCI6XCIxOTcwLTA0LTAxXCIsXCJnaXZlbl9uYW1lXCI6\nXCJBbGljZVwiLFwiaXNzdWVyX2lkXCI6XCJzdmMtYWxiZXJ0YVwiLFwic3VybmFt\nZVwiOlwiUmFuY2hcIn0iLCJraW5kIjoicHJpdmF0ZSIsInBrIjp7IngiOiIweDBm\nODVlMzc2ODJlMWViYzA1ZTQwYTFmYjU5OTY5MDExZTIzMmRjMDk0NDg5YWQwZWFm\nZmE5YjRhYjVkMDg5NWIiLCJ5IjoiMHgxOTIwZDI1N2M3MzNlNGFmMmZlYzcxNDI2\nMTFjZWZlNWMxM2NlYWNiZGRhZTQ0ZTIxNmQzY2ZiZWIwOTc5NGNiIn19LCJwYXll\nZV92ZCI6eyJFX2N0Ijp7IkMiOnsieCI6IjB4MWViN2M3NWZhNGEzNDBhY2VlN2Q2\nMGNkZDRmODUzNjNiNTM3ZDVhYjUwNTNkYWFjMzM3OTk4Njc2ZGI2M2RmZCIsInki\nOiIweDA2ZDk0MDBkYmRmNjBkZjBjYzc0ZmRlNzQ0NDQyZTFlYzEyZDZmZGU4YjUy\nY2Q0ZTcxZjAzYTlkYmYzNGJlN2QifSwiUiI6eyJ4IjoiMHgyOTJjZGMxZjcxY2Y4\nMjlhMjcxNmRhZmQwYTE3MTU3NjgxYTc5ZDQ1NWJmMmRjMmM3NzY5MGUwZjJiMjE1\nOGI0IiwieSI6IjB4MWUxNjZkN2ZjYjg3MmQ2ZDdiZDI2OGU3MWRiOWJlYjBkYTNm\nZTJkNmEyY2JlNzBhNWMxNTExY2YzYjdlNzE1NCJ9fSwiTV9uYW1lZCI6eyJ4Ijoi\nMHgxNTRhOTA4N2JkMGE0ZmY2ZDYyMzkxMTQ5MDNiYWQ4OGYwYTQ3NWFiMWUzZmU1\nYjZjZGFiZDMzODViNjYwY2Y5IiwieSI6IjB4MWIzNGNmMTY0YzA4NjVjM2E0OTY2\nNjM0YmFhMzZmYjVhNGVjMzdiOTNhZWI1MjVmOGNjYjJmNmFkNGU5YWZmOCJ9LCJh\nY2NvdW50IjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwYTExY2UwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGExMWNlIiwiY2hhaW5pZCI6MSwicHJvb2Yi\nOnsiVDEiOnsieCI6IjB4MTQzOWIwYWE4YmFlZDg0OTQwMTQ0MjgwN2U3ZmQ1ZWM3\nYTk5YWY3NmI5NTI3YWYwZDI2NTNkZWQ0M2RlZWU5NyIsInkiOiIweDE4ZGFmNDZj\nMjM4ODY5YjE2OGYyMWYyMDhkNmM5ZTUzZmJkZjYwNzM0MzgzNTEzMjAyNmMwMTJj\nODYzNDYwNmQifSwiVDIiOnsieCI6IjB4MmU5ZGQ3ZmFhMjM3MjI1N2RlOTM1NDVm\nOTc4NmMyMTU5MjE2OWQwMGMzY2RmZDQwMGNkZTVhNDEwODUyYTYzOCIsInkiOiIw\neDFiYzY2OGQzODliMDc5ODcxYjk4NjExM2YxNWEzNzdhYjE1Y2FhOTYyOThlMzVi\nMmI2Zjc0NTc3OGIxYjNhZjkifSwiZSI6IjB4MmQ4OTg1N2VjNmVmOWIwZjk0NGE3\nYWY0ZjBjYjQ2MWQyYmVhNmUxMWFhMDYwYjE0OTJhYjA4OWY2MWNlNzM1OCIsInMi\nOiIweDA1NTMzYjIwMDZlOTY1MzJiNjE0ZWVkZmQ0ZWZmNDkzYjI0MzZjZTI5NWZh\nZjkzMzA2MTJkOTdlNWFmN2RkYTMifX0sInBheWVyIjp7IkVfYWRkciI6eyJDIjp7\nIngiOiIweDFlNjE0MGQ2M2FlZDQwZTRkMDQ2NDhkNzI3NTFlNWFlY2JjNWMyM2M5\nYTJjZGNmYTcwOTgzNjYwNjVhZDczYmEiLCJ5IjoiMHgwMjU0MDY5YTVhOTQwY2Zj\nZjA5YWNjZGJiODNhMWEyOGE2Y2ZmMGNhMTQ4MDI4MmNjMGMyZjJkYzc4OTVmODYy\nIn0sIlIiOnsieCI6IjB4MGVjNjE0ZGY2MzU2YzUxYTczZDM2ZDBhMmNiNTMxYzg0\nZDliZGMzYjY0OGFkMDA0MTRjYTk4NGNjOGYyYzc0ZiIsInkiOiIweDA5OGZhODM5\nZDlkYThhY2ZiMDg3YWRjNDk2N2Y1NWI5OGZmZGYzNGFjNzY2ZmE4NDViNzQ0OWE1\nNmI1NjM5YWIifX0sIk0iOnsieCI6IjB4MjEzYjE5NzEwNzVhY2VlNGU4YzY3ZTgx\nYTU4NDAwYTJmZGY1YTk3ZjI2Y2JmYjY0ODliNWQ2MGQyMWEzYTAwNiIsInkiOiIw\neDI5ODlhOTgyMzhlM2M0ZWUzZmFiYTYyMTU3MmI4ZGFjYWE4YWMzYWQxNTIxOGIx\nYmYzNWQwYWI4YTQ0YTMwZDYifSwiYWRkciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMGIwYjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGIwYiIs\nImlkZW50aXR5Ijoie1wiZG9iXCI6XCIxOTY4LTExLTExXCIsXCJnaXZlbl9uYW1l\nXCI6XCJCb2JcIixcImlzc3Vlcl9pZFwiOlwic3ZjLWFsYmVydGFcIixcInN1cm5h\nbWVcIjpcIkdyYW5hcnlcIn0iLCJraW5kIjoicHJpdmF0ZSIsInBrIjp7IngiOiIw\neDBmMWU3MzBlYjg1MGFhZmIwNzhlZDg3MWM3OGRhNmVkZjVlMDg0Yjk4Y2MzN2U0\nZjEyZDk1YWZmOGY2MGIyN2EiLCJ5IjoiMHgyM2Y1ODZjMzg4NmU3NWZmMmRiOGFm\nYzAyNGI5YjkwOTQyNjZhYTQxMDFjM2Y2ZjlkOWQzMTI2NmRlNzBmMTgzIn19LCJw\ncm9vZiI6eyJjbXMiOlsiMHgwY2ZkYWQzYzZlNzA1ODUxMzY1Y2ZlMGQ1MGJjODFi\nMjk3NmM5ZWIxY2UyOGM0ZTI4ZjY0MWM5MmRhOGJlZDhlIl0sImZhY2UiOiIweDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwZmEiLCJudWxsaWZpZXIiOiIweDI2OWJjYTM3YjIyZmRiNTAy\nNjRjMjFlNjkyYjI1ZDNkMWYzMTRhZDA3NzYyYWMwOTc0Yzc0MmJmYzI3ZjkzMDki\nLCJvcGVuaW5nIjp7ImZsYXZvciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMiIsImlkSGFz\naCI6IjB4MDYyNGYwNmIwNjM3ZWYyZjU4NTU5MDQxZjRmZGM1OWE2ZGMxZDAxMjU5\nMTFlNGQ2ODI0ZTUwMzYyMDFkNzU4YyIsInByZWRpY2F0ZSI6IjB4MDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMCIsInJobyI6IjB4MjIxZmIyMjBjNThmY2JmZjI2Y2ZkNWE2MTBkMzY2\nYjFjNmY2ZWEwM2YzYWFiZDg3ZGQzMWFlNDVjYzkzNWFmZSIsInYiOiIweDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwZmEifX0sInJvbGUiOiJyZWNpcGllbnQiLCJ0eG4iOnsiYmxvY2si\nOjEyMzQ1OTksImV2ZW50IjoiU3BlbnRDb3VwbGVkQTIiLCJraW5kIjoibm90ZS1z\ncGVuZCIsImxvZ2luZGV4IjoxLCJtaW50X2Jsb2NrIjoxMjM0NTAwLCJtaW50X3R4\naGFzaCI6IjB4Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj\nY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYyIsIm51bGxpZmllciI6IjB4MjY5YmNh\nMzdiMjJmZGI1MDI2NGMyMWU2OTJiMjVkM2QxZjMxNGFkMDc3NjJhYzA5NzRjNzQy\nYmZjMjdmOTMwOSIsInRpbWVzdGFtcCI6MTc3OTk5OTAwMCwidHhoYXNoIjoiMHhh\nMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJh\nMmEyYTJhMmEyYTJhMmEyIiwidmFsdWUiOjI1MH0sInR5cGUiOiJub3RlLWEyIiwi\ndiI6MX0\n.END",
+   "kind": "note-a2",
+   "mint": {
+    "binding": {
+     "A1": {
+      "x": "0x25e8b37a737c0946442883fd4c212d77fd8e4d65373475d79eacca4dcf99205e",
+      "y": "0x011bb71955674230822077a5aaef6384733be0c2ac1ec03c509272bf3fb58bbd"
+     },
+     "A2": {
+      "x": "0x130f43206b409b653465dbb324bdbadbab5b4a9b4a4eda2240166e37d0f98534",
+      "y": "0x00b6dac36aab4533ed26ef5e54322fff2cbf658a2c1d91c9a85e2af181188e65"
+     },
+     "A3": {
+      "x": "0x04072c88e088c244a43d6ff849fae18a219bf144928a330afbd43f12f2def295",
+      "y": "0x00d8497e63fd3f1492064c762d025e2b7046d70113c56f446766bb5c2af1775c"
+     },
+     "A4": {
+      "x": "0x0a6a9256c10f3b7e8afdfbd958261df61b25d69996354719499ac0fdf831a166",
+      "y": "0x28f375040252a11e7e68a9759a2bcaf35882d741ae2e1b9e79546bc15f2a1e3e"
+     },
+     "A5": {
+      "x": "0x0e49d5c1200dbb91a789dce2c01f0b699fff4db920f53ce4fadc52b8cf321999",
+      "y": "0x19f0d7d95915cf4cb5b39bd71a9343b0ff5c664cbef2bc3ff13a11ac9d8d6920"
+     },
+     "Q": {
+      "x": "0x0f0a553dbe4702d07b7bb985b51ce9a88791da37d9e096dd41548bc51ed9cd08",
+      "y": "0x10bca2c162f0f7b5a8bf1a1a2c4944e3db0d318b2a3af9f116f893577f2f1e32"
+     },
+     "T": {
+      "x": "0x2cb8900c483cbe6a6358b0f52129f4483fb7b834b043380be7638f7100e99167",
+      "y": "0x0817b0011c930fa45b4fc2958023389634ddee3f2ca88f4007a6e933aea57d26"
+     },
+     "U": {
+      "x": "0x096a739f4af152b6fd90a45d2812b3e06dde556a5308abfd65c07f9975227eac",
+      "y": "0x2428c4d511b32d53891e17fe25bbc35d72e06bc117c48886ed9d56d87aa5d216"
+     },
+     "e": "0x082eb31bfa7e1a9abab415e180c17ad8d927cb8728562bab0c1bd4af087837ad",
+     "s_b": "0x275de37197e4b422a9abdc7aac461f2473fb716f6a22db2b598ae87c7de31689",
+     "s_g": "0x28708b719db1d59102480c2187fcb2e7e93f3a2e4794402b4ed6b60bb71497b4",
+     "s_r": "0x1a1771ed8cae523e4024c727bc9492790647beb6d92ee1cb769556304ca9a879",
+     "s_s": "0x2fe6f2aaab9d04772e35f6e18195393c7ecf8467bc260e6334e03c1df02320f1"
+    },
+    "cm": "0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e",
+    "cms": [
+     "0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e"
+    ],
+    "eIss": {
+     "C": {
+      "x": "0x2f27a73213212e007b407015e77cb82943e55a8fe7bb85d60d0f7d5d84719b59",
+      "y": "0x06ed96a038cd5e0c132a94e7cda6e07ee8591e46771919fc72035bc68d17ae8a"
+     },
+     "R": {
+      "x": "0x19704e212f98c15928f934c15c1d5735bb32cba51e54ea79c5ce6569e47e28fa",
+      "y": "0x03af0201f4ad7eeb60fea8702457b64c83772812838d6b7d6762ca38175a3659"
+     }
+    },
+    "eNote": {
+     "C": {
+      "x": "0x12b56b0829fd4532f54dcc45266df4e78f0c224b7440bd79fc3781729d32a5be",
+      "y": "0x00c4dffeeaa66147cc93935644f4b0687824ef35afdff0bcc4840d04e737d361"
+     },
+     "R": {
+      "x": "0x2cc449c56a494037af68089feac4c7678ea66fe3d57694cf9aa73997ff989992",
+      "y": "0x04f55d604577b46be6fd7c07f5d9fb286dd98ba0c68bc1ca8b74bb10f5b34768"
+     }
+    },
+    "nonces": {
+     "beta": "0x0c98f017a5637b365ef3eeb29711e37bf91657e0f5a489b7745e012d34ece33f",
+     "gamma": "0x15fd7cb8422d50f4a82d17b3d1ddb939eaa4988b83a67814847e2ecc30543b3b",
+     "k_b": "0x00ae527f1839dbd63e792c088aaf370350440f624ae8d3e18e61858b60909cce",
+     "k_g": "0x04eaf29bb900b515bfa4a5fe333e1f4c8ae311103d77411bf4f744915db6e471",
+     "k_r": "0x2122b36d507b1a22169a8159434039c0bea3430b8f15163e5b32af7bf7b46e55",
+     "k_s": "0x266ffd3722510f575bd319f411ac60c8d14a01e7cc30a44c04bb177fb1b97573",
+     "r_note": "0x24b2ff4be56fd25f58944cc7afdca80b07473e367e2ba56191c313b84519af97",
+     "r_prime": "0x219d9d660d33713af1ab1309854731f550df1848c7df823640a6b602aeb8a4d1",
+     "rho": "0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe"
+    },
+    "nullifier": "0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309",
+    "opening": {
+     "flavor": "0x0000000000000000000000000000000000000000000000000000000000000002",
+     "idHash": "0x0624f06b0637ef2f58559041f4fdc59a6dc1d0125911e4d6824e5036201d758c",
+     "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "rho": "0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe",
+     "v": "0x00000000000000000000000000000000000000000000000000000000000000fa"
+    }
+   },
+   "nonces": {
+    "t_vd": "0x2fc1cb5de4f0ddc4cb9a0b787529c8c2dfda9fef62133a83c0409fa84d7e332b"
+   },
+   "payee": "alice",
+   "payer": "bob",
+   "receipt_id": "cb4kkzonnrif",
+   "role": "recipient",
+   "txn": {
+    "block": 1234599,
+    "block_time": 1779999000,
+    "logindex": 1,
+    "mint_block": 1234500,
+    "mint_txhash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "txhash": "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+    "value": 250
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+     "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+    },
+    "ok": true,
+    "reason": "VALID",
+    "value": 250
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"issuer_binding\":{\"A1\":{\"x\":\"0x25e8b37a737c0946442883fd4c212d77fd8e4d65373475d79eacca4dcf99205e\",\"y\":\"0x011bb71955674230822077a5aaef6384733be0c2ac1ec03c509272bf3fb58bbd\"},\"A2\":{\"x\":\"0x130f43206b409b653465dbb324bdbadbab5b4a9b4a4eda2240166e37d0f98534\",\"y\":\"0x00b6dac36aab4533ed26ef5e54322fff2cbf658a2c1d91c9a85e2af181188e65\"},\"A3\":{\"x\":\"0x04072c88e088c244a43d6ff849fae18a219bf144928a330afbd43f12f2def295\",\"y\":\"0x00d8497e63fd3f1492064c762d025e2b7046d70113c56f446766bb5c2af1775c\"},\"A4\":{\"x\":\"0x0a6a9256c10f3b7e8afdfbd958261df61b25d69996354719499ac0fdf831a166\",\"y\":\"0x28f375040252a11e7e68a9759a2bcaf35882d741ae2e1b9e79546bc15f2a1e3e\"},\"A5\":{\"x\":\"0x0e49d5c1200dbb91a789dce2c01f0b699fff4db920f53ce4fadc52b8cf321999\",\"y\":\"0x19f0d7d95915cf4cb5b39bd71a9343b0ff5c664cbef2bc3ff13a11ac9d8d6920\"},\"Q\":{\"x\":\"0x0f0a553dbe4702d07b7bb985b51ce9a88791da37d9e096dd41548bc51ed9cd08\",\"y\":\"0x10bca2c162f0f7b5a8bf1a1a2c4944e3db0d318b2a3af9f116f893577f2f1e32\"},\"T\":{\"x\":\"0x2cb8900c483cbe6a6358b0f52129f4483fb7b834b043380be7638f7100e99167\",\"y\":\"0x0817b0011c930fa45b4fc2958023389634ddee3f2ca88f4007a6e933aea57d26\"},\"U\":{\"x\":\"0x096a739f4af152b6fd90a45d2812b3e06dde556a5308abfd65c07f9975227eac\",\"y\":\"0x2428c4d511b32d53891e17fe25bbc35d72e06bc117c48886ed9d56d87aa5d216\"},\"e\":\"0x082eb31bfa7e1a9abab415e180c17ad8d927cb8728562bab0c1bd4af087837ad\",\"s_b\":\"0x275de37197e4b422a9abdc7aac461f2473fb716f6a22db2b598ae87c7de31689\",\"s_g\":\"0x28708b719db1d59102480c2187fcb2e7e93f3a2e4794402b4ed6b60bb71497b4\",\"s_r\":\"0x1a1771ed8cae523e4024c727bc9492790647beb6d92ee1cb769556304ca9a879\",\"s_s\":\"0x2fe6f2aaab9d04772e35f6e18195393c7ecf8467bc260e6334e03c1df02320f1\"},\"issuer_binding_status\":\"bound\",\"note\":{\"eIss\":{\"C\":{\"x\":\"0x2f27a73213212e007b407015e77cb82943e55a8fe7bb85d60d0f7d5d84719b59\",\"y\":\"0x06ed96a038cd5e0c132a94e7cda6e07ee8591e46771919fc72035bc68d17ae8a\"},\"R\":{\"x\":\"0x19704e212f98c15928f934c15c1d5735bb32cba51e54ea79c5ce6569e47e28fa\",\"y\":\"0x03af0201f4ad7eeb60fea8702457b64c83772812838d6b7d6762ca38175a3659\"}},\"eNote\":{\"C\":{\"x\":\"0x12b56b0829fd4532f54dcc45266df4e78f0c224b7440bd79fc3781729d32a5be\",\"y\":\"0x00c4dffeeaa66147cc93935644f4b0687824ef35afdff0bcc4840d04e737d361\"},\"R\":{\"x\":\"0x2cc449c56a494037af68089feac4c7678ea66fe3d57694cf9aa73997ff989992\",\"y\":\"0x04f55d604577b46be6fd7c07f5d9fb286dd98ba0c68bc1ca8b74bb10f5b34768\"}}},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payer\":{\"E_addr\":{\"C\":{\"x\":\"0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba\",\"y\":\"0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862\"},\"R\":{\"x\":\"0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f\",\"y\":\"0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab\"}},\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"payer_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba\",\"y\":\"0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862\"},\"R\":{\"x\":\"0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f\",\"y\":\"0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab\"}},\"M_named\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"account\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x110ed248af05d3fa4792a4d751e7e53527a014751339d3d6eb4758c4ccc4c1d0\",\"y\":\"0x0aa9699a5c11bd228b7dd1367aa782af0484160af1cf359018a4206be3edad39\"},\"T2\":{\"x\":\"0x2913e1e625ac6f07907032138a720195915b23a7bf6e7b9fcbd005e2c97a4971\",\"y\":\"0x00b2713585cfe988716a4a2ed2f6a900832d237ec1276192b55250001c4eb2c9\"},\"e\":\"0x1117ed28a445d10f92ec09b354d9dd601a418998efdb226dc8fa7f247cd6de16\",\"s\":\"0x2ca9d784603a7e13368d6c6ccc1149d6646f110a8bda5be923556892d45415a0\"}},\"proof\":{\"cms\":[\"0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"nullifier\":\"0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"idHash\":\"0x0624f06b0637ef2f58559041f4fdc59a6dc1d0125911e4d6824e5036201d758c\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"issuer\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledA2\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309\",\"timestamp\":1779999000,\"txhash\":\"0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2\",\"value\":250},\"type\":\"note-a2\",\"v\":1}",
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwiaXNz\ndWVyX2JpbmRpbmciOnsiQTEiOnsieCI6IjB4MjVlOGIzN2E3MzdjMDk0NjQ0Mjg4\nM2ZkNGMyMTJkNzdmZDhlNGQ2NTM3MzQ3NWQ3OWVhY2NhNGRjZjk5MjA1ZSIsInki\nOiIweDAxMWJiNzE5NTU2NzQyMzA4MjIwNzdhNWFhZWY2Mzg0NzMzYmUwYzJhYzFl\nYzAzYzUwOTI3MmJmM2ZiNThiYmQifSwiQTIiOnsieCI6IjB4MTMwZjQzMjA2YjQw\nOWI2NTM0NjVkYmIzMjRiZGJhZGJhYjViNGE5YjRhNGVkYTIyNDAxNjZlMzdkMGY5\nODUzNCIsInkiOiIweDAwYjZkYWMzNmFhYjQ1MzNlZDI2ZWY1ZTU0MzIyZmZmMmNi\nZjY1OGEyYzFkOTFjOWE4NWUyYWYxODExODhlNjUifSwiQTMiOnsieCI6IjB4MDQw\nNzJjODhlMDg4YzI0NGE0M2Q2ZmY4NDlmYWUxOGEyMTliZjE0NDkyOGEzMzBhZmJk\nNDNmMTJmMmRlZjI5NSIsInkiOiIweDAwZDg0OTdlNjNmZDNmMTQ5MjA2NGM3NjJk\nMDI1ZTJiNzA0NmQ3MDExM2M1NmY0NDY3NjZiYjVjMmFmMTc3NWMifSwiQTQiOnsi\neCI6IjB4MGE2YTkyNTZjMTBmM2I3ZThhZmRmYmQ5NTgyNjFkZjYxYjI1ZDY5OTk2\nMzU0NzE5NDk5YWMwZmRmODMxYTE2NiIsInkiOiIweDI4ZjM3NTA0MDI1MmExMWU3\nZTY4YTk3NTlhMmJjYWYzNTg4MmQ3NDFhZTJlMWI5ZTc5NTQ2YmMxNWYyYTFlM2Ui\nfSwiQTUiOnsieCI6IjB4MGU0OWQ1YzEyMDBkYmI5MWE3ODlkY2UyYzAxZjBiNjk5\nZmZmNGRiOTIwZjUzY2U0ZmFkYzUyYjhjZjMyMTk5OSIsInkiOiIweDE5ZjBkN2Q5\nNTkxNWNmNGNiNWIzOWJkNzFhOTM0M2IwZmY1YzY2NGNiZWYyYmMzZmYxM2ExMWFj\nOWQ4ZDY5MjAifSwiUSI6eyJ4IjoiMHgwZjBhNTUzZGJlNDcwMmQwN2I3YmI5ODVi\nNTFjZTlhODg3OTFkYTM3ZDllMDk2ZGQ0MTU0OGJjNTFlZDljZDA4IiwieSI6IjB4\nMTBiY2EyYzE2MmYwZjdiNWE4YmYxYTFhMmM0OTQ0ZTNkYjBkMzE4YjJhM2FmOWYx\nMTZmODkzNTc3ZjJmMWUzMiJ9LCJUIjp7IngiOiIweDJjYjg5MDBjNDgzY2JlNmE2\nMzU4YjBmNTIxMjlmNDQ4M2ZiN2I4MzRiMDQzMzgwYmU3NjM4ZjcxMDBlOTkxNjci\nLCJ5IjoiMHgwODE3YjAwMTFjOTMwZmE0NWI0ZmMyOTU4MDIzMzg5NjM0ZGRlZTNm\nMmNhODhmNDAwN2E2ZTkzM2FlYTU3ZDI2In0sIlUiOnsieCI6IjB4MDk2YTczOWY0\nYWYxNTJiNmZkOTBhNDVkMjgxMmIzZTA2ZGRlNTU2YTUzMDhhYmZkNjVjMDdmOTk3\nNTIyN2VhYyIsInkiOiIweDI0MjhjNGQ1MTFiMzJkNTM4OTFlMTdmZTI1YmJjMzVk\nNzJlMDZiYzExN2M0ODg4NmVkOWQ1NmQ4N2FhNWQyMTYifSwiZSI6IjB4MDgyZWIz\nMWJmYTdlMWE5YWJhYjQxNWUxODBjMTdhZDhkOTI3Y2I4NzI4NTYyYmFiMGMxYmQ0\nYWYwODc4MzdhZCIsInNfYiI6IjB4Mjc1ZGUzNzE5N2U0YjQyMmE5YWJkYzdhYWM0\nNjFmMjQ3M2ZiNzE2ZjZhMjJkYjJiNTk4YWU4N2M3ZGUzMTY4OSIsInNfZyI6IjB4\nMjg3MDhiNzE5ZGIxZDU5MTAyNDgwYzIxODdmY2IyZTdlOTNmM2EyZTQ3OTQ0MDJi\nNGVkNmI2MGJiNzE0OTdiNCIsInNfciI6IjB4MWExNzcxZWQ4Y2FlNTIzZTQwMjRj\nNzI3YmM5NDkyNzkwNjQ3YmViNmQ5MmVlMWNiNzY5NTU2MzA0Y2E5YTg3OSIsInNf\ncyI6IjB4MmZlNmYyYWFhYjlkMDQ3NzJlMzVmNmUxODE5NTM5M2M3ZWNmODQ2N2Jj\nMjYwZTYzMzRlMDNjMWRmMDIzMjBmMSJ9LCJpc3N1ZXJfYmluZGluZ19zdGF0dXMi\nOiJib3VuZCIsIm5vdGUiOnsiZUlzcyI6eyJDIjp7IngiOiIweDJmMjdhNzMyMTMy\nMTJlMDA3YjQwNzAxNWU3N2NiODI5NDNlNTVhOGZlN2JiODVkNjBkMGY3ZDVkODQ3\nMTliNTkiLCJ5IjoiMHgwNmVkOTZhMDM4Y2Q1ZTBjMTMyYTk0ZTdjZGE2ZTA3ZWU4\nNTkxZTQ2NzcxOTE5ZmM3MjAzNWJjNjhkMTdhZThhIn0sIlIiOnsieCI6IjB4MTk3\nMDRlMjEyZjk4YzE1OTI4ZjkzNGMxNWMxZDU3MzViYjMyY2JhNTFlNTRlYTc5YzVj\nZTY1NjllNDdlMjhmYSIsInkiOiIweDAzYWYwMjAxZjRhZDdlZWI2MGZlYTg3MDI0\nNTdiNjRjODM3NzI4MTI4MzhkNmI3ZDY3NjJjYTM4MTc1YTM2NTkifX0sImVOb3Rl\nIjp7IkMiOnsieCI6IjB4MTJiNTZiMDgyOWZkNDUzMmY1NGRjYzQ1MjY2ZGY0ZTc4\nZjBjMjI0Yjc0NDBiZDc5ZmMzNzgxNzI5ZDMyYTViZSIsInkiOiIweDAwYzRkZmZl\nZWFhNjYxNDdjYzkzOTM1NjQ0ZjRiMDY4NzgyNGVmMzVhZmRmZjBiY2M0ODQwZDA0\nZTczN2QzNjEifSwiUiI6eyJ4IjoiMHgyY2M0NDljNTZhNDk0MDM3YWY2ODA4OWZl\nYWM0Yzc2NzhlYTY2ZmUzZDU3Njk0Y2Y5YWE3Mzk5N2ZmOTg5OTkyIiwieSI6IjB4\nMDRmNTVkNjA0NTc3YjQ2YmU2ZmQ3YzA3ZjVkOWZiMjg2ZGQ5OGJhMGM2OGJjMWNh\nOGI3NGJiMTBmNWIzNDc2OCJ9fX0sInBheWVlIjp7IkVfYWRkciI6eyJDIjp7Ingi\nOiIweDFlYjdjNzVmYTRhMzQwYWNlZTdkNjBjZGQ0Zjg1MzYzYjUzN2Q1YWI1MDUz\nZGFhYzMzNzk5ODY3NmRiNjNkZmQiLCJ5IjoiMHgwNmQ5NDAwZGJkZjYwZGYwY2M3\nNGZkZTc0NDQ0MmUxZWMxMmQ2ZmRlOGI1MmNkNGU3MWYwM2E5ZGJmMzRiZTdkIn0s\nIlIiOnsieCI6IjB4MjkyY2RjMWY3MWNmODI5YTI3MTZkYWZkMGExNzE1NzY4MWE3\nOWQ0NTViZjJkYzJjNzc2OTBlMGYyYjIxNThiNCIsInkiOiIweDFlMTY2ZDdmY2I4\nNzJkNmQ3YmQyNjhlNzFkYjliZWIwZGEzZmUyZDZhMmNiZTcwYTVjMTUxMWNmM2I3\nZTcxNTQifX0sIk0iOnsieCI6IjB4MTU0YTkwODdiZDBhNGZmNmQ2MjM5MTE0OTAz\nYmFkODhmMGE0NzVhYjFlM2ZlNWI2Y2RhYmQzMzg1YjY2MGNmOSIsInkiOiIweDFi\nMzRjZjE2NGMwODY1YzNhNDk2NjYzNGJhYTM2ZmI1YTRlYzM3YjkzYWViNTI1Zjhj\nY2IyZjZhZDRlOWFmZjgifSwiYWRkciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMGExMWNlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBhMTFjZSIsImlk\nZW50aXR5Ijoie1wiZG9iXCI6XCIxOTcwLTA0LTAxXCIsXCJnaXZlbl9uYW1lXCI6\nXCJBbGljZVwiLFwiaXNzdWVyX2lkXCI6XCJzdmMtYWxiZXJ0YVwiLFwic3VybmFt\nZVwiOlwiUmFuY2hcIn0iLCJraW5kIjoicHJpdmF0ZSIsInBrIjp7IngiOiIweDBm\nODVlMzc2ODJlMWViYzA1ZTQwYTFmYjU5OTY5MDExZTIzMmRjMDk0NDg5YWQwZWFm\nZmE5YjRhYjVkMDg5NWIiLCJ5IjoiMHgxOTIwZDI1N2M3MzNlNGFmMmZlYzcxNDI2\nMTFjZWZlNWMxM2NlYWNiZGRhZTQ0ZTIxNmQzY2ZiZWIwOTc5NGNiIn19LCJwYXll\nciI6eyJFX2FkZHIiOnsiQyI6eyJ4IjoiMHgxZTYxNDBkNjNhZWQ0MGU0ZDA0NjQ4\nZDcyNzUxZTVhZWNiYzVjMjNjOWEyY2RjZmE3MDk4MzY2MDY1YWQ3M2JhIiwieSI6\nIjB4MDI1NDA2OWE1YTk0MGNmY2YwOWFjY2RiYjgzYTFhMjhhNmNmZjBjYTE0ODAy\nODJjYzBjMmYyZGM3ODk1Zjg2MiJ9LCJSIjp7IngiOiIweDBlYzYxNGRmNjM1NmM1\nMWE3M2QzNmQwYTJjYjUzMWM4NGQ5YmRjM2I2NDhhZDAwNDE0Y2E5ODRjYzhmMmM3\nNGYiLCJ5IjoiMHgwOThmYTgzOWQ5ZGE4YWNmYjA4N2FkYzQ5NjdmNTViOThmZmRm\nMzRhYzc2NmZhODQ1Yjc0NDlhNTZiNTYzOWFiIn19LCJNIjp7IngiOiIweDIxM2Ix\nOTcxMDc1YWNlZTRlOGM2N2U4MWE1ODQwMGEyZmRmNWE5N2YyNmNiZmI2NDg5YjVk\nNjBkMjFhM2EwMDYiLCJ5IjoiMHgyOTg5YTk4MjM4ZTNjNGVlM2ZhYmE2MjE1NzJi\nOGRhY2FhOGFjM2FkMTUyMThiMWJmMzVkMGFiOGE0NGEzMGQ2In0sImFkZHIiOiIw\neDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBiMGIwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDBiMGIiLCJpZGVudGl0eSI6IntcImRvYlwiOlwiMTk2OC0x\nMS0xMVwiLFwiZ2l2ZW5fbmFtZVwiOlwiQm9iXCIsXCJpc3N1ZXJfaWRcIjpcInN2\nYy1hbGJlcnRhXCIsXCJzdXJuYW1lXCI6XCJHcmFuYXJ5XCJ9Iiwia2luZCI6InBy\naXZhdGUiLCJwayI6eyJ4IjoiMHgwZjFlNzMwZWI4NTBhYWZiMDc4ZWQ4NzFjNzhk\nYTZlZGY1ZTA4NGI5OGNjMzdlNGYxMmQ5NWFmZjhmNjBiMjdhIiwieSI6IjB4MjNm\nNTg2YzM4ODZlNzVmZjJkYjhhZmMwMjRiOWI5MDk0MjY2YWE0MTAxYzNmNmY5ZDlk\nMzEyNjZkZTcwZjE4MyJ9fSwicGF5ZXJfdmQiOnsiRV9jdCI6eyJDIjp7IngiOiIw\neDFlNjE0MGQ2M2FlZDQwZTRkMDQ2NDhkNzI3NTFlNWFlY2JjNWMyM2M5YTJjZGNm\nYTcwOTgzNjYwNjVhZDczYmEiLCJ5IjoiMHgwMjU0MDY5YTVhOTQwY2ZjZjA5YWNj\nZGJiODNhMWEyOGE2Y2ZmMGNhMTQ4MDI4MmNjMGMyZjJkYzc4OTVmODYyIn0sIlIi\nOnsieCI6IjB4MGVjNjE0ZGY2MzU2YzUxYTczZDM2ZDBhMmNiNTMxYzg0ZDliZGMz\nYjY0OGFkMDA0MTRjYTk4NGNjOGYyYzc0ZiIsInkiOiIweDA5OGZhODM5ZDlkYThh\nY2ZiMDg3YWRjNDk2N2Y1NWI5OGZmZGYzNGFjNzY2ZmE4NDViNzQ0OWE1NmI1NjM5\nYWIifX0sIk1fbmFtZWQiOnsieCI6IjB4MjEzYjE5NzEwNzVhY2VlNGU4YzY3ZTgx\nYTU4NDAwYTJmZGY1YTk3ZjI2Y2JmYjY0ODliNWQ2MGQyMWEzYTAwNiIsInkiOiIw\neDI5ODlhOTgyMzhlM2M0ZWUzZmFiYTYyMTU3MmI4ZGFjYWE4YWMzYWQxNTIxOGIx\nYmYzNWQwYWI4YTQ0YTMwZDYifSwiYWNjb3VudCI6IjB4MDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMGIwYjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGIw\nYiIsImNoYWluaWQiOjEsInByb29mIjp7IlQxIjp7IngiOiIweDExMGVkMjQ4YWYw\nNWQzZmE0NzkyYTRkNzUxZTdlNTM1MjdhMDE0NzUxMzM5ZDNkNmViNDc1OGM0Y2Nj\nNGMxZDAiLCJ5IjoiMHgwYWE5Njk5YTVjMTFiZDIyOGI3ZGQxMzY3YWE3ODJhZjA0\nODQxNjBhZjFjZjM1OTAxOGE0MjA2YmUzZWRhZDM5In0sIlQyIjp7IngiOiIweDI5\nMTNlMWU2MjVhYzZmMDc5MDcwMzIxMzhhNzIwMTk1OTE1YjIzYTdiZjZlN2I5ZmNi\nZDAwNWUyYzk3YTQ5NzEiLCJ5IjoiMHgwMGIyNzEzNTg1Y2ZlOTg4NzE2YTRhMmVk\nMmY2YTkwMDgzMmQyMzdlYzEyNzYxOTJiNTUyNTAwMDFjNGViMmM5In0sImUiOiIw\neDExMTdlZDI4YTQ0NWQxMGY5MmVjMDliMzU0ZDlkZDYwMWE0MTg5OThlZmRiMjI2\nZGM4ZmE3ZjI0N2NkNmRlMTYiLCJzIjoiMHgyY2E5ZDc4NDYwM2E3ZTEzMzY4ZDZj\nNmNjYzExNDlkNjY0NmYxMTBhOGJkYTViZTkyMzU1Njg5MmQ0NTQxNWEwIn19LCJw\ncm9vZiI6eyJjbXMiOlsiMHgwY2ZkYWQzYzZlNzA1ODUxMzY1Y2ZlMGQ1MGJjODFi\nMjk3NmM5ZWIxY2UyOGM0ZTI4ZjY0MWM5MmRhOGJlZDhlIl0sImZhY2UiOiIweDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwZmEiLCJudWxsaWZpZXIiOiIweDI2OWJjYTM3YjIyZmRiNTAy\nNjRjMjFlNjkyYjI1ZDNkMWYzMTRhZDA3NzYyYWMwOTc0Yzc0MmJmYzI3ZjkzMDki\nLCJvcGVuaW5nIjp7ImZsYXZvciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMiIsImlkSGFz\naCI6IjB4MDYyNGYwNmIwNjM3ZWYyZjU4NTU5MDQxZjRmZGM1OWE2ZGMxZDAxMjU5\nMTFlNGQ2ODI0ZTUwMzYyMDFkNzU4YyIsInByZWRpY2F0ZSI6IjB4MDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMCIsInJobyI6IjB4MjIxZmIyMjBjNThmY2JmZjI2Y2ZkNWE2MTBkMzY2\nYjFjNmY2ZWEwM2YzYWFiZDg3ZGQzMWFlNDVjYzkzNWFmZSIsInYiOiIweDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwZmEifX0sInJvbGUiOiJpc3N1ZXIiLCJ0eG4iOnsiYmxvY2siOjEy\nMzQ1OTksImV2ZW50IjoiU3BlbnRDb3VwbGVkQTIiLCJraW5kIjoibm90ZS1zcGVu\nZCIsImxvZ2luZGV4IjoxLCJtaW50X2Jsb2NrIjoxMjM0NTAwLCJtaW50X3R4aGFz\naCI6IjB4Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj\nY2NjY2NjY2NjY2NjY2NjY2NjY2NjYyIsIm51bGxpZmllciI6IjB4MjY5YmNhMzdi\nMjJmZGI1MDI2NGMyMWU2OTJiMjVkM2QxZjMxNGFkMDc3NjJhYzA5NzRjNzQyYmZj\nMjdmOTMwOSIsInRpbWVzdGFtcCI6MTc3OTk5OTAwMCwidHhoYXNoIjoiMHhhMmEy\nYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEy\nYTJhMmEyYTJhMmEyIiwidmFsdWUiOjI1MH0sInR5cGUiOiJub3RlLWEyIiwidiI6\nMX0\n.END",
+   "kind": "note-a2",
+   "mint": {
+    "binding": {
+     "A1": {
+      "x": "0x25e8b37a737c0946442883fd4c212d77fd8e4d65373475d79eacca4dcf99205e",
+      "y": "0x011bb71955674230822077a5aaef6384733be0c2ac1ec03c509272bf3fb58bbd"
+     },
+     "A2": {
+      "x": "0x130f43206b409b653465dbb324bdbadbab5b4a9b4a4eda2240166e37d0f98534",
+      "y": "0x00b6dac36aab4533ed26ef5e54322fff2cbf658a2c1d91c9a85e2af181188e65"
+     },
+     "A3": {
+      "x": "0x04072c88e088c244a43d6ff849fae18a219bf144928a330afbd43f12f2def295",
+      "y": "0x00d8497e63fd3f1492064c762d025e2b7046d70113c56f446766bb5c2af1775c"
+     },
+     "A4": {
+      "x": "0x0a6a9256c10f3b7e8afdfbd958261df61b25d69996354719499ac0fdf831a166",
+      "y": "0x28f375040252a11e7e68a9759a2bcaf35882d741ae2e1b9e79546bc15f2a1e3e"
+     },
+     "A5": {
+      "x": "0x0e49d5c1200dbb91a789dce2c01f0b699fff4db920f53ce4fadc52b8cf321999",
+      "y": "0x19f0d7d95915cf4cb5b39bd71a9343b0ff5c664cbef2bc3ff13a11ac9d8d6920"
+     },
+     "Q": {
+      "x": "0x0f0a553dbe4702d07b7bb985b51ce9a88791da37d9e096dd41548bc51ed9cd08",
+      "y": "0x10bca2c162f0f7b5a8bf1a1a2c4944e3db0d318b2a3af9f116f893577f2f1e32"
+     },
+     "T": {
+      "x": "0x2cb8900c483cbe6a6358b0f52129f4483fb7b834b043380be7638f7100e99167",
+      "y": "0x0817b0011c930fa45b4fc2958023389634ddee3f2ca88f4007a6e933aea57d26"
+     },
+     "U": {
+      "x": "0x096a739f4af152b6fd90a45d2812b3e06dde556a5308abfd65c07f9975227eac",
+      "y": "0x2428c4d511b32d53891e17fe25bbc35d72e06bc117c48886ed9d56d87aa5d216"
+     },
+     "e": "0x082eb31bfa7e1a9abab415e180c17ad8d927cb8728562bab0c1bd4af087837ad",
+     "s_b": "0x275de37197e4b422a9abdc7aac461f2473fb716f6a22db2b598ae87c7de31689",
+     "s_g": "0x28708b719db1d59102480c2187fcb2e7e93f3a2e4794402b4ed6b60bb71497b4",
+     "s_r": "0x1a1771ed8cae523e4024c727bc9492790647beb6d92ee1cb769556304ca9a879",
+     "s_s": "0x2fe6f2aaab9d04772e35f6e18195393c7ecf8467bc260e6334e03c1df02320f1"
+    },
+    "cm": "0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e",
+    "cms": [
+     "0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e"
+    ],
+    "eIss": {
+     "C": {
+      "x": "0x2f27a73213212e007b407015e77cb82943e55a8fe7bb85d60d0f7d5d84719b59",
+      "y": "0x06ed96a038cd5e0c132a94e7cda6e07ee8591e46771919fc72035bc68d17ae8a"
+     },
+     "R": {
+      "x": "0x19704e212f98c15928f934c15c1d5735bb32cba51e54ea79c5ce6569e47e28fa",
+      "y": "0x03af0201f4ad7eeb60fea8702457b64c83772812838d6b7d6762ca38175a3659"
+     }
+    },
+    "eNote": {
+     "C": {
+      "x": "0x12b56b0829fd4532f54dcc45266df4e78f0c224b7440bd79fc3781729d32a5be",
+      "y": "0x00c4dffeeaa66147cc93935644f4b0687824ef35afdff0bcc4840d04e737d361"
+     },
+     "R": {
+      "x": "0x2cc449c56a494037af68089feac4c7678ea66fe3d57694cf9aa73997ff989992",
+      "y": "0x04f55d604577b46be6fd7c07f5d9fb286dd98ba0c68bc1ca8b74bb10f5b34768"
+     }
+    },
+    "nonces": {
+     "beta": "0x0c98f017a5637b365ef3eeb29711e37bf91657e0f5a489b7745e012d34ece33f",
+     "gamma": "0x15fd7cb8422d50f4a82d17b3d1ddb939eaa4988b83a67814847e2ecc30543b3b",
+     "k_b": "0x00ae527f1839dbd63e792c088aaf370350440f624ae8d3e18e61858b60909cce",
+     "k_g": "0x04eaf29bb900b515bfa4a5fe333e1f4c8ae311103d77411bf4f744915db6e471",
+     "k_r": "0x2122b36d507b1a22169a8159434039c0bea3430b8f15163e5b32af7bf7b46e55",
+     "k_s": "0x266ffd3722510f575bd319f411ac60c8d14a01e7cc30a44c04bb177fb1b97573",
+     "r_note": "0x24b2ff4be56fd25f58944cc7afdca80b07473e367e2ba56191c313b84519af97",
+     "r_prime": "0x219d9d660d33713af1ab1309854731f550df1848c7df823640a6b602aeb8a4d1",
+     "rho": "0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe"
+    },
+    "nullifier": "0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309",
+    "opening": {
+     "flavor": "0x0000000000000000000000000000000000000000000000000000000000000002",
+     "idHash": "0x0624f06b0637ef2f58559041f4fdc59a6dc1d0125911e4d6824e5036201d758c",
+     "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "rho": "0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe",
+     "v": "0x00000000000000000000000000000000000000000000000000000000000000fa"
+    }
+   },
+   "nonces": {
+    "t_vd": "0x225a7c8e2f9fe606ba83714ff678e7e83806181237d629c03dec2d9e135e4f9d"
+   },
+   "payee": "alice",
+   "payer": "bob",
+   "receipt_id": "suqx3h7ucyew",
+   "role": "issuer",
+   "txn": {
+    "block": 1234599,
+    "block_time": 1779999000,
+    "logindex": 1,
+    "mint_block": 1234500,
+    "mint_txhash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "txhash": "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+    "value": 250
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+     "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+    },
+    "ok": true,
+    "reason": "VALID",
+    "value": 250
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"issuer_binding_status\":\"unverified\",\"note\":{\"eIss\":{\"C\":{\"x\":\"0x2f27a73213212e007b407015e77cb82943e55a8fe7bb85d60d0f7d5d84719b59\",\"y\":\"0x06ed96a038cd5e0c132a94e7cda6e07ee8591e46771919fc72035bc68d17ae8a\"},\"R\":{\"x\":\"0x19704e212f98c15928f934c15c1d5735bb32cba51e54ea79c5ce6569e47e28fa\",\"y\":\"0x03af0201f4ad7eeb60fea8702457b64c83772812838d6b7d6762ca38175a3659\"}},\"eNote\":{\"C\":{\"x\":\"0x12b56b0829fd4532f54dcc45266df4e78f0c224b7440bd79fc3781729d32a5be\",\"y\":\"0x00c4dffeeaa66147cc93935644f4b0687824ef35afdff0bcc4840d04e737d361\"},\"R\":{\"x\":\"0x2cc449c56a494037af68089feac4c7678ea66fe3d57694cf9aa73997ff989992\",\"y\":\"0x04f55d604577b46be6fd7c07f5d9fb286dd98ba0c68bc1ca8b74bb10f5b34768\"}}},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x0eb17ae19f5e5a4c788577fbd97a0e4e2f5af6d63ab814c440f2d8f838cbccd2\",\"y\":\"0x05cc810502833207800ac7499709bbe7ae94baffdf3ee155e2e5cca4f9475159\"},\"T2\":{\"x\":\"0x07e0c3bf732f6e6965334991eeae65c506362e2e5bb9dca9cc7a175a1bef8c66\",\"y\":\"0x080de317c1a44d3b0100935458ecf6df5a08c913a3b0dc30a46502db30cb6ff6\"},\"e\":\"0x0e66d24f719334ca563b96796bc556c181bbd120f14e74029b0e9e854fd823cc\",\"s\":\"0x1d93de3905a4effd5bcce4b4197f02d93691fdbbbccfbe15e5fc24c10483daca\"}},\"payer\":{\"E_addr\":{\"C\":{\"x\":\"0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba\",\"y\":\"0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862\"},\"R\":{\"x\":\"0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f\",\"y\":\"0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab\"}},\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"nullifier\":\"0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"idHash\":\"0x0624f06b0637ef2f58559041f4fdc59a6dc1d0125911e4d6824e5036201d758c\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"recipient\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledA2\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309\",\"timestamp\":1779999000,\"txhash\":\"0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2\",\"value\":250},\"type\":\"note-a2\",\"v\":1}",
+   "envelope": "AB-RCPT/1.\neyJjaGFpbmlkIjoxLCJjb250cmFjdHMiOnsiYnVjayI6IjB4YjBiMGIwYjBiMGIw\nYjBiMGIwYjBiMGIwYjBiMGIwYjBiMGIwYjBiMCIsIm5vdGVzIjoiMHg3MDcwNzA3\nMDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwNzA3MDcwIiwicmVnaXN0cnkiOiIw\neDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQxZDFkMWQifSwiaXNz\ndWVyX2JpbmRpbmdfc3RhdHVzIjoidW52ZXJpZmllZCIsIm5vdGUiOnsiZUlzcyI6\neyJDIjp7IngiOiIweDJmMjdhNzMyMTMyMTJlMDA3YjQwNzAxNWU3N2NiODI5NDNl\nNTVhOGZlN2JiODVkNjBkMGY3ZDVkODQ3MTliNTkiLCJ5IjoiMHgwNmVkOTZhMDM4\nY2Q1ZTBjMTMyYTk0ZTdjZGE2ZTA3ZWU4NTkxZTQ2NzcxOTE5ZmM3MjAzNWJjNjhk\nMTdhZThhIn0sIlIiOnsieCI6IjB4MTk3MDRlMjEyZjk4YzE1OTI4ZjkzNGMxNWMx\nZDU3MzViYjMyY2JhNTFlNTRlYTc5YzVjZTY1NjllNDdlMjhmYSIsInkiOiIweDAz\nYWYwMjAxZjRhZDdlZWI2MGZlYTg3MDI0NTdiNjRjODM3NzI4MTI4MzhkNmI3ZDY3\nNjJjYTM4MTc1YTM2NTkifX0sImVOb3RlIjp7IkMiOnsieCI6IjB4MTJiNTZiMDgy\nOWZkNDUzMmY1NGRjYzQ1MjY2ZGY0ZTc4ZjBjMjI0Yjc0NDBiZDc5ZmMzNzgxNzI5\nZDMyYTViZSIsInkiOiIweDAwYzRkZmZlZWFhNjYxNDdjYzkzOTM1NjQ0ZjRiMDY4\nNzgyNGVmMzVhZmRmZjBiY2M0ODQwZDA0ZTczN2QzNjEifSwiUiI6eyJ4IjoiMHgy\nY2M0NDljNTZhNDk0MDM3YWY2ODA4OWZlYWM0Yzc2NzhlYTY2ZmUzZDU3Njk0Y2Y5\nYWE3Mzk5N2ZmOTg5OTkyIiwieSI6IjB4MDRmNTVkNjA0NTc3YjQ2YmU2ZmQ3YzA3\nZjVkOWZiMjg2ZGQ5OGJhMGM2OGJjMWNhOGI3NGJiMTBmNWIzNDc2OCJ9fX0sInBh\neWVlIjp7IkVfYWRkciI6eyJDIjp7IngiOiIweDFlYjdjNzVmYTRhMzQwYWNlZTdk\nNjBjZGQ0Zjg1MzYzYjUzN2Q1YWI1MDUzZGFhYzMzNzk5ODY3NmRiNjNkZmQiLCJ5\nIjoiMHgwNmQ5NDAwZGJkZjYwZGYwY2M3NGZkZTc0NDQ0MmUxZWMxMmQ2ZmRlOGI1\nMmNkNGU3MWYwM2E5ZGJmMzRiZTdkIn0sIlIiOnsieCI6IjB4MjkyY2RjMWY3MWNm\nODI5YTI3MTZkYWZkMGExNzE1NzY4MWE3OWQ0NTViZjJkYzJjNzc2OTBlMGYyYjIx\nNThiNCIsInkiOiIweDFlMTY2ZDdmY2I4NzJkNmQ3YmQyNjhlNzFkYjliZWIwZGEz\nZmUyZDZhMmNiZTcwYTVjMTUxMWNmM2I3ZTcxNTQifX0sIk0iOnsieCI6IjB4MTU0\nYTkwODdiZDBhNGZmNmQ2MjM5MTE0OTAzYmFkODhmMGE0NzVhYjFlM2ZlNWI2Y2Rh\nYmQzMzg1YjY2MGNmOSIsInkiOiIweDFiMzRjZjE2NGMwODY1YzNhNDk2NjYzNGJh\nYTM2ZmI1YTRlYzM3YjkzYWViNTI1ZjhjY2IyZjZhZDRlOWFmZjgifSwiYWRkciI6\nIjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGExMWNlMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDBhMTFjZSIsImlkZW50aXR5Ijoie1wiZG9iXCI6XCIxOTcw\nLTA0LTAxXCIsXCJnaXZlbl9uYW1lXCI6XCJBbGljZVwiLFwiaXNzdWVyX2lkXCI6\nXCJzdmMtYWxiZXJ0YVwiLFwic3VybmFtZVwiOlwiUmFuY2hcIn0iLCJraW5kIjoi\ncHJpdmF0ZSIsInBrIjp7IngiOiIweDBmODVlMzc2ODJlMWViYzA1ZTQwYTFmYjU5\nOTY5MDExZTIzMmRjMDk0NDg5YWQwZWFmZmE5YjRhYjVkMDg5NWIiLCJ5IjoiMHgx\nOTIwZDI1N2M3MzNlNGFmMmZlYzcxNDI2MTFjZWZlNWMxM2NlYWNiZGRhZTQ0ZTIx\nNmQzY2ZiZWIwOTc5NGNiIn19LCJwYXllZV92ZCI6eyJFX2N0Ijp7IkMiOnsieCI6\nIjB4MWViN2M3NWZhNGEzNDBhY2VlN2Q2MGNkZDRmODUzNjNiNTM3ZDVhYjUwNTNk\nYWFjMzM3OTk4Njc2ZGI2M2RmZCIsInkiOiIweDA2ZDk0MDBkYmRmNjBkZjBjYzc0\nZmRlNzQ0NDQyZTFlYzEyZDZmZGU4YjUyY2Q0ZTcxZjAzYTlkYmYzNGJlN2QifSwi\nUiI6eyJ4IjoiMHgyOTJjZGMxZjcxY2Y4MjlhMjcxNmRhZmQwYTE3MTU3NjgxYTc5\nZDQ1NWJmMmRjMmM3NzY5MGUwZjJiMjE1OGI0IiwieSI6IjB4MWUxNjZkN2ZjYjg3\nMmQ2ZDdiZDI2OGU3MWRiOWJlYjBkYTNmZTJkNmEyY2JlNzBhNWMxNTExY2YzYjdl\nNzE1NCJ9fSwiTV9uYW1lZCI6eyJ4IjoiMHgxNTRhOTA4N2JkMGE0ZmY2ZDYyMzkx\nMTQ5MDNiYWQ4OGYwYTQ3NWFiMWUzZmU1YjZjZGFiZDMzODViNjYwY2Y5IiwieSI6\nIjB4MWIzNGNmMTY0YzA4NjVjM2E0OTY2NjM0YmFhMzZmYjVhNGVjMzdiOTNhZWI1\nMjVmOGNjYjJmNmFkNGU5YWZmOCJ9LCJhY2NvdW50IjoiMHgwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwYTExY2UwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGEx\nMWNlIiwiY2hhaW5pZCI6MSwicHJvb2YiOnsiVDEiOnsieCI6IjB4MGViMTdhZTE5\nZjVlNWE0Yzc4ODU3N2ZiZDk3YTBlNGUyZjVhZjZkNjNhYjgxNGM0NDBmMmQ4Zjgz\nOGNiY2NkMiIsInkiOiIweDA1Y2M4MTA1MDI4MzMyMDc4MDBhYzc0OTk3MDliYmU3\nYWU5NGJhZmZkZjNlZTE1NWUyZTVjY2E0Zjk0NzUxNTkifSwiVDIiOnsieCI6IjB4\nMDdlMGMzYmY3MzJmNmU2OTY1MzM0OTkxZWVhZTY1YzUwNjM2MmUyZTViYjlkY2E5\nY2M3YTE3NWExYmVmOGM2NiIsInkiOiIweDA4MGRlMzE3YzFhNDRkM2IwMTAwOTM1\nNDU4ZWNmNmRmNWEwOGM5MTNhM2IwZGMzMGE0NjUwMmRiMzBjYjZmZjYifSwiZSI6\nIjB4MGU2NmQyNGY3MTkzMzRjYTU2M2I5Njc5NmJjNTU2YzE4MWJiZDEyMGYxNGU3\nNDAyOWIwZTllODU0ZmQ4MjNjYyIsInMiOiIweDFkOTNkZTM5MDVhNGVmZmQ1YmNj\nZTRiNDE5N2YwMmQ5MzY5MWZkYmJiY2NmYmUxNWU1ZmMyNGMxMDQ4M2RhY2EifX0s\nInBheWVyIjp7IkVfYWRkciI6eyJDIjp7IngiOiIweDFlNjE0MGQ2M2FlZDQwZTRk\nMDQ2NDhkNzI3NTFlNWFlY2JjNWMyM2M5YTJjZGNmYTcwOTgzNjYwNjVhZDczYmEi\nLCJ5IjoiMHgwMjU0MDY5YTVhOTQwY2ZjZjA5YWNjZGJiODNhMWEyOGE2Y2ZmMGNh\nMTQ4MDI4MmNjMGMyZjJkYzc4OTVmODYyIn0sIlIiOnsieCI6IjB4MGVjNjE0ZGY2\nMzU2YzUxYTczZDM2ZDBhMmNiNTMxYzg0ZDliZGMzYjY0OGFkMDA0MTRjYTk4NGNj\nOGYyYzc0ZiIsInkiOiIweDA5OGZhODM5ZDlkYThhY2ZiMDg3YWRjNDk2N2Y1NWI5\nOGZmZGYzNGFjNzY2ZmE4NDViNzQ0OWE1NmI1NjM5YWIifX0sIk0iOnsieCI6IjB4\nMjEzYjE5NzEwNzVhY2VlNGU4YzY3ZTgxYTU4NDAwYTJmZGY1YTk3ZjI2Y2JmYjY0\nODliNWQ2MGQyMWEzYTAwNiIsInkiOiIweDI5ODlhOTgyMzhlM2M0ZWUzZmFiYTYy\nMTU3MmI4ZGFjYWE4YWMzYWQxNTIxOGIxYmYzNWQwYWI4YTQ0YTMwZDYifSwiYWRk\nciI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGIwYjAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMGIwYiIsImlkZW50aXR5Ijoie1wiZG9iXCI6XCIx\nOTY4LTExLTExXCIsXCJnaXZlbl9uYW1lXCI6XCJCb2JcIixcImlzc3Vlcl9pZFwi\nOlwic3ZjLWFsYmVydGFcIixcInN1cm5hbWVcIjpcIkdyYW5hcnlcIn0iLCJraW5k\nIjoicHJpdmF0ZSIsInBrIjp7IngiOiIweDBmMWU3MzBlYjg1MGFhZmIwNzhlZDg3\nMWM3OGRhNmVkZjVlMDg0Yjk4Y2MzN2U0ZjEyZDk1YWZmOGY2MGIyN2EiLCJ5Ijoi\nMHgyM2Y1ODZjMzg4NmU3NWZmMmRiOGFmYzAyNGI5YjkwOTQyNjZhYTQxMDFjM2Y2\nZjlkOWQzMTI2NmRlNzBmMTgzIn19LCJwcm9vZiI6eyJjbXMiOlsiMHgwY2ZkYWQz\nYzZlNzA1ODUxMzY1Y2ZlMGQ1MGJjODFiMjk3NmM5ZWIxY2UyOGM0ZTI4ZjY0MWM5\nMmRhOGJlZDhlIl0sImZhY2UiOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwZmEiLCJudWxsaWZp\nZXIiOiIweDI2OWJjYTM3YjIyZmRiNTAyNjRjMjFlNjkyYjI1ZDNkMWYzMTRhZDA3\nNzYyYWMwOTc0Yzc0MmJmYzI3ZjkzMDkiLCJvcGVuaW5nIjp7ImZsYXZvciI6IjB4\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMiIsImlkSGFzaCI6IjB4MDYyNGYwNmIwNjM3ZWYyZjU4\nNTU5MDQxZjRmZGM1OWE2ZGMxZDAxMjU5MTFlNGQ2ODI0ZTUwMzYyMDFkNzU4YyIs\nInByZWRpY2F0ZSI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInJobyI6IjB4MjIxZmIy\nMjBjNThmY2JmZjI2Y2ZkNWE2MTBkMzY2YjFjNmY2ZWEwM2YzYWFiZDg3ZGQzMWFl\nNDVjYzkzNWFmZSIsInYiOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw\nMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwZmEifX0sInJvbGUiOiJy\nZWNpcGllbnQiLCJ0eG4iOnsiYmxvY2siOjEyMzQ1OTksImV2ZW50IjoiU3BlbnRD\nb3VwbGVkQTIiLCJraW5kIjoibm90ZS1zcGVuZCIsImxvZ2luZGV4IjoxLCJtaW50\nX2Jsb2NrIjoxMjM0NTAwLCJtaW50X3R4aGFzaCI6IjB4Y2NjY2NjY2NjY2NjY2Nj\nY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj\nYyIsIm51bGxpZmllciI6IjB4MjY5YmNhMzdiMjJmZGI1MDI2NGMyMWU2OTJiMjVk\nM2QxZjMxNGFkMDc3NjJhYzA5NzRjNzQyYmZjMjdmOTMwOSIsInRpbWVzdGFtcCI6\nMTc3OTk5OTAwMCwidHhoYXNoIjoiMHhhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJh\nMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyYTJhMmEyIiwidmFsdWUi\nOjI1MH0sInR5cGUiOiJub3RlLWEyIiwidiI6MX0\n.END",
+   "kind": "note-a2-unbound",
+   "mint": {
+    "binding": {
+     "A1": {
+      "x": "0x25e8b37a737c0946442883fd4c212d77fd8e4d65373475d79eacca4dcf99205e",
+      "y": "0x011bb71955674230822077a5aaef6384733be0c2ac1ec03c509272bf3fb58bbd"
+     },
+     "A2": {
+      "x": "0x130f43206b409b653465dbb324bdbadbab5b4a9b4a4eda2240166e37d0f98534",
+      "y": "0x00b6dac36aab4533ed26ef5e54322fff2cbf658a2c1d91c9a85e2af181188e65"
+     },
+     "A3": {
+      "x": "0x04072c88e088c244a43d6ff849fae18a219bf144928a330afbd43f12f2def295",
+      "y": "0x00d8497e63fd3f1492064c762d025e2b7046d70113c56f446766bb5c2af1775c"
+     },
+     "A4": {
+      "x": "0x0a6a9256c10f3b7e8afdfbd958261df61b25d69996354719499ac0fdf831a166",
+      "y": "0x28f375040252a11e7e68a9759a2bcaf35882d741ae2e1b9e79546bc15f2a1e3e"
+     },
+     "A5": {
+      "x": "0x0e49d5c1200dbb91a789dce2c01f0b699fff4db920f53ce4fadc52b8cf321999",
+      "y": "0x19f0d7d95915cf4cb5b39bd71a9343b0ff5c664cbef2bc3ff13a11ac9d8d6920"
+     },
+     "Q": {
+      "x": "0x0f0a553dbe4702d07b7bb985b51ce9a88791da37d9e096dd41548bc51ed9cd08",
+      "y": "0x10bca2c162f0f7b5a8bf1a1a2c4944e3db0d318b2a3af9f116f893577f2f1e32"
+     },
+     "T": {
+      "x": "0x2cb8900c483cbe6a6358b0f52129f4483fb7b834b043380be7638f7100e99167",
+      "y": "0x0817b0011c930fa45b4fc2958023389634ddee3f2ca88f4007a6e933aea57d26"
+     },
+     "U": {
+      "x": "0x096a739f4af152b6fd90a45d2812b3e06dde556a5308abfd65c07f9975227eac",
+      "y": "0x2428c4d511b32d53891e17fe25bbc35d72e06bc117c48886ed9d56d87aa5d216"
+     },
+     "e": "0x082eb31bfa7e1a9abab415e180c17ad8d927cb8728562bab0c1bd4af087837ad",
+     "s_b": "0x275de37197e4b422a9abdc7aac461f2473fb716f6a22db2b598ae87c7de31689",
+     "s_g": "0x28708b719db1d59102480c2187fcb2e7e93f3a2e4794402b4ed6b60bb71497b4",
+     "s_r": "0x1a1771ed8cae523e4024c727bc9492790647beb6d92ee1cb769556304ca9a879",
+     "s_s": "0x2fe6f2aaab9d04772e35f6e18195393c7ecf8467bc260e6334e03c1df02320f1"
+    },
+    "cm": "0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e",
+    "cms": [
+     "0x0cfdad3c6e705851365cfe0d50bc81b2976c9eb1ce28c4e28f641c92da8bed8e"
+    ],
+    "eIss": {
+     "C": {
+      "x": "0x2f27a73213212e007b407015e77cb82943e55a8fe7bb85d60d0f7d5d84719b59",
+      "y": "0x06ed96a038cd5e0c132a94e7cda6e07ee8591e46771919fc72035bc68d17ae8a"
+     },
+     "R": {
+      "x": "0x19704e212f98c15928f934c15c1d5735bb32cba51e54ea79c5ce6569e47e28fa",
+      "y": "0x03af0201f4ad7eeb60fea8702457b64c83772812838d6b7d6762ca38175a3659"
+     }
+    },
+    "eNote": {
+     "C": {
+      "x": "0x12b56b0829fd4532f54dcc45266df4e78f0c224b7440bd79fc3781729d32a5be",
+      "y": "0x00c4dffeeaa66147cc93935644f4b0687824ef35afdff0bcc4840d04e737d361"
+     },
+     "R": {
+      "x": "0x2cc449c56a494037af68089feac4c7678ea66fe3d57694cf9aa73997ff989992",
+      "y": "0x04f55d604577b46be6fd7c07f5d9fb286dd98ba0c68bc1ca8b74bb10f5b34768"
+     }
+    },
+    "nonces": {
+     "beta": "0x0c98f017a5637b365ef3eeb29711e37bf91657e0f5a489b7745e012d34ece33f",
+     "gamma": "0x15fd7cb8422d50f4a82d17b3d1ddb939eaa4988b83a67814847e2ecc30543b3b",
+     "k_b": "0x00ae527f1839dbd63e792c088aaf370350440f624ae8d3e18e61858b60909cce",
+     "k_g": "0x04eaf29bb900b515bfa4a5fe333e1f4c8ae311103d77411bf4f744915db6e471",
+     "k_r": "0x2122b36d507b1a22169a8159434039c0bea3430b8f15163e5b32af7bf7b46e55",
+     "k_s": "0x266ffd3722510f575bd319f411ac60c8d14a01e7cc30a44c04bb177fb1b97573",
+     "r_note": "0x24b2ff4be56fd25f58944cc7afdca80b07473e367e2ba56191c313b84519af97",
+     "r_prime": "0x219d9d660d33713af1ab1309854731f550df1848c7df823640a6b602aeb8a4d1",
+     "rho": "0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe"
+    },
+    "nullifier": "0x269bca37b22fdb50264c21e692b25d3d1f314ad07762ac0974c742bfc27f9309",
+    "opening": {
+     "flavor": "0x0000000000000000000000000000000000000000000000000000000000000002",
+     "idHash": "0x0624f06b0637ef2f58559041f4fdc59a6dc1d0125911e4d6824e5036201d758c",
+     "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "rho": "0x221fb220c58fcbff26cfd5a610d366b1c6f6ea03f3aabd87dd31ae45cc935afe",
+     "v": "0x00000000000000000000000000000000000000000000000000000000000000fa"
+    }
+   },
+   "nonces": {
+    "t_vd": "0x08c5c076d07a0f5254961248ecc05163a715ad3ebb3bf9cfb7e7d97caabc2610"
+   },
+   "payee": "alice",
+   "payer": "bob",
+   "receipt_id": "3auodikbgwtx",
+   "role": "recipient",
+   "txn": {
+    "block": 1234599,
+    "block_time": 1779999000,
+    "logindex": 1,
+    "mint_block": 1234500,
+    "mint_txhash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "txhash": "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+    "value": 250
+   },
+   "verify": {
+    "identity_M": {
+     "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+     "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+    },
+    "ok": true,
+    "reason": "UNVERIFIED ISSUER",
+    "value": 250
+   }
+  }
+ ],
+ "seed": "0x0000000000000000000000000000000000000000000000000000003a11e75eed",
+ "tampered": [
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"note\":{\"eDepForIss\":{\"C\":{\"x\":\"0x1b9bf0c47482e7cc5c21fb2a8a747078a29cc9f32d955c3b0e73f4ba676a76a8\",\"y\":\"0x2fffdd90dc43b8c6475924c51465eaf4e07ad2716afde15b8a595271f4bd76b0\"},\"R\":{\"x\":\"0x2224ab17c1b9f37ea97aadb3995959fe580c55223fde03753c7ed4b1fb9af893\",\"y\":\"0x205ab08f03a7ba40fb8d37db8a237b9533e30f2a2551c6540ac0f19ea8e37b7f\"}},\"sigma_R\":{\"x\":\"0x0e9dbfb852f1ccb53689740a363acf884e5eff120606b40e2f22956f464ca57e\",\"y\":\"0x02f1cb78f0ebef0a8c15eeb1d3fee97c7862446e1163aab9675f0a66866f8253\"},\"sigma_s\":\"0x2e9dbeed92485edcad62d9685c8cbe1924efbc1990675d173d048f445598b010\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x25d7bea9a9bcfcef5660572b5067158c6912cfcade6adcdfe1eef92a00e0d81e\",\"y\":\"0x20a74ebaa7f7fd4c8f87fe513c6a58a13c02b0ef5eae5b1d26ca554eada73167\"},\"T2\":{\"x\":\"0x0098c73b395b5a818926da702d3fc0befd405c58173e115e7e5ecf533fd6e9bc\",\"y\":\"0x1126c897ca91bf43379e8d5f36276e02b55888cfb9c19e2a413e487eb62e110b\"},\"e\":\"0x229b051960fcc587f8f15e5cde4092de5bbfb3cb3950264d81faa2445c5e8fc9\",\"s\":\"0x1c3809dc1c57caabe1e856e7ccfd7ffe8c17a79cb55418b94d635e9f0726fad4\"}},\"payer\":{\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"public\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x2fb7d821197a8647669dd6e0254c35912fa585ea606b2caa660e4ec57dcdfded\",\"0x03fa5b9d2e4801154e64ac3345192c56343df762a1a6d7cdf3e158167255fc3a\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"issuer_sig\":{\"R\":{\"x\":\"0x14935096e975be4d86d8903034b238913dbf50a5105e3c3a7769654af239804a\",\"y\":\"0x29b3fed52aefe0c65de6ba62872515fb7d7d07e9bb595672599141d8c40a493d\"},\"e\":\"0x2f766f71eb2cfed3317f13c6b44e4b0e3795ad5f0bd4174886f1295a1f10de1f\",\"s\":\"0x0b23e55b2f3da26aa65d3ea35a3254b43e7785a64735983499c99f35f04fda23\"},\"nullifier\":\"0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b20\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000003\",\"idHash\":\"0x07666197cf73750f37911027eff06eedf5b7601b0c5a66451097c05e5bf2a426\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x10d2333418f734cf2cd7b5738010694c06919fc620d65b403fd6e715b1e901e7\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"recipient\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledB1\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22\",\"timestamp\":1779999000,\"txhash\":\"0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1\",\"value\":250},\"type\":\"note-b1\",\"v\":1}",
+   "note": "b1 nullifier flipped",
+   "verify": {
+    "identity_M": null,
+    "ok": false,
+    "reason": "note-b1: nullifier mismatch",
+    "value": null
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"note\":{\"eNote\":{\"C\":{\"x\":\"0x1b4d663bf1ba60d6b937f96b785e9fd2b5e4175a45ff176efa85e369b479dfdd\",\"y\":\"0x0326893e440090e9c8678a8419ff80df51468cbf37b91e819e9c3a2bd2865509\"},\"R\":{\"x\":\"0x1b9b3aeaa7cadb200b60d04f4af4b37304fb0cf9d0dfede602afba7b84234255\",\"y\":\"0x06b1781f67e45508271c5c4b46453245ee89cf5e6381cbf679d8a8367469165a\"}},\"eRec\":{\"C\":{\"x\":\"0x17e9fe2f89a9d18d57e9685da6423fb88d80b0257baf57242bd35a54ae61113f\",\"y\":\"0x1a0fd91e011bf86f904f234422e3100441b9b07f4471df4f35eb9c39739b1661\"},\"R\":{\"x\":\"0x17f9ecf10655b2f7703ff32b67b8bdc8bce0c4634384cb529b7077a3663d841a\",\"y\":\"0x1229585ab01a2d5c29c66ea6a5cd0994b521bb428c7033754c6d69bbb4264a1f\"}},\"sigma_R\":{\"x\":\"0x14b38ac83c93bdd164850e0cf9abd6e4525cdf679a0a97301e0f195ba4db9ab4\",\"y\":\"0x01b258784b0db419f1c1c230133383a2dcd6ff482d960ec49da87bf8c30c7ff2\"},\"sigma_s\":\"0x17b74afb071a9ee5a465457953857e24dde4e7f337df4e25b89a5eafedcdeaf6\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x10ef2902a786c5a3e694a7c9784662fac2e6daa27dc1a8b4e29ce624410b56b7\",\"y\":\"0x20ad18a178b9a2f9bcc58899e6ab048f16725f6439742752eeae0c3dea3128be\"},\"T2\":{\"x\":\"0x237cf018a14cdee90c13b972e35334513d0044901f241ecccdb2d41da686a9ad\",\"y\":\"0x1584ef383a98b608f3fa11036545e37045c3e1334d29ea7f903542e109de9392\"},\"e\":\"0x0fa1ce7e162591a57553d4adaaf66b8209640ed10ed9ca76ff95ec216c82a530\",\"s\":\"0x1af370a390771c316376d4c19a9b38d18ca5f3996b83eba8f3e4fcbd538d9ed6\"}},\"payer\":{\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"public\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x02ea8b700e8d7dadc6293021f65facf1e12e4213c4e4631fc3bddb42a2bce46b\",\"0x2c2d715a981316ae2701bed3179815f938e1e4bb5bce5182c6a332ec2f027f83\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"nullifier\":\"0x2165a582d4d0a0638da36f51f3e88d0c034a05b42cae599033501815f562a85f\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"idHash\":\"0x1e8ee828fdfd56cec12dbbcbdf2acb0e67d3b0f4b99eb5843935d22b3d6c7adf\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x11b6717d116d4c3e939abcf0f830379ba967a67d7f4f80f9b8d6cba90793a45b\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"recipient\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledA1\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x2165a582d4d0a0638da36f51f3e88d0c034a05b42cae599033501815f562a85f\",\"timestamp\":1779999000,\"txhash\":\"0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"value\":250},\"type\":\"note-a1\",\"v\":1}",
+   "note": "a1 issuer_sig removed",
+   "verify": {
+    "identity_M": null,
+    "ok": false,
+    "reason": "note-a1: missing issuer batch Schnorr",
+    "value": null
+   }
+  },
+  {
+   "canonical": "{\"chainid\":1,\"contracts\":{\"buck\":\"0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\",\"notes\":\"0x7070707070707070707070707070707070707070\",\"registry\":\"0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d\"},\"note\":{\"eDepForIss\":{\"C\":{\"x\":\"0x1b9bf0c47482e7cc5c21fb2a8a747078a29cc9f32d955c3b0e73f4ba676a76a8\",\"y\":\"0x2fffdd90dc43b8c6475924c51465eaf4e07ad2716afde15b8a595271f4bd76b0\"},\"R\":{\"x\":\"0x2224ab17c1b9f37ea97aadb3995959fe580c55223fde03753c7ed4b1fb9af893\",\"y\":\"0x205ab08f03a7ba40fb8d37db8a237b9533e30f2a2551c6540ac0f19ea8e37b7f\"}},\"sigma_R\":{\"x\":\"0x0e9dbfb852f1ccb53689740a363acf884e5eff120606b40e2f22956f464ca57e\",\"y\":\"0x02f1cb78f0ebef0a8c15eeb1d3fee97c7862446e1163aab9675f0a66866f8253\"},\"sigma_s\":\"0x2e9dbeed92485edcad62d9685c8cbe1924efbc1990675d173d048f445598b010\"},\"payee\":{\"E_addr\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"addr\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"identity\":\"{\\\"dob\\\":\\\"1970-04-01\\\",\\\"given_name\\\":\\\"Alice\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Ranch\\\"}\",\"kind\":\"private\",\"pk\":{\"x\":\"0x0f85e37682e1ebc05e40a1fb59969011e232dc094489ad0eaffa9b4ab5d0895b\",\"y\":\"0x1920d257c733e4af2fec7142611cefe5c13ceacbddae44e216d3cfbeb09794cb\"}},\"payee_vd\":{\"E_ct\":{\"C\":{\"x\":\"0x1eb7c75fa4a340acee7d60cdd4f85363b537d5ab5053daac337998676db63dfd\",\"y\":\"0x06d9400dbdf60df0cc74fde744442e1ec12d6fde8b52cd4e71f03a9dbf34be7d\"},\"R\":{\"x\":\"0x292cdc1f71cf829a2716dafd0a17157681a79d455bf2dc2c77690e0f2b2158b4\",\"y\":\"0x1e166d7fcb872d6d7bd268e71db9beb0da3fe2d6a2cbe70a5c1511cf3b7e7154\"}},\"M_named\":{\"x\":\"0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9\",\"y\":\"0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8\"},\"account\":\"0x0000000000000000000000000a11ce00000000000000000000000000000a11ce\",\"chainid\":1,\"proof\":{\"T1\":{\"x\":\"0x25d7bea9a9bcfcef5660572b5067158c6912cfcade6adcdfe1eef92a00e0d81e\",\"y\":\"0x20a74ebaa7f7fd4c8f87fe513c6a58a13c02b0ef5eae5b1d26ca554eada73167\"},\"T2\":{\"x\":\"0x0098c73b395b5a818926da702d3fc0befd405c58173e115e7e5ecf533fd6e9bc\",\"y\":\"0x1126c897ca91bf43379e8d5f36276e02b55888cfb9c19e2a413e487eb62e110b\"},\"e\":\"0x229b051960fcc587f8f15e5cde4092de5bbfb3cb3950264d81faa2445c5e8fc9\",\"s\":\"0x1c3809dc1c57caabe1e856e7ccfd7ffe8c17a79cb55418b94d635e9f0726fad4\"}},\"payer\":{\"M\":{\"x\":\"0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006\",\"y\":\"0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6\"},\"addr\":\"0x0000000000000000000000000b0b000000000000000000000000000000000b0b\",\"identity\":\"{\\\"dob\\\":\\\"1968-11-11\\\",\\\"given_name\\\":\\\"Bob\\\",\\\"issuer_id\\\":\\\"svc-alberta\\\",\\\"surname\\\":\\\"Granary\\\"}\",\"kind\":\"public\",\"pk\":{\"x\":\"0x0f1e730eb850aafb078ed871c78da6edf5e084b98cc37e4f12d95aff8f60b27a\",\"y\":\"0x23f586c3886e75ff2db8afc024b9b9094266aa4101c3f6f9d9d31266de70f183\"}},\"proof\":{\"cms\":[\"0x2fb7d821197a8647669dd6e0254c35912fa585ea606b2caa660e4ec57dcdfded\",\"0x03fa5b9d2e4801154e64ac3345192c56343df762a1a6d7cdf3e158167255fc3a\"],\"face\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\",\"issuer_sig\":{\"R\":{\"x\":\"0x14935096e975be4d86d8903034b238913dbf50a5105e3c3a7769654af239804a\",\"y\":\"0x29b3fed52aefe0c65de6ba62872515fb7d7d07e9bb595672599141d8c40a493d\"},\"e\":\"0x2f766f71eb2cfed3317f13c6b44e4b0e3795ad5f0bd4174886f1295a1f10de1f\",\"s\":\"0x0b23e55b2f3da26aa65d3ea35a3254b43e7785a64735983499c99f35f04fda23\"},\"nullifier\":\"0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22\",\"opening\":{\"flavor\":\"0x0000000000000000000000000000000000000000000000000000000000000003\",\"idHash\":\"0x07666197cf73750f37911027eff06eedf5b7601b0c5a66451097c05e5bf2a426\",\"predicate\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"rho\":\"0x10d2333418f734cf2cd7b5738010694c06919fc620d65b403fd6e715b1e901e7\",\"v\":\"0x00000000000000000000000000000000000000000000000000000000000000fa\"}},\"role\":\"recipient\",\"txn\":{\"block\":1234599,\"event\":\"SpentCoupledB1\",\"kind\":\"note-spend\",\"logindex\":1,\"mint_block\":1234500,\"mint_txhash\":\"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"nullifier\":\"0x113465cb0fea932d5909f3ad5cd631c0b7faf5c8d8558a9089ac5c3e695b7b22\",\"timestamp\":1779999000,\"txhash\":\"0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1\",\"value\":251},\"type\":\"note-b1\",\"v\":1}",
+   "note": "b1 txn value != face",
+   "verify": {
+    "identity_M": null,
+    "ok": false,
+    "reason": "note-b1: txn value != face",
+    "value": null
+   }
+  }
+ ],
+ "unilateral_a1": {
+  "M_iss": {
+   "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+   "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+  },
+  "M_rec": {
+   "x": "0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9",
+   "y": "0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8"
+  },
+  "chainid": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "issuer": "0x0000000000000000000000000b0b000000000000000000000000000000000b0b",
+  "m_issuer": "0x24fe47d3f01f9464980ac88d204e3d1bb582b593d3f6ac48ac0b99bb57738336",
+  "m_rec": "0x0fee1b0ce9ec2aacb7278f41ff6314874f5b01d9429e1d7cf7a4b45ac376a8e1",
+  "minted": {
+   "cm": "0x2d1ce451a2776fc252364817f68a572a79487d2291c06dc896dc6fad75efc9f7",
+   "eNote": {
+    "C": {
+     "x": "0x1e3087cab7f5c2158cc90e10afc9e10c9bf8ebbe798a38261cf148b2912257a3",
+     "y": "0x063a147fb997b1ffa8dacd5c9c7346f9b3304b3f25bd297f0f2d7831a66b4879"
+    },
+    "R": {
+     "x": "0x0e2bf497f01e2c79034ce1aa796d6715aacb72519a378c8d817851083ff3a30d",
+     "y": "0x0b95079da73016ebea600c447fdd83c3dccacc32741dc89aea4f2e9200c8f4d6"
+    }
+   },
+   "eRec": {
+    "C": {
+     "x": "0x1858a8e1739939aba2926ad4b92a6113ea400eda8629a7ccd92d208a7a374764",
+     "y": "0x20ad94cbecbd8f313fd87407b669d200fd79febd14cd974f617069b54a868085"
+    },
+    "R": {
+     "x": "0x07472344c3b2861954c67476bf45448861f4889fd21d1e4db917c0b7fafdc4dd",
+     "y": "0x0134a994c611e50551245714ed4c8087e476a14c0da0bae54d83208991b76787"
+    }
+   },
+   "idHash": "0x282dd1a807fbf77f3d140f1172a6fa0af44fdf752a9d50d9ade7e4015beb2bb0",
+   "opening": {
+    "flavor": "0x0000000000000000000000000000000000000000000000000000000000000001",
+    "idHash": "0x282dd1a807fbf77f3d140f1172a6fa0af44fdf752a9d50d9ade7e4015beb2bb0",
+    "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "rho": "0x114e11d38ea5a11ace19eb554449b4cd72ae55237c30360bc3432e08f472407a",
+    "v": "0x0000000000000000000000000000000000000000000000000000000000000309"
+   }
+  },
+  "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "r_note": "0x29b9d19423916486e999496a14b8800484c2a38da571c881ba4fb87708cb735c",
+  "r_prime": "0x092db6582bb69ba13c7b66d69aa14ebaa54f703041c4efae9a19b42a55409a29",
+  "receipt": {
+   "M_iss": {
+    "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+    "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+   },
+   "M_iss_member": true,
+   "M_rec": {
+    "x": "0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9",
+    "y": "0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8"
+   },
+   "M_rec_member": true,
+   "value": "0x0000000000000000000000000000000000000000000000000000000000000309",
+   "vd": {
+    "T1": {
+     "x": "0x270f2a288178234b630da86324f6de33d5337794e51f1dd98b2267d1113003c3",
+     "y": "0x086e397260ab106220ec7364f3b506dbb3adf3f6a7f78bbd1ea3f2f8880a421a"
+    },
+    "T2": {
+     "x": "0x1de34ee9e756b438d36257e70f9fb6634feb9968e9ab4191e97fffe75a98930d",
+     "y": "0x2f0898223c7e17c1ada95893a6189481eef51a8f43b2c8b4f79b33a14c3a4d3b"
+    },
+    "e": "0x0605d026f883ffe6b3f6cfc068a9fbbed879d224cc07451011bc059139825462",
+    "s": "0x1faaea3810c30b7fb2e980caab3f3ba830db13f4893802e24aeb228a71aa0c8f"
+   }
+  },
+  "rho": "0x114e11d38ea5a11ace19eb554449b4cd72ae55237c30360bc3432e08f472407a",
+  "sigma_R": {
+   "x": "0x22a78c2ad61953106d05c478ec1c1dfcdd990dfb292496e2189ef3927f0a0427",
+   "y": "0x1be2f5a0d188d5d4f51849d45a65c5950d7761a24f0ff2a74c1b213676bbc676"
+  },
+  "sigma_s": "0x191b85312edf8cadb3f333eb9a4954b22c4b18bf31684f1426849d6903fd13b0",
+  "t_vd": "0x1a42342fc58d3830101348fcfca3aff565ecd6fe4c1e9d7d45ad1cf83483b21d",
+  "v": "0x0000000000000000000000000000000000000000000000000000000000000309",
+  "verify": {
+   "reason": "VALID",
+   "valid": true
+  }
+ },
+ "unilateral_a2": {
+  "E_reg": {
+   "C": {
+    "x": "0x1e6140d63aed40e4d04648d72751e5aecbc5c23c9a2cdcfa7098366065ad73ba",
+    "y": "0x0254069a5a940cfcf09accdbb83a1a28a6cff0ca1480282cc0c2f2dc7895f862"
+   },
+   "R": {
+    "x": "0x0ec614df6356c51a73d36d0a2cb531c84d9bdc3b648ad00414ca984cc8f2c74f",
+    "y": "0x098fa839d9da8acfb087adc4967f55b98ffdf34ac766fa845b7449a56b5639ab"
+   }
+  },
+  "M_rec": {
+   "x": "0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9",
+   "y": "0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8"
+  },
+  "beta": "0x2bf1c4d235c078cdc8905d2080a3fcd93e87d9a9f60aa268c037eb8b923aabe3",
+  "chainid": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "gamma": "0x0e198f7fc3296b238c51767daa76026c60063b6b1031042050be697341f7ed4e",
+  "issuer": "0x0000000000000000000000000b0b000000000000000000000000000000000b0b",
+  "k_b": "0x136be0d6db9015fa7f48bf990d0aeacaf37359071ac789442c398e9f34bb7b67",
+  "k_g": "0x21b77dd11e481f74636e9ee64492173310978f822d6ab739039a4194b14f8c6f",
+  "k_r": "0x078078924beec32e5b9362766ac16e2a2d1cde58ee78e22603da1b768e59026d",
+  "k_s": "0x228bff0c1a14f1149adaf9ae71496ee19d0f776a7c7f37612868565d67ab746e",
+  "m_rec": "0x0fee1b0ce9ec2aacb7278f41ff6314874f5b01d9429e1d7cf7a4b45ac376a8e1",
+  "minted": {
+   "M_I": {
+    "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+    "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+   },
+   "binding": {
+    "A1": {
+     "x": "0x213451bc987c5e48a60b0b3dea5d6f7d92bc5bf7f0adc69fc1a50a8ab6672743",
+     "y": "0x045a489dbfda6728ed0ce79c5d981620e11328cc866f3aa887fd257cc3569ee9"
+    },
+    "A2": {
+     "x": "0x2e8676b5f530f4214fa146f32aca50689d3dd0603a7215277713bbb56cdec915",
+     "y": "0x260a2860bb2d07a20be9cdbcc802bcf12a9e3091abd8ebd8b9cdeceff5bf12bf"
+    },
+    "A3": {
+     "x": "0x11206fe7e256f443d81bca8ded3ac74d4f00a293913e6f65070fe35fafbc8b2f",
+     "y": "0x0c65654f68cf2b5d2562a53b26aede405d0e2de57eb63fc85f040356489135ad"
+    },
+    "A4": {
+     "x": "0x1a6e54c8663c0dfa377a5723ffd842d8776eebea5678d3f3ba6210f49a8d270e",
+     "y": "0x13923a48c32e1d1a79c4642bdda5507bd7a806e7a7322c9cb849ba166ef0bc1a"
+    },
+    "A5": {
+     "x": "0x1f7c2676166ef316aa4363b9fafce7a3cab07d0d7fcbce54c8b22fe08cfe3f5f",
+     "y": "0x1d89958d44f703884d255f08e6fadaa62d0f343638131ed19d5b2f2c46cecd95"
+    },
+    "Q": {
+     "x": "0x11e731a9ffc4ff2f045018d7ab3ea4f2aca301aaf310a9260d3550843a0fc1c9",
+     "y": "0x2e735bcbff3680fef410dbbfea53c55c8012635adb574d4e683c212f84515025"
+    },
+    "T": {
+     "x": "0x0a91160ea24be2550f0d3279822352831938c356f135edbb9b0b069ab41d4231",
+     "y": "0x2ee0db9ac9112d6272b288c16065fdaea73c4ba5c516978fd710e497825d65ac"
+    },
+    "U": {
+     "x": "0x17f61ea88114d3547bd05264b4e9e72963327b6c2a0d55558b74dd3472ac38a7",
+     "y": "0x0302f3815ba58f1e85e698ab9a4cf828c1734376f30679af71de18264c8d663f"
+    },
+    "e": "0x2d4d0f03de32460a363eef57dd9671eb41b9615f046aba947330a49638a9dc4b",
+    "s_b": "0x1131de5f309fa198b9f3c2d307a7a93242643f3ea147e3e886d71e0db0c0f1da",
+    "s_g": "0x12a85601521e3eaf267039ea9987d5532c1615ac35f746df77028aaabb1c2b69",
+    "s_r": "0x0f7e949ce848fb5a9ee95db2183b638bf1e9d9cd18540395efe0c2b9cc00530b",
+    "s_s": "0x10f8ddd6a8b55eb48bab6648a45f4c0abaf8cf76fb2d79029dbcb4abaec98b3e"
+   },
+   "cm": "0x25132fc859da2c6acf0aad049f398741ecc6d0cc07d33db4b6e640b2c8f4444e",
+   "eIss": {
+    "C": {
+     "x": "0x11f3283b3ae1034fbee2c7e0d2f3a73fc0481a53fb0b4d14038a117df9b7f0b4",
+     "y": "0x1225cda28ff2e5719234eb7d3c3aaedb7953a8a9e71a363414556be1b17402b1"
+    },
+    "R": {
+     "x": "0x015bd73e7b8eed5a3b8aea8a0f8a3da1f3ed9eabfa6b2131e8ee2c3e4720442a",
+     "y": "0x11fe48cdbd84261c276e65bff72fb8a0806f1b6b1161f335aa04b09c06ee1efb"
+    }
+   },
+   "eNote": {
+    "C": {
+     "x": "0x24c1d9112915c6329c8a40a5bd52cd5712b3c21574cf55ad067f0b3da6bd4a50",
+     "y": "0x0aee5205d62dd068a2957d34cb0ab26a3a0896ac47d8f636e5cb1d5ed33aa055"
+    },
+    "R": {
+     "x": "0x004d6dbe7cc40a497fd63c77cd9fc76acc53c30c24c8ef4a9b81be31db2bdd9a",
+     "y": "0x2c3d0f479284f8a12ec973acf1c808c6c881c8140017c2b85e86bcbec8bb9012"
+    }
+   },
+   "idHash": "0x0079f9ab5ba6c268c3cd8a43ed0c23f36ed940c8ecb50eddf6b6778e517e4542",
+   "opening": {
+    "flavor": "0x0000000000000000000000000000000000000000000000000000000000000002",
+    "idHash": "0x0079f9ab5ba6c268c3cd8a43ed0c23f36ed940c8ecb50eddf6b6778e517e4542",
+    "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "rho": "0x2c21d2b62269b50fe4e3bf95052cc639a788037cc2563cb36382a00059cfb48c",
+    "v": "0x0000000000000000000000000000000000000000000000000000000000000309"
+   }
+  },
+  "predicate": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "r_note": "0x1db2dd69adfce8c8810b4b3916462118b9d3103607559f837addaf98a72e9196",
+  "r_prime": "0x25c82dbaec71c96ceeeed115e73dac1b7111e96d9b6850566c67d17846e340cb",
+  "receipt": {
+   "M_I": {
+    "x": "0x213b1971075acee4e8c67e81a58400a2fdf5a97f26cbfb6489b5d60d21a3a006",
+    "y": "0x2989a98238e3c4ee3faba621572b8dacaa8ac3ad15218b1bf35d0ab8a44a30d6"
+   },
+   "M_I_member": true,
+   "M_rec": {
+    "x": "0x154a9087bd0a4ff6d6239114903bad88f0a475ab1e3fe5b6cdabd3385b660cf9",
+    "y": "0x1b34cf164c0865c3a4966634baa36fb5a4ec37b93aeb525f8ccb2f6ad4e9aff8"
+   },
+   "M_rec_member": true,
+   "value": "0x0000000000000000000000000000000000000000000000000000000000000309",
+   "vd": {
+    "T1": {
+     "x": "0x2f42447752fd55ff6c7b244730fe162640636a40dc4af22fde8c4e7e82d49191",
+     "y": "0x168074ee583dbda42371515c7d02174d84a43a126e3ba51e94b59beb65dc9e77"
+    },
+    "T2": {
+     "x": "0x1e950004727d2618edc5bfc7e86bc1b116b66ffbc7f0e2932473456725b56ecc",
+     "y": "0x1e2088900e43966552b6b3975655c8b542ecab00b9de8a50ac32ea1197dfea6d"
+    },
+    "e": "0x131a6f30f9d98cd47654981bb846b8f170ee137565cf2676a127852e6447262e",
+    "s": "0x29dd03ba5af7bf54e54ef905a994d05b1587171ae081e32a006d2e21b08c8ae0"
+   }
+  },
+  "rho": "0x2c21d2b62269b50fe4e3bf95052cc639a788037cc2563cb36382a00059cfb48c",
+  "sk_iss": "0x0e3623f8ce6b556cf4f35325b91f1f8e9ab20003db1553392a3ae1f4edeeef9a",
+  "t_vd": "0x1bf443a50d647d3466629f5a47354d7faa3eebaaf38cbb1ae659a0083ec51374",
+  "tree": {
+   "depth": 10,
+   "leaves": [
+    "0x1a0dbdbc53ffed4b07231016fbc4f0c634ddb5f60ed8cf510c64045e420c0d6d",
+    "0x22af83a441ceba33398631afe28ccc681887f124e5c12b8dba6b6a260712a0b6",
+    "0x2eef0996fa9d8ba325b1ca6e62de8f80c97f0aa13131940851a5476c92c4e67b"
+   ],
+   "root": "0x06eb24b51b610e7d15d438e4f1921aecc36f2aceaed64ac2f795382ff3ee5f6d"
+  },
+  "v": "0x0000000000000000000000000000000000000000000000000000000000000309",
+  "verify": {
+   "reason": "VALID",
+   "valid": true
+  },
+  "wrong_root_tree": {
+   "leaves": [
+    "0x22af83a441ceba33398631afe28ccc681887f124e5c12b8dba6b6a260712a0b6"
+   ],
+   "root": "0x12eb5253dc94cbd575904b086ec3eafcca0cbd7baf1f568ba2d38ca03895041a"
+  },
+  "wrong_root_verify": {
+   "reason": "issuer M not a registered identity",
+   "valid": false
+  }
+ }
+}

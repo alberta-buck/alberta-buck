@@ -100,12 +100,21 @@ pub(crate) fn fq_strict(w: &W256) -> Result<Fq> {
 }
 
 /// Scalar reduced mod ORDER -- mirrors the Python reference's `% ORDER`.
-pub(crate) fn fr_mod(w: &W256) -> Fr {
+/// Public as the sibling-crate (buck-registry / buck-wallet) interop
+/// surface, together with [`w_from_fr`], [`g1_from_w`] and [`w_from_g1`].
+pub fn fr_mod(w: &W256) -> Fr {
     Fr::from_be_bytes_mod_order(w)
 }
 
-pub(crate) fn w_from_fr(x: &Fr) -> W256 {
+pub fn w_from_fr(x: &Fr) -> W256 {
     w_from_bigint(&x.into_bigint())
+}
+
+/// Arbitrary-length big-endian bytes reduced mod ORDER -- the Python
+/// `int.from_bytes(data, "big") % ORDER` idiom (registry transcript ids,
+/// message hashes).
+pub fn scalar_from_be_bytes_mod_order(data: &[u8]) -> W256 {
+    w_from_fr(&Fr::from_be_bytes_mod_order(data))
 }
 
 pub(crate) fn w_from_fq(x: &Fq) -> W256 {
@@ -125,7 +134,7 @@ pub(crate) fn w_is_zero(w: &W256) -> bool {
 // Word <-> point conversions
 // ---------------------------------------------------------------------------
 
-pub(crate) fn g1_from_w(p: &G1w) -> Result<G1Affine> {
+pub fn g1_from_w(p: &G1w) -> Result<G1Affine> {
     if w_is_zero(&p.0) && w_is_zero(&p.1) {
         return Ok(G1Affine::identity());
     }
@@ -137,14 +146,14 @@ pub(crate) fn g1_from_w(p: &G1w) -> Result<G1Affine> {
     Ok(a)
 }
 
-pub(crate) fn w_from_g1(p: &G1Affine) -> G1w {
+pub fn w_from_g1(p: &G1Affine) -> G1w {
     match p.xy() {
         Some((x, y)) => (w_from_fq(&x), w_from_fq(&y)),
         None => (ZERO_W, ZERO_W),
     }
 }
 
-pub(crate) fn w_from_g1p(p: &G1Projective) -> G1w {
+pub fn w_from_g1p(p: &G1Projective) -> G1w {
     w_from_g1(&p.into_affine())
 }
 
