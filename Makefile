@@ -1244,6 +1244,20 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
 	@echo "       then open http://localhost:8000/eqworld.html"
 
+# Stage the compiled kernels into the alberta-buck-kernel package.  The
+# identity, wallet and registry kernels are ONE cdylib with three
+# #[pymodule] entry points -- byte-identical files today -- so it ships once
+# as _kernel.abi3.so and each module loads it under its own name.  4.9 MB of
+# wheel becomes 1.9 MB.
+.PHONY: core-kernel-dist
+core-kernel-dist:	core-build-py
+	@cmp -s core/python/buck_core/buck_identity.so core/python/buck_core/buck_wallet.so && \
+	 cmp -s core/python/buck_core/buck_identity.so core/python/buck_core/buck_registry.so || \
+	  { echo "identity/wallet/registry .so differ -- the one-dylib assumption is broken"; exit 1; }
+	cp core/python/buck_core/buck_identity.so core/python-kernel/buck_kernel/_kernel.abi3.so
+	cp core/python/buck_core/buck_math.so     core/python-kernel/buck_kernel/_math.abi3.so
+	@echo "staged core/python-kernel/buck_kernel/{_kernel,_math}.abi3.so"
+
 core-build:	core-build-py core-build-wasm
 
 core-test-py:
