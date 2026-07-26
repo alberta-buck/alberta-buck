@@ -14,7 +14,14 @@
 // backends.js).  Contract handles are plain {abi, address} objects.
 
 export const CALL_GAS = 12_000_000n;
-export const DEPLOY_GAS = 55_000_000n;
+// Under tevm's 30M default block gas limit: a tx whose gas limit exceeds
+// the block limit is rejected outright ("Tx gaslimit ... exceeds block gas
+// limit"), and tevm exposes no way to raise it.  55M happened to work only
+// because older viem did not forward the parameter; a fresh install of the
+// published package fails on the first deploy.  The largest contract here
+// (BuckBasketProRata, ~21.8 KB) deploys for well under 6M, so this is a
+// ceiling rather than a constraint.
+export const DEPLOY_GAS = 29_000_000n;
 
 export class Session {
   /**
