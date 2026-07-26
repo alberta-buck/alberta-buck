@@ -1032,6 +1032,8 @@ sim-plot-eq-%:
 .PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
 .PHONY: core-wallet-vectors core-registry-vectors
+.PHONY: core-vectors-sync core-vectors-check
+.PHONY: poseidon-constants poseidon-constants-check
 
 # Emit from the py_ecc reference (kernel_vectors.py forces
 # BUCK_IDENTITY_BACKEND=py itself; the binding need not be built).
@@ -1045,6 +1047,40 @@ core-wallet-vectors:
 
 core-registry-vectors:
 	python -m alberta_buck.registry.kernel_vectors core/vectors/registry-kernel-vectors.json
+
+# Each published crate carries its OWN copy of the vectors it replays:
+# `cargo package` includes only files under the crate directory, so a crate
+# whose tests reached ../../../test/vectors would ship a suite that cannot
+# run for anyone downstream (alberta-buck-deployment.org, P0/4).  -sync
+# refreshes the copies after regenerating the canonical files; -check fails
+# on drift and gates core-test-rust, so a stale copy cannot ship.
+core-vectors-sync:
+	cp test/vectors/math-vectors.json            core/rust/buck-math/tests/vectors/
+	cp test/vectors/identity.json                core/rust/buck-identity/tests/vectors/
+	cp core/vectors/identity-kernel-vectors.json core/rust/buck-identity/tests/vectors/
+	cp core/vectors/registry-kernel-vectors.json core/rust/buck-registry/tests/vectors/
+	cp core/vectors/wallet-kernel-vectors.json   core/rust/buck-wallet/tests/vectors/
+
+core-vectors-check:
+	@cmp test/vectors/math-vectors.json            core/rust/buck-math/tests/vectors/math-vectors.json
+	@cmp test/vectors/identity.json                core/rust/buck-identity/tests/vectors/identity.json
+	@cmp core/vectors/identity-kernel-vectors.json core/rust/buck-identity/tests/vectors/identity-kernel-vectors.json
+	@cmp core/vectors/registry-kernel-vectors.json core/rust/buck-registry/tests/vectors/registry-kernel-vectors.json
+	@cmp core/vectors/wallet-kernel-vectors.json   core/rust/buck-wallet/tests/vectors/wallet-kernel-vectors.json
+	@echo "vendored crate vectors match the canonical files"
+
+# Poseidon round constants and MDS matrices, DERIVED from the Poseidon
+# specification's Grain LFSR rather than copied from circomlib -- see NOTICE
+# and the generator's docstring.  The output is byte-identical to circomlib's
+# file, which -check proves whenever node_modules/circomlibjs is installed.
+POSEIDON_GEN	= core/rust/buck-identity/constants/generate.py
+CIRCOMLIB_JSON	= node_modules/circomlibjs/src/poseidon_constants.json
+
+poseidon-constants:
+	python3 $(POSEIDON_GEN) --write
+
+poseidon-constants-check:
+	python3 $(POSEIDON_GEN) --check $(if $(wildcard $(CIRCOMLIB_JSON)),--check-against $(CIRCOMLIB_JSON))
 
 core-js-deps:
 	cd core/js && npm ci
@@ -1146,7 +1182,7 @@ core-test-js:
 	@test -d core/js/node_modules || { echo "core/js deps missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/js && node --test
 
-core-test-rust:
+core-test-rust:	core-vectors-check poseidon-constants-check
 	cd core/rust && cargo test --quiet
 
 core-test:	core-test-py core-test-js core-test-rust

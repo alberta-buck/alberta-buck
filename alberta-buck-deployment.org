@@ -406,9 +406,10 @@ none of it depends on which registry goes first.
    | =alberta-buck-wallet=   | =../../vectors/wallet-kernel-vectors.json=                                          |
 
    =cargo package= only includes files under the crate directory, so a
-   published crate would ship a test suite that cannot compile
-   (=include_str!= is a hard error).  For crates whose entire value
-   proposition is "vector-proven bit-identical", that is unacceptable.  Copy
+   published crate would ship a test suite that compiles and then panics on
+   the missing file for every downstream user.  For crates whose entire
+   value proposition is "vector-proven bit-identical", that is unacceptable.
+   Copy
    each needed vector file into the crate
    (=core/rust/buck-math/tests/vectors/=), add a =make core-vectors-sync=
    that refreshes them, and a CI byte-compare that fails on drift.

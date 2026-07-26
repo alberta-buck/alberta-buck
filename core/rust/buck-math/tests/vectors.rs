@@ -19,7 +19,7 @@ fn i(v: &Value, k: &str) -> i128 {
 
 fn load() -> Vec<Value> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"),
-                       "/../../../test/vectors/math-vectors.json");
+                       "/tests/vectors/math-vectors.json");
     let text = std::fs::read_to_string(path)
         .expect("run `make nix-match-MathVectors` to generate the vectors");
     serde_json::from_str(&text).unwrap()

@@ -57,7 +57,7 @@ fn jproof(v: &serde_json::Value) -> MembershipProof {
 fn fixture() -> serde_json::Value {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../vectors/registry-kernel-vectors.json"
+        "/tests/vectors/registry-kernel-vectors.json"
     );
     let txt = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!("cannot read {path}: {e} (run: make nix-venv-core-registry-vectors)")

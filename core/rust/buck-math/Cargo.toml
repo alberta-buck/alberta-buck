@@ -1,9 +1,19 @@
 [package]
-name = "buck-math"
-version = "0.0.1"
-edition = "2021"
+# Published as alberta-buck-math; imported as buck_math (see [lib] below and
+# alberta-buck-deployment.org, D3: distributions carry the project prefix,
+# import names stay short).
+name = "alberta-buck-math"
 description = "Alberta Buck integer monetary arithmetic, bit-identical to the Solidity contracts"
-license = "MIT"
+keywords = ["ethereum", "stablecoin", "demurrage", "depreciation", "fixed-point"]
+categories = ["mathematics", "finance", "no-std"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "buck_math"
 
 [dependencies]
 

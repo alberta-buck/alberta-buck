@@ -3,12 +3,17 @@
 Why this exists: the Phase 6/7/7-bis circuits (mint, mint_batch, spend) all
 hash with circomlib's Poseidon, and we want Python-side witness emitters and
 test oracles whose commitments / nullifiers / Merkle nodes agree exactly with
-those circuits.  The circomlibjs JSON constants are vendored as package data
-(``alberta_buck/wallet/poseidon_constants.json``, a byte-identical copy of
-``node_modules/circomlibjs/src/poseidon_constants.json``) so they ship with a
-pip install rather than requiring an npm-installed repo checkout; when running
-from a checkout that has ``node_modules``, the circomlibjs original is used as
-a fallback if the vendored copy is missing.
+those circuits.  The JSON constants ship as package data
+(``alberta_buck/wallet/poseidon_constants.json``) so a pip install needs no
+npm-installed repo checkout; when running from a checkout that has
+``node_modules``, circomlibjs's own file is used as a fallback if the shipped
+copy is missing.
+
+Provenance: the shipped constants are GENERATED, not copied -- see
+``core/rust/buck-identity/constants/generate.py``, which derives them from the
+Poseidon specification's Grain LFSR and emits this exact file.  They are
+byte-identical to circomlib's, which ``make poseidon-constants-check`` proves
+whenever ``node_modules/circomlibjs`` is present.
 
 What this matches: this is the *unoptimized* Poseidon algorithm (full M matrix,
 per-round full C vector).  It is mathematically equivalent to the optimized

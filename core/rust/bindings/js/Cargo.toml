@@ -1,19 +1,25 @@
 [package]
+# A build artifact, not a library: the wasm package is what ships (npm
+# alberta-buck-kernel), never this crate.
 name = "buck-math-wasm"
-version = "0.0.1"
-edition = "2021"
 description = "WASM/JS binding for the buck-math kernel (browser + Node)"
-license = "MIT"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-kernel = { path = "../../buck-math", package = "buck-math" }
+kernel = { path = "../../buck-math", package = "alberta-buck-math" }
 # u128/i128 cross as JS BigInt.
 wasm-bindgen = "0.2"
 
 [package.metadata.wasm-pack.profile.release]
 # Skip the wasm-opt download/pass: one less moving part; the kernel is
-# tiny integer math and needs no size heroics.
+# tiny integer math and needs no size heroics.  (Publication flips this on
+# for the released package -- alberta-buck-deployment.org, P2 gotcha 2.)
 wasm-opt = false

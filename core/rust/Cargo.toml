@@ -6,6 +6,18 @@
 # (wasm-clean; the no_std flip is mechanical if a Holochain zome needs it
 # -- the holo-mutualcredit pattern still applies).
 
+# Shared package metadata (alberta-buck-deployment.org, D2/D3/D4): the four
+# kernel crates publish to crates.io as alberta-buck-<kernel> and move as ONE
+# version -- they are one artifact compiled three ways, and a bit-identical
+# guarantee that spans versions is not a guarantee.  The bindings/ crates are
+# build artifacts (publish = false) and inherit only for consistency.
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "CAL-1.0"
+repository = "https://github.com/alberta-buck/alberta-buck"
+authors = ["Perry Kundert <perry@dominionrnd.com>"]
+
 [workspace]
 resolver = "2"
 members = [

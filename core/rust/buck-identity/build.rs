@@ -1,11 +1,14 @@
 //! Poseidon constants codegen.
 //!
-//! Converts the vendored circomlibjs `poseidon_constants.json` (a
-//! byte-identical copy of the same file `alberta_buck/wallet/poseidon.py`
-//! loads) into static `[u64; 4]` limb arrays.  Keeping the JSON as the
-//! single source of truth -- rather than committing generated Rust --
-//! makes "same constants as the circuits and the Python reference" an
-//! auditable file compare.
+//! Converts `constants/poseidon_constants.json` (the same file
+//! `alberta_buck/wallet/poseidon.py` loads) into static `[u64; 4]` limb
+//! arrays.  Keeping the JSON as the single source of truth -- rather than
+//! committing generated Rust -- makes "same constants as the circuits and
+//! the Python reference" an auditable file compare.
+//!
+//! The JSON itself is emitted by `constants/generate.py` from the Poseidon
+//! specification's Grain LFSR; it is byte-identical to circomlib's file,
+//! but derived rather than copied (`make poseidon-constants-check`, NOTICE).
 
 use std::env;
 use std::fmt::Write as _;

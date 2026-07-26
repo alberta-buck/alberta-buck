@@ -1,25 +1,31 @@
 [package]
+# A build artifact, not a library: the wasm package is what ships (npm
+# alberta-buck-kernel), never this crate.
 name = "buck-identity-wasm"
-version = "0.0.1"
-edition = "2021"
 description = "WASM/JS binding for the buck-identity kernel (browser + Node)"
-license = "MIT"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-kernel = { path = "../../buck-identity", package = "buck-identity" }
+kernel = { path = "../../buck-identity", package = "alberta-buck-identity" }
 # The wallet + registry kernels ride in the SAME wasm blob (one arkworks
 # copy): structured wallet inputs cross as JSON-args texts, certificates
 # as their wire bytes, the trees as exported classes.
-wallet = { path = "../../buck-wallet", package = "buck-wallet" }
-registry = { path = "../../buck-registry", package = "buck-registry" }
+wallet = { path = "../../buck-wallet", package = "alberta-buck-wallet" }
+registry = { path = "../../buck-registry", package = "alberta-buck-registry" }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 # 256-bit words cross the ABI as 0x-hex strings; core/js/src/identity.js
 # wraps this in the BigInt-native API.
 wasm-bindgen = "0.2"
 
 [package.metadata.wasm-pack.profile.release]
-# Skip the wasm-opt download/pass: one less moving part.
+# Skip the wasm-opt download/pass: one less moving part.  (Publication
+# flips this on -- alberta-buck-deployment.org, P2 gotcha 2.)
 wasm-opt = false

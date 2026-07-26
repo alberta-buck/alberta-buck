@@ -1,9 +1,14 @@
 [package]
+# A build artifact, not a library: the wheel is what ships (PyPI
+# alberta-buck-kernel), never this crate.
 name = "buck-math-py"
-version = "0.0.1"
-edition = "2021"
 description = "Python binding for the buck-math kernel (import buck_math)"
-license = "MIT"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [lib]
 name = "buck_math"
@@ -12,6 +17,6 @@ crate-type = ["cdylib"]
 [dependencies]
 # Aliased: the cdylib itself is named buck_math (the Python module), which
 # would shadow the kernel crate's name in paths.
-kernel = { path = "../../buck-math", package = "buck-math" }
+kernel = { path = "../../buck-math", package = "alberta-buck-math" }
 # abi3-py311: one artifact serves CPython >= 3.11.
 pyo3 = { version = "0.24", features = ["extension-module", "abi3-py311"] }

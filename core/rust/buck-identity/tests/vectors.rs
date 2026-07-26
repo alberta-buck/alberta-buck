@@ -48,7 +48,7 @@ fn jg2(v: &serde_json::Value) -> G2w {
 fn fixture() -> serde_json::Value {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../test/vectors/identity.json"
+        "/tests/vectors/identity.json"
     );
     let txt = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("cannot read {path}: {e} (run: make nix-vectors-identity)"));
@@ -456,7 +456,7 @@ fn golden_identity_fixture() {
 fn kernel_fixture() -> serde_json::Value {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../vectors/identity-kernel-vectors.json"
+        "/tests/vectors/identity-kernel-vectors.json"
     );
     let txt = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!("cannot read {path}: {e} (run: make nix-venv-core-identity-vectors)")

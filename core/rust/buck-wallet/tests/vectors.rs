@@ -90,7 +90,7 @@ fn jbinding(v: &Value) -> IssuerReencProof {
 fn fixture() -> Value {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../vectors/wallet-kernel-vectors.json"
+        "/tests/vectors/wallet-kernel-vectors.json"
     );
     let txt = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!("cannot read {path}: {e} (run: make nix-venv-core-wallet-vectors)")
