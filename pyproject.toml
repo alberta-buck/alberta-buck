@@ -6,25 +6,63 @@ build-backend = "setuptools.build_meta"
 name			= "alberta-buck"
 version			= "0.1.0"
 description		= "Alberta Buck commodity-basket stablecoin: oracle tools, historical analysis, and PID simulation"
-requires-python		= ">=3.10"
+# 3.11 is the floor of alberta-buck-core, which is a hard dependency below.
+requires-python		= ">=3.11"
 license			= "GPL-3.0-or-later"
 authors = [
     { name = "Perry Kundert", email = "perry@dominionrnd.com" }
 ]
 
+# The base install is PURE PYTHON and installs everywhere.  Nothing here
+# compiles, and nothing here is platform-gated: `pip install alberta-buck`
+# gets a working wallet, registry and analysis stack on any machine with a
+# supported CPython, including ones no wheel of ours is built for.
+#
+# Everything that would narrow that -- the compiled kernels, the in-process
+# EVM, plotting, the websocket server -- is an extra.  Each is imported
+# lazily at its point of use (alberta_buck.sim.plot_* import matplotlib
+# inside the plotting functions; __main__ imports pyrevm_backend inside the
+# backend selector), so a base install imports and runs; it simply cannot
+# reach those code paths.
 dependencies = [
     "web3		>=7,<8",
-    "matplotlib		>=3.8",
     "python-dotenv	>=1.0,<2",
-    "py_ecc		>=8.0",
-    "pyrevm		>=0.3",     # in-process EVM backend for alberta_buck.sim
-    "websockets		>=12",      # alberta_buck.sim.server frame/control/rpc
+    "py_ecc		>=8.0",     # the pure-Python bn254 path (wallet.bn254)
+    # session/journal/artifacts, and the contract artifacts it depends on.
+    # buck_contracts is never imported here directly -- it arrives through
+    # core, which is what calls it.
+    "alberta-buck-core	>=0.1.0",
 ]
 
 [project.optional-dependencies]
+# The compiled kernels.  Optional BY CONSTRUCTION, not by omission:
+# alberta_buck.wallet._kernel selects at call time and falls back to the
+# pure-Python path when the import fails, and the kernel is proven
+# bit-identical to that path by core/vectors/*-kernel-vectors.json -- so
+# installing this cannot change a single emitted byte, only the speed.
+# Wheels exist for macOS arm64/x86_64 and manylinux_2_28 x86_64/aarch64;
+# elsewhere this extra simply has nothing to install, which is why it must
+# never become a hard dependency.
+kernel = ["alberta-buck-core[kernel]>=0.1.0"]
+
+# pyrevm: the in-process EVM backend (~7000x per-tx vs anvil).  An extra
+# rather than a dependency because it has no wheel for every target we
+# support -- as a hard dependency it would make `pip install alberta-buck`
+# fail to BUILD on exactly the platforms the kernel matrix covers.
+fast = ["pyrevm >=0.3"]
+
+plots = ["matplotlib >=3.8"]    # alberta_buck.sim.plot_* renderers
+server = ["websockets >=12"]    # alberta_buck.sim.server frame/control/rpc
+
+# Everything: the full simulation stack as a developer runs it.
+sim = ["alberta-buck[kernel,fast,plots,server]"]
+
 tests = [
     "pytest",
     "pytest-cov",
+    # The suite exercises the plotting and pyrevm paths, so testing needs
+    # what a plain install deliberately leaves out.
+    "alberta-buck[plots,fast]",
 ]
 
 dev = [
