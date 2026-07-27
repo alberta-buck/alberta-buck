@@ -25,7 +25,7 @@ _REPO = Path(__file__).resolve().parents[3]
 
 
 def _load(rel: str) -> dict:
-    return json.loads((_REPO / rel).read_text())
+    return json.loads((_REPO / rel).read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")

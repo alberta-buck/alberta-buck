@@ -29,7 +29,7 @@ _REPO = Path(__file__).resolve().parents[3]
 
 @pytest.fixture(scope="module")
 def rv() -> dict:
-    return json.loads((_REPO / "core/vectors/registry-kernel-vectors.json").read_text())
+    return json.loads((_REPO / "core/vectors/registry-kernel-vectors.json").read_text(encoding="utf-8"))
 
 
 def _i(h: str) -> int:

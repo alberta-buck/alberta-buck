@@ -44,7 +44,7 @@ PY_ = REPO / "core" / "contracts" / "python" / "buck_contracts"
 # every emitted artifact.  Read from the config rather than duplicated, so
 # the two cannot drift apart.
 def pinned_solc() -> str:
-    txt = (REPO / "foundry.toml").read_text()
+    txt = (REPO / "foundry.toml").read_text(encoding="utf-8")
     in_default = False
     for line in txt.splitlines():
         s = line.strip()
@@ -95,7 +95,7 @@ def load(name: str) -> dict:
     if not f.exists():
         raise SystemExit(
             f"missing {f.relative_to(REPO)} -- run: make contracts-dist-build")
-    return json.loads(f.read_text())
+    return json.loads(f.read_text(encoding="utf-8"))
 
 
 def collect(expect_solc: str):

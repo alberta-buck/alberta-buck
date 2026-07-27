@@ -20,7 +20,7 @@ VECTORS = (Path(__file__).resolve().parents[3]
 
 
 def rows():
-    return json.loads(VECTORS.read_text())
+    return json.loads(VECTORS.read_text(encoding="utf-8"))
 
 
 def test_constants_match_the_contracts():

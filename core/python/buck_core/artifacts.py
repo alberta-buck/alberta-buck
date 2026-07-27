@@ -52,7 +52,7 @@ def load_artifact(name: str, sol_file: str | None = None) -> tuple[list, str]:
     """
     try:
         f = repo_root() / "out" / f"{sol_file or name}.sol" / f"{name}.json"
-        art = json.loads(f.read_text())
+        art = json.loads(f.read_text(encoding="utf-8"))
         return art["abi"], art["bytecode"]["object"]
     except (FileNotFoundError, OSError):
         pass

@@ -296,6 +296,15 @@ jobs:
   # abi3-py311 means one build per platform, not one per Python version --
   # these cp311 wheels serve 3.11, 3.12, 3.13 and onward.
   #
+  # NO WINDOWS WHEEL, deliberately, for now.  The packaging side of it
+  # works -- the .pyd built, loaded and passed 32 of the 39 tests on the
+  # first attempt -- so re-enabling is adding back a matrix entry with
+  # `venv_bin: Scripts` (Windows venvs put executables there), plus
+  # win_amd64 in the publish job's expected set.  It was dropped as a
+  # priority call, not because it is far away.  Without a wheel, Windows
+  # users get `pip install alberta-buck` on the pure-Python path, which is
+  # the supported configuration everywhere anyway.
+  #
   # WHEELS ONLY, no sdist.  The kernel sdist would carry whatever object the
   # build host produced and none of the Rust that made it, so pip on an
   # unmatched platform would "build" it and install a foreign binary.  With
@@ -315,30 +324,22 @@ jobs:
             os: macos-latest
             platform: macosx_11_0_arm64
             host_platform: macosx-11.0-arm64
-            venv_bin: bin
           - name: macos-x86_64
             os: macos-15-intel
             platform: macosx_10_13_x86_64
             host_platform: macosx-10.13-x86_64
-            venv_bin: bin
           - name: manylinux-x86_64
             os: ubuntu-latest
             container: quay.io/pypa/manylinux_2_28_x86_64
             platform: manylinux_2_28_x86_64
-            venv_bin: bin
           - name: manylinux-aarch64
             os: ubuntu-24.04-arm
             container: quay.io/pypa/manylinux_2_28_aarch64
             platform: manylinux_2_28_aarch64
-            venv_bin: bin
-          - name: windows-amd64
-            os: windows-latest
-            platform: win_amd64
-            venv_bin: Scripts
 
     defaults:
       run:
-        shell: bash             # git-bash on Windows, so one script per step
+        shell: bash
 
     steps:
       # The manylinux image's git refuses to operate on a checkout it does
@@ -397,9 +398,17 @@ jobs:
         # other half of that pin is the -mmacosx-version-min link flag in
         # core/rust/.cargo/config.toml; BOTH are required, since `wheel`
         # takes the greater of the two.
-        env:
-          _PYTHON_HOST_PLATFORM: ${{ matrix.host_platform }}
+        #
+        # It is exported ONLY where it has a value.  Passing it through
+        # `env:` set it to "" on the Linux legs, and CPython's
+        # sysconfig.get_platform() tests `"_PYTHON_HOST_PLATFORM" in
+        # os.environ` -- membership, not truthiness -- so it returned the
+        # empty string and the build died on
+        # `Bad wheel filename 'alberta_buck_kernel-0.1.0-cp311-abi3-.whl'`.
         run: |
+          if [ -n "${{ matrix.host_platform }}" ]; then
+            export _PYTHON_HOST_PLATFORM="${{ matrix.host_platform }}"
+          fi
           $PY -m pip install --quiet build
           $PY -m build --wheel core/python-kernel --outdir wheelhouse-raw/
 
@@ -437,7 +446,7 @@ jobs:
       - name: Install the wheel and prove the kernel is live
         run: |
           $PY -m venv .testenv
-          V=.testenv/${{ matrix.venv_bin }}
+          V=.testenv/bin
           $V/python -m pip install --quiet --upgrade pip
           $V/python -m pip install --quiet pytest alberta-buck-core dist/*.whl
           # MUST precede pytest: the vector tests use importorskip, so a
@@ -489,7 +498,6 @@ jobs:
           want = {
               "macosx_11_0_arm64", "macosx_10_13_x86_64",
               "manylinux_2_28_x86_64", "manylinux_2_28_aarch64",
-              "win_amd64",
           }
           got = {p.name.rsplit("-", 1)[-1][: -len(".whl")]
                  for p in Path("dist").glob("*.whl")}

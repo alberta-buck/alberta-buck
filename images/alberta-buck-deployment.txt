@@ -60,8 +60,10 @@ Table of Contents
 .. 2. P3: `alberta-buck-core' on PyPI, and the pure/binary split  [done 2026-07-27]
 .. 3. P4: `alberta-buck-kernel' wheels
 ..... 1. The macOS platform tag is set at the link, not at packaging
-..... 2. Wheels only – no sdist
-..... 3. What gates a wheel
+..... 2. An empty environment variable is not an unset one
+..... 3. JSON is UTF-8; `read_text()' is whatever the locale says
+..... 4. Wheels only – no sdist
+..... 5. What gates a wheel
 .. 4. P5: `alberta-buck' on PyPI
 .. 5. P6: what the game adds
 .. 6. P7: making the repository public
@@ -557,13 +559,19 @@ Table of Contents
   platform*, not one per Python version, and it keeps working on 3.13,
   3.14 and beyond with no rebuild.
 
-  Targets: macOS arm64 + x86_64, manylinux_2_28 x86_64 + aarch64,
-  Windows amd64.  *linux-aarch64 is included* – it is the gap that bites
-  `pyrevm' today, and ARM servers are where a cheap game backend lives.
-  Every one of the five has a native GitHub runner (`macos-13' is
-  retired, but `macos-15-intel' replaces it), so *nothing is
-  cross-compiled* and every wheel is tested on the architecture it was
-  built for.
+  Targets: macOS arm64 + x86_64, manylinux_2_28 x86_64 + aarch64.  Each
+  has a native GitHub runner (`macos-13' is retired, but
+  `macos-15-intel' replaces it), so *nothing is cross-compiled* and
+  every wheel is tested on the architecture it was built for.
+  *linux-aarch64 is included* – it is the gap that bites `pyrevm' today,
+  and ARM servers are where a cheap game backend lives.
+
+  *Windows is deferred*, on priority rather than difficulty: on its
+  first run the `.pyd' built, loaded and passed 32 of the 39 tests.
+  Re-enabling is a matrix entry with `venv_bin: Scripts' plus
+  `win_amd64' in the publish job's expected set.  Until then Windows
+  gets `pip install alberta-buck' on the pure-Python path, which is the
+  supported configuration everywhere anyway.
 
   *Not maturin*, as this document previously proposed.  maturin builds
   one extension module per wheel and we ship two cdylibs in one –
@@ -607,7 +615,43 @@ Table of Contents
   build instead.
 
 
-6.3.2 Wheels only – no sdist
+6.3.2 An empty environment variable is not an unset one
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  `_PYTHON_HOST_PLATFORM' was passed through the job's `env:' block, so
+  on the matrix legs that do not define it GitHub set it to `""' rather
+  than leaving it out.  CPython's `sysconfig.get_platform()' tests
+
+  ┌────
+  │ if "_PYTHON_HOST_PLATFORM" in os.environ:      # membership, NOT truthiness
+  │     return os.environ["_PYTHON_HOST_PLATFORM"]
+  └────
+
+  so it returned the empty string, and both Linux legs died on `Bad
+  wheel filename 'alberta_buck_kernel-0.1.0-cp311-abi3-.whl''.  The
+  variable is now exported inside the step only when it has a value.
+  Worth remembering generally: a workflow `env:' key whose value is an
+  undefined matrix field is /set and empty/, which is a different thing
+  from absent to any code that checks membership.
+
+
+6.3.3 JSON is UTF-8; `read_text()' is whatever the locale says
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  `Path.read_text()' with no `encoding' uses the platform's preferred
+  codec.  On Linux and macOS that is UTF-8 and the bug is invisible; on
+  Windows it is cp1252, and the kernel vector files contain non-ASCII
+  (`\xe6\x9d\x8e', a CJK name in a canonical-JSON test case).  Every
+  vector fixture raised `UnicodeDecodeError' at setup.
+
+  RFC 8259 makes JSON UTF-8 by definition, so all ten call sites under
+  `core/' and `scripts/' now say `read_text(encoding'"utf-8")=.  Two of
+  them were in the *published* `alberta-buck-core' – `artifacts.py' and
+  `session.py' – where a Windows user loading a contract artifact would
+  have hit the same failure with no test to catch it.
+
+
+6.3.4 Wheels only – no sdist
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The kernel sdist is a hazard, not a fallback.  Its contents are
@@ -619,7 +663,7 @@ Table of Contents
   check is enforced in both the matrix job and the publish job.
 
 
-6.3.3 What gates a wheel
+6.3.5 What gates a wheel
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The vector suite is the kernel's whole claim – bit-identical agreement
