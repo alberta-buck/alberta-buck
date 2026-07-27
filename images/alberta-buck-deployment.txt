@@ -20,8 +20,8 @@ showing private net worth, real economic decisions played against real
 BUCK mechanics – is the forcing function that ends that.  A game runs on
 someone else's machine.
 
-Nine artifacts are now published and installable.  Getting there was
-less about packaging than about *determinism*: an artifact you cannot
+Ten artifacts are now published and installable.  Getting there was less
+about packaging than about *determinism*: an artifact you cannot
 reproduce is an artifact you cannot honestly publish, and the repository
 turned out to hold two independent sources of irreproducible binaries.
 Both are gone.  This document records what is live, why the build is
@@ -58,7 +58,7 @@ Table of Contents
 6. The way forward
 .. 1. P2.5b: `alberta-buck-contracts' on PyPI  [done 2026-07-26]
 .. 2. P3: `alberta-buck-core' on PyPI, and the pure/binary split  [done 2026-07-27]
-.. 3. P4: `alberta-buck-kernel' wheels
+.. 3. P4: `alberta-buck-kernel' wheels  [done 2026-07-27]
 ..... 1. The macOS platform tag is set at the link, not at packaging
 ..... 2. The staging import check is not the gate, and must not act like one
 ..... 3. An empty environment variable is not an unset one
@@ -89,27 +89,27 @@ Table of Contents
    `alberta-buck-contracts'  npm          0.1.0  GPL-3.0-or-later 
    `alberta-buck-contracts'  PyPI         0.1.0  GPL-3.0-or-later 
    `alberta-buck-core'       PyPI         0.1.0  CAL-1.0          
+   `alberta-buck-kernel'     PyPI         0.1.0  CAL-1.0          
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   Remaining:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   #  artifact / step              registry  blocked on                       
-  ────────────────────────────────────────────────────────────────────────────
-   4  `alberta-buck-kernel'        PyPI      nothing – tag `py-kernel-v0.1.0' 
-   5  `alberta-buck'               PyPI      dependency hygiene               
-   6  `alberta-buck-game' + zomes  npm       D2 – where authority lives       
-   7  repository public            GitHub    a deliberate decision            
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   #  artifact / step              registry  blocked on                 
+  ──────────────────────────────────────────────────────────────────────
+   5  `alberta-buck'               PyPI      dependency hygiene         
+   6  `alberta-buck-game' + zomes  npm       D2 – where authority lives 
+   7  repository public            GitHub    a deliberate decision      
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   In place: `release-crates.yml', `release-npm.yml' and
   `release-pypi.yml' (all trusted publishing, no stored tokens),
   `LICENSE' / `core/LICENSE' / `LICENSING.md' / `NOTICE', a Rust
   toolchain and `binaryen' in the flake, `Cargo.lock' and `foundry.lock'
   committed.  The repository is pushed to
-  `github.com/alberta-buck/alberta-buck' (private), and
-  `release-pypi.yml' has run green – the PyPI row above is the first
-  artifact this repository published without a human holding a token.
+  `github.com/alberta-buck/alberta-buck' (private), and all three
+  release workflows have run green – every PyPI row above was published
+  with no human holding a token.
 
 
 2 The architecture, and why
@@ -552,8 +552,8 @@ Table of Contents
     selector.
 
 
-6.3 P4: `alberta-buck-kernel' wheels
-────────────────────────────────────
+6.3 P4: `alberta-buck-kernel' wheels  [done 2026-07-27]
+───────────────────────────────────────────────────────
 
   The only phase with real engineering.  abi3-py311 was already set in
   both binding crates, which is the large simplification: *one wheel per

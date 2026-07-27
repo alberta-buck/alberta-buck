@@ -7,7 +7,7 @@
 #+series_order: 25
 #+weight: 26
 #+draft: true
-#+description: Nine of eleven planned artifacts are published: four Rust kernel crates on crates.io, three JavaScript packages on npm and two Python distributions on PyPI, under pinned reproducible builds.  This document records what is live, the architecture behind it -- CAL-1.0 for the kernels, one compiler for everything we own, third-party artifacts taken from their publishers rather than rebuilt -- and the remaining path through PyPI to the Alberta Buck game.
+#+description: Ten of eleven planned artifacts are published: four Rust kernel crates on crates.io, three JavaScript packages on npm and three Python distributions on PyPI, under pinned reproducible builds.  This document records what is live, the architecture behind it -- CAL-1.0 for the kernels, one compiler for everything we own, third-party artifacts taken from their publishers rather than rebuilt -- and the remaining path through PyPI to the Alberta Buck game.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-deployment
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -24,7 +24,7 @@ showing private net worth, real economic decisions played against real BUCK
 mechanics -- is the forcing function that ends that.  A game runs on
 someone else's machine.
 
-Nine artifacts are now published and installable.  Getting there was less
+Ten artifacts are now published and installable.  Getting there was less
 about packaging than about *determinism*: an artifact you cannot reproduce
 is an artifact you cannot honestly publish, and the repository turned out to
 hold two independent sources of irreproducible binaries.  Both are gone.
@@ -59,12 +59,12 @@ project outside this checkout:
 | =alberta-buck-contracts= | npm       |   0.1.0 | GPL-3.0-or-later |
 | =alberta-buck-contracts= | PyPI      |   0.1.0 | GPL-3.0-or-later |
 | =alberta-buck-core=      | PyPI      |   0.1.0 | CAL-1.0          |
+| =alberta-buck-kernel=    | PyPI      |   0.1.0 | CAL-1.0          |
 
 Remaining:
 
 | #   | artifact / step             | registry  | blocked on                    |
 |-----+-----------------------------+-----------+-------------------------------|
-| 4   | =alberta-buck-kernel=       | PyPI      | nothing -- tag =py-kernel-v0.1.0= |
 | 5   | =alberta-buck=              | PyPI      | dependency hygiene            |
 | 6   | =alberta-buck-game= + zomes | npm       | D2 -- where authority lives   |
 | 7   | repository public           | GitHub    | a deliberate decision         |
@@ -73,9 +73,9 @@ In place: =release-crates.yml=, =release-npm.yml= and =release-pypi.yml= (all
 trusted publishing, no stored tokens), =LICENSE= / =core/LICENSE= /
 =LICENSING.md= / =NOTICE=, a Rust toolchain and =binaryen= in the flake,
 =Cargo.lock= and =foundry.lock= committed.  The repository is pushed to
-=github.com/alberta-buck/alberta-buck= (private), and =release-pypi.yml= has
-run green -- the PyPI row above is the first artifact this repository
-published without a human holding a token.
+=github.com/alberta-buck/alberta-buck= (private), and all three release
+workflows have run green -- every PyPI row above was published with no
+human holding a token.
 
 * The architecture, and why
 
@@ -458,7 +458,7 @@ split exists to remove.  The job gates on what the wheel actually promises:
   =ImportError= -- precisely what =alberta_buck.wallet._kernel= catches to
   fall back to pure Python.  Any other failure would break the selector.
 
-** P4: =alberta-buck-kernel= wheels
+** P4: =alberta-buck-kernel= wheels  [done 2026-07-27]
 
 The only phase with real engineering.  abi3-py311 was already set in both
 binding crates, which is the large simplification: *one wheel per platform*,
