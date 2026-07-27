@@ -1,0 +1,36 @@
+[project]
+name = "alberta-buck-kernel"
+version = "0.1.0"
+description = "Compiled Alberta Buck kernels for Python: integer monetary arithmetic bit-identical to the Solidity contracts, and the BN254 identity/wallet/registry cryptography"
+readme = "README.md"
+# abi3-py311: one wheel per platform serves every CPython from 3.11 on.
+requires-python = ">=3.11"
+license = "CAL-1.0"
+authors = [
+    { name = "Perry Kundert", email = "perry@dominionrnd.com" }
+]
+keywords = ["ethereum", "stablecoin", "bn254", "zero-knowledge", "cryptography"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Office/Business :: Financial",
+]
+
+[project.urls]
+Homepage = "https://github.com/alberta-buck/alberta-buck"
+"Bug Tracker" = "https://github.com/alberta-buck/alberta-buck/issues"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["buck_kernel*"]
+
+[tool.setuptools.package-data]
+# The compiled kernels, staged by `make core-kernel-dist`.  Generated and
+# therefore gitignored -- but they ARE the package, so they must ship.
+buck_kernel = ["*.so", "*.pyd", "*.dylib"]

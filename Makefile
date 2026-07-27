@@ -19,13 +19,19 @@ ANVIL_PORT		?= 8545
 ANVIL_BLOCK_TIME	?= 0
 FORK_BLOCK		?=
 
-# Forge options.  --use 0.8.28 sidesteps a solc 0.8.31 IR codegen bug
-# ("Modifiers not implemented yet"); the v2/v3 builds use their own
-# pragmas (=0.5.16, =0.7.6) so we skip them here and they pick up via
-# the FOUNDRY_PROFILE=v3 path / their own solc.
-FORGE_OPTS		?= --optimize --optimizer-runs 200 --use 0.8.28 \
-			   --skip 'src/uniswap_v2_build/**' \
-			   --skip 'src/uniswap_v3_build/**'
+# Forge options.  The solc pin (0.8.28, avoiding a 0.8.31 IR codegen bug)
+# and the uniswap_v*_build skips now live in [profile.default] in
+# foundry.toml -- on a command line they applied only where somebody
+# remembered them, and the bare builds below are exactly where nobody did.
+FORGE_OPTS		?= --optimize --optimizer-runs 200 $(FORGE_SKIP_GENERATED)
+
+# test/RegressionTest.sol imports a Groth16 verifier that the SNARK
+# toolchain GENERATES into build/snark/ (gitignored).  foundry resolves the
+# whole project graph before it applies any --skip name filter, so when that
+# file is absent every `forge build` fails at parse time -- which is exactly
+# what a fresh clone and CI see.  Skip that one path when the generated
+# verifier is not present, and run it normally when it is.
+FORGE_SKIP_GENERATED	= $(if $(wildcard build/snark/regression/RegressVerifier.sol),,--skip 'test/RegressionTest.sol')
 
 # Fork block pinning (deterministic tests): set FORK_BLOCK=12345 to pin
 ifdef FORK_BLOCK
@@ -77,7 +83,18 @@ emacs:
 	emacs -nw
 
 test: build-uniswap-artifacts
-	forge test $(FORGE_OPTS) -vvv
+	forge test $(FORGE_OPTS) $(FORGE_SKIP_SNARK_TESTS) -vvv
+
+# The SNARK suites read proof fixtures the circom/snarkjs toolchain
+# GENERATES into build/snark/ (gitignored, and a trusted setup away).  With
+# the fixtures present they run; without them they fail at vm.readFile, so a
+# fresh clone or a CI runner that has not built the circuits skips them --
+# deliberately and visibly, rather than by pretending the suite is green.
+#
+#   make snark-...      # generate the fixtures, then these run too
+SNARK_TEST_SUITES	= MintVerifierTest|MintVerifierA2Test|NotesA2TieTest|SpendVerifierTest
+FORGE_SKIP_SNARK_TESTS	= $(if $(wildcard build/snark/mint_batch_a2_n1/fixtures/basic.json),,\
+			     --no-match-contract '$(SNARK_TEST_SUITES)')
 unit-%:
 	forge test $(FORGE_OPTS) --match-test $* -vvv
 path-%:
@@ -144,9 +161,21 @@ fmt-check:
 # scenarios) require these.  Also ensures the critical V2 init-code-hash patch
 # has been applied so UniswapV2Router02 computes the same pair addresses as the
 # locally-built V2Factory.
-build-uniswap-artifacts: v2-patch-init-code-hash
-	FOUNDRY_VIA_IR=false FOUNDRY_PROFILE=v3 forge build --skip test --skip script
-	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
+build-uniswap-artifacts: stage-uniswap
+	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
+
+# The third-party artifacts come from Uniswap's own published npm packages,
+# pinned exactly in package.json.  We no longer compile them: their pragmas
+# are =0.5.16 / =0.6.6 / =0.7.6, which foundry cannot resolve at all on
+# arm64 macOS, and the copies that used to sit in out/ were stale leftovers
+# from a toolchain that no longer exists -- reproducible on no fresh clone
+# and in no CI runner.  See scripts/stage-uniswap.mjs.
+.PHONY: stage-uniswap stage-uniswap-check
+stage-uniswap:
+	node scripts/stage-uniswap.mjs
+
+stage-uniswap-check:
+	node scripts/stage-uniswap.mjs --check
 
 # ── Local Anvil Node ─────────────────────────────────────────────────
 
@@ -555,9 +584,8 @@ SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 #      (required for BuckBasket's deep call stack).  Skips the 0.7.6
 #      trigger to avoid the IR-incompatibility error.
 # Both profiles share the same ``out/`` directory.
-sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) v2-patch-init-code-hash
-	FOUNDRY_VIA_IR=false FOUNDRY_PROFILE=v3 forge build --skip test --skip script
-	forge build --skip test --skip script --skip 'src/uniswap_v3_build/*'
+sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
+	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
 
 # ── Uniswap V2 init-code-hash patch ──────────────────────────────────────
 #
@@ -583,7 +611,7 @@ sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) v2-patch-init-code-hash
 v2-patch-init-code-hash:
 	@# Phase 1: ensure UniswapV2Pair artifact exists so we can hash it.
 	@test -f out/UniswapV2Pair.sol/UniswapV2Pair.json || \
-		forge build --skip test --skip script --skip 'src/uniswap_v3_build/*' >/dev/null
+		node scripts/stage-uniswap.mjs >/dev/null
 	@HASH=$$(cast keccak $$(jq -r '.bytecode.object' out/UniswapV2Pair.sol/UniswapV2Pair.json) | sed 's/^0x//'); \
 		LIB=lib/v2-periphery/contracts/libraries/UniswapV2Library.sol; \
 		CURRENT=$$(grep -oE "hex'[0-9a-f]*' // init code hash" $$LIB | sed -E "s/hex'([0-9a-f]*)'.*/\1/"); \
@@ -1082,6 +1110,30 @@ poseidon-constants:
 poseidon-constants-check:
 	python3 $(POSEIDON_GEN) --check $(if $(wildcard $(CIRCOMLIB_JSON)),--check-against $(CIRCOMLIB_JSON))
 
+# ── Published contract artifacts (alberta-buck-contracts) ────────────
+#
+# The reproducible build behind the published package.  [profile.dist] in
+# foundry.toml pins the compiler and writes to its own out-dist/, so a dev
+# build can never decide what gets published; scripts/contracts-dist.py
+# emits only the contracts we own and asserts the pin held.
+#
+#   make contracts-dist          # build + emit dist/contracts/
+#   make contracts-dist-check    # verify the build (CI release gate)
+#
+# The Uniswap implementations are deliberately absent: they are BUSL-1.1 /
+# GPL-2.0 / GPL-3.0 and consumers take them from Uniswap's own packages.
+.PHONY: contracts-dist contracts-dist-build contracts-dist-check
+
+contracts-dist-build:
+	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
+
+contracts-dist:		contracts-dist-build
+	python3 scripts/contracts-dist.py --emit
+	@echo "  npm:  core/contracts   pypi: core/contracts/python"
+
+contracts-dist-check:	contracts-dist-build
+	python3 scripts/contracts-dist.py --check
+
 core-js-deps:
 	cd core/js && npm ci
 
@@ -1101,19 +1153,7 @@ core-js-artifacts:
 # caches code signatures by inode -- a stale cache SIGKILLs (Killed: 9)
 # the next import.  A fresh inode per copy sidesteps it.
 core-build-py:
-	cd core/rust && cargo build --release -p buck-math-py -p buck-identity-py
-	rm -f core/python/buck_core/buck_math.so \
-	      core/python/buck_core/buck_identity.so \
-	      core/python/buck_core/buck_wallet.so \
-	      core/python/buck_core/buck_registry.so
-	cp core/rust/target/release/libbuck_math.dylib \
-	   core/python/buck_core/buck_math.so
-	cp core/rust/target/release/libbuck_identity.dylib \
-	   core/python/buck_core/buck_identity.so
-	cp core/rust/target/release/libbuck_identity.dylib \
-	   core/python/buck_core/buck_wallet.so
-	cp core/rust/target/release/libbuck_identity.dylib \
-	   core/python/buck_core/buck_registry.so
+	python3 scripts/stage-kernel.py --dev
 
 # The JS kernel bindings: wasm-pack (npm devDependency of core/js) emits
 # nodejs-target packages into core/js/kernel/node/ (flat: buck_math.* and
@@ -1192,6 +1232,15 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
 	@echo "       then open http://localhost:8000/eqworld.html"
 
+# Stage the compiled kernels into the alberta-buck-kernel package.  The
+# identity, wallet and registry kernels are ONE cdylib with three
+# #[pymodule] entry points -- byte-identical files today -- so it ships once
+# as _kernel.abi3.so and each module loads it under its own name.  4.9 MB of
+# wheel becomes 1.9 MB.
+.PHONY: core-kernel-dist
+core-kernel-dist:
+	python3 scripts/stage-kernel.py
+
 core-build:	core-build-py core-build-wasm
 
 core-test-py:
@@ -1209,13 +1258,31 @@ core-test:	core-test-py core-test-js core-test-rust
 
 # ── Dependencies ─────────────────────────────────────────────────────
 
+# Dependencies are PINNED to exact tags.  An unpinned `forge install`
+# fetches whatever HEAD is that day, and these libraries are compiled INTO
+# our contracts -- so the published bytecode would change underneath us with
+# no commit to show for it (alberta-buck-deployment.org, P2.5).  Bumping a
+# pin is deliberate: rebuild, re-run contracts-dist-check, new version.
+# These four are the only Solidity dependencies src/ and test/ actually
+# import -- v3-core for its interfaces, chainlink for AggregatorV3Interface,
+# OpenZeppelin for the token bases, forge-std for the harness.  The Uniswap
+# IMPLEMENTATIONS are no longer dependencies at all: their compiled
+# artifacts come from Uniswap's npm packages (scripts/stage-uniswap.mjs).
+#
+# Tags are exact and are the GIT tag, which for these repositories is NOT
+# the npm version -- Uniswap v3-core publishes npm 1.0.1 from a repository
+# whose latest tag is v1.0.0, and chainlink tags without a leading "v".
+# Guessing from package.json is how CI first failed here.
 install:
-	forge install OpenZeppelin/openzeppelin-contracts --no-git
-	forge install smartcontractkit/chainlink-brownie-contracts --no-git
-	forge install Uniswap/v3-core --no-git
-	forge install Uniswap/v3-periphery --no-git
-	forge install Uniswap/universal-router --no-git
-	forge install foundry-rs/forge-std --no-git
+	forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+	forge install smartcontractkit/chainlink-brownie-contracts@1.3.0 --no-git
+	forge install Uniswap/v3-core@v1.0.0 --no-git
+	forge install foundry-rs/forge-std@v1.16.1 --no-git
+
+# Additionally required by the Python routing sim, which builds the
+# Universal Router as its own sub-project for its artifact.
+install-sim:	install
+	forge install Uniswap/universal-router@v1.6.0 --no-git
 
 update:
 	forge update

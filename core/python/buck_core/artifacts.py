@@ -35,7 +35,34 @@ def repo_root() -> Path:
 
 
 def load_artifact(name: str, sol_file: str | None = None) -> tuple[list, str]:
-    """Return (abi, bytecode) for out/<sol_file or name>.sol/<name>.json."""
-    f = repo_root() / "out" / f"{sol_file or name}.sol" / f"{name}.json"
-    art = json.loads(f.read_text())
-    return art["abi"], art["bytecode"]["object"]
+    """Return (abi, bytecode) for a contract.
+
+    Resolution order:
+
+    1. ``out/<sol_file or name>.sol/<name>.json`` in a repo checkout -- the
+       developer path, unchanged: a freshly built artifact always wins, so
+       editing a contract and rebuilding takes effect immediately.
+    2. the installed ``alberta-buck-contracts`` package.
+
+    The fallback is what lets a pip-installed ``alberta_buck`` deploy a
+    world at all: ``repo_root()`` raises ``FileNotFoundError`` when no
+    ``foundry.toml`` is reachable, so without it an installed package could
+    import fine and then fail on its first deploy (see
+    alberta-buck-deployment.org, P2.5).
+    """
+    try:
+        f = repo_root() / "out" / f"{sol_file or name}.sol" / f"{name}.json"
+        art = json.loads(f.read_text(encoding="utf-8"))
+        return art["abi"], art["bytecode"]["object"]
+    except (FileNotFoundError, OSError):
+        pass
+
+    try:
+        import buck_contracts
+    except ImportError:
+        raise FileNotFoundError(
+            f"no artifact for {name}: not in a repo checkout with out/ built "
+            f"(run `make build`), and alberta-buck-contracts is not installed "
+            f"(pip install alberta-buck-contracts)") from None
+
+    return buck_contracts.artifact(name)

@@ -27,7 +27,7 @@ _REPO = Path(__file__).resolve().parents[3]
 
 @pytest.fixture(scope="module")
 def wv() -> dict:
-    return json.loads((_REPO / "core/vectors/wallet-kernel-vectors.json").read_text())
+    return json.loads((_REPO / "core/vectors/wallet-kernel-vectors.json").read_text(encoding="utf-8"))
 
 
 def test_canonical_json(wv):

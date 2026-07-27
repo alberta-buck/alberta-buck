@@ -7,6 +7,9 @@
     "snarkjs": "0.7.5"
   },
   "devDependencies": {
+    "@uniswap/v2-core": "1.0.1",
+    "@uniswap/v2-periphery": "1.1.0-beta.0",
+    "@uniswap/v3-core": "1.0.1",
     "circomlib": "2.0.5",
     "circomlibjs": "^0.1.7",
     "ethers": "^6.13.4",

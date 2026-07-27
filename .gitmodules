@@ -1,18 +1,3 @@
-[submodule "nucypher-contracts"]
-	path = nucypher-contracts
-	url = git@github.com:nucypher/nucypher-contracts.git
-[submodule "pyUmbral"]
-	path = pyUmbral
-	url = git@github.com:nucypher/pyUmbral.git
-[submodule "rust-umbral"]
-	path = rust-umbral
-	url = git@github.com:nucypher/rust-umbral.git
-[submodule "uniswap/uniswap-ai"]
-	path = uniswap/uniswap-ai
-	url = git@github.com:Uniswap/uniswap-ai.git
-[submodule "lib/forge-std"]
-	path = lib/forge-std
-	url = https://github.com/foundry-rs/forge-std
 [submodule "lib/circom-lib"]
 	path = lib/circom-lib
-	url = git@github.com:dl-solarity/circom-lib.git
+	url = https://github.com/dl-solarity/circom-lib.git

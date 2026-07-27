@@ -279,7 +279,7 @@ class Web3Session:
         return self.w3.eth.contract(address=rcpt["contractAddress"], abi=abi)
 
     def deploy_from_path(self, artifact_path: str, *args):
-        art = json.loads((repo_root() / artifact_path).read_text())
+        art = json.loads((repo_root() / artifact_path).read_text(encoding="utf-8"))
         return self.deploy("", *args, abi=art["abi"],
                            bytecode=art["bytecode"]["object"])
 

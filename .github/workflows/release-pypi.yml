@@ -1,0 +1,520 @@
+# Publish the Alberta Buck Python packages to PyPI.
+#
+# Authentication is OIDC trusted publishing -- no API token anywhere.
+#
+# ── Tags are per package ──────────────────────────────────────────────
+#
+#     git tag py-contracts-v0.1.0    # alberta-buck-contracts
+#     git tag py-core-v0.1.0         # alberta-buck-core
+#     git tag py-kernel-v0.1.0       # alberta-buck-kernel   (P4, not yet)
+#     git tag py-sim-v0.1.0          # alberta-buck          (P5, not yet)
+#
+# One shared py-v* tag cannot work: D4 lets each package's patch version
+# float independently, so a single tag would either force all four to the
+# same version or make the tag/version equality gate unenforceable.  Each
+# job therefore triggers on its own prefix and checks its own pyproject.
+#
+# ── Pending publishers ────────────────────────────────────────────────
+#
+# PyPI differs from crates.io and npm in the one way that matters here: a
+# *pending publisher* can be configured for a project that does not exist
+# yet, and the first successful upload creates it.  So unlike the other two
+# registries, this needs no manual token bootstrap -- but the pending
+# publisher must be configured first, at
+# https://pypi.org/manage/account/publishing/ .
+#
+# CAUTION: pending publishers are UNIQUE on (owner, repo, workflow,
+# environment) -- warehouse enforces it in the database and the second
+# registration fails with "already been registered for a different project
+# name".  project_name is deliberately NOT part of that key: the OIDC claim
+# is all PyPI has to decide which project to mint, so two pending
+# publishers with identical config would be ambiguous.  Hence a distinct
+# environment per package.  (The constraint is only on *pending*
+# publishers; once a project exists, established publishers may share a
+# config freely.  There is no reason to migrate back, and separate
+# environments allow per-package protection rules.)
+#
+#     project                  owner/repo               environment
+#     alberta-buck-contracts   alberta-buck/alberta-buck  pypi
+#     alberta-buck-core        alberta-buck/alberta-buck  pypi
+#     alberta-buck-kernel      alberta-buck/alberta-buck  pypi-kernel
+#     alberta-buck             alberta-buck/alberta-buck  pypi-sim
+#
+# Workflow name is the filename -- release-pypi.yml -- not the `name:`
+# below.  The environment must match each job's `environment:` exactly.
+# A pending publisher does not reserve the name; it is claimed on first
+# use, and converts to an established publisher then.
+#
+# alberta-buck (P5) joins this workflow as its phase lands; see
+# alberta-buck-deployment.org.
+
+name: Release PyPI
+
+on:
+  push:
+    tags:
+      - 'py-contracts-v*'
+      - 'py-core-v*'
+      - 'py-kernel-v*'
+      - 'py-sim-v*'
+
+concurrency:
+  group: release-pypi
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Publish alberta-buck-contracts
+    if: startsWith(github.ref_name, 'py-contracts-v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/alberta-buck-contracts
+    permissions:
+      contents: read
+      id-token: write          # required for PyPI trusted publishing
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Tag matches the package version
+        env:
+          PREFIX: py-contracts-v
+          PYPROJECT: core/contracts/python/pyproject.toml
+        run: |
+          python3 - <<'EOF'
+          import os, sys, tomllib
+          prefix, path = os.environ["PREFIX"], os.environ["PYPROJECT"]
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix(prefix)
+          ver = tomllib.load(open(path, "rb"))["project"]["version"]
+          if tag != ver:
+              print(f"::error::tag {prefix}{tag} does not match {path} version {ver}")
+              sys.exit(1)
+          print(f"{ver} matches the tag")
+          EOF
+
+      # Pinned solidity dependencies; they compile INTO our contracts, so
+      # the exact tags in `make install` are part of the published bytecode.
+      - name: Install Solidity dependencies
+        run: make install
+
+      # The Uniswap artifacts our test worlds deploy are taken from
+      # Uniswap's own npm packages, not rebuilt -- their pre-0.8 pragmas
+      # need compilers foundry cannot resolve on every platform.
+      - name: Install JS dependencies
+        run: npm ci --no-audit --no-fund
+
+      # The release gate: the artifact we publish must be the artifact the
+      # suite exercises.  529 tests, no forked network needed.
+      - name: Test
+        run: make test
+
+      - name: Build the contracts bundle
+        run: make contracts-dist
+
+      # Asserts every artifact records the pinned compiler and that no
+      # third-party contract carried bytecode into the bundle.
+      - name: Verify the bundle
+        run: python3 scripts/contracts-dist.py --check
+
+      - name: Build the wheel and sdist
+        run: |
+          python -m pip install --quiet build
+          python -m build core/contracts/python --outdir dist/
+
+      - name: Check the wheel actually contains the bundle
+        # package-data is generated and therefore gitignored; a wheel that
+        # quietly shipped without contracts.json would install and then fail
+        # on first use.
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, zipfile
+          whl = glob.glob("dist/*.whl")
+          if not whl:
+              print("::error::no wheel built"); sys.exit(1)
+          names = zipfile.ZipFile(whl[0]).namelist()
+          need = ["buck_contracts/contracts.json", "buck_contracts/compiler.json"]
+          missing = [n for n in need if n not in names]
+          if missing:
+              print(f"::error::wheel {whl[0]} is missing {missing}"); sys.exit(1)
+          print(f"{whl[0]}: bundle present ({len(names)} files)")
+          EOF
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # ──────────────────────────────────────────────────────────────────────
+  # alberta-buck-core: pure Python, no toolchain.  The compiled kernels
+  # live in alberta-buck-kernel precisely so this job needs no Rust and no
+  # per-platform matrix -- one py3-none-any wheel serves everyone.
+  #
+  # The suite in core/python/tests is NOT a gate here: its vector tests
+  # need a built kernel .so and its session tests need a live EVM, neither
+  # of which this wheel contains or requires.  Those run in core-test-py
+  # (make nix-core-test) and gate the kernel release.  What this job gates
+  # instead is what the wheel itself promises: that it is pure, that it
+  # deploys contracts with no checkout, and that it degrades to pure
+  # Python when the kernel is absent.
+  # ──────────────────────────────────────────────────────────────────────
+  core:
+    name: Publish alberta-buck-core
+    if: startsWith(github.ref_name, 'py-core-v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/alberta-buck-core
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'      # the floor: requires-python >=3.11
+
+      - name: Tag matches the package version
+        env:
+          PREFIX: py-core-v
+          PYPROJECT: core/python/pyproject.toml
+        run: |
+          python3 - <<'EOF'
+          import os, sys, tomllib
+          prefix, path = os.environ["PREFIX"], os.environ["PYPROJECT"]
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix(prefix)
+          ver = tomllib.load(open(path, "rb"))["project"]["version"]
+          if tag != ver:
+              print(f"::error::tag {prefix}{tag} does not match {path} version {ver}")
+              sys.exit(1)
+          print(f"{ver} matches the tag")
+          EOF
+
+      - name: Build the wheel and sdist
+        run: |
+          python -m pip install --quiet build
+          python -m build core/python --outdir dist/
+
+      - name: The wheel must be pure
+        # This is the whole point of the core/kernel split: depending on the
+        # session API must not drag a per-platform wheel matrix behind it.
+        # A stray built .so in core/python/buck_core (they are gitignored,
+        # but a future package-data entry would ship them) would silently
+        # turn this into a platform wheel that installs on the wrong host
+        # and fails at import.
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, zipfile
+          whl = glob.glob("dist/*.whl")
+          if len(whl) != 1:
+              print(f"::error::expected exactly one wheel, got {whl}"); sys.exit(1)
+          whl = whl[0]
+          if not whl.endswith("-py3-none-any.whl"):
+              print(f"::error::{whl} is not a pure wheel"); sys.exit(1)
+          binary = [n for n in zipfile.ZipFile(whl).namelist()
+                    if n.endswith((".so", ".pyd", ".dylib"))]
+          if binary:
+              print(f"::error::{whl} carries compiled objects: {binary}"); sys.exit(1)
+          print(f"{whl}: pure")
+          EOF
+
+      - name: Smoke test the wheel outside any checkout
+        # Installed from a wheel with no repo above it, buck_core must
+        # still deploy a world -- that fallback to alberta-buck-contracts
+        # is what makes an installed package usable at all (P2.5).  Run
+        # from a temp cwd: repo_root() walks up from BOTH __file__ and the
+        # cwd, so testing inside the checkout would prove nothing.
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet dist/*.whl
+          cd "$(mktemp -d)"
+          /tmp/smoke/bin/python - <<'EOF'
+          import sys
+          from buck_core import (
+              CALL_GAS, DEPLOY_GAS, Expect, Journal, Web3Session,
+              load_artifact, repo_root,
+          )
+
+          try:
+              root = repo_root()
+          except FileNotFoundError:
+              pass
+          else:
+              print(f"::error::found a checkout at {root}; test is meaningless")
+              sys.exit(1)
+
+          abi, bytecode = load_artifact("Buck")
+          assert bytecode.startswith("0x"), bytecode[:16]
+          assert len(bytecode) > 2, "empty bytecode"
+          assert any(e.get("name") == "transfer" for e in abi), "not an ERC-20 ABI"
+          print(f"load_artifact('Buck'): {len(abi)} ABI entries, "
+                f"{len(bytecode) // 2 - 1} bytes -- no checkout needed")
+
+          # Without alberta-buck-kernel the shims must raise ImportError:
+          # that is exactly what alberta_buck.wallet._kernel catches to
+          # fall back to pure Python.  Anything else (an AttributeError, a
+          # partially-initialised module) would break the selector.
+          for name in ("buck_math", "buck_identity", "buck_wallet", "buck_registry"):
+              try:
+                  __import__(f"buck_core.{name}")
+              except ImportError:
+                  continue
+              print(f"::error::buck_core.{name} imported without the kernel")
+              sys.exit(1)
+          print("kernel shims degrade to ImportError as the selector expects")
+          EOF
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # ──────────────────────────────────────────────────────────────────────
+  # alberta-buck-kernel: one wheel per platform, built natively on each.
+  #
+  # Every target has a native runner, so nothing is cross-compiled and
+  # every wheel is tested on the architecture it is built for.  Linux runs
+  # INSIDE the manylinux image rather than on the runner: a wheel's minimum
+  # glibc is whatever it was linked against, and ubuntu-latest's 2.39 would
+  # produce something most machines cannot install.
+  #
+  # abi3-py311 means one build per platform, not one per Python version --
+  # these cp311 wheels serve 3.11, 3.12, 3.13 and onward.
+  #
+  # NO WINDOWS WHEEL, deliberately, for now.  The packaging side of it
+  # works -- the .pyd built, loaded and passed 32 of the 39 tests on the
+  # first attempt -- so re-enabling is adding back a matrix entry with
+  # `venv_bin: Scripts` (Windows venvs put executables there), plus
+  # win_amd64 in the publish job's expected set.  It was dropped as a
+  # priority call, not because it is far away.  Without a wheel, Windows
+  # users get `pip install alberta-buck` on the pure-Python path, which is
+  # the supported configuration everywhere anyway.
+  #
+  # WHEELS ONLY, no sdist.  The kernel sdist would carry whatever object the
+  # build host produced and none of the Rust that made it, so pip on an
+  # unmatched platform would "build" it and install a foreign binary.  With
+  # wheels alone that same case is a clean "no matching distribution", and
+  # `pip install alberta-buck` without [kernel] still works everywhere.
+  # ──────────────────────────────────────────────────────────────────────
+  kernel-wheels:
+    name: Wheel ${{ matrix.name }}
+    if: startsWith(github.ref_name, 'py-kernel-v')
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false          # one platform's failure must not hide the rest
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+            platform: macosx_11_0_arm64
+            host_platform: macosx-11.0-arm64
+          - name: macos-x86_64
+            os: macos-15-intel
+            platform: macosx_10_13_x86_64
+            host_platform: macosx-10.13-x86_64
+          - name: manylinux-x86_64
+            os: ubuntu-latest
+            container: quay.io/pypa/manylinux_2_28_x86_64
+            platform: manylinux_2_28_x86_64
+          - name: manylinux-aarch64
+            os: ubuntu-24.04-arm
+            container: quay.io/pypa/manylinux_2_28_aarch64
+            platform: manylinux_2_28_aarch64
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # The manylinux image's git refuses to operate on a checkout it does
+      # not own, which is every checkout inside a container.
+      - name: Trust the workspace (container only)
+        if: matrix.container != ''
+        run: git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v5
+
+      # The manylinux images carry their own interpreters at a known path.
+      # setup-python has nothing to offer there and would fetch a build
+      # linked against the runner's glibc, defeating the container.
+      - name: Select the interpreter (container)
+        if: matrix.container != ''
+        run: echo "PY=/opt/python/cp311-cp311/bin/python" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v6
+        if: matrix.container == ''
+        with:
+          python-version: '3.11'
+
+      - name: Select the interpreter (runner)
+        if: matrix.container == ''
+        run: echo "PY=python" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Tag matches the package version
+        env:
+          PREFIX: py-kernel-v
+          PYPROJECT: core/python-kernel/pyproject.toml
+        run: |
+          $PY - <<'EOF'
+          import os, sys, tomllib
+          prefix, path = os.environ["PREFIX"], os.environ["PYPROJECT"]
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix(prefix)
+          ver = tomllib.load(open(path, "rb"))["project"]["version"]
+          if tag != ver:
+              print(f"::error::tag {prefix}{tag} does not match {path} version {ver}")
+              sys.exit(1)
+          print(f"{ver} matches the tag")
+          EOF
+
+      # Builds the two cdylibs and stages them into the package, named for
+      # this platform (.pyd on Windows).  The script then imports all four
+      # modules out of what it staged, proving every PyInit_ symbol
+      # resolves -- including the three that share one object -- before
+      # anything is packaged.
+      - name: Build and stage the kernels
+        run: $PY scripts/stage-kernel.py
+
+      - name: Build the wheel
+        # _PYTHON_HOST_PLATFORM pins the macOS tag, which `wheel` would
+        # otherwise take from the building interpreter's sysconfig.  The
+        # other half of that pin is the -mmacosx-version-min link flag in
+        # core/rust/.cargo/config.toml; BOTH are required, since `wheel`
+        # takes the greater of the two.
+        #
+        # It is exported ONLY where it has a value.  Passing it through
+        # `env:` set it to "" on the Linux legs, and CPython's
+        # sysconfig.get_platform() tests `"_PYTHON_HOST_PLATFORM" in
+        # os.environ` -- membership, not truthiness -- so it returned the
+        # empty string and the build died on
+        # `Bad wheel filename 'alberta_buck_kernel-0.1.0-cp311-abi3-.whl'`.
+        run: |
+          if [ -n "${{ matrix.host_platform }}" ]; then
+            export _PYTHON_HOST_PLATFORM="${{ matrix.host_platform }}"
+          fi
+          $PY -m pip install --quiet build
+          $PY -m build --wheel core/python-kernel --outdir wheelhouse-raw/
+
+      # setuptools tags a wheel built inside the container linux_x86_64,
+      # which PyPI rejects outright.  auditwheel inspects the symbol
+      # versions actually referenced and applies the manylinux tag they
+      # earn.
+      - name: Repair to manylinux
+        if: matrix.container != ''
+        run: |
+          mkdir -p dist
+          auditwheel repair --plat ${{ matrix.platform }} \
+            -w dist/ wheelhouse-raw/*.whl
+          rm -rf wheelhouse-raw
+
+      - name: Collect the wheel
+        if: matrix.container == ''
+        run: |
+          mkdir -p dist
+          mv wheelhouse-raw/*.whl dist/
+          rm -rf wheelhouse-raw
+
+      - name: Check the wheel
+        run: |
+          $PY scripts/check-kernel-wheel.py \
+            --wheel dist/*.whl \
+            --expect-platform ${{ matrix.platform }} \
+            --no-sdist dist
+
+      # The conformance gate.  Installing alberta-buck-core from PyPI puts
+      # the real shims in front of the wheel, so this exercises the path a
+      # user gets rather than the checkout's own build: a fresh checkout has
+      # no .so beside core/python/buck_core, so buck_core delegates to the
+      # installed kernel.
+      - name: Install the wheel and prove the kernel is live
+        run: |
+          $PY -m venv .testenv
+          V=.testenv/bin
+          $V/python -m pip install --quiet --upgrade pip
+          $V/python -m pip install --quiet pytest alberta-buck-core dist/*.whl
+          # MUST precede pytest: the vector tests use importorskip, so a
+          # kernel that fails to load makes them SKIP and the suite passes
+          # while proving nothing about this wheel.
+          $V/python scripts/check-kernel-wheel.py --installed
+          $V/python -m pytest core/python/tests -q -rs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.name }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  kernel-publish:
+    name: Publish alberta-buck-kernel
+    if: startsWith(github.ref_name, 'py-kernel-v')
+    needs: kernel-wheels
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-kernel          # distinct per package; see the header
+      url: https://pypi.org/p/alberta-buck-kernel
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Every platform is present
+        # `needs` already fails this job if a matrix leg failed, but a
+        # silently SHRINKING matrix -- a retired runner label, an `if` that
+        # stopped matching -- would publish a partial release that looks
+        # complete.  Name the platforms explicitly.
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from pathlib import Path
+          want = {
+              "macosx_11_0_arm64", "macosx_10_13_x86_64",
+              "manylinux_2_28_x86_64", "manylinux_2_28_aarch64",
+          }
+          got = {p.name.rsplit("-", 1)[-1][: -len(".whl")]
+                 for p in Path("dist").glob("*.whl")}
+          if missing := want - got:
+              print(f"::error::no wheel for {sorted(missing)}"); sys.exit(1)
+          if extra := got - want:
+              print(f"::error::unexpected wheel platforms {sorted(extra)}")
+              sys.exit(1)
+          for p in sorted(Path("dist").iterdir()):
+              print(f"  {p.name}  ({p.stat().st_size:,} bytes)")
+          print(f"all {len(want)} platforms present")
+          EOF
+
+      - name: Wheels only
+        run: python3 scripts/check-kernel-wheel.py --no-sdist dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

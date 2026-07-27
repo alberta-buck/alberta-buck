@@ -1,9 +1,29 @@
 # Link flags for building Python extension modules (bindings/py) with
 # plain cargo -- what maturin/setuptools-rust would otherwise inject.
 # Python symbols resolve at import time from the hosting interpreter.
+#
+# The version-min flags are not cosmetic.  A macOS wheel's platform tag is
+# not taken from MACOSX_DEPLOYMENT_TARGET or from the packaging step: the
+# `wheel` project reads the Mach-O LC_BUILD_VERSION out of every object in
+# the wheel and tags to the highest minos it finds.  So the deployment
+# target has to be pinned at the LINK, and a wheel built on a macOS 26
+# runner would otherwise be tagged macosx_26_0 and install on essentially
+# nothing.  Pinning here rather than in the environment also survives
+# toolchains that supply their own SDK default -- nix's does, which is how
+# this was found: MACOSX_DEPLOYMENT_TARGET=11.0 was ignored and the object
+# still came out minos 14.0.
+#
+# 11.0 is the floor for arm64 (the first Apple Silicon macOS); 10.13 for
+# x86_64 matches what CPython's own macOS builds target.
 
 [target.aarch64-apple-darwin]
-rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+rustflags = [
+    "-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup",
+    "-C", "link-arg=-mmacosx-version-min=11.0",
+]
 
 [target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+rustflags = [
+    "-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup",
+    "-C", "link-arg=-mmacosx-version-min=10.13",
+]

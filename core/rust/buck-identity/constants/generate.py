@@ -202,7 +202,7 @@ def main():
 
     if args.check:
         for path in TARGETS:
-            if path.read_text() != text:
+            if path.read_text(encoding="utf-8") != text:
                 print(f"MISMATCH: {path.relative_to(REPO)} differs from the "
                       f"generated constants", file=sys.stderr)
                 status = 1
@@ -210,7 +210,7 @@ def main():
                 print(f"ok {path.relative_to(REPO)}")
 
     if args.check_against:
-        other = json.loads(Path(args.check_against).read_text())
+        other = json.loads(Path(args.check_against).read_text(encoding="utf-8"))
         mine = json.loads(text)
         same = (
             [[int(v, 16) for v in row] for row in mine["C"]] ==

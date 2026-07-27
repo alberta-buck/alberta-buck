@@ -3,9 +3,12 @@
 // stay loadable in the browser (Phase 4).
 
 import { readFileSync, existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
 import { JournalWriter } from "./journal.js";
+
+const require = createRequire(import.meta.url);
 
 /** The repository checkout root: ALBERTA_BUCK_REPO, or walk up from cwd
  *  (then from this file) looking for foundry.toml -- the same resolution
@@ -28,11 +31,44 @@ export function repoRoot() {
     "set ALBERTA_BUCK_REPO or run from inside the repo checkout");
 }
 
-/** Return {abi, bytecode} for out/<solFile or name>.sol/<name>.json. */
+/** Return {abi, bytecode} for a contract.
+ *
+ *  Resolution order, mirroring buck_core.artifacts.load_artifact:
+ *
+ *    1. out/<solFile or name>.sol/<name>.json in a repo checkout -- the
+ *       developer path, so a freshly rebuilt contract takes effect at once;
+ *    2. the installed alberta-buck-contracts package.
+ *
+ *  Without (2) this package is unusable outside a checkout: repoRoot()
+ *  throws when no foundry.toml is reachable, so `npm i alberta-buck-core`
+ *  would import cleanly and then fail on the first deploy.
+ */
 export function loadArtifact(name, solFile = null) {
-  const f = join(repoRoot(), "out", `${solFile ?? name}.sol`, `${name}.json`);
-  const art = JSON.parse(readFileSync(f, "utf8"));
-  return { abi: art.abi, bytecode: art.bytecode.object };
+  try {
+    const f = join(repoRoot(), "out", `${solFile ?? name}.sol`, `${name}.json`);
+    const art = JSON.parse(readFileSync(f, "utf8"));
+    return { abi: art.abi, bytecode: art.bytecode.object };
+  } catch {
+    // No checkout, or that contract is not built here -- try the package.
+  }
+
+  let bundle;
+  try {
+    bundle = require("alberta-buck-contracts/contracts.json");
+  } catch {
+    throw new Error(
+      `no artifact for ${name}: not in a repo checkout with out/ built ` +
+      `(run \`make build\`), and alberta-buck-contracts is not installed`);
+  }
+
+  const c = bundle.contracts[name];
+  if (!c) {
+    throw new Error(
+      `no artifact for ${name}: alberta-buck-contracts ships ` +
+      `${Object.keys(bundle.contracts).join(", ")}. Third-party contracts ` +
+      `(Uniswap, WETH9) come from their own packages.`);
+  }
+  return { abi: c.abi, bytecode: c.bytecode };
 }
 
 /** True when the Foundry artifacts are built (tests skip when not). */

@@ -9,8 +9,29 @@ optimizer_runs = 200
 via_ir = true
 gas_limit = "18446744073709551615"   # u64::MAX -- the simulation test runs hundreds of millions of gas
 memory_limit = 1073741824             # 1 GiB -- JSON serialisation accumulates a large memory string
-auto_detect_solc = true
 evm_version = "cancun"
+
+# ONE compiler for our contracts, declared here rather than passed as
+# --use on some command lines and not others.
+#
+# Our sources are ranged (^0.8.20), so auto-detection had a choice and made
+# it differently depending on which target ran: `make build` pinned 0.8.28
+# while the bare `forge build` inside build-uniswap-artifacts took the
+# newest installed compiler, and both wrote out/.  A full `make test` left
+# out/ holding five compiler versions with Buck.json at 0.8.31 -- the very
+# version this pin exists to avoid (an IR codegen bug, "Modifiers not
+# implemented yet").
+#
+# There is nothing else to compile: the Uniswap contracts are no longer
+# built from source at all.  Their pragmas (=0.5.16, =0.6.6, =0.7.6) needed
+# three more compilers that foundry cannot even resolve on arm64 macOS, so
+# their official published artifacts are staged into out/ instead
+# (scripts/stage-uniswap.mjs).  One compiler now builds everything we own.
+#
+# Moving this pin changes every byte we publish.  It is a version event.
+solc = "0.8.28"
+auto_detect_solc = false
+
 ffi = false
 fs_permissions = [
     { access = "read-write", path = "./test/vectors" },
@@ -31,11 +52,6 @@ remappings = [
     "@uniswap/v2-periphery/=lib/v2-periphery/",
     "@uniswap/lib/=lib/solidity-lib/",
 ]
-
-[profile.v3]
-via_ir = true
-src = "src/uniswap_v3_build"
-out = "out"
 
 [profile.default.fmt]
 line_length = 120

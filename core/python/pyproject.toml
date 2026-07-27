@@ -6,13 +6,31 @@
 # `pip install -e core/python` works today for external consumers.
 
 [project]
-name = "buck-core"
-version = "0.0.1"
-description = "Alberta Buck core platform: ChainSession testing API, journal, kernel bindings"
+name = "alberta-buck-core"
+version = "0.1.0"
+description = "Alberta Buck core platform (Python): the ChainSession API over anvil/testnets/pyrevm with expectation journaling, and the Foundry artifact loader"
+readme = "README.md"
+license = "CAL-1.0"
+authors = [
+    { name = "Perry Kundert", email = "perry@dominionrnd.com" }
+]
+keywords = ["ethereum", "stablecoin", "simulation", "web3"]
 requires-python = ">=3.11"
 dependencies = [
     "web3>=7",
+    # The contract artifacts, so an installed package can deploy a world
+    # without a repo checkout (buck_core.artifacts.load_artifact).
+    "alberta-buck-contracts>=0.1.0",
 ]
+
+[project.optional-dependencies]
+# The compiled kernels: optional by construction.  Everything they do has a
+# pure-Python equivalent, so this only makes it faster.
+kernel = ["alberta-buck-kernel>=0.1.0"]
+
+[project.urls]
+Homepage = "https://github.com/alberta-buck/alberta-buck"
+"Bug Tracker" = "https://github.com/alberta-buck/alberta-buck/issues"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -21,7 +39,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["buck_core*"]
 
-[tool.setuptools.package-data]
-# The compiled buck-math kernel (built by `make nix-core-build-py`) ships
-# inside the package: import buck_core.buck_math.
-buck_core = ["*.so"]
+# No package-data: this is deliberately a PURE Python wheel
+# (py3-none-any).  The compiled kernels live in alberta-buck-kernel; the
+# buck_core.buck_* modules here are shims that delegate to it, so that
+# depending on the session/journal API does not drag a per-platform wheel
+# matrix along.  A repo checkout still has the built .so beside the shim,
+# and CPython prefers the extension.
