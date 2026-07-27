@@ -20,7 +20,7 @@ showing private net worth, real economic decisions played against real
 BUCK mechanics – is the forcing function that ends that.  A game runs on
 someone else's machine.
 
-Seven artifacts are now published and installable.  Getting there was
+Nine artifacts are now published and installable.  Getting there was
 less about packaging than about *determinism*: an artifact you cannot
 reproduce is an artifact you cannot honestly publish, and the repository
 turned out to hold two independent sources of irreproducible binaries.
@@ -57,8 +57,11 @@ Table of Contents
 .. 1. D2: where the game's authority lives
 6. The way forward
 .. 1. P2.5b: `alberta-buck-contracts' on PyPI  [done 2026-07-26]
-.. 2. P3: `alberta-buck-core' on PyPI, and the pure/binary split
+.. 2. P3: `alberta-buck-core' on PyPI, and the pure/binary split  [done 2026-07-27]
 .. 3. P4: `alberta-buck-kernel' wheels
+..... 1. The macOS platform tag is set at the link, not at packaging
+..... 2. Wheels only – no sdist
+..... 3. What gates a wheel
 .. 4. P5: `alberta-buck' on PyPI
 .. 5. P6: what the game adds
 .. 6. P7: making the repository public
@@ -82,19 +85,19 @@ Table of Contents
    `alberta-buck-core'       npm          0.1.1  CAL-1.0          
    `alberta-buck-contracts'  npm          0.1.0  GPL-3.0-or-later 
    `alberta-buck-contracts'  PyPI         0.1.0  GPL-3.0-or-later 
+   `alberta-buck-core'       PyPI         0.1.0  CAL-1.0          
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   Remaining:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   #  artifact / step              registry  blocked on                     
-  ──────────────────────────────────────────────────────────────────────────
-   3  `alberta-buck-core'          PyPI      nothing – tag `py-core-v0.1.0' 
-   4  `alberta-buck-kernel'        PyPI      the wheel matrix               
-   5  `alberta-buck'               PyPI      P3, then dependency hygiene    
-   6  `alberta-buck-game' + zomes  npm       D2 – where authority lives     
-   7  repository public            GitHub    a deliberate decision          
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   #  artifact / step              registry  blocked on                       
+  ────────────────────────────────────────────────────────────────────────────
+   4  `alberta-buck-kernel'        PyPI      nothing – tag `py-kernel-v0.1.0' 
+   5  `alberta-buck'               PyPI      dependency hygiene               
+   6  `alberta-buck-game' + zomes  npm       D2 – where authority lives       
+   7  repository public            GitHub    a deliberate decision            
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   In place: `release-crates.yml', `release-npm.yml' and
   `release-pypi.yml' (all trusted publishing, no stored tokens),
@@ -473,12 +476,11 @@ Table of Contents
   bytecode.
 
 
-6.2 P3: `alberta-buck-core' on PyPI, and the pure/binary split
-──────────────────────────────────────────────────────────────
+6.2 P3: `alberta-buck-core' on PyPI, and the pure/binary split  [done 2026-07-27]
+─────────────────────────────────────────────────────────────────────────────────
 
-  The split is done (c6623b4) and `release-pypi.yml' carries the job;
-  what remains is `git tag py-core-v0.1.0'.  The reasoning below is kept
-  because the shape it produced is what P4 and P5 are built on.
+  Shipped 0.1.0 as a pure `py3-none-any' wheel.  The reasoning below is
+  kept because the shape it produced is what P4 and P5 are built on.
 
   `core/python/buck_core/' held four `.so' files, three of them
   *byte-identical copies of one dylib* (`buck_identity.so',
@@ -550,20 +552,88 @@ Table of Contents
 6.3 P4: `alberta-buck-kernel' wheels
 ────────────────────────────────────
 
-  The only phase with real engineering.  abi3-py311 is already set in
+  The only phase with real engineering.  abi3-py311 was already set in
   both binding crates, which is the large simplification: *one wheel per
   platform*, not one per Python version, and it keeps working on 3.13,
   3.14 and beyond with no rebuild.
 
-  Build with *maturin* rather than the plain-cargo Makefile path: it
-  knows abi3, emits correct wheel tags, handles the macOS `-undefined
-  dynamic_lookup' flags that `core/rust/.cargo/config.toml' now
-  hand-rolls, and vendors workspace path dependencies into the sdist.
-  Keep `make core-build-py' for development.
-
   Targets: macOS arm64 + x86_64, manylinux_2_28 x86_64 + aarch64,
-  Windows amd64.  *Include linux-aarch64* – it is the gap that bites
+  Windows amd64.  *linux-aarch64 is included* – it is the gap that bites
   `pyrevm' today, and ARM servers are where a cheap game backend lives.
+  Every one of the five has a native GitHub runner (`macos-13' is
+  retired, but `macos-15-intel' replaces it), so *nothing is
+  cross-compiled* and every wheel is tested on the architecture it was
+  built for.
+
+  *Not maturin*, as this document previously proposed.  maturin builds
+  one extension module per wheel and we ship two cdylibs in one –
+  `_math' (zero-dependency arithmetic) and `_kernel' (identity + wallet
+  + registry sharing a single object).  Adopting it would have meant
+  collapsing that structure to suit the tool.  `scripts/stage-kernel.py'
+  does the part maturin was wanted for – it knows each platform's cdylib
+  filename and staged suffix – and `auditwheel' inside the manylinux
+  image does the rest.
+
+  *Linux builds inside `quay.io/pypa/manylinux_2_28_*', not on the
+  runner.* A wheel's minimum glibc is whatever it linked against;
+  `ubuntu-latest' is 2.39, which almost nothing outside a current Ubuntu
+  can load.
+
+
+6.3.1 The macOS platform tag is set at the link, not at packaging
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  The trap worth the most words, because every instinct about it is
+  wrong.  A macOS wheel's platform tag does not come from
+  `MACOSX_DEPLOYMENT_TARGET', and not from the packaging step: the
+  `wheel' project reads the Mach-O `LC_BUILD_VERSION' out of every
+  object in the wheel and takes the *greater* of that and the building
+  interpreter's `sysconfig' platform.
+
+  Both halves have to be pinned, and each was found by a wheel coming
+  out wrong:
+
+  • `-C link-arg'-mmacosx-version-min=11.0= in
+    `core/rust/.cargo/config.toml'.  Setting `MACOSX_DEPLOYMENT_TARGET'
+    in the environment was *ignored* – nix supplies its own SDK default,
+    and the object still came out `minos 14.0'.  Pinning at the link
+    works regardless of toolchain.
+  • `_PYTHON_HOST_PLATFORM' in the workflow, for the interpreter's half.
+
+  Unpinned on a macOS 26 runner the result is `macosx_26_0_arm64': a
+  wheel that uploads without complaint and installs on essentially
+  nothing.  `scripts/check-kernel-wheel.py --expect-platform' asserts
+  the exact tag per matrix entry, so either pin coming loose fails the
+  build instead.
+
+
+6.3.2 Wheels only – no sdist
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  The kernel sdist is a hazard, not a fallback.  Its contents are
+  `buck_kernel/' *including whatever `.so' the build host produced*, and
+  none of the Rust that made it: published, pip on an unmatched platform
+  would download it, "build" it, and install a foreign binary.  With
+  wheels alone that case is a clean /no matching distribution/, and `pip
+  install alberta-buck' without `[kernel]' still works everywhere.  The
+  check is enforced in both the matrix job and the publish job.
+
+
+6.3.3 What gates a wheel
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  The vector suite is the kernel's whole claim – bit-identical agreement
+  with the pure-Python spec – so each wheel runs it on its own platform,
+  installed, with `alberta-buck-core' from PyPI in front of it.
+
+  That suite alone would be worthless as a gate: its tests are guarded
+  by `pytest.importorskip', so a kernel that fails to load makes them
+  *skip* and the run passes green having proven nothing.
+  `check-kernel-wheel.py --installed' runs first and asserts all four
+  modules resolved to compiled objects inside the installed
+  `buck_kernel'.  Verified both ways: 39 passed against the wheel, and
+  the preflight fails with /No module named 'buck_kernel'/ when the
+  kernel is absent.
 
 
 6.4 P5: `alberta-buck' on PyPI

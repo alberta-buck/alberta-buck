@@ -1153,19 +1153,7 @@ core-js-artifacts:
 # caches code signatures by inode -- a stale cache SIGKILLs (Killed: 9)
 # the next import.  A fresh inode per copy sidesteps it.
 core-build-py:
-	cd core/rust && cargo build --release -p buck-math-py -p buck-identity-py
-	rm -f core/python/buck_core/buck_math.so \
-	      core/python/buck_core/buck_identity.so \
-	      core/python/buck_core/buck_wallet.so \
-	      core/python/buck_core/buck_registry.so
-	cp core/rust/target/release/libbuck_math.dylib \
-	   core/python/buck_core/buck_math.so
-	cp core/rust/target/release/libbuck_identity.dylib \
-	   core/python/buck_core/buck_identity.so
-	cp core/rust/target/release/libbuck_identity.dylib \
-	   core/python/buck_core/buck_wallet.so
-	cp core/rust/target/release/libbuck_identity.dylib \
-	   core/python/buck_core/buck_registry.so
+	python3 scripts/stage-kernel.py --dev
 
 # The JS kernel bindings: wasm-pack (npm devDependency of core/js) emits
 # nodejs-target packages into core/js/kernel/node/ (flat: buck_math.* and
@@ -1250,13 +1238,8 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 # as _kernel.abi3.so and each module loads it under its own name.  4.9 MB of
 # wheel becomes 1.9 MB.
 .PHONY: core-kernel-dist
-core-kernel-dist:	core-build-py
-	@cmp -s core/python/buck_core/buck_identity.so core/python/buck_core/buck_wallet.so && \
-	 cmp -s core/python/buck_core/buck_identity.so core/python/buck_core/buck_registry.so || \
-	  { echo "identity/wallet/registry .so differ -- the one-dylib assumption is broken"; exit 1; }
-	cp core/python/buck_core/buck_identity.so core/python-kernel/buck_kernel/_kernel.abi3.so
-	cp core/python/buck_core/buck_math.so     core/python-kernel/buck_kernel/_math.abi3.so
-	@echo "staged core/python-kernel/buck_kernel/{_kernel,_math}.abi3.so"
+core-kernel-dist:
+	python3 scripts/stage-kernel.py
 
 core-build:	core-build-py core-build-wasm
 

@@ -33,7 +33,9 @@ node_modules/
 # are the wasm halves of the published alberta-buck-kernel package; its
 # package.json and README are tracked, the build outputs are not.
 /core/python/buck_core/*.so
+/core/python/buck_core/*.pyd
 /core/python-kernel/buck_kernel/*.abi3.so
+/core/python-kernel/buck_kernel/*.abi3.pyd
 /core/python-kernel/build/
 /core/js/kernel/node/
 /core/js/kernel/web/
