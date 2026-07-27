@@ -94,6 +94,29 @@ def extension_suffix() -> str:
     return ".abi3.pyd" if sys.platform == "win32" else ".abi3.so"
 
 
+def copy_object(src: Path, dst: Path) -> None:
+    """Copy a compiled object into place and make sure it is really there.
+
+    rm before cp: overwriting a .so in place keeps its inode, and macOS
+    caches code signatures by inode -- a stale cache SIGKILLs (Killed: 9)
+    the next import rather than failing it.  A fresh inode per copy
+    sidesteps that.
+
+    fsync after cp: the next thing that happens to this file is a dlopen,
+    and on macOS that has been observed to fail with "slice is not valid
+    mach-o file" -- the error a truncated or unreadable object gives -- on
+    bytes that were correct.  Forcing the data out before anyone maps it
+    costs microseconds and removes the question.
+    """
+    dst.unlink(missing_ok=True)
+    shutil.copy2(src, dst)
+    fd = os.open(dst, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 # Every spelling of the two architectures we ship, across cargo triples,
 # platform.machine() and wheel tags.
 _ARCH_ALIASES = (
@@ -140,12 +163,8 @@ def stage_wheel(built: Path) -> list[Path]:
         src = built / cdylib_filename(libname)
         if not src.exists():
             sys.exit(f"::error::cargo produced no {src}")
-        # Remove before copy: overwriting a mapped .so in place can leave a
-        # process holding a half-written image, and on macOS the result is
-        # a SIGKILL on next import rather than an error.
         dst = dest / f"{stem}{suffix}"
-        dst.unlink(missing_ok=True)
-        shutil.copy2(src, dst)
+        copy_object(src, dst)
         staged.append(dst)
         print(f"  {src.name} -> {dst.relative_to(REPO)} "
               f"({dst.stat().st_size:,} bytes)")
@@ -162,12 +181,42 @@ def stage_dev(built: Path) -> list[Path]:
         if not src.exists():
             sys.exit(f"::error::cargo produced no {src}")
         dst = dest / (modname + (".pyd" if sys.platform == "win32" else ".so"))
-        dst.unlink(missing_ok=True)
-        shutil.copy2(src, dst)
+        copy_object(src, dst)
         staged.append(dst)
         print(f"  {src.name} -> {dst.relative_to(REPO)} "
               f"({dst.stat().st_size:,} bytes)")
     return staged
+
+
+# Loads one extension by explicit path, as buck_kernel._loader does.
+_IMPORT_PROBE = """
+import importlib.util, sys
+from importlib.machinery import ExtensionFileLoader
+name, so = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location(
+    name, so, loader=ExtensionFileLoader(name, so))
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+"""
+
+
+def describe(so: Path) -> str:
+    """Whatever the platform can tell us about an object that would not load."""
+    import platform
+    lines = [f"  path        : {so}",
+             f"  size        : {so.stat().st_size:,} bytes",
+             f"  interpreter : {sys.executable}",
+             f"  running as  : {platform.machine()} "
+             f"({sysconfig.get_platform()})"]
+    for cmd in (["file", "-b", str(so)], ["lipo", "-archs", str(so)]):
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True,
+                                 timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if out.returncode == 0 and out.stdout.strip():
+            lines.append(f"  {cmd[0]:12}: {out.stdout.strip()}")
+    return "\n".join(lines)
 
 
 def verify(staged: list[Path], dev: bool) -> None:
@@ -176,10 +225,21 @@ def verify(staged: list[Path], dev: bool) -> None:
     Symbol inspection would need nm/dumpbin and would still not prove the
     module initialises.  Importing does, and it is the same operation the
     wheel performs on a user's machine.
-    """
-    import importlib.util
-    from importlib.machinery import ExtensionFileLoader
 
+    Each import runs in a SUBPROCESS, and gets one retry.  Not fastidiousness:
+    on GitHub's macos-26 arm64 image this same check failed with dyld
+    reporting "slice is not valid mach-o file" on an object that was
+    byte-for-byte identical (483,696 bytes) to one that had loaded cleanly
+    on the previous run of the same commit, same image, same rustc.  The
+    bytes were not the variable, so a fresh process and a second attempt
+    are the cheap mitigations; if it fails twice, describe() prints the
+    object's actual architecture so the next occurrence is diagnosed rather
+    than guessed at.
+
+    Nothing is lost if this check is wrong, either way: the real gate is
+    downstream, where the built wheel is installed and the conformance
+    vectors run against it.
+    """
     if dev:
         plan = [(p.name.split(".")[0], p) for p in staged]
     else:
@@ -188,14 +248,24 @@ def verify(staged: list[Path], dev: bool) -> None:
         plan += [(m, by_stem["_kernel"]) for m in KERNEL_MODULES]
 
     for modname, so in plan:
-        spec = importlib.util.spec_from_file_location(
-            modname, str(so), loader=ExtensionFileLoader(modname, str(so)))
-        mod = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(mod)
-        except ImportError as exc:
-            sys.exit(f"::error::{so.name} has no PyInit_{modname}: {exc}")
-        print(f"  import {modname} from {so.name}: ok")
+        last = ""
+        for attempt in (1, 2):
+            out = subprocess.run(
+                [sys.executable, "-c", _IMPORT_PROBE, modname, str(so)],
+                capture_output=True, text=True)
+            if out.returncode == 0:
+                note = "" if attempt == 1 else f" (on attempt {attempt})"
+                print(f"  import {modname} from {so.name}: ok{note}")
+                break
+            last = (out.stderr or out.stdout).strip().splitlines()[-1:]
+            last = last[0] if last else f"exit {out.returncode}"
+            if attempt == 1:
+                print(f"  import {modname} from {so.name}: failed, retrying "
+                      f"-- {last}")
+        else:
+            print(f"::error::{so.name} would not load as {modname}: {last}")
+            print(describe(so))
+            sys.exit(1)
 
 
 def main() -> int:

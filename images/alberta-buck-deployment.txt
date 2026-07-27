@@ -60,10 +60,11 @@ Table of Contents
 .. 2. P3: `alberta-buck-core' on PyPI, and the pure/binary split  [done 2026-07-27]
 .. 3. P4: `alberta-buck-kernel' wheels
 ..... 1. The macOS platform tag is set at the link, not at packaging
-..... 2. An empty environment variable is not an unset one
-..... 3. JSON is UTF-8; `read_text()' is whatever the locale says
-..... 4. Wheels only – no sdist
-..... 5. What gates a wheel
+..... 2. The staging import check is not the gate, and must not act like one
+..... 3. An empty environment variable is not an unset one
+..... 4. JSON is UTF-8; `read_text()' is whatever the locale says
+..... 5. Wheels only – no sdist
+..... 6. What gates a wheel
 .. 4. P5: `alberta-buck' on PyPI
 .. 5. P6: what the game adds
 .. 6. P7: making the repository public
@@ -615,7 +616,37 @@ Table of Contents
   build instead.
 
 
-6.3.2 An empty environment variable is not an unset one
+6.3.2 The staging import check is not the gate, and must not act like one
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  On the second run of an unchanged commit, `macos-arm64' failed the
+  post-stage import with dyld reporting /slice is not valid mach-o file/
+  – the error an unreadable object gives.  The object was *byte-for-byte
+  identical* to the one that had loaded cleanly the run before: 483,696
+  bytes, same runner image (`macos-26-arm64' 20260720.0258.1), same
+  rustc 1.97.1, same `host macosx-10.9-universal2'.  The bytes were not
+  the variable.
+
+  The root cause is unproven.  What the check now does instead of
+  guessing:
+
+  • each import runs in a *subprocess*, and gets *one retry*;
+  • the staged object is *fsync'd* after copy, since the very next thing
+    that touches it is a `dlopen' and the failure mode is exactly what a
+    partially visible file produces;
+  • on a second failure, `describe()' prints the object's real
+    architecture (`file', `lipo -archs') and the interpreter's, so the
+    next occurrence is diagnosed rather than theorised about.
+
+  This is proportionate because the check is *redundant*.  It is an
+  early convenience – catch a missing `PyInit_' before packaging – and
+  the actual gate is downstream: the wheel is installed and the
+  conformance vectors run against it.  A redundant check that can fail
+  spuriously is worse than no check; one that retries and then explains
+  itself is worth keeping.
+
+
+6.3.3 An empty environment variable is not an unset one
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   `_PYTHON_HOST_PLATFORM' was passed through the job's `env:' block, so
@@ -635,7 +666,7 @@ Table of Contents
   from absent to any code that checks membership.
 
 
-6.3.3 JSON is UTF-8; `read_text()' is whatever the locale says
+6.3.4 JSON is UTF-8; `read_text()' is whatever the locale says
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   `Path.read_text()' with no `encoding' uses the platform's preferred
@@ -651,7 +682,7 @@ Table of Contents
   have hit the same failure with no test to catch it.
 
 
-6.3.4 Wheels only – no sdist
+6.3.5 Wheels only – no sdist
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The kernel sdist is a hazard, not a fallback.  Its contents are
@@ -663,7 +694,7 @@ Table of Contents
   check is enforced in both the matrix job and the publish job.
 
 
-6.3.5 What gates a wheel
+6.3.6 What gates a wheel
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The vector suite is the kernel's whole claim – bit-identical agreement

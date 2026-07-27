@@ -512,6 +512,31 @@ that uploads without complaint and installs on essentially nothing.
 =scripts/check-kernel-wheel.py --expect-platform= asserts the exact tag per
 matrix entry, so either pin coming loose fails the build instead.
 
+*** The staging import check is not the gate, and must not act like one
+
+On the second run of an unchanged commit, =macos-arm64= failed the
+post-stage import with dyld reporting /slice is not valid mach-o file/ --
+the error an unreadable object gives.  The object was *byte-for-byte
+identical* to the one that had loaded cleanly the run before: 483,696 bytes,
+same runner image (=macos-26-arm64= 20260720.0258.1), same rustc 1.97.1,
+same =host macosx-10.9-universal2=.  The bytes were not the variable.
+
+The root cause is unproven.  What the check now does instead of guessing:
+
+- each import runs in a *subprocess*, and gets *one retry*;
+- the staged object is *fsync'd* after copy, since the very next thing that
+  touches it is a =dlopen= and the failure mode is exactly what a partially
+  visible file produces;
+- on a second failure, =describe()= prints the object's real architecture
+  (=file=, =lipo -archs=) and the interpreter's, so the next occurrence is
+  diagnosed rather than theorised about.
+
+This is proportionate because the check is *redundant*.  It is an early
+convenience -- catch a missing =PyInit_= before packaging -- and the actual
+gate is downstream: the wheel is installed and the conformance vectors run
+against it.  A redundant check that can fail spuriously is worse than no
+check; one that retries and then explains itself is worth keeping.
+
 *** An empty environment variable is not an unset one
 
 =_PYTHON_HOST_PLATFORM= was passed through the job's =env:= block, so on the
