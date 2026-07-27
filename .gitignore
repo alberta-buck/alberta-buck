@@ -64,6 +64,7 @@ lcov.info
 *.tex
 *.fls
 *.log
+*.out
 /raw-materials-price/
 
 # window-stamped historical CSVs are generated caches

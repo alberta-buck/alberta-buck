@@ -48,14 +48,15 @@ Table of Contents
 .. 6. The contracts have no addresses
 3. Mechanics worth not rediscovering
 .. 1. The first publish is always manual
-.. 2. Build outputs are not published by default
-.. 3. Dependencies must be pinned to be reproducible
+.. 2. Pending publishers are unique on the config, not the project
+.. 3. Build outputs are not published by default
+.. 4. Dependencies must be pinned to be reproducible
 4. The public-code boundary
 .. 1. D1: the sim's source goes public  [settled 2026-07-26]
 5. Remaining decisions
 .. 1. D2: where the game's authority lives
 6. The way forward
-.. 1. P2.5b: `alberta-buck-contracts' on PyPI
+.. 1. P2.5b: `alberta-buck-contracts' on PyPI  [done 2026-07-26]
 .. 2. P3: `alberta-buck-core' on PyPI, and the pure/binary split
 .. 3. P4: `alberta-buck-kernel' wheels
 .. 4. P5: `alberta-buck' on PyPI
@@ -80,27 +81,29 @@ Table of Contents
    `alberta-buck-kernel'     npm          0.1.1  CAL-1.0          
    `alberta-buck-core'       npm          0.1.1  CAL-1.0          
    `alberta-buck-contracts'  npm          0.1.0  GPL-3.0-or-later 
+   `alberta-buck-contracts'  PyPI         0.1.0  GPL-3.0-or-later 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   Remaining:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     #  artifact / step              registry  blocked on                 
-  ────────────────────────────────────────────────────────────────────────
-   2.5  `alberta-buck-contracts'     PyPI      a first-publish credential 
-     3  `alberta-buck-core'          PyPI      the pure/binary split      
-     4  `alberta-buck-kernel'        PyPI      the wheel matrix           
-     5  `alberta-buck'               PyPI      D1 – is the sim public?    
-     6  `alberta-buck-game' + zomes  npm       D2 – where authority lives 
-     7  repository public            GitHub    a deliberate decision      
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   #  artifact / step              registry  blocked on                     
+  ──────────────────────────────────────────────────────────────────────────
+   3  `alberta-buck-core'          PyPI      nothing – tag `py-core-v0.1.0' 
+   4  `alberta-buck-kernel'        PyPI      the wheel matrix               
+   5  `alberta-buck'               PyPI      P3, then dependency hygiene    
+   6  `alberta-buck-game' + zomes  npm       D2 – where authority lives     
+   7  repository public            GitHub    a deliberate decision          
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  In place: `release-crates.yml' and `release-npm.yml' (trusted
-  publishing, no stored tokens), `LICENSE' / `core/LICENSE' /
-  `LICENSING.md' / `NOTICE', a Rust toolchain and `binaryen' in the
-  flake, `Cargo.lock' and `foundry.lock' committed.  *Nothing is pushed
-  to GitHub yet*, so neither workflow has ever run – and the source of
-  seven published artifacts exists on one machine.
+  In place: `release-crates.yml', `release-npm.yml' and
+  `release-pypi.yml' (all trusted publishing, no stored tokens),
+  `LICENSE' / `core/LICENSE' / `LICENSING.md' / `NOTICE', a Rust
+  toolchain and `binaryen' in the flake, `Cargo.lock' and `foundry.lock'
+  committed.  The repository is pushed to
+  `github.com/alberta-buck/alberta-buck' (private), and
+  `release-pypi.yml' has run green – the PyPI row above is the first
+  artifact this repository published without a human holding a token.
 
 
 2 The architecture, and why
@@ -218,9 +221,17 @@ Table of Contents
   once the workspace moved to 0.2.0, publishing a crate built against
   its own old sibling.
 
-  Tags are per-registry: `rs-v*', `js-v*', `py-v*'.  One `v0.1.0' firing
-  all three breaks the moment an artifact is unchanged, since crates.io
+  Tags are per-registry: `rs-v*', `js-v*'.  One `v0.1.0' firing all
+  three breaks the moment an artifact is unchanged, since crates.io
   rejects a republished version.
+
+  PyPI goes one level finer – `py-contracts-v*', `py-core-v*',
+  `py-kernel-v*', `py-sim-v*' – because its four distributions are
+  genuinely independent packages rather than one workspace released
+  together.  A shared `py-v*' would have to either force all four to the
+  same version, contradicting the patch-floats rule above, or abandon
+  the tag-matches-version gate.  Neither is worth saving three tag
+  prefixes.
 
 
 2.4 One compiler for everything we own
@@ -329,13 +340,46 @@ Table of Contents
     created by its first OIDC upload, so PyPI can be zero-token from the
     start – once the workflow exists and the repository is pushed.
 
+
+3.2 Pending publishers are unique on the config, not the project
+────────────────────────────────────────────────────────────────
+
+  The natural reading of PyPI's form – four projects, same owner, same
+  repository, same workflow, differing only in project name – is
+  rejected on the second registration:
+
+        A pending trusted publisher matching this configuration
+        has already been registered for a different project name.
+
+  Warehouse enforces a database constraint on `(owner, repo, workflow,
+  environment)' and deliberately leaves `project_name' out of it.  The
+  reason is sound: the OIDC claim is *all* PyPI has to decide which
+  project to mint, so two pending publishers with identical configs
+  would be ambiguous.  The discriminator has to be something the claim
+  carries, and the cheap one is the *environment*:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   project                   environment   
+  ─────────────────────────────────────────
+   `alberta-buck-contracts'  `pypi'        
+   `alberta-buck-core'       `pypi'        
+   `alberta-buck-kernel'     `pypi-kernel' 
+   `alberta-buck'            `pypi-sim'    
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The constraint binds *pending* publishers only – established ones may
+  share a config freely, which is why `contracts' and `core' coexist on
+  `pypi' (`contracts' was established before `core' was registered).
+  There is no reason to consolidate them afterwards: separate
+  environments allow per-package protection rules.
+
   npm generates provenance attestations only for *public* repositories.
   While this repository is private, publishes succeed but carry no
   provenance, and `--provenance' must not be passed: it fails outright
   rather than degrading.
 
 
-3.2 Build outputs are not published by default
+3.3 Build outputs are not published by default
 ──────────────────────────────────────────────
 
   npm falls back to `.gitignore' when there is no `.npmignore', and
@@ -347,7 +391,7 @@ Table of Contents
   than trusting that it did.
 
 
-3.3 Dependencies must be pinned to be reproducible
+3.4 Dependencies must be pinned to be reproducible
 ──────────────────────────────────────────────────
 
   `make install' fetched HEAD of five repositories and `foundry.lock'
@@ -417,25 +461,26 @@ Table of Contents
 6 The way forward
 ═════════════════
 
-6.1 P2.5b: `alberta-buck-contracts' on PyPI
-───────────────────────────────────────────
+6.1 P2.5b: `alberta-buck-contracts' on PyPI  [done 2026-07-26]
+──────────────────────────────────────────────────────────────
 
-  The package builds and installs; only a credential is missing.  Either
-  configure a PyPI *pending publisher* (project
-  `alberta-buck-contracts', owner `alberta-buck', repository
-  `alberta-buck', workflow `release-pypi.yml', environment `pypi') and
-  let the first upload create the project with no token at all – which
-  requires pushing the repository and writing that workflow – or use an
-  API token for the bootstrap, as npm and crates.io required.
+  Shipped 0.1.0 with no token ever created: a pending publisher, and the
+  first OIDC upload minted the project.  The bootstrap that npm and
+  crates.io each needed a scoped token for, PyPI did not need at all.
 
-  /Accept/: `pip install alberta-buck-contracts' in a clean venv outside
-  any checkout returns `Buck''s ABI and 16,158 bytes of bytecode.
+  /Accepted/: `pip install alberta-buck-contracts' in a clean venv
+  outside any checkout returns `Buck''s ABI and 16,157 bytes of
+  bytecode.
 
 
 6.2 P3: `alberta-buck-core' on PyPI, and the pure/binary split
 ──────────────────────────────────────────────────────────────
 
-  `core/python/buck_core/' holds four `.so' files, three of them
+  The split is done (c6623b4) and `release-pypi.yml' carries the job;
+  what remains is `git tag py-core-v0.1.0'.  The reasoning below is kept
+  because the shape it produced is what P4 and P5 are built on.
+
+  `core/python/buck_core/' held four `.so' files, three of them
   *byte-identical copies of one dylib* (`buck_identity.so',
   `buck_wallet.so', `buck_registry.so': 1,491,824 bytes each – one
   cdylib with three `#[pymodule]' entry points).  Right for the
@@ -478,6 +523,28 @@ Table of Contents
 
   4.9 MB of wheel becomes 1.9 MB.  The fallback – ship the dylib three
   times – is wasteful, not broken.
+
+  The core suite (`core/python/tests') is deliberately *not* the release
+  gate: its vector tests need a built kernel and its session tests a
+  live EVM, neither of which this wheel contains or requires.  Gating on
+  it would make a pure-Python release depend on the Rust toolchain –
+  exactly the coupling the split exists to remove.  The job gates on
+  what the wheel actually promises:
+
+  • the wheel is `py3-none-any' and carries no `.so', `.pyd' or
+    `.dylib'.  The four `.so' files still sit beside the shims in a
+    checkout, so this is a live risk, not a theoretical one – a future
+    `package-data' entry would ship them and produce a platform wheel
+    that installs on the wrong host and fails at import;
+  • installed from the wheel into a clean venv *outside any checkout*,
+    `load_artifact("Buck")' returns 46 ABI entries and 16,157 bytes from
+    the installed `alberta-buck-contracts'.  Run from a temp cwd,
+    because `repo_root()' walks up from both `__file__' and the cwd –
+    testing inside the checkout would prove nothing;
+  • with no kernel installed, each `buck_core.buck_*' shim raises
+    `ImportError' – precisely what `alberta_buck.wallet._kernel' catches
+    to fall back to pure Python.  Any other failure would break the
+    selector.
 
 
 6.3 P4: `alberta-buck-kernel' wheels

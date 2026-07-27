@@ -1,37 +1,62 @@
 # Publish the Alberta Buck Python packages to PyPI.
 #
-# Trigger: a py-v* tag, e.g.
-#
-#     git tag py-v0.1.0 && git push origin py-v0.1.0
-#
 # Authentication is OIDC trusted publishing -- no API token anywhere.
+#
+# ── Tags are per package ──────────────────────────────────────────────
+#
+#     git tag py-contracts-v0.1.0    # alberta-buck-contracts
+#     git tag py-core-v0.1.0         # alberta-buck-core
+#     git tag py-kernel-v0.1.0       # alberta-buck-kernel   (P4, not yet)
+#     git tag py-sim-v0.1.0          # alberta-buck          (P5, not yet)
+#
+# One shared py-v* tag cannot work: D4 lets each package's patch version
+# float independently, so a single tag would either force all four to the
+# same version or make the tag/version equality gate unenforceable.  Each
+# job therefore triggers on its own prefix and checks its own pyproject.
+#
+# ── Pending publishers ────────────────────────────────────────────────
 #
 # PyPI differs from crates.io and npm in the one way that matters here: a
 # *pending publisher* can be configured for a project that does not exist
 # yet, and the first successful upload creates it.  So unlike the other two
 # registries, this needs no manual token bootstrap -- but the pending
 # publisher must be configured first, at
-# https://pypi.org/manage/account/publishing/ :
+# https://pypi.org/manage/account/publishing/ .
 #
-#     PyPI project name : alberta-buck-contracts
-#     Owner             : alberta-buck
-#     Repository        : alberta-buck
-#     Workflow name     : release-pypi.yml
-#     Environment       : pypi          (must match `environment:` below)
+# CAUTION: pending publishers are UNIQUE on (owner, repo, workflow,
+# environment) -- warehouse enforces it in the database and the second
+# registration fails with "already been registered for a different project
+# name".  project_name is deliberately NOT part of that key: the OIDC claim
+# is all PyPI has to decide which project to mint, so two pending
+# publishers with identical config would be ambiguous.  Hence a distinct
+# environment per package.  (The constraint is only on *pending*
+# publishers; once a project exists, established publishers may share a
+# config freely.  There is no reason to migrate back, and separate
+# environments allow per-package protection rules.)
 #
-# A pending publisher does not reserve the name; it is claimed on first use.
+#     project                  owner/repo               environment
+#     alberta-buck-contracts   alberta-buck/alberta-buck  pypi
+#     alberta-buck-core        alberta-buck/alberta-buck  pypi
+#     alberta-buck-kernel      alberta-buck/alberta-buck  pypi-kernel
+#     alberta-buck             alberta-buck/alberta-buck  pypi-sim
 #
-# Only alberta-buck-contracts ships today.  alberta-buck-core,
-# alberta-buck-kernel and alberta-buck join this workflow as their phases
-# land (alberta-buck-deployment.org, P3/P4/P5); each needs its own pending
-# publisher configured the same way.
+# Workflow name is the filename -- release-pypi.yml -- not the `name:`
+# below.  The environment must match each job's `environment:` exactly.
+# A pending publisher does not reserve the name; it is claimed on first
+# use, and converts to an established publisher then.
+#
+# alberta-buck-kernel (P4, the wheel matrix) and alberta-buck (P5) join
+# this workflow as their phases land; see alberta-buck-deployment.org.
 
 name: Release PyPI
 
 on:
   push:
     tags:
-      - 'py-v*'
+      - 'py-contracts-v*'
+      - 'py-core-v*'
+      - 'py-kernel-v*'
+      - 'py-sim-v*'
 
 concurrency:
   group: release-pypi
@@ -43,6 +68,7 @@ permissions:
 jobs:
   contracts:
     name: Publish alberta-buck-contracts
+    if: startsWith(github.ref_name, 'py-contracts-v')
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -65,15 +91,19 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
 
       - name: Tag matches the package version
+        env:
+          PREFIX: py-contracts-v
+          PYPROJECT: core/contracts/python/pyproject.toml
         run: |
           python3 - <<'EOF'
           import os, sys, tomllib
-          tag = os.environ["GITHUB_REF_NAME"].removeprefix("py-v")
-          ver = tomllib.load(open("core/contracts/python/pyproject.toml", "rb"))["project"]["version"]
+          prefix, path = os.environ["PREFIX"], os.environ["PYPROJECT"]
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix(prefix)
+          ver = tomllib.load(open(path, "rb"))["project"]["version"]
           if tag != ver:
-              print(f"::error::tag py-v{tag} does not match package version {ver}")
+              print(f"::error::tag {prefix}{tag} does not match {path} version {ver}")
               sys.exit(1)
-          print(f"alberta-buck-contracts {ver} matches the tag")
+          print(f"{ver} matches the tag")
           EOF
 
       # Pinned solidity dependencies; they compile INTO our contracts, so
@@ -121,6 +151,132 @@ jobs:
           if missing:
               print(f"::error::wheel {whl[0]} is missing {missing}"); sys.exit(1)
           print(f"{whl[0]}: bundle present ({len(names)} files)")
+          EOF
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # ──────────────────────────────────────────────────────────────────────
+  # alberta-buck-core: pure Python, no toolchain.  The compiled kernels
+  # live in alberta-buck-kernel precisely so this job needs no Rust and no
+  # per-platform matrix -- one py3-none-any wheel serves everyone.
+  #
+  # The suite in core/python/tests is NOT a gate here: its vector tests
+  # need a built kernel .so and its session tests need a live EVM, neither
+  # of which this wheel contains or requires.  Those run in core-test-py
+  # (make nix-core-test) and gate the kernel release.  What this job gates
+  # instead is what the wheel itself promises: that it is pure, that it
+  # deploys contracts with no checkout, and that it degrades to pure
+  # Python when the kernel is absent.
+  # ──────────────────────────────────────────────────────────────────────
+  core:
+    name: Publish alberta-buck-core
+    if: startsWith(github.ref_name, 'py-core-v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/alberta-buck-core
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'      # the floor: requires-python >=3.11
+
+      - name: Tag matches the package version
+        env:
+          PREFIX: py-core-v
+          PYPROJECT: core/python/pyproject.toml
+        run: |
+          python3 - <<'EOF'
+          import os, sys, tomllib
+          prefix, path = os.environ["PREFIX"], os.environ["PYPROJECT"]
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix(prefix)
+          ver = tomllib.load(open(path, "rb"))["project"]["version"]
+          if tag != ver:
+              print(f"::error::tag {prefix}{tag} does not match {path} version {ver}")
+              sys.exit(1)
+          print(f"{ver} matches the tag")
+          EOF
+
+      - name: Build the wheel and sdist
+        run: |
+          python -m pip install --quiet build
+          python -m build core/python --outdir dist/
+
+      - name: The wheel must be pure
+        # This is the whole point of the core/kernel split: depending on the
+        # session API must not drag a per-platform wheel matrix behind it.
+        # A stray built .so in core/python/buck_core (they are gitignored,
+        # but a future package-data entry would ship them) would silently
+        # turn this into a platform wheel that installs on the wrong host
+        # and fails at import.
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, zipfile
+          whl = glob.glob("dist/*.whl")
+          if len(whl) != 1:
+              print(f"::error::expected exactly one wheel, got {whl}"); sys.exit(1)
+          whl = whl[0]
+          if not whl.endswith("-py3-none-any.whl"):
+              print(f"::error::{whl} is not a pure wheel"); sys.exit(1)
+          binary = [n for n in zipfile.ZipFile(whl).namelist()
+                    if n.endswith((".so", ".pyd", ".dylib"))]
+          if binary:
+              print(f"::error::{whl} carries compiled objects: {binary}"); sys.exit(1)
+          print(f"{whl}: pure")
+          EOF
+
+      - name: Smoke test the wheel outside any checkout
+        # Installed from a wheel with no repo above it, buck_core must
+        # still deploy a world -- that fallback to alberta-buck-contracts
+        # is what makes an installed package usable at all (P2.5).  Run
+        # from a temp cwd: repo_root() walks up from BOTH __file__ and the
+        # cwd, so testing inside the checkout would prove nothing.
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet dist/*.whl
+          cd "$(mktemp -d)"
+          /tmp/smoke/bin/python - <<'EOF'
+          import sys
+          from buck_core import (
+              CALL_GAS, DEPLOY_GAS, Expect, Journal, Web3Session,
+              load_artifact, repo_root,
+          )
+
+          try:
+              root = repo_root()
+          except FileNotFoundError:
+              pass
+          else:
+              print(f"::error::found a checkout at {root}; test is meaningless")
+              sys.exit(1)
+
+          abi, bytecode = load_artifact("Buck")
+          assert bytecode.startswith("0x"), bytecode[:16]
+          assert len(bytecode) > 2, "empty bytecode"
+          assert any(e.get("name") == "transfer" for e in abi), "not an ERC-20 ABI"
+          print(f"load_artifact('Buck'): {len(abi)} ABI entries, "
+                f"{len(bytecode) // 2 - 1} bytes -- no checkout needed")
+
+          # Without alberta-buck-kernel the shims must raise ImportError:
+          # that is exactly what alberta_buck.wallet._kernel catches to
+          # fall back to pure Python.  Anything else (an AttributeError, a
+          # partially-initialised module) would break the selector.
+          for name in ("buck_math", "buck_identity", "buck_wallet", "buck_registry"):
+              try:
+                  __import__(f"buck_core.{name}")
+              except ImportError:
+                  continue
+              print(f"::error::buck_core.{name} imported without the kernel")
+              sys.exit(1)
+          print("kernel shims degrade to ImportError as the selector expects")
           EOF
 
       - name: Publish to PyPI
