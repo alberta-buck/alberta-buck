@@ -595,26 +595,77 @@ against the wheel, and the preflight fails with /No module named
 
 ** P5: =alberta-buck= on PyPI
 
-Blocked on P3 (hard =buck_core= import) and D1.  The contract blocker is
-cleared: =load_artifact= falls back to the installed
-=alberta-buck-contracts= when no =foundry.toml= is reachable, with a repo
-checkout's =out/= still winning so a rebuild takes effect immediately.
+*** The base install is pure Python, and that is the point
 
-Remaining:
+Everything heavy is an extra, so =pip install alberta-buck= installs
+*everywhere* -- including machines no wheel of ours is built for:
 
-1. *Dependency hygiene.*  =matplotlib= (plots only) -> =[plots]=;
-   =websockets= (=sim/server.py= only) -> =[server]=; =pyrevm=
-   (=sim/pyrevm_backend.py= only) -> =[fast]=.  =pyrevm= especially: as a
-   hard dependency it makes =pip install alberta-buck= *fail to build* on
-   linux-aarch64 and on macOS with Python 3.13+, because upstream ships no
-   wheels there.  As an extra it is opt-in, and its absence degrades to the
-   anvil backend, which the code already does.
-2. Add =alberta-buck-core= and =alberta-buck-contracts= to =dependencies=,
-   =alberta-buck-kernel= as =[kernel]=, then *delete the =sys.path= shim* in
-   =alberta_buck/__init__.py= -- its comment already anticipates this.
-3. Align =requires-python= to >= 3.11 (currently 3.10).
-4. Dynamic version from =alberta_buck/version.py=, plus the
-   tag-matches-version CI guard.
+| extra     | adds                        | reached from             |
+|-----------+-----------------------------+--------------------------|
+| (base)    | web3, dotenv, py_ecc, core  | always                   |
+| =kernel=  | =alberta-buck-core[kernel]= | =wallet._kernel=         |
+| =fast=    | =pyrevm=                    | =sim.pyrevm_backend=     |
+| =plots=   | =matplotlib=                | =sim.plot_*=             |
+| =server=  | =websockets=                | =sim.server=             |
+| =sim=     | all of the above            | development              |
+
+This narrows what is *installed* without changing what *runs*, because
+every one of those was already imported lazily at its point of use --
+=sim.plot_*= import matplotlib inside the plotting functions, =__main__=
+imports =pyrevm_backend= inside the backend selector, and =sim/__init__.py=
+imports nothing.  Nothing had to be restructured to make this true; it was
+already true, and the dependency list simply did not say so.
+
+=pyrevm= is the one that mattered.  Upstream ships no wheel for every
+target we support, so as a *hard* dependency it made =pip install
+alberta-buck= fail to *build* on precisely the platforms the kernel matrix
+covers.  =websockets= is the one that did not: web3 depends on it anyway,
+so declaring it here documents =sim.server='s direct use rather than
+shrinking anything.
+
+*** The kernel extra is safe because the fallback is real
+
+=alberta_buck.wallet._kernel= selects at call time and drops to the
+pure-Python path on =ImportError=, and the kernel is proven bit-identical
+to that path by =core/vectors/*-kernel-vectors.json=.  So the extra cannot
+change an emitted byte -- only the speed.
+
+Verified from built wheels rather than asserted: two clean venvs, base and
+=[kernel]=, computing Poseidon and G1 =mul= / =add=.  The backends report
+=py= and =kernel= respectively and every value is identical.
+
+*** Done, and what is left
+
+The =sys.path= shim in =alberta_buck/__init__.py= is gone -- =core= is a
+declared dependency now, and a checkout still gets its own copy first
+because =make venv= installs =core/python= editable, which is the same
+mechanism declared rather than improvised.  =requires-python= is >= 3.11,
+the floor of =alberta-buck-core=.
+
+Remaining before the tag: a dynamic version from =alberta_buck/version.py=,
+and the =py-sim-v*= job in =release-pypi.yml= (pending publisher
+=alberta-buck=, environment =pypi-sim=).
+
+*** An unseeded global RNG cost two full-suite runs
+
+Worth recording because the failure was so plausible.  Two tests went red
+while the dependency change was being validated, and neither was caused by
+it: =test_mini_parity= was polluted by fixtures a previous run had
+regenerated without =anvil= on =PATH=, and =test_escrow_oracle='s
+feed-revenue test failed because =truthstake.Reporter.observe= draws from
+the *global* =random=, which the test never seeded -- 5 failures in 30
+seeds, 17%.
+
+The other tests in that file construct local =_rand.Random(42)= instances
+and look seeded; =observe()= ignores them and reads the global.  It is now
+seeded, with the docstring saying plainly that this pins the sample rather
+than making the marginal assertion hold.
+
+The general lesson is about attribution, not randomness: a test that fails
+one run in six will be attributed to whatever change is in flight.  Before
+believing a regression, run the suite on the *unmodified* tree -- the
+baseline here was 404 passed with one unrelated pre-existing failure, which
+is exactly what the change reproduces.
 
 ** P6: what the game adds
 
