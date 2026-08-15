@@ -223,8 +223,8 @@ def test_rebalancing_sim_plot():
     # and unwinds above par by PREMIUM_BP, so the markers should straddle the
     # 1.0 line -- if they cluster on one side the leg is one-directional and
     # is not closing round-trips.
-    ent = [f.get("bdaEntries", 0) for f in fr]
-    sold = [f.get("bdaSold", 0) for f in fr]
+    ent = [f.get("dbb_bought", 0) + f.get("dba_bought", 0) for f in fr]
+    sold = [f.get("dbb_sold", 0) + f.get("dba_sold", 0) for f in fr]
     bu_par = [f.get("buckUsd", 0) / 1e6 for f in fr]
     buy_d = [days[i] for i in range(1, len(fr)) if ent[i] > ent[i - 1]]
     buy_p = [bu_par[i] for i in range(1, len(fr)) if ent[i] > ent[i - 1]]
@@ -233,12 +233,13 @@ def test_rebalancing_sim_plot():
     if buy_d:
         handles6.append(ax.scatter(
             buy_d, buy_p, marker="^", s=22, color="tab:olive", zorder=5,
-            label=f"demand leg buys ({ent[-1]}, "
-                  f"{fr[-1].get('bdaBought', 0) / E6:,.0f} BUCK)"))
+            label=f"demand leg buys ({len(buy_d)} days, "
+                  f"{ent[-1] / E6:,.0f} BUCK)"))
     if sell_d:
         handles6.append(ax.scatter(
             sell_d, sell_p, marker="v", s=22, color="tab:pink", zorder=5,
-            label=f"demand leg sells ({sold[-1]})"))
+            label=f"demand leg sells ({len(sell_d)} days, "
+                  f"{sold[-1] / E6:,.0f} BUCK)"))
     ax.axhline(1.0, color="black", alpha=0.35, linewidth=0.9, linestyle="-.")
     ax.axhline(0.0, color="black", alpha=0.2, linewidth=0.8)
     ax.annotate("setpoint 1.0", xy=(0.005, 1.0), xycoords=("axes fraction", "data"),
@@ -343,9 +344,29 @@ def test_rebalancing_sim_plot():
     # mistaken for a result.
     dollar_days = [f.get("dmDollarDays", 0) for f in fr]
 
+    # An APR is a ratio whose denominator starts at nearly nothing.  On day 3
+    # a few hundred dollar-days of capital turn a single lucky round trip into
+    # four figures of "APR", and one such point sets the y-scale for the whole
+    # two-year picture.  The early value is not a small annual rate, it is not
+    # an annual rate at all -- so it is withheld rather than drawn, and the
+    # curve begins where the denominator can carry it.  WARMUP_DAYS covers the
+    # elapsed-time divisor; the dollar-day series additionally has to reach a
+    # visible fraction of the capital it eventually deploys.
+    WARMUP_DAYS = 45
+    WARMUP_FRAC = 0.02
+    dd_floor = WARMUP_FRAC * (dollar_days[-1] or 0)
+    NA = float("nan")
+
+    def pct(v):
+        """Render a possibly-withheld rate; a run shorter than the warmup has
+        no annual rate to report, and should say so rather than print nan."""
+        return f"{v:.2f}%" if v == v else "n/a"
+
     def apr(series):
-        return [100.0 * 365.0 * v / dd if dd > 0 else 0.0
-                for v, dd in zip(series, dollar_days)]
+        """Annualize on deployed capital-time, blank until it means something."""
+        return [100.0 * 365.0 * v / dd
+                if (dd > 0 and dd >= dd_floor and dy >= WARMUP_DAYS) else NA
+                for v, dd, dy in zip(series, dollar_days, days)]
 
     realized_apr = apr([f.get("dmProfitUsd", 0) for f in fr])
     treasury_apr = apr([treasury_buck(f) for f in fr])
@@ -355,22 +376,64 @@ def test_rebalancing_sim_plot():
                   label="realized holder APR (redeemed round-trips / dollar-days)")
     l2, = ax.plot(days, treasury_apr, color="tab:green", linewidth=1.4,
                   label="treasury APR (retained basket profit / dollar-days)")
-    ax.set_ylabel("APR (%)")
+    ax.set_ylabel(f"APR (%)  [from day {WARMUP_DAYS}]")
     ax.set_xlabel("Day")
     ax.grid(True, alpha=0.3)
 
-    # The demand leg, on the same axis because it is the same KIND of number
-    # and needs no caveat: seeded with a finite USDC budget, minting nothing,
-    # marked across USDC + BUCK + TOKEN + deposit stake.  Its capital is
-    # deployed from day 0, so elapsed days are the capital-time.
-    bda_apr = []
-    for f, dy in zip(fr, days):
-        seed = f.get("bdaSeedUsd") or 0
-        elapsed = max(1, dy)
-        bda_apr.append(100.0 * 365.0 * (f.get("bdaValueUsd", 0) - seed)
-                       / (seed * elapsed) if seed else 0.0)
-    l0, = ax.plot(days, bda_apr, color="tab:olive", linewidth=1.4,
-                  label="demand-leg APR (finite budget, fully marked)")
+    # The demand leg's own book, split by variant, on the same axis because
+    # these are the same KIND of number and need no caveat: each arb is
+    # seeded with a FINITE USDC endowment and mints neither USDC nor BUCK,
+    # so `arb_state` (cash + BUCK held at par, against endowment) is a real
+    # mark.  Their capital is available from day 0, so elapsed days are the
+    # capital-time.
+    #
+    # The two lines are the point of the pair.  A holder sits on loose BUCK
+    # and pays demurrage; a basketeer parks it as TOKEN in the basket and
+    # pays none while earning the rebalancing premium.  Same hurdle model,
+    # opposite carry.
+    def arb_apr(cls):
+        """Mark an arb's book against its endowment.
+
+        Two corrections matter here, and the first cut got both wrong:
+
+        * BUCK is marked at the FLOATING price, not at par.  BUCK traded
+          between 0.95 and 1.43 USDC over this run, so par understates a long
+          position by up to 43% and reads it as a loss on entry.
+        * `parked` is the BUCK principal in open BuckBasket receipts -- the
+          capital a basketeer has actually put to work.  Omitting it books a
+          loss the moment the agent deposits, which is the same mistake
+          `directMintPnl` makes.  Older vectors carry only a receipt COUNT;
+          their mark is short by the open positions, so it is drawn dashed
+          rather than presented as complete.
+        """
+        out = []
+        for f, dy in zip(fr, days):
+            rows = [a for a in f.get("arb2", []) if a.get("cls") == cls]
+            endow = sum(a.get("endow", 0) for a in rows)
+            if not endow or dy < WARMUP_DAYS:
+                out.append(NA)
+                continue
+            px = (f.get("buckUsd", 0) or E6) / E6      # USDC per BUCK
+            buck = sum(a.get("held", 0) + a.get("parked", 0) for a in rows)
+            val = sum(a.get("cash", 0) for a in rows) + buck * px
+            out.append(100.0 * 365.0 * (val - endow) / (endow * dy))
+        return out
+
+    def arb_complete(cls):
+        """True when every open position in the mark carries a value."""
+        rows = [a for a in fr[-1].get("arb2", []) if a.get("cls") == cls]
+        return bool(rows) and all("parked" in a for a in rows)
+
+    basketeer = arb_apr("dbb")
+    holder = arb_apr("dba")
+    _bk_ok = arb_complete("dbb")
+    l0, = ax.plot(days, basketeer, color="tab:olive", linewidth=1.6,
+                  linestyle="-" if _bk_ok else "--",
+                  label="demand leg: BASKETEER APR (parks in the basket)"
+                        + ("" if _bk_ok else " -- open positions UNPRICED"))
+    l0b, = ax.plot(days, holder, color="tab:brown", linewidth=1.2,
+                   linestyle="-.",
+                   label="demand leg: HOLDER APR (sits on BUCK, pays demurrage)")
 
     ax2 = ax.twinx()
     dm_apr = apr([f.get("directMintPnl", 0) for f in fr])
@@ -379,12 +442,24 @@ def test_rebalancing_sim_plot():
     ax2.set_ylabel("artifact APR (%)", color="tab:gray")
     ax2.tick_params(axis="y", labelcolor="tab:gray")
 
+    # Scale to the series themselves rather than to whatever survived the
+    # warmup filter first: a single outlier that clears the filter should not
+    # be able to flatten everything else either.
+    finite = [v for ser in (realized_apr, treasury_apr, basketeer, holder)
+              for v in ser if v == v]
+    if finite:
+        finite.sort()
+        lo = finite[int(0.01 * (len(finite) - 1))]
+        hi = finite[int(0.99 * (len(finite) - 1))]
+        pad = max(1.0, 0.15 * (hi - lo))
+        ax.set_ylim(min(lo - pad, -pad), hi + pad)
+
     rt = fr[-1].get("dmRoundTrips", 0)
-    ax.legend(handles=[l1, l2, l0, l3], loc="upper left", fontsize=7)
-    ax.set_title("BuckBasket return on capital-at-risk  --  holders "
-                 f"{realized_apr[-1]:.2f}% APR over {rt} round-trips, "
-                 f"treasury {treasury_apr[-1]:.2f}% APR, "
-                 f"demand leg {bda_apr[-1]:.2f}% APR")
+    ax.legend(handles=[l1, l2, l0, l0b, l3], loc="upper left", fontsize=7)
+    ax.set_title("BuckBasket return on capital-at-risk  --  depositors "
+                 f"{pct(realized_apr[-1])} APR over {rt} round-trips, "
+                 f"treasury {pct(treasury_apr[-1])} APR, demand leg "
+                 f"{pct(basketeer[-1])} basketeer / {pct(holder[-1])} holder")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -419,21 +494,24 @@ def test_rebalancing_sim_plot():
     print(f"  Treasury BUCK: {tb_final:,.2f}  "
           f"share of NAV: {ts_final:.2f}%  "
           f"treasury ROI: {treasury_roi_final:.2f}%")
-    print(f"  realized holder return: {realized_apr[-1]:.2f}% APR "
+    print(f"  realized depositor return: {pct(realized_apr[-1])} APR "
           f"(${last.get('dmProfitUsd', 0) / E6:,.0f} booked over "
           f"{last.get('dmRoundTrips', 0)} redeemed round-trips)")
-    print(f"  treasury return: {treasury_apr[-1]:.2f}% APR")
+    print(f"  treasury return: {pct(treasury_apr[-1])} APR")
     print(f"  ... both on ${dollar_days[-1] / E6:,.0f} dollar-days "
           f"of capital-at-risk")
     print(f"  [directMintPnl {dm_roi_final:.2f}% of gross deposits / "
-          f"{dm_apr[-1]:.2f}% APR -- ARTIFACT: the DM agents mint the USDC "
+          f"{pct(dm_apr[-1])} APR -- ARTIFACT: the DM agents mint the USDC "
           f"they spend, so value is still conjured at the purchase site]")
-    print(f"  demand leg: {last.get('bdaEntries', 0)} entries  "
-          f"{last.get('bdaBought', 0) / E6:,.0f} BUCK bought  "
-          f"{last.get('bdaSold', 0) / E6:,.0f} BUCK sold")
-    print(f"  demand-leg portfolio: ${last.get('bdaValueUsd', 0) / E6:,.0f} "
-          f"from ${(last.get('bdaSeedUsd') or 0) / E6:,.0f} seed  "
-          f"({bda_apr[-1]:.2f}% APR)")
+    print(f"  demand leg BASKETEER: {last.get('dbb_bought',0)/E6:,.0f} BUCK "
+          f"bought / {last.get('dbb_sold',0)/E6:,.0f} sold, "
+          f"{last.get('dbb_parked',0)/E6:,.0f} parked, "
+          f"{last.get('dbb_harvests',0)} harvests  ({pct(basketeer[-1])} APR)")
+    print(f"  demand leg HOLDER:    {last.get('dba_bought',0)/E6:,.0f} BUCK "
+          f"bought / {last.get('dba_sold',0)/E6:,.0f} sold"
+          f"  ({pct(holder[-1])} APR)")
+    if last.get("dbb_err"):
+        print(f"  demand-leg error: {last['dbb_err']}")
     print(f"  direct-mint entries: {dm_entries}  exits: {dm_exits}")
     print(f"  basket NAV: {nav_final:,.2f} BUCK  "
           f"outstanding: {out_final:,.2f} BUCK  "

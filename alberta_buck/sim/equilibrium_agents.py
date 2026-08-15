@@ -283,6 +283,17 @@ class _ProxyAgent(Agent):
         if amount <= 0:
             return
         t0, t1 = _pool_tokens(d, pool_addr)
+        # BUCK is a lien-bearing balance: `balanceOf` is raw MINUS accrued
+        # demurrage, and both the paying proxy and SimLP are Non-Carrying, so
+        # each can hold `raw` while being able to spend strictly less.  Size
+        # against the proxy's spendable BEFORE the transfer, or the transfer
+        # reverts with "amount exceeds spendable".
+        if input_c.address.lower() == d.buck.address.lower():
+            payer = (from_proxy or self.proxy).address
+            amount = min(int(amount),
+                         max(0, d.buck.functions.balanceOf(payer).call()))
+            if amount <= 0:
+                return
         zero_for_one = input_c.address.lower() == t0.lower()
         sqrt_limit = MIN_SQRT_RATIO + 1 if zero_for_one else MAX_SQRT_RATIO - 1
         self._proxy_exec(
@@ -290,6 +301,17 @@ class _ProxyAgent(Agent):
             input_c.encode_abi("transfer(address,uint256)",
                                args=[d.simlp.address, int(amount)]),
             proxy=from_proxy)
+        # ... and again on SimLP's side: it pays the pool from its OWN
+        # balance in the swap callback, and it carries a lien of its own from
+        # whatever BUCK has passed through it.  Swapping more than it can
+        # spend reverts inside the callback, which is what the traceback
+        # points at rather than the transfer above.
+        if input_c.address.lower() == d.buck.address.lower():
+            amount = min(int(amount),
+                         max(0, d.buck.functions.balanceOf(
+                             d.simlp.address).call()))
+            if amount <= 0:
+                return
         d.chain.send(d.simlp.functions.swap(
             pool_addr, recipient, zero_for_one, int(amount),
             sqrt_limit, t0, t1))
@@ -1315,13 +1337,74 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                         ctr["bcd_buy_err"] = repr(e)[:200]
 
 
+# ── the allocator's hurdle ─────────────────────────────────────────────
+#
+# A real investor does not trade a fixed number of basis points off a dollar.
+# BUCK is not a dollar stablecoin -- it is priced against real assets and
+# labour, so its USD price is SUPPOSED to rise as commodities do, and a fixed
+# band against 1.00 USDC mistakes that drift for a mispricing.  What an
+# allocator actually asks is whether the whole round trip beats leaving the
+# money in USDC over the period it expects to hold.  Two terms decide it:
+#
+#   edge    the K-quench recovery.  `basketValueInBuck` is the controller's
+#           own process variable and 1.0 is its setpoint, so `bvib - 1` IS
+#           the appreciation the machine is working to deliver: bvib 1.10
+#           says the basket costs 1.10 BUCK where it should cost 1.00, i.e.
+#           BUCK is 10% cheap against its own anchor.  (See
+#           BuckKControllerDirect: "error = setpoint - process; -50_000 ppm
+#           == basket 5% rich" -- a rich basket is a cheap BUCK.)
+#
+#   carry   the yield differential, per year, in REAL terms.  USDC earns a
+#           T-bill and loses inflation; BUCK is inflation-neutral by
+#           construction, so its real return is whatever the position itself
+#           yields -- and that is where the two variants diverge.
+#
+#     BUY  when  edge + carry*horizon >  cost   (round trip clears its fees)
+#     SELL when  edge + carry*horizon <  0      (entry cost is sunk, so the
+#                                                gap between the two is
+#                                                hysteresis, not indecision)
+#
+# The holder/basketeer asymmetry falls straight out of `carry` and is the
+# whole point of the A/B: a HOLDER sits on loose BUCK and pays demurrage; a
+# BASKETEER swaps it into TOKEN, holds no BUCK at all, and earns the
+# rebalancing premium instead.  At the numbers below that is -3.0%/yr versus
+# +1.5%/yr -- patience punishes one and pays the other, which is the whole
+# result and does not depend on the inflation figure being aggressive.
+USDC_YIELD = 0.045        # short T-bill / MMF / HYSA proxy (nominal)
+TRUE_INFLATION = 0.035    # Deliberately CONSERVATIVE: near the headline CPI
+                          # a sceptical reader already accepts, rather than
+                          # the higher figure the shadow-inflation argument
+                          # would justify.  It is the assumption that most
+                          # flatters USDC, so the demand leg's edge here is a
+                          # LOWER bound -- raise it and every conclusion below
+                          # gets stronger, never weaker.
+BASKET_PREMIUM = 0.025    # rebalancing premium, i.e. the EXCESS over
+                          # buy-and-hold -- test/vectors/basket-flow-sim.json
+                          # reports sharePriceExcessVsPassive 5.13% / 730d.
+                          # NOT the 10%+ headline ROI, which is mostly the
+                          # commodity drift a passive holder gets anyway.
+DEMURRAGE = 0.020         # Buck.BASE_RATE_PER_YEAR (2e25 in SCALE 1e27)
+ROUND_TRIP_COST = 0.005   # 5bp BUCK/USDC in + 30bp TOKEN/USDC out + slippage
+
+# Conviction sizing: an allocator with a 4%/yr edge does not go all-in, and
+# one with a 0.1% edge does not commit the same dollar.  Deployment scales
+# linearly with the excess return and saturates, so the population's total
+# demand is a readable function of how mispriced BUCK is.
+FULL_ALLOC_EXCESS = 0.10  # excess return at which the book is fully sized
+MAX_ALLOC = 0.75          # never commit the whole endowment
+
+
 @_register
 class DiscountBuckArbAgent(_ProxyAgent):
-    """The time-for-profit BUCK arb (HOLDER variant): buys BUCK below USD
-    par and simply holds.  Every issued BUCK has a forced future buyer --
-    the issuer's own redemption, or the Jubilee fund over ~50 years --
-    and the K-controller quenches inflation, so below-par BUCK is a
-    claim bought at a discount to its recovery.  Sells at/above par.
+    """The time-for-profit BUCK arb (HOLDER variant): buys BUCK when the
+    round trip beats USDC over its horizon, and simply holds.  Every issued
+    BUCK has a forced future buyer -- the issuer's own redemption, or the
+    Jubilee fund over ~50 years -- and the K-controller quenches inflation,
+    so a BUCK cheap against the basket is a claim bought at a discount to
+    its recovery.  Holding costs demurrage, so this variant's carry is
+    NEGATIVE and only the recovery can pay for it: it needs a real
+    discount, and time works against it.  Sells when the thesis dies.
+
     Both legs are impact-capped (a bite never pushes the pool past the
     band that justified it: x <= r*(1-sqrt(p)) buying, r*(sqrt(p)-1)
     selling), so the arb stabilizes without ever overshooting.
@@ -1332,16 +1415,59 @@ class DiscountBuckArbAgent(_ProxyAgent):
 
     CTR = "dba"
 
+    # Real annual yield ON THE POSITION ITSELF.  Loose BUCK just pays
+    # demurrage; the basketeer overrides this.
+    POSITION_YIELD = -DEMURRAGE
+
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
         r = self._rng
         cls = type(self).__name__
         m6 = 1_000 * 10 ** 6
         self.endow = int(_draw(scenario, cls, "endow_k", r, 500) * m6)
-        self.buy_disc = _draw(scenario, cls, "buy_disc", r, 0.02)
-        self.sell_prem = _draw(scenario, cls, "sell_prem", r, 0.0)
+        # Heterogeneous patience and heterogeneous inflation belief: a
+        # population that agrees on everything acts as one block and clears
+        # nothing.  The horizon is what sets how much carry an investor can
+        # bank against a given mispricing, so it is the knob that most
+        # changes behaviour.
+        self.horizon = _draw(scenario, cls, "horizon_yr", r, (0.5, 3.0))
+        self.infl = _draw(scenario, cls, "inflation", r,
+                          (TRUE_INFLATION - 0.015, TRUE_INFLATION + 0.015))
+        self.usdc_yield = _draw(scenario, cls, "usdc_yield", r, USDC_YIELD)
+        self.basket_yield = _draw(scenario, cls, "basket_yield", r,
+                                  BASKET_PREMIUM)
+        self.cost = _draw(scenario, cls, "round_trip_cost", r, ROUND_TRIP_COST)
+        self._deployed = 0        # USDC put at risk, net of proceeds
         self._bind_proxy(d)
         d.chain.send(d.usdc.functions.mint(self.proxy.address, self.endow))
+
+    # -- the hurdle ----------------------------------------------------- #
+
+    def _carry(self) -> float:
+        """Real annual excess of this position over parking in USDC."""
+        yield_on_position = (self.basket_yield
+                             if self.POSITION_YIELD is None
+                             else self.POSITION_YIELD)
+        return yield_on_position - (self.usdc_yield - self.infl)
+
+    def _bvib(self, d) -> float:
+        """basketValueInBuck: >1 means the basket is rich, i.e. BUCK is cheap
+        against its anchor and the controller is working to lift it."""
+        try:
+            return int(d.basket.functions.basketValueInBuck().call()) / 1e18
+        except Exception:
+            return 1.0
+
+    def _excess(self, d) -> float:
+        """Expected excess return over USDC for the whole round trip."""
+        return (self._bvib(d) - 1.0) + self._carry() * self.horizon
+
+    def _target_deploy(self, excess: float) -> int:
+        """Conviction sizing: how much of the endowment this edge justifies."""
+        if excess <= 0:
+            return 0
+        frac = min(MAX_ALLOC, MAX_ALLOC * excess / FULL_ALLOC_EXCESS)
+        return int(self.endow * frac)
 
     def _spot_ub(self, d):
         r_in = d.chain.balance_of(d.usdc, d.pool_ub)
@@ -1353,12 +1479,24 @@ class DiscountBuckArbAgent(_ProxyAgent):
         return max(0, s)
 
     def _buy_leg(self, d, day, ctr) -> int:
-        spot, _, r_out = self._spot_ub(d)
         cash = d.chain.balance_of(d.usdc, self.proxy.address)
-        if spot > 1.0 - self.buy_disc or cash < 10 ** 6:
+        if cash < 10 ** 6:
             return 0
-        cap = int(r_out * (1.0 - math.sqrt(spot)))
-        want = min(cap, int(cash / max(spot, 1e-9)))
+        excess = self._excess(d)
+        if excess <= self.cost:
+            return 0                       # the round trip does not pay
+        room = self._target_deploy(excess) - self._deployed
+        if room < 10 ** 6:
+            return 0                       # already sized to this conviction
+        spot, _, r_out = self._spot_ub(d)
+        # Impact cap: below par, never push the pool past the price that
+        # justified the trade.  Above par that bound vanishes -- the hurdle
+        # already said this is worth paying up for -- but "no bound" would
+        # let one agent reprice the venue by itself, so fall back to a flat
+        # slice of depth.
+        cap = (int(r_out * (1.0 - math.sqrt(spot))) if spot < 1.0
+               else max(10 ** 6, r_out // 50))
+        want = min(cap, int(min(cash, room) / max(spot, 1e-9)))
         if want < 10 ** 6:
             return 0
         pre = cash
@@ -1367,12 +1505,16 @@ class DiscountBuckArbAgent(_ProxyAgent):
         k = self.CTR
         ctr[k + "Bought"] = ctr.get(k + "Bought", 0) + got
         ctr[k + "Spent"] = ctr.get(k + "Spent", 0) + spent
+        self._deployed += spent
         return got
 
     def _sell_leg(self, d, day, ctr, amount=None) -> int:
         spot, _, r_out = self._spot_ub(d)
         held = self._held(d)
-        if spot < 1.0 + self.sell_prem or held < 10 ** 6:
+        # No `cost` term here: entry cost is already sunk, so the buy and
+        # sell thresholds differ by exactly that -- the hysteresis that keeps
+        # a position from churning on noise around its own hurdle.
+        if held < 10 ** 6 or self._excess(d) >= 0:
             return 0
         cap = int(r_out * (math.sqrt(spot) - 1.0)) if spot > 1.0 else held
         amt = min(held, cap if cap > 0 else held)
@@ -1386,15 +1528,31 @@ class DiscountBuckArbAgent(_ProxyAgent):
         k = self.CTR
         ctr[k + "Sold"] = ctr.get(k + "Sold", 0) + sold
         ctr[k + "Recv"] = ctr.get(k + "Recv", 0) + recv
+        self._deployed = max(0, self._deployed - recv)
         return sold
 
     def arb_state(self, d) -> dict | None:
-        """Per-frame inventory for the snapshot: cash + BUCK held (par)."""
+        """Per-frame inventory for the snapshot.
+
+        `parked` is the BUCK principal still sitting in open BuckBasket
+        receipts.  Without it the mark omits exactly the capital a basketeer
+        has put to work, and reads it as a loss the moment the agent
+        deposits -- the same mistake `directMintPnl` makes.  `receipts` is
+        kept as a count for the activity series.
+        """
         if self.proxy is None:
             return None
+        parked = 0
+        for rid in getattr(self, "_receipts", []):
+            try:
+                dep = d.basket.functions.deposits(rid).call()
+                parked += dep[0]            # buckPrincipal
+            except Exception:
+                pass
         return {"cls": self.CTR, "idx": self.idx,
                 "cash": d.chain.balance_of(d.usdc, self.proxy.address),
                 "held": self._held(d), "endow": self.endow,
+                "parked": parked,
                 "receipts": len(getattr(self, "_receipts", []))}
 
     def act(self, d, scenario, day, tick, ctr) -> None:
@@ -1406,36 +1564,59 @@ class DiscountBuckArbAgent(_ProxyAgent):
 
 @_register
 class DiscountBasketArbAgent(DiscountBuckArbAgent):
-    """BASKETEER variant: buys discount BUCK like the holder, then PARKS
-    it -- swaps BUCK -> TOKEN through the TOKEN/BUCK basket pools (the
-    BUCK leaves circulation into pool inventory, lifting the BUCK/TOKEN
-    ratios) and deposits the TOKEN into the BuckBasket for an LP receipt
-    (rebalancing revenue on top of the recovery).  Harvests when BUCK
-    trades at/above par: redeem the oldest receipt and sell the returned
-    BUCK into the premium.
+    """BASKETEER variant: buys cheap BUCK like the holder, then PARKS it --
+    swaps BUCK -> TOKEN through the TOKEN/BUCK basket pools (the BUCK leaves
+    circulation into pool inventory, lifting the BUCK/TOKEN ratios) and
+    deposits the TOKEN into the BuckBasket for an LP receipt.
+
+    The parked position holds no BUCK at all, so it pays NO demurrage and
+    earns the rebalancing premium instead -- which flips the sign of the
+    carry against the holder variant and is the whole content of the A/B.
+    Where a holder needs a real discount and is punished for waiting, a
+    basketeer is paid to wait and will buy through a modest premium.
+
+    Harvests when the thesis dies: redeem the oldest receipt, sell any
+    returned TOKEN back to USDC, and sell residual BUCK into the market.
 
     Extra telemetry: dbbParked (BUCK swapped into basket pools),
-    dbbReceipts (open LP positions).
+    dbbReceipts (open LP positions), dbbHarvests (receipts redeemed).
     """
 
     CTR = "dbb"
+
+    # Parked value sits in TOKEN inside the basket, never as loose BUCK --
+    # no demurrage.  None => use the agent's own basket-premium belief.
+    POSITION_YIELD = None
 
     def setup(self, d, scenario, rng) -> None:
         super().setup(d, scenario, rng)
         self._receipts: list[int] = []
 
     def _park_leg(self, d, day, ctr) -> None:
-        held = self._held(d)
-        if held < 25_000 * 10 ** 6:
-            return
+        # Spendable, not raw: `_held` reads signedBalanceOf, which is the
+        # balance BEFORE the demurrage lien, and a park sized off it asks to
+        # move BUCK the proxy cannot actually move.
+        held = min(self._held(d),
+                   max(0, d.buck.functions.balanceOf(self.proxy.address).call()))
+        if held < 25_000 * 10 ** 6 or self._excess(d) < 0:
+            return                          # do not park what we mean to sell
         i = (day + self.idx) % len(d.tokens)
         tc = d.tokens[i]
         pool = d.pool_buck[i]
         pre_tok = d.chain.balance_of(tc, self.proxy.address)
         # BUCK -> TOKEN in the basket pool: the parked BUCK becomes pool
-        # inventory; cap the bite at ~5% of the pool's BUCK side.
+        # inventory.  The bite has to stay inside the basket's OWN slippage
+        # guard, which reverts any valuation (and therefore any depositor's
+        # redeem) when a pool's spot leaves its TWAP band -- see
+        # BuckBasketUniswapV3._enforceSlippageGuard, deployed here at 500bp.
+        # On a constant-product pool a bite of fraction f of the input
+        # reserve moves price by about 2f, so 1% is ~2% of move: comfortably
+        # inside the band, and small enough that a POPULATION of basketeers
+        # arriving the same day does not add up to a breach.  The earlier 5%
+        # was sized for a two-agent A/B and skews the pool hard enough at
+        # this population to make honest depositors' redeems revert.
         r_buck = d.chain.balance_of(d.buck, pool)
-        amt = min(held, max(10 ** 6, r_buck // 20))
+        amt = min(held, max(10 ** 6, r_buck // 100))
         self._swap_via_simlp(d, pool, d.buck, amt, self.proxy.address)
         got_tok = d.chain.balance_of(tc, self.proxy.address) - pre_tok
         if got_tok <= 0:
@@ -1453,18 +1634,38 @@ class DiscountBasketArbAgent(DiscountBuckArbAgent):
         ctr["dbbReceipts"] = ctr.get("dbbReceipts", 0) + 1
 
     def _harvest_leg(self, d, day, ctr) -> None:
-        spot, _, _ = self._spot_ub(d)
-        if spot < 1.0 + self.sell_prem or not self._receipts:
-            return
+        if not self._receipts or self._excess(d) >= 0:
+            return                          # thesis still alive: keep waiting
         rid = self._receipts.pop(0)
         try:
+            # Three-arg redeem: the ONLY overload both basket implementations
+            # expose.  ProRata also has a two-arg form, but the traditional
+            # BuckBasket does not, and the rebalancing A/B runs both.
+            # redeemBp 0 means "all" on both (`redeemBp == 0 ? 10000`).
             self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
-                "redeem(uint256,uint256)", args=[rid, 10_000]))
+                "redeem(uint256,uint256,uint256)", args=[rid, 0, 0]))
             ctr["dbbHarvests"] = ctr.get("dbbHarvests", 0) + 1
         except Exception as e:
             self._receipts.append(rid)
             ctr["dbb_err"] = repr(e)[:200]
             return
+        # Redemption pays in TOKEN, never BUCK.  Turn it back into the
+        # numeraire, or the capital never recycles and `_deployed` never
+        # unwinds -- the position would look permanent no matter the thesis.
+        for i, tc in enumerate(d.tokens):
+            bal = d.chain.balance_of(tc, self.proxy.address)
+            if bal <= 0:
+                continue
+            pre = d.chain.balance_of(d.usdc, self.proxy.address)
+            try:
+                self._swap_via_simlp(d, d.pool_usdc[i], tc, bal,
+                                     self.proxy.address)
+            except Exception as e:
+                ctr["dbb_err"] = repr(e)[:200]
+                continue
+            recv = d.chain.balance_of(d.usdc, self.proxy.address) - pre
+            ctr["dbbRecv"] = ctr.get("dbbRecv", 0) + recv
+            self._deployed = max(0, self._deployed - recv)
         self._sell_leg(d, day, ctr)
 
     def act(self, d, scenario, day, tick, ctr) -> None:
