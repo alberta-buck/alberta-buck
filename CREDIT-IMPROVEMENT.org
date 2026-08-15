@@ -1,0 +1,452 @@
+#+TITLE: BuckCredit accounting -- transferability, the credit limit, and balanceOf
+#+AUTHOR: Perry Kundert
+#+date: 2026-08-15
+#+category: Alberta Buck
+#+OPTIONS: ^:nil toc:2 num:t
+
+Working proposal.  Nothing here is implemented; the defects are all
+reproducible from =test/CreditProbe.t.sol= and =test/BuckReviewProbe.t.sol=
+on this branch.  Once settled, this folds back into
+=alberta-buck-ethereum.org= and this file is retired.
+
+* Constraints this proposal is written to
+
+  1. A BUCK_CREDIT must not be transferable while it is drawn.
+  2. =balanceOf= for a credit account must be *correct* first and cheap
+     second.  Caching is welcome only if it is provably safe.
+  3. Transferring out of an account backed by BUCK_CREDIT is expected to
+     cost more than transferring from a plain positive balance.  That is
+     not a deal-breaker; a wrong answer is.
+
+  Read together, (2) and (3) point somewhere slightly further than
+  "fix the cache": the cheapest correct =balanceOf= is one that does not
+  consult the credit machinery at all.  See section 4.
+
+* What is broken today
+
+** D1 A drawn position can walk away from its collateral
+
+   =creditLimit(a)= is derived from =totalCurrentValue(a)=, which sums
+   =activatedValue= over the NFTs =a= currently owns.  Nothing stops a
+   holder who has already drawn against that coverage from transferring
+   the NFT away.  Plain =transferFrom=, no receiver hook, nothing exotic.
+   A negative raw balance is only ever checked at the moment it is
+   created, so there is no later solvency test to catch it.
+
+   #+BEGIN_EXAMPLE
+   alice draws her full 1,000 of headroom  -> signedRaw(alice) = -1,000
+   alice transfers the NFT to dave         -> creditLimit(alice) =      0
+                                              creditLimit(dave)  =  1,000
+   dave draws it too                       -> bob holds          =  2,000 BUCK
+
+   2,000 BUCK issued against 1,000 of activated coverage.
+   #+END_EXAMPLE
+
+   Severity: this is the one that mints unbacked BUCK.  Everything else
+   in this document is correctness or cost.
+
+** D2 The per-block credit-limit cache is dead, and unsound if revived
+
+   =_refreshCreditLimit= has no callers.  =creditLimitBlock= is therefore
+   only ever written by =_invalidateCreditCache=, which sets it to zero,
+   and =block.number= is never zero -- so =creditLimit()= always takes the
+   recompute branch and the cache never populates.  Every non-Carrying
+   transfer pays a full NFT scan through =balanceOf(from)=:
+
+   | measurement                                    |    gas |
+   |------------------------------------------------+--------|
+   | =creditLimit=, 10 NFTs, NONE depreciation      | 25,446 |
+   | =creditLimit=, 1 NFT, 40yr declining balance   | 12,235 |
+
+   The important part is not that it is dead.  It is that *wiring it up
+   as written would be incorrect*.  The cached product is
+   =totalCurrentValue * currentBuckK=, and =currentBuckK= moves whenever
+   any mint or burn advances the PID via =IBuckK.compute()= -- which fires
+   no cache invalidation at all.  Two transactions in one block are
+   enough:
+
+   #+BEGIN_EXAMPLE
+   creditLimit before K change: 1,000.000000
+   creditLimit after  K change:   500.000000     <- same block
+   cache block stamp          : 0                <- cache is dead, so this
+                                                    read was live and right
+   #+END_EXAMPLE
+
+   =onCreditMutation= covers NFT mint / burn / transfer / activate /
+   updateCredit.  It does not and cannot cover BUCK_K.
+
+** D3 A downward reappraisal strands the position it shrinks
+
+   =updateCredit= clamps =activatedValue= down to the new =faceValue=, but
+   =mintsBacked= lives in Buck and is not clamped with it.  =_allocateBurn=
+   sizes the unwind off =mintsBacked=; =deactivateFromBuck= checks that
+   unwind against =activatedValue=.  Once they diverge the holder cannot
+   close the position:
+
+   #+BEGIN_EXAMPLE
+   after mint            face 2,000   activated 1,000   mintsBacked 1,000
+   reappraise to 500     face   500   activated   500   mintsBacked 1,000
+
+   burn(800)   -> revert "BuckCredit: deactivate > active"
+   #+END_EXAMPLE
+
+   Burning down in chunks does not recover it.  The coverage runs out
+   before the backing does, and what is left can never be unwound:
+
+   #+BEGIN_EXAMPLE
+   burned down by          : 400.000000
+   residual activatedValue :  55.555528
+   residual mintsBacked    : 555.555528     <- permanently stuck
+   #+END_EXAMPLE
+
+   The residue also permanently disqualifies the NFT from future minting,
+   because =_allocateMint= skips any token whose =faceValue <= mintsBacked=.
+   The asset can recover its whole value and still be unusable as credit.
+
+   If the holder had already *spent* the draw when the reappraisal lands,
+   they are underwater immediately and the designed exit is closed:
+
+   #+BEGIN_EXAMPLE
+   after spend        signedRaw -1,000   creditLimit 1,000
+   after reappraisal  signedRaw -1,000   creditLimit   500   balanceOf 0
+   burn(100)  -> revert "BUCK: post-burn credit used exceeds limit"
+   #+END_EXAMPLE
+
+** D4 balanceOf reports credit headroom as spendable ERC-20 balance
+
+   For a non-Carrying account =balanceOf= returns held BUCK *plus* unused
+   credit headroom.  An account holding nothing reports 5,000 BUCK if it
+   has 5,000 of activated coverage.  This is deliberate and documented as
+   "what alice can spend right now", and as a user-facing semantic it is
+   the right one -- but it is the number every ERC-20 integration reads,
+   and it moves when a PID controller moves BUCK_K.
+
+   Worth noting for the impact assessment in section 4: *nothing in
+   =src/= actually depends on this today*.  Every in-tree
+   =buck.balanceOf(...)= consumer reads a *pool* balance
+   (=RebalanceDirectorBase=, =BuckBasketUniswapV3= x3, =BuckBasket=), and
+   pools are Carrying, so they take the =return raw= branch and never
+   touch the credit path.
+
+** D5 A fully drawn holder cannot burn at all (by design -- but see D3)
+
+   The post-burn check requires =used <= creditLimit= *after* the unwind.
+   Burning =A= releases =U = A/(1-eff)= of coverage and refunds only
+   =U - A=, so the limit always falls faster than =used= does.  At
+   =used == limit= -- the normal end state of mint-then-spend -- every burn
+   fails:
+
+   #+BEGIN_EXAMPLE
+   fully drawn: signedRaw -988.888888   creditLimit 988.888888
+   burn(1)  -> revert "BUCK: post-burn credit used exceeds limit"
+   #+END_EXAMPLE
+
+   The contract says so explicitly ("if you owe X ... repay first"), so
+   this is a design property, not a defect: you repay the credit, then
+   release the coverage.  It is listed here because it is what makes D3
+   bite so hard.  A holder pushed underwater by someone else's action --
+   a reappraisal, or simply depreciation of the insured asset -- has no
+   path back through =burn=, only through acquiring BUCK elsewhere.
+   Whether that is acceptable for *involuntary* undercollateralisation is
+   a policy question this proposal raises but does not answer.
+
+** Minor
+
+   - =storedLimit= is declared =public= and never read or written.  It
+     generates a getter that always returns zero, which indexers and
+     integrators will reasonably take to mean something.
+   - =_selectCheapest= makes two external calls per NFT
+     (=tokenOfOwnerByIndex= + =creditInfo=) when =batchCreditInfo= exists
+     precisely to avoid that.  A =tokensOfOwner(address)= bulk view on
+     BuckCredit would collapse the whole selector to two calls.
+
+* The shape underneath all of it
+
+  There are two ledgers for the same quantity:
+
+  | ledger           | lives in   | written by                              | read by                     |
+  |------------------+------------+-----------------------------------------+-----------------------------|
+  | =activatedValue= | BuckCredit | =_activate=, =deactivateFromBuck=, =updateCredit= clamp | =currentValue= -> =creditLimit= |
+  | =mintsBacked=    | Buck       | =_allocateMint=, =_allocateBurn=        | the mint / burn allocators  |
+
+  In production they are equal by construction -- there is no public
+  =activate()=, so activation only ever happens inside =_allocateMint=.
+  The contract comments say as much.  Every defect above is a consequence
+  of the two ledgers being *separately mutable*:
+
+  - D1: the limit follows =activatedValue=, which follows the NFT, while
+    the drawn balance stays with the account.
+  - D3: =updateCredit= moves one ledger and not the other.
+  - D2: the cache is a third copy of a derived quantity, invalidated
+    against only one of its inputs.
+
+  The through-line for the proposal is therefore: *make the equality an
+  enforced invariant rather than a convention, and stop keeping derived
+  copies of it.*
+
+* Options
+
+** T -- Transferability of a drawn credit
+
+*** T1  Block =_update= while =activatedValue > 0=   [recommended]
+
+    #+BEGIN_SRC solidity
+    function _update(address to, uint256 tokenId, address auth)
+        internal override returns (address from)
+    {
+        from = super._update(to, tokenId, auth);
+        require(from == address(0) || credits[tokenId].activatedValue.isZero(),
+                "BuckCredit: coverage activated");
+        ...
+    }
+    #+END_SRC
+
+    Local to BuckCredit; one cold SLOAD (~2,100) on an NFT transfer, and
+    zero on the mint path once =from == address(0)= short-circuits.  The
+    =from == address(0)= arm is required so =createCredit= still works.
+
+    Its real virtue is not the gas.  It makes the safety property
+    *self-enforcing inside BuckCredit*, with no dependency on Buck being
+    correct and no cross-contract call to get wrong.  Combined with R2
+    below (which restores =mintsBacked == activatedValue= as an
+    invariant), "activated" and "drawn" are the same predicate, so the
+    local check is exactly the right one.
+
+    Consequence to accept deliberately: an insured asset cannot be sold
+    with a live policy attached.  Burn down to zero, then transfer.  That
+    is consistent with the stated design -- "closure only ever by the
+    holder's burn" -- and it is what constraint (1) asks for.
+
+*** T2  Block on =IBuck(buck).mintsBacked(tokenId) != 0=
+
+    Authoritative with respect to the money ledger, and strictly stricter
+    than T1 in exactly the case where the two diverge.  Costs a
+    STATICCALL (~2,600) on every NFT movement and inverts the dependency:
+    BuckCredit would need Buck to be live and correct in order to
+    transfer a token.  Worth keeping in reserve if R2 is rejected and the
+    ledgers are allowed to diverge.
+
+*** T3  Allow the transfer, require sender post-transfer solvency
+
+    =used <= creditLimit(sender)= after the move.  More permissive: a
+    holder with several NFTs could sell an undrawn one.  But it needs the
+    Buck call anyway, and it lets an NFT carrying =mintsBacked > 0= change
+    hands, leaving premium bookkeeping attached to a token whose new
+    owner did not pay it.  Not recommended as the primary rule; a
+    reasonable *later* relaxation once T1 is in place and the invariant is
+    enforced.
+
+*** T4  Move the liability with the NFT   [rejected]
+
+    Transferring the drawn position along with the collateral needs a
+    signed balance to move between two accounts with no consent model on
+    the receiving side.  Not worth the machinery.
+
+** L -- The credit limit and its cache
+
+*** L1  Delete the cache   [recommended]
+
+    Remove =creditLimitCache=, =creditLimitBlock=, =_refreshCreditLimit=,
+    =_invalidateCreditCache=, =onCreditMutation=, and BuckCredit's three
+    =IBuckHook= call sites plus its =buck= / =setBuck= wiring.
+    =creditLimit()= becomes a pure function of live state.
+
+    Cost on the transfer path: *zero*.  The cache is already dead, so this
+    is deletion of code that never runs.  It is a net saving elsewhere --
+    every NFT mint / transfer / activate / reappraisal currently pays for
+    a cross-contract call whose only effect is to zero a slot nothing
+    reads.
+
+    Two bonuses worth having:
+
+    - It removes the only BuckCredit -> Buck call, which is the only
+      reason =onCreditMutation= has to be exempt from the new reentrancy
+      guard.  After L1 the guard has no exemptions at all, and BuckCredit
+      no longer calls into Buck for any reason.
+    - It removes an entire class of future bug: a derived value cached
+      against an incomplete set of invalidation triggers.
+
+    Storage: slots for the two mappings must stay occupied to preserve
+    the layout the =vm.store= consumers depend on.  Replace them with an
+    explicitly named private gap rather than leaving public getters that
+    return stale zeroes.
+
+*** L2  Wire the cache as written   [rejected]
+
+    Unsound, per D2: no invalidation on BUCK_K.
+
+*** L3  Cache the NFT scan only, not the product   [safe, if caching is wanted later]
+
+    The unsoundness in L2 comes entirely from caching the *product*.
+    Cache =totalCurrentValue= alone, keyed on =block.number= and
+    invalidated by =onCreditMutation=, and multiply by a live
+    =currentBuckK()= on every read:
+
+    #+BEGIN_SRC solidity
+    function creditLimit(address a) public view returns (uint256) {
+        uint256 cv = creditValueBlock[a] == uint64(block.number)
+            ? creditValueCache[a]
+            : buckCredit.totalCurrentValue(a);
+        return cv == 0 ? 0 : cv * buckK.currentBuckK() / BUCKK_SCALE;
+    }
+    #+END_SRC
+
+    This is sound.  =totalCurrentValue= depends on the holder's NFT set,
+    each token's parameters, and =block.timestamp=; the set and the
+    parameters all route through =_update= / =_activate= /
+    =deactivateFromBuck= / =updateCredit=, every one of which fires the
+    hook, and the timestamp is constant within a block.  It also keeps
+    the expensive part (the scan) while paying for the cheap part (one
+    staticcall) every time.
+
+    Recommendation: do *not* ship this now.  Constraint (2) says
+    correctness and simplicity beat cost, and L1 is strictly simpler.
+    Keep L3 on file as the answer to "can the credit scan be cached
+    safely?", which is yes, in this exact shape and no other.
+
+** R -- Reappraisal
+
+*** R2  Forbid reappraisal below activated coverage   [recommended]
+
+    #+BEGIN_SRC solidity
+    require(newFaceValue >= c.activatedValue.asUint(),
+            "BuckCredit: face below activated coverage");
+    #+END_SRC
+
+    One line, and it deletes D3 at the root rather than papering over its
+    consequences.  It also matches the economics the design already
+    states: activated coverage is a *purchased policy*, paid for upfront
+    with pool principal that funds its premium in perpetuity.  An insurer
+    unilaterally writing it down is a breach of that contract, not an
+    appraisal.  The insurer keeps every other lever -- =faceValue= down to
+    the activated line, the depreciation schedule, the premium rate --
+    and an asset that has genuinely lost value is what the *claim* path
+    is for.
+
+    With R2 the whole =_covSeconds= rescaling branch inside =updateCredit=
+    becomes dead and can go too, along with its rounding.
+
+*** R1  Clamp both ledgers together via a new hook
+
+    =updateCredit= calls back into Buck to clamp =mintsBacked= alongside
+    =activatedValue=.  Keeps the ledgers equal, but it does not answer the
+    real question: the pool principal for the clamped-away coverage has
+    already been paid, and the holder's drawn balance does not shrink
+    with the limit.  Somebody has to absorb the difference, and making
+    that "the holder, silently, by being pushed underwater" is what
+    happens today.  If reappraisal-below-activated is ever genuinely
+    needed, this needs a settlement rule -- most likely a pro-rata pool
+    refund mirroring the burn path -- and that is a larger design than
+    R2.
+
+*** R3  Size the burn unwind off =min(mintsBacked, activatedValue)=
+
+    A band-aid: it lets the burn proceed but leaves =mintsBacked= residue
+    that still disqualifies the token from future minting.  Worth adding
+    anyway as a defensive clamp *alongside* R2, so that any divergence
+    from a source not yet thought of degrades into "burnable" rather than
+    "stuck".
+
+** B -- What balanceOf means
+
+*** B2  =balanceOf= = held only; add =spendableOf=   [recommended]
+
+    #+BEGIN_SRC solidity
+    /// ERC-20 balance: BUCK this account actually holds, net of demurrage.
+    function balanceOf(address a) public view returns (uint256);
+
+    /// What this account can move right now: held + unused NFT-backed
+    /// headroom.  The transfer path checks this, not balanceOf.
+    function spendableOf(address a) public view returns (uint256);
+    #+END_SRC
+
+    This is the change that best serves constraint (2), and it does so by
+    *removing* work rather than adding it.  =balanceOf= becomes a pure
+    function of the account's own packed slot: one SLOAD, one demurrage
+    computation, no NFT scan, no BUCK_K read, no external calls at all.
+    There is nothing left in it to cache, and nothing left in it to get
+    stale.  The expensive live scan moves to =spendableOf=, which is
+    consulted in exactly one place -- the solvency check inside
+    =_nonCarryingTransfer= -- where it has to be live anyway.  That is
+    constraint (3) landing exactly where it was aimed: the cost sits on
+    the credit draw, not on every read of the token.
+
+    It also retires D4.  No integration can be told an account holds BUCK
+    that nothing put there.
+
+    Blast radius, measured rather than assumed: no consumer in =src/=
+    changes behaviour, because every in-tree =balanceOf= call site reads a
+    Carrying pool (see D4).  What changes is what wallets and third-party
+    contracts see for a *user* account with credit.
+
+    Two things to state plainly rather than discover later:
+
+    - A wallet showing =balanceOf= would stop showing available credit.
+      That is arguably correct -- headroom is a facility, not a balance --
+      and =spendableOf= is the number for a wallet to display.
+    - =transfer= would succeed for amounts above =balanceOf=.  This does
+      not violate ERC-20 (the standard constrains when a transfer must
+      revert, not the converse), but an integration that does its own
+      =require(balanceOf(x) >= amt)= pre-check would block a legitimate
+      credit draw.  Under-reporting is the safe direction to be wrong in;
+      over-reporting, which is today's behaviour, is not.
+
+*** B1  Keep =held + unusedCredit=, document loudly
+
+    Zero code, zero risk, and the hazard stays.  The honest version of
+    this option is that it is only tenable if BUCK is never composed with
+    contracts that were not written for it -- which is the opposite of
+    the stated goal.
+
+*** B3  Also remove the implicit credit draw from =transfer=
+
+    Require an explicit =mint= to draw; make =transfer= check held balance
+    only.  The cleanest ERC-20 story, and it makes every draw pass
+    through the allocator that does the =mintsBacked= bookkeeping.  It is
+    also the largest behavioural change in this document and it makes
+    ordinary spending a two-step for credit users.  Not proposed now;
+    noted because B2 is a strict prerequisite for it, so B2 keeps the
+    door open.
+
+* Proposed change set
+
+  In dependency order.  Each step is independently shippable and
+  independently testable.
+
+  | # | change                                              | risk   | note                                        |
+  |---+-----------------------------------------------------+--------+---------------------------------------------|
+  | 1 | R2: =newFaceValue >= activatedValue=                | low    | one require; kills D3 at the root           |
+  | 2 | R3: defensive =min()= clamp in =_allocateBurn=      | low    | belt and braces for step 1                  |
+  | 3 | T1: block =_update= on activated coverage           | low    | closes D1, the only unbacked-BUCK defect    |
+  | 4 | L1: delete the credit-limit cache and the hook      | medium | pure deletion; removes the guard exemption  |
+  | 5 | B2: split =balanceOf= / =spendableOf=               | medium | retires D4; makes =balanceOf= uncacheable-by-construction |
+  | 6 | retire =storedLimit=; add =tokensOfOwner= bulk view | low    | hygiene and allocator cost                  |
+
+  Steps 1-3 are the correctness fixes and should go together.  Steps 4-5
+  are the simplification constraint (2) asks for, and they are much
+  easier to review once 1-3 have pinned the invariant.
+
+** Tests that change
+
+  - =BuckCreditLimit.t.sol::test_cache_invalidates_on_NFT_transfer= and
+    the sibling cache tests: deleted with step 4.  The NFT-transfer test
+    also force-activates before transferring, so it needs step 3 anyway.
+  - =BuckCreditHarness.forceActivate= breaks =mintsBacked ==
+    activatedValue= by design.  With steps 1 and 3 in place it can push
+    an NFT into a state production cannot reach.  Either make it
+    increment Buck's =mintsBacked= too, or restrict its use to fixtures
+    that never transfer or burn.
+  - =test/BuckReviewProbe.t.sol= and =test/CreditProbe.t.sol= are
+    characterization probes: they assert today's behaviour, defects
+    included.  Invert them into regression tests as each step lands, and
+    delete the files when the list is empty.
+
+** Invariants worth asserting once the change set is in
+
+  1. =mintsBacked[tid] == activatedValue(tid)= for every token, at every
+     observation point.  Currently a comment; should be an invariant test.
+  2. =activatedValue(tid) > 0= implies the token cannot change owner.
+  3. =sum over holders of creditLimit(h)= is a pure function of live NFT
+     state and BUCK_K, with no path-dependence -- i.e. re-deriving it from
+     scratch always agrees with any incremental accounting.
+  4. =balanceOf(a)= makes no external call.
