@@ -287,18 +287,71 @@ file is retired.
 
 * Still open
 
-  1. =alberta-buck-ethereum.org= still documents the credit-limit cache,
-     =onCreditMutation= and =IBuckHook= (eight mentions).  The master needs
-     to catch up before this file is retired.
-  2. Integration notes for =balanceOf=: a BUCK balance is a live function
-     of the holder's insured assets and of BUCK_K, and third-party
-     contracts that snapshot it must expect it to move on its own.
-  3. =tokensOfOwner= bulk view, to collapse =_selectCheapest= from 2N
+** D6 =mint(N)= under-delivers against a depreciated credit
+
+   Found while reconciling the master document's end-to-end walkthrough
+   against the code.  =_allocateMint= sizes =take= against the
+   /undepreciated/ =faceValue= and grosses it up only for the premium
+   inversion, while =creditLimit= reads the /depreciated/ =currentValue=.
+   The holder therefore ends up short by exactly the depreciation applied
+   to the coverage taken, ~take * (faceValue - depreciatedFace) / faceValue~:
+
+   #+BEGIN_EXAMPLE
+   300,000 structure, LINEAR 200bp/yr on a 60,000 floor, 3 years in,
+   premium 200bp.  Depreciated face 285,600.
+
+   mint(50,000)  ->  take         = 62,500      (grossed up for the premium)
+                     principal    = 12,500
+                     currentValue = 59,500      (62,500 x 285,600/300,000)
+                     balanceOf    = 47,000      <- 3,000 short
+   #+END_EXAMPLE
+
+   The contract's own comment says =_allocateMint= "allocate[s] enough
+   coverage to deliver =amount= net to msg.sender", and the master document
+   said =balanceOf = amount=, so this is a defect against stated intent
+   rather than a documented trade-off.  It is invisible on =NONE=-schedule
+   credits, which is most of the test suite.
+
+   The fix is a second gross-up, ~take = ceil(amount * BP * faceValue /
+   (denom * depreciatedFace))~ -- but that charges premium on the larger
+   coverage, which is a different economics than the one shipped, and the
+   allocator would need =depreciatedFace= in the =CreditSlice= to compute
+   it.  Pinned meanwhile by
+   =test_knownGap_mintUnderDeliversAgainstDepreciatedCredit=, with
+   =test_mintDeliversExactlyAgainstNonDepreciatingCredit= as the control.
+
+** D7 =createCredit= is permissionless
+
+   Any address may mint a BUCK_CREDIT to any client, naming itself the
+   insurer; =updateCredit= is gated on ~msg.sender == insurer~ but creation
+   is not gated at all, and ERC-721 =_mint= needs no consent from the
+   recipient.  A fresh credit grants no headroom (=activatedValue= is zero)
+   but it does add an iteration to the victim's =totalCurrentValue= walk --
+   which, now that the limit is read live, runs on every outbound transfer
+   from that account.  So an attacker can raise a chosen address's transfer
+   cost without bound for the price of the mints.
+
+   Blast radius is one account at a time and a Carrying account is immune,
+   but this is the one item here that should close before mainnet.  Options
+   are enumerated under "Credit Enumeration DoS" in the master document;
+   recipient opt-in at =createCredit= is the most direct.
+
+** Smaller
+
+  1. Integration notes for =balanceOf= -- *done*: see "Integrating with
+     BUCK" in =alberta-buck-ethereum.org=.
+  2. =tokensOfOwner= bulk view, to collapse =_selectCheapest= from 2N
      external calls to 2.
-  4. =BuckCreditHarness.forceActivate= reaches states production cannot:
+  3. =BuckCreditHarness.forceActivate= reaches states production cannot:
      it activates without moving Buck's =mintsBacked=.  It is now only
      used by fixtures that never burn, but it would be safer for it to
      move both.
+  4. Custom errors in place of the 42 revert strings in =Buck.sol= would
+     return about 2.2 KB of bytecode (measured: 18,657 -> 16,389 with the
+     reasons stripped entirely, so ~2.0 KB net of the 4-byte selectors).
+     Margin is 5,919 B today, so this is headroom for later growth rather
+     than a present need; it would convert 32 =vm.expectRevert= string
+     assertions across the suite.
 
 * Invariants now enforced, and worth asserting directly
 

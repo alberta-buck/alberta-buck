@@ -185,6 +185,54 @@ contract BuckCreditReappraisalTest is Test {
     }
 
     // ---------------------------------------------------------------------
+    // Known gap: mint() under-delivers against a depreciated credit
+    // ---------------------------------------------------------------------
+
+    /// @notice Characterization, not an endorsement.  `_allocateMint` sizes
+    ///         `take` off the *undepreciated* faceValue and grosses it up only
+    ///         for the premium inversion, while `creditLimit` reads the
+    ///         *depreciated* currentValue.  So a mint against a credit that
+    ///         has depreciated hands the holder less spendable headroom than
+    ///         they asked for -- short by exactly the depreciation factor on
+    ///         the coverage taken.
+    ///
+    ///         Delivering the full amount would mean grossing `take` up by
+    ///         face/depreciatedFace as well, which charges premium on the
+    ///         larger coverage.  Whether that is the right economics is a
+    ///         design question, so this test pins today's behaviour rather
+    ///         than asserting a fix.
+    function test_knownGap_mintUnderDeliversAgainstDepreciatedCredit() public {
+        vm.prank(INSURER);
+        uint256 tid = credit.createCredit(
+            alice, 0, 300_000e6, 60_000e6,
+            BuckCredit.DepreciationType.LINEAR, 200, uint48(t0), 200
+        );
+        _at(3 * YEAR);                       // 3 yr x 200bp on (300k - 60k) = 14.4k off face
+
+        vm.prank(alice);
+        buck.mint(50_000e6, _ids(tid));
+
+        (, uint256 activated,) = credit.creditInfo(tid);
+        assertEq(activated, 62_500e6, "take grossed up for the 200bp premium only");
+        assertEq(buck.creditLimit(alice), 59_500e6, "limit reads the depreciated value");
+        assertEq(buck.signedRawBalanceOf(alice), -int256(12_500e6), "principal paid");
+
+        assertEq(buck.balanceOf(alice), 47_000e6, "delivered");
+        assertLt(buck.balanceOf(alice), 50_000e6, "...which is short of the 50,000 requested");
+
+        // The shortfall is exactly the depreciation applied to the coverage.
+        assertEq(50_000e6 - buck.balanceOf(alice), 62_500e6 * 144 / 3000, "= take * 14.4k/300k");
+    }
+
+    /// @notice Control: with no depreciation the identity holds exactly.
+    function test_mintDeliversExactlyAgainstNonDepreciatingCredit() public {
+        uint256 tid = _buy(300_000e6, 200, 50_000e6);
+        assertEq(buck.balanceOf(alice), 50_000e6, "delivered exactly what was asked");
+        assertEq(buck.creditLimit(alice), 62_500e6, "limit == activated, undepreciated");
+        tid;
+    }
+
+    // ---------------------------------------------------------------------
     // Liveness of the limit
     // ---------------------------------------------------------------------
 

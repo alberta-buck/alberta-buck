@@ -107,8 +107,8 @@ counterparty on both sides.
                          | +--------+                              |
                          |                                         |
                          | activateFromBuck                        |
-                         | onCreditMutation                        |
-                         v                                         |
+                         | deactivateFromBuck                      |
+                         v   (one-way: BuckCredit never calls Buck) |
                        +-+----------+                              |
                        | BuckCredit |<-- createCredit              |
                        | (ERC 721)  |    (insurer)                 |
@@ -126,7 +126,8 @@ mints, burns, transfers, deposits or spends via the contract entry points in the
 row.  Every contract that moves BUCK -- =Buck=, =BuckBasket=, =Notes= -- consults
 =IdentityRegistry.isVerified= on both counterparties before settling.  =BuckCredit=
 (ERC-721) is mutated only by insurers (=createCredit=, =updateCredit=) and by =Buck= itself
-(=activateFromBuck= / =onCreditMutation= hook during mint and burn).  =BUCK_K= is private
+(=activateFromBuck= / =deactivateFromBuck= during mint and burn); the dependency is one-way
+-- =BuckCredit= never calls back into =Buck=.  =BUCK_K= is private
 infrastructure: =Buck= calls =compute()= on every mint/burn, and =BuckBasket= is the
 privileged caller of =reprime()= and the source of =basketValueInBuck()= that the
 =Direct= variant integrates against.  External dependencies (not shown): Uniswap V3 (LPs
@@ -138,20 +139,18 @@ The flow is:
 
 1. An *insurer* mints a =BUCK_CREDIT= NFT for a client's asset, setting face value, depreciation
    schedule, and =premiumRate= (annual basis points of activated coverage).
-2. The *client* may pre-activate some or all of the credit via =BuckCredit.activate= to expose the
-   activated portion as a /credit limit/ (without yet drawing against it).  Pre-activation is
-   optional -- =Buck.mint= will auto-activate (top-up only) any additional coverage it needs.
+2. There is no separate activation step, and no public =BuckCredit.activate=.  Coverage is
+   activated only inside =Buck.mint=, atomically with the insurance principal that funds it --
+   see [[#activation][Activation = Mint, Deactivation = Burn]].  While coverage is live the credit
+   cannot change hands.
 3. Before touching BUCK, the client =registers= with =IdentityRegistry=, posting a rerandomized PS
    credential and ElGamal-encrypted identity point.  The registry verifies both via BN254
    pairings (~235K gas, paid once per address).
-4. =BUCK.mint(amount[, tokenIds])= draws coverage cheapest-first across the client's NFTs (via the
-   batched =BuckCredit.batchCreditInfo= read), auto-activates any uncovered take per NFT through
-   =BuckCredit.activateFromBuck=, debits the =mutual-insurance pool principal= (sized at 10x the
-   annual premium on the activated coverage) from the client's /signed/ raw balance, and credits
-   that principal to =insurancePool=.  No BUCK is delivered to the client's raw balance:
-   ~signedRawBalanceOf(client) = -poolPrincipal~ after a fresh mint, and
-   ~balanceOf(client) = creditLimit(client) - poolPrincipal~ is the headroom the client can now
-   spend.
+4. =BUCK.mint(amount[, tokenIds])= draws coverage cheapest-first across the client's NFTs,
+   activates it, and debits the mutual-insurance pool principal -- 10x the annual premium on the
+   coverage -- from the client's /signed/ raw balance into =insurancePool=.  No BUCK is delivered
+   to the client's raw balance; what the client gains is spendable headroom.  The arithmetic is
+   in [[#mint-burn][mint(N) and burn(N)]].
 5. To send BUCK, the sender =approves= with a Chaum-Pedersen receipt that re-encrypts the
    sender's identity under the spender's public key.  =transfer= / =transferFrom= then bilateral-
    identity-check both sides and emit =BuckTransferReceipt= carrying only ciphertext hashes.
@@ -209,8 +208,10 @@ Fields group by mutability:
 - *Immutable at mint*: =insurer= (the address allowed to update this token), =assetClass=,
   =createdAt=.
 - *Insurer-mutable* via =updateCredit=: =faceValue=, =depreciationFloor=, =depType=, =depRate=,
-  =depStartAt=, =premiumRate=, =lastUpdated=.
-- *Client-mutable* via =activate=: =activatedValue= (capped at =faceValue=), =lastActivatedAt=.
+  =depStartAt=, =premiumRate=, =lastUpdated=.  =faceValue= may not be reappraised below
+  =activatedValue= -- see [[#insurer-updates][Insurer Updates]].
+- *Buck-mutable* via =activateFromBuck= / =deactivateFromBuck=: =activatedValue= (capped at
+  =faceValue=), =lastActivatedAt=.  The client never writes these directly.
 
 =DepreciationType= is one of =NONE= (land, gold), =LINEAR= (constant annual reduction), or
 =DECLINING_BALANCE= (continuous-compounded percentage).  Three events --
@@ -242,6 +243,9 @@ A residential property would typically have two BUCK_CREDITs: one for the land (
 the structure (LINEAR or DECLINING_BALANCE with a salvage floor).
 
 ** Activation = Mint, Deactivation = Burn
+   :PROPERTIES:
+   :CUSTOM_ID: activation
+   :END:
 
 There is no public =BuckCredit.activate()= function.  Activation -- expanding =activatedValue=
 and thus growing the holder's =creditLimit= -- happens /only/ atomically as part of
@@ -264,18 +268,27 @@ part of their atomic sequences.  Test fixtures that need to set up a holder with
 =creditLimit= without exercising the mint() purchase path use the =BuckCreditHarness=
 subclass's =forceActivate= -- explicitly not present on production =BuckCredit=.
 
-=Buck.mint(amount[, tokenIds])= walks the holder's NFTs cheapest-first (or in caller-supplied
-order), computes ~take_i = ceil(remaining_i * BP / (BP - rate_i * POOL_ROI_INV))~ per NFT,
-calls =activateFromBuck(tid, holder, take_i)= to grow =activatedValue= and =mintsBacked= in
-lockstep, debits ~poolPrincipal_i = take_i - amount_i~ from the holder's signed raw, and
-credits the same amount to =insurancePool=.  =Buck.burn(amount[, tokenIds])= is the symmetric
-inverse: walks most-expensive-first, computes =unwind_i=, calls =deactivateFromBuck= to
-shrink =activatedValue= and =mintsBacked= in lockstep, debits =poolRefund_i= from
-=insurancePool=, and credits it to the holder's signed raw.
+=Buck.mint= and =Buck.burn= are the only callers.  Their per-NFT arithmetic, and the post-burn
+solvency rule that goes with it, are in [[#mint-burn][mint(N) and burn(N)]].
 
-The post-burn solvency invariant: after release, the holder's used credit must still fit under the
-shrunken =creditLimit=.  If you owe X and try to release enough coverage to drop =creditLimit=
-below X, the burn reverts -- repay first.
+*A credit that is backing BUCK cannot change hands.*  =BuckCredit._update= -- the ERC-721 hook
+every mint, transfer and burn passes through -- refuses to move a token whose =activatedValue= is
+non-zero, with =BuckCredit: credit in use=.  Minting is exempt (=from == address(0)=), so
+=createCredit= still works, and a burn that takes coverage back to zero frees the credit to be
+sold again.
+
+The reason is that the two halves of a credit position live in different places.  =Buck= derives
+the holder's =creditLimit= from the activated value of the credits they /own/, while the BUCK
+drawn against that limit stays as a negative raw balance on the account that /drew/ it.  Let the
+token move and the two separate: the seller keeps an obligation with nothing behind it, and the
+buyer receives headroom against coverage that has already been spent.  The same activated value
+would back BUCK twice.
+
+=activatedValue= is the predicate rather than =Buck='s =mintsBacked= deliberately: it is local,
+so =BuckCredit= enforces the property without consulting =Buck= at all, and the guarantee does not
+depend on another contract being correct or even reachable.  The two agree by construction --
+activation happens only inside =Buck._allocateMint=, and =updateCredit= may not reappraise below
+activated coverage.
 
 =totalCurrentValue(account)= walks =tokenOfOwnerByIndex= and sums =currentValue(tokenId)= -- the
 single call =Buck.creditLimit= makes to size the holder's headroom (then multiplied by
@@ -287,14 +300,17 @@ for the entire list in one external call, used by =Buck=
 
 ** Buck Wiring
 
-=BuckCredit= and =Buck= form a bidirectional dependency: =Buck= reads =BuckCredit= for credit
-sizing, and =BuckCredit= notifies =Buck= when NFT state changes so =Buck='s per-block
-=creditLimitCache= can invalidate.  The cycle is broken with a one-shot
-=BuckCredit.setBuck(address)= called post-deployment, and a tiny =IBuckHook= surface
-(=onCreditMutation(address from, address to)=) that fires from =BuckCredit._update= (mint /
-transfer / burn) plus =updateCredit= / =activateFromBuck= / =deactivateFromBuck=.
-Until =setBuck= is called, the hook is silent (=address(0)= guard), so =BuckCredit= can be
-deployed and exercised before =Buck= exists in test fixtures.
+The dependency is one-way: =Buck= reads =BuckCredit= to size credit, and =BuckCredit= never
+calls =Buck=.  =BuckCredit.setBuck(address)= is a one-shot post-deployment authorisation record
+-- it names the single contract allowed to call =activateFromBuck= / =deactivateFromBuck= -- and
+nothing more.
+
+Earlier drafts had =BuckCredit= notify =Buck= on every NFT mutation, so that a per-block
+credit-limit cache in =Buck= could invalidate.  Both the cache and the notification are gone; see
+[[#credit-limit][The Credit Limit Is Read Live]] for why the cache could not have been made correct.
+Removing them left the call graph acyclic, which is worth more than the cache was: there is no
+reentrant path from =BuckCredit= back into =Buck=, so =Buck='s reentrancy guard needs no
+exemption for one.
 
 The two-contract split, rather than collapsing into a single Diamond, is forced by the
 ERC-20 / ERC-721 standards: =balanceOf(address)= and =transferFrom(address,address,uint256)= share
@@ -305,13 +321,34 @@ marketplaces, and routers.  See [[#future][Future Directions]] for the modulariz
 viable (intra-ERC-20 facets in =Buck=, independent UUPS for =BuckCredit=).
 
 ** Insurer Updates
+   :PROPERTIES:
+   :CUSTOM_ID: insurer-updates
+   :END:
 
 =updateCredit(tokenId, newFaceValue, newDepreciationFloor, newDepType, newDepRate,
-newDepStartAt, newPremiumRate)= is gated on ~msg.sender == credits[tokenId].insurer~.  If the new
-face value is below the current activated amount the contract caps =activatedValue= downward in
-the same call.  =assetClass= and =insurer= never change.  Reductions can push a client's
-outstanding BUCK above their credit limit; default insurance (held in =insurancePool=) covers the
-gap.
+newDepStartAt, newPremiumRate)= is gated on ~msg.sender == credits[tokenId].insurer~.
+=assetClass= and =insurer= never change.
+
+*An insurer may reappraise down to the coverage the holder has already bought, and no further*:
+~newFaceValue >= activatedValue~, else =BuckCredit: face below activated coverage=.  Activated
+coverage is a completed purchase -- its pool principal was paid up front and funds its premium in
+perpetuity -- so writing it down revokes a policy rather than revaluing an asset.  An asset that
+has genuinely lost value is what a *claim* is for; ordinary decline is what the depreciation
+schedule is for, and that still moves the holder's credit limit continuously without touching the
+coverage itself.  Every other lever stays: =faceValue= down to the activated line, the schedule,
+the floor, the premium rate.
+
+The rule is also load-bearing for solvency.  =activatedValue= lives in =BuckCredit= and
+=mintsBacked= lives in =Buck=; the burn is sized from the second and checked against the first.
+An earlier draft let a reappraisal clamp one without the other, and a holder whose credit was
+written down could then never unwind the position -- burnable only down to the clamped line, with
+the remainder stuck and the credit permanently disqualified from backing BUCK again.  Refusing
+the clamp keeps the two equal by construction, which is also what makes the transfer lock in
+[[#activation][Activation = Mint]] the right predicate.
+
+A reappraisal, or ordinary depreciation, can still leave a holder's outstanding BUCK above their
+credit limit.  That is a supported state, not a default: see [[#underwater][Underwater Is a State, Not a
+Failure]].
 
 * IdentityRegistry: On-Chain Trust Anchor
   :PROPERTIES:
@@ -437,7 +474,8 @@ struct AccountState {
                                // NFT-backed used credit; positive == held BUCK.
     BuckSeconds buckSeconds;   // uint120 underlying; demurrage IOU integral on positive holdings
     uint40      timestamp;     // last crystallisation (safe past year 36800)
-    uint16      flags;         // reserved for future per-account flags
+    uint16      flags;         // bit 0: demurrage routed to demurragePayer[a].
+                               // bits 1-15 reserved.
 }
 mapping(address => AccountState) internal _state;
 #+END_SRC
@@ -449,12 +487,19 @@ mapping(address => AccountState) internal _state;
 floor, and activated values are non-negative by construction); =Buck= reads via =asInt()= in
 signed contexts and =asUint()= only after verifying non-negativity.
 
-Outside the hot path: per-block credit-limit cache (=creditLimitCache[a]=, =creditLimitBlock[a]=,
-two new mappings appended after =basket=), allowances, per-NFT outstanding allocations
-(=mintsBacked[tokenId]=), approve-time receipt fragments.  =BUCK= implements =IERC20= and
-=IERC20Metadata= directly -- no OpenZeppelin ERC20 inheritance, so the slot layout is explicit
-and the transfer paths are linear (no =_update= override re-entry).  Decimals are 6, matching
-USDC.
+A bit in =flags= is the cheapest state this contract has: the word rides in the slot the transfer
+path already loads and stores, so testing one is free.  That is exactly why it is spent only on
+hot-path dispatch.  Cold-path bookkeeping -- the count of accounts a demurrage payer carries --
+lives in its own mapping instead.
+
+Outside the hot path: allowances, per-NFT outstanding allocations (=mintsBacked[tokenId]=),
+approve-time receipt fragments, and the delegated-demurrage maps.  *Nothing derived is stored.*
+An account's credit limit, and therefore its =balanceOf=, is recomputed from live =BuckCredit=
+state on every read; there is no cached copy of it anywhere.
+
+=BUCK= implements =IERC20= and =IERC20Metadata= directly -- no OpenZeppelin ERC20 inheritance, so
+the slot layout is explicit and the transfer paths are linear (no =_update= override re-entry).
+Decimals are 6, matching USDC.
 
 ** Signed Balances and =balanceOf=
 
@@ -476,7 +521,42 @@ Carrying accounts (AMM pools, Notes pool, Jubilee) hold no BuckCredit NFTs, so
 =feeOwing= and =balanceOfFees= clamp to zero on negative raw -- demurrage is a per-second
 property of *held* BUCK, not used credit.
 
+*** The Credit Limit Is Read Live
+    :PROPERTIES:
+    :CUSTOM_ID: credit-limit
+    :END:
+
+~creditLimit(a) = totalCurrentValue(a) * currentBuckK / 1e18~ is computed from scratch on every
+read.  This is the point of BUCK_CREDIT, not an oversight: a holder's spendable balance is meant
+to move when they acquire a credit, when an insurer reappraises one, when an asset depreciates on
+its schedule, and when BUCK_K moves under the whole system.  A =balanceOf= that did not move with
+those would be reporting the wrong number.
+
+An earlier draft cached the product per block, invalidated by an NFT-mutation hook from
+=BuckCredit=.  That could not have been made correct.  BUCK_K moves inside any =mint= or =burn=
+that advances the PID -- from any account, with nothing to announce it -- so two transactions in
+one block were enough to read a stale limit; and no hook can cover depreciation at all, which is
+continuous.  The cache never populated in practice, and it was removed along with the hook rather
+than repaired.
+
+The cost lands where it should:
+
+| =creditLimit(a)= for ...                        |    gas |
+|-------------------------------------------------+--------|
+| an account with no credits                      |  6,327 |
+| an account with 10 credits, =NONE= schedule     | 27,603 |
+| one credit, 40 years into =DECLINING_BALANCE=   | 11,925 |
+
+An account holding ten insured assets pays for ten insured assets on every outbound transfer.  An
+account with a plain positive balance pays one external call that returns zero, and a Carrying
+account never reaches the credit path at all.  That distribution is deliberate: drawing on
+insured collateral is a more expensive operation than spending cash, and it should read that way
+on the gas meter.
+
 ** mint(N) and burn(N)
+   :PROPERTIES:
+   :CUSTOM_ID: mint-burn
+   :END:
 
 =mint(uint256 amount)= and =mint(uint256 amount, uint256[] calldata tokenIds)= are the two
 overloads.  The no-arg form runs an internal cheapest-first selector (insertion sort over the
@@ -511,11 +591,14 @@ NFT touched, =_allocateMint= calls =BuckCredit.activateFromBuck(tid, holder, tak
 the same atomic operation.
 
 Per-NFT bookkeeping: =mintsBacked[tokenId]= tracks the cumulative outstanding allocation against
-each NFT, capped at =faceValue=.  Under production semantics (no public
-=BuckCredit.activate()=), the invariant ~mintsBacked[tid] == activatedValue[tid]~ holds at every
-observation point -- they grow together on mint and shrink together on burn.  A mint-burn
-round-trip on the same NFT order is rate-neutral and not arbitrageable -- both sides hit the
-same =denom=.
+each NFT, capped at =faceValue=.  The invariant ~mintsBacked[tid] == activatedValue[tid]~ holds
+at every observation point, kept by two rules: activation happens only inside =_allocateMint=
+(there is no public =BuckCredit.activate()=), and =updateCredit= may not reappraise below
+activated coverage.  They grow together on mint and shrink together on burn.  The burn allocator
+sizes its unwind from ~min(mintsBacked, activatedValue)~ anyway -- with the rules above they
+cannot differ, and the clamp is there so that any future divergence costs the system a rounding
+rather than costing a holder their exit.  A mint-burn round-trip on the same NFT order is
+rate-neutral and not arbitrageable -- both sides hit the same =denom=.
 
 The shipped =mint= sequence:
 
@@ -553,7 +636,8 @@ The shipped =mint= sequence:
 7. Emit =Transfer(0, insurancePool, poolPrincipal)=,
    =Minted(sender, totalCoverage, poolPrincipal, creditValue, buckKValue, newLimit)=.
 
-End-state arithmetic for a fresh mint against a zero-balance, non-credit-using holder:
+End-state arithmetic for a fresh mint against a zero-balance, non-credit-using holder, where
+every credit drawn on is *undepreciated*:
 
 #+BEGIN_SRC text
 signedRawBalanceOf(holder) = -poolPrincipal       (used = principal paid to pool)
@@ -564,6 +648,28 @@ balanceOf(holder)          = creditLimit - used   = sum take_i - sum principal_i
 totalSupply                += poolPrincipal       (only the pool's positive contribution grows)
 #+END_SRC
 
+*Known gap -- a depreciated credit under-delivers.*  The allocator sizes =take= against the
+/undepreciated/ =faceValue= and grosses it up only for the premium inversion, while
+=creditLimit= reads the /depreciated/ =currentValue=.  Draw on a credit that has already
+depreciated and the last line above does not hold: the holder is short by exactly the
+depreciation applied to the coverage taken,
+~take * (faceValue - depreciatedFace) / faceValue~.
+
+Concretely -- a 300,000 structure, LINEAR 200bp/yr on a 60,000 floor, three years in
+(depreciated face 285,600), premium 200bp:
+
+#+BEGIN_SRC text
+mint(50,000)  ->  take        = 62,500      (grossed up for the 200bp premium)
+                  principal   = 12,500
+                  currentValue= 59,500      (62,500 x 285,600/300,000)
+                  balanceOf   = 47,000      <- 3,000 short of the 50,000 asked for
+#+END_SRC
+
+Delivering the full amount would mean grossing =take= up by ~faceValue / depreciatedFace~ as
+well, which charges premium on the larger coverage -- defensible, but a different economics than
+the one shipped.  Pinned by =test_knownGap_mintUnderDeliversAgainstDepreciatedCredit=; the
+decision is tracked in =CREDIT-IMPROVEMENT.org=.
+
 =burn(amount[, tokenIds])= mirrors the math but with the most-expensive-first default selector:
 unwind dearest NFT first, call =BuckCredit.deactivateFromBuck(tid, holder, unwind_i)= which
 shrinks =activatedValue= and =mintsBacked= in lockstep, debit =poolRefund= from =insurancePool=,
@@ -572,10 +678,35 @@ positive from a positive balance).  =quoteMint= and =quoteBurn= are read-only vi
 =(totalCoverage, poolPrincipal)= or =(totalUnwind, poolRefund)= for the same allocator math, so
 an off-chain optimizer can size required limits and refunds before submitting.
 
-The burn-side solvency check: after refund and deactivation, the holder's remaining used credit must
-still fit under the shrunken =creditLimit=.  If you owe X and try to release enough coverage to
-drop =creditLimit= below X, the burn reverts with =BUCK: post-burn credit used exceeds limit=.
-Repay first.
+*** Underwater Is a State, Not a Failure
+    :PROPERTIES:
+    :CUSTOM_ID: underwater
+    :END:
+
+The burn-side solvency check: after refund and deactivation, the holder's remaining used credit
+must still fit under the shrunken =creditLimit=, else the burn reverts with =BUCK: post-burn
+credit used exceeds limit=.
+
+Releasing =A= units of headroom gives back =A/(1-eff)= of coverage but refunds only the
+difference, so the limit always falls faster than the debt does.  A holder standing exactly at
+their limit -- the normal end state of mint-then-spend -- therefore cannot burn at all until they
+repay.  That is the intended order of operations, and the same one any loan imposes: repay the
+credit, then release the collateral.  Acquiring BUCK and receiving it /is/ the repayment; it
+lifts the signed raw toward zero, and the unwind then fits.
+
+A holder can also be pushed under the line by events they did not choose -- a reappraisal, or
+simply the insured asset depreciating on schedule.  Doing nothing about it is a supported
+outcome, and costs them nothing acutely:
+
+- *The insurance stays in force.*  Its premium was paid up front, in perpetuity, and no path
+  cancels it.  =activatedValue= does not move.
+- *The exposure shrinks on its own.*  Jubilee relief accrues against the coverage's
+  age at ~2 %/year, so what closing the position eventually costs declines year on year with no
+  action from the holder.  Over ten years a 1,000 BUCK position's =redeemCost= falls to
+  ~800 BUCK.
+
+So there is no liquidation, no margin call, and no forced sale.  The position simply becomes
+cheaper to close the longer it is carried -- which is the whole point of the Jubilee.
 
 The =balanceOf(sender) >= amount= spendable check on transfer-out is where credit headroom
 becomes a real BUCK flow: a transfer larger than =held= but at-or-below =held + unusedCredit=
@@ -586,9 +717,9 @@ just shrank from =held= toward zero or further into used credit).
 
 ** Identity-Bound approve()
 
-=approve(spender, amount, E_bob, pi_CP)= is mandatory -- the parameterless ERC-20
-=approve(address, uint256)= reverts with =BUCK: use identity-bound approve=.  Both =sender= and
-=spender= must be =isVerified=.  The CP proof is required regardless of the spender's identity
+=approve(spender, amount, E_bob, pi_CP)= is the identity-bound form, and the only one that lays
+down a receipt fragment.  Both =sender= and =spender= must be =isVerified=.  The CP proof is
+required regardless of the spender's identity
 flavor (Public-Identity or Encrypted): the always-CP rule produces a uniform per-pair audit
 record openable on subpoena, and engages the spender's BN254 identity key for forward security
 under future identity rotation.  Full rationale in
@@ -600,6 +731,19 @@ registry (so the carrying flavor consented to cannot retroactively flip).  Per-p
 gas (29K CP verify + 46K allowance + 22K receipt SSTORE), paid once.  Subsequent transfers
 between the same pair add only the bilateral check and the receipt event (~5K above an
 ERC-20-baseline transfer).
+
+The plain 2-arg =approve(address, uint256)= is /also/ supported, and sets nothing but the
+allowance.  This is deliberate, and it costs no privacy: identity is enforced at *transfer* time,
+never at approve time.  A bare allowance only authorises the spender to /initiate/ a
+=transferFrom=; =_identityCheckedTransfer= then independently re-validates both =from= and =to=
+and the receipt-fragment rule for that pair -- and that gate keys on ~(from, to)~, never on
+~(from, spender)~.  A plain-approved spender therefore cannot manufacture a transfer the rules
+would not already permit: they still cannot move BUCK between two non-public parties without a
+real CP receipt fragment laid down by the 4-arg form.
+
+What it buys is that BUCK is a first-class citizen of stock router and Permit2 infrastructure,
+which requires a plain ~approve(PERMIT2, max)~, without weakening any counterparty-privacy
+invariant.
 
 ** transfer() and transferFrom()
 
@@ -625,10 +769,39 @@ use the deterministic =_identityHash= fallback.
 After identity checks, transfer dispatch is automatic on the sender's =isCarrying= flag: Carrying
 senders (AMM pools, the Notes pool, the Jubilee fund) take the =_carryingTransfer= path that
 crystallises both sides through now and apportions the sender's live =buckSeconds= proportionally
-to the value transferred; Non-Carrying senders take =_nonCarryingTransfer= which just shifts raw
-balance after a spendable check on =balanceOf(from)= = ~balance - feeOwing~.  =BuckTransferReceipt(from, to, amount,
-fromHash, toHash)= is emitted; ~_identityHash(a) = keccak256(abi.encode(pk, E_addr))~ is
-deterministic per account.
+to the value transferred; Non-Carrying senders take =_nonCarryingTransfer=, which crystallises
+the sender, checks the amount against ~balanceOf(from) = held + unusedCredit~, and shifts raw
+balance.  Because the sender is crystallised immediately before that check, the spendable figure
+it reads is always settled through the current block.
+=BuckTransferReceipt(from, to, amount, fromHash, toHash)= is emitted;
+~_identityHash(a) = keccak256(abi.encode(pk, E_addr))~ is deterministic per account.
+
+*** Reentrancy Guard
+    :PROPERTIES:
+    :CUSTOM_ID: reentrancy-guard
+    :END:
+
+Every state-mutating entry point -- =transfer=, =transferFrom=, the identity-bound =approve=,
+both =mint= and =burn= overloads, =mintFromBasket=, =burnFromBasket=, and the delegated-demurrage
+calls -- is wrapped in a transient-storage mutex (EIP-1153; the build targets cancun).
+=TSTORE= / =TLOAD= are 100 gas flat with no cold tier, so the guard costs ~600 gas per guarded
+call against ~5,150 for the classic storage-slot guard, and it occupies *no storage slot* -- the
+layout is undisturbed.  Transient state cannot survive the transaction, so a path that sets the
+lock and returns without clearing it cannot brick anything.
+
+A bit in the spare =AccountState.flags= word would be cheaper still (~390 gas, since the slot is
+written anyway) and was measured and rejected.  It guards the wrong thing: an attacker re-enters
+from whatever address they like, so locking =msg.sender= stops nothing, and locking every account
+an operation touches means publishing a lock =SSTORE= per account before every call-out.  The bit
+would also share a slot with the balance, and this contract's idiom is read-struct-into-memory /
+write-struct-back -- every such sequence silently clears a lock set after the read.
+
+The guard has *no exemptions*.  It needed one when =BuckCredit= called back into =Buck= through
+the credit-limit hook -- that call arrives from inside the very =activateFromBuck= a guarded mint
+is executing, so guarding it deadlocked every mint.  With the hook gone, the call graph between
+the contracts runs one way and the question does not arise.  The plain 2-arg =approve= is left
+unguarded on purpose: it touches only the allowance map, calls nothing, and is the hottest entry
+point for router integration.
 
 ** Demurrage and Jubilee
    :PROPERTIES:
@@ -698,6 +871,87 @@ accrual.
 The Jubilee is the sink that funds default coverage, perpetual-ground-rent disbursement, or a
 periodic balance reset -- all governance-driven on-chain disbursement paths land on top of this
 single accumulating slot.
+
+*** Delegated Demurrage: a Designated Fee Payer
+    :PROPERTIES:
+    :CUSTOM_ID: fee-payer
+    :END:
+
+An account may route its demurrage to a designated payer, so that one Identity's several accounts
+concentrate their erosion in one place instead of each being eaten from underneath.
+
+The mechanism is a *transfer of buck-seconds*, not a discount.  Demurrage here is a lien, never a
+movement: the fee is locked inside the account's own raw balance, and the aggregate of those
+liens is what backs the Jubilee's accrual against =totalSupply=.  Since
+~sum_a buckSeconds(a)~ tracks ~integral(totalSupply dt)~, destroying buck-seconds anywhere would
+leave the Jubilee accruing against nothing.  So at crystallisation the sponsored account's
+~(balance * dt)~ rectangle is moved into the payer's slot rather than its own.  The total is
+conserved exactly, and *no raw BUCK moves at all* -- no supply invariant is touched by the
+feature.
+
+Absorption is capped at the payer's own lien capacity: the point at which =feeOwing(payer)= would
+exceed =rawBalanceOf(payer)=.  Past that the lien would be uncollectible, which is precisely how
+delegation would have become a way /out/ of demurrage rather than a way to relocate it.  Whatever
+the payer cannot carry stays with the sponsored account, so the worst case is "no delegation at
+all" -- never uncollected demurrage.
+
+Consent is two-sided.  =requestDemurragePayer(payer)= elects; =acceptDemurragePayer(account)=
+takes on the liability; either side may =clearDemurragePayer=.  The payer's consent is what stops
+anyone dumping unbounded fee exposure onto any balance.  Neither party may be Carrying -- a
+Carrying account's =balanceOf= ignores its fee entirely, so its lien would not bite -- and chains
+are refused, since routing is one hop by construction and a chain only makes "who is actually
+paying" unanswerable by inspection.
+
+Settlement is lazy, on the sponsored account's next touch, which is the cadence at which BUCK
+accrues everything else.  Between touches the payer's own =feeOwing= does not yet include its
+sponsees' pending rectangles -- finding them would mean enumerating sponsees --
+so =settleDemurrage(account)= is a permissionless poke that forces the transfer.  No spend
+decision ever uses a stale number: every balance-moving path crystallises the account it is about
+to debit immediately before reading its balance.
+
+Cost: nothing for accounts that do not opt in, since dispatch is a mask on the =flags= word the
+transfer path already holds in memory; +863 gas warm and +8,434 cold for those that do.
+Conservation is asserted against identical unsponsored control pairs; the residual is at most one
+raw unit (1e-6 BUCK) per account merged, from flooring once over a pooled slot instead of twice,
+and it always lands on the system's side of the ledger.
+
+** Integrating with BUCK
+   :PROPERTIES:
+   :CUSTOM_ID: integration
+   :END:
+
+BUCK is a standards-compliant ERC-20 and works with stock routers, pools and Permit2.  Three of
+its properties are unusual enough that an integration written against ordinary tokens should be
+checked against them.
+
+*Identity is enforced on transfer, and both sides must be registered.*  A transfer to an
+unregistered address reverts.  Any contract intended to hold BUCK must be bound via
+=IdentityRegistry.bindContract= -- typically with ~isPublicIdentity_ = true, isCarrying = true~
+for a pool or vault (see [[#identity-registry][IdentityRegistry]]).  This is the one change most
+integrations need: deploy, then bind, before the first transfer in.
+
+*=balanceOf= moves on its own.*  For a non-Carrying account it is ~held + unusedCredit~, and the
+credit half is a live function of the holder's insured assets and of BUCK_K.  It falls as those
+assets depreciate, moves when an insurer reappraises one, and moves when the PID moves BUCK_K --
+all without any transfer occurring.  Demurrage moves the held half downward continuously for the
+same reason.  Consequences:
+
+- Do not treat a stored =balanceOf= snapshot as still valid in a later block.
+- Do not derive a share price or a collateral ratio from an account's =balanceOf= unless you
+  intend it to track that account's insured assets.  For custody questions use
+  =rawBalanceOf= / =signedRawBalanceOf=, which report only BUCK actually held.
+- Do not sample =balanceOf= from inside a callback you do not control: views are not covered by
+  the [[#reentrancy-guard][reentrancy guard]], and the ordinary read-only-reentrancy discipline applies.
+
+Contracts bound as *Carrying* are exempt from all of this: =balanceOf= is exactly the raw
+balance, no credit and no demurrage deduction.  Every pool in this system is Carrying, which is
+why nothing in-tree is affected.
+
+*Transfers may exceed =balanceOf= at the moment you read it, and may exceed held BUCK.*  A
+transfer at or below ~held + unusedCredit~ succeeds by driving the sender's signed raw negative
+and issuing fresh BUCK to the recipient.  A pre-flight ~require(balanceOf(x) >= amt)~ in your own
+contract is therefore redundant, and against a stale read it is wrong in both directions.  Let
+the transfer revert instead.
 
 * BuckBasket: Direct-Mint Orchestrator + USD-Free Value Anchor
   :PROPERTIES:
@@ -1242,15 +1496,18 @@ both verifications must succeed.
   :END:
 
 Alice owns a $500K Calgary home (land $200K, structure $300K).  Two insurers (LandCo, HomeCo) have
-issued =BUCK_CREDIT= NFTs; HomeCo's structure credit depreciates LINEAR at 200bp/yr.  After 3
-years and partial activation, Alice's collateral and effective coverage:
+issued =BUCK_CREDIT= NFTs; HomeCo's structure credit depreciates LINEAR at 200bp/yr against a 20 %
+floor.  Three years on, and before Alice has minted anything:
 
-| Token | Insurer | Face Value | Depreciation          | Activated | Current Value | Premium Rate |
-|-------+---------+------------+-----------------------+-----------+---------------+--------------|
-| #42   | LandCo  | 200,000    | NONE                  | 200,000   | 200,000       | 50bp         |
-| #43   | HomeCo  | 300,000    | LINEAR, 200bp, 20% fl | 150,000   | 141,000       | 200bp        |
-|-------+---------+------------+-----------------------+-----------+---------------+--------------|
-| Total |         |            |                       |           | 341,000       |              |
+| Token | Insurer | Face Value | Depreciation          | Depreciated Face | Premium Rate |
+|-------+---------+------------+-----------------------+------------------+--------------|
+| #42   | LandCo  | 200,000    | NONE                  | 200,000          | 50bp         |
+| #43   | HomeCo  | 300,000    | LINEAR, 200bp, 20% fl | 285,600          | 200bp        |
+
+Note what is /not/ in that table.  =activatedValue= is zero on both credits, because activation
+happens only inside =Buck.mint=; so ~totalCurrentValue(alice) = 0~ and Alice's =creditLimit= is
+zero too.  The credit limit is not "what she could borrow" -- it is "what she has already drawn
+coverage for".  Her *capacity* to mint is bounded per credit by ~faceValue - mintsBacked~.
 
 ** Step 0: Identity Registration (One-Time)
 
@@ -1264,20 +1521,34 @@ those accounts.
 
 ** Step 1: Mint
 
-Alice calls =BUCK.mint(50_000e6)= -- the no-arg form, so the built-in selector sorts her NFTs by
-=premiumRate= ascending: LandCo (50bp) first, then HomeCo (200bp).  At ~BUCK_K = 1e18~:
+Alice calls =BUCK.mint(50_000e6)= -- the no-arg form, so the built-in selector sorts her credits by
+=premiumRate= ascending: LandCo (50bp) first, then HomeCo (200bp).  At ~BUCK_K = 1e18~, and
+writing BUCK amounts rather than raw 6-decimal units:
 
-1. ~totalCurrentValue = 341,000e6~, ~maxLimit = 341,000e6~.  Alice's existing balance is
-   280,000e6, so the early gate (~280k + 50k <= 341k~) passes.
-2. The allocator walks NFT #42: ~denom = 10000 - 50*10 = 9500~, ~avail = 200,000e6 - mintsBacked[#42]~.
-   Suppose this is Alice's first mint; ~avail = 200,000e6~, ~netCap = 190,000e6~.  ~netCap >= 50,000e6~,
-   so the partial-fill closed form fires: ~take = ceil(50_000e6 * 10000 / 9500) = 52,631,579~,
-   ~principal = take - 50_000e6 = 2,631,579~.  =mintsBacked[#42] += 52,631,579=.
-3. Tight gate: ~280,000e6 + 52,631,579 <= 341,000e6~ -- passes.
-4. Alice receives exactly 50,000e6.  =insurancePool= receives 2,631,579 (the 10x principal whose
-   10% ROI funds the 0.50% annual premium on the activated coverage).
-5. =Minted(alice, 52,631,579, 2,631,579, 341,000e6, 1e18, 341,000e6)=, plus standard =Transfer=
-   events.
+1. =buckK.compute()= runs the PID cadence.  The static controller returns =fundingFactor() == 0=,
+   so the counter-cyclical reserve gate is disabled and no pre-mint balance is captured.
+2. The allocator walks #42 first: ~denom = 10000 - 50*10 = 9500~, ~avail = 200,000 - 0~,
+   ~netCap = avail * 9500 / 10000 = 190,000~.  Since ~netCap >= 50,000~ the closed-form partial
+   fill lands it in one credit: ~take = ceil(50,000 * 10000 / 9500) = 52,631.578948~,
+   ~principal = take - 50,000 = 2,631.578948~.  #43 is never touched.
+3. =activateFromBuck(#42, alice, take)= grows =activatedValue= to =take=, and
+   =mintsBacked[#42]= with it.  From this moment #42 cannot be transferred.
+4. =insurancePool= is credited the principal and Alice's signed raw is debited the same: the
+   principal's 10 % assumed ROI (263.16/yr) exactly funds the 50bp annual premium on 52,631.58
+   of coverage (263.16/yr), in perpetuity.
+
+End state, all of it live-derived rather than stored:
+
+#+BEGIN_SRC text
+activatedValue[#42] = mintsBacked[#42] = 52,631.578948
+creditLimit(alice)                     = 52,631.578948   (#42 is NONE-schedule, so no haircut)
+signedRawBalanceOf(alice)              =    -2,631.578948
+balanceOf(alice)                       =    50,000.000000   (limit - used)
+totalSupply                           +=     2,631.578948   (the pool's positive contribution)
+#+END_SRC
+
+Alice now holds no BUCK at all and can spend 50,000 of it.  Had the selector reached #43 instead,
+the depreciated-credit shortfall described in [[#mint-burn][mint(N) and burn(N)]] would apply.
 
 ** Step 2: Approve Bob (Identity Handshake)
 
@@ -1341,14 +1612,21 @@ opening to) redeems =cm[0]= for 100 BUCK to =recipient=:
    automatically: the recipient receives the full 100e6 and absorbs an amount-weighted share of
    the pool's average demurrage age via =buckSeconds=.
 
-If HomeCo later reappraises the structure at $280K, Alice's effective collateral drops
-correspondingly.  If her outstanding BUCK exceeds the new limit, the InsurancePool covers the gap
-on documented default events; the Jubilee accumulator is the long-horizon backstop.
+If HomeCo later reappraises the structure at $280K, that is allowed -- #43 carries no activated
+coverage, so the floor in [[#insurer-updates][Insurer Updates]] does not bind, and Alice's future capacity against
+it drops accordingly.  What HomeCo /cannot/ do is write #42's coverage down: LandCo is #42's
+insurer, and even LandCo may not reappraise below the 52,631.58 Alice has bought.
+
+Meanwhile #42 keeps depreciating on its schedule -- =NONE=, so not at all here, but a
+depreciating credit would pull =creditLimit= down under Alice continuously.  If it fell below her
+drawn 2,631.58 she would be [[#underwater][underwater]]: she could not burn until she reacquired BUCK and
+repaid, her insurance would stay in force regardless, and the Jubilee relief accruing against
+#42's coverage-age would shrink the cost of closing the position year on year.
 
 * Gas Cost Snapshot
 
-Approximate gas costs from the current Foundry suite (Solidity 0.8.31, optimizer on).  PID and
-oracle figures are estimates against unwritten oracle wiring.
+Approximate gas costs from the current Foundry suite (Solidity 0.8.28, cancun, via-IR, optimizer
+at 200 runs).  PID and oracle figures are estimates against unwritten oracle wiring.
 
 | Operation                                      | Gas (approx) | At 30 gwei | Notes                                    |
 |------------------------------------------------+--------------+------------+------------------------------------------|
@@ -1358,9 +1636,12 @@ oracle figures are estimates against unwritten oracle wiring.
 | IdentityRegistry.verifySpendCP                 | ~36K         | ~$3        | CP-DLEQ via EIP-196 (A-flavor spend)     |
 | BUCK.approve() (identity)                      | ~97K         | ~$8        | 29K CP + 46K allowance + 22K SSTORE      |
 | BUCK.transfer / transferFrom                   | ~80K         | ~$6        | Identity check + receipt + 1 SSTORE/side |
+| -- reentrancy guard, per guarded call          | ~600         | --         | TSTORE/TLOAD; no storage slot            |
+| -- credit scan, sender holding 10 credits      | ~28K         | ~$2        | Live creditLimit; 6K with none held      |
+| -- demurrage routed to a designated payer      | ~900         | --         | Warm payer slot; 0 if not delegated      |
 | BUCK.mint() (static BUCK_K, 1 NFT)             | ~150K        | ~$12       | NFT walk + allocator + Jubilee accrual   |
 | BUCK.mint() (static BUCK_K, 2-NFT spillover)   | ~210K        | ~$17       | + second NFT crystallise                 |
-| BUCK.burn() (1 NFT)                            | ~120K        | ~$10       | Mirror of mint, no limit ratchet         |
+| BUCK.burn() (1 NFT)                            | ~120K        | ~$10       | Mirror of mint                           |
 | BUCK.mint() (with PID update, 4-pool basket)   | ~450K        | ~$36       | + 4 V3 TWAP reads + BUCK TWAP + PID math |
 | BUCK.mint() (PID cached, within dT)            | ~155K        | ~$12       | one SLOAD on the cache path              |
 | Notes.mint (mint_batch, N=1)                   | ~461K        | ~$37       | Groth16 verify (~216K) + insert          |
@@ -1389,25 +1670,69 @@ Chainlink branch of =_getBasketCost= must verify =updatedAt= is within an accept
 
 ** Credit Enumeration DoS
 
-A malicious user could mint many tiny BUCK_CREDITs to make =totalCurrentValue= and the
-cheapest-first allocator gas-prohibitive.  Mitigations: minimum face value at credit creation, a
-cap on credits per account (e.g. 20), or off-chain aggregation with Merkle proof.  None are wired
-in yet -- the relevant test suites cap NFT counts at small N.
+This is the sharpest remaining edge in the system, and it is worth stating without softening.
+
+=createCredit= is *permissionless*: any address may mint a BUCK_CREDIT to any client, naming
+itself the insurer.  There is no insurer allowlist -- =updateCredit= is gated on
+~msg.sender == insurer~, but creation is not gated at all.  Recipients cannot refuse, since
+ERC-721 =_mint= needs no consent from the receiver.
+
+A freshly created credit is harmless in value terms: =activatedValue= is zero, so it contributes
+zero to =totalCurrentValue= and grants no headroom.  It is not harmless in gas terms.
+=totalCurrentValue= walks =tokenOfOwnerByIndex= over /every/ token the account owns before
+discovering that each contributes nothing, and since the credit limit is now
+[[#credit-limit][read live]], that walk runs on every outbound transfer from a non-Carrying account --
+not only at mint.  So an attacker can spam a chosen address with worthless credits and raise that
+address's transfer cost without bound.
+
+The blast radius is one account at a time: nobody else's balance reads the victim's credits, and
+a Carrying account never enters the credit path.  But "you can make a specific user's token
+unusable for the price of the mints" is a real griefing vector, and it is the one thing on this
+page that should be closed before mainnet.  The candidates, roughly in order of directness:
+
+- *Recipient opt-in at =createCredit=* -- the client must have registered an intent, or the
+  insurer must be on a per-client allowlist.  Closes it completely; costs a handshake.
+- *An insurer allowlist* -- governance-gated creation, mirroring =trustedIssuers= in the
+  registry.  Closes it, at the cost of a permissioned credit market.
+- *A cap on credits per account* (e.g. 20) -- bounds the damage but hands the attacker a way to
+  fill the victim's quota with junk.
+- *Minimum face value* -- raises the price of the attack without bounding it.
+- *Off-chain aggregation with a Merkle proof* -- removes the walk entirely; much larger change.
+
+None are wired in yet; the relevant test suites cap NFT counts at small N.
 
 ** Insurer Trust
 
-The insurer can reduce =faceValue= at any time, potentially pushing accounts into default.  This
-is by design -- it reflects real-world reappraisal risk.  The InsurancePool covers default events;
-governance can blacklist abusive insurers; multi-insurer market discipline is the natural check.
-Time-locks on insurer updates (e.g. 7-day delay for reductions > 20%) are a future enhancement.
+An insurer may reappraise =faceValue= downward, but not below coverage the holder has already
+bought (see [[#insurer-updates][Insurer Updates]]).  So an insurer cannot cancel a policy, cannot strand a
+position, and cannot by itself put a holder into default: the worst it can do is reduce future
+borrowing capacity against that asset, and -- via the depreciation schedule -- let the holder's
+credit limit decline over time.  A holder pushed below their limit that way is in the supported
+[[#underwater][underwater]] state, not a defaulted one.
+
+That leaves the residual insurer risks: refusing to honour a claim, and setting a punitive
+=premiumRate= on new coverage.  Governance can blacklist abusive insurers, and multi-insurer
+market discipline is the natural check.  Time-locks on insurer updates (e.g. 7-day delay for
+reductions > 20 %) remain a future enhancement.
 
 ** Reentrancy
 
-All state changes occur before external calls in =BUCK.mint=, =BUCK.burn=, and =Notes.mint /
-spend / spendACP=.  Identity verification is the first guard in every transfer; =mintsBacked= is
-written before the user-facing =_mint=.  =BuckCredit.activate= is a leaf operation.  No
-=ReentrancyGuard= is currently wired -- the design relies on checks-effects-interactions
-discipline; adding a guard before mainnet is a one-line change if review insists.
+Every state-mutating entry point on =Buck= carries a transient-storage mutex; the design and the
+measured cost are in [[#reentrancy-guard][Reentrancy Guard]].  The guard has no exemptions.
+
+The guard is defence in depth rather than a fix for a live hole.  Every outbound call =Buck=
+makes today is either a =STATICCALL= -- including the PID controller's oracle reads, which sit
+behind an =internal view= =_readReferences()= -- or a call into one of the three immutable,
+address-locked system contracts, none of which reach arbitrary code.  What the guard protects
+against is the future: =BuckCredit= behind a UUPS proxy (see [[#future][Future Directions]]), or any
+ERC-721 receiver hook added to the activation path.  The window it closes is real and specific:
+=_allocateMint= activates coverage -- which grows credit headroom immediately -- before debiting
+the minter the pool principal, so mid-mint =balanceOf= overstates, and =_subBalance= does not
+re-check the limit on the way out.
+
+Note that view functions are not guarded and cannot be: read-only reentrancy against
+=balanceOf= is a hazard for /integrations/, which must not sample a BUCK balance from inside a
+callback they do not control.  See [[#integration][Integrating with BUCK]].
 
 ** Pool Solvency
 
@@ -1453,7 +1778,7 @@ flags for later study:
   demurrage, NFT-credit accounting, ERC-20 wire-protocol, BuckBasket direct-mint hooks, and
   Jubilee bookkeeping.  Splitting these into facets (identity facet, demurrage facet, mint-burn
   facet, ERC-20 facet) is the natural modularization path: facets share =Buck='s storage layout
-  (=AccountState=, =_totalSupply=, =mintsBacked=, =creditLimitCache=), function selectors don't
+  (=AccountState=, =_totalSupply=, =mintsBacked=), function selectors don't
   collide within a single ERC standard, and per-facet upgradability lets bug fixes ship without
   redeploying the whole stack.  Cross-contract calls into =BuckCredit= and =BuckKController= stay
   external -- the ERC-20 / ERC-721 selector collision detailed in [[#buck-credit][BUCK_CREDIT]] forces
@@ -1465,10 +1790,12 @@ flags for later study:
 
 * Status
 
-Current Foundry suite: 24 test files cover all six contracts in tree (=BuckCredit=,
+Current Foundry suite: 53 test files cover all six contracts in tree (=BuckCredit=,
 =IdentityRegistry=, =Buck=, =BuckBasket=, =BuckKControllerStatic= + =BuckKControllerDirect= +
-=BuckKController=, =Notes=) plus dedicated suites for the Phase 1b NFT-credit machinery
-(=BuckCreditLimit.t.sol=, =BuckSignedBalance.t.sol=), the SNARK toolchain (=mint_batch.circom= at
+=BuckKController=, =Notes=) plus dedicated suites for the NFT-credit machinery
+(=BuckCreditLimit.t.sol=, =BuckCreditBacking.t.sol=, =BuckCreditReappraisal.t.sol=,
+=BuckSignedBalance.t.sol=), the reentrancy guard and delegated demurrage
+(=BuckReentrancy.t.sol=, =BuckDelegatedDemurrage.t.sol=, =GuardBench.t.sol=), the SNARK toolchain (=mint_batch.circom= at
 pinned N \in {1, 2, 4, 8, 16, 32}, =spend.circom=, =spend_a.circom= V2), and a Python reference
 wallet (=alberta_buck.wallet=) that emits canonical test vectors the Solidity tests load via
 =vm.readFile=.  One =BuckKControllerForkTest= requires a live mainnet RPC and is skipped offline.
