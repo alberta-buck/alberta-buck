@@ -75,6 +75,56 @@ contract Buck is IERC20, IERC20Metadata {
     uint256 internal constant BP                 = 10000;
     uint256 internal constant POOL_ROI_INV       = 10;                  // 10% assumed annual ROI
 
+    /// @dev AccountState.flags bit 0: this account's demurrage is routed to
+    ///      `demurragePayer[account]`.
+    uint16  internal constant FLAG_SPONSORED     = 0x0001;
+    /// @dev AccountState.flags bits 1..15 hold the number of accounts that
+    ///      name this one as their demurrage payer.
+    uint16  internal constant SPONSEE_SHIFT      = 1;
+    uint16  internal constant MAX_SPONSEES       = 0x7FFF;
+
+    // ---- reentrancy guard ---------------------------------------------------
+    //
+    // Transient storage (EIP-1153; the build already targets cancun).  TSTORE
+    // / TLOAD are 100 gas flat with no cold tier, no refund accounting, and
+    // no persistent slot -- so this occupies NO storage slot and leaves the
+    // existing layout, which tests reach by hard-coded index via `vm.store`,
+    // completely undisturbed.  Measured cost is ~600 gas on a guarded call
+    // against ~5150 for the classic storage-slot guard.
+    //
+    // Deliberately a contract-level mutex rather than a bit in AccountState.
+    // A per-account bit is cheaper still (~390 gas, since the slot is written
+    // anyway) but guards the wrong thing: an attacker reenters from whatever
+    // address they like, so locking `msg.sender` stops nothing, and locking
+    // every account an operation touches means publishing a lock SSTORE per
+    // account before each call-out.  Worse, a persistent bit sharing a slot
+    // with the balance is silently cleared by any of this contract's
+    // read-struct-into-memory / write-struct-back sequences, and a path that
+    // sets it and returns without clearing bricks that account forever.
+    // Transient state cannot survive the transaction, so it cannot brick
+    // anything.
+    bool private transient _entered;
+
+    /// @dev Blocks reentry into any BUCK state-mutating entry point.  NOT
+    ///      applied to `onCreditMutation`, which is the *legitimate* reentrant
+    ///      call: BuckCredit invokes it from inside the very
+    ///      activateFromBuck / deactivateFromBuck calls that mint and burn
+    ///      make.  It carries its own `msg.sender == buckCredit` gate and
+    ///      only invalidates a cache.
+    ///
+    ///      Nor is it applied to the plain 2-arg `approve`, which touches only
+    ///      the allowance map and calls nothing: re-entering it grants an
+    ///      attacker no capability a separate transaction would not, and it is
+    ///      the single hottest entry point for router / Permit2 integration.
+    ///      The 4-arg identity-bound `approve` IS guarded -- it calls into the
+    ///      registry.
+    modifier nonReentrant() {
+        require(!_entered, "BUCK: reentrant");
+        _entered = true;
+        _;
+        _entered = false;
+    }
+
     // ---- packed per-account state ------------------------------------------
     //
     //   balance      uint80   raw stored balance.  Spendable (Non-Carrying):
@@ -89,7 +139,18 @@ contract Buck is IERC20, IERC20Metadata {
     //   timestamp    uint40   last crystallisation (seconds since epoch).
     //                         2^40 sec ≈ year 36812 -- safe past 2038.
     //
-    //   flags        uint16   reserved for future per-account flags.
+    //   flags        uint16   bit 0     FLAG_SPONSORED -- this account's
+    //                                   demurrage routes to demurragePayer[a].
+    //                         bits 1-15 sponsee count -- how many accounts
+    //                                   name THIS account as their payer.
+    //                                   Non-zero forbids being sponsored in
+    //                                   turn (no payer chains).
+    //
+    //                         Both live in the slot the transfer path already
+    //                         loads and stores, so testing them is free: an
+    //                         account that never opts in pays nothing for the
+    //                         feature.  Note this is deliberately NOT where a
+    //                         reentrancy guard lives -- see `_entered`.
 
     struct AccountState {
         BuckQty     balance;       // uint80 underlying; cap = BuckTypes.MAX_BALANCE
@@ -161,6 +222,57 @@ contract Buck is IERC20, IERC20Metadata {
     mapping(address => uint256) public creditLimitCache;
     mapping(address => uint64)  public creditLimitBlock;
 
+    // ---- delegated demurrage (fee payer) -----------------------------------
+    //
+    // An account may route its demurrage exposure to a designated payer, so
+    // that an Identity's several accounts concentrate their fee erosion in
+    // one place instead of each one's balance being eaten from underneath it.
+    //
+    // The mechanism is a *transfer of buckSeconds*, not a discount.  Buck's
+    // demurrage is a lien, never a movement: an account's fee is locked
+    // inside its own raw balance (balanceOf = raw - fee) and the Jubilee's
+    // system-level accrual against totalSupply is what that sterilisation
+    // backs.  Sum_a buckSeconds(a) tracks integral(totalSupply dt); destroy
+    // buckSeconds anywhere and the Jubilee over-accrues against nothing --
+    // silent inflation.  So delegation moves the (balance * dt) rectangle
+    // from the sponsored account's slot into the payer's slot at
+    // crystallisation.  The total is conserved exactly; only its owner moves.
+    //
+    // Absorption is capped at the payer's own capacity to carry a lien --
+    // the point where feeOwing(payer) would exceed rawBalance(payer).  Past
+    // that the lien would be uncollectible and delegation WOULD become an
+    // escape hatch from demurrage.  Whatever the payer cannot carry stays
+    // with the sponsored account, exactly where it would have been.
+    //
+    // Settlement is lazy, on the sponsored account's next touch -- the same
+    // cadence at which Buck accrues everything else.  Two consequences worth
+    // stating plainly:
+    //
+    //   - Between touches the payer's own feeOwing does not yet include its
+    //     sponsees' pending rectangles, because finding them would mean
+    //     enumerating sponsees.  `settleDemurrage(account)` is a
+    //     permissionless poke that forces the transfer, so a payer (or an
+    //     indexer) can bring its books current whenever it wants.
+    //   - A payer that spends itself down before settlement absorbs less
+    //     than it would have, and the shortfall stays with the sponsored
+    //     account.  So a delegation is best-effort, and its failure mode is
+    //     exactly "no delegation at all" -- never a loss to anyone else, and
+    //     never demurrage that goes uncollected.
+    //
+    // No spend decision is ever made on a stale number: every balance-moving
+    // path crystallises the account it is about to debit, immediately before
+    // reading its balance.
+    //
+    // Appended last so every pre-existing slot index is unchanged.
+
+    /// @notice The account that carries `a`'s demurrage, once both sides have
+    ///         consented.  Zero when `a` pays its own.
+    mapping(address => address) public demurragePayer;
+
+    /// @notice Pending election: `a` has named this account, which has not
+    ///         yet accepted.  Cleared on accept.
+    mapping(address => address) public demurragePayerRequest;
+
     // ---- premium / mutual-insurance pool model -----------------------------
     //
     // mint(N) delivers N to the holder + a mutual-insurance pool deposit of
@@ -197,6 +309,9 @@ contract Buck is IERC20, IERC20Metadata {
     );
     event JubileeAccrued(uint256 delta, uint256 newJubileeBalance);
     event JubileeRedeemed(address indexed account, uint256 relief);
+    event DemurragePayerRequested(address indexed account, address indexed payer);
+    event DemurragePayerSet(address indexed account, address indexed payer);
+    event DemurragePayerCleared(address indexed account, address indexed payer);
 
     // ---- constructor -------------------------------------------------------
 
@@ -245,7 +360,7 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 held = 0;
         if (raw > 0) {
             uint256 rawU = uint256(raw);
-            uint256 fee = _feeOwing(s, rawU);
+            uint256 fee = _feeOwing(a, rawU);
             held = fee >= rawU ? 0 : rawU - fee;
         }
         uint256 used = raw < 0 ? uint256(-raw) : 0;
@@ -264,7 +379,7 @@ contract Buck is IERC20, IERC20Metadata {
         int256 raw = s.balance.asInt();
         if (raw <= 0) return raw;          // credit used accrues no demurrage (clamped in _feeOwing)
         if (identity.isCarrying(a)) return raw;
-        uint256 fee = _feeOwing(s, uint256(raw));
+        uint256 fee = _feeOwing(a, uint256(raw));
         return raw - int256(fee);
     }
 
@@ -297,12 +412,14 @@ contract Buck is IERC20, IERC20Metadata {
         return true;
     }
 
-    function transfer(address to, uint256 amount) external returns (bool) {
+    function transfer(address to, uint256 amount) external nonReentrant returns (bool) {
         _identityCheckedTransfer(msg.sender, to, amount);
         return true;
     }
 
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    function transferFrom(address from, address to, uint256 amount)
+        external nonReentrant returns (bool)
+    {
         _spendAllowance(from, msg.sender, amount);
         _identityCheckedTransfer(from, to, amount);
         return true;
@@ -315,7 +432,7 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 amount,
         IdentityRegistry.ElGamalCT calldata E_bob,
         IdentityRegistry.CPProof calldata pi_CP
-    ) external returns (bool) {
+    ) external nonReentrant returns (bool) {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
         require(identity.isVerified(spender),    "BUCK: spender not verified");
         require(
@@ -385,13 +502,126 @@ contract Buck is IERC20, IERC20Metadata {
         _invalidateCreditCache(to);
     }
 
+    // ---- delegated demurrage (fee payer) API -------------------------------
+
+    /// @notice Number of accounts that name `a` as their demurrage payer.
+    function sponseeCount(address a) public view returns (uint256) {
+        return uint256(_state[a].flags >> SPONSEE_SHIFT);
+    }
+
+    /// @notice True if `a`'s demurrage is being carried by another account.
+    function isSponsored(address a) external view returns (bool) {
+        return _state[a].flags & FLAG_SPONSORED != 0;
+    }
+
+    /// @notice Fold `a`'s elapsed (balance * dt) rectangle into stored state
+    ///         now, rather than waiting for its next transfer.  For a
+    ///         sponsored account this is what hands the exposure to its payer,
+    ///         so a payer can keep its own books current instead of waiting on
+    ///         its sponsees to move BUCK.
+    /// @dev    Permissionless and idempotent within a block: it grants no
+    ///         capability that an ordinary transfer does not already exercise,
+    ///         and it moves no value.
+    function settleDemurrage(address a) external nonReentrant {
+        _accrueJubilee();
+        _crystallize(a);
+    }
+
+    /// @notice Step 1 of 2: name `payer` as the account you want to carry your
+    ///         demurrage.  Takes effect only once `payer` accepts.
+    /// @dev    Pass address(0) to withdraw a pending request.
+    function requestDemurragePayer(address payer) external nonReentrant {
+        require(payer != msg.sender, "BUCK: self payer");
+        demurragePayerRequest[msg.sender] = payer;
+        emit DemurragePayerRequested(msg.sender, payer);
+    }
+
+    /// @notice Step 2 of 2: accept liability for `account`'s demurrage.
+    /// @dev    Both sides must consent.  The payer's consent is what keeps
+    ///         this from being an attack -- unilateral delegation would let
+    ///         anyone dump unbounded fee exposure onto any balance.  The
+    ///         sponsored side's consent keeps a third party from silently
+    ///         changing how a contract's balance behaves.
+    ///
+    ///         Constraints, and why:
+    ///           - Both parties verified: the feature exists to let one
+    ///             Identity's accounts pool their exposure; it stays inside
+    ///             the identity system.
+    ///           - Neither party Carrying: a Carrying account's balanceOf
+    ///             ignores its fee entirely (it hands its age basis to
+    ///             recipients instead), so a Carrying payer's lien would not
+    ///             bite -- that is precisely the escape hatch this design
+    ///             exists to avoid.
+    ///           - No chains: a payer may not itself be sponsored, and a
+    ///             sponsored account may not be a payer.  Routing is one hop
+    ///             by construction, so chains would not recurse, but they
+    ///             make "who is actually paying" unanswerable by inspection.
+    function acceptDemurragePayer(address account) external nonReentrant {
+        require(demurragePayerRequest[account] == msg.sender, "BUCK: not requested");
+        require(account != msg.sender,                        "BUCK: self payer");
+        require(identity.isVerified(account),                 "BUCK: account not verified");
+        require(identity.isVerified(msg.sender),              "BUCK: payer not verified");
+        require(!identity.isCarrying(account),                "BUCK: account is Carrying");
+        require(!identity.isCarrying(msg.sender),             "BUCK: payer is Carrying");
+
+        // Everything accrued so far stays where it accrued.
+        _accrueJubilee();
+        _crystallize(account);
+        _crystallize(msg.sender);
+
+        AccountState memory as_ = _state[account];
+        require(as_.flags & FLAG_SPONSORED == 0,       "BUCK: already sponsored");
+        require(as_.flags >> SPONSEE_SHIFT == 0,       "BUCK: account is a payer");
+        AccountState memory ps = _state[msg.sender];
+        require(ps.flags & FLAG_SPONSORED == 0,        "BUCK: payer is sponsored");
+        uint16 n = ps.flags >> SPONSEE_SHIFT;
+        require(n < MAX_SPONSEES,                      "BUCK: payer at capacity");
+
+        as_.flags |= FLAG_SPONSORED;
+        _state[account] = as_;
+        ps.flags = (ps.flags & FLAG_SPONSORED) | uint16((n + 1) << SPONSEE_SHIFT);
+        _state[msg.sender] = ps;
+
+        demurragePayer[account]        = msg.sender;
+        demurragePayerRequest[account] = address(0);
+        emit DemurragePayerSet(account, msg.sender);
+    }
+
+    /// @notice End a delegation.  Callable by either side -- the sponsored
+    ///         account may always walk away, and a payer may always stop the
+    ///         bleeding.
+    function clearDemurragePayer(address account) external nonReentrant {
+        address p = demurragePayer[account];
+        require(p != address(0), "BUCK: not sponsored");
+        require(msg.sender == account || msg.sender == p, "BUCK: not a party");
+
+        // Crystallise first, so the rectangle accrued under the delegation
+        // lands on the payer rather than snapping back onto `account`.
+        _accrueJubilee();
+        _crystallize(account);
+
+        AccountState memory as_ = _state[account];
+        as_.flags &= ~FLAG_SPONSORED;
+        _state[account] = as_;
+
+        AccountState memory ps = _state[p];
+        uint16 n = ps.flags >> SPONSEE_SHIFT;
+        if (n != 0) {
+            ps.flags = (ps.flags & FLAG_SPONSORED) | uint16((n - 1) << SPONSEE_SHIFT);
+            _state[p] = ps;
+        }
+
+        demurragePayer[account] = address(0);
+        emit DemurragePayerCleared(account, p);
+    }
+
     // ---- mint / burn -------------------------------------------------------
 
-    function mint(uint256 amount) external {
+    function mint(uint256 amount) external nonReentrant {
         _mintAllocated(amount, _selectCheapest(msg.sender));
     }
 
-    function mint(uint256 amount, uint256[] calldata tokenIds) external {
+    function mint(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
         _mintAllocated(amount, tokenIds);
     }
 
@@ -399,11 +629,11 @@ contract Buck is IERC20, IERC20Metadata {
     ///         so the dearest insurance is released first, returning the
     ///         largest pool principal per BUCK burned and freeing expensive
     ///         capacity for re-use.
-    function burn(uint256 amount) external {
+    function burn(uint256 amount) external nonReentrant {
         _burnAllocated(amount, _selectMostExpensive(msg.sender));
     }
 
-    function burn(uint256 amount, uint256[] calldata tokenIds) external {
+    function burn(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
         _burnAllocated(amount, tokenIds);
     }
 
@@ -424,7 +654,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///         funding-factor machinery -- direct-mint BUCK is backed by
     ///         the TOKEN reserves in BuckBasket's pools, not by insured-
     ///         asset credit.  Only callable by the registered basket.
-    function mintFromBasket(address to, uint256 amount) external {
+    function mintFromBasket(address to, uint256 amount) external nonReentrant {
         require(msg.sender == basket && basket != address(0), "BUCK: not basket");
         if (amount == 0) return;
         _accrueJubilee();
@@ -439,7 +669,7 @@ contract Buck is IERC20, IERC20Metadata {
     /// @notice Burn `amount` BUCK from BuckBasket's balance.  Only callable
     ///         by the registered basket.  Mirrors mintFromBasket on the
     ///         supply side without consulting credit-NFT machinery.
-    function burnFromBasket(uint256 amount) external {
+    function burnFromBasket(uint256 amount) external nonReentrant {
         require(msg.sender == basket && basket != address(0), "BUCK: not basket");
         if (amount == 0) return;
         _accrueJubilee();
@@ -969,7 +1199,15 @@ contract Buck is IERC20, IERC20Metadata {
         // elapsed-rectangle is meaningless.
         uint256 toRawPos  = oldToPos;
         uint256 toElapsed = block.timestamp - uint256(ts.timestamp);
-        uint256 toBs      = ts.buckSeconds.asUint() + toRawPos * toElapsed + carried;
+        // The recipient's own rectangle plus the age basis the Carrying
+        // sender hands over.  Both are new exposure for `to`, so both route
+        // to `to`'s payer when it has one -- otherwise a sponsored account
+        // would still be eroded by whatever it received from a pool.
+        uint256 toNewBs   = toRawPos * toElapsed + carried;
+        if (ts.flags & FLAG_SPONSORED != 0) {
+            toNewBs = _routeToPayer(to, toNewBs);
+        }
+        uint256 toBs      = ts.buckSeconds.asUint() + toNewBs;
 
         ts.balance     = toBuckQtySigned(newToSigned);
         ts.buckSeconds = toBuckSeconds(toBs);
@@ -985,10 +1223,9 @@ contract Buck is IERC20, IERC20Metadata {
     // ---- demurrage views ---------------------------------------------------
 
     function feeOwing(address a) public view returns (uint256) {
-        AccountState storage s = _state[a];
-        int256 raw = s.balance.asInt();
+        int256 raw = _state[a].balance.asInt();
         if (raw <= 0) return 0;             // no demurrage on used credit or empty
-        return _feeOwing(s, uint256(raw));
+        return _feeOwing(a, uint256(raw));
     }
 
     function balanceOfFees(address a) public view returns (uint256) {
@@ -1041,11 +1278,79 @@ contract Buck is IERC20, IERC20Metadata {
     ///            = balance * elapsed * 0.02 / year_length   [raw units]
     ///
     ///        Example: 1 BUCK (1e6 raw) held 1 year → 1e6 * 0.02 = 20,000 raw.
-    function _feeOwing(AccountState storage s, uint256 raw) internal view returns (uint256) {
+    function _feeOwing(address a, uint256 raw) internal view returns (uint256) {
+        AccountState storage s = _state[a];
+        uint256 buckSecondsLive = s.buckSeconds.asUint();
         uint256 elapsed = block.timestamp - uint256(s.timestamp);
-        uint256 buckSecondsLive = s.buckSeconds.asUint() + (raw * elapsed);
+        if (elapsed != 0 && raw != 0) {
+            uint256 delta = raw * elapsed;
+            // A sponsored account's live rectangle is destined for its payer;
+            // only the slice the payer has no room for stays here.  Note the
+            // guard: `elapsed == 0` is the state every spend check sees --
+            // `_nonCarryingTransfer` crystallises `from` immediately before
+            // reading `balanceOf(from)` -- so the transfer hot path never
+            // reaches the payer lookup, and unsponsored accounts never test
+            // more than a mask on a word already in memory.
+            if (s.flags & FLAG_SPONSORED != 0) {
+                (, , uint256 take) = _payerRoom(a, delta);
+                delta -= take;
+            }
+            buckSecondsLive += delta;
+        }
         if (buckSecondsLive == 0) return 0;
         return Math.mulDiv(buckSecondsLive, BASE_RATE_PER_SEC, SCALE);
+    }
+
+    /// @dev How much of `deltaBs` buck-seconds `a`'s designated payer can take
+    ///      on, and the payer's own live buck-seconds so the writing twin can
+    ///      commit without recomputing.
+    ///
+    ///      The cap is the payer's *lien capacity*: the buck-seconds at which
+    ///      feeOwing(payer) would equal rawBalance(payer).  Beyond it the fee
+    ///      is uncollectible -- balanceOf clamps at zero and the surplus is
+    ///      demurrage that nobody ever pays, which is the one outcome that
+    ///      would make delegation a way out of demurrage rather than a way to
+    ///      relocate it.  Capping here keeps a delegated account's lien no
+    ///      less collectible than an undelegated one's.
+    function _payerRoom(address a, uint256 deltaBs)
+        internal view returns (address p, uint256 pBs, uint256 take)
+    {
+        if (deltaBs == 0) return (address(0), 0, 0);
+        p = demurragePayer[a];
+        if (p == address(0)) return (p, 0, 0);
+
+        AccountState storage ps = _state[p];
+        int256 pRawSigned = ps.balance.asInt();
+        if (pRawSigned <= 0) return (p, 0, 0);   // nothing to lien against
+        uint256 pRaw = uint256(pRawSigned);
+
+        // Payer's own live integral, then its capacity ceiling.
+        pBs = ps.buckSeconds.asUint()
+            + pRaw * (block.timestamp - uint256(ps.timestamp));
+        uint256 maxBs = pRaw * SCALE / BASE_RATE_PER_SEC;
+        if (pBs >= maxBs) return (p, pBs, 0);    // payer is tapped out
+
+        uint256 room = maxBs - pBs;
+        take = deltaBs <= room ? deltaBs : room;
+    }
+
+    /// @dev Writing twin of `_payerRoom`: move as much of `deltaBs` onto the
+    ///      payer as it can carry, returning the remainder that stays with
+    ///      `a`.  Writing the payer's slot also crystallises the payer's own
+    ///      rectangle (it is folded into `pBs`), which is exactly right --
+    ///      the payer is being touched, so it settles its own clock too.
+    ///
+    ///      `_state[p]` is written here and `_state[a]` by the caller
+    ///      afterwards, so p == a would silently discard this write;
+    ///      acceptDemurragePayer forbids self-payment for that reason.
+    function _routeToPayer(address a, uint256 deltaBs) internal returns (uint256) {
+        (address p, uint256 pBs, uint256 take) = _payerRoom(a, deltaBs);
+        if (take == 0) return deltaBs;
+        AccountState memory ps = _state[p];
+        ps.buckSeconds = toBuckSeconds(pBs + take);
+        ps.timestamp   = uint40(block.timestamp);
+        _state[p]      = ps;
+        return deltaBs - take;
     }
 
     /// @dev Fold the elapsed (balance * dt) rectangle into buckSeconds and
@@ -1060,8 +1365,17 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 elapsed  = block.timestamp - uint256(s.timestamp);
         bool dirty = false;
         if (elapsed != 0 && raw != 0) {
-            uint256 newBs = s.buckSeconds.asUint() + raw * elapsed;
-            s.buckSeconds = toBuckSeconds(newBs);
+            uint256 delta = raw * elapsed;
+            // Delegated demurrage: hand the rectangle to this account's payer
+            // as far as the payer can carry it.  Conserved, never destroyed --
+            // whatever the payer has no room for stays here.  Free for the
+            // unsponsored: the flags word is already in memory.
+            if (s.flags & FLAG_SPONSORED != 0) {
+                delta = _routeToPayer(a, delta);
+            }
+            if (delta != 0) {
+                s.buckSeconds = toBuckSeconds(s.buckSeconds.asUint() + delta);
+            }
             dirty = true;
         }
         if (uint256(s.timestamp) != block.timestamp) {
