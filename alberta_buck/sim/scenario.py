@@ -72,6 +72,13 @@ REBALANCING = Scenario(
             # and deposit it into the currently most-underweight pool, with
             # BuckBasket enforcing its BUCK->TOKEN slippage guard.
             "DirectMintBuckAgent": 75,
+            # The demand leg.  Everyone above is indifferent to what a BUCK
+            # is worth -- the DM agents pledge TOKEN, the arbs only chase
+            # cross-pool cycles -- so nothing leans against BUCK drifting off
+            # parity.  These buy BUCK on the floating pool when it trades at
+            # a discount, park it in the basket, and unwind at a premium,
+            # from a finite USDC budget rather than freshly minted supply.
+            "BuckDiscountBasketAgent": 20,
             # Advances the BasketRebalanceDirector's amortized MA signals a
             # bounded slice per tick and executes its advisory efforts
             # (sell-side hint -> BUCK -> buy-side hint) through the router.

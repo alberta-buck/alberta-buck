@@ -210,6 +210,35 @@ def test_rebalancing_sim_plot():
     l3, = ax.plot(days, p_frac, color="tab:purple", linewidth=1.0,
                   linestyle="--", label="P = error = 1 - basketValue")
     handles6.append(l3)
+    # What the BuckDiscountBasketAgent actually trades against: BUCK's price
+    # on the floating pool.  basketValueInBuck is BUCK against the commodity
+    # basket; this is BUCK against the numeraire, and the gap between them is
+    # where the demand leg finds its edge.
+    l3b, = ax.plot(days, [f.get("buckUsd", 0) / 1e6 for f in fr],
+                   color="tab:cyan", linewidth=1.1,
+                   label="BUCK/USD (floating pool)")
+    handles6.append(l3b)
+    # The demand leg's actual fills, marked at the price they traded on.
+    # BuckDiscountBasketAgent buys when BUCK/USD sits below par by DISCOUNT_BP
+    # and unwinds above par by PREMIUM_BP, so the markers should straddle the
+    # 1.0 line -- if they cluster on one side the leg is one-directional and
+    # is not closing round-trips.
+    ent = [f.get("bdaEntries", 0) for f in fr]
+    sold = [f.get("bdaSold", 0) for f in fr]
+    bu_par = [f.get("buckUsd", 0) / 1e6 for f in fr]
+    buy_d = [days[i] for i in range(1, len(fr)) if ent[i] > ent[i - 1]]
+    buy_p = [bu_par[i] for i in range(1, len(fr)) if ent[i] > ent[i - 1]]
+    sell_d = [days[i] for i in range(1, len(fr)) if sold[i] > sold[i - 1]]
+    sell_p = [bu_par[i] for i in range(1, len(fr)) if sold[i] > sold[i - 1]]
+    if buy_d:
+        handles6.append(ax.scatter(
+            buy_d, buy_p, marker="^", s=22, color="tab:olive", zorder=5,
+            label=f"demand leg buys ({ent[-1]}, "
+                  f"{fr[-1].get('bdaBought', 0) / E6:,.0f} BUCK)"))
+    if sell_d:
+        handles6.append(ax.scatter(
+            sell_d, sell_p, marker="v", s=22, color="tab:pink", zorder=5,
+            label=f"demand leg sells ({sold[-1]})"))
     ax.axhline(1.0, color="black", alpha=0.35, linewidth=0.9, linestyle="-.")
     ax.axhline(0.0, color="black", alpha=0.2, linewidth=0.8)
     ax.annotate("setpoint 1.0", xy=(0.005, 1.0), xycoords=("axes fraction", "data"),
@@ -292,72 +321,70 @@ def test_rebalancing_sim_plot():
                  f"  --  director acted on {dtrades[-1]}/{pokes[-1]} pokes "
                  f"({duty:.1f}%)")
 
-    # ---- Panel 8: BuckBasket investment ROI -------------------------- #
+    # ---- Panel 8: BuckBasket return on capital-at-risk --------------- #
     #
-    # Current sim accounting is day-0 value based: DirectMint agents invest
-    # commodity TOKEN, receive BuckBasket receipts, and later redeem TOKEN.
-    # This is useful for diagnosing the present commodity-depositor sim, but
-    # a later idle-BUCK savings-account model should add receipt claim value,
-    # BUCK demurrage avoided, and current BUCK/USD mark-to-market fields.
+    # Three series that ARE returns, and one that only looks like one.
     ax = axes[7]
 
-    # Two things are needed to state a return: a profit and the capital-time
-    # that earned it.  Only one of them is currently sound.
+    # A return needs a profit and the capital-time that earned it.
     #
-    # CAPITAL-TIME is sound.  `dmOutstanding` is the principal actually
-    # deployed in the basket at each instant, so integrating it over the run
-    # gives dollar-days, and APR = profit / dollar-days * 365.
+    # `dmProfitUsd` / `dmDollarDays` is the sound pair: profit is booked only
+    # when a deposit is actually REDEEMED, comparing proceeds against what was
+    # deposited, and dollar-days count the capital that was deployed while it
+    # was deployed.  Neither depends on how an agent's idle wealth is valued,
+    # which is what made the old figure meaningless.
     #
-    # `directMintPnl` is NOT a profit.  It is
-    # `_agent_value(now) - _agent_value(day 0)`, and `_agent_value` counts a
-    # DirectMint agent's basket TOKEN and its deposit stake but NOT the USDC
-    # it spends to buy them.  The agents start in USDC and buy TOKEN, so every
-    # deposit moves value from an uncounted bucket into a counted one and
-    # books it as gain.  The tell is in the data: the figure tracks the
-    # *number* of deposits (a near-constant ~79% of each one) while deployed
-    # capital is flat or falling -- profit that grows with transaction count
-    # and not with capital or time.  That constant is also the whole reason
-    # the old "ROI" curve sat at ~80%: 79% was a property of the metric, not
-    # a result.  Tracked in the sim notes; until it is fixed the line is
-    # plotted greyed and labelled, not used for a headline.
-    #
-    # `treasuryBuck` IS a real profit: BUCK actually retained by the basket
-    # from redeemed receipts.  It carries the headline.
-    buck_usd0 = (bu[0] / 1e6) if bu and bu[0] else 1.0
-
-    dollar_days, acc = [], 0.0
-    prev_day = days[0] if days else 0
-    for f, day in zip(fr, days):
-        dt = max(0, day - prev_day)
-        acc += (f.get("dmOutstanding", 0) / E6) * buck_usd0 * E6 * dt
-        dollar_days.append(acc)
-        prev_day = day
+    # `directMintPnl` is a mark, not a profit: _agent_value now counts USDC,
+    # but the DM agents mint the USDC they spend inside `_buy_token_from_usdc`
+    # and never hold a balance, so the value is still conjured at the purchase
+    # site.  The tell survives: it tracks the NUMBER of deposits at a
+    # near-constant fraction of each, while deployed capital is flat.  Kept
+    # greyed, on its own axis, so the artifact stays visible without being
+    # mistaken for a result.
+    dollar_days = [f.get("dmDollarDays", 0) for f in fr]
 
     def apr(series):
         return [100.0 * 365.0 * v / dd if dd > 0 else 0.0
                 for v, dd in zip(series, dollar_days)]
 
+    realized_apr = apr([f.get("dmProfitUsd", 0) for f in fr])
     treasury_apr = apr([treasury_buck(f) for f in fr])
-    dm_apr = apr([f.get("directMintPnl", 0) for f in fr])
 
     ax.axhline(0, color="black", alpha=0.25, linewidth=0.8)
-    l1, = ax.plot(days, treasury_apr, color="tab:green", linewidth=1.8,
-                  label="treasury APR on capital-at-risk (retained basket profit)")
+    l1, = ax.plot(days, realized_apr, color="tab:blue", linewidth=1.8,
+                  label="realized holder APR (redeemed round-trips / dollar-days)")
+    l2, = ax.plot(days, treasury_apr, color="tab:green", linewidth=1.4,
+                  label="treasury APR (retained basket profit / dollar-days)")
     ax.set_ylabel("APR (%)")
     ax.set_xlabel("Day")
     ax.grid(True, alpha=0.3)
 
+    # The demand leg, on the same axis because it is the same KIND of number
+    # and needs no caveat: seeded with a finite USDC budget, minting nothing,
+    # marked across USDC + BUCK + TOKEN + deposit stake.  Its capital is
+    # deployed from day 0, so elapsed days are the capital-time.
+    bda_apr = []
+    for f, dy in zip(fr, days):
+        seed = f.get("bdaSeedUsd") or 0
+        elapsed = max(1, dy)
+        bda_apr.append(100.0 * 365.0 * (f.get("bdaValueUsd", 0) - seed)
+                       / (seed * elapsed) if seed else 0.0)
+    l0, = ax.plot(days, bda_apr, color="tab:olive", linewidth=1.4,
+                  label="demand-leg APR (finite budget, fully marked)")
+
     ax2 = ax.twinx()
-    l2, = ax2.plot(days, dm_apr, color="tab:gray", linewidth=1.0, linestyle="--",
-                   label="directMintPnl APR -- ARTIFACT: counts USDC->TOKEN "
-                         "conversion as gain, not a return")
+    dm_apr = apr([f.get("directMintPnl", 0) for f in fr])
+    l3, = ax2.plot(days, dm_apr, color="tab:gray", linewidth=1.0, linestyle="--",
+                   label="directMintPnl APR -- ARTIFACT, not a return")
     ax2.set_ylabel("artifact APR (%)", color="tab:gray")
     ax2.tick_params(axis="y", labelcolor="tab:gray")
 
-    ax.legend(handles=[l1, l2], loc="upper left", fontsize=7)
-    ax.set_title("BuckBasket return on capital-at-risk  --  treasury "
-                 f"{treasury_apr[-1]:.2f}% APR on "
-                 f"${dollar_days[-1] / E6 / 1e6:,.0f}M dollar-days")
+    rt = fr[-1].get("dmRoundTrips", 0)
+    ax.legend(handles=[l1, l2, l0, l3], loc="upper left", fontsize=7)
+    ax.set_title("BuckBasket return on capital-at-risk  --  holders "
+                 f"{realized_apr[-1]:.2f}% APR over {rt} round-trips, "
+                 f"treasury {treasury_apr[-1]:.2f}% APR, "
+                 f"demand leg {bda_apr[-1]:.2f}% APR")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -386,18 +413,27 @@ def test_rebalancing_sim_plot():
         100 * last.get("directMintPnl", 0) / invested if invested else 0)
     treasury_roi_final = (
         100 * treasury_buck(last) / invested if invested else 0)
-    total_roi_final = dm_roi_final + treasury_roi_final
     print(f"  direct trades: {last.get('directTrades',0)}  "
           f"BUCK-routed: {last.get('cycleTrades',0)}  "
           f"rebalance: {last.get('rebalanceTrades',0)}")
     print(f"  Treasury BUCK: {tb_final:,.2f}  "
           f"share of NAV: {ts_final:.2f}%  "
           f"treasury ROI: {treasury_roi_final:.2f}%")
-    print(f"  treasury return: {treasury_apr[-1]:.2f}% APR on "
-          f"${dollar_days[-1] / E6:,.0f} dollar-days of capital-at-risk")
+    print(f"  realized holder return: {realized_apr[-1]:.2f}% APR "
+          f"(${last.get('dmProfitUsd', 0) / E6:,.0f} booked over "
+          f"{last.get('dmRoundTrips', 0)} redeemed round-trips)")
+    print(f"  treasury return: {treasury_apr[-1]:.2f}% APR")
+    print(f"  ... both on ${dollar_days[-1] / E6:,.0f} dollar-days "
+          f"of capital-at-risk")
     print(f"  [directMintPnl {dm_roi_final:.2f}% of gross deposits / "
-          f"{dm_apr[-1]:.2f}% APR -- ARTIFACT: _agent_value omits the USDC "
-          f"spent, so each deposit books ~79% of itself as gain]")
+          f"{dm_apr[-1]:.2f}% APR -- ARTIFACT: the DM agents mint the USDC "
+          f"they spend, so value is still conjured at the purchase site]")
+    print(f"  demand leg: {last.get('bdaEntries', 0)} entries  "
+          f"{last.get('bdaBought', 0) / E6:,.0f} BUCK bought  "
+          f"{last.get('bdaSold', 0) / E6:,.0f} BUCK sold")
+    print(f"  demand-leg portfolio: ${last.get('bdaValueUsd', 0) / E6:,.0f} "
+          f"from ${(last.get('bdaSeedUsd') or 0) / E6:,.0f} seed  "
+          f"({bda_apr[-1]:.2f}% APR)")
     print(f"  direct-mint entries: {dm_entries}  exits: {dm_exits}")
     print(f"  basket NAV: {nav_final:,.2f} BUCK  "
           f"outstanding: {out_final:,.2f} BUCK  "
