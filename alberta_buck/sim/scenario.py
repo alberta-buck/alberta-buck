@@ -72,13 +72,23 @@ REBALANCING = Scenario(
             # and deposit it into the currently most-underweight pool, with
             # BuckBasket enforcing its BUCK->TOKEN slippage guard.
             "DirectMintBuckAgent": 75,
-            # The demand leg.  Everyone above is indifferent to what a BUCK
+            # The DEMAND leg.  Everyone above is indifferent to what a BUCK
             # is worth -- the DM agents pledge TOKEN, the arbs only chase
-            # cross-pool cycles -- so nothing leans against BUCK drifting off
-            # parity.  These buy BUCK on the floating pool when it trades at
-            # a discount, park it in the basket, and unwind at a premium,
-            # from a finite USDC budget rather than freshly minted supply.
-            "BuckDiscountBasketAgent": 20,
+            # cross-pool cycles -- so nothing leaned against BUCK drifting
+            # off parity.  These compare the whole round trip against leaving
+            # the money in USDC and buy when it wins, from a finite budget
+            # rather than freshly minted supply.  Both variants run so the
+            # holder/basketeer carry asymmetry is visible in one render.
+            "DiscountBasketArbAgent": 12,
+            "DiscountBuckArbAgent": 4,
+            # The ISSUANCE leg, and the reason BUCK_K has anything to act on.
+            # buckK reaches the economy only through creditLimit, so without
+            # credit borrowers the controller pushes on a channel carrying
+            # none of the growth, winds its integral down and sits on the
+            # floor -- which is exactly what earlier runs of this scenario
+            # showed.  These are the honest debtors: real premiumRate, real
+            # funding-factor gate, obligations that are pure chain truth.
+            "BuckCreditDebtorAgent": 4,
             # Advances the BasketRebalanceDirector's amortized MA signals a
             # bounded slice per tick and executes its advisory efforts
             # (sell-side hint -> BUCK -> buy-side hint) through the router.

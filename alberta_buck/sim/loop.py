@@ -11,6 +11,10 @@ from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
 import alberta_buck.sim.director_agent  # noqa: F401  triggers @_register
+# The discount-BUCK time arbs and the honest credit debtors live here.
+# Registering them unconditionally lets any scenario name them: the
+# module only imports repo-local helpers, so this costs nothing.
+import alberta_buck.sim.equilibrium_agents as eqm  # noqa: F401  @_register
 from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )
@@ -44,6 +48,11 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     BootstrapDMAgent._counter = 0
     DirectMintAgent._counter = 0
     DirectMintBuckAgent._counter = 0
+    # Same defensiveness for the equilibrium agents, now that non-equilibrium
+    # scenarios name them too (build_equilibrium resets these itself).
+    eqm.FatCreditBorrowerAgent._regime_counter = 0
+    eqm.SaverAgent._regime_counter = 0
+    eqm.BuckCreditDebtorAgent._arrival_seq = 0
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
         cls = REGISTRY[cls_name]

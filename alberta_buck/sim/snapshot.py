@@ -96,9 +96,6 @@ class Snapshotter:
         # store live references here (e.g. a growing intervention log).
         self.meta: dict = {}
         self.tokens = [t[0] for t in scenario.tokens]
-        # Day-0 portfolio of the BuckDiscountBasketAgent demand leg, latched
-        # on the first capture; None until then.
-        self._bda_seed: int | None = None
         self._pool_abi, _ = load_artifact("UniswapV3Pool")
         # address -> day-0 USDC-micro value per RAW unit helper key
         self._kind = {Web3.to_checksum_address(d.usdc.address): ("usdc", 0),
@@ -177,16 +174,9 @@ class Snapshotter:
             total += rb                          # BUCK side value
         return total
 
-    def _agent_value(self, agents, day, cls_name, count_buck=False) -> int:
+    def _agent_value(self, agents, day, cls_name) -> int:
         """Portfolio value of matching agents, including the value of any
-        BuckBasket LP deposits (receipt NFTs).
-
-        `count_buck` adds loose BUCK at par (1 BUCK == 1 USDC at t=0, both
-        6-dec -- the same convention the deposit stake below already uses).
-        It is OFF by default because most DM agents MINT the BUCK they hold,
-        so counting it would book conjured supply as wealth.  It is correct
-        only for an agent that can obtain BUCK solely by buying it.
-        """
+        BuckBasket LP deposits (receipt NFTs)."""
         d = self.d
         names = {cls_name} if isinstance(cls_name, str) else set(cls_name)
         v = 0
@@ -208,8 +198,6 @@ class Snapshotter:
             # `dmDollarDays`), which compares redeem proceeds against what was
             # actually deposited and is immune to both.
             v += _bal(d.usdc, ag.address)
-            if count_buck:
-                v += _bal(d.buck, ag.address)
             for i, tc in enumerate(d.tokens):
                 v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
             # Include the BuckBasket deposit at the depositor's *own* economic
@@ -333,13 +321,6 @@ class Snapshotter:
                 agents, day, ("DirectMintAgent", "DirectMintBuckAgent")
             ) - dm_init_val
 
-        # The demand leg's portfolio, with its day-0 baseline latched on the
-        # first capture -- it is seeded in setup and has not traded yet.
-        bda_val = self._agent_value(
-            agents, day, "BuckDiscountBasketAgent", count_buck=True)
-        if self._bda_seed is None:
-            self._bda_seed = bda_val
-
         # Basket NAV (total BUCK value of all BuckBasket LP) and
         # outstanding DM liability (sum of buckPrincipal across active
         # deposits).  Treasury BUCK tracks retained profit from redemptions.
@@ -424,19 +405,6 @@ class Snapshotter:
             "dmProfitUsd": ctr.get("dmProfitUsd", 0),
             "dmDollarDays": ctr.get("dmDollarDays", 0),
             "dmRoundTrips": ctr.get("dmRoundTrips", 0),
-            # BuckDiscountBasketAgent: the price-triggered demand leg.  Its
-            # trade counts read as how far and how often BUCK left parity.
-            "bdaEntries": ctr.get("bdaEntries", 0),
-            "bdaBought": ctr.get("bdaBought", 0),
-            "bdaSold": ctr.get("bdaSold", 0),
-            # ... and its portfolio, which unlike directMintPnl is a real
-            # mark-to-market: this agent is seeded with a FINITE USDC budget
-            # and mints neither USDC nor BUCK, so every asset it can hold --
-            # USDC, BUCK, TOKEN, deposit stake -- is counted, and nothing
-            # enters the measurement from outside it.  `bdaSeedUsd` is the
-            # day-0 baseline to subtract.
-            "bdaValueUsd": bda_val,
-            "bdaSeedUsd": self._bda_seed,
             "basketNav": nav,
             "dmOutstanding": out_buck,
             "treasuryBuck": treas_buck,
