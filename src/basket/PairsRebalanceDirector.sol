@@ -27,7 +27,10 @@ import {RebalanceDirectorBase} from "./RebalanceDirectorBase.sol";
 ///         equilibrium -- the confirmed-turn criterion; `vel` in the model,
 ///         measured as the better-balanced deployment default).  Effort =
 ///         kappa * |imbalance| * votes/K, capped; a pairwise leash with
-///         hysteresis enforces the mandate through trends.  The pairwise
+///         hysteresis enforces the mandate through trends.  `boundaryBp`
+///         optionally sizes on the EXCESS over the deadband instead of the
+///         whole imbalance -- the no-trade-region form, which pays only where
+///         trading is expensive (see `_pairEffort`).  The pairwise
 ///         imbalance is the arithmetic difference of weight ratios
 ///         (w_i/w*_i - w_j/w*_j, 1e18), computed from the chassis's cached
 ///         bv/s observations.
@@ -58,6 +61,7 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
         uint64 leash1e9;            // pairwise forced-rebalance bound (30%)
         uint64 leashInner1e9;       // leash release (hysteresis, 25%)
         uint32 capBpPerEpoch;       // max effort per pair per epoch
+        uint32 boundaryBp;          // no-trade boundary, bp of the deadband
     }
 
     Params public params;
@@ -79,7 +83,8 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
 
     function _setParams(Params memory p) internal {
         if (p.epochSeconds == 0 || p.quorum == 0 || p.quorum > K
-            || p.leashInner1e9 > p.leash1e9) revert BadParams();
+            || p.leashInner1e9 > p.leash1e9
+            || p.boundaryBp > 10000) revert BadParams();
         params = p;
         epochSeconds = p.epochSeconds;
         emit ParamsSet(p);
@@ -233,8 +238,34 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
         }
         if (votes < p.quorum) return 0;
 
+        // Under proportional costs the optimal policy is a NO-TRADE REGION:
+        // one trades only far enough to reach its boundary, never all the way
+        // to the target (Davis-Norman 1990; Shreve-Soner 1994).  `boundaryBp`
+        // is how much of the deadband to treat as that boundary -- 0 sizes on
+        // the full |d| (toward the target), 10000 sizes on |d| - deadband (to
+        // the edge).
+        //
+        // It is a governance knob and not a constant because the measured
+        // sign FLIPS with trading cost, exactly as the theory predicts: the
+        // optimal region widens with cost, so imposing a wide one where
+        // trading is cheap gives up premium for nothing.  Against the Python
+        // model (rebalance_policy.py, `pairs` vs `pairs-nt`, 20y x 5 seeds,
+        // premium vs hold per year):
+        //
+        //     cost/leg      30bp      100bp      250bp
+        //     delta       -5.2bp     +3.6bp    +15.9bp
+        //
+        // on ~15% less turnover throughout.  A 30bp venue -- which is what
+        // the 0.30% TOKEN/BUCK pools are -- should leave this at 0.
+        int256 sizeD = absD;
+        if (p.boundaryBp != 0) {
+            sizeD -= int256(uint256(p.deadband1e9)) * 1e9
+                * int256(uint256(p.boundaryBp)) / 10000;
+            if (sizeD <= 0) return 0;      // inside the boundary: hold still
+        }
+
         // effort = kappa * |d| * votes/K, in bp of NAV per epoch, capped.
-        int256 bp = (int256(uint256(p.kappa1e9)) * absD * int256(votes))
+        int256 bp = (int256(uint256(p.kappa1e9)) * sizeD * int256(votes))
             / int256(K) / 1e9 / 1e14;
         int256 cap = int256(uint256(p.capBpPerEpoch));
         if (bp > cap) bp = cap;

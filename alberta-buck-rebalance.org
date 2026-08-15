@@ -21,45 +21,51 @@
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
 #+BEGIN_ABSTRACT
-The BuckBasket (see /The BuckBasket/) keeps itself roughly balanced for free:
-redemptions draw from overweight pools, deposits and treasury sweeps fill
-underweight ones, and the world's arbitrageurs do the rest.  What that leaves
-on the table is /timing/.  Basket constituents do not wander at random -- they
-trail the M2 money supply with measurable, commodity-specific lags, so a
-constituent's share of basket value takes long, slow excursions away from its
-target weight and then comes home as the laggards catch up.
+The BuckBasket (see /The BuckBasket/) stays roughly balanced at no cost.
+Redemptions draw from the overweight pools.  Deposits and treasury sweeps
+fill the underweight ones.  The world's arbitrageurs do the rest.
 
-This article does four things.  First, it measures those lags and turns them
-into a rebalancing policy: scale each constituent's rebalancing effort by how
-far it is from proportion, /times/ how hard its delayed moving average is
-turning back toward proportion -- quench while the excursion is still running,
-pour when it levels off.  Second, it verifies the policy in simulation: the
-gated policies capture 75-90% of the continuous-rebalancing premium at a
-quarter to a half of the turnover, with by far the best per-trade timing.
+What this leaves unused is /timing/.  Basket constituents do not move at
+random.  They follow the M2 money supply with lags we can measure, and each
+commodity has its own lag.  A constituent's share of basket value therefore
+makes long, slow excursions away from its target weight, and comes home when
+the slower constituents catch up.
 
-Third, it changes coordinates.  A single window on a single share-vs-target
-deviation harvests one timescale and carries the numeraire's noise; working
-instead in /differential mode/ -- pairwise log ratios, which cancel the
-common mode exactly, across a seven-scale filter bank -- beats even
-continuous rebalancing's gross harvest, and is what deploys.
+This article does four things.
 
-Fourth -- the heart of the matter -- it encodes all of this as an EVM state
-machine whose signal maintenance is /amortized across activations/: every
-deposit, redemption, or bare keeper trigger carries a small, bounded slice of
-the work, closed-form catch-up makes a poke after a quiet week cost the same
-as a poke after a busy hour, and the whole machine advises the basket through
-two O(1) reads: where deposits should go, and which pool best satisfies a
-redemption.
+First, it measures those lags and builds a rebalancing policy from them.
+Scale each constituent's effort by two quantities: how far it sits from its
+target weight, and how hard its delayed moving average turns back toward
+that target.  Wait while the excursion still grows.  Trade when it levels
+off.
+
+Second, it tests the policy in simulation.  The gated policies collect
+75-90% of the continuous-rebalancing premium, at a quarter to a half of the
+turnover, with far better per-trade timing.
+
+Third, it changes coordinates.  One window on one share-vs-target deviation
+collects one timescale only, and it carries the numeraire's noise.
+/Differential mode/ removes both faults: pairwise log ratios, which cancel
+the common mode exactly, across a filter bank of seven scales.  It collects
+more than continuous rebalancing does, and it is the engine we deploy.
+
+Fourth, and most important, it encodes the policy as an EVM state machine
+that /amortizes its own maintenance/.  Every deposit, redemption or keeper
+trigger does a small, bounded part of the work.  A closed-form catch-up
+makes a poke after a quiet week cost the same as a poke after a busy hour.
+The machine then advises the basket through two O(1) reads: where a deposit
+should go, and which pool best satisfies a redemption.
 #+END_ABSTRACT
 
 * The premise: money moves first, commodities follow
 
-When the money supply expands, the new purchasing power does not reach all
-prices at once -- the Cantillon insight.  Monetary assets reprice in weeks;
-industrial commodities in months; wages and food over a year or more.  For the
-BUCK basket this is measurable.  Correlating each constituent's year-over-year
-growth against M2SL (post-1995 window, lags swept 0..36 months; see
-=alberta_buck/sim/quotes/fetch_feedstock.py= and
+New money does not reach all prices at once.  This is the Cantillon effect.
+Monetary assets reprice in weeks, industrial commodities in months, and wages
+and food over a year or more.
+
+For the BUCK basket we can measure it.  Correlate each constituent's
+year-over-year growth against M2SL, over a post-1995 window, with lags swept
+from 0 to 36 months (see =alberta_buck/sim/quotes/fetch_feedstock.py= and
 =rebalance_policy.py --fit-lags=):
 
 | constituent | peak lag (months) | peak correlation | tier             |
@@ -71,19 +77,20 @@ growth against M2SL (post-1995 window, lags swept 0..36 months; see
 | LABR        | 15-16             | 0.32-0.38        | sticky (slow)    |
 | FOOD        | 23                | 0.21-0.26        | sticky (slow)    |
 
-The ordering is exactly the intuition: monetary, then energy and construction,
-then labour and food.  (Gold's fit is weak -- it trades on real rates and
-crisis as much as on M2 -- so it takes a fast "monetary asset" prior rather
-than a fitted lag.)
+The order matches the intuition: monetary assets first, then energy and
+construction, then labour and food.  Gold fits poorly, because it trades on
+real rates and on crisis as much as on M2, so it gets a fast "monetary asset"
+prior instead of a fitted lag.
 
-The consequence for the basket: when M2 surges, the fast constituents
-overshoot their target share of basket value and stay overweight /until the
-laggards catch up/ -- an excursion with a timescale set by the lag spread,
-roughly a year.  These excursions are the basket's harvest.  A rebalancer that
-reacts to instantaneous deviation starts selling the riser immediately and
-keeps selling all the way up -- paying fees and bleeding against the trend.
-One that waits for the excursion to /level off/ makes fewer, larger trades at
-maximum mispricing.
+The consequence for the basket is this.  When M2 surges, the fast
+constituents overshoot their target share and stay overweight until the slow
+ones catch up.  The lag spread sets how long that takes: roughly a year.
+
+These excursions are the basket's harvest.  A rebalancer that reacts to the
+instantaneous deviation starts to sell the riser immediately, and keeps
+selling all the way up.  It pays fees and bleeds against the trend.  A
+rebalancer that waits for the excursion to level off makes fewer and larger
+trades, at the maximum mispricing.
 
 * The policy: quench while diverging, pour on the turn
 
@@ -100,38 +107,40 @@ Per constituent \(i\), at a fixed sampling cadence (one epoch ~ one day):
     && \text{-- the observed closure rate}.
 \end{align*}
 
-The rules, each of which was a /measured failure/ in the Python model before
-it was a rule (=alberta_buck/sim/rebalance_policy.py=, =make nix-sim-policy=):
+Each rule below was a /measured failure/ in the Python model before it was a
+rule (=alberta_buck/sim/rebalance_policy.py=, =make nix-sim-policy=):
 
-1. *Direction and magnitude come from the raw deviation; the MA contributes
-   only timing.*  A lagging average that still reads "overweight" after the
-   raw share has reverted through target must not trade.  Require
-   ~sign(m) == sign(delta)~.
-2. *The velocity of the MA classifies the regime.*  Still receding (deviation
-   growing): do nothing -- don't fight a move that is still developing.
-   Level (turning): start, but not too fast.  Gaining (closing): complete the
-   remaining rebalancing.
-3. *Size by rate-matching.*  Trade at \(\rho\) times the closure rate the
-   1-week EMA actually observes -- "the rate at which we'd lose half the
-   distance to balance" -- floored by a "half the gap in one window" prior
-   (which alone applies while level):
+1. *The raw deviation gives direction and size.  The moving average gives
+   timing only.*  A lagging average can still read "overweight" after the raw
+   share has already crossed back through its target.  It must not trade
+   then.  Require ~sign(m) == sign(delta)~.
+2. *The velocity of the moving average classifies the regime.*  Still
+   receding, so the deviation grows: do nothing, because the move is not
+   finished.  Level, so it turns: start, but slowly.  Gaining, so the gap
+   closes: complete the rebalancing.
+3. *Size by rate-matching.*  Trade at \(\rho\) times the closure rate that
+   the 1-week EMA observes: the rate at which we would lose half the distance
+   to balance.  A prior of "half the gap in one window" floors it, and that
+   prior applies alone while the regime is level:
    \[ \mathrm{effort}_i \;=\; \min\bigl(\rho\,\hat{c}_i\,w^*_i,\ \mathrm{cap}\bigr),
       \qquad
       \hat{c}_i \;=\; \max\Bigl(-\mathrm{sign}(\delta_i)\,\dot{d}_i,\
                                 \tfrac{\ln 2}{2X_i}\,\lvert\delta_i\rvert\Bigr). \]
-   This is self-calibrating (no hand gain) and self-limiting: our own flow
-   feeds the observed rate, so raising \(\rho\) saturates instead of
-   overshooting.  Effort peaks just after the turn -- closure accelerating
-   while deviation is still near maximum -- and tapers as the gap closes.
-4. *A leash bounds the quench.*  A secular trend that never levels off (BTC,
-   2020-25) would otherwise run the deviation away unboundedly.  Past
-   |delta| > 30% the policy trades at cap regardless of the gate, with
-   hysteresis release at 25%.  The factor times trades /within/ the leash;
-   the leash enforces the mandate.
-5. *Proceeds recycle, but never wash.*  Sell-side flow re-enters the
-   underweight pools (this is =sweepTreasury= / =investFromBucks=), but never
-   a constituent the policy itself sold in the same round -- a stale-signal
-   sell paired with a raw-underweight rebuy just donates the AMM fee.
+   This calibrates itself: there is no hand-set gain.  It also limits itself,
+   because our own flow feeds the rate we observe, so a larger \(\rho\)
+   saturates instead of overshooting.  Effort peaks just after the turn, when
+   closure accelerates and the deviation is still near its maximum, then
+   falls away as the gap closes.
+4. *A leash bounds the wait.*  A secular trend never levels off (BTC,
+   2020-25), so without a bound the deviation would run away.  Past
+   |delta| > 30% the policy trades at the cap whatever the gate says, and
+   releases at 25%.  The gate times the trades /inside/ the leash.  The
+   leash enforces the mandate.
+5. *Proceeds recycle, but never wash.*  Sell-side flow returns to the
+   underweight pools through =sweepTreasury= / =investFromBucks=.  It must
+   never return to a constituent the policy sold in the same round: a
+   stale-signal sell against a raw-underweight rebuy only donates the AMM
+   fee.
 
 The mechanism, live on the 2020-25 history:
 
@@ -153,35 +162,36 @@ proportional rebalancing ("prop", what spot-based routing approximates):
 
 Each alternative loses to the gated policies on its own terms:
 
-*vs hold* -- doing nothing forfeits the entire rebalancing premium /and/
-abandons the mandate (weights drift wherever prices take them).  Every active
-policy compounds steadily ahead of hold in the reverting regime:
+*Against hold.*  Doing nothing gives up the whole rebalancing premium, and
+it also abandons the mandate: the weights drift wherever prices take them.
+In the reverting regime every active policy compounds steadily ahead of
+hold:
 
 #+CAPTION: Twenty synthetic years, NAV relative to buy-and-hold (hold = the dashed zero line; line labels give the multi-seed mean premium).  The premium is real and persistent -- the only question is what it costs to collect.
 #+ATTR_LATEX: :width \textwidth
 #+ATTR_HTML: :width 100%
 [[./images/rebalance-vs-hold.png]]
 
-*vs prop (continuous proportional -- what spot-based routing approximates)* --
-prop collects the largest gross premium but pays for it everywhere: the most
-turnover (0.82x NAV/yr), the shallowest trades (5.3% mean deviation), and the
-worst behaviour in a secular trend, where it sells a riser continuously all
-the way up.  The 2020-25 replay (BTC x9, reversion never arrives) is the
-stress case -- the gated policies lose 90-130bp/yr /less/ against the trend
-on a half to a third of prop's turnover, while still holding the basket's
-weights bounded:
+*Against prop*, continuous proportional rebalancing, which is what
+spot-based routing approximates.  Prop collects the largest gross premium and
+pays for it everywhere: the most turnover (0.82x NAV/yr), the shallowest
+trades (5.3% mean deviation), and the worst behaviour in a secular trend,
+where it sells a riser continuously all the way up.  The 2020-25 replay is
+the stress case, because BTC ran x9 and reversion never came.  There the
+gated policies lose 90-130bp/yr /less/ against the trend, on a half to a
+third of prop's turnover, and still hold the weights bounded:
 
 #+CAPTION: The mandate's cost under a secular trend (2020-25, BTC x9).  Left: NAV against buy-and-hold -- every constant-mix policy must sell the riser, but the gated policies (factor, vrate) bleed the least, on the least turnover.  Right: buy-and-hold's mean absolute deviation runs off toward 80% -- it has stopped being the declared basket -- while every active policy keeps weights bounded.
 #+ATTR_LATEX: :width \textwidth
 #+ATTR_HTML: :width 100%
 [[./images/rebalance-vs-prop.png]]
 
-*vs band (the 5% threshold rebalancer)* -- band waits, but for the /wrong
-signal/: a fixed deviation level rather than the excursion's turn.  It
-re-engages the moment the band is crossed -- early in a developing excursion
--- so it trades shallow (4.4% mean deviation), churns the most of any policy
-(1.42x NAV/yr, band-edge oscillation), and shows the worst per-trade timing.
-The gated policies wait for the turn itself and are strictly better on every
+*Against band*, the 5% threshold rebalancer.  Band waits, but for the wrong
+signal: a fixed deviation level, not the turn of the excursion.  It engages
+as soon as the band is crossed, which is early in a developing excursion.  So
+it trades shallow (4.4% mean deviation), churns more than any other policy
+(1.42x NAV/yr, from oscillation at the band edge), and times its trades
+worst.  The gated policies wait for the turn itself, and beat band on every
 per-trade measure:
 
 #+CAPTION: Timing efficiency on the synthetic paths: 90-day forward capture per traded dollar vs turnover (bubble area = premium vs hold).  Band is dominated -- more churn and worse timing than either gated policy; vrate captures +514bp per traded dollar at 0.25x NAV/yr of turnover.
@@ -189,33 +199,34 @@ per-trade measure:
 #+ATTR_HTML: :width 85%
 [[./images/rebalance-frontier.png]]
 
-In sum: the gated policies collect ~75-90% of prop's premium at 30-55% of its
-turnover, trading at roughly twice the mispricing depth, with the least
-trend-bleed; full tables in =BASKET-REBALANCE.md=.
+In short: the gated policies collect 75-90% of prop's premium, at 30-55% of
+its turnover, at roughly twice the mispricing depth, and with the least
+trend-bleed.  Full tables are in =BASKET-REBALANCE.md=.
 
 Every policy in that table reads one signal: a constituent's share of basket
-value against its target, on a single window.  The next section replaces that
-signal with a different one -- and beats all four.  It is the engine the
-deployed contract actually runs, so the table above is best read as the
-argument for /gating/, not as the menu of what ships.
+value against its target, on one window.  The next section replaces that
+signal, and beats all four.  It is also the engine the deployed contract
+runs.  So read the table above as the argument for /gating/, not as the menu
+of what ships.
 
 * Differential mode: the basket as a polyphase machine
 
-The policy above has two weaknesses, and both come from the /coordinate
-system/ rather than from the gating.
+The policy above has two weaknesses.  Both come from the /coordinate system/,
+not from the gating.
 
-First, *one window harvests one timescale.*  Windows fitted to the M2 lag
-spread catch the year-long excursions and concede every mid-size swing to
-whoever is rebalancing continuously.  Second, *share-of-basket-value is not a
-clean observable.*  A constituent's share is measured from pool BUCK
-reserves, so it carries the numeraire's own noise: when BUCK moves against
-the dollar, every share moves, and the signal cannot tell that from a
-commodity actually getting rich.
+First, *one window collects one timescale.*  Windows fitted to the M2 lag
+spread catch the year-long excursions, and concede every mid-size swing to
+whoever rebalances continuously.
+
+Second, *share of basket value is not a clean observable.*  We measure a
+constituent's share from pool BUCK reserves, so it carries the numeraire's
+own noise.  When BUCK moves against the dollar, every share moves, and the
+signal cannot tell that from a commodity that has really become rich.
 
 The reconception (2026-07-11) is to change coordinates.  In a three-phase
-machine one does not reason about the three line voltages; one splits them
-into a *common mode* (the zero sequence, which carries no torque) and the
-*differential modes* (which carry all of it).  The basket has exactly this
+machine you do not reason about the three line voltages.  You split them into
+a *common mode*, the zero sequence, which carries no torque, and the
+*differential modes*, which carry all of it.  The basket has the same
 structure:
 
 #+begin_quote
@@ -224,41 +235,43 @@ mode -- BUCK's own valuation against the numeraire -- is the K-controller's
 job, and it *cancels exactly* in cross-commodity log price ratios.
 #+end_quote
 
-So the =pairs= engine works pairwise and logarithmically.  For legs \(i,j\)
+So the =pairs= engine works pairwise, and in logarithms.  For legs \(i,j\)
 the imbalance is
 \[ d_{ij} \;=\; \ln\frac{1+\delta_i}{1+\delta_j}, \]
-which is numeraire-free by construction: any factor common to both legs
+This is numeraire-free by construction: any factor common to both legs
 subtracts out.  A Uniswap /tick is already a log price/, so the engine reads
-ticks straight from =slot0= and never needs =ln()= on-chain.
+ticks straight from =slot0=, and never needs =ln()= on-chain.
 
 ** A filter bank instead of a window
 
 Each leg carries \(K=7\) EMAs of its normalized tick, on geometrically spaced
-windows (5, 10, 20, 40, 80, 160, 320 days).  Because the EMA is linear, /every
-pair's moving average, velocity and curvature at every scale is the difference
-of two legs' ladders/ -- the full \(N(N-1)/2\) differential graph falls out of
-\(O(NK)\) state, with no pairwise storage at all.
+windows: 5, 10, 20, 40, 80, 160 and 320 days.  The EMA is linear, so /every
+pair's moving average, velocity and curvature at every scale is the
+difference of two legs' ladders/.  The full \(N(N-1)/2\) differential graph
+therefore falls out of \(O(NK)\) state, with no pairwise storage at all.
 
-Differences of adjacent EMAs are band-pass filters, so the ladder is an octave
-filter bank: the short windows see mid-size swings, the long ones see the M2
-excursions, and the same gating logic applies independently at each scale.
+The difference of two adjacent EMAs is a band-pass filter, so the ladder is
+an octave filter bank.  The short windows see mid-size swings.  The long ones
+see the M2 excursions.  The same gating logic applies at each scale, and each
+scale decides on its own.
 
 ** The quorum turn detector
 
-Per pair, each scale casts a vote, and it votes only when both of the
-single-scale rules hold at that scale: the MA gap agrees in sign with the raw
-pairwise imbalance, /and/ its curvature points back toward equilibrium.  The
-pair opens when votes reach a quorum (4 of 7 by default).  No single scale can
-fire alone, which is what makes a fast window safe to include.
+Each scale casts one vote per pair.  A scale votes only when both
+single-scale rules hold at that scale: its moving-average gap agrees in sign
+with the raw pairwise imbalance, /and/ its curvature points back toward
+equilibrium.  The pair opens when the votes reach a quorum, 4 of 7 by
+default.  No scale can fire alone, which is what makes a fast window safe to
+include.
 
 Effort is \(\kappa\,\lvert d_{ij}\rvert\,(\text{votes}/K)\), capped, under a
-pairwise leash with hysteresis (30% / 25%).  Trades are *matched pairs* --
-sell the rich leg, buy the poor leg, equal value -- so they are
-self-financing, leave no cash residue, and are structurally wash-proof: the
-engine cannot sell a constituent and rebuy it in the same round, which is the
-failure the single-scale policy needed an explicit no-wash rule to avoid.
-Progressive warmup lets the short windows vote from about day 20, so the
-engine is not silent for a 116-day window's warmup.
+pairwise leash with hysteresis at 30% and 25%.  Trades are *matched pairs*:
+sell the rich leg, buy the poor leg, equal value.  They are therefore
+self-financing, they leave no cash residue, and they are wash-proof by
+construction, because the engine cannot sell a constituent and rebuy it in
+the same round.  The single-scale policy needed an explicit no-wash rule to
+prevent that.  A progressive warmup lets the short windows vote from about
+day 20, so the engine is not silent while a 116-day window fills.
 
 ** What it measures
 
@@ -270,31 +283,31 @@ Synthetic 20-year paths, 5 seeds, quorum 4, premium vs hold in bp/yr:
 | 100bp    | +365 | +308 | +357   | +313  | *+422* |
 | 250bp    | +228 |  +89 | *+283* | +271  | +262  |
 
-=pairs= beats even /prop's gross harvest/ -- multi-scale coverage recovers the
-mid-size swings, and pair-matched execution harvests more per unit of
-imbalance -- and dominates every policy through roughly 200bp/leg of cost.
-Only at extreme costs does =factor= retake the lead.
+=pairs= beats even /prop's gross harvest/, for two reasons: multi-scale
+coverage recovers the mid-size swings, and pair-matched execution collects
+more per unit of imbalance.  It dominates every policy through roughly
+200bp/leg of cost.  Only at extreme costs does =factor= retake the lead.
 
-The quorum is the cost/premium knob: q3 maximizes premium (+508 at 1.39
-turnover), q5 minimizes turnover (0.65 at +460), and *q4 is the knee*.
+The quorum trades premium against cost: q3 gives the most premium (+508, at
+1.39 turnover), q5 the least turnover (0.65, at +460), and *q4 is the knee*.
 
-The vote criterion is the other knob, and it is the one that decides the
-engine's character (quorum 4):
+The vote criterion is the other knob, and it decides the engine's character
+(quorum 4):
 
 | vote   | criterion                                  | synth premium | turnover | capture90 | hist CAGR |
 |--------+--------------------------------------------+---------------+----------+-----------+-----------|
 | =curv= | divergence /decelerating/ -- early, at the top | +496       |     0.96 | +201 bp   |     17.9% |
 | =vel=  | gap /already closing/ -- the confirmed turn   | +421         |     0.60 | +270 bp   |     *18.4%* |
 
-=curv= buys about 75bp/yr more gross harvest for 60% more turnover and worse
-trend bleed; the two cross at roughly 235bp/leg of cost.  =vel= trades later
-and less, with better per-trade capture and prop-level trend robustness, and
-is *the deployment default* -- it is the criterion
+=curv= buys about 75bp/yr more gross harvest, for 60% more turnover and
+worse trend bleed.  The two cross at roughly 235bp/leg of cost.  =vel= trades
+later and less, with better per-trade capture and trend robustness equal to
+prop's.  =vel= is *the deployment default*, and it is the criterion
 =PairsRebalanceDirector.sol= implements.
 
 ** Which engine, and when
 
-The honest summary of the whole study is a regime split:
+The whole study comes down to a regime split:
 
 - *=pairs= is the reverting-regime pick* -- the regime the BuckBasket is
   built for, and the one the physics argument in /The BuckBasket/ says is the
@@ -302,21 +315,21 @@ The honest summary of the whole study is a regime split:
 - *=factor= remains the trend-regime pick* -- best historical CAGR (19.3%)
   through the 2020-25 replay, where BTC ran x9 and reversion never arrived.
 
-Between the two engines that /exist on-chain/, though, the choice is not
-close: =pairs= dominates =vrate= on both the premium and the risk measure.
-=vrate= concentrates its trades where observed closure is fastest, which in a
-trend means selling into sharp V-shaped pullbacks that then resume -- its
-historical capture90 is the worst of any policy studied at -676bp, against
-=pairs= / =vel= at +270bp.  In the reverting regime that same concentration is
-maximally right (+514bp, the best of any policy), which is precisely what makes
-it the wrong default: it is the policy whose performance depends most on the
-regime being the one you hoped for.
+Between the two engines that /exist on-chain/ the choice is not close.
+=pairs= beats =vrate= on the premium and on the risk measure.  =vrate=
+concentrates its trades where the observed closure is fastest.  In a trend
+that means selling into sharp V-shaped pullbacks which then resume, and its
+historical capture90 is the worst of any policy studied: -676bp, against
++270bp for =pairs= / =vel=.  In the reverting regime the same concentration
+is exactly right, at +514bp, the best of any policy.  That is what makes
+=vrate= the wrong default: of all the policies, its result depends most on
+the regime being the one you hoped for.
 
 * Encoding it on-chain: work that amortizes across whoever shows up
 
-The policy needs a clock -- moving averages advance with time -- but the EVM
-has no scheduler and nobody pays to run one.  The established answer is the
-pattern behind Compound's =accrueInterest=, MakerDAO's per-collateral =drip=,
+The policy needs a clock, because moving averages advance with time.  The EVM
+has no scheduler, and nobody pays to run one.  The established answer is the
+pattern behind Compound's =accrueInterest=, MakerDAO's per-collateral =drip=
 and Uniswap's oracle observations:
 
 #+begin_quote
@@ -342,21 +355,23 @@ gap), \(n\) missed epochs of EMA recursion collapse exactly, with
     && \text{-- the closure rate};
 \end{align*}
 
-each computable in \(O(\log n)\) by binary exponentiation.  One poke after a quiet
-month costs the same as one poke after a busy hour, /and lands the signals in
-the same place/ n diligent pokes would.  This is not approximately true; it
-is an invariant the test suite fuzzes (256 random gap/imbalance combinations)
-and enforces to fixed-point rounding.  (The velocity closed form matters: a
-naive "average dm over the gap" EMA update classifies the regime differently
-than the diligent recursion -- a real bug the regime test matrix caught.)
+Binary exponentiation computes each in \(O(\log n)\).  One poke after a quiet
+month costs the same as one poke after a busy hour, /and it lands the signals
+where n diligent pokes would have left them/.  This is not approximately
+true.  It is an invariant that the test suite fuzzes over 256 random
+gap-and-imbalance combinations, and enforces to fixed-point rounding.
+
+The closed form for the velocity matters.  A naive "average dm over the gap"
+update classifies the regime differently from the diligent recursion.  That
+was a real bug, and the regime test matrix caught it.
 
 ** The round-robin work wheel
 
-N constituents, a persistent cursor, and =poke(maxWork)=: each call advances
-at most =maxWork= stale constituents from the cursor on.  Every basket
-activation -- deposit, redeem, treasury sweep, or a bare keeper trigger --
-carries a small budget (1-2).  The gas story, measured (6-token mocks,
-via-IR, solc 0.8.28):
+Take N constituents, a persistent cursor and =poke(maxWork)=.  Each call
+advances at most =maxWork= stale constituents, starting from the cursor.
+Every basket activation -- a deposit, a redeem, a treasury sweep or a bare
+keeper trigger -- carries a small budget of 1 to 2.  The measured gas, on
+6-token mocks with via-IR and solc 0.8.28:
 
 | operation                            | gas     |
 |--------------------------------------+---------|
@@ -364,44 +379,47 @@ via-IR, solc 0.8.28):
 | poke one constituent, 50-epoch gap   | ~19,900 |
 | poke when everything is fresh        | ~3,100  |
 
-Catch-up is /flat in gap size/ (the 50-epoch poke is cheaper than the 1-epoch
-one purely from storage warmth), and the fresh-epoch guard is near-free.  So:
-*the more granular the triggering, the less work each agent performs* -- and
-if nobody shows up for a week, whoever arrives next pays one closed-form
-update, not a week of them.  Work is conserved; granularity trades per-call
-gas against signal staleness, never total cost.
+Catch-up is /flat in the size of the gap/.  The 50-epoch poke is cheaper than
+the 1-epoch poke only because its storage is already warm.  The fresh-epoch
+guard is almost free.  So *the more often the machine is triggered, the less
+work each agent does*.  If nobody arrives for a week, whoever arrives next
+pays one closed-form update, not a week of them.  Work is conserved.
+Granularity trades per-call gas against signal staleness, and never against
+total cost.
 
 ** Cached observations with running sums
 
-A constituent's deviation needs /everyone's/ pool values (its share of the
-total).  Reading \(N\) pools per poke would defeat the sharding, so each poke
-reads only /its own/ pool -- one =balanceOf= (the BUCK reserve \(bv_i\); for
-full-range positions pool value \(= 2\,bv_i\)) and one =slot0= (spot, for the
-price-scaled target share \(s_i = a_i\,P_{0,i}^2/\mathrm{spot}_i\), the same
-fixed-quantity-index target the pro-rata redemption uses) -- and folds the
-result into cached running sums by difference:
+A constituent's deviation is its share of the total, so it needs
+/everyone's/ pool values.  Reading \(N\) pools per poke would defeat the
+sharding.  So each poke reads only /its own/ pool: one =balanceOf= for the
+BUCK reserve \(bv_i\) (a full-range position has pool value \(2\,bv_i\)), and
+one =slot0= for the spot, which gives the price-scaled target share
+\(s_i = a_i\,P_{0,i}^2/\mathrm{spot}_i\).  That is the same
+fixed-quantity-index target the pro-rata redemption uses.  The poke then
+folds its reading into cached running sums, by difference:
 
 \[ B \mathrel{{+}{=}} bv_i^{\mathrm{new}} - bv_i^{\mathrm{cached}}, \qquad
    S \mathrel{{+}{=}} s_i^{\mathrm{new}} - s_i^{\mathrm{cached}}, \qquad
    \delta_i = \frac{bv_i / B}{\,s_i / S\,} - 1 . \]
 
-Deviations are computed against slightly-stale sums -- which a moving-average
-policy is insensitive to by construction.  Decision data aggregates the same
-way: each poke stores its constituent's signed advisory effort, and the two
-decision reads -- =depositHint()= (strongest buy-side effort) and
-=redeemHint()= (strongest sell-side) -- are trivial scans over N cached
-int32s.
+The sums are slightly stale, and a moving-average policy is insensitive to
+that by construction.  Decision data aggregates the same way.  Each poke
+stores its constituent's signed advisory effort, so the two decision reads
+are simple scans over N cached int32s: =depositHint()= returns the strongest
+buy-side effort, and =redeemHint()= the strongest sell-side.
 
 ** The trust model: hints, not authority
 
 The director holds no funds and executes nothing.  Its outputs are
-/advisory/: the basket's venue re-verifies everything material (the
-spot-vs-TWAP manipulation guard, liquidity bounds, the conversion-loss
-budget) on every trade it actually performs.  A stale, wrong, or even
-adversarial hint can re-order flows -- route a deposit to the second-best
-pool -- but cannot break solvency or extract value beyond what the venue's
-own guards already bound.  That is what makes it safe for the signal state
-to be lazily maintained by unauthenticated public pokes.
+/advisory/.  On every trade it performs, the basket's venue re-verifies
+everything material: the spot-versus-TWAP manipulation guard, the liquidity
+bounds and the conversion-loss budget.
+
+A hint that is stale, wrong or even adversarial can therefore only re-order
+flows -- send a deposit to the second-best pool, say.  It cannot break
+solvency, and it cannot extract value beyond what the venue's own guards
+already bound.  That is why the signal state is safe to maintain lazily,
+through unauthenticated public pokes.
 
 * The contracts: two engines on a shared chassis
 
@@ -421,8 +439,8 @@ sums, binary exponentiation, and the =depositHint= / =redeemHint= /
   advisory reads stay O(N) cached -- fully API-compatible with =vrate=.
 
 *=pairs= at quorum 4 is what deploys*, and what the rebalancing simulation
-runs.  The rest of this section describes =vrate=, whose state layout is the
-simpler illustration of the shared machinery.
+runs.  The rest of this section describes =vrate=, because its state layout
+shows the shared machinery more simply.
 
 =src/basket/BasketRebalanceDirector.sol= (~2.5 slots of hot state per
 constituent, packed):
@@ -458,13 +476,13 @@ The API surface:
 How =BuckBasketProRata= consumes it (the integration increments, in order of
 invasiveness):
 
-1. *Increment 0 -- flow routing, zero new trades.*  =_depositBuck= and
-   =sweepTreasury= pass =director.depositHint()= as the =poolHint= to
-   =investFromBucks= (falling back to most-underweight on the sentinel), and
-   the single-token redeem path consults =redeemHint()=.  Every such
-   activation also calls =director.poke(1)= -- the bounded slice that keeps
-   the signals alive.  The basket's ordinary deposit/redeem/sweep traffic
-   then performs well-timed rebalancing /for free/.
+1. *Increment 0 -- flow routing, no new trades.*  =_depositBuck= and
+   =sweepTreasury= pass =director.depositHint()= to =investFromBucks= as the
+   =poolHint=, and fall back to most-underweight on the sentinel.  The
+   single-token redeem path reads =redeemHint()=.  Each of these activations
+   also calls =director.poke(1)=, the bounded slice that keeps the signals
+   alive.  The basket's ordinary deposit, redeem and sweep traffic then
+   performs well-timed rebalancing /for free/.
 2. *Increment 1 -- keeper rebalance steps.*  A permissionless pair,
    =rebalanceSource(i)= (withdraw + convert from the strongest sell-side
    pool, bounded by =effortBp=) and =rebalanceSink()= (invest the pending
@@ -480,185 +498,194 @@ Three layers, all runnable from the Makefile:
 (The model figures above regenerate via =make nix-sim-policy= then
 =make nix-sim-plot-article=.)
 
-- *Unit + fuzz (Forge)* -- =make nix-test-director=.  Ten tests: the
-  amortization invariant (diligent-vs-lazy twins, plus the 256-run fuzz over
-  random gaps and imbalances), regime transitions on a scripted excursion
-  (receding quenched, level starts, gaining saturates, sign-agreement blocks
-  the stale-MA wrong-way trade), leash engagement and hysteresis, both hints,
-  wheel budgets and cursor rotation, and the gas measurements quoted above.
+- *Unit and fuzz tests (Forge)* -- =make nix-test-director=.  Ten tests
+  cover six things.  The amortization invariant, as diligent-versus-lazy
+  twins, plus a 256-run fuzz over random gaps and imbalances.  The regime
+  transitions on a scripted excursion: receding waits, level starts, gaining
+  saturates, and sign-agreement blocks the wrong-way trade from a stale
+  moving average.  Leash engagement and its hysteresis.  Both hints.  Wheel
+  budgets and cursor rotation.  And the gas figures quoted above.
 - *Parallel regime matrix* -- =make nix-test-director-regimes=.  The same
   suite re-run across a window x rho grid (defaults: {6, 8, 16} epochs x
   {1.5, 3, 6}), one forge process per regime, in parallel.  This matrix is
   what exposed the velocity catch-up approximation: windows of 6 classified
   a post-gap regime differently between the lazy and diligent paths until
   the closed form replaced the average-velocity shortcut.
-- *Anvil end-to-end* -- =make nix-sim-director=.  The rebalancing scenario
-  (~400 agents: arbs, LPs, direct-mint depositors, a whale) plus a
-  =DirectorKeeperAgent= that pokes the deployed director with a 2-constituent
-  budget each tick and executes its advice as 2-hop Universal Router swaps
-  (sell-hint -> BUCK -> buy-hint), sized by the advised bp of basket NAV.
-  The output vector records =directorPokes= / =directorTrades= per day
-  alongside the existing basket telemetry.
+- *End-to-end on Anvil* -- =make nix-sim-director=.  This runs the
+  rebalancing scenario, about 400 agents: arbs, LPs, direct-mint depositors
+  and a whale.  A =DirectorKeeperAgent= pokes the deployed director with a
+  2-constituent budget each tick, and executes its advice as 2-hop Universal
+  Router swaps, sell-hint to BUCK to buy-hint, sized by the advised bp of
+  basket NAV.  The output vector records =directorPokes= and
+  =directorTrades= per day, beside the existing basket telemetry.
 
 * Variants worth investigating
 
-Nothing in this section is measured.  It is the set of directions the
-machine's own structure suggests, each with the literature that would supply
-the theory, ordered by what looks like the best return on effort.  Two
-analogies organize them, and both are load-bearing rather than decorative.
+Nothing in this section is measured.  These are the directions the machine's
+own structure suggests, each with the literature that would supply the
+theory, ordered by expected return on effort.  Two analogies organize them,
+and both do real work rather than decoration.
 
 ** Taking the machine analogy literally
 
 The three-phase intuition that produced differential mode has more in it.  A
-polyphase drive does not stop at "separate the common mode"; it applies two
-specific transforms, and both have an exact basket counterpart:
+polyphase drive does not stop at "separate the common mode".  It applies two
+specific transforms, and each has an exact basket counterpart:
 
-- The *Clarke transform* (abc to alpha-beta-zero) splits a three-phase vector
-  into a zero sequence -- which carries no torque -- and two /orthogonal/
+- The *Clarke transform* (abc to alpha-beta-zero) splits a three-phase
+  vector into a zero sequence, which carries no torque, and two /orthogonal/
   differential components.  The basket's log-weight vector splits the same
-  way: one common mode (BUCK against the numeraire, the K-controller's
-  business) and \(N-1\) differential modes.
-- The *Park transform* (alpha-beta to d-q) then rotates into a frame turning
-  with the field, so that quantities which were sinusoidal become constant
-  and a plain PI controller suffices.  Field-oriented control splits current
-  into a torque-producing component and a flux-producing one, and regulates
-  them separately.
+  way: one common mode, BUCK against the numeraire, which is the
+  K-controller's business, and \(N-1\) differential modes.
+- The *Park transform* (alpha-beta to d-q) then rotates into a frame that
+  turns with the field.  Quantities that were sinusoidal become constant, and
+  a plain PI controller is then enough.  Field-oriented control uses this to
+  split the current into a torque-producing part and a flux-producing part,
+  and regulates each separately.
 
-The basket's d-q split is the useful part: the component of an imbalance that
-is /harvestable/ (mean-reverting -- torque) versus the component that is
-/secular/ (a trend that must be tolerated and bounded -- flux).  The leash is
-today a crude version of exactly this distinction, applied after the fact and
+The basket's d-q split is the useful part.  One part of an imbalance is
+/harvestable/, because it reverts: that is torque.  The other part is
+/secular/, a trend that must be tolerated and bounded: that is flux.  The
+leash is a crude form of this distinction today, applied after the fact and
 with a hand-set bound.
 
-And *slip* is the concept the engine already rediscovered.  Induction torque
-is proportional to slip -- the /relative/ rate between field and rotor -- and
-vanishes at zero slip, however fast both are turning.  That is precisely the
-rate-matching rule: harvest scales with the rate of relative movement, not
-with absolute price motion.  The machine analogy retroactively validates the
-policy's central choice.
+*Slip* is the concept the engine already rediscovered.  Induction torque is
+proportional to slip, the /relative/ rate between field and rotor, and it
+falls to zero at zero slip however fast both are turning.  That is the
+rate-matching rule exactly: the harvest scales with the rate of relative
+movement, not with absolute price motion.  The machine analogy therefore
+confirms the policy's central choice after the fact.
 
 ** Taking the frequency analogy literally
 
-The EMA ladder is already a temporal decomposition: geometrically spaced
-windows, differences of adjacent EMAs acting as band-pass filters -- an
-octave filter bank, which is a wavelet transform under another name.  What is
-/not/ decomposed is the cross-sectional axis.  The full object is
-two-dimensional -- *mode x timescale* -- and the engine currently does one
-axis properly and the other by brute force.
+The EMA ladder is already a decomposition in time: geometrically spaced
+windows, with the difference of two adjacent EMAs acting as a band-pass
+filter.  That is an octave filter bank, which is a wavelet transform under
+another name.  The cross-sectional axis is /not/ decomposed.  The full object
+is two-dimensional, *mode x timescale*, and the engine does one axis properly
+and the other by brute force.
 
 *** Orthogonal modes instead of pairs
 
-The sharpest available critique of the =pairs= engine is that its basis is
-redundant.  Six legs have *five* independent differential modes, but the
-engine tracks *fifteen* pairs.  The quorum therefore counts heavily
-overlapping evidence as if it were independent, and effort sizing double- and
-triple-counts the same underlying excursion.
+The sharpest criticism of the =pairs= engine is that its basis is redundant.
+Six legs carry *five* independent differential modes, but the engine tracks
+*fifteen* pairs.  The quorum therefore counts overlapping evidence as if it
+were independent, and the effort sizing counts the same excursion two or
+three times.
 
-The fix is the Clarke transform generalized: diagonalize the covariance of
-leg log-returns and work in the eigenbasis.  PC1 is the common mode -- which
-should be /discarded/ here, because it is the controller's job -- and
-PC2..PCN are orthogonal, so each can be sized independently without
-double-counting, and a quorum over modes is a quorum over genuinely
-independent evidence.  This is the standard construction in statistical
-arbitrage (Avellaneda and Lee, /Statistical Arbitrage in the US Equities
-Market/, 2010: PCA eigenportfolios with mean-reverting residuals).
+The fix is the Clarke transform, generalized: diagonalize the covariance of
+the leg log-returns, and work in the eigenbasis.  PC1 is the common mode, and
+here it is /discarded/, because it is the controller's job.  PC2 to PCN are
+orthogonal, so each can be sized on its own without double-counting, and a
+quorum over modes is a quorum over genuinely independent evidence.  This is
+the standard construction in statistical arbitrage (Avellaneda and Lee,
+/Statistical Arbitrage in the US Equities Market/, 2010: PCA eigenportfolios
+with mean-reverting residuals).
 
-Cost on-chain is an \(N \times N\) fixed-point rotation applied to the cached
+The on-chain cost is an \(N \times N\) fixed-point rotation of the cached
 ladders.  At \(N=6\) that is small, and the eigenvectors are governance
-parameters refitted rarely -- not per poke.  The cointegration literature
-(Johansen) gives the more principled version still: for constituents bound to
-each other by physics, the object to trade is the /stationary/ linear
-combination, not the pairwise raw imbalance.
+parameters, refitted rarely rather than per poke.  The cointegration
+literature (Johansen) gives a more principled version again: for constituents
+bound to each other by physics, the object to trade is the /stationary/
+linear combination, not the raw pairwise imbalance.
 
 *** Trade to the boundary, not to the target
 
-Under proportional transaction costs the optimal policy is provably *not* to
-trade toward the target: it is a *no-trade region*, and one trades only
-enough to return to its boundary (Davis and Norman 1990; Shreve and Soner
-1994).  The current engine sizes effort toward proportion and relies on the
-cap and deadband to stop it overshooting.  Reformulating the deadband as a
-genuine no-trade wedge, with effort sized to reach the near edge rather than
-the centre, should cut turnover with no loss of premium -- the cheapest
-change on this list, and the one with the firmest theory behind it.
+Under proportional transaction costs, the optimal policy is provably *not*
+to trade toward the target.  It is a *no-trade region*, and one trades only
+far enough to return to its boundary (Davis and Norman 1990; Shreve and Soner
+1994).  The current engine sizes effort toward proportion, and relies on the
+cap and the deadband to stop it overshooting.  Make the deadband a genuine
+no-trade wedge, and size effort to reach the near edge instead of the centre.
+This is the cheapest change on this list, and the one with the firmest theory
+behind it.
 
 *** Bands fitted to the reversion, not set by hand
 
-The deadband is a flat 150bp and the leash a flat 30%.  For a mean-reverting
-spread the optimal entry and exit thresholds are known in closed form as a
-function of the reversion rate, the volatility and the cost (Bertram 2010;
-Leung and Li on optimal Ornstein-Uhlenbeck trading), and they scale like
-\(\sigma/\sqrt{2\theta}\).  Since the M2-lag study already fits a timescale per
-constituent, fitting \((\theta,\sigma)\) per /pair/ or per /mode/ is the same
-kind of exercise, and it replaces two hand-set constants with measured ones.
+The deadband is a flat 150bp, and the leash a flat 30%.  For a
+mean-reverting spread, the optimal entry and exit thresholds are known in
+closed form, as a function of the reversion rate, the volatility and the cost
+(Bertram 2010; Leung and Li on optimal Ornstein-Uhlenbeck trading).  They
+scale like \(\sigma/\sqrt{2\theta}\).  The M2-lag study already fits a
+timescale per constituent, so fitting \((\theta,\sigma)\) per /pair/ or per
+/mode/ is the same kind of exercise.  It would replace two hand-set constants
+with measured ones.
 
 *** Weights are bounded, so bound them properly
 
-"Strict upper and lower bounds" has an exact stochastic counterpart: weights
+"Strict upper and lower bounds" has an exact stochastic counterpart.  Weights
 live on a simplex, and the natural diffusion there is the *Jacobi
-(Wright-Fisher)* process, whose stationary distribution is Beta and whose
-first-passage behaviour is known.  Fitting it gives the leash a /quantile/
-instead of a guess -- "this excursion is at the 99th percentile of what this
-constituent's share does" is a defensible trigger in a way that "30%" is not.
+(Wright-Fisher)* process: its stationary distribution is Beta, and its
+first-passage behaviour is known.  Fit it, and the leash becomes a
+/quantile/ instead of a guess.  "This excursion is at the 99th percentile of
+what this constituent's share does" is a defensible trigger.  "30%" is not.
 
 *** A target-share family with a theorem attached
 
 Constant-mix is one point in a family.  Fernholz's stochastic portfolio
-theory shows that a portfolio generated by a concave function of market
-weights decomposes into a generating term plus a drift term that is
-/non-negative/, and that *diversity-weighted* portfolios
-(\(w_i \propto \mu_i^{\,p}\), \(0<p<1\)) outperform the market portfolio under
-a diversity condition -- which is exactly the bounded-weights premise the
-BuckBasket rests on.  The rebalancing premium this article measures /is/
-Fernholz's excess growth rate.  Exposing \(p\) as a governance parameter gives
-a continuous knob from equal-weight (maximum premium, maximum turnover) to
-cap-weight (zero of both), with a proof rather than a simulation behind the
-interpolation.
+theory shows two things.  A portfolio generated by a concave function of the
+market weights decomposes into a generating term plus a drift term, and that
+drift term is /non-negative/.  And *diversity-weighted* portfolios
+(\(w_i \propto \mu_i^{\,p}\), \(0<p<1\)) beat the market portfolio under a
+diversity condition -- which is exactly the bounded-weights premise the
+BuckBasket rests on.
+
+The rebalancing premium this article measures /is/ Fernholz's excess growth
+rate.  Expose \(p\) as a governance parameter and you get a continuous knob,
+from equal-weight (maximum premium, maximum turnover) to cap-weight (neither),
+with a proof behind the interpolation instead of a simulation.
 
 *** Phase, not just velocity
 
-"Wait for the turn" is a statement about /phase/: trade when an excursion is
-near the end of its cycle.  The engine currently infers this from the sign of
-a velocity or curvature, which is a one-bit reading of a continuous quantity.
-The analytic-signal construction (a Hilbert transform, cheaply approximated
-by an EMA quadrature pair) yields instantaneous amplitude and phase directly,
-so effort could be a smooth function of how far through the excursion a pair
-actually is.
+"Wait for the turn" is a statement about /phase/: trade when an excursion
+nears the end of its cycle.  The engine infers this from the sign of a
+velocity or a curvature, which is a one-bit reading of a continuous quantity.
+The analytic-signal construction -- a Hilbert transform, approximated cheaply
+by an EMA quadrature pair -- gives instantaneous amplitude and phase
+directly.  Effort could then be a smooth function of how far through its
+excursion a pair actually is.
 
-For genuine periodicity -- and energy and food have real seasonality -- the
-*Goertzel algorithm* computes a single DFT bin with two state variables and
-O(1) work per sample, which is the one FFT-family primitive cheap enough to
-run on-chain unmodified.  Worth it only if a fitted seasonal component turns
-out to be material; worth /testing/ for that reason.
+Energy and food have real seasonality, so genuine periodicity is worth
+detecting.  The *Goertzel algorithm* computes one DFT bin from two state
+variables, at O(1) work per sample.  It is the one FFT-family primitive cheap
+enough to run on-chain unmodified.  It pays only if a fitted seasonal
+component turns out to be material, which is a reason to /test/ for one.
 
 ** What not to do
 
-Two attractive-sounding directions are traps, and the article's own data says
-so.  *Do not chase gross premium*: =curv= and quorum 3 both buy more harvest
-with more turnover, and the whole result of this study is that timing beats
-volume.  And *do not add a non-reverting constituent to sharpen the signal*:
-a machine whose every gear assumes reversion cannot be improved by feeding it
-something built not to revert -- the argument is made in full in /The
-BuckBasket/, and the 2020-25 replay is the measurement.
+Two directions sound attractive and are traps.  The article's own data says
+so.
+
+*Do not chase gross premium.*  =curv= and quorum 3 each buy more harvest with
+more turnover, and the result of this whole study is that timing beats
+volume.
+
+*Do not add a non-reverting constituent to sharpen the signal.*  Every gear
+in this machine assumes reversion, so feeding it something built not to
+revert cannot improve it.  /The BuckBasket/ makes the argument in full, and
+the 2020-25 replay is the measurement.
 
 * Limitations and next increments
 
-- The lazy catch-up is exact under sample-and-hold; a real gap has a price
-  path.  More pokes give higher fidelity at the same amortized price -- and
-  the basket's own activity supplies them precisely when flows (and thus
-  fidelity needs) are high.
-- The director reads whole-pool BUCK reserves; the venue nets out treasury
-  liquidity.  The small bias is irrelevant to hint /ordering/.
-- Windows are governance parameters, seeded from the M2-lag analysis; the
-  model says the premium is flat across 30-180d, so mis-tuning is forgiving.
-- The basket-side consumption (increment 0 wiring in =BuckBasketProRata=,
-  the =rebalanceSource/Sink= pair) is the next contract pass; the director
-  itself, its tests, and the sim keeper are complete.
-- Keeper bounty economics (a few bp of each productive step, paid from
-  treasury) are needed on a public network and are not yet modeled.
+- The lazy catch-up is exact under sample-and-hold, but a real gap has a
+  price path.  More pokes give more fidelity at the same amortized price, and
+  the basket's own activity supplies them exactly when flows are high, which
+  is when fidelity matters most.
+- The director reads whole-pool BUCK reserves, while the venue nets out
+  treasury liquidity.  The bias is small, and it does not affect the /order/
+  of the hints.
+- Windows are governance parameters, seeded from the M2-lag analysis.  The
+  model says the premium is flat from 30 to 180 days, so mis-tuning them
+  costs little.
+- The basket-side consumption is the next contract pass: the increment-0
+  wiring in =BuckBasketProRata=, and the =rebalanceSource/Sink= pair.  The
+  director itself, its tests and the sim keeper are complete.
+- Keeper bounty economics are not modelled yet.  A public network needs them:
+  a few bp of each productive step, paid from the treasury.
 - *The trend-regime pick has no on-chain engine.*  =factor= wins the
-  historical replay and is a Python policy only; the two Solidity engines are
-  =vrate= and =pairs=.  Either the regime split is accepted as a deliberate
-  bet on reversion -- which the basket's whole thesis already is -- or
-  =factor= needs an engine so governance can switch.
+  historical replay, but it exists only as a Python policy: the two Solidity
+  engines are =vrate= and =pairs=.  So either we accept the regime split as a
+  deliberate bet on reversion -- which the basket's whole thesis already is --
+  or =factor= needs an engine, so that governance can switch.
 - The =pairs= basis is redundant (fifteen pairs over five independent modes
   at \(N=6\)); see /Variants worth investigating/.

@@ -27,7 +27,15 @@ UR_ARTIFACT = "alberta_buck/sim/artifacts/UniversalRouter.json"
 E6 = 10 ** 6
 E18 = 10 ** 18
 FEE_USDC = 3000
-FEE_BUCK = 3000         # TOKEN/BUCK pools: 0.30% (direct-mint LP profit)
+# TOKEN/BUCK pools.  0.30% by default, but this is OUR choice and it is not
+# obviously right: these pools exist to serve the BuckBasket, so the fee
+# should be set by what the basket needs, not by pool revenue.  The fee cuts
+# three ways -- it is a cost on the basket's own rebalancing, it is INCOME to
+# the basket as the LP, and it is the gate that decides how small a
+# mispricing an external arb will bother to close (i.e. how tightly the pool
+# tracks the world, which is the basket's whole job as the reference mass).
+# Override to compare: SIM_FEE_BUCK=500 for the 0.05% tier.
+FEE_BUCK = int(os.environ.get("SIM_FEE_BUCK", "3000"))
 FEE_BUCK_UB = 500       # BUCK/USDC pool:   0.05% (gauge-breaking, cheap)
 TICK_SPACING = {3000: 60, 500: 10}
 
@@ -468,11 +476,17 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
         if director_impl == "pairs":
             dir_quorum = int(os.environ.get("DIRECTOR_QUORUM", "4"))
+            # boundaryBp: the no-trade-region form of effort sizing.  0 is
+            # not a placeholder -- it is the measured right answer for a 30bp
+            # venue (the refinement costs 5bp/yr there and only pays above
+            # ~50bp/leg).  Raise it if the pools ever trade expensively.
+            dir_boundary = int(os.environ.get("DIRECTOR_BOUNDARY_BP", "0"))
             director = chain.deploy(
                 "PairsRebalanceDirector", basket.address, gov,
                 (86400, dir_quorum, 500_000_000, dir_deadband * 100_000,
-                 300_000_000, 250_000_000, 50))
-            desc = f"quorum={dir_quorum}/7 kappa=0.5"
+                 300_000_000, 250_000_000, 50, dir_boundary))
+            desc = (f"quorum={dir_quorum}/7 kappa=0.5"
+                    + (f" boundary={dir_boundary}bp" if dir_boundary else ""))
         else:
             dir_window = int(os.environ.get("DIRECTOR_WINDOW", "15"))
             director = chain.deploy(
