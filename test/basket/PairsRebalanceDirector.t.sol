@@ -364,7 +364,7 @@ contract PairsRebalanceDirectorTest is Test {
         dir.setParams(p);
         vm.prank(GOV);
         dir.setParams(p);
-        (, uint8 q,,,,,) = dir.params();
+        (, uint8 q,,,,,,) = dir.params();   // 8 fields since boundaryBp
         assertEq(q, 5);
     }
 
