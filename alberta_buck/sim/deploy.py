@@ -393,6 +393,14 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     FACE = max(2 * dp.target_buck_lp, mint_amt * 12 // 10)
 
     now_ts = w3.eth.get_block("latest")["timestamp"]
+    # A credit only lands where its recipient asked for it, so SimLP has to
+    # name the deployer as an insurer it will accept before the credit can be
+    # issued.  SimLP is a contract and cannot sign, so the opt-in goes through
+    # its exec() passthrough.
+    chain.send(simlp.functions.exec(
+        credit.address,
+        credit.encode_abi("setCreditIssuer", args=[getattr(deployer, "address", deployer), True]),
+    ), sender=deployer)
     cc = credit.functions.createCredit(simlp.address, 0, FACE, 0, 0, 0,
                                        now_ts, 0)              # NONE, premium 0
     chain.send(cc, sender=deployer)

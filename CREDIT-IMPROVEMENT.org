@@ -295,6 +295,34 @@ file is retired.
     =test_burn_returnsTheWholeDepositAcrossPartialReleases=, with
     =test_nonDepreciatingCreditIsUnchanged= as the control.
 
+** D7 Credits could be pushed onto anybody   [FIXED]
+
+   =createCredit= minted an ERC-721 to an address that had never consented,
+   and ERC-721 =_mint= asks the receiver nothing.  A fresh credit grants no
+   headroom -- =activatedValue= is zero -- but it costs its holder gas
+   forever after: =totalCurrentValue= walks =tokenOfOwnerByIndex= over every
+   token they own, and since the limit is read live that walk runs on every
+   outbound transfer from a non-Carrying account.  An attacker could raise a
+   chosen address's transfer cost without bound for the price of the mints.
+
+   Fixed with a per-pair opt-in: =setCreditIssuer(insurer, accepted)=, and
+   =createCredit= reverts with =BuckCredit: insurer not accepted by client=
+   unless it is set.  Revocable, and it governs only new issuance, since
+   credits already held may be backing BUCK.
+
+   The rule is uniform -- naming yourself the insurer does not exempt you.
+   There is no reading of "I am my own insurer" that needs a carve-out, and
+   declining to open one keeps the invariant statable in a line and avoids a
+   hole shaped exactly like D8.
+
+   The gate is an internal =virtual= so =BuckCreditHarness= can stand it down
+   for fixtures whose holders never send a transaction of their own; it is
+   exercised against the production contract in =BuckCreditIssuance.t.sol=.
+
+   One consequence worth naming: a contract that holds credits now needs a
+   way to call =setCreditIssuer=.  The sim's SimLP and agent proxies already
+   have an =exec= passthrough, so they route the opt-in through it.
+
 ** Minor
 
    - =storedLimit= -- the Phase-1a "highest-ever credit limit" ratchet, a
@@ -375,21 +403,37 @@ file is retired.
 
 * Still open
 
-** D7 =createCredit= is permissionless
+** D8 Anyone may be an insurer, so anyone may mint BUCK for free
 
-   Any address may mint a BUCK_CREDIT to any client, naming itself the
-   insurer; =updateCredit= is gated on ~msg.sender == insurer~ but creation
-   is not gated at all, and ERC-721 =_mint= needs no consent from the
-   recipient.  A fresh credit grants no headroom (=activatedValue= is zero)
-   but it does add an iteration to the victim's =totalCurrentValue= walk --
-   which, now that the limit is read live, runs on every outbound transfer
-   from that account.  So an attacker can raise a chosen address's transfer
-   cost without bound for the price of the mints.
+   Found while scoping D7, and it is the more serious of the two by a wide
+   margin.  =createCredit= vets nobody.  A credit's =faceValue= and
+   =premiumRate= are whatever its issuer declares, and a zero-premium credit
+   costs nothing to draw on -- ~poolPrincipal == 0~, so the counter-cyclical
+   funding gate is inapplicable by design.  So one verified account can write
+   itself a policy on an asset it never names and mint against it:
 
-   Blast radius is one account at a time and a Carrying account is immune,
-   but this is the one item here that should close before mainnet.  Options
-   are enumerated under "Credit Enumeration DoS" in the master document;
-   recipient opt-in at =createCredit= is the most direct.
+   #+BEGIN_EXAMPLE
+   mallory issues herself a zero-premium credit, faceValue 1,000,000,000
+   mint(500,000,000)  ->  principal paid  0
+                          spendable       500,000,000 BUCK
+                          transferred on  totalSupply 0 -> 500,000,000
+   #+END_EXAMPLE
+
+   Nothing downstream catches it: =totalCurrentValue= sums whatever credits
+   an account holds without asking who issued them, and the identity layer
+   only establishes that the *minter* is a registered person, not that the
+   *insurer* is good for anything.
+
+   D7's recipient opt-in does not close this and cannot -- the attacker is
+   both insurer and client, so she accepts herself.  Only vetting the insurer
+   closes it.
+
+   The intended shape is deliberately *not* a governance allowlist: issuance
+   stays open to any comer who can demonstrate they are good for the claims
+   -- on-chain solvency (a buffer held, and provably available to the
+   parametric payout trigger) plus a rating.  That system is unbuilt.  Until
+   it exists, BUCK's supply is bounded only by the honesty of everyone
+   holding a registered identity, and this is the blocker before mainnet.
 
 ** Smaller
 

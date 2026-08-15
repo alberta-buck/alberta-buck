@@ -343,6 +343,11 @@ class DirectMintBuckAgent(_DMBase):
 
         now_ts = d.w3.eth.get_block("latest")["timestamp"]
         face = self.SEED_USDC * self.CREDIT_MULTIPLE
+        # The proxy must accept the deployer as an insurer before a credit
+        # can be issued to it; it is a contract, so the opt-in goes through
+        # exec().
+        self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
+            "setCreditIssuer", args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
         d.chain.send(d.credit.functions.createCredit(
             self.proxy.address, 0, face, 0, 0, 0, now_ts, 0))
 

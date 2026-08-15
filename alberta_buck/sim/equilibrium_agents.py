@@ -499,6 +499,9 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         now_ts = d.w3.eth.get_block("latest")["timestamp"]
         per = max(1, face_total // self.N_CREDITS)
         self._token_ids = []
+        # Credits only land where the recipient asked for them.
+        self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
+            "setCreditIssuer", args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
         for _ in range(self.N_CREDITS):
             rcpt = d.chain.send(d.credit.functions.createCredit(
                 self.proxy.address, 0, per, 0, 0, 0, now_ts, 0))
@@ -1056,6 +1059,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self._bind_proxy(d)
         now_ts = d.w3.eth.get_block("latest")["timestamp"]
         per = max(1, face // self.N_CREDITS)
+        self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
+            "setCreditIssuer", args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
         for _ in range(self.N_CREDITS):
             d.chain.send(d.credit.functions.createCredit(
                 self.proxy.address, 0, per, 0, 0, 0, now_ts,

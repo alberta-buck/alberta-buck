@@ -387,13 +387,17 @@ class NotesStack:
         """Grant the issuer BuckCredit and mint BUCK against it."""
         iss = self._addr(self.fx.issuer.addr)
         face = self.fx.face
+        gov_addr = self.gov.address if hasattr(self.gov, "address") else self.gov
+        s0 = self._send_from(
+            self.credit.functions.setCreditIssuer(gov_addr, True),
+            iss, "acceptIssuer")
         fn = self.credit.functions.createCredit(iss, 0, 10 * face, 10 * face, 0, 0, 0, 0)
         token_id = fn.call()
         s1 = self._send_from(fn, self.gov, "createCredit")
         s2 = self._send_from(self.credit.functions.forceActivate(token_id, 10 * face),
                              iss, "activateCredit")
         s3 = self._send_from(self.buck.functions.mint(2 * face), iss, "buck.mint")
-        return [s1, s2, s3]
+        return [s0, s1, s2, s3]
 
     def approve_pool(self, party: Party, amount: int, name: str) -> Step:
         """The identity-bound ``Buck.approve``: re-encrypt the party's

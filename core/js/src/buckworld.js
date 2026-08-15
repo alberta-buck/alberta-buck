@@ -167,6 +167,11 @@ export async function identityApprove(world, from, to, opts = {}) {
  */
 export async function createCredit(world, holder, face, opts = {}) {
   const now = (await world.session.client.getBlock()).timestamp;
+  // A credit only lands where its recipient asked for it: the holder names
+  // the issuing account as one it accepts before the credit can be issued.
+  await world.session.send(world.credit, "setCreditIssuer",
+    [world.session.account.address, true],
+    { tag: "world:acceptIssuer", account: holder.account });
   await world.session.send(world.credit, "createCredit",
     [holder.account.address, opts.assetClass ?? 0, face,
      opts.floor ?? 0n, opts.depType ?? 0, opts.depRate ?? 0,

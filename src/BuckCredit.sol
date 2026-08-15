@@ -118,7 +118,24 @@ contract BuckCredit is ERC721Enumerable {
     ///         calls Buck -- this is an authorisation record, nothing more.
     address public buck;
 
+    // ── Recipient opt-in ────────────────────────────────────────────
+    //
+    // A credit only lands where its recipient asked for it.  Without this,
+    // `createCredit` mints an ERC-721 to an address that never consented --
+    // and a credit costs its holder gas forever after, because
+    // `totalCurrentValue` walks every token they own on every outbound BUCK
+    // transfer.  An attacker could raise a chosen address's transfer cost
+    // without bound for the price of the mints.
+    //
+    // The rule is uniform: it applies to self-issuance too.  There is no
+    // reading of "I am my own insurer" that needs a carve-out, and declining
+    // to open one keeps the invariant a reader can state in one line.
+
+    /// @notice Insurers a client is willing to receive credits from.
+    mapping(address => mapping(address => bool)) public acceptsCreditFrom;
+
     // --- Events ---
+    event CreditIssuerSet(address indexed client, address indexed insurer, bool accepted);
     event CreditCreated(uint256 indexed tokenId, address indexed insurer,
                         address indexed owner, uint256 faceValue);
     event CreditUpdated(uint256 indexed tokenId, address indexed insurer,
@@ -173,6 +190,23 @@ contract BuckCredit is ERC721Enumerable {
         );
     }
 
+    /// @notice Accept, or stop accepting, credits issued by `insurer`.
+    /// @dev    Revocable, and it only governs *new* issuance: credits already
+    ///         held are unaffected, since they may be backing BUCK.
+    function setCreditIssuer(address insurer, bool accepted) external {
+        acceptsCreditFrom[msg.sender][insurer] = accepted;
+        emit CreditIssuerSet(msg.sender, insurer, accepted);
+    }
+
+    /// @dev The opt-in gate.  Virtual so `BuckCreditHarness` can stand it
+    ///      down for fixtures whose holders never send a transaction of their
+    ///      own; the gate itself is exercised against this contract, not the
+    ///      harness, in `BuckCreditIssuance.t.sol`.
+    function _requireAccepted(address client) internal view virtual {
+        require(acceptsCreditFrom[client][msg.sender],
+                "BuckCredit: insurer not accepted by client");
+    }
+
     /// @notice Insurer creates a new BUCK_CREDIT NFT for a client.
     /// @dev faceValue / depreciationFloor are accepted as uint256 for ABI
     ///      ergonomics but must fit in BuckTypes.MAX_BALANCE (uint80 cap)
@@ -187,6 +221,7 @@ contract BuckCredit is ERC721Enumerable {
         uint48 depStartAt,
         uint32 premiumRate
     ) external returns (uint256) {
+        _requireAccepted(client);
         require(depreciationFloor <= faceValue, "floor > face");
 
         uint256 tokenId = _nextTokenId++;

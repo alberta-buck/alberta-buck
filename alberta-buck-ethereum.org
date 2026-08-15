@@ -137,8 +137,11 @@ EVM precompiles (pairings for =IdentityRegistry=, modular arithmetic for the
 
 The flow is:
 
-1. An *insurer* mints a =BUCK_CREDIT= NFT for a client's asset, setting face value, depreciation
-   schedule, and =premiumRate= (annual basis points of activated coverage).
+1. A *client* names an insurer it will accept credits from (=setCreditIssuer=), and that
+   *insurer* mints a =BUCK_CREDIT= NFT for the client's asset, setting face value, depreciation
+   schedule, and =premiumRate= (annual basis points of activated coverage).  A credit only lands
+   where its recipient asked for it -- see [[#unvetted-insurers][Unvetted Insurers]] for what that
+   does and, more importantly, does not protect against.
 2. There is no separate activation step, and no public =BuckCredit.activate=.  Coverage is
    activated only inside =Buck.mint=, atomically with the insurance principal that funds it --
    see [[#activation][Activation = Mint, Deactivation = Burn]].  While coverage is live the credit
@@ -204,6 +207,11 @@ allocations.  All monetary fields are in 6-decimal BUCK-equivalent units (USDC-c
 ** Data Model
 
 Fields group by mutability:
+
+Issuance is opt-in per (client, insurer) pair: =createCredit= reverts unless the client has
+called =setCreditIssuer(insurer, true)=.  Anyone may still /be/ an insurer -- that is the open
+question in [[#unvetted-insurers][Unvetted Insurers]] -- but nobody can put a credit in your hands
+uninvited.
 
 - *Immutable at mint*: =insurer= (the address allowed to update this token), =assetClass=,
   =createdAt=.
@@ -1737,38 +1745,60 @@ computing off the unchanged TWAP.  When/if Chainlink basket feeds are adopted la
 Chainlink branch of =_getBasketCost= must verify =updatedAt= is within an acceptable window
 (~1 hour) and revert if stale.
 
-** Credit Enumeration DoS
+** Unvetted Insurers -- the open hole
+   :PROPERTIES:
+   :CUSTOM_ID: unvetted-insurers
+   :END:
 
-This is the sharpest remaining edge in the system, and it is worth stating without softening.
+*This is the one thing on this page that must close before mainnet, and it is not closed.*
 
-=createCredit= is *permissionless*: any address may mint a BUCK_CREDIT to any client, naming
-itself the insurer.  There is no insurer allowlist -- =updateCredit= is gated on
-~msg.sender == insurer~, but creation is not gated at all.  Recipients cannot refuse, since
-ERC-721 =_mint= needs no consent from the receiver.
+=createCredit= is permissionless.  Any address may issue a BUCK_CREDIT naming itself the
+insurer; there is no vetting of any kind.  =updateCredit= is gated on ~msg.sender == insurer~,
+but becoming an insurer in the first place is not gated at all.
 
-A freshly created credit is harmless in value terms: =activatedValue= is zero, so it contributes
-zero to =totalCurrentValue= and grants no headroom.  It is not harmless in gas terms.
-=totalCurrentValue= walks =tokenOfOwnerByIndex= over /every/ token the account owns before
-discovering that each contributes nothing, and since the credit limit is now
-[[#credit-limit][read live]], that walk runs on every outbound transfer from a non-Carrying account --
-not only at mint.  So an attacker can spam a chosen address with worthless credits and raise that
-address's transfer cost without bound.
+The consequence is unbacked issuance, not merely a nuisance.  A credit's =faceValue= and
+=premiumRate= are whatever its issuer says they are, and a zero-premium credit costs nothing to
+draw on -- ~poolPrincipal == 0~, so the counter-cyclical funding gate is inapplicable by design.
+So a single verified account can write itself a policy on an asset it never names, and mint
+against it:
 
-The blast radius is one account at a time: nobody else's balance reads the victim's credits, and
-a Carrying account never enters the credit path.  But "you can make a specific user's token
-unusable for the price of the mints" is a real griefing vector, and it is the one thing on this
-page that should be closed before mainnet.  The candidates, roughly in order of directness:
+#+BEGIN_SRC text
+mallory issues herself a zero-premium credit, faceValue 1,000,000,000
+mint(500,000,000)   ->  principal paid   0
+                        spendable        500,000,000 BUCK
+                        transferred on   totalSupply 0 -> 500,000,000
+#+END_SRC
 
-- *Recipient opt-in at =createCredit=* -- the client must have registered an intent, or the
-  insurer must be on a per-client allowlist.  Closes it completely; costs a handshake.
-- *An insurer allowlist* -- governance-gated creation, mirroring =trustedIssuers= in the
-  registry.  Closes it, at the cost of a permissioned credit market.
-- *A cap on credits per account* (e.g. 20) -- bounds the damage but hands the attacker a way to
-  fill the victim's quota with junk.
-- *Minimum face value* -- raises the price of the attack without bounding it.
-- *Off-chain aggregation with a Merkle proof* -- removes the walk entirely; much larger change.
+Nothing downstream catches it.  =totalCurrentValue= sums whatever credits an account holds
+without asking who issued them, and the identity layer only establishes that the /minter/ is a
+registered person -- not that the /insurer/ is good for anything.
 
-None are wired in yet; the relevant test suites cap NFT counts at small N.
+The recipient opt-in below does not close this, and cannot: the attacker is both insurer and
+client, so she accepts herself.  Only vetting the insurer closes it.  The intended shape is
+deliberately *not* a governance allowlist -- issuance stays open to anyone who can demonstrate
+they are good for the claims: on-chain solvency (a buffer held, and provably available to the
+parametric payout trigger) plus a rating.  That system is unbuilt.  Until it exists, BUCK's
+supply is bounded only by the honesty of everyone holding a registered identity.
+
+** Recipient Opt-In
+
+A credit only lands where its recipient asked for it.  A client calls
+=setCreditIssuer(insurer, true)= before that insurer may issue to them; the flag is per-pair,
+revocable, and governs only new issuance, since credits already held may be backing BUCK.  The
+rule is uniform -- naming yourself the insurer does not exempt you -- which keeps the invariant
+statable in one line and declines to open a carve-out shaped exactly like the attack above.
+
+What this closes is the gas-griefing vector.  A credit costs its holder gas forever after:
+=totalCurrentValue= walks =tokenOfOwnerByIndex= over /every/ token the account owns, and since
+the credit limit is [[#credit-limit][read live]], that walk runs on every outbound transfer from a
+non-Carrying account.  Without the opt-in an attacker could raise a chosen address's transfer
+cost without bound for the price of the mints, and the victim could not refuse delivery --
+ERC-721 =_mint= needs no consent from the receiver.  A holder can still dispose of an unwanted
+credit by transferring it away, since an unactivated credit is freely transferable, but that is
+a remedy they should never have had to reach for.
+
+It is not a substitute for vetting.  It bounds who may put a credit in your hands; it says
+nothing about whether that credit is worth anything.
 
 ** Insurer Trust
 
@@ -1779,11 +1809,12 @@ borrowing capacity against that asset, and -- via the depreciation schedule -- l
 credit limit decline over time.  A holder pushed below their limit that way is in the supported
 [[#underwater][underwater]] state, not a defaulted one.
 
-That leaves the residual insurer risks: refusing to honour a claim, and setting a punitive
-=premiumRate= on new coverage.  Governance can blacklist abusive insurers, and multi-insurer
-market discipline is the natural check.  Time-locks on insurer updates (e.g. 7-day delay for
-reductions > 20 %) remain a future enhancement.
-
+That leaves the residual risks from an insurer who /has/ been vetted: refusing to honour a claim,
+and setting a punitive =premiumRate= on new coverage.  Multi-insurer market discipline is the
+natural check, and a rating that responds to claim behaviour is the intended mechanism.
+Time-locks on insurer updates (e.g. 7-day delay for reductions > 20 %) remain a future
+enhancement.  For the prior question -- how an insurer becomes vetted at all -- see
+[[#unvetted-insurers][Unvetted Insurers]].
 ** Reentrancy
 
 Every state-mutating entry point on =Buck= carries a transient-storage mutex; the design and the
