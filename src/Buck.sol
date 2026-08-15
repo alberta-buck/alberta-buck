@@ -76,12 +76,8 @@ contract Buck is IERC20, IERC20Metadata {
     uint256 internal constant POOL_ROI_INV       = 10;                  // 10% assumed annual ROI
 
     /// @dev AccountState.flags bit 0: this account's demurrage is routed to
-    ///      `demurragePayer[account]`.
+    ///      `demurragePayer[account]`.  The only flag the hot path tests.
     uint16  internal constant FLAG_SPONSORED     = 0x0001;
-    /// @dev AccountState.flags bits 1..15 hold the number of accounts that
-    ///      name this one as their demurrage payer.
-    uint16  internal constant SPONSEE_SHIFT      = 1;
-    uint16  internal constant MAX_SPONSEES       = 0x7FFF;
 
     // ---- reentrancy guard ---------------------------------------------------
     //
@@ -141,15 +137,16 @@ contract Buck is IERC20, IERC20Metadata {
     //
     //   flags        uint16   bit 0     FLAG_SPONSORED -- this account's
     //                                   demurrage routes to demurragePayer[a].
-    //                         bits 1-15 sponsee count -- how many accounts
-    //                                   name THIS account as their payer.
-    //                                   Non-zero forbids being sponsored in
-    //                                   turn (no payer chains).
+    //                         bits 1-15 reserved.
     //
-    //                         Both live in the slot the transfer path already
-    //                         loads and stores, so testing them is free: an
-    //                         account that never opts in pays nothing for the
-    //                         feature.  Note this is deliberately NOT where a
+    //                         This word is scarce: it rides in the slot the
+    //                         transfer path already loads and stores, which
+    //                         is exactly what makes a bit here free to test
+    //                         and therefore worth spending only on hot-path
+    //                         dispatch.  Cold-path bookkeeping belongs in its
+    //                         own slot -- the count of accounts a payer
+    //                         carries lives in `sponseeCount`, not here.
+    //                         Note this is also deliberately NOT where a
     //                         reentrancy guard lives -- see `_entered`.
 
     struct AccountState {
@@ -272,6 +269,13 @@ contract Buck is IERC20, IERC20Metadata {
     /// @notice Pending election: `a` has named this account, which has not
     ///         yet accepted.  Cleared on accept.
     mapping(address => address) public demurragePayerRequest;
+
+    /// @notice How many accounts name `a` as their demurrage payer.  Touched
+    ///         only when a delegation is armed or released, so it lives here
+    ///         rather than in the packed flags word: a non-zero count is what
+    ///         makes `a` a payer, which is a question only those two cold
+    ///         paths ever ask.  No second flag bit is needed for it.
+    mapping(address => uint32) public sponseeCount;
 
     // ---- premium / mutual-insurance pool model -----------------------------
     //
@@ -504,11 +508,6 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- delegated demurrage (fee payer) API -------------------------------
 
-    /// @notice Number of accounts that name `a` as their demurrage payer.
-    function sponseeCount(address a) public view returns (uint256) {
-        return uint256(_state[a].flags >> SPONSEE_SHIFT);
-    }
-
     /// @notice True if `a`'s demurrage is being carried by another account.
     function isSponsored(address a) external view returns (bool) {
         return _state[a].flags & FLAG_SPONSORED != 0;
@@ -570,17 +569,13 @@ contract Buck is IERC20, IERC20Metadata {
         _crystallize(msg.sender);
 
         AccountState memory as_ = _state[account];
-        require(as_.flags & FLAG_SPONSORED == 0,       "BUCK: already sponsored");
-        require(as_.flags >> SPONSEE_SHIFT == 0,       "BUCK: account is a payer");
-        AccountState memory ps = _state[msg.sender];
-        require(ps.flags & FLAG_SPONSORED == 0,        "BUCK: payer is sponsored");
-        uint16 n = ps.flags >> SPONSEE_SHIFT;
-        require(n < MAX_SPONSEES,                      "BUCK: payer at capacity");
+        require(as_.flags & FLAG_SPONSORED == 0, "BUCK: already sponsored");
+        require(sponseeCount[account] == 0,      "BUCK: account is a payer");
+        require(_state[msg.sender].flags & FLAG_SPONSORED == 0, "BUCK: payer is sponsored");
 
         as_.flags |= FLAG_SPONSORED;
         _state[account] = as_;
-        ps.flags = (ps.flags & FLAG_SPONSORED) | uint16((n + 1) << SPONSEE_SHIFT);
-        _state[msg.sender] = ps;
+        sponseeCount[msg.sender] += 1;
 
         demurragePayer[account]        = msg.sender;
         demurragePayerRequest[account] = address(0);
@@ -604,12 +599,8 @@ contract Buck is IERC20, IERC20Metadata {
         as_.flags &= ~FLAG_SPONSORED;
         _state[account] = as_;
 
-        AccountState memory ps = _state[p];
-        uint16 n = ps.flags >> SPONSEE_SHIFT;
-        if (n != 0) {
-            ps.flags = (ps.flags & FLAG_SPONSORED) | uint16((n - 1) << SPONSEE_SHIFT);
-            _state[p] = ps;
-        }
+        uint32 n = sponseeCount[p];
+        if (n != 0) sponseeCount[p] = n - 1;
 
         demurragePayer[account] = address(0);
         emit DemurragePayerCleared(account, p);
