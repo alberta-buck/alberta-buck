@@ -60,6 +60,7 @@ def test_rebalancing_sim_plot():
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
 
     d = json.loads(DATA.read_text())
     names = d["tokens"]
@@ -70,7 +71,7 @@ def test_rebalancing_sim_plot():
     def col(key, t):
         return [f.get(key, [])[t] for f in fr]
 
-    fig, axes = plt.subplots(6, 1, figsize=(13, 21), sharex=True)
+    fig, axes = plt.subplots(8, 1, figsize=(13, 28), sharex=True)
 
     # buckUsd = USDC-micro per 1 BUCK from the floating BUCK/USDC pool.
     bu = [f.get("buckUsd", 0) for f in fr]
@@ -173,45 +174,190 @@ def test_rebalancing_sim_plot():
     ax.legend(handles=handles5, loc="upper left", fontsize=7)
     ax.set_title("Basket NAV, outstanding, treasury BUCK & share")
 
-    # ---- Panel 6: BuckBasket investment ROI -------------------------- #
+    # ---- Panel 6: BUCK_K controller ---------------------------------- #
+    #
+    # Does the value-balancing machinery actually reach its setpoint in this
+    # regime?  The controller is
+    #
+    #     error     = 1.0 - basketValueInBuck          (setpoint is 1.0 BUCK)
+    #     rawOutput = 1.0 + P*Kp + I*Ki + D*Kd         (all /UNIT)
+    #     buckK     = clamp(rawOutput, buckKMin, buckKMax)
+    #
+    # so the pane needs the process variable, the lever, and which PID term
+    # is moving it.  P is plotted on the left axis as a fraction because it
+    # *is* the error -- P == 1 - basketValueInBuck exactly -- so it belongs on
+    # the same dimensionless scale as the quantity it is derived from, where
+    # the reader can see it close (or fail to close) the gap to the setpoint.
+    #
+    # I and D go on the right axis in their own units: I accumulates
+    # ppm-seconds and is what winds a railed controller deep into its clamp,
+    # D is ppm/second.  Once buckK sits on a rail the lever tells you nothing
+    # more, and only the integral shows how far past the rail the controller
+    # has wound -- i.e. how long a reversal would take to unwind.
+    ax = axes[5]
+    handles6 = []
+    basket_val = [f.get("basketVal", 0) / 1e18 for f in fr]
+    k = [f.get("buckK", 0) / 1e18 for f in fr]
+    # P is stored in ppm of fractional error; show it as a fraction.
+    p_frac = [f.get("pid_p", 0) / 1e6 for f in fr]
+
+    l1, = ax.plot(days, basket_val, color="tab:blue", linewidth=1.5,
+                  label="basketValueInBuck (process variable)")
+    handles6.append(l1)
+    l2, = ax.plot(days, k, color="tab:green", linewidth=1.8,
+                  label="buckK (lever)")
+    handles6.append(l2)
+    l3, = ax.plot(days, p_frac, color="tab:purple", linewidth=1.0,
+                  linestyle="--", label="P = error = 1 - basketValue")
+    handles6.append(l3)
+    ax.axhline(1.0, color="black", alpha=0.35, linewidth=0.9, linestyle="-.")
+    ax.axhline(0.0, color="black", alpha=0.2, linewidth=0.8)
+    ax.annotate("setpoint 1.0", xy=(0.005, 1.0), xycoords=("axes fraction", "data"),
+                fontsize=6, color="black", alpha=0.6, va="bottom")
+    ax.set_ylabel("BUCK_K / basketValueInBuck / error")
+    ax.grid(True, alpha=0.3)
+
+    ax2 = ax.twinx()
+    i_term = [f.get("pid_i", 0) for f in fr]
+    d_term = [f.get("pid_d", 0) for f in fr]
+    l4, = ax2.plot(days, i_term, color="tab:red", linewidth=1.2,
+                   linestyle=":", label="I (integral, ppm*s)")
+    handles6.append(l4)
+    if any(v != 0 for v in d_term):
+        l5, = ax2.plot(days, d_term, color="tab:brown", linewidth=1.0,
+                       linestyle=":", label="D (derivative, ppm/s)")
+        handles6.append(l5)
+    else:
+        # A flat-zero D is itself a finding: no derivative action is firing.
+        handles6.append(Line2D([], [], color="tab:brown", linestyle=":",
+                               label="D = 0 throughout (no derivative action)"))
+    ax2.set_ylabel("PID integral (ppm*s)", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+
+    ax.legend(handles=handles6, loc="upper left", fontsize=7)
+    railed = sum(1 for v in k if v <= 0.0)
+    suffix = (f"  --  buckK railed at 0 for {railed}/{len(k)} days"
+              if railed else "")
+    ax.set_title("BUCK_K controller: setpoint tracking and PID state" + suffix)
+
+    # ---- Panel 7: what BUCK_K can actually reach, and director duty --- #
+    #
+    # Read directly under the controller pane: it shows why K moves the way
+    # it does.  BUCK enters circulation by two routes with very different
+    # relationships to the controller.
+    #
+    #   dmOutstanding  BuckBasket direct-mint, backed by deposited TOKEN.
+    #                  Buck.mintFromBasket never consults creditLimit, so
+    #                  BUCK_K has no lever on this at all.
+    #   residual       supply - dmOutstanding: the credit-backed remainder,
+    #                  the only part creditLimit -- and therefore BUCK_K --
+    #                  gates.
+    #
+    # If the residual is flat while supply grows, the controller is pushing
+    # on a channel that is not carrying the growth, and no amount of K
+    # movement will close the error.
+    ax = axes[6]
+    handles7 = []
+    supply = [f.get("supply", 0) / E6 for f in fr]
+    dmo = [f.get("dmOutstanding", 0) / E6 for f in fr]
+    residual = [s - o for s, o in zip(supply, dmo)]
+
+    l1, = ax.plot(days, supply, color="tab:blue", linewidth=1.6,
+                  label="BUCK totalSupply")
+    handles7.append(l1)
+    l2, = ax.plot(days, dmo, color="tab:orange", linewidth=1.3, linestyle="--",
+                  label="basket direct-mint (BUCK_K has no lever)")
+    handles7.append(l2)
+    l3, = ax.plot(days, residual, color="tab:green", linewidth=1.5,
+                  label="credit-backed residual (the only part BUCK_K gates)")
+    handles7.append(l3)
+    ax.set_ylabel("BUCK")
+    ax.grid(True, alpha=0.3)
+
+    ax2 = ax.twinx()
+    pokes = [f.get("directorPokes", 0) for f in fr]
+    dtrades = [f.get("directorTrades", 0) for f in fr]
+    l4, = ax2.plot(days, pokes, color="tab:red", linewidth=1.0, linestyle=":",
+                   label="director pokes (cumulative)")
+    handles7.append(l4)
+    l5, = ax2.plot(days, dtrades, color="tab:purple", linewidth=1.2,
+                   label="director trades (cumulative)")
+    handles7.append(l5)
+    ax2.set_ylabel("director pokes / trades", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+
+    duty = (100.0 * dtrades[-1] / pokes[-1]) if pokes and pokes[-1] else 0.0
+    ax.legend(handles=handles7, loc="upper left", fontsize=7)
+    ax.set_title("BUCK supply by backing, and rebalance-director duty cycle"
+                 f"  --  director acted on {dtrades[-1]}/{pokes[-1]} pokes "
+                 f"({duty:.1f}%)")
+
+    # ---- Panel 8: BuckBasket investment ROI -------------------------- #
     #
     # Current sim accounting is day-0 value based: DirectMint agents invest
     # commodity TOKEN, receive BuckBasket receipts, and later redeem TOKEN.
     # This is useful for diagnosing the present commodity-depositor sim, but
     # a later idle-BUCK savings-account model should add receipt claim value,
     # BUCK demurrage avoided, and current BUCK/USD mark-to-market fields.
-    ax = axes[5]
-    invested = [f.get("dmTotalInvested", 0) for f in fr]
+    ax = axes[7]
 
-    def pct_of_invested(key):
-        vals = []
-        for f, inv in zip(fr, invested):
-            vals.append(100.0 * f.get(key, 0) / inv if inv else 0.0)
-        return vals
+    # Two things are needed to state a return: a profit and the capital-time
+    # that earned it.  Only one of them is currently sound.
+    #
+    # CAPITAL-TIME is sound.  `dmOutstanding` is the principal actually
+    # deployed in the basket at each instant, so integrating it over the run
+    # gives dollar-days, and APR = profit / dollar-days * 365.
+    #
+    # `directMintPnl` is NOT a profit.  It is
+    # `_agent_value(now) - _agent_value(day 0)`, and `_agent_value` counts a
+    # DirectMint agent's basket TOKEN and its deposit stake but NOT the USDC
+    # it spends to buy them.  The agents start in USDC and buy TOKEN, so every
+    # deposit moves value from an uncounted bucket into a counted one and
+    # books it as gain.  The tell is in the data: the figure tracks the
+    # *number* of deposits (a near-constant ~79% of each one) while deployed
+    # capital is flat or falling -- profit that grows with transaction count
+    # and not with capital or time.  That constant is also the whole reason
+    # the old "ROI" curve sat at ~80%: 79% was a property of the metric, not
+    # a result.  Tracked in the sim notes; until it is fixed the line is
+    # plotted greyed and labelled, not used for a headline.
+    #
+    # `treasuryBuck` IS a real profit: BUCK actually retained by the basket
+    # from redeemed receipts.  It carries the headline.
+    buck_usd0 = (bu[0] / 1e6) if bu and bu[0] else 1.0
 
-    dm_roi = pct_of_invested("directMintPnl")
-    treasury_roi = [
-        100.0 * treasury_buck(f) / inv if inv else 0.0
-        for f, inv in zip(fr, invested)
-    ]
-    total_roi = [
-        100.0 * (
-            f.get("directMintPnl", 0) + treasury_buck(f)
-        ) / inv if inv else 0.0
-        for f, inv in zip(fr, invested)
-    ]
+    dollar_days, acc = [], 0.0
+    prev_day = days[0] if days else 0
+    for f, day in zip(fr, days):
+        dt = max(0, day - prev_day)
+        acc += (f.get("dmOutstanding", 0) / E6) * buck_usd0 * E6 * dt
+        dollar_days.append(acc)
+        prev_day = day
+
+    def apr(series):
+        return [100.0 * 365.0 * v / dd if dd > 0 else 0.0
+                for v, dd in zip(series, dollar_days)]
+
+    treasury_apr = apr([treasury_buck(f) for f in fr])
+    dm_apr = apr([f.get("directMintPnl", 0) for f in fr])
+
     ax.axhline(0, color="black", alpha=0.25, linewidth=0.8)
-    ax.plot(days, dm_roi, color="tab:blue", linewidth=1.4,
-            label="DirectMint sim-accounting ROI")
-    ax.plot(days, treasury_roi, color="tab:green", linewidth=1.2,
-            linestyle="--", label="treasury retained / invested")
-    ax.plot(days, total_roi, color="tab:purple", linewidth=1.0,
-            linestyle=":", label="DirectMint + treasury ROI")
-    ax.set_ylabel("ROI (%)")
+    l1, = ax.plot(days, treasury_apr, color="tab:green", linewidth=1.8,
+                  label="treasury APR on capital-at-risk (retained basket profit)")
+    ax.set_ylabel("APR (%)")
     ax.set_xlabel("Day")
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper left", fontsize=7)
-    ax.set_title("BuckBasket investment ROI (current DirectMint accounting)")
+
+    ax2 = ax.twinx()
+    l2, = ax2.plot(days, dm_apr, color="tab:gray", linewidth=1.0, linestyle="--",
+                   label="directMintPnl APR -- ARTIFACT: counts USDC->TOKEN "
+                         "conversion as gain, not a return")
+    ax2.set_ylabel("artifact APR (%)", color="tab:gray")
+    ax2.tick_params(axis="y", labelcolor="tab:gray")
+
+    ax.legend(handles=[l1, l2], loc="upper left", fontsize=7)
+    ax.set_title("BuckBasket return on capital-at-risk  --  treasury "
+                 f"{treasury_apr[-1]:.2f}% APR on "
+                 f"${dollar_days[-1] / E6 / 1e6:,.0f}M dollar-days")
 
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -247,8 +393,11 @@ def test_rebalancing_sim_plot():
     print(f"  Treasury BUCK: {tb_final:,.2f}  "
           f"share of NAV: {ts_final:.2f}%  "
           f"treasury ROI: {treasury_roi_final:.2f}%")
-    print(f"  DirectMint sim-accounting ROI: {dm_roi_final:.2f}%  "
-          f"DirectMint+treasury ROI: {total_roi_final:.2f}%")
+    print(f"  treasury return: {treasury_apr[-1]:.2f}% APR on "
+          f"${dollar_days[-1] / E6:,.0f} dollar-days of capital-at-risk")
+    print(f"  [directMintPnl {dm_roi_final:.2f}% of gross deposits / "
+          f"{dm_apr[-1]:.2f}% APR -- ARTIFACT: _agent_value omits the USDC "
+          f"spent, so each deposit books ~79% of itself as gain]")
     print(f"  direct-mint entries: {dm_entries}  exits: {dm_exits}")
     print(f"  basket NAV: {nav_final:,.2f} BUCK  "
           f"outstanding: {out_final:,.2f} BUCK  "
