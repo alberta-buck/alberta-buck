@@ -190,8 +190,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
-    # activateFromBuck (which requires msg.sender == buck) and so NFT
-    # mutations invalidate Buck's credit-limit cache via onCreditMutation.
+    # activateFromBuck (which requires msg.sender == buck).  The wiring is an
+    # authorisation record only: BuckCredit never calls back into Buck.
     chain.send(credit.functions.setBuck(buck.address), sender=deployer)
 
     v3f = chain.deploy("UniswapV3Factory")

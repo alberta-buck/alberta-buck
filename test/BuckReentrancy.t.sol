@@ -184,23 +184,17 @@ contract BuckReentrancyTest is Test {
             "no overstatement window -- guard would be belt-and-braces only");
     }
 
-    /// @notice The guard must NOT block BuckCredit's own callback into Buck.
-    ///         `onCreditMutation` is invoked from inside activateFromBuck,
-    ///         which is itself inside a guarded mint; guarding it would
-    ///         deadlock every mint in the system.
-    function test_guard_doesNotBlockCreditMutationHook() public {
-        // Unarmed: the mint runs the ordinary path, including the hook that
-        // production BuckCredit fires from inside activateFromBuck.
+    /// @notice The guard has no exemptions, and needs none: BuckCredit does
+    ///         not call back into Buck at all.  An ordinary mint, which
+    ///         crosses into BuckCredit and returns, runs clean under it.
+    function test_guard_hasNoExemptionsAndDoesNotDeadlock() public {
         uint256[] memory ids = new uint256[](1);
         attacker.doMint(900e6, ids);
         assertEq(buck.balanceOf(address(attacker)), 900e6, "ordinary mint must still work");
 
-        // And the hook itself is callable while a guarded call is not in
-        // flight, from the registered credit contract only.
-        vm.prank(address(credit));
-        buck.onCreditMutation(address(attacker), address(0));
-
-        vm.expectRevert("BUCK: not credit");
-        buck.onCreditMutation(address(attacker), address(0));
+        // A second guarded call in the same transaction is fine -- the lock
+        // is released on return, not held for the transaction.
+        attacker.doMint(90e6, ids);
+        assertEq(buck.balanceOf(address(attacker)), 990e6, "and again");
     }
 }

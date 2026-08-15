@@ -16,9 +16,15 @@ import {IdentityRegistry} from "./IdentityRegistry.sol";
 /// Jubilee receives system-level demurrage credit via direct slot writes
 /// (`totalSupply` is NOT mutated by demurrage -- only by user mint / burn).
 ///
-/// Mint/burn-side bookkeeping (storedLimit, mintsBacked, allowances, receipt
-/// fragments) lives in separate maps because it's touched per-mint, not per
-/// transfer.  This keeps the hot path to one SSTORE per side per transfer.
+/// Mint/burn-side bookkeeping (mintsBacked, allowances, receipt fragments)
+/// lives in separate maps because it's touched per-mint, not per transfer.
+/// This keeps the hot path to one SSTORE per side per transfer.
+///
+/// Nothing derived is stored.  An account's credit limit, and therefore its
+/// balanceOf, is recomputed from live BuckCredit state on every read: it is
+/// meant to track the insured assets behind it as they are acquired,
+/// reappraised and depreciated, and a cached copy of a number whose inputs
+/// live in two other contracts is a wrong balance waiting to happen.
 interface IBuckK {
     function currentBuckK() external view returns (uint256);
     /// @dev State-changing accessor.  Runs a PID cycle if `dT` has elapsed,
@@ -101,14 +107,13 @@ contract Buck is IERC20, IERC20Metadata {
     // anything.
     bool private transient _entered;
 
-    /// @dev Blocks reentry into any BUCK state-mutating entry point.  NOT
-    ///      applied to `onCreditMutation`, which is the *legitimate* reentrant
-    ///      call: BuckCredit invokes it from inside the very
-    ///      activateFromBuck / deactivateFromBuck calls that mint and burn
-    ///      make.  It carries its own `msg.sender == buckCredit` gate and
-    ///      only invalidates a cache.
+    /// @dev Blocks reentry into any BUCK state-mutating entry point.  Since
+    ///      the credit-limit cache and its `onCreditMutation` hook were
+    ///      removed, BuckCredit no longer calls back into Buck at all and the
+    ///      guard has no exemption to make for it: the call graph between the
+    ///      two contracts runs one way.
     ///
-    ///      Nor is it applied to the plain 2-arg `approve`, which touches only
+    ///      It is not applied to the plain 2-arg `approve`, which touches only
     ///      the allowance map and calls nothing: re-entering it grants an
     ///      attacker no capability a separate transaction would not, and it is
     ///      the single hottest entry point for router / Permit2 integration.
@@ -164,8 +169,20 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- mint-side bookkeeping (rare path) ---------------------------------
 
-    /// @notice Highest-ever credit limit observed for this account.
-    mapping(address => uint256) public storedLimit;
+    /// @notice The account that carries `a`'s demurrage, once both sides have
+    ///         consented.  Zero when `a` pays its own.  See the delegated
+    ///         demurrage section below for the mechanism; the other two fields
+    ///         it needs are declared there.
+    /// @dev    Housed here, out of order, to reclaim the slot the Phase-1a
+    ///         `storedLimit` ratchet used to occupy -- a highest-ever credit
+    ///         limit per account, from before the limit was read live.
+    ///         Nothing had written it in a long time, but it was still
+    ///         exported as a public getter that always answered zero.
+    ///         Reusing its slot retires it without shifting `mintsBacked` (4)
+    ///         or `_receiptFragments` (5), which several test fixtures reach
+    ///         by hard-coded index via `vm.store`.
+    mapping(address => address) public demurragePayer;
+
     /// @notice Outstanding BUCK coverage backed by a given BuckCredit NFT.
     mapping(uint256 => uint256) public mintsBacked;
     /// @dev keccak256(E_to) per (from, to) from approve-time CP receipts.
@@ -199,25 +216,11 @@ contract Buck is IERC20, IERC20Metadata {
     // address.  Once set, the field is immutable in effect (further
     // setBasket calls revert).
     //
-    // Placed last in the storage layout so the existing slot positions of
-    // _state / _totalSupply / _allowances / storedLimit / mintsBacked /
-    // _receiptFragments / _jubileeLastUpdate (which tests reach via
-    // `vm.store(..., slot, ...)`) remain unchanged.
+    // Placed after the maps above.  Several tests reach _state (slot 0),
+    // _totalSupply (1), _allowances (2) and _receiptFragments (5) by
+    // hard-coded index via `vm.store`; anything added from here on leaves
+    // those alone.
     address public basket;
-
-    // ---- Credit-limit cache ------------------------------------------------
-    //
-    // creditLimit(a) = totalCurrentValue(a) * currentBuckK / 1e18 -- live sum
-    // over the holder's BuckCredit NFTs.  Caching per block avoids re-scanning
-    // NFTs in the (common) case where the same account makes multiple
-    // transfers in one block.  BuckCredit invalidates the cache via the
-    // onCreditMutation hook on every NFT mint / burn / transfer / activate /
-    // updateCredit.
-    //
-    // Appended after `basket` so existing slot positions are preserved (see
-    // the `vm.store` consumers enumerated in the Phase-1 plan).
-    mapping(address => uint256) public creditLimitCache;
-    mapping(address => uint64)  public creditLimitBlock;
 
     // ---- delegated demurrage (fee payer) -----------------------------------
     //
@@ -262,9 +265,8 @@ contract Buck is IERC20, IERC20Metadata {
     //
     // Appended last so every pre-existing slot index is unchanged.
 
-    /// @notice The account that carries `a`'s demurrage, once both sides have
-    ///         consented.  Zero when `a` pays its own.
-    mapping(address => address) public demurragePayer;
+    // `demurragePayer` itself is declared further up, in the slot the
+    // retired `storedLimit` ratchet used to hold.
 
     /// @notice Pending election: `a` has named this account, which has not
     ///         yet accepted.  Cleared on accept.
@@ -457,53 +459,31 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- Credit-limit machinery (NFT-backed negative-balance headroom) ----
 
-    /// @notice Live credit limit (NFT-backed BUCK headroom) for account `a`.
-    /// @dev    Formula: ~totalCurrentValue(a) * currentBuckK / BUCKK_SCALE~.
-    ///         Sum of depreciated activated BuckCredit values scaled by the
-    ///         current PID multiplier.  Cached per block to avoid re-scanning
-    ///         a holder's NFT list across multiple transfers in the same
-    ///         block; the cache is invalidated by BuckCredit via the
-    ///         `onCreditMutation` hook on every NFT mint / burn / transfer /
-    ///         activate / updateCredit.
+    /// @notice Live credit limit (NFT-backed BUCK headroom) for account `a`:
+    ///         the sum of the depreciated activated values of the BuckCredits
+    ///         `a` holds, scaled by the current PID multiplier.
+    ///
+    ///         `totalCurrentValue(a) * currentBuckK / BUCKK_SCALE`
+    ///
+    /// @dev    Read live, every time, deliberately.  This number is supposed
+    ///         to move: it rises when the holder acquires or activates more
+    ///         credit, and falls as their insured assets depreciate on
+    ///         schedule, are reappraised, or as BUCK_K moves under them.
+    ///         `balanceOf` is built on it, so a stale answer here is a wrong
+    ///         balance, and there is no invalidation signal that covers all
+    ///         three inputs -- BUCK_K in particular changes inside any mint or
+    ///         burn that advances the PID, from any account, with nothing to
+    ///         announce it.
+    ///
+    ///         The cost is real and lands where it should: an account holding
+    ///         BuckCredit NFTs pays a scan of its own credits on every
+    ///         outbound transfer, proportional to how many it holds.  An
+    ///         account with no credits pays one external call that returns
+    ///         zero, and a Carrying account never reaches here at all.
     function creditLimit(address a) public view returns (uint256) {
-        if (creditLimitBlock[a] == uint64(block.number)) {
-            return creditLimitCache[a];
-        }
-        return _computeCreditLimit(a);
-    }
-
-    /// @dev Pure computation of the live credit limit; no cache read/write.
-    function _computeCreditLimit(address holder) internal view returns (uint256) {
-        uint256 cv = buckCredit.totalCurrentValue(holder);
+        uint256 cv = buckCredit.totalCurrentValue(a);
         if (cv == 0) return 0;
-        uint256 bk = buckK.currentBuckK();
-        return cv * bk / BUCKK_SCALE;
-    }
-
-    /// @dev Refresh the per-block cache.  Called from any non-view path that
-    ///      needs the credit limit (mint, burn, negative-going transfer).
-    function _refreshCreditLimit(address holder) internal returns (uint256 limit) {
-        if (creditLimitBlock[holder] == uint64(block.number)) {
-            return creditLimitCache[holder];
-        }
-        limit = _computeCreditLimit(holder);
-        creditLimitCache[holder] = limit;
-        creditLimitBlock[holder] = uint64(block.number);
-    }
-
-    /// @dev Mark the cache stale for `holder` so the next read recomputes.
-    function _invalidateCreditCache(address holder) internal {
-        if (holder == address(0)) return;
-        creditLimitBlock[holder] = 0;
-    }
-
-    /// @notice Hook called by BuckCredit on every NFT state change to
-    ///         invalidate Buck's per-block credit-limit cache.  Restricted
-    ///         to the registered BuckCredit contract.
-    function onCreditMutation(address from, address to) external {
-        require(msg.sender == address(buckCredit), "BUCK: not credit");
-        _invalidateCreditCache(from);
-        _invalidateCreditCache(to);
+        return cv * buckK.currentBuckK() / BUCKK_SCALE;
     }
 
     // ---- delegated demurrage (fee payer) API -------------------------------
@@ -853,9 +833,16 @@ contract Buck is IERC20, IERC20Metadata {
 
         // Post-burn solvency: the holder's used credit must not exceed their
         // shrunken creditLimit.  Computed after settlement so signed raw
-        // already reflects the refund (climb toward zero).  Reading
-        // creditLimit() picks up the just-invalidated cache, so it
-        // reflects the now-deactivated value.
+        // already reflects the refund (climb toward zero), and read live so
+        // it reflects the coverage just deactivated.
+        //
+        // A holder who is already at their limit cannot burn: releasing
+        // coverage costs more limit than the refund repays.  That is the
+        // intended shape -- you repay the credit, then release the coverage,
+        // as with any loan.  Doing nothing is also a supported outcome: the
+        // insurance is paid up in perpetuity and stays in force, and the
+        // Jubilee relief accruing on the coverage shrinks what closing it
+        // costs, year on year, without the holder doing anything.
         int256 signedRaw = signedBalanceOf(msg.sender);
         uint256 used     = signedRaw < 0 ? uint256(-signedRaw) : 0;
         require(used <= creditLimit(msg.sender),
@@ -972,7 +959,16 @@ contract Buck is IERC20, IERC20Metadata {
             CreditSlice memory s = slices[i];
             require(s.owner == msg.sender, "BUCK: not credit owner");
             uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
-            uint256 used    = mintsBacked[tid];
+            // `mintsBacked` and `activatedValue` are equal by construction --
+            // activation happens only in _allocateMint, and updateCredit may
+            // no longer reappraise below activated coverage.  Take the lesser
+            // anyway: an unwind larger than the coverage on the token reverts
+            // inside deactivateFromBuck, and a burn that reverts is a holder
+            // who cannot close a position.  Whatever future edit puts these
+            // two out of step should cost the system a rounding, not the
+            // holder their exit.
+            uint256 used = mintsBacked[tid];
+            if (s.activatedValue < used) used = s.activatedValue;
             // Silently skip fully-unused or over-rate NFTs rather than reverting: a reappraisal
             // that pushes premiumRate above the pool-ROI threshold must not strand a burn.
             if (used == 0 || effRate >= BP) continue;
@@ -991,16 +987,12 @@ contract Buck is IERC20, IERC20Metadata {
                 refund_i = unwind - netCap;
                 remaining -= netCap;
             }
-            mintsBacked[tid] = used - unwind;
+            mintsBacked[tid] = mintsBacked[tid] - unwind;
             // Deactivate exactly `unwind` coverage on this NFT.  Mirror
-            // of the activateFromBuck call in _allocateMint -- the
-            // invariant mintsBacked[tid] == activatedValue[tid] holds
-            // by construction since public activate() is gone.  Burning
+            // of the activateFromBuck call in _allocateMint.  Burning
             // is THE deactivation; it shrinks activatedValue (and thus
             // creditLimit) in lockstep with mintsBacked and refunds the
-            // proportional pool principal.  BuckCredit fires
-            // onCreditMutation, invalidating Buck's per-block credit-
-            // limit cache.
+            // proportional pool principal.
             // deactivateFromBuck reports the Jubilee relief carried by the
             // unwound coverage (aged ~2%/yr in BuckCredit's coverage-
             // seconds); _burnAllocated settles it from the fund.
@@ -1020,6 +1012,7 @@ contract Buck is IERC20, IERC20Metadata {
             uint256 tid = tokenIds[i];
             uint256 effRate = uint256(slices[i].premiumRate) * POOL_ROI_INV;
             uint256 used = mintsBacked[tid];
+            if (slices[i].activatedValue < used) used = slices[i].activatedValue;
             if (used == 0 || effRate >= BP) continue; // mirrors _allocateBurn skip, not a revert
             uint256 denom  = BP - effRate;
             uint256 netCap = used * denom / BP;
