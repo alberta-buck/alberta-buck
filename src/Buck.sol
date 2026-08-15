@@ -272,6 +272,25 @@ contract Buck is IERC20, IERC20Metadata {
     ///         yet accepted.  Cleared on accept.
     mapping(address => address) public demurragePayerRequest;
 
+    /// @notice Pool principal currently held against a given BuckCredit NFT.
+    /// @dev    Declared here, away from `mintsBacked` which it shadows, only
+    ///         because the slots before it are load-bearing for fixtures that
+    ///         reach `_receiptFragments` (5) by hard-coded index.
+    ///
+    ///         The deposit is *returnable*.  Its yield at the insurer's
+    ///         assumed ROI funds the premium in perpetuity -- that is what
+    ///         makes a policy a one-time purchase rather than a recurring
+    ///         expense -- so what the holder actually pays for cover is the
+    ///         opportunity cost of the deposit, not the deposit.  Releasing
+    ///         coverage returns it pro rata on the face units released.
+    ///
+    ///         It has to be stored rather than recomputed: the deposit for a
+    ///         credit is the sum over past draws of `V_i * effRate_i / BP`,
+    ///         and both the appraisal and the premium rate can have moved
+    ///         between them, so `mintsPrincipal / mintsBacked` is a weighted
+    ///         average that no amount of present-day state can reconstruct.
+    mapping(uint256 => uint256) public mintsPrincipal;
+
     /// @notice How many accounts name `a` as their demurrage payer.  Touched
     ///         only when a delegation is armed or released, so it lives here
     ///         rather than in the packed flags word: a non-zero count is what
@@ -859,6 +878,135 @@ contract Buck is IERC20, IERC20Metadata {
     ///      deliver `amount` net to msg.sender.  Per-NFT inversion:
     ///         take = ceil(remaining * BP / (BP - rate * POOL_ROI_INV)).
     ///      Writes mintsBacked.  Returns (totalCoverage, poolPrincipal).
+    /// @dev The per-credit inversion, shared by all four allocator paths so
+    ///      they cannot drift apart.  Everything here happens in *present
+    ///      insured value*; face units are only the denomination the credit
+    ///      records coverage in.
+    ///
+    ///      A credit's `activatedValue` is a slice of the asset *as appraised
+    ///      at issue*.  What is actually insured today is that slice scaled
+    ///      by `rho = depFace / face`, and that -- not the face slice -- is
+    ///      what the premium is charged on: you pay for the cover you have,
+    ///      not for the cover the asset used to be worth.  So:
+    ///
+    ///          V = ceil(net * BP / denom)      present value that settles `net`
+    ///          principal = V - net            = V * effRate / BP
+    ///          units = ceil(V * face / depFace)   face units that carry V
+    ///
+    ///      Charging on present value is also the only formulation that does
+    ///      not fall over.  Charging on the face slice instead gives
+    ///      `units = net * BP / (rho * BP - effRate)`, which is unsatisfiable
+    ///      once `rho * BP <= effRate` -- a 200bp credit would become
+    ///      unmintable at any price below 20 % of face, because depreciation
+    ///      had eaten the premium margin.  Here `denom` is independent of
+    ///      `rho`, so any credit with a non-zero appraisal still works, and
+    ///      the cost per BUCK delivered stays `net * effRate / denom` no
+    ///      matter how old the asset is -- which is why cheapest-first by
+    ///      `premiumRate` remains the right selector.
+    ///
+    ///      When `depFace == face` this reduces to `units = V` exactly, so
+    ///      non-depreciating credits behave precisely as before.
+    ///
+    ///      Precondition: `depFace > 0`.  A credit appraised at zero insures
+    ///      nothing, so both callers skip it before reaching here.
+    ///
+    /// @param net      spendable still to be placed (mint) or released (burn)
+    /// @param capUnits face-denominated coverage this credit has available:
+    ///                 `faceValue - mintsBacked` drawing, the outstanding
+    ///                 backing unwinding
+    /// @return units     face units to activate / deactivate
+    /// @return principal pool principal to pay / refund
+    /// @return settled   how much of `net` this credit accounts for
+    function _drawSlice(
+        uint256 net,
+        uint256 capUnits,
+        uint256 face,
+        uint256 depFace,
+        uint256 denom
+    ) internal pure returns (uint256 units, uint256 principal, uint256 settled) {
+        // Bounds: face, depFace, capUnits and net are all <= MAX_BALANCE
+        // (~6.04e23), so every product below stays far inside uint256.
+        uint256 capV   = capUnits * depFace / face;   // present value available
+        uint256 netCap = capV * denom / BP;           // net spendable it settles
+
+        if (netCap >= net) {
+            uint256 v = (net * BP + denom - 1) / denom;
+            if (v >= capV) {
+                // Rounding can push v one unit past the capacity it was
+                // derived from; take the whole credit rather than over-ask.
+                units = capUnits;
+                v     = capV;
+            } else {
+                units = (v * face + depFace - 1) / depFace;
+                if (units > capUnits) units = capUnits;
+            }
+            principal = v - net;
+            settled   = net;
+        } else {
+            units     = capUnits;
+            principal = capV - netCap;
+            settled   = netCap;
+        }
+    }
+
+    /// @dev The release side, and deliberately NOT the mirror of `_drawSlice`.
+    ///
+    ///      Drawing prices coverage: how much deposit does this much cover
+    ///      cost.  Releasing does not re-price anything -- it hands back the
+    ///      deposit the coverage is carrying, pro rata on the face units let
+    ///      go.  The two differ the moment the appraisal moves, and the
+    ///      difference is the whole point: a holder who bought cover at one
+    ///      appraisal and releases it at a lower one gets their whole deposit
+    ///      back, not the fraction the shrunken cover would cost today.
+    ///
+    ///      Re-pricing on the way out would charge them twice for the same
+    ///      depreciation.  The pool has already been compensated for holding
+    ///      an over-sized deposit against shrinking cover: it earned its
+    ///      assumed ROI on the full deposit the whole time while owing
+    ///      premium only on what was still insured.  Keeping the surplus
+    ///      principal as well would be helping itself twice from one decline.
+    ///
+    ///      So the net spendable a credit can release is its present cover
+    ///      less the deposit that comes back with it:
+    ///
+    ///          capV   = backedUnits * depFace / face
+    ///          netCap = capV - deposit
+    ///          units  = ceil(net * backedUnits / netCap)
+    ///          refund = deposit * units / backedUnits
+    ///
+    ///      `capV <= deposit` means the position has no spendable left in it
+    ///      -- the holder is underwater and must repay before releasing, the
+    ///      same rule the post-burn solvency check enforces.  The credit
+    ///      settles nothing and the caller moves on.
+    ///
+    ///      Note what falls out when the holder holds no loose BUCK:
+    ///      `netCap == creditLimit - used == balanceOf`, so burning exactly
+    ///      their spendable closes the position and squares the deposit.
+    ///
+    /// @param backedUnits face units outstanding on this credit
+    /// @param deposit     pool principal held against them
+    function _releaseSlice(
+        uint256 net,
+        uint256 backedUnits,
+        uint256 face,
+        uint256 depFace,
+        uint256 deposit
+    ) internal pure returns (uint256 units, uint256 refund, uint256 settled) {
+        uint256 capV = backedUnits * depFace / face;
+        if (capV <= deposit) return (0, 0, 0);
+        uint256 netCap = capV - deposit;
+
+        if (netCap >= net) {
+            units   = (net * backedUnits + netCap - 1) / netCap;
+            if (units > backedUnits) units = backedUnits;
+            settled = net;
+        } else {
+            units   = backedUnits;
+            settled = netCap;
+        }
+        refund = deposit * units / backedUnits;
+    }
+
     function _allocateMint(uint256 amount, uint256[] memory tokenIds)
         internal returns (uint256 totalCoverage, uint256 poolPrincipal)
     {
@@ -878,23 +1026,18 @@ contract Buck is IERC20, IERC20Metadata {
 
             uint256 used = mintsBacked[tid];
             if (s.faceValue <= used) continue;
-            uint256 avail  = s.faceValue - used;
-            uint256 denom  = BP - effRate;
-            uint256 netCap = avail * denom / BP;
+            // A credit appraised at zero insures nothing, so it can carry no
+            // coverage and no premium.  Skip it rather than activate face
+            // units that would deliver no headroom.
+            if (s.depreciatedFace == 0) continue;
 
-            uint256 take;
-            uint256 principal_i;
-            if (netCap >= remaining) {
-                take = (remaining * BP + denom - 1) / denom;
-                if (take > avail) take = avail;
-                principal_i = take - remaining;
-                remaining = 0;
-            } else {
-                take = avail;
-                principal_i = take - netCap;
-                remaining -= netCap;
-            }
-            mintsBacked[tid] = used + take;
+            (uint256 take, uint256 principal_i, uint256 settled) = _drawSlice(
+                remaining, s.faceValue - used, s.faceValue, s.depreciatedFace,
+                BP - effRate
+            );
+            remaining -= settled;
+            mintsBacked[tid]   = used + take;
+            mintsPrincipal[tid] += principal_i;   // returnable deposit
             // Activate `take` more coverage on this NFT -- but only the
             // delta needed to satisfy `activatedValue >= mintsBacked`.
             // In production (no public BuckCredit.activate()), the
@@ -928,21 +1071,12 @@ contract Buck is IERC20, IERC20Metadata {
             require(effRate < BP, "BUCK: NFT rate too high");
             uint256 used = mintsBacked[tid];
             if (s.faceValue <= used) continue;
-            uint256 avail  = s.faceValue - used;
-            uint256 denom  = BP - effRate;
-            uint256 netCap = avail * denom / BP;
-            uint256 take;
-            uint256 principal_i;
-            if (netCap >= remaining) {
-                take = (remaining * BP + denom - 1) / denom;
-                if (take > avail) take = avail;
-                principal_i = take - remaining;
-                remaining = 0;
-            } else {
-                take = avail;
-                principal_i = take - netCap;
-                remaining -= netCap;
-            }
+            if (s.depreciatedFace == 0) continue;      // mirrors _allocateMint
+            (uint256 take, uint256 principal_i, uint256 settled) = _drawSlice(
+                remaining, s.faceValue - used, s.faceValue, s.depreciatedFace,
+                BP - effRate
+            );
+            remaining     -= settled;
             totalCoverage += take;
             poolPrincipal += principal_i;
         }
@@ -971,23 +1105,15 @@ contract Buck is IERC20, IERC20Metadata {
             if (s.activatedValue < used) used = s.activatedValue;
             // Silently skip fully-unused or over-rate NFTs rather than reverting: a reappraisal
             // that pushes premiumRate above the pool-ROI threshold must not strand a burn.
-            if (used == 0 || effRate >= BP) continue;
-            uint256 denom   = BP - effRate;
-            uint256 netCap  = used * denom / BP;
+            if (used == 0 || effRate >= BP || s.depreciatedFace == 0) continue;
 
-            uint256 unwind;
-            uint256 refund_i;
-            if (netCap >= remaining) {
-                unwind = (remaining * BP + denom - 1) / denom;
-                if (unwind > used) unwind = used;
-                refund_i = unwind - remaining;
-                remaining = 0;
-            } else {
-                unwind   = used;
-                refund_i = unwind - netCap;
-                remaining -= netCap;
-            }
-            mintsBacked[tid] = mintsBacked[tid] - unwind;
+            (uint256 unwind, uint256 refund_i, uint256 settled) = _releaseSlice(
+                remaining, used, s.faceValue, s.depreciatedFace, mintsPrincipal[tid]
+            );
+            if (unwind == 0) continue;              // nothing left to release here
+            remaining           -= settled;
+            mintsBacked[tid]    -= unwind;
+            mintsPrincipal[tid] -= refund_i;
             // Deactivate exactly `unwind` coverage on this NFT.  Mirror
             // of the activateFromBuck call in _allocateMint.  Burning
             // is THE deactivation; it shrinks activatedValue (and thus
@@ -1010,24 +1136,17 @@ contract Buck is IERC20, IERC20Metadata {
         CreditSlice[] memory slices = buckCredit.batchCreditInfo(tokenIds);
         for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
             uint256 tid = tokenIds[i];
-            uint256 effRate = uint256(slices[i].premiumRate) * POOL_ROI_INV;
+            CreditSlice memory s = slices[i];
+            uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
             uint256 used = mintsBacked[tid];
-            if (slices[i].activatedValue < used) used = slices[i].activatedValue;
-            if (used == 0 || effRate >= BP) continue; // mirrors _allocateBurn skip, not a revert
-            uint256 denom  = BP - effRate;
-            uint256 netCap = used * denom / BP;
-            uint256 unwind;
-            uint256 refund_i;
-            if (netCap >= remaining) {
-                unwind = (remaining * BP + denom - 1) / denom;
-                if (unwind > used) unwind = used;
-                refund_i = unwind - remaining;
-                remaining = 0;
-            } else {
-                unwind   = used;
-                refund_i = unwind - netCap;
-                remaining -= netCap;
-            }
+            if (s.activatedValue < used) used = s.activatedValue;
+            // mirrors the _allocateBurn skips, not a revert
+            if (used == 0 || effRate >= BP || s.depreciatedFace == 0) continue;
+            (uint256 unwind, uint256 refund_i, uint256 settled) = _releaseSlice(
+                remaining, used, s.faceValue, s.depreciatedFace, mintsPrincipal[tid]
+            );
+            if (unwind == 0) continue;
+            remaining   -= settled;
             totalUnwind += unwind;
             poolRefund  += refund_i;
         }

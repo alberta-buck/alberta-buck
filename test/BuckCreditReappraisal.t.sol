@@ -185,51 +185,147 @@ contract BuckCreditReappraisalTest is Test {
     }
 
     // ---------------------------------------------------------------------
-    // Known gap: mint() under-delivers against a depreciated credit
+    // Minting against a depreciated credit
     // ---------------------------------------------------------------------
 
-    /// @notice Characterization, not an endorsement.  `_allocateMint` sizes
-    ///         `take` off the *undepreciated* faceValue and grosses it up only
-    ///         for the premium inversion, while `creditLimit` reads the
-    ///         *depreciated* currentValue.  So a mint against a credit that
-    ///         has depreciated hands the holder less spendable headroom than
-    ///         they asked for -- short by exactly the depreciation factor on
-    ///         the coverage taken.
-    ///
-    ///         Delivering the full amount would mean grossing `take` up by
-    ///         face/depreciatedFace as well, which charges premium on the
-    ///         larger coverage.  Whether that is the right economics is a
-    ///         design question, so this test pins today's behaviour rather
-    ///         than asserting a fix.
-    function test_knownGap_mintUnderDeliversAgainstDepreciatedCredit() public {
+    /// @dev A 300,000 structure, LINEAR 200bp/yr against a 60,000 floor,
+    ///      three years in: 3 x 200bp of (300,000 - 60,000) = 14,400 off, so
+    ///      the appraisal today is 285,600 and rho = 0.952.
+    function _depreciatedCredit() internal returns (uint256 tid) {
         vm.prank(INSURER);
-        uint256 tid = credit.createCredit(
+        tid = credit.createCredit(
             alice, 0, 300_000e6, 60_000e6,
             BuckCredit.DepreciationType.LINEAR, 200, uint48(t0), 200
         );
-        _at(3 * YEAR);                       // 3 yr x 200bp on (300k - 60k) = 14.4k off face
+        _at(3 * YEAR);
+    }
+
+    /// @notice The holder gets what they asked for.  The allocator inverts in
+    ///         present insured value and grosses the face units back up by
+    ///         face/depreciatedFace, so depreciation costs the holder capacity
+    ///         on the credit -- not headroom on the mint.
+    function test_mintDeliversInFullAgainstADepreciatedCredit() public {
+        uint256 tid = _depreciatedCredit();
+        assertEq(credit.depreciatedFaceValue(tid), 285_600e6, "rho = 285,600/300,000");
 
         vm.prank(alice);
         buck.mint(50_000e6, _ids(tid));
 
+        assertEq(buck.balanceOf(alice), 50_000e6, "delivered exactly what was asked");
+
+        // V = ceil(50,000 * 10000/8000) = 62,500 of *present* insured value,
+        // carried by ceil(62,500 * 300,000/285,600) face units.
         (, uint256 activated,) = credit.creditInfo(tid);
-        assertEq(activated, 62_500e6, "take grossed up for the 200bp premium only");
-        assertEq(buck.creditLimit(alice), 59_500e6, "limit reads the depreciated value");
-        assertEq(buck.signedRawBalanceOf(alice), -int256(12_500e6), "principal paid");
-
-        assertEq(buck.balanceOf(alice), 47_000e6, "delivered");
-        assertLt(buck.balanceOf(alice), 50_000e6, "...which is short of the 50,000 requested");
-
-        // The shortfall is exactly the depreciation applied to the coverage.
-        assertEq(50_000e6 - buck.balanceOf(alice), 62_500e6 * 144 / 3000, "= take * 14.4k/300k");
+        assertEq(activated, 65_651_260_505, "face units grossed up by 1/rho");
+        assertEq(buck.creditLimit(alice), 62_500e6, "present insured value");
+        assertEq(buck.signedRawBalanceOf(alice), -int256(12_500e6), "principal on present value");
     }
 
-    /// @notice Control: with no depreciation the identity holds exactly.
-    function test_mintDeliversExactlyAgainstNonDepreciatingCredit() public {
-        uint256 tid = _buy(300_000e6, 200, 50_000e6);
+    /// @notice The premium is charged on what is actually insured, not on the
+    ///         face slice the coverage is denominated in.  The pool principal
+    ///         at the assumed 10% ROI funds exactly the annual premium on the
+    ///         present insured value, in perpetuity.
+    function test_premiumIsChargedOnPresentInsuredValue() public {
+        uint256 tid = _depreciatedCredit();
+        vm.prank(alice);
+        buck.mint(50_000e6, _ids(tid));
+
+        uint256 principal    = uint256(-buck.signedRawBalanceOf(alice));
+        uint256 insuredValue = buck.creditLimit(alice);          // 62,500
+        (, uint256 activated,) = credit.creditInfo(tid);         // 65,651.26 face units
+
+        assertEq(principal * 10 / 100, insuredValue * 200 / 10_000,
+                 "principal yield == premium on the insured value");
+        assertGt(activated, insuredValue, "and NOT on the larger face slice");
+        assertLt(principal * 10 / 100, activated * 200 / 10_000,
+                 "which would have over-charged the holder");
+    }
+
+    /// @notice Cost per BUCK delivered does not depend on how old the asset
+    ///         is -- which is why cheapest-first by premiumRate stays the
+    ///         right selector.
+    function test_premiumCostPerBuckIsIndependentOfDepreciation() public {
+        uint256 tid = _depreciatedCredit();
+        vm.prank(alice);
+        buck.mint(50_000e6, _ids(tid));
+        uint256 depreciatedCost = uint256(-buck.signedRawBalanceOf(alice));
+
+        // Same face, same rate, no depreciation, different holder.
+        vm.prank(INSURER);
+        uint256 fresh = credit.createCredit(
+            dave, 0, 300_000e6, 0, BuckCredit.DepreciationType.NONE, 0, 0, 200
+        );
+        vm.prank(dave);
+        buck.mint(50_000e6, _ids(fresh));
+        uint256 freshCost = uint256(-buck.signedRawBalanceOf(dave));
+
+        assertEq(depreciatedCost, freshCost, "same premium for the same headroom");
+    }
+
+    /// @notice Mint then burn the same amount against the same credit cancels
+    ///         exactly: no rounding drift to arbitrage.
+    function test_mintBurnRoundTripIsExactOnADepreciatedCredit() public {
+        uint256 tid = _depreciatedCredit();
+
+        vm.prank(alice);
+        buck.mint(50_000e6, _ids(tid));
+        vm.prank(alice);
+        buck.burn(50_000e6, _ids(tid));
+
+        (, uint256 activated,) = credit.creditInfo(tid);
+        assertEq(activated, 0, "coverage fully released");
+        assertEq(buck.mintsBacked(tid), 0, "backing released with it");
+        assertEq(buck.signedRawBalanceOf(alice), 0, "principal fully refunded");
+    }
+
+    /// @notice The deposit is returnable in full, whatever the appraisal did
+    ///         in between.  Cover bought when the asset was worth 100,000 and
+    ///         released when it is worth 50,000 still returns every unit of
+    ///         principal: the pool was already paid for holding an over-sized
+    ///         deposit against shrinking cover -- it earned its assumed ROI on
+    ///         the whole deposit while owing premium only on what was still
+    ///         insured -- so keeping the surplus principal as well would be
+    ///         helping itself twice from one decline.
+    function test_depositReturnsInFullAfterDepreciation() public {
+        vm.prank(INSURER);
+        uint256 tid = credit.createCredit(
+            alice, 0, 100_000e6, 0,
+            BuckCredit.DepreciationType.LINEAR, 1000, uint48(t0), 200
+        );
+        vm.prank(alice);
+        buck.mint(10_000e6, _ids(tid));
+
+        uint256 paid = buck.mintsPrincipal(tid);
+        assertEq(paid, 2_500e6, "deposit = 20% of the 12,500 insured");
+        assertEq(uint256(-buck.signedRawBalanceOf(alice)), paid, "and it was debited");
+        assertEq(buck.rawBalanceOf(POOL), paid, "the pool holds it");
+
+        _at(5 * YEAR);
+        assertEq(credit.depreciatedFaceValue(tid), 50_000e6, "appraisal halved");
+        assertEq(buck.creditLimit(alice), 6_250e6, "so the cover halved too");
+
+        // Her whole spendable is exactly what the cover can release, because
+        // the deposit comes back with it: 6,250 of cover less the 2,500 held.
+        uint256 spendable = buck.balanceOf(alice);
+        assertEq(spendable, 3_750e6, "capV - deposit");
+
+        vm.prank(alice);
+        buck.burn(spendable, _ids(tid));
+
+        assertEq(buck.mintsPrincipal(tid), 0, "deposit fully returned");
+        assertEq(buck.mintsBacked(tid),    0, "cover fully released");
+        assertEq(buck.rawBalanceOf(POOL),  0, "the pool gave back every unit");
+        // Alice ends square or slightly ahead: the Jubilee also rebates the
+        // relief that five years of carrying the coverage accrued.
+        assertGe(buck.signedRawBalanceOf(alice), 0, "no principal lost to depreciation");
+    }
+
+    /// @notice A non-depreciating credit is unaffected: with rho == 1 the
+    ///         gross-up is the identity.
+    function test_nonDepreciatingCreditIsUnchanged() public {
+        _buy(300_000e6, 200, 50_000e6);
         assertEq(buck.balanceOf(alice), 50_000e6, "delivered exactly what was asked");
         assertEq(buck.creditLimit(alice), 62_500e6, "limit == activated, undepreciated");
-        tid;
     }
 
     // ---------------------------------------------------------------------

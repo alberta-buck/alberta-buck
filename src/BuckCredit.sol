@@ -219,14 +219,25 @@ contract BuckCredit is ERC721Enumerable {
         CreditParams storage c = credits[tokenId];
         if (c.activatedValue.isZero()) return 0;
 
-        uint256 face = c.faceValue.asUint();
-        uint256 depreciatedFace = _depreciate(
-            face, c.depType, c.depRate,
+        // Activated portion depreciates proportionally.
+        return depreciatedFaceValue(tokenId) * c.activatedValue.asUint()
+             / c.faceValue.asUint();
+    }
+
+    /// @notice The whole asset's appraised value on today's schedule, before
+    ///         any activation is taken into account.
+    /// @dev    This is the ceiling on what can actually be insured now, and
+    ///         therefore what a premium is charged against.  `currentValue`
+    ///         is this scaled by the holder's activated share;
+    ///         `depreciatedFaceValue` is the share-independent figure Buck's
+    ///         allocator needs to convert between face units and present
+    ///         insured value.
+    function depreciatedFaceValue(uint256 tokenId) public view returns (uint256) {
+        CreditParams storage c = credits[tokenId];
+        return _depreciate(
+            c.faceValue.asUint(), c.depType, c.depRate,
             c.depreciationFloor.asUint(), c.depStartAt
         );
-
-        // Activated portion depreciates proportionally.
-        return depreciatedFace * c.activatedValue.asUint() / face;
     }
 
     /// @dev Discrete-time depreciation.  No transcendental approximations —
@@ -430,10 +441,11 @@ contract BuckCredit is ERC721Enumerable {
             uint256 tid = tokenIds[i];
             CreditParams storage c = credits[tid];
             slices[i] = CreditSlice({
-                owner:          ownerOf(tid),
-                faceValue:      c.faceValue.asUint(),
-                activatedValue: c.activatedValue.asUint(),
-                premiumRate:    c.premiumRate
+                owner:           ownerOf(tid),
+                faceValue:       c.faceValue.asUint(),
+                depreciatedFace: depreciatedFaceValue(tid),
+                activatedValue:  c.activatedValue.asUint(),
+                premiumRate:     c.premiumRate
             });
         }
     }

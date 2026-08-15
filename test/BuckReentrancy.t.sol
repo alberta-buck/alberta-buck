@@ -63,7 +63,8 @@ contract ReenteringCredit {
         slices = new CreditSlice[](ids.length);
         for (uint256 i = 0; i < ids.length; i++) {
             slices[i] = CreditSlice({
-                owner: holder, faceValue: face, activatedValue: activated, premiumRate: rate
+                owner: holder, faceValue: face, depreciatedFace: face,
+                activatedValue: activated, premiumRate: rate
             });
         }
     }

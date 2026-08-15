@@ -207,6 +207,94 @@ file is retired.
    Regression: =test_fullyDrawnHolder_repaysThenCloses= and
    =test_openPosition_decaysInFavourOfTheHolder=.
 
+** D6 A depreciated credit under-delivered, and the deposit leaked   [FIXED]
+
+   Two faults, and the second only surfaced because the first was being
+   fixed.
+
+*** The draw
+
+    =_allocateMint= sized =take= against the /undepreciated/ =faceValue=
+    and grossed it up only for the premium inversion, while =creditLimit=
+    reads the /depreciated/ =currentValue=.  The holder came up short by
+    exactly the depreciation applied to the cover taken.  A 300,000
+    structure three years into 200bp/yr delivered 47,000 on a =mint(50,000)=.
+
+    The allocator now inverts in *present insured value* and grosses the
+    face units back up:
+
+    #+BEGIN_EXAMPLE
+    V         = ceil(amount * BP / denom)          present value that settles `amount`
+    principal = V - amount                         = V * effRate / BP
+    take      = ceil(V * faceValue / depreciatedFace)
+    #+END_EXAMPLE
+
+    Two things follow from charging premium on =V= rather than on the face
+    slice.  It is what the holder should pay -- you pay for the cover you
+    have, not the cover the asset used to be worth.  And it is the only
+    formulation that does not fall over: charging on the face slice gives
+    ~take = amount * BP / (rho * BP - effRate)~, unsatisfiable once
+    ~rho * BP <= effRate~, so a 200bp credit would become unmintable at any
+    price below 20 % of face.  With the premium on =V=, =denom= is
+    independent of =rho=, the cost per BUCK delivered stays
+    ~amount * effRate / denom~ however old the asset is -- which is also
+    why cheapest-first by =premiumRate= remains the right selector -- and
+    ~rho == 1~ reduces the gross-up to the identity, so nothing changes for
+    a non-depreciating credit.
+
+    =CreditSlice= gains =depreciatedFace=, and =BuckCredit= a public
+    =depreciatedFaceValue(tokenId)=.
+
+*** The refund
+
+    The first cut ran the same inversion on the burn side, which quietly
+    made the pool deposit only *partly* refundable: cover bought when an
+    asset was worth 100,000 and released when it was worth 50,000 returned
+    1,250 of a 2,500 deposit.  Caught in review, and wrong.
+
+    The deposit is returnable.  Its yield funds the premium in perpetuity
+    -- that is what makes a policy a one-time purchase rather than a
+    recurring expense -- so what the holder pays for cover is the
+    /opportunity cost/ of the deposit, not the deposit.  Re-pricing it on
+    exit charges them twice for one decline: the pool has already been
+    compensated for holding an over-sized deposit against shrinking cover,
+    because it earned its assumed ROI on the whole deposit while owing
+    premium only on what was still insured.
+
+    So releasing does not re-price.  It hands back the deposit the cover is
+    carrying, pro rata on the face units let go:
+
+    #+BEGIN_EXAMPLE
+    capV   = mintsBacked * rho
+    netCap = capV - mintsPrincipal
+    units  = ceil(amount * mintsBacked / netCap)
+    refund = mintsPrincipal * units / mintsBacked
+    #+END_EXAMPLE
+
+    That needs =mintsPrincipal[tokenId]=, a new mapping, because the
+    deposit is the sum over past draws of ~V_i * effRate_i / BP~ and both
+    the appraisal and the rate may have moved between them --
+    ~mintsPrincipal / mintsBacked~ is a weighted average with no closed
+    form.  It is appended after =demurragePayerRequest= so slots 0-7 are
+    untouched.
+
+    Two properties fall out, and both are worth having.
+    ~capV <= mintsPrincipal~ means the position has no spendable left in it
+    -- the holder is underwater and must repay first, the same rule the
+    post-burn solvency check enforces, reached from the other direction.
+    And with no loose BUCK held, ~netCap == creditLimit - used ==
+    balanceOf~: *burning exactly their spendable closes the position and
+    squares the deposit*, which the earlier version could not do at all --
+    it reverted.
+
+    Regressions: =test_mintDeliversInFullAgainstADepreciatedCredit=,
+    =test_premiumIsChargedOnPresentInsuredValue=,
+    =test_premiumCostPerBuckIsIndependentOfDepreciation=,
+    =test_depositReturnsInFullAfterDepreciation=,
+    =test_mintBurnRoundTripIsExactOnADepreciatedCredit=,
+    =test_burn_returnsTheWholeDepositAcrossPartialReleases=, with
+    =test_nonDepreciatingCreditIsUnchanged= as the control.
+
 ** Minor
 
    - =storedLimit= -- the Phase-1a "highest-ever credit limit" ratchet, a
@@ -286,39 +374,6 @@ file is retired.
    Rejected -- see D4.  It optimises for the wrong property.
 
 * Still open
-
-** D6 =mint(N)= under-delivers against a depreciated credit
-
-   Found while reconciling the master document's end-to-end walkthrough
-   against the code.  =_allocateMint= sizes =take= against the
-   /undepreciated/ =faceValue= and grosses it up only for the premium
-   inversion, while =creditLimit= reads the /depreciated/ =currentValue=.
-   The holder therefore ends up short by exactly the depreciation applied
-   to the coverage taken, ~take * (faceValue - depreciatedFace) / faceValue~:
-
-   #+BEGIN_EXAMPLE
-   300,000 structure, LINEAR 200bp/yr on a 60,000 floor, 3 years in,
-   premium 200bp.  Depreciated face 285,600.
-
-   mint(50,000)  ->  take         = 62,500      (grossed up for the premium)
-                     principal    = 12,500
-                     currentValue = 59,500      (62,500 x 285,600/300,000)
-                     balanceOf    = 47,000      <- 3,000 short
-   #+END_EXAMPLE
-
-   The contract's own comment says =_allocateMint= "allocate[s] enough
-   coverage to deliver =amount= net to msg.sender", and the master document
-   said =balanceOf = amount=, so this is a defect against stated intent
-   rather than a documented trade-off.  It is invisible on =NONE=-schedule
-   credits, which is most of the test suite.
-
-   The fix is a second gross-up, ~take = ceil(amount * BP * faceValue /
-   (denom * depreciatedFace))~ -- but that charges premium on the larger
-   coverage, which is a different economics than the one shipped, and the
-   allocator would need =depreciatedFace= in the =CreditSlice= to compute
-   it.  Pinned meanwhile by
-   =test_knownGap_mintUnderDeliversAgainstDepreciatedCredit=, with
-   =test_mintDeliversExactlyAgainstNonDepreciatingCredit= as the control.
 
 ** D7 =createCredit= is permissionless
 

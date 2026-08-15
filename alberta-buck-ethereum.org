@@ -492,10 +492,12 @@ path already loads and stores, so testing one is free.  That is exactly why it i
 hot-path dispatch.  Cold-path bookkeeping -- the count of accounts a demurrage payer carries --
 lives in its own mapping instead.
 
-Outside the hot path: allowances, per-NFT outstanding allocations (=mintsBacked[tokenId]=),
-approve-time receipt fragments, and the delegated-demurrage maps.  *Nothing derived is stored.*
-An account's credit limit, and therefore its =balanceOf=, is recomputed from live =BuckCredit=
-state on every read; there is no cached copy of it anywhere.
+Outside the hot path: allowances, per-credit outstanding cover and the deposit held against it
+(=mintsBacked[tokenId]=, =mintsPrincipal[tokenId]=), approve-time receipt fragments, and the
+delegated-demurrage maps.  *Nothing derived is stored.*  An account's credit limit, and therefore
+its =balanceOf=, is recomputed from live =BuckCredit= state on every read; there is no cached copy
+of it anywhere.  =mintsPrincipal= is not an exception -- it is a record of what was actually paid,
+which no amount of present-day state can reconstruct once the appraisal or the rate has moved.
 
 =BUCK= implements =IERC20= and =IERC20Metadata= directly -- no OpenZeppelin ERC20 inheritance, so
 the slot layout is explicit and the transfer paths are linear (no =_update= override re-entry).
@@ -570,25 +572,92 @@ principal per BUCK burned and freeing expensive coverage capacity for re-use.  T
 not arbitrageable: per-NFT inversion is symmetric (same =denom= on both sides), so a mint-burn
 round-trip on the same NFT restores both its =mintsBacked= and =activatedValue= exactly.
 
-The /mutual-insurance pool model/: each NFT carries an annual =premiumRate= in basis points.
-Drawing =take= units of coverage from one NFT generates an annual premium of
-~take * premiumRate / BP~.  The pool deposit sized to cover that premium at a 10% assumed ROI is
-~take * premiumRate * POOL_ROI_INV / BP~ where ~POOL_ROI_INV = 10~.  The insurer keeps any return
-above 10% as profit.  Per-NFT inversion -- given a target net headroom =amount= and rate =r=:
+*** The Per-Credit Inversion
+
+Two quantities have to be kept apart, and the whole inversion turns on the difference.
+
+=activatedValue= is denominated in *face* units -- a slice of the asset /as appraised at issue/.
+What is actually insured today is that slice scaled by ~rho = depreciatedFace / faceValue~.  That
+is proportional coinsurance, and it is the right shape for a depreciating asset: the holder's
+share of the asset stays constant while its worth tracks the asset.  =creditLimit= reads the
+scaled figure, so the allocator inverts in *present insured value* and grosses back up into face
+units at the end.
+
+Each credit carries an annual =premiumRate= in basis points, and *the premium is charged on what
+is actually insured* -- the present value, not the face slice.  You pay for the cover you have,
+not for the cover the asset used to be worth.  So, given a target net headroom =amount= and rate
+=r=:
 
 #+BEGIN_SRC text
-denom     = BP - r * POOL_ROI_INV               (must be > 0; max effective rate ~1000bp)
-take      = ceil(amount * BP / denom)
-principal = take - amount
+denom     = BP - r * POOL_ROI_INV          (must be > 0; max effective rate ~1000bp)
+V         = ceil(amount * BP / denom)      present insured value that settles `amount`
+principal = V - amount                     = V * r * POOL_ROI_INV / BP
+take      = ceil(V * faceValue / depreciatedFace)     face units that carry V
 #+END_SRC
 
+At ~POOL_ROI_INV = 10~ the pool deposit is ten times the annual premium on =V=, so at the
+insurer's assumed 10 % ROI its yield funds that premium in perpetuity; the insurer keeps any
+return above 10 % as profit.  When ~rho = 1~ the last line is the identity and this reduces
+exactly to the undepreciated case.
+
+Charging the premium on present value is not merely fairer, it is the only formulation that does
+not fall over.  Charge on the face slice instead and the inversion becomes
+~take = amount * BP / (rho * BP - effRate)~, which is unsatisfiable once ~rho * BP <= effRate~:
+a 200bp credit would become unmintable at /any/ price below 20 % of face, because depreciation
+had eaten the premium margin.  With the premium on =V=, =denom= is independent of =rho=, every
+credit with a non-zero appraisal still works, and the cost per BUCK delivered stays
+~amount * effRate / denom~ however old the asset is.  That last property is why cheapest-first by
+=premiumRate= remains the correct selector: depreciation changes how much *capacity* a draw
+consumes, never how much it *costs*.
+
 The allocator (=_allocateMint=) walks =BuckCredit.batchCreditInfo(tokenIds)= once, then iterates
-in memory: per-NFT ~netCap = avail * denom / BP~ where ~avail = faceValue - mintsBacked~, and
-either fully consumes the NFT (headroom contribution = =netCap=, principal = =take - netCap=) or
-partially consumes it via the closed-form inversion to land exactly on =remaining=.  For each
-NFT touched, =_allocateMint= calls =BuckCredit.activateFromBuck(tid, holder, take_i)= to grow
+in memory.  Per credit the available present value is ~capV = (faceValue - mintsBacked) * rho~
+and the net it can settle is ~capV * denom / BP~; the credit is either fully consumed or
+partially consumed via the closed form above to land exactly on =remaining=.  A credit whose
+appraisal has reached zero insures nothing and is skipped.  For each credit touched,
+=_allocateMint= calls =BuckCredit.activateFromBuck(tid, holder, take_i)= to grow
 =activatedValue= and =mintsBacked= in lockstep -- the activation and the principal payment are
 the same atomic operation.
+
+*** Releasing: the Deposit Comes Back
+
+The release side is deliberately *not* the mirror of the draw.
+
+Drawing prices coverage: how much deposit does this much cover cost, at today's appraisal and
+today's rate.  Releasing does not re-price anything.  It hands back the deposit the coverage is
+carrying, pro rata on the face units let go:
+
+#+BEGIN_SRC text
+capV   = mintsBacked * rho                     present value of the outstanding cover
+netCap = capV - mintsPrincipal                 net spendable it can release
+units  = ceil(amount * mintsBacked / netCap)   face units to deactivate
+refund = mintsPrincipal * units / mintsBacked  the deposit those units carry
+#+END_SRC
+
+The distinction only shows once the appraisal moves, and then it is the whole point.  A holder
+who buys cover at one appraisal and releases it at a lower one gets *their whole deposit back*,
+not the fraction the shrunken cover would cost today.
+
+That follows from what the deposit is.  The pool's yield on it funds the premium in perpetuity --
+that is what makes a policy a one-time purchase rather than a recurring expense -- so what the
+holder actually pays for cover is the /opportunity cost/ of the deposit, not the deposit.
+Re-pricing on the way out would charge them twice for one decline: the pool has already been
+compensated for holding an over-sized deposit against shrinking cover, because it earned its
+assumed ROI on the full deposit the whole time while owing premium only on what was still
+insured.  Keeping the surplus principal as well would be helping itself twice.
+
+The deposit is stored, in =mintsPrincipal[tokenId]=, rather than recomputed.  It cannot be
+recovered from present-day state: it is the sum over past draws of ~V_i * effRate_i / BP~, and
+both the appraisal and the premium rate may have moved between them, so ~mintsPrincipal /
+mintsBacked~ is a weighted average with no closed form.
+
+Two properties fall out.  ~capV <= mintsPrincipal~ means the position has no spendable left in
+it -- the holder is underwater and must repay before releasing, which is the same rule the
+post-burn solvency check enforces, reached from the other direction.  And when the holder holds
+no loose BUCK, ~netCap == creditLimit - used == balanceOf~: *burning exactly their spendable
+closes the position and squares the deposit*.  A mint and an immediate burn of the same amount
+cancel exactly; partial releases floor, so the dust stays in the pool until the final release
+hands it back.
 
 Per-NFT bookkeeping: =mintsBacked[tokenId]= tracks the cumulative outstanding allocation against
 each NFT, capped at =faceValue=.  The invariant ~mintsBacked[tid] == activatedValue[tid]~ holds
@@ -648,27 +717,25 @@ balanceOf(holder)          = creditLimit - used   = sum take_i - sum principal_i
 totalSupply                += poolPrincipal       (only the pool's positive contribution grows)
 #+END_SRC
 
-*Known gap -- a depreciated credit under-delivers.*  The allocator sizes =take= against the
-/undepreciated/ =faceValue= and grosses it up only for the premium inversion, while
-=creditLimit= reads the /depreciated/ =currentValue=.  Draw on a credit that has already
-depreciated and the last line above does not hold: the holder is short by exactly the
-depreciation applied to the coverage taken,
-~take * (faceValue - depreciatedFace) / faceValue~.
+*A depreciated credit delivers in full.*  The allocator inverts in present insured value and
+grosses the face units back up by ~faceValue / depreciatedFace~, so the last line above holds
+whatever the appraisal has done.  Depreciation costs the holder /capacity/ on the credit -- the
+same headroom consumes more face units -- never headroom on the mint.
 
-Concretely -- a 300,000 structure, LINEAR 200bp/yr on a 60,000 floor, three years in
-(depreciated face 285,600), premium 200bp:
+Worked through on a 300,000 structure, LINEAR 200bp/yr on a 60,000 floor, three years in
+(appraisal 285,600, so rho = 0.952), premium 200bp:
 
 #+BEGIN_SRC text
-mint(50,000)  ->  take        = 62,500      (grossed up for the 200bp premium)
-                  principal   = 12,500
-                  currentValue= 59,500      (62,500 x 285,600/300,000)
-                  balanceOf   = 47,000      <- 3,000 short of the 50,000 asked for
+mint(50,000)  ->  V         = 62,500          present insured value, ceil(50,000 * 10000/8000)
+                  principal = 12,500          = V * 2000/10000
+                  take      = 65,651.260505   face units, ceil(V * 300,000/285,600)
+                  balanceOf = 50,000          exactly what was asked for
 #+END_SRC
 
-Delivering the full amount would mean grossing =take= up by ~faceValue / depreciatedFace~ as
-well, which charges premium on the larger coverage -- defensible, but a different economics than
-the one shipped.  Pinned by =test_knownGap_mintUnderDeliversAgainstDepreciatedCredit=; the
-decision is tracked in =CREDIT-IMPROVEMENT.org=.
+The premium is charged on the 62,500 actually insured, not on the 65,651 face slice that carries
+it: at the assumed 10 % ROI the 12,500 deposit yields 1,250/yr, which is 200bp of 62,500.  Charged
+on the face slice it would have been 1,313/yr, and the holder would have been paying for cover the
+asset no longer has.
 
 =burn(amount[, tokenIds])= mirrors the math but with the most-expensive-first default selector:
 unwind dearest NFT first, call =BuckCredit.deactivateFromBuck(tid, holder, unwind_i)= which
@@ -1548,7 +1615,9 @@ totalSupply                           +=     2,631.578948   (the pool's positive
 #+END_SRC
 
 Alice now holds no BUCK at all and can spend 50,000 of it.  Had the selector reached #43 instead,
-the depreciated-credit shortfall described in [[#mint-burn][mint(N) and burn(N)]] would apply.
+she would have got the same 50,000 -- the gross-up in [[#mint-burn][mint(N) and burn(N)]] would simply have
+activated more of #43's face to carry it, and charged premium on the 285,600 appraisal rather
+than the 300,000 the structure was worth when it was new.
 
 ** Step 2: Approve Bob (Identity Handshake)
 

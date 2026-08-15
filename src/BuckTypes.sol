@@ -168,9 +168,17 @@ function toBuckSeconds(uint256 x) pure returns (BuckSeconds) {
 ///         _allocateBurn loops do not pay an external call per NFT.
 ///         File-level struct so both Buck.sol and BuckCredit.sol can
 ///         reference the same definition without an import cycle.
+///
+/// @dev    Two face values, and the difference matters.  `activatedValue`
+///         is denominated in *face* units -- a slice of the asset as it was
+///         appraised at issue -- while what is actually insured today is
+///         that slice scaled by `depreciatedFace / faceValue`.  Buck's
+///         allocator inverts in present-value units and grosses back up, so
+///         it needs both.
 struct CreditSlice {
     address owner;            // ownerOf(tokenId)
-    uint256 faceValue;        // 6-decimal BUCK
-    uint256 activatedValue;   // 6-decimal BUCK
+    uint256 faceValue;        // 6-decimal BUCK, as appraised at issue
+    uint256 depreciatedFace;  // 6-decimal BUCK, faceValue on today's schedule
+    uint256 activatedValue;   // 6-decimal BUCK, face-denominated coverage sold
     uint32  premiumRate;      // basis points
 }
