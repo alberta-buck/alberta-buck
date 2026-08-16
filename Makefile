@@ -764,6 +764,14 @@ sim-plot-rebalancing-revert:	$(REBALANCING_VECTOR_REVERT)
 
 sim-rebalancing-revert:	sim-run-rebalancing-revert sim-plot-rebalancing-revert
 
+# Who collects the rebalancing premium: per-commodity excursions, the
+# basketValueInBuck break, and the depositor/treasury split.  The chain-sim
+# answer to the article's Figure 1.
+#   make nix-sim-plot-basket-split
+.PHONY: sim-plot-basket-split
+sim-plot-basket-split:	$(REBALANCING_VECTOR_REVERT)
+	python -m pytest alberta_buck/sim/plot_basket_split.py -v -s
+
 
 # ── Pure price-flow basket simulator (no Anvil) ───────────────────────
 #
