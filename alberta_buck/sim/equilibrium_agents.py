@@ -375,6 +375,31 @@ class _ProxyAgent(Agent):
 
 
 
+def _impact_cap(reserve_in: int, max_impact_bp: int) -> int:
+    """Largest input that moves a constant-product pool by at most `bp`.
+
+    Adding dx to reserve x takes the price to 1/(1+f)^2 of where it was, with
+    f = dx/x, so holding the move to `imp` gives
+
+        f <= 1/sqrt(1 - imp) - 1
+
+    which at 100bp is about 0.50% of the reserve.
+
+    The point is that it is a bound on PRICE IMPACT rather than on size, and
+    that is what a fixed fraction cannot express.  As pools deepen the same
+    budget permits a proportionally larger trade, so a market that grows
+    absorbs bigger entries at the same cost to the entrant -- which is the
+    behaviour a real market has and "1% of the reserve" does not.  It also
+    makes the throttle endogenous: many agents entering the same way deepen
+    nothing and simply meet each other's impact, while agents arriving from
+    different directions cancel and both get through.
+    """
+    if reserve_in <= 0 or max_impact_bp <= 0:
+        return 0
+    imp = min(0.99, max_impact_bp / 10_000.0)
+    return int(reserve_in * (1.0 / math.sqrt(1.0 - imp) - 1.0))
+
+
 @_register
 class PidKeeperAgent(Agent):
     """A registered EOA that advances the PID every tick (permissionless
@@ -1044,6 +1069,13 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self.retire_disc = _draw(scenario, cls, "retire_disc", r, 0.02)
         self.cash_buffer = int(_draw(scenario, cls, "buffer_k", r, 20) * m6)
         self.overdraw_effort = _draw(scenario, cls, "overdraw_effort", r, 0.0)
+        # How hard this debtor is willing to push the BUCK/USDC route to get
+        # its refinancing done.  This is the throttle that matters: a debtor
+        # who dumps a whole tranche craters the exit it needs, lifts
+        # basketValueInBuck and pulls K down on everyone -- so the market's
+        # depth, not a hand-set tranche cap, is what paces refinancing.
+        self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r,
+                                       (25, 150)))
         horizon = max(1, int(getattr(scenario, "days", 1)))
         # Arrival: growth-regime schedule when arrive_mode is set; else the
         # legacy uniform stagger over arrive_frac of the horizon.
@@ -1281,7 +1313,16 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             if minted and d.pool_ub:
                 before = d.chain.balance_of(d.usdc, self.proxy.address)
                 try:
-                    sold = self._sell_capped(d, d.pool_ub, want_tranche)
+                    # Sell only what the route can absorb within this
+                    # debtor's impact budget.  The remainder stays drawn and
+                    # is sold on later ticks, so refinancing paces itself to
+                    # market depth instead of to a calendar.
+                    r_out = d.chain.balance_of(d.buck, d.pool_ub)
+                    sold = self._sell_capped(
+                        d, d.pool_ub,
+                        min(want_tranche,
+                            max(10 ** 6, _impact_cap(r_out,
+                                                     self.max_impact_bp))))
                 except Exception as e:
                     ctr["bcd_sell_err"] = repr(e)[:200]
                     sold = 0
@@ -1324,7 +1365,9 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             spot = r_in / r_out if r_out else 10.0
             if spot <= 1.0 - self.retire_disc:
                 want = min(want, spare,
-                           int(r_out * (1.0 - math.sqrt(spot))))
+                           int(r_out * (1.0 - math.sqrt(spot))),
+                           max(10 ** 6, _impact_cap(r_in,
+                                                    self.max_impact_bp)))
                 if want > 10 ** 6:
                     try:
                         tl0 = self.trade_loss
@@ -1475,6 +1518,8 @@ class DiscountBuckArbAgent(_ProxyAgent):
         self.basket_yield = _draw(scenario, cls, "basket_yield", r,
                                   BASKET_PREMIUM)
         self.cost = _draw(scenario, cls, "round_trip_cost", r, ROUND_TRIP_COST)
+        self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r,
+                                       (25, 150)))
         # The trend window should match the holding period: a three-year
         # investor reads a longer trend than a six-month one.  Quarter of the
         # horizon, clamped to a month either side of sanity.
@@ -1580,6 +1625,7 @@ class DiscountBuckArbAgent(_ProxyAgent):
         return max(0, s)
 
     def _buy_leg(self, d, day, ctr) -> int:
+        _, r_in, _ = self._spot_ub(d)
         cash = d.chain.balance_of(d.usdc, self.proxy.address)
         if cash < 10 ** 6:
             return 0
@@ -1595,8 +1641,14 @@ class DiscountBuckArbAgent(_ProxyAgent):
         # already said this is worth paying up for -- but "no bound" would
         # let one agent reprice the venue by itself, so fall back to a flat
         # slice of depth.
-        cap = (int(r_out * (1.0 - math.sqrt(spot))) if spot < 1.0
-               else max(10 ** 6, r_out // 50))
+        # Two bounds, and they say different things.  Below par, never push
+        # the pool past the price that justified the trade.  Always, never
+        # move it more than this agent's impact budget -- which replaces the
+        # old flat 2%-of-reserve and scales with the market instead.
+        cap = _impact_cap(r_in, self.max_impact_bp)
+        if spot < 1.0:
+            cap = min(cap, int(r_out * (1.0 - math.sqrt(spot))))
+        cap = max(10 ** 6, cap)
         want = min(cap, int(min(cash, room) / max(spot, 1e-9)))
         if want < 10 ** 6:
             return 0
@@ -1618,7 +1670,9 @@ class DiscountBuckArbAgent(_ProxyAgent):
         if held < 10 ** 6 or self._excess(d) >= 0:
             return 0
         cap = int(r_out * (math.sqrt(spot) - 1.0)) if spot > 1.0 else held
-        amt = min(held, cap if cap > 0 else held)
+        cap = min(cap if cap > 0 else held,
+                  max(10 ** 6, _impact_cap(r_out, self.max_impact_bp)))
+        amt = min(held, cap)
         if amount is not None:
             amt = min(amt, amount)
         if amt < 10 ** 6:
@@ -1730,6 +1784,8 @@ class BuckIssuerArbAgent(_ProxyAgent):
         self.issue_at = _draw(scenario, cls, "issue_at", r, (0.010, 0.040))
         self.cover_at = _draw(scenario, cls, "cover_at", r, (0.000, 0.015))
         self.step_frac = _draw(scenario, cls, "step_frac", r, (0.05, 0.20))
+        self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r,
+                                       (25, 150)))
         self._drawn = 0
         self._activated = 0
         # Enough BUCK on hand to clear the funding gate, and no more.
@@ -1791,7 +1847,8 @@ class BuckIssuerArbAgent(_ProxyAgent):
         amt = int(unactivated * self.step_frac)
         # Cap the bite so one issuance does not reprice the venue by itself.
         r_out = d.chain.balance_of(d.buck, d.pool_ub)
-        amt = min(amt, max(10 ** 6, r_out // 50), unactivated)
+        amt = min(amt, max(10 ** 6, _impact_cap(r_out, self.max_impact_bp)),
+                  unactivated)
         if amt < 10 ** 6:
             return
         # Step one: open the line.  This is where the funding-factor gate
@@ -1946,7 +2003,8 @@ class DiscountBasketArbAgent(DiscountBuckArbAgent):
         # was sized for a two-agent A/B and skews the pool hard enough at
         # this population to make honest depositors' redeems revert.
         r_buck = d.chain.balance_of(d.buck, pool)
-        amt = min(held, max(10 ** 6, r_buck // 100))
+        amt = min(held, max(10 ** 6,
+                            _impact_cap(r_buck, self.max_impact_bp)))
         self._swap_via_simlp(d, pool, d.buck, amt, self.proxy.address)
         got_tok = d.chain.balance_of(tc, self.proxy.address) - pre_tok
         if got_tok <= 0:

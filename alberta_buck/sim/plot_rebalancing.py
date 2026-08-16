@@ -42,6 +42,21 @@ OUT = _resolve(Path(os.environ.get("REB_OUT",
 E6 = 10 ** 6
 
 
+def _rel(p: Path):
+    """Repo-relative when it can be, absolute otherwise.
+
+    REB_OUT / SPLIT_OUT are deliberately overridable so a run in
+    flight can be plotted to a scratch path; relative_to() raises on
+    anything outside the repo, which crashed the summary AFTER the
+    figure had already been written.
+    """
+    try:
+        return p.relative_to(REPO)
+    except ValueError:
+        return p
+
+
+
 def _i(v):
     return int(v)
 
@@ -467,7 +482,7 @@ def test_rebalancing_sim_plot():
     plt.close(fig)
 
     # Convergence summary.
-    print(f"\nWrote {OUT.relative_to(REPO)}  ({len(days)} days)")
+    print(f"\nWrote {_rel(OUT)}  ({len(days)} days)")
     for t in range(3):
         ref = col("refUsd", t)[-1] / E6
         su = col("spotUsdc", t)[-1] / E6

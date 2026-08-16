@@ -85,6 +85,21 @@ OUT = Path(os.environ.get(
 
 E6 = 10 ** 6
 
+
+def _rel(p: Path):
+    """Repo-relative when it can be, absolute otherwise.
+
+    REB_OUT / SPLIT_OUT are deliberately overridable so a run in
+    flight can be plotted to a scratch path; relative_to() raises on
+    anything outside the repo, which crashed the summary AFTER the
+    figure had already been written.
+    """
+    try:
+        return p.relative_to(REPO)
+    except ValueError:
+        return p
+
+
 INK = "#20242c"
 INK2 = "#77808f"
 SELL = "#e34948"          # same palette as plot_rebalance_article
@@ -229,7 +244,7 @@ def test_basket_split_plot():
     fig.savefig(OUT, dpi=140)
     plt.close(fig)
 
-    print(f"\nWrote {OUT.relative_to(REPO)}  ({len(days)} days)")
+    print(f"\nWrote {_rel(OUT)}  ({len(days)} days)")
     print(f"  depositor  {dep_apr:+.2f}% APR   "
           f"(${last.get('dmProfitUsd', 0) / E6:+,.0f} over "
           f"{last.get('dmRoundTrips', 0)} round-trips)")

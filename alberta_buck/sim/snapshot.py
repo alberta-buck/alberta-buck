@@ -428,5 +428,11 @@ class Snapshotter:
                "frames": self.frames}
         if self.meta:
             out["meta"] = self.meta
-        p.write_text(json.dumps(out))
+        # Atomic: the incremental checkpoint rewrites this file every 25
+        # days while the run continues, and a reader plotting a run in
+        # flight would otherwise be able to catch a half-written file.
+        # Write beside it and rename, which is atomic within a filesystem.
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(json.dumps(out))
+        tmp.replace(p)
         return p
