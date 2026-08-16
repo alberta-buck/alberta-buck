@@ -381,6 +381,12 @@ class Snapshotter:
             "bia_bought": ctr.get("biaBought", 0),
             "bia_sold": ctr.get("biaSold", 0),
             "bia_throttled": ctr.get("biaThrottled", 0),
+            # BuckPoolInvestorAgent.  Snapshotted at birth this time: a
+            # counter that lives only in `ctr` reads 0 forever, which has
+            # already produced two confident wrong readings on this branch.
+            "bpi_minted": ctr.get("bpiMinted", 0),
+            "bpi_positions": ctr.get("bpiPositions", 0),
+            "bpi_repositions": ctr.get("bpiRepositions", 0),
             # WHY they were refused, not just how often.  A bare count let a
             # wrong explanation stand unchallenged for two runs.
             "bia_why": dict(ctr.get("biaWhy", {})),

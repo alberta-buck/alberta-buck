@@ -1866,6 +1866,380 @@ class DiscountBuckArbAgent(_ProxyAgent):
 
 
 @_register
+class BuckPoolInvestorAgent(_ProxyAgent):
+    """A stablecoin holder who doubles their exposure by LPing against BUCK.
+
+    THE POSITION
+
+    They already hold USDC on-chain, and already carry insurance on it -- an
+    insurer with multi-sig authority over the account, who limits their loss
+    exposure and charges for the service.  What is new is that the insurer
+    now issues a BuckCredit NFT representing that same cover.  Nothing about
+    the underlying arrangement changes; the NFT just makes the existing
+    insurance legible to the BUCK system.
+
+    That NFT is collateral.  They mint the BUCK it supports at the current K
+    and pair it with the USDC they already had, so ONE pile of capital
+    provides BOTH sides of a BUCK/USDC position and earns fees on twice the
+    notional.  Unwinding is symmetric:
+
+      BUCK appreciates -- the position converts toward USDC, so they hold
+        fewer BUCK than they drew and must buy some back to release the lien.
+      BUCK depreciates -- the position converts toward BUCK, so they hold
+        more than they drew, release the lien immediately, and sell the rest.
+
+    Insurance is FREE from this agent's point of view, and that is a
+    modelling simplification with a real justification and a real cost.  The
+    justification: a custodial stablecoin holder plausibly pays for this
+    cover already, so the marginal cost of representing it as a BuckCredit is
+    near zero to them.  The cost: premiumRate 0 means poolPrincipal 0, so
+    Buck.mint is exempt from the funding-factor gate -- see the module note
+    above for what that removes.  A later pass should charge the premium and
+    make them accumulate the reserve like anyone else.
+
+    FRONT-RUNNING THE CONTROLLER
+
+    The pool position is concentrated, and where it sits is a directional
+    view.  basketValueInBuck is the controller's own process variable, so it
+    says which way K is about to push:
+
+      bvib > 1   the basket is rich in BUCK, error is negative, K falls,
+                 credit tightens, supply contracts -- BUCK should RISE
+                 against USDC.  Sit ABOVE the price, holding BUCK, and sell
+                 it into the rise.
+      bvib < 1   K rises, credit loosens, supply expands -- BUCK should FALL.
+                 Sit BELOW the price, holding USDC, and buy into the fall.
+
+    A concentrated position is a bet that the price comes to you.  Placing it
+    on the side the controller is pushing toward means the flow arrives,
+    which is where the fees are.
+
+    WIDTH IS A RISK APPETITE, AND IT VARIES
+
+    The range is how much fluctuation this investor tolerates before their
+    position goes one-sided.  Too narrow and it is out of range constantly,
+    holding one token and earning nothing; too wide and the capital is spread
+    thin and captures little of the intraday movement.  The right width is a
+    judgement about volatility, and investors genuinely disagree about it --
+    so `half_width_bp` is drawn per agent (150-900bp) alongside its own
+    rebalancing patience.  A population that agreed would reposition in
+    lockstep, all abandoning the same range on the same tick and all crowding
+    the same new one, which is not a market.
+
+    Repositioning only happens when the price actually leaves the range.
+    Inside it, the position is working and moving it would just pay fees to
+    realize a loss.
+
+    Telemetry (ctr): bpiMinted / bpiPositions / bpiRepositions / bpiFeesUsd.
+    """
+
+    CTR = "bpi"
+    N_CREDITS = 2
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        m6 = 1_000 * 10 ** 6
+        self.stable = int(_draw(scenario, cls, "stable_k", r, (200, 900)) * m6)
+        # Risk appetite, and the reason these do not move as one block.
+        self.half_width_bp = int(_draw(scenario, cls, "half_width_bp", r,
+                                       (150, 900)))
+        # How far outside the range before bothering to move it: a small
+        # tolerance stops a position thrashing at its own boundary.
+        self.reposition_slack_bp = int(_draw(scenario, cls,
+                                             "reposition_slack_bp", r,
+                                             (25, 200)))
+        self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r,
+                                       (25, 150)))
+        self._pos: tuple[int, int] | None = None     # (tickLower, tickUpper)
+        self._liq = 0
+        self._drawn = 0
+        self._repositions = 0
+
+        self._bind_proxy(d)
+        d.chain.send(d.usdc.functions.mint(self.proxy.address, self.stable))
+        # The insurer's NFT: the cover they already carry, made legible.
+        # premiumRate 0 -- free to them, see the class docstring.
+        now_ts = d.w3.eth.get_block("latest")["timestamp"]
+        per = max(1, self.stable // self.N_CREDITS)
+        self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
+            "setCreditIssuer",
+            args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
+        for _ in range(self.N_CREDITS):
+            d.chain.send(d.credit.functions.createCredit(
+                self.proxy.address, 0, per, 0, 0, 0, now_ts, 0))
+        self._face = per * self.N_CREDITS
+        self._token_ids = [
+            d.credit.functions.tokenOfOwnerByIndex(self.proxy.address, i).call()
+            for i in range(self.N_CREDITS)]
+
+    # -- pool geometry --------------------------------------------------- #
+
+    def _pool_state(self, d):
+        """(sqrtPriceX96, tick, tickSpacing, token0, token1) for BUCK/USDC."""
+        pool_abi, _ = load_artifact("UniswapV3Pool")
+        pool = d.w3.eth.contract(address=d.pool_ub, abi=pool_abi)
+        slot0 = pool.functions.slot0().call()
+        return (slot0[0], slot0[1], pool.functions.tickSpacing().call(),
+                pool.functions.token0().call(), pool.functions.token1().call())
+
+    def _bvib(self, d) -> float:
+        try:
+            return int(d.basket.functions.basketValueInBuck().call()) / 1e18
+        except Exception:
+            return 1.0
+
+    @staticmethod
+    def _bp_to_ticks(bp: int) -> int:
+        """A tick IS a log price -- price = 1.0001^tick -- so a fractional
+        move x spans ln(1+x)/ln(1.0001) ticks, which for small x is very
+        nearly x in basis points.  900bp is 862 ticks, not 900, and using the
+        exact form keeps a wide range from quietly being 4% narrower than
+        asked for."""
+        return max(1, int(math.log(1.0 + bp / 10_000.0) / math.log(1.0001)))
+
+    @staticmethod
+    def _sqrt_at_tick(t: int) -> int:
+        """sqrtPriceX96 at a tick.  price = 1.0001^t, so sqrt is 1.0001^(t/2)."""
+        return int((1.0001 ** (t / 2.0)) * (1 << 96))
+
+    def _target_range(self, d, tick: int, spacing: int, buck_is_token0: bool,
+                      amt0: int, amt1: int) -> tuple[int, int]:
+        """Where to sit.  Two cases, and they are different situations.
+
+        HOLDING BOTH TOKENS -- which is the normal state, and always the
+        state right after drawing against the insurance -- the position
+        STRADDLES the current price and deploys both sides.  That is the
+        whole point of the structure: one pile of capital providing both legs
+        and earning fees on twice the notional.  A single-sided position here
+        would leave half the capital idle.
+
+        The straddle is not centred.  A range spanning [A, B] around price P
+        holds value in token1 roughly in proportion to (P - A) and in token0
+        to (B - P), so to deploy BOTH sides fully the split has to match the
+        mix already held -- "the natural bound implied by the mix".  Total
+        width is this investor's tolerance; where P sits inside it is decided
+        by what they are holding.
+
+        HOLDING ONE TOKEN -- which happens after the price runs through the
+        range and converts the position -- there is nothing to straddle with,
+        so the new position ABUTS the current price on the side the
+        controller is pushing toward.  bvib > 1 means K falls, supply
+        contracts and BUCK should rise, so hold BUCK and sell into it; which
+        side of the CURRENT TICK that is depends on orientation, because the
+        pool price is token1/token0 and a BUCK rally is a falling price when
+        BUCK is token1.
+        """
+        width = self._bp_to_ticks(self.half_width_bp)
+        width = max(spacing, (width // spacing) * spacing)
+        base = (tick // spacing) * spacing
+        v0, v1 = max(0, amt0), max(0, amt1)
+        both = v0 > 0 and v1 > 0 and min(v0, v1) * 20 >= max(v0, v1)
+        if both:
+            return self._straddle_for_mix(sp, base, spacing, 2 * width,
+                                          v0, v1)
+        if False:
+            # Split the total width in proportion to the mix.  Room ABOVE the
+            # price is funded in token0 and room BELOW in token1, so the
+            # widths have to sit in the same ratio as the holdings.
+            #
+            # Right after the draw that ratio is known exactly: they hold
+            # their original USDC plus the BUCK the insurance supports, which
+            # is creditLimit = K x collateral -- so USDC : BUCK is 1 : K, and
+            # at K = 0.75 the range runs 4/7 below the price and 3/7 above.
+            # (`balanceOf` on a Non-Carrying account is held BUCK plus unused
+            # credit headroom, so before any draw it already reports exactly
+            # K x collateral -- the amount deployable, not the amount held.)
+            total = 2 * width
+            hi_w = max(spacing, int(total * v0 / (v0 + v1)))
+            hi_w = max(spacing, (hi_w // spacing) * spacing)
+            lo_w = max(spacing, total - hi_w)
+            lo_w = max(spacing, (lo_w // spacing) * spacing)
+            return base - lo_w, base + hi_w
+        bvib = self._bvib(d)
+        if bvib == 1.0:
+            return base - width, base + width
+        above = (bvib > 1.0) == buck_is_token0
+        return (base, base + 2 * width) if above else (base - 2 * width, base)
+
+    def _straddle_for_mix(self, sp: int, base: int, spacing: int,
+                          width: int, amt0: int, amt1: int) -> tuple[int, int]:
+        """Place a range of `width` ticks so it consumes EXACTLY this mix.
+
+        A concentrated position holds unequal amounts whenever it is not
+        symmetric around the price in sqrt-space, and that asymmetry is the
+        free parameter.  With the price P inside [A, B]:
+
+            amount0 = L (sqrtB - sqrtP) / (sqrtP sqrtB)
+            amount1 = L (sqrtP - sqrtA)
+
+        so their ratio is fixed by where P sits in the range, and there is
+        one placement that matches any mix on hand.  Solved by bisection on
+        the low-side width rather than in closed form: the algebra is a
+        quadratic in sqrtA, but bisection on the exact amount formulas avoids
+        both the fixed-point rounding and the small-angle approximation that
+        a width-proportional split quietly relies on.
+
+        That approximation is also wrong in a way worth naming: widths track
+        the VALUE split, amt0*P : amt1, not the raw amounts.  Near parity the
+        difference is invisible, which is exactly why it would have survived.
+        """
+        Q96 = 1 << 96
+
+        def amounts(lo_w: int) -> tuple[int, int]:
+            lo = base - lo_w
+            hi = base + (width - lo_w)
+            sa, sb = self._sqrt_at_tick(lo), self._sqrt_at_tick(hi)
+            spc = min(max(sp, sa + 1), sb - 1)
+            a0 = (sb - spc) * Q96 // max(1, (spc * sb) // Q96)
+            a1 = spc - sa
+            return a0, a1
+
+        want = amt1 / amt0 if amt0 else float("inf")
+        lo_w, hi_w = spacing, max(spacing, width - spacing)
+        for _ in range(40):
+            mid = (lo_w + hi_w) // 2
+            a0, a1 = amounts(mid)
+            got = a1 / a0 if a0 else float("inf")
+            if got < want:
+                lo_w = mid            # more room below -> more token1
+            else:
+                hi_w = mid
+            if hi_w - lo_w <= spacing:
+                break
+        lo_w = max(spacing, (lo_w // spacing) * spacing)
+        return base - lo_w, base + max(spacing, width - lo_w)
+
+    def _in_range(self, tick: int) -> bool:
+        if self._pos is None:
+            return False
+        lo, hi = self._pos
+        slack = self._bp_to_ticks(self.reposition_slack_bp)
+        return (lo - slack) <= tick <= (hi + slack)
+
+    # -- telemetry -------------------------------------------------------- #
+
+    def arb_state(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        signed = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        return {"cls": self.CTR, "idx": self.idx,
+                "cash": d.chain.balance_of(d.usdc, self.proxy.address),
+                "held": max(0, signed), "drawn": max(0, -signed),
+                "endow": self.stable, "parked": 0,
+                "width": self.half_width_bp,
+                "repos": self._repositions,
+                "receipts": 1 if self._pos else 0}
+
+    def _exit_position(self, d, ctr) -> bool:
+        """Burn the current range and collect everything owed, fees included.
+
+        `burn` credits the owed amounts to the position; `collect` is what
+        actually moves them, so both are needed and a burn alone would leave
+        the capital in the pool.
+        """
+        if self._pos is None:
+            return True
+        lo, hi = self._pos
+        pool_abi, _ = load_artifact("UniswapV3Pool")
+        pool = d.w3.eth.contract(address=d.pool_ub, abi=pool_abi)
+        try:
+            self._proxy_exec(d, d.pool_ub, pool.encode_abi(
+                "burn(int24,int24,uint128)",
+                args=[lo, hi, int(getattr(self, "_liq", 0))]))
+            self._proxy_exec(d, d.pool_ub, pool.encode_abi(
+                "collect(address,int24,int24,uint128,uint128)",
+                args=[self.proxy.address, lo, hi,
+                      2 ** 128 - 1, 2 ** 128 - 1]))
+        except Exception as e:
+            ctr["bpi_err"] = repr(e)[:160]
+            return False
+        self._pos = None
+        self._liq = 0
+        return True
+
+    def act(self, d, scenario, day, tick_i, ctr) -> None:
+        if tick_i != 0 or self.proxy is None or not d.pool_ub:
+            return
+        try:
+            sp, tick, spacing, t0, t1 = self._pool_state(d)
+        except Exception as e:
+            ctr["bpi_err"] = repr(e)[:160]
+            return
+        if self._pos is not None and self._in_range(tick):
+            return                      # working: leave it alone
+        buck_is_token0 = d.buck.address.lower() == t0.lower()
+        # Draw the BUCK side against the insurance, once.
+        if self._drawn == 0:
+            room = 0
+            for tid in self._token_ids:
+                try:
+                    face = d.credit.functions.depreciatedFaceValue(tid).call()
+                    used = d.buck.functions.mintsBacked(tid).call()
+                    room += max(0, face - used)
+                except Exception:
+                    pass
+            want = min(room, self.stable)
+            if want >= 10 ** 6:
+                try:
+                    self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                        "mint(uint256)", args=[want]))
+                    self._drawn += want
+                    ctr["bpiMinted"] = ctr.get("bpiMinted", 0) + want
+                except Exception as e:
+                    ctr["bpi_err"] = repr(e)[:160]
+                    return
+        # What is actually on hand, in token0/token1 terms.
+        bal_b = max(0, d.buck.functions.balanceOf(self.proxy.address).call())
+        bal_u = d.chain.balance_of(d.usdc, self.proxy.address)
+        amt0, amt1 = (bal_b, bal_u) if buck_is_token0 else (bal_u, bal_b)
+        lo, hi = self._target_range(d, tick, spacing, buck_is_token0,
+                                    amt0, amt1)
+        if self._pos == (lo, hi):
+            return
+
+        # Concentrated-range liquidity.  The full-range formula from
+        # deploy.py under-sizes a narrow band by the ratio of the widths --
+        # 20-30x at 300-600bp -- which showed up as 95% of capital idle while
+        # positions "placed" fine.  With the price INSIDE the range both legs
+        # bind, so take the smaller:
+        #     amount0 = L (sqrtB - sqrtP) Q96 / (sqrtP sqrtB)
+        #     amount1 = L (sqrtP - sqrtA) / Q96
+        Q96 = 1 << 96
+        sa, sb = self._sqrt_at_tick(lo), self._sqrt_at_tick(hi)
+        sp_c = min(max(sp, sa + 1), sb - 1)
+        if sb <= sa:
+            return
+        cands = []
+        if amt0 > 0 and sb > sp_c:
+            cands.append(amt0 * sp_c * sb // (Q96 * (sb - sp_c)))
+        if amt1 > 0 and sp_c > sa:
+            cands.append(amt1 * Q96 // (sp_c - sa))
+        L = min(cands) if cands else 0
+        if L < 1:
+            return
+        # Leave the old range first, or liquidity strands in a band the
+        # price has already left and stops earning anything.
+        if self._pos is not None:
+            if not self._exit_position(d, ctr):
+                return
+            self._repositions += 1
+            ctr["bpiRepositions"] = ctr.get("bpiRepositions", 0) + 1
+        # The proxy IS a SimLP, so it can serve the V3 mint callback itself.
+        try:
+            d.chain.send(self.proxy.functions.mint(
+                d.pool_ub, lo, hi, int(min(L, 2 ** 127 - 1)), t0, t1))
+        except Exception as e:
+            ctr["bpi_err"] = repr(e)[:160]
+            self._pos = None
+            return
+        self._pos = (lo, hi)
+        self._liq = int(min(L, 2 ** 127 - 1))
+        ctr["bpiPositions"] = ctr.get("bpiPositions", 0) + 1
+
+
+@_register
 class BuckIssuerArbAgent(_ProxyAgent):
     """The SUPPLY side: mints over-valued BUCK and buys real assets with it.
 

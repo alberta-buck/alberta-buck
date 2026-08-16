@@ -143,8 +143,15 @@ def deploy_params(exp) -> SimpleNamespace:
     # can, so refinancing arrives gradually as K drifts rather than all at
     # once.  The onset is a different shape, and that is the thing worth
     # bracketing.  SIM_K0=0.50 make nix-sim-rebalancing-revert
+    # target_buck_lp_m is the BUCK/USDC seed, and it is the throughput limit
+    # on refinancing: entries are impact-capped at ~0.5% of the reserve per
+    # trade at 100bp, so a $10M route passes ~$50k per debtor per month.  At
+    # 24 debtors wanting ~$24M through it, that paced them to 13% of their
+    # mortgages in 200 days -- the route, not the collateral, was binding.
     for key, env in (("k0", "SIM_K0"), ("kmin", "SIM_KMIN"),
-                     ("kmax", "SIM_KMAX")):
+                     ("kmax", "SIM_KMAX"),
+                     ("target_buck_m", "SIM_POOL_M"),
+                     ("target_buck_lp_m", "SIM_BUCK_LP_M")):
         val = os.environ.get(env)
         if val:
             dep[key] = float(val)

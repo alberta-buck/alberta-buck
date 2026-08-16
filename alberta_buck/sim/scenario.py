@@ -90,6 +90,15 @@ REBALANCING = Scenario(
             # issue BUCK against BuckCredit collateral when it is rich and
             # buy real assets with it, then cover when it returns to parity.
             "BuckIssuerArbAgent": 6,
+            # Stablecoin holders who represent their existing custodial
+            # insurance as a BuckCredit, mint the BUCK it supports, and LP
+            # both sides of BUCK/USDC -- one pile of capital, twice the
+            # notional earning fees.  Their concentrated positions are a
+            # directional view: basketValueInBuck says which way K is about
+            # to push, so they sit on that side and let the flow come to
+            # them.  Widths are drawn per agent so they do not reposition in
+            # lockstep.
+            "BuckPoolInvestorAgent": 8,
             # The ISSUANCE leg, and the reason BUCK_K has anything to act on.
             # buckK reaches the economy only through creditLimit, so without
             # credit borrowers the controller pushes on a channel carrying
