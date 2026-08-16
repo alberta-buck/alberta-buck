@@ -727,6 +727,44 @@ sim-rebalancing-prorata:	sim-run-rebalancing-prorata sim-plot-rebalancing-prorat
 sim-rebalancing-traditional:	sim-run-rebalancing-traditional sim-plot-rebalancing-traditional
 
 
+# -- The reverting regime: oscillation without drift -------------------
+#
+# The committed price CSVs are GBM with +8%/+15%/+2% annual drift baked in,
+# which confounds every reversion measurement made against them.  A
+# rebalancing premium is a claim about harvesting oscillation and a demand
+# agent is judged on buying cheap; in a market that rises throughout,
+# buy-and-hold beats both for reasons unrelated to either mechanism.
+#
+# The revert regime keeps the same volatility and removes the drift: an
+# Ornstein-Uhlenbeck walk pinned by a Brownian bridge, so each series ends
+# EXACTLY where it began.  Whatever is earned here came from the
+# oscillation, because there is no trend left to earn from.
+#
+#   make nix-sim-gen-prices-revert       # write prices/*-rev.csv (committed)
+#   make nix-sim-rebalancing-revert      # run + plot the reverting regime
+
+REBALANCING_VECTOR_REVERT = test/vectors/rebalancing-sim-revert.json
+
+.PHONY: sim-gen-prices-revert sim-run-rebalancing-revert
+.PHONY: sim-plot-rebalancing-revert sim-rebalancing-revert
+
+sim-gen-prices-revert:
+	python -m $(SIM_PKG).gen_prices --regime revert
+
+sim-run-rebalancing-revert:	sim-build
+	python -m $(SIM_PKG) --scenario rebalancing-revert --days $(SIM_DAYS) \
+		--ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--out $(REBALANCING_VECTOR_REVERT)
+
+sim-plot-rebalancing-revert:	$(REBALANCING_VECTOR_REVERT)
+	REB_VECTOR=$(REBALANCING_VECTOR_REVERT) \
+		REB_OUT=images/rebalancing-sim-revert.png \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing-revert:	sim-run-rebalancing-revert sim-plot-rebalancing-revert
+
+
 # ── Pure price-flow basket simulator (no Anvil) ───────────────────────
 #
 # Ad-hoc check of investor flow rebalancing against the generated

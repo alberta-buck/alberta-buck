@@ -1346,13 +1346,47 @@ class BuckCreditDebtorAgent(_ProxyAgent):
 # allocator actually asks is whether the whole round trip beats leaving the
 # money in USDC over the period it expects to hold.  Two terms decide it:
 #
-#   edge    the K-quench recovery.  `basketValueInBuck` is the controller's
-#           own process variable and 1.0 is its setpoint, so `bvib - 1` IS
-#           the appreciation the machine is working to deliver: bvib 1.10
-#           says the basket costs 1.10 BUCK where it should cost 1.00, i.e.
-#           BUCK is 10% cheap against its own anchor.  (See
-#           BuckKControllerDirect: "error = setpoint - process; -50_000 ppm
-#           == basket 5% rich" -- a rich basket is a cheap BUCK.)
+#   edge    what the round trip is expected to earn in USD.  This needs TWO
+#           terms, and using only the first is the mistake that cost this
+#           agent 24% in the first 45 days of the 730-day run.
+#
+#           Write P_B for BUCK's USD price and P_K for the basket's, so that
+#           bvib = P_K / P_B.  Then:
+#
+#             term 1   bvib - 1           BUCK cheap against the basket.
+#                                         This is the K-quench recovery: the
+#                                         controller drives bvib to its 1.0
+#                                         setpoint.  (BuckKControllerDirect:
+#                                         "error = setpoint - process;
+#                                         -50_000 ppm == basket 5% rich" --
+#                                         a rich basket is a cheap BUCK.)
+#
+#             term 2   MA(P_K)/P_K - 1    the basket cheap against its OWN
+#                                         trend.  No forecast is needed for
+#                                         this; it is the mean reversion the
+#                                         whole design already rests on.
+#
+#           Term 1 alone is a SPREAD, and the agent does not hold a spread --
+#           it holds an outright long, bought with USDC.  Its return is
+#           therefore (spread closing) + (the basket's own USD drift), and
+#           the second part is usually the larger.  Measured on day 0 of the
+#           730-day run: term 1 said BUY at +8%, the spread then closed
+#           exactly as predicted (BUCK -24%, basket -33%), and the position
+#           still lost 24% because it was long into a falling market.  The
+#           signal was right and the position was wrong.
+#
+#           The two terms compose, which is what makes this a correction
+#           rather than a patch:
+#
+#             (P_K/P_B - 1) + (MA(P_K)/P_K - 1)  ~=  MA(P_K)/P_B - 1
+#
+#           "is BUCK cheap against where the basket is GOING", not against
+#           where it happens to sit today.  With a flat basket MA == P_K and
+#           it collapses back to bvib - 1, i.e. to the old rule in exactly
+#           the case the old rule assumed.
+#
+#           The two variants take different references, because they end up
+#           holding different things -- see TRACKS_BUCK below.
 #
 #   carry   the yield differential, per year, in REAL terms.  USDC earns a
 #           T-bill and loses inflation; BUCK is inflation-neutral by
@@ -1419,6 +1453,10 @@ class DiscountBuckArbAgent(_ProxyAgent):
     # demurrage; the basketeer overrides this.
     POSITION_YIELD = -DEMURRAGE
 
+    # This variant ends the holding period in BUCK, so BUCK's own price is
+    # what its edge is measured against.  The basketeer overrides it.
+    TRACKS_BUCK = True
+
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
         r = self._rng
@@ -1437,6 +1475,12 @@ class DiscountBuckArbAgent(_ProxyAgent):
         self.basket_yield = _draw(scenario, cls, "basket_yield", r,
                                   BASKET_PREMIUM)
         self.cost = _draw(scenario, cls, "round_trip_cost", r, ROUND_TRIP_COST)
+        # The trend window should match the holding period: a three-year
+        # investor reads a longer trend than a six-month one.  Quarter of the
+        # horizon, clamped to a month either side of sanity.
+        self.ma_days = int(min(365.0, max(30.0, self.horizon * 365.0 / 4.0)))
+        self._ma_pk: float | None = None     # EMA of the basket's USD price
+        self._n_obs = 0
         self._deployed = 0        # USDC put at risk, net of proceeds
         self._bind_proxy(d)
         d.chain.send(d.usdc.functions.mint(self.proxy.address, self.endow))
@@ -1458,9 +1502,66 @@ class DiscountBuckArbAgent(_ProxyAgent):
         except Exception:
             return 1.0
 
+    def _basket_usd(self, d) -> float:
+        """P_K: the basket's price in USD, from the two quantities we observe.
+
+        bvib is the basket priced in BUCK and spot is BUCK priced in USD, so
+        their product is the basket priced in USD -- the thing whose drift
+        term 1 leaves out.
+        """
+        spot, _, _ = self._spot_ub(d)
+        return self._bvib(d) * spot
+
+    def observe(self, d) -> None:
+        """Advance the basket-price trend by one daily sample."""
+        pk = self._basket_usd(d)
+        if pk <= 0.0:
+            return
+        if self._ma_pk is None:
+            self._ma_pk = pk
+        else:
+            beta = 2.0 / (self.ma_days + 1.0)
+            self._ma_pk += (pk - self._ma_pk) * beta
+        self._n_obs += 1
+
+    def _edge(self, d) -> float | None:
+        """Expected USD gain from convergence, or None while the trend is cold.
+
+        The reference differs by variant because the exposures differ:
+
+          HOLDER      keeps BUCK, so it converges to the basket's trend value
+                      and takes BOTH terms:  MA(P_K)/P_B - 1.
+
+          BASKETEER   swaps BUCK into TOKEN and parks it.  Spend X USDC, get
+                      X/P_B BUCK, convert to (X/P_B)(P_B/P_K) = X/P_K baskets
+                      -- P_B cancels EXACTLY, so bvib is irrelevant to it and
+                      its return is P_K'/P_K - 1.  It takes term 2 only:
+                      MA(P_K)/P_K - 1.
+
+        Feeding the basketeer a bvib signal was describing an exposure it
+        does not hold.
+        """
+        if self._ma_pk is None or self._n_obs < self.ma_days:
+            return None                      # no trend yet: do not guess
+        if self.TRACKS_BUCK:
+            ref, _, _ = self._spot_ub(d)     # P_B
+        else:
+            ref = self._basket_usd(d)        # P_K
+        if ref <= 0.0:
+            return None
+        return self._ma_pk / ref - 1.0
+
     def _excess(self, d) -> float:
-        """Expected excess return over USDC for the whole round trip."""
-        return (self._bvib(d) - 1.0) + self._carry() * self.horizon
+        """Expected excess return over USDC for the whole round trip.
+
+        Returns 0.0 while the trend is cold, which reads as "no edge" to
+        both the buy gate (needs > cost) and the sell gate (needs < 0), so a
+        warming agent simply holds still.
+        """
+        edge = self._edge(d)
+        if edge is None:
+            return 0.0
+        return edge + self._carry() * self.horizon
 
     def _target_deploy(self, excess: float) -> int:
         """Conviction sizing: how much of the endowment this edge justifies."""
@@ -1558,6 +1659,7 @@ class DiscountBuckArbAgent(_ProxyAgent):
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or self.proxy is None:
             return
+        self.observe(d)                      # trend first, then decide
         if not self._buy_leg(d, day, ctr):
             self._sell_leg(d, day, ctr)
 
@@ -1587,6 +1689,10 @@ class DiscountBasketArbAgent(DiscountBuckArbAgent):
     # Parked value sits in TOKEN inside the basket, never as loose BUCK --
     # no demurrage.  None => use the agent's own basket-premium belief.
     POSITION_YIELD = None
+
+    # It ends the holding period in TOKEN, not BUCK, so its edge is measured
+    # against the basket.  bvib cancels out of its round trip entirely.
+    TRACKS_BUCK = False
 
     def setup(self, d, scenario, rng) -> None:
         super().setup(d, scenario, rng)
@@ -1671,6 +1777,7 @@ class DiscountBasketArbAgent(DiscountBuckArbAgent):
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or self.proxy is None:
             return
+        self.observe(d)                      # trend first, then decide
         if not self._buy_leg(d, day, ctr):
             self._harvest_leg(d, day, ctr)
         self._park_leg(d, day, ctr)

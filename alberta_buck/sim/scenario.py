@@ -97,7 +97,30 @@ REBALANCING = Scenario(
     ticks_per_day=4,
 )
 
-SCENARIOS = {ROUTING.name: ROUTING, REBALANCING.name: REBALANCING}
+# The same population and timeline as REBALANCING, on price series that
+# oscillate with the same volatility but carry ZERO net drift and end exactly
+# where they begin (alberta_buck/sim/gen_prices.py --regime revert).
+#
+# The committed trend CSVs bake in +8%/+15%/+2% annual drift, which confounds
+# every reversion claim measured against them: a rebalancing premium is a
+# statement about harvesting oscillation, and a demand agent is judged on
+# buying cheap, but in a market that rises throughout, buy-and-hold beats
+# both for a reason unrelated to either mechanism.  Here there is no trend
+# left to collect, so whatever a policy or an agent earns, it earned from the
+# oscillation.  This is the regime the BuckBasket's charter actually
+# describes -- commodities that physics forces to revert.
+REBALANCING_REVERT = Scenario(
+    name="rebalancing-revert",
+    tokens=REBALANCING.tokens,
+    csv_files=["paxg-rev.csv", "cbbtc-rev.csv", "aoil-rev.csv"],
+    agents=dict(REBALANCING.agents),
+    days=REBALANCING.days,
+    ticks_per_day=REBALANCING.ticks_per_day,
+)
+
+SCENARIOS = {ROUTING.name: ROUTING,
+             REBALANCING.name: REBALANCING,
+             REBALANCING_REVERT.name: REBALANCING_REVERT}
 
 
 def build_historical(start=None, end=None, years=5.0, ticks_per_day=1,
