@@ -169,7 +169,17 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
                   f"  cycle={ctr['cycleTrades']} direct={ctr['directTrades']}",
                   flush=True)
 
-    path = snap.write(out_path)
+    # The vector is written AFTER the teardown, below.  Writing it here left
+    # every run's books open: the last frame carried whatever positions the
+    # Bernoulli exit never happened to close -- 91 of them, 9.5M BUCK, in the
+    # 730-day reverting run -- and their profit was never booked into
+    # dmProfitUsd.  The teardown then force-redeemed them and released a
+    # further 79k BUCK to treasury that no reader of the vector could see.
+    #
+    # The per-day frames stay exactly as they were, because they record
+    # VOLUNTARY behaviour and a forced liquidation is a different kind of
+    # event.  The teardown result goes into the vector's metadata instead, so
+    # a run closes its own books without a synthetic jump in the time series.
 
     # --- teardown: force-redeem active DM positions, then report ----- #
     if verbose:
@@ -222,6 +232,20 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
             print(f"[teardown] teardown released "
                   f"{treasury_delta/E6:,.2f} BUCK to treasury")
 
+        # Closed books, for readers of the vector.  `outstandingPost` is what
+        # remains after every voluntary position is forced shut: it is the
+        # pinned BootstrapDMAgent capital, which deposits once and never
+        # exits, and it is why a run does not return to its starting state.
+        snap.meta["teardown"] = {
+            "forcedExits": forced_ok,
+            "outstandingPre": outstanding_pre,
+            "outstandingPost": outstanding_post,
+            "treasuryPre": treasury_pre,
+            "treasuryPost": treasury_post,
+            "treasuryReleased": treasury_delta,
+            "navPost": nav_post,
+        }
+
         # End-of-sim summary: entries, exits, treasury share of NAV.
         #
         # "treasury share" = treasuryBuck / NAV.  treasuryBuck is the
@@ -253,6 +277,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
             roi = 100 * fee / cap0 if cap0 else 0
             print(f"  {g:5s}  capital ${cap0/E6:,.0f}  "
                   f"fees ${fee/E6:,.0f}  ROI {roi:+.3f}%")
+
+    # Final write, with the teardown recorded: the run's books are closed.
+    path = snap.write(out_path) if out_path else None
 
     # --- summary ----------------------------------------------------- #
     tail = snap.frames[-30:] if len(snap.frames) >= 30 else snap.frames

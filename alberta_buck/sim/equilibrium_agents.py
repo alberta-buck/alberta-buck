@@ -1665,6 +1665,230 @@ class DiscountBuckArbAgent(_ProxyAgent):
 
 
 @_register
+class BuckIssuerArbAgent(_ProxyAgent):
+    """The SUPPLY side: mints over-valued BUCK and buys real assets with it.
+
+    Every other actor in the rebalancing scenario either wants BUCK or is
+    indifferent to it.  The discount arbs bid for it; the direct-mint agents
+    pledge TOKEN; the debtors issue on a mortgage schedule that has nothing
+    to do with what a BUCK is worth.  So when BUCK becomes over-valued there
+    is nobody whose business it is to issue into that, and the price has no
+    ceiling.
+
+    The 730-day reverting run is what happens without this agent.  The demand
+    leg bought 3.4M BUCK between days 460 and 550; the debtors answered with
+    about 600k, one sixth, because their issuance follows amortization rather
+    than opportunity; buckK ran to its 0.95 clamp and stayed there.
+    basketValueInBuck fell from 1.05 to 0.80 -- BUCK 20% rich against its own
+    anchor -- and every redemption from then on took BuckBasketProRata's
+    deflation branch, converting depositors' TOKEN away to cover burns that
+    the withdrawn liquidity no longer covered.  Treasury accrual stopped
+    dead.  The break was not the price regime; it was a market with one side.
+
+    This is the missing side, and it is the oldest trade there is: when your
+    money is worth more than what it claims, issue it and buy the claim.
+
+      bvib < 1   the basket is cheap in BUCK -- BUCK buys more real goods
+                 than parity says it should.  DRAW BUCK against BuckCredit
+                 collateral and spend it on TOKEN.  This is seigniorage: the
+                 issuer keeps the difference, and the selling pressure is
+                 what caps the appreciation.
+      bvib > 1   BUCK is cheap against the basket.  Sell the TOKEN back, buy
+                 BUCK, and retire the draw -- covering the position at a
+                 discount to what it was issued at.
+
+    Issuing is two steps, and the first one is easy to miss.  `Buck.mint`
+    ACTIVATES a slice of the collateral's coverage -- `BuckCredit.currentValue`
+    returns 0 while `activatedValue` is zero, so an un-activated NFT
+    contributes nothing to `totalCurrentValue` and therefore nothing to
+    `creditLimit`.  Only once coverage is activated does `balanceOf` report
+    spendable headroom, and only then does selling draw the balance negative.
+    Mint alone issues nothing: it debits the premium and opens the line.
+    Retiring is the balance climbing back toward zero.
+
+    Telemetry (ctr): biaDrawn / biaRetired (6-dec BUCK), biaBought /
+    biaSold (6-dec USDC of TOKEN acquired and released).
+    """
+
+    CTR = "bia"
+    N_CREDITS = 4
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        m6 = 1_000 * 10 ** 6
+        # Collateral, not cash: this agent issues against assets it owns
+        # rather than spending a war chest, which is what makes it an ISSUER
+        # and bounds it by creditLimit (and therefore by buckK).
+        face = int(_draw(scenario, cls, "face_k", r, (800, 1600)) * m6)
+        # A real premium, so the funding-factor gate applies for real and a
+        # blocked issuance shows up as a throttle rather than as silence.
+        self.premium_rate = int(_draw(scenario, cls, "premium_bp", r, (25, 75)))
+        # How far BUCK must be rich before issuing, and how far back toward
+        # parity before covering.  The gap between them is hysteresis.
+        self.issue_at = _draw(scenario, cls, "issue_at", r, (0.010, 0.040))
+        self.cover_at = _draw(scenario, cls, "cover_at", r, (0.000, 0.015))
+        self.step_frac = _draw(scenario, cls, "step_frac", r, (0.05, 0.20))
+        self._drawn = 0
+        self._activated = 0
+        # Enough BUCK on hand to clear the funding gate, and no more.
+        self.gate_buffer = int(_draw(scenario, cls, "gate_buffer_k", r, 25)
+                               * 1_000 * 10 ** 6)
+        self._bind_proxy(d)
+        now_ts = d.w3.eth.get_block("latest")["timestamp"]
+        per = max(1, face // self.N_CREDITS)
+        self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
+            "setCreditIssuer",
+            args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
+        for _ in range(self.N_CREDITS):
+            d.chain.send(d.credit.functions.createCredit(
+                self.proxy.address, 0, per, 0, 0, 0, now_ts, self.premium_rate))
+        self._face = per * self.N_CREDITS
+        # Working capital.  The funding gate wants the minter to hold BUCK
+        # covering poolPrincipal * fundingFactor before activation, and
+        # poolPrincipal is the PREMIUM rather than the draw, so this is small
+        # -- but an issuer with no float cannot open a line at all.
+        d.chain.send(d.usdc.functions.mint(
+            self.proxy.address, int(_draw(scenario, cls, "float_k", r, 150)
+                                    * 1_000 * 10 ** 6)))
+
+    # -- state ---------------------------------------------------------- #
+
+    def _bvib(self, d) -> float:
+        try:
+            return int(d.basket.functions.basketValueInBuck().call()) / 1e18
+        except Exception:
+            return 1.0
+
+    def _headroom(self, d) -> int:
+        """Spendable BUCK: held, plus unused credit.  Drawing is spending."""
+        try:
+            return int(d.buck.functions.balanceOf(self.proxy.address).call())
+        except Exception:
+            return 0
+
+    def _tok_value(self, d) -> int:
+        """USDC value of TOKEN inventory at pool prices."""
+        v = 0
+        for i, tc in enumerate(d.tokens):
+            bal = d.chain.balance_of(tc, self.proxy.address)
+            if bal <= 0:
+                continue
+            rt = d.chain.balance_of(tc, d.pool_usdc[i])
+            ru = d.chain.balance_of(d.usdc, d.pool_usdc[i])
+            if rt:
+                v += bal * ru // rt
+        return v
+
+    # -- legs ----------------------------------------------------------- #
+
+    def _issue(self, d, day, ctr) -> None:
+        """Activate coverage, draw against it, and buy real assets."""
+        unactivated = max(0, self._face - self._activated)
+        if unactivated < 10 ** 6:
+            return
+        amt = int(unactivated * self.step_frac)
+        # Cap the bite so one issuance does not reprice the venue by itself.
+        r_out = d.chain.balance_of(d.buck, d.pool_ub)
+        amt = min(amt, max(10 ** 6, r_out // 50), unactivated)
+        if amt < 10 ** 6:
+            return
+        # Step one: open the line.  This is where the funding-factor gate
+        # applies, and where the premium is paid.
+        try:
+            self._proxy_exec(d, d.buck.address,
+                             d.buck.encode_abi("mint(uint256)", args=[amt]))
+            self._activated += amt
+        except Exception:
+            ctr["biaThrottled"] = ctr.get("biaThrottled", 0) + 1
+            # Not enough float to clear the gate: convert some USDC to BUCK
+            # so the next attempt can.  This is the counter-cyclical demand
+            # the gate is designed to compel.
+            # Bounded, and only while the float is thin.  Buying BUCK is
+            # DEMAND, which is the pressure this agent exists to relieve, so
+            # topping the gate buffer must never become the agent's main
+            # activity -- the first run spent an entire $150k float this way
+            # and drew almost nothing.
+            held = max(0, d.buck.functions.signedBalanceOf(
+                self.proxy.address).call())
+            if held < self.gate_buffer:
+                cash = d.chain.balance_of(d.usdc, self.proxy.address)
+                want = min(cash // 4, self.gate_buffer - held)
+                if want > 10 ** 6:
+                    try:
+                        self._buy_buck(d, d.pool_ub, d.usdc, want, d.fee_ub)
+                    except Exception:
+                        pass
+            return
+        # Step two: spend it.  Now that coverage is activated, balanceOf
+        # reports headroom and selling draws the signed balance negative.
+        pre_u = d.chain.balance_of(d.usdc, self.proxy.address)
+        sold = self._sell_capped(d, d.pool_ub, amt)
+        if sold <= 0:
+            return
+        got = d.chain.balance_of(d.usdc, self.proxy.address) - pre_u
+        self._drawn += sold
+        ctr["biaDrawn"] = ctr.get("biaDrawn", 0) + sold
+        # Spend the proceeds on the most underweight commodity: the issuer
+        # wants real goods, and buying where the basket is short helps rather
+        # than fights the mandate.
+        i = (day + self.idx) % len(d.tokens)
+        if got > 0:
+            try:
+                self._swap_via_simlp(d, d.pool_usdc[i], d.usdc, got,
+                                     self.proxy.address)
+                ctr["biaBought"] = ctr.get("biaBought", 0) + got
+            except Exception as e:
+                ctr["bia_err"] = repr(e)[:200]
+
+    def _cover(self, d, day, ctr) -> None:
+        """Sell the assets back and retire the draw."""
+        if self._drawn <= 0:
+            return
+        for i, tc in enumerate(d.tokens):
+            bal = d.chain.balance_of(tc, self.proxy.address)
+            if bal <= 0:
+                continue
+            pre = d.chain.balance_of(d.usdc, self.proxy.address)
+            try:
+                self._swap_via_simlp(d, d.pool_usdc[i], tc, bal,
+                                     self.proxy.address)
+            except Exception as e:
+                ctr["bia_err"] = repr(e)[:200]
+                continue
+            ctr["biaSold"] = ctr.get("biaSold", 0) + (
+                d.chain.balance_of(d.usdc, self.proxy.address) - pre)
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        if cash < 10 ** 6:
+            return
+        want = min(self._drawn, int(cash))
+        got = self._buy_buck(d, d.pool_ub, d.usdc, want, d.fee_ub)
+        if got > 0:
+            self._drawn = max(0, self._drawn - got)
+            ctr["biaRetired"] = ctr.get("biaRetired", 0) + got
+
+    def arb_state(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        signed = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        return {"cls": self.CTR, "idx": self.idx,
+                "cash": d.chain.balance_of(d.usdc, self.proxy.address),
+                "held": max(0, signed), "drawn": max(0, -signed),
+                "tok": self._tok_value(d), "endow": self._face,
+                "parked": 0, "receipts": 0}
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None:
+            return
+        bvib = self._bvib(d)
+        if bvib < 1.0 - self.issue_at:
+            self._issue(d, day, ctr)          # BUCK rich: issue into it
+        elif bvib > 1.0 - self.cover_at:
+            self._cover(d, day, ctr)          # back toward parity: cover
+
+
+@_register
 class DiscountBasketArbAgent(DiscountBuckArbAgent):
     """BASKETEER variant: buys cheap BUCK like the holder, then PARKS it --
     swaps BUCK -> TOKEN through the TOKEN/BUCK basket pools (the BUCK leaves

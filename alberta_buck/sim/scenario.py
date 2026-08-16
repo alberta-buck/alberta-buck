@@ -81,6 +81,15 @@ REBALANCING = Scenario(
             # holder/basketeer carry asymmetry is visible in one render.
             "DiscountBasketArbAgent": 12,
             "DiscountBuckArbAgent": 4,
+            # The SUPPLY side, and the market has no ceiling without it.
+            # Every agent above either wants BUCK or ignores it, and the
+            # debtors issue on a mortgage schedule rather than because BUCK
+            # is dear.  So a sustained bid drove basketValueInBuck to 0.80 in
+            # the reverting run, buckK sat on its 0.95 clamp, and every
+            # redemption fell into the basket's deflation branch.  These
+            # issue BUCK against BuckCredit collateral when it is rich and
+            # buy real assets with it, then cover when it returns to parity.
+            "BuckIssuerArbAgent": 6,
             # The ISSUANCE leg, and the reason BUCK_K has anything to act on.
             # buckK reaches the economy only through creditLimit, so without
             # credit borrowers the controller pushes on a channel carrying

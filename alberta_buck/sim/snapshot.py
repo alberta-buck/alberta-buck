@@ -372,6 +372,15 @@ class Snapshotter:
             "dbb_recv": ctr.get("dbbRecv", 0),
             "dbb_parked": ctr.get("dbbParked", 0),
             "dbb_harvests": ctr.get("dbbHarvests", 0),
+            # BuckIssuerArbAgent: the supply side.  Without these the agent
+            # is invisible -- counters live in `ctr` and a frame that does
+            # not copy them reads 0 forever, which is exactly how the first
+            # two smoke runs looked like a dead agent.
+            "bia_drawn": ctr.get("biaDrawn", 0),
+            "bia_retired": ctr.get("biaRetired", 0),
+            "bia_bought": ctr.get("biaBought", 0),
+            "bia_sold": ctr.get("biaSold", 0),
+            "bia_throttled": ctr.get("biaThrottled", 0),
             "bcd_deploys": ctr.get("bcdDeploys", 0),
             "bcd_throttled": ctr.get("bcdThrottled", 0),
             "bcd_saved": ctr.get("bcdSaved", 0),
