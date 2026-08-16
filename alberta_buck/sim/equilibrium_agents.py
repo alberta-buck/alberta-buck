@@ -375,6 +375,51 @@ class _ProxyAgent(Agent):
 
 
 
+# -- insurance is switched OFF in this simulation -----------------------
+#
+# Both issuing agents create their BuckCredit with premiumRate 0, which makes
+# `poolPrincipal` zero, which makes `Buck.mint` EXEMPT from the funding gate:
+#
+#     if (factor > 0 && poolPrincipal > 0) { require(preFundingBalance >= ...) }
+#
+# That is a deliberate loss of fidelity, and it is worth being precise about
+# what is given up, because the gate is not a formality.
+#
+# `poolPrincipal` capitalizes the insurance pool as a perpetuity at an assumed
+# 10% ROI -- POOL_ROI_INV = 10 in Buck.sol -- so it is the ANNUAL premium
+# TIMES TEN, not the annual premium.  A 50bp policy on a $100,000 draw is
+# $500/yr, hence $5,000 of principal; and fundingFactor is 1 + 10(b - p)/b,
+# so at basketValueInBuck 1.10 the factor is 1.91 and the minter must be
+# HOLDING $9,550 of BUCK -- about 9.5% of the draw -- before the mint is
+# allowed.  That is a serious accumulation requirement.
+#
+# It does two jobs, both of which vanish here:
+#
+#   * it discourages issuance INTO inflation.  The factor rises exactly when
+#     BUCK is undervalued, so the moment issuing more BUCK would hurt most is
+#     the moment it costs most to arrange.
+#   * it manufactures aggregate BUCK DEMAND from anyone who issues anyway,
+#     because the reserve must be bought on the market first, so issuance
+#     drags a bid along behind it.
+#
+# Turning it off makes issuance cheaper and less counter-cyclical than the
+# real design, and removes a source of standing demand.  Read any result
+# about issuance volume or parity with that in mind.
+#
+# TO RESTORE FIDELITY LATER, in rough order of effort:
+#   1. a helper quoting the BUCK accumulation a draw requires -- quoteMint
+#      gives poolPrincipal and fundingFactor is a live read, so
+#      `required = poolPrincipal * factor / 1e18` is a two-call view;
+#   2. a saving loop that actually funds it.  BuckCreditDebtorAgent has one
+#      in outline (step 2 of its act) and it could not keep up: with a real
+#      premium it managed 3 deploys against 77 gate refusals over 120 days,
+#      because `balanceOf` counts unused credit headroom, headroom needs
+#      activated coverage, and a NEW borrower holds nothing the gate accepts.
+#      That bootstrap deadlock is the thing to model, not to route around;
+#   3. the premium as a real cost in the ROI ledger, on BOTH the BUCK path
+#      and the mortgage counterfactual.
+
+
 def _impact_cap(reserve_in: int, max_impact_bp: int) -> int:
     """Largest input that moves a constant-product pool by at most `bp`.
 
@@ -1063,8 +1108,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self.income_annual = int(_draw(scenario, cls, "income_k", r,
                                        (180, 320)) * m6)
         face = int(_draw(scenario, cls, "face_k", r, (600, 1200)) * m6)
-        self.premium_rate = int(_draw(scenario, cls, "premium_bp", r,
-                                      (50, 150)))
+        # 0 => poolPrincipal 0 => funding gate exempt (see the module note).
+        self.premium_rate = int(_draw(scenario, cls, "premium_bp", r, 0))
         self.save_rate = _draw(scenario, cls, "save_rate", r, (0.25, 0.75))
         self.retire_disc = _draw(scenario, cls, "retire_disc", r, 0.02)
         self.cash_buffer = int(_draw(scenario, cls, "buffer_k", r, 20) * m6)
@@ -1094,6 +1139,11 @@ class BuckCreditDebtorAgent(_ProxyAgent):
 
         self.hypo_mortgage = self.mortgage
         self.hypo_cash = 0
+        # BUCK-path savings: the receipt this debtor holds in the BuckBasket,
+        # and the USDC principal it put in.  The counterfactual has no
+        # equivalent because every dollar of its income is owed to the bank.
+        self._basket_receipt: int | None = None
+        self._basket_in = 0
         start = self.arrive_day if self.arrive_day is not None else 0
         self._last_day = start
         self._last_month_day = start - self.MONTH
@@ -1185,10 +1235,23 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         except Exception:
             jub = 0
         jub = min(jub, drawn)
-        nw = cash + held - self.mortgage - drawn + jub
+        # The BuckBasket position is part of this debtor's wealth.  Leaving
+        # it out would repeat the `directMintPnl` mistake in reverse: money
+        # that moved from a counted bucket into an uncounted one, read as a
+        # loss.  Valued at the principal deposited, which is the same
+        # convention Snapshot._agent_value uses for a BUCK-side deposit.
+        basket = 0
+        if self._basket_receipt is not None:
+            try:
+                dep = d.basket.functions.deposits(self._basket_receipt).call()
+                basket = dep[0]
+            except Exception:
+                basket = self._basket_in
+        nw = cash + held + basket - self.mortgage - drawn + jub
         return {"idx": self.idx, "theta": round(self.theta, 2),
                 "pattern": self.pattern, "nw": nw,
                 "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
+                "basket": basket, "basket_in": self._basket_in,
                 "limit": limit, "mortgage": self.mortgage, "drawn": drawn,
                 "jub": jub, "deploys": self.deploys,
                 "throttled": self.throttled,
@@ -1247,6 +1310,31 @@ class BuckCreditDebtorAgent(_ProxyAgent):
 
         disc = max(0.0, bvib - 1.0)
 
+        # ENCUMBRANCE MATCHING.
+        #
+        # The comparison only means something if both paths keep the SAME
+        # claim against the same asset.  The mortgage amortizes on schedule,
+        # so `hypo_mortgage` IS the encumbrance trajectory, and the BUCK path
+        # tracks it rather than drawing whatever it can.
+        #
+        # Net of Jubilee: relief melts the drawn balance at ~2%/yr, so an
+        # effective liability of `drawn - jub` is what actually encumbers the
+        # asset.  Matching means
+        #
+        #     drawn - jub == hypo_mortgage      =>   target = hypo_mortgage + jub
+        #
+        # and the melt is therefore a benefit -- it lets the BUCK side carry
+        # more drawn for the same encumbrance, which is exactly the asymmetry
+        # the comparison is meant to price.
+        jub = 0
+        try:
+            for tid in self._token_ids:
+                jub += d.credit.functions.jubileeRelief(tid).call()
+        except Exception:
+            jub = 0
+        jub = min(jub, drawn)
+        target = self.hypo_mortgage + jub
+
         # Tranche capacity comes from UNACTIVATED face: creditLimit only
         # reflects credit already activated by a mint, and the mint itself
         # is what activates -- so size against faceValue - activatedValue
@@ -1264,7 +1352,10 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         #    insurance principal via quoteMint and top the BUCK buffer up to
         #    the fundingFactor-scaled requirement -- buying preferentially
         #    when BUCK is at/below its basket value (disc small).
-        want_tranche = min(self.tranche_cap, headroom, self.mortgage)
+        # Draw toward the encumbrance target, not toward a calendar.  On the
+        # first month that is the whole mortgage: the refinance is a single
+        # act, paced only by headroom and by what the exit route can absorb.
+        want_tranche = min(max(0, target - drawn), headroom)
         if want_tranche >= 10 ** 6 and self.mortgage > 10 ** 6:
             try:
                 _, principal = d.buck.functions.quoteMint(
@@ -1287,8 +1378,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
 
         # 3. THE CONTROL: activate a tranche through the REAL gate, then
         #    deploy it against the mortgage.
-        if self.mortgage > 10 ** 6 and disc <= self.theta * self.apr \
-                and want_tranche >= 10 ** 6:
+        if disc <= self.theta * self.apr and want_tranche >= 10 ** 6:
             mint_amt = min(want_tranche, unactivated)
             try:
                 if mint_amt >= 10 ** 6:
@@ -1306,10 +1396,13 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                     # the advantage decomposition can separate it out.
                     self.premium_paid += max(0, pre - post)
                 minted = True
-            except Exception:
-                minted = False       # gate said no: save more, retry later
+            except Exception as e:
+                minted = False       # retry later
                 self.throttled += 1
                 ctr["bcdThrottled"] = ctr.get("bcdThrottled", 0) + 1
+                why = repr(e)[:120]
+                ctr.setdefault("bcdWhy", {})
+                ctr["bcdWhy"][why] = ctr["bcdWhy"].get(why, 0) + 1
             if minted and d.pool_ub:
                 before = d.chain.balance_of(d.usdc, self.proxy.address)
                 try:
@@ -1335,6 +1428,60 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                     self.mortgage -= principal
                     self.deploys += 1
                     ctr["bcdDeploys"] = ctr.get("bcdDeploys", 0) + 1
+        # 4. AMORTIZE THE CLAIM on the same schedule as the mortgage would
+        #    have.  `hypo_mortgage` is the counterfactual's remaining
+        #    balance, so buying BUCK back until `drawn - jub` meets it keeps
+        #    both paths encumbering the asset identically month by month.
+        #
+        #    What it costs is the PRINCIPAL portion of the payment.  What the
+        #    mortgage path additionally pays -- the INTEREST portion -- is
+        #    what the BUCK path keeps, and early in a 300-month amortization
+        #    that is most of the payment.  This is the arbitrage, and this is
+        #    where it shows up as cash.
+        if self.mortgage <= 10 ** 6:
+            over = drawn - jub - self.hypo_mortgage
+            cash = d.chain.balance_of(d.usdc, self.proxy.address)
+            spare = max(0, cash - self.cash_buffer)
+            if over > 10 ** 6 and spare > 10 ** 6 and d.pool_ub:
+                r_out = d.chain.balance_of(d.buck, d.pool_ub)
+                want = min(over, spare,
+                           max(10 ** 6, _impact_cap(r_out, self.max_impact_bp)))
+                try:
+                    got = self._buy_track(d, want)
+                    if got > 0:
+                        ctr["bcdRepaid"] = ctr.get("bcdRepaid", 0) + got
+                except Exception as e:
+                    ctr["bcd_repay_err"] = repr(e)[:200]
+
+            # 5. INVEST THE SURPLUS.  The counterfactual has no equivalent
+            #    line: every dollar of its income is owed to the bank.  Here
+            #    the interest that is never paid is free, and idle BUCK is
+            #    what the BuckBasket exists to absorb -- so the comparison
+            #    includes what that balance actually earns, not what it would
+            #    earn if left in a drawer.
+            cash = d.chain.balance_of(d.usdc, self.proxy.address)
+            spare = max(0, cash - self.cash_buffer)
+            if spare > 10 ** 6 and self._basket_receipt is None and d.pool_ub:
+                try:
+                    got = self._buy_track(d, spare)
+                    if got > 10 ** 6:
+                        self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                            "approve(address,uint256)",
+                            args=[d.basket.address, got]))
+                        rcpt = self._proxy_exec(
+                            d, d.basket.address, d.basket.encode_abi(
+                                "depositToken(address,uint256,uint256)",
+                                args=[d.buck.address, got, 0]))
+                        for log in rcpt["logs"]:
+                            if log["topics"][0] == d.deposited_topic:
+                                self._basket_receipt = int.from_bytes(
+                                    log["topics"][2], "big")
+                                break
+                        self._basket_in += got
+                        ctr["bcdInvested"] = ctr.get("bcdInvested", 0) + got
+                except Exception as e:
+                    ctr["bcd_invest_err"] = repr(e)[:200]
+
         if self.mortgage <= 10 ** 6 and not self._retired_flagged:
             # The attraction signal: a neighbor just became mortgage-free.
             self._retired_flagged = True
@@ -1778,7 +1925,8 @@ class BuckIssuerArbAgent(_ProxyAgent):
         face = int(_draw(scenario, cls, "face_k", r, (800, 1600)) * m6)
         # A real premium, so the funding-factor gate applies for real and a
         # blocked issuance shows up as a throttle rather than as silence.
-        self.premium_rate = int(_draw(scenario, cls, "premium_bp", r, (25, 75)))
+        # 0 => poolPrincipal 0 => funding gate exempt (see the module note).
+        self.premium_rate = int(_draw(scenario, cls, "premium_bp", r, 0))
         # How far BUCK must be rich before issuing, and how far back toward
         # parity before covering.  The gap between them is hysteresis.
         self.issue_at = _draw(scenario, cls, "issue_at", r, (0.010, 0.040))
@@ -1801,6 +1949,9 @@ class BuckIssuerArbAgent(_ProxyAgent):
             d.chain.send(d.credit.functions.createCredit(
                 self.proxy.address, 0, per, 0, 0, 0, now_ts, self.premium_rate))
         self._face = per * self.N_CREDITS
+        self._token_ids = [
+            d.credit.functions.tokenOfOwnerByIndex(self.proxy.address, i).call()
+            for i in range(self.N_CREDITS)]
         # Working capital.  The funding gate wants the minter to hold BUCK
         # covering poolPrincipal * fundingFactor before activation, and
         # poolPrincipal is the PREMIUM rather than the draw, so this is small
@@ -1841,7 +1992,19 @@ class BuckIssuerArbAgent(_ProxyAgent):
 
     def _issue(self, d, day, ctr) -> None:
         """Activate coverage, draw against it, and buy real assets."""
-        unactivated = max(0, self._face - self._activated)
+        # Remaining capacity is chain truth, not a local tally.  Tracking it
+        # in Python over-counted -- _allocateMint caps each NFT at
+        # `faceValue - mintsBacked`, and depreciation moves that underneath a
+        # counter -- which produced 30 of 36 "insufficient credit allocation"
+        # refusals in the diagnostic run.
+        unactivated = 0
+        for tid in self._token_ids:
+            try:
+                face = d.credit.functions.depreciatedFaceValue(tid).call()
+                used = d.buck.functions.mintsBacked(tid).call()
+                unactivated += max(0, face - used)
+            except Exception:
+                pass
         if unactivated < 10 ** 6:
             return
         amt = int(unactivated * self.step_frac)
@@ -1857,11 +2020,19 @@ class BuckIssuerArbAgent(_ProxyAgent):
             self._proxy_exec(d, d.buck.address,
                              d.buck.encode_abi("mint(uint256)", args=[amt]))
             self._activated += amt
-        except Exception:
+        except Exception as e:
             ctr["biaThrottled"] = ctr.get("biaThrottled", 0) + 1
-            # Not enough float to clear the gate: convert some USDC to BUCK
-            # so the next attempt can.  This is the counter-cyclical demand
-            # the gate is designed to compel.
+            # Record the reason.  Swallowing it produced a confident wrong
+            # story: the funding gate was blamed for these refusals, but
+            # fundingFactor is 1 + 10(b-p)/b and returns ZERO once BUCK is
+            # ~9% over-valued -- the gate is OFF exactly when this agent
+            # wants to issue.  Whatever stops it is something else.
+            why = repr(e)[:120]
+            ctr.setdefault("biaWhy", {})
+            ctr["biaWhy"][why] = ctr["biaWhy"].get(why, 0) + 1
+            # Only top the float when the reason really is the gate.
+            if "funding" not in why:
+                return
             # Bounded, and only while the float is thin.  Buying BUCK is
             # DEMAND, which is the pressure this agent exists to relieve, so
             # topping the gate buffer must never become the agent's main

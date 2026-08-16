@@ -381,6 +381,10 @@ class Snapshotter:
             "bia_bought": ctr.get("biaBought", 0),
             "bia_sold": ctr.get("biaSold", 0),
             "bia_throttled": ctr.get("biaThrottled", 0),
+            # WHY they were refused, not just how often.  A bare count let a
+            # wrong explanation stand unchallenged for two runs.
+            "bia_why": dict(ctr.get("biaWhy", {})),
+            "bcd_why": dict(ctr.get("bcdWhy", {})),
             "bcd_deploys": ctr.get("bcdDeploys", 0),
             "bcd_throttled": ctr.get("bcdThrottled", 0),
             "bcd_saved": ctr.get("bcdSaved", 0),

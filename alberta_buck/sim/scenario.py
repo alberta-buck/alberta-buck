@@ -97,7 +97,20 @@ REBALANCING = Scenario(
             # floor -- which is exactly what earlier runs of this scenario
             # showed.  These are the honest debtors: real premiumRate, real
             # funding-factor gate, obligations that are pure chain truth.
-            "BuckCreditDebtorAgent": 4,
+            # Sized against the DEMAND flow, not by taste.  buckK sitting on
+            # its 0.95 clamp is the controller asking for issuance an economy
+            # cannot supply, so the supply side has to be able to answer the
+            # arbitrage that keeps it there: at K=0.95 a holder of insured
+            # collateral swaps ~2%/yr of real interest cost for a one-time ~1%
+            # premium, with no principal schedule -- payback under six months.
+            # Nobody leaves that alone, so the sim should not either.
+            #
+            # 24 debtors x ~$900k collateral is ~$16M of issuance capacity at
+            # K=0.75, against the ~$17.8M the demand leg actually bought over
+            # 730 days.  The rate is not the constraint (monthly cadence at
+            # one year of payments per tranche is ~$21M/yr); the COLLATERAL
+            # is, and 4 agents carried under $4M of it.
+            "BuckCreditDebtorAgent": 24,
             # Advances the BasketRebalanceDirector's amortized MA signals a
             # bounded slice per tick and executes its advisory efforts
             # (sell-side hint -> BUCK -> buy-side hint) through the router.

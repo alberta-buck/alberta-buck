@@ -65,6 +65,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import os
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -133,6 +134,20 @@ def deploy_params(exp) -> SimpleNamespace:
     dep = dict(DEFAULTS["deploy"])
     if exp is not None:
         dep.update(exp.deploy)
+    # Env overrides, for the scenarios that carry no experiment TOML.
+    #
+    # k0 is the neutral feed-forward LTV the controller starts from, and it
+    # decides how much BUCK a unit of collateral can issue before the PID has
+    # said anything.  At 0.75 a holder of insured collateral can refinance
+    # most of a mortgage straight away; at 0.50 only the least-encumbered
+    # can, so refinancing arrives gradually as K drifts rather than all at
+    # once.  The onset is a different shape, and that is the thing worth
+    # bracketing.  SIM_K0=0.50 make nix-sim-rebalancing-revert
+    for key, env in (("k0", "SIM_K0"), ("kmin", "SIM_KMIN"),
+                     ("kmax", "SIM_KMAX")):
+        val = os.environ.get(env)
+        if val:
+            dep[key] = float(val)
     kp, ki, kd = derive_gains(
         dk_rail=dep["dk_rail"], e_max=dep["e_max"],
         tau_i_days=dep["tau_i_days"], kp_frac=dep["kp_frac"],
