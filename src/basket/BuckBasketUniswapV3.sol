@@ -213,6 +213,73 @@ contract BuckBasketUniswapV3 is
         }
     }
 
+    // --- Fence primitives (BuckBasketFence) ------------------------------- //
+
+    function fencePool(address token, uint8 decimals, uint256 initialPriceInBuck,
+                       uint24 feeTier)
+        external override onlySelf
+        returns (address pool, int24 spacing, bool buckIsToken0)
+    {
+        pool = _findOrCreatePool(token, feeTier);
+        buckIsToken0 = address(buck) < token;
+        uint160 sqrtPriceX96 =
+            _sqrtPriceFromBuckRate(buckIsToken0, initialPriceInBuck, decimals);
+        try IUniswapV3Pool(pool).initialize(sqrtPriceX96) {} catch {}
+        IUniswapV3Pool(pool).increaseObservationCardinalityNext(observationCardinality);
+        spacing = v3Factory.feeAmountTickSpacing(feeTier);
+    }
+
+    function fenceMint(address token, address pool, int24 lo, int24 hi,
+                       uint128 liquidity)
+        external override onlySelf returns (uint256 a0, uint256 a1)
+    {
+        if (!(liquidity > 0)) revert L0();
+        _callbackPool = pool;
+        (a0, a1) = IUniswapV3Pool(pool).mint(
+            address(this), lo, hi, liquidity, abi.encode(token));
+        _callbackPool = address(0);
+    }
+
+    function fenceBurn(address pool, int24 lo, int24 hi, uint128 liquidity)
+        external override onlySelf returns (uint256 a0, uint256 a1)
+    {
+        IUniswapV3Pool(pool).burn(lo, hi, liquidity);
+        (uint128 c0, uint128 c1) = IUniswapV3Pool(pool).collect(
+            address(this), lo, hi, type(uint128).max, type(uint128).max);
+        return (uint256(c0), uint256(c1));
+    }
+
+    function fenceSwap(address token, address pool, bool sellBuck, uint256 amountIn)
+        external override onlySelf returns (uint256 spent, uint256 received)
+    {
+        if (amountIn == 0) return (0, 0);
+        bool buckIs0 = address(buck) < token;
+        bool zeroForOne = sellBuck ? buckIs0 : !buckIs0;
+        _swapCallbackPool = pool;
+        (int256 d0, int256 d1) = IUniswapV3Pool(pool).swap(
+            address(this), zeroForOne, int256(amountIn),
+            zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
+            abi.encode(token));
+        _swapCallbackPool = address(0);
+        int256 buckDelta = buckIs0 ? d0 : d1;
+        int256 tokDelta  = buckIs0 ? d1 : d0;
+        if (sellBuck) {
+            if (!(buckDelta >= 0 && tokDelta <= 0)) revert SwapDeltaSign();
+            spent = uint256(buckDelta); received = uint256(-tokDelta);
+        } else {
+            if (!(buckDelta <= 0 && tokDelta >= 0)) revert SwapDeltaSign();
+            spent = uint256(tokDelta); received = uint256(-buckDelta);
+        }
+    }
+
+    function fenceState(address pool)
+        external view override
+        returns (uint160 sqrtPriceX96, int24 tick, int24 spacing)
+    {
+        (sqrtPriceX96, tick,,,,,) = IUniswapV3Pool(pool).slot0();
+        spacing = IUniswapV3Pool(pool).tickSpacing();
+    }
+
     // --- V3 callbacks (authenticated by pool, not onlySelf) --------------- //
 
     function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data)

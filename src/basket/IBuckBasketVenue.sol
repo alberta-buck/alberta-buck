@@ -81,6 +81,41 @@ interface IBuckBasketVenue {
     function monetaryLeg(uint256 i, bool sellBuck, uint256 amountIn)
         external returns (uint256 spent, uint256 received);
 
+    // --- Fence primitives (BuckBasketFence) ------------------------------ //
+    //
+    // All take the pool and range EXPLICITLY rather than reading the
+    // constituent's stored tick range, because a fence is a ladder of
+    // arbitrary concentrated positions in a pool the constituent record does
+    // not name -- a different fee tier on the same TOKEN/BUCK pair.  The V3
+    // mint/swap callbacks already resolve the constituent from the encoded
+    // token rather than from the pool address, so they serve any fee tier of
+    // that pair unchanged.
+
+    /// @notice Find or create + initialize the fence pool for `token` at
+    ///         `feeTier`, and report its tick spacing.
+    function fencePool(address token, uint8 decimals, uint256 initialPriceInBuck,
+                       uint24 feeTier)
+        external returns (address pool, int24 spacing, bool buckIsToken0);
+
+    /// @notice Mint `liquidity` over [lo,hi] in `pool`, paying from the
+    ///         basket's own balances.
+    function fenceMint(address token, address pool, int24 lo, int24 hi,
+                       uint128 liquidity) external returns (uint256 a0, uint256 a1);
+
+    /// @notice Burn `liquidity` over [lo,hi] and collect everything owed --
+    ///         principal AND accrued fees, which is where the harvest comes
+    ///         from.  `burn` only credits; `collect` is what moves it.
+    function fenceBurn(address pool, int24 lo, int24 hi, uint128 liquidity)
+        external returns (uint256 a0, uint256 a1);
+
+    /// @notice Swap in the fence pool: TOKEN -> BUCK or BUCK -> TOKEN.
+    function fenceSwap(address token, address pool, bool sellBuck, uint256 amountIn)
+        external returns (uint256 spent, uint256 received);
+
+    /// @notice Live pool state for range placement.
+    function fenceState(address pool)
+        external view returns (uint160 sqrtPriceX96, int24 tick, int24 spacing);
+
     function convertIntoBucks(uint256[] calldata tokenInventory, uint256 targetBuck)
         external returns (uint256 gained, uint256 lossValue, uint256[] memory inventoryAfter);
 }
