@@ -145,7 +145,7 @@ class Deployment:
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
-    basket_impl: str = "prorata"  # "prorata" (BuckBasketProRata, default) | "legacy"
+    basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "legacy"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     director: Any = None          # rebalance director (prorata only)
     director_impl: str = "pairs"  # "pairs" (default) | "vrate"
@@ -209,14 +209,21 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # inter-tick commodity moves (6h ticks vs 600s TWAP) from tripping it.
     ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, 64, 500, 1000)
     venue = None
-    if basket_impl == "prorata":
-        basket = chain.deploy("BuckBasketProRata", *ctor)
+    if basket_impl in ("prorata", "ops"):
+        # "ops" is BuckBasketProRata plus the monetary-operations desk on the
+        # director's COMMON mode.  Identical constructor, identical venue,
+        # and inert until setOpsParams enables it -- so an ops basket with no
+        # policy installed is the baseline, byte for byte in behaviour.
+        basket = chain.deploy(
+            "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata",
+            *ctor)
         # Install the Uniswap V3 venue facet (the shell delegatecalls it) and
         # re-wrap the basket handle with the union ABI so Python can call facet
         # views (basketValueInBuck) that the shell serves via its fallback.
         venue = chain.deploy("BuckBasketUniswapV3")
         chain.send(basket.functions.setVenue(venue.address), sender=gov)
-        shell_abi, _ = load_artifact("BuckBasketProRata")
+        shell_abi, _ = load_artifact(
+            "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata")
         facet_abi, _ = load_artifact("BuckBasketUniswapV3")
         union = shell_abi + [e for e in facet_abi if e not in shell_abi]
         basket = w3.eth.contract(address=basket.address, abi=union)
@@ -472,7 +479,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # DIRECTOR_WINDOW / DIRECTOR_DEADBAND_BP / DIRECTOR_QUORUM env overrides
     # let short smoke sims exercise the trade path (pairs quorum 4 needs the
     # 40-epoch window warm -- pass DIRECTOR_QUORUM=2|3 for a 30-day run).
-    if basket_impl == "prorata":
+    if basket_impl in ("prorata", "ops"):
         dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
         if director_impl == "pairs":
             dir_quorum = int(os.environ.get("DIRECTOR_QUORUM", "4"))
@@ -497,6 +504,57 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         chain.send(director.functions.syncConstituents())
         d.director = director
         d.director_impl = director_impl
+        if basket_impl == "ops" and director_impl == "pairs":
+            # Thresholds are in tick*1e9 and a tick is ~1bp, so 100e9 reads as
+            # 100bp.  measIdx 2 is the 20-epoch rung: the article's sweep puts
+            # the knee there, and past the 80-epoch rung the lagged reading
+            # still says "dear" after the market has gone cheap, which answers
+            # an inflation excursion by issuing more.  That is a correctness
+            # bound, and setMonParams refuses anything slower than rung 3.
+            mon_cap  = int(os.environ.get("SIM_OPS_CAP_BP", "40"))
+            mon_meas = int(os.environ.get("SIM_OPS_MEAS", "2"))
+            mon_pers = int(os.environ.get("SIM_OPS_PERSIST", "30"))
+            chain.send(director.functions.setMonParams(
+                (100_000_000_000,      # deadband 100bp
+                 200_000_000_000,      # leash    200bp
+                 250_000_000,          # kappa    0.25
+                 mon_cap, mon_pers, mon_meas)), sender=gov)
+            # The bounds.  They exist to stop the desk substituting a fast fix
+            # for the slow, structural withdrawal of BUCK that K performs
+            # through creditLimit -- so they are the knob that decides where
+            # the two mandates overlap, and they are meant to be swept.
+            leg_bp  = int(os.environ.get("SIM_OPS_LEG_BP", "40"))
+            pos_bp  = int(os.environ.get("SIM_OPS_POSITION_BP", "1000"))
+            out_bp  = int(os.environ.get("SIM_OPS_OUTRIGHT_BP", "1000"))
+            chain.send(basket.functions.setMonetaryDirector(
+                director.address), sender=gov)
+            chain.send(basket.functions.setOpsParams(
+                (leg_bp, pos_bp, out_bp, True)), sender=gov)
+            # Founding reserves.  Without them the desk is inert in exactly
+            # the regime it exists for: Q1/Q2 are TOKEN-funded and it may not
+            # spend depositor TOKEN, so with BUCK persistently cheap it never
+            # accumulates anything to defend with.
+            # ref() is USDC-MICRO per whole token, so the budget has to be
+            # micro too.  Plain dollars here under-capitalized the desk by
+            # exactly 1e6 -- it received 0.0001 PAXG instead of 100, drained
+            # the whole book on its first operation buying 1.3 BUCK, and then
+            # reported "idle" for the rest of the run.
+            cap_usd = int(os.environ.get("SIM_OPS_CAPITAL_USD", "400000"))
+            for i, tc in enumerate(tok):
+                ref0 = scenario.prices.ref(i, 0)
+                amt = cap_usd * 10 ** 6 * (10 ** dec[i]) // ref0 if ref0 else 0
+                if amt <= 0:
+                    continue
+                chain.send(tc.functions.mint(gov, amt))
+                chain.send(tc.functions.approve(basket.address, amt), sender=gov)
+                chain.send(basket.functions.capitalizeMonetary(i, amt), sender=gov)
+            if verbose:
+                print(f"[deploy] monetary desk capitalized "
+                      f"${cap_usd:,}/token across {len(tok)} tokens")
+            if verbose:
+                print(f"[deploy] monetary desk ON  cap={mon_cap}bp/epoch "
+                      f"meas=rung{mon_meas} persist={mon_pers}ep  "
+                      f"leg={leg_bp}bp pos={pos_bp}bp outright={out_bp}bp")
         if verbose:
             print(f"[deploy] {director_impl} rebalance director "
                   f"{director.address[:10]}...  {desc}"

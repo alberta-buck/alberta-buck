@@ -97,3 +97,123 @@ class DirectorKeeperAgent(Agent):
             return
         if self._exec(d, d.tokens[sell_i], move_amt, toks, False, ctr):
             ctr["directorTrades"] = ctr.get("directorTrades", 0) + 1
+
+
+@_register
+class MonetaryKeeperAgent(Agent):
+    """Drives BuckBasketOps.monetaryOperation() -- the desk's only trigger.
+
+    The basket is the actor here; this agent just turns the crank, exactly as
+    DirectorKeeperAgent does for the rebalancer.  Everything that decides what
+    happens -- the common mode, the deadband and leash, persistence, the three
+    bounds, which pools get hit -- lives in the contracts.  That is the whole
+    point of the ops basket over the MonetaryOpsAgent prototype: the policy is
+    on-chain and permissionless, so nothing about the outcome depends on a
+    privileged off-chain actor being well behaved.
+
+    The entry point is once-per-director-epoch (86400s), so calling it every
+    tick is harmless -- the extra calls revert StepAlreadyDone and are counted
+    rather than swallowed.
+
+    Every revert is a legible state and each is counted separately, because
+    the interesting failures here are the QUIET ones:
+
+      mkIdle      the desk wanted to absorb and had no TOKEN left to spend.
+                  It funds Q1/Q2 from the assets its own issuance bought, so
+                  this is the desk out of ammunition -- the state that
+                  decides whether it can defend anything.
+      mkBound     a bound bit: inventory ceiling, or the cumulative
+                  balance-sheet ceiling.  These exist to stop the desk
+                  substituting a fast fix for the slow, structural withdrawal
+                  of BUCK that K performs through creditLimit, so a run where
+                  they never bind has not tested the overlap at all.
+      mkNoAdvice  inside the deadband: nothing to do, which is most days.
+
+    Telemetry (ctr): mkQ1..mkQ4 / mkOps / mkIdle / mkBound / mkNoAdvice /
+    mkDone / mkOutstanding / mkBuckHeld / mkOffset / mkSlippage / mk_err.
+    """
+
+    # Quadrant index -> counter suffix, matching the article's numbering.
+    QUADRANT = {1: "mkQ1", 2: "mkQ2", 3: "mkQ3", 4: "mkQ4"}
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or getattr(d, "basket_impl", "") != "ops":
+            return
+        try:
+            q = d.basket.functions.monetaryOperation().call(
+                {"from": self.address})
+        except Exception as e:
+            self._classify(ctr, e)
+            return
+        try:
+            d.chain.send(d.basket.functions.monetaryOperation(),
+                         sender=self.account, gas=6_000_000)
+        except Exception as e:
+            self._classify(ctr, e)
+            return
+        ctr["mkOps"] = ctr.get("mkOps", 0) + 1
+        key = self.QUADRANT.get(int(q))
+        if key:
+            ctr[key] = ctr.get(key, 0) + 1
+        self._observe(d, ctr)
+
+    def _observe(self, d, ctr) -> None:
+        """Book state, read from chain rather than tallied here.  A Python
+        tally of an on-chain book drifts the moment anything else touches it,
+        and on this branch that mistake has already produced two confident
+        wrong readings."""
+        try:
+            ctr["mkOutstanding"] = int(
+                d.basket.functions.monetaryOutstanding().call())
+            ctr["mkBuckHeld"] = int(
+                d.basket.functions.monetaryBuckHeld().call())
+            # What the desk's own inventory has taken out of the deviation K
+            # measures.  If this grows while K stops moving, the desk is
+            # suppressing the very forcing its position is a bet on.
+            ctr["mkOffset"] = int(
+                d.basket.functions.monetaryDeviationOffset().call())
+            # The desk's remaining ammunition, per pool.  Q1/Q2 spend TOKEN,
+            # and "how much is left" is the difference between a desk that is
+            # holding station and one that has been spent out.
+            ctr["mkTokHeld"] = [
+                int(d.basket.functions.monetaryTokenHeld(i).call())
+                for i in range(len(d.tokens))]
+            ctr["mkNavBuck"] = int(
+                d.basket.functions.monetaryTokenValue().call())
+        except Exception as e:
+            ctr["mk_err"] = repr(e)[:160]
+
+    # Custom-error SELECTORS.  web3 surfaces an error the ABI cannot decode
+    # as a bare 4-byte selector, so matching on the name binned all 60
+    # reverts of a smoke run into "other" and hid that the basket simply had
+    # no director wired.  Match the selector; keep the name as a fallback.
+    SELECTOR = {
+        "0x3c430e99": "mkIdle",         # MonetaryIdle()
+        "0x2a200215": "mkBound",        # MonetaryBound()
+        "0x95a4fa2c": "mkNoAdvice",     # NoAdvice()
+        "0x6ce47dce": "mkDone",         # StepAlreadyDone()
+        "0xf2365b5b": "mkNoValue",      # NoValue()
+        "0x51ed450c": "mkNoDirector",   # DirectorUnset()
+        "0x7dd37f70": "mkSlippage",     # Slippage()
+    }
+
+    @classmethod
+    def _classify(cls, ctr, e) -> None:
+        why = repr(e)
+        for sel, key in cls.SELECTOR.items():
+            if sel in why:
+                ctr[key] = ctr.get(key, 0) + 1
+                return
+        for sig, key in (("MonetaryIdle", "mkIdle"),
+                         ("MonetaryBound", "mkBound"),
+                         ("NoAdvice", "mkNoAdvice"),
+                         ("StepAlreadyDone", "mkDone"),
+                         ("NoValue", "mkNoValue"),
+                         ("DirectorUnset", "mkNoDirector")):
+            if sig in why:
+                ctr[key] = ctr.get(key, 0) + 1
+                return
+        # Selector-only reverts (no ABI decode): record the raw reason rather
+        # than dropping it into the generic bucket.
+        ctr["mk_err"] = why[:160]
+        ctr["mkOtherErr"] = ctr.get("mkOtherErr", 0) + 1

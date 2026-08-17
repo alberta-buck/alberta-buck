@@ -106,7 +106,19 @@ contract BuckBasketOps is BuckBasketProRata {
 
     OpsParams public opsParams;
 
+    /// @notice Director consulted for `monetaryEffort()`.  Deliberately
+    ///         SEPARATE from `director`, which gates the shell's advisory
+    ///         deposit routing and rebalance step.  In the chain simulation
+    ///         the rebalance director is driven externally by a keeper and
+    ///         `setDirector` is never called, so pointing the monetary path
+    ///         at `director` would have switched on advisory routing as a
+    ///         side effect -- and the comparison this basket exists for must
+    ///         differ from its baseline by monetary operations and nothing
+    ///         else.  Falls back to `director` when unset.
+    address public monetaryDirector;
+
     event OpsParamsSet(OpsParams p);
+    event MonetaryDirectorSet(address indexed director);
 
     constructor(
         address _buck,
@@ -126,6 +138,43 @@ contract BuckBasketOps is BuckBasketProRata {
         opsParams = OpsParams({maxLegBp: 40, maxPositionBp: 1000,
                                maxOutrightBp: 1000, enabled: false});
     }
+
+    function setMonetaryDirector(address d_) external onlyGov {
+        monetaryDirector = d_;
+        emit MonetaryDirectorSet(d_);
+    }
+
+    function _monDir() internal view returns (address) {
+        address md = monetaryDirector;
+        return md != address(0) ? md : director;
+    }
+
+    /// @notice Capitalize the desk with TOKEN reserves.
+    ///
+    ///         Q1 and Q2 are TOKEN-funded bids, and the desk may not fund
+    ///         them from depositor TOKEN: a depositor is paid in TOKEN only,
+    ///         so converting their commodity into BUCK to defend parity would
+    ///         charge them for it.  Its own issuance is the other source --
+    ///         Q4 sells BUCK for TOKEN when BUCK is dear -- but that is
+    ///         exactly backwards for a desk whose first task is an excursion
+    ///         the WRONG way: in the reverting regime BUCK is never dear, the
+    ///         desk never accumulates, and it wanted to act on 57 of 90 days
+    ///         with nothing to act with.
+    ///
+    ///         That is the 1992 ERM lesson rather than a defect -- a currency
+    ///         board can only defend with reserves it built up earlier -- so
+    ///         the desk is capitalized like one.  In production the same job
+    ///         is done by treasury accrual, which is already excluded from
+    ///         every depositor claim; this is the founding grant.
+    function capitalizeMonetary(uint256 i, uint256 amount) external onlyGov {
+        if (i >= constituents.length) revert NotInBasket();
+        if (amount == 0) revert Amount0();
+        IERC20(constituents[i].token).transferFrom(msg.sender, address(this), amount);
+        monetaryTokenHeld[i] += amount;
+        emit MonetaryCapitalized(i, amount);
+    }
+
+    event MonetaryCapitalized(uint256 indexed i, uint256 amount);
 
     function setOpsParams(OpsParams calldata p) external onlyGov {
         if (p.maxLegBp > 500) revert Bp10000();     // 5% of a pool is already a lot
@@ -181,13 +230,14 @@ contract BuckBasketOps is BuckBasketProRata {
     function monetaryOperation() external returns (uint8 quadrant) {
         OpsParams memory op = opsParams;
         if (!op.enabled) revert MonetaryIdle();
-        if (director == address(0)) revert DirectorUnset();
+        address dir = _monDir();
+        if (dir == address(0)) revert DirectorUnset();
 
-        uint32 e = IMonetaryDirector(director).epochNow();
+        uint32 e = IMonetaryDirector(dir).epochNow();
         if (lastMonetaryEpoch == e + 1) revert StepAlreadyDone();
         lastMonetaryEpoch = e + 1;
 
-        (int32 effortBp, bool outright) = IMonetaryDirector(director).monetaryEffort();
+        (int32 effortBp, bool outright) = IMonetaryDirector(dir).monetaryEffort();
         if (effortBp == 0) revert NoAdvice();
 
         uint256 nav = _navBuck();

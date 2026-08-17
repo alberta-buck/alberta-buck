@@ -137,6 +137,10 @@ REBALANCING = Scenario(
             # bounded slice per tick and executes its advisory efforts
             # (sell-side hint -> BUCK -> buy-side hint) through the router.
             "DirectorKeeperAgent": 1,
+            # Turns the crank on BuckBasketOps.monetaryOperation().  Inert
+            # unless --basket ops deployed the two-mode shell, so it costs one
+            # skipped call a day on every other run and needs no roster switch.
+            "MonetaryKeeperAgent": 1,
             # The COMMON mode.  Everything above trades the differences
             # between commodities; this reads their mean -- which is
             # basketValueInBuck, the controller's own process variable -- and

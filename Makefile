@@ -813,6 +813,41 @@ sim-compare-ops:
 sim-monetary-ops:	sim-run-ops-off sim-run-ops-on sim-compare-ops
 
 
+# ── The ops BASKET A/B (contract, not agent) ──────────────────────────
+#
+# Same scenario and seed; the ONLY difference is which shell is deployed.
+# The monetary-ops AGENT is off in both arms, so what is measured is the
+# contract-side desk -- full-strength Q2/Q4 via burnFromBasket/mintFromBasket,
+# which no agent can reach.
+#
+#   make nix-venv-sim-basket-ops        # both arms + the table
+#
+# Sweep the overlap between the fast desk and K's slow forcing with
+# SIM_OPS_POSITION_BP / SIM_OPS_OUTRIGHT_BP / SIM_OPS_CAPITAL_USD.
+
+BASKET_VECTOR_OFF	= test/vectors/basket-ops-off.json
+BASKET_VECTOR_ON	= test/vectors/basket-ops-on.json
+
+.PHONY: sim-basket-ops sim-run-basket-off sim-run-basket-on sim-compare-basket
+
+sim-run-basket-off:	sim-build
+	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket prorata --backend $(SIM_BACKEND) \
+		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(BASKET_VECTOR_OFF)
+
+sim-run-basket-on:	sim-build
+	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket ops --backend $(SIM_BACKEND) \
+		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(BASKET_VECTOR_ON)
+
+sim-compare-basket:
+	python -m $(SIM_PKG).compare_ops $(BASKET_VECTOR_OFF) $(BASKET_VECTOR_ON)
+
+sim-basket-ops:	sim-run-basket-off sim-run-basket-on sim-compare-basket
+
+
 # ── Pure price-flow basket simulator (no Anvil) ───────────────────────
 #
 # Ad-hoc check of investor flow rebalancing against the generated

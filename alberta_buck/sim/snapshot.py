@@ -408,6 +408,30 @@ class Snapshotter:
             "mo_no_book": ctr.get("moNoBook", 0),
             "mo_throttled": ctr.get("moThrottled", 0),
             "mo_funded": ctr.get("moFunded", 0),
+            # BuckBasketOps, driven by MonetaryKeeperAgent.  Distinct mk*
+            # prefix from the mo* agent prototype above: both write the same
+            # ctr dict and merging them would silently double-count.
+            "mk_q1": ctr.get("mkQ1", 0),
+            "mk_q2": ctr.get("mkQ2", 0),
+            "mk_q3": ctr.get("mkQ3", 0),
+            "mk_q4": ctr.get("mkQ4", 0),
+            "mk_ops": ctr.get("mkOps", 0),
+            "mk_idle": ctr.get("mkIdle", 0),
+            "mk_bound": ctr.get("mkBound", 0),
+            "mk_no_advice": ctr.get("mkNoAdvice", 0),
+            "mk_done": ctr.get("mkDone", 0),
+            "mk_no_value": ctr.get("mkNoValue", 0),
+            "mk_tok_held": list(ctr.get("mkTokHeld", [])),
+            "mk_tok_value": ctr.get("mkNavBuck", 0),
+            "mk_slippage": ctr.get("mkSlippage", 0),
+            "mk_no_director": ctr.get("mkNoDirector", 0),
+            "mk_other_err": ctr.get("mkOtherErr", 0),
+            # Book state, read from chain each operation (gauges, not counters).
+            "mk_outstanding": ctr.get("mkOutstanding", 0),
+            "mk_buck_held": ctr.get("mkBuckHeld", 0),
+            # What the desk's inventory has taken out of the deviation K sees.
+            "mk_offset": ctr.get("mkOffset", 0),
+            "mk_err": ctr.get("mk_err", ""),
             "mo_why": dict(ctr.get("moWhy", {})),
             # The last exception each proxy agent swallowed.  These were set
             # into `ctr` from the start and copied nowhere, so a smoke run
