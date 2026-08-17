@@ -112,6 +112,25 @@ interface IBuckBasketVenue {
     function fenceSwap(address token, address pool, bool sellBuck, uint256 amountIn)
         external returns (uint256 spent, uint256 received);
 
+    /// @notice Exact contents of a band at the live price, and the TWAP /
+    ///         liquidity math around it.  These live on the FACET purely for
+    ///         bytecode budget: the UniswapV3OracleLib arithmetic they inline
+    ///         put BuckBasketFence 593 bytes over EIP-170, which neither
+    ///         forge nor pyrevm enforces -- so it would have shipped as a
+    ///         contract that simply cannot be deployed.  Stateless on purpose
+    ///         (pool and range passed in) so no fence state has to move into
+    ///         the shared storage layout.
+    function fenceQuote(address pool, int24 lo, int24 hi, uint128 liquidity,
+                        bool buckIsToken0)
+        external view returns (uint256 buckAmt, uint256 tokAmt);
+
+    function fenceTwap(address pool, address token, uint8 decimals,
+                       uint32 secondsAgo) external view returns (uint256 priceInBuck);
+
+    function fenceLiquidityFor(address pool, int24 lo, int24 hi,
+                               uint256 amount0, uint256 amount1)
+        external view returns (uint128);
+
     /// @notice Live pool state for range placement.
     function fenceState(address pool)
         external view returns (uint160 sqrtPriceX96, int24 tick, int24 spacing);

@@ -206,13 +206,8 @@ contract BuckBasketFence is BuckBasketProRata {
     {
         Fence storage fz = fenceOf[i];
         if (!fz.live || fz.liquidity == 0) return (0, 0);
-        (uint160 sp,,) = _venue().fenceState(fz.pool);
-        uint160 sa = UniswapV3OracleLib.getSqrtRatioAtTick(fz.lo);
-        uint160 sb = UniswapV3OracleLib.getSqrtRatioAtTick(fz.hi);
-        uint160 spc = sp < sa ? sa : (sp > sb ? sb : sp);
-        uint256 a0 = UniswapV3OracleLib.getAmount0ForLiquidity(spc, sb, fz.liquidity);
-        uint256 a1 = UniswapV3OracleLib.getAmount1ForLiquidity(sa, spc, fz.liquidity);
-        return fz.buckIsToken0 ? (a0, a1) : (a1, a0);
+        return _venue().fenceQuote(fz.pool, fz.lo, fz.hi, fz.liquidity,
+                                   fz.buckIsToken0);
     }
 
     /// @notice TWAP price of constituent `i` in BUCK per whole TOKEN, read
@@ -220,23 +215,9 @@ contract BuckBasketFence is BuckBasketProRata {
     ///         computed from this, so a spot read would let a whale inflate
     ///         the basket's own issuance budget by pushing the price.
     function fencePrice(uint256 i) public view returns (uint256) {
-        Fence storage fz = fenceOf[i];
         Constituent storage c = constituents[i];
-        int24 tick;
-        try this.consultFence(fz.pool, twapWindow) returns (int24 t) {
-            tick = t;
-        } catch {
-            (, tick,) = _venue().fenceState(fz.pool);
-        }
-        return UniswapV3OracleLib.getQuoteAtTick(
-            tick, uint128(10 ** c.decimals), c.token, address(buck));
-    }
-
-    /// @dev External so `fencePrice` can try/catch a cold pool's consult.
-    function consultFence(address pool, uint32 secondsAgo)
-        external view returns (int24)
-    {
-        return UniswapV3OracleLib.consult(pool, secondsAgo);
+        return _venue().fenceTwap(fenceOf[i].pool, c.token, c.decimals,
+                                  twapWindow);
     }
 
     /// @notice Everything the basket holds, in BUCK: both sides of every
@@ -343,12 +324,9 @@ contract BuckBasketFence is BuckBasketProRata {
     function _strikeLiquidity(Fence storage fz, uint256 tokenAmount, uint256 buckAmount)
         internal view returns (uint128)
     {
-        (uint160 sp,,) = _venue().fenceState(fz.pool);
-        uint160 sa = UniswapV3OracleLib.getSqrtRatioAtTick(fz.lo);
-        uint160 sb = UniswapV3OracleLib.getSqrtRatioAtTick(fz.hi);
         (uint256 a0, uint256 a1) = fz.buckIsToken0
             ? (buckAmount, tokenAmount) : (tokenAmount, buckAmount);
-        return UniswapV3OracleLib.getLiquidityForAmounts(sp, sa, sb, a0, a1);
+        return _venue().fenceLiquidityFor(fz.pool, fz.lo, fz.hi, a0, a1);
     }
 
     // --- The keeper: K tracking, re-striking, and the harvest --------------- //
@@ -494,42 +472,72 @@ contract BuckBasketFence is BuckBasketProRata {
             ? totalOutstandingBuck : toBurn;
         dep.buckPrincipal -= principal < dep.buckPrincipal ? principal : dep.buckPrincipal;
 
-        // Pay the TOKEN slices out in kind.
+        // Settle the BUCK side WITHOUT moving BUCK.
+        //
+        // Two earlier attempts failed for instructive reasons.  Paying only
+        // TOKEN stranded the claim whenever the band had converted to BUCK
+        // (a 40,000-share claim came back as 13,620).  CONVERTING the surplus
+        // unwound into the very band the exit had just thinned, so the leaver
+        // ate the slippage of their own withdrawal.  Transferring the BUCK in
+        // kind reverts outright: `BUCK: recipient must identity-approve
+        // sender` -- an active per-counterparty approval no depositor gives,
+        // which is a far harder constraint than merely being identity-bound.
+        //
+        // So the surplus BUCK STAYS with the basket and the depositor is paid
+        // its TWAP-equivalent in TOKEN out of the idle buffer instead.  That
+        // buffer exists by construction: getLiquidityForAmounts binds on the
+        // BUCK side, so about (1-K) of every deposit's TOKEN sits outside the
+        // band and is exactly what this settles against.  No swap, no
+        // slippage, no BUCK ever leaves.  The basket is left BUCK-heavy by
+        // precisely the surplus, which is what the next fenceRebalance
+        // retires against the K budget -- the imbalance is absorbed by the
+        // mechanism that already exists rather than by the person leaving.
+        uint256 extra;
+        {
+            uint256 surplus = buckClaim > toBurn ? buckClaim - toBurn : 0;
+            uint256 px = fencePrice(j);
+            if (surplus > 0 && px > 0) {
+                extra = UniswapV3OracleLib.mulDiv(
+                    surplus, 10 ** constituents[j].decimals, px);
+            }
+        }
+
+        uint256 unpaid;
         for (uint256 i = 0; i < n; i++) {
             address tk = constituents[i].token;
             uint256 bal = IERC20(tk).balanceOf(address(this));
-            if (bal == 0) continue;
             uint256 released = bal > tokBefore[i] ? bal - tokBefore[i] : 0;
             uint256 pay = released + tokBefore[i] * num / den;
-            if (pay > bal) pay = bal;
+            if (i == j) pay += extra;
+            if (pay > bal) { unpaid = pay - bal; pay = bal; }
             if (pay > 0) IERC20(tk).transfer(msg.sender, pay);
         }
 
-        // Pay the BUCK side out in kind too.
-        //
-        // The first cut CONVERTED the surplus BUCK to TOKEN so that a
-        // depositor need never touch BUCK -- ProRata's rule, and a real one,
-        // since BUCK transfers are identity-gated.  It does not survive here:
-        // the swap unwinds into the very band the exit just thinned, so the
-        // leaver eats the slippage of their own withdrawal.  Measured, a
-        // 40,000-share claim came back as 13,620 after the band had converted
-        // to BUCK.  A fence depositor genuinely owns a slice of a TOKEN+BUCK
-        // portfolio rather than pure seigniorage, so paying both sides in
-        // kind is the honest settlement AND the one with no slippage at all.
-        //
-        // The cost is that a fence depositor must be identity-bound.  That is
-        // a real narrowing of who can be a commodity LP, and it is the price
-        // of this basket holding BUCK on the depositor's behalf.
-        uint256 surplus = buckClaim > toBurn ? buckClaim - toBurn : 0;
-        uint256 payable_ = IERC20(address(buck)).balanceOf(address(this));
-        if (surplus > payable_) surplus = payable_;
-        if (surplus > 0) IERC20(address(buck)).transfer(msg.sender, surplus);
+        // Idle first, swap only what is left over.  Ordering matters more
+        // than it looks: settling the WHOLE surplus by swapping unwinds into
+        // the band the exit just thinned, and in the worst case -- a fully
+        // converted band, half the liquidity gone -- returned 13,620 on a
+        // 40,000 claim.  Draining the free buffer first means the swap is
+        // only ever the remainder, which for one exit among many is nothing.
+        if (unpaid > 0) {
+            uint256 px2 = fencePrice(j);
+            uint256 needBuck = px2 == 0 ? 0 : UniswapV3OracleLib.mulDiv(
+                unpaid, px2, 10 ** constituents[j].decimals);
+            uint256 held2 = IERC20(address(buck)).balanceOf(address(this));
+            if (needBuck > held2) needBuck = held2;
+            if (needBuck > 0) {
+                (, uint256 gotTok) = _venue().fenceSwap(
+                    dep.token, fzo.pool, true, needBuck);
+                uint256 avail = IERC20(dep.token).balanceOf(address(this));
+                if (gotTok > avail) gotTok = avail;
+                if (gotTok > 0) IERC20(dep.token).transfer(msg.sender, gotTok);
+            }
+        }
 
         shareOf[receiptId] = sh - take;
         totalShares -= take;
         if (shareOf[receiptId] == 0) receipt.burn(receiptId);
 
-        harvestBuck += surplus;
         emit FenceRedeemed(receiptId, take, toBurn);
         emit Redeemed(msg.sender, receiptId, toBurn, 0, 0,
                       uint256(10000 - bp));

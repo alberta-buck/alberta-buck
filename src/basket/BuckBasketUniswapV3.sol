@@ -272,6 +272,48 @@ contract BuckBasketUniswapV3 is
         }
     }
 
+    function fenceQuote(address pool, int24 lo, int24 hi, uint128 liquidity,
+                        bool buckIsToken0)
+        external view override returns (uint256 buckAmt, uint256 tokAmt)
+    {
+        if (liquidity == 0) return (0, 0);
+        (uint160 sp,,,,,,) = IUniswapV3Pool(pool).slot0();
+        uint160 sa = UniswapV3OracleLib.getSqrtRatioAtTick(lo);
+        uint160 sb = UniswapV3OracleLib.getSqrtRatioAtTick(hi);
+        uint160 spc = sp < sa ? sa : (sp > sb ? sb : sp);
+        uint256 a0 = UniswapV3OracleLib.getAmount0ForLiquidity(spc, sb, liquidity);
+        uint256 a1 = UniswapV3OracleLib.getAmount1ForLiquidity(sa, spc, liquidity);
+        return buckIsToken0 ? (a0, a1) : (a1, a0);
+    }
+
+    function fenceTwap(address pool, address token, uint8 decimals,
+                       uint32 secondsAgo)
+        external view override returns (uint256)
+    {
+        int24 tick;
+        if (secondsAgo == 0) {
+            (, tick,,,,,) = IUniswapV3Pool(pool).slot0();
+        } else {
+            try this.consultTickExternal(pool, secondsAgo) returns (int24 t) {
+                tick = t;
+            } catch {
+                (, tick,,,,,) = IUniswapV3Pool(pool).slot0();
+            }
+        }
+        return UniswapV3OracleLib.getQuoteAtTick(
+            tick, uint128(10 ** decimals), token, address(buck));
+    }
+
+    function fenceLiquidityFor(address pool, int24 lo, int24 hi,
+                               uint256 amount0, uint256 amount1)
+        external view override returns (uint128)
+    {
+        (uint160 sp,,,,,,) = IUniswapV3Pool(pool).slot0();
+        return UniswapV3OracleLib.getLiquidityForAmounts(
+            sp, UniswapV3OracleLib.getSqrtRatioAtTick(lo),
+            UniswapV3OracleLib.getSqrtRatioAtTick(hi), amount0, amount1);
+    }
+
     function fenceState(address pool)
         external view override
         returns (uint160 sqrtPriceX96, int24 tick, int24 spacing)

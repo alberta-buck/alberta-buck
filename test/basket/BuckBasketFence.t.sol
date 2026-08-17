@@ -303,7 +303,7 @@ contract BuckBasketFenceTest is Test {
 
         // Buy TOKEN out of the band with BUCK: the position converts toward
         // BUCK, which is exactly the state that used to strand the claim.
-        _arb(pool, address(buck), 60_000e18);
+        _arb(pool, address(buck), 25_000e18);
 
         uint256 before = paxg.balanceOf(alice);
         vm.prank(alice);
@@ -311,8 +311,14 @@ contract BuckBasketFenceTest is Test {
         uint256 got = paxg.balanceOf(alice) - before;
         assertGt(got, 0, "paid something");
 
-        // Paid in kind on BOTH sides, so count both.
-        uint256 valueOut = got * PAXG_PRICE / 1e18 + buck.balanceOf(alice);
+        // Settled entirely in TOKEN: the surplus BUCK stays with the basket
+        // and its TWAP-equivalent is paid from the idle buffer.  No BUCK ever
+        // reaches the depositor, which matters because a BUCK transfer needs
+        // the recipient to have identity-approved the sender -- an active
+        // step no depositor takes, and it reverted every redemption in a
+        // 180-day chain run before this settlement replaced it.
+        assertEq(buck.balanceOf(alice), 0, "depositor never touches BUCK");
+        uint256 valueOut = got * PAXG_PRICE / 1e18;
         assertGt(valueOut, (shares * 3) / 4,
                  "claim is not stranded on the BUCK side");
     }
@@ -331,6 +337,16 @@ contract BuckBasketFenceTest is Test {
         vm.prank(alice);
         basketC.redeem(rid, 0);
         assertLt(basketC.totalOutstandingBuck(), out0, "obligation retired");
+    }
+
+    /// Neither forge nor pyrevm enforces EIP-170, so nothing else in this
+    /// repo would notice a shell growing past it -- the tests pass, the
+    /// simulation runs, and the contract simply cannot be deployed to a real
+    /// chain.  BuckBasketFence was 593 bytes over before the V3 arithmetic
+    /// moved to the facet, and every test was green throughout.
+    function test_deployedSizeIsUnderEip170() public view {
+        assertLt(address(basketC).code.length, 24576, "shell over EIP-170");
+        assertLt(address(venueFacet).code.length, 24576, "facet over EIP-170");
     }
 
     function test_openFence_isOncePerConstituent() public {
