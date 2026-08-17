@@ -1,0 +1,495 @@
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+              THE ALBERTA BUCK - BASKET OPERATIONS (V1.0)
+                One Filter Bank, Two Mandates: Commodity
+                  Rebalancing and Monetary Operations
+
+                             Perry Kundert
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+                               2026-08-16
+
+
+<https://perry.kundert.ca/images/dominion-logo.png>
+
+The BuckBasket rebalances commodities against each other.  It reads a
+seven-scale filter bank over its pool prices, finds which constituent is
+rich and which is poor, and moves value between them as excursions turn.
+The `pairs' engine works in /differential mode/ and cancels the common
+mode deliberately, because "BUCK's own valuation is the K-controller's
+job".
+
+But a Uniswap tick is a log price, so the MEAN of those legs is BUCK's
+own valuation – `basketValueInBuck', the controller's process variable.
+The signal is already in the filter bank.  The basket computes it every
+cycle and discards it.
+
+This article puts it to work.  The same ladder drives two mandates: the
+differences steer commodity rebalancing, the mean steers /monetary
+operations/.  The basket becomes a market maker in BUCK whose quote skew
+is set by the controller's error, and whose inventory changes /are/ the
+open market operation.
+
+The purpose is speed.  K works, but it works slowly: it acts only
+through `creditLimit', and a credit book turns over in months.  An
+attacker with real money can push BUCK off parity faster than K can pull
+it back.  A basket that trades the common mode acts in hours, absorbs
+the excursion while it is forming, and books the attacker's loss as
+depositor profit.
+
+In simulation, over nine seeds, an inflation attack's peak excursion
+falls from 1538bp to 1099bp, the basket books $604k, and the attacker is
+worse off in nine runs out of nine.  The same machinery LOSES when the
+move is real rather than an attack, which is the property that makes the
+rest of it trustworthy.
+
+Getting there required three separate bounds, and each was invisible
+until the one before it was in place.  Without them the basket
+accumulated half the pool, showed a profit the whole way, and never once
+raised an alarm – because the act of absorbing suppresses the very
+signal that would say stop.  That sequence is documented here in full,
+because it is more useful than the result.
+
+Table of Contents
+─────────────────
+
+1. The signal is already there
+2. Why speed matters
+3. The four quadrants
+.. 1. Q1 and Q3 are repo
+.. 2. Q2 and Q4 are outright
+4. What produces what
+5. What it measures
+6. The constraints, and one of them is a correctness bound
+.. 1. Measure fast enough, or you become the destabilizer
+.. 2. Depositor claims must not be diluted
+.. 3. Reserves are finite and the bound is public
+.. 4. Anti-windup
+7. Three runaways, each hiding behind the fix for the last
+.. 1. One: the operator suppresses its own alarm
+.. 2. Two: the fix relocated the runaway
+.. 3. Three: only then does the failure test pass honestly
+8. Implementation
+.. 1. The director gains a second output
+.. 2. The basket gains one keeper entry point
+.. 3. Order of work
+9. Limitations
+
+
+1 The signal is already there
+═════════════════════════════
+
+  The `pairs' rebalance engine keeps, for each constituent, a ladder of
+  seven EMAs over the pool tick.  A tick is \(\log\) of the
+  constituent's price /in BUCK/.  Write \(c_i\) for leg \(i\)'s log
+  price.  Then
+
+  \[ \underbrace{c_i - \bar{c}}_{\text{differential}}
+     \qquad\text{and}\qquad \underbrace{\bar{c} =
+     \tfrac{1}{N}\textstyle\sum_i c_i}_{\text{common}} \]
+
+  are the two halves of the same reading.  The differences say which
+  commodity is rich against which.  The mean says what the whole basket
+  costs in BUCK – which is `basketValueInBuck', the number the PID
+  steers.
+
+  The EMA is linear, so this costs nothing:
+
+  \[ \frac{1}{N}\sum_i \mathrm{EMA}_k(c_i) \;=\;
+  \mathrm{EMA}_k\!\left(\frac{1}{N}\sum_i c_i\right) \]
+
+  The common mode at every one of the seven scales is the mean of the
+  per-leg ladders the engine already maintains.  No new state, no new
+  reads, no new storage.  The basket has been computing BUCK's own
+  mispricing at seven timescales and throwing it away every cycle.
+
+
+2 Why speed matters
+═══════════════════
+
+  BUCK_K is a sound controller and a slow one.  It acts through
+  `creditLimit', so its only lever is how much new credit-backed BUCK
+  may be issued.  A credit book turns over in months.  When someone
+  mints a fortune against pledged wealth and spends it, K responds by
+  tightening the tap – and the tap governs a flow that takes quarters to
+  matter.
+
+  Meanwhile the attack lands in days.
+
+  The BuckBasket is the largest pool of real assets in the system and it
+  can act immediately.  It already holds both sides of every pool.
+  Giving it the common-mode signal turns the system's inertia into its
+  fastest actuator:
+
+  • *K sets the standing policy.* Slow, structural, and it decides how
+    much BUCK the economy may carry.
+  • *The basket runs the operations.* Fast, bounded, reversible, and it
+    decides what happens this week.
+
+  That is the division a central bank already makes between its policy
+  rate and its open market desk.
+
+
+3 The four quadrants
+════════════════════
+
+  Two questions decide the operation.  Is BUCK cheap or dear?  And has
+  the excursion turned, or is it persisting?
+
+  ┌────
+  │                     BUCK CHEAP (bvib > 1)         BUCK DEAR (bvib < 1)
+  │                     basket costs more BUCK        basket costs less BUCK
+  │                     than it should                than it should
+  │ 
+  │ REVERTING       Q1  ABSORB  (temporary)       Q3  SUPPLY  (temporary)
+  │ the excursion       TOKEN-funded bids             BUCK-funded offers
+  │ has turned          BELOW the price.              ABOVE the price.
+  │                     Buy the dump; sell it         Sell into the bid; buy
+  │                     back on recovery.             back on the return.
+  │                     Net supply: unchanged.        Net supply: unchanged.
+  │ 
+  │ PERSISTENT      Q2  RETIRE  (outright)        Q4  ISSUE   (outright)
+  │ past the leash      Burn acquired BUCK            Mint against basket
+  │ for N days          against outstanding.          TOKEN and sell.
+  │                     Supply FALLS.                 Supply RISES.
+  └────
+
+
+3.1 Q1 and Q3 are repo
+──────────────────────
+
+  A concentrated Uniswap V3 range order performs an operation and
+  unwinds it automatically.  Place BUCK above the price: as BUCK
+  strengthens the position sells it, and as BUCK returns the position
+  buys it back.  The operation reverses itself, and it earns the spread
+  while it waits.
+
+  That is what a temporary open market operation is.  A central bank
+  uses repo for daily noise precisely because it self-reverses and needs
+  no decision to unwind.  The basket gets the same instrument for free
+  from the AMM it already lives in.
+
+  Temporary operations are the default.  They are cheap to be wrong
+  with.
+
+
+3.2 Q2 and Q4 are outright
+──────────────────────────
+
+  An outright operation changes the size of the balance sheet.  Burning
+  BUCK retires it permanently; minting creates it permanently.  These
+  are reached only when the temporary operation has been consumed /and/
+  the price has stayed away.
+
+  Persistence is measured as a duration, not a velocity.  This matters:
+  a short-window velocity changes sign on noise, so a "has it turned"
+  test built on velocity almost never reports "no".  In the first
+  version of the model the outright quadrants were unreachable for
+  exactly this reason – supply never moved, and half the mechanism was
+  inert while looking healthy.
+
+  The rule is: the deviation exceeds the leash on every one of \(N\)
+  consecutive days.  Thirty days at 200bp in the model.
+
+
+4 What produces what
+════════════════════
+
+  *Ordinary commodity dispersion.* cbBTC rises against LABR; the
+  basket's weights drift apart; the mean does not move.  This is
+  /differential/ and it goes to commodity rebalancing exactly as today.
+  No monetary operation, because BUCK is not mispriced – the commodities
+  have moved relative to each other.
+
+  *A whale mints and spends a fortune.* Every pool's BUCK reserve rises
+  together.  The differences barely move – the whale sold BUCK, not one
+  commodity – so the rebalancer sees almost nothing.  The MEAN moves
+  hard.  This is /common/ and it is Q1: the basket bids for BUCK below
+  the market with TOKEN it already holds, and buys the dump at a
+  discount.
+
+  *The whale's position persists.* The excursion does not turn.  After
+  thirty days past the leash the basket escalates to Q2, burning the
+  BUCK it has accumulated against `totalOutstandingBuck'.  Supply falls
+  permanently.  The whale must eventually buy BUCK back to retire the
+  credit line that funded the attack – into a market whose float the
+  basket has removed.
+
+  *Someone wants BUCK badly and bids it up.* The mean moves the other
+  way.  Q3: the basket offers BUCK above the market from inventory.  If
+  the bid persists, Q4 mints against basket TOKEN and sells into it,
+  acquiring real assets with money the market has over-valued.
+
+  *A genuine revaluation.* Commodities really do become worth more BUCK,
+  and stay there.  This looks exactly like an attack to the signal, and
+  it is the case the design must lose gracefully.  See /When it should
+  lose/ below.
+
+
+5 What it measures
+══════════════════
+
+  The model is `alberta_buck/sim/monetary_ops.py'.  It abstracts the
+  pools to a single price with constant-product impact against depth,
+  mean-reverting at a 120-day timescale, and runs an attacker who sells
+  6M BUCK over 20 days, holds 60 days, then unwinds – because an
+  inflation attack is funded by drawing credit, and the credit must be
+  retired by buying BUCK back.  Costs are 30bp a leg.  Operations are
+  bounded at 0.4% of depth per day, outright at 0.2%.
+
+  <./images/basket-operations.png>
+
+  Means over nine seeds, because a single draw proves nothing – the
+  first version of this table was built on one seed and reported the
+  opposite conclusion in the `drift' row:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   scenario  peak dev off  peak dev ON  days off 2%  basket P&L  profitable 
+  ──────────────────────────────────────────────────────────────────────────
+   inflate   1538bp        1099bp               244  +603,772    9/9        
+   squeeze   1366bp        1274bp               208  +491,509    9/9        
+   drift     1141bp        870bp                313  -96,234     2/9        
+   quiet     760bp         509bp                135  +147,392    9/9        
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The excursion is damped in every scenario, the basket is paid for
+  absorbing it in the three where the move is not real, and it LOSES
+  where the move is real.  Against the attacker, over nine seeds,
+  operations cost the attacker a further $256k on the inflation attack
+  and $295k on the squeeze – worse for the attacker in 9 runs out of 9
+  in both cases.
+
+
+6 The constraints, and one of them is a correctness bound
+═════════════════════════════════════════════════════════
+
+6.1 Measure fast enough, or you become the destabilizer
+───────────────────────────────────────────────────────
+
+  `basketValueInBuck' is read from the basket's own pools, so a basket
+  that trades on it moves its own sensor.  The obvious guard is to
+  measure on a scale so slow that one bounded operation cannot shift it.
+  That was the first design, measuring on the 160-day EMA.
+
+  It made things worse.  The excursion peaks at 1645bp on spot but only
+  712bp on the 160-day average, and that 933bp of attenuation is phase
+  lag.  Operations timed off a lagged signal arrive after the spot has
+  turned, so their flow lands pro-cyclically.  Peak deviation grew from
+  1645bp to 2116bp.
+
+  They still made money.  That is the uncomfortable part, and the
+  central result of this model:
+
+        Profitability and stabilization are not the same
+        objective.  "The corrective trade is the profitable trade"
+        holds only when the signal is timely.  With lag they come
+        apart, and a lagged operator is a profitable destabilizer.
+
+  Measured across the ladder, on the inflation scenario:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   measure on  peak dev  damping  basket P&L  attacker P&L  supply change 
+  ────────────────────────────────────────────────────────────────────────
+          10d  1004bp    -641bp   +623,186    -580,548      -566,628      
+          20d  1074bp    -570bp   +672,384    -622,660      -801,908      
+          40d  1185bp    -460bp   +694,414    -711,547      -623,610      
+          80d  1344bp    -301bp   +746,063    -985,063      *+685,152*    
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Two things fall out.
+
+  *Stabilization and extraction trade off.* Acting early damps the
+  excursion, and therefore forecloses the profit that excursion would
+  have paid.  The basket cannot both prevent the attack and maximally
+  loot it.  This is a policy choice, and it should be made explicitly
+  rather than discovered.
+
+  *Past roughly 80 days the outright operations invert.* The lagged
+  reading still says "dear" long after the market has gone cheap, so an
+  inflation attack is answered by ISSUING more.  That is not a
+  preference, it is a correctness bound on the measurement scale.
+
+  20d is the knee.  Collocation at that scale is handled by the size
+  bound instead: an operation capped at 0.4% of depth per day cannot
+  dominate a 20-day average.
+
+
+6.2 Depositor claims must not be diluted
+────────────────────────────────────────
+
+  A depositor's claim is \(\text{redeemBuck} \times \mathrm{NAV} /
+  \text{totalOutstandingBuck}\).  BUCK minted for a monetary operation
+  is not backed by a depositor's TOKEN, so folding it into the same
+  counter would dilute every depositor.
+
+  Monetary issuance must be tracked as its own liability class.
+  Depositor claims are computed against NAV net of the monetary book.
+
+
+6.3 Reserves are finite and the bound is public
+───────────────────────────────────────────────
+
+  A convertibility undertaking is only as good as its reserves.  The
+  basket's defensive capacity is its NAV, and any bound it publishes
+  will be probed – the 1992 ERM crisis is the standing lesson.  Size
+  operations against NAV, and expect the bound to be tested rather than
+  respected.
+
+
+6.4 Anti-windup
+───────────────
+
+  Bounding the operation while K keeps demanding more winds the PID
+  integrator against the bound.  Feed the /achieved/ action back to the
+  integrator, not the requested one.
+
+
+7 Three runaways, each hiding behind the fix for the last
+═════════════════════════════════════════════════════════
+
+  The `drift' scenario – a genuine 8% revaluation, no attacker – is the
+  test that matters, because a design which profits in every scenario is
+  not being tested.  Building it exposed three separate unbounded
+  behaviours, and each was invisible until the previous one was fixed.
+  This section is the most useful thing in this article.
+
+
+7.1 One: the operator suppresses its own alarm
+──────────────────────────────────────────────
+
+  Absorbing holds the measured deviation down.  That is what absorbing
+  IS.  So a persistence test built on that deviation is silenced by the
+  very act it exists to police.
+
+  In the drift scenario the basket bought until its BUCK inventory
+  reached *49.9% of pool depth, and still climbing*, having spent
+  essentially its entire TOKEN reserve – and the outright quadrants
+  never once fired, because its own bid held the price inside the leash
+  the whole time.
+
+  Worse, it showed a PROFIT throughout, in 7 of 9 seeds.  The gain was
+  real volatility harvesting around the prevailing level; the loss was
+  an unrealized mark on a position that could not have been unwound.  A
+  P&L that looks healthy while the position becomes the market is the
+  classic shape of a blow-up, and nothing in the price signal reported
+  it.
+
+  The fix is to escalate on INVENTORY rather than on price.  Inventory
+  is the one signal the operator's own action cannot suppress, because
+  it /is/ the operator's own action.  If a large position has been
+  absorbed and the price has not come back, the move is real – whatever
+  the price says.
+
+
+7.2 Two: the fix relocated the runaway
+──────────────────────────────────────
+
+  With inventory-based escalation the position limit held – 49.9% of
+  depth fell to 5.3% – and the basket promptly burned *18.65M BUCK, 93%
+  of all supply*, chasing a gap that 8% would have closed.  Escalation
+  fired every day and nothing bounded the cumulative balance-sheet
+  change.
+
+  The fix is a cumulative bound on outright operations, 10% of supply
+  here.  A central bank announces the size of a programme; it does not
+  run the desk until the number comes right.
+
+
+7.3 Three: only then does the failure test pass honestly
+────────────────────────────────────────────────────────
+
+  With all three bounds – per-operation size, position limit with
+  inventory-based escalation, and cumulative balance-sheet cap – the
+  drift scenario loses in 7 seeds of 9, and the supply change lands at
+  1.99M against a 2.0M cap for an 8% revaluation.  The right magnitude,
+  in the right direction, and a loss.
+
+  The general lesson is worth stating on its own.  Each bound was
+  necessary, each was invisible until the previous one was in place, and
+  the system looked healthy and profitable in between.  A bounded
+  operator needs bounds on the FLOW, on the POSITION, and on the
+  CUMULATIVE BALANCE SHEET, and they are three different constraints
+  rather than three settings of one.
+
+
+8 Implementation
+════════════════
+
+8.1 The director gains a second output
+──────────────────────────────────────
+
+  `RebalanceDirectorBase' already caches per-leg ladders and folds them
+  into per-leg efforts.  The common mode is the mean of those ladders,
+  so:
+
+  ┌────
+  │ /// Signed monetary effort, bp of NAV per epoch.
+  │ ///   > 0  issue BUCK      < 0  retire BUCK
+  │ /// `outright` distinguishes a balance-sheet change from a range order.
+  │ function monetaryEffort() external view returns (int32 effortBp, bool outright);
+  └────
+
+  The computation is a mean over the cached `m[k]' the engine already
+  holds, a deadband, a leash, and a consecutive-day counter.  No new
+  per-leg state.
+
+
+8.2 The basket gains one keeper entry point
+───────────────────────────────────────────
+
+  `monetaryOperation()', permissionless and bounded, mirroring the
+  existing `rebalanceSource' / `rebalanceSink' pattern:
+
+  1. read `monetaryEffort()';
+  2. if not `outright', place or refresh a concentrated range order on
+     the indicated side, sized by the effort and capped by the per-epoch
+     bound;
+  3. if `outright', burn from the monetary book (retire) or mint into it
+     (issue), within the same bound;
+  4. account to `monetaryOutstanding', never to `totalOutstandingBuck'.
+
+
+8.3 Order of work
+─────────────────
+
+  1. The model in this article (done): does the mechanism work, and
+     where does it fail?
+  2. An /agent/ that runs the quadrants against the live chain sim, so
+     the behaviour is observed against real pools and real
+     counterparties before any contract changes.  This is deliberately
+     before the contract work: it puts the basket's own sensor outside
+     its own control loop while the dynamics are still being learned.
+  3. `monetaryEffort()' on the director, with the fuzz treatment the
+     amortization invariant already gets.
+  4. `monetaryOperation()' on the basket, with the separate liability
+     class.
+
+
+9 Limitations
+═════════════
+
+  • The model abstracts every pool to one price.  Real operations act on
+    one TOKEN/BUCK pool at a time and must choose which, which is a
+    routing problem the differential engine already solves and this
+    model does not exercise.
+  • Attack sizing is a single shape: 6M over 20 days, held, then
+    unwound.  A patient attacker who bleeds size in over months is a
+    different problem and is not tested here.
+  • The reversion timescale is assumed, not fitted.  The basket's real
+    reversion rate should come from the same OU fit that the rebalance
+    article proposes for its deadbands.
+  • Nothing here models the interaction between monetary operations and
+    the commodity rebalancer competing for the same pool depth.  They
+    share an actuator, and that coupling is unexamined.
+  • The 1:K position sizing that a real range order needs – placing an
+    exact mix over the current price – is solved in
+    `BuckPoolInvestorAgent' but not reflected in this model, which
+    trades a single abstract price.
+  • *The parameterization is not converged.* The bounds above are the
+    ones that stopped the runaways this model produced, at the sizes
+    that happened to work; they are not fitted, and no claim is made
+    that they are optimal or even good.  The end-of-run supply change
+    also reflects the whole path rather than the attack alone – an
+    inflation attack contracts supply while it runs and expands it again
+    as the attacker unwinds, so the terminal number is not a clean read
+    on the response.
