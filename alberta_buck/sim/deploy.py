@@ -89,7 +89,13 @@ def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
     token_to_user = 0
     treasury_buck = 0
 
-    if d.basket_impl == "prorata":
+    # Anything that is NOT the legacy shell pays via ERC20 transfers and
+    # emits the 6-arg Redeemed.  Enumerating implementations here instead
+    # silently mis-parsed the "ops" shell as legacy: it emits no
+    # RedeemedFromPool, so every redemption booked 0 treasury BUCK and 0
+    # TOKEN returned, and an A/B read as the desk having consumed the entire
+    # treasury when nothing of the sort had happened.
+    if d.basket_impl != "legacy":
         basket_tokens = {c.address.lower() for c in d.tokens}
         for log in rcpt["logs"]:
             t0 = log["topics"][0]
