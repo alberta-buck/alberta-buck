@@ -108,6 +108,16 @@ contract BuckBasketFence is BuckBasketProRata {
     uint32  public fenceRecenterBp;    // drift before the band is re-struck
     uint256 public harvestBuck;        // cumulative BUCK-side harvest, telemetry
 
+    /// @notice BUCK this basket has issued and not yet retired: minted minus
+    ///         burned across deposits, re-strikes and redemptions.
+    ///
+    ///         `totalOutstandingBuck` cannot serve here.  It is the sum of
+    ///         deposit PRINCIPALS -- a historical record -- while
+    ///         `fenceRebalance` mints and burns against the K budget without
+    ///         touching it, so the two diverge from the first re-strike.  The
+    ///         live figure is the one a claim has to net against.
+    int256 public netIssued;
+
     event FenceOpened(uint256 indexed i, address pool, int24 lo, int24 hi);
     event FenceStruck(uint256 indexed i, int24 lo, int24 hi, uint128 liquidity,
                       uint256 buckTarget, int256 buckDelta);
@@ -229,16 +239,40 @@ contract BuckBasketFence is BuckBasketProRata {
         return UniswapV3OracleLib.consult(pool, secondsAgo);
     }
 
-    /// @notice Whole-basket fence value in BUCK: the depositor claim base.
-    function fenceNav() public view returns (uint256 nav) {
+    /// @notice Everything the basket holds, in BUCK: both sides of every
+    ///         band PLUS the idle balances.
+    ///
+    ///         The idle part is not a rounding detail.  `getLiquidityForAmounts`
+    ///         binds on whichever side runs out first, and with a K-scaled
+    ///         mix that is always the BUCK side, so about (1-K) of every
+    ///         deposit's TOKEN -- a quarter of it at K = 0.75 -- sits outside
+    ///         the band.  A band-only measure misses all of it.
+    function fenceAssets() public view returns (uint256 assets) {
         for (uint256 i = 0; i < constituents.length; i++) {
             (uint256 b, uint256 t) = fenceAmounts(i);
-            nav += b;
-            if (t > 0) {
-                nav += UniswapV3OracleLib.mulDiv(
-                    t, fencePrice(i), 10 ** constituents[i].decimals);
+            uint256 tok = t + IERC20(constituents[i].token).balanceOf(address(this));
+            assets += b;
+            if (tok > 0) {
+                assets += UniswapV3OracleLib.mulDiv(
+                    tok, fencePrice(i), 10 ** constituents[i].decimals);
             }
         }
+        assets += IERC20(address(buck)).balanceOf(address(this));
+    }
+
+    /// @notice The depositor claim base: assets NET of the BUCK the basket
+    ///         still owes to retire.
+    ///
+    ///         Netting is what makes this comparable to `totalShares`.  A
+    ///         deposit of `t` adds `t` of TOKEN and mints `K*t` of BUCK, so
+    ///         assets rise by `(1+K)t` while the obligation rises by `K*t` --
+    ///         a net `t`, which is exactly the shares issued.  Reporting
+    ///         assets without the netting made the basket look 1/(1+K) richer
+    ///         than it is, and the band-only version made it look poorer.
+    function fenceNav() public view returns (uint256) {
+        uint256 assets = fenceAssets();
+        int256 net = int256(assets) - netIssued;
+        return net > 0 ? uint256(net) : 0;
     }
 
     /// @notice The K budget: the most BUCK this basket may have outstanding.
@@ -281,7 +315,10 @@ contract BuckBasketFence is BuckBasketProRata {
         // difference is float K can actually reach.
         uint256 K = controller.compute();
         uint256 mintAmt = UniswapV3OracleLib.mulDiv(shares, K, 1e18);
-        if (mintAmt > 0) buck.mintFromBasket(address(this), mintAmt);
+        if (mintAmt > 0) {
+            buck.mintFromBasket(address(this), mintAmt);
+            netIssued += int256(mintAmt);
+        }
 
         uint128 L = _strikeLiquidity(fz, tokenAmount, mintAmt);
         if (L > 0) {
@@ -356,11 +393,13 @@ contract BuckBasketFence is BuckBasketProRata {
             uint256 excess = buckHave - target;
             buck.burnFromBasket(excess);
             buckHave -= excess;
+            netIssued -= int256(excess);
             buckDelta = -int256(excess);
         } else if (target > buckHave) {
             uint256 short_ = target - buckHave;
             buck.mintFromBasket(address(this), short_);
             buckHave += short_;
+            netIssued += int256(short_);
             buckDelta = int256(short_);
         }
 
@@ -419,16 +458,40 @@ contract BuckBasketFence is BuckBasketProRata {
         }
         // Band proceeds (this receipt's, in full) plus its pro-rata slice of
         // whatever was sitting idle -- undeployed remainder and harvest alike.
-        uint256 buckOut = IERC20(address(buck)).balanceOf(address(this))
+        uint256 buckClaim = IERC20(address(buck)).balanceOf(address(this))
             - buckBefore + buckBefore * num / den;
 
-        // Retire this receipt's share of the outstanding principal.  Any BUCK
-        // the band returned beyond it stays with the basket as harvest.
         Deposit storage dep = deposits[receiptId];
         uint256 principal = dep.buckPrincipal * bp / 10000;
-        uint256 toBurn = buckOut < principal ? buckOut : principal;
-        if (toBurn > 0) buck.burnFromBasket(toBurn);
-        totalOutstandingBuck -= toBurn;
+        uint256 j = indexOf[dep.token] - 1;
+        Fence storage fzo = fenceOf[j];
+
+        // A shortfall still has to be covered by selling TOKEN, or the
+        // obligation silently fails to retire and every later claim is
+        // overstated.  This direction is small and unavoidable.
+        if (buckClaim < principal) {
+            uint256 need = principal - buckClaim;
+            uint256 px = fencePrice(j);
+            uint256 tokIn = px == 0 ? 0 : UniswapV3OracleLib.mulDiv(
+                need, 10 ** constituents[j].decimals, px) * 102 / 100;
+            uint256 have = IERC20(dep.token).balanceOf(address(this));
+            if (tokIn > have) tokIn = have;
+            if (tokIn > 0) {
+                (, uint256 got) = _venue().fenceSwap(dep.token, fzo.pool, false, tokIn);
+                buckClaim += got;
+            }
+        }
+
+        uint256 buckHeld = IERC20(address(buck)).balanceOf(address(this));
+        uint256 toBurn = principal;
+        if (toBurn > buckClaim) toBurn = buckClaim;
+        if (toBurn > buckHeld)  toBurn = buckHeld;
+        if (toBurn > 0) {
+            buck.burnFromBasket(toBurn);
+            netIssued -= int256(toBurn);
+        }
+        totalOutstandingBuck -= toBurn > totalOutstandingBuck
+            ? totalOutstandingBuck : toBurn;
         dep.buckPrincipal -= principal < dep.buckPrincipal ? principal : dep.buckPrincipal;
 
         // Pay the TOKEN slices out in kind.
@@ -442,11 +505,31 @@ contract BuckBasketFence is BuckBasketProRata {
             if (pay > 0) IERC20(tk).transfer(msg.sender, pay);
         }
 
+        // Pay the BUCK side out in kind too.
+        //
+        // The first cut CONVERTED the surplus BUCK to TOKEN so that a
+        // depositor need never touch BUCK -- ProRata's rule, and a real one,
+        // since BUCK transfers are identity-gated.  It does not survive here:
+        // the swap unwinds into the very band the exit just thinned, so the
+        // leaver eats the slippage of their own withdrawal.  Measured, a
+        // 40,000-share claim came back as 13,620 after the band had converted
+        // to BUCK.  A fence depositor genuinely owns a slice of a TOKEN+BUCK
+        // portfolio rather than pure seigniorage, so paying both sides in
+        // kind is the honest settlement AND the one with no slippage at all.
+        //
+        // The cost is that a fence depositor must be identity-bound.  That is
+        // a real narrowing of who can be a commodity LP, and it is the price
+        // of this basket holding BUCK on the depositor's behalf.
+        uint256 surplus = buckClaim > toBurn ? buckClaim - toBurn : 0;
+        uint256 payable_ = IERC20(address(buck)).balanceOf(address(this));
+        if (surplus > payable_) surplus = payable_;
+        if (surplus > 0) IERC20(address(buck)).transfer(msg.sender, surplus);
+
         shareOf[receiptId] = sh - take;
         totalShares -= take;
         if (shareOf[receiptId] == 0) receipt.burn(receiptId);
 
-        harvestBuck += buckOut > principal ? buckOut - principal : 0;
+        harvestBuck += surplus;
         emit FenceRedeemed(receiptId, take, toBurn);
         emit Redeemed(msg.sender, receiptId, toBurn, 0, 0,
                       uint256(10000 - bp));

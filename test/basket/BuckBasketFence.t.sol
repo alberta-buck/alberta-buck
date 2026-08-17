@@ -199,11 +199,15 @@ contract BuckBasketFenceTest is Test {
         uint256 shares0 = basketC.totalShares();
         uint256 nav0 = basketC.fenceNav();
 
-        // Trade back and forth across the band: the round trip leaves the
-        // price where it started and the fees behind.
+        // A REAL round trip: swap in, then swap back exactly what came out.
+        // Two fixed-size legs are not one -- the fee makes the return leg
+        // short, the price ratchets, and the basket takes genuine
+        // impermanent loss that swamps the fee income being measured.
         for (uint256 r = 0; r < 6; r++) {
+            uint256 t0 = paxg.balanceOf(address(this));
             _arb(pool, address(buck), 20_000e18);
-            _arb(pool, address(paxg), 5e18);
+            uint256 got = paxg.balanceOf(address(this)) - t0;
+            if (got > 0) _arb(pool, address(paxg), got);
         }
         basketC.fenceRebalance(0);
 
@@ -246,6 +250,87 @@ contract BuckBasketFenceTest is Test {
         uint256 aGot = paxg.balanceOf(alice) - aBefore;
         uint256 bGot = paxg.balanceOf(bob) - bBefore;
         assertApproxEqRel(bGot, 2 * aGot, 0.10e18, "payouts track shares");
+    }
+
+    // ---- fix 3: the claim base nets the obligation ------------------------ //
+
+    /// A deposit of t adds t of TOKEN and mints K*t of BUCK: assets rise by
+    /// (1+K)t while the obligation rises by K*t, a net t -- exactly the shares
+    /// issued.  Reporting assets without netting made the basket look 1/(1+K)
+    /// richer than it is; the band-only version made it look poorer, because
+    /// about (1-K) of every deposit's TOKEN sits outside the band.
+    function test_navNetsTheObligationAndTracksShares() public {
+        _open();
+        _deposit(alice, 10e18);
+        _deposit(bob,   10e18);
+
+        assertGt(basketC.fenceAssets(), basketC.fenceNav(),
+                 "assets exceed NAV by the outstanding obligation");
+        assertApproxEqRel(basketC.fenceNav(), basketC.totalShares(), 0.05e18,
+                          "NAV tracks shares");
+        assertApproxEqRel(uint256(basketC.netIssued()),
+                          basketC.fenceAssets() - basketC.fenceNav(),
+                          0.01e18, "the gap IS the live obligation");
+    }
+
+    /// netIssued must follow fenceRebalance, which totalOutstandingBuck does
+    /// not: that counter is the sum of deposit principals and never moves
+    /// when the K budget does.
+    function test_netIssuedFollowsRebalanceWhereOutstandingDoesNot() public {
+        _open();
+        _deposit(alice, 10e18);
+        int256 net0 = basketC.netIssued();
+        uint256 out0 = basketC.totalOutstandingBuck();
+
+        ctrl.setK(0.30e18);
+        basketC.fenceRebalance(0);
+
+        assertLt(basketC.netIssued(), net0, "live obligation fell with K");
+        assertEq(basketC.totalOutstandingBuck(), out0,
+                 "the principal ledger did not, which is why it cannot net");
+    }
+
+    // ---- fix 2: value does not get trapped in BUCK ------------------------- //
+
+    /// Push the band so it converts to BUCK, then exit.  Paying only TOKEN
+    /// left the depositor's value behind as "harvest" and put the net claim
+    /// base 42% under shares in the first chain run.
+    function test_redeem_returnsValueAfterBandConvertsToBuck() public {
+        address pool = _open();
+        uint256 rid = _deposit(alice, 10e18);
+        _deposit(bob, 10e18);
+        uint256 shares = basketC.shareOf(rid);
+
+        // Buy TOKEN out of the band with BUCK: the position converts toward
+        // BUCK, which is exactly the state that used to strand the claim.
+        _arb(pool, address(buck), 60_000e18);
+
+        uint256 before = paxg.balanceOf(alice);
+        vm.prank(alice);
+        basketC.redeem(rid, 0);
+        uint256 got = paxg.balanceOf(alice) - before;
+        assertGt(got, 0, "paid something");
+
+        // Paid in kind on BOTH sides, so count both.
+        uint256 valueOut = got * PAXG_PRICE / 1e18 + buck.balanceOf(alice);
+        assertGt(valueOut, (shares * 3) / 4,
+                 "claim is not stranded on the BUCK side");
+    }
+
+    /// The mirror: a band that came back mostly TOKEN cannot cover its burn
+    /// from BUCK alone.  Selling just enough TOKEN is what keeps the
+    /// obligation retiring; without it every later claim is overstated.
+    function test_redeem_coversBurnWhenBandIsAllToken() public {
+        address pool = _open();
+        uint256 rid = _deposit(alice, 10e18);
+        _deposit(bob, 10e18);
+
+        _arb(pool, address(paxg), 30e18);            // band converts to TOKEN
+
+        uint256 out0 = basketC.totalOutstandingBuck();
+        vm.prank(alice);
+        basketC.redeem(rid, 0);
+        assertLt(basketC.totalOutstandingBuck(), out0, "obligation retired");
     }
 
     function test_openFence_isOncePerConstituent() public {
