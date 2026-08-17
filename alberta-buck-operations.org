@@ -582,14 +582,149 @@ Before trusting any result from it:
 
 1. The model in this article (done): does the mechanism work, and where does
    it fail?
-2. An /agent/ that runs the quadrants against the live chain sim, so the
-   behaviour is observed against real pools and real counterparties before
-   any contract changes.  This is deliberately before the contract work: it
-   puts the basket's own sensor outside its own control loop while the
-   dynamics are still being learned.
-3. =monetaryEffort()= on the director, with the fuzz treatment the
-   amortization invariant already gets.
-4. =monetaryOperation()= on the basket, with the separate liability class.
+2. An /agent/ that runs the quadrants against the live chain sim (done, and
+   see /What the agent showed/ below), so the behaviour is observed against
+   real pools and real counterparties before any contract changes.
+3. =monetaryEffort()= on the director (done).
+4. =monetaryOperation()= on the basket (done), with the separate liability
+   class.
+
+** What the agent showed, including the part that did not survive
+
+=MonetaryOpsAgent= runs the quadrants from outside the basket.  Over 365 days
+in the reverting regime, against the same roster and seed with the agent
+removed:
+
+| seed    | peak dev off -> ON | mean dev off -> ON | depositor P&L | treasury |
+|---------+--------------------+--------------------+---------------+----------|
+| default |    1207 -> 821     |     378 -> 287     |     +106,984  | -106,692 |
+| 7       |    1098 -> 1154    |     344 -> 301     |     +138,237  |  -97,106 |
+| 11      |    1081 -> 1246    |     353 -> 286     |     +100,458  |  -94,094 |
+
+The first row alone reads as a 32% cut in the peak excursion.  It is a
+single draw, and it does not replicate: on two further seeds the PEAK got
+WORSE, by 56bp and 165bp.  What survives all three is different and narrower
+-- the MEAN deviation falls every time, by 12 to 24%.
+
+The distinction is the useful part.  A bounded desk absorbing a fraction of
+depth per day can hold down the everyday wander of the common mode; it
+cannot stand in front of the excursion that actually matters, and its own
+standing issuance adds float while it tries.  Anyone quoting a peak-damping
+number from one seed is quoting noise, and this article did exactly that
+once already, in the =drift= row of the scenario table.
+
+What also replicates, in all three seeds, is a transfer: depositors gain
+about $100-140k and the treasury loses very nearly the same amount.  The
+plausible mechanism is that holding BUCK nearer parity puts fewer
+redemptions into BuckBasketProRata's deflation branch, which is the branch
+that converts depositors' TOKEN to cover burns -- so the treasury accrues
+less because it is expropriating depositors less.  That is an interpretation
+of a consistent number, not a measured causal chain.
+
+The agent also measured its own ceiling.  =moNoBook= counted 36 days on which
+the policy called for an outright retirement and the agent had no drawn line
+left to retire against -- the gap that only the contract can close.
+
+* The contract: BuckBasketOps
+
+=src/basket/BuckBasketOps.sol=, with =commonMode()= / =monetaryEffort()= on
+=PairsRebalanceDirector=.  Selected with =--basket ops=, and inert until
+=setOpsParams= enables it, so an ops basket with no policy installed is the
+baseline it is compared against.
+
+** The depositor separation is achieved by NOT writing to the payout path
+
+This was expected to be the expensive part and turned out to be the cheapest,
+because the architecture already had the shape.
+
+A depositor's claim is \(V = \theta\,\mathrm{NAV}\) with \(\theta =
+\text{redeemBuck}/\text{totalOutstandingBuck}\), allocated from
+=poolBuckValues()=, which reads the basket's LP POSITION net of
+=treasuryLiquidity=.  There is already a second, non-depositor class of
+liquidity, and exactly ONE line excludes it:
+
+#+begin_src solidity
+if (totalL <= c.treasuryLiquidity) continue;
+depL[i] = totalL - c.treasuryLiquidity;
+#+end_src
+
+So the monetary book is held as plain TOKEN and BUCK BALANCES and never
+LP'd.  It is then outside =depL= by construction, and not one line of the
+redemption allocator changes.  =mintFromBasket= does not touch
+=totalOutstandingBuck= either -- only =depositToken=, =_depositBuck= and
+=redeem= do -- so monetary issuance cannot enter a receipt's denominator even
+by accident.
+
+The reason to prefer this over netting a monetary term out of the payout
+formula: \(\theta\) appears four times across =_allocateSellHigh= and
+=_allocateSingleToken=, and a mistake in any of them is a silent transfer
+away from depositors rather than a bad trade.  Two tests pin it -- the book
+survives a full depositor exit, and no quadrant moves =totalOutstandingBuck=.
+
+** What only the contract can do
+
+- *Q2 retires float the basket never issued.*  =burnFromBasket= destroys BUCK
+  bought from anyone.  An agent cannot: supply is \(\sum_a \max(0,
+  \text{signedRaw}(a))\), so it removes float only while its own balance is
+  drawn, and =Buck.burn= merely deactivates coverage.
+- *Q4 is not capped by K.*  =mintFromBasket= is backed by basket TOKEN rather
+  than by insured-asset credit, so it bypasses =creditLimit= entirely.
+
+** A bound that is not politeness
+
+=maxLegBp= caps each operation at a fraction of that pool's BUCK reserve.
+That is a safety property, not good manners: =poolBuckValues= runs
+=_enforceSlippageGuard= on every redemption, so a monetary swap large enough
+to push spot off TWAP would revert every depositor exit until the window
+caught up.  The basket must not be able to brick its own redemption path.
+
+** The desk has to be capitalized, and that is the 1992 lesson
+
+Q1 and Q2 are TOKEN-funded bids.  The desk may not fund them from depositor
+TOKEN -- a depositor is paid in TOKEN only, so converting their commodity to
+defend parity would charge them for the defence.  Its own Q4 issuance is the
+other source, but that is exactly backwards for a desk whose first task is an
+excursion the WRONG way: in the reverting regime BUCK is never dear, so the
+desk never accumulates.  Uncapitalized, it wanted to act on 57 of 90 days and
+had nothing to act with.
+
+A currency board can only defend with reserves it built up earlier.  So the
+desk is capitalized like one -- =capitalizeMonetary()= is the founding grant,
+and in production the same job is done by treasury accrual, which is already
+outside every depositor claim.  The size of that grant is a real policy
+variable and it is the first thing to sweep.
+
+** Why the limits exist, and what they are actually for
+
+The bounds are not primarily risk limits.  They exist to stop the desk
+substituting a fast fix for the slow, structural withdrawal of BUCK that K
+performs through =creditLimit= -- so they are the knob that sets where the
+two mandates OVERLAP, and they are meant to be swept
+(=SIM_OPS_POSITION_BP= / =SIM_OPS_OUTRIGHT_BP= / =SIM_OPS_CAPITAL_USD=).
+
+This reframes what counts as success.  The desk's position is a BET that K
+eventually forces the issue: it buys BUCK the market is dumping and holds it
+while K tightens credit behind it.  Interim mark-to-market is therefore the
+wrong scorecard, and a desk that loses in the short term is fine provided the
+long-term forcing arrives.
+
+What would invalidate the bet is subtler and is the thing to watch for.  The
+desk damps the excursion by absorbing it, and =basketValueInBuck= is read
+from the very pools it absorbs into -- so a SUCCESSFUL operation shrinks the
+error K sees.  If K then stops tightening, the forcing never arrives and the
+desk is left holding inventory with nothing behind it.  That is the
+system-level form of the first runaway in this article: the operator
+suppressing its own alarm, one loop further out.
+
+=monetaryDeviationOffset()= exposes exactly that quantity -- what the desk's
+own inventory has taken out of the deviation K measures.  It is EXPOSED
+rather than acted on, because the right response is a controller-side choice
+(feed K the undamped error, or feed the achieved action back to the
+integrator as anti-windup) and it should be measured before it is picked.  In
+a 90-day run the desk held 1.25M BUCK of float while =buckK= still fell from
+0.745 to 0.584, so the forcing was not being suppressed at that size.  Whether
+that survives a larger desk is the open question, and it is the reason the
+bounds are a sweep rather than a constant.
 
 * Limitations
 

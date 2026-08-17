@@ -122,6 +122,21 @@ def summarize(v: dict) -> dict:
         "why": last.get("mo_why", {}),
         "err": last.get("mo_err", ""),
         "desk": _desk(f),
+        # BuckBasketOps, when --basket ops deployed the two-mode shell.
+        "mk": {
+            "q": [last.get(f"mk_q{i}", 0) for i in (1, 2, 3, 4)],
+            "ops": last.get("mk_ops", 0),
+            "outstanding": last.get("mk_outstanding", 0),
+            "held": last.get("mk_buck_held", 0),
+            "offset": last.get("mk_offset", 0),
+            "tokValue": last.get("mk_tok_value", 0),
+            "idle": last.get("mk_idle", 0),
+            "bound": last.get("mk_bound", 0),
+            "noAdvice": last.get("mk_no_advice", 0),
+            "slippage": last.get("mk_slippage", 0),
+            "otherErr": last.get("mk_other_err", 0),
+            "err": last.get("mk_err", ""),
+        },
     }
 
 
@@ -161,9 +176,45 @@ def main(argv=None) -> int:
                on["dmProfitUsd"] / 1e6))
     print(_row("days buckK railed", off["kClampDays"], on["kClampDays"]))
 
+    mk = on["mk"]
+    if mk["ops"]:
+        q = mk["q"]
+        print("\n  THE BASKET DESK  (BuckBasketOps, on-chain policy)")
+        print(f"    quadrants fired      Q1 absorb {q[0]:<6d} Q2 retire {q[1]:<6d}"
+              f" Q3 supply {q[2]:<6d} Q4 issue {q[3]}")
+        print(_row("net issued (BUCK)", 0, mk["outstanding"] / 1e6))
+        print(_row("inventory held", 0, mk["held"] / 1e6))
+        print(_row("TOKEN reserves left", 0, mk["tokValue"] / 1e6))
+        print("\n  DOES THE DESK SUPPRESS K'S FORCING?")
+        print(f"    float the desk removed  {mk['offset']/1e6:>14,.0f} BUCK")
+        print(f"    buckK OFF -> ON         {off['kClampDays']:>6d} -> "
+              f"{on['kClampDays']:<6d} days railed")
+        print(f"""
+    The desk damps the excursion by absorbing it, and basketValueInBuck is
+    read from the very pools it absorbs into -- so a successful operation
+    SHRINKS the error K sees.  If K then stops tightening, the long-term
+    forcing the desk's position is a bet on never arrives and the desk is
+    left holding inventory with nothing behind it.  Compare the K paths in
+    the two vectors before trusting any P&L here.""")
+        print("\n  WHY IT DID NOT ACT  (the quiet failures)")
+        print(f"    out of TOKEN         {mk['idle']:>14,d}  "
+              f"(Q1/Q2 are TOKEN-funded: this is the desk out of ammunition)")
+        print(f"    bound bit            {mk['bound']:>14,d}  "
+              f"(inventory or cumulative ceiling)")
+        print(f"    inside deadband      {mk['noAdvice']:>14,d}")
+        if mk["slippage"]:
+            print(f"    OWN TWAP GUARD       {mk['slippage']:>14,d}  "
+                  f"(the desk tripped the basket's redemption guard)")
+        if mk["otherErr"]:
+            print(f"    unclassified         {mk['otherErr']:>14,d}  "
+                  f"{str(mk['err'])[:60]}")
+
     d = on["desk"]
     if d is None:
-        print("\n  NO DESK IN THE 'ON' VECTOR -- was SIM_MONETARY_OPS set?")
+        if mk["ops"]:
+            return 0
+        print("\n  NO DESK IN THE 'ON' VECTOR -- was SIM_MONETARY_OPS or "
+              "--basket ops set?")
         return 1
     print("\n  THE DESK")
     q = on["q"]
