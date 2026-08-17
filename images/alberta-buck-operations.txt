@@ -72,7 +72,8 @@ Table of Contents
 8. Implementation
 .. 1. The director gains a second output
 .. 2. The basket gains one keeper entry point
-.. 3. Order of work
+.. 3. Implementing the agent against the chain simulation
+.. 4. Order of work
 9. Limitations
 
 
@@ -449,7 +450,169 @@ Table of Contents
   4. account to `monetaryOutstanding', never to `totalOutstandingBuck'.
 
 
-8.3 Order of work
+8.3 Implementing the agent against the chain simulation
+───────────────────────────────────────────────────────
+
+  Step 2 below is the one to do first, and this section is what it
+  needs.  Every item here cost a debugging cycle while building
+  `BuckPoolInvestorAgent' and `BuckIssuerArbAgent'; none of it is
+  visible from the contracts alone.
+
+
+8.3.1 Where it goes
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  A `_ProxyAgent' subclass in `alberta_buck/sim/equilibrium_agents.py',
+  registered with `@_register' and added to the `REBALANCING' roster.
+  The base class provides `_bind_proxy', `_proxy_exec', `_buy_buck',
+  `_sell_capped' and `_swap_via_simlp'.  The proxy is a `SimLP', which
+  matters: it can serve the Uniswap V3 mint callback itself, so the
+  agent can hold concentrated positions directly.
+
+
+8.3.2 Reading the signal
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  `basketValueInBuck()' off the basket is the spot common mode.  The
+  agent keeps its own EMA ladder over `log(bvib)' on the
+  `PairsRebalanceDirector' window geometry (5,10,20,40,80,160,320),
+  measures the level on the 20-day rung, and detects the turn on the
+  10-day rung.  Advance the ladder ONCE per day, before any decision, or
+  the level lags the action by a tick.
+
+
+8.3.3 The three primitives, and their exact call paths
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  *Range order.* The proxy mints directly:
+
+  ┌────
+  │ d.chain.send(self.proxy.functions.mint(pool, tickLower, tickUpper, L, t0, t1))
+  └────
+
+  Exiting takes TWO calls through `exec', and a burn alone silently
+  strands the capital – `burn' only credits the owed amounts, `collect'
+  moves them:
+
+  ┌────
+  │ self._proxy_exec(d, pool, pool_c.encode_abi(
+  │     "burn(int24,int24,uint128)", args=[lo, hi, liquidity]))
+  │ self._proxy_exec(d, pool, pool_c.encode_abi(
+  │     "collect(address,int24,int24,uint128,uint128)",
+  │     args=[self.proxy.address, lo, hi, 2**128 - 1, 2**128 - 1]))
+  └────
+
+  *Issue.* `Buck.mint(amount)' ACTIVATES coverage against the agent's
+  BuckCredit; it does not credit the balance.  Spending afterwards is
+  what draws.  Two consequences that look like bugs if they are not
+  expected: `BuckCredit.currentValue' returns 0 while `activatedValue'
+  is zero, so an un-activated NFT contributes nothing to `creditLimit'
+  and the agent can hold collateral it cannot spend; and remaining
+  capacity must be read from chain, never tallied in Python, because
+  depreciation moves it underneath any local count.  Note the two halves
+  live on DIFFERENT contracts:
+
+  ┌────
+  │ face = d.credit.functions.depreciatedFaceValue(tid).call()   # BuckCredit
+  │ used = d.buck.functions.mintsBacked(tid).call()              # Buck
+  │ headroom = max(0, face - used)
+  └────
+
+  A Python-side tally of what was activated drifts from the chain within
+  days and presents as "insufficient credit allocation" on most
+  attempts.
+
+  *Retire.* Buy BUCK back so the signed balance climbs toward zero, then
+  burn to release coverage.  `Buck.burn(uint256)' or the tokenIds
+  overload.
+
+
+8.3.4 Units and orientation, which are the two silent killers
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  `bvib' is BUCK PER BASKET.  TOKEN to BUCK multiplies; BUCK to TOKEN
+  divides.  Getting this backwards still runs, still trades, and reports
+  plausible numbers – it simply sizes every operation wrongly and marks
+  the book wrong.
+
+  `Buck.balanceOf' on a Non-Carrying account is held BUCK PLUS unused
+  credit headroom, so before any draw it already reports `creditLimit' =
+  K x collateral.  That is the drawable amount and it is what a position
+  should be sized against.  `signedBalanceOf' is the raw balance and
+  does NOT net the demurrage lien, so sizing a transfer off it produces
+  "amount exceeds spendable".
+
+  Pool orientation decides which side of the current tick a directional
+  position sits on.  The pool price is token1/token0, so holding BUCK to
+  sell into a BUCK rally is ABOVE the tick when BUCK is token0 and BELOW
+  it when BUCK is token1.  Getting this wrong puts every position on
+  exactly the wrong side and looks like bad luck.
+
+
+8.3.5 Concentrated liquidity is not full-range liquidity
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  The seeding formula in `deploy.py' is for full-range positions.
+  Reusing it for a narrow band under-sizes by the ratio of the widths –
+  20 to 30x at 300 to 600bp – which presents as positions placing
+  successfully while most of the capital sits idle.  With the price
+  inside the range both legs bind:
+
+  \[ a_0 = L\frac{\sqrt{B}-\sqrt{P}}{\sqrt{P}\sqrt{B}}, \qquad a_1 =
+     L(\sqrt{P}-\sqrt{A}), \qquad L = \min(L_0, L_1) \]
+
+  A tick is a log price, so a `bp` move is \(\ln(1+x)/\ln(1.0001)\)
+  ticks – 900bp is 862 ticks, not 900.  Using bp directly makes a wide
+  range 4% narrower than intended.
+
+
+8.3.6 Telemetry, or the agent is invisible
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Counters written into `ctr' are NOT in the vector unless `snapshot.py'
+  copies them into the frame dict.  A counter that is not copied reads 0
+  forever, and that has produced two separate "the agent is dead"
+  conclusions on this branch about agents that were working.  Add the
+  counters to `snapshot.py' in the same commit as the agent, never
+  later.
+
+  Report per-agent inventory through `arb_state()', which the
+  snapshotter collects into `arb2[]'.  Aggregate counters hide the
+  failure that matters here: an agent whose position is quietly becoming
+  the market shows healthy totals right up until it cannot exit.
+
+
+8.3.7 Where each bound is enforced
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   bound              value       enforced                                
+  ────────────────────────────────────────────────────────────────────────
+   per-operation      0.4% depth  trade sizing, via `_impact_cap'         
+   position           10% depth   refuse to add when inventory exceeds it 
+   escalation         5% depth    switch temporary -> outright            
+   cumulative         10% supply  net (minted - burned) across the run    
+   measurement scale  20d rung    never slower than 40d (80d inverts)     
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+8.3.8 Verification checklist
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Before trusting any result from it:
+
+  1. counters appear in the vector and are non-zero;
+  2. `arb_state' inventory is bounded and NOT monotonically growing;
+  3. outright operations fire at all – if Q2/Q4 are zero the mechanism
+     is half inert, which is how this model first behaved;
+  4. supply moves in the correct direction during an attack, not merely
+     at the end of the run;
+  5. a run with the agent disabled, same seed, for the baseline;
+  6. several seeds, because the failure case reversed sign between one
+     seed and nine.
+
+
+8.4 Order of work
 ─────────────────
 
   1. The model in this article (done): does the mechanism work, and
