@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -169,7 +170,14 @@ def main(argv=None) -> int:
 
     print("\n  THE SYSTEM")
     print(_row("BUCK supply", off["supplyEnd"] / 1e6, on["supplyEnd"] / 1e6))
-    print(_row("basket NAV", off["navPost"] / 1e6, on["navPost"] / 1e6))
+    # _basket_nav reduces algebraically to 2 x the pools' BUCK reserves: it
+    # prices the TOKEN side at rb/rt and then multiplies back by rt, so the
+    # TOKEN side always evaluates to rb.  A desk that buys BUCK OUT of the
+    # pools and holds it therefore drops this measure by ~2x the float it
+    # removed, with nothing destroyed -- so it must be read next to the
+    # desk's own book, never alone.
+    print(_row("pool NAV (=2x poolBUCK)", off["navPost"] / 1e6,
+               on["navPost"] / 1e6))
     print(_row("treasury BUCK", off["treasuryBuck"] / 1e6,
                on["treasuryBuck"] / 1e6))
     print(_row("depositor P&L USD", off["dmProfitUsd"] / 1e6,
@@ -185,6 +193,30 @@ def main(argv=None) -> int:
         print(_row("net issued (BUCK)", 0, mk["outstanding"] / 1e6))
         print(_row("inventory held", 0, mk["held"] / 1e6))
         print(_row("TOKEN reserves left", 0, mk["tokValue"] / 1e6))
+        book = mk["held"] + mk["tokValue"]
+        print(_row("desk book (BUCK+TOKEN)", 0, book / 1e6))
+        # The founding grant, if the run recorded one.  BUCK and USD are
+        # 1:1 by construction at t0, so this is comparable to the book.
+        cap = int(os.environ.get("SIM_OPS_CAPITAL_USD", "0")) * 10 ** 6 * 3
+        if cap:
+            retired = -mk["outstanding"] if mk["outstanding"] < 0 else 0
+            print(_row("desk P&L vs capital", 0, (book - cap) / 1e6))
+            print(f"""
+    The desk's P&L and the float it retired are the SAME budget spent two
+    ways, and they trade off exactly as the article's measure-fast/extract
+    tension predicts.  Q1 and Q3 are the extraction path -- buy the dump,
+    sell it back, keep the spread.  Q2 forgoes that: burning BUCK bought at
+    a discount gives up the recovery profit to buy a permanent supply
+    reduction instead, which accrues to every BUCK holder rather than to the
+    desk.  {retired/1e6:,.0f} BUCK of float retired is what this desk bought
+    with its loss.  A desk tuned to extract would hold and sell instead, and
+    would stabilize less.""")
+        print(f"""
+    Read the pool-NAV delta against that book.  Pool NAV is 2 x the pools'
+    BUCK reserves, so BUCK the desk buys out of the pools and holds leaves
+    that measure by construction -- roughly 2x the float removed -- without
+    being destroyed.  Off-pool assets ({book/1e6:,.0f} BUCK here) are the
+    other half of the picture.""")
         print("\n  DOES THE DESK SUPPRESS K'S FORCING?")
         print(f"    float the desk removed  {mk['offset']/1e6:>14,.0f} BUCK")
         print(f"    buckK OFF -> ON         {off['kClampDays']:>6d} -> "

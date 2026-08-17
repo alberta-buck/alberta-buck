@@ -694,6 +694,75 @@ and in production the same job is done by treasury accrual, which is already
 outside every depositor claim.  The size of that grant is a real policy
 variable and it is the first thing to sweep.
 
+** What the contract desk did
+
+Two seeds, 365 days, the same roster and seed in both arms; the only
+difference is which shell is deployed (the monetary-ops AGENT is off in
+both, so this isolates the contract).
+
+|                    | 43981 base |     ops | seed 7 base |     ops |
+|--------------------+------------+---------+-------------+---------|
+| peak deviation bp  |       1143 | *768*   |        1083 | *914*   |
+| mean deviation bp  |        389 | *289*   |         358 | *322*   |
+| terminal dev bp    |        755 |     620 |         723 |     -48 |
+| BUCK supply        |     25.34M |  26.13M |      24.38M |  24.38M |
+| depositor P&L      |   +219,966 | *+320,137* |   +194,826 | *+279,558* |
+| treasury BUCK      |    413,163 | 354,035 |     424,356 | 384,967 |
+| days buckK railed  |          1 |       1 |           1 |       1 |
+| Q1 / Q2 / Q3 / Q4  |          - | 89/26/0/2 |         - | 87/14/36/10 |
+
+The peak improves in BOTH seeds, which is the line the AGENT could not hold
+-- it made the peak worse in two seeds of three.  The difference is Q2 and
+Q4: =burnFromBasket= retires float the basket never issued, and
+=mintFromBasket= is not capped by K.
+
+*** The bound that prevented the escalation it was meant to trigger
+
+Q2 fired ZERO times in the first pair of runs, while the inventory ceiling
+bound on 150 and 95 days.  =_absorb= tested that ceiling at the top and
+reverted before Q2 was ever considered -- so a desk pinned at its ceiling
+could never escalate, though being pinned there IS the signal that the move
+is real.  The bound meant to trigger escalation was preventing it: the first
+runaway of this article, one layer further out.
+
+Q2 now burns INVENTORY first, which needs no TOKEN (by the time persistence
+is established the desk has usually spent its reserves absorbing) and
+relieves the ceiling.  On seed 43981 that took the peak from -138bp to
+-375bp against baseline, halved the supply increase, cut the ceiling hits
+from 150 to 32, and moved the monetary book from +73k issued to -2.05M
+retired.  On seed 7 the net supply change went from +870k to -9k: the
+retirement exactly cancelled the issuance.
+
+*** Reducing supply and profiting from it are the same budget spent twice
+
+| seed  | desk P&L | float retired | retired per BUCK spent |
+|-------+----------+---------------+------------------------|
+| 43981 |    -1.99M |         2.05M |                   1.03 |
+| 7     |    -0.49M |         0.59M |                   1.22 |
+
+The desk LOSES on its own book and retires slightly MORE float than the book
+it spent, because it is buying BUCK at a discount and destroying it.  That is
+not a defect, it is the trade: Q1 and Q3 are the extraction path -- buy the
+dump, sell it back, keep the spread -- and Q2 forgoes that recovery profit to
+buy a permanent supply reduction instead.  The gain accrues to every BUCK
+holder rather than to the desk, and it shows up here as depositors ending
+$85-100k better off in both seeds.
+
+So the answer to "can we profit from reducing BUCK supply AND reduce BUCK
+supply" is: not with the same operation.  A desk tuned to extract holds and
+sells; a desk tuned to stabilize burns.  What the persistence test buys is
+the ability to do the first by default and the second only when the
+excursion proves real.
+
+*** K kept forcing
+
+=buckK= railed for exactly one day in all four runs, and the desk retired
+2.05M and 0.59M of float without changing that.  At this size the fast
+operations are not damping K's error into silence, which is the precondition
+for the desk's position being a bet worth placing at all.  Whether it
+survives a larger desk is exactly what =SIM_OPS_CAPITAL_USD= is for, and it
+is the open question rather than a settled one.
+
 ** Why the limits exist, and what they are actually for
 
 The bounds are not primarily risk limits.  They exist to stop the desk
