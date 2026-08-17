@@ -344,6 +344,54 @@ contract BuckBasketFenceTest is Test {
     /// simulation runs, and the contract simply cannot be deployed to a real
     /// chain.  BuckBasketFence was 593 bytes over before the V3 arithmetic
     /// moved to the facet, and every test was green throughout.
+    // ---- DIAGNOSTIC: is the burn obligation stale? ------------------------- //
+
+    /// `deposits[id].buckPrincipal` is what was minted ON THE DAY, but
+    /// fenceRebalance burns against the K budget afterwards without touching
+    /// it.  If redemption still retires the original figure, it destroys BUCK
+    /// the basket no longer owes -- and that BUCK is depositor value.
+    function test_diag_principalGoesStaleAfterRebalanceBurn() public {
+        _open();
+        uint256 ridA = _deposit(alice, 10e18);
+        _deposit(bob, 10e18);
+
+        int256 net0 = basketC.netIssued();
+        ctrl.setK(0.30e18);
+        basketC.fenceRebalance(0);
+        int256 net1 = basketC.netIssued();
+        assertLt(net1, net0, "the rebalance retired part of the issuance");
+
+        (uint256 principal,,,) = basketC.deposits(ridA);
+        uint256 liveShare = uint256(net1) * basketC.shareOf(ridA)
+            / basketC.totalShares();
+        emit log_named_uint("original principal", principal);
+        emit log_named_uint("live pro-rata obligation", liveShare);
+        assertGt(principal, liveShare,
+                 "redemption would retire more than this receipt still owes");
+    }
+
+    /// The consequence, end to end: what a depositor actually recovers versus
+    /// their pro-rata share of the basket's own reported NAV.
+    function test_diag_recoveryVersusReportedNav() public {
+        _open();
+        uint256 ridA = _deposit(alice, 10e18);
+        _deposit(bob, 10e18);
+        ctrl.setK(0.30e18);
+        basketC.fenceRebalance(0);
+
+        uint256 nav = basketC.fenceNav();
+        uint256 claim = nav * basketC.shareOf(ridA) / basketC.totalShares();
+
+        uint256 before = paxg.balanceOf(alice);
+        vm.prank(alice);
+        basketC.redeem(ridA, 0);
+        uint256 got = (paxg.balanceOf(alice) - before) * PAXG_PRICE / 1e18;
+
+        emit log_named_uint("claim per reported NAV", claim);
+        emit log_named_uint("actually recovered   ", got);
+        assertApproxEqRel(got, claim, 0.10e18, "recovery matches the claim");
+    }
+
     function test_deployedSizeIsUnderEip170() public view {
         assertLt(address(basketC).code.length, 24576, "shell over EIP-170");
         assertLt(address(venueFacet).code.length, 24576, "facet over EIP-170");

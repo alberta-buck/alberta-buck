@@ -440,7 +440,18 @@ contract BuckBasketFence is BuckBasketProRata {
             - buckBefore + buckBefore * num / den;
 
         Deposit storage dep = deposits[receiptId];
-        uint256 principal = dep.buckPrincipal * bp / 10000;
+        // The obligation this receipt still carries is its PRO-RATA share of
+        // the LIVE issuance, not the figure minted on the day it arrived.
+        //
+        // `buckPrincipal` goes stale the moment fenceRebalance burns against
+        // a falling K budget, and it never catches up.  Retiring the stale
+        // figure destroys BUCK the basket no longer owes, and that BUCK is
+        // depositor value: measured, a receipt whose live obligation was
+        // 12,000 was retiring 30,001, and recovered 28,077 against a 40,001
+        // claim.  Shares are a pro-rata claim on the assets; the obligation
+        // has to be pro-rata on the same denominator or the two do not close.
+        uint256 principal = netIssued > 0
+            ? uint256(netIssued) * num / den : 0;
         uint256 j = indexOf[dep.token] - 1;
         Fence storage fzo = fenceOf[j];
 
@@ -468,9 +479,14 @@ contract BuckBasketFence is BuckBasketProRata {
             buck.burnFromBasket(toBurn);
             netIssued -= int256(toBurn);
         }
-        totalOutstandingBuck -= toBurn > totalOutstandingBuck
-            ? totalOutstandingBuck : toBurn;
-        dep.buckPrincipal -= principal < dep.buckPrincipal ? principal : dep.buckPrincipal;
+        // `totalOutstandingBuck` and `buckPrincipal` are now informational
+        // only -- kept so the deposit ledger still zeroes out as receipts
+        // close, but no longer load-bearing for anything.
+        uint256 booked = dep.buckPrincipal * bp / 10000;
+        if (booked > dep.buckPrincipal) booked = dep.buckPrincipal;
+        dep.buckPrincipal -= booked;
+        totalOutstandingBuck -= booked > totalOutstandingBuck
+            ? totalOutstandingBuck : booked;
 
         // Settle the BUCK side WITHOUT moving BUCK.
         //
