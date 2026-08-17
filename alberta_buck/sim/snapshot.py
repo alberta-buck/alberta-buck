@@ -387,6 +387,38 @@ class Snapshotter:
             "bpi_minted": ctr.get("bpiMinted", 0),
             "bpi_positions": ctr.get("bpiPositions", 0),
             "bpi_repositions": ctr.get("bpiRepositions", 0),
+            # MonetaryOpsAgent: the four quadrants, and the bounds that
+            # stopped each of the three runaways.  moNoBook counts the times
+            # Q2 wanted to retire and had no drawn line to retire against --
+            # the one thing an agent structurally cannot do that the basket
+            # can, so it is the measure of what phases 3/4 would add.
+            "mo_dev_bp": ctr.get("moDevBp", 0),
+            "mo_q1": ctr.get("moQ1", 0),
+            "mo_q2": ctr.get("moQ2", 0),
+            "mo_q3": ctr.get("moQ3", 0),
+            "mo_q4": ctr.get("moQ4", 0),
+            "mo_bought": ctr.get("moBought", 0),
+            "mo_sold": ctr.get("moSold", 0),
+            "mo_issued": ctr.get("moIssued", 0),
+            "mo_retired": ctr.get("moRetired", 0),
+            "mo_burned": ctr.get("moBurned", 0),
+            "mo_opened": ctr.get("moOpened", 0),
+            "mo_pos_limit": ctr.get("moPosLimit", 0),
+            "mo_cum_limit": ctr.get("moCumLimit", 0),
+            "mo_no_book": ctr.get("moNoBook", 0),
+            "mo_throttled": ctr.get("moThrottled", 0),
+            "mo_funded": ctr.get("moFunded", 0),
+            "mo_why": dict(ctr.get("moWhy", {})),
+            # The last exception each proxy agent swallowed.  These were set
+            # into `ctr` from the start and copied nowhere, so a smoke run
+            # showed BuckPoolInvestorAgent minting $4.7M and opening ZERO
+            # positions with no visible reason -- the fourth time on this
+            # branch that an unplumbed counter turned a loud failure into a
+            # silent one.
+            "mo_err": ctr.get("mo_err", ""),
+            "bpi_err": ctr.get("bpi_err", ""),
+            "bia_err": ctr.get("bia_err", ""),
+            "bcd_err": ctr.get("bcd_err", ""),
             # WHY they were refused, not just how often.  A bare count let a
             # wrong explanation stand unchallenged for two runs.
             "bia_why": dict(ctr.get("biaWhy", {})),

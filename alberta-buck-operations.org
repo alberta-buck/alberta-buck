@@ -436,6 +436,78 @@ and presents as "insufficient credit allocation" on most attempts.
 *Retire.*  Buy BUCK back so the signed balance climbs toward zero, then burn
 to release coverage.  =Buck.burn(uint256)= or the tokenIds overload.
 
+*** An agent is not the basket, and two quadrants are weaker for it
+
+This is the one place where the quadrant table above does not survive contact
+with the contracts, and it is worth being exact because the difference is
+what phases 3 and 4 exist to close.
+
+=mintFromBasket= and =burnFromBasket= both begin
+
+#+begin_src solidity
+require(msg.sender == basket && basket != address(0), "BUCK: not basket");
+#+end_src
+
+so an agent reaches supply only through the ordinary credit path.  Three
+consequences, none of them obvious from the quadrant table:
+
+*Q4 is bounded by K; the basket's is not.*  An agent mints against its own
+BuckCredit, so it is capped by =creditLimit = totalCurrentValue x buckK=.
+=mintFromBasket= bypasses that machinery entirely -- direct-mint BUCK is
+backed by the basket's TOKEN reserves rather than by insured-asset credit.
+The funding factor is NOT the constraint here: it is \(1 + 10(b-p)/b\), which
+returns ZERO once BUCK is about 10% over-valued, so the gate is switched off
+exactly when Q4 wants to fire.
+
+*Burning does not destroy tokens.*  =Buck.burn= deactivates coverage -- "you
+repay the credit, then release the coverage, as with any loan" -- and the
+post-burn check is =used <= creditLimit=.  Nothing is subtracted from the
+caller's balance.
+
+*So retirement happens on the BUY, not on the burn.*  The supply invariant is
+
+\[ \text{totalSupply} \;=\; \sum_a \max(0,\ \text{signedRaw}(a)) \]
+
+An account holding drawn credit has a negative signed balance and therefore
+contributes nothing.  Buying BUCK while drawn moves float out of the pool and
+into an account where it counts for nothing, and supply falls by exactly that
+amount.  Buying BEYOND the draw just accumulates inventory and changes no
+supply at all.  The burn's job is to close the line so the retirement cannot
+simply be undone by redrawing -- which is precisely the temporary/outright
+distinction, and it is the same distinction Q1 and Q2 encode.
+
+Two things follow for the agent.
+
+It needs a STANDING BOOK.  With no drawn line, Q2 has nothing to retire and
+degrades to Q1 whatever the policy says.  So the agent opens by drawing a
+fraction of its line and selling it, which both funds the TOKEN side that Q1
+spends and creates the outstanding issue that Q2 contracts.  A central bank's
+asset side is bought with money it issued, and the same structure is what
+gives it room to move in either direction.
+
+And the residual gap must be MEASURED rather than assumed away.  Count the
+days the policy asked for an outright retirement and no drawn line was left,
+and report that number: it is the size of what an agent cannot do, in the
+units of the thing itself.  In the reverting scenario it is not small.
+
+*** Running the comparison
+
+#+begin_src sh
+make nix-venv-sim-monetary-ops     # both runs, then the A/B table
+#+end_src
+
+Two runs of the same scenario and seed differing only in whether
+=MonetaryOpsAgent= is in the roster (=SIM_MONETARY_OPS=1=), compared by
+=alberta_buck/sim/compare_ops.py=.  One agent, not a population: the basket
+has one operations desk, and a single actor keeps the result attributable to
+the mechanism rather than to a crowd of them meeting each other's impact.
+
+Report the desk's terminal INVENTORY beside its P&L, always.  A desk that
+damps the deviation by accumulating a position it could never unwind has
+moved the loss rather than removed it, and the deviation series alone will
+not say so -- that is exactly the first runaway in this article, which showed
+a profit in seven seeds of nine while holding half the pool.
+
 *** Units and orientation, which are the two silent killers
 
 =bvib= is BUCK PER BASKET.  TOKEN to BUCK multiplies; BUCK to TOKEN divides.

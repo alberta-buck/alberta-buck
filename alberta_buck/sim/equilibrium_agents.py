@@ -2004,7 +2004,8 @@ class BuckPoolInvestorAgent(_ProxyAgent):
         """sqrtPriceX96 at a tick.  price = 1.0001^t, so sqrt is 1.0001^(t/2)."""
         return int((1.0001 ** (t / 2.0)) * (1 << 96))
 
-    def _target_range(self, d, tick: int, spacing: int, buck_is_token0: bool,
+    def _target_range(self, d, sp: int, tick: int, spacing: int,
+                      buck_is_token0: bool,
                       amt0: int, amt1: int) -> tuple[int, int]:
         """Where to sit.  Two cases, and they are different situations.
 
@@ -2039,24 +2040,6 @@ class BuckPoolInvestorAgent(_ProxyAgent):
         if both:
             return self._straddle_for_mix(sp, base, spacing, 2 * width,
                                           v0, v1)
-        if False:
-            # Split the total width in proportion to the mix.  Room ABOVE the
-            # price is funded in token0 and room BELOW in token1, so the
-            # widths have to sit in the same ratio as the holdings.
-            #
-            # Right after the draw that ratio is known exactly: they hold
-            # their original USDC plus the BUCK the insurance supports, which
-            # is creditLimit = K x collateral -- so USDC : BUCK is 1 : K, and
-            # at K = 0.75 the range runs 4/7 below the price and 3/7 above.
-            # (`balanceOf` on a Non-Carrying account is held BUCK plus unused
-            # credit headroom, so before any draw it already reports exactly
-            # K x collateral -- the amount deployable, not the amount held.)
-            total = 2 * width
-            hi_w = max(spacing, int(total * v0 / (v0 + v1)))
-            hi_w = max(spacing, (hi_w // spacing) * spacing)
-            lo_w = max(spacing, total - hi_w)
-            lo_w = max(spacing, (lo_w // spacing) * spacing)
-            return base - lo_w, base + hi_w
         bvib = self._bvib(d)
         if bvib == 1.0:
             return base - width, base + width
@@ -2194,7 +2177,7 @@ class BuckPoolInvestorAgent(_ProxyAgent):
         bal_b = max(0, d.buck.functions.balanceOf(self.proxy.address).call())
         bal_u = d.chain.balance_of(d.usdc, self.proxy.address)
         amt0, amt1 = (bal_b, bal_u) if buck_is_token0 else (bal_u, bal_b)
-        lo, hi = self._target_range(d, tick, spacing, buck_is_token0,
+        lo, hi = self._target_range(d, sp, tick, spacing, buck_is_token0,
                                     amt0, amt1)
         if self._pos == (lo, hi):
             return
@@ -2216,7 +2199,13 @@ class BuckPoolInvestorAgent(_ProxyAgent):
             cands.append(amt0 * sp_c * sb // (Q96 * (sb - sp_c)))
         if amt1 > 0 and sp_c > sa:
             cands.append(amt1 * Q96 // (sp_c - sa))
-        L = min(cands) if cands else 0
+        # Shave the result: _straddle_for_mix bisects on the exact amount
+        # formulas but then rounds the split to tickSpacing, which moves the
+        # ratio slightly -- enough that the mint callback asked for more of
+        # one token than the proxy held and reverted with
+        # ERC20InsufficientBalance, silently, since bpi_err was copied into
+        # no frame.  A margin costs a fraction of a percent of deployment.
+        L = int(min(cands) * 0.995) if cands else 0
         if L < 1:
             return
         # Leave the old range first, or liquidity strands in a band the
@@ -2608,3 +2597,491 @@ class DiscountBasketArbAgent(DiscountBuckArbAgent):
         if not self._buy_leg(d, day, ctr):
             self._harvest_leg(d, day, ctr)
         self._park_leg(d, day, ctr)
+
+
+@_register
+class MonetaryOpsAgent(_ProxyAgent):
+    """The BuckBasket's operations desk, run as an agent.
+
+    This is phase 2 of alberta-buck-operations.org: the four quadrants driven
+    against the live chain, against real pools and real counterparties, BEFORE
+    any contract change.  The point of doing it as an agent first is that it
+    puts the basket's own sensor outside its own control loop while the
+    dynamics are still being learned -- and the article is explicit that the
+    parameterization is not converged.
+
+    THE SIGNAL
+
+    A Uniswap tick is a log price, so the MEAN of the basket's per-leg ladders
+    is log(basketValueInBuck) -- the controller's own process variable, and
+    the common mode the `pairs` engine deliberately discards.  Here it is read
+    straight off basketValueInBuck() and run through the same seven-window
+    ladder the PairsRebalanceDirector uses, measured on the 20-day rung.
+
+    The rung is a correctness bound, not a preference.  Past roughly 80 days
+    the lagged reading still says "dear" long after the market has gone cheap,
+    so an inflation attack gets answered by ISSUING more.  Collocation at 20d
+    is handled by the size bound instead: an operation capped at a fraction of
+    a percent of depth per day cannot dominate a 20-day average.
+
+    THE FOUR QUADRANTS
+
+        bvib > 1 (BUCK cheap)          bvib < 1 (BUCK dear)
+        Q1 ABSORB  buy BUCK, hold      Q3 SUPPLY  sell held BUCK
+        Q2 RETIRE  buy BUCK, burn      Q4 ISSUE   mint, sell
+
+    Q1/Q3 are temporary and self-reversing: what Q1 accumulates is what Q3
+    sells back when the deviation turns.  Q2/Q4 are outright and change the
+    size of the balance sheet, reached only when the deviation has stayed past
+    the leash for `persist_days` OR inventory says the move is real.
+
+    WHAT AN AGENT CANNOT DO, AND WHY IT MATTERS HERE
+
+    An agent is not the basket, and two of the quadrants are weaker for it.
+    `mintFromBasket` / `burnFromBasket` both require msg.sender == basket, so
+    this agent works through the ordinary credit path like anyone else:
+
+      * Q4 mints against its OWN BuckCredit, so it is bounded by
+        creditLimit = totalCurrentValue x buckK.  The real basket's
+        mintFromBasket bypasses K entirely.  (It is NOT bounded by the funding
+        factor: that is 1 + 10(b-p)/b, which returns 0 once BUCK is ~9%
+        over-valued -- the gate is off exactly when Q4 wants to fire.)
+
+      * Q2 can only retire supply THIS AGENT issued.  `Buck.burn` does not
+        destroy tokens -- it DEACTIVATES coverage ("you repay the credit,
+        then release the coverage, as with any loan"), and nothing is
+        subtracted from the caller's balance.  Retirement happens on the BUY:
+        supply is sum_a max(0, signedRaw(a)), so an account holding drawn
+        credit contributes nothing, and buying BUCK while drawn moves float
+        into an account where it does not count.  Buying BEYOND the draw is
+        inventory and changes no supply at all.  The burn's job is to close
+        the line so the retirement cannot be undone by redrawing -- which is
+        exactly the temporary/outright distinction Q1 and Q2 encode.
+
+    That second point is why this agent opens a STANDING BOOK before it
+    operates at all: it draws `open_frac` of its line and sells it, which
+    both funds the
+    TOKEN side that Q1 spends and creates the outstanding issue that Q2
+    contracts.  A central bank's asset side is bought with money it issued;
+    the same structure is what gives it room to operate in either direction.
+    The residual gap -- retiring third-party float -- is exactly what phases 3
+    and 4 (monetaryEffort / monetaryOperation) add, and it cannot be closed
+    from outside the contract.
+
+    WHICH POOL
+
+    Every TOKEN/BUCK pool, spread evenly.  The common mode is by definition
+    the part that is the same in all of them, so acting on one would inject a
+    differential disturbance and fight the rebalancer for the same depth.
+    Each leg is separately capped by _impact_cap against that pool's reserve.
+
+    Operations are executed as capped swaps rather than as concentrated range
+    orders, even though BuckPoolInvestorAgent has the machinery.  A resting
+    range order earns fees while it waits, and that income would confound the
+    comparison this agent exists to make -- is the desk profiting from
+    monetary operations, or from being an LP?  Swaps isolate the operation.
+
+    Telemetry (ctr): moQ1..moQ4 / moBought / moSold / moIssued / moRetired /
+    moBurned / moPosLimit / moCumLimit / moDevBp / moWhy.
+    """
+
+    CTR = "mo"
+    N_CREDITS = 4
+    WINDOWS = (5, 10, 20, 40, 80, 160, 320)
+    MEAS = 2                       # 20d: the knee of the sweep
+    # Days spent establishing the book before the first operation.  Twice the
+    # measurement window: the ladder is warm at 20d, but a book built at the
+    # rate the impact bound allows is not, and a desk that starts operating
+    # with a book it is still assembling cannot tell its own flow from the
+    # market's.  At one window the book reached $637k of a $2.1M target and
+    # Q1 spent it before persistence could ever escalate to Q2.
+    ESTABLISH = 2
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        m6 = 1_000 * 10 ** 6
+        # Defaults are the values monetary_ops.py converged on.  They are the
+        # ones that stopped the runaways that model produced, at the sizes
+        # that happened to work; they are not fitted.
+        self.deadband = _draw(scenario, cls, "deadband", r, 0.010)
+        self.leash = _draw(scenario, cls, "leash", r, 0.020)
+        self.temp_frac = _draw(scenario, cls, "temp_frac", r, 0.004)
+        self.perm_frac = _draw(scenario, cls, "perm_frac", r, 0.002)
+        self.persist_days = int(_draw(scenario, cls, "persist_days", r, 30))
+        self.inv_escalate = _draw(scenario, cls, "inv_escalate", r, 0.05)
+        self.inv_max = _draw(scenario, cls, "inv_max", r, 0.10)
+        self.max_outright = _draw(scenario, cls, "max_outright", r, 0.10)
+        # A BACKSTOP, not the policy size.  At 40bp this bound was doing
+        # all the sizing -- 0.2% of each reserve, which capped a $2.1M
+        # book open at $10k/day and starved every quadrant behind it.
+        # Loose enough that temp_frac governs and this only catches the
+        # case where one pool is much thinner than the others.
+        self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r, 100))
+        self.open_frac = _draw(scenario, cls, "open_frac", r, 0.35)
+
+        self._m: list[float | None] = [None] * len(self.WINDOWS)
+        self._n = 0
+        self._over = 0
+        self._issued = 0            # cum BUCK put into circulation (Q4 + open)
+        self._retired = 0           # cum BUCK taken back out (Q2)
+        self._burned = 0            # cum coverage released
+        self._dev = 0.0
+        self.q = [0, 0, 0, 0]
+
+        face = int(_draw(scenario, cls, "face_k", r, 6000) * m6)
+        self._bind_proxy(d)
+        now_ts = d.w3.eth.get_block("latest")["timestamp"]
+        per = max(1, face // self.N_CREDITS)
+        self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
+            "setCreditIssuer",
+            args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
+        # premiumRate 0, consistent with the module note above: insurance is
+        # switched off in this simulation on both issuing agents.
+        for _ in range(self.N_CREDITS):
+            d.chain.send(d.credit.functions.createCredit(
+                self.proxy.address, 0, per, 0, 0, 0, now_ts, 0))
+        self._face = per * self.N_CREDITS
+        self._token_ids = [
+            d.credit.functions.tokenOfOwnerByIndex(self.proxy.address, i).call()
+            for i in range(self.N_CREDITS)]
+        d.chain.send(d.usdc.functions.mint(
+            self.proxy.address,
+            int(_draw(scenario, cls, "float_k", r, 2000) * m6)))
+
+    # -- signal ----------------------------------------------------------- #
+
+    def _bvib(self, d) -> float:
+        try:
+            return int(d.basket.functions.basketValueInBuck().call()) / 1e18
+        except Exception:
+            return 1.0
+
+    def _ladder(self, x: float) -> None:
+        """Common mode at seven scales.  In a real implementation this is
+        mean_i(leg_i.m[k]) over ladders the director already holds -- the EMA
+        is linear, so the mean of the EMAs IS the EMA of the mean, and the
+        signal costs no new state."""
+        self._n += 1
+        for k, w in enumerate(self.WINDOWS):
+            b = 2.0 / (w + 1.0)
+            cur = x if self._m[k] is None else self._m[k] + (x - self._m[k]) * b
+            self._m[k] = cur
+
+    # -- chain state ------------------------------------------------------ #
+
+    def _pools(self, d) -> list:
+        return [(i, p) for i, p in enumerate(d.pool_buck) if p]
+
+    def _depth(self, d) -> int:
+        """Aggregate BUCK depth across the basket's own pools."""
+        return sum(d.chain.balance_of(d.buck, p) for _i, p in self._pools(d))
+
+    def _signed(self, d) -> int:
+        try:
+            return int(d.buck.functions.signedBalanceOf(self.proxy.address).call())
+        except Exception:
+            return 0
+
+    def _unactivated(self, d) -> int:
+        """Remaining credit capacity, read from chain across BOTH contracts.
+
+        depreciatedFaceValue lives on BuckCredit and mintsBacked on Buck, and
+        depreciation moves the difference underneath any Python-side tally --
+        which is what produced 30 of 36 'insufficient credit allocation'
+        refusals when BuckIssuerArbAgent counted it locally.
+        """
+        room = 0
+        for tid in self._token_ids:
+            try:
+                face = d.credit.functions.depreciatedFaceValue(tid).call()
+                used = d.buck.functions.mintsBacked(tid).call()
+                room += max(0, face - used)
+            except Exception:
+                pass
+        return room
+
+    def _tok_value(self, d) -> int:
+        v = 0
+        for i, tc in enumerate(d.tokens):
+            bal = d.chain.balance_of(tc, self.proxy.address)
+            if bal <= 0:
+                continue
+            rt = d.chain.balance_of(tc, d.pool_usdc[i])
+            ru = d.chain.balance_of(d.usdc, d.pool_usdc[i])
+            if rt:
+                v += bal * ru // rt
+        return v
+
+    def _why(self, ctr, e) -> None:
+        why = repr(e)[:120]
+        ctr.setdefault("moWhy", {})
+        ctr["moWhy"][why] = ctr["moWhy"].get(why, 0) + 1
+
+    # -- primitives ------------------------------------------------------- #
+
+    def _buy_buck_across(self, d, want_buck: int, ctr) -> int:
+        """Spend TOKEN across every BUCK pool to acquire ~`want_buck`.
+
+        Returns BUCK actually acquired, measured as the change in the proxy's
+        SIGNED balance -- which is the honest number whether the purchase is
+        retiring a draw (signed climbing toward 0) or accumulating inventory.
+        `balanceOf` would not do: it counts unused credit headroom, so it moves
+        when the credit line moves and not only when BUCK does.
+        """
+        pools = self._pools(d)
+        if not pools or want_buck <= 0:
+            return 0
+        before = self._signed(d)
+        share = max(1, want_buck // len(pools))
+        for i, p in pools:
+            tc = d.tokens[i]
+            held = d.chain.balance_of(tc, self.proxy.address)
+            if held <= 0:
+                continue
+            r_in = d.chain.balance_of(tc, p)
+            r_out = d.chain.balance_of(d.buck, p)
+            if r_in <= 0 or r_out <= 0:
+                continue
+            need = self._amount_in_for_out(r_in, r_out, share, d.fee_buck)
+            spend = min(held, need or (r_in // 50),
+                        _impact_cap(r_in, self.max_impact_bp))
+            if spend <= 0:
+                continue
+            try:
+                self._swap_via_simlp(d, p, tc, spend, self.proxy.address)
+            except Exception as e:
+                self._why(ctr, e)
+        got = self._signed(d) - before
+        if got > 0:
+            ctr["moBought"] = ctr.get("moBought", 0) + got
+        return max(0, got)
+
+    def _sell_buck_across(self, d, want_buck: int, ctr) -> int:
+        """Sell BUCK across every pool, acquiring TOKEN.  Returns BUCK sold."""
+        pools = self._pools(d)
+        if not pools or want_buck <= 0:
+            return 0
+        before = self._signed(d)
+        share = max(1, want_buck // len(pools))
+        for _i, p in pools:
+            r_out = d.chain.balance_of(d.buck, p)
+            if r_out <= 0:
+                continue
+            # Cap against the BUCK side: selling BUCK adds to that reserve,
+            # and it is that reserve's move that shows up in bvib.
+            amt = min(share, _impact_cap(r_out, self.max_impact_bp))
+            if amt < 10 ** 6:
+                continue
+            try:
+                self._swap_via_simlp(d, p, d.buck, amt, self.proxy.address)
+            except Exception as e:
+                self._why(ctr, e)
+        sold = before - self._signed(d)
+        if sold > 0:
+            ctr["moSold"] = ctr.get("moSold", 0) + sold
+        return max(0, sold)
+
+    def _mint(self, d, amt: int, ctr) -> int:
+        """Activate coverage.  Issues nothing by itself -- spending is what
+        draws the signed balance negative and puts BUCK into circulation."""
+        amt = min(amt, self._unactivated(d))
+        if amt < 10 ** 6:
+            return 0
+        try:
+            self._proxy_exec(d, d.buck.address,
+                             d.buck.encode_abi("mint(uint256)", args=[amt]))
+            return amt
+        except Exception as e:
+            self._why(ctr, e)
+            ctr["moThrottled"] = ctr.get("moThrottled", 0) + 1
+            return 0
+
+    def _burn(self, d, amt: int, ctr) -> int:
+        """Release coverage so the retired line cannot simply be redrawn."""
+        if amt < 10 ** 6:
+            return 0
+        try:
+            self._proxy_exec(d, d.buck.address,
+                             d.buck.encode_abi("burn(uint256)", args=[amt]))
+            self._burned += amt
+            ctr["moBurned"] = ctr.get("moBurned", 0) + amt
+            return amt
+        except Exception as e:
+            self._why(ctr, e)
+            return 0
+
+    # -- the standing book ------------------------------------------------ #
+
+    def _fund(self, d, ctr) -> None:
+        """Keep a TOKEN reserve on hand.
+
+        Q1 spends TOKEN into the basket's own pools, and a desk that runs out
+        of the asset it sells stops being a desk: in the first smoke run the
+        agent spent its entire TOKEN inventory on day 20 and then sat inert
+        for forty days at a 600bp deviation, having fired exactly one
+        operation.  Conversion goes through the deep TOKEN/USDC pools, which
+        are NOT the venue being operated on, so topping up does not itself
+        move the signal being measured.
+        """
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        if cash < 10 ** 6:
+            return
+        want = int(self._depth(d) * self.temp_frac * 2)      # ~2 days of ops
+        if self._tok_value(d) >= want:
+            return
+        per = max(1, min(cash, want) // max(1, len(d.tokens)))
+        for i, _tc in enumerate(d.tokens):
+            r_in = d.chain.balance_of(d.usdc, d.pool_usdc[i])
+            amt = min(per, _impact_cap(r_in, self.max_impact_bp),
+                      d.chain.balance_of(d.usdc, self.proxy.address))
+            if amt < 10 ** 6:
+                continue
+            try:
+                self._swap_via_simlp(d, d.pool_usdc[i], d.usdc, amt,
+                                     self.proxy.address)
+                ctr["moFunded"] = ctr.get("moFunded", 0) + amt
+            except Exception as e:
+                self._why(ctr, e)
+
+    def _open_book(self, d, ctr) -> None:
+        """Build the standing book a slice per day during ladder warmup.
+
+        Deferred out of setup() because the TOKEN/BUCK pools are seeded by
+        BootstrapDMAgent's own setup and agent setup order is not guaranteed
+        -- opening against empty pools would sell into nothing.  Built
+        INCREMENTALLY, and only while the ladder is still warming, for two
+        reasons: a single large sale is exactly the disturbance this agent
+        exists to damp, and once measurement starts the book must be a
+        given rather than something the desk is still assembling.
+        """
+        target = int(self._face * self.open_frac)
+        if self._issued >= target:
+            return
+        want = min(target - self._issued,
+                   int(self._depth(d) * self.temp_frac * 3))
+        if self._mint(d, want, ctr) <= 0:
+            return
+        sold = self._sell_buck_across(d, want, ctr)
+        if sold <= 0:
+            return
+        self._issued += sold
+        ctr["moIssued"] = ctr.get("moIssued", 0) + sold
+        ctr["moOpened"] = ctr.get("moOpened", 0) + sold
+
+    # -- telemetry -------------------------------------------------------- #
+
+    def arb_state(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        signed = self._signed(d)
+        return {"cls": self.CTR, "idx": self.idx,
+                "cash": d.chain.balance_of(d.usdc, self.proxy.address),
+                "held": max(0, signed), "drawn": max(0, -signed),
+                "tok": self._tok_value(d), "endow": self._face,
+                "parked": 0, "receipts": 0,
+                "devBp": int(1e4 * self._dev),
+                "q": list(self.q)}
+
+    # -- the loop --------------------------------------------------------- #
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None:
+            return
+        # Advance the ladder ONCE per day, before any decision, or the level
+        # lags the action by a tick.
+        self._ladder(math.log(max(1e-9, self._bvib(d))))
+        self._fund(d, ctr)
+        if self._n <= self.ESTABLISH * self.WINDOWS[self.MEAS]:
+            self._open_book(d, ctr)     # establish the desk first
+            return
+        dev = self._m[self.MEAS]
+        self._dev = dev
+        ctr["moDevBp"] = int(1e4 * dev)
+        # Persistence is a DURATION, not an instantaneous velocity.  A short
+        # velocity changes sign on noise, so "not turning" almost never held
+        # and the outright quadrants were unreachable -- supply never moved
+        # while half the mechanism looked healthy.
+        self._over = self._over + 1 if abs(dev) > self.leash else 0
+        if abs(dev) < self.deadband:
+            return
+
+        depth = self._depth(d)
+        if depth <= 0:
+            return
+        signed = self._signed(d)
+        held, drawn = max(0, signed), max(0, -signed)
+        # Escalate on INVENTORY, not only on price.  Absorbing holds the
+        # measured deviation down -- that IS absorbing -- so a persistence
+        # test built on that deviation is suppressed by the very act it
+        # polices.  Inventory is the one signal the operator's own action
+        # cannot suppress, because it IS the operator's own action.
+        inv = held / depth
+        persistent = self._over >= self.persist_days or inv > self.inv_escalate
+
+        try:
+            supply = int(d.buck.functions.totalSupply().call())
+        except Exception:
+            supply = 0
+        cum_cap = int(self.max_outright * supply) if supply else 0
+
+        size = int(depth * (self.perm_frac if persistent else self.temp_frac))
+        if size <= 0:
+            return
+
+        if dev > 0:
+            # BUCK CHEAP: the basket costs more BUCK than it should.  Buy it.
+            if inv > self.inv_max:
+                ctr["moPosLimit"] = ctr.get("moPosLimit", 0) + 1
+                return                     # hard position limit
+            got = self._buy_buck_across(d, size, ctr)
+            if got <= 0:
+                return
+            # Q2 needs a drawn line to retire against; without one the buy has
+            # moved float from the pool to this account and changed no supply,
+            # which is Q1 whatever we call it.
+            room = (self._retired - self._issued) < cum_cap
+            if persistent and drawn > 0 and room:
+                # Supply fell on the BUY, not on the burn: `burn` deactivates
+                # coverage, it does not destroy tokens -- "you repay the
+                # credit, then release the coverage, as with any loan".  So
+                # the buy-back is the retirement and the burn is what makes it
+                # permanent, by closing the line so it cannot be redrawn.
+                # Gating the burn on a POSITIVE held balance (as the first
+                # cut did) meant it never fired while the draw was only
+                # partly repaid, which is most of the time.
+                self._retired += min(got, drawn)
+                ctr["moRetired"] = ctr.get("moRetired", 0) + min(got, drawn)
+                self._burn(d, min(got, drawn), ctr)
+                self.q[1] += 1
+                ctr["moQ2"] = ctr.get("moQ2", 0) + 1
+            else:
+                if persistent and drawn <= 0:
+                    ctr["moNoBook"] = ctr.get("moNoBook", 0) + 1
+                self.q[0] += 1
+                ctr["moQ1"] = ctr.get("moQ1", 0) + 1
+        else:
+            # BUCK DEAR.  Sell it.
+            room = (self._issued - self._retired) < cum_cap
+            if persistent and room:
+                minted = self._mint(d, size, ctr)
+                if minted <= 0:
+                    return
+                sold = self._sell_buck_across(d, minted, ctr)
+                if sold <= 0:
+                    return
+                self._issued += sold
+                ctr["moIssued"] = ctr.get("moIssued", 0) + sold
+                self.q[3] += 1
+                ctr["moQ4"] = ctr.get("moQ4", 0) + 1
+            else:
+                if persistent:
+                    ctr["moCumLimit"] = ctr.get("moCumLimit", 0) + 1
+                # Q3 sells only what Q1 previously absorbed.
+                if held < 10 ** 6:
+                    return
+                if self._sell_buck_across(d, min(held, size), ctr) <= 0:
+                    return
+                self.q[2] += 1
+                ctr["moQ3"] = ctr.get("moQ3", 0) + 1

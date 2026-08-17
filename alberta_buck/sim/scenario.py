@@ -8,10 +8,23 @@ are scenario-agnostic.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from alberta_buck.sim.prices import Prices
+
+# The BuckBasket's monetary-operations desk, run as an agent
+# (alberta-buck-operations.org, phase 2).  OFF by default so the committed
+# vectors stay the baseline; the comparison is a pair of runs on one seed:
+#
+#     make nix-sim-rebalancing-revert                       # baseline
+#     SIM_MONETARY_OPS=1 make nix-sim-rebalancing-revert    # operations on
+#
+# One agent, not a population: the basket has one operations desk, and a
+# single actor keeps the A/B attributable to the mechanism rather than to a
+# crowd of them meeting each other's impact.
+MONETARY_OPS = int(os.environ.get("SIM_MONETARY_OPS", "0") or 0)
 
 
 @dataclass
@@ -123,7 +136,12 @@ REBALANCING = Scenario(
             # Advances the BasketRebalanceDirector's amortized MA signals a
             # bounded slice per tick and executes its advisory efforts
             # (sell-side hint -> BUCK -> buy-side hint) through the router.
-            "DirectorKeeperAgent": 1},
+            "DirectorKeeperAgent": 1,
+            # The COMMON mode.  Everything above trades the differences
+            # between commodities; this reads their mean -- which is
+            # basketValueInBuck, the controller's own process variable -- and
+            # runs the four quadrants against it.  SIM_MONETARY_OPS=1.
+            **({"MonetaryOpsAgent": MONETARY_OPS} if MONETARY_OPS else {})},
     days=365,
     ticks_per_day=4,
 )

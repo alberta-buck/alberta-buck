@@ -773,6 +773,40 @@ sim-plot-basket-split:	$(REBALANCING_VECTOR_REVERT)
 	python -m pytest alberta_buck/sim/plot_basket_split.py -v -s
 
 
+# ── Monetary operations A/B ───────────────────────────────────────────
+#
+# The BuckBasket's operations desk (alberta-buck-operations.org, phase 2)
+# run as an agent against the live chain sim, compared against the same
+# scenario and seed without it.  Two runs, then the comparison:
+#
+#   make nix-venv-sim-monetary-ops        # both runs + the table
+#   make nix-venv-sim-compare-ops         # just the table, from existing runs
+#
+# Written to their own vectors so neither clobbers the committed baseline.
+
+OPS_VECTOR_OFF	= test/vectors/monetary-ops-off.json
+OPS_VECTOR_ON	= test/vectors/monetary-ops-on.json
+
+.PHONY: sim-monetary-ops sim-run-ops-off sim-run-ops-on sim-compare-ops
+
+sim-run-ops-off:	sim-build
+	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) \
+		--director $(SIM_DIRECTOR) --out $(OPS_VECTOR_OFF)
+
+sim-run-ops-on:	sim-build
+	SIM_MONETARY_OPS=1 python -m $(SIM_PKG) --scenario rebalancing-revert \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) \
+		--director $(SIM_DIRECTOR) --out $(OPS_VECTOR_ON)
+
+sim-compare-ops:
+	python -m $(SIM_PKG).compare_ops $(OPS_VECTOR_OFF) $(OPS_VECTOR_ON)
+
+sim-monetary-ops:	sim-run-ops-off sim-run-ops-on sim-compare-ops
+
+
 # ── Pure price-flow basket simulator (no Anvil) ───────────────────────
 #
 # Ad-hoc check of investor flow rebalancing against the generated
