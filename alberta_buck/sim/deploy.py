@@ -147,6 +147,7 @@ class Deployment:
     pool_usdc: list = field(default_factory=list)   # TOKEN/USDC addrs
     pool_buck: list = field(default_factory=list)   # TOKEN/BUCK addrs
     pool_ub: str = ""                               # floating BUCK/USDC pool
+    pool_fence: list = field(default_factory=list)  # BuckBasketFence bands
     pool_meta: list = field(default_factory=list)   # (pool,owner,lo,hi,group)
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
@@ -215,21 +216,36 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # inter-tick commodity moves (6h ticks vs 600s TWAP) from tripping it.
     ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, 64, 500, 1000)
     venue = None
-    if basket_impl in ("prorata", "ops"):
+    if basket_impl in ("prorata", "ops", "fence"):
         # "ops" is BuckBasketProRata plus the monetary-operations desk on the
         # director's COMMON mode.  Identical constructor, identical venue,
         # and inert until setOpsParams enables it -- so an ops basket with no
         # policy installed is the baseline, byte for byte in behaviour.
-        basket = chain.deploy(
-            "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata",
-            *ctor)
+        if basket_impl == "fence":
+            # The fence tier defaults to the DEPOSITOR tier, which makes
+            # _findOrCreatePool hand back the constituent's own pool.  The
+            # separate tier was proposed to keep the fence out of
+            # poolBuckValues, but BuckBasketFence overrides _redeem and
+            # prices claims from exact V3 math on its own band, so nothing
+            # reads poolBuckValues on this path.  A separate tier would
+            # instead make the experiment inert: basketValueInBuck -- what K
+            # reads -- comes from the constituent's pool, so a fence
+            # elsewhere could not move K's signal without an arbitrageur
+            # linking the two.  SIM_FENCE_TIER=500 restores the split.
+            fence_tier = int(os.environ.get("SIM_FENCE_TIER", str(FEE_BUCK)))
+            basket = chain.deploy("BuckBasketFence", *ctor, fence_tier)
+        else:
+            basket = chain.deploy(
+                "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata",
+                *ctor)
         # Install the Uniswap V3 venue facet (the shell delegatecalls it) and
         # re-wrap the basket handle with the union ABI so Python can call facet
         # views (basketValueInBuck) that the shell serves via its fallback.
         venue = chain.deploy("BuckBasketUniswapV3")
         chain.send(basket.functions.setVenue(venue.address), sender=gov)
         shell_abi, _ = load_artifact(
-            "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata")
+            {"ops": "BuckBasketOps", "fence": "BuckBasketFence"}
+            .get(basket_impl, "BuckBasketProRata"))
         facet_abi, _ = load_artifact("BuckBasketUniswapV3")
         union = shell_abi + [e for e in facet_abi if e not in shell_abi]
         basket = w3.eth.contract(address=basket.address, abi=union)
@@ -364,6 +380,12 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         chain.send(reg.functions.bindContract(
             pb, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
         d.pool_buck.append(pb)
+        if basket_impl == "fence":
+            # Strike the first band.  Must follow addBasketToken: the fence
+            # is priced and centred off the constituent record.
+            chain.send(basket.functions.openFence(i), sender=gov)
+            d.pool_fence.append(
+                basket.functions.fenceOf(i).call()[0])
 
         if verbose:
             print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
@@ -485,7 +507,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # DIRECTOR_WINDOW / DIRECTOR_DEADBAND_BP / DIRECTOR_QUORUM env overrides
     # let short smoke sims exercise the trade path (pairs quorum 4 needs the
     # 40-epoch window warm -- pass DIRECTOR_QUORUM=2|3 for a 30-day run).
-    if basket_impl in ("prorata", "ops"):
+    if basket_impl in ("prorata", "ops", "fence"):
         dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
         if director_impl == "pairs":
             dir_quorum = int(os.environ.get("DIRECTOR_QUORUM", "4"))

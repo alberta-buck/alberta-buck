@@ -217,3 +217,69 @@ class MonetaryKeeperAgent(Agent):
         # than dropping it into the generic bucket.
         ctr["mk_err"] = why[:160]
         ctr["mkOtherErr"] = ctr.get("mkOtherErr", 0) + 1
+
+
+@_register
+class FenceKeeperAgent(Agent):
+    """Turns the crank on BuckBasketFence.fenceRebalance().
+
+    One constituent per activation -- the same amortization the director uses
+    -- because a re-strike burns and re-mints a band and there is no reason
+    for one activation to carry all of them.
+
+    Everything that decides what happens is on-chain: the K budget is
+    arithmetic on the TWAP, the band centre is the TWAP, and the harvest is
+    whatever `collect` returns.  This agent chooses nothing.
+
+    The number to watch is `fkFootprint` against `fkBudget`.  The basket's
+    whole claim to helping K rests on the first tracking the second: if the
+    footprint stops following the budget down, the K-scaling is not biting
+    and this basket is no better than the one it replaces.
+
+    Telemetry (ctr): fkStruck / fkMinted / fkBurned / fkNav / fkShares /
+    fkFootprint / fkBudget / fk_err.
+    """
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or getattr(d, "basket_impl", "") != "fence":
+            return
+        n = len(d.tokens)
+        if n == 0:
+            return
+        i = day % n                       # amortized: one band per day
+        try:
+            delta = d.basket.functions.fenceRebalance(i).call(
+                {"from": self.address})
+        except Exception as e:
+            ctr["fk_err"] = repr(e)[:160]
+            ctr["fkFailed"] = ctr.get("fkFailed", 0) + 1
+            return
+        try:
+            d.chain.send(d.basket.functions.fenceRebalance(i),
+                         sender=self.account, gas=8_000_000)
+        except Exception as e:
+            ctr["fk_err"] = repr(e)[:160]
+            ctr["fkFailed"] = ctr.get("fkFailed", 0) + 1
+            return
+        ctr["fkStruck"] = ctr.get("fkStruck", 0) + 1
+        if delta > 0:
+            ctr["fkMinted"] = ctr.get("fkMinted", 0) + int(delta)
+        elif delta < 0:
+            ctr["fkBurned"] = ctr.get("fkBurned", 0) + int(-delta)
+        self._observe(d, ctr)
+
+    def _observe(self, d, ctr) -> None:
+        """Read the book from chain.  A Python tally of an on-chain book
+        drifts the moment anything else touches it."""
+        try:
+            ctr["fkNav"] = int(d.basket.functions.fenceNav().call())
+            ctr["fkShares"] = int(d.basket.functions.totalShares().call())
+            # The footprint is what K is supposed to be able to move: BUCK
+            # inside the bands plus whatever is idle at the basket.
+            foot = int(d.chain.balance_of(d.buck, d.basket.address))
+            for i in range(len(d.tokens)):
+                foot += int(d.basket.functions.fenceAmounts(i).call()[0])
+            ctr["fkFootprint"] = foot
+            ctr["fkBudget"] = int(d.basket.functions.buckBudget().call())
+        except Exception as e:
+            ctr["fk_err"] = repr(e)[:160]

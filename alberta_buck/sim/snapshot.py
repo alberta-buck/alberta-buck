@@ -423,6 +423,18 @@ class Snapshotter:
             "mk_no_value": ctr.get("mkNoValue", 0),
             "mk_tok_held": list(ctr.get("mkTokHeld", [])),
             "mk_tok_value": ctr.get("mkNavBuck", 0),
+            # BuckBasketFence.  fk_footprint vs fk_budget is the whole test:
+            # if the footprint stops tracking the budget down, the K-scaling
+            # is not biting.
+            "fk_struck": ctr.get("fkStruck", 0),
+            "fk_minted": ctr.get("fkMinted", 0),
+            "fk_burned": ctr.get("fkBurned", 0),
+            "fk_nav": ctr.get("fkNav", 0),
+            "fk_shares": ctr.get("fkShares", 0),
+            "fk_footprint": ctr.get("fkFootprint", 0),
+            "fk_budget": ctr.get("fkBudget", 0),
+            "fk_failed": ctr.get("fkFailed", 0),
+            "fk_err": ctr.get("fk_err", ""),
             "mk_slippage": ctr.get("mkSlippage", 0),
             "mk_no_director": ctr.get("mkNoDirector", 0),
             "mk_other_err": ctr.get("mkOtherErr", 0),
