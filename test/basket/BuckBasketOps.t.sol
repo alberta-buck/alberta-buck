@@ -264,6 +264,53 @@ contract BuckBasketOpsTest is Test {
         }));
     }
 
+    /// Escalation must be reachable FROM THE STATE THAT TRIGGERS IT.
+    ///
+    /// The inventory ceiling exists because a large absorbed position that
+    /// has not come back is the one signal the desk's own action cannot
+    /// suppress -- so being pinned at it is exactly when the desk should
+    /// escalate to an outright retirement.  The first cut tested the ceiling
+    /// at the top of _absorb and reverted before Q2 was ever considered, so
+    /// a pinned desk could never escalate: Q2 fired zero times across two
+    /// 365-day chain runs while the ceiling bound on 150 and 95 days.
+    function test_q2_escalatesEvenWhenPinnedAtPositionCeiling() public {
+        _addPaxg(); _depositPaxg(alice, 1e18); _enable();
+        _operate(40, true);                       // Q4: acquire TOKEN
+        _operate(-40, false);                     // Q1: build inventory
+        uint256 held = basketC.monetaryBuckHeld();
+        assertGt(held, 0, "inventory present");
+
+        // Pin it: any inventory at all is now over the ceiling.
+        vm.prank(GOV);
+        basketC.setOpsParams(BuckBasketOps.OpsParams({
+            maxLegBp: 200, maxPositionBp: 0, maxOutrightBp: 1000, enabled: true
+        }));
+
+        uint256 supply1 = buck.totalSupply();
+        int256  out1    = basketC.monetaryOutstanding();
+        uint8 q = _operate(-40, true);            // cheap AND persistent
+        assertEq(q, 2, "pinned desk still escalates to Q2");
+        assertLt(basketC.monetaryBuckHeld(), held, "inventory burned down");
+        assertLt(buck.totalSupply(), supply1, "supply fell");
+        // The book CONTRACTS.  It does not necessarily go negative here --
+        // this sequence opens with Q4, so the desk is retiring its own
+        // issuance first; retiring past that is what a longer excursion does.
+        assertLt(basketC.monetaryOutstanding(), out1, "book contracted");
+    }
+
+    /// Burning inventory needs no TOKEN, which is the point: by the time
+    /// persistence is established the desk has usually spent its reserves
+    /// absorbing, and requiring a fresh purchase made Q2 unreachable.
+    function test_q2_retiresWithNoTokenReservesLeft() public {
+        _addPaxg(); _depositPaxg(alice, 1e18); _enable();
+        _operate(40, true);
+        _operate(-40, false);                     // spends the TOKEN book
+        assertEq(basketC.monetaryTokenHeld(0), 0, "reserves spent");
+        assertGt(basketC.monetaryBuckHeld(), 0);
+
+        assertEq(_operate(-40, true), 2, "Q2 from inventory alone");
+    }
+
     // ---- THE INVARIANT: depositors are untouched --------------------------- //
 
     /// A monetary operation must never move `totalOutstandingBuck`.  That

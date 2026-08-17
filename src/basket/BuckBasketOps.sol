@@ -253,10 +253,39 @@ contract BuckBasketOps is BuckBasketProRata {
 
     function _absorb(uint256 size, bool outright, OpsParams memory op,
                      uint256 nav, int32 effortBp) internal returns (uint8) {
+        bool room = -monetaryOutstanding
+            < int256(nav * op.maxOutrightBp / 10000);
+
+        // Q2 RETIRE, out of INVENTORY first.  Burning what the desk already
+        // holds turns a temporary position into a permanent one, which is
+        // precisely the escalation the article describes: the temporary
+        // operation has been consumed AND the price stayed away.
+        //
+        // It has to come first, and the reason is a design error this
+        // ordering fixes rather than a preference.  The position limit used
+        // to be tested at the top and reverted before Q2 was ever reached --
+        // so a desk pinned at its inventory ceiling could never escalate,
+        // even though being pinned there IS the signal that the move is
+        // real.  That is the model's first runaway wearing different
+        // clothes: the bound meant to TRIGGER escalation was preventing it,
+        // and Q2 fired zero times in 730 agent-days across two seeds.
+        //
+        // Burning inventory also needs no TOKEN at all, which matters
+        // because by the time persistence is established the desk has
+        // usually spent its reserves absorbing, and it relieves the ceiling
+        // that was blocking further operations.
+        if (outright && room && monetaryBuckHeld > 0) {
+            uint256 burnAmt = size < monetaryBuckHeld ? size : monetaryBuckHeld;
+            buck.burnFromBasket(burnAmt);
+            monetaryBuckHeld -= burnAmt;
+            monetaryOutstanding -= int256(burnAmt);
+            emit MonetaryOperation(2, effortBp, true, burnAmt,
+                                   monetaryOutstanding, monetaryBuckHeld);
+            return 2;
+        }
+
         // Position limit.  Inventory is the one signal the desk's own action
-        // cannot suppress, because it IS the desk's own action: if a large
-        // position has been absorbed and the price has not come back, the
-        // move is real whatever the price says.
+        // cannot suppress, because it IS the desk's own action.
         if (monetaryBuckHeld >= nav * op.maxPositionBp / 10000) revert MonetaryBound();
 
         // Nothing left to spend is an ordinary state, not an error in the
@@ -267,12 +296,12 @@ contract BuckBasketOps is BuckBasketProRata {
         uint256 bought = _swapAcross(false, size, op);
         if (bought == 0) revert MonetaryIdle();
 
-        // Q2 RETIRE: burn it.  Supply falls permanently.  Unlike an agent --
-        // which can only retire float it issued itself, because supply is
+        // Q2 on a FRESH purchase.  Unlike an agent -- which can only retire
+        // float it issued itself, because supply is
         // sum_a max(0, signedRaw(a)) and a drawn credit line contributes
         // nothing -- the basket burns BUCK it bought from ANYONE.  That is
         // the whole reason this lives in the contract.
-        if (outright && -int256(monetaryOutstanding) < int256(nav * op.maxOutrightBp / 10000)) {
+        if (outright && room) {
             buck.burnFromBasket(bought);
             monetaryOutstanding -= int256(bought);
             emit MonetaryOperation(2, effortBp, true, bought,
