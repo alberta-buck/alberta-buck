@@ -789,17 +789,23 @@ OPS_VECTOR_ON	= test/vectors/monetary-ops-on.json
 
 .PHONY: sim-monetary-ops sim-run-ops-off sim-run-ops-on sim-compare-ops
 
+# SIM_SEED selects the draw.  Both arms MUST use the same one -- the whole
+# comparison is that they differ only in the roster.  Sweep several: the
+# model's failure case reversed sign between one seed and nine.
+SIM_SEED	?=
+OPS_SEED	= $(if $(SIM_SEED),--seed $(SIM_SEED),)
+
 sim-run-ops-off:	sim-build
 	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
 		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
 		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) \
-		--director $(SIM_DIRECTOR) --out $(OPS_VECTOR_OFF)
+		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(OPS_VECTOR_OFF)
 
 sim-run-ops-on:	sim-build
 	SIM_MONETARY_OPS=1 python -m $(SIM_PKG) --scenario rebalancing-revert \
 		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
 		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) \
-		--director $(SIM_DIRECTOR) --out $(OPS_VECTOR_ON)
+		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(OPS_VECTOR_ON)
 
 sim-compare-ops:
 	python -m $(SIM_PKG).compare_ops $(OPS_VECTOR_OFF) $(OPS_VECTOR_ON)

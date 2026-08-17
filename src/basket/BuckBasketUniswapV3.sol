@@ -261,6 +261,23 @@ contract BuckBasketUniswapV3 is
         tokenIn = UniswapV3OracleLib.mulDiv(ideal, 1e6, 1e6 - c.feeTier) + 1;
     }
 
+    /// @inheritdoc IBuckBasketVenue
+    ///
+    /// @dev The per-leg size bound lives in the shell, but note WHY one is
+    ///      needed at all beyond good behaviour: `poolBuckValues` runs
+    ///      `_enforceSlippageGuard` on every redemption, so a monetary swap
+    ///      big enough to push spot off TWAP would revert every depositor
+    ///      exit until the window caught up.  The basket must not be able to
+    ///      brick its own redemption path.
+    function monetaryLeg(uint256 i, bool sellBuck, uint256 amountIn)
+        external override onlySelf returns (uint256 spent, uint256 received)
+    {
+        if (amountIn == 0) return (0, 0);
+        Constituent storage c = constituents[i];
+        return sellBuck ? _swapBuckForTokenExactIn(c, amountIn)
+                        : _swapTokenForBuckExactIn(c, amountIn);
+    }
+
     function _swapTokenForBuckExactIn(Constituent storage c, uint256 tokenIn)
         internal returns (uint256 spent, uint256 received)
     {

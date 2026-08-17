@@ -73,6 +73,14 @@ interface IBuckBasketVenue {
     ///         (per-constituent TOKEN the basket holds), best route first.
     ///         Returns the BUCK gained, the value lost to slippage+fee (for the
     ///         caller's loss-budget check), and the remaining inventory.
+    /// @notice One leg of a monetary operation in constituent `i`.
+    ///         `sellBuck` swaps BUCK -> TOKEN (the issue side); otherwise
+    ///         TOKEN -> BUCK (the absorb side).  Pure AMM mechanics: all
+    ///         sizing, bounding, minting, burning and book-keeping stay in
+    ///         the shell.  Returns what was actually spent and received.
+    function monetaryLeg(uint256 i, bool sellBuck, uint256 amountIn)
+        external returns (uint256 spent, uint256 received);
+
     function convertIntoBucks(uint256[] calldata tokenInventory, uint256 targetBuck)
         external returns (uint256 gained, uint256 lossValue, uint256[] memory inventoryAfter);
 }

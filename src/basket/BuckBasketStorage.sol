@@ -93,6 +93,44 @@ abstract contract BuckBasketStorage {
     uint256 public defaultMaxDeviationBp;
     uint256 public minSeedLiquidity;
 
+    // --- Monetary operations book (BuckBasketOps) -------------------------- //
+    //
+    // A THIRD kind of liquidity, alongside depositor and treasury.  The
+    // depositor claim is computed from `poolBuckValues`, which reads the
+    // basket's LP POSITION (`_positionLiquidity`) net of `treasuryLiquidity`
+    // -- so a monetary book held as plain TOKEN/BUCK BALANCES is outside the
+    // claim by construction, and no line of the redemption allocator changes.
+    // That is deliberate: `totalOutstandingBuck` is the denominator of every
+    // depositor payout (theta = R/O appears four times across
+    // _allocateSellHigh and _allocateSingleToken), and the safest way to keep
+    // monetary BUCK out of it is never to put it in.
+    //
+    // `mintFromBasket` does not touch totalOutstandingBuck either -- only
+    // depositToken / _depositBuck / redeem do -- so issuance for a monetary
+    // operation cannot dilute a receipt even by accident.
+    //
+    // The Constituent struct is deliberately NOT extended: two tests and the
+    // director destructure it with fixed 11-slot arity, and appending a field
+    // would break them silently.
+
+    /// @notice Net BUCK put into circulation by monetary operations.
+    ///         Positive = issued (Q4), negative = retired (Q2).  This is the
+    ///         separate liability class the operations article requires.
+    int256  public monetaryOutstanding;
+
+    /// @notice BUCK absorbed by a temporary operation (Q1) and not yet
+    ///         released (Q3) or burned (Q2).  Held as a balance, not as LP.
+    uint256 public monetaryBuckHeld;
+
+    /// @notice TOKEN acquired by monetary issuance, per constituent index.
+    ///         The desk's asset side: bought with money it issued, exactly as
+    ///         a central bank's is.
+    mapping(uint256 => uint256) public monetaryTokenHeld;
+
+    /// @notice +1-encoded epoch of the last monetary operation (0 = never),
+    ///         so the keeper entry point is once-per-epoch like the rebalancer.
+    uint32  public lastMonetaryEpoch;
+
     // --- Constants -------------------------------------------------------- //
 
     uint160 internal constant MIN_SQRT_RATIO = 4295128739;
@@ -118,6 +156,9 @@ abstract contract BuckBasketStorage {
     event DirectorSet(address indexed director);
     event RebalanceStepped(uint256 indexed sellIdx, uint256 indexed buyIdx,
                            uint256 valueMoved, uint256 buckReinvested, uint128 liquidity);
+    /// @param quadrant 1=absorb 2=retire 3=supply 4=issue
+    event MonetaryOperation(uint8 indexed quadrant, int32 effortBp, bool outright,
+                            uint256 buckMoved, int256 outstanding, uint256 buckHeld);
 
     // --- Errors (custom errors save bytecode vs require-strings) ----------- //
     error AlreadyPresent();
@@ -139,6 +180,8 @@ abstract contract BuckBasketStorage {
     error Gov0();
     error InvalidRescale();
     error L0();
+    error MonetaryBound();
+    error MonetaryIdle();
     error NoAdvice();
     error NoLPWithdrawn();
     error NoOutstanding();
