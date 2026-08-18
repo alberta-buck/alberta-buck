@@ -39,10 +39,17 @@ is one line; an open grant cannot be withdrawn.
 ## Generated verifiers
 
 The Groth16 verifiers under `src/` are emitted by snarkjs and carry the
-`GPL-3.0`-only header its template writes, which makes the effective licence
-of the contract set as a whole GPL-3.0-**only**.  They are left as generated:
-whether the template's output is snarkjs-derived is unsettled and not ours to
-decide unilaterally.
+header its template writes.  The `SPDX-License-Identifier: GPL-3.0` tag on
+line 1 is the deprecated, ambiguous SPDX identifier, but the licence notice
+in the same header -- written by 0KIMS association, the copyright holder --
+grants "either version 3 of the License, or (at your option) any later
+version": the standard GPL-3.0-**or-later** grant.  The notice is the
+operative grant; the tag is metadata.  So the verifiers do not narrow the
+contract set: everything under `src/` is GPL-3.0-or-later.
+
+The files are left byte-for-byte as generated (the headers are snarkjs's to
+write, and byte-stock output is what the regeneration runbook verifies);
+`REUSE.toml` records the or-later reading with the rationale.
 
 ## Why CAL for the kernels
 
