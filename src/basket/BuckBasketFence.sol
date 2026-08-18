@@ -5,6 +5,15 @@ import {IERC20}             from "@openzeppelin/contracts/token/ERC20/IERC20.sol
 
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 import {BuckBasketProRata}  from "./BuckBasketProRata.sol";
+
+interface IFenceDirector {
+    /// Differential mode: signed per-leg effort, bp of NAV per epoch.
+    /// Positive = buy-side (underweight); negative = sell-side (overweight).
+    function effortOf(uint256 i) external view returns (int256);
+    /// Common mode at ladder scale k, tick*1e9.  Positive = the basket costs
+    /// more BUCK than at inception, i.e. BUCK is CHEAP.
+    function commonMode(uint256 k) external view returns (int256);
+}
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 
 /// @title BuckBasketFence -- a savings vehicle that capitalizes on BUCK
@@ -79,6 +88,84 @@ import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 ///         shrinks AND K falls, so the budget contracts and the position is
 ///         cut exactly when the excursion proves real.  One economically
 ///         meaningful constraint in place of three tuned bounds.
+/// # Known limitations, in rough order of how much they matter
+///
+///         Recorded here rather than in a tracker because every one of them
+///         is a property of the design as it stands, and the next person to
+///         touch this file needs them before they touch it.
+///
+///   1. *The budget is denominated in the unit that moves.*  `K x (TOKEN
+///      value in BUCK)` rises exactly when BUCK weakens, so the basket mints
+///      MORE into a depreciation -- a positive feedback loop closed only by K
+///      falling faster than the collateral revalues.  Measured over 40 days
+///      the budget grew 55% while K fell 2.4%, so K is plainly the slower
+///      leg.  It is damped, not absent: against the full-range basket over
+///      730 days the excursion is far smaller.  A real fix denominates the
+///      budget in basket units rather than BUCK, and that is a different
+///      contract.
+///
+///   2. *The whole band is re-struck every call.*  `fenceRebalance` burns and
+///      re-mints unconditionally, so the position is realized daily and pays
+///      fees for the privilege.  `fenceRecenterBp` exists for precisely this
+///      and is never read.  A ladder of rungs would let unfilled ones rest
+///      and move only what the price has passed.
+///
+///   3. *One band per constituent, so nothing can be skewed.*  A symmetric
+///      band is direction-neutral by construction: it cannot express "this
+///      TOKEN is overweight and likely to revert" (the differential mode,
+///      already available as `PairsRebalanceDirector.effortOf`) or "BUCK is
+///      dear and K is about to expand supply, so stop selling TOKEN" (the
+///      common mode, already available as `commonMode`).  Both signals exist
+///      and are tested; only the placement that would use them is missing.
+///
+///   4. *The band centre is struck on SPOT while the budget is read on TWAP.*
+///      That asymmetry is a manipulation surface: moving spot before a
+///      re-strike shifts where the basket's liquidity lands without moving
+///      the budget that sizes it.  The TWAP is the right reference for both;
+///      spot is used here only because the band has to be placed relative to
+///      where trading actually is.
+///
+///   5. *About (1-K) of every deposit's TOKEN sits idle.*
+///      `getLiquidityForAmounts` binds on whichever side runs out first,
+///      always the BUCK side under a K-scaled mix, so roughly a quarter of
+///      the collateral earns nothing at K = 0.75.  It is NOT dead weight to
+///      be removed: it is the buffer redemption settles against, and without
+///      it exits fall back to swapping into the band they just thinned.  The
+///      improvement is to deploy it as a single-sided rung that is still
+///      reachable for settlement, not to shrink it.
+///
+///   6. *BUCK-side deposits revert.*  `BuckBasketProRata.depositToken`
+///      short-circuits `token == address(buck)` into `_depositBuck`; this
+///      override drops that branch, so depositing BUCK reverts NotInBasket.
+///      It is a genuine design question rather than an oversight -- someone
+///      depositing BUCK into a basket whose rule is "mint K x against TOKEN
+///      collateral" is not providing collateral -- but it must be answered,
+///      because 75 agents in the chain scenario do exactly that.
+///
+///   7. *Settlement can still swap.*  Idle-first bounds it to the shortfall
+///      rather than the whole claim, but a large exit against a converted
+///      band still pays slippage.  A redemption-reserve target inside
+///      `fenceRebalance` would bound it further.
+///
+///   8. *`totalOutstandingBuck` and `Deposit.buckPrincipal` are vestigial.*
+///      Both are historical records that `fenceRebalance` does not maintain.
+///      `netIssued` is the live obligation and the only one that may be used
+///      for anything; retiring the stale figure at exit destroyed depositor
+///      value (a receipt owing 12,000 was retiring 30,001) until it was
+///      caught.  They are kept only so the deposit ledger still zeroes.
+///
+///   9. *Redemption pays a mix of every constituent, not the deposit token.*
+///      Correct for a basket saver -- they own a slice of the whole thing --
+///      but it differs from ProRata's single-token payout, and any consumer
+///      that assumes one token back will mis-account it.
+///
+///  10. *`openFence` is one-shot per constituent.*  There is no migration
+///      path if a band ever needs to move pools or fee tiers.
+///
+///  11. *O(N) external calls per operation.*  `fenceAssets`, `buckBudget` and
+///      `_redeem` all loop the constituents and call the facet per leg.  Fine
+///      at three, not obviously fine at thirty.
+///
 contract BuckBasketFence is BuckBasketProRata {
 
     struct Fence {
@@ -107,6 +194,31 @@ contract BuckBasketFence is BuckBasketProRata {
     uint32  public fenceHalfWidthBp;   // band half-width around the TWAP
     uint32  public fenceRecenterBp;    // drift before the band is re-struck
     uint256 public harvestBuck;        // cumulative BUCK-side harvest, telemetry
+
+    /// @notice Directional placement, off by default so the symmetric band
+    ///         remains the baseline any comparison is measured against.
+    ///
+    ///         Both inputs already exist on PairsRebalanceDirector and are
+    ///         already tested; only the placement that uses them is new.
+    ///         FACTOR A is the differential mode -- a constituent far above
+    ///         its target weight is the one most likely to revert, because
+    ///         every basket commodity is thermodynamically and
+    ///         substitutionally replaceable, so supply answers price.  FACTOR
+    ///         B is the common mode -- it does not say where BUCK IS, it says
+    ///         where K is about to push it, which is the opposite sign: BUCK
+    ///         dear now means K expands supply, BUCK weakens, and TOKEN/BUCK
+    ///         prices RISE, so the basket should be accumulating TOKEN rather
+    ///         than selling it.
+    struct FactorParams {
+        uint16 weightA;     // percent applied to the differential signal
+        uint16 weightB;     // percent applied to the common mode
+        uint16 maxSkewBp;   // clamp on the centre offset, bp of the half-width
+        uint8  measIdx;     // ladder rung read for the common mode
+        bool   enabled;
+    }
+    FactorParams public factorParams;
+
+    event FactorParamsSet(FactorParams p);
 
     /// @notice BUCK this basket has issued and not yet retired: minted minus
     ///         burned across deposits, re-strikes and redemptions.
@@ -141,6 +253,62 @@ contract BuckBasketFence is BuckBasketProRata {
         fenceFeeTier     = _fenceFeeTier;
         fenceHalfWidthBp = 1500;        // +-15%
         fenceRecenterBp  = 500;         // re-strike after a 5% drift
+    }
+
+    function setFactorParams(FactorParams calldata p) external onlyGov {
+        if (p.maxSkewBp > 10000 || p.measIdx > 6) revert BadTargetWeight();
+        factorParams = p;
+        emit FactorParamsSet(p);
+    }
+
+    /// @notice Signed placement skew, bp of the half-width.
+    ///           > 0  centre the band ABOVE spot -- ask-heavy, holding TOKEN
+    ///                ready to sell into any strength, which is how you
+    ///                position for a fall you cannot sell into directly.
+    ///           < 0  centre BELOW spot -- bid-heavy, accumulating TOKEN on
+    ///                any weakness ahead of an expected rise.
+    ///
+    ///         A resting order can only be filled by the price coming TO it,
+    ///         so "expect a fall" cannot mean an ask further above -- the
+    ///         price would move away from it and never fill.  It means an ask
+    ///         tight against spot, which is what centring the band upward
+    ///         produces.  This is the ramp-in-front-of-the-marble placement:
+    ///         if the move comes, the arbitrage that makes it fills the band
+    ///         on the way past.
+    function fenceSkewBp(uint256 i) public view returns (int256 bp) {
+        FactorParams memory fp = factorParams;
+        if (!fp.enabled || director == address(0)) return 0;
+
+        // A: overweight (negative effort) => expect a fall => positive skew.
+        int256 a;
+        try IFenceDirector(director).effortOf(i) returns (int256 e) { a = -e; }
+        catch { a = 0; }
+
+        // B: common mode POSITIVE means BUCK is cheap now, so K tightens,
+        // supply contracts, BUCK strengthens and TOKEN/BUCK falls => again a
+        // positive skew.  Scaled from tick*1e9 to bp (a tick is ~1bp).
+        int256 b;
+        try IFenceDirector(director).commonMode(fp.measIdx) returns (int256 c) {
+            b = c / 1e9;
+        } catch { b = 0; }
+
+        bp = (a * int256(uint256(fp.weightA)) + b * int256(uint256(fp.weightB)))
+            / 100;
+        int256 cap = int256(uint256(fp.maxSkewBp));
+        if (bp >  cap) bp =  cap;
+        if (bp < -cap) bp = -cap;
+    }
+
+    /// @dev Where the band sits this strike: half-width either side of a
+    ///      centre offset from spot by the skew.
+    function _bandFor(uint256 i, int24 tick, int24 spacing)
+        internal view returns (int24 lo, int24 hi)
+    {
+        int24 w = _bpToTicks(fenceHalfWidthBp);
+        int256 off = int256(w) * fenceSkewBp(i) / 10000;
+        int24 centre = tick + int24(off);
+        lo = _align(centre - w, spacing);
+        hi = _align(centre + w, spacing);
     }
 
     function setFenceParams(uint32 halfWidthBp, uint32 recenterBp) external onlyGov {
@@ -189,9 +357,7 @@ contract BuckBasketFence is BuckBasketProRata {
         fz.buckIsToken0 = buckIs0;
         fz.live = true;
         (, int24 tick,) = _venue().fenceState(pool);
-        int24 w = _bpToTicks(fenceHalfWidthBp);
-        fz.lo = _align(tick - w, spacing);
-        fz.hi = _align(tick + w, spacing);
+        (fz.lo, fz.hi) = _bandFor(i, tick, spacing);
         emit FenceOpened(i, pool, fz.lo, fz.hi);
     }
 
@@ -349,11 +515,9 @@ contract BuckBasketFence is BuckBasketProRata {
             fz.liquidity = 0;
         }
 
-        // Re-centre on the TWAP.
+        // Re-strike, skewed by the factors when they are enabled.
         (, int24 tick,) = _venue().fenceState(fz.pool);
-        int24 w = _bpToTicks(fenceHalfWidthBp);
-        fz.lo = _align(tick - w, fz.spacing);
-        fz.hi = _align(tick + w, fz.spacing);
+        (fz.lo, fz.hi) = _bandFor(i, tick, fz.spacing);
 
         // Everything on hand for this constituent.
         uint256 tokHave  = IERC20(c.token).balanceOf(address(this));

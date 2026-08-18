@@ -181,7 +181,7 @@ class RegistryAgent:
         registry_id: str,
         signing_key: Optional[RegistryKeyPair] = None,
         ps_keypair: Optional[PSKeyPair] = None,
-        tree_depth: int = 12,
+        tree_depth: int = 12,          # SUB-tree depth; the aggregator is 10
     ) -> None:
         self.registry_id = registry_id
         self._key = signing_key if signing_key is not None else registry_keygen()

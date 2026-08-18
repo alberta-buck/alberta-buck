@@ -258,6 +258,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     chain.send(reg.functions.bindContract(
         basket.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
 
+    fence_factors: list = []
+
     # --- tokens ------------------------------------------------------ #
     usdc = chain.deploy("MockERC20", "USD Coin", "USDC", 6)
     tok, dec, wbp = [], [], []
@@ -386,6 +388,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             chain.send(basket.functions.openFence(i), sender=gov)
             d.pool_fence.append(
                 basket.functions.fenceOf(i).call()[0])
+            fence_factors.append(i)
 
         if verbose:
             print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
@@ -532,6 +535,31 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         chain.send(director.functions.syncConstituents())
         d.director = director
         d.director_impl = director_impl
+        if basket_impl == "fence" and fence_factors:
+            # The factors READ the director, so the fence needs it wired.
+            # Safe here where it was not for the ops basket: this shell
+            # overrides depositToken and _redeem outright, so none of the
+            # inherited advisory-routing paths that `director` also gates are
+            # reachable.
+            chain.send(basket.functions.setDirector(director.address),
+                       sender=gov)
+            if int(os.environ.get("SIM_FENCE_FACTORS", "0") or 0):
+                # A: differential -- lean against the constituent that has
+                #    diverged most from its target weight.
+                # B: common -- lean the way K is about to push BUCK.
+                # Off by default so the symmetric band stays the baseline
+                # every comparison is measured against.
+                chain.send(basket.functions.setFactorParams((
+                    int(os.environ.get("SIM_FACTOR_A", "100")),
+                    int(os.environ.get("SIM_FACTOR_B", "100")),
+                    int(os.environ.get("SIM_FACTOR_MAXSKEW", "5000")),
+                    int(os.environ.get("SIM_FACTOR_MEAS", "2")),
+                    True)), sender=gov)
+                if verbose:
+                    print("[deploy] fence FACTORS on  "
+                          f"A={os.environ.get('SIM_FACTOR_A','100')}% "
+                          f"B={os.environ.get('SIM_FACTOR_B','100')}% "
+                          f"maxSkew={os.environ.get('SIM_FACTOR_MAXSKEW','5000')}bp")
         if basket_impl == "ops" and director_impl == "pairs":
             # Thresholds are in tick*1e9 and a tick is ~1bp, so 100e9 reads as
             # 100bp.  measIdx 2 is the 20-epoch rung: the article's sweep puts

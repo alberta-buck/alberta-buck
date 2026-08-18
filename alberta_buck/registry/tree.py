@@ -95,7 +95,20 @@ class IdentityMerkleTree:
     insertion and O(d) path generation without storing internal nodes.
 
     Args:
-        depth: Tree depth (1..32).  Depth 12 = ~4K identities per sub-tree.
+        depth: Tree depth (1..32).  Depth 12 = ~4K identities per SUB-TREE.
+
+            12 is deliberately NOT the chain's IDENTITY_TREE_DEPTH (10), and
+            they are not supposed to agree.  An identity organization keeps
+            its own sub-tree at this depth; the depth-10 AGGREGATOR composes
+            those sub-roots into the single on-chain `identityRoot` (see
+            merkle_service.AggregatorMembershipProof, whose `aggregator_root`
+            IS that on-chain value).  The committed cross-language vectors
+            pin the split: core/vectors/registry-kernel-vectors.json carries
+            aggregator.depth = 10 beside reg_a.depth = reg_b.depth = 12.
+
+            So do not "reconcile" this default with the contract.  Changing
+            it silently changes every sub-tree root and invalidates the
+            kernel vectors that Rust, Python and JS all replay.
     """
 
     def __init__(self, depth: int = 12) -> None:
