@@ -125,7 +125,7 @@ per-N =circuits/mint_batch_n*.circom= renderings that =SNARK_PINS= emits.
 They are a matched set and splitting them across commits makes the tree
 unbisectable.
 
-* The =--b-only= trap
+* The =--b-only= flag, and why it is mandatory
 
 =scripts/snark/fix_verifier_g2.py= post-processes an exported verifier.  It
 has two modes and picking the wrong one fails *every* proof:
@@ -137,28 +137,43 @@ has two modes and picking the wrong one fails *every* proof:
 
 Every call site in =scripts/snark/*.sh= passes =--b-only=.  Two did not, and
 the resulting verifier rejected all 11 membership proofs in the suite with no
-indication of why.
+indication of why.  The flagless mode exists only for verifiers exported by
+much older snarkjs that emitted VK constants real-first; against any current
+snarkjs it is simply wrong.
 
 Apply it *exactly once* per verifier.  The swap is an involution, so a second
 application silently undoes the first — a duplicated call in
 =test_verifier_regression.sh= did this for some time.
 
-** Why the swap is needed at all
+** Why we patch stock verifiers at all
 
-It is *not* a snarkjs bug; see =doc/historical/alberta-buck-verifier-bug.org=,
-whose CORRECTION section has the verified history.  snarkjs expects the caller
-to supply =_pB= in EIP-197 order and its own =zkey export soliditycalldata=
-does that swap for you.  This repo packs =pi_b= in snarkjs's *natural* order
-in the Python/shell paths, so the swap is moved into the verifier instead.
+*We use stock snarkjs.*  It is EIP-197 correct end to end: its own
+=zkey export soliditycalldata= output verifies against its own exported
+verifier on-chain, which snarkjs's =smart_contract_tests= demonstrate.  There
+is no upstream defect and nothing to wait for.
 
-Both conventions are live here and both work:
+The precompile wants G2 as =[x_im, x_re, y_im, y_re]=, and snarkjs splits that
+work between contract and caller: the verifier embeds its VK constants
+im-first and expects =_pB= to arrive already swapped, which
+=exportSolidityCallData= does.  Our Python/shell fixture generators do not use
+that exporter -- they pack straight out of =proof.json= -- so we move the swap
+into the verifier instead.
 
-| path | packs | verifier |
-|------+-------+----------|
-| JS provers (=prove_mint.js= etc.) | swapped, caller-side | unpatched |
-| Python/shell (=gen_e2e_world.py=, =setup_g1tie.sh=) | natural order | =--b-only= patched |
+| path | packs =pi_b= | verifier |
+|------+--------------+----------|
+| =scripts/snark/prove_*.js= | swapped, caller-side | *stock* |
+| =scripts/snark/*.sh=, =*.py= | natural, as in proof.json | *=--b-only= patched* |
 
-Do not "unify" these without regenerating everything that depends on them.
+Both conventions are live here, both are self-consistent, and both verify.
+They are *not* interchangeable: a stock verifier fed unswapped calldata, or a
+patched verifier fed swapped calldata, produces an off-curve point and fails
+every proof.  Do not unify them without regenerating every dependent vector.
+
+Upstream will not adopt our convention, and should not: verifiers are deployed
+immutably, so changing snarkjs's calldata order would desynchronise every
+existing deployment from its own tooling.  The convention is an ABI.  What was
+worth sending upstream is documentation and a test pinning it -- see the
+=docs/groth16-verifier-pb-convention= branch of the snarkjs fork.
 
 * Other prerequisites that are easy to miss
 

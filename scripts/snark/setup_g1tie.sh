@@ -94,8 +94,13 @@ sed -i.bak 's/public view returns/public returns/g' \
 rm -f "$BUILD_DIR/Groth16Verifier.sol.bak"
 cp "$BUILD_DIR/Groth16Verifier.sol" \
     "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
-# EIP-197 G2 encoding fix: MUST run after cp to avoid macOS sed temp-file issues
-# (sed -i uses atomic rename; python must open the file after sed completes)
+# Adapt the STOCK verifier to our calldata convention.  snarkjs is EIP-197
+# correct as shipped; its exporter swaps pi_b caller-side and its verifier
+# expects that.  Our Python/shell fixtures pack pi_b straight out of
+# proof.json instead, so we move the swap into the verifier.  See
+# scripts/snark/fix_verifier_g2.py and doc/snark-regeneration.org.
+# MUST run after cp: sed -i uses atomic rename, so python has to open the
+# file only once sed has completed.
 # --b-only is REQUIRED for snarkjs 0.7.5+: it already emits the VK constants
 # in EIP-197 order, so the default mode swaps them a SECOND time and every
 # proof then fails against the pairing precompile.  Only the proof-B swap is

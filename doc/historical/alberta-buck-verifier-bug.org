@@ -27,8 +27,12 @@ below is wrong on three counts.  Verified against =~/src/snarkjs= at
   March 2023.  Its parent already emits =vk_beta_2[0][1]= first.  It is a
   faithful assembly rewrite of a convention that already existed on both sides.
 
-So snarkjs has been internally consistent since 2021: =zkey export
-soliditycalldata= feeds =verifyProof= correctly.  What is real is that the
+So snarkjs has been not merely internally consistent but *EIP-197 correct end
+to end* since 2021: =zkey export soliditycalldata= feeds =verifyProof=
+correctly on a real EVM, which snarkjs's own =smart_contract_tests= verify.
+The precompile is satisfied.  Our need to patch comes from OUR choice to pack
+=pi_b= straight out of =proof.json= in the Python/shell paths rather than use
+that exporter -- an adaptation to our calling convention, not a fix.  What is real is that the
 convention is *undocumented and untested* — VK swapped inside the contract, B
 swapped outside it, with no test anywhere linking the exporter to a deployed
 verifier.  That is why it reads as a bug and why it survived five years.

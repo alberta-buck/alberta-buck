@@ -1,20 +1,56 @@
 #!/usr/bin/env python3
-"""Fix snarkjs-generated Solidity verifier: apply EIP-197 G2 encoding swap.
+"""Adapt a STOCK snarkjs Solidity verifier to this repo's calldata convention.
 
-Older snarkjs exports stored the embedded VK G2 constants (beta, gamma,
-delta) as [x_re, x_im, y_re, y_im] while EIP-197 expects
-[x_im, x_re, y_im, y_re]; the default mode swaps both the VK constants and
-the proof-B component in the assembly.
+We use snarkjs as published.  Nothing here is a bug fix and nothing upstream
+needs changing -- snarkjs is EIP-197 correct end to end, and its own
+`zkey export soliditycalldata` output verifies against its own exported
+verifier on-chain.  What this script does is bend that verifier to accept the
+calldata WE produce, which is packed differently.
 
-IMPORTANT -- snarkjs 0.7.5 (current) already emits the VK constants in
-EIP-197 order; swapping them CORRUPTS the verifier (the pairing precompile
-rejects the malformed G2 points and every proof "fails").  Only the proof-B
-swap is still wanted, because the repo convention stores/packs pi_b in
-snarkjs proof.json natural order (the caller-side swap that
-`snarkjs generatecall` would otherwise perform).  For verifiers exported by
-snarkjs 0.7.5+, pass --b-only.
+THE TWO CONVENTIONS
 
-Usage: python scripts/snark/fix_verifier_g2.py [--b-only] <verifier.sol>
+The bn256Pairing precompile requires G2 points as [x_im, x_re, y_im, y_re].
+snarkjs satisfies that by splitting the work: the verifier embeds its VK
+constants im-first, and expects the CALLER to hand it `_pB` already in
+EIP-197 order.  `exportSolidityCallData` performs that swap.  So:
+
+    stock verifier   <->  caller swaps pi_b       (snarkjs's ABI)
+    patched verifier <->  caller packs pi_b as-is (this script)
+
+Both are self-consistent and both verify on-chain.  They are not
+interchangeable: pairing a stock verifier with unswapped calldata, or a
+patched verifier with swapped calldata, yields an off-curve point and every
+proof fails.
+
+WHY WE PATCH RATHER THAN SWAP AT THE CALLER
+
+Our Python and shell fixture generators pack straight out of proof.json --
+`pi_b[0][0], pi_b[0][1], pi_b[1][0], pi_b[1][1]` -- because remembering to
+swap at every one of those call sites is the kind of thing that gets missed
+once and then debugged for a day.  Moving the swap into the verifier makes it
+a single, testable place.
+
+Note this repo runs BOTH conventions on purpose:
+
+    scripts/snark/prove_*.js   swap caller-side  -> use STOCK verifiers
+    scripts/snark/*.sh, *.py   pack natural      -> use PATCHED verifiers
+
+Do not "unify" them without regenerating every dependent proof vector; see
+doc/snark-regeneration.org.
+
+USAGE
+
+    python3 fix_verifier_g2.py --b-only <verifier.sol>
+
+--b-only swaps ONLY the proof-B component in the assembly, which is what
+snarkjs 0.7.5+ needs: it already emits the VK constants in EIP-197 order, so
+touching those swaps correct values a second time and corrupts the verifier.
+Always pass --b-only.  The flagless mode exists for verifiers exported by
+much older snarkjs that emitted VK constants real-first; it is almost
+certainly not what you want.
+
+Apply EXACTLY ONCE per verifier.  The swap is an involution, so a second
+application silently undoes the first.
 """
 import sys, re
 

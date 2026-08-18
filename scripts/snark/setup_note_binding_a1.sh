@@ -151,6 +151,8 @@ cp "$BUILD_DIR/Groth16Verifier.sol" \
 # (swapping them corrupts the verifier -- the pairing precompile rejects the
 # malformed points).  Only the proof-B swap is wanted, so the repo convention
 # of storing/packing pi_b in proof.json natural order keeps working.
+# Adapt the stock verifier to our natural-order pi_b packing (not a
+# snarkjs fix -- see fix_verifier_g2.py).
 python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" --b-only \
     "$REPO_ROOT/src/NoteBindingA1Groth16Verifier.sol"
 echo "  -> src/NoteBindingA1Groth16Verifier.sol (EIP-197 proof-B swap applied)"
