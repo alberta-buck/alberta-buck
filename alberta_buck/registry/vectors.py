@@ -44,6 +44,7 @@ from alberta_buck.registry.certificate import (
 )
 from alberta_buck.registry.tree import (
     IdentityMerkleTree, MembershipProof, identity_leaf,
+    AGGREGATOR_DEPTH, KYC_SUBTREE_DEPTH,
 )
 from alberta_buck.registry.merkle_service import (
     CentralMerkleService, SubTreeKind,
@@ -280,8 +281,8 @@ def build_registry_vectors(
     identity_specs: Optional[List[Tuple[str, dict, int]]] = None,
     feature_specs: Optional[List[str]] = None,
     feature_assignments: Optional[Dict[str, List[str]]] = None,
-    tree_depth: int = 12,
-    aggregator_depth: int = 10,
+    tree_depth: int = KYC_SUBTREE_DEPTH,
+    aggregator_depth: int = AGGREGATOR_DEPTH,
     registry_id: str = "test-registry",
     output_dir: Optional[str] = None,
 ) -> RegistryVectors:

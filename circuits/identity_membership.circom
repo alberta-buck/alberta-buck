@@ -75,4 +75,17 @@ template IdentityMembership(depth) {
 
 // Depth pinned to 10 to match the reference IdentityTree(depth=10) used by the
 // wallet vectors; production pins this to the registry accumulator's depth.
+// The 10 here is the AGGREGATOR depth -- the tree whose root is the
+// on-chain `identityRoot`.  Named elsewhere as:
+//   Solidity  IdentityRegistry.IDENTITY_TREE_DEPTH
+//   Rust      buck_registry::tree::AGGREGATOR_DEPTH
+//   Python    alberta_buck.registry.tree.AGGREGATOR_DEPTH
+// It is NOT the registry sub-tree depth (12, KYC_SUBTREE_DEPTH); an
+// organization's own tree is deeper and composes into this one.
+//
+// Left as a literal on purpose: a compile-time `var` would very likely
+// produce identical R1CS, but "very likely" is not worth it here --
+// any change to this file forces a fresh trusted setup, hence a new
+// zkey, a new committed verifier and regenerated proof vectors, which
+// the Makefile calls a MATCHED SET from a single run.
 component main { public [ identityRoot ] } = IdentityMembership(10);

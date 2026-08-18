@@ -47,6 +47,7 @@ from alberta_buck.registry.tree import (
     MembershipProof,
     identity_leaf,
     EMPTY_LEAF,
+    AGGREGATOR_DEPTH,
 )
 from alberta_buck.wallet.poseidon import poseidon
 
@@ -205,7 +206,7 @@ class CentralMerkleService:
         depth: Aggregator tree depth.  Depth 10 supports up to 1024 sub-trees.
     """
 
-    def __init__(self, depth: int = 10) -> None:
+    def __init__(self, depth: int = AGGREGATOR_DEPTH) -> None:
         self._tree = IdentityMerkleTree(depth=depth)
         self._sub_trees: Dict[str, SubTreeRecord] = {}
 

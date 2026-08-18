@@ -46,6 +46,39 @@ def identity_leaf(M) -> int:
     return poseidon([x % F_R, y % F_R])
 
 
+# --- Tree depths ---------------------------------------------------------- #
+#
+# THREE depths, and they are meant to differ.  This has been mistaken for an
+# inconsistency more than once, so the numbers live here as names rather than
+# as literals at each call site.
+#
+#   AGGREGATOR_DEPTH      the CentralMerkleService tree whose root IS the
+#                         on-chain `identityRoot`.  Must equal Solidity
+#                         `IdentityRegistry.IDENTITY_TREE_DEPTH` and the
+#                         `component main` depth of both membership circuits,
+#                         because those prove a path to that exact root.
+#
+#   KYC_SUBTREE_DEPTH     one registry organization's own identity sub-tree.
+#                         Deliberately deeper: it sizes how many identities a
+#                         single organization can hold (2**12 ~ 4K), which is
+#                         a capacity question, not a protocol one.  Changing
+#                         it changes sub-roots and therefore the committed
+#                         cross-language kernel vectors.
+#
+#   FEATURE_SUBTREE_DEPTH a feature authority's sub-tree (attributes such as
+#                         licences).  Equal to AGGREGATOR_DEPTH today by
+#                         coincidence of capacity, not by requirement -- kept
+#                         separate so raising one does not silently raise the
+#                         other.
+#
+# Only AGGREGATOR_DEPTH is protocol-critical.  The two sub-tree depths are
+# capacity knobs and may be raised independently, at the cost of regenerating
+# the vectors that pin them (core/vectors/registry-kernel-vectors.json records
+# aggregator.depth beside reg_a.depth / reg_b.depth).
+AGGREGATOR_DEPTH: int = 10
+KYC_SUBTREE_DEPTH: int = 12
+FEATURE_SUBTREE_DEPTH: int = 10
+
 # Sentinel for an empty leaf (depth-0 zero).
 EMPTY_LEAF = 0
 
@@ -111,7 +144,7 @@ class IdentityMerkleTree:
             kernel vectors that Rust, Python and JS all replay.
     """
 
-    def __init__(self, depth: int = 12) -> None:
+    def __init__(self, depth: int = KYC_SUBTREE_DEPTH) -> None:
         if depth < 1 or depth > 32:
             raise ValueError(f"depth must be in [1, 32], got {depth}")
         self.depth = depth
@@ -304,7 +337,8 @@ class IdentityMerkleTree:
     # -- rebuild from event log ----------------------------------------------
 
     @classmethod
-    def from_leaves(cls, leaves: List[int], depth: int = 12) -> 'IdentityMerkleTree':
+    def from_leaves(cls, leaves: List[int],
+                    depth: int = KYC_SUBTREE_DEPTH) -> 'IdentityMerkleTree':
         """Reconstruct the tree from a leaf list (e.g. event log replay).
 
         Args:

@@ -27,7 +27,9 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
-from alberta_buck.registry.tree import IdentityMerkleTree, MembershipProof, identity_leaf
+from alberta_buck.registry.tree import (
+    IdentityMerkleTree, MembershipProof, identity_leaf, FEATURE_SUBTREE_DEPTH,
+)
 from alberta_buck.wallet.bn254 import G1, mul, eq
 
 
@@ -71,7 +73,8 @@ class FeatureAuthority:
         tree_depth: Depth of the feature tree (default 10, ~1K identities).
     """
 
-    def __init__(self, feature_id: str, tree_depth: int = 10) -> None:
+    def __init__(self, feature_id: str,
+                 tree_depth: int = FEATURE_SUBTREE_DEPTH) -> None:
         if not feature_id.startswith("feature:"):
             raise ValueError("feature_id must use the 'feature:' prefix convention")
         self.feature_id = feature_id
