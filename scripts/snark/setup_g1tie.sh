@@ -96,7 +96,12 @@ cp "$BUILD_DIR/Groth16Verifier.sol" \
     "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
 # EIP-197 G2 encoding fix: MUST run after cp to avoid macOS sed temp-file issues
 # (sed -i uses atomic rename; python must open the file after sed completes)
-python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" \
+# --b-only is REQUIRED for snarkjs 0.7.5+: it already emits the VK constants
+# in EIP-197 order, so the default mode swaps them a SECOND time and every
+# proof then fails against the pairing precompile.  Only the proof-B swap is
+# still wanted.  Omitting this flag silently produced a verifier that
+# rejected all 11 membership proofs in the suite.
+python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" --b-only \
     "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
 echo "  -> src/IdentityMembershipG1TieVerifier.sol (EIP-197 G2 fix applied)"
 

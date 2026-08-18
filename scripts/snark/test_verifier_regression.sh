@@ -63,10 +63,10 @@ fi
 # Export Solidity verifier (rename to avoid collision with source-tree verifier)
 "$SNARKJS" zkesv "$BUILD/z1.zkey" "$BUILD/RegressVerifier.sol" 2>/dev/null
 # G2 fix first (match snarkjs raw output), then rename
-python3 "$ROOT/scripts/snark/fix_verifier_g2.py" "$BUILD/RegressVerifier.sol"
+python3 "$ROOT/scripts/snark/fix_verifier_g2.py" --b-only "$BUILD/RegressVerifier.sol"
 	perl -i -pe 's/contract Groth16Verifier/contract RegressVerifier/g; s/public view returns/public returns/g' "$BUILD/RegressVerifier.sol"
 	# Fix EIP-197 G2 encoding (snarkjs stores real-first, EIP-197 expects im-first)
-	python3 "$ROOT/scripts/snark/fix_verifier_g2.py" "$BUILD/RegressVerifier.sol"
+	python3 "$ROOT/scripts/snark/fix_verifier_g2.py" --b-only "$BUILD/RegressVerifier.sol"
 echo "  Solidity verifier exported"
 
 # ---- Step 2: Generate Forge test vectors ------------------------------------

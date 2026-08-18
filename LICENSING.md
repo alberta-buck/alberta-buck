@@ -15,7 +15,34 @@ Two licences, applied by layer.  The reasoning is the decision of record in
 | `alberta_buck/`          | GPL-3.0-or-later   | PyPI `alberta-buck`                              |
 
 Full texts: `core/LICENSE` (CAL-1.0), `LICENSE` (GPL-3.0).  Third-party
-components and their licences: `NOTICE`.
+components and their licences: `NOTICE`.  The name is **not** covered by
+either licence: `TRADEMARKS.md`.  Contributing: `CONTRIBUTING.md`.
+
+## How licensing is declared
+
+Machine-readably in `REUSE.toml`, per the REUSE Specification, which is the
+supported alternative to stamping every file with an SPDX header.  That file
+and this table are the same map and must be kept in step.
+
+Source files are **not** uniformly headered — as of this writing 657 of 797
+tracked files carry no SPDX identifier, which is why the declaration is
+central.  New files should carry one anyway (`CONTRIBUTING.md`), because a
+header is the only thing that travels with a file copied *out* of the repo.
+
+## Design documents
+
+The `*.org` design writing and `doc/` are **not** under the licences above.
+All rights reserved, declared explicitly rather than left as an undeclared
+default.  This is the reversible direction: relaxing to an open licence later
+is one line; an open grant cannot be withdrawn.
+
+## Generated verifiers
+
+The Groth16 verifiers under `src/` are emitted by snarkjs and carry the
+`GPL-3.0`-only header its template writes, which makes the effective licence
+of the contract set as a whole GPL-3.0-**only**.  They are left as generated:
+whether the template's output is snarkjs-derived is unsettled and not ours to
+decide unilaterally.
 
 ## Why CAL for the kernels
 

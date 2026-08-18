@@ -1,8 +1,51 @@
-#+TITLE: On-Chain Groth16 Verifier Export Bug — ROOT CAUSE FOUND
+#+TITLE: On-Chain Groth16 Verifier Export — an undocumented convention, not a bug (see CORRECTION)
 #+SUBTITLE: EIP-197 G2 Point Encoding Mismatch in snarkjs Solidity Verifier Export
 #+author: Perry Kundert
 #+date: 2026-06-06
 #+description: snarkjs stores G2 points as [x_re, x_im, y_re, y_im] but EIP-197 expects [x_im, x_re, y_im, y_re]. The Solidity verifier does not swap, causing the bn256Pairing precompile to reject the proof.
+
+* CORRECTION (2026-08-17) — the causal story below is wrong
+
+The practical conclusion of this document still holds: our tooling packs =pi_b=
+in snarkjs's *natural* order, so a verifier we export must have its B component
+swapped, which is what =scripts/snark/fix_verifier_g2.py --b-only= does.  Keep
+doing that.
+
+But the diagnosis — "snarkjs has a bug; the B assembly was never updated to
+match the VK constants" — does not survive checking, and the git archaeology
+below is wrong on three counts.  Verified against =~/src/snarkjs= at
+=upstream/v0.7.6=:
+
+- *=_pB= is not supposed to be swapped in-contract.*  It is *specified* as
+  already EIP-197-ordered; the caller supplies it that way.  There was never
+  anything in the assembly to "update".
+- *=src/groth16_exportsoliditycalldata.js= is not a workaround.*  It is the
+  producer side of that convention, and it swaps =pi_b= at line 41 of upstream
+  v0.7.6 today.  It dates to =577b3f3= (*2021-05-31*, "Plonk finished") — two
+  years BEFORE the commit it supposedly compensates for.
+- *=62a3b9e= did not introduce the VK swap*, and it is dated *2023-05-11*, not
+  March 2023.  Its parent already emits =vk_beta_2[0][1]= first.  It is a
+  faithful assembly rewrite of a convention that already existed on both sides.
+
+So snarkjs has been internally consistent since 2021: =zkey export
+soliditycalldata= feeds =verifyProof= correctly.  What is real is that the
+convention is *undocumented and untested* — VK swapped inside the contract, B
+swapped outside it, with no test anywhere linking the exporter to a deployed
+verifier.  That is why it reads as a bug and why it survived five years.
+
+Consequence: *the fix branch must not be shipped upstream as a behavioural
+change.*  Correcting the template would desynchronise every Groth16 verifier
+deployed since 2021 from its own proof-generation tooling — an incompatibility
+between new JavaScript and immutable on-chain bytecode, which no version number
+can mediate.  What is worth upstreaming is documentation plus the missing
+exporter-to-verifier test.
+
+The failure mode, at least, is safe: a re/im swap yields an off-curve point, the
+pairing precompile fails, and =verifyProof= returns false.  Completeness breaks
+(valid proofs rejected); soundness never does.
+
+The original text is kept below unedited except where marked, because the
+measurements in it are sound even though the attribution is not.
 
 * Root Cause
 
@@ -165,24 +208,28 @@ make snark-test-regression
 The bug is in the Groth16 Solidity verifier template:
 =templates/verifier_groth16.sol.ejs= (lines 108-111).
 
-The VK constants (lines 32-43) were correctly swapped for EIP-197 in
-commit =62a3b9e= (March 2023) by Xavier Pinsach — using
-=vk_beta_2[0][1]= for =betax1=, etc.  But the B component assembly
-was never updated to match.
+[CORRECTED] The VK constants (lines 32-43) are emitted in EIP-197 order,
+using =vk_beta_2[0][1]= for =betax1=.  The B component assembly is NOT
+swapped — and that is correct, not an omission: =_pB= is specified as
+already EIP-197-ordered, supplied that way by the caller.
 
-Two other files had manual JavaScript workarounds to compensate:
-- =smart_contract_tests/test/smart_contracts.test.js= — swapped =pi_b=
-  components before calling =verifyProof()=
-- =src/groth16_exportsoliditycalldata.js= — same swap in calldata output
+The two files below were described here as "manual JavaScript workarounds
+to compensate".  They are not.  They are the producer side of the same
+convention, and they predate the assembly refactor by two years:
+- =smart_contract_tests/test/smart_contracts.test.js= — supplies =pi_b= in
+  EIP-197 order
+- =src/groth16_exportsoliditycalldata.js:41= — same, in calldata output
 
 **Git history**
 
+[CORRECTED — dates and roles verified against upstream/v0.7.6]
+
 | Commit | Date | What |
 |--------+------+------|
-| =62a3b9e= | 2023-03 | Template created: VK constants swapped for EIP-197, B NOT swapped |
-| =96b7d27= | 2023-03 | Test added with manual proofB swap to work around template bug |
-| =d5a179c= | 2023-03 | Calldata export added with same manual swap |
-| =78b0503= | 2026-06-06 | FIX: template B assembly swapped; test + calldata workarounds removed |
+| =577b3f3= | 2021-05-31 | "Plonk finished" — calldata exporter emits =pi_b= EIP-197-ordered.  ORIGIN of the convention, not a workaround. |
+| =62a3b9e= | 2023-05-11 | Assembly rewrite of the Groth16 verifier.  VK constants were ALREADY im-first in its parent; this commit changed no convention. |
+| =96b7d27= | 2023-03 | fflonk test refactor.  Not the origin of the test-side ordering. |
+| =78b0503= | 2026-06-06 | Our branch: template B swapped + exporter/test un-swapped.  Self-consistent, but a BREAKING change for every deployed verifier — do not upstream as-is. |
 
 **Fix applied** (branch =fix/verifier_groth16= at =~/src/snarkjs=):
 
