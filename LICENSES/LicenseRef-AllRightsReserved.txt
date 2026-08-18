@@ -1,0 +1,11 @@
+All Rights Reserved
+
+The files declared under this identifier are included in this repository
+for reference and reading.  No copyright licence is granted: they may not
+be copied, modified, published, or redistributed except as copyright law
+itself permits, or with the prior written permission of the copyright
+holder named for each file (see REUSE.toml).
+
+This is the legal default made explicit rather than left undeclared.  It
+is the reversible direction: relaxing to an open licence later is one
+line; an open grant cannot be withdrawn.

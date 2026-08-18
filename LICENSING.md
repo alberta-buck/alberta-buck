@@ -39,8 +39,8 @@ is one line; an open grant cannot be withdrawn.
 ## Generated verifiers
 
 The Groth16 verifiers under `src/` are emitted by snarkjs and carry the
-header its template writes.  The `SPDX-License-Identifier: GPL-3.0` tag on
-line 1 is the deprecated, ambiguous SPDX identifier, but the licence notice
+header its template writes.  The SPDX tag on its line 1, `GPL-3.0`, is the
+deprecated, ambiguous SPDX identifier, but the licence notice
 in the same header -- written by 0KIMS association, the copyright holder --
 grants "either version 3 of the License, or (at your option) any later
 version": the standard GPL-3.0-**or-later** grant.  The notice is the
@@ -73,8 +73,8 @@ decorative.
 
 ## Combined Work Exception
 
-CAL 4.5 lets individual files be marked
-`SPDX-License-Identifier: CAL-1.0-Combined-Work-Exception`, permitting
+CAL 4.5 lets individual files be marked with the SPDX identifier
+`CAL-1.0-Combined-Work-Exception`, permitting
 combination into a larger work under other terms -- provided recipients
 still receive the notices, the source access, and full control of their own
 data.
@@ -94,8 +94,12 @@ supported alternative and is what compliance scanners read.
 New files should carry a header anyway, matching the table above, because it
 is the only thing that travels with a file copied *out* of this repository:
 
+<!-- REUSE-IgnoreStart -->
+
     // SPDX-License-Identifier: CAL-1.0          (core/)
     // SPDX-License-Identifier: GPL-3.0-or-later (src/*.sol, alberta_buck/)
+
+<!-- REUSE-IgnoreEnd -->
 
 ## Contributions
 

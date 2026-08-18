@@ -67,8 +67,12 @@ circomlib data inside a CAL crate.
 New source files must carry an SPDX identifier matching the layer they are in,
 per the table in `LICENSING.md`:
 
+<!-- REUSE-IgnoreStart -->
+
     // SPDX-License-Identifier: CAL-1.0          (core/)
     // SPDX-License-Identifier: GPL-3.0-or-later (src/, alberta_buck/)
+
+<!-- REUSE-IgnoreEnd -->
 
 ---
 
