@@ -352,6 +352,12 @@ golden-receipts:  # requires nix-
 # Override the pinned batch sizes (each gets its own circuit + verifier):
 #   make snark SNARK_PINS="1 2 4 8 16"
 #
+# RUNBOOK: doc/snark-regeneration.org -- the dependency chain, timings, disk
+# budget, and the --b-only trap.  Read it before regenerating anything; the
+# artifacts here are a MATCHED SET and regenerating one member invalidates the
+# committed proof vectors of the others.  Run `make nix-test` immediately
+# after any snark-* target, BEFORE committing.
+#
 # !! DEV ENTROPY !!  scripts/snark/setup.sh contributes FIXED dev-only entropy
 # ("alberta-buck-dev-*"), so every artifact here is a REPRODUCIBLE DEV setup --
 # green in tests, but NOT a secure production setup (the toxic waste is known).

@@ -62,11 +62,13 @@ fi
 
 # Export Solidity verifier (rename to avoid collision with source-tree verifier)
 "$SNARKJS" zkesv "$BUILD/z1.zkey" "$BUILD/RegressVerifier.sol" 2>/dev/null
-# G2 fix first (match snarkjs raw output), then rename
+# G2 fix first, then rename.  Apply the fix EXACTLY ONCE: the swap is an
+# involution, so a second application silently undoes the first.  A
+# duplicated tab-indented copy of these two lines used to sit here and did
+# precisely that, leaving this regression harness testing a verifier that
+# could never accept a proof.
 python3 "$ROOT/scripts/snark/fix_verifier_g2.py" --b-only "$BUILD/RegressVerifier.sol"
-	perl -i -pe 's/contract Groth16Verifier/contract RegressVerifier/g; s/public view returns/public returns/g' "$BUILD/RegressVerifier.sol"
-	# Fix EIP-197 G2 encoding (snarkjs stores real-first, EIP-197 expects im-first)
-	python3 "$ROOT/scripts/snark/fix_verifier_g2.py" --b-only "$BUILD/RegressVerifier.sol"
+perl -i -pe 's/contract Groth16Verifier/contract RegressVerifier/g; s/public view returns/public returns/g' "$BUILD/RegressVerifier.sol"
 echo "  Solidity verifier exported"
 
 # ---- Step 2: Generate Forge test vectors ------------------------------------

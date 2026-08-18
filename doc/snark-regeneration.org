@@ -1,0 +1,180 @@
+# Copyright (c) 2026 Perry Kundert.  All rights reserved.
+#
+# This document is NOT covered by the source-code licences in LICENSING.md.
+# SPDX-License-Identifier: LicenseRef-AllRightsReserved
+#+TITLE: Regenerating the SNARK Artifacts
+#+SUBTITLE: What breaks, in what order, and roughly how long it takes
+#+author: Perry Kundert
+#+date: 2026-08-18
+
+This is the runbook for the day =build/snark/= is empty and the test suite is
+red.  It was written immediately after doing exactly that, so the chain and
+the traps below are observed rather than inferred.
+
+* The one thing to understand first
+
+Everything under =build/snark/= is a *MATCHED SET*.  A zkey, the Solidity
+verifier exported from it, and every committed proof vector that verifies
+against that verifier are produced by a single run and are only valid
+together.  Groth16 setup is non-deterministic — the delta differs per run —
+so regenerating any one member invalidates the rest.
+
+The practical consequence, and the trap that cost a full session:
+
+#+begin_quote
+Regenerating ONE circuit's verifier silently invalidates every committed proof
+vector that verifies through it.  The tests do not fail at regeneration time;
+they fail the next time someone runs them.  *Run =make nix-test= immediately
+after any =snark-*= target, before committing anything.*
+#+end_quote
+
+* Dev entropy: what these artifacts are and are not
+
+=scripts/snark/setup.sh= contributes a FIXED entropy string,
+=alberta-buck-dev-ptau-${POW}=, so the powers of tau are *reproducible* —
+regenerating gives byte-identical ptau.  The zkeys are *not*: =groth16 setup=
+draws fresh randomness for delta on every run.
+
+So the honest status of everything in =build/snark/=:
+
+- The toxic waste is *known*.  Anyone who reads =setup.sh= can forge proofs.
+- This is fine for tests, CI and development, and is *not deployable*.
+- Production requires a real multi-party ceremony.  Until that happens, every
+  committed verifier in =src/= is a development artifact.
+
+A public ceremony ptau (e.g. the Hermez =powersOfTau28_hez_final_*.ptau=
+series) would be a strict improvement over the dev tau for the phase-1 half,
+and is a drop-in: put it in =build/snark/ptau/= under the expected name and
+=ensure_ptau= will reuse it rather than generating one.
+
+* The ptau are the expensive part, and they are circuit-independent
+
+| file | size | used by |
+|------+------+---------|
+| =pot12_final.ptau= | 4.5M | identity membership |
+| =pot13_final.ptau= | 9.0M | identity membership (native) |
+| =pot15_final.ptau= | 36M | mint, spend, =mint_batch_n1= |
+| =pot16_final.ptau= | 72M | =mint_batch_n2= |
+| =pot17_final.ptau= | 144M | =mint_batch_n4= |
+| =pot18_final.ptau= | 288M | =mint_batch_n8= |
+| =pot19_final.ptau= | 576M | =mint_batch_n16= |
+| =pot20_final.ptau= | 1.1G | =mint_batch_n32= |
+| =pot22_final.ptau= | *4.8G* | note-binding circuits |
+
+=ptau_pow_for_n()= in =setup.sh= maps batch size to power: N=1 -> 2^15,
+doubling per doubling of N, to N=32 -> 2^20.  Constraint count roughly
+doubles with batch size, hence the ladder.
+
+Two things worth internalising:
+
+1. *Only =potN_final.ptau= matters.*  =ensure_ptau= checks for it and skips
+   generation entirely if present; the =_0000= / =_0001= intermediates are
+   scratch and need not be kept or restored.
+2. *The ptau survive circuit changes.*  Editing a circuit forces a new zkey
+   and verifier, never a new ptau.  Keep them.
+
+=build/snark/= reaches *~17G* with the full pin set plus note-binding.  Budget
+the disk before starting; =pot22= alone is 4.8G and is generated late, so
+running out mid-way wastes everything before it.
+
+* DANGER: the only target that destroys ptau
+
+=make snark-ptau= begins =rm -rf build/snark/ptau=.  It is the *only* target
+that does.  It is now guarded — it prints what it will delete and requires
+typing =delete-ptau= — but know what it is before you reach for it.
+
+If you want fresh zkeys and verifiers against the ptau you already have, the
+target is *=make snark-setup=*.
+
+* The dependency chain, in the order it actually bites
+
+Each step below closes one link and reveals at most the next.  Measured on an
+M-series Mac with the ptau already present:
+
+| # | target | needs | produces | time |
+|---+--------+-------+----------+------|
+| 1 | =snark-g1tie= | pot12/13 | G1-tie verifier + =test/vectors/g1tie/proof.json= | ~1 min |
+| 2 | =snark-setup SNARK_PINS="1"= | pot15 | mint, spend, =mint_batch_n1= | ~2 min |
+| 3 | =snark-a2-setup SNARK_PINS="1"= | pot15 | =mint_batch_a2_n1= | ~1 min |
+| 4 | =snark-note-binding-a1= | rapidsnark, pot22 | A1 note-binding + its proof vector | *~15 min* |
+| 5 | =snark-note-binding= | rapidsnark, pot22 | note-binding + its proof vector | *~15 min* |
+| 6 | =snark-e2e-fixtures= | ALL of the above | =alberta_buck/test/vectors/e2e/{a1,a2,b1}.json= | ~1 min |
+
+Steps 4 and 5 are the long ones: they compile a C++ witness calculator and
+generate =pot22= (4.8G) if it is absent.  Do not run them under a timeout.
+
+Full pin set (=SNARK_PINS="1 2 4 8 16 32"=, both families) is substantially
+longer — the =n32= circuits alone need =pot20= — and is only necessary if you
+are changing the mint circuits.  For a red suite caused by a verifier
+regeneration, =SNARK_PINS="1"= is sufficient: only N=1 feeds the e2e fixtures.
+
+** Recipe: suite is red after regenerating something
+
+#+begin_src bash
+make nix-snark-g1tie                      # if the g1tie verifier changed
+make nix-snark-setup    SNARK_PINS="1"
+make nix-snark-a2-setup SNARK_PINS="1"
+make nix-snark-note-binding-a1            # slow
+make nix-snark-note-binding               # slow
+make nix-snark-e2e-fixtures
+make nix-test                             # expect 546 passed, 0 failed
+#+end_src
+
+Commit the *whole* result in one commit: verifiers, proof vectors, and the
+per-N =circuits/mint_batch_n*.circom= renderings that =SNARK_PINS= emits.
+They are a matched set and splitting them across commits makes the tree
+unbisectable.
+
+* The =--b-only= trap
+
+=scripts/snark/fix_verifier_g2.py= post-processes an exported verifier.  It
+has two modes and picking the wrong one fails *every* proof:
+
+- *=--b-only=* — swaps only the proof-B component.  *This is what you want*
+  for snarkjs 0.7.5+, which already emits the VK constants in EIP-197 order.
+- *no flag* — swaps the VK constants as well.  On 0.7.5+ that is a SECOND
+  swap of already-correct constants and corrupts the verifier.
+
+Every call site in =scripts/snark/*.sh= passes =--b-only=.  Two did not, and
+the resulting verifier rejected all 11 membership proofs in the suite with no
+indication of why.
+
+Apply it *exactly once* per verifier.  The swap is an involution, so a second
+application silently undoes the first — a duplicated call in
+=test_verifier_regression.sh= did this for some time.
+
+** Why the swap is needed at all
+
+It is *not* a snarkjs bug; see =doc/historical/alberta-buck-verifier-bug.org=,
+whose CORRECTION section has the verified history.  snarkjs expects the caller
+to supply =_pB= in EIP-197 order and its own =zkey export soliditycalldata=
+does that swap for you.  This repo packs =pi_b= in snarkjs's *natural* order
+in the Python/shell paths, so the swap is moved into the verifier instead.
+
+Both conventions are live here and both work:
+
+| path | packs | verifier |
+|------+-------+----------|
+| JS provers (=prove_mint.js= etc.) | swapped, caller-side | unpatched |
+| Python/shell (=gen_e2e_world.py=, =setup_g1tie.sh=) | natural order | =--b-only= patched |
+
+Do not "unify" these without regenerating everything that depends on them.
+
+* Other prerequisites that are easy to miss
+
+- *rapidsnark* — needed by both note-binding targets.  =make rapidsnark=
+  unpacks =lib/rapidsnark-macOS-arm64-*.zip=.
+- *circomlib* — =circuits/*.circom= include it from =node_modules=, so
+  =npm install= must have run.  Note this makes the circuits derivative of
+  GPL-3.0 circomlib.
+- =test/RegressionTest.sol= imports from the gitignored =build/snark/regression/=,
+  so a fresh clone cannot =forge build= until that circuit is generated.
+
+* What "green" looks like
+
+=make nix-test= -> *546 passed, 0 failed, 1 skipped (547 total)*.
+
+If the failures mention "membership must verify" the g1tie verifier and its
+dependents are out of step.  If they mention "bad mint proof" the mint
+verifiers are.  Both mean the same thing: something was regenerated and its
+vectors were not.
