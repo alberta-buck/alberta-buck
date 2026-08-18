@@ -407,8 +407,10 @@ def assemble(flavor: str):
         "proofBytes": "0x" + "".join(
             int(x).to_bytes(32, "big").hex() for x in [
                 g1_proof["pi_a"][0], g1_proof["pi_a"][1],
-                g1_proof["pi_b"][0][0], g1_proof["pi_b"][0][1],
-                g1_proof["pi_b"][1][0], g1_proof["pi_b"][1][1],
+                # pi_b EIP-197-ordered (im, re) -- the swap zkesc performs;
+                # the on-chain verifier is stock and expects it pre-swapped.
+                g1_proof["pi_b"][0][1], g1_proof["pi_b"][0][0],
+                g1_proof["pi_b"][1][1], g1_proof["pi_b"][1][0],
                 g1_proof["pi_c"][0], g1_proof["pi_c"][1],
             ]),
         "public": g1_public,
@@ -421,8 +423,8 @@ def assemble(flavor: str):
             "proofBytes": "0x" + "".join(
                 int(x).to_bytes(32, "big").hex() for x in [
                     nb_proof["pi_a"][0], nb_proof["pi_a"][1],
-                    nb_proof["pi_b"][0][0], nb_proof["pi_b"][0][1],
-                    nb_proof["pi_b"][1][0], nb_proof["pi_b"][1][1],
+                    nb_proof["pi_b"][0][1], nb_proof["pi_b"][0][0],
+                    nb_proof["pi_b"][1][1], nb_proof["pi_b"][1][0],
                     nb_proof["pi_c"][0], nb_proof["pi_c"][1],
                 ]),
         }

@@ -106,11 +106,10 @@ async function main() {
     }
 
     const pA = [proof.pi_a[0], proof.pi_a[1]];
-    // snarkjs emits pi_b with (x1, x0, y1, y0) -- the pairing precompile and
-    // the snarkjs Solidity template expect the Fp2 limbs in reversed order.
-    // The generated verifier handles this swap internally; the a/b/c the
-    // verifier expects as calldata match proof.pi_* 1:1 when serialized in
-    // this [[b[0][1], b[0][0]], [b[1][1], b[1][0]]] convention.
+    // proof.json stores each G2 pair as [x_re, x_im]; verifyProof's _pB is
+    // specified in EIP-197 order [x_im, x_re], so the CALLER swaps -- the
+    // same conversion `snarkjs zkey export soliditycalldata` performs.  The
+    // verifier is stock snarkjs and does no swapping of its own.
     const pB = [[proof.pi_b[0][1], proof.pi_b[0][0]],
                 [proof.pi_b[1][1], proof.pi_b[1][0]]];
     const pC = [proof.pi_c[0], proof.pi_c[1]];

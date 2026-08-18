@@ -94,21 +94,10 @@ sed -i.bak 's/public view returns/public returns/g' \
 rm -f "$BUILD_DIR/Groth16Verifier.sol.bak"
 cp "$BUILD_DIR/Groth16Verifier.sol" \
     "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
-# Adapt the STOCK verifier to our calldata convention.  snarkjs is EIP-197
-# correct as shipped; its exporter swaps pi_b caller-side and its verifier
-# expects that.  Our Python/shell fixtures pack pi_b straight out of
-# proof.json instead, so we move the swap into the verifier.  See
-# scripts/snark/fix_verifier_g2.py and doc/snark-regeneration.org.
-# MUST run after cp: sed -i uses atomic rename, so python has to open the
-# file only once sed has completed.
-# --b-only is REQUIRED for snarkjs 0.7.5+: it already emits the VK constants
-# in EIP-197 order, so the default mode swaps them a SECOND time and every
-# proof then fails against the pairing precompile.  Only the proof-B swap is
-# still wanted.  Omitting this flag silently produced a verifier that
-# rejected all 11 membership proofs in the suite.
-python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" --b-only \
-    "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
-echo "  -> src/IdentityMembershipG1TieVerifier.sol (EIP-197 G2 fix applied)"
+# The verifier is committed STOCK -- byte-for-byte as snarkjs exports it
+# (after the contract rename above).  The EIP-197 pi_b swap happens at vector
+# PACKING below instead, matching snarkjs's own `zkey export soliditycalldata`.
+echo "  -> src/IdentityMembershipG1TieVerifier.sol (stock snarkjs export)"
 
 # ---- Step 6: Generate Forge test vectors ----
 echo "--- Generating Forge test vectors ---"
@@ -122,8 +111,8 @@ with open('$BUILD_DIR/public.json') as f: pub = json.load(f)
 vectors = {
     'a': [str(proof['pi_a'][0]), str(proof['pi_a'][1])],
     'b': [
-        str(proof['pi_b'][0][0]), str(proof['pi_b'][0][1]),
-        str(proof['pi_b'][1][0]), str(proof['pi_b'][1][1]),
+        str(proof['pi_b'][0][1]), str(proof['pi_b'][0][0]),
+        str(proof['pi_b'][1][1]), str(proof['pi_b'][1][0]),
     ],
     'c': [str(proof['pi_c'][0]), str(proof['pi_c'][1])],
     'pub': [str(p) for p in pub],

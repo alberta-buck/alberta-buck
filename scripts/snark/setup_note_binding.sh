@@ -162,15 +162,10 @@ sed -i.bak 's/public view returns/public returns/g' \
 rm -f "$BUILD_DIR/Groth16Verifier.sol.bak"
 cp "$BUILD_DIR/Groth16Verifier.sol" \
     "$REPO_ROOT/src/NoteBindingGroth16Verifier.sol"
-# --b-only: snarkjs 0.7.5 already emits the VK G2 constants in EIP-197 order
-# (swapping them corrupts the verifier -- the pairing precompile rejects the
-# malformed points).  Only the proof-B swap is wanted, so the repo convention
-# of storing/packing pi_b in proof.json natural order keeps working.
-# Adapt the stock verifier to our natural-order pi_b packing (not a
-# snarkjs fix -- see fix_verifier_g2.py).
-python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" --b-only \
-    "$REPO_ROOT/src/NoteBindingGroth16Verifier.sol"
-echo "  -> src/NoteBindingGroth16Verifier.sol (EIP-197 proof-B swap applied)"
+# The verifier is committed STOCK -- byte-for-byte as snarkjs exports it
+# (after the contract rename).  The EIP-197 pi_b swap happens at vector
+# packing below instead, matching `snarkjs zkey export soliditycalldata`.
+echo "  -> src/NoteBindingGroth16Verifier.sol (stock snarkjs export)"
 
 # ---- Step 9: Generate Forge test vectors ----
 VECTORS_DIR="$REPO_ROOT/test/vectors/note_binding"
@@ -182,8 +177,8 @@ with open('$BUILD_DIR/public.json') as f: pub = json.load(f)
 vectors = {
     'a': [str(proof['pi_a'][0]), str(proof['pi_a'][1])],
     'b': [
-        str(proof['pi_b'][0][0]), str(proof['pi_b'][0][1]),
-        str(proof['pi_b'][1][0]), str(proof['pi_b'][1][1]),
+        str(proof['pi_b'][0][1]), str(proof['pi_b'][0][0]),
+        str(proof['pi_b'][1][1]), str(proof['pi_b'][1][0]),
     ],
     'c': [str(proof['pi_c'][0]), str(proof['pi_c'][1])],
     'pub': [str(p) for p in pub],
