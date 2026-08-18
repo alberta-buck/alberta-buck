@@ -79,7 +79,13 @@ integrator needs it -- never across the kernels wholesale.
 
 ## File headers
 
-Source files carry an SPDX identifier matching the table above:
+Most source files do **not** carry an SPDX header -- 657 of 797 tracked files
+have none.  Licensing is therefore declared centrally in `REUSE.toml` (see
+"How licensing is declared" above), which is the REUSE Specification's
+supported alternative and is what compliance scanners read.
+
+New files should carry a header anyway, matching the table above, because it
+is the only thing that travels with a file copied *out* of this repository:
 
     // SPDX-License-Identifier: CAL-1.0          (core/)
     // SPDX-License-Identifier: GPL-3.0-or-later (src/*.sol, alberta_buck/)
