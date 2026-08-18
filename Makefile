@@ -376,7 +376,29 @@ snark-fixtures:
 # Full from-scratch regen (phase 1 + phase 2): removes the dev ptau and every
 # circuit build dir so setup.sh rebuilds the Powers of Tau and all verifiers.
 # Hours, dev entropy only.
+# DESTRUCTIVE.  This is the ONLY target that deletes build/snark/ptau, and that
+# directory is the expensive one: the powers of tau run to gigabytes
+# (pot20_final.ptau alone is 1.1G) and take hours to regenerate.  Every other
+# snark target leaves it alone -- ensure_ptau() reuses an existing
+# potN_final.ptau and prints "[ptau] reusing".  If you only want fresh zkeys
+# and verifiers, `make snark-setup` is the target you want: it rebuilds the
+# circuits against the ptau you already have.
+#
+# Guarded because losing this directory once already cost a recovery from an
+# old checkout.  Set CONFIRM=yes for non-interactive use (CI, make -j).
 snark-ptau:
+	@if [ "$(CONFIRM)" != "yes" ]; then \
+	  echo; echo "  *** snark-ptau DELETES the powers of tau ***"; echo; \
+	  if [ -d build/snark/ptau ]; then \
+	    echo "  about to remove $$(du -sh build/snark/ptau 2>/dev/null | cut -f1) from build/snark/ptau:"; \
+	    ls build/snark/ptau/*_final.ptau 2>/dev/null | sed 's|^|    |'; \
+	  else \
+	    echo "  (no build/snark/ptau present -- nothing to lose)"; \
+	  fi; \
+	  echo; echo "  Regenerating takes hours.  For zkeys/verifiers only: make snark-setup"; echo; \
+	  printf "  Type 'delete-ptau' to proceed: "; read ans; \
+	  if [ "$$ans" != "delete-ptau" ]; then echo "  aborted -- nothing removed"; exit 1; fi; \
+	fi
 	rm -rf build/snark/ptau build/snark/mint build/snark/spend $(SNARK_DIRS)
 	$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
 
