@@ -1113,6 +1113,35 @@ sim-plot-rebalancing-eq:	$(REBALANCING_EQ_VECTOR)
 
 sim-rebalancing-eq:	sim-run-rebalancing-eq sim-plot-rebalancing-eq
 
+# Variants by extension name (knobs / trend / disruption axes -- see the
+# naming strategy in experiments/rebalancing-eq-5yr.toml):
+#
+#   make sim-rebalancing-eq-<ext>    # experiments/rebalancing-eq-5yr-<ext>.toml
+#                                    # -> test/vectors/rebalancing-sim-eq-<ext>.json
+#                                    # -> images/rebalancing-sim-eq-<ext>.png
+#   make sim-compare-rebalancing-eq  # eqmetrics over all arms + the banked
+#                                    # equilibrium baseline
+
+sim-run-rebalancing-eq-%:	sim-build
+	python -m $(SIM_PKG) \
+		--experiment alberta_buck/sim/experiments/rebalancing-eq-5yr-$*.toml \
+		$(if $(REBALANCING_EQ_DAYS),--days $(REBALANCING_EQ_DAYS)) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--out test/vectors/rebalancing-sim-eq-$*.json
+
+sim-plot-rebalancing-eq-%:
+	REB_VECTOR=test/vectors/rebalancing-sim-eq-$*.json \
+		REB_OUT=images/rebalancing-sim-eq-$*.png \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing-eq-%:	sim-run-rebalancing-eq-% sim-plot-rebalancing-eq-%
+
+.PHONY: sim-compare-rebalancing-eq
+sim-compare-rebalancing-eq:
+	python -m alberta_buck.sim.eqmetrics \
+		test/vectors/eq-baseline-5yr-prorata.json \
+		test/vectors/rebalancing-sim-eq*.json
+
 # The realistic observation world: honest BuckCreditDebtorAgents (real
 # premium credit + real funding gate) as the issuance channel, with
 # savers/investors/arbs/whale/PID; growth regimes via arrive_mode knobs
