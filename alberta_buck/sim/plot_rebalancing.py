@@ -489,7 +489,8 @@ def test_rebalancing_sim_plot():
     plt.close(fig)
 
     # Convergence summary.
-    print(f"\nWrote {_rel(OUT)}  ({len(days)} days)")
+    print(f"\nWrote {_rel(OUT)}  "
+          f"({len(days)} frames, day {days[0]}..{days[-1]})")
     for t in range(nt):
         ref = col("refUsd", t)[-1] / E6
         su = col("spotUsdc", t)[-1] / E6

@@ -41,9 +41,14 @@
 name = "rebalancing-eq-5yr"
 notes = "eq-baseline-5yr structure + rebalance-director keeper"
 
+# Full rebalancing cadence (day_step 1, ticks 4), NOT the equilibrium
+# campaign's coarse macro mode (day_step 10, ticks 1): the whale snaps
+# daily, the director is poked 4x/day like the synthetic rebalancing
+# scenarios, and the PID integrates on 6h samples instead of 10d ones.
+# ~40x the iterations of the campaign cadence -- hours, not minutes.
 [scenario]
 family = "rebalancing-eq"
 years = 5.0
-ticks_per_day = 1
-day_step = 10
+ticks_per_day = 4
+day_step = 1
 seed = 0xA1BC

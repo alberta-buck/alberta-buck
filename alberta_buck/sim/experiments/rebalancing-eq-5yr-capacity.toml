@@ -13,11 +13,12 @@
 name = "rebalancing-eq-5yr-capacity"
 notes = "rebalancing-eq + savers2x demand + borrower capacity headroom"
 
+# Full rebalancing cadence, matching the base arm (see its TOML).
 [scenario]
 family = "rebalancing-eq"
 years = 5.0
-ticks_per_day = 1
-day_step = 10
+ticks_per_day = 4
+day_step = 1
 seed = 0xA1BC
 
 [agents.FatCreditBorrowerAgent]
