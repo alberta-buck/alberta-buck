@@ -1142,6 +1142,29 @@ sim-compare-rebalancing-eq:
 		test/vectors/eq-baseline-5yr-prorata.json \
 		test/vectors/rebalancing-sim-eq*.json
 
+# THE MATRIX: re-run every rebalancing-eq-5yr*.toml arm against the
+# CURRENT contracts (sim-build recompiles first, so contract changes --
+# BuckBasket, Buck, the controller -- propagate to every arm), then print
+# the eqmetrics table.  Each arm is hours at full cadence; MATRIX_JOBS
+# arms run concurrently (pyrevm is in-process, one core each).
+#
+#   make nix-venv-sim-rebalancing-eq-matrix
+#   make nix-venv-sim-rebalancing-eq-matrix MATRIX_JOBS=8
+
+MATRIX_JOBS	?= 4
+
+.PHONY: sim-rebalancing-eq-matrix
+sim-rebalancing-eq-matrix:	sim-build
+	ls alberta_buck/sim/experiments/rebalancing-eq-5yr*.toml \
+	| xargs -P $(MATRIX_JOBS) -I{} sh -c '\
+		ext=$$(basename {} .toml); ext=$${ext#rebalancing-eq-5yr}; \
+		echo "=== arm $${ext:-base}: {}"; \
+		python -m $(SIM_PKG) --experiment {} \
+			--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+			--out test/vectors/rebalancing-sim-eq$$ext.json \
+			> test/vectors/rebalancing-sim-eq$$ext.log 2>&1'
+	$(MAKE) sim-compare-rebalancing-eq
+
 # The realistic observation world: honest BuckCreditDebtorAgents (real
 # premium credit + real funding gate) as the issuance channel, with
 # savers/investors/arbs/whale/PID; growth regimes via arrive_mode knobs

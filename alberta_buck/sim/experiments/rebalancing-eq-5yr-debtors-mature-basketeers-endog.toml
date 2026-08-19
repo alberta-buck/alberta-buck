@@ -1,0 +1,66 @@
+# rebalancing-eq variant "debtors-mature-basketeers-endog": the ENDOGENOUS
+# version of "originate" -- identical population and knobs, but both
+# origination flows respond to the system instead of following a fixed
+# calendar:
+#
+#   * debtors' arrival clocks run at hazard = (K/k_ref) x
+#     (1 + arr_gain*(1-bvib)), capped at arr_max: cheap, available BUCK
+#     credit (K generous, BUCK at/above par) pulls new borrowers in;
+#     a crushed K or rich bv stalls them.  The on-chain brakes (ff
+#     issue-rate toll, pre-buy reserve, K-scaled limits) remain the
+#     anti-flood backstop -- the hazard only decides WHEN people show up,
+#     the protocol still prices what they may do;
+#   * depositors' clocks run at hazard = dev_ref/max(dev_ref, ewma|bvib-1|):
+#     savers bring USDC at full rate while the basket demonstrably holds
+#     its peg (trailing 90d EWMA within 2%), and stay away in proportion
+#     as it wobbles.
+#
+# hazard == 1 at (K==k_ref, bv==1, stable peg) reproduces the open-loop
+# "originate" stagger exactly, so THIS ARM vs "originate" isolates what
+# the price-responsiveness itself contributes: does the economy find the
+# same matched growth without anyone choosing the rate?
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-debtors-mature-basketeers-endog"
+notes = "originate with price-responsive (endogenous) arrival hazards"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+BuckCreditDebtorAgent = 30
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+ArrivingDMAgent = 60
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+mortgage_k = [600, 1400]
+income_k = [180, 320]
+face_k = [600, 1200]
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]    # tau spread: neutral hazard == originate arm
+arr_gain = 5.0
+arr_max = 3.0
+arr_k_ref = 0.75
+
+[agents.ArrivingDMAgent]
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]    # tau spread: stable peg == originate arm
+ticket_k = [300, 700]
+enter_ptick = 2e-3
+exit_ptick = 2e-3
+dep_dev_ref = 0.02
+dep_halflife = 90.0
+
+[agents.FatCreditBorrowerAgent]
+mid_frac = -0.5             # adoption S-curve saturated before the window

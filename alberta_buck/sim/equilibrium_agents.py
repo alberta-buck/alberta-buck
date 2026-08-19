@@ -482,23 +482,69 @@ class ArrivingDMAgent(DirectMintAgent):
     over the horizon), ticket_k (deposit size, $k, default [300,700]),
     enter_ptick / exit_ptick (per-tick Bernoulli probabilities, defaults
     2e-3 / 2e-3: entered fraction ~50%, mean hold ~125 days at 4
-    ticks/day)."""
+    ticks/day); arrive_mode = "endog" switches the fixed stagger to the
+    demonstrated-stability hazard clock (dep_dev_ref, dep_halflife --
+    see setup())."""
 
     def setup(self, d, scenario, rng) -> None:
         super().setup(d, scenario, rng)
         cls = type(self).__name__
         r = _agent_rng(scenario.seed, cls, self.idx)
         horizon = max(1, int(getattr(scenario, "days", 1)))
-        self.arrive_day = int(
-            _draw(scenario, cls, "arrive_frac", r, (0.0, 1.0)) * horizon)
+        # Draw order matters for reproducibility: arrive_frac first, then
+        # ticket_k, matching the original stagger-only implementation.
+        tau_frac = _draw(scenario, cls, "arrive_frac", r, (0.0, 1.0))
         self.SEED_USDC = int(_draw(scenario, cls, "ticket_k", r,
                                    (300, 700)) * 1_000 * 10 ** 6)
         self.ENTER_PROB_PER_TICK = float(
             _spec(scenario, cls, "enter_ptick", 2e-3))
         self.EXIT_PROB_PER_TICK = float(
             _spec(scenario, cls, "exit_ptick", 2e-3))
+        # arrive_mode "endog": arrivals track DEMONSTRATED basket quality --
+        # a pending depositor's clock runs at full (open-loop) speed while
+        # the trailing EWMA peg deviation |bvib-1| stays within dep_dev_ref,
+        # and slows in proportion as the basket wobbles (hazard =
+        # dev_ref / max(dev_ref, ewma)).  tau reuses the arrive_frac spread,
+        # so a perfectly stable basket reproduces the open-loop stagger and
+        # an unstable one starves itself of new deposits.
+        self._endog = (_spec(scenario, cls, "arrive_mode", "stagger")
+                       == "endog")
+        if self._endog:
+            self._endog_tau = tau_frac * horizon
+            self._endog_clock = 0.0
+            self._endog_last = None
+            self._ewma_dev = 0.0
+            self._dev_ref = float(_spec(scenario, cls, "dep_dev_ref", 0.02))
+            self._halflife = float(_spec(scenario, cls, "dep_halflife", 90.0))
+            self.arrive_day = None      # set on endogenous arrival
+        else:
+            self.arrive_day = int(tau_frac * horizon)
 
     def act(self, d, scenario, day, tick, ctr) -> None:
+        if self._endog and self.arrive_day is None:
+            if tick == 0:
+                if self._endog_last is None:
+                    self._endog_last = day
+                dd = max(0, day - self._endog_last)
+                self._endog_last = day
+                if dd:
+                    try:
+                        bvib = d.basket.functions.basketValueInBuck() \
+                            .call() / 1e18
+                    except Exception:
+                        bvib = 1.0
+                    alpha = 1.0 - 0.5 ** (dd / max(1e-9, self._halflife))
+                    self._ewma_dev += alpha * (abs(bvib - 1.0)
+                                               - self._ewma_dev)
+                    hazard = self._dev_ref / max(self._dev_ref,
+                                                 self._ewma_dev)
+                    self._endog_clock += dd * hazard
+                if self._endog_clock >= self._endog_tau:
+                    self.arrive_day = day
+                    ctr["endogDepositorArrivals"] = (
+                        ctr.get("endogDepositorArrivals", 0) + 1)
+            if self.arrive_day is None:
+                return
         if day < self.arrive_day:
             return
         super().act(d, scenario, day, tick, ctr)
@@ -1226,9 +1272,25 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r,
                                        (25, 150)))
         horizon = max(1, int(getattr(scenario, "days", 1)))
-        # Arrival: growth-regime schedule when arrive_mode is set; else the
-        # legacy uniform stagger over arrive_frac of the horizon.
-        if _spec(scenario, cls, "arrive_mode", "immediate") != "immediate":
+        # Arrival: growth-regime schedule when arrive_mode is set; "endog"
+        # replaces the fixed stagger with a HAZARD-driven clock (advanced in
+        # act(): rate ~ credit attractiveness); else the legacy uniform
+        # stagger over arrive_frac of the horizon.
+        mode = _spec(scenario, cls, "arrive_mode", "immediate")
+        self._endog = (mode == "endog")
+        if self._endog:
+            # tau = the day this debtor WOULD arrive at neutral (hazard 1.0)
+            # attractiveness -- the same arrive_frac spread as the open-loop
+            # stagger, so hazard==1 reproduces the "originate" arm exactly.
+            self._endog_tau = _draw(scenario, cls, "arrive_frac", r,
+                                    (0.0, 1.0)) * horizon
+            self._endog_clock = 0.0
+            self._endog_last = None
+            self._arr_gain = float(_spec(scenario, cls, "arr_gain", 5.0))
+            self._arr_max = float(_spec(scenario, cls, "arr_max", 3.0))
+            self._arr_k_ref = float(_spec(scenario, cls, "arr_k_ref", 0.75))
+            self.arrive_day = None      # set on endogenous arrival
+        elif mode != "immediate":
             self.arrive_day = _growth_arrival_day(
                 self._class_seq, self._class_count, scenario, cls, r)
         else:
@@ -1372,6 +1434,33 @@ class BuckCreditDebtorAgent(_ProxyAgent):
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or self.proxy is None:
             return
+        if getattr(self, "_endog", False) and self.arrive_day is None:
+            # Endogenous origination: a pending debtor's clock advances at a
+            # rate ~ how competitive BUCK issuance looks against their
+            # traditional mortgage RIGHT NOW -- generous K-scaled capacity
+            # (k/k_ref) times sell-side price advantage (BUCK at/above par:
+            # 1 + arr_gain*(1-bvib)).  hazard==1 at (K==k_ref, bv==1)
+            # reproduces the open-loop "originate" stagger exactly; a railed
+            # controller begging for supply pulls arrivals in, a crushed K /
+            # rich bv stalls them.  Capped at arr_max: adoption has real-
+            # world frictions no price signal removes.
+            if self._endog_last is None:
+                self._endog_last = day
+            dd = max(0, day - self._endog_last)
+            self._endog_last = day
+            if dd:
+                try:
+                    k = d.kctrl.functions.buckK().call() / 1e18
+                    bvib = d.basket.functions.basketValueInBuck().call() / 1e18
+                except Exception:
+                    k, bvib = self._arr_k_ref, 1.0
+                hazard = max(0.0, k / max(1e-9, self._arr_k_ref)) \
+                    * max(0.0, 1.0 + self._arr_gain * (1.0 - bvib))
+                self._endog_clock += dd * min(self._arr_max, hazard)
+            if self._endog_clock < self._endog_tau:
+                return
+            self.arrive_day = day
+            ctr["endogDebtorArrivals"] = ctr.get("endogDebtorArrivals", 0) + 1
         if not _growth_active(self, day, ctr):
             return
         if not getattr(self, "_started", False):

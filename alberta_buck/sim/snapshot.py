@@ -464,6 +464,11 @@ class Snapshotter:
             "bcd_saved": ctr.get("bcdSaved", 0),
             "growth_arrivals": ctr.get("growthArrivals", 0),
             "growth_departures": ctr.get("growthDepartures", 0),
+            # Endogenous-origination arrivals (arrive_mode "endog"): how many
+            # debtors / basket depositors the price-responsive hazard clocks
+            # have brought online so far.
+            "endog_debtor_arrivals": ctr.get("endogDebtorArrivals", 0),
+            "endog_depositor_arrivals": ctr.get("endogDepositorArrivals", 0),
             "neighbors_retired": ctr.get("neighborsRetired", 0),
             "iv_events": ctr.get("ivEvents", 0),           # cum interventions
             "supply": int(d.buck.functions.totalSupply().call()),
