@@ -1,0 +1,39 @@
+# rebalancing-eq variant "debtors": the rational supply side.  The base
+# arm's K climbs monotonically (integral of a persistent ~0.3% lean)
+# because nothing issues BUCK for ECONOMIC reasons -- the FatCredit
+# borrowers follow a scheduled adoption S-curve, capped util, fixed
+# population.  This arm adds 24 honest BuckCreditDebtorAgents (audited
+# octl mortgage debtors: real premium-bearing credit, the real on-chain
+# funding gate, obligations as chain truth) whose theta law deploys
+# whenever the BUCK discount is small vs mortgage interest saved -- in a
+# lean regime (bv < 1) the discount is zero, so they monetize collateral
+# and sell BUCK into the premium until parity.  The supply-side mirror of
+# the savers' value-based demand, plus an honest amortization-driven
+# retirement channel.  Knobs from experiments/realistic.toml (the audited
+# debtor world); staggered arrival over the first year as there.
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-debtors"
+notes = "rebalancing-eq + 24 honest mortgage debtors (theta-law issuance)"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+BuckCreditDebtorAgent = 24
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]          # aggressiveness: tolerated discount, yrs of apr
+apr = [0.045, 0.065]
+mortgage_k = [600, 1400]
+income_k = [180, 320]
+face_k = [600, 1200]
+premium_bp = [50, 150]      # REAL insurance premium -> real funding gate
+save_rate = [0.25, 0.75]
+arrive_frac = [0.0, 0.5]    # staggered arrival over the first year

@@ -1,0 +1,44 @@
+# rebalancing-eq variant "debtors-mature": the debtors cohort in an
+# ADOPTED economy.  Composes "debtors" (24 theta-law mortgage debtors, see
+# rebalancing-eq-5yr-debtors.toml) with "mature": the window opens on a
+# credit economy that has already adopted --
+#
+#   * debtors arrive at day 0 (arrive_frac 0) instead of staggering in
+#     over the first year;
+#   * the FatCredit borrowers' adoption S-curve is already saturated
+#     (mid_frac -0.5 puts the logistic midpoint half a horizon BEFORE the
+#     window, so cap_frac ~= 1 from day 0), removing the scheduled
+#     capacity withholding the controller otherwise spends the mid-run
+#     compensating for.
+#
+# Against "debtors" this separates "missing rational actors" from
+# "actors present but still ramping".
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-debtors-mature"
+notes = "rebalancing-eq + 24 debtors, adoption saturated from day 0"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+BuckCreditDebtorAgent = 24
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+mortgage_k = [600, 1400]
+income_k = [180, 320]
+face_k = [600, 1200]
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+arrive_frac = 0.0           # mature: everyone is already here
+
+[agents.FatCreditBorrowerAgent]
+mid_frac = -0.5             # adoption S-curve saturated before the window
