@@ -118,6 +118,8 @@ def _agent_rng(seed: int, class_name: str, idx: int) -> random.Random:
 # success recruits.  Per-class knobs (all [agents.<Class>] overridable):
 #
 #   arrive_mode  = "immediate" (default) | "steady" | "scurve" | "decline"
+#                  | "endow" (SaverAgent: immediate arrival WITH pre-window
+#                  BUCK inventory of endow_m, self-issued at setup)
 #   arrive_n0    = fraction of the ceiling active at t0        (0.25)
 #   arrive_rate  = steady/decline annual rate                  (0.25 = 25%/yr)
 #   arrive_peak  = scurve peak RELATIVE growth, per year       (2.0 = 200%/yr)
@@ -951,7 +953,11 @@ class SaverAgent(_ProxyAgent):
         cls = type(self).__name__
         self._class_seq = slot                      # regime counter == ordinal
         self._class_count = getattr(scenario, "agents", {}).get(cls, 1)
-        if _spec(scenario, cls, "arrive_mode", "immediate") != "immediate":
+        # "endow" arrives immediately like the default; it differs only in
+        # starting with pre-window BUCK inventory (below, after the proxy
+        # binds).
+        arrive_mode = _spec(scenario, cls, "arrive_mode", "immediate")
+        if arrive_mode not in ("immediate", "endow"):
             self.arrive_day = _growth_arrival_day(
                 self._class_seq, self._class_count, scenario, cls, r)
             self.depart_day = _growth_departure_day(
@@ -979,6 +985,39 @@ class SaverAgent(_ProxyAgent):
         self._bind_proxy(d)
         # Seed the proxy with its USDC budget to deploy over the run.
         d.chain.send(d.usdc.functions.mint(self.proxy.address, self.budget))
+        # arrive_mode "endow": model the saver cohort that already existed
+        # when the window opens.  Each saver arrives HOLDING endow_m BUCK
+        # (positive signed balance -- totalSupply rises by the endowment),
+        # transferred from SimLP against a fresh zero-premium credit, the
+        # same par-value fiction that seeds the pools: SimLP carries the
+        # drawn obligation, the saver owns the BUCK outright.  t0 is pure
+        # balance-sheet expansion with ZERO market impact, and the sell
+        # leg has inventory from the first premium instead of spending
+        # the early run acquiring it through thin pools (the cold-start
+        # transient this mode exists to remove).  NB: minting on the
+        # saver's OWN credit would endow K-scaled *headroom* instead of
+        # held BUCK (balanceOf counts unused creditLimit, which melts as
+        # K falls) -- the transfer from a third party is what makes the
+        # endowment real inventory.  The USDC budget is untouched.
+        if arrive_mode == "endow":
+            endow = int(_draw(scenario, cls, "endow_m", r,
+                              (1, 3)) * 1_000_000 * 10 ** 6)
+            if endow >= 10 ** 6:
+                # Deploy-time SimLP seed formula: mint activates coverage,
+                # freeing mint*K spendable, so size mint (and face) off the
+                # live resting K with a 20% margin.
+                k0 = d.kctrl.functions.buckK().call()
+                mint_amt = (endow * 10 ** 18 // max(1, k0)) * 12 // 10
+                face = max(2 * endow, mint_amt * 12 // 10)
+                now_ts = d.w3.eth.get_block("latest")["timestamp"]
+                d.chain.send(d.credit.functions.createCredit(
+                    d.simlp.address, 0, face, 0, 0, 0, now_ts, 0))
+                d.chain.send(d.simlp.functions.exec(
+                    d.buck.address, d.buck.encode_abi(
+                        "mint(uint256)", args=[mint_amt])))
+                d.chain.send(d.simlp.functions.exec(
+                    d.buck.address, d.buck.encode_abi(
+                        "transfer", args=[self.proxy.address, endow])))
 
     def _apply_regime(self, day) -> str:
         """Primary knob = base_rate (savings cadence).  Redraw from the SAME
