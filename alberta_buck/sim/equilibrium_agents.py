@@ -55,6 +55,7 @@ import random
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.chain import load_artifact
+from alberta_buck.sim.direct_mint import DirectMintAgent
 from alberta_buck.sim.experiment import draw as _draw, spec as _spec, sample as _sample
 from alberta_buck.sim.router import MIN_SQRT_RATIO, MAX_SQRT_RATIO
 
@@ -461,6 +462,46 @@ def _impact_cap(reserve_in: int, max_impact_bp: int) -> int:
         return 0
     imp = min(0.99, max_impact_bp / 10_000.0)
     return int(reserve_in * (1.0 / math.sqrt(1.0 - imp) - 1.0))
+
+
+@_register
+class ArrivingDMAgent(DirectMintAgent):
+    """Basket-side ORIGINATION flow: a DirectMintAgent with a staggered
+    arrival day and spec-driven ticket size / churn.
+
+    The stationary DirectMintAgent population models an ESTABLISHED
+    depositor base (fixed count, Bernoulli churn around a steady entered
+    fraction).  This subclass models depositors COMING ONLINE as the
+    basket proves itself: each agent activates at its arrive_frac of the
+    horizon and then behaves like its parent, so the basket's 100%-LTV
+    (K-immune) tranche GROWS over the run -- the demand-side twin of the
+    debtors' arrive_frac origination stagger.  Match the two rates so
+    K-controlled credit supply and basket-minted supply grow together.
+
+    Knobs ([agents.ArrivingDMAgent]): arrive_frac (default [0,1], uniform
+    over the horizon), ticket_k (deposit size, $k, default [300,700]),
+    enter_ptick / exit_ptick (per-tick Bernoulli probabilities, defaults
+    2e-3 / 2e-3: entered fraction ~50%, mean hold ~125 days at 4
+    ticks/day)."""
+
+    def setup(self, d, scenario, rng) -> None:
+        super().setup(d, scenario, rng)
+        cls = type(self).__name__
+        r = _agent_rng(scenario.seed, cls, self.idx)
+        horizon = max(1, int(getattr(scenario, "days", 1)))
+        self.arrive_day = int(
+            _draw(scenario, cls, "arrive_frac", r, (0.0, 1.0)) * horizon)
+        self.SEED_USDC = int(_draw(scenario, cls, "ticket_k", r,
+                                   (300, 700)) * 1_000 * 10 ** 6)
+        self.ENTER_PROB_PER_TICK = float(
+            _spec(scenario, cls, "enter_ptick", 2e-3))
+        self.EXIT_PROB_PER_TICK = float(
+            _spec(scenario, cls, "exit_ptick", 2e-3))
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if day < self.arrive_day:
+            return
+        super().act(d, scenario, day, tick, ctr)
 
 
 @_register

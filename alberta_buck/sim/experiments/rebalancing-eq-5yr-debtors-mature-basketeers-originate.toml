@@ -1,0 +1,67 @@
+# rebalancing-eq variant "debtors-mature-basketeers-originate": BOTH sides
+# of the economy grow continuously, at roughly matched dollar rates.
+#
+# The debtors-mature partial run exposed the ceiling: a fixed cohort's
+# finite face (~24 x $900k) is fully deployed by mid-run, supply growth
+# stops, and K climbs to the rail.  Real credit economies ORIGINATE
+# continuously -- new borrowers arrive at a rate set by how competitive
+# BUCK issuance is against their traditional mortgage.  And if the basket
+# proves stable with a positive real return, savers keep bringing USDC.
+# The two flows must roughly match, so K-controlled credit supply grows
+# alongside the basket's 100%-LTV (K-immune) tranche.
+#
+# This arm is the OPEN-LOOP matched-rate version -- both sides on a
+# shared ~$3M/yr growth dial, tuned by construction:
+#
+#   * credit side: 30 debtors arriving uniformly over the horizon
+#     (arrive_frac [0,1]); ~$900k face each, ~60% deployed at interior K
+#     => ~$3.2M/yr of K-scaled issuance capacity coming online;
+#   * basket side: 60 ArrivingDMAgents (arrive_frac [0,1]), ~$500k
+#     tickets, ~50% entered steady-state => ~$3.0M/yr of new 100%-LTV
+#     deposits, on top of the stationary 120/30 depositor base.
+#
+# The on-chain brakes already price the "drown the system" failure mode
+# (debtors issuing and converting immediately): the funding-factor's
+# super-linear issue-rate toll, the pre-buy reserve, and K-scaling of
+# every creditLimit all bind harder the faster issuance runs.  The
+# ENDOGENOUS version -- arrival hazards wired to those observables
+# instead of a fixed stagger -- is the designed next step; this arm
+# establishes the matched-rate baseline it will be judged against.
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-debtors-mature-basketeers-originate"
+notes = "continuous debtor + basket-depositor origination, ~matched $/yr"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+BuckCreditDebtorAgent = 30
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+ArrivingDMAgent = 60
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+mortgage_k = [600, 1400]
+income_k = [180, 320]
+face_k = [600, 1200]
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+arrive_frac = [0.0, 1.0]    # continuous origination over the whole horizon
+
+[agents.ArrivingDMAgent]
+arrive_frac = [0.0, 1.0]    # depositors come online as the basket proves out
+ticket_k = [300, 700]
+enter_ptick = 2e-3
+exit_ptick = 2e-3
+
+[agents.FatCreditBorrowerAgent]
+mid_frac = -0.5             # adoption S-curve saturated before the window
