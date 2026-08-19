@@ -38,3 +38,9 @@ premium_bp = [50, 150]      # REAL insurance premium -> real funding gate
 save_rate = [0.25, 0.75]
 refi_mode = "atomic"      # ex-ante whole-conversion evaluation (see agent)
 arrive_frac = [0.0, 0.5]    # staggered arrival over the first year
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

@@ -470,10 +470,16 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # BUCK into it, and BUCK transfers are identity-gated on the recipient.
     chain.send(reg.functions.bindContract(
         pub, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+    # Sized off target_buck_lp -- the knob DOCUMENTED as the BUCK/USDC seed
+    # (it previously keyed off target_buck, silently coupling the floating
+    # pool's depth to the TOKEN/BUCK pools').  A national-scale currency
+    # pair is deep; a shallow floating pool is an artificial exit-route
+    # bottleneck (in reality best-cost routing would also spread exits over
+    # BUCK/TOKEN->TOKEN/USDC legs).
     if usdc.address.lower() == u0.lower():
-        Lub = dp.target_buck * spU // Q96
+        Lub = dp.target_buck_lp * spU // Q96
     else:
-        Lub = dp.target_buck * Q96 // spU
+        Lub = dp.target_buck_lp * Q96 // spU
     lo_ub, hi_ub = full_range_ticks(TICK_SPACING[FEE_BUCK_UB])
     chain.send(simlp.functions.mint(pub, lo_ub, hi_ub, max(1, Lub), u0, u1))
     d.pool_ub = pub

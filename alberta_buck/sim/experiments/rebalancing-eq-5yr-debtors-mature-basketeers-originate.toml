@@ -66,3 +66,9 @@ exit_ptick = 2e-3
 
 [agents.FatCreditBorrowerAgent]
 mid_frac = -0.5             # adoption S-curve saturated before the window
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

@@ -28,3 +28,9 @@ fund_budget_m = [5, 9]
 [agents.SaverAgent]
 prem_gain = [8.0, 15.0]
 budget_m = [40, 80]
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

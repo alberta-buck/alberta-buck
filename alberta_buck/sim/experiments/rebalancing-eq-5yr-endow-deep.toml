@@ -27,7 +27,7 @@ seed = 0xA1BC
 
 [deploy]
 target_buck_m = 40.0
-target_buck_lp_m = 40.0
+target_buck_lp_m = 50.0    # deep national-scale BUCK/USDC exit route
 
 [agents.SaverAgent]
 arrive_mode = "endow"

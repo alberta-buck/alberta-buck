@@ -26,3 +26,9 @@ seed = 0xA1BC
 [agents.SaverAgent]
 arrive_mode = "endow"
 endow_m = [1, 3]
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0
