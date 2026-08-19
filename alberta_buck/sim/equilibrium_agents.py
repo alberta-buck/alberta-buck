@@ -183,6 +183,22 @@ def _growth_departure_day(seq: int, count: int, scenario, cls: str,
     return None
 
 
+def _dt_days(scenario) -> float:
+    """Calendar days one activation represents: day_step / ticks_per_day.
+
+    Rate knobs (saver base_rate, borrower retire_rate / release_rate, the
+    ff issue-rate signal) are PER-DAY; every act scales them by this, so
+    daily flow is cadence-invariant -- the same at the equilibrium
+    campaign's coarse macro mode (10 d/act) and the rebalancing cadence
+    (0.25 d/act).  Level-seeking legs (issue-to-target, escrow top-up) need
+    no scaling: acting more often only tracks the target more tightly.
+    NB: this redefines the knobs -- the banked campaign vectors were run
+    with per-ACT rates at 10 d/act (i.e. one-tenth the per-day flow the
+    same numbers now mean); their tables stand as history."""
+    return (max(1, getattr(scenario, "day_step", 1))
+            / max(1, getattr(scenario, "ticks_per_day", 1)))
+
+
 def _growth_active(agent, day: int, ctr) -> bool:
     """Arrival gate with the neighbor-attraction warped clock."""
     if getattr(agent, "_growth_arrived", False):
@@ -682,7 +698,7 @@ class FatCreditBorrowerAgent(_ProxyAgent):
                 self._tranches[0][0] = o - take
         return released
 
-    def _release_pending(self, d, bvib: float, ctr) -> None:
+    def _release_pending(self, d, bvib: float, ctr, dt_days: float = 1.0) -> None:
         """Counter-cyclically unwind the pending-release reserve: sell a
         chunk of escrow BUCK into a TOKEN/BUCK pool -- which pushes
         basketValue UP -- only while bvib <= 1 + release_eps, i.e. exactly
@@ -696,7 +712,8 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         bal = self._reserve_balance(d)
         avail = max(0, bal - self.reserve_req)   # requirement keeps first claim
         amt = min(self.pending_release, avail,
-                  int(max(10 ** 6, self.pending_release * self.release_rate)))
+                  int(max(10 ** 6, self.pending_release
+                          * min(1.0, self.release_rate * dt_days))))
         if amt < 10 ** 6:
             return
         i = self._rng.randrange(len(d.tokens))
@@ -758,7 +775,11 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         # demand signal.  totalSupply == sum_a max(0, signedRaw(a)), so it
         # rises exactly as BUCK is sold into circulation.
         prev = self._supply_prev if self._supply_prev else supply_now
-        issue_rate = max(0.0, (supply_now - prev) / max(1, prev))
+        dtd = _dt_days(scenario)
+        # Per-DAY issuance rate: the raw since-last-step delta divided by
+        # the days one step represents, so ff's super-linear term reads the
+        # same signal at any cadence.
+        issue_rate = max(0.0, (supply_now - prev) / max(1, prev)) / dtd
         self._supply_prev = supply_now
 
         # One-off shock bookkeeping (observability).
@@ -775,7 +796,7 @@ class FatCreditBorrowerAgent(_ProxyAgent):
 
         # Counter-cyclical unwind of any pending-release reserve happens
         # every step, whatever branch the draw target selects below.
-        self._release_pending(d, bvib, ctr)
+        self._release_pending(d, bvib, ctr, dtd)
 
         # (A) Adoption ramp (+ optional shock) scales the effective target.
         cap = self._cap_frac(day, getattr(scenario, "days", 1))
@@ -882,8 +903,8 @@ class FatCreditBorrowerAgent(_ProxyAgent):
             # the discount -- "money at a discount": when BUCK is cheap vs the
             # basket, redeemers bid it back hard (counter-cyclical demand).
             excess = drawn - target
-            retire_eff = self.retire_rate * (
-                1.0 + self.disc_gain * max(0.0, bvib - 1.0))
+            retire_eff = min(1.0, self.retire_rate * dtd * (
+                1.0 + self.disc_gain * max(0.0, bvib - 1.0)))
             want = int(retire_eff * excess)
             if want < 10 ** 6:
                 return
@@ -1057,10 +1078,12 @@ class SaverAgent(_ProxyAgent):
             holding = d.chain.balance_of(d.buck, self.proxy.address)
             held_usdc = d.chain.balance_of(d.usdc, self.proxy.address)
 
+            dtd = _dt_days(scenario)      # base_rate is per-DAY
             if discount > 0 and holding < self.savings_goal \
                     and self._spent < self.budget:
                 # Buy below value: accelerate accumulation with the discount.
-                rate = int(self.base_rate * (1.0 + self.disc_gain * discount))
+                rate = int(self.base_rate * dtd
+                           * (1.0 + self.disc_gain * discount))
                 amt = min(rate, held_usdc, self.budget - self._spent)
                 if amt < 10 ** 6:               # sub-$1 move: skip
                     return
@@ -1075,7 +1098,8 @@ class SaverAgent(_ProxyAgent):
                 ru = d.chain.balance_of(d.usdc, d.pool_ub)
                 rb = d.chain.balance_of(d.buck, d.pool_ub)
                 spot = ru * PARITY // rb if rb else 0
-                want_usdc = int(self.base_rate * (1.0 + self.prem_gain * premium))
+                want_usdc = int(self.base_rate * dtd
+                                * (1.0 + self.prem_gain * premium))
                 # BUCK to sell to realize ~want_usdc of USDC at current spot.
                 sell = want_usdc * PARITY // spot if spot else 0
                 keep = int(self.reserve_frac * holding)   # reserve vs holdings

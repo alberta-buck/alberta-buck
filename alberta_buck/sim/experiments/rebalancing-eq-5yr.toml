@@ -28,7 +28,8 @@
 # its parents' blocks.  <ext> composes deltas left-to-right on three axes,
 # in this fixed order so names stay canonical:
 #
-#   1. knobs      -- [agents.*] blocks: "capacity", "savers2x", ...
+#   1. knobs      -- [agents.*] and [deploy] blocks: "capacity",
+#                    "savers2x", "endow", "deep" (4x pool depth), ...
 #   2. trend      -- basket commodity regime: "revert", "grow", "decline"
 #                    (slow drifts; will need a price-generation hook or a
 #                    staged PriceOverlay ramp -- reserved, not yet built)
