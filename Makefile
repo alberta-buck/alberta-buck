@@ -1079,6 +1079,40 @@ sim-experiment-%:	sim-build
 	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
 		--experiment alberta_buck/sim/experiments/$*.toml $(EQ_SETS)
 
+# -- Rebalancing under the equilibrium financial structure -------------
+#
+# The eq-baseline-5yr world (same window, basket recomposition, deploy
+# knobs, borrower/saver loop and seed) plus a DirectorKeeperAgent, so the
+# rebalance director's contribution to the closed loop is the only delta
+# against eq-baseline-5yr-prorata.  Own vector/image names; neither the
+# synthetic rebalancing scenarios nor the eq-baseline vectors are touched.
+#
+#   make nix-sim-rebalancing-eq          # run -> plot
+#   make nix-sim-run-rebalancing-eq      # just the run (~35min+ full 5y)
+#   make nix-sim-plot-rebalancing-eq     # just the plot
+#
+# Smoke first with a short horizon:  ... REBALANCING_EQ_DAYS=120
+# (the full 5y window is still generated; only the run is truncated).
+
+REBALANCING_EQ_TOML	= alberta_buck/sim/experiments/rebalancing-eq-5yr.toml
+REBALANCING_EQ_VECTOR	= test/vectors/rebalancing-sim-eq.json
+REBALANCING_EQ_IMAGE	= images/rebalancing-sim-eq.png
+REBALANCING_EQ_DAYS	?=
+
+.PHONY: sim-run-rebalancing-eq sim-plot-rebalancing-eq sim-rebalancing-eq
+
+sim-run-rebalancing-eq:	sim-build
+	python -m $(SIM_PKG) --experiment $(REBALANCING_EQ_TOML) \
+		$(if $(REBALANCING_EQ_DAYS),--days $(REBALANCING_EQ_DAYS)) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--out $(REBALANCING_EQ_VECTOR)
+
+sim-plot-rebalancing-eq:	$(REBALANCING_EQ_VECTOR)
+	REB_VECTOR=$(REBALANCING_EQ_VECTOR) REB_OUT=$(REBALANCING_EQ_IMAGE) \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing-eq:	sim-run-rebalancing-eq sim-plot-rebalancing-eq
+
 # The realistic observation world: honest BuckCreditDebtorAgents (real
 # premium credit + real funding gate) as the issuance channel, with
 # savers/investors/arbs/whale/PID; growth regimes via arrive_mode knobs

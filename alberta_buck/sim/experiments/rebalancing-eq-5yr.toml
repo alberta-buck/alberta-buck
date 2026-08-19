@@ -1,0 +1,28 @@
+# The eq-baseline-5yr financial structure, observed through the rebalancing
+# machinery.  Everything is inherited unchanged from the baseline-5yr
+# defaults -- the 5y macro window, the recomposed M2-laggard weighted basket,
+# the rolling-reserve borrowers + savers + PID cadence, the [deploy] knobs
+# (K0 0.75, rails (0, 0.95), tau_I 90d, dt 1800, 10M/10M pool depths), the
+# prorata basket and the canonical seed -- with ONE addition, made by the
+# "rebalancing-eq" scenario family: a DirectorKeeperAgent advancing the
+# BasketRebalanceDirector's signals and executing its advisory efforts.
+#
+# The director deploys in every prorata run; in the equilibrium scenario
+# nothing pokes it, so this run's delta against eq-baseline-5yr-prorata is
+# exactly the rebalance director's contribution to the closed loop.
+#
+#   make nix-sim-rebalancing-eq      # run -> test/vectors/rebalancing-sim-eq.json
+#                                    #     -> images/rebalancing-sim-eq.png
+#
+# The vector renders through plot_rebalancing (one panel per token) and is
+# judged with eqmetrics like any equilibrium run.
+
+name = "rebalancing-eq-5yr"
+notes = "eq-baseline-5yr structure + rebalance-director keeper"
+
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 1
+day_step = 10
+seed = 0xA1BC

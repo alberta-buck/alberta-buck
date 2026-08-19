@@ -277,3 +277,38 @@ def build_equilibrium(start=None, end=None, years=None, ticks_per_day=48,
         ticks_per_day=ticks_per_day,
         seed=seed,
     )
+
+
+def build_rebalancing_eq(start=None, end=None, years=None, ticks_per_day=1,
+                         seed=0xA1BC):
+    """The equilibrium financial structure, observed through the
+    rebalancing machinery.
+
+    Identical to build_equilibrium -- the same recomposed M2-laggard
+    weighted basket on the same real historical window, the same
+    FatCreditBorrower/Saver monetary loop and PID cadence -- plus the one
+    agent that makes it a *rebalancing* run: a DirectorKeeperAgent
+    advancing the BasketRebalanceDirector's amortized signals and
+    executing its advisory efforts.  The director itself deploys in every
+    prorata run; in the equilibrium scenario nothing pokes it, so its
+    contribution to the closed loop is exactly the delta this scenario
+    makes visible.
+
+    A separate scenario (selected by `[scenario] family = "rebalancing-eq"`
+    in an experiment TOML, canonically experiments/rebalancing-eq-5yr.toml)
+    rather than a knob on either parent, so the committed equilibrium
+    vectors and the synthetic rebalancing scenarios both stay untouched.
+    The vector feeds the rebalancing pipeline (plot_rebalancing) and is
+    judged with eqmetrics like any equilibrium run.
+    """
+    sc = build_equilibrium(start=start, end=end, years=years,
+                           ticks_per_day=ticks_per_day, seed=seed)
+    return Scenario(
+        name="rebalancing-eq",
+        tokens=sc.tokens,
+        csv_files=sc.csv_files,
+        agents={**sc.agents, "DirectorKeeperAgent": 1},
+        days=sc.days,
+        ticks_per_day=sc.ticks_per_day,
+        seed=sc.seed,
+    )

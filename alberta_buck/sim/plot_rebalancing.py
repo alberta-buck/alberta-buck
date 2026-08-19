@@ -86,7 +86,12 @@ def test_rebalancing_sim_plot():
     def col(key, t):
         return [f.get(key, [])[t] for f in fr]
 
-    fig, axes = plt.subplots(8, 1, figsize=(13, 28), sharex=True)
+    # One panel per token, then the five aggregate panels.  For the
+    # 3-token synthetic scenarios this is exactly the historical 8x28"
+    # layout; 6-token historical/equilibrium vectors get 11 panels.
+    nt = len(names)
+    fig, axes = plt.subplots(5 + nt, 1, figsize=(13, 3.5 * (5 + nt)),
+                             sharex=True)
 
     # buckUsd = USDC-micro per 1 BUCK from the floating BUCK/USDC pool.
     bu = [f.get("buckUsd", 0) for f in fr]
@@ -97,8 +102,8 @@ def test_rebalancing_sim_plot():
             return f["treasuryBuck"]
         return int(f.get("treasuryShare", 0.0) * f.get("basketNav", 0))
 
-    # ---- Panels 1-3: per token, both pools vs market reference -------- #
-    for t in range(3):
+    # ---- Panels 1..nt: per token, both pools vs market reference ------ #
+    for t in range(nt):
         ax = axes[t]
         ref = [v / E6 for v in col("refUsd", t)]
         su = [v / E6 for v in col("spotUsdc", t)]
@@ -140,26 +145,28 @@ def test_rebalancing_sim_plot():
                          "(BUCK-unaware arbs + basket rebalancer)")
 
     # ---- Panel 4: pool value-weight deviations ----------------------- #
-    ax = axes[3]
-    colors_w = ["tab:orange", "tab:blue", "tab:green"]
+    ax = axes[nt]
+    colors_w = ["tab:orange", "tab:blue", "tab:green",
+                "tab:red", "tab:purple", "tab:brown"]
     handles = []
-    for t in range(3):
-        aw = [f.get("poolWeights", [[0, 0]] * 3)[t][0] for f in fr]
-        tw = [f.get("poolWeights", [[0, 0]] * 3)[t][1] for f in fr]
-        l1, = ax.plot(days, aw, color=colors_w[t], linewidth=1.4,
+    for t in range(nt):
+        aw = [f.get("poolWeights", [[0, 0]] * nt)[t][0] for f in fr]
+        tw = [f.get("poolWeights", [[0, 0]] * nt)[t][1] for f in fr]
+        cw = colors_w[t % len(colors_w)]
+        l1, = ax.plot(days, aw, color=cw, linewidth=1.4,
                       label=f"{names[t]} actual")
-        l2, = ax.plot(days, tw, color=colors_w[t], linewidth=1.0,
+        l2, = ax.plot(days, tw, color=cw, linewidth=1.0,
                       linestyle="--",
                       label=f"{names[t]} target")
         handles.extend([l1, l2])
-    ax.axhline(1.0 / 3, color="black", alpha=0.15, linewidth=0.5)
+    ax.axhline(1.0 / nt, color="black", alpha=0.15, linewidth=0.5)
     ax.set_ylabel("value weight")
     ax.legend(handles=handles, loc="upper left", fontsize=7, ncol=2)
     ax.grid(True, alpha=0.3)
     ax.set_title("TOKEN/BUCK pool value weights: actual vs basket target")
 
     # ---- Panel 5: treasury compounding (NAV, outstanding, treasury) -- #
-    ax = axes[4]
+    ax = axes[nt + 1]
     handles5 = []
     nav = [f.get("basketNav", 0) / E6 for f in fr]
     l1, = ax.plot(days, nav, color="tab:blue", linewidth=1.5,
@@ -209,7 +216,7 @@ def test_rebalancing_sim_plot():
     # D is ppm/second.  Once buckK sits on a rail the lever tells you nothing
     # more, and only the integral shows how far past the rail the controller
     # has wound -- i.e. how long a reversal would take to unwind.
-    ax = axes[5]
+    ax = axes[nt + 2]
     handles6 = []
     basket_val = [f.get("basketVal", 0) / 1e18 for f in fr]
     k = [f.get("buckK", 0) / 1e18 for f in fr]
@@ -301,7 +308,7 @@ def test_rebalancing_sim_plot():
     # If the residual is flat while supply grows, the controller is pushing
     # on a channel that is not carrying the growth, and no amount of K
     # movement will close the error.
-    ax = axes[6]
+    ax = axes[nt + 3]
     handles7 = []
     supply = [f.get("supply", 0) / E6 for f in fr]
     dmo = [f.get("dmOutstanding", 0) / E6 for f in fr]
@@ -340,7 +347,7 @@ def test_rebalancing_sim_plot():
     # ---- Panel 8: BuckBasket return on capital-at-risk --------------- #
     #
     # Three series that ARE returns, and one that only looks like one.
-    ax = axes[7]
+    ax = axes[nt + 4]
 
     # A return needs a profit and the capital-time that earned it.
     #
@@ -483,7 +490,7 @@ def test_rebalancing_sim_plot():
 
     # Convergence summary.
     print(f"\nWrote {_rel(OUT)}  ({len(days)} days)")
-    for t in range(3):
+    for t in range(nt):
         ref = col("refUsd", t)[-1] / E6
         su = col("spotUsdc", t)[-1] / E6
         sb = (col("spotBuck", t)[-1] * (bu[-1] / 1e6) / E6
@@ -535,8 +542,8 @@ def test_rebalancing_sim_plot():
     dp_final = last.get("directMintPnl", 0) / E6
     print(f"  rebalancer P&L: ${rp_final:,.0f}  "
           f"direct-mint P&L: ${dp_final:,.0f}")
-    pw = last.get("poolWeights", [[0, 0]] * 3)
-    for t in range(3):
+    pw = last.get("poolWeights", [[0, 0]] * nt)
+    for t in range(nt):
         aw, tw = pw[t]
         dev = (aw - tw) * 100
         print(f"  {names[t]:5s}  weight actual={aw:.4f} target={tw:.4f}  "

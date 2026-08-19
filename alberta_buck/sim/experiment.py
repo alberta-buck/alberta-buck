@@ -85,6 +85,9 @@ DEFAULTS: dict = {
     "name": "unnamed",
     "notes": "",
     "scenario": {
+        "family": "equilibrium",   # scenario builder: "equilibrium" |
+                                   # "rebalancing-eq" (same financial
+                                   # structure + the rebalance director)
         "years": 5.0,
         "start": "",
         "end": "",
@@ -243,11 +246,17 @@ def load(path: str | Path | None = None, sets: list[str] | None = None
 
 
 def build(exp: Experiment):
-    """Scenario for this experiment (equilibrium family), with the
-    experiment attached so deploy/loop/agents see the overrides."""
-    from alberta_buck.sim.scenario import build_equilibrium
+    """Scenario for this experiment, with the experiment attached so
+    deploy/loop/agents see the overrides.  `[scenario] family` selects the
+    builder: "equilibrium" (default) or "rebalancing-eq" (the identical
+    financial structure plus the rebalance-director keeper)."""
+    from alberta_buck.sim.scenario import (build_equilibrium,
+                                           build_rebalancing_eq)
     s = exp.scenario
-    sc = build_equilibrium(
+    builder = {"equilibrium": build_equilibrium,
+               "rebalancing-eq": build_rebalancing_eq,
+               }[s.get("family", "equilibrium")]
+    sc = builder(
         start=s["start"] or None, end=s["end"] or None,
         years=s["years"] or None,
         ticks_per_day=int(s["ticks_per_day"]),
