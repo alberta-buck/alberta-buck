@@ -462,6 +462,9 @@ class Snapshotter:
             "bcd_deploys": ctr.get("bcdDeploys", 0),
             "bcd_throttled": ctr.get("bcdThrottled", 0),
             "bcd_saved": ctr.get("bcdSaved", 0),
+            "bcd_deploys": ctr.get("bcdDeploys", 0),
+            "bcd_atomic_refis": ctr.get("bcdAtomicRefis", 0),
+            "bcd_atomic_declined": ctr.get("bcdAtomicDeclined", 0),
             "growth_arrivals": ctr.get("growthArrivals", 0),
             "growth_departures": ctr.get("growthDepartures", 0),
             # Endogenous-origination arrivals (arrive_mode "endog"): how many

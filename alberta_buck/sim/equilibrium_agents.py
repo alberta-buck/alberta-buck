@@ -1271,6 +1271,17 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         # depth, not a hand-set tranche cap, is what paces refinancing.
         self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r,
                                        (25, 150)))
+        # refi_mode "atomic": evaluate the WHOLE mortgage conversion ex ante
+        # -- quote the BUCK needed to net the full USDC mortgage after
+        # slippage and fees, check issuance capacity for that amount, and
+        # execute the complete BuckCredit -> BUCK -> USDC -> payoff in one
+        # act, or not at all (no partial commits, no premium paid on a
+        # refinance that cannot complete).  "paced" (default) is the
+        # original audited behavior: commit the tranche, then dribble the
+        # exit through an impact cap.
+        self._refi_atomic = (_spec(scenario, cls, "refi_mode", "paced")
+                             == "atomic")
+        self._atomic_B = 0
         horizon = max(1, int(getattr(scenario, "days", 1)))
         # Arrival: growth-regime schedule when arrive_mode is set; "endog"
         # replaces the fixed stagger with a HAZARD-driven clock (advanced in
@@ -1429,6 +1440,59 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 "income": self.income_annual,
                 "active": bool(getattr(self, "_growth_arrived", False))}
 
+    # -- atomic refinance planning ------------------------------------------- #
+
+    def _atomic_plan(self, d, limit, drawn, unactivated, ctr):
+        """Ex-ante evaluation of the WHOLE mortgage conversion.
+
+        Quote the BUCK/USDC pool for the BUCK input needed to net the FULL
+        remaining USDC mortgage after slippage and the pool fee (constant-
+        product closed form on the full-range floating pool, +0.5% safety
+        margin), then check the credit side can supply it: spendable
+        headroom plus K-scaled unactivated face.  Returns (face units to
+        mint, all-in execution discount vs par) and stashes the sale size
+        in self._atomic_B; on any infeasibility returns (0, inf) -- nothing
+        is minted, no premium is paid, the debtor simply waits.  This makes
+        the population self-limiting: refinances execute only as the market
+        can bear them, at full size or not at all."""
+        M = int(self.mortgage)
+        self._atomic_B = 0
+        if M <= 10 ** 6 or not d.pool_ub:
+            return 0, 0.0
+        ru = d.chain.balance_of(d.usdc, d.pool_ub)
+        rb = d.chain.balance_of(d.buck, d.pool_ub)
+        if ru <= 0 or rb <= 0 or M * 5 >= ru * 4:
+            # Needing >80% of the pool's USDC side is not a quote, it is a
+            # liquidity hole; wait for depth.
+            ctr["bcdAtomicDeclined"] = ctr.get("bcdAtomicDeclined", 0) + 1
+            ctr.setdefault("bcdAtomicWhy", {})
+            ctr["bcdAtomicWhy"]["depth"] = (
+                ctr["bcdAtomicWhy"].get("depth", 0) + 1)
+            return 0, float("inf")
+        fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
+        bprime = M * rb // max(1, ru - M)
+        need_b = int(bprime / max(1e-9, 1.0 - fee) * 1.005) + 10 ** 6
+        d_eff = max(0.0, 1.0 - M / need_b)
+        try:
+            k = int(d.kctrl.functions.buckK().call())
+        except Exception:
+            k = 0
+        spendable = max(0, limit - drawn)
+        capacity = spendable + (unactivated * k // 10 ** 18) * 95 // 100
+        if need_b > capacity:
+            ctr["bcdAtomicDeclined"] = ctr.get("bcdAtomicDeclined", 0) + 1
+            ctr.setdefault("bcdAtomicWhy", {})
+            ctr["bcdAtomicWhy"]["capacity"] = (
+                ctr["bcdAtomicWhy"].get("capacity", 0) + 1)
+            return 0, float("inf")
+        face_need = 0
+        if need_b > spendable and k > 0:
+            face_need = min(unactivated,
+                            ((need_b - spendable) * 10 ** 18 // k)
+                            * 105 // 100)
+        self._atomic_B = need_b
+        return face_need, d_eff
+
     # -- the loop -------------------------------------------------------------- #
 
     def act(self, d, scenario, day, tick, ctr) -> None:
@@ -1548,7 +1612,17 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         # Draw toward the encumbrance target, not toward a calendar.  On the
         # first month that is the whole mortgage: the refinance is a single
         # act, paced only by headroom and by what the exit route can absorb.
-        want_tranche = min(max(0, target - drawn), headroom)
+        # Atomic mode replaces this with the ex-ante whole-conversion plan:
+        # want_tranche becomes the FACE to activate for the full quoted
+        # sale, gate_disc the all-in execution discount vs par.
+        if self._refi_atomic:
+            want_tranche, gate_disc = self._atomic_plan(
+                d, limit, drawn, unactivated, ctr)
+            ready = self._atomic_B >= 10 ** 6
+        else:
+            want_tranche = min(max(0, target - drawn), headroom)
+            gate_disc = disc
+            ready = want_tranche >= 10 ** 6
         if want_tranche >= 10 ** 6 and self.mortgage > 10 ** 6:
             try:
                 _, principal = d.buck.functions.quoteMint(
@@ -1558,7 +1632,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             required = principal * ff // 10 ** 18 if ff else 0
             bal = d.buck.functions.balanceOf(self.proxy.address).call()
             short = required - bal
-            if short > 10 ** 6 and disc <= max(self.theta * self.apr, 0.01):
+            if short > 10 ** 6 and gate_disc <= max(self.theta * self.apr,
+                                                    0.01):
                 cash = d.chain.balance_of(d.usdc, self.proxy.address)
                 budget = int(max(0, cash - self.cash_buffer)
                              * self.save_rate)
@@ -1570,8 +1645,10 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                         ctr["bcd_save_err"] = repr(e)[:200]
 
         # 3. THE CONTROL: activate a tranche through the REAL gate, then
-        #    deploy it against the mortgage.
-        if disc <= self.theta * self.apr and want_tranche >= 10 ** 6:
+        #    deploy it against the mortgage.  Atomic mode fires only when
+        #    the whole conversion clears its ex-ante checks (ready); the
+        #    face mint may be zero if spendable headroom already covers it.
+        if gate_disc <= self.theta * self.apr and ready:
             mint_amt = min(want_tranche, unactivated)
             try:
                 if mint_amt >= 10 ** 6:
@@ -1599,16 +1676,24 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             if minted and d.pool_ub:
                 before = d.chain.balance_of(d.usdc, self.proxy.address)
                 try:
-                    # Sell only what the route can absorb within this
-                    # debtor's impact budget.  The remainder stays drawn and
-                    # is sold on later ticks, so refinancing paces itself to
-                    # market depth instead of to a calendar.
-                    r_out = d.chain.balance_of(d.buck, d.pool_ub)
-                    sold = self._sell_capped(
-                        d, d.pool_ub,
-                        min(want_tranche,
-                            max(10 ** 6, _impact_cap(r_out,
-                                                     self.max_impact_bp))))
+                    if self._refi_atomic:
+                        # The whole quoted sale in one act -- the slippage
+                        # was computed and accepted before anything was
+                        # committed, so no impact cap applies.
+                        sold = self._sell_capped(d, d.pool_ub,
+                                                 self._atomic_B)
+                    else:
+                        # Sell only what the route can absorb within this
+                        # debtor's impact budget.  The remainder stays
+                        # drawn and is sold on later ticks, so refinancing
+                        # paces itself to market depth instead of to a
+                        # calendar.
+                        r_out = d.chain.balance_of(d.buck, d.pool_ub)
+                        sold = self._sell_capped(
+                            d, d.pool_ub,
+                            min(want_tranche,
+                                max(10 ** 6, _impact_cap(
+                                    r_out, self.max_impact_bp))))
                 except Exception as e:
                     ctr["bcd_sell_err"] = repr(e)[:200]
                     sold = 0
@@ -1621,6 +1706,9 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                     self.mortgage -= principal
                     self.deploys += 1
                     ctr["bcdDeploys"] = ctr.get("bcdDeploys", 0) + 1
+                    if self._refi_atomic and self.mortgage <= 10 ** 6:
+                        ctr["bcdAtomicRefis"] = (
+                            ctr.get("bcdAtomicRefis", 0) + 1)
         # 4. AMORTIZE THE CLAIM on the same schedule as the mortgage would
         #    have.  `hypo_mortgage` is the counterfactual's remaining
         #    balance, so buying BUCK back until `drawn - jub` meets it keeps

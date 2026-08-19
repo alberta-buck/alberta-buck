@@ -47,6 +47,7 @@ income_k = [180, 320]
 face_k = [600, 1200]
 premium_bp = [50, 150]
 save_rate = [0.25, 0.75]
+refi_mode = "atomic"      # ex-ante whole-conversion evaluation (see agent)
 arrive_mode = "endog"
 arrive_frac = [0.0, 1.0]    # tau spread: neutral hazard == originate arm
 arr_gain = 5.0
