@@ -1253,11 +1253,36 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         flip = "salary" if r.random() < 0.5 else "lumpy"
         self.pattern = str(_spec(scenario, cls, "pattern", "")) or flip
         self.apr = _draw(scenario, cls, "apr", r, (0.045, 0.065))
-        self.mortgage = int(_draw(scenario, cls, "mortgage_k", r,
-                                  (600, 1400)) * m6)
-        self.income_annual = int(_draw(scenario, cls, "income_k", r,
-                                       (180, 320)) * m6)
-        face = int(_draw(scenario, cls, "face_k", r, (600, 1200)) * m6)
+        # Housing-market mode: when `home_k` is specified, draw the HOME
+        # (the insured asset) as the primary variable and DERIVE the rest --
+        # face = the appraised home value (the insurable value the
+        # BuckCredit attests, what premium_bp is charged on, and what
+        # creditLimit = face*K scales), mortgage = home * ltv, income a
+        # fraction of home value (homes at ~3-5x income).  home_k is drawn
+        # LOG-uniform to mirror the right skew of real estate.  The legacy
+        # independent mortgage_k/face_k/income_k draws (the audited octl
+        # configs) apply when home_k is absent -- they imply an
+        # LTV distribution massed near 1.0 with underwater tails, i.e. a
+        # maximally-leveraged civilization, so calibrated worlds should
+        # prefer home_k + ltv (mean ~0.50).
+        home_spec = _spec(scenario, cls, "home_k", None)
+        if home_spec is not None:
+            if isinstance(home_spec, (list, tuple)):
+                lo, hi = float(home_spec[0]), float(home_spec[1])
+                home_k = lo * (hi / max(1e-9, lo)) ** r.random()
+            else:
+                home_k = float(home_spec)
+            ltv = _draw(scenario, cls, "ltv", r, (0.05, 0.95))
+            face = int(home_k * m6)
+            self.mortgage = int(face * ltv)
+            self.income_annual = int(
+                face * _draw(scenario, cls, "income_frac", r, (0.20, 0.35)))
+        else:
+            self.mortgage = int(_draw(scenario, cls, "mortgage_k", r,
+                                      (600, 1400)) * m6)
+            self.income_annual = int(_draw(scenario, cls, "income_k", r,
+                                           (180, 320)) * m6)
+            face = int(_draw(scenario, cls, "face_k", r, (600, 1200)) * m6)
         # 0 => poolPrincipal 0 => funding gate exempt (see the module note).
         self.premium_rate = int(_draw(scenario, cls, "premium_bp", r, 0))
         self.save_rate = _draw(scenario, cls, "save_rate", r, (0.25, 0.75))

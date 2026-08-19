@@ -42,9 +42,9 @@ ArrivingDMAgent = 60
 [agents.BuckCreditDebtorAgent]
 theta = [0.0, 3.0]
 apr = [0.045, 0.065]
-mortgage_k = [600, 1400]
-income_k = [180, 320]
-face_k = [600, 1200]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform (median ~550k)
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
 premium_bp = [50, 150]
 save_rate = [0.25, 0.75]
 refi_mode = "atomic"      # ex-ante whole-conversion evaluation (see agent)
