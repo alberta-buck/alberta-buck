@@ -1,0 +1,293 @@
+#+TITLE: REBALANCING-EQ: The Variant Matrix -- Findings and Analysis
+#+AUTHOR: Perry Kundert
+#+DATE: 2026-08-20
+#+OPTIONS: toc:2 num:t
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+
+* Purpose and lineage
+
+The =rebalancing-eq= scenario family joins the two simulation programs
+that had previously run apart: the *equilibrium campaign*
+(=alberta_buck/sim/EQUILIBRIUM.md= -- the BUCK-K monetary loop on real
+5-year macro data, judged by the parity-with-interior-K gate) and the
+*rebalancing machinery* (the BasketRebalanceDirector and the BuckBasket
+as a savings vehicle, previously exercised only on synthetic 3-token
+regimes).  Every arm below runs the eq-baseline financial structure --
+the 6-token M2-laggard weighted basket (LABR 2400 / CNST 2200 / FOOD
+2000 / NRGC 2000 / PAXG 800 / cbBTC 600 bp), the real macro window,
+prorata basket, K0 0.75 with rails (0, 0.95), seed 0xA1BC -- through
+real contract deployments on an EVM (pyrevm), with the director keeper
+active, at full rebalancing cadence (day_step 1, ticks 4: daily whale
+pins, 6-hour PID samples).
+
+Acceptance gate (unchanged from the campaign): tail (last 25%)
+basketValueInBuck within 1.00 +/- 0.02, K never railed in the tail,
+issuance/redemption channels alive.
+
+* The family: variants, running, reproducing
+
+Experiments: =alberta_buck/sim/experiments/rebalancing-eq-5yr*.toml=.
+Variant extension names compose deltas left-to-right on three axes --
+(1) knobs ([agents.*] and [deploy]), (2) trend regime (reserved), (3)
+disruption (=[[interventions]]= price shocks).  Each TOML is standalone
+(no cross-file inheritance) and its resolved config is embedded in the
+output vector's meta.
+
+- =make nix-sim-rebalancing-eq-<ext>= runs one arm ->
+  =test/vectors/rebalancing-sim-eq-<ext>.json= +
+  =images/rebalancing-sim-eq-<ext>.png=;
+- =make nix-venv-sim-rebalancing-eq-matrix= re-runs EVERY arm against
+  the *current contracts* (recompiles first, MATRIX_JOBS-way parallel)
+  and prints the gate table -- the "adjust the BuckBasket, observe the
+  net effects" loop;
+- =make nix-sim-compare-rebalancing-eq= gates existing vectors only.
+
+The final vectors are ~25-30MB each and are NOT committed; the rendered
+images, this document, and the one-command matrix regeneration are the
+record.  Runs are deterministic: same code + same TOML -> identical
+vector.
+
+* Model rulings (decisions of record)
+
+These calibration and semantics decisions were made deliberately and
+should not be silently re-litigated:
+
+1. *Per-day agent rates.*  Rate knobs (saver base_rate, borrower
+   retire/release rates, the funding factor's issue-rate signal) are
+   per-DAY, scaled by =day_step/ticks_per_day= each activation, so
+   daily flow is cadence-invariant.  The coarse macro mode (day_step
+   10) is an approximation for slow dynamics only; the notorious
+   cold-start buckUsd spike of early runs was substantially an artifact
+   of 10-day PID sampling and lumpy per-act flows.
+
+2. *Atomic refinance* (~refi_mode="atomic"~, this family only; the
+   audited octl configs keep "paced").  A debtor evaluates the WHOLE
+   mortgage conversion ex ante: quote the BUCK needed to net the full
+   USDC mortgage after slippage and pool fee, check issuance capacity
+   (spendable headroom + K-scaled unactivated face), gate the theta law
+   on the all-in execution discount, then execute BuckCredit -> BUCK ->
+   USDC -> full payoff in one act -- or do nothing (no mint, no premium
+   paid, re-quote next month).  The paced model committed first and
+   discovered the market later; it also made every deployed debtor a
+   perpetual net BUCK absorber (monthly save-rate buffer accumulation
+   with one-shot issuance), which is what strangled the early debtor
+   arms.
+
+3. *Admission frontier LTV <= K is expected.*  A mortgage above
+   face * K cannot be fully funded by BUCK issuance; in reality the
+   borrower would top up with supplemental USDC credit.  Those
+   borrowers are IGNORED for now (declined debtors are fully inert).
+   K is thereby the emergent admission gate on mortgage conversion --
+   wide when the system wants supply, narrow when it does not.
+
+4. *Housing-market distribution.*  The home (the insured asset) is the
+   primary draw -- =home_k [200,1500]= LOG-uniform (median ~$530k),
+   mirroring real estate's right skew -- and the rest derives: face =
+   the appraised home value (the insurable value the BuckCredit
+   attests; premium charged on it; creditLimit = face*K), mortgage =
+   home * ltv with =ltv [0.05,0.95]= (mean ~0.49, the seasoned-ladder
+   average), income = home * [0.20,0.35].  The legacy independent
+   mortgage/face draws implied a maximally-leveraged civilization (LTV
+   massed near 1.0 with underwater tails) and excluded ~88% of the
+   population at the frontier.
+
+5. *Deep exit route.*  The floating BUCK/USDC pool is $50M family-wide
+   (~[deploy] target_buck_lp_m = 50~; deploy.py now sizes the pool off
+   its documented knob).  A national-scale currency pair is deep, and a
+   shallow pool was an artificial exit bottleneck; real best-cost
+   routing would additionally spread exits across BUCK/TOKEN ->
+   TOKEN/USDC legs.  The BUCK-unaware arbs keep the deep pool balanced.
+   With atomic refinance, this depth is the literal admission control
+   on credit adoption (~2% all-in on a ~$1M mortgage vs ~10% at $10M).
+
+6. *Saver endowment* (~arrive_mode="endow"~): pre-window BUCK inventory
+   transferred from SimLP against a zero-premium credit.  NB: minting
+   on the saver's own credit endows K-scaled *headroom* (balanceOf
+   counts unused creditLimit, which melts as K falls), not held BUCK;
+   the third-party transfer is what makes it real inventory
+   (totalSupply == sum of positive signed balances).
+
+7. *Endogenous arrivals* (~arrive_mode="endog"~): debtor hazard =
+   (K/k_ref) * (1 + arr_gain*(1-bvib)) capped at arr_max; depositor
+   hazard = dev_ref / max(dev_ref, ewma|bvib-1|).  hazard == 1
+   reproduces the open-loop "originate" stagger exactly, so the
+   endog-vs-originate comparison isolates price-responsiveness itself.
+
+* The final matrix (2026-08-19/20)
+
+All ten arms PASS.  Zero railed frames in any tail; zero execution
+errors; every debtor in every arm eventually completed a full atomic
+refinance (declines were transient re-quotes -- the frontier acted as a
+queue, not a wall).
+
+| arm            | bv tail (sd)    |     K | iss/ret $M | refis | notes                             |
+|----------------+-----------------+-------+------------+-------+-----------------------------------|
+| (banked eq-baseline, coarse cadence, $10M ub) | 0.9926 (0.0265) | 0.819 | 1.73/1.52 | -- | the reference |
+| base           | 1.0005 (0.0107) | 0.760 | 1.60/0.00  |    -- | fine cadence alone closes it      |
+| capacity       | 1.0017 (0.0266) | 0.634 | 2.05/1.18  |    -- | lowest resting K                  |
+| endow          | 1.0005 (0.0101) | 0.715 | 1.40/0.54  |    -- | inventory lowers K, opens retire  |
+| deep           | 1.0006 (0.0101) | 0.757 | 1.38/0.00  |    -- | ~= base once ub is already deep   |
+| endow-deep     | 1.0003 (0.0097) | 0.715 | 1.49/0.55  |    -- | == endow: endow carries it        |
+| debtors        | 1.0002 (0.0081) | 0.763 | 1.06/0.56  | 24/24 | staggered conversion              |
+| debtors-mature | 0.9999 (0.0080) | 0.925 | 0.00/1.56  | 24/24 | converted economy; tail deleveraging |
+| basketeers     | 0.9998 (0.0244) | 0.860 | 2.60/1.15  | 24/24 | K-immune tranche + churn costs sd |
+| originate      | 1.0006 (0.0072) | 0.942 | 0.51/0.02  | 30/30 | both sides growing; NEAR RAIL     |
+| endog          | 1.0002 (0.0068) | 0.924 | 0.43/0.00  | 30/30 | same equilibrium, found by prices |
+
+* What each variant does (effect analysis)
+
+** base -- the fine-cadence result
+The control loop closes with no help: parity to 0.05% with K settled at
+0.760.  K climbs during the FatCredit adoption S-curve and plateaus
+exactly when cap_frac saturates -- the climb is the controller
+compensating for *scheduled* capacity withholding, not chronic
+deflation.  Residual weakness: the retirement channel is silent
+(0.00) -- nothing in this cast ever wants to deleverage.
+
+** capacity (savers2x demand + borrower face/funding headroom)
+Buys the LOWEST resting K (0.634): with demand and capacity headroom
+the plant answers the controller easily and the controller retains the
+most unused authority.  The cost is the widest parity spread of the
+non-basketeer arms (0.0266) -- strong saver demand is itself a
+perturbation.  Choose this shape when rail margin is the objective.
+
+** endow / deep / endow-deep -- steady-state initialization, attributed
+At the original $10M floating pool, depth did nearly all the work.
+With the family now at $50M, the attribution INVERTS: deep (extra
+TOKEN/BUCK depth) is indistinguishable from base (K 0.757 vs 0.760),
+while the saver endowment carries the whole remaining effect -- endow
+and endow-deep are identical (K 0.715, retirement 0.54/0.55 vs 0.00).
+Standing private sell-side inventory lowers the resting K by ~0.045 and
+is the difference between a one-sided and a breathing channel.  Lesson:
+liquidity depth and distributed inventory are complements, and once one
+is adequate the other is the binding one.
+
+** debtors (staggered arrival over the first year)
+24 honest mortgage refinancers tighten parity (sd 0.0081, from 0.0107)
+and open the retirement channel, at base-like K.  The conversion flow
+itself is stabilizing: each atomic refinance is a supply event that
+lands when the market can bear it (theta law + LTV<=K + quoted
+slippage), and the ex-debtors' subsequent surplus investment adds
+basket demand.
+
+** debtors-mature (everyone converts at t0)
+The "converted civilization": all 24 refinance immediately, and the
+economy then runs on the refinanced supply.  K rests HIGH (0.925) --
+the controller holds the admission gate wide -- but interior and
+settled (dK ~ 0), with the second-tightest parity (0.0080) and a tail
+that is pure voluntary deleveraging (iss 0.00 / ret 1.56M).  Under the
+OLD rulings (paced, shallow, narrow-face) this exact arm railed 81% of
+its tail; the reversal is entirely the three structural fixes.
+
+** basketeers (+ DirectMint depositor population)
+The basket finally exercised as a savings vehicle inside the loop: ~950
+depositor round-trips, the first treasury accrual, the K-immune
+100%-LTV tranche at ~10% of supply.  Cost: the loosest debtor-arm
+spread (0.0244) -- depositor churn is real noise the director must
+absorb -- but the gate still passes comfortably.  The stylized fear
+that the K-immune tranche strangles the controller does NOT materialize
+at this scale.
+
+** originate (+ continuous debtor and depositor origination)
+Both sides of the economy grow at roughly matched dollar rates; all 30
+debtors convert; the K-immune tranche reaches 13.7M (~18% of supply)
+with 1,158 round-trips -- and parity is the second-tightest in the
+program (0.0072).  The caution: K rests at 0.942, EIGHT BASIS POINTS
+of lever below the 0.95 rail.  A growing economy consumes controller
+authority; see recommendations.
+
+** endog (originate with price-responsive arrival hazards)
+The headline theoretical result: the endogenous economy finds
+essentially the SAME equilibrium as the hand-tuned calendar (bv 1.0002
+vs 1.0006, sd 0.0068 vs 0.0072) with slightly MORE rail margin (K 0.924
+vs 0.942), and nobody chose a growth rate.  Debtor arrivals accelerate
+into lean markets, depositors wait out demonstrated instability, and
+the on-chain brakes (funding-factor toll, pre-buy reserve, K-scaled
+limits) price what arrivals may do.  Matched supply/demand growth is an
+emergent property of the price system, as designed.
+
+* Cross-cutting findings
+
+1. *Execution semantics and market microstructure matter as much as
+   the controller.*  Nothing about the PID changed between the all-FAIL
+   debtor matrix and the all-PASS one -- what changed was HOW agents
+   execute (atomic vs paced), WHAT the exit route can bear ($50M vs
+   $10M), and WHO the population is (housing distribution vs maximal
+   leverage).
+2. *K's resting level is the admission-frontier position.*  A converted
+   or growing economy settles K high because the controller is holding
+   the conversion gate open; that is a feature -- but it spends rail
+   margin, which is the robustness budget.
+3. *The K-immune basket tranche is tolerable at ~18% of supply.*  The
+   fence's motivating problem did not bite at realistic scale; whether
+   it bites at 30-50% remains the open fence-in-the-loop question.
+4. *Private inventory is the retirement channel.*  Every arm whose
+   savers hold standing BUCK shows two-sided channels; every arm with
+   empty savers shows one-sided issuance.
+
+* Recommendations: robustness against economic disruption
+
+Ranked by expected information per unit of compute.
+
+1. *Multi-seed sweep first.*  Everything above is seed 0xA1BC.  The
+   equilibrium campaign's own history (3/5 seeds failed its plain
+   baseline) is the warning: run the matrix's key arms (base, endow,
+   debtors-mature, endog) across the campaign's 5 seeds via sweep.py
+   before treating any conclusion as robust.
+2. *Buy back rail margin for the growth arms.*  originate/endog rest
+   0.008-0.026 below KMAX; any demand shock rails them immediately.
+   Three levers, in order of principle: (a) implement the *top-up
+   borrower* (BUCK for face*K, supplemental USDC for the remainder) so
+   the admission frontier is not the only supply valve; (b) widen the
+   collateral base (new insured asset classes = new face arriving
+   independent of housing); (c) a KMAX policy study -- 0.95 was chosen
+   to keep a railed K solvent and observable, but a converted economy
+   may warrant a higher ceiling with an explicit solvency argument.
+3. *Exercise the disruption axis.*  The naming scheme reserves it; the
+   machinery exists (=[[interventions]]= price_shock, uptake_shock,
+   retune).  Priority shocks against the winning arms: (a) a commodity
+   spike (NRGC +30%, cbBTC +50% -- the campaign's shock-price recipe)
+   mid-run; (b) a *demand run*: mass depositor exit (exit_ptick shock
+   on the DM population) -- the basket-run scenario; (c) a rate-cycle
+   shock (apr shift changes every theta threshold and the refinance
+   arbitrage itself).
+4. *Test the oversupply flood.*  The feared scenario -- massive
+   issuance through unencumbered collateral driving K to its LOWER
+   rail -- is still untested.  Add carry issuers (BuckIssuerArbAgent
+   exists) or a debtor draw_mult beyond encumbrance matching, and
+   measure: how deep K dives, where bv's discount equilibrates (the
+   theta/ff boundary predicts ~theta*apr), and the recovery half-life
+   (K throttles flow, not stock; only Jubilee melt and buy-backs
+   shrink the overhang).
+5. *Fence-in-the-loop.*  Swap =--basket fence= into the basketeer
+   arms so basket issuance is K-scaled rather than K-immune, and
+   compare stability AND depositor economics against these baselines.
+   This is the designed join of the fence program with the monetary
+   loop, and becomes urgent if the tranche share is pushed past ~30%.
+6. *Slow-trend regimes.*  grow/decline commodity drifts (the trend
+   axis) need a price-generation hook or staged PriceOverlay ramps --
+   the reverting-vs-trending distinction mattered enormously in the
+   synthetic program and is unexplored here.
+7. *Population churn.*  Port the campaign's population-churn
+   experiment (lost borrower + saver) to this family; the endog
+   hazards should recruit replacements -- verifying that is exactly
+   what they are for.
+8. *Exit-route realism.*  The single deep pool abstracts best-cost
+   multi-route exits (BUCK/TOKEN -> TOKEN/USDC).  Teaching the debtor
+   quote (and the arbs) to split across routes would let depth be
+   stressed without the abstraction absorbing it.
+
+* Artifacts
+
+- Vectors: =test/vectors/rebalancing-sim-eq*.json= (uncommitted;
+  regenerate with the matrix target).  Superseded-run checkpoints
+  (paced, shallow-ub, narrow-face eras): =build/sim/runs/partial*=.
+- Images: =images/rebalancing-sim-eq*.png= (committed) -- the 11-panel
+  render per arm.
+- Progress tooling: a watcher script (session scratchpad) renders
+  =build/sim/progress/= every 10 minutes during long runs; the sims
+  checkpoint their vectors every 25 sim-days, so partial runs are
+  always plottable.
+- Parent documents: =alberta_buck/sim/EQUILIBRIUM.md= (the campaign),
+  =BASKET-REBALANCE.md= / =BASKET-REDESIGN.md= (the synthetic basket
+  program).
