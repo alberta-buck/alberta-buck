@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.93)
+#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.94)
 #+author: Perry Kundert
 #+date: 2026-05-24 12:00:00
 #+category: Alberta Buck
