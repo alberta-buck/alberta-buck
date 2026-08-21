@@ -226,6 +226,16 @@ class _ProxyAgent(Agent):
 
     is_eoa = False
 
+    def _telemetry_common(self, d) -> dict:
+        """The common per-frame telemetry fields (TELEMETRY.md v1):
+        u = USDC held, b = Buck.balanceOf (NB: includes unused K-scaled
+        credit headroom), s = signedBalanceOf (negative = drawn credit),
+        nw = the par-marked net worth u + s.  All 6-dec micro-USD ints."""
+        u = int(d.chain.balance_of(d.usdc, self.proxy.address))
+        b = int(d.buck.functions.balanceOf(self.proxy.address).call())
+        s = int(d.buck.functions.signedBalanceOf(self.proxy.address).call())
+        return {"u": u, "b": b, "s": s, "nw": u + s}
+
     def __init__(self, idx: int):
         super().__init__(idx)
         self._rng: random.Random | None = None
@@ -601,9 +611,12 @@ class ExcursionArbAgent(_ProxyAgent):
         self._last_day = None
         self._basis = 0             # USDC spent on the open long (usdc base)
         self._bind_proxy(d)
+        self._face = 0
+        self._budget = 0
         if self.capital == "credit":
             face = int(_draw(scenario, cls, "face_m", r,
                              (2, 6)) * 1_000_000 * 10 ** 6)
+            self._face = face
             now_ts = d.w3.eth.get_block("latest")["timestamp"]
             self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
                 "setCreditIssuer",
@@ -616,7 +629,25 @@ class ExcursionArbAgent(_ProxyAgent):
             budget = int(_draw(scenario, cls, "budget_m", r,
                                (2, 6)) * 1_000_000 * 10 ** 6)
             d.chain.send(d.usdc.functions.mint(self.proxy.address, budget))
+            self._budget = budget
             self._nw0 = budget
+
+    def telemetry_static(self) -> dict:
+        return {"capital": self.capital, "entry_dev": self.entry_dev,
+                "exit_dev": self.exit_dev, "min_edge": self.min_edge,
+                "halflife": self.halflife,
+                "max_impact_bp": self.max_impact_bp,
+                "budget": self._budget, "face": self._face,
+                "nw0": self._nw0}
+
+    def telemetry(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        rec = self._telemetry_common(d)
+        if self._ewma is not None:
+            rec["ewma"] = round(self._ewma, 6)
+        rec["basis"] = self._basis
+        return rec
 
     def _nw(self, d) -> int:
         """Par-marked net worth: USDC + signed BUCK (held minus drawn)."""
@@ -782,6 +813,21 @@ class WhaleRaidAgent(_ProxyAgent):
         self.spent_reacq = 0
         self.target_buck = 0
         self.phase = 0
+
+    def telemetry_static(self) -> dict:
+        return {"budget": self.budget, "accum_days": self.accum_days,
+                "reacquire_days": self.reacq_days,
+                "raid_day": self.raid_day}
+
+    def telemetry(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        rec = self._telemetry_common(d)
+        rec.update({"phase": self.phase, "accum": self.spent_accum,
+                    "dump": self.recv_dump, "reacq": self.spent_reacq,
+                    "target": self.target_buck,
+                    "pnl": self.recv_dump - self.spent_reacq})
+        return rec
 
     def _buy_slice(self, d, days_left: int, cap_bp: int) -> int:
         cash = d.chain.balance_of(d.usdc, self.proxy.address)
@@ -1417,6 +1463,20 @@ class SaverAgent(_ProxyAgent):
                     d.buck.address, d.buck.encode_abi(
                         "transfer", args=[self.proxy.address, endow])))
 
+    def telemetry_static(self) -> dict:
+        return {"base_rate": self.base_rate, "disc_gain": self.disc_gain,
+                "prem_gain": self.prem_gain,
+                "reserve_frac": self.reserve_frac, "budget": self.budget,
+                "savings_goal": self.savings_goal,
+                "arrive_day": self.arrive_day}
+
+    def telemetry(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        rec = self._telemetry_common(d)
+        rec["spent"] = self._spent
+        return rec
+
     def _apply_regime(self, day) -> str:
         """Primary knob = base_rate (savings cadence).  Redraw from the SAME
         spec as setup() -- an earlier pre-rescale range here (20k-60k vs the
@@ -1573,6 +1633,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             self.income_annual = int(_draw(scenario, cls, "income_k", r,
                                            (180, 320)) * m6)
             face = int(_draw(scenario, cls, "face_k", r, (600, 1200)) * m6)
+        self._face0 = face              # telemetry: insured value at setup
+        self._mortgage0 = self.mortgage  # telemetry: opening mortgage
         # 0 => poolPrincipal 0 => funding gate exempt (see the module note).
         self.premium_rate = int(_draw(scenario, cls, "premium_bp", r, 0))
         self.save_rate = _draw(scenario, cls, "save_rate", r, (0.25, 0.75))
@@ -1703,6 +1765,28 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         return pay
 
     # -- observability ------------------------------------------------------- #
+
+    TELEMETRY_STRIDE = 4        # 24-30 debtors, monthly dynamics: every 4th day
+
+    def telemetry_static(self) -> dict:
+        return {"theta": round(self.theta, 3), "apr": round(self.apr, 4),
+                "pattern": self.pattern, "face": self._face0,
+                "mortgage0": self._mortgage0,
+                "income": self.income_annual, "payment": self.payment,
+                "premium_bp": self.premium_rate,
+                "refi_mode": "atomic" if self._refi_atomic else "paced",
+                "arrive_day": self.arrive_day}
+
+    def telemetry(self, d) -> dict | None:
+        st = self.octl_state(d)
+        if st is None:
+            return None
+        return {"u": st["cash"], "nw": st["nw"],
+                "mortgage": st["mortgage"], "drawn": st["drawn"],
+                "jub": st["jub"], "basket": st["basket"],
+                "deploys": st["deploys"], "throttled": st["throttled"],
+                "hypo": st["hypo"],
+                "active": 1 if st["active"] else 0}
 
     def octl_state(self, d) -> dict | None:
         if self.proxy is None:

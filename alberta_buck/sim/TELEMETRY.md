@@ -1,0 +1,151 @@
+# Per-agent telemetry (schema v1)
+
+The language-neutral contract between the Python simulation and any
+consumer -- the matplotlib plots, analysis scripts, and the JS+SVG
+dashboards fed by the sim server.  A dashboard needs three things per
+agent: who it is (identity + resolved knobs), what it holds, and how it
+is doing (P&L).  This file defines exactly where those live in a sim
+vector / frame stream.  It is written for a reader who has never opened
+the Python.
+
+## Where telemetry lives
+
+A sim vector is one JSON document:
+
+```json
+{"tokens": [...], "decimals": [...],
+ "meta":   {..., "telemetry": {...}},        <- static, ONCE
+ "frames": [{"day": 0, ..., "ag": {...}},    <- per-frame records
+            ...]}
+```
+
+The sim server's `ws://.../s/<sid>/frames` channel streams the same
+frame objects one per message, so a live dashboard and a saved vector
+read identically.  Frames are also checkpointed to disk every 25
+simulated days, so a partial run is always readable.
+
+## `meta.telemetry` -- the roster (static, emitted once)
+
+```json
+{"version": 1,
+ "units": "usd6",
+ "agents": [
+   {"id": "ExcursionArbAgent#0",
+    "cls": "ExcursionArbAgent",
+    "idx": 0,
+    "stride": 1,
+    "knobs": {"capital": "usdc", "entry_dev": 0.03, "exit_dev": 0.01,
+              "min_edge": 0.01, "halflife": 5.0, "max_impact_bp": 112,
+              "budget": 4123456789, "face": 0, "nw0": 4123456789}},
+   ...]}
+```
+
+- `id` -- stable agent identity, `"<class>#<index>"`, where index is the
+  agent's ordinal in the WHOLE population (not per-class), e.g.
+  `"ExcursionArbAgent#285"`.  The key used in every frame's `ag` object;
+  never parse it -- match it against the roster.
+- `stride` -- this agent emits a per-frame record only on days where
+  `day % stride == 0`.
+- `knobs` -- the RESOLVED per-agent parameters (drawn values, not the
+  configuration ranges).  Class-specific; see the class tables below.
+- `units: "usd6"` -- unless stated otherwise, monetary fields are
+  integers in 6-decimal micro-USD (1_000_000 == $1).  BUCK uses the
+  same 6-decimal convention (1 BUCK == $1 at par).
+
+Only classes that opt in appear.  Large background populations (the
+DirectMint depositor crowd, arbs, whales-as-market-makers) emit nothing
+and cost nothing.
+
+## `frames[i].ag` -- the per-frame records
+
+```json
+"ag": {"ExcursionArbAgent#0": {"u": 3990000000, "b": 120000000,
+                               "s": 120000000, "nw": 4110000000,
+                               "ewma": 1.0312, "basis": 130000000},
+       "WhaleRaidAgent#0": {"u": ..., "b": ..., "s": ..., "nw": ...,
+                            "phase": 2, "accum": ..., "dump": ...,
+                            "reacq": ..., "target": ..., "pnl": ...}}
+```
+
+The `ag` key is present only when at least one agent was due; an agent
+id is present only on its stride days.  Consumers must treat both as
+sparse (the `alberta_buck.sim.telemetry.load()` accessor aligns series
+with explicit `null`s).
+
+### Common fields (every emitting class)
+
+| field | meaning |
+|-------|---------|
+| `u`   | USDC held |
+| `b`   | `Buck.balanceOf` -- spendable BUCK.  NB: includes unused K-scaled credit headroom, by the contract's own semantics |
+| `s`   | `Buck.signedBalanceOf` -- negative = drawn credit (an outstanding claim on own assets) |
+| `nw`  | par-marked net worth, `u + s` |
+
+### Class extras
+
+**ExcursionArbAgent / ExcursionCreditArbAgent** -- knobs: `capital`
+("usdc"|"credit"), `entry_dev`, `exit_dev`, `min_edge`, `halflife`,
+`max_impact_bp`, `budget`, `face`, `nw0`.  Frame extras: `ewma` (the
+filtered bvib signal, float), `basis` (USDC currently committed to the
+open long; usdc base only).  Population P&L = sum of (`nw` - `nw0`).
+
+**WhaleRaidAgent** -- knobs: `budget`, `accum_days`, `reacquire_days`,
+`raid_day`.  Frame extras: `phase` (0 idle, 1 accumulate, 2 dump,
+3 reacquire, 4 done), `accum`/`dump`/`reacq` (cumulative USDC legs),
+`target` (BUCK position to rebuild), `pnl` (= `dump` - `reacq`).
+
+**BuckCreditDebtorAgent** (stride 4) -- knobs: `theta`, `apr`,
+`pattern`, `face` (insured value), `mortgage0`, `income`, `payment`,
+`premium_bp`, `refi_mode`, `arrive_day`.  Frame record replaces the
+common fields with the debtor ledger: `u` (cash), `nw` (chain-truth net
+worth incl. basket deposit, net of mortgage and drawn less Jubilee
+relief), `mortgage` (remaining fiat), `drawn`, `jub`, `basket`,
+`deploys`, `throttled`, `hypo` (counterfactual cash - mortgage),
+`active` (0|1).
+
+**SaverAgent** -- knobs: `base_rate` (per-day), `disc_gain`,
+`prem_gain`, `reserve_frac`, `budget`, `savings_goal`, `arrive_day`.
+Frame extras: `spent` (net USDC deployed into BUCK).
+
+## Sampling rules and size math
+
+Emission is spaced by the class attribute `TELEMETRY_STRIDE` (days).
+The rule of thumb for new classes: populations larger than ~16 should
+set `stride >= ceil(count / 16)`.
+
+A common record serialises to ~110-150 bytes.  The current featured
+cast at full cadence (1827 daily frames):
+
+    8 excursion + 1 raid + 4 savers   @ stride 1  ~= 13 rec/frame
+    24-30 debtors                     @ stride 4  ~=  7 rec/frame
+    -> ~20 records/frame * ~140 B ~= 2.8 kB/frame
+    -> ~5.1 MB over 1827 frames, on a 25-30 MB vector  (~ +20%)
+
+Worst tolerated case (the <2x budget): ~75 records/frame ~= 19 MB.
+Emitting 300 agents at stride 1 (~65 MB) is out of budget -- set
+strides.
+
+## Versioning
+
+`meta.telemetry.version` is bumped on breaking changes to this layout.
+A vector without `meta.telemetry` predates the schema (version 0);
+`telemetry.load()` returns `{"version": 0, "agents": {}}` for it.
+
+## Python access
+
+    from alberta_buck.sim.telemetry import load
+    t = load("test/vectors/<vector>.json")
+    a = t["agents"]["ExcursionArbAgent#0"]
+    a["meta"]["knobs"]; a["days"]; a["series"]["nw"]
+
+## Opting a class in (Python side)
+
+Implement both methods (see `Agent` in `agents.py`):
+
+    TELEMETRY_STRIDE = 1                  # or >= ceil(count/16)
+    def telemetry_static(self) -> dict    # resolved knobs, once
+    def telemetry(self, d) -> dict        # per-frame record
+
+`_ProxyAgent._telemetry_common(d)` supplies the common u/b/s/nw block.
+Return None from either to stay silent.  Telemetry must never alter
+economic behavior, defaults, or rng draw order.

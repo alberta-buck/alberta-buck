@@ -221,6 +221,38 @@ class Snapshotter:
                 rebal_init_val: int | None = None,
                 dm_init_val: int | None = None) -> None:
         d = self.d
+        # Per-agent telemetry (TELEMETRY.md, v1).  Static facts once into
+        # meta; per-frame records under frame["ag"] for agents due at this
+        # day (day % TELEMETRY_STRIDE == 0).  Agents opt in by implementing
+        # telemetry()/telemetry_static(); the default None costs nothing.
+        if "telemetry" not in self.meta:
+            metas = []
+            for ag in agents:
+                try:
+                    st = ag.telemetry_static()
+                except Exception:
+                    st = None
+                if st is not None:
+                    cls = type(ag).__name__
+                    metas.append({
+                        "id": f"{cls}#{ag.idx}", "cls": cls, "idx": ag.idx,
+                        "stride": max(1, int(getattr(
+                            ag, "TELEMETRY_STRIDE", 1))),
+                        "knobs": st})
+            if metas:
+                self.meta["telemetry"] = {
+                    "version": 1, "units": "usd6", "agents": metas}
+        ag_t = {}
+        for ag in agents:
+            stride = max(1, int(getattr(ag, "TELEMETRY_STRIDE", 1)))
+            if day % stride:
+                continue
+            try:
+                rec = ag.telemetry(d)
+            except Exception:
+                rec = None
+            if rec:
+                ag_t[f"{type(ag).__name__}#{ag.idx}"] = rec
         ref, su, sb = [], [], []
         for i, tc in enumerate(d.tokens):
             ref.append(self.s.prices.ref(i, day))
@@ -523,6 +555,8 @@ class Snapshotter:
             "treasuryBuck": treas_buck,
             "treasuryShare": treas_frac,
         })
+        if ag_t:
+            self.frames[-1]["ag"] = ag_t
 
     def write(self, path=None) -> Path:
         p = Path(path) if path else (
