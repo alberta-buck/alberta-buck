@@ -257,6 +257,17 @@ class Snapshotter:
                     saver_hold += _bal(d.buck, ag.address)
                 except Exception:
                     pass
+        # Excursion-arb population state: BUCK inventory + par-marked P&L
+        # (nw - nw0) summed over ExcursionArbAgent and its subclasses.
+        exc_held = exc_pnl = 0
+        for ag in agents:
+            if (type(ag).__name__.startswith("Excursion")
+                    and getattr(ag, "proxy", None)):
+                try:
+                    exc_held += _bal(d.buck, ag.address)
+                    exc_pnl += ag._nw(d) - ag._nw0
+                except Exception:
+                    pass
         # Borrower issuance-channel state (equilibrium scenario): summed
         # K-scaled limit / drawn / funding-reserve accounts across the
         # FatCreditBorrower population, plus the cumulative flow counters.
@@ -472,6 +483,13 @@ class Snapshotter:
             # have brought online so far.
             "endog_debtor_arrivals": ctr.get("endogDebtorArrivals", 0),
             "endog_depositor_arrivals": ctr.get("endogDepositorArrivals", 0),
+            # Excursion-arb + whale-raid observability.
+            "exc_entries": ctr.get("excursionEntries", 0),
+            "exc_exits": ctr.get("excursionExits", 0),
+            "exc_pnl": exc_pnl,
+            "exc_held": exc_held,
+            "raid_phase": ctr.get("raidPhase", 0),
+            "raid_pnl": ctr.get("raidPnl", 0),
             "neighbors_retired": ctr.get("neighborsRetired", 0),
             "iv_events": ctr.get("ivEvents", 0),           # cum interventions
             "supply": int(d.buck.functions.totalSupply().call()),

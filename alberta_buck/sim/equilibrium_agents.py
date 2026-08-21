@@ -551,6 +551,296 @@ class ArrivingDMAgent(DirectMintAgent):
 
 
 @_register
+class ExcursionArbAgent(_ProxyAgent):
+    """Detects bvib excursions and profits on the restoration of BUCK-vs-
+    basket equilibrium -- the poised private capital that damps forced
+    excursions (a whale dump, a panic) instead of joining them.
+
+    Signal: an EWMA of basketValueInBuck (halflife days).  A DISCOUNT
+    excursion (ewma > 1 + entry_dev: BUCK cheap vs the basket) is bought;
+    the long is closed when the ewma re-enters 1 +/- exit_dev (or
+    overshoots into premium), booking realized P&L.  Every entry is gated
+    by an EX-ANTE quote in the _atomic_plan spirit: the pool's all-in
+    execution price (closed-form constant-product + fee, at the
+    impact-capped size) must clear par by min_edge -- no edge at this
+    size, no trade.
+
+    Two capital bases (knob `capital`, or the ExcursionCreditArbAgent
+    subclass):
+
+      * "usdc" (default): a budget_m war chest; buys the discount, sells
+        the reversion.  Pure round-trip speculation.
+      * "credit": the LATENT-CREDIT participant -- holds a zero-premium
+        BuckCredit (face_m) it has never needed to draw.  On a PREMIUM
+        excursion (ewma < 1 - entry_dev) it mints against face*K and
+        sells above par; on a later DISCOUNT excursion it buys BUCK back
+        below par toward its drawn balance (the buy itself retires drawn
+        credit; a best-effort burn then deactivates the coverage).
+        Selling a par obligation dear and retiring it cheap is the
+        riskless reversion profit every under-levered credit holder is
+        poised to take.
+
+    Net worth is par-marked (USDC + signed BUCK); the snapshot sums
+    (nw - nw0) across the population as exc_pnl."""
+
+    CAPITAL = None                  # subclass pin ("credit")
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        self.halflife = float(_spec(scenario, cls, "halflife", 5.0))
+        self.entry_dev = float(_spec(scenario, cls, "entry_dev", 0.03))
+        self.exit_dev = float(_spec(scenario, cls, "exit_dev", 0.01))
+        self.min_edge = float(_spec(scenario, cls, "min_edge", 0.01))
+        self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r,
+                                       (50, 150)))
+        self.capital = self.CAPITAL or str(_spec(scenario, cls, "capital",
+                                                 "usdc"))
+        self._ewma = None
+        self._last_day = None
+        self._basis = 0             # USDC spent on the open long (usdc base)
+        self._bind_proxy(d)
+        if self.capital == "credit":
+            face = int(_draw(scenario, cls, "face_m", r,
+                             (2, 6)) * 1_000_000 * 10 ** 6)
+            now_ts = d.w3.eth.get_block("latest")["timestamp"]
+            self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
+                "setCreditIssuer",
+                args=[getattr(d.chain.deployer, "address",
+                              d.chain.deployer), True]))
+            d.chain.send(d.credit.functions.createCredit(
+                self.proxy.address, 0, face, 0, 0, 0, now_ts, 0))
+            self._nw0 = 0
+        else:
+            budget = int(_draw(scenario, cls, "budget_m", r,
+                               (2, 6)) * 1_000_000 * 10 ** 6)
+            d.chain.send(d.usdc.functions.mint(self.proxy.address, budget))
+            self._nw0 = budget
+
+    def _nw(self, d) -> int:
+        """Par-marked net worth: USDC + signed BUCK (held minus drawn)."""
+        u = d.chain.balance_of(d.usdc, self.proxy.address)
+        s = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        return u + s
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if tick != 0 or self.proxy is None or not d.pool_ub:
+            return
+        try:
+            bvib = d.basket.functions.basketValueInBuck().call() / 1e18
+        except Exception:
+            return
+        if self._last_day is None:
+            self._last_day = day
+            self._ewma = bvib
+        dd = max(0, day - self._last_day)
+        self._last_day = day
+        if dd:
+            alpha = 1.0 - 0.5 ** (dd / max(1e-9, self.halflife))
+            self._ewma += alpha * (bvib - self._ewma)
+        try:
+            ru = d.chain.balance_of(d.usdc, d.pool_ub)
+            rb = d.chain.balance_of(d.buck, d.pool_ub)
+        except Exception:
+            return
+        if ru <= 0 or rb <= 0:
+            return
+        fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
+        try:
+            if self.capital == "credit":
+                self._act_credit(d, self._ewma, ru, rb, fee, ctr)
+            else:
+                self._act_usdc(d, self._ewma, ru, rb, fee, ctr)
+        except Exception as e:
+            ctr["exc_err"] = repr(e)[:160]
+
+    # -- USDC base: buy the discount, sell the reversion --------------------- #
+
+    def _act_usdc(self, d, e, ru, rb, fee, ctr) -> None:
+        held = d.chain.balance_of(d.buck, self.proxy.address)
+        if held > 10 ** 6 and e <= 1.0 + self.exit_dev:
+            # Reversion (or premium overshoot): close the long, book P&L.
+            before = d.chain.balance_of(d.usdc, self.proxy.address)
+            self._swap_via_simlp(d, d.pool_ub, d.buck, held,
+                                 self.proxy.address)
+            got = d.chain.balance_of(d.usdc, self.proxy.address) - before
+            ctr["excursionExits"] = ctr.get("excursionExits", 0) + 1
+            ctr["excursionRealized"] = (ctr.get("excursionRealized", 0)
+                                        + got - self._basis)
+            self._basis = 0
+            return
+        if e > 1.0 + self.entry_dev:
+            cash = d.chain.balance_of(d.usdc, self.proxy.address)
+            x = min(cash, _impact_cap(ru, self.max_impact_bp))
+            if x < 10 ** 6:
+                return
+            xp = int(x * (1.0 - fee))
+            out = rb * xp // (ru + xp)
+            if out <= 0 or x / out > 1.0 - self.min_edge:
+                return              # no ex-ante edge at this size
+            self._swap_via_simlp(d, d.pool_ub, d.usdc, x, self.proxy.address)
+            self._basis += x
+            ctr["excursionEntries"] = ctr.get("excursionEntries", 0) + 1
+
+    # -- credit base: sell the premium dear, retire the discount cheap ------- #
+
+    def _act_credit(self, d, e, ru, rb, fee, ctr) -> None:
+        signed = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        drawn = max(0, -signed)
+        if e < 1.0 - self.entry_dev:
+            # Premium excursion: issue against latent credit, sell above par.
+            y = _impact_cap(rb, self.max_impact_bp)
+            if y < 10 ** 6:
+                return
+            yp = int(y * (1.0 - fee))
+            out = ru * yp // (rb + yp)
+            if out / y < 1.0 + self.min_edge:
+                return              # pool does not pay par + edge
+            spendable = max(0, d.buck.functions.balanceOf(
+                self.proxy.address).call())
+            if spendable < y:
+                try:
+                    k = int(d.kctrl.functions.buckK().call())
+                except Exception:
+                    k = 0
+                if k > 0:
+                    m = ((y - spendable) * 10 ** 18 // k) * 105 // 100
+                    try:
+                        self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                            "mint(uint256)", args=[int(m)]))
+                    except Exception as ex:
+                        ctr["exc_mint_err"] = repr(ex)[:120]
+            sold = self._sell_capped(d, d.pool_ub, y)
+            if sold > 0:
+                ctr["excursionEntries"] = ctr.get("excursionEntries", 0) + 1
+        elif e > 1.0 + self.entry_dev and drawn > 10 ** 6:
+            # Discount excursion: buy the obligation back below par.
+            cash = d.chain.balance_of(d.usdc, self.proxy.address)
+            x = min(cash, _impact_cap(ru, self.max_impact_bp))
+            if x < 10 ** 6:
+                return
+            xp = int(x * (1.0 - fee))
+            out = rb * xp // (ru + xp)
+            if out <= 0 or x / out > 1.0 - self.min_edge:
+                return
+            got = self._buy_buck(d, d.pool_ub, d.usdc, min(out, drawn),
+                                 d.fee_ub)
+            if got > 10 ** 6:
+                # The buy already retired drawn credit (signed climbed
+                # toward 0); best-effort burn deactivates the coverage.
+                try:
+                    self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                        "burn(uint256)", args=[int(got)]))
+                except Exception:
+                    pass
+                ctr["excursionExits"] = ctr.get("excursionExits", 0) + 1
+
+
+@_register
+class ExcursionCreditArbAgent(ExcursionArbAgent):
+    """ExcursionArbAgent pinned to the latent-credit capital base, so a
+    population can mix bases via two [scenario.agents] entries."""
+
+    CAPITAL = "credit"
+
+
+@_register
+class WhaleRaidAgent(_ProxyAgent):
+    """The adversary: tests whether a whale can force undamped feedback.
+
+    Quietly accumulates a BUCK position (impact-capped daily buys over
+    accum_days), then at raid_frac of the horizon DUMPS the entire
+    position into the floating pool across that day's ticks -- the attack
+    deliberately ignores impact caps -- and finally attempts to
+    re-accumulate the same BUCK position at the depressed price over
+    reacquire_days.  The design claim under test: against a poised cast
+    (excursion arbs, latent credit, theta-law debtors) the raid strictly
+    loses money (raidPnl = dump proceeds - reacquisition cost < 0, or the
+    position cannot be rebuilt at all: raidShortfall > 0) and the
+    excursion half-life stays bounded.
+
+    Phases (ctr raidPhase): 0 idle, 1 accumulate, 2 dump, 3 reacquire,
+    4 done."""
+
+    def setup(self, d, scenario, rng) -> None:
+        self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
+        r = self._rng
+        cls = type(self).__name__
+        horizon = max(1, int(getattr(scenario, "days", 1)))
+        self.budget = int(_draw(scenario, cls, "budget_m", r,
+                                (8, 12)) * 1_000_000 * 10 ** 6)
+        self.accum_days = int(_spec(scenario, cls, "accum_days", 60))
+        self.reacq_days = int(_spec(scenario, cls, "reacquire_days", 90))
+        raid_frac = float(_spec(scenario, cls, "raid_frac", 0.5))
+        self.raid_day = max(1, int(raid_frac * horizon))
+        self.accum_start = max(0, self.raid_day - self.accum_days)
+        self._bind_proxy(d)
+        d.chain.send(d.usdc.functions.mint(self.proxy.address, self.budget))
+        self.spent_accum = 0
+        self.recv_dump = 0
+        self.spent_reacq = 0
+        self.target_buck = 0
+        self.phase = 0
+
+    def _buy_slice(self, d, days_left: int, cap_bp: int) -> int:
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        ru = d.chain.balance_of(d.usdc, d.pool_ub)
+        x = min(cash, cash // max(1, days_left) + 1, _impact_cap(ru, cap_bp))
+        if x < 10 ** 6:
+            return 0
+        before = cash
+        self._swap_via_simlp(d, d.pool_ub, d.usdc, x, self.proxy.address)
+        return before - d.chain.balance_of(d.usdc, self.proxy.address)
+
+    def act(self, d, scenario, day, tick, ctr) -> None:
+        if self.proxy is None or not d.pool_ub:
+            return
+        try:
+            if self.phase < 4:
+                ticks = max(1, int(getattr(scenario, "ticks_per_day", 1)))
+                if day < self.accum_start:
+                    self.phase = 0
+                elif day < self.raid_day:
+                    self.phase = 1
+                    if tick == 0:
+                        self.spent_accum += self._buy_slice(
+                            d, self.raid_day - day, 50)
+                elif day == self.raid_day:
+                    self.phase = 2
+                    held = d.chain.balance_of(d.buck, self.proxy.address)
+                    if tick == 0 and self.target_buck == 0:
+                        self.target_buck = held
+                    chunk = held // max(1, ticks - tick)
+                    if chunk > 10 ** 6:
+                        before = d.chain.balance_of(d.usdc,
+                                                    self.proxy.address)
+                        self._swap_via_simlp(d, d.pool_ub, d.buck, chunk,
+                                             self.proxy.address)
+                        self.recv_dump += (d.chain.balance_of(
+                            d.usdc, self.proxy.address) - before)
+                elif day <= self.raid_day + self.reacq_days:
+                    self.phase = 3
+                    if tick == 0:
+                        held = d.chain.balance_of(d.buck, self.proxy.address)
+                        if self.target_buck - held <= 10 ** 6:
+                            self.phase = 4
+                        else:
+                            self.spent_reacq += self._buy_slice(
+                                d, self.raid_day + self.reacq_days - day, 50)
+                else:
+                    self.phase = 4
+        except Exception as e:
+            ctr["raid_err"] = repr(e)[:160]
+        ctr["raidPhase"] = self.phase
+        ctr["raidPnl"] = self.recv_dump - self.spent_reacq
+        ctr["raidAccumSpent"] = self.spent_accum
+        if self.phase >= 3 and self.target_buck:
+            held = d.chain.balance_of(d.buck, self.proxy.address)
+            ctr["raidShortfall"] = max(0, self.target_buck - held)
+
+
+@_register
 class PidKeeperAgent(Agent):
     """A registered EOA that advances the PID every tick (permissionless
     compute()).  compute() only does work once dT (30 min) has elapsed, which
