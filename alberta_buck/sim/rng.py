@@ -96,3 +96,22 @@ def agent_rng(seed: int, class_name: str, idx: int):
     return random.Random(
         int.from_bytes(hashlib.blake2b(_key_bytes(seed, class_name, idx),
                                        digest_size=16).digest(), "big"))
+
+
+def keyed_u(seed: int, *parts) -> float:
+    """A language-neutral uniform in [0,1) keyed by (seed, *parts) -- the
+    loop's OWN draws in keyed mode (whale snap tick and token order, the
+    per-tick agent act order), so they consume no shared stream and do not
+    depend on how many agents exist.  Each str part is UTF-8 with a 1-byte
+    length prefix, each int part 8 bytes big-endian (signed); the digest is
+    blake2b(seed_be32 || b"loop" || parts, digest_size=8) and the float is
+    (u64 >> 11) * 2**-53, exactly as KeyedRandom.random()."""
+    buf = bytearray(int(seed).to_bytes(32, "big", signed=False) + b"loop")
+    for x in parts:
+        if isinstance(x, str):
+            b = x.encode()
+            buf += bytes([len(b) & 0xFF]) + b
+        else:
+            buf += int(x).to_bytes(8, "big", signed=True)
+    h = hashlib.blake2b(bytes(buf), digest_size=8).digest()
+    return (int.from_bytes(h, "big") >> 11) * (2.0 ** -53)

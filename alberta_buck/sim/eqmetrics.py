@@ -209,6 +209,9 @@ def excursion_response(frames: list, w: dict, resp_days: int = RESP_DAYS,
                       wdev < pre_wdev + band, minus day1; searched to the
                       vector end
       d_exc_pnl_m, d_raid_pnl_m   population P&L change across the span
+      d_exc_real_m                excursion REALIZED P&L booked on closes
+                                  (par-marked d_exc_pnl_m includes the
+                                  mark-to-market of held BUCK/baskets)
                       in $M (6-dec USD), baselined at the last frame BEFORE
                       day0 (so injection-day marks count), else the first
                       span frame
@@ -330,6 +333,7 @@ def excursion_response(frames: list, w: dict, resp_days: int = RESP_DAYS,
         "wdev_peak_day": wdev_peak_day,
         "wdev_recovery_days": wdev_recovery_days,
         "d_exc_pnl_m": delta("exc_pnl", E6 * 1e6),
+        "d_exc_real_m": delta("exc_realized", E6 * 1e6),
         "d_raid_pnl_m": delta("raid_pnl", E6 * 1e6),
         "exc_entries": delta("exc_entries"),
         "exc_exits": delta("exc_exits"),
@@ -494,8 +498,8 @@ def _f(v, spec, none="-"):
 def exc_header() -> str:
     return (f"{'name':<18} {'kind':<24} {'day0-day1':>10} {'peak%':>6} "
             f"{'@d':>4} {'recov':>6} {'auc':>7} {'Kmove':>6} {'rail':>5} "
-            f"{'$ext%':>6} {'wdev+':>6} {'dExc$M':>7} {'dRaid$M':>8} "
-            f"{'ent/ex':>7}")
+            f"{'$ext%':>6} {'wdev+':>6} {'dExc$M':>7} {'dReal$M':>8} "
+            f"{'dRaid$M':>8} {'ent/ex':>7}")
 
 
 def exc_row(stats: dict, x: dict) -> str:
@@ -520,6 +524,7 @@ def exc_row(stats: dict, x: dict) -> str:
             f"{_f(None if bu is None else 100 * bu, '+.1f'):>6} "
             f"{_f(x.get('wdev_peak'), '+.3f'):>6} "
             f"{_f(x.get('d_exc_pnl_m'), '+.2f'):>7} "
+            f"{_f(x.get('d_exc_real_m'), '+.2f'):>8} "
             f"{_f(x.get('d_raid_pnl_m'), '+.2f'):>8} "
             f"{ent_ex:>7}")
 

@@ -531,6 +531,7 @@ class Snapshotter:
             "exc_entries": ctr.get("excursionEntries", 0),
             "exc_exits": ctr.get("excursionExits", 0),
             "exc_pnl": exc_pnl,
+            "exc_realized": ctr.get("excursionRealized", 0),
             "exc_held": exc_held,
             "raid_phase": ctr.get("raidPhase", 0),
             "raid_pnl": ctr.get("raidPnl", 0),

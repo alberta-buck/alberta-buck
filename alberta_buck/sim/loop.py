@@ -139,9 +139,21 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
         # TOKEN/USDC truth pool.  Updating only one random token let the
         # floating BUCK/USDC gauge be dominated by whichever asset was most
         # recently snapped, making TOKEN/BUCK->USD plots look cross-wired.
-        whale_tick = prng.randrange(scenario.ticks_per_day)
-        whale_order = list(range(n_tok))
-        prng.shuffle(whale_order)
+        # Keyed mode: the loop's own draws come from keyed hashes instead of
+        # the shared Mersenne stream, so whale timing and the agents' act
+        # order do not depend on how many agents exist -- cells that differ
+        # only by an (inert) agent population share an identical history.
+        # Historical (default) mode is untouched.
+        keyed = _rng_mod.mode() == "keyed"
+        if keyed:
+            whale_tick = int(_rng_mod.keyed_u(scenario.seed, "whale", day)
+                             * scenario.ticks_per_day)
+            whale_order = sorted(range(n_tok), key=lambda i: _rng_mod.keyed_u(
+                scenario.seed, "whale-order", day, i))
+        else:
+            whale_tick = prng.randrange(scenario.ticks_per_day)
+            whale_order = list(range(n_tok))
+            prng.shuffle(whale_order)
         for tick in range(scenario.ticks_per_day):
             ts += tick_secs
             anvil.warp_to(ts)
@@ -150,8 +162,13 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
                 for wagent in whales:
                     for whale_tok in whale_order:
                         wagent.snap(d, scenario, day, whale_tok, ctr)
-            order = arbs[:]
-            prng.shuffle(order)
+            if keyed:
+                order = sorted(arbs, key=lambda a: _rng_mod.keyed_u(
+                    scenario.seed, "order", day, tick, type(a).__name__,
+                    a.idx))
+            else:
+                order = arbs[:]
+                prng.shuffle(order)
             for a in order:
                 a.act(d, scenario, day, tick, ctr)
         try:

@@ -102,9 +102,30 @@ def cells(arms, mixes, scales, sets, days, outdir: Path) -> list[dict]:
     return out
 
 
+def complete(path: Path) -> bool:
+    """True when `path` is a FINISHED vector: the sim writes checkpoint
+    vectors mid-run, so existence is not completion.  Finished == the last
+    frame's day reaches the experiment's horizon (years * 365, less a day)
+    or, for truncated smokes (--days), at least 95% of the frames' span."""
+    try:
+        d = json.loads(path.read_text())
+        fr = d.get("frames") or []
+        if not fr:
+            return False
+        sc = (d.get("meta", {}).get("experiment", {}) or {}).get("scenario", {})
+        horizon = float(sc.get("years") or 0) * 365
+        last = int(fr[-1].get("day", 0))
+        days = d.get("meta", {}).get("days")
+        if days:
+            return last >= int(days) - 1
+        return horizon > 0 and last >= int(horizon) - 2
+    except Exception:
+        return False
+
+
 def _run_one(spec: dict) -> dict:
     out = Path(spec["out"])
-    if out.exists() and not spec.get("force"):
+    if out.exists() and not spec.get("force") and complete(out):
         return {"label": spec["label"], "skipped": True}
     cmd = [sys.executable, "-m", "alberta_buck.sim",
            "--experiment", spec["toml"], "--backend", "pyrevm",
@@ -194,12 +215,13 @@ def report(specs: list[dict], outdir: Path, resp_days: int, band: float):
         return (f"{_fmt(x.get('peak_dev') * 100 if x.get('peak_dev') is not None else None, '+.1f')}%"
                 f" r{('never' if rec is None else int(rec))}"
                 f" auc{_fmt(x.get('auc_pct_days'), '.0f')}"
-                f" exc{_fmt(x.get('d_exc_pnl_m'), '+.2f')}"
+                f" real{_fmt(x.get('d_exc_real_m'), '+.2f')}"
+                f" mark{_fmt(x.get('d_exc_pnl_m'), '+.2f')}"
                 f" raid{_fmt(x.get('d_raid_pnl_m'), '+.2f')}")
 
     for scale in scales:
-        P(f"## grid: peak bv dev % / recovery d / auc %-days / d exc P&L $M / "
-          f"d raid P&L $M  (scale x{scale:g})")
+        P(f"## grid: peak bv dev % / recovery d / auc %-days / defender "
+          f"realized $M / defender marked $M / raid P&L $M  (scale x{scale:g})")
         P("")
         P("| arm \\ mix | " + " | ".join(mixes) + " |")
         P("|---|" + "---|" * len(mixes))
@@ -256,7 +278,7 @@ def main(argv=None) -> int:
         from alberta_buck.sim.gen_historical import gen
         gen(years=2.0)
         todo = [sp for sp in specs
-                if a.force or not Path(sp["out"]).exists()]
+                if a.force or not complete(Path(sp["out"]))]
         print(f"[catalogue] {len(specs)} cells, {len(todo)} to run, "
               f"{a.jobs} jobs -> {outdir}", flush=True)
         with ThreadPoolExecutor(max_workers=max(1, a.jobs)) as pool:

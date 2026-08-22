@@ -203,3 +203,17 @@ Recipe (all integers big-endian, blake2b = RFC 7693, unkeyed):
   KeyedRandom so a gap fails loudly instead of diverging silently.
 - The loop's world machinery (whale scheduling, identity nonces) is NOT
   on this contract; it stays server-side.
+
+### The loop's own draws (keyed mode)
+
+In keyed mode the run loop takes its own three draws from keyed hashes
+too, so nothing consumes a shared stream and the world's history does
+not depend on how many agents exist (two runs differing only by an
+inert agent population are identical):
+
+    u(seed, *parts) = blake2b(seed_be32 || b"loop" || parts, 8) >> 11 * 2^-53
+      str part  -> 1-byte length || utf8;  int part -> 8 bytes BE (signed)
+    whale snap tick  = floor(u(seed, "whale", day) * ticks_per_day)
+    whale token order = token indices sorted by u(seed, "whale-order", day, i)
+    agent act order (per tick) = agents sorted by
+                       u(seed, "order", day, tick, class_name, idx)
