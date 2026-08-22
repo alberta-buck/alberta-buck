@@ -206,6 +206,97 @@ the on-chain brakes (funding-factor toll, pre-buy reserve, K-scaled
 limits) price what arrivals may do.  Matched supply/demand growth is an
 emergent property of the price system, as designed.
 
+* The excursion program: poised capital vs. the whale (2026-08-22)
+
+Short/mid-term stability is supposed to rest on profit-seeking
+participants poised to capitalize on BUCK-vs-bvib excursions.  Two agent
+classes test that thesis, plus an adversary.
+
+** The excursion agents: methodology and assumptions
+
+*ExcursionArbAgent* watches an EWMA of basketValueInBuck (halflife 5 d)
+and acts once daily (tick 0).  Every trade is gated by an ex-ante
+all-in quote in the atomic-refinance spirit: the closed-form
+constant-product execution price (plus pool fee) at the impact-capped
+size (50-150 bp of the pool side) must clear par by ~min_edge~ (1%) --
+no computed edge at that size, no trade.  Two capital bases:
+
+- ~capital="usdc"~ -- a budget war chest ($2-6M).  ENTRY: discount
+  excursion (ewma > 1 + entry_dev, 0.03: BUCK cheap vs basket) -> buy.
+  EXIT: the whole long is closed when the ewma re-enters
+  1 + exit_dev (0.01) from above -- including a premium overshoot --
+  booking realized P&L against the accumulated basis.
+- ~capital="credit"~ -- the LATENT-CREDIT participant: a zero-premium
+  BuckCredit face ($2-6M) it has never needed to draw.  ENTRY: premium
+  excursion (ewma < 1 - entry_dev) -> mint against face*K and sell
+  above par.  EXIT: a LATER DISCOUNT excursion (ewma > 1 + entry_dev,
+  deliberately the entry-grade gate, not exit_dev) -> buy BUCK below
+  par toward the drawn balance (the buy itself retires drawn credit;
+  a best-effort burn deactivates coverage).  Selling a par obligation
+  dear and retiring it cheap is the reversion profit; closing at par
+  would only pay fees, so the position correctly WAITS -- possibly
+  forever (the obligation melts on the Jubilee regardless).
+
+Assumptions worth knowing when reading results: the signal is bvib
+(the controller's own process variable), not buckUsd; quotes are
+single-pool (the floating BUCK/USDC route only, no multi-hop); net
+worth is par-marked (USDC + signed BUCK at 1.0); positions carry no
+financing cost beyond demurrage; agents act independently, daily.
+
+The 5-day halflife has a consequence the raid exposed: a 3-day
+excursion is attenuated roughly 3x by the filter, so raid-speed events
+barely graze the 3% entry gate -- the slow cold-start premium is what
+the credit base sold into (nearly all recorded "entries"), while the
+USDC base sat correctly idle for five years in the healthy arms.
+"Zero exits" in the finals is therefore mostly the credit base's
+designed patience, plus a filter too slow for raid-speed discounts;
+a faster (or dual-timescale) signal is the obvious calibration
+experiment.
+
+*WhaleRaidAgent* is the adversary: accumulate a position quietly
+(impact-capped daily slices), DUMP it all on the raid day
+(deliberately uncapped -- that is the attack), then attempt to
+re-accumulate at the depressed price.  Its ledger prices the raid
+exactly: dump proceeds minus accumulation and re-acquisition costs.
+
+** The raid experiment (three arms, all complete)
+
+| arm                  | verdict            |     K | raid P&L | buckUsd trough | recovery |
+|----------------------+--------------------+-------+----------+----------------+----------|
+| endog-excursion      | PASS (bv 1.0005)   | 0.725 |       -- | --             | --       |
+| endog-excursion-raid | PASS (bv 1.0010)   | 0.904 |  -$1.00M | -22%           | 3 days   |
+| endog-raid (control) | FAIL (37% railed)  | 0.949 |  -$0.57M | -23%           | never    |
+
+1. *Raids lose money, and defenders make them lose more.*  Against the
+   poised cast the whale lost $1.00M; undefended, only $0.57M --
+   because the defended market snapped back in 3 days, forcing
+   re-accumulation at recovered prices, while the undefended market
+   stayed depressed and sold the whale its position back cheap.
+   Defense heals the market faster AND punishes the raider harder.
+2. *The undefended economy takes permanent damage*: peak bv deviation
+   16.7% (vs 8.8% defended), no recovery inside 60 days, and the arm
+   fails its gate outright (K railed 37% of the tail).  The poised
+   cast is the difference between a bruise and a wound.
+3. *The excursion cast is the strongest K-relief measured*: resting K
+   drops from the endog arm's 0.924 to 0.725 -- below K0 -- with the
+   retirement channel open.  A standing two-sided private cast
+   relieves the controller more than any initialization variant.
+4. Caveat: excursion earnings (+$3.5-4.2M) are par-marked
+   mark-to-model; the credit base's obligations remain open by design,
+   so realized-vs-marked stays a reporting distinction.
+
+* Portcast: the JS-port validation target (in flight)
+
+~rebalancing-eq-5yr-portcast~ is the settled-physics cast -- every
+agent in its decision-of-record embodiment, language-neutral keyed
+RNG (~[scenario] rng = "keyed"~; recipe in TELEMETRY.md), and NO
+FatCreditBorrowerAgent: if the household debtors + basket depositors
+alone pass the gate, an entire complex class drops out of the JS
+port.  Already learned from its smoke: WITHOUT FatCredit the
+cold-start transient vanishes entirely (bv 0.993-1.009, K flat at
+K0 = 0.750) -- the mature arms' violent openings were the Fat
+borrowers' day-0 reserve prefunding and issuance all along.
+
 * Cross-cutting findings
 
 1. *Execution semantics and market microstructure matter as much as
