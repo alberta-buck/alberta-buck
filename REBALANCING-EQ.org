@@ -368,6 +368,52 @@ Ranked by expected information per unit of compute.
    quote (and the arbs) to split across routes would let depth be
    stressed without the abstraction absorbing it.
 
+* Roadmap: the quadrant-balance program (2026-08-22)
+
+The organizing model (Perry): K guarantees equilibrium in the long run;
+short-term stability rests on profit-seeking agents covering four
+quadrants in roughly equal strength -- BUCK issue/withdraw balanced by
+accumulate/redeem, on two symmetry axes: the COMMON mode (BUCK vs the
+neutral basket: sell BUCK rich into basket exposure, rotate back on the
+discount) and the DIFFERENTIAL mode (sell commodities above their basket
+proportion into those below).  Individual agents are modeled and tuned
+for their own ROI first; the learnings then integrate into a sane
+BuckBasket (which should perform the absorb service automatically when
+BUCK is at a discount and K is rising -- BuckBasketOps Q1 with a
+K-gradient condition).
+
+In dependency order:
+
+1. *BasketRotationAgent* -- the four-legged common-mode agent: value
+   held as BUCK or a BuckBasket receipt, rotated on bvib excursions
+   under the ex-ante-quote discipline.  Completes symmetry axis 1 (the
+   current excursion pair trades against USDC, not the neutral basket,
+   and each covers only half the round trip).
+2. Dual-timescale excursion signal -- DONE (fast_halflife; effective
+   signal = the filter farther from parity).  Remaining: expose the
+   credit base's buyback threshold as its own knob.
+3. *CommodityRebalArbAgent* -- the private differential-mode trader:
+   sells overweight constituents into underweight ones for its own
+   account (the director's signal, privatized); optional
+   foresight_days knob wired to scheduled price shocks to price the
+   value of commodity-specialist foresight.
+4. *Quadrant-flow telemetry* -- classify per-day dollar flows into the
+   four quadrants per class; a balance metric (strength ratios +
+   symmetry index) in eqmetrics.  The instrument panel for tuning.
+5. *Per-class ROI reporting* -- telemetry-derived realized+marked ROI
+   per class, so knob sweeps rank configurations by individual agent
+   profitability as well as system stability.
+6. *Balance-mix harness* -- one dial per quadrant (cohort counts and
+   budgets), swept; plus a dedicated startup-imbalance arm (issuers
+   front-loaded, opportunistic-wealth dial varied).
+7. LAST: fold the winning knobs into the BuckBasketOps/Fence revision
+   and gate it as a contract-level arm.
+
+In flight as of this writing: the portcast full run (the no-FatCredit
+JS-port target) and dual-timescale re-runs of the two excursion arms
+(single-timescale finals preserved under build/sim/runs/singlets-*).
+The raid control arm is unaffected by the signal change and stands.
+
 * Artifacts
 
 - Vectors: =test/vectors/rebalancing-sim-eq*.json= (uncommitted;
