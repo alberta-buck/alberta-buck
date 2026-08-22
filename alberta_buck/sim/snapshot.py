@@ -300,6 +300,18 @@ class Snapshotter:
                     exc_pnl += ag._nw(d) - ag._nw0
                 except Exception:
                     pass
+        # Differential-mode private rebalancers: P&L vs buy-and-hold of
+        # the initial inventory (raw BUCK), summed over the class.
+        crb_pnl = crb_n = 0
+        for ag in agents:
+            if type(ag).__name__ == "CommodityRebalArbAgent":
+                try:
+                    rec = ag.telemetry(d)
+                    if rec:
+                        crb_pnl += rec.get("pnl", 0)
+                        crb_n += 1
+                except Exception:
+                    pass
         # Borrower issuance-channel state (equilibrium scenario): summed
         # K-scaled limit / drawn / funding-reserve accounts across the
         # FatCreditBorrower population, plus the cumulative flow counters.
@@ -522,6 +534,13 @@ class Snapshotter:
             "exc_held": exc_held,
             "raid_phase": ctr.get("raidPhase", 0),
             "raid_pnl": ctr.get("raidPnl", 0),
+            "raid_side": ctr.get("raidSide", ""),
+            # Directional quadrant volumes of the excursion population
+            # (cumulative usd6): [absorb, retire, supply, issue].
+            "exc_q": [ctr.get("excQ1", 0), ctr.get("excQ2", 0),
+                      ctr.get("excQ3", 0), ctr.get("excQ4", 0)],
+            "crb_pnl": crb_pnl,
+            "crb_trades": ctr.get("crbTrades", 0),
             "neighbors_retired": ctr.get("neighborsRetired", 0),
             "iv_events": ctr.get("ivEvents", 0),           # cum interventions
             "supply": int(d.buck.functions.totalSupply().call()),

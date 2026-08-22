@@ -49,8 +49,10 @@ Intervention actions (the four surfaces):
     fund        {cls, idx, usdc_m}    mint USDC to proxies (+bump budget)
 
   exogenous shocks:
-    price_shock  {token, mult[, from_day]}   multiplies the CSV reference
-                 from that day on (whale re-pins pools to the shocked ref)
+    price_shock  {token, mult[, from_day, until_day]}
+                 multiplies the CSV reference from from_day (default: the
+                 scheduled day) on; until_day (exclusive) lifts it again,
+                 absent = permanent (whale re-pins pools to the shocked ref)
     uptake_shock {idx="all"|..., mag}        borrowers: +mag adoption step
 
   population:
@@ -309,26 +311,33 @@ def draw(scenario, cls_name: str, name: str, rng, default):
 # ---------------------------------------------------------------------------
 
 class PriceOverlay:
-    """Wraps Prices; multiplies token references from a given day on.  The
-    whale re-pins TOKEN/USDC to the shocked reference, so a shock propagates
-    through the same market plumbing as any real price move.  Keyed off the
-    `day` argument, so day-0 baselines read through unshocked."""
+    """Wraps Prices; multiplies token references from a given day on
+    (optionally only until an `until_day`, exclusive -- a temporary
+    excursion rather than a permanent step).  The whale re-pins TOKEN/USDC
+    to the shocked reference, so a shock propagates through the same market
+    plumbing as any real price move.  Keyed off the `day` argument, so
+    day-0 baselines read through unshocked."""
 
     def __init__(self, base):
         self._base = base
-        self._shocks: list[tuple[int, int, float]] = []   # (tok, from_day, mult)
+        # (tok, from_day, mult, until_day-or-None)
+        self._shocks: list[tuple[int, int, float, int | None]] = []
 
     @property
     def days(self) -> int:
         return self._base.days
 
-    def shock(self, token_idx: int, from_day: int, mult: float) -> None:
-        self._shocks.append((int(token_idx), int(from_day), float(mult)))
+    def shock(self, token_idx: int, from_day: int, mult: float,
+              until_day: int | None = None) -> None:
+        """Multiply token_idx's reference by `mult` while
+        from_day <= day < until_day (until_day None = forever)."""
+        self._shocks.append((int(token_idx), int(from_day), float(mult),
+                             None if until_day is None else int(until_day)))
 
     def ref(self, token_idx: int, day: int) -> int:
         p = self._base.ref(token_idx, day)
-        for tok, fd, m in self._shocks:
-            if tok == token_idx and day >= fd:
+        for tok, fd, m, ud in self._shocks:
+            if tok == token_idx and day >= fd and (ud is None or day < ud):
                 p = int(p * m)
         return max(1, p)
 
@@ -468,8 +477,13 @@ class Interventions:
         if act == "price_shock":
             ti = self._token_index(iv["token"])
             from_day = int(iv.get("from_day", day))
-            self.scenario.prices.shock(ti, from_day, float(iv["mult"]))
-            return f"{iv['token']} x{iv['mult']} from day {from_day}"
+            until_day = iv.get("until_day")
+            until_day = None if until_day is None else int(until_day)
+            self.scenario.prices.shock(ti, from_day, float(iv["mult"]),
+                                       until_day=until_day)
+            return (f"{iv['token']} x{iv['mult']} from day {from_day}"
+                    + (f" until day {until_day}" if until_day is not None
+                       else ""))
         if act == "uptake_shock":
             sel = self._select({**iv, "cls":
                                 iv.get("cls", "FatCreditBorrowerAgent")})

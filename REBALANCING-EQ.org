@@ -261,11 +261,25 @@ exactly: dump proceeds minus accumulation and re-acquisition costs.
 
 ** The raid experiment (three arms, all complete)
 
-| arm                  | verdict            |     K | raid P&L | buckUsd trough | recovery |
-|----------------------+--------------------+-------+----------+----------------+----------|
-| endog-excursion      | PASS (bv 1.0005)   | 0.725 |       -- | --             | --       |
-| endog-excursion-raid | PASS (bv 1.0010)   | 0.904 |  -$1.00M | -22%           | 3 days   |
-| endog-raid (control) | FAIL (37% railed)  | 0.949 |  -$0.57M | -23%           | never    |
+| arm                            | verdict            |     K | raid P&L | buckUsd trough | recovery |
+|--------------------------------+--------------------+-------+----------+----------------+----------|
+| endog-excursion (single-ts)    | PASS (bv 1.0005)   | 0.725 |       -- | --             | --       |
+| endog-excursion-raid (single)  | PASS (bv 1.0010)   | 0.904 |  -$1.00M | -22%           | 3 days   |
+| endog-raid (control)           | FAIL (37% railed)  | 0.949 |  -$0.57M | -23%           | never    |
+| endog-excursion (dual-ts)      | PASS (bv 1.0005)   | 0.691 |       -- | --             | --       |
+| endog-excursion-raid (dual-ts) | PASS (bv 1.0015)   | 0.938 |  -$0.87M | -21%           | 40 days  |
+
+The dual-timescale rows (fast_halflife 1 d, commit bb4ec06) are NOT a
+controlled comparison with the single-timescale rows above them: the
+signal change alters every excursion decision from day 0, so by the
+day-913 raid the two histories had diverged for 913 days (different
+K, inventories, pool depths).  What the dual-ts raid arm does show is
+that the fast filter ENGAGED the raid (+13 discount-leg entries in
+the dump+30d window, where the single-ts cast sat out) while the
+healthy dual-ts arm posts the tightest bv spread in the program (sd
+0.0066) and higher excursion earnings (+$5.20M vs +$3.46M).  The
+excursion CATALOGUE below is the controlled instrument that replaces
+this kind of comparison.
 
 1. *Raids lose money, and defenders make them lose more.*  Against the
    poised cast the whale lost $1.00M; undefended, only $0.57M --
@@ -285,7 +299,7 @@ exactly: dump proceeds minus accumulation and re-acquisition costs.
    mark-to-model; the credit base's obligations remain open by design,
    so realized-vs-marked stays a reporting distinction.
 
-* Portcast: the JS-port validation target (in flight)
+* Portcast: the JS-port validation target (PASS)
 
 ~rebalancing-eq-5yr-portcast~ is the settled-physics cast -- every
 agent in its decision-of-record embodiment, language-neutral keyed
@@ -296,6 +310,13 @@ port.  Already learned from its smoke: WITHOUT FatCredit the
 cold-start transient vanishes entirely (bv 0.993-1.009, K flat at
 K0 = 0.750) -- the mature arms' violent openings were the Fat
 borrowers' day-0 reserve prefunding and issuance all along.
+
+Full-run verdict (2026-08-22): *PASS* -- bv 1.0004 (sd 0.0070), K
+0.704 interior, 0% railed, channels alive through the bcd+dm fallback
+(3.38M net issuance in the tail).  The no-FatCredit settled-physics
+cast reproduces the success with the tightest spread of any
+full-economy arm; the JS-port cast is CONFIRMED and FatCredit drops
+out of the port.  It is also the base of the excursion catalogue.
 
 * Cross-cutting findings
 
@@ -368,6 +389,106 @@ Ranked by expected information per unit of compute.
    quote (and the arbs) to split across routes would let depth be
    stressed without the abstraction absorbing it.
 
+* The excursion catalogue: control of every excursion (2026-08-22)
+
+The quadrant-balance program needs a falsifiable instrument before it
+needs more agents: "control of every short- and long-term excursion"
+is testable only once the excursions are enumerated, injected on a
+controlled window, and measured by one response metric.  The
+catalogue is that instrument.  Code: ~alberta_buck/sim/catalogue.py~
+(grid driver), ~experiments/catalogue-*.toml~ (arms),
+~eqmetrics.excursion_windows/excursion_response~ (metric).
+
+** The arms (2-year portcast window, ONE injection at day 365)
+
+| arm        | axis         | sign     | speed | injector                                         |
+|------------+--------------+----------+-------+--------------------------------------------------|
+| none       | --           | --       | --    | control: endogenous excursions only              |
+| dump       | common       | discount | short | WhaleRaid side=sell: accumulate 60 d, dump 1 d   |
+| squeeze    | common       | premium  | short | WhaleRaid side=buy: buy $8-12M in 1 d            |
+| grind-down | common       | discount | long  | WhaleRaid side=sell: liquidate evenly over 60 d  |
+| grind-up   | common       | premium  | long  | WhaleRaid side=buy: buy evenly over 60 d         |
+| spike      | both         | +basket  | short | price_shock NRGC x1.30, lifted after 30 d        |
+| step       | differential | +basket  | long  | price_shock NRGC x1.30, permanent                |
+
+The base is the portcast cast (settled physics, keyed RNG, no
+FatCredit), which has NO cold-start transient; every defender is
+threshold-gated and therefore idle until an excursion appears; and the
+keyed RNG gives each class its own draw stream.  So cells of one arm
+share an IDENTICAL pre-history up to the injection, and the response
+deltas between mixes are attributable to the mix -- the controlled
+A/B the raid arms could not provide.
+
+** The defender mixes (one agent, every quadrant)
+
+~ExcursionArbAgent~ now holds wealth in two legs, BUCK and a NEUTRAL
+asset, and rotates between them on the dual-timescale bvib signal
+under the ex-ante-quote discipline.  ~neutral~ selects the non-BUCK
+leg -- "usdc" (a war chest), "basket" (the constituents in the
+basket's own ~basketAmount~ proportions, traded TOKEN<->BUCK in the
+TOKEN/BUCK pools that DEFINE bvib, so the rotation pushes the
+observable directly and pays no demurrage while parked), or "credit"
+(the latent-credit issuer/retirer) -- and ~buck_frac~ (the rest-state
+BUCK share) selects the quadrants served from day 0: 0 = absorb the
+discount (Q1), 1 = supply the premium (Q3), 0.5 = two-sided.  Pinned
+subclasses mix them in one roster: ExcursionArbAgent (usdc, Q1),
+ExcursionBuckArbAgent (usdc, buck_frac 1, Q3), ExcursionCreditArbAgent
+(Q4 issue / Q2 retire; buyback gate now its own knob ~cover_dev~),
+ExcursionBasketArbAgent (basket, 0.5: the common-mode rotation agent,
+roadmap item 1 realized as a parameterization, not a new class).
+~CommodityRebalArbAgent~ (roadmap item 3) is the differential-mode
+private trader: an EOA holding a TOKEN inventory in basket
+proportions that sells the constituent dear relative to the basket
+into the one cheap (most-over into most-under, common mode demeaned),
+through the director's own two-hop route, when the spread beats
+~band~ and the ex-ante quote leaves spread - cost >= min_edge; its
+reversion expectation is either the MA deviation (~halflife~) or, with
+~foresight_days~ > 0, the exogenous reference series itself -- the
+commodity specialist who knows whether a shock is transient.  P&L is
+marked against buy-and-hold of the initial inventory.  The excursion
+population's DIRECTIONAL dollar flows are now booked per quadrant
+(~exc_q~ = absorb / retire / supply / issue) -- the first cut of the
+quadrant-flow telemetry (roadmap item 4).
+
+| mix    | ExcursionArb | Credit | Basket | Buck | CommodityRebal | quadrants staffed           |
+|--------+--------------+--------+--------+------+----------------+-----------------------------|
+| none   |            0 |      0 |      0 |    0 |              0 | -- (Saver + debtors only)    |
+| usdc   |            8 |      0 |      0 |    0 |              0 | Q1 absorb                   |
+| buck   |            0 |      0 |      0 |    8 |              0 | Q3 supply                   |
+| credit |            0 |      8 |      0 |    0 |              0 | Q4 issue, Q2 retire         |
+| basket |            0 |      0 |      8 |    0 |              0 | Q1+Q3 (rotation)            |
+| crb    |            0 |      0 |      0 |    0 |              4 | differential only           |
+| all    |            5 |      3 |      4 |    2 |              2 | every quadrant + both axes  |
+
+~--scale~ multiplies every defender count (intensity); the whale's
+~budget_m~ and the shock's ~mult~ scale the injections.
+
+** The response metric (eqmetrics, per injection window)
+
+Windows are detected from the vector itself (raid phase 2 spans;
+applied price_shock / other interventions).  For each: pre-window
+baselines (30 d), signed peak bv deviation and its day, AUC of |bv-1|
+(%-days), recovery days (first day after the injection end with
+|bv-1| < 1% held for 5 d; "never" otherwise), K move and rail days,
+buckUsd extreme, the axis-2 weight-deviation peak and recovery
+(poolWeights), and the population deltas over the span: excursion
+P&L, raid P&L, entries/exits, per-quadrant flows.  ~python -m
+alberta_buck.sim.eqmetrics --json~ exposes everything to the grid
+driver.  Verdicts of every historical vector are unchanged.
+
+** Reading the grid
+
+The arm x mix grid answers the program's two questions directly:
+(1) the BOUNDS of equilibrium -- which injections a given mix survives
+(verdict, peak, recovery) and at what intensity the bound breaks; (2)
+the SIGNS of weak support from a quadrant -- an arm whose response is
+poor under every mix lacking that quadrant and good under every mix
+staffing it (a premium excursion uncontrolled without Q3/Q4 staffing,
+a discount one without Q1/Q2, a differential one without the
+rebalancer) isolates the missing quadrant.  Wave 1 (7 arms x 6 mixes,
+scale 1) is in flight as of this writing; results will be recorded
+here with the grid.
+
 * Roadmap: the quadrant-balance program (2026-08-22)
 
 The organizing model (Perry): K guarantees equilibrium in the long run;
@@ -382,24 +503,28 @@ BuckBasket (which should perform the absorb service automatically when
 BUCK is at a discount and K is rising -- BuckBasketOps Q1 with a
 K-gradient condition).
 
-In dependency order:
+In dependency order (status as of 2026-08-22 in brackets):
 
-1. *BasketRotationAgent* -- the four-legged common-mode agent: value
-   held as BUCK or a BuckBasket receipt, rotated on bvib excursions
-   under the ex-ante-quote discipline.  Completes symmetry axis 1 (the
-   current excursion pair trades against USDC, not the neutral basket,
-   and each covers only half the round trip).
-2. Dual-timescale excursion signal -- DONE (fast_halflife; effective
-   signal = the filter farther from parity).  Remaining: expose the
-   credit base's buyback threshold as its own knob.
-3. *CommodityRebalArbAgent* -- the private differential-mode trader:
-   sells overweight constituents into underweight ones for its own
-   account (the director's signal, privatized); optional
-   foresight_days knob wired to scheduled price shocks to price the
-   value of commodity-specialist foresight.
-4. *Quadrant-flow telemetry* -- classify per-day dollar flows into the
-   four quadrants per class; a balance metric (strength ratios +
-   symmetry index) in eqmetrics.  The instrument panel for tuning.
+0. *The excursion catalogue* [DONE, wave 1 in flight] -- enumerate the
+   excursions (axis x sign x speed), inject each on a controlled
+   window, measure one response metric, grid it against defender
+   mixes and intensities.  The falsifiable instrument the rest of the
+   program is tuned against.
+1. *BasketRotationAgent* [DONE as a parameterization: ExcursionArb
+   neutral="basket", buck_frac 0.5] -- the common-mode rotation agent
+   trading BUCK <-> the constituent basket in the bvib-defining pools.
+   Completes symmetry axis 1.  A BuckBasket-RECEIPT neutral leg (LP
+   exposure that earns the rebalancing premium) remains a possible
+   fourth base.
+2. Dual-timescale excursion signal [DONE]; credit-base buyback
+   threshold exposed as ~cover_dev~ [DONE].
+3. *CommodityRebalArbAgent* [DONE, minimal] -- MA-reversion or
+   foresight signal, band, two-hop execution; to be tuned on the
+   spike/step arms.
+4. *Quadrant-flow telemetry* [PARTIAL] -- the excursion population's
+   directional flows are booked per quadrant (~exc_q~); the remaining
+   classes (Saver, debtors, DM) and the balance metric (strength
+   ratios + symmetry index) are still to do.
 5. *Per-class ROI reporting* -- telemetry-derived realized+marked ROI
    per class, so knob sweeps rank configurations by individual agent
    profitability as well as system stability.
@@ -409,10 +534,15 @@ In dependency order:
 7. LAST: fold the winning knobs into the BuckBasketOps/Fence revision
    and gate it as a contract-level arm.
 
-In flight as of this writing: the portcast full run (the no-FatCredit
-JS-port target) and dual-timescale re-runs of the two excursion arms
-(single-timescale finals preserved under build/sim/runs/singlets-*).
-The raid control arm is unaffected by the signal change and stands.
+Complete as of this writing: the portcast full run (PASS; JS-port
+cast confirmed) and the dual-timescale re-runs of the two excursion
+arms (single-timescale finals preserved under
+build/sim/runs/singlets-*; table and caveat above).  In flight: the
+catalogue's wave 1 (~make nix-venv-sim-catalogue~; report in
+build/sim/catalogue/summary.md).  The JS port (step 3 of the platform
+plan) follows the catalogue: every agent it ports should be one whose
+excursion control has been demonstrated here, in its simplest
+embodiment.
 
 * Artifacts
 

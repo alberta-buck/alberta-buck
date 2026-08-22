@@ -83,16 +83,36 @@ with explicit `null`s).
 
 ### Class extras
 
-**ExcursionArbAgent / ExcursionCreditArbAgent** -- knobs: `capital`
-("usdc"|"credit"), `entry_dev`, `exit_dev`, `min_edge`, `halflife`,
-`max_impact_bp`, `budget`, `face`, `nw0`.  Frame extras: `ewma` (the
-filtered bvib signal, float), `basis` (USDC currently committed to the
-open long; usdc base only).  Population P&L = sum of (`nw` - `nw0`).
+**ExcursionArbAgent** and its pinned variants (ExcursionCreditArbAgent,
+ExcursionBasketArbAgent, ExcursionBuckArbAgent) -- knobs: `neutral`
+("usdc"|"basket"|"credit"; `capital` is the legacy alias), `buck_frac`
+(rest-state BUCK share of the initial wealth), `entry_dev`, `exit_dev`,
+`cover_dev` (credit base buyback gate), `min_edge`, `halflife`,
+`fast_halflife`, `max_impact_bp`, `budget`, `face`, `base_buck`, `nw0`.
+Frame extras: `ewma`/`fast` (the two bvib filters, float), `basis`
+(neutral committed to the open long), `pos` (= `b` - rest-state base:
++ long, - short), and for the basket base `bk` (basket holdings in PAR
+units, usd6: TOKEN value at pool prices / bvib; `nw` includes it).
+Population P&L = sum of (`nw` - `nw0`).  Frame-level `exc_q` =
+[absorb, retire, supply, issue] cumulative directional volumes (usd6)
+of the whole excursion population.
 
-**WhaleRaidAgent** -- knobs: `budget`, `accum_days`, `reacquire_days`,
-`raid_day`.  Frame extras: `phase` (0 idle, 1 accumulate, 2 dump,
-3 reacquire, 4 done), `accum`/`dump`/`reacq` (cumulative USDC legs),
-`target` (BUCK position to rebuild), `pnl` (= `dump` - `reacq`).
+**WhaleRaidAgent** -- knobs: `budget`, `side` ("sell" = dump =
+discount excursion | "buy" = squeeze = premium excursion),
+`accum_days`, `reacquire_days`, `raid_day`, `raid_days` (1 = raid
+speed, N = grind).  Frame extras: `phase` (0 idle, 1 accumulate,
+2 inject, 3 unwind, 4 done), `accum`/`dump`/`reacq` (sell-side USDC
+legs), `raid`/`unwind` (buy-side USDC legs), `target` (BUCK position
+to rebuild / unwind), `pnl` (sell: `dump` - `reacq`; buy: `unwind` -
+`raid`).  Frame-level `raid_side` carries the sign.
+
+**CommodityRebalArbAgent** -- knobs: `budget`, `halflife`, `band`,
+`min_edge`, `foresight_days`, `max_impact_bp`.  Frame record (no
+common fields: an EOA holding TOKEN): `inv` (inventory value at pool
+prices, raw BUCK), `hold` (the initial inventory at today's prices),
+`pnl` (= `inv` - `hold`: the rebalancing premium/penalty vs
+buy-and-hold), `trades`.  Frame-level `crb_pnl` / `crb_trades` sum
+the class.
 
 **BuckCreditDebtorAgent** (stride 4) -- knobs: `theta`, `apr`,
 `pattern`, `face` (insured value), `mortgage0`, `income`, `payment`,

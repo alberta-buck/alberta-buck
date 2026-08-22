@@ -1165,6 +1165,41 @@ sim-rebalancing-eq-matrix:	sim-build
 			> test/vectors/rebalancing-sim-eq$$ext.log 2>&1'
 	$(MAKE) sim-compare-rebalancing-eq
 
+# THE EXCURSION CATALOGUE: injected excursions x defender mixes x intensity
+# on the portcast cast (2-year window, injection at day 365).  Arms are
+# experiments/catalogue-<arm>.toml; mixes/scales are applied as --set
+# overrides by alberta_buck.sim.catalogue (see its docstring).  Cells
+# whose vector exists are reused (a killed grid resumes); the report is
+# build/sim/catalogue/summary.md.  Design: REBALANCING-EQ.org.
+#
+#   make nix-venv-sim-catalogue                      # full grid (7 x 6)
+#   make nix-venv-sim-catalogue CAT_ARMS=dump,squeeze CAT_MIXES=none,basket
+#   make nix-venv-sim-catalogue CAT_SCALE=0.5,2       # intensity sweep
+#   make nix-venv-sim-catalogue-report               # tables from vectors
+#   make nix-venv-sim-catalogue-dump CAT_MIXES=all    # one arm
+
+CAT_ARMS	?= none,dump,squeeze,grind-down,grind-up,spike,step
+CAT_MIXES	?= none,usdc,buck,credit,basket,all
+CAT_SCALE	?= 1
+CAT_JOBS	?= 10
+CAT_DIR		?= build/sim/catalogue
+
+.PHONY: sim-catalogue sim-catalogue-report
+sim-catalogue:	sim-build
+	python -m alberta_buck.sim.catalogue --arms $(CAT_ARMS) \
+		--mixes $(CAT_MIXES) --scale $(CAT_SCALE) \
+		--jobs $(CAT_JOBS) --outdir $(CAT_DIR)
+
+sim-catalogue-report:
+	python -m alberta_buck.sim.catalogue --report-only \
+		--arms $(CAT_ARMS) --mixes $(CAT_MIXES) --scale $(CAT_SCALE) \
+		--outdir $(CAT_DIR)
+
+sim-catalogue-%:	sim-build
+	python -m alberta_buck.sim.catalogue --arms $* \
+		--mixes $(CAT_MIXES) --scale $(CAT_SCALE) \
+		--jobs $(CAT_JOBS) --outdir $(CAT_DIR)
+
 # The realistic observation world: honest BuckCreditDebtorAgents (real
 # premium credit + real funding gate) as the issuance channel, with
 # savers/investors/arbs/whale/PID; growth regimes via arrive_mode knobs

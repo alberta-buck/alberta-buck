@@ -1,0 +1,63 @@
+# Excursion CATALOGUE arm "step" -- the portcast cast (settled physics,
+# keyed rng, no FatCredit) on a 2-year window with ONE injected excursion
+# at day 365.  The defender mix and intensity are swept from outside
+# (alberta_buck.sim.catalogue overrides the Excursion*/CommodityRebal
+# counts); this file fixes the physics and the injection only.
+# Design of record: REBALANCING-EQ.org, "The excursion catalogue".
+name = "catalogue-step"
+notes = "permanent constituent shock: NRGC x1.30 from day 365 (axis 2 + the lagged common mode)"
+
+[scenario]
+family = "rebalancing-eq"
+rng = "keyed"
+years = 2.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[deploy]
+target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route
+
+[scenario.agents]
+FatCreditBorrowerAgent = 0
+BuckCreditDebtorAgent = 30
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+ArrivingDMAgent = 60
+ExcursionArbAgent = 5
+ExcursionCreditArbAgent = 3
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+refi_mode = "atomic"        # ex-ante whole-conversion evaluation
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+arr_gain = 5.0
+arr_max = 3.0
+arr_k_ref = 0.75
+
+[agents.ArrivingDMAgent]
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+ticket_k = [300, 700]
+enter_ptick = 2e-3
+exit_ptick = 2e-3
+dep_dev_ref = 0.02
+dep_halflife = 90.0
+
+# -- the injection ------------------------------------------------------ #
+[[interventions]]
+day = 365
+action = "price_shock"
+token = "NRGC"
+mult = 1.30
