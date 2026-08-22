@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 
 from alberta_buck.sim import identity as idmod
+from alberta_buck.sim import rng as _rng_mod
 from alberta_buck.sim.agents import REGISTRY, MarketMakerWhale
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
@@ -33,6 +34,11 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     chain = Chain(w3, w3.eth.accounts[0])
     rng = idmod.seeded_rng(scenario.seed)
     prng = random.Random(scenario.seed)
+    # Agent RNG mode for this run ("" = historical Mersenne; "keyed" = the
+    # language-neutral KeyedRandom streams for the JS port).  Set before any
+    # agent setup; reset explicitly each run since the flag is
+    # process-global (back-to-back runs in one process).
+    _rng_mod.set_mode(getattr(scenario, "rng_mode", ""))
 
     if verbose:
         print(f"[sim] deploying '{scenario.name}' with {basket_impl} basket "

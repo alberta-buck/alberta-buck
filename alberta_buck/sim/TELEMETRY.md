@@ -149,3 +149,37 @@ Implement both methods (see `Agent` in `agents.py`):
 `_ProxyAgent._telemetry_common(d)` supplies the common u/b/s/nw block.
 Return None from either to stay silent.  Telemetry must never alter
 economic behavior, defaults, or rng draw order.
+
+## Keyed RNG (`[scenario] rng = "keyed"`) -- the draw contract
+
+The portcast arms replace Python's Mersenne agent RNG with a
+language-neutral keyed-hash stream so a JS port can reproduce every draw
+exactly (implementation: `alberta_buck/sim/rng.py`, class `KeyedRandom`).
+
+Recipe (all integers big-endian, blake2b = RFC 7693, unkeyed):
+
+    key   = blake2b( seed_be32 || utf8(class_name) || idx_be8,
+                     digest_size = 16 )                     # 16 bytes
+    h(n)  = blake2b( key || n_be8, digest_size = 8 )        # n = 0,1,2,...
+    x(n)  = ( u64(h(n)) >> 11 ) * 2**-53                    # float64 in [0,1)
+
+- `seed` is the scenario seed (e.g. 0xA1BC); `idx` is the agent's global
+  population ordinal (the roster id ordinal), EXCEPT the DirectMint
+  family, which keys with the literal class name "DirectMintAgent" /
+  "DirectMintBuckAgent" and the per-family sequence counter `_seq`
+  (ArrivingDMAgent shares the "DirectMintAgent" stream family).
+- Every supported method consumes exactly ONE x(n), in call order:
+  `random() = x`; `uniform(a,b) = a + (b-a)*x`;
+  `randint(a,b) = a + floor(x*(b-a+1))` (inclusive);
+  `randrange(n) = floor(x*n)`; `randrange(a,b) = a + floor(x*(b-a))`;
+  `choice(seq) = seq[randrange(len(seq))]`.
+  All derived arithmetic is plain float64 -- reproducible bit-for-bit in
+  JS (`Number`); recover the u64 from the 8 digest bytes via BigInt, then
+  `Number(u64 >> 11n) * 2**-53`.
+- Knob draws happen in each class's setup() in source order; in-run
+  randomness continues the same stream.  A port must make the same calls
+  in the same order to stay on-stream -- golden-scenario vectors are the
+  check, and any unsupported method is deliberately absent from
+  KeyedRandom so a gap fails loudly instead of diverging silently.
+- The loop's world machinery (whale scheduling, identity nonces) is NOT
+  on this contract; it stays server-side.

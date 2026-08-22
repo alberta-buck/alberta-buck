@@ -53,6 +53,7 @@ import math
 import random
 
 from alberta_buck.sim import identity as idmod
+from alberta_buck.sim import rng as _rng_mod
 from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim.direct_mint import DirectMintAgent
@@ -95,16 +96,12 @@ def _pool_tokens(d, pool_addr: str) -> tuple[str, str]:
     return hit
 
 
-def _agent_rng(seed: int, class_name: str, idx: int) -> random.Random:
-    """Per-agent deterministic RNG keyed off (seed, class, idx)."""
-    seed_bytes = (
-        int(seed).to_bytes(32, "big", signed=False)
-        + class_name.encode()
-        + int(idx).to_bytes(8, "big", signed=False)
-    )
-    return random.Random(
-        int.from_bytes(hashlib.blake2b(seed_bytes, digest_size=16).digest(),
-                       "big"))
+def _agent_rng(seed: int, class_name: str, idx: int):
+    """Per-agent deterministic RNG keyed off (seed, class, idx).  Delegates
+    to alberta_buck.sim.rng.agent_rng: Mersenne (byte-identical historical
+    behavior) by default, a language-neutral KeyedRandom stream when the
+    run sets `[scenario] rng = "keyed"` (see rng.py / TELEMETRY.md)."""
+    return _rng_mod.agent_rng(seed, class_name, idx)
 
 
 

@@ -88,6 +88,9 @@ DEFAULTS: dict = {
         "family": "equilibrium",   # scenario builder: "equilibrium" |
                                    # "rebalancing-eq" (same financial
                                    # structure + the rebalance director)
+        "rng": "",                 # "" = historical Mersenne agent RNG;
+                                   # "keyed" = language-neutral KeyedRandom
+                                   # streams (the JS-port contract; rng.py)
         "years": 5.0,
         "start": "",
         "end": "",
@@ -266,6 +269,7 @@ def build(exp: Experiment):
     if s["days"]:
         sc.days = min(int(s["days"]), sc.prices.days)
     sc.day_step = int(s["day_step"])
+    sc.rng_mode = s.get("rng", "")
     sc.experiment = exp
     return sc
 

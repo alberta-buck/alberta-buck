@@ -78,6 +78,32 @@ def summarize(path: str | Path, tail_frac: float = TAIL_FRAC) -> dict:
     thr_hits = sum(1 for a, b in zip(thr_t, thr_t[1:]) if b > a)
     saver_t = _col(tail, "saver_hold")
 
+    # Fallback channel source for worlds with NO FatCredit borrowers at all
+    # (e.g. the portcast arm): judge liveness from the debtor + basket
+    # channels instead.  Dollars are NET tail deltas of the two supply
+    # tranches (credit residual = supply - basket direct-mint; basket =
+    # dmOutstanding); events count debtor deploys and basket entries/exits
+    # so an offsetting churn still reads as alive.  Only engaged when the
+    # final frame shows the fat channel never existed (limit/issued/retired
+    # all zero), so every historical vector's stats are unchanged.
+    last = frames[-1]
+    channel_src = "fat"
+    channel_events_tail = None
+    if (not last.get("fat_limit", 0) and not last.get("fat_issued", 0)
+            and not last.get("fat_retired", 0)):
+        channel_src = "bcd+dm"
+        dm_t = _col(tail, "dmOutstanding")
+        res_t = [s - o for s, o in zip(sup_t, dm_t)]
+        d_res = res_t[-1] - res_t[0]
+        d_dm = dm_t[-1] - dm_t[0]
+        iss_net = max(0, d_res) + max(0, d_dm)
+        ret_net = max(0, -d_res) + max(0, -d_dm)
+        iss_t = [0, iss_net]              # reuse the delta-based reporting
+        ret_t = [0, ret_net]
+        channel_events_tail = sum(
+            _col(tail, k)[-1] - _col(tail, k)[0]
+            for k in ("bcd_deploys", "dmEntries", "dmExits"))
+
     stats = {
         "path": str(path),
         "name": exp.get("name", ""),
@@ -101,6 +127,8 @@ def summarize(path: str | Path, tail_frac: float = TAIL_FRAC) -> dict:
         "retired_tail_m": (ret_t[-1] - ret_t[0]) / E6 / 1e6,
         "throttle_tail_frac": thr_hits / max(1, len(tail) - 1),
         "saver_tail_mean_m": _mean(saver_t) / E6 / 1e6,
+        "channel_src": channel_src,
+        "channel_events_tail": channel_events_tail,
         "iv_applied": len(meta.get("interventions_applied", [])),
         "iv_failed": sum(1 for iv in meta.get("interventions_applied", [])
                          if not iv.get("ok", True)),
@@ -119,8 +147,15 @@ def accept(stats: dict, tol: float = PARITY_TOL) -> tuple[bool, list[str]]:
     if stats["k_tail_rail_frac"] > 0.0:
         reasons.append(f"K railed {100 * stats['k_tail_rail_frac']:.0f}% "
                        f"of the tail")
-    if stats["issued_tail_m"] <= 0.0 and stats["retired_tail_m"] <= 0.0:
-        reasons.append("issuance/redemption channels dead in the tail")
+    if stats.get("channel_src", "fat") == "fat":
+        if stats["issued_tail_m"] <= 0.0 and stats["retired_tail_m"] <= 0.0:
+            reasons.append("issuance/redemption channels dead in the tail")
+    else:
+        # No-FatCredit world: net tranche deltas OR channel events suffice.
+        if (stats["issued_tail_m"] <= 0.0 and stats["retired_tail_m"] <= 0.0
+                and (stats.get("channel_events_tail") or 0) <= 0):
+            reasons.append("issuance/redemption channels (bcd+dm) dead "
+                           "in the tail")
     if stats["iv_failed"]:
         reasons.append(f"{stats['iv_failed']} interventions FAILED")
     return (not reasons), reasons
@@ -138,7 +173,9 @@ def row(stats: dict) -> str:
             "{k_tail_rail_frac:>5.0%} {issued_tail_m:>8.2f} "
             "{retired_tail_m:>9.2f} {throttle_tail_frac:>6.0%}  "
             .format(**stats)
-            + ("PASS" if ok else "FAIL: " + "; ".join(reasons)))
+            + ("PASS" if ok else "FAIL: " + "; ".join(reasons))
+            + (" [ch:bcd+dm net]"
+               if stats.get("channel_src", "fat") != "fat" else ""))
 
 
 def main(argv=None) -> int:
