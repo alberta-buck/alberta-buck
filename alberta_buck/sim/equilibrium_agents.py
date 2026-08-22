@@ -597,6 +597,13 @@ class ExcursionArbAgent(_ProxyAgent):
         r = self._rng
         cls = type(self).__name__
         self.halflife = float(_spec(scenario, cls, "halflife", 5.0))
+        # Dual-timescale signal: the slow filter (halflife) reads regimes,
+        # the fast one (fast_halflife) reads raid-speed events -- a 3-day
+        # dump is attenuated ~3x by a 5-day halflife and never reached the
+        # entry gate (the single-filter design's measured blind spot).  The
+        # EFFECTIVE signal is whichever filter sits farther from parity, so
+        # entries catch both speeds and exits wait for BOTH to re-enter.
+        self.fast_halflife = float(_spec(scenario, cls, "fast_halflife", 1.0))
         self.entry_dev = float(_spec(scenario, cls, "entry_dev", 0.03))
         self.exit_dev = float(_spec(scenario, cls, "exit_dev", 0.01))
         self.min_edge = float(_spec(scenario, cls, "min_edge", 0.01))
@@ -605,6 +612,7 @@ class ExcursionArbAgent(_ProxyAgent):
         self.capital = self.CAPITAL or str(_spec(scenario, cls, "capital",
                                                  "usdc"))
         self._ewma = None
+        self._fast = None
         self._last_day = None
         self._basis = 0             # USDC spent on the open long (usdc base)
         self._bind_proxy(d)
@@ -643,6 +651,8 @@ class ExcursionArbAgent(_ProxyAgent):
         rec = self._telemetry_common(d)
         if self._ewma is not None:
             rec["ewma"] = round(self._ewma, 6)
+        if self._fast is not None:
+            rec["fast"] = round(self._fast, 6)
         rec["basis"] = self._basis
         return rec
 
@@ -662,11 +672,14 @@ class ExcursionArbAgent(_ProxyAgent):
         if self._last_day is None:
             self._last_day = day
             self._ewma = bvib
+            self._fast = bvib
         dd = max(0, day - self._last_day)
         self._last_day = day
         if dd:
             alpha = 1.0 - 0.5 ** (dd / max(1e-9, self.halflife))
             self._ewma += alpha * (bvib - self._ewma)
+            af = 1.0 - 0.5 ** (dd / max(1e-9, self.fast_halflife))
+            self._fast += af * (bvib - self._fast)
         try:
             ru = d.chain.balance_of(d.usdc, d.pool_ub)
             rb = d.chain.balance_of(d.buck, d.pool_ub)
@@ -675,11 +688,15 @@ class ExcursionArbAgent(_ProxyAgent):
         if ru <= 0 or rb <= 0:
             return
         fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
+        # Effective signal: the filter farther from parity.
+        e_eff = (self._fast
+                 if abs(self._fast - 1.0) > abs(self._ewma - 1.0)
+                 else self._ewma)
         try:
             if self.capital == "credit":
-                self._act_credit(d, self._ewma, ru, rb, fee, ctr)
+                self._act_credit(d, e_eff, ru, rb, fee, ctr)
             else:
-                self._act_usdc(d, self._ewma, ru, rb, fee, ctr)
+                self._act_usdc(d, e_eff, ru, rb, fee, ctr)
         except Exception as e:
             ctr["exc_err"] = repr(e)[:160]
 
