@@ -413,11 +413,19 @@ catalogue is that instrument.  Code: ~alberta_buck/sim/catalogue.py~
 
 The base is the portcast cast (settled physics, keyed RNG, no
 FatCredit), which has NO cold-start transient; every defender is
-threshold-gated and therefore idle until an excursion appears; and the
-keyed RNG gives each class its own draw stream.  So cells of one arm
-share an IDENTICAL pre-history up to the injection, and the response
-deltas between mixes are attributable to the mix -- the controlled
-A/B the raid arms could not provide.
+threshold-gated and therefore idle until an excursion appears; the
+keyed RNG gives each class its own draw stream; and in keyed mode the
+loop's own draws (whale snap tick and token order, the per-tick agent
+act order) come from keyed hashes rather than a shared stream (commit
+07f8c4a), so the world's history does not depend on how many agents
+exist -- verified: a cell with no defenders, one with eight inert
+credit agents and one with eight basket agents produce byte-identical
+world frames.  So cells of one arm share an IDENTICAL pre-history up
+to the injection, and the response deltas between mixes are
+attributable to the mix -- the controlled A/B the raid arms could not
+provide.  (Holding-cost caveat: BUCK-endowed mixes pay demurrage while
+poised, ~0.5% of the holding per 90 days, which the par-marked P&L
+shows as a drift; ~exc_realized~ books only what closes realize.)
 
 ** The defender mixes (one agent, every quadrant)
 
