@@ -162,6 +162,15 @@ def report(specs: list[dict], outdir: Path, resp_days: int, band: float):
                                                  "label")},
                           "error": "no vector", "frames": 0})
             continue
+        if not complete(p):
+            try:
+                last = json.loads(p.read_text())["frames"][-1].get("day")
+            except Exception:
+                last = "?"
+            stats.append({**{k: sp[k] for k in ("arm", "mix", "scale",
+                                                 "label")},
+                          "error": f"partial (day {last})", "frames": 0})
+            continue
         st = eqmetrics.summarize(p, resp_days=resp_days, band=band)
         st.update({k: sp[k] for k in ("arm", "mix", "scale", "label")})
         st["name"] = sp["label"]
