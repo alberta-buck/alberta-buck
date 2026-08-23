@@ -221,16 +221,25 @@ def report(specs: list[dict], outdir: Path, resp_days: int, band: float):
             return f"sd {st['bv_tail_std']:.4f} K {st['k_tail_mean']:.3f}"
         x = inj[0]
         rec = x.get("recovery_days")
-        return (f"{_fmt(x.get('peak_dev') * 100 if x.get('peak_dev') is not None else None, '+.1f')}%"
-                f" r{('never' if rec is None else int(rec))}"
-                f" auc{_fmt(x.get('auc_pct_days'), '.0f')}"
-                f" real{_fmt(x.get('d_exc_real_m'), '+.2f')}"
-                f" mark{_fmt(x.get('d_exc_pnl_m'), '+.2f')}"
-                f" raid{_fmt(x.get('d_raid_pnl_m'), '+.2f')}")
+        wrec = x.get("wdev_recovery_days")
+        s = (f"{_fmt(x.get('peak_dev') * 100 if x.get('peak_dev') is not None else None, '+.1f')}%"
+             f" r{('never' if rec is None else int(rec))}"
+             f" auc{_fmt(x.get('auc_pct_days'), '.0f')}")
+        if x.get("src") == "iv":
+            s += (f" wdev{_fmt(x.get('wdev_peak'), '+.3f')}"
+                  f" wr{('never' if wrec is None else int(wrec))}")
+        s += (f" real{_fmt(x.get('d_exc_real_m'), '+.2f')}"
+              f" mark{_fmt(x.get('d_exc_pnl_m'), '+.2f')}")
+        if x.get("src") == "raid":
+            s += f" raid{_fmt(x.get('d_raid_pnl_m'), '+.2f')}"
+        if (x.get("d_crb_pnl_m") or 0) != 0 or (x.get("crb_trades") or 0):
+            s += f" crb{_fmt(x.get('d_crb_pnl_m'), '+.2f')}"
+        return s
 
     for scale in scales:
-        P(f"## grid: peak bv dev % / recovery d / auc %-days / defender "
-          f"realized $M / defender marked $M / raid P&L $M  (scale x{scale:g})")
+        P(f"## grid: peak bv dev % / recovery d / auc %-days [/ axis-2 wdev "
+          f"peak, recovery] / defender realized $M / marked $M [/ raid P&L "
+          f"$M] [/ crb P&L $M]  (scale x{scale:g})")
         P("")
         P("| arm \\ mix | " + " | ".join(mixes) + " |")
         P("|---|" + "---|" * len(mixes))
