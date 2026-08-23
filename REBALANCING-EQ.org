@@ -569,8 +569,35 @@ Findings:
    trades -- demurrage on a poised inventory -- which is exactly the
    carry the rest state pays to be ready.
 
-Differential-only cells (4 CommodityRebalArbAgents, no excursion
-bases; spike/step): PENDING -- recorded here when complete.
+Differential-only cells (4 CommodityRebalArbAgents, MA-reversion
+signal, band 3%, no excursion bases):
+
+| arm   | mix  | bv peak | AUC | wdev peak | wdev recov | crb P&L in window | crb P&L whole run |
+|-------+------+---------+-----+-----------+------------+-------------------+-------------------|
+| spike | none |   +1.8% |  63 |    +0.133 |   at lift  |                -- |                -- |
+| spike | crb  |   +2.2% |  68 |    +0.092 |   at lift  |           +$0.26M |           -$0.36M |
+| step  | none |   +2.0% |  52 |    +0.133 |       19 d |                -- |                -- |
+| step  | crb  |   +2.2% |  51 |    +0.092 |       17 d |           +$0.06M |           -$0.60M |
+
+6. *The mechanistic differential agent provides the service at a
+   private loss.*  Four MA-reversion rebalancers ($8.6M of TOKEN) cut
+   the shock's weight-deviation peak by a third (+0.133 -> +0.092) and
+   shave a day or two off the director's restoration -- and lose
+   ~$0.5M (6% of inventory) in the first year BEFORE any injection,
+   trading the background relative-price drift of a trending macro
+   series (~600 two-hop round trips, each paying two pool fees plus
+   impact) as if it were reversion.  Inside the windows the sign is
+   exactly what theory says: the transient spike is profitable
+   (+$0.26M as it reverts), the permanent step is not (the rebalancer
+   sells the winner; -$0.17M across the step, net +$0.06M over the
+   window only because the background happened to revert).  Reading:
+   the differential quadrant is NOT self-financing on a mean-reversion
+   signal alone -- it needs either foresight (the specialist; the
+   ~foresight_days~ cells of wave 2 test it) or a far wider band, and
+   the director's deliberate slowness looks like the right default for
+   a mechanistic rebalancer.  (The ~all~ mix's crb numbers differ
+   because the excursion bases alter the pools those two agents trade
+   in.)
 
 * Roadmap: the quadrant-balance program (2026-08-22)
 
