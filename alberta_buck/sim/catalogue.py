@@ -78,7 +78,8 @@ def _scaled(n: int, scale: float) -> int:
     return max(1, int(round(n * scale)))
 
 
-def cells(arms, mixes, scales, sets, days, outdir: Path) -> list[dict]:
+def cells(arms, mixes, scales, sets, days, outdir: Path,
+          tag: str = "") -> list[dict]:
     out = []
     for arm in arms:
         toml = EXPERIMENTS / f"catalogue-{arm}.toml"
@@ -89,12 +90,14 @@ def cells(arms, mixes, scales, sets, days, outdir: Path) -> list[dict]:
                 raise SystemExit(f"unknown mix {mix!r}; known: "
                                  f"{','.join(MIXES)}")
             for scale in scales:
-                label = f"{arm}-{mix}" + (f"-x{scale:g}" if scale != 1 else "")
+                label = (f"{arm}-{mix}" + (f"-x{scale:g}" if scale != 1 else "")
+                         + (f"-{tag}" if tag else ""))
                 cell_sets = [f"scenario.agents.{c}="
                              f"{_scaled(MIXES[mix].get(c, 0), scale)}"
                              for c in DEFENDERS] + list(sets)
                 out.append({
                     "arm": arm, "mix": mix, "scale": scale, "label": label,
+                    "tag": tag,
                     "toml": str(toml), "sets": cell_sets, "days": days,
                     "out": str(outdir / f"cat-{label}.json"),
                     "log": str(outdir / f"cat-{label}.log"),
@@ -153,13 +156,14 @@ def _fmt(x, spec: str, none: str = "--") -> str:
         return str(x)
 
 
-def report(specs: list[dict], outdir: Path, resp_days: int, band: float):
+def report(specs: list[dict], outdir: Path, resp_days: int, band: float,
+           summary: str = "summary"):
     stats = []
     for sp in specs:
         p = Path(sp["out"])
         if not p.exists():
             stats.append({**{k: sp[k] for k in ("arm", "mix", "scale",
-                                                 "label")},
+                                                 "label", "tag")},
                           "error": "no vector", "frames": 0})
             continue
         if not complete(p):
@@ -168,11 +172,11 @@ def report(specs: list[dict], outdir: Path, resp_days: int, band: float):
             except Exception:
                 last = "?"
             stats.append({**{k: sp[k] for k in ("arm", "mix", "scale",
-                                                 "label")},
+                                                 "label", "tag")},
                           "error": f"partial (day {last})", "frames": 0})
             continue
         st = eqmetrics.summarize(p, resp_days=resp_days, band=band)
-        st.update({k: sp[k] for k in ("arm", "mix", "scale", "label")})
+        st.update({k: sp[k] for k in ("arm", "mix", "scale", "label", "tag")})
         st["name"] = sp["label"]
         stats.append(st)
 
@@ -209,6 +213,13 @@ def report(specs: list[dict], outdir: Path, resp_days: int, band: float):
             arms.append(st["arm"])
         if st["mix"] not in mixes:
             mixes.append(st["mix"])
+    for st in stats:
+        if st.get("tag"):
+            st["arm"] = f"{st['arm']}-{st['tag']}"
+    arms = []
+    for st in stats:
+        if st["arm"] not in arms:
+            arms.append(st["arm"])
     by = {(st["arm"], st["mix"], st["scale"]): st for st in stats}
 
     def cell(st) -> str:
@@ -249,10 +260,11 @@ def report(specs: list[dict], outdir: Path, resp_days: int, band: float):
         P("")
 
     md = "\n".join(lines)
-    (outdir / "summary.md").write_text(md)
-    (outdir / "summary.json").write_text(json.dumps(stats, indent=1))
+    (outdir / f"{summary}.md").write_text(md)
+    (outdir / f"{summary}.json").write_text(json.dumps(stats, indent=1))
     print(md)
-    print(f"[catalogue] summary -> {outdir / 'summary.md'} / summary.json")
+    print(f"[catalogue] summary -> {outdir / (summary + '.md')} / "
+          f"{summary}.json")
     return stats
 
 
@@ -271,6 +283,10 @@ def main(argv=None) -> int:
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--report-only", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--tag", default="", help="label suffix for a variant "
+                    "run sharing --outdir (e.g. inj2 with --set overrides)")
+    ap.add_argument("--summary", default="summary",
+                    help="basename of the report files written to --outdir")
     ap.add_argument("--resp-days", type=int, default=eqmetrics.RESP_DAYS)
     ap.add_argument("--band", type=float, default=eqmetrics.EXC_BAND)
     a = ap.parse_args(argv)
@@ -282,7 +298,7 @@ def main(argv=None) -> int:
     arms = [s for s in a.arms.split(",") if s]
     mixes = [s for s in a.mixes.split(",") if s]
     scales = [float(s) for s in a.scale.split(",") if s]
-    specs = cells(arms, mixes, scales, a.sets, a.days, outdir)
+    specs = cells(arms, mixes, scales, a.sets, a.days, outdir, a.tag)
     for sp in specs:
         sp["force"] = a.force
 
@@ -303,7 +319,7 @@ def main(argv=None) -> int:
             for r in pool.map(_run_one, todo):
                 print(f"[catalogue] {r}", flush=True)
 
-    report(specs, outdir, a.resp_days, a.band)
+    report(specs, outdir, a.resp_days, a.band, a.summary)
     return 0
 
 

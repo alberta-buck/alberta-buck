@@ -1165,6 +1165,10 @@ class WhaleRaidAgent(_ProxyAgent):
         self.accum_days = int(_spec(scenario, cls, "accum_days", 60))
         self.reacq_days = int(_spec(scenario, cls, "reacquire_days", 90))
         self.raid_days = max(1, int(_spec(scenario, cls, "raid_days", 1)))
+        # Impact cap (bp) of the quiet legs -- accumulation and unwinding.
+        # At 50 bp a $50M pool admits ~$125k/day, so a 60-day accumulation
+        # builds ~$7.5M whatever the budget; raise it for bigger raids.
+        self.quiet_cap_bp = int(_spec(scenario, cls, "quiet_cap_bp", 50))
         raid_day = _spec(scenario, cls, "raid_day", None)
         if raid_day is None:
             raid_frac = float(_spec(scenario, cls, "raid_frac", 0.5))
@@ -1185,7 +1189,7 @@ class WhaleRaidAgent(_ProxyAgent):
 
     def telemetry_static(self) -> dict:
         return {"budget": self.budget, "side": self.side,
-                "accum_days": self.accum_days,
+                "accum_days": self.accum_days, "quiet_cap_bp": self.quiet_cap_bp,
                 "reacquire_days": self.reacq_days,
                 "raid_day": self.raid_day, "raid_days": self.raid_days}
 
@@ -1257,7 +1261,8 @@ class WhaleRaidAgent(_ProxyAgent):
         elif day < self.raid_day:
             self.phase = 1
             if tick == 0:
-                self.spent_accum += self._buy_slice(d, self.raid_day - day, 50)
+                self.spent_accum += self._buy_slice(d, self.raid_day - day,
+                                                    self.quiet_cap_bp)
         elif day < self.raid_end:
             self.phase = 2
             held = d.chain.balance_of(d.buck, self.proxy.address)
@@ -1278,7 +1283,8 @@ class WhaleRaidAgent(_ProxyAgent):
                     self.phase = 4
                 else:
                     self.spent_reacq += self._buy_slice(
-                        d, self.raid_end + self.reacq_days - day, 50)
+                        d, self.raid_end + self.reacq_days - day,
+                        self.quiet_cap_bp)
         else:
             self.phase = 4
 
@@ -1305,7 +1311,8 @@ class WhaleRaidAgent(_ProxyAgent):
                     self.phase = 4
                 else:
                     self.recv_unwind += self._sell_slice(
-                        d, self.raid_end + self.reacq_days - day, 50)
+                        d, self.raid_end + self.reacq_days - day,
+                        self.quiet_cap_bp)
         else:
             self.phase = 4
 
