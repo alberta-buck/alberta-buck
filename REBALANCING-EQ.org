@@ -493,9 +493,84 @@ the SIGNS of weak support from a quadrant -- an arm whose response is
 poor under every mix lacking that quadrant and good under every mix
 staffing it (a premium excursion uncontrolled without Q3/Q4 staffing,
 a discount one without Q1/Q2, a differential one without the
-rebalancer) isolates the missing quadrant.  Wave 1 (7 arms x 6 mixes,
-scale 1) is in flight as of this writing; results will be recorded
-here with the grid.
+rebalancer) isolates the missing quadrant.
+
+** Wave 1 results (7 arms x 6 mixes, scale 1; 2026-08-23)
+
+Figure: =images/catalogue-wave1.png= (rows = arms; bvib, BUCK/USDC and
+the axis-2 weight deviation around the shaded injection, every mix
+overlaid).  Report: =build/sim/catalogue/summary.md=.  Every one of
+the 42 cells PASSES the 2-year tail gate; no injection at this
+intensity leaves the equilibrium.  The control holds exactly: mixes
+whose agents cannot act on an arm (buck/credit on the dump, usdc on
+the squeeze, every excursion base on the grinds and the shocks)
+reproduce the ~none~ cell to the last digit, so every delta below is
+the mix and nothing else.
+
+| arm (injection)          | mix    | peak bv dev | recovery | AUC %-d | defender realized / marked | whale P&L |
+|--------------------------+--------+-------------+----------+---------+----------------------------+-----------|
+| dump ($7.6M in 1 d)      | none   |      +12.7% |     16 d |      80 | --                         |   -$0.01M |
+|                          | usdc   |       +8.7% |     12 d |      71 | +0.26 / +0.26              |   -$0.01M |
+|                          | basket |      +10.6% |      7 d |      73 | +0.01 / -0.12              |   -$0.01M |
+|                          | all    |       +7.9% |     11 d |      71 | +0.16 / +0.04              |   -$0.01M |
+| squeeze ($10M in 1 d)    | none   |      -10.4% |      5 d |      82 | --                         |   -$0.87M |
+|                          | buck   |      -10.1% |     14 d |      78 | +0.03 / -0.11              |   -$0.88M |
+|                          | credit |      -10.1% |     10 d |      78 | +0.00 / +0.63              |   -$0.89M |
+|                          | basket |      -10.1% |      4 d |      81 | +0.01 / -0.08              |   -$0.87M |
+|                          | all    |       -8.1% |     10 d |      71 | +0.08 / +0.45              |   -$0.79M |
+| grind-down ($10M / 60 d) | any    |       +1.7% |      6 d |      83 | inert                      |   +$2.00M |
+| grind-up ($10M / 60 d)   | any    |       +2.1% |     12 d |      90 | inert                      |   -$1.62M |
+| spike (NRGC x1.3, 30 d)  | any    |       +1.8% |      1 d |      63 | inert; wdev +0.133         |        -- |
+| step (NRGC x1.3, perm.)  | any    |       +2.0% |     81 d |      52 | inert; wdev +0.133, 19 d   |        -- |
+
+(buck/credit on the dump and usdc on the squeeze equal ~none~; the
+grind/shock rows hold for every mix without the differential agent;
+~all~ on the shocks differs because its CommodityRebalArbAgents trade
+continuously -- see the differential reading below.)
+
+Findings:
+
+1. *The discount side is controlled by Q1 staffing.*  Eight USDC-based
+   absorbers cut the dump peak from 12.7% to 8.7% and the AUC by 11%
+   and realized +$0.26M doing it (8 round trips).  The basket rotation
+   gives the FASTEST recovery (16 -> 7 days) because it trades in the
+   bvib-defining pools directly, but it carries little size: the
+   TOKEN/BUCK pools are thin, so its impact-capped bites are ~1/5 of a
+   USDC absorber's, and 25 round trips realized only +$0.01M.  The
+   full cast is best on peak (7.9%).
+2. *The premium side is the weakly supported quadrant at this scale.*
+   A one-day $10M squeeze is faster than either filter, so every mix
+   shares the -10.4% trough; single-quadrant staffing afterwards (Q3
+   holders or Q4 issuers, 8 each) does not move the peak (-10.1%) and
+   lengthens time-to-band (5 -> 10-14 d) while trimming the AUC 5%;
+   only the full cast damps it materially (-8.1%, AUC -13%, the whale
+   loses less because the defenders' supply lets it unwind at better
+   prices).  The issuers' +$0.63M is the largest defender gain but is
+   marked, not realized: the obligations wait for a discount by
+   design.  Where the premium bound lies is the intensity question
+   (wave 2: defender scale x2/x4, squeeze budget x2/x4).
+3. *Slow grinds and a x1.3 constituent shock never reach the 3% gate.*
+   The standing cast (savers, debtors, depositors, director, K)
+   absorbs $170k/day for 60 days with a bvib peak of 1.7-2.1% and a
+   30%/30-day energy shock with +1.8%; no excursion agent acts, all
+   mixes coincide.  BUCK/USDC rises with its basket (+13-16%) as
+   designed.  Whale P&L on grinds is confounded by the window's own
+   BUCK/USD trend (+15% over the response span): the grinding seller
+   books +$2.0M from the trend, the grinding buyer -$1.6M.
+4. *Axis 2.*  The shock's real effect is the weight deviation (+0.133
+   over a background that itself swings 0.00-0.15 with the macro
+   series): the director restores a permanent step's weights within
+   ~19 days.  The mixes carrying CommodityRebalArbAgents show the
+   deviation peak lower (+0.099) and the step's common-mode AUC down
+   52 -> 42, with the agents' own P&L positive (+$0.18-0.28M for two
+   of them); the differential-only cells refine this (below).
+5. *Holding costs are visible and honest*: BUCK-endowed mixes (buck,
+   basket) show -$0.1 to -$0.25M marked over a 150-day span with no
+   trades -- demurrage on a poised inventory -- which is exactly the
+   carry the rest state pays to be ready.
+
+Differential-only cells (4 CommodityRebalArbAgents, no excursion
+bases; spike/step): PENDING -- recorded here when complete.
 
 * Roadmap: the quadrant-balance program (2026-08-22)
 
