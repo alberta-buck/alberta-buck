@@ -599,6 +599,88 @@ signal, band 3%, no excursion bases):
    because the excursion bases alter the pools those two agents trade
    in.)
 
+** Wave 2 results (intensity sweep; 2026-08-23)
+
+42 further cells: defender counts x2/x4 on the raid-speed arms, injection
+budgets x2/x4 (whale budget_m [16,24] / [32,48] with quiet_cap_bp 100/200),
+$30-40M 60-day grinds, x1.6 constituent shocks, and the foresight
+differential agent.  Figures: =images/catalogue-wave2-x2.png= / =-x4.png=;
+reports =build/sim/catalogue/summary-{scale,inj2,inj4,grind4,shock16,fs30}.md=.
+
+*The bounds of equilibrium, found.*  The undefended economy PASSES at x1
+and x2 injections and FAILS at x4:
+
+| arm (undefended vs full cast)   | verdict     | tail bv | tail K (rail)   | whale P&L |
+|---------------------------------+-------------+---------+-----------------+-----------|
+| dump x2 ($15M) undefended       | PASS        |  1.0000 | 0.74            |   ~$0.00M |
+| dump x4 ($30M+) undefended      | *FAIL*      |  0.7796 | 0.950 (100%)    |   ~$0.00M |
+| dump x4 ($30M+) full cast       | PASS        |  0.9984 | 0.806 (0%)      |   ~$0.00M |
+| squeeze x4 ($40M) undefended    | PASS        |  1.0000 | 0.945 (0%)      |   -$9.13M |
+| squeeze x4 ($40M) full cast     | PASS        |  1.0004 | 0.798 (0%)      |  -$10.59M |
+| grind-down x4 undefended        | *FAIL*      |  0.7258 | 0.950 (100%)    |   +$7.7M* |
+| grind-down x4 full cast         | FAIL (rail) |  0.9927 | 0.936 (17%)     |   +$7.8M* |
+| grind-up x4 undefended          | PASS        |  1.0006 | 0.937 (0%)      |   -$7.33M |
+| grind-up x4 full cast           | PASS        |  1.0002 | 0.810 (0%)      |   -$7.11M |
+
+(* grind-seller P&L is dominated by the window's +15% BUCK/USD trend and by
+selling into the premium its own accumulation created; it is not evidence
+that grinding is profitable net of the trend.)
+
+Findings, continuing the wave-1 numbering:
+
+7. *The poised cast is the difference between equilibrium and permanent
+   failure.*  The x4 dump leaves the undefended economy 22% off parity
+   with K pinned to its rail for the entire second year; the identical
+   attack against the full cast ends at bv 0.9984, K 0.806, PASS.  The
+   x4 grind-down breaks the undefended economy the same way; the full
+   cast holds parity (bv 0.9927) but spends most of the rail margin
+   (K 0.936, railed 17% of the tail) -- survival, with the robustness
+   budget consumed.  Everywhere else defense converts near-rail resting
+   K (0.94-0.95) into interior K (0.80-0.81): poised capital buys back
+   exactly the margin recommendation 2 said the growth arms lack.
+8. *Attacks punish themselves superlinearly, and defense deepens it.*
+   Squeeze whale P&L -$0.87M / -$3.06M / -$9.13M at x1/x2/x4
+   (undefended); -$10.59M defended at x4.  Defender realized profit
+   grows with attack size (+$0.08M / +$0.39M / +$1.50M) -- the poised
+   cast is countercyclically PAID more, the worse the attack.
+9. *Slow attacks are erased by poised capital.*  $30-40M ground over 60
+   days undefended: AUC 1112 (down) and 1967 (up) %-days with 37-39%
+   peaks; against the full cast: AUC 96 and 182 with peaks -2.9% and
+   -5.5% -- a 10x reduction; the defenders absorb the whole slow flow
+   near their impact caps.  Fast excursions can only be damped; slow
+   ones can be effectively cancelled.
+10. *Defender scaling is quadrant-specific.*  Q1 (usdc) shows
+    diminishing returns (dump peak 8.7/8.0/7.0% at x1/x2/x4).  The
+    basket rotation is the best scaler (10.6/8.3/6.2%, recovery 5 d at
+    x4): its x1 limit was capacity, not signal, and its flow lands in
+    the bvib-defining pools.  Q3 (buck) OVERCROWDS at x4 (realized
+    -$0.53M, AUC worse than x1): too many suppliers competing for one
+    reversion.  Credit (Q4/Q2) is scale-stable but stays unrealized.
+    MA-differential losses scale with count (-0.25/-0.51/-1.32M at
+    2/4/8 agents), and because crb agents trade continuously they
+    perturb the pre-history: 'all'-mix cells are NOT controlled across
+    scales (dump-all x2/x4 peak jitter is history, not defense).
+11. *Foresight flips the differential quadrant into a business.*  The
+    MA rebalancer loses -$0.4 to -0.6M over 2 years; foresight_days=30
+    earns +$4.1 to +4.9M whole-run on the same $8.6M book (~2200
+    trades) and +$2.5-2.8M inside every shock window, on BOTH the x1.3
+    and x1.6, transient and permanent shocks -- it front-runs scheduled
+    price moves and trades the real drift instead of betting on
+    reversion.  It also collapses the permanent step's common-mode
+    recovery (87 -> 5 days, crb-only mix).  fs30 is an oracle bound: a
+    real commodity specialist sits between MA (zero knowledge) and
+    fs30 (perfect 30-day knowledge); the knob now prices that knowledge.
+
+Where the program stands after the catalogue: the two raid-speed common-
+mode arms are damped by staffing Q1 (discounts) and only by the FULL cast
+(premiums); slow attacks and both x4 bounds are decided by whether the
+cast exists at all; the differential axis needs either the director's
+patience or paid-for foresight.  The next knobs to tune are the premium
+side's speed (the one-day trough is untouched by any mix -- an intra-day
+or tick-level response question), the basket rotation's budget (best
+scaler, thin pools), and Q3 crowd control (stagger or size-share the
+suppliers).
+
 * Roadmap: the quadrant-balance program (2026-08-22)
 
 The organizing model (Perry): K guarantees equilibrium in the long run;
@@ -644,15 +726,13 @@ In dependency order (status as of 2026-08-22 in brackets):
 7. LAST: fold the winning knobs into the BuckBasketOps/Fence revision
    and gate it as a contract-level arm.
 
-Complete as of this writing: the portcast full run (PASS; JS-port
-cast confirmed) and the dual-timescale re-runs of the two excursion
-arms (single-timescale finals preserved under
-build/sim/runs/singlets-*; table and caveat above).  In flight: the
-catalogue's wave 1 (~make nix-venv-sim-catalogue~; report in
-build/sim/catalogue/summary.md).  The JS port (step 3 of the platform
-plan) follows the catalogue: every agent it ports should be one whose
-excursion control has been demonstrated here, in its simplest
-embodiment.
+Complete as of this writing: portcast (PASS; JS-port cast confirmed),
+the dual-timescale re-runs, and the catalogue's waves 1 and 2 (86
+cells; results above).  Next: multi-seed the key catalogue cells,
+quadrant-flow balance metric across the remaining classes, per-class
+ROI, the balance-mix/startup arm -- then the JS port (step 3 of the
+platform plan), porting only agents whose excursion control was
+demonstrated here, in their simplest embodiments.
 
 * Artifacts
 
