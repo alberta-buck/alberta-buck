@@ -1,0 +1,513 @@
+#+TITLE: CARRY-CONVEXITY: Pricing the Optionality the BuckBasket Sells
+#+AUTHOR: Perry Kundert
+#+DATE: 2026-09-01
+#+OPTIONS: toc:2 num:t
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+
+* Purpose and lineage
+
+This document joins the excursion-catalogue program (=REBALANCING-EQ.org=)
+with an external critique: Panoptic's "Yin (Carry) & Yang (Convexity)
+Require Each Other to Survive & Thrive" (X article, 2026-08-27; saved
+copies =~/Downloads/Panoptic-carry.{pdf,html}=), itself the onchain
+transplant of the Artemis/Cole carry-vs-convexity framing.  The critique,
+stated in our terms:
+
+  A passive AMM LP is a carry trader -- a seller of perpetual optionality
+  who collects a fixed fee (the implied volatility) while eating adverse
+  selection (the realized volatility).  Onchain, the structural oversupply
+  of LP positions suppresses IV below RV, and crypto is the most
+  momentum-prone, fat-tailed asset class -- so the profitable side is
+  BUYING convexity from LPs, not being one.  Carry books show negative
+  skew ("sawtooth" P&L: steady fees, rare wipeouts); convexity books show
+  positive skew ("stairstep").  A market is complete and stable only when
+  both sides exist and both are PRICED.
+
+The critique matters here because the BuckBasket is not merely *an* LP --
+it is the SOLE full-range LP in every TOKEN/BUCK constituent pool
+(=alberta_buck/sim/deploy.py= pool_meta; =BuckBasketUniswapV3.sol=), its
+depositor-facing balance sheet IS that LP book, and =basketValueInBuck=
+(the controller's process variable) is read from those same pools.  Every
+arb, whale slice and excursion trade in a constituent pool has the basket
+(depositor L + treasury L) as counterparty.  There is no third party
+absorbing adverse selection.
+
+Three goals organize the program (decisions of intent, not yet of record):
+
+1. *Harvest the benign workforce.*  The BUCK-unaware arbs (AnonymousArb,
+   TokenAccumulator lineage) repin the TOKEN/BUCK pools to the world for
+   free and pay the basket fees to do it.  Their flow must STAY cheap --
+   the fee is "the gate that decides how small a mispricing an external
+   arb will bother to close" (=deploy.py= fee note) -- while the basket
+   captures it as carry.
+2. *Detect adverse events and price them.*  Toxic flow (informed,
+   manipulative, raid-speed) must pay a higher price for the convexity it
+   consumes, detected from observables (markout, tick RV, |bvib-1|, size
+   vs impact norms) and priced via state-dependent fees and spreads.
+3. *Position ahead of the system's own enforcement.*  K's trajectory is
+   committed, slow and public (integral-dominant PID, tau_I ~90 d).  The
+   basket can legitimately place inventory, ranges and fees aligned with
+   what the controller will enforce -- the common-mode analogue of the
+   fs30 foresight result, available to the system for free.
+
+* The audit: where the critique lands (2026-09-01)
+
+** The exposure
+
+- The basket owns one full-range V3 position per constituent, in that
+  constituent's TOKEN/BUCK pool; economically a CPMM wearing a V3
+  interface (NAV = 2 x buckReserve identity, =BASKET-REDESIGN.md=).
+  Full-range = the widest possible short straddle, sold continuously at
+  the pool fee, at every price.
+- Fee tiers are static: TOKEN/BUCK 3000 (0.30%), BUCK/USDC 500.  One IV
+  for all regimes and all counterparties.
+- The depositor is the residual claimant on BOTH commodity moves and
+  BUCK's par deviation (=BuckBasketProRata.sol= ~_redeem~ phase 2: BUCK
+  profit -> treasury; shortfall -> covered from depositor TOKEN).  The
+  treasury holds a one-sided call; the depositor holds the negative-skew
+  residual, down to the ~Underwater~ revert as the left tail.
+
+** The measured evidence (already in this repo, not previously named)
+
+- =alberta_buck/sim/plot_basket_split.py= (docstring analysis): one agent
+  pushing BUCK ~19% off parity made EVERY redemption take the deflation
+  branch; ~$1.54M over ~300 redemptions landed on depositors "rather than
+  on the agent causing it."  That is the Panoptic asymmetry, measured.
+- Finding 6 (=REBALANCING-EQ.org=): the MA-reversion differential
+  rebalancer loses ~6% of inventory per year trading trending macro drift
+  as if it were reversion -- RV > IV on the differential axis, measured.
+- Finding 11: foresight_days=30 flips the same book to +$4-5M -- the
+  informed convexity buyer's profit is real, and the passive quoting side
+  pays it.
+- =alberta-buck-operations.org= ops-desk scoreboard: the basket desk
+  loses on =drift= (2/9 seeds profitable) -- exactly where the move is
+  real -- and "a lagged operator is a profitable destabilizer."
+- =test/basket/BuckBasketFence.t.sol= two-leg test: "the basket takes
+  genuine impermanent loss that swamps the fee income being measured."
+- *LVR / markout accounting is absent.*  =snapshot.py= LP APR is gross
+  fee yield with no adverse-selection offset.  The repo currently cannot
+  answer: did the 30 bp fee on NRGC/BUCK cover realized vol last quarter?
+
+** Where the critique does NOT land: manufactured reversion
+
+Panoptic's RV > IV inversion is an empirical claim about UNANCHORED,
+momentum-prone assets.  The bvib axis is engineered to mean-revert: K
+plus the poised cast manufacture the reversion that a TradFi option
+seller merely bets on.  The catalogue proved it: attacker P&L is
+superlinearly negative (-$0.87M / -$3.06M / -$9.13M at x1/x2/x4
+squeezes), defenders are paid countercyclically (finding 8), and the
+excursion agents' ~min_edge~ gate means they refuse to sell convexity
+below a 1% floor premium -- priced optionality, not passive LPing.
+
+So the two axes split cleanly:
+
+| axis                        | vol regime                  | correct posture                              |
+|-----------------------------+-----------------------------+----------------------------------------------|
+| common mode (BUCK vs basket) | manufactured reversion      | SELL convexity -- but priced, never for free |
+| differential (TOKEN i vs j)  | genuinely trending (macro)  | patience (director), paid foresight, hedges  |
+
+The prescription is not "stop being the carry side."  It is: price the
+convexity currently given away (goals 1-2), route carry income to the
+standing convexity that defends the system, and buy the convexity the
+system cannot manufacture (the trending satellites).  The insurance
+company that also owns the fire department should charge premiums, pay
+its firefighters a retainer, and reinsure the one block it cannot protect.
+
+* Wave 3 instrument: the markout / LVR ledger
+
+The catalogue's rule applies: no new machinery before the falsifiable
+instrument.  Wave 3's instrument is a per-pool, per-counterparty-class
+markout ledger.
+
+** Definitions
+
+For each swap =s= in constituent pool =i= at time =t=, with the basket-LP
+side's signed base-token flow =q_lp= and effective execution price
+=p_exec=:
+
+  markout_D(s) = q_lp x (p_ref(t + D) - p_exec(t))
+
+Negative markout: the basket sold what was about to appreciate (or bought
+what was about to fall) -- adverse selection, realized.  Three reference
+prices, in order of increasing externality:
+
+- (a) own-pool TWAP at =t + D= -- cheap, self-referential;
+- (b) truth-implied TOKEN/BUCK = (TOKEN/USDC) / (BUCK/USDC) from the deep
+  truth pools -- the world's opinion, the one the whale cannot cheaply
+  move; the default reference;
+- (c) the exogenous reference series itself -- the sim's oracle truth,
+  the fs30 analogue; sim-only, bounds what any detector could achieve.
+
+Horizons =D= in {next tick, 1 d, 5 d}, matching the dual-timescale
+excursion signal.  Aggregates per pool per window:
+
+  fees_i        = fee income accrued to the basket position
+  adverse_i     = sum of markout_D over swaps (signed)
+  netlp_i       = fees_i + adverse_i          (the LP's true P&L vs hold)
+  lvr_bench_i   = integral of (sigma_i^2 / 8) x poolValue_i dt
+                  (analytic LVR from realized tick variance)
+  carry_ratio_i = fees_i / lvr_bench_i        (the IV-vs-RV verdict)
+
+** Attribution: the sim's unique advantage
+
+Every sim swap has a known sender class (keyed RNG, fixed roster), so the
+ledger splits per class x pool x window: whale (accumulate / dump /
+re-buy phases separately), BUCK-unaware arbs, director keeper, excursion
+agents by base, DM depositors, debtors.  Toxicity of a class = mean
+markout per dollar of its flow.  Expected shape, which the instrument
+must confirm or refute:
+
+- whale dump-day flow: deeply negative for the basket (the attack IS
+  concentrated adverse selection);
+- benign arbs: mildly negative gross, ~zero net of fee (they sell the
+  basket exactly the rebalancing it wants -- Shannon's demon's other
+  half);
+- director keeper: the basket trading against its own book (internal
+  transfer; must net to ~fees);
+- excursion agents: negative for the pool ledger BY DESIGN (they trade
+  only at >= 1% edge) -- the defense is partly funded by the basket's own
+  LP book, a transfer the system-level P&L hides and this ledger exposes.
+
+** Where it lives
+
+- =snapshot.py= already reads fee growth (=feeGrowthGlobal= deltas +
+  =tokensOwed=); add swap-event capture with class tags and the deferred
+  markout resolution at frame =t + D=.
+- =eqmetrics.py=: a =markout= panel alongside =excursion_windows= --
+  per-pool fees / adverse / netlp / carry_ratio, per-class toxicity, for
+  the whole run and inside each injection window.
+- =catalogue.py= grid columns: basket fees, basket adverse, netlp,
+  carry_ratio (worst pool), whale toxicity extracted.
+
+** New gates (additive to the 2-year tail gate)
+
+1. *Carry coverage*: tail carry_ratio_i >= 1 for every constituent pool
+   -- the fee actually covers the realized-vol cost of the depth sold.
+2. *Benign-flow health*: quiet-regime (outside injection windows)
+   tracking error of each pool vs the truth-implied price stays within
+   the current baseline x1.25 -- whatever fee policy is adopted must not
+   starve the workforce that pins the sensor.
+3. *Expropriation bound*: depositor deviation-branch cost per dollar of
+   injected manipulation flow (the =plot_basket_split= decomposition)
+   must FALL under any adopted option, never rise.
+
+* Implementation options
+
+Ranked lightest to heaviest.  A/B/C are pool-structural; D is an overlay;
+E/F recur from the quadrant program and are listed for completeness.
+Everything is sim-testable before contract work: model the fee/structure
+in the pyrevm pool wrapper first (exactly as ~fundingFactor~ was
+simulated before on-chain enforcement), port the winner later.
+
+** A. Static fee retune (V3, no new machinery)
+
+Let wave 3a's carry_ratio pick per-pool static tiers: plausibly
+cbBTC/BUCK and PAXG/BUCK up (trending, fat-tailed -- the underpriced
+straddles), LABR/CNST down (slow anchors, benign flow dominates, cheap
+tracking matters more than premium).  Cost: none.  Limit: one IV per
+pool for all regimes; the one-day squeeze stays unpriced; known to be a
+compromise (=deploy.py= three-way fee tension note).
+
+** B. Uniswap v4 hooked pools: dynamic fees
+
+V4 pools may declare a dynamic-fee flag; a hook contract sets the fee
+per-swap (beforeSwap), with afterSwap available for accounting.  The
+basket already owns, bootstraps and registers its pools, so migrating a
+constituent to a hooked pool is an internal registry + LP move (the
+adoptable-receipt / constituent-migration scaffolding is the path; note
+current deps are v3-core/periphery -- v4-core would be a new vendored
+dep, EVM target cancun already satisfied).
+
+Candidate fee policies (the wave-3b axis):
+
+| policy      | fee                                        | prices                         | principal risk                              |
+|-------------+--------------------------------------------+--------------------------------+---------------------------------------------|
+| vol-scaled  | base + kv x EWMA(tick moves^2)             | raid-speed realized vol        | reactive lag on the first block of a dump   |
+| dev-scaled  | base + kd x abs(bvib - 1)                  | excursion persistence          | self-referential sensor; needs cap + median |
+| directional | high on deviation-worsening side, base on the correcting side | the attack itself | order-splitting; benign-flow asymmetry      |
+| size-tiered | convex in size / impact-cap norm           | block toxicity (uncapped dump) | splitting across txs (use per-block cumul.) |
+
+Properties worth having regardless of policy choice:
+
+- Surge revenue accrues to the LP position = depositor L + treasury L:
+  the manipulated are paid BY the manipulation, countercyclically --
+  the fee-level analogue of finding 8, and the direct repair of the
+  =plot_basket_split= expropriation.
+- The directors already maintain tick-EMA ladders on these pools
+  (=PairsRebalanceDirector=); the vol estimator is largely built.
+- The one-day squeeze trough that no daily-gated defender touched
+  (wave-2 conclusion) is exactly what a per-swap fee CAN touch: it is
+  the only tick-speed responder that needs no agent, no capital and no
+  signal faster than the trade it prices.
+- am-AMM variant (auction-managed AMM): auction the right to lead-trade
+  the pool each block/epoch; the rent converts LVR into income
+  mechanically.  Heavier, changes the pool's trust surface; catalogue it
+  as a study behind the simpler fee policies.
+
+Sim plan: implement the fee schedule as a state function in the sim's
+pool adapter (no v4 port needed to LEARN); gate any Solidity hook work on
+a wave-3b win.
+
+** C. Priced-tail liquidity: the fence generalized
+
+Full-range custody sells optionality at every price for free.  The fence
+already reframes depth as "a continuum of resting limit orders" in a
++/-15% band.  Generalize into three structural zones per pool:
+
+1. a *band* around TWAP holding most depositor L (dense where benign flow
+   lives -- multiplies fee capture per dollar exactly where volume is);
+2. *priced tails*: single-sided range orders at entry-grade offsets
+   (~3%+), which fill only at a charged discount/premium -- the
+   ~min_edge~ discipline expressed as position structure instead of an
+   agent.  A raid that dumps through the band fills the discount tail:
+   the basket buys the dump at a price it set in advance, which is
+   inventory acquisition at a premium, not silent IL;
+3. an *idle reserve* (the fence's (1-K) buffer lineage) sized by K.
+
+Wave-2 already showed the basket-rotation defender was the best scaler
+but capacity-limited by thin pools; the basket's own book restruck as
+band+tails is that same strategy at two orders of magnitude the size.
+Note what this changes for valuation: the =NAV = 2 x buckReserve=
+full-range identity dies with full-range; =poolBuckValues= must price
+the position properly (the fence already crossed this bridge).
+
+** D. Derivatives overlay: perpetuals and options
+
+Three distinct legs; keep them separate in design and in accounting.
+
+*** D1. Hedging the trending satellites (buy convexity)
+
+The differential axis is genuinely trending and the basket is a
+structurally underpaid vol seller there (finding 6; the "deflation
+forever" trap, =alberta-buck-ethereum-basket.org=).  The 600 bp cbBTC cap
+is the first defense; the second is to hold protective tail exposure on
+the satellites, bought externally and funded from the rebalancing
+premium (+322-496 bp/yr measured, =BASKET-REBALANCE.md=):
+
+- venue options: perp futures on cbBTC/PAXG-proxies at external venues --
+  Hyperliquid (CLOB perps; HIP-3 permits builder-deployed markets as of
+  this writing), dYdX, GMX -- or perpetual OPTIONS (Panoptic-style, on
+  truth-side pairs) where available; options are the honest instrument
+  (the exposure being hedged is gamma, not delta), perps the liquid one
+  (a delta-hedge program on perps replicates convexity at rebalance
+  cost -- acceptable if sized small);
+- sizing from the wave-3a ledger: hedge the measured adverse_i of the
+  satellite pools, not a model;
+- success metric: depositor IL on spike/step arms with hedge on/off,
+  net of hedge cost (funding + fees).  If the hedge does not beat its
+  carry cost across x1.3 AND x1.6, the correct hedge is a smaller
+  satellite weight, not a derivative.
+
+Caveats: venue/counterparty risk (an external CLOB's margin engine and
+custody are outside our solvency argument), basis risk (cbBTC vs venue
+BTC-perp), and operational keys.  The overlay must be a treasury program
+with its own budget and kill switch, never entangled with depositor L.
+
+*** D2. Writing par-reversion insurance (sell convexity, explicitly)
+
+The system's crown asset is manufactured reversion at par.  Sell it
+explicitly instead of implicitly:
+
+- form: a funding-rate perpetual on bvib (mark = medianized bvib TWAP).
+  Deviation-longs (bets that |bvib-1| grows) pay funding to the writer
+  while inside the band; payout on excursions.  The treasury is the
+  natural writer because it enforces the reversion it is selling;
+- the credit-base excursion agent already IS this trade implicitly
+  (mint/sell above par, cover below); D2 formalizes it with explicit
+  premium accounting -- streamia for the backstop currently free;
+- the solvency condition is the point: an attacker expressing the raid
+  THROUGH the instrument (buy deviation-longs, then dump) must pay more
+  in funding + premium + fee surge than the defended excursion can
+  return.  Wave 2 measured the defended excursion envelope (peak x
+  duration at x1..x4); price the instrument off that envelope, cap open
+  interest against the defense budget, and verify the superlinear-loss
+  property survives listing.  If it does not price safely, do not list:
+  D2 is a study with an honest kill criterion, not a default.
+
+*** D3. Perp telemetry as an early-warning sensor (detection)
+
+Raids have a quiet phase (60-day accumulation before the dump).  Off-pool
+venues see it first: funding rates, open interest and basis on BUCK and
+satellite pairs move while the accumulator is still impact-capped.  Feed
+external funding/OI/basis into the adverse-event state that drives the
+fee policy (B) and arms the defenders.  In-sim analogue now: the whale's
+accumulation is visible in pool-imbalance and flow-toxicity terms --
+add a detector metric and measure LEAD TIME on the dump/squeeze arms
+(how many days before the dump does the detector fire, at what false-
+positive rate on the no-injection control?).
+
+** E. Auctioned rebalancing flow (RFQ) -- recurring from the quadrant program
+
+Findings 6/11: mechanistic differential rebalancing is negative-carry;
+foresight is a business.  The basket cannot have commodity foresight but
+can auction its flow to those who do: director publishes intent (sell i,
+buy j, size, deadline); solvers bid; best execution wins.  The basket
+stops paying LVR on its own rebalancing legs and captures part of the
+informed edge as price improvement.  The stubbed =BasketRebalancer.pathFor=
+registry and the unmodelled keeper bounty both resolve into the auction
+spread.  Sim: reuse the fs30 agent as a bidding solver vs the
+pool-walking baseline.
+
+** F. Readiness yield -- carry funds convexity
+
+The article's deepest point applied to the quadrant program: convexity
+books die without carry.  The poised cast bleeds demurrage while waiting
+(finding 5), Q3 overcrowds into losses at x4 (finding 10), and the x4
+bound showed the cast's EXISTENCE is the difference between equilibrium
+and permanent failure.  Route treasury income (BUCK-profit accrual,
+fee-surge revenue from B, funding from D2, funding-factor tolls) into a
+demurrage rebate for capital verifiably parked in defense posture (a
+vault whose funds can only trade toward par).  With endog-style arrival
+hazards on defenders, the cast then SIZES ITSELF to the yield.  Wave-3
+question: the minimum readiness yield at which the x4 dump bound holds
+with an endogenous cast.
+
+* Policy foresight: positioning ahead of K
+
+The unique, legitimate edge.  Sign conventions first (decision of
+record): bvib > 1 = basket dear = BUCK cheap = DISCOUNT excursion;
+error = 1 - bvib < 0; K falls; credit contracts; BUCK strengthens; bvib
+returns to 1.  Premium excursion mirror-image (bvib < 1 -> K rises ->
+supply grows -> BUCK weakens back to par).
+
+Because the controller is integral-dominant and slow (tau_I ~90 d), its
+trajectory over the next weeks is a committed function of its readable
+state.  During a sustained discount the system KNOWS contraction is
+coming and BUCK will be pushed up; during a sustained premium, the
+reverse.  Three legitimate uses -- this is not front-running external
+information, it is the central bank buying its own currency ahead of its
+own announced tightening:
+
+1. *Inventory*: BuckBasketOps Q1 absorbs the discount (accumulate BUCK
+   the policy is about to make scarce); Q3 supplies the premium.  Both
+   coincide directionally with the excursion agents' reversion trades --
+   the gradient gate adds confirmation and timing, not direction.
+2. *Ranges*: skew the priced tails (option C) toward the enforcement
+   direction -- deeper bid-side tails during a discount.
+3. *Fees*: pre-emptively raise the anti-enforcement side's fee (option
+   B directional policy keyed on the K gradient rather than raw bvib).
+
+A reconciliation flag, raised rather than silently re-litigated: the
+roadmap ruling (=REBALANCING-EQ.org= quadrant-balance model) phrases the
+ops condition as "absorb ... when BUCK is at a discount and K is
+RISING"; under the sign convention above a discount drives K DOWN
+(integral dominance makes dK/dt track sign(error) almost immediately),
+so the phrase cannot describe K's contemporaneous response to the same
+discount.  A 2026-09-01 code audit found the tension lives ONLY in
+prose -- every shipped signal is correctly signed (see the audit note
+below) -- and that "K rising" has TWO coherent readings as a gate on
+the unimplemented BuckBasketOps Q1 condition:
+
+- *Gate A -- enforcement alignment (absorb while K is falling)*: buy
+  what policy is actively making scarce; the K forcing closes the
+  position.  Supported by =BuckPoolInvestorAgent= (which already
+  places ranges on the side K is pushing toward, docstring stating the
+  convention exactly) and by =BuckBasketOps.monetaryDeviationOffset='s
+  stranding analysis (the desk's position needs the K forcing behind
+  it -- "if K then stops tightening, the long-term forcing the desk's
+  position is a bet on never arrives").
+- *Gate B -- deploy-only-when-healthy (absorb transient discounts
+  against a rising TREND-K regime)*: K read at regime scale (tau_I
+  ~90 d) classifies the discount -- transient dip in an expansionary
+  regime (safe to buy; the corner the slow lever cannot serve) vs
+  structural oversupply in a K-falling regime (stand down; the
+  controller is handling it, and the monetary book would be spent
+  fighting a correction).  Supported verbatim by the fence's
+  established K-coupling (=BuckBasketFence.sol=: "K falling forces it
+  to withdraw and burn; K rising lets it deploy") -- the same
+  design instinct for the same organ family.
+
+The readings differ in timescale (instantaneous dK vs regime trend)
+and in objective (profit alignment vs book preservation), and both
+have design-text support.  Wave 3d settles it empirically: gate
+variants {none, dK<0 fast, trend-K rising, composite} on the Q1/Q3
+ops program, measuring both ops P&L and stability -- per the ops-desk
+law ("profitability and stabilization ... come apart" only when the
+signal lags), and whichever gate wins IS the decision of record.
+
+Audit note (2026-09-01): no implemented agent trades on an inverted
+signal.  ExcursionArb and subclasses buy the discount / sell the
+premium / close on reversion (bvib EWMA only; K used solely as mint
+capacity); SaverAgent code is correct (~discount = max(0, bvib-1) ->
+buy~) though its inline comment at
+=alberta_buck/sim/equilibrium_agents.py:2099= states the convention
+INVERTED ("BUCK is discounted when ... basketValueInBuck < 1") -- a
+stale prose slip contradicted by its own next line; the endog hazards
+recruit issuers when BUCK is rich (correct); and the shipped monetary
+path is correctly signed end-to-end
+(=PairsRebalanceDirector.monetaryEffort=: "cm > 0 == BUCK CHEAP ==
+retire (negative)" -> =BuckBasketOps= ~effortBp < 0 -> _absorb~), with
+NO K-gradient gate implemented anywhere yet.  The catalogue results
+corroborate: a backwards cast would amplify excursions and bleed; the
+measured cast damps peaks and is paid more the worse the attack.
+
+Two corollaries worth writing down:
+
+- The controller's state is public, so EVERYONE has policy foresight.
+  That is a feature: third parties front-running committed policy do the
+  enforcement for the system, so K itself has to move less (forward
+  guidance).  The basket's edge is not informational -- it is that it
+  can position at zero adverse-selection cost against its own book and
+  it earns the reversion it enforces.
+- fs30 priced perfect 30-day COMMODITY knowledge at +$4-5M on an $8.6M
+  book.  Wave 3d prices perfect POLICY knowledge -- which the system
+  possesses for free -- on the common mode.  If the number is material,
+  the ops program pays for the readiness yield (F) by itself.
+
+* Wave 3 cell plan
+
+| wave | axis                | cells                                                                      | metric additions                              |
+|------+---------------------+----------------------------------------------------------------------------+-----------------------------------------------|
+| 3a   | instrument only     | existing arms x {none, usdc, all}; no new physics                          | markout ledger, carry_ratio, class toxicity   |
+| 3b   | fee policy          | {static-retune, vol, dev, directional, size} x {dump, squeeze, grind-down} x {x1, x4} | + whale P&L delta, benign tracking error |
+| 3c   | tail structure      | {full-range, band, band+tails} x raid arms (fence-in-the-loop, at last)    | + depositor/treasury split per regime         |
+| 3d   | K-foresight gates   | Q1/Q3 ops x {none, dK<0, dK>0, predicted-K}                                | + ops P&L vs fs30 bound, gate sign verdict    |
+| 3e   | derivatives overlay | D1 hedge on/off x {spike, step} x {x1.3, x1.6}; D2 writer solvency; D3 lead time | + hedge cost, IL delta, detector ROC     |
+
+Gate set: the 2-year tail gate, plus carry coverage, benign-flow health,
+and the expropriation bound (wave-3 instrument section).  3a reuses the
+existing grid so every historical arm gains the new columns on
+regeneration; 3b-3e are new physics and go behind it.
+
+* Recommendations (ranked by expected information per unit of compute)
+
+1. *Build 3a.*  Pure metric; no model changes; reinterprets all 86
+   existing catalogue cells.  Everything else in this document is
+   hypothesis until carry_ratio and the toxicity ledger exist.
+2. *3b in the sim's pool adapter.*  The dynamic fee is the only candidate
+   answer to the untouched one-day squeeze trough, and the sim can test
+   every policy without touching Solidity.
+3. *3c.*  Fence-in-the-loop was already the matrix's recommendation 5;
+   the markout metric finally gives it a depositor-economics judgment,
+   not just a stability one.
+4. *3d.*  Settles the roadmap's K-gradient sign with data and prices the
+   system's free policy foresight.
+5. *3e.*  Overlay studies; D1 first (bounded, honest kill criterion), D3
+   second (pure telemetry), D2 last (only if the solvency pricing
+   closes).
+6. *Contract work LAST*: vendored v4-core + a hook implementing the
+   winning 3b policy, the band+tails custody rework if 3c wins, registry
+   migration via the receipt-adoption scaffold.  Nothing ships on-chain
+   that did not first win its catalogue cell.
+
+* Artifacts and references
+
+- Saved critique: =~/Downloads/Panoptic-carry.pdf= / =.html= (X article,
+  @Panoptic_xyz, 2026-08-27,
+  https://x.com/Panoptic_xyz/status/2093081191427805570).
+- Panoptic research corpus (public): "Panoptic Solves LVR", "Reverse
+  Gamma Scalping", "IV & Put Wing Premia", "Derivatives Solve the
+  Uniswap Doom Loop" -- https://panoptic.xyz/research/.
+- LVR: Milionis, Moallemi, Roughgarden, Zhang, "Automated Market Making
+  and Loss-Versus-Rebalancing", arXiv:2208.06046 (the sigma^2/8 result).
+- am-AMM: Adams et al., "am-AMM: An Auction-Managed Automated Market
+  Maker", arXiv:2403.03367.
+- Uniswap v4: core repo + hooks/dynamic-fee documentation.
+- Hyperliquid: HIP-3 (builder-deployed perp markets) documentation.
+- Lineage: Artemis Capital (C. Cole), "The Allegory of the Hawk and the
+  Serpent" -- the carry/convexity yin-yang framing Panoptic transplants.
+- Parent documents: =REBALANCING-EQ.org= (the catalogue and its waves),
+  =BASKET-REDESIGN.md= / =BASKET-REBALANCE.md= (custody + director),
+  =alberta-buck-operations.org= (the ops desk and the
+  profitability-vs-stabilization law), =alberta_buck/sim/EQUILIBRIUM.md=
+  (the campaign and the controller).

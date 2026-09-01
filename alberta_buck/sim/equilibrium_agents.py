@@ -2097,7 +2097,7 @@ class SaverAgent(_ProxyAgent):
             return
         try:
             # Value reference is the BASKET: BUCK is discounted when a basket costs
-            # less than 1 BUCK (basketValueInBuck < 1).  This is the same
+            # more than 1 BUCK (basketValueInBuck > 1).  This is the same
             # observable the controller defends, so buying leans into the peg.
             bvib = d.basket.functions.basketValueInBuck().call() / 1e18
             discount = max(0.0, bvib - 1.0)      # BUCK below basket value -> buy
