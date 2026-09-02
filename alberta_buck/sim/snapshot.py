@@ -588,6 +588,10 @@ class Snapshotter:
             # WP-1: the markout ledger's cumulative aggregates (None when
             # the loop runs without one, e.g. older callers).
             "mx": mx,
+            # WP-5: stress fees paid by duress exits (cumulative BUCK value)
+            # and the number of exits that paid one (direct_mint.py).
+            "stressFeesPaid": ctr.get("stressFeesPaid", 0),
+            "stressFeeExits": ctr.get("stressFeeExits", 0),
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t
