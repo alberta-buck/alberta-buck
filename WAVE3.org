@@ -185,7 +185,87 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 | WP-8  | SeederAgent; orientation check; 3h seeder cells                       | --      | seeder_agent.py (new); loop.py import                         | seeder on/off at launch; private-depth arrival            | R10; G3                                                          | ~8         | TODO   |                |
 | WP-9  | Five seeds on the key 3c/3d cells; the flood with/without facility    | WP-2, WP-3b, WP-6 | sweep usage; a flood experiment TOML (new)              | replication table; flood table                            | R11, R12                                                         | ~40        | TODO   |                |
 | WP-10 | Documents of record                                                   | all     | CARRY-CONVEXITY.org, REBALANCING-EQ.org, this file             | "Wave 3 results" section; findings 12+; ledger closed      | R13                                                              | --         | TODO   |                |
+| WP-12 | The star driver + pane renderer: =star.py= (baseline TOML + axes spec -> 1 + 2A cells per arm, run / =--report-only=, sensitivity table md/json), =plot_star.py= (one figure per pane: axes x arms panels with lo / base / hi overlaid), =experiments/stars/= | WP-1 | star.py, plot_star.py (new); experiments/stars/*.toml | the integral-only-K star (c0) spec + a dry-run; a smoke star | dry-run lists 1 + 2A cells per arm; the smoke star renders the k and bvib panes; sensitivity table regenerates from vectors | ~5 (smoke) | IN PROGRESS | =wp/12-star= / Claude (session 2) |
+| WP-3c | Integral-only K, with the P/D roles factored into the level-1 facilities: the first star (kp_frac x tau_i x cast x whale) on none / dump x1 / squeeze x4, judged by G7 / G8 and x4 AUC / rail days vs the P-carrying baseline | WP-12, WP-2 (for the undertakings baseline; the usdc-mix baseline may run first) | experiments/stars/k-integral-*.toml | the c0 and c1 sensitivity tables and pane figures; a recommendation on kp_frac | decisions pending 7 closed with evidence | ~63 / cycle | TODO |                |
 | WP-11 | Monetary Diamond consolidation (POST-wave-3): facets = venue, custody, ops, undertakings + ladder, facility registry, house, observer, controller; =Buck='s =buckK= and =basket= point at the Diamond (CARRY-CONVEXITY.org 6.4) | all wave-3 wins | src/basket/* (facets), src/Buck.sol wiring decision, deploy scripts | facet map + shared storage layout; time-locked parameters | existing forge suites pass facet by facet; lambda = gamma = 0 identity; one-way call graph asserted | -- | TODO |                |
+
+* The star method: one axis at a time from a baseline
+
+(Design owner, 2026-09-02.)  The full grid of every controllable axis at
+every value is unrenderable past two or three axes.  Instead: pick a few
+BEST scenarios as baselines; for each baseline vary EACH axis lower and
+higher while holding every other axis at the baseline; render one
+chosen PANE (the K pane, the depositor-ROI pane, the bvib pane, the
+markout pane, ...) per axis with lo / base / hi overlaid; read the
+sensitivity table; move the baseline along the axes that improved the
+objective; repeat.  A star, re-centred each cycle, searches the space
+for its sweet spots organically over a few cycles.
+
+** Definitions
+
+- *Baseline*: a complete experiment TOML (physics, cast, facilities,
+  injections) -- a scenario of record.  Several may exist.
+- *Axis*: one controllable knob, as a dotted =--set= key, with its
+  baseline value and a lo / hi value (or a multiplicative step); an
+  axis may also be a TAG axis (=--tag=) for knobs that live outside
+  =--set= (e.g. the controller variant).
+- *Star*: for each arm in the star's arm list (typically =none= plus
+  one or two injections), the baseline cell plus lo and hi cells per
+  axis: 1 + 2A cells per arm.  A cells x A axes x 3 arms, ~A=10, is
+  ~63 cells -- a night on a MATRIX_JOBS machine.
+- *Objective*: declared per star, e.g. "minimize the x4 squeeze AUC
+  subject to G1-G8 PASS and depositor realized ROI >= baseline".  The
+  driver does not optimize; it reports, and the design owner moves the
+  baseline.
+- *Pane*: one time series per vector rendered per axis with lo / base /
+  hi overlaid, one row per arm: =k= (buckK), =bvib=, =dm_roi= (depositor
+  realized P&L), =nav_bsk= (basket NAV in baskets), =carry= (the
+  markout ledger's basket netlp), =whale= (raid P&L), =supply=,
+  =exc_pnl= (defender P&L).
+- *Cycle*: run the star; write the sensitivity table (per axis: the
+  metrics at lo / base / hi and the deltas); pick the new baseline;
+  commit the star spec and its summary as the cycle's record
+  (=experiments/stars/<name>-c<k>.toml=, =build/sim/star/<name>-c<k>/=,
+  =images/star-<name>-c<k>-<pane>.png=).
+
+** Caveat, and its mitigation
+
+One-axis-at-a-time misses interactions.  Mitigations: re-centre every
+cycle (coordinate ascent finds interacting optima over cycles); run the
+PAIR cell of the two most sensitive axes each cycle (four cells); and
+run a small full factorial on any two axes whose pair cell disagrees
+with the sum of their single effects.  Multi-seed the final baseline.
+
+** The axes catalogue (what can be varied)
+
+| group        | axis (=--set= key)                             | note                                  |
+|--------------+------------------------------------------------+---------------------------------------|
+| controller   | =deploy.kp_frac= (0 = integral-only K), =deploy.tau_i_days=, =deploy.dk_rail=, =deploy.kmax=, =deploy.k0= | decision pending 7 is the kp_frac axis |
+| shadow       | =SIM_SHADOW_LAMBDA= / =_GAMMA= (tag axes until WP-3a lands a =--set=) | D4                                    |
+| undertakings | =agents.UndertakingAgent.eps= / =.p= / =.delta= / =.phi= / =.reserve_frac= / =.leg_bp= | D3 (WP-2)                             |
+| facility     | =agents.FacilityAgent.x= / =.y= / =.max_frac=; =scenario.agents.FacilityAgent= (population) | D6 (WP-6)                          |
+| fee          | =deploy.fee_policy= / =.fee_base_bp= / =.fee_rv_gain= (WP-4)            | 3b                                    |
+| cast         | =scenario.agents.<Excursion*>= counts; =agents.ExcursionArbAgent.entry_dev= / =.min_edge= | the private middle of the ladder |
+| seeder       | =scenario.agents.SeederAgent=, =agents.SeederAgent.range_bp= (WP-8)     | D5                                    |
+| injection    | =agents.WhaleRaidAgent.budget_m= / =.raid_days= / =.quiet_cap_bp=       | the attack's shape                    |
+| physics      | =deploy.target_buck_lp_m=, =deploy.target_buck_m=                       | depth                                 |
+
+** The first star: integral-only K
+
+Decision pending 7 is resolved in principle (design owner, 2026-09-02):
+K MAY be integral-only, with the P and D roles factored out into the
+level-1 facilities -- the undertakings, the desk, the facility, the fee
+-- which provide the short-term incentives and harvest the excursion
+ROI for organic participants; K is then long-term stability only.  In
+mid-ranging terms the proportional action moves from the controller to
+the actuators, whose positions K integrates.  Whether the fast
+facilities cover what the P kick covered is exactly what the star
+measures: baseline = the portcast cast with the undertakings (once
+WP-2 lands; until then, the =usdc= mix); axes = =deploy.kp_frac= {0,
+0.02, 0.05}, =deploy.tau_i_days= {45, 90, 180}, defender count x{0.5,
+1, 2}, whale budget x{0.5, 1, 2}; arms = none, dump x1, squeeze x4;
+panes = =k= and =bvib= first, =dm_roi= second; objective = G7 + G8
+PASS with x4 AUC and rail days no worse than the P-carrying baseline.
 
 * Test plan
 
@@ -281,6 +361,36 @@ verdict hold on >= 4/5.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-02 -- WP-1 merged; WP-12 the star driver (session 2, Claude on =wp/12-star=)
+
+- =wp/1-instrument= merged --no-ff into =feature/carry-convexity=
+  (4e4700c).  The 3a regeneration is DEFERRED by the design owner until
+  the more interesting tools exist.
+- Decision pending 7 resolved in principle (design owner): K may be
+  INTEGRAL-ONLY, the P and D roles factored out into the level-1
+  facilities; to be tested.  Method: the STAR (this file, "The star
+  method") -- one axis at a time from a baseline, a pane per axis,
+  re-centred each cycle.
+- Built: =alberta_buck/sim/star.py= (spec loader; cells = baseline +
+  lo/hi per axis per arm, with per-axis arm restriction and env-var
+  axes; parallel runner; a --days-aware completeness check; the
+  sensitivity table with deltas vs the baseline and the G7 numbers
+  max / RMS |K - K_base| per cell), =plot_star.py= (one figure per
+  pane: arms x axes panels, lo / base / hi overlaid; panes k, bvib,
+  dm_roi, nav_bsk, carry, whale, supply, exc_pnl),
+  =experiments/stars/k-integral-c0.toml= (the first star: kp_frac x
+  tau_i x cast x whale on none / dump-x1 / squeeze-x4; 23 cells).
+- Smoke star (20 days, arms none + dump-x1, axes kp_frac + cast, 10
+  cells, ~5 min on 5 jobs; =build/sim/star-smoke/=): the table and
+  three panes render.  Two sanity results: the =cast= axis is
+  byte-identical to base on both arms (dK_max 0.000 -- threshold-gated
+  defenders are inert in 20 quiet days, the keyed-RNG guarantee); the
+  =kp_frac= axis already separates in 20 quiet days (dK_max 0.006 at 0,
+  0.009 at 0.05; RMS 0.002 / 0.003) -- the P kick's footprint on an
+  organic regime, which is exactly what G7 will judge on the full c0.
+- Next: run c0 in full (23 cells, ~23 core-hours) when compute is
+  allocated; WP-2 (the undertakings) so c1 can re-centre on them.
 
 ** 2026-09-02 -- WP-1 in progress (session 2, Claude on =wp/1-instrument=)
 
