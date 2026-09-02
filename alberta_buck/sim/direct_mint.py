@@ -31,11 +31,31 @@ from __future__ import annotations
 
 import random
 
+from web3 import Web3
+
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim import rng as _rng_mod
 from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim.router import MIN_SQRT_RATIO, MAX_SQRT_RATIO
+
+# WP-5: the stress fee on duress exits.  BuckBasketProRata emits
+# StressFee(receiptId indexed, deviation1e18, feeBp, feeValueBuck) as a
+# SEPARATE log on a deflation-branch redemption beyond the deadband; the
+# Redeemed event is unchanged, so parse_redeem keeps working.  Booked as
+# ctr["stressFeesPaid"] (cumulative fee value, BUCK 6-dec in the sim) and
+# ctr["stressFeeExits"] (exits that paid one); append-only counters.
+STRESS_FEE_TOPIC = Web3.keccak(text="StressFee(uint256,uint256,uint256,uint256)")
+
+
+def _book_stress_fee(rcpt, ctr) -> None:   # WP-5
+    from eth_abi import decode
+    for log in rcpt["logs"]:
+        if log["topics"][0] == STRESS_FEE_TOPIC:
+            _dev, _fee_bp, fee_value = decode(
+                ["uint256", "uint256", "uint256"], bytes(log["data"]))
+            ctr["stressFeesPaid"] = ctr.get("stressFeesPaid", 0) + fee_value
+            ctr["stressFeeExits"] = ctr.get("stressFeeExits", 0) + 1
 
 
 class _DMBase(Agent):
@@ -197,6 +217,7 @@ class _DMBase(Agent):
             tok_to_user, treasury_buck = parse_redeem(d, rcpt, self.address)
             ctr["dmTotalReturned"] = ctr.get("dmTotalReturned", 0) + tok_to_user
             ctr["treasuryBuck"] = ctr.get("treasuryBuck", 0) + treasury_buck
+            _book_stress_fee(rcpt, ctr)   # WP-5
             self._record_roundtrip(d, ctr, self.address, before_usd)
             # Reset state so the agent can re-enter on a later tick
             # (stochastic DMs).  Bootstrap DMs override _exit to a no-op
@@ -401,6 +422,7 @@ class DirectMintBuckAgent(_DMBase):
             tok_to_user, treasury_buck = parse_redeem(d, rcpt, self.proxy.address)
             ctr["dmTotalReturned"] = ctr.get("dmTotalReturned", 0) + tok_to_user
             ctr["treasuryBuck"] = ctr.get("treasuryBuck", 0) + treasury_buck
+            _book_stress_fee(rcpt, ctr)   # WP-5
             self._record_roundtrip(d, ctr, self.proxy.address, before_usd)
             self._receipt_id = None
             self._principal_tok = 0

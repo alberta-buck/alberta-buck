@@ -62,6 +62,23 @@ import {BuckBasketStorage, IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketS
 ///   (BUCK transfers are identity-gated; paying depositors BUCK would force every
 ///   participant to be identity-bound).  The principal burn is senior to all of
 ///   this.
+///
+/// # The stress fee on duress exits (WP-5; CARRY-CONVEXITY D2)
+///
+///   "If you need to exit under duress, you take the hit."  A redemption that
+///   lands in the deflation branch (`Bw < R`, BUCK dear) while the TWAP
+///   deviation below par exceeds `stressFeeDeadbandBp` pays `stressFeeSlopeBp`
+///   of `V` per 1% of deviation beyond the deadband, capped at
+///   `stressFeeMaxBp`.  The fee is taken in TOKEN from the payout and re-LP'd
+///   into its own pool with freshly minted partner BUCK as DEPOSITOR
+///   liquidity -- so NAV rises by ~2x the fee while outstanding rises by ~1x
+///   (the partner BUCK, booked in `stressBonusPrincipal`), and every remaining
+///   receipt's claim `θ·NAV` and the coverage ratio both rise.  The treasury
+///   sees none of it.  The partner BUCK is retired pro rata by every later
+///   redemption (`_bonusSlice`), so the burn invariant holds to the last
+///   receipt.  The fee never reverts a redemption; it only reduces the payout.
+///   The deviation is read from the TWAP `basketValueInBuck()`, so a same-block
+///   spot sandwich cannot move it.
 contract BuckBasketProRata is BuckBasketStorage {
 
     constructor(
@@ -86,6 +103,12 @@ contract BuckBasketProRata is BuckBasketStorage {
         observationCardinality = _observationCardinality;
         defaultMaxDeviationBp  = _defaultMaxDeviationBp;
         minSeedLiquidity       = _minSeedLiquidity;
+
+        // Stress fee defaults (D2): no fee inside 2% of par; 50 bp of V per
+        // 1% beyond; capped at 5% of V.
+        stressFeeDeadbandBp = 200;
+        stressFeeSlopeBp    = 50;
+        stressFeeMaxBp      = 500;
 
         receipt = new BuckBasketReceipt(address(this));
     }
@@ -113,6 +136,35 @@ contract BuckBasketProRata is BuckBasketStorage {
     function setDirector(address _director) external onlyGov {
         director = _director;
         emit DirectorSet(_director);
+    }
+
+    /// @notice Set the duress-exit stress fee (D2): no fee while the TWAP
+    ///         deviation below par is within `deadbandBp`; `slopeBp` of V per
+    ///         1% of deviation beyond it; capped at `maxBp`.  `maxBp == 0`
+    ///         disables the fee.
+    function setStressFee(uint256 deadbandBp, uint256 slopeBp, uint256 maxBp)
+        external onlyGov
+    {
+        if (!(deadbandBp <= 10000 && maxBp <= 10000)) revert Bp10000();
+        stressFeeDeadbandBp = deadbandBp;
+        stressFeeSlopeBp    = slopeBp;
+        stressFeeMaxBp      = maxBp;
+        emit StressFeeSet(deadbandBp, slopeBp, maxBp);
+    }
+
+    /// @notice The stress fee a deflation-branch redemption would pay now: the
+    ///         TWAP deviation below par (`1e18 - bvib`; 0 at or above par) and
+    ///         the fee in bp of the value claim V.  Reads the venue's TWAP
+    ///         `basketValueInBuck()`, so a same-block spot sandwich cannot push
+    ///         a redeemer into the fee or out of it.
+    function stressFeeQuote() public view returns (uint256 deviation, uint256 feeBp) {
+        int256 bvib = _venue().basketValueInBuck();
+        if (bvib >= int256(1e18)) return (0, 0);
+        deviation = uint256(int256(1e18) - bvib);
+        uint256 band = stressFeeDeadbandBp * 1e14;              // bp -> 1e18
+        if (deviation <= band) return (deviation, 0);
+        feeBp = (deviation - band) * stressFeeSlopeBp / 1e16;   // per 1% beyond
+        if (feeBp > stressFeeMaxBp) feeBp = stressFeeMaxBp;
     }
 
     /// @dev Carry a bounded work slice for the director's signal state
@@ -396,14 +448,20 @@ contract BuckBasketProRata is BuckBasketStorage {
             ? d.buckPrincipal
             : d.buckPrincipal * redeemShare / 10000;
         if (!(R > 0)) revert RedeemZero();
+        // The burn obligation `Rb`: the receipt's own principal `R` plus its
+        // pro-rata slice of the stress-fee bonus principal (WP-5).  With
+        // P = O - S the sum of receipt principals, θ = Rb/O = R/P, so the value
+        // claim is exactly what it would be with S folded into every receipt,
+        // and the bonus is retired as receipts leave (the last retires it all).
+        uint256 Rb = R + _bonusSlice(R);
 
         // Phase 1: read venue value statistics, allocate (balanced sell-high or
         // all from one pool), and withdraw.
         (uint256[] memory bv, uint128[] memory depL, uint256 B, uint256[] memory prices) =
             _venue().poolBuckValues();
         (uint256[] memory burnL, uint256 V) = payoutToken == address(0)
-            ? _allocateSellHigh(R, bv, depL, B, prices)
-            : _allocateSingleToken(R, payoutToken, bv, depL, B);
+            ? _allocateSellHigh(Rb, bv, depL, B, prices)
+            : _allocateSingleToken(Rb, payoutToken, bv, depL, B);
         uint256 N = constituents.length;
         uint256[] memory perPoolTok = new uint256[](N);
         uint256 Bw = 0;
@@ -424,22 +482,29 @@ contract BuckBasketProRata is BuckBasketStorage {
         // leaves to a depositor and commodity LPs need no BUCK identity.
         uint256 treasuryBuck = 0;
         uint256 burned;
-        if (Bw >= R) {
-            burned = R;
-            treasuryBuck = Bw - R;          // all BUCK profit -> treasury
+        if (Bw >= Rb) {
+            burned = Rb;
+            treasuryBuck = Bw - Rb;         // all BUCK profit -> treasury
         } else {
             (uint256 gained, uint256 lossValue, uint256[] memory inv) =
-                _venue().convertIntoBucks(perPoolTok, R - Bw);
+                _venue().convertIntoBucks(perPoolTok, Rb - Bw);
             perPoolTok = inv;
             uint256 have = Bw + gained;
-            burned = have >= R ? R : have;
+            burned = have >= Rb ? Rb : have;
             // Revert path 1: burn unsatisfiable within the loss budget.  A zero
             // budget means "unlimited" (skip the loss cap) so `redeem(id, bp, 0)`
             // matches the legacy basket's no-guard call.
-            if (!(R - burned <= MAX_DUST_WEI)) revert Underwater();
+            if (!(Rb - burned <= MAX_DUST_WEI)) revert Underwater();
             if (!(maxConversionLossBp == 0
                   || lossValue * 10000 <= maxConversionLossBp * V)) revert ConversionLoss();
             treasuryBuck = have - burned;   // over-swap excess
+
+            // Phase 2b (WP-5): a duress exit pays the stress fee, credited to
+            // whoever remains (skipped when this receipt is the last principal
+            // -- there is nobody left to credit and nothing to retire it).
+            if (totalOutstandingBuck - stressBonusPrincipal > R) {
+                _stressFee(receiptId, V, perPoolTok, prices);
+            }
         }
 
         // Phase 3: burn principal, pay out.  Treasury BUCK stays in the basket
@@ -455,8 +520,9 @@ contract BuckBasketProRata is BuckBasketStorage {
             }
         }
 
-        // Phase 4: finalize bookkeeping (outstanding drops by R; any dust gap
-        // R-burned is a bounded supply leak, not double-counted).
+        // Phase 4: finalize bookkeeping (outstanding drops by Rb -- the
+        // principal R plus the retired bonus slice; any dust gap Rb-burned is
+        // a bounded supply leak, not double-counted).
         if (redeemShare == 10000) {
             delete deposits[receiptId];
             receipt.burn(receiptId);
@@ -464,12 +530,73 @@ contract BuckBasketProRata is BuckBasketStorage {
             deposits[receiptId].buckPrincipal -= R;
             deposits[receiptId].tokenPrincipal -= d.tokenPrincipal * redeemShare / 10000;
         }
-        totalOutstandingBuck -= R;
+        stressBonusPrincipal -= Rb - R;
+        totalOutstandingBuck -= Rb;
 
         controller.compute();
         emit Redeemed(
             msg.sender, receiptId, burned, 0, treasuryBuck,
             redeemShare == 10000 ? 0 : 10000 - redeemShare);
+    }
+
+    /// @dev The slice of the stress-fee bonus principal a redemption of `R`
+    ///      receipt principal retires: `R·S/P`, P = O - S.  Exact for the last
+    ///      receipt (R == P ⇒ the whole of S); rounds down otherwise, so the
+    ///      remainder is carried to later redeemers, never lost.
+    function _bonusSlice(uint256 R) internal view returns (uint256 slice) {
+        uint256 S = stressBonusPrincipal;
+        if (S == 0) return 0;
+        slice = UniswapV3OracleLib.mulDiv(R, S, totalOutstandingBuck - S);
+        if (slice > S) slice = S;
+    }
+
+    /// @dev Phase 2b of a deflation-branch redemption: charge the stress fee
+    ///      (D2) and credit it to the remaining depositors.  The fee is
+    ///      `feeBp` of the value claim V (`stressFeeQuote`, TWAP-based), taken
+    ///      in TOKEN pro rata across the payout (valued at the guarded spot
+    ///      `prices`), and each leg is re-LP'd into its own pool with freshly
+    ///      minted partner BUCK as DEPOSITOR liquidity -- `provideForToken`,
+    ///      exactly a deposit's mechanics, so it lands in `depL` and never in
+    ///      `treasuryLiquidity`.  The partner BUCK is booked in
+    ///      `stressBonusPrincipal` and `totalOutstandingBuck`.  Never reverts
+    ///      the redemption: a leg whose re-LP fails (dust below the venue's
+    ///      minimum) is waived back to the payout.  The venue's spot/TWAP
+    ///      guard is skipped here (0): `poolBuckValues` already enforced it
+    ///      for this redemption and the settlement swap may have moved spot.
+    function _stressFee(uint256 receiptId, uint256 V, uint256[] memory perPoolTok,
+                        uint256[] memory prices)
+        internal
+    {
+        (uint256 dev, uint256 feeBp) = stressFeeQuote();
+        if (feeBp == 0) return;
+        uint256 N = perPoolTok.length;
+        uint256 payoutValue = 0;
+        for (uint256 i = 0; i < N; i++) {
+            if (perPoolTok[i] == 0 || prices[i] == 0) continue;
+            payoutValue += UniswapV3OracleLib.mulDiv(
+                perPoolTok[i], prices[i], 10 ** constituents[i].decimals);
+        }
+        if (payoutValue == 0) return;
+        uint256 feeValue = UniswapV3OracleLib.mulDiv(V, feeBp, 10000);
+        if (feeValue > payoutValue) feeValue = payoutValue;
+
+        uint256 minted = 0;
+        uint256 taken = 0;
+        for (uint256 i = 0; i < N; i++) {
+            if (perPoolTok[i] == 0 || prices[i] == 0) continue;
+            uint256 feeTok = UniswapV3OracleLib.mulDiv(perPoolTok[i], feeValue, payoutValue);
+            if (feeTok == 0) continue;
+            try _venue().provideForToken(i, feeTok, 0) returns (uint128, uint256 partnerBuck) {
+                perPoolTok[i] -= feeTok;
+                minted += partnerBuck;
+                taken += UniswapV3OracleLib.mulDiv(
+                    feeTok, prices[i], 10 ** constituents[i].decimals);
+            } catch {}
+        }
+        if (minted == 0) return;
+        stressBonusPrincipal += minted;
+        totalOutstandingBuck += minted;
+        emit StressFee(receiptId, dev, feeBp, taken);
     }
 
     /// @notice Closed-form sell-high allocation in BUCK value, over the venue's
