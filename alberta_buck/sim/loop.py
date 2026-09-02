@@ -20,6 +20,7 @@ from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )
 from alberta_buck.sim.snapshot import Snapshotter
+from alberta_buck.sim.markout import MarkoutLedger, PoolProbe, actor_tag  # WP-1
 
 E6 = 10 ** 6
 
@@ -124,6 +125,21 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     tick_secs = max(60, (86_400 * step) // scenario.ticks_per_day)
 
     n_tok = len(d.tokens)
+    # WP-1: the markout ledger (alberta_buck/sim/markout.py).  Every act
+    # that sends a transaction is followed by a reserve diff of the basket
+    # pools (+ BUCK/USDC); the deltas are booked as trades against the LP,
+    # tagged by the acting agent's class, and marked out at each frame.
+    # The send counter is what keeps this cheap: most acts send nothing.
+    ledger = MarkoutLedger(n_pools=n_tok)
+    probe = PoolProbe(d)
+    sent = [0]
+    _send = d.chain.send
+
+    def _counting_send(*args, **kw):
+        sent[0] += 1
+        return _send(*args, **kw)
+    d.chain.send = _counting_send
+    chain.send = _counting_send
     for day in range(0, scenario.days, step):
         # Scripted interventions fire first, so a price shock scheduled for
         # this day is already visible in refUsd / the whale's snap below.
@@ -169,13 +185,26 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
             else:
                 order = arbs[:]
                 prng.shuffle(order)
+            reserves = probe.read()
             for a in order:
+                s0 = sent[0]
                 a.act(d, scenario, day, tick, ctr)
+                if sent[0] != s0:
+                    after = probe.read()
+                    tag = actor_tag(a)
+                    bvib_now = None
+                    for pool, db, dq, dec, fee in probe.diff(reserves, after):
+                        if bvib_now is None:
+                            bvib_now = probe.bvib()
+                        ledger.record(day, tick, tag, pool, db, dq, dec, fee,
+                                      bvib_now)
+                    reserves = after
         try:
             chain.send(d.kctrl.functions.compute())
         except Exception:
             pass
-        snap.capture(day, ctr, agents, init_val, reb_init, dm_init)
+        snap.capture(day, ctr, agents, init_val, reb_init, dm_init,
+                     ledger=ledger)
         if on_frame is not None:
             on_frame(snap.frames[-1])
         # Incremental checkpoint: flush the vector periodically so a long run

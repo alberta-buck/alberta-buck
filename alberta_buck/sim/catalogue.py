@@ -259,6 +259,97 @@ def report(specs: list[dict], outdir: Path, resp_days: int, band: float,
                 cell(by.get((arm, m, scale))) for m in mixes) + " |")
         P("")
 
+    # -- WP-1: the basket's own side, vs the undefended cell ------------ #
+    # Deltas are reported only against the `none` mix of the same arm /
+    # scale (same tag), and flagged [uncontrolled] when the pre-injection
+    # basket NAV differs (a mix whose agents trade before the injection --
+    # e.g. the crb rebalancers -- has its own history).
+    def bs_cell(st, ref) -> str:
+        if st is None or st.get("error"):
+            return "--"
+        b = st.get("basket") or {}
+        e = b.get("end") or {}
+        if not e:
+            return "--"
+        s = (f"navU {_fmt(e.get('nav_usd_m'), '.1f')} "
+             f"navK {_fmt(e.get('nav_bsk_m'), '.1f')} "
+             f"tr {_fmt(e.get('treasury_k'), '.0f')}k "
+             f"dmR {_fmt(e.get('dm_real_m'), '+.2f')}")
+        if ref is not None and ref is not st and not ref.get("error"):
+            rb = ref.get("basket") or {}
+            re_, rp, p = rb.get("end") or {}, rb.get("pre") or {}, b.get("pre") or {}
+            if re_:
+                same = abs((p.get("nav_b_m") or 0) - (rp.get("nav_b_m") or 0)) \
+                    <= 1e-9 * max(1.0, abs(rp.get("nav_b_m") or 1.0))
+
+                def dd(key, spec):
+                    a, r = e.get(key), re_.get(key)
+                    return _fmt(None if a is None or r is None else a - r, spec)
+
+                s += (f" ; d navU {dd('nav_usd_m', '+.2f')} "
+                      f"navK {dd('nav_bsk_m', '+.2f')} "
+                      f"tr {dd('treasury_k', '+.0f')}k "
+                      f"dmR {dd('dm_real_m', '+.2f')}"
+                      + ("" if same else " [uncontrolled]"))
+        return s
+
+    def mx_cell(st) -> str:
+        if st is None or st.get("error"):
+            return "--"
+        m = st.get("markout")
+        if not m:
+            return "(no ledger)"
+        b, w = m["basket"], m["whale"]
+        return (f"fees {b['fees_m']:+.3f} adv {b['adv_m']:+.3f} "
+                f"cm {b['adv_cm_m']:+.3f} carry "
+                f"{_fmt(b['worst_carry'], '.2f', none='>1')} "
+                f"; whale adv {w['adv_basket_m']:+.3f} ub {w['adv_ub_m']:+.3f}")
+
+    def kfc_cell(st) -> str:
+        if st is None or st.get("error"):
+            return "--"
+        kfc = st.get("kfc") or {}
+        law = kfc.get("law") or {}
+        k = kfc.get("h") or {}
+
+        def g(h, key, spec):
+            v = (k.get(h) or k.get(str(h)) or {}).get(key)
+            return _fmt(v, spec)
+
+        return (f"law: Kp {_fmt(law.get('kp_fit'), '.3f')} "
+                f"(R2 {_fmt(law.get('kp_r2'), '.2f')}) "
+                f"Ki/d {_fmt(law.get('ki_fit_per_day'), '.4f')} "
+                f"(R2 {_fmt(law.get('ki_r2'), '.2f')}) "
+                f"post-hit30 {_fmt(law.get('post_hit_30'), '.0%')} "
+                f"; calm: p30 {g(30, 'mae_persist', '.4f')} "
+                f"in1 {g(30, 'within_1pt_persist', '.0%')} "
+                f"; ex-ante obs30 {g(30, 'mae_observer', '.4f')} "
+                f"naive30 {g(30, 'mae_naive', '.4f')}")
+
+    for title, fn in (
+            ("basket side at end: NAV $M USD / $M baskets / treasury k / "
+             "depositor realized $M; | delta vs the undefended (none) cell",
+             lambda st, arm, scale: bs_cell(st, by.get((arm, "none", scale)))),
+            ("markout ledger (injection window; whole run for controls): "
+             "basket fees / adverse total / adverse common-mode $M, worst "
+             "carry ratio | whale adverse in basket pools / in BUCK-USDC",
+             lambda st, arm, scale: mx_cell(st)),
+            ("K comprehensibility (WAVE3 R14 / G8): the law fitted -- "
+             "dK ~ Kp d(1-bvib) day to day, dK ~ Ki mean(1-bvib) 30 over a "
+             "month -- with R2 and the ex-post 30d direction hit; calm "
+             "(persistence MAE, within 1pt); ex-ante forecast MAE",
+             lambda st, arm, scale: kfc_cell(st))):
+        for scale in scales:
+            P(f"## {title}  (scale x{scale:g})")
+            P("")
+            P("| arm \\ mix | " + " | ".join(mixes) + " |")
+            P("|---|" + "---|" * len(mixes))
+            for arm in arms:
+                P(f"| {arm} | " + " | ".join(
+                    fn(by.get((arm, m, scale)), arm, scale) for m in mixes)
+                  + " |")
+            P("")
+
     md = "\n".join(lines)
     (outdir / f"{summary}.md").write_text(md)
     (outdir / f"{summary}.json").write_text(json.dumps(stats, indent=1))

@@ -347,6 +347,252 @@ def excursion_response(frames: list, w: dict, resp_days: int = RESP_DAYS,
     }
 
 
+# ---------------------------------------------------------------------------
+# WP-1: the basket's own side, the markout ledger, K forecastability
+# (CARRY-CONVEXITY.org 3.3 / 8.1; WAVE3.org R1, R2, R14)
+# ---------------------------------------------------------------------------
+
+def _nearest(days: list[int], day: int) -> int:
+    """Index of the frame nearest `day` (the earlier one on ties)."""
+    return min(range(len(days)), key=lambda i: (abs(days[i] - day), i))
+
+
+def _bs_snap(f: dict) -> dict:
+    """One frame's basket-side balance sheet in report units.  NAV in
+    BUCK, in USD (x buck_usd) and in BASKETS (/ bvib) -- the last is the
+    depositor's unit of account; $M and k."""
+    bv = (f.get("basketVal") or 0) / E18
+    bu = (_busd(f) or 0) / E6
+    nav = (f.get("basketNav") or 0) / E6
+    return {
+        "day": f.get("day"),
+        "bvib": bv,
+        "buck_usd": bu,
+        "nav_b_m": nav / 1e6,
+        "nav_usd_m": nav * bu / 1e6,
+        "nav_bsk_m": (nav / bv / 1e6) if bv else None,
+        "treasury_k": (f.get("treasuryBuck") or 0) / E6 / 1e3,
+        "dm_real_m": (f.get("dmProfitUsd") or 0) / E6 / 1e6,
+        "dm_mark_m": (f.get("directMintPnl") or 0) / E6 / 1e6,
+        "supply_m": (f.get("supply") or 0) / E6 / 1e6,
+        "k": (f.get("buckK") or 0) / E18,
+    }
+
+
+def basket_side(frames: list, w: dict | None = None, plus_days: int = 60,
+                pre_days: int = PRE_DAYS) -> dict:
+    """The basket's own side of an excursion (the columns no catalogue
+    summary carried until 2026-09-01): at the pre-injection baseline
+    (pre_days before day0), at day1 + plus_days, and at the end.  Without
+    a window: first frame / None / last frame."""
+    if not frames:
+        return {}
+    days = _frame_days(frames)
+    if w is None:
+        return {"pre": _bs_snap(frames[0]), "plus": None,
+                "end": _bs_snap(frames[-1])}
+    day0, day1 = int(w["day0"]), int(w["day1"])
+    return {"pre": _bs_snap(frames[_nearest(days, day0 - pre_days)]),
+            "plus": _bs_snap(frames[_nearest(days, day1 + plus_days)]),
+            "end": _bs_snap(frames[-1])}
+
+
+def _mx_sub(a, b):
+    """Elementwise a - b over the ledger's frame aggregates (lists of
+    ints / dicts of lists); a missing b is zero."""
+    if isinstance(a, dict):
+        return {k: _mx_sub(v, (b or {}).get(k)) for k, v in a.items()}
+    if isinstance(a, list):
+        b = b or [0] * len(a)
+        return [_mx_sub(x, y) for x, y in zip(a, b)]
+    return a - (b or 0)
+
+
+def markout_panel(frames: list, w: dict | None = None) -> dict | None:
+    """The markout ledger (frame["mx"], cumulative) over the whole run or,
+    with a window, over [last frame before day0, resp_end]: per basket
+    pool fees / adverse (total, common-mode) at each horizon in $M and
+    the carry ratio fees / adverse at the longest horizon; the BUCK/USDC
+    venue; per-class toxicity = adverse per $M of that class's basket
+    flow.  None when the vector carries no ledger (pre-WP-1 vectors)."""
+    if not frames or not frames[-1].get("mx"):
+        return None
+    days = _frame_days(frames)
+    if w is None:
+        base, end = None, frames[-1]["mx"]
+    else:
+        day0 = int(w["day0"])
+        before = [i for i in range(len(frames)) if days[i] < day0]
+        base = frames[before[-1]].get("mx") if before else None
+        end = frames[_nearest(days, int(w.get("resp_end", days[-1])))].get("mx")
+        if not end:
+            return None
+    mx = _mx_sub(end, base) if base else end
+    hs = [int(x) for x in mx.get("h", [])]
+    if not hs:
+        return None
+    hl = hs[-1]
+    M = 1e6 * E6
+
+    def pool_row(i, r):
+        adv = {D: [r[3 + 2 * k] / M, r[4 + 2 * k] / M] for k, D in enumerate(hs)}
+        tot = adv[hl][0]
+        return {"i": i, "n": r[0], "vol_m": r[1] / M, "fees_m": r[2] / M,
+                "adv_m": adv,
+                "carry_ratio": (r[2] / M) / (-tot) if tot < 0 else None}
+
+    pools = [pool_row(i, r) for i, r in enumerate(mx.get("pool", []))]
+    ubr = mx.get("ub") or []
+    ub = None
+    if ubr:
+        ub = {"n": ubr[0], "vol_m": ubr[1] / M, "fees_m": ubr[2] / M,
+              "adv_m": {D: ubr[3 + k] / M for k, D in enumerate(hs)}}
+    cls = {}
+    for c, r in (mx.get("cls") or {}).items():
+        adv = {D: [r[3 + 2 * k] / M, r[4 + 2 * k] / M] for k, D in enumerate(hs)}
+        nh = len(hs)
+        vol_ub = r[3 + 2 * nh] / M
+        adv_ub = {D: r[4 + 2 * nh + k] / M for k, D in enumerate(hs)}
+        vol = r[1] / M
+        cls[c] = {"n": r[0], "vol_m": vol, "fees_m": r[2] / M, "adv_m": adv,
+                  "tox": (adv[hl][0] / vol) if vol > 0 else None,
+                  "vol_ub_m": vol_ub, "adv_ub_m": adv_ub,
+                  "tox_ub": (adv_ub[hl] / vol_ub) if vol_ub > 0 else None}
+    fees = sum(p["fees_m"] for p in pools)
+    adv_t = sum(p["adv_m"][hl][0] for p in pools)
+    adv_c = sum(p["adv_m"][hl][1] for p in pools)
+    ratios = [p["carry_ratio"] for p in pools if p["carry_ratio"] is not None]
+    whale_adv = sum(v["adv_m"][hl][0] for c, v in cls.items()
+                    if c.startswith("WhaleRaidAgent"))
+    whale_vol = sum(v["vol_m"] for c, v in cls.items()
+                    if c.startswith("WhaleRaidAgent"))
+    whale_ub = sum(v["adv_ub_m"][hl] for c, v in cls.items()
+                   if c.startswith("WhaleRaidAgent"))
+    return {"h": hs, "window": w is not None, "pool": pools, "ub": ub,
+            "cls": cls,
+            "basket": {"fees_m": fees, "adv_m": adv_t, "adv_cm_m": adv_c,
+                       "adv_diff_m": adv_t - adv_c, "netlp_m": fees + adv_t,
+                       "worst_carry": min(ratios) if ratios else None},
+            "whale": {"adv_basket_m": whale_adv, "vol_basket_m": whale_vol,
+                      "adv_ub_m": whale_ub}}
+
+
+def _ls(xs, ys):
+    """Least-squares slope through the origin and R^2 of ys on xs."""
+    den = sum(x * x for x in xs)
+    if not den:
+        return None, None
+    b = sum(x * y for x, y in zip(xs, ys)) / den
+    my = _mean(ys)
+    ss_tot = sum((y - my) ** 2 for y in ys)
+    ss_res = sum((y - b * x) ** 2 for x, y in zip(xs, ys))
+    return b, (1.0 - ss_res / ss_tot) if ss_tot else None
+
+
+def k_forecast(frames: list, meta: dict | None,
+               horizons=(7, 30)) -> dict | None:
+    """K comprehensibility (WAVE3 R14 / G8) -- three questions a competent
+    observer can check against public state.
+
+    1. Is K CALM?  Persistence K(t+h) = K(t): MAE and the share within one
+       point (0.01) at each horizon.  In organic regimes K should sit
+       still; excursions move it by design.
+    2. Does K OBEY ITS LAW?  The shipped controller is
+         K = K_I - Kp (bvib - 1),   dK_I/dt = Ki (1 - bvib),
+       so day to day  dK ~ Kp * d(1 - bvib)  and over a month
+       dK ~ Ki * mean(1 - bvib) * 30.  Both are fitted by least squares
+       (slope and R^2) and compared with the designed gains.  An observer
+       who knows the deviation history knows K: the EX-POST direction hit
+       rate is sign(dK_30) == sign(mean deviation) on months with
+       |mean deviation| > 0.25%.
+    3. Can K be FORECAST ex ante from today's state alone?  The naive law
+       K + Ki h (1 - bvib) is scored beside the observer's law
+       K + Kp (1 - bvib) + Ki h * (trailing-h mean of (1 - bvib)) -- the
+       P kick unwinds as the deviation reverts, and the recent mean
+       deviation persists -- with MAE and within-one-point.  Measured
+       2026-09-02: persistence beats both at 7 and 30 days because
+       excursions revert inside a week; that is a property of the P term,
+       not a defect of the law, and it is reported so it can be decided
+       (WAVE3 decisions pending 7)."""
+    if len(frames) < 3:
+        return None
+    exp = (meta or {}).get("experiment", {}) or {}
+    dep = exp.get("deploy", {}) or {}
+    dk_rail = float(dep.get("dk_rail", 0.5))
+    e_max = float(dep.get("e_max", 0.10))
+    tau = float(dep.get("tau_i_days", 90.0))
+    kp_frac = float(dep.get("kp_frac", 0.02))
+    kp = dep.get("kp")
+    ki = dep.get("ki")
+    kp_real = float(kp) if kp else kp_frac * dk_rail / e_max
+    ki_day = (float(ki) * 86400.0) if ki else dk_rail / (e_max * tau)
+    kmin = float(dep.get("kmin", 0.0))
+    kmax = float(dep.get("kmax", 0.95))
+    days = _frame_days(frames)
+    n = len(frames)
+    bv = [f.get("basketVal", E18) / E18 for f in frames]
+    bk = [f.get("buckK", 0) / E18 for f in frames]
+    e = [1.0 - x for x in bv]
+    out = {"kp_designed": kp_real, "ki_per_day_designed": ki_day, "h": {}}
+
+    # -- the law, fitted ---------------------------------------------- #
+    d1 = [(e[i] - e[i - 1], bk[i] - bk[i - 1]) for i in range(1, n)
+          if days[i] - days[i - 1] <= 1]
+    kp_fit, kp_r2 = _ls([x for x, _ in d1], [y for _, y in d1]) \
+        if d1 else (None, None)
+    m30 = []
+    j = 0
+    for i in range(n):
+        target = days[i] + 30
+        while j < n and days[j] < target:
+            j += 1
+        if j >= n:
+            break
+        span = days[j] - days[i]
+        me = _mean(e[i:j + 1])
+        m30.append((me * span, bk[j] - bk[i], me))
+    ki_fit, ki_r2 = _ls([x for x, _, _ in m30], [y for _, y, _ in m30]) \
+        if m30 else (None, None)
+    post = [(dk, me) for _, dk, me in m30 if abs(me) > 0.0025]
+    post_hit = (sum(1 for dk, me in post if dk * me > 0) / len(post)) \
+        if post else None
+    out["law"] = {"kp_fit": kp_fit, "kp_r2": kp_r2, "n1": len(d1),
+                  "ki_fit_per_day": ki_fit, "ki_r2": ki_r2, "n30": len(m30),
+                  "post_hit_30": post_hit, "post_n": len(post)}
+
+    # -- calm, and the ex-ante forecasts ------------------------------ #
+    for h in horizons:
+        h = int(h)
+        per, nai, obs = [], [], []
+        j = 0
+        for i in range(n):
+            target = days[i] + h
+            while j < n and days[j] < target:
+                j += 1
+            if j >= n:
+                break
+            lo = max(0, i - h)
+            trail = _mean(e[lo:i + 1])
+            fc_n = min(kmax, max(kmin, bk[i] + ki_day * h * e[i]))
+            fc_o = min(kmax, max(kmin, bk[i] + kp_real * e[i]
+                                 + ki_day * h * trail))
+            per.append(abs(bk[j] - bk[i]))
+            nai.append(abs(bk[j] - fc_n))
+            obs.append(abs(bk[j] - fc_o))
+        m = len(per)
+        if not m:
+            continue
+        out["h"][h] = {
+            "n": m,
+            "mae_persist": _mean(per),
+            "within_1pt_persist": sum(1 for x in per if x <= 0.01) / m,
+            "mae_naive": _mean(nai),
+            "mae_observer": _mean(obs),
+            "within_1pt_observer": sum(1 for x in obs if x <= 0.01) / m,
+        }
+    return out
+
+
 def summarize(path: str | Path, tail_frac: float = TAIL_FRAC,
               resp_days: int = RESP_DAYS, band: float = EXC_BAND,
               pre_days: int = PRE_DAYS) -> dict:
@@ -444,6 +690,16 @@ def summarize(path: str | Path, tail_frac: float = TAIL_FRAC,
         {**w, **excursion_response(frames, w, resp_days=resp_days, band=band,
                                    pre_days=pre_days, kmin=kmin, kmax=kmax)}
         for w in excursion_windows(d, resp_days=resp_days)]
+    # WP-1: the basket's own side, the markout ledger and K
+    # forecastability, measured on the first injection window when there
+    # is one (the catalogue's controlled window) and the whole run
+    # otherwise.  Measurement only; never part of accept().
+    inj = [w for w in stats["excursions"] if w.get("src") in ("raid", "iv")]
+    w0 = inj[0] if inj else None
+    stats["basket"] = basket_side(frames, w0, pre_days=pre_days)
+    stats["markout"] = markout_panel(frames, w0)
+    stats["markout_run"] = markout_panel(frames, None) if w0 else None
+    stats["kfc"] = k_forecast(frames, meta)
     return stats
 
 
@@ -594,7 +850,59 @@ def main(argv=None) -> int:
         for st in allst:
             for x in st.get("excursions") or []:
                 print(exc_row(st, x))
+    # WP-1 panels.
+    print("\nbasket side at end (NAV $M USD / $M baskets, treasury k, "
+          "depositor realized $M) and K comprehensibility: the law fitted "
+          "(Kp, R2; Ki/day, R2; ex-post 30d direction hit) and calm "
+          "(persistence MAE / within 1pt at 30d)")
+    print(f"{'name':<18} {'navU':>7} {'navK':>7} {'treas':>7} {'dmReal':>7} "
+          f"| {'Kp':>6} {'R2':>5} {'Ki/d':>6} {'R2':>5} {'hit30':>5} "
+          f"| {'p30':>6} {'in30':>5} {'obs30':>6}")
+    for st in allst:
+        print(basket_row(st))
+    if any(st.get("markout") for st in allst):
+        print("\nmarkout ledger (window when injected, else whole run): "
+              "basket fees / adverse total / adverse common-mode $M, worst "
+              "carry ratio; whale adverse in basket pools / in BUCK-USDC $M")
+        for st in allst:
+            print(markout_row(st))
     return worst
+
+
+def basket_row(st: dict) -> str:
+    name = str(st.get("name", ""))[:18]
+    e = (st.get("basket") or {}).get("end") or {}
+    kfc = st.get("kfc") or {}
+    law = kfc.get("law") or {}
+    k = kfc.get("h") or {}
+
+    def kf(h, key, spec):
+        v = (k.get(h) or k.get(str(h)) or {}).get(key)
+        return _f(v, spec)
+
+    return (f"{name:<18} {_f(e.get('nav_usd_m'), '.1f'):>7} "
+            f"{_f(e.get('nav_bsk_m'), '.1f'):>7} "
+            f"{_f(e.get('treasury_k'), '.0f'):>7} "
+            f"{_f(e.get('dm_real_m'), '+.2f'):>7} "
+            f"| {_f(law.get('kp_fit'), '.3f'):>6} {_f(law.get('kp_r2'), '.2f'):>5} "
+            f"{_f(law.get('ki_fit_per_day'), '.4f'):>6} {_f(law.get('ki_r2'), '.2f'):>5} "
+            f"{_f(law.get('post_hit_30'), '.0%'):>5} "
+            f"| {kf(30, 'mae_persist', '.4f'):>6} "
+            f"{kf(30, 'within_1pt_persist', '.0%'):>5} "
+            f"{kf(30, 'mae_observer', '.4f'):>6}")
+
+
+def markout_row(st: dict) -> str:
+    name = str(st.get("name", ""))[:18]
+    m = st.get("markout")
+    if not m:
+        return f"{name:<18} (no ledger in vector)"
+    b, w = m["basket"], m["whale"]
+    return (f"{name:<18} fees {b['fees_m']:+.3f} adv {b['adv_m']:+.3f} "
+            f"cm {b['adv_cm_m']:+.3f} netlp {b['netlp_m']:+.3f} "
+            f"carry {_f(b['worst_carry'], '.2f', none='>1')} "
+            f"| whale adv basket {w['adv_basket_m']:+.3f} "
+            f"ub {w['adv_ub_m']:+.3f}")
 
 
 if __name__ == "__main__":
