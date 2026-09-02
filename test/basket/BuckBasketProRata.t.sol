@@ -266,7 +266,11 @@ contract BuckBasketProRataTest is Test {
         vm.prank(alice);
         basketC.redeem(ridA, 0, 2000);
 
-        assertApproxEqAbs(basketC.totalOutstandingBuck(), outBefore - principalA, 1e9,
+        // Outstanding drops by alice's principal; what remains above bob's is
+        // the partner BUCK of her stress fee's re-LP (WP-5), a burn obligation
+        // bob retires when he leaves.
+        assertApproxEqAbs(basketC.totalOutstandingBuck(),
+            outBefore - principalA + basketC.stressBonusPrincipal(), 1e9,
             "principal fully retired");
         assertGt(paxg.balanceOf(alice), paxgBefore, "depositor still gets (reduced) PAXG");
     }

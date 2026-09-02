@@ -144,6 +144,35 @@ abstract contract BuckBasketStorage {
     address internal _callbackPool;
     address internal _swapCallbackPool;
 
+    // --- Stress fee on duress exits (WP-5; CARRY-CONVEXITY D2) ------------ //
+    //
+    // APPENDED at the end of the shared layout: every slot above keeps its
+    // position for the venue facet and for the ops / fence shells that add
+    // state of their own after this base.
+    //
+    // A redemption that lands in the DEFLATION branch (Bw < R: BUCK dear,
+    // basketValueInBuck < 1) while the TWAP deviation exceeds the deadband
+    // pays a fee proportional to the deviation.  The fee is taken in TOKEN
+    // from the payout and re-LP'd into its own pool with freshly minted
+    // partner BUCK as DEPOSITOR liquidity (the mechanics of a deposit), so
+    // it accrues to the remaining holders and never to the treasury.  The
+    // partner BUCK is a burn obligation like any deposit's: it is carried in
+    // `stressBonusPrincipal`, counted in `totalOutstandingBuck`, and retired
+    // pro rata by every later redemption (the last receipt retires all of
+    // it), so the basket still burns exactly what it minted.
+    //
+    //   totalOutstandingBuck == sum buckPrincipal + stressBonusPrincipal
+
+    /// @notice No fee while the TWAP deviation below par is <= this (bp).
+    uint256 public stressFeeDeadbandBp;
+    /// @notice Fee, in bp of the redemption value V, per 1% of deviation
+    ///         beyond the deadband.
+    uint256 public stressFeeSlopeBp;
+    /// @notice Cap on the fee (bp of V).  0 disables the fee.
+    uint256 public stressFeeMaxBp;
+    /// @notice Partner BUCK minted for re-LP'd stress fees, still outstanding.
+    uint256 public stressBonusPrincipal;
+
     // --- Events ----------------------------------------------------------- //
 
     event BasketTokenAdded(address indexed token, uint256 weightBp, uint256 initialPriceInBuck, address pool);
@@ -159,6 +188,11 @@ abstract contract BuckBasketStorage {
     /// @param quadrant 1=absorb 2=retire 3=supply 4=issue
     event MonetaryOperation(uint8 indexed quadrant, int32 effortBp, bool outright,
                             uint256 buckMoved, int256 outstanding, uint256 buckHeld);
+    /// @notice A duress exit paid the stress fee (WP-5).  `deviation1e18` is
+    ///         the TWAP deviation below par, `feeBp` the fee in bp of the value
+    ///         claim V, `feeValueBuck` the TOKEN value actually taken (spot).
+    event StressFee(uint256 indexed receiptId, uint256 deviation1e18, uint256 feeBp, uint256 feeValueBuck);
+    event StressFeeSet(uint256 deadbandBp, uint256 slopeBp, uint256 maxBp);
 
     // --- Errors (custom errors save bytecode vs require-strings) ----------- //
     error AlreadyPresent();
