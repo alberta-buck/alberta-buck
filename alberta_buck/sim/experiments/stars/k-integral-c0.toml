@@ -1,0 +1,64 @@
+# Star k-integral, cycle 0 -- WAVE3.org "The first star: integral-only K"
+# (decisions pending 7).  Baseline: the portcast cast with the usdc
+# defender mix (the catalogue's Q1 absorbers); once WP-2 lands, cycle 1
+# re-centres on the undertakings.  Axes: the controller's P kick
+# (kp_frac; 0 = integral-only), its integral time, the defender cast,
+# and the whale's budget.  Arms: the organic control, the x1 dump, the
+# x4 squeeze.  Objective: G7 + G8 PASS with x4 AUC and rail days no
+# worse than the P-carrying baseline.
+#
+#   python -m alberta_buck.sim.star k-integral-c0 --jobs 6
+#   python -m alberta_buck.sim.plot_star k-integral-c0 --pane k
+#   python -m alberta_buck.sim.plot_star k-integral-c0 --pane bvib
+name = "k-integral-c0"
+notes = "integral-only K: kp_frac x tau_i x cast x whale, usdc baseline"
+objective = "G7 + G8 PASS; squeeze-x4 AUC and rail days no worse than base"
+
+[baseline]
+"scenario.agents.ExcursionArbAgent" = 8
+"scenario.agents.ExcursionCreditArbAgent" = 0
+"scenario.agents.ExcursionBasketArbAgent" = 0
+"scenario.agents.ExcursionBuckArbAgent" = 0
+"scenario.agents.CommodityRebalArbAgent" = 0
+
+[[arm]]
+name = "none"
+toml = "catalogue-none.toml"
+
+[[arm]]
+name = "dump-x1"
+toml = "catalogue-dump.toml"
+
+[[arm]]
+name = "squeeze-x4"
+toml = "catalogue-squeeze.toml"
+sets = { "agents.WhaleRaidAgent.budget_m" = [32, 48], "agents.WhaleRaidAgent.quiet_cap_bp" = 200 }
+
+[[axis]]
+name = "kp_frac"
+key = "deploy.kp_frac"
+base = 0.02
+lo = 0.0
+hi = 0.05
+
+[[axis]]
+name = "tau_i"
+key = "deploy.tau_i_days"
+base = 90.0
+lo = 45.0
+hi = 180.0
+
+[[axis]]
+name = "cast"
+key = "scenario.agents.ExcursionArbAgent"
+base = 8
+lo = 4
+hi = 16
+
+[[axis]]
+name = "whale"
+key = "agents.WhaleRaidAgent.budget_m"
+base = [8, 12]
+lo = [4, 6]
+hi = [16, 24]
+arms = ["dump-x1"]          # the squeeze-x4 arm pins its own budget
