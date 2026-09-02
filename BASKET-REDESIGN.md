@@ -102,7 +102,7 @@ into the org master and the `BUG #N` list is retired.
 ## 2. The invariant and the unit of account
 
 The hard constraint: **the basket must eventually burn exactly the BUCK it
-minted.** `totalOutstandingBuck == Σ buckPrincipal` over all live receipts; a
+minted.** `totalOutstandingBuck == Σ buckPrincipal + stressBonusPrincipal` over all live receipts (the second term is the stress fee's re-LP'd partner BUCK, WAVE3 WP-5, retired pro rata by every redemption); a
 redemption burns its share of that total and never more.
 
 NAV above outstanding is **treasury equity** — accumulated AMM fees + retained

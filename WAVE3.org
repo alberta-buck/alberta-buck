@@ -208,7 +208,7 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 | WP-3a | =IStabilizer= seam + observer on the ops shell + =BuckKControllerShadow= + deploy wiring + forge tests | -- | IStabilizer.sol (new), BuckBasketOps.sol (append), BuckKControllerShadow.sol (new), deploy.py (append), forge test (new) | =--controller shadow= runs a smoke cell; the desk is the first registered stabilizer, the sim offset the second | forge tests: sign canaries on the shadow input; lambda = gamma = 0 identity with Direct; offset and saturation arithmetic; reprime unaffected | 1 (smoke) | TODO |                |
 | WP-3b | Desk in the loop + lambda sweep (3d)                                 | WP-2, WP-3a | experiments (append); catalogue tag =shadow=                 | P4 table: lambda_d x {dump, squeeze, grind-down} x {x1, x4} | R5; desk return-to-zero time; runaway-one detection at lambda 0 | ~40   | TODO   |                |
 | WP-4  | Directional fee in the swap adapter; 3b grid                          | WP-2    | fees.py (new); swap adapter hook (append)                     | trough-depth and tracking-error table                    | R7; G3                                                           | ~24        | TODO   |                |
-| WP-5  | Stress fee (Solidity in =_redeem=, or DM emulation)                   | --      | BuckBasketProRata.sol (local) + forge test, OR DM agents (append) | P2 table on the x4 cells                                | R6; G4                                                           | ~8         | TODO   |                |
+| WP-5  | Stress fee (Solidity in =_redeem=)                                    | --      | BuckBasketProRata.sol, BuckBasketStorage.sol (append), forge test; direct_mint.py + snapshot.py (append) | P2 table on the x4 cells (cells not yet run) | R6 (contract-level, tested); G4 measurement pending the x4 cells | ~8 | DONE (merged 2026-09-02; cells pending) | =wp/5-stress-fee= / subagent |
 | WP-6  | FacilityAgent; mixes =fac=, =fac-all=; 3g grid                        | WP-1    | facility_agent.py (new); loop.py import; MIXES block          | P6 table: population x (x, y) x deposit-to-basket on/off | R8                                                               | ~72        | TODO   |                |
 | WP-7  | Perp ledger + FundingHouseAgent; whale =via=; 3f grid                 | WP-6    | perp.py (new); WhaleRaidAgent knob (append); loop.py import   | P7 table: g() slope x via {perp, spot}; solvency check    | R9                                                               | ~24        | TODO   |                |
 | WP-8  | SeederAgent; orientation check; 3h seeder cells                       | --      | seeder_agent.py (new); loop.py import                         | seeder on/off at launch; private-depth arrival            | R10; G3                                                          | ~8         | TODO   |                |
@@ -390,6 +390,41 @@ verdict hold on >= 4/5.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-02 -- WP-5 DONE and merged (session 2, subagent on =wp/5-stress-fee=)
+
+- Commits 502ff4f (contracts) + bdaaa6d (sim), merged --no-ff into
+  =feature/carry-convexity=.  =make nix-test=: 58 suites, 559 passed, 0
+  failed, 1 pre-existing skip; =make nix-match-BuckBasketStressFee=:
+  13/13.
+- Mechanism (D2, R6): in the deflation branch only (Bw < Rb), after the
+  cover swap, fee = feeBp x V is taken in TOKEN pro rata across the
+  payout and each leg is re-LP'd into its own pool via
+  =provideForToken= -- a deposit's exact mechanics, so it lands in
+  depositor L, never treasury L; the minted partner BUCK goes into
+  =stressBonusPrincipal= AND =totalOutstandingBuck=, and every
+  redemption's burn obligation carries its pro-rata slice of the bonus
+  (Rb = R + R S/(O - S)), so theta is exactly as if the bonus were folded
+  into every receipt.  Invariant: totalOutstandingBuck == sum
+  buckPrincipal + stressBonusPrincipal (=BASKET-REDESIGN.md= section 2
+  updated).  Params (governance, event): deadband 200 bp, slope 50 bp
+  per 1% beyond it, cap 500 bp; =stressFeeQuote()= view; =StressFee=
+  event separate from =Redeemed= (sim decoding unchanged).  Guards: no
+  fee for the last principal (nobody to credit); a dust re-LP that
+  reverts is waived back to the payout.
+- Sizes (runtime B): ProRata 14,518 -> 16,179; Ops 18,915 -> 20,530;
+  Fence 22,899 -> 23,556 (1,020 B headroom -- TIGHT); venue +160.
+- Documented residual (test comment): the BRANCH is decided on spot
+  (Bw < Rb) while the deviation is TWAP, so a same-block buy lifting Bw
+  to Rb escapes the fee -- only while the shortfall is under ~2.5% of
+  the claim's BUCK half, i.e. where the fee would be <= ~150 bp.
+  Closing it means gating on the TWAP deviation alone, at the cost of
+  "inflation branch byte-for-byte unchanged"; left as specified.  The
+  Fence shell overrides =_redeem= and does not apply the fee.
+- Sim: =stressFeesPaid= / =stressFeeExits= per frame; 10-day smoke clean.
+  Gate G4 (duress-exit fairness) can now be measured on the x4 cells
+  once the main repo's =out/= is rebuilt (deferred until the Python
+  worktrees' smokes finish, because they read it through a symlink).
 
 ** 2026-09-02 -- WP-1 merged; WP-12 the star driver (session 2, Claude on =wp/12-star=)
 
