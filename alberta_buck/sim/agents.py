@@ -48,6 +48,26 @@ class Agent:
     def address(self) -> str:
         return self.account.address
 
+    # -- per-agent telemetry (schema: alberta_buck/sim/TELEMETRY.md) -------- #
+    #
+    # Opt-in: the default returns None and the snapshot emits nothing, so
+    # large background populations cost nothing.  A class that wants to
+    # appear on dashboards implements BOTH methods:
+    #   telemetry_static() -> dict   resolved knobs / identity facts, captured
+    #                                ONCE into the vector's meta.telemetry;
+    #   telemetry(d)       -> dict   the per-frame record (positions, P&L).
+    # TELEMETRY_STRIDE spaces per-frame emission in calendar days (emit when
+    # day % stride == 0); populations larger than ~16 should set
+    # stride >= ceil(count/16) to keep vector growth bounded.
+
+    TELEMETRY_STRIDE = 1
+
+    def telemetry_static(self) -> dict | None:
+        return None
+
+    def telemetry(self, d) -> dict | None:
+        return None
+
     def deposit_info(self, d) -> tuple | None:
         """Return (token_idx, principal_tok, principal_buck) for LP position
         value tracking.  None means the agent has no BuckBasket deposit."""

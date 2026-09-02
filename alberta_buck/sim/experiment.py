@@ -49,8 +49,10 @@ Intervention actions (the four surfaces):
     fund        {cls, idx, usdc_m}    mint USDC to proxies (+bump budget)
 
   exogenous shocks:
-    price_shock  {token, mult[, from_day]}   multiplies the CSV reference
-                 from that day on (whale re-pins pools to the shocked ref)
+    price_shock  {token, mult[, from_day, until_day]}
+                 multiplies the CSV reference from from_day (default: the
+                 scheduled day) on; until_day (exclusive) lifts it again,
+                 absent = permanent (whale re-pins pools to the shocked ref)
     uptake_shock {idx="all"|..., mag}        borrowers: +mag adoption step
 
   population:
@@ -65,6 +67,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import os
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -84,6 +87,12 @@ DEFAULTS: dict = {
     "name": "unnamed",
     "notes": "",
     "scenario": {
+        "family": "equilibrium",   # scenario builder: "equilibrium" |
+                                   # "rebalancing-eq" (same financial
+                                   # structure + the rebalance director)
+        "rng": "",                 # "" = historical Mersenne agent RNG;
+                                   # "keyed" = language-neutral KeyedRandom
+                                   # streams (the JS-port contract; rng.py)
         "years": 5.0,
         "start": "",
         "end": "",
@@ -133,6 +142,27 @@ def deploy_params(exp) -> SimpleNamespace:
     dep = dict(DEFAULTS["deploy"])
     if exp is not None:
         dep.update(exp.deploy)
+    # Env overrides, for the scenarios that carry no experiment TOML.
+    #
+    # k0 is the neutral feed-forward LTV the controller starts from, and it
+    # decides how much BUCK a unit of collateral can issue before the PID has
+    # said anything.  At 0.75 a holder of insured collateral can refinance
+    # most of a mortgage straight away; at 0.50 only the least-encumbered
+    # can, so refinancing arrives gradually as K drifts rather than all at
+    # once.  The onset is a different shape, and that is the thing worth
+    # bracketing.  SIM_K0=0.50 make nix-sim-rebalancing-revert
+    # target_buck_lp_m is the BUCK/USDC seed, and it is the throughput limit
+    # on refinancing: entries are impact-capped at ~0.5% of the reserve per
+    # trade at 100bp, so a $10M route passes ~$50k per debtor per month.  At
+    # 24 debtors wanting ~$24M through it, that paced them to 13% of their
+    # mortgages in 200 days -- the route, not the collateral, was binding.
+    for key, env in (("k0", "SIM_K0"), ("kmin", "SIM_KMIN"),
+                     ("kmax", "SIM_KMAX"),
+                     ("target_buck_m", "SIM_POOL_M"),
+                     ("target_buck_lp_m", "SIM_BUCK_LP_M")):
+        val = os.environ.get(env)
+        if val:
+            dep[key] = float(val)
     kp, ki, kd = derive_gains(
         dk_rail=dep["dk_rail"], e_max=dep["e_max"],
         tau_i_days=dep["tau_i_days"], kp_frac=dep["kp_frac"],
@@ -221,11 +251,17 @@ def load(path: str | Path | None = None, sets: list[str] | None = None
 
 
 def build(exp: Experiment):
-    """Scenario for this experiment (equilibrium family), with the
-    experiment attached so deploy/loop/agents see the overrides."""
-    from alberta_buck.sim.scenario import build_equilibrium
+    """Scenario for this experiment, with the experiment attached so
+    deploy/loop/agents see the overrides.  `[scenario] family` selects the
+    builder: "equilibrium" (default) or "rebalancing-eq" (the identical
+    financial structure plus the rebalance-director keeper)."""
+    from alberta_buck.sim.scenario import (build_equilibrium,
+                                           build_rebalancing_eq)
     s = exp.scenario
-    sc = build_equilibrium(
+    builder = {"equilibrium": build_equilibrium,
+               "rebalancing-eq": build_rebalancing_eq,
+               }[s.get("family", "equilibrium")]
+    sc = builder(
         start=s["start"] or None, end=s["end"] or None,
         years=s["years"] or None,
         ticks_per_day=int(s["ticks_per_day"]),
@@ -235,6 +271,7 @@ def build(exp: Experiment):
     if s["days"]:
         sc.days = min(int(s["days"]), sc.prices.days)
     sc.day_step = int(s["day_step"])
+    sc.rng_mode = s.get("rng", "")
     sc.experiment = exp
     return sc
 
@@ -274,26 +311,33 @@ def draw(scenario, cls_name: str, name: str, rng, default):
 # ---------------------------------------------------------------------------
 
 class PriceOverlay:
-    """Wraps Prices; multiplies token references from a given day on.  The
-    whale re-pins TOKEN/USDC to the shocked reference, so a shock propagates
-    through the same market plumbing as any real price move.  Keyed off the
-    `day` argument, so day-0 baselines read through unshocked."""
+    """Wraps Prices; multiplies token references from a given day on
+    (optionally only until an `until_day`, exclusive -- a temporary
+    excursion rather than a permanent step).  The whale re-pins TOKEN/USDC
+    to the shocked reference, so a shock propagates through the same market
+    plumbing as any real price move.  Keyed off the `day` argument, so
+    day-0 baselines read through unshocked."""
 
     def __init__(self, base):
         self._base = base
-        self._shocks: list[tuple[int, int, float]] = []   # (tok, from_day, mult)
+        # (tok, from_day, mult, until_day-or-None)
+        self._shocks: list[tuple[int, int, float, int | None]] = []
 
     @property
     def days(self) -> int:
         return self._base.days
 
-    def shock(self, token_idx: int, from_day: int, mult: float) -> None:
-        self._shocks.append((int(token_idx), int(from_day), float(mult)))
+    def shock(self, token_idx: int, from_day: int, mult: float,
+              until_day: int | None = None) -> None:
+        """Multiply token_idx's reference by `mult` while
+        from_day <= day < until_day (until_day None = forever)."""
+        self._shocks.append((int(token_idx), int(from_day), float(mult),
+                             None if until_day is None else int(until_day)))
 
     def ref(self, token_idx: int, day: int) -> int:
         p = self._base.ref(token_idx, day)
-        for tok, fd, m in self._shocks:
-            if tok == token_idx and day >= fd:
+        for tok, fd, m, ud in self._shocks:
+            if tok == token_idx and day >= fd and (ud is None or day < ud):
                 p = int(p * m)
         return max(1, p)
 
@@ -433,8 +477,13 @@ class Interventions:
         if act == "price_shock":
             ti = self._token_index(iv["token"])
             from_day = int(iv.get("from_day", day))
-            self.scenario.prices.shock(ti, from_day, float(iv["mult"]))
-            return f"{iv['token']} x{iv['mult']} from day {from_day}"
+            until_day = iv.get("until_day")
+            until_day = None if until_day is None else int(until_day)
+            self.scenario.prices.shock(ti, from_day, float(iv["mult"]),
+                                       until_day=until_day)
+            return (f"{iv['token']} x{iv['mult']} from day {from_day}"
+                    + (f" until day {until_day}" if until_day is not None
+                       else ""))
         if act == "uptake_shock":
             sel = self._select({**iv, "cls":
                                 iv.get("cls", "FatCreditBorrowerAgent")})

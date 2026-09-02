@@ -1,0 +1,34 @@
+# rebalancing-eq variant "endow-deep": the full steady-state initialization,
+# composing the two cold-start levers the probes separated:
+#
+#   * "endow"  -- savers arrive HOLDING pre-window BUCK inventory, so the
+#     sell leg is armed from the first premium (fixes the inventory side;
+#     zero t0 market impact);
+#   * "deep"   -- 4x pool depth ([deploy] target 40/40 vs 10/10), which the
+#     depth probe showed damps the cold-start buckUsd excursion ~7x (the
+#     price-impact side the endowment deliberately does not touch).
+#
+# Together the window should open in something close to the steady state:
+# inventory distributed, pools deep enough that the residual acquisition
+# flow prices sanely.
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-endow-deep"
+notes = "rebalancing-eq + saver endowment + 4x pool depth"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[deploy]
+target_buck_m = 40.0
+target_buck_lp_m = 50.0    # deep national-scale BUCK/USDC exit route
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]

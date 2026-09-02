@@ -73,6 +73,68 @@ interface IBuckBasketVenue {
     ///         (per-constituent TOKEN the basket holds), best route first.
     ///         Returns the BUCK gained, the value lost to slippage+fee (for the
     ///         caller's loss-budget check), and the remaining inventory.
+    /// @notice One leg of a monetary operation in constituent `i`.
+    ///         `sellBuck` swaps BUCK -> TOKEN (the issue side); otherwise
+    ///         TOKEN -> BUCK (the absorb side).  Pure AMM mechanics: all
+    ///         sizing, bounding, minting, burning and book-keeping stay in
+    ///         the shell.  Returns what was actually spent and received.
+    function monetaryLeg(uint256 i, bool sellBuck, uint256 amountIn)
+        external returns (uint256 spent, uint256 received);
+
+    // --- Fence primitives (BuckBasketFence) ------------------------------ //
+    //
+    // All take the pool and range EXPLICITLY rather than reading the
+    // constituent's stored tick range, because a fence is a ladder of
+    // arbitrary concentrated positions in a pool the constituent record does
+    // not name -- a different fee tier on the same TOKEN/BUCK pair.  The V3
+    // mint/swap callbacks already resolve the constituent from the encoded
+    // token rather than from the pool address, so they serve any fee tier of
+    // that pair unchanged.
+
+    /// @notice Find or create + initialize the fence pool for `token` at
+    ///         `feeTier`, and report its tick spacing.
+    function fencePool(address token, uint8 decimals, uint256 initialPriceInBuck,
+                       uint24 feeTier)
+        external returns (address pool, int24 spacing, bool buckIsToken0);
+
+    /// @notice Mint `liquidity` over [lo,hi] in `pool`, paying from the
+    ///         basket's own balances.
+    function fenceMint(address token, address pool, int24 lo, int24 hi,
+                       uint128 liquidity) external returns (uint256 a0, uint256 a1);
+
+    /// @notice Burn `liquidity` over [lo,hi] and collect everything owed --
+    ///         principal AND accrued fees, which is where the harvest comes
+    ///         from.  `burn` only credits; `collect` is what moves it.
+    function fenceBurn(address pool, int24 lo, int24 hi, uint128 liquidity)
+        external returns (uint256 a0, uint256 a1);
+
+    /// @notice Swap in the fence pool: TOKEN -> BUCK or BUCK -> TOKEN.
+    function fenceSwap(address token, address pool, bool sellBuck, uint256 amountIn)
+        external returns (uint256 spent, uint256 received);
+
+    /// @notice Exact contents of a band at the live price, and the TWAP /
+    ///         liquidity math around it.  These live on the FACET purely for
+    ///         bytecode budget: the UniswapV3OracleLib arithmetic they inline
+    ///         put BuckBasketFence 593 bytes over EIP-170, which neither
+    ///         forge nor pyrevm enforces -- so it would have shipped as a
+    ///         contract that simply cannot be deployed.  Stateless on purpose
+    ///         (pool and range passed in) so no fence state has to move into
+    ///         the shared storage layout.
+    function fenceQuote(address pool, int24 lo, int24 hi, uint128 liquidity,
+                        bool buckIsToken0)
+        external view returns (uint256 buckAmt, uint256 tokAmt);
+
+    function fenceTwap(address pool, address token, uint8 decimals,
+                       uint32 secondsAgo) external view returns (uint256 priceInBuck);
+
+    function fenceLiquidityFor(address pool, int24 lo, int24 hi,
+                               uint256 amount0, uint256 amount1)
+        external view returns (uint128);
+
+    /// @notice Live pool state for range placement.
+    function fenceState(address pool)
+        external view returns (uint160 sqrtPriceX96, int24 tick, int24 spacing);
+
     function convertIntoBucks(uint256[] calldata tokenInventory, uint256 targetBuck)
         external returns (uint256 gained, uint256 lossValue, uint256[] memory inventoryAfter);
 }

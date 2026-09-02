@@ -8,10 +8,23 @@ are scenario-agnostic.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from alberta_buck.sim.prices import Prices
+
+# The BuckBasket's monetary-operations desk, run as an agent
+# (alberta-buck-operations.org, phase 2).  OFF by default so the committed
+# vectors stay the baseline; the comparison is a pair of runs on one seed:
+#
+#     make nix-sim-rebalancing-revert                       # baseline
+#     SIM_MONETARY_OPS=1 make nix-sim-rebalancing-revert    # operations on
+#
+# One agent, not a population: the basket has one operations desk, and a
+# single actor keeps the A/B attributable to the mechanism rather than to a
+# crowd of them meeting each other's impact.
+MONETARY_OPS = int(os.environ.get("SIM_MONETARY_OPS", "0") or 0)
 
 
 @dataclass
@@ -72,15 +85,98 @@ REBALANCING = Scenario(
             # and deposit it into the currently most-underweight pool, with
             # BuckBasket enforcing its BUCK->TOKEN slippage guard.
             "DirectMintBuckAgent": 75,
+            # The DEMAND leg.  Everyone above is indifferent to what a BUCK
+            # is worth -- the DM agents pledge TOKEN, the arbs only chase
+            # cross-pool cycles -- so nothing leaned against BUCK drifting
+            # off parity.  These compare the whole round trip against leaving
+            # the money in USDC and buy when it wins, from a finite budget
+            # rather than freshly minted supply.  Both variants run so the
+            # holder/basketeer carry asymmetry is visible in one render.
+            "DiscountBasketArbAgent": 12,
+            "DiscountBuckArbAgent": 4,
+            # The SUPPLY side, and the market has no ceiling without it.
+            # Every agent above either wants BUCK or ignores it, and the
+            # debtors issue on a mortgage schedule rather than because BUCK
+            # is dear.  So a sustained bid drove basketValueInBuck to 0.80 in
+            # the reverting run, buckK sat on its 0.95 clamp, and every
+            # redemption fell into the basket's deflation branch.  These
+            # issue BUCK against BuckCredit collateral when it is rich and
+            # buy real assets with it, then cover when it returns to parity.
+            "BuckIssuerArbAgent": 6,
+            # Stablecoin holders who represent their existing custodial
+            # insurance as a BuckCredit, mint the BUCK it supports, and LP
+            # both sides of BUCK/USDC -- one pile of capital, twice the
+            # notional earning fees.  Their concentrated positions are a
+            # directional view: basketValueInBuck says which way K is about
+            # to push, so they sit on that side and let the flow come to
+            # them.  Widths are drawn per agent so they do not reposition in
+            # lockstep.
+            "BuckPoolInvestorAgent": 8,
+            # The ISSUANCE leg, and the reason BUCK_K has anything to act on.
+            # buckK reaches the economy only through creditLimit, so without
+            # credit borrowers the controller pushes on a channel carrying
+            # none of the growth, winds its integral down and sits on the
+            # floor -- which is exactly what earlier runs of this scenario
+            # showed.  These are the honest debtors: real premiumRate, real
+            # funding-factor gate, obligations that are pure chain truth.
+            # Sized against the DEMAND flow, not by taste.  buckK sitting on
+            # its 0.95 clamp is the controller asking for issuance an economy
+            # cannot supply, so the supply side has to be able to answer the
+            # arbitrage that keeps it there: at K=0.95 a holder of insured
+            # collateral swaps ~2%/yr of real interest cost for a one-time ~1%
+            # premium, with no principal schedule -- payback under six months.
+            # Nobody leaves that alone, so the sim should not either.
+            #
+            # 24 debtors x ~$900k collateral is ~$16M of issuance capacity at
+            # K=0.75, against the ~$17.8M the demand leg actually bought over
+            # 730 days.  The rate is not the constraint (monthly cadence at
+            # one year of payments per tranche is ~$21M/yr); the COLLATERAL
+            # is, and 4 agents carried under $4M of it.
+            "BuckCreditDebtorAgent": 24,
             # Advances the BasketRebalanceDirector's amortized MA signals a
             # bounded slice per tick and executes its advisory efforts
             # (sell-side hint -> BUCK -> buy-side hint) through the router.
-            "DirectorKeeperAgent": 1},
+            "DirectorKeeperAgent": 1,
+            # Turns the crank on BuckBasketOps.monetaryOperation().  Inert
+            # unless --basket ops deployed the two-mode shell, so it costs one
+            # skipped call a day on every other run and needs no roster switch.
+            "MonetaryKeeperAgent": 1,
+            # Re-strikes BuckBasketFence's bands, one constituent a day.
+            # Inert unless --basket fence deployed that shell.
+            "FenceKeeperAgent": 1,
+            # The COMMON mode.  Everything above trades the differences
+            # between commodities; this reads their mean -- which is
+            # basketValueInBuck, the controller's own process variable -- and
+            # runs the four quadrants against it.  SIM_MONETARY_OPS=1.
+            **({"MonetaryOpsAgent": MONETARY_OPS} if MONETARY_OPS else {})},
     days=365,
     ticks_per_day=4,
 )
 
-SCENARIOS = {ROUTING.name: ROUTING, REBALANCING.name: REBALANCING}
+# The same population and timeline as REBALANCING, on price series that
+# oscillate with the same volatility but carry ZERO net drift and end exactly
+# where they begin (alberta_buck/sim/gen_prices.py --regime revert).
+#
+# The committed trend CSVs bake in +8%/+15%/+2% annual drift, which confounds
+# every reversion claim measured against them: a rebalancing premium is a
+# statement about harvesting oscillation, and a demand agent is judged on
+# buying cheap, but in a market that rises throughout, buy-and-hold beats
+# both for a reason unrelated to either mechanism.  Here there is no trend
+# left to collect, so whatever a policy or an agent earns, it earned from the
+# oscillation.  This is the regime the BuckBasket's charter actually
+# describes -- commodities that physics forces to revert.
+REBALANCING_REVERT = Scenario(
+    name="rebalancing-revert",
+    tokens=REBALANCING.tokens,
+    csv_files=["paxg-rev.csv", "cbbtc-rev.csv", "aoil-rev.csv"],
+    agents=dict(REBALANCING.agents),
+    days=REBALANCING.days,
+    ticks_per_day=REBALANCING.ticks_per_day,
+)
+
+SCENARIOS = {ROUTING.name: ROUTING,
+             REBALANCING.name: REBALANCING,
+             REBALANCING_REVERT.name: REBALANCING_REVERT}
 
 
 def build_historical(start=None, end=None, years=5.0, ticks_per_day=1,
@@ -180,4 +276,39 @@ def build_equilibrium(start=None, end=None, years=None, ticks_per_day=48,
         days=n_days,
         ticks_per_day=ticks_per_day,
         seed=seed,
+    )
+
+
+def build_rebalancing_eq(start=None, end=None, years=None, ticks_per_day=1,
+                         seed=0xA1BC):
+    """The equilibrium financial structure, observed through the
+    rebalancing machinery.
+
+    Identical to build_equilibrium -- the same recomposed M2-laggard
+    weighted basket on the same real historical window, the same
+    FatCreditBorrower/Saver monetary loop and PID cadence -- plus the one
+    agent that makes it a *rebalancing* run: a DirectorKeeperAgent
+    advancing the BasketRebalanceDirector's amortized signals and
+    executing its advisory efforts.  The director itself deploys in every
+    prorata run; in the equilibrium scenario nothing pokes it, so its
+    contribution to the closed loop is exactly the delta this scenario
+    makes visible.
+
+    A separate scenario (selected by `[scenario] family = "rebalancing-eq"`
+    in an experiment TOML, canonically experiments/rebalancing-eq-5yr.toml)
+    rather than a knob on either parent, so the committed equilibrium
+    vectors and the synthetic rebalancing scenarios both stay untouched.
+    The vector feeds the rebalancing pipeline (plot_rebalancing) and is
+    judged with eqmetrics like any equilibrium run.
+    """
+    sc = build_equilibrium(start=start, end=end, years=years,
+                           ticks_per_day=ticks_per_day, seed=seed)
+    return Scenario(
+        name="rebalancing-eq",
+        tokens=sc.tokens,
+        csv_files=sc.csv_files,
+        agents={**sc.agents, "DirectorKeeperAgent": 1},
+        days=sc.days,
+        ticks_per_day=sc.ticks_per_day,
+        seed=sc.seed,
     )

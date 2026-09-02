@@ -1,0 +1,57 @@
+# rebalancing-eq variant "debtors-mature-basketeers": the fullest economy
+# in the matrix.  Composes "debtors-mature" (24 theta-law mortgage debtors
+# in an adopted economy -- see rebalancing-eq-5yr-debtors-mature.toml)
+# with "basketeers": a stochastic BuckBasket DEPOSITOR population, so the
+# basket is finally exercised as the savings vehicle it is, inside the
+# real monetary loop.
+#
+#   * DirectMintAgent x120: $100k tickets, ~17% steady-state entered,
+#     ~50-day holds at this cadence -- with the 24 frozen bootstrap seeds
+#     (~6M) this puts the basket's 100%-LTV direct-mint tranche near ~30%
+#     of supply, WITH churn (entries/exits/round-trips/treasury accrual);
+#   * DirectMintBuckAgent x30: idle-BUCK holders depositing through the
+#     basket's BUCK side (zero-premium headroom, public Buck.mint path).
+#
+# The question the rest of the matrix cannot ask: does the equilibrium
+# survive a large, growing, K-IMMUNE basket-backed tranche inside it --
+# the synthetic A/Bs' K-immunity problem, now tested in the real loop.
+# Counts scaled up from backdrop-ab.toml (the banked eq-ab-basketeers
+# precedent, which PASSed at 4/2 over 365d).
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-debtors-mature-basketeers"
+notes = "debtors-mature + basket depositor population (K-immune tranche ~30%)"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+BuckCreditDebtorAgent = 24
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform (median ~550k)
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+refi_mode = "atomic"      # ex-ante whole-conversion evaluation (see agent)
+arrive_frac = 0.0           # mature: everyone is already here
+
+[agents.FatCreditBorrowerAgent]
+mid_frac = -0.5             # adoption S-curve saturated before the window
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

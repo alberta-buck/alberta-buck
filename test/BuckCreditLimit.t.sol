@@ -9,10 +9,10 @@ import {BuckCredit}             from "../src/BuckCredit.sol";
 import {BuckCreditHarness}             from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
 
-/// @title BuckCreditLimit.t.sol -- Phase 1a creditLimit() view + per-block
-///        cache invalidation tests.
+/// @title BuckCreditLimit.t.sol -- the live creditLimit() view, and the
+///        transferability of the credits behind it.
 ///
-/// @notice Exercises the new live credit-limit machinery without going
+/// @notice Exercises the live credit-limit machinery without going
 ///         through the identity-bound mint/transfer paths (which require
 ///         the BN254 PS-credential machinery exercised in Buck.t.sol).
 ///         Holders here are unverified addresses; we touch them only via
@@ -39,7 +39,17 @@ contract BuckCreditLimitTest is Test {
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));
+        t0 = block.timestamp;
     }
+
+    /// @dev Snapshot of the starting timestamp, taken in setUp and read back
+    ///      from storage.  `block.timestamp` cannot change inside a real
+    ///      transaction, so the via-IR optimiser folds every read in a
+    ///      function to one TIMESTAMP -- which means a local
+    ///      `uint256 start = block.timestamp` taken before a `vm.warp` is not
+    ///      a snapshot at all, it is an alias that yields the warped value.
+    ///      An SLOAD across the setUp boundary is.
+    uint256 internal t0;
 
     /// @notice Newly-created NFT with no activation contributes 0 to creditLimit.
     function test_creditLimit_zero_for_unactivated_NFT() public {
@@ -74,20 +84,17 @@ contract BuckCreditLimitTest is Test {
         vm.prank(ALICE);
         credit.forceActivate(tid, 500_000e6);
 
-        // Halve BUCK_K -- limit should halve.
+        // Halve BUCK_K -- limit halves immediately, in the same block.  No
+        // NFT mutation happens here, so nothing could have signalled the
+        // change; the limit is right because it is read live.
         vm.prank(GOV);
         kCtrl.setBuckK(5e17);
-        // Invalidate cache so the next read reflects the new K.  (The
-        // controller change does not fire a BuckCredit hook; only NFT
-        // mutations do.  The view path computes fresh when uncached.)
-        // Roll to a new block so the cache is naturally stale.
-        vm.roll(block.number + 1);
         assertEq(buck.creditLimit(ALICE), 250_000e6, "creditLimit must halve with BUCK_K");
     }
 
-    /// @notice Cache invalidation: a fresh NFT mint to ALICE invalidates her cache.
-    function test_cache_invalidates_on_NFT_mint() public {
-        // Prime: create + activate one NFT; touch the cache.
+    /// @notice The limit follows credits as they are acquired -- no signal,
+    ///         no invalidation, just a live read of what the holder owns.
+    function test_creditLimit_tracksAcquiredCredits() public {
         vm.prank(INSURER);
         credit.createCredit(
             ALICE, 0, 100_000e6, 0,
@@ -95,48 +102,55 @@ contract BuckCreditLimitTest is Test {
         );
         vm.prank(ALICE);
         credit.forceActivate(0, 100_000e6);
-        // Drive a cache write by calling _refresh-equivalent via a known
-        // path: creditLimit() view alone doesn't persist; instead use the
-        // public mapping to assert raw cache state.
-        assertEq(buck.creditLimitBlock(ALICE), 0, "no path persisted yet");
+        assertEq(buck.creditLimit(ALICE), 100_000e6, "one credit");
 
-        // Now create a second NFT for Alice -- the hook fires _update,
-        // which calls onCreditMutation(0, ALICE).  The cache for ALICE is
-        // invalidated (block reset to 0).  Since it was 0 anyway this is
-        // a no-op-but-confirms-no-revert test.
         vm.prank(INSURER);
         credit.createCredit(
             ALICE, 0, 50_000e6, 0,
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
-        // Activate the new NFT -- another hook fire.
         vm.prank(ALICE);
         credit.forceActivate(1, 50_000e6);
         assertEq(buck.creditLimit(ALICE), 150_000e6, "limit must include both NFTs");
     }
 
-    /// @notice Transferring an NFT invalidates the cache for both parties.
-    function test_cache_invalidates_on_NFT_transfer() public {
+    /// @notice The limit follows natural depreciation, with nothing at all
+    ///         happening on chain in between.
+    function test_creditLimit_tracksDepreciation() public {
+        vm.prank(INSURER);
+        uint256 tid = credit.createCredit(
+            ALICE, 0, 100_000e6, /*floor=*/0,
+            BuckCredit.DepreciationType.LINEAR, /*1000bp/yr=*/1000,
+            uint48(t0), 0
+        );
+        vm.prank(ALICE);
+        credit.forceActivate(tid, 100_000e6);
+        assertEq(buck.creditLimit(ALICE), 100_000e6, "undepreciated at t0");
+
+        vm.warp(t0 + 365 days + 6 hours);
+        assertEq(buck.creditLimit(ALICE), 90_000e6, "10%/yr off after one year");
+    }
+
+    /// @notice An unactivated credit moves freely, and the limit follows it.
+    function test_unusedCredit_transfersAndCarriesItsLimit() public {
         vm.prank(INSURER);
         uint256 tid = credit.createCredit(
             ALICE, 0, 100_000e6, 0,
             BuckCredit.DepreciationType.NONE, 0, 0, 0
         );
-        vm.prank(ALICE);
-        credit.forceActivate(tid, 100_000e6);
-        // Confirm starting state.
-        assertEq(buck.creditLimit(ALICE), 100_000e6);
-        assertEq(buck.creditLimit(BOB),   0);
-
-        // Transfer -- both caches invalidate; new reads reflect the move.
         vm.prank(ALICE);
         credit.transferFrom(ALICE, BOB, tid);
-        assertEq(buck.creditLimit(ALICE), 0,         "ALICE loses credit on transfer");
-        assertEq(buck.creditLimit(BOB),   100_000e6, "BOB gains credit on transfer");
+
+        vm.prank(BOB);
+        credit.forceActivate(tid, 100_000e6);
+        assertEq(buck.creditLimit(ALICE), 0,         "ALICE never activated it");
+        assertEq(buck.creditLimit(BOB),   100_000e6, "BOB owns and activated it");
     }
 
-    /// @notice updateCredit() by the insurer also invalidates the cache.
-    function test_cache_invalidates_on_updateCredit() public {
+    /// @notice A credit that is backing BUCK cannot change hands.  This is
+    ///         what stops a drawn position from walking away from its
+    ///         collateral and letting the same coverage back BUCK twice.
+    function test_activatedCredit_cannotTransfer() public {
         vm.prank(INSURER);
         uint256 tid = credit.createCredit(
             ALICE, 0, 100_000e6, 0,
@@ -144,22 +158,64 @@ contract BuckCreditLimitTest is Test {
         );
         vm.prank(ALICE);
         credit.forceActivate(tid, 100_000e6);
-        assertEq(buck.creditLimit(ALICE), 100_000e6);
 
-        // Insurer reappraises to a lower face -- activated caps down and
-        // totalCurrentValue drops.  The hook fires from updateCredit.
-        vm.prank(INSURER);
-        credit.updateCredit(
-            tid, 40_000e6, 0,
-            BuckCredit.DepreciationType.NONE, 0, 0, 0
-        );
-        assertEq(buck.creditLimit(ALICE), 40_000e6, "limit must follow reappraisal");
+        vm.prank(ALICE);
+        vm.expectRevert(bytes("BuckCredit: credit in use"));
+        credit.transferFrom(ALICE, BOB, tid);
+
+        vm.prank(ALICE);
+        vm.expectRevert(bytes("BuckCredit: credit in use"));
+        credit.safeTransferFrom(ALICE, BOB, tid);
+
+        assertEq(credit.ownerOf(tid), ALICE, "still ALICE's");
     }
 
-    /// @notice onCreditMutation is gated on the BuckCredit caller.
-    function test_onCreditMutation_restricted_to_credit() public {
-        vm.expectRevert(bytes("BUCK: not credit"));
-        buck.onCreditMutation(ALICE, BOB);
+    /// @notice An insurer may reappraise down to the coverage the holder has
+    ///         bought, and no further.
+    function test_reappraisal_cannotUndercutActivatedCoverage() public {
+        vm.prank(INSURER);
+        uint256 tid = credit.createCredit(
+            ALICE, 0, 100_000e6, 0,
+            BuckCredit.DepreciationType.NONE, 0, 0, 0
+        );
+        vm.prank(ALICE);
+        credit.forceActivate(tid, 40_000e6);
+
+        // Down to the activated line: allowed.
+        vm.prank(INSURER);
+        credit.updateCredit(
+            tid, 40_000e6, 0, BuckCredit.DepreciationType.NONE, 0, 0, 0
+        );
+        assertEq(buck.creditLimit(ALICE), 40_000e6, "coverage survives intact");
+
+        // Below it: refused.
+        vm.prank(INSURER);
+        vm.expectRevert(bytes("BuckCredit: face below activated coverage"));
+        credit.updateCredit(
+            tid, 39_999e6, 0, BuckCredit.DepreciationType.NONE, 0, 0, 0
+        );
+    }
+
+    /// @notice A reappraisal that changes the schedule still moves the limit.
+    function test_creditLimit_followsReappraisedSchedule() public {
+        vm.prank(INSURER);
+        uint256 tid = credit.createCredit(
+            ALICE, 0, 100_000e6, 0,
+            BuckCredit.DepreciationType.NONE, 0, 0, 0
+        );
+        vm.prank(ALICE);
+        credit.forceActivate(tid, 100_000e6);
+
+        vm.warp(t0 + 365 days + 6 hours);
+        assertEq(buck.creditLimit(ALICE), 100_000e6, "not depreciating yet");
+
+        // Same face, but now on a schedule that has been running for a year.
+        vm.prank(INSURER);
+        credit.updateCredit(
+            tid, 100_000e6, 0,
+            BuckCredit.DepreciationType.LINEAR, 1000, uint48(t0), 0
+        );
+        assertEq(buck.creditLimit(ALICE), 90_000e6, "limit follows the new schedule");
     }
 
     /// @notice BuckCredit.setBuck is one-shot.

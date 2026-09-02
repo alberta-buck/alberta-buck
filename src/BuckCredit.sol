@@ -5,15 +5,6 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
 import {BuckTypes, BuckQty, toBuckQty, CreditSlice} from "./BuckTypes.sol";
 
-/// @notice Hook surface BuckCredit calls on Buck whenever an NFT mutation
-///         (mint / burn / transfer / activate) changes a holder's
-///         totalCurrentValue.  Buck uses it to invalidate its per-block
-///         credit-limit cache for the affected holders so that subsequent
-///         creditLimit() reads compute against the fresh NFT state.
-interface IBuckHook {
-    function onCreditMutation(address from, address to) external;
-}
-
 /// @title BuckCredit — ERC-721 Insured Asset NFT
 /// @notice Each token represents an insurer's offer of parametric insurance on a
 ///         real-world asset, with deterministic depreciation and piecemeal activation.
@@ -35,11 +26,11 @@ interface IBuckHook {
 /// BuckCredit and Buck currently communicate via:
 ///   Buck -> BuckCredit: totalCurrentValue, batchCreditInfo, ownerOf,
 ///                       balanceOf, tokenOfOwnerByIndex, activateFromBuck
-///   BuckCredit -> Buck: IBuckHook.onCreditMutation (cache invalidation)
+///   BuckCredit -> Buck: nothing.  The call graph is one-way.
 ///
 /// It is tempting to collapse the pair into a single Diamond (EIP-2535)
 /// with separate facets, eliminating the cross-contract calls and the
-/// setBuck()/IBuckHook wiring.  This is a dead end:
+/// setBuck() wiring.  This is a dead end:
 ///
 ///   ERC-20 and ERC-721 share function selectors with incompatible
 ///   semantics.  balanceOf(address) is 0x70a08231 in both standards
@@ -122,14 +113,29 @@ contract BuckCredit is ERC721Enumerable {
     ///      ~2%/yr discount, settled from the Jubilee fund at burn.
     mapping(uint256 => uint256) internal _covSeconds;
 
-    /// @notice Buck contract that receives credit-mutation callbacks for
-    ///         cache invalidation.  Wired one-shot post-deployment via
-    ///         setBuck(...); zero-address means callbacks are skipped (so
-    ///         BuckCredit can be deployed and exercised before Buck exists,
-    ///         e.g. in older fixtures).
+    /// @notice The Buck contract permitted to drive activation.  Wired
+    ///         one-shot post-deployment via setBuck(...).  BuckCredit never
+    ///         calls Buck -- this is an authorisation record, nothing more.
     address public buck;
 
+    // ── Recipient opt-in ────────────────────────────────────────────
+    //
+    // A credit only lands where its recipient asked for it.  Without this,
+    // `createCredit` mints an ERC-721 to an address that never consented --
+    // and a credit costs its holder gas forever after, because
+    // `totalCurrentValue` walks every token they own on every outbound BUCK
+    // transfer.  An attacker could raise a chosen address's transfer cost
+    // without bound for the price of the mints.
+    //
+    // The rule is uniform: it applies to self-issuance too.  There is no
+    // reading of "I am my own insurer" that needs a carve-out, and declining
+    // to open one keeps the invariant a reader can state in one line.
+
+    /// @notice Insurers a client is willing to receive credits from.
+    mapping(address => mapping(address => bool)) public acceptsCreditFrom;
+
     // --- Events ---
+    event CreditIssuerSet(address indexed client, address indexed insurer, bool accepted);
     event CreditCreated(uint256 indexed tokenId, address indexed insurer,
                         address indexed owner, uint256 faceValue);
     event CreditUpdated(uint256 indexed tokenId, address indexed insurer,
@@ -140,11 +146,11 @@ contract BuckCredit is ERC721Enumerable {
 
     constructor() ERC721("BuckCredit", "BUCK_CREDIT") {}
 
-    /// @notice One-shot wiring of the Buck contract for credit-mutation
-    ///         hooks.  Callable by anyone (the Buck address is public and
-    ///         the function is idempotent once set), but immutable after
-    ///         first set.  Mirrors Buck.setBasket(...) for the symmetric
-    ///         BuckBasket wiring style.
+    /// @notice One-shot wiring of the Buck contract permitted to call
+    ///         activateFromBuck / deactivateFromBuck.  Callable by anyone
+    ///         (the Buck address is public and the function is idempotent
+    ///         once set), but immutable after first set.  Mirrors
+    ///         Buck.setBasket(...) for the symmetric BuckBasket wiring style.
     function setBuck(address _buck) external {
         require(buck == address(0), "BuckCredit: buck already set");
         require(_buck != address(0), "BuckCredit: buck=0");
@@ -152,19 +158,53 @@ contract BuckCredit is ERC721Enumerable {
         emit BuckSet(_buck);
     }
 
-    /// @dev Override the OZ ERC721 _update hook so any NFT state change
-    ///      (mint / burn / transfer) invalidates Buck's per-block credit-
-    ///      limit cache for both the previous and new owners.  ERC721Enumerable
-    ///      itself overrides _update; we call super to preserve its
-    ///      enumeration bookkeeping.
+    /// @dev A credit that is currently backing BUCK cannot change hands.
+    ///
+    ///      Buck derives a holder's credit limit from the activated value of
+    ///      the credits they own, while the BUCK drawn against that limit
+    ///      stays as a negative balance on the account that drew it.  Let the
+    ///      token move and the two separate: the seller keeps an obligation
+    ///      with nothing behind it, and the buyer receives headroom against
+    ///      coverage that has already been spent.  The same activated value
+    ///      would back BUCK twice.
+    ///
+    ///      `activatedValue` is the right predicate rather than Buck's
+    ///      `mintsBacked` because it is local: BuckCredit enforces this
+    ///      without consulting Buck, so the property does not depend on
+    ///      another contract being correct or even reachable.  The two agree
+    ///      by construction -- activation happens only inside
+    ///      `Buck._allocateMint`, and `updateCredit` may no longer clamp one
+    ///      without the other.
+    ///
+    ///      Release is by burning the position down (`Buck.burn`), which
+    ///      deactivates the coverage.  At `activatedValue == 0` the credit
+    ///      is freely transferable again.  ERC721Enumerable also overrides
+    ///      `_update`; super() preserves its enumeration bookkeeping.
     function _update(address to, uint256 tokenId, address auth)
         internal override returns (address from)
     {
         from = super._update(to, tokenId, auth);
-        address b = buck;
-        if (b != address(0)) {
-            IBuckHook(b).onCreditMutation(from, to);
-        }
+        require(
+            from == address(0) || credits[tokenId].activatedValue.isZero(),
+            "BuckCredit: credit in use"
+        );
+    }
+
+    /// @notice Accept, or stop accepting, credits issued by `insurer`.
+    /// @dev    Revocable, and it only governs *new* issuance: credits already
+    ///         held are unaffected, since they may be backing BUCK.
+    function setCreditIssuer(address insurer, bool accepted) external {
+        acceptsCreditFrom[msg.sender][insurer] = accepted;
+        emit CreditIssuerSet(msg.sender, insurer, accepted);
+    }
+
+    /// @dev The opt-in gate.  Virtual so `BuckCreditHarness` can stand it
+    ///      down for fixtures whose holders never send a transaction of their
+    ///      own; the gate itself is exercised against this contract, not the
+    ///      harness, in `BuckCreditIssuance.t.sol`.
+    function _requireAccepted(address client) internal view virtual {
+        require(acceptsCreditFrom[client][msg.sender],
+                "BuckCredit: insurer not accepted by client");
     }
 
     /// @notice Insurer creates a new BUCK_CREDIT NFT for a client.
@@ -181,6 +221,7 @@ contract BuckCredit is ERC721Enumerable {
         uint48 depStartAt,
         uint32 premiumRate
     ) external returns (uint256) {
+        _requireAccepted(client);
         require(depreciationFloor <= faceValue, "floor > face");
 
         uint256 tokenId = _nextTokenId++;
@@ -213,14 +254,25 @@ contract BuckCredit is ERC721Enumerable {
         CreditParams storage c = credits[tokenId];
         if (c.activatedValue.isZero()) return 0;
 
-        uint256 face = c.faceValue.asUint();
-        uint256 depreciatedFace = _depreciate(
-            face, c.depType, c.depRate,
+        // Activated portion depreciates proportionally.
+        return depreciatedFaceValue(tokenId) * c.activatedValue.asUint()
+             / c.faceValue.asUint();
+    }
+
+    /// @notice The whole asset's appraised value on today's schedule, before
+    ///         any activation is taken into account.
+    /// @dev    This is the ceiling on what can actually be insured now, and
+    ///         therefore what a premium is charged against.  `currentValue`
+    ///         is this scaled by the holder's activated share;
+    ///         `depreciatedFaceValue` is the share-independent figure Buck's
+    ///         allocator needs to convert between face units and present
+    ///         insured value.
+    function depreciatedFaceValue(uint256 tokenId) public view returns (uint256) {
+        CreditParams storage c = credits[tokenId];
+        return _depreciate(
+            c.faceValue.asUint(), c.depType, c.depRate,
             c.depreciationFloor.asUint(), c.depStartAt
         );
-
-        // Activated portion depreciates proportionally.
-        return depreciatedFace * c.activatedValue.asUint() / face;
     }
 
     /// @dev Discrete-time depreciation.  No transcendental approximations —
@@ -337,7 +389,6 @@ contract BuckCredit is ERC721Enumerable {
         c.activatedValue  = toBuckQty(current - amount);
         c.lastActivatedAt = uint48(block.timestamp);
 
-        IBuckHook(buck).onCreditMutation(holder, address(0));
         emit CreditActivated(tokenId, holder, 0, current - amount);
     }
 
@@ -350,13 +401,6 @@ contract BuckCredit is ERC721Enumerable {
         _foldCoverage(tokenId, c);
         c.activatedValue  = toBuckQty(newActivated);
         c.lastActivatedAt = uint48(block.timestamp);
-
-        // activatedValue feeds totalCurrentValue(), which gates Buck's
-        // credit limit -- invalidate the cache for this holder.
-        address b = buck;
-        if (b != address(0)) {
-            IBuckHook(b).onCreditMutation(holder, address(0));
-        }
 
         emit CreditActivated(tokenId, holder, amount, newActivated);
     }
@@ -432,10 +476,11 @@ contract BuckCredit is ERC721Enumerable {
             uint256 tid = tokenIds[i];
             CreditParams storage c = credits[tid];
             slices[i] = CreditSlice({
-                owner:          ownerOf(tid),
-                faceValue:      c.faceValue.asUint(),
-                activatedValue: c.activatedValue.asUint(),
-                premiumRate:    c.premiumRate
+                owner:           ownerOf(tid),
+                faceValue:       c.faceValue.asUint(),
+                depreciatedFace: depreciatedFaceValue(tid),
+                activatedValue:  c.activatedValue.asUint(),
+                premiumRate:     c.premiumRate
             });
         }
     }
@@ -470,20 +515,26 @@ contract BuckCredit is ERC721Enumerable {
         require(msg.sender == c.insurer,                "Not insurer");
         require(newDepreciationFloor <= newFaceValue,   "floor > face");
 
+        // An insurer may reappraise freely down to the coverage the holder
+        // has already bought, and no further.  Activated coverage is a
+        // completed purchase: its pool principal was paid up front and funds
+        // its premium in perpetuity, so writing it down would be revoking a
+        // policy, not revaluing an asset.  An asset that has genuinely lost
+        // value is what the claim path is for; ordinary decline is what the
+        // depreciation schedule below is for, and that still moves the
+        // holder's credit limit without touching the coverage itself.
+        //
+        // This is also what keeps `activatedValue` and Buck's `mintsBacked`
+        // equal.  Clamping one without the other used to leave the holder
+        // unable to unwind: Buck sizes the burn from `mintsBacked` while
+        // `deactivateFromBuck` measures it against `activatedValue`, so a
+        // clamp stranded the position permanently -- burnable only down to
+        // the clamped line, with the remainder stuck and the credit
+        // disqualified from ever backing BUCK again.
+        require(newFaceValue >= c.activatedValue.asUint(),
+                "BuckCredit: face below activated coverage");
+
         BuckQty newFace = toBuckQty(newFaceValue);  // bound-check up front
-        if (newFaceValue < c.activatedValue.asUint()) {
-            // Reappraisal clamp mutates activatedValue: fold the Jubilee
-            // aging first and scale it to the surviving coverage (the
-            // clamped-away coverage takes its share of aging with it).
-            _foldCoverage(tokenId, c);
-            uint256 cur = c.activatedValue.asUint();
-            if (cur > 0) {
-                _covSeconds[tokenId] =
-                    _covSeconds[tokenId] * newFaceValue / cur;
-            }
-            c.activatedValue  = newFace;
-            c.lastActivatedAt = uint48(block.timestamp);
-        }
 
         c.faceValue         = newFace;
         c.depreciationFloor = toBuckQty(newDepreciationFloor);
@@ -492,13 +543,6 @@ contract BuckCredit is ERC721Enumerable {
         c.depStartAt        = newDepStartAt;
         c.premiumRate       = newPremiumRate;
         c.lastUpdated       = uint48(block.timestamp);
-
-        // Insurer reappraisal can change totalCurrentValue of the holder;
-        // invalidate Buck's credit-limit cache for the current owner.
-        address b = buck;
-        if (b != address(0)) {
-            IBuckHook(b).onCreditMutation(ownerOf(tokenId), address(0));
-        }
 
         emit CreditUpdated(tokenId, msg.sender, newFaceValue, newDepRate, newPremiumRate);
     }

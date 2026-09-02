@@ -355,20 +355,49 @@ contract BuckTest is Test {
         // Phase 1b: burn() repays principal -- signed raw climbs toward zero.
         // The user's spendable (balanceOf) GROWS by `refund_i` because their
         // unused credit headroom expands as debt shrinks.
-        _grantCredit(alice, 1000e6);
+        uint256 tid = _grantCredit(alice, 1000e6);
         vm.prank(alice);
         buck.mint(100e6);
-        int256 signedBefore = buck.signedRawBalanceOf(alice);  // ~ -5_263_158
+        int256  signedBefore  = buck.signedRawBalanceOf(alice);  // ~ -5_263_158
+        uint256 depositBefore = buck.mintsPrincipal(tid);
 
         vm.prank(alice);
         buck.burn(10e6);
 
-        // unwind = ceil(10e6 * 10000 / 9500) = 10_526_316
-        // refund = unwind - 10e6              =     526_316
-        // alice's signed raw climbs by refund: -5_263_158 + 526_316 = -4_736_842
-        int256 signedAfter = buck.signedRawBalanceOf(alice);
-        assertEq(signedAfter - signedBefore, int256(uint256(526_316)),
-                 "burn refunds principal: signed raw climbs by refund_i");
+        // The refund is the deposit the released cover was carrying, pro rata
+        // on the face units let go -- not a re-pricing of that cover.
+        uint256 refunded = depositBefore - buck.mintsPrincipal(tid);
+        assertEq(refunded, 526_315, "pro-rata share of the deposit");
+        assertEq(buck.signedRawBalanceOf(alice) - signedBefore, int256(refunded),
+                 "burn refunds principal: signed raw climbs by the refund");
+    }
+
+    /// @notice Whatever the appraisal does in between, releasing all the cover
+    ///         returns the whole deposit.  Partial releases floor, so the dust
+    ///         stays in the pool until the final release hands it back.
+    function test_burn_returnsTheWholeDepositAcrossPartialReleases() public {
+        uint256 tid = _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+
+        uint256 deposit = buck.mintsPrincipal(tid);
+        assertEq(uint256(-buck.signedRawBalanceOf(alice)), deposit, "paid it all in");
+
+        for (uint256 i = 0; i < 9; i++) {
+            vm.prank(alice);
+            buck.burn(10e6);
+        }
+        // Close out whatever the flooring left behind.  Not balanceOf: this
+        // fixture grants far more credit than the mint drew on, so alice's
+        // spendable includes headroom no deposit stands behind.  The cover
+        // here does not depreciate, so its present value is its face units.
+        uint256 tail = buck.mintsBacked(tid) - buck.mintsPrincipal(tid);
+        vm.prank(alice);
+        buck.burn(tail);
+
+        assertEq(buck.mintsPrincipal(tid), 0, "deposit fully returned");
+        assertEq(buck.mintsBacked(tid),    0, "cover fully released");
+        assertEq(buck.signedRawBalanceOf(alice), 0, "holder is square");
     }
 
     function test_burn_refundsPoolPrincipalProportionally() public {
@@ -382,12 +411,11 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.burn(10e6);
 
-        // Inverse of mint at the same rate:
-        //   unwind = ceil(10e6 * 10000 / 9500) = 10_526_316
-        //   refund = unwind - 10e6              =     526_316
-        assertEq(buck.signedRawBalanceOf(alice), signedAfterMint + int256(uint256(526_316)),
+        // unwind = ceil(10e6 * 10000 / 9500) = 10_526_316 face units, carrying
+        // their pro-rata share of the deposit back with them.
+        assertEq(buck.signedRawBalanceOf(alice), signedAfterMint + int256(uint256(526_315)),
                  "alice's debt shrinks by refund_i");
-        assertEq(buck.balanceOf(POOL),    poolAfterMint - 526_316, "pool refund returned");
+        assertEq(buck.balanceOf(POOL),    poolAfterMint - 526_315, "pool refund returned");
         assertEq(buck.mintsBacked(tid),   backedAfterMint - 10_526_316, "coverage unwound");
     }
 
@@ -412,8 +440,8 @@ contract BuckTest is Test {
         int256 signedBefore = buck.signedRawBalanceOf(alice);
         vm.prank(alice);
         buck.burn(10e6, order);
-        // refund_cheap = ceil(10e6*10000/9500) - 10e6 = 526_316
-        assertEq(buck.signedRawBalanceOf(alice), signedBefore + int256(uint256(526_316)),
+        // 10_526_316 face units released, carrying their share of the deposit.
+        assertEq(buck.signedRawBalanceOf(alice), signedBefore + int256(uint256(526_315)),
                  "alice debt shrinks by refund_i (cheap-rate unwind)");
     }
 
@@ -459,18 +487,18 @@ contract BuckTest is Test {
         // Dear netCap = 68.75e6 * 8000/10000 = 55e6 of holder reduction.
         // Burn 100e6: dear contributes 55e6 (full), remaining 45e6 goes to cheap.
         // Cheap denom = 9500, unwind = ceil(45e6*10000/9500) = 47_368_422,
-        // refund_cheap = 47.37e6 - 45e6 = 2_368_422.
-        // Total refund = 13_750_000 (dear) + 2_368_422 (cheap) = 16_118_422.
+        // carrying its pro-rata share of that credit's deposit back:
+        // 2_368_421.  Total refund = 13_750_000 (dear) + 2_368_421 = 16_118_421.
         int256 signedBefore = buck.signedRawBalanceOf(alice);
         vm.prank(alice);
         buck.burn(100e6);
 
         assertEq(buck.mintsBacked(dear),  0,                          "dear fully unwound");
         assertEq(buck.mintsBacked(cheap), 100e6 - 47_368_422,         "cheap partially unwound");
-        assertEq(buck.signedRawBalanceOf(alice), signedBefore + int256(uint256(16_118_422)),
+        assertEq(buck.signedRawBalanceOf(alice), signedBefore + int256(uint256(16_118_421)),
                  "alice debt shrinks by total refund");
-        // 18_750_000 minted to pool initially; 16_118_422 refunded.
-        assertEq(buck.balanceOf(POOL),    18_750_000 - 16_118_422,    "pool refund spans both NFTs");
+        // 18_750_000 minted to pool initially; 16_118_421 refunded.
+        assertEq(buck.balanceOf(POOL),    18_750_000 - 16_118_421,    "pool refund spans both NFTs");
     }
 
     function test_quoteMint_multiRate_matchesExecution() public {

@@ -1,0 +1,51 @@
+# rebalancing-eq variant "debtors-mature": the debtors cohort in an
+# ADOPTED economy.  Composes "debtors" (24 theta-law mortgage debtors, see
+# rebalancing-eq-5yr-debtors.toml) with "mature": the window opens on a
+# credit economy that has already adopted --
+#
+#   * debtors arrive at day 0 (arrive_frac 0) instead of staggering in
+#     over the first year;
+#   * the FatCredit borrowers' adoption S-curve is already saturated
+#     (mid_frac -0.5 puts the logistic midpoint half a horizon BEFORE the
+#     window, so cap_frac ~= 1 from day 0), removing the scheduled
+#     capacity withholding the controller otherwise spends the mid-run
+#     compensating for.
+#
+# Against "debtors" this separates "missing rational actors" from
+# "actors present but still ramping".
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-debtors-mature"
+notes = "rebalancing-eq + 24 debtors, adoption saturated from day 0"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+BuckCreditDebtorAgent = 24
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform (median ~550k)
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+refi_mode = "atomic"      # ex-ante whole-conversion evaluation (see agent)
+arrive_frac = 0.0           # mature: everyone is already here
+
+[agents.FatCreditBorrowerAgent]
+mid_frac = -0.5             # adoption S-curve saturated before the window
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

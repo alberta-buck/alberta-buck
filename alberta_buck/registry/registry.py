@@ -32,7 +32,9 @@ from alberta_buck.registry.certificate import (
     registry_verify_certificate,
     seal_certificate,
 )
-from alberta_buck.registry.tree import IdentityMerkleTree, MembershipProof, identity_leaf
+from alberta_buck.registry.tree import (
+    IdentityMerkleTree, MembershipProof, identity_leaf, KYC_SUBTREE_DEPTH,
+)
 from alberta_buck.wallet.bn254 import (
     G1, ORDER, add, mul, neg, eq, rand_scalar, point_to_words,
 )
@@ -181,7 +183,7 @@ class RegistryAgent:
         registry_id: str,
         signing_key: Optional[RegistryKeyPair] = None,
         ps_keypair: Optional[PSKeyPair] = None,
-        tree_depth: int = 12,
+        tree_depth: int = KYC_SUBTREE_DEPTH,
     ) -> None:
         self.registry_id = registry_id
         self._key = signing_key if signing_key is not None else registry_keygen()

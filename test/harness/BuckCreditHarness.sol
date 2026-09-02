@@ -28,4 +28,12 @@ contract BuckCreditHarness is BuckCredit {
     function forceActivate(uint256 tokenId, uint256 amount) external {
         _activate(tokenId, ownerOf(tokenId), amount);
     }
+
+    /// @dev Stand down the recipient opt-in.  Production requires the client
+    ///      to have called `setCreditIssuer` before an insurer may issue to
+    ///      them; most fixtures here hand credits to addresses that never
+    ///      send a transaction of their own, so requiring it would be pure
+    ///      ceremony.  The gate is exercised against the real contract in
+    ///      `BuckCreditIssuance.t.sol`.
+    function _requireAccepted(address) internal pure override {}
 }

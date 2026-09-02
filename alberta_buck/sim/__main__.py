@@ -22,9 +22,12 @@ def main(argv=None) -> int:
                          "(RPC-faithful; needs anvil on PATH -- fork tests)")
     ap.add_argument("--director", default="pairs", choices=["vrate", "pairs"],
                     help="rebalance-director signal engine (prorata only)")
-    ap.add_argument("--basket", default=None, choices=["legacy", "prorata"],
+    ap.add_argument("--basket", default=None,
+                    choices=["legacy", "prorata", "ops", "fence"],
                     help="basket implementation: BuckBasketProRata (prorata, "
-                         "default) or BuckBasket (legacy)")
+                         "default), BuckBasketOps (ops -- prorata plus the "
+                         "monetary-operations desk on the director's common "
+                         "mode), BuckBasketFence (fence -- K-scaled issuance deployed as a concentrated band), or BuckBasket (legacy)")
     ap.add_argument("--days", type=int, default=None)
     ap.add_argument("--ticks-per-day", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)

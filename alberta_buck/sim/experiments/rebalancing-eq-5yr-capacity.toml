@@ -1,0 +1,36 @@
+# rebalancing-eq variant "capacity": the base run FAILED its gate on the
+# saturated-plant signature (bv 0.9935 -- fine and tighter than baseline --
+# but K railed at 0.95 for 39% of the tail with the funding throttle at
+# 100%).  This arm gives the issuance plant the same demand + capacity
+# headroom that carried worst-seed 99 to PASS in the equilibrium campaign
+# (baseline-capacity.toml): savers2x sell-side demand plus borrower face
+# and funding budgets.  If the director + headroom passes with K interior,
+# the base failure was pure plant saturation; if K still rails, the
+# director itself is starving the issuance channel.
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-capacity"
+notes = "rebalancing-eq + savers2x demand + borrower capacity headroom"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[agents.FatCreditBorrowerAgent]
+face_m = [3, 7]
+fund_budget_m = [5, 9]
+
+[agents.SaverAgent]
+prem_gain = [8.0, 15.0]
+budget_m = [40, 80]
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

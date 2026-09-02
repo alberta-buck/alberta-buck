@@ -248,7 +248,26 @@ impl IdentityMerkleTree {
 
 /// The on-chain identity-tree depth: `IdentityRegistry.IDENTITY_TREE_DEPTH`
 /// and the membership circuits both fix 10 (`unilateral_a2.IdentityTree`).
+///
+/// This is the AGGREGATOR depth -- the tree whose root IS `identityRoot`.
+/// It is the only one of the three that is protocol-critical, because the
+/// circuits prove a path to exactly this root.
 pub const IDENTITY_TREE_DEPTH: usize = 10;
+
+/// Alias making the role explicit at call sites that compose sub-trees.
+pub const AGGREGATOR_DEPTH: usize = IDENTITY_TREE_DEPTH;
+
+/// One registry organization's own identity sub-tree.  Deliberately deeper
+/// than the aggregator: it sizes how many identities a single organization
+/// can hold (2**12 ~ 4K), which is a capacity question rather than a protocol
+/// one.  Mirrors `alberta_buck.registry.tree.KYC_SUBTREE_DEPTH`, and the
+/// committed vectors pin it (`reg_a.depth` / `reg_b.depth`).
+pub const KYC_SUBTREE_DEPTH: usize = 12;
+
+/// A feature authority's sub-tree (attributes such as licences).  Equal to
+/// AGGREGATOR_DEPTH today by coincidence of capacity, not by requirement --
+/// named separately so raising one cannot silently raise the other.
+pub const FEATURE_SUBTREE_DEPTH: usize = 10;
 
 /// The wallet-facing point-centric tree at the on-chain depth.
 pub fn identity_tree() -> IdentityMerkleTree {

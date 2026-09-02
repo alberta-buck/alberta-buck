@@ -16,9 +16,15 @@ import {IdentityRegistry} from "./IdentityRegistry.sol";
 /// Jubilee receives system-level demurrage credit via direct slot writes
 /// (`totalSupply` is NOT mutated by demurrage -- only by user mint / burn).
 ///
-/// Mint/burn-side bookkeeping (storedLimit, mintsBacked, allowances, receipt
-/// fragments) lives in separate maps because it's touched per-mint, not per
-/// transfer.  This keeps the hot path to one SSTORE per side per transfer.
+/// Mint/burn-side bookkeeping (mintsBacked, allowances, receipt fragments)
+/// lives in separate maps because it's touched per-mint, not per transfer.
+/// This keeps the hot path to one SSTORE per side per transfer.
+///
+/// Nothing derived is stored.  An account's credit limit, and therefore its
+/// balanceOf, is recomputed from live BuckCredit state on every read: it is
+/// meant to track the insured assets behind it as they are acquired,
+/// reappraised and depreciated, and a cached copy of a number whose inputs
+/// live in two other contracts is a wrong balance waiting to happen.
 interface IBuckK {
     function currentBuckK() external view returns (uint256);
     /// @dev State-changing accessor.  Runs a PID cycle if `dT` has elapsed,
@@ -75,6 +81,51 @@ contract Buck is IERC20, IERC20Metadata {
     uint256 internal constant BP                 = 10000;
     uint256 internal constant POOL_ROI_INV       = 10;                  // 10% assumed annual ROI
 
+    /// @dev AccountState.flags bit 0: this account's demurrage is routed to
+    ///      `demurragePayer[account]`.  The only flag the hot path tests.
+    uint16  internal constant FLAG_SPONSORED     = 0x0001;
+
+    // ---- reentrancy guard ---------------------------------------------------
+    //
+    // Transient storage (EIP-1153; the build already targets cancun).  TSTORE
+    // / TLOAD are 100 gas flat with no cold tier, no refund accounting, and
+    // no persistent slot -- so this occupies NO storage slot and leaves the
+    // existing layout, which tests reach by hard-coded index via `vm.store`,
+    // completely undisturbed.  Measured cost is ~600 gas on a guarded call
+    // against ~5150 for the classic storage-slot guard.
+    //
+    // Deliberately a contract-level mutex rather than a bit in AccountState.
+    // A per-account bit is cheaper still (~390 gas, since the slot is written
+    // anyway) but guards the wrong thing: an attacker reenters from whatever
+    // address they like, so locking `msg.sender` stops nothing, and locking
+    // every account an operation touches means publishing a lock SSTORE per
+    // account before each call-out.  Worse, a persistent bit sharing a slot
+    // with the balance is silently cleared by any of this contract's
+    // read-struct-into-memory / write-struct-back sequences, and a path that
+    // sets it and returns without clearing bricks that account forever.
+    // Transient state cannot survive the transaction, so it cannot brick
+    // anything.
+    bool private transient _entered;
+
+    /// @dev Blocks reentry into any BUCK state-mutating entry point.  Since
+    ///      the credit-limit cache and its `onCreditMutation` hook were
+    ///      removed, BuckCredit no longer calls back into Buck at all and the
+    ///      guard has no exemption to make for it: the call graph between the
+    ///      two contracts runs one way.
+    ///
+    ///      It is not applied to the plain 2-arg `approve`, which touches only
+    ///      the allowance map and calls nothing: re-entering it grants an
+    ///      attacker no capability a separate transaction would not, and it is
+    ///      the single hottest entry point for router / Permit2 integration.
+    ///      The 4-arg identity-bound `approve` IS guarded -- it calls into the
+    ///      registry.
+    modifier nonReentrant() {
+        require(!_entered, "BUCK: reentrant");
+        _entered = true;
+        _;
+        _entered = false;
+    }
+
     // ---- packed per-account state ------------------------------------------
     //
     //   balance      uint80   raw stored balance.  Spendable (Non-Carrying):
@@ -89,7 +140,19 @@ contract Buck is IERC20, IERC20Metadata {
     //   timestamp    uint40   last crystallisation (seconds since epoch).
     //                         2^40 sec ≈ year 36812 -- safe past 2038.
     //
-    //   flags        uint16   reserved for future per-account flags.
+    //   flags        uint16   bit 0     FLAG_SPONSORED -- this account's
+    //                                   demurrage routes to demurragePayer[a].
+    //                         bits 1-15 reserved.
+    //
+    //                         This word is scarce: it rides in the slot the
+    //                         transfer path already loads and stores, which
+    //                         is exactly what makes a bit here free to test
+    //                         and therefore worth spending only on hot-path
+    //                         dispatch.  Cold-path bookkeeping belongs in its
+    //                         own slot -- the count of accounts a payer
+    //                         carries lives in `sponseeCount`, not here.
+    //                         Note this is also deliberately NOT where a
+    //                         reentrancy guard lives -- see `_entered`.
 
     struct AccountState {
         BuckQty     balance;       // uint80 underlying; cap = BuckTypes.MAX_BALANCE
@@ -106,8 +169,20 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- mint-side bookkeeping (rare path) ---------------------------------
 
-    /// @notice Highest-ever credit limit observed for this account.
-    mapping(address => uint256) public storedLimit;
+    /// @notice The account that carries `a`'s demurrage, once both sides have
+    ///         consented.  Zero when `a` pays its own.  See the delegated
+    ///         demurrage section below for the mechanism; the other two fields
+    ///         it needs are declared there.
+    /// @dev    Housed here, out of order, to reclaim the slot the Phase-1a
+    ///         `storedLimit` ratchet used to occupy -- a highest-ever credit
+    ///         limit per account, from before the limit was read live.
+    ///         Nothing had written it in a long time, but it was still
+    ///         exported as a public getter that always answered zero.
+    ///         Reusing its slot retires it without shifting `mintsBacked` (4)
+    ///         or `_receiptFragments` (5), which several test fixtures reach
+    ///         by hard-coded index via `vm.store`.
+    mapping(address => address) public demurragePayer;
+
     /// @notice Outstanding BUCK coverage backed by a given BuckCredit NFT.
     mapping(uint256 => uint256) public mintsBacked;
     /// @dev keccak256(E_to) per (from, to) from approve-time CP receipts.
@@ -141,25 +216,87 @@ contract Buck is IERC20, IERC20Metadata {
     // address.  Once set, the field is immutable in effect (further
     // setBasket calls revert).
     //
-    // Placed last in the storage layout so the existing slot positions of
-    // _state / _totalSupply / _allowances / storedLimit / mintsBacked /
-    // _receiptFragments / _jubileeLastUpdate (which tests reach via
-    // `vm.store(..., slot, ...)`) remain unchanged.
+    // Placed after the maps above.  Several tests reach _state (slot 0),
+    // _totalSupply (1), _allowances (2) and _receiptFragments (5) by
+    // hard-coded index via `vm.store`; anything added from here on leaves
+    // those alone.
     address public basket;
 
-    // ---- Credit-limit cache ------------------------------------------------
+    // ---- delegated demurrage (fee payer) -----------------------------------
     //
-    // creditLimit(a) = totalCurrentValue(a) * currentBuckK / 1e18 -- live sum
-    // over the holder's BuckCredit NFTs.  Caching per block avoids re-scanning
-    // NFTs in the (common) case where the same account makes multiple
-    // transfers in one block.  BuckCredit invalidates the cache via the
-    // onCreditMutation hook on every NFT mint / burn / transfer / activate /
-    // updateCredit.
+    // An account may route its demurrage exposure to a designated payer, so
+    // that an Identity's several accounts concentrate their fee erosion in
+    // one place instead of each one's balance being eaten from underneath it.
     //
-    // Appended after `basket` so existing slot positions are preserved (see
-    // the `vm.store` consumers enumerated in the Phase-1 plan).
-    mapping(address => uint256) public creditLimitCache;
-    mapping(address => uint64)  public creditLimitBlock;
+    // The mechanism is a *transfer of buckSeconds*, not a discount.  Buck's
+    // demurrage is a lien, never a movement: an account's fee is locked
+    // inside its own raw balance (balanceOf = raw - fee) and the Jubilee's
+    // system-level accrual against totalSupply is what that sterilisation
+    // backs.  Sum_a buckSeconds(a) tracks integral(totalSupply dt); destroy
+    // buckSeconds anywhere and the Jubilee over-accrues against nothing --
+    // silent inflation.  So delegation moves the (balance * dt) rectangle
+    // from the sponsored account's slot into the payer's slot at
+    // crystallisation.  The total is conserved exactly; only its owner moves.
+    //
+    // Absorption is capped at the payer's own capacity to carry a lien --
+    // the point where feeOwing(payer) would exceed rawBalance(payer).  Past
+    // that the lien would be uncollectible and delegation WOULD become an
+    // escape hatch from demurrage.  Whatever the payer cannot carry stays
+    // with the sponsored account, exactly where it would have been.
+    //
+    // Settlement is lazy, on the sponsored account's next touch -- the same
+    // cadence at which Buck accrues everything else.  Two consequences worth
+    // stating plainly:
+    //
+    //   - Between touches the payer's own feeOwing does not yet include its
+    //     sponsees' pending rectangles, because finding them would mean
+    //     enumerating sponsees.  `settleDemurrage(account)` is a
+    //     permissionless poke that forces the transfer, so a payer (or an
+    //     indexer) can bring its books current whenever it wants.
+    //   - A payer that spends itself down before settlement absorbs less
+    //     than it would have, and the shortfall stays with the sponsored
+    //     account.  So a delegation is best-effort, and its failure mode is
+    //     exactly "no delegation at all" -- never a loss to anyone else, and
+    //     never demurrage that goes uncollected.
+    //
+    // No spend decision is ever made on a stale number: every balance-moving
+    // path crystallises the account it is about to debit, immediately before
+    // reading its balance.
+    //
+    // Appended last so every pre-existing slot index is unchanged.
+
+    // `demurragePayer` itself is declared further up, in the slot the
+    // retired `storedLimit` ratchet used to hold.
+
+    /// @notice Pending election: `a` has named this account, which has not
+    ///         yet accepted.  Cleared on accept.
+    mapping(address => address) public demurragePayerRequest;
+
+    /// @notice Pool principal currently held against a given BuckCredit NFT.
+    /// @dev    Declared here, away from `mintsBacked` which it shadows, only
+    ///         because the slots before it are load-bearing for fixtures that
+    ///         reach `_receiptFragments` (5) by hard-coded index.
+    ///
+    ///         The deposit is *returnable*.  Its yield at the insurer's
+    ///         assumed ROI funds the premium in perpetuity -- that is what
+    ///         makes a policy a one-time purchase rather than a recurring
+    ///         expense -- so what the holder actually pays for cover is the
+    ///         opportunity cost of the deposit, not the deposit.  Releasing
+    ///         coverage returns it pro rata on the face units released.
+    ///
+    ///         It has to be stored rather than recomputed: the deposit for a
+    ///         credit is the sum over past draws of `V_i * effRate_i / BP`,
+    ///         and both the appraisal and the premium rate can have moved
+    ///         between them, so `mintsPrincipal / mintsBacked` is a weighted
+    ///         average that no amount of present-day state can reconstruct.
+    mapping(uint256 => uint256) public mintsPrincipal;
+
+    /// @notice How many accounts name `a` as their demurrage payer.  Touched
+    ///         only when a delegation is armed or released, so it lives here
+    ///         rather than in the packed flags word: a non-zero count is what
+    ///         makes `a` a payer, which is a question only those two cold
+    ///         paths ever ask.  No second flag bit is needed for it.
+    mapping(address => uint32) public sponseeCount;
 
     // ---- premium / mutual-insurance pool model -----------------------------
     //
@@ -197,6 +334,9 @@ contract Buck is IERC20, IERC20Metadata {
     );
     event JubileeAccrued(uint256 delta, uint256 newJubileeBalance);
     event JubileeRedeemed(address indexed account, uint256 relief);
+    event DemurragePayerRequested(address indexed account, address indexed payer);
+    event DemurragePayerSet(address indexed account, address indexed payer);
+    event DemurragePayerCleared(address indexed account, address indexed payer);
 
     // ---- constructor -------------------------------------------------------
 
@@ -245,7 +385,7 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 held = 0;
         if (raw > 0) {
             uint256 rawU = uint256(raw);
-            uint256 fee = _feeOwing(s, rawU);
+            uint256 fee = _feeOwing(a, rawU);
             held = fee >= rawU ? 0 : rawU - fee;
         }
         uint256 used = raw < 0 ? uint256(-raw) : 0;
@@ -264,7 +404,7 @@ contract Buck is IERC20, IERC20Metadata {
         int256 raw = s.balance.asInt();
         if (raw <= 0) return raw;          // credit used accrues no demurrage (clamped in _feeOwing)
         if (identity.isCarrying(a)) return raw;
-        uint256 fee = _feeOwing(s, uint256(raw));
+        uint256 fee = _feeOwing(a, uint256(raw));
         return raw - int256(fee);
     }
 
@@ -297,12 +437,14 @@ contract Buck is IERC20, IERC20Metadata {
         return true;
     }
 
-    function transfer(address to, uint256 amount) external returns (bool) {
+    function transfer(address to, uint256 amount) external nonReentrant returns (bool) {
         _identityCheckedTransfer(msg.sender, to, amount);
         return true;
     }
 
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    function transferFrom(address from, address to, uint256 amount)
+        external nonReentrant returns (bool)
+    {
         _spendAllowance(from, msg.sender, amount);
         _identityCheckedTransfer(from, to, amount);
         return true;
@@ -315,7 +457,7 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 amount,
         IdentityRegistry.ElGamalCT calldata E_bob,
         IdentityRegistry.CPProof calldata pi_CP
-    ) external returns (bool) {
+    ) external nonReentrant returns (bool) {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
         require(identity.isVerified(spender),    "BUCK: spender not verified");
         require(
@@ -336,62 +478,140 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- Credit-limit machinery (NFT-backed negative-balance headroom) ----
 
-    /// @notice Live credit limit (NFT-backed BUCK headroom) for account `a`.
-    /// @dev    Formula: ~totalCurrentValue(a) * currentBuckK / BUCKK_SCALE~.
-    ///         Sum of depreciated activated BuckCredit values scaled by the
-    ///         current PID multiplier.  Cached per block to avoid re-scanning
-    ///         a holder's NFT list across multiple transfers in the same
-    ///         block; the cache is invalidated by BuckCredit via the
-    ///         `onCreditMutation` hook on every NFT mint / burn / transfer /
-    ///         activate / updateCredit.
+    /// @notice Live credit limit (NFT-backed BUCK headroom) for account `a`:
+    ///         the sum of the depreciated activated values of the BuckCredits
+    ///         `a` holds, scaled by the current PID multiplier.
+    ///
+    ///         `totalCurrentValue(a) * currentBuckK / BUCKK_SCALE`
+    ///
+    /// @dev    Read live, every time, deliberately.  This number is supposed
+    ///         to move: it rises when the holder acquires or activates more
+    ///         credit, and falls as their insured assets depreciate on
+    ///         schedule, are reappraised, or as BUCK_K moves under them.
+    ///         `balanceOf` is built on it, so a stale answer here is a wrong
+    ///         balance, and there is no invalidation signal that covers all
+    ///         three inputs -- BUCK_K in particular changes inside any mint or
+    ///         burn that advances the PID, from any account, with nothing to
+    ///         announce it.
+    ///
+    ///         The cost is real and lands where it should: an account holding
+    ///         BuckCredit NFTs pays a scan of its own credits on every
+    ///         outbound transfer, proportional to how many it holds.  An
+    ///         account with no credits pays one external call that returns
+    ///         zero, and a Carrying account never reaches here at all.
     function creditLimit(address a) public view returns (uint256) {
-        if (creditLimitBlock[a] == uint64(block.number)) {
-            return creditLimitCache[a];
-        }
-        return _computeCreditLimit(a);
-    }
-
-    /// @dev Pure computation of the live credit limit; no cache read/write.
-    function _computeCreditLimit(address holder) internal view returns (uint256) {
-        uint256 cv = buckCredit.totalCurrentValue(holder);
+        uint256 cv = buckCredit.totalCurrentValue(a);
         if (cv == 0) return 0;
-        uint256 bk = buckK.currentBuckK();
-        return cv * bk / BUCKK_SCALE;
+        return cv * buckK.currentBuckK() / BUCKK_SCALE;
     }
 
-    /// @dev Refresh the per-block cache.  Called from any non-view path that
-    ///      needs the credit limit (mint, burn, negative-going transfer).
-    function _refreshCreditLimit(address holder) internal returns (uint256 limit) {
-        if (creditLimitBlock[holder] == uint64(block.number)) {
-            return creditLimitCache[holder];
-        }
-        limit = _computeCreditLimit(holder);
-        creditLimitCache[holder] = limit;
-        creditLimitBlock[holder] = uint64(block.number);
+    // ---- delegated demurrage (fee payer) API -------------------------------
+
+    /// @notice True if `a`'s demurrage is being carried by another account.
+    function isSponsored(address a) external view returns (bool) {
+        return _state[a].flags & FLAG_SPONSORED != 0;
     }
 
-    /// @dev Mark the cache stale for `holder` so the next read recomputes.
-    function _invalidateCreditCache(address holder) internal {
-        if (holder == address(0)) return;
-        creditLimitBlock[holder] = 0;
+    /// @notice Fold `a`'s elapsed (balance * dt) rectangle into stored state
+    ///         now, rather than waiting for its next transfer.  For a
+    ///         sponsored account this is what hands the exposure to its payer,
+    ///         so a payer can keep its own books current instead of waiting on
+    ///         its sponsees to move BUCK.
+    /// @dev    Permissionless and idempotent within a block: it grants no
+    ///         capability that an ordinary transfer does not already exercise,
+    ///         and it moves no value.
+    function settleDemurrage(address a) external nonReentrant {
+        _accrueJubilee();
+        _crystallize(a);
     }
 
-    /// @notice Hook called by BuckCredit on every NFT state change to
-    ///         invalidate Buck's per-block credit-limit cache.  Restricted
-    ///         to the registered BuckCredit contract.
-    function onCreditMutation(address from, address to) external {
-        require(msg.sender == address(buckCredit), "BUCK: not credit");
-        _invalidateCreditCache(from);
-        _invalidateCreditCache(to);
+    /// @notice Step 1 of 2: name `payer` as the account you want to carry your
+    ///         demurrage.  Takes effect only once `payer` accepts.
+    /// @dev    Pass address(0) to withdraw a pending request.
+    function requestDemurragePayer(address payer) external nonReentrant {
+        require(payer != msg.sender, "BUCK: self payer");
+        demurragePayerRequest[msg.sender] = payer;
+        emit DemurragePayerRequested(msg.sender, payer);
+    }
+
+    /// @notice Step 2 of 2: accept liability for `account`'s demurrage.
+    /// @dev    Both sides must consent.  The payer's consent is what keeps
+    ///         this from being an attack -- unilateral delegation would let
+    ///         anyone dump unbounded fee exposure onto any balance.  The
+    ///         sponsored side's consent keeps a third party from silently
+    ///         changing how a contract's balance behaves.
+    ///
+    ///         Constraints, and why:
+    ///           - Both parties verified: the feature exists to let one
+    ///             Identity's accounts pool their exposure; it stays inside
+    ///             the identity system.
+    ///           - Neither party Carrying: a Carrying account's balanceOf
+    ///             ignores its fee entirely (it hands its age basis to
+    ///             recipients instead), so a Carrying payer's lien would not
+    ///             bite -- that is precisely the escape hatch this design
+    ///             exists to avoid.
+    ///           - No chains: a payer may not itself be sponsored, and a
+    ///             sponsored account may not be a payer.  Routing is one hop
+    ///             by construction, so chains would not recurse, but they
+    ///             make "who is actually paying" unanswerable by inspection.
+    function acceptDemurragePayer(address account) external nonReentrant {
+        require(demurragePayerRequest[account] == msg.sender, "BUCK: not requested");
+        require(account != msg.sender,                        "BUCK: self payer");
+        require(identity.isVerified(account),                 "BUCK: account not verified");
+        require(identity.isVerified(msg.sender),              "BUCK: payer not verified");
+        require(!identity.isCarrying(account),                "BUCK: account is Carrying");
+        require(!identity.isCarrying(msg.sender),             "BUCK: payer is Carrying");
+
+        // Everything accrued so far stays where it accrued.
+        _accrueJubilee();
+        _crystallize(account);
+        _crystallize(msg.sender);
+
+        AccountState memory as_ = _state[account];
+        require(as_.flags & FLAG_SPONSORED == 0, "BUCK: already sponsored");
+        require(sponseeCount[account] == 0,      "BUCK: account is a payer");
+        require(_state[msg.sender].flags & FLAG_SPONSORED == 0, "BUCK: payer is sponsored");
+
+        as_.flags |= FLAG_SPONSORED;
+        _state[account] = as_;
+        sponseeCount[msg.sender] += 1;
+
+        demurragePayer[account]        = msg.sender;
+        demurragePayerRequest[account] = address(0);
+        emit DemurragePayerSet(account, msg.sender);
+    }
+
+    /// @notice End a delegation.  Callable by either side -- the sponsored
+    ///         account may always walk away, and a payer may always stop the
+    ///         bleeding.
+    function clearDemurragePayer(address account) external nonReentrant {
+        address p = demurragePayer[account];
+        require(p != address(0), "BUCK: not sponsored");
+        require(msg.sender == account || msg.sender == p, "BUCK: not a party");
+
+        // Crystallise first, so the rectangle accrued under the delegation
+        // lands on the payer rather than snapping back onto `account`.
+        _accrueJubilee();
+        _crystallize(account);
+
+        AccountState memory as_ = _state[account];
+        as_.flags &= ~FLAG_SPONSORED;
+        _state[account] = as_;
+
+        uint32 n = sponseeCount[p];
+        if (n != 0) sponseeCount[p] = n - 1;
+
+        demurragePayer[account] = address(0);
+        emit DemurragePayerCleared(account, p);
     }
 
     // ---- mint / burn -------------------------------------------------------
 
-    function mint(uint256 amount) external {
+    function mint(uint256 amount) external nonReentrant {
         _mintAllocated(amount, _selectCheapest(msg.sender));
     }
 
-    function mint(uint256 amount, uint256[] calldata tokenIds) external {
+    function mint(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
         _mintAllocated(amount, tokenIds);
     }
 
@@ -399,11 +619,11 @@ contract Buck is IERC20, IERC20Metadata {
     ///         so the dearest insurance is released first, returning the
     ///         largest pool principal per BUCK burned and freeing expensive
     ///         capacity for re-use.
-    function burn(uint256 amount) external {
+    function burn(uint256 amount) external nonReentrant {
         _burnAllocated(amount, _selectMostExpensive(msg.sender));
     }
 
-    function burn(uint256 amount, uint256[] calldata tokenIds) external {
+    function burn(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
         _burnAllocated(amount, tokenIds);
     }
 
@@ -424,7 +644,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///         funding-factor machinery -- direct-mint BUCK is backed by
     ///         the TOKEN reserves in BuckBasket's pools, not by insured-
     ///         asset credit.  Only callable by the registered basket.
-    function mintFromBasket(address to, uint256 amount) external {
+    function mintFromBasket(address to, uint256 amount) external nonReentrant {
         require(msg.sender == basket && basket != address(0), "BUCK: not basket");
         if (amount == 0) return;
         _accrueJubilee();
@@ -439,7 +659,7 @@ contract Buck is IERC20, IERC20Metadata {
     /// @notice Burn `amount` BUCK from BuckBasket's balance.  Only callable
     ///         by the registered basket.  Mirrors mintFromBasket on the
     ///         supply side without consulting credit-NFT machinery.
-    function burnFromBasket(uint256 amount) external {
+    function burnFromBasket(uint256 amount) external nonReentrant {
         require(msg.sender == basket && basket != address(0), "BUCK: not basket");
         if (amount == 0) return;
         _accrueJubilee();
@@ -632,9 +852,16 @@ contract Buck is IERC20, IERC20Metadata {
 
         // Post-burn solvency: the holder's used credit must not exceed their
         // shrunken creditLimit.  Computed after settlement so signed raw
-        // already reflects the refund (climb toward zero).  Reading
-        // creditLimit() picks up the just-invalidated cache, so it
-        // reflects the now-deactivated value.
+        // already reflects the refund (climb toward zero), and read live so
+        // it reflects the coverage just deactivated.
+        //
+        // A holder who is already at their limit cannot burn: releasing
+        // coverage costs more limit than the refund repays.  That is the
+        // intended shape -- you repay the credit, then release the coverage,
+        // as with any loan.  Doing nothing is also a supported outcome: the
+        // insurance is paid up in perpetuity and stays in force, and the
+        // Jubilee relief accruing on the coverage shrinks what closing it
+        // costs, year on year, without the holder doing anything.
         int256 signedRaw = signedBalanceOf(msg.sender);
         uint256 used     = signedRaw < 0 ? uint256(-signedRaw) : 0;
         require(used <= creditLimit(msg.sender),
@@ -651,6 +878,135 @@ contract Buck is IERC20, IERC20Metadata {
     ///      deliver `amount` net to msg.sender.  Per-NFT inversion:
     ///         take = ceil(remaining * BP / (BP - rate * POOL_ROI_INV)).
     ///      Writes mintsBacked.  Returns (totalCoverage, poolPrincipal).
+    /// @dev The per-credit inversion, shared by all four allocator paths so
+    ///      they cannot drift apart.  Everything here happens in *present
+    ///      insured value*; face units are only the denomination the credit
+    ///      records coverage in.
+    ///
+    ///      A credit's `activatedValue` is a slice of the asset *as appraised
+    ///      at issue*.  What is actually insured today is that slice scaled
+    ///      by `rho = depFace / face`, and that -- not the face slice -- is
+    ///      what the premium is charged on: you pay for the cover you have,
+    ///      not for the cover the asset used to be worth.  So:
+    ///
+    ///          V = ceil(net * BP / denom)      present value that settles `net`
+    ///          principal = V - net            = V * effRate / BP
+    ///          units = ceil(V * face / depFace)   face units that carry V
+    ///
+    ///      Charging on present value is also the only formulation that does
+    ///      not fall over.  Charging on the face slice instead gives
+    ///      `units = net * BP / (rho * BP - effRate)`, which is unsatisfiable
+    ///      once `rho * BP <= effRate` -- a 200bp credit would become
+    ///      unmintable at any price below 20 % of face, because depreciation
+    ///      had eaten the premium margin.  Here `denom` is independent of
+    ///      `rho`, so any credit with a non-zero appraisal still works, and
+    ///      the cost per BUCK delivered stays `net * effRate / denom` no
+    ///      matter how old the asset is -- which is why cheapest-first by
+    ///      `premiumRate` remains the right selector.
+    ///
+    ///      When `depFace == face` this reduces to `units = V` exactly, so
+    ///      non-depreciating credits behave precisely as before.
+    ///
+    ///      Precondition: `depFace > 0`.  A credit appraised at zero insures
+    ///      nothing, so both callers skip it before reaching here.
+    ///
+    /// @param net      spendable still to be placed (mint) or released (burn)
+    /// @param capUnits face-denominated coverage this credit has available:
+    ///                 `faceValue - mintsBacked` drawing, the outstanding
+    ///                 backing unwinding
+    /// @return units     face units to activate / deactivate
+    /// @return principal pool principal to pay / refund
+    /// @return settled   how much of `net` this credit accounts for
+    function _drawSlice(
+        uint256 net,
+        uint256 capUnits,
+        uint256 face,
+        uint256 depFace,
+        uint256 denom
+    ) internal pure returns (uint256 units, uint256 principal, uint256 settled) {
+        // Bounds: face, depFace, capUnits and net are all <= MAX_BALANCE
+        // (~6.04e23), so every product below stays far inside uint256.
+        uint256 capV   = capUnits * depFace / face;   // present value available
+        uint256 netCap = capV * denom / BP;           // net spendable it settles
+
+        if (netCap >= net) {
+            uint256 v = (net * BP + denom - 1) / denom;
+            if (v >= capV) {
+                // Rounding can push v one unit past the capacity it was
+                // derived from; take the whole credit rather than over-ask.
+                units = capUnits;
+                v     = capV;
+            } else {
+                units = (v * face + depFace - 1) / depFace;
+                if (units > capUnits) units = capUnits;
+            }
+            principal = v - net;
+            settled   = net;
+        } else {
+            units     = capUnits;
+            principal = capV - netCap;
+            settled   = netCap;
+        }
+    }
+
+    /// @dev The release side, and deliberately NOT the mirror of `_drawSlice`.
+    ///
+    ///      Drawing prices coverage: how much deposit does this much cover
+    ///      cost.  Releasing does not re-price anything -- it hands back the
+    ///      deposit the coverage is carrying, pro rata on the face units let
+    ///      go.  The two differ the moment the appraisal moves, and the
+    ///      difference is the whole point: a holder who bought cover at one
+    ///      appraisal and releases it at a lower one gets their whole deposit
+    ///      back, not the fraction the shrunken cover would cost today.
+    ///
+    ///      Re-pricing on the way out would charge them twice for the same
+    ///      depreciation.  The pool has already been compensated for holding
+    ///      an over-sized deposit against shrinking cover: it earned its
+    ///      assumed ROI on the full deposit the whole time while owing
+    ///      premium only on what was still insured.  Keeping the surplus
+    ///      principal as well would be helping itself twice from one decline.
+    ///
+    ///      So the net spendable a credit can release is its present cover
+    ///      less the deposit that comes back with it:
+    ///
+    ///          capV   = backedUnits * depFace / face
+    ///          netCap = capV - deposit
+    ///          units  = ceil(net * backedUnits / netCap)
+    ///          refund = deposit * units / backedUnits
+    ///
+    ///      `capV <= deposit` means the position has no spendable left in it
+    ///      -- the holder is underwater and must repay before releasing, the
+    ///      same rule the post-burn solvency check enforces.  The credit
+    ///      settles nothing and the caller moves on.
+    ///
+    ///      Note what falls out when the holder holds no loose BUCK:
+    ///      `netCap == creditLimit - used == balanceOf`, so burning exactly
+    ///      their spendable closes the position and squares the deposit.
+    ///
+    /// @param backedUnits face units outstanding on this credit
+    /// @param deposit     pool principal held against them
+    function _releaseSlice(
+        uint256 net,
+        uint256 backedUnits,
+        uint256 face,
+        uint256 depFace,
+        uint256 deposit
+    ) internal pure returns (uint256 units, uint256 refund, uint256 settled) {
+        uint256 capV = backedUnits * depFace / face;
+        if (capV <= deposit) return (0, 0, 0);
+        uint256 netCap = capV - deposit;
+
+        if (netCap >= net) {
+            units   = (net * backedUnits + netCap - 1) / netCap;
+            if (units > backedUnits) units = backedUnits;
+            settled = net;
+        } else {
+            units   = backedUnits;
+            settled = netCap;
+        }
+        refund = deposit * units / backedUnits;
+    }
+
     function _allocateMint(uint256 amount, uint256[] memory tokenIds)
         internal returns (uint256 totalCoverage, uint256 poolPrincipal)
     {
@@ -670,23 +1026,18 @@ contract Buck is IERC20, IERC20Metadata {
 
             uint256 used = mintsBacked[tid];
             if (s.faceValue <= used) continue;
-            uint256 avail  = s.faceValue - used;
-            uint256 denom  = BP - effRate;
-            uint256 netCap = avail * denom / BP;
+            // A credit appraised at zero insures nothing, so it can carry no
+            // coverage and no premium.  Skip it rather than activate face
+            // units that would deliver no headroom.
+            if (s.depreciatedFace == 0) continue;
 
-            uint256 take;
-            uint256 principal_i;
-            if (netCap >= remaining) {
-                take = (remaining * BP + denom - 1) / denom;
-                if (take > avail) take = avail;
-                principal_i = take - remaining;
-                remaining = 0;
-            } else {
-                take = avail;
-                principal_i = take - netCap;
-                remaining -= netCap;
-            }
-            mintsBacked[tid] = used + take;
+            (uint256 take, uint256 principal_i, uint256 settled) = _drawSlice(
+                remaining, s.faceValue - used, s.faceValue, s.depreciatedFace,
+                BP - effRate
+            );
+            remaining -= settled;
+            mintsBacked[tid]   = used + take;
+            mintsPrincipal[tid] += principal_i;   // returnable deposit
             // Activate `take` more coverage on this NFT -- but only the
             // delta needed to satisfy `activatedValue >= mintsBacked`.
             // In production (no public BuckCredit.activate()), the
@@ -720,21 +1071,12 @@ contract Buck is IERC20, IERC20Metadata {
             require(effRate < BP, "BUCK: NFT rate too high");
             uint256 used = mintsBacked[tid];
             if (s.faceValue <= used) continue;
-            uint256 avail  = s.faceValue - used;
-            uint256 denom  = BP - effRate;
-            uint256 netCap = avail * denom / BP;
-            uint256 take;
-            uint256 principal_i;
-            if (netCap >= remaining) {
-                take = (remaining * BP + denom - 1) / denom;
-                if (take > avail) take = avail;
-                principal_i = take - remaining;
-                remaining = 0;
-            } else {
-                take = avail;
-                principal_i = take - netCap;
-                remaining -= netCap;
-            }
+            if (s.depreciatedFace == 0) continue;      // mirrors _allocateMint
+            (uint256 take, uint256 principal_i, uint256 settled) = _drawSlice(
+                remaining, s.faceValue - used, s.faceValue, s.depreciatedFace,
+                BP - effRate
+            );
+            remaining     -= settled;
             totalCoverage += take;
             poolPrincipal += principal_i;
         }
@@ -751,35 +1093,32 @@ contract Buck is IERC20, IERC20Metadata {
             CreditSlice memory s = slices[i];
             require(s.owner == msg.sender, "BUCK: not credit owner");
             uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
-            uint256 used    = mintsBacked[tid];
+            // `mintsBacked` and `activatedValue` are equal by construction --
+            // activation happens only in _allocateMint, and updateCredit may
+            // no longer reappraise below activated coverage.  Take the lesser
+            // anyway: an unwind larger than the coverage on the token reverts
+            // inside deactivateFromBuck, and a burn that reverts is a holder
+            // who cannot close a position.  Whatever future edit puts these
+            // two out of step should cost the system a rounding, not the
+            // holder their exit.
+            uint256 used = mintsBacked[tid];
+            if (s.activatedValue < used) used = s.activatedValue;
             // Silently skip fully-unused or over-rate NFTs rather than reverting: a reappraisal
             // that pushes premiumRate above the pool-ROI threshold must not strand a burn.
-            if (used == 0 || effRate >= BP) continue;
-            uint256 denom   = BP - effRate;
-            uint256 netCap  = used * denom / BP;
+            if (used == 0 || effRate >= BP || s.depreciatedFace == 0) continue;
 
-            uint256 unwind;
-            uint256 refund_i;
-            if (netCap >= remaining) {
-                unwind = (remaining * BP + denom - 1) / denom;
-                if (unwind > used) unwind = used;
-                refund_i = unwind - remaining;
-                remaining = 0;
-            } else {
-                unwind   = used;
-                refund_i = unwind - netCap;
-                remaining -= netCap;
-            }
-            mintsBacked[tid] = used - unwind;
+            (uint256 unwind, uint256 refund_i, uint256 settled) = _releaseSlice(
+                remaining, used, s.faceValue, s.depreciatedFace, mintsPrincipal[tid]
+            );
+            if (unwind == 0) continue;              // nothing left to release here
+            remaining           -= settled;
+            mintsBacked[tid]    -= unwind;
+            mintsPrincipal[tid] -= refund_i;
             // Deactivate exactly `unwind` coverage on this NFT.  Mirror
-            // of the activateFromBuck call in _allocateMint -- the
-            // invariant mintsBacked[tid] == activatedValue[tid] holds
-            // by construction since public activate() is gone.  Burning
+            // of the activateFromBuck call in _allocateMint.  Burning
             // is THE deactivation; it shrinks activatedValue (and thus
             // creditLimit) in lockstep with mintsBacked and refunds the
-            // proportional pool principal.  BuckCredit fires
-            // onCreditMutation, invalidating Buck's per-block credit-
-            // limit cache.
+            // proportional pool principal.
             // deactivateFromBuck reports the Jubilee relief carried by the
             // unwound coverage (aged ~2%/yr in BuckCredit's coverage-
             // seconds); _burnAllocated settles it from the fund.
@@ -797,23 +1136,17 @@ contract Buck is IERC20, IERC20Metadata {
         CreditSlice[] memory slices = buckCredit.batchCreditInfo(tokenIds);
         for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
             uint256 tid = tokenIds[i];
-            uint256 effRate = uint256(slices[i].premiumRate) * POOL_ROI_INV;
+            CreditSlice memory s = slices[i];
+            uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
             uint256 used = mintsBacked[tid];
-            if (used == 0 || effRate >= BP) continue; // mirrors _allocateBurn skip, not a revert
-            uint256 denom  = BP - effRate;
-            uint256 netCap = used * denom / BP;
-            uint256 unwind;
-            uint256 refund_i;
-            if (netCap >= remaining) {
-                unwind = (remaining * BP + denom - 1) / denom;
-                if (unwind > used) unwind = used;
-                refund_i = unwind - remaining;
-                remaining = 0;
-            } else {
-                unwind   = used;
-                refund_i = unwind - netCap;
-                remaining -= netCap;
-            }
+            if (s.activatedValue < used) used = s.activatedValue;
+            // mirrors the _allocateBurn skips, not a revert
+            if (used == 0 || effRate >= BP || s.depreciatedFace == 0) continue;
+            (uint256 unwind, uint256 refund_i, uint256 settled) = _releaseSlice(
+                remaining, used, s.faceValue, s.depreciatedFace, mintsPrincipal[tid]
+            );
+            if (unwind == 0) continue;
+            remaining   -= settled;
             totalUnwind += unwind;
             poolRefund  += refund_i;
         }
@@ -969,7 +1302,15 @@ contract Buck is IERC20, IERC20Metadata {
         // elapsed-rectangle is meaningless.
         uint256 toRawPos  = oldToPos;
         uint256 toElapsed = block.timestamp - uint256(ts.timestamp);
-        uint256 toBs      = ts.buckSeconds.asUint() + toRawPos * toElapsed + carried;
+        // The recipient's own rectangle plus the age basis the Carrying
+        // sender hands over.  Both are new exposure for `to`, so both route
+        // to `to`'s payer when it has one -- otherwise a sponsored account
+        // would still be eroded by whatever it received from a pool.
+        uint256 toNewBs   = toRawPos * toElapsed + carried;
+        if (ts.flags & FLAG_SPONSORED != 0) {
+            toNewBs = _routeToPayer(to, toNewBs);
+        }
+        uint256 toBs      = ts.buckSeconds.asUint() + toNewBs;
 
         ts.balance     = toBuckQtySigned(newToSigned);
         ts.buckSeconds = toBuckSeconds(toBs);
@@ -985,10 +1326,9 @@ contract Buck is IERC20, IERC20Metadata {
     // ---- demurrage views ---------------------------------------------------
 
     function feeOwing(address a) public view returns (uint256) {
-        AccountState storage s = _state[a];
-        int256 raw = s.balance.asInt();
+        int256 raw = _state[a].balance.asInt();
         if (raw <= 0) return 0;             // no demurrage on used credit or empty
-        return _feeOwing(s, uint256(raw));
+        return _feeOwing(a, uint256(raw));
     }
 
     function balanceOfFees(address a) public view returns (uint256) {
@@ -1041,11 +1381,79 @@ contract Buck is IERC20, IERC20Metadata {
     ///            = balance * elapsed * 0.02 / year_length   [raw units]
     ///
     ///        Example: 1 BUCK (1e6 raw) held 1 year → 1e6 * 0.02 = 20,000 raw.
-    function _feeOwing(AccountState storage s, uint256 raw) internal view returns (uint256) {
+    function _feeOwing(address a, uint256 raw) internal view returns (uint256) {
+        AccountState storage s = _state[a];
+        uint256 buckSecondsLive = s.buckSeconds.asUint();
         uint256 elapsed = block.timestamp - uint256(s.timestamp);
-        uint256 buckSecondsLive = s.buckSeconds.asUint() + (raw * elapsed);
+        if (elapsed != 0 && raw != 0) {
+            uint256 delta = raw * elapsed;
+            // A sponsored account's live rectangle is destined for its payer;
+            // only the slice the payer has no room for stays here.  Note the
+            // guard: `elapsed == 0` is the state every spend check sees --
+            // `_nonCarryingTransfer` crystallises `from` immediately before
+            // reading `balanceOf(from)` -- so the transfer hot path never
+            // reaches the payer lookup, and unsponsored accounts never test
+            // more than a mask on a word already in memory.
+            if (s.flags & FLAG_SPONSORED != 0) {
+                (, , uint256 take) = _payerRoom(a, delta);
+                delta -= take;
+            }
+            buckSecondsLive += delta;
+        }
         if (buckSecondsLive == 0) return 0;
         return Math.mulDiv(buckSecondsLive, BASE_RATE_PER_SEC, SCALE);
+    }
+
+    /// @dev How much of `deltaBs` buck-seconds `a`'s designated payer can take
+    ///      on, and the payer's own live buck-seconds so the writing twin can
+    ///      commit without recomputing.
+    ///
+    ///      The cap is the payer's *lien capacity*: the buck-seconds at which
+    ///      feeOwing(payer) would equal rawBalance(payer).  Beyond it the fee
+    ///      is uncollectible -- balanceOf clamps at zero and the surplus is
+    ///      demurrage that nobody ever pays, which is the one outcome that
+    ///      would make delegation a way out of demurrage rather than a way to
+    ///      relocate it.  Capping here keeps a delegated account's lien no
+    ///      less collectible than an undelegated one's.
+    function _payerRoom(address a, uint256 deltaBs)
+        internal view returns (address p, uint256 pBs, uint256 take)
+    {
+        if (deltaBs == 0) return (address(0), 0, 0);
+        p = demurragePayer[a];
+        if (p == address(0)) return (p, 0, 0);
+
+        AccountState storage ps = _state[p];
+        int256 pRawSigned = ps.balance.asInt();
+        if (pRawSigned <= 0) return (p, 0, 0);   // nothing to lien against
+        uint256 pRaw = uint256(pRawSigned);
+
+        // Payer's own live integral, then its capacity ceiling.
+        pBs = ps.buckSeconds.asUint()
+            + pRaw * (block.timestamp - uint256(ps.timestamp));
+        uint256 maxBs = pRaw * SCALE / BASE_RATE_PER_SEC;
+        if (pBs >= maxBs) return (p, pBs, 0);    // payer is tapped out
+
+        uint256 room = maxBs - pBs;
+        take = deltaBs <= room ? deltaBs : room;
+    }
+
+    /// @dev Writing twin of `_payerRoom`: move as much of `deltaBs` onto the
+    ///      payer as it can carry, returning the remainder that stays with
+    ///      `a`.  Writing the payer's slot also crystallises the payer's own
+    ///      rectangle (it is folded into `pBs`), which is exactly right --
+    ///      the payer is being touched, so it settles its own clock too.
+    ///
+    ///      `_state[p]` is written here and `_state[a]` by the caller
+    ///      afterwards, so p == a would silently discard this write;
+    ///      acceptDemurragePayer forbids self-payment for that reason.
+    function _routeToPayer(address a, uint256 deltaBs) internal returns (uint256) {
+        (address p, uint256 pBs, uint256 take) = _payerRoom(a, deltaBs);
+        if (take == 0) return deltaBs;
+        AccountState memory ps = _state[p];
+        ps.buckSeconds = toBuckSeconds(pBs + take);
+        ps.timestamp   = uint40(block.timestamp);
+        _state[p]      = ps;
+        return deltaBs - take;
     }
 
     /// @dev Fold the elapsed (balance * dt) rectangle into buckSeconds and
@@ -1060,8 +1468,17 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 elapsed  = block.timestamp - uint256(s.timestamp);
         bool dirty = false;
         if (elapsed != 0 && raw != 0) {
-            uint256 newBs = s.buckSeconds.asUint() + raw * elapsed;
-            s.buckSeconds = toBuckSeconds(newBs);
+            uint256 delta = raw * elapsed;
+            // Delegated demurrage: hand the rectangle to this account's payer
+            // as far as the payer can carry it.  Conserved, never destroyed --
+            // whatever the payer has no room for stays here.  Free for the
+            // unsponsored: the flags word is already in memory.
+            if (s.flags & FLAG_SPONSORED != 0) {
+                delta = _routeToPayer(a, delta);
+            }
+            if (delta != 0) {
+                s.buckSeconds = toBuckSeconds(s.buckSeconds.asUint() + delta);
+            }
             dirty = true;
         }
         if (uint256(s.timestamp) != block.timestamp) {

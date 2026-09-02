@@ -1,0 +1,82 @@
+# rebalancing-eq variant "debtors-mature-basketeers-endog-excursion":
+# the endog arm plus POISED private capital -- ExcursionArbAgents that
+# detect bvib excursions (EWMA signal) and profit on the restoration of
+# equilibrium, gating every trade on an ex-ante all-in quote (pool
+# closed-form + fee at the impact-capped size) so costs are computed
+# BEFORE anything is committed:
+#
+#   * 5 USDC-funded round-trippers: buy the discount, sell the reversion;
+#   * 3 latent-credit holders (ExcursionCreditArbAgent): unused
+#     zero-premium BuckCredit face -- sell the premium dear against
+#     face*K, buy the discount back cheap against their drawn balance
+#     (retiring a par obligation below par).
+#
+# This is the short/mid-term stability thesis under test: profit-seeking
+# participants, correctly computing their costs, damp forced excursions.
+# Compare against ...-endog (no poised cast) and the raid arms.
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-debtors-mature-basketeers-endog-excursion"
+notes = "endog + poised excursion arbs (5 usdc, 3 latent-credit)"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+BuckCreditDebtorAgent = 30
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+ArrivingDMAgent = 60
+ExcursionArbAgent = 5
+ExcursionCreditArbAgent = 3
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform (median ~550k)
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+refi_mode = "atomic"      # ex-ante whole-conversion evaluation (see agent)
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]    # tau spread: neutral hazard == originate arm
+arr_gain = 5.0
+arr_max = 3.0
+arr_k_ref = 0.75
+
+[agents.ArrivingDMAgent]
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]    # tau spread: stable peg == originate arm
+ticket_k = [300, 700]
+enter_ptick = 2e-3
+exit_ptick = 2e-3
+dep_dev_ref = 0.02
+dep_halflife = 90.0
+
+[agents.FatCreditBorrowerAgent]
+mid_frac = -0.5             # adoption S-curve saturated before the window
+
+[agents.ExcursionArbAgent]
+budget_m = [2, 6]
+entry_dev = 0.03
+exit_dev = 0.01
+min_edge = 0.01
+
+[agents.ExcursionCreditArbAgent]
+face_m = [2, 6]
+entry_dev = 0.03
+exit_dev = 0.01
+min_edge = 0.01
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

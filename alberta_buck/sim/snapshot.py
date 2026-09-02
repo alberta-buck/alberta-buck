@@ -183,6 +183,21 @@ class Snapshotter:
         for ag in agents:
             if type(ag).__name__ not in names:
                 continue
+            # USDC is the numeraire and 6-dec like the valuation itself, so it
+            # enters at par.  Omitting it made this a measure of *deployment*
+            # rather than wealth: an agent converting USDC into TOKEN moved
+            # value from an uncounted bucket into a counted one, and the
+            # difference was booked as gain.
+            #
+            # This alone does not make `directMintPnl` a return.  The DM
+            # agents call `_buy_token_from_usdc`, which mints the USDC it
+            # spends inside the same call, so they never hold a USDC balance
+            # for this line to find -- the value is conjured at the purchase
+            # site, not lost at the valuation site.  For a sound return use
+            # the realized round-trip accounting (`dmProfitUsd` over
+            # `dmDollarDays`), which compares redeem proceeds against what was
+            # actually deposited and is immune to both.
+            v += _bal(d.usdc, ag.address)
             for i, tc in enumerate(d.tokens):
                 v += _bal(tc, ag.address) * self.s.prices.ref(i, 0) // (10 ** d.dec[i])
             # Include the BuckBasket deposit at the depositor's *own* economic
@@ -206,6 +221,38 @@ class Snapshotter:
                 rebal_init_val: int | None = None,
                 dm_init_val: int | None = None) -> None:
         d = self.d
+        # Per-agent telemetry (TELEMETRY.md, v1).  Static facts once into
+        # meta; per-frame records under frame["ag"] for agents due at this
+        # day (day % TELEMETRY_STRIDE == 0).  Agents opt in by implementing
+        # telemetry()/telemetry_static(); the default None costs nothing.
+        if "telemetry" not in self.meta:
+            metas = []
+            for ag in agents:
+                try:
+                    st = ag.telemetry_static()
+                except Exception:
+                    st = None
+                if st is not None:
+                    cls = type(ag).__name__
+                    metas.append({
+                        "id": f"{cls}#{ag.idx}", "cls": cls, "idx": ag.idx,
+                        "stride": max(1, int(getattr(
+                            ag, "TELEMETRY_STRIDE", 1))),
+                        "knobs": st})
+            if metas:
+                self.meta["telemetry"] = {
+                    "version": 1, "units": "usd6", "agents": metas}
+        ag_t = {}
+        for ag in agents:
+            stride = max(1, int(getattr(ag, "TELEMETRY_STRIDE", 1)))
+            if day % stride:
+                continue
+            try:
+                rec = ag.telemetry(d)
+            except Exception:
+                rec = None
+            if rec:
+                ag_t[f"{type(ag).__name__}#{ag.idx}"] = rec
         ref, su, sb = [], [], []
         for i, tc in enumerate(d.tokens):
             ref.append(self.s.prices.ref(i, day))
@@ -240,6 +287,29 @@ class Snapshotter:
             if type(ag).__name__ == "SaverAgent" and getattr(ag, "proxy", None):
                 try:
                     saver_hold += _bal(d.buck, ag.address)
+                except Exception:
+                    pass
+        # Excursion-arb population state: BUCK inventory + par-marked P&L
+        # (nw - nw0) summed over ExcursionArbAgent and its subclasses.
+        exc_held = exc_pnl = 0
+        for ag in agents:
+            if (type(ag).__name__.startswith("Excursion")
+                    and getattr(ag, "proxy", None)):
+                try:
+                    exc_held += _bal(d.buck, ag.address)
+                    exc_pnl += ag._nw(d) - ag._nw0
+                except Exception:
+                    pass
+        # Differential-mode private rebalancers: P&L vs buy-and-hold of
+        # the initial inventory (raw BUCK), summed over the class.
+        crb_pnl = crb_n = 0
+        for ag in agents:
+            if type(ag).__name__ == "CommodityRebalArbAgent":
+                try:
+                    rec = ag.telemetry(d)
+                    if rec:
+                        crb_pnl += rec.get("pnl", 0)
+                        crb_n += 1
                 except Exception:
                     pass
         # Borrower issuance-channel state (equilibrium scenario): summed
@@ -357,11 +427,121 @@ class Snapshotter:
             "dbb_recv": ctr.get("dbbRecv", 0),
             "dbb_parked": ctr.get("dbbParked", 0),
             "dbb_harvests": ctr.get("dbbHarvests", 0),
+            # BuckIssuerArbAgent: the supply side.  Without these the agent
+            # is invisible -- counters live in `ctr` and a frame that does
+            # not copy them reads 0 forever, which is exactly how the first
+            # two smoke runs looked like a dead agent.
+            "bia_drawn": ctr.get("biaDrawn", 0),
+            "bia_retired": ctr.get("biaRetired", 0),
+            "bia_bought": ctr.get("biaBought", 0),
+            "bia_sold": ctr.get("biaSold", 0),
+            "bia_throttled": ctr.get("biaThrottled", 0),
+            # BuckPoolInvestorAgent.  Snapshotted at birth this time: a
+            # counter that lives only in `ctr` reads 0 forever, which has
+            # already produced two confident wrong readings on this branch.
+            "bpi_minted": ctr.get("bpiMinted", 0),
+            "bpi_positions": ctr.get("bpiPositions", 0),
+            "bpi_repositions": ctr.get("bpiRepositions", 0),
+            # MonetaryOpsAgent: the four quadrants, and the bounds that
+            # stopped each of the three runaways.  moNoBook counts the times
+            # Q2 wanted to retire and had no drawn line to retire against --
+            # the one thing an agent structurally cannot do that the basket
+            # can, so it is the measure of what phases 3/4 would add.
+            "mo_dev_bp": ctr.get("moDevBp", 0),
+            "mo_q1": ctr.get("moQ1", 0),
+            "mo_q2": ctr.get("moQ2", 0),
+            "mo_q3": ctr.get("moQ3", 0),
+            "mo_q4": ctr.get("moQ4", 0),
+            "mo_bought": ctr.get("moBought", 0),
+            "mo_sold": ctr.get("moSold", 0),
+            "mo_issued": ctr.get("moIssued", 0),
+            "mo_retired": ctr.get("moRetired", 0),
+            "mo_burned": ctr.get("moBurned", 0),
+            "mo_opened": ctr.get("moOpened", 0),
+            "mo_pos_limit": ctr.get("moPosLimit", 0),
+            "mo_cum_limit": ctr.get("moCumLimit", 0),
+            "mo_no_book": ctr.get("moNoBook", 0),
+            "mo_throttled": ctr.get("moThrottled", 0),
+            "mo_funded": ctr.get("moFunded", 0),
+            # BuckBasketOps, driven by MonetaryKeeperAgent.  Distinct mk*
+            # prefix from the mo* agent prototype above: both write the same
+            # ctr dict and merging them would silently double-count.
+            "mk_q1": ctr.get("mkQ1", 0),
+            "mk_q2": ctr.get("mkQ2", 0),
+            "mk_q3": ctr.get("mkQ3", 0),
+            "mk_q4": ctr.get("mkQ4", 0),
+            "mk_ops": ctr.get("mkOps", 0),
+            "mk_idle": ctr.get("mkIdle", 0),
+            "mk_bound": ctr.get("mkBound", 0),
+            "mk_no_advice": ctr.get("mkNoAdvice", 0),
+            "mk_done": ctr.get("mkDone", 0),
+            "mk_no_value": ctr.get("mkNoValue", 0),
+            "mk_tok_held": list(ctr.get("mkTokHeld", [])),
+            "mk_tok_value": ctr.get("mkNavBuck", 0),
+            # BuckBasketFence.  fk_footprint vs fk_budget is the whole test:
+            # if the footprint stops tracking the budget down, the K-scaling
+            # is not biting.
+            "fk_struck": ctr.get("fkStruck", 0),
+            "fk_minted": ctr.get("fkMinted", 0),
+            "fk_burned": ctr.get("fkBurned", 0),
+            "fk_nav": ctr.get("fkNav", 0),
+            "fk_shares": ctr.get("fkShares", 0),
+            "fk_footprint": ctr.get("fkFootprint", 0),
+            "fk_budget": ctr.get("fkBudget", 0),
+            "fk_failed": ctr.get("fkFailed", 0),
+            "fk_err": ctr.get("fk_err", ""),
+            "mk_slippage": ctr.get("mkSlippage", 0),
+            "mk_no_director": ctr.get("mkNoDirector", 0),
+            "mk_other_err": ctr.get("mkOtherErr", 0),
+            # Book state, read from chain each operation (gauges, not counters).
+            "mk_outstanding": ctr.get("mkOutstanding", 0),
+            "mk_buck_held": ctr.get("mkBuckHeld", 0),
+            # What the desk's inventory has taken out of the deviation K sees.
+            "mk_offset": ctr.get("mkOffset", 0),
+            "mk_err": ctr.get("mk_err", ""),
+            "mo_why": dict(ctr.get("moWhy", {})),
+            # The last exception each proxy agent swallowed.  These were set
+            # into `ctr` from the start and copied nowhere, so a smoke run
+            # showed BuckPoolInvestorAgent minting $4.7M and opening ZERO
+            # positions with no visible reason -- the fourth time on this
+            # branch that an unplumbed counter turned a loud failure into a
+            # silent one.
+            "mo_err": ctr.get("mo_err", ""),
+            "bpi_err": ctr.get("bpi_err", ""),
+            "bia_err": ctr.get("bia_err", ""),
+            "bcd_err": ctr.get("bcd_err", ""),
+            # WHY they were refused, not just how often.  A bare count let a
+            # wrong explanation stand unchallenged for two runs.
+            "bia_why": dict(ctr.get("biaWhy", {})),
+            "bcd_why": dict(ctr.get("bcdWhy", {})),
             "bcd_deploys": ctr.get("bcdDeploys", 0),
             "bcd_throttled": ctr.get("bcdThrottled", 0),
             "bcd_saved": ctr.get("bcdSaved", 0),
+            "bcd_deploys": ctr.get("bcdDeploys", 0),
+            "bcd_atomic_refis": ctr.get("bcdAtomicRefis", 0),
+            "bcd_atomic_declined": ctr.get("bcdAtomicDeclined", 0),
             "growth_arrivals": ctr.get("growthArrivals", 0),
             "growth_departures": ctr.get("growthDepartures", 0),
+            # Endogenous-origination arrivals (arrive_mode "endog"): how many
+            # debtors / basket depositors the price-responsive hazard clocks
+            # have brought online so far.
+            "endog_debtor_arrivals": ctr.get("endogDebtorArrivals", 0),
+            "endog_depositor_arrivals": ctr.get("endogDepositorArrivals", 0),
+            # Excursion-arb + whale-raid observability.
+            "exc_entries": ctr.get("excursionEntries", 0),
+            "exc_exits": ctr.get("excursionExits", 0),
+            "exc_pnl": exc_pnl,
+            "exc_realized": ctr.get("excursionRealized", 0),
+            "exc_held": exc_held,
+            "raid_phase": ctr.get("raidPhase", 0),
+            "raid_pnl": ctr.get("raidPnl", 0),
+            "raid_side": ctr.get("raidSide", ""),
+            # Directional quadrant volumes of the excursion population
+            # (cumulative usd6): [absorb, retire, supply, issue].
+            "exc_q": [ctr.get("excQ1", 0), ctr.get("excQ2", 0),
+                      ctr.get("excQ3", 0), ctr.get("excQ4", 0)],
+            "crb_pnl": crb_pnl,
+            "crb_trades": ctr.get("crbTrades", 0),
             "neighbors_retired": ctr.get("neighborsRetired", 0),
             "iv_events": ctr.get("ivEvents", 0),           # cum interventions
             "supply": int(d.buck.functions.totalSupply().call()),
@@ -381,11 +561,22 @@ class Snapshotter:
             "dmExits": ctr.get("dmExits", 0),
             "dmExitFails": ctr.get("dmExitFails", 0),
             "dmTotalInvested": ctr.get("dmTotalInvested", 0),
+            # Realized round-trip accounting: profit booked only when a
+            # deposit is actually redeemed, against the capital-days it was
+            # deployed for.  Already maintained by _DMBase._record_roundtrip
+            # and printed at teardown; carried per-frame so the plots can show
+            # a return that does not depend on how an agent's idle wealth is
+            # valued.
+            "dmProfitUsd": ctr.get("dmProfitUsd", 0),
+            "dmDollarDays": ctr.get("dmDollarDays", 0),
+            "dmRoundTrips": ctr.get("dmRoundTrips", 0),
             "basketNav": nav,
             "dmOutstanding": out_buck,
             "treasuryBuck": treas_buck,
             "treasuryShare": treas_frac,
         })
+        if ag_t:
+            self.frames[-1]["ag"] = ag_t
 
     def write(self, path=None) -> Path:
         p = Path(path) if path else (
@@ -395,5 +586,11 @@ class Snapshotter:
                "frames": self.frames}
         if self.meta:
             out["meta"] = self.meta
-        p.write_text(json.dumps(out))
+        # Atomic: the incremental checkpoint rewrites this file every 25
+        # days while the run continues, and a reader plotting a run in
+        # flight would otherwise be able to catch a half-written file.
+        # Write beside it and rename, which is atomic within a filesystem.
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(json.dumps(out))
+        tmp.replace(p)
         return p

@@ -1,0 +1,70 @@
+# rebalancing-eq variant "portcast": the JS-PORT VALIDATION TARGET.
+#
+# The settled-physics cast only -- every agent in its decision-of-record
+# embodiment (atomic refinance, housing distribution, endog arrival, endow
+# inventory, per-day rates), with the vestigial variants left behind, and
+# the language-neutral keyed RNG (rng = "keyed"; recipe in TELEMETRY.md)
+# so a JS implementation can reproduce the draws exactly.
+#
+# THE EXPERIMENT: NO FatCreditBorrowerAgent.  The debtor arms showed its
+# role shrinking to tail deleveraging; if this world still passes the
+# parity-with-interior-K gate, the household debtors + basket depositors
+# are the sufficient issuance economy and an entire complex class drops
+# out of the port.  eqmetrics falls back to the debtor+basket channels
+# for the liveness judgment when the fat channel never existed.
+#
+# If this arm reproduces the endog arm's success, the JS port targets
+# EXACTLY this cast, judged by the same gate (statistical tolerance, not
+# byte-identity).  See rebalancing-eq-5yr.toml for the naming strategy.
+
+name = "rebalancing-eq-5yr-portcast"
+notes = "JS-port target: settled physics, keyed rng, no FatCredit"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+rng = "keyed"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[deploy]
+target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route
+
+[scenario.agents]
+FatCreditBorrowerAgent = 0
+BuckCreditDebtorAgent = 30
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+ArrivingDMAgent = 60
+ExcursionArbAgent = 5
+ExcursionCreditArbAgent = 3
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+refi_mode = "atomic"        # ex-ante whole-conversion evaluation
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+arr_gain = 5.0
+arr_max = 3.0
+arr_k_ref = 0.75
+
+[agents.ArrivingDMAgent]
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+ticket_k = [300, 700]
+enter_ptick = 2e-3
+exit_ptick = 2e-3
+dep_dev_ref = 0.02
+dep_halflife = 90.0

@@ -1,0 +1,34 @@
+# rebalancing-eq variant "endow": steady-state initialization of the saver
+# cohort.  The base run's cold start has the savers begin with ZERO BUCK
+# inventory and immediately acquire millions through a ~$10M floating pool
+# (buckUsd spiked to ~$21 in the coarse-cadence smoke).  Here each saver
+# arrives already holding endow_m BUCK, self-issued against zero-premium
+# collateral before the window opens (+held, +drawn, no market impact), so
+# the sell side has inventory from the first premium.  Note the settled
+# resting holdings are LEAN (~0.1M total at both 5y tails), so the
+# endowment is sized modestly -- it buffers the transient's sell side, it
+# does not pre-satisfy savings_goal (10-30M each, a deliberate standing
+# bid).
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-endow"
+notes = "rebalancing-eq + savers endowed with pre-window BUCK inventory"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

@@ -1,0 +1,750 @@
+#+TITLE: REBALANCING-EQ: The Variant Matrix -- Findings and Analysis
+#+AUTHOR: Perry Kundert
+#+DATE: 2026-08-20
+#+OPTIONS: toc:2 num:t
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+
+* Purpose and lineage
+
+The =rebalancing-eq= scenario family joins the two simulation programs
+that had previously run apart: the *equilibrium campaign*
+(=alberta_buck/sim/EQUILIBRIUM.md= -- the BUCK-K monetary loop on real
+5-year macro data, judged by the parity-with-interior-K gate) and the
+*rebalancing machinery* (the BasketRebalanceDirector and the BuckBasket
+as a savings vehicle, previously exercised only on synthetic 3-token
+regimes).  Every arm below runs the eq-baseline financial structure --
+the 6-token M2-laggard weighted basket (LABR 2400 / CNST 2200 / FOOD
+2000 / NRGC 2000 / PAXG 800 / cbBTC 600 bp), the real macro window,
+prorata basket, K0 0.75 with rails (0, 0.95), seed 0xA1BC -- through
+real contract deployments on an EVM (pyrevm), with the director keeper
+active, at full rebalancing cadence (day_step 1, ticks 4: daily whale
+pins, 6-hour PID samples).
+
+Acceptance gate (unchanged from the campaign): tail (last 25%)
+basketValueInBuck within 1.00 +/- 0.02, K never railed in the tail,
+issuance/redemption channels alive.
+
+* The family: variants, running, reproducing
+
+Experiments: =alberta_buck/sim/experiments/rebalancing-eq-5yr*.toml=.
+Variant extension names compose deltas left-to-right on three axes --
+(1) knobs ([agents.*] and [deploy]), (2) trend regime (reserved), (3)
+disruption (=[[interventions]]= price shocks).  Each TOML is standalone
+(no cross-file inheritance) and its resolved config is embedded in the
+output vector's meta.
+
+- =make nix-sim-rebalancing-eq-<ext>= runs one arm ->
+  =test/vectors/rebalancing-sim-eq-<ext>.json= +
+  =images/rebalancing-sim-eq-<ext>.png=;
+- =make nix-venv-sim-rebalancing-eq-matrix= re-runs EVERY arm against
+  the *current contracts* (recompiles first, MATRIX_JOBS-way parallel)
+  and prints the gate table -- the "adjust the BuckBasket, observe the
+  net effects" loop;
+- =make nix-sim-compare-rebalancing-eq= gates existing vectors only.
+
+The final vectors are ~25-30MB each and are NOT committed; the rendered
+images, this document, and the one-command matrix regeneration are the
+record.  Runs are deterministic: same code + same TOML -> identical
+vector.
+
+* Model rulings (decisions of record)
+
+These calibration and semantics decisions were made deliberately and
+should not be silently re-litigated:
+
+1. *Per-day agent rates.*  Rate knobs (saver base_rate, borrower
+   retire/release rates, the funding factor's issue-rate signal) are
+   per-DAY, scaled by =day_step/ticks_per_day= each activation, so
+   daily flow is cadence-invariant.  The coarse macro mode (day_step
+   10) is an approximation for slow dynamics only; the notorious
+   cold-start buckUsd spike of early runs was substantially an artifact
+   of 10-day PID sampling and lumpy per-act flows.
+
+2. *Atomic refinance* (~refi_mode="atomic"~, this family only; the
+   audited octl configs keep "paced").  A debtor evaluates the WHOLE
+   mortgage conversion ex ante: quote the BUCK needed to net the full
+   USDC mortgage after slippage and pool fee, check issuance capacity
+   (spendable headroom + K-scaled unactivated face), gate the theta law
+   on the all-in execution discount, then execute BuckCredit -> BUCK ->
+   USDC -> full payoff in one act -- or do nothing (no mint, no premium
+   paid, re-quote next month).  The paced model committed first and
+   discovered the market later; it also made every deployed debtor a
+   perpetual net BUCK absorber (monthly save-rate buffer accumulation
+   with one-shot issuance), which is what strangled the early debtor
+   arms.
+
+3. *Admission frontier LTV <= K is expected.*  A mortgage above
+   face * K cannot be fully funded by BUCK issuance; in reality the
+   borrower would top up with supplemental USDC credit.  Those
+   borrowers are IGNORED for now (declined debtors are fully inert).
+   K is thereby the emergent admission gate on mortgage conversion --
+   wide when the system wants supply, narrow when it does not.
+
+4. *Housing-market distribution.*  The home (the insured asset) is the
+   primary draw -- =home_k [200,1500]= LOG-uniform (median ~$530k),
+   mirroring real estate's right skew -- and the rest derives: face =
+   the appraised home value (the insurable value the BuckCredit
+   attests; premium charged on it; creditLimit = face*K), mortgage =
+   home * ltv with =ltv [0.05,0.95]= (mean ~0.49, the seasoned-ladder
+   average), income = home * [0.20,0.35].  The legacy independent
+   mortgage/face draws implied a maximally-leveraged civilization (LTV
+   massed near 1.0 with underwater tails) and excluded ~88% of the
+   population at the frontier.
+
+5. *Deep exit route.*  The floating BUCK/USDC pool is $50M family-wide
+   (~[deploy] target_buck_lp_m = 50~; deploy.py now sizes the pool off
+   its documented knob).  A national-scale currency pair is deep, and a
+   shallow pool was an artificial exit bottleneck; real best-cost
+   routing would additionally spread exits across BUCK/TOKEN ->
+   TOKEN/USDC legs.  The BUCK-unaware arbs keep the deep pool balanced.
+   With atomic refinance, this depth is the literal admission control
+   on credit adoption (~2% all-in on a ~$1M mortgage vs ~10% at $10M).
+
+6. *Saver endowment* (~arrive_mode="endow"~): pre-window BUCK inventory
+   transferred from SimLP against a zero-premium credit.  NB: minting
+   on the saver's own credit endows K-scaled *headroom* (balanceOf
+   counts unused creditLimit, which melts as K falls), not held BUCK;
+   the third-party transfer is what makes it real inventory
+   (totalSupply == sum of positive signed balances).
+
+7. *Endogenous arrivals* (~arrive_mode="endog"~): debtor hazard =
+   (K/k_ref) * (1 + arr_gain*(1-bvib)) capped at arr_max; depositor
+   hazard = dev_ref / max(dev_ref, ewma|bvib-1|).  hazard == 1
+   reproduces the open-loop "originate" stagger exactly, so the
+   endog-vs-originate comparison isolates price-responsiveness itself.
+
+* The final matrix (2026-08-19/20)
+
+All ten arms PASS.  Zero railed frames in any tail; zero execution
+errors; every debtor in every arm eventually completed a full atomic
+refinance (declines were transient re-quotes -- the frontier acted as a
+queue, not a wall).
+
+| arm            | bv tail (sd)    |     K | iss/ret $M | refis | notes                             |
+|----------------+-----------------+-------+------------+-------+-----------------------------------|
+| (banked eq-baseline, coarse cadence, $10M ub) | 0.9926 (0.0265) | 0.819 | 1.73/1.52 | -- | the reference |
+| base           | 1.0005 (0.0107) | 0.760 | 1.60/0.00  |    -- | fine cadence alone closes it      |
+| capacity       | 1.0017 (0.0266) | 0.634 | 2.05/1.18  |    -- | lowest resting K                  |
+| endow          | 1.0005 (0.0101) | 0.715 | 1.40/0.54  |    -- | inventory lowers K, opens retire  |
+| deep           | 1.0006 (0.0101) | 0.757 | 1.38/0.00  |    -- | ~= base once ub is already deep   |
+| endow-deep     | 1.0003 (0.0097) | 0.715 | 1.49/0.55  |    -- | == endow: endow carries it        |
+| debtors        | 1.0002 (0.0081) | 0.763 | 1.06/0.56  | 24/24 | staggered conversion              |
+| debtors-mature | 0.9999 (0.0080) | 0.925 | 0.00/1.56  | 24/24 | converted economy; tail deleveraging |
+| basketeers     | 0.9998 (0.0244) | 0.860 | 2.60/1.15  | 24/24 | K-immune tranche + churn costs sd |
+| originate      | 1.0006 (0.0072) | 0.942 | 0.51/0.02  | 30/30 | both sides growing; NEAR RAIL     |
+| endog          | 1.0002 (0.0068) | 0.924 | 0.43/0.00  | 30/30 | same equilibrium, found by prices |
+
+* What each variant does (effect analysis)
+
+** base -- the fine-cadence result
+The control loop closes with no help: parity to 0.05% with K settled at
+0.760.  K climbs during the FatCredit adoption S-curve and plateaus
+exactly when cap_frac saturates -- the climb is the controller
+compensating for *scheduled* capacity withholding, not chronic
+deflation.  Residual weakness: the retirement channel is silent
+(0.00) -- nothing in this cast ever wants to deleverage.
+
+** capacity (savers2x demand + borrower face/funding headroom)
+Buys the LOWEST resting K (0.634): with demand and capacity headroom
+the plant answers the controller easily and the controller retains the
+most unused authority.  The cost is the widest parity spread of the
+non-basketeer arms (0.0266) -- strong saver demand is itself a
+perturbation.  Choose this shape when rail margin is the objective.
+
+** endow / deep / endow-deep -- steady-state initialization, attributed
+At the original $10M floating pool, depth did nearly all the work.
+With the family now at $50M, the attribution INVERTS: deep (extra
+TOKEN/BUCK depth) is indistinguishable from base (K 0.757 vs 0.760),
+while the saver endowment carries the whole remaining effect -- endow
+and endow-deep are identical (K 0.715, retirement 0.54/0.55 vs 0.00).
+Standing private sell-side inventory lowers the resting K by ~0.045 and
+is the difference between a one-sided and a breathing channel.  Lesson:
+liquidity depth and distributed inventory are complements, and once one
+is adequate the other is the binding one.
+
+** debtors (staggered arrival over the first year)
+24 honest mortgage refinancers tighten parity (sd 0.0081, from 0.0107)
+and open the retirement channel, at base-like K.  The conversion flow
+itself is stabilizing: each atomic refinance is a supply event that
+lands when the market can bear it (theta law + LTV<=K + quoted
+slippage), and the ex-debtors' subsequent surplus investment adds
+basket demand.
+
+** debtors-mature (everyone converts at t0)
+The "converted civilization": all 24 refinance immediately, and the
+economy then runs on the refinanced supply.  K rests HIGH (0.925) --
+the controller holds the admission gate wide -- but interior and
+settled (dK ~ 0), with the second-tightest parity (0.0080) and a tail
+that is pure voluntary deleveraging (iss 0.00 / ret 1.56M).  Under the
+OLD rulings (paced, shallow, narrow-face) this exact arm railed 81% of
+its tail; the reversal is entirely the three structural fixes.
+
+** basketeers (+ DirectMint depositor population)
+The basket finally exercised as a savings vehicle inside the loop: ~950
+depositor round-trips, the first treasury accrual, the K-immune
+100%-LTV tranche at ~10% of supply.  Cost: the loosest debtor-arm
+spread (0.0244) -- depositor churn is real noise the director must
+absorb -- but the gate still passes comfortably.  The stylized fear
+that the K-immune tranche strangles the controller does NOT materialize
+at this scale.
+
+** originate (+ continuous debtor and depositor origination)
+Both sides of the economy grow at roughly matched dollar rates; all 30
+debtors convert; the K-immune tranche reaches 13.7M (~18% of supply)
+with 1,158 round-trips -- and parity is the second-tightest in the
+program (0.0072).  The caution: K rests at 0.942, EIGHT BASIS POINTS
+of lever below the 0.95 rail.  A growing economy consumes controller
+authority; see recommendations.
+
+** endog (originate with price-responsive arrival hazards)
+The headline theoretical result: the endogenous economy finds
+essentially the SAME equilibrium as the hand-tuned calendar (bv 1.0002
+vs 1.0006, sd 0.0068 vs 0.0072) with slightly MORE rail margin (K 0.924
+vs 0.942), and nobody chose a growth rate.  Debtor arrivals accelerate
+into lean markets, depositors wait out demonstrated instability, and
+the on-chain brakes (funding-factor toll, pre-buy reserve, K-scaled
+limits) price what arrivals may do.  Matched supply/demand growth is an
+emergent property of the price system, as designed.
+
+* The excursion program: poised capital vs. the whale (2026-08-22)
+
+Short/mid-term stability is supposed to rest on profit-seeking
+participants poised to capitalize on BUCK-vs-bvib excursions.  Two agent
+classes test that thesis, plus an adversary.
+
+** The excursion agents: methodology and assumptions
+
+*ExcursionArbAgent* watches an EWMA of basketValueInBuck (halflife 5 d)
+and acts once daily (tick 0).  Every trade is gated by an ex-ante
+all-in quote in the atomic-refinance spirit: the closed-form
+constant-product execution price (plus pool fee) at the impact-capped
+size (50-150 bp of the pool side) must clear par by ~min_edge~ (1%) --
+no computed edge at that size, no trade.  Two capital bases:
+
+- ~capital="usdc"~ -- a budget war chest ($2-6M).  ENTRY: discount
+  excursion (ewma > 1 + entry_dev, 0.03: BUCK cheap vs basket) -> buy.
+  EXIT: the whole long is closed when the ewma re-enters
+  1 + exit_dev (0.01) from above -- including a premium overshoot --
+  booking realized P&L against the accumulated basis.
+- ~capital="credit"~ -- the LATENT-CREDIT participant: a zero-premium
+  BuckCredit face ($2-6M) it has never needed to draw.  ENTRY: premium
+  excursion (ewma < 1 - entry_dev) -> mint against face*K and sell
+  above par.  EXIT: a LATER DISCOUNT excursion (ewma > 1 + entry_dev,
+  deliberately the entry-grade gate, not exit_dev) -> buy BUCK below
+  par toward the drawn balance (the buy itself retires drawn credit;
+  a best-effort burn deactivates coverage).  Selling a par obligation
+  dear and retiring it cheap is the reversion profit; closing at par
+  would only pay fees, so the position correctly WAITS -- possibly
+  forever (the obligation melts on the Jubilee regardless).
+
+Assumptions worth knowing when reading results: the signal is bvib
+(the controller's own process variable), not buckUsd; quotes are
+single-pool (the floating BUCK/USDC route only, no multi-hop); net
+worth is par-marked (USDC + signed BUCK at 1.0); positions carry no
+financing cost beyond demurrage; agents act independently, daily.
+
+The 5-day halflife has a consequence the raid exposed: a 3-day
+excursion is attenuated roughly 3x by the filter, so raid-speed events
+barely graze the 3% entry gate -- the slow cold-start premium is what
+the credit base sold into (nearly all recorded "entries"), while the
+USDC base sat correctly idle for five years in the healthy arms.
+"Zero exits" in the finals is therefore mostly the credit base's
+designed patience, plus a filter too slow for raid-speed discounts;
+a faster (or dual-timescale) signal is the obvious calibration
+experiment.
+
+*WhaleRaidAgent* is the adversary: accumulate a position quietly
+(impact-capped daily slices), DUMP it all on the raid day
+(deliberately uncapped -- that is the attack), then attempt to
+re-accumulate at the depressed price.  Its ledger prices the raid
+exactly: dump proceeds minus accumulation and re-acquisition costs.
+
+** The raid experiment (three arms, all complete)
+
+| arm                            | verdict            |     K | raid P&L | buckUsd trough | recovery |
+|--------------------------------+--------------------+-------+----------+----------------+----------|
+| endog-excursion (single-ts)    | PASS (bv 1.0005)   | 0.725 |       -- | --             | --       |
+| endog-excursion-raid (single)  | PASS (bv 1.0010)   | 0.904 |  -$1.00M | -22%           | 3 days   |
+| endog-raid (control)           | FAIL (37% railed)  | 0.949 |  -$0.57M | -23%           | never    |
+| endog-excursion (dual-ts)      | PASS (bv 1.0005)   | 0.691 |       -- | --             | --       |
+| endog-excursion-raid (dual-ts) | PASS (bv 1.0015)   | 0.938 |  -$0.87M | -21%           | 40 days  |
+
+The dual-timescale rows (fast_halflife 1 d, commit bb4ec06) are NOT a
+controlled comparison with the single-timescale rows above them: the
+signal change alters every excursion decision from day 0, so by the
+day-913 raid the two histories had diverged for 913 days (different
+K, inventories, pool depths).  What the dual-ts raid arm does show is
+that the fast filter ENGAGED the raid (+13 discount-leg entries in
+the dump+30d window, where the single-ts cast sat out) while the
+healthy dual-ts arm posts the tightest bv spread in the program (sd
+0.0066) and higher excursion earnings (+$5.20M vs +$3.46M).  The
+excursion CATALOGUE below is the controlled instrument that replaces
+this kind of comparison.
+
+1. *Raids lose money, and defenders make them lose more.*  Against the
+   poised cast the whale lost $1.00M; undefended, only $0.57M --
+   because the defended market snapped back in 3 days, forcing
+   re-accumulation at recovered prices, while the undefended market
+   stayed depressed and sold the whale its position back cheap.
+   Defense heals the market faster AND punishes the raider harder.
+2. *The undefended economy takes permanent damage*: peak bv deviation
+   16.7% (vs 8.8% defended), no recovery inside 60 days, and the arm
+   fails its gate outright (K railed 37% of the tail).  The poised
+   cast is the difference between a bruise and a wound.
+3. *The excursion cast is the strongest K-relief measured*: resting K
+   drops from the endog arm's 0.924 to 0.725 -- below K0 -- with the
+   retirement channel open.  A standing two-sided private cast
+   relieves the controller more than any initialization variant.
+4. Caveat: excursion earnings (+$3.5-4.2M) are par-marked
+   mark-to-model; the credit base's obligations remain open by design,
+   so realized-vs-marked stays a reporting distinction.
+
+* Portcast: the JS-port validation target (PASS)
+
+~rebalancing-eq-5yr-portcast~ is the settled-physics cast -- every
+agent in its decision-of-record embodiment, language-neutral keyed
+RNG (~[scenario] rng = "keyed"~; recipe in TELEMETRY.md), and NO
+FatCreditBorrowerAgent: if the household debtors + basket depositors
+alone pass the gate, an entire complex class drops out of the JS
+port.  Already learned from its smoke: WITHOUT FatCredit the
+cold-start transient vanishes entirely (bv 0.993-1.009, K flat at
+K0 = 0.750) -- the mature arms' violent openings were the Fat
+borrowers' day-0 reserve prefunding and issuance all along.
+
+Full-run verdict (2026-08-22): *PASS* -- bv 1.0004 (sd 0.0070), K
+0.704 interior, 0% railed, channels alive through the bcd+dm fallback
+(3.38M net issuance in the tail).  The no-FatCredit settled-physics
+cast reproduces the success with the tightest spread of any
+full-economy arm; the JS-port cast is CONFIRMED and FatCredit drops
+out of the port.  It is also the base of the excursion catalogue.
+
+* Cross-cutting findings
+
+1. *Execution semantics and market microstructure matter as much as
+   the controller.*  Nothing about the PID changed between the all-FAIL
+   debtor matrix and the all-PASS one -- what changed was HOW agents
+   execute (atomic vs paced), WHAT the exit route can bear ($50M vs
+   $10M), and WHO the population is (housing distribution vs maximal
+   leverage).
+2. *K's resting level is the admission-frontier position.*  A converted
+   or growing economy settles K high because the controller is holding
+   the conversion gate open; that is a feature -- but it spends rail
+   margin, which is the robustness budget.
+3. *The K-immune basket tranche is tolerable at ~18% of supply.*  The
+   fence's motivating problem did not bite at realistic scale; whether
+   it bites at 30-50% remains the open fence-in-the-loop question.
+4. *Private inventory is the retirement channel.*  Every arm whose
+   savers hold standing BUCK shows two-sided channels; every arm with
+   empty savers shows one-sided issuance.
+
+* Recommendations: robustness against economic disruption
+
+Ranked by expected information per unit of compute.
+
+1. *Multi-seed sweep first.*  Everything above is seed 0xA1BC.  The
+   equilibrium campaign's own history (3/5 seeds failed its plain
+   baseline) is the warning: run the matrix's key arms (base, endow,
+   debtors-mature, endog) across the campaign's 5 seeds via sweep.py
+   before treating any conclusion as robust.
+2. *Buy back rail margin for the growth arms.*  originate/endog rest
+   0.008-0.026 below KMAX; any demand shock rails them immediately.
+   Three levers, in order of principle: (a) implement the *top-up
+   borrower* (BUCK for face*K, supplemental USDC for the remainder) so
+   the admission frontier is not the only supply valve; (b) widen the
+   collateral base (new insured asset classes = new face arriving
+   independent of housing); (c) a KMAX policy study -- 0.95 was chosen
+   to keep a railed K solvent and observable, but a converted economy
+   may warrant a higher ceiling with an explicit solvency argument.
+3. *Exercise the disruption axis.*  The naming scheme reserves it; the
+   machinery exists (=[[interventions]]= price_shock, uptake_shock,
+   retune).  Priority shocks against the winning arms: (a) a commodity
+   spike (NRGC +30%, cbBTC +50% -- the campaign's shock-price recipe)
+   mid-run; (b) a *demand run*: mass depositor exit (exit_ptick shock
+   on the DM population) -- the basket-run scenario; (c) a rate-cycle
+   shock (apr shift changes every theta threshold and the refinance
+   arbitrage itself).
+4. *Test the oversupply flood.*  The feared scenario -- massive
+   issuance through unencumbered collateral driving K to its LOWER
+   rail -- is still untested.  Add carry issuers (BuckIssuerArbAgent
+   exists) or a debtor draw_mult beyond encumbrance matching, and
+   measure: how deep K dives, where bv's discount equilibrates (the
+   theta/ff boundary predicts ~theta*apr), and the recovery half-life
+   (K throttles flow, not stock; only Jubilee melt and buy-backs
+   shrink the overhang).
+5. *Fence-in-the-loop.*  Swap =--basket fence= into the basketeer
+   arms so basket issuance is K-scaled rather than K-immune, and
+   compare stability AND depositor economics against these baselines.
+   This is the designed join of the fence program with the monetary
+   loop, and becomes urgent if the tranche share is pushed past ~30%.
+6. *Slow-trend regimes.*  grow/decline commodity drifts (the trend
+   axis) need a price-generation hook or staged PriceOverlay ramps --
+   the reverting-vs-trending distinction mattered enormously in the
+   synthetic program and is unexplored here.
+7. *Population churn.*  Port the campaign's population-churn
+   experiment (lost borrower + saver) to this family; the endog
+   hazards should recruit replacements -- verifying that is exactly
+   what they are for.
+8. *Exit-route realism.*  The single deep pool abstracts best-cost
+   multi-route exits (BUCK/TOKEN -> TOKEN/USDC).  Teaching the debtor
+   quote (and the arbs) to split across routes would let depth be
+   stressed without the abstraction absorbing it.
+
+* The excursion catalogue: control of every excursion (2026-08-22)
+
+The quadrant-balance program needs a falsifiable instrument before it
+needs more agents: "control of every short- and long-term excursion"
+is testable only once the excursions are enumerated, injected on a
+controlled window, and measured by one response metric.  The
+catalogue is that instrument.  Code: ~alberta_buck/sim/catalogue.py~
+(grid driver), ~experiments/catalogue-*.toml~ (arms),
+~eqmetrics.excursion_windows/excursion_response~ (metric).
+
+** The arms (2-year portcast window, ONE injection at day 365)
+
+| arm        | axis         | sign     | speed | injector                                         |
+|------------+--------------+----------+-------+--------------------------------------------------|
+| none       | --           | --       | --    | control: endogenous excursions only              |
+| dump       | common       | discount | short | WhaleRaid side=sell: accumulate 60 d, dump 1 d   |
+| squeeze    | common       | premium  | short | WhaleRaid side=buy: buy $8-12M in 1 d            |
+| grind-down | common       | discount | long  | WhaleRaid side=sell: liquidate evenly over 60 d  |
+| grind-up   | common       | premium  | long  | WhaleRaid side=buy: buy evenly over 60 d         |
+| spike      | both         | +basket  | short | price_shock NRGC x1.30, lifted after 30 d        |
+| step       | differential | +basket  | long  | price_shock NRGC x1.30, permanent                |
+
+The base is the portcast cast (settled physics, keyed RNG, no
+FatCredit), which has NO cold-start transient; every defender is
+threshold-gated and therefore idle until an excursion appears; the
+keyed RNG gives each class its own draw stream; and in keyed mode the
+loop's own draws (whale snap tick and token order, the per-tick agent
+act order) come from keyed hashes rather than a shared stream (commit
+07f8c4a), so the world's history does not depend on how many agents
+exist -- verified: a cell with no defenders, one with eight inert
+credit agents and one with eight basket agents produce byte-identical
+world frames.  So cells of one arm share an IDENTICAL pre-history up
+to the injection, and the response deltas between mixes are
+attributable to the mix -- the controlled A/B the raid arms could not
+provide.  (Holding-cost caveat: BUCK-endowed mixes pay demurrage while
+poised, ~0.5% of the holding per 90 days, which the par-marked P&L
+shows as a drift; ~exc_realized~ books only what closes realize.)
+
+** The defender mixes (one agent, every quadrant)
+
+~ExcursionArbAgent~ now holds wealth in two legs, BUCK and a NEUTRAL
+asset, and rotates between them on the dual-timescale bvib signal
+under the ex-ante-quote discipline.  ~neutral~ selects the non-BUCK
+leg -- "usdc" (a war chest), "basket" (the constituents in the
+basket's own ~basketAmount~ proportions, traded TOKEN<->BUCK in the
+TOKEN/BUCK pools that DEFINE bvib, so the rotation pushes the
+observable directly and pays no demurrage while parked), or "credit"
+(the latent-credit issuer/retirer) -- and ~buck_frac~ (the rest-state
+BUCK share) selects the quadrants served from day 0: 0 = absorb the
+discount (Q1), 1 = supply the premium (Q3), 0.5 = two-sided.  Pinned
+subclasses mix them in one roster: ExcursionArbAgent (usdc, Q1),
+ExcursionBuckArbAgent (usdc, buck_frac 1, Q3), ExcursionCreditArbAgent
+(Q4 issue / Q2 retire; buyback gate now its own knob ~cover_dev~),
+ExcursionBasketArbAgent (basket, 0.5: the common-mode rotation agent,
+roadmap item 1 realized as a parameterization, not a new class).
+~CommodityRebalArbAgent~ (roadmap item 3) is the differential-mode
+private trader: an EOA holding a TOKEN inventory in basket
+proportions that sells the constituent dear relative to the basket
+into the one cheap (most-over into most-under, common mode demeaned),
+through the director's own two-hop route, when the spread beats
+~band~ and the ex-ante quote leaves spread - cost >= min_edge; its
+reversion expectation is either the MA deviation (~halflife~) or, with
+~foresight_days~ > 0, the exogenous reference series itself -- the
+commodity specialist who knows whether a shock is transient.  P&L is
+marked against buy-and-hold of the initial inventory.  The excursion
+population's DIRECTIONAL dollar flows are now booked per quadrant
+(~exc_q~ = absorb / retire / supply / issue) -- the first cut of the
+quadrant-flow telemetry (roadmap item 4).
+
+| mix    | ExcursionArb | Credit | Basket | Buck | CommodityRebal | quadrants staffed           |
+|--------+--------------+--------+--------+------+----------------+-----------------------------|
+| none   |            0 |      0 |      0 |    0 |              0 | -- (Saver + debtors only)    |
+| usdc   |            8 |      0 |      0 |    0 |              0 | Q1 absorb                   |
+| buck   |            0 |      0 |      0 |    8 |              0 | Q3 supply                   |
+| credit |            0 |      8 |      0 |    0 |              0 | Q4 issue, Q2 retire         |
+| basket |            0 |      0 |      8 |    0 |              0 | Q1+Q3 (rotation)            |
+| crb    |            0 |      0 |      0 |    0 |              4 | differential only           |
+| all    |            5 |      3 |      4 |    2 |              2 | every quadrant + both axes  |
+
+~--scale~ multiplies every defender count (intensity); the whale's
+~budget_m~ and the shock's ~mult~ scale the injections.
+
+** The response metric (eqmetrics, per injection window)
+
+Windows are detected from the vector itself (raid phase 2 spans;
+applied price_shock / other interventions).  For each: pre-window
+baselines (30 d), signed peak bv deviation and its day, AUC of |bv-1|
+(%-days), recovery days (first day after the injection end with
+|bv-1| < 1% held for 5 d; "never" otherwise), K move and rail days,
+buckUsd extreme, the axis-2 weight-deviation peak and recovery
+(poolWeights), and the population deltas over the span: excursion
+P&L, raid P&L, entries/exits, per-quadrant flows.  ~python -m
+alberta_buck.sim.eqmetrics --json~ exposes everything to the grid
+driver.  Verdicts of every historical vector are unchanged.
+
+** Reading the grid
+
+The arm x mix grid answers the program's two questions directly:
+(1) the BOUNDS of equilibrium -- which injections a given mix survives
+(verdict, peak, recovery) and at what intensity the bound breaks; (2)
+the SIGNS of weak support from a quadrant -- an arm whose response is
+poor under every mix lacking that quadrant and good under every mix
+staffing it (a premium excursion uncontrolled without Q3/Q4 staffing,
+a discount one without Q1/Q2, a differential one without the
+rebalancer) isolates the missing quadrant.
+
+** Wave 1 results (7 arms x 6 mixes, scale 1; 2026-08-23)
+
+Figure: =images/catalogue-wave1.png= (rows = arms; bvib, BUCK/USDC and
+the axis-2 weight deviation around the shaded injection, every mix
+overlaid).  Report: =build/sim/catalogue/summary.md=.  Every one of
+the 42 cells PASSES the 2-year tail gate; no injection at this
+intensity leaves the equilibrium.  The control holds exactly: mixes
+whose agents cannot act on an arm (buck/credit on the dump, usdc on
+the squeeze, every excursion base on the grinds and the shocks)
+reproduce the ~none~ cell to the last digit, so every delta below is
+the mix and nothing else.
+
+| arm (injection)          | mix    | peak bv dev | recovery | AUC %-d | defender realized / marked | whale P&L |
+|--------------------------+--------+-------------+----------+---------+----------------------------+-----------|
+| dump ($7.6M in 1 d)      | none   |      +12.7% |     16 d |      80 | --                         |   -$0.01M |
+|                          | usdc   |       +8.7% |     12 d |      71 | +0.26 / +0.26              |   -$0.01M |
+|                          | basket |      +10.6% |      7 d |      73 | +0.01 / -0.12              |   -$0.01M |
+|                          | all    |       +7.9% |     11 d |      71 | +0.16 / +0.04              |   -$0.01M |
+| squeeze ($10M in 1 d)    | none   |      -10.4% |      5 d |      82 | --                         |   -$0.87M |
+|                          | buck   |      -10.1% |     14 d |      78 | +0.03 / -0.11              |   -$0.88M |
+|                          | credit |      -10.1% |     10 d |      78 | +0.00 / +0.63              |   -$0.89M |
+|                          | basket |      -10.1% |      4 d |      81 | +0.01 / -0.08              |   -$0.87M |
+|                          | all    |       -8.1% |     10 d |      71 | +0.08 / +0.45              |   -$0.79M |
+| grind-down ($10M / 60 d) | any    |       +1.7% |      6 d |      83 | inert                      |   +$2.00M |
+| grind-up ($10M / 60 d)   | any    |       +2.1% |     12 d |      90 | inert                      |   -$1.62M |
+| spike (NRGC x1.3, 30 d)  | any    |       +1.8% |      1 d |      63 | inert; wdev +0.133         |        -- |
+| step (NRGC x1.3, perm.)  | any    |       +2.0% |     81 d |      52 | inert; wdev +0.133, 19 d   |        -- |
+
+(buck/credit on the dump and usdc on the squeeze equal ~none~; the
+grind/shock rows hold for every mix without the differential agent;
+~all~ on the shocks differs because its CommodityRebalArbAgents trade
+continuously -- see the differential reading below.)
+
+Findings:
+
+1. *The discount side is controlled by Q1 staffing.*  Eight USDC-based
+   absorbers cut the dump peak from 12.7% to 8.7% and the AUC by 11%
+   and realized +$0.26M doing it (8 round trips).  The basket rotation
+   gives the FASTEST recovery (16 -> 7 days) because it trades in the
+   bvib-defining pools directly, but it carries little size: the
+   TOKEN/BUCK pools are thin, so its impact-capped bites are ~1/5 of a
+   USDC absorber's, and 25 round trips realized only +$0.01M.  The
+   full cast is best on peak (7.9%).
+2. *The premium side is the weakly supported quadrant at this scale.*
+   A one-day $10M squeeze is faster than either filter, so every mix
+   shares the -10.4% trough; single-quadrant staffing afterwards (Q3
+   holders or Q4 issuers, 8 each) does not move the peak (-10.1%) and
+   lengthens time-to-band (5 -> 10-14 d) while trimming the AUC 5%;
+   only the full cast damps it materially (-8.1%, AUC -13%, the whale
+   loses less because the defenders' supply lets it unwind at better
+   prices).  The issuers' +$0.63M is the largest defender gain but is
+   marked, not realized: the obligations wait for a discount by
+   design.  Where the premium bound lies is the intensity question
+   (wave 2: defender scale x2/x4, squeeze budget x2/x4).
+3. *Slow grinds and a x1.3 constituent shock never reach the 3% gate.*
+   The standing cast (savers, debtors, depositors, director, K)
+   absorbs $170k/day for 60 days with a bvib peak of 1.7-2.1% and a
+   30%/30-day energy shock with +1.8%; no excursion agent acts, all
+   mixes coincide.  BUCK/USDC rises with its basket (+13-16%) as
+   designed.  Whale P&L on grinds is confounded by the window's own
+   BUCK/USD trend (+15% over the response span): the grinding seller
+   books +$2.0M from the trend, the grinding buyer -$1.6M.
+4. *Axis 2.*  The shock's real effect is the weight deviation (+0.133
+   over a background that itself swings 0.00-0.15 with the macro
+   series): the director restores a permanent step's weights within
+   ~19 days.  The mixes carrying CommodityRebalArbAgents show the
+   deviation peak lower (+0.099) and the step's common-mode AUC down
+   52 -> 42, with the agents' own P&L positive (+$0.18-0.28M for two
+   of them); the differential-only cells refine this (below).
+5. *Holding costs are visible and honest*: BUCK-endowed mixes (buck,
+   basket) show -$0.1 to -$0.25M marked over a 150-day span with no
+   trades -- demurrage on a poised inventory -- which is exactly the
+   carry the rest state pays to be ready.
+
+Differential-only cells (4 CommodityRebalArbAgents, MA-reversion
+signal, band 3%, no excursion bases):
+
+| arm   | mix  | bv peak | AUC | wdev peak | wdev recov | crb P&L in window | crb P&L whole run |
+|-------+------+---------+-----+-----------+------------+-------------------+-------------------|
+| spike | none |   +1.8% |  63 |    +0.133 |   at lift  |                -- |                -- |
+| spike | crb  |   +2.2% |  68 |    +0.092 |   at lift  |           +$0.26M |           -$0.36M |
+| step  | none |   +2.0% |  52 |    +0.133 |       19 d |                -- |                -- |
+| step  | crb  |   +2.2% |  51 |    +0.092 |       17 d |           +$0.06M |           -$0.60M |
+
+6. *The mechanistic differential agent provides the service at a
+   private loss.*  Four MA-reversion rebalancers ($8.6M of TOKEN) cut
+   the shock's weight-deviation peak by a third (+0.133 -> +0.092) and
+   shave a day or two off the director's restoration -- and lose
+   ~$0.5M (6% of inventory) in the first year BEFORE any injection,
+   trading the background relative-price drift of a trending macro
+   series (~600 two-hop round trips, each paying two pool fees plus
+   impact) as if it were reversion.  Inside the windows the sign is
+   exactly what theory says: the transient spike is profitable
+   (+$0.26M as it reverts), the permanent step is not (the rebalancer
+   sells the winner; -$0.17M across the step, net +$0.06M over the
+   window only because the background happened to revert).  Reading:
+   the differential quadrant is NOT self-financing on a mean-reversion
+   signal alone -- it needs either foresight (the specialist; the
+   ~foresight_days~ cells of wave 2 test it) or a far wider band, and
+   the director's deliberate slowness looks like the right default for
+   a mechanistic rebalancer.  (The ~all~ mix's crb numbers differ
+   because the excursion bases alter the pools those two agents trade
+   in.)
+
+** Wave 2 results (intensity sweep; 2026-08-23)
+
+42 further cells: defender counts x2/x4 on the raid-speed arms, injection
+budgets x2/x4 (whale budget_m [16,24] / [32,48] with quiet_cap_bp 100/200),
+$30-40M 60-day grinds, x1.6 constituent shocks, and the foresight
+differential agent.  Figures: =images/catalogue-wave2-x2.png= / =-x4.png=;
+reports =build/sim/catalogue/summary-{scale,inj2,inj4,grind4,shock16,fs30}.md=.
+
+*The bounds of equilibrium, found.*  The undefended economy PASSES at x1
+and x2 injections and FAILS at x4:
+
+| arm (undefended vs full cast)   | verdict     | tail bv | tail K (rail)   | whale P&L |
+|---------------------------------+-------------+---------+-----------------+-----------|
+| dump x2 ($15M) undefended       | PASS        |  1.0000 | 0.74            |   ~$0.00M |
+| dump x4 ($30M+) undefended      | *FAIL*      |  0.7796 | 0.950 (100%)    |   ~$0.00M |
+| dump x4 ($30M+) full cast       | PASS        |  0.9984 | 0.806 (0%)      |   ~$0.00M |
+| squeeze x4 ($40M) undefended    | PASS        |  1.0000 | 0.945 (0%)      |   -$9.13M |
+| squeeze x4 ($40M) full cast     | PASS        |  1.0004 | 0.798 (0%)      |  -$10.59M |
+| grind-down x4 undefended        | *FAIL*      |  0.7258 | 0.950 (100%)    |   +$7.7M* |
+| grind-down x4 full cast         | FAIL (rail) |  0.9927 | 0.936 (17%)     |   +$7.8M* |
+| grind-up x4 undefended          | PASS        |  1.0006 | 0.937 (0%)      |   -$7.33M |
+| grind-up x4 full cast           | PASS        |  1.0002 | 0.810 (0%)      |   -$7.11M |
+
+(* grind-seller P&L is dominated by the window's +15% BUCK/USD trend and by
+selling into the premium its own accumulation created; it is not evidence
+that grinding is profitable net of the trend.)
+
+Findings, continuing the wave-1 numbering:
+
+7. *The poised cast is the difference between equilibrium and permanent
+   failure.*  The x4 dump leaves the undefended economy 22% off parity
+   with K pinned to its rail for the entire second year; the identical
+   attack against the full cast ends at bv 0.9984, K 0.806, PASS.  The
+   x4 grind-down breaks the undefended economy the same way; the full
+   cast holds parity (bv 0.9927) but spends most of the rail margin
+   (K 0.936, railed 17% of the tail) -- survival, with the robustness
+   budget consumed.  Everywhere else defense converts near-rail resting
+   K (0.94-0.95) into interior K (0.80-0.81): poised capital buys back
+   exactly the margin recommendation 2 said the growth arms lack.
+8. *Attacks punish themselves superlinearly, and defense deepens it.*
+   Squeeze whale P&L -$0.87M / -$3.06M / -$9.13M at x1/x2/x4
+   (undefended); -$10.59M defended at x4.  Defender realized profit
+   grows with attack size (+$0.08M / +$0.39M / +$1.50M) -- the poised
+   cast is countercyclically PAID more, the worse the attack.
+9. *Slow attacks are erased by poised capital.*  $30-40M ground over 60
+   days undefended: AUC 1112 (down) and 1967 (up) %-days with 37-39%
+   peaks; against the full cast: AUC 96 and 182 with peaks -2.9% and
+   -5.5% -- a 10x reduction; the defenders absorb the whole slow flow
+   near their impact caps.  Fast excursions can only be damped; slow
+   ones can be effectively cancelled.
+10. *Defender scaling is quadrant-specific.*  Q1 (usdc) shows
+    diminishing returns (dump peak 8.7/8.0/7.0% at x1/x2/x4).  The
+    basket rotation is the best scaler (10.6/8.3/6.2%, recovery 5 d at
+    x4): its x1 limit was capacity, not signal, and its flow lands in
+    the bvib-defining pools.  Q3 (buck) OVERCROWDS at x4 (realized
+    -$0.53M, AUC worse than x1): too many suppliers competing for one
+    reversion.  Credit (Q4/Q2) is scale-stable but stays unrealized.
+    MA-differential losses scale with count (-0.25/-0.51/-1.32M at
+    2/4/8 agents), and because crb agents trade continuously they
+    perturb the pre-history: 'all'-mix cells are NOT controlled across
+    scales (dump-all x2/x4 peak jitter is history, not defense).
+11. *Foresight flips the differential quadrant into a business.*  The
+    MA rebalancer loses -$0.4 to -0.6M over 2 years; foresight_days=30
+    earns +$4.1 to +4.9M whole-run on the same $8.6M book (~2200
+    trades) and +$2.5-2.8M inside every shock window, on BOTH the x1.3
+    and x1.6, transient and permanent shocks -- it front-runs scheduled
+    price moves and trades the real drift instead of betting on
+    reversion.  It also collapses the permanent step's common-mode
+    recovery (87 -> 5 days, crb-only mix).  fs30 is an oracle bound: a
+    real commodity specialist sits between MA (zero knowledge) and
+    fs30 (perfect 30-day knowledge); the knob now prices that knowledge.
+
+Where the program stands after the catalogue: the two raid-speed common-
+mode arms are damped by staffing Q1 (discounts) and only by the FULL cast
+(premiums); slow attacks and both x4 bounds are decided by whether the
+cast exists at all; the differential axis needs either the director's
+patience or paid-for foresight.  The next knobs to tune are the premium
+side's speed (the one-day trough is untouched by any mix -- an intra-day
+or tick-level response question), the basket rotation's budget (best
+scaler, thin pools), and Q3 crowd control (stagger or size-share the
+suppliers).
+
+* Roadmap: the quadrant-balance program (2026-08-22)
+
+The organizing model (Perry): K guarantees equilibrium in the long run;
+short-term stability rests on profit-seeking agents covering four
+quadrants in roughly equal strength -- BUCK issue/withdraw balanced by
+accumulate/redeem, on two symmetry axes: the COMMON mode (BUCK vs the
+neutral basket: sell BUCK rich into basket exposure, rotate back on the
+discount) and the DIFFERENTIAL mode (sell commodities above their basket
+proportion into those below).  Individual agents are modeled and tuned
+for their own ROI first; the learnings then integrate into a sane
+BuckBasket (which should perform the absorb service automatically when
+BUCK is at a discount and K is rising -- BuckBasketOps Q1 with a
+K-gradient condition).
+
+In dependency order (status as of 2026-08-22 in brackets):
+
+0. *The excursion catalogue* [DONE, wave 1 in flight] -- enumerate the
+   excursions (axis x sign x speed), inject each on a controlled
+   window, measure one response metric, grid it against defender
+   mixes and intensities.  The falsifiable instrument the rest of the
+   program is tuned against.
+1. *BasketRotationAgent* [DONE as a parameterization: ExcursionArb
+   neutral="basket", buck_frac 0.5] -- the common-mode rotation agent
+   trading BUCK <-> the constituent basket in the bvib-defining pools.
+   Completes symmetry axis 1.  A BuckBasket-RECEIPT neutral leg (LP
+   exposure that earns the rebalancing premium) remains a possible
+   fourth base.
+2. Dual-timescale excursion signal [DONE]; credit-base buyback
+   threshold exposed as ~cover_dev~ [DONE].
+3. *CommodityRebalArbAgent* [DONE, minimal] -- MA-reversion or
+   foresight signal, band, two-hop execution; to be tuned on the
+   spike/step arms.
+4. *Quadrant-flow telemetry* [PARTIAL] -- the excursion population's
+   directional flows are booked per quadrant (~exc_q~); the remaining
+   classes (Saver, debtors, DM) and the balance metric (strength
+   ratios + symmetry index) are still to do.
+5. *Per-class ROI reporting* -- telemetry-derived realized+marked ROI
+   per class, so knob sweeps rank configurations by individual agent
+   profitability as well as system stability.
+6. *Balance-mix harness* -- one dial per quadrant (cohort counts and
+   budgets), swept; plus a dedicated startup-imbalance arm (issuers
+   front-loaded, opportunistic-wealth dial varied).
+7. LAST: fold the winning knobs into the BuckBasketOps/Fence revision
+   and gate it as a contract-level arm.
+
+Complete as of this writing: portcast (PASS; JS-port cast confirmed),
+the dual-timescale re-runs, and the catalogue's waves 1 and 2 (86
+cells; results above).  Next: multi-seed the key catalogue cells,
+quadrant-flow balance metric across the remaining classes, per-class
+ROI, the balance-mix/startup arm -- then the JS port (step 3 of the
+platform plan), porting only agents whose excursion control was
+demonstrated here, in their simplest embodiments.
+
+* Artifacts
+
+- Vectors: =test/vectors/rebalancing-sim-eq*.json= (uncommitted;
+  regenerate with the matrix target).  Superseded-run checkpoints
+  (paced, shallow-ub, narrow-face eras): =build/sim/runs/partial*=.
+- Images: =images/rebalancing-sim-eq*.png= (committed) -- the 11-panel
+  render per arm.
+- Progress tooling: a watcher script (session scratchpad) renders
+  =build/sim/progress/= every 10 minutes during long runs; the sims
+  checkpoint their vectors every 25 sim-days, so partial runs are
+  always plottable.
+- Parent documents: =alberta_buck/sim/EQUILIBRIUM.md= (the campaign),
+  =BASKET-REBALANCE.md= / =BASKET-REDESIGN.md= (the synthetic basket
+  program).

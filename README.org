@@ -1,3 +1,11 @@
+# Copyright (c) 2026 Perry Kundert.  All rights reserved.
+#
+# This document is NOT covered by the source-code licences in
+# LICENSING.md.  The code is free software; the design writing is not
+# (yet) placed under an open licence -- see LICENSING.md, "Design
+# documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
+#
+# SPDX-License-Identifier: LicenseRef-AllRightsReserved
 #+title: Alberta Buck -- Ethereum Smart Contracts
 #+OPTIONS: ^:nil toc:nil
 
@@ -267,4 +275,28 @@ populated with historical trend data sourced from public commodity price dataset
 
 * License
 
-GPL-3.0-or-later
+Two licences, applied by layer.  =LICENSING.md= is the map and the decision of
+record; in short:
+
+- =core/= (the Rust/Python/JS kernels) -- *CAL-1.0*, the Cryptographic
+  Autonomy License.  Chosen because it restricts /architecture/ rather than
+  /purpose/: an operator must be able to hand a user their own data, and may
+  not use key custody to limit a user's control of it.
+- =src/*.sol= and =alberta_buck/= -- *GPL-3.0-or-later*.
+
+Full texts: =LICENSE= (GPL-3.0) and =core/LICENSE= (CAL-1.0).  Third-party
+components: =NOTICE=.  Contributing: =CONTRIBUTING.md= (CLA, not DCO -- the
+reasoning is in that file).
+
+** The name is not covered by those licences
+
+The Alberta Buck source code is free software under the licences above.
+*"Alberta Buck" is not part of that grant.*  Neither licence conveys trademark
+rights -- CAL-1.0 §3.1(b) withholds them expressly, and GPL-3.0 §7(e) permits
+declining to grant them.
+
+You may state that your work is derived from, based on, or compatible with
+Alberta Buck.  You may not name a fork, deployment, service or token "Alberta
+Buck", or use the name in a way implying endorsement.  See =TRADEMARKS.md=,
+which also states plainly why this is a weak mark rather than pretending
+otherwise.

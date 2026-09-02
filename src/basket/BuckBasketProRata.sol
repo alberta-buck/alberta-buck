@@ -289,7 +289,7 @@ contract BuckBasketProRata is BuckBasketStorage {
     ///         BUCK into the most-underweight pool as a depositor position
     ///         (constant-mix injection, §8) -- see `_depositBuck`.
     function depositToken(address token, uint256 tokenAmount, uint256 maxDeviationBp)
-        external returns (uint256 receiptId)
+        external virtual returns (uint256 receiptId)
     {
         if (!(tokenAmount > 0)) revert Amount0();
         if (token == address(buck)) return _depositBuck(tokenAmount);
@@ -382,7 +382,7 @@ contract BuckBasketProRata is BuckBasketStorage {
     ///         reverts rather than realize a larger loss.
     function _redeem(uint256 receiptId, uint256 redeemBp,
                      uint256 maxConversionLossBp, address payoutToken)
-        internal
+        internal virtual
     {
         _pokeDirector();
         if (!(receipt.ownerOf(receiptId) == msg.sender)) revert NotOwner();

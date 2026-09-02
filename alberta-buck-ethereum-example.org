@@ -1,3 +1,11 @@
+# Copyright (c) 2026 Perry Kundert.  All rights reserved.
+#
+# This document is NOT covered by the source-code licences in
+# LICENSING.md.  The code is free software; the design writing is not
+# (yet) placed under an open licence -- see LICENSING.md, "Design
+# documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
+#
+# SPDX-License-Identifier: LicenseRef-AllRightsReserved
 #+title: Alberta Buck -- Worked Examples
 #+author: Perry Kundert
 #+date: 2026-05-10

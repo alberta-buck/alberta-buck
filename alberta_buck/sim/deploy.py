@@ -27,7 +27,15 @@ UR_ARTIFACT = "alberta_buck/sim/artifacts/UniversalRouter.json"
 E6 = 10 ** 6
 E18 = 10 ** 18
 FEE_USDC = 3000
-FEE_BUCK = 3000         # TOKEN/BUCK pools: 0.30% (direct-mint LP profit)
+# TOKEN/BUCK pools.  0.30% by default, but this is OUR choice and it is not
+# obviously right: these pools exist to serve the BuckBasket, so the fee
+# should be set by what the basket needs, not by pool revenue.  The fee cuts
+# three ways -- it is a cost on the basket's own rebalancing, it is INCOME to
+# the basket as the LP, and it is the gate that decides how small a
+# mispricing an external arb will bother to close (i.e. how tightly the pool
+# tracks the world, which is the basket's whole job as the reference mass).
+# Override to compare: SIM_FEE_BUCK=500 for the 0.05% tier.
+FEE_BUCK = int(os.environ.get("SIM_FEE_BUCK", "3000"))
 FEE_BUCK_UB = 500       # BUCK/USDC pool:   0.05% (gauge-breaking, cheap)
 TICK_SPACING = {3000: 60, 500: 10}
 
@@ -81,7 +89,13 @@ def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
     token_to_user = 0
     treasury_buck = 0
 
-    if d.basket_impl == "prorata":
+    # Anything that is NOT the legacy shell pays via ERC20 transfers and
+    # emits the 6-arg Redeemed.  Enumerating implementations here instead
+    # silently mis-parsed the "ops" shell as legacy: it emits no
+    # RedeemedFromPool, so every redemption booked 0 treasury BUCK and 0
+    # TOKEN returned, and an A/B read as the desk having consumed the entire
+    # treasury when nothing of the sort had happened.
+    if d.basket_impl != "legacy":
         basket_tokens = {c.address.lower() for c in d.tokens}
         for log in rcpt["logs"]:
             t0 = log["topics"][0]
@@ -133,11 +147,12 @@ class Deployment:
     pool_usdc: list = field(default_factory=list)   # TOKEN/USDC addrs
     pool_buck: list = field(default_factory=list)   # TOKEN/BUCK addrs
     pool_ub: str = ""                               # floating BUCK/USDC pool
+    pool_fence: list = field(default_factory=list)  # BuckBasketFence bands
     pool_meta: list = field(default_factory=list)   # (pool,owner,lo,hi,group)
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
-    basket_impl: str = "prorata"  # "prorata" (BuckBasketProRata, default) | "legacy"
+    basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "legacy"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     director: Any = None          # rebalance director (prorata only)
     director_impl: str = "pairs"  # "pairs" (default) | "vrate"
@@ -190,8 +205,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
-    # activateFromBuck (which requires msg.sender == buck) and so NFT
-    # mutations invalidate Buck's credit-limit cache via onCreditMutation.
+    # activateFromBuck (which requires msg.sender == buck).  The wiring is an
+    # authorisation record only: BuckCredit never calls back into Buck.
     chain.send(credit.functions.setBuck(buck.address), sender=deployer)
 
     v3f = chain.deploy("UniswapV3Factory")
@@ -201,14 +216,36 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # inter-tick commodity moves (6h ticks vs 600s TWAP) from tripping it.
     ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, 64, 500, 1000)
     venue = None
-    if basket_impl == "prorata":
-        basket = chain.deploy("BuckBasketProRata", *ctor)
+    if basket_impl in ("prorata", "ops", "fence"):
+        # "ops" is BuckBasketProRata plus the monetary-operations desk on the
+        # director's COMMON mode.  Identical constructor, identical venue,
+        # and inert until setOpsParams enables it -- so an ops basket with no
+        # policy installed is the baseline, byte for byte in behaviour.
+        if basket_impl == "fence":
+            # The fence tier defaults to the DEPOSITOR tier, which makes
+            # _findOrCreatePool hand back the constituent's own pool.  The
+            # separate tier was proposed to keep the fence out of
+            # poolBuckValues, but BuckBasketFence overrides _redeem and
+            # prices claims from exact V3 math on its own band, so nothing
+            # reads poolBuckValues on this path.  A separate tier would
+            # instead make the experiment inert: basketValueInBuck -- what K
+            # reads -- comes from the constituent's pool, so a fence
+            # elsewhere could not move K's signal without an arbitrageur
+            # linking the two.  SIM_FENCE_TIER=500 restores the split.
+            fence_tier = int(os.environ.get("SIM_FENCE_TIER", str(FEE_BUCK)))
+            basket = chain.deploy("BuckBasketFence", *ctor, fence_tier)
+        else:
+            basket = chain.deploy(
+                "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata",
+                *ctor)
         # Install the Uniswap V3 venue facet (the shell delegatecalls it) and
         # re-wrap the basket handle with the union ABI so Python can call facet
         # views (basketValueInBuck) that the shell serves via its fallback.
         venue = chain.deploy("BuckBasketUniswapV3")
         chain.send(basket.functions.setVenue(venue.address), sender=gov)
-        shell_abi, _ = load_artifact("BuckBasketProRata")
+        shell_abi, _ = load_artifact(
+            {"ops": "BuckBasketOps", "fence": "BuckBasketFence"}
+            .get(basket_impl, "BuckBasketProRata"))
         facet_abi, _ = load_artifact("BuckBasketUniswapV3")
         union = shell_abi + [e for e in facet_abi if e not in shell_abi]
         basket = w3.eth.contract(address=basket.address, abi=union)
@@ -220,6 +257,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     chain.send(kctrl.functions.setBasket(basket.address), sender=gov)
     chain.send(reg.functions.bindContract(
         basket.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+
+    fence_factors: list = []
 
     # --- tokens ------------------------------------------------------ #
     usdc = chain.deploy("MockERC20", "USD Coin", "USDC", 6)
@@ -343,6 +382,13 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         chain.send(reg.functions.bindContract(
             pb, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
         d.pool_buck.append(pb)
+        if basket_impl == "fence":
+            # Strike the first band.  Must follow addBasketToken: the fence
+            # is priced and centred off the constituent record.
+            chain.send(basket.functions.openFence(i), sender=gov)
+            d.pool_fence.append(
+                basket.functions.fenceOf(i).call()[0])
+            fence_factors.append(i)
 
         if verbose:
             print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
@@ -393,6 +439,14 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     FACE = max(2 * dp.target_buck_lp, mint_amt * 12 // 10)
 
     now_ts = w3.eth.get_block("latest")["timestamp"]
+    # A credit only lands where its recipient asked for it, so SimLP has to
+    # name the deployer as an insurer it will accept before the credit can be
+    # issued.  SimLP is a contract and cannot sign, so the opt-in goes through
+    # its exec() passthrough.
+    chain.send(simlp.functions.exec(
+        credit.address,
+        credit.encode_abi("setCreditIssuer", args=[getattr(deployer, "address", deployer), True]),
+    ), sender=deployer)
     cc = credit.functions.createCredit(simlp.address, 0, FACE, 0, 0, 0,
                                        now_ts, 0)              # NONE, premium 0
     chain.send(cc, sender=deployer)
@@ -416,10 +470,16 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # BUCK into it, and BUCK transfers are identity-gated on the recipient.
     chain.send(reg.functions.bindContract(
         pub, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+    # Sized off target_buck_lp -- the knob DOCUMENTED as the BUCK/USDC seed
+    # (it previously keyed off target_buck, silently coupling the floating
+    # pool's depth to the TOKEN/BUCK pools').  A national-scale currency
+    # pair is deep; a shallow floating pool is an artificial exit-route
+    # bottleneck (in reality best-cost routing would also spread exits over
+    # BUCK/TOKEN->TOKEN/USDC legs).
     if usdc.address.lower() == u0.lower():
-        Lub = dp.target_buck * spU // Q96
+        Lub = dp.target_buck_lp * spU // Q96
     else:
-        Lub = dp.target_buck * Q96 // spU
+        Lub = dp.target_buck_lp * Q96 // spU
     lo_ub, hi_ub = full_range_ticks(TICK_SPACING[FEE_BUCK_UB])
     chain.send(simlp.functions.mint(pub, lo_ub, hi_ub, max(1, Lub), u0, u1))
     d.pool_ub = pub
@@ -456,15 +516,21 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # DIRECTOR_WINDOW / DIRECTOR_DEADBAND_BP / DIRECTOR_QUORUM env overrides
     # let short smoke sims exercise the trade path (pairs quorum 4 needs the
     # 40-epoch window warm -- pass DIRECTOR_QUORUM=2|3 for a 30-day run).
-    if basket_impl == "prorata":
+    if basket_impl in ("prorata", "ops", "fence"):
         dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
         if director_impl == "pairs":
             dir_quorum = int(os.environ.get("DIRECTOR_QUORUM", "4"))
+            # boundaryBp: the no-trade-region form of effort sizing.  0 is
+            # not a placeholder -- it is the measured right answer for a 30bp
+            # venue (the refinement costs 5bp/yr there and only pays above
+            # ~50bp/leg).  Raise it if the pools ever trade expensively.
+            dir_boundary = int(os.environ.get("DIRECTOR_BOUNDARY_BP", "0"))
             director = chain.deploy(
                 "PairsRebalanceDirector", basket.address, gov,
                 (86400, dir_quorum, 500_000_000, dir_deadband * 100_000,
-                 300_000_000, 250_000_000, 50))
-            desc = f"quorum={dir_quorum}/7 kappa=0.5"
+                 300_000_000, 250_000_000, 50, dir_boundary))
+            desc = (f"quorum={dir_quorum}/7 kappa=0.5"
+                    + (f" boundary={dir_boundary}bp" if dir_boundary else ""))
         else:
             dir_window = int(os.environ.get("DIRECTOR_WINDOW", "15"))
             director = chain.deploy(
@@ -475,6 +541,82 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         chain.send(director.functions.syncConstituents())
         d.director = director
         d.director_impl = director_impl
+        if basket_impl == "fence" and fence_factors:
+            # The factors READ the director, so the fence needs it wired.
+            # Safe here where it was not for the ops basket: this shell
+            # overrides depositToken and _redeem outright, so none of the
+            # inherited advisory-routing paths that `director` also gates are
+            # reachable.
+            chain.send(basket.functions.setDirector(director.address),
+                       sender=gov)
+            if int(os.environ.get("SIM_FENCE_FACTORS", "0") or 0):
+                # A: differential -- lean against the constituent that has
+                #    diverged most from its target weight.
+                # B: common -- lean the way K is about to push BUCK.
+                # Off by default so the symmetric band stays the baseline
+                # every comparison is measured against.
+                chain.send(basket.functions.setFactorParams((
+                    int(os.environ.get("SIM_FACTOR_A", "100")),
+                    int(os.environ.get("SIM_FACTOR_B", "100")),
+                    int(os.environ.get("SIM_FACTOR_MAXSKEW", "5000")),
+                    int(os.environ.get("SIM_FACTOR_MEAS", "2")),
+                    True)), sender=gov)
+                if verbose:
+                    print("[deploy] fence FACTORS on  "
+                          f"A={os.environ.get('SIM_FACTOR_A','100')}% "
+                          f"B={os.environ.get('SIM_FACTOR_B','100')}% "
+                          f"maxSkew={os.environ.get('SIM_FACTOR_MAXSKEW','5000')}bp")
+        if basket_impl == "ops" and director_impl == "pairs":
+            # Thresholds are in tick*1e9 and a tick is ~1bp, so 100e9 reads as
+            # 100bp.  measIdx 2 is the 20-epoch rung: the article's sweep puts
+            # the knee there, and past the 80-epoch rung the lagged reading
+            # still says "dear" after the market has gone cheap, which answers
+            # an inflation excursion by issuing more.  That is a correctness
+            # bound, and setMonParams refuses anything slower than rung 3.
+            mon_cap  = int(os.environ.get("SIM_OPS_CAP_BP", "40"))
+            mon_meas = int(os.environ.get("SIM_OPS_MEAS", "2"))
+            mon_pers = int(os.environ.get("SIM_OPS_PERSIST", "30"))
+            chain.send(director.functions.setMonParams(
+                (100_000_000_000,      # deadband 100bp
+                 200_000_000_000,      # leash    200bp
+                 250_000_000,          # kappa    0.25
+                 mon_cap, mon_pers, mon_meas)), sender=gov)
+            # The bounds.  They exist to stop the desk substituting a fast fix
+            # for the slow, structural withdrawal of BUCK that K performs
+            # through creditLimit -- so they are the knob that decides where
+            # the two mandates overlap, and they are meant to be swept.
+            leg_bp  = int(os.environ.get("SIM_OPS_LEG_BP", "40"))
+            pos_bp  = int(os.environ.get("SIM_OPS_POSITION_BP", "1000"))
+            out_bp  = int(os.environ.get("SIM_OPS_OUTRIGHT_BP", "1000"))
+            chain.send(basket.functions.setMonetaryDirector(
+                director.address), sender=gov)
+            chain.send(basket.functions.setOpsParams(
+                (leg_bp, pos_bp, out_bp, True)), sender=gov)
+            # Founding reserves.  Without them the desk is inert in exactly
+            # the regime it exists for: Q1/Q2 are TOKEN-funded and it may not
+            # spend depositor TOKEN, so with BUCK persistently cheap it never
+            # accumulates anything to defend with.
+            # ref() is USDC-MICRO per whole token, so the budget has to be
+            # micro too.  Plain dollars here under-capitalized the desk by
+            # exactly 1e6 -- it received 0.0001 PAXG instead of 100, drained
+            # the whole book on its first operation buying 1.3 BUCK, and then
+            # reported "idle" for the rest of the run.
+            cap_usd = int(os.environ.get("SIM_OPS_CAPITAL_USD", "400000"))
+            for i, tc in enumerate(tok):
+                ref0 = scenario.prices.ref(i, 0)
+                amt = cap_usd * 10 ** 6 * (10 ** dec[i]) // ref0 if ref0 else 0
+                if amt <= 0:
+                    continue
+                chain.send(tc.functions.mint(gov, amt))
+                chain.send(tc.functions.approve(basket.address, amt), sender=gov)
+                chain.send(basket.functions.capitalizeMonetary(i, amt), sender=gov)
+            if verbose:
+                print(f"[deploy] monetary desk capitalized "
+                      f"${cap_usd:,}/token across {len(tok)} tokens")
+            if verbose:
+                print(f"[deploy] monetary desk ON  cap={mon_cap}bp/epoch "
+                      f"meas=rung{mon_meas} persist={mon_pers}ep  "
+                      f"leg={leg_bp}bp pos={pos_bp}bp outright={out_bp}bp")
         if verbose:
             print(f"[deploy] {director_impl} rebalance director "
                   f"{director.address[:10]}...  {desc}"

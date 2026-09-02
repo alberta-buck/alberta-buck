@@ -41,12 +41,17 @@ premium_bp = 100
 save_rate = 0.5
 arrive_frac = [0.0, 0.1]
 
+# Both arbs now decide by ROI rather than a fixed band: they buy when
+# (bvib - 1) + carry*horizon clears the round-trip cost, and sell when it
+# goes negative.  The knobs are the BELIEFS that feed that comparison, so
+# the A/B is now "same investor, two places to put the BUCK" -- the holder
+# pays demurrage on it, the basketeer earns the rebalancing premium.
 [agents.DiscountBuckArbAgent]
 endow_k = 500
-buy_disc = 0.02
-sell_prem = 0.0
+horizon_yr = [0.5, 3.0]
+inflation = [0.045, 0.075]
 
 [agents.DiscountBasketArbAgent]
 endow_k = 500
-buy_disc = 0.02
-sell_prem = 0.0
+horizon_yr = [0.5, 3.0]
+inflation = [0.045, 0.075]

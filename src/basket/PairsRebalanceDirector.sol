@@ -27,7 +27,10 @@ import {RebalanceDirectorBase} from "./RebalanceDirectorBase.sol";
 ///         equilibrium -- the confirmed-turn criterion; `vel` in the model,
 ///         measured as the better-balanced deployment default).  Effort =
 ///         kappa * |imbalance| * votes/K, capped; a pairwise leash with
-///         hysteresis enforces the mandate through trends.  The pairwise
+///         hysteresis enforces the mandate through trends.  `boundaryBp`
+///         optionally sizes on the EXCESS over the deadband instead of the
+///         whole imbalance -- the no-trade-region form, which pays only where
+///         trading is expensive (see `_pairEffort`).  The pairwise
 ///         imbalance is the arithmetic difference of weight ratios
 ///         (w_i/w*_i - w_j/w*_j, 1e18), computed from the chassis's cached
 ///         bv/s observations.
@@ -58,9 +61,33 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
         uint64 leash1e9;            // pairwise forced-rebalance bound (30%)
         uint64 leashInner1e9;       // leash release (hysteresis, 25%)
         uint32 capBpPerEpoch;       // max effort per pair per epoch
+        uint32 boundaryBp;          // no-trade boundary, bp of the deadband
+    }
+
+    /// @notice Monetary-operation policy on the COMMON mode of the same
+    ///         ladder.  All thresholds are in tick*1e9, and a Uniswap tick IS
+    ///         a log price, so one tick is ~1bp and `100e9` reads as 100bp.
+    struct MonParams {
+        uint64 deadband1e9;      // below this, do nothing (100bp = 100e9)
+        uint64 leash1e9;         // sustained beyond this -> outright (200e9)
+        uint64 kappa1e9;         // effort gain on the deviation
+        uint32 capBpPerEpoch;    // max monetary effort/epoch, bp of NAV; 0 = OFF
+        uint16 persistEpochs;    // consecutive epochs past the leash -> outright
+        uint8  measIdx;          // ladder rung measured on (2 = 20 epochs)
     }
 
     Params public params;
+    MonParams public monParams;
+
+    /// @notice Signed monetary effort, bp of NAV per epoch.
+    ///         > 0 issue BUCK (BUCK dear)   < 0 retire BUCK (BUCK cheap)
+    int32  public monEffortBp;
+    /// @notice Whether the operation is outright (balance-sheet) or temporary.
+    bool   public monOutright;
+    /// @notice Consecutive epochs the common mode has spent past the leash.
+    uint32 public monOverEpochs;
+    uint32 internal monLastEpoch;                       // +1-encoded; 0 = never
+
     mapping(uint256 => Leg) internal legOf;
     mapping(uint256 => int32) internal netEffortBp;     // per leg
     mapping(uint256 => int32) internal pairEffortBp;    // per pair (i*16+j, i<j)
@@ -77,9 +104,22 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
 
     function setParams(Params calldata p) external onlyGov { _setParams(p); }
 
+    /// @notice Install the monetary-operation policy.  `capBpPerEpoch == 0`
+    ///         switches monetary operations off entirely, which is the
+    ///         default and the baseline this is compared against.
+    function setMonParams(MonParams calldata mp) external onlyGov {
+        // The measurement scale is a CORRECTNESS bound, not a preference:
+        // past roughly the 80-epoch rung the lagged reading still says "dear"
+        // long after the market has gone cheap, so an inflation excursion is
+        // answered by ISSUING more.  Rung 3 (40) is the last safe one.
+        if (mp.measIdx > 3 || mp.leash1e9 < mp.deadband1e9) revert BadParams();
+        monParams = mp;
+    }
+
     function _setParams(Params memory p) internal {
         if (p.epochSeconds == 0 || p.quorum == 0 || p.quorum > K
-            || p.leashInner1e9 > p.leash1e9) revert BadParams();
+            || p.leashInner1e9 > p.leash1e9
+            || p.boundaryBp > 10000) revert BadParams();
         params = p;
         epochSeconds = p.epochSeconds;
         emit ParamsSet(p);
@@ -111,6 +151,46 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
     {
         Leg storage leg = legOf[i];
         return (leg.refTick, leg.lastEpoch, leg.firstEpoch);
+    }
+
+    /// @notice The COMMON mode at ladder scale `k`: the mean of every leg's
+    ///         ladder, measured from that leg's own first observation.
+    ///
+    ///         A tick is a log price, so leg `i`'s ladder is log(price of
+    ///         TOKEN_i in BUCK) and the MEAN of the legs is log(basket priced
+    ///         in BUCK) -- basketValueInBuck itself, the K controller's own
+    ///         process variable.  Because the EMA is linear,
+    ///
+    ///             mean_i EMA_k(c_i)  ==  EMA_k(mean_i c_i)
+    ///
+    ///         so this is the EMA of the common mode at scale k and it costs
+    ///         no new state: the `pairs` engine already maintains every term.
+    ///         The differences steer commodity rebalancing; the mean steers
+    ///         monetary operations.  One filter bank, two mandates.
+    ///
+    ///         Sign: normTick is positive when TOKEN appreciates in BUCK, so
+    ///         a POSITIVE common mode means the basket costs more BUCK than
+    ///         it did -- BUCK is CHEAP.  Units are tick*1e9 (~1bp per tick).
+    function commonMode(uint256 k) public view returns (int256 cm) {
+        if (k >= K) return 0;
+        uint256 seen = 0;
+        uint256 n = constituentCount;
+        for (uint256 i = 0; i < n; i++) {
+            Leg storage leg = legOf[i];
+            if (leg.firstEpoch == 0) continue;
+            cm += int256(leg.m[k]) - int256(leg.refTick) * 1e9;
+            seen++;
+        }
+        if (seen == 0) return 0;
+        cm /= int256(seen);
+    }
+
+    /// @notice Signed monetary effort, bp of NAV per epoch, and whether the
+    ///         operation is outright (changes the balance sheet) or temporary
+    ///         (self-reversing).
+    ///           > 0  issue BUCK      < 0  retire BUCK
+    function monetaryEffort() external view returns (int32 effortBp, bool outright) {
+        return (monEffortBp, monOutright);
     }
 
     function pairEffortOf(uint256 i, uint256 j) external view returns (int256) {
@@ -175,7 +255,53 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
         leg.lastEpoch = e;
 
         _refreshPairs(i, e);
+        _updateMonetary(e);
         emit Poked(i, e, normTick, netEffortBp[i]);
+    }
+
+    /// @dev Advance the monetary policy once per epoch, on the common mode.
+    ///
+    ///      Persistence is measured as a DURATION rather than as an
+    ///      instantaneous velocity.  A short-window velocity changes sign on
+    ///      noise, so a "has it turned" test built on velocity almost never
+    ///      reports "no" -- in the model that made the outright quadrants
+    ///      unreachable, and supply never moved while half the mechanism
+    ///      looked healthy.
+    function _updateMonetary(uint32 e) internal {
+        MonParams memory mp = monParams;
+        if (mp.capBpPerEpoch == 0) return;          // monetary operations off
+        if (monLastEpoch == e + 1) return;          // once per epoch
+        monLastEpoch = e + 1;
+
+        // Every leg must have the measurement rung warm, or the mean is taken
+        // over ladders that are still seeded at their first observation and
+        // reads as a spurious zero.
+        uint32 w = WINDOWS[mp.measIdx];
+        uint256 n = constituentCount;
+        if (n == 0) { monEffortBp = 0; monOutright = false; return; }
+        for (uint256 i = 0; i < n; i++) {
+            Leg storage leg = legOf[i];
+            if (leg.firstEpoch == 0 || e + 1 < leg.firstEpoch + w) {
+                monEffortBp = 0; monOutright = false; return;
+            }
+        }
+
+        int256 cm = commonMode(mp.measIdx);
+        int256 absCm = cm >= 0 ? cm : -cm;
+
+        monOverEpochs = absCm > int256(uint256(mp.leash1e9))
+            ? monOverEpochs + 1 : 0;
+
+        if (absCm < int256(uint256(mp.deadband1e9))) {
+            monEffortBp = 0; monOutright = false; return;
+        }
+
+        int256 bp = int256(uint256(mp.kappa1e9)) * absCm / 1e9 / 1e9;
+        int256 cap = int256(uint256(mp.capBpPerEpoch));
+        if (bp > cap) bp = cap;
+        // cm > 0 == basket dearer in BUCK == BUCK CHEAP == retire (negative).
+        monEffortBp  = cm > 0 ? -int32(int256(bp)) : int32(int256(bp));
+        monOutright  = monOverEpochs >= mp.persistEpochs;
     }
 
     /// @dev Recompute the pair efforts involving leg `i` against each synced
@@ -233,8 +359,34 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
         }
         if (votes < p.quorum) return 0;
 
+        // Under proportional costs the optimal policy is a NO-TRADE REGION:
+        // one trades only far enough to reach its boundary, never all the way
+        // to the target (Davis-Norman 1990; Shreve-Soner 1994).  `boundaryBp`
+        // is how much of the deadband to treat as that boundary -- 0 sizes on
+        // the full |d| (toward the target), 10000 sizes on |d| - deadband (to
+        // the edge).
+        //
+        // It is a governance knob and not a constant because the measured
+        // sign FLIPS with trading cost, exactly as the theory predicts: the
+        // optimal region widens with cost, so imposing a wide one where
+        // trading is cheap gives up premium for nothing.  Against the Python
+        // model (rebalance_policy.py, `pairs` vs `pairs-nt`, 20y x 5 seeds,
+        // premium vs hold per year):
+        //
+        //     cost/leg      30bp      100bp      250bp
+        //     delta       -5.2bp     +3.6bp    +15.9bp
+        //
+        // on ~15% less turnover throughout.  A 30bp venue -- which is what
+        // the 0.30% TOKEN/BUCK pools are -- should leave this at 0.
+        int256 sizeD = absD;
+        if (p.boundaryBp != 0) {
+            sizeD -= int256(uint256(p.deadband1e9)) * 1e9
+                * int256(uint256(p.boundaryBp)) / 10000;
+            if (sizeD <= 0) return 0;      // inside the boundary: hold still
+        }
+
         // effort = kappa * |d| * votes/K, in bp of NAV per epoch, capped.
-        int256 bp = (int256(uint256(p.kappa1e9)) * absD * int256(votes))
+        int256 bp = (int256(uint256(p.kappa1e9)) * sizeD * int256(votes))
             / int256(K) / 1e9 / 1e14;
         int256 cap = int256(uint256(p.capBpPerEpoch));
         if (bp > cap) bp = cap;

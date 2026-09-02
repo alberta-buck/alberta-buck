@@ -28,6 +28,10 @@ from alberta_buck.sim.deploy import deploy
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
 import alberta_buck.sim.director_agent  # noqa: F401  triggers @_register
+# The discount-BUCK time arbs and the honest credit debtors live here.
+# Registering them unconditionally lets any scenario name them: the
+# module only imports repo-local helpers, so this costs nothing.
+import alberta_buck.sim.equilibrium_agents  # noqa: F401  triggers @_register
 from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )

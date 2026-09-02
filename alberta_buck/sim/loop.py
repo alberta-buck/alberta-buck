@@ -5,12 +5,17 @@ from __future__ import annotations
 import random
 
 from alberta_buck.sim import identity as idmod
+from alberta_buck.sim import rng as _rng_mod
 from alberta_buck.sim.agents import REGISTRY, MarketMakerWhale
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
 import alberta_buck.sim.direct_mint  # noqa: F401  triggers @_register
 import alberta_buck.sim.director_agent  # noqa: F401  triggers @_register
+# The discount-BUCK time arbs and the honest credit debtors live here.
+# Registering them unconditionally lets any scenario name them: the
+# module only imports repo-local helpers, so this costs nothing.
+import alberta_buck.sim.equilibrium_agents as eqm  # noqa: F401  @_register
 from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )
@@ -29,6 +34,11 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     chain = Chain(w3, w3.eth.accounts[0])
     rng = idmod.seeded_rng(scenario.seed)
     prng = random.Random(scenario.seed)
+    # Agent RNG mode for this run ("" = historical Mersenne; "keyed" = the
+    # language-neutral KeyedRandom streams for the JS port).  Set before any
+    # agent setup; reset explicitly each run since the flag is
+    # process-global (back-to-back runs in one process).
+    _rng_mod.set_mode(getattr(scenario, "rng_mode", ""))
 
     if verbose:
         print(f"[sim] deploying '{scenario.name}' with {basket_impl} basket "
@@ -44,6 +54,11 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     BootstrapDMAgent._counter = 0
     DirectMintAgent._counter = 0
     DirectMintBuckAgent._counter = 0
+    # Same defensiveness for the equilibrium agents, now that non-equilibrium
+    # scenarios name them too (build_equilibrium resets these itself).
+    eqm.FatCreditBorrowerAgent._regime_counter = 0
+    eqm.SaverAgent._regime_counter = 0
+    eqm.BuckCreditDebtorAgent._arrival_seq = 0
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
         cls = REGISTRY[cls_name]
@@ -124,9 +139,21 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
         # TOKEN/USDC truth pool.  Updating only one random token let the
         # floating BUCK/USDC gauge be dominated by whichever asset was most
         # recently snapped, making TOKEN/BUCK->USD plots look cross-wired.
-        whale_tick = prng.randrange(scenario.ticks_per_day)
-        whale_order = list(range(n_tok))
-        prng.shuffle(whale_order)
+        # Keyed mode: the loop's own draws come from keyed hashes instead of
+        # the shared Mersenne stream, so whale timing and the agents' act
+        # order do not depend on how many agents exist -- cells that differ
+        # only by an (inert) agent population share an identical history.
+        # Historical (default) mode is untouched.
+        keyed = _rng_mod.mode() == "keyed"
+        if keyed:
+            whale_tick = int(_rng_mod.keyed_u(scenario.seed, "whale", day)
+                             * scenario.ticks_per_day)
+            whale_order = sorted(range(n_tok), key=lambda i: _rng_mod.keyed_u(
+                scenario.seed, "whale-order", day, i))
+        else:
+            whale_tick = prng.randrange(scenario.ticks_per_day)
+            whale_order = list(range(n_tok))
+            prng.shuffle(whale_order)
         for tick in range(scenario.ticks_per_day):
             ts += tick_secs
             anvil.warp_to(ts)
@@ -135,8 +162,13 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
                 for wagent in whales:
                     for whale_tok in whale_order:
                         wagent.snap(d, scenario, day, whale_tok, ctr)
-            order = arbs[:]
-            prng.shuffle(order)
+            if keyed:
+                order = sorted(arbs, key=lambda a: _rng_mod.keyed_u(
+                    scenario.seed, "order", day, tick, type(a).__name__,
+                    a.idx))
+            else:
+                order = arbs[:]
+                prng.shuffle(order)
             for a in order:
                 a.act(d, scenario, day, tick, ctr)
         try:
@@ -160,7 +192,17 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
                   f"  cycle={ctr['cycleTrades']} direct={ctr['directTrades']}",
                   flush=True)
 
-    path = snap.write(out_path)
+    # The vector is written AFTER the teardown, below.  Writing it here left
+    # every run's books open: the last frame carried whatever positions the
+    # Bernoulli exit never happened to close -- 91 of them, 9.5M BUCK, in the
+    # 730-day reverting run -- and their profit was never booked into
+    # dmProfitUsd.  The teardown then force-redeemed them and released a
+    # further 79k BUCK to treasury that no reader of the vector could see.
+    #
+    # The per-day frames stay exactly as they were, because they record
+    # VOLUNTARY behaviour and a forced liquidation is a different kind of
+    # event.  The teardown result goes into the vector's metadata instead, so
+    # a run closes its own books without a synthetic jump in the time series.
 
     # --- teardown: force-redeem active DM positions, then report ----- #
     if verbose:
@@ -213,6 +255,20 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
             print(f"[teardown] teardown released "
                   f"{treasury_delta/E6:,.2f} BUCK to treasury")
 
+        # Closed books, for readers of the vector.  `outstandingPost` is what
+        # remains after every voluntary position is forced shut: it is the
+        # pinned BootstrapDMAgent capital, which deposits once and never
+        # exits, and it is why a run does not return to its starting state.
+        snap.meta["teardown"] = {
+            "forcedExits": forced_ok,
+            "outstandingPre": outstanding_pre,
+            "outstandingPost": outstanding_post,
+            "treasuryPre": treasury_pre,
+            "treasuryPost": treasury_post,
+            "treasuryReleased": treasury_delta,
+            "navPost": nav_post,
+        }
+
         # End-of-sim summary: entries, exits, treasury share of NAV.
         #
         # "treasury share" = treasuryBuck / NAV.  treasuryBuck is the
@@ -244,6 +300,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
             roi = 100 * fee / cap0 if cap0 else 0
             print(f"  {g:5s}  capital ${cap0/E6:,.0f}  "
                   f"fees ${fee/E6:,.0f}  ROI {roi:+.3f}%")
+
+    # Final write, with the teardown recorded: the run's books are closed.
+    path = snap.write(out_path) if out_path else None
 
     # --- summary ----------------------------------------------------- #
     tail = snap.frames[-30:] if len(snap.frames) >= 30 else snap.frames

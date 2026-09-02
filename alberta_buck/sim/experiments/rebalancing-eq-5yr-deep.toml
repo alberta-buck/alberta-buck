@@ -1,0 +1,22 @@
+# rebalancing-eq variant "deep": 4x pool depth alone, no saver endowment.
+# The attribution single for endow-deep: if endow-deep's flat-K result
+# holds at the tail, this arm (against "endow" and the base) separates how
+# much came from the deeper pools absorbing flow vs the savers' standing
+# sell-side inventory.
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-deep"
+notes = "rebalancing-eq + 4x pool depth (no endowment)"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[deploy]
+target_buck_m = 40.0
+target_buck_lp_m = 50.0    # deep national-scale BUCK/USDC exit route

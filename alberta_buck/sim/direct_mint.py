@@ -32,6 +32,7 @@ from __future__ import annotations
 import random
 
 from alberta_buck.sim import identity as idmod
+from alberta_buck.sim import rng as _rng_mod
 from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim.router import MIN_SQRT_RATIO, MAX_SQRT_RATIO
@@ -268,19 +269,14 @@ class DirectMintAgent(_DMBase):
 
     def setup(self, d, scenario, rng) -> None:
         super().setup(d, scenario, rng)
-        # Per-agent RNG keyed off (scenario.seed, agent.idx) for
-        # reproducibility independent of the order other agents consume
-        # the shared `rng`.  random.Random rejects tuples -- fold the
-        # key triple into a single 64-bit-safe int by hashing the bytes.
-        import hashlib
-        seed_bytes = (
-            int(scenario.seed).to_bytes(32, "big", signed=False)
-            + b"DirectMintAgent"
-            + int(self._seq).to_bytes(8, "big", signed=False)
-        )
-        self._rng = random.Random(
-            int.from_bytes(hashlib.blake2b(seed_bytes, digest_size=16).digest(),
-                           "big"))
+        # Per-agent RNG keyed off (scenario.seed, "DirectMintAgent",
+        # agent._seq) for reproducibility independent of the order other
+        # agents consume the shared `rng`.  agent_rng reproduces the
+        # historical blake2b->Mersenne seeding byte-for-byte by default and
+        # honors the run's keyed mode (rng.py).  NB the literal class-name
+        # key: ArrivingDMAgent subclasses share this stream family.
+        self._rng = _rng_mod.agent_rng(
+            scenario.seed, "DirectMintAgent", self._seq)
 
     def act(self, d, scenario, day, tick, ctr) -> None:
         if self._rng is None:
@@ -327,15 +323,8 @@ class DirectMintBuckAgent(_DMBase):
         return "0x" + "0" * 40
 
     def setup(self, d, scenario, rng) -> None:
-        import hashlib
-        seed_bytes = (
-            int(scenario.seed).to_bytes(32, "big", signed=False)
-            + b"DirectMintBuckAgent"
-            + int(self._seq).to_bytes(8, "big", signed=False)
-        )
-        self._rng = random.Random(
-            int.from_bytes(hashlib.blake2b(seed_bytes, digest_size=16).digest(),
-                           "big"))
+        self._rng = _rng_mod.agent_rng(
+            scenario.seed, "DirectMintBuckAgent", self._seq)
 
         self.proxy = d.chain.deploy("SimLP", sol_file="SimLP")
         d.chain.send(d.reg.functions.bindContract(
@@ -343,6 +332,11 @@ class DirectMintBuckAgent(_DMBase):
 
         now_ts = d.w3.eth.get_block("latest")["timestamp"]
         face = self.SEED_USDC * self.CREDIT_MULTIPLE
+        # The proxy must accept the deployer as an insurer before a credit
+        # can be issued to it; it is a contract, so the opt-in goes through
+        # exec().
+        self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
+            "setCreditIssuer", args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
         d.chain.send(d.credit.functions.createCredit(
             self.proxy.address, 0, face, 0, 0, 0, now_ts, 0))
 

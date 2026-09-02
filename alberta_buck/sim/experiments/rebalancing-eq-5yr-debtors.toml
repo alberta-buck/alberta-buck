@@ -1,0 +1,46 @@
+# rebalancing-eq variant "debtors": the rational supply side.  The base
+# arm's K climbs monotonically (integral of a persistent ~0.3% lean)
+# because nothing issues BUCK for ECONOMIC reasons -- the FatCredit
+# borrowers follow a scheduled adoption S-curve, capped util, fixed
+# population.  This arm adds 24 honest BuckCreditDebtorAgents (audited
+# octl mortgage debtors: real premium-bearing credit, the real on-chain
+# funding gate, obligations as chain truth) whose theta law deploys
+# whenever the BUCK discount is small vs mortgage interest saved -- in a
+# lean regime (bv < 1) the discount is zero, so they monetize collateral
+# and sell BUCK into the premium until parity.  The supply-side mirror of
+# the savers' value-based demand, plus an honest amortization-driven
+# retirement channel.  Knobs from experiments/realistic.toml (the audited
+# debtor world); staggered arrival over the first year as there.
+#
+# See rebalancing-eq-5yr.toml for the variant naming strategy.
+
+name = "rebalancing-eq-5yr-debtors"
+notes = "rebalancing-eq + 24 honest mortgage debtors (theta-law issuance)"
+
+# Full rebalancing cadence, matching the base arm (see its TOML).
+[scenario]
+family = "rebalancing-eq"
+years = 5.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[scenario.agents]
+BuckCreditDebtorAgent = 24
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]          # aggressiveness: tolerated discount, yrs of apr
+apr = [0.045, 0.065]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform (median ~550k)
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [50, 150]      # REAL insurance premium -> real funding gate
+save_rate = [0.25, 0.75]
+refi_mode = "atomic"      # ex-ante whole-conversion evaluation (see agent)
+arrive_frac = [0.0, 0.5]    # staggered arrival over the first year
+
+# A national-scale BUCK/USDC pair is deep; a shallow floating pool is an
+# artificial exit bottleneck (real routing would also spread exits across
+# BUCK/TOKEN->TOKEN/USDC legs).  The BUCK-unaware arbs keep it balanced.
+[deploy]
+target_buck_lp_m = 50.0

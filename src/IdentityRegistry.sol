@@ -137,14 +137,42 @@ contract IdentityRegistry {
     uint256 internal constant H_Y =
         3372178911466361414640845512261989709787490420390555908180501907382229222644;
 
-    /// @notice Depth of the registry-Identity Merkle accumulator.  Must match
-    ///         the depth used by circuits/identity_membership.circom and the
-    ///         Python alberta_buck.registry.tree.IdentityMerkleTree.
+    /// @notice Depth of the registry-Identity Merkle accumulator.
+    ///
+    /// @dev    This is the depth of the AGGREGATOR tree, not of an individual
+    ///         registry's sub-tree, and the distinction is load-bearing.
+    ///         Identity organizations each maintain their own sub-tree and
+    ///         aggregate into a single on-chain root: see
+    ///         `alberta_buck/registry/merkle_service.py`, where
+    ///         `AggregatorMembershipProof.aggregator_root` is documented as
+    ///         "the combined root (= on-chain identityRoot)" and
+    ///         `FullMembershipProof` is a sub-tree path PLUS an aggregator
+    ///         path.  Sub-trees default to depth 12
+    ///         (`IdentityMerkleTree(depth=12)`), and the committed
+    ///         cross-language vectors record exactly that split --
+    ///         `core/vectors/registry-kernel-vectors.json` has
+    ///         `aggregator.depth = 10` beside `reg_a.depth = reg_b.depth = 12`.
+    ///
+    ///         An earlier version of this comment said the constant "must
+    ///         match ... alberta_buck.registry.tree.IdentityMerkleTree",
+    ///         which reads as though the sub-tree class should be 10 and
+    ///         invites someone to "fix" the Python default.  It should not be
+    ///         changed: 12 is correct for a sub-tree and 10 is correct here.
+    ///
+    ///         CAVEAT, and it is a real gap rather than a nuance:
+    ///         circuits/identity_membership.circom proves ONE depth-10 path
+    ///         from identity_leaf(M) straight to `identityRoot`, so it cannot
+    ///         verify a composed sub-tree + aggregator proof.  The two-level
+    ///         design currently exists off-chain in Python only; nothing
+    ///         on-chain consumes a `FullMembershipProof`.  Reconciling them
+    ///         needs either a composed circuit or a flattened accumulator.
     uint8   public constant IDENTITY_TREE_DEPTH = 10;
 
     /// @notice Empty-subtree roots at each depth, precomputed as
     ///         ZERO_{d+1} = Poseidon([ZERO_d, ZERO_d]) with ZERO_0 = 0.
-    ///         Matches alberta_buck.registry.tree.IdentityMerkleTree._zeros.
+    ///         Matches IdentityMerkleTree._zeros AT THE AGGREGATOR DEPTH --
+    ///         the zero ladder is depth-independent, so a depth-12 sub-tree
+    ///         shares ZERO_0..ZERO_10 and simply carries two more.
     uint256 internal constant ZERO_0  = 0;
     uint256 internal constant ZERO_1  = 14744269619966411208579211824598458697587494354926760081771325075741142829156;
     uint256 internal constant ZERO_2  = 7423237065226347324353380772367382631490014989348495481811164164159255474657;

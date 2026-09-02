@@ -80,8 +80,19 @@ contract PairsRebalanceDirectorTest is Test {
             deadband1e9:   15_000_000,      // 1.5%
             leash1e9:      300_000_000,     // 30%
             leashInner1e9: 250_000_000,     // 25%
-            capBpPerEpoch: CAP
+            capBpPerEpoch: CAP,
+            boundaryBp:    0                // size on |d| (toward the target)
         });
+    }
+
+    /// Same knobs, but size on the EXCESS over the deadband: the no-trade
+    /// region form.  `bp` is how much of the deadband becomes the boundary.
+    function _paramsBoundary(uint32 bp)
+        internal pure returns (PairsRebalanceDirector.Params memory)
+    {
+        PairsRebalanceDirector.Params memory p = _params();
+        p.boundaryBp = bp;
+        return p;
     }
 
     function setUp() public {
@@ -263,6 +274,89 @@ contract PairsRebalanceDirectorTest is Test {
         assertLt(gasFresh, 30_000, "fresh-epoch guard is near-free");
     }
 
+    // --- The no-trade boundary ------------------------------------------------ //
+    //
+    // Under proportional costs the optimal policy trades only to the edge of a
+    // no-trade region, never to the target (Davis-Norman, Shreve-Soner).
+    // `boundaryBp` selects between the two, and must do so without breaking the
+    // matched-pair property that makes the engine self-financing.
+
+    function test_boundary_sizes_on_the_excess() public {
+        PairsRebalanceDirector nt =
+            new PairsRebalanceDirector(address(basket), GOV,
+                                       _paramsBoundary(10000));
+        nt.syncConstituents();
+
+        // Same path as the confirmed-turn test, poking both twins together.
+        for (uint256 e = 0; e <= 24; e++) {
+            _warpToEpoch(e);
+            dir.pokeAll();
+            nt.pokeAll();
+        }
+        int24 t0 = 0;
+        uint256 ep = 25;
+        for (uint256 k = 0; k < 10; k++) {
+            t0 += 150;
+            pools[0].setTick(t0);
+            _warpToEpoch(ep++);
+            dir.pokeAll();
+            nt.pokeAll();
+        }
+        for (uint256 k = 0; k < 6; k++) {
+            _warpToEpoch(ep++);
+            dir.pokeAll();
+            nt.pokeAll();
+        }
+        for (uint256 k = 0; k < 12; k++) {
+            t0 -= 100;
+            pools[0].setTick(t0);
+            _warpToEpoch(ep++);
+            dir.pokeAll();
+            nt.pokeAll();
+        }
+
+        // The turn is confirmed for both: same direction, same quorum.
+        assertLt(dir.effortOf(0), 0, "plain: sell the rich leg");
+        assertLt(nt.effortOf(0), 0, "boundary: sell the rich leg too");
+
+        // ... but the boundary form subtracts the deadband before sizing, so
+        // it commits strictly less to the same signal.
+        assertGt(nt.effortOf(0), dir.effortOf(0),
+            "boundary trades less (both negative, so 'greater' is smaller)");
+
+        // The matched-pair invariant must survive the change.
+        assertEq(nt.effortOf(0) + nt.effortOf(1) + nt.effortOf(2), 0,
+            "boundary form still nets to zero");
+        assertEq(nt.redeemHint(), 0, "same rich leg");
+    }
+
+    function test_boundary_zero_is_the_existing_behaviour() public {
+        PairsRebalanceDirector twin =
+            new PairsRebalanceDirector(address(basket), GOV,
+                                       _paramsBoundary(0));
+        twin.syncConstituents();
+        pools[0].setTick(500);
+        buck.setBal(address(pools[0]), 115e18);
+        for (uint256 e = 0; e <= 30; e++) {
+            _warpToEpoch(e);
+            dir.pokeAll();
+            twin.pokeAll();
+        }
+        for (uint256 i = 0; i < 3; i++) {
+            assertEq(twin.effortOf(i), dir.effortOf(i),
+                "boundaryBp 0 is bit-identical to the default");
+        }
+    }
+
+    function test_boundary_out_of_range_reverts() public {
+        vm.prank(GOV);
+        vm.expectRevert(RebalanceDirectorBase.BadParams.selector);
+        dir.setParams(_paramsBoundary(10001));
+
+        vm.prank(GOV);
+        dir.setParams(_paramsBoundary(10000));   // the upper bound is legal
+    }
+
     function test_params_onlyGov() public {
         PairsRebalanceDirector.Params memory p = _params();
         p.quorum = 5;
@@ -270,7 +364,7 @@ contract PairsRebalanceDirectorTest is Test {
         dir.setParams(p);
         vm.prank(GOV);
         dir.setParams(p);
-        (, uint8 q,,,,,) = dir.params();
+        (, uint8 q,,,,,,) = dir.params();   // 8 fields since boundaryBp
         assertEq(q, 5);
     }
 

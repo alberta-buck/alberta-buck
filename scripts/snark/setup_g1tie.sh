@@ -94,11 +94,10 @@ sed -i.bak 's/public view returns/public returns/g' \
 rm -f "$BUILD_DIR/Groth16Verifier.sol.bak"
 cp "$BUILD_DIR/Groth16Verifier.sol" \
     "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
-# EIP-197 G2 encoding fix: MUST run after cp to avoid macOS sed temp-file issues
-# (sed -i uses atomic rename; python must open the file after sed completes)
-python3 "$REPO_ROOT/scripts/snark/fix_verifier_g2.py" \
-    "$REPO_ROOT/src/IdentityMembershipG1TieVerifier.sol"
-echo "  -> src/IdentityMembershipG1TieVerifier.sol (EIP-197 G2 fix applied)"
+# The verifier is committed STOCK -- byte-for-byte as snarkjs exports it
+# (after the contract rename above).  The EIP-197 pi_b swap happens at vector
+# PACKING below instead, matching snarkjs's own `zkey export soliditycalldata`.
+echo "  -> src/IdentityMembershipG1TieVerifier.sol (stock snarkjs export)"
 
 # ---- Step 6: Generate Forge test vectors ----
 echo "--- Generating Forge test vectors ---"
@@ -112,8 +111,8 @@ with open('$BUILD_DIR/public.json') as f: pub = json.load(f)
 vectors = {
     'a': [str(proof['pi_a'][0]), str(proof['pi_a'][1])],
     'b': [
-        str(proof['pi_b'][0][0]), str(proof['pi_b'][0][1]),
-        str(proof['pi_b'][1][0]), str(proof['pi_b'][1][1]),
+        str(proof['pi_b'][0][1]), str(proof['pi_b'][0][0]),
+        str(proof['pi_b'][1][1]), str(proof['pi_b'][1][0]),
     ],
     'c': [str(proof['pi_c'][0]), str(proof['pi_c'][1])],
     'pub': [str(p) for p in pub],

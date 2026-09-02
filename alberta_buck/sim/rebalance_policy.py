@@ -104,6 +104,31 @@ SYMS = [r[0] for r in LAG_TABLE]
 HIST_CSV = {r[0]: r[1] for r in LAG_TABLE}
 TAUS = {r[0]: r[2] for r in LAG_TABLE}
 
+# The BuckBasket's charter admits only civilizational basics -- things physics
+# forces to revert -- and warns in so many words against constituents built
+# NOT to revert.  The default six include both cbBTC (x9 over 2020-25) and
+# PAXG, so the historical replay is dominated by exactly the assets the
+# charter would exclude, and any policy comparison run on it is really a
+# comparison of trend behaviour.  BASICS is the charter-compliant subset:
+# energy, construction, food, labour.
+BASICS = ["NRGC", "CNST", "FOOD", "LABR"]
+
+
+def set_syms(subset: Sequence[str]) -> None:
+    """Restrict the run to `subset` (order preserved from LAG_TABLE).
+
+    SYMS is module-global and read by the policies and the synthetic path
+    generator at construction time, so this must be called ONCE before any
+    policy or price series is built -- which is what `run()` does.
+    """
+    global SYMS
+    unknown = [x for x in subset if x not in HIST_CSV]
+    if unknown:
+        raise SystemExit(f"unknown symbols: {unknown}")
+    if len(subset) < 2:
+        raise SystemExit("need at least two constituents")
+    SYMS = [r[0] for r in LAG_TABLE if r[0] in set(subset)]
+
 # Synthetic-mode daily idiosyncratic vol (OU component) and M2 pass-through
 # elasticity per symbol.  Betas ~1 make deviations *transient* -- the premise
 # under test is differential LAG, not differential long-run drift; cbBTC gets
@@ -324,6 +349,7 @@ class FactorPolicy:
 
 
 PAIR_LADDER = [5, 10, 20, 40, 80, 160, 320]     # geometric window ladder
+_SQRT2 = math.sqrt(2.0)
 
 
 class _EmaLadder:
@@ -385,12 +411,20 @@ class PairsPolicy:
     def __init__(self, windows_ladder: Sequence[int] = PAIR_LADDER,
                  quorum: int = 4, kappa: float = 0.5, cap: float = 0.005,
                  deadband: float = 0.015, leash: float = 0.30,
-                 leash_inner: float = 0.25, vote: str = "vel"):
+                 leash_inner: float = 0.25, vote: str = "vel",
+                 boundary: bool = False):
         self.legs = [_EmaLadder(windows_ladder) for _ in SYMS]
         self.K = len(windows_ladder)
         self.quorum = quorum
         self.vote = vote          # "curv": divergence decelerating (early);
                                   # "vel": gap already closing (confirmed)
+        # Under proportional costs the optimal policy is a NO-TRADE REGION
+        # and one trades only far enough to reach its boundary, never to the
+        # target (Davis-Norman 1990; Shreve-Soner 1994).  With boundary=True
+        # the deadband becomes that region and effort is sized on the excess
+        # |d| - deadband; with False it is sized on |d| itself, i.e. toward
+        # the target, which is what every policy in this module did.
+        self.boundary = boundary
         self.kappa = kappa
         self.cap = cap
         self.deadband = deadband
@@ -425,7 +459,8 @@ class PairsPolicy:
                 votes += 1
         if votes < self.quorum:
             return 0.0
-        return min(self.kappa * abs(d) * votes / self.K, self.cap)
+        mag = max(0.0, abs(d) - self.deadband) if self.boundary else abs(d)
+        return min(self.kappa * mag * votes / self.K, self.cap)
 
     def efforts(self, deltas: Sequence[float],
                 prices: Sequence[float] | None = None) -> list[float]:
@@ -456,6 +491,222 @@ class PairsPolicy:
             s = min(scale[i], scale[j])
             net[i] -= e * s
             net[j] += e * s
+        return net
+
+
+def _jacobi_eig(a: list[list[float]], sweeps: int = 24
+                ) -> tuple[list[float], list[list[float]]]:
+    """Cyclic Jacobi eigendecomposition of a small symmetric matrix.
+
+    Returns (eigenvalues, eigenvectors-as-rows), unsorted.  N is 4-6 here, so
+    an O(N^3) pure-Python routine costs nothing and avoids a numpy dependency
+    in a module the Solidity port has to mirror.
+    """
+    n = len(a)
+    m = [row[:] for row in a]
+    v = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
+    for _ in range(sweeps):
+        off = sum(m[i][j] ** 2 for i in range(n) for j in range(n) if i != j)
+        if off < 1e-24:
+            break
+        for pp in range(n - 1):
+            for qq in range(pp + 1, n):
+                if abs(m[pp][qq]) < 1e-18:
+                    continue
+                theta = (m[qq][qq] - m[pp][pp]) / (2.0 * m[pp][qq])
+                t = math.copysign(1.0, theta) / (
+                    abs(theta) + math.sqrt(theta * theta + 1.0))
+                c = 1.0 / math.sqrt(t * t + 1.0)
+                sn = t * c
+                for k in range(n):
+                    mkp, mkq = m[k][pp], m[k][qq]
+                    m[k][pp] = c * mkp - sn * mkq
+                    m[k][qq] = sn * mkp + c * mkq
+                for k in range(n):
+                    mpk, mqk = m[pp][k], m[qq][k]
+                    m[pp][k] = c * mpk - sn * mqk
+                    m[qq][k] = sn * mpk + c * mqk
+                for k in range(n):
+                    vkp, vkq = v[k][pp], v[k][qq]
+                    v[k][pp] = c * vkp - sn * vkq
+                    v[k][qq] = sn * vkp + c * vkq
+    vals = [m[i][i] for i in range(n)]
+    vecs = [[v[r][i] for r in range(n)] for i in range(n)]   # rows = vectors
+    return vals, vecs
+
+
+class ModesPolicy:
+    """Differential mode in an ORTHOGONAL basis -- the polyphase transform.
+
+    The `pairs` engine's weakness is its basis, not its gating.  N legs carry
+    only N-1 independent differential modes, but pairs tracks N(N-1)/2 of
+    them: at N=6 that is fifteen signals over five degrees of freedom.  The
+    quorum therefore counts heavily overlapping evidence as if it were
+    independent, and one leg's excursion appears in every pair containing it
+    -- which is the mechanism behind the reported trend-regime failure, where
+    "the quorum fires on BTC's consolidations" is one excursion voting five
+    times.
+
+    This is what a polyphase drive does about it, in two steps:
+
+      Clarke (abc -> alpha-beta-zero): subtract the cross-sectional mean of
+        log prices.  That removes the zero sequence -- BUCK's own valuation,
+        which is the K-controller's business -- exactly, just as the pairwise
+        log ratio does, but once for the whole vector instead of per pair.
+
+      Park (alpha-beta -> d-q): rotate into the frame the data actually
+        turns in.  Diagonalizing the EWMA covariance of the centred returns
+        gives N-1 orthogonal modes; each is sized independently because they
+        share no variance, so a quorum over modes counts independent
+        evidence.  This is the eigenportfolio construction of Avellaneda and
+        Lee (2010), with the market factor removed by construction rather
+        than by discarding PC1.
+
+    EMA linearity carries over intact: a mode's moving average, velocity and
+    curvature at any scale is the projection of the per-leg ladders onto that
+    mode, so the filter bank is unchanged and no extra state is needed.
+
+    Because every mode is orthogonal to the all-ones vector, the per-leg
+    efforts sum to zero identically -- the trades are self-financing and
+    wash-proof for the same structural reason matched pairs are, without
+    needing to be paired up explicitly.
+    """
+
+    name = "modes"
+
+    def __init__(self, windows_ladder: Sequence[int] = PAIR_LADDER,
+                 quorum: int = 4, kappa: float = 0.5, cap: float = 0.005,
+                 deadband: float = 0.015, leash: float = 0.30,
+                 leash_inner: float = 0.25, vote: str = "vel",
+                 boundary: bool = False, cov_halflife: float = 250.0,
+                 refit_days: int = 60, warmup_days: int = 120):
+        self.n = len(SYMS)
+        self.legs = [_EmaLadder(windows_ladder) for _ in SYMS]
+        self.K = len(windows_ladder)
+        self.quorum = quorum
+        self.kappa = kappa
+        self.cap = cap
+        self.deadband = deadband
+        self.leash = leash
+        self.leash_inner = leash_inner
+        self.vote = vote
+        self.boundary = boundary
+        self.refit_days = refit_days
+        self.warmup_days = warmup_days
+        self.beta_cov = 1.0 - 0.5 ** (1.0 / cov_halflife)
+        self.cov = [[0.0] * self.n for _ in range(self.n)]
+        self.prev_c: list[float] | None = None
+        self.c0: list[float] | None = None
+        self.basis: list[list[float]] = []      # rows: unit mode vectors
+        self.refs: list[float] = []             # day-0 projection per mode
+        self.leashed: dict[int, bool] = {}
+        self.t = 0
+
+    # -- basis ---------------------------------------------------------- #
+
+    def _centre(self, logp: Sequence[float]) -> list[float]:
+        mu = sum(logp) / self.n
+        return [x - mu for x in logp]
+
+    def _refit(self) -> None:
+        """Diagonalize the centred-return covariance; keep the real modes.
+
+        Centring puts the all-ones direction in the null space, so exactly
+        one eigenvalue is ~0 and dropping it leaves the N-1 differential
+        modes.  Sorted by variance so mode 0 is the dominant contrast (e.g.
+        monetary-versus-sticky), which is a tradeable excursion, NOT the
+        common mode -- that is already gone.
+        """
+        vals, vecs = _jacobi_eig(self.cov)
+        order = sorted(range(self.n), key=lambda i: -vals[i])
+        keep = [i for i in order if vals[i] > 1e-14][:self.n - 1]
+        basis = []
+        for i in keep:
+            v = vecs[i]
+            mu = sum(v) / self.n                 # re-orthogonalize vs ones
+            v = [x - mu for x in v]
+            nrm = math.sqrt(sum(x * x for x in v))
+            if nrm > 1e-9:
+                basis.append([x / nrm for x in v])
+        if basis:
+            self.basis = basis
+            self.refs = [sum(b[i] * self.c0[i] for i in range(self.n))
+                         for b in self.basis]
+
+    # -- signal --------------------------------------------------------- #
+
+    def _mode_effort(self, mi: int, b: Sequence[float], d: float) -> float:
+        was = self.leashed.get(mi, False)
+        self.leashed[mi] = abs(d) > (self.leash_inner if was else self.leash)
+        if self.leashed[mi]:
+            return self.cap
+        if abs(d) < self.deadband:
+            return 0.0
+        votes = 0
+        for k in range(self.K):
+            if not all(leg.ready(k) for leg in self.legs):
+                continue
+            g = sum(b[i] * self.legs[i].ma(k)
+                    for i in range(self.n)) - self.refs[mi]
+            if g * d <= 0.0:
+                continue
+            if self.vote == "vel":
+                x = sum(b[i] * self.legs[i].vel(k) for i in range(self.n))
+            else:
+                x = sum(b[i] * self.legs[i].accel(k) for i in range(self.n))
+            if x * math.copysign(1.0, d) < 0.0:
+                votes += 1
+        if votes < self.quorum:
+            return 0.0
+        mag = max(0.0, abs(d) - self.deadband) if self.boundary else abs(d)
+        return min(self.kappa * mag * votes / self.K, self.cap)
+
+    def efforts(self, deltas: Sequence[float],
+                prices: Sequence[float] | None = None) -> list[float]:
+        n = self.n
+        c = self._centre([math.log(p) for p in prices])
+        if self.c0 is None:
+            self.c0 = c[:]
+        for leg, x in zip(self.legs, c):
+            leg.update(x)
+        if self.prev_c is not None:                # EWMA covariance of returns
+            r = [c[i] - self.prev_c[i] for i in range(n)]
+            b = self.beta_cov
+            for i in range(n):
+                for j in range(n):
+                    self.cov[i][j] += (r[i] * r[j] - self.cov[i][j]) * b
+        self.prev_c = c
+        self.t += 1
+        if self.t >= self.warmup_days and (
+                not self.basis or self.t % self.refit_days == 0):
+            self._refit()
+        if not self.basis:
+            return [0.0] * n
+
+        # Deviation vector in the same centred coordinates as the basis.
+        u = [math.log(1.0 + deltas[i]) for i in range(n)]
+        mu = sum(u) / n
+        u = [x - mu for x in u]
+
+        # Scale the projection into PAIR-EQUIVALENT units before applying any
+        # of the shared knobs.  A pair (i,j) is the unit contrast
+        # b = (e_i - e_j)/sqrt(2), and PairsPolicy measures d_ij = u_i - u_j,
+        # which is sqrt(2) times b.u.  Comparing the two policies at one
+        # deadband/leash/kappa without this factor runs `modes` at a 1.41x
+        # tighter deadband -- which showed up exactly as expected, in `modes`
+        # making 5120 small trades against `pairs` 2966.
+        net = [0.0] * n
+        for mi, b in enumerate(self.basis):
+            d = _SQRT2 * sum(b[i] * u[i] for i in range(n))
+            e = self._mode_effort(mi, b, d)
+            if e <= 0.0:
+                continue
+            e = math.copysign(e, d)          # d>0: over-exposed along +b
+            for i in range(n):
+                net[i] -= e * b[i]
+        peak = max(abs(v) for v in net)
+        if peak > self.cap:                  # one scalar: zero-sum preserved
+            net = [v * self.cap / peak for v in net]
         return net
 
 
@@ -726,6 +977,18 @@ def _policies(windows: dict[str, int], kappa: float, cap: float,
         "pairs": lambda: PairsPolicy(quorum=quorum, kappa=pairs_kappa,
                                      cap=cap, deadband=deadband,
                                      vote=pairs_vote),
+        # Proposal 2: same signal, sized to the no-trade boundary.
+        "pairs-nt": lambda: PairsPolicy(quorum=quorum, kappa=pairs_kappa,
+                                        cap=cap, deadband=deadband,
+                                        vote=pairs_vote, boundary=True),
+        # Proposal 1: orthogonal modes instead of redundant pairs...
+        "modes": lambda: ModesPolicy(quorum=quorum, kappa=pairs_kappa,
+                                     cap=cap, deadband=deadband,
+                                     vote=pairs_vote),
+        # ... and both together.
+        "modes-nt": lambda: ModesPolicy(quorum=quorum, kappa=pairs_kappa,
+                                        cap=cap, deadband=deadband,
+                                        vote=pairs_vote, boundary=True),
     }
 
 
@@ -736,6 +999,10 @@ def run_historical(windows, kappa, cap, deadband, cost_bp, rho=3.0,
                    trace_sym="cbBTC", trace_policy="vrate") -> dict:
     prices = load_hist_prices()
     weights = [1.0 / len(SYMS)] * len(SYMS)
+    # The showcase trace defaults to cbBTC, which a charter-compliant subset
+    # deliberately excludes; fall back to the widest-swinging member present.
+    if trace_sym not in SYMS:
+        trace_sym = max(SYMS, key=lambda x: SYNTH_SIGMA.get(x, 0.0))
     out = {"days": len(prices), "syms": SYMS,
            "prices": [[row[i] for row in prices] for i in range(len(SYMS))],
            "series": {}, "metrics": {}, "showcaseSym": trace_sym,
@@ -883,8 +1150,14 @@ def run(mode: str = "both", years: float = 20.0, seeds: int = 5,
         deadband: float = 0.015, sweep: bool = False,
         sweep_policy: str = "factor",
         windows_override: dict[str, int] | None = None,
+        syms: Sequence[str] | None = None,
         out: Path = DEFAULT_OUT) -> dict:
-    windows = derive_windows(TAUS)
+    # Before anything else: the policies and the synthetic generator read
+    # SYMS at construction time.
+    if syms:
+        set_syms(syms)
+    taus = {s_: TAUS[s_] for s_ in SYMS}
+    windows = derive_windows(taus)
     if windows_override:
         windows.update(windows_override)
     cap = cap_bp / 1e4
@@ -894,14 +1167,14 @@ def run(mode: str = "both", years: float = 20.0, seeds: int = 5,
 
     result: dict = {
         "config": {
-            "syms": SYMS, "tausMonths": TAUS, "windows": windows,
+            "syms": SYMS, "tausMonths": taus, "windows": windows,
             "kappa": kappa, "rho": rho, "capBpPerDay": cap_bp,
             "deadband": deadband, "costBp": cost_bp, "years": years,
             "seeds": seeds,
         },
         "lagTable": [
             {"sym": s, "tauMonths": t, "peakCorr": c, "note": n}
-            for s, _, t, c, n in LAG_TABLE
+            for s, _, t, c, n in LAG_TABLE if s in SYMS
         ],
     }
     if mode in ("both", "historical"):
@@ -909,8 +1182,9 @@ def run(mode: str = "both", years: float = 20.0, seeds: int = 5,
                                               cost_bp, rho=rho, quorum=quorum,
                                               pairs_kappa=pairs_kappa,
                                               pairs_vote=pairs_vote)
-        _print_metrics("historical (2020-09 .. 2025-09, 6 constituents):",
-                       result["historical"]["metrics"])
+        _print_metrics(
+            f"historical (2020-09 .. 2025-09, {len(SYMS)} constituents: "
+            f"{','.join(SYMS)}):", result["historical"]["metrics"])
     if mode in ("both", "synthetic"):
         result["synthetic"] = run_synthetic(windows, kappa, cap, deadband,
                                             cost_bp, years, seeds, rho=rho,
@@ -965,10 +1239,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--deadband", type=float, default=0.015)
     parser.add_argument("--sweep", action="store_true",
                         help="coordinate window sweep on synthetic paths")
-    parser.add_argument("--sweep-policy", choices=("factor", "vrate"),
+    parser.add_argument("--sweep-policy",
+                        choices=("factor", "vrate", "pairs", "modes"),
                         default="factor")
     parser.add_argument("--windows", default=None,
                         help="override, e.g. cbBTC=120,FOOD=90")
+    parser.add_argument("--syms", default=None,
+                        help="restrict constituents, e.g. NRGC,CNST,FOOD,LABR "
+                             "or the alias 'basics' -- the charter-compliant "
+                             "subset with the non-reverting assets removed")
     parser.add_argument("--fit-lags", action="store_true",
                         help="re-fit LAG_TABLE from vendored series and exit")
     parser.add_argument("--out", default=str(DEFAULT_OUT))
@@ -985,7 +1264,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             sym, _, days = part.partition("=")
             overrides[sym.strip()] = int(days)
 
-    run(mode=args.mode, years=args.years, seeds=args.seeds,
+    syms = None
+    if args.syms:
+        syms = (BASICS if args.syms.strip().lower() == "basics"
+                else [x.strip() for x in args.syms.split(",") if x.strip()])
+
+    run(mode=args.mode, years=args.years, seeds=args.seeds, syms=syms,
         cost_bp=args.cost_bp, cap_bp=args.cap_bp, kappa=args.kappa,
         rho=args.rho, quorum=args.quorum, pairs_kappa=args.pairs_kappa,
         pairs_vote=args.pairs_vote,

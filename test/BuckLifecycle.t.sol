@@ -233,8 +233,25 @@ contract BuckLifecycleTest is Test {
         );
         _snap("liquidity-removed");
 
-        // ── 6. Alice burns her spendable BUCK, releasing coverage ────────────
-        uint256 burnAmt = buck.balanceOf(alice);
+        // ── 6. Alice releases her coverage ───────────────────────────────────
+        //
+        // Not `balanceOf(alice)`: burn unwinds *coverage*, and her spendable
+        // is more than that.  It also counts BUCK she holds outright (back
+        // from the LP) and headroom from the part of the credit this fixture
+        // force-activated but never drew on.  Neither is releasable here.
+        //
+        // What the outstanding backing can settle is its *present* insured
+        // value less the deposit that comes back with it.  A year of 15 %/yr
+        // declining balance has taken the credit to ~85.8 % of face, so the
+        // cover she bought is worth that much less today -- which is why she
+        // cannot hand back everything the mint delivered, even though the
+        // deposit itself returns in full.
+        uint256 presentValue =
+            buck.mintsBacked(tokenId) * credit.depreciatedFaceValue(tokenId) / 10_000e6;
+        uint256 deposit = buck.mintsPrincipal(tokenId);
+        uint256 burnAmt = presentValue > deposit ? presentValue - deposit : 0;
+        uint256 spendable = buck.balanceOf(alice);
+        if (burnAmt > spendable) burnAmt = spendable;
         if (burnAmt > 0) {
             vm.prank(alice);
             buck.burn(burnAmt);

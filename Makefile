@@ -352,6 +352,12 @@ golden-receipts:  # requires nix-
 # Override the pinned batch sizes (each gets its own circuit + verifier):
 #   make snark SNARK_PINS="1 2 4 8 16"
 #
+# RUNBOOK: doc/snark-regeneration.org -- the dependency chain, timings, disk
+# budget, and the --b-only trap.  Read it before regenerating anything; the
+# artifacts here are a MATCHED SET and regenerating one member invalidates the
+# committed proof vectors of the others.  Run `make nix-test` immediately
+# after any snark-* target, BEFORE committing.
+#
 # !! DEV ENTROPY !!  scripts/snark/setup.sh contributes FIXED dev-only entropy
 # ("alberta-buck-dev-*"), so every artifact here is a REPRODUCIBLE DEV setup --
 # green in tests, but NOT a secure production setup (the toxic waste is known).
@@ -376,7 +382,29 @@ snark-fixtures:
 # Full from-scratch regen (phase 1 + phase 2): removes the dev ptau and every
 # circuit build dir so setup.sh rebuilds the Powers of Tau and all verifiers.
 # Hours, dev entropy only.
+# DESTRUCTIVE.  This is the ONLY target that deletes build/snark/ptau, and that
+# directory is the expensive one: the powers of tau run to gigabytes
+# (pot20_final.ptau alone is 1.1G) and take hours to regenerate.  Every other
+# snark target leaves it alone -- ensure_ptau() reuses an existing
+# potN_final.ptau and prints "[ptau] reusing".  If you only want fresh zkeys
+# and verifiers, `make snark-setup` is the target you want: it rebuilds the
+# circuits against the ptau you already have.
+#
+# Guarded because losing this directory once already cost a recovery from an
+# old checkout.  Set CONFIRM=yes for non-interactive use (CI, make -j).
 snark-ptau:
+	@if [ "$(CONFIRM)" != "yes" ]; then \
+	  echo; echo "  *** snark-ptau DELETES the powers of tau ***"; echo; \
+	  if [ -d build/snark/ptau ]; then \
+	    echo "  about to remove $$(du -sh build/snark/ptau 2>/dev/null | cut -f1) from build/snark/ptau:"; \
+	    ls build/snark/ptau/*_final.ptau 2>/dev/null | sed 's|^|    |'; \
+	  else \
+	    echo "  (no build/snark/ptau present -- nothing to lose)"; \
+	  fi; \
+	  echo; echo "  Regenerating takes hours.  For zkeys/verifiers only: make snark-setup"; echo; \
+	  printf "  Type 'delete-ptau' to proceed: "; read ans; \
+	  if [ "$$ans" != "delete-ptau" ]; then echo "  aborted -- nothing removed"; exit 1; fi; \
+	fi
 	rm -rf build/snark/ptau build/snark/mint build/snark/spend $(SNARK_DIRS)
 	$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
 
@@ -727,6 +755,127 @@ sim-rebalancing-prorata:	sim-run-rebalancing-prorata sim-plot-rebalancing-prorat
 sim-rebalancing-traditional:	sim-run-rebalancing-traditional sim-plot-rebalancing-traditional
 
 
+# -- The reverting regime: oscillation without drift -------------------
+#
+# The committed price CSVs are GBM with +8%/+15%/+2% annual drift baked in,
+# which confounds every reversion measurement made against them.  A
+# rebalancing premium is a claim about harvesting oscillation and a demand
+# agent is judged on buying cheap; in a market that rises throughout,
+# buy-and-hold beats both for reasons unrelated to either mechanism.
+#
+# The revert regime keeps the same volatility and removes the drift: an
+# Ornstein-Uhlenbeck walk pinned by a Brownian bridge, so each series ends
+# EXACTLY where it began.  Whatever is earned here came from the
+# oscillation, because there is no trend left to earn from.
+#
+#   make nix-sim-gen-prices-revert       # write prices/*-rev.csv (committed)
+#   make nix-sim-rebalancing-revert      # run + plot the reverting regime
+
+REBALANCING_VECTOR_REVERT = test/vectors/rebalancing-sim-revert.json
+
+.PHONY: sim-gen-prices-revert sim-run-rebalancing-revert
+.PHONY: sim-plot-rebalancing-revert sim-rebalancing-revert
+
+sim-gen-prices-revert:
+	python -m $(SIM_PKG).gen_prices --regime revert
+
+sim-run-rebalancing-revert:	sim-build
+	python -m $(SIM_PKG) --scenario rebalancing-revert --days $(SIM_DAYS) \
+		--ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--out $(REBALANCING_VECTOR_REVERT)
+
+sim-plot-rebalancing-revert:	$(REBALANCING_VECTOR_REVERT)
+	REB_VECTOR=$(REBALANCING_VECTOR_REVERT) \
+		REB_OUT=images/rebalancing-sim-revert.png \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing-revert:	sim-run-rebalancing-revert sim-plot-rebalancing-revert
+
+# Who collects the rebalancing premium: per-commodity excursions, the
+# basketValueInBuck break, and the depositor/treasury split.  The chain-sim
+# answer to the article's Figure 1.
+#   make nix-sim-plot-basket-split
+.PHONY: sim-plot-basket-split
+sim-plot-basket-split:	$(REBALANCING_VECTOR_REVERT)
+	python -m pytest alberta_buck/sim/plot_basket_split.py -v -s
+
+
+# ── Monetary operations A/B ───────────────────────────────────────────
+#
+# The BuckBasket's operations desk (alberta-buck-operations.org, phase 2)
+# run as an agent against the live chain sim, compared against the same
+# scenario and seed without it.  Two runs, then the comparison:
+#
+#   make nix-venv-sim-monetary-ops        # both runs + the table
+#   make nix-venv-sim-compare-ops         # just the table, from existing runs
+#
+# Written to their own vectors so neither clobbers the committed baseline.
+
+OPS_VECTOR_OFF	= test/vectors/monetary-ops-off.json
+OPS_VECTOR_ON	= test/vectors/monetary-ops-on.json
+
+.PHONY: sim-monetary-ops sim-run-ops-off sim-run-ops-on sim-compare-ops
+
+# SIM_SEED selects the draw.  Both arms MUST use the same one -- the whole
+# comparison is that they differ only in the roster.  Sweep several: the
+# model's failure case reversed sign between one seed and nine.
+SIM_SEED	?=
+OPS_SEED	= $(if $(SIM_SEED),--seed $(SIM_SEED),)
+
+sim-run-ops-off:	sim-build
+	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) \
+		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(OPS_VECTOR_OFF)
+
+sim-run-ops-on:	sim-build
+	SIM_MONETARY_OPS=1 python -m $(SIM_PKG) --scenario rebalancing-revert \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) \
+		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(OPS_VECTOR_ON)
+
+sim-compare-ops:
+	python -m $(SIM_PKG).compare_ops $(OPS_VECTOR_OFF) $(OPS_VECTOR_ON)
+
+sim-monetary-ops:	sim-run-ops-off sim-run-ops-on sim-compare-ops
+
+
+# ── The ops BASKET A/B (contract, not agent) ──────────────────────────
+#
+# Same scenario and seed; the ONLY difference is which shell is deployed.
+# The monetary-ops AGENT is off in both arms, so what is measured is the
+# contract-side desk -- full-strength Q2/Q4 via burnFromBasket/mintFromBasket,
+# which no agent can reach.
+#
+#   make nix-venv-sim-basket-ops        # both arms + the table
+#
+# Sweep the overlap between the fast desk and K's slow forcing with
+# SIM_OPS_POSITION_BP / SIM_OPS_OUTRIGHT_BP / SIM_OPS_CAPITAL_USD.
+
+BASKET_VECTOR_OFF	= test/vectors/basket-ops-off.json
+BASKET_VECTOR_ON	= test/vectors/basket-ops-on.json
+
+.PHONY: sim-basket-ops sim-run-basket-off sim-run-basket-on sim-compare-basket
+
+sim-run-basket-off:	sim-build
+	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket prorata --backend $(SIM_BACKEND) \
+		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(BASKET_VECTOR_OFF)
+
+sim-run-basket-on:	sim-build
+	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
+		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
+		--basket ops --backend $(SIM_BACKEND) \
+		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(BASKET_VECTOR_ON)
+
+sim-compare-basket:
+	python -m $(SIM_PKG).compare_ops $(BASKET_VECTOR_OFF) $(BASKET_VECTOR_ON)
+
+sim-basket-ops:	sim-run-basket-off sim-run-basket-on sim-compare-basket
+
+
 # ── Pure price-flow basket simulator (no Anvil) ───────────────────────
 #
 # Ad-hoc check of investor flow rebalancing against the generated
@@ -929,6 +1078,127 @@ sim-experiment:	sim-build
 sim-experiment-%:	sim-build
 	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
 		--experiment alberta_buck/sim/experiments/$*.toml $(EQ_SETS)
+
+# -- Rebalancing under the equilibrium financial structure -------------
+#
+# The eq-baseline-5yr world (same window, basket recomposition, deploy
+# knobs, borrower/saver loop and seed) plus a DirectorKeeperAgent, so the
+# rebalance director's contribution to the closed loop is the only delta
+# against eq-baseline-5yr-prorata.  Own vector/image names; neither the
+# synthetic rebalancing scenarios nor the eq-baseline vectors are touched.
+#
+#   make nix-sim-rebalancing-eq          # run -> plot
+#   make nix-sim-run-rebalancing-eq      # just the run (~35min+ full 5y)
+#   make nix-sim-plot-rebalancing-eq     # just the plot
+#
+# Smoke first with a short horizon:  ... REBALANCING_EQ_DAYS=120
+# (the full 5y window is still generated; only the run is truncated).
+
+REBALANCING_EQ_TOML	= alberta_buck/sim/experiments/rebalancing-eq-5yr.toml
+REBALANCING_EQ_VECTOR	= test/vectors/rebalancing-sim-eq.json
+REBALANCING_EQ_IMAGE	= images/rebalancing-sim-eq.png
+REBALANCING_EQ_DAYS	?=
+
+.PHONY: sim-run-rebalancing-eq sim-plot-rebalancing-eq sim-rebalancing-eq
+
+sim-run-rebalancing-eq:	sim-build
+	python -m $(SIM_PKG) --experiment $(REBALANCING_EQ_TOML) \
+		$(if $(REBALANCING_EQ_DAYS),--days $(REBALANCING_EQ_DAYS)) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--out $(REBALANCING_EQ_VECTOR)
+
+sim-plot-rebalancing-eq:	$(REBALANCING_EQ_VECTOR)
+	REB_VECTOR=$(REBALANCING_EQ_VECTOR) REB_OUT=$(REBALANCING_EQ_IMAGE) \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing-eq:	sim-run-rebalancing-eq sim-plot-rebalancing-eq
+
+# Variants by extension name (knobs / trend / disruption axes -- see the
+# naming strategy in experiments/rebalancing-eq-5yr.toml):
+#
+#   make sim-rebalancing-eq-<ext>    # experiments/rebalancing-eq-5yr-<ext>.toml
+#                                    # -> test/vectors/rebalancing-sim-eq-<ext>.json
+#                                    # -> images/rebalancing-sim-eq-<ext>.png
+#   make sim-compare-rebalancing-eq  # eqmetrics over all arms + the banked
+#                                    # equilibrium baseline
+
+sim-run-rebalancing-eq-%:	sim-build
+	python -m $(SIM_PKG) \
+		--experiment alberta_buck/sim/experiments/rebalancing-eq-5yr-$*.toml \
+		$(if $(REBALANCING_EQ_DAYS),--days $(REBALANCING_EQ_DAYS)) \
+		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--out test/vectors/rebalancing-sim-eq-$*.json
+
+sim-plot-rebalancing-eq-%:
+	REB_VECTOR=test/vectors/rebalancing-sim-eq-$*.json \
+		REB_OUT=images/rebalancing-sim-eq-$*.png \
+		python -m pytest $(SIM_REB_PLOT) -v -s
+
+sim-rebalancing-eq-%:	sim-run-rebalancing-eq-% sim-plot-rebalancing-eq-%
+
+.PHONY: sim-compare-rebalancing-eq
+sim-compare-rebalancing-eq:
+	python -m alberta_buck.sim.eqmetrics \
+		test/vectors/eq-baseline-5yr-prorata.json \
+		test/vectors/rebalancing-sim-eq*.json
+
+# THE MATRIX: re-run every rebalancing-eq-5yr*.toml arm against the
+# CURRENT contracts (sim-build recompiles first, so contract changes --
+# BuckBasket, Buck, the controller -- propagate to every arm), then print
+# the eqmetrics table.  Each arm is hours at full cadence; MATRIX_JOBS
+# arms run concurrently (pyrevm is in-process, one core each).
+#
+#   make nix-venv-sim-rebalancing-eq-matrix
+#   make nix-venv-sim-rebalancing-eq-matrix MATRIX_JOBS=8
+
+MATRIX_JOBS	?= 4
+
+.PHONY: sim-rebalancing-eq-matrix
+sim-rebalancing-eq-matrix:	sim-build
+	ls alberta_buck/sim/experiments/rebalancing-eq-5yr*.toml \
+	| xargs -P $(MATRIX_JOBS) -I{} sh -c '\
+		ext=$$(basename {} .toml); ext=$${ext#rebalancing-eq-5yr}; \
+		echo "=== arm $${ext:-base}: {}"; \
+		python -m $(SIM_PKG) --experiment {} \
+			--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+			--out test/vectors/rebalancing-sim-eq$$ext.json \
+			> test/vectors/rebalancing-sim-eq$$ext.log 2>&1'
+	$(MAKE) sim-compare-rebalancing-eq
+
+# THE EXCURSION CATALOGUE: injected excursions x defender mixes x intensity
+# on the portcast cast (2-year window, injection at day 365).  Arms are
+# experiments/catalogue-<arm>.toml; mixes/scales are applied as --set
+# overrides by alberta_buck.sim.catalogue (see its docstring).  Cells
+# whose vector exists are reused (a killed grid resumes); the report is
+# build/sim/catalogue/summary.md.  Design: REBALANCING-EQ.org.
+#
+#   make nix-venv-sim-catalogue                      # full grid (7 x 6)
+#   make nix-venv-sim-catalogue CAT_ARMS=dump,squeeze CAT_MIXES=none,basket
+#   make nix-venv-sim-catalogue CAT_SCALE=0.5,2       # intensity sweep
+#   make nix-venv-sim-catalogue-report               # tables from vectors
+#   make nix-venv-sim-catalogue-dump CAT_MIXES=all    # one arm
+
+CAT_ARMS	?= none,dump,squeeze,grind-down,grind-up,spike,step
+CAT_MIXES	?= none,usdc,buck,credit,basket,all
+CAT_SCALE	?= 1
+CAT_JOBS	?= 10
+CAT_DIR		?= build/sim/catalogue
+
+.PHONY: sim-catalogue sim-catalogue-report
+sim-catalogue:	sim-build
+	python -m alberta_buck.sim.catalogue --arms $(CAT_ARMS) \
+		--mixes $(CAT_MIXES) --scale $(CAT_SCALE) \
+		--jobs $(CAT_JOBS) --outdir $(CAT_DIR)
+
+sim-catalogue-report:
+	python -m alberta_buck.sim.catalogue --report-only \
+		--arms $(CAT_ARMS) --mixes $(CAT_MIXES) --scale $(CAT_SCALE) \
+		--outdir $(CAT_DIR)
+
+sim-catalogue-%:	sim-build
+	python -m alberta_buck.sim.catalogue --arms $* \
+		--mixes $(CAT_MIXES) --scale $(CAT_SCALE) \
+		--jobs $(CAT_JOBS) --outdir $(CAT_DIR)
 
 # The realistic observation world: honest BuckCreditDebtorAgents (real
 # premium credit + real funding gate) as the issuance channel, with

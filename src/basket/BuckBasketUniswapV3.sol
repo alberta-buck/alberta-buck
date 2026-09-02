@@ -213,6 +213,115 @@ contract BuckBasketUniswapV3 is
         }
     }
 
+    // --- Fence primitives (BuckBasketFence) ------------------------------- //
+
+    function fencePool(address token, uint8 decimals, uint256 initialPriceInBuck,
+                       uint24 feeTier)
+        external override onlySelf
+        returns (address pool, int24 spacing, bool buckIsToken0)
+    {
+        pool = _findOrCreatePool(token, feeTier);
+        buckIsToken0 = address(buck) < token;
+        uint160 sqrtPriceX96 =
+            _sqrtPriceFromBuckRate(buckIsToken0, initialPriceInBuck, decimals);
+        try IUniswapV3Pool(pool).initialize(sqrtPriceX96) {} catch {}
+        IUniswapV3Pool(pool).increaseObservationCardinalityNext(observationCardinality);
+        spacing = v3Factory.feeAmountTickSpacing(feeTier);
+    }
+
+    function fenceMint(address token, address pool, int24 lo, int24 hi,
+                       uint128 liquidity)
+        external override onlySelf returns (uint256 a0, uint256 a1)
+    {
+        if (!(liquidity > 0)) revert L0();
+        _callbackPool = pool;
+        (a0, a1) = IUniswapV3Pool(pool).mint(
+            address(this), lo, hi, liquidity, abi.encode(token));
+        _callbackPool = address(0);
+    }
+
+    function fenceBurn(address pool, int24 lo, int24 hi, uint128 liquidity)
+        external override onlySelf returns (uint256 a0, uint256 a1)
+    {
+        IUniswapV3Pool(pool).burn(lo, hi, liquidity);
+        (uint128 c0, uint128 c1) = IUniswapV3Pool(pool).collect(
+            address(this), lo, hi, type(uint128).max, type(uint128).max);
+        return (uint256(c0), uint256(c1));
+    }
+
+    function fenceSwap(address token, address pool, bool sellBuck, uint256 amountIn)
+        external override onlySelf returns (uint256 spent, uint256 received)
+    {
+        if (amountIn == 0) return (0, 0);
+        bool buckIs0 = address(buck) < token;
+        bool zeroForOne = sellBuck ? buckIs0 : !buckIs0;
+        _swapCallbackPool = pool;
+        (int256 d0, int256 d1) = IUniswapV3Pool(pool).swap(
+            address(this), zeroForOne, int256(amountIn),
+            zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
+            abi.encode(token));
+        _swapCallbackPool = address(0);
+        int256 buckDelta = buckIs0 ? d0 : d1;
+        int256 tokDelta  = buckIs0 ? d1 : d0;
+        if (sellBuck) {
+            if (!(buckDelta >= 0 && tokDelta <= 0)) revert SwapDeltaSign();
+            spent = uint256(buckDelta); received = uint256(-tokDelta);
+        } else {
+            if (!(buckDelta <= 0 && tokDelta >= 0)) revert SwapDeltaSign();
+            spent = uint256(tokDelta); received = uint256(-buckDelta);
+        }
+    }
+
+    function fenceQuote(address pool, int24 lo, int24 hi, uint128 liquidity,
+                        bool buckIsToken0)
+        external view override returns (uint256 buckAmt, uint256 tokAmt)
+    {
+        if (liquidity == 0) return (0, 0);
+        (uint160 sp,,,,,,) = IUniswapV3Pool(pool).slot0();
+        uint160 sa = UniswapV3OracleLib.getSqrtRatioAtTick(lo);
+        uint160 sb = UniswapV3OracleLib.getSqrtRatioAtTick(hi);
+        uint160 spc = sp < sa ? sa : (sp > sb ? sb : sp);
+        uint256 a0 = UniswapV3OracleLib.getAmount0ForLiquidity(spc, sb, liquidity);
+        uint256 a1 = UniswapV3OracleLib.getAmount1ForLiquidity(sa, spc, liquidity);
+        return buckIsToken0 ? (a0, a1) : (a1, a0);
+    }
+
+    function fenceTwap(address pool, address token, uint8 decimals,
+                       uint32 secondsAgo)
+        external view override returns (uint256)
+    {
+        int24 tick;
+        if (secondsAgo == 0) {
+            (, tick,,,,,) = IUniswapV3Pool(pool).slot0();
+        } else {
+            try this.consultTickExternal(pool, secondsAgo) returns (int24 t) {
+                tick = t;
+            } catch {
+                (, tick,,,,,) = IUniswapV3Pool(pool).slot0();
+            }
+        }
+        return UniswapV3OracleLib.getQuoteAtTick(
+            tick, uint128(10 ** decimals), token, address(buck));
+    }
+
+    function fenceLiquidityFor(address pool, int24 lo, int24 hi,
+                               uint256 amount0, uint256 amount1)
+        external view override returns (uint128)
+    {
+        (uint160 sp,,,,,,) = IUniswapV3Pool(pool).slot0();
+        return UniswapV3OracleLib.getLiquidityForAmounts(
+            sp, UniswapV3OracleLib.getSqrtRatioAtTick(lo),
+            UniswapV3OracleLib.getSqrtRatioAtTick(hi), amount0, amount1);
+    }
+
+    function fenceState(address pool)
+        external view override
+        returns (uint160 sqrtPriceX96, int24 tick, int24 spacing)
+    {
+        (sqrtPriceX96, tick,,,,,) = IUniswapV3Pool(pool).slot0();
+        spacing = IUniswapV3Pool(pool).tickSpacing();
+    }
+
     // --- V3 callbacks (authenticated by pool, not onlySelf) --------------- //
 
     function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data)
@@ -259,6 +368,23 @@ contract BuckBasketUniswapV3 is
         if (buckRes <= buckOut || tokRes == 0) return type(uint256).max;
         uint256 ideal = UniswapV3OracleLib.mulDiv(tokRes, buckOut, buckRes - buckOut);
         tokenIn = UniswapV3OracleLib.mulDiv(ideal, 1e6, 1e6 - c.feeTier) + 1;
+    }
+
+    /// @inheritdoc IBuckBasketVenue
+    ///
+    /// @dev The per-leg size bound lives in the shell, but note WHY one is
+    ///      needed at all beyond good behaviour: `poolBuckValues` runs
+    ///      `_enforceSlippageGuard` on every redemption, so a monetary swap
+    ///      big enough to push spot off TWAP would revert every depositor
+    ///      exit until the window caught up.  The basket must not be able to
+    ///      brick its own redemption path.
+    function monetaryLeg(uint256 i, bool sellBuck, uint256 amountIn)
+        external override onlySelf returns (uint256 spent, uint256 received)
+    {
+        if (amountIn == 0) return (0, 0);
+        Constituent storage c = constituents[i];
+        return sellBuck ? _swapBuckForTokenExactIn(c, amountIn)
+                        : _swapTokenForBuckExactIn(c, amountIn);
     }
 
     function _swapTokenForBuckExactIn(Constituent storage c, uint256 tokenIn)

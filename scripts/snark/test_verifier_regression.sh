@@ -62,11 +62,9 @@ fi
 
 # Export Solidity verifier (rename to avoid collision with source-tree verifier)
 "$SNARKJS" zkesv "$BUILD/z1.zkey" "$BUILD/RegressVerifier.sol" 2>/dev/null
-# G2 fix first (match snarkjs raw output), then rename
-python3 "$ROOT/scripts/snark/fix_verifier_g2.py" "$BUILD/RegressVerifier.sol"
-	perl -i -pe 's/contract Groth16Verifier/contract RegressVerifier/g; s/public view returns/public returns/g' "$BUILD/RegressVerifier.sol"
-	# Fix EIP-197 G2 encoding (snarkjs stores real-first, EIP-197 expects im-first)
-	python3 "$ROOT/scripts/snark/fix_verifier_g2.py" "$BUILD/RegressVerifier.sol"
+# The verifier stays STOCK; the EIP-197 pi_b swap is applied at vector
+# packing below (matching `snarkjs zkey export soliditycalldata`).
+perl -i -pe 's/contract Groth16Verifier/contract RegressVerifier/g; s/public view returns/public returns/g' "$BUILD/RegressVerifier.sol"
 echo "  Solidity verifier exported"
 
 # ---- Step 2: Generate Forge test vectors ------------------------------------
@@ -77,7 +75,7 @@ import json, os, re
 with open('$BUILD/proof.json') as f: p=json.load(f)
 with open('$BUILD/public.json') as f: pub=json.load(f)
 v={'a':[str(p['pi_a'][0]),str(p['pi_a'][1])],
-   'b':[str(p['pi_b'][0][0]),str(p['pi_b'][0][1]),str(p['pi_b'][1][0]),str(p['pi_b'][1][1])],
+   'b':[str(p['pi_b'][0][1]),str(p['pi_b'][0][0]),str(p['pi_b'][1][1]),str(p['pi_b'][1][0])],
    'c':[str(p['pi_c'][0]),str(p['pi_c'][1])],'pub':[str(x) for x in pub]}
 os.makedirs('$VECTORS',exist_ok=True)
 with open('$VECTORS/proof.json','w')as f:json.dump(v,f,indent=2)

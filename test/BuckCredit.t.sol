@@ -224,11 +224,12 @@ contract BuckCreditTest is Test {
         vm.prank(alice);
         credit.forceActivate(tokenId, 300_000e6);
 
-        // Insurer reappraises: reduce face value below activated
+        // Insurer reappraises down to the activated line -- the furthest a
+        // reappraisal may go -- and changes the schedule and premium.
         vm.prank(insurer);
         credit.updateCredit(
             tokenId,
-            250_000e6,     // new face value (below 300K activated)
+            300_000e6,     // new face value == activated coverage
             50_000e6,
             BuckCredit.DepreciationType.LINEAR,
             250,
@@ -236,9 +237,10 @@ contract BuckCreditTest is Test {
             120
         );
 
-        // Activated should be capped to new face value
-        (, uint256 activated, ) = credit.creditInfo(tokenId);
-        assertEq(activated, 250_000e6);
+        (uint256 face, uint256 activated, uint32 premium) = credit.creditInfo(tokenId);
+        assertEq(face,      300_000e6, "face reappraised");
+        assertEq(activated, 300_000e6, "coverage the holder bought is untouched");
+        assertEq(premium,   120,       "premium updated");
     }
 
     function test_insurer_update_reverts_if_not_insurer() public {
@@ -296,7 +298,12 @@ contract BuckCreditTest is Test {
         assertEq(credit.currentValue(tokenId), 100_000e6);
     }
 
-    function test_updateCredit_newFaceBelowActivated_capsActivated() public {
+    /// @dev Activated coverage is a completed purchase: its pool principal
+    ///      was paid up front and funds its premium in perpetuity, so an
+    ///      insurer may reappraise down to it but not through it.  Writing it
+    ///      down would also break the lockstep with Buck's `mintsBacked` and
+    ///      leave the holder unable to unwind the position.
+    function test_updateCredit_newFaceBelowActivated_reverts() public {
         vm.prank(insurer);
         uint256 tokenId = credit.createCredit(
             alice, 1, FACE_VALUE, FLOOR,
@@ -305,17 +312,19 @@ contract BuckCreditTest is Test {
         vm.prank(alice);
         credit.forceActivate(tokenId, FACE_VALUE);
 
-        // Insurer reduces face value below activation.
         vm.prank(insurer);
+        vm.expectRevert("BuckCredit: face below activated coverage");
         credit.updateCredit(
             tokenId, 250_000e6, FLOOR,
             BuckCredit.DepreciationType.NONE, 0, 0, 100
         );
-        (, uint256 activated,) = credit.creditInfo(tokenId);
-        assertEq(activated, 250_000e6, "activated capped to new face");
+
+        (uint256 face, uint256 activated,) = credit.creditInfo(tokenId);
+        assertEq(face,      FACE_VALUE, "face unchanged");
+        assertEq(activated, FACE_VALUE, "coverage intact");
     }
 
-    function test_updateCredit_newFaceZero_clearsActivated() public {
+    function test_updateCredit_totalWriteOff_refusedWhileCoverageActive() public {
         vm.prank(insurer);
         uint256 tokenId = credit.createCredit(
             alice, 1, FACE_VALUE, FLOOR,
@@ -324,14 +333,28 @@ contract BuckCreditTest is Test {
         vm.prank(alice);
         credit.forceActivate(tokenId, 100_000e6);
 
-        // Insurer zeros the face value (total write-off).
+        vm.prank(insurer);
+        vm.expectRevert("BuckCredit: face below activated coverage");
+        credit.updateCredit(
+            tokenId, 0, 0,
+            BuckCredit.DepreciationType.NONE, 0, 0, 100
+        );
+    }
+
+    function test_updateCredit_totalWriteOff_allowedWhileUnactivated() public {
+        vm.prank(insurer);
+        uint256 tokenId = credit.createCredit(
+            alice, 1, FACE_VALUE, FLOOR,
+            BuckCredit.DepreciationType.NONE, 0, 0, 100
+        );
+
         vm.prank(insurer);
         credit.updateCredit(
             tokenId, 0, 0,
             BuckCredit.DepreciationType.NONE, 0, 0, 100
         );
-        (, uint256 activated,) = credit.creditInfo(tokenId);
-        assertEq(activated, 0, "activated cleared on total write-off");
+        (uint256 face,,) = credit.creditInfo(tokenId);
+        assertEq(face, 0, "nothing bought yet, so nothing to protect");
     }
 
     function test_DECLINING_BALANCE_maxRate_immediateDepreciation() public {
