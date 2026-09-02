@@ -1670,7 +1670,7 @@ Table of Contents
   • Panoptic, "Yin (Carry) & Yang (Convexity) Require Each Other to
     Survive & Thrive", X, 2026-08-27
     (<https://x.com/Panoptic_xyz/status/2093081191427805570>); saved
-    copies `~/Downloads/Panoptic-carry.{pdf,html}'.
+    copies saved copy `doc/Panoptic-carry.pdf'.
   • Panoptic research: "Panoptic Solves LVR"; "Reverse Gamma Scalping";
     "IV & Put Wing Premia"; "Derivatives Solve the Uniswap Doom Loop"
     (<https://panoptic.xyz/research/>).
