@@ -22,13 +22,42 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
 
 * STATUS -- resume here
 
-- *Last updated*: 2026-09-02 (session 1: program created).
+- *Last updated*: 2026-09-02 (session 2: WP-1 and WP-12 merged; five
+  packages IN FLIGHT in parallel worktrees -- see below).
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
-  the --no-ff merge of =feature/fee-account=).
-- *Phase*: 0 -- plan written; no code yet.  Next action: WP-1 (the
-  instrument), then WP-2 and WP-3a in parallel.
-- *Open decisions needing the design owner*: none blocking WP-1..WP-3.
-  See "Decisions pending" at the end of the ledger.
+  the --no-ff merge of =feature/fee-account=); WP-1 merged at 4e4700c,
+  WP-12 at 7e5c46e.
+- *Phase*: 1 -- instrument and star driver landed; the five independent
+  build packages were fanned out to subagents on 2026-09-02, each in its
+  own worktree and branch:
+
+  | package | worktree                           | branch             | kind     |
+  |---------+------------------------------------+--------------------+----------|
+  | WP-2    | =/Users/perry/src/alberta-buck-wp-2=  | =wp/2-undertakings= | python |
+  | WP-3a   | =/Users/perry/src/alberta-buck-wp-3a= | =wp/3a-observer=    | solidity |
+  | WP-5    | =/Users/perry/src/alberta-buck-wp-5=  | =wp/5-stress-fee=   | solidity |
+  | WP-6    | =/Users/perry/src/alberta-buck-wp-6=  | =wp/6-facility=     | python |
+  | WP-8    | =/Users/perry/src/alberta-buck-wp-8=  | =wp/8-seeder=       | python |
+
+  If this file still says IN FLIGHT when you resume: =git log
+  --oneline feature/carry-convexity..wp/<n>-<slug>= shows what each
+  branch delivered; each branch's last commit message and the smoke
+  vectors under its worktree's =build/sim/smoke/= are the evidence;
+  integrate with =git merge --no-ff= into =feature/carry-convexity=
+  (shared-file conflicts are append-only =# WP-n= blocks -- keep both),
+  run =python -m pytest alberta_buck/test/test_{markout,ladder,facility,seeder}.py=
+  and =make nix-test= after the Solidity merges, then record each in
+  the ledger and set its WP row to DONE.  Worktree recipe: =git
+  worktree add ../alberta-buck-wp-<n> -b wp/<n>-<slug>
+  feature/carry-convexity=, then =ln -s ../alberta-buck/lib lib=; for
+  Python-only packages also =ln -s ../alberta-buck/{out,cache} .=; run
+  Python with =PYTHONPATH=<worktree>= so the worktree's package shadows
+  the venv's editable install (verified).  Remove worktrees with =git
+  worktree remove= once merged.
+- *Deferred by the design owner*: the 3a regeneration (all 86 cells with
+  the ledger); the full k-integral-c0 star (23 cells).
+- *Open decisions needing the design owner*: 1-6 (7 resolved in
+  principle: integral-only K, to be tested by the star).
 
 ** Resume protocol (5 minutes)
 
