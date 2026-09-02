@@ -110,6 +110,7 @@ acceptance.  Status: TODO / IN PROGRESS / DONE / BLOCKED.
 | R11 | Key 3c/3d cells replicate across the campaign's five seeds                                            | REBAL rec. 1  | verdicts and signs agree on >= 4/5 seeds                                                        | TODO   |
 | R12 | The oversupply flood is measured with and without the facility                                        | REBAL rec. 4, 9.1 | equilibrium discount vs theta x apr reported; the facility's exposure to D8 sized                | TODO   |
 | R13 | Results land in the documents of record                                                               | --            | =CARRY-CONVEXITY.org= gains a "Wave 3 results" section; =REBALANCING-EQ.org= findings continue from 12; this ledger closed | TODO |
+| R14 | K is COMPREHENSIBLE and PREDICTABLE to a reasonably observant, competent person, and operates equivalently in organic, normal market behaviour: (a) the public-law forecast K(t+h) = K + Ki (1 - bvib) h (later: with the observer's inputs) beats persistence and lands within 1 point most of the time (G8); (b) every wave-3 mechanism leaves the organic arms' K trajectory within tolerance of the baseline controller's (G7); (c) every input to K is a public on-chain view and its contribution to dK is decomposable per frame | design owner, 2026-09-02 | G7, G8 on every wave's cells; the =kfc= panel of =eqmetrics= (WP-1); an attribution panel once the observer exists (WP-3a) | IN PROGRESS |
 
 * Design
 
@@ -173,7 +174,7 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 
 | id    | goal                                                                 | depends | owns (files)                                                  | deliverable                                              | acceptance                                                       | est. cells | status | branch / owner |
 |-------+----------------------------------------------------------------------+---------+---------------------------------------------------------------+----------------------------------------------------------+------------------------------------------------------------------+------------+--------+----------------|
-| WP-1  | The instrument: markout ledger + basket-side columns in the summary  | --      | markout.py (new); snapshot.py, eqmetrics.py, catalogue.py (append) | =--report-only= regenerates 3.3 with markout columns     | R1, R2; =test_markout.py= green                                  | 0 (report) | TODO   |                |
+| WP-1  | The instrument: markout ledger + basket-side columns + K forecastability panel in the summary | -- | markout.py (new); loop.py, snapshot.py, eqmetrics.py, catalogue.py (append) | =--report-only= regenerates 3.3 with basket-side and kfc columns on the existing vectors; markout columns on re-run cells | R1, R2, R14(a) instrument; =test_markout.py= green; a 60-day smoke with non-zero ledger | 0 (report) + 1 smoke | DONE on branch; merge pending; 3a regeneration not run | =wp/1-instrument= / Claude (session 2) |
 | WP-2  | Ladder module + UndertakingAgent; mixes =ut=, =ut-all=; 3c grid       | WP-1    | ladder.py, undertaking_agents.py (new); loop.py import; MIXES block | P1 and P8 tables for eps x p x (delta, phi) on the four common-mode arms x {x1, x4} | R3, R4; G5, G6; =test_ladder.py= green; determinism check   | ~72        | TODO   |                |
 | WP-3a | =IStabilizer= seam + observer on the ops shell + =BuckKControllerShadow= + deploy wiring + forge tests | -- | IStabilizer.sol (new), BuckBasketOps.sol (append), BuckKControllerShadow.sol (new), deploy.py (append), forge test (new) | =--controller shadow= runs a smoke cell; the desk is the first registered stabilizer, the sim offset the second | forge tests: sign canaries on the shadow input; lambda = gamma = 0 identity with Direct; offset and saturation arithmetic; reprime unaffected | 1 (smoke) | TODO |                |
 | WP-3b | Desk in the loop + lambda sweep (3d)                                 | WP-2, WP-3a | experiments (append); catalogue tag =shadow=                 | P4 table: lambda_d x {dump, squeeze, grind-down} x {x1, x4} | R5; desk return-to-zero time; runaway-one detection at lambda 0 | ~40   | TODO   |                |
@@ -232,6 +233,32 @@ with the new agent at count 0 is byte-identical to the same cell
 without the agent class present (the keyed-RNG guarantee that a new
 class does not perturb the world's history; =TELEMETRY.md=).
 
+** The two comprehensibility gates (R14)
+
+- *G7 -- organic equivalence.*  On the organic arms (=none=, the x1
+  grinds, the endog/portcast cast) a mechanism under test must leave
+  K's trajectory within tolerance of the baseline controller's: max
+  |K_test(t) - K_base(t)| <= 0.02 and RMS <= 0.01 over the run.  The
+  fast books are near zero in organic regimes, so a mechanism that
+  moves K there is acting on something other than an excursion.
+- *G8 -- K comprehensibility.*  The =kfc= panel (=eqmetrics.k_forecast=)
+  asks three things an observer can check against public state.  (i)
+  K OBEYS ITS LAW: day to day dK ~ Kp d(1 - bvib), over a month dK ~ Ki
+  mean(1 - bvib) 30; the fitted slopes must be within 25% of the
+  designed gains with R^2 >= 0.8 for the monthly law, and the EX-POST
+  direction hit (sign of dK_30 == sign of the month's mean deviation,
+  on months with |mean| > 0.25%) >= 80%.  (ii) K is CALM in organic
+  regimes: persistence within one point on >= 90% of 30-day windows.
+  (iii) the ex-ante observer forecast (K + Kp (1 - bvib) + Ki h x the
+  trailing mean deviation) is reported beside the naive law and
+  persistence -- measured 2026-09-02, persistence wins at 7 and 30 days
+  because excursions revert inside a week and the P kick unwinds with
+  them.  That is not a defect of the law; it is the P term being
+  visible at short horizons, and whether an explainable K should carry
+  a P term at all is decisions pending 7.  When the observer exists
+  (WP-3a) the same three checks run with its inputs, and the gap is the
+  price of the extra inputs, reported per cell.
+
 ** L4 -- the cells and their gates
 
   make nix-venv-sim-catalogue CAT_ARMS=dump,squeeze,grind-down,grind-up \
@@ -254,6 +281,65 @@ verdict hold on >= 4/5.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-02 -- WP-1 in progress (session 2, Claude on =wp/1-instrument=)
+
+- Built: =alberta_buck/sim/markout.py= (ledger, probe, class tags),
+  =loop.py= (send counter + per-act reserve diff), =snapshot.py=
+  (=frame["mx"]=), =eqmetrics.py= (=basket_side=, =markout_panel=,
+  =k_forecast=; CLI panels), =catalogue.py= (three new grid sections),
+  =alberta_buck/test/test_markout.py= (8 tests, green).
+- R1 met on the existing vectors: =--report-only= reproduces the
+  CARRY-CONVEXITY 3.3 basket-side table -- dump/usdc vs none at end:
+  navU -0.75, navK -0.73, treasury -9k, depositor realized +0.08;
+  the =all= mixes flagged [uncontrolled] (their crb agents trade
+  pre-injection).  Report: =build/sim/catalogue/wp1-check.md=.
+- R14(a) instrument (the =kfc= panel), first numbers on
+  dump/squeeze x {none, usdc, all}:
+
+  | cell         | Kp fit (R2)  | Ki/day fit (R2) | ex-post hit30 | p30 MAE / in1pt | observer MAE30 / naive |
+  |--------------+--------------+-----------------+---------------+-----------------+------------------------|
+  | dump none    | 0.107 (0.92) | 0.0536 (0.80)   | 94%           | 0.0018 / 96%    | 0.0035 / 0.0113        |
+  | dump usdc    | 0.108 (0.94) | 0.0519 (0.68)   | 97%           | 0.0016 / 97%    | 0.0030 / 0.0110        |
+  | dump all     | 0.108 (0.95) | 0.0484 (0.55)   | 98%           | 0.0015 / 99%    | 0.0028 / 0.0109        |
+  | squeeze none | 0.108 (0.91) | 0.0589 (0.82)   | 98%           | 0.0020 / 96%    | 0.0036 / 0.0114        |
+  | squeeze all  | 0.107 (0.95) | 0.0448 (0.49)   | 97%           | 0.0015 / 100%   | 0.0027 / 0.0109        |
+
+  Reading: the controller obeys its shipped law (designed Kp 0.10, Ki
+  0.0556/day); K is calm; the month's mean deviation tells an observer
+  K's direction 94-98% of the time; but no ex-ante forecast beats
+  persistence, because excursions revert inside a week and the P kick
+  unwinds with them -- decisions pending 7.  The monthly-law R2 falls to
+  0.5-0.7 in the mixes whose defenders damp bvib (K has less to
+  explain), which is the first quantitative sign of the sensor-damping
+  D4 exists to fix.
+- Markout columns: "(no ledger)" on every historical vector, as
+  expected.  The 60-day smoke (=build/sim/smoke/wp1-squeeze60.json=:
+  catalogue-squeeze physics, raid at day 30, 8 USDC absorbers, ~6.5 min
+  on pyrevm) is the first vector with =mx=, and R2 is met:
+  - 2,743 basket-pool trades, 1,672 BUCK/USDC trades; basket fees
+    $31.6k (the loop's routed-volume estimate: $47.7k, same order);
+    per-class rows for AnonymousArb, TokenAccumulator, DirectorKeeper,
+    Saver, WhaleRaid:p2 / :p3, BuckCreditDebtor; no custody classes.
+  - Whale, BUCK/USDC venue: $8.0M on the squeeze day, adverse to SimLP
+    -$282k at 1 d and FAVOURABLE +$367k at 5 d -- the reversal profit
+    lands on the external LP, not the basket (the venue finding of
+    CARRY-CONVEXITY 3.3, now per trade).  Whale adverse in the basket
+    pools: zero (it never trades there).
+  - Savers moved $61.7M through BUCK/USDC in 60 days (the endow arm's
+    counter-cyclical churn), adverse to SimLP -$360k at 5 d.
+  - DirectorKeeper: +$40k 5-day markout in the basket pools -- the
+    director's rebalancing trades are LP-favourable ex post.
+  - Injection-window panel: basket fees +0.016, adverse -0.010
+    (common-mode -0.020), netlp +0.007, worst carry ratio 0.58 -- the
+    30 bp fee did NOT cover the 5-day adverse selection in the worst
+    pool inside the window.  First reading of G2 on a defended squeeze.
+- Ex-post K law on the smoke: Kp 0.102 (R2 0.62), Ki 0.059/day (R2
+  0.84), direction 100%; not an organic regime (K moved 0.044).
+- WP-1 status: code complete and committed on =wp/1-instrument=; the
+  full 3a regeneration (all 86 cells with the ledger) is the next
+  compute step and is NOT run yet; merge into =feature/carry-convexity=
+  pending the design owner's review.
 
 ** 2026-09-02 -- the hierarchical structure (session 1, later)
 
@@ -297,6 +383,17 @@ next.  Paste acceptance evidence here, not in chat.
    decide before the first testnet deploy that is meant to persist.
 6. Time-locks on facet replacement and on eps / p / delta / phi /
    lambda / gamma: the delay and the announcement channel.
+7. *Should an explainable K carry a P term?*  Measured on the catalogue
+   vectors (WP-1, 2026-09-02): K obeys its law exactly (fitted Kp 0.107
+   vs 0.10 designed; Ki 0.054/day vs 0.056; monthly-law correlation
+   0.90), but because excursions revert inside a week the P kick (2% of
+   rail authority at e_max) makes K's WEEKLY motion anti-correlated with
+   today's deviation (-0.5 at 1 d, -0.33 at 7 d): a naive observer
+   applying "K falls when BUCK is cheap" is wrong-way within the week
+   and right within the month.  A pure-integral K (kp_frac = 0) is
+   monotone in the deviation history and simpler to state; the cost is
+   the fast kick.  Proposed cell: kp_frac in {0, 0.02} on the organic
+   arms and the x1/x4 raids, judged by G7/G8 and by peak/AUC.
 
 * Conventions
 

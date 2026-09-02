@@ -219,7 +219,8 @@ class Snapshotter:
 
     def capture(self, day, ctr, agents, init_val,
                 rebal_init_val: int | None = None,
-                dm_init_val: int | None = None) -> None:
+                dm_init_val: int | None = None,
+                ledger=None) -> None:
         d = self.d
         # Per-agent telemetry (TELEMETRY.md, v1).  Static facts once into
         # meta; per-frame records under frame["ag"] for agents due at this
@@ -281,6 +282,16 @@ class Snapshotter:
             pid_d = int(d.kctrl.functions.D().call())
         except Exception:
             pid_p = pid_i = pid_d = 0
+        # WP-1: resolve the markout ledger at today's prices (spotBuck per
+        # basket pool, buck_usd for BUCK/USDC, bvib); the cumulative
+        # aggregates ride in the frame under "mx".
+        mx = None
+        if ledger is not None:
+            prices = {i: sb[i] for i in range(len(sb))}
+            if buck_usd:
+                prices["ub"] = buck_usd
+            ledger.resolve(day, prices, bv / 1e18 if bv else 0.0)
+            mx = ledger.frame()
         # Idle-BUCK held by savers (sum over any SaverAgent proxies present).
         saver_hold = 0
         for ag in agents:
@@ -574,6 +585,9 @@ class Snapshotter:
             "dmOutstanding": out_buck,
             "treasuryBuck": treas_buck,
             "treasuryShare": treas_frac,
+            # WP-1: the markout ledger's cumulative aggregates (None when
+            # the loop runs without one, e.g. older callers).
+            "mx": mx,
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t
