@@ -1,0 +1,292 @@
+#+TITLE: WAVE3: The Target-Zone Program -- Requirements, Design, Work Packages, Progress
+#+AUTHOR: Perry Kundert
+#+DATE: 2026-09-02
+#+OPTIONS: toc:2 num:t
+#+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
+
+This is the working ledger for wave 3 of the excursion program: the
+proof, in simulation, of the design of record in =CARRY-CONVEXITY.org=
+(v1.2) -- the Convertibility Undertakings with the weak-side ladder, the
+shadow-bvib controller, the stress fee, the directional fee, the
+latent-credit facility, the perp funding lever, and the treasury seeder
+-- before any of it becomes Solidity.  It is written to be RESUMED: by
+the next session, by a different agent, or by several agents in
+parallel.  Every requirement is testable, every work package owns its
+files, and the progress ledger says what happened and what is next.
+
+Companion documents: =CARRY-CONVEXITY.org= (the design of record: the
+six decisions, the model, the seven-plus-one predictions, the wave
+table); =REBALANCING-EQ.org= (the catalogue machinery and findings 1-11);
+=alberta-buck-operations.org= (the desk, its bounds, the telemetry
+discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
+
+* STATUS -- resume here
+
+- *Last updated*: 2026-09-02 (session 1: program created).
+- *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
+  the --no-ff merge of =feature/fee-account=).
+- *Phase*: 0 -- plan written; no code yet.  Next action: WP-1 (the
+  instrument), then WP-2 and WP-3a in parallel.
+- *Open decisions needing the design owner*: none blocking WP-1..WP-3.
+  See "Decisions pending" at the end of the ledger.
+
+** Resume protocol (5 minutes)
+
+1. =git log --oneline -20 feature/carry-convexity= and =git branch --list
+   'wp/*'= -- what landed, what is in flight.
+2. Read this file's STATUS, the work-package table (status column), and
+   the last three ledger entries.
+3. =make nix-venv-sim-catalogue-report= -- the current summary tables
+   from whatever vectors exist under =build/sim/catalogue/=.
+4. To claim a work package: set its status to IN PROGRESS with your
+   branch name (=wp/<n>-<slug>= off =feature/carry-convexity=), commit
+   this file first, then work.
+5. To close one: paste the acceptance evidence (table rows, test names,
+   commit hashes) into the ledger, set status DONE, merge --no-ff into
+   =feature/carry-convexity=, and update STATUS.
+
+* Principles
+
+1. *Proof of concept in Python agents over the real contracts.*  The
+   catalogue already runs the deployed Solidity stack in-process
+   (pyrevm) with Python agents.  An agent holding the right AUTHORITY
+   (SimLP's V3 callback proxy and a zero-premium BuckCredit face) can
+   stand in for a contract feature at the economics level.  So the
+   undertakings, the ladder, the facility, the seeder and the perp are
+   agents first.  The eventual Solidity must reproduce the agent's
+   economics, judged by the SAME cells -- "the Solidity contracts are
+   the mathematical specification" (=alberta-buck-platform.org=) cuts
+   both ways: the agent is the executable requirement the contract is
+   later held to.
+2. *Solidity early only where K's specification demands it.*  K reads
+   =basket.basketValueInBuck()= on-chain; a Python-side PID pushing K
+   through =BuckKControllerStatic.setBuckK= would re-implement the
+   controller's anti-windup, dT and priming semantics and drift from the
+   spec.  The shadow controller is therefore a SMALL Solidity variant
+   (WP-3a), with a sim-only setter so agent-booked inventory can feed it
+   before the undertakings are contract-level.  The stress fee (WP-5)
+   is the other candidate for early Solidity, because =_redeem= is the
+   best-tested path in the basket and the change is local.
+3. *Every requirement has a gate.*  The gates are those of
+   =CARRY-CONVEXITY.org= section 8.2 plus the predictions of 7.9; a work
+   package is DONE when its cells pass its gate, not when its code runs.
+4. *Determinism.*  Keyed RNG (=[scenario] rng = "keyed"=); a re-run of a
+   cell is byte-identical; new agents draw from their own keyed stream
+   and never perturb another class's history (=TELEMETRY.md=).
+5. *Telemetry in the same commit as the agent* (=alberta-buck-operations.org=,
+   "the agent is invisible"): counters into =snapshot.py= with the
+   agent; per-agent inventory through =arb_state=; several seeds before
+   any peak-damping number is quoted.
+6. *Vectors are not committed* (25-30 MB each); summaries, images and
+   this ledger are the record; any cell is regenerable from its TOML
+   plus =--set= overrides, which the vector's =meta= embeds.
+7. *One work package, one branch, one owner, its own files.*  Shared
+   files (=catalogue.py= MIXES, =loop.py='s registration import,
+   =snapshot.py= counters, =WhaleRaidAgent='s knobs) take APPEND-ONLY
+   blocks marked =# WP-n=; rebase on =feature/carry-convexity= before
+   merging; the integrator resolves the rest.
+8. *House style*: ASCII in docs and commit messages; no attribution
+   lines; =make nix-venv-*= for Python, =make nix-*= for forge; never
+   bare =forge build=.
+
+* Requirements
+
+Each is a testable statement with its source in =CARRY-CONVEXITY.org=
+(D = decision, P = prediction of 7.9, G = gate of 8.2) and its
+acceptance.  Status: TODO / IN PROGRESS / DONE / BLOCKED.
+
+| id  | requirement                                                                                          | source        | acceptance                                                                                      | status |
+|-----+------------------------------------------------------------------------------------------------------+---------------+-------------------------------------------------------------------------------------------------+--------|
+| R1  | The catalogue summary carries the basket's own side: NAV (USD, baskets), treasury, depositor realized, per cell, with deltas vs the undefended cell of the same arm | 3a, 3.3     | =catalogue.py --report-only= reproduces the 3.3 table within rounding                          | TODO   |
+| R2  | A per-pool, per-class markout ledger (par-referenced on the common mode) with fees, adverse, netlp, carry_ratio | 3a, 8.1     | markout columns non-empty for every cell; unit test on synthetic swaps; class toxicity ordering as expected in 8.1 | TODO |
+| R3  | A strong-side undertaking sells BUCK for the bundle at par + eps in unlimited aggregate, and for any convertible token at par + p*eps bounded by conversion capacity | D3, P1, G5 | x4 squeeze: bvib >= 1/(1+p*eps) outside the capacity window; K end < 0.90; books return to zero within 1.5 tau_I | TODO |
+| R4  | A weak-side ladder buys BUCK for the bundle at eps + (k-1) delta, tranche k sized phi of remaining reserve | D3 ref., P8  | x4 dump/grind-down: no cell with rho < 0.1 inside the first edge; whale average sale price monotone in size; lower peak per reserve dollar than delta = 0 | TODO |
+| R5  | K's process variable is bvib_shadow = bvib + lambda_d I_d/D (+ lambda_c I_c/D)                      | D4, P4        | with the desk in the loop, desk inventory within 10% of zero inside 1.5 tau_I after x1/x2 injections; lambda = 0 reproduces runaway one on the drift-like arm | TODO |
+| R6  | A duress exit (deflation branch during a measured excursion) pays a stress fee proportional to the deviation, credited to remaining holders | D2, P2, G4 | depositor realized P&L in every x4 cell >= the x1 cell of the same arm; the exiting/remaining transfer sign is toward remaining | TODO |
+| R7  | A directional fee: base on the deviation-correcting side; RV- and size-scaled on the worsening side  | 3b            | one-day squeeze trough shallower than the same cell without it; benign tracking error within x1.25 (G3) | TODO |
+| R8  | A latent-credit facility issues into premiums (to a basket deposit) and retires into discounts on user thresholds (x, y, max fraction), reporting utilization u | D6, P6     | the facility population cuts the x1 squeeze peak and AUC below the "credit" mix and REALIZES its harvest on the retire leg | TODO |
+| R9  | A bvib-settled perp with funding g(bvib_shadow) paid to the house; OI capped; the whale may express the raid through it | D5, P7    | accumulation-phase cost rises with duration; detector lead time >= 20 d at < 1 false positive / 2 yr on the control; solvency inequality holds on the wave-2 envelope | TODO |
+| R10 | A treasury seeder holds a single-sided BUCK/USDC range from current toward ideal, withdrawn as private depth arrives | D5         | orientation checklist passes (ops doc); benign tracking error unchanged (G3); position converts in the corrective direction only | TODO |
+| R11 | Key 3c/3d cells replicate across the campaign's five seeds                                            | REBAL rec. 1  | verdicts and signs agree on >= 4/5 seeds                                                        | TODO   |
+| R12 | The oversupply flood is measured with and without the facility                                        | REBAL rec. 4, 9.1 | equilibrium discount vs theta x apr reported; the facility's exposure to D8 sized                | TODO   |
+| R13 | Results land in the documents of record                                                               | --            | =CARRY-CONVEXITY.org= gains a "Wave 3 results" section; =REBALANCING-EQ.org= findings continue from 12; this ledger closed | TODO |
+
+* Design
+
+** The stand-ins and what they become
+
+| element                     | proof-of-concept (this wave)                                             | eventual Solidity                                                    |
+|-----------------------------+--------------------------------------------------------------------------+----------------------------------------------------------------------|
+| strong-side undertaking     | =UndertakingAgent=: SimLP authority, zero-premium face sized "unlimited" | =buyBuck(bundle|token)= on the ops shell; monetary-book issued        |
+| weak-side ladder            | same agent, TOKEN book sized reserve_frac x NAV, =ladder.py= schedule    | =sellBuck(...)= at the tranche discount; monetary-book absorbed       |
+| shadow controller           | =BuckKControllerShadow= (Solidity, small) + =setShadowOffset= (sim-only) | the same variant reading the contract-level books; setter removed    |
+| stress fee                  | either =_redeem= (Solidity, local) or DM-agent emulation                 | =_redeem= deflation-branch fee                                        |
+| directional fee             | surcharge in the sim swap adapter, paid to the basket LP / treasury      | a v4 dynamic-fee hook behind the venue seam                           |
+| facility                    | =FacilityAgent= (promoted credit base)                                   | a user-parameterized contract holding a credit line + a receipt       |
+| perp / house                | =perp.py= ledger + =FundingHouseAgent=; funding settled as BUCK transfers | a contract, or a HIP-3 market with the house as maker                |
+| treasury seeder             | =SeederAgent= (=BuckPoolInvestorAgent= variant)                          | a treasury program                                                    |
+
+** Components, modules, and ownership
+
+New code goes in NEW modules so work packages do not collide; shared
+files take append-only blocks.
+
+| component                | module / file                                   | interface                                                                 | owner  |
+|--------------------------+-------------------------------------------------+---------------------------------------------------------------------------+--------|
+| markout ledger           | =alberta_buck/sim/markout.py= (new)              | =Markout.record(swap)=, =.resolve(frame_t)=, per-pool/per-class aggregates | WP-1   |
+| swap capture             | =alberta_buck/sim/snapshot.py= (append)          | swap events with sender class tags; basket-side fields promoted           | WP-1   |
+| summary columns          | =alberta_buck/sim/eqmetrics.py=, =catalogue.py= (append) | =markout= panel; NAV/treasury/depositor deltas; new mixes            | WP-1 (integrator) |
+| ladder schedule          | =alberta_buck/sim/ladder.py= (new, pure)         | =Ladder(eps, delta, phi, R0)=: =bid()=, =fill(amount)=, =rho=, =tranche=; no chain access | WP-2 |
+| undertaking agent        | =alberta_buck/sim/undertaking_agents.py= (new)   | =UndertakingAgent(_ProxyAgent)=: knobs eps, p, delta, phi, reserve_frac, leg_bp; counters ut_issued/ut_absorbed/ut_rho/ut_tranche/ut_err | WP-2 |
+| registration             | =alberta_buck/sim/loop.py= (one import line per module, append) | =import alberta_buck.sim.undertaking_agents  # noqa  WP-2=          | each WP |
+| shadow view + controller | =src/basket/BuckBasketOps.sol= (append), =src/BuckKControllerShadow.sol= (new), =deploy.py= (append) | =shadowValueInBuck()=; =setShadowLambda=; sim-only =setShadowOffset=; =--controller shadow= / =SIM_SHADOW_LAMBDA= | WP-3a |
+| desk in the loop         | =deploy.py= / experiments (append)               | =--basket ops= with =SIM_OPS_*= from a TOML =[deploy]= block               | WP-3b  |
+| directional fee          | =alberta_buck/sim/fees.py= (new) + swap adapter hook (append) | =fee_bp(side, rv, size)=; surcharge routed to the basket                | WP-4   |
+| stress fee               | =src/basket/BuckBasketProRata.sol= (=_redeem=, local) OR DM agents (append) | fee ~ deviation on the deflation branch, credited to remaining holders | WP-5   |
+| facility agent           | =alberta_buck/sim/facility_agent.py= (new)       | =FacilityAgent=: x, y, max_frac, target; counters fac_issued/fac_retired/fac_u | WP-6 |
+| perp ledger + house      | =alberta_buck/sim/perp.py= (new), =FundingHouseAgent= in the same module; =WhaleRaidAgent= =via= knob (append) | positions, mark, funding accrual, OI cap; settle funding on-chain each tick | WP-7 |
+| seeder agent             | =alberta_buck/sim/seeder_agent.py= (new)         | =SeederAgent=: ideal from truth pools; range current->ideal; withdraw rule | WP-8 |
+| experiments              | =experiments/catalogue-*.toml= (unchanged); new =--set= knobs per agent; new mixes in =catalogue.py= MIXES: =ut=, =ut-all=, =fac=, =fac-all=, =house= | -- | each WP via WP-1 |
+| tests                    | =alberta_buck/test/test_ladder.py=, =test_markout.py=, =test_fees.py=, =test_perp.py= (new); forge =test/BuckKControllerShadow.t.sol= (new) | pytest / forge | each WP |
+
+** Signs and units (repeat of the record, because they are the silent killers)
+
+- bvib > 1: BUCK cheap (discount); K falls.  bvib < 1: BUCK dear
+  (premium); K rises.
+- Shadow inventory: absorbed (weak side, facility retire) POSITIVE;
+  issued (strong side, facility issue) NEGATIVE.  bvib_shadow = bvib +
+  lambda * I / D.
+- bvib is BUCK PER BASKET: TOKEN -> BUCK multiplies, BUCK -> TOKEN
+  divides (=alberta-buck-operations.org=, "units and orientation").
+- Pool orientation: a BUCK rally is a FALLING pool price when BUCK is
+  token1.  =BuckPoolInvestorAgent= has the checked logic; reuse it.
+- BUCK and USDC are 6-dec in the sim; =basketValueInBuck= is 18-dec.
+
+* Work packages
+
+Dependencies: WP-1 first.  WP-2, WP-3a (the Solidity part), WP-5, WP-6,
+WP-8 are mutually independent and may run in parallel on their own
+branches.  WP-3b (the lambda cells) needs WP-2 (the ladder must be
+present when lambda is swept).  WP-4 needs WP-2 (the one-day trough is
+measured with the undertakings in place).  WP-7 needs WP-6.  WP-9
+needs WP-2 and WP-3b.  WP-10 runs last.
+
+| id    | goal                                                                 | depends | owns (files)                                                  | deliverable                                              | acceptance                                                       | est. cells | status | branch / owner |
+|-------+----------------------------------------------------------------------+---------+---------------------------------------------------------------+----------------------------------------------------------+------------------------------------------------------------------+------------+--------+----------------|
+| WP-1  | The instrument: markout ledger + basket-side columns in the summary  | --      | markout.py (new); snapshot.py, eqmetrics.py, catalogue.py (append) | =--report-only= regenerates 3.3 with markout columns     | R1, R2; =test_markout.py= green                                  | 0 (report) | TODO   |                |
+| WP-2  | Ladder module + UndertakingAgent; mixes =ut=, =ut-all=; 3c grid       | WP-1    | ladder.py, undertaking_agents.py (new); loop.py import; MIXES block | P1 and P8 tables for eps x p x (delta, phi) on the four common-mode arms x {x1, x4} | R3, R4; G5, G6; =test_ladder.py= green; determinism check   | ~72        | TODO   |                |
+| WP-3a | Shadow view + =BuckKControllerShadow= + deploy wiring + forge tests   | --      | BuckBasketOps.sol (append), BuckKControllerShadow.sol (new), deploy.py (append), forge test (new) | =--controller shadow= runs a smoke cell; canaries pass | forge tests: sign canaries, offset arithmetic, lambda = 0 identity with Direct | 1 (smoke) | TODO |                |
+| WP-3b | Desk in the loop + lambda sweep (3d)                                 | WP-2, WP-3a | experiments (append); catalogue tag =shadow=                 | P4 table: lambda_d x {dump, squeeze, grind-down} x {x1, x4} | R5; desk return-to-zero time; runaway-one detection at lambda 0 | ~40   | TODO   |                |
+| WP-4  | Directional fee in the swap adapter; 3b grid                          | WP-2    | fees.py (new); swap adapter hook (append)                     | trough-depth and tracking-error table                    | R7; G3                                                           | ~24        | TODO   |                |
+| WP-5  | Stress fee (Solidity in =_redeem=, or DM emulation)                   | --      | BuckBasketProRata.sol (local) + forge test, OR DM agents (append) | P2 table on the x4 cells                                | R6; G4                                                           | ~8         | TODO   |                |
+| WP-6  | FacilityAgent; mixes =fac=, =fac-all=; 3g grid                        | WP-1    | facility_agent.py (new); loop.py import; MIXES block          | P6 table: population x (x, y) x deposit-to-basket on/off | R8                                                               | ~72        | TODO   |                |
+| WP-7  | Perp ledger + FundingHouseAgent; whale =via=; 3f grid                 | WP-6    | perp.py (new); WhaleRaidAgent knob (append); loop.py import   | P7 table: g() slope x via {perp, spot}; solvency check    | R9                                                               | ~24        | TODO   |                |
+| WP-8  | SeederAgent; orientation check; 3h seeder cells                       | --      | seeder_agent.py (new); loop.py import                         | seeder on/off at launch; private-depth arrival            | R10; G3                                                          | ~8         | TODO   |                |
+| WP-9  | Five seeds on the key 3c/3d cells; the flood with/without facility    | WP-2, WP-3b, WP-6 | sweep usage; a flood experiment TOML (new)              | replication table; flood table                            | R11, R12                                                         | ~40        | TODO   |                |
+| WP-10 | Documents of record                                                   | all     | CARRY-CONVEXITY.org, REBALANCING-EQ.org, this file             | "Wave 3 results" section; findings 12+; ledger closed      | R13                                                              | --         | TODO   |                |
+
+* Test plan
+
+Five layers; a work package passes each in order.  Commands are the
+house incantations.
+
+** L0 -- build and static
+
+- Solidity WPs: =make nix-build= then =make nix-test= (the Makefile's
+  pinned solc, skips the uniswap dirs); never bare =forge=.
+- Python: =make nix-venv-test= (pytest over =alberta_buck/test/=).
+
+** L1 -- unit tests of pure logic (fast, no chain)
+
+- =test_ladder.py=: schedule construction; =fill= depletes geometrically;
+  =bid= steps by delta; rho never reaches 0 at finite fills; delta = 0
+  reproduces a flat edge; the CPMM limit approximates a constant-product
+  bid on a fine grid.
+- =test_markout.py=: par-referenced common-mode markout on synthetic
+  swaps; sign conventions; class aggregation; carry_ratio arithmetic.
+- =test_fees.py=: directional schedule -- corrective side at base;
+  worsening side monotone in RV and size; per-block cumulative
+  splitting defeated.
+- =test_perp.py=: funding accrual and sign; OI cap; mark = medianized
+  bvib; the solvency inequality on the wave-2 envelope numbers.
+- Forge =BuckKControllerShadow.t.sol=: sign canaries on the shadow
+  input; lambda = 0 reproduces =BuckKControllerDirect= exactly;
+  =setShadowOffset= arithmetic; reprime unaffected.
+
+** L2 -- smoke cells (one agent, 60 days)
+
+  python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/catalogue-squeeze.toml \
+      --backend pyrevm --days 60 --set scenario.agents.UndertakingAgent=1 --out build/sim/smoke/ut.json
+
+The ops doc's verification checklist applies: counters appear in the
+vector and are non-zero; per-agent inventory (=arb_state=) is bounded
+and not monotone; the agent's errors counter is zero; the action fires
+at all (an inert agent that looks healthy was the ops doc's first
+"dead agent" conclusion).
+
+** L3 -- determinism
+
+Two identical runs are byte-identical (=cmp= on the vectors); a cell
+with the new agent at count 0 is byte-identical to the same cell
+without the agent class present (the keyed-RNG guarantee that a new
+class does not perturb the world's history; =TELEMETRY.md=).
+
+** L4 -- the cells and their gates
+
+  make nix-venv-sim-catalogue CAT_ARMS=dump,squeeze,grind-down,grind-up \
+      CAT_MIXES=none,ut,ut-all CAT_TAG=ut-e3p2 \
+      CAT_SET="agents.UndertakingAgent.eps=0.03 agents.UndertakingAgent.p=2"
+
+Each cell is judged by =eqmetrics= on the six gates of
+=CARRY-CONVEXITY.org= 8.2 (tail gate, carry coverage, benign-flow
+health, duress-exit fairness, band integrity, attacker cost) and by the
+prediction it targets (7.9).  A work package's acceptance is the table
+of its cells with the gate verdicts; paste it into the ledger.
+
+** L5 -- replication
+
+=alberta_buck.sim.sweep= over the campaign's five seeds (41404, 7,
+1337, 2025, 99) for the key cells; a claim survives if its sign and
+verdict hold on >= 4/5.
+
+* Progress ledger
+
+Newest first.  Each entry: date, who, what ran, what was found, what is
+next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-02 -- program created (session 1, design owner + Claude)
+
+- =CARRY-CONVEXITY.org= v1.2 committed (1affbdb) with the weak-side
+  ladder refinement; =feature/fee-account= merged --no-ff into master
+  (3a9e170); =feature/carry-convexity= opened; references pointed at
+  =doc/Panoptic-carry.pdf=.
+- This plan written.  No code.  WP-1 is next; WP-2, WP-3a, WP-5, WP-6,
+  WP-8 may start in parallel once WP-1's =snapshot.py= field names are
+  fixed (they are the only shared surface the agents write to).
+- The basket-side table of =CARRY-CONVEXITY.org= 3.3 was computed by the
+  scratchpad script =basket_pnl2.py= (not in the repo); WP-1 ports its
+  logic into =catalogue.py= so it is regenerable.
+
+** Decisions pending (for the design owner)
+
+1. WP-5 route: Solidity-in-=_redeem= (recommended: local, best-tested
+   path, and the fee is contract behaviour) vs DM-agent emulation
+   (faster, less faithful).
+2. Default eps for the first 3c grid: 3% with p = 2 (the model's
+   prediction 1 is stated at these values); the grid sweeps around it.
+3. The reserve fraction the weak-side ladder may deploy of NAV
+   (=reserve_frac=): start at 0.5; sweep {0.25, 0.5, 1.0}.
+4. Whether WP-7 (the perp) waits for WP-6's result (the plan says yes).
+
+* Conventions
+
+- Branches: =wp/<n>-<slug>= off =feature/carry-convexity=; merge
+  --no-ff back; this file updated in the merge commit.
+- Commit messages: ASCII; =sim:= / =doc:= / =contracts:= prefix; what
+  and why; no attribution lines.
+- Vector names: =build/sim/catalogue/cat-<arm>-<mix>[-x<scale>][-<tag>].json=;
+  summaries =summary-<tag>.md=; smokes under =build/sim/smoke/=.
+- Images that document a result are committed under =images/=; vectors
+  are not.
+- Every number quoted in a document of record names its cell (arm, mix,
+  scale, tag, seed) so it can be regenerated.
