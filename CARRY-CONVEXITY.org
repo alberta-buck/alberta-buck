@@ -893,8 +893,8 @@ single receipt class pro rata.
 |-------------------------------+--------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------|
 | strong-side undertaking       | =BuckBasketOps= (or a sibling shell)                   | =buyBuck(bundle)= at par+eps; =buyBuck(token, amount)= at par+p*eps with atomic conversion via the rebalancing hint; monetary-book accounting (issued) |
 | weak-side ladder              | same                                                   | =sellBuck(bundle)= at the current tranche's discount (eps + (k-1) delta; tranche phi of the remaining reserve); =sellBuck(token)= at the tranche discount x p via the sell-high mix; monetary-book accounting (absorbed); stress fee under duress |
-| shadow view                   | =BuckBasketOps=                                        | =shadowValueInBuck()= = bvib + lambda_d * offset_d / depth + lambda_c * offset_c / depth                                                               |
-| controller input              | =BuckKControllerDirect=                                | a =Shadow= variant whose =_readReferences= reads =shadowValueInBuck()=; lambda governance-set, swept in sim                                            |
+| stabilizer seam + observer    | =IStabilizer= (new); =BuckBasketOps= (the observer, a facet later) | =IStabilizer= {netInventory, capacity, saturation} on every level-1 actuator; =shadowValueInBuck()= = bvib + sum_i lambda_i * netInventory_i / D; =saturation()= (6.4) |
+| controller input              | =BuckKControllerShadow=                                | =_readReferences= reads the observer; gain scheduling Ki (1 + gamma saturation); lambda_i and gamma governance-set, swept in sim; lambda = gamma = 0 is Direct |
 | persistence-driven retirement | =PairsRebalanceDirector= / =BuckBasketOps=             | existing Q2/Q1 escalation applied to the undertakings' books                                                                                           |
 | stress fee                    | =BuckBasketProRata._redeem=                            | deflation-branch fee ~ deviation, credited to remaining depositors                                                                                     |
 | the facility                  | new contract, user-parameterized                       | draws against a BuckCredit line into a basket deposit at premium; redeems and repays at discount; reports utilization                                  |
@@ -902,6 +902,141 @@ single receipt class pro rata.
 | the perp / house              | sim agent + Python venue ledger, then contract         | funding = g(bvib_shadow); OI cap; house = monetary book                                                                                                |
 | directional dynamic fee       | sim pool adapter, then a v4 hook behind the venue seam | base fee on the corrective side; RV- and size-scaled on the worsening side                                                                             |
 #+LATEX: }
+
+** The hierarchical structure: the stabilizer seam and the monetary Diamond
+
+(Design owner + Claude, 2026-09-02.)  Once several fast actuators act
+on bvib -- the pools, the desk, the undertakings and their ladder, the
+facility population, the house -- "which contract holds K" stops being
+a question about addresses and becomes a question about signals.  The
+rule from mid-ranging control (4.4) settles it:
+
+  K consumes the fast actuators' POSITIONS and their SATURATION, never
+  their filtered signals.
+
+*** The two seams, and which one is artificial
+
+=Buck= holds two authorities: =buckK= (an =immutable=; the =IBuckK=
+surface =currentBuckK= / =compute= / =fundingFactor=) and =basket=
+(one-shot).  The =IBuckK= seam is NOT artificial: it is what lets the
+controller be swapped and forge-tested as the mathematical
+specification without touching =Buck=.  What has become artificial is
+the ADDRESS behind it.  =BuckKControllerDirect._readReferences= reads one
+number from one contract; under this design the process variable is
+assembled from several books that all live on the basket side.  The
+observer that assembles them belongs where the state lives -- the
+monetary Diamond -- and =Buck='s two authorities should both point at
+it.  Because =buckK= is immutable, that address must be the Diamond (or
+an upgradeable controller proxy) from the day =Buck= is deployed; the
+decision is recorded in =WAVE3.org=.
+
+*** The levels
+
+| level | timescale  | who                                                                            | controls                                               | reports upward                                                          |
+|-------+------------+--------------------------------------------------------------------------------+--------------------------------------------------------+-------------------------------------------------------------------------|
+| 0     | tick       | the pools; the directional fee hook                                            | the price of displacement                              | nothing (stateless)                                                     |
+| 1     | hours-days | the undertakings + ladder; the desk's Q1/Q3; the facility population; the house | bvib, by taking POSITIONS                             | =netInventory= (absorbed - issued); =capacity= remaining; =saturation= |
+| 2     | weeks      | the persistence test -> Q2 burn / Q4 acknowledge                               | converts standing inventory to permanent supply change | inventory leaves level 1 and becomes K's stock                          |
+| 3     | months     | K                                                                              | the stock of credit-backed BUCK                        | --                                                                      |
+| 4     | governance | eps, p, delta, phi, lambda_i, gamma, gains, rails                              | time-locked parameters                                 | --                                                                      |
+
+*** The stabilizer seam
+
+Every level-1 actuator implements one interface:
+
+  interface IStabilizer {
+      function netInventory() external view returns (int256);   // absorbed - issued, BUCK (6-dec)
+      function capacity()     external view returns (uint256);  // remaining, 1e18 = all: rho (ladder),
+                                                                //   C_leg room (strong-side convenience
+                                                                //   path), headroom (facility), OI room (house)
+      function saturation()   external view returns (uint256);  // 0..1e18, degree at a bound
+  }
+
+The OBSERVER registers stabilizers with governance weights lambda_i and
+computes
+
+  shadowValueInBuck() = bvib + sum_i lambda_i * netInventory_i / D
+  saturation()        = weighted max_i saturation_i
+
+The CONTROLLER's =_readReferences= reads the observer instead of the
+basket, integrates the shadow error exactly as today (rails,
+conditional integration, priming, dS, dT), and uses =saturation()= for
+bounded gain scheduling -- Ki_eff = Ki (1 + gamma saturation), gamma
+governance-set and swept -- so that when the fast actuators are pinned
+at their bounds the structural lever moves faster.  That is the ops
+doc's "escalate on inventory, because inventory is the one signal the
+operator's own action cannot suppress", generalized to the whole level.
+With every lambda_i = 0 and gamma = 0 the controller IS
+=BuckKControllerDirect=; that identity is the regression test.
+
+Three things the structure deliberately does NOT do, each for a reason
+already measured:
+
+- *It does not feed the fast controllers' filtered deviations into K.*
+  The desk's 20-day common mode is a filtered bvib, which K already
+  integrates; feeding both double-counts, and the ops doc's ladder scan
+  showed a lagged reading INVERTS the outright quadrants past 80 days.
+  Positions carry the information without the lag.
+- *It does not let the fast controllers set K, and K does not set their
+  setpoints.*  Cascade control is the wrong topology: the fast
+  controllers' setpoint is par, which is definitional; K mid-ranges
+  THEM.
+- *It needs no priority logic among the fast controllers.*  The
+  laddered target zone (6.1) is already a split-range structure: each
+  actuator's active zone is a band of bvib.  The one real coupling is
+  shared pool depth (the ops doc's "the desk and the rebalancer compete
+  for the same actuator"), which the observer resolves with a
+  per-epoch capacity budget (C_leg accounting), not with priorities.
+  The persistence escalation (level 2) is the handoff: a Q2 burn or Q4
+  acknowledgment moves inventory out of level 1 and into K's stock, and
+  the shadow term drops accordingly.
+
+*** The monetary Diamond
+
+The basket is already a degenerate Diamond (=BuckBasketProRata='s
+=fallback= delegatecalls the venue facet over shared
+=BuckBasketStorage=; =BASKET-REDESIGN.md= 4).  The monetary Diamond is
+that pattern with more facets on one storage layout; facet boundaries
+are today's contract boundaries, so the existing forge suites carry
+over facet by facet:
+
+| facet                 | today                              | reports to the observer                                                                          |
+|-----------------------+------------------------------------+--------------------------------------------------------------------------------------------------|
+| venue                 | =BuckBasketUniswapV3=              | bvib, depth D                                                                                    |
+| custody / pro-rata    | =BuckBasketProRata= (+ stress fee) | --                                                                                               |
+| ops (the desk)        | =BuckBasketOps=                    | its book; its bounds' saturation                                                                 |
+| undertakings + ladder | new                                | issued (strong side); absorbed and rho (weak side)                                               |
+| facility registry     | new                                | sum of drawn credit of registered facility addresses, read from =Buck.signedRawBalanceOf= -- verifiable on-chain, no trusted reporting |
+| house                 | new (only if 3f wins)              | OI, net position                                                                                 |
+| observer              | new                                | =shadowValueInBuck()=, =saturation()=                                                            |
+| controller            | =BuckKControllerBase= PID          | exposes =IBuckK= to =Buck=                                                                       |
+
+=Buck= stays the ERC-20 Diamond the master document already plans
+(identity, demurrage, mint/burn, ERC-20 facets); =BuckCredit= stays a
+sibling for the selector-collision reason the master document gives;
+the two Diamonds talk only through =IBuckK=, =mintFromBasket= /
+=burnFromBasket=, and identity.  The one-way call graph survives: the
+controller facet reads its own storage and never calls =Buck=.
+
+Two cautions.  A single Diamond concentrates upgrade authority, so
+facet replacement and the eps / p / delta / phi / lambda / gamma
+parameters want time-locks -- the "technical measures" discipline of
+D3.  And the facility registry is a place an attacker could try to
+move K: reading drawn credit from =Buck= removes the REPORTING trust,
+but under D8 drawn credit itself can be fictitious until insurers are
+vetted, so lambda_c weights only facilities backed by vetted credit.
+
+*** What changes in wave 3
+
+Only the seam, and cheaply.  WP-3a's =shadowValueInBuck()= is the
+observer's output rather than a one-off view on the ops shell, with
+=IStabilizer= implemented first by the desk and second by the sim's
+agent-booked offset (a pseudo-stabilizer the =UndertakingAgent= and
+=FacilityAgent= write through a sim-only setter), so the WP-2/6/7
+agents' books map onto facets one-to-one later.  The controller stays a
+separate contract through wave 3 (it reads the observer); consolidation
+into the monetary Diamond is a post-wave-3 work package (WP-11) with
+the immutable-=buckK= decision recorded now.  No wave-3 cell changes.
 
 ** What this supersedes in earlier documents
 

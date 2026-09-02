@@ -139,7 +139,7 @@ files take append-only blocks.
 | ladder schedule          | =alberta_buck/sim/ladder.py= (new, pure)         | =Ladder(eps, delta, phi, R0)=: =bid()=, =fill(amount)=, =rho=, =tranche=; no chain access | WP-2 |
 | undertaking agent        | =alberta_buck/sim/undertaking_agents.py= (new)   | =UndertakingAgent(_ProxyAgent)=: knobs eps, p, delta, phi, reserve_frac, leg_bp; counters ut_issued/ut_absorbed/ut_rho/ut_tranche/ut_err | WP-2 |
 | registration             | =alberta_buck/sim/loop.py= (one import line per module, append) | =import alberta_buck.sim.undertaking_agents  # noqa  WP-2=          | each WP |
-| shadow view + controller | =src/basket/BuckBasketOps.sol= (append), =src/BuckKControllerShadow.sol= (new), =deploy.py= (append) | =shadowValueInBuck()=; =setShadowLambda=; sim-only =setShadowOffset=; =--controller shadow= / =SIM_SHADOW_LAMBDA= | WP-3a |
+| stabilizer seam + observer + shadow controller | =src/basket/IStabilizer.sol= (new); =src/basket/BuckBasketOps.sol= (append: the desk implements =IStabilizer=; the observer -- stabilizer registry with weights, =shadowValueInBuck()=, =saturation()=, =setShadowLambda=, sim-only =setShadowOffset= pseudo-stabilizer); =src/BuckKControllerShadow.sol= (new: reads the observer; gain scheduling gamma); =deploy.py= (append) | =IStabilizer= {netInventory, capacity, saturation}; =shadowValueInBuck()=; =saturation()=; =--controller shadow= / =SIM_SHADOW_LAMBDA= / =SIM_SHADOW_GAMMA= | WP-3a |
 | desk in the loop         | =deploy.py= / experiments (append)               | =--basket ops= with =SIM_OPS_*= from a TOML =[deploy]= block               | WP-3b  |
 | directional fee          | =alberta_buck/sim/fees.py= (new) + swap adapter hook (append) | =fee_bp(side, rv, size)=; surcharge routed to the basket                | WP-4   |
 | stress fee               | =src/basket/BuckBasketProRata.sol= (=_redeem=, local) OR DM agents (append) | fee ~ deviation on the deflation branch, credited to remaining holders | WP-5   |
@@ -175,7 +175,7 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 |-------+----------------------------------------------------------------------+---------+---------------------------------------------------------------+----------------------------------------------------------+------------------------------------------------------------------+------------+--------+----------------|
 | WP-1  | The instrument: markout ledger + basket-side columns in the summary  | --      | markout.py (new); snapshot.py, eqmetrics.py, catalogue.py (append) | =--report-only= regenerates 3.3 with markout columns     | R1, R2; =test_markout.py= green                                  | 0 (report) | TODO   |                |
 | WP-2  | Ladder module + UndertakingAgent; mixes =ut=, =ut-all=; 3c grid       | WP-1    | ladder.py, undertaking_agents.py (new); loop.py import; MIXES block | P1 and P8 tables for eps x p x (delta, phi) on the four common-mode arms x {x1, x4} | R3, R4; G5, G6; =test_ladder.py= green; determinism check   | ~72        | TODO   |                |
-| WP-3a | Shadow view + =BuckKControllerShadow= + deploy wiring + forge tests   | --      | BuckBasketOps.sol (append), BuckKControllerShadow.sol (new), deploy.py (append), forge test (new) | =--controller shadow= runs a smoke cell; canaries pass | forge tests: sign canaries, offset arithmetic, lambda = 0 identity with Direct | 1 (smoke) | TODO |                |
+| WP-3a | =IStabilizer= seam + observer on the ops shell + =BuckKControllerShadow= + deploy wiring + forge tests | -- | IStabilizer.sol (new), BuckBasketOps.sol (append), BuckKControllerShadow.sol (new), deploy.py (append), forge test (new) | =--controller shadow= runs a smoke cell; the desk is the first registered stabilizer, the sim offset the second | forge tests: sign canaries on the shadow input; lambda = gamma = 0 identity with Direct; offset and saturation arithmetic; reprime unaffected | 1 (smoke) | TODO |                |
 | WP-3b | Desk in the loop + lambda sweep (3d)                                 | WP-2, WP-3a | experiments (append); catalogue tag =shadow=                 | P4 table: lambda_d x {dump, squeeze, grind-down} x {x1, x4} | R5; desk return-to-zero time; runaway-one detection at lambda 0 | ~40   | TODO   |                |
 | WP-4  | Directional fee in the swap adapter; 3b grid                          | WP-2    | fees.py (new); swap adapter hook (append)                     | trough-depth and tracking-error table                    | R7; G3                                                           | ~24        | TODO   |                |
 | WP-5  | Stress fee (Solidity in =_redeem=, or DM emulation)                   | --      | BuckBasketProRata.sol (local) + forge test, OR DM agents (append) | P2 table on the x4 cells                                | R6; G4                                                           | ~8         | TODO   |                |
@@ -184,6 +184,7 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 | WP-8  | SeederAgent; orientation check; 3h seeder cells                       | --      | seeder_agent.py (new); loop.py import                         | seeder on/off at launch; private-depth arrival            | R10; G3                                                          | ~8         | TODO   |                |
 | WP-9  | Five seeds on the key 3c/3d cells; the flood with/without facility    | WP-2, WP-3b, WP-6 | sweep usage; a flood experiment TOML (new)              | replication table; flood table                            | R11, R12                                                         | ~40        | TODO   |                |
 | WP-10 | Documents of record                                                   | all     | CARRY-CONVEXITY.org, REBALANCING-EQ.org, this file             | "Wave 3 results" section; findings 12+; ledger closed      | R13                                                              | --         | TODO   |                |
+| WP-11 | Monetary Diamond consolidation (POST-wave-3): facets = venue, custody, ops, undertakings + ladder, facility registry, house, observer, controller; =Buck='s =buckK= and =basket= point at the Diamond (CARRY-CONVEXITY.org 6.4) | all wave-3 wins | src/basket/* (facets), src/Buck.sol wiring decision, deploy scripts | facet map + shared storage layout; time-locked parameters | existing forge suites pass facet by facet; lambda = gamma = 0 identity; one-way call graph asserted | -- | TODO |                |
 
 * Test plan
 
@@ -254,6 +255,20 @@ verdict hold on >= 4/5.
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
 
+** 2026-09-02 -- the hierarchical structure (session 1, later)
+
+- Decision: K consumes the fast actuators' POSITIONS and SATURATION,
+  never their filtered signals (=CARRY-CONVEXITY.org= 6.4).  The
+  =IStabilizer= seam {netInventory, capacity, saturation} and the
+  observer (=shadowValueInBuck=, =saturation=) are the interface WP-3a
+  builds; the controller reads the observer; lambda = gamma = 0
+  reproduces =BuckKControllerDirect=.
+- WP-3a revised accordingly; WP-11 (monetary Diamond consolidation,
+  post-wave-3) added.  No wave-3 cell changes.
+- Constraint recorded: =Buck.buckK= is immutable, so the monetary
+  Diamond (or an upgradeable controller proxy) must be the controller
+  address from =Buck='s deployment.  Decisions pending 5 and 6.
+
 ** 2026-09-02 -- program created (session 1, design owner + Claude)
 
 - =CARRY-CONVEXITY.org= v1.2 committed (1affbdb) with the weak-side
@@ -277,6 +292,11 @@ next.  Paste acceptance evidence here, not in chat.
 3. The reserve fraction the weak-side ladder may deploy of NAV
    (=reserve_frac=): start at 0.5; sweep {0.25, 0.5, 1.0}.
 4. Whether WP-7 (the perp) waits for WP-6's result (the plan says yes).
+5. =Buck.buckK= is immutable: the monetary Diamond (or an upgradeable
+   controller proxy) must be the controller address from deployment --
+   decide before the first testnet deploy that is meant to persist.
+6. Time-locks on facet replacement and on eps / p / delta / phi /
+   lambda / gamma: the delay and the announcement channel.
 
 * Conventions
 
