@@ -204,7 +204,7 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 | id    | goal                                                                 | depends | owns (files)                                                  | deliverable                                              | acceptance                                                       | est. cells | status | branch / owner |
 |-------+----------------------------------------------------------------------+---------+---------------------------------------------------------------+----------------------------------------------------------+------------------------------------------------------------------+------------+--------+----------------|
 | WP-1  | The instrument: markout ledger + basket-side columns + K forecastability panel in the summary | -- | markout.py (new); loop.py, snapshot.py, eqmetrics.py, catalogue.py (append) | =--report-only= regenerates 3.3 with basket-side and kfc columns on the existing vectors; markout columns on re-run cells | R1, R2, R14(a) instrument; =test_markout.py= green; a 60-day smoke with non-zero ledger | 0 (report) + 1 smoke | DONE on branch; merge pending; 3a regeneration not run | =wp/1-instrument= / Claude (session 2) |
-| WP-2  | Ladder module + UndertakingAgent; mixes =ut=, =ut-all=; 3c grid       | WP-1    | ladder.py, undertaking_agents.py (new); loop.py import; MIXES block | P1 and P8 tables for eps x p x (delta, phi) on the four common-mode arms x {x1, x4} | R3, R4; G5, G6; =test_ladder.py= green; determinism check   | ~72        | TODO   |                |
+| WP-2  | Ladder module + UndertakingAgent; mixes =ut=, =ut-all=; 3c grid       | WP-1    | ladder.py, undertaking_agents.py (new); loop.py import; MIXES block | P1 and P8 tables for eps x p x (delta, phi) x leg_bp on the four common-mode arms x {x1, x4} | R3, R4 (agent built, smoke shows the capacity window); G5, G6 pending the 3c cells; =test_ladder.py= green; determinism OK | ~72 | DONE (merged 2026-09-02; 3c cells pending) | =wp/2-undertakings= / subagent |
 | WP-3a | =IStabilizer= seam + observer on the ops shell + =BuckKControllerShadow= + deploy wiring + forge tests | -- | IStabilizer.sol (new), BuckBasketOps.sol (append), BuckKControllerShadow.sol (new), deploy.py (append), forge test (new) | =--controller shadow= runs a smoke cell; the desk is the first registered stabilizer, the sim offset the second | forge tests: sign canaries on the shadow input; lambda = gamma = 0 identity with Direct; offset and saturation arithmetic; reprime unaffected | 1 (smoke) | TODO |                |
 | WP-3b | Desk in the loop + lambda sweep (3d)                                 | WP-2, WP-3a | experiments (append); catalogue tag =shadow=                 | P4 table: lambda_d x {dump, squeeze, grind-down} x {x1, x4} | R5; desk return-to-zero time; runaway-one detection at lambda 0 | ~40   | TODO   |                |
 | WP-4  | Directional fee in the swap adapter; 3b grid                          | WP-2    | fees.py (new); swap adapter hook (append)                     | trough-depth and tracking-error table                    | R7; G3                                                           | ~24        | TODO   |                |
@@ -390,6 +390,45 @@ verdict hold on >= 4/5.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-02 -- WP-2 DONE and merged (session 2, subagent on =wp/2-undertakings=)
+
+- Commit 9267d81, merged --no-ff into =feature/carry-convexity= (one
+  append-only conflict in =snapshot.py= against WP-5's block, both
+  kept).  =test_ladder.py= 8 passed; =test_markout.py= still 8.
+- Built: =alberta_buck/sim/ladder.py= (pure =Ladder(eps, delta, phi,
+  R0, p)=: bid, edge_bvib, capacity, fill -> (buck, avg_price,
+  tranches), rho, tranche, reset; delta = 0 flat edge and the CPMM limit
+  documented), =undertaking_agents.py= (=UndertakingAgent=: strong side
+  mints against an "unlimited" zero-premium face and sells the bundle
+  when the 1-day EWMA < 1/(1 + p eps); weak side buys BUCK with a
+  reserve_frac x NAV TOKEN book down the ladder when the signal passes
+  the current tranche's edge; unwinds at par within eps/2 -- TraHK, never
+  at a premium; books netted to the proxy's single signed balance; ut_*
+  counters; arb_state), mixes =ut= / =ut-all=.
+- Smoke (catalogue-squeeze, raid $8M at day 30, no private cast):
+  - default leg_bp 40: the desk issued $31.8k on days 32-33 and the
+    trough was UNTOUCHED (bvib min 0.8942 with and without; K end 0.790
+    vs 0.791; whale -$5.575M vs -$5.573M).  C_leg = 0.4% of each basket
+    pool's $1-2.7M BUCK reserve = $16-32k/day of capacity against an $8M
+    one-day squeeze: the "conversion-capacity window" of CARRY-CONVEXITY
+    7.4, in numbers.  PREDICTION 1 (band integrity) is therefore NOT met
+    at the default cap -- as the model said it would not be inside the
+    window.
+  - leg_bp 500 (the ops shell's maximum): $201.7k issued in one act on
+    day 32, bvib 0.9387 vs 0.9054 count-0 that day, the whole book
+    retired at par on day 59 (issued_open back to 0), K end 0.781, whale
+    -$5.586M.  The mechanism works when capacity allows; the day-31
+    trough itself is untouched because the desk acts at tick 0 on the
+    lagged signal, the day AFTER the injection.
+  - Determinism: A vs B byte-identical; count-0 vs class-absent frames
+    identical modulo the new ut_* default keys.
+- Open: the 3c grid must sweep =agents.UndertakingAgent.leg_bp= (and
+  =sig_halflife=; a tick-level signal is the way to meet the injection
+  day itself); =--scale= multiplies desk COUNT (x4 = 4 books), which is
+  not the intended intensity axis for a single desk -- give the star an
+  explicit reserve_frac / leg_bp axis instead; the weak side (ladder,
+  rho) is untested until the dump / grind-down arms run.
 
 ** 2026-09-02 -- WP-5 DONE and merged (session 2, subagent on =wp/5-stress-fee=)
 
