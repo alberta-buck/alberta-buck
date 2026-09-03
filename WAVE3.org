@@ -209,7 +209,7 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 | WP-3b | Desk in the loop + lambda sweep (3d)                                 | WP-2, WP-3a | experiments (append); catalogue tag =shadow=                 | P4 table: lambda_d x {dump, squeeze, grind-down} x {x1, x4} | R5; desk return-to-zero time; runaway-one detection at lambda 0 | ~40   | TODO   |                |
 | WP-4  | Directional fee in the swap adapter; 3b grid                          | WP-2    | fees.py (new); swap adapter hook (append)                     | trough-depth and tracking-error table                    | R7; G3                                                           | ~24        | TODO   |                |
 | WP-5  | Stress fee (Solidity in =_redeem=)                                    | --      | BuckBasketProRata.sol, BuckBasketStorage.sol (append), forge test; direct_mint.py + snapshot.py (append) | P2 table on the x4 cells (cells not yet run) | R6 (contract-level, tested); G4 measurement pending the x4 cells | ~8 | DONE (merged 2026-09-02; cells pending) | =wp/5-stress-fee= / subagent |
-| WP-6  | FacilityAgent; mixes =fac=, =fac-all=; 3g grid                        | WP-1    | facility_agent.py (new); loop.py import; MIXES block          | P6 table: population x (x, y) x deposit-to-basket on/off | R8                                                               | ~72        | TODO   |                |
+| WP-6  | FacilityAgent; mixes =fac=, =fac-all=; 3g grid                        | WP-1    | facility_agent.py (new); loop.py import; MIXES block          | P6 table: population x (x, y) x max_impact_bp x target (basket / usdc) | R8 (agent built; both legs exercised; throughput-bound); P6 pending the 3g cells; =test_facility.py= green; determinism OK | ~72 | DONE (merged 2026-09-02; 3g cells pending) | =wp/6-facility= / subagent |
 | WP-7  | Perp ledger + FundingHouseAgent; whale =via=; 3f grid                 | WP-6    | perp.py (new); WhaleRaidAgent knob (append); loop.py import   | P7 table: g() slope x via {perp, spot}; solvency check    | R9                                                               | ~24        | TODO   |                |
 | WP-8  | SeederAgent; orientation check; 3h seeder cells                       | --      | seeder_agent.py (new); loop.py import                         | seeder on/off at launch; private-depth arrival            | R10; G3                                                          | ~8         | TODO   |                |
 | WP-9  | Five seeds on the key 3c/3d cells; the flood with/without facility    | WP-2, WP-3b, WP-6 | sweep usage; a flood experiment TOML (new)              | replication table; flood table                            | R11, R12                                                         | ~40        | TODO   |                |
@@ -390,6 +390,47 @@ verdict hold on >= 4/5.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-02 -- WP-6 DONE and merged (session 2, subagent on =wp/6-facility=)
+
+- Commit 8142096, merged --no-ff into =feature/carry-convexity= (three
+  append-only conflicts against WP-2 / WP-5 in catalogue.py, loop.py,
+  snapshot.py; both sides kept).  =test_facility.py= 18 passed (34 with
+  markout + ladder).
+- Built: =alberta_buck/sim/facility_agent.py= -- pure
+  =facility_decision(signal, x, y, drawn, limit, max_frac, open_position,
+  headroom)= -> (action, size) and =FacilityAgent(_ProxyAgent)= (knobs x,
+  y, max_frac, face_m, sig_halflife, max_impact_bp, target basket|usdc;
+  the D6 rule: issue at a premium against the line and deposit the BUCK
+  to the basket; redeem + repay at a discount, selling only enough TOKEN
+  to repay, the surplus kept as inventory).  limit = depreciated face x
+  K (the line's potential L_i of CARRY-CONVEXITY 7.6), drawn =
+  -signedRawBalanceOf; coverage activated per bite (1.05 x deficit).
+  Counters fac_issued / retired / burned / deposits / redeems / drawn /
+  limit / u / err, fac_pnl summed like exc_pnl; mixes =fac= (32),
+  =fac-all=.
+- Smoke (catalogue-squeeze, raid $8M day 30, FacilityAgent=8, no private
+  cast): first issue day 31 (1-d EWMA lag); 485,868 BUCK issued through
+  56 basket deposits, u peaks 0.030 of a 16.39M line; bvib min 0.9079 vs
+  0.8942 count-0; AUC|1-bvib| 0.580 vs 0.782 (-26%); K end 0.7805 vs
+  0.7912 (D4: K sees the damped error -- the shadow term is what restores
+  it).  No discount > 1.03 followed, so no retire in that cell.  Retire
+  leg exercised with y=0.005, raid day 2: day 14 redeems 25/40 receipts,
+  repays 22.4k, burns 26.4k coverage; day 17 the rest; fac_pnl +7.7k with
+  253k TOKEN inventory against 246k drawn -- the harvest lands on the
+  retire leg, as D6 says.
+- Determinism: two 60-d runs byte-identical.
+- Open: (1) THROUGHPUT -- the basket deposit is throttled by the ~0.9M
+  BUCK TOKEN/BUCK pools (7-9k BUCK/agent/day at 50-150 bp), 30-80x less
+  than the credit mix sells into the 50M BUCK/USDC pool; the 3g grid must
+  sweep =agents.FacilityAgent.max_impact_bp= and compare =target=usdc=.
+  (2) The basket's own =Slippage()= guard (=_enforceSlippageGuard= in
+  poolBuckValues) refuses redeems on a fast excursion day -- the retire
+  leg's first attempt failed and retried; note for WP-5 / R6.  (3)
+  fac_err is sticky (house convention).  (4) Two concurrent sim launches
+  once failed at import with =ModuleNotFoundError: buck_core= (editable
+  finder mapping to the main repo's core/python), retries succeeded; not
+  reproducible on demand.
 
 ** 2026-09-02 -- WP-2 DONE and merged (session 2, subagent on =wp/2-undertakings=)
 
