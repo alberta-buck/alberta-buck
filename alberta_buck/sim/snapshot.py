@@ -631,6 +631,21 @@ class Snapshotter:
             "fac_u": ctr.get("fac_u", 0.0),
             "fac_err": ctr.get("fac_err", ""),
             "fac_pnl": fac_pnl,
+            # WP-8: SeederAgent (alberta_buck/sim/seeder_agent.py) -- the
+            # treasury's temporary BUCK/USDC range.  Copied in the same
+            # commit as the agent (the ops doc's "the agent is invisible").
+            "sd_positions": ctr.get("sdPositions", 0),
+            "sd_repositions": ctr.get("sdRepositions", 0),
+            "sd_converted": ctr.get("sdConverted", 0),
+            "sd_withdrawn": ctr.get("sdWithdrawn", 0),
+            "sd_side": ctr.get("sdSide", ""),
+            "sd_ideal": ctr.get("sdIdeal", 0),          # micro-USD per BUCK
+            "sd_current": ctr.get("sdCurrent", 0),      # micro-USD per BUCK
+            "sd_gap_bp": ctr.get("sdGapBp", 0),
+            "sd_liq": ctr.get("sdLiq", 0),
+            "sd_depth": ctr.get("sdDepth", 0),          # private depth, usd6
+            "sd_last": dict(ctr.get("sdLast", {})),     # the last placement
+            "sd_err": ctr.get("sd_err", ""),
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

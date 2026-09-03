@@ -58,6 +58,10 @@ ARMS = ["none", "dump", "squeeze", "grind-down", "grind-up", "spike", "step"]
 DEFENDERS = ["ExcursionArbAgent", "ExcursionCreditArbAgent",
              "ExcursionBasketArbAgent", "ExcursionBuckArbAgent",
              "CommodityRebalArbAgent"]
+# WP-8: the treasury seeder is governed by the mixes too -- count 0 in every
+# existing mix, so no banked cell changes; enable it per cell with
+# CAT_SET="scenario.agents.SeederAgent=1".
+DEFENDERS.append("SeederAgent")
 
 MIXES = {
     "none":   {},
