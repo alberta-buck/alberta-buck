@@ -29,7 +29,8 @@ E6 = 10 ** 6
 
 
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
-        director_impl="pairs", on_day_start=None, on_frame=None) -> dict:
+        director_impl="pairs", on_day_start=None, on_frame=None,
+        controller_impl="direct") -> dict:
     """on_day_start(day, d, agents, ctr): a mutation window before the
     day's ticks (the sim server applies population/knob controls here).
     on_frame(frame): called with each just-captured snapshot frame (the
@@ -49,7 +50,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
               f"({scenario.days}d x {scenario.ticks_per_day} ticks)...",
               flush=True)
     d = deploy(chain, anvil, scenario, rng, basket_impl=basket_impl,
-               director_impl=director_impl)
+               director_impl=director_impl, controller_impl=controller_impl)
 
     # --- build + register the agent population ----------------------- #
     # Reset per-class counters defensively so back-to-back sim runs in

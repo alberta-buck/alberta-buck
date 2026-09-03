@@ -105,13 +105,25 @@ contract BuckKControllerDirect is BuckKControllerBase {
         emit BasketSet(_basket);
     }
 
-    function _readReferences() internal view override
+    function _readReferences() internal view virtual override
         returns (int256 buckValue, int256 basketValue)
     {
         buckValue = UNIT;
         basketValue = (address(basket) != address(0))
                     ? basket.basketValueInBuck()
                     : UNIT;
+    }
+
+    /// @dev The integrator's increment for one cycle (ppm*seconds).  A hook so
+    ///      a variant can schedule the integral gain on the INCREMENT --
+    ///      Ki_eff * err * dt -- without touching the wound integral or the
+    ///      `buckK == buckK0 + Kp*P + Ki*I` algebra that reprime(), retune()
+    ///      and setBuckK0() rely on.  The direct controller's increment is
+    ///      exactly `err * dt`; see BuckKControllerShadow for the schedule.
+    function _integralStep(int256 err, int256 dt) internal view virtual
+        returns (int256)
+    {
+        return err * dt;
     }
 
     /// @dev Bumpless-transfer algebra for the ppm embodiment:
@@ -152,7 +164,7 @@ contract BuckKControllerDirect is BuckKControllerBase {
         uint256 effective = elapsed > dTMax ? dTMax : elapsed;
         int256  dt = int256(effective);
 
-        int256 newI = I + err * dt;             // ppm*seconds
+        int256 newI = I + _integralStep(err, dt);   // ppm*seconds
         int256 dErr = err - P;                  // ppm  (P holds previous err)
 
         int256 uP = Kp * err;                   // 1e18

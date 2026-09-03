@@ -5,6 +5,7 @@ import {IERC20}              from "@openzeppelin/contracts/token/ERC20/IERC20.so
 
 import {BuckBasketProRata}   from "./BuckBasketProRata.sol";
 import {IBuckBasketVenue}    from "./IBuckBasketVenue.sol";
+import {IStabilizer}         from "./IStabilizer.sol";
 
 interface IMonetaryDirector {
     function monetaryEffort() external view returns (int32 effortBp, bool outright);
@@ -95,7 +96,19 @@ interface IMonetaryDirector {
 ///                           monetary swap would revert every depositor exit
 ///                           until the window caught up.  The basket must not
 ///                           be able to brick its own redemption path.
-contract BuckBasketOps is BuckBasketProRata {
+///
+/// # The stabilizer seam (WP-3a; CARRY-CONVEXITY.org 6.4)
+///
+///         The desk is the first level-1 stabilizer: it implements
+///         `IStabilizer` from its own book (`netInventory`, `capacity`,
+///         `saturation`) and publishes the reference depth D
+///         (`shadowDepth`).  The OBSERVER that registers stabilizers with
+///         their lambdas and assembles K's process variable from them is
+///         `ShadowObserver` -- its own contract, for the bytecode budget and
+///         because that is the shape of the observer facet of the monetary
+///         Diamond (WP-11).  What `BuckKControllerShadow` integrates is the
+///         observer's `shadowValueInBuck()`, not anything on this shell.
+contract BuckBasketOps is BuckBasketProRata, IStabilizer {
 
     struct OpsParams {
         uint32 maxLegBp;        // per-leg cap, bp of that pool's BUCK reserve
@@ -392,6 +405,105 @@ contract BuckBasketOps is BuckBasketProRata {
                 monetaryTokenHeld[i] = have - spent;
                 moved += recv;
             }
+        }
+    }
+
+    // --- IStabilizer: the desk's own book ----------------------------------- //
+
+    /// @notice absorbed - issued, BUCK native units.
+    ///
+    /// @dev    DERIVATION from the book as `_absorb` / `_supply` keep it:
+    ///
+    ///           monetaryBuckHeld     BUCK bought under Q1 and still held
+    ///                                (released by Q3, burned by Q2).  Every
+    ///                                unit of it is BUCK the market sold and
+    ///                                the desk took out of circulation
+    ///                                TEMPORARILY -- absorbed, positive.
+    ///           monetaryOutstanding  signed net OUTRIGHT change to supply:
+    ///                                +issued (Q4 mint-and-sell), -retired
+    ///                                (Q2 burn).  While it is positive the
+    ///                                desk has BUCK in circulation it minted
+    ///                                and has not retired -- issued, negative.
+    ///
+    ///         So netInventory = monetaryBuckHeld - max(monetaryOutstanding, 0).
+    ///
+    ///         The negative side of monetaryOutstanding is deliberately NOT
+    ///         inventory.  A Q2 burn is the persistence escalation: it moves
+    ///         BUCK out of level 1 and into K's stock (CARRY-CONVEXITY.org
+    ///         6.4, level 2), so the shadow term must DROP when it fires
+    ///         (D4: "burned inventory leaves the book and the shadow term
+    ///         drops to zero").  Counting the retired amount as absorbed would
+    ///         leave the term where it was; counting it against the issued
+    ///         side (signed) would make a burn of held inventory a no-op on
+    ///         the shadow value.  Walk the quadrants: Q4 issue 100 -> -100;
+    ///         Q1 absorb 100 -> 0 (its own issuance re-absorbed, circulation
+    ///         unchanged); Q2 burn the 100 held -> held 0, outstanding 0 ->
+    ///         0; Q2 burn a further 50 bought fresh -> outstanding -50 -> 0:
+    ///         permanent, K sees the real bvib, no double count.
+    function netInventory() public view override returns (int256) {
+        int256 issued = monetaryOutstanding > 0 ? monetaryOutstanding : int256(0);
+        return int256(monetaryBuckHeld) - issued;
+    }
+
+    /// @notice Remaining room under the desk's bounds, 1e18 = all: the
+    ///         SMALLER of the fraction left under `maxPositionBp` (inventory
+    ///         vs NAV) and under `maxOutrightBp` (|monetaryOutstanding| vs
+    ///         NAV) -- the two bounds `_absorb` / `_supply` revert on.
+    ///
+    /// @dev    A disabled desk, and a desk whose NAV cannot be read (empty
+    ///         basket, or the spot/TWAP guard tripped -- `monetaryOperation`
+    ///         would revert on the same read), report 0: they cannot act,
+    ///         which for the gain scheduling is the same thing as pinned.
+    ///         `maxLegBp` is a per-operation pacing limit, not a book bound,
+    ///         and TOKEN-reserve exhaustion is an ordinary state the desk
+    ///         refills by issuing; neither enters capacity.
+    function capacity() public view override returns (uint256) {
+        OpsParams memory op = opsParams;
+        if (!op.enabled) return 0;
+        uint256 nav = _navBuckSafe();
+        uint256 posRoom = _room(nav * op.maxPositionBp / 10000, monetaryBuckHeld);
+        int256  o = monetaryOutstanding;
+        uint256 outRoom = _room(nav * op.maxOutrightBp / 10000,
+                                o < 0 ? uint256(-o) : uint256(o));
+        return posRoom < outRoom ? posRoom : outRoom;
+    }
+
+    /// @notice 1e18 - capacity(): 1e18 once either bound has been hit.
+    function saturation() public view override returns (uint256) {
+        return 1e18 - capacity();
+    }
+
+    /// @dev Fraction of `cap` still unused by `used`, 1e18-scaled; 0 at or
+    ///      past the bound (the same `>=` the operations revert on), and 0
+    ///      for a zero cap (any book at all is over it).
+    function _room(uint256 cap, uint256 used) internal pure returns (uint256) {
+        if (cap == 0 || used >= cap) return 0;
+        return (cap - used) * 1e18 / cap;
+    }
+
+    /// @dev `_navBuck` without the revert: `poolBuckValues` throws NoValue on
+    ///      an empty basket and Slippage when spot is off TWAP, and a VIEW on
+    ///      the controller's path must not take K's compute() down with it.
+    function _navBuckSafe() internal view returns (uint256) {
+        try _venue().poolBuckValues()
+            returns (uint256[] memory, uint128[] memory, uint256 B, uint256[] memory)
+        {
+            return 2 * B;
+        } catch {
+            return 0;
+        }
+    }
+
+    /// @notice The reference depth D the observer normalizes inventory by:
+    ///         the BUCK reserve of the basket pools (native units) -- the
+    ///         whole pool balance, exactly what `_swapAcross` sizes its legs
+    ///         against, rather than the guarded depositor slice from
+    ///         `poolBuckValues`, which reverts under a spot/TWAP deviation
+    ///         and would take K's compute() with it.
+    function shadowDepth() external view returns (uint256 depth) {
+        uint256 n = constituents.length;
+        for (uint256 i = 0; i < n; i++) {
+            depth += IERC20(address(buck)).balanceOf(constituents[i].pool);
         }
     }
 }

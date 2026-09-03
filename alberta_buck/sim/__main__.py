@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from alberta_buck.sim.anvil import Anvil
@@ -22,6 +23,15 @@ def main(argv=None) -> int:
                          "(RPC-faithful; needs anvil on PATH -- fork tests)")
     ap.add_argument("--director", default="pairs", choices=["vrate", "pairs"],
                     help="rebalance-director signal engine (prorata only)")
+    ap.add_argument("--controller", default=os.environ.get("SIM_CONTROLLER", "direct"),
+                    choices=["direct", "shadow"],
+                    help="BUCK_K controller: BuckKControllerDirect (direct, "
+                         "default) or BuckKControllerShadow (shadow -- WP-3a: "
+                         "reads the ops shell's observer, bvib + lambda * "
+                         "netInventory / D, with Ki scheduled by the desk's "
+                         "saturation; SIM_SHADOW_LAMBDA / SIM_SHADOW_GAMMA, "
+                         "default 0, make it Direct's twin).  Env SIM_CONTROLLER "
+                         "sets the default so catalogue/star cells can select it")
     ap.add_argument("--basket", default=None,
                     choices=["legacy", "prorata", "ops", "fence"],
                     help="basket implementation: BuckBasketProRata (prorata, "
@@ -103,7 +113,7 @@ def main(argv=None) -> int:
         Backend = Anvil
     with Backend(port=a.port) as anvil:
         summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl,
-                      director_impl=a.director)
+                      director_impl=a.director, controller_impl=a.controller)
     ok = summary["cycle_trades"] > 0 and summary["all_eoa_verified"]
     return 0 if ok else 1
 
