@@ -395,6 +395,18 @@ class Snapshotter:
         treas_buck = ctr.get("treasuryBuck", 0)
         treas_frac = treas_buck / nav if nav > 0 else 0.0
 
+        # WP-6: the latent-credit facility population's par-marked P&L
+        # (nw - nw0: USDC + signed BUCK + TOKEN at reference + open receipts
+        # at principal), summed the way exc_pnl is (facility_agent.py).
+        fac_pnl = 0
+        for ag in agents:
+            if (type(ag).__name__ == "FacilityAgent"
+                    and getattr(ag, "proxy", None)):
+                try:
+                    fac_pnl += ag._nw(d) - ag._nw0
+                except Exception:
+                    pass
+
         self.frames.append({
             "invested": init_val,                      # arb capital (USDC,d0)
             "lp": lp,                                  # group: [feeUsd, capUsd]
@@ -588,6 +600,19 @@ class Snapshotter:
             # WP-1: the markout ledger's cumulative aggregates (None when
             # the loop runs without one, e.g. older callers).
             "mx": mx,
+            # WP-6: the latent-credit facility (facility_agent.py).  Flows
+            # are cumulative BUCK / counts; fac_drawn / fac_limit / fac_u
+            # are the population's live book read from chain at each act.
+            "fac_issued": ctr.get("fac_issued", 0),
+            "fac_retired": ctr.get("fac_retired", 0),
+            "fac_burned": ctr.get("fac_burned", 0),
+            "fac_deposits": ctr.get("fac_deposits", 0),
+            "fac_redeems": ctr.get("fac_redeems", 0),
+            "fac_drawn": ctr.get("fac_drawn", 0),
+            "fac_limit": ctr.get("fac_limit", 0),
+            "fac_u": ctr.get("fac_u", 0.0),
+            "fac_err": ctr.get("fac_err", ""),
+            "fac_pnl": fac_pnl,
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

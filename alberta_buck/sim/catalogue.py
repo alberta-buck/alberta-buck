@@ -71,6 +71,15 @@ MIXES = {
                "CommodityRebalArbAgent": 2},
 }
 
+# -- WP-6: the latent-credit facility (facility_agent.py) ----------------- #
+# Governed like every defender (set to 0 in every mix that omits it), so a
+# TOML's own FacilityAgent count never leaks into a cell.
+DEFENDERS.append("FacilityAgent")
+MIXES.update({
+    "fac":     {"FacilityAgent": 32},                     # D6 issue / retire
+    "fac-all": {**MIXES["all"], "FacilityAgent": 32},     # the all mix + it
+})
+
 
 def _scaled(n: int, scale: float) -> int:
     if n <= 0:
