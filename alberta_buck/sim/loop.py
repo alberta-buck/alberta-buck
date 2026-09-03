@@ -21,6 +21,7 @@ from alberta_buck.sim.direct_mint import (
 )
 from alberta_buck.sim.snapshot import Snapshotter
 from alberta_buck.sim.markout import MarkoutLedger, PoolProbe, actor_tag  # WP-1
+import alberta_buck.sim.seeder_agent  # noqa: F401  WP-8  triggers @_register
 
 E6 = 10 ** 6
 
