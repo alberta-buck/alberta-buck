@@ -211,7 +211,7 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 | WP-5  | Stress fee (Solidity in =_redeem=)                                    | --      | BuckBasketProRata.sol, BuckBasketStorage.sol (append), forge test; direct_mint.py + snapshot.py (append) | P2 table on the x4 cells (cells not yet run) | R6 (contract-level, tested); G4 measurement pending the x4 cells | ~8 | DONE (merged 2026-09-02; cells pending) | =wp/5-stress-fee= / subagent |
 | WP-6  | FacilityAgent; mixes =fac=, =fac-all=; 3g grid                        | WP-1    | facility_agent.py (new); loop.py import; MIXES block          | P6 table: population x (x, y) x max_impact_bp x target (basket / usdc) | R8 (agent built; both legs exercised; throughput-bound); P6 pending the 3g cells; =test_facility.py= green; determinism OK | ~72 | DONE (merged 2026-09-02; 3g cells pending) | =wp/6-facility= / subagent |
 | WP-7  | Perp ledger + FundingHouseAgent; whale =via=; 3f grid                 | WP-6    | perp.py (new); WhaleRaidAgent knob (append); loop.py import   | P7 table: g() slope x via {perp, spot}; solvency check    | R9                                                               | ~24        | TODO   |                |
-| WP-8  | SeederAgent; orientation check; 3h seeder cells                       | --      | seeder_agent.py (new); loop.py import                         | seeder on/off at launch; private-depth arrival            | R10; G3                                                          | ~8         | TODO   |                |
+| WP-8  | SeederAgent; orientation check; 3h seeder cells                       | --      | seeder_agent.py (new); loop.py import                         | seeder on/off at launch; private-depth arrival            | R10 (corrective side only, shown); G3 met (ratio 1.04); =test_seeder.py= green; determinism OK; 3h cells blocked on decision 8 (reserve-ratio gauges) | ~8 | DONE (merged 2026-09-02; 3h cells pending) | =wp/8-seeder= / subagent |
 | WP-9  | Five seeds on the key 3c/3d cells; the flood with/without facility    | WP-2, WP-3b, WP-6 | sweep usage; a flood experiment TOML (new)              | replication table; flood table                            | R11, R12                                                         | ~40        | TODO   |                |
 | WP-10 | Documents of record                                                   | all     | CARRY-CONVEXITY.org, REBALANCING-EQ.org, this file             | "Wave 3 results" section; findings 12+; ledger closed      | R13                                                              | --         | TODO   |                |
 | WP-12 | The star driver + pane renderer: =star.py= (baseline TOML + axes spec -> 1 + 2A cells per arm, run / =--report-only=, sensitivity table md/json), =plot_star.py= (one figure per pane: axes x arms panels with lo / base / hi overlaid), =experiments/stars/= | WP-1 | star.py, plot_star.py (new); experiments/stars/*.toml | the integral-only-K star (c0) spec + a dry-run; a smoke star | dry-run lists 1 + 2A cells per arm; the smoke star renders the k and bvib panes; sensitivity table regenerates from vectors | ~5 (smoke) | IN PROGRESS | =wp/12-star= / Claude (session 2) |
@@ -390,6 +390,51 @@ verdict hold on >= 4/5.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-02 -- WP-8 DONE and merged (session 2, subagent on =wp/8-seeder=)
+
+- Commit 8a5a67c, merged --no-ff into =feature/carry-convexity= (two
+  append-only conflicts in loop.py / snapshot.py; both sides kept).
+  =test_seeder.py= 84 passed; the four wave-3 test files together 118.
+- Built: =alberta_buck/sim/seeder_agent.py= -- pure helpers
+  (=ideal_buck_usd=, tick <-> usd6, =seeder_range=, =corrective_side=,
+  =single_sided_liquidity=, =depth_usd6=) and =SeederAgent(_ProxyAgent)=
+  (knobs budget_m [10,20], restrike_bp 100, withdraw_depth_m 50, max_days
+  365, min_gap_bp 25, start_day 1, count_simlp false); sd_* counters.
+  ORIENTATION (tested both ways): a V3 range above the tick is funded
+  with token0, below with token1; the sim's BUCK/USDC pool has USDC as
+  token0, so "BUCK must rise" is a range BELOW the tick funded with
+  BUCK.  The funding side is sign(ideal - current) alone; only the tick
+  direction flips with token order.
+- Smoke (catalogue-none, 60 d): 6 placements, 5 restrikes, 0
+  conversions, 0 withdrawals, no error; every placement's side matched
+  sign(ideal - current) (five USDC-funded when BUCK was rich, one
+  BUCK-funded on day 31 when it was cheap).  G3: per-frame mean BUCK/USDC
+  tracking error 0.449% on vs 0.432% off, ratio 1.039 (gate <= 1.25);
+  the loop's own gauge read 0.10% vs 0.12% at day 59 and 0.11% vs 0.25%
+  at day 40.  Determinism: byte-identical repeats; count-0 vs
+  class-absent frames identical.
+- Deviations: (1) a units bug in the ideal (basketAmount is weight x
+  1e36 / the 6-dec init price) caught by the first smoke, verified on a
+  live deployment (sum = 1.0000 BUCK at p0), fixed and re-run; (2)
+  =start_day= 1 because at day 0 tick 0 the truth pools are +21% on
+  every token until the whale's first snap; (3) the withdraw rule
+  excludes the SimLP deploy-time full-range position
+  ("SimLP-independent depth"), so it never fired in 60 d.
+- FINDING (decision pending 8): =SaverAgent= (ru/rb),
+  =router.quote_hop= (xy=k on pool balances) and =snapshot.buck_usd= all
+  price BUCK/USDC by RESERVE RATIO; a concentrated position is misread
+  as a price move (day 1: reserve-implied 1.41 vs spot 1.08).  The
+  seeder-on world's higher spot (mean |spot-1| 0.046 vs 0.024), +5M
+  supply and K 0.787 vs 0.746 (|dK| max 0.041, rms 0.034 -- a G7 FAIL if
+  applied) are gauge artefacts, not the seeder's economics.  No seeder
+  cell can be judged until those gauges quote from slot0 / the tick; the
+  change touches shared files and alters banked vectors by rounding.
+- Open: the conversion leg never fired (spot stayed 1.5-4.5% above
+  ideal), so R10's "converts only in the corrective direction" is shown
+  by construction and by the BUCK bought (6.39M at ~1.077), not by a
+  pass-through; re-funding the BUCK side after a conversion needs a
+  treasury buy-back (out of scope).
 
 ** 2026-09-02 -- WP-6 DONE and merged (session 2, subagent on =wp/6-facility=)
 
@@ -648,6 +693,21 @@ next.  Paste acceptance evidence here, not in chat.
    monotone in the deviation history and simpler to state; the cost is
    the fast kick.  Proposed cell: kp_frac in {0, 0.02} on the organic
    arms and the x1/x4 raids, judged by G7/G8 and by peak/AUC.
+8. *Reserve-ratio gauges vs concentrated liquidity* (from WP-8).  Three
+   readers price BUCK/USDC from the pool's token balances as if every
+   position were full-range: =SaverAgent= (ru/rb), =router.quote_hop=
+   and =snapshot.buck_usd=.  The moment any concentrated position exists
+   in BUCK/USDC -- the seeder's, or a private LP's -- they misread it as
+   a price move (day 1 of the seeder smoke: reserve-implied 1.41 vs spot
+   1.08), and the sim's K moves on that error (0.787 vs 0.746, a G7 fail
+   that is a gauge artefact).  The on-chain controller is not affected
+   (it reads the basket's TWAP over TOKEN/BUCK), but every sim verdict
+   that involves BUCK/USDC depth is.  Proposed: quote from slot0 / the
+   tick in all three (one shared change, its own branch), regenerate the
+   banked vectors (rounding-level drift expected, to be confirmed
+   byte-for-byte where no concentrated position existed), and only then
+   run the 3h seeder cells and any private-LP arm.  Until then WP-8's
+   G3 result stands (it is measured on spot), its K numbers do not.
 
 * Conventions
 
