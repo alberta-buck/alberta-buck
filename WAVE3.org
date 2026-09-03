@@ -22,41 +22,60 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
 
 * STATUS -- resume here
 
-- *Last updated*: 2026-09-02 (session 2: WP-1 and WP-12 merged; five
-  packages IN FLIGHT in parallel worktrees -- see below).
+- *Last updated*: 2026-09-02, end of session 2: every build package of
+  phase 1 is merged (WP-1, WP-12, WP-5, WP-2, WP-6, WP-8, WP-3a); the
+  worktrees are removed; the wp/* branches remain as history.  Nothing
+  is in flight.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
-  the --no-ff merge of =feature/fee-account=); WP-1 merged at 4e4700c,
-  WP-12 at 7e5c46e.
-- *Phase*: 1 -- instrument and star driver landed; the five independent
-  build packages were fanned out to subagents on 2026-09-02, each in its
-  own worktree and branch:
-
-  | package | worktree                           | branch             | kind     |
-  |---------+------------------------------------+--------------------+----------|
-  | WP-2    | =/Users/perry/src/alberta-buck-wp-2=  | =wp/2-undertakings= | python |
-  | WP-3a   | =/Users/perry/src/alberta-buck-wp-3a= | =wp/3a-observer=    | solidity |
-  | WP-5    | =/Users/perry/src/alberta-buck-wp-5=  | =wp/5-stress-fee=   | solidity |
-  | WP-6    | =/Users/perry/src/alberta-buck-wp-6=  | =wp/6-facility=     | python |
-  | WP-8    | =/Users/perry/src/alberta-buck-wp-8=  | =wp/8-seeder=       | python |
-
-  If this file still says IN FLIGHT when you resume: =git log
-  --oneline feature/carry-convexity..wp/<n>-<slug>= shows what each
-  branch delivered; each branch's last commit message and the smoke
-  vectors under its worktree's =build/sim/smoke/= are the evidence;
-  integrate with =git merge --no-ff= into =feature/carry-convexity=
-  (shared-file conflicts are append-only =# WP-n= blocks -- keep both),
-  run =python -m pytest alberta_buck/test/test_{markout,ladder,facility,seeder}.py=
-  and =make nix-test= after the Solidity merges, then record each in
-  the ledger and set its WP row to DONE.  Worktree recipe: =git
-  worktree add ../alberta-buck-wp-<n> -b wp/<n>-<slug>
-  feature/carry-convexity=, then =ln -s ../alberta-buck/lib lib=; for
-  Python-only packages also =ln -s ../alberta-buck/{out,cache} .=; run
-  Python with =PYTHONPATH=<worktree>= so the worktree's package shadows
-  the venv's editable install (verified).  Remove worktrees with =git
-  worktree remove= once merged.
+  the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
+  4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
+  WP-8 cbc12d2, WP-3a 4b0ad9d.  All four wave-3 pytest files green
+  (118 tests); the forge suite on the final tree: 60 suites, 600
+  passed, 0 failed, 1 skipped (SNARK suites excluded by the Makefile as
+  usual).  Sizes: BuckBasketOps 21,265 B (3,311 headroom), Fence 23,556
+  (1,020 -- still the tight shell), ShadowObserver 2,965, Shadow
+  controller 4,265, Direct 3,395.
+- *Phase*: 1 complete -- instrument, star driver, and the five agents /
+  contracts exist and each passed its L1-L3 layers on one smoke.  Phase
+  2 is MEASUREMENT: none of the new facilities has run its catalogue
+  cells yet (WP-3c, 3g, 3h, 3d), and two things gate that:
+  1. *Decision pending 8* (reserve-ratio gauges): fix =SaverAgent=,
+     =router.quote_hop= and =snapshot.buck_usd= to quote from slot0
+     before any cell with a concentrated BUCK/USDC position (the
+     seeder, private LPs) is judged.  Own branch, then regenerate the
+     banked vectors.
+  2. *The capacity axes*: the smokes showed every facility is
+     capacity-bound at its defaults (undertakings $16-32k/day vs an $8M
+     raid at leg_bp 40; facility u peaks 3% because the basket deposit
+     is throttled by the TOKEN/BUCK pools).  The 3c / 3g grids must
+     sweep =leg_bp= / =reserve_frac= and =max_impact_bp= / =target=
+     explicitly; =--scale= multiplies desk COUNT and is the wrong axis
+     for a single desk.
+  Suggested next steps in order: (a) decision 8 branch; (b) WP-3d --
+  enable the desk under =--controller shadow= in the loop, add the
+  shadow value / boost / saturation to the snapshot (the R14
+  attribution panel), sweep lambda x gamma on the four common-mode arms
+  (decisions 9 and 10 measured there); (c) 3c undertakings grid with the
+  capacity axes; (d) the k-integral-c0 star (deferred) once 3d has
+  fixed a baseline; (e) 3g, 3h.
+- *Smoke vectors* from the five worktrees are archived (not committed)
+  under =build/sim/smoke/wp-{2,5,6,8}/= in the main repo; WP-3a's were
+  in =/tmp=.  Every number in the ledger names its command.
+- *Worktree recipe* (for the next fan-out): =git worktree add
+  ../alberta-buck-wp-<n> -b wp/<n>-<slug> feature/carry-convexity=; in
+  it =ln -s ../alberta-buck/lib lib= (WP-3a found =lib/lib= one level
+  too deep with a bare symlink -- symlink the ENTRIES of lib, and
+  =lib/circom-lib= must be a real clone at its recorded commit or forge
+  auto-installs); Python-only packages also =ln -s
+  ../alberta-buck/{out,cache} .=; run Python with =PYTHONPATH=<worktree>
+  ALBERTA_BUCK_REPO=<worktree>= (the second so =buck_core.artifacts=
+  loads the worktree's =out/=, which matters once the worktree builds
+  its own contracts).  Shared files take append-only =# WP-n= blocks;
+  merge --no-ff and keep both sides.  Subagents do not edit this file
+  or CARRY-CONVEXITY.org; the integrator records their reports here.
 - *Deferred by the design owner*: the 3a regeneration (all 86 cells with
   the ledger); the full k-integral-c0 star (23 cells).
-- *Open decisions needing the design owner*: 1-6 (7 resolved in
+- *Open decisions needing the design owner*: 1-6, 8-10 (7 resolved in
   principle: integral-only K, to be tested by the star).
 
 ** Resume protocol (5 minutes)
@@ -205,7 +224,7 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 |-------+----------------------------------------------------------------------+---------+---------------------------------------------------------------+----------------------------------------------------------+------------------------------------------------------------------+------------+--------+----------------|
 | WP-1  | The instrument: markout ledger + basket-side columns + K forecastability panel in the summary | -- | markout.py (new); loop.py, snapshot.py, eqmetrics.py, catalogue.py (append) | =--report-only= regenerates 3.3 with basket-side and kfc columns on the existing vectors; markout columns on re-run cells | R1, R2, R14(a) instrument; =test_markout.py= green; a 60-day smoke with non-zero ledger | 0 (report) + 1 smoke | DONE on branch; merge pending; 3a regeneration not run | =wp/1-instrument= / Claude (session 2) |
 | WP-2  | Ladder module + UndertakingAgent; mixes =ut=, =ut-all=; 3c grid       | WP-1    | ladder.py, undertaking_agents.py (new); loop.py import; MIXES block | P1 and P8 tables for eps x p x (delta, phi) x leg_bp on the four common-mode arms x {x1, x4} | R3, R4 (agent built, smoke shows the capacity window); G5, G6 pending the 3c cells; =test_ladder.py= green; determinism OK | ~72 | DONE (merged 2026-09-02; 3c cells pending) | =wp/2-undertakings= / subagent |
-| WP-3a | =IStabilizer= seam + observer on the ops shell + =BuckKControllerShadow= + deploy wiring + forge tests | -- | IStabilizer.sol (new), BuckBasketOps.sol (append), BuckKControllerShadow.sol (new), deploy.py (append), forge test (new) | =--controller shadow= runs a smoke cell; the desk is the first registered stabilizer, the sim offset the second | forge tests: sign canaries on the shadow input; lambda = gamma = 0 identity with Direct; offset and saturation arithmetic; reprime unaffected | 1 (smoke) | TODO |                |
+| WP-3a | =IStabilizer= seam + standalone =ShadowObserver= + =BuckKControllerShadow= + deploy wiring + forge tests | -- | IStabilizer.sol, IShadowObserver.sol, ShadowObserver.sol, BuckKControllerShadow.sol (new); BuckBasketOps.sol (seam), BuckKControllerDirect.sol (pure refactor: virtual hooks); deploy.py / loop.py / __main__.py (append) | =--controller shadow --basket ops= runs; the desk is the first registered stabilizer, the observer's own offset the second | 21 Shadow + 18 Ops tests; lambda = gamma = 0 identity with Direct state-for-state; offset and saturation arithmetic; buckK frame-identical vs Direct on a 5-d smoke | 1 (smoke) | DONE (merged 2026-09-02) | =wp/3a-observer= / subagent |
 | WP-3b | Desk in the loop + lambda sweep (3d)                                 | WP-2, WP-3a | experiments (append); catalogue tag =shadow=                 | P4 table: lambda_d x {dump, squeeze, grind-down} x {x1, x4} | R5; desk return-to-zero time; runaway-one detection at lambda 0 | ~40   | TODO   |                |
 | WP-4  | Directional fee in the swap adapter; 3b grid                          | WP-2    | fees.py (new); swap adapter hook (append)                     | trough-depth and tracking-error table                    | R7; G3                                                           | ~24        | TODO   |                |
 | WP-5  | Stress fee (Solidity in =_redeem=)                                    | --      | BuckBasketProRata.sol, BuckBasketStorage.sol (append), forge test; direct_mint.py + snapshot.py (append) | P2 table on the x4 cells (cells not yet run) | R6 (contract-level, tested); G4 measurement pending the x4 cells | ~8 | DONE (merged 2026-09-02; cells pending) | =wp/5-stress-fee= / subagent |
@@ -390,6 +409,80 @@ verdict hold on >= 4/5.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-02 -- Session 2 close: phase 1 integrated
+
+- Final tree =feature/carry-convexity= at the WP-3a merge 4b0ad9d plus
+  this status commit.  =make nix-build= clean; =make nix-test= 60
+  suites, 600 passed, 0 failed, 1 skipped; the four wave-3 pytest files
+  118 passed.  Pre-3a checkpoint (after WP-5 / 2 / 6 / 8): 59 suites,
+  562 passed.
+- Integration smokes on the merged tree (catalogue-none, 5 d, pyrevm,
+  =build/sim/smoke/int5-*.json=, not committed): =--basket ops= vs
+  =--controller shadow --basket ops= -> buckK IDENTICAL on every frame
+  (the lambda = gamma = 0 identity survives the merge); the same with
+  SIM_SHADOW_LAMBDA=0.5 SIM_SHADOW_GAMMA=0.5 and UndertakingAgent=1,
+  FacilityAgent=2, SeederAgent=1 together -> exits 0, ut_err / fac_err /
+  sd_err all empty, ut_issued 15.7k, fac_issued 29.1k (u 0.0063),
+  sd_positions 1, markout ledger on all 6 pools.  The five packages'
+  append-only blocks coexist in loop.py / snapshot.py / catalogue.py.
+- Worktrees ../alberta-buck-wp-{2,3a,5,6,8} removed; branches kept;
+  smoke vectors archived under =build/sim/smoke/wp-<n>/=.
+
+** 2026-09-02 -- WP-3a DONE and merged (session 2, subagent on =wp/3a-observer=)
+
+- Commits 1f4107d (contracts) + d863a1e (sim wiring), merged --no-ff
+  into =feature/carry-convexity=.  In the worktree: 58 suites, 584
+  passed, 0 failed (=BuckKControllerShadowTest= 21/21,
+  =BuckBasketOpsTest= 33/33).
+- Built: =src/basket/IStabilizer.sol= {netInventory, capacity,
+  saturation}; =IShadowObserver.sol= + =ShadowObserver.sol= (STANDALONE
+  contract, =ShadowObserver(basket, governance)= -- the observer moved
+  OFF the ops shell after WP-5 took the shell to 20,530 B; the shape of
+  the WP-11 observer facet; registry of stabilizers with per-stabilizer
+  lambda, a pseudo-stabilizer offset for the sim, =shadowValueInBuck()=
+  and =shadowSaturation()= -- not =saturation=, the desk and the observer
+  will share an address in the Diamond so selectors must not collide);
+  =BuckBasketOps.sol= implements =IStabilizer= + =shadowDepth()= (no new
+  storage; =BuckBasketStorage= untouched); =BuckKControllerDirect.sol=
+  pure refactor (=_readReferences= virtual, =_integralStep(err, dt)=
+  hook); =BuckKControllerShadow.sol= reads the observer, applies gamma
+  to the integral INCREMENT (the wound integral is never rescaled when a
+  bound is hit or released; reprime / retune / setBuckK0 algebra
+  unchanged); MAX_LAMBDA / MAX_GAMMA 1000x sanity caps.
+- Semantics: netInventory = monetaryBuckHeld - max(monetaryOutstanding,
+  0) -- Q1 inventory absorbed (+), unretired Q4 issuance issued (-), a
+  Q2 burn drops out of the term (D4); capacity = the smaller remaining
+  fraction under maxPositionBp / maxOutrightBp; saturation = 1 -
+  capacity; a disabled desk or unreadable NAV reports PINNED via
+  try/catch on poolBuckValues rather than reverting K's compute path.
+  Depth D = the pools' BUCK balances (what _swapAcross sizes against);
+  absorbed positive raises the shadow value.
+- Sizes (solc 0.8.28): BuckBasketOps 18,915 -> 19,655 (+740; ~21,270
+  on the integration branch after WP-5, ~3.3 KB headroom);
+  ShadowObserver 2,965; Direct 3,395 unchanged; Shadow 4,265.
+- Deploy smoke (catalogue-none, 5 d, pyrevm): default / --basket ops /
+  --controller shadow --basket ops (lambda = gamma = 0) / the same with
+  SIM_SHADOW_LAMBDA=0.5 SIM_SHADOW_GAMMA=0.5: buckK IDENTICAL on every
+  frame across all four (the desk books nothing on a quiet arm).  Day-1
+  probe: depth $5.55M; setShadowOffset(+2% depth) -> shadow - bvib =
+  +0.0100; pinning the desk (maxPositionBp = 0) -> saturation 1.0,
+  shadowSaturation 0.5, integralBoost 1.25.
+- Open: (1) sims from a worktree need =ALBERTA_BUCK_REPO=<worktree>=
+  (=buck_core.artifacts.repo_root()= walks up from the main-repo file
+  first); (2) pinned-on-unreadable-NAV bites pre-bootstrap and under the
+  slippage guard (boost 1 + gamma while error ~ 0) -> decision pending
+  9; (3) =fundingFactor()= now sees the shadow bvib -> decision pending
+  10; (4) =setObserver= switching steps the PV, reprime is basket-only;
+  (5) one lambda per registered stabilizer -- WP-6's lambda_c needs a
+  registered stub or a second offset (WP-3d); (6) under via_ir the
+  optimizer folds =block.timestamp=, so repeated =vm.warp(block.timestamp
+  + x)= warps to the same instant -- the new suite uses
+  =vm.getBlockTimestamp()=; existing tests with the old pattern (e.g.
+  =BuckKControllerDirect.t.sol::test_reprime_absorbs_step=) may never
+  advance their second warp (untouched; worth a look); (7) no snapshot
+  telemetry for shadow value / boost yet (the R14 attribution panel;
+  WP-3d).
 
 ** 2026-09-02 -- WP-8 DONE and merged (session 2, subagent on =wp/8-seeder=)
 
@@ -708,6 +801,23 @@ next.  Paste acceptance evidence here, not in chat.
    byte-for-byte where no concentrated position existed), and only then
    run the 3h seeder cells and any private-LP arm.  Until then WP-8's
    G3 result stands (it is measured on spot), its K numbers do not.
+9. *Unreadable NAV: pinned or idle?* (from WP-3a).  When the desk is
+   disabled or =poolBuckValues= reverts (empty basket, spot/TWAP guard),
+   the seam reports saturation = 1 ("pinned"), so the shadow controller
+   runs Ki(1 + gamma) while the error is ~0 -- harmless in magnitude
+   but it fires pre-bootstrap and on exactly the manipulated days the
+   guard exists for.  Alternative: report saturation 0 (no scheduling)
+   when the desk cannot act.  One-line change; the WP-3d lambda / gamma
+   sweep should run both and the R14 panel should show which one a
+   reader can explain.
+10. *Should the funding factor see the shadow bvib?* (from WP-3a).
+   =BuckKControllerShadow= overrides the reference read, so
+   =lastBasketCost= is the shadow process and =fundingFactor()= (the
+   mint gate) moves with the desk's inventory too.  Consistent with D4
+   (the whole controller sees the damped error) but the gate is a
+   separate lever with its own gauge (=ff_close= in the equilibrium
+   sim); record the choice, and let WP-3d measure mint volume with the
+   gate on the raw vs the shadow bvib.
 
 * Conventions
 
