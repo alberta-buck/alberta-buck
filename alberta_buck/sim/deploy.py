@@ -156,6 +156,8 @@ class Deployment:
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     director: Any = None          # rebalance director (prorata only)
     director_impl: str = "pairs"  # "pairs" (default) | "vrate"
+    controller_impl: str = "direct"   # "direct" (default) | "shadow"  (WP-3a)
+    observer: Any = None          # ShadowObserver (shadow controller on ops only)
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
 
@@ -166,7 +168,8 @@ def _erc20_abi() -> list:
 
 
 def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
-           basket_impl="prorata", director_impl="pairs") -> Deployment:
+           basket_impl="prorata", director_impl="pairs",
+           controller_impl="direct") -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, pool_acct, issuer_addr = accts[0], accts[1], accts[2], accts[3]
@@ -198,8 +201,14 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     dp = deploy_params(getattr(scenario, "experiment", None))
     K0, KMIN, KMAX = dp.k0_wei, dp.kmin_wei, dp.kmax_wei
     KP, KI, KD = dp.kp_scaled, dp.ki_scaled, dp.kd_scaled
-    kctrl = chain.deploy("BuckKControllerDirect",
-                          KP, KI, KD, dp.dt, KMIN, KMAX, K0, gov)
+    # WP-3a: "shadow" is BuckKControllerDirect reading the ops shell's
+    # observer (bvib + lambda * netInventory / D) with gain scheduling on
+    # the desk's saturation; same constructor, and with no observer wired
+    # (or lambda = gamma = 0) it computes exactly what Direct does.
+    kctrl = chain.deploy(
+        "BuckKControllerShadow" if controller_impl == "shadow"
+        else "BuckKControllerDirect",
+        KP, KI, KD, dp.dt, KMIN, KMAX, K0, gov)
     if dp.dtmax_secs:
         chain.send(kctrl.functions.setDTMax(dp.dtmax_secs), sender=gov)
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
@@ -257,6 +266,34 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     chain.send(kctrl.functions.setBasket(basket.address), sender=gov)
     chain.send(reg.functions.bindContract(
         basket.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+
+    # --- WP-3a: the stabilizer seam and the observer ------------------ #
+    # The observer (ShadowObserver) reads the basket's bvib and the ops
+    # shell's shadowDepth(), so it is deployed only under --basket ops; on
+    # any other basket the shadow controller reads basketValueInBuck()
+    # directly and IS Direct.  The desk is the first registered stabilizer
+    # and the sim's agent-booked offset the second, both at
+    # SIM_SHADOW_LAMBDA (1.0 = the full inventory/depth ratio);
+    # SIM_SHADOW_GAMMA schedules Ki by the desk's saturation.  Defaults 0:
+    # the observer wired but inert, byte-for-byte Direct's trajectory.
+    observer = None
+    if controller_impl == "shadow" and basket_impl == "ops":
+        shadow_lambda = int(float(os.environ.get("SIM_SHADOW_LAMBDA", "0")) * E18)
+        shadow_gamma = int(float(os.environ.get("SIM_SHADOW_GAMMA", "0")) * E18)
+        observer = chain.deploy("ShadowObserver", basket.address, gov)
+        chain.send(observer.functions.addStabilizer(basket.address, shadow_lambda),
+                   sender=gov)
+        chain.send(observer.functions.setShadowLambda(shadow_lambda), sender=gov)
+        chain.send(kctrl.functions.setObserver(observer.address), sender=gov)
+        if shadow_gamma:
+            chain.send(kctrl.functions.setGamma(shadow_gamma), sender=gov)
+        if verbose:
+            print(f"[deploy] shadow controller: observer={observer.address[:10]}... "
+                  f"desk+offset lambda={shadow_lambda / E18:g} "
+                  f"gamma={shadow_gamma / E18:g}")
+    elif controller_impl == "shadow" and verbose:
+        print(f"[deploy] shadow controller on a {basket_impl} basket: no "
+              "observer, reads basketValueInBuck (== direct)")
 
     fence_factors: list = []
 
@@ -332,6 +369,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                    reg, buck, credit, kctrl, basket, router, simlp, usdc,
                    erc20_abi, tok, dec,
                    basket_impl=basket_impl, venue=venue,
+                   controller_impl=controller_impl, observer=observer,
                    deposited_topic=deposited_topic, redeemed_topic=redeemed_topic)
 
     # --- pools: TOKEN/USDC (truth) + TOKEN/BUCK (basket) ------------- #
