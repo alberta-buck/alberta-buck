@@ -588,6 +588,20 @@ class Snapshotter:
             # WP-1: the markout ledger's cumulative aggregates (None when
             # the loop runs without one, e.g. older callers).
             "mx": mx,
+            # WP-2: the undertakings desk (undertaking_agents.py): the
+            # monetary book's issued / retired / absorbed / unwound columns
+            # (BUCK 6-dec, cumulative; *_open = standing), the weak-side
+            # ladder's reserve fraction and tranche, trades, last error.
+            "ut_issued": ctr.get("ut_issued", 0),
+            "ut_issued_open": ctr.get("ut_issued_open", 0),
+            "ut_retired": ctr.get("ut_retired", 0),
+            "ut_absorbed": ctr.get("ut_absorbed", 0),
+            "ut_absorbed_open": ctr.get("ut_absorbed_open", 0),
+            "ut_unwound": ctr.get("ut_unwound", 0),
+            "ut_rho": ctr.get("ut_rho", 1.0),
+            "ut_tranche": ctr.get("ut_tranche", 0),
+            "ut_trades": ctr.get("ut_trades", 0),
+            "ut_err": ctr.get("ut_err", ""),
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

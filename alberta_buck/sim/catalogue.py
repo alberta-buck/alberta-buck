@@ -71,6 +71,14 @@ MIXES = {
                "CommodityRebalArbAgent": 2},
 }
 
+# WP-2: the undertakings desk (alberta_buck/sim/undertaking_agents.py) is
+# a defender the mixes govern; `ut` is the desk alone, `ut-all` the full
+# cast plus the desk.  NB --scale multiplies the desk count like any other
+# defender (one book of reserve_frac x NAV per desk).
+DEFENDERS.append("UndertakingAgent")
+MIXES["ut"] = {"UndertakingAgent": 1}                # the undertakings desk
+MIXES["ut-all"] = {**MIXES["all"], "UndertakingAgent": 1}
+
 
 def _scaled(n: int, scale: float) -> int:
     if n <= 0:
