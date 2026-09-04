@@ -38,11 +38,14 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   =ONBOARDING-D7.org= (the reading plan for agents from other
   accounts).  Decisions 8, 10, 11 RESOLVED 2026-09-04 (slot0 with
   minimal regeneration; the funding factor sees RAW bvib only; listed
-  caps with carry-class weights); 12, 13 proceeding as proposed.  IN
-  FLIGHT: the decision-8 branch =wp/d8-slot0= and WP-13
-  =wp/13-controller= on this account (worktrees
-  =../alberta-buck-wp-d8= and =../alberta-buck-wp-13=); WP-16 / 15 / 14
-  are on offer to other-account agents through =ONBOARDING-D7.org=.
+  caps with carry-class weights); 12, 13 proceeding as proposed.
+  Decision 8 DONE: =wp/d8-slot0= merged 46c3b7d (=gauge.py= at every
+  BUCK/USDC read; =vecdiff=; the artefact gone; decisions pending
+  14-16 filed).  IN FLIGHT: WP-13 =wp/13-controller= on this account
+  (worktree =../alberta-buck-wp-13=; contracts and wiring committed,
+  report pending); WP-16 / 15 / 14 are on offer to other-account
+  agents through =ONBOARDING-D7.org=.  Still to run: the 1-year
+  identity pair on the Xeon, judged by =vecdiff=.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -590,7 +593,7 @@ plan can start, with what was verified on the day.
 
 | #  | decision                                          | recommendation                                                                                                                                                                                   | gates                                  | status |
 |----+---------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------------------------+--------|
-| 8  | slot0 gauges                                      | proceed: quote from slot0 in the three readers; regenerate ONLY the L3 identity pair and the none-arm baselines (the grid's cells are all fresh); the 86-cell regeneration is not on the critical path | classes 7 and 10; every seeder cell | RESOLVED 2026-09-04: proceed, minimal regeneration |
+| 8  | slot0 gauges                                      | proceed: quote from slot0 in the three readers; regenerate ONLY the L3 identity pair and the none-arm baselines (the grid's cells are all fresh); the 86-cell regeneration is not on the critical path | classes 7 and 10; every seeder cell | DONE 2026-09-04: merged 46c3b7d (=gauge.py=, every BUCK/USDC read); the 1-year identity pair on the Xeon remains |
 | 10 | does the funding factor see the position?         | YES, as its own lever: ff = f(e_raw) + c_ff s, c_ff default the S0-equivalent, swept {0, S0, 2x} on class 5 -- the interventions reach participants at the MINT timescale through ff and at the credit timescale through K | WP-13 | RESOLVED 2026-09-04: RAW bvib only -- the price loop and =fundingFactor()= read the basket; the position enters K only through the position loop |
 | 11 | caps and cost weights for V                       | caps as listed under decision 11; strong-side notional = reserve_frac x NAV (symmetric fill); w: desk 1, undertakings 1 per side, facility 0.5, seeder 0.25; sweep the strong side's w in cycle 2 | WP-13 (weights), WP-16 (the carry weights in the cost) | RESOLVED 2026-09-04: listed caps, carry-class weights, strong-side weight swept in cycle 2 |
 | 12 | the gains policy                                  | LQR-derived (WP-16) with the SIMC sanity check; S0 = as built; a two-point tau_s axis per design                                                                                                | WP-16                                  | proposed; unobjected 2026-09-04, proceeding |
@@ -715,6 +718,52 @@ a Xeon cell.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-04 -- Decision-8 branch DONE and merged (session 3, subagent on =wp/d8-slot0=)
+
+- Merged --no-ff as 46c3b7d (branch commits bf08eae the fix, 0be11b4
+  =vecdiff= + =buck_usd_bal=, 4312cdc the report =reports/wp-d8.org=,
+  which is the evidence of record; this entry is its summary).  On the
+  merged tree the four wave-3 files plus =test_gauge.py=: 151 passed.
+- SCOPE WIDENED, with cause.  The brief named three readers; the
+  subagent found (finding 1) that the K artefact's channel was the
+  excursion arbs' EX-ANTE GATE (=_cp_out= over pool balances: with the
+  seeder's USD 15M in the USDC balance, "sell BUCK above par + edge"
+  passed trivially and the credit variant minted into phantom depth --
+  17 entries and +5.8M supply), so fixing only the named readers would
+  not have removed it.  One module, =alberta_buck/sim/gauge.py=
+  (virtual reserves x = L 2^96 / sqrtP, y = L sqrtP / 2^96 from slot0
+  and the active liquidity; =buck_usd6=; a memoized =Chain.pool_state=
+  invalidated with the balance cache), is now the input of every
+  BUCK/USDC read and of the generic quote primitives (=quote_hop= /
+  =quote_path=, =_buy_buck=, the excursion, whale, debtor, discount,
+  issuer, anonymous and facility reads); the formulas are unchanged in
+  form.  Named approximation: within-range; a swap crossing a tick
+  boundary meets a different L.  Contracts untouched (they read TWAP).
+- Artefact gone: on the placement day the gauge reads 1.098389 with
+  the seeder on AND off (balances 1.410246; before, the gauge read
+  1.414440).  K identical on/off through day 1; the on/off gap now
+  begins with day 2's trading and follows bvib (economics): max |dK|
+  0.025 / rms 0.015 after vs 0.032 / 0.025 before; excursion-credit
+  entries 17 -> 8; supply on - off +7.05M (Q4 issue into the premium
+  the seeder's range creates).
+- L3 NOT byte-identical in the none cell, as decision 8 allowed:
+  balances include uncollected fees, so every quote moves by a fee
+  fraction; |d bvib| max 1.26e-3, |d K| max 1.70e-4 over 30 days,
+  first changed action COUNT day 25 (ubTrades 1110 -> 1107).  The
+  =vecdiff= module (=python -m alberta_buck.sim.vecdiff A B=) is the
+  L3 instrument beside =cmp=; the bf08eae vs 0be11b4 pair is identical
+  in every pre-existing field (the memo is inert).  Cells run FASTER
+  (none 2m38 -> 2m30; seeder 2m44 -> 2m13: fewer phantom cycles).
+- Pre-existing failure on the branch of record (finding 6):
+  =test_lifecycle_plot= asserts max(jubilee) > 0 on the committed
+  =test/vectors/lifecycle.json= (all zeros since 1c773ce, 2026-08-15).
+  Not touched.
+- Open issues filed as decisions pending 14-16; the 1-year identity
+  pair and the none-arm baselines are to be regenerated on the Xeon
+  with =vecdiff= as the judge (readiness table).  Worktree
+  =../alberta-buck-wp-d8= removed; the after2 pair archived under
+  =build/sim/smoke/d8/= (not committed).
 
 ** 2026-09-04 -- Readiness for the grid; ONBOARDING-D7.org; the Xeon; the dependency rule (session 3, design owner + Claude)
 
@@ -1149,9 +1198,13 @@ next.  Paste acceptance evidence here, not in chat.
    the fast kick.  Proposed cell: kp_frac in {0, 0.02} on the organic
    arms and the x1/x4 raids, judged by G7/G8 and by peak/AUC.
 8. *Reserve-ratio gauges vs concentrated liquidity* (from WP-8).  RESOLVED
-   2026-09-04 (design owner): quote from slot0 in all three readers on
-   its own branch (=wp/d8-slot0=); regenerate only the L3 identity pair
-   and the none-arm baselines; the grid's cells are all fresh.  Three
+   2026-09-04 (design owner) and DONE (merged 46c3b7d): quote from slot0
+   and the active liquidity -- in every BUCK/USDC read and quote
+   primitive, not only the three named readers, because the artefact's
+   channel was the excursion arbs' ex-ante gate (ledger); regenerate
+   only the L3 identity pair and the none-arm baselines, judged by
+   =vecdiff= beside =cmp= (the none cell drifts by a fee fraction).
+   Three
    readers price BUCK/USDC from the pool's token balances as if every
    position were full-range: =SaverAgent= (ru/rb), =router.quote_hop=
    and =snapshot.buck_usd=.  The moment any concentrated position exists
@@ -1271,6 +1324,34 @@ next.  Paste acceptance evidence here, not in chat.
    side for the grid (the ops shell has ~3.3 KB of EIP-170 headroom
    and WP-13 needs some of it); the contract-side skew waits for the
    monetary Diamond (WP-11).
+
+14. *TOKEN-pool reserve gauges* (from the decision-8 branch).  The same
+   balance reads remain on the TOKEN/BUCK and TOKEN/USDC pools
+   (=snapshot._implied=, =_pool_value_weights=, the basket-neutral
+   excursion legs, CommodityRebalArb's cap, the director's and
+   rebalancer's POOL_FRAC caps, the anonymous arb's TOKEN binders).
+   The ProRata venue mints full-range positions, so today they are off
+   by the 0.30% fee only; the fence basket's bands and any private
+   TOKEN/BUCK LP are the concentrated case.  =gauge.active_reserves= is
+   the drop-in.  Proposed: one follow-up commit with the same identity
+   pair, before the first fence-basket cell of the grid.
+15. *The seeder-on K gap is economics and outside G7 at x1* (from the
+   decision-8 branch).  With the artefact gone, a USD 10-20M seeder
+   range still moves K by max 0.025 / rms 0.015 in a 30-day smoke: the
+   seeder targets the truth-pool USD ideal while K reads the TOKEN/BUCK
+   bvib, and while the range holds BUCK/USD above the none path the
+   credit arbs issue into the premium.  Proposed: the 3h seeder cells
+   with =budget_m= as the amount axis (x0.25 .. x4) and =min_gap_bp=
+   swept, judged by G7 / G8 and by =buck_usd_bal - buck_usd= as the
+   position's conversion gauge; and a design note on sizing the
+   seeder's bid against the desk's Q3 rather than against ideal.
+16. *Small follow-ups from the decision-8 branch.*  (a) =inspect.py='s
+   TUI gauge still divides balances (register the pool ABI in its
+   reader, convert with =gauge.sqrt_price_to_usd6=).  (b)
+   =test_lifecycle_plot= fails on the branch of record (=jubilee= all
+   zeros in the committed vector since 1c773ce): regenerate the vector
+   or relax the assertion.  (c) =vecdiff='s counter heuristic wants a
+   declared counter list in =snapshot.py=.
 
 * Conventions
 
