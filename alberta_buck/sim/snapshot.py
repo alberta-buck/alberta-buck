@@ -35,6 +35,61 @@ def _implied(d, pool, token_c, dec, quote_c):
     return rq * (10 ** dec) // rt
 
 
+def _wp13_frame(d) -> dict:
+    """WP-13: the desk's book, the observer's aggregate position and flags,
+    and the two loops' per-term attribution, read once per frame like
+    buckK / pid_* (one terms() call for the six terms).  Every field is
+    None when its source is absent: the desk's book needs an ops basket,
+    the observer / position fields the shadow controller."""
+    f = {"sh_held": None, "sh_outstanding": None, "sh_net": None, "sh_cap": None,
+         "sh_mode": None, "sh_s": None, "sh_sat": None, "sh_value": None,
+         "sh_offset": None, "sh_offset_cap": None, "sh_stale": None,
+         "sh_excluded": None, "sh_desk_cap": None, "sh_desk_stale": None,
+         "sh_desk_excluded": None, "sh_boost": None,
+         "pid_s": None, "pid_is": None, "pid_ds": None,
+         "pid_up": None, "pid_ui": None, "pid_ud": None,
+         "pid_q": None, "pid_qi": None, "pid_qd": None}
+    if getattr(d, "basket_impl", "") == "ops":
+        try:
+            f["sh_held"] = int(d.basket.functions.monetaryBuckHeld().call())
+            f["sh_outstanding"] = int(d.basket.functions.monetaryOutstanding().call())
+            f["sh_net"] = int(d.basket.functions.netInventory().call())
+        except Exception:
+            pass
+        try:                                   # reverts NavUnreadable on a guard trip
+            f["sh_cap"] = int(d.basket.functions.positionCap().call())
+        except Exception:
+            f["sh_cap"] = None
+    obs = getattr(d, "observer", None)
+    if obs is not None:
+        try:
+            f["sh_mode"] = int(obs.functions.mode().call())
+            f["sh_s"] = int(obs.functions.aggregatePosition().call())
+            f["sh_sat"] = int(obs.functions.shadowSaturation().call())
+            f["sh_value"] = int(obs.functions.shadowValueInBuck().call())
+            f["sh_offset"] = int(obs.functions.shadowOffset().call())
+            f["sh_offset_cap"] = int(obs.functions.shadowCap().call())
+            st, ex = obs.functions.flags().call()
+            f["sh_stale"], f["sh_excluded"] = int(st), int(ex)
+            f["sh_desk_cap"] = int(obs.functions.heldCap(d.basket.address).call())
+            f["sh_desk_stale"] = bool(obs.functions.stale(d.basket.address).call())
+            f["sh_desk_excluded"] = bool(obs.functions.excluded(d.basket.address).call())
+        except Exception:
+            pass
+    if getattr(d, "controller_impl", "direct") == "shadow":
+        try:
+            f["sh_boost"] = int(d.kctrl.functions.integralBoost().call())
+            f["pid_s"] = int(d.kctrl.functions.S().call())
+            f["pid_is"] = int(d.kctrl.functions.IS().call())
+            f["pid_ds"] = int(d.kctrl.functions.DS().call())
+            t = d.kctrl.functions.terms().call()
+            (f["pid_up"], f["pid_ui"], f["pid_ud"],
+             f["pid_q"], f["pid_qi"], f["pid_qd"]) = (int(x) for x in t[:6])
+        except Exception:
+            pass
+    return f
+
+
 def _pool_value_weights(d) -> list[list[float]]:
     """Per-token [actual_weight, target_weight] from TOKEN/BUCK pools.
 
@@ -646,6 +701,19 @@ class Snapshotter:
             "sd_depth": ctr.get("sdDepth", 0),          # private depth, usd6
             "sd_last": dict(ctr.get("sdLast", {})),     # the last placement
             "sd_err": ctr.get("sd_err", ""),
+            # WP-13: the desk's book (sh_held / sh_outstanding / sh_net /
+            # sh_cap), the observer (sh_mode 0 = S, 1 = V; sh_s the aggregate
+            # position 1e18; sh_sat; sh_value = bvib + s_S; the pseudo-
+            # stabilizer's sh_offset / sh_offset_cap; the stale / excluded
+            # masks and the desk's own flags), the controller's position
+            # state (pid_s / pid_is / pid_ds, ppm like pid_p / pid_i /
+            # pid_d) and the per-term attribution in 1e18 K units (pid_up /
+            # pid_ui / pid_ud beside pid_q / pid_qi / pid_qd), all None
+            # under --controller direct; the booking counters of
+            # shadow_book.py.
+            **_wp13_frame(d),
+            "sh_offset_txs": ctr.get("sh_offset_txs", 0),
+            "sh_offset_err": ctr.get("sh_offset_err", ""),
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

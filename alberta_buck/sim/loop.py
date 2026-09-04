@@ -24,6 +24,7 @@ from alberta_buck.sim.markout import MarkoutLedger, PoolProbe, actor_tag  # WP-1
 import alberta_buck.sim.undertaking_agents  # noqa: F401  WP-2
 import alberta_buck.sim.facility_agent  # noqa: F401  triggers @_register  WP-6
 import alberta_buck.sim.seeder_agent  # noqa: F401  WP-8  triggers @_register
+from alberta_buck.sim import shadow_book  # WP-13: the stand-ins' book -> observer
 
 E6 = 10 ** 6
 
@@ -203,6 +204,10 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
                         ledger.record(day, tick, tag, pool, db, dq, dec, fee,
                                       bvib_now)
                     reserves = after
+        # WP-13: book the agent stand-ins' net inventory (the undertakings'
+        # open books, the facility's drawn lines) into the observer's
+        # pseudo-stabilizer before K's cycle; a no-op without an observer.
+        shadow_book.book(d, ctr)
         try:
             chain.send(d.kctrl.functions.compute())
         except Exception:

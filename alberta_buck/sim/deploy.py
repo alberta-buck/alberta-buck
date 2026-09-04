@@ -295,6 +295,69 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         print(f"[deploy] shadow controller on a {basket_impl} basket: no "
               "observer, reads basketValueInBuck (== direct)")
 
+    # --- WP-13: the corrected controller (D7) -------------------------- #
+    # The position loop's gains, the observer's aggregation mode and the
+    # per-stabilizer gains / weights, all from the environment (the form
+    # the star driver's `env` axes use).  Defaults leave every banked cell
+    # unchanged: mode S, Kq = Kqi = Kqd = 0 (the position loop inert, so
+    # K is byte-for-byte Direct's), the desk and the pseudo-stabilizer at
+    # weight 1 (decision 11: the offset stands in for the undertakings
+    # today), lambdas as SIM_SHADOW_LAMBDA set them above.
+    #
+    #   SIM_SHADOW_MODE                s | v  (--shadow-mode sets it)
+    #   SIM_SHADOW_KQ / _KQI / _KQD    REAL gains, stored real * 1e12 like
+    #                                  kp / ki (experiment.derive_gains)
+    #   SIM_SHADOW_LAMBDA_DESK / _OFFSET   S gains per stabilizer
+    #                                  (default: SIM_SHADOW_LAMBDA, both)
+    #   SIM_SHADOW_W_DESK / _OFFSET    V cost weights (default 1 and 1)
+    #   SIM_SHADOW_OFFSET_CAP_USD      the pseudo-stabilizer's V cap in USD
+    #                                  (BUCK 6-dec): the undertakings size
+    #                                  their weak-side book reserve_frac (0.5)
+    #                                  x NAV, and NAV ~ 2 x target_buck_m at
+    #                                  the seed, so the default is
+    #                                  target_buck_m ($10M); 0 excludes it
+    #                                  from V (S needs no cap)
+    # The stand-ins' inventory is booked into the pseudo-stabilizer by the
+    # loop before each daily compute() (shadow_book.py).
+    if observer is not None:
+        shadow_mode = os.environ.get("SIM_SHADOW_MODE", "s").strip().lower()
+        if shadow_mode not in ("s", "v"):
+            raise ValueError(f"SIM_SHADOW_MODE must be s or v, not {shadow_mode!r}")
+        kq  = int(round(float(os.environ.get("SIM_SHADOW_KQ",  "0")) * 1e12))
+        kqi = int(round(float(os.environ.get("SIM_SHADOW_KQI", "0")) * 1e12))
+        kqd = int(round(float(os.environ.get("SIM_SHADOW_KQD", "0")) * 1e12))
+        lam_desk = os.environ.get("SIM_SHADOW_LAMBDA_DESK")
+        lam_off  = os.environ.get("SIM_SHADOW_LAMBDA_OFFSET")
+        w_desk = int(float(os.environ.get("SIM_SHADOW_W_DESK", "1")) * E18)
+        w_off  = int(float(os.environ.get("SIM_SHADOW_W_OFFSET", "1")) * E18)
+        cap_env = os.environ.get("SIM_SHADOW_OFFSET_CAP_USD")
+        cap_off = (int(float(cap_env) * 10 ** 6) if cap_env is not None
+                   else int(dp.target_buck))
+        if shadow_mode == "v":
+            chain.send(observer.functions.setMode(1), sender=gov)
+        if kq or kqi or kqd:
+            chain.send(kctrl.functions.setPositionGains(kq, kqi, kqd), sender=gov)
+        if lam_desk is not None:
+            chain.send(observer.functions.setStabilizerLambda(
+                basket.address, int(float(lam_desk) * E18)), sender=gov)
+        if lam_off is not None:
+            chain.send(observer.functions.setShadowLambda(
+                int(float(lam_off) * E18)), sender=gov)
+        if w_desk != E18:
+            chain.send(observer.functions.setStabilizerWeight(
+                basket.address, w_desk), sender=gov)
+        if w_off:
+            chain.send(observer.functions.setShadowWeight(w_off), sender=gov)
+        if cap_off:
+            chain.send(observer.functions.setShadowCap(cap_off), sender=gov)
+        if verbose:
+            print(f"[deploy] WP-13 position loop: mode={shadow_mode.upper()} "
+                  f"Kq={kq / 1e12:g} Kqi={kqi / 1e12:g} Kqd={kqd / 1e12:g}  "
+                  f"lambda desk={float(lam_desk) if lam_desk is not None else shadow_lambda / E18:g} "
+                  f"offset={float(lam_off) if lam_off is not None else shadow_lambda / E18:g}  "
+                  f"w desk={w_desk / E18:g} offset={w_off / E18:g}  "
+                  f"offset cap=${cap_off / 10 ** 6:,.0f}")
+
     fence_factors: list = []
 
     # --- tokens ------------------------------------------------------ #
