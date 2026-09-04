@@ -21,8 +21,16 @@ import {MockBuck, MockController, BBToken, IV3Pool}
 contract MockStabilizer is IStabilizer {
     int256  public netInventory;
     uint256 public saturation;
+    uint256 public cap = 1_000_000e6;      // WP-13: readable by default
+    bool    public capReverts;
     function set(int256 inv, uint256 sat) external { netInventory = inv; saturation = sat; }
+    function setCap(uint256 c) external { cap = c; }
+    function setCapReverts(bool r) external { capReverts = r; }
     function capacity() external view returns (uint256) { return 1e18 - saturation; }
+    function positionCap() external view returns (uint256) {
+        require(!capReverts, "nav down");
+        return cap;
+    }
 }
 
 /// @dev Stands in for PairsRebalanceDirector's monetary surface so the
@@ -445,6 +453,13 @@ contract BuckBasketOpsTest is Test {
         vm.prank(GOV); k.setObserver(address(obs));
     }
 
+    /// @dev The S0 design tag: the position loop carries the price loop's
+    ///      gains, so mode S reproduces D4 as built (WP-13).
+    function _newShadowS0() internal returns (BuckKControllerShadow k) {
+        k = _newShadow();
+        vm.prank(GOV); k.setPositionGains(5e11, 2e7, 0);
+    }
+
     function _newDirect() internal returns (BuckKControllerDirect k) {
         k = new BuckKControllerDirect(5e11, 2e7, 0, 3600, 0, 0.95e18, 0.75e18, GOV);
         vm.prank(GOV); k.setBasket(address(basketC));
@@ -533,6 +548,7 @@ contract BuckBasketOpsTest is Test {
         _addPaxg(); _depositPaxg(alice, 1e18);
         assertEq(basketC.capacity(), 0, "off by default: cannot act");
         assertEq(basketC.saturation(), 1e18);
+        assertEq(basketC.positionCap(), 0, "WP-13: disabled reads cap 0, no revert");
     }
 
     /// An unreadable NAV (empty basket -> poolBuckValues reverts NoValue)
@@ -543,6 +559,10 @@ contract BuckBasketOpsTest is Test {
         assertEq(basketC.saturation(), 1e18);
         assertEq(basketC.netInventory(), 0);
         assertEq(basketC.shadowDepth(), 0);
+        // WP-13: the cap is the one view that REVERTS on an unreadable NAV
+        // -- the observer holds its last good cap behind try/catch.
+        vm.expectRevert(BuckBasketOps.NavUnreadable.selector);
+        basketC.positionCap();
     }
 
     // ---- the observer: registry --------------------------------------------- //
@@ -592,7 +612,7 @@ contract BuckBasketOpsTest is Test {
         // swap-and-pop: removing the first moves the last into its slot.
         vm.prank(GOV); obs.removeStabilizer(address(a));
         assertEq(obs.stabilizerCount(), 2);
-        (address s0, uint256 l0) = obs.stabilizers(0);
+        (address s0, uint256 l0, , , , ) = obs.stabilizers(0);
         assertEq(s0, address(c)); assertEq(l0, 2e18);
         assertEq(obs.stabilizerIndex(address(c)), 1);
         assertEq(obs.stabilizerIndex(address(a)), 0, "gone");
@@ -600,11 +620,11 @@ contract BuckBasketOpsTest is Test {
         // removing the last needs no move.
         vm.prank(GOV); obs.removeStabilizer(address(c));
         assertEq(obs.stabilizerCount(), 1);
-        (s0, l0) = obs.stabilizers(0);
+        (s0, l0, , , , ) = obs.stabilizers(0);
         assertEq(s0, address(b)); assertEq(l0, 0.5e18);
 
         vm.prank(GOV); obs.setStabilizerLambda(address(b), 0.25e18);
-        (, l0) = obs.stabilizers(0);
+        (, l0, , , , ) = obs.stabilizers(0);
         assertEq(l0, 0.25e18);
 
         // re-adding a removed one works.
@@ -670,12 +690,16 @@ contract BuckBasketOpsTest is Test {
         assertEq(obs.shadowSaturation(), 0);
     }
 
-    /// saturation = max_i min(1, lambda_i * sat_i).
+    /// saturation = max_i min(1, g_i * min(1, |q_i| / heldCap_i)), computed
+    /// by the OBSERVER from the book and the held cap (WP-13); g_i is
+    /// lambda_i under S and w_i under V.  The stabilizer's own saturation()
+    /// is no longer consulted.
     function test_observer_saturation_lambdaWeightedMax() public {
         MockStabilizer a = new MockStabilizer();
         MockStabilizer b = new MockStabilizer();
-        a.set(0, 0.3e18);
-        b.set(0, 1e18);
+        a.setCap(100e6); b.setCap(100e6);
+        a.set(30e6, 1e18);                        // fill 0.3 (its own sat, 1, is ignored)
+        b.set(-100e6, 0);                         // fill 1 (issued: |q|)
         vm.prank(GOV); obs.addStabilizer(address(a), 1e18);
         vm.prank(GOV); obs.addStabilizer(address(b), 0.5e18);
         assertEq(obs.shadowSaturation(), 0.5e18, "max(1*0.3, 0.5*1)");
@@ -683,12 +707,22 @@ contract BuckBasketOpsTest is Test {
         vm.prank(GOV); obs.setStabilizerLambda(address(a), 2e18);
         assertEq(obs.shadowSaturation(), 0.6e18, "max(2*0.3, 0.5*1)");
 
-        a.set(0, 1e18);
+        a.set(100e6, 0);
         assertEq(obs.shadowSaturation(), 1e18, "2*1 capped at 1");
 
         vm.prank(GOV); obs.setStabilizerLambda(address(a), 0);
         vm.prank(GOV); obs.setStabilizerLambda(address(b), 0);
         assertEq(obs.shadowSaturation(), 0, "lambda 0 stabilizers cannot schedule K");
+
+        // Under V the weights take lambda's place.
+        vm.prank(GOV); obs.setMode(ShadowObserver.Mode.V);
+        vm.prank(GOV); obs.setStabilizerWeight(address(a), 0.25e18);
+        vm.prank(GOV); obs.setStabilizerWeight(address(b), 0.5e18);
+        assertEq(obs.shadowSaturation(), 0.5e18, "max(0.25*1, 0.5*1)");
+        b.setCap(0); obs.refresh();               // b disabled: excluded
+        assertEq(obs.shadowSaturation(), 0.25e18);
+        b.setCap(100e6); b.setCapReverts(true); obs.refresh();   // still held at 0
+        assertEq(obs.shadowSaturation(), 0.25e18, "held cap 0 until a good read");
     }
 
     // ---- the desk as the first registered stabilizer, end to end ------------ //
@@ -714,7 +748,7 @@ contract BuckBasketOpsTest is Test {
     /// sale out of bvib, and K lands ABOVE Direct's (7.3).
     function test_observer_deskIssued_raisesKvsDirect() public {
         _addPaxg(); _depositPaxg(alice, 1e18); _enable();
-        BuckKControllerShadow kS = _newShadow();
+        BuckKControllerShadow kS = _newShadowS0();
         BuckKControllerDirect kD = _newDirect();
         vm.prank(GOV); obs.addStabilizer(address(basketC), 1e18);
         _operate(40, true);                                       // Q4 issue
@@ -728,7 +762,7 @@ contract BuckBasketOpsTest is Test {
     /// BELOW Direct's.
     function test_observer_offsetAbsorbed_lowersKvsDirect() public {
         _addPaxg(); _depositPaxg(alice, 1e18);
-        BuckKControllerShadow kS = _newShadow();
+        BuckKControllerShadow kS = _newShadowS0();
         BuckKControllerDirect kD = _newDirect();
         int256 twoPctOfDepth = int256(basketC.shadowDepth() / 50);
         vm.prank(GOV); obs.setShadowLambda(1e18);
@@ -738,18 +772,160 @@ contract BuckBasketOpsTest is Test {
         assertLt(kS.buckK(), kD.buckK(), "absorbed: K falls relative to Direct");
     }
 
-    /// The desk pinned at a bound schedules K's integral gain through the
-    /// observer, and only when its lambda is non-zero.
+    /// The desk full against its HELD cap schedules K's integral gain
+    /// through the observer, and only when its lambda is non-zero.  A
+    /// desk with a zero cap is DISABLED, not pinned: excluded, no schedule
+    /// (WP-13, decision 9).
     function test_observer_deskSaturation_schedulesGamma() public {
         _addPaxg(); _depositPaxg(alice, 1e18); _enable();
         BuckKControllerShadow kS = _newShadow();
         vm.prank(GOV); kS.setGamma(1e18);
         vm.prank(GOV); obs.addStabilizer(address(basketC), 1e18);
         assertEq(kS.integralBoost(), 1e18, "idle desk: no boost");
-        _setOps(0, 1000, true);                                   // pin the position bound
-        assertEq(basketC.saturation(), 1e18);
-        assertEq(kS.integralBoost(), 2e18, "pinned desk doubles Ki");
+        _operate(40, true);                                       // Q4: net inventory -40 bp of NAV
+        assertLt(basketC.netInventory(), 0);
+        assertGt(kS.integralBoost(), 1e18, "a partial fill schedules in proportion");
+        assertLt(kS.integralBoost(), 2e18);
+        _setOps(1, 1000, true); obs.refresh();                    // cap 1 bp of NAV < |q|
+        assertEq(obs.stabilizerSaturation(address(basketC)), 1e18, "full against the held cap");
+        assertEq(kS.integralBoost(), 2e18, "full desk doubles Ki");
         vm.prank(GOV); obs.setStabilizerLambda(address(basketC), 0);
         assertEq(kS.integralBoost(), 1e18, "lambda 0: no scheduling either");
+        vm.prank(GOV); obs.setStabilizerLambda(address(basketC), 1e18);
+        _setOps(0, 1000, true); obs.refresh();                    // cap 0: disabled
+        assertTrue(obs.excluded(address(basketC)));
+        assertEq(kS.integralBoost(), 1e18, "a disabled desk cannot schedule K");
+    }
+
+    // ======================================================================= //
+    // WP-13: positionCap(), the held cap and the sensor-fault policy on the
+    // real desk (decision 9)
+    // ======================================================================= //
+
+    /// The desk's cap is maxPositionBp x NAV (decision 11), the bound
+    /// _absorb reverts on; it tracks the ops params and the NAV.
+    function test_desk_positionCap_isMaxPositionBpOfNav() public {
+        _addPaxg(); _depositPaxg(alice, 1e18); _enable();
+        assertEq(basketC.positionCap(), _nav() * 1000 / 10000);
+        _setOps(250, 1000, true);
+        assertEq(basketC.positionCap(), _nav() * 250 / 10000);
+        _depositPaxg(bob, 1e18);
+        assertEq(basketC.positionCap(), _nav() * 250 / 10000, "tracks NAV");
+        _setOps(250, 1000, false);
+        assertEq(basketC.positionCap(), 0, "disabled: 0");
+        _setOps(0, 1000, true);
+        assertEq(basketC.positionCap(), 0, "no inventory allowed: 0 (excluded)");
+    }
+
+    /// A spot pushed off its TWAP inside the window (the redemption guard)
+    /// makes NAV unreadable: positionCap() reverts NavUnreadable, while
+    /// netInventory() -- the position -- is unchanged by any of it.
+    function test_desk_positionCap_revertsNavUnreadable_onGuardTrip() public {
+        address pool = _addPaxg(); _depositPaxg(alice, 1e18); _enable();
+        _operate(40, true);                                       // Q4: a real book
+        int256 q = basketC.netInventory();
+        assertLt(q, 0);
+        vm.warp(vm.getBlockTimestamp() + 700);                    // TWAP history at this price
+        uint256 capBefore = basketC.positionCap();
+        assertGt(capBefore, 0);
+
+        _arb(pool, address(buck), 3000e18);                       // spot far off TWAP
+        vm.expectRevert(BuckBasketStorage.Slippage.selector);
+        _venueView().poolBuckValues();
+        vm.expectRevert(BuckBasketOps.NavUnreadable.selector);
+        basketC.positionCap();
+        assertEq(basketC.netInventory(), q, "position always readable");
+        assertEq(basketC.capacity(), 0, "capacity() keeps its WP-3a pinned reading");
+
+        vm.warp(vm.getBlockTimestamp() + 700);                    // the window catches up
+        assertGt(basketC.positionCap(), 0, "readable again");
+    }
+
+    /// The observer over the real desk: a guard trip keeps the held cap,
+    /// the position, the saturation and the aggregate, sets stale(); the
+    /// first successful read clears it and refreshes the cap.
+    function test_observer_deskGuardTrip_holdsCap_flagsStale() public {
+        address pool = _addPaxg(); _depositPaxg(alice, 1e18); _enable();
+        vm.prank(GOV); obs.setMode(ShadowObserver.Mode.V);
+        vm.prank(GOV); obs.addStabilizer(address(basketC), 1e18);
+        // dT 1 s, so a cycle can land INSIDE the 600 s TWAP window the trip lasts.
+        BuckKControllerShadow kS = new BuckKControllerShadow(5e11, 2e7, 0, 1, 0, 0.95e18, 0.75e18, GOV);
+        vm.prank(GOV); kS.setBasket(address(basketC));
+        vm.prank(GOV); kS.setObserver(address(obs));
+        vm.prank(GOV); kS.setPositionGains(5e11, 2e7, 0);
+        _operate(40, true);                                       // Q4: issued, net -40 bp of NAV
+        vm.warp(vm.getBlockTimestamp() + 3601);                   // TWAP history at this price
+        kS.compute();                                             // observe(): readable
+        assertFalse(obs.stale(address(basketC)));
+        uint256 cap0 = obs.heldCap(address(basketC));
+        assertEq(cap0, basketC.positionCap());
+        int256  pos0 = obs.position(address(basketC));
+        uint256 sat0 = obs.stabilizerSaturation(address(basketC));
+        int256  s0   = obs.aggregatePosition();
+        assertEq(pos0, basketC.netInventory() * 1e18 / int256(cap0));
+        assertLt(pos0, 0);
+        assertEq(s0, pos0, "one stabilizer at weight 1: s is its fill");
+
+        _arb(pool, address(buck), 3000e18);                       // the trip
+        vm.expectRevert(BuckBasketOps.NavUnreadable.selector);
+        basketC.positionCap();
+        vm.warp(vm.getBlockTimestamp() + 100);                    // inside the window
+        kS.compute();                                             // observe() refreshes
+        assertTrue(obs.stale(address(basketC)), "stale");
+        assertFalse(obs.excluded(address(basketC)), "included on the held cap");
+        assertEq(obs.heldCap(address(basketC)), cap0, "cap held");
+        assertEq(obs.position(address(basketC)), pos0, "position unchanged");
+        assertEq(obs.stabilizerSaturation(address(basketC)), sat0, "saturation unchanged");
+        assertEq(obs.aggregatePosition(), s0, "aggregate unchanged");
+        assertEq(kS.lastS(), s0, "K integrated the held position");
+        BuckKControllerShadow.Terms memory t = kS.terms();
+        assertEq(t.staleMask, 1); assertEq(t.excludedMask, 0);
+
+        vm.warp(vm.getBlockTimestamp() + 700);                    // the window catches up
+        kS.compute();
+        assertFalse(obs.stale(address(basketC)), "first successful read clears stale");
+        assertEq(obs.heldCap(address(basketC)), basketC.positionCap(), "cap refreshed");
+        assertTrue(obs.heldCap(address(basketC)) != cap0, "the NAV moved with the price");
+        (uint256 st, ) = obs.flags();
+        assertEq(st, 0);
+    }
+
+    /// A disabled desk is EXCLUDED from s (both modes) and the weights
+    /// renormalized without it; re-enabling brings it back on the next read.
+    function test_observer_disabledDesk_excludedFromS() public {
+        _addPaxg(); _depositPaxg(alice, 1e18); _enable();
+        vm.prank(GOV); obs.addStabilizer(address(basketC), 1e18);
+        MockStabilizer m = new MockStabilizer();
+        m.setCap(100e6); m.set(50e6, 0);                          // fill 0.5
+        vm.prank(GOV); obs.addStabilizer(address(m), 1e18);
+        vm.prank(GOV); obs.setStabilizerWeight(address(m), 0.5e18);
+        _operate(40, true);                                       // Q4: desk issued
+        assertLt(basketC.netInventory(), 0);
+        int256 bvib = _venueView().basketValueInBuck();
+        assertLt(obs.shadowValueInBuck(), bvib, "S: the desk's issuance in the shadow value");
+
+        // Disable: the desk drops out of both aggregations.
+        _setOps(1000, 1000, false); obs.refresh();
+        assertTrue(obs.excluded(address(basketC)));
+        assertFalse(obs.stale(address(basketC)), "a good read of 0");
+        assertEq(obs.position(address(basketC)), 0);
+        uint256 depth = basketC.shadowDepth();
+        assertEq(obs.shadowValueInBuck(), bvib + int256(1e18) * int256(50e6) / int256(depth),
+                 "S: only the mock remains");
+        vm.prank(GOV); obs.setMode(ShadowObserver.Mode.V);
+        assertEq(obs.aggregatePosition(), int256(0.5e18), "V: renormalized to the mock alone");
+        (, uint256 ex) = obs.flags();
+        assertEq(ex, 1, "desk excluded (bit 0); nothing booked on the pseudo");
+        vm.prank(GOV); obs.setShadowOffset(1);
+        (, ex) = obs.flags();
+        assertEq(ex, 1 | (1 << 255), "a booked pseudo inventory with no V cap is flagged");
+        vm.prank(GOV); obs.setShadowOffset(0);
+
+        // Re-enable: back on the next read, at its fill.
+        _setOps(1000, 1000, true); obs.refresh();
+        assertFalse(obs.excluded(address(basketC)));
+        int256 fill = basketC.netInventory() * 1e18 / int256(obs.heldCap(address(basketC)));
+        assertEq(obs.aggregatePosition(),
+                 (int256(1e18) * fill + int256(0.5e18) * int256(0.5e18)) / int256(1.5e18));
     }
 }

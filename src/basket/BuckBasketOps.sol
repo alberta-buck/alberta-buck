@@ -473,6 +473,31 @@ contract BuckBasketOps is BuckBasketProRata, IStabilizer {
         return 1e18 - capacity();
     }
 
+    /// @notice WP-13: the desk's inventory bound in BUCK, `maxPositionBp` x
+    ///         NAV -- the bound `_absorb` reverts on, and the cap the
+    ///         observer normalizes `netInventory` by (decision 11).  The
+    ///         outright bound is a balance-sheet programme size, not an
+    ///         inventory bound, so it does not enter.
+    ///
+    /// @dev    Three outcomes (IStabilizer): 0 when the desk is disabled
+    ///         (excluded from the aggregate); REVERTS `NavUnreadable` when
+    ///         the desk is enabled and NAV cannot be read (empty basket, or
+    ///         the spot/TWAP guard tripped in one pool -- the observer holds
+    ///         its last good cap and flags the desk stale, so a raid day
+    ///         does not read as a change of position); the bound otherwise.
+    ///         The holding logic lives in the OBSERVER: the shell adds
+    ///         nothing but this view (EIP-170 headroom).
+    function positionCap() external view override returns (uint256) {
+        OpsParams memory op = opsParams;
+        if (!op.enabled) return 0;
+        uint256 nav = _navBuckSafe();
+        if (nav == 0) revert NavUnreadable();
+        return nav * op.maxPositionBp / 10000;
+    }
+
+    /// @dev The desk is enabled but its NAV cannot be read this block.
+    error NavUnreadable();
+
     /// @dev Fraction of `cap` still unused by `used`, 1e18-scaled; 0 at or
     ///      past the bound (the same `>=` the operations revert on), and 0
     ///      for a zero cap (any book at all is over it).

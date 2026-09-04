@@ -44,4 +44,29 @@ interface IStabilizer {
 
     /// @notice 0..1e18, degree at a bound (1e18 once a bound has been hit).
     function saturation() external view returns (uint256);
+
+    /// @notice WP-13 (CARRY-CONVEXITY.org D7): the stabilizer's inventory
+    ///         bound cap_i in BUCK native units -- what the observer
+    ///         normalizes `netInventory` by (position = q / cap, in [-1, 1])
+    ///         under the V aggregation and computes the held saturation
+    ///         from in both modes.
+    ///
+    ///         THREE OUTCOMES, each meaning something different to the
+    ///         observer (WAVE3.org decision 9):
+    ///
+    ///           * a positive cap: the bound as of this block; the observer
+    ///             refreshes its HELD cap and clears the stale flag;
+    ///           * ZERO, no revert: the stabilizer is DISABLED (it truly
+    ///             cannot act); the observer EXCLUDES it from the aggregate
+    ///             and renormalizes the weights without it;
+    ///           * a REVERT: the bound cannot be sized right now (the desk's
+    ///             NAV is unreadable -- an empty basket, or the spot/TWAP
+    ///             guard tripped in one pool); the observer keeps the last
+    ///             good cap and flags the stabilizer STALE.  Position is
+    ///             always readable (`netInventory` depends on nothing
+    ///             external); only its normalization is not.
+    ///
+    ///         Never "pinned", never "idle": a reverting cap is a sensor
+    ///         fault, not saturation.
+    function positionCap() external view returns (uint256);
 }

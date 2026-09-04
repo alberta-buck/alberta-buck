@@ -71,8 +71,8 @@ contract BuckKControllerDirect is BuckKControllerBase {
     ///         integrator trims K away from this to hold basketValue == 1.0.
     uint256 public buckK0;
 
-    int256 private constant TO18 = 1e12;   // ppm -> 1e18
-    int256 private constant PPM  = 1e6;    // 1.0 expressed in ppm
+    int256 internal constant TO18 = 1e12;   // ppm -> 1e18
+    int256 internal constant PPM  = 1e6;    // 1.0 expressed in ppm
 
     event BasketSet(address indexed basket);
     event Reprimed(int256 newP, int256 newI);
@@ -126,11 +126,13 @@ contract BuckKControllerDirect is BuckKControllerBase {
         return err * dt;
     }
 
-    /// @dev Bumpless-transfer algebra for the ppm embodiment:
+    /// @dev Bumpless-transfer algebra for the ppm embodiment (virtual, with
+    ///      compute() and reprime(), so BuckKControllerShadow can carry a
+    ///      second loop with its own state inside the same algebra -- WP-13):
     ///      buckK == buckK0 + Kp*P + Ki*I  (gains real*1e12, P in ppm,
     ///      I in ppm*s), so the I that holds the current output is
     ///      (buckK - buckK0 - Kp*P) / Ki -- the same form reprime() uses.
-    function _rederiveI() internal view override returns (int256) {
+    function _rederiveI() internal view virtual override returns (int256) {
         return (int256(buckK) - int256(buckK0) - Kp * P) / Ki;
     }
 
@@ -150,7 +152,7 @@ contract BuckKControllerDirect is BuckKControllerBase {
 
     /// @notice Run (or cache) one PID cycle in ppm space and return buckK.
     /// @dev    Permissionless; cheap cached-read when dT has not elapsed.
-    function compute() external override returns (uint256) {
+    function compute() external virtual override returns (uint256) {
         uint256 elapsed = block.timestamp - lastUpdate;
         if (elapsed < dT) {
             return buckK;
@@ -202,7 +204,7 @@ contract BuckKControllerDirect is BuckKControllerBase {
     ///         absorb the dilution discontinuity in basketValue.  Recaptures
     ///         P against the new process state and re-derives I so the next
     ///         no-error cycle reproduces the current buckK.
-    function reprime() external {
+    function reprime() external virtual {
         require(msg.sender == address(basket), "only basket");
         (int256 buckValue, int256 basketValue) = _readReferences();
         int256 setpoint = buckValue   / TO18;
