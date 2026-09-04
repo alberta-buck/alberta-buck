@@ -14,6 +14,7 @@ from pathlib import Path
 from web3 import Web3
 
 from alberta_buck.sim.chain import load_artifact
+from alberta_buck.sim.gauge import buck_usd6
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_VECTORS = REPO / "test" / "vectors"
@@ -259,13 +260,22 @@ class Snapshotter:
             ref.append(self.s.prices.ref(i, day))
             su.append(_implied(d, d.pool_usdc[i], tc, d.dec[i], d.usdc))
             sb.append(_implied(d, d.pool_buck[i], tc, d.dec[i], d.buck))
-        # Floating BUCK/USDC pool: implied USDC-micro per 1 BUCK.
+        # Floating BUCK/USDC pool: USDC-micro per 1 BUCK from slot0
+        # (decision 8: the balance ratio misreads a concentrated position).
         buck_usd = 0
+        buck_usd_bal = 0
         if getattr(d, "pool_ub", ""):
-            ru = _bal(d.usdc, d.pool_ub)
+            try:
+                buck_usd = buck_usd6(d.chain, d.pool_ub, d.buck)
+            except Exception:
+                buck_usd = 0
+            # The retired balance-ratio gauge, kept as a diagnostic (frame
+            # field buck_usd_bal): its gap to buck_usd is what concentrated
+            # positions and uncollected fees add to the balances without
+            # moving the price.
             rb = _bal(d.buck, d.pool_ub)
             if rb:
-                buck_usd = ru * 1_000_000 // rb
+                buck_usd_bal = _bal(d.usdc, d.pool_ub) * 1_000_000 // rb
         try:
             bv = int(d.basket.functions.basketValueInBuck().call())
         except Exception:
@@ -646,6 +656,9 @@ class Snapshotter:
             "sd_depth": ctr.get("sdDepth", 0),          # private depth, usd6
             "sd_last": dict(ctr.get("sdLast", {})),     # the last placement
             "sd_err": ctr.get("sd_err", ""),
+            # WP-D8 (WAVE3.org decision 8): buck_usd above now quotes from
+            # slot0; this is the balance ratio it replaced, kept beside it.
+            "buck_usd_bal": buck_usd_bal,               # balances, micro-USD
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

@@ -1,0 +1,429 @@
+#+TITLE: WP-d8 report -- slot0 gauges (WAVE3.org decision 8)
+#+AUTHOR: Claude (decision-8 branch owner), for the integrator
+#+DATE: 2026-09-04
+
+* Summary
+
+Built: the sim's BUCK/USDC readers -- SaverAgent's spot, snapshot.buck_usd,
+router.quote_hop / quote_path, and every other read that stood for the
+pool's price or depth (the excursion arbs' ex-ante gates, _ProxyAgent
+._buy_buck, the debtors' atomic-refi quote and retire gate, the discount
+and issuer arbs, the whale raid's slices, the facility's three reads, the
+anonymous arb's binder) -- now quote from the pool's slot0 price and its
+ACTIVE liquidity through one new module (=alberta_buck/sim/gauge.py=) and
+a memoized =Chain.pool_state=; the constant-product formulas are unchanged
+in form and run on the virtual reserves x = L 2^96 / sqrtP, y = L sqrtP /
+2^96, which is exact inside the active tick range.  Shown: the WP-8 day-1
+artefact is gone (placement day: slot0 gauge 1.098389 in BOTH the seeder
+and the none cell, balances 1.410246; before, the gauge read 1.414440) and
+the seeder-on K gap is now economics (identical through day 1, diverging
+with day 2's trading; excursion-credit entries 17 -> 8), while the
+no-concentrated-position cell is NOT byte-identical: the pool fees that a
+balance quote counted as reserves drift it by |d bvib| max 1.26e-3, |d K|
+max 1.70e-4 over 30 days, with the first changed action COUNT on day 25.
+Next: the integrator regenerates the 1-year identity pair and the none-arm
+baselines on the Xeon with =vecdiff= beside =cmp=, and the 3h seeder cells
+can be judged; the TOKEN-pool reserve gauges (open issue 1) are the same
+substitution, recommended before any fence-basket cell.
+
+* Commits (on wp/d8-slot0, newest first; from feature/carry-convexity c99a4f8)
+
+- (this file) doc: reports/wp-d8.org
+- 0be11b4 sim: vecdiff (the L3 drift gauge) and buck_usd_bal beside the
+  slot0 gauge
+- bf08eae sim: decision 8 -- quote BUCK/USDC from slot0 and active
+  liquidity, not pool balances
+
+* Files
+
+New:
+- =alberta_buck/sim/gauge.py= -- the module: =virtual_reserves=,
+  =oriented=, =active_reserves(chain, pool, a, b)= (the drop-in for a
+  balanceOf(pool) pair, returned in the caller's token order),
+  =buck_usd6(chain, pool, buck)= (micro-USD per BUCK from sqrtPriceX96,
+  either token order), =sqrt_price_to_usd6= (moved from the seeder),
+  =pool_state= / =read_pool_state= (memo-or-uncached reads).  The module
+  docstring carries the derivation, the approximation, the units and the
+  orientation rule.
+- =alberta_buck/test/test_gauge.py= -- 33 tests: both token orderings for
+  every conversion, the quote's equality with the V3 within-range closed
+  form (both directions, three fee tiers), the artefact in numbers (an
+  out-of-range position moves the balance ratio and not the gauge), the
+  chained path quote, the Chain memo's lifecycle, the uncached fallback.
+- =alberta_buck/sim/vecdiff.py= -- =python -m alberta_buck.sim.vecdiff
+  A.json B.json=: |d bvib| / |d K| max and mean, then every changed frame
+  field, cumulative counters (never falling in either vector: agents that
+  acted differently) separated from gauges; exit 0 iff identical.
+- =reports/wp-d8.org= -- this file.
+
+Modified (in place; the substitutions are two-line, formulas untouched):
+- =alberta_buck/sim/chain.py= -- =Chain.pool_state= (memo of
+  (sqrtPriceX96, tick, liquidity, token0, token1) per pool) and a
+  =clear_balance_cache= override that drops it with the balances: the memo
+  is exactly as fresh as a memoized balanceOf (cleared on every send and
+  deploy, and by loop.py / driver.py on every time warp).
+- =alberta_buck/sim/router.py= -- =quote_hop= / =quote_path= take
+  =chain=; the hop is the within-range constant-product swap on the
+  virtual reserves; =balance_of= is kept in the signature for the old
+  call shape and unused.  Module docstring rewritten.
+- =alberta_buck/sim/snapshot.py= -- =buck_usd= from =buck_usd6=; the
+  retired balance ratio kept beside it as the diagnostic frame field
+  =buck_usd_bal= (WP-D8 append block at the end of the frame dict).
+- =alberta_buck/sim/seeder_agent.py= -- =Q96=, =E6=, =sqrt_price_to_usd6=
+  imported from the gauge and re-exported (test_seeder.py unchanged).
+- =alberta_buck/sim/equilibrium_agents.py= -- 13 sites: =_buy_buck=
+  (any pool), ExcursionArbAgent.act and =_usdc_leg=, WhaleRaidAgent
+  =_buy_slice= / =_sell_slice=, CommodityRebalArbAgent (chain= on
+  quote_path), SaverAgent's spot, BuckCreditDebtorAgent (atomic-refi
+  quote, paced-sale cap, repayment cap, retire gate),
+  DiscountBuckArbAgent =_spot_ub=, BuckIssuerArbAgent's bite cap.
+- =alberta_buck/sim/agents.py= -- AnonymousArbAgent's BUCK/USDC binder;
+  chain= on both quote_path calls (AnonymousArb, TokenAccumulator).
+- =alberta_buck/sim/facility_agent.py= -- =_headroom= (usdc target),
+  =_issue_usdc=, =_buy_buck_usdc=.
+- =alberta_buck/sim/rebalancer.py=, =alberta_buck/sim/director_agent.py=
+  -- chain= on their quote_path calls.
+
+Not touched, by design: the contracts (the on-chain basket reads its own
+TWAP); =markout.py= (its balance reads measure a swap's FLOW, which
+balances are right for); the TOKEN/BUCK and TOKEN/USDC reserve gauges
+(open issue 1); =inspect.py='s TUI gauge (open issue 2).
+
+Dependencies added: none (house rule 11).
+
+* Design notes (what the change is, and its limits)
+
+- WHY balances lie.  A V3 pool's balance is the sum over every position
+  of what its range holds at the current price, plus uncollected LP and
+  protocol fees.  Only a full-range position holds the constant-product
+  ratio; a concentrated position adds its funding asset without moving
+  the price.  The seeder's USDC range on day 1: balances 1.410, slot0
+  1.083.
+- WHAT replaces them.  Inside the active tick range the pool IS a
+  constant-product market on x = L 2^96 / sqrtP, y = L sqrtP / 2^96
+  (x y = L^2, y / x = price).  =_cp_out=, =_impact_cap=,
+  =_amount_in_for_out= and =quote_hop= are exact on (x, y) for a swap
+  that stays inside the range, so the change is of INPUT, not of form:
+  every site keeps its lines and reads (ru, rb) from =active_reserves=.
+- THE APPROXIMATION, named.  A swap that crosses a tick boundary meets a
+  different L beyond it.  Crossing INTO more liquidity (a corrective
+  swap entering the seeder's adjacent range) fills better than quoted,
+  so the ex-ante gate errs conservative; crossing OUT of a concentrated
+  range into thinner liquidity fills worse than quoted.  The balance
+  quote silently made the same within-range assumption with the wrong
+  reserves.  An exact multi-tick quote is the on-chain Quoter, not
+  taken here: no such path exists in the sim, and the reads would be
+  eth_calls per candidate route per tick.
+- ORIENTATION.  token0 is the lower address; the sim's BUCK/USDC pool has
+  USDC as token0, so a BUCK rally is a FALLING pool price.  =buck_usd6=
+  and =active_reserves= take the pool's token0 from the memo, so every
+  caller keeps writing (r_usdc, r_buck); test_gauge.py pins both orders.
+- MEMO.  =Chain.pool_state= is invalidated wherever the balance cache is,
+  so a quote costs no more than the reads it replaced; the cells ran
+  FASTER (none 2m38 -> 2m30, seeder 2m44 -> 2m13 wall), partly fewer
+  phantom trades.  A bare Web3Session falls back to an uncached read.
+  =notes_stack.py= sends through =w3.eth.send_transaction= without
+  clearing the balance cache; the memo shares that pre-existing exposure
+  (not on any sim cell's path).
+
+* Layers passed
+
+- L0: =make nix-build= / =make nix-test= NOT run in this worktree (shared
+  =out/= and =cache/= through symlinks; no Solidity changed).  The venv
+  suite, the =make nix-venv-test= equivalent, at 0be11b4:
+
+    python -m pytest alberta_buck/test/ -q -p no:cacheprovider
+    1 failed, 593 passed, 3 skipped, 1 warning in 102.21s
+
+  The failure is =test_lifecycle_plot= and is pre-existing (finding 6).
+  The plot tests regenerate six PNGs (=images/*.png=,
+  =alberta_buck/test/truthstake_*.png=); restored with =git checkout=,
+  not committed.
+- L1: the four wave-3 files plus the new one, 151 passed:
+
+    python -m pytest alberta_buck/test/test_markout.py alberta_buck/test/test_ladder.py alberta_buck/test/test_facility.py alberta_buck/test/test_seeder.py alberta_buck/test/test_gauge.py -q
+    151 passed, 1 warning in 1.04s
+
+  =test_gauge.py= (33): test_sqrt_price_par_both_orientations[2],
+  test_sqrt_price_orientation_flips_with_token_order,
+  test_sqrt_price_agrees_with_the_seeder_tick_helpers[6],
+  test_virtual_reserves_at_par_are_L_and_L,
+  test_virtual_reserves_carry_the_price_and_the_invariant,
+  test_virtual_reserves_degenerate,
+  test_oriented_returns_the_callers_order_both_orderings,
+  test_oriented_accepts_contract_like_tokens_and_rejects_foreign_ones,
+  test_active_reserve_ratio_is_the_slot0_price[6],
+  test_buck_usd6_without_a_pool_is_zero,
+  test_out_of_range_position_moves_the_balances_not_the_gauge[2],
+  test_quote_hop_is_the_v3_within_range_swap[6], test_quote_hop_edges,
+  test_quote_path_chains_hops_through_the_memo,
+  test_chain_pool_state_memo_follows_the_balance_cache,
+  test_pool_state_falls_back_to_an_uncached_read.
+- L2: four 30-day cells (pyrevm, catalogue-none, the house incantation
+  with PYTHONPATH and ALBERTA_BUCK_REPO set to the worktree), before at
+  c99a4f8 and after at bf08eae / 0be11b4:
+
+    python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/catalogue-none.toml --backend pyrevm --days 30 --out build/sim/smoke/d8/none-before.json
+    python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/catalogue-none.toml --backend pyrevm --days 30 --set scenario.agents.SeederAgent=1 --out build/sim/smoke/d8/seeder-before.json
+    python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/catalogue-none.toml --backend pyrevm --days 30 --out build/sim/smoke/d8/none-after.json        # bf08eae
+    python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/catalogue-none.toml --backend pyrevm --days 30 --set scenario.agents.SeederAgent=1 --out build/sim/smoke/d8/seeder-after.json   # bf08eae
+    python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/catalogue-none.toml --backend pyrevm --days 30 --out build/sim/smoke/d8/none-after2.json       # 0be11b4
+    python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/catalogue-none.toml --backend pyrevm --days 30 --set scenario.agents.SeederAgent=1 --out build/sim/smoke/d8/seeder-after2.json  # 0be11b4
+
+  Wall: none 2m38.4 (before) / 2m29.7 (bf08eae) / 2m31.7 (0be11b4);
+  seeder 2m43.7 / 2m12.8 / 2m14.8.  All exit 0, no =*_err= counters.
+  Counters at day 29 (none before / none after / seeder before / seeder
+  after): cycleTrades 1437 / 1434 / 1540 / 957; ubTrades 1110 / 1107 /
+  1165 / 539; directTrades 180 all; saver_buys 240 / 240 / 132 / 104;
+  saver_sells 240 / 240 / 342 / 248; exc_entries 0 / 0 / 17 / 8;
+  exc_q[issue] 0 / 0 / 4.78M / 7.14M; sd_positions 0 / 0 / 3 / 3;
+  sd_repositions 0 / 0 / 2 / 1; sd_converted 0; sd_withdrawn 0.
+- L3: the cmp lines.
+
+    cmp build/sim/smoke/d8/none-before.json build/sim/smoke/d8/none-after.json
+    build/sim/smoke/d8/none-before.json build/sim/smoke/d8/none-after.json differ: char 644, line 1
+    cmp build/sim/smoke/d8/seeder-before.json build/sim/smoke/d8/seeder-after.json
+    build/sim/smoke/d8/seeder-before.json build/sim/smoke/d8/seeder-after.json differ: char 644, line 1
+    cmp build/sim/smoke/d8/none-after.json build/sim/smoke/d8/none-after2.json
+    build/sim/smoke/d8/none-after.json build/sim/smoke/d8/none-after2.json differ: char 16180, line 1
+
+  Char 644 is frame 0's =buck_usd= (the gauge itself: 1073341 by
+  balances, 1073322 by slot0).  The bf08eae vs 0be11b4 pair differs ONLY
+  by the added field: =vecdiff= reports |d bvib| = |d K| = 0, zero
+  changed counters, one changed field (=buck_usd_bal=, absent before) --
+  the second commit is byte-identical in every pre-existing field, so
+  the memo and the diagnostic read are inert.  The determinism of the
+  harness itself was not re-checked with a repeat run (WP-8 did).
+
+* Acceptance evidence
+
+** 1. L3 identity where no concentrated position exists (the none cell)
+
+Not byte-identical, as the brief allowed: the pools' balances include
+the uncollected fees, so the balance quote and the slot0 quote differ by
+a fee-sized amount from the first swap.  Quantified with
+
+    python -m alberta_buck.sim.vecdiff build/sim/smoke/d8/none-before.json build/sim/smoke/d8/none-after.json
+
+| quantity                          | value                                                   |
+|-----------------------------------+---------------------------------------------------------|
+| max abs(d bvib)                   | 1.258e-3 (day 27)                                       |
+| mean abs(d bvib)                  | 1.597e-4                                                |
+| max abs(d buckK)                  | 1.703e-4 (day 27)                                       |
+| mean abs(d buckK)                 | 2.799e-5                                                |
+| first changed gauge               | day 0, buck_usd 1073341 -> 1073322 (1.8e-5)             |
+| first changed action SIZE         | day 3: a direct-mint entry USD 3,490 smaller (dmOutstanding, supply; 3.4e-4 of the book) |
+| first changed action COUNT        | day 25: ubTrades 1110 -> 1107; day 26: cycleTrades 1437 -> 1434 |
+| other counts changed              | none (saver_buys/sells 240/240, directTrades 180, dmEntries 48, dmExits 3, bcd_* identical) |
+| balance/slot0 gap in the none cell| +1.8e-5 at day 0, +1e-6 .. +6e-6 thereafter (frame field buck_usd_bal vs buck_usd) |
+
+Cause: with only full-range positions the virtual reserves equal the
+balances less the uncollected fees (0.05% of BUCK/USDC volume, 0.30% of
+TOKEN/BUCK volume) and rounding dust, so every quote moves by a fee
+fraction; the arbs' fills differ at that order from day 0, the pools'
+state drifts, and a direct-mint entry on day 3 is sized off that drifted
+state.  The divergence stays at rounding level for 30 days: K within
+1.7e-4, bvib within 1.3e-3, three fewer arb cycles.  The design owner's
+"rounding-level drift expected" holds; the 1-year identity pair
+(readiness table, 2 x 1-year) should be judged with =vecdiff= beside
+=cmp= rather than by =cmp= alone.
+
+** 2. The seeder smoke: the day-1 artefact
+
+The slot0 gauge beside the balance ratio at the same instant (day end),
+with the none cell's gauge and the seeder's own tick-0 read
+(=seeder-after2.json=, =none-after2.json=):
+
+| day | buck_usd (slot0) | buck_usd_bal (balances) | bal/slot0 - 1 | none cell buck_usd | sd_current (tick 0) | sd_ideal | sd_gap_bp | sd_side | sd_positions |
+|-----+------------------+-------------------------+---------------+--------------------+---------------------+----------+-----------+---------+--------------|
+|   0 |         1.073322 |                1.073341 |       +0.0000 |           1.073322 |            0.000000 | 0.000000 |         0 |         |            0 |
+|   1 |         1.098389 |                1.410246 |       +0.2839 |           1.098389 |            1.082793 | 1.003103 |      -736 | usdc    |            1 |
+|   2 |         1.075332 |                1.324515 |       +0.2317 |           1.025709 |            1.089724 | 1.003247 |      -794 | usdc    |            1 |
+|   3 |         1.066661 |                1.244114 |       +0.1664 |           0.997450 |            1.075332 | 1.005792 |      -647 | usdc    |            1 |
+|   4 |         1.025567 |                0.920088 |       -0.1028 |           0.996908 |            1.057066 | 1.005559 |      -487 | usdc    |            1 |
+|   5 |         1.018385 |                0.871608 |       -0.1441 |           0.996576 |            1.022269 | 1.003576 |      -183 | usdc    |            1 |
+|   6 |         1.014839 |                0.848442 |       -0.1640 |           0.999920 |            1.018287 | 0.996703 |      -212 | usdc    |            1 |
+|   7 |         1.013351 |                0.838865 |       -0.1722 |           1.000065 |            1.014016 | 0.998154 |      -156 | usdc    |            1 |
+|   8 |         1.013301 |                0.838543 |       -0.1725 |           0.999263 |            1.013351 | 1.005790 |       -75 | usdc    |            1 |
+|   9 |         1.013274 |                0.838371 |       -0.1726 |           1.028895 |            1.013300 | 1.000588 |      -125 | usdc    |            1 |
+
+The same days BEFORE the change (=seeder-before.json=; the frame had no
+balance field, so the seeder's tick-0 slot0 read is the comparator):
+
+| day | buck_usd (balances) | sd_current (slot0, tick 0) | gauge/slot0 - 1 |
+|-----+---------------------+----------------------------+-----------------|
+|   1 |            1.414440 |                   1.082793 |          +0.306 |
+|   2 |            1.336748 |                   1.095119 |          +0.221 |
+|   3 |            1.212350 |                   1.084936 |          +0.117 |
+|   4 |            1.091280 |                   1.068312 |          +0.022 |
+|   5 |            0.993786 |                   1.044318 |          -0.048 |
+
+Read: on the placement day the gauge is 1.098389 with the seeder on and
+1.098389 with it off -- a USD 15M USDC-funded range placed beyond the
+price adds 28% to the balance ratio and nothing to the price; before,
+the gauge read that 28% as a rally (1.414440).  Day 3's seeder read at
+tick 0 (1.075332) equals day 2's day-end gauge (1.075332) exactly: the
+same conversion of the same slot0.  From day 4 the balance ratio falls
+BELOW slot0 (-10% .. -17%): the corrective arb sold BUCK into the range,
+which converted toward BUCK as designed (R10), and the balances now
+carry that BUCK; no reader sees it.
+
+** 2b. K on vs off
+
+| day | K none (before) | K seeder (before) | dK before | K none (after) | K seeder (after) | dK after | supply none (after) $M | supply seeder (after) $M | bvib none (after) | bvib seeder (after) |
+|-----+-----------------+-------------------+-----------+----------------+------------------+----------+------------------------+--------------------------+-------------------+---------------------|
+|   0 |          0.7419 |            0.7419 |   +0.0000 |         0.7419 |           0.7419 |  +0.0000 |                  60.44 |                    60.44 |            1.0635 |              1.0635 |
+|   1 |          0.7487 |            0.7487 |   +0.0000 |         0.7487 |           0.7487 |  +0.0000 |                  60.44 |                    60.44 |            0.9875 |              0.9875 |
+|   2 |          0.7541 |            0.7583 |   +0.0042 |         0.7541 |           0.7551 |  +0.0010 |                  60.44 |                    60.44 |            0.9563 |              0.9476 |
+|   3 |          0.7497 |            0.7704 |   +0.0207 |         0.7497 |           0.7587 |  +0.0090 |                  60.54 |                    60.53 |            1.0078 |              0.9433 |
+|   4 |          0.7509 |            0.7746 |   +0.0238 |         0.7509 |           0.7585 |  +0.0077 |                  60.54 |                    67.34 |            0.9951 |              0.9681 |
+|   5 |          0.7509 |            0.7713 |   +0.0204 |         0.7509 |           0.7590 |  +0.0081 |                  60.63 |                    67.77 |            0.9957 |              0.9776 |
+|   7 |          0.7493 |            0.7686 |   +0.0193 |         0.7493 |           0.7605 |  +0.0112 |                  60.83 |                    67.96 |            1.0061 |              0.9861 |
+|  10 |          0.7489 |            0.7682 |   +0.0193 |         0.7489 |           0.7618 |  +0.0129 |                  60.93 |                    68.06 |            1.0093 |              0.9909 |
+|  15 |          0.7492 |            0.7795 |   +0.0304 |         0.7492 |           0.7598 |  +0.0107 |                  61.44 |                    70.98 |            1.0082 |              1.0044 |
+|  20 |          0.7512 |            0.7784 |   +0.0272 |         0.7512 |           0.7662 |  +0.0150 |                  62.43 |                    69.53 |            0.9896 |              0.9791 |
+|  25 |          0.7482 |            0.7775 |   +0.0293 |         0.7483 |           0.7715 |  +0.0233 |                  63.62 |                    70.70 |            1.0113 |              0.9892 |
+|  29 |          0.7495 |            0.7803 |   +0.0308 |         0.7497 |           0.7748 |  +0.0251 |                  65.36 |                    72.41 |            1.0012 |              0.9818 |
+
+| pair   | max abs(dK) | rms dK | max abs(d bvib) | mean abs(d bvib) | supply on - off, day 29 | mean abs(spot - 1) off | mean abs(spot - 1) on |
+|--------+-------------+--------+-----------------+------------------+-------------------------+------------------------+-----------------------|
+| before |      0.0316 | 0.0247 |          0.1432 |           0.0223 |                +5.79M   |                 0.0200 |                0.0604 |
+| after  |      0.0251 | 0.0149 |          0.0645 |           0.0166 |                +7.05M   |                 0.0200 |                0.0328 |
+
+Read: K is identical on and off through day 1 (the placement moves
+nothing), before and after.  The on/off gap now begins with day 2's
+trading and follows bvib: the seeder's USDC range sits adjacent to the
+price on the corrective side, absorbs the BUCK the arbs sell, and holds
+BUCK/USD 5-7% above the none path through day 8 (1.075 vs 1.026 on day
+2; 1.067 vs 0.997 on day 3); the TOKEN/BUCK pools read that as a premium
+(bvib 0.943 vs 1.008 on day 3) and K rises.  The +7.05M of supply is 8
+excursion-credit entries issuing into that premium (Q4 issue 7.14M) --
+their gate now reads the same depth the pool has.  Before, 17 entries
+passed on phantom depth and K's gap was a gauge artefact from day 2.
+The remaining gap is the seeder's economics; at the x1 budget (USD
+10-20M) it still exceeds G7 (max 0.020, rms 0.010) in this 30-day
+smoke, which is what the 3h seeder cells exist to measure (open issue 3).
+WP-8's G3 result (tracking error on spot) stands; its K numbers are
+superseded by this table.
+
+** 3. pytest
+
+The four wave-3 files plus =test_gauge.py=: 151 passed (L1 above); the
+full venv suite 593 passed, 3 skipped, 1 pre-existing failure (finding
+6).
+
+* Findings
+
+1. The artefact's channel was the excursion-credit arbs' ex-ante gate,
+   not the named readers alone.  =ExcursionArbAgent= (5 + 3 in the
+   catalogue cast) gates entries on =_cp_out(ru, rb, ...)= over the pool
+   balances; with the seeder's USD 15M in the USDC balance the "sell
+   BUCK above par + edge" test passed trivially and the credit variant
+   minted and sold: 17 entries and +5.8M supply by day 29 in the seeder
+   world (=vecdiff none-before seeder-before=), which is WP-8's "+5M
+   supply, K 0.787 vs 0.746".  After: 8 entries, and each passed a gate
+   that reads the pool's active depth.  Command: the vecdiff lines in L3
+   / acceptance 1.
+2. The balance/slot0 gap is not fee-sized only when a position is
+   concentrated -- it is signed by the position's conversion.  In the
+   seeder cell the gap is +28% at placement (USDC beyond the price),
+   crosses zero on day 4 and settles at -17% (the range converted to
+   BUCK as the corrective flow arrived).  =buck_usd_bal= makes this
+   visible in every vector; in the none cell it stays under 6e-6.
+   Command: =d8_tables.py= over =seeder-after2.json= (the table in
+   acceptance 2).
+3. The L3 drift is rounding-level and slow: 30 days of the none cell
+   move K by at most 1.7e-4 and bvib by at most 1.3e-3, and the first
+   changed action COUNT is on day 25.  Byte-identity cannot be the
+   acceptance for a change that removes a fee-sized bias from every
+   quote; =vecdiff= is the instrument.  Command: acceptance 1.
+4. The cells run faster: none 2m38 -> 2m30, seeder 2m44 -> 2m13.  The
+   memo makes a pool read as cheap as a cached balanceOf, and the seeder
+   world executes 583 fewer phantom arb cycles.  Command: the =time=
+   lines in =build/sim/smoke/d8/*.log=.
+5. With the seeder on, the anonymous arbs cycle LESS through BUCK/USDC
+   than with it off (ubTrades 539 vs 1107; cycleTrades 957 vs 1434),
+   the reverse of before (1165 vs 1110).  The routes C2 / C3 need a
+   BUCK/USDC mispricing against the TOKEN pools; the seeder's bid
+   removes it on the corrective side.  Not investigated further; it is
+   the seeder's economics and belongs to the 3h cells.
+6. Pre-existing failure on the branch of record:
+   =alberta_buck/test/test_lifecycle_plot.py::test_lifecycle_plot=
+   asserts =max(jubilee) > 0= on the committed forge-emitted vector
+   =test/vectors/lifecycle.json=, whose =jubilee= series is all zeros.
+   The vector was last regenerated in 1c773ce (2026-08-15, "buck: price
+   cover at its depreciated value, and give the deposit back whole");
+   nothing on this branch touches the vector, the Solidity test or the
+   plot test.  Command: =python -m pytest alberta_buck/test/ -q=.
+
+* Open issues and proposed decisions
+
+1. TOKEN-pool reserve gauges.  The same balance reads remain on the
+   TOKEN/BUCK and TOKEN/USDC pools: =snapshot._implied= (spotUsdc /
+   spotBuck, the markout prices, the seeder's ideal),
+   =_pool_value_weights=, ExcursionArbAgent =_baskets_par= and
+   =_act_rotate= (the basket-neutral variant), CommodityRebalArb's
+   =rt= cap, the director's and rebalancer's POOL_FRAC caps, the
+   anonymous arb's TOKEN binders, and the valuations at
+   equilibrium_agents.py 1394 / 3619 / 4082.  The ProRata venue mints
+   full-range positions (=_fullRangeTicks=), so today they are off by
+   the 0.30% fees only; the fence basket's bands are exactly the
+   concentrated case, and any private LP in TOKEN/BUCK would be.
+   =active_reserves= is the drop-in.  Proposed: do it as one follow-up
+   commit before the first fence-basket cell of the grid, with the
+   same identity pair; not done here to keep decision 8's blast radius
+   to BUCK/USDC and the generic quote primitives.
+2. =inspect.py='s TUI gauge (=_buck_usd=) still divides balances.  It
+   reads through the TUI's own BlockingReader, whose view-ABI map has no
+   pool entry; the fix is registering the UniswapV3Pool ABI there and
+   converting with =gauge.sqrt_price_to_usd6=.  Display-only, anvil
+   path; proposed as a small follow-up so the human's gauge does not
+   contradict the frames.
+3. The seeder-on K gap is economics and still outside G7 at x1 in a
+   30-day smoke (max 0.025, rms 0.015).  The seeder targets the
+   truth-pool USD ideal (1.003-1.006 here) while K reads the TOKEN/BUCK
+   bvib; while its range holds BUCK/USD above the none path, bvib reads
+   a premium and the credit arbs issue into it.  Proposed: the 3h seeder
+   cells with budget as the amount axis (x0.25 .. x4 of budget_m) and
+   =min_gap_bp= swept, judged by G7 / G8 and by =buck_usd_bal - buck_usd=
+   as the position's conversion gauge; and a design note on whether the
+   seeder's bid should be sized against the desk's Q3 rather than
+   against ideal.
+4. Regeneration.  Decision 8 asks for the L3 identity pair and the
+   none-arm baselines only.  This branch banks the 30-day pair; the
+   1-year pair from the readiness table should be produced on the Xeon
+   with =vecdiff= as the judge, and =buck_usd_bal= lets the integrator
+   confirm on any banked vector whether a concentrated position ever
+   existed in it (the gap exceeds the fee level).
+5. Quote semantics past a tick boundary.  The within-range quote is the
+   named approximation (design notes).  If a cell shows an agent
+   systematically over- or under-filled against its ex-ante quote across
+   the seeder's range, the remedy is an eth_call to a Quoter on the
+   pre-fund router path, which the sim does not have; recording the
+   question, not proposing the work.
+6. =vecdiff='s counter heuristic (a field that never falls in either
+   vector) classifies a few monotone-by-chance gauges (dmOutstanding,
+   treasuryBuck) as counters.  Harmless for reading; a declared list of
+   counters in =snapshot.py= would be exact.
+7. =buck_usd_bal= is a new frame field (append-only); WP-13's frame
+   appends land after it or before it without conflict.  The four
+   wave-3 files do not assert on frame shape.
+
+* Left behind
+
+- =build/sim/smoke/d8/= in the worktree: 3.6 MB -- six 30-day vectors
+  (none-before / none-after / none-after2 / seeder-before / seeder-after
+  / seeder-after2, 0.6 MB each) and their logs, plus =pytest-full.log=.
+  Not committed.  Delete freely after the ledger entry; the after2 pair
+  is the one to keep if any (it carries =buck_usd_bal=).
+- Scratchpad (session temp, not in the repo): =d8_edits.py= (the
+  substitution script, exact strings with asserted counts) and
+  =d8_tables.py= (the org tables above), a few KB.
+- Regenerated by the plot tests and RESTORED with =git checkout=:
+  =images/arb-scenario.png=, =images/equilibrium-isolation.png=,
+  =images/equilibrium-scenario.png=, =images/lifecycle.png=,
+  =alberta_buck/test/truthstake_honey_pot_collapse.png=,
+  =alberta_buck/test/truthstake_simulation.png=.  No PNG churn on the
+  branch; the tree is clean but for the untracked =out= / =cache=
+  symlinks of the worktree recipe.
+- Nothing installed; nothing in =/tmp= beyond the scratchpad.

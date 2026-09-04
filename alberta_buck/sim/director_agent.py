@@ -93,7 +93,8 @@ class DirectorKeeperAgent(Agent):
                 (d.pool_buck[buy_i], B, b_addr, fb)]
         balance_of = lambda token, holder: d.chain.balance_of(
             token, holder, d.erc20_abi)
-        if quote_path(d.w3, d.erc20_abi, hops, move_amt, balance_of) == 0:
+        if quote_path(d.w3, d.erc20_abi, hops, move_amt, balance_of,
+                      chain=d.chain) == 0:
             return
         if self._exec(d, d.tokens[sell_i], move_amt, toks, False, ctr):
             ctr["directorTrades"] = ctr.get("directorTrades", 0) + 1

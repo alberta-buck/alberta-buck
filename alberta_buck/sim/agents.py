@@ -25,6 +25,7 @@ from web3 import Web3
 
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.chain import load_artifact
+from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import (
     quote_path, encode_path, ur_exec_args, sqrt_price_x96,
 )
@@ -193,13 +194,14 @@ class AnonymousArbAgent(Agent):
             buck_res = d.chain.balance_of(d.buck, d.pool_buck[x])
             binders = [usdc_res, buck_res]
             if d.pool_ub:
-                binders.append(d.chain.balance_of(d.usdc, d.pool_ub))
+                binders.append(active_reserves(d.chain, d.pool_ub, d.usdc,
+                                               d.buck)[0])
             amt = min(bal, min(binders) * self.POOL_FRAC_BP // 10_000)
             if amt == 0:
                 continue
             best = None
             for toks, hops, uses_ub in self._candidates(d, amt, x):
-                o = quote_path(w3, ab, hops, amt, balance_of)
+                o = quote_path(w3, ab, hops, amt, balance_of, chain=d.chain)
                 if o > amt * (10_000 + self.MARGIN_BP) // 10_000:
                     if best is None or o - amt > best[0]:
                         best = (o - amt, toks, uses_ub)
@@ -297,7 +299,7 @@ class TokenAccumulatorAgent(Agent):
         ]
         best = None
         for toks, hops in cands:
-            o = quote_path(w3, ab, hops, amt, balance_of)
+            o = quote_path(w3, ab, hops, amt, balance_of, chain=d.chain)
             if o > amt * (10_000 + self.MARGIN_BP) // 10_000:
                 if best is None or o - amt > best[0]:
                     best = (o - amt, toks)

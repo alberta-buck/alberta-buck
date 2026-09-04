@@ -58,6 +58,7 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim.direct_mint import DirectMintAgent
 from alberta_buck.sim.experiment import draw as _draw, spec as _spec, sample as _sample
+from alberta_buck.sim.gauge import active_reserves, buck_usd6
 from alberta_buck.sim.router import MIN_SQRT_RATIO, MAX_SQRT_RATIO, quote_path
 
 FEE_DEN = 1_000_000
@@ -389,8 +390,8 @@ class _ProxyAgent(Agent):
         held = d.chain.balance_of(input_c, self.proxy.address)
         if held == 0 or want_buck <= 0:
             return 0
-        r_in = d.chain.balance_of(input_c, pool_addr)
-        r_out = d.chain.balance_of(d.buck, pool_addr)
+        # Decision 8: the pool's active liquidity at slot0, not its balances.
+        r_in, r_out = active_reserves(d.chain, pool_addr, input_c, d.buck)
         need = self._amount_in_for_out(r_in, r_out, want_buck, fee)
         spend = min(held, need) if need else min(held, r_in // 10)
         if spend <= 0:
@@ -831,8 +832,8 @@ class ExcursionArbAgent(_ProxyAgent):
             af = 1.0 - 0.5 ** (dd / max(1e-9, self.fast_halflife))
             self._fast += af * (bvib - self._fast)
         try:
-            ru = d.chain.balance_of(d.usdc, d.pool_ub)
-            rb = d.chain.balance_of(d.buck, d.pool_ub)
+            # Decision 8: active liquidity at slot0, not balances.
+            ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         except Exception:
             return
         if ru <= 0 or rb <= 0:
@@ -913,8 +914,7 @@ class ExcursionArbAgent(_ProxyAgent):
                 ctr["excursionEntries"] = ctr.get("excursionEntries", 0) + 1
 
     def _usdc_leg(self, d, side, want, ctr, gated) -> tuple[int, int]:
-        ru = d.chain.balance_of(d.usdc, d.pool_ub)
-        rb = d.chain.balance_of(d.buck, d.pool_ub)
+        ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
         if side == "buy":
             cash = d.chain.balance_of(d.usdc, self.proxy.address)
@@ -1210,7 +1210,7 @@ class WhaleRaidAgent(_ProxyAgent):
 
     def _buy_slice(self, d, days_left: int, cap_bp: int) -> int:
         cash = d.chain.balance_of(d.usdc, self.proxy.address)
-        ru = d.chain.balance_of(d.usdc, d.pool_ub)
+        ru, _rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         x = min(cash, cash // max(1, days_left) + 1, _impact_cap(ru, cap_bp))
         if x < 10 ** 6:
             return 0
@@ -1220,7 +1220,7 @@ class WhaleRaidAgent(_ProxyAgent):
 
     def _sell_slice(self, d, days_left: int, cap_bp: int) -> int:
         held = max(0, d.buck.functions.balanceOf(self.proxy.address).call())
-        rb = d.chain.balance_of(d.buck, d.pool_ub)
+        _ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         y = min(held, held // max(1, days_left) + 1, _impact_cap(rb, cap_bp))
         if y < 10 ** 6:
             return 0
@@ -1460,7 +1460,8 @@ class CommodityRebalArbAgent(Agent):
                 (d.pool_buck[buy_i], B, b_addr, fb)]
         balance_of = lambda token, holder: d.chain.balance_of(
             token, holder, d.erc20_abi)
-        out = quote_path(d.w3, d.erc20_abi, hops, x, balance_of)
+        out = quote_path(d.w3, d.erc20_abi, hops, x, balance_of,
+                         chain=d.chain)
         if out <= 0:
             return
         v_in = x * px[sell_i] // (10 ** d.dec[sell_i])
@@ -2122,9 +2123,9 @@ class SaverAgent(_ProxyAgent):
 
             elif premium > 0 and holding > 10 ** 6:
                 # Spend above value: sell BUCK for USDC, keeping reserve_frac.
-                ru = d.chain.balance_of(d.usdc, d.pool_ub)
-                rb = d.chain.balance_of(d.buck, d.pool_ub)
-                spot = ru * PARITY // rb if rb else 0
+                # Decision 8: spot from slot0 (micro-USD per BUCK), not the
+                # balance ratio, which a concentrated position distorts.
+                spot = buck_usd6(d.chain, d.pool_ub, d.buck)
                 want_usdc = int(self.base_rate * dtd
                                 * (1.0 + self.prem_gain * premium))
                 # BUCK to sell to realize ~want_usdc of USDC at current spot.
@@ -2448,8 +2449,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self._atomic_B = 0
         if M <= 10 ** 6 or not d.pool_ub:
             return 0, 0.0
-        ru = d.chain.balance_of(d.usdc, d.pool_ub)
-        rb = d.chain.balance_of(d.buck, d.pool_ub)
+        ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         if ru <= 0 or rb <= 0 or M * 5 >= ru * 4:
             # Needing >80% of the pool's USDC side is not a quote, it is a
             # liquidity hole; wait for depth.
@@ -2677,7 +2677,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                         # drawn and is sold on later ticks, so refinancing
                         # paces itself to market depth instead of to a
                         # calendar.
-                        r_out = d.chain.balance_of(d.buck, d.pool_ub)
+                        _ru, r_out = active_reserves(d.chain, d.pool_ub,
+                                                     d.usdc, d.buck)
                         sold = self._sell_capped(
                             d, d.pool_ub,
                             min(want_tranche,
@@ -2713,7 +2714,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             cash = d.chain.balance_of(d.usdc, self.proxy.address)
             spare = max(0, cash - self.cash_buffer)
             if over > 10 ** 6 and spare > 10 ** 6 and d.pool_ub:
-                r_out = d.chain.balance_of(d.buck, d.pool_ub)
+                _ru, r_out = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
                 want = min(over, spare,
                            max(10 ** 6, _impact_cap(r_out, self.max_impact_bp)))
                 try:
@@ -2777,8 +2778,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         elif self.mortgage <= 10 ** 6 and drawn > 0:
             want = drawn
         if want > 10 ** 6 and spare > 10 ** 6 and d.pool_ub:
-            r_in = d.chain.balance_of(d.usdc, d.pool_ub)
-            r_out = d.chain.balance_of(d.buck, d.pool_ub)
+            r_in, r_out = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
             spot = r_in / r_out if r_out else 10.0
             if spot <= 1.0 - self.retire_disc:
                 want = min(want, spare,
@@ -3033,8 +3033,8 @@ class DiscountBuckArbAgent(_ProxyAgent):
         return int(self.endow * frac)
 
     def _spot_ub(self, d):
-        r_in = d.chain.balance_of(d.usdc, d.pool_ub)
-        r_out = d.chain.balance_of(d.buck, d.pool_ub)
+        # Decision 8: active liquidity at slot0, not balances.
+        r_in, r_out = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         return ((r_in / r_out) if r_out else 1.0), r_in, r_out
 
     def _held(self, d) -> int:
@@ -3642,7 +3642,7 @@ class BuckIssuerArbAgent(_ProxyAgent):
             return
         amt = int(unactivated * self.step_frac)
         # Cap the bite so one issuance does not reprice the venue by itself.
-        r_out = d.chain.balance_of(d.buck, d.pool_ub)
+        _ru, r_out = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         amt = min(amt, max(10 ** 6, _impact_cap(r_out, self.max_impact_bp)),
                   unactivated)
         if amt < 10 ** 6:
