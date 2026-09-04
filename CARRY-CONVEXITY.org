@@ -986,7 +986,10 @@ schedule with default 0: with the position loop explicit its job is
 done by structure, and it is measured, not assumed.  With Kq = Kqi =
 Kqd = 0 (and gamma = 0) the controller IS =BuckKControllerDirect=;
 that identity replaces the lambda = gamma = 0 identity as the
-regression test.
+regression test.  The price loop and =fundingFactor()= read the RAW
+bvib (WAVE3.org decision 10, 2026-09-04): the position enters K only
+through the position loop, and participants learn of the interventions
+through K's motion, not through the mint gate.
 
 *The lever count.*  Integral action can zero at most as many
 controlled variables as there are independent manipulated variables.

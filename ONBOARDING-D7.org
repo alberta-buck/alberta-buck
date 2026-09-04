@@ -227,6 +227,13 @@ sessions of a few hours.
 - Entry: =BuckKControllerDirect._integralStep= and =_readReferences=
   are the seams; =ShadowObserver.shadowValueInBuck= is what S
   generalizes; =BuckBasketOps.capacity()= is where the cap is read.
+- Decided 2026-09-04: =_readReferences= returns the basket's RAW value
+  (the price loop and =fundingFactor()= never see the position; the
+  observer feeds only s); caps and weights per WAVE3.org decision 11
+  (desk 1, undertakings 1 per side, facility 0.5, seeder 0.25); the
+  unreadable-NAV policy per decision 9 (hold the last good cap, flag
+  stale, exclude a disabled stabilizer); gamma stays as an optional
+  schedule defaulting to 0.
 - Size: =BuckBasketOps= has ~3.3 KB of EIP-170 headroom.  Prefer to
   hold the last good cap in the OBSERVER (it reads the stabilizer's cap
   through a view that reverts or flags when NAV is unreadable), keeping
