@@ -16,6 +16,7 @@
           ipython
           matplotlib
           numpy
+          scipy               # LQR / Riccati solvers (WP-16 gain derivation); numpy iteration is the fallback
           pandas
           tabulate
           pytest
@@ -41,6 +42,7 @@
           which
           jq
           curl
+          rsync               # moving simulation vectors between the grid machines
 
           # Foundry: forge (compiler/test), anvil (local node), cast (CLI), chisel (REPL)
           foundry

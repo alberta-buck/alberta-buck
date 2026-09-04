@@ -1,0 +1,311 @@
+#+TITLE: Onboarding for the D7 program: bringing a strong agent up to speed
+#+AUTHOR: Perry Kundert (design owner) with Claude
+#+DATE: 2026-09-04
+
+* Who this is for, and the contract
+
+An agent -- a Claude Code session on another account, or a person --
+joining the D7 program: the evaluation of the two K designs (the shadow
+bvib S and the position vector V) on one grid of disruptions and
+responses.  You will own ONE work package on ONE branch.  The integrator
+(the design owner's main session) records, merges =--no-ff=, and runs the
+grid.  About two hours of reading precede the first commit; the reading
+order below is chosen so that every later page assumes only the earlier
+ones.
+
+Read this file top to bottom once.  Then follow the reading plan.  Then
+claim a work package (section 8) and report in the format of section 7.
+
+* The state in one paragraph
+
+BUCK is a stablecoin whose value is defined against a basket of
+commodity-token pools; =bvib= (basket value in BUCK) is the process
+variable, par (1.0) the setpoint.  A slow lever, K, scales the credit
+limits BUCK can be minted against; it is a PID on the error 1 - bvib
+(=src/BuckKControllerDirect.sol=, ppm units, integral-dominant, rails
+(0, 0.95), K0 0.75).  Several FAST facilities now act on bvib directly by
+taking positions: the basket's monetary desk (=BuckBasketOps=, Q1 absorb
+/ Q3 supply), the Convertibility Undertakings and their weak-side ladder
+(=undertaking_agents.py=), a population of latent-credit facilities
+(=facility_agent.py=), and a treasury seeder (=seeder_agent.py=).  Each
+holds a bounded inventory.  The design question of record, D7
+(=CARRY-CONVEXITY.org=), is how those inventories feed back into K: S
+reconstitutes a price (bvib + sum lambda_i q_i / D), V reports a
+cost-weighted fill (sum w_i q_i / cap_i); both are consumed by a SECOND
+PID loop in K, on the position, with its own gains and one integrator.
+Every facility also gets a local skew on its own band so that n
+positions have n levers.  The grid that decides between S and V is the
+"controller-alternatives test plan" section of =WAVE3.org=: ~130
+two-year simulation cells of an equilibrium economy (real contracts on
+an in-process EVM) under ten disruption classes.
+
+* Setup
+
+** Access and branches
+
+- Repository: =git@github.com:alberta-buck/alberta-buck.git= (private;
+  the design owner grants access).  Branch of record:
+  =feature/carry-convexity=.  Never commit to =master=.
+- Your branch: =wp/<n>-<slug>= from =feature/carry-convexity=.  One
+  package, one branch, your own new files; shared files take
+  append-only blocks (section 6).
+
+** Same machine as the integrator (worktree)
+
+  git worktree add ../alberta-buck-wp-<n> -b wp/<n>-<slug> feature/carry-convexity
+  cd ../alberta-buck-wp-<n>
+  for e in ../alberta-buck/lib/*; do ln -s "$e" lib/; done     # ENTRIES of lib, not lib itself
+  # lib/circom-lib must be a real clone at its recorded commit (forge auto-installs otherwise)
+  ln -s ../alberta-buck/out ../alberta-buck/cache .              # Python-only packages
+  export PYTHONPATH=$PWD ALBERTA_BUCK_REPO=$PWD
+
+The second variable makes =buck_core.artifacts= load YOUR =out/= once
+you build contracts in the worktree.  Do not rebuild the main repo's
+=out/= while other worktrees symlink it.
+
+** Another machine
+
+  git clone git@github.com:alberta-buck/alberta-buck.git && cd alberta-buck
+  git checkout -b wp/<n>-<slug> feature/carry-convexity
+  nix develop                     # Foundry (pinned solc 0.8.28 via the Makefile), Python 3.13, Node
+  make venv                       # the repo venv: ../alberta-buck.venv-<ver>-<platform>; installs alberta_buck + core/python
+  make nix-build                  # never bare `forge build`
+  make nix-test                   # at 2db1581: 60 suites, 600 passed, 0 failed, 1 skipped
+  make nix-venv-test              # pytest; the four wave-3 files are 118 tests
+
+Python is ALWAYS run inside the nix shell with the repo venv active:
+
+  nix develop --command bash -c "source ../alberta-buck.venv-*/bin/activate && python -m alberta_buck.sim ..."
+
+pip installs go ONLY into the repo venv, and only through the Makefile
+(=make venv=); no global installs.  New dependencies are declared in
+=flake.nix= or =pyproject.toml= (house rule 11), never assumed.  The
+venv has numpy; scipy is in the flake's nix-python env, not the venv.
+
+** First smoke (five minutes)
+
+  nix develop --command bash -c "source ../alberta-buck.venv-*/bin/activate && \
+    SIM_CONTROLLER=shadow SIM_SHADOW_LAMBDA=0.5 python -m alberta_buck.sim \
+      --experiment alberta_buck/sim/experiments/catalogue-none.toml --backend pyrevm \
+      --days 30 --set scenario.basket=ops --out build/sim/smoke/hello.json"
+
+Expect: "[sim] deploying 'rebalancing-eq' with ops basket", "[deploy]
+shadow controller: observer=... lambda=0.5 gamma=0", ~160 s, a 0.6 MB
+vector, exit 0.  A 2-year cell is ~66 min single-process; a vector is
+~15 MB; peak memory ~180 MB.  Vectors are never committed.
+
+** The grid machine
+
+The cycles run on the design owner's 32-core, 96 GB Xeon (Linux
+x86_64); the integrator's macOS machine runs smokes and analysis.  The
+flake covers both systems (=eachDefaultSystem=); pyrevm and the core
+kernel ship manylinux x86_64 wheels, so =make venv= works unchanged.
+Vectors come back with rsync (declared in the flake).
+
+One caveat before any cross-machine comparison: byte-identity (L3) is
+guaranteed WITHIN a machine.  Between macOS and Linux, libm
+transcendental functions can differ by an ulp, and a divergent float in
+an agent's keyed draw would diverge the whole vector.  Run the same
+30-day smoke on both machines once and =cmp= the vectors; until that
+says identical, every comparison in a cycle (baseline vs axis cells) is
+produced on ONE machine.
+
+* The reading plan (in order; minutes are for a careful read)
+
+| step | read                                                                                                          | min | why                                                                 |
+|------+---------------------------------------------------------------------------------------------------------------+-----+---------------------------------------------------------------------|
+| 1    | =CLAUDE.md=                                                                                                   | 5   | the rules (build, style, no attribution)                            |
+| 2    | =WAVE3.org=: STATUS, Principles, Requirements, Work packages, "The controller-alternatives test plan", "Readiness", Decisions pending | 45 | the operating document; what is done, what you may claim, how it is judged |
+| 3    | =CARRY-CONVEXITY.org= 1 (purpose; the answer), 2.1 (the common-mode loop), 4.4 (mid-ranging), 5 D3 / D4 / D6 / D7, 6.4 (the hierarchy and the seam), 7.2-7.3 and "The position loop", 8.2-8.3 (gates, waves) | 60 | the design of record and the theory; skip 3 (the critique) unless you work on fees or markout |
+| 4    | Solidity, in this order: =src/BuckKControllerBase.sol=, =BuckKControllerDirect.sol= (the ppm PID; the sign convention), =BuckKControllerShadow.sol=, =src/basket/IStabilizer.sol=, =IShadowObserver.sol=, =ShadowObserver.sol=, =BuckBasketOps.sol= (netInventory / capacity / saturation / _navBuckSafe / shadowDepth, ~lines 440-510), =BuckBasketUniswapV3.sol= (basketValueInBuck, poolBuckValues, _enforceSlippageGuard, _readPoolPrice), =test/BuckKControllerShadow.t.sol= | 45 | what exists; how the identity with Direct is asserted |
+| 5    | Sim: =alberta_buck/sim/experiments/template.toml= (every knob), =experiment.py= docstring (interventions), =catalogue.py= header (arms, mixes, DEFENDERS), =star.py= docstring, =eqmetrics.py= (accept, excursion_response, k_forecast), =snapshot.py= frame fields (grep =WP-=), the docstrings of =undertaking_agents.py= / =facility_agent.py= / =seeder_agent.py=, =deploy.py= (the SIM_OPS_* and SIM_SHADOW_* wiring) | 45 | the harness you will drive |
+| 6    | Background as needed: =alberta-buck-operations.org= ("Three runaways"; the desk), =REBALANCING-EQ.org= (the catalogue's results), =alberta_buck/sim/EQUILIBRIUM.md=, =alberta_buck/sim/TELEMETRY.md= (keyed RNG, determinism), =BASKET-REDESIGN.md= (the ProRata shell and the venue facet) | 60 | only when your package touches them |
+
+Total: about three and a half hours including the setup.
+
+* Signs and units (the silent killers)
+
+- bvib > 1: BUCK cheap (discount); K falls.  bvib < 1: BUCK dear
+  (premium); K rises.  error = 1 - bvib in ppm inside the controller.
+- Inventory / position: BUCK ABSORBED (weak side: bought and held;
+  facility retire) is POSITIVE; BUCK ISSUED (strong side: minted and
+  sold; facility issue) is NEGATIVE.  Absorbed inventory drives K
+  DOWN; issued drives K up.  Under S the aggregate is sum lambda_i q_i
+  / D (price units); under V it is sum w_i q_i / cap_i in [-1, 1].
+- bvib is BUCK PER BASKET: TOKEN -> BUCK multiplies, BUCK -> TOKEN
+  divides.  A BUCK rally is a FALLING pool price when BUCK is token1;
+  =BuckPoolInvestorAgent= has the checked logic -- reuse it.
+- BUCK and USDC are 6-dec in the sim; =basketValueInBuck= is 18-dec;
+  gains are stored real x 1e12; time is seconds.
+- The controller's sign is CORRECT; do not "fix" it.
+
+* House rules (non-negotiable)
+
+1. One package, one branch, your own files.  Shared files
+   (=loop.py= import line, =snapshot.py= frame fields, =catalogue.py=
+   MIXES / DEFENDERS, =eqmetrics.py=) take append-only blocks headed
+   =# WP-n= at the END of the existing blocks, so branches merge by
+   keeping both sides.
+2. You do not edit =WAVE3.org= or =CARRY-CONVEXITY.org=.  Your evidence
+   goes in =reports/wp-<n>.org= on your branch (section 7); the
+   integrator moves it into the ledger.
+3. ASCII only in documents and commit messages; no co-author or AI
+   attribution lines; concise messages (what changed and why).
+4. Never commit vectors (=build/=); commit summaries, tables, images.
+5. Determinism (=TELEMETRY.md=): keyed RNG per agent class; a new agent
+   at count 0 must leave every existing cell BYTE-IDENTICAL (=cmp= two
+   vectors); new knobs draw AFTER the existing ones in a class's draw
+   order.  Run the identity check and paste the =cmp= line.
+6. Telemetry lands in the SAME commit as the agent: counters into
+   =snapshot.py=, per-agent inventory through =arb_state=.  An agent
+   without counters is invisible, and an invisible agent was the ops
+   doc's first "dead agent".
+7. Never bare =forge= or =python=; =make nix-*= and the venv
+   incantation.  Do not rebuild the main repo's =out/= from a worktree.
+8. Do not edit sim code while a grid is in flight (later cells import
+   the current file).
+9. Forge under via_ir folds =block.timestamp=: use
+   =vm.getBlockTimestamp()= when warping repeatedly.
+10. Disk: the integrator's machine is near full.  Keep vectors under
+    =build/sim/<package>/=, clean scratch outputs, and say in your
+    report how much you left behind.
+11. Every tool or library a package needs is DECLARED, never assumed
+    present on the host: system tools and nix-python libraries go in
+    =flake.nix= (=commonInputs= / =python3Env=), venv libraries in
+    =pyproject.toml= extras (installed by =make venv=).  Nothing is
+    installed globally, and nothing is used because it happened to be
+    on PATH.  Say in your report what you added.
+
+* The report (=reports/wp-<n>.org=)
+
+  #+TITLE: WP-<n> report -- <slug>
+  * Summary (three sentences: what was built, what it showed, what is next)
+  * Commits (hashes on wp/<n>-<slug>, newest first)
+  * Files (new; appended)
+  * Layers passed
+  - L0: make nix-build / make nix-test / make nix-venv-test counts
+  - L1: test names and counts
+  - L2: the smoke command(s) verbatim and the counters observed
+  - L3: the cmp lines
+  * Acceptance evidence (the table the work-package row asks for)
+  * Findings (numbered; each with the command that produced it)
+  * Open issues and proposed decisions (numbered; the integrator files them)
+  * Left behind (vectors, sizes, where)
+
+* The packages on offer
+
+Claim by telling the integrator; the WAVE3.org table row is the
+specification, this section is the entry map.  Estimates are agent
+sessions of a few hours.
+
+** Decision-8 branch: quote from slot0 (1 session)
+
+- Goal: three readers price BUCK/USDC by pool reserves as if every
+  position were full-range; a concentrated position (the seeder's, a
+  private LP's) reads as a price move.  Quote from =slot0= / the tick in
+  all three.
+- Files: =alberta_buck/sim/equilibrium_agents.py= (=SaverAgent= ru/rb),
+  =router.py= (=quote_hop=), =snapshot.py= (=buck_usd=).
+- Acceptance: a cell with NO concentrated position is byte-identical
+  before and after (=cmp=); the seeder smoke's day-1 reserve-implied
+  1.41 vs spot 1.08 artefact is gone; the L2 seeder smoke's K no longer
+  moves at the placement.
+- Pitfall: the sim's own gauges are separate from the on-chain basket
+  reads (which use the TWAP); do not touch the contracts.
+
+** WP-13: the corrected controller and observer (1-2 sessions; Solidity + Python)
+
+- Goal: the second loop in =BuckKControllerShadow= (Kq, Kqi, Kqd; a
+  second integrator; per-integrator anti-windup at the rails; the
+  zero-gain identity with Direct), the observer's two aggregations (S:
+  sum lambda_i q_i / D; V: sum w_i q_i / cap_i, weights, exclusion of
+  disabled stabilizers, renormalization), =IStabilizer.position()= /
+  =positionCap()= / =stale()= with the hold-last-cap policy of decision
+  9, and the telemetry: the desk's book, s, saturation, stale /
+  excluded, and =pid_q= / =pid_qi= / =pid_qd= beside =pid_p= / =pid_i=
+  / =pid_d= in the snapshot.
+- Entry: =BuckKControllerDirect._integralStep= and =_readReferences=
+  are the seams; =ShadowObserver.shadowValueInBuck= is what S
+  generalizes; =BuckBasketOps.capacity()= is where the cap is read.
+- Size: =BuckBasketOps= has ~3.3 KB of EIP-170 headroom.  Prefer to
+  hold the last good cap in the OBSERVER (it reads the stabilizer's cap
+  through a view that reverts or flags when NAV is unreadable), keeping
+  the shell small.
+- Acceptance (forge): Kq = Kqi = Kqd = 0 reproduces Direct state for
+  state; S0 gains (= the price loop's) reproduce D4 in the interior; a
+  guard trip (spot pushed off TWAP in one pool) leaves position() and
+  saturation() unchanged and sets stale(); the disabled desk is excluded
+  from s; the first successful read clears stale.  A 5-day smoke in each
+  mode; the identity smoke frame-for-frame vs Direct.
+- Wiring: =--shadow-mode s|v= (or =SIM_SHADOW_MODE=), =SIM_SHADOW_KQ= /
+  =_KQI= / =_KQD=, =SIM_SHADOW_W_<name>= (V) / =SIM_SHADOW_LAMBDA_<name>=
+  (S), in =deploy.py= / =__main__.py= append blocks; a =[deploy]= TOML
+  form is welcome but the env form is what the star driver uses today.
+
+** WP-16: the gain derivation (1 session; Python, offline)
+
+- Goal: =alberta_buck/sim/kdesign.py=: the reduced plant (price error,
+  aggregate position, their integrals, K) as a small discrete-time
+  linear model; identification of k_s (flow per unit K per unit cap)
+  from step tests (six 1-year cells with a K step via the
+  =[[interventions]]= retune / k0 surface and the desk on); LQR with
+  costs (e^2, carry-weighted s^2, dK^2) solved by Riccati iteration in
+  numpy (scipy, declared in the flake's python env, is the optional
+  cross-check in the unit test, not a runtime dependency of the venv);
+  the SIMC sanity check for an integrating process
+  (Kc = 1 / (k' tau_c), tau_I = 4 tau_c); a margin check; the gain table
+  (Kq, Kqi, Kqd, tau_s) for S and V at both depths, as JSON and as an
+  org table.
+- Acceptance: with the position weight 0 the LQR gains reproduce the
+  price loop's (Kp, Ki) within 25% (the sanity anchor); the derived
+  tau_s lands between tau_I (90 d) and the persistence horizon; a
+  =test_kdesign.py= on a synthetic plant.
+- Entry: =deploy.py= (how Kp / Ki are derived from =dk_rail=, =e_max=,
+  =tau_i_days=, =kp_frac=); =eqmetrics.k_forecast= (the K law fit).
+
+** WP-14: the local skews (1 session; Python agents)
+
+- Goal: =band_i = band_i0 + kappa_i q_i / cap_i= on the undertakings
+  (eps per side), the facility (x / y) and the seeder (range centre);
+  the desk's skew is emulated on the keeper side for the grid (the
+  contract-side version waits for WP-11).  Default kappa 0; counters
+  =sk_*=.
+- Acceptance: kappa = 0 byte-identical (L3); under a differential
+  disturbance (one facility loaded, the level's aggregate near zero)
+  the loaded book unwinds while K stays within G7.
+
+** WP-15: the grid's machinery (1-2 sessions before the cycles; Python)
+
+- Goal: the disruption TOMLs for classes 5, 6, 8, 10 (TOML-only via
+  =add_agents= / =remove_agents= / =uptake_shock=), a one-pool pusher
+  injector for class 7, a =period_days= knob on =WhaleRaidAgent= for
+  class 8, the =BookLoaderAgent= for class 9, the metrics (habituation,
+  carry BUCK-days, saturation dwell, K economy, book-loading, per-loop
+  attribution) as an =eqmetrics= append block, and a =values = [...]=
+  multi-level axis in =star.py= for the design tag.  Then the cycle-1
+  star spec.
+- Acceptance: each class TOML runs as a =none= mix cell and its
+  disruption is visible in the frames; the class-9 agent's P&L is
+  booked; every new metric has a unit test on a synthetic frame series.
+- Entry: =experiment.py= docstring (the intervention surface),
+  =WhaleRaidAgent= (the injector to extend), =star.py= (axes).
+
+* Glossary (ten terms)
+
+- *bvib*: basket value in BUCK; > 1 BUCK cheap, < 1 BUCK dear.
+- *K*: the credit-limit scale the controller sets; the slow lever.
+- *the desk*: =BuckBasketOps=; Q1 absorb / Q2 retire / Q3 supply / Q4
+  issue.
+- *the undertakings*: standing offers at par +/- eps in bundle units;
+  strong side unlimited, weak side a NAV-bounded ladder.
+- *the facility*: latent credit issuing into premiums and retiring into
+  discounts on user thresholds x / y.
+- *the seeder*: the treasury's temporary one-sided BUCK/USDC range.
+- *position / netInventory*: absorbed minus issued, BUCK; the state a
+  stabilizer reports upward.
+- *S / V*: the two aggregations of positions under judgment (price
+  units with D; cost-weighted fill without D).
+- *the position loop*: K's second PID, on the aggregate position, with
+  its own gains and one integrator.
+- *habituation*: the fast actuators' inventory returning to zero as K
+  takes over the steady-state load; the metric the grid gates on.

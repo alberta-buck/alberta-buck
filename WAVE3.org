@@ -32,7 +32,12 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   unreadable NAV are under "Decisions pending" 9); decision 11 opened
   (cost weights and caps); the controller-alternatives test plan is a
   section of this file; WP-13 / 14 / 15 / 16 added, R15-R18 added.
-  Nothing is in flight.
+  2026-09-04: the "Readiness for the controller-alternatives grid"
+  section (what remains, verified harness support, compute on the
+  Mac and the 32-core Xeon, the dependency rule, the agent plan) and
+  =ONBOARDING-D7.org= (the reading plan for agents from other
+  accounts).  Awaiting the design owner on decisions 8, 10, 11 (12,
+  13 proposed); nothing is in flight.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -74,7 +79,7 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   or CARRY-CONVEXITY.org; the integrator records their reports here.
 - *Deferred by the design owner*: the 3a regeneration (all 86 cells with
   the ledger); the full k-integral-c0 star (23 cells).
-- *Open decisions needing the design owner*: 1-6, 8, 10, 11 (7 resolved
+- *Open decisions needing the design owner*: 1-6, 8, 10-13 (7 resolved
   in principle: integral-only K, to be tested by the star; 9 closed
   2026-09-03: hold the last good cap).
 
@@ -569,10 +574,165 @@ Each step passes L0-L3 before the next; WP-13 and WP-16 are
 independent and may run in parallel worktrees; WP-14 needs WP-13's
 =position()= only for its telemetry and may start alongside.
 
+* Readiness for the controller-alternatives grid (2026-09-04)
+
+What remains to be decided and implemented before cycle 1 of the test
+plan can start, with what was verified on the day.
+
+** Decisions that gate the grid
+
+| #  | decision                                          | recommendation                                                                                                                                                                                   | gates                                  | status |
+|----+---------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------------------------+--------|
+| 8  | slot0 gauges                                      | proceed: quote from slot0 in the three readers; regenerate ONLY the L3 identity pair and the none-arm baselines (the grid's cells are all fresh); the 86-cell regeneration is not on the critical path | classes 7 and 10; every seeder cell | open   |
+| 10 | does the funding factor see the position?         | YES, as its own lever: ff = f(e_raw) + c_ff s, c_ff default the S0-equivalent, swept {0, S0, 2x} on class 5 -- the interventions reach participants at the MINT timescale through ff and at the credit timescale through K | WP-13 (a second input on =fundingFactor()=) | open |
+| 11 | caps and cost weights for V                       | caps as listed under decision 11; strong-side notional = reserve_frac x NAV (symmetric fill); w: desk 1, undertakings 1 per side, facility 0.5, seeder 0.25; sweep the strong side's w in cycle 2 | WP-13 (weights), WP-16 (the carry weights in the cost) | open |
+| 12 | the gains policy                                  | LQR-derived (WP-16) with the SIMC sanity check; S0 = as built; a two-point tau_s axis per design                                                                                                | WP-16                                  | proposed |
+| 13 | the desk's local skew: keeper-emulated or on-chain | emulate on the keeper side for the grid; the contract-side skew waits for WP-11 (the ops shell has ~3.3 KB of headroom)                                                                          | WP-14                                  | proposed |
+| -- | the backdrop                                      | the catalogue's 2-year portcast window, injection day 365, depth x1 and x4                                                                                                                       | WP-15                                  | assumed |
+
+** What exists, verified 2026-09-04
+
+- =--set scenario.basket=ops= with =SIM_CONTROLLER=shadow= selects the
+  desk and the shadow controller under the experiment harness with NO
+  code change (a 2-day dry run printed "deploying ... with ops basket"
+  and "shadow controller: observer=... lambda=0.5 gamma=0").  The
+  star driver passes =--set= and env, so WP-3b's core wiring exists;
+  what remains of WP-3b is telemetry.
+- Missing telemetry in the snapshot: the desk's book
+  (=monetaryBuckHeld= / =monetaryOutstanding= / =netInventory=), s,
+  saturation, boost, stale / excluded, and the position loop's terms
+  beside =pid_p= / =pid_i= / =pid_d=.  WP-13 adds them.
+- The venv has numpy and not scipy: WP-16 solves the Riccati equation
+  by iteration in numpy; no new dependency.
+- =star.py= axes are two-level (lo / hi): WP-15 adds a =values= list
+  for the five-design tag axis.
+- =experiment.py= has =add_agents= / =remove_agents= (wind_down |
+  hard), =uptake_shock=, and =price_shock= with =until_day=: classes 5,
+  6 and 10 are TOML-only.  Class 7 needs a one-pool pusher injector;
+  class 8 a =period_days= knob on =WhaleRaidAgent=; class 9 the
+  =BookLoaderAgent=.
+- The forge tree at 2db1581: 60 suites, 600 passed, 0 failed, 1
+  skipped; the four wave-3 pytest files 118 passed.
+
+** Implementation before cycle 1
+
+| item                                                          | package  | sessions | parallel with          | acceptance                                   |
+|---------------------------------------------------------------+----------+----------+------------------------+----------------------------------------------|
+| slot0 quoting in the three readers; identity pair; seeder smoke | decision 8 | 1      | everything             | cmp identical where no concentrated position |
+| second loop, observer modes, position / cap / stale, telemetry, wiring, forge tests | WP-13 | 1-2 | WP-16, WP-15 | the identity and guard-trip tests; both modes smoke |
+| reduced model, step tests, LQR, SIMC check, the gain table    | WP-16    | 1        | WP-13, WP-15           | the sanity anchor; tau_s in range             |
+| class TOMLs, pusher, period knob, BookLoaderAgent, metrics, star values axis, cycle-1 spec | WP-15 | 1-2 | WP-13, WP-16 (A cells run early) | each class visible; metrics unit-tested |
+| local skews on the three agents; keeper-emulated desk skew    | WP-14    | 1        | after WP-13's telemetry, or with own counters | kappa = 0 byte-identical; differential test |
+
+Critical path: decision 8 -> WP-13 -> cycle 1 (the S and V cells need
+WP-16's gains; the A and S0 cells can run as soon as WP-13 and WP-15's
+TOMLs exist).
+
+** Compute
+
+Measured 2026-09-04 on the design owner's machine (14 cores, 10
+performance; 48 GB; 43 GB free of 1.8 TB): a 30-day pyrevm cell with
+the desk and the shadow controller takes 161 s wall (158 s CPU) at 181
+MB peak; the vector is 0.6 MB per 30 days.  So a 2-year cell is ~66
+min single-process and ~15 MB; ten run in parallel on the performance
+cores.
+
+| work                       | cells      | wall at 10-way |
+|----------------------------+------------+----------------|
+| cycle 1                    | 78         | ~9 h           |
+| cycle 2                    | 32         | ~4 h           |
+| cycle 3                    | 16         | ~2 h           |
+| WP-16 step tests           | 6 x 1-year | ~40 min        |
+| decision-8 identity pair   | 2 x 1-year | ~15 min        |
+| smokes (all packages)      | ~20 x 30 d | ~10 min        |
+
+Memory is not the constraint (2 GB for ten cells); CPU is; DISK is a
+risk on the design owner's machine (98% used): the vectors are ~2 GB,
+but =/private/tmp= task outputs and scratchpads have wedged it before
+(ENOSPC) and must be cleaned between cycles.
+
+The grid machine (design owner, 2026-09-04): a 32-core, 96 GB Xeon
+(Linux x86_64), older cores -- assume 2-3x the per-cell time of the
+Mac's performance cores, so a 2-year cell in ~2-3 h, 28 in parallel:
+
+| work            | cells | wall on the Xeon (28-way) | wall on both |
+|-----------------+-------+---------------------------+--------------|
+| cycle 1         | 78    | ~7-8 h (overnight)        | ~4 h         |
+| cycle 2         | 32    | ~3 h                      | ~2 h         |
+| cycle 3         | 16    | ~2-3 h                    | ~1.5 h       |
+
+Memory on the Xeon is a non-issue (~6 GB at 28-way).  Its disk should
+have ~10 GB free for a cycle's vectors and logs.  Setup: nix (the
+flake covers x86_64-linux), clone, =make venv= (pyrevm and the core
+kernel have manylinux x86_64 wheels), =make nix-build=, =make
+nix-test=; the cycles run there with =catalogue.py= / =star.py --jobs
+28=; vectors return by rsync (declared in the flake).  The Mac runs
+smokes, WP-16's step tests, the analysis and the report.
+
+Dependency rule (design owner, 2026-09-04): every tool or library the
+plan needs is DECLARED -- system tools and nix-python libraries in
+=flake.nix=, venv libraries in =pyproject.toml= extras -- never assumed
+on the host.  Added 2026-09-04: =scipy= (python env; WP-16's optional
+cross-check) and =rsync= (commonInputs).
+
+Cross-machine determinism: L3 byte-identity is guaranteed within a
+machine.  Between macOS and Linux, libm transcendentals can differ by
+an ulp and a divergent float in a keyed draw diverges the vector.  Run
+one 30-day smoke on both machines and =cmp= them before the cycles;
+until that says identical, every comparison of a cycle is produced on
+ONE machine (the Xeon), and the Mac's smokes are never a baseline for
+a Xeon cell.
+
+** Agents from other accounts
+
+- The repository is private on GitHub (=alberta-buck/alberta-buck=);
+  grant each account read / write on the repo, or take pull requests
+  from forks.  Same-machine agents use the worktree recipe.
+- =ONBOARDING-D7.org= is the reading plan and the entry map: setup,
+  a three-and-a-half-hour reading order, signs and units, the house
+  rules, the report template (=reports/wp-<n>.org=), and per-package
+  briefs for the decision-8 branch, WP-13, WP-16, WP-14 and WP-15.
+- Roles: the integrator (the design owner's main session) records
+  here, merges =--no-ff=, and runs the cycles; every other agent owns
+  one package on =wp/<n>-<slug>= and reports through its report file.
+- Parallel plan (five agents): A decision-8 branch; B WP-13; C WP-16;
+  D WP-15's machinery (starts with A = Direct cells); E WP-14.  Two
+  fit the integrator's own account at once (the session-2 fan-out hit
+  rate limits at five); the rest come from other accounts.
+- The design owner's other-account agents are onboarded by
+  =ONBOARDING-D7.org= alone; they need repo access and, for the grid
+  packages, an account on the Xeon.  The integrator claims the
+  critical path (decision 8, then WP-13) on this account.
+
 * Progress ledger
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-04 -- Readiness for the grid; ONBOARDING-D7.org; the Xeon; the dependency rule (session 3, design owner + Claude)
+
+- The design owner asked what remains to be decided and implemented
+  before the controller-alternatives grid, for the compute it needs,
+  and for a reading plan that brings agents from other accounts up to
+  speed.  Answered in the "Readiness" section above (decisions 8, 10,
+  11 open; 12, 13 proposed; the implementation table; compute; the
+  agent plan) and in =ONBOARDING-D7.org= (setup, a 3.5-hour reading
+  order, signs and units, house rules, the report template, per-
+  package briefs).
+- Verified: =--set scenario.basket=ops= + =SIM_CONTROLLER=shadow= select
+  the desk and the shadow controller under the harness with no code
+  change (2-day dry run); a 30-day desk + shadow cell is 161 s wall /
+  181 MB peak / 0.6 MB vector on the Mac (14 cores, 48 GB, 43 GB disk
+  free); the snapshot lacks the desk's book and every shadow field;
+  =star.py= axes are two-level; =experiment.py= has add / remove
+  agents, uptake and price shocks.
+- Design owner: a 32-core, 96 GB Xeon is available for the cycles;
+  every required resource is declared in =flake.nix= (added: scipy,
+  rsync) rather than assumed on the host.  Cross-machine byte-identity
+  is to be checked once before the cycles.
+- Next: the design owner's answers on decisions 8, 10, 11 (and 12, 13
+  as proposed); then the decision-8 branch and WP-13 on this account,
+  WP-16 / WP-15 / WP-14 on other accounts per the onboarding brief.
 
 ** 2026-09-03 -- D7: the position loop; decision 9 closed; the controller-alternatives test plan (session 3, design owner + Claude)
 
@@ -1079,6 +1239,17 @@ next.  Paste acceptance evidence here, not in chat.
    the desk at 1; sweep the strong side's weight in {0.5, 1, 2} in
    cycle 2 of the test plan.  Under S the same question is lambda_i
    per stabilizer.
+
+12. *The gains policy* (from the readiness review, 2026-09-04).
+   Proposed: LQR-derived gains (WP-16) with the SIMC sanity check for
+   S and V; S0 keeps the as-built gains (the price loop's, times
+   lambda); every design gets a two-point tau_s axis so no design is
+   condemned by one tuning.
+13. *The desk's local skew: keeper-emulated or on-chain* (from the
+   readiness review, 2026-09-04).  Proposed: emulate on the keeper
+   side for the grid (the ops shell has ~3.3 KB of EIP-170 headroom
+   and WP-13 needs some of it); the contract-side skew waits for the
+   monetary Diamond (WP-11).
 
 * Conventions
 
