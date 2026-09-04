@@ -22,10 +22,17 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
 
 * STATUS -- resume here
 
-- *Last updated*: 2026-09-02, end of session 2: every build package of
-  phase 1 is merged (WP-1, WP-12, WP-5, WP-2, WP-6, WP-8, WP-3a); the
-  worktrees are removed; the wp/* branches remain as history.  Nothing
-  is in flight.
+- *Last updated*: 2026-09-03, session 3 (design, no code changed): D7
+  recorded in CARRY-CONVEXITY.org -- K mid-ranges the level's
+  POSITIONS; the shadow bvib (S) and the position vector (V) are kept
+  as alternatives to implement and test; the missing levers are
+  corrected in both (a position loop with its OWN gains and one
+  integrator; local skews kappa_i so n positions have n levers);
+  decision 9 CLOSED (hold the last good cap -- the mechanics of an
+  unreadable NAV are under "Decisions pending" 9); decision 11 opened
+  (cost weights and caps); the controller-alternatives test plan is a
+  section of this file; WP-13 / 14 / 15 / 16 added, R15-R18 added.
+  Nothing is in flight.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -35,29 +42,21 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   usual).  Sizes: BuckBasketOps 21,265 B (3,311 headroom), Fence 23,556
   (1,020 -- still the tight shell), ShadowObserver 2,965, Shadow
   controller 4,265, Direct 3,395.
-- *Phase*: 1 complete -- instrument, star driver, and the five agents /
-  contracts exist and each passed its L1-L3 layers on one smoke.  Phase
-  2 is MEASUREMENT: none of the new facilities has run its catalogue
-  cells yet (WP-3c, 3g, 3h, 3d), and two things gate that:
-  1. *Decision pending 8* (reserve-ratio gauges): fix =SaverAgent=,
-     =router.quote_hop= and =snapshot.buck_usd= to quote from slot0
-     before any cell with a concentrated BUCK/USDC position (the
-     seeder, private LPs) is judged.  Own branch, then regenerate the
-     banked vectors.
-  2. *The capacity axes*: the smokes showed every facility is
-     capacity-bound at its defaults (undertakings $16-32k/day vs an $8M
-     raid at leg_bp 40; facility u peaks 3% because the basket deposit
-     is throttled by the TOKEN/BUCK pools).  The 3c / 3g grids must
-     sweep =leg_bp= / =reserve_frac= and =max_impact_bp= / =target=
-     explicitly; =--scale= multiplies desk COUNT and is the wrong axis
-     for a single desk.
-  Suggested next steps in order: (a) decision 8 branch; (b) WP-3d --
-  enable the desk under =--controller shadow= in the loop, add the
-  shadow value / boost / saturation to the snapshot (the R14
-  attribution panel), sweep lambda x gamma on the four common-mode arms
-  (decisions 9 and 10 measured there); (c) 3c undertakings grid with the
-  capacity axes; (d) the k-integral-c0 star (deferred) once 3d has
-  fixed a baseline; (e) 3g, 3h.
+- *Phase*: 2 is MEASUREMENT, and the controller structure itself is
+  now under judgment (D7).  Gates, in order: (a) decision 8 (slot0
+  gauges) on its own branch, banked vectors regenerated -- classes 7
+  and 10 of the test plan and every seeder cell read the gauge; (b)
+  WP-13 (corrected controller + observer modes + hold-last cap) and
+  WP-16 (the reduced model and LQR gain table) in parallel worktrees;
+  (c) WP-14 (local skews, default 0); (d) WP-15 -- the test plan's
+  three cycles (~130 cells): the star over designs {A, S0, S, V, Vk},
+  the design x capacity x class factorial, the five-seed replication.
+  The old 3d lambda x gamma sweep is superseded (S0 is a design tag in
+  cycle 1).  The capacity finding of session 2 is the plan's AMOUNT
+  axis: x0.25 .. x16 on the explicit knobs (=leg_bp= / =reserve_frac=,
+  =max_frac= / population, =SIM_OPS_*_BP=, =range_bp=), never
+  =--scale=.  3c's undertakings grid and the deferred k-integral-c0
+  star run on the winning design.
 - *Smoke vectors* from the five worktrees are archived (not committed)
   under =build/sim/smoke/wp-{2,5,6,8}/= in the main repo; WP-3a's were
   in =/tmp=.  Every number in the ledger names its command.
@@ -75,8 +74,9 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   or CARRY-CONVEXITY.org; the integrator records their reports here.
 - *Deferred by the design owner*: the 3a regeneration (all 86 cells with
   the ledger); the full k-integral-c0 star (23 cells).
-- *Open decisions needing the design owner*: 1-6, 8-10 (7 resolved in
-  principle: integral-only K, to be tested by the star).
+- *Open decisions needing the design owner*: 1-6, 8, 10, 11 (7 resolved
+  in principle: integral-only K, to be tested by the star; 9 closed
+  2026-09-03: hold the last good cap).
 
 ** Resume protocol (5 minutes)
 
@@ -159,6 +159,10 @@ acceptance.  Status: TODO / IN PROGRESS / DONE / BLOCKED.
 | R12 | The oversupply flood is measured with and without the facility                                        | REBAL rec. 4, 9.1 | equilibrium discount vs theta x apr reported; the facility's exposure to D8 sized                | TODO   |
 | R13 | Results land in the documents of record                                                               | --            | =CARRY-CONVEXITY.org= gains a "Wave 3 results" section; =REBALANCING-EQ.org= findings continue from 12; this ledger closed | TODO |
 | R14 | K is COMPREHENSIBLE and PREDICTABLE to a reasonably observant, competent person, and operates equivalently in organic, normal market behaviour: (a) the public-law forecast K(t+h) = K + Ki (1 - bvib) h (later: with the observer's inputs) beats persistence and lands within 1 point most of the time (G8); (b) every wave-3 mechanism leaves the organic arms' K trajectory within tolerance of the baseline controller's (G7); (c) every input to K is a public on-chain view and its contribution to dK is decomposable per frame | design owner, 2026-09-02 | G7, G8 on every wave's cells; the =kfc= panel of =eqmetrics= (WP-1); an attribution panel once the observer exists (WP-3a) | IN PROGRESS |
+| R15 | K's position loop has gains independent of its price loop: (Kq, Kqi, Kqd) separate from (Kp, Ki, Kd), one integrator on the AGGREGATE position; Kq = Kqi = Kqd = 0 is Direct | D7 | forge: the zero-gain identity with Direct state-for-state; S0 gains reproduce D4 in the interior; the grid's sensitivity table shows tau_s moving habituation time while K's organic path stays within G7 | TODO |
+| R16 | Every level-1 stabilizer has a local skew kappa_i on its own band (band_i = band_i0 + kappa_i q_i / cap_i), so n positions have n levers: common mode to K, differential modes to the skews | D7 | kappa = 0 byte-identical to today (L3); under a differential disturbance the loaded book unwinds while K stays within G7 | TODO |
+| R17 | An unreadable NAV holds the last good cap and flags staleness; position is always reported; a disabled stabilizer is excluded from the aggregate and the weights renormalized | D7, decision 9 | forge: a guard trip leaves position() / saturation() unchanged and sets stale(); class-7 cells show no K kick from the trip under V | TODO |
+| R18 | Habituation and book-loading are measured and gated: abs(s) within 10% of zero inside 1.5 tau_s with <= 1 sign change (P9); book-loading attacker P&L <= 0 under S and V, and K's excursion under V <= under S (P10) | D7, P9, P10 | the test plan's cycle-1 and cycle-2 tables | TODO |
 
 * Design
 
@@ -218,14 +222,19 @@ WP-8 are mutually independent and may run in parallel on their own
 branches.  WP-3b (the lambda cells) needs WP-2 (the ladder must be
 present when lambda is swept).  WP-4 needs WP-2 (the one-day trough is
 measured with the undertakings in place).  WP-7 needs WP-6.  WP-9
-needs WP-2 and WP-3b.  WP-10 runs last.
+needs WP-2 and WP-3b.  WP-10 runs last.  D7 (2026-09-03): WP-13 and
+WP-16 are independent and may run in parallel; WP-14 needs WP-13's
+position telemetry only; WP-15 needs decision 8, WP-13, WP-14 and WP-16
+and runs the controller-alternatives test plan (its own section below);
+WP-3b's lambda sweep is absorbed into WP-15, its desk-in-the-loop wiring
+remains.
 
 | id    | goal                                                                 | depends | owns (files)                                                  | deliverable                                              | acceptance                                                       | est. cells | status | branch / owner |
 |-------+----------------------------------------------------------------------+---------+---------------------------------------------------------------+----------------------------------------------------------+------------------------------------------------------------------+------------+--------+----------------|
 | WP-1  | The instrument: markout ledger + basket-side columns + K forecastability panel in the summary | -- | markout.py (new); loop.py, snapshot.py, eqmetrics.py, catalogue.py (append) | =--report-only= regenerates 3.3 with basket-side and kfc columns on the existing vectors; markout columns on re-run cells | R1, R2, R14(a) instrument; =test_markout.py= green; a 60-day smoke with non-zero ledger | 0 (report) + 1 smoke | DONE on branch; merge pending; 3a regeneration not run | =wp/1-instrument= / Claude (session 2) |
 | WP-2  | Ladder module + UndertakingAgent; mixes =ut=, =ut-all=; 3c grid       | WP-1    | ladder.py, undertaking_agents.py (new); loop.py import; MIXES block | P1 and P8 tables for eps x p x (delta, phi) x leg_bp on the four common-mode arms x {x1, x4} | R3, R4 (agent built, smoke shows the capacity window); G5, G6 pending the 3c cells; =test_ladder.py= green; determinism OK | ~72 | DONE (merged 2026-09-02; 3c cells pending) | =wp/2-undertakings= / subagent |
 | WP-3a | =IStabilizer= seam + standalone =ShadowObserver= + =BuckKControllerShadow= + deploy wiring + forge tests | -- | IStabilizer.sol, IShadowObserver.sol, ShadowObserver.sol, BuckKControllerShadow.sol (new); BuckBasketOps.sol (seam), BuckKControllerDirect.sol (pure refactor: virtual hooks); deploy.py / loop.py / __main__.py (append) | =--controller shadow --basket ops= runs; the desk is the first registered stabilizer, the observer's own offset the second | 21 Shadow + 18 Ops tests; lambda = gamma = 0 identity with Direct state-for-state; offset and saturation arithmetic; buckK frame-identical vs Direct on a 5-d smoke | 1 (smoke) | DONE (merged 2026-09-02) | =wp/3a-observer= / subagent |
-| WP-3b | Desk in the loop + lambda sweep (3d)                                 | WP-2, WP-3a | experiments (append); catalogue tag =shadow=                 | P4 table: lambda_d x {dump, squeeze, grind-down} x {x1, x4} | R5; desk return-to-zero time; runaway-one detection at lambda 0 | ~40   | TODO   |                |
+| WP-3b | Desk in the loop: =--basket ops= under the experiment harness (=SIM_OPS_*= from a TOML =[deploy]= block, desk counters in the snapshot); the lambda sweep moved to WP-15 (D7) | WP-3a | deploy.py / experiment.py / snapshot.py (append) | the desk runs in every non-none mix of the test plan | R5 as amended by D7; runaway-one detection at Kq = 0 on the grind arm | 2 smokes | TODO |                |
 | WP-4  | Directional fee in the swap adapter; 3b grid                          | WP-2    | fees.py (new); swap adapter hook (append)                     | trough-depth and tracking-error table                    | R7; G3                                                           | ~24        | TODO   |                |
 | WP-5  | Stress fee (Solidity in =_redeem=)                                    | --      | BuckBasketProRata.sol, BuckBasketStorage.sol (append), forge test; direct_mint.py + snapshot.py (append) | P2 table on the x4 cells (cells not yet run) | R6 (contract-level, tested); G4 measurement pending the x4 cells | ~8 | DONE (merged 2026-09-02; cells pending) | =wp/5-stress-fee= / subagent |
 | WP-6  | FacilityAgent; mixes =fac=, =fac-all=; 3g grid                        | WP-1    | facility_agent.py (new); loop.py import; MIXES block          | P6 table: population x (x, y) x max_impact_bp x target (basket / usdc) | R8 (agent built; both legs exercised; throughput-bound); P6 pending the 3g cells; =test_facility.py= green; determinism OK | ~72 | DONE (merged 2026-09-02; 3g cells pending) | =wp/6-facility= / subagent |
@@ -236,6 +245,10 @@ needs WP-2 and WP-3b.  WP-10 runs last.
 | WP-12 | The star driver + pane renderer: =star.py= (baseline TOML + axes spec -> 1 + 2A cells per arm, run / =--report-only=, sensitivity table md/json), =plot_star.py= (one figure per pane: axes x arms panels with lo / base / hi overlaid), =experiments/stars/= | WP-1 | star.py, plot_star.py (new); experiments/stars/*.toml | the integral-only-K star (c0) spec + a dry-run; a smoke star | dry-run lists 1 + 2A cells per arm; the smoke star renders the k and bvib panes; sensitivity table regenerates from vectors | ~5 (smoke) | IN PROGRESS | =wp/12-star= / Claude (session 2) |
 | WP-3c | Integral-only K, with the P/D roles factored into the level-1 facilities: the first star (kp_frac x tau_i x cast x whale) on none / dump x1 / squeeze x4, judged by G7 / G8 and x4 AUC / rail days vs the P-carrying baseline | WP-12, WP-2 (for the undertakings baseline; the usdc-mix baseline may run first) | experiments/stars/k-integral-*.toml | the c0 and c1 sensitivity tables and pane figures; a recommendation on kp_frac | decisions pending 7 closed with evidence | ~63 / cycle | TODO |                |
 | WP-11 | Monetary Diamond consolidation (POST-wave-3): facets = venue, custody, ops, undertakings + ladder, facility registry, house, observer, controller; =Buck='s =buckK= and =basket= point at the Diamond (CARRY-CONVEXITY.org 6.4) | all wave-3 wins | src/basket/* (facets), src/Buck.sol wiring decision, deploy scripts | facet map + shared storage layout; time-locked parameters | existing forge suites pass facet by facet; lambda = gamma = 0 identity; one-way call graph asserted | -- | TODO |                |
+| WP-13 | The corrected controller (D7): two loops with independent gains (Kq, Kqi, Kqd) and one position integrator; observer aggregation modes S / V with weights; =IStabilizer.position()= / =positionCap()= / =stale()=; hold-last cap on an unreadable NAV; disabled stabilizers excluded | WP-3a | BuckKControllerShadow.sol (extend), ShadowObserver.sol (modes, weights, exclusion), IStabilizer.sol (append), BuckBasketOps.sol (position / cap / stale), forge tests; deploy.py / __main__.py (append: =--shadow-mode s|v=, =SIM_SHADOW_KQ= / =_KQI= / =_KQD= / =_W_*=) | =--controller shadow= runs in both modes; the R14 attribution panel gets the per-loop dK | Kq = Kqi = Kqd = 0 identity with Direct state-for-state; S0 gains reproduce D4 in the interior on a 5-d smoke; guard-trip test leaves position() / saturation() unchanged and sets stale(); disabled desk excluded from s; shell size within EIP-170 | 1 smoke | TODO |                |
+| WP-14 | Local skews kappa_i on the level-1 agents: UndertakingAgent (eps per side), FacilityAgent (x / y), SeederAgent (range centre), the desk (its Q1/Q3 thresholds via the ops params): band_i = band_i0 + kappa_i q_i / cap_i, default 0 | WP-13 (position telemetry only) | undertaking_agents.py, facility_agent.py, seeder_agent.py (append: kappa knob, sk_* counters); the desk's thresholds | kappa on / off cells in the grid | kappa = 0 byte-identical to today (L3); under a differential disturbance the loaded facility's own book unwinds with K within G7 | 2 smokes | TODO |                |
+| WP-15 | The controller-alternatives grid (the test plan of this file): disruption TOMLs for classes 5-8 and 10; =BookLoaderAgent= (class 9); habituation / carry / saturation-dwell / K-economy / book-loading / attribution metrics; cycles 1-3 | decision 8; WP-13, WP-14, WP-16 | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml (new); bookloader.py (new); eqmetrics.py / snapshot.py (append); a star spec per cycle | the three cycles' tables and panes; a recommendation S vs V, tau_s, kappa* | P9 and P10 judged; G1-G8 on every cell; R15-R18 | ~130 | TODO |                |
+| WP-16 | Gain derivation, offline: the reduced plant (7.2 + the position loop) as a small linear model in Python; identify k_s (flow per unit K per unit cap) from banked vectors; LQR with costs (e^2, carry-weighted s^2, dK^2); SIMC sanity; margin check; the gain table for S and V at both depths | WP-1 vectors | alberta_buck/sim/kdesign.py, test_kdesign.py (new) | the gain table (Kq, Kqi, Kqd, tau_s) per design and depth; the lambda knee derived rather than swept | LQR reproduces the price loop's (Kp, Ki) within 25% when the position weight is 0 (the sanity anchor); the derived tau_s lands between tau_I and the persistence horizon | 0 | TODO |                |
 
 * The star method: one axis at a time from a baseline
 
@@ -297,6 +310,10 @@ with the sum of their single effects.  Multi-seed the final baseline.
 | seeder       | =scenario.agents.SeederAgent=, =agents.SeederAgent.range_bp= (WP-8)     | D5                                    |
 | injection    | =agents.WhaleRaidAgent.budget_m= / =.raid_days= / =.quiet_cap_bp=       | the attack's shape                    |
 | physics      | =deploy.target_buck_lp_m=, =deploy.target_buck_m=                       | depth                                 |
+| controller (D7) | tag axes =SIM_CONTROLLER= {direct, shadow}, =SIM_SHADOW_MODE= {s, v}; =SIM_SHADOW_KQ= / =_KQI= / =_KQD= (a =--set= once WP-13 lands); =SIM_SHADOW_GAMMA= | the design under judgment                  |
+| weights      | =SIM_SHADOW_W_<stabilizer>= (V), =SIM_SHADOW_LAMBDA_<stabilizer>= (S)          | decision pending 11                        |
+| local skews  | =agents.<Facility>.kappa=; the desk's via the ops params                        | WP-14                                      |
+| disruptions  | the class TOMLs of the test plan; =agents.BookLoaderAgent.budget_m= / =.hold_days= | WP-15                                    |
 
 ** The first star: integral-only K
 
@@ -405,10 +422,188 @@ of its cells with the gate verdicts; paste it into the ledger.
 1337, 2025, 99) for the key cells; a claim survives if its sign and
 verdict hold on >= 4/5.
 
+* The controller-alternatives test plan (D7)
+
+(Design owner + Claude, 2026-09-03.)  Both K designs of D7 -- S, the
+shadow bvib in price units, and V, the position vector -- are judged
+on ONE grid: a steady-state equilibrium backdrop, a catalogue of
+disruptions added to it, and the level-1 responses added in varying
+kinds and amounts.  The question the grid answers is not which is
+prettier but: under which design does K stay comprehensible (R14),
+the facilities habituate (return to zero), the attacker pay, and the
+economy hold parity -- across the disruption classes and across the
+amount of fast capacity standing in front of K.
+
+** Backdrop
+
+- *Equilibrium of record*: the 2-year portcast window of the catalogue
+  arms (=experiments/catalogue-none.toml=: the JS-port cast, K ~ 0.70-
+  0.75 interior, bv 1.000 +/- 0.007), injection day 365.  Every cell
+  starts from the same keyed history, so a cell's first 365 days are
+  byte-identical across designs (the L3 guarantee) and the response is
+  attributable to the disruption.
+- *Two depths*: the default (=deploy.target_buck_m= 10) and a deep
+  variant (x4), because every facility was capacity-bound at the
+  defaults, and D-normalization is the thing depth changes under S.
+- *Controller baseline*: A = Direct (Kq = 0, lambda = 0), the
+  P-carrying gains of record; the integral-only variant (decision 7)
+  enters as an axis, not as a sixth design.
+
+** Disruption classes (the attacks and the accidents)
+
+Each class isolates one thing a controller must do.  The existing
+catalogue arms cover 1-4; 5-10 are new experiment TOMLs built from the
+same injectors and the =[[interventions]]= surface, plus one new agent
+(class 9).
+
+| # | class                  | mechanism (TOML)                                                                 | what it tests                                                                                   |
+|---+------------------------+----------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------|
+| 1 | impulse dump / squeeze | =catalogue-dump= / =catalogue-squeeze=, WhaleRaidAgent budget x{1, 4}            | transient absorption; the one-day trough; habituation time                                      |
+| 2 | grind                  | =catalogue-grind-down= / =-up=, raid_days 60                                     | the slow attack; the K vs facility division of labour                                           |
+| 3 | differential shock     | =catalogue-spike= / =-step= (price_shock on one constituent)                     | K must NOT move (G7); the common / differential split                                            |
+| 4 | none (control)         | =catalogue-none=                                                                 | organic equivalence; the calm gate                                                              |
+| 5 | structural step        | =[[interventions]]= add / remove a saver or borrower cohort at day 365, permanent | a persistent flow: the s integrator must return s to zero while K takes the load; temporary vs outright |
+| 6 | ramp                   | uptake_shock ramped over 180 d                                                   | a growing disturbance; the internal-model limit (a ramp wants a double integrator; measure the residual) |
+| 7 | guard trip             | a one-pool spot push past 500 bp inside the TWAP window, every 10 d              | the sensor-fault policy (decision 9); gamma's inadvertent schedule under S0                     |
+| 8 | periodic               | WhaleRaidAgent sell / buy alternating, period {0.5, 1, 2} x tau_s                | resonance and limit cycles between the two integrators; carry churn                             |
+| 9 | book-loading attack    | =BookLoaderAgent=: loads a facility toward its cap, waits for K to move, unwinds and mints / burns under the moved K | the risk of inventory-fed K: attacker P&L <= 0 under S and V; K's excursion per loaded fraction |
+| 10 | liquidity withdrawal  | remove half the private LP depth at day 365 (interventions remove)               | D-dependence of S; V should be invariant                                                        |
+
+** Responses (the level-1 designs, and how much of each)
+
+- *Kind* (the mix): =none=, =ut=, =fac=, seeder on, =all=, =ut-all=,
+  =fac-all=, with the desk itself via =--basket ops= in every non-none
+  mix of this grid (the first time it runs in the loop; WP-3b), because
+  it is the stabilizer K mid-ranges first.
+- *Amount* (capacity -- the axis the smokes said matters): the explicit
+  capacity knobs at x{0.25, 1, 4, 16}: =agents.UndertakingAgent.leg_bp=
+  and =.reserve_frac=; =agents.FacilityAgent.max_frac= and the
+  population; =SIM_OPS_POSITION_BP= / =_OUTRIGHT_BP= / =_LEG_BP=; the
+  seeder's =range_bp= and target.  NOT =--scale= (desk count).
+- *Local skews* (WP-14): kappa_i in {0, kappa*} per facility, so the
+  differential-mode lever is measured on and off.
+
+** Controller alternatives (the axis under judgment)
+
+| tag | design                    | gains                                                             |
+|-----+---------------------------+-------------------------------------------------------------------|
+| A   | Direct                    | of record; Kq = Kqi = Kqd = 0                                     |
+| S0  | shadow, D4 as built       | (Kq, Kqi, Kqd) = (Kp, Ki, Kd) x lambda; gamma in {0, 0.5}         |
+| S   | shadow, independent gains | lambda = 1; (Kq, Kqi, Kqd) from WP-16 in price units              |
+| V   | position vector           | w_i from the cost class; (Kq, Kqi, Kqd) from WP-16 in fill units  |
+| Vk  | V + local skews           | V with kappa_i = kappa*                                           |
+
+Gains for S and V are derived the SAME way (WP-16: LQR on the reduced
+plant, then the SIMC sanity check, then the margin check), so the
+comparison is between structures, not between tunings.  Each design
+also gets a two-point tau_s axis ({0.5, 2} x the derived value), so a
+design is not condemned by one tuning.
+
+** Metrics and gates
+
+Existing (=eqmetrics=): the six gates of CARRY-CONVEXITY.org 8.2; G7
+(organic equivalence) and G8 (K comprehensibility) of R14; peak / AUC
+/ recovery of the injection; whale P&L; depositor realized; markout.
+Added for this grid (=eqmetrics= append, WP-15):
+
+- *habituation*: time for |s| to fall below 10% of its peak after the
+  disturbance ends; residual |s| at the horizon; the number of sign
+  changes of s (a limit-cycle detector).  Gate P9: <= 1.5 tau_s and <=
+  1 sign change.
+- *carry*: Int |q_i| dt per facility in BUCK-days, and x the carry
+  rate -- the cost habituation exists to minimize.
+- *saturation dwell*: the fraction of frames any facility is at a
+  bound, and the fraction with =stale()= set.
+- *K economy*: total variation of K, max |dK / day|, rail days -- "K
+  glides".
+- *book-loading*: attacker P&L; max |K - K_none| per unit of loaded
+  fraction.  Gate P10: attacker P&L <= 0 under S and V, and K's
+  excursion under V no larger than under S.
+- *attribution* (R14c): per frame, the price loop's and the position
+  loop's contributions to dK, and the stale / excluded flags -- the
+  panel a reader uses to say WHY K moved.
+
+** Design of the grid
+
+The full factorial (10 classes x 8 mixes x 4 amounts x 5 designs x 2
+depths x 2 tau_s) is 6,400 cells and unrenderable.  The plan is a star
+plus two small factorials, in three cycles, each judged before the
+next:
+
+1. *Cycle 1 -- the structural comparison* (the star, WP-12).  Baseline
+   = the =all= mix + desk at x1 capacity, default depth, derived gains;
+   arms = classes 1 (x1 and x4), 4, 5, 7, 9; axes = capacity x{0.25,
+   4}, tau_s x{0.5, 2}, depth x4, kappa {0, kappa*}; plus the five
+   design cells per arm (design is a TAG axis).  1 + 2A per arm with A
+   = 4 over 6 arms, plus 4 extra design cells per arm: ~78 cells.
+   Decides whether V's structural claims hold.
+2. *Cycle 2 -- the interactions.*  A full factorial on design {S, V} x
+   capacity x{0.25, 1, 4, 16} x class {1 at x4, 5, 8, 10}: 32 cells.
+   This is where "varying amounts of the various designs of responses"
+   is measured: does the winner change with how much fast capacity
+   stands in front of K?  Decision 11's weight sweep rides here.
+3. *Cycle 3 -- robustness.*  The winning design's baseline over the
+   five seeds (L5) on classes 1, 5 and 9: 15 cells; and one anvil
+   confirmation cell (pyrevm vs anvil identity, the backend gate).
+
+Total ~130 cells; at the catalogue's measured rate (~90 min per 2-year
+pyrevm cell, 10-way parallel) about a day per cycle.  Every cell's
+vector carries its resolved config; =--report-only= regenerates every
+table.
+
+** Prerequisites and order
+
+1. Decision 8 (slot0 gauges) on its own branch, vectors regenerated:
+   classes 7 and 10 and every seeder cell read the gauge.
+2. WP-13: the corrected controller and observer (Solidity + deploy
+   wiring + forge identity tests + the sensor-fault policy).
+3. WP-16: the reduced model and the gain derivation (Python, offline;
+   its output is the gain table the grid uses).
+4. WP-14: the local skews on the four level-1 agents (kappa_i), default
+   0 so no banked cell changes.
+5. WP-15: the new disruption TOMLs, the =BookLoaderAgent=, the
+   habituation / carry / attribution metrics, then cycles 1-3.
+6. The k-integral-c0 star (deferred) runs on the winning design.
+
+Each step passes L0-L3 before the next; WP-13 and WP-16 are
+independent and may run in parallel worktrees; WP-14 needs WP-13's
+=position()= only for its telemetry and may start alongside.
+
 * Progress ledger
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-03 -- D7: the position loop; decision 9 closed; the controller-alternatives test plan (session 3, design owner + Claude)
+
+- The design owner asked whether the level-1 facilities are P / I / D
+  accumulators of K, whether a higher-level controller (Kalman,
+  optimal control) is emerging and should be explicit, and whether the
+  shadow bvib is the right coupling or each facility should report an
+  over / under-sold signal with summing metadata.
+- Read (no code changed): =BuckKControllerDirect= / =Shadow=,
+  =ShadowObserver=, =IStabilizer=, =BuckBasketOps.capacity()= /
+  =_navBuckSafe()= / =shadowDepth()=, the venue's =poolBuckValues()= /
+  =_enforceSlippageGuard()= / =_readPoolPrice()=; the three agents
+  (they read =buckK= only; none writes K).
+- Found: the shadow term expands to a per-facility PID on inventory
+  whose P:I:D ratio is locked to the price loop's (the missing lever);
+  the reference depth D sits in the on-chain law; gamma keyed to a
+  guard trip is an inadvertent price-velocity schedule (decision 9's
+  real content).  Precedents: mid-ranging, habituating control,
+  averaging level control, the internal model principle, Skogestad's
+  control-structure design, Avellaneda-Stoikov (the shadow price is a
+  level-1 quoting variable).
+- Recorded: CARRY-CONVEXITY.org D7 (both alternatives kept; the
+  corrected two-loop controller; the lever count and the local skews;
+  LQR offline, no on-chain MPC, no Kalman on inventory; sensor-fault
+  policy), the model addendum "The position loop", the seam amendment,
+  predictions 9-10, wave row 3i, recommendation 3a, glossary and
+  literature.  This file: R15-R18; WP-13 / 14 / 15 / 16; WP-3b
+  narrowed; axes; the test plan section; decision 9 closed with the
+  mechanics of an unreadable NAV; decision 11 opened; STATUS.
+- Next: decision 8 branch; WP-13 and WP-16 in parallel worktrees;
+  WP-14; WP-15 cycle 1.
 
 ** 2026-09-02 -- Session 2 close: phase 1 integrated
 
@@ -801,15 +996,68 @@ next.  Paste acceptance evidence here, not in chat.
    byte-for-byte where no concentrated position existed), and only then
    run the 3h seeder cells and any private-LP arm.  Until then WP-8's
    G3 result stands (it is measured on spot), its K numbers do not.
-9. *Unreadable NAV: pinned or idle?* (from WP-3a).  When the desk is
-   disabled or =poolBuckValues= reverts (empty basket, spot/TWAP guard),
-   the seam reports saturation = 1 ("pinned"), so the shadow controller
-   runs Ki(1 + gamma) while the error is ~0 -- harmless in magnitude
-   but it fires pre-bootstrap and on exactly the manipulated days the
-   guard exists for.  Alternative: report saturation 0 (no scheduling)
-   when the desk cannot act.  One-line change; the WP-3d lambda / gamma
-   sweep should run both and the R14 panel should show which one a
-   reader can explain.
+9. *Unreadable NAV: pinned or idle?* (from WP-3a).  RESOLVED
+   2026-09-03 (design owner, with D7): NEITHER -- hold the last good
+   cap.  The mechanics, recorded because the failure mode is subtle:
+
+   - WHAT "unreadable" means.  =BuckBasketOps.capacity()= sizes both
+     desk bounds against NAV = 2 x B from =poolBuckValues()=, through
+     =_navBuckSafe()=, which try/catches the read and returns 0 when
+     it reverts.  A zero NAV makes both caps zero, =_room()= returns 0,
+     capacity() = 0 and saturation() = 1e18: "pinned".
+     =netInventory()= never touches NAV (it is =monetaryBuckHeld -
+     max(monetaryOutstanding, 0)=), so the POSITION is always
+     readable; only its normalization is not.
+   - WHEN it happens.  (a) The desk is disabled (=opsParams.enabled=
+     false): pre-bootstrap, and whenever governance switches the desk
+     off; capacity() returns 0 before any read.  (b) =NoValue()=: no
+     constituent has depositor liquidity beyond the treasury's
+     (=totalL <= treasuryLiquidity= in every pool), an empty basket,
+     or a pool holding no BUCK -- launch, and a fully redeemed basket.
+     (c) =Slippage()=: for ANY one constituent, spot is off its TWAP by
+     more than =defaultMaxDeviationBp= (500 bp in the sim deploy; the
+     guard is skipped when it is 0) inside =twapWindow= (600 s in the
+     sim).  This is the guard that protects depositor redemptions from
+     a manipulated spot, and on the controller's path it turns "a fast
+     move in one pool" into "no NAV" for the duration of the window --
+     exactly the raid days.  (d) A cold pool WITHOUT TWAP history does
+     NOT trip it: =peekTwap= reverts, the catch returns, the guard is
+     skipped.  (e) A bad pool address or a reverting token is a
+     governance error, not an operating condition.
+   - WHY pinned was wrong.  On a guard trip the desk is usually NOT at
+     a bound; it is in the middle of the move it exists to absorb.
+     Reporting saturation 1 there made gamma an inadvertent schedule
+     on PRICE VELOCITY (spot vs TWAP) -- a D-type kick keyed to the one
+     signal the ops doc says the desk must not escalate on -- and it
+     boosted Ki while the error was still ~0, so the boost landed on
+     noise.  Reporting idle (0) was also wrong: a desk that IS at a
+     bound when the guard trips would have reported free.
+   - WHY K itself does not see this.  =basketValueInBuck()= reads each
+     pool's TWAP with a spot fallback and never runs the guard, so K's
+     own process variable never reverts; only the desk's cap does.
+     The asymmetry is deliberate (a view on K's path must not take
+     =compute()= down) and stays.
+   - THE POLICY (D7).  The stabilizer keeps =lastGoodCap= (the NAV-
+     derived bound from the last successful read, refreshed on every
+     successful =capacity()= and on every desk operation) and its age.
+     On an unreadable NAV, =position()=, =capacity()= and
+     =saturation()= are all computed against lastGoodCap, and =stale()=
+     exposes the age for telemetry and the R14 attribution panel.  A
+     DISABLED desk still reports capacity 0 and saturation 1 (it truly
+     cannot act), but the observer EXCLUDES a disabled stabilizer from
+     the aggregate position and renormalizes the weights, because a
+     book that cannot move is not a lever K should mid-range.  Before
+     the first successful read (launch) lastGoodCap is 0 and the
+     stabilizer reports position 0, capacity 0, saturation 1, stale --
+     and is excluded the same way.  gamma defaults to 0 under D7; if it
+     is ever used it must key off the HELD saturation, never a guard
+     trip.
+   - EVIDENCE TO COLLECT.  WP-13's forge tests: a guard trip (spot
+     pushed off TWAP in one pool) leaves position() and saturation()
+     unchanged and sets stale(); the disabled desk is excluded from s;
+     the first successful read clears stale.  The grid's guard-trip
+     disruption (test plan, class 7) measures K's path under S and V
+     with the trip on and off.
 10. *Should the funding factor see the shadow bvib?* (from WP-3a).
    =BuckKControllerShadow= overrides the reference read, so
    =lastBasketCost= is the shadow process and =fundingFactor()= (the
@@ -818,6 +1066,19 @@ next.  Paste acceptance evidence here, not in chat.
    separate lever with its own gauge (=ff_close= in the equilibrium
    sim); record the choice, and let WP-3d measure mint volume with the
    gate on the raw vs the shadow bvib.
+
+11. *Cost weights and caps for the aggregate position* (from D7).  V
+   needs, per stabilizer, an inventory bound cap_i in BUCK and a cost
+   weight w_i.  Caps: the desk, =maxPositionBp= x NAV (the bound it
+   already reverts on); the undertakings, the weak-side reserve R0
+   and, for the strong side (unlimited by D3), a governance notional
+   -- the one genuinely open number; the facility registry, the sum
+   of vetted limits x max_frac; the seeder, its funded amount.
+   Weights: proportional to the carry cost of holding that inventory
+   per BUCK-day (a TOKEN book vs issued BUCK vs latent credit), with
+   the desk at 1; sweep the strong side's weight in {0.5, 1, 2} in
+   cycle 2 of the test plan.  Under S the same question is lambda_i
+   per stabilizer.
 
 * Conventions
 
