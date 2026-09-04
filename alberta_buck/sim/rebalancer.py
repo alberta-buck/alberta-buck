@@ -139,7 +139,8 @@ class BuckBasketRebalancerAgent(Agent):
         # Only enter if the fill is profitable (net >0, after fees).
         w3, ab = d.w3, d.erc20_abi
         balance_of = lambda token, holder: d.chain.balance_of(token, holder, ab)
-        out_amt = quote_path(w3, ab, hops, move_amt, balance_of)
+        out_amt = quote_path(w3, ab, hops, move_amt, balance_of,
+                             chain=d.chain)
         if out_amt == 0:
             return
 

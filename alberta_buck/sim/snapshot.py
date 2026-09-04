@@ -14,6 +14,7 @@ from pathlib import Path
 from web3 import Web3
 
 from alberta_buck.sim.chain import load_artifact
+from alberta_buck.sim.gauge import buck_usd6
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_VECTORS = REPO / "test" / "vectors"
@@ -259,13 +260,14 @@ class Snapshotter:
             ref.append(self.s.prices.ref(i, day))
             su.append(_implied(d, d.pool_usdc[i], tc, d.dec[i], d.usdc))
             sb.append(_implied(d, d.pool_buck[i], tc, d.dec[i], d.buck))
-        # Floating BUCK/USDC pool: implied USDC-micro per 1 BUCK.
+        # Floating BUCK/USDC pool: USDC-micro per 1 BUCK from slot0
+        # (decision 8: the balance ratio misreads a concentrated position).
         buck_usd = 0
         if getattr(d, "pool_ub", ""):
-            ru = _bal(d.usdc, d.pool_ub)
-            rb = _bal(d.buck, d.pool_ub)
-            if rb:
-                buck_usd = ru * 1_000_000 // rb
+            try:
+                buck_usd = buck_usd6(d.chain, d.pool_ub, d.buck)
+            except Exception:
+                buck_usd = 0
         try:
             bv = int(d.basket.functions.basketValueInBuck().call())
         except Exception:

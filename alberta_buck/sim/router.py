@@ -1,9 +1,12 @@
 """Off-chain AMM math + path discovery + Universal Router encoding.
 
-The org doc's "exact eth_call quoter": our seeded V3 pools are full-range,
-so they behave as constant-product (x*y=k); we quote each hop exactly from
-live reserves (`ERC20.balanceOf(pool)`), net of the pool fee.  The Universal
-Router only *executes* the chosen path (pre-fund / payerIsUser=false).
+The org doc's "exact eth_call quoter": each hop is quoted as the
+constant-product market its pool presents INSIDE the active tick range --
+the virtual reserves of slot0's price and liquidity() (alberta_buck.sim.gauge,
+WAVE3.org decision 8) -- net of the pool fee.  Until decision 8 the quote
+divided the pool's token balances, which a concentrated position distorts.
+The Universal Router only *executes* the chosen path (pre-fund /
+payerIsUser=false).
 """
 
 from __future__ import annotations
@@ -11,6 +14,8 @@ from __future__ import annotations
 import math
 
 from web3 import Web3
+
+from alberta_buck.sim.gauge import oriented, pool_state, read_pool_state
 
 FEE_DEN = 1_000_000
 MIN_SQRT_RATIO = 4295128739
@@ -34,24 +39,22 @@ def full_range_ticks(tick_spacing: int) -> tuple[int, int]:
     return -hi, hi
 
 
-# ---- exact constant-product quote ----------------------------------- #
+# ---- within-range constant-product quote ---------------------------- #
 
 def quote_hop(w3: Web3, erc20_abi: list, pool: str,
               token_in: str, token_out: str, amt_in: int, fee: int,
-              balance_of=None) -> int:
-    """Exact xy=k output for a single full-range V3 hop, net of `fee`."""
+              balance_of=None, chain=None) -> int:
+    """Exact xy=k output for a single V3 hop inside its active range, net of
+    `fee` (pip).  The reserves are the pool's virtual reserves at slot0
+    (gauge.virtual_reserves): read through `chain.pool_state` (memoized)
+    when the sim's Chain is given, else uncached through `w3`.  `balance_of`
+    is accepted for the old call shape and unused -- the balance quote is
+    what decision 8 retired."""
     if amt_in == 0:
         return 0
-    if balance_of is None:
-        ti = w3.eth.contract(address=Web3.to_checksum_address(token_in),
-                             abi=erc20_abi)
-        to = w3.eth.contract(address=Web3.to_checksum_address(token_out),
-                             abi=erc20_abi)
-        r_in = ti.functions.balanceOf(pool).call()
-        r_out = to.functions.balanceOf(pool).call()
-    else:
-        r_in = balance_of(token_in, pool)
-        r_out = balance_of(token_out, pool)
+    state = (pool_state(chain, pool) if chain is not None
+             else read_pool_state(w3, pool))
+    r_in, r_out = oriented(state, token_in, token_out)
     if r_in == 0 or r_out == 0:
         return 0
     eff = amt_in * (FEE_DEN - fee) // FEE_DEN
@@ -59,11 +62,12 @@ def quote_hop(w3: Web3, erc20_abi: list, pool: str,
 
 
 def quote_path(w3, erc20_abi, hops: list[tuple[str, str, str, int]],
-               amt_in: int, balance_of=None) -> int:
+               amt_in: int, balance_of=None, chain=None) -> int:
     """hops = [(pool, token_in, token_out, fee), ...] chained."""
     amt = amt_in
     for pool, ti, to, fee in hops:
-        amt = quote_hop(w3, erc20_abi, pool, ti, to, amt, fee, balance_of)
+        amt = quote_hop(w3, erc20_abi, pool, ti, to, amt, fee, balance_of,
+                        chain=chain)
         if amt == 0:
             return 0
     return amt

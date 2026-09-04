@@ -60,6 +60,7 @@ from alberta_buck.sim.equilibrium_agents import (
     FEE_DEN, _ProxyAgent, _agent_rng, _cp_out, _impact_cap,
 )
 from alberta_buck.sim.experiment import draw as _draw, spec as _spec
+from alberta_buck.sim.gauge import active_reserves
 
 E6 = 10 ** 6
 E18 = 10 ** 18
@@ -355,8 +356,8 @@ class FacilityAgent(_ProxyAgent):
         if self.target == "usdc":
             if not d.pool_ub:
                 return 0
-            return _impact_cap(d.chain.balance_of(d.buck, d.pool_ub),
-                               self.max_impact_bp)
+            return _impact_cap(active_reserves(d.chain, d.pool_ub, d.usdc,
+                                               d.buck)[1], self.max_impact_bp)
         cap = None
         for i in range(len(d.tokens)):
             rb = d.chain.balance_of(d.buck, d.pool_buck[i])
@@ -418,8 +419,7 @@ class FacilityAgent(_ProxyAgent):
     def _issue_usdc(self, d, size: int, k: int, ctr) -> None:
         if not d.pool_ub:
             return
-        ru = d.chain.balance_of(d.usdc, d.pool_ub)
-        rb = d.chain.balance_of(d.buck, d.pool_ub)
+        ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
         y = min(size, _impact_cap(rb, self.max_impact_bp))
         if y < E6:
@@ -512,8 +512,7 @@ class FacilityAgent(_ProxyAgent):
         cash = d.chain.balance_of(d.usdc, self.proxy.address)
         if drawn < E6 or cash < E6:
             return
-        ru = d.chain.balance_of(d.usdc, d.pool_ub)
-        rb = d.chain.balance_of(d.buck, d.pool_ub)
+        ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
         x = min(cash, _impact_cap(ru, self.max_impact_bp))
         if x < E6:

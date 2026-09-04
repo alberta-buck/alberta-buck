@@ -110,10 +110,11 @@ from alberta_buck.sim.agents import _register
 from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim.equilibrium_agents import _ProxyAgent, _agent_rng
 from alberta_buck.sim.experiment import draw as _draw, spec as _spec
+# Decision 8 moved the slot0 spot conversion (with Q96 and E6) to the shared
+# gauge; re-exported here so the names test_seeder.py imports stay put.
+from alberta_buck.sim.gauge import E6, Q96, sqrt_price_to_usd6  # noqa: F401
 from alberta_buck.sim.snapshot import _implied
 
-Q96 = 1 << 96
-E6 = 10 ** 6
 E18 = 10 ** 18
 LN_TICK = math.log(1.0001)
 MAX_L = 2 ** 127 - 1
@@ -154,12 +155,6 @@ def usd6_to_tick(usd6: int, buck_is_token0: bool) -> int:
 def tick_to_usd6(tick: int, buck_is_token0: bool) -> int:
     """Inverse of usd6_to_tick at the tick's lower edge (micro-USD)."""
     ratio = 1.0001 ** tick
-    return int(round(E6 * ratio if buck_is_token0 else E6 / ratio))
-
-
-def sqrt_price_to_usd6(sqrt_price_x96: int, buck_is_token0: bool) -> int:
-    """Exact spot from slot0: micro-USD per BUCK."""
-    ratio = (sqrt_price_x96 / Q96) ** 2
     return int(round(E6 * ratio if buck_is_token0 else E6 / ratio))
 
 
