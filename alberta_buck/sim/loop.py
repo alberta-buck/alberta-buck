@@ -190,6 +190,11 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
             else:
                 order = arbs[:]
                 prng.shuffle(order)
+            # WP-13: the stand-ins' books as of the previous tick reach the
+            # observer before any agent runs K's cycle this tick (an
+            # agent's compute() inside the last tick makes the end-of-day
+            # call below a cached read); a no-op unless the sum changed.
+            shadow_book.book(d, ctr)
             reserves = probe.read()
             for a in order:
                 s0 = sent[0]
