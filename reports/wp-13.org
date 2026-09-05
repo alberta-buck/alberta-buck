@@ -1,0 +1,403 @@
+#+TITLE: WP-13 report -- controller
+#+AUTHOR: Claude (WP-13 owner) for the integrator
+#+DATE: 2026-09-04
+
+Branch =wp/13-controller= (worktree =../alberta-buck-wp-13=, from
+=feature/carry-convexity= at c99a4f8).  Specification: WAVE3.org WP-13
+row, R15 / R17, decisions 9 / 10 / 11; CARRY-CONVEXITY.org D7 and "The
+position loop (D7)"; ONBOARDING-D7.org section 8 ("Decided 2026-09-04").
+
+* Summary
+
+Built: the corrected two-loop K controller (=BuckKControllerShadow=
+extended in place: a second PID on the observer's aggregate position with
+its own gains Kq / Kqi / Kqd and ONE integrator, per-integrator rail
+anti-windup, the bumpless retune / retunePosition / setBuckK0 / reprime
+algebra carrying the position terms, =terms()= and a =BuckKTerms= event
+beside the unchanged =BuckKUpdated=; the price loop and =fundingFactor()=
+read the RAW basket, decision 10), the observer's two aggregations S and
+V with per-stabilizer lambda / weight and the hold-last-cap sensor-fault
+policy of decision 9 (held caps refreshed each cycle through
+=positionCap()= in try/catch, =stale= / =excluded= flags, disabled
+stabilizers excluded and the V weights renormalized),
+=IStabilizer.positionCap()= with the desk's =NavUnreadable=, and the sim
+wiring (=--shadow-mode s|v=, =SIM_SHADOW_KQ/_KQI/_KQD=, =_W_*=,
+=_LAMBDA_*=, =_OFFSET_CAP_USD=), the booking of the Python stand-ins'
+books into the pseudo-stabilizer (which no cell had ever exercised: the
+agents never called =setShadowOffset=), and 27 telemetry fields.  Showed:
+Kq = Kqi = Kqd = 0 reproduces Direct state for state over a railed
+schedule whatever the observer reports (forge), the 5-day smoke's buckK
+identical on 5/5 frames (max |delta| 0) and the direct cell equal to the
+archived pre-WP-13 vector on all 182 frame keys; mode S at the price
+loop's gains reproduces D4 as built term for term in the interior; a
+guard trip on the real desk holds the cap, keeps position / saturation /
+aggregate unchanged and sets =stale()=, the first good read clears it;
+both modes run 30 days with the position loop engaged, no stale /
+excluded frame, =ut_err= empty, exit 0, and K = K0 + the six terms to the
+wei on every frame.  Next: WP-16's gains on this surface (Kq, Kqi, Kqd
+in S or V units), WP-15's class-7 cells for R17's "no K kick under V",
+and the open decisions below (the position-error sign convention,
+exclusion under S, the registry defaults, per-agent stabilizers instead
+of one lumped offset).
+
+* Commits (on =wp/13-controller=, newest first)
+
+- =671e298= sim: WP-13 book the stand-ins' position at each tick start
+  too -- an agent's compute() in the last tick made the end-of-day cycle
+  a cached read, so a day's booking reached K a day late
+- =988a330= test: WP-13 test_shadow_book.py -- the pseudo-stabilizer
+  booking's sign convention, no-op without an observer, send-on-change,
+  failure recording
+- =8e7818f= sim: WP-13 wiring -- --shadow-mode s|v (SIM_SHADOW_MODE),
+  SIM_SHADOW_KQ/_KQI/_KQD real gains, per-stabilizer lambdas and V
+  weights, the pseudo-stabilizer's cap (SIM_SHADOW_OFFSET_CAP_USD);
+  shadow_book.py books the undertakings' and facility's inventory into
+  the observer before each daily compute; snapshot: the desk's book, s,
+  saturation, boost, stale/excluded flags and the per-term attribution
+  pid_q/pid_qi/pid_qd beside pid_up/pid_ui/pid_ud
+- =facd3af= contracts: WP-13 the corrected K controller (D7) -- a second
+  PID loop on the observer's aggregate position with its own gains (Kq,
+  Kqi, Kqd) and one integrator, per-integrator rail anti-windup, bumpless
+  retune/setBuckK0/reprime with the position terms, terms() and
+  BuckKTerms attribution; the price loop and fundingFactor read the raw
+  basket (decision 10); ShadowObserver aggregation modes S and V with
+  per-stabilizer lambda/weight, held caps with the sensor-fault policy
+  (decision 9), observe()/flags(); IStabilizer.positionCap();
+  BuckBasketOps.positionCap() reverting NavUnreadable; Direct: virtual
+  compute/reprime/_rederiveI (pure refactor); 36 Shadow + 37 Ops tests
+- plus this report's commit.
+
+* Files
+
+- New: =alberta_buck/sim/shadow_book.py= (the stand-ins' book ->
+  =setShadowOffset=, sent only on change); =alberta_buck/test/test_shadow_book.py=
+  (4 tests); =reports/wp-13.org=.
+- Rewritten in place (WP-3a's files, same paths): =src/basket/IShadowObserver.sol=
+  (=observe()=, =aggregatePosition()=, =shadowValueInBuck()=,
+  =shadowSaturation()=, =flags()=); =src/basket/ShadowObserver.sol=
+  (modes, weights, held caps, refresh, per-stabilizer views);
+  =src/BuckKControllerShadow.sol= (the two-loop cycle);
+  =test/BuckKControllerShadow.t.sol= (21 -> 36 tests; the WP-3a gamma,
+  reprime and governance tests kept and adapted).
+- Extended: =src/basket/IStabilizer.sol= (=positionCap()= appended);
+  =src/basket/BuckBasketOps.sol= (=positionCap()=, =error NavUnreadable=,
+  +114 B); =src/BuckKControllerDirect.sol= (pure refactor: =compute=,
+  =reprime=, =_rederiveI= made virtual, =TO18= / =PPM= internal; no
+  behaviour change -- 13/13 Direct tests unchanged);
+  =test/basket/BuckBasketOps.t.sol= (=MockStabilizer.positionCap=; 3
+  tests adapted to the held-cap semantics, 4 new; 33 -> 37).
+- Appended (=# WP-13= blocks): =alberta_buck/sim/deploy.py= (after the
+  WP-3a observer block); =alberta_buck/sim/__main__.py= (=--shadow-mode=
+  after =--set=; sets =SIM_SHADOW_MODE= so the env form the star driver
+  uses and the flag agree); =alberta_buck/sim/snapshot.py= (=_wp13_frame()=
+  helper + one =**_wp13_frame(d)= line and two counters after the WP-8
+  keys); =alberta_buck/sim/loop.py= (one import line at the end of the
+  WP imports, AND two 1-line booking calls -- before the daily
+  =compute()= and at each tick start -- which are NOT at the end of the
+  import block: they must precede the cycle; merge by keeping both
+  sides).
+
+* Layers passed
+
+** L0
+
+- =make nix-build= -- "Compiler run successful with warnings" (the one
+  pre-existing warning in =BuckKControllerBase.sol:233=).
+- =make nix-test= -- "Ran 59 test suites in 8.23s: 616 tests passed, 0
+  failed, 1 skipped (617 total tests)".  The baseline 60 suites / 600
+  passed / 1 skipped counts =test/RegressionTest.sol= (3 tests), which
+  the Makefile skips when =build/snark/regression/RegressVerifier.sol= is
+  absent, as it is in this worktree (present in the main repo): 600 - 3
+  + 15 (Shadow 21 -> 36) + 4 (Ops 33 -> 37) = 616.
+- pytest (=make nix-venv-test= equivalent for the wave-3 files, run with
+  the venv incantation): =python -m pytest alberta_buck/test/test_markout.py
+  alberta_buck/test/test_ladder.py alberta_buck/test/test_facility.py
+  alberta_buck/test/test_seeder.py alberta_buck/test/test_shadow_book.py -q=
+  -> "122 passed, 1 warning in 0.45s" (118 + 4).
+- Sizes (deployedBytecode, solc 0.8.28, via_ir, runs 200; EIP-170 limit
+  24,576 B):
+
+  | contract              | before (c99a4f8) |  after | delta | headroom |
+  |-----------------------+------------------+--------+-------+----------|
+  | BuckBasketOps         |           21,265 | 21,379 |  +114 |    3,197 |
+  | ShadowObserver        |            2,965 |  6,000 | +3,035 |  18,576 |
+  | BuckKControllerShadow |            4,265 |  5,824 | +1,559 |  18,752 |
+  | BuckKControllerDirect |            3,395 |  3,395 |     0 |   21,181 |
+  | BuckBasketFence       |           23,556 | 23,556 |     0 |    1,020 |
+
+** L1
+
+- =BuckKControllerShadowTest= 36/36 (=make nix-match-BuckKControllerShadowTest=):
+  identity: =test_identity_observerWired_zeroPosition_zeroGains=
+  (railed), =test_identity_nonzeroPosition_zeroGains= (a live s = 0.05,
+  sat 0.7, gains 0: Direct's state, S / IS / lastS tracked),
+  =test_identity_noObserver=, =test_identity_gammaWithoutObserver_isInert=,
+  =test_identity_saturatedObserver_zeroGamma_isInert=,
+  =test_identity_reprime_zeroGains=; S0:
+  =test_s0_reproducesD4_interior_exact= (real ShadowObserver, mode S,
+  lambda 0.5, D = 1M BUCK, 8-step schedule of (bvib, q) both signs:
+  buckK exact, P + S == the composite twin's P, I + IS == its I),
+  =test_s0_reproducesD4_interior_withKd= (Kd = Kqd = 1e9: within 2 wei),
+  =test_decision10_fundingFactor_readsRawBasket= (the composite twin's
+  gate moves with the book, the two-loop controller's does not); signs:
+  =test_sign_absorbedInventory_lowersK=, =test_sign_issuedInventory_raisesK=,
+  =test_sign_modeV_absorbedLowers_issuedRaises= (fill +/-0.5 through the
+  real observer), =test_sign_dampedExcursion_equalsUndamped=; observer:
+  =test_observer_modeV_weightedFill_renormalized= (weights, a disabled
+  stabilizer dropped from both sums, the pseudo-stabilizer in V once its
+  cap is set, fills clamped, mode S in the same registry),
+  =test_observer_guardTrip_holdsCap_flagsStale_clearsOnRead=,
+  =test_observer_unreadAtRegistration_excludedAndStale= (+ =NoCode=),
+  =test_observer_revertingBook_revertsLoudly=; =test_antiWindup_perIntegrator=
+  (I unwinds while IS is frozen at the high rail, then IS unwinds);
+  =test_terms_decomposeK_andEvent= (=terms()= and =BuckKTerms= with
+  predicted values, K0 + terms == buckK); bumpless:
+  =test_bumpless_retunePosition= (live buckK unchanged; the raw setter
+  steps by IS * dKqi), =test_bumpless_setBuckK0_withPositionLoop= (+ the
+  base =retune=), =test_bumpless_reprime_afterDilutionStep= (P and S
+  recaptured, IS kept, the no-motion cycle at parity reproduces buckK
+  exactly); gamma (5, kept from WP-3a), reprime (3), governance (5).
+- =BuckBasketOpsTest= 37/37 (=make nix-match-BuckBasketOpsTest=): new
+  =test_desk_positionCap_isMaxPositionBpOfNav=,
+  =test_desk_positionCap_revertsNavUnreadable_onGuardTrip= (spot pushed
+  3000 BUCK off a warm TWAP: =poolBuckValues= reverts =Slippage=,
+  =positionCap= reverts =NavUnreadable=, =netInventory= unchanged,
+  =capacity()= keeps its WP-3a pinned reading; readable again after the
+  window), =test_observer_deskGuardTrip_holdsCap_flagsStale= (the real
+  desk through a 1 s-dT controller: inside the window the cycle holds
+  the cap, position, saturation, aggregate, sets stale and the terms'
+  staleMask; after the window the next cycle clears stale and refreshes
+  the cap to the moved NAV), =test_observer_disabledDesk_excludedFromS=
+  (excluded in S and V, weights renormalized to the remaining mock,
+  flags bit 0; bit 255 only for a BOOKED pseudo inventory without a V
+  cap; re-enabled on the next read); adapted
+  =test_observer_saturation_lambdaWeightedMax= (fill of the held cap,
+  S and V weights), =test_observer_deskSaturation_schedulesGamma= (a
+  partial fill schedules in proportion; a desk full against a 1 bp cap
+  doubles Ki; a zero cap is DISABLED: excluded, no schedule),
+  =test_stabilizer_disabledDesk_reportsPinned= / =_emptyBasket_doesNotRevert=
+  (+ the cap's three outcomes); the S0 helper =_newShadowS0= on the two
+  K-vs-Direct desk tests.
+- =test_shadow_book.py= 4/4: =test_net_inventory_signs=,
+  =test_book_is_noop_without_observer=, =test_book_sends_only_on_change=,
+  =test_book_records_failure_and_keeps_last_value=.
+
+** L2 (all under =build/sim/smoke/wp13/=; every run exit 0)
+
+Environment for every invocation: =export PYTHONPATH=/Users/perry/src/alberta-buck-wp-13
+ALBERTA_BUCK_REPO=/Users/perry/src/alberta-buck-wp-13= and
+=nix develop --command bash -c "source /Users/perry/src/alberta-buck.venv-0.1.0-nix-darwin-cpython-313/bin/activate && python -m alberta_buck.sim ..."=.
+
+1. direct5: =python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/catalogue-none.toml --backend pyrevm --days 5 --set scenario.basket=ops --out build/sim/smoke/wp13/direct5.json=
+   -> exit 0; every =sh_*= / =pid_q*= / =pid_u*= field None except the
+   desk's book (=sh_held= 0, =sh_outstanding= 0, =sh_net= 0, =sh_cap=
+   $1,171,044 = 10% of NAV).
+2. shadow5: the same with =SIM_CONTROLLER=shadow= (all position gains 0,
+   lambda 0) -> "[deploy] WP-13 position loop: mode=S Kq=0 Kqi=0 Kqd=0
+   lambda desk=0 offset=0  w desk=1 offset=1  offset cap=$10,000,000";
+   exit 0; =sh_mode= 0, =sh_s= 0, =sh_sat= 0, =sh_boost= 1e18,
+   =sh_stale= 0, =sh_excluded= 0, =sh_desk_cap= $1,167,890, =pid_up=
+   3.61e14 / =pid_ui= 2.50e14 / =pid_q= = =pid_qi= = =pid_qd= = 0,
+   =sh_offset_txs= 0.
+3. s30 / v30 (the brief's cells): =SIM_CONTROLLER=shadow SIM_SHADOW_MODE=s SIM_SHADOW_LAMBDA=1 SIM_SHADOW_KQ=0.01 SIM_SHADOW_KQI=6.43e-8=
+   (V: =SIM_SHADOW_MODE=v=, no lambda) with =--days 30 --set scenario.basket=ops --set scenario.agents.UndertakingAgent=1=
+   -> both exit 0, =ut_err= empty, stale / excluded 0 on all 30 frames,
+   K 0.7419 -> 0.7495; but =ut_trades= 0: at the default band (eps 3%,
+   p 2) the undertakings never trade on the calm none-arm in 30 days,
+   so =sh_offset= stays 0, s = 0 and =pid_q= = =pid_qi= = 0 (the
+   plumbing is exercised, the loop is not).  Gains used: Kq = 0.1 x the
+   sim's Kp (0.1 real), Kqi = 0.1 x its Ki (6.43e-7 real).
+4. s30e / v30e (the loop engaged): the same plus =--set agents.UndertakingAgent.eps=0.005 --set agents.UndertakingAgent.p=1.0=:
+
+   | cell | mode | ut trades | issued / open | absorbed / open | offset txs | s last  | max abs s | pid_q last | pid_qi last | stale / excluded frames | ut_err | exit |
+   |------+------+-----------+---------------+-----------------+------------+---------+-----------+------------+-------------+-------------------------+--------+------|
+   | s30e | S    |         8 | 57,634 / 24,149 | 15,242 / 0    |          8 | -0.00232 | 0.00403  | +2.3e-5    | +7.9e-5     | 0 / 0                   | ''     |    0 |
+   | v30e | V    |         8 | 57,634 / 24,149 | 15,242 / 0    |          8 | -0.00121 | 0.00167  | +1.2e-5    | +3.7e-5     | 0 / 0                   | ''     |    0 |
+
+   (BUCK 6-dec figures in whole BUCK; s in 1e18 units; pid_* in K
+   units.)  Issued inventory (offset -24,149 BUCK) makes s negative and
+   the position terms positive: issued raises K (7.3).  The desk itself
+   books nothing on the calm arm (=mk_ops= 0, =sh_net= 0), its held cap
+   ($2.08M = 10% of NAV) is read every cycle, never stale.  =sh_value=
+   = bvib + s_S (1.0000 vs bvib 1.0023 under S; = bvib under V, whose
+   lambdas are 0).
+5. s0-5 (S0 gains on a live cell, the attribution identity):
+   =SIM_CONTROLLER=shadow SIM_SHADOW_MODE=s SIM_SHADOW_LAMBDA=1 SIM_SHADOW_KQ=0.1 SIM_SHADOW_KQI=6.43004e-7=
+   with =--days 5 ... UndertakingAgent=1 eps=0.005 p=1.0= -> exit 0; on
+   every frame buckK == K0 + pid_up + pid_ui + pid_ud + pid_q + pid_qi +
+   pid_qd exactly (max |delta| 0 wei); day 1: 15,242 BUCK absorbed, s =
+   +0.00286, =pid_q= = -0.000286 = -Kq s the same day, K 0.749169 vs
+   0.749573 with the term a day late (finding 4).
+
+** L3
+
+- =python3 cmpk.py direct5.json shadow5.json= (frame-by-frame): "frames=5
+  buckK identical on 5/5 frames; max|delta|=0"; max |delta| of
+  basketVal, supply, pid_p, pid_i, pid_d all 0.
+- direct5 vs the main repo's archived pre-WP-13 cell
+  =build/sim/smoke/int5-direct.json= (catalogue-none, 5 d, pyrevm, ops
+  basket, session 2): all 182 common frame keys equal on every frame
+  (differing keys: none); the 27 WP-13 keys are new; =meta= differs
+  only in =experiment/scenario/basket= ('prorata' there because that
+  run selected the ops basket with =--basket ops=, 'ops' here from
+  =--set scenario.basket=ops=).  So =--controller direct= is unchanged
+  by this package on every pre-existing field, and a byte-level =cmp=
+  cannot be identical by construction (the new keys).
+
+* Acceptance evidence
+
+| criterion (WP-13 row; R15; R17)                                     | evidence                                                                                                                                                                                                   |
+|---------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Kq = Kqi = Kqd = 0 identity with Direct, state for state           | forge: 6 identity tests (railed schedule; with a live non-zero position and saturation too); smoke: shadow5 vs direct5 buckK identical 5/5, max delta 0; direct5 == archived int5-direct on 182 keys        |
+| S0 gains reproduce D4 in the interior                               | forge: =test_s0_reproducesD4_interior_exact= (exact; P + S and I + IS equal the composite twin's), =_withKd= (2 wei); live: s0-5 K == K0 + six terms on every frame (a D4 twin no longer exists in-tree, finding 6) |
+| guard trip leaves position() / saturation() unchanged, sets stale() | forge: =test_observer_guardTrip_holdsCap_flagsStale_clearsOnRead= (mock), =test_observer_deskGuardTrip_holdsCap_flagsStale= and =test_desk_positionCap_revertsNavUnreadable_onGuardTrip= (real desk, Slippage) |
+| the first successful read clears stale and refreshes the cap        | both guard-trip tests; =test_observer_unreadAtRegistration_excludedAndStale=                                                                                                                              |
+| disabled desk excluded from s; weights renormalized                 | =test_observer_disabledDesk_excludedFromS=, =test_observer_modeV_weightedFill_renormalized=, =test_observer_deskSaturation_schedulesGamma= (cap 0: excluded, no schedule)                                     |
+| one position integrator on the aggregate; gains independent (R15)   | =IS= is the only position integrator (=BuckKControllerShadow=); =setPositionGains= / =retunePosition= separate from =setGains= / =retune=; =test_bumpless_retunePosition=, =test_antiWindup_perIntegrator=  |
+| position always reported; hold last good cap (R17)                  | =netInventory= untouched; observer =heldCap= / =heldAt= / =stale= / =excluded= / =position=; the desk's cap's three outcomes (=test_stabilizer_*=, =test_desk_positionCap_*=)                               |
+| the price loop and fundingFactor() read the RAW basket (decision 10)| =BuckKControllerShadow= inherits Direct's =_readReferences=; =test_decision10_fundingFactor_readsRawBasket=; the S0 test's =lastBasketCost= 1_000_000 at parity with a 3% book                             |
+| --controller shadow runs in both modes; the R14 panel gets per-loop dK | s30 / v30 / s30e / v30e / s0-5 exit 0; =terms()= + =BuckKTerms=; frame fields =pid_up/ui/ud/q/qi/qd=, =sh_s=, =sh_stale=, =sh_excluded=; =test_terms_decomposeK_andEvent=                                   |
+| shell size within EIP-170                                           | BuckBasketOps 21,379 B (+114), headroom 3,197 B                                                                                                                                                             |
+| --controller direct byte-identical                                  | L3 above (identical on every pre-existing key; the vector gains 27 keys)                                                                                                                                    |
+| forge / pytest green                                                | 59 suites, 616 passed, 0 failed, 1 skipped; 122 pytest passed                                                                                                                                                |
+
+Not measured here (the grid's): the sensitivity table on tau_s (R15),
+class-7 cells "no K kick from the trip under V" (R17) -- WP-15 with
+WP-16's gains.
+
+* Findings
+
+1. The pseudo-stabilizer was never fed.  =grep -rn setShadowOffset alberta_buck/=
+   found no caller: WP-3a's sim-only offset existed but the
+   UndertakingAgent / FacilityAgent never booked into it, so every
+   shadow cell so far (including session 2's integration smokes with
+   UndertakingAgent=1, FacilityAgent=2) fed K the desk's book only.
+   =shadow_book.py= now books =ut_absorbed_open - ut_issued_open -
+   fac_drawn= (absorbed positive, issued negative) whenever it changes.
+2. On the calm none-arm the undertakings at the default band never
+   trade in 30 days (s30 / v30: =ut_trades= 0, bvib within +/-2% after
+   the day-0 bootstrap transient of 1.0635), so "UndertakingAgent=1"
+   alone does not put a position in front of K; =eps=0.005, p=1.0= does
+   (8 trades, 57.6k issued / 15.2k absorbed).  At the smoke gains the
+   loop's contribution is tiny (|uQ| <= 4e-5, |uQI| <= 8e-5 K units).
+3. S and V units on the same books (s30e vs v30e, identical histories
+   up to K's fourth decimal): s_S = q / D = -0.0023 (D ~ 10.4M BUCK of
+   pool reserve); s_V = (w_off * q / cap_off + w_desk * 0) / (w_off +
+   w_desk) = -0.0012 -- the desk, included at weight 1 with an empty
+   book, halves the level's fill.  That is the normalization D7
+   specifies; whether an idle stabilizer should dilute the aggregate is
+   decision 11's weight question (open issue 4).
+4. A one-day booking lag, fixed in =671e298=.  Agents run =compute()=
+   themselves (=equilibrium_agents.py:1490=, =driver.py:181=); when one
+   does so inside the last tick, the loop's end-of-day =compute()= is a
+   cached read (dT 1800 s not elapsed), so a booking made just before
+   it reached K on the NEXT day (s0-5 before the fix: day 1 s = +0.00286
+   with =pid_q= 0).  Booking at each tick start (no tx unless the sum
+   changed) puts the previous tick's books in front of every cycle; the
+   same mechanism explains why =sh_desk_cap= (the cap as of the last
+   real cycle) can differ from =sh_cap= (live) by ~0.3% on some frames,
+   exactly as =pid_*= are as of that cycle.
+5. The S0 identity and ppm rounding.  =err= and =sErr= are each
+   truncated to ppm, so e + r equals the composite's error only when
+   bvib and s round identically at the ppm boundary; the forge test uses
+   multiples of 1e12 and is exact.  With Kd = Kqd != 0 the derivative
+   rounds once per term instead of once on the sum: within 2 wei.  At
+   a rail the per-integrator anti-windup can accept one increment the
+   composite would reject (e and r of opposite sign): interior-exact,
+   rail-approximate, as D7 states.
+6. No D4-as-built twin exists in the tree any more (the composite
+   =_readReferences= is retired by decision 10), so the WP-13 row's "S0
+   reproduces D4 on a 5-d smoke" is evidenced by the forge S0 tests
+   (the composite is a Direct instance on a mock returning bvib +
+   lambda q / D) and, on a live cell, by the attribution identity K ==
+   K0 + sum of the six terms on every frame (s0-5).
+7. Cost of the shell's addition: =positionCap()= + =NavUnreadable= =
+   +114 B (21,265 -> 21,379); the holding logic (struct fields, refresh,
+   flags, per-stabilizer views) lives in the observer (+3,035 B) and the
+   second loop in the controller (+1,559 B).
+8. The worktree lacks =build/snark=, so =make nix-test= skips
+   =test/RegressionTest.sol= (3 tests): 59 suites / 616 here corresponds
+   to the baseline's 60 / 600 (600 - 3 + 19).
+9. Determinism: a shadow cell with nothing booked sends no extra
+   transaction (=sh_offset_txs= 0 in shadow5, s30, v30); the deploy adds
+   =setShadowWeight= / =setShadowCap= (and =setMode= / gains when
+   non-default) before any agent acts.  The direct path is untouched.
+
+* Open issues and proposed decisions
+
+1. The position loop's sign convention.  Implemented as a PID on the
+   position ERROR r = 0 - s (stored in =S=, ppm, like =P= = 1 - bvib),
+   so positive gains give D4's signs (absorbed lowers K) and S0 is
+   literally (Kq, Kqi, Kqd) = (Kp, Ki, Kd).  The brief's "output = ...
+   + Kq*s" reads the same with s the stored error.  Proposed: keep it
+   (both loops are errors with setpoints par and zero); the alternative
+   (store s, subtract in the law) flips the anti-windup rule's sense.
+2. Exclusion applies under S too.  A stabilizer with held cap 0
+   (disabled, or never read) drops out of s_S as well as s_V, and
+   =shadowValueInBuck()= (bvib + s_S) follows.  WP-3a's composite
+   included every lambda > 0 stabilizer regardless of its bounds; D7 /
+   decision 9 say "excluded from the aggregate" without qualifying the
+   mode.  Proposed: as implemented (a book that cannot move is not a
+   lever in either units); the pseudo-stabilizer stays always-included
+   under S (it has no NAV) and needs =shadowCap= > 0 under V.
+3. Registry defaults.  =addStabilizer(s, lambda)= keeps its WP-3a
+   signature and starts the V weight at 1e18 (the desk's carry class);
+   the pseudo-stabilizer's =shadowWeight= starts at 0 and =deploy.py=
+   sets it (default 1 per decision 11).  =addStabilizer= also attempts
+   the first cap read at once (so an enabled, readable stabilizer is
+   included from registration) and rejects codeless addresses
+   (=NoCode=).  Proposed: accept; or make the weight explicit in a new
+   3-argument registration if the integrator prefers no implicit 1.
+4. One lumped pseudo-stabilizer.  The undertakings' and the facility's
+   books are summed into ONE offset at one lambda, one weight and one
+   cap (default =target_buck_m= = $10M, i.e. reserve_frac 0.5 x the
+   ~2 x target_buck_m NAV at the seed; =SIM_SHADOW_OFFSET_CAP_USD=
+   overrides).  Decision 11 lists per-class caps and weights (desk 1,
+   undertakings 1 per side, facility 0.5, seeder 0.25) and a swept
+   strong-side weight; the seeder is not booked at all.  Proposed:
+   WP-14 or WP-15 registers one sim-only stabilizer per agent class
+   (a small registry contract or a second / third offset on the
+   observer) so V's per-class weights and caps mean what decision 11
+   says; the observer's per-stabilizer surface already supports it.
+5. Idle stabilizers dilute V (finding 3).  With the desk included at
+   weight 1 and an empty book, the level's fill is halved.  Proposed:
+   decide whether V's denominator is the sum of weights of INCLUDED
+   (readable, enabled) stabilizers as implemented, or of stabilizers
+   with a non-zero book; the former is D7's text and keeps s continuous
+   when a book crosses zero.
+6. =observe()= is permissionless and stateful (it refreshes the held
+   caps), and =compute()= now makes two observer calls per cycle
+   (=observe()=, =flags()= for the event).  Anyone may refresh at any
+   time; the only effect is a fresher cap.  Proposed: accept; if the
+   Diamond (WP-11) wants a single call, fold =flags= into =observe=.
+7. An old-interface stabilizer (no =positionCap()=) reads as
+   permanently stale and excluded, silently; a codeless address is
+   rejected at registration.  Proposed: governance registers only
+   WP-13-aware stabilizers; document in the seam's NatSpec (done).
+8. =terms()= at a rail sums to the RAW output under the committed
+   state, not to the rail (the discarded increments are not in it).
+   The panel should read =buckK= for the applied value and the terms
+   for the decomposition.  Proposed: accept; note it in the eqmetrics
+   attribution panel (WP-15).
+9. =loop.py= takes two 1-line WP-13 calls outside the import block
+   (before the daily =compute()= and at each tick start).  Proposed:
+   merge keeping both sides; if the loop's compute site is contested,
+   the tick-start call alone suffices for ticks_per_day >= 2.
+10. R17's measurement ("class-7 cells show no K kick from the trip
+    under V") and R15's tau_s sensitivity are WP-15's cells on WP-16's
+    gains; the forge tests here cover the mechanics only.
+11. =BuckBasketFence= still has 1,020 B of headroom; it does not
+    implement =IStabilizer= and is untouched.
+
+* Left behind
+
+- Vectors and logs (not committed): =build/sim/smoke/wp13/= -- direct5,
+  shadow5, s30, v30, s30e, v30e (30-day, ~0.64 MB each), s0-5 (+ .log
+  each), ~2.9 MB in total; the worktree's own =out/= (29 MB) and
+  =cache/= (0.2 MB).
+- Scratch (session-local, outside the repo): =cmpk.py= (the frame
+  comparison), =an30.py= (the 30-day summary), two forge logs and one
+  pytest log under the session scratchpad.
+- No new dependencies: =flake.nix= and =pyproject.toml= untouched.
+- The main repo and =../alberta-buck-wp-d8= were not written to; the
+  archived =int5-direct.json= was read only.

@@ -61,7 +61,18 @@ def main(argv=None) -> int:
                     help="dotted override into the experiment config, e.g. "
                          "--set deploy.k0=0.8 --set scenario.seed=7 "
                          "(repeatable; usable without --experiment)")
+    # WP-13: the observer's aggregation mode (CARRY-CONVEXITY.org D7): S,
+    # the shadow bvib in price units (sum lambda_i q_i / D), or V, the
+    # cost-weighted position vector (sum w_i q_i / cap_i).  The position
+    # loop's gains and the weights are env-only (SIM_SHADOW_KQ / _KQI /
+    # _KQD, SIM_SHADOW_W_* / _LAMBDA_*, SIM_SHADOW_OFFSET_CAP_USD; deploy.py).
+    ap.add_argument("--shadow-mode", default=os.environ.get("SIM_SHADOW_MODE", "s"),
+                    choices=["s", "v"],
+                    help="shadow controller's aggregation (WP-13): s = shadow "
+                         "bvib (D4 units, default), v = position vector; env "
+                         "SIM_SHADOW_MODE sets the default for catalogue/star cells")
     a = ap.parse_args(argv)
+    os.environ["SIM_SHADOW_MODE"] = a.shadow_mode       # WP-13: deploy.py reads it
 
     basket_impl = a.basket or "prorata"
     seed0 = a.seed if a.seed is not None else 0xA1BC
