@@ -1,6 +1,6 @@
 #+TITLE: Onboarding for the D7 program: bringing a strong agent up to speed
 #+AUTHOR: Perry Kundert (design owner) with Claude
-#+DATE: 2026-09-04
+#+DATE: 2026-09-06 (first written 2026-09-04)
 
 * Who this is for, and the contract
 
@@ -39,6 +39,16 @@ positions have n levers.  The grid that decides between S and V is the
 two-year simulation cells of an equilibrium economy (real contracts on
 an in-process EVM) under ten disruption classes.
 
+As of 2026-09-06 the two critical-path packages are MERGED on
+=feature/carry-convexity=: decision 8 (46c3b7d: the sim quotes
+BUCK/USDC from slot0 through =alberta_buck/sim/gauge.py=; =vecdiff= is
+the drift gauge) and WP-13 (b4c1b75: the two-loop controller, the
+observer's S / V modes, the hold-last cap, and =shadow_book.py=, which
+books the Python stand-ins' inventory into the observer).  Their
+reports are =reports/wp-d8.org= and =reports/wp-13.org=; read them
+before the package you claim, because they name the surface you build
+on and the open questions (WAVE3.org decisions pending 14-19).
+
 * Setup
 
 ** Access and branches
@@ -70,8 +80,8 @@ you build contracts in the worktree.  Do not rebuild the main repo's
   nix develop                     # Foundry (pinned solc 0.8.28 via the Makefile), Python 3.13, Node
   make venv                       # the repo venv: ../alberta-buck.venv-<ver>-<platform>; installs alberta_buck + core/python
   make nix-build                  # never bare `forge build`
-  make nix-test                   # at 2db1581: 60 suites, 600 passed, 0 failed, 1 skipped
-  make nix-venv-test              # pytest; the four wave-3 files are 118 tests
+  make nix-test                   # at 17d77c7: 60 suites, 619 passed, 0 failed, 1 skipped
+  make nix-venv-test              # pytest; the wave-3 files + test_gauge + test_shadow_book are 155 tests
 
 Python is ALWAYS run inside the nix shell with the repo venv active:
 
@@ -90,8 +100,8 @@ venv has numpy; scipy is in the flake's nix-python env, not the venv.
       --days 30 --set scenario.basket=ops --out build/sim/smoke/hello.json"
 
 Expect: "[sim] deploying 'rebalancing-eq' with ops basket", "[deploy]
-shadow controller: observer=... lambda=0.5 gamma=0", ~160 s, a 0.6 MB
-vector, exit 0.  A 2-year cell is ~66 min single-process; a vector is
+shadow controller: observer=... lambda=0.5 gamma=0", "[deploy] WP-13
+position loop: mode=S Kq=0 ...", ~160 s, a 0.6 MB vector, exit 0.  A 2-year cell is ~66 min single-process; a vector is
 ~15 MB; peak memory ~180 MB.  Vectors are never committed.
 
 ** The grid machine
@@ -198,7 +208,12 @@ Claim by telling the integrator; the WAVE3.org table row is the
 specification, this section is the entry map.  Estimates are agent
 sessions of a few hours.
 
-** Decision-8 branch: quote from slot0 (1 session)
+** Decision-8 branch: quote from slot0 -- DONE (merged 46c3b7d; see reports/wp-d8.org)
+
+Kept below as the record of the brief.  Follow-ups are WAVE3.org
+decisions pending 14 (the TOKEN-pool reserve gauges: the same
+substitution with =gauge.active_reserves=, before any fence-basket
+cell) and 16 (the TUI gauge; the pre-existing lifecycle plot test).
 
 - Goal: three readers price BUCK/USDC by pool reserves as if every
   position were full-range; a concentrated position (the seeder's, a
@@ -213,7 +228,17 @@ sessions of a few hours.
 - Pitfall: the sim's own gauges are separate from the on-chain basket
   reads (which use the TWAP); do not touch the contracts.
 
-** WP-13: the corrected controller and observer (1-2 sessions; Solidity + Python)
+** WP-13: the corrected controller and observer -- DONE (merged b4c1b75; see reports/wp-13.org)
+
+Kept below as the description of the surface WP-14 / 15 / 16 build on.
+The env names as built: =SIM_SHADOW_MODE= (s | v), =SIM_SHADOW_KQ= /
+=_KQI= / =_KQD= (real gains), =SIM_SHADOW_W_DESK= / =_W_OFFSET= (V
+weights), =SIM_SHADOW_LAMBDA_DESK= / =_LAMBDA_OFFSET= (S; =SIM_SHADOW_LAMBDA=
+sets both), =SIM_SHADOW_OFFSET_CAP_USD= (the pseudo-stabilizer's cap,
+default $10M); frame fields =sh_*= and =pid_up/ui/ud/q/qi/qd=.  On the
+calm none arm the undertakings at the default band never trade in 30
+days: engage the loop with =--set agents.UndertakingAgent.eps=0.005
+--set agents.UndertakingAgent.p=1.0= or a disruption arm.
 
 - Goal: the second loop in =BuckKControllerShadow= (Kq, Kqi, Kqd; a
   second integrator; per-integrator anti-windup at the rails; the
@@ -267,6 +292,12 @@ sessions of a few hours.
   price loop's (Kp, Ki) within 25% (the sanity anchor); the derived
   tau_s lands between tau_I (90 d) and the persistence horizon; a
   =test_kdesign.py= on a synthetic plant.
+- Units: the controller's position loop is a PID on r = 0 - s with s
+  in ppm (S: q / D; V: the cost-weighted fill), and the gains share the
+  real x 1e12 convention of Kp / Ki / Kd (=reports/wp-13.org=,
+  decision 19).  Emit the table in real units per mode, and note that
+  s_V is roughly half s_S on the same books while the desk's empty
+  book is included (decision 18).
 - Entry: =deploy.py= (how Kp / Ki are derived from =dk_rail=, =e_max=,
   =tau_i_days=, =kp_frac=); =eqmetrics.k_forecast= (the K law fit).
 
@@ -280,6 +311,12 @@ sessions of a few hours.
 - Acceptance: kappa = 0 byte-identical (L3); under a differential
   disturbance (one facility loaded, the level's aggregate near zero)
   the loaded book unwinds while K stays within G7.
+- First sub-task (WAVE3.org decision 17): the stand-ins are booked into
+  ONE lumped pseudo-stabilizer today; register one sim-only stabilizer
+  per agent class (undertakings, facility, seeder) so decision 11's
+  per-class caps and weights mean what they say, and book the seeder's
+  converted range as a position.  The observer's per-stabilizer surface
+  already supports it.
 
 ** WP-15: the grid's machinery (1-2 sessions before the cycles; Python)
 
