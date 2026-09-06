@@ -22,7 +22,7 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
 
 * STATUS -- resume here
 
-- *Last updated*: 2026-09-03, session 3 (design, no code changed): D7
+- *Last updated*: 2026-09-06 (session 3).  2026-09-03: D7
   recorded in CARRY-CONVEXITY.org -- K mid-ranges the level's
   POSITIONS; the shadow bvib (S) and the position vector (V) are kept
   as alternatives to implement and test; the missing levers are
@@ -41,11 +41,16 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   caps with carry-class weights); 12, 13 proceeding as proposed.
   Decision 8 DONE: =wp/d8-slot0= merged 46c3b7d (=gauge.py= at every
   BUCK/USDC read; =vecdiff=; the artefact gone; decisions pending
-  14-16 filed).  IN FLIGHT: WP-13 =wp/13-controller= on this account
-  (worktree =../alberta-buck-wp-13=; contracts and wiring committed,
-  report pending); WP-16 / 15 / 14 are on offer to other-account
-  agents through =ONBOARDING-D7.org=.  Still to run: the 1-year
-  identity pair on the Xeon, judged by =vecdiff=.
+  14-16 filed).  WP-13 DONE: =wp/13-controller= merged b4c1b75
+  (2026-09-06; the corrected two-loop controller, observer modes S / V,
+  hold-last cap, the stand-ins' books finally fed to the observer;
+  decisions pending 17-19 filed).  Forge on the tree: 60 suites, 619
+  passed, 0 failed, 1 skipped; pytest 155.  Both worktrees removed;
+  NOTHING IS IN FLIGHT.  Next: WP-16 (gains), WP-15 (the grid's
+  machinery), WP-14 (local skews) on offer to other-account agents
+  through =ONBOARDING-D7.org=; the 1-year identity pair on the Xeon,
+  judged by =vecdiff=; decision 14 (TOKEN-pool gauges) before any
+  fence-basket cell.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -174,9 +179,9 @@ acceptance.  Status: TODO / IN PROGRESS / DONE / BLOCKED.
 | R12 | The oversupply flood is measured with and without the facility                                        | REBAL rec. 4, 9.1 | equilibrium discount vs theta x apr reported; the facility's exposure to D8 sized                | TODO   |
 | R13 | Results land in the documents of record                                                               | --            | =CARRY-CONVEXITY.org= gains a "Wave 3 results" section; =REBALANCING-EQ.org= findings continue from 12; this ledger closed | TODO |
 | R14 | K is COMPREHENSIBLE and PREDICTABLE to a reasonably observant, competent person, and operates equivalently in organic, normal market behaviour: (a) the public-law forecast K(t+h) = K + Ki (1 - bvib) h (later: with the observer's inputs) beats persistence and lands within 1 point most of the time (G8); (b) every wave-3 mechanism leaves the organic arms' K trajectory within tolerance of the baseline controller's (G7); (c) every input to K is a public on-chain view and its contribution to dK is decomposable per frame | design owner, 2026-09-02 | G7, G8 on every wave's cells; the =kfc= panel of =eqmetrics= (WP-1); an attribution panel once the observer exists (WP-3a) | IN PROGRESS |
-| R15 | K's position loop has gains independent of its price loop: (Kq, Kqi, Kqd) separate from (Kp, Ki, Kd), one integrator on the AGGREGATE position; Kq = Kqi = Kqd = 0 is Direct | D7 | forge: the zero-gain identity with Direct state-for-state; S0 gains reproduce D4 in the interior; the grid's sensitivity table shows tau_s moving habituation time while K's organic path stays within G7 | TODO |
+| R15 | K's position loop has gains independent of its price loop: (Kq, Kqi, Kqd) separate from (Kp, Ki, Kd), one integrator on the AGGREGATE position; Kq = Kqi = Kqd = 0 is Direct | D7 | forge: the zero-gain identity with Direct state-for-state; S0 gains reproduce D4 in the interior; the grid's sensitivity table shows tau_s moving habituation time while K's organic path stays within G7 | mechanics DONE (WP-13, forge); the tau_s table pending WP-15 |
 | R16 | Every level-1 stabilizer has a local skew kappa_i on its own band (band_i = band_i0 + kappa_i q_i / cap_i), so n positions have n levers: common mode to K, differential modes to the skews | D7 | kappa = 0 byte-identical to today (L3); under a differential disturbance the loaded book unwinds while K stays within G7 | TODO |
-| R17 | An unreadable NAV holds the last good cap and flags staleness; position is always reported; a disabled stabilizer is excluded from the aggregate and the weights renormalized | D7, decision 9 | forge: a guard trip leaves position() / saturation() unchanged and sets stale(); class-7 cells show no K kick from the trip under V | TODO |
+| R17 | An unreadable NAV holds the last good cap and flags staleness; position is always reported; a disabled stabilizer is excluded from the aggregate and the weights renormalized | D7, decision 9 | forge: a guard trip leaves position() / saturation() unchanged and sets stale(); class-7 cells show no K kick from the trip under V | mechanics DONE (WP-13, forge, real desk); class-7 cells pending WP-15 |
 | R18 | Habituation and book-loading are measured and gated: abs(s) within 10% of zero inside 1.5 tau_s with <= 1 sign change (P9); book-loading attacker P&L <= 0 under S and V, and K's excursion under V <= under S (P10) | D7, P9, P10 | the test plan's cycle-1 and cycle-2 tables | TODO |
 
 * Design
@@ -260,7 +265,7 @@ remains.
 | WP-12 | The star driver + pane renderer: =star.py= (baseline TOML + axes spec -> 1 + 2A cells per arm, run / =--report-only=, sensitivity table md/json), =plot_star.py= (one figure per pane: axes x arms panels with lo / base / hi overlaid), =experiments/stars/= | WP-1 | star.py, plot_star.py (new); experiments/stars/*.toml | the integral-only-K star (c0) spec + a dry-run; a smoke star | dry-run lists 1 + 2A cells per arm; the smoke star renders the k and bvib panes; sensitivity table regenerates from vectors | ~5 (smoke) | IN PROGRESS | =wp/12-star= / Claude (session 2) |
 | WP-3c | Integral-only K, with the P/D roles factored into the level-1 facilities: the first star (kp_frac x tau_i x cast x whale) on none / dump x1 / squeeze x4, judged by G7 / G8 and x4 AUC / rail days vs the P-carrying baseline | WP-12, WP-2 (for the undertakings baseline; the usdc-mix baseline may run first) | experiments/stars/k-integral-*.toml | the c0 and c1 sensitivity tables and pane figures; a recommendation on kp_frac | decisions pending 7 closed with evidence | ~63 / cycle | TODO |                |
 | WP-11 | Monetary Diamond consolidation (POST-wave-3): facets = venue, custody, ops, undertakings + ladder, facility registry, house, observer, controller; =Buck='s =buckK= and =basket= point at the Diamond (CARRY-CONVEXITY.org 6.4) | all wave-3 wins | src/basket/* (facets), src/Buck.sol wiring decision, deploy scripts | facet map + shared storage layout; time-locked parameters | existing forge suites pass facet by facet; lambda = gamma = 0 identity; one-way call graph asserted | -- | TODO |                |
-| WP-13 | The corrected controller (D7): two loops with independent gains (Kq, Kqi, Kqd) and one position integrator; observer aggregation modes S / V with weights; =IStabilizer.position()= / =positionCap()= / =stale()=; hold-last cap on an unreadable NAV; disabled stabilizers excluded; the price loop and =fundingFactor()= read the RAW basket value (decision 10) | WP-3a | BuckKControllerShadow.sol (extend), ShadowObserver.sol (modes, weights, exclusion), IStabilizer.sol (append), BuckBasketOps.sol (position / cap / stale), forge tests; deploy.py / __main__.py (append: =--shadow-mode s|v=, =SIM_SHADOW_KQ= / =_KQI= / =_KQD= / =_W_*=) | =--controller shadow= runs in both modes; the R14 attribution panel gets the per-loop dK | Kq = Kqi = Kqd = 0 identity with Direct state-for-state; S0 gains reproduce D4 in the interior on a 5-d smoke; guard-trip test leaves position() / saturation() unchanged and sets stale(); disabled desk excluded from s; shell size within EIP-170 | 1 smoke | TODO |                |
+| WP-13 | The corrected controller (D7): two loops with independent gains (Kq, Kqi, Kqd) and one position integrator; observer aggregation modes S / V with weights; =IStabilizer.position()= / =positionCap()= / =stale()=; hold-last cap on an unreadable NAV; disabled stabilizers excluded; the price loop and =fundingFactor()= read the RAW basket value (decision 10) | WP-3a | BuckKControllerShadow.sol (extend), ShadowObserver.sol (modes, weights, exclusion), IStabilizer.sol (append), BuckBasketOps.sol (position / cap / stale), forge tests; deploy.py / __main__.py (append: =--shadow-mode s|v=, =SIM_SHADOW_KQ= / =_KQI= / =_KQD= / =_W_*=) | =--controller shadow= runs in both modes; the R14 attribution panel gets the per-loop dK | Kq = Kqi = Kqd = 0 identity with Direct state-for-state; S0 gains reproduce D4 in the interior on a 5-d smoke; guard-trip test leaves position() / saturation() unchanged and sets stale(); disabled desk excluded from s; shell size within EIP-170 | 1 smoke | DONE (merged 2026-09-06, b4c1b75; 36 Shadow + 37 Ops + 4 pytest; identity 5/5 frames; S and V engaged smokes) | =wp/13-controller= / subagent |
 | WP-14 | Local skews kappa_i on the level-1 agents: UndertakingAgent (eps per side), FacilityAgent (x / y), SeederAgent (range centre), the desk (its Q1/Q3 thresholds via the ops params): band_i = band_i0 + kappa_i q_i / cap_i, default 0 | WP-13 (position telemetry only) | undertaking_agents.py, facility_agent.py, seeder_agent.py (append: kappa knob, sk_* counters); the desk's thresholds | kappa on / off cells in the grid | kappa = 0 byte-identical to today (L3); under a differential disturbance the loaded facility's own book unwinds with K within G7 | 2 smokes | TODO |                |
 | WP-15 | The controller-alternatives grid (the test plan of this file): disruption TOMLs for classes 5-8 and 10; =BookLoaderAgent= (class 9); habituation / carry / saturation-dwell / K-economy / book-loading / attribution metrics; cycles 1-3 | decision 8; WP-13, WP-14, WP-16 | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml (new); bookloader.py (new); eqmetrics.py / snapshot.py (append); a star spec per cycle | the three cycles' tables and panes; a recommendation S vs V, tau_s, kappa* | P9 and P10 judged; G1-G8 on every cell; R15-R18 | ~130 | TODO |                |
 | WP-16 | Gain derivation, offline: the reduced plant (7.2 + the position loop) as a small linear model in Python; identify k_s (flow per unit K per unit cap) from banked vectors; LQR with costs (e^2, carry-weighted s^2, dK^2); SIMC sanity; margin check; the gain table for S and V at both depths | WP-1 vectors | alberta_buck/sim/kdesign.py, test_kdesign.py (new) | the gain table (Kq, Kqi, Kqd, tau_s) per design and depth; the lambda knee derived rather than swept | LQR reproduces the price loop's (Kp, Ki) within 25% when the position weight is 0 (the sanity anchor); the derived tau_s lands between tau_I and the persistence horizon | 0 | TODO |                |
@@ -628,8 +633,8 @@ plan can start, with what was verified on the day.
 
 | item                                                          | package  | sessions | parallel with          | acceptance                                   |
 |---------------------------------------------------------------+----------+----------+------------------------+----------------------------------------------|
-| slot0 quoting in the three readers; identity pair; seeder smoke | decision 8 | 1      | everything             | cmp identical where no concentrated position |
-| second loop, observer modes, position / cap / stale, telemetry, wiring, forge tests | WP-13 | 1-2 | WP-16, WP-15 | the identity and guard-trip tests; both modes smoke |
+| slot0 quoting in the three readers; identity pair; seeder smoke | decision 8 | 1      | everything             | DONE 2026-09-04 (46c3b7d); the 1-year pair on the Xeon remains |
+| second loop, observer modes, position / cap / stale, telemetry, wiring, forge tests | WP-13 | 1-2 | WP-16, WP-15 | DONE 2026-09-06 (b4c1b75) |
 | reduced model, step tests, LQR, SIMC check, the gain table    | WP-16    | 1        | WP-13, WP-15           | the sanity anchor; tau_s in range             |
 | class TOMLs, pusher, period knob, BookLoaderAgent, metrics, star values axis, cycle-1 spec | WP-15 | 1-2 | WP-13, WP-16 (A cells run early) | each class visible; metrics unit-tested |
 | local skews on the three agents; keeper-emulated desk skew    | WP-14    | 1        | after WP-13's telemetry, or with own counters | kappa = 0 byte-identical; differential test |
@@ -718,6 +723,72 @@ a Xeon cell.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-06 -- WP-13 DONE and merged (session 3, subagent on =wp/13-controller=)
+
+- Merged --no-ff as b4c1b75 (branch commits facd3af contracts, 8e7818f
+  wiring + telemetry, 988a330 tests, 671e298 the booking-lag fix,
+  0a14f1c the report =reports/wp-13.org=, which is the evidence of
+  record).  One conflict, =snapshot.py= (the WP-D8 and WP-13 append
+  blocks at the same spot), kept both sides in order.  On the merged
+  tree: =make nix-build= clean (the one pre-existing warning);
+  =make nix-test= 60 suites, 619 passed, 0 failed, 1 skipped (600 + 15
+  Shadow + 4 Ops); pytest of the wave-3 files + =test_gauge= +
+  =test_shadow_book=: 155 passed.
+- Built (D7 as decided): =BuckKControllerShadow= is Direct plus a second
+  PID on the position ERROR r = 0 - s (state S / IS / DS; gains Kq /
+  Kqi / Kqd real x 1e12 like Kp / Ki / Kd; ONE position integrator;
+  per-integrator rail anti-windup; bumpless =retunePosition= /
+  =setBuckK0= / =reprime= carrying the position terms; =terms()= and a
+  =BuckKTerms= event beside the unchanged =BuckKUpdated=); the price
+  loop and =fundingFactor()= read the RAW basket (decision 10).
+  =ShadowObserver= aggregates in mode S (sum lambda_i q_i / D) or V
+  (sum w_i q_i / cap_i over the INCLUDED stabilizers, weights
+  renormalized); =observe()= refreshes each held cap through
+  =IStabilizer.positionCap()= in try/catch -- a revert holds the cap and
+  flags STALE, a zero EXCLUDES (decision 9) -- and =flags()= carries
+  the masks.  =BuckBasketOps.positionCap()= reverts =NavUnreadable= on
+  a guard trip: +114 B (shell 21,379 B, headroom 3,197); the holding
+  logic lives in the observer (6,000 B) and the second loop in the
+  controller (5,824 B).  Sim: =--shadow-mode s|v= / =SIM_SHADOW_MODE=,
+  =SIM_SHADOW_KQ= / =_KQI= / =_KQD=, =_W_DESK= / =_W_OFFSET=,
+  =_LAMBDA_DESK= / =_LAMBDA_OFFSET=, =_OFFSET_CAP_USD= (default $10M);
+  27 =sh_*= / =pid_*= frame fields (the desk's book, s, saturation,
+  boost, stale / excluded, =pid_up/ui/ud= beside =pid_q/qi/qd=).
+- FINDING (subagent, finding 1): WP-3a's sim-only pseudo-stabilizer
+  was NEVER FED -- no agent called =setShadowOffset=, so every shadow
+  cell before this merge (session 2's integration smokes included) fed
+  K the desk's book only.  =shadow_book.py= now books =ut_absorbed_open
+  - ut_issued_open - fac_drawn= at each tick start (sent only on
+  change; a one-day lag through the agents' own =compute()= calls was
+  found and fixed in 671e298).
+- Evidence (forge): six identity tests (Kq = Kqi = Kqd = 0 reproduces
+  Direct state for state over a railed schedule, with a live non-zero
+  position too); S0 reproduction exact in the interior against a
+  Direct twin on the composite value (2 wei with Kd); sign canaries in
+  both modes; the guard trip on the REAL desk (spot pushed off a warm
+  TWAP: =Slippage= -> =NavUnreadable=; the observer holds the cap,
+  keeps position / saturation / aggregate, sets stale; the next cycle
+  after the window clears it); the disabled desk excluded and the
+  weights renormalized; per-integrator anti-windup; bumpless
+  retunePosition / setBuckK0 / reprime; =terms()= decomposition.
+- Integration smokes on the MERGED tree (catalogue-none, pyrevm, ops
+  basket, =build/sim/smoke/int13/=, not committed): 5-day Direct vs
+  shadow with zero position gains -> buckK identical on 5/5 frames
+  (max |dK| 0; the only differing pre-existing field is the TOKEN side
+  of =poolBal= at the wei level, which session 2's archived pair shows
+  too -- deployment-address dust, not behaviour); 30-day S and V cells
+  with the position loop engaged (Kq 0.01, Kqi 6.43e-8 real;
+  UndertakingAgent=1 at eps 0.005, p 1.0): exit 0, =ut_err= empty, 8
+  trades, 24.1k BUCK issued open, s_S -0.0023 / s_V -0.0012 at day 29,
+  =pid_q= / =pid_qi= positive (issued raises K), stale / excluded 0 on
+  every frame, and K == K0 + the six terms on every frame.  At the
+  DEFAULT band (eps 3%, p 2) the undertakings never trade on the calm
+  none arm in 30 days, so a position in front of K needs the tighter
+  band or a disruption.
+- Open issues filed as decisions pending 17-19.  Worktree
+  =../alberta-buck-wp-13= removed; its smokes archived under
+  =build/sim/smoke/wp13/=.
 
 ** 2026-09-04 -- Decision-8 branch DONE and merged (session 3, subagent on =wp/d8-slot0=)
 
@@ -1352,6 +1423,35 @@ next.  Paste acceptance evidence here, not in chat.
    zeros in the committed vector since 1c773ce): regenerate the vector
    or relax the assertion.  (c) =vecdiff='s counter heuristic wants a
    declared counter list in =snapshot.py=.
+
+17. *One lumped pseudo-stabilizer vs per-class stabilizers* (from
+   WP-13).  The Python stand-ins' books (undertakings + facility) are
+   summed into ONE sim-only offset with one lambda, one weight and one
+   cap (default $10M); the seeder is not booked at all.  Decision 11's
+   per-class caps and weights (desk 1, undertakings 1 per side,
+   facility 0.5, seeder 0.25) therefore cannot yet mean what they say
+   in a cell.  Proposed: WP-14 or WP-15 registers one sim-only
+   stabilizer per agent class (the observer's per-stabilizer surface
+   already supports it) and books the seeder's converted range as a
+   position.
+18. *Idle stabilizers dilute V* (from WP-13, finding 3).  V's
+   denominator is the sum of weights over INCLUDED (readable, enabled)
+   stabilizers, as D7 states, so the desk at weight 1 with an empty
+   book halves the level's fill (s_V -0.0012 vs s_S -0.0023 on the
+   same books).  Alternative: sum over stabilizers with a non-zero
+   book, which keeps s discontinuous when a book crosses zero.
+   Proposed: keep D7's rule and let WP-16's gains absorb the scale;
+   revisit if cycle 2's weight sweep says the dilution matters.
+19. *Conventions accepted from WP-13* (recorded, no action): the
+   position loop is a PID on the position ERROR r = 0 - s, so positive
+   gains give D4's signs and S0 is literally (Kq, Kqi, Kqd) = (Kp, Ki,
+   Kd); exclusion applies under S as well as V (a book that cannot
+   move is not a lever in either units); =addStabilizer= keeps its
+   WP-3a signature, starts the V weight at 1e18, reads the cap once at
+   registration and rejects codeless addresses; =observe()= is
+   permissionless and stateful (a fresher cap is its only effect);
+   =terms()= at a rail sums to the RAW output, so the R14 panel reads
+   =buckK= for the applied value and the terms for the decomposition.
 
 * Conventions
 
