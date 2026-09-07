@@ -45,8 +45,11 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   (2026-09-06; the corrected two-loop controller, observer modes S / V,
   hold-last cap, the stand-ins' books finally fed to the observer;
   decisions pending 17-19 filed).  Forge on the tree: 60 suites, 619
-  passed, 0 failed, 1 skipped; pytest 155.  Both worktrees removed;
-  NOTHING IS IN FLIGHT.  Next: WP-16 (gains), WP-15 (the grid's
+  passed, 0 failed, 1 skipped; pytest 155.  Both worktrees removed.
+  datasim.local is UP as the grid machine (2026-09-06: build, forge
+  and pytest verified there with the Mac's numbers; the 30-day cell is
+  byte-identical across the two machines; ptau, the big keys and
+  build/sim wait for the LAN).  NOTHING IS IN FLIGHT.  Next: WP-16 (gains), WP-15 (the grid's
   machinery), WP-14 (local skews) on offer to other-account agents
   through =ONBOARDING-D7.org=; the 1-year identity pair on the Xeon,
   judged by =vecdiff=; decision 14 (TOKEN-pool gauges) before any
@@ -666,15 +669,16 @@ risk on the design owner's machine (98% used): the vectors are ~2 GB,
 but =/private/tmp= task outputs and scratchpads have wedged it before
 (ENOSPC) and must be cleaned between cycles.
 
-The grid machine (design owner, 2026-09-04): a 32-core, 96 GB Xeon
-(Linux x86_64), older cores -- assume 2-3x the per-cell time of the
-Mac's performance cores, so a 2-year cell in ~2-3 h, 28 in parallel:
+The grid machine, =datasim.local= (design owner; UP as of 2026-09-06):
+a 32-core, 94 GB Xeon, Linux x86_64, 175 GB free.  Measured: the
+30-day cell takes 8:32 wall there against ~2:41 on the Mac, ~3.2x per
+core, so a 2-year cell is ~3.5 h single-process and 28 run in parallel:
 
 | work            | cells | wall on the Xeon (28-way) | wall on both |
 |-----------------+-------+---------------------------+--------------|
-| cycle 1         | 78    | ~7-8 h (overnight)        | ~4 h         |
-| cycle 2         | 32    | ~3 h                      | ~2 h         |
-| cycle 3         | 16    | ~2-3 h                    | ~1.5 h       |
+| cycle 1         | 78    | ~10 h (overnight)         | ~6 h         |
+| cycle 2         | 32    | ~4 h                      | ~2.5 h       |
+| cycle 3         | 16    | ~3.5 h                    | ~2 h         |
 
 Memory on the Xeon is a non-issue (~6 GB at 28-way).  Its disk should
 have ~10 GB free for a cycle's vectors and logs.  Setup: nix (the
@@ -690,13 +694,19 @@ plan needs is DECLARED -- system tools and nix-python libraries in
 on the host.  Added 2026-09-04: =scipy= (python env; WP-16's optional
 cross-check) and =rsync= (commonInputs).
 
-Cross-machine determinism: L3 byte-identity is guaranteed within a
-machine.  Between macOS and Linux, libm transcendentals can differ by
-an ulp and a divergent float in a keyed draw diverges the vector.  Run
-one 30-day smoke on both machines and =cmp= them before the cycles;
-until that says identical, every comparison of a cycle is produced on
-ONE machine (the Xeon), and the Mac's smokes are never a baseline for
-a Xeon cell.
+Cross-machine determinism: CHECKED 2026-09-06 -- the same 30-day
+catalogue-none cell on the Mac (arm64 / macOS) and on datasim (x86_64
+/ Linux) is BYTE-IDENTICAL (=cmp=; =vecdiff= identical).  Cells from
+the two machines may be mixed within a cycle.
+
+What datasim has (2026-09-06): the branch at c795e01; the Foundry
+libraries; circom-lib at the pinned commit; =build/snark= without ptau
+and without the multi-GB keys; the venv; node_modules; =~/.claude= and
+=~/.claude.json= (paths resolve through the design owner's =/Users ->
+/home= symlink).  Verified there: build, forge 619 / 1 skipped, pytest
+155.  What it does not have yet (the LAN transfer): =ptau= (9.7 GB),
+the note_binding keys (~7 GB), =build/sim= (1.8 GB), a Claude Code
+install and login.
 
 ** Agents from other accounts
 
@@ -716,13 +726,58 @@ a Xeon cell.
   rate limits at five); the rest come from other accounts.
 - The design owner's other-account agents are onboarded by
   =ONBOARDING-D7.org= alone; they need repo access and, for the grid
-  packages, an account on the Xeon.  The integrator claims the
-  critical path (decision 8, then WP-13) on this account.
+  packages, an account on datasim.  The critical path (decision 8,
+  WP-13) was run on the integrator's account and is merged.
 
 * Progress ledger
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-06 -- datasim.local (the 32-core Xeon) brought up as the grid machine (session 3, design owner + Claude)
+
+- Host: =datasim.local=, Linux 5.10 x86_64, 32 cores, 94 GB, 175 GB
+  free; nix 2.35, git, rsync 3.2.3, node / npm present; the clone at
+  =~/src/alberta-buck= (origin =pjkundert/alberta-buck=); the design
+  owner symlinked =/Users -> /home= so every macOS path in =~/.claude=
+  and =~/.claude.json= resolves unchanged.
+- Transferred over ssh (rsync from the flake; =--max-size= where noted):
+  =lib/= Foundry libraries (103 MB: openzeppelin, chainlink-brownie,
+  forge-std, solidity-lib, v2 / v3 core and periphery, universal-router
+  without its node_modules and out; no macOS rapidsnark);
+  =build/snark/= without =ptau/= and without any file over 50 MB (280
+  MB: every verifier, fixture and small key -- enough for the SNARK
+  forge suites); =~/.claude/= (348 MB, without daemon.log and debug/)
+  and =~/.claude.json=.  Pushed by git rather than copied: the branch
+  head (=feature/carry-convexity= at c795e01, via a =mac/= ref and a
+  fast-forward) and the pinned =lib/circom-lib= commit 224c5a2, which
+  upstream no longer carries (pushed into the submodule's module
+  directory, then =git submodule update --init --no-fetch=).
+- DEFERRED to the LAN by the design owner: =build/snark/ptau= (9.7
+  GB), the note_binding / note_binding_a1 zkeys, r1cs and witnesses
+  (~7 GB), =build/sim= (1.8 GB of banked vectors), universal-router's
+  node_modules.  The =.env= (RPC keys) was not copied.
+- Verified on datasim at c795e01: =make nix-build= clean (the same two
+  harmless "dependency not found" warnings as the Mac); =make nix-test=
+  60 suites, 619 passed, 0 failed, 1 skipped -- identical to the Mac,
+  SNARK suites included; =make venv= completed (the first attempt had
+  been interrupted mid-install: bin/activate was missing); pytest of
+  the wave-3 files + gauge + shadow_book 155 passed.
+- CROSS-MACHINE DETERMINISM: the same 30-day catalogue-none cell (ops
+  basket, pyrevm) on both machines -> =cmp= BYTE-IDENTICAL and
+  =vecdiff= "identical: True".  Cells from the two machines may be
+  mixed in a cycle; the libm caveat is retired.
+- Timing: the 30-day cell took 8:32 wall on the Xeon (175 MB peak)
+  against ~2:41 on the Mac -- ~3.2x per core, so a 2-year cell is ~3.5
+  h single-process there and 28 run in parallel.
+- Lessons: rsync =--delete-excluded= DELETES excluded paths on the
+  receiver (it removed the remote's circom-lib worktree; recovered
+  through the module directory); a detached remote job needs
+  =nohup ... < /dev/null & disown= or the ssh session hangs; a git push
+  into a submodule's module directory needs its worktree directory to
+  exist.
+- Not done (the design owner's): install Claude Code on datasim and log
+  in (the macOS Keychain credential does not transfer).
 
 ** 2026-09-06 -- WP-13 DONE and merged (session 3, subagent on =wp/13-controller=)
 

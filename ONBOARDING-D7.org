@@ -104,21 +104,35 @@ shadow controller: observer=... lambda=0.5 gamma=0", "[deploy] WP-13
 position loop: mode=S Kq=0 ...", ~160 s, a 0.6 MB vector, exit 0.  A 2-year cell is ~66 min single-process; a vector is
 ~15 MB; peak memory ~180 MB.  Vectors are never committed.
 
-** The grid machine
+** The grid machine: datasim.local (up since 2026-09-06)
 
-The cycles run on the design owner's 32-core, 96 GB Xeon (Linux
-x86_64); the integrator's macOS machine runs smokes and analysis.  The
-flake covers both systems (=eachDefaultSystem=); pyrevm and the core
-kernel ship manylinux x86_64 wheels, so =make venv= works unchanged.
+The cycles run on the design owner's 32-core, 94 GB Xeon (=datasim.local=,
+Linux x86_64, ssh); the integrator's macOS machine runs smokes and
+analysis.  The flake covers both systems (=eachDefaultSystem=); pyrevm
+and the core kernel ship manylinux x86_64 wheels.  Verified there at
+c795e01: =make nix-build=, =make nix-test= (60 suites, 619 passed, 1
+skipped, SNARK suites included), =make venv=, and the wave-3 pytest
+files (155).  The venv is =~/src/alberta-buck.venv-0.1.0-nix-linux-cpython-313=;
+the design owner symlinked =/Users -> /home=, so the macOS paths in
+this document and in =~/.claude= resolve unchanged.
+
+Determinism across the two machines is CHECKED: the same 30-day
+catalogue-none cell is byte-identical on the Mac and on datasim (=cmp=
+and =vecdiff=), so cells from either machine may be compared directly.
+Per-core speed: ~3.2x the Mac's time per cell (a 30-day cell 8:32 vs
+2:41), so a 2-year cell is ~3.5 h single-process there; run =--jobs 28=.
 Vectors come back with rsync (declared in the flake).
 
-One caveat before any cross-machine comparison: byte-identity (L3) is
-guaranteed WITHIN a machine.  Between macOS and Linux, libm
-transcendental functions can differ by an ulp, and a divergent float in
-an agent's keyed draw would diverge the whole vector.  Run the same
-30-day smoke on both machines once and =cmp= the vectors; until that
-says identical, every comparison in a cycle (baseline vs axis cells) is
-produced on ONE machine.
+Not on datasim yet (a LAN transfer the design owner does): =build/snark/ptau=
+(9.7 GB), the note_binding zkeys / r1cs / witnesses (~7 GB), the banked
+=build/sim= vectors (1.8 GB), universal-router's node_modules, the
+=.env=.  The SNARK forge suites already pass without them (their
+verifiers and fixtures are there); only key regeneration needs them.
+
+Two ssh habits: a job that must outlive the session is launched as
+=nohup bash -c "..." > log 2>&1 < /dev/null & disown= and polled through
+a done-marker file; and rsync's =--delete-excluded= deletes EXCLUDED
+paths on the receiver -- never use it to "protect" a directory.
 
 * The reading plan (in order; minutes are for a careful read)
 
