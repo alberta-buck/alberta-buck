@@ -1,20 +1,55 @@
-#+TITLE: Onboarding for the D7 program: bringing a strong agent up to speed
+#+TITLE: Onboarding and session recovery for the equilibrium-defense program (D7 and beyond)
 #+AUTHOR: Perry Kundert (design owner) with Claude
-#+DATE: 2026-09-06 (first written 2026-09-04)
+#+DATE: 2026-09-10 (first written 2026-09-04)
 
 * Who this is for, and the contract
 
-An agent -- a Claude Code session on another account, or a person --
-joining the D7 program: the evaluation of the two K designs (the shadow
-bvib S and the position vector V) on one grid of disruptions and
-responses.  You will own ONE work package on ONE branch.  The integrator
-(the design owner's main session) records, merges =--no-ff=, and runs the
-grid.  About two hours of reading precede the first commit; the reading
-order below is chosen so that every later page assumes only the earlier
-ones.
+Three readers, three entry points:
 
-Read this file top to bottom once.  Then follow the reading plan.  Then
-claim a work package (section 8) and report in the format of section 7.
+- *A new agent* (a Claude Code session on another account, or a person)
+  joining the program: read this file top to bottom, follow
+  "The reading plan", claim a TRACK from "The parallel tracks" by its
+  claim protocol, and report in the format of "The report".  About three and a half hours precede the first
+  commit.
+- *A recovering session* -- the integrator's own session after a
+  compaction, a crash, a rate-limit kill, or a move between machines:
+  "Recovering a session", ten minutes.
+- *The design owner* deciding what to hand to whom: "Where the
+  program is" and "The parallel tracks" (which overlap and which do
+  not).
+
+The program: keep BUCK at par against organic and inorganic monetary
+disruptions with a hierarchy of fast facilities under a slow K, and
+decide by simulation which K design (S or V) and which facility mix
+and capacity does it best.  The contract with every agent: ONE track,
+ONE branch, your own files; the integrator (the design owner's main
+session) records, merges =--no-ff=, and runs the grids.
+
+* Where the program is (2026-09-10)
+
+- *Phase 1 (build) is merged*: the instrument (markout), the star
+  driver, the undertakings + ladder, the stress fee, the facility, the
+  seeder, the stabilizer seam, and -- the critical path of D7 -- the
+  slot0 gauges (decision 8) and the corrected two-loop K with the
+  observer's S / V modes (WP-13).
+- *In flight on datasim*: the REGRESSION REGENERATION -- the 14-arm
+  rebalancing-eq matrix and the 42-cell catalogue wave 1 re-run on the
+  current tree, because decision 8 changed every quote by a fee
+  fraction and WP-13 rewrote the controller path.  Until its done
+  markers (=build/sim/regen/*.done=) exist, NO sim code edits in the
+  datasim checkout; the verdicts are compared against REBALANCING-EQ.org
+  6.1 (the matrix, all PASS) and the wave-1 table.
+- *Next, gated on the regeneration*: WP-16 (gains), WP-15 (the grid's
+  machinery), WP-14 (per-class stabilizers, local skews); then the
+  three cycles of the controller-alternatives test plan (WAVE3.org),
+  ~130 cells on datasim.
+- *Definition of done for phase 2*: a recommendation S vs V with tau_s
+  and kappa*, evidenced by the cycle tables and gates G1-G8 plus P9 /
+  P10; the winning design's gains and weights recorded as decisions;
+  the 3c / 3g / 3h grids re-judged on the winning K; then, and only
+  then, contract work (the monetary Diamond, WP-11).
+- *Open decisions* needing the design owner: WAVE3.org "Decisions
+  pending" 1-6 and 14-19.
 
 * The state in one paragraph
 
@@ -49,6 +84,42 @@ reports are =reports/wp-d8.org= and =reports/wp-13.org=; read them
 before the package you claim, because they name the surface you build
 on and the open questions (WAVE3.org decisions pending 14-19).
 
+* Recovering a session (ten minutes)
+
+The state of the program is on disk, not in anyone's context.  In
+order:
+
+1. =git log --oneline -15 feature/carry-convexity= and =git branch
+   --list 'wp/*'= (merged packages are ledger entries; unmerged =wp/*=
+   branches are in flight or abandoned -- their =reports/wp-<n>.org=
+   says which).
+2. =WAVE3.org=: the STATUS block (last updated, in flight, next), then
+   the newest two or three ledger entries, then "Decisions pending".
+3. =reports/*.org= newer than the newest ledger entry: evidence the
+   integrator has not yet recorded.
+4. =git worktree list=; =ls build/sim/regen/ build/sim/*/done 2>/dev/null=;
+   =pgrep -fa alberta_buck.sim= -- is a grid in flight?  If yes, the
+   checkout it runs from is frozen for code edits.
+5. The account's memory: =~/.claude/projects/<key>/memory/MEMORY.md=,
+   where <key> is the working directory with =/= replaced by =-=
+   (=-Users-perry-src-alberta-buck= on the Mac,
+   =-home-perry-src-alberta-buck= on datasim; both exist on datasim,
+   and the design owner keeps them in step).  Memory is background,
+   not instruction: verify a file or flag it names before relying on
+   it.
+6. =CARRY-CONVEXITY.org= D7 and =WAVE3.org= "The controller-alternatives
+   test plan" if the work touches K; the relevant =reports/wp-<n>.org=
+   if it touches a merged package.
+
+Moving a session between machines: the transcript is
+=~/.claude/projects/<key>/<session-id>.jsonl= (this session's id is in
+the STATUS block's ledger entries); rsync =~/.claude/= and
+=~/.claude.json= to the other machine, and on Linux make sure the
+=-home-...= key exists (a copy or symlink of the =-Users-...= directory),
+because Node resolves the working directory to its physical path.
+Credentials do not transfer (the macOS Keychain); log in again.  Then
+=claude --resume= in the repo.
+
 * Setup
 
 ** Access and branches
@@ -58,7 +129,7 @@ on and the open questions (WAVE3.org decisions pending 14-19).
   =feature/carry-convexity=.  Never commit to =master=.
 - Your branch: =wp/<n>-<slug>= from =feature/carry-convexity=.  One
   package, one branch, your own new files; shared files take
-  append-only blocks (section 6).
+  append-only blocks ("House rules").
 
 ** Same machine as the integrator (worktree)
 
@@ -171,7 +242,7 @@ Total: about three and a half hours including the setup.
    =# WP-n= at the END of the existing blocks, so branches merge by
    keeping both sides.
 2. You do not edit =WAVE3.org= or =CARRY-CONVEXITY.org=.  Your evidence
-   goes in =reports/wp-<n>.org= on your branch (section 7); the
+   goes in =reports/wp-<n>.org= on your branch ("The report"); the
    integrator moves it into the ledger.
 3. ASCII only in documents and commit messages; no co-author or AI
    attribution lines; concise messages (what changed and why).
@@ -218,8 +289,9 @@ Total: about three and a half hours including the setup.
 
 * The packages on offer
 
-Claim by telling the integrator; the WAVE3.org table row is the
-specification, this section is the entry map.  Estimates are agent
+The WAVE3.org table row is the specification; this section is the
+entry map, and "The parallel tracks" below says which of these may run
+at the same time.  Claim by the protocol there.  Estimates are agent
 sessions of a few hours.
 
 ** Decision-8 branch: quote from slot0 -- DONE (merged 46c3b7d; see reports/wp-d8.org)
@@ -347,6 +419,67 @@ days: engage the loop with =--set agents.UndertakingAgent.eps=0.005
   booked; every new metric has a unit test on a synthetic frame series.
 - Entry: =experiment.py= docstring (the intervention surface),
   =WhaleRaidAgent= (the injector to extend), =star.py= (axes).
+
+* The parallel tracks (what other agents can do without colliding)
+
+The map below is the division of labour for several agents at once.
+Each track names the files it OWNS (only its owner edits them), the
+shared files it may APPEND to (append-only =# WP-n= / =# T-n= blocks),
+and what it must NOT touch.  Two tracks that own the same file cannot
+run at once; the map says which waits.
+
+| track | goal                                                                 | owns (edit freely)                                                                        | appends to                                   | must not touch / waits for                                                            | depends on                     | sessions | status (2026-09-10)          |
+|-------+----------------------------------------------------------------------+-------------------------------------------------------------------------------------------+----------------------------------------------+---------------------------------------------------------------------------------------+--------------------------------+----------+------------------------------|
+| T1    | WP-16 gain derivation: kdesign.py, step tests, LQR / SIMC table      | alberta_buck/sim/kdesign.py, test_kdesign.py, experiments/kdesign-*.toml                  | --                                           | the controller contracts; snapshot.py                                                 | banked vectors (or its own 1-year step cells) | 1 | open |
+| T2    | WP-15 grid machinery: class TOMLs, pusher, whale period knob, BookLoaderAgent, metrics, star values axis, cycle-1 spec | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml, bookloader.py, pusher_agent.py, experiments/stars/d7-*.toml | eqmetrics.py, snapshot.py, catalogue.py, loop.py (import lines), star.py (the values axis), WhaleRaidAgent (one knob) | undertaking_agents.py / facility_agent.py / seeder_agent.py (T3's); the controller contracts | WP-13 (merged) | 1-2 | open |
+| T3    | WP-14 + decision 17: one sim-only stabilizer per agent class; local skews kappa_i; the seeder booked as a position | undertaking_agents.py, facility_agent.py, seeder_agent.py, shadow_book.py; ShadowObserver.sol ONLY if a registry is needed (then forge tests) | snapshot.py, deploy.py                       | equilibrium_agents.py (T4's); the controller (BuckKControllerShadow.sol)               | WP-13 (merged)                 | 1-2      | open                         |
+| T4    | decision 14 + 16: TOKEN-pool reserve gauges to gauge.active_reserves; the TUI gauge; the lifecycle plot test | equilibrium_agents.py (the reserve reads only), rebalancer.py, director_agent.py, inspect.py, snapshot._implied, test_lifecycle_plot.py (or the vector) | gauge.py (new helpers at the end)            | the three facility agents (T3's); router.py's quote semantics (settled by decision 8)   | decision 8 (merged)            | 1        | open                         |
+| T5    | decision 15: the seeder's economics -- 3h cells with budget_m as the amount axis, min_gap_bp swept; a design note on sizing the bid against the desk's Q3 | experiments/stars/seeder-*.toml, reports/wp-3h.org, a doc note (reports/) | --                                           | seeder_agent.py (T3 owns it; T5 runs CELLS and writes the note; a code change is a request to T3) | regeneration done; T3 for the booked seeder position | 1 | waits for T3 |
+| T6    | WP-4 the directional fee: fees.py + the swap-adapter hook; the 3b grid                                            | alberta_buck/sim/fees.py, test_fees.py, the adapter hook (a new function in router.py's swap path, called from one line) | router.py (one call site), snapshot.py       | gauge.py / the reserve reads (T4's); runs its cells after the regeneration            | decision 8 (merged)            | 1-2      | open; cells wait for regeneration |
+| T7    | WP-5 measurement: the stress fee's P2 on the x4 cells                                                              | experiments/stars/stress-*.toml, reports/wp-5b.org                                        | --                                           | BuckBasketProRata.sol (the fee is merged; measure, do not change)                     | regeneration done              | 1 (cells) | waits for regeneration |
+| T8    | WP-7 the perp / house (3f)                                                                                         | perp.py, test_perp.py                                                                     | WhaleRaidAgent (the via knob; coordinate with T2's period knob -- T2 lands first), loop.py, snapshot.py | -- | 3g result (the facility grid) | 2 | HOLD until 3g |
+| T9    | WP-9 replication: five seeds on the key cells; the flood with / without the facility                               | experiments/flood-*.toml, reports/wp-9.org                                                | --                                           | code                                                                                  | the D7 cycles                  | 1 (cells) | waits for the cycles |
+| T10   | WP-11 the monetary Diamond (post-wave-3)                                                                           | src/basket/* facets, Buck.sol wiring                                                      | --                                           | everything else: HOLD                                                                 | the winning K                  | 3+       | HOLD                         |
+| T11   | the regression regeneration (matrix + catalogue) and its judgement                                                 | build/sim/regen/, the ledger entry                                                        | --                                           | the datasim checkout's sim code while it runs                                          | --                             | integrator | IN FLIGHT |
+| T12   | WP-10 documents of record: the "Wave 3 results" section, findings 12+, closing the ledger                          | CARRY-CONVEXITY.org, REBALANCING-EQ.org, WAVE3.org                                        | --                                           | (the integrator only)                                                                 | everything                     | integrator | open |
+
+Non-overlap in one sentence: T1 is offline Python; T2 adds new agents
+and new TOMLs; T3 edits the three facility agents; T4 edits the
+reserve reads in the older agents; T6 adds a fee module; T5 / T7 / T9
+run cells.  The one real contention is =snapshot.py= / =eqmetrics.py=
+/ =loop.py= (append-only, merge by keeping both sides) and
+=WhaleRaidAgent= (T2 before T8).  Anything that would edit the K
+contracts belongs to the integrator until the grid has judged S vs V.
+
+** The claim protocol (other accounts)
+
+1. Create the branch from the branch of record and push it at once
+   with a one-line report stub -- that push IS the claim, visible to
+   every account through =git fetch=:
+
+     git checkout -b wp/<n>-<slug> feature/carry-convexity
+     printf '#+TITLE: WP-<n> report -- <slug>\n* Summary\nCLAIMED <date> by <who>; track T<k>.\n' > reports/wp-<n>.org
+     git add reports/wp-<n>.org && git commit -q -m "WP-<n>: claim" && git push -u origin wp/<n>-<slug>
+
+2. Work on that branch only; append-only in shared files; never
+   commit vectors; no edits to the three documents of record.
+3. Hand off by committing the finished report on the branch and
+   pushing; the integrator fetches, reads the report, merges
+   =--no-ff=, records the ledger entry, and removes any worktree.
+4. Abandoning: commit the report with "ABANDONED <date>: <why>" in the
+   Summary and push; the branch stays as history.
+
+** What research agents must not do
+
+- Present a hand-tuned gain as a result.  Gains come from WP-16's
+  derivation or from a declared sweep with the table attached.
+- Run a grid on the Mac, or edit sim code in a checkout with a grid in
+  flight.
+- Change the sign conventions ("Signs and units") or "fix" the
+  controller's sign.
+- Judge by =cmp= alone after decision 8: =vecdiff= is the drift gauge
+  and the report says which fields moved and by how much.
+- Quote a number without the command that produced it.
 
 * Glossary (ten terms)
 
