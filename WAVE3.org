@@ -742,6 +742,55 @@ install and login.
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
 
+** 2026-09-11 -- Regression regeneration: the catalogue's wave 1 (session 3, on datasim)
+
+- Finished 07:47 PDT, =make= exit 0, 42 of 42 cells, report
+  =build/sim/catalogue/summary.md= (not committed; =make
+  nix-venv-sim-catalogue-report= regenerates it).  VERDICTS: 42/42
+  PASS the 2-year tail gate, as in 2026-08-23.  CONTROL: mixes whose
+  agents cannot act on an arm reproduce the =none= cell to the last
+  digit (buck / credit on the dump, usdc on the squeeze, every
+  excursion base on the grinds, the spike and the step), so the
+  keyed-RNG determinism is intact and every delta is the mix.
+- RESPONSES MOVED (now vs 2026-08-23), all verdicts unchanged:
+
+  | cell             | peak bvib dev   | recovery d | AUC     | defender realized | whale P&L        |
+  |------------------+-----------------+------------+---------+-------------------+------------------|
+  | dump none        | +12.5 [+12.7]   | 4 [16]     | 82 [80] | --                | -0.02 [-0.01]    |
+  | dump usdc        | +8.7 [+8.7]     | 3 [12]     | 71 [71] | +0.27 [+0.26]     | -0.02            |
+  | dump basket      | +10.5 [+10.6]   | 7 [7]      | 80 [73] | +0.01 [+0.01]     |                  |
+  | dump all         | +8.5 [+7.9]     | 38 [11]    | 81 [71] | +0.18 [+0.16]     | -0.01            |
+  | squeeze none     | -11.4 [-10.4]   | 10 [5]     | 90 [82] | --                | -0.97 [-0.87]    |
+  | squeeze buck     | -10.0 [-10.1]   | 11 [14]    | 72 [78] | +0.11 [+0.03]     | -0.96            |
+  | squeeze credit   | -10.0 [-10.1]   | 10 [10]    | 78 [78] | +0.00 [+0.00]     | -0.98            |
+  | squeeze basket   | -10.3 [-10.1]   | 4 [4]      | 79 [81] | +0.01 [+0.01]     | -0.97            |
+  | squeeze all      | -9.4 [-8.1]     | 5 [10]     | 73 [71] | +0.06 [+0.08]     | -0.87 [-0.79]    |
+  | grind-down (any) | +2.8 [+1.7]     | 35 [6]     | 80 [83] | inert             | +2.00 [+2.00]    |
+  | grind-down all   | +1.8            | 0          | 82      |                   | +1.99            |
+  | grind-up (any)   | +1.8 [+2.1]     | 31 [12]    | 84 [90] | inert             | -1.63 [-1.62]    |
+  | spike (any)      | +1.9 [+1.8]     | 0 [1]      | 73 [63] | inert             | --               |
+
+  Read: the undefended squeeze is a point deeper (-11.4 vs -10.4) and
+  the full cast damps it less (-9.4 vs -8.1); the dump's undefended
+  trough is unchanged but its recovery is now counted in 4 days
+  rather than 16 while the full cast's recovery lengthened to 38; the
+  grind-down's peak rose to 2.8% (still under the 3% gate) with a
+  35-day recovery.  Two physics changes stand between these numbers
+  and the banked ones: decision 8 (every ex-ante gate reads the pool's
+  ACTIVE depth, so the excursion arbs enter less on phantom depth --
+  the same mechanism that removed WP-8's artefact) and D2's stress fee
+  (duress exits in the deflation branch -- the squeeze's branch -- now
+  pay 50 bp per 1% beyond 2%, which changes the depositors' behaviour
+  in exactly the squeeze cells).  Attribution needs =vecdiff= against
+  the banked wave-1 vectors, which are on the Mac; until then these
+  are the BASELINE NUMBERS of the D2 world for every later 3c / 3d /
+  3g cell, and the wave-1 table in REBALANCING-EQ.org is history
+  (decision 20 (a)).
+- Not regenerated: wave 2 (the intensity sweep, 44 cells); the D7
+  grid's cycles re-run its x4 cells anyway.
+- Still running: the three matrix re-runs (endow, endog-excursion,
+  endog; started 06:37-06:38; ~10 h).
+
 ** 2026-09-11 -- ORGANIC-SCALE.org; decisions 20 / 21; the wp/21-inputs branch (session 3, on datasim)
 
 - The design owner's question: can the collected metrics and every
