@@ -307,3 +307,113 @@ demography + cohorts; T17 the ladder runs and the organic gates.
 Their owned files are new modules; their appends are the usual shared
 files; none touches the controller, the observer, or the D7 grid's
 machinery (T2).
+
+* Scaling by multiplicity (design owner's proposal, 2026-09-11)
+
+The proposal: keep a few hundred agents -- enough to carry the
+VARIANCE of behaviour, each with randomly drawn parameters as today --
+and let each agent's ACTIONS scale to stand for 1, 10, 100, 1,000 ...
+individuals acting alike.  Assessment: this is the cohort layer of
+section 4 in its cheapest form, and it is the right first form.
+
+- *Compute*: the cost is per agent-tick, so a few hundred agents at
+  any multiplicity M cost what today's runs cost (~9 h per five-year
+  arm on datasim at fine cadence); the ladder becomes six runs, not
+  six populations.
+- *Heterogeneity*: the spread across a few hundred drawn parameter
+  sets already IS the distribution the cohort would sample; what is
+  lost is within-cohort diversity of TIMING (1,000 households do not
+  all refinance on the same tick).  Remedy: a cohort agent acts with a
+  FRACTION of its multiplicity per tick (a Bernoulli or Poisson thin
+  of M), so its flow is smooth at the tick scale and lumpy only where
+  the household's own life is lumpy (harvest cheques, a mortgage
+  origination).  This is one line in the base class, not a redesign.
+- *Chain granularity*: one swap of M x size is not M swaps of size --
+  it crosses more of the pool's tick range in one transaction, so its
+  price impact and fee are those of a single large trade.  Two
+  remedies, both needed: the pools' DEPTH scales with the rung (a
+  village's pools are not a nation's), and a cohort's trade is split
+  into k sub-trades within the tick when its size exceeds an impact
+  cap (the excursion agents already size by impact).  With both, the
+  per-transaction path is close to M small trades within the same
+  tick; the equivalence gate (section 4, cohorts) measures the
+  residual.
+- *Credit and accounts*: a BuckCredit face of M x face and one
+  account holding M households' BUCK behave under the contracts
+  exactly as M separate ones would, EXCEPT where the contract is
+  per-account: the funding gate's balance test and demurrage are
+  linear, but a per-account cap or a per-position bound (the desk's,
+  a facility's max_frac) would need to be read as per-cohort.  Listed
+  as the audit item for the cohort layer.
+- *Growth within a run vs across runs*: five years cannot carry five
+  orders of magnitude of growth organically; M is therefore a
+  PER-RUN rung parameter (deploy-time scaling of pool depth, treasury,
+  faces, budgets, the whale's budget), and the existing growth regimes
+  (=growth-steady= 25%/yr, the S-curve, decline, churn, the endog
+  hazards) supply the within-run growth on top of it.  Rung k is M =
+  10^(k-1) with everything money-denominated scaled alike; what is
+  NOT scaled is what the ladder tests (the desk's and undertakings'
+  caps as fractions of NAV, K's rails, the fee's bp).
+- *The gate*: at rung 2, ten agents at M = 1 against one agent at
+  M = 10 with the same drawn parameters, on the same arm; the
+  tolerance on issuance, savings and retirement flows and on bvib's
+  path is decision 2 of section 7.  Until it passes, every
+  higher-rung number is provisional.
+
+So: yes, and it is how tracks T16 / T17 should be built: multiplicity
+in the agent base class, thinning per tick, impact-capped splitting,
+rung-scaled deployment, the equivalence gate first.
+
+* Python or JavaScript: settling the engine (2026-09-11)
+
+The question: is it time to settle on one engine, and what is lost by
+migrating to the JavaScript implementation once the Python
+experiments' learnings are harvested?
+
+** What each side holds
+
+| asset                                             | Python                                                                                              | JavaScript (=core/js=)                                                                       |
+|---------------------------------------------------+-----------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------|
+| the EVM                                           | pyrevm, in-process, ~7000x anvil per tx: the only backend that runs a 5-year x 4-tick world in hours | tevm (ethereumjs; out of memory past ~6 months) or anvil over RPC (hours become weeks)       |
+| agents                                            | 29 classes; the organic core, the cast, the facilities, the keepers                                 | the doctrine (one-screen objects) and three audited household prototypes; the walking-skeleton cast |
+| the harness                                       | TOML experiments, interventions, sweeps, the catalogue and star drivers, eqmetrics gates, markout, vecdiff, plots, the TUI, the sim server | journals, SVG charts, a summary JSON; no grid driver, no gates                              |
+| determinism                                       | keyed RNG per class; byte-identical vectors within and across machines                              | designed for the port (the portcast cast validated it); journal parity proven on mini-sim    |
+| numerics for design                               | numpy (scipy in the flake): LQR, SIMC, the K-law fits                                               | none of note                                                                                 |
+| the audience                                      | the researchers                                                                                     | the participants: credit unions, wallets, browser worlds -- the SDK the agents document     |
+| results banked                                    | the matrix, the catalogue, wave 3's packages, the regeneration                                      | the audits (mortgage-retiree exact to the ledger), the browser demos                         |
+
+** What a migration would cost and lose
+
+1. *Speed, first and decisively*: without an in-process EVM for node,
+   no grid program is feasible in JavaScript.  A revm binding for node
+   (napi-rs, the same Rust toolchain the wasm kernels use) is the
+   prerequisite -- one to two weeks of platform work -- and until it
+   exists the research engine cannot move.
+2. *The harness*: everything in the harness row is a port (8-12
+   agent-sessions) plus re-validation of every banked result by
+   vector identity, arm by arm.
+3. *Numerics*: WP-16's derivation and the K-law analysis stay in
+   Python or become bespoke JS.
+4. *Two implementations of every agent* for the transition, with
+   drift as the standing risk; the audits show exactness is
+   achievable and show what it costs.
+5. *Gains*: one language from research to participants; browser-native
+   worlds; the viewer, the server and the SDK unified; the wasm
+   kernels already there.
+
+** The ruling proposed
+
+Do not migrate the research engine now, and do not leave the question
+open either: SETTLE THE DIVISION.  Python is the research engine
+through the D7 grid and the organic ladder (waves 3 and 4); JavaScript
+is the participant platform -- the SDK agents, the browser worlds, the
+viewer -- fed by the SAME telemetry schema (v2) and held to Python by
+the ported-cast identity ("JS ports only demonstrated agents" stays the
+rule).  The viewer being JavaScript makes the visualization neutral
+between them today.  Revisit the engine when two things are true: a
+fast EVM binding for node exists, and the organic agent set has
+stabilized at the end of wave 4 -- at that point the port is a
+translation of settled behaviour with a vector-identity gate per
+agent, not a moving target.  What is lost by never migrating: nothing
+the participants need, because what they need is the SDK doctrine,
+which is JavaScript already.
