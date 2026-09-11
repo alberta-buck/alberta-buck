@@ -742,6 +742,51 @@ install and login.
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
 
+** 2026-09-11 -- Attribution of the regeneration's shifts: what the banked vectors say (session 3, on datasim)
+
+- With the August vectors on datasim (=build/sim/banked/=), =vecdiff=
+  of each regenerated wave-1 cell against its banked twin:
+
+  | cell            | mean abs(d bvib) | max abs(d bvib) (day) | mean abs(dK) | changed action counters |
+  |-----------------+------------------+-----------------------+--------------+-------------------------|
+  | none-none       | 0.0065           | 0.071 (526)           | 0.0050       | 47                      |
+  | dump-none       | 0.0068           | 0.082 (670)           | 0.0042       | 48                      |
+  | dump-all        | 0.0074           | 0.071 (717)           | 0.0050       | 52                      |
+  | squeeze-none    | 0.0071           | 0.071 (717)           | 0.0047       | 48                      |
+  | squeeze-all     | 0.0070           | 0.043 (367)           | 0.0026       | 52                      |
+  | grind-down-none | 0.0068           | 0.061 (719)           | 0.0036       | 44                      |
+  | matrix basketeers | 0.0098         | 0.316 (1820)          | 0.0178       | 60                      |
+
+  READ: the UNINJECTED control cell diverges from its August twin as
+  much as any injected cell -- from the first days, in 47 of the
+  agents' action counters, with single-day bvib differences up to 7%
+  -- while its tail statistics match (1.0002 / 0.0061 / 0.733 both
+  times).  Two runs whose every quote differs by a fee fraction
+  (decision 8) are different REALIZATIONS of the same equilibrium: the
+  trajectories separate at the first trade and never re-converge
+  frame for frame, so a cell's response numbers (peak, recovery) are
+  measured against a different day-365 state than August's, and their
+  differences are not attributable trade by trade.  The verdicts and
+  the tail statistics are what carries over; the response numbers of
+  2026-09-11 are the baseline of the D2 world (decision 20 (a)).
+- The stress fee's share is small on these cells: it first fires on
+  day 366-395 and totals 3-5 exits (2.5k-44k BUCK) over two years on
+  the none, dump-none and squeeze cells, and NEVER on dump-all or
+  grind-down-none -- so the dump-all recovery change (11 -> 38 d) is
+  decision 8's, not D2's.  On the matrix's basketeers arm (18 exits,
+  49k BUCK) the threefold fall in tail sd is most plausibly decision
+  8 removing the credit arbs' phantom-depth entries (WP-8's finding 1
+  at catalogue scale); a fee-off diagnostic pair (=setStressFee(0,0,0)=
+  at deploy on the basketeers arm and the squeeze-none cell, ~4 h each)
+  would separate the two -- offered, not scheduled, since decision 20
+  keeps the fee on and the verdicts do not depend on it.
+- The endog re-run: 1827 frames, PASS, bv 1.0008 / 0.0129 / K 0.931
+  [1.0002 / 0.0068 / 0.924]; the endow re-run: PASS, 1.0004 / 0.0100 /
+  0.712 [1.0005 / 0.0101 / 0.715].  The 1093-frame first run was the
+  startup race after all: the clean re-run runs the full window.
+  Thirteen of fourteen arms are now judged; endog-excursion is the
+  last.
+
 ** 2026-09-11 -- The viewer (T14) and telemetry v2 (T13) built on =wp/14-viewer= (session 3, on datasim)
 
 - Built (worktree =../alberta-buck-wp-14=, branch from a42778f): the
