@@ -1,0 +1,309 @@
+#+TITLE: The organic environment at civilization scale: where the simulation is, what the viewer must show, and the effort to get there
+#+AUTHOR: Perry Kundert (design owner) with Claude
+#+DATE: 2026-09-11
+
+* The question
+
+The design owner's thesis (2026-09-11): introducing advanced monetary
+operations into a thin, incomplete organic equilibrium environment will
+not provide a good foundation for judging their effectiveness.  The
+organic environment that is wanted: a civilization-scale growth path
+from a few million BUCK of assets (tens of households, farmsteads,
+businesses) through hundreds of billions (thousands to hundreds of
+thousands of them), populated by the full spectrum of roles --
+
+- ISSUING: wealth -> BUCK (mortgages, operating lines, pledged assets);
+- SAVING, short to mid term: BUCK held; BUCK into the BuckBasket; BUCK
+  earned, exchanged for wealth, then pledged as a standing BuckCredit
+  facility to avoid demurrage;
+- RETIRING: issued or earned BUCK -> USDC to pay down external debt,
+  then retired opportunistically as BUCK is available at a discount --
+
+and a viewer that shows every collected metric and every agent's state
+and actions against the simulation clock, for Python or JavaScript
+worlds alike, so that agents' decisions (when, and why, given the
+global state) and the system's response to their aggregate can be
+seen unfolding.  This document takes stock against that goal and
+estimates the work.  It is a plan, not a result: nothing here is
+measured yet beyond what the ledger already records.
+
+* Where the simulation is (2026-09-11)
+
+** The roster against the spectrum
+
+29 registered agent classes exist (=alberta_buck/sim=).  Mapped to the
+roles above:
+
+| role                                                     | Python agents today                                                                                          | JS prototypes (=core/js/prototypes=)   | gap                                                                                                        |
+|----------------------------------------------------------+--------------------------------------------------------------------------------------------------------------+----------------------------------------+------------------------------------------------------------------------------------------------------------|
+| issue: mortgage against insured property                 | =BuckCreditDebtorAgent= (honest: real premium credit, the real funding gate, atomic refinance); =FatCreditBorrowerAgent= (stylized pooled properties, adoption S-curve, rolling reserve) | =mortgage-retiree.js= (audited port)  | none for the mortgage itself                                                                               |
+| issue: a business with a revenue cycle                   | --                                                                                                           | =farmer.js= (land + inventory pledged; operating line drawn for inputs, repaid from harvest; lumpy revenue) | NO Python population; no operating-line agent; no seasonal revenue |
+| issue: idle externally backed BUCK; over-valued BUCK sold for assets | =DirectMintBuckAgent=; =BuckIssuerArbAgent=                                                        | --                                     | none                                                                                                       |
+| issue: latent credit against premiums / discounts        | =FacilityAgent= (D6)                                                                                         | --                                     | none                                                                                                       |
+| save: counter-cyclical BUCK holder with a goal           | =SaverAgent= (buy below value, spend above; savings_goal)                                                    | --                                     | the goal is a cap, not a life-cycle (no drawdown phase)                                                    |
+| save: basket depositor                                   | =DirectMintAgent=, =ArrivingDMAgent= (origination flow), =BootstrapDMAgent=                                  | =basket-investor.js=                   | none                                                                                                       |
+| save: LP against BUCK; discount holder; basketeer        | =BuckPoolInvestorAgent=; =DiscountBuckArbAgent=; =DiscountBasketArbAgent=                                    | --                                     | none                                                                                                       |
+| save: BUCK EARNED -> exchanged for wealth -> pledged as a standing, undrawn BuckCredit facility | --                                                                                     | --                                     | ABSENT: no wage/earnings channel, no accumulate-then-pledge life-cycle, no standing undrawn facility as a saving instrument |
+| retire: pay down own BUCK credit when BUCK is cheap      | =BuckCreditDebtorAgent= retire gate; =FatCreditBorrowerAgent= retire_rate; the octl debtors (theta ladder)   | =mortgage-retiree.js=                  | none                                                                                                       |
+| retire: BUCK -> USDC to pay EXTERNAL (USD) debt, then retire BUCK at a discount | --                                                                                    | =mortgage-retiree.js= (MonthlyIncome + external mortgage) | ABSENT in Python: external USD debt is not a stock any agent carries; no income stream services it |
+| the defenders and adversaries (not organic)              | the excursion family, the whale, the commodity rebalancer, the undertakings, the seeder, the desk, the keepers | PinWhale, ParityArb, PidKeeper        | complete for the catalogue's purpose                                                                        |
+
+Whole categories absent from the Python world: an INCOME economy
+(wages paid in BUCK, expenses, goods priced in BUCK, merchants who
+set prices), EXTERNAL DEBT as a stock (USD mortgages and lines that
+BUCK earnings pay down), INSURERS as agents (D8: who vets the latent
+credit), INTERMEDIARIES (the credit unions of the mission statement,
+running BuckCredit pools and arbs for their members), a DEMOGRAPHY
+(household formation, exit, wealth and income distributions), and
+the GROWTH PATH itself as a first-class object (the ladder from a
+village to a nation).  The JS side holds the household doctrine
+(=farmer=, =basket-investor=, =mortgage-retiree=, =MonthlyIncome=) as
+exemplars proven by ledger audit, each "fitting on one screen" -- the
+right seeds, not yet populations.
+
+** The scale
+
+The matrix arms are the deepest organic worlds banked: about 285
+identities (30 honest debtors, 120 + 30 + 60 depositors, savers,
+borrowers, the cast), BUCK supply ~64M, basket NAV ~14M, pools seeded
+at $10M, five years at four ticks a day.  One such arm is 9-10.5 hours
+on datasim (32-core Xeon) and ~3 hours on the Mac: about 15 ms per
+agent-tick on pyrevm, the fixed cost of one on-chain act.  That fixes
+the compute wall for agent-per-household simulation at fine cadence:
+
+| households as agents | 5 y at 4 ticks/day, one core | 5 y at day_step 10, 1 tick (the equilibrium campaign's coarse mode) |
+|----------------------+------------------------------+---------------------------------------------------------------------|
+| 300 (today)          | ~9 h                         | ~14 min                                                             |
+| 3,000                | ~90 h                        | ~2.3 h                                                              |
+| 30,000               | ~900 h (five weeks)          | ~23 h                                                               |
+| 300,000              | impossible                   | ~10 days                                                            |
+
+So "hundreds of thousands of households" is not an agent count; it is
+a COHORT count times a cohort size.  A cohort agent stands for N
+households drawn from a distribution (income, assets, debt, horizon),
+acts with fractional flows (the cohort's aggregate issue / save /
+retire each tick) and carries the heterogeneity as sampled sub-books,
+so that 300 cohorts of 1,000 households run in today's compute.  The
+existing =growth-*.toml= experiments (steady 25%/yr, S-curve, decline,
+population churn, =realistic=) and the =endog= arrival hazards are
+the germ of the demography; they scale populations by count, not by
+cohort, and stop at tens of agents.
+
+** The telemetry and the viewer, today
+
+- Aggregate metrics: every frame carries ~210 keys -- the common-mode
+  state (=basketVal=, =buckK=, =supply=, =treasuryBuck=, the pools'
+  =poolBal= / =spotBuck= / =spotUsdc= / =refUsd=), the controller's
+  terms (=pid_*=), and per-CLASS counters by prefix (=bcd_= debtors,
+  =dm*= depositors, =saver_*=, =fat_*=, =bia_=, =bpi_=, =dba_= / =dbb_=,
+  =exc_*=, =raid_*=, =crb_=, =ut_=, =fac_=, =sd_=, =sh_=, =mk_= / =mo_=
+  the desk, =fk_= the fence, =growth_*=, =regime_*=, =mx= the markout
+  ledger).  This is what the matplotlib panes (=plot_equilibrium= and
+  friends) draw.
+- Per-agent state: TELEMETRY.md schema v1 -- =meta.telemetry= is the
+  roster (id "Class#idx", class, index, stride, resolved knobs) and
+  =frame["ag"][id]= is a small state record for agents that implement
+  =telemetry()= (holdings and P&L).  Implemented by the excursion
+  family, the saver and two more in =equilibrium_agents.py=, the
+  undertakings, the facility and the seeder: 7 of 29 classes.  The
+  depositor, debtor and borrower populations -- the organic core --
+  report only their class aggregates.
+- Actions: NONE in the vector.  Agents print human lines to stdout
+  ("[directmintagent-108] redeem failed ..."); the markout ledger
+  attributes SWAPS to an actor tag through the pool probe; the JS
+  agents keep a =this.ledger= array and a journal of tagged sends.  A
+  "why did this agent act" question cannot be answered from a vector
+  today.
+- Live source: the sim server (=alberta_buck.sim.server=) streams the
+  SAME frame objects over =ws://.../s/<sid>/frames= with =/control= and
+  =/rpc= channels, one world per client session -- a browser viewer of
+  the frame schema is already fed live.  The JS sims (=eqsim=,
+  =farmsim=, =mini-sim=, =join-sim=) write their OWN summary JSON, SVG
+  charts and JSONL journals, not the frame schema.
+- The consistency question, answered: within Python the per-class
+  aggregates are consistent by convention (prefix + counter) and the
+  per-agent records are consistent where they exist (schema v1); the
+  JS agents do not emit the Python schema.  One contract for both is
+  the first deliverable below.
+
+* The viewer
+
+** What it must do (the design owner's specification, restated)
+
+A time slider across the top drives a "current" simulation time.  The
+LEFT column stacks the simulation metric panes, the matplotlib panes
+as live graphs, every collected series available.  The RIGHT column
+holds one TAB per agent class present in the run, populated
+dynamically from the roster; inside a tab, one pane per agent with
+graph pens for that agent's state fields and a log of its actions
+showing the three nearest the current time.  Sources: a Python vector
+(complete, or a checkpointed partial one), a live Python world (the
+server's frames channel), or a JavaScript simulation emitting frames
+incrementally.  The purpose is to see WHEN and WHY each agent decides,
+against the global state it sees, and how the system's response to
+the aggregate unfolds.
+
+** Design
+
+1. *Telemetry schema v2* (Python first).  Keep v1's roster and state
+   record; add per frame, per agent, =acts=: the list of actions since
+   the previous frame, each ={"t": tick, "kind": "...", "args": {...},
+   "why": {...}, "ok": bool, "err": "..."}=.  The recording point
+   already exists: the loop's pool probe attributes a send to
+   =actor_tag(a)=; a thin recorder on =chain.send= under the acting
+   agent's tag captures EVERY send (not only swaps), and the agent's
+   decision variables (the bvib it read, the gate it passed) go in
+   =why= from the same place the agent already prints them.  Every
+   class implements =telemetry()= (a base-class default from its
+   counters), so the organic core appears per agent.  Frame size
+   grows with actions; the vectors stay tens of MB.
+2. *The JS adapter*.  The JS doctrine's =this.ledger= and tagged
+   sends map one-to-one onto =acts=; a small emitter writes the frame
+   schema (=meta.telemetry= + frames) incrementally (JSONL, one frame
+   per line, or the websocket channel), so the viewer never knows
+   which language produced the world.
+3. *The viewer itself*: one HTML file plus one script, no server
+   required, in =alberta_buck/sim/viewer/=; served by the sim server
+   too.  Plotting with uPlot (vendored through =package.json= as a dev
+   dependency -- house rule 11), which draws 1,800 frames x 200 series
+   without effort.  Left: panes auto-discovered from frame keys and
+   grouped by prefix, with a saved layout for the canonical panes.
+   Right: tabs from the roster's classes, per-agent panes with pens
+   from the =ag= fields, the action log window bound to the slider.
+   Sources: drag-and-drop or URL for a vector (partial vectors read
+   because frames are checkpointed every 25 days), =ws://= for a live
+   world, JSONL for a JS world.  Export: the current view as PNG/SVG
+   for the documents of record.
+4. *Where it pays first*: the D7 grid's attribution panel (R14c: WHY K
+   moved -- the price loop's and the position loop's terms beside the
+   facilities' books) is exactly this viewer's left column; the
+   organic program's questions (why did the debtors stop issuing?) are
+   its right column.
+
+** Effort
+
+| step                                                    | sessions | depends on          |
+|---------------------------------------------------------+----------+---------------------|
+| telemetry v2: recorder, =acts=, every class reporting   | 1-2      | --                  |
+| viewer v1: file source, slider, left panes, class tabs, agent panes, action log | 2 | v2 (can start on v1 data) |
+| live source (websocket) + partial-vector refresh        | 0.5      | viewer v1           |
+| JS emitter / adapter to the frame schema                | 1        | v2                  |
+| exports for the documents; the canonical pane layouts   | 0.5      | viewer v1           |
+
+About five sessions to a viewer that answers "when and why" for both
+worlds.
+
+* The organic program
+
+** What "organic" must mean at each rung
+
+A SCALE LADDER, each rung a world that must hold equilibrium under its
+own organic load before any monetary operation is judged on it:
+
+| rung | assets | households (as cohorts x size)       | pools (BUCK/USDC, TOKEN/BUCK) | what the rung tests                                                        |
+|------+--------+--------------------------------------+-------------------------------+----------------------------------------------------------------------------|
+| 1    | $3M    | 30 x 1 (agents ARE the households)   | $0.3M                         | the village: few actors, lumpy flows; does K even have a signal?           |
+| 2    | $30M   | 300 x 1                              | $3M                           | today's matrix, made organic (income, external debt, businesses)           |
+| 3    | $300M  | 300 x 10                             | $30M                          | first cohorts; the fast facilities' caps vs depth                          |
+| 4    | $3B    | 300 x 100                            | $300M                         | the town: pools deep, K's authority vs demand growth                       |
+| 5    | $30B   | 300 x 1,000                          | $3B                           | the region: does the funding gate throttle a growing economy?              |
+| 6    | $300B  | 300 x 10,000                         | $30B                          | the nation: the desk and undertakings as fractions of a large economy      |
+
+Each rung runs the organic gates first (the matrix's: bv tail within 1%,
+K interior, channels alive, plus the new ones: income serviced, debt
+paid down, savings life-cycles completing) and only then the
+catalogue's disruptions and the D7 designs.  The rungs differ in what
+breaks, which is the point: a desk cap that is 10% of NAV is decisive
+at rung 2 and invisible at rung 6.
+
+** The agents to build (Python populations from the JS seeds)
+
+1. *The income channel*: a =HouseholdAgent= with a wage in BUCK (a LABR
+   share of the basket as the wage index), expenses, a savings rate,
+   and the three destinations of surplus (hold BUCK; deposit into the
+   basket; buy insured wealth and pledge it as a STANDING undrawn
+   BuckCredit facility -- the demurrage-avoiding saver the design
+   owner names).  This is the missing saver.
+2. *The business*: =FarmsteadAgent= / =BusinessAgent=, the Python port
+   of =farmer.js=: pledged operating assets, an operating line drawn
+   seasonally and repaid from lumpy revenue, a mortgage, payroll to the
+   household population (closing the income loop).
+3. *The external-debt retiree*: the Python port of =mortgage-retiree.js=
+   with =MonthlyIncome=: a USD (USDC) mortgage as a stock; BUCK earned
+   or issued is swapped to USDC to pay it down, and the BUCK credit is
+   retired opportunistically at a discount.
+4. *The intermediary*: a =CreditUnionAgent= holding members' BuckCredit
+   pools and running the member-facing arbs (the mission statement).
+5. *The insurer*: vets and prices the latent credit (D8), the counter-
+   party of every facility; a rate, a capacity, a default model.
+6. *Demography*: a =Demography= driver that forms and retires households
+   and businesses by hazards, samples their incomes and assets from
+   distributions that scale with the rung, and grows the population
+   along the ladder -- the =growth-*= experiments generalized.
+7. *Cohorts*: the aggregation layer (one agent, N households) with
+   fractional flows and sampled sub-books; a cohort must reproduce the
+   sum of N single agents within a stated tolerance at rung 2 before it
+   is trusted at rung 3+ (the L3-style gate of this program).
+
+** Effort
+
+| step                                                              | sessions | compute            | depends on              |
+|-------------------------------------------------------------------+----------+--------------------+-------------------------|
+| telemetry v2 + viewer (above)                                     | 5        | --                 | --                      |
+| income channel + standing-facility saver (Python)                  | 2        | smokes             | --                      |
+| business / farmstead + payroll (port of farmer.js)                 | 2        | smokes             | income channel          |
+| external-debt retiree (port of mortgage-retiree + MonthlyIncome)   | 1        | smokes             | income channel          |
+| intermediary + insurer (minimal forms)                             | 2        | smokes             | the above               |
+| demography driver + growth regimes on the ladder                   | 2        | rung 1-2 cells     | the agents              |
+| cohort layer + its equivalence gate                                | 3        | rung 2-3 cells     | demography              |
+| the ladder runs: organic gates at rungs 1-6                        | 2        | ~6 x 5 cells, coarse cadence: a day on datasim | cohorts |
+| the catalogue and the D7 designs re-judged on rungs 2, 4, 6        | 2        | ~3 x the wave-1 grid | the ladder             |
+
+About 20 agent-sessions and a few machine-days: a wave of its own
+("wave 4, the organic civilization"), runnable IN PARALLEL with the D7
+grid's machinery because it owns different files (new agents, the
+viewer, the demography driver) and never touches the controller.
+
+* The verdict on the thesis, and what to run now
+
+The thesis is right for the QUANTITATIVE conclusions the D7 grid was
+going to draw -- gains, capacities, weights, carry costs, attacker
+P&L, depositor fairness all depend on how deep and how organic the
+world is -- and those conclusions should wait for rung 2 made organic
+and for at least one deeper rung.  It is not right for the STRUCTURAL
+question the grid's first cycle asks: whether the two-loop K is
+identical to Direct with zero gains, whether S and V habituate at all,
+whether a book-loading attacker can move K -- those hold or fail in a
+thin world as in a deep one, and the mechanics are cheap to establish
+now.  So: run cycle 1 of the controller-alternatives plan as a
+STRUCTURAL check on the current environment (it also exercises the
+viewer's left column), build telemetry v2 and the viewer immediately
+(they pay for both programs), start the organic agents in parallel,
+and re-judge the catalogue and the D7 designs rung by rung as the
+ladder comes up.  The gate to record: "no monetary operation is judged
+at a rung whose organic gates have not passed."
+
+* Decisions for the design owner
+
+1. The ladder's rungs (the table above) and the definition of the
+   organic gates at each rung.
+2. Cohort granularity and the equivalence tolerance (a cohort of 10 vs
+   10 agents: within what error on issuance, savings and retirement?).
+3. The minimal income economy: wages indexed to LABR paid in BUCK; do
+   goods get BUCK prices (merchants), or is expenditure a flow only?
+4. The viewer stack and home: uPlot vendored through =package.json=,
+   =alberta_buck/sim/viewer/=, served by the sim server -- or a
+   different choice.
+5. Whether the JS platform becomes the second source now (the emitter
+   in wave 4) or after the Python populations exist.
+6. Whether cycle 1 of the D7 grid runs on the current environment as
+   the structural check (recommended) or waits for rung 2.
+
+* Tracks (added to ONBOARDING-D7.org)
+
+T13 telemetry v2; T14 the viewer; T15 the organic agents (income
+channel, business, external-debt retiree, intermediary, insurer); T16
+demography + cohorts; T17 the ladder runs and the organic gates.
+Their owned files are new modules; their appends are the usual shared
+files; none touches the controller, the observer, or the D7 grid's
+machinery (T2).

@@ -54,7 +54,10 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   catalogue wave 1 on the current tree (ledger); done markers under
   =build/sim/regen/=; no sim code edits in that checkout until both
   are done.  The D7 grid (WP-15's cycles) starts only after the
-  regeneration is judged.  Next: WP-16 (gains), WP-15 (the grid's
+  regeneration is judged.  =ORGANIC-SCALE.org= (2026-09-11) opens wave 4, the
+  organic civilization-scale environment (tracks T13-T17); the D7
+  grid's cycle 1 runs as a STRUCTURAL check on the current world, its
+  quantitative cycles wait for the ladder's rung 2.  Next: WP-16 (gains), WP-15 (the grid's
   machinery), WP-14 (local skews) on offer to other-account agents
   through =ONBOARDING-D7.org=; the 1-year identity pair on the Xeon,
   judged by =vecdiff=; decision 14 (TOKEN-pool gauges) before any
@@ -738,6 +741,45 @@ install and login.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-11 -- ORGANIC-SCALE.org; decisions 20 / 21; the wp/21-inputs branch (session 3, on datasim)
+
+- The design owner's question: can the collected metrics and every
+  agent's state and actions be visualized against the simulation
+  clock, for Python and JavaScript worlds; do all agents emit a
+  consistent record; where does the simulation stand against an
+  organic civilization-scale growth environment (a few million BUCK
+  to hundreds of billions; issuing / saving / retiring households,
+  farmsteads and businesses); and is a thin organic environment a
+  sound base for judging the advanced monetary operations?
+- Answered in =ORGANIC-SCALE.org=: the 29-class roster mapped to the
+  issue / save / retire spectrum (absent: an income economy, external
+  USD debt as a stock, the earned-BUCK -> wealth -> standing-facility
+  saver, insurers, intermediaries, demography; the JS prototypes hold
+  the household doctrine as exemplars); the compute wall (15 ms per
+  agent-tick; 300 agents x 5 y x 4 ticks = 9 h on datasim) and the
+  cohort layer it forces; the telemetry as it is (v1 roster + per-agent
+  state for 7 of 29 classes; class aggregates for the rest; NO action
+  log; the JS sims on their own schema; the server streams frames
+  live) and the viewer's design (telemetry v2 with =acts=, one HTML +
+  uPlot, slider, left metric panes, right class tabs); a six-rung
+  scale ladder with organic gates per rung; effort (~5 sessions for
+  the viewer, ~20 for the organic wave, in parallel with the D7 grid);
+  the verdict: the thesis holds for the grid's QUANTITATIVE verdicts
+  (wait for rung 2 made organic), not for cycle 1's STRUCTURAL checks
+  (run now).  Tracks T13-T17 added to ONBOARDING-D7.org; six decisions
+  for the design owner listed in the document.
+- Decision 20 resolved (a): the stress fee stays on; decision 21
+  resolved: inputs are generated before the fan-out -- implemented on
+  =wp/21-inputs= (worktree =../alberta-buck-wp-21=): gen_historical
+  serializes generate-or-reuse under an advisory lock and writes every
+  CSV and the manifest atomically; =Prices= refuses short rows, unequal
+  lengths and a length that disagrees with the window's manifest
+  (=PricesIncomplete=); =python -m alberta_buck.sim ... --prepare=
+  builds a scenario and exits; the Makefile's matrix and catalogue
+  targets prepare every arm before =xargs= / the thread pool;
+  =test_prices_inputs.py=.  Merged after the regeneration finishes
+  (the running checkout is frozen).
 
 ** 2026-09-11 -- Regression regeneration: the matrix's first pass (session 3, on datasim)
 
