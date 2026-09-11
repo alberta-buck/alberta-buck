@@ -83,3 +83,7 @@ alberta_buck/sim/prices/hist-manifest-*.json
 /core/contracts/python/build/
 /core/python/build/
 /dist/
+
+# WAVE3.org decision 21: gen_historical's advisory lock and atomic-write temps
+alberta_buck/sim/prices/*.lock
+alberta_buck/sim/prices/*.tmp-*

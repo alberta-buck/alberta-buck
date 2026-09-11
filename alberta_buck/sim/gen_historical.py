@@ -31,7 +31,9 @@ from __future__ import annotations
 import argparse
 import bisect
 import csv
+import fcntl
 import json
+import os
 from datetime import date, timedelta
 
 from alberta_buck.sim.prices import CSV_DIR
@@ -103,40 +105,67 @@ def gen(start=None, end=None, years=5.0, out_dir=CSV_DIR):
     want_files = [fname.replace(".csv", f"-{tag}.csv")
                   for _, fname, _, _ in BINDINGS]
     manifest = out_dir / f"hist-manifest-{tag}.json"
-    if manifest.exists():
-        try:
-            have = json.loads(manifest.read_text())
-            if (have.get("start") == s.isoformat()
-                    and have.get("end") == e.isoformat()
-                    and have.get("files") == want_files
-                    and all((out_dir / f).exists() for f in want_files)):
-                return want_files, have["n_days"], s, e
-        except Exception:
-            pass
-
-    sources = {"us": qs_us, "xau": qs_xau}
-
-    def price(metric, src, d):
-        if src == "btc":
-            return btc_at(d)
-        return sources[src].at(metric, d)
-
     out_dir.mkdir(parents=True, exist_ok=True)
-    files = []
-    for (sym, base, metric, src), fname in zip(BINDINGS, want_files):
-        with (out_dir / fname).open("w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["day", "close_usd_micro"])
-            for k, d in enumerate(dates):
-                w.writerow([k, round(price(metric, src, d) * USDC)])
-        files.append(fname)
-        first = price(metric, src, dates[0])
-        last = price(metric, src, dates[-1])
-        print(f"  {fname}: {len(dates)} days  {first:,.2f} -> {last:,.2f}")
-    manifest.write_text(json.dumps({
-        "start": s.isoformat(), "end": e.isoformat(),
-        "files": files, "n_days": len(dates)}))
-    return files, len(dates), s, e
+
+    # WAVE3.org decision 21: several runs starting together (the matrix's
+    # xargs fan-out, the catalogue's and star's thread pools) generate the
+    # SAME window.  Generate-or-reuse is therefore serialized under an
+    # advisory lock, and every file is written atomically (temp + rename)
+    # with the manifest LAST, so a reader that finds the manifest finds
+    # complete files, and a reader arriving mid-generation waits at the
+    # lock instead of reading a half-written CSV (three of fourteen matrix
+    # arms did exactly that on 2026-09-10).
+    lock_path = out_dir / f"hist-manifest-{tag}.lock"
+    with lock_path.open("a+") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            if manifest.exists():
+                try:
+                    have = json.loads(manifest.read_text())
+                    if (have.get("start") == s.isoformat()
+                            and have.get("end") == e.isoformat()
+                            and have.get("files") == want_files
+                            and all((out_dir / f).exists() for f in want_files)):
+                        return want_files, have["n_days"], s, e
+                except Exception:
+                    pass
+
+            sources = {"us": qs_us, "xau": qs_xau}
+
+            def price(metric, src, d):
+                if src == "btc":
+                    return btc_at(d)
+                return sources[src].at(metric, d)
+
+            files = []
+            for (sym, base, metric, src), fname in zip(BINDINGS, want_files):
+                tmp = out_dir / f"{fname}.tmp-{os.getpid()}"
+                with tmp.open("w", newline="") as f:
+                    w = csv.writer(f)
+                    w.writerow(["day", "close_usd_micro"])
+                    for k, d in enumerate(dates):
+                        w.writerow([k, round(price(metric, src, d) * USDC)])
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, out_dir / fname)
+                files.append(fname)
+                first = price(metric, src, dates[0])
+                last = price(metric, src, dates[-1])
+                print(f"  {fname}: {len(dates)} days  {first:,.2f} -> {last:,.2f}")
+            _atomic_write_text(manifest, json.dumps({
+                "start": s.isoformat(), "end": e.isoformat(),
+                "files": files, "n_days": len(dates)}))
+            return files, len(dates), s, e
+        finally:
+            fcntl.flock(lk, fcntl.LOCK_UN)
+
+
+def _atomic_write_text(path, text: str) -> None:
+    """Write `text` to `path` through a same-directory temp file and a
+    rename, so no reader ever sees a partial file (decision 21)."""
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    tmp.write_text(text)
+    os.replace(tmp, path)
 
 
 def main(argv=None):

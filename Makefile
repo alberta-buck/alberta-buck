@@ -1153,8 +1153,29 @@ sim-compare-rebalancing-eq:
 
 MATRIX_JOBS	?= 4
 
+# WAVE3.org decision 21: GENERATE EVERY ARM'S INPUTS BEFORE FANNING OUT.
+# The window-stamped historical CSVs are produced by the first run that
+# needs them; fourteen arms starting together produced them concurrently
+# and three read half-written files (2026-09-10).  `--prepare` builds a
+# scenario (generating its inputs under gen_historical's lock) and exits,
+# so the fan-out below starts from complete files.  The lock alone makes
+# the fan-out safe; the prepare step makes it explicit and fast.
+comma		:= ,
+MATRIX_TOMLS	= $(wildcard alberta_buck/sim/experiments/rebalancing-eq-5yr*.toml)
+CAT_ARM_TOMLS	= $(foreach a,$(subst $(comma), ,$(CAT_ARMS)),alberta_buck/sim/experiments/catalogue-$(a).toml)
+
+.PHONY: sim-prepare-matrix sim-prepare-catalogue
+sim-prepare-matrix:	sim-build
+	@for t in $(MATRIX_TOMLS); do \
+		python -m $(SIM_PKG) --experiment $$t --backend $(SIM_BACKEND) --prepare || exit 1; \
+	done
+sim-prepare-catalogue:	sim-build
+	@for t in $(CAT_ARM_TOMLS); do \
+		python -m $(SIM_PKG) --experiment $$t --backend $(SIM_BACKEND) --prepare || exit 1; \
+	done
+
 .PHONY: sim-rebalancing-eq-matrix
-sim-rebalancing-eq-matrix:	sim-build
+sim-rebalancing-eq-matrix:	sim-prepare-matrix
 	ls alberta_buck/sim/experiments/rebalancing-eq-5yr*.toml \
 	| xargs -P $(MATRIX_JOBS) -I{} sh -c '\
 		ext=$$(basename {} .toml); ext=$${ext#rebalancing-eq-5yr}; \
@@ -1185,7 +1206,7 @@ CAT_JOBS	?= 10
 CAT_DIR		?= build/sim/catalogue
 
 .PHONY: sim-catalogue sim-catalogue-report
-sim-catalogue:	sim-build
+sim-catalogue:	sim-prepare-catalogue
 	python -m alberta_buck.sim.catalogue --arms $(CAT_ARMS) \
 		--mixes $(CAT_MIXES) --scale $(CAT_SCALE) \
 		--jobs $(CAT_JOBS) --outdir $(CAT_DIR)
@@ -1196,6 +1217,7 @@ sim-catalogue-report:
 		--outdir $(CAT_DIR)
 
 sim-catalogue-%:	sim-build
+	python -m $(SIM_PKG) --experiment alberta_buck/sim/experiments/catalogue-$*.toml --backend $(SIM_BACKEND) --prepare
 	python -m alberta_buck.sim.catalogue --arms $* \
 		--mixes $(CAT_MIXES) --scale $(CAT_SCALE) \
 		--jobs $(CAT_JOBS) --outdir $(CAT_DIR)

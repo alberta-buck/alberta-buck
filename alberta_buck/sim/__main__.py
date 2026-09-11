@@ -56,6 +56,13 @@ def main(argv=None) -> int:
     ap.add_argument("--experiment", default=None, metavar="TOML",
                     help="equilibrium experiment file; implies --scenario "
                          "equilibrium (see alberta_buck/sim/experiments/)")
+    # WAVE3.org decision 21: build the scenario (generating its inputs --
+    # the window-stamped historical CSVs -- under gen_historical's lock)
+    # and exit, so a grid's fan-out starts from complete files.
+    ap.add_argument("--prepare", action="store_true",
+                    help="build the scenario and generate its inputs, then exit "
+                         "without running (the grid targets call this per arm "
+                         "before fanning out)")
     ap.add_argument("--set", action="append", default=[], dest="sets",
                     metavar="KEY=VAL",
                     help="dotted override into the experiment config, e.g. "
@@ -117,6 +124,11 @@ def main(argv=None) -> int:
         sc.seed = a.seed
     if a.day_step is not None:
         sc.day_step = a.day_step
+
+    if a.prepare:
+        print(f"[prepare] {sc.name}: {sc.days} days x {sc.ticks_per_day} ticks; "
+              f"inputs complete ({len(sc.csv_files)} price files)")
+        return 0
 
     if a.backend == "pyrevm":
         from alberta_buck.sim.pyrevm_backend import PyrevmAnvil as Backend
