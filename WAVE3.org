@@ -742,6 +742,56 @@ install and login.
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
 
+** 2026-09-11 -- The viewer (T14) and telemetry v2 (T13) built on =wp/14-viewer= (session 3, on datasim)
+
+- Built (worktree =../alberta-buck-wp-14=, branch from a42778f): the
+  viewer =alberta_buck/sim/viewer/= (index.html, viewer.js, viewer.css;
+  uPlot 1.6.31 declared in package.json and copied into the gitignored
+  =vendor/= by =make viewer-vendor=; =python -m alberta_buck.sim.viewer=
+  serves the page and, read-only, the repo's =build/sim= and
+  =test/vectors= under =/data/= with an index) -- a time slider across
+  the top, the canonical metric panes on the left (bvib, K, the price
+  and position loops' terms, the shadow books, supply / treasury,
+  BUCK/USD by slot0 and by balances, NAV, the stress fee) with every
+  other frame key toggleable by prefix group, and on the right one tab
+  per agent class (roster classes, the scenario's populations, and the
+  classes visible through their aggregate counters) with the class
+  aggregates, one pane per instance (its telemetry pens) and the three
+  acts nearest the clock; sources: a dropped or chosen file, a served
+  vector (=?v=/data/...=), or JSONL.  Node test
+  =viewer/test_viewer.mjs= runs the model pipeline on real vectors.
+- Telemetry v2 (TELEMETRY.md, new section): the roster names EVERY
+  agent (=telemetry= true / false, knobs or null); the action log --
+  =alberta_buck/sim/acts.py= wraps =chain.send= once and the loop sets
+  =chain.actor= around each act() / snap(), so every send is attributed
+  to its agent (success or recorded revert) without touching the agent;
+  =Agent.note(d, kind, **why)= adds the decision's reasons; the snapshot
+  drains every agent's acts every frame.  =SaverAgent= is the first
+  instrumented agent (buy / sell with bvib, discount or premium, rate,
+  size, holding, goal, budget).  =SIM_ACTS= all | telemetry | none.
+- Evidence: pytest 161 (7 new in =test_telemetry_v2.py=: attribution,
+  revert recorded and re-raised, note compaction, idempotent install,
+  the modes).  The node test on the regenerated =cat-dump-all= (v1:
+  roster 51, 179 series; DirectMintAgent x120 -> 120 blank frames,
+  ArrivingDMAgent x60 -> 60, BuckCreditDebtorAgent x30 with telemetry)
+  and on =portcast= (v1, 1827 frames): OK.  The v2 smoke (30-day
+  catalogue-none, ops basket, SaverAgent=2): roster 286 (40 with
+  state), 3,358 acts in 30 days (240 saver notes: 122 buy / 118 sell;
+  21 recorded reverts; 10 classes acting), vector 645 KB -> 828 KB
+  (+28%).  OBSERVATION-ONLY PROVEN: the same cell with =SIM_ACTS=none=
+  differs in NO frame key outside =ag=, in no state record, and the
+  rosters are identical.
+- The answer to "agents without v1 telemetry": v1 vectors name the
+  classes and counts from =meta.experiment.scenario.agents=, so the
+  viewer shows a tab per class with the aggregate panes and one blank
+  frame per uncounted instance; v2 names every instance.
+- Served for review on datasim: =http://datasim.local:8787/= (233
+  vectors indexed: the regenerated catalogue and matrix, the banked
+  2026-08 sets, the v2 smoke at
+  =?v=/data/build/sim/smoke/v2/none30-acts.json=).  NOT MERGED: the
+  checkout is frozen until the three matrix re-runs finish; the branch
+  merges after them with =wp/21-inputs=.
+
 ** 2026-09-11 -- Regression regeneration: the catalogue's wave 1 (session 3, on datasim)
 
 - Finished 07:47 PDT, =make= exit 0, 42 of 42 cells, report
