@@ -14,6 +14,7 @@ from pathlib import Path
 from web3 import Web3
 
 from alberta_buck.sim.chain import load_artifact
+from alberta_buck.sim import acts as _acts_mod
 from alberta_buck.sim.gauge import buck_usd6
 
 REPO = Path(__file__).resolve().parents[2]
@@ -282,6 +283,10 @@ class Snapshotter:
         # meta; per-frame records under frame["ag"] for agents due at this
         # day (day % TELEMETRY_STRIDE == 0).  Agents opt in by implementing
         # telemetry()/telemetry_static(); the default None costs nothing.
+        # Schema v2 (TELEMETRY.md): the roster lists EVERY agent -- those
+        # without telemetry_static() carry knobs None and telemetry false --
+        # so a viewer can name and count every instance, and each frame
+        # drains every agent's pending acts (alberta_buck/sim/acts.py).
         if "telemetry" not in self.meta:
             metas = []
             for ag in agents:
@@ -289,16 +294,17 @@ class Snapshotter:
                     st = ag.telemetry_static()
                 except Exception:
                     st = None
-                if st is not None:
-                    cls = type(ag).__name__
-                    metas.append({
-                        "id": f"{cls}#{ag.idx}", "cls": cls, "idx": ag.idx,
-                        "stride": max(1, int(getattr(
-                            ag, "TELEMETRY_STRIDE", 1))),
-                        "knobs": st})
+                cls = type(ag).__name__
+                metas.append({
+                    "id": f"{cls}#{ag.idx}", "cls": cls, "idx": ag.idx,
+                    "stride": max(1, int(getattr(
+                        ag, "TELEMETRY_STRIDE", 1))),
+                    "telemetry": st is not None,
+                    "knobs": st})
             if metas:
                 self.meta["telemetry"] = {
-                    "version": 1, "units": "usd6", "agents": metas}
+                    "version": 2, "units": "usd6", "acts": _acts_mod.MODE,
+                    "agents": metas}
         ag_t = {}
         for ag in agents:
             stride = max(1, int(getattr(ag, "TELEMETRY_STRIDE", 1)))
@@ -310,6 +316,14 @@ class Snapshotter:
                 rec = None
             if rec:
                 ag_t[f"{type(ag).__name__}#{ag.idx}"] = rec
+        for ag in agents:
+            pending = _acts_mod.drain(ag)
+            if pending:
+                key = f"{type(ag).__name__}#{ag.idx}"
+                rec = ag_t.get(key)
+                if rec is None:
+                    rec = ag_t[key] = {}
+                rec["acts"] = pending
         ref, su, sb = [], [], []
         for i, tc in enumerate(d.tokens):
             ref.append(self.s.prices.ref(i, day))

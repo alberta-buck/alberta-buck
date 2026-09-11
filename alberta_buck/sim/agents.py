@@ -69,6 +69,13 @@ class Agent:
     def telemetry(self, d) -> dict | None:
         return None
 
+    # -- telemetry v2: the action log (alberta_buck/sim/acts.py) ---------- #
+    # Sends are recorded for every agent by the loop's recorder; an agent
+    # adds the WHY of a decision with note() before the sends it causes.
+    def note(self, d, kind: str, **why) -> None:
+        from alberta_buck.sim import acts as _acts
+        _acts.note(self, d.chain, kind, **why)
+
     def deposit_info(self, d) -> tuple | None:
         """Return (token_idx, principal_tok, principal_buck) for LP position
         value tracking.  None means the agent has no BuckBasket deposit."""

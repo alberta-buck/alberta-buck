@@ -2115,6 +2115,9 @@ class SaverAgent(_ProxyAgent):
                 amt = min(rate, held_usdc, self.budget - self._spent)
                 if amt < 10 ** 6:               # sub-$1 move: skip
                     return
+                self.note(d, "buy", bvib=bvib, discount=discount, rate=rate,
+                          amt=amt, holding=holding, goal=self.savings_goal,
+                          spent=self._spent, budget=self.budget)
                 self._swap_via_simlp(d, d.pool_ub, d.usdc, amt,
                                      self.proxy.address)
                 self._spent += amt
@@ -2134,6 +2137,9 @@ class SaverAgent(_ProxyAgent):
                 sell = min(sell, holding - keep)
                 if sell < 10 ** 6:              # sub-$1 move: skip
                     return
+                self.note(d, "sell", bvib=bvib, premium=premium, spot=spot,
+                          want_usdc=want_usdc, sell=sell, keep=keep,
+                          holding=holding)
                 before = d.chain.balance_of(d.usdc, self.proxy.address)
                 self._swap_via_simlp(d, d.pool_ub, d.buck, sell,
                                      self.proxy.address)

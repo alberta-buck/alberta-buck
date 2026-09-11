@@ -1186,6 +1186,24 @@ sim-rebalancing-eq-matrix:	sim-prepare-matrix
 			> test/vectors/rebalancing-sim-eq$$ext.log 2>&1'
 	$(MAKE) sim-compare-rebalancing-eq
 
+# THE SIM VIEWER (alberta_buck/sim/viewer; ORGANIC-SCALE.org T13 / T14): a
+# static page over uPlot (declared in package.json) that reads any sim
+# vector.  viewer-vendor copies uPlot's dist into the (gitignored) vendor
+# dir; viewer serves the page and the repo's vectors on VIEWER_PORT.
+#
+#   make nix-viewer-vendor
+#   make nix-venv-viewer VIEWER_PORT=8787      # then open http://<host>:8787/
+VIEWER_PORT	?= 8787
+VIEWER_DIR	= alberta_buck/sim/viewer
+
+.PHONY: viewer-vendor viewer
+viewer-vendor:
+	@[ -d node_modules/uplot/dist ] || npm install --no-audit --no-fund --loglevel=error
+	mkdir -p $(VIEWER_DIR)/vendor
+	cp node_modules/uplot/dist/uPlot.iife.min.js node_modules/uplot/dist/uPlot.min.css $(VIEWER_DIR)/vendor/
+viewer:		viewer-vendor
+	python -m alberta_buck.sim.viewer --port $(VIEWER_PORT)
+
 # THE EXCURSION CATALOGUE: injected excursions x defender mixes x intensity
 # on the portcast cast (2-year window, injection at day 365).  Arms are
 # experiments/catalogue-<arm>.toml; mixes/scales are applied as --set

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alberta Buck sim viewer</title>
+<link rel="stylesheet" href="vendor/uPlot.min.css">
+<link rel="stylesheet" href="viewer.css">
+<script src="vendor/uPlot.iife.min.js"></script>
+<script src="viewer.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="row">
+    <strong>Alberta Buck sim viewer</strong>
+    <span id="title" class="muted">drop a vector JSON here, choose a file, or pick a served vector</span>
+  </div>
+  <div class="row">
+    <input id="file" type="file" accept=".json,.jsonl">
+    <select id="vectors"><option value="">served vectors ...</option></select>
+    <button id="prev">&lt;</button><button id="play">play</button><button id="next">&gt;</button>
+    <span id="day" class="mono">day -</span>
+    <input id="slider" type="range" min="0" max="0" value="0">
+  </div>
+  <div id="readout" class="row mono muted"></div>
+  <div id="status" class="row mono muted"></div>
+</header>
+<main>
+  <section id="left-col">
+    <div class="col-title">simulation metrics <span class="muted">(canonical panes; toggle groups below)</span></div>
+    <div id="groups" class="groups"></div>
+    <div id="left"></div>
+  </section>
+  <section id="right-col">
+    <div class="col-title">agents by class</div>
+    <div id="tabs" class="tabs"></div>
+    <div id="agents"></div>
+  </section>
+</main>
+</body>
+</html>
