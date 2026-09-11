@@ -83,3 +83,6 @@ alberta_buck/sim/prices/hist-manifest-*.json
 /core/contracts/python/build/
 /core/python/build/
 /dist/
+
+# the sim viewer's vendored uPlot (make viewer-vendor copies it from node_modules)
+alberta_buck/sim/viewer/vendor/

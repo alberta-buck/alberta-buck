@@ -217,3 +217,61 @@ inert agent population are identical):
     whale token order = token indices sorted by u(seed, "whale-order", day, i)
     agent act order (per tick) = agents sorted by
                        u(seed, "order", day, tick, class_name, idx)
+
+## Schema v2 (2026-09-11): every agent in the roster, and the action log
+
+Two additions, both backward compatible for readers of v1:
+
+1. **The roster lists EVERY agent.**  `meta.telemetry.agents[]` carries
+   one entry per agent instance, whether or not its class implements
+   `telemetry_static()`:
+
+   ```json
+   {"id": "DirectMintAgent#61", "cls": "DirectMintAgent", "idx": 61,
+    "stride": 1, "telemetry": false, "knobs": null}
+   ```
+
+   `telemetry: true` entries carry `knobs` and emit per-frame state as
+   in v1.  A viewer can therefore name and count every instance of every
+   class, and give an instance a blank pane when it has no state.
+   `meta.telemetry.version` is `2`; `meta.telemetry.acts` records the
+   recorder mode (`all` | `telemetry` | `none`, from `SIM_ACTS`).
+
+2. **The action log.**  `frames[i].ag[id].acts` is the list of what the
+   agent did since the previous frame, in order, drained EVERY frame for
+   every agent (state records keep their stride).  Two record shapes:
+
+   ```json
+   {"t": 2, "fn": "swap", "ok": true}                      <- a chain send
+   {"t": 2, "fn": "redeem", "ok": false, "err": "tx reverted: redeem :: 0x7dd37f70"}
+   {"t": 2, "kind": "buy", "why": {"bvib": 1.0123, "discount": 0.0123,
+                                   "rate": 216000000, "amt": 216000000,
+                                   "holding": 1200000000, "goal": 19000000000000}}
+   ```
+
+   Sends are recorded by the loop's recorder (`alberta_buck/sim/acts.py`)
+   for every agent without any change to the agent: the loop sets
+   `chain.actor` around each `act()` / `snap()` and every `chain.send`
+   under that actor is attributed to it, success or revert (the revert
+   is recorded, then re-raised as before).  `t` is the tick within the
+   day.  The WHY of a decision is the agent's own, added with
+   `self.note(d, kind, **why)` immediately before the sends it causes;
+   `why` values are compacted (floats to 6 significant digits, strings
+   to 48 characters, one level of nesting).  The first instrumented
+   agent is `SaverAgent` (`buy` / `sell` with the bvib, discount or
+   premium, rate, size, holding, goal and budget it decided on); an agent
+   that never calls `note()` still shows its sends.
+
+Size: a send record is ~30 bytes, a note ~120; the organic core of the
+matrix arms makes a few hundred sends a day, so a five-year vector grows
+by roughly its own size.  `SIM_ACTS=telemetry` restricts recording to
+classes that opted into state telemetry; `SIM_ACTS=none` disables it.
+The recorder observes only: a cell with `SIM_ACTS=none` is identical to
+one with `all` in every field but `meta.telemetry` and the `acts` lists
+(the viewer's node test and `test_telemetry_v2.py` are the gates).
+
+The viewer (`alberta_buck/sim/viewer`, `python -m alberta_buck.sim.viewer`)
+reads v1 and v2 alike: v1 vectors get class tabs from the scenario's
+populations with blank frames for the uncounted instances; v2 vectors
+get every instance named, and the three acts nearest the clock under
+each agent's pens.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 
 from alberta_buck.sim import identity as idmod
+from alberta_buck.sim import acts as acts_mod
 from alberta_buck.sim import rng as _rng_mod
 from alberta_buck.sim.agents import REGISTRY, MarketMakerWhale
 from alberta_buck.sim.chain import Chain
@@ -138,6 +139,10 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     ledger = MarkoutLedger(n_pools=n_tok)
     probe = PoolProbe(d)
     sent = [0]
+    # Telemetry v2 (alberta_buck/sim/acts.py): the recorder wraps the raw
+    # send so every send is attributed to d.chain.actor; the counting
+    # wrapper below sits on top of it.
+    acts_mod.install(d.chain)
     _send = d.chain.send
 
     def _counting_send(*args, **kw):
@@ -179,10 +184,16 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
             ts += tick_secs
             anvil.warp_to(ts)
             d.chain.clear_balance_cache()
+            d.chain.sim_day = day
+            d.chain.sim_tick = tick
             if tick == whale_tick:
                 for wagent in whales:
                     for whale_tok in whale_order:
-                        wagent.snap(d, scenario, day, whale_tok, ctr)
+                        d.chain.actor = wagent
+                        try:
+                            wagent.snap(d, scenario, day, whale_tok, ctr)
+                        finally:
+                            d.chain.actor = None
             if keyed:
                 order = sorted(arbs, key=lambda a: _rng_mod.keyed_u(
                     scenario.seed, "order", day, tick, type(a).__name__,
@@ -198,7 +209,11 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
             reserves = probe.read()
             for a in order:
                 s0 = sent[0]
-                a.act(d, scenario, day, tick, ctr)
+                d.chain.actor = a
+                try:
+                    a.act(d, scenario, day, tick, ctr)
+                finally:
+                    d.chain.actor = None
                 if sent[0] != s0:
                     after = probe.read()
                     tag = actor_tag(a)
