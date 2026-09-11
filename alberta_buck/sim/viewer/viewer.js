@@ -199,7 +199,9 @@ if (typeof module !== "undefined") {
 
 if (typeof window !== "undefined") {
   const $ = (s, el = document) => el.querySelector(s);
-  const state = { model: null, idx: 0, charts: [], playing: null, activeTab: null };
+  const state = { model: null, idx: 0, charts: [], leftCharts: [], rightCharts: [], playing: null, activeTab: null, loadSeq: 0, aborter: null };
+  function destroy(list) { for (const u of list) { try { u.destroy(); } catch (_) {} } list.length = 0; state.charts = state.leftCharts.concat(state.rightCharts); }
+  function status(msg, isErr) { const s = $("#status"); if (s) { s.textContent = msg || ""; s.className = "row mono " + (isErr ? "err" : "muted"); } }
 
   function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
@@ -228,12 +230,13 @@ if (typeof window !== "undefined") {
     const u = new uPlot({ width: box.clientWidth - 8 || 520, height: opts.height || 140, series,
       cursor: { sync: { key: "sim" } }, legend: { show: true }, plugins: [cursorPlugin()],
       axes: [{ label: "day" }, { size: 60 }], scales: { x: { time: false } } }, data, box);
-    state.charts.push(u);
+    (opts.column === "right" ? state.rightCharts : state.leftCharts).push(u);
+    state.charts = state.leftCharts.concat(state.rightCharts);
     return u;
   }
 
   function renderLeft() {
-    const m = state.model, left = $("#left"); left.innerHTML = "";
+    const m = state.model, left = $("#left"); destroy(state.leftCharts); left.innerHTML = "";
     for (const [title, keys] of m.canonical) makeChart(left, title, m.series, keys);
     const groups = Object.entries(m.groups).sort();
     const sel = $("#groups"); sel.innerHTML = "";
@@ -247,7 +250,7 @@ if (typeof window !== "undefined") {
   function renderGroup(g, keys, on) {
     const left = $("#left");
     const existing = $(`[data-pane-group="${g}"]`, left);
-    if (existing) existing.remove();
+    if (existing) { for (const u of state.leftCharts.filter(u => existing.contains(u.root))) { try { u.destroy(); } catch (_) {} } state.leftCharts = state.leftCharts.filter(u => !existing.contains(u.root)); state.charts = state.leftCharts.concat(state.rightCharts); existing.remove(); }
     if (!on) return;
     const wrap = el("div"); wrap.dataset.paneGroup = g; left.appendChild(wrap);
     // chunk keys into panes of <= 6 pens
@@ -255,7 +258,7 @@ if (typeof window !== "undefined") {
   }
 
   function renderTabs() {
-    const m = state.model, tabs = $("#tabs"), body = $("#agents"); tabs.innerHTML = ""; body.innerHTML = "";
+    const m = state.model, tabs = $("#tabs"), body = $("#agents"); destroy(state.rightCharts); tabs.innerHTML = ""; body.innerHTML = "";
     for (const c of m.classes) {
       const b = el("button", "tab", `${c.cls} x${c.count}${c.withState ? "" : " (no state)"}`);
       b.addEventListener("click", () => { state.activeTab = c.cls; renderTabs(); });
@@ -269,14 +272,14 @@ if (typeof window !== "undefined") {
     body.appendChild(head);
     if (c.aggKeys.length) {
       const agg = el("div"); body.appendChild(agg);
-      for (let i = 0; i < c.aggKeys.length; i += 6) makeChart(agg, `${c.cls} aggregates: ${c.aggKeys.slice(i, i + 6).join(", ")}`, m.series, c.aggKeys.slice(i, i + 6), { height: 120 });
+      for (let i = 0; i < c.aggKeys.length; i += 6) makeChart(agg, `${c.cls} aggregates: ${c.aggKeys.slice(i, i + 6).join(", ")}`, m.series, c.aggKeys.slice(i, i + 6), { height: 120, column: "right" });
     } else body.appendChild(el("div", "note", "no class aggregates in this vector"));
     for (const a of c.agents) {
       const pane = el("div", "agent"); body.appendChild(pane);
       const pens = m.agents.pens[a.id] || {};
       const keys = Object.keys(pens);
       pane.appendChild(el("div", "agent-title", `${a.id}  stride ${a.stride || 1}  knobs: ${JSON.stringify(a.knobs || {}).slice(0, 160)}`));
-      if (keys.length) makeChart(pane, `${a.id}`, pens, keys, { height: 120 });
+      if (keys.length) makeChart(pane, `${a.id}`, pens, keys, { height: 120, column: "right" });
       else pane.appendChild(el("div", "note", a.telemetry === false ? "named instance, no state telemetry (its acts below, if any)" : "no per-frame state in this vector"));
       const log = el("div", "acts"); log.dataset.agent = a.id; pane.appendChild(log);
       renderActs(log, a.id);
@@ -307,7 +310,7 @@ if (typeof window !== "undefined") {
     const m = state.model; if (!m) return;
     state.idx = Math.max(0, Math.min(m.frames.length - 1, i));
     $("#slider").value = state.idx; $("#day").textContent = `day ${m.days[state.idx]} (${state.idx + 1}/${m.frames.length})`;
-    for (const u of state.charts) u.redraw(false);
+    for (const u of state.charts) { try { u.redraw(false); } catch (_) {} }
     for (const log of document.querySelectorAll(".acts")) renderActs(log, log.dataset.agent);
     const f = m.frames[state.idx];
     $("#readout").textContent = ["basketVal", "buckK", "supply", "buck_usd"].filter(k => k in f).map(k => `${k}=${fmt(k, f[k])}`).join("   ");
@@ -315,18 +318,40 @@ if (typeof window !== "undefined") {
   function fmt(k, v) { if (!isNum(v)) return String(v); const [s] = unitOf(k, [v]); const x = v * s; return Math.abs(x) >= 1000 ? x.toLocaleString(undefined, { maximumFractionDigits: 0 }) : x.toPrecision(6); }
 
   function load(vec, name) {
-    state.charts = []; state.activeTab = null;
-    state.model = buildModel(vec);
+    destroy(state.leftCharts); destroy(state.rightCharts); state.activeTab = null;
+    if (state.playing) { clearInterval(state.playing); state.playing = null; $("#play").textContent = "play"; }
+    try { state.model = buildModel(vec); }
+    catch (e) { status(`could not build the model from ${name}: ${e.message}`, true); return; }
+    status(`loaded ${name}`);
     $("#title").textContent = `${name}: ${state.model.frames.length} frames, telemetry v${state.model.version || "1 (none)"}, ${state.model.roster.length} agents in roster, ${state.model.classes.length} classes`;
     $("#slider").max = Math.max(0, state.model.frames.length - 1);
     renderLeft(); renderTabs(); setIdx(state.model.frames.length - 1);
   }
 
   async function loadUrl(url) {
-    $("#title").textContent = `loading ${url} ...`;
-    const r = await fetch(url); if (!r.ok) { $("#title").textContent = `failed: ${r.status} ${url}`; return; }
-    const text = await r.text();
-    load(text.trimStart().startsWith("{") ? JSON.parse(text) : jsonl(text), url);
+    if (!url) return;
+    const seq = ++state.loadSeq;
+    if (state.aborter) { try { state.aborter.abort(); } catch (_) {} }
+    const ctl = state.aborter = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    $("#title").textContent = `loading ${url} ...`; status("");
+    try {
+      const r = await fetch(url, ctl ? { signal: ctl.signal } : undefined);
+      if (!r.ok) { status(`failed: HTTP ${r.status} for ${url}`, true); return; }
+      const text = await r.text();
+      if (seq !== state.loadSeq) return;            // a newer load superseded this one
+      const vec = text.trimStart().startsWith("{") ? JSON.parse(text) : jsonl(text);
+      load(vec, url);
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      status(`could not load ${url}: ${e.message}`, true);
+    }
+  }
+  function loadFile(f) {
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onerror = () => status(`could not read ${f.name}`, true);
+    rd.onload = () => { try { const txt = rd.result; load(txt.trimStart().startsWith("{") ? JSON.parse(txt) : jsonl(txt), f.name); } catch (e) { status(`${f.name}: ${e.message}`, true); } };
+    rd.readAsText(f);
   }
   function jsonl(text) { // frames one per line; an optional first line {"meta":...}
     const lines = text.split("\n").filter(Boolean).map(l => JSON.parse(l));
@@ -344,11 +369,13 @@ if (typeof window !== "undefined") {
       state.playing = setInterval(() => { if (state.idx >= state.model.frames.length - 1) setIdx(0); else setIdx(state.idx + 1); }, 120);
     });
     document.addEventListener("keydown", e => { if (e.key === "ArrowLeft") setIdx(state.idx - 1); if (e.key === "ArrowRight") setIdx(state.idx + 1); });
-    $("#file").addEventListener("change", e => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => load(JSON.parse(rd.result), f.name); rd.readAsText(f); });
+    $("#file").addEventListener("change", e => loadFile(e.target.files[0]));
     document.body.addEventListener("dragover", e => e.preventDefault());
-    document.body.addEventListener("drop", e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => load(JSON.parse(rd.result), f.name); rd.readAsText(f); });
+    document.body.addEventListener("drop", e => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); });
+    window.addEventListener("error", e => status(`error: ${e.message}`, true));
+    window.addEventListener("unhandledrejection", e => status(`error: ${(e.reason && e.reason.message) || e.reason}`, true));
     const q = new URLSearchParams(location.search);
-    try { const r = await fetch("/data/index.json"); if (r.ok) { const idx = await r.json(); const sel = $("#vectors"); for (const v of idx) { const o = el("option", null, `${v.path} (${(v.size / 1048576).toFixed(1)} MB)`); o.value = "/data/" + v.path; sel.appendChild(o); } sel.addEventListener("change", () => loadUrl(sel.value)); } } catch (_) {}
+    try { const r = await fetch("/data/index.json"); if (r.ok) { const idx = await r.json(); const sel = $("#vectors"); for (const v of idx) { const o = el("option", null, `${v.path} (${(v.size / 1048576).toFixed(1)} MB)`); o.value = "/data/" + v.path; sel.appendChild(o); } sel.addEventListener("change", () => { if (sel.value) loadUrl(sel.value); }); } } catch (_) {}
     if (q.get("v")) loadUrl(q.get("v"));
   });
 }

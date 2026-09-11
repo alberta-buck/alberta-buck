@@ -79,6 +79,18 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("[viewer] " + (fmt % args) + "\n")
 
+    def end_headers(self):
+        # the page and its script change while a session is open
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
+    def handle(self):
+        # a browser that cancels a 40 MB vector mid-stream is not an error
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            sys.stderr.write("[viewer] client went away mid-transfer\n")
+
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="alberta_buck.sim.viewer")
