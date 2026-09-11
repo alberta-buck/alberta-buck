@@ -22,46 +22,23 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
 
 * STATUS -- resume here
 
-- *Last updated*: 2026-09-10 (session 3, on datasim).  2026-09-03: D7
-  recorded in CARRY-CONVEXITY.org -- K mid-ranges the level's
-  POSITIONS; the shadow bvib (S) and the position vector (V) are kept
-  as alternatives to implement and test; the missing levers are
-  corrected in both (a position loop with its OWN gains and one
-  integrator; local skews kappa_i so n positions have n levers);
-  decision 9 CLOSED (hold the last good cap -- the mechanics of an
-  unreadable NAV are under "Decisions pending" 9); decision 11 opened
-  (cost weights and caps); the controller-alternatives test plan is a
-  section of this file; WP-13 / 14 / 15 / 16 added, R15-R18 added.
-  2026-09-04: the "Readiness for the controller-alternatives grid"
-  section (what remains, verified harness support, compute on the
-  Mac and the 32-core Xeon, the dependency rule, the agent plan) and
-  =ONBOARDING-D7.org= (the reading plan for agents from other
-  accounts).  Decisions 8, 10, 11 RESOLVED 2026-09-04 (slot0 with
-  minimal regeneration; the funding factor sees RAW bvib only; listed
-  caps with carry-class weights); 12, 13 proceeding as proposed.
-  Decision 8 DONE: =wp/d8-slot0= merged 46c3b7d (=gauge.py= at every
-  BUCK/USDC read; =vecdiff=; the artefact gone; decisions pending
-  14-16 filed).  WP-13 DONE: =wp/13-controller= merged b4c1b75
-  (2026-09-06; the corrected two-loop controller, observer modes S / V,
-  hold-last cap, the stand-ins' books finally fed to the observer;
-  decisions pending 17-19 filed).  Forge on the tree: 60 suites, 619
-  passed, 0 failed, 1 skipped; pytest 155.  Both worktrees removed.
-  datasim.local is UP as the grid machine (2026-09-06: build, forge
-  and pytest verified there with the Mac's numbers; the 30-day cell is
-  byte-identical across the two machines; ptau, the big keys and
-  build/sim wait for the LAN).  IN FLIGHT (2026-09-10, on datasim):
-  the REGRESSION REGENERATION -- the 14-arm matrix and the 42-cell
-  catalogue wave 1 on the current tree (ledger); done markers under
-  =build/sim/regen/=; no sim code edits in that checkout until both
-  are done.  The D7 grid (WP-15's cycles) starts only after the
-  regeneration is judged.  =ORGANIC-SCALE.org= (2026-09-11) opens wave 4, the
-  organic civilization-scale environment (tracks T13-T17); the D7
-  grid's cycle 1 runs as a STRUCTURAL check on the current world, its
-  quantitative cycles wait for the ladder's rung 2.  Next: WP-16 (gains), WP-15 (the grid's
-  machinery), WP-14 (local skews) on offer to other-account agents
-  through =ONBOARDING-D7.org=; the 1-year identity pair on the Xeon,
-  judged by =vecdiff=; decision 14 (TOKEN-pool gauges) before any
-  fence-basket cell.
+- *Last updated*: 2026-09-11 (session 3, on datasim).  THE REGRESSION
+  REGENERATION IS CLOSED: the 14-arm matrix (13 PASS, the undefended
+  raid FAIL as always) and the 42-cell catalogue wave 1 (42 PASS) keep
+  every recorded verdict on the current tree; the response numbers of
+  2026-09-11 are the baseline of record (the D2 world, decision 20
+  (a)); August's vectors are not comparable frame by frame (the
+  attribution entry).  Merged since the D7 program opened: decision 8
+  (46c3b7d), WP-13 (b4c1b75), decision 21 (10090e7), the viewer and
+  telemetry v2 (cdd1e49).  =ORGANIC-SCALE.org= opened wave 4 (tracks
+  T13-T17); the viewer serves at =http://datasim.local:8787/=.
+  NOTHING IS IN FLIGHT.  Next: (a) the design owner's decisions in
+  ORGANIC-SCALE.org (rungs and gates, cohort tolerance, the minimal
+  income economy, the viewer stack, JS as a second source, cycle-1
+  timing); (b) WP-16 / WP-15 / WP-14 for the D7 grid's cycle 1 as a
+  STRUCTURAL check on the current world; (c) wave 4's agents (T15)
+  and the multiplicity layer (T16); (d) more agents' =why= notes and
+  the viewer's live websocket source.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -741,6 +718,46 @@ install and login.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-11 -- Regeneration CLOSED; wp/21-inputs and wp/14-viewer merged (session 3, on datasim)
+
+- THE MATRIX, all 14 arms on the current tree (bv tail / sd / K; the
+  recorded values in brackets): base 1.0006 / 0.0105 / 0.746 [1.0005 /
+  0.0107 / 0.760]; capacity 1.0016 / 0.0285 / 0.647 [1.0017 / 0.0266 /
+  0.634]; endow 1.0004 / 0.0100 / 0.712 [1.0005 / 0.0101 / 0.715]; deep
+  1.0005 / 0.0103 / 0.757 [1.0006 / 0.0101 / 0.757]; endow-deep 1.0005
+  / 0.0093 / 0.707 [1.0003 / 0.0097 / 0.715]; debtors 1.0005 / 0.0111 /
+  0.755 [1.0002 / 0.0081 / 0.763]; debtors-mature 0.9999 / 0.0077 /
+  0.927 [0.9999 / 0.0080 / 0.925]; basketeers 1.0005 / 0.0080 / 0.886
+  [0.9998 / 0.0244 / 0.860]; originate 1.0007 / 0.0072 / 0.941 [1.0006
+  / 0.0072 / 0.942]; endog 1.0008 / 0.0129 / 0.931 [1.0002 / 0.0068 /
+  0.924]; endog-excursion 1.0011 / 0.0171 / 0.703 [1.0005 / 0.725
+  single, 0.691 dual]; endog-excursion-raid 1.0006 / 0.0069 / 0.940
+  [1.0010 / 0.904 single, 1.0015 / 0.938 dual]; portcast 1.0003 /
+  0.0071 / 0.684 [1.0004 / 0.0070 / 0.704]; endog-raid (undefended)
+  FAIL, K railed 37% [always failed].  THIRTEEN PASS, ONE EXPECTED
+  FAIL: every arm keeps its recorded verdict; no arm railed that did
+  not; the equilibrium holds on the tree that carries decision 8, the
+  stress fee and WP-13.  THE CATALOGUE wave 1: 42 / 42 PASS (entry
+  above).  Verdict of the regeneration: NO REGRESSION.  The response
+  numbers of 2026-09-11 are the baseline of record (decision 20 (a));
+  the attribution entry above says why August's are not comparable
+  frame by frame.
+- Merged --no-ff, in order: =wp/21-inputs= as 10090e7 (decision 21: the
+  generator's lock and atomic writes, =PricesIncomplete=, =--prepare=,
+  the Makefile's prepare-before-fan-out; 7 tests) and =wp/14-viewer= as
+  cdd1e49 (the viewer and telemetry v2; 7 tests; one .gitignore
+  both-sides-append conflict kept both).  On the merged tree: the
+  eight sim pytest files 168 passed; =node alberta_buck/sim/viewer/test_viewer.mjs=
+  OK on the v2 smoke and a regenerated catalogue cell; =--prepare=
+  builds the 5-year window in 2 s; =make -n sim-prepare-catalogue=
+  expands.  The viewer now serves from the branch of record
+  (=http://datasim.local:8787/=, =ALBERTA_BUCK_REPO= the main checkout);
+  both worktrees removed, branches kept.
+- Left behind on datasim: the 14 matrix vectors in =test/vectors/=
+  (untracked, never added), wave 1 in =build/sim/catalogue/=, the
+  August sets in =build/sim/banked/=, the v2 smokes in
+  =build/sim/smoke/v2/=, ptau arriving from the Mac.
 
 ** 2026-09-11 -- Attribution of the regeneration's shifts: what the banked vectors say (session 3, on datasim)
 
