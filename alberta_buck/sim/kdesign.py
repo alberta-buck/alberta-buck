@@ -1091,8 +1091,14 @@ def plants_from_fit(fit: dict, des: Design) -> dict:
         sc = f["scales"]
         cap = sc["cap_off"]
         D = sc["D"]
-        plant = Plant(a=f["price"]["a"], k_e=f["price"]["k_e"], k_s=f["book"]["F_K"] / cap,
-                      t_flow=des.t_persist_days)
+        a, k_e, F_K = f["price"].get("a"), f["price"].get("k_e"), f["book"].get("F_K")
+        bad = [n for n, v in (("a", a), ("k_e", k_e), ("F_K", F_K))
+               if v is None or not math.isfinite(v) or v <= 0]
+        if bad:
+            print(f"[solve] {depth}: no usable plant ({', '.join(bad)} not finite and "
+                  "positive); skipped", file=sys.stderr)
+            continue
+        plant = Plant(a=a, k_e=k_e, k_s=F_K / cap, t_flow=des.t_persist_days)
         out[depth] = {"plant_fill": plant, "sigma": {"S": cap / D, "V": 0.5},
                       "D": D, "cap_off": cap, "F_K": f["book"]["F_K"],
                       "F_K_supply": f["supply"]["F_K"], "depth_m": f.get("depth_m")}
