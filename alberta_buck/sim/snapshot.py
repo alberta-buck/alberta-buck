@@ -92,6 +92,39 @@ def _wp13_frame(d) -> dict:
     return f
 
 
+# WP-15: the injectors' counters (pusher_agent.py: pu_* / lx_*;
+# bookloader.py: bl_*; the periodic whale's raid_cycle) and the loader's
+# par-marked P&L.  Keys are copied ONLY when the injector exists (each
+# initializes its counters in bootstrap()), so a cell without them keeps
+# its frame shape and stays byte-identical (house rule 5).
+WP15_KEYS = (
+    "pu_pushes", "pu_unwinds", "pu_pool", "pu_move_bp", "pu_tripped", "pu_err",
+    "lx_exits", "lx_venue", "lx_frac", "lx_liq_before", "lx_liq_after",
+    "lx_buck", "lx_usdc", "lx_err",
+    "bl_phase", "bl_bought", "bl_loaded", "bl_unwound", "bl_sold", "bl_target",
+    "bl_rho_load", "bl_s_load", "bl_loaded_frac", "bl_held_days", "bl_k_load",
+    "bl_k_unwind", "bl_err",
+)
+
+
+def _wp15_frame(d, ctr, agents) -> dict:
+    f = {k: ctr[k] for k in WP15_KEYS if k in ctr}
+    if "raidCycle" in ctr:
+        f["raid_cycle"] = ctr["raidCycle"]
+    loaders = [ag for ag in agents
+               if type(ag).__name__ == "BookLoaderAgent"
+               and getattr(ag, "proxy", None)]
+    if loaders:
+        pnl = 0
+        for ag in loaders:
+            try:
+                pnl += ag._nw(d) - ag._nw0
+            except Exception:
+                pass
+        f["bl_pnl"] = pnl
+    return f
+
+
 def _pool_value_weights(d) -> list[list[float]]:
     """Per-token [actual_weight, target_weight] from TOKEN/BUCK pools.
 
@@ -741,6 +774,8 @@ class Snapshotter:
             **_wp13_frame(d),
             "sh_offset_txs": ctr.get("sh_offset_txs", 0),
             "sh_offset_err": ctr.get("sh_offset_err", ""),
+            # WP-15: the grid's injectors (only when present; see above).
+            **_wp15_frame(d, ctr, agents),
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t
