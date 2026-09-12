@@ -22,7 +22,7 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
 
 * STATUS -- resume here
 
-- *Last updated*: 2026-09-11 (session 3, on datasim).  THE REGRESSION
+- *Last updated*: 2026-09-12 (session 3, on datasim).  THE REGRESSION
   REGENERATION IS CLOSED: the 14-arm matrix (13 PASS, the undefended
   raid FAIL as always) and the 42-cell catalogue wave 1 (42 PASS) keep
   every recorded verdict on the current tree; the response numbers of
@@ -33,11 +33,14 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   telemetry v2 (cdd1e49).  =ORGANIC-SCALE.org= opened wave 4 (tracks
   T13-T17); the viewer serves at =http://datasim.local:8787/=.
   ORGANIC-SCALE.org's six decisions RESOLVED 2026-09-11 (decision 22).
-  IN FLIGHT: WP-16 (=wp/16-kdesign=) and WP-15 (=wp/15-grid=) on this
-  account in worktrees =../alberta-buck-wp-16= / =-wp-15=, the D7
-  grid's prerequisites; then WP-14, then cycle 1 as the STRUCTURAL
-  check; the viewer's websocket source; wave 4's T15 / T16 / T17 are
-  on offer to other accounts.
+  WP-15 DONE and merged (75d9e34, 2026-09-12): the grid's machinery
+  exists and =d7-c1= dry-runs 54 cells.  IN FLIGHT on this account:
+  WP-16 (=wp/16-kdesign=, =../alberta-buck-wp-16=: the gain table) and
+  WP-14 (=wp/14-skews=, =../alberta-buck-wp-14=: per-class stabilizers
+  and the local skews; its own out/).  Then cycle 1 as the STRUCTURAL
+  check: the A / S0 cells can run as soon as the tree is quiet, the S /
+  V cells after WP-16, Vk after WP-14.  Wave 4's T15 / T16 / T17 are on
+  offer to other accounts.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -254,7 +257,7 @@ remains.
 | WP-11 | Monetary Diamond consolidation (POST-wave-3): facets = venue, custody, ops, undertakings + ladder, facility registry, house, observer, controller; =Buck='s =buckK= and =basket= point at the Diamond (CARRY-CONVEXITY.org 6.4)                                                                                                                                    | all wave-3 wins                                                                  | src/basket/* (facets), src/Buck.sol wiring decision, deploy scripts                                                                                                                                                       | facet map + shared storage layout; time-locked parameters                                                                  | existing forge suites pass facet by facet; lambda = gamma = 0 identity; one-way call graph asserted                                                                      | --                                                                                                                                                                                                                                                   | TODO                                                   |                                                                                                               |                               |
 | WP-13 | The corrected controller (D7): two loops with independent gains (Kq, Kqi, Kqd) and one position integrator; observer aggregation modes S / V with weights; =IStabilizer.position()= / =positionCap()= / =stale()=; hold-last cap on an unreadable NAV; disabled stabilizers excluded; the price loop and =fundingFactor()= read the RAW basket value (decision 10) | WP-3a                                                                            | BuckKControllerShadow.sol (extend), ShadowObserver.sol (modes, weights, exclusion), IStabilizer.sol (append), BuckBasketOps.sol (position / cap / stale), forge tests; deploy.py / __main__.py (append: =--shadow-mode s  | v=, =SIM_SHADOW_KQ= / =_KQI= / =_KQD= / =_W_*=)                                                                            | =--controller shadow= runs in both modes; the R14 attribution panel gets the per-loop dK                                                                                 | Kq = Kqi = Kqd = 0 identity with Direct state-for-state; S0 gains reproduce D4 in the interior on a 5-d smoke; guard-trip test leaves position() / saturation() unchanged and sets stale(); disabled desk excluded from s; shell size within EIP-170 | 1 smoke                                                | DONE (merged 2026-09-06, b4c1b75; 36 Shadow + 37 Ops + 4 pytest; identity 5/5 frames; S and V engaged smokes) | =wp/13-controller= / subagent |
 | WP-14 | Local skews kappa_i on the level-1 agents: UndertakingAgent (eps per side), FacilityAgent (x / y), SeederAgent (range centre), the desk (its Q1/Q3 thresholds via the ops params): band_i = band_i0 + kappa_i q_i / cap_i, default 0                                                                                                                               | WP-13 (position telemetry only)                                                  | undertaking_agents.py, facility_agent.py, seeder_agent.py (append: kappa knob, sk_* counters); the desk's thresholds                                                                                                      | kappa on / off cells in the grid                                                                                           | kappa = 0 byte-identical to today (L3); under a differential disturbance the loaded facility's own book unwinds with K within G7                                         | 2 smokes                                                                                                                                                                                                                                             | TODO                                                   |                                                                                                               |                               |
-| WP-15 | The controller-alternatives grid (the test plan of this file): disruption TOMLs for classes 5-8 and 10; =BookLoaderAgent= (class 9); habituation / carry / saturation-dwell / K-economy / book-loading / attribution metrics; cycles 1-3                                                                                                                           | decision 8; WP-13, WP-14, WP-16                                                  | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml (new); bookloader.py (new); eqmetrics.py / snapshot.py (append); a star spec per cycle                                                   | the three cycles' tables and panes; a recommendation S vs V, tau_s, kappa*                                                 | P9 and P10 judged; G1-G8 on every cell; R15-R18                                                                                                                          | ~130                                                                                                                                                                                                                                                 | TODO                                                   |                                                                                                               |                               |
+| WP-15 | The controller-alternatives grid (the test plan of this file): disruption TOMLs for classes 5-8 and 10; =BookLoaderAgent= (class 9); habituation / carry / saturation-dwell / K-economy / book-loading / attribution metrics; cycles 1-3                                                                                                                           | decision 8; WP-13, WP-14, WP-16                                                  | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml (new); bookloader.py (new); eqmetrics.py / snapshot.py (append); a star spec per cycle                                                   | the three cycles' tables and panes; a recommendation S vs V, tau_s, kappa*                                                 | P9 and P10 judged; G1-G8 on every cell; R15-R18                                                                                                                          | ~130                                                                                                                                                                                                                                                 | machinery DONE (merged 2026-09-12, 75d9e34: the class arms, three injectors, the d7 metrics, star axes, d7-c1.toml 54 cells); the cycles not yet run | =wp/15-grid= / subagent |                               |
 | WP-16 | Gain derivation, offline: the reduced plant (7.2 + the position loop) as a small linear model in Python; identify k_s (flow per unit K per unit cap) from banked vectors; LQR with costs (e^2, carry-weighted s^2, dK^2); SIMC sanity; margin check; the gain table for S and V at both depths                                                                     | WP-1 vectors                                                                     | alberta_buck/sim/kdesign.py, test_kdesign.py (new)                                                                                                                                                                        | the gain table (Kq, Kqi, Kqd, tau_s) per design and depth; the lambda knee derived rather than swept                       | LQR reproduces the price loop's (Kp, Ki) within 25% when the position weight is 0 (the sanity anchor); the derived tau_s lands between tau_I and the persistence horizon | 0                                                                                                                                                                                                                                                    | TODO                                                   |                                                                                                               |                               |
 
 * The star method: one axis at a time from a baseline
@@ -717,6 +720,70 @@ install and login.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-12 -- WP-15 DONE and merged (session 3, subagent on =wp/15-grid=)
+
+- Merged --no-ff as 75d9e34 (seven branch commits, head f13fc3b; the
+  report =reports/wp-15.org= is the evidence of record).  On the merged
+  tree the nine sim pytest files: 183 passed; =python -m
+  alberta_buck.sim.star experiments/stars/d7-c1.toml --dry-run=: 54
+  cells.  Subagents were 429-killed twice (the session limit resets
+  at 1:30 and 10:10 Vancouver time); resumed with exact state notes
+  each time.
+- Built: the disruption classes 5-10 as catalogue arms on the none
+  backdrop -- =catalogue-cohort-step= (half the savers wound down),
+  =-cohort-add= (15 honest debtors added at once), =-ramp= (a debtor
+  every 10 days for 180 days: =uptake_shock= is INERT on the catalogue
+  cast, which has no FatCredit borrowers), =-lpexit= (=LpExitAgent=:
+  venue "ub" burns half the SimLP BUCK/USDC seed and holds the
+  principal; venue "basket" is a $10M depositor who leaves and moves
+  D), =-periodic= (=WhaleRaidAgent= =period_days=, alternating sides,
+  default 0 byte-identical), =-guardtrip= (=PusherAgent=: a one-pool
+  spot push past the 500 bp guard at the day's last tick every N days,
+  unwound next tick, the observer poked), =-bookload=
+  (=BookLoaderAgent=: loads the ladder from a USDC budget, holds,
+  unwinds, books the round trip; defaults push_bp 800 / dev_target
+  0.03 because at 150 bp the cast absorbed the attack and the ladder
+  never loaded); the d7 metrics as an =eqmetrics= block (habituation
+  with gate P9, carry BUCK-days, saturation / stale dwell, K economy,
+  book-loading with P10's P&L half against the none twin, per-loop
+  attribution) with 15 tests, wired into the catalogue's summary (a d7
+  panel) and the star's table; =star.py= =values = [...]= / =preset= /
+  compound axes (WP-12 specs keep their counts); the cycle-1 spec with
+  the design preset axis {A, S0, S, V} (Vk waits for WP-14; the S / V
+  gains are marked place-holders until WP-16's table).
+- Evidence: L3 byte-identity on three base cells (none30, dump30 with a
+  whale lifecycle inside the window, ops30 with the desk, the
+  undertakings and the S0 loop engaged), and the injectors at count 0
+  =vecdiff=-identical; every class visible in a 30-60-day smoke (five
+  guard trips with =positionCap()= reverting and the stale flag on the
+  push-day frames, no K kick; four alternating raid cycles; the seed's
+  active liquidity exactly halved; the savers' cadence halved; 15
+  debtors added and funding-gated like the cast; a 6-debtor staircase;
+  the loader at 800 bp loading the ladder to rho 0.945).
+- FINDINGS worth the design owner's eye: (1) the first LIVE cell in
+  which the desk's own book fed K through the seam -- in guardtrip60
+  the desk issued from day 49 (outstanding 269k BUCK, s -0.024) and the
+  position loop raised K 0.749 -> 0.762 in ten days at the S0 gains,
+  the sign D7 predicts; (2) the book-loading risk in numbers, before
+  WP-16's gains: a 5.5% load of the ladder moved K by 0.097 during the
+  load and K OVERSHOT by +0.14 after the unwind (0.65 -> 0.89 in 15
+  days) -- the position integrator wound on the absorbed book unwinds
+  slowly while the price loop sees the post-unwind premium; the
+  attacker paid $7.0M for it; (3) the guard also trips ORGANICALLY on
+  the calm arm (a whale snap or a large deposit inside the day's last
+  600 s), so the hold-last-cap policy is exercised in every cell, not
+  only the guard-trip arm; (4) the observer's D is the basket pools'
+  BUCK, so BUCK/USDC depth withdrawal thins the exit route without
+  moving s_S -- class 10 needs both venues; (5) the
+  =MonetaryKeeperAgent= is not in the rebalancing-eq cast, so =--set
+  scenario.basket=ops= alone deploys a desk nobody cranks -- the
+  cycle-1 baseline adds it; (6) =CLAUDE.md= is untracked and ignored,
+  so worktrees and clones lack it (the house rules in
+  ONBOARDING-D7.org carried the agent; the recipe now copies it).
+- Open issues filed as decisions pending 23-26.  Worktree
+  =../alberta-buck-wp-15= removed, branch kept; its vectors (24 MB)
+  discarded with it -- the report carries the numbers.
 
 ** 2026-09-11 -- WP-16 and WP-15 launched; the viewer's live source (session 3, on datasim)
 
@@ -1860,6 +1927,36 @@ next.  Paste acceptance evidence here, not in chat.
    emitter in the second half of wave 4; D7 cycle 1 now as the
    structural check with its quantitative readings provisional.  The
    full text is in ORGANIC-SCALE.org.
+
+23. *Class 10's venue* (from WP-15).  The observer's D is the basket
+   pools' BUCK (=shadowDepth()=), not BUCK/USDC depth; withdrawing
+   BUCK/USDC depth (venue "ub") thins the exit route and the arbs'
+   gates without moving s_S, while a departing $10M basket depositor
+   (venue "basket") moves D but changes the pre-history.  Proposed:
+   cycle 2 runs class 10 with BOTH venues, and experiment.py gains an
+   =exit_agents= intervention (force a fraction of a DM class's
+   receipts out and freeze them) so existing depositors can leave with
+   an identical pre-history.
+24. *Added cohorts arrive at once through private knobs* (from WP-15).
+   =add_agents= works mid-run, but making a debtor cohort arrive at
+   once needed =set_knob= on the debtor's private =_endog= /
+   =arrive_day=.  Proposed: an =arrive= option on =add_agents= in
+   experiment.py; the class-5 / 6 TOMLs stand as written meanwhile.
+25. *The book-loading attacker's strength and the periodic windows*
+   (from WP-15).  At 150 bp the cast absorbs the attack; at 800 bp the
+   ladder loads to rho 0.945 but the ladder's =leg_bp= bounds
+   absorption to ~0.4% of the book per day, so rho 0.5 needs ~170 days.
+   Proposed: cycle 2 sweeps =push_bp= {300, 800} and =load_days= {60,
+   180}, and runs the loader's =side = "buy"= once WP-14 books the
+   issued side with its own cap; on periodic arms
+   =excursion_response= clips each window at the next window's start
+   (a =clip_next= option in the WP-1 block, the integrator's).
+26. *The tau_s axis scaling and the cycle-1 order* (from WP-15).  The
+   tau_s axis scales the gains x{0.5, 2} uniformly; the SIMC reading
+   would scale Kqi by {4, 0.25}.  Proposed: WP-16's table replaces the
+   place-holders and fixes the rule; run the A and S0 cells of d7-c1
+   first (they need no table), the S / V cells after WP-16 lands, Vk
+   after WP-14.
 
 * Conventions
 
