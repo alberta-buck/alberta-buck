@@ -415,6 +415,13 @@ class SeederAgent(_ProxyAgent):
             except Exception:
                 self._b0 = None
 
+    def bootstrap(self, d, scenario, ctr) -> None:
+        """WP-14: publish the position's cap (the budget) before the first
+        act, so the seeder's stabilizer is registered and INCLUDED from day
+        0 with an empty position rather than excluded until start_day."""
+        ctr["sd_q"] = int(self._q_frozen + self._q_live)
+        ctr["sd_cap"] = int(self.budget)
+
     # -- chain reads -------------------------------------------------------- #
 
     def _pool(self, d):
