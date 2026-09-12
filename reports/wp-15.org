@@ -1,0 +1,457 @@
+#+TITLE: WP-15 report -- grid (the controller-alternatives grid's machinery)
+#+AUTHOR: Claude (WP-15 owner, track T2) for the integrator
+#+DATE: 2026-09-12
+
+Branch =wp/15-grid= (worktree =../alberta-buck-wp-15= on datasim, from
+=feature/carry-convexity= at c867ffd).  Specification: WAVE3.org WP-15 row,
+"The controller-alternatives test plan (D7)", R15-R18, decisions pending 9
+/ 17-19 / 22; CARRY-CONVEXITY.org D7, "The position loop", predictions 9
+and 10, 8.2; ONBOARDING-D7.org's WP-15 brief and track T2.  No Solidity
+touched; no dependency added (house rule 11).  Note: =CLAUDE.md= (reading
+step 1) does not exist in the tree at c867ffd; the house rules of
+ONBOARDING-D7.org were followed instead.
+
+* Summary
+
+Built the MACHINERY of the D7 grid: the six new disruption arms as
+catalogue TOMLs on the none backdrop (cohort-step and cohort-add for class
+5, ramp, lpexit, periodic, guardtrip, bookload), a =period_days= knob on
+=WhaleRaidAgent= (class 8, alternating sell / buy cycles), two SimLP-style
+authority injectors (=PusherAgent=, the class-7 one-pool guard trip;
+=LpExitAgent=, the class-10 liquidity withdrawal) and the class-9
+=BookLoaderAgent= (loads the ladder from a USDC budget, holds, unwinds,
+books the round trip par-marked), the six metrics as an =eqmetrics= append
+block (habituation with gate P9, carry BUCK-days, saturation dwell, K
+economy, book-loading with P10's P&L half, per-loop attribution) wired into
+the catalogue's and the star's summaries with 15 unit tests, the star
+driver's =values = [...]= / =preset= / compound axes, and the cycle-1 spec
+=experiments/stars/d7-c1.toml= (54 cells, dry-run listed).  Showed: every
+banked cell is byte-identical (three =cmp= pairs at 30 days, incl. a whale
+cell and an engaged desk cell); each class is visible in the frames of a
+30-60-day smoke (the trip flags and =positionCap()= reverting after every
+push with no K kick; four alternating raid cycles; the seed's liquidity
+halved with the principal held; the savers' cadence halved; 15 debtors
+added and gated by the funding factor; a 6-debtor staircase; the loader at
+800 bp loading the ladder to rho 0.945 with K moving 0.097 against the
+twin and the attacker down $7.0M).  Next: the integrator runs =d7-c1= on
+the merged tree (A / S0 cells now; S / V once WP-16's gains replace the
+marked place-holders), decides the class-10 venue (the observer's D is the
+basket pools' BUCK, not BUCK/USDC depth) and the class-6 realization
+(=uptake_shock= is inert on the FatCredit-free cast), and WP-14 adds Vk.
+
+* Commits (on =wp/15-grid=, newest first)
+
+- (this file) doc: reports/wp-15.org
+- =eba234d= sim: BookLoaderAgent defaults push_bp 800 / dev_target 0.03
+  (at 150 bp the cast absorbed the loader and the ladder never loaded)
+- =a0768f9= sim: the disruption classes 5-10 as catalogue arms
+- =3c95c01= sim: star.py values / preset / compound axes, the d7 columns,
+  the cycle-1 spec d7-c1.toml
+- =28ec686= sim: eqmetrics d7 metrics + test_d7metrics.py (15)
+- =46b7edb= sim: PusherAgent, LpExitAgent, BookLoaderAgent; snapshot /
+  loop / catalogue appends
+- =8f6b93e= sim: WhaleRaidAgent period_days
+
+* Files
+
+New:
+- =alberta_buck/sim/pusher_agent.py= -- =PusherAgent= (class 7) and
+  =LpExitAgent= (class 10), both =@_register=; the module docstring
+  carries the mechanics, knobs and counters.
+- =alberta_buck/sim/bookloader.py= -- =BookLoaderAgent= (class 9).
+- =alberta_buck/sim/experiments/catalogue-{cohort-step,cohort-add,ramp,lpexit,periodic,guardtrip,bookload}.toml=
+  -- generated from =catalogue-none.toml= (the physics block verbatim,
+  the injection appended), so every class shares the none arm's history
+  to its injection.
+- =alberta_buck/sim/experiments/stars/d7-c1.toml= -- the cycle-1 star.
+- =alberta_buck/test/test_d7metrics.py= -- 15 tests.
+- =reports/wp-15.org=.
+
+Appended (=# WP-15= blocks at the end of the existing WP blocks; merge by
+keeping both sides):
+- =alberta_buck/sim/equilibrium_agents.py= -- =WhaleRaidAgent=: the
+  =period_days= knob (a =_spec=, read AFTER every existing draw), the
+  per-cycle state and =_cycle_bounds= / =_cycle_of= / =_act_periodic=;
+  =_act_sell= / =_act_buy= read the post-window end from =self._post_end=
+  (equal to =raid_end + reacq_days= when period 0); =telemetry_static=
+  adds =period_days= and =act= sets =raidCycle= only when periodic.
+- =alberta_buck/sim/snapshot.py= -- =WP15_KEYS= / =_wp15_frame()= after
+  =_wp13_frame()= and one =**_wp15_frame(d, ctr, agents)= line after
+  =sh_offset_err=: the =pu_*= / =lx_*= / =bl_*= counters, =raid_cycle= and
+  =bl_pnl= are copied ONLY when the injector exists (each initializes its
+  counters in =bootstrap()=), so a cell without them keeps its frame shape.
+- =alberta_buck/sim/loop.py= -- two import lines after the WP-13 import.
+- =alberta_buck/sim/catalogue.py= -- =ARMS_D7=, =INJECTORS= after the WP-6
+  MIXES block (the default =ARMS= unchanged); a wrapped =report= that
+  appends the d7 panel to =summary.md= / =.json= (the none-mix cell of the
+  same arm and scale is the book-loading twin).
+- =alberta_buck/sim/eqmetrics.py= -- the metrics, =d7_windows=,
+  =d7_panel=, a wrapped =summarize= (=stats["d7"]=, the injectors' windows
+  in the excursion block, =twin= / =tau_s_days= arguments), =d7_row=, a
+  wrapped =main= printing the d7 rows.
+- =alberta_buck/sim/star.py= -- =load_star= / =cells= / =report= rebound
+  at the end of the module (the WP-12 ones kept as =_*_wp12=; =main=
+  binds the names at call time); =COLS_D7= / =_metrics_d7=.
+
+* Layers passed
+
+Environment for every command: =cd /home/perry/src/alberta-buck-wp-15;
+export PYTHONPATH=$PWD ALBERTA_BUCK_REPO=$PWD= and
+=nix develop --command bash -c "source ../alberta-buck.venv-0.1.0-nix-linux-cpython-313/bin/activate && ..."=.
+Cells were run detached (a per-cell script under the vector's directory,
+=nohup=, a =.done= marker with the exit code and wall time).
+
+** L0
+
+- =make nix-build= / =make nix-test=: NOT run in the worktree (its =out/=
+  and =cache/= are symlinks to the main checkout's; no Solidity changed).
+- The venv suite (the =make nix-venv-test= equivalent), at a0768f9:
+
+    python -m pytest alberta_buck/test/ -q -p no:cacheprovider
+    4 failed, 615 passed, 10 skipped, 1 warning in 796.35s
+
+  The 4 failures are =test_arb_plot=, =test_debtor_ledger::test_isolation_plot=,
+  =test_equilibrium_plot=, =test_lifecycle_plot=: numpy in datasim's venv
+  cannot load =libstdc++.so.6= (=ImportError= at
+  =numpy/_core/multiarray.py:11=), the same through the Makefile's
+  interactive-activate route, and the same on the frozen c867ffd tree
+  (=python -m pytest alberta_buck/test/test_arb_plot.py= -> the identical
+  ImportError): environmental and pre-existing, not this branch (finding 9).
+- The brief's file list, at a0768f9:
+
+    python -m pytest alberta_buck/test/test_d7metrics.py alberta_buck/test/test_markout.py alberta_buck/test/test_ladder.py alberta_buck/test/test_facility.py alberta_buck/test/test_seeder.py alberta_buck/test/test_gauge.py alberta_buck/test/test_shadow_book.py alberta_buck/test/test_prices_inputs.py alberta_buck/test/test_telemetry_v2.py -q -p no:cacheprovider
+    183 passed, 1 warning in 3.61s
+
+** L1 (=test_d7metrics.py=, 15 passed in 0.18 s)
+
+=test_habituation_exponential_decay_and_gate_p9= (tau 20 d decay: t_hab in
+[44, 48], no sign change, P9 true at tau_s 40 and false at 20),
+=test_habituation_limit_cycle_counts_sign_changes= (a 40-day sine: never
+habituates, >= 8 swings, P9 false), =test_habituation_one_overshoot_is_one_sign_change=,
+=test_habituation_none_without_sh_s=, =test_sign_changes_ignore_the_band=,
+=test_carry_buck_days_per_facility= (ut 50 / fac 20 / desk 30 BUCK-days
+over 10 days, the window, absent fields), =test_saturation_dwell_fractions=
+(0.2 / 0.3 / 0.0 / 0.1; a zero held cap counts as saturated; None without
+the fields), =test_k_economy_total_variation_and_rails= (tv 0.24, max
+0.21/day, 2 rail days), =test_book_loading_pnl_and_k_excursion_vs_twin=
+(-$1.0M, frac 0.25, k_exc 0.05 -> 0.2 per unit, P10's P&L half),
+=test_attribution_shares_and_flags= (2/3 : 1/3, the stale frame, the
+per-frame series), =test_d7_windows_from_the_injectors_counters=,
+=test_d7_panel_end_to_end= (the panel and the wrapped =summarize= on a
+written vector), =test_star_values_presets_and_compound_axes= (14 labelled
+cells, the design base pinned everywhere but the design cells, env vs
+--set channels, =--axes=), =test_star_wp12_spec_counts_are_unchanged=
+(k-integral-c0: 23, no =value= field), =test_star_validation_errors=.
+
+** L2 (30-60 day cells; every run exit 0; vectors under =build/sim/wp15/=)
+
+Common: =--backend pyrevm --director pairs=; the none-mix sets
+=--set scenario.agents.ExcursionArbAgent=0 --set scenario.agents.ExcursionCreditArbAgent=0=
+(NM); the desk =--set scenario.basket=ops --set scenario.agents.MonetaryKeeperAgent=1=
+(OPS); the engaged undertakings =--set scenario.agents.UndertakingAgent=1
+--set agents.UndertakingAgent.eps=0.005 --set agents.UndertakingAgent.p=1.0=
+(UT); the S0 controller env =SIM_CONTROLLER=shadow SIM_SHADOW_MODE=s
+SIM_SHADOW_LAMBDA=1 SIM_SHADOW_KQ=0.1 SIM_SHADOW_KQI=6.43004e-7= (S0).
+The injection day is moved into the window by =--set= (for the
+intervention arms by replacing the =interventions= list with the same
+entries at day 10 / 5..55, Python-literal syntax).
+
+1. guardtrip60 (class 7): S0, =catalogue-guardtrip.toml --days 60= OPS NM
+   =--set agents.PusherAgent.start_day=10= (1142 s).  Pushes at days 10,
+   20, 30, 40, 50 in pools 0..4, =pu_move_bp= 800 each, unwinds the next
+   day (=pu_unwinds= 5), =pu_tripped= 5 (=positionCap()= reverted after
+   EVERY push).  Frames: day 10 =sh_cap= None / =sh_stale= 1 /
+   =sh_desk_stale= True; days 30 and 40 the same; day 50 stale set with
+   the cap readable again by the day's end (the cast arbed the push
+   back inside the tick); day 20 clear by the day's end (finding 2).
+   K across the trips: 0.7487 -> 0.7487 (d10-11), 0.7499 -> 0.7502
+   (d20-21), 0.7484 (d30), 0.7513 (d40), 0.7476 -> 0.7522 (d50-51, the
+   desk's own Q4 book from day 49, finding 3): no kick.  The desk:
+   =mk_ops= 6 (all Q4 from day 49), =mk_slippage= 1 (=monetaryOperation=
+   reverted =Slippage= once), =mk_err= the Slippage selector.  Organic
+   trips: =sh_cap= None on days 5, 23, 51 without a push (finding 2).
+2. periodic60 (class 8): =catalogue-periodic.toml --days 60= NM =--set
+   agents.WhaleRaidAgent.raid_day=10 --set agents.WhaleRaidAgent.accum_days=8
+   --set agents.WhaleRaidAgent.period_days=15= (1140 s).  The
+   (day: phase / side / cycle) sequence: 2: 1/sell/0, 10: 2/sell/0, 11:
+   3/sell/0, 25: 2/buy/1, 26: 3/buy/1, 33: 1/sell/2, 40: 2/sell/2, 41:
+   3/sell/2, 55: 2/buy/3, 56: 3/buy/3 -- four cycles, alternating,
+   each clipped into its 15-day period (accumulate 7 d, reacquire 14 d,
+   unwind 7 d).  =eqmetrics.excursion_windows= sees four raid windows
+   (raid:sell 10, raid:buy 25, raid:sell 40, raid:buy 55).  =raid_pnl=
+   (both leg pairs) -6.99M mid-squeeze (day 25), +0.60M (day 40).  K
+   0.748 -> 0.783 (max) on the squeezes.
+3. lpexit30 (class 10, venue ub): =catalogue-lpexit.toml --days 30= NM
+   =--set agents.LpExitAgent.exit_day=10= (674 s).  =lx_liq_before=
+   50,000,000,000,000 -> =lx_liq_after= 25,000,000,000,000 (the pool's
+   active L exactly halved), =lx_buck= 24,705,646.86 / =lx_usdc=
+   25,297,860.19 collected to the agent's proxy; =supply= 61.40M at day
+   10 and 61.59M at day 15, the same as the none cell (the BUCK is held,
+   not retired); =buck_usd= 1.0289 (d9) -> 1.0420 (d12) with no jump at
+   the burn; the seed's fee series continues.
+4. lpexit30-basket (class 10, venue basket): the same =--set
+   agents.LpExitAgent.venue=basket= (694 s).  A $10M TOKEN deposit at
+   bootstrap (6 receipts): =supply= 70.44M at day 0 (vs 60.44M),
+   =basketNav= 31.5M (vs 11.1M); at day 10 =lx_exits= 6, the basket
+   pools' BUCK depth =lx_liq_before= 16,326,799.51 -> =lx_liq_after=
+   6,326,799.51 (D falls 61%), and from day 12 =supply= 61.40M /
+   =basketNav= 13.22M equal the none cell's.  Day-0 tracking error 0.54%
+   vs 0.19%: the pre-history differs from the none arm (finding 5).
+5. cohort-step30 (class 5, demand side): =catalogue-cohort-step.toml
+   --days 30= NM =--set 'interventions=[{"day": 10, "action":
+   "remove_agents", "cls": "SaverAgent", "idx": [0, 1], "mode":
+   "wind_down"}]'= (662 s).  =interventions_applied=: (10, remove_agents,
+   ok, "wind_down 2 SaverAgent"); =regime_saver= (the mean base_rate)
+   382k -> 217k from day 12; =saver_buys= / =saver_sells= +24 / +24 per
+   3 days before, +10..12 after.
+6. cohort-add30 (class 5, supply side): =catalogue-cohort-add.toml
+   --days 30= NM with the three interventions at day 10 (633 s).  Applied:
+   "added 15 BuckCreditDebtorAgent (idx [280..294])", "_endog set on
+   15/15", "arrive_day set on 15/15"; =octl= 30 -> 45 entries from day 10,
+   all 15 =active=, cash accruing ($0.11M by day 10), drawn 0: their
+   refinancing is gated by the funding factor like the cast's
+   (=bcd_why= "BUCK: insufficient mint funding" 16 -> 21, "insufficient
+   credit allocation" 5 -> 6; the base cast's own =bcd_deploys= is 0 in
+   30 days too) -- the cohort's flow arrives over the months after its
+   step (finding 4).
+7. ramp60 (class 6): =catalogue-ramp.toml --days 60= NM with 6 x 3
+   interventions at days 5, 15, .., 55 (1121 s).  =octl= 30 -> 31 (d6),
+   32 (d15), 33 (d27), 34 (d36), 35 (d45), 36 (d57); all applied ok.
+8. bookload60 (class 9, push_bp 150): S0, =catalogue-bookload.toml --days
+   60= OPS UT NM =--set agents.BookLoaderAgent.load_day=5 --set
+   agents.BookLoaderAgent.load_days=20 --set agents.BookLoaderAgent.hold_days=15
+   --set agents.BookLoaderAgent.unwind_days=10= (1273 s), and
+   bookload60-none (the none twin: the same without UT, 1266 s).  Phases
+   1 (d5-24) / 2 (d25-39) / 3 (d40-49) / 4; =bl_bought= = =bl_loaded=
+   $3.83M, =bl_unwound= $2.59M, P&L -$0.34M (twin -$0.29M); but
+   =ut_rho= stayed 1.0, =bl_loaded_frac= 0 (=ut_absorbed= 52k unwound
+   at par the same days): the cast absorbed a 150-bp attack entirely
+   (finding 6).
+9. bookload60-p800 / -p300 (the same cell with =--set
+   agents.BookLoaderAgent.push_bp=800 --set agents.BookLoaderAgent.dev_target=0.03=
+   / =300= and =0.02=; 1445 / 1451 s):
+
+   | cell | loaded $M | rho at load end | loaded frac | s_S peak | K at load end (twin) | max abs(K - K_twin) over the hold | per unit frac | P&L $M | ut_absorbed / open |
+   |------+-----------+-----------------+-------------+----------+----------------------+-----------------------------------+---------------+--------+--------------------|
+   | p800 |      5.35 |           0.945 |       0.055 |   +0.048 | 0.653 (0.749)        |                             0.097 |          1.77 |  -6.99 | 420k / 46k         |
+   | p300 |      4.80 |           0.971 |       0.029 |   +0.023 | 0.714 (0.751)        |                             0.068 |          2.39 |  -4.42 | 173k / 0           |
+
+   (=eqmetrics.book_loading= with the twin; the S0 gains.)  K falls on
+   the absorbed book during the load and overshoots after the unwind
+   (p800: 0.65 -> 0.89 by day 45, finding 7).  These defaults are now the
+   TOML's (=eba234d=).
+10. ops30 (the engaged desk + undertakings + S0 on the none arm, the L3
+    cell): =ut_trades= 8, =sh_s= -0.0023 at day 29, =mk_ops= 0 (the
+    keeper present, no operation in 30 calm days).
+
+The d7 panel on real vectors (=python -m alberta_buck.sim.eqmetrics ...=,
+the row for guardtrip60): =hab[tnever res0.94 sc0 P9x] carry[ut0 fac0
+desk2.28e+06] dwell[sat0% stale7%] K[tv0.064 dmax0.0046 rail0] bl[--]
+attr[pos14% stale4 exc0]= -- the 4 stale frames, the desk's 2.28M
+BUCK-days of issued book, the position loop's 14% of |dK|.
+
+** L3 (the identity pairs)
+
+The base cells were run FIRST from a frozen =git archive c867ffd= copy
+(=out/= and =cache/= symlinked), with the SAME relative command lines,
+then from the worktree at a0768f9:
+
+    cmp build/sim/wp15/base/none30.json build/sim/wp15/smoke1/none30.json -> exit 0 (936995 bytes, sha256 6e7fafb56176 / 6e7fafb56176)
+    cmp build/sim/wp15/base/dump30.json build/sim/wp15/smoke1/dump30.json -> exit 0 (947461 bytes, sha256 0bec59a6e698 / 0bec59a6e698)
+    cmp build/sim/wp15/base/ops30.json build/sim/wp15/smoke1/ops30.json -> exit 0 (956242 bytes, sha256 f7af46845fcc / f7af46845fcc)
+
+- none30: =--experiment alberta_buck/sim/experiments/catalogue-none.toml
+  --backend pyrevm --director pairs --days 30= (the injectors absent).
+- dump30: =catalogue-dump.toml ... --days 30 --set agents.WhaleRaidAgent.raid_day=8
+  --set agents.WhaleRaidAgent.accum_days=8 --set agents.WhaleRaidAgent.reacquire_days=15=
+  (the whale's whole lifecycle inside the window; =period_days= 0).
+- ops30: S0 env, =catalogue-none.toml ... --days 30 --set scenario.basket=ops=
+  UT =--set scenario.agents.MonetaryKeeperAgent=1= (the desk, the observer,
+  the position loop engaged).
+- none30z: none30 plus =--set scenario.agents.PusherAgent=0 --set
+  scenario.agents.BookLoaderAgent=0 --set scenario.agents.LpExitAgent=0=:
+
+    python -m alberta_buck.sim.vecdiff build/sim/wp15/base/none30.json build/sim/wp15/smoke1/none30z.json
+    frames 30 vs 30; identical: True
+    |delta bvib|  max 0 (day 0)  mean 0
+    |delta buckK|  max 0 (day 0)  mean 0
+    changed cumulative counters (agents acted differently): 0; changed gauges/values: 0
+
+  (its =cmp= differs at byte 892670 only because =meta.experiment= carries
+  the three =--set= lines).
+
+Wall on datasim, 13 cells in parallel: 30-day cells 624-694 s, 60-day
+cells 1121-1273 s (1445 s with the stronger loader).
+
+* Acceptance evidence
+
+| criterion (WP-15 row; ONBOARDING brief; P9 / P10; R15-R18)                     | evidence                                                                                                                                                                                                                                             |
+|--------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| class TOMLs 5, 6, 8, 10 TOML-only (add / remove / uptake); 7 a pusher; 9 the loader | 5: cohort-step (remove_agents wind_down) + cohort-add (add_agents + set_knob); 6: ramp (18 x add_agents: =uptake_shock= inert on this cast, finding 1); 8: periodic (the knob); 10: lpexit (an agent: no LP-providing class in the cast, finding 5); 7: pusher_agent.py; 9: bookloader.py |
+| each class TOML runs as a none-mix cell and its disruption is visible in the frames | L2 1-9: the flags / cycles / liquidity / cadence / population / counters quoted; every run exit 0, no =*_err= but the desk's expected =Slippage=                                                                                                       |
+| =period_days= default 0 leaves every banked cell unchanged (L3 byte-identity)   | dump30 cmp exit 0 (a whale cell); none30 / ops30 cmp exit 0                                                                                                                                                                                          |
+| the new injectors at count 0 leave catalogue-none byte-identical               | none30 cmp exit 0; none30z vecdiff identical on every frame                                                                                                                                                                                          |
+| the class-9 agent's P&L is booked (par-marked like ExcursionArbAgent)          | =bl_pnl= in every frame (snapshot sums =_nw - _nw0=: USDC + signed BUCK + TOKEN at pool prices / bvib); -$6.99M / -$4.42M / -$0.34M in the three loader cells                                                                                          |
+| the pusher trips the guard; =positionCap()= reverts NavUnreadable; stale rises | =pu_tripped= 5/5; =sh_cap= None and =sh_stale= 1 / =sh_desk_stale= True on the push-day frames (4 of 5; the fifth cleared inside the tick); =mk_slippage= 1                                                                                                 |
+| counters in snapshot.py in the same commit as the agent (house rule 6)        | 46b7edb: =pu_*= / =lx_*= / =bl_*= copied when present; =raid_cycle= for the periodic whale (8f6b93e)                                                                                                                                                  |
+| every new metric has a unit test on a synthetic frame series                  | test_d7metrics.py: 15 tests (L1)                                                                                                                                                                                                                     |
+| metrics wired into the catalogue summary (a d7 panel) and the star's table    | catalogue =report= wrapper (the d7 rows after the WP-1 tables); star =COLS_D7= (hab_t, hab_sc, carry, sat, stale, k_tv, k_dmax, bl_pnl, bl_kexc, attr_pos) with deltas vs base                                                                         |
+| star.py =values = [...]= axis; a design preset expanding to several env vars  | =d7-c1= design axis =preset = "design", values = [A, S0, S, V]=; =[presets.design]=; test_star_values_presets_and_compound_axes                                                                                                                       |
+| 1 + 2A cells per arm unchanged for existing specs                             | =python -m alberta_buck.sim.star experiments/stars/k-integral-c0.toml --dry-run= -> "[star] 23 cells" (as before); test_star_wp12_spec_counts_are_unchanged                                                                                             |
+| the cycle-1 spec lists every cell in a dry run                                | =python -m alberta_buck.sim.star experiments/stars/d7-c1.toml --dry-run= -> 54 labelled lines + "[star] 54 cells" (build/sim/wp15/d7-c1-dryrun.txt); the star itself NOT run                                                                              |
+| P9 (habituation <= 1.5 tau_s, <= 1 sign change) MEASURED                      | the metric and gate exist (=habituation()=, =p9=); on the 60-day smokes s has not habituated at the horizon (t_hab None, residual 0.79-1.0 of peak) -- the cycle's 2-year cells judge it                                                              |
+| P10 (attacker P&L <= 0; K's excursion under V <= under S)                      | the P&L half holds in every loader cell (=p10_pnl= True); the S-vs-V half is the design axis on the bookload arm of d7-c1 (not run here)                                                                                                             |
+| R15 tau_s table, R17 class-7 "no K kick under V", R18                         | the machinery: the tau_s axis (x0.5 / x2 of the gains), the guardtrip arm, the habituation / book-loading gates; the tables are the cycle's                                                                                                           |
+
+* Findings
+
+1. =uptake_shock= is inert on the catalogue cast.  It adds to
+   =FatCreditBorrowerAgent.extra_cap= (experiment.py:492,
+   equilibrium_agents.py:1589 / 1682, the only readers), and every
+   catalogue arm sets =FatCreditBorrowerAgent = 0=.  Class 6 is therefore
+   realized as a population staircase of honest debtors (one every 10
+   days for 180 days), each made to arrive at once.  Command: =grep -n
+   extra_cap alberta_buck/sim/*.py=; ramp60's =octl= growth.
+2. The guard trip is visible only inside the tick of the push.  The
+   basket's TWAP over the last 600 s still reads the old price until
+   time advances (the swap's oracle observation carries the pre-swap
+   tick), so spot != TWAP for readers in the same tick and not after;
+   the pusher therefore pushes at the day's LAST tick (the end-of-day
+   frame and the loop's cycle see it) and pokes the observer's
+   permissionless =refresh()= so the trip is registered whether or not
+   a keeper's cycle runs after the push.  The cast can still arb the
+   spot back inside the tick (day 20: =pu_tripped= counted, the frame
+   clear; day 50: stale set, the cap readable again).  The guard also
+   trips ORGANICALLY on the calm arm (=sh_cap= None on days 5, 23 with no
+   push): a whale snap or a large DM entry inside the last 600 s of a
+   day.  Command: L2 1; =sh_cap= / =sh_stale= per frame.
+3. The desk issued from day 49 of guardtrip60 (=mk_q4= 1..6, outstanding
+   0 -> 269k BUCK, =sh_s= -0.024) and the position loop raised K 0.749 ->
+   0.762 in ten days at the S0 gains (=pid_qi= 0 -> 1.1e16 = 0.011 K
+   units): the first live cell in which the desk's OWN book fed K
+   through =IStabilizer= -- the sign is D7's (issued raises K).  Command:
+   the day 48-59 frame dump in the analysis (=sh_outstanding=, =pid_q=,
+   =pid_qi=).
+4. A debtor cohort added mid-run is gated like the cast: with the arm's
+   =premium_bp= [50, 150] the funding factor requires a saved BUCK buffer
+   before activation, so =bcd_deploys= stays 0 for the first month of
+   every cell (none30 too) and the cohort's issuance arrives over the
+   months after the step.  =add_agents= itself works mid-run (setup,
+   proxies, credits); the endogenous arrival clock had to be switched
+   off by =set_knob= on =_endog= and =arrive_day= (a private attribute
+   through a public surface: open issue 2).  Command: L2 6.
+5. The observer's D is not BUCK/USDC depth.  =BuckBasketOps.shadowDepth()=
+   (BuckBasketOps.sol:528) sums the BUCK in the TOKEN/BUCK basket pools,
+   so removing BUCK/USDC depth (the brief's class 10) thins the exit route
+   and the arbs' gates without moving s_S = q / D.  The catalogue cast has
+   no =BuckPoolInvestorAgent= (the private LP class of the REBALANCING
+   scenario), so the private BUCK/USDC depth is the SimLP seed
+   (=target_buck_lp_m= 50): =LpExitAgent= burns half of it and holds the
+   principal (venue "ub"); venue "basket" -- a $10M depositor who leaves
+   -- moves D itself (16.3M -> 6.3M) at the cost of a different
+   pre-history.  Command: L2 3-4; =grep -n shadowDepth src/basket/BuckBasketOps.sol=.
+6. A gentle book-loading attack does not load the ladder.  At 150 bp per
+   pool per tick the loader's $3.8M was absorbed by the cast (DM
+   depositors, savers, the anonymous arbs) and by the ladder's own
+   at-par unwind (=ut_absorbed= 52k, =ut_unwound= 52k the same days):
+   =ut_rho= 1.0 after 20 days.  At 800 bp the ladder loads (rho 0.945, s
+   +0.048) but the ladder's =leg_bp= (40 bp of each pool's TOKEN reserve
+   per day) bounds its absorption to ~0.4% of the book per day, so
+   rho_target 0.5 needs ~170 days of sustained discount; the capacity
+   axis scales =leg_bp= and =reserve_frac= together, so the loaded
+   FRACTION per day is capacity-invariant and only the absolute inventory
+   scales.  The attacker's own BUCK/USDC buying is arbed into a bvib
+   PREMIUM (the C3 route), the opposite of the load.  Command: L2 8-9.
+7. At the S0 gains a 5.5% book load moves K by 0.097 during the load and
+   K overshoots by +0.14 after the unwind (p800: 0.653 -> 0.89 by day
+   45; the position integrator wound up on the absorbed book unwinds
+   slowly and the price loop sees the post-unwind premium, bvib 0.74 at
+   day 30): the book-loading risk of an inventory-fed K in numbers,
+   before WP-16's gains.  Command: L2 9.
+8. The periodic cell's response windows overlap: =excursion_response=
+   measures each raid over =resp_days= (90) past its end, so with a
+   period below that the later raids sit inside the earlier windows
+   (periodic60: the day-10 window's peak is the day-41 frame, bvib
+   1.1117).  Per-window responses on periodic arms should be read with
+   =--resp-days= <= the period (open issue 4).  Command: L2 2; the
+   analysis' "periodic windows" line.
+9. datasim's venv numpy cannot load =libstdc++.so.6= under the nix shell,
+   so the four plot tests fail with ImportError on this machine at
+   c867ffd as on this branch (L0); the wave-3 files do not import numpy.
+10. The =MonetaryKeeperAgent= is not in the rebalancing-eq cast
+    (scenario.py: the REBALANCING scenario has it, =build_rebalancing_eq=
+    does not), so =--set scenario.basket=ops= alone deploys a desk nobody
+    cranks; the cycle-1 baseline adds =scenario.agents.MonetaryKeeperAgent=1=
+    and the L2 cells above ran with it (=mk_ops= 6 in guardtrip60).
+    Command: =grep -n MonetaryKeeperAgent alberta_buck/sim/scenario.py=.
+
+* Open issues and proposed decisions
+
+1. Class 10's venue.  Proposed: run cycle 2's class-10 cells with BOTH
+   venues (the brief's "ub" as the exit-route test; "basket" as the
+   D-dependence test of design S, prediction 9's second clause), and
+   record that "venue basket" changes the pre-history (a larger D for
+   the first year); or add an =exit_agents= intervention to experiment.py
+   (force =_exit= on a fraction of a DM class's receipts and freeze them)
+   so the existing depositors leave with an identical pre-history --
+   experiment.py is not T2's file.
+2. Class 5 / 6 use =set_knob= on the debtor's private =_endog= /
+   =arrive_day= to make an added cohort arrive at once.  Proposed: an
+   =arrive= knob on =add_agents= (or an =arrive_mode= per-add override) in
+   experiment.py; until then the TOMLs stand as written.
+3. The book-loading attacker's strength.  The defaults are now 800 bp /
+   dev_target 0.03 (the whale's "ignore the impact caps" spirit).
+   Proposed: cycle 2 sweeps =push_bp= {300, 800} and =load_days= {60,
+   180} (rho 0.5 needs ~170 d at the ladder's leg cap), and the loader's
+   =side = "buy"= (the strong side + the credit exploit, implemented,
+   untested in a cell) runs once WP-14's per-class stabilizers book the
+   issued side with its own cap.
+4. =excursion_response= on periodic arms: clip each window's response
+   span at the next window's start (or pass =--resp-days= = period).
+   Proposed: a =clip_next= option in the WP-1 block (the integrator's).
+5. The tau_s axis is the gains x{0.5, 2} uniformly (the brief's
+   reading); the SIMC reading (Kq ~ 1/tau_s, Kqi ~ 1/tau_s^2) would scale
+   Kqi by {4, 0.25}.  Proposed: WP-16's table replaces the base and the
+   integrator chooses the scaling rule with it (four marked lines in
+   d7-c1.toml).
+6. S and V run at the S0 gains until WP-16 lands, so the S and S0 cells
+   of d7-c1 coincide and V's gains are in fill units at the price-loop
+   numbers (roughly the same order at the default depth: cap_off =
+   target_buck_m ~ D, reports/wp-13.org finding 3).  Proposed: run the A
+   and S0 cells first (the readiness table's critical path); replace the
+   place-holders before the S / V cells.
+7. =habituation()='s tau_s defaults to the deploy's =tau_i_days= (90 d)
+   when the caller passes none; the star passes nothing today.  Proposed:
+   the tau_s axis's level (or the derived tau_s from WP-16) is passed
+   through =summarize(tau_s_days=)= by the star report once the gains
+   table exists.
+8. The loader is an ARM agent (the arm's TOML sets its count; the mixes
+   never touch it), not a DEFENDERS entry: a mix zeroes DEFENDERS, and an
+   attacker in DEFENDERS would have needed a mix of its own.  =INJECTORS=
+   documents the four.  Proposed: accept.
+9. Frame shape: the WP-15 keys appear only in cells whose injector exists
+   (house rule 5 by construction; =vecdiff= across cells with and without
+   an injector reports them as new fields).  Proposed: accept.
+10. The class-7 arm's push at the day's last tick means the cast's
+    tick-0 actors (undertakings, excursion arbs, the desk) act on the
+    pushed price at the next day's open in random order with the
+    unwind.  Proposed: accept as the disruption; =push_tick= is a knob.
+
+* Left behind
+
+- =build/sim/wp15/= in the worktree, 24 MB, not committed: =base/= (the
+  three c867ffd cells + logs + .done), =smoke1/= (13 cells, the .sh
+  launch scripts, logs, .done), =smoke2/= (the two loader variants),
+  =d7-c1-dryrun.txt=, =fullpytest.log=.  Delete freely after the ledger
+  entry; keep =base/= and =smoke1/{none30,dump30,ops30}.json= if the
+  identity pairs are wanted again.
+- The frozen base tree =scratchpad/base-c867ffd= (a =git archive=, ~60
+  MB with the pool artifacts symlinked) under the session scratchpad,
+  plus =gen_tomls.py=, =launch.py=, =mkspec.py=, =smoke_report.py=,
+  =l3.sh=, =run_cell.sh=.
+- =test/vectors/identity-cache.json= was regenerated by the runs and
+  restored with =git checkout= before the commits; the untracked
+  =alberta_buck/sim/viewer/vendor= (the viewer's vendored uPlot) was not
+  touched or committed.
+- Nothing installed; =flake.nix= and =pyproject.toml= untouched.  The
+  main checkout and =../alberta-buck-wp-16= were not written to.
