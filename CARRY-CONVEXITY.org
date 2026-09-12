@@ -1025,6 +1025,28 @@ inventory; no per-facility integrators in K; no reconstituted price as
 K's input under V (S keeps it, as the alternative under test); no
 fast-controller filtered signals into K (6.4 stands).
 
+*Optimal control, as derived (WP-16, 2026-09-12).*  The LQR of record
+is LOOP-AT-A-TIME.  With one lever and both integrals costed, the
+reduced plant has a conserved direction -- k_s (a Int(e) + e) + k_e s
+is unchanged by any input, so the price integral and the position carry
+the same information (the impact-scaled cumulative net flow) and cannot
+both be zeroed by K -- and the joint Riccati iteration diverges.  Each
+loop's LQR on its own plant reproduces the sim's price gains exactly
+(the anchor) and gives the position loop Kq 2.42 per unit s_S, Kqi
+8.1e-8/s, tau_s 127 d at the carry weight of record; the joint closed
+loop then carries a structural eigenvalue at 1 (the two integrators'
+contents can shift between them without moving K), bounded in the sim
+only by the band and the rails.  A joint law would need the band -- a
+hybrid, which the cascade with anti-windup already is.  Two facts of
+the sim shape what those gains can do: K is a weak lever (~50k
+BUCK/day of flow per unit), so the derived position loop spends its
+whole rail at a 21% fill of the undertakings' reserve and the
+S0-equivalent lambda is ~24 against the 0.5-1 the D4 cells ran; and
+the undertakings' book on a calm arm is transient, unwound at par
+within days.  WAVE3.org decisions 27-31 carry the choices this
+leaves: the persistence horizon, the position loop's authority, the
+depth axis, P9's window, the two-integrator drift.
+
 *What decides between S and V.*  The grid: the same disruptions, the
 same facility mixes and capacities, both aggregations, gains derived
 the same way (WP-16), judged by G1-G8 plus the habituation and
