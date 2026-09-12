@@ -1,0 +1,131 @@
+# Star d7, cycle 1 -- the STRUCTURAL comparison of the controller
+# alternatives (WAVE3.org "The controller-alternatives test plan", cycle 1;
+# CARRY-CONVEXITY.org D7; WP-15).  Runs on datasim with
+#
+#   python -m alberta_buck.sim.star d7-c1 --jobs 28
+#   python -m alberta_buck.sim.star d7-c1 --dry-run        # lists every cell
+#
+# BASELINE: the `all` mix + the undertakings ENGAGED (eps 0.005, p 1.0: at
+# the default band they never trade on the calm arm, reports/wp-13.org) +
+# the desk (scenario.basket = ops with the SIM_OPS_* defaults, driven by a
+# MonetaryKeeperAgent -- the rebalancing-eq cast has none, so the desk
+# would otherwise never operate), at x1 capacity, default depth, design S
+# (the position loop in price units) at the S0 gains.  Every cell is a
+# 2-year portcast window with the injection at day 365.
+#
+# ARMS: the organic control, the impulse dump at x1 and x4 (budget_m x4,
+# quiet_cap_bp 200 so the accumulation can build the position), the
+# structural step (class 5), the guard trip (class 7), the book-loading
+# attack (class 9).
+#
+# AXES (1 + 2A cells per arm plus the values cells):
+#   capacity  x{0.25, 4} on the EXPLICIT knobs, never --scale: the
+#             undertakings' leg_bp and reserve_frac, the desk's
+#             SIM_OPS_POSITION_BP / _OUTRIGHT_BP / _LEG_BP, and the
+#             pseudo-stabilizer's V cap (0.5 x NAV ~ target_buck_m at x1);
+#   tau_s     the position loop's gains x{0.5, 2} of the base (WAVE3.org
+#             decision 12: a two-point tau_s axis per design);
+#   design    the TAG axis: presets A, S0, S, V (Vk waits for WP-14's
+#             kappa; S0g -- S0 with gamma 0.5 -- is defined and not run);
+#   depth     deploy.target_buck_m x4 (the deep variant; the pseudo-
+#             stabilizer's default cap follows target_buck_m).
+#
+# 6 arms x (1 + 2 + 2 + 3 + 1) = 54 cells.
+#
+# GAINS -- THE WP-16 PLACE-HOLDER.  Until WP-16's table (kdesign.py: the
+# LQR / SIMC gains for S and V at both depths) lands, S and V run at the S0
+# gains -- (Kq, Kqi, Kqd) = (Kp, Ki, Kd) real = (0.1, 6.43004e-7, 0) from
+# the deploy defaults kp_frac 0.02, dk_rail 0.5, e_max 0.10, tau_i_days 90
+# -- so the S and S0 cells coincide and V's gains are in FILL units at the
+# price-loop numbers.  Replace the four lines marked WP-16 below with the
+# table's values (S in price units, V in fill units) and the tau_s axis's
+# base with the S value; nothing else changes.
+#
+# OBJECTIVE: gates G1-G8 PASS on every cell; P9 (habituation <= 1.5 tau_s,
+# <= 1 sign change) on the dump and cohort-step arms; P10 (attacker P&L
+# <= 0; K's excursion under V <= under S) on the bookload arm; R17's "no K
+# kick from the trip under V" on the guardtrip arm.  The sensitivity table
+# (summary.md) carries the d7 columns (eqmetrics' WP-15 panel).
+name = "d7-c1"
+notes = "D7 cycle 1: capacity x tau_s x design {A, S0, S, V} x depth on none / dump x1 / dump x4 / cohort-step / guardtrip / bookload; all mix + engaged undertakings + desk"
+objective = "G1-G8 PASS; P9 on dump / cohort-step; P10 on bookload; no K kick from the trip under V"
+
+[baseline]
+"scenario.basket" = "ops"
+"scenario.agents.MonetaryKeeperAgent" = 1
+"scenario.agents.ExcursionArbAgent" = 5
+"scenario.agents.ExcursionCreditArbAgent" = 3
+"scenario.agents.ExcursionBasketArbAgent" = 4
+"scenario.agents.ExcursionBuckArbAgent" = 2
+"scenario.agents.CommodityRebalArbAgent" = 2
+"scenario.agents.UndertakingAgent" = 1
+"scenario.agents.FacilityAgent" = 0
+"scenario.agents.SeederAgent" = 0
+"agents.UndertakingAgent.eps" = 0.005
+"agents.UndertakingAgent.p" = 1.0
+
+# The five designs as env presets (reports/wp-13.org names): a design cell
+# receives every assignment of its preset on top of the baseline's pins.
+[presets.design]
+A = { SIM_CONTROLLER = "direct" }
+S0 = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
+S0g = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, SIM_SHADOW_GAMMA = 0.5, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
+# WP-16: S's gains in PRICE units (Kq, Kqi, Kqd real) -- place-holder = S0
+S = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
+# WP-16: V's gains in FILL units (Kq, Kqi, Kqd real) -- place-holder = S0
+V = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "v", SIM_SHADOW_W_DESK = 1, SIM_SHADOW_W_OFFSET = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
+# Vk = V + the local skews (WP-14's kappa*): not yet defined.
+
+[[arm]]
+name = "none"
+toml = "catalogue-none.toml"
+
+[[arm]]
+name = "dump-x1"
+toml = "catalogue-dump.toml"
+
+[[arm]]
+name = "dump-x4"
+toml = "catalogue-dump.toml"
+sets = { "agents.WhaleRaidAgent.budget_m" = [32, 48], "agents.WhaleRaidAgent.quiet_cap_bp" = 200 }
+
+[[arm]]
+name = "cohort-step"
+toml = "catalogue-cohort-step.toml"
+
+[[arm]]
+name = "guardtrip"
+toml = "catalogue-guardtrip.toml"
+
+[[arm]]
+name = "bookload"
+toml = "catalogue-bookload.toml"
+
+# -- capacity: the explicit knobs at x0.25 / x1 / x4 ----------------------- #
+[[axis]]
+name = "capacity"
+base = { "agents.UndertakingAgent.leg_bp" = 40, "agents.UndertakingAgent.reserve_frac" = 0.5, SIM_OPS_POSITION_BP = 1000, SIM_OPS_OUTRIGHT_BP = 1000, SIM_OPS_LEG_BP = 40, SIM_SHADOW_OFFSET_CAP_USD = 10000000 }
+lo = { "agents.UndertakingAgent.leg_bp" = 10, "agents.UndertakingAgent.reserve_frac" = 0.125, SIM_OPS_POSITION_BP = 250, SIM_OPS_OUTRIGHT_BP = 250, SIM_OPS_LEG_BP = 10, SIM_SHADOW_OFFSET_CAP_USD = 2500000 }
+hi = { "agents.UndertakingAgent.leg_bp" = 160, "agents.UndertakingAgent.reserve_frac" = 2.0, SIM_OPS_POSITION_BP = 4000, SIM_OPS_OUTRIGHT_BP = 4000, SIM_OPS_LEG_BP = 160, SIM_SHADOW_OFFSET_CAP_USD = 40000000 }
+
+# -- tau_s: the position loop's gains x{0.5, 2} of the base ----------------- #
+# WP-16: replace base with the derived (Kq, Kqi, Kqd) of the baseline design.
+[[axis]]
+name = "tau_s"
+base = { SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
+lo = { SIM_SHADOW_KQ = 0.05, SIM_SHADOW_KQI = 3.21502e-7, SIM_SHADOW_KQD = 0 }
+hi = { SIM_SHADOW_KQ = 0.2, SIM_SHADOW_KQI = 1.286008e-6, SIM_SHADOW_KQD = 0 }
+
+# -- design: the TAG axis, S the baseline ----------------------------------- #
+[[axis]]
+name = "design"
+preset = "design"
+base = "S"
+values = ["A", "S0", "S", "V"]
+
+# -- depth: the deep variant ------------------------------------------------ #
+[[axis]]
+name = "depth"
+key = "deploy.target_buck_m"
+base = 10.0
+values = [40.0]

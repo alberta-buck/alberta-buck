@@ -26,6 +26,8 @@ import alberta_buck.sim.undertaking_agents  # noqa: F401  WP-2
 import alberta_buck.sim.facility_agent  # noqa: F401  triggers @_register  WP-6
 import alberta_buck.sim.seeder_agent  # noqa: F401  WP-8  triggers @_register
 from alberta_buck.sim import shadow_book  # WP-13: the stand-ins' book -> observer
+import alberta_buck.sim.pusher_agent  # noqa: F401  WP-15  @_register PusherAgent, LpExitAgent
+import alberta_buck.sim.bookloader  # noqa: F401  WP-15  @_register BookLoaderAgent
 
 E6 = 10 ** 6
 

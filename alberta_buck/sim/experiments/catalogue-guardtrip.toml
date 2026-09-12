@@ -1,0 +1,72 @@
+# Excursion CATALOGUE arm "guardtrip" -- the portcast cast (settled physics,
+# keyed rng, no FatCredit) on a 2-year window with ONE injected excursion
+# at day 365.  The defender mix and intensity are swept from outside
+# (alberta_buck.sim.catalogue overrides the Excursion*/CommodityRebal
+# counts); this file fixes the physics and the injection only.
+# Design of record: REBALANCING-EQ.org, "The excursion catalogue";
+# WP-15: WAVE3.org test-plan class 7 (the sensor-fault policy of decision
+# 9; gamma's inadvertent schedule under S0).  PusherAgent (pusher_agent.py)
+# pushes one basket pool's spot push_bp past its 600 s TWAP at the day's
+# last tick every every_days days from start_day and swaps back on the
+# next tick; inside the trip the desk's NAV is unreadable (positionCap()
+# reverts NavUnreadable) and the observer holds the cap and flags stale.
+name = "catalogue-guardtrip"
+notes = "class 7 guard trip: one TOKEN/BUCK pool pushed 800 bp past the 500 bp spot/TWAP guard every 10 days from day 365, unwound the next tick"
+
+[scenario]
+family = "rebalancing-eq"
+rng = "keyed"
+years = 2.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[deploy]
+target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route
+
+[scenario.agents]
+PusherAgent = 1
+FatCreditBorrowerAgent = 0
+BuckCreditDebtorAgent = 30
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+ArrivingDMAgent = 60
+ExcursionArbAgent = 5
+ExcursionCreditArbAgent = 3
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+refi_mode = "atomic"        # ex-ante whole-conversion evaluation
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+arr_gain = 5.0
+arr_max = 3.0
+arr_k_ref = 0.75
+
+[agents.ArrivingDMAgent]
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+ticket_k = [300, 700]
+enter_ptick = 2e-3
+exit_ptick = 2e-3
+dep_dev_ref = 0.02
+dep_halflife = 90.0
+
+# -- the injection: class 7, the guard trip ------------------------------ #
+[agents.PusherAgent]
+start_day = 365
+every_days = 10
+push_bp = 800
+push_tick = -1
+pool = -1
+poke = 1

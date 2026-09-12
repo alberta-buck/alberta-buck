@@ -390,5 +390,271 @@ def main(argv=None) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# WP-15: multi-level axes, named presets and compound levels (WAVE3.org "The
+# controller-alternatives test plan": the design TAG axis of cycle 1), and
+# the d7 metric columns of the sensitivity table.
+#
+# Beyond the WP-12 axis (one `key` or `env`, scalar base / lo / hi -> two
+# cells), an axis may carry
+#
+#   values = [v1, v2, ...]     one cell per level BESIDE the baseline; an
+#                              optional `base` is pinned in every other cell
+#                              of the arm (a value equal to it makes no cell);
+#   preset = "<table>"         with `values`: each v names an entry of
+#                              [presets.<table>] whose assignments the cell
+#                              receives -- a design tag expanding to several
+#                              environment variables (SIM_CONTROLLER,
+#                              SIM_SHADOW_MODE, the gains, lambdas, weights);
+#   base / lo / hi as tables   a compound two-level axis: several knobs moved
+#                              together (the capacity axis: leg_bp,
+#                              reserve_frac and the SIM_OPS_* bounds).
+#
+# An assignment's NAME selects its channel: an upper-case name (SIM_*) is an
+# environment variable, a dotted name a --set key.  The WP-12 axes are still
+# produced by the WP-12 `cells` (existing specs keep 1 + 2A cells per arm);
+# the WP-15 axes pin their base in every cell of the arm and append their
+# own cells after it, labelled <arm>-<axis>-<level>, with the level as the
+# `value` column.  `main` binds these names at call time, so the CLI, the
+# dry run and --report-only use them unchanged.
+# ---------------------------------------------------------------------------
+
+_load_star_wp12 = load_star
+_cells_wp12 = cells
+_report_wp12 = report
+
+
+def _is_env_name(name: str) -> bool:
+    return name.isupper() or name.startswith("SIM_")
+
+
+def _wp15_axis(ax: dict) -> bool:
+    return ("values" in ax or "preset" in ax
+            or any(isinstance(ax.get(k), dict) for k in ("base", "lo", "hi")))
+
+
+def _expand(spec: dict, ax: dict, level) -> dict:
+    """The assignments {name: value} one level of a WP-15 axis makes."""
+    if "preset" in ax:
+        table = (spec.get("presets") or {}).get(ax["preset"])
+        if not isinstance(table, dict) or str(level) not in table:
+            raise SystemExit(f"axis {ax.get('name')!r}: no preset "
+                             f"{ax['preset']}.{level} in [presets]")
+        return dict(table[str(level)])
+    if isinstance(level, dict):
+        return dict(level)
+    if "key" in ax:
+        return {ax["key"]: level}
+    if "env" in ax:
+        return {ax["env"]: level}
+    raise SystemExit(f"axis {ax.get('name')!r} needs `key`, `env` or `preset`")
+
+
+def _apply_cell(cell: dict, assign: dict) -> None:
+    for name, val in assign.items():
+        if _is_env_name(name):
+            cell["env"][name] = str(val)
+        else:
+            cell["sets"] = [s for s in cell["sets"]
+                            if s.split("=", 1)[0] != name]
+            cell["sets"].append(_fmt_set(name, val))
+
+
+def load_star(path: str | Path) -> dict:
+    """The WP-12 loader, accepting the WP-15 axis forms (validated here;
+    the WP-12 axes keep the WP-12 checks)."""
+    p = Path(path)
+    for cand in (p, p.with_suffix(".toml"), STARS / p.name,
+                 STARS / (p.name + ".toml")):
+        if cand.exists():
+            p = cand
+            break
+    else:
+        raise SystemExit(f"no such star spec: {path} (looked under {STARS})")
+    spec = tomllib.loads(p.read_text())
+    spec.setdefault("name", p.stem)
+    spec.setdefault("baseline", {})
+    spec.setdefault("arm", [])
+    spec.setdefault("axis", [])
+    spec.setdefault("presets", {})
+    spec["_path"] = str(p)
+    for ax in spec["axis"]:
+        if not _wp15_axis(ax):
+            if "key" not in ax and "env" not in ax:
+                raise SystemExit(f"axis {ax.get('name')!r} needs `key` or `env`")
+            for k in ("base", "lo", "hi"):
+                if k not in ax:
+                    raise SystemExit(f"axis {ax.get('name')!r} needs `{k}`")
+            continue
+        if "values" in ax:
+            if not isinstance(ax["values"], list) or not ax["values"]:
+                raise SystemExit(f"axis {ax.get('name')!r}: `values` must be "
+                                 "a non-empty list")
+            for v in ax["values"]:
+                _expand(spec, ax, v)
+        else:
+            for k in ("lo", "hi"):
+                if not isinstance(ax.get(k), dict):
+                    raise SystemExit(f"axis {ax.get('name')!r}: a compound "
+                                     f"axis needs `{k}` as a table")
+        if "base" in ax:
+            _expand(spec, ax, ax["base"])
+    return spec
+
+
+def cells(spec: dict, outdir: Path, arms=None, axes=None, days=None) -> list[dict]:
+    """The WP-12 cells (baseline + lo / hi per scalar axis) with every
+    WP-15 axis's base pinned, then the WP-15 cells per arm: one per value
+    (values axes) or lo / hi (compound axes)."""
+    wp12 = {**spec, "axis": [ax for ax in spec["axis"] if not _wp15_axis(ax)]}
+    out = _cells_wp12(wp12, outdir, arms=arms, axes=axes, days=days)
+    w15 = [ax for ax in spec["axis"] if _wp15_axis(ax)]
+    if not w15:
+        return out
+    want_axes = set(axes) if axes else None
+    by_arm: dict[str, list[dict]] = {}
+    for c in out:
+        by_arm.setdefault(c["arm"], []).append(c)
+    for arm_name, arm_cells in by_arm.items():
+        for ax in w15:
+            if ax.get("arms") and arm_name not in ax["arms"]:
+                continue
+            if "base" in ax:
+                assign = _expand(spec, ax, ax["base"])
+                for c in arm_cells:
+                    _apply_cell(c, assign)
+    result = []
+    for arm in spec["arm"]:
+        name = arm["name"]
+        if name not in by_arm:
+            continue
+        base = next(c for c in by_arm[name] if c["level"] == "base")
+        result.extend(by_arm[name])
+        for ax in w15:
+            if want_axes and ax["name"] not in want_axes:
+                continue
+            if ax.get("arms") and name not in ax["arms"]:
+                continue
+            if "values" in ax:
+                levels = [(str(v), v) for v in ax["values"]
+                          if "base" not in ax or v != ax["base"]]
+            else:
+                levels = [("lo", ax["lo"]), ("hi", ax["hi"])]
+            for lvl, val in levels:
+                label = f"{name}-{ax['name']}-{lvl}"
+                c = {**base, "axis": ax["name"], "level": lvl, "label": label,
+                     "sets": list(base["sets"]), "env": dict(base["env"]),
+                     "value": lvl,
+                     "out": str(outdir / f"{label}.json"),
+                     "log": str(outdir / f"{label}.log")}
+                _apply_cell(c, _expand(spec, ax, val))
+                result.append(c)
+    return result
+
+
+COLS_D7 = [("hab_t", "d", ""), ("hab_sc", "d", ""), ("carry", ".3g", ""),
+           ("sat", ".0%", ""), ("stale", ".0%", ""), ("k_tv", ".3f", ""),
+           ("k_dmax", ".4f", ""), ("bl_pnl", "+.3f", ""), ("bl_kexc", ".4f", ""),
+           ("attr_pos", ".0%", "")]
+
+
+def _metrics_d7(st: dict) -> dict:
+    """The d7 panel's columns (eqmetrics.d7_panel): habituation time and
+    sign changes, carry BUCK-days (ut + fac + desk), saturation and stale
+    dwell, K's total variation and max |dK|/day, the loader's P&L and K
+    excursion vs the twin, the position loop's share of |dK|."""
+    p = st.get("d7") or {}
+    h = p.get("habituation") or {}
+    c = p.get("carry") or {}
+    w = p.get("dwell") or {}
+    k = p.get("k_economy") or {}
+    b = p.get("book_loading") or {}
+    a = p.get("attribution") or {}
+    return {"hab_t": h.get("t_hab"), "hab_sc": h.get("sign_changes"),
+            "carry": c.get("total"), "sat": w.get("sat_frac"),
+            "stale": w.get("stale_frac"), "k_tv": k.get("tv"),
+            "k_dmax": k.get("dk_max_per_day"), "bl_pnl": b.get("pnl_m"),
+            "bl_kexc": b.get("k_exc_max"), "attr_pos": a.get("share_pos")}
+
+
+def report(spec: dict, specs: list[dict], outdir: Path, resp_days: int,
+           band: float) -> dict:
+    """The WP-12 sensitivity table with the WP-15 levels' `value` column
+    and the d7 columns; the none arm's cell of the same axis / level is the
+    book-loading twin of every other arm's cell."""
+    labels = {sp["label"]: sp for sp in specs}
+    stats = {}
+    for sp in specs:
+        p = Path(sp["out"])
+        if not cell_complete(p, sp.get("days")):
+            stats[sp["label"]] = None
+            continue
+        twin = None
+        if sp["arm"] != "none" and sp["label"].startswith(sp["arm"] + "-"):
+            tl = "none-" + sp["label"][len(sp["arm"]) + 1:]
+            if tl in labels:
+                twin = labels[tl]["out"]
+        st = eqmetrics.summarize(p, resp_days=resp_days, band=band, twin=twin)
+        st["name"] = sp["label"]
+        stats[sp["label"]] = st
+
+    cols = COLS + COLS_D7
+    lines = []
+    P = lines.append
+    P(f"# star {spec['name']} -- {spec.get('notes', '')}")
+    P("")
+    P(f"objective: {spec.get('objective', '(none declared)')}")
+    P("")
+    arms = []
+    for sp in specs:
+        if sp["arm"] not in arms:
+            arms.append(sp["arm"])
+    table = {}
+    for arm in arms:
+        base_sp = next(s for s in specs if s["arm"] == arm and s["level"] == "base")
+        base_st = stats.get(base_sp["label"])
+        base_m = {**_metrics(base_st), **_metrics_d7(base_st)} if base_st else None
+        base_k = _k_series(Path(base_sp["out"])) if base_st else {}
+        P(f"## arm {arm}")
+        P("")
+        P("| axis | level | value | " + " | ".join(c for c, _, _ in cols) + " |")
+        P("|---|---|---|" + "---|" * len(cols))
+        rows = []
+        for sp in [s for s in specs if s["arm"] == arm]:
+            st = stats.get(sp["label"])
+            if st is None:
+                P(f"| {sp['axis'] or 'base'} | {sp['level']} | | (no vector) |")
+                continue
+            m = {**_metrics(st), **_metrics_d7(st)}
+            if sp["level"] == "base":
+                m["dK_max"] = m["dK_rms"] = 0.0
+            else:
+                ke = k_equivalence(_k_series(Path(sp["out"])), base_k)
+                m["dK_max"] = ke["max"] if ke else None
+                m["dK_rms"] = ke["rms"] if ke else None
+            if "value" in sp:
+                value = str(sp["value"])
+            else:
+                ax = next((a for a in spec["axis"] if a["name"] == sp["axis"]), None)
+                value = "" if ax is None else _fmt(ax.get(sp["level"], ""), "")
+            cells_txt = [_cellfmt(c, s, m.get(c),
+                                  None if sp["level"] == "base" else base_m)
+                         for c, s, _ in cols]
+            P(f"| {sp['axis'] or 'base'} | {sp['level']} | {value} | "
+              + " | ".join(cells_txt) + " |")
+            rows.append({"label": sp["label"], "axis": sp["axis"],
+                         "level": sp["level"], "value": value, **m})
+        P("")
+        table[arm] = rows
+    md = "\n".join(lines)
+    (outdir / "summary.md").write_text(md)
+    (outdir / "summary.json").write_text(json.dumps(
+        {"star": {k: v for k, v in spec.items() if not k.startswith("_")},
+         "cells": table}, indent=1))
+    print(md)
+    print(f"[star] summary -> {outdir / 'summary.md'} / summary.json")
+    return table
+
+
 if __name__ == "__main__":
     sys.exit(main())

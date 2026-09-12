@@ -90,6 +90,18 @@ MIXES.update({
     "fac":     {"FacilityAgent": 32},                     # D6 issue / retire
     "fac-all": {**MIXES["all"], "FacilityAgent": 32},     # the all mix + it
 })
+# -- WP-15: the controller-alternatives grid (WAVE3.org test plan) -------- #
+# The disruption classes 5-10 as arms (experiments/catalogue-<arm>.toml);
+# ARMS (the default grid) is unchanged.  Their injectors -- the periodic
+# whale (period_days), PusherAgent (class 7), LpExitAgent (class 10) and
+# BookLoaderAgent (class 9) -- are ARM agents like WhaleRaidAgent: the arm's
+# TOML sets their count and the mixes never touch them (a mix zeroes
+# DEFENDERS, and an attacker is not a defender), so `cat-bookload-none` is
+# the loader against an undefended world and `cat-bookload-ut` the loader
+# against the ladder.  INJECTORS names them for readers of a cell.
+ARMS_D7 = ["cohort-step", "cohort-add", "ramp", "lpexit", "periodic",
+           "guardtrip", "bookload"]
+INJECTORS = ["WhaleRaidAgent", "PusherAgent", "LpExitAgent", "BookLoaderAgent"]
 
 
 def _scaled(n: int, scale: float) -> int:
@@ -432,6 +444,50 @@ def main(argv=None) -> int:
 
     report(specs, outdir, a.resp_days, a.band, a.summary)
     return 0
+
+
+# ---------------------------------------------------------------------------
+# WP-15: the "d7" panel of the summary (eqmetrics' WP-15 block) -- one row
+# per cell: habituation of s after the last disturbance, carry BUCK-days,
+# saturation / stale dwell, K economy, book-loading (K's excursion against
+# the none-mix cell of the same arm and scale, the undefended twin) and the
+# loop attribution.  Appended to summary.md / summary.json after the WP-1
+# tables; `main` binds `report` at call time.
+# ---------------------------------------------------------------------------
+
+_report_wp1 = report
+
+
+def report(specs: list[dict], outdir: Path, resp_days: int, band: float,
+           summary: str = "summary"):
+    stats = _report_wp1(specs, outdir, resp_days, band, summary)
+    by = {(st.get("arm"), st.get("mix"), st.get("scale")): st for st in stats}
+    lines = ["", "## d7 panel (WP-15): habituation [t_hab d, residual/peak, "
+             "sign changes, P9] carry [BUCK-days] dwell [saturated, stale] "
+             "K [total variation, max |dK|/day, rail days] book-loading "
+             "[P&L $M, loaded fraction, max |K - K_none| over the hold, "
+             "per unit fraction] attribution [position loop's share of |dK|, "
+             "stale / excluded frames]", "", "```"]
+    for st in stats:
+        if st.get("error") or not st.get("d7"):
+            continue
+        bl = (st["d7"] or {}).get("book_loading")
+        twin = by.get((st.get("arm"), "none", st.get("scale")))
+        if bl and twin is not None and twin is not st and not twin.get("error"):
+            try:
+                a = json.loads(Path(st["path"]).read_text()).get("frames") or []
+                b = json.loads(Path(twin["path"]).read_text()).get("frames") or []
+                st["d7"]["book_loading"] = eqmetrics.book_loading(a, b)
+            except Exception:
+                pass
+        lines.append(eqmetrics.d7_row(st))
+    lines.append("```")
+    md = "\n".join(lines)
+    with (outdir / f"{summary}.md").open("a") as fh:
+        fh.write(md + "\n")
+    (outdir / f"{summary}.json").write_text(json.dumps(stats, indent=1))
+    print(md)
+    return stats
 
 
 if __name__ == "__main__":
