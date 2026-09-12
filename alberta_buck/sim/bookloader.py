@@ -38,7 +38,7 @@ the round trip.
   knobs ([agents.BookLoaderAgent]): budget_m [20, 30] (the ONLY draw --
     first on the class's keyed stream; every later knob is a _spec): side
     "sell", load_day 365, load_days 60, hold_days 30, unwind_days 15,
-    rho_target 0.5, s_target 0.0, dev_target 0.02, push_bp 150, face_m 0.
+    rho_target 0.5, s_target 0.0, dev_target 0.03, push_bp 800, face_m 0.
   counters (ctr -> frame, only when the agent exists): bl_phase (0 idle,
     1 loading, 2 holding, 3 unwinding, 4 done), bl_bought (BUCK bought in
     BUCK/USDC), bl_loaded (BUCK sold into the basket pools, or bought from
@@ -88,8 +88,8 @@ class BookLoaderAgent(_ProxyAgent):
         self.unwind_days = max(1, int(_spec(scenario, cls, "unwind_days", 15)))
         self.rho_target = float(_spec(scenario, cls, "rho_target", 0.5))
         self.s_target = float(_spec(scenario, cls, "s_target", 0.0))
-        self.dev_target = float(_spec(scenario, cls, "dev_target", 0.02))
-        self.push_bp = int(_spec(scenario, cls, "push_bp", 150))
+        self.dev_target = float(_spec(scenario, cls, "dev_target", 0.03))
+        self.push_bp = int(_spec(scenario, cls, "push_bp", 800))
         self.face_m = float(_spec(scenario, cls, "face_m", 0.0))
         self._bind_proxy(d)
         d.chain.send(d.usdc.functions.mint(self.proxy.address, self.budget))

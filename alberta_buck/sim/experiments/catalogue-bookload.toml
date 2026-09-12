@@ -72,5 +72,5 @@ load_days = 60
 hold_days = 30
 unwind_days = 15
 rho_target = 0.5
-dev_target = 0.02
-push_bp = 150
+dev_target = 0.03
+push_bp = 800
