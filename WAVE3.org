@@ -718,6 +718,36 @@ install and login.
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
 
+** 2026-09-11 -- WP-16 and WP-15 launched; the viewer's live source (session 3, on datasim)
+
+- With the six ORGANIC-SCALE.org decisions resolved (decision 22), the
+  D7 grid's two prerequisites are in flight on this account as
+  subagents in worktrees: WP-16 (=wp/16-kdesign=, =../alberta-buck-wp-16=:
+  the reduced plant, six 1-year step-test cells, the numpy Riccati
+  LQR, the SIMC check, =build/sim/kdesign/gains.json=) and WP-15
+  (=wp/15-grid=, =../alberta-buck-wp-15=: the class TOMLs for the
+  structural step, ramp, LP exit and periodic raid, the one-pool
+  pusher for the guard trip, the =BookLoaderAgent=, the d7 metrics in
+  =eqmetrics=, =star.py='s =values= axis and presets, the cycle-1 star
+  spec).  WP-14 follows them; cycle 1 runs on the merged tree.
+- The viewer gained its LIVE source (5d28ebf): a
+  =ws://host:port/s/<sid>/frames= URL (the =?ws== query parameter or
+  the header box) streams the sim server's frames into the model,
+  rebuilt every 25 frames or 3 s, the clock following the newest frame;
+  when a stream carries no roster the classes and instances are named
+  from the =ag= ids (v2 names every agent).  Proven end to end: a
+  =python -m alberta_buck.sim.server= world (catalogue-none, ops
+  basket, 6 days) streamed to a node-22 websocket client and through
+  the model: 6 frames, 11 classes, 58 named agents, 1,250 acts, at
+  0.06 days/s for the full cast at fine cadence.  The server is left
+  running on datasim (=--host 0.0.0.0 --port 8797=; log
+  =/tmp/simserver-8797.log=); the viewer on 8787 (the server's comment
+  calls 8787 BUCKy's port -- move the viewer if the two ever share a
+  host).
+- Note for the node-side tests: the nix-profile node is v20 (no global
+  =WebSocket=); run websocket clients under =nix develop --command node=
+  (v22).
+
 ** 2026-09-11 -- Regeneration CLOSED; wp/21-inputs and wp/14-viewer merged (session 3, on datasim)
 
 - THE MATRIX, all 14 arms on the current tree (bv tail / sd / K; the
