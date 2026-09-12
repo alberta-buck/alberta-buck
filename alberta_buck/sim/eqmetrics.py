@@ -905,5 +905,422 @@ def markout_row(st: dict) -> str:
             f"ub {w['adv_ub_m']:+.3f}")
 
 
+# ---------------------------------------------------------------------------
+# WP-15: the controller-alternatives grid's metrics (WAVE3.org "Metrics and
+# gates"; CARRY-CONVEXITY.org predictions 9 and 10; R14c, R18).  Pure
+# functions of a frame list, unit-tested on synthetic series
+# (test_d7metrics.py); `d7_panel` gathers them and the wrapped `summarize`
+# below carries the panel as stats["d7"] into the catalogue and star
+# reports.  Frame fields (snapshot.py): sh_s (the observer's aggregate
+# position, 1e18; None under --controller direct), sh_sat / sh_stale /
+# sh_excluded / sh_desk_cap / sh_desk_stale / sh_desk_excluded, sh_net (the
+# desk's book), ut_absorbed_open / ut_issued_open, fac_drawn, pid_up / pid_ui
+# / pid_ud / pid_q / pid_qi / pid_qd (the two loops' terms, 1e18 K units),
+# buckK, and the injectors' pu_* / bl_* / lx_* counters.
+# ---------------------------------------------------------------------------
+
+HAB_FRAC = 0.10            # |s| within this fraction of its peak = habituated
+HAB_HOLD_DAYS = 5          # in-band hold required to call it (a zero crossing
+                           # passes through the band without habituating)
+P9_TAU_MULT = 1.5          # gate P9: t_hab <= 1.5 tau_s
+P9_MAX_SIGN_CHANGES = 1
+
+
+def _sval(f):
+    v = f.get("sh_s")
+    return None if v is None else v / E18
+
+
+def _sign_changes(vals: list[float], band: float) -> int:
+    """Transitions between 'clearly positive' (> +band) and 'clearly
+    negative' (< -band); values inside the band do not change the state,
+    so a decay through zero counts 0 and a limit cycle counts every swing."""
+    state = 0
+    n = 0
+    for v in vals:
+        s = 1 if v > band else (-1 if v < -band else 0)
+        if s and state and s != state:
+            n += 1
+        if s:
+            state = s
+    return n
+
+
+def habituation(frames: list, end_day: int | None = None,
+                tau_s_days: float | None = None, start_day: int | None = None,
+                frac: float = HAB_FRAC, hold_days: int = HAB_HOLD_DAYS) -> dict | None:
+    """The habituation record on the observer's aggregate position s.
+
+    peak            max |s| over [start_day, horizon] (start_day defaults to
+                    end_day, the disturbance's end; None = the whole run)
+    t_hab           days after end_day until |s| < frac * peak holds for
+                    >= hold_days of data (rectangle coverage); None = never
+    residual        |s| at the horizon (the last frame)
+    residual_frac   residual / peak
+    sign_changes    swings of s between +/- frac * peak after end_day (a
+                    limit-cycle detector)
+    p9              the gate: t_hab <= P9_TAU_MULT * tau_s and
+                    sign_changes <= P9_MAX_SIGN_CHANGES (None without tau_s)
+    None when the vector carries no sh_s (a direct-controller cell)."""
+    days = _frame_days(frames)
+    deltas = _frame_deltas(days)
+    idx = [i for i in range(len(frames)) if _sval(frames[i]) is not None]
+    if not idx:
+        return None
+    end = days[idx[0]] if end_day is None else int(end_day)
+    start = end if start_day is None else int(start_day)
+    win = [i for i in idx if days[i] >= start]
+    if not win:
+        return None
+    peak = max(abs(_sval(frames[i])) for i in win)
+    ipk = max(win, key=lambda i: abs(_sval(frames[i])))
+    band = frac * peak
+    post = [i for i in idx if days[i] >= end]
+    t_hab = None
+    j = 0
+    while j < len(post):
+        i = post[j]
+        if abs(_sval(frames[i])) >= band:
+            j += 1
+            continue
+        k = j
+        while k + 1 < len(post) and abs(_sval(frames[post[k + 1]])) < band:
+            k += 1
+        if days[post[k]] + deltas[post[k]] - days[i] >= hold_days or peak == 0:
+            t_hab = days[i] - end
+            break
+        j = k + 1
+    residual = abs(_sval(frames[idx[-1]]))
+    sc = _sign_changes([_sval(frames[i]) for i in post], band)
+    p9 = None
+    if tau_s_days:
+        p9 = (t_hab is not None and t_hab <= P9_TAU_MULT * float(tau_s_days)
+              and sc <= P9_MAX_SIGN_CHANGES)
+    return {"peak": peak, "peak_day": days[ipk], "end_day": end,
+            "t_hab": t_hab, "residual": residual,
+            "residual_frac": (residual / peak) if peak else 0.0,
+            "sign_changes": sc, "tau_s_days": tau_s_days, "p9": p9,
+            "n": len(post)}
+
+
+def carry(frames: list, day0: int | None = None, day1: int | None = None) -> dict:
+    """Int |q_i| dt per facility in BUCK-days (whole BUCK x days) over
+    [day0, day1] (defaults: the whole run): the undertakings' open book
+    |ut_absorbed_open - ut_issued_open|, the facility's fac_drawn, the
+    desk's |sh_net| (None -> 0), and `booked` = |sh_offset| (the
+    pseudo-stabilizer's booked sum, which double-counts ut + fac and is
+    reported for the observer's view).  The seeder is not booked as a
+    position (WAVE3.org decision 17) and has no carry here."""
+    days = _frame_days(frames)
+    deltas = _frame_deltas(days)
+    acc = {"ut": 0.0, "fac": 0.0, "desk": 0.0, "booked": 0.0}
+    span = 0
+    for i, f in enumerate(frames):
+        if day0 is not None and days[i] < day0:
+            continue
+        if day1 is not None and days[i] > day1:
+            continue
+        dt = deltas[i]
+        span += dt
+        acc["ut"] += abs((f.get("ut_absorbed_open") or 0)
+                         - (f.get("ut_issued_open") or 0)) / E6 * dt
+        acc["fac"] += abs(f.get("fac_drawn") or 0) / E6 * dt
+        acc["desk"] += abs(f.get("sh_net") or 0) / E6 * dt
+        acc["booked"] += abs(f.get("sh_offset") or 0) / E6 * dt
+    total = acc["ut"] + acc["fac"] + acc["desk"]
+    return {**acc, "total": total, "days": span,
+            "mean_buck": (total / span) if span else 0.0}
+
+
+def saturation_dwell(frames: list) -> dict:
+    """Fractions of the frames (that carry the field) with the level
+    saturated (sh_sat >= 1, or the desk's held cap 0), with the stale mask
+    set (sh_stale != 0 or the desk stale), with the excluded mask set, and
+    with the ladder near its floor (ut_rho < 0.1)."""
+    sat = stale = exc = ladder = 0
+    n_sat = n_stale = n_exc = n_ladder = 0
+    for f in frames:
+        if f.get("sh_sat") is not None or f.get("sh_desk_cap") is not None:
+            n_sat += 1
+            if ((f.get("sh_sat") or 0) >= E18
+                    or (f.get("sh_desk_cap") is not None and not f.get("sh_desk_cap"))):
+                sat += 1
+        if f.get("sh_stale") is not None or f.get("sh_desk_stale") is not None:
+            n_stale += 1
+            if f.get("sh_stale") or f.get("sh_desk_stale"):
+                stale += 1
+        if f.get("sh_excluded") is not None or f.get("sh_desk_excluded") is not None:
+            n_exc += 1
+            if f.get("sh_excluded") or f.get("sh_desk_excluded"):
+                exc += 1
+        if f.get("ut_rho") is not None:
+            n_ladder += 1
+            if f.get("ut_rho", 1.0) < 0.1:
+                ladder += 1
+
+    def frac(a, n):
+        return (a / n) if n else None
+    return {"sat_frac": frac(sat, n_sat), "stale_frac": frac(stale, n_stale),
+            "excluded_frac": frac(exc, n_exc), "ladder_frac": frac(ladder, n_ladder),
+            "sat_frames": sat, "stale_frames": stale, "excluded_frames": exc,
+            "n": len(frames)}
+
+
+def k_economy(frames: list, kmin: float = 0.0, kmax: float = 0.95,
+              day0: int | None = None) -> dict:
+    """K glides: the total variation of buckK, the max |dK| per day, and
+    the rail days, over the frames from day0 on (default: all)."""
+    days = _frame_days(frames)
+    deltas = _frame_deltas(days)
+    sel = [i for i in range(len(frames)) if day0 is None or days[i] >= day0]
+    ks = [frames[i].get("buckK", 0) / E18 for i in sel]
+    tv = 0.0
+    dmax = 0.0
+    for a, b in zip(sel, sel[1:]):
+        dk = abs(frames[b].get("buckK", 0) - frames[a].get("buckK", 0)) / E18
+        tv += dk
+        dmax = max(dmax, dk / max(1, days[b] - days[a]))
+    rail = sum(deltas[i] for i, k in zip(sel, ks)
+               if k <= kmin + RAIL_EPS or k >= kmax - RAIL_EPS)
+    return {"tv": tv, "dk_max_per_day": dmax, "rail_days": rail,
+            "k_min": min(ks) if ks else None, "k_max": max(ks) if ks else None,
+            "n": len(sel)}
+
+
+def book_loading(frames: list, twin_frames: list | None = None) -> dict | None:
+    """The class-9 record: the attacker's par-marked P&L ($M, the last
+    frame's bl_pnl), the loaded fraction (bl_loaded_frac), K at the end of
+    loading and at the unwind, and -- with the none-twin cell's frames --
+    the max |K - K_twin| over the hold (frames with bl_phase 2; the whole
+    run after loading when the hold is empty) per unit of loaded fraction.
+    Gate P10's first half (P&L <= 0) is `p10_pnl`; its second half (V's
+    excursion <= S's) compares two cells and is left to the table.  None
+    when the vector carries no loader."""
+    if not frames or frames[-1].get("bl_phase") is None:
+        return None
+    days = _frame_days(frames)
+    last = frames[-1]
+    pnl_m = (last.get("bl_pnl") or 0) / E6 / 1e6
+    frac = float(last.get("bl_loaded_frac") or 0.0)
+    hold = [i for i, f in enumerate(frames) if f.get("bl_phase") == 2]
+    if not hold:
+        hold = [i for i, f in enumerate(frames) if (f.get("bl_phase") or 0) >= 2]
+    k_exc = None
+    if twin_frames and hold:
+        tk = {int(f.get("day", i)): f.get("buckK", 0) / E18
+              for i, f in enumerate(twin_frames)}
+        diffs = [abs(frames[i].get("buckK", 0) / E18 - tk[days[i]])
+                 for i in hold if days[i] in tk]
+        k_exc = max(diffs) if diffs else None
+    return {"pnl_m": pnl_m, "loaded_frac": frac,
+            "loaded_buck_m": (last.get("bl_loaded") or 0) / E6 / 1e6,
+            "unwound_buck_m": (last.get("bl_unwound") or 0) / E6 / 1e6,
+            "k_load": last.get("bl_k_load"), "k_unwind": last.get("bl_k_unwind"),
+            "held_days": last.get("bl_held_days"),
+            "phase": last.get("bl_phase"),
+            "k_exc_max": k_exc,
+            "k_exc_per_frac": (k_exc / frac) if (k_exc is not None and frac > 0) else None,
+            "p10_pnl": pnl_m <= 0.0}
+
+
+def attribution(frames: list) -> dict | None:
+    """R14c: per frame, the price loop's (pid_up + pid_ui + pid_ud) and the
+    position loop's (pid_q + pid_qi + pid_qd) contributions to dK, and the
+    frames where stale / excluded were set; the compact summary is each
+    loop's share of the total |dK| (the terms sum to K - K0, so their
+    frame-to-frame changes ARE the decomposition of dK; at a rail the
+    terms sum to the raw output, WP-13 open issue 8).  None when the
+    vector carries no terms (a direct-controller cell)."""
+    idx = [i for i, f in enumerate(frames) if f.get("pid_up") is not None]
+    if len(idx) < 2:
+        return None
+
+    def price(f):
+        return (f["pid_up"] + (f.get("pid_ui") or 0) + (f.get("pid_ud") or 0)) / E18
+
+    def pos(f):
+        return ((f.get("pid_q") or 0) + (f.get("pid_qi") or 0)
+                + (f.get("pid_qd") or 0)) / E18
+    tv_p = tv_q = 0.0
+    for a, b in zip(idx, idx[1:]):
+        tv_p += abs(price(frames[b]) - price(frames[a]))
+        tv_q += abs(pos(frames[b]) - pos(frames[a]))
+    tot = tv_p + tv_q
+    stale = sum(1 for i in idx if frames[i].get("sh_stale") or frames[i].get("sh_desk_stale"))
+    exc = sum(1 for i in idx if frames[i].get("sh_excluded") or frames[i].get("sh_desk_excluded"))
+    return {"tv_price": tv_p, "tv_pos": tv_q,
+            "share_price": (tv_p / tot) if tot else None,
+            "share_pos": (tv_q / tot) if tot else None,
+            "pos_last": pos(frames[idx[-1]]), "price_last": price(frames[idx[-1]]),
+            "stale_frames": stale, "excluded_frames": exc, "n": len(idx)}
+
+
+def attribution_series(frames: list) -> list[dict]:
+    """The per-frame panel: day, dK, dK_price, dK_pos, stale, excluded."""
+    out = []
+    prev = None
+    for f in frames:
+        if f.get("pid_up") is None:
+            continue
+        p = (f["pid_up"] + (f.get("pid_ui") or 0) + (f.get("pid_ud") or 0)) / E18
+        q = ((f.get("pid_q") or 0) + (f.get("pid_qi") or 0) + (f.get("pid_qd") or 0)) / E18
+        k = f.get("buckK", 0) / E18
+        rec = {"day": f.get("day"), "k": k,
+               "dk": None if prev is None else k - prev[0],
+               "dk_price": None if prev is None else p - prev[1],
+               "dk_pos": None if prev is None else q - prev[2],
+               "stale": bool(f.get("sh_stale") or f.get("sh_desk_stale")),
+               "excluded": bool(f.get("sh_excluded") or f.get("sh_desk_excluded"))}
+        out.append(rec)
+        prev = (k, p, q)
+    return out
+
+
+def d7_windows(frames: list) -> list[dict]:
+    """The WP-15 injectors' windows, in the shape of excursion_windows:
+    each guard trip (a frame where pu_pushes rose) as "trip" (day0 = day1),
+    the loader's load phase (bl_phase 1 span) as "load", its hold as
+    "hold", and the LP exit (lx_exits rose) as "lpexit"; src "d7"."""
+    out = []
+    days = _frame_days(frames)
+    prev_push = prev_exit = 0
+    load = hold = None
+    for i, f in enumerate(frames):
+        pu = f.get("pu_pushes")
+        if pu is not None and pu > prev_push:
+            out.append({"kind": "trip", "day0": days[i], "day1": days[i], "src": "d7"})
+            prev_push = pu
+        lx = f.get("lx_exits")
+        if lx is not None and lx > prev_exit:
+            out.append({"kind": "lpexit", "day0": days[i], "day1": days[i], "src": "d7"})
+            prev_exit = lx
+        ph = f.get("bl_phase")
+        if ph == 1:
+            load = (days[i] if load is None else load[0], days[i])
+        elif ph == 2:
+            hold = (days[i] if hold is None else hold[0], days[i])
+    if load:
+        out.append({"kind": "load", "day0": load[0], "day1": load[1], "src": "d7"})
+    if hold:
+        out.append({"kind": "hold", "day0": hold[0], "day1": hold[1], "src": "d7"})
+    out.sort(key=lambda w: (w["day0"], w["day1"]))
+    return out
+
+
+def d7_panel(frames: list, meta: dict | None, windows: list | None = None,
+             twin_frames: list | None = None,
+             tau_s_days: float | None = None) -> dict:
+    """The "d7" panel of a cell: habituation after the LAST disturbance
+    window (raid, intervention or injector; the whole run when there is
+    none), carry over the run, saturation dwell, K economy from the first
+    window on, book-loading (with the twin), and the loop attribution.
+    tau_s defaults to the deploy's tau_i_days (the position loop's time
+    constant is WP-16's; the star's tau_s axis passes its own)."""
+    exp = (meta or {}).get("experiment", {}) or {}
+    dep = exp.get("deploy", {}) or {}
+    kmin = float(dep.get("kmin", 0.0))
+    kmax = float(dep.get("kmax", 0.95))
+    if tau_s_days is None:
+        tau_s_days = float(dep.get("tau_i_days", 90.0))
+    wins = [w for w in (windows or []) if w.get("src") in ("raid", "iv", "d7")]
+    day0 = min((int(w["day0"]) for w in wins), default=None)
+    day1 = max((int(w["day1"]) for w in wins), default=None)
+    return {
+        "tau_s_days": tau_s_days,
+        "disturbance": {"day0": day0, "day1": day1, "n": len(wins)},
+        "habituation": habituation(frames, end_day=day1, start_day=day0,
+                                   tau_s_days=tau_s_days),
+        "carry": carry(frames),
+        "carry_post": carry(frames, day0=day0) if day0 is not None else None,
+        "dwell": saturation_dwell(frames),
+        "k_economy": k_economy(frames, kmin=kmin, kmax=kmax, day0=day0),
+        "book_loading": book_loading(frames, twin_frames),
+        "attribution": attribution(frames),
+    }
+
+
+_summarize_wp1 = summarize
+
+
+def summarize(path: str | Path, tail_frac: float = TAIL_FRAC,
+              resp_days: int = RESP_DAYS, band: float = EXC_BAND,
+              pre_days: int = PRE_DAYS, twin: str | Path | None = None,
+              tau_s_days: float | None = None) -> dict:
+    """WP-15: the WP-1 summary plus the injectors' windows in the
+    excursion block and the "d7" panel; `twin` names the none-twin cell's
+    vector for the book-loading excursion, `tau_s_days` the position
+    loop's time constant for gate P9."""
+    st = _summarize_wp1(path, tail_frac=tail_frac, resp_days=resp_days,
+                        band=band, pre_days=pre_days)
+    d = json.loads(Path(path).read_text())
+    frames = d.get("frames") or []
+    if not frames:
+        st["d7"] = None
+        return st
+    meta = d.get("meta", {})
+    dep = (meta.get("experiment", {}) or {}).get("deploy", {}) or {}
+    kmin = float(dep.get("kmin", 0.0))
+    kmax = float(dep.get("kmax", 0.95))
+    for w in d7_windows(frames):
+        w["resp_end"] = w["day1"] + int(resp_days)
+        st["excursions"].append({**w, **excursion_response(
+            frames, w, resp_days=resp_days, band=band, pre_days=pre_days,
+            kmin=kmin, kmax=kmax)})
+    st["excursions"].sort(key=lambda w: (w["day0"], w["day1"]))
+    twin_frames = None
+    if twin and Path(twin).exists():
+        twin_frames = json.loads(Path(twin).read_text()).get("frames") or []
+    st["d7"] = d7_panel(frames, meta, st["excursions"], twin_frames=twin_frames,
+                        tau_s_days=tau_s_days)
+    return st
+
+
+def d7_row(st: dict) -> str:
+    """One line of the d7 panel for a cell (the catalogue / CLI tables)."""
+    name = str(st.get("name", ""))[:18]
+    p = st.get("d7") or {}
+    h = p.get("habituation") or {}
+    c = p.get("carry") or {}
+    w = p.get("dwell") or {}
+    k = p.get("k_economy") or {}
+    b = p.get("book_loading") or {}
+    a = p.get("attribution") or {}
+    hab = ("--" if not h else
+           f"t{('never' if h.get('t_hab') is None else h['t_hab'])} "
+           f"res{_f(h.get('residual_frac'), '.2f')} sc{h.get('sign_changes')} "
+           f"{'' if h.get('p9') is None else ('P9ok' if h['p9'] else 'P9x')}")
+    car = f"ut{_f(c.get('ut'), '.3g')} fac{_f(c.get('fac'), '.3g')} desk{_f(c.get('desk'), '.3g')}"
+    dw = f"sat{_f(w.get('sat_frac'), '.0%')} stale{_f(w.get('stale_frac'), '.0%')}"
+    ke = f"tv{_f(k.get('tv'), '.3f')} dmax{_f(k.get('dk_max_per_day'), '.4f')} rail{_f(k.get('rail_days'), 'd')}"
+    bl = ("--" if not b else
+          f"pnl{_f(b.get('pnl_m'), '+.3f')} frac{_f(b.get('loaded_frac'), '.2f')} "
+          f"kexc{_f(b.get('k_exc_max'), '.4f')} /frac{_f(b.get('k_exc_per_frac'), '.4f')}")
+    at = ("--" if not a else
+          f"pos{_f(a.get('share_pos'), '.0%')} stale{a.get('stale_frames')} "
+          f"exc{a.get('excluded_frames')}")
+    return f"{name:<18} hab[{hab}] carry[{car}] dwell[{dw}] K[{ke}] bl[{bl}] attr[{at}]"
+
+
+_main_wp1 = main
+
+
+def main(argv=None) -> int:
+    """WP-15: the WP-1 CLI, then the d7 panel rows."""
+    rc = _main_wp1(argv)
+    args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        opts, paths = _parse_args(args)
+    except ValueError:
+        return rc
+    if not paths or opts["json"]:
+        return rc
+    print("\nd7 panel (WP-15): habituation of s after the last disturbance "
+          "(t_hab days, residual/peak, sign changes, P9), carry BUCK-days, "
+          "saturation dwell, K economy, book-loading, loop attribution")
+    for p in paths:
+        print(d7_row(summarize(p, resp_days=opts["resp_days"], band=opts["band"])))
+    return rc
+
+
 if __name__ == "__main__":
     sys.exit(main())
