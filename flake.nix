@@ -88,6 +88,13 @@
           buildInputs = commonInputs ++ [ python3Env ];
           shellHook = ''
             export SOLC_PATH="${pkgs.solc}/bin/solc"
+            # The repo venv's manylinux wheels (numpy, the WP-16 runtime
+            # dependency) dlopen libstdc++ and zlib, which the nix loader does
+            # not find in a Linux host's /usr/lib; point it at the store's
+            # copies, the same gcc runtime the shell's own tools link.
+            if [ "$(uname -s)" = Linux ]; then
+              export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.zlib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            fi
 
             echo "Alberta Buck — Ethereum Development Environment"
             echo ""
