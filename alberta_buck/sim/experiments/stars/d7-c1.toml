@@ -30,7 +30,7 @@
 #   depth     deploy.target_buck_m x4 (the deep variant; the pseudo-
 #             stabilizer's default cap follows target_buck_m).
 #
-# 6 arms x (1 + 2 + 2 + 3 + 1) = 54 cells.
+# 6 arms x (1 + 2 + 2 + 4 + 1) = 60 cells (S0k added with WP-16's table).
 #
 # GAINS -- THE WP-16 PLACE-HOLDER.  Until WP-16's table (kdesign.py: the
 # LQR / SIMC gains for S and V at both depths) lands, S and V run at the S0
@@ -70,10 +70,12 @@ objective = "G1-G8 PASS; P9 on dump / cohort-step; P10 on bookload; no K kick fr
 A = { SIM_CONTROLLER = "direct" }
 S0 = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
 S0g = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, SIM_SHADOW_GAMMA = 0.5, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
-# WP-16: S's gains in PRICE units (Kq, Kqi, Kqd real) -- place-holder = S0
-S = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
-# WP-16: V's gains in FILL units (Kq, Kqi, Kqd real) -- place-holder = S0
-V = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "v", SIM_SHADOW_W_DESK = 1, SIM_SHADOW_W_OFFSET = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
+# WP-16 (reports/wp-16.org, build/sim/kdesign/gains.org, depth 10): S's gains in PRICE units
+S = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 2.418, SIM_SHADOW_KQI = 8.053e-8, SIM_SHADOW_KQD = 0 }
+# S0k: the as-built S0 at the DERIVED knee, lambda = Kq_S / Kp = 24 (WP-16 open issue 6)
+S0k = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 24, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
+# WP-16 (depth 10): V's gains in FILL units; the depth-40 row is a units artefact until WP-14 books the real caps (WP-16 finding 6)
+V = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "v", SIM_SHADOW_W_DESK = 1, SIM_SHADOW_W_OFFSET = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 3.168, SIM_SHADOW_KQI = 1.055e-7, SIM_SHADOW_KQD = 0 }
 # Vk = V + the local skews (WP-14's kappa*): not yet defined.
 
 [[arm]]
@@ -108,20 +110,22 @@ base = { "agents.UndertakingAgent.leg_bp" = 40, "agents.UndertakingAgent.reserve
 lo = { "agents.UndertakingAgent.leg_bp" = 10, "agents.UndertakingAgent.reserve_frac" = 0.125, SIM_OPS_POSITION_BP = 250, SIM_OPS_OUTRIGHT_BP = 250, SIM_OPS_LEG_BP = 10, SIM_SHADOW_OFFSET_CAP_USD = 2500000 }
 hi = { "agents.UndertakingAgent.leg_bp" = 160, "agents.UndertakingAgent.reserve_frac" = 2.0, SIM_OPS_POSITION_BP = 4000, SIM_OPS_OUTRIGHT_BP = 4000, SIM_OPS_LEG_BP = 160, SIM_SHADOW_OFFSET_CAP_USD = 40000000 }
 
-# -- tau_s: the position loop's gains x{0.5, 2} of the base ----------------- #
-# WP-16: replace base with the derived (Kq, Kqi, Kqd) of the baseline design.
+# -- tau_s: the position loop's time constant x{0.5, 2} of the derived 127 d ---- #
+# WP-16: the baseline design S at the derived gains; the axis follows SIMC's
+# laws (Kq ~ 1 / tau_s, Kqi ~ 1 / tau_s^2): x0.5 -> Kq 4.836 / Kqi 3.221e-7,
+# x2 -> Kq 1.209 / Kqi 2.013e-8 (gains.org's tau_s columns).
 [[axis]]
 name = "tau_s"
-base = { SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
-lo = { SIM_SHADOW_KQ = 0.05, SIM_SHADOW_KQI = 3.21502e-7, SIM_SHADOW_KQD = 0 }
-hi = { SIM_SHADOW_KQ = 0.2, SIM_SHADOW_KQI = 1.286008e-6, SIM_SHADOW_KQD = 0 }
+base = { SIM_SHADOW_KQ = 2.418, SIM_SHADOW_KQI = 8.053e-8, SIM_SHADOW_KQD = 0 }
+lo = { SIM_SHADOW_KQ = 4.836, SIM_SHADOW_KQI = 3.221e-7, SIM_SHADOW_KQD = 0 }
+hi = { SIM_SHADOW_KQ = 1.209, SIM_SHADOW_KQI = 2.013e-8, SIM_SHADOW_KQD = 0 }
 
 # -- design: the TAG axis, S the baseline ----------------------------------- #
 [[axis]]
 name = "design"
 preset = "design"
 base = "S"
-values = ["A", "S0", "S", "V"]
+values = ["A", "S0", "S0k", "S", "V"]
 
 # -- depth: the deep variant ------------------------------------------------ #
 [[axis]]
