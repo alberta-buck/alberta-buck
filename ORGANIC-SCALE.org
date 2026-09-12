@@ -283,21 +283,57 @@ and re-judge the catalogue and the D7 designs rung by rung as the
 ladder comes up.  The gate to record: "no monetary operation is judged
 at a rung whose organic gates have not passed."
 
-* Decisions for the design owner
+* Decisions for the design owner -- RESOLVED 2026-09-11
 
-1. The ladder's rungs (the table above) and the definition of the
-   organic gates at each rung.
-2. Cohort granularity and the equivalence tolerance (a cohort of 10 vs
-   10 agents: within what error on issuance, savings and retirement?).
-3. The minimal income economy: wages indexed to LABR paid in BUCK; do
-   goods get BUCK prices (merchants), or is expenditure a flow only?
-4. The viewer stack and home: uPlot vendored through =package.json=,
-   =alberta_buck/sim/viewer/=, served by the sim server -- or a
-   different choice.
-5. Whether the JS platform becomes the second source now (the emitter
-   in wave 4) or after the Python populations exist.
-6. Whether cycle 1 of the D7 grid runs on the current environment as
-   the structural check (recommended) or waits for rung 2.
+The six questions and the rulings (the design owner accepted the
+recommendations as put):
+
+1. *The ladder's rungs and gates.*  Build FOUR rungs first, 1, 2, 4
+   and 6 (a $3M village, today's $30M, a $3B town, a $300B nation), a
+   factor of 100 apart; insert 3 and 5 only if something non-monotone
+   appears.  A rung is two numbers -- total pledged assets and pool
+   depth as a fraction of them (today ~7%) -- and everything
+   money-denominated scales with it at deploy (pool seeds, treasury,
+   credit faces, budgets, the whale's budget as a fraction of depth);
+   the desk's and undertakings' caps as fractions of NAV, K's rails and
+   the fee's bp do not scale.  Gates per rung: the matrix's three (tail
+   bvib within 1%, K interior, channels alive) plus four organic ones
+   (expenses met without forced liquidation; external debt paid down
+   within the horizon; savings life-cycles completing; the funding
+   gate throttling < 10% of the tail).  Rung 1 has its own cast:
+   households, a credit union, the desk; no whale.
+2. *Cohorts.*  Multiplicity M as a per-run rung parameter on a fixed
+   population of a few hundred heterogeneous agents; the simplest form
+   first -- one book per cohort, Poisson thinning per tick, trades
+   above an impact cap split within the tick.  The equivalence gate at
+   rung 2: ten agents at M = 1 against one at M = 10 with the same
+   drawn knobs on the same arm must agree within 5% on cumulative
+   issuance, savings and retirement at the horizon, 1% RMS on bvib,
+   and K within G7's tolerance.  Sub-books only if that gate fails.
+3. *The income economy.*  Flows with an index, no merchants: wages in
+   BUCK paid by businesses, indexed to the basket's labour token;
+   expenses paid back to businesses, indexed to the basket's food,
+   energy and construction shares; businesses fund the first payroll
+   against pledged assets (the farmer's operating line).  No goods
+   market or price-setting in wave 4.
+4. *The viewer.*  As built: uPlot declared in package.json and
+   vendored by =make viewer-vendor=, the page in
+   =alberta_buck/sim/viewer=, served by its own module; the sim
+   server's live websocket is the next source.
+5. *JavaScript as the second source.*  Later, with the contract fixed
+   now: TELEMETRY.md v2 and the JSONL frame form are the emitter's
+   target; the emitter is written in the second half of wave 4, after
+   T15's populations settle their =why= notes.
+6. *D7 cycle 1.*  Runs NOW on the current world as the STRUCTURAL check
+   (identity, habituation, book-loading, the guard trip; S vs V under
+   the same gains); every quantitative reading it yields (tau_s, kappa,
+   the weights) is provisional until rung 2 is organic, and the ledger
+   says so on the day it runs.
+
+Order of work that follows: WP-16 and WP-15 (the grid's prerequisites)
+in parallel now; WP-14 next; cycle 1; the viewer's websocket source;
+then wave 4's T15 (the income channel and the three household roles),
+T16 (multiplicity and the rung-2 gate), T17 (the four rungs).
 
 * Tracks (added to ONBOARDING-D7.org)
 

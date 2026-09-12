@@ -32,13 +32,12 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   (46c3b7d), WP-13 (b4c1b75), decision 21 (10090e7), the viewer and
   telemetry v2 (cdd1e49).  =ORGANIC-SCALE.org= opened wave 4 (tracks
   T13-T17); the viewer serves at =http://datasim.local:8787/=.
-  NOTHING IS IN FLIGHT.  Next: (a) the design owner's decisions in
-  ORGANIC-SCALE.org (rungs and gates, cohort tolerance, the minimal
-  income economy, the viewer stack, JS as a second source, cycle-1
-  timing); (b) WP-16 / WP-15 / WP-14 for the D7 grid's cycle 1 as a
-  STRUCTURAL check on the current world; (c) wave 4's agents (T15)
-  and the multiplicity layer (T16); (d) more agents' =why= notes and
-  the viewer's live websocket source.
+  ORGANIC-SCALE.org's six decisions RESOLVED 2026-09-11 (decision 22).
+  IN FLIGHT: WP-16 (=wp/16-kdesign=) and WP-15 (=wp/15-grid=) on this
+  account in worktrees =../alberta-buck-wp-16= / =-wp-15=, the D7
+  grid's prerequisites; then WP-14, then cycle 1 as the STRUCTURAL
+  check; the viewer's websocket source; wave 4's T15 / T16 / T17 are
+  on offer to other accounts.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -1821,6 +1820,16 @@ next.  Paste acceptance evidence here, not in chat.
    file whose row count disagrees with its manifest.  A Makefile /
    loader change; to be made after the regeneration, never while it
    runs.
+
+22. *ORGANIC-SCALE.org decisions 1-6* -- RESOLVED 2026-09-11 (design
+   owner, as recommended): four rungs first (1, 2, 4, 6) with the
+   matrix's gates plus four organic gates; multiplicity as a per-run
+   rung parameter with the rung-2 equivalence gate (5% flows, 1% RMS
+   bvib, G7 on K); the income economy as indexed flows with no
+   merchants; the viewer as built plus the websocket source; the JS
+   emitter in the second half of wave 4; D7 cycle 1 now as the
+   structural check with its quantitative readings provisional.  The
+   full text is in ORGANIC-SCALE.org.
 
 * Conventions
 
