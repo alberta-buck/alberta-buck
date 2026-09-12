@@ -1262,13 +1262,13 @@ def org_fit_table(fit: dict) -> str:
 
 def org_table(table: dict) -> str:
     """The gain table as org, one row per mode x depth."""
-    lines = ["| mode | depth | sigma | k_s (s/day/K) | w | tau_s d | zeta | Kq | Kqi (1/s) | Kqd | Kq x1e12 | Kqi x1e12 | SIMC Kq | SIMC Kqi (1/s) | tau_s x0.5: Kq / Kqi | tau_s x2: Kq / Kqi | anchor Kp / Ki ratio | in range | fill at rail |",
-             "|------+-------+-------+---------------+---+---------+------+----+-----------+-----+----------+-----------+---------+----------------+----------------------+--------------------+----------------------+----------+--------------|"]
+    lines = ["| mode | depth | sigma | k_s (s/day/K) | w | tau_s d | zeta | Kq | Kqi (1/s) | Kqd (impl. L_d) | Kq x1e12 | Kqi x1e12 | SIMC Kq | SIMC Kqi (1/s) | tau_s x0.5: Kq / Kqi | tau_s x2: Kq / Kqi | anchor Kp / Ki ratio | in range | fill at rail |",
+             "|------+-------+-------+---------------+---+---------+------+----+-----------+-----------------+----------+-----------+---------+----------------+----------------------+--------------------+----------------------+----------+--------------|"]
     for key, r in table["rows"].items():
         g, s, ax, an = r["lqr"], r["simc"], r["tau_s_axis"], r["anchor"]
         lines.append(
             f"| {r['mode']} | {r['depth_m']:g} | {r['sigma']:.3f} | {r['plant']['k_s']:.3e} | {r['weights']['w_carry']:.3e} "
-            f"| {g['tau_s_days']:.1f} | {g['zeta']:.2f} | {g['Kq']:.4g} | {g['Kqi']:.3e} | {g['Kqd']:.3g} "
+            f"| {g['tau_s_days']:.1f} | {g['zeta']:.2f} | {g['Kq']:.4g} | {g['Kqi']:.3e} | 0 ({g['L_d']:.3g}) "
             f"| {g['Kq_x1e12']} | {g['Kqi_x1e12']} | {s['Kq']:.4g} | {s['Kqi']:.3e} "
             f"| {ax['0.5']['Kq']:.4g} / {ax['0.5']['Kqi']:.3e} | {ax['2']['Kq']:.4g} / {ax['2']['Kqi']:.3e} "
             f"| {an['Kp_ratio']:.3f} / {an['Ki_ratio']:.3f} | {'yes' if r['tau_s_in_range'] else 'NO'} "
