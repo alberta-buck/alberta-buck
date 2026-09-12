@@ -118,6 +118,20 @@ function buildClasses(meta, frames, allKeys) {
   for (const a of roster) (byCls[a.cls] = byCls[a.cls] || []).push(a);
   const pop = ((meta && meta.experiment && meta.experiment.scenario) || {}).agents || {};
   const classes = new Set([...Object.keys(byCls), ...Object.keys(pop)]);
+  // A live frame stream (the sim server's /frames channel) carries no
+  // meta: name the instances from the ag ids seen in the frames (v2 names
+  // every agent), so classes and counts still appear.
+  const seen = {};
+  if (!roster.length) {
+    for (const f of frames) for (const id of Object.keys(f.ag || {})) {
+      const cls = id.split("#")[0]; (seen[cls] = seen[cls] || new Set()).add(id);
+    }
+    for (const [cls, ids] of Object.entries(seen)) {
+      classes.add(cls);
+      byCls[cls] = [...ids].map(id => ({ id, cls, idx: Number(id.split("#")[1]) || 0, stride: 1, telemetry: null, knobs: null }));
+      if (pop[cls] == null) pop[cls] = ids.size;
+    }
+  }
   // classes only visible through their aggregates
   for (const [cls, prefs] of Object.entries(CLASS_PREFIX)) {
     if (allKeys.some(k => prefs.some(p => k.startsWith(p)))) {
@@ -359,6 +373,43 @@ if (typeof window !== "undefined") {
     return { meta: head.meta || {}, tokens: head.tokens || [], frames: lines };
   }
 
+  // Live source: the sim server's ws://host:port/s/<sid>/frames channel
+  // sends one frame object per message ({...frame, pace, sid}), then
+  // {"done": true} or {"error": ...}.  Frames accumulate; the model is
+  // rebuilt every LIVE_EVERY frames (or on the next frame after LIVE_MS),
+  // and the clock follows the newest frame while it sits at the end.
+  const LIVE_EVERY = 25, LIVE_MS = 3000;
+  const live = { ws: null, frames: [], last: 0, follow: true, name: "" };
+  function liveRebuild(final) {
+    const atEnd = !state.model || state.idx >= state.model.frames.length - 1;
+    const keepTab = state.activeTab;
+    load({ meta: {}, tokens: [], frames: live.frames.slice() }, `${live.name} (live, ${live.frames.length} frames${final ? ", done" : ""})`);
+    if (keepTab && state.model.classes.some(c => c.cls === keepTab)) { state.activeTab = keepTab; renderTabs(); }
+    if (atEnd && live.follow) setIdx(state.model.frames.length - 1);
+    live.last = Date.now();
+  }
+  function connect(url) {
+    if (live.ws) { try { live.ws.close(); } catch (_) {} }
+    live.frames = []; live.name = url; live.follow = true;
+    status(`connecting ${url} ...`);
+    let ws;
+    try { ws = new WebSocket(url); } catch (e) { status(`bad websocket url: ${e.message}`, true); return; }
+    live.ws = ws;
+    ws.onopen = () => status(`live: ${url}`);
+    ws.onerror = () => status(`websocket error on ${url}`, true);
+    ws.onclose = () => { status(`closed: ${url} (${live.frames.length} frames)`); if (live.frames.length) liveRebuild(true); };
+    ws.onmessage = ev => {
+      let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
+      if (msg.done) { liveRebuild(true); return; }
+      if (msg.error) { status(`sim error: ${msg.error}`, true); return; }
+      if (msg.day == null) return;
+      live.frames.push(msg);
+      const n = live.frames.length;
+      if (n === 1 || n % LIVE_EVERY === 0 || Date.now() - live.last > LIVE_MS) liveRebuild(false);
+      const d = $("#day"); if (d && state.model) d.textContent = `day ${state.model.days[state.idx]} (${state.idx + 1}/${state.model.frames.length}; live ${n}${msg.pace ? ", " + msg.pace + " d/s" : ""})`;
+    };
+  }
+
   window.addEventListener("DOMContentLoaded", async () => {
     $("#slider").addEventListener("input", e => setIdx(Number(e.target.value)));
     $("#prev").addEventListener("click", () => setIdx(state.idx - 1));
@@ -376,6 +427,9 @@ if (typeof window !== "undefined") {
     window.addEventListener("unhandledrejection", e => status(`error: ${(e.reason && e.reason.message) || e.reason}`, true));
     const q = new URLSearchParams(location.search);
     try { const r = await fetch("/data/index.json"); if (r.ok) { const idx = await r.json(); const sel = $("#vectors"); for (const v of idx) { const o = el("option", null, `${v.path} (${(v.size / 1048576).toFixed(1)} MB)`); o.value = "/data/" + v.path; sel.appendChild(o); } sel.addEventListener("change", () => { if (sel.value) loadUrl(sel.value); }); } } catch (_) {}
+    $("#slider").addEventListener("input", () => { live.follow = state.model && state.idx >= state.model.frames.length - 1; });
+    $("#ws").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.value.trim()) connect(e.target.value.trim()); });
     if (q.get("v")) loadUrl(q.get("v"));
+    if (q.get("ws")) { $("#ws").value = q.get("ws"); connect(q.get("ws")); }
   });
 }
