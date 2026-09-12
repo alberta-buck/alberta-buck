@@ -74,7 +74,7 @@ S0g = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1,
 S = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
 # WP-16: V's gains in FILL units (Kq, Kqi, Kqd real) -- place-holder = S0
 V = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "v", SIM_SHADOW_W_DESK = 1, SIM_SHADOW_W_OFFSET = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
-# Vk = V + the local skews (WP-14's kappa*): not yet defined.
+Vk = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "v", SIM_SHADOW_W_DESK = 1, SIM_SHADOW_W_OFFSET = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0, "agents.UndertakingAgent.kappa" = 0.1, "agents.FacilityAgent.kappa" = 0.1, "agents.SeederAgent.kappa" = 0.1 }  # WP-14: Vk = V + the local skews at kappa* = 0.1 (one eps of 0.005 per 5% fill; reports/wp-14.org)
 
 [[arm]]
 name = "none"
