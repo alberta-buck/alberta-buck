@@ -1124,6 +1124,40 @@ def solve(fit: dict, des: Design | None = None, w_carry: float | None = None,
     return table
 
 
+def _fmt(v, spec: str) -> str:
+    if v is None or (isinstance(v, float) and not math.isfinite(v)):
+        return "-"
+    return format(v, spec)
+
+
+def org_fit_table(fit: dict) -> str:
+    """The step responses per cell and the pooled fit per depth, as org."""
+    lines = ["| depth | cell | dK | pairs | identical frames | sat day | De last | Dq last (BUCK) | Dsupply last (BUCK) | F_K book (BUCK/d/K) | r2 | F_K supply | r2 | a (1/d) | k_e | r2 |",
+             "|-------+------+----+-------+------------------+---------+---------+----------------+---------------------+---------------------+----+------------+----+---------+-----+----|"]
+    for depth, f in fit.get("depths", {}).items():
+        for name, c in f.get("cells", {}).items():
+            if "book" not in c:
+                lines.append(f"| {depth} | {name} | {_fmt(c.get('dK'), '+.2f')} | {c.get('n_pairs', '-')} | "
+                             f"{c.get('identical_frames', '-')} | {c.get('saturated_day') or '-'} | "
+                             f"{c.get('error', 'no fit')} | | | | | | | | | |")
+                continue
+            lines.append(
+                f"| {depth} | {name} | {_fmt(c['dK'], '+.2f')} | {c['n_pairs']} | {c['identical_frames']} "
+                f"| {c['saturated_day'] or '-'} | {_fmt(c['price']['de_last'], '+.4f')} "
+                f"| {_fmt(c['book']['dq_last'], '+,.0f')} | {_fmt(c['supply']['dsupply_last'], '+,.0f')} "
+                f"| {_fmt(c['book']['F_K'], '+.4g')} | {_fmt(c['book']['r2'], '.2f')} "
+                f"| {_fmt(c['supply']['F_K'], '+.4g')} | {_fmt(c['supply']['r2'], '.2f')} "
+                f"| {_fmt(c['price']['a'], '.3g')} | {_fmt(c['price']['k_e'], '+.3g')} | {_fmt(c['price']['r2'], '.2f')} |")
+        if "price" in f:
+            ar = f.get("control_ar1", {})
+            lines.append(
+                f"| {depth} | POOLED | | {f['price']['n']} | | | control AR1 a {_fmt(ar.get('a'), '.3g')} | | "
+                f"| {_fmt(f['book']['F_K'], '+.4g')} | {_fmt(f['book']['r2'], '.2f')} "
+                f"| {_fmt(f['supply']['F_K'], '+.4g')} | {_fmt(f['supply']['r2'], '.2f')} "
+                f"| {_fmt(f['price']['a'], '.3g')} | {_fmt(f['price']['k_e'], '+.3g')} | {_fmt(f['price']['r2'], '.2f')} |")
+    return "\n".join(lines)
+
+
 def org_table(table: dict) -> str:
     """The gain table as org, one row per mode x depth."""
     lines = ["| mode | depth | k_s (s/day/K) | w | tau_s d | zeta | Kq | Kqi (1/s) | Kqd | Kq x1e12 | Kqi x1e12 | SIMC Kq | SIMC Kqi (1/s) | tau_s x0.5: Kq / Kqi | tau_s x2: Kq / Kqi | anchor Kp / Ki ratio | in range |",
@@ -1200,6 +1234,9 @@ def main(argv=None) -> int:
         p = outdir / ("smoke" if a.smoke else "") / "fit.json"
         p.write_text(json.dumps(_clean(fit), indent=1))
         print(p)
+        po = p.with_suffix(".org")
+        po.write_text(org_fit_table(fit) + "\n")
+        print(org_fit_table(fit))
         for depth, f in fit.get("depths", {}).items():
             if "price" in f:
                 print(f"[fit] {depth}: a={f['price']['a']:.4g}/d k_e={f['price']['k_e']:.4g} (r2 {f['price']['r2']:.3f}) "

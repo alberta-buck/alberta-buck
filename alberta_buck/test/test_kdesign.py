@@ -270,6 +270,8 @@ def test_identification_recovers_known_gains(tmp_path):
     pooled = kd.fit_pooled(ctrl, [st])
     assert abs(pooled["book"]["F_K"] / 250.0 - 1.0) < 0.10
     assert abs(pooled["scales"]["D"] - 1.04e7) < 1.0
+    table = kd.org_fit_table({"depths": {"d10": pooled}})
+    assert "| d10 | step |" in table and "| d10 | POOLED |" in table
 
 
 # --- The experiments --------------------------------------------------------------- #
