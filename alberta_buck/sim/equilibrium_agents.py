@@ -1152,7 +1152,13 @@ class WhaleRaidAgent(_ProxyAgent):
     loses money and the excursion half-life stays bounded.
 
     Phases (ctr raidPhase): 0 idle, 1 accumulate, 2 inject, 3 unwind,
-    4 done; ctr raidSide carries the sign for the response metric."""
+    4 done; ctr raidSide carries the sign for the response metric.
+
+    WP-15 (class 8, the periodic disturbance): period_days > 0 repeats the
+    raid every period_days after raid_day with the side alternating (sell,
+    buy, sell, ...), each cycle a full lifecycle clipped into its period
+    (_cycle_bounds); ctr raidCycle / frame raid_cycle count the cycles and
+    raidPnl sums both leg pairs.  Default 0 = the single raid, unchanged."""
 
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
@@ -1177,6 +1183,19 @@ class WhaleRaidAgent(_ProxyAgent):
         self.accum_start = (max(0, self.raid_day - self.accum_days)
                             if self.side == "sell" else self.raid_day)
         self.raid_end = self.raid_day + self.raid_days        # exclusive
+        # WP-15 (class 8, the periodic disturbance): period_days > 0 repeats
+        # the raid every period_days after raid_day with the side ALTERNATING
+        # (sell, buy, sell, ...): cycle k injects over [R_k, R_k + raid_days)
+        # with R_k = raid_day + k * period_days; a sell cycle accumulates over
+        # the pre-window before R_k and reacquires after, a buy cycle squeezes
+        # and unwinds; the pre / post windows are clipped so consecutive
+        # cycles never overlap (_cycle_bounds).  A _spec (no draw), read AFTER
+        # every existing draw; default 0 = today's single raid, byte for byte.
+        self.period_days = int(_spec(scenario, cls, "period_days", 0))
+        self._post_end = self.raid_end + self.reacq_days      # exclusive
+        self._raid_day0 = self.raid_day
+        self._side0 = self.side
+        self._cycle = -1
         self._bind_proxy(d)
         d.chain.send(d.usdc.functions.mint(self.proxy.address, self.budget))
         self.spent_accum = 0
@@ -1188,12 +1207,18 @@ class WhaleRaidAgent(_ProxyAgent):
         self.phase = 0
 
     def telemetry_static(self) -> dict:
-        return {"budget": self.budget, "side": self.side,
-                "accum_days": self.accum_days, "quiet_cap_bp": self.quiet_cap_bp,
-                "reacquire_days": self.reacq_days,
-                "raid_day": self.raid_day, "raid_days": self.raid_days}
+        rec = {"budget": self.budget, "side": self.side,
+               "accum_days": self.accum_days, "quiet_cap_bp": self.quiet_cap_bp,
+               "reacquire_days": self.reacq_days,
+               "raid_day": self.raid_day, "raid_days": self.raid_days}
+        if self.period_days:                       # WP-15: only when periodic
+            rec["period_days"] = self.period_days
+        return rec
 
     def _pnl(self) -> int:
+        if self.period_days:                       # WP-15: both leg pairs
+            return ((self.recv_dump - self.spent_reacq)
+                    + (self.recv_unwind - self.spent_raid))
         if self.side == "buy":
             return self.recv_unwind - self.spent_raid
         return self.recv_dump - self.spent_reacq
@@ -1232,7 +1257,9 @@ class WhaleRaidAgent(_ProxyAgent):
         if self.proxy is None or not d.pool_ub:
             return
         try:
-            if self.phase < 4:
+            if self.period_days:                   # WP-15: the periodic raid
+                self._act_periodic(d, scenario, day, tick)
+            elif self.phase < 4:
                 if self.side == "buy":
                     self._act_buy(d, scenario, day, tick)
                 else:
@@ -1243,6 +1270,8 @@ class WhaleRaidAgent(_ProxyAgent):
         ctr["raidSide"] = self.side
         ctr["raidPnl"] = self._pnl()
         ctr["raidAccumSpent"] = self.spent_accum
+        if self.period_days:                       # WP-15: only when periodic
+            ctr["raidCycle"] = self._cycle
         if self.phase >= 3 and self.target_buck:
             held = d.chain.balance_of(d.buck, self.proxy.address)
             # sell: position not yet rebuilt; buy: position not yet unwound
@@ -1275,7 +1304,7 @@ class WhaleRaidAgent(_ProxyAgent):
                                      self.proxy.address)
                 self.recv_dump += (d.chain.balance_of(
                     d.usdc, self.proxy.address) - before)
-        elif day < self.raid_end + self.reacq_days:
+        elif day < self._post_end:
             self.phase = 3
             if tick == 0:
                 held = d.chain.balance_of(d.buck, self.proxy.address)
@@ -1283,7 +1312,7 @@ class WhaleRaidAgent(_ProxyAgent):
                     self.phase = 4
                 else:
                     self.spent_reacq += self._buy_slice(
-                        d, self.raid_end + self.reacq_days - day,
+                        d, self._post_end - day,
                         self.quiet_cap_bp)
         else:
             self.phase = 4
@@ -1302,7 +1331,7 @@ class WhaleRaidAgent(_ProxyAgent):
                     d.usdc, self.proxy.address))
                 self.target_buck = d.chain.balance_of(d.buck,
                                                       self.proxy.address)
-        elif day < self.raid_end + self.reacq_days:
+        elif day < self._post_end:
             self.phase = 3
             if tick == 0:
                 held = max(0, d.buck.functions.balanceOf(
@@ -1311,10 +1340,63 @@ class WhaleRaidAgent(_ProxyAgent):
                     self.phase = 4
                 else:
                     self.recv_unwind += self._sell_slice(
-                        d, self.raid_end + self.reacq_days - day,
+                        d, self._post_end - day,
                         self.quiet_cap_bp)
         else:
             self.phase = 4
+
+    # -- WP-15: the periodic raid (class 8) ---------------------------------- #
+
+    def _cycle_bounds(self, k: int) -> tuple[str, int, int, int, int]:
+        """(side, pre_start, R_k, R_end, post_end) of cycle k.  The side
+        alternates from the configured one; a sell cycle's accumulation
+        window is accum_days for the first cycle and at most half the
+        period's slack afterwards; the post window (reacquire / unwind) is
+        clipped so it ends before the next cycle's accumulation starts."""
+        P = self.period_days
+        side = self._side0 if k % 2 == 0 else (
+            "buy" if self._side0 == "sell" else "sell")
+        nxt = "buy" if side == "sell" else "sell"
+        slack = max(0, P - self.raid_days)
+        pre = ((self.accum_days if k == 0 else min(self.accum_days, slack // 2))
+               if side == "sell" else 0)
+        pre_next = min(self.accum_days, slack // 2) if nxt == "sell" else 0
+        post = max(0, min(self.reacq_days, slack - pre_next))
+        R = self._raid_day0 + k * P
+        return (side, max(0, R - pre), R, R + self.raid_days,
+                R + self.raid_days + post)
+
+    def _cycle_of(self, day: int) -> int:
+        """The cycle whose window holds `day`; -1 before the first."""
+        P = self.period_days
+        _s, pre0, _r, _e, _p = self._cycle_bounds(0)
+        if day < pre0:
+            return -1
+        k = max(0, (day - self._raid_day0) // P)
+        _s, pre_next, _r, _e, _p = self._cycle_bounds(k + 1)
+        return k + 1 if day >= pre_next else k
+
+    def _act_periodic(self, d, scenario, day, tick) -> None:
+        """Dispatch to the single-raid state machines with this cycle's
+        side and windows; per-cycle state (phase, target) resets on entry
+        to a new cycle, the four USDC ledgers stay cumulative."""
+        k = self._cycle_of(day)
+        if k < 0:
+            self.phase = 0
+            return
+        if k != self._cycle:
+            side, pre_start, R, R_end, post_end = self._cycle_bounds(k)
+            self._cycle = k
+            self.side = side
+            self.raid_day, self.raid_end = R, R_end
+            self.accum_start = pre_start
+            self._post_end = post_end
+            self.target_buck = 0
+            self.phase = 0
+        if self.side == "buy":
+            self._act_buy(d, scenario, day, tick)
+        else:
+            self._act_sell(d, scenario, day, tick)
 
 
 @_register
