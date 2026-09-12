@@ -33,14 +33,16 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   telemetry v2 (cdd1e49).  =ORGANIC-SCALE.org= opened wave 4 (tracks
   T13-T17); the viewer serves at =http://datasim.local:8787/=.
   ORGANIC-SCALE.org's six decisions RESOLVED 2026-09-11 (decision 22).
-  WP-15 DONE and merged (75d9e34, 2026-09-12): the grid's machinery
-  exists and =d7-c1= dry-runs 54 cells.  IN FLIGHT on this account:
-  WP-16 (=wp/16-kdesign=, =../alberta-buck-wp-16=: the gain table) and
-  WP-14 (=wp/14-skews=, =../alberta-buck-wp-14=: per-class stabilizers
-  and the local skews; its own out/).  Then cycle 1 as the STRUCTURAL
-  check: the A / S0 cells can run as soon as the tree is quiet, the S /
-  V cells after WP-16, Vk after WP-14.  Wave 4's T15 / T16 / T17 are on
-  offer to other accounts.
+  WP-15 (75d9e34) and WP-16 (50e0616) DONE and merged 2026-09-12: the
+  grid's machinery and the gain table exist; =d7-c1= carries the
+  derived gains and dry-runs 60 cells.  WP-16's findings (decisions
+  27-33): the joint plant is not stabilizable (loop-at-a-time LQR), K
+  is a weak lever (the derived position loop rails at a 21% fill; the
+  S0-equivalent lambda is 24), the depth axis does not change D.  IN
+  FLIGHT: WP-14 (=wp/14-skews=, =../alberta-buck-wp-14=, own out/).
+  Cycle 1 runs on ONE tree after WP-14 merges, from the frozen grid
+  worktree =../alberta-buck-grid= re-pointed to that commit.  Wave 4's
+  T15 / T16 / T17 are on offer to other accounts.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -258,7 +260,7 @@ remains.
 | WP-13 | The corrected controller (D7): two loops with independent gains (Kq, Kqi, Kqd) and one position integrator; observer aggregation modes S / V with weights; =IStabilizer.position()= / =positionCap()= / =stale()=; hold-last cap on an unreadable NAV; disabled stabilizers excluded; the price loop and =fundingFactor()= read the RAW basket value (decision 10) | WP-3a                                                                            | BuckKControllerShadow.sol (extend), ShadowObserver.sol (modes, weights, exclusion), IStabilizer.sol (append), BuckBasketOps.sol (position / cap / stale), forge tests; deploy.py / __main__.py (append: =--shadow-mode s  | v=, =SIM_SHADOW_KQ= / =_KQI= / =_KQD= / =_W_*=)                                                                            | =--controller shadow= runs in both modes; the R14 attribution panel gets the per-loop dK                                                                                 | Kq = Kqi = Kqd = 0 identity with Direct state-for-state; S0 gains reproduce D4 in the interior on a 5-d smoke; guard-trip test leaves position() / saturation() unchanged and sets stale(); disabled desk excluded from s; shell size within EIP-170 | 1 smoke                                                | DONE (merged 2026-09-06, b4c1b75; 36 Shadow + 37 Ops + 4 pytest; identity 5/5 frames; S and V engaged smokes) | =wp/13-controller= / subagent |
 | WP-14 | Local skews kappa_i on the level-1 agents: UndertakingAgent (eps per side), FacilityAgent (x / y), SeederAgent (range centre), the desk (its Q1/Q3 thresholds via the ops params): band_i = band_i0 + kappa_i q_i / cap_i, default 0                                                                                                                               | WP-13 (position telemetry only)                                                  | undertaking_agents.py, facility_agent.py, seeder_agent.py (append: kappa knob, sk_* counters); the desk's thresholds                                                                                                      | kappa on / off cells in the grid                                                                                           | kappa = 0 byte-identical to today (L3); under a differential disturbance the loaded facility's own book unwinds with K within G7                                         | 2 smokes                                                                                                                                                                                                                                             | TODO                                                   |                                                                                                               |                               |
 | WP-15 | The controller-alternatives grid (the test plan of this file): disruption TOMLs for classes 5-8 and 10; =BookLoaderAgent= (class 9); habituation / carry / saturation-dwell / K-economy / book-loading / attribution metrics; cycles 1-3                                                                                                                           | decision 8; WP-13, WP-14, WP-16                                                  | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml (new); bookloader.py (new); eqmetrics.py / snapshot.py (append); a star spec per cycle                                                   | the three cycles' tables and panes; a recommendation S vs V, tau_s, kappa*                                                 | P9 and P10 judged; G1-G8 on every cell; R15-R18                                                                                                                          | ~130                                                                                                                                                                                                                                                 | machinery DONE (merged 2026-09-12, 75d9e34: the class arms, three injectors, the d7 metrics, star axes, d7-c1.toml 54 cells); the cycles not yet run | =wp/15-grid= / subagent |                               |
-| WP-16 | Gain derivation, offline: the reduced plant (7.2 + the position loop) as a small linear model in Python; identify k_s (flow per unit K per unit cap) from banked vectors; LQR with costs (e^2, carry-weighted s^2, dK^2); SIMC sanity; margin check; the gain table for S and V at both depths                                                                     | WP-1 vectors                                                                     | alberta_buck/sim/kdesign.py, test_kdesign.py (new)                                                                                                                                                                        | the gain table (Kq, Kqi, Kqd, tau_s) per design and depth; the lambda knee derived rather than swept                       | LQR reproduces the price loop's (Kp, Ki) within 25% when the position weight is 0 (the sanity anchor); the derived tau_s lands between tau_I and the persistence horizon | 0                                                                                                                                                                                                                                                    | TODO                                                   |                                                                                                               |                               |
+| WP-16 | Gain derivation, offline: the reduced plant (7.2 + the position loop) as a small linear model in Python; identify k_s (flow per unit K per unit cap) from banked vectors; LQR with costs (e^2, carry-weighted s^2, dK^2); SIMC sanity; margin check; the gain table for S and V at both depths                                                                     | WP-1 vectors                                                                     | alberta_buck/sim/kdesign.py, test_kdesign.py (new)                                                                                                                                                                        | the gain table (Kq, Kqi, Kqd, tau_s) per design and depth; the lambda knee derived rather than swept                       | LQR reproduces the price loop's (Kp, Ki) within 25% when the position weight is 0 (the sanity anchor); the derived tau_s lands between tau_I and the persistence horizon | 0                                                                                                                                                                                                                                                    | DONE (merged 2026-09-12, 50e0616; the table in build/sim/kdesign/gains.org; anchor exact; the joint plant not stabilizable -> loop-at-a-time) | =wp/16-kdesign= / subagent |                               |
 
 * The star method: one axis at a time from a baseline
 
@@ -720,6 +722,83 @@ install and login.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-12 -- WP-16 DONE and merged: the position loop's gains, and what the derivation found (session 3, subagent on =wp/16-kdesign=)
+
+- Merged --no-ff as 50e0616 (seven branch commits, head 95f5eda; the
+  report =reports/wp-16.org= and =build/sim/kdesign/gains.org= /
+  =fit.org= (copied into the main checkout's build dir, with the ten
+  step-test vectors and the grind set, so =python -m
+  alberta_buck.sim.kdesign all= reproduces the table) are the evidence
+  of record).  With it the flake's shellHook exports the store's gcc
+  runtime and zlib on Linux: the venv's manylinux numpy now imports on
+  datasim (verified: numpy 2.5.3, matplotlib, the arb plot test
+  passing -- the four plot failures WP-15 saw were this).  pytest: 184
+  passed, 1 skipped (the scipy cross-check runs only in the flake's
+  python env).
+- Built: =kdesign.py= -- the reduced plant of record (price
+  self-regulating, position integrating, the contract's current-sample
+  integral at the tick cadence), LQR by doubling Riccati iteration in
+  numpy, Bryson weights on the deploy's own constants with the price
+  weight calibrated to the sim's Kp, SIMC and margins, the S / V
+  fill-unit mapping, step-test identification against a control cell
+  sharing the keyed history, ten step-test experiments and a CLI; 16
+  tests.
+- THE TABLE (depth 10; real units; the env form): S: Kq 2.418, Kqi
+  8.053e-8/s (=SIM_SHADOW_MODE=s SIM_SHADOW_LAMBDA=1 SIM_SHADOW_KQ=2.418
+  SIM_SHADOW_KQI=8.053e-8=); V: Kq 3.168, Kqi 1.055e-7; tau_s 127.3 d,
+  zeta 0.83; the anchor exact (Kp / Ki ratios 1.000); the tau_s axis
+  x0.5 / x2 by SIMC's laws (Kq 4.836 / 1.209; Kqi 3.221e-7 / 2.013e-8);
+  Kqd 0 of record (the implied feedforward L_d 210 is not realisable
+  through the D term).  The loaded-book confirmation cells (a $8-12M
+  grind ending at the step day, three cells) finished after the
+  hand-off: the supply ramp per K is 56,483 BUCK/d/K (R2 0.96) against
+  the step tests' 49,595 -- within 14%, not the 2x that would replace
+  the table; the book channel is null there too.  The step-test table
+  stands as the table of record; the grind-based solve (Kq_S 2.121, Kqi
+  7.06e-8) is the same design within 12%.
+- FINDINGS that change the plan: (1) THE JOINT PLANT IS NOT
+  STABILIZABLE -- one lever, two costed integrals: the combination
+  =k_s (a Ie + e) + k_e s= is conserved (z A = z, z B = 0, tested), so a
+  joint LQR has no finite solution; the derivation of record is
+  LOOP-AT-A-TIME (the mid-ranging design), and the joint closed loop
+  carries a structural eigenvalue at exactly 1 with eigenvector (0, Kqi,
+  0, -Ki): the price and position integrators' contents can shift
+  between them without moving K -- benign in K, bounded only by the
+  band and the rails; =pid_i= vs =pid_qi= drift is a K-economy metric
+  to carry.  (2) K IS A WEAK LEVER on this cast: a unit of K commands
+  ~50-56k BUCK/day of supply flow (the debtors' arrival hazard and
+  K-scaled limits; a -0.20 step also delevers 6.3M at once), the price
+  barely moves (a full-authority 0.5 K shifts bvib 0.2-0.4%; the cast
+  reverts within the day, lag-1 autocorrelation -0.53), and the
+  undertakings' book on the calm arm is TRANSIENT (unwound at par
+  within days; a standing 126k BUCK per unit K, 0.8% of the reserve),
+  so k_s of record is the supply ramp over the real reserve.  (3) THE
+  DERIVED POSITION LOOP SPENDS ITS AUTHORITY EARLY: Kq alone reaches
+  dk_rail at a 21% fill of the real reserve (~$3.2M of $15.3M);
+  draining a $10M grind book in 127 d would need K = 1.6; the
+  S0-equivalent lambda is 24 (depth 10) / 21 (depth 40) against the
+  0.5-1 every D4 cell ran -- D4 as exercised coupled the books to K
+  25-50x more weakly than the derivation wants; a rail-respecting
+  alternative has tau_s ~400 d.  (4) THE DEPTH AXIS DOES NOT CHANGE D:
+  =deploy.target_buck_m= seeds the truth pools' USDC side and the
+  pseudo-stabilizer's cap, while D (15.3M vs 15.9M) and NAV (30.5M vs
+  31.8M) come from the depositors and are the same at both depths; the
+  pseudo-stabilizer's cap (=target_buck=) overstates the real reserve
+  4x at "depth 40", so V's depth-40 gains are a units artefact (WP-14's
+  real caps fix it).  (5) T_p = 180 d (2 tau_I) taken as the
+  persistence horizon: the ops doc's level-2 dwell is price-based and
+  silenced under D7.  (6) P9's window (10% within 1.5 tau_s) is tighter
+  than the derived loop's own envelope (the position pair's constant is
+  254 d).  (7) The design cadence matters only at Kp (28% between h =
+  0.25 and 1 d); h = 0.25 d is the cadence of record.
+- The cycle-1 spec now carries the table: S and V at the derived gains,
+  the tau_s axis on SIMC's laws, and a fifth design S0k (S0 at lambda
+  24) so the structural comparison S0 vs S is not a comparison of
+  tunings: 60 cells (3b8f078).
+- Open issues filed as decisions pending 27-33.  Worktree
+  =../alberta-buck-wp-16= removed after its vectors were archived;
+  branch kept.
 
 ** 2026-09-12 -- WP-15 DONE and merged (session 3, subagent on =wp/15-grid=)
 
@@ -1957,6 +2036,53 @@ next.  Paste acceptance evidence here, not in chat.
    place-holders and fixes the rule; run the A and S0 cells of d7-c1
    first (they need no table), the S / V cells after WP-16 lands, Vk
    after WP-14.
+
+27. *The persistence horizon T_p* (from WP-16).  The only horizon in the
+   ops doc is the level-2 price dwell (30 days past the 200 bp leash),
+   silenced under D7 by the facilities' own bids.  Taken: T_p = 180 d
+   = 2 tau_I (a flow K has not owned after two integral times is
+   structural); it sets the position integral's weight.  Proposed:
+   record it; WP-15's class-5 cells report the BOOK's dwell (|s| above
+   a threshold for N days) so the number can be revisited.
+28. *The position loop's authority* (from WP-16, the decisive one).  K
+   commands ~50k BUCK/day per unit on this cast; the derived gains rail
+   at a 21% fill of the real reserve, and the rail-respecting
+   alternative has tau_s ~400 d.  Options: (a) more authority for the
+   position loop (a wider rail, or =dk_rail= per loop); (b) accept that
+   K cannot mid-range books of the undertakings' size and leave the
+   drain to the facilities' own unwind rules and the local skews
+   (WP-14) -- K then mid-ranges the SMALL residual; (c) a facility mix
+   whose flow per unit K is larger.  Proposed: cycle 1 runs the
+   derived gains AND the tau_s axis (x0.5 rails at a 10% fill, x2 at
+   41%), reports rail days and the book's dwell, and the design owner
+   chooses with those numbers.
+29. *The depth axis* (from WP-16).  =deploy.target_buck_m= does not
+   change D or NAV (the depositors do).  Proposed: cycle 1 keeps the
+   axis as "truth-pool depth" and the ledger says so; the ORGANIC
+   ladder's rungs scale D through the depositor population and the
+   basket seed (ORGANIC-SCALE.org decision 1), which is where "depth"
+   belongs.
+30. *P9's window* (from WP-16).  1.5 tau_s (190 d) is tighter than the
+   derived loop's envelope (254 d).  Proposed: P9 reads tau_s as the
+   position pair's time constant (1 / (zeta omega_n)), or the gate
+   becomes "within 10% inside 3 tau_s"; decide when cycle 1's
+   habituation numbers exist.
+31. *The two-integrator redundancy* (from WP-16, finding 1).  The
+   price and position integrals share a conserved direction; their
+   contents can drift apart without moving K.  Proposed: WP-15's
+   K-economy metrics gain the total variation of =pid_i - pid_qi=; the
+   rails' anti-windup is reviewed for the two integrators winding in
+   opposite directions with K interior; CARRY-CONVEXITY.org D7 records
+   that the LQR of record is loop-at-a-time and that a joint law needs
+   the band (the cascade with anti-windup IS that hybrid).  Recorded
+   there 2026-09-12.
+32. *scipy in the venv* (from WP-16).  The cross-check test skips in
+   the venv.  Proposed: accept (numpy is the runtime), or add scipy to
+   the =tests= extra of pyproject.toml.
+33. *Commit CLAUDE.md* (from WP-15 and WP-16).  It is untracked and
+   ignored; every worktree and clone lacks it and the onboarding names
+   it.  Proposed: commit it (nothing in it is secret), or move its
+   content into ONBOARDING-D7.org's house rules and drop the reference.
 
 * Conventions
 
