@@ -3,6 +3,8 @@
 //! Binds a rerandomized PS signature to an ElGamal ciphertext and proves
 //! the registrant holds `sk` for `pk`: (a) `sigma'` is a valid PS signature
 //! on `m`, (b) `E = (r*G, m*G + r*pk)` encrypts the same `m`, (k) `pk = sk*G`.
+//! Fiat-Shamir binds chainid and domain `AlbertaBuck:Register:v2`, not the
+//! registry contract address (fixture proofs replay onto many deployments).
 //! Verified on-chain by `IdentityRegistry.register`.
 
 use ark_bn254::{G1Affine, G2Affine};

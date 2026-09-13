@@ -120,7 +120,7 @@ def aliased_g1tie_limbs(witness):
 
 
 def uncontrolled_registration(registrant=0xBAD):
-    """§9: registration NIZK never takes sk; pk need not be a key we hold."""
+    """§9 inverted: NUMS pk with a dummy sk; production verify must reject."""
     from alberta_buck.review.mitigations import independent_generator
     issuer = ps_keygen(seeded())
     owner = Account(12345, 45678, 98765)

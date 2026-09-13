@@ -296,8 +296,9 @@ def test_chaum_pedersen_rejects_wrong_M():
         alice_kp.sk, r_bad,
         0xa11ce, 0xb0b, 1, rng=rng,
     )
-    # Even with a "valid" prover transcript over the bad ciphertext, Check 2
-    # fails because C_bad - C_a doesn't reflect the same underlying M.
+    # Even with a "valid" prover transcript over the bad ciphertext, Check 3
+    # (difference relation) fails because C_bad - C_a does not reflect the
+    # same underlying M.
     assert not chaum_pedersen_verify(
         E_a, E_bad, alice_kp.pk, bob_kp.pk, proof,
         0xa11ce, 0xb0b, 1,

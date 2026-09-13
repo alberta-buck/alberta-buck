@@ -1,9 +1,10 @@
 # Run: PYTHONPATH=. python scripts/review/evm_uncontrolled_register.py
-"""Review finding 9, executed on a real EVM (in-process revm):
-IdentityRegistry.register accepts a NIZK that never proves pk = sk*G.
-The attacker encrypts mG to a NUMS public key they do not hold and still
-becomes isVerified.  Honest control: the same credential under a key the
-registrant does hold also registers (different address).
+"""Review finding 9 inverted: on a real EVM (in-process revm)
+IdentityRegistry.register REJECTS a NIZK for a NUMS public key with no
+known sk (the attacker encrypts mG to a point they do not hold).
+
+Honest control: the same credential under a key the registrant holds
+still registers (different address).
 """
 from web3 import Web3
 

@@ -15,6 +15,10 @@ kernel port must preserve is:
    ``IdentityRegistry.register`` and ``isVerified()`` holds.
 
 Skips cleanly if anvil/web3 or the kernel binding is unavailable.
+
+Registration Fiat-Shamir binds block.chainid.  Sim Anvil/PyrevmAnvil
+default to 31337; issuance must use that live chain id (not a hardcoded 1)
+or on-chain register reverts `bad FS challenge`.
 """
 
 from __future__ import annotations
@@ -60,6 +64,35 @@ def _cold_run(tmp_path: Path, monkeypatch, backend: str) -> dict:
     finally:
         idmod.reset_sim_registry()
     return json.loads(tmp_cache.read_text())
+
+
+def test_sim_issue_binds_anvil_default_chainid():
+    """Cheap gate: sim issuance must Fiat-Shamir at Anvil's default 31337.
+
+    test_identity_cache_regeneration_backend_invariant is the full on-chain
+    check (skipped without anvil).  This test does not need a node.
+    """
+    from alberta_buck.sim.identity import SimRegistry, reset_sim_registry
+    from alberta_buck.sim.identity import seeded_rng
+    from alberta_buck.wallet.nizk import registration_verify
+
+    reset_sim_registry()
+    try:
+        rng = seeded_rng(1)
+        sim = SimRegistry(1)
+        rec = sim.issue("Farmer", 0, 0xA11CE, rng, chainid=31337)
+        assert registration_verify(
+            rec.ps_sigma_rerand, rec.E_addr, rec.client_kp.pk,
+            sim.ps_keypair.pk_X, sim.ps_keypair.pk_Y,
+            rec.registration_proof, 0xA11CE, 31337,
+        )
+        assert not registration_verify(
+            rec.ps_sigma_rerand, rec.E_addr, rec.client_kp.pk,
+            sim.ps_keypair.pk_X, sim.ps_keypair.pk_Y,
+            rec.registration_proof, 0xA11CE, 1,
+        )
+    finally:
+        reset_sim_registry()
 
 
 @pytest.mark.skipif(anvil_missing or web3_missing,

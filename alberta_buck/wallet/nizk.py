@@ -15,6 +15,12 @@ It is a Schnorr-family sigma protocol with four commitments:
 
 Fiat-Shamir challenge e binds (sigma', E, pk, A_ps, T_C, T_R, T_key), the
 registrant's Ethereum address, chainid, and domain `AlbertaBuck:Register:v2`.
+The IdentityRegistry contract address is omitted: identity.json / Foundry
+fixtures are generated once and replayed onto many `new IdentityRegistry()`
+deployments with different CREATE addresses, the same class of encoding
+decision as approve (which also omits registry).  Cross-chain replay is
+fixed; a valid credential can still be presented to a second registry on
+the same chain that trusts the same issuer.
 
 Responses: s_m = m_tilde + e*m,  s_r = r_tilde + e*r,  s_sk = sk_tilde + e*sk
 (mod ORDER).

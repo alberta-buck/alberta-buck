@@ -1,11 +1,11 @@
 # Run: PYTHONPATH=. python scripts/review/evm_approval_forgery.py  -- review evidence; see doc/review/identity-findings.md
-"""Review finding 3, executed on a real EVM (in-process revm via PyrevmAnvil):
-the deployed IdentityRegistry._verifyApprove accepts a Chaum-Pedersen approval
-whose witness is NOT the sender's registered account key, so Bob decrypts the
-approval to a THIRD party's identity, not the sender's.
+"""Review finding 3 inverted: on a real EVM (in-process revm via PyrevmAnvil)
+IdentityRegistry._verifyApprove REJECTS a Chaum-Pedersen approval whose
+witness is not the sender's registered account key (the forged receipt
+would otherwise decrypt to a third party's identity).
 
-Honest control included.  No production source is modified; the deployed
-bytecode is the committed out/IdentityRegistry.sol artifact.
+Honest control: the sender's real sk still verifies and decrypts to the
+sender's M.
 """
 import sys
 

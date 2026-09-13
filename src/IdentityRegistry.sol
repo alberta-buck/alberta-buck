@@ -981,6 +981,11 @@ contract IdentityRegistry {
         pts[6] = proof.T_C;
         pts[7] = proof.T_R;
         pts[8] = proof.T_key;
+        // Encoding decision (same class as approve): bind chainid + domain,
+        // not address(this).  Fixture proofs are generated once and replayed
+        // onto many IdentityRegistry deployments with different CREATE
+        // addresses.  Cross-chain replay is fixed; cross-registry replay on
+        // the same chain is not.
         uint256[] memory scl = new uint256[](3);
         scl[0] = uint256(uint160(registrant));
         scl[1] = chainid;
