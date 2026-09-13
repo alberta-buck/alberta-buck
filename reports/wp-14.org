@@ -40,8 +40,9 @@ over 30 days) with K inside G7 (max |dK| 0.011, RMS 0.005); the brief's
 kappa* = 0.1 (one eps of skew at a 5% fill) is INERT on the bookload arm
 -- the loader holds bvib 5-7% cheap, far beyond both the unskewed edge
 (1.005) and the skewed one (1.010), so the ladder trades at its leg cap
-whatever its bid and the two cells are identical to the wei; at kappa 0.6 -- the skew at the load's 5.4% fill equals the loader's
-3% target -- the lever bites: the loaded book's BUCK-days fall 21%
+whatever its bid and the two cells are identical to the wei; at kappa
+0.6 -- the skew at the load's 5.4% fill equals the loader's 3% target
+-- the lever bites: the loaded book's BUCK-days fall 21%
 (its peak 10% lower, back under 10% of the peak three days sooner,
 fully unwound with rho 1.0 from day 45 where kappa 0 never gets back)
 and the strong side disposes of the inventory at a smaller premium,
@@ -138,10 +139,12 @@ Appended (=# WP-14= blocks; merge by keeping both sides):
   contracts are absent (frame shape preserved).
 - =alberta_buck/sim/experiments/stars/d7-c1.toml= -- the ONE marked
   place-holder line: the =Vk= preset (V's assignments plus
-  =agents.UndertakingAgent.kappa= / =FacilityAgent.kappa= /
-  =SeederAgent.kappa= = 0.1).  =values= of the design axis NOT edited
-  (the brief allowed one line; add ="Vk"= to it when the cycle runs the
-  skews: 54 -> 60 cells).
+  =agents.UndertakingAgent.kappa= 0.6, =FacilityAgent.kappa= 0.1,
+  =SeederAgent.kappa= 0.1 -- the measured values of finding 3 / 4;
+  first written at 0.1 for all three in d796bad, the one-eps rule, then
+  set to the measured ones in 1de4104).  =values= of the design axis NOT
+  edited (the brief allowed one line; add ="Vk"= to it when the cycle
+  runs the skews: 54 -> 60 cells; the dry run still lists 54).
 
 Not touched: =loop.py= (its two WP-13 =shadow_book.book= calls dispatch
 per class through =book=), =__main__.py= (the env form), =ShadowObserver.sol=
@@ -403,7 +406,7 @@ lines (=build/sim/wp14/base/= vs =smoke1/=):
 | 2 L3: kappa 0 and the per-class default leave the base cells byte-identical; where booking changes what the observer aggregates, vecdiff + explanation | none30 / dump30 =cmp= exit 0; ops30 at =SIM_SHADOW_PERCLASS=0= =cmp= exit 0 (byte-identical, same sha256); the per-class ops30 and bl60-k0: K and bvib identical on every frame (max 0), the differing fields exactly the booking counters and the new per-class fields (L3); the S sum is the same integer (forge =test_modeS_perClassEqualsLumpedOffset=) |
 | 3 the per-class view: an ops30-style cell with the undertakings issuing AND the facility drawing; s_V by hand | facv30e day 12 (L2 5): uts -17,520 / 5,439,665, fac -423,280 / 8,649,349, desk 0 / 1,329,281, utw 0 / 5,439,665: s_V = -0.027690 / 3.50 = -0.007911 = =sh_s= exactly; also days 5 / 20 / 29 and smoke2 day 1.  At the brief's default x / y the facility never draws in 30 days (facv30), so the view is on the engaged band (x = y = 0.005)   |
 | 4 the differential test (R16): bookload at kappa 0 vs kappa*; the loaded book unwinds faster under kappa* while K stays within G7 | kappa* = 0.1 (one eps at a 5% fill): the skew fires (48 skewed trades, 55 notes) but the cells are IDENTICAL -- the disturbance sits far beyond both edges and the unwind is leg-capped, so the lever has nothing to move (finding 3).  At kappa 0.6 (the skew at the load's fill = the loader's 3% target) it passes AS STATED: BUCK-days 7.96M -> 6.29M, peak 322,817 -> 291,074, below 10% of peak day 44 vs 47, rho back to 1.0 from day 45 (kappa 0: 0.928 at day 59), K max abs dK 0.0116 / RMS 0.0054 (G7's 0.02 / 0.01); at kappa 1.0 the book moves more (4.98M BUCK-days) and K leaves G7 (0.0293 / 0.0141) -- L2 9, finding 3.  The facility's own version of the test passes as stated: facv30e vs facv30ek, its drawn BUCK-days 11.0M -> 4.0M, K max abs dK 0.011 / RMS 0.005 (L2 6) |
-| 5 the Vk preset gets its kappa* value                                       | =d7-c1.toml= line 77: =Vk = { ...V's assignments..., "agents.UndertakingAgent.kappa" = 0.1, "agents.FacilityAgent.kappa" = 0.1, "agents.SeederAgent.kappa" = 0.1 }= (the one marked place-holder line; ="Vk"= not added to =values=, open issue 2 / Files)                                                                                                  |
+| 5 the Vk preset gets its kappa* value                                       | =d7-c1.toml= line 77: =Vk = { ...V's assignments..., "agents.UndertakingAgent.kappa" = 0.6, "agents.FacilityAgent.kappa" = 0.1, "agents.SeederAgent.kappa" = 0.1 }= -- the measured kappa* (the brief's one-eps rule gives 0.1, inert on the bookload arm; 0.6 is the value at which the lever moves the book inside G7; finding 3); the one marked place-holder line; ="Vk"= not added to =values= (open issue 2 / Files) |
 | 6 pytest: the nine sim test files (183) plus the new tests                  | 199 passed (183 + 16 =test_skews.py=); the 4 WP-13 =test_shadow_book= tests untouched and green                                                                                                                                                                                                                                                       |
 | counters in the same commit as the agent (house rule 6)                     | d796bad: =sk_ut= / =sk_ut_f= / =sk_ut_n=, =sk_fac= / =sk_fac_n=, =sk_sd= / =sk_sd_n=, =sh_perclass= / =sh_class_txs= / =sh_class_err= / =sh_<cls>_{q,cap,stale,excluded,w,lambda}=; the notes in every kappa cell's =acts=                                                                                                                         |
 | new knobs draw AFTER the existing ones; a new class at count 0 is inert     | =kappa= is the last =_draw= of each class (scalar default: no variate); none30 / dump30 byte-identical                                                                                                                                                                                                                                                 |
@@ -554,14 +557,21 @@ lines (=build/sim/wp14/base/= vs =smoke1/=):
    daily and moves the desk's policy off-chain, the thing the ops basket
    exists to avoid.  Proposed: the contract-side reference shift when
    WP-11 (or a small branch before it) touches the director; the desk
-   runs at kappa_d = 0 in cycle 1's Vk cells (the Vk preset says so).
-2. kappa* per class.  Vk sets 0.1 on all three classes: for the
-   undertakings that is one eps (0.005, the grid's engaged band) of
-   skew at a 5% fill, the brief's rule; a kappa scaled to each class's
-   own band by the same rule would be x / 0.05 = 0.6 for the facility
-   (x = y = 0.03) and min_gap_bp / 0.05 = 0.05 for the seeder.
-   Proposed: one kappa* in cycle 1 (the structural check), a per-class
-   sweep in cycle 2 if Vk earns it.
+   runs unskewed in cycle 1's Vk cells (the preset carries no desk kappa).
+2. kappa* per class.  The brief's rule (one eps of skew at a 5% fill)
+   gives 0.1 for the undertakings at the grid's engaged eps 0.005, and
+   that value is inert on the only arm that loads their book (finding
+   3): the skew must reach the DISTURBANCE, not the band, so Vk carries
+   the measured 0.6 (one loader target, 3%, at the load's 5.4% fill;
+   1.0 leaves G7).  The facility's 0.1 is measured inside G7 at its
+   0.005 band (finding 4) but its fill under the default x = y = 0.03
+   is unmeasured; the seeder's 0.1 is unmeasured and its fill is O(1)
+   by design (finding 5), so 0.1 moves its centre by up to 10% of the
+   ideal -- 0.01-0.05 is the likelier range.  Proposed: cycle 1 runs Vk
+   as set (the structural check; the seeder is not in its cast); cycle
+   2 sweeps kappa per class {0.1, 0.6, 1.0} on the bookload arm and
+   {0.03, 0.1, 0.3} on the facility, judged by G7 and the book's
+   BUCK-days, before Vk is judged against V.
 3. =SIM_SHADOW_OFFSET_CAP_USD= is inert under the per-class default
    (the pseudo-stabilizer's V cap is cleared; each class carries its
    REAL cap, which already scales with =reserve_frac= / =max_frac= /
@@ -596,7 +606,13 @@ lines (=build/sim/wp14/base/= vs =smoke1/=):
    published =sd_cap= the seeder's stabilizer sat excluded until its
    =start_day=, one flagged frame in every seeder cell.  The cells
    =smoke2= / =sdv30k= of this report ran before that commit (the
-   =sh_sd_excluded= 1 on their day-0 frame is that); =sdv30k2= after it.
+   =sh_sd_excluded= 1 on their day-0 frame is that); after it, sd2 (V0,
+   NONE OPS UT + SeederAgent=1, =--days 2=, exit 0) has the seeder
+   REGISTERED AND INCLUDED on its day-0 frame -- =sh_sd_cap=
+   10,216,800,101,566 (the budget), =sh_sd_q= 0, =sh_sd_excluded= 0,
+   =sh_excluded= 0, three booking txs (uts, utw, sd) -- before any range
+   exists (=sd_positions= 0; the first usdc range comes on day 1 with
+   s_V +0.00086).  Closed.
 9. The lumped =shadowOffset= path stays in the observer and in
    =shadow_book.book= for comparisons (=SIM_SHADOW_PERCLASS=0=).
    Proposed: remove it with WP-11, when the books are contract-level.
@@ -607,7 +623,7 @@ lines (=build/sim/wp14/base/= vs =smoke1/=):
   four 75d9e34 cells none30 / dump30 / ops30 / bookload60 with logs and
   =.done=), =smoke1/= (13 cells: the L3 re-runs none30 / dump30 / ops30
   / ops30-lumped, the per-class and skew cells smoke2 / facv30 / facv30e
-  / facv30ek / sdv30k, the four bookload cells bl60-k0 / k1 / k6 / k10;
+  / facv30ek / sdv30k / sd2, the four bookload cells bl60-k0 / k1 / k6 / k10;
   =misordered/= holds the first ops30 pair with the keeper's set first,
   finding 7; logs, =.done=), =run_cell.sh=, =launch_smoke1.sh=, the
   build / test logs.  Delete freely after the ledger entry; keep =base/=
