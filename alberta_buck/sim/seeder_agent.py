@@ -98,6 +98,32 @@ reserves.  It is a depth gauge, not a reserve count.
 Telemetry (ctr -> frame, snapshot.py WP-8 block): sdPositions /
 sdRepositions / sdConverted / sdWithdrawn / sdSide / sdIdeal / sdCurrent /
 sdGapBp / sdLiq / sdDepth / sdLast / sd_err.
+
+THE RANGE AS A POSITION (WP-14; WAVE3.org decision 17).  What the range
+has CONVERTED is a level-1 inventory in the seam's sense: a BUCK-funded
+range that the corrective arb has lifted has SOLD BUCK into the market
+(issued, negative), a USDC-funded range that has been hit has BOUGHT BUCK
+(absorbed, positive).  `position_amounts` (Uniswap V3 LiquidityAmounts)
+reads the range's current BUCK side off its liquidity, ticks and the
+pool's sqrtPrice; `range_position` signs it: -(funded - buck_in_range) on
+the buck side, +buck_in_range on the usdc side.  When a range is exited
+its converted amount is FROZEN into the position (the sold BUCK stays in
+circulation; the treasury program's unwind is out of scope), and a fresh
+range adds its own.  Published as sd_q with cap sd_cap = the budget (the
+treasury's funded amount, decision 11) for the per-class stabilizer
+(shadow_book.py).
+
+LOCAL SKEW (WP-14; CARRY-CONVEXITY.org D7 "The lever count"; R16).  The
+range's centre -- the ideal it is struck toward -- is skewed by the
+seeder's own position, ideal_eff = ideal x (1 + kappa * q / cap)
+(`skew_ideal`): a seeder that has sold BUCK (q < 0) lowers its target
+toward the current price and stops offering sooner; one that has bought
+BUCK raises it, absorbing less.  kappa 0 (the default) uses the raw
+ideal itself, so every banked cell is byte-identical.  Knob kappa (drawn
+AFTER budget_m, the class's only other draw); counters sk_sd (the applied
+skew, a fraction of the ideal) and sk_sd_n (placements and exits decided
+under a non-zero skew), written only when a skew is applied;
+note(kind="skew") carries the why before the sends.
 """
 
 from __future__ import annotations
@@ -252,6 +278,49 @@ def depth_usd6(liquidity: int, sqrt_price_x96: int, usdc_is_token0: bool) -> int
     return liquidity * sqrt_price_x96 // Q96
 
 
+def position_amounts(liquidity: int, sqrt_price_x96: int, lo: int, hi: int
+                     ) -> tuple[int, int]:
+    """(amount0, amount1) a V3 position of `liquidity` on [lo, hi) holds
+    at `sqrt_price_x96` (LiquidityAmounts.getAmountsForLiquidity): token0
+    only below the range, token1 only above it, both inside."""
+    if liquidity <= 0 or hi <= lo or sqrt_price_x96 <= 0:
+        return 0, 0
+    sa, sb = sqrt_at_tick(lo), sqrt_at_tick(hi)
+    if sb <= sa:
+        return 0, 0
+    if sqrt_price_x96 <= sa:
+        return liquidity * (sb - sa) * Q96 // (sa * sb), 0
+    if sqrt_price_x96 >= sb:
+        return 0, liquidity * (sb - sa) // Q96
+    return (liquidity * (sb - sqrt_price_x96) * Q96 // (sqrt_price_x96 * sb),
+            liquidity * (sqrt_price_x96 - sa) // Q96)
+
+
+def range_position(side: str, funded: int, buck_in_range: int) -> int:
+    """The range's converted amount as a stabilizer position (module doc):
+    a BUCK-funded range has SOLD funded - buck_in_range (negative); a
+    USDC-funded range has BOUGHT buck_in_range (positive); 0 otherwise."""
+    if side == "buck":
+        return -max(0, int(funded) - int(buck_in_range))
+    if side == "usdc":
+        return max(0, int(buck_in_range))
+    return 0
+
+
+def skew_ideal(ideal: int, kappa: float, q: int, cap: int
+               ) -> tuple[int, float, float]:
+    """(ideal_eff, skew, fill): the range centre skewed by the seeder's own
+    position, ideal x (1 + kappa * fill), fill = q / cap in [-1, 1].  With
+    kappa 0, cap 0 or an empty position the ideal itself comes back."""
+    fill = 0.0
+    if cap > 0 and q:
+        fill = max(-1.0, min(1.0, q / cap))
+    if not kappa or fill == 0.0:
+        return ideal, 0.0, fill
+    skew = kappa * fill
+    return max(1, int(round(ideal * (1.0 + skew)))), skew, fill
+
+
 # -- the agent ------------------------------------------------------------ #
 
 @_register
@@ -286,6 +355,7 @@ class SeederAgent(_ProxyAgent):
         r = self._rng
         self.budget = int(_draw(scenario, cls, "budget_m", r, (10.0, 20.0))
                           * 1_000_000 * E6)
+        self.kappa = float(_draw(scenario, cls, "kappa", r, 0.0))   # WP-14
         self.restrike_bp = int(_spec(scenario, cls, "restrike_bp", 100))
         self.withdraw_depth_m = float(_spec(scenario, cls, "withdraw_depth_m",
                                             50.0))
@@ -309,6 +379,9 @@ class SeederAgent(_ProxyAgent):
         self._minted = 0
         self._simlp_key = None
         self._last = {}
+        self._q_frozen = 0          # WP-14: exited ranges' converted BUCK
+        self._q_live = 0            # WP-14: the open range's converted BUCK
+        self._skew = 0.0
 
         self._bind_proxy(d)
         # The USDC side: the treasury's cash.
@@ -341,6 +414,13 @@ class SeederAgent(_ProxyAgent):
                 self._b0 = d.buck.address.lower() == t0.lower()
             except Exception:
                 self._b0 = None
+
+    def bootstrap(self, d, scenario, ctr) -> None:
+        """WP-14: publish the position's cap (the budget) before the first
+        act, so the seeder's stabilizer is registered and INCLUDED from day
+        0 with an empty position rather than excluded until start_day."""
+        ctr["sd_q"] = int(self._q_frozen + self._q_live)
+        ctr["sd_cap"] = int(self.budget)
 
     # -- chain reads -------------------------------------------------------- #
 
@@ -391,6 +471,16 @@ class SeederAgent(_ProxyAgent):
 
     # -- position primitives ------------------------------------------------ #
 
+    def _live_position(self, d, sp: int | None = None) -> int:
+        """WP-14: the open range's converted BUCK, signed (module doc)."""
+        if self._pos is None or self._liq <= 0:
+            return 0
+        if sp is None:
+            sp = self._pool_state(d)[0]
+        a0, a1 = position_amounts(self._liq, sp, self._pos[0], self._pos[1])
+        buck_in_range = a0 if self._b0 else a1
+        return range_position(self._side, self._funded, buck_in_range)
+
     def _exit_position(self, d, ctr) -> bool:
         """Burn the range and collect everything owed -- BOTH calls; a burn
         alone only credits the owed amounts and strands the capital."""
@@ -398,6 +488,10 @@ class SeederAgent(_ProxyAgent):
             return True
         lo, hi = self._pos
         pool = self._pool(d)
+        try:
+            frozen = self._live_position(d)         # WP-14: before the burn
+        except Exception:
+            frozen = self._q_live
         try:
             self._proxy_exec(d, d.pool_ub, pool.encode_abi(
                 "burn(int24,int24,uint128)", args=[lo, hi, int(self._liq)]))
@@ -411,6 +505,8 @@ class SeederAgent(_ProxyAgent):
         self._liq = 0
         self._side = ""
         self._funded = 0
+        self._q_frozen += frozen                    # WP-14
+        self._q_live = 0
         return True
 
     def _funding_available(self, d, side: str) -> int:
@@ -468,6 +564,22 @@ class SeederAgent(_ProxyAgent):
         if ideal <= 0 or current <= 0:
             ctr["sd_err"] = f"bad prices ideal={ideal} current={current}"
             return
+        # WP-14: the range as a position, and the local skew on its centre
+        # (module doc); kappa 0 uses the raw ideal itself.
+        try:
+            self._q_live = self._live_position(d, sp)
+        except Exception as e:
+            ctr["sd_err"] = repr(e)[:160]
+        ideal_raw = ideal
+        ideal, skew, fill = skew_ideal(ideal_raw, self.kappa,
+                                       self._q_frozen + self._q_live,
+                                       self.budget)
+        self._skew = skew
+        if skew:
+            ctr["sk_sd"] = round(skew, 8)
+            self.note(d, "skew", fill=fill, skew=skew, ideal=ideal_raw,
+                      ideal_eff=ideal, current=current,
+                      q=self._q_frozen + self._q_live, cap=self.budget)
         gap_bp = (ideal - current) * 10_000 / current
         ideal_t = usd6_to_tick(ideal, self._b0)
         pool = self._pool(d)
@@ -476,7 +588,7 @@ class SeederAgent(_ProxyAgent):
         except Exception as e:
             ctr["sd_err"] = repr(e)[:160]
             depth = 0
-        ctr["sdIdeal"] = ideal
+        ctr["sdIdeal"] = ideal_raw
         ctr["sdCurrent"] = current
         ctr["sdGapBp"] = int(round(gap_bp))
         ctr["sdDepth"] = depth
@@ -517,6 +629,8 @@ class SeederAgent(_ProxyAgent):
                 return
             if converted:
                 self._converted += 1
+            if self._skew:
+                ctr["sk_sd_n"] = ctr.get("sk_sd_n", 0) + 1
             replacing = True
 
         # A fresh range from current toward ideal, when the gap is real.
@@ -529,6 +643,8 @@ class SeederAgent(_ProxyAgent):
                                current, int(round(gap_bp)), t0, t1):
                     if replacing:
                         self._repositions += 1
+                    if self._skew:
+                        ctr["sk_sd_n"] = ctr.get("sk_sd_n", 0) + 1
         self._book(ctr)
 
     def _book(self, ctr) -> None:
@@ -539,6 +655,8 @@ class SeederAgent(_ProxyAgent):
         ctr["sdSide"] = self._side
         ctr["sdLiq"] = int(self._liq)
         ctr["sdLast"] = dict(self._last)
+        ctr["sd_q"] = int(self._q_frozen + self._q_live)     # WP-14
+        ctr["sd_cap"] = int(self.budget)
 
     # -- telemetry ---------------------------------------------------------- #
 
@@ -548,7 +666,9 @@ class SeederAgent(_ProxyAgent):
                 "max_days": self.max_days, "min_gap_bp": self.min_gap_bp,
                 "count_simlp": self.count_simlp, "start_day": self.start_day,
                 "face": self._face,
-                "minted": self._minted, "buck_is_token0": self._b0}
+                "minted": self._minted, "buck_is_token0": self._b0,
+                # WP-14: only when set (a kappa-0 cell's meta is unchanged).
+                **({"kappa": self.kappa} if self.kappa else {})}
 
     def telemetry(self, d) -> dict | None:
         if self.proxy is None:

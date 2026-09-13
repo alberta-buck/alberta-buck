@@ -51,6 +51,23 @@ draw order below is pinned (x, y, max_frac, face_m, sig_halflife,
 max_impact_bp) -- add new draws AFTER these.  Scalar specs consume no
 variate.  DirectMint's dm* counters are NOT touched: the facility keeps
 its own books.
+
+LOCAL SKEW (WP-14; CARRY-CONVEXITY.org D7 "The lever count"; R16).  Each
+facility skews its own thresholds by its own inventory, band = band0 +
+kappa * q / cap, with q = -drawn (issued BUCK is negative), cap = max_frac
+x limit (its own deployment cap), fill f = q / cap in [-1, 0] and skew =
+kappa * f <= 0 (`skew_thresholds`).  A drawn line needs the DEEPER premium
+x_eff = x - skew = x + kappa |f| before it issues more, and retires SOONER
+at the smaller discount y_eff = y + skew = y - kappa |f| (floored at 0: it
+never retires into a premium, where the redeem-and-sell leg would lose
+against par).  kappa 0 (the default) hands `facility_decision` the very
+same floats, so every banked cell is byte-identical.  Knob kappa (drawn
+AFTER max_impact_bp, the last of the pinned order); counters sk_fac (the
+deepest applied skew over the population, threshold units) and sk_fac_n
+(issue / retire decisions taken under a non-zero skew), written only when
+a skew is applied; note(kind="skew") carries the why before the legs.
+The population's cap sum_i max_frac_i x limit_i is published as fac_cap
+beside fac_drawn / fac_limit for the per-class stabilizer (shadow_book.py).
 """
 
 from __future__ import annotations
@@ -108,6 +125,21 @@ def facility_decision(signal, x, y, drawn, limit, max_frac, open_position,
     return HOLD, 0
 
 
+def skew_thresholds(x, y, kappa, drawn, cap):
+    """(x_eff, y_eff, skew, fill): the facility's local skew (module doc).
+    fill = -min(1, drawn / cap) (issued negative), skew = kappa * fill;
+    x_eff = x - skew (deeper premium to issue), y_eff = max(0, y + skew)
+    (retires at a smaller discount).  kappa 0, cap 0 or nothing drawn
+    returns (x, y, 0.0, fill) with x and y the very same floats."""
+    fill = 0.0
+    if cap > 0 and drawn > 0:
+        fill = -min(1.0, drawn / cap)
+    if not kappa or fill == 0.0:
+        return x, y, 0.0, fill
+    skew = kappa * fill
+    return x - skew, max(0.0, y + skew), skew, fill
+
+
 @_register
 class FacilityAgent(_ProxyAgent):
     """The auto-pay-down facility as a sim agent (the executable requirement
@@ -130,6 +162,8 @@ class FacilityAgent(_ProxyAgent):
         self.sig_halflife = 1.0
         self.max_impact_bp = 100
         self.min_edge = 0.0
+        self.kappa = 0.0
+        self._skew = 0.0
         self.target = "basket"
         self._face = 0
         self._tid = None
@@ -152,7 +186,8 @@ class FacilityAgent(_ProxyAgent):
         r = self._rng
         cls = type(self).__name__
         # Draw order is PINNED (keyed-rng vectors); new draws go after
-        # max_impact_bp.  Scalar specs consume no stream variate.
+        # kappa (WP-14, after max_impact_bp).  Scalar specs consume no
+        # stream variate.
         self.x = float(_draw(scenario, cls, "x", r, 0.03))
         self.y = float(_draw(scenario, cls, "y", r, 0.03))
         self.max_frac = min(1.0, max(0.0, float(
@@ -161,6 +196,7 @@ class FacilityAgent(_ProxyAgent):
         self.sig_halflife = float(_draw(scenario, cls, "sig_halflife", r, 1.0))
         self.max_impact_bp = int(_draw(scenario, cls, "max_impact_bp", r,
                                        (50, 150)))
+        self.kappa = float(_draw(scenario, cls, "kappa", r, 0.0))   # WP-14
         self.target = str(_spec(scenario, cls, "target", "basket"))
         if self.target not in ("basket", "usdc"):
             raise ValueError(f"FacilityAgent target {self.target!r}: "
@@ -266,7 +302,9 @@ class FacilityAgent(_ProxyAgent):
         return {"x": self.x, "y": self.y, "max_frac": self.max_frac,
                 "face": self._face, "sig_halflife": self.sig_halflife,
                 "max_impact_bp": self.max_impact_bp, "target": self.target,
-                "min_edge": self.min_edge, "nw0": self._nw0}
+                "min_edge": self.min_edge, "nw0": self._nw0,
+                # WP-14: only when set (a kappa-0 cell's meta is unchanged).
+                **({"kappa": self.kappa} if self.kappa else {})}
 
     def telemetry(self, d) -> dict | None:
         if self.proxy is None:
@@ -321,9 +359,23 @@ class FacilityAgent(_ProxyAgent):
             drawn = self._drawn(d)
             limit = self._limit(d, k)
             headroom = self._headroom(d)
+            # WP-14: the local skew on this line's own thresholds (module
+            # doc); kappa 0 passes x and y themselves.
+            x_eff, y_eff, skew, fill = skew_thresholds(
+                self.x, self.y, self.kappa, drawn, self.max_frac * limit)
+            self._skew = skew
             action, size = facility_decision(
-                self._sig, self.x, self.y, drawn, limit, self.max_frac,
+                self._sig, x_eff, y_eff, drawn, limit, self.max_frac,
                 bool(self._receipts), headroom)
+            if skew:
+                sk = ctr.setdefault("skFacBook", {})
+                sk[self.idx] = skew
+                ctr["sk_fac"] = round(min(sk.values()), 8)
+                if action != HOLD:
+                    ctr["sk_fac_n"] = ctr.get("sk_fac_n", 0) + 1
+                    self.note(d, "skew", fill=fill, skew=skew, x=x_eff,
+                              y=y_eff, sig=self._sig, drawn=drawn,
+                              cap=int(self.max_frac * limit), act=action)
             if action == ISSUE:
                 self._issue(d, size, k, bvib, ctr)
             elif action == RETIRE:
@@ -338,7 +390,8 @@ class FacilityAgent(_ProxyAgent):
         """The population's live book: each agent writes its own (drawn,
         limit) read from chain; the sums are what the frame carries."""
         try:
-            entry = (self._drawn(d), self._limit(d))
+            limit = self._limit(d)
+            entry = (self._drawn(d), limit, int(self.max_frac * limit))
         except Exception:
             return
         book = ctr.setdefault("facBook", {})
@@ -348,6 +401,8 @@ class FacilityAgent(_ProxyAgent):
         ctr["fac_drawn"] = dr
         ctr["fac_limit"] = li
         ctr["fac_u"] = (dr / li) if li else 0.0
+        # WP-14: sum_i max_frac_i x limit_i, the facility class's cap.
+        ctr["fac_cap"] = sum(v[2] for v in book.values() if len(v) > 2)
 
     def _headroom(self, d) -> int:
         """Market cap on one issue: the basket target swaps ~half the deposit

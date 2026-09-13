@@ -30,7 +30,7 @@
 #   depth     deploy.target_buck_m x4 (the deep variant; the pseudo-
 #             stabilizer's default cap follows target_buck_m).
 #
-# 6 arms x (1 + 2 + 2 + 4 + 1) = 60 cells (S0k added with WP-16's table).
+# 6 arms x (1 + 2 + 2 + 5 + 1) = 66 cells (S0k with WP-16's table; Vk with WP-14's kappa).
 #
 # GAINS -- THE WP-16 PLACE-HOLDER.  Until WP-16's table (kdesign.py: the
 # LQR / SIMC gains for S and V at both depths) lands, S and V run at the S0
@@ -76,7 +76,8 @@ S = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 1, S
 S0k = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "s", SIM_SHADOW_LAMBDA = 24, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 0.1, SIM_SHADOW_KQI = 6.43004e-7, SIM_SHADOW_KQD = 0 }
 # WP-16 (depth 10): V's gains in FILL units; the depth-40 row is a units artefact until WP-14 books the real caps (WP-16 finding 6)
 V = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "v", SIM_SHADOW_W_DESK = 1, SIM_SHADOW_W_OFFSET = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 3.168, SIM_SHADOW_KQI = 1.055e-7, SIM_SHADOW_KQD = 0 }
-# Vk = V + the local skews (WP-14's kappa*): not yet defined.
+# Vk = V (the derived fill-unit gains) + WP-14's measured local skews (undertakings 0.6, facility 0.1, seeder 0.1)
+Vk = { SIM_CONTROLLER = "shadow", SIM_SHADOW_MODE = "v", SIM_SHADOW_W_DESK = 1, SIM_SHADOW_W_OFFSET = 1, SIM_SHADOW_GAMMA = 0, SIM_SHADOW_KQ = 3.168, SIM_SHADOW_KQI = 1.055e-7, SIM_SHADOW_KQD = 0, "agents.UndertakingAgent.kappa" = 0.6, "agents.FacilityAgent.kappa" = 0.1, "agents.SeederAgent.kappa" = 0.1 }  # WP-14: Vk = V + the local skews; kappa* measured on the bookload arm (0.1 = one eps per 5% fill is inert there; 0.6 unwinds the book inside G7; 1.0 leaves G7) -- reports/wp-14.org }
 
 [[arm]]
 name = "none"
@@ -125,7 +126,7 @@ hi = { SIM_SHADOW_KQ = 1.209, SIM_SHADOW_KQI = 2.013e-8, SIM_SHADOW_KQD = 0 }
 name = "design"
 preset = "design"
 base = "S"
-values = ["A", "S0", "S0k", "S", "V"]
+values = ["A", "S0", "S0k", "S", "V", "Vk"]
 
 # -- depth: the deep variant ------------------------------------------------ #
 [[axis]]

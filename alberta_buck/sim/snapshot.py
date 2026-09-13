@@ -125,6 +125,49 @@ def _wp15_frame(d, ctr, agents) -> dict:
     return f
 
 
+# WP-14: the per-class sim-only stabilizers (deploy.py SIM_SHADOW_PERCLASS;
+# shadow_book.py) and the local skews' counters (undertaking_agents.py /
+# facility_agent.py / seeder_agent.py: sk_*).  Keys appear ONLY when their
+# source exists -- the stabilizers deployed and the class registered; a
+# class acting under a non-zero kappa -- so every existing cell keeps its
+# frame shape and stays byte-identical (house rule 5).  Per registered
+# class: sh_<cls>_q (the booked net inventory, BUCK 6-dec, absorbed
+# positive), sh_<cls>_cap (the observer's HELD cap), sh_<cls>_stale /
+# _excluded (its flags) and sh_<cls>_w / _lambda (its V weight / S lambda,
+# 1e18) -- enough to recompute s_V = sum w_i q_i / cap_i / sum w_i over the
+# included classes (the desk's row is sh_net / sh_desk_cap / SIM_SHADOW_W_DESK)
+# and s_S = sum lambda_i q_i / D by hand from one frame.
+WP14_SK_KEYS = ("sk_ut", "sk_ut_f", "sk_ut_n", "sk_fac", "sk_fac_n",
+                "sk_sd", "sk_sd_n")
+
+
+def _wp14_frame(d, ctr) -> dict:
+    f = {k: ctr[k] for k in WP14_SK_KEYS if k in ctr}
+    stabs = getattr(d, "sim_stabs", None)
+    obs = getattr(d, "observer", None)
+    if not stabs or obs is None:
+        return f
+    f["sh_perclass"] = 1
+    f["sh_class_txs"] = ctr.get("sh_class_txs", 0)
+    f["sh_class_err"] = ctr.get("sh_class_err", "")
+    gains = getattr(d, "sim_stab_gains", {}) or {}
+    for cls in getattr(d, "sim_stab_reg", ()):
+        st = stabs.get(cls)
+        if st is None:
+            continue
+        try:
+            f[f"sh_{cls}_q"] = int(st.functions.netInventory().call())
+            f[f"sh_{cls}_cap"] = int(obs.functions.heldCap(st.address).call())
+            f[f"sh_{cls}_stale"] = int(bool(obs.functions.stale(st.address).call()))
+            f[f"sh_{cls}_excluded"] = int(bool(obs.functions.excluded(st.address).call()))
+            lam, w = gains.get(cls, (None, None))
+            f[f"sh_{cls}_lambda"] = lam
+            f[f"sh_{cls}_w"] = w
+        except Exception:
+            pass
+    return f
+
+
 def _pool_value_weights(d) -> list[list[float]]:
     """Per-token [actual_weight, target_weight] from TOKEN/BUCK pools.
 
@@ -776,6 +819,9 @@ class Snapshotter:
             "sh_offset_err": ctr.get("sh_offset_err", ""),
             # WP-15: the grid's injectors (only when present; see above).
             **_wp15_frame(d, ctr, agents),
+            # WP-14: the per-class stabilizers and the skews (only when
+            # present; see _wp14_frame above).
+            **_wp14_frame(d, ctr),
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

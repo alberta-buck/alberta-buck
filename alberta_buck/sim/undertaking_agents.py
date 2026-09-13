@@ -54,7 +54,36 @@ bvib); arb_state() carries the per-desk inventory into frame["arb2"].
 Knobs ([agents.UndertakingAgent], all drawable [lo, hi] or scalar, off
 the class's own keyed rng stream; draw order pinned): eps 0.03, p 2.0,
 delta 0.01, phi 0.25, reserve_frac 0.5, leg_bp 40, face_m 1000,
-sig_halflife 1.0.  Endows NOTHING in BUCK.
+sig_halflife 1.0, kappa 0.0.  Endows NOTHING in BUCK.
+
+LOCAL SKEW (WP-14; CARRY-CONVEXITY.org D7 "The lever count"; WAVE3.org
+R16).  Each side's edge is skewed by the desk's OWN inventory,
+
+    band = band0 + kappa * q / cap
+
+with q = absorbed_open - issued_open (BUCK; absorbed positive), cap the
+symmetric notional reserve_frac x NAV struck with the book (decision 11:
+the strong side's governance notional and the ladder's R0 are the same
+number), fill f = q / cap in [-1, 1] and skew = kappa * f in eps units
+(`skew_bands`).  Long ABSORBED inventory (f > 0): the weak side's eps
+becomes eps_w = eps + skew -- the ladder's bids deepen, the at-par unwind
+fires at sig <= 1 + eps_w / 2 (sooner) and accepts down to 1 - eps_w / 2
+-- and the strong side's eps becomes eps_s = eps - skew, so the absorbed
+inventory is offered at a smaller premium.  Long ISSUED inventory (f < 0):
+the mirror -- the strong side needs the deeper premium eps_s = eps +
+|skew|, the at-par retire fires at sig >= 1 - |skew| / 2 (sooner) and pays
+up to 1 + eps_s / 2, and the weak side's bid tightens to eps_w = eps -
+|skew|, retiring the issued book sooner.  A facility long inventory bids
+lower and offers sooner (Avellaneda-Stoikov), so its own flow reverts its
+own book while K mid-ranges only the common mode.  Both edges are floored
+at 0 (never through par, D1) and capped at EPS_MAX so the ladder's first
+bid stays positive.  kappa 0 (the default) hands every branch the very
+same floats as before the skew existed, so every banked cell is
+byte-identical.  Knob kappa (drawn AFTER sig_halflife, the last of the
+pinned order); counters sk_ut (the applied skew, eps units), sk_ut_f (the
+fill) and sk_ut_n (trades executed under a non-zero skew), written only
+when a skew is applied; note(kind="skew") carries the why before the sends
+(TELEMETRY.md v2).
 """
 
 from __future__ import annotations
@@ -68,6 +97,28 @@ from alberta_buck.sim.ladder import Ladder
 
 E6 = 10 ** 6
 E18 = 10 ** 18
+EPS_MAX = 0.45                  # a skewed edge never past this (bid > 0)
+
+
+def _clamp_eps(e: float) -> float:
+    return 0.0 if e < 0.0 else (EPS_MAX if e > EPS_MAX else e)
+
+
+def skew_bands(eps: float, kappa: float, q: int, cap: int
+               ) -> tuple[float, float, float, float]:
+    """(eps_w, eps_s, skew, fill): the local skew of D7 on the undertakings'
+    two edges (module doc).  fill = q / cap in [-1, 1] (absorbed positive);
+    skew = kappa * fill in eps units; the weak (absorbing) side's band is
+    eps + skew and the strong (issuing) side's eps - skew, each floored at
+    0 and capped at EPS_MAX.  With kappa 0, cap 0 or an empty book the
+    return is (eps, eps, 0.0, fill) with eps the very same float."""
+    fill = 0.0
+    if cap > 0 and q:
+        fill = max(-1.0, min(1.0, q / cap))
+    if not kappa or fill == 0.0:
+        return eps, eps, 0.0, fill
+    skew = kappa * fill
+    return _clamp_eps(eps + skew), _clamp_eps(eps - skew), skew, fill
 
 
 def _basket_nav(d) -> int:
@@ -114,8 +165,9 @@ class UndertakingAgent(_ProxyAgent):
         self._rng = _agent_rng(scenario.seed, cls, self.idx)
         r = self._rng
         # Draw order is pinned (keyed-rng vectors): eps, p, delta, phi,
-        # reserve_frac, leg_bp, face_m, sig_halflife.  Scalar specs consume
-        # no draws; a [lo, hi] spec draws from this class's own stream.
+        # reserve_frac, leg_bp, face_m, sig_halflife, kappa (WP-14).  Scalar
+        # specs consume no draws; a [lo, hi] spec draws from this class's own
+        # stream.
         self.eps = float(_draw(scenario, cls, "eps", r, 0.03))
         self.p = float(_draw(scenario, cls, "p", r, 2.0))
         self.delta = float(_draw(scenario, cls, "delta", r, 0.01))
@@ -124,6 +176,8 @@ class UndertakingAgent(_ProxyAgent):
         self.leg_bp = int(_draw(scenario, cls, "leg_bp", r, 40))
         self.face_m = float(_draw(scenario, cls, "face_m", r, 1000))
         self.sig_halflife = float(_draw(scenario, cls, "sig_halflife", r, 1.0))
+        self.kappa = float(_draw(scenario, cls, "kappa", r, 0.0))   # WP-14
+        self._skew = 0.0
         self._bind_proxy(d)
         # The "unlimited" zero-premium face, created the way the credit
         # base does (ExcursionCreditArbAgent): premiumRate 0 exempts the
@@ -153,6 +207,17 @@ class UndertakingAgent(_ProxyAgent):
         """Strike the book once the basket pools are live (the DM agents'
         bootstraps seed them); falls through to the first act otherwise."""
         self._maybe_build_book(d, scenario)
+        self._book_cap(ctr)
+
+    def _book_cap(self, ctr) -> None:
+        """WP-14: the desks' symmetric notional (reserve_frac x NAV at the
+        strike, = the ladder's R0) summed into ctr["ut_cap"] -- the cap of
+        both per-class stabilizers (shadow_book.py)."""
+        if self._book0 <= 0:
+            return
+        book = ctr.setdefault("utCapBook", {})
+        book[self.idx] = self._book0
+        ctr["ut_cap"] = sum(book.values())
 
     def _maybe_build_book(self, d, scenario) -> None:
         if self.ladder is not None:
@@ -204,7 +269,10 @@ class UndertakingAgent(_ProxyAgent):
                 "phi": self.phi, "reserve_frac": self.reserve_frac,
                 "leg_bp": self.leg_bp, "face": self._face,
                 "sig_halflife": self.sig_halflife,
-                "book0": self._book0, "nw0": self._nw0}
+                "book0": self._book0, "nw0": self._nw0,
+                # WP-14: reported only when set, so a kappa-0 cell's meta
+                # (the roster's knobs) stays byte-identical.
+                **({"kappa": self.kappa} if self.kappa else {})}
 
     def telemetry(self, d) -> dict | None:
         if self.proxy is None:
@@ -271,6 +339,7 @@ class UndertakingAgent(_ProxyAgent):
             self._sig += alpha * (bvib - self._sig)
         try:
             self._maybe_build_book(d, scenario)
+            self._book_cap(ctr)
             if self.ladder is not None:
                 self._act(d, self._sig, ctr)
         except Exception as e:
@@ -309,10 +378,23 @@ class UndertakingAgent(_ProxyAgent):
         self._reconcile(ctr, signed)
         drawn = max(0, -signed)
         held = max(0, signed)
+        # WP-14: the local skew on both edges (module doc).  kappa 0 hands
+        # back eps itself on both sides and a zero skew, so every band
+        # below is the same float it was before the skew existed.
+        q_open = self.absorbed_open - self.issued_open
+        eps_w, eps_s, skew, fill = skew_bands(self.eps, self.kappa, q_open,
+                                              self._book0)
+        L.eps = eps_w
+        self._skew = skew
+        if skew:
+            ctr["sk_ut"] = round(skew, 8)
+            ctr["sk_ut_f"] = round(fill, 6)
+            self.note(d, "skew", fill=fill, skew=skew, eps_w=eps_w,
+                      eps_s=eps_s, sig=sig, q=q_open, cap=self._book0)
         sold_today = bought_today = False
         # -- strong side: sell BUCK dear for the bundle; retire at par ---- #
-        if sig < 1.0 / (1.0 + self.p * self.eps):
-            sold, _bundles = self._sell_leg(d, None, 1.0 + self.p * self.eps,
+        if sig < 1.0 / (1.0 + self.p * eps_s):
+            sold, _bundles = self._sell_leg(d, None, 1.0 + self.p * eps_s,
                                             ctr)
             if sold > 0:
                 sold_today = True
@@ -326,10 +408,11 @@ class UndertakingAgent(_ProxyAgent):
                     self.issued_open += iss
                     _book(ctr, "ut_issued", iss)
                     _book(ctr, "ut_issued_open", iss)
-        elif sig >= 1.0 and self.issued_open > 0 and drawn > 0:
+        elif (sig >= 1.0 + skew / 2.0 and self.issued_open > 0
+              and drawn > 0):
             want = min(self.issued_open, drawn)
             if want >= E6:
-                got, _bundles = self._buy_leg(d, want, 1.0 + self.eps / 2.0,
+                got, _bundles = self._buy_leg(d, want, 1.0 + eps_s / 2.0,
                                               None)
                 if got > 0:
                     bought_today = True
@@ -354,10 +437,10 @@ class UndertakingAgent(_ProxyAgent):
                         _book(ctr, "ut_absorbed_open", a)
                         L.fill(bundles * a / got / E6)
         elif (not sold_today and self.absorbed_open > 0
-              and sig <= 1.0 + self.eps / 2.0):
+              and sig <= 1.0 + eps_w / 2.0):
             want = min(self.absorbed_open, held)
             if want >= E6:
-                sold, _bundles = self._sell_leg(d, want, 1.0 - self.eps / 2.0,
+                sold, _bundles = self._sell_leg(d, want, 1.0 - eps_w / 2.0,
                                                 ctr)
                 if sold > 0:
                     self._trade(ctr)
@@ -367,6 +450,8 @@ class UndertakingAgent(_ProxyAgent):
     def _trade(self, ctr) -> None:
         self.trades += 1
         _book(ctr, "ut_trades", 1)
+        if self._skew:
+            _book(ctr, "sk_ut_n", 1)          # WP-14: a skewed act
 
     def _retire(self, d, ctr, amt: int) -> None:
         """Book `amt` of issued BUCK retired (the buy already climbed the

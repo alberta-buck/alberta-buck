@@ -160,6 +160,12 @@ class Deployment:
     observer: Any = None          # ShadowObserver (shadow controller on ops only)
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
+    # WP-14: the per-class sim-only stabilizers (SimStabilizer per agent
+    # class, decision 17), the classes registered with the observer, and
+    # each class's (lambda, weight) 1e18 for lazy registration.
+    sim_stabs: dict = field(default_factory=dict)
+    sim_stab_reg: set = field(default_factory=set)
+    sim_stab_gains: dict = field(default_factory=dict)
 
 
 def _erc20_abi() -> list:
@@ -722,4 +728,78 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             print(f"[deploy] {director_impl} rebalance director "
                   f"{director.address[:10]}...  {desc}"
                   f" deadband={dir_deadband}bp cap=50bp/epoch")
+    # --- WP-14: one sim-only stabilizer per agent class (decision 17) --- #
+    # Replaces the ONE lumped pseudo-stabilizer of WP-3a / WP-13 (three
+    # books summed under one lambda, one weight and one cap that was
+    # target_buck_m rather than any class's real bound -- WP-16 read a full
+    # undertakings book as a fill of 0.76 at depth 10 and 0.20 at depth 40)
+    # with a SimStabilizer per class, registered at decision 11's lambdas
+    # and cost weights, each booked with its REAL cap by shadow_book.py:
+    #
+    #   uts  the undertakings' strong side (issued)   cap reserve_frac x NAV
+    #   utw  the undertakings' weak side (absorbed)   cap the ladder's R0
+    #   fac  the facility population (drawn lines)   cap sum max_frac_i x L_i
+    #   sd   the seeder's converted range            cap its funded amount
+    #
+    #   SIM_SHADOW_PERCLASS             1 (default) | 0 -- the lumped path
+    #   SIM_SHADOW_W_UTS / _UTW / _FAC / _SD        V weights: 1, 1, 0.5, 0.25
+    #   SIM_SHADOW_LAMBDA_UTS / _UTW / _FAC / _SD   S lambdas: default the
+    #                                   pseudo-stabilizer's (SIM_SHADOW_LAMBDA_
+    #                                   OFFSET, else SIM_SHADOW_LAMBDA)
+    #
+    # Only the classes PRESENT in the cell are registered (an absent class
+    # would sit excluded and set a flag bit); the contracts for the other
+    # classes are deployed anyway and registered by shadow_book.py on their
+    # first cap (a class added by an intervention).  The contracts are
+    # created from `gov` -- never from the deployer -- so the deployer's
+    # nonce and every later address (tokens, pools, the agents' proxies)
+    # stay exactly what they are on the lumped path: under S the per-class
+    # sum is the same integer as the lumped offset, and K is identical.
+    # The pseudo-stabilizer's V cap is cleared so an idle offset does not
+    # dilute V (its lambda times a zero offset is 0 under S).
+    # Default 1: decision 11's per-class caps and weights only mean what
+    # they say per class; cells without an observer are untouched either
+    # way, and the lumped path stays reachable for comparisons.
+    perclass = os.environ.get("SIM_SHADOW_PERCLASS", "1").strip() not in ("0", "", "false", "no")
+    if observer is not None and perclass:
+        from buck_core.session import DEPLOY_GAS
+        counts = getattr(scenario, "agents", {}) or {}
+        present = {"uts": counts.get("UndertakingAgent", 0) > 0,
+                   "utw": counts.get("UndertakingAgent", 0) > 0,
+                   "fac": counts.get("FacilityAgent", 0) > 0,
+                   "sd": counts.get("SeederAgent", 0) > 0}
+        w_default = {"uts": "1", "utw": "1", "fac": "0.5", "sd": "0.25"}
+        lam_default = os.environ.get("SIM_SHADOW_LAMBDA_OFFSET",
+                                     os.environ.get("SIM_SHADOW_LAMBDA", "0"))
+        sim_abi, sim_bc = load_artifact("SimStabilizer", "SimStabilizer")
+        for cls in ("uts", "utw", "fac", "sd"):
+            lam = int(float(os.environ.get(f"SIM_SHADOW_LAMBDA_{cls.upper()}",
+                                           lam_default)) * E18)
+            w = int(float(os.environ.get(f"SIM_SHADOW_W_{cls.upper()}",
+                                         w_default[cls])) * E18)
+            ctor = w3.eth.contract(abi=sim_abi, bytecode=sim_bc).constructor(
+                gov, cls.encode().ljust(32, b"\0"))
+            h = ctor.transact({"from": gov, "gas": DEPLOY_GAS, "gasPrice": 0})
+            rcpt = w3.eth.wait_for_transaction_receipt(h)
+            chain.clear_balance_cache()
+            if rcpt["status"] != 1:
+                raise RuntimeError(f"deploy SimStabilizer {cls} reverted")
+            st = w3.eth.contract(address=rcpt["contractAddress"], abi=sim_abi)
+            d.sim_stabs[cls] = st
+            d.sim_stab_gains[cls] = (lam, w)
+            if present[cls]:
+                chain.send(observer.functions.addStabilizer(st.address, lam),
+                           sender=gov)
+                if w != E18:
+                    chain.send(observer.functions.setStabilizerWeight(
+                        st.address, w), sender=gov)
+                d.sim_stab_reg.add(cls)
+        if int(observer.functions.shadowCap().call()):
+            chain.send(observer.functions.setShadowCap(0), sender=gov)
+        if verbose:
+            regs = " ".join(c for c in ("uts", "utw", "fac", "sd") if c in d.sim_stab_reg) or "none"
+            print("[deploy] WP-14 per-class stabilizers: registered " + regs + "  "
+                  + " ".join(f"{c}:lambda={d.sim_stab_gains[c][0] / E18:g}/w={d.sim_stab_gains[c][1] / E18:g}"
+                             for c in ("uts", "utw", "fac", "sd"))
+                  + "  (pseudo-stabilizer cap cleared)")
     return d
