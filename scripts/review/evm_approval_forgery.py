@@ -27,11 +27,13 @@ g2 = lambda P: ((int(P[0].coeffs[0]), int(P[0].coeffs[1])),
 def register(chain, reg, issuer_addr, acct, eoa, rng):
     sigma = ps_sign(ISS, acct.m, rng=rng)
     sig_p, _ = ps_rerandomize(sigma, rng=rng)
-    pf = registration_prove(sig_p, acct.m, acct.r, acct.pk, acct.E, int(eoa, 16), rng=rng)
+    pf = registration_prove(sig_p, acct.m, acct.r, acct.pk, acct.E, int(eoa, 16),
+                            acct.sk, rng=rng)
     fn = reg.functions.register(
         issuer_addr, g1(acct.pk), (g1(acct.E.R), g1(acct.E.C)),
         (g1(sig_p.sigma_1), g1(sig_p.sigma_2)),
-        (pf.e, pf.s_m, pf.s_r, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R)))
+        (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R),
+         g1(pf.T_key)))
     chain.send(fn, sender=eoa)
 
 
@@ -80,6 +82,6 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     print("HONEST   approval accepted                           :", honest_ok,
           "; decrypts to alice.M :", eq(elgamal_decrypt(honest_ct, bob.sk), alice.M))
 
-    assert accepted and honest_ok, "finding 3 not reproduced"
-    print("\nRESULT: the deployed verifier accepts a false-identity approval "
-          "(finding 3 reproduced on EVM).")
+    assert not accepted and honest_ok, "finding 3 not repaired"
+    print("\nRESULT: the deployed verifier rejects a false-identity approval "
+          "and accepts the honest control (finding 3 inverted).")

@@ -17,10 +17,11 @@ from alberta_buck.review.mitigations import (
     credential_leaf, prove_key_ownership, verify_key_ownership,
     membership_proof_required, APPROVE_DOMAIN,
 )
-from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, neg, eq
+from alberta_buck.wallet.bn254 import G1, ORDER, Z1, add, mul, neg, eq
 from alberta_buck.wallet.ps import ps_verify
-from alberta_buck.wallet.nizk import registration_verify
-from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_verify
+from alberta_buck.wallet.nizk import registration_prove, registration_verify
+from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove, chaum_pedersen_verify
+from alberta_buck.wallet.ps import ps_sign, ps_rerandomize
 from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
 from alberta_buck.wallet.issuer_reenc import H_POINT, H_SCALAR
 from alberta_buck.registry.tree import identity_leaf
@@ -48,12 +49,19 @@ def test_02_public_credential_and_disclosed_record_register_attacker(backend):
 def test_03_fresh_false_identity_approval_and_compact_repair(backend):
     alice, bob, victim, fake_sk, rp, forged, old = false_identity_approval()
     assert not eq(mul(G1, fake_sk), alice.pk)
-    assert chaum_pedersen_verify(alice.E, forged, alice.pk, bob.pk, old, 0xA, 0xB, 1)
+    # Production verifier rejects the forged witness (finding 3 inverted).
+    assert not chaum_pedersen_verify(alice.E, forged, alice.pk, bob.pk, old, 0xA, 0xB, 1)
     assert eq(elgamal_decrypt(forged, bob.sk), mul(G1, victim))
     ctx = ApprovalContext(0xA, 0xB, 1, 0xCAFE)
     bad = prove_approval(alice.E, forged, alice.pk, bob.pk, fake_sk, rp, ctx, seeded())
     assert not verify_approval(alice.E, forged, alice.pk, bob.pk, bad, ctx)
     honest_ct = elgamal_encrypt(alice.M, bob.pk, rp)
+    honest = chaum_pedersen_prove(
+        alice.E, honest_ct, alice.pk, bob.pk, alice.sk, rp, 0xA, 0xB, 1, seeded(),
+    )
+    assert chaum_pedersen_verify(alice.E, honest_ct, alice.pk, bob.pk, honest, 0xA, 0xB, 1)
+    assert not chaum_pedersen_verify(alice.E, honest_ct, alice.pk, bob.pk, honest, 0xA, 0xB, 2)
+    assert not chaum_pedersen_verify(alice.E, honest_ct, Z1, bob.pk, honest, 0xA, 0xB, 1)
     good = prove_approval(alice.E, honest_ct, alice.pk, bob.pk, alice.sk, rp, ctx, seeded())
     assert verify_approval(alice.E, honest_ct, alice.pk, bob.pk, good, ctx)
     for field in ("sender", "spender", "chainid", "registry", "nonce"):
@@ -104,18 +112,29 @@ def test_08_empty_membership_proof_is_not_a_proof(backend):
 
 def test_09_registration_accepts_a_public_key_with_no_known_secret(backend):
     issuer, owner, pk, E, sigma, proof = uncontrolled_registration()
-    assert registration_verify(sigma, E, pk, issuer.pk_X, issuer.pk_Y, proof, 0xBAD)
+    # Production verifier rejects a NUMS pk (finding 9 inverted).
+    assert not registration_verify(sigma, E, pk, issuer.pk_X, issuer.pk_Y, proof, 0xBAD)
     # No scalar we have satisfies pk = sk*G.
     assert not eq(pk, mul(G1, owner.sk))
-    # The missing relation, prototyped, cannot be proved without sk.
     domain = APPROVE_DOMAIN
-    # A random response against this pk is not a key-ownership proof.
     bogus = prove_key_ownership(pk, owner.sk, domain, seeded())
     assert not verify_key_ownership(pk, bogus, domain)
     honest_sk = 45678
     honest_pk = mul(G1, honest_sk)
     good = prove_key_ownership(honest_pk, honest_sk, domain, seeded())
     assert verify_key_ownership(honest_pk, good, domain)
+    # Honest key still registers.
+    honest = Account(12345, 45678, 98765)
+    sig_h, _ = ps_rerandomize(ps_sign(issuer, honest.m, seeded(11)), seeded(12))
+    pf = registration_prove(
+        sig_h, honest.m, honest.r, honest.pk, honest.E, 0xA11C, honest.sk, 1, seeded(13),
+    )
+    assert registration_verify(
+        sig_h, honest.E, honest.pk, issuer.pk_X, issuer.pk_Y, pf, 0xA11C, 1,
+    )
+    assert not registration_verify(
+        sig_h, honest.E, honest.pk, issuer.pk_X, issuer.pk_Y, pf, 0xA11C, 2,
+    )
 
 
 def test_07_a1_spend_public_inputs_omit_flavor(backend):

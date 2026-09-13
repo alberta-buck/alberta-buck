@@ -59,7 +59,7 @@ def _save_cache(cache: dict) -> None:
 
 
 def _cache_key(seed: int, class_name: str, idx: int) -> str:
-    return f"{seed:08x}:{class_name}:{idx}"
+    return f"{seed:08x}:{class_name}:{idx}:v2"
 
 
 def _deterministic_key(seed: int, class_name: str, idx: int) -> bytes:
@@ -175,10 +175,11 @@ def _to_serializable(rec: FullRegistrationRecord) -> list:
     sig_arg = (g1(rec.ps_sigma_rerand.sigma_1), g1(rec.ps_sigma_rerand.sigma_2))
     proof_arg = (
         rec.registration_proof.e, rec.registration_proof.s_m,
-        rec.registration_proof.s_r,
+        rec.registration_proof.s_r, rec.registration_proof.s_sk,
         g1(rec.registration_proof.A_ps),
         g1(rec.registration_proof.T_C),
         g1(rec.registration_proof.T_R),
+        g1(rec.registration_proof.T_key),
     )
     merkle_data = (rec.leaf_index, rec.leaf, rec.membership_proof.root if rec.membership_proof else 0)
     return [pk, E_arg, sig_arg, proof_arg, merkle_data]
@@ -274,13 +275,14 @@ def register_args(issuer, eoa_addr: int, fields: dict,
     kp = identity_keygen(rng=rng)
     r = rand_scalar(rng)
     E = elgamal_encrypt(mul(G1, m), kp.pk, r)
-    pf = registration_prove(sigma_p, m, r, kp.pk, E, eoa_addr, rng=rng)
+    pf = registration_prove(sigma_p, m, r, kp.pk, E, eoa_addr, kp.sk, rng=rng)
 
     g1 = lambda P: tuple(point_to_words(P))
     pk = g1(kp.pk)
     E_arg = (g1(E.R), g1(E.C))
     sig_arg = (g1(sigma_p.sigma_1), g1(sigma_p.sigma_2))
-    proof_arg = (pf.e, pf.s_m, pf.s_r, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R))
+    proof_arg = (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C),
+                 g1(pf.T_R), g1(pf.T_key))
     return pk, E_arg, sig_arg, proof_arg
 
 

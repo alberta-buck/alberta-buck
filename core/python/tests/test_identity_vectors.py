@@ -127,21 +127,24 @@ def test_registration(kv):
     e_ct = _ct(r["E"])
     proof = bi.registration_prove(
         sigma[0], sigma[1], _i(r["m"]), _i(r["r"]), _pt(r["pk"]), e_ct,
-        _i(r["registrant"]), _i(r["m_tilde"]), _i(r["r_tilde"]),
+        _i(r["registrant"]), _i(r["sk"]), _i(r["chainid"]),
+        _i(r["m_tilde"]), _i(r["r_tilde"]), _i(r["sk_tilde"]),
     )
     pf = r["proof"]
     assert proof == (
-        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_r"]),
-        _pt(pf["A_ps"]), _pt(pf["T_C"]), _pt(pf["T_R"]),
+        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_r"]), _i(pf["s_sk"]),
+        _pt(pf["A_ps"]), _pt(pf["T_C"]), _pt(pf["T_R"]), _pt(pf["T_key"]),
     )
     ps = kv["ps"]
     assert bi.registration_verify(
         sigma[0], sigma[1], e_ct, _pt(r["pk"]),
         _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]),
+        _i(r["chainid"]),
     )
     assert not bi.registration_verify(
         sigma[0], sigma[1], e_ct, _pt(r["pk"]),
         _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]) ^ 1,
+        _i(r["chainid"]),
     )
 
 
@@ -299,13 +302,13 @@ def test_identity_fixture(iv):
             assert bi.ps_verify(iss_x, iss_y, _pt(p[sig]["sigma_1"]), _pt(p[sig]["sigma_2"]), m)
         pf = p["registration_proof"]
         proof = (
-            _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_r"]),
-            _pt(pf["A_ps"]), _pt(pf["T_C"]), _pt(pf["T_R"]),
+            _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_r"]), _i(pf["s_sk"]),
+            _pt(pf["A_ps"]), _pt(pf["T_C"]), _pt(pf["T_R"]), _pt(pf["T_key"]),
         )
         assert bi.registration_verify(
             _pt(p["ps_sig_rerand"]["sigma_1"]), _pt(p["ps_sig_rerand"]["sigma_2"]),
             _ct(p["ciphertext"]), _pt(p["elgamal_kp"]["pk"]),
-            iss_x, iss_y, proof, _i(p["registrant"]),
+            iss_x, iss_y, proof, _i(p["registrant"]), chainid,
         )
 
     # Unicode canonical-dialect pin: raw UTF-8 (accents + CJK) hashes to m.

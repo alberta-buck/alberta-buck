@@ -380,7 +380,8 @@ class RegistryAgent:
 
         # Registration NIZK: proves the PS credential and E_addr encrypt the same m.
         nizk = registration_prove(
-            sigma_rerand, m, r_elg, kp.pk, E_addr, registrant_addr, rng=rng,
+            sigma_rerand, m, r_elg, kp.pk, E_addr, registrant_addr, kp.sk,
+            chainid if chainid else 1, rng=rng,
         )
 
         # Signed certificate for off-chain verification.

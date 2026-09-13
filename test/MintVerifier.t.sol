@@ -190,9 +190,11 @@ contract MintVerifierTest is Test {
         p.e    = _u(j, string.concat(base, ".e"));
         p.s_m  = _u(j, string.concat(base, ".s_m"));
         p.s_r  = _u(j, string.concat(base, ".s_r"));
+        p.s_sk = _u(j, string.concat(base, ".s_sk"));
         p.A_ps = _g1(j, string.concat(base, ".A_ps"));
         p.T_C  = _g1(j, string.concat(base, ".T_C"));
         p.T_R  = _g1(j, string.concat(base, ".T_R"));
+        p.T_key = _g1(j, string.concat(base, ".T_key"));
         vm.prank(acct);
         reg.register(ISSUER, pk, E, sigma, p);
     }

@@ -92,7 +92,7 @@ def test_spot_parity_same_draws_same_proofs(monkeypatch):
         kp = identity_keygen(rng=rng)
         r = rand_scalar(rng)
         E = elgamal_encrypt(mul(G1, m), kp.pk, r)
-        proof = registration_prove(sigma_p, m, r, kp.pk, E, 0xA11CE, rng=rng)
+        proof = registration_prove(sigma_p, m, r, kp.pk, E, 0xA11CE, kp.sk, rng=rng)
         ok = registration_verify(sigma_p, E, kp.pk, issuer.pk_X, issuer.pk_Y,
                                  proof, 0xA11CE)
         E2 = elgamal_encrypt(mul(G1, m), kp.pk, rand_scalar(rng))

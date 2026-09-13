@@ -128,21 +128,23 @@ export function wrapIdentity(wasm) {
         hex(hBatch), hex(issuer), hex(chainid)),
 
     // ---- Registration NIZK -------------------------------------------------
-    registrationProve(sig, m, r, pk, E, registrant, mTilde, rTilde) {
+    registrationProve(sig, m, r, pk, E, registrant, sk, chainid, mTilde, rTilde, skTilde) {
       const o = wasm.registration_prove(
         [...flatP(sig.sigma_1), ...flatP(sig.sigma_2)],
         hex(m), hex(r), ...flatP(pk), flatCT(E),
-        hex(registrant), hex(mTilde), hex(rTilde));
-      return { e: big(o[0]), s_m: big(o[1]), s_r: big(o[2]),
-               A_ps: P(o, 3), T_C: P(o, 5), T_R: P(o, 7) };
+        hex(registrant), hex(sk), hex(chainid),
+        hex(mTilde), hex(rTilde), hex(skTilde));
+      return { e: big(o[0]), s_m: big(o[1]), s_r: big(o[2]), s_sk: big(o[3]),
+               A_ps: P(o, 4), T_C: P(o, 6), T_R: P(o, 8), T_key: P(o, 10) };
     },
-    registrationVerify: (sig, E, pk, issuerX, issuerY, proof, registrant) =>
+    registrationVerify: (sig, E, pk, issuerX, issuerY, proof, registrant, chainid) =>
       wasm.registration_verify(
         [...flatP(sig.sigma_1), ...flatP(sig.sigma_2)],
         flatCT(E), ...flatP(pk), flatG2(issuerX), flatG2(issuerY),
-        [hex(proof.e), hex(proof.s_m), hex(proof.s_r),
-         ...flatP(proof.A_ps), ...flatP(proof.T_C), ...flatP(proof.T_R)],
-        hex(registrant)),
+        [hex(proof.e), hex(proof.s_m), hex(proof.s_r), hex(proof.s_sk),
+         ...flatP(proof.A_ps), ...flatP(proof.T_C), ...flatP(proof.T_R),
+         ...flatP(proof.T_key)],
+        hex(registrant), hex(chainid)),
 
     // ---- Chaum-Pedersen approve --------------------------------------------
     chaumPedersenProve(eAlice, eBob, pkA, pkB, skA, rPrime,

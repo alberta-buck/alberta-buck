@@ -56,9 +56,11 @@ def _decode(j):
                 e=_h(p["registration_proof"]["e"]),
                 s_m=_h(p["registration_proof"]["s_m"]),
                 s_r=_h(p["registration_proof"]["s_r"]),
+                s_sk=_h(p["registration_proof"]["s_sk"]),
                 A_ps=_pt(p["registration_proof"]["A_ps"]),
                 T_C=_pt(p["registration_proof"]["T_C"]),
                 T_R=_pt(p["registration_proof"]["T_R"]),
+                T_key=_pt(p["registration_proof"]["T_key"]),
             ),
         }
 

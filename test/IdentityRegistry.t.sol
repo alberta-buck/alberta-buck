@@ -68,9 +68,11 @@ contract IdentityRegistryTest is Test {
         p.e    = _u(string.concat(base, ".e"));
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
+        p.s_sk = _u(string.concat(base, ".s_sk"));
         p.A_ps = _g1(string.concat(base, ".A_ps"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
+        p.T_key = _g1(string.concat(base, ".T_key"));
     }
 
     function _cpProof() internal view returns (IdentityRegistry.CPProof memory p) {
@@ -190,6 +192,41 @@ contract IdentityRegistryTest is Test {
         reg.register(ISSUER, pk, E, bad, _regProof("alice"));
     }
 
+    function test_register_rejects_zero_pk() public {
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        vm.prank(alice);
+        vm.expectRevert(bytes("pk=O"));
+        reg.register(ISSUER, BN254.zeroG1(), E, _ps("alice"), _regProof("alice"));
+    }
+
+    function test_register_rejects_zero_R() public {
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        E.R = BN254.zeroG1();
+        vm.prank(alice);
+        vm.expectRevert(bytes("R=O"));
+        reg.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
+    }
+
+    function test_register_rejects_noncanonical_scalar() public {
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        IdentityRegistry.RegistrationProof memory p = _regProof("alice");
+        p.s_sk = p.s_sk + BN254.R;
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad scalar"));
+        reg.register(ISSUER, pk, E, _ps("alice"), p);
+    }
+
+    function test_register_rejects_wrong_chainid() public {
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        vm.chainId(2);
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad FS challenge"));
+        reg.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
+    }
+
     // ---- bindContract ------------------------------------------------------
 
     function test_bindContract_rejectsEOA() public {
@@ -293,6 +330,23 @@ contract IdentityRegistryTest is Test {
         IdentityRegistry.CPProof memory bad = _cpProof();
         bad.e = (bad.e + 1) % BN254.R;
         assertFalse(reg.verifyApprove(alice, bob, E_b, bad));
+    }
+
+    function test_verifyApprove_rejects_noncanonical_scalar() public {
+        _registerAlice();
+        _registerBob();
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        IdentityRegistry.CPProof memory bad = _cpProof();
+        bad.s1 = bad.s1 + BN254.R;
+        assertFalse(reg.verifyApprove(alice, bob, E_b, bad));
+    }
+
+    function test_verifyApprove_rejects_zero_R() public {
+        _registerAlice();
+        _registerBob();
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        E_b.R = BN254.zeroG1();
+        assertFalse(reg.verifyApprove(alice, bob, E_b, _cpProof()));
     }
 
     // ---- setBuck -----------------------------------------------------------

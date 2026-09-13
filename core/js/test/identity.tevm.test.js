@@ -67,15 +67,18 @@ test("identity ceremony: wasm NIZK verified by IdentityRegistry on tevm", { skip
   const r = rand();
   const E = id.elgamalEncrypt(id.g1Mul(id.G1, m), pk, r);
   const registrant = BigInt(session.account.address);
-  const proof = id.registrationProve(sigmaP, m, r, pk, E, registrant, rand(), rand());
-  assert.ok(id.registrationVerify(sigmaP, E, pk, pkX, pkY, proof, registrant),
+  const chainid = 1n;
+  const proof = id.registrationProve(
+    sigmaP, m, r, pk, E, registrant, sk, chainid, rand(), rand(), rand());
+  assert.ok(id.registrationVerify(sigmaP, E, pk, pkX, pkY, proof, registrant, chainid),
     "kernel-side verify");
 
   const args = [
     issuerAddr, g(pk), ct(E),
     { sigma_1: g(sigmaP.sigma_1), sigma_2: g(sigmaP.sigma_2) },
-    { e: proof.e, s_m: proof.s_m, s_r: proof.s_r,
-      A_ps: g(proof.A_ps), T_C: g(proof.T_C), T_R: g(proof.T_R) },
+    { e: proof.e, s_m: proof.s_m, s_r: proof.s_r, s_sk: proof.s_sk,
+      A_ps: g(proof.A_ps), T_C: g(proof.T_C), T_R: g(proof.T_R),
+      T_key: g(proof.T_key) },
   ];
 
   // THE moment: the real Solidity verifier accepts the wasm proof

@@ -2,14 +2,15 @@
 //! `alberta_buck/wallet/chaum_pedersen.py` (the approve handshake,
 //! on-chain `IdentityRegistry.verifyApprove`).
 //!
-//! Commitments `T1 = k1*R_a`, `T2 = k2*pk_b`, `T3 = k2*G`; challenge binds
-//! `(E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3, sender, spender,
-//! chainid)`; responses `s1 = k1 + e*sk_alice`, `s2 = k2 + e*r'`.
+//! Three-relation statement (ABI-stable 6-field proof):
+//! `T1 = T_key = a*G`, `T3 = T_R = b*G`, `T2 = T_diff = a*R_a - b*pk_b`;
+//! challenge binds `(E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3, sender,
+//! spender, chainid)`; responses `s1 = a + e*sk`, `s2 = b + e*r'`.
 
 use ark_bn254::{G1Affine, G1Projective};
 use ark_ec::{AffineRepr, CurveGroup};
 
-use crate::{fr_mod, g1_from_w, w_from_fr, w_from_g1, G1w, Result, Transcript, W256};
+use crate::{fr_mod, g1_from_w, w_from_fr, w_from_g1, w_lt_order, G1w, Result, Transcript, W256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CpProof {
@@ -68,16 +69,16 @@ pub fn chaum_pedersen_prove(
     let eb = (g1_from_w(&e_bob.0)?, g1_from_w(&e_bob.1)?);
     let pka = g1_from_w(pk_alice)?;
     let pkb = g1_from_w(pk_bob)?;
-    let k1 = fr_mod(k1);
-    let k2 = fr_mod(k2);
+    let a = fr_mod(k1);
+    let b = fr_mod(k2);
 
-    let t1 = (ea.0 * k1).into_affine();
-    let t2 = (pkb * k2).into_affine();
-    let t3 = (G1Affine::generator() * k2).into_affine();
+    let t1 = (G1Affine::generator() * a).into_affine();
+    let t3 = (G1Affine::generator() * b).into_affine();
+    let t2 = (ea.0 * a - pkb * b).into_affine();
 
     let e = transcript(&ea, &eb, &pka, &pkb, &t1, &t2, &t3, sender, spender, chainid).e();
-    let s1 = k1 + e * fr_mod(sk_alice);
-    let s2 = k2 + e * fr_mod(r_prime);
+    let s1 = a + e * fr_mod(sk_alice);
+    let s2 = b + e * fr_mod(r_prime);
 
     Ok(CpProof {
         e: w_from_fr(&e),
@@ -100,6 +101,10 @@ pub fn chaum_pedersen_verify(
     spender: &W256,
     chainid: &W256,
 ) -> Result<bool> {
+    if !w_lt_order(&proof.e) || !w_lt_order(&proof.s1) || !w_lt_order(&proof.s2) {
+        return Ok(false);
+    }
+
     let ea = (g1_from_w(&e_alice.0)?, g1_from_w(&e_alice.1)?);
     let eb = (g1_from_w(&e_bob.0)?, g1_from_w(&e_bob.1)?);
     let pka = g1_from_w(pk_alice)?;
@@ -107,24 +112,33 @@ pub fn chaum_pedersen_verify(
     let t1 = g1_from_w(&proof.t1)?;
     let t2 = g1_from_w(&proof.t2)?;
     let t3 = g1_from_w(&proof.t3)?;
+
+    if pka.is_zero() || pkb.is_zero() || ea.0.is_zero() || eb.0.is_zero() {
+        return Ok(false);
+    }
+
     let e = fr_mod(&proof.e);
     let s1 = fr_mod(&proof.s1);
     let s2 = fr_mod(&proof.s2);
 
-    // Check 1: s2*G == T3 + e*R_b
+    // Check 1: s1*G == T1 + e*pk_a
+    if G1Affine::generator() * s1 != t1 + pka * e {
+        return Ok(false);
+    }
+
+    // Check 2: s2*G == T3 + e*R_b
     if G1Affine::generator() * s2 != eb.0 * e + t3 {
         return Ok(false);
     }
 
-    // Check 2: s1*R_a - s2*pk_b == (T1 - T2) + e*(C_a - C_b)
+    // Check 3: s1*R_a - s2*pk_b == T2 + e*(C_a - C_b)
     let lhs: G1Projective = ea.0 * s1 - pkb * s2;
     let ca_cb: G1Projective = G1Projective::from(ea.1) - eb.1;
-    let rhs: G1Projective = ca_cb * e + t1 - t2;
+    let rhs: G1Projective = G1Projective::from(t2) + ca_cb * e;
     if lhs != rhs {
         return Ok(false);
     }
 
-    // Check 3: Fiat-Shamir
     let e_check = transcript(&ea, &eb, &pka, &pkb, &t1, &t2, &t3, sender, spender, chainid).e();
     Ok(w_from_fr(&e_check) == proof.e)
 }

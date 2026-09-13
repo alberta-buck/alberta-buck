@@ -106,17 +106,22 @@ test("registration NIZK", { skip }, () => {
   const r = KV.registration;
   const sig = { sigma_1: pt(r.sigma_1), sigma_2: pt(r.sigma_2) };
   const proof = id.registrationProve(
-    sig, B(r.m), B(r.r), pt(r.pk), ct(r.E), B(r.registrant), B(r.m_tilde), B(r.r_tilde));
+    sig, B(r.m), B(r.r), pt(r.pk), ct(r.E), B(r.registrant), B(r.sk), B(r.chainid),
+    B(r.m_tilde), B(r.r_tilde), B(r.sk_tilde));
   assert.equal(proof.e, B(r.proof.e));
   assert.equal(proof.s_m, B(r.proof.s_m));
   assert.equal(proof.s_r, B(r.proof.s_r));
+  assert.equal(proof.s_sk, B(r.proof.s_sk));
   assert.deepEqual(proof.A_ps, pt(r.proof.A_ps));
   assert.deepEqual(proof.T_C, pt(r.proof.T_C));
   assert.deepEqual(proof.T_R, pt(r.proof.T_R));
+  assert.deepEqual(proof.T_key, pt(r.proof.T_key));
   assert.ok(id.registrationVerify(
-    sig, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof, B(r.registrant)));
+    sig, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof,
+    B(r.registrant), B(r.chainid)));
   assert.ok(!id.registrationVerify(
-    sig, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof, B(r.registrant) + 1n));
+    sig, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof,
+    B(r.registrant) + 1n, B(r.chainid)));
 });
 
 test("chaum-pedersen approve", { skip }, () => {
@@ -255,11 +260,12 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
     assert.ok(id.psVerify(issX, issY, sigR, m));
     const pf = p.registration_proof;
     const proof = {
-      e: B(pf.e), s_m: B(pf.s_m), s_r: B(pf.s_r),
-      A_ps: pt(pf.A_ps), T_C: pt(pf.T_C), T_R: pt(pf.T_R),
+      e: B(pf.e), s_m: B(pf.s_m), s_r: B(pf.s_r), s_sk: B(pf.s_sk),
+      A_ps: pt(pf.A_ps), T_C: pt(pf.T_C), T_R: pt(pf.T_R), T_key: pt(pf.T_key),
     };
     assert.ok(id.registrationVerify(
-      sigR, ct(p.ciphertext), pt(p.elgamal_kp.pk), issX, issY, proof, B(p.registrant)));
+      sigR, ct(p.ciphertext), pt(p.elgamal_kp.pk), issX, issY, proof,
+      B(p.registrant), chainid));
   }
 
   // unicode canonical-dialect pin: raw UTF-8 (accents + CJK + sorted keys)

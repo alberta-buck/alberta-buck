@@ -51,9 +51,11 @@ test("browser bundle: full registration ceremony proves + verifies", { skip }, (
   const E = wasm.elgamal_encrypt(...M, ...pk, hex(r));
 
   const registrant = "0x" + "a11ce".padStart(40, "0");
+  const chainid = "0x1";
   const proof = wasm.registration_prove(
-    sigmaP, hex(m), hex(r), ...pk, E, registrant, hex(rand()), hex(rand()));
-  assert.ok(wasm.registration_verify(sigmaP, E, ...pk, pkX, pkY, proof, registrant));
+    sigmaP, hex(m), hex(r), ...pk, E, registrant, hex(sk), chainid,
+    hex(rand()), hex(rand()), hex(rand()));
+  assert.ok(wasm.registration_verify(sigmaP, E, ...pk, pkX, pkY, proof, registrant, chainid));
   assert.ok(!wasm.registration_verify(
-    sigmaP, E, ...pk, pkX, pkY, proof, "0x" + "bad".padStart(40, "0")));
+    sigmaP, E, ...pk, pkX, pkY, proof, "0x" + "bad".padStart(40, "0"), chainid));
 });

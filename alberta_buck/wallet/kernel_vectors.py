@@ -235,19 +235,23 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     t_re = draw()
     sigma_p, _ = ps_rerandomize(sigma, rng=_replay([t_re]))
     registrant = 0xA11CE % (1 << 160)
-    m_tilde, r_tilde = draw(), draw()
-    proof = registration_prove(sigma_p, m, r, pk_e, E, registrant,
-                               rng=_replay([m_tilde, r_tilde]))
+    m_tilde, r_tilde, sk_tilde = draw(), draw(), draw()
+    proof = registration_prove(sigma_p, m, r, pk_e, E, registrant, sk_e, chainid,
+                               rng=_replay([m_tilde, r_tilde, sk_tilde]))
     out["registration"] = {
         "m": scalar_to_hex(m), "r": scalar_to_hex(r),
+        "sk": scalar_to_hex(sk_e),
         "pk": _g1(pk_e), "E": _ct(E),
         "sigma_1": _g1(sigma_p.sigma_1), "sigma_2": _g1(sigma_p.sigma_2),
-        "registrant": _hx(registrant),
+        "registrant": _hx(registrant), "chainid": _hx(chainid),
         "m_tilde": scalar_to_hex(m_tilde), "r_tilde": scalar_to_hex(r_tilde),
+        "sk_tilde": scalar_to_hex(sk_tilde),
         "proof": {
             "e": scalar_to_hex(proof.e), "s_m": scalar_to_hex(proof.s_m),
-            "s_r": scalar_to_hex(proof.s_r), "A_ps": _g1(proof.A_ps),
+            "s_r": scalar_to_hex(proof.s_r), "s_sk": scalar_to_hex(proof.s_sk),
+            "A_ps": _g1(proof.A_ps),
             "T_C": _g1(proof.T_C), "T_R": _g1(proof.T_R),
+            "T_key": _g1(proof.T_key),
         },
     }
 

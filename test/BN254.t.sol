@@ -112,7 +112,7 @@ contract BN254Test is Test {
     // ---- Fiat-Shamir parity ------------------------------------------------
 
     function test_fsChallenge_matches_alice_registration_e() public view {
-        BN254.G1Point[] memory pts = new BN254.G1Point[](8);
+        BN254.G1Point[] memory pts = new BN254.G1Point[](9);
         pts[0] = _g1At(".alice.ps_sig_rerand.sigma_1");
         pts[1] = _g1At(".alice.ps_sig_rerand.sigma_2");
         pts[2] = _g1At(".alice.ciphertext.R");
@@ -121,9 +121,12 @@ contract BN254Test is Test {
         pts[5] = _g1At(".alice.registration_proof.A_ps");
         pts[6] = _g1At(".alice.registration_proof.T_C");
         pts[7] = _g1At(".alice.registration_proof.T_R");
+        pts[8] = _g1At(".alice.registration_proof.T_key");
 
-        uint256[] memory scl = new uint256[](1);
+        uint256[] memory scl = new uint256[](3);
         scl[0] = _scalarAt(".alice.registrant");
+        scl[1] = _scalarAt(".chainid");
+        scl[2] = uint256(keccak256("AlbertaBuck:Register:v2"));
 
         uint256 e = BN254.fsChallenge(pts, scl);
         assertEq(e, _scalarAt(".alice.registration_proof.e"), "registration FS mismatch");

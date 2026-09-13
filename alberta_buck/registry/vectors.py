@@ -138,12 +138,14 @@ def _party_to_json(party: FullRegistration) -> Dict[str, Any]:
             "sigma_2": _g1(party.ps_sigma_rerand.sigma_2),
         },
         "registration_proof": {
-            "e":    scalar_to_hex(party.registration_proof.e),
-            "s_m":  scalar_to_hex(party.registration_proof.s_m),
-            "s_r":  scalar_to_hex(party.registration_proof.s_r),
-            "A_ps": _g1(party.registration_proof.A_ps),
-            "T_C":  _g1(party.registration_proof.T_C),
-            "T_R":  _g1(party.registration_proof.T_R),
+            "e":     scalar_to_hex(party.registration_proof.e),
+            "s_m":   scalar_to_hex(party.registration_proof.s_m),
+            "s_r":   scalar_to_hex(party.registration_proof.s_r),
+            "s_sk":  scalar_to_hex(party.registration_proof.s_sk),
+            "A_ps":  _g1(party.registration_proof.A_ps),
+            "T_C":   _g1(party.registration_proof.T_C),
+            "T_R":   _g1(party.registration_proof.T_R),
+            "T_key": _g1(party.registration_proof.T_key),
         },
     }
     # Merkle proofs

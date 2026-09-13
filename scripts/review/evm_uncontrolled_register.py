@@ -33,23 +33,20 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     iss_addr = Web3.to_checksum_address("0x00000000000000000000000000000000000000aa")
     chain.send(reg.functions.trustIssuer(iss_addr, (g2(issuer.pk_X), g2(issuer.pk_Y))),
                sender=gov)
-    chain.send(reg.functions.register(
-        iss_addr, g1(pk), (g1(E.R), g1(E.C)),
-        (g1(sigma.sigma_1), g1(sigma.sigma_2)),
-        (proof.e, proof.s_m, proof.s_r, g1(proof.A_ps), g1(proof.T_C), g1(proof.T_R))),
-        sender=attacker)
-    assert reg.functions.isVerified(attacker).call()
-    stored = reg.functions.pkOf(attacker).call()
-    print("register() accepted NUMS pk with no known sk")
-    print("   isVerified(attacker) =", True)
-    print("   stored pk matches NUMS point =", stored[0] == g1(pk)[0])
-    # Cannot decrypt E without sk (try owner's sk: wrong key).
+    nums_ok = True
     try:
-        opened = elgamal_decrypt(E, owner.sk)
-        decrypted_with_owner_sk = eq(opened, owner.M)
+        chain.send(reg.functions.register(
+            iss_addr, g1(pk), (g1(E.R), g1(E.C)),
+            (g1(sigma.sigma_1), g1(sigma.sigma_2)),
+            (proof.e, proof.s_m, proof.s_r, proof.s_sk, g1(proof.A_ps),
+             g1(proof.T_C), g1(proof.T_R), g1(proof.T_key))),
+            sender=attacker)
     except Exception:
-        decrypted_with_owner_sk = False
-    print("   owner.sk decrypts the registered ciphertext to M =", decrypted_with_owner_sk)
+        nums_ok = False
+    assert not nums_ok
+    assert not reg.functions.isVerified(attacker).call()
+    print("register() rejected NUMS pk with no known sk")
+    print("   isVerified(attacker) =", False)
 
     # Honest control on a second address.
     honest = Web3.to_checksum_address("0x000000000000000000000000000000000000a11c")
@@ -58,14 +55,15 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     rng = seeded(11)
     sig_h, _ = ps_rerandomize(ps_sign(issuer, alice.m, rng=rng), rng=rng)
     pf = registration_prove(sig_h, alice.m, alice.r, alice.pk, alice.E,
-                            int(honest, 16), rng=rng)
+                            int(honest, 16), alice.sk, rng=rng)
     chain.send(reg.functions.register(
         iss_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
         (g1(sig_h.sigma_1), g1(sig_h.sigma_2)),
-        (pf.e, pf.s_m, pf.s_r, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R))),
+        (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R),
+         g1(pf.T_key))),
         sender=honest)
     assert reg.functions.isVerified(honest).call()
     print("HONEST register under a held key accepted =", True)
 
-    print("\nRESULT: finding 9 reproduced on EVM "
-          "(registration without knowledge of sk).")
+    print("\nRESULT: finding 9 inverted on EVM "
+          "(NUMS registration rejected; honest register accepted).")

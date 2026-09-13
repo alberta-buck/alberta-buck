@@ -117,14 +117,17 @@ export async function onboard(world, account, fields, opts = {}) {
   const M = id.g1Mul(id.G1, m);
   const r = rng();
   const E = id.elgamalEncrypt(M, pk, r);
+  const chainid = BigInt(await world.session.client.getChainId());
   const proof = id.registrationProve(
-    sigmaP, m, r, pk, E, BigInt(account.address), rng(), rng());
+    sigmaP, m, r, pk, E, BigInt(account.address), sk, chainid,
+    rng(), rng(), rng());
 
   await world.session.send(world.reg, "register", [
     world.issuer.addr, g(pk), ct(E),
     { sigma_1: g(sigmaP.sigma_1), sigma_2: g(sigmaP.sigma_2) },
-    { e: proof.e, s_m: proof.s_m, s_r: proof.s_r,
-      A_ps: g(proof.A_ps), T_C: g(proof.T_C), T_R: g(proof.T_R) },
+    { e: proof.e, s_m: proof.s_m, s_r: proof.s_r, s_sk: proof.s_sk,
+      A_ps: g(proof.A_ps), T_C: g(proof.T_C), T_R: g(proof.T_R),
+      T_key: g(proof.T_key) },
   ], { tag: `onboard:${full.given_name ?? account.address}`, gas: 3_000_000n,
        account });
 

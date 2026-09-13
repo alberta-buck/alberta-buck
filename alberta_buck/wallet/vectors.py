@@ -158,7 +158,7 @@ def _build_party(rng, issuer, fields, addr) -> _Party:
     r = rand_scalar(rng)
     M = mul(G1, m)
     E = elgamal_encrypt(M, kp.pk, r)
-    proof = registration_prove(sigma_p, m, r, kp.pk, E, addr, rng=rng)
+    proof = registration_prove(sigma_p, m, r, kp.pk, E, addr, kp.sk, CHAINID, rng=rng)
     return _Party(fields, addr, canonical, m, M, sigma, sigma_p, kp, r, E, proof)
 
 
@@ -175,12 +175,14 @@ def _party_to_json(p: _Party) -> Dict[str, Any]:
         "ciphertext":    {"R": _g1(p.E.R), "C": _g1(p.E.C)},
         "registrant":    scalar_to_hex(p.addr),
         "registration_proof": {
-            "e":    scalar_to_hex(p.proof.e),
-            "s_m":  scalar_to_hex(p.proof.s_m),
-            "s_r":  scalar_to_hex(p.proof.s_r),
-            "A_ps": _g1(p.proof.A_ps),
-            "T_C":  _g1(p.proof.T_C),
-            "T_R":  _g1(p.proof.T_R),
+            "e":     scalar_to_hex(p.proof.e),
+            "s_m":   scalar_to_hex(p.proof.s_m),
+            "s_r":   scalar_to_hex(p.proof.s_r),
+            "s_sk":  scalar_to_hex(p.proof.s_sk),
+            "A_ps":  _g1(p.proof.A_ps),
+            "T_C":   _g1(p.proof.T_C),
+            "T_R":   _g1(p.proof.T_R),
+            "T_key": _g1(p.proof.T_key),
         },
     }
 

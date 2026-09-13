@@ -52,7 +52,7 @@ def harvested_registration(registrant=0xBAD):
     sigma, _ = ps_rerandomize(published, seeded(3))
     attacker = Account(owner.m, 22222, 33333)
     proof = registration_prove(sigma, owner.m, attacker.r, attacker.pk,
-                               attacker.E, registrant, seeded(4))
+                               attacker.E, registrant, attacker.sk, 1, seeded(4))
     return issuer, owner, published, attacker, sigma, proof
 
 
@@ -130,5 +130,6 @@ def uncontrolled_registration(registrant=0xBAD):
     pk = independent_generator()
     r = 33333
     E = elgamal_encrypt(owner.M, pk, r)
-    proof = registration_prove(sigma, owner.m, r, pk, E, registrant, seeded(4))
+    proof = registration_prove(sigma, owner.m, r, pk, E, registrant, owner.sk,
+                               1, seeded(4))
     return issuer, owner, pk, E, sigma, proof

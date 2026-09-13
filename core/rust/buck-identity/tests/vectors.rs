@@ -244,22 +244,24 @@ fn golden_identity_fixture() {
             e: jw(&pf["e"]),
             s_m: jw(&pf["s_m"]),
             s_r: jw(&pf["s_r"]),
+            s_sk: jw(&pf["s_sk"]),
             a_ps: jg1(&pf["A_ps"]),
             t_c: jg1(&pf["T_C"]),
             t_r: jg1(&pf["T_R"]),
+            t_key: jg1(&pf["T_key"]),
         };
         let sig_p = (
             jg1(&p["ps_sig_rerand"]["sigma_1"]),
             jg1(&p["ps_sig_rerand"]["sigma_2"]),
         );
         assert!(nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &registrant
+            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &registrant, &chainid
         )
         .unwrap());
         let mut wrong = registrant;
         wrong[31] ^= 1;
         assert!(!nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &wrong
+            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &wrong, &chainid
         )
         .unwrap());
     }
@@ -592,16 +594,21 @@ fn kernel_vectors_replay() {
         &jg1(&rg["pk"]),
         &jct(&rg["E"]),
         &jw(&rg["registrant"]),
+        &jw(&rg["sk"]),
+        &jw(&rg["chainid"]),
         &jw(&rg["m_tilde"]),
         &jw(&rg["r_tilde"]),
+        &jw(&rg["sk_tilde"]),
     )
     .unwrap();
     assert_eq!(proof.e, jw(&rg["proof"]["e"]));
     assert_eq!(proof.s_m, jw(&rg["proof"]["s_m"]));
     assert_eq!(proof.s_r, jw(&rg["proof"]["s_r"]));
+    assert_eq!(proof.s_sk, jw(&rg["proof"]["s_sk"]));
     assert_eq!(proof.a_ps, jg1(&rg["proof"]["A_ps"]));
     assert_eq!(proof.t_c, jg1(&rg["proof"]["T_C"]));
     assert_eq!(proof.t_r, jg1(&rg["proof"]["T_R"]));
+    assert_eq!(proof.t_key, jg1(&rg["proof"]["T_key"]));
     assert!(nizk::registration_verify(
         &jg1(&rg["sigma_1"]),
         &jg1(&rg["sigma_2"]),
@@ -611,6 +618,7 @@ fn kernel_vectors_replay() {
         &jg2(&v["ps"]["pk_Y"]),
         &proof,
         &jw(&rg["registrant"]),
+        &jw(&rg["chainid"]),
     )
     .unwrap());
 

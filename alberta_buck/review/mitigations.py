@@ -102,8 +102,8 @@ def payment_commitment(flavor, value, rho, issuer, recipient, predicate=0):
 def prove_key_ownership(pk, sk, domain, rng=None):
     """One-relation Schnorr that registration and approve both need: pk = sk*G.
 
-    Review prototype only.  Production registration currently omits this
-    (finding 9); production approve omits it (finding 3).
+    Review prototype of the isolated key relation.  Production registration
+    and approve now include the same equation (findings 9 and 3).
     """
     a = rand_scalar(rng)
     T = mul(G1, a)

@@ -5,24 +5,41 @@ gives Bob a fresh encryption E_bob = (R_b, C_b) of the same M under pk_bob, and
 proves they decrypt to the same M -- without revealing M, sk_alice or the
 re-encryption randomness r'.
 
-Witnesses:  sk_alice (secret key for E_alice), r' (randomness for E_bob).
+Witnesses:  sk (secret key for pk_alice), r' (randomness for E_bob).
 Public:     E_alice, E_bob, pk_alice, pk_bob, sender, spender, chainid.
 
-Commitments:  T1 = k1*R_a,  T2 = k2*pk_bob,  T3 = k2*G  (k1, k2 random)
-Challenge:    e  = H(E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3,
-                     sender, spender, chainid)            mod ORDER
-Responses:    s1 = k1 + e*sk_alice,  s2 = k2 + e*r'      mod ORDER
+The statement is the three-relation protocol of alberta-buck-proofs.org Part II
+(S1/S2/S3) and doc/review/identity-findings.md Sec. 3:
 
-On-chain proof carries (e, s1, s2, T1, T2, T3) -- the verifier needs T1, T2, T3
-to reconstruct the Fiat-Shamir hash.  (Naive (e, s1, s2) is *not* sound: only
-T1-T2 and T3 can be recovered from the verification equations, so a transcript
-binding T1 and T2 separately requires both to be in calldata.)
+  pk_a       = sk * G
+  R_b        = r' * G
+  C_a - C_b  = sk * R_a - r' * pk_b
 
-Verifier checks (all in G1, ~36K gas via ecAdd/ecMul + the extra calldata):
+Wire encoding (ABI-stable): the existing 6-field CPProof (e, s1, s2, T1, T2, T3)
+is KEPT.  After the three-relation repair all three commitments are reconstructible
+from (e, u, v), so compact (e, s1, s2) would be sound; we still send the three T's
+so the on-chain ABI does not change.  The earlier comment that compact (e, s1, s2)
+is unsound applied to the TWO-relation transcript (T1 and T2 hashed separately,
+only T1-T2 constrained).  Reinterpretation:
 
-  Check 1: s2*G              == T3 + e*R_b               -- r' consistent with R_b
-  Check 2: s1*R_a - s2*pk_b  == (T1 - T2) + e*(C_a - C_b) -- same M in both
-  Check 3: Fiat-Shamir e was honestly derived
+  s1 = u = a + e*sk
+  s2 = v = b + e*r'
+  T1 = T_key  = a*G
+  T3 = T_R    = b*G
+  T2 = T_diff = a*R_a - b*pk_b
+
+Challenge: e = H(E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3,
+                 sender, spender, chainid)  mod ORDER
+
+Verifier:
+
+  s1*G              == T1 + e*pk_a
+  s2*G              == T3 + e*R_b
+  s1*R_a - s2*pk_b  == T2 + e*(C_a - C_b)
+  Fiat-Shamir e was honestly derived
+
+Account keys and both R values must be non-infinity; scalars must be canonical
+(0 <= s < ORDER).  C may legitimately be the point at infinity.
 """
 
 from __future__ import annotations
@@ -30,8 +47,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
+from py_ecc.bn128 import is_on_curve, b as curve_b
+
 from alberta_buck.wallet.bn254 import (
-    G1, ORDER, add, mul, neg, eq, rand_scalar, point_to_words,
+    G1, ORDER, add, mul, neg, eq, is_inf, rand_scalar, point_to_words,
 )
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.transcript import keccak_scalar
@@ -42,9 +61,25 @@ class CPProof:
     e:  int
     s1: int
     s2: int
-    T1: Tuple    # G1
-    T2: Tuple    # G1
-    T3: Tuple    # G1
+    T1: Tuple    # G1  T_key  = a*G
+    T2: Tuple    # G1  T_diff = a*R_a - b*pk_b
+    T3: Tuple    # G1  T_R    = b*G
+
+
+def _canonical(s: int) -> bool:
+    return isinstance(s, int) and 0 <= s < ORDER
+
+
+def _on_curve(P) -> bool:
+    if P is None or is_inf(P):
+        return False
+    return is_on_curve(P, curve_b)
+
+
+def _on_curve_or_inf(P) -> bool:
+    if P is None or is_inf(P):
+        return True
+    return is_on_curve(P, curve_b)
 
 
 def _cp_transcript(
@@ -87,16 +122,16 @@ def chaum_pedersen_prove(
     chainid:   int,
     rng=None,
 ) -> CPProof:
-    k1 = rand_scalar(rng)
-    k2 = rand_scalar(rng)
-    T1 = mul(E_alice.R, k1)
-    T2 = mul(pk_bob, k2)
-    T3 = mul(G1, k2)
+    a = rand_scalar(rng)
+    b = rand_scalar(rng)
+    T1 = mul(G1, a)                                      # T_key
+    T3 = mul(G1, b)                                      # T_R
+    T2 = add(mul(E_alice.R, a), neg(mul(pk_bob, b)))     # T_diff
     e  = _cp_transcript(
         E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3, sender, spender, chainid,
     )
-    s1 = (k1 + e * (sk_alice % ORDER)) % ORDER
-    s2 = (k2 + e * (r_prime  % ORDER)) % ORDER
+    s1 = (a + e * (sk_alice % ORDER)) % ORDER
+    s2 = (b + e * (r_prime  % ORDER)) % ORDER
     return CPProof(e=e, s1=s1, s2=s2, T1=T1, T2=T2, T3=T3)
 
 
@@ -111,20 +146,27 @@ def chaum_pedersen_verify(
     chainid:   int,
 ) -> bool:
     e, s1, s2 = proof.e, proof.s1, proof.s2
-
-    # Check 1: s2*G == T3 + e*R_b
-    lhs1 = mul(G1, s2)
-    rhs1 = add(proof.T3, mul(E_bob.R, e))
-    if not eq(lhs1, rhs1):
+    if not all(_canonical(s) for s in (e, s1, s2)):
+        return False
+    if not all(_on_curve(p) for p in (E_alice.R, E_bob.R, pk_alice, pk_bob)):
+        return False
+    if not all(_on_curve_or_inf(p) for p in (E_alice.C, E_bob.C, proof.T1, proof.T2, proof.T3)):
         return False
 
-    # Check 2: s1*R_a - s2*pk_b == (T1 - T2) + e*(C_a - C_b)
-    lhs2 = add(mul(E_alice.R, s1), neg(mul(pk_bob, s2)))
-    rhs2 = add(add(proof.T1, neg(proof.T2)), mul(add(E_alice.C, neg(E_bob.C)), e))
-    if not eq(lhs2, rhs2):
+    # Check 1: s1*G == T1 + e*pk_a  (key ownership)
+    if not eq(mul(G1, s1), add(proof.T1, mul(pk_alice, e))):
         return False
 
-    # Check 3: Fiat-Shamir
+    # Check 2: s2*G == T3 + e*R_b
+    if not eq(mul(G1, s2), add(proof.T3, mul(E_bob.R, e))):
+        return False
+
+    # Check 3: s1*R_a - s2*pk_b == T2 + e*(C_a - C_b)
+    lhs = add(mul(E_alice.R, s1), neg(mul(pk_bob, s2)))
+    rhs = add(proof.T2, mul(add(E_alice.C, neg(E_bob.C)), e))
+    if not eq(lhs, rhs):
+        return False
+
     e_check = _cp_transcript(
         E_alice, E_bob, pk_alice, pk_bob,
         proof.T1, proof.T2, proof.T3,

@@ -102,9 +102,11 @@ contract IdentityRegistryV2Test is Test {
         proof.e    = _u(j, ".registration_proof.e");
         proof.s_m  = _u(j, ".registration_proof.s_m");
         proof.s_r  = _u(j, ".registration_proof.s_r");
+        proof.s_sk = _u(j, ".registration_proof.s_sk");
         proof.A_ps = _g1j(j, ".registration_proof.A_ps");
         proof.T_C  = _g1j(j, ".registration_proof.T_C");
         proof.T_R  = _g1j(j, ".registration_proof.T_R");
+        proof.T_key = _g1j(j, ".registration_proof.T_key");
 
         vm.prank(who);
         reg.register(ISSUER_ADDR, pk, E, sigma, proof);
@@ -274,9 +276,11 @@ contract IdentityRegistryV2Test is Test {
         proof.e    = _u(j, ".registration_proof.e");
         proof.s_m  = _u(j, ".registration_proof.s_m");
         proof.s_r  = _u(j, ".registration_proof.s_r");
+        proof.s_sk = _u(j, ".registration_proof.s_sk");
         proof.A_ps = _g1j(j, ".registration_proof.A_ps");
         proof.T_C  = _g1j(j, ".registration_proof.T_C");
         proof.T_R  = _g1j(j, ".registration_proof.T_R");
+        proof.T_key = _g1j(j, ".registration_proof.T_key");
 
         vm.prank(who);
         reg.register(ISSUER_ADDR, pk, E, sigma, proof, leaf);

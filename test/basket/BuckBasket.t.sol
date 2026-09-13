@@ -732,9 +732,11 @@ contract BuckBasketTest is Test {
         p.e    = _u(string.concat(base, ".e"));
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
+        p.s_sk = _u(string.concat(base, ".s_sk"));
         p.A_ps = _g1(string.concat(base, ".A_ps"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
+        p.T_key = _g1(string.concat(base, ".T_key"));
     }
     function _trustIssuer() internal {
         IdentityRegistry.PSPubKey memory ipk;
