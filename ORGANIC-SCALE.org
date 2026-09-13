@@ -333,7 +333,135 @@ recommendations as put):
 Order of work that follows: WP-16 and WP-15 (the grid's prerequisites)
 in parallel now; WP-14 next; cycle 1; the viewer's websocket source;
 then wave 4's T15 (the income channel and the three household roles),
-T16 (multiplicity and the rung-2 gate), T17 (the four rungs).
+T16 (multiplicity and the rung-2 gate), T17 (the four rungs).  Amended
+2026-09-13: the stand comes first (the section below).
+
+* The stand before the controller (design owner + Claude, 2026-09-13; RESOLVED)
+
+The design owner's reading, after WP-16 (=reports/wp-16.org=) and
+=CARRY-CONVEXITY.org= D9: every quantitative controller result awaits
+the thin-cast problem; no amount of optimal control replaces a rich set
+of economic actors arbitraging against other actors whose pursuit of
+their own goals at a premium or discount produced the disruption; the
+organic, scalable population is the required TEST STAND before control
+and responsiveness to disruption are optimized.  The question put: is
+that a misreading?  The answer of record: no, with one correction and
+one sharpening, and the sequence below is the ruling.
+
+** Where the thin cast bites, precisely
+
+The two numbers WP-16 used to call K a weak lever and the price loop
+noise are population ASSUMPTIONS, not measurements of an economy:
+
+| WP-16 number                                  | what actually sets it in today's sim                                                                                                                                                              |
+|-----------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| supply flow per unit K, ~50k BUCK/day         | a pending debtor's arrival clock advances at (K / 0.75) x (1 + 5 x (1 - bvib)), capped at 3x (=equilibrium_agents.py=, the =endog= arrival hazard: =arr_k_ref=, =arr_gain=, =arr_max=).  One line, an assumed elasticity. |
+| the price reverts within the day              | the excursion arbs' thresholds and their effectively unlimited capital                                                                                                                              |
+| cuts delever at once, rises ramp slowly       | genuine in kind, but its size is the debtors' K-scaled limits on a 30-debtor cast                                                                                                                 |
+
+A real borrower decides to refinance a 6% USD mortgage into BUCK credit
+when the premium, the funding factor and the discount make it pay, and
+retires the BUCK liability when BUCK is cheap.  That decision,
+multiplied over a population with a distribution of rates and horizons,
+is what g and its lag ARE.  So every quantitative claim about K --
+decision 28 on its authority above all -- waits for the stand, as
+decision 22 and D9 already say.
+
+** What survives any cast (the correction)
+
+The structural half of the controller work does not wait, and it is
+what tells the stand what to measure.  Three facts hold in every
+population: one lever zeroes one integral (algebra); K acts only
+through voluntary borrowing, so it is a slow rate lever everywhere and
+only g and the uptake lag change; a cut can compel while a rise can
+only offer, in any credit money.  Those fix the controller's SHAPE (D9:
+one integrated signal plus an estimated persistent flow) and name what
+the stand must be able to measure at each rung: g, the uptake lag
+tau_K, the persistence spectrum of organic flow, and the ratio of K's
+authority to the disturbance scale.  D9's stage 1 (cycle 1 as the
+single-versus-double integrator test) runs now; stage 2 (the
+perfect-measurement K) rides the ladder as a PER-RUNG INSTRUMENT, one
+cell per arm, re-asking "is K the lever at this scale"; stage 3 (the
+estimator) only after rung 2 passes its gates; stage 4 after that.
+
+** The organic load, not more arbitrage (the sharpening)
+
+The arbitrage layer already exists and works almost too well (the cast
+reverts within the day because the arbs are unconstrained).  What is
+missing is the ORGANIC LOAD -- income, expenses, external debt as a
+stock, life-cycle saving, business cycles, demography -- the flows that
+produce disruptions endogenously, households and businesses meeting
+their own goals at a premium or discount, instead of a whale on a
+schedule.  The roster table above names exactly those absences.
+
+** How to build the stand (the program of section 4, refined)
+
+1. *The decision kernel, once.*  Every organic agent is a
+   budget-constrained household or business choosing each tick among a
+   fixed menu by comparing CARRY RATES: demurrage on held BUCK, the
+   basket yield, the external debt rate, the cost of BUCK credit
+   (premium plus insurance), the current discount or premium, and the
+   funding factor.  The menu: hold BUCK; deposit into the basket;
+   pledge wealth as a standing undrawn BuckCredit facility; retire
+   external debt; retire BUCK credit; spend.  That one comparison IS
+   the list of rational behaviours (buy low, sell high, accumulate and
+   divest opportunistically, retire expensive external debt, retire
+   the BUCK liability at a discount), and it is the carry logic the
+   design already applies to the desk.  Parameters are drawn per agent
+   from distributions that scale with the rung.
+2. *The roster, ported rather than invented.*  The JS seeds are audited
+   to the ledger and the octl debtors already retire mortgages
+   optimally.  In the order that grounds the K channel first:
+   (a) the income channel and the external-debt retiree (they set g and
+   the retirement flows); (b) the standing-facility saver, the
+   demurrage-avoiding role no Python agent plays today; (c) the
+   business with payroll, closing the income loop; (d) a minimal credit
+   union and insurer.
+3. *Scale by multiplicity, gated.*  Decision 2 stands: a few hundred
+   heterogeneous agents, each standing for M households with Poisson
+   thinning per tick and impact-capped trade splitting; the rung-2
+   equivalence gate is the first thing T16 must pass; agent count stays
+   fixed, so a rung costs what a cell costs today.
+4. *Realism as gates, not agent counts.*  Each rung passes a short list
+   of STYLIZED FACTS before any monetary operation is judged on it:
+   debt-to-income; the credit-created share of the BUCK supply (the one
+   that matters most -- it is the ratio that decides whether K has
+   authority at all); the savings rate; BUCK turnover per year; the
+   annual refinancing fraction; the holding-period distribution; the
+   reversion time of price deviations.  Target values are SOURCED when
+   the gate is written (=reports/wp-ladder.org= carries the table with
+   its sources), never asserted here.
+5. *The progression.*  Five sim-years cannot carry five orders of
+   magnitude organically, so the ladder's rungs are steady states at
+   fixed M (1, 2, 4, 6 as decided).  One continuous village-to-nation
+   INTEGRATION CELL per design of record is added: at 25% growth per
+   year it is roughly a fifty-year run, which the coarse cadence
+   (day_step 10, one tick) does in a few hours per core by the compute
+   table above.  It is a stress test of the mechanism under growth, not
+   a forecast.
+6. *Disruptions from inside.*  Once the load is organic the catalogue
+   gains ENDOGENOUS arms -- a harvest season, a mortgage renewal wave,
+   a commodity move through the quotes, a demographic shock; the whale
+   stays as the adversarial bound but stops being the only disturbance.
+
+** The sequence (RESOLVED 2026-09-13, design owner)
+
+1. Judge cycle 1 as the structural test it is (D9 stage 1; every
+   quantitative reading provisional, decision 22).
+2. The critical path on the integrator's account moves to T15 in the
+   order of item 2 above; the first two roles are about two sessions.
+   T15 stops being "on offer".
+3. T16 with its equivalence gate next; then T17's rungs with the
+   organic gates of decision 1 PLUS the stylized-facts gates of item 4.
+4. D9's stage 2 rides the ladder per rung; stage 3 only after rung 2
+   passes; stage 4 after that.
+5. THE PHASE RULE (recorded in =WAVE3.org= STATUS): nothing in D9 beyond
+   stage 1 is built before rung 2 passes its gates, and no monetary
+   operation is judged at a rung whose organic and stylized-facts gates
+   have not passed.
+
+The effort estimate of section 4 (about twenty agent-sessions and a
+few machine-days) is unchanged; the order within it is.
 
 * Tracks (added to ONBOARDING-D7.org)
 
@@ -342,7 +470,8 @@ channel, business, external-debt retiree, intermediary, insurer); T16
 demography + cohorts; T17 the ladder runs and the organic gates.
 Their owned files are new modules; their appends are the usual shared
 files; none touches the controller, the observer, or the D7 grid's
-machinery (T2).
+machinery (T2).  From 2026-09-13 T15 is the critical path on the
+integrator's account ("The stand before the controller").
 
 * Scaling by multiplicity (design owner's proposal, 2026-09-11)
 

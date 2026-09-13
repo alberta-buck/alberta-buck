@@ -71,6 +71,16 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   =max_frac= / population, =SIM_OPS_*_BP=, =range_bp=), never
   =--scale=.  3c's undertakings grid and the deferred k-integral-c0
   star run on the winning design.
+- *THE PHASE RULE (2026-09-13, design owner)*: THE STAND COMES FIRST.
+  Nothing in D9 beyond stage 1 (cycle 1 read as the single-versus-double
+  integrator test) is built before rung 2 of the organic ladder passes
+  its gates, and no monetary operation is judged at a rung whose organic
+  and stylized-facts gates have not passed (=ORGANIC-SCALE.org=, "The
+  stand before the controller").  After cycle 1 is judged the critical
+  path on this account is T15 (income channel + external-debt retiree;
+  the standing-facility saver; business + payroll; minimal credit union
+  + insurer), then T16 (multiplicity + the rung-2 gate), then T17 (the
+  rungs).  D9's stage 2 rides the ladder as a per-rung instrument.
 - *Smoke vectors* from the five worktrees are archived (not committed)
   under =build/sim/smoke/wp-{2,5,6,8}/= in the main repo; WP-3a's were
   in =/tmp=.  Every number in the ledger names its command.
@@ -726,6 +736,32 @@ install and login.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-13 -- The stand before the controller: the phase rule (session 3, design owner + Claude, on datasim)
+
+- The design owner's reading after D9: every quantitative controller
+  result awaits the thin-cast problem; the organic, scalable population
+  is the required test stand.  Confirmed, with one correction (the
+  structural half of D9 does not wait and names what the stand must
+  measure: g, tau_K, the persistence spectrum, the authority ratio per
+  rung) and one sharpening (the arbitrage layer exists; the ORGANIC
+  LOAD is what is missing).  The two numbers WP-16 rested on are
+  population assumptions: g is the =endog= arrival hazard (K / 0.75) x
+  (1 + 5 (1 - bvib)) capped at 3x, and the within-day reversion is the
+  arbs' parameters.  Recorded in =ORGANIC-SCALE.org= "The stand before
+  the controller": the decision kernel (a carry-rate comparison over a
+  fixed menu), the roster order (income + external-debt retiree;
+  standing-facility saver; business + payroll; credit union + insurer),
+  multiplicity gated at rung 2, stylized-facts gates per rung (values
+  sourced when written), one fifty-year coarse-cadence progression
+  cell per design of record, endogenous disruption arms.  Decision 38
+  RESOLVED; the phase rule added to STATUS; ONBOARDING-D7.org's T15 /
+  T16 / T17 rows re-statused (T15 = the critical path on this account
+  after cycle 1); D9 carries the ruling.
+- Cycle 1: 29 of 66 vectors written by 07:20 PDT (the star log's exit
+  lines lag because =pool.map= reports in submission order); none
+  failed.
+- Next: judge cycle 1 when its =.done= marker appears; then T15.
 
 ** 2026-09-13 -- The controller structure after WP-16: D9 recorded (session 3, design owner + Claude, on datasim)
 
@@ -2248,6 +2284,12 @@ next.  Paste acceptance evidence here, not in chat.
    quadratic cost wants; no larger P is justified.  Decision 28's
    option (b) is the default if stage 2's ceiling is within the noise
    of A.
+   RESOLVED 2026-09-13 (design owner): the analysis and the sequence
+   accepted, with the stand first -- stage 1 now; stage 2 as a per-rung
+   instrument on the organic ladder; stage 3 only after rung 2 passes
+   its gates; stage 4 after that.  The phase rule is in STATUS; the
+   record is =ORGANIC-SCALE.org= "The stand before the controller".
+
 * Conventions
 
 - Branches: =wp/<n>-<slug>= off =feature/carry-convexity=; merge

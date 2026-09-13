@@ -1321,6 +1321,15 @@ it changes: the two-loop form of D7 is now the alternative under test
 rather than the incumbent, pending stage 1; the estimator is the
 design of the next two stages; and "faster K" is closed as a
 direction.
+/Ruling (design owner, 2026-09-13)./  The analysis and the sequence
+accepted, with THE STAND FIRST: the two numbers WP-16 rested on (g as
+the =endog= arrival hazard; the within-day reversion as the arbs'
+parameters) are population assumptions, so stage 1 runs now, stage 2
+rides the organic ladder as a per-rung instrument, stage 3 waits for
+rung 2 to pass its gates, and stage 4 follows.  The record of the
+stand -- the decision kernel, the roster order, the gates, the
+progression cell -- is =ORGANIC-SCALE.org= "The stand before the
+controller"; the phase rule is in =WAVE3.org= STATUS.
 
 * The resulting structure
 

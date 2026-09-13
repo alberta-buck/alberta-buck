@@ -458,9 +458,9 @@ run at once; the map says which waits.
 | T12   | WP-10 documents of record: the "Wave 3 results" section, findings 12+, closing the ledger                          | CARRY-CONVEXITY.org, REBALANCING-EQ.org, WAVE3.org                                        | --                                           | (the integrator only)                                                                 | everything                     | integrator | open |
 | T13   | telemetry schema v2: per-agent =acts= (every tagged send + the decision's =why=), every class reporting =telemetry()= (ORGANIC-SCALE.org) | snapshot.py's telemetry block, agents.py base hooks, TELEMETRY.md; a send recorder in chain.py | equilibrium_agents.py / direct_mint.py (the per-class telemetry() bodies only) | the controller; the D7 grid machinery (T2) | -- | 1-2 | BUILT on wp/14-viewer 2026-09-11 (recorder + SaverAgent why); other agents' why notes open |
 | T14   | the viewer: one HTML + script in alberta_buck/sim/viewer/ (uPlot vendored via package.json); slider, left metric panes, right class tabs with per-agent panes and the 3-nearest action log; file / websocket / JSONL sources | alberta_buck/sim/viewer/*, package.json (devDependency), server.py (serve the static files) | -- | the sim's Python agents | T13 for acts (starts on v1 data) | 2-3 | v1 BUILT on wp/14-viewer 2026-09-11, served at datasim:8787; live websocket source and the JS emitter open |
-| T15   | the organic agents: income channel + standing-facility saver; business / farmstead with payroll (port of farmer.js); external-debt retiree (port of mortgage-retiree + MonthlyIncome); minimal intermediary and insurer | household_agents.py, business_agents.py, intermediary_agents.py (new); experiments/organic-*.toml | loop.py imports, snapshot.py, catalogue.py DEFENDERS | the three facility agents (T3), equilibrium_agents.py's existing classes | -- | 5-7 | open |
-| T16   | demography driver + the cohort layer with its equivalence gate (a cohort of N reproduces N agents within tolerance) | demography.py, cohort.py (new), test_cohort.py | experiment.py (a [demography] block), snapshot.py | the controller | T15 | 5 | open |
-| T17   | the scale ladder: rungs 1-6 (ORGANIC-SCALE.org), the organic gates per rung, then the catalogue and the D7 designs re-judged rung by rung | experiments/ladder-*.toml, reports/wp-ladder.org, eqmetrics.py (organic gates, append) | -- | code outside eqmetrics | T15, T16; datasim | 4 + compute | open |
+| T15   | the organic agents: income channel + standing-facility saver; business / farmstead with payroll (port of farmer.js); external-debt retiree (port of mortgage-retiree + MonthlyIncome); minimal intermediary and insurer | household_agents.py, business_agents.py, intermediary_agents.py (new); experiments/organic-*.toml | loop.py imports, snapshot.py, catalogue.py DEFENDERS | the three facility agents (T3), equilibrium_agents.py's existing classes | -- | 5-7 | CRITICAL PATH, the integrator's account, after cycle 1 is judged (2026-09-13); order: income channel + external-debt retiree, standing-facility saver, business + payroll, credit union + insurer |
+| T16   | demography driver + the cohort layer with its equivalence gate (a cohort of N reproduces N agents within tolerance) | demography.py, cohort.py (new), test_cohort.py | experiment.py (a [demography] block), snapshot.py | the controller | T15 | 5 | next after T15 (the rung-2 equivalence gate first) |
+| T17   | the scale ladder: rungs 1-6 (ORGANIC-SCALE.org), the organic gates per rung, then the catalogue and the D7 designs re-judged rung by rung | experiments/ladder-*.toml, reports/wp-ladder.org, eqmetrics.py (organic gates, append) | -- | code outside eqmetrics | T15, T16; datasim | 4 + compute | after T16; organic gates + the stylized-facts gates (ORGANIC-SCALE.org "The stand before the controller") |
 
 Non-overlap in one sentence: T1 is offline Python; T2 adds new agents
 and new TOMLs; T3 edits the three facility agents; T4 edits the
@@ -471,6 +471,15 @@ that never touch the controller or T2's files.  The one real contention is =snap
 / =loop.py= (append-only, merge by keeping both sides) and
 =WhaleRaidAgent= (T2 before T8).  Anything that would edit the K
 contracts belongs to the integrator until the grid has judged S vs V.
+
+THE PHASE RULE (2026-09-13): the stand comes first.  Nothing in
+CARRY-CONVEXITY.org D9 beyond stage 1 is built before rung 2 of the
+organic ladder passes its gates, and no monetary operation is judged at
+a rung whose organic and stylized-facts gates have not passed
+(ORGANIC-SCALE.org "The stand before the controller").  T15 is the
+critical path on the integrator's account from the day cycle 1 is
+judged; an agent resuming this program starts there unless the STATUS
+block of WAVE3.org says otherwise.
 
 ** The claim protocol (other accounts)
 
