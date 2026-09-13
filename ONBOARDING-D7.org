@@ -152,6 +152,7 @@ you build contracts in the worktree.  Do not rebuild the main repo's
   nix develop                     # Foundry (pinned solc 0.8.28 via the Makefile), Python 3.13, Node
   make venv                       # the repo venv: ../alberta-buck.venv-<ver>-<platform>; installs alberta_buck + core/python
   make nix-build                  # never bare `forge build`
+  make nix-venv-sim-build         # if this checkout will RUN CELLS: stages the six Uniswap artifacts too (house rule 13)
   make nix-test                   # at 17d77c7: 60 suites, 619 passed, 0 failed, 1 skipped
   make nix-venv-test              # pytest; the wave-3 files + test_gauge + test_shadow_book are 155 tests
 
@@ -272,6 +273,17 @@ Total: about three and a half hours including the setup.
     =pyproject.toml= extras (installed by =make venv=).  Nothing is
     installed globally, and nothing is used because it happened to be
     on PATH.  Say in your report what you added.
+12. The ORDER of =--set= lines is part of a cell's identity: agents are
+    numbered in the insertion order of =scenario.agents=, which the
+    =--set= lines extend in command-line order, and the keyed RNG streams
+    and the identity cache are per (seed, class, idx).  A re-ordered
+    command line is a DIFFERENT cell (it drifts from day 0).  Copy a
+    base cell's command line verbatim for any identity pair, and never
+    "tidy" the order of a spec's sets.
+13. A worktree that RUNS CELLS needs the staged third-party artifacts:
+    =make nix-venv-sim-build= (forge build + =gen_prices= + =stage-uniswap=),
+    not =make nix-build= alone, or every cell dies at deploy with
+    "UniswapV3Factory is not published here".
 
 * The report (=reports/wp-<n>.org=)
 
@@ -434,7 +446,7 @@ run at once; the map says which waits.
 |-------+----------------------------------------------------------------------+-------------------------------------------------------------------------------------------+----------------------------------------------+---------------------------------------------------------------------------------------+--------------------------------+----------+------------------------------|
 | T1    | WP-16 gain derivation: kdesign.py, step tests, LQR / SIMC table      | alberta_buck/sim/kdesign.py, test_kdesign.py, experiments/kdesign-*.toml                  | --                                           | the controller contracts; snapshot.py                                                 | banked vectors (or its own 1-year step cells) | 1 | DONE (merged 50e0616, 2026-09-12): the table in build/sim/kdesign/gains.org |
 | T2    | WP-15 grid machinery: class TOMLs, pusher, whale period knob, BookLoaderAgent, metrics, star values axis, cycle-1 spec | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml, bookloader.py, pusher_agent.py, experiments/stars/d7-*.toml | eqmetrics.py, snapshot.py, catalogue.py, loop.py (import lines), star.py (the values axis), WhaleRaidAgent (one knob) | undertaking_agents.py / facility_agent.py / seeder_agent.py (T3's); the controller contracts | WP-13 (merged) | 1-2 | DONE (merged 75d9e34, 2026-09-12); the cycles are the integrator's |
-| T3    | WP-14 + decision 17: one sim-only stabilizer per agent class; local skews kappa_i; the seeder booked as a position | undertaking_agents.py, facility_agent.py, seeder_agent.py, shadow_book.py; ShadowObserver.sol ONLY if a registry is needed (then forge tests) | snapshot.py, deploy.py                       | equilibrium_agents.py (T4's); the controller (BuckKControllerShadow.sol)               | WP-13 (merged)                 | 1-2      | open                         |
+| T3    | WP-14 + decision 17: one sim-only stabilizer per agent class; local skews kappa_i; the seeder booked as a position | undertaking_agents.py, facility_agent.py, seeder_agent.py, shadow_book.py; ShadowObserver.sol ONLY if a registry is needed (then forge tests) | snapshot.py, deploy.py                       | equilibrium_agents.py (T4's); the controller (BuckKControllerShadow.sol)               | WP-13 (merged)                 | 1-2      | DONE (merged 801f34f, 2026-09-12); the desk's on-chain skew is decision 34 |
 | T4    | decision 14 + 16: TOKEN-pool reserve gauges to gauge.active_reserves; the TUI gauge; the lifecycle plot test | equilibrium_agents.py (the reserve reads only), rebalancer.py, director_agent.py, inspect.py, snapshot._implied, test_lifecycle_plot.py (or the vector) | gauge.py (new helpers at the end)            | the three facility agents (T3's); router.py's quote semantics (settled by decision 8)   | decision 8 (merged)            | 1        | open                         |
 | T5    | decision 15: the seeder's economics -- 3h cells with budget_m as the amount axis, min_gap_bp swept; a design note on sizing the bid against the desk's Q3 | experiments/stars/seeder-*.toml, reports/wp-3h.org, a doc note (reports/) | --                                           | seeder_agent.py (T3 owns it; T5 runs CELLS and writes the note; a code change is a request to T3) | regeneration done; T3 for the booked seeder position | 1 | waits for T3 |
 | T6    | WP-4 the directional fee: fees.py + the swap-adapter hook; the 3b grid                                            | alberta_buck/sim/fees.py, test_fees.py, the adapter hook (a new function in router.py's swap path, called from one line) | router.py (one call site), snapshot.py       | gauge.py / the reserve reads (T4's); runs its cells after the regeneration            | decision 8 (merged)            | 1-2      | open; cells wait for regeneration |
