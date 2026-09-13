@@ -39,6 +39,7 @@ BIND_PK = _G
 BIND_E = (_G, _G)                              # ElGamalCT (R, C)
 
 _CACHE_PATH = Path(__file__).resolve().parents[2] / "test" / "vectors" / "identity-cache.json"
+_CACHE_SCHEMA = 3
 
 # ---------------------------------------------------------------------------
 # Cache management
@@ -53,13 +54,28 @@ def _load_cache() -> dict:
     return {}
 
 
+def _valid_cache_entry(data: Any) -> bool:
+    """Return whether ``data`` matches the current registration ABI.
+
+    RegistrationProof grew from six to eight fields in schema 3.  Treat old
+    or partially-written entries as cache misses instead of handing a stale
+    tuple to web3's ABI encoder.
+    """
+    return (
+        isinstance(data, list)
+        and len(data) in (4, 5)
+        and isinstance(data[3], list)
+        and len(data[3]) == 8
+    )
+
+
 def _save_cache(cache: dict) -> None:
     _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _CACHE_PATH.write_text(json.dumps(cache))
 
 
 def _cache_key(seed: int, class_name: str, idx: int, chainid: int = 31337) -> str:
-    return f"{seed:08x}:{class_name}:{idx}:v2:{chainid}"
+    return f"{seed:08x}:{class_name}:{idx}:v{_CACHE_SCHEMA}:{chainid}"
 
 
 def _deterministic_key(seed: int, class_name: str, idx: int) -> bytes:
@@ -225,7 +241,7 @@ def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
 
     cache = _load_cache()
     key = _cache_key(seed, class_name, idx, chainid)
-    if key in cache:
+    if key in cache and _valid_cache_entry(cache[key]):
         return account, _from_serializable(cache[key])
 
     # Generate fresh registration args and cache them.

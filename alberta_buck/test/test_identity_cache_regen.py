@@ -95,6 +95,34 @@ def test_sim_issue_binds_anvil_default_chainid():
         reset_sim_registry()
 
 
+def test_legacy_registration_proof_is_not_a_cache_hit(monkeypatch):
+    """A six-field proof must be regenerated, never sent to the v3 ABI."""
+    from alberta_buck.sim import identity as idmod
+
+    key = idmod._cache_key(7, "TestAgent", 0, 31337)
+    legacy = [
+        [1, 2],
+        [[1, 2], [1, 2]],
+        [[1, 2], [1, 2]],
+        [1, 2, 3, [1, 2], [1, 2], [1, 2]],
+    ]
+
+    monkeypatch.setattr(idmod, "_load_cache", lambda: {key: legacy})
+
+    class RegenerateSentinel(Exception):
+        pass
+
+    def regenerate(_seed):
+        raise RegenerateSentinel
+
+    monkeypatch.setattr(idmod, "get_sim_registry", regenerate)
+    with pytest.raises(RegenerateSentinel):
+        idmod.cached_eoa_setup(
+            7, "TestAgent", 0, issuer=None,
+            rng=idmod.seeded_rng(7), chainid=31337,
+        )
+
+
 @pytest.mark.skipif(anvil_missing or web3_missing,
                     reason="anvil or web3 not available")
 @pytest.mark.skipif(not kernel_active(),
