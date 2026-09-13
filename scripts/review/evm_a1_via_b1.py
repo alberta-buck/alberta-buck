@@ -13,9 +13,10 @@ point); only the expected outcome flipped.  Finding 7 (flavor-agnostic
 spend circuit) is still a circuit gap, but empty membership no longer
 lets it move BUCK.
 
-Honest control: the same minted A1 note is then spent through
+Honest controls: the same minted A1 note is then spent through
 spendCoupledA1 with the fixture's real membership and note-binding
-proofs; BUCK is paid to the addressee.
+proofs; a separate B1 fixture then completes its lifecycle with a real
+membership proof.  Both pay their intended recipients.
 """
 import os
 import sys
@@ -166,3 +167,34 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     print("\nRESULT: finding 8 inverted -- empty membership no longer spends.")
     print("   A1-via-B1 with empty membership reverts; honest A1 with real")
     print("   membership+binding proofs still pays the addressee.")
+
+# Required P0-0 control: fail-closed membership must not break an honest B1
+# lifecycle carrying the committed real spend and G1-tie membership proofs.
+b1_fx = E2EFixture.load("b1")
+assert b1_fx.opening.flavor == 3, "fixture must be B1"
+
+with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as anvil:
+    b1_stack = NotesStack(anvil, b1_fx, rng=seeded(45))
+    b1_stack.bind_identities()
+    for a in (b1_fx.issuer.addr, b1_fx.depositor.addr):
+        anvil.set_code(b1_stack._addr(a), "0x")
+    b1_stack.fund_issuer()
+    b1_stack.approve_pool(b1_fx.issuer, 2 * b1_fx.face, "approve issuer->pool")
+    b1_stack.approve_pool(b1_fx.depositor, 0, "approve depositor->pool")
+
+    payout = b1_stack._addr(b1_fx.payout)
+    payout_before = b1_stack.buck.functions.balanceOf(payout).call()
+    pool_before = b1_stack.buck.functions.balanceOf(b1_stack.notes.address).call()
+    b1_stack.mint()
+    minted_pool = b1_stack.buck.functions.balanceOf(b1_stack.notes.address).call()
+    honest_b1 = b1_stack.spend()
+    payout_after = b1_stack.buck.functions.balanceOf(payout).call()
+    pool_after = b1_stack.buck.functions.balanceOf(b1_stack.notes.address).call()
+
+    assert minted_pool - pool_before == b1_fx.face, "B1 mint must escrow face"
+    assert payout_after - payout_before == b1_fx.face, "honest B1 must pay recipient"
+    assert minted_pool - pool_after == b1_fx.face, "honest B1 must debit the pool"
+    assert b1_stack.notes.functions.nullifiers(b1_fx.nullifier).call(), \
+        "honest B1 must consume nullifier"
+    print("HONEST B1 spend with real membership proof succeeded; tx", honest_b1.txhash)
+    print("   recipient delta BUCK =", payout_after - payout_before)
