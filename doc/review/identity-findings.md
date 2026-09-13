@@ -180,7 +180,11 @@ possession unconditional human non-transferability.
 
 ## 3. The approval proof does not bind its witness to the account key
 
-**Reproduced in the wallet verifier; matching Solidity equations inspected.**
+**Reproduced in the wallet verifier and on a real EVM.** The deployed
+`IdentityRegistry` bytecode accepts the false-identity approval, and Bob
+decrypts it to the third party's identity, not the sender's; the honest
+control is accepted and decrypts to the sender's identity. See
+`scripts/review/evm_approval_forgery.py` (in-process revm via `PyrevmAnvil`).
 Let the sender's registration be
 
     pk_a = sk*G, R_a = r*G, C_a = m*G + sk*R_a.
@@ -373,7 +377,11 @@ public identity identifier.
 
 ## 5. Sharing the public point does not bind the membership witness
 
-**Source-established; real Groth16 witness/proof pending.**
+**Reproduced with real Groth16 artifacts.** Using the committed circuit and
+proving key (`build/snark/g1tie`), a proof was generated and verified for a
+witness whose public `P` is opened by an identity that is **not** the tree
+member `M`, by supplying `T = P - M`. An honest control proof also verifies.
+See `scripts/review/g1tie_membership_mismatch.py`.
 [`identity_membership_g1tie.circom`](../../circuits/identity_membership_g1tie.circom)
 checks membership of `M` and the point addition `P = M + T`. It accepts the
 point `T` as a witness; it does not prove knowledge of a scalar `b` such
@@ -955,6 +963,14 @@ Existing work:
   [credential/payment circuit](circuits/credential_payment.circom) are preserved
   scaffolding. Their existence does not establish completed Groth16/EVM or PQ
   checks. The circuit has not been compiled or proved in this review.
+- [Executed reproductions](../../scripts/review/) added after the first pass:
+  `evm_approval_forgery.py` reproduces finding 3 against the deployed registry
+  on an in-process EVM; `g1tie_membership_mismatch.py` reproduces finding 5
+  with the committed Groth16 circuit and proving key; `silmarils_model.py` is
+  the executable SILMARILS model behind the orthogonality assessment. These
+  upgraded the evidence labels for findings 3 and 5 above. The costed,
+  prioritized plan for landing the repairs is in
+  [mitigation-implementation-guide.md](mitigation-implementation-guide.md).
 
 Remaining tasks, in dependency order:
 

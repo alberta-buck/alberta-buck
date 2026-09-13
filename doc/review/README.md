@@ -6,6 +6,8 @@ It is ongoing; the papers themselves have not yet been revised.
 - [Reading and working record](2026-09-12-editorial-audit.md)
 - [Identity findings, evidence and mitigation options](identity-findings.md)
 - [Audience map and editing decisions](editorial-map.md)
+- [Mitigation implementation and testing guide](mitigation-implementation-guide.md) -- costed, prioritized handoff for landing the repairs
+- [Executed reproductions](../../scripts/review/) -- EVM approval forgery, real-Groth16 membership mismatch, SILMARILS model
 
 The immediate priority is to make the identity claims accurate. Three
 counterexamples have been reproduced with the wallet code. Further findings
