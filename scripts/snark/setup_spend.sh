@@ -55,6 +55,10 @@ echo "[sol] exporting Solidity verifier -> isolated SpendGroth16Verifier.sol"
 snarkjs zkesv "$ZKEYF" "$SOL"
 sed -i.bak "s/contract Groth16Verifier/contract SpendGroth16Verifier/" "$SOL"
 rm -f "$SOL.bak"
+# snarkjs emits whitespace-only blank lines.  Keep the committed verifier
+# stable under git diff --check after every regeneration.
+sed -i.bak -E 's/[[:space:]]+$//' "$SOL"
+rm -f "$SOL.bak"
 
 echo "[copy] matched set -> $OUT and $VERIFIER"
 rm -rf "$OUT"

@@ -42,7 +42,7 @@ contract SpendGroth16Verifier {
     uint256 constant deltay1 = 8561782799793747390884979494617379186620592096678665182870607915142334313541;
     uint256 constant deltay2 = 2415898867332878178962355440260697036130244298460682339592704473567550733540;
 
-    
+
     uint256 constant IC0x = 19983633768322306516637983712745202637169495121620442350667846721031895007652;
     uint256 constant IC0y = 17650419207650652317962441815759946376003573110610313810507664591442406801753;
     
@@ -114,7 +114,7 @@ contract SpendGroth16Verifier {
                 mstore(add(_pVk, 32), IC0y)
 
                 // Compute the linear combination vk_x
-                
+
                 g1_mulAccC(_pVk, IC1x, IC1y, calldataload(add(pubSignals, 0)))
                 
                 g1_mulAccC(_pVk, IC2x, IC2y, calldataload(add(pubSignals, 32)))
@@ -179,7 +179,7 @@ contract SpendGroth16Verifier {
             mstore(0x40, add(pMem, pLastMem))
 
             // Validate that all evaluations ∈ F
-            
+
             checkField(calldataload(add(_pubSignals, 0)))
             
             checkField(calldataload(add(_pubSignals, 32)))
