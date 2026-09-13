@@ -643,12 +643,13 @@ contract Notes {
     ///      the sigma decrypted `eIss` to — a colluding pair cannot answer the
     ///      coupling with one point and the membership with another.
     ///
-    ///      Reverts if the verifier is wired and the proof is empty or invalid,
+    ///      Reverts if the verifier is unset, the proof is empty or invalid,
     ///      or the registry's identityRoot is zero (unseeded accumulator).
-    ///      Returns without checking if the verifier is not set (address(0));
-    ///      coupled spend entry points require it non-zero before calling, so
-    ///      empty proofs are not a spend surface.  The real G1-tie verifier has
-    ///      no valid proof for the point (0, 0) and so fails closed there.
+    ///      Coupled spend entry points also require the verifier non-zero
+    ///      (cheap, before the spend SNARK); this helper fails closed too so
+    ///      a future caller cannot skip by omitting that require.  The real
+    ///      G1-tie verifier has no valid proof for the point (0, 0) and so
+    ///      fails closed there.
     function _verifyIdentityMembership(
         bytes memory identityMembershipProof,
         uint256 px,
@@ -657,7 +658,8 @@ contract Notes {
         internal
     {
         IIdentityMembershipVerifier verifier = identityMembershipVerifier;
-        if (address(verifier) == address(0)) return;
+        require(address(verifier) != address(0),
+                "Notes: membership verifier not set");
         require(identityMembershipProof.length != 0,
                 "Notes: empty identity membership proof");
 
@@ -685,12 +687,12 @@ contract Notes {
     ///      shared point: `dc.P_I`).  See INoteBindingVerifier for both
     ///      relations.
     ///
-    ///      Reverts if the verifier is wired and the proof is empty or invalid.
-    ///      Returns without checking if the verifier is not set (address(0));
-    ///      addressed coupled spends require it non-zero before calling, so
-    ///      empty proofs are not a spend surface.  The production relations
-    ///      are circuits/note_binding.circom and circuits/note_binding_a1.circom
-    ///      (soundness: Proofs Theorem 12).
+    ///      Reverts if the verifier is unset or the proof is empty or invalid.
+    ///      Addressed coupled spends also require the verifier non-zero
+    ///      (cheap, before the spend SNARK); this helper fails closed too so
+    ///      a future caller cannot skip by omitting that require.  The
+    ///      production relations are circuits/note_binding.circom and
+    ///      circuits/note_binding_a1.circom (soundness: Proofs Theorem 12).
     function _verifyNoteBinding(
         bytes memory noteBindingProof,
         uint256 nullifier,
@@ -703,7 +705,8 @@ contract Notes {
         internal
     {
         INoteBindingVerifier verifier = noteBindingVerifier;
-        if (address(verifier) == address(0)) return;
+        require(address(verifier) != address(0),
+                "Notes: note binding verifier not set");
         require(noteBindingProof.length != 0, "Notes: empty note binding");
 
         bool ok = a1Layout

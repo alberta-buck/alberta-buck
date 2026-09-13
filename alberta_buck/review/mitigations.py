@@ -124,9 +124,9 @@ def verify_key_ownership(pk, proof, domain):
 
 
 def membership_proof_required(proof: bytes, verifier_set: bool) -> bool:
-    """Intended fail-closed gate for Notes._verifyIdentityMembership.
+    """Fail-closed gate for Notes._verifyIdentityMembership.
 
-    Production currently returns early on empty proof or unset verifier
-    (finding 8).  A repair accepts the spend only when this is True.
+    Production coupled spends require a nonempty proof and a wired
+    verifier; this helper is that predicate.
     """
     return verifier_set and len(proof) > 0
