@@ -497,7 +497,7 @@ contract IdentityRegistry {
     }
 
     /// @dev PS signature + registration NIZK, Fiat-Shamir bound to `registrant`.
-    ///      Used by register (registrant = msg.sender) and by certified
+    ///      Used by register (registrant = msg.sender) and by credential
     ///      bindContract (registrant = target).
     function _verifyCredential(
         address issuer,

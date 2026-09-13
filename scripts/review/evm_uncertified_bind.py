@@ -9,7 +9,7 @@ certified-operator bind of a registered binder's own (pk, E).
 from web3 import Web3
 
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil, DEV_ACCOUNTS
-from alberta_buck.sim.chain import Chain
+from alberta_buck.sim.chain import Chain, Expect
 from alberta_buck.review.examples import Account, seeded
 from alberta_buck.wallet.bn254 import point_to_words
 from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
@@ -54,19 +54,26 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     bogus = Account(999, 111, 222)
     junk_leaf = 12345
     assert junk_leaf != identity_leaf(bogus.M)
+    bind5 = reg.get_function_by_signature(
+        "bindContract(address,(uint256,uint256),"
+        "((uint256,uint256),(uint256,uint256)),bool,bool)")
     bind6 = reg.get_function_by_signature(
         "bindContract(address,(uint256,uint256),"
         "((uint256,uint256),(uint256,uint256)),bool,bool,uint256)")
-    fabricated = True
-    try:
-        chain.send(bind6(target, g1(bogus.pk), (g1(bogus.E.R), g1(bogus.E.C)),
-                         True, False, junk_leaf), sender=gov)
-    except Exception:
-        fabricated = False
-    assert not fabricated
+
+    chain.send(bind5(target, g1(bogus.pk), (g1(bogus.E.R), g1(bogus.E.C)),
+                     True, False), sender=gov, expect=Expect.REVERT)
+    assert "binder not registered" in (chain.last_revert_reason or "")
+    assert not reg.functions.isVerified(target).call()
+    print("5-arg bindContract from unregistered sender reverted:",
+          chain.last_revert_reason)
+
+    chain.send(bind6(target, g1(bogus.pk), (g1(bogus.E.R), g1(bogus.E.C)),
+                     True, False, junk_leaf), sender=gov, expect=Expect.REVERT)
+    assert "unchecked identity leaf" in (chain.last_revert_reason or "")
     assert not reg.functions.isVerified(target).call()
     assert reg.functions.identityRoot().call() == 0
-    print("bindContract rejected fabricated (pk, E) and unrelated leaf", junk_leaf)
+    print("6-arg bindContract rejected unrelated leaf", junk_leaf)
     print("   isVerified(target) =", False, "; identityRoot still 0")
 
     rng = seeded(9)
@@ -89,16 +96,12 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
         "(uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
         "(uint256,uint256),(uint256,uint256)),"
         "uint256)")
-    unmatched = True
-    try:
-        chain.send(reg6(
-            iss_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
-            (g1(sigma.sigma_1), g1(sigma.sigma_2)),
-            _proof_arg(pf),
-            fake_leaf), sender=alice_addr)
-    except Exception:
-        unmatched = False
-    assert not unmatched
+    chain.send(reg6(
+        iss_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
+        (g1(sigma.sigma_1), g1(sigma.sigma_2)),
+        _proof_arg(pf),
+        fake_leaf), sender=alice_addr, expect=Expect.REVERT)
+    assert "unchecked identity leaf" in (chain.last_revert_reason or "")
     assert not reg.functions.isVerified(alice_addr).call()
     print("register() rejected a real credential with leaf != Poseidon(M)")
     print("   honest leaf", honest_leaf)
@@ -117,9 +120,6 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     # Honest certified-operator bind: alice copies her registered identity.
     pool = Web3.to_checksum_address("0x000000000000000000000000000000000000b00b")
     anvil.set_code(pool, "0x60006000fd")
-    bind5 = reg.get_function_by_signature(
-        "bindContract(address,(uint256,uint256),"
-        "((uint256,uint256),(uint256,uint256)),bool,bool)")
     chain.send(bind5(pool, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
                      True, True), sender=alice_addr)
     assert reg.functions.isVerified(pool).call()

@@ -293,8 +293,7 @@ class _ProxyAgent(Agent):
     def _new_proxy(self, d):
         """Deploy + bind (public, non-carrying) one SimLP proxy contract."""
         proxy = d.chain.deploy("SimLP", sol_file="SimLP")
-        d.chain.send(d.reg.functions.bindContract(
-            proxy.address, idmod.BIND_PK, idmod.BIND_E, True, False))
+        idmod.bind_as_operator(d.chain, d.reg, proxy.address, True, False)
         return proxy
 
     def _proxy_exec(self, d, target: str, data: bytes, proxy=None):

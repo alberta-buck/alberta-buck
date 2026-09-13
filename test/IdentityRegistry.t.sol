@@ -20,11 +20,13 @@ contract IdentityRegistryTest is Test {
     address internal bob;
 
     string internal vj;
+    string internal bj;
 
     function setUp() public {
         // The wallet's transcripts use chainid = 1.
         vm.chainId(1);
         vj = vm.readFile("test/vectors/identity.json");
+        bj = vm.readFile("test/vectors/bind_contract.json");
         deployCodeTo(
             "IdentityRegistry.sol:IdentityRegistry",
             abi.encode(GOV),
@@ -68,6 +70,35 @@ contract IdentityRegistryTest is Test {
     function _ct(string memory key) internal view returns (IdentityRegistry.ElGamalCT memory c) {
         c.R = _g1(string.concat(key, ".R"));
         c.C = _g1(string.concat(key, ".C"));
+    }
+
+    function _bu(string memory key) internal view returns (uint256) {
+        return vm.parseJsonUint(bj, key);
+    }
+
+    function _bg1(string memory key) internal view returns (BN254.G1Point memory) {
+        return BN254.G1Point(_bu(string.concat(key, ".x")), _bu(string.concat(key, ".y")));
+    }
+
+    function _bct(string memory key) internal view returns (IdentityRegistry.ElGamalCT memory c) {
+        c.R = _bg1(string.concat(key, ".R"));
+        c.C = _bg1(string.concat(key, ".C"));
+    }
+
+    function _bps(string memory key) internal view returns (IdentityRegistry.PSSig memory s) {
+        s.sigma_1 = _bg1(string.concat(key, ".sigma_1"));
+        s.sigma_2 = _bg1(string.concat(key, ".sigma_2"));
+    }
+
+    function _bproof(string memory key) internal view returns (IdentityRegistry.RegistrationProof memory p) {
+        p.e    = _bu(string.concat(key, ".e"));
+        p.s_m  = _bu(string.concat(key, ".s_m"));
+        p.s_r  = _bu(string.concat(key, ".s_r"));
+        p.s_sk = _bu(string.concat(key, ".s_sk"));
+        p.A_ps = _bg1(string.concat(key, ".A_ps"));
+        p.T_C  = _bg1(string.concat(key, ".T_C"));
+        p.T_R  = _bg1(string.concat(key, ".T_R"));
+        p.T_key = _bg1(string.concat(key, ".T_key"));
     }
 
     function _regProof(string memory who) internal view returns (IdentityRegistry.RegistrationProof memory p) {
@@ -380,6 +411,29 @@ contract IdentityRegistryTest is Test {
             pool, ISSUER, _alicePk(), _aliceE(), _ps("alice"), _regProof("alice"),
             true, true
         );
+    }
+
+    function test_bindContract_credentialSucceedsForTarget() public {
+        // Proof Fiat-Shamired against uint160(pool); stores that (pk, E).
+        address pool = address(uint160(_bu(".pool.target")));
+        assertEq(pool, address(0xDECAF));
+        _planAt(pool);
+        vm.prank(alice);
+        reg.bindContract(
+            pool, ISSUER,
+            _bg1(".pool.pk"), _bct(".pool.ciphertext"),
+            _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
+            true, true
+        );
+        assertTrue(reg.isVerified(pool));
+        assertTrue(BN254.eq(reg.pkOf(pool), _bg1(".pool.pk")));
+        IdentityRegistry.ElGamalCT memory stored = reg.ciphertextOf(pool);
+        IdentityRegistry.ElGamalCT memory expected = _bct(".pool.ciphertext");
+        assertTrue(BN254.eq(stored.R, expected.R) && BN254.eq(stored.C, expected.C));
+        assertEq(reg.issuerOf(pool), ISSUER);
+        assertEq(reg.binderOf(pool), alice);
+        assertTrue(reg.isPublicIdentity(pool));
+        assertTrue(reg.isCarrying(pool));
     }
 
     function test_register_rejectsUncheckedLeaf() public {

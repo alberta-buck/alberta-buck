@@ -218,3 +218,96 @@ contract BuckAwareDeployerTest is Test {
         assertEq(predicted, expected);
     }
 }
+
+/// @title Production credential deploy+bind (CREATE2 address known to the proof).
+contract BuckAwareDeployerCertifiedTest is Test {
+    IdentityRegistry  internal reg;
+    BuckAwareDeployer internal deployer;
+
+    address internal constant GOV = address(0xA0);
+    address internal constant ISSUER = address(0x1551E1);
+    address internal constant BROADCASTER = address(0xB10D);
+
+    string internal vj;
+    string internal bj;
+
+    function setUp() public {
+        vm.chainId(1);
+        vm.deal(BROADCASTER, 100 ether);
+        vj = vm.readFile("test/vectors/identity.json");
+        bj = vm.readFile("test/vectors/bind_contract.json");
+
+        vm.prank(BROADCASTER);
+        reg = new IdentityRegistry(GOV);
+        vm.prank(BROADCASTER);
+        deployer = new BuckAwareDeployer(address(reg));
+
+        IdentityRegistry.PSPubKey memory ipk;
+        ipk.X.X[0] = _u(".issuer.pk_X.x[0]");
+        ipk.X.X[1] = _u(".issuer.pk_X.x[1]");
+        ipk.X.Y[0] = _u(".issuer.pk_X.y[0]");
+        ipk.X.Y[1] = _u(".issuer.pk_X.y[1]");
+        ipk.Y.X[0] = _u(".issuer.pk_Y.x[0]");
+        ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
+        ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
+        ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        vm.prank(GOV);
+        reg.trustIssuer(ISSUER, ipk);
+    }
+
+    function _u(string memory key) internal view returns (uint256) {
+        return vm.parseJsonUint(vj, key);
+    }
+
+    function _bu(string memory key) internal view returns (uint256) {
+        return vm.parseJsonUint(bj, key);
+    }
+
+    function _bg1(string memory key) internal view returns (BN254.G1Point memory) {
+        return BN254.G1Point(_bu(string.concat(key, ".x")), _bu(string.concat(key, ".y")));
+    }
+
+    function _bct(string memory key) internal view returns (IdentityRegistry.ElGamalCT memory c) {
+        c.R = _bg1(string.concat(key, ".R"));
+        c.C = _bg1(string.concat(key, ".C"));
+    }
+
+    function _bps() internal view returns (IdentityRegistry.PSSig memory s) {
+        s.sigma_1 = _bg1(".create2.ps_sig_rerand.sigma_1");
+        s.sigma_2 = _bg1(".create2.ps_sig_rerand.sigma_2");
+    }
+
+    function _bproof() internal view returns (IdentityRegistry.RegistrationProof memory p) {
+        p.e    = _bu(".create2.registration_proof.e");
+        p.s_m  = _bu(".create2.registration_proof.s_m");
+        p.s_r  = _bu(".create2.registration_proof.s_r");
+        p.s_sk = _bu(".create2.registration_proof.s_sk");
+        p.A_ps = _bg1(".create2.registration_proof.A_ps");
+        p.T_C  = _bg1(".create2.registration_proof.T_C");
+        p.T_R  = _bg1(".create2.registration_proof.T_R");
+        p.T_key = _bg1(".create2.registration_proof.T_key");
+    }
+
+    function test_deployCreate2AndBind_credential() public {
+        assertEq(address(reg), vm.parseJsonAddress(bj, ".create2.registry"));
+        assertEq(address(deployer), vm.parseJsonAddress(bj, ".create2.deployer"));
+
+        bytes memory initCode = type(ToyContract).creationCode;
+        bytes32 salt = bytes32(_bu(".create2.salt"));
+        address predicted = deployer.predictCreate2Address(salt, keccak256(initCode));
+        assertEq(predicted, vm.parseJsonAddress(bj, ".create2.predicted"));
+
+        address deployed = deployer.deployCreate2AndBind(
+            salt, initCode, ISSUER,
+            _bg1(".create2.pk"), _bct(".create2.ciphertext"),
+            _bps(), _bproof(), true, true
+        );
+        assertEq(deployed, predicted);
+        assertTrue(reg.isVerified(deployed));
+        assertTrue(BN254.eq(reg.pkOf(deployed), _bg1(".create2.pk")));
+        assertEq(reg.issuerOf(deployed), ISSUER);
+        assertEq(reg.binderOf(deployed), address(deployer));
+        assertTrue(reg.isPublicIdentity(deployed));
+        assertTrue(reg.isCarrying(deployed));
+    }
+}
