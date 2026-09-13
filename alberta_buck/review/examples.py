@@ -100,3 +100,35 @@ def mismatched_membership():
     tree = IdentityMerkleTree(depth=10)
     tree.insert_identity(member)
     return member, outsider, P, tree, membership_input(tree, 0, member, P)
+
+
+def aliased_g1tie_limbs(witness):
+    """§5c: carry 2^64 from limb 0 into limb 1; Poseidon leaf unchanged.
+
+    The g1-tie circuit reconstructs Mx_mod from four limbs with no 64-bit
+    range check, then hashes Mx_mod for the Merkle leaf while feeding the
+    raw limbs to EC add.  A carry between limbs keeps the field sum (and
+    therefore the leaf) identical and changes the EC-add representation.
+    """
+    w = dict(witness)
+    mx = list(w["Mx"])
+    assert mx[1] >= 1, "need a borrowable high limb"
+    mx[0] = mx[0] + (1 << 64)
+    mx[1] = mx[1] - 1
+    w["Mx"] = mx
+    return w
+
+
+def uncontrolled_registration(registrant=0xBAD):
+    """§9: registration NIZK never takes sk; pk need not be a key we hold."""
+    from alberta_buck.review.mitigations import independent_generator
+    issuer = ps_keygen(seeded())
+    owner = Account(12345, 45678, 98765)
+    published, _ = ps_rerandomize(ps_sign(issuer, owner.m, seeded(1)), seeded(2))
+    sigma, _ = ps_rerandomize(published, seeded(3))
+    # pk is a NUMS point: there is no exported scalar sk with pk = sk*G.
+    pk = independent_generator()
+    r = 33333
+    E = elgamal_encrypt(owner.M, pk, r)
+    proof = registration_prove(sigma, owner.m, r, pk, E, registrant, seeded(4))
+    return issuer, owner, pk, E, sigma, proof

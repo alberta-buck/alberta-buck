@@ -9,11 +9,13 @@ import json
 
 from alberta_buck.review.examples import (
     Account, seeded, harvested_registration, false_identity_approval,
-    double_opening, mismatched_membership,
+    double_opening, mismatched_membership, aliased_g1tie_limbs,
+    uncontrolled_registration,
 )
 from alberta_buck.review.mitigations import (
     ApprovalContext, prove_approval, verify_approval, independent_generator,
-    credential_leaf,
+    credential_leaf, prove_key_ownership, verify_key_ownership,
+    membership_proof_required, APPROVE_DOMAIN,
 )
 from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, neg, eq
 from alberta_buck.wallet.ps import ps_verify
@@ -90,6 +92,56 @@ def test_05_arbitrary_T_and_known_log_are_independent_gaps(backend):
     delta = 9
     shifted_M = add(mul(G1, m1), mul(H, delta))
     assert eq(add(mul(G1, m1), mul(H, b1)), add(shifted_M, mul(H, b1-delta)))
+
+
+def test_08_empty_membership_proof_is_not_a_proof(backend):
+    # Models Notes._verifyIdentityMembership: empty bytes currently skip the
+    # check.  The intended repair requires a nonempty proof and a wired verifier.
+    assert not membership_proof_required(b"", True)
+    assert not membership_proof_required(b"\x00" * 256, False)
+    assert membership_proof_required(b"\x00" * 256, True)
+
+
+def test_09_registration_accepts_a_public_key_with_no_known_secret(backend):
+    issuer, owner, pk, E, sigma, proof = uncontrolled_registration()
+    assert registration_verify(sigma, E, pk, issuer.pk_X, issuer.pk_Y, proof, 0xBAD)
+    # No scalar we have satisfies pk = sk*G.
+    assert not eq(pk, mul(G1, owner.sk))
+    # The missing relation, prototyped, cannot be proved without sk.
+    domain = APPROVE_DOMAIN
+    # A random response against this pk is not a key-ownership proof.
+    bogus = prove_key_ownership(pk, owner.sk, domain, seeded())
+    assert not verify_key_ownership(pk, bogus, domain)
+    honest_sk = 45678
+    honest_pk = mul(G1, honest_sk)
+    good = prove_key_ownership(honest_pk, honest_sk, domain, seeded())
+    assert verify_key_ownership(honest_pk, good, domain)
+
+
+def test_07_a1_spend_public_inputs_omit_flavor(backend):
+    from pathlib import Path
+    import json
+    path = Path(__file__).resolve().parents[1] / "vectors" / "e2e" / "a1.json"
+    if not path.is_file():
+        pytest.skip("A1 e2e fixture not present")
+    d = json.loads(path.read_text())
+    assert int(d["opening"]["flavor"]) == 1
+    pub = d["spend"]["public"]
+    assert "flavor" not in pub and int(d["spend"]["witness"]["flavor"]) == 1
+    # Same opening, different payout account: the circuit still has a witness.
+    w = d["spend"]["witness"]
+    assert int(w["recipient"]) != 0xBAD
+    # Nullifier is independent of recipient, so a fresh proof can redirect payout.
+    assert "recipient" in pub
+
+
+def test_05c_limb_carry_preserves_poseidon_leaf_not_ec_limbs(backend):
+    member, outsider, P, tree, witness = mismatched_membership()
+    aliased = aliased_g1tie_limbs(witness)
+    assert aliased["Mx"] != witness["Mx"]
+    rec = lambda ls: ls[0] + (ls[1] << 64) + (ls[2] << 128) + (ls[3] << 192)
+    assert rec(aliased["Mx"]) == rec(witness["Mx"]) == witness["Mx_mod"]
+    assert aliased["Mx"][0] != witness["Mx"][0]
 
 
 def test_06_pool_and_previous_counterparty_have_real_decryption_capabilities(backend):

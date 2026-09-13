@@ -81,6 +81,10 @@ These are counterexamples, not just missing proofs. Preserve reproducible
 scripts/tests before changing claims. Do not silently redesign cryptography
 as part of a prose edit.
 
+Later the same day, EVM and Groth16 reproductions landed for findings 3
+(already listed), 4, 5a, 5c, 7, 8 and 9. Findings 7 and 8 together moved
+BUCK. See `identity-findings.md` and `scripts/review/`.
+
 ## Additional code findings requiring focused witnesses
 
 - `IdentityRegistry._bindContract` accepts arbitrary supplied pk/E without
@@ -102,9 +106,17 @@ as part of a prose edit.
   previous counterparties; it is not an exclusive participant secret.
 - `spendCoupledB1` uses the general spend circuit without proving that the
   note's committed flavor is B1 or tying its caller-supplied issuer to the
-  note's committed issuer material. Addressed-note openings can therefore
-  reach a path omitting addressed note-binding checks, subject to that path's
-  other witnesses. This is source analysis, not a completed malicious EVM spend.
+  note's committed issuer material. Reproduced: an A1 opening spent through
+  B1 by a non-addressee, with empty membership, moved the note's face
+  (`scripts/review/evm_a1_via_b1.py`).
+- `_verifyIdentityMembership` / `_verifyNoteBinding` skip on empty proof or
+  unset verifier even when the real adapter is wired (finding 8).
+- Registration NIZK never proves `pk = sk*G`; a NUMS public key registers
+  (`scripts/review/evm_uncontrolled_register.py`).
+- G1-tie limbs are not 64-bit range-checked; a 2^64 carry proves against
+  the committed zkey (`scripts/review/g1tie_limb_alias.py`).
+- `_bindContract` / unmatched `identityLeaf` reproduced on EVM
+  (`scripts/review/evm_uncertified_bind.py`).
 
 ## Editorial issues already established
 
@@ -132,14 +144,13 @@ as part of a prose edit.
 
 ## Local environment and preservation
 
-Update 2026-09-13: wallet counterexamples and mitigation prototypes have been
-added; the kernel/receipt selection passed 11 tests (eight pure-Python cases
-deselected). Integration helpers, test fixtures and the review circuit are
-preserved as unfinished work. The user requested documenting the remaining
-Groth16/EVM, cross-backend and larger mitigation work rather than continuing
-its implementation; that task list is now in `identity-findings.md`. Solc
-0.8.28 compilation succeeded with existing warnings. No production protocol
-source changed, and no real-EVM attack or new circuit proof has been executed.
+Update 2026-09-13: wallet counterexamples, mitigation prototypes, and
+EVM/Groth16 reproductions for findings 3, 4, 5a, 5c, 7, 8 and 9 have been
+added. Both `py` and `kernel` wallet-review backends pass. Integration
+helpers, test fixtures and the review circuit remain unfinished scaffolding
+for circuit-mitigation work. No production protocol source changed. The
+repair order (P0-0 fail-closed first) is in
+`mitigation-implementation-guide.md`.
 
 - No applicable AGENTS.md found in cwd/ancestors or initial tracked-file search.
 - Read CLAUDE.md and CONTRIBUTING.md. Preserve document copyright headers.

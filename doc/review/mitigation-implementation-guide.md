@@ -54,17 +54,22 @@ Reproductions live under `scripts/review/` and
 | 1 | A published PS signature lets anyone holding a candidate `m` test the identity; the issuer can link its own clients | High (breaks issuer-blindness) | Wallet, both backends (`test_01`) |
 | 2 | Disclosed `m` + the public signature let an attacker register a **new** account under that identity | High (read/write not separated) | Wallet, both backends (`test_02`) |
 | 3 | The approval proof omits the registered-key relation, so a sender can make a receipt name a **third party** | High (framing) | Wallet (`test_03`) **and on a real EVM** (`scripts/review/evm_approval_forgery.py`) |
-| 4 | `_bindContract` and caller-supplied `identityLeaf` are stored with no credential/inclusion proof | Medium-High | Source-established (unambiguous in `src/IdentityRegistry.sol`) |
-| 5a | The g1-tie circuit accepts `T = P - M` with free `T`, so any member can pair with any `P` | High (identity substitution) | **Real Groth16** with the committed circuit + zkey (`scripts/review/g1tie_membership_mismatch.py`) |
+| 4 | `_bindContract` and caller-supplied `identityLeaf` are stored with no credential/inclusion proof | Medium-High | **Real EVM** (`scripts/review/evm_uncertified_bind.py`) |
+| 5a | The g1-tie circuit accepts `T = P - M` with free `T`, so any member can pair with any `P` | High (identity substitution) | **Real Groth16** (`scripts/review/g1tie_membership_mismatch.py`) |
 | 5b | `issuer_reenc.H` has a published discrete log, so `P = mG + bH` is not binding for scalar-known identities | Medium (latent) | Wallet (`test_05`) |
+| 5c | G1-tie limbs are not 64-bit range-checked; a 2^64 carry keeps the Poseidon leaf and changes EC-add `M` | High once 5a is patched; already live | **Real Groth16** (`scripts/review/g1tie_limb_alias.py`) |
 | 6 | Pool operator and prior counterparties hold real decryption capability; identity-derived keys are not exclusive | Medium | Wallet (`test_06`) + source |
-| 7 | The B1 spend path does not prove the note's flavor or bind the caller-supplied issuer | High (addressed notes reach a bearer path) | Source-established; `spend.circom`'s own comment admits it |
+| 7 | The B1 spend path does not prove the note's flavor or bind the caller-supplied issuer | High (addressed notes reach a bearer path) | **Real EVM + real spend SNARK** (`scripts/review/evm_a1_via_b1.py`) |
+| 8 | Empty membership/note-binding proofs, or an unset/stub verifier, skip the check | High (bypasses §§5 and 7) | **Real EVM** (same script; Foundry skip tests document it as intended) |
+| 9 | Registration NIZK never proves `pk = sk·G` | Medium-High | Wallet (`test_09`) **and on a real EVM** (`scripts/review/evm_uncontrolled_register.py`) |
 
-None of these is yet a demonstrated end-to-end theft of funds. Findings 2, 3,
-5, and 7 are unauthorized-action or identity-substitution results that still
-require the attacker to hold specific witnesses. Keep that calibration in the
-paper edits; do not upgrade "unauthorized registration" to "balance theft"
-without a reproduction that moves BUCK.
+Findings 7 and 8 **together** are a demonstrated unauthorized redemption:
+an A1 opening spent through `spendCoupledB1` by a non-addressee, with an
+empty membership proof, moved the note's face in BUCK. A public observer
+without the opening still cannot spend. Do not describe addressed notes as
+addressee-only while this path exists. Findings 2, 3, 5, and 9 remain
+unauthorized-action or identity-substitution results that have not by
+themselves moved a Notes balance.
 
 ## SILMARILS is orthogonal: do not use it to repair these findings
 
@@ -120,11 +125,40 @@ shape must land in all four plus the vectors, or cross-language parity breaks:
 
 ## Work packages, in priority order
 
-### P0-A. Approval three-relation repair (finding 3)
+### P0-0. Fail closed on membership and note-binding (finding 8)
 
-**Why first.** Highest confirmed severity, reproduced on a real EVM, and the
-only fix that needs no trusted-setup regeneration. It is a self-contained
-sigma-protocol change.
+**Why first.** One Solidity `require`. No trusted setup. Findings 5 and 7
+have no on-chain effect until empty proofs stop skipping the verifier.
+The A1-via-B1 theft-shaped spend used exactly this skip.
+
+**Fix.** In `Notes._verifyIdentityMembership` and `_verifyNoteBinding`:
+if the verifier address is set, require `proof.length != 0` and call the
+verifier (do not `return` on empty bytes). On coupled paths, refuse
+`address(0)` verifiers in the constructor / `setIdentityMembershipVerifier`
+/ `setNoteBindingVerifier` once production is declared, or require them
+non-zero at spend. Do not deploy `StubIdentityMembershipVerifier` outside
+tests.
+
+**Files.** `src/Notes.sol`; invert
+`test/NotesCoupledA2.t.sol::test_coupledA2_emptyMembershipProof_skips` and
+`test_coupledA2_emptyNoteBinding_skips` (and the B1 equivalents).
+
+**Test.** Re-run `scripts/review/evm_a1_via_b1.py`: the attack must revert;
+pair with an honest B1 control that still pays. Empty note-binding on A1/A2
+must revert. A nonempty invalid proof must revert.
+
+**Cost.** Negligible gas. Effort: small.
+
+**Done when.** Empty proof skip tests now expect revert; A1-via-B1 reverts;
+honest coupled spends with real proofs still settle.
+
+---
+
+### P0-A. Approval three-relation repair (finding 3) and registration key relation (finding 9)
+
+**Why here.** Highest remaining confirmed severity that needs no trusted
+setup. Finding 9 is the same missing equation on registration; do both
+while the sigma machinery is open.
 
 **Mechanism.** `alberta_buck/wallet/chaum_pedersen.py` and
 `IdentityRegistry._verifyApprove` check only two relations: `R_b` consistency
@@ -133,13 +167,23 @@ sender who knows their own encryption randomness `r` sets
 `s = sk + (m - m_v)/r mod q` and produces an approval that "re-encrypts" a
 victim scalar `m_v`. The proofs paper (`alberta-buck-proofs.org`, Part II,
 relations S1/S2/S3) proves a **three**-relation protocol; the shipped code is
-a different, unsound two-relation protocol.
+a different, unsound two-relation protocol. Registration (`nizk.py`) has the
+same omission: it proves `σ` and `E` share `m`, not that the registrant holds
+`sk` for `pk`.
 
 **Fix.** Adopt the compact three-relation approval already prototyped in
 `alberta_buck/review/mitigations.py` (`prove_approval` / `verify_approval`).
 It adds `T_key = a*G` and the verifier check `u*G == T_key + e*pk_a`, keeping
 the `R_b` and difference relations. The forged witness fails the new first
-relation.
+relation. Add the same key relation to registration (`prove_key_ownership`
+is the one-relation sketch). Reject infinity/zero keys and `R = O`. Bind
+domain, registry, chain, nonce.
+
+The existing `chaum_pedersen.py` comment that compact `(e,s1,s2)` is
+**unsound** applies to the **two**-relation transcript (`T1` and `T2` hashed
+separately, only `T1-T2` constrained). After the three-relation repair all
+three `T`s are reconstructible, so compact `(e,u,v)` is sound. Document that
+reversal in the same commit.
 
 **Files.**
 1. `alberta_buck/wallet/chaum_pedersen.py`: replace `CPProof` and both
@@ -148,12 +192,15 @@ relation.
    findings doc §3 costs both). Record the decision in the module docstring.
 2. `src/IdentityRegistry.sol`: `struct CPProof`, `_verifyApprove`, `_fsApprove`
    to mirror the new relations and encoding. Add the `pk_a` key relation.
-   Reject infinity/zero keys and non-canonical scalars.
-3. `core/rust/buck-identity/src/chaum_pedersen.rs`: same relations.
-4. `core/js/src/identity-core.js` (and `identity.js`): same relations.
-5. Regenerate `test/vectors/identity.json` via `emit-vectors`; re-run the Rust
+   Reject infinity/zero keys and non-canonical scalars. Same for `_register`
+   / `_fsRegister` (add `sk` relation, `chainId`, registry).
+3. `alberta_buck/wallet/nizk.py`: registration takes `sk` and proves
+   `pk = sk*G`.
+4. `core/rust/buck-identity/src/chaum_pedersen.rs` and registration.
+5. `core/js/src/identity-core.js` (and `identity.js`): same relations.
+6. Regenerate `test/vectors/identity.json` via `emit-vectors`; re-run the Rust
    and JS vector tests so parity holds.
-6. Update every caller of the changed `verifyApprove` ABI: `Buck.approve`
+7. Update every caller of the changed `verifyApprove` ABI: `Buck.approve`
    overload, `alberta_buck/sim/notes_stack.py::approve_pool`, and any wallet
    `build_receipt` path that embeds a CP proof.
 
@@ -162,8 +209,10 @@ asserts the OLD verifier accepts and the NEW prototype rejects. After the fix,
 the production `chaum_pedersen_verify` and the Solidity `_verifyApprove` must
 both reject the forged witness and accept the honest one. Extend
 `scripts/review/evm_approval_forgery.py` to assert `accepted == False` for the
-forgery and `True` for the honest control against the rebuilt contract. Add
-adversarial cases: changed domain, repeated nonce, zero/infinity keys.
+forgery and `True` for the honest control against the rebuilt contract. Invert
+`test_09` and `evm_uncontrolled_register.py` the same way. Add
+adversarial cases: changed domain, repeated nonce, zero/infinity keys,
+NUMS `pk`.
 
 **Cost.** Two extra scalar multiplications on-chain, about +12,000 gas at the
 EIP-1108 BN254 schedule, plus hashing and call overhead to measure. The
@@ -171,18 +220,21 @@ compact `(e, u, v)` encoding can save about 192 calldata bytes. No trusted
 setup. Effort: medium, dominated by four-backend parity and the ABI ripple.
 
 **Done when.** Forged approval rejected by Python and Solidity; honest
-approval accepted; Rust and JS vector tests green; the EVM script asserts the
-rejection; `test_03` inverted with a commit note.
+approval accepted; NUMS-key registration rejected; honest registration
+accepted; Rust and JS vector tests green; both EVM scripts assert the
+rejection; `test_03` and `test_09` inverted with a commit note.
 
 ---
 
 ### P0-B. B1 spend flavor and issuer binding (finding 7)
 
-**Why here.** High severity: an A1/A2 (addressed) note opening can be pushed
-through the bearer B1 entry point, avoiding addressed note-binding, and the
-caller-supplied `issuer` is not tied to the note's committed issuer material.
-`circuits/spend.circom` states in its own comment that it does not constrain
-`flavor` and that A-flavor notes are "effectively bearer-spendable."
+**Why here.** High severity, now a demonstrated unauthorized redemption
+(with finding 8): an A1 opening plus a non-addressee's registered identity
+redeems through `spendCoupledB1`. `circuits/spend.circom` states in its own
+comment that it does not constrain `flavor` and that A-flavor notes are
+"effectively bearer-spendable." Prefer a **public `flavor` (or `mode`)
+input** that each Solidity entry point passes as a constant over splitting
+circuits, unless benchmarks say otherwise.
 
 **Fix.**
 1. Constrain the committed `flavor` to the entry point's mode. Either add a
@@ -192,20 +244,21 @@ caller-supplied `issuer` is not tied to the note's committed issuer material.
 2. In `Notes.spendCoupledB1`, bind the supplied `issuer` to the note's
    committed issuance material. Define the issuance payload and its signature
    precisely; a note cannot sign the commitment that contains its own
-   signature, so use a separately defined issuance payload.
+   signature, so use a separately defined issuance payload. A public `issuer`
+   with no constraint to `idHash` does nothing.
 3. Constrain `predicate`: reject unsupported predicates rather than committing
    an arbitrary word.
+4. P0-0 must already be merged; otherwise this circuit work is skippable.
 
 **Files.** `circuits/spend.circom` (and any new `spend_a.circom`),
 `src/Notes.sol` (`spendCoupledB1`, `_spendCoupled`, `_verifyNoteBinding`),
 plus the Groth16 verifier and vectors that the circuit change forces.
 
-**Test.** Start from the A1/A2/B1 fixtures in
-`alberta_buck/sim/notes_stack.py`. Generate a spend proof for a controlled
-payout and attempt the B1 route with only an A-flavor opening; assert it now
-reverts. Separately substitute the issuer of a B1 note and assert rejection.
-Add unsupported-predicate cases. These are semantic-substitution tests; a
-mutated-bytes rejection does not cover them.
+**Test.** Re-run `scripts/review/evm_a1_via_b1.py` against the rebuilt
+spend verifier: the A1 opening through B1 must revert even with a nonempty
+membership proof. Separately substitute the issuer of a B1 note and assert
+rejection. Add unsupported-predicate cases. These are semantic-substitution
+tests; a mutated-bytes rejection does not cover them.
 
 **Cost.** A fixed-flavor circuit keeps the public-input count and proof size;
 the mode equality is cheap. Authenticating issuance material adds proving work.
@@ -215,8 +268,9 @@ medium-high.
 
 **Done when.** Every note flavor is tried through every spend entry point with
 fresh proofs; only the intended flavor succeeds per path; issuer substitution
-is rejected; artifacts regenerated as a matched set; a honest control spend
-still settles BUCK.
+is rejected; `evm_a1_via_b1.py` reverts even with nonempty membership;
+artifacts regenerated as a matched set; an honest control spend still
+settles BUCK.
 
 ---
 
@@ -231,35 +285,43 @@ by the companion sigma. Reproduced with the committed circuit and zkey.
 membership into the note-binding relation so a single circuit uses the **same**
 private identity variable for the Merkle leaf, the ciphertext relation, and the
 addressed recipient/issuer condition. This removes the cross-proof equality
-assumption entirely.
+assumption entirely. **B1 has no note-binding** — also ship a B1-specific
+combined circuit (same private `m_dep` for the depositor binding, `P_dep`,
+and the Merkle leaf) or a repaired standalone membership circuit that B1
+actually calls. Do not delete g1-tie until that path exists.
+
+Range-check every 64-bit limb (`Num2Bits(64)`). Use a complete addition
+formula or explicitly handle `x1 = x2`. Derive `H` by hash-to-curve (RFC 9380);
+do not keep `H_SCALAR·G` as a Pedersen generator.
 
 **Fix (alternative: mitigation A).** Keep separate proofs but make `P` a
 binding commitment `mG + bH` where **no party knows `log_G(H)`** (derive `H`
 by hash-to-curve per RFC 9380, not by publishing a scalar), and prove
 knowledge of `m, b` on both sides. Note the residual `M' = M + delta*H`
 transformation for arbitrary point messages; constrain the scalar
-representation.
+representation. Limb range and complete addition still apply.
 
 **Files.** `circuits/identity_membership_g1tie.circom` or the note-binding
 circuits; the generated `IdentityMembershipG1TieVerifier.sol` /
 `NoteBinding*Verifier.sol`; the adapters; `src/Notes.sol::_verifyIdentityMembership`;
 proving/verification keys and proof vectors under `build/snark/`.
 
-**Test.** Rebuild `scripts/review/g1tie_membership_mismatch.py` against the
-repaired artifacts: the `T = P - M` witness must now fail witness satisfaction
-or verification, off-chain and through the deployed adapter. Preserve the
-known-log double-opening (`test_05`) as an independent check. A changed public
-input rejecting the old proof is **not** the same as rejecting a fresh
-mismatched witness; assert both.
+**Test.** Rebuild `scripts/review/g1tie_membership_mismatch.py` and
+`g1tie_limb_alias.py` against the repaired artifacts: both witnesses must
+now fail. Preserve the known-log double-opening (`test_05`) as an independent
+check. Drive a mismatched witness through the deployed adapter, not only
+off-chain snarkjs. A changed public input rejecting the old proof is **not**
+the same as rejecting a fresh mismatched witness; assert both.
 
 **Cost.** Circuit redesign, fresh trusted setup, redeployed verifier. High
 effort. Benchmark mitigation B (one larger circuit, fewer verifier calls)
 against mitigation A (two proofs, a maintained composition argument) before
 committing.
 
-**Done when.** The mismatched witness is rejected by the real prover/verifier;
-the honest membership proof still verifies; artifacts regenerated as a matched
-set; the composition argument is written down.
+**Done when.** The mismatched witness and the limb-carry witness are rejected
+by the real prover/verifier; the honest membership proof still verifies;
+B1 still has a sound membership/binding path; artifacts regenerated as a
+matched set; the composition argument is written down.
 
 ---
 
@@ -282,10 +344,10 @@ roots an explicit authority and update policy.
 `_insertIdentityLeaf`, the `register`/`bindContract` overloads), plus wallet
 helpers that build binding arguments.
 
-**Test.** Reject unauthorized first binding, fabricated service identities,
-certified-identity/leaf mismatches, and unaccepted roots. Verify two accounts
-built from one credential reveal no common leaf. New EVM reproduction under
-`scripts/review/`, with honest controls.
+**Test.** Invert `scripts/review/evm_uncertified_bind.py`: unauthorized first
+binding, fabricated service identities, certified-identity/leaf mismatches
+and unaccepted roots must revert. Verify two accounts built from one
+credential reveal no common leaf. Honest controls still bind.
 
 **Cost.** Mostly Solidity plus a proof obligation at bind/register time. No
 new curve primitive. Medium effort. Interacts with P2-A: the private,

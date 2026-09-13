@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from eth_hash.auto import keccak
 from py_ecc.bn128 import is_on_curve, b as curve_b, field_modulus
 
-from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, neg, point_to_words, rand_scalar
+from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, neg, eq, point_to_words, rand_scalar
 from alberta_buck.wallet.transcript import keccak_scalar
 from alberta_buck.wallet.poseidon import poseidon
 
@@ -97,3 +97,36 @@ def payment_context(account, chainid, registry, nonce):
 
 def payment_commitment(flavor, value, rho, issuer, recipient, predicate=0):
     return poseidon([NOTE_TAG, flavor, value, rho, issuer, recipient, predicate])
+
+
+def prove_key_ownership(pk, sk, domain, rng=None):
+    """One-relation Schnorr that registration and approve both need: pk = sk*G.
+
+    Review prototype only.  Production registration currently omits this
+    (finding 9); production approve omits it (finding 3).
+    """
+    a = rand_scalar(rng)
+    T = mul(G1, a)
+    e = keccak_scalar(domain, *point_to_words(pk), *point_to_words(T))
+    return (e, (a + e * (sk % ORDER)) % ORDER, T)
+
+
+def verify_key_ownership(pk, proof, domain):
+    e, u, T = proof
+    if not (0 <= e < ORDER and 0 <= u < ORDER):
+        return False
+    if pk is None or T is None:
+        return False
+    if not all(is_on_curve(p, curve_b) for p in (pk, T)):
+        return False
+    return e == keccak_scalar(domain, *point_to_words(pk), *point_to_words(T)) \
+        and eq(mul(G1, u), add(T, mul(pk, e)))
+
+
+def membership_proof_required(proof: bytes, verifier_set: bool) -> bool:
+    """Intended fail-closed gate for Notes._verifyIdentityMembership.
+
+    Production currently returns early on empty proof or unset verifier
+    (finding 8).  A repair accepts the spend only when this is True.
+    """
+    return verifier_set and len(proof) > 0
