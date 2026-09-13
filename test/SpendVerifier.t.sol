@@ -33,8 +33,12 @@ contract SpendVerifierTest is Test {
     function setUp() public {
         spendAdapter = new SpendVerifierAdapter(address(new SpendGroth16Verifier()));
 
+        // Use the committed A1 E2E vector rather than a gitignored build/
+        // fixture.  scripts/snark/regen_spend_vectors.py updates this proof
+        // from the same matched spend zkey as the generated verifier, so the
+        // focused test is runnable from a clean checkout.
         string memory fx =
-            vm.readFile("build/snark/spend/fixtures/spend_leaf0_to_bob.json");
+            vm.readFile("alberta_buck/test/vectors/e2e/a1.json");
         fxNoteRoot  = vm.parseJsonUint(fx, ".spend.public.noteRoot");
         fxNullifier = vm.parseJsonUint(fx, ".spend.public.nullifier");
         fxFace      = vm.parseJsonUint(fx, ".spend.public.face");
