@@ -1,0 +1,626 @@
+#+TITLE: WP-14 report -- skews (per-class stabilizers and the local skews)
+#+AUTHOR: Claude (WP-14 owner, track T3) for the integrator
+#+DATE: 2026-09-12
+
+Branch =wp/14-skews= (worktree =../alberta-buck-wp-14= on datasim, from
+=feature/carry-convexity= at 75d9e34 -- the BASE of every identity pair
+below; the branch of record moved to 50e0616 (WP-16 merged) while this
+ran, and the worktree stayed at 75d9e34 as instructed).  Specification:
+WAVE3.org WP-14 row, R16 / R17, decisions pending 9 / 11 / 13 / 17 / 18 /
+19 / 22; CARRY-CONVEXITY.org D7 ("The lever count"), "The position loop
+(D7)", 6.4 and its D7 amendment, D3, D6; ONBOARDING-D7.org's WP-14 brief
+and track T3; reports/wp-13.org and reports/wp-15.org.  No dependency
+added (house rule 11).  The worktree has its OWN =out/= and =cache/=
+(=make nix-build= / =make nix-test= ran here; the six third-party
+artifacts were staged with =node scripts/stage-uniswap.mjs=, which
+=make build-uniswap-artifacts= wraps -- a bare =make nix-build= leaves a
+fresh worktree without =UniswapV3Factory=, finding 8).
+
+* Summary
+
+Built: one sim-only =SimStabilizer= per agent class (the undertakings'
+strong side, their weak side, the facility population, the seeder),
+registered with the WP-13 observer at decision 11's lambdas and cost
+weights and booked with each class's REAL cap (reserve_frac x NAV per
+side, sum max_frac_i x limit_i, the seeder's budget) in place of the one
+lumped pseudo-stabilizer (decision 17), the seeder's converted range
+booked as a position; and the local skews of D7 on the three stand-ins
+-- the undertakings' eps per side, the facility's x / y, the seeder's
+range centre, band = band0 + kappa q / cap -- with kappa 0 the default,
+=sk_*= counters, =note(kind="skew")= and per-class =sh_<cls>_*= frame
+fields.  Showed: kappa 0 and the per-class default leave the base cells
+byte-identical where the observer is absent (none30, dump30) and, where
+it is present, the lumped path byte-identical (ops30 at
+=SIM_SHADOW_PERCLASS=0=: cmp exit 0) while the per-class path reproduces K
+and bvib to the wei on every frame of the 30-day ops cell and the
+60-day loaded cell (the S sum is the same integer; only the booking
+fields move); s_V by hand equals =sh_s= on every frame checked; the
+facility's skew unwinds its own drawn book (its BUCK-days 11.0M -> 4.0M
+over 30 days) with K inside G7 (max |dK| 0.011, RMS 0.005); the brief's
+kappa* = 0.1 (one eps of skew at a 5% fill) is INERT on the bookload arm
+-- the loader holds bvib 5-7% cheap, far beyond both the unskewed edge
+(1.005) and the skewed one (1.010), so the ladder trades at its leg cap
+whatever its bid and the two cells are identical to the wei; at kappa 0.6 -- the skew at the load's 5.4% fill equals the loader's
+3% target -- the lever bites: the loaded book's BUCK-days fall 21%
+(its peak 10% lower, back under 10% of the peak three days sooner,
+fully unwound with rho 1.0 from day 45 where kappa 0 never gets back)
+and the strong side disposes of the inventory at a smaller premium,
+with K inside G7 (max |dK| 0.0116, RMS 0.0054); at kappa 1.0 the book
+moves more (BUCK-days -37%) but K leaves G7 (0.029 / 0.014), so the Vk
+preset carries the measured kappa* (undertakings 0.6, facility 0.1,
+seeder 0.1).
+Next: the desk's skew as a common-mode reference shift in the director
+(the exact recipe in open issue 1; it cannot be emulated keeper-side
+without replacing the keeper), ="Vk"= added to =d7-c1='s design values
+when the cycle runs the skews, and the seeder's O(1) fill (finding 5)
+before any seeder cell feeds K.
+
+* Commits (on =wp/14-skews=, newest first)
+
+- (this file) doc: reports/wp-14.org
+- =1de4104= sim: WP-14 Vk preset carries the measured kappa* (undertakings
+  0.6, facility 0.1, seeder 0.1)
+- =d9ed1cd= sim: WP-14 SeederAgent publishes its cap (the budget) from
+  bootstrap so its stabilizer is included from day 0 with an empty
+  position, not excluded until start_day
+- =d796bad= sim: WP-14 per-class stabilizers and the local skews
+  (decision 17, D7 R16) -- SimStabilizer + 8 forge tests, deploy.py,
+  shadow_book.py, the three agents' kappa / skews / caps, snapshot.py,
+  test_skews.py (16), the Vk preset
+
+* Files
+
+New:
+- =src/sim_build/SimStabilizer.sol= -- the sim-only per-class
+  =IStabilizer= with setters: =setBook= / =setCap= / =setBookAndCap= /
+  =setCapReverts= (governance), =netInventory= / =positionCap= (the
+  three outcomes: the cap; ZERO when disabled; a =CapUnreadable= revert
+  while =capReverts=) / =capacity= / =saturation= (the seam's, from the
+  same book and cap); a =bytes32 tag= naming the class.
+- =test/SimStabilizer.t.sol= -- 8 tests against the REAL =ShadowObserver=
+  (L1).
+- =alberta_buck/test/test_skews.py= -- 16 tests: the three pure skew
+  rules, the seeder's range-as-position math, the per-class booking.
+- =reports/wp-14.org=.
+
+Rewritten in place (my files):
+- =alberta_buck/sim/shadow_book.py= -- =class_books= (the per-class
+  (q, cap) from the counters), =book_classes= (send on change through
+  =setBookAndCap=; lazy registration of a class that appears mid-run),
+  =book= dispatching per class when =d.sim_stabs= exists and to the
+  WP-13 lumped =setShadowOffset= otherwise; =net_inventory= untouched
+  (the 4 WP-13 tests pass unchanged).
+- =alberta_buck/sim/undertaking_agents.py= -- knob =kappa= (drawn AFTER
+  =sig_halflife=, the last of the pinned order; scalar default 0.0
+  consumes no draw); =skew_bands= (pure); the four branches of =_act= on
+  =eps_w= / =eps_s= / the retire threshold =1 + skew/2=; =L.eps= set to
+  =eps_w= before the act; =_book_cap= publishing =ut_cap= (the symmetric
+  notional reserve_frac x NAV at the strike, = the ladder's R0) from
+  =bootstrap= and every act; counters =sk_ut= / =sk_ut_f= / =sk_ut_n=
+  and =note(kind="skew")=, only under a non-zero skew; =kappa= in the
+  knobs only when set.
+- =alberta_buck/sim/facility_agent.py= -- knob =kappa= (drawn AFTER
+  =max_impact_bp=); =skew_thresholds= (pure); =act= hands
+  =facility_decision= =x_eff= / =y_eff=; =_book= publishes =fac_cap= =
+  sum_i max_frac_i x limit_i beside =fac_drawn= / =fac_limit= (the
+  =facBook= tuple gained a third element); counters =sk_fac= (the
+  deepest applied skew over the population) / =sk_fac_n=; the note.
+- =alberta_buck/sim/seeder_agent.py= -- knob =kappa= (drawn AFTER
+  =budget_m=, the class's only other draw); =position_amounts= (Uniswap
+  V3 =getAmountsForLiquidity=), =range_position= (the range's converted
+  BUCK, signed), =skew_ideal= (pure); the range booked as a position:
+  =_live_position=, the converted amount FROZEN into =_q_frozen= at every
+  exit, =sd_q= / =sd_cap= (= the budget) published from =bootstrap= and
+  =_book=; the skewed centre =ideal_eff= used for the gap, the tick, the
+  side test and the placement (=sd_ideal= keeps the raw ideal); counters
+  =sk_sd= / =sk_sd_n=; the note.
+
+Appended (=# WP-14= blocks; merge by keeping both sides):
+- =alberta_buck/sim/deploy.py= -- three fields at the end of the
+  =Deployment= dataclass (=sim_stabs=, =sim_stab_reg=, =sim_stab_gains=)
+  and one block before the final =return d=: =SIM_SHADOW_PERCLASS= (1),
+  =SIM_SHADOW_W_UTS= / =_UTW= / =_FAC= / =_SD= (1, 1, 0.5, 0.25),
+  =SIM_SHADOW_LAMBDA_UTS= / =_UTW= / =_FAC= / =_SD= (default the
+  pseudo-stabilizer's: =SIM_SHADOW_LAMBDA_OFFSET=, else
+  =SIM_SHADOW_LAMBDA=); the four contracts created FROM =gov= (a raw
+  =constructor().transact({"from": gov})=, never =chain.deploy=, so the
+  deployer's nonce and every later address -- tokens, pools, the agents'
+  proxies -- are exactly the lumped path's); the classes PRESENT in
+  =scenario.agents= registered with =addStabilizer= +
+  =setStabilizerWeight=; the pseudo-stabilizer's V cap cleared
+  (=setShadowCap(0)=) so an idle offset does not dilute V.
+- =alberta_buck/sim/snapshot.py= -- =WP14_SK_KEYS= / =_wp14_frame()= after
+  =_wp15_frame()= and one =**_wp14_frame(d, ctr)= line after the WP-15
+  line: =sk_*= copied when present; =sh_perclass=, =sh_class_txs=,
+  =sh_class_err= and, per REGISTERED class, =sh_<cls>_q= (the booked net
+  inventory) / =_cap= (the observer's HELD cap) / =_stale= / =_excluded=
+  / =_w= / =_lambda=, read from chain each frame; nothing when the
+  contracts are absent (frame shape preserved).
+- =alberta_buck/sim/experiments/stars/d7-c1.toml= -- the ONE marked
+  place-holder line: the =Vk= preset (V's assignments plus
+  =agents.UndertakingAgent.kappa= / =FacilityAgent.kappa= /
+  =SeederAgent.kappa= = 0.1).  =values= of the design axis NOT edited
+  (the brief allowed one line; add ="Vk"= to it when the cycle runs the
+  skews: 54 -> 60 cells).
+
+Not touched: =loop.py= (its two WP-13 =shadow_book.book= calls dispatch
+per class through =book=), =__main__.py= (the env form), =ShadowObserver.sol=
+and the controller (the per-stabilizer surface sufficed, as decision 17
+said), =equilibrium_agents.py=, =director_agent.py=, WP-15's modules.
+
+* Layers passed
+
+Environment for every command: =cd /home/perry/src/alberta-buck-wp-14;
+export PYTHONPATH=$PWD ALBERTA_BUCK_REPO=$PWD= and
+=nix develop --command bash -c "source ../alberta-buck.venv-0.1.0-nix-linux-cpython-313/bin/activate && ..."=.
+Cells ran detached (=build/sim/wp14/run_cell.sh=: =nohup=, a =.done=
+marker with the exit code and wall time; =launch_smoke1.sh= lists every
+post-change command line verbatim).
+
+** L0
+
+- =make nix-build= (worktree, own =out/=): "No files changed, compilation
+  skipped" after the first build of the tree with =SimStabilizer.sol=
+  (=build/sim/wp14/build1.log=, rc=0; the one pre-existing lint warning).
+- =make nix-test=: "Ran 60 test suites in 30.34s: 624 tests passed, 0
+  failed, 1 skipped (625 total tests)" (=build/sim/wp14/test1.log=,
+  rc=0).  Against the main checkout's 60 / 619 / 1 at 75d9e34: this
+  worktree has no =build/snark/regression/RegressVerifier.sol=, so the
+  Makefile skips =test/RegressionTest.sol= (3 tests, =--skip=), and the
+  new =SimStabilizerTest= adds 8: 619 - 3 + 8 = 624, 60 suites either
+  way (one out, one in).  The 1 skipped is the same
+  =BuckKControllerForkTest= (its =setUp= skips without a fork URL) as in
+  the baseline.  Existing suites unchanged in count.
+- pytest, the brief's nine files plus the new one:
+
+    python -m pytest alberta_buck/test/test_skews.py alberta_buck/test/test_d7metrics.py alberta_buck/test/test_markout.py alberta_buck/test/test_ladder.py alberta_buck/test/test_facility.py alberta_buck/test/test_seeder.py alberta_buck/test/test_gauge.py alberta_buck/test/test_shadow_book.py alberta_buck/test/test_prices_inputs.py alberta_buck/test/test_telemetry_v2.py -q -p no:cacheprovider
+    199 passed, 1 warning in 1.71s          (183 + 16)
+
+** L1
+
+- =SimStabilizerTest= 8/8 (=make nix-match-SimStabilizerTest=):
+  =test_governance_settersRevertForOthers=, =test_setBookAndCap_oneTx_emits=,
+  =test_capacity_saturation_arithmetic= (cap 0: capacity 0 / saturation
+  1e18 like the disabled desk; 0.25 / 0.5 fills either sign; a book
+  beyond its cap clamped; the cap moved under the book),
+  =test_positionCap_positive_heldAndIncluded= (read at registration,
+  held until =observe()=, position = q / held cap, s_S = lambda q / D),
+  =test_positionCap_zero_excludedAndRenormalized= (a never-booked class
+  excluded from registration on, NOT stale; a class that disables leaves
+  V's denominator, its excluded bit set, its position 0; excluded under S
+  too), =test_positionCap_revert_holdsCapFlagsStale_clearsOnRead= (the
+  held cap kept against a new book and a new cap, stale bit set, still
+  included, position = new book / held cap; the first good read clears it
+  and takes the new cap), =test_modeS_perClassEqualsLumpedOffset= (four
+  classes at lambda 1 vs a twin observer with one =shadowOffset= = the
+  sum: =aggregatePosition= and =shadowValueInBuck= EQUAL -- the L3
+  argument), =test_modeV_decision11Weights_byHand= (weights 1 / 1 / 0.5 /
+  0.25: s_V = 0.2 / 2.75 by hand; a desk-shaped idle stabilizer at
+  weight 1 dilutes it to 0.2 / 3.75, decision 18; saturation = the
+  weighted max fill).
+- =test_skews.py= 16/16: =test_ut_kappa_zero_returns_the_same_floats=
+  (the =is= identity that makes L3 hold), =test_ut_long_absorbed_deepens_weak_side_and_offers_sooner=
+  (kappa* 0.1: one eps at a 5% fill; eps_w 0.010, eps_s 0; the unwind
+  threshold higher), =test_ut_long_issued_is_the_mirror= (eps_s 0.010,
+  eps_w 0, the retire threshold below par),
+  =test_ut_edges_clamped_never_through_par_and_bid_positive=,
+  =test_fac_kappa_zero_returns_the_same_floats=,
+  =test_fac_drawn_line_needs_deeper_premium_and_retires_sooner= (through
+  =facility_decision=: a half-drawn skewed line HOLDS at a 4% premium
+  where a fresh line issues, and RETIRES at a 1% discount where an
+  unskewed one holds), =test_fac_fill_clamped_at_the_cap=,
+  =test_sd_kappa_zero_returns_the_ideal_itself=,
+  =test_sd_sold_buck_lowers_the_centre_bought_raises_it=,
+  =test_position_amounts_match_single_sided_funding= (a range above the
+  price holds token0 only and the amount =single_sided_liquidity= was
+  inverted from; below, token1 only; inside, both, converting as the
+  price crosses), =test_range_position_signs=,
+  =test_class_books_signs_and_caps=,
+  =test_book_dispatches_per_class_and_sends_only_on_change= (the cap
+  struck sends both sides once; a book change sends one class; nothing
+  resent; the lumped setter never called),
+  =test_book_registers_a_late_class_on_its_first_cap=,
+  =test_book_records_failure_and_keeps_last_books=,
+  =test_book_lumped_path_without_the_contracts=.
+
+** L2 (30-60 day cells under =build/sim/wp14/smoke1/=; every run exit 0)
+
+Common: =--backend pyrevm --director pairs=; the desk =--set
+scenario.basket=ops --set scenario.agents.MonetaryKeeperAgent=1= (OPS);
+the engaged undertakings =--set scenario.agents.UndertakingAgent=1 --set
+agents.UndertakingAgent.eps=0.005 --set agents.UndertakingAgent.p=1.0=
+(UT); the S0 controller env =SIM_CONTROLLER=shadow SIM_SHADOW_MODE=s
+SIM_SHADOW_LAMBDA=1 SIM_SHADOW_KQ=0.1 SIM_SHADOW_KQI=6.43004e-7= (S0);
+the V env =SIM_CONTROLLER=shadow SIM_SHADOW_MODE=v SIM_SHADOW_KQ=0.1
+SIM_SHADOW_KQI=6.43004e-7= (V0; the S0 gains in fill units, WP-15's
+place-holder); NONE = =--experiment alberta_buck/sim/experiments/catalogue-none.toml
+--days 30=; the bookload line of reports/wp-15.org L2 9 (BL) =
+=--experiment alberta_buck/sim/experiments/catalogue-bookload.toml --days 60=
+OPS UT =--set scenario.agents.ExcursionArbAgent=0 --set
+scenario.agents.ExcursionCreditArbAgent=0 --set
+agents.BookLoaderAgent.load_day=5 --set agents.BookLoaderAgent.load_days=20
+--set agents.BookLoaderAgent.hold_days=15 --set
+agents.BookLoaderAgent.unwind_days=10 --set agents.BookLoaderAgent.push_bp=800
+--set agents.BookLoaderAgent.dev_target=0.03=.  =SIM_SHADOW_PERCLASS= is
+unset everywhere but ops30-lumped (the default 1 applies).
+
+Every cell exit 0 (=.done= markers under =build/sim/wp14/smoke1/=;
+wall 567-654 s for 30 days, 1327-1340 s for 60 days with 11 cells in
+parallel).  The verbatim lines (=--out= omitted) are in
+=build/sim/wp14/launch_smoke1.sh=; in short:
+
+1. smoke2 (the error catcher: V0, NONE OPS UT =--days 2=,
+   FacilityAgent=2 at x = y = 0.005, SeederAgent=1, kappa 0.1 on all
+   three): 93 s.  =[deploy] WP-14 per-class stabilizers: registered uts
+   utw fac sd  uts:lambda=0/w=1 utw:lambda=0/w=1 fac:lambda=0/w=0.5
+   sd:lambda=0/w=0.25 (pseudo-stabilizer cap cleared)=.  Day-1 frame:
+   desk 0 / cap 1,064,935; uts 0 / 5,439,665; utw +15,089 / 5,439,665;
+   fac 0 / 2,599,598 (= 0.5 x the two lines' 5,199,196); sd 0 /
+   10,545,848 (the budget); s_V by hand (1 x 0.002774) / 3.75 =
+   +0.000740 = =sh_s= 739678859351497 / 1e18; =sh_offset= 0,
+   =sh_offset_cap= 0, =sh_class_err= '', no =*_err=.
+2. none30, dump30 (the two direct-controller base cells re-run): the L3
+   pairs below.
+3. ops30 / ops30-lumped (S0, NONE OPS UT, the third base cell re-run
+   with the per-class default and with =SIM_SHADOW_PERCLASS=0=): L3
+   below.  NOTE: my first launch put the =MonetaryKeeperAgent= set before
+   the =UndertakingAgent= sets; the base had them after, and the two are
+   DIFFERENT cells (finding 7) -- that pair is kept under
+   =smoke1/misordered/= and the pair below was re-run with the base's
+   exact order.
+4. facv30 (V0, NONE OPS UT, =--set scenario.agents.FacilityAgent=8=, the
+   brief's cell as written): the facility NEVER draws in 30 calm days
+   at its default x = y = 0.03 (=fac_drawn= 0 on every frame; finding
+   6), the undertakings issue on days 10-21 (=ut_trades= 7).
+5. facv30e (facv30 + =--set agents.FacilityAgent.x=0.005 --set
+   agents.FacilityAgent.y=0.005=, the engaged band): the facility draws
+   from day 2 (=fac_issued= 505,950 BUCK, =fac_retired= 47,886, drawn
+   458,010 at day 29; one retire leg's redeem reverted =Slippage=,
+   recorded in =fac_err= -- pre-existing facility behaviour), the
+   undertakings issue on days 6-13 (=ut_trades= 8); day 12 has BOTH
+   books open -- the per-class view of acceptance 3:
+
+   | class | q (BUCK)     | held cap (BUCK) | fill      | w    | stale | excluded |
+   |-------+--------------+-----------------+-----------+------+-------+----------|
+   | desk  | 0            | 1,329,280.52    | 0         | 1    | 0     | 0        |
+   | uts   | -17,519.96   | 5,439,665.36    | -0.003221 | 1    | 0     | 0        |
+   | utw   | 0            | 5,439,665.36    | 0         | 1    | 0     | 0        |
+   | fac   | -423,279.54  | 8,649,349.19    | -0.048938 | 0.5  | 0     | 0        |
+
+   by hand s_V = (1 x -0.003221 + 0.5 x -0.048938) / (1 + 1 + 1 + 0.5)
+   = -0.027690 / 3.50 = -0.007911; the frame's =sh_s= =
+   -7911327477040262 / 1e18 = -0.007911.  The same identity holds on
+   days 5, 20 and 29 (fac alone: -0.012136 / 3.5 = -0.003467;
+   -0.029093 / 3.5 = -0.008312; -0.026201 / 3.5 = -0.007486).  =sh_sat=
+   0.0245 = w_fac x |fill_fac| = 0.5 x 0.048938 (the weighted max).
+6. facv30ek (facv30e + =--set agents.FacilityAgent.kappa=0.1 --set
+   agents.UndertakingAgent.kappa=0.1=): 66 facility =skew= notes and 14
+   undertakings' (e.g. day 3, =FacilityAgent#292=: fill -0.0342, skew
+   -0.00342, x 0.00842, y 0.00158, act issue); =sk_fac= -0.0030 (the
+   deepest of the eight), =sk_fac_n= 66, =sk_ut_n= 5.  Against facv30e:
+   the facility's drawn BUCK-days 4,040,639 vs 11,049,334, issued
+   168,813 vs 505,950, retired 18,249 vs 47,886, drawn at day 29 150,557
+   vs 458,010; K max |dK| 0.01088, RMS 0.00501 (G7's 0.02 / 0.01); the
+   undertakings 8 trades in both.
+7. sdv30k (V0, NONE OPS UT, =--set scenario.agents.SeederAgent=1 --set
+   agents.SeederAgent.kappa=0.1 --set agents.UndertakingAgent.kappa=0.1=):
+   the seeder's usdc-funded range (BUCK/USD 1.077 vs ideal 1.003)
+   converts FULLY by day 4 (=sh_sd_q= +9,689,480 of the 10,216,800
+   budget, fill 0.948), is re-struck as a buck-funded range that sells
+   back (day 25: -1,854,003; 14 positions, 13 repositions, 1 converted);
+   s_V peaks +0.0712 (day 5: (1 x -0.0056 + 0.25 x 0.9434) / 3.25 =
+   +0.070836 = =sh_s=) and K falls 0.7419 -> 0.6967 by day 25 (finding
+   5); =sk_sd= up to 0.0948 (the centre shifted 9.5% above the ideal),
+   =sk_sd_n= 26, 28 seeder notes, 21 undertakings'.
+8. bl60-k0 / bl60-k1 (S0, BL, kappa 0 / 0.1): the differential test,
+   acceptance 4 and finding 3.  Both: =bl_loaded= $5,350,746, rho at
+   the load's end 0.945468 (frac 0.0545), absorbed 419,991 / unwound
+   374,487 BUCK, 50 trades, P&L -$6.991M, K min 0.6528 (day 24) and
+   0.8843 at day 59 -- the WP-15 L2 9 p800 numbers.  bl60-k1: 55 skew
+   notes, =sk_ut_n= 48, =sk_ut= up to 0.00593 (day 26: eps_w 0.0109,
+   eps_s 0), and NOT ONE frame differs from bl60-k0 in K, bvib, rho or
+   the books.
+9. bl60-k6 / bl60-k10 (BL + =--set agents.UndertakingAgent.kappa=0.6= /
+   =1.0=; 1233 / 1251 s), against bl60-k0:
+
+   | cell | kappa | max abs dK | RMS dK | K min  | K day 59 | abs peak (day) | abs BUCK-days | below 10% of peak | rho load end | rho day 59 | absorbed | unwound | issued | trades | skewed acts | max sk_ut | s peak | P&L $M |
+   |------+-------+------------+--------+--------+----------+----------------+---------------+-------------------+--------------+------------+----------+---------+--------+--------+-------------+-----------+--------+--------|
+   | k0   |   0   |     --     |   --   | 0.6528 |   0.8843 | 322,817 (25)   |     7,962,034 | day 47            |       0.9455 |     0.9283 |  419,991 | 374,487 |      0 |     50 |          -- |        -- | 0.0479 | -6.991 |
+   | k6   |  0.6  |    0.01160 | 0.0054 | 0.6553 |   0.8937 | 291,074 (25)   |     6,290,515 | day 44            |       0.9514 |     1.0000 |  306,355 | 306,354 | 63,917 |     47 |          44 |    0.0321 | 0.0430 | -7.019 |
+   | k10  |  1.0  |    0.02931 | 0.0141 | 0.6561 |   0.9122 | 244,195 (24)   |     4,976,273 | day 42            |       0.9571 |     1.0000 |  259,476 | 259,475 | 106,745 |    48 |          45 |    0.0449 | 0.0358 | -7.137 |
+
+   (BUCK 6-dec in whole BUCK; "below 10% of peak" the first day after
+   the peak with the absorbed book under a tenth of it; the loader's
+   =bl_loaded= $5.35M in all three.)  The two cells are identical to
+   kappa 0 through day 15; the skewed ladder then passes on absorb days
+   (k6: 16 and 22) as its bid deepens (eps_w 0.005 + 0.6 x fill, 0.0371
+   at the peak: the edge 1.0385 against the loader's 3% target), so the
+   book peaks lower and, in the hold phase, the strong side -- whose
+   premium requirement eps_s = eps - skew reaches 0 -- sells the
+   absorbed inventory into the premium (63,917 / 106,745 BUCK issued
+   against 0) and retires it by day 57: the book is 0 and rho 1.0 from
+   day 45, where kappa 0 still holds 5,930 and re-absorbs 67,522 in the
+   unwind's aftermath.  K's paths: within 0.003 through day 40, then
+   apart as the position loop integrates the difference (0.0116 at
+   kappa 0.6, inside G7; 0.0293 at 1.0, outside).  Series:
+   =python3 kdiff.py smoke1/bl60-k0.json smoke1/bl60-k6.json --series=.
+
+** L3 (the identity pairs)
+
+The base cells were run FIRST from the worktree at 75d9e34 (no edit,
+own =out/=), then re-run from the changed tree with the SAME command
+lines (=build/sim/wp14/base/= vs =smoke1/=):
+
+    cmp base/none30.json smoke1/none30.json -> exit 0 (936995 / 936995 bytes; sha256 6e7fafb56176 / 6e7fafb56176)
+    vecdiff: frames 30 vs 30; identical: True; |delta bvib| max 0; |delta buckK| max 0; changed counters 0; gauges 0
+    cmp base/dump30.json smoke1/dump30.json -> exit 0 (947461 / 947461 bytes; sha256 0bec59a6e698 / 0bec59a6e698)
+    vecdiff: identical: True; max 0 / 0; changed 0 / 0
+    cmp base/ops30.json smoke1/ops30-lumped.json -> exit 0 (956242 / 956242 bytes; sha256 f7af46845fcc / f7af46845fcc)
+    vecdiff: identical: True; max 0 / 0; changed 0 / 0           (SIM_SHADOW_PERCLASS=0: the WP-13 lumped path, untouched)
+    cmp base/ops30.json smoke1/ops30.json -> exit 1 (956242 / 966926 bytes)      (the per-class default: new fields)
+    vecdiff: frames 30 vs 30; |delta bvib| max 0 (day 0) mean 0; |delta buckK| max 0 (day 0) mean 0;
+             changed counters 14, gauges 5 -- every one a booking field or a new per-class field:
+      sh_offset      A -24137266686 (day 29)  B 0            max|d| 33485214406   <- now sh_uts_q: the same integers,
+      sh_uts_q       A None                   B -24137266686 max|d| 33485214406      day for day (24,149 BUCK issued open)
+      sh_utw_q       A None                   B 0            max|d| 15241765883   (the 15,242 absorbed on day 1, unwound)
+      sh_offset_txs  A 8  B 0 ;  sh_class_txs  A None  B 10 ;  sh_offset_cap  A 10000000000000  B 0
+      sh_sat         A 0.00241  B 0.00444 (day 29)  max|d| 0.0028  (|q| / 5,439,665 instead of / 10,000,000; gamma 0)
+      sh_perclass, sh_uts_* / sh_utw_* (cap, w, lambda, stale, excluded), sh_class_err: new
+
+- none30: =--experiment alberta_buck/sim/experiments/catalogue-none.toml
+  --backend pyrevm --director pairs --days 30=.
+- dump30: =catalogue-dump.toml ... --days 30 --set agents.WhaleRaidAgent.raid_day=8
+  --set agents.WhaleRaidAgent.accum_days=8 --set agents.WhaleRaidAgent.reacquire_days=15=.
+- ops30: S0, =catalogue-none.toml ... --days 30 --set scenario.basket=ops
+  --set scenario.agents.UndertakingAgent=1 --set agents.UndertakingAgent.eps=0.005
+  --set agents.UndertakingAgent.p=1.0 --set scenario.agents.MonetaryKeeperAgent=1=
+  (this ORDER; finding 7).
+- bookload60 (a fourth base cell, WP-15's L2 9 line at 75d9e34) vs
+  bl60-k0 (the same line on the changed tree, per-class default):
+
+    python3 kdiff.py base/bookload60.json smoke1/bl60-k0.json
+    frames 60 vs 60; max|dK| 0.00000; RMS dK 0.00000; K_end 0.8843 vs 0.8843; max|d bvib| 0.00000
+    python -m alberta_buck.sim.vecdiff base/bookload60.json smoke1/bl60-k0.json
+    identical: False; |delta bvib| max 0; |delta buckK| max 0; changed counters 15; gauges 4:
+      sh_offset        A 45503591729 (day 59)  B 0        max|d| 322817454502   <- the book now lives in
+      sh_utw_q         A None                  B 45503591729  max|d| 322817454502   sh_utw_q, the same integers
+      sh_offset_txs    A 50   B 0 ;  sh_class_txs  A None  B 52 ;  sh_offset_cap  A 10000000000000  B 0
+      sh_sat           max|d| 0.0271 (the fill against the REAL cap 5,439,665 instead of $10M; gamma 0, no K effect)
+      sh_perclass, sh_uts_* / sh_utw_* (q, cap, w, lambda, stale, excluded), sh_class_err: new fields
+
+  i.e. what the observer aggregates is the same NUMBER: under S, s =
+  sum lambda_i q_i / D with every lambda 1 is (q_uts + q_utw) / D =
+  (-issued_open + absorbed_open) / D = the lumped offset / D, the same
+  integer division (=test_modeS_perClassEqualsLumpedOffset= pins it in
+  forge), so K and bvib are identical on 60 / 60 frames and every
+  changed field is a booking counter or a new per-class field.
+
+* Acceptance evidence
+
+| criterion (the WP-14 row; R16; the brief's items 1-6)                        | evidence                                                                                                                                                                                                                                                                                                                                              |
+|-----------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 forge: SimStabilizer's tests (the three positionCap outcomes; capacity / saturation), suites unchanged in count | =make nix-build= rc 0; =make nix-test= 60 suites / 624 passed / 0 failed / 1 skipped = 619 - 3 (=RegressionTest= skipped: no =build/snark/regression= in the worktree) + 8 (=SimStabilizerTest=); the 1 skipped is =BuckKControllerForkTest= as in the baseline; L1 lists the three-outcome tests                                                                    |
+| 2 L3: kappa 0 and the per-class default leave the base cells byte-identical; where booking changes what the observer aggregates, vecdiff + explanation | none30 / dump30 =cmp= exit 0; ops30 at =SIM_SHADOW_PERCLASS=0= =cmp= exit 0 (byte-identical, same sha256); the per-class ops30 and bl60-k0: K and bvib identical on every frame (max 0), the differing fields exactly the booking counters and the new per-class fields (L3); the S sum is the same integer (forge =test_modeS_perClassEqualsLumpedOffset=) |
+| 3 the per-class view: an ops30-style cell with the undertakings issuing AND the facility drawing; s_V by hand | facv30e day 12 (L2 5): uts -17,520 / 5,439,665, fac -423,280 / 8,649,349, desk 0 / 1,329,281, utw 0 / 5,439,665: s_V = -0.027690 / 3.50 = -0.007911 = =sh_s= exactly; also days 5 / 20 / 29 and smoke2 day 1.  At the brief's default x / y the facility never draws in 30 days (facv30), so the view is on the engaged band (x = y = 0.005)   |
+| 4 the differential test (R16): bookload at kappa 0 vs kappa*; the loaded book unwinds faster under kappa* while K stays within G7 | kappa* = 0.1 (one eps at a 5% fill): the skew fires (48 skewed trades, 55 notes) but the cells are IDENTICAL -- the disturbance sits far beyond both edges and the unwind is leg-capped, so the lever has nothing to move (finding 3).  At kappa 0.6 (the skew at the load's fill = the loader's 3% target) it passes AS STATED: BUCK-days 7.96M -> 6.29M, peak 322,817 -> 291,074, below 10% of peak day 44 vs 47, rho back to 1.0 from day 45 (kappa 0: 0.928 at day 59), K max abs dK 0.0116 / RMS 0.0054 (G7's 0.02 / 0.01); at kappa 1.0 the book moves more (4.98M BUCK-days) and K leaves G7 (0.0293 / 0.0141) -- L2 9, finding 3.  The facility's own version of the test passes as stated: facv30e vs facv30ek, its drawn BUCK-days 11.0M -> 4.0M, K max abs dK 0.011 / RMS 0.005 (L2 6) |
+| 5 the Vk preset gets its kappa* value                                       | =d7-c1.toml= line 77: =Vk = { ...V's assignments..., "agents.UndertakingAgent.kappa" = 0.1, "agents.FacilityAgent.kappa" = 0.1, "agents.SeederAgent.kappa" = 0.1 }= (the one marked place-holder line; ="Vk"= not added to =values=, open issue 2 / Files)                                                                                                  |
+| 6 pytest: the nine sim test files (183) plus the new tests                  | 199 passed (183 + 16 =test_skews.py=); the 4 WP-13 =test_shadow_book= tests untouched and green                                                                                                                                                                                                                                                       |
+| counters in the same commit as the agent (house rule 6)                     | d796bad: =sk_ut= / =sk_ut_f= / =sk_ut_n=, =sk_fac= / =sk_fac_n=, =sk_sd= / =sk_sd_n=, =sh_perclass= / =sh_class_txs= / =sh_class_err= / =sh_<cls>_{q,cap,stale,excluded,w,lambda}=; the notes in every kappa cell's =acts=                                                                                                                         |
+| new knobs draw AFTER the existing ones; a new class at count 0 is inert     | =kappa= is the last =_draw= of each class (scalar default: no variate); none30 / dump30 byte-identical                                                                                                                                                                                                                                                 |
+
+* Findings
+
+1. Per class equals lumped under S, to the wei.  With every lambda 1
+   the observer's S sum over the two undertakings' stabilizers is the
+   same integer as the lumped =shadowOffset= (absorbed - issued), so K
+   and bvib are identical on 60 / 60 frames of the loaded cell and 30 /
+   30 of the ops cell; the changed fields are exactly the booking
+   counters, =sh_sat= (now the fill against the real cap) and the new
+   per-class fields.  Command: =python3 kdiff.py base/bookload60.json
+   smoke1/bl60-k0.json= and the vecdiff in L3; forge
+   =test_modeS_perClassEqualsLumpedOffset=.
+2. The real caps versus the lumped $10M (WP-16's finding, closed).  The
+   undertakings' cap at the strike is reserve_frac x NAV = 0.5 x
+   10,879,331 = 5,439,665 BUCK on the catalogue-none seed (both sides:
+   decision 11's symmetric notional); the desk's is 10% of NAV,
+   1,064,935 -> 2,053,448 over 30 days as NAV grows; the facility's is
+   sum max_frac_i x limit_i, 2,599,598 for two lines and 8,619,562 ->
+   8,740,477 for eight (it moves with K daily, one booking tx a day);
+   the seeder's is its budget, 10,216,800 / 10,545,848 (a draw).  Under
+   the lumped cap a full undertakings book read as a fill of 0.54 here;
+   it now reads 1.0, and =sh_sat= at the load's peak reads 0.0594
+   (322,817 / 5,439,665) instead of 0.0323.  Command: =python3
+   perclass.py smoke1/smoke2.json 1=; L3's =sh_sat= line.
+3. kappa* = 0.1 is inert on the bookload arm, and why.  The loader
+   (push_bp 800, dev_target 0.03) holds bvib 5-7% CHEAP through the
+   load; the ladder's edge is 1 / (1 - eps_w): 1.0050 unskewed, 1.0104
+   at the peak fill (eps_w 0.0104); the pools price BUCK far beyond
+   both, so the ladder's daily bite is its LEG CAP (leg_bp 40 bp of each
+   pool's TOKEN reserve), the same amount whatever its bid, and the
+   ex-ante gate =f / out > max_bpb= passes in both cells.  The unwind
+   (sig <= 1 + eps_w / 2: 1.0025 vs 1.0052) fires in the hold phase,
+   when the loader's own BUCK/USDC buying has arbed bvib to 0.69-0.99
+   (WP-15 finding 6), far inside both thresholds, and its size is
+   =min(absorbed_open, held)= leg-capped: identical too.  A local skew
+   moves decisions only within its band's reach; at a 5.4% fill kappa
+   0.1 reaches 0.5% while the disturbance is 3-7%.  Command: =python3
+   kdiff.py smoke1/bl60-k0.json smoke1/bl60-k1.json --series= (every row
+   equal; =sk_ut= 0.0003-0.0059, =sk_ut_n= 48).  At kappa 0.6 the skew at the peak fill
+   is 0.032 (edge 1.0385 vs the loader's 3% target) and the lever
+   bites: the ladder passes on two absorb days, its book peaks 10%
+   lower and carries 21% fewer BUCK-days, the strong side -- eps_s = eps
+   - skew = 0 at the peak -- sells 63,917 BUCK of the absorbed
+   inventory into the hold-phase premium and retires it ("bids lower
+   and offers sooner", both halves), the book is 0 with rho 1.0 from
+   day 45, and K stays inside G7 (max 0.0116 / RMS 0.0054).  At kappa
+   1.0 (skew 0.045 at the peak) the book moves more (-37% BUCK-days)
+   but K ends 0.028 higher: from day 45 the skewed cell's book is 0
+   while kappa 0's re-absorbs 67k, and the position loop integrates the
+   difference -- outside G7.  So kappa* for the undertakings is the
+   brief's rule restated as "one DISTURBANCE of skew at the load's
+   fill" (0.6 here), not one eps; the Vk preset carries 0.6 for the
+   undertakings, 0.1 for the facility (measured inside G7 at its 0.005
+   band, finding 4) and 0.1 for the seeder (unmeasured; open issue 2).
+   Command: L2 9's table; =python3 kdiff.py smoke1/bl60-k0.json
+   smoke1/bl60-k10.json --series=.
+4. The facility's skew moves its own book with K inside G7.  Eight
+   lines at x = y = 0.005 on the calm arm draw 505,950 BUCK over 30 days
+   at kappa 0; at kappa 0.1 each line's x deepens by 0.1 x its own fill
+   (up to 0.0084 at fill -0.034) and its y tightens to 0.0016, so the
+   population draws 168,813, holds 4.04M instead of 11.05M BUCK-days and
+   ends with a third of the line drawn (150,557 vs 458,010) while K's
+   path differs by max 0.0109 / RMS 0.0050 -- the differential lever
+   of D7 on the facility, measured.  The undertakings' own trades are 8
+   in both cells.  Command: the facv30e / facv30ek pair in L2 6.
+5. The seeder's fill is O(1) by design, and it now feeds K.  A seeder
+   range converts its WHOLE budget when the price crosses it (that is
+   its job): by day 4 the usdc range had bought 9.69M of a 10.22M budget
+   (fill 0.948), s_V rose to +0.071 with the seeder at weight 0.25, and
+   K fell 0.7419 -> 0.6967 by day 25 (facv30, the same cast without a
+   seeder: 0.7588 at day 29).  Decision 15's "seeder-on K gap" now
+   enters through the observer as well as through the price; and the
+   seeder's kappa at 0.1 shifts its centre by up to 9.5% of the ideal.
+   Command: =python3 perclass.py smoke1/sdv30k.json 5 25=; open issue
+   2 / 5.
+6. At its default band the facility never draws on the calm arm in 30
+   days (facv30: =fac_drawn= 0 on every frame), exactly as the
+   undertakings never trade at eps 3% / p 2 (reports/wp-13.org finding
+   2); the per-class view therefore uses x = y = 0.005, the facility's
+   "engaged" band, which draws from day 2.  Command: L2 4 vs 5.
+7. The =--set= ORDER is part of a cell's identity.  Agents are numbered
+   in the insertion order of =scenario.agents=, which the =--set= lines
+   extend in command-line order; the keyed RNG streams and the identity
+   cache are per (seed, class, idx).  My first ops30 re-run put the
+   keeper's set before the undertakings' and got =UndertakingAgent#289=
+   where the base had =#288=: the frames differ from day 0 (=arb2=) and
+   drift to |delta bvib| 0.0198 / |delta K| 0.0026 over 30 days on BOTH
+   the lumped and the per-class path -- a different cell, not a code
+   effect (the artifacts' mtimes predate every base cell; the runtime
+   bytecode of the worktree's =out/= equals the main checkout's modulo
+   the metadata tail).  The pair is kept under =smoke1/misordered/=;
+   the L3 pair was re-run with the base's order.  "Copy the exact
+   command lines" is literal.  Command: the first-differing-frame
+   script in the session log; =python -m alberta_buck.sim.vecdiff
+   base/ops30.json smoke1/misordered/ops30-lumped.json=.
+8. A fresh worktree's =make nix-build= does not stage the six
+   third-party artifacts (=UniswapV3Factory= / =Pool=, =WETH9=, the V2
+   trio): every cell died at deploy with "UniswapV3Factory is not
+   published here" until =node scripts/stage-uniswap.mjs= (what =make
+   build-uniswap-artifacts= wraps) ran.  ONBOARDING's worktree recipe
+   says =make nix-build= only.  Command: =build/sim/wp14/base/*.log= of
+   the first launch; =make -n build-uniswap-artifacts=.
+9. The identity cache and the setup RNG.  =identity.cached_eoa_setup=
+   draws the registration record from the setup =rng= on a cache MISS
+   (=identity.py:114 issue(..., rng)=) and not on a hit, so an L3 pair
+   must be run in the same cache state; the base cells here missed the
+   ops30 order's two entries (the file showed modified) and the re-runs
+   missed them again after the restore (=git checkout= before the
+   commits), so both sides took the same path.  Command: =git status
+   test/vectors/identity-cache.json= between runs; =grep -n rng
+   alberta_buck/sim/identity.py=.
+10. Cost of the per-class path: 52 booking transactions in the 60-day
+    loaded cell (50 lumped) -- one per class per change, from =gov=,
+    never from the deployer -- and 4-6 extra =eth_call= per frame for
+    the telemetry; =SimStabilizer= is 2,932 B of bytecode.  Command:
+    =sh_class_txs= in L3; =load_artifact("SimStabilizer")=.
+
+* Open issues and proposed decisions
+
+1. The desk's local skew (decision 13): LEFT, with exactly what it
+   needs.  On-chain the desk's Q1 / Q3 "thresholds" are the director's
+   ONE symmetric =monParams.deadband1e9=, applied to |cm| in
+   =PairsRebalanceDirector='s monetary step (=src/basket/PairsRebalanceDirector.sol:295=,
+   =if (absCm < deadband1e9) { monEffortBp = 0; ... }=); the quadrant is
+   the SIGN of =monetaryEffort().effortBp= in
+   =BuckBasketOps.monetaryOperation= (=BuckBasketOps.sol:260=).  The
+   Avellaneda-Stoikov skew of D7 is a shift of the common mode's
+   REFERENCE by the desk's own fill, cm' = cm - kappa_d x q_d / cap_d
+   (q_d = =netInventory()=, cap_d = =positionCap()=, both the desk's own
+   IStabilizer views), so the absorb edge deepens and the supply edge
+   fires sooner when the desk is long absorbed, the mirror when long
+   issued: ~10 lines in the director's monetary step plus a governance
+   =setMonSkew(kappa1e9, desk)= (or a signed =monOffset1e9= a keeper
+   sets).  A KEEPER-SIDE emulation without editing the keeper or the desk
+   classes is not available: the deadband cannot be skewed per side
+   through =setMonParams= (one number, both sides), and =deploy.py='s
+   env can only set it once.  The nearest emulation is a keeper SUBCLASS
+   replacing =MonetaryKeeperAgent= in the cast that each day (i)
+   re-parameterizes the director from =gov= with deadband - kappa|f|
+   (the symmetric tighten) and (ii) previews =monetaryOperation()= and
+   skips the crank when the quadrant would ADD to the desk's inventory
+   while |cm| -- recovered from =effortBp x 1e18 / kappa1e9= -- is below
+   deadband + kappa|f|: both halves, but it re-parameterizes the
+   director's persistence surface (leash / outright share the struct)
+   daily and moves the desk's policy off-chain, the thing the ops basket
+   exists to avoid.  Proposed: the contract-side reference shift when
+   WP-11 (or a small branch before it) touches the director; the desk
+   runs at kappa_d = 0 in cycle 1's Vk cells (the Vk preset says so).
+2. kappa* per class.  Vk sets 0.1 on all three classes: for the
+   undertakings that is one eps (0.005, the grid's engaged band) of
+   skew at a 5% fill, the brief's rule; a kappa scaled to each class's
+   own band by the same rule would be x / 0.05 = 0.6 for the facility
+   (x = y = 0.03) and min_gap_bp / 0.05 = 0.05 for the seeder.
+   Proposed: one kappa* in cycle 1 (the structural check), a per-class
+   sweep in cycle 2 if Vk earns it.
+3. =SIM_SHADOW_OFFSET_CAP_USD= is inert under the per-class default
+   (the pseudo-stabilizer's V cap is cleared; each class carries its
+   REAL cap, which already scales with =reserve_frac= / =max_frac= /
+   =budget_m= on the capacity axis).  =d7-c1.toml='s capacity axis still
+   sets it (WP-15's file; not edited).  Proposed: drop it from the axis,
+   or leave it as a no-op that documents the old path
+   (=SIM_SHADOW_PERCLASS=0= reads it again).
+4. The strong side's cap is the weak side's R0 (=reserve_frac x NAV= at
+   the strike, constant thereafter), decision 11's "symmetric notional"
+   and its "one genuinely open number".  Proposed: accept for the
+   cycles; a separate =strong_cap_m= knob on =UndertakingAgent= if a
+   different governance notional is wanted.
+5. The seeder's position is what its ranges CONVERTED (issued BUCK
+   negative, absorbed positive), frozen at each exit because the
+   treasury's unwind is out of scope (WP-8); the counters =sd_q= /
+   =sd_cap= are single-instance like WP-8's =sd*=.  Proposed: accept;
+   T5 (the seeder's economics) reads =sh_sd_q= against =sh_sd_cap=.
+6. Frame shape and the roster.  =sk_*= fields exist only when a
+   non-zero skew was applied and the =sh_<cls>_*= fields only when the
+   per-class contracts exist; =kappa= enters the roster's knobs only
+   when set.  All three keep every kappa-0 / lumped cell byte-identical
+   (L3); a vecdiff across kappa levels reports the =sk_*= keys as new
+   fields, as WP-15's injector keys are.  Proposed: accept (the same
+   rule as WP-15's).
+7. A class absent at deploy but added by an intervention is registered
+   by =book_classes= on its first non-zero cap, so its registry index
+   (and flag bit) is the order of appearance, not the fixed uts / utw /
+   fac / sd order.  Proposed: accept -- the frame's per-class fields are
+   keyed by class name, and the flag masks are summarized per class in
+   =sh_<cls>_stale= / =_excluded=.
+8. The seeder's day-0 exclusion (fixed in d9ed1cd): before =bootstrap=
+   published =sd_cap= the seeder's stabilizer sat excluded until its
+   =start_day=, one flagged frame in every seeder cell.  The cells
+   =smoke2= / =sdv30k= of this report ran before that commit (the
+   =sh_sd_excluded= 1 on their day-0 frame is that); =sdv30k2= after it.
+9. The lumped =shadowOffset= path stays in the observer and in
+   =shadow_book.book= for comparisons (=SIM_SHADOW_PERCLASS=0=).
+   Proposed: remove it with WP-11, when the books are contract-level.
+
+* Left behind
+
+- =build/sim/wp14/= in the worktree, 24 MB, not committed: =base/= (the
+  four 75d9e34 cells none30 / dump30 / ops30 / bookload60 with logs and
+  =.done=), =smoke1/= (13 cells: the L3 re-runs none30 / dump30 / ops30
+  / ops30-lumped, the per-class and skew cells smoke2 / facv30 / facv30e
+  / facv30ek / sdv30k, the four bookload cells bl60-k0 / k1 / k6 / k10;
+  =misordered/= holds the first ops30 pair with the keeper's set first,
+  finding 7; logs, =.done=), =run_cell.sh=, =launch_smoke1.sh=, the
+  build / test logs.  Delete freely after the ledger entry; keep =base/=
+  and =smoke1/{none30,dump30,ops30,ops30-lumped,bl60-k0}.json= if the
+  identity pairs are wanted again.
+- The worktree's own =out/= (31 MB, including the six staged third-party
+  artifacts) and =cache/= (212 KB).
+- Scratch, session-local, outside the repo (the session scratchpad):
+  =kdiff.py= (K equivalence and the series), =perclass.py= (the
+  per-class rows and s_V by hand), =skewnotes.py=, =l3.sh=,
+  =l2cells.txt=.
+- =test/vectors/identity-cache.json= was regenerated by the runs and
+  restored with =git checkout= before every commit; the untracked
+  =alberta_buck/sim/viewer/vendor= and =node_modules= untouched.
+- Nothing installed; =flake.nix= and =pyproject.toml= untouched.  The
+  main checkout and =../alberta-buck-wp-16= were not written to.
