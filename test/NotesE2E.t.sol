@@ -5,6 +5,7 @@ import {Test, console2} from "forge-std/Test.sol";
 
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {PoseidonT3Bytecode} from "../src/PoseidonT3Bytecode.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
@@ -83,7 +84,7 @@ abstract contract NotesE2EBase is Test {
         face      = _u(".face");
 
         // ---- IdentityRegistry with the REAL incremental accumulator ----
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
         vm.startPrank(GOV);
         reg.setIdentityPoseidon(PoseidonT3Bytecode.deploy());
         vm.stopPrank();

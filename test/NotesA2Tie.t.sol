@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {Notes} from "../src/Notes.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
@@ -45,7 +46,7 @@ contract NotesA2TieTest is Test {
     function setUp() public {
         vm.chainId(1);                       // issuer_reenc transcript chainid = 1
         vj  = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         issuer = address(uint160(_u(".issuer_reenc.issuer")));
         vm.etch(issuer, hex"60006000fd");

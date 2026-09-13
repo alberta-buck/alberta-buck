@@ -78,10 +78,11 @@ contract Deploy is Script {
         // operates the pool), and approve receipts are decryptable by the
         // governance-held sk for subpoena response.
         //
-        // TODO(production): replace placeholder (pk, E) below with operator-
-        // generated values from the alberta_buck.wallet ElGamal keypair tool.
-        // The (pk, E) pair has the same shape as an EOA self-registration
-        // record; the operator publishes m_notes alongside the binding.
+        // TODO(production): 5-arg bindContract is the certified-operator
+        // exception -- the broadcaster must already be registered and (pk, E)
+        // must match that identity.  Prefer the credential overload with a
+        // PS signature + NIZK Fiat-Shamir-bound to address(notes).  Placeholder
+        // G1 values below will revert until that is wired.
         BN254.G1Point memory pk_notes_placeholder = BN254.g1();
         IdentityRegistry.ElGamalCT memory E_notes_placeholder =
             IdentityRegistry.ElGamalCT({ R: BN254.g1(), C: BN254.g1() });

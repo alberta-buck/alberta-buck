@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {StubIdentityMembershipVerifier} from "../src/StubIdentityMembershipVerifier.sol";
 import {StubNoteBindingVerifier} from "../src/StubNoteBindingVerifier.sol";
 import {Buck} from "../src/Buck.sol";
@@ -53,7 +54,7 @@ contract NotesCoupledA2Test is Test {
         vm.chainId(1);                           // wallet transcripts use chainid = 1
         vj = vm.readFile("test/vectors/unilateral_a2.json");
 
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         // The depositor: any registered Fountain account bound to the recipient
         // identity m_rec.  verifyDepositCoupling reads its (pk, E_addr).

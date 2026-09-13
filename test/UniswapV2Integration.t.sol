@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
@@ -112,7 +113,7 @@ contract UniswapV2IntegrationTest is Test {
 
         // Identity layer + register Alice and Bob.
         deployCodeTo(
-            "IdentityRegistry.sol:IdentityRegistry",
+            "test/harness/IdentityRegistryHarness.sol:IdentityRegistryHarness",
             abi.encode(GOV),
             REGISTRY_ADDR
         );

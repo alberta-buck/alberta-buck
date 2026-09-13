@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {StubIdentityMembershipVerifier} from "../src/StubIdentityMembershipVerifier.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
@@ -47,7 +48,7 @@ contract NotesCoupledB1Test is Test {
         vm.chainId(1);
         vj = vm.readFile("test/vectors/b1_binding.json");
 
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         depositor = address(uint160(_u(".depositor.addr")));
         issuer    = address(uint160(_u(".issuer.addr")));

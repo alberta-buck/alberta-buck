@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 
 /// @notice Phase 1 of the Notes mutual-decryptability fix: the public-issuer
@@ -19,7 +20,7 @@ contract IssuerSchnorrTest is Test {
     uint256 constant K  = 0x2222222222222222222222222222222222222222222222222222222222222222;
 
     function setUp() public {
-        reg = new IdentityRegistry(makeAddr("gov"));
+        reg = new IdentityRegistryHarness(makeAddr("gov"));
         // Bind `issuer` as a registered PUBLIC identity with pk = SK*G.
         // bindContract requires the target to be a deployed contract.
         vm.etch(issuer, hex"60006000fd");
@@ -138,7 +139,7 @@ contract IssuerSchnorrVectorTest is Test {
     function setUp() public {
         vm.chainId(1);                          // wallet transcripts use chainid = 1
         vj  = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         issuer = address(uint160(_u(".issuer_schnorr.issuer")));
         vm.etch(issuer, hex"60006000fd");

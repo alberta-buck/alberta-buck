@@ -260,9 +260,33 @@ contract IdentityRegistryTest is Test {
     }
 
     // ---- bindContract ------------------------------------------------------
+    //
+    // The 5-arg path is the already-certified-operator exception: the binder
+    // must be registered and the supplied (pk, E) must equal that identity.
+    // Alice's vector credential is the honest control.
+
+    function _alicePk() internal view returns (BN254.G1Point memory) {
+        return _g1(".alice.elgamal_kp.pk");
+    }
+
+    function _aliceE() internal view returns (IdentityRegistry.ElGamalCT memory) {
+        return _ct(".alice.ciphertext");
+    }
+
+    function _planAt(address target) internal {
+        vm.etch(target, hex"60006000fd");
+    }
+
+    function _bindPoolAsAlice(address pool, bool isPublic, bool isCarrying) internal {
+        _registerAlice();
+        _planAt(pool);
+        vm.prank(alice);
+        reg.bindContract(pool, _alicePk(), _aliceE(), isPublic, isCarrying);
+    }
 
     function test_bindContract_rejectsEOA() public {
-        // Alice is an EOA -- her address has no code, so bindContract refuses.
+        // Alice is an EOA -- her address has no code, so bindContract refuses
+        // before the binder-registered check.
         vm.expectRevert(bytes("target not a deployed contract"));
         reg.bindContract(
             alice,
@@ -273,48 +297,102 @@ contract IdentityRegistryTest is Test {
         );
     }
 
-    function test_bindContract_succeedsForDeployedContract_public() public {
+    function test_bindContract_rejectsUnregisteredBinder() public {
         address pool = address(0xDECAF);
-        vm.etch(pool, hex"60006000fd");
-
+        _planAt(pool);
         IdentityRegistry.ElGamalCT memory E =
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        vm.expectRevert(bytes("binder not registered"));
         reg.bindContract(pool, BN254.g1(), E, true, true);
+    }
+
+    function test_bindContract_rejectsMismatchedPkE() public {
+        _registerAlice();
+        address pool = address(0xDECAF);
+        _planAt(pool);
+        IdentityRegistry.ElGamalCT memory junk =
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        vm.prank(alice);
+        vm.expectRevert(bytes("uncertified identity"));
+        reg.bindContract(pool, BN254.g1(), junk, true, true);
+    }
+
+    function test_bindContract_succeedsForDeployedContract_public() public {
+        address pool = address(0xDECAF);
+        _bindPoolAsAlice(pool, true, true);
 
         assertTrue(reg.isVerified(pool),         "pool now verified");
         assertTrue(reg.isPublicIdentity(pool),   "pool is Public Identity");
         assertTrue(reg.isCarrying(pool),         "pool is Carrying");
-        assertEq(reg.binderOf(pool), address(this), "binder is the test contract");
+        assertEq(reg.binderOf(pool), alice,      "binder is alice");
         BN254.G1Point memory storedPk = reg.pkOf(pool);
-        assertTrue(BN254.eq(storedPk, BN254.g1()), "stored pk matches");
+        assertTrue(BN254.eq(storedPk, _alicePk()), "stored pk matches binder");
+        assertEq(reg.issuerOf(pool), ISSUER,     "issuer copied from binder");
     }
 
     function test_bindContract_succeedsForDeployedContract_encrypted() public {
-        // BUCK-aware contracts may bind under an encrypted Identity (operator
-        // controls the off-chain sk that decrypts approve receipts).
         address vault = address(0xBADD);
-        vm.etch(vault, hex"60006000fd");
-
-        IdentityRegistry.ElGamalCT memory E =
-            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-        reg.bindContract(vault, BN254.g1(), E, false, false);
+        _bindPoolAsAlice(vault, false, false);
 
         assertTrue(reg.isVerified(vault),          "vault now verified");
         assertFalse(reg.isPublicIdentity(vault),   "vault is encrypted Identity");
         assertFalse(reg.isCarrying(vault),         "vault is Non-Carrying (user wallet)");
+        assertEq(reg.binderOf(vault), alice);
     }
 
     function test_bindContract_firstBinderWins() public {
         address pool = address(0xDECAF);
-        vm.etch(pool, hex"60006000fd");
+        _bindPoolAsAlice(pool, true, true);
 
-        IdentityRegistry.ElGamalCT memory E =
-            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-        reg.bindContract(pool, BN254.g1(), E, true, true);
-
-        // Second bind reverts -- first binder owns the slot.
+        vm.prank(alice);
         vm.expectRevert(bytes("already bound"));
-        reg.bindContract(pool, BN254.g1(), E, true, true);
+        reg.bindContract(pool, _alicePk(), _aliceE(), true, true);
+    }
+
+    function test_bindContract_rejectsUncheckedLeaf() public {
+        _registerAlice();
+        address pool = address(0xDECAF);
+        _planAt(pool);
+        vm.prank(alice);
+        vm.expectRevert(bytes("unchecked identity leaf"));
+        reg.bindContract(pool, _alicePk(), _aliceE(), true, true, 12345);
+    }
+
+    function test_bindContract_leafZeroIsCertifiedOperatorPath() public {
+        _registerAlice();
+        address pool = address(0xDECAF);
+        _planAt(pool);
+        vm.prank(alice);
+        reg.bindContract(pool, _alicePk(), _aliceE(), true, true, 0);
+        assertTrue(reg.isVerified(pool));
+        assertEq(reg.identityRoot(), 0, "leaf=0 must not touch the accumulator");
+    }
+
+    function test_bindContract_rejectsRegisterProofBoundToBinder() public {
+        // Alice's registration proof is Fiat-Shamired against Alice, not the
+        // pool.  Replaying it on the credential bind overload must fail FS.
+        _registerAlice();
+        address pool = address(0xDECAF);
+        _planAt(pool);
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad FS challenge"));
+        reg.bindContract(
+            pool, ISSUER, _alicePk(), _aliceE(), _ps("alice"), _regProof("alice"),
+            true, true
+        );
+    }
+
+    function test_register_rejectsUncheckedLeaf() public {
+        vm.prank(alice);
+        vm.expectRevert(bytes("unchecked identity leaf"));
+        reg.register(ISSUER, _alicePk(), _aliceE(), _ps("alice"), _regProof("alice"), 12345);
+    }
+
+    function test_register_leafZeroStillRegisters() public {
+        vm.prank(alice);
+        reg.register(ISSUER, _alicePk(), _aliceE(), _ps("alice"), _regProof("alice"), 0);
+        assertTrue(reg.isVerified(alice));
+        assertEq(reg.identityRoot(), 0);
     }
 
     // ---- verifyApprove -----------------------------------------------------
@@ -437,37 +515,26 @@ contract IdentityRegistryTest is Test {
 
     // ---- setIsCarrying / markApproved freeze -------------------------------
 
-    function _planAt(address target) internal {
-        vm.etch(target, hex"60006000fd");
-    }
-
     function test_setIsCarrying_onlyBinder() public {
         address pool = address(0xDECAF);
-        _planAt(pool);
-        IdentityRegistry.ElGamalCT memory E =
-            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-
-        // The test contract is the binder.
-        reg.bindContract(pool, BN254.g1(), E, true, true);
+        _bindPoolAsAlice(pool, true, true);
 
         // Random caller cannot flip the flag.
-        vm.prank(alice);
         vm.expectRevert(bytes("not binder"));
         reg.setIsCarrying(pool, false);
 
         // Binder can.
+        vm.prank(alice);
         reg.setIsCarrying(pool, false);
         assertFalse(reg.isCarrying(pool));
+        vm.prank(alice);
         reg.setIsCarrying(pool, true);
         assertTrue(reg.isCarrying(pool));
     }
 
     function test_markApproved_onlyBuck() public {
         address pool = address(0xDECAF);
-        _planAt(pool);
-        IdentityRegistry.ElGamalCT memory E =
-            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-        reg.bindContract(pool, BN254.g1(), E, true, true);
+        _bindPoolAsAlice(pool, true, true);
 
         // Without a buck set, no caller can markApproved.
         vm.expectRevert(bytes("only Buck"));
@@ -494,10 +561,7 @@ contract IdentityRegistryTest is Test {
 
     function test_setIsCarrying_revertsAfterFreeze() public {
         address pool = address(0xDECAF);
-        _planAt(pool);
-        IdentityRegistry.ElGamalCT memory E =
-            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-        reg.bindContract(pool, BN254.g1(), E, true, true);
+        _bindPoolAsAlice(pool, true, true);
 
         // Buck-side approval freezes the flag.
         address fakeBuck = address(0xB0CC);
@@ -507,6 +571,7 @@ contract IdentityRegistryTest is Test {
         reg.markApproved(pool);
 
         // Binder can no longer change isCarrying.
+        vm.prank(alice);
         vm.expectRevert(bytes("carrying frozen by approval"));
         reg.setIsCarrying(pool, false);
 

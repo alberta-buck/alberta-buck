@@ -13,12 +13,13 @@ import {IdentityRegistry} from "./IdentityRegistry.sol";
 ///         a competing `bindContract` between the operator's deployment and
 ///         their bind because both happen inside one external call.
 ///
-///         The helper does NOT verify operator authority -- (pk, E) are just
-///         passed through to the registry.  Authority derives from controlling
-///         the salt / factory call: an adversary who can submit the same
-///         (factory, factoryCall) or (salt, initCode) tuple first can bind
-///         their own (pk, E) and lock the operator out.  Use a high-entropy
-///         salt or call this helper directly from a tx the operator submits.
+///         Certification is the registry's: the 5-arg bindContract path is
+///         the already-certified-operator exception (msg.sender must be
+///         registered and (pk, E) must match), so a helper contract cannot
+///         use it.  The credential overloads forward a PS signature +
+///         registration NIZK Fiat-Shamir-bound to the deployed address
+///         (CREATE2-predictable).  Use a high-entropy salt or call this
+///         helper from a tx the operator submits.
 contract BuckAwareDeployer {
 
     IdentityRegistry public immutable registry;
@@ -36,7 +37,32 @@ contract BuckAwareDeployer {
 
     /// @notice Call `factory.<factoryCall>` (which must return a single
     ///         ABI-encoded address -- matches `IUniswapV2Factory.createPair`,
-    ///         OpenZeppelin Clones, etc.) and bind the deployed contract.
+    ///         OpenZeppelin Clones, etc.) and bind the deployed contract
+    ///         under a PS credential Fiat-Shamir-bound to that address.
+    function deployAndBind(
+        address factory,
+        bytes calldata factoryCall,
+        address issuer,
+        BN254.G1Point calldata pk,
+        IdentityRegistry.ElGamalCT calldata E,
+        IdentityRegistry.PSSig calldata sigma,
+        IdentityRegistry.RegistrationProof calldata proof,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external returns (address deployed) {
+        deployed = _factoryDeploy(factory, factoryCall);
+        registry.bindContract(
+            deployed, issuer, pk, E, sigma, proof,
+            isPublicIdentity_, isCarrying_
+        );
+        emit Deployed(deployed, msg.sender, isPublicIdentity_);
+    }
+
+    /// @notice Factory deploy + already-certified-operator bind.  The registry
+    ///         5-arg path requires msg.sender (this helper) to be a registered
+    ///         account whose stored (pk, E) match; a typical helper is not.
+    ///         Prefer the credential overload.  Kept so fixture harnesses that
+    ///         override 5-arg bindContract still exercise atomic deploy+bind.
     function deployAndBind(
         address factory,
         bytes calldata factoryCall,
@@ -45,18 +71,38 @@ contract BuckAwareDeployer {
         bool isPublicIdentity_,
         bool isCarrying_
     ) external returns (address deployed) {
-        (bool ok, bytes memory ret) = factory.call(factoryCall);
-        require(ok, "factory call failed");
-        require(ret.length >= 32, "factory return too short");
-        deployed = abi.decode(ret, (address));
-        require(deployed != address(0), "factory returned zero");
+        deployed = _factoryDeploy(factory, factoryCall);
         registry.bindContract(deployed, pk, E, isPublicIdentity_, isCarrying_);
         emit Deployed(deployed, msg.sender, isPublicIdentity_);
     }
 
-    /// @notice CREATE2-deploy raw `initCode` under `salt` and bind the result.
-    ///         Use for direct contract deployment (no factory).  Predicted
-    ///         address is keccak256(0xff || this || salt || keccak256(initCode)).
+    /// @notice CREATE2-deploy raw `initCode` under `salt` and bind the result
+    ///         under a PS credential Fiat-Shamir-bound to the predicted address.
+    ///         Predicted address is keccak256(0xff || this || salt || keccak256(initCode)).
+    function deployCreate2AndBind(
+        bytes32 salt,
+        bytes calldata initCode,
+        address issuer,
+        BN254.G1Point calldata pk,
+        IdentityRegistry.ElGamalCT calldata E,
+        IdentityRegistry.PSSig calldata sigma,
+        IdentityRegistry.RegistrationProof calldata proof,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external returns (address deployed) {
+        bytes memory ic = initCode;
+        assembly {
+            deployed := create2(0, add(ic, 32), mload(ic), salt)
+        }
+        require(deployed != address(0), "create2 failed");
+        registry.bindContract(
+            deployed, issuer, pk, E, sigma, proof,
+            isPublicIdentity_, isCarrying_
+        );
+        emit Deployed(deployed, msg.sender, isPublicIdentity_);
+    }
+
+    /// @notice CREATE2 + already-certified-operator bind.  See 5-arg deployAndBind.
     function deployCreate2AndBind(
         bytes32 salt,
         bytes calldata initCode,
@@ -72,6 +118,16 @@ contract BuckAwareDeployer {
         require(deployed != address(0), "create2 failed");
         registry.bindContract(deployed, pk, E, isPublicIdentity_, isCarrying_);
         emit Deployed(deployed, msg.sender, isPublicIdentity_);
+    }
+
+    function _factoryDeploy(address factory, bytes calldata factoryCall)
+        internal returns (address deployed)
+    {
+        (bool ok, bytes memory ret) = factory.call(factoryCall);
+        require(ok, "factory call failed");
+        require(ret.length >= 32, "factory return too short");
+        deployed = abi.decode(ret, (address));
+        require(deployed != address(0), "factory returned zero");
     }
 
     /// @notice Compute the CREATE2 address that `deployCreate2AndBind` would

@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckAwareDeployer} from "../src/BuckAwareDeployer.sol";
 
 /// @dev Minimal factory that deploys a trivial contract and returns its address.
@@ -36,7 +37,7 @@ contract BuckAwareDeployerTest is Test {
     address internal constant GOV = address(0xA0);
 
     function setUp() public {
-        reg      = new IdentityRegistry(GOV);
+        reg      = new IdentityRegistryHarness(GOV);
         deployer = new BuckAwareDeployer(address(reg));
         factory  = new ToyFactory();
     }

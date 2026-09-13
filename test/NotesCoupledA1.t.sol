@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {StubIdentityMembershipVerifier} from "../src/StubIdentityMembershipVerifier.sol";
 import {StubNoteBindingVerifier} from "../src/StubNoteBindingVerifier.sol";
 import {Buck} from "../src/Buck.sol";
@@ -49,7 +50,7 @@ contract NotesCoupledA1Test is Test {
         vm.chainId(1);
         vj = vm.readFile("test/vectors/unilateral_a1.json");
 
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         depositor = address(uint160(_u(".depositor.addr")));
         vm.etch(depositor, hex"60006000fd");

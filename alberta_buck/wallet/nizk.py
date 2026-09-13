@@ -133,11 +133,13 @@ def registration_prove(
 ) -> RegistrationProof:
     """Build the registration NIZK proof.
 
-    `registrant` is the Ethereum address of the address that will submit the
-    proof, encoded as a uint256 (left-padded uint160).  Binding it, `chainid`,
-    `registry`, and REGISTER_DOMAIN into the Fiat-Shamir transcript prevents
-    proof replay across addresses, chains, registry deployments, and protocol
-    versions. `sk` is the account secret with pk = sk*G.
+    `registrant` is the Ethereum address the proof is bound to, encoded as a
+    uint256 (left-padded uint160).  For register() this is msg.sender; for
+    bindContract() it is the target contract (see bind_contract_prove).
+    Binding it, `chainid`, `registry`, and REGISTER_DOMAIN into the
+    Fiat-Shamir transcript prevents proof replay across addresses, chains,
+    registry deployments, and protocol versions.  `sk` is the account secret
+    with pk = sk*G.
     """
     m_tilde = rand_scalar(rng)
     r_tilde = rand_scalar(rng)
@@ -158,6 +160,25 @@ def registration_prove(
         e=e, s_m=s_m, s_r=s_r, s_sk=s_sk,
         A_ps=A_ps, T_C=T_C, T_R=T_R, T_key=T_key,
     )
+
+
+def bind_contract_prove(
+    sigma_p: PSSignature,
+    m: int,
+    r: int,
+    pk,
+    E: ElGamalCiphertext,
+    target: int,
+    sk: int,
+    chainid: int = 1,
+    rng=None,
+) -> RegistrationProof:
+    """Registration NIZK for IdentityRegistry.bindContract.
+
+    Fiat-Shamir registrant is uint160(target), not the binder.  A proof
+    valid for an EOA cannot be replayed onto a contract, and vice versa.
+    """
+    return registration_prove(sigma_p, m, r, pk, E, target, sk, chainid, rng)
 
 
 def registration_verify(

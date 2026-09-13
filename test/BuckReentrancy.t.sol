@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {CreditSlice} from "../src/BuckTypes.sol";
@@ -128,7 +129,7 @@ contract BuckReentrancyTest is Test {
     address internal constant SINK = address(0x51C0);
 
     function setUp() public {
-        reg      = new IdentityRegistry(GOV);
+        reg      = new IdentityRegistryHarness(GOV);
         credit   = new ReenteringCredit();
         kCtrl    = new BuckKControllerStatic(1e18, GOV);
         buck     = new Buck(address(credit), address(kCtrl), address(reg), POOL);

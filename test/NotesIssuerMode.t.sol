@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {Notes} from "../src/Notes.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubMintVerifierA2} from "../src/StubMintVerifierA2.sol";
@@ -45,7 +46,7 @@ contract NotesIssuerModeTest is Test {
     function setUp() public {
         vm.chainId(1);                          // issuer_reenc transcript chainid
         vj  = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         StubMintVerifier  m = new StubMintVerifier(GOV);
         StubSpendVerifier s = new StubSpendVerifier(GOV);

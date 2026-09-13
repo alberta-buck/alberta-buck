@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {IIdentityMembershipVerifier} from "../src/IIdentityMembershipVerifier.sol";
 import {StubIdentityMembershipVerifier} from "../src/StubIdentityMembershipVerifier.sol";
 import {Buck} from "../src/Buck.sol";
@@ -51,7 +52,7 @@ contract NotesIdentityMembershipTest is Test {
         vm.chainId(1);
 
         // Identity layer (simplified — bind alice/bob as PUBLIC issuers with known keys).
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
         alice = 0x0411ce00000000000000000000000000000411ce;
         bob   = 0x00B0B00000000000000000000000000000000b0b;
         vm.etch(alice, hex"60006000fd");

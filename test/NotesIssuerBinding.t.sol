@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {Notes} from "../src/Notes.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
@@ -31,7 +32,7 @@ contract NotesIssuerBindingTest is Test {
     uint256 constant K  = 0x2222222222222222222222222222222222222222222222222222222222222222;
 
     function setUp() public {
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
         StubMintVerifier  mintStub  = new StubMintVerifier(GOV);   // accepts any proof
         StubSpendVerifier spendStub = new StubSpendVerifier(GOV);
         MockBuck          buck      = new MockBuck();
