@@ -68,8 +68,5 @@ echo "setup_spend: wrote $OUT and $VERIFIER"
 
 echo "[vectors] re-proving e2e spend openings against the new zkey"
 PYTHON="${PYTHON:-python3}"
-if [ -x /Users/perry/src/alberta-buck.venv-0.1.0-nix-darwin-cpython-313/bin/python ]; then
-    PYTHON=/Users/perry/src/alberta-buck.venv-0.1.0-nix-darwin-cpython-313/bin/python
-fi
 PYTHONPATH="$ROOT" "$PYTHON" "$ROOT/scripts/snark/regen_spend_vectors.py"
 echo "setup_spend: matched spend set ready"

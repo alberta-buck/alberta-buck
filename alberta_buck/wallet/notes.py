@@ -1,7 +1,7 @@
 """BUCK Notes commitment / nullifier construction (Phase 7+ corrected design).
 
 Hash family: circomlib Poseidon over BN254 (matches the shipped
-=spend.circom= and the planned =spend_a.circom=).  The Python implementation
+=spend.circom=).  The Python implementation
 in :mod:`alberta_buck.wallet.poseidon` agrees with circomlibjs's unoptimized
 variant, which is the same hash the optimized circuit Poseidon computes (just
 via different but equivalent constants).  See :file:`scripts/snark/poseidon_t3_code.js`
@@ -9,8 +9,8 @@ for the on-chain bytecode story.
 
 Wire formats::
 
-    cm    = Poseidon([flavor, v, rho, id_hash, predicate])    # spend.circom L90
-    nf_b  = Poseidon([rho, id_hash, 4242])                    # spend.circom L113-117
+    cm    = Poseidon([flavor, v, rho, id_hash, predicate])    # spend.circom (C)
+    nf_b  = Poseidon([rho, id_hash, 4242])                    # spend.circom (N)
     nf_a  = Poseidon([rho, id_hash, 4243])                    # reserved; unused on chain
 
 The shipped unified ``spend.circom`` derives the 4242-tagged nullifier for
@@ -95,7 +95,7 @@ class NoteOpening:
 def note_commitment(opening: NoteOpening) -> int:
     """``cm = Poseidon([flavor, v, rho, id_hash, predicate])``.
 
-    Matches :file:`circuits/spend.circom` line 90 byte-for-byte.
+    Matches :file:`circuits/spend.circom` constraint (C) byte-for-byte.
     """
     return poseidon([
         opening.flavor,
@@ -111,7 +111,7 @@ def note_commitment(opening: NoteOpening) -> int:
 def nullifier_b(rho: int, id_hash: int) -> int:
     """B-spend nullifier: ``Poseidon([rho, id_hash, 4242])``.
 
-    Matches :file:`circuits/spend.circom` lines 113-117.  For B-flavor
+    Matches :file:`circuits/spend.circom` constraint (N).  For B-flavor
     (bearer) notes the spend authorization is knowledge of ``rho``; the
     contract simply checks that the nullifier hasn't been seen before.
     """
