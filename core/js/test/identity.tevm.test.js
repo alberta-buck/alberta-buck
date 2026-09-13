@@ -67,7 +67,7 @@ test("identity ceremony: wasm NIZK verified by IdentityRegistry on tevm", { skip
   const r = rand();
   const E = id.elgamalEncrypt(id.g1Mul(id.G1, m), pk, r);
   const registrant = BigInt(session.account.address);
-  const chainid = 1n;
+  const chainid = BigInt(await session.client.getChainId());
   const proof = id.registrationProve(
     sigmaP, m, r, pk, E, registrant, sk, chainid, rand(), rand(), rand());
   assert.ok(id.registrationVerify(sigmaP, E, pk, pkX, pkY, proof, registrant, chainid),
