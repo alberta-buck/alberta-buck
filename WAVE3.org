@@ -33,16 +33,17 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   telemetry v2 (cdd1e49).  =ORGANIC-SCALE.org= opened wave 4 (tracks
   T13-T17); the viewer serves at =http://datasim.local:8787/=.
   ORGANIC-SCALE.org's six decisions RESOLVED 2026-09-11 (decision 22).
-  WP-15 (75d9e34) and WP-16 (50e0616) DONE and merged 2026-09-12: the
-  grid's machinery and the gain table exist; =d7-c1= carries the
-  derived gains and dry-runs 60 cells.  WP-16's findings (decisions
-  27-33): the joint plant is not stabilizable (loop-at-a-time LQR), K
-  is a weak lever (the derived position loop rails at a 21% fill; the
-  S0-equivalent lambda is 24), the depth axis does not change D.  IN
-  FLIGHT: WP-14 (=wp/14-skews=, =../alberta-buck-wp-14=, own out/).
-  Cycle 1 runs on ONE tree after WP-14 merges, from the frozen grid
-  worktree =../alberta-buck-grid= re-pointed to that commit.  Wave 4's
-  T15 / T16 / T17 are on offer to other accounts.
+  WP-15 (75d9e34), WP-16 (50e0616) and WP-14 (801f34f) DONE and merged
+  2026-09-12: the grid's machinery, the gain table and the per-class
+  stabilizers with the local skews all exist.  CYCLE 1 IS IN FLIGHT:
+  66 two-year cells (designs A, S0, S0k, S, V, Vk x capacity x tau_s x
+  depth on none / dump x1 / dump x4 / cohort-step / guardtrip /
+  bookload), launched 21:05 PDT 2026-09-12 from the frozen grid
+  worktree =../alberta-buck-grid= at 801f34f, ~9 h; its vectors at
+  =build/sim/star-d7= for the viewer.  The main checkout is free for
+  edits.  Decisions pending 27-37 await the design owner, 28 (the
+  position loop's authority) with cycle 1's numbers.  Wave 4's T15 /
+  T16 / T17 are on offer to other accounts.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -258,7 +259,7 @@ remains.
 | WP-3c | Integral-only K, with the P/D roles factored into the level-1 facilities: the first star (kp_frac x tau_i x cast x whale) on none / dump x1 / squeeze x4, judged by G7 / G8 and x4 AUC / rail days vs the P-carrying baseline                                                                                                                                      | WP-12, WP-2 (for the undertakings baseline; the usdc-mix baseline may run first) | experiments/stars/k-integral-*.toml                                                                                                                                                                                       | the c0 and c1 sensitivity tables and pane figures; a recommendation on kp_frac                                             | decisions pending 7 closed with evidence                                                                                                                                 | ~63 / cycle                                                                                                                                                                                                                                          | TODO                                                   |                                                                                                               |                               |
 | WP-11 | Monetary Diamond consolidation (POST-wave-3): facets = venue, custody, ops, undertakings + ladder, facility registry, house, observer, controller; =Buck='s =buckK= and =basket= point at the Diamond (CARRY-CONVEXITY.org 6.4)                                                                                                                                    | all wave-3 wins                                                                  | src/basket/* (facets), src/Buck.sol wiring decision, deploy scripts                                                                                                                                                       | facet map + shared storage layout; time-locked parameters                                                                  | existing forge suites pass facet by facet; lambda = gamma = 0 identity; one-way call graph asserted                                                                      | --                                                                                                                                                                                                                                                   | TODO                                                   |                                                                                                               |                               |
 | WP-13 | The corrected controller (D7): two loops with independent gains (Kq, Kqi, Kqd) and one position integrator; observer aggregation modes S / V with weights; =IStabilizer.position()= / =positionCap()= / =stale()=; hold-last cap on an unreadable NAV; disabled stabilizers excluded; the price loop and =fundingFactor()= read the RAW basket value (decision 10) | WP-3a                                                                            | BuckKControllerShadow.sol (extend), ShadowObserver.sol (modes, weights, exclusion), IStabilizer.sol (append), BuckBasketOps.sol (position / cap / stale), forge tests; deploy.py / __main__.py (append: =--shadow-mode s  | v=, =SIM_SHADOW_KQ= / =_KQI= / =_KQD= / =_W_*=)                                                                            | =--controller shadow= runs in both modes; the R14 attribution panel gets the per-loop dK                                                                                 | Kq = Kqi = Kqd = 0 identity with Direct state-for-state; S0 gains reproduce D4 in the interior on a 5-d smoke; guard-trip test leaves position() / saturation() unchanged and sets stale(); disabled desk excluded from s; shell size within EIP-170 | 1 smoke                                                | DONE (merged 2026-09-06, b4c1b75; 36 Shadow + 37 Ops + 4 pytest; identity 5/5 frames; S and V engaged smokes) | =wp/13-controller= / subagent |
-| WP-14 | Local skews kappa_i on the level-1 agents: UndertakingAgent (eps per side), FacilityAgent (x / y), SeederAgent (range centre), the desk (its Q1/Q3 thresholds via the ops params): band_i = band_i0 + kappa_i q_i / cap_i, default 0                                                                                                                               | WP-13 (position telemetry only)                                                  | undertaking_agents.py, facility_agent.py, seeder_agent.py (append: kappa knob, sk_* counters); the desk's thresholds                                                                                                      | kappa on / off cells in the grid                                                                                           | kappa = 0 byte-identical to today (L3); under a differential disturbance the loaded facility's own book unwinds with K within G7                                         | 2 smokes                                                                                                                                                                                                                                             | TODO                                                   |                                                                                                               |                               |
+| WP-14 | Local skews kappa_i on the level-1 agents: UndertakingAgent (eps per side), FacilityAgent (x / y), SeederAgent (range centre), the desk (its Q1/Q3 thresholds via the ops params): band_i = band_i0 + kappa_i q_i / cap_i, default 0                                                                                                                               | WP-13 (position telemetry only)                                                  | undertaking_agents.py, facility_agent.py, seeder_agent.py (append: kappa knob, sk_* counters); the desk's thresholds                                                                                                      | kappa on / off cells in the grid                                                                                           | kappa = 0 byte-identical to today (L3); under a differential disturbance the loaded facility's own book unwinds with K within G7                                         | 2 smokes                                                                                                                                                                                                                                             | DONE (merged 2026-09-12, 801f34f: SimStabilizer per class with real caps; kappa skews; the measured kappa* 0.6 / 0.1 / 0.1; the desk's skew left with its contract-side recipe) | =wp/14-skews= / subagent |                               |
 | WP-15 | The controller-alternatives grid (the test plan of this file): disruption TOMLs for classes 5-8 and 10; =BookLoaderAgent= (class 9); habituation / carry / saturation-dwell / K-economy / book-loading / attribution metrics; cycles 1-3                                                                                                                           | decision 8; WP-13, WP-14, WP-16                                                  | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml (new); bookloader.py (new); eqmetrics.py / snapshot.py (append); a star spec per cycle                                                   | the three cycles' tables and panes; a recommendation S vs V, tau_s, kappa*                                                 | P9 and P10 judged; G1-G8 on every cell; R15-R18                                                                                                                          | ~130                                                                                                                                                                                                                                                 | machinery DONE (merged 2026-09-12, 75d9e34: the class arms, three injectors, the d7 metrics, star axes, d7-c1.toml 54 cells); the cycles not yet run | =wp/15-grid= / subagent |                               |
 | WP-16 | Gain derivation, offline: the reduced plant (7.2 + the position loop) as a small linear model in Python; identify k_s (flow per unit K per unit cap) from banked vectors; LQR with costs (e^2, carry-weighted s^2, dK^2); SIMC sanity; margin check; the gain table for S and V at both depths                                                                     | WP-1 vectors                                                                     | alberta_buck/sim/kdesign.py, test_kdesign.py (new)                                                                                                                                                                        | the gain table (Kq, Kqi, Kqd, tau_s) per design and depth; the lambda knee derived rather than swept                       | LQR reproduces the price loop's (Kp, Ki) within 25% when the position weight is 0 (the sanity anchor); the derived tau_s lands between tau_I and the persistence horizon | 0                                                                                                                                                                                                                                                    | DONE (merged 2026-09-12, 50e0616; the table in build/sim/kdesign/gains.org; anchor exact; the joint plant not stabilizable -> loop-at-a-time) | =wp/16-kdesign= / subagent |                               |
 
@@ -722,6 +723,83 @@ install and login.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-12 -- WP-14 DONE and merged; CYCLE 1 LAUNCHED (session 3, subagent on =wp/14-skews=; the integrator on datasim)
+
+- Merged --no-ff as 801f34f (five branch commits, head 442fc43; the
+  report =reports/wp-14.org= is the evidence of record; one conflict in
+  =d7-c1.toml= resolved by keeping the derived S / S0k / V presets and
+  giving Vk the derived V gains plus WP-14's measured kappas).  On the
+  merged tree: =make nix-build= clean; =make nix-test= 61 suites, 627
+  passed, 0 failed, 1 skipped (619 + 8 SimStabilizer); pytest of the
+  eleven sim files 215 passed, 1 skipped; =d7-c1= dry-runs 66 cells
+  (the six designs A, S0, S0k, S, V, Vk).
+- Built: =src/sim_build/SimStabilizer.sol= -- a sim-only =IStabilizer=
+  per agent class with setters and the three =positionCap()= outcomes,
+  one per class deployed from =gov= (so no deployer nonce moves and
+  every later address is the lumped path's) and registered at decision
+  11's lambdas and weights: the undertakings' strong and weak sides
+  (cap = reserve_frac x NAV at the strike, both sides), the facility
+  population (sum max_frac_i x limit_i), the seeder (its budget; its
+  converted range booked as a position); =shadow_book.py= books each
+  class on change; the lumped offset stays behind =SIM_SHADOW_PERCLASS=0=.
+  The local skews of D7: =kappa= on the undertakings (eps per side),
+  the facility (x / y) and the seeder (range centre), band = band0 +
+  kappa q / cap, default 0, with =sk_*= counters, =note(kind="skew")=
+  and per-class =sh_<cls>_*= frame fields.
+- Evidence: none30 / dump30 byte-identical; ops30 byte-identical on the
+  lumped path and, on the per-class path, K and bvib identical to the
+  wei on every frame of the 30-day ops cell and the 60-day loaded cell
+  (the S sum is the same integer, pinned in forge); s_V by hand equals
+  =sh_s= on every frame checked (the facility and the undertakings both
+  open); the facility's skew unwinds its own drawn book (11.0M -> 4.0M
+  BUCK-days) with K inside G7.  THE MEASURED KAPPA: the brief's rule
+  (one eps at a 5% fill = 0.1) is INERT on the bookload arm, because
+  the loader holds bvib 5-7% cheap, beyond both the unskewed and the
+  skewed edge, so the ladder trades at its leg cap whatever its bid; at
+  kappa 0.6 (the skew at the load's 5.4% fill equals the loader's 3%
+  target) the lever bites -- the loaded book's BUCK-days -21%, the peak
+  10% lower, rho back to 1.0 from day 45 where kappa 0 never returns,
+  K inside G7 (max 0.0116 / RMS 0.0054); at 1.0 the book moves more but
+  K leaves G7.  Vk carries undertakings 0.6, facility 0.1, seeder 0.1.
+- FINDINGS: (1) the =--set= ORDER is part of a cell's identity -- agents
+  are numbered in the insertion order of =scenario.agents=, which the
+  =--set= lines extend in command-line order, and the keyed streams are
+  per (seed, class, idx): a re-ordered pair drifts from day 0 (house
+  rule 12 in ONBOARDING); (2) a fresh worktree's =make nix-build= does
+  not stage the six third-party artifacts -- cells die at deploy with
+  "UniswapV3Factory is not published here" until =node
+  scripts/stage-uniswap.mjs= runs (=make nix-venv-sim-build= wraps it;
+  the recipe now says so); (3) the desk's local skew cannot be emulated
+  keeper-side without replacing the keeper: on-chain the desk's
+  thresholds are the director's one symmetric deadband and the
+  quadrant is the sign of =monetaryEffort()=; the contract-side recipe
+  is a reference shift cm' = cm - kappa_d q_d / cap_d in the director's
+  monetary step (~10 lines + a governance setter) -- decision 34; (4)
+  the seeder's fill is O(1) by design (a range converts its whole
+  budget when the price crosses it), so a seeder at weight 0.25 moves
+  s_V by +0.07 and K by -0.045 in 25 days -- decision 15's gap now
+  enters through the observer too; (5) at the default bands neither the
+  facility (x = y = 0.03) nor the undertakings (eps 3%) act on the calm
+  arm in 30 days; the engaged bands (0.005) are the grid's; (6)
+  =SIM_SHADOW_OFFSET_CAP_USD= is inert under the per-class default; the
+  capacity axis still sets it (a no-op).
+- CYCLE 1 LAUNCHED 21:05 PDT from the frozen grid worktree
+  =../alberta-buck-grid= at 801f34f (its own =out/= with the staged
+  artifacts; the window pre-generated with =--prepare=): =python -m
+  alberta_buck.sim.star alberta_buck/sim/experiments/stars/d7-c1.toml
+  --jobs 26 --outdir build/sim/star=, 66 two-year cells, log and done
+  marker under the worktree's =build/sim/regen/=; a monitor reports
+  progress every 15 minutes; expected ~9 h.  The main checkout is FREE
+  for code edits (the grid reads the worktree).  The vectors are
+  visible to the viewer through =build/sim/star-d7= (a symlink into
+  the worktree).  Per decision 22 every quantitative reading of cycle
+  1 is provisional until rung 2 is organic; the structural questions
+  (identity, habituation, book-loading, the guard trip; S vs V under
+  the same gains) are what it decides.
+- Open issues filed as decisions pending 34-37.  Worktree
+  =../alberta-buck-wp-14= removed (its 24 MB of vectors discarded; the
+  report carries the numbers); branch kept.
 
 ** 2026-09-12 -- WP-16 DONE and merged: the position loop's gains, and what the derivation found (session 3, subagent on =wp/16-kdesign=)
 
@@ -2083,6 +2161,36 @@ next.  Paste acceptance evidence here, not in chat.
    ignored; every worktree and clone lacks it and the onboarding names
    it.  Proposed: commit it (nothing in it is secret), or move its
    content into ONBOARDING-D7.org's house rules and drop the reference.
+
+34. *The desk's local skew, contract-side* (from WP-14).  A keeper-side
+   emulation would re-parameterize the director daily and move the
+   desk's policy off-chain.  The recipe: in =PairsRebalanceDirector='s
+   monetary step, shift the common-mode reference by the desk's own
+   fill, cm' = cm - kappa_d x netInventory / positionCap, with a
+   governance =setMonSkew(kappa1e9)=; ~10 lines plus forge tests.
+   Proposed: a small branch before WP-11 (the desk runs unskewed in
+   cycle 1's Vk cells).
+35. *kappa per class* (from WP-14).  The one-eps rule gives values that
+   are inert where the disturbance exceeds the band's reach; the
+   measured undertakings' 0.6 is "one disturbance of skew at the
+   load's fill".  The facility's 0.1 is measured only at its engaged
+   band; the seeder's 0.1 is unmeasured and its fill is O(1).
+   Proposed: cycle 2 sweeps kappa per class ({0.1, 0.6, 1.0} on the
+   bookload arm; {0.03, 0.1, 0.3} for the facility; {0.01, 0.03, 0.1}
+   for the seeder), judged by G7 and the book's BUCK-days, before Vk is
+   judged against V.
+36. *The seeder feeds K through the observer* (from WP-14; extends
+   decision 15).  A seeder range converts its whole budget when the
+   price crosses it, so at weight 0.25 it moved s_V by +0.07 and K by
+   -0.045 in 25 days on the calm arm.  Proposed: the seeder's weight
+   is 0 until T5 settles its economics (it is not in cycle 1's cast),
+   or its position is booked net of the treasury's intended
+   conversion.
+37. *Small follow-ups from WP-14*: drop =SIM_SHADOW_OFFSET_CAP_USD= from
+   the capacity axis (inert under the per-class default); a
+   =strong_cap_m= knob if a governance notional other than reserve_frac
+   x NAV is wanted for the strong side; remove the lumped offset path
+   with WP-11.
 
 * Conventions
 
