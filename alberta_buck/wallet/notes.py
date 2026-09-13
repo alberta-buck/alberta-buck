@@ -51,7 +51,7 @@ from alberta_buck.wallet.poseidon import F_R, poseidon
 NULLIFIER_TAG_B = 4242
 NULLIFIER_TAG_A = 4243
 
-# Flavor labels -- match the circuit's `flavor` private input.
+# Flavor labels -- match the circuit's public `flavor` input.
 FLAVOR_A1 = 1
 FLAVOR_A2 = 2
 FLAVOR_B1 = 3
@@ -64,8 +64,9 @@ class NoteOpening:
     """The witness a wallet stores for one outstanding note.
 
     Mirrors the SNARK opening tuple ``(flavor, v, rho, id_hash, predicate)``
-    -- exactly the five private inputs to ``Poseidon(5)`` in
-    :file:`circuits/spend.circom`.  The wallet is responsible for computing
+    -- the five Poseidon-5 words in :file:`circuits/spend.circom` (``flavor``
+    is also a public input bound to the entry-point mode).  The wallet is
+    responsible for computing
     ``id_hash`` from the appropriate identity material via the
     :func:`id_hash_a1` / :func:`id_hash_a2` / :func:`id_hash_b1` helpers
     below; the dataclass treats it as an opaque field element.

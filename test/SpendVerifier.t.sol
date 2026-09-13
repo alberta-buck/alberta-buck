@@ -12,8 +12,8 @@ import {SpendVerifierAdapter} from "../src/SpendVerifierAdapter.sol";
 ///         spend reuses: Notes.spendCoupledA1/A2/B1 all call
 ///         spendVerifier.verifySpend.  This suite pins the on-chain verifier to
 ///         the prover output -- a real proof verifies, and tampering any bound
-///         public input (noteRoot, nullifier, face, recipient, chainId) is
-///         rejected.  The end-to-end Notes behaviour (payout, nullifier burn,
+///         public input (noteRoot, nullifier, face, recipient, chainId, flavor)
+///         is rejected.  The end-to-end Notes behaviour (payout, nullifier burn,
 ///         double-spend) is covered by the NotesCoupled{A1,A2,B1} suites.
 ///
 ///         (Previously this drove the verifier through the generic Notes.spend /
@@ -27,6 +27,7 @@ contract SpendVerifierTest is Test {
     uint256 internal fxFace;
     address internal fxRecipient;
     uint256 internal fxChainId;
+    uint256 internal fxFlavor;
     bytes   internal fxProof;
 
     function setUp() public {
@@ -39,37 +40,44 @@ contract SpendVerifierTest is Test {
         fxFace      = vm.parseJsonUint(fx, ".spend.public.face");
         fxRecipient = vm.parseJsonAddress(fx, ".spend.public.recipient");
         fxChainId   = vm.parseJsonUint(fx, ".spend.public.chainId");
+        fxFlavor    = vm.parseJsonUint(fx, ".spend.public.flavor");
         fxProof     = vm.parseJsonBytes(fx, ".spend.proofBytes");
     }
 
-    function _verify(uint256 root, uint256 nf, uint256 face, address rec, uint256 cid)
+    function _verify(uint256 root, uint256 nf, uint256 face, address rec, uint256 cid, uint256 flavor)
         internal view returns (bool)
     {
-        return spendAdapter.verifySpend(fxProof, root, nf, face, rec, cid);
+        return spendAdapter.verifySpend(fxProof, root, nf, face, rec, cid, flavor);
     }
 
     function test_realProofVerifies() public {
-        assertTrue(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId),
+        assertTrue(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId, fxFlavor),
             "real spend Groth16 proof must verify on-chain");
     }
 
     function test_tamperedRootRejected() public {
-        assertFalse(_verify(fxNoteRoot ^ 1, fxNullifier, fxFace, fxRecipient, fxChainId));
+        assertFalse(_verify(fxNoteRoot ^ 1, fxNullifier, fxFace, fxRecipient, fxChainId, fxFlavor));
     }
 
     function test_tamperedNullifierRejected() public {
-        assertFalse(_verify(fxNoteRoot, fxNullifier ^ 1, fxFace, fxRecipient, fxChainId));
+        assertFalse(_verify(fxNoteRoot, fxNullifier ^ 1, fxFace, fxRecipient, fxChainId, fxFlavor));
     }
 
     function test_tamperedFaceRejected() public {
-        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace + 1, fxRecipient, fxChainId));
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace + 1, fxRecipient, fxChainId, fxFlavor));
     }
 
     function test_tamperedRecipientRejected() public {
-        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, address(0xCAFE), fxChainId));
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, address(0xCAFE), fxChainId, fxFlavor));
     }
 
     function test_chainIdMismatchRejected() public {
-        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId + 1));
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId + 1, fxFlavor));
+    }
+
+    function test_tamperedFlavorRejected() public {
+        uint256 other = fxFlavor == 3 ? 1 : 3;
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId, other),
+            "entry-point flavor must match the committed opening");
     }
 }

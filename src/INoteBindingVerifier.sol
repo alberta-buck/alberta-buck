@@ -8,10 +8,10 @@ pragma solidity ^0.8.20;
 ///         spent note committed in its `idHash` — without revealing `idHash`,
 ///         the committed ciphertext, or the re-randomization scalar.
 ///
-///         WHY THIS EXISTS.  The flavor-agnostic spend proof (spend.circom)
-///         proves only that *some* note opening is in the tree and that its
-///         nullifier is well-formed; it does NOT bind the coupling's `eEnc` to
-///         that note.  Without this tie, the addressed (A1/A2) guarantees the
+///         WHY THIS EXISTS.  The spend proof (spend.circom) binds flavor as a
+///         public input and proves that *some* matching-flavor note opening is
+///         in the tree with a well-formed nullifier; it does NOT bind the
+///         coupling's `eEnc` to that note.  Without this tie, the addressed (A1/A2) guarantees the
 ///         docs claim are NOT enforced on-chain:
 ///           * "only the recipient Identity M_rec can spend an A1/A2 note" —
 ///             any registered account holding the opening can redeem it by

@@ -55,7 +55,7 @@ VENV_OPTS		=
 .PHONY: all build test clean fmt snapshot build-uniswap-artifacts
 .PHONY: fork-sepolia fork-mainnet fork-mainnet-cache anvil stop-anvil
 .PHONY: deploy-local deploy-sepolia
-.PHONY: snark-g1tie snark-g1tie-clean snark-g1tie-regen snark-test-regression snark-update
+.PHONY: snark-g1tie snark-g1tie-clean snark-g1tie-regen snark-spend snark-test-regression snark-update
 .PHONY: install update
 .PHONY: test-python venv-activate
 .PHONY: golden-receipts
@@ -436,6 +436,12 @@ snark-a2-fixtures:
 snark-g1tie:
 	rm -rf build/snark/g1tie
 	$(SNARK_PATH) bash scripts/snark/setup_g1tie.sh
+
+# Spend circuit only (circuits/spend.circom).  Isolated compile + setup, then
+# copy the matched set (r1cs/wasm/zkey/verifier + re-proved e2e spend vectors).
+# Does not rebuild mint, g1tie, or note-binding.
+snark-spend:
+	$(SNARK_PATH) bash scripts/snark/setup_spend.sh
 
 snark-g1tie-regen: snark-g1tie
 

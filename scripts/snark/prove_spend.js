@@ -9,7 +9,7 @@
  *     mintFixture: { ... copy of the mint fixture for re-minting ... },
  *     spend: {
  *       leafIndex,                       // which of the two minted leaves
- *       public: { noteRoot, nullifier, face, recipient, chainId },
+ *       public: { noteRoot, nullifier, face, recipient, chainId, flavor },
  *       proof:  { pA, pB, pC },
  *       proofBytes: "0x..."              // ABI-encoded for the adapter
  *     }
@@ -164,11 +164,12 @@ async function main() {
     const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY);
 
     // Public-signal order matches `component main { public [...] }`:
-    //   [ noteRoot, nullifier, face, recipient, chainId ]
+    //   [ noteRoot, nullifier, face, recipient, chainId, flavor ]
     const expectPub = [
-        input.noteRoot, input.nullifier, input.face, input.recipient, input.chainId,
+        input.noteRoot, input.nullifier, input.face, input.recipient,
+        input.chainId, input.flavor,
     ];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
         if (publicSignals[i] !== expectPub[i]) {
             throw new Error(`publicSignals[${i}] mismatch: ${publicSignals[i]} vs ${expectPub[i]}`);
         }
@@ -195,6 +196,7 @@ async function main() {
                 face:      input.face,
                 recipient: RECIPIENT,
                 chainId:   input.chainId,
+                flavor:    input.flavor,
             },
             witness: input,
             proof:   { pA, pB, pC },
@@ -210,6 +212,7 @@ async function main() {
     console.log(`  face      = ${input.face}`);
     console.log(`  recipient = ${RECIPIENT}`);
     console.log(`  chainId   = ${input.chainId}`);
+    console.log(`  flavor    = ${input.flavor}`);
 
     const vk = JSON.parse(fs.readFileSync(VKEY, "utf8"));
     const ok = await snarkjs.groth16.verify(vk, publicSignals, proof);
