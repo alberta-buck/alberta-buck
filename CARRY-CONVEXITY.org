@@ -8,7 +8,7 @@
 
 #+BEGIN_ABSTRACT
 We analyze the Panoptic carry/convexity critique against the BuckBasket and specify the wave-3 markout
-instrument.  We evaluate the basket's own side of the excursion catalogue and record six design
+instrument.  We evaluate the basket's own side of the excursion catalogue and record the design
 decisions reached by working each open question through one historical and one synthetic example.
 
 We map the system as it stands across every design document in the repo, state the theory each
@@ -90,7 +90,7 @@ work.
 - Section 4 gives the theory: eight results from monetary economics,
   market microstructure and control, each tied to the repo text it
   clarifies or contrasts.
-- Section 5 records the six decisions of record.
+- Section 5 records the decisions of record (D1-D7, D9).
 - Section 6 draws the resulting structure and its contract surface.
 - Section 7 is the model: symbols, laws, bounds, and predictions the
   catalogue can falsify.
@@ -1045,7 +1045,8 @@ S0-equivalent lambda is ~24 against the 0.5-1 the D4 cells ran; and
 the undertakings' book on a calm arm is transient, unwound at par
 within days.  WAVE3.org decisions 27-31 carry the choices this
 leaves: the persistence horizon, the position loop's authority, the
-depth axis, P9's window, the two-integrator drift.
+depth axis, P9's window, the two-integrator drift.  What follows
+from these findings for the structure itself is D9 (2026-09-13).
 
 *What decides between S and V.*  The grid: the same disruptions, the
 same facility mixes and capacities, both aggregations, gains derived
@@ -1056,6 +1057,270 @@ is the incumbent and may win on simplicity if the position loop's
 gains turn out to want the price loop's ratios anyway.  R5 is
 amended: K's input is the observer's aggregate position in EITHER
 units, with its own gains.
+
+** D9. K takes ONE integrated signal; the flow's persistence is the hidden state; the sequence from here
+
+(Design owner + Claude, 2026-09-13.  D8 is =CREDIT-IMPROVEMENT.org='s
+unvetted-insurer decision, referenced throughout this document; the
+number is skipped here so that reference stays unambiguous.)
+
+/Question./  WP-16 (=reports/wp-16.org=) derived D7's position-loop
+gains and, on the way, showed that the joint plant is not
+stabilizable: one lever, two costed integrals, a conserved direction.
+The design owner's reading: the theory was that K could be moved
+slowly on persistent price error (the I term on bvib) and more quickly
+on the scale of the monetary operations the fast events required (the
+position loop), but both inputs measure the same thing, so they fight
+-- one gaining while the other damps, by the timing of their
+measurements and responses.  Two ways forward were put: (a) back to a
+single PID, with the short-horizon events synthesized into its P and D
+inputs and larger Kp / Kd so that K answers faster; (b) deeper
+measurement of the economy -- the scale and dynamics of what moves
+bvib, not bvib alone -- feeding an optimal-control law that computes
+the K which would soft-land bvib at par if present trends continued,
+re-planned as they do not, the way a landing rocket estimates the wind
+from its own divergence and feeds that estimate forward.  This section
+records what WP-16 measured, what it means in control terms, which of
+the two ways is right and why, and the sequence of experiments that
+decides the design from here -- for each stage, what must be
+discovered, why it matters, and the design each outcome selects.
+
+/What WP-16 measured./  Findings 1-9 of the report; cells
+=build/sim/kdesign/d10-{ctrl,m20,m10,m05,p05,p10,p20}=,
+=d40-{ctrl,m20,p20}= and the grind set (1-year cells, K held 0.75 from
+day 120, the K0 step at day 150).  Every number is from the thin
+D2-world cast and provisional under =ORGANIC-SCALE.org= decision 6.
+
+#+LATEX: {\scriptsize
+| quantity                                    | measured                                                | finding  |
+|---------------------------------------------+---------------------------------------------------------+----------|
+| supply flow per unit K                      | ~50k BUCK/day, as a RAMP; 56k on a loaded book          | 1, grind |
+| at full rail authority (dk_rail 0.5)        | ~25k BUCK/day                                           | 1, 5     |
+| a 60-day grind of $8-12M                    | 130-200k BUCK/day                                       | 2, grind |
+| draining a full $15M book at the rail       | ~600 days                                               | 5        |
+| price shift from full authority             | 0.2-0.4% of bvib                                        | 3        |
+| daily price error, loop open                | std 0.70%, lag-1 autocorrelation -0.53                  | 3        |
+| a cut to K 0.55                             | -6.3M BUCK at once (the debtors' limits bind)           | 1        |
+| the undertakings' book on the calm arm      | transient: unwound at par within days                   | 2        |
+| the derived position loop's rail            | reached at a 21% fill of the real reserve               | 5        |
+| the two integrators' joint eigenvalue       | exactly 1, eigenvector (0, Kqi, 0, -Ki)                 | 4        |
+| the LQR's flow-state gain (the feedforward) | L_d = 210 K per (s / day); unrealisable as a D term     | 9        |
+#+LATEX: }
+
+/The finding in control terms./  The design owner's reading is right,
+and the conserved direction states it exactly.  The price integral and
+the facilities' inventory are two GAUGES on one quantity: the
+cumulative net demand for BUCK at the peg.  K moves supply, and the
+band routes that supply into one gauge or the other.  While a facility
+holds price the flow lands in inventory and the price gauge reads
+nothing; when the facility is drained or absent the same flow lands in
+price and the inventory gauge is pinned at its cap.  K never has two
+independent errors to serve.  It has one error read by two
+instruments, and which instrument is live depends on the regime.  4.4
+already said so: "the slow controller does NOT look at the process
+variable -- it looks at the fast actuator's POSITION ... Two
+controllers on one variable without this separation oscillate or wind
+up."  D7's corrected controller put BOTH loops on K, and WP-16
+measured the consequence.
+
+The fight has a specific shape.  A facility absorbs a lump and unwinds
+it at par within days (finding 2).  The position integrator keeps the
+residue of that excursion; the residue holds K slightly low; the
+standing price error that leaves is what the price integrator then
+winds against, on its 90-day constant.  The two integrators end up
+holding offsetting contents whose sum is the K the plant wants, and
+the split between them drifts freely -- the eigenvalue at exactly 1
+(finding 4).  In the contract only the rails bound it, and the worst
+case is both integrators pinned at opposite rails with K interior, the
+per-integrator anti-windup fighting a saturation that is not real.
+
+/Why faster K gains are not the answer (way (a))./  Three measured
+facts make K a slow lever by physics, not by tuning:
+
+1. The daily price error is noise on the day scale (std 0.70%, lag-1
+   -0.53): the cast restores the price inside the day and overshoots.
+   A larger Kp moves K by that noise; a Kd amplifies it.  Finding 9 is
+   the derivative form: the implied flow gain would jerk K by tenths
+   from one lumpy fill.
+2. K acts through the borrowers' arrival hazard and their K-scaled
+   limits (=equilibrium_agents.py=, the k / k_ref hazard).  A step in K
+   yields a supply RAMP that compounds late (+8k BUCK at day 240,
+   +2.15M at day 364 for +0.20).  A K move lasting a day moves supply
+   by a few thousand BUCK.  No gain makes a one-day K move matter.
+3. The lever is asymmetric.  A cut to 0.55 delevered 6.3M BUCK at once
+   -- a margin call; a rise is an offer nobody has to take (cuts 55k
+   vs rises 44k BUCK per K-day at depth 10; 44k vs 75k at depth 40).
+   A linear controller of any speed does not know this.
+
+Short-horizon events belong to the level-1 facilities by physics: they
+hold inventory, K does not.  What CAN be faster is not K's response
+but the DECISION about which part of the flow is K's business -- the
+persistent part.  Way (b) delivers exactly that, and it is a different
+mechanism from higher gains.  Way (a)'s single-integrator half is
+right and is kept (stage 1); its higher-gain half is not.  This also
+settles WAVE3.org decision 7 in the direction WP-16's anchor found: the
+2% P term is what a quadratic cost on the instantaneous error wants
+when the cast itself reverts within the day, and no larger P is
+justified by any measurement in hand.
+
+/What way (b) is, in this system's terms./  D7's paragraph "Optimal
+control and estimation" named the one hidden variable, the PERSISTENCE
+of the demand flow, and its tool, a disturbance observer.  WP-16 then
+derived the law that wants it: the LQR's flow-state gain L_d = 210
+says the optimal K is MOSTLY FEEDFORWARD from the disturbance flow,
+and finding 9 says it was unrealisable only because the flow was taken
+by differencing one lumpy gauge.  The missing component is an
+ESTIMATOR that fuses every channel through which excess demand is met
+-- the facilities' fills, the desk's net inventory, direct-mint net
+flow, debtor draws and repayments, the pools' reserves -- all on chain
+already, so the sensor is free.  With the disturbance modelled as a
+persistent component (decay T_p) plus a transient one (decay tau_t,
+days), the steady-state Kalman filter is an alpha-beta tracker on the
+fused flow: two exponential averages in the contract (Kalman 1960;
+Kalata 1984).  The persistent estimate lags by ~tau_t, not by the
+90-day price integral.  The law:
+
+  e_s   = e + lambda s                  the shadow error: ONE signal (S units; in V units s_V / lambda_V)
+  F_hat = the fused net flow (BUCK/day, sold positive); F_p its persistent part (a slow average); F_t = F_hat - F_p
+  K     = K0 + clip(-F_p / g, rails)    feedforward: the K whose supply ramp cancels the persistent flow
+             + Kp e_s + Ki Int(e_s)     ONE PI -- the price loop's -- on the shadow error (S0k as built)
+
+with g the supply ramp per unit K (WP-16's F_K, identified, not
+assumed) and the one integrator covering only the part of g we got
+wrong -- the internal model principle (4.6) doing the one job it is
+needed for.  The landing: K leaves the rail when the supply still in
+the pipe -- g times the uptake lag tau_K times the K excursion --
+equals the book remaining; that is the powered-descent timing of the
+design owner's analogy (Acikmese and Ploen 2007), and P9's
+one-sign-change test measures it.  The price loop on K is not a second
+loop: the price term of the shadow error covers the regime in which no
+facility is engaged, the position term the regime in which one is.
+The second lever is the FACILITY (its inventory and its local skew,
+D7); the third, where it exists, the desk's outright operations.
+
+Two limits on the analogy, of record.  The rocket knows its physics to
+a percent and the wind is a perturbation; our g differs 2x between
+cuts and rises and depends on the cast, and a dump is 5-8x K's
+authority.  So during a disruption the feedforward sits at the rail,
+the facilities absorb, and the estimator earns its keep on the
+RELEASE.  And every number above is from the thin cast: the ratio of
+K's authority to the disturbance scale is an assumption about how much
+of the money supply is credit-created, and belongs on the organic
+ladder (=ORGANIC-SCALE.org=) as a headline number per rung.
+
+/The structural conclusion./  K takes ONE integrated signal.  The
+second lever is the facility.  The sensor is an estimator of the flow
+and its persistence -- level 2 of 6.4 made explicit: the ops doc's
+persistence test as a filter instead of a dwell.  D7's S and V stay
+under test as the two-integrator alternative, and cycle 1 (in flight)
+is read as the single-versus-double integrator test it already
+contains.  Proposed for the design owner (WAVE3.org decision 38): the
+two-loop form of D7 becomes the alternative and one PI on the shadow
+error the incumbent once stage 1 reads that way; the estimator follows
+stages 2-3.
+
+/Recommended sequence (Claude, 2026-09-13; for the design owner)./
+Four stages, each cheaper than the next and each bounding the value of
+the next.  For each: what must be discovered, why it matters, and the
+design each outcome selects.
+
+*Stage 1 -- cycle 1 as the single-versus-double integrator test.*
+Already running (WAVE3.org, d7-c1): designs A (price only), S0 and S0k
+(ONE integrator on the shadow error, lambda 1 and the derived 24), S
+and V (two integrators), Vk (V plus the local skews), on none / dump x1
+/ dump x4 / cohort-step / guardtrip / bookload.
+
+- To discover: whether the second integrator hurts.  Measurements: the
+  gates G1-G8; P9's sign changes and habituation time; the rail days;
+  and the DRIFT, the total variation of =pid_i - pid_qi= (WAVE3.org
+  decision 31; both terms are in every frame, so it is computed from
+  the vectors after the fact in =eqmetrics=).
+- Why it matters: it decides whether D7's two-loop form survives at
+  all, before any estimator is built and at no extra compute.
+
+#+LATEX: {\scriptsize
+| stage-1 outcome                                                                     | design selected                                                                                                                                                                                                                                  |
+|-------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| S0k matches or beats S and V on the gates, with less drift and fewer sign changes   | retire the second integrator: the controller of record is one PI on the shadow error; S and V become the two UNITS of that signal (decision 11 stands; V keeps its no-D advantage)                                                                |
+| S or V beat S0k                                                                     | the derived lambda mapping is wrong, or the position P term matters at the transient scale; keep two loops but GATE the price integral by regime (I on price only while no facility is engaged) -- 4.4's separation restored, a true valve-position controller |
+| neither S0k nor S / V beats A on the gates                                          | K's tuning is second order on this cast; go to stage 2 to bound it before spending further                                                                                                                                                       |
+| drift large (an integrator at a rail with K interior on any arm)                    | the anti-windup review of decision 31 is mandatory whichever structure wins                                                                                                                                                                      |
+#+LATEX: }
+
+*Stage 2 -- the perfect-measurement benchmark (the ceiling).*  Way (b)
+with the sim's TRUE flows fed to the controller and g known: a Python
+controller in the harness (the shadow controller's PI plus the
+feedforward with the release rule, its inputs read from the
+deployment's own books and the whale's schedule rather than estimated),
+one 2-year cell per cycle-1 arm.
+
+- To discover: the value of K on this cast, as a ceiling: the gap
+  between the perfect-measurement K and A, and between it and S0k, on
+  the dump, grind and cohort-step arms (peak, AUC, the book's
+  BUCK-days, rail days, K's total variation, habituation time).
+- Why it matters: it bounds every later stage.  No estimator beats a
+  controller that knows the flow; if that controller barely beats A,
+  the position loop's authority (decision 28) answers itself and the
+  program's spend moves to the facilities and the organic economy.
+
+#+LATEX: {\scriptsize
+| stage-2 outcome                                                                     | design selected                                                                                                                                                                                                       |
+|-------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ceiling within the gates' noise of A                                                | K is not the lever for these disturbances: decision 28 (b); K keeps the structural residual only; spend on the facilities' reserves, the ladder's schedule and the organic ladder                                       |
+| ceiling beats S0k by more than the noise on peak, AUC or BUCK-days                  | the feedforward is worth building: stage 3                                                                                                                                                                            |
+| ceiling within the noise of S0k, both well above A                                  | the single integrator already captures K's value; stop at stage 1's design; identify g per rung and leave the estimator unbuilt                                                                                        |
+| ceiling beats A only on the release (fewer sign changes, shorter dwell), not on peak | build the estimator for the release rule only; the feedforward's magnitude is the rail logic, which the PI already has                                                                                                 |
+#+LATEX: }
+
+*Stage 3 -- the estimator and the feedforward, in the sim.*  The
+alpha-beta estimator on the fused flow with the persistent / transient
+split, the law above, g and tau_K from identification.  Contract form
+last, and only if the sim form wins its cells.
+
+- To discover: (i) g and tau_K separately for cuts and rises, from
+  2-year step tests (the 1-year cells showed the ramp still compounding
+  at day 364; whether it saturates or grows decides whether K is a
+  RATE lever or a GROWTH lever); (ii) the estimator's lag and its
+  false-persistence rate on the control arm (how often organic noise
+  is called persistent); (iii) the release timing against the ceiling
+  (P9's one sign change); (iv) the on-chain cost (two EWMAs and a
+  division against the tick budget).
+- Why it matters: it is the design the design owner asked for, and its
+  gains are derived from identified constants, not swept, so its
+  transfer across the ladder's rungs is a matter of re-identification.
+
+#+LATEX: {\scriptsize
+| stage-3 outcome                                                                     | design selected                                                                                                                                                                                                       |
+|-------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| estimator within the gates' noise of the ceiling on every arm                       | the contract form is two EWMAs and the law above; a WP replaces the position loop in =BuckKControllerShadow= with the feedforward, the =ShadowObserver= gaining the flow channels                                         |
+| the persistence call lags beyond ~tau_t, or fires on organic noise                  | the disturbance model is wrong: label the flow by source (debtor / direct-mint / facility / pool) and estimate per channel; the K-sensitive channel is the plant, the others are disturbances                          |
+| g asymmetric beyond 2x                                                              | a piecewise law: cuts costed as impulses (the margin call), rises as a rate; never one linear gain across the sign                                                                                                     |
+| the ramp compounds (no saturation inside 2 years)                                   | K is a GROWTH lever on the debtor population: the plant is population dynamics, the feedforward is -F_p / g(t), and the uptake model becomes a per-rung number on the organic ladder                                  |
+#+LATEX: }
+
+*Stage 4 -- multi-lever optimal control.*  K, the desk and the
+facilities as one allocation problem with the same estimator as
+sensor: the transient component sized to the desk's operations, the
+persistent to K, the differential modes to the local skews.  That
+plant has n levers and IS stabilizable; it is habituating control
+(Henson et al. 1995) done properly.
+
+- To discover: the authority ratio per rung (K's flow per unit against
+  the disturbance scale) and the desk's transient share.
+- Why it matters: by the design owner's thesis and =ORGANIC-SCALE.org=
+  decision 6 it waits for the organic economy at rung 2; built on the
+  thin cast it would be judged on numbers the cast does not have.
+- Outcome: the allocation rule of the monetary-operations program;
+  not designed here.
+
+/What this leaves unchanged./  The undertakings, the ladder, the
+stress fee, the local skews, the =IStabilizer= seam (position, cap,
+staleness; the estimator reads the same books plus the flows the
+contracts already emit), decisions 9-11 and the organic ladder.  What
+it changes: the two-loop form of D7 is now the alternative under test
+rather than the incumbent, pending stage 1; the estimator is the
+design of the next two stages; and "faster K" is closed as a
+direction.
 
 * The resulting structure
 
@@ -1162,6 +1427,10 @@ decision is recorded in =WAVE3.org=.
 | 2     | weeks      | the persistence test -> Q2 burn / Q4 acknowledge                               | converts standing inventory to permanent supply change | inventory leaves level 1 and becomes K's stock                          |
 | 3     | months     | K                                                                              | the stock of credit-backed BUCK                        | --                                                                      |
 | 4     | governance | eps, p, delta, phi, lambda_i, gamma, gains, rails                              | time-locked parameters                                 | --                                                                      |
+(D9, 2026-09-13.)  Level 2 is where D9's flow estimator lives: the
+persistence test as a FILTER on the fused flow through every level-1
+book, feeding K's feedforward, instead of a dwell on a standing book.
+Level 3's K then integrates ONE signal, the shadow error.
 
 *** The stabilizer seam
 
@@ -1555,6 +1824,22 @@ does not price safely, it is not listed.
    inventory to move K and unwinds after the move (class 9) ends with
    P&L <= 0 under both S and V, and K's excursion per unit of loaded
    fraction under V is no larger than under S.
+11. *One integrator (D9).*  Under S0k the two integrators' drift (the
+   total variation of pid_i - pid_qi, decision 31) is nil by
+   construction and K shows at most one sign change per disruption of
+   classes 1, 2 and 5; under S and V the drift is non-zero on every
+   arm, grows with the number of absorb-unwind cycles, and some S or V
+   cell holds an integrator at its rail while K is interior.  If S0k
+   is not also within the gates' noise of S and V on G1-G8, the
+   position P term matters and stage 1's second outcome applies.
+12. *The feedforward's worth (D9).*  On the dump x4, grind and
+   cohort-step arms the ordering A <= S0k <= estimator <= ceiling holds
+   on peak, AUC and the book's BUCK-days; the ceiling beats S0k by more
+   than the gates' noise on BUCK-days and habituation time and by
+   little on peak, because the feedforward sits at the rail during the
+   disruption and earns its keep on the release.  A ceiling within the
+   noise of A falsifies K as the lever for these disturbances (stage
+   2's first outcome).
 
 Any of these failing changes a decision; 9.6 says which.
 
@@ -1764,6 +2049,10 @@ answer; they are policy, not code.
 | the perp raises attacker cost less than its liquidation risk costs the house | D5          | do not build the perp; rely on the band and the fee                  |
 | benign tracking error rises under the seeder or the fee                      | D5, 3b      | narrower seeder range; lower base fee                                |
 | the flood equilibrates below theta x apr with the facility on                | D6 + D8     | the facility waits for insurer vetting                               |
+| S0k matches S / V on the gates with less drift and fewer sign changes        | D7 -> D9    | one PI on the shadow error; the position loop retired                |
+| the perfect-measurement K is within the gates' noise of A                    | D9, dec. 28 | K keeps the structural residual; spend on facilities and the ladder |
+| the estimator's persistence call fires on organic noise                      | D9 stage 3  | per-channel flow estimation, labelled by source                      |
+| g asymmetric beyond 2x, or the supply ramp compounds without saturating      | D9 stage 3  | a piecewise or population-dynamics law; never one linear gain        |
 #+LATEX: }
 
 ** The JS port
@@ -1786,6 +2075,9 @@ is Python-side in 3f and is not a port candidate until it is a contract.
 3a. *3i (D7) before 3c's verdicts are read* -- the controller under
    judgment changes every "K end" number; run the controller-
    alternatives grid (WAVE3.org) on the equilibrium backdrop first.
+3b. *D9's stage 2, the perfect-measurement K, before cycle 2* -- one
+   Python cell per arm bounds the value of every controller package
+   after it, and costs less than any of them.
 4. *3b* -- the directional fee, for the one-day trough.
 5. *3g then 3f* -- the middle of the ladder, then the duration lever.
 6. *3e, 3h* -- satellites, seeds, the seeder, the flood.
@@ -1839,6 +2131,22 @@ is Python-side in 3f and is not a port candidate until it is a contract.
 - *habituation*: the return of the fast actuators' inventory to zero as
   the slow lever takes over the steady-state load (Henson et al.
   1995); measured as the time for |s| to fall within 10% of zero.
+- *the shadow error*: e_s = e + lambda s, the one signal K integrates
+  under D9 -- the price term live while no facility is engaged, the
+  position term live while one is; S0k's input as built.
+- *the flow estimator*: the alpha-beta (steady-state Kalman) filter on
+  the fused net BUCK flow through every peg-supporting channel, split
+  into a persistent and a transient part; the sensor of D9's
+  feedforward; level 2 of 6.4 made explicit.
+- *the perfect-measurement K*: D9's ceiling -- the feedforward law run
+  with the sim's true flows and a known g; the bound no estimator can
+  beat, and the measure of whether K is the lever at all.
+- *the uptake lag (tau_K)*: the time the supply takes to answer a K
+  move through the borrowers' hazard; with g it sets the release
+  timing (the supply still in the pipe).
+- *the drift*: the total variation of pid_i - pid_qi, the two
+  integrators' contents shifting between them without moving K
+  (WP-16 finding 4; WAVE3.org decision 31).
 
 * References
 
@@ -1934,6 +2242,18 @@ is Python-side in 3f and is not a port candidate until it is a contract.
   Journal 48; Friedman (1951), "Commodity-Reserve Currency", Journal of
   Political Economy 59(3).
 - SEC money-market fund reforms (2014; 2023 -- mandatory liquidity fees).
+- Kalman (1960), "A New Approach to Linear Filtering and Prediction
+  Problems", J. Basic Engineering 82(1); Kalata (1984), "The Tracking
+  Index: A Generalized Parameter for alpha-beta and alpha-beta-gamma
+  Target Trackers", IEEE Trans. Aerospace and Electronic Systems
+  AES-20(2) -- the steady-state filter as two constants (D9).
+- Acikmese and Ploen (2007), "Convex Programming Approach to Powered
+  Descent Guidance for Mars Landing", J. Guidance, Control, and
+  Dynamics 30(5) -- the landing analogy of D9: guidance re-planned
+  each step from the estimated state; the estimate, not the gain, is
+  what makes it fast.
+- Ljung (1999), "System Identification: Theory for the User", 2nd ed.
+  -- the step tests and differential fits of WP-16 and D9's stage 3.
 
 ** History
 
