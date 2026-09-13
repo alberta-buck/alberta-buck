@@ -222,12 +222,12 @@ contract NotesCoupledA2Test is Test {
         notes.spendCoupledA2(hex"00", root, 0xC5, 100, depositor, _eIss(), _dc(), hex"cafe", hex"beef");
     }
 
-    function test_coupledA2_emptyMembershipProof_skips() public {
-        // Empty membership proof: backward-compat skip (the coupling still gates).
+    function test_coupledA2_emptyMembershipProof_reverts() public {
+        // Empty membership proof: fail closed (verifier is wired).
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: empty identity membership proof"));
         notes.spendCoupledA2(hex"00", root, 0xC6, 100, depositor, _eIss(), _dc(), "", hex"beef");
-        assertTrue(notes.nullifiers(0xC6), "nullifier consumed");
     }
 
     // ---- double-spend -------------------------------------------------------
@@ -254,13 +254,29 @@ contract NotesCoupledA2Test is Test {
         notes.spendCoupledA2(hex"00", root, 0xC8, 100, depositor, _eIss(), _dc(), hex"cafe", hex"beef");
     }
 
-    function test_coupledA2_emptyNoteBinding_skips() public {
-        // Empty note-binding proof: backward-compat skip (the coupling + membership
-        // still gate).  Documents the RESERVED status: with no tie, the spend
-        // proceeds even though eEnc is not bound to the note.
+    function test_coupledA2_emptyNoteBinding_reverts() public {
+        // Empty note-binding proof: fail closed (verifier is wired).
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: empty note binding"));
         notes.spendCoupledA2(hex"00", root, 0xC9, 100, depositor, _eIss(), _dc(), hex"cafe", "");
-        assertTrue(notes.nullifiers(0xC9), "nullifier consumed");
+    }
+
+    function test_coupledA2_unsetMembershipVerifier_reverts() public {
+        vm.prank(GOV);
+        notes.setIdentityMembershipVerifier(address(0));
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: membership verifier not set"));
+        notes.spendCoupledA2(hex"00", root, 0xCA, 100, depositor, _eIss(), _dc(), hex"cafe", hex"beef");
+    }
+
+    function test_coupledA2_unsetNoteBindingVerifier_reverts() public {
+        vm.prank(GOV);
+        notes.setNoteBindingVerifier(address(0));
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: note binding verifier not set"));
+        notes.spendCoupledA2(hex"00", root, 0xCB, 100, depositor, _eIss(), _dc(), hex"cafe", hex"beef");
     }
 }

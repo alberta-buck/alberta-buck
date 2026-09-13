@@ -204,10 +204,35 @@ contract NotesCoupledA1Test is Test {
         notes.spendCoupledA1(hex"00", root, 0xA16, 100, depositor, _eRec(), _dc(), hex"cafe", hex"beef");
     }
 
-    function test_coupledA1_emptyNoteBinding_skips() public {
+    function test_coupledA1_emptyNoteBinding_reverts() public {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: empty note binding"));
         notes.spendCoupledA1(hex"00", root, 0xA17, 100, depositor, _eRec(), _dc(), hex"cafe", "");
-        assertTrue(notes.nullifiers(0xA17), "nullifier consumed");
+    }
+
+    function test_coupledA1_emptyMembershipProof_reverts() public {
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: empty identity membership proof"));
+        notes.spendCoupledA1(hex"00", root, 0xA18, 100, depositor, _eRec(), _dc(), "", hex"beef");
+    }
+
+    function test_coupledA1_unsetMembershipVerifier_reverts() public {
+        vm.prank(GOV);
+        notes.setIdentityMembershipVerifier(address(0));
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: membership verifier not set"));
+        notes.spendCoupledA1(hex"00", root, 0xA19, 100, depositor, _eRec(), _dc(), hex"cafe", hex"beef");
+    }
+
+    function test_coupledA1_unsetNoteBindingVerifier_reverts() public {
+        vm.prank(GOV);
+        notes.setNoteBindingVerifier(address(0));
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: note binding verifier not set"));
+        notes.spendCoupledA1(hex"00", root, 0xA1A, 100, depositor, _eRec(), _dc(), hex"cafe", hex"beef");
     }
 }

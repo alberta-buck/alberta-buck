@@ -6,15 +6,27 @@ party Mallory, who is given only the A1 opening, generates a FRESH spend
 proof that pays HER address, produces a B1 depositor binding on HER keys,
 and calls spendCoupledB1 with an EMPTY membership proof.
 
-The spend circuit does not constrain flavor, so the A1 opening is accepted
-on the bearer path.  Empty membership skips the G1-tie check even though
-the real adapter is wired.  BUCK is paid to Mallory, not the addressee.
+P0-0 inverted this assertion: empty membership now fails closed even
+with the real G1-tie adapter wired, so the A1-via-B1 call MUST revert.
+The attack is unchanged (same opening, same empty proof, same B1 entry
+point); only the expected outcome flipped.  Finding 7 (flavor-agnostic
+spend circuit) is still a circuit gap, but empty membership no longer
+lets it move BUCK.
 
-Honest control: the same A1 spend proof still verifies off-chain for the
-original recipient; the B1 path is the one that moves funds.
+Honest control: the same minted A1 note is then spent through
+spendCoupledA1 with the fixture's real membership and note-binding
+proofs; BUCK is paid to the addressee.
 """
+import os
 import sys
 from pathlib import Path
+
+# Deploy THIS checkout's Notes artifact.  buck_core may be an editable
+# install from another tree; repo_root() prefers that tree unless
+# ALBERTA_BUCK_REPO is set.
+_repo = Path(__file__).resolve().parents[2]
+if "ALBERTA_BUCK_REPO" not in os.environ and (_repo / "foundry.toml").exists():
+    os.environ["ALBERTA_BUCK_REPO"] = str(_repo)
 
 from web3 import Web3
 
@@ -95,29 +107,36 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     fn = stack.notes.functions.spendCoupledB1(
         proof, root, nf, face, MALLORY, stack._addr(fx.issuer.addr),
         (g1(e_dep.R), g1(e_dep.C)), db_tuple(b1_proof),
-        b"",   # empty membership: finding 8 fail-open
+        b"",   # empty membership: finding 8 -- must now revert
     )
-    step = stack._send_from(fn, MALLORY, "Notes.spendCoupledB1(A1 opening)",
-                            event="SpentCoupledB1", contract=stack.notes)
+    try:
+        stack._send_from(fn, MALLORY, "Notes.spendCoupledB1(A1 opening)",
+                         event="SpentCoupledB1", contract=stack.notes)
+        raise AssertionError(
+            "A1-via-B1 empty membership must revert (finding 8 inverted)")
+    except RuntimeError as err:
+        reason = str(err)
+        print("A1-via-B1 empty membership REVERTED (finding 8 inverted)")
+        print("   reason:", reason)
+        print("   flavor in witness = 1 (A1); entry point = spendCoupledB1 (finding 7)")
+        assert "empty identity membership" in reason, reason
 
     mal_bal = stack.buck.functions.balanceOf(MALLORY).call()
     dep_bal = stack.buck.functions.balanceOf(dep_addr).call()
     notes_bal = stack.buck.functions.balanceOf(stack.notes.address).call()
     spent = stack.notes.functions.nullifiers(nf).call()
-    print("FORGED B1 spend of A1 note accepted; tx", step.txhash)
-    print("   empty membership proof skipped G1-tie (finding 8)")
-    print("   flavor in witness = 1 (A1); entry point = spendCoupledB1 (finding 7)")
     print("   nullifier consumed =", spent)
     print("   Mallory delta BUCK =", mal_bal - mal_bal_before)
     print("   addressee delta BUCK =", dep_bal - dep_bal_before)
     print("   pool delta BUCK =", notes_bal - notes_bal_before)
-    assert spent, "nullifier not consumed"
-    assert mal_bal - mal_bal_before == face, "Mallory did not receive face"
-    assert dep_bal == dep_bal_before, "addressee must not be paid"
-    assert notes_bal_before - notes_bal == face
+    assert not spent, "nullifier must not be consumed on revert"
+    assert mal_bal == mal_bal_before, "Mallory must not receive BUCK"
+    assert dep_bal == dep_bal_before, "addressee must not be paid by the attack"
+    assert notes_bal == notes_bal_before, "pool must not move BUCK on revert"
 
-    # Issuer substitution: a second B1-shaped call cannot reuse the nullifier.
-    # Demonstrate the binding accepts a different registered issuer independently.
+    # Issuer substitution: a second B1-shaped call cannot reuse the nullifier
+    # once spent, but the binding still accepts a different registered issuer
+    # independently (finding 7 circuit gap, not closed by P0-0).
     fake_iss = Web3.to_checksum_address("0x00000000000000000000000000000000000015e1")
     anvil.set_code(fake_iss, ACCOUNT_STUB)
     fake_acct = Account(13579, 24680, 11111)
@@ -133,6 +152,17 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     print("depositor binding verifies against a SUBSTITUTE issuer =", ok_sub)
     assert ok_sub
 
-    print("\nRESULT: findings 7 and 8 reproduced on EVM with a real spend SNARK.")
-    print("   An A1 opening was redeemed through spendCoupledB1 by a non-addressee;")
-    print("   empty membership skipped the wired G1-tie verifier; BUCK moved.")
+    # Honest control: real A1 coupled spend of the SAME note.
+    stack.approve_pool(fx.depositor, 0, "approve depositor->pool")
+    honest = stack.spend()
+    dep_bal_after = stack.buck.functions.balanceOf(dep_addr).call()
+    notes_bal_after = stack.buck.functions.balanceOf(stack.notes.address).call()
+    assert stack.notes.functions.nullifiers(nf).call(), "honest A1 must consume nullifier"
+    assert dep_bal_after - dep_bal_before == face, "honest A1 must pay addressee"
+    assert notes_bal_before - notes_bal_after == face, "honest A1 must debit the pool"
+    print("HONEST A1 spend succeeded; tx", honest.txhash)
+    print("   addressee delta BUCK =", dep_bal_after - dep_bal_before)
+
+    print("\nRESULT: finding 8 inverted -- empty membership no longer spends.")
+    print("   A1-via-B1 with empty membership reverts; honest A1 with real")
+    print("   membership+binding proofs still pays the addressee.")
