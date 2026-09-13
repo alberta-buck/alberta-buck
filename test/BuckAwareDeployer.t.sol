@@ -242,6 +242,9 @@ contract BuckAwareDeployerCertifiedTest is Test {
         vm.prank(BROADCASTER);
         deployer = new BuckAwareDeployer(address(reg));
 
+        vm.prank(GOV);
+        reg.setBindingFactory(address(deployer), true);
+
         IdentityRegistry.PSPubKey memory ipk;
         ipk.X.X[0] = _u(".issuer.pk_X.x[0]");
         ipk.X.X[1] = _u(".issuer.pk_X.x[1]");

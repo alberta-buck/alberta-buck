@@ -308,9 +308,22 @@ contract IdentityRegistryTest is Test {
         vm.etch(target, hex"60006000fd");
     }
 
+    function _authorizeBinding(
+        address target,
+        address binder,
+        BN254.G1Point memory pk,
+        IdentityRegistry.ElGamalCT memory E,
+        bool isPublic,
+        bool isCarrying
+    ) internal {
+        vm.prank(target);
+        reg.authorizeContractBinding(binder, pk, E, isPublic, isCarrying);
+    }
+
     function _bindPoolAsAlice(address pool, bool isPublic, bool isCarrying) internal {
         _registerAlice();
         _planAt(pool);
+        _authorizeBinding(pool, alice, _alicePk(), _aliceE(), isPublic, isCarrying);
         vm.prank(alice);
         reg.bindContract(pool, _alicePk(), _aliceE(), isPublic, isCarrying);
     }
@@ -346,6 +359,49 @@ contract IdentityRegistryTest is Test {
         vm.prank(alice);
         vm.expectRevert(bytes("uncertified identity"));
         reg.bindContract(pool, BN254.g1(), junk, true, true);
+    }
+
+    function test_bindContract_rejectsRegisteredStrangerWithoutTargetAuthorization() public {
+        _registerAlice();
+        address unrelated = address(0x515151);
+        _planAt(unrelated);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("target did not authorize binding"));
+        reg.bindContract(unrelated, _alicePk(), _aliceE(), true, true);
+        assertFalse(reg.isVerified(unrelated));
+    }
+
+    function test_bindContract_authorizationPinsBinderIdentityAndFlags() public {
+        _registerAlice();
+        address pool = address(0xDECAF);
+        _planAt(pool);
+        _authorizeBinding(pool, alice, _alicePk(), _aliceE(), true, true);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("target did not authorize binding"));
+        reg.bindContract(pool, _alicePk(), _aliceE(), false, true);
+
+        vm.prank(alice);
+        reg.bindContract(pool, _alicePk(), _aliceE(), true, true);
+        assertEq(reg.pendingBindingAuthorization(pool), bytes32(0));
+    }
+
+    function test_setBindingFactory_isGovernedAndRequiresContract() public {
+        address factory = address(0xFAC7);
+        _planAt(factory);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("not governance"));
+        reg.setBindingFactory(factory, true);
+
+        vm.prank(GOV);
+        reg.setBindingFactory(factory, true);
+        assertTrue(reg.isBindingFactory(factory));
+
+        vm.prank(GOV);
+        vm.expectRevert(bytes("factory not a contract"));
+        reg.setBindingFactory(address(0xE0A), true);
     }
 
     function test_bindContract_succeedsForDeployedContract_public() public {
@@ -393,6 +449,7 @@ contract IdentityRegistryTest is Test {
         _registerAlice();
         address pool = address(0xDECAF);
         _planAt(pool);
+        _authorizeBinding(pool, alice, _alicePk(), _aliceE(), true, true);
         vm.prank(alice);
         reg.bindContract(pool, _alicePk(), _aliceE(), true, true, 0);
         assertTrue(reg.isVerified(pool));
@@ -418,6 +475,9 @@ contract IdentityRegistryTest is Test {
         address pool = address(uint160(_bu(".pool.target")));
         assertEq(pool, address(0xDECAF));
         _planAt(pool);
+        _authorizeBinding(
+            pool, alice, _bg1(".pool.pk"), _bct(".pool.ciphertext"), true, true
+        );
         vm.prank(alice);
         reg.bindContract(
             pool, ISSUER,

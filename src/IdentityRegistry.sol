@@ -266,6 +266,17 @@ contract IdentityRegistry {
     ///         so setIsCarrying() can never target an EOA.
     mapping(address => address)       public  binderOf;
 
+    /// @notice Exact, one-shot binding authorization recorded by a target
+    ///         contract for an already-certified operator. The target itself
+    ///         must publish this commitment before bindContract can consume it.
+    mapping(address => bytes32)       public  pendingBindingAuthorization;
+
+    /// @notice Deployment helpers approved by governance to perform an atomic
+    ///         deploy + credential bind. An approved helper is the control
+    ///         boundary for newly-created targets; existing targets use
+    ///         pendingBindingAuthorization instead.
+    mapping(address => bool)          public  isBindingFactory;
+
     /// @notice Authorised Buck contract -- the only address permitted to
     ///         call markApproved() to freeze the carrying flag.  Set once
     ///         by governance via setBuck() after Buck is deployed.
@@ -306,6 +317,13 @@ contract IdentityRegistry {
     event CarryingFrozen(address indexed target);
     event IdentityRootUpdated(uint256 indexed previous, uint256 indexed next);
     event IdentityPoseidonSet(address indexed previous, address indexed next);
+    event BindingFactorySet(address indexed factory, bool approved);
+    event ContractBindingAuthorized(
+        address indexed target,
+        address indexed binder,
+        bytes32 indexed authorization
+    );
+    event ContractBindingAuthorizationRevoked(address indexed target);
 
     // ---- constructor / governance ------------------------------------------
 
@@ -351,6 +369,15 @@ contract IdentityRegistry {
         require(_buck != address(0),      "buck=0");
         buck = _buck;
         emit BuckSet(_buck);
+    }
+
+    /// @notice Approve or revoke an atomic deployment helper. The helper's
+    ///         implementation must deploy and bind in one transaction.
+    function setBindingFactory(address factory, bool approved) external {
+        require(msg.sender == governance, "not governance");
+        require(factory.code.length > 0, "factory not a contract");
+        isBindingFactory[factory] = approved;
+        emit BindingFactorySet(factory, approved);
     }
 
     /// @notice Post the current registry-Identity Merkle accumulator root.
@@ -538,6 +565,47 @@ contract IdentityRegistry {
 
     // ---- contract identity binding -----------------------------------------
 
+    /// @notice Commit to an exact binding of this contract. Existing targets
+    ///         call this through their own controller/governance mechanism;
+    ///         merely being the first registered EOA to call bindContract is
+    ///         not evidence of control over the target.
+    function authorizeContractBinding(
+        address binder,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external {
+        require(msg.sender.code.length > 0, "target not a deployed contract");
+        require(!_isRegistered(msg.sender), "already bound");
+        require(binder != address(0), "binder=0");
+        bytes32 authorization = _bindingAuthorizationHash(
+            msg.sender, binder, pk, E, isPublicIdentity_, isCarrying_
+        );
+        pendingBindingAuthorization[msg.sender] = authorization;
+        emit ContractBindingAuthorized(msg.sender, binder, authorization);
+    }
+
+    /// @notice Revoke this contract's unconsumed binding authorization.
+    function revokeContractBindingAuthorization() external {
+        require(msg.sender.code.length > 0, "target not a deployed contract");
+        delete pendingBindingAuthorization[msg.sender];
+        emit ContractBindingAuthorizationRevoked(msg.sender);
+    }
+
+    function bindingAuthorizationHash(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external view returns (bytes32) {
+        return _bindingAuthorizationHash(
+            target, binder, pk, E, isPublicIdentity_, isCarrying_
+        );
+    }
+
     /// @notice Bind a (pk, E_addr) Identity to a deployed contract address.
     ///
     ///         Three independent checks:
@@ -603,6 +671,10 @@ contract IdentityRegistry {
         require(target.code.length > 0, "target not a deployed contract");
         require(!_isRegistered(target), "already bound");
         _verifyCredential(issuer, pk, E, sigma, proof, target);
+        _consumeBindingControl(
+            target, msg.sender, pk, E, isPublicIdentity_, isCarrying_,
+            isBindingFactory[msg.sender]
+        );
         _storeBinding(target, pk, E, isPublicIdentity_, isCarrying_, msg.sender, issuer);
     }
 
@@ -619,10 +691,49 @@ contract IdentityRegistry {
         require(!_isRegistered(target),     "already bound");
         require(_isRegistered(msg.sender),  "binder not registered");
         require(_samePkE(msg.sender, pk, E), "uncertified identity");
+        _consumeBindingControl(
+            target, msg.sender, pk, E, isPublicIdentity_, isCarrying_, false
+        );
         _storeBinding(
             target, pk, E, isPublicIdentity_, isCarrying_,
             msg.sender, issuerOf[msg.sender]
         );
+    }
+
+    function _consumeBindingControl(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_,
+        bool atomicFactory
+    ) internal {
+        if (atomicFactory) return;
+        bytes32 expected = _bindingAuthorizationHash(
+            target, binder, pk, E, isPublicIdentity_, isCarrying_
+        );
+        require(
+            pendingBindingAuthorization[target] == expected,
+            "target did not authorize binding"
+        );
+        delete pendingBindingAuthorization[target];
+    }
+
+    function _bindingAuthorizationHash(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) internal view returns (bytes32) {
+        return keccak256(abi.encode(
+            keccak256("AlbertaBuck:ContractBindingControl:v1"),
+            address(this), block.chainid, target, binder,
+            pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y,
+            isPublicIdentity_, isCarrying_
+        ));
     }
 
     function _samePkE(

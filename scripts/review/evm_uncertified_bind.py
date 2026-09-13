@@ -117,9 +117,20 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     assert reg.functions.identityRoot().call() == 0
     print("HONEST register with leaf=0 accepted =", True)
 
-    # Honest certified-operator bind: alice copies her registered identity.
+    # A registered stranger still cannot claim an unrelated deployed target.
     pool = Web3.to_checksum_address("0x000000000000000000000000000000000000b00b")
     anvil.set_code(pool, "0x60006000fd")
+    chain.send(bind5(pool, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
+                     True, True), sender=alice_addr, expect=Expect.REVERT)
+    assert "target did not authorize binding" in (chain.last_revert_reason or "")
+    assert not reg.functions.isVerified(pool).call()
+    print("REGISTERED stranger could not claim an unrelated target")
+
+    # Honest certified-operator bind: the target explicitly authorizes alice's
+    # exact identity and policy flags before alice copies her registered record.
+    chain.send(reg.functions.authorizeContractBinding(
+        alice_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)), True, True
+    ), sender=pool)
     chain.send(bind5(pool, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
                      True, True), sender=alice_addr)
     assert reg.functions.isVerified(pool).call()
@@ -134,6 +145,10 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     pf_v = bind_contract_prove(
         sigma_v, vault_acct.m, vault_acct.r, vault_acct.pk, vault_acct.E,
         int(vault, 16), vault_acct.sk, rng=rng)
+    chain.send(reg.functions.authorizeContractBinding(
+        alice_addr, g1(vault_acct.pk),
+        (g1(vault_acct.E.R), g1(vault_acct.E.C)), False, False
+    ), sender=vault)
     bind_cred = reg.get_function_by_signature(
         "bindContract(address,address,(uint256,uint256),"
         "((uint256,uint256),(uint256,uint256)),"
