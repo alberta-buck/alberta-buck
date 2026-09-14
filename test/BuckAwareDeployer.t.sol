@@ -227,6 +227,8 @@ contract BuckAwareDeployerCertifiedTest is Test {
     address internal constant GOV = address(0xA0);
     address internal constant ISSUER = address(0x1551E1);
     address internal constant BROADCASTER = address(0xB10D);
+    uint256 internal constant CURVE_ORDER =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
     string internal vj;
     string internal bj;
@@ -291,6 +293,21 @@ contract BuckAwareDeployerCertifiedTest is Test {
         p.T_key = _bg1(".create2.registration_proof.T_key");
     }
 
+    function _bindingProof(address target)
+        internal view returns (IdentityRegistry.ContractBindingProof memory p)
+    {
+        uint256 k = 0xC2EA7E;
+        p.T = BN254.mul(BN254.g1(), k);
+        p.e = reg.contractBindingChallenge(
+            target, address(deployer), _bg1(".create2.pk"), p.T, true, true
+        );
+        p.s = addmod(
+            k,
+            mulmod(p.e, _u(".alice.elgamal_kp.sk"), CURVE_ORDER),
+            CURVE_ORDER
+        );
+    }
+
     function test_deployCreate2AndBind_credential() public {
         assertEq(address(reg), vm.parseJsonAddress(bj, ".create2.registry"));
         assertEq(address(deployer), vm.parseJsonAddress(bj, ".create2.deployer"));
@@ -303,7 +320,7 @@ contract BuckAwareDeployerCertifiedTest is Test {
         address deployed = deployer.deployCreate2AndBind(
             salt, initCode, ISSUER,
             _bg1(".create2.pk"), _bct(".create2.ciphertext"),
-            _bps(), _bproof(), true, true
+            _bps(), _bproof(), _bindingProof(predicted), true, true
         );
         assertEq(deployed, predicted);
         assertTrue(reg.isVerified(deployed));

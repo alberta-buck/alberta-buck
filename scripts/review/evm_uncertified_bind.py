@@ -14,6 +14,7 @@ from alberta_buck.review.examples import Account, seeded
 from alberta_buck.wallet.bn254 import point_to_words
 from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
 from alberta_buck.wallet.nizk import registration_prove, bind_contract_prove
+from alberta_buck.wallet.contract_binding import contract_binding_prove
 from alberta_buck.registry.tree import identity_leaf
 
 g1 = lambda P: tuple(point_to_words(P))
@@ -38,6 +39,10 @@ def deploy_poseidon(chain):
 def _proof_arg(pf):
     return (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R),
             g1(pf.T_key))
+
+
+def _binding_arg(pf):
+    return (pf.e, pf.s, g1(pf.T))
 
 
 with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
@@ -118,8 +123,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     print("HONEST register with leaf=0 accepted =", True)
 
     # A registered stranger still cannot claim an unrelated deployed target.
-    pool = Web3.to_checksum_address("0x000000000000000000000000000000000000b00b")
-    anvil.set_code(pool, "0x60006000fd")
+    pool_target = chain.deploy("BindingTargetHarness", sol_file="BindingTargetHarness")
+    pool = pool_target.address
     chain.send(bind5(pool, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
                      True, True), sender=alice_addr, expect=Expect.REVERT)
     assert "target did not authorize binding" in (chain.last_revert_reason or "")
@@ -128,9 +133,10 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
 
     # Honest certified-operator bind: the target explicitly authorizes alice's
     # exact identity and policy flags before alice copies her registered record.
-    chain.send(reg.functions.authorizeContractBinding(
-        alice_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)), True, True
-    ), sender=pool)
+    chain.send(pool_target.functions.authorizeIdentityBinding(
+        reg.address, alice_addr, g1(alice.pk),
+        (g1(alice.E.R), g1(alice.E.C)), True, True
+    ), sender=gov)
     chain.send(bind5(pool, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
                      True, True), sender=alice_addr)
     assert reg.functions.isVerified(pool).call()
@@ -138,29 +144,34 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     print("HONEST certified-operator bind accepted =", True)
 
     # Honest credential bind: independent identity, FS registrant = target.
-    vault = Web3.to_checksum_address("0x00000000000000000000000000000000000000a2")
-    anvil.set_code(vault, "0x60006000fd")
+    vault_target = chain.deploy("BindingTargetHarness", sol_file="BindingTargetHarness")
+    vault = vault_target.address
     vault_acct = Account(22222, 33333, 44444)
     sigma_v, _ = ps_rerandomize(ps_sign(iss, vault_acct.m, rng=rng), rng=rng)
     pf_v = bind_contract_prove(
         sigma_v, vault_acct.m, vault_acct.r, vault_acct.pk, vault_acct.E,
         int(vault, 16), vault_acct.sk, rng=rng)
-    chain.send(reg.functions.authorizeContractBinding(
-        alice_addr, g1(vault_acct.pk),
+    bind_auth_v = contract_binding_prove(
+        vault_acct.sk, vault_acct.pk, int(vault, 16), int(alice_addr, 16),
+        int(reg.address, 16), False, False, rng=rng)
+    chain.send(vault_target.functions.authorizeIdentityBinding(
+        reg.address, alice_addr, g1(vault_acct.pk),
         (g1(vault_acct.E.R), g1(vault_acct.E.C)), False, False
-    ), sender=vault)
+    ), sender=gov)
     bind_cred = reg.get_function_by_signature(
         "bindContract(address,address,(uint256,uint256),"
         "((uint256,uint256),(uint256,uint256)),"
         "((uint256,uint256),(uint256,uint256)),"
         "(uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
         "(uint256,uint256),(uint256,uint256)),"
+        "(uint256,uint256,(uint256,uint256)),"
         "bool,bool)")
     chain.send(bind_cred(
         vault, iss_addr, g1(vault_acct.pk),
         (g1(vault_acct.E.R), g1(vault_acct.E.C)),
         (g1(sigma_v.sigma_1), g1(sigma_v.sigma_2)),
         _proof_arg(pf_v),
+        _binding_arg(bind_auth_v),
         False, False), sender=alice_addr)
     assert reg.functions.isVerified(vault).call()
     print("HONEST credential bind (FS registrant = target) accepted =", True)

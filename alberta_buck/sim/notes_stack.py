@@ -44,6 +44,7 @@ from alberta_buck.wallet.build_receipt import (
 )
 from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
 from alberta_buck.wallet.nizk import bind_contract_prove
+from alberta_buck.wallet.contract_binding import contract_binding_prove
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
 from alberta_buck.wallet.vectors import ALICE_FIELDS, BOB_FIELDS
 
@@ -361,15 +362,24 @@ class NotesStack:
             "((uint256,uint256),(uint256,uint256)),"
             "(uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
             "(uint256,uint256),(uint256,uint256)),"
+            "(uint256,uint256,(uint256,uint256)),"
             "bool,bool)")
         self._iss_kp = ps_keygen(rng=self.rng)
         self._iss_addr = self._addr(0xAA)
+        self.pool_m = rand_scalar(self.rng)
+        self.pool_r = rand_scalar(self.rng)
+        self.pool_E = elgamal_encrypt(mul(G1, self.pool_m), self.pool_pk, self.pool_r)
         g2 = lambda P: ((int(P[0].coeffs[0]), int(P[0].coeffs[1])),
                         (int(P[1].coeffs[0]), int(P[1].coeffs[1])))
         ch.send(self.reg.functions.trustIssuer(
             self._iss_addr, (g2(self._iss_kp.pk_X), g2(self._iss_kp.pk_Y))))
+        ch.send(self.notes.functions.authorizeIdentityBinding(
+            self.reg.address, self.gov, _xy(self.pool_pk),
+            (_xy(self.pool_E.R), _xy(self.pool_E.C)),
+            True, True))
         ch.send(self._credential_bind_fn(
-            self.notes.address, self.pool_pk, self.pool_sk, True, True))
+            self.notes.address, self.pool_pk, self.pool_sk, True, True,
+            m=self.pool_m, r=self.pool_r, E=self.pool_E))
 
         self.contracts = {
             "registry": self.reg.address.lower(),
@@ -380,6 +390,9 @@ class NotesStack:
     def _proof_arg(self, pf):
         return (pf.e, pf.s_m, pf.s_r, pf.s_sk, _xy(pf.A_ps), _xy(pf.T_C),
                 _xy(pf.T_R), _xy(pf.T_key))
+
+    def _binding_arg(self, pf):
+        return (pf.e, pf.s, _xy(pf.T))
 
     def _credential_bind_fn(self, target, pk, sk, is_public, is_carrying,
                             m=None, r=None, E=None):
@@ -395,10 +408,14 @@ class NotesStack:
         pf = bind_contract_prove(
             sigma, m, r, pk, E, int(target, 16), sk,
             chainid=self.fx.chainid, rng=self.rng)
+        binder = self.gov
+        bind_auth = contract_binding_prove(
+            sk, pk, int(target, 16), int(binder, 16), int(self.reg.address, 16),
+            is_public, is_carrying, chainid=self.fx.chainid, rng=self.rng)
         return self._bind_cred(
             target, self._iss_addr, _xy(pk), (_xy(E.R), _xy(E.C)),
             (_xy(sigma.sigma_1), _xy(sigma.sigma_2)),
-            self._proof_arg(pf), is_public, is_carrying)
+            self._proof_arg(pf), self._binding_arg(bind_auth), is_public, is_carrying)
 
     def _replay_fixture_accounts(self):
         """Recover (sk, r) for issuer then depositor (gen_e2e_world.account)."""
@@ -427,6 +444,11 @@ class NotesStack:
             self.anvil._rpc("anvil_setCode", [addr, ACCOUNT_STUB])
             self._impersonate(addr)
             who = "issuer" if int(b["addr"], 16) == self.fx.issuer.addr else "depositor"
+            out.append(self._send_from(
+                self.reg.functions.authorizeContractBinding(
+                    self.gov, _xy(rec["pk"]),
+                    (_xy(rec["E"].R), _xy(rec["E"].C)), bool(b["isPublic"]), False),
+                addr, f"authorize {who} binding"))
             out.append(self._send_from(
                 self._credential_bind_fn(
                     addr, rec["pk"], rec["sk"], bool(b["isPublic"]), False,

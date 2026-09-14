@@ -311,6 +311,23 @@ contract Notes {
         identityRegistry = IdentityRegistry(next);
     }
 
+    /// @notice Let governance authorize an exact registry binding on behalf of
+    ///         this contract. IdentityRegistry sees Notes itself as the caller,
+    ///         providing the target-control half of contract enrollment.
+    function authorizeIdentityBinding(
+        address registry,
+        address binder,
+        BN254.G1Point calldata pk,
+        IdentityRegistry.ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external {
+        require(msg.sender == governance, "not governance");
+        IdentityRegistry(registry).authorizeContractBinding(
+            binder, pk, E, isPublicIdentity_, isCarrying_
+        );
+    }
+
     /// @notice Wire (or rotate) the identity membership verifier consulted
     ///         by every spend path when identityRegistry.identityRoot() is
     ///         non-zero.  Passing `address(0)` disables identity membership

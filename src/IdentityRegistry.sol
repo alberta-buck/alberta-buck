@@ -49,6 +49,15 @@ contract IdentityRegistry {
         BN254.G1Point T_key;  // account-key commitment: sk_tilde * G
     }
 
+    /// @notice Holder authorization for an exact contract-binding policy.
+    ///         This prevents a bearer registration proof from being copied
+    ///         and submitted first with different public/carrying flags.
+    struct ContractBindingProof {
+        uint256 e;
+        uint256 s;
+        BN254.G1Point T;
+    }
+
     /// @notice 6-element Chaum-Pedersen proof (matches alberta_buck.wallet.chaum_pedersen).
     ///         ABI is unchanged; the three T fields are reinterpreted as the
     ///         three-relation commitments T_key, T_diff, T_R (see _verifyApprove).
@@ -150,6 +159,9 @@ contract IdentityRegistry {
     uint256 internal constant REGISTER_DOMAIN = uint256(
         keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2")
     );
+
+    uint256 public constant CONTRACT_BINDING_DOMAIN =
+        uint256(keccak256("AlbertaBuck:ContractBindingAuthorization:v1"));
 
     /// @notice Depth of the registry-Identity Merkle accumulator.
     ///
@@ -665,17 +677,76 @@ contract IdentityRegistry {
         ElGamalCT calldata E,
         PSSig calldata sigma,
         RegistrationProof calldata proof,
+        ContractBindingProof calldata bindingProof,
         bool isPublicIdentity_,
         bool isCarrying_
     ) external {
         require(target.code.length > 0, "target not a deployed contract");
         require(!_isRegistered(target), "already bound");
         _verifyCredential(issuer, pk, E, sigma, proof, target);
+        _verifyContractBindingProof(
+            target, msg.sender, pk, bindingProof,
+            isPublicIdentity_, isCarrying_
+        );
         _consumeBindingControl(
             target, msg.sender, pk, E, isPublicIdentity_, isCarrying_,
             isBindingFactory[msg.sender]
         );
         _storeBinding(target, pk, E, isPublicIdentity_, isCarrying_, msg.sender, issuer);
+    }
+
+    function contractBindingChallenge(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        BN254.G1Point calldata T,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external view returns (uint256) {
+        return _fsContractBinding(
+            target, binder, pk, T, isPublicIdentity_, isCarrying_
+        );
+    }
+
+    function _verifyContractBindingProof(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        ContractBindingProof calldata proof,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) internal view {
+        require(_canonical(proof.e) && _canonical(proof.s), "bad binding scalar");
+        require(!BN254.isInfinity(proof.T), "binding T=O");
+        require(proof.e == _fsContractBinding(
+            target, binder, pk, proof.T, isPublicIdentity_, isCarrying_
+        ), "bad binding challenge");
+        require(BN254.eq(
+            BN254.mul(BN254.g1(), proof.s),
+            BN254.add(proof.T, BN254.mul(pk, proof.e))
+        ), "bad binding authorization");
+    }
+
+    function _fsContractBinding(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        BN254.G1Point calldata T,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) internal view returns (uint256) {
+        BN254.G1Point[] memory pts = new BN254.G1Point[](2);
+        pts[0] = pk;
+        pts[1] = T;
+        uint256[] memory scl = new uint256[](7);
+        scl[0] = CONTRACT_BINDING_DOMAIN;
+        scl[1] = uint256(uint160(address(this)));
+        scl[2] = block.chainid;
+        scl[3] = uint256(uint160(target));
+        scl[4] = uint256(uint160(binder));
+        scl[5] = isPublicIdentity_ ? 1 : 0;
+        scl[6] = isCarrying_ ? 1 : 0;
+        return BN254.fsChallenge(pts, scl);
     }
 
     /// @dev Already-certified operator exception: binder is registered and

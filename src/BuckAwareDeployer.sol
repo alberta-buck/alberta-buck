@@ -47,12 +47,13 @@ contract BuckAwareDeployer {
         IdentityRegistry.ElGamalCT calldata E,
         IdentityRegistry.PSSig calldata sigma,
         IdentityRegistry.RegistrationProof calldata proof,
+        IdentityRegistry.ContractBindingProof calldata bindingProof,
         bool isPublicIdentity_,
         bool isCarrying_
     ) external returns (address deployed) {
         deployed = _factoryDeploy(factory, factoryCall);
         registry.bindContract(
-            deployed, issuer, pk, E, sigma, proof,
+            deployed, issuer, pk, E, sigma, proof, bindingProof,
             isPublicIdentity_, isCarrying_
         );
         emit Deployed(deployed, msg.sender, isPublicIdentity_);
@@ -87,6 +88,7 @@ contract BuckAwareDeployer {
         IdentityRegistry.ElGamalCT calldata E,
         IdentityRegistry.PSSig calldata sigma,
         IdentityRegistry.RegistrationProof calldata proof,
+        IdentityRegistry.ContractBindingProof calldata bindingProof,
         bool isPublicIdentity_,
         bool isCarrying_
     ) external returns (address deployed) {
@@ -96,7 +98,7 @@ contract BuckAwareDeployer {
         }
         require(deployed != address(0), "create2 failed");
         registry.bindContract(
-            deployed, issuer, pk, E, sigma, proof,
+            deployed, issuer, pk, E, sigma, proof, bindingProof,
             isPublicIdentity_, isCarrying_
         );
         emit Deployed(deployed, msg.sender, isPublicIdentity_);

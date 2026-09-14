@@ -19,6 +19,9 @@ contract IdentityRegistryTest is Test {
     address internal alice;
     address internal bob;
 
+    uint256 internal constant CURVE_ORDER =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
     string internal vj;
     string internal bj;
 
@@ -111,6 +114,22 @@ contract IdentityRegistryTest is Test {
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
         p.T_key = _g1(string.concat(base, ".T_key"));
+    }
+
+    function _bindingProof(
+        address target,
+        address binder,
+        BN254.G1Point memory pk,
+        uint256 sk,
+        bool isPublic,
+        bool isCarrying
+    ) internal view returns (IdentityRegistry.ContractBindingProof memory p) {
+        uint256 k = 0xB1AD;
+        p.T = BN254.mul(BN254.g1(), k);
+        p.e = reg.contractBindingChallenge(
+            target, binder, pk, p.T, isPublic, isCarrying
+        );
+        p.s = addmod(k, mulmod(p.e, sk, CURVE_ORDER), CURVE_ORDER);
     }
 
     function _cpProof() internal view returns (IdentityRegistry.CPProof memory p) {
@@ -462,11 +481,14 @@ contract IdentityRegistryTest is Test {
         _registerAlice();
         address pool = address(0xDECAF);
         _planAt(pool);
+        IdentityRegistry.ContractBindingProof memory authorization = _bindingProof(
+            pool, alice, _alicePk(), _u(".alice.elgamal_kp.sk"), true, true
+        );
         vm.prank(alice);
         vm.expectRevert(bytes("bad FS challenge"));
         reg.bindContract(
             pool, ISSUER, _alicePk(), _aliceE(), _ps("alice"), _regProof("alice"),
-            true, true
+            authorization, true, true
         );
     }
 
@@ -478,12 +500,15 @@ contract IdentityRegistryTest is Test {
         _authorizeBinding(
             pool, alice, _bg1(".pool.pk"), _bct(".pool.ciphertext"), true, true
         );
+        IdentityRegistry.ContractBindingProof memory authorization = _bindingProof(
+            pool, alice, _bg1(".pool.pk"), _u(".alice.elgamal_kp.sk"), true, true
+        );
         vm.prank(alice);
         reg.bindContract(
             pool, ISSUER,
             _bg1(".pool.pk"), _bct(".pool.ciphertext"),
             _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
-            true, true
+            authorization, true, true
         );
         assertTrue(reg.isVerified(pool));
         assertTrue(BN254.eq(reg.pkOf(pool), _bg1(".pool.pk")));
@@ -492,6 +517,38 @@ contract IdentityRegistryTest is Test {
         assertTrue(BN254.eq(stored.R, expected.R) && BN254.eq(stored.C, expected.C));
         assertEq(reg.issuerOf(pool), ISSUER);
         assertEq(reg.binderOf(pool), alice);
+        assertTrue(reg.isPublicIdentity(pool));
+        assertTrue(reg.isCarrying(pool));
+    }
+
+    function test_bindContract_credentialCannotBeFrontRunWithChangedFlags() public {
+        address pool = address(uint160(_bu(".pool.target")));
+        address factory = address(0xFAC7);
+        _planAt(pool);
+        _planAt(factory);
+        vm.prank(GOV);
+        reg.setBindingFactory(factory, true);
+
+        IdentityRegistry.ContractBindingProof memory authorization = _bindingProof(
+            pool, factory, _bg1(".pool.pk"), _u(".alice.elgamal_kp.sk"), true, true
+        );
+        vm.prank(factory);
+        vm.expectRevert(bytes("bad binding challenge"));
+        reg.bindContract(
+            pool, ISSUER,
+            _bg1(".pool.pk"), _bct(".pool.ciphertext"),
+            _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
+            authorization, false, false
+        );
+
+        vm.prank(factory);
+        reg.bindContract(
+            pool, ISSUER,
+            _bg1(".pool.pk"), _bct(".pool.ciphertext"),
+            _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
+            authorization, true, true
+        );
+        assertEq(reg.binderOf(pool), factory);
         assertTrue(reg.isPublicIdentity(pool));
         assertTrue(reg.isCarrying(pool));
     }
