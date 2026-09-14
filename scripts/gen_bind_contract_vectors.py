@@ -38,6 +38,19 @@ def _scalar(value: int) -> str:
     return f"0x{value:064x}"
 
 
+def _proof_json(proof) -> dict:
+    return {
+        "e": _scalar(proof.e),
+        "s_m": _scalar(proof.s_m),
+        "s_r": _scalar(proof.s_r),
+        "s_sk": _scalar(proof.s_sk),
+        "A_ps": _point_json(proof.A_ps),
+        "T_C": _point_json(proof.T_C),
+        "T_R": _point_json(proof.T_R),
+        "T_key": _point_json(proof.T_key),
+    }
+
+
 def main() -> None:
     identity = json.loads(IDENTITY.read_text())
     binding = json.loads(BINDING.read_text())
@@ -59,11 +72,24 @@ def main() -> None:
     ciphertext = ElGamalCiphertext(
         _point(row["ciphertext"]["R"]), _point(row["ciphertext"]["C"])
     )
+    pool = binding["pool"]
+    pool_registry = _integer(identity["registry"])
+    pool_seeded = random.Random(0xB10D)
+    pool_proof = bind_contract_prove(
+        sigma, _integer(row["m"]), _integer(row["r"]), pk, ciphertext,
+        _integer(pool["target"]), _integer(row["elgamal_kp"]["sk"]),
+        chainid=1, rng=lambda: pool_seeded.getrandbits(256),
+        registry=pool_registry,
+    )
+    pool["registry"] = f"0x{pool_registry:040x}"
+    pool["registration_proof"] = _proof_json(pool_proof)
+
     seeded = random.Random(0xC2EA7E)
     proof = bind_contract_prove(
         sigma, _integer(row["m"]), _integer(row["r"]), pk, ciphertext,
         target, _integer(row["elgamal_kp"]["sk"]), chainid=1,
         rng=lambda: seeded.getrandbits(256),
+        registry=_integer(create2["registry"]),
     )
 
     create2["predicted"] = "0x" + predicted.hex()
@@ -75,16 +101,7 @@ def main() -> None:
         "sigma_1": _point_json(sigma.sigma_1),
         "sigma_2": _point_json(sigma.sigma_2),
     }
-    create2["registration_proof"] = {
-        "e": _scalar(proof.e),
-        "s_m": _scalar(proof.s_m),
-        "s_r": _scalar(proof.s_r),
-        "s_sk": _scalar(proof.s_sk),
-        "A_ps": _point_json(proof.A_ps),
-        "T_C": _point_json(proof.T_C),
-        "T_R": _point_json(proof.T_R),
-        "T_key": _point_json(proof.T_key),
-    }
+    create2["registration_proof"] = _proof_json(proof)
     BINDING.write_text(json.dumps(binding, indent=2) + "\n")
     print(f"updated {BINDING.relative_to(ROOT)} for {create2['predicted']}")
 

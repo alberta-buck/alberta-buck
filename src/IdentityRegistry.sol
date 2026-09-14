@@ -635,9 +635,10 @@ contract IdentityRegistry {
     ///
     ///         The 5-arg overload is (a): an already-certified operator copies
     ///         their registered identity onto `target`.  An unregistered
-    ///         caller cannot bind a fabricated identity.  Do not assume
-    ///         `target` has owner(); authorization is the binder's existing
-    ///         registration plus first-binder-wins.
+    ///         caller cannot bind a fabricated identity.  Existing contracts
+    ///         must first authorize the exact binder, identity, and policy via
+    ///         authorizeContractBinding; approved factories instead perform
+    ///         deployment and binding atomically.
     ///
     ///         `isPublicIdentity_` records that the operator discloses m
     ///         off-chain (AMM pools, BUCK-unaware contracts).  `isCarrying_`

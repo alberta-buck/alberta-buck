@@ -159,7 +159,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     sigma_v, _ = ps_rerandomize(ps_sign(iss, vault_acct.m, rng=rng), rng=rng)
     pf_v = bind_contract_prove(
         sigma_v, vault_acct.m, vault_acct.r, vault_acct.pk, vault_acct.E,
-        int(vault, 16), vault_acct.sk, rng=rng)
+        int(vault, 16), vault_acct.sk, rng=rng,
+        registry=int(reg.address, 16))
     bind_auth_v = contract_binding_prove(
         vault_acct.sk, vault_acct.pk, int(vault, 16), int(alice_addr, 16),
         int(reg.address, 16), False, False, rng=rng)

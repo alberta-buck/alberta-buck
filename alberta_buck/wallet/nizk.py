@@ -172,13 +172,17 @@ def bind_contract_prove(
     sk: int,
     chainid: int = 1,
     rng=None,
+    *,
+    registry: int = 0,
 ) -> RegistrationProof:
     """Registration NIZK for IdentityRegistry.bindContract.
 
     Fiat-Shamir registrant is uint160(target), not the binder.  A proof
     valid for an EOA cannot be replayed onto a contract, and vice versa.
     """
-    return registration_prove(sigma_p, m, r, pk, E, target, sk, chainid, rng)
+    return registration_prove(
+        sigma_p, m, r, pk, E, target, sk, chainid, rng, registry=registry,
+    )
 
 
 def registration_verify(

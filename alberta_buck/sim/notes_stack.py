@@ -407,7 +407,8 @@ class NotesStack:
                                   rng=self.rng)
         pf = bind_contract_prove(
             sigma, m, r, pk, E, int(target, 16), sk,
-            chainid=self.fx.chainid, rng=self.rng)
+            chainid=self.fx.chainid, rng=self.rng,
+            registry=int(self.reg.address, 16))
         binder = self.gov
         bind_auth = contract_binding_prove(
             sk, pk, int(target, 16), int(binder, 16), int(self.reg.address, 16),

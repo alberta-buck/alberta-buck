@@ -777,7 +777,6 @@ contract BuckTest is Test {
     function _freshStackWithDirectController()
         internal returns (Buck b, BuckKControllerDirect kc, BuckCreditHarness c)
     {
-        IdentityRegistry r = new IdentityRegistryHarness(GOV);
         kc = new BuckKControllerDirect(
             0.1e18, 0.01e18, 0,
             60,
