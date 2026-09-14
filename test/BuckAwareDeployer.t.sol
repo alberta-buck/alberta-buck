@@ -6,6 +6,7 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckAwareDeployer} from "../src/BuckAwareDeployer.sol";
+import {ToyContract} from "./fixtures/ToyContract.sol";
 
 /// @dev Minimal factory that deploys a trivial contract and returns its address.
 ///      Mirrors the shape of IUniswapV2Factory.createPair / OZ Clones.clone.
@@ -24,8 +25,6 @@ contract ToyFactory {
         assembly { mstore(0, 0x01) return(0, 1) }
     }
 }
-
-contract ToyContract {}
 
 /// @title BuckAwareDeployerTest — atomic deploy + bind.
 contract BuckAwareDeployerTest is Test {

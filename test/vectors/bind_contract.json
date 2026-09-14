@@ -53,7 +53,7 @@
     "registry": "0xd29a2d5edc154dbe36d8e370eaa284622578e074",
     "deployer": "0x50fc7a29f1fb4f705f6ed64b0ecbf0c1497df33b",
     "salt": "0x42",
-    "predicted": "0x183b7bfeb630e847dba7e8dc829f612fdc5dce5c",
+    "predicted": "0x75df38fe4f2ab9b550eb34d880fa08f9f4cca5e1",
     "pk": {
       "x": "0x260f787a044e3af962778a868b558466a6ac4e78bed38c3a4fa87e382e8ceb4b",
       "y": "0x17f83b960bdfb1a5c5c01daf8cfbd92394cbb597a68498e876163bb3de3c4473"
@@ -79,25 +79,25 @@
       }
     },
     "registration_proof": {
-      "e": "0x2fd48ca1da4af78117e4784e3105c1b7cf8ca25acf4a1f8be29e44e2a2b45c44",
-      "s_m": "0x14f34f7afe4a91292be24e9d4fe5bd49588bd1c33edb22bf6af33c6923d81d68",
-      "s_r": "0x04dfee91f01303fb859a4aea969bb03aecf64c5ccfbf7d99f22dcab87c8f31d1",
-      "s_sk": "0x1784d6f5b3f66cccc23888dbce216dcc1adf0bc1b608060a6f7de7370755e2c8",
+      "e": "0x073261a0dda79777b2f29cfe8e0752021d2c14d454a4532150549bb49bdc556d",
+      "s_m": "0x2950b51afce2016047bc363701463b8bc41201ea520309075365dedf39b7fe31",
+      "s_r": "0x26c3a61eddc1b508a8e52c95c9d9bd9ad0ecb05b78cf9ccb329dbfef7538f77b",
+      "s_sk": "0x1c62e42c9c77d4a2e4c6c60a1b8a39d8c6803fff0c36ff0266fbbd112a07d295",
       "A_ps": {
-        "x": "0x13c9c15c6441a01a6bcf4e185d1b031d2980165b6a2172c450983add6a22b9e5",
-        "y": "0x1ea61220ca3acb4ecd05a99c79459b82d2edd9d1c80026a1400580817f78a082"
+        "x": "0x11e3f03929728d2eb63e190d6e2dc4684d54137e8a513e79b842a3442436ef9a",
+        "y": "0x00f73a7f9dd21fd2ac68dcb09e5504eaf812f9bcbfd646d466564df00cffdf0a"
       },
       "T_C": {
-        "x": "0x20ce73bc04378ff733d4176c95578658aab8c9d310a8248cbafd52ce7b51d01f",
-        "y": "0x22307c3bc03d5fa56dda94024f69098c8ac9a154ec493bbf6ded272cb844752b"
+        "x": "0x081d38058d85561d79cb49326c08e0cb4c91b29b4a342b7375b5b68ddfb39c31",
+        "y": "0x250d182efbaac2959a88c4f6c5855ad1b9ff62a4f3ff731d4795e48725e0e4f8"
       },
       "T_R": {
-        "x": "0x180541bf9c7dd82043e705e7513ac3cdf71c5dcf9c80a209d31487a575ee4dcd",
-        "y": "0x011c2bdd63157476d8c8cb4233608e247ecb749e9730448e34fe266898c358bc"
+        "x": "0x199fa65fe9afa2c1c5c434e00e10e256f903e8ce91088513b8819e785d3d919b",
+        "y": "0x28a187c1fcf6671091a46d1aadbcc390a430017aeae3908a0301562f27815d35"
       },
       "T_key": {
-        "x": "0x0153862878112256c96578455530a5bd7de9969a808093c7f93325d39e6699bf",
-        "y": "0x20621e4ae5a27d936a4c113b816b88f1c0a639abe4e723995cf09cda3c018452"
+        "x": "0x29b0ce7c723db78bc8733188a2373e148a5efbf266d2fad8b0c38562f0de50c7",
+        "y": "0x2930c341721cb7cb01c550e4d8af3f0fcb1688e0e110c3b229a0e2d827c832f0"
       }
     }
   }
