@@ -39,6 +39,11 @@ def prove_opening(name: str, witness: dict) -> dict:
     pub = result["publicSignals"]
     if pub[5] != flavor:
         raise SystemExit(f"{name}: publicSignals[5] flavor {pub[5]} != {flavor}")
+    if pub[6] != str(witness["issuanceCommitment"]):
+        raise SystemExit(
+            f"{name}: publicSignals[6] issuance commitment "
+            f"{pub[6]} != {witness['issuanceCommitment']}"
+        )
     return result
 
 
@@ -49,12 +54,19 @@ def main() -> None:
         path = VEC_DIR / f"{flavor}.json"
         world = json.loads(path.read_text())
         witness = world["spend"]["witness"]
+        issuance_commitment = (
+            world["opening"]["cm"] if flavor == "b1" else "0"
+        )
+        witness["issuanceCommitment"] = str(issuance_commitment)
         print(f"[regen] proving e2e {flavor} spend (flavor={witness['flavor']})")
         result = prove_opening(f"e2e_{flavor}", witness)
         proof = snark_to_fixture_proof(result["proof"])
         world["spend"]["proof"] = proof
         world["spend"]["proofBytes"] = "0x" + result["proofBytes"].hex()
         world["spend"]["public"]["flavor"] = str(witness["flavor"])
+        world["spend"]["public"]["issuanceCommitment"] = str(
+            issuance_commitment
+        )
         path.write_text(json.dumps(world, indent=2) + "\n")
         print(f"  wrote {path}")
         if flavor == "a1":

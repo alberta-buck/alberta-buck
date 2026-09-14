@@ -28,6 +28,7 @@ contract SpendVerifierTest is Test {
     address internal fxRecipient;
     uint256 internal fxChainId;
     uint256 internal fxFlavor;
+    uint256 internal fxIssuanceCommitment;
     bytes   internal fxProof;
 
     function setUp() public {
@@ -45,43 +46,68 @@ contract SpendVerifierTest is Test {
         fxRecipient = vm.parseJsonAddress(fx, ".spend.public.recipient");
         fxChainId   = vm.parseJsonUint(fx, ".spend.public.chainId");
         fxFlavor    = vm.parseJsonUint(fx, ".spend.public.flavor");
+        fxIssuanceCommitment =
+            vm.parseJsonUint(fx, ".spend.public.issuanceCommitment");
         fxProof     = vm.parseJsonBytes(fx, ".spend.proofBytes");
     }
 
-    function _verify(uint256 root, uint256 nf, uint256 face, address rec, uint256 cid, uint256 flavor)
+    function _verify(
+        uint256 root,
+        uint256 nf,
+        uint256 face,
+        address rec,
+        uint256 cid,
+        uint256 flavor,
+        uint256 issuanceCommitment
+    )
         internal view returns (bool)
     {
-        return spendAdapter.verifySpend(fxProof, root, nf, face, rec, cid, flavor);
+        return spendAdapter.verifySpend(
+            fxProof, root, nf, face, rec, cid, flavor, issuanceCommitment
+        );
     }
 
     function test_realProofVerifies() public {
-        assertTrue(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId, fxFlavor),
+        assertTrue(_verify(
+            fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId, fxFlavor,
+            fxIssuanceCommitment),
             "real spend Groth16 proof must verify on-chain");
     }
 
     function test_tamperedRootRejected() public {
-        assertFalse(_verify(fxNoteRoot ^ 1, fxNullifier, fxFace, fxRecipient, fxChainId, fxFlavor));
+        assertFalse(_verify(fxNoteRoot ^ 1, fxNullifier, fxFace, fxRecipient,
+                            fxChainId, fxFlavor, fxIssuanceCommitment));
     }
 
     function test_tamperedNullifierRejected() public {
-        assertFalse(_verify(fxNoteRoot, fxNullifier ^ 1, fxFace, fxRecipient, fxChainId, fxFlavor));
+        assertFalse(_verify(fxNoteRoot, fxNullifier ^ 1, fxFace, fxRecipient,
+                            fxChainId, fxFlavor, fxIssuanceCommitment));
     }
 
     function test_tamperedFaceRejected() public {
-        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace + 1, fxRecipient, fxChainId, fxFlavor));
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace + 1, fxRecipient,
+                            fxChainId, fxFlavor, fxIssuanceCommitment));
     }
 
     function test_tamperedRecipientRejected() public {
-        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, address(0xCAFE), fxChainId, fxFlavor));
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, address(0xCAFE),
+                            fxChainId, fxFlavor, fxIssuanceCommitment));
     }
 
     function test_chainIdMismatchRejected() public {
-        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId + 1, fxFlavor));
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient,
+                            fxChainId + 1, fxFlavor, fxIssuanceCommitment));
     }
 
     function test_tamperedFlavorRejected() public {
         uint256 other = fxFlavor == 3 ? 1 : 3;
-        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient, fxChainId, other),
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient,
+                            fxChainId, other, fxIssuanceCommitment),
             "entry-point flavor must match the committed opening");
+    }
+
+    function test_tamperedIssuanceCommitmentRejected() public {
+        assertFalse(_verify(fxNoteRoot, fxNullifier, fxFace, fxRecipient,
+                            fxChainId, fxFlavor, fxIssuanceCommitment ^ 1));
     }
 }

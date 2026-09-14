@@ -36,6 +36,8 @@ from alberta_buck.review.examples import Account, seeded
 from alberta_buck.review.integration import spend_prove
 from alberta_buck.wallet.b1_binding import b1_bind_prove
 from alberta_buck.wallet.bn254 import point_to_words
+from alberta_buck.wallet.notes import NoteOpening, note_commitment
+from alberta_buck.wallet.poseidon import poseidon
 
 g1 = lambda P: tuple(point_to_words(P))
 
@@ -59,6 +61,15 @@ def prove_mallory_spend(fx):
     print("proving spend with A1 flavor, recipient = Mallory ...")
     proved = spend_prove(SCRATCH / "mallory-spend", w)
     return proved["proofBytes"], w
+
+
+def root_for_opening(witness, opening):
+    """Recompute the supplied path root for a different leaf opening."""
+    node = note_commitment(opening)
+    for sibling, index in zip(witness["pathElements"], witness["pathIndices"]):
+        sib = int(sibling)
+        node = poseidon([sib, node] if int(index) else [node, sib])
+    return node
 
 
 fx = E2EFixture.load("a1")
@@ -121,7 +132,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     # Empty membership still reverts, but flavor is now the earlier check:
     # spendCoupledB1 supplies public flavor=3 against an A1 proof.
     fn_empty = stack.notes.functions.spendCoupledB1(
-        proof, root, nf, face, MALLORY, stack._addr(fx.issuer.addr),
+        proof, root, nf, face, MALLORY, int(fx.raw["opening"]["cm"]),
+        stack._addr(fx.issuer.addr),
         (g1(e_dep.R), g1(e_dep.C)), db_tuple(b1_proof),
         b"",
     )
@@ -143,7 +155,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     mem = bytes.fromhex(fx.raw["membership"]["proofBytes"][2:])
     assert len(mem) > 0, "fixture membership must be nonempty"
     fn_mem = stack.notes.functions.spendCoupledB1(
-        proof, root, nf, face, MALLORY, stack._addr(fx.issuer.addr),
+        proof, root, nf, face, MALLORY, int(fx.raw["opening"]["cm"]),
+        stack._addr(fx.issuer.addr),
         (g1(e_dep.R), g1(e_dep.C)), db_tuple(b1_proof),
         mem,
     )
@@ -171,24 +184,22 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
         print("cannot prove A1 opening at public flavor=3 (commitment mismatch)")
         print("   prover:", str(err).splitlines()[-1][:200])
 
-    # Issuer substitution: the B1 depositor-binding sigma still accepts a
-    # different registered issuer (idHash is not opened to m_issuer).  This
-    # remaining gap is documented, not closed, by this PR.
-    fake_iss = Web3.to_checksum_address("0x00000000000000000000000000000000000015e1")
-    anvil.set_code(fake_iss, ACCOUNT_STUB)
-    fake_acct = Account(13579, 24680, 11111)
-    stack.chain.send(
-        bind5(fake_iss, g1(fake_acct.pk), (g1(fake_acct.E.R), g1(fake_acct.E.C)),
-              True, False),
-        sender=stack.gov)
-    sub_proof, sub_e = b1_bind_prove(
-        mallory.m, mallory.sk, mallory.E, fake_acct.pk,
-        MALLORY_ADDR_INT, fx.chainid, rng=seeded(44))
-    ok_sub = stack.reg.functions.verifyDepositorBinding(
-        MALLORY, fake_iss, (g1(sub_e.R), g1(sub_e.C)), db_tuple(sub_proof)).call()
-    print("depositor binding verifies against a SUBSTITUTE issuer =", ok_sub)
-    print("   (issuer-to-idHash gap remains; see PR summary)")
-    assert ok_sub
+    # Unsupported-predicate semantic test.  Recompute a matching commitment
+    # and Merkle root for predicate=1, so witness generation can fail only on
+    # the circuit's explicit predicate===0 policy rather than a stale path.
+    w_pred = dict(w)
+    unsupported = NoteOpening(
+        flavor=int(w["flavor"]), v=int(w["v"]), rho=int(w["rho"]),
+        id_hash=int(w["idHash"]), predicate=1,
+    )
+    w_pred["predicate"] = 1
+    w_pred["noteRoot"] = root_for_opening(w, unsupported)
+    try:
+        spend_prove(SCRATCH / "unsupported-predicate", w_pred)
+        raise AssertionError("unsupported nonzero predicate must be unsatisfiable")
+    except RuntimeError as err:
+        print("unsupported predicate=1 is UNSAT with a matching commitment/path")
+        print("   prover:", str(err).splitlines()[-1][:200])
 
     # Honest control: real A1 coupled spend of the SAME note.
     stack.approve_pool(fx.depositor, 0, "approve depositor->pool")
@@ -234,7 +245,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
            _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
     e_dep = d["sigma"]["eDepForIss"]
     fn_empty = stack.notes.functions.spendCoupledB1(
-        proof, root, nf, face, rec, stack._addr(fx_b1.issuer.addr),
+        proof, root, nf, face, rec, int(d["opening"]["cm"]),
+        stack._addr(fx_b1.issuer.addr),
         _ct_tuple(e_dep), b1p, b"")
     try:
         stack._send_from(fn_empty, dep, "Notes.spendCoupledB1(B1, empty mem)",
@@ -245,6 +257,43 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
         print("HONEST-flavor B1 empty membership REVERTED (PR1 preserved)")
         print("   reason:", reason)
         assert "empty identity membership" in reason, reason
+        assert not stack.notes.functions.nullifiers(nf).call()
+
+    # Issuer substitution is a semantic test: create a fresh, valid depositor
+    # binding against a different registered issuer while retaining the honest
+    # B1 opening and proof.  The exact commitment's mint attribution rejects
+    # composition with that otherwise-valid sigma.
+    fake_iss = Web3.to_checksum_address("0x00000000000000000000000000000000000015e1")
+    fake_acct = Account(13579, 24680, 11111)
+    anvil.set_code(fake_iss, ACCOUNT_STUB)
+    stack.chain.send(
+        stack._bind5(
+            fake_iss, g1(fake_acct.pk), (g1(fake_acct.E.R), g1(fake_acct.E.C)),
+            True, False,
+        ),
+        sender=stack.gov,
+    )
+    sub_proof, sub_e = b1_bind_prove(
+        fx_b1.depositor.m, fx_b1.depositor.sk, fx_b1.depositor.E,
+        fake_acct.pk, fx_b1.depositor.addr, fx_b1.chainid, rng=seeded(44),
+    )
+    assert stack.reg.functions.verifyDepositorBinding(
+        rec, fake_iss, (g1(sub_e.R), g1(sub_e.C)), db_tuple(sub_proof)
+    ).call(), "substitution control sigma must be independently valid"
+    mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
+    fn_sub = stack.notes.functions.spendCoupledB1(
+        proof, root, nf, face, rec, int(d["opening"]["cm"]), fake_iss,
+        (g1(sub_e.R), g1(sub_e.C)), db_tuple(sub_proof), mem,
+    )
+    try:
+        stack._send_from(fn_sub, dep, "Notes.spendCoupledB1(substitute issuer)",
+                         event="SpentCoupledB1", contract=stack.notes)
+        raise AssertionError("substitute issuer must not redeem a B1 note")
+    except RuntimeError as err:
+        reason = str(err)
+        print("SUBSTITUTE issuer spend REVERTED")
+        print("   reason:", reason)
+        assert "wrong B1 issuer" in reason, reason
         assert not stack.notes.functions.nullifiers(nf).call()
 
     steps = {"spend": stack.spend()}

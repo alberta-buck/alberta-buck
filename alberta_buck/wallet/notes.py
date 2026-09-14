@@ -18,6 +18,11 @@ EVERY flavor; the 4243 tag is reserved in case a future flavor-split
 derivation is wanted (it would keep the namespaces disjoint for the same
 ``(rho, id_hash)`` pair).
 
+For B1 only, the spend circuit also exposes the recomputed note commitment as
+``issuanceCommitment``.  ``Notes`` records that commitment under the public
+issuer whose registered-key batch Schnorr authorized its mint, and requires
+the spend-time issuer to match.  A1/A2 keep this public signal at zero.
+
 A-flavor identity binding: the spend circuit does **not** learn the
 recipient from ``id_hash`` -- it is opaque to the circuit.  The addressed
 (A1/A2) binding is enforced by the Identity-M deposit gate at spend: the

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
+import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
@@ -25,6 +26,8 @@ import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 ///         membership-bound B1 spender path that completes the Identity-M design
 ///         for bearer notes.  See alberta-buck-notes.org ("Mutual Decryptability", B1) and notes-flow "Identity-M Spend Path".
 contract NotesCoupledB1Test is Test {
+    using stdStorage for StdStorage;
+
     Buck internal buck;
     BuckCreditHarness internal credit;
     BuckKControllerStatic internal kCtrl;
@@ -36,6 +39,7 @@ contract NotesCoupledB1Test is Test {
 
     address internal constant GOV  = address(0xA0);
     address internal constant POOL = address(0xBA51C);
+    uint256 internal constant ISSUANCE_CM = 0xB100;
 
     string  internal vj;
     address internal depositor;   // the payout account (= recipient), bound to M_dep
@@ -95,6 +99,13 @@ contract NotesCoupledB1Test is Test {
         buck.transfer(address(notes), 200e18);
         vm.stopPrank();
         vm.store(address(notes), bytes32(uint256(8)), bytes32(uint256(1000e18)));
+        // Unit-plumbing tests use stub mint/spend verifiers and seed the one
+        // mint-authenticated fact that spendCoupledB1 now consumes.  The real
+        // mint-to-spend linkage is exercised by NotesE2E_B1.
+        stdstore.target(address(notes))
+            .sig("publicIssuerOfCommitment(uint256)")
+            .with_key(ISSUANCE_CM)
+            .checked_write(issuer);
     }
 
     // ---- vector helpers -----------------------------------------------------
@@ -142,7 +153,7 @@ contract NotesCoupledB1Test is Test {
         uint256 nf   = 0xB10;
         uint256 balBefore = buck.balanceOf(depositor);
         vm.prank(depositor);
-        notes.spendCoupledB1(hex"00", root, nf, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, nf, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
         assertTrue(notes.nullifiers(nf), "nullifier consumed");
         assertEq(buck.balanceOf(depositor), balBefore + 100, "payout delivered");
@@ -153,7 +164,7 @@ contract NotesCoupledB1Test is Test {
         vm.expectEmit(true, true, true, true, address(notes));
         emit Notes.SpentCoupledB1(0xB11, 100, depositor, issuer, _eDepForIss());
         vm.prank(depositor);
-        notes.spendCoupledB1(hex"00", root, 0xB11, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, 0xB11, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
     }
 
@@ -165,7 +176,7 @@ contract NotesCoupledB1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad depositor binding"));
-        notes.spendCoupledB1(hex"00", root, 0xB12, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, 0xB12, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), p, hex"cafe");
     }
 
@@ -176,7 +187,7 @@ contract NotesCoupledB1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad depositor binding"));
-        notes.spendCoupledB1(hex"00", root, 0xB13, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, 0xB13, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), p, hex"cafe");
     }
 
@@ -185,17 +196,17 @@ contract NotesCoupledB1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad identity membership proof"));
-        notes.spendCoupledB1(hex"00", root, 0xB14, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, 0xB14, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
     }
 
     function test_coupledB1_doubleSpend_reverts() public {
         uint256 root = notes.noteRoot();
         vm.startPrank(depositor);
-        notes.spendCoupledB1(hex"00", root, 0xB15, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, 0xB15, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
         vm.expectRevert(bytes("Notes: already spent"));
-        notes.spendCoupledB1(hex"00", root, 0xB15, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, 0xB15, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
         vm.stopPrank();
     }

@@ -256,6 +256,10 @@ contract Notes {
     ///         mutual-decryptability, Phase 2; see verifyIssuerReenc).
     event IssuerReencBound(address indexed issuer, uint256 indexed newRoot, uint256 count);
 
+    /// @notice Authenticated public-mint issuer for an exact note commitment.
+    ///         The spend circuit reveals this handle only for B1 notes.
+    mapping(uint256 => address) public publicIssuerOfCommitment;
+
     // ---- constructor / governance -----------------------------------------
 
     constructor(
@@ -438,6 +442,14 @@ contract Notes {
                 msg.sender, keccak256(abi.encodePacked(cms)), issuerSig),
             "Notes: bad issuer binding"
         );
+        // Persist the issuer authenticated by the batch Schnorr for every
+        // exact commitment.  Refuse duplicates so a later public issuer cannot
+        // overwrite the first note's issuance attribution.
+        for (uint256 i = 0; i < cms.length; i++) {
+            require(publicIssuerOfCommitment[cms[i]] == address(0),
+                    "Notes: duplicate public commitment");
+            publicIssuerOfCommitment[cms[i]] = msg.sender;
+        }
         uint256 startIndex =
             _advanceAndPull(newRoot, nextLeafIndex_, totalFace, cms.length);
         emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
@@ -796,7 +808,7 @@ contract Notes {
         // Note commitment + nullifier: cm in the pool tree, nullifier well-formed.
         require(
             spendVerifier.verifySpend(
-                proof, root, nullifier, face, recipient, block.chainid, flavor
+                proof, root, nullifier, face, recipient, block.chainid, flavor, 0
             ),
             "Notes: bad spend proof"
         );
@@ -877,6 +889,12 @@ contract Notes {
     // ---- Identity-M-bound B1 spend (bearer, public issuer) ---------------
 
     /// @notice Redeem an identity-M-bound B1 note -- bearer, *public* issuer.
+    ///         `issuanceCommitment` is the exact note commitment opened by the
+    ///         spend SNARK.  Its mint-time issuer was recorded only after the
+    ///         registered-key batch Schnorr passed; the supplied `issuer` must
+    ///         match that immutable attribution.  This deliberately reveals a
+    ///         B1 spend-to-mint handle: bearer issuers are public, while A1/A2
+    ///         keep the corresponding circuit signal zero.
     ///         The depositor (= `recipient`, the payout account) re-encrypts its
     ///         own registered Identity M_dep under the public issuer's key
     ///         (`eDepForIss`) and proves, hiding every Identity, that the
@@ -902,6 +920,7 @@ contract Notes {
         uint256          nullifier,
         uint256          face,
         address          recipient,
+        uint256          issuanceCommitment,
         address          issuer,
         IdentityRegistry.ElGamalCT            calldata eDepForIss,
         IdentityRegistry.DepositorBindingProof calldata b1Proof,
@@ -920,10 +939,16 @@ contract Notes {
         // an A1/A2 opening cannot verify here even with a nonempty membership.
         require(
             spendVerifier.verifySpend(
-                proof, root, nullifier, face, recipient, block.chainid, FLAVOR_B1
+                proof, root, nullifier, face, recipient, block.chainid, FLAVOR_B1,
+                issuanceCommitment
             ),
             "Notes: bad spend proof"
         );
+
+        // The proof above opens this exact B1 commitment.  Its issuer was
+        // recorded only after the mint batch's registered-key Schnorr passed.
+        require(publicIssuerOfCommitment[issuanceCommitment] == issuer,
+                "Notes: wrong B1 issuer");
 
         // Identity-M binding, half 1: the depositor binding sigma (incl. the
         // P_dep commitment).

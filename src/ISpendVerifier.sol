@@ -15,6 +15,8 @@ pragma solidity ^0.8.20;
 ///           - flavor:     committed Poseidon-5 word (A1=1, A2=2, B1=3);
 ///                         each Notes.spendCoupled* entry point supplies its
 ///                         own constant so an A-opening cannot redeem via B1
+///           - issuanceCommitment: the opened note commitment for B1, zero for
+///                         A1/A2; binds a bearer spend to its authenticated mint
 interface ISpendVerifier {
     function verifySpend(
         bytes calldata proof,
@@ -23,6 +25,7 @@ interface ISpendVerifier {
         uint256 face,
         address recipient,
         uint256 chainId,
-        uint256 flavor
+        uint256 flavor,
+        uint256 issuanceCommitment
     ) external view returns (bool);
 }

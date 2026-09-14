@@ -272,7 +272,10 @@ abstract contract NotesE2EBase is Test {
         vm.startPrank(depositor);
         if (_flavorCode() != 3) {
             vm.expectRevert(bytes("Notes: bad spend proof"));
-            notes.spendCoupledB1(proof, root, nf, face, payout, issuer, zct, zdb, memProof);
+            notes.spendCoupledB1(
+                proof, root, nf, face, payout, _u(".opening.cm"), issuer,
+                zct, zdb, memProof
+            );
         }
         if (_flavorCode() != 1) {
             vm.expectRevert(bytes("Notes: bad spend proof"));
@@ -306,7 +309,8 @@ abstract contract NotesE2EBase is Test {
         // Note proof (shared by all flavors; public flavor matches the entry point).
         uint256 g0 = gasleft();
         bool okSpend = spendAdapter.verifySpend(
-            spendProof, noteRoot, nf, spendFace, spendRec, 1, _flavorCode());
+            spendProof, noteRoot, nf, spendFace, spendRec, 1, _flavorCode(),
+            _isBearer() ? _u(".opening.cm") : 0);
         uint256 spendGas = g0 - gasleft();
         assertTrue(okSpend, "spend proof must verify");
         console2.log(string.concat("[gas:", _flavor(), "] spend proof:"), spendGas);
@@ -396,7 +400,10 @@ contract NotesE2E_B1 is NotesE2EBase {
         bytes memory memProof = _b(".membership.proofBytes");
         vm.prank(depositor);
         uint256 g = gasleft();
-        notes.spendCoupledB1(proof, root, nf, face, payout, issuer, eDep, db, memProof);
+        notes.spendCoupledB1(
+            proof, root, nf, face, payout, _u(".opening.cm"), issuer,
+            eDep, db, memProof
+        );
         gasUsed = g - gasleft();
     }
 }

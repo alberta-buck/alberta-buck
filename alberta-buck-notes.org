@@ -410,10 +410,13 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
      require nullifier not in nullifiers
      verify SNARK (spend, B-flavor / bearer shape):
        - face in [0, 2^128) and face == v   # Num2Bits(128) on both
+       - flavor == B1 and predicate == 0    # entry-point policy is public
        - cm = Poseidon5(flavor, v, rho, idHash, predHash)
+       - issuanceCommitment == cm           # B1-only public mint handle
        - Merkle inclusion of cm under root  # Switcher + Poseidon(2) per level
        - nullifier == Poseidon3(rho, idHash, 4242)
        - ghost-bind public signals (face, recipient, chainId) via x*x
+     require publicIssuerOfCommitment[issuanceCommitment] == issuer
      nullifiers[nullifier] = true
      noteFaceSum -= face
      # An ordinary ERC-20 transfer out of the pool.  Because the pool is
@@ -2591,35 +2594,44 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Spend: Note-Opening + the Identity-M Deposit Gate
 
-   The note-opening proof below is flavor-agnostic (it proves a valid note
-   is being spent); the Identity-M deposit gate that follows establishes
-   /who/ is spending.
+   The note-opening proof below is shared by all three flavors.  Its public
+   =flavor= is constrained to the committed opening and supplied by the
+   selected contract entrypoint; the Identity-M deposit gate that follows
+   establishes /who/ is spending.
 
    *Public inputs.*  =noteRoot=, =nullifier=, =face=, =recipient=,
-   =chainId=.
+   =chainId=, =flavor=, and =issuanceCommitment=.  For B1 the last input is
+   the exact opened note commitment; for A1/A2 it is zero.
 
-   *Witnesses.*  \( (\text{flavor}, v, \rho, \text{idHash},
+   *Witnesses.*  \( (v, \rho, \text{idHash},
    \text{predHash}, \text{leafIndex}, \text{path}[20]) \).
 
-   *Constraints.*  Five groups, mirroring the circuit's section
+   *Constraints.*  Eight groups, mirroring the circuit's section
    labels:
 
    - *(R)* Range bounds: \( v \in [0, 2^{128}) \) and
      \( \text{face} \in [0, 2^{128}) \) via =Num2Bits(128)= on each,
      and \( \text{face} \equiv v \) (face exposed publicly equals the
      witness face).
+   - *(F)* Flavor policy: =flavor= is exactly A1, A2, or B1.  Because the
+     contract supplies the entrypoint's constant, an addressed opening cannot
+     be replayed through the bearer path.
+   - *(P)* Predicate policy: =predHash= is zero; no nonzero spend predicate is
+     implemented by this circuit version.
    - *(C)* Commitment opening:
      \( cm = \text{Poseidon5}(\text{flavor}, v, \rho, \text{idHash},
      \text{predHash}) \).
+   - *(I)* Issuance attribution: =issuanceCommitment= equals (cm) for B1
+     and zero for A1/A2.  This gives only the public bearer flavor an exact
+     mint-to-spend handle.
    - *(M)* Merkle membership: walk =path[20]= with =Switcher=
      selectors and Poseidon-T3 at each level, asserting the result
      equals =noteRoot=.
    - *(N)* Nullifier:
      \( \text{nullifier} = \text{Poseidon3}(\rho, \text{idHash},
-     4242) \).  The constant tag 4242 is the B-spend domain
-     separator; the same =idHash= can mint an A-flavor note and a
-     B-flavor note without nullifier collision (different =flavor=
-     in the commitment), but both today share this circuit and tag.
+     4242) \).  The constant tag 4242 is the shared spend-nullifier domain.
+     Reusing the same \((\rho,\text{idHash})\) across flavors therefore
+     deliberately collides; wallet generation uses a fresh \(\rho\) per note.
    - *(B)* Ghost binding: =recipient= and =chainId= are constrained
      into the witness via \( x \cdot x \) so the proof cannot be
      replayed against a different recipient or chain (replay
@@ -2629,7 +2641,9 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    =spendCoupledA2= / =spendCoupledB1= -- requires =root= in the recent =roots=
    ring and =nullifier= unused, verifies this note proof through
    =SpendVerifierAdapter= (=spendVerifier.verifySpend=, shared by all three),
-   runs the Identity gate below, sets =nullifiers[nullifier] = true=, decrements
+   and for B1 requires the revealed commitment's mint-authenticated issuer to
+   equal the supplied issuer.  It then runs the Identity gate below, sets
+   =nullifiers[nullifier] = true=, decrements
    =noteFaceSum=, and calls =buck.transfer(recipient, face)= -- routed through the
    Carrying path because the pool is =isCarrying=.
 
@@ -2928,10 +2942,18 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    derives its public inputs from \( P \), not the prover's bytes), so /those two
    halves/ cannot be decoupled.
 
+   *The B1 issuer tie is implemented.*  After the public-mint batch Schnorr
+   authenticates its caller, =Notes.mint= immutably records every exact
+   commitment under that issuer.  The spend proof exposes the recomputed
+   commitment only for a B1 opening, and =spendCoupledB1= requires its recorded
+   issuer to equal the issuer used by the depositor-binding proof.  A valid
+   binding made for a substitute registered issuer therefore cannot compose
+   with the note.  This deliberately makes B1 spends linkable to their public
+   mint commitment; A1/A2 expose zero in this slot.
+
    *The note \( \leftrightarrow \) \( eEnc \) tie is implemented -- for both
-   addressed layouts.*  The flavour-agnostic spend proof (=spend.circom=)
-   proves only that /some/ opening is in the tree and that its nullifier is
-   well-formed; it exposes no \( idHash \), so on its own nothing ties the
+   addressed layouts.*  The shared spend proof (=spend.circom=) binds its
+   public flavor but exposes no \( idHash \), so on its own nothing ties the
    deposit-coupling ciphertext \( eEnc \) to the /specific note being spent/.
    The closing piece is the /in-SNARK tie/ (=INoteBindingVerifier=), one
    circuit per addressed payload layout:
