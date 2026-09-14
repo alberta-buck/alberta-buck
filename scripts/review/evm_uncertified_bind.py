@@ -6,6 +6,15 @@ identityLeaf.  register() refuses a caller-chosen leaf.
 Honest controls: register with leaf=0; bind with a target-bound credential;
 certified-operator bind of a registered binder's own (pk, E).
 """
+import os
+from pathlib import Path
+
+# Artifact discovery must follow this script's checkout when several PR
+# worktrees are installed/editable at once.
+os.environ.setdefault(
+    "ALBERTA_BUCK_REPO", str(Path(__file__).resolve().parents[2])
+)
+
 from web3 import Web3
 
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil, DEV_ACCOUNTS
