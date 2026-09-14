@@ -6,7 +6,8 @@ proves they decrypt to the same M -- without revealing M, sk_alice or the
 re-encryption randomness r'.
 
 Witnesses:  sk (secret key for pk_alice), r' (randomness for E_bob).
-Public:     E_alice, E_bob, pk_alice, pk_bob, sender, spender, chainid.
+Public:     E_alice, E_bob, pk_alice, pk_bob, sender, spender, chainid,
+            registry and approval nonce.
 
 The statement is the three-relation protocol of alberta-buck-proofs.org Part II
 (S1/S2/S3) and doc/review/identity-findings.md Sec. 3:
@@ -29,7 +30,8 @@ only T1-T2 constrained).  Reinterpretation:
   T2 = T_diff = a*R_a - b*pk_b
 
 Challenge: e = H(E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3,
-                 sender, spender, chainid)  mod ORDER
+                 sender, spender, chainid, registry, nonce,
+                 "AlbertaBuck:Approve:v3")  mod ORDER
 
 Verifier:
 
@@ -53,7 +55,10 @@ from alberta_buck.wallet.bn254 import (
     G1, ORDER, add, mul, neg, eq, is_inf, rand_scalar, point_to_words,
 )
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
-from alberta_buck.wallet.transcript import keccak_scalar
+from alberta_buck.wallet.transcript import keccak_raw, keccak_scalar
+
+
+APPROVE_DOMAIN = int.from_bytes(keccak_raw(b"AlbertaBuck:Approve:v3"), "big")
 
 
 @dataclass(frozen=True)
@@ -91,6 +96,8 @@ def _cp_transcript(
     sender:  int,
     spender: int,
     chainid: int,
+    registry: int,
+    nonce: int,
 ) -> int:
     Rax, Ray = point_to_words(E_alice.R)
     Cax, Cay = point_to_words(E_alice.C)
@@ -106,7 +113,7 @@ def _cp_transcript(
         Rbx, Rby, Cbx, Cby,
         pax, pay, pbx, pby,
         T1x, T1y, T2x, T2y, T3x, T3y,
-        sender, spender, chainid,
+        sender, spender, chainid, registry, nonce, APPROVE_DOMAIN,
     )
 
 
@@ -121,6 +128,9 @@ def chaum_pedersen_prove(
     spender:   int,
     chainid:   int,
     rng=None,
+    *,
+    registry:  int = 0,
+    nonce:     int = 0,
 ) -> CPProof:
     a = rand_scalar(rng)
     b = rand_scalar(rng)
@@ -128,7 +138,8 @@ def chaum_pedersen_prove(
     T3 = mul(G1, b)                                      # T_R
     T2 = add(mul(E_alice.R, a), neg(mul(pk_bob, b)))     # T_diff
     e  = _cp_transcript(
-        E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3, sender, spender, chainid,
+        E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3,
+        sender, spender, chainid, registry, nonce,
     )
     s1 = (a + e * (sk_alice % ORDER)) % ORDER
     s2 = (b + e * (r_prime  % ORDER)) % ORDER
@@ -144,6 +155,8 @@ def chaum_pedersen_verify(
     sender:    int,
     spender:   int,
     chainid:   int,
+    registry:  int = 0,
+    nonce:     int = 0,
 ) -> bool:
     e, s1, s2 = proof.e, proof.s1, proof.s2
     if not all(_canonical(s) for s in (e, s1, s2)):
@@ -170,6 +183,6 @@ def chaum_pedersen_verify(
     e_check = _cp_transcript(
         E_alice, E_bob, pk_alice, pk_bob,
         proof.T1, proof.T2, proof.T3,
-        sender, spender, chainid,
+        sender, spender, chainid, registry, nonce,
     )
     return e_check == e

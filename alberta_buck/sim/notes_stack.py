@@ -407,11 +407,13 @@ class NotesStack:
         self._impersonate(addr)
         r_prime = rand_scalar(self.rng)
         E_for_pool = elgamal_encrypt(party.M, self.pool_pk, r_prime)
+        approve_nonce = self.reg.functions.approveNonces(addr).call()
         cp = chaum_pedersen_prove(
             party.E, E_for_pool, party.pk, self.pool_pk,
             party.sk, r_prime,
             party.addr, int(self.notes.address, 16), self.fx.chainid,
             rng=self.rng,
+            registry=int(self.reg.address, 16), nonce=approve_nonce,
         )
         approve4 = self.buck.get_function_by_signature(
             "approve(address,uint256,((uint256,uint256),(uint256,uint256)),"

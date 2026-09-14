@@ -198,6 +198,7 @@ fn golden_identity_fixture() {
     let v = fixture();
     assert_eq!(v["$schema_version"], 1);
     let chainid = jw(&v["chainid"]);
+    let registry = jw(&v["registry"]);
 
     let iss_x = jg2(&v["issuer"]["pk_X"]);
     let iss_y = jg2(&v["issuer"]["pk_Y"]);
@@ -255,13 +256,15 @@ fn golden_identity_fixture() {
             jg1(&p["ps_sig_rerand"]["sigma_2"]),
         );
         assert!(nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &registrant, &chainid
+            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
+            &registrant, &chainid, &registry
         )
         .unwrap());
         let mut wrong = registrant;
         wrong[31] ^= 1;
         assert!(!nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &wrong, &chainid
+            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
+            &wrong, &chainid, &registry
         )
         .unwrap());
     }
@@ -306,12 +309,14 @@ fn golden_identity_fixture() {
         t3: jg1(&cp["T3"]),
     };
     assert!(chaum_pedersen::chaum_pedersen_verify(
-        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &sender, &spender, &chainid
+        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &sender, &spender,
+        &chainid, &jw(&ap["registry"]), &jw(&ap["nonce"])
     )
     .unwrap());
     // swapped sender/spender must fail
     assert!(!chaum_pedersen::chaum_pedersen_verify(
-        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &spender, &sender, &chainid
+        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &spender, &sender,
+        &chainid, &jw(&ap["registry"]), &jw(&ap["nonce"])
     )
     .unwrap());
 
@@ -471,8 +476,6 @@ fn kernel_vectors_replay() {
     let v = kernel_fixture();
     assert_eq!(v["$schema_version"], 1);
     assert_eq!(v["backend"], "py", "vectors must come from the py reference");
-    let chainid = jw(&v["schnorr"]["chainid"]);
-
     // ---- g1 / g2 ops ----------------------------------------------------
     for row in v["g1_ops"].as_array().unwrap() {
         let a = jg1(&row["A"]);
@@ -596,6 +599,7 @@ fn kernel_vectors_replay() {
         &jw(&rg["registrant"]),
         &jw(&rg["sk"]),
         &jw(&rg["chainid"]),
+        &jw(&rg["registry"]),
         &jw(&rg["m_tilde"]),
         &jw(&rg["r_tilde"]),
         &jw(&rg["sk_tilde"]),
@@ -619,6 +623,7 @@ fn kernel_vectors_replay() {
         &proof,
         &jw(&rg["registrant"]),
         &jw(&rg["chainid"]),
+        &jw(&rg["registry"]),
     )
     .unwrap());
 
@@ -634,6 +639,8 @@ fn kernel_vectors_replay() {
         &jw(&cp["sender"]),
         &jw(&cp["spender"]),
         &jw(&cp["chainid"]),
+        &jw(&cp["registry"]),
+        &jw(&cp["nonce"]),
         &jw(&cp["k1"]),
         &jw(&cp["k2"]),
     )
@@ -653,6 +660,8 @@ fn kernel_vectors_replay() {
         &jw(&cp["sender"]),
         &jw(&cp["spender"]),
         &jw(&cp["chainid"]),
+        &jw(&cp["registry"]),
+        &jw(&cp["nonce"]),
     )
     .unwrap());
 

@@ -73,6 +73,7 @@ pub fn cp_proof_record(
     sender: &W256,
     spender: &W256,
     chainid: u64,
+    nonce: &W256,
     proof: &CpProof,
 ) -> Value {
     json!({
@@ -83,6 +84,8 @@ pub fn cp_proof_record(
         "sender": scalar_hex(sender),
         "spender": scalar_hex(spender),
         "chainid": chainid,
+        "protocol": "AlbertaBuck:Approve:v3",
+        "nonce": scalar_hex(nonce),
         "proof": {
             "e": scalar_hex(&proof.e),
             "s1": scalar_hex(&proof.s1),
@@ -366,6 +369,7 @@ pub fn build_eoa_priv(
     txhash: &str,
     block: u64,
     logindex: u64,
+    approve_nonce: &W256,
     notes: Option<&[String]>,
     t_vd_payer: &W256,
     t_self: &W256,
@@ -387,6 +391,7 @@ pub fn build_eoa_priv(
         payer_addr,
         payee_addr,
         chainid,
+        approve_nonce,
         cp_proof,
     );
     let vd_self = self_vd(payee_e_addr, payee_sk, payee_m, payee_addr, chainid, t_self)?;

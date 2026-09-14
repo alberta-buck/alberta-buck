@@ -45,7 +45,13 @@ contract IdentityRegistryV2Test is Test {
 
         expectedIdentityRoot = vm.parseJsonUint(rjRoot, ".identityRoot");
 
-        reg = new IdentityRegistry(GOV);
+        address registryAddr = address(uint160(_u(rj, ".registry.address")));
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            registryAddr
+        );
+        reg = IdentityRegistry(registryAddr);
         _trustIssuer();
 
         // Compute deterministic addresses that match the Python vectors'

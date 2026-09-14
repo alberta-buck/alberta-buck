@@ -128,6 +128,7 @@ def test_registration(kv):
     proof = bi.registration_prove(
         sigma[0], sigma[1], _i(r["m"]), _i(r["r"]), _pt(r["pk"]), e_ct,
         _i(r["registrant"]), _i(r["sk"]), _i(r["chainid"]),
+        _i(r["registry"]),
         _i(r["m_tilde"]), _i(r["r_tilde"]), _i(r["sk_tilde"]),
     )
     pf = r["proof"]
@@ -139,12 +140,12 @@ def test_registration(kv):
     assert bi.registration_verify(
         sigma[0], sigma[1], e_ct, _pt(r["pk"]),
         _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]),
-        _i(r["chainid"]),
+        _i(r["chainid"]), _i(r["registry"]),
     )
     assert not bi.registration_verify(
         sigma[0], sigma[1], e_ct, _pt(r["pk"]),
         _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]) ^ 1,
-        _i(r["chainid"]),
+        _i(r["chainid"]), _i(r["registry"]),
     )
 
 
@@ -152,7 +153,10 @@ def test_chaum_pedersen(kv):
     c = kv["chaum_pedersen"]
     e_a, e_b = _ct(c["E_a"]), _ct(c["E_b"])
     pk_a, pk_b = _pt(c["pk_a"]), _pt(c["pk_b"])
-    args = (_i(c["sender"]), _i(c["spender"]), _i(c["chainid"]))
+    args = (
+        _i(c["sender"]), _i(c["spender"]), _i(c["chainid"]),
+        _i(c["registry"]), _i(c["nonce"]),
+    )
     proof = bi.chaum_pedersen_prove(
         e_a, e_b, pk_a, pk_b, _i(c["sk_a"]), _i(c["r_prime"]),
         *args, _i(c["k1"]), _i(c["k2"]),
@@ -290,6 +294,7 @@ def test_prove_rejects_inconsistent_witness(kv):
 
 def test_identity_fixture(iv):
     chainid = _i(iv["chainid"])
+    registry = _i(iv["registry"])
     iss_x, iss_y = _g2(iv["issuer"]["pk_X"]), _g2(iv["issuer"]["pk_Y"])
 
     for who in ("alice", "bob"):
@@ -308,7 +313,7 @@ def test_identity_fixture(iv):
         assert bi.registration_verify(
             _pt(p["ps_sig_rerand"]["sigma_1"]), _pt(p["ps_sig_rerand"]["sigma_2"]),
             _ct(p["ciphertext"]), _pt(p["elgamal_kp"]["pk"]),
-            iss_x, iss_y, proof, _i(p["registrant"]), chainid,
+            iss_x, iss_y, proof, _i(p["registrant"]), chainid, registry,
         )
 
     # Unicode canonical-dialect pin: raw UTF-8 (accents + CJK) hashes to m.
@@ -328,6 +333,7 @@ def test_identity_fixture(iv):
         _pt(iv["alice"]["elgamal_kp"]["pk"]), _pt(iv["bob"]["elgamal_kp"]["pk"]),
         (_i(cp["e"]), _i(cp["s1"]), _i(cp["s2"]), _pt(cp["T1"]), _pt(cp["T2"]), _pt(cp["T3"])),
         _i(ap["sender"]), _i(ap["spender"]), chainid,
+        _i(ap["registry"]), _i(ap["nonce"]),
     )
 
     isch = iv["issuer_schnorr"]

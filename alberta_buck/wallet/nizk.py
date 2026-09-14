@@ -14,13 +14,8 @@ It is a Schnorr-family sigma protocol with four commitments:
   T_key = sk_tilde * G                   -- account-key commitment
 
 Fiat-Shamir challenge e binds (sigma', E, pk, A_ps, T_C, T_R, T_key), the
-registrant's Ethereum address, chainid, and domain `AlbertaBuck:Register:v2`.
-The IdentityRegistry contract address is omitted: identity.json / Foundry
-fixtures are generated once and replayed onto many `new IdentityRegistry()`
-deployments with different CREATE addresses, the same class of encoding
-decision as approve (which also omits registry).  Cross-chain replay is
-fixed; a valid credential can still be presented to a second registry on
-the same chain that trusts the same issuer.
+registrant's Ethereum address, chainid, IdentityRegistry address, and domain
+`AlbertaBuck:Register:v3`.
 
 Responses: s_m = m_tilde + e*m,  s_r = r_tilde + e*r,  s_sk = sk_tilde + e*sk
 (mod ORDER).
@@ -59,7 +54,7 @@ from alberta_buck.wallet.transcript import keccak_raw, keccak_scalar
 # Domain separator, a full keccak word (not reduced mod ORDER), hashed into
 # the Fiat-Shamir transcript so a registration proof cannot be replayed under
 # a different protocol version.  Mirrors IdentityRegistry.REGISTER_DOMAIN.
-REGISTER_DOMAIN = int.from_bytes(keccak_raw(b"AlbertaBuck:Register:v2"), "big")
+REGISTER_DOMAIN = int.from_bytes(keccak_raw(b"AlbertaBuck:Register:v3"), "big")
 
 
 @dataclass(frozen=True)
@@ -100,6 +95,7 @@ def _registration_transcript(
     T_key,
     registrant: int,
     chainid: int,
+    registry: int,
 ) -> int:
     s1x, s1y = point_to_words(sigma_p.sigma_1)
     s2x, s2y = point_to_words(sigma_p.sigma_2)
@@ -116,7 +112,7 @@ def _registration_transcript(
         pkx, pky,
         Apx, Apy, Tcx, Tcy, Trx, Try_,
         Tkx, Tky,
-        registrant, chainid, REGISTER_DOMAIN,
+        registrant, chainid, registry, REGISTER_DOMAIN,
     )
 
 
@@ -130,14 +126,16 @@ def registration_prove(
     sk: int,
     chainid: int = 1,
     rng=None,
+    *,
+    registry: int = 0,
 ) -> RegistrationProof:
     """Build the registration NIZK proof.
 
     `registrant` is the Ethereum address of the address that will submit the
     proof, encoded as a uint256 (left-padded uint160).  Binding it, `chainid`,
-    and REGISTER_DOMAIN into the Fiat-Shamir transcript prevents proof replay
-    across addresses, chains, and protocol versions.  `sk` is the account
-    secret with pk = sk*G.
+    `registry`, and REGISTER_DOMAIN into the Fiat-Shamir transcript prevents
+    proof replay across addresses, chains, registry deployments, and protocol
+    versions. `sk` is the account secret with pk = sk*G.
     """
     m_tilde = rand_scalar(rng)
     r_tilde = rand_scalar(rng)
@@ -148,7 +146,7 @@ def registration_prove(
     T_key = mul(G1, sk_tilde)
 
     e = _registration_transcript(
-        sigma_p, E, pk, A_ps, T_C, T_R, T_key, registrant, chainid,
+        sigma_p, E, pk, A_ps, T_C, T_R, T_key, registrant, chainid, registry,
     )
     s_m = (m_tilde + e * (m % ORDER)) % ORDER
     s_r = (r_tilde + e * (r % ORDER)) % ORDER
@@ -169,6 +167,7 @@ def registration_verify(
     proof: RegistrationProof,
     registrant: int,
     chainid: int = 1,
+    registry: int = 0,
 ) -> bool:
     """Mirror of the Solidity verifier; returns True iff all checks pass.
 
@@ -188,7 +187,7 @@ def registration_verify(
             (proof.e, proof.s_m, proof.s_r, proof.s_sk,
              point_to_words(proof.A_ps), point_to_words(proof.T_C),
              point_to_words(proof.T_R), point_to_words(proof.T_key)),
-            registrant, chainid,
+            registrant, chainid, registry,
         )
     if not all(_canonical(s) for s in (proof.e, proof.s_m, proof.s_r, proof.s_sk)):
         return False
@@ -199,7 +198,7 @@ def registration_verify(
 
     e_check = _registration_transcript(
         sigma_p, E, pk, proof.A_ps, proof.T_C, proof.T_R, proof.T_key,
-        registrant, chainid,
+        registrant, chainid, registry,
     )
     if e_check != proof.e:
         return False

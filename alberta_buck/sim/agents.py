@@ -77,7 +77,7 @@ class Agent:
     def setup(self, d, scenario, rng) -> None:
         self.account, args = idmod.cached_eoa_setup(
             scenario.seed, type(self).__name__, self.idx,
-            d.issuer_kp, rng, int(d.w3.eth.chain_id))
+            d.issuer_kp, rng, int(d.w3.eth.chain_id), int(d.reg.address, 16))
         d.anvil.set_balance(self.address, 100 * 10 ** 18)
         d.chain.send(
             d.reg.functions.register(d.issuer_addr, *args),

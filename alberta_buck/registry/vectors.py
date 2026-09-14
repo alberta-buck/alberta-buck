@@ -54,6 +54,8 @@ from alberta_buck.registry.feature_authority import FeatureAuthority
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = REPO / "test" / "vectors" / "registry"
+DEFAULT_CHAINID = 1
+DEFAULT_REGISTRY_ADDR = int("1d" * 20, 16)
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +198,8 @@ class RegistryVectors:
         feature_authorities: FeatureAuthority instances keyed by feature_id.
     """
     seed: int
+    chainid: int
+    registry_addr: int
     registry_agent: RegistryAgent
     ps_issuer: PSKeyPair
     identities: Dict[str, FullRegistration]
@@ -206,9 +210,11 @@ class RegistryVectors:
         """Export all vectors as a single JSON-serialisable dict."""
         result: Dict[str, Any] = {
             "seed": self.seed,
+            "chainid": scalar_to_hex(self.chainid),
             "aggregator_root": scalar_to_hex(self.cms.identity_root),
             "registry": {
                 "id": self.registry_agent.registry_id,
+                "address": scalar_to_hex(self.registry_addr),
                 "pk": _g1(self.registry_agent.pk_registry),
                 "sub_root": scalar_to_hex(self.registry_agent.sub_root),
                 "identity_count": self.registry_agent.identity_count,
@@ -286,6 +292,8 @@ def build_registry_vectors(
     tree_depth: int = KYC_SUBTREE_DEPTH,
     aggregator_depth: int = AGGREGATOR_DEPTH,
     registry_id: str = "test-registry",
+    chainid: int = DEFAULT_CHAINID,
+    registry_addr: int = DEFAULT_REGISTRY_ADDR,
     output_dir: Optional[str] = None,
 ) -> RegistryVectors:
     """Build a complete vector set for Forge test consumption.
@@ -302,6 +310,8 @@ def build_registry_vectors(
         tree_depth: Depth of the registry identity tree.
         aggregator_depth: Depth of the central Merkle aggregator.
         registry_id: Stable identifier for the test registry.
+        chainid: EVM chain ID bound into registration proofs.
+        registry_addr: IdentityRegistry address bound into registration proofs.
         output_dir: Where to write JSON files (None = skip write).
 
     Returns:
@@ -368,6 +378,8 @@ def build_registry_vectors(
         full = agent.issue_full_identity(
             identity_fields=fields,
             client_kp=None,  # auto-generate ElGamal keypair
+            chainid=chainid,
+            registry_addr=registry_addr,
             registrant_addr=addr,
             rng=rng,
         )
@@ -414,6 +426,8 @@ def build_registry_vectors(
 
     result = RegistryVectors(
         seed=seed,
+        chainid=chainid,
+        registry_addr=registry_addr,
         registry_agent=agent,
         ps_issuer=ps_issuer,
         identities=identities,

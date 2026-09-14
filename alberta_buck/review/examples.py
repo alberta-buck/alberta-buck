@@ -43,7 +43,7 @@ class Account:
         return elgamal_encrypt(self.M, self.pk, self.r)
 
 
-def harvested_registration(registrant=0xBAD):
+def harvested_registration(registrant=0xBAD, registry=0):
     """§1–2: the attacker receives only the published signature and disclosed m."""
     issuer = ps_keygen(seeded())
     owner = Account(12345, 45678, 98765)
@@ -52,18 +52,21 @@ def harvested_registration(registrant=0xBAD):
     sigma, _ = ps_rerandomize(published, seeded(3))
     attacker = Account(owner.m, 22222, 33333)
     proof = registration_prove(sigma, owner.m, attacker.r, attacker.pk,
-                               attacker.E, registrant, attacker.sk, 1, seeded(4))
+                               attacker.E, registrant, attacker.sk, 1, seeded(4),
+                               registry=registry)
     return issuer, owner, published, attacker, sigma, proof
 
 
-def false_identity_approval(sender=0xA, spender=0xB, chainid=1):
+def false_identity_approval(sender=0xA, spender=0xB, chainid=1,
+                            registry=0, nonce=0):
     """§3: sender knowingly substitutes a third party's identity with a new proof."""
     alice, bob = Account(12345, 45678, 98765), Account(67890, 22222, 77777)
     victim_m, r_prime = 54321, 33333
     fake_sk = (alice.sk + (alice.m - victim_m) * pow(alice.r, -1, ORDER)) % ORDER
     forged = elgamal_encrypt(mul(G1, victim_m), bob.pk, r_prime)
     proof = chaum_pedersen_prove(alice.E, forged, alice.pk, bob.pk, fake_sk,
-                                 r_prime, sender, spender, chainid, seeded(5))
+                                 r_prime, sender, spender, chainid, seeded(5),
+                                 registry=registry, nonce=nonce)
     return alice, bob, victim_m, fake_sk, r_prime, forged, proof
 
 
@@ -119,7 +122,7 @@ def aliased_g1tie_limbs(witness):
     return w
 
 
-def uncontrolled_registration(registrant=0xBAD):
+def uncontrolled_registration(registrant=0xBAD, registry=0):
     """§9 inverted: NUMS pk with a dummy sk; production verify must reject."""
     from alberta_buck.review.mitigations import independent_generator
     issuer = ps_keygen(seeded())
@@ -131,5 +134,5 @@ def uncontrolled_registration(registrant=0xBAD):
     r = 33333
     E = elgamal_encrypt(owner.M, pk, r)
     proof = registration_prove(sigma, owner.m, r, pk, E, registrant, owner.sk,
-                               1, seeded(4))
+                               1, seeded(4), registry=registry)
     return issuer, owner, pk, E, sigma, proof

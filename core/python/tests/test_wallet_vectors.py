@@ -71,6 +71,7 @@ def _receipt_args(wv, row):
     if kind == "eoa-priv":
         args["E_for_payee"] = row["E_for_payee"]
         args["cp_proof"] = row["cp_proof"]
+        args["approve_nonce"] = row["approve_nonce"]
     if kind.startswith("note-"):
         mint = row["mint"]
         args["opening"] = mint["opening"]

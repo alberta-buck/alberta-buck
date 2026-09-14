@@ -28,7 +28,10 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
 
     attacker = Web3.to_checksum_address("0x0000000000000000000000000000000000000bad")
     anvil.set_balance(attacker, 10**18)
-    issuer, owner, pk, E, sigma, proof = uncontrolled_registration(int(attacker, 16))
+    registry = int(reg.address, 16)
+    issuer, owner, pk, E, sigma, proof = uncontrolled_registration(
+        int(attacker, 16), registry,
+    )
     assert not eq(pk, mul(G1, owner.sk))
 
     iss_addr = Web3.to_checksum_address("0x00000000000000000000000000000000000000aa")
@@ -56,7 +59,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     rng = seeded(11)
     sig_h, _ = ps_rerandomize(ps_sign(issuer, alice.m, rng=rng), rng=rng)
     pf = registration_prove(sig_h, alice.m, alice.r, alice.pk, alice.E,
-                            int(honest, 16), alice.sk, rng=rng)
+                            int(honest, 16), alice.sk, rng=rng,
+                            registry=registry)
     chain.send(reg.functions.register(
         iss_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
         (g1(sig_h.sigma_1), g1(sig_h.sigma_2)),

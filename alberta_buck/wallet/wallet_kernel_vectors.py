@@ -90,6 +90,7 @@ def _rcpt(res) -> Dict[str, Any]:
 CHAINID = 1
 CONTRACTS = {"registry": "0x" + "1d" * 20, "buck": "0x" + "b0" * 20,
              "notes": "0x" + "70" * 20}
+REGISTRY = int(CONTRACTS["registry"], 16)
 FACE = 250
 
 
@@ -263,7 +264,8 @@ def _build(seed: int) -> Dict[str, Any]:
     cp = chaum_pedersen_prove(alice["E"], E_for_bob, alice["pk"], bob["pk"],
                               alice["sk"], r_prime,
                               alice["addr"], bob["addr"], CHAINID,
-                              rng=_replay([k1, k2]))
+                              rng=_replay([k1, k2]),
+                              registry=REGISTRY, nonce=0)
     t_vd_payer, t_self = draw(), draw()
     core = build_eoa_priv(
         chainid=CHAINID, contracts=CONTRACTS,
@@ -275,11 +277,13 @@ def _build(seed: int) -> Dict[str, Any]:
         payee_sk=bob["sk"], payee_E_addr=bob["E"],
         value=500_000000, block_time=1779999000,
         txhash="0x" + "ee" * 32, block=1234567, logindex=2,
+        approve_nonce=0,
         rng=_replay([t_vd_payer, t_self]))
     receipts.append({
         "kind": "eoa-priv", "role": "recipient",
         "payer": "alice", "payee": "bob",
         "E_for_payee": _ct(E_for_bob),
+        "approve_nonce": scalar_to_hex(0),
         "cp_proof": {"e": scalar_to_hex(cp.e), "s1": scalar_to_hex(cp.s1),
                      "s2": scalar_to_hex(cp.s2), "T1": _g1(cp.T1),
                      "T2": _g1(cp.T2), "T3": _g1(cp.T3)},
@@ -472,6 +476,16 @@ def _build(seed: int) -> Dict[str, Any]:
     def _wrong_value(d):
         d["txn"]["value"] = d["txn"]["value"] + 1
     _tamper(b1_rec, _wrong_value, "b1 txn value != face")
+
+    eoa_priv = next(r for r in receipts if r["kind"] == "eoa-priv")
+
+    def _legacy_approve(d):
+        del d["proof"]["approve"]["protocol"]
+    _tamper(eoa_priv, _legacy_approve, "legacy approve proof version")
+
+    def _wrong_approve_nonce(d):
+        d["proof"]["approve"]["nonce"] = scalar_to_hex(1)
+    _tamper(eoa_priv, _wrong_approve_nonce, "approve nonce changed")
 
     out["tampered"] = tampered
 

@@ -5,12 +5,18 @@
 //! Three-relation statement (ABI-stable 6-field proof):
 //! `T1 = T_key = a*G`, `T3 = T_R = b*G`, `T2 = T_diff = a*R_a - b*pk_b`;
 //! challenge binds `(E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3, sender,
-//! spender, chainid)`; responses `s1 = a + e*sk`, `s2 = b + e*r'`.
+//! spender, chainid, registry, nonce, APPROVE_DOMAIN)`; responses
+//! `s1 = a + e*sk`, `s2 = b + e*r'`.
 
 use ark_bn254::{G1Affine, G1Projective};
 use ark_ec::{AffineRepr, CurveGroup};
 
+use crate::keccak::keccak_raw;
 use crate::{fr_mod, g1_from_w, w_from_fr, w_from_g1, w_lt_order, G1w, Result, Transcript, W256};
+
+fn approve_domain() -> W256 {
+    keccak_raw(b"AlbertaBuck:Approve:v3")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CpProof {
@@ -34,7 +40,10 @@ fn transcript(
     sender: &W256,
     spender: &W256,
     chainid: &W256,
+    registry: &W256,
+    nonce: &W256,
 ) -> Transcript {
+    let domain = approve_domain();
     let mut t = Transcript::new();
     t.p(&e_alice.0)
         .p(&e_alice.1)
@@ -47,7 +56,10 @@ fn transcript(
         .p(t3)
         .w(sender)
         .w(spender)
-        .w(chainid);
+        .w(chainid)
+        .w(registry)
+        .w(nonce)
+        .w(&domain);
     t
 }
 
@@ -62,6 +74,8 @@ pub fn chaum_pedersen_prove(
     sender: &W256,
     spender: &W256,
     chainid: &W256,
+    registry: &W256,
+    nonce: &W256,
     k1: &W256,
     k2: &W256,
 ) -> Result<CpProof> {
@@ -76,7 +90,10 @@ pub fn chaum_pedersen_prove(
     let t3 = (G1Affine::generator() * b).into_affine();
     let t2 = (ea.0 * a - pkb * b).into_affine();
 
-    let e = transcript(&ea, &eb, &pka, &pkb, &t1, &t2, &t3, sender, spender, chainid).e();
+    let e = transcript(
+        &ea, &eb, &pka, &pkb, &t1, &t2, &t3,
+        sender, spender, chainid, registry, nonce,
+    ).e();
     let s1 = a + e * fr_mod(sk_alice);
     let s2 = b + e * fr_mod(r_prime);
 
@@ -100,6 +117,8 @@ pub fn chaum_pedersen_verify(
     sender: &W256,
     spender: &W256,
     chainid: &W256,
+    registry: &W256,
+    nonce: &W256,
 ) -> Result<bool> {
     if !w_lt_order(&proof.e) || !w_lt_order(&proof.s1) || !w_lt_order(&proof.s2) {
         return Ok(false);
@@ -139,6 +158,9 @@ pub fn chaum_pedersen_verify(
         return Ok(false);
     }
 
-    let e_check = transcript(&ea, &eb, &pka, &pkb, &t1, &t2, &t3, sender, spender, chainid).e();
+    let e_check = transcript(
+        &ea, &eb, &pka, &pkb, &t1, &t2, &t3,
+        sender, spender, chainid, registry, nonce,
+    ).e();
     Ok(w_from_fr(&e_check) == proof.e)
 }

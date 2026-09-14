@@ -145,10 +145,11 @@ contract IdentityRegistry {
     uint256 internal constant H_Y =
         3372178911466361414640845512261989709787490420390555908180501907382229222644;
 
-    /// @notice Fiat-Shamir domain for registration; a full keccak word, not
-    ///         reduced mod R.  Mirrors alberta_buck.wallet.nizk.REGISTER_DOMAIN.
+    /// @notice Fiat-Shamir domains; full keccak words, not reduced mod R.
     uint256 public constant REGISTER_DOMAIN =
-        uint256(keccak256("AlbertaBuck:Register:v2"));
+        uint256(keccak256("AlbertaBuck:Register:v3"));
+    uint256 public constant APPROVE_DOMAIN =
+        uint256(keccak256("AlbertaBuck:Approve:v3"));
 
     /// @notice Depth of the registry-Identity Merkle accumulator.
     ///
@@ -269,6 +270,11 @@ contract IdentityRegistry {
     ///         call markApproved() to freeze the carrying flag.  Set once
     ///         by governance via setBuck() after Buck is deployed.
     address                           public  buck;
+
+    /// @notice Next nonce accepted by Buck's identity-bound approve path.
+    ///         The registry consumes it only for the authorised Buck contract;
+    ///         the read-only verifier remains available for receipt checking.
+    mapping(address => uint256)       public  approveNonces;
 
     /// @notice Registry-Identity Merkle accumulator root.  Updated on each
     ///         registration when the incremental accumulator is active
@@ -496,7 +502,10 @@ contract IdentityRegistry {
         );
 
         // (d) Fiat-Shamir
-        require(proof.e == _fsRegister(sigma, E, pk, proof, registrant, block.chainid), "bad FS challenge");
+        require(
+            proof.e == _fsRegister(sigma, E, pk, proof, registrant, block.chainid),
+            "bad FS challenge"
+        );
 
         // (b) ElGamal C consistency: s_m*G + s_r*pk == e*C + T_C
         require(_checkElGamalC(proof.s_m, proof.s_r, pk, E.C, proof.T_C, proof.e), "bad NIZK C");
@@ -627,21 +636,50 @@ contract IdentityRegistry {
     /// @notice Verify Alice's Chaum-Pedersen proof of equal-plaintext re-encryption
     ///         that ``E_bob`` encrypts the same M as ``E_addr[sender]``.
     /// @dev    Reads E_alice from storage (caller cannot substitute), and binds
-    ///         (sender, spender, chainid) into the transcript.
+    ///         the action/version domain, registry, parties, chain and current
+    ///         per-sender nonce into the transcript.
     function verifyApprove(
         address sender,
         address spender,
         ElGamalCT calldata E_bob,
         CPProof calldata pi
     ) external view returns (bool) {
-        return _verifyApprove(sender, spender, E_bob, pi);
+        return _verifyApprove(sender, spender, E_bob, pi, approveNonces[sender]);
+    }
+
+    /// @notice Verify a historical approval at its recorded nonce without
+    ///         consulting or changing the registry's current nonce.
+    function verifyApproveAtNonce(
+        address sender,
+        address spender,
+        ElGamalCT calldata E_bob,
+        CPProof calldata pi,
+        uint256 nonce
+    ) external view returns (bool) {
+        return _verifyApprove(sender, spender, E_bob, pi, nonce);
+    }
+
+    /// @notice Verify and consume the current approval nonce.  Only Buck may
+    ///         call this stateful path, preventing third-party nonce griefing.
+    function verifyAndConsumeApprove(
+        address sender,
+        address spender,
+        ElGamalCT calldata E_bob,
+        CPProof calldata pi
+    ) external returns (bool) {
+        require(msg.sender == buck, "only Buck");
+        uint256 nonce = approveNonces[sender];
+        if (!_verifyApprove(sender, spender, E_bob, pi, nonce)) return false;
+        approveNonces[sender] = nonce + 1;
+        return true;
     }
 
     function _verifyApprove(
         address sender,
         address spender,
         ElGamalCT calldata E_bob,
-        CPProof calldata pi
+        CPProof calldata pi,
+        uint256 nonce
     ) internal view returns (bool) {
         if (!_isRegistered(sender) || !_isRegistered(spender)) return false;
         if (!_canonical(pi.e) || !_canonical(pi.s1) || !_canonical(pi.s2)) return false;
@@ -677,7 +715,9 @@ contract IdentityRegistry {
         if (!BN254.eq(lhs2, rhs2)) return false;
 
         // Check 4: Fiat-Shamir
-        return pi.e == _fsApprove(E_a, E_bob, pkA, pkB, pi, sender, spender, block.chainid);
+        return pi.e == _fsApprove(
+            E_a, E_bob, pkA, pkB, pi, sender, spender, block.chainid, nonce
+        );
     }
 
     // ---- public-issuer note binding (Notes mutual-decryptability, Phase 1) --
@@ -970,7 +1010,7 @@ contract IdentityRegistry {
         RegistrationProof calldata proof,
         address registrant,
         uint256 chainid
-    ) internal pure returns (uint256) {
+    ) internal view returns (uint256) {
         BN254.G1Point[] memory pts = new BN254.G1Point[](9);
         pts[0] = sigma.sigma_1;
         pts[1] = sigma.sigma_2;
@@ -981,15 +1021,11 @@ contract IdentityRegistry {
         pts[6] = proof.T_C;
         pts[7] = proof.T_R;
         pts[8] = proof.T_key;
-        // Encoding decision (same class as approve): bind chainid + domain,
-        // not address(this).  Fixture proofs are generated once and replayed
-        // onto many IdentityRegistry deployments with different CREATE
-        // addresses.  Cross-chain replay is fixed; cross-registry replay on
-        // the same chain is not.
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](4);
         scl[0] = uint256(uint160(registrant));
         scl[1] = chainid;
-        scl[2] = REGISTER_DOMAIN;
+        scl[2] = uint256(uint160(address(this)));
+        scl[3] = REGISTER_DOMAIN;
         return BN254.fsChallenge(pts, scl);
     }
 
@@ -1001,8 +1037,9 @@ contract IdentityRegistry {
         CPProof calldata pi,
         address sender,
         address spender,
-        uint256 chainid
-    ) internal pure returns (uint256) {
+        uint256 chainid,
+        uint256 nonce
+    ) internal view returns (uint256) {
         BN254.G1Point[] memory pts = new BN254.G1Point[](9);
         pts[0] = E_a.R;
         pts[1] = E_a.C;
@@ -1013,10 +1050,13 @@ contract IdentityRegistry {
         pts[6] = pi.T1;
         pts[7] = pi.T2;
         pts[8] = pi.T3;
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](6);
         scl[0] = uint256(uint160(sender));
         scl[1] = uint256(uint160(spender));
         scl[2] = chainid;
+        scl[3] = uint256(uint160(address(this)));
+        scl[4] = nonce;
+        scl[5] = APPROVE_DOMAIN;
         return BN254.fsChallenge(pts, scl);
     }
 

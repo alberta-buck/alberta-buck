@@ -110,6 +110,8 @@ BOB_ADDR   = 0x0b0b000000000000000000000000000000000b0b
 # Fiat-Shamir transcript.
 SPEND_RECIPIENT = BOB_ADDR
 CHAINID    = 1
+REGISTRY_ADDR = int("1d" * 20, 16)
+APPROVE_NONCE = 0
 
 # Public-issuer Schnorr binding (Notes mutual-decryptability, Phase 1).  A
 # distinct address so the Solidity parity test can bind it as an
@@ -158,7 +160,10 @@ def _build_party(rng, issuer, fields, addr) -> _Party:
     r = rand_scalar(rng)
     M = mul(G1, m)
     E = elgamal_encrypt(M, kp.pk, r)
-    proof = registration_prove(sigma_p, m, r, kp.pk, E, addr, kp.sk, CHAINID, rng=rng)
+    proof = registration_prove(
+        sigma_p, m, r, kp.pk, E, addr, kp.sk, CHAINID, rng=rng,
+        registry=REGISTRY_ADDR,
+    )
     return _Party(fields, addr, canonical, m, M, sigma, sigma_p, kp, r, E, proof)
 
 
@@ -201,8 +206,8 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     cp = chaum_pedersen_prove(
         alice.E, E_for_bob, alice.kp.pk, bob.kp.pk,
         alice.kp.sk, r_prime,
-        ALICE_ADDR, BOB_ADDR, CHAINID,
-        rng=rng,
+        ALICE_ADDR, BOB_ADDR, CHAINID, rng=rng,
+        registry=REGISTRY_ADDR, nonce=APPROVE_NONCE,
     )
 
     # Stream-preservation: the legacy Phase-8 A-spend vectors (spend_cp +
@@ -334,6 +339,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
         value=500_000000, block_time=RCPT_TIME,
         txhash="0x" + "ee" * 32, block=1234567, logindex=2,
+        approve_nonce=APPROVE_NONCE,
         rng=rng,
     )
 
@@ -482,6 +488,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         "seed":    f"0x{seed:064x}",
         "ORDER":   f"0x{ORDER:064x}",
         "chainid": scalar_to_hex(CHAINID),
+        "registry": scalar_to_hex(REGISTRY_ADDR),
         "issuer": {
             "sk_x": scalar_to_hex(issuer.sk_x),
             "sk_y": scalar_to_hex(issuer.sk_y),
@@ -502,6 +509,8 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             "sender":   scalar_to_hex(ALICE_ADDR),
             "spender":  scalar_to_hex(BOB_ADDR),
             "chainid":  scalar_to_hex(CHAINID),
+            "registry": scalar_to_hex(REGISTRY_ADDR),
+            "nonce":    scalar_to_hex(APPROVE_NONCE),
             "E_alice":   {"R": _g1(alice.E.R),  "C": _g1(alice.E.C)},
             "E_for_bob": {"R": _g1(E_for_bob.R), "C": _g1(E_for_bob.C)},
             "r_prime":  scalar_to_hex(r_prime),
@@ -555,6 +564,8 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             "sender":        scalar_to_hex(ALICE_ADDR),   # named counterparty (payer)
             "spender":       scalar_to_hex(BOB_ADDR),     # recipient assembling it
             "chainid":       scalar_to_hex(CHAINID),
+            "registry":      scalar_to_hex(REGISTRY_ADDR),
+            "nonce":         scalar_to_hex(APPROVE_NONCE),
             "sender_pk":     _g1(alice.kp.pk),            # registry _pk[sender]
             "sender_E_addr": {"R": _g1(alice.E.R), "C": _g1(alice.E.C)},  # _E_addr[sender]
             "spender_pk":    _g1(bob.kp.pk),              # registry _pk[spender]

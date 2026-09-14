@@ -13,6 +13,8 @@ contract IdentityRegistryTest is Test {
     IdentityRegistry internal reg;
     address internal constant GOV = address(0xA0);
     address internal constant ISSUER = address(0x1551E1);
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     address internal alice;
     address internal bob;
@@ -23,7 +25,12 @@ contract IdentityRegistryTest is Test {
         // The wallet's transcripts use chainid = 1.
         vm.chainId(1);
         vj = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
 
         alice = address(uint160(_u(".alice.registrant")));
         bob   = address(uint160(_u(".bob.registrant")));
@@ -227,6 +234,31 @@ contract IdentityRegistryTest is Test {
         reg.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
     }
 
+    function test_register_rejects_otherRegistry() public {
+        IdentityRegistry other = new IdentityRegistry(GOV);
+        IdentityRegistry.PSPubKey memory ipk;
+        ipk.X.X[0] = _u(".issuer.pk_X.x[0]");
+        ipk.X.X[1] = _u(".issuer.pk_X.x[1]");
+        ipk.X.Y[0] = _u(".issuer.pk_X.y[0]");
+        ipk.X.Y[1] = _u(".issuer.pk_X.y[1]");
+        ipk.Y.X[0] = _u(".issuer.pk_Y.x[0]");
+        ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
+        ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
+        ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        vm.prank(GOV);
+        other.trustIssuer(ISSUER, ipk);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad FS challenge"));
+        other.register(
+            ISSUER,
+            _g1(".alice.elgamal_kp.pk"),
+            _ct(".alice.ciphertext"),
+            _ps("alice"),
+            _regProof("alice")
+        );
+    }
+
     // ---- bindContract ------------------------------------------------------
 
     function test_bindContract_rejectsEOA() public {
@@ -292,6 +324,36 @@ contract IdentityRegistryTest is Test {
         _registerBob();
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         assertTrue(reg.verifyApprove(alice, bob, E_b, _cpProof()));
+    }
+
+    function test_verifyAndConsumeApprove_rejectsReplay_andKeepsHistoricalCheck() public {
+        _registerAlice();
+        _registerBob();
+        vm.prank(GOV);
+        reg.setBuck(address(this));
+
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        IdentityRegistry.CPProof memory pi = _cpProof();
+        assertTrue(reg.verifyApproveAtNonce(alice, bob, E_b, pi, 0));
+        assertTrue(reg.verifyAndConsumeApprove(alice, bob, E_b, pi));
+        assertEq(reg.approveNonces(alice), 1);
+        assertFalse(reg.verifyApprove(alice, bob, E_b, pi));
+        assertTrue(reg.verifyApproveAtNonce(alice, bob, E_b, pi, 0));
+        assertFalse(reg.verifyAndConsumeApprove(alice, bob, E_b, pi));
+        assertEq(reg.approveNonces(alice), 1);
+    }
+
+    function test_verifyAndConsumeApprove_onlyBuck() public {
+        _registerAlice();
+        _registerBob();
+        vm.prank(GOV);
+        reg.setBuck(address(this));
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("only Buck"));
+        reg.verifyAndConsumeApprove(
+            alice, bob, _ct(".approve.E_for_bob"), _cpProof()
+        );
     }
 
     function test_verifyApprove_rejects_unregistered_sender() public {

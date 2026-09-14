@@ -1771,8 +1771,10 @@ secret key and an archival node -- without any counterparty's cooperation.
        // Read the caller's registered credential from the registry
        // CRITICAL: read from storage, never from calldata.  (Real names:
        // ciphertextOf(msg.sender) / pkOf(spender); verifyApprove reads
-       // E_alice itself from storage and binds (sender, spender, chainid).)
-       require(identityRegistry.verifyApprove(
+       // E_alice itself from storage and binds the registry, sender, spender,
+       // chainid, action domain, and a one-shot per-sender nonce.)
+       uint256 nonce = identityRegistry.approveNonces(msg.sender);
+       require(identityRegistry.verifyAndConsumeApprove(
                    msg.sender, spender, E_spender, chaumPedersen),
                "BUCK: bad CP proof");
 
@@ -1783,13 +1785,15 @@ secret key and an archival node -- without any counterparty's cooperation.
        _approve(msg.sender, spender, amount);
 
        // Emit ONLY the hash -- NOT the ciphertext itself.
-       emit ApproveReceipt(msg.sender, spender, receipt);
+       emit ApproveReceipt(msg.sender, spender, nonce, receipt);
        return true;
    }
    #+end_example
 
    What the public sees in the ~ApproveReceipt~ event:
    - Alice's address approved a spender (same as standard ERC-20 Approval)
+   - The consumed per-sender approval nonce, so the transcript remains
+     historically verifiable after later approvals
    - A single ~bytes32~ hash of the re-encrypted ElGamal ciphertext
    - *No* identity address, *no* public key, *no* linkable identifier
 

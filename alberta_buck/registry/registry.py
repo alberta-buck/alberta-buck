@@ -331,6 +331,7 @@ class RegistryAgent:
         expires_at: int = 0,
         registrant_addr: int = 0,
         rng=None,
+        registry_addr: int = 0,
     ) -> FullRegistrationRecord:
         """Issue a complete identity: certificate + PS credential + registration NIZK.
 
@@ -345,6 +346,7 @@ class RegistryAgent:
             expires_at: POSIX timestamp (0 = no expiry).
             registrant_addr: Ethereum address for Fiat-Shamir binding in the NIZK.
             rng: Optional callable for deterministic randomness.
+            registry_addr: IdentityRegistry address for domain separation.
 
         Returns:
             FullRegistrationRecord with certificate, PS credential, NIZK,
@@ -381,7 +383,7 @@ class RegistryAgent:
         # Registration NIZK: proves the PS credential and E_addr encrypt the same m.
         nizk = registration_prove(
             sigma_rerand, m, r_elg, kp.pk, E_addr, registrant_addr, kp.sk,
-            chainid if chainid else 1, rng=rng,
+            chainid if chainid else 1, rng=rng, registry=registry_addr,
         )
 
         # Signed certificate for off-chain verification.
@@ -420,6 +422,7 @@ class RegistryAgent:
         expires_at: int = 0,
         registrant_addrs: Optional[List[int]] = None,
         rng=None,
+        registry_addr: int = 0,
     ) -> List[FullRegistrationRecord]:
         """Issue full identities for a batch.
 
@@ -429,6 +432,7 @@ class RegistryAgent:
             expires_at: POSIX timestamp (0 = no expiry).
             registrant_addrs: Parallel list of Ethereum addresses for NIZK binding.
             rng: Optional callable for deterministic randomness.
+            registry_addr: IdentityRegistry address for domain separation.
 
         Returns:
             List of FullRegistrationRecord, one per issued identity.
@@ -438,7 +442,10 @@ class RegistryAgent:
             raise ValueError("registrant_addrs length must match identities length")
         records = []
         for (fields, kp), addr in zip(identities, addrs):
-            rec = self.issue_full_identity(fields, kp, chainid, expires_at, addr, rng)
+            rec = self.issue_full_identity(
+                fields, kp, chainid, expires_at, addr, rng,
+                registry_addr=registry_addr,
+            )
             records.append(rec)
         return records
 

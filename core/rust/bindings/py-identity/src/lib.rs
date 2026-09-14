@@ -261,6 +261,7 @@ fn registration_prove(
     registrant: BigUint,
     sk: BigUint,
     chainid: BigUint,
+    registry: BigUint,
     m_tilde: BigUint,
     r_tilde: BigUint,
     sk_tilde: BigUint,
@@ -275,6 +276,7 @@ fn registration_prove(
         &w(&registrant)?,
         &w(&sk)?,
         &w(&chainid)?,
+        &w(&registry)?,
         &w(&m_tilde)?,
         &w(&r_tilde)?,
         &w(&sk_tilde)?,
@@ -304,6 +306,7 @@ fn registration_verify(
     proof: PyReg,
     registrant: BigUint,
     chainid: BigUint,
+    registry: BigUint,
 ) -> PyResult<bool> {
     let p = kernel::nizk::RegistrationProof {
         e: w(&proof.0)?,
@@ -325,6 +328,7 @@ fn registration_verify(
         &p,
         &w(&registrant)?,
         &w(&chainid)?,
+        &w(&registry)?,
     )
     .map_err(err)
 }
@@ -345,6 +349,8 @@ fn chaum_pedersen_prove(
     sender: BigUint,
     spender: BigUint,
     chainid: BigUint,
+    registry: BigUint,
+    nonce: BigUint,
     k1: BigUint,
     k2: BigUint,
 ) -> PyResult<PyCp> {
@@ -358,6 +364,8 @@ fn chaum_pedersen_prove(
         &w(&sender)?,
         &w(&spender)?,
         &w(&chainid)?,
+        &w(&registry)?,
+        &w(&nonce)?,
         &w(&k1)?,
         &w(&k2)?,
     )
@@ -383,6 +391,8 @@ fn chaum_pedersen_verify(
     sender: BigUint,
     spender: BigUint,
     chainid: BigUint,
+    registry: BigUint,
+    nonce: BigUint,
 ) -> PyResult<bool> {
     let p = kernel::chaum_pedersen::CpProof {
         e: w(&proof.0)?,
@@ -401,6 +411,8 @@ fn chaum_pedersen_verify(
         &w(&sender)?,
         &w(&spender)?,
         &w(&chainid)?,
+        &w(&registry)?,
+        &w(&nonce)?,
     )
     .map_err(err)
 }

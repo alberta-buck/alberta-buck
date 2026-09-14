@@ -180,6 +180,14 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
         vp = core.proof.get("vd_payer")
         if ap is None or vp is None:
             return RcptResult(False, None, None, "eoa-priv: missing approve/vd_payer")
+        if (
+            not isinstance(ap, dict)
+            or ap.get("protocol") != "AlbertaBuck:Approve:v3"
+        ):
+            return RcptResult(
+                False, None, None,
+                "eoa-priv: legacy approve proof; regenerate as AlbertaBuck:Approve:v3",
+            )
         # Approve handshake (soundness)
         E_payer = _ct_from_hex(ap["E_a"])
         E_spender = _ct_from_hex(ap["E_b"])
@@ -188,12 +196,21 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
         sender = _h(ap["sender"])
         spender = _h(ap["spender"])
         cid_ap = ap["chainid"]
+        registry = _h(core.contracts["registry"])
+        nonce_raw = ap.get("nonce")
+        if not isinstance(nonce_raw, str):
+            return RcptResult(False, None, None, "eoa-priv: invalid approve nonce")
+        try:
+            nonce = _h(nonce_raw)
+        except ValueError:
+            return RcptResult(False, None, None, "eoa-priv: invalid approve nonce")
         p = ap["proof"]
         cp = CPProof(e=_h(p["e"]), s1=_h(p["s1"]), s2=_h(p["s2"]),
                      T1=_g1_from_hex(p["T1"]), T2=_g1_from_hex(p["T2"]),
                      T3=_g1_from_hex(p["T3"]))
         if not chaum_pedersen_verify(E_payer, E_spender, pk_payer, pk_spender,
-                                      cp, sender, spender, cid_ap):
+                                      cp, sender, spender, cid_ap,
+                                      registry, nonce):
             return RcptResult(False, None, None, "eoa-priv: approve handshake fails")
         # Verifiable decryption (recovery + provability)
         E_vd, M_vd, acct_vd, cid_vd, vd = _vd_from_record(vp)

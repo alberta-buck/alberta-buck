@@ -23,6 +23,8 @@ contract BuckTest is Test {
     address internal constant GOV     = address(0xA0);
     address internal constant ISSUER  = address(0x1551E1);
     address internal constant POOL    = address(0xBA51C);
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     address internal alice;
     address internal bob;
@@ -37,7 +39,12 @@ contract BuckTest is Test {
         vj = vm.readFile("test/vectors/identity.json");
 
         // Identity layer + register Alice and Bob.
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
         bob   = address(uint160(_u(".bob.registrant")));
@@ -910,6 +917,19 @@ contract BuckTest is Test {
         assertEq(buck.allowance(alice, bob), 100e6);
         bytes32 expected = keccak256(abi.encode(E_b.R.X, E_b.R.Y, E_b.C.X, E_b.C.Y));
         assertEq(buck.receiptFragment(alice, bob), expected);
+        assertEq(reg.approveNonces(alice), 1, "approval nonce consumed");
+    }
+
+    function test_identityApprove_rejectsProofReplay() public {
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        IdentityRegistry.CPProof memory pi = _cpProof();
+
+        vm.prank(alice);
+        buck.approve(bob, 100e6, E_b, pi);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("BUCK: bad CP proof"));
+        buck.approve(bob, 100e6, E_b, pi);
     }
 
     function test_identityApprove_freezesSpenderCarryingFlag() public {

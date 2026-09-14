@@ -249,7 +249,13 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
 
    The =ApproveReceipt= half: at approve time the payer re-encrypted their M for
    the payee (=E_for_spender=) and proved it (=cp_proof= = =verifyApprove=); the
-   payee verifiably decrypts it to =payer.M= (=vd_proof=).  Payload = both
+   =AlbertaBuck:Approve:v3= transcript binds the registry, chain, sender,
+   spender, and the one-shot sender nonce emitted by =Buck.ApproveReceipt=.
+   A receipt records that consumed nonce so tier-1 verification can replay the
+   exact transcript and tier 2 can call =verifyApproveAtNonce=.  Pre-v3 approve
+   records are rejected with an explicit regeneration result; they are not
+   reinterpreted under the repaired proof.  The payee verifiably decrypts the
+   ciphertext to =payer.M= (=vd_proof=).  Payload = both
    Parties (private) + =ApproveReceipt= proofs + payee self =vd_proof= +
    =Transfer= anchor + registry =pk= / =E_addr= for both (tier 2).
 

@@ -186,6 +186,11 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
         let (Some(ap), Some(vp)) = (get_opt(proof, "approve"), get_opt(proof, "vd_payer")) else {
             return Ok(RcptResult::fail("eoa-priv: missing approve/vd_payer"));
         };
+        if ap.get("protocol").and_then(Value::as_str) != Some("AlbertaBuck:Approve:v3") {
+            return Ok(RcptResult::fail(
+                "eoa-priv: legacy approve proof; regenerate as AlbertaBuck:Approve:v3",
+            ));
+        }
         let e_payer = get_ct(ap, "E_a")?;
         let e_spender = get_ct(ap, "E_b")?;
         let pk_payer = get_g1(ap, "pk_a")?;
@@ -193,6 +198,8 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
         let sender = get_w(ap, "sender")?;
         let spender = get_w(ap, "spender")?;
         let cid_ap = w_from_u128(get_u128(ap, "chainid")?);
+        let registry = get_w(get(core, "contracts")?, "registry")?;
+        let nonce = get_w(ap, "nonce")?;
         let p = get(ap, "proof")?;
         let cp = buck_identity::chaum_pedersen::CpProof {
             e: get_w(p, "e")?,
@@ -203,7 +210,8 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
             t3: get_g1(p, "T3")?,
         };
         if !buck_identity::chaum_pedersen::chaum_pedersen_verify(
-            &e_payer, &e_spender, &pk_payer, &pk_spender, &cp, &sender, &spender, &cid_ap,
+            &e_payer, &e_spender, &pk_payer, &pk_spender, &cp, &sender, &spender,
+            &cid_ap, &registry, &nonce,
         )? {
             return Ok(RcptResult::fail("eoa-priv: approve handshake fails"));
         }

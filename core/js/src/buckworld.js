@@ -118,8 +118,10 @@ export async function onboard(world, account, fields, opts = {}) {
   const r = rng();
   const E = id.elgamalEncrypt(M, pk, r);
   const chainid = BigInt(await world.session.client.getChainId());
+  const registry = BigInt(world.reg.address);
   const proof = id.registrationProve(
     sigmaP, m, r, pk, E, BigInt(account.address), sk, chainid,
+    registry,
     rng(), rng(), rng());
 
   await world.session.send(world.reg, "register", [
@@ -148,11 +150,15 @@ export async function identityApprove(world, from, to, opts = {}) {
   const id = world.id;
   const rng = opts.rng ?? id.randScalar;
   const chainid = BigInt(await world.session.client.getChainId());
+  const registry = BigInt(world.reg.address);
+  const nonce = BigInt(await world.session.call(
+    world.reg, "approveNonces", [from.account.address]));
   const rPrime = rng();
   const eForTo = id.elgamalEncrypt(from.M, to.kp.pk, rPrime);
   const proof = id.chaumPedersenProve(
     from.E, eForTo, from.kp.pk, to.kp.pk, from.kp.sk, rPrime,
     BigInt(from.account.address), BigInt(to.account.address), chainid,
+    registry, nonce,
     rng(), rng());
   await world.session.send(world.buck, "approve", [
     to.account.address, opts.allowance ?? 0n, ct(eForTo),

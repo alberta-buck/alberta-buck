@@ -39,7 +39,7 @@ BIND_PK = _G
 BIND_E = (_G, _G)                              # ElGamalCT (R, C)
 
 _CACHE_PATH = Path(__file__).resolve().parents[2] / "test" / "vectors" / "identity-cache.json"
-_CACHE_SCHEMA = 3
+_CACHE_SCHEMA = 4
 
 # ---------------------------------------------------------------------------
 # Cache management
@@ -74,8 +74,9 @@ def _save_cache(cache: dict) -> None:
     _CACHE_PATH.write_text(json.dumps(cache))
 
 
-def _cache_key(seed: int, class_name: str, idx: int, chainid: int = 31337) -> str:
-    return f"{seed:08x}:{class_name}:{idx}:v{_CACHE_SCHEMA}:{chainid}"
+def _cache_key(seed: int, class_name: str, idx: int, chainid: int = 31337,
+               registry: int = 0) -> str:
+    return f"{seed:08x}:{class_name}:{idx}:v{_CACHE_SCHEMA}:{chainid}:{registry:040x}"
 
 
 def _deterministic_key(seed: int, class_name: str, idx: int) -> bytes:
@@ -128,7 +129,8 @@ class SimRegistry:
         return self._identity_count
 
     def issue(self, class_name: str, idx: int, eoa_addr: int,
-              rng: Callable[[], int], chainid: int) -> FullRegistrationRecord:
+              rng: Callable[[], int], chainid: int,
+              registry: int) -> FullRegistrationRecord:
         """Issue a full identity for one sim agent.
 
         Args:
@@ -138,6 +140,7 @@ class SimRegistry:
             rng: Seeded random generator.
             chainid: Live EVM chain id (Anvil default 31337).  Bound into
                 the registration NIZK; must match block.chainid at register().
+            registry: Live IdentityRegistry contract address.
 
         Returns:
             FullRegistrationRecord with cert, PS credential, NIZK, and
@@ -148,6 +151,7 @@ class SimRegistry:
             identity_fields=fields,
             client_kp=None,  # auto-generate ElGamal keypair
             chainid=chainid,
+            registry_addr=registry,
             registrant_addr=eoa_addr,
             rng=rng,
         )
@@ -223,7 +227,8 @@ def _from_serializable(data: list) -> tuple:
 # ---------------------------------------------------------------------------
 
 def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
-                     rng: Callable[[], int], chainid: int) -> tuple[LocalAccount, tuple]:
+                     rng: Callable[[], int], chainid: int,
+                     registry: int) -> tuple[LocalAccount, tuple]:
     """Return (account, register_args) for an agent, using disk cache.
 
     The EOA private key is deterministic (seed + class + idx), so the address
@@ -240,13 +245,13 @@ def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
     addr_int = int(account.address, 16)
 
     cache = _load_cache()
-    key = _cache_key(seed, class_name, idx, chainid)
+    key = _cache_key(seed, class_name, idx, chainid, registry)
     if key in cache and _valid_cache_entry(cache[key]):
         return account, _from_serializable(cache[key])
 
     # Generate fresh registration args and cache them.
     reg = get_sim_registry(seed)
-    rec = reg.issue(class_name, idx, addr_int, rng, chainid)
+    rec = reg.issue(class_name, idx, addr_int, rng, chainid, registry)
     # Attach the membership proof now (tree is current after issuance).
     rec.membership_proof = reg.membership_proof(rec.leaf_index)
     args = _to_serializable(rec)
@@ -280,7 +285,8 @@ def pspubkey_arg(issuer) -> tuple:
 
 
 def register_args(issuer, eoa_addr: int, fields: dict,
-                   rng: Callable[[], int], chainid: int) -> tuple:
+                   rng: Callable[[], int], chainid: int,
+                   registry: int) -> tuple:
     """Args for IdentityRegistry.register(issuer, pk, E, sigma, proof),
     bound to eoa_addr (must equal the tx sender).
 
@@ -296,7 +302,7 @@ def register_args(issuer, eoa_addr: int, fields: dict,
     r = rand_scalar(rng)
     E = elgamal_encrypt(mul(G1, m), kp.pk, r)
     pf = registration_prove(sigma_p, m, r, kp.pk, E, eoa_addr, kp.sk,
-                            chainid, rng=rng)
+                            chainid, rng=rng, registry=registry)
 
     g1 = lambda P: tuple(point_to_words(P))
     pk = g1(kp.pk)

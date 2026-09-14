@@ -3,8 +3,8 @@
 //! Binds a rerandomized PS signature to an ElGamal ciphertext and proves
 //! the registrant holds `sk` for `pk`: (a) `sigma'` is a valid PS signature
 //! on `m`, (b) `E = (r*G, m*G + r*pk)` encrypts the same `m`, (k) `pk = sk*G`.
-//! Fiat-Shamir binds chainid and domain `AlbertaBuck:Register:v2`, not the
-//! registry contract address (fixture proofs replay onto many deployments).
+//! Fiat-Shamir binds chainid, the registry contract address, and domain
+//! `AlbertaBuck:Register:v3`.
 //! Verified on-chain by `IdentityRegistry.register`.
 
 use ark_bn254::{G1Affine, G2Affine};
@@ -17,11 +17,11 @@ use crate::{
     W256,
 };
 
-/// Full keccak word of `AlbertaBuck:Register:v2` -- not reduced mod ORDER.
+/// Full keccak word of `AlbertaBuck:Register:v3` -- not reduced mod ORDER.
 /// Mirrors `alberta_buck.wallet.nizk.REGISTER_DOMAIN` and
 /// `IdentityRegistry.REGISTER_DOMAIN`.
 fn register_domain() -> W256 {
-    keccak_raw(b"AlbertaBuck:Register:v2")
+    keccak_raw(b"AlbertaBuck:Register:v3")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +49,7 @@ fn transcript(
     t_key: &G1Affine,
     registrant: &W256,
     chainid: &W256,
+    registry: &W256,
 ) -> Transcript {
     let domain = register_domain();
     let mut t = Transcript::new();
@@ -63,6 +64,7 @@ fn transcript(
         .p(t_key)
         .w(registrant)
         .w(chainid)
+        .w(registry)
         .w(&domain);
     t
 }
@@ -79,6 +81,7 @@ pub fn registration_prove(
     registrant: &W256,
     sk: &W256,
     chainid: &W256,
+    registry: &W256,
     m_tilde: &W256,
     r_tilde: &W256,
     sk_tilde: &W256,
@@ -98,7 +101,8 @@ pub fn registration_prove(
     let t_key = (G1Affine::generator() * sk_tilde).into_affine();
 
     let e = transcript(
-        &s1, &s2, &er, &ec, &pk, &a_ps, &t_c, &t_r, &t_key, registrant, chainid,
+        &s1, &s2, &er, &ec, &pk, &a_ps, &t_c, &t_r, &t_key,
+        registrant, chainid, registry,
     )
     .e();
     let s_m = m_tilde + e * fr_mod(m);
@@ -129,6 +133,7 @@ pub fn registration_verify(
     proof: &RegistrationProof,
     registrant: &W256,
     chainid: &W256,
+    registry: &W256,
 ) -> Result<bool> {
     if !w_lt_order(&proof.e)
         || !w_lt_order(&proof.s_m)
@@ -155,7 +160,8 @@ pub fn registration_verify(
     }
 
     let e_check = transcript(
-        &s1, &s2, &er, &ec, &pk, &a_ps, &t_c, &t_r, &t_key, registrant, chainid,
+        &s1, &s2, &er, &ec, &pk, &a_ps, &t_c, &t_r, &t_key,
+        registrant, chainid, registry,
     )
     .e();
     if w_from_fr(&e_check) != proof.e {

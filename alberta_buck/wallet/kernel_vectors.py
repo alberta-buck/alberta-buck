@@ -95,6 +95,7 @@ def build_kernel_vectors(seed: int = 0x1DE47B0CA) -> Dict[str, Any]:
 def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     rng = _seeded_rng(seed)
     draw = lambda: rand_scalar(rng)
+    registry = int("1d" * 20, 16)
 
     out: Dict[str, Any] = {
         "$schema_version": 1,
@@ -236,14 +237,17 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     sigma_p, _ = ps_rerandomize(sigma, rng=_replay([t_re]))
     registrant = 0xA11CE % (1 << 160)
     m_tilde, r_tilde, sk_tilde = draw(), draw(), draw()
-    proof = registration_prove(sigma_p, m, r, pk_e, E, registrant, sk_e, chainid,
-                               rng=_replay([m_tilde, r_tilde, sk_tilde]))
+    proof = registration_prove(
+        sigma_p, m, r, pk_e, E, registrant, sk_e, chainid,
+        rng=_replay([m_tilde, r_tilde, sk_tilde]), registry=registry,
+    )
     out["registration"] = {
         "m": scalar_to_hex(m), "r": scalar_to_hex(r),
         "sk": scalar_to_hex(sk_e),
         "pk": _g1(pk_e), "E": _ct(E),
         "sigma_1": _g1(sigma_p.sigma_1), "sigma_2": _g1(sigma_p.sigma_2),
         "registrant": _hx(registrant), "chainid": _hx(chainid),
+        "registry": _hx(registry),
         "m_tilde": scalar_to_hex(m_tilde), "r_tilde": scalar_to_hex(r_tilde),
         "sk_tilde": scalar_to_hex(sk_tilde),
         "proof": {
@@ -261,13 +265,16 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     r_prime = draw()
     E_b = elgamal_encrypt(M, pk_b, r_prime)
     sender, spender = registrant, 0x0B0B % (1 << 160)
+    approve_nonce = 0
     k1, k2 = draw(), draw()
     cp = chaum_pedersen_prove(E, E_b, pk_e, pk_b, sk_e, r_prime,
-                              sender, spender, chainid, rng=_replay([k1, k2]))
+                              sender, spender, chainid, rng=_replay([k1, k2]),
+                              registry=registry, nonce=approve_nonce)
     out["chaum_pedersen"] = {
         "E_a": _ct(E), "E_b": _ct(E_b), "pk_a": _g1(pk_e), "pk_b": _g1(pk_b),
         "sk_a": scalar_to_hex(sk_e), "r_prime": scalar_to_hex(r_prime),
         "sender": _hx(sender), "spender": _hx(spender), "chainid": _hx(chainid),
+        "registry": _hx(registry), "nonce": _hx(approve_nonce),
         "k1": scalar_to_hex(k1), "k2": scalar_to_hex(k2),
         "proof": {
             "e": scalar_to_hex(cp.e), "s1": scalar_to_hex(cp.s1),

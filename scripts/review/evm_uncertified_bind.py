@@ -72,7 +72,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     alice = Account(12345, 45678, 98765)
     sigma, _ = ps_rerandomize(ps_sign(iss, alice.m, rng=rng), rng=rng)
     pf = registration_prove(sigma, alice.m, alice.r, alice.pk, alice.E,
-                            int(alice_addr, 16), alice.sk, rng=rng)
+                            int(alice_addr, 16), alice.sk, rng=rng,
+                            registry=int(reg.address, 16))
     honest_leaf = identity_leaf(alice.M)
     fake_leaf = honest_leaf ^ 1
     reg6 = reg.get_function_by_signature(

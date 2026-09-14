@@ -326,6 +326,7 @@ pub fn registration_prove(
     registrant: &str,
     sk: &str,
     chainid: &str,
+    registry: &str,
     m_tilde: &str,
     r_tilde: &str,
     sk_tilde: &str,
@@ -343,6 +344,7 @@ pub fn registration_prove(
         &w(registrant)?,
         &w(sk)?,
         &w(chainid)?,
+        &w(registry)?,
         &w(m_tilde)?,
         &w(r_tilde)?,
         &w(sk_tilde)?,
@@ -378,6 +380,7 @@ pub fn registration_verify(
     proof: Vec<String>,
     registrant: &str,
     chainid: &str,
+    registry: &str,
 ) -> Result<bool, JsError> {
     if sigma.len() != 4 || e_ct.len() != 4 || issuer_x.len() != 4 || issuer_y.len() != 4 {
         return Err(JsError::new("sigma/e_ct/issuer_x/issuer_y need 4 words each"));
@@ -405,6 +408,7 @@ pub fn registration_verify(
         &p,
         &w(registrant)?,
         &w(chainid)?,
+        &w(registry)?,
     )
     .map_err(err)
 }
@@ -428,6 +432,8 @@ pub fn chaum_pedersen_prove(
     sender: &str,
     spender: &str,
     chainid: &str,
+    registry: &str,
+    nonce: &str,
     k1: &str,
     k2: &str,
 ) -> Result<Vec<String>, JsError> {
@@ -444,6 +450,8 @@ pub fn chaum_pedersen_prove(
         &w(sender)?,
         &w(spender)?,
         &w(chainid)?,
+        &w(registry)?,
+        &w(nonce)?,
         &w(k1)?,
         &w(k2)?,
     )
@@ -475,6 +483,8 @@ pub fn chaum_pedersen_verify(
     sender: &str,
     spender: &str,
     chainid: &str,
+    registry: &str,
+    nonce: &str,
 ) -> Result<bool, JsError> {
     if e_alice.len() != 4 || e_bob.len() != 4 || proof.len() != 9 {
         return Err(JsError::new("bad word counts"));
@@ -496,6 +506,8 @@ pub fn chaum_pedersen_verify(
         &w(sender)?,
         &w(spender)?,
         &w(chainid)?,
+        &w(registry)?,
+        &w(nonce)?,
     )
     .map_err(err)
 }

@@ -208,6 +208,7 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
             txhash,
             block,
             logindex,
+            &get_w(args, "approve_nonce")?,
             notes_ref,
             &get_w(nonces, "t_vd_payer")?,
             &get_w(nonces, "t_self")?,
