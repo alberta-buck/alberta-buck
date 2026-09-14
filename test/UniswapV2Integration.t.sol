@@ -90,6 +90,8 @@ contract UniswapV2IntegrationTest is Test {
     address internal constant GOV     = address(0xA0);
     address internal constant POOL    = address(0xBA51C);
     address internal constant CAROL   = address(0xCABE1);  // unverified outsider
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     address internal alice;     // verified LP / swapper
     address internal bob;       // verified swapper
@@ -109,7 +111,12 @@ contract UniswapV2IntegrationTest is Test {
         vj = vm.readFile("test/vectors/identity.json");
 
         // Identity layer + register Alice and Bob.
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
         bob   = address(uint160(_u(".bob.registrant")));

@@ -27,6 +27,8 @@ contract BuckDemurrageTest is Test {
     address internal constant GOV     = address(0xA0);
     address internal constant ISSUER  = address(0x1551E1);
     address internal constant POOL    = address(0xBA51C);
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     address internal alice;
     address internal bob;
@@ -37,7 +39,12 @@ contract BuckDemurrageTest is Test {
         vm.chainId(1);
         vj = vm.readFile("test/vectors/identity.json");
 
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
         // Bob acts as a Public-Identity counterparty contract throughout the

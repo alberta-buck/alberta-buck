@@ -123,10 +123,11 @@ contract BN254Test is Test {
         pts[7] = _g1At(".alice.registration_proof.T_R");
         pts[8] = _g1At(".alice.registration_proof.T_key");
 
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](4);
         scl[0] = _scalarAt(".alice.registrant");
         scl[1] = _scalarAt(".chainid");
-        scl[2] = uint256(keccak256("AlbertaBuck:Register:v2"));
+        scl[2] = _scalarAt(".registry");
+        scl[3] = uint256(keccak256("AlbertaBuck:Register:v3"));
 
         uint256 e = BN254.fsChallenge(pts, scl);
         assertEq(e, _scalarAt(".alice.registration_proof.e"), "registration FS mismatch");
@@ -144,10 +145,13 @@ contract BN254Test is Test {
         pts[7] = _g1At(".approve.cp_proof.T2");
         pts[8] = _g1At(".approve.cp_proof.T3");
 
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](6);
         scl[0] = _scalarAt(".approve.sender");
         scl[1] = _scalarAt(".approve.spender");
         scl[2] = _scalarAt(".approve.chainid");
+        scl[3] = _scalarAt(".approve.registry");
+        scl[4] = _scalarAt(".approve.nonce");
+        scl[5] = uint256(keccak256("AlbertaBuck:Approve:v3"));
 
         uint256 e = BN254.fsChallenge(pts, scl);
         assertEq(e, _scalarAt(".approve.cp_proof.e"), "approve FS mismatch");
