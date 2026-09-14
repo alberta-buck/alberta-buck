@@ -248,8 +248,9 @@ secret key and an archival node -- without any counterparty's cooperation.
      // registrant is msg.sender (NOT a passed address) -- it, the chain, the
      // registry deployment, and the action/version domain are folded into the
      // proof's Fiat-Shamir challenge, so a proof cannot be replayed across
-     // addresses, chains, or registries.  (A 6-arg overload also takes a
-     // uint256 identityLeaf for the registry-Identity accumulator.)
+     // addresses, chains, or registries.  A compatibility overload accepts
+     // identityLeaf only when it is zero; callers cannot insert an
+     // unconstrained accumulator leaf.)
      identityRegistry.register(
          issuer,          // trusted issuer whose PS key signed the credential
          pk_new,          // identity public key
@@ -1415,14 +1416,13 @@ secret key and an archival node -- without any counterparty's cooperation.
 
   Smart contracts can't do KYC, yet every BUCK transfer requires both
   parties to be /identifiable/.  The solution is *bindContract*: at
-  deployment time the operator (or an atomic
-  ~BuckAwareDeployer.deployAndBind~ helper) calls
-  ~IdentityRegistry.bindContract(target, pk, E, isPublicIdentity_)~,
-  publishing the operator's BN254 public key ~pk~ and ElGamal
-  ciphertext ~E~ against the contract's address.  ~bindContract~ is
-  *first-binder-wins* (anyone may bind any address whose code is
-  deployed; the deployer protects against front-running by binding
-  atomically with the deploy), the bound contract is marked
+  deployment time the operator uses one of two certified paths.  An existing
+  contract first calls ~authorizeContractBinding~ through its controller and
+  commits the exact binder, ~(pk,E)~, and policy flags; the binder then calls
+  ~bindContract~.  A new contract may instead be deployed and bound atomically
+  by a governance-approved ~BuckAwareDeployer~, using a fresh PS credential
+  whose registration proof is bound to the predicted target and registry.
+  The bound contract is marked
   ~isVerified[target] = true~, and the boolean ~isPublicIdentity[target]~
   is set per the binding.  When the spender or a transfer endpoint is
   bound under a Public Identity, the BUCK contract may fall back to
@@ -1443,17 +1443,17 @@ secret key and an archival node -- without any counterparty's cooperation.
    The relevant code in =src/IdentityRegistry.sol=:
 
    #+begin_example
-   /// Bind a deployed contract address to an operator-controlled identity.
-   /// First-binder-wins; deployers protect against front-running by binding
-   /// atomically alongside the deploy (BuckAwareDeployer.deployAndBind).
+   /// An existing target authorizes this exact binder/identity/policy tuple.
+   function authorizeContractBinding(address binder, G1Point pk, ElGamalCT E,
+                                     bool isPublicIdentity_, bool isCarrying_);
+
+   /// Copy an already-registered operator identity onto an authorized target.
    /// `isPublicIdentity_` selects the receipt-fragment fallback policy; if
    /// true, transfers may use the bound _identityHash on this side when no
    /// per-pair CP fragment exists; if false (Encrypted-Identity contract)
    /// the contract participates exactly like an EOA (no fallback).
    /// `isCarrying_` selects the demurrage transfer flavour (service
    /// contracts -- AMM pools, the Notes pool -- bind isCarrying_=true).
-   /// (A second overload also takes a uint256 identityLeaf to update the
-   /// registry-Identity accumulator; pass 0 to skip it.)
    function bindContract(
        address              target,
        BN254.G1Point calldata pk,
@@ -1463,13 +1463,17 @@ secret key and an archival node -- without any counterparty's cooperation.
    ) external {
        require(target.code.length > 0, "target not a deployed contract");
        require(!_isRegistered(target), "already bound");
-       _pk[target]              = pk;
-       _E_addr[target]          = E;
-       isPublicIdentity[target] = isPublicIdentity_;
-       isCarrying[target]       = isCarrying_;
-       binderOf[target]         = msg.sender;
-       emit ContractBound(target, msg.sender, isPublicIdentity_);
+       require(_isRegistered(msg.sender), "binder not registered");
+       require(_samePkE(msg.sender, pk, E), "uncertified identity");
+       _consumeBindingControl(target, msg.sender, pk, E,
+                              isPublicIdentity_, isCarrying_, false);
+       _storeBinding(target, pk, E, isPublicIdentity_, isCarrying_,
+                     msg.sender, issuerOf[msg.sender]);
    }
+
+   /// A second overload verifies a target-bound PS credential, its account-key
+   /// ownership/policy authorization, and either target control or an approved
+   /// atomic factory before storing the same binding.
    #+end_example
 
    (=isVerified(target)= is a view returning true once =pk= is written --
@@ -1477,10 +1481,10 @@ secret key and an archival node -- without any counterparty's cooperation.
    =ciphertextOf=, not the illustrative =getCredential= / =getIdentityKey=
    names used elsewhere in this document.)
 
-   No ~register~ for the contract address (no PS signature is needed
-   because the contract has no underlying KYC credential of its own);
-   the operator's already-registered ~(pk, E)~ is republished against
-   the contract's address.  Whoever holds the operator's secret key
+   No separate ~register~ transaction is needed for the contract address.
+   The certified-operator path republishes an already-registered ~(pk,E)~;
+   the fresh-credential path verifies a PS credential directly during bind.
+   Whoever holds the certified identity's secret key
    ~sk~ can decrypt every receipt that uses the bound ciphertext.
 
 ** The interaction surface
@@ -1518,14 +1522,12 @@ secret key and an archival node -- without any counterparty's cooperation.
       factory deploys a new ~UniswapV2Pair~ at a CREATE2-deterministic
       address.
 
-   2. Operator calls
-      =reg.bindContract(pair,   pk_op, E_op, true)=
-      and
-      =reg.bindContract(router, pk_op, E_op, true)=
-      (or atomically via =BuckAwareDeployer.deployAndBind=, which
-      avoids any first-binder-wins front-running between deploy and
-      bind).  ~pk_op~ and ~E_op~ are the operator's already-registered
-      identity material.
+   2. Operator has each existing target authorize the exact operator identity
+      and policy, then calls =reg.bindContract(...)= as that registered
+      operator.  For a new CREATE2 target, an approved
+      =BuckAwareDeployer.deployAndBind= verifies a target-bound credential and
+      performs deployment plus binding atomically.  ~pk_op~ and ~E_op~ are
+      therefore certified identity material, not caller-selected placeholders.
 
       That's the entire administrative step.  The pair and the router
       are now valid Public-Identity BUCK counterparties; their
@@ -1576,18 +1578,16 @@ secret key and an archival node -- without any counterparty's cooperation.
    *The operator is the legal counterparty.*  Setting up a BUCK/X AMM
    is permissionless at the factory level (anyone can call
    ~createPair~).  What gates the pool's usability for BUCK is
-   ~bindContract~ -- and *whoever calls bindContract first wins*.
-   That is operationally significant: the operator must bind atomically
-   with the deploy (via ~BuckAwareDeployer.deployAndBind~) to prevent
-   an attacker from front-running and binding the pool to /their/ key.
+   ~bindContract~, but an arbitrary first caller cannot claim it: an existing
+   pool must authorize the exact binding, while an approved helper can bind a
+   newly deployed target atomically.
    Once bound, the operator's identity is the contract's identity for
    audit purposes.
 
-   ~bindContract~ does not require governance.  Permissioning is
-   instead a property of /how the contract is deployed/: a contract
-   meant to be operator-controlled deploys via a deployer/binder
-   helper that performs both steps atomically.  Governance plays no
-   role.
+   Governance does not select ordinary operators, but it does approve which
+   factory helpers may use the atomic target-control exception.  Existing
+   contracts express control through their own controller/governance call to
+   ~authorizeContractBinding~.
 
 ** Encrypted-Identity contracts
 
@@ -1831,7 +1831,7 @@ secret key and an archival node -- without any counterparty's cooperation.
 
     Both identity fragments must exist before BUCK can move.  If Bob's
     counterparty is a *Public-Identity contract* (e.g., a Uniswap pool
-    bound via ~bindContract(pool, pk_op, E_op, true)~), step 2 is not
+    authorized and bound via ~bindContract(pool, pk_op, E_op, true, true)~), step 2 is not
     required from the pool side: ~isPublicIdentity(pool) == true~ lets
     the bilateral check fall back to the bound ~_identityHash(pool)~
     on the pool side.  Alice still must complete step 1 (her own CP-
@@ -2271,7 +2271,7 @@ secret key and an archival node -- without any counterparty's cooperation.
   data, where it resides, and what each party does.  Alice is a private
   EOA; Bob's pool is a *Public-Identity contract*
   (~isPublicIdentity(pool) = true~, bound at deploy time via
-  =bindContract(pool, pk_bob, E_bob, true)=).  The Private-to-Public-
+  =bindContract(pool, pk_bob, E_bob, true, true)=).  The Private-to-Public-
   Identity mode means Alice still calls =approve= (always CP-bound,
   ~29K gas) -- there is no isPublicIdentity shortcut at approve time -- but no
   =approve= is needed from the pool's side because its receipt fragment
@@ -2313,7 +2313,8 @@ secret key and an archival node -- without any counterparty's cooperation.
         -> pair at address 0xPOOL bound under Bob's published (pk, E),
            with isPublicIdentity[0xPOOL] = true and
            isVerified[0xPOOL]       = true.
-        Atomic deploy+bind defends against first-binder-wins front-running.
+        Atomic deploy+bind leaves no interval for a competing binding; the
+        registry accepts this target-control exception only from an approved factory.
      3. Same atomic pattern for the router 0xROUTER.
 
    After binding:
@@ -2619,18 +2620,16 @@ secret key and an archival node -- without any counterparty's cooperation.
    decryption key; the operator does, and the operator's ~sk~ decrypts
    every receipt that uses ~_identityHash(pool)~.
 
-   *First-binder-wins.*  Because ~bindContract~ requires only that
-   ~target.code.length > 0~ and that the address has not yet been
-   bound, an attacker can race a passive deployment and bind a freshly
-   deployed contract to /their/ key before the deployer does.  The
-   defense is atomic deploy+bind via ~BuckAwareDeployer~; passive
-   ~createPair~ followed by a separate ~bindContract~ from the
-   operator's wallet is unsafe in adversarial settings.
+   *Target control and one-shot binding.*  An existing pool must authorize the
+   exact binder, certified identity, and policy flags before ~bindContract~;
+   consuming that authorization and binding are one transaction.  A
+   governance-approved ~BuckAwareDeployer~ may use the atomic exception for a
+   contract it creates and binds in the same call.  The first /authorized/
+   binding remains final, but an unrelated caller cannot win a race.
 
-   The factory transaction is on-chain and pseudonymous; the
-   IdentityRegistry has no record of who deployed the contract.  Once
-   bound, the operator's identity (the EOA who registered ~(pk_op,
-   E_op)~) is the pool's accountability surface.
+   The registry records ~binderOf~ and the credential issuer.  Once bound, the
+   certified operator identity behind ~(pk_op,E_op)~ is the pool's
+   accountability surface.
 
    For commercial DeFi operators who want public branding ("DeFi Ops
    Inc., Alberta"), publication happens off-chain (their own website,

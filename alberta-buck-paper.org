@@ -417,10 +417,11 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   \( E_{\mathrm{addr}}[X] = (R_X, C_X) = (r_X G,\ M_X + r_X\, pk_X) \)
   with \( pk_X = sk_X G \).  Alongside it sits a Pointcheval-Sanders
   (PS) credential over \( m \), rerandomised by the client so that not
-  even the issuer can recognise it.  The registry maintains an
-  incremental Merkle accumulator over identity points (root
-  \( \mathsf{rt_{id}} \)), with membership provable in zero knowledge
-  and updated commit-before-use.
+  even the issuer can recognise it.  The registry stores a governance-posted
+  Merkle root over identity points (\( \mathsf{rt_{id}} \)), with membership
+  provable in zero knowledge and updated commit-before-use.  Automatic
+  per-registration admission remains pending a proof that the inserted leaf
+  hashes the certified Identity; caller-supplied nonzero leaves are rejected.
 
   These two secrets carry different authority.  The identity scalar
   \( m \) grants /read/ capability (decrypt ciphertexts addressed to
@@ -1317,7 +1318,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+LATEX: {\scriptsize
    | Component          | Realisation                                                                                                             |
    |--------------------+-------------------------------------------------------------------------------------------------------------------------|
-   | Identity substrate | =IdentityRegistry=: ElGamal credentials, PS verification, incremental Poseidon identity accumulator (commit-before-use) |
+   | Identity substrate | =IdentityRegistry=: ElGamal credentials, PS verification, governance-posted Poseidon identity root (commit-before-use; automatic certified admission pending) |
    | Batch mint         | =mint_batch[_a2].circom= per pinned N; issuer Schnorr (public) / blinded re-encryption binding + leaf-tie (private)     |
    | Spend              | =spend.circom= (flavour-agnostic, depth 20); nullifier =Poseidon3(rho, idHash, 4242)=                                   |
    | Deposit sigmas     | =verifyDepositCoupling= (A1/A2), =verifyDepositorBinding= (B1); EIP-196                                                 |
