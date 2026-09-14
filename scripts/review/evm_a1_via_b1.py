@@ -6,10 +6,10 @@ party Mallory, who is given only the A1 opening, generates a FRESH spend
 proof that pays HER address, produces a B1 depositor binding on HER keys,
 and calls spendCoupledB1.
 
-P0-0 inverted the empty-membership assertion: empty membership now fails
-closed even with the real G1-tie adapter wired.  P0-B (this PR) makes
-**flavor** the rejecting check even when membership is nonempty: the spend
-SNARK's public flavor is 1 (A1) and spendCoupledB1 supplies 3 (B1).
+This PR makes **flavor** the rejecting check even when membership is
+nonempty: the spend SNARK's public flavor is 1 (A1) and spendCoupledB1
+supplies 3 (B1).  The empty-membership variant also rejects at that earlier
+flavor check, without depending on the separate fail-closed PR.
 
 Honest controls: the same minted A1 note is spent through spendCoupledA1
 with the fixture's real membership and note-binding proofs; a separate B1
@@ -213,13 +213,11 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     print("   addressee delta BUCK =", dep_bal_after - dep_bal_before)
 
     print("\nRESULT: finding 7 inverted -- flavor mismatch rejects A1-via-B1")
-    print("   even with nonempty membership; empty membership still reverts;")
+    print("   for both empty and nonempty attack calls;")
     print("   honest A1 with matching flavor still pays the addressee.")
 
 
 # Honest B1 control: matching flavor through spendCoupledB1 still settles.
-# PR1 empty-membership fail-closed is re-checked here (flavor matches, so
-# the spend SNARK succeeds and empty membership is the rejecting check).
 fx_b1 = E2EFixture.load("b1")
 assert fx_b1.opening.flavor == 3, "b1 fixture must be B1"
 with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as anvil:
@@ -244,21 +242,6 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
            _g1_tuple(db["A2"]), _g1_tuple(db["A4"]), _g1_tuple(db["B1"]),
            _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
     e_dep = d["sigma"]["eDepForIss"]
-    fn_empty = stack.notes.functions.spendCoupledB1(
-        proof, root, nf, face, rec, int(d["opening"]["cm"]),
-        stack._addr(fx_b1.issuer.addr),
-        _ct_tuple(e_dep), b1p, b"")
-    try:
-        stack._send_from(fn_empty, dep, "Notes.spendCoupledB1(B1, empty mem)",
-                         event="SpentCoupledB1", contract=stack.notes)
-        raise AssertionError("B1 empty membership must still revert (PR1)")
-    except RuntimeError as err:
-        reason = str(err)
-        print("HONEST-flavor B1 empty membership REVERTED (PR1 preserved)")
-        print("   reason:", reason)
-        assert "empty identity membership" in reason, reason
-        assert not stack.notes.functions.nullifiers(nf).call()
-
     # Issuer substitution is a semantic test: create a fresh, valid depositor
     # binding against a different registered issuer while retaining the honest
     # B1 opening and proof.  The exact commitment's mint attribution rejects
