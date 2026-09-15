@@ -145,10 +145,11 @@ contract IdentityRegistry {
     uint256 internal constant H_Y =
         3372178911466361414640845512261989709787490420390555908180501907382229222644;
 
-    /// @notice Fiat-Shamir domain for registration; a full keccak word, not
-    ///         reduced mod R.  Mirrors alberta_buck.wallet.nizk.REGISTER_DOMAIN.
-    uint256 public constant REGISTER_DOMAIN =
-        uint256(keccak256("AlbertaBuck:Register:v2"));
+    /// @dev Fiat-Shamir protocol domain for registration; a full keccak word,
+    ///      not reduced mod R.  This is transcript metadata, not contract API.
+    uint256 internal constant REGISTER_DOMAIN = uint256(
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2")
+    );
 
     /// @notice Depth of the registry-Identity Merkle accumulator.
     ///
