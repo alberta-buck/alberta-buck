@@ -199,4 +199,22 @@ contract NotesCoupledB1Test is Test {
                              _eDepForIss(), _b1(), hex"cafe");
         vm.stopPrank();
     }
+
+    function test_coupledB1_emptyMembershipProof_reverts() public {
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: empty identity membership proof"));
+        notes.spendCoupledB1(hex"00", root, 0xB16, 100, depositor, issuer,
+                             _eDepForIss(), _b1(), "");
+    }
+
+    function test_coupledB1_unsetMembershipVerifier_reverts() public {
+        vm.prank(GOV);
+        notes.setIdentityMembershipVerifier(address(0));
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: membership verifier not set"));
+        notes.spendCoupledB1(hex"00", root, 0xB17, 100, depositor, issuer,
+                             _eDepForIss(), _b1(), hex"cafe");
+    }
 }

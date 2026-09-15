@@ -123,11 +123,12 @@ contract Notes {
     ///         Verifies a Groth16 proof that the counterparty identity point
     ///         is a member of the registry-Identity accumulator under
     ///         identityRegistry.identityRoot().  Required for the full
-    ///         identity-binding spend path (A2 deposit coupling + B1
+    ///         identity-binding spend path (A1/A2 deposit coupling + B1
     ///         depositor binding).  Optional at construction; governance
-    ///         wires it via setIdentityMembershipVerifier.  A zero address
-    ///         means identity membership checks are skipped (backward-compat
-    ///         during migration).
+    ///         wires it via setIdentityMembershipVerifier.  Coupled spends
+    ///         require a non-zero verifier and a nonempty proof (fail closed).
+    ///         The setter still accepts address(0) so governance can rotate
+    ///         through unset; those spends then revert rather than skip.
     IIdentityMembershipVerifier public identityMembershipVerifier;
 
     // ---- nullifier + audit state ------------------------------------------
@@ -165,11 +166,12 @@ contract Notes {
     ///             spend an A1/A2 note"; and
     ///           * A2 collusion — "an un-nameable note is un-spendable".
     ///         Optional at construction; governance wires it via
-    ///         setNoteBindingVerifier.  A zero address (or an empty per-spend
-    ///         proof) SKIPS the tie (backward-compat) — and, crucially, while
-    ///         skipped those two guarantees are NOT enforced on-chain.  Wired
-    ///         only into the addressed spends; B1 (bearer) needs no tie (the
-    ///         depositor binding names the depositor directly).
+    ///         setNoteBindingVerifier.  Addressed coupled spends (A1/A2)
+    ///         require a non-zero verifier and a nonempty proof (fail closed);
+    ///         the setter still accepts address(0), but those spends then
+    ///         revert rather than skip.  Wired only into the addressed spends;
+    ///         B1 (bearer) needs no tie (the depositor binding names the
+    ///         depositor directly).
     /// @dev    Appended at the END of storage so the existing slot positions
     ///         (nullifiers, noteFaceSum, nextLeafIndex, roots, ...) that tests
     ///         reach via `vm.store` stay unperturbed.
@@ -312,10 +314,9 @@ contract Notes {
     }
 
     /// @notice Wire (or rotate) the identity membership verifier consulted
-    ///         by every spend path when identityRegistry.identityRoot() is
-    ///         non-zero.  Passing `address(0)` disables identity membership
-    ///         checks (backward-compat during migration).  When the G1-tie
-    ///         circuit lands, governance swaps the real verifier in.
+    ///         by the coupled spend paths.  Passing `address(0)` is allowed
+    ///         (governance tests of the setter); coupled spends then revert
+    ///         rather than skipping the check.
     function setIdentityMembershipVerifier(address next) external {
         require(msg.sender == governance, "not governance");
         emit IdentityMembershipVerifierUpdated(
@@ -325,9 +326,9 @@ contract Notes {
 
     /// @notice Wire (or rotate) the note<->eEnc tie verifier
     ///         (INoteBindingVerifier) consulted by the addressed (A1/A2) spends.
-    ///         Passing `address(0)` disables the tie (backward-compat skip) — and
-    ///         while disabled the addressed-binding / A2-collusion guarantees are
-    ///         NOT enforced.  The production verifiers are the generated
+    ///         Passing `address(0)` is allowed (governance tests of the setter);
+    ///         addressed coupled spends then revert rather than skipping the
+    ///         tie.  The production verifiers are the generated
     ///         NoteBindingGroth16Verifier (A2) and NoteBindingA1Groth16Verifier
     ///         (A1) behind one NoteBindingVerifierAdapter.
     function setNoteBindingVerifier(address next) external {
@@ -642,13 +643,13 @@ contract Notes {
     ///      the sigma decrypted `eIss` to — a colluding pair cannot answer the
     ///      coupling with one point and the membership with another.
     ///
-    ///      Reverts if the verifier is wired and the proof is invalid or the
-    ///      registry's identityRoot is zero (unseeded accumulator).  Silently
-    ///      passes if the verifier is not set (address(0)) or the proof is empty
-    ///      (backward-compat skip).  The generic spend paths pass `(0, 0)`: with
-    ///      the stub verifier that is plumbing-only; the real G1-tie verifier has
-    ///      no valid proof for the point (0, 0) and so fails closed there — the
-    ///      bound membership is reachable only through `spendCoupledA2`.
+    ///      Reverts if the verifier is unset, the proof is empty or invalid,
+    ///      or the registry's identityRoot is zero (unseeded accumulator).
+    ///      Coupled spend entry points also require the verifier non-zero
+    ///      (cheap, before the spend SNARK); this helper fails closed too so
+    ///      a future caller cannot skip by omitting that require.  The real
+    ///      G1-tie verifier has no valid proof for the point (0, 0) and so
+    ///      fails closed there.
     function _verifyIdentityMembership(
         bytes memory identityMembershipProof,
         uint256 px,
@@ -657,8 +658,10 @@ contract Notes {
         internal
     {
         IIdentityMembershipVerifier verifier = identityMembershipVerifier;
-        if (address(verifier) == address(0)) return;
-        if (identityMembershipProof.length == 0) return;
+        require(address(verifier) != address(0),
+                "Notes: membership verifier not set");
+        require(identityMembershipProof.length != 0,
+                "Notes: empty identity membership proof");
 
         IdentityRegistry reg = identityRegistry;
         require(address(reg) != address(0), "Notes: identity registry not set");
@@ -684,12 +687,12 @@ contract Notes {
     ///      shared point: `dc.P_I`).  See INoteBindingVerifier for both
     ///      relations.
     ///
-    ///      Reverts if the verifier is wired and the proof is invalid.  Silently
-    ///      passes if the verifier is not set (address(0)) or the proof is empty
-    ///      (backward-compat skip) — while skipped, the addressed-binding and
-    ///      A2-collusion guarantees are NOT enforced.  The production relations
-    ///      are circuits/note_binding.circom and circuits/note_binding_a1.circom
-    ///      (soundness: Proofs Theorem 12).
+    ///      Reverts if the verifier is unset or the proof is empty or invalid.
+    ///      Addressed coupled spends also require the verifier non-zero
+    ///      (cheap, before the spend SNARK); this helper fails closed too so
+    ///      a future caller cannot skip by omitting that require.  The
+    ///      production relations are circuits/note_binding.circom and
+    ///      circuits/note_binding_a1.circom (soundness: Proofs Theorem 12).
     function _verifyNoteBinding(
         bytes memory noteBindingProof,
         uint256 nullifier,
@@ -702,8 +705,9 @@ contract Notes {
         internal
     {
         INoteBindingVerifier verifier = noteBindingVerifier;
-        if (address(verifier) == address(0)) return;
-        if (noteBindingProof.length == 0) return;
+        require(address(verifier) != address(0),
+                "Notes: note binding verifier not set");
+        require(noteBindingProof.length != 0, "Notes: empty note binding");
 
         bool ok = a1Layout
             ? verifier.verifyNoteBindingA1(
@@ -752,10 +756,10 @@ contract Notes {
     ///      that `eEnc` is the note's committed ciphertext: the spend SNARK is
     ///      flavor-agnostic and exposes no idHash.  Step 3 is what makes the
     ///      addressed-binding ("only M_rec can spend") and A2-collusion
-    ///      ("un-nameable note un-spendable") guarantees hold; if governance
-    ///      leaves the binding verifier unset (or a spend passes an empty
-    ///      proof), they are NOT enforced for that spend.  See
-    ///      INoteBindingVerifier and Proofs Theorem 12.
+    ///      ("un-nameable note un-spendable") guarantees hold.  Coupled spends
+    ///      require both verifiers to be wired and reject empty proofs, so
+    ///      leaving a slot unset is not a skip.  See INoteBindingVerifier and
+    ///      Proofs Theorem 12.
     function _spendCoupled(
         bytes   calldata proof,
         uint256          root,
@@ -769,6 +773,10 @@ contract Notes {
         bool             a1Layout
     ) internal {
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
+        require(address(identityMembershipVerifier) != address(0),
+                "Notes: membership verifier not set");
+        require(address(noteBindingVerifier) != address(0),
+                "Notes: note binding verifier not set");
         require(recipient != address(0),  "Notes: zero recipient");
         require(face      > 0,            "Notes: zero face");
         require(_isAcceptedRoot(root),    "Notes: unknown root");
@@ -796,7 +804,8 @@ contract Notes {
         _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
 
         // Identity-M binding, half 3: the note<->eEnc tie, binding `eEnc` to
-        // THIS note (skipped only if governance left the slot unset).
+        // THIS note.  Empty proofs revert; the entry point required the
+        // verifier slot to be set.
         _verifyNoteBinding(noteBindingProof, nullifier, a1Layout, face,
                            eEnc, dc.P_I.X, dc.P_I.Y);
 
@@ -888,6 +897,8 @@ contract Notes {
         bytes   calldata membershipProof
     ) external {
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
+        require(address(identityMembershipVerifier) != address(0),
+                "Notes: membership verifier not set");
         require(recipient != address(0),  "Notes: zero recipient");
         require(issuer    != address(0),  "Notes: zero issuer");
         require(face      > 0,            "Notes: zero face");

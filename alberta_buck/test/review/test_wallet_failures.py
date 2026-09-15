@@ -95,8 +95,8 @@ def test_05_arbitrary_T_and_known_log_are_independent_gaps(backend):
 
 
 def test_08_empty_membership_proof_is_not_a_proof(backend):
-    # Models Notes._verifyIdentityMembership: empty bytes currently skip the
-    # check.  The intended repair requires a nonempty proof and a wired verifier.
+    # Models Notes._verifyIdentityMembership fail-closed gate: a spend is
+    # accepted only with a nonempty proof AND a wired verifier (finding 8).
     assert not membership_proof_required(b"", True)
     assert not membership_proof_required(b"\x00" * 256, False)
     assert membership_proof_required(b"\x00" * 256, True)
