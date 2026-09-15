@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {BN254}                from "../src/BN254.sol";
 import {IdentityRegistry}     from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck}                 from "../src/Buck.sol";
 import {BuckCredit}           from "../src/BuckCredit.sol";
 import {BuckCreditHarness}           from "./harness/BuckCreditHarness.sol";
@@ -75,7 +76,7 @@ contract NotesTest is Test {
         vj = vm.readFile("test/vectors/identity.json");
 
         // Identity layer + Alice/Bob registered (mirrors Buck.t.sol).
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
         bob   = address(uint160(_u(".bob.registrant")));

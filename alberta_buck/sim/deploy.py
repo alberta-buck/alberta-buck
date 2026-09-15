@@ -173,10 +173,17 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     erc20_abi = _erc20_abi()
 
     # --- identity layer ---------------------------------------------- #
-    reg = chain.deploy("IdentityRegistry", gov)
+    # The simulation deploys synthetic infrastructure (SimLP, routers, and
+    # basket variants) that has no production binding-authorizer surface.
+    # Use the explicitly test-only registry harness for those fixture binds;
+    # production deployments use IdentityRegistry plus target-specific adapters.
+    reg = chain.deploy("IdentityRegistryHarness", gov)
     issuer_kp = idmod.make_issuer(rng)
     chain.send(reg.functions.trustIssuer(issuer_addr, idmod.pspubkey_arg(issuer_kp)),
                sender=gov)
+    # Certified-operator bind copies this identity onto BUCK-touching contracts.
+    idmod.register_deployer(chain, reg, issuer_addr, issuer_kp, rng,
+                            int(w3.eth.chain_id), sender=deployer)
 
     # --- Direct BUCK stack ------------------------------------------- #
     credit = chain.deploy("BuckCredit")
@@ -255,8 +262,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         deposited_topic, redeemed_topic = LEGACY_DEPOSITED_TOPIC, LEGACY_REDEEMED_TOPIC
     chain.send(buck.functions.setBasket(basket.address), sender=pool_acct)
     chain.send(kctrl.functions.setBasket(basket.address), sender=gov)
-    chain.send(reg.functions.bindContract(
-        basket.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+    idmod.bind_as_operator(chain, reg, basket.address, True, True, sender=deployer)
 
     fence_factors: list = []
 
@@ -304,8 +310,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # creditLimit (held + unusedCredit) as spendable; the transfer to
     # the pool drives signedRaw to -value and the pool receives freshly
     # issued BUCK.
-    chain.send(reg.functions.bindContract(
-        simlp.address, idmod.BIND_PK, idmod.BIND_E, True, False), sender=deployer)
+    idmod.bind_as_operator(chain, reg, simlp.address, True, False, sender=deployer)
     big = 10 ** 30
     chain.send(usdc.functions.mint(simlp.address, big))
     for c in tok:
@@ -325,8 +330,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     ur_art = json.loads((REPO / UR_ARTIFACT).read_text())
     router = chain.deploy("UniversalRouter", ur_params,
                           abi=ur_art["abi"], bytecode=ur_art["bytecode"]["object"])
-    chain.send(reg.functions.bindContract(
-        router.address, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+    idmod.bind_as_operator(chain, reg, router.address, True, True, sender=deployer)
 
     d = Deployment(w3, chain, anvil, gov, pool_acct, issuer_addr, issuer_kp,
                    reg, buck, credit, kctrl, basket, router, simlp, usdc,
@@ -379,8 +383,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         chain.send(basket.functions.addBasketToken(
             c.address, dec[i], p0, pass_wbp[i], FEE_BUCK), sender=gov)
         pb = v3f.functions.getPool(c.address, buck.address, FEE_BUCK).call()
-        chain.send(reg.functions.bindContract(
-            pb, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+        idmod.bind_as_operator(chain, reg, pb, True, True, sender=deployer)
         d.pool_buck.append(pb)
         if basket_impl == "fence":
             # Strike the first band.  Must follow addBasketToken: the fence
@@ -468,8 +471,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     u1 = poolU.functions.token1().call()
     # Bind the pool BEFORE LPing it (public): the mint callback transfers
     # BUCK into it, and BUCK transfers are identity-gated on the recipient.
-    chain.send(reg.functions.bindContract(
-        pub, idmod.BIND_PK, idmod.BIND_E, True, True), sender=deployer)
+    idmod.bind_as_operator(chain, reg, pub, True, True, sender=deployer)
     # Sized off target_buck_lp -- the knob DOCUMENTED as the BUCK/USDC seed
     # (it previously keyed off target_buck, silently coupling the floating
     # pool's depth to the TOKEN/BUCK pools').  A national-scale currency

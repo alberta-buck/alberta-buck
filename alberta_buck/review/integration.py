@@ -73,10 +73,11 @@ def ps_key_tuple(key):
 
 
 def register(chain, registry, account, issuer_addr, sigma, proof, registrant, leaf=None):
+    """On-chain identityLeaf is unconstrained and refused; `leaf` is ignored."""
     args = (issuer_addr, point_to_words(account.pk), ct_tuple(account.E),
             proof_tuple(sigma), proof_tuple(proof))
-    return chain.send(registry.functions.register(*args, *(() if leaf is None else (leaf,))),
-                      sender=registrant)
+    _ = leaf
+    return chain.send(registry.functions.register(*args), sender=registrant)
 
 
 def deploy_poseidon(chain):

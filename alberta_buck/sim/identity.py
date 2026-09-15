@@ -32,8 +32,9 @@ from alberta_buck.wallet.nizk import registration_prove
 from alberta_buck.registry.certificate import registry_keygen
 from alberta_buck.registry.registry import RegistryAgent, FullRegistrationRecord
 
-# bindContract uses the G1 generator (1,2) as a non-zero placeholder pk/E so
-# isVerified() is true — exactly what the Forge tests pass (BN254.g1()).
+# Legacy placeholder (pk, E) = G1 generator.  Production bindContract no
+# longer accepts these from an unregistered caller; use bind_as_operator
+# after the sender has registered.
 _G = point_to_words(G1)                       # (1, 2)
 BIND_PK = _G
 BIND_E = (_G, _G)                              # ElGamalCT (R, C)
@@ -215,10 +216,11 @@ def _from_serializable(data: list) -> tuple:
             return tuple(tup(v) for v in x)
         return x
     args = tuple(tup(v) for v in data)
-    if len(args) == 5 and isinstance(args[4], tuple) and len(args[4]) == 3:
-        # Cache format stores (leaf_index, identity_leaf, sub_root); the
-        # on-chain 6-arg register overload expects only identityLeaf.
-        return (*args[:4], args[4][1])
+    # Cache may store merkle (leaf_index, identity_leaf, sub_root) or a
+    # bare identityLeaf.  On-chain register refuses unconstrained leaves,
+    # so callers always get the 5-arg (pk, E, sigma, proof) tuple.
+    if len(args) >= 5:
+        return args[:4]
     return args
 
 
@@ -311,6 +313,31 @@ def register_args(issuer, eoa_addr: int, fields: dict,
     proof_arg = (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C),
                  g1(pf.T_R), g1(pf.T_key))
     return pk, E_arg, sig_arg, proof_arg
+
+
+def register_deployer(chain, reg, issuer_addr, issuer, rng, chainid: int,
+                      sender=None, class_name: str = "Deployer") -> tuple:
+    """Register `sender` (default chain.deployer) with a real PS credential.
+
+    Returns (pk, E) suitable for subsequent bind_as_operator calls.
+    """
+    sender = sender if sender is not None else chain.deployer
+    addr = sender.address if hasattr(sender, "address") else sender
+    args = register_args(issuer, int(addr, 16), fields_for(class_name, 0),
+                         rng, chainid, int(reg.address, 16))
+    chain.send(reg.functions.register(issuer_addr, *args), sender=sender)
+    return args[0], args[1]
+
+
+def bind_as_operator(chain, reg, target, is_public: bool = True,
+                     is_carrying: bool = True, sender=None) -> None:
+    """Certified-operator bind: copy the already-registered sender's (pk, E)."""
+    sender = sender if sender is not None else chain.deployer
+    addr = sender.address if hasattr(sender, "address") else sender
+    pk = reg.functions.pkOf(addr).call()
+    E = reg.functions.ciphertextOf(addr).call()
+    chain.send(reg.functions.bindContract(target, pk, E, is_public, is_carrying),
+               sender=sender)
 
 
 def fields_for(name: str, i: int) -> dict:

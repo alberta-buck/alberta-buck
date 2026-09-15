@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 
 /// @notice Cross-artifact parity for the B1 depositor binding (the dual of the
@@ -23,7 +24,7 @@ contract B1BindingTest is Test {
     function setUp() public {
         vm.chainId(1);
         vj  = vm.readFile("test/vectors/b1_binding.json");
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         // Both parties are registered: the depositor's payout account and the
         // public bearer issuer (whose pk the binding re-encrypts toward).

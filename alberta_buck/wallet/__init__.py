@@ -25,6 +25,9 @@ from alberta_buck.wallet.elgamal import (
 from alberta_buck.wallet.nizk import (
     RegistrationProof, registration_prove, registration_verify,
 )
+from alberta_buck.wallet.contract_binding import (
+    ContractBindingProof, contract_binding_prove, contract_binding_verify,
+)
 from alberta_buck.wallet.chaum_pedersen import (
     CPProof, chaum_pedersen_prove, chaum_pedersen_verify,
 )
@@ -77,6 +80,7 @@ __all__ = [
     "ElGamalCiphertext", "IdentityKeyPair", "identity_keygen",
     "elgamal_encrypt", "elgamal_decrypt",
     "RegistrationProof", "registration_prove", "registration_verify",
+    "ContractBindingProof", "contract_binding_prove", "contract_binding_verify",
     "CPProof", "chaum_pedersen_prove", "chaum_pedersen_verify",
     "poseidon", "F_R",
     "NoteOpening", "FLAVOR_A1", "FLAVOR_A2", "FLAVOR_B1",

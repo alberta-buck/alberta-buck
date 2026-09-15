@@ -17,7 +17,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: BUCK Notes are the Alberta Buck's privacy-preserving bearer-instrument primitive: a single Tornado-style Poseidon Merkle tree of note commitments, a nullifier set, and Groth16 SNARK circuits for mint and identity membership.  The authority axis is the KYC-bound Identity point M, never an EOA address: notes /name/ identities and treat accounts as interchangeable envelopes that need only /match/ the expected M.  The system collapses onto one gadget -- "prove a re-encryption of a registered Identity under a target key" -- instantiated three ways: A2 (issuer encrypts its Identity under the recipient identity point, at mint), A1 (public issuer, in the clear with a Schnorr signature), and B1 (depositor encrypts its Identity under the public issuer key, at spend).  All three are wired end to end through Notes.spendCoupled{A1,A2,B1}: A1/A2 via verifyDepositCoupling, B1 via verifyDepositorBinding, each composed with a membership proof bound to the sigma's committed point (identity_membership_g1tie.circom + IdentityMembershipG1TieVerifier) so the spender is provably a registered Identity and an un-nameable counterparty is un-spendable; the identity Merkle accumulator is maintained on chain (IdentityRegistry.identityRoot, commit-before-use).  Demurrage needs no note-side machinery: the Notes Pool is the Notes contract's own ERC-20 balance, and spend is an ordinary BUCK transfer out of the pool -- because the pool is a registered Carrying account, BUCK routes it through the Carrying-transfer path, delivering the full face value and apportioning a proportional share of the pool's accumulated buck-seconds (its demurrage age) onto the recipient.  Donations to the pool freshen its index and subsidise all subsequent spends.  The same commitment can be published on chain, mailed in a letter, or printed on paper with a QR code; counterfeiting is cryptographically impossible, and demurrage makes lost notes return value to the commons rather than extracting it as seigniorage.  Addressed (A1, A2) notes are cryptographically safe for indefinite holding (the identity-pinned deposit gate binds the recipient's Identity); B1 bearer cheques are civil-trust instruments meant to be cashed promptly.  Notes defeat bulk on-chain traceability while preserving bilateral disclosure to both named parties and under warrant.  This is the first design where a private bearer instrument is a native, first-class primitive of the monetary system rather than an aftermarket wrapper.
+#+description: BUCK Notes are the Alberta Buck's privacy-preserving bearer-instrument primitive: a single Tornado-style Poseidon Merkle tree of note commitments, a nullifier set, and Groth16 SNARK circuits for mint and identity membership.  The authority axis is the KYC-bound Identity point M, never an EOA address: notes /name/ identities and treat accounts as interchangeable envelopes that need only /match/ the expected M.  The system collapses onto one gadget -- "prove a re-encryption of a registered Identity under a target key" -- instantiated three ways: A2 (issuer encrypts its Identity under the recipient identity point, at mint), A1 (public issuer, in the clear with a Schnorr signature), and B1 (depositor encrypts its Identity under the public issuer key, at spend).  All three are wired end to end through Notes.spendCoupled{A1,A2,B1}: A1/A2 via verifyDepositCoupling, B1 via verifyDepositorBinding, each composed with a membership proof bound to the sigma's committed point (identity_membership_g1tie.circom + IdentityMembershipG1TieVerifier) so the spender is provably a member of the governance-posted Identity root and an un-nameable counterparty is un-spendable; unchecked per-registration leaf admission is refused pending a credential-to-leaf proof.  Demurrage needs no note-side machinery: the Notes Pool is the Notes contract's own ERC-20 balance, and spend is an ordinary BUCK transfer out of the pool -- because the pool is a registered Carrying account, BUCK routes it through the Carrying-transfer path, delivering the full face value and apportioning a proportional share of the pool's accumulated buck-seconds (its demurrage age) onto the recipient.  Donations to the pool freshen its index and subsidise all subsequent spends.  The same commitment can be published on chain, mailed in a letter, or printed on paper with a QR code; counterfeiting is cryptographically impossible, and demurrage makes lost notes return value to the commons rather than extracting it as seigniorage.  Addressed (A1, A2) notes are cryptographically safe for indefinite holding (the identity-pinned deposit gate binds the recipient's Identity); B1 bearer cheques are civil-trust instruments meant to be cashed promptly.  Notes defeat bulk on-chain traceability while preserving bilateral disclosure to both named parties and under warrant.  This is the first design where a private bearer instrument is a native, first-class primitive of the monetary system rather than an aftermarket wrapper.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-notes
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -584,11 +584,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    (=circuits/identity_membership_g1tie.circom=) and its exported Groth16
    verifier, cross-checked byte-for-byte against the wallet accumulator.  The
    on-chain \( \mathsf{rt_{id}} \) root (commit-before-use) and the three coupled
-   spend entrypoints (=spendCoupled{A1,A2,B1}=) are now /shipped/; only a production
-   ptau ceremony remains.
+   spend entrypoints (=spendCoupled{A1,A2,B1}=) are now /shipped/.  The root is
+   governance-posted: automatic credential-to-leaf admission remains P2-A, and
+   a production ptau ceremony also remains.
 
-   The Notes contract itself is bound under a Public Identity
-   (=bindContract(notes, pk_op, E_op, true, true)=).  Both the issuer
+   The Notes contract itself is bound under a Public Identity after deployment.
+   =Deploy.s.sol= wires the contracts but deliberately leaves this ceremony
+   pending; =BindNotesIdentity.s.sol= consumes the operator's target-bound
+   credential once the registry and Notes addresses are known.  Both the issuer
    and the recipient must complete a one-time CP-bound =approve= for
    the Notes contract address before their first mint or spend.  This
    establishes the per-pair CP fragments that the BUCK transfer guard
@@ -1610,7 +1613,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
     *Status (on chain).*  Shipped: the binding sigma
     =IdentityRegistry.verifyDepositCoupling=, the P-bound membership
     (=circuits/identity_membership_g1tie.circom= + its verifier), the on-chain
-    accumulator root (commit-before-use), and the =spendCoupledA2= entrypoint that
+    governance-posted accumulator root (commit-before-use), and the =spendCoupledA2= entrypoint that
     co-verifies the two.
 
 ** B1 (Bearer): Civil-Trust, Not Cryptographic
@@ -2939,9 +2942,11 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** Status: the Identity-M spend path, complete
 
    The binding sigmas, the P-bound membership circuit + verifier, the on-chain
-   incremental \( \mathsf{rt_{id}} \) accumulator (=IdentityRegistry.identityRoot=,
+   governance-posted \( \mathsf{rt_{id}} \) root (=IdentityRegistry.identityRoot=,
    commit-before-use), and the three coupled spend entrypoints (=spendCoupledA1=,
-   =spendCoupledA2=, =spendCoupledB1=) are all shipped and tested end to end.  The
+   =spendCoupledA2=, =spendCoupledB1=) are all shipped and tested end to end.
+   Automatic admission is not: register/bind reject a nonzero caller-supplied
+   leaf until a proof ties it to the certified Identity.  The
    membership is /bound/ to each sigma's committed point \( P \) (the verifier
    derives its public inputs from \( P \), not the prover's bytes), so /those two
    halves/ cannot be decoupled.

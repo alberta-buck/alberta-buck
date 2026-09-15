@@ -42,6 +42,11 @@ from alberta_buck.wallet.notes import NoteOpening
 from alberta_buck.wallet.build_receipt import (
     build_note_b1, build_note_a1, build_note_a2,
 )
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.nizk import bind_contract_prove
+from alberta_buck.wallet.contract_binding import contract_binding_prove
+from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
+from alberta_buck.wallet.vectors import ALICE_FIELDS, BOB_FIELDS
 
 # The fixture worlds ship as alberta_buck.test package data, so a
 # venv-installed wheel can load them with no repo checkout; the live-EVM
@@ -54,6 +59,10 @@ EVENT_BY_FLAVOR = {"b1": "SpentCoupledB1", "a1": "SpentCoupledA1", "a2": "SpentC
 # A registered "contract" account needs code; the world accounts get the same
 # one-revert stub NotesE2E.t.sol etches.
 ACCOUNT_STUB = "0x60006000fd"
+
+# Must match scripts/snark/gen_e2e_world.py SEEDS so account() replay
+# recovers the fixture's (sk, r) for credential bind.
+_E2E_SEEDS = {"a1": 0xE2EA1, "a2": 0xE2EA2, "b1": 0xE2EB1}
 
 
 def _pt(d: dict):
@@ -347,15 +356,30 @@ class NotesStack:
         # a genuine re-encryption (the operator could decrypt it).
         self.pool_sk = rand_scalar(self.rng)
         self.pool_pk = mul(G1, self.pool_sk)
-        ppk = _xy(self.pool_pk)
-        g1 = _xy(G1)
-        self._bind5 = self.reg.get_function_by_signature(
-            "bindContract(address,(uint256,uint256),"
-            "((uint256,uint256),(uint256,uint256)),bool,bool)")
-        self._bind6 = self.reg.get_function_by_signature(
-            "bindContract(address,(uint256,uint256),"
-            "((uint256,uint256),(uint256,uint256)),bool,bool,uint256)")
-        ch.send(self._bind5(self.notes.address, ppk, (g1, g1), True, True))
+        self._bind_cred = self.reg.get_function_by_signature(
+            "bindContract(address,address,(uint256,uint256),"
+            "((uint256,uint256),(uint256,uint256)),"
+            "((uint256,uint256),(uint256,uint256)),"
+            "(uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
+            "(uint256,uint256),(uint256,uint256)),"
+            "(uint256,uint256,(uint256,uint256)),"
+            "bool,bool)")
+        self._iss_kp = ps_keygen(rng=self.rng)
+        self._iss_addr = self._addr(0xAA)
+        self.pool_m = rand_scalar(self.rng)
+        self.pool_r = rand_scalar(self.rng)
+        self.pool_E = elgamal_encrypt(mul(G1, self.pool_m), self.pool_pk, self.pool_r)
+        g2 = lambda P: ((int(P[0].coeffs[0]), int(P[0].coeffs[1])),
+                        (int(P[1].coeffs[0]), int(P[1].coeffs[1])))
+        ch.send(self.reg.functions.trustIssuer(
+            self._iss_addr, (g2(self._iss_kp.pk_X), g2(self._iss_kp.pk_Y))))
+        ch.send(self.notes.functions.authorizeIdentityBinding(
+            self.reg.address, self.gov, _xy(self.pool_pk),
+            (_xy(self.pool_E.R), _xy(self.pool_E.C)),
+            True, True))
+        ch.send(self._credential_bind_fn(
+            self.notes.address, self.pool_pk, self.pool_sk, True, True,
+            m=self.pool_m, r=self.pool_r, E=self.pool_E))
 
         self.contracts = {
             "registry": self.reg.address.lower(),
@@ -363,24 +387,78 @@ class NotesStack:
             "notes":    self.notes.address.lower(),
         }
 
+    def _proof_arg(self, pf):
+        return (pf.e, pf.s_m, pf.s_r, pf.s_sk, _xy(pf.A_ps), _xy(pf.T_C),
+                _xy(pf.T_R), _xy(pf.T_key))
+
+    def _binding_arg(self, pf):
+        return (pf.e, pf.s, _xy(pf.T))
+
+    def _credential_bind_fn(self, target, pk, sk, is_public, is_carrying,
+                            m=None, r=None, E=None):
+        """PS credential + NIZK, Fiat-Shamir registrant = uint160(target)."""
+        if m is None:
+            m = rand_scalar(self.rng)
+        if r is None:
+            r = rand_scalar(self.rng)
+        if E is None:
+            E = elgamal_encrypt(mul(G1, m), pk, r)
+        sigma, _ = ps_rerandomize(ps_sign(self._iss_kp, m, rng=self.rng),
+                                  rng=self.rng)
+        pf = bind_contract_prove(
+            sigma, m, r, pk, E, int(target, 16), sk,
+            chainid=self.fx.chainid, rng=self.rng,
+            registry=int(self.reg.address, 16))
+        binder = self.gov
+        bind_auth = contract_binding_prove(
+            sk, pk, int(target, 16), int(binder, 16), int(self.reg.address, 16),
+            is_public, is_carrying, chainid=self.fx.chainid, rng=self.rng)
+        return self._bind_cred(
+            target, self._iss_addr, _xy(pk), (_xy(E.R), _xy(E.C)),
+            (_xy(sigma.sigma_1), _xy(sigma.sigma_2)),
+            self._proof_arg(pf), self._binding_arg(bind_auth), is_public, is_carrying)
+
+    def _replay_fixture_accounts(self):
+        """Recover (sk, r) for issuer then depositor (gen_e2e_world.account)."""
+        import random
+        rng_state = random.Random(_E2E_SEEDS[self.fx.flavor])
+        rng = lambda: rng_state.getrandbits(256)
+        out = []
+        for fields in (BOB_FIELDS, ALICE_FIELDS):
+            m = identity_scalar(canonical_identity_data(fields))
+            sk = rand_scalar(rng)
+            pk = mul(G1, sk)
+            r = rand_scalar(rng)
+            E = elgamal_encrypt(mul(G1, m), pk, r)
+            out.append(dict(m=m, sk=sk, pk=pk, E=E, r=r))
+        return out
+
     # -- lifecycle steps -------------------------------------------------------
 
     def bind_identities(self) -> List[Step]:
-        """Bind the two fixture identities WITH their identity leaves -- the
-        registry's incremental Poseidon Merkle accumulator updates on chain,
-        and must replay to the Python wallet tree's root."""
+        """Credential-bind the two fixture identities.  Leaves are not
+        inserted on-chain (unconstrained); governance posts the fixture root."""
+        recovered = self._replay_fixture_accounts()
         out = []
-        for b in self.fx.raw["binds"]:
+        for b, rec in zip(self.fx.raw["binds"], recovered):
             addr = self._addr(int(b["addr"], 16))
             self.anvil._rpc("anvil_setCode", [addr, ACCOUNT_STUB])
             self._impersonate(addr)
+            who = "issuer" if int(b["addr"], 16) == self.fx.issuer.addr else "depositor"
             out.append(self._send_from(
-                self._bind6(addr, _g1_tuple(b["pk"]), _ct_tuple(b["E"]),
-                            bool(b["isPublic"]), False, int(b["identityLeaf"])),
-                self.gov, f"bind {'issuer' if int(b['addr'],16)==self.fx.issuer.addr else 'depositor'}"))
-        onchain_root = self.reg.functions.identityRoot().call()
-        assert onchain_root == int(self.fx.raw["identityRoot"]), \
-            "on-chain incremental identityRoot must replay the wallet tree"
+                self.reg.functions.authorizeContractBinding(
+                    self.gov, _xy(rec["pk"]),
+                    (_xy(rec["E"].R), _xy(rec["E"].C)), bool(b["isPublic"]), False),
+                addr, f"authorize {who} binding"))
+            out.append(self._send_from(
+                self._credential_bind_fn(
+                    addr, rec["pk"], rec["sk"], bool(b["isPublic"]), False,
+                    m=rec["m"], r=rec["r"], E=rec["E"]),
+                self.gov, f"bind {who}"))
+        root = int(self.fx.raw["identityRoot"])
+        out.append(self._send_from(
+            self.reg.functions.setIdentityRoot(root), self.gov, "setIdentityRoot"))
+        assert self.reg.functions.identityRoot().call() == root
         return out
 
     def fund_issuer(self) -> List[Step]:

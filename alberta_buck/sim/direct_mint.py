@@ -327,8 +327,7 @@ class DirectMintBuckAgent(_DMBase):
             scenario.seed, "DirectMintBuckAgent", self._seq)
 
         self.proxy = d.chain.deploy("SimLP", sol_file="SimLP")
-        d.chain.send(d.reg.functions.bindContract(
-            self.proxy.address, idmod.BIND_PK, idmod.BIND_E, True, False))
+        idmod.bind_as_operator(d.chain, d.reg, self.proxy.address, True, False)
 
         now_ts = d.w3.eth.get_block("latest")["timestamp"]
         face = self.SEED_USDC * self.CREDIT_MULTIPLE

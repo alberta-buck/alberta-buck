@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {BN254} from "./BN254.sol";
+import {IContractBindingAdapter} from "./IContractBindingAdapter.sol";
 import {IPoseidonT3} from "./IPoseidonT3.sol";
 
 /// @title IdentityRegistry — on-chain registry of identity-bound public keys.
@@ -47,6 +48,15 @@ contract IdentityRegistry {
         BN254.G1Point T_C;    // ElGamal C commitment: m_tilde*G + r_tilde*pk
         BN254.G1Point T_R;    // ElGamal R commitment: r_tilde * G
         BN254.G1Point T_key;  // account-key commitment: sk_tilde * G
+    }
+
+    /// @notice Holder authorization for an exact contract-binding policy.
+    ///         This prevents a bearer registration proof from being copied
+    ///         and submitted first with different public/carrying flags.
+    struct ContractBindingProof {
+        uint256 e;
+        uint256 s;
+        BN254.G1Point T;
     }
 
     /// @notice 6-element Chaum-Pedersen proof (matches alberta_buck.wallet.chaum_pedersen).
@@ -150,6 +160,9 @@ contract IdentityRegistry {
     uint256 internal constant REGISTER_DOMAIN = uint256(
         keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2")
     );
+
+    uint256 public constant CONTRACT_BINDING_DOMAIN =
+        uint256(keccak256("AlbertaBuck:ContractBindingAuthorization:v1"));
 
     /// @notice Depth of the registry-Identity Merkle accumulator.
     ///
@@ -259,24 +272,36 @@ contract IdentityRegistry {
     ///         freeze is one-way; there is no unfreeze.
     mapping(address => bool)          public  carryingFrozen;
 
-    /// @notice The msg.sender of the bindContract() call that bound this
-    ///         address.  Only the binder may call setIsCarrying() before
-    ///         the flag is frozen by a counterparty's approve.  EOAs are
-    ///         self-registered and have no binder (binderOf[eoa] == 0),
-    ///         so setIsCarrying() can never target an EOA.
+    /// @notice The certified operator responsible for this binding. This is
+    ///         msg.sender on direct binds and the adapter-authenticated
+    ///         operator on adapter binds. Only that operator may call
+    ///         setIsCarrying() before the flag is frozen by a counterparty's
+    ///         approve. EOAs are self-registered and have no binder
+    ///         (binderOf[eoa] == 0), so setIsCarrying() cannot target an EOA.
     mapping(address => address)       public  binderOf;
+
+    /// @notice Exact, one-shot binding authorization recorded by a target
+    ///         contract for an already-certified operator. The target itself
+    ///         must publish this commitment before bindContract can consume it.
+    mapping(address => bytes32)       public  pendingBindingAuthorization;
+
+    /// @notice Narrow, governance-audited adapters permitted to bind contracts
+    ///         whose provenance and authority semantics they validate.
+    mapping(address => bool)          public  isBindingAdapter;
+    /// @notice Provenance address recorded when an adapter is approved.
+    mapping(address => address)       public  bindingAdapterProvenance;
 
     /// @notice Authorised Buck contract -- the only address permitted to
     ///         call markApproved() to freeze the carrying flag.  Set once
     ///         by governance via setBuck() after Buck is deployed.
     address                           public  buck;
 
-    /// @notice Registry-Identity Merkle accumulator root.  Updated on each
-    ///         registration when the incremental accumulator is active
-    ///         (identityPoseidon != address(0) and a non-zero identity leaf
-    ///         is provided).  Also settable by governance for batch updates.
-    ///         Consumed by the identity membership SNARK at Notes spend time
-    ///         to prove "the counterparty identity M is a registered identity".
+    /// @notice Registry-Identity Merkle accumulator root.  Posted by
+    ///         governance (setIdentityRoot).  register/bind refuse a
+    ///         caller-supplied identityLeaf until a proof that the leaf
+    ///         hashes the certified identity exists (P2-A).  Consumed by
+    ///         the identity membership SNARK at Notes spend time to prove
+    ///         "the counterparty identity M is a registered identity".
     ///         See alberta-buck-notes.org ("Mutual Decryptability", "one gadget") and alberta-buck-notes-flow.org "The Identity-M Spend Path".
     uint256                           public  identityRoot;
 
@@ -306,6 +331,17 @@ contract IdentityRegistry {
     event CarryingFrozen(address indexed target);
     event IdentityRootUpdated(uint256 indexed previous, uint256 indexed next);
     event IdentityPoseidonSet(address indexed previous, address indexed next);
+    event BindingAdapterSet(
+        address indexed adapter,
+        address indexed provenance,
+        bool approved
+    );
+    event ContractBindingAuthorized(
+        address indexed target,
+        address indexed binder,
+        bytes32 indexed authorization
+    );
+    event ContractBindingAuthorizationRevoked(address indexed target);
 
     // ---- constructor / governance ------------------------------------------
 
@@ -353,11 +389,34 @@ contract IdentityRegistry {
         emit BuckSet(_buck);
     }
 
+    /// @notice Approve or revoke a narrowly audited binding adapter.
+    /// @dev Approval is meaningful only together with review of the adapter's
+    ///      provenance checks and binding-authority semantics. Revocation does
+    ///      not call adapter code, so governance can always remove approval.
+    function setBindingAdapter(address adapter, bool approved) external {
+        require(msg.sender == governance, "not governance");
+        address provenance = bindingAdapterProvenance[adapter];
+        if (approved) {
+            require(adapter.code.length > 0, "adapter not a contract");
+            IContractBindingAdapter bindingAdapter = IContractBindingAdapter(adapter);
+            require(bindingAdapter.registry() == address(this), "adapter registry mismatch");
+            provenance = bindingAdapter.provenance();
+            require(provenance.code.length > 0, "provenance not a contract");
+            bindingAdapterProvenance[adapter] = provenance;
+        }
+        isBindingAdapter[adapter] = approved;
+        emit BindingAdapterSet(adapter, provenance, approved);
+    }
+
     /// @notice Post the current registry-Identity Merkle accumulator root.
     ///         Called by governance (or an authorised aggregator contract)
     ///         once per batch of registrations.  The new root must be non-zero.
     ///         Emits IdentityRootUpdated so off-chain indexers can track the
     ///         root history for membership proof generation.
+    /// @dev    Caller-supplied identityLeaf on register/bind is refused
+    ///         (unchecked identity leaf): there is no on-chain proof that a
+    ///         leaf hashes the identity encrypted in E.  Until that proof
+    ///         exists, the accumulator is governance-posted.
     function setIdentityRoot(uint256 _root) external {
         require(msg.sender == governance, "not governance");
         require(_root != 0,               "root=0");
@@ -366,10 +425,10 @@ contract IdentityRegistry {
     }
 
     /// @notice Set the Poseidon T3 contract used for incremental Merkle tree
-    ///         updates.  When set to a non-zero address, register() and
-    ///         bindContract() overloads that accept an identityLeaf parameter
-    ///         will update the identityRoot incrementally.  Governance may
-    ///         clear it (set to 0) to revert to governance-managed roots.
+    ///         updates.  Governance-posted roots (setIdentityRoot) remain the
+    ///         admission path: register/bind refuse identityLeaf != 0 until a
+    ///         leaf-relationship proof exists.  Governance may clear Poseidon
+    ///         (set to 0) if unused.
     function setIdentityPoseidon(address _poseidon) external {
         require(msg.sender == governance, "not governance");
         emit IdentityPoseidonSet(identityPoseidon, _poseidon);
@@ -446,8 +505,7 @@ contract IdentityRegistry {
     /// @notice Register caller's identity binding under issuer-signed credential.
     ///         msg.sender is the registrant -- bound into the Fiat-Shamir
     ///         transcript so a proof valid for one address cannot be replayed
-    ///         under another.  This overload does NOT update the identity
-    ///         Merkle accumulator; use the 6-arg overload with identityLeaf.
+    ///         under another.  Does not update the identity Merkle accumulator.
     function register(
         address issuer,
         BN254.G1Point calldata pk,
@@ -458,10 +516,9 @@ contract IdentityRegistry {
         _register(issuer, pk, E, sigma, proof, msg.sender, 0);
     }
 
-    /// @notice Register with an identity Merkle leaf for incremental
-    ///         accumulator update.  identityLeaf = Poseidon([M.x, M.y] % F_R)
-    ///         where M is the identity point encrypted in E_addr.  Pass 0 to
-    ///         skip the tree update (identical behaviour to the 5-arg overload).
+    /// @notice Register.  identityLeaf must be 0: a caller-supplied leaf is
+    ///         not proven to hash the identity encrypted in E, so non-zero
+    ///         values revert `unchecked identity leaf`.  Leaf linking is P2-A.
     function register(
         address issuer,
         BN254.G1Point calldata pk,
@@ -473,9 +530,8 @@ contract IdentityRegistry {
         _register(issuer, pk, E, sigma, proof, msg.sender, identityLeaf);
     }
 
-    /// @dev Shared registration logic.  If identityLeaf != 0 and the
-    ///      incremental accumulator is active, inserts the leaf and updates
-    ///      identityRoot.
+    /// @dev Shared registration logic.  identityLeaf != 0 is refused: there
+    ///      is no on-chain relation that leaf = Poseidon(M) for the M in E.
     function _register(
         address issuer,
         BN254.G1Point calldata pk,
@@ -486,6 +542,26 @@ contract IdentityRegistry {
         uint256 identityLeaf
     ) internal {
         require(!_isRegistered(registrant), "already registered");
+        require(identityLeaf == 0,          "unchecked identity leaf");
+        _verifyCredential(issuer, pk, E, sigma, proof, registrant);
+
+        _pk[registrant]     = pk;
+        _E_addr[registrant] = E;
+        issuerOf[registrant] = issuer;
+        emit Registered(registrant, issuer);
+    }
+
+    /// @dev PS signature + registration NIZK, Fiat-Shamir bound to `registrant`.
+    ///      Used by register (registrant = msg.sender) and by credential
+    ///      bindContract (registrant = target).
+    function _verifyCredential(
+        address issuer,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        PSSig calldata sigma,
+        RegistrationProof calldata proof,
+        address registrant
+    ) internal view {
         require(isTrustedIssuer[issuer],    "untrusted issuer");
         require(!BN254.isInfinity(sigma.sigma_1), "sigma_1=O");
         require(!BN254.isInfinity(pk),      "pk=O");
@@ -513,61 +589,86 @@ contract IdentityRegistry {
 
         // (a) PS pairing product
         require(_checkPSPairing(sigma, proof, _trustedIssuers[issuer]), "bad PS sig");
-
-        _pk[registrant]     = pk;
-        _E_addr[registrant] = E;
-        issuerOf[registrant] = issuer;
-        emit Registered(registrant, issuer);
-
-        if (identityLeaf != 0 && identityPoseidon != address(0)) {
-            uint256 newRoot = _insertIdentityLeaf(identityLeaf);
-            emit IdentityRootUpdated(identityRoot, newRoot);
-            identityRoot = newRoot;
-        }
     }
 
     // ---- contract identity binding -----------------------------------------
 
+    /// @notice Commit to an exact binding of this contract. Existing targets
+    ///         call this through their own controller/governance mechanism;
+    ///         merely being the first registered EOA to call bindContract is
+    ///         not evidence of control over the target.
+    function authorizeContractBinding(
+        address binder,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external {
+        require(msg.sender.code.length > 0, "target not a deployed contract");
+        require(!_isRegistered(msg.sender), "already bound");
+        require(binder != address(0), "binder=0");
+        bytes32 authorization = _bindingAuthorizationHash(
+            msg.sender, binder, pk, E, isPublicIdentity_, isCarrying_
+        );
+        pendingBindingAuthorization[msg.sender] = authorization;
+        emit ContractBindingAuthorized(msg.sender, binder, authorization);
+    }
+
+    /// @notice Revoke this contract's unconsumed binding authorization.
+    function revokeContractBindingAuthorization() external {
+        require(msg.sender.code.length > 0, "target not a deployed contract");
+        delete pendingBindingAuthorization[msg.sender];
+        emit ContractBindingAuthorizationRevoked(msg.sender);
+    }
+
+    function bindingAuthorizationHash(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external view returns (bytes32) {
+        return _bindingAuthorizationHash(
+            target, binder, pk, E, isPublicIdentity_, isCarrying_
+        );
+    }
+
     /// @notice Bind a (pk, E_addr) Identity to a deployed contract address.
-    ///         No PSSig / NIZK is required: trust derives from atomic
-    ///         deploy+bind (use `BuckAwareDeployer.deployAndBind` to deploy
-    ///         and bind in a single transaction so no front-runner has a
-    ///         window to register a competing binding before the operator).
-    ///         For pre-existing contracts the first binder wins.
-    /// @dev    The binding shape is identical to a self-registered EOA:
-    ///         (pk, E_addr) is stored, isVerified is set true.  The
-    ///         `isPublicIdentity_` flag records that the operator has chosen
-    ///         to publicly disclose m off-chain (typical for AMM pools and
-    ///         other BUCK-unaware contracts whose operator wants on-chain
-    ///         counterparty audit trails to be openable on subpoena).  An
-    ///         encrypted-identity binding (isPublicIdentity_ = false) is
-    ///         supported by the same call but currently exercised only by
-    ///         BUCK-aware contracts that ship the operator's off-chain
-    ///         per-counterparty pre-approval flow (deferred).
-    /// @dev    `isCarrying_` selects the demurrage transfer flavour for
-    ///         outflows from this address.  Service contracts that hold
-    ///         BUCK on behalf of others (Notes pool, AMM pools, the Jubilee
-    ///         fund itself) bind with `isCarrying_=true` so recipients
-    ///         absorb the proportional age basis on disbursement.  Multisig
-    ///         and AA wallets that act on behalf of a single user bind
-    ///         with `isCarrying_=false`.  msg.sender is recorded as the
-    ///         binder; only the binder may later call setIsCarrying() to
-    ///         change the flag, and only before any counterparty has
-    ///         frozen it via approve().
+    ///
+    ///         Three independent checks:
+    ///         1. Control: `target` is a deployed contract and unbound. The
+    ///            target authorizes the exact proposed binding. Contracts with
+    ///            known external provenance use a separately audited adapter.
+    ///         2. Certification: either (a) this exception -- msg.sender is a
+    ///            registered account and the supplied (pk, E) equal that
+    ///            account's stored identity -- or (b) the credential overload,
+    ///            which verifies the same PS signature + registration NIZK as
+    ///            register(), Fiat-Shamir registrant = uint160(target).
+    ///         3. Membership: identityLeaf != 0 is refused.  A caller-chosen
+    ///            leaf is not evidence of KYC admission.
+    ///
+    ///         The 5-arg overload is (a): an already-certified operator copies
+    ///         their registered identity onto `target`.  An unregistered
+    ///         caller cannot bind a fabricated identity.  Existing contracts
+    ///         must first authorize the exact binder, identity, and policy via
+    ///         authorizeContractBinding. Known-provenance contracts instead
+    ///         use bindContractFromAdapter.
+    ///
+    ///         `isPublicIdentity_` records that the operator discloses m
+    ///         off-chain (AMM pools, BUCK-unaware contracts).  `isCarrying_`
+    ///         selects demurrage flavour.  msg.sender is recorded as binder.
     function bindContract(
         address target,
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
         bool isPublicIdentity_,
         bool isCarrying_
-    ) external {
-        _bindContract(target, pk, E, isPublicIdentity_, isCarrying_, 0);
+    ) external virtual {
+        _bindCertifiedOperator(target, pk, E, isPublicIdentity_, isCarrying_);
     }
 
-    /// @notice Bind with an identity Merkle leaf for incremental accumulator
-    ///         update.  identityLeaf = Poseidon([M.x, M.y] % F_R) where M is
-    ///         the identity point encrypted in E_addr.  Pass 0 to skip the
-    ///         tree update (identical behaviour to the 5-arg overload).
+    /// @notice Bind.  identityLeaf must be 0 (unchecked identity leaf otherwise).
     function bindContract(
         address target,
         BN254.G1Point calldata pk,
@@ -575,34 +676,203 @@ contract IdentityRegistry {
         bool isPublicIdentity_,
         bool isCarrying_,
         uint256 identityLeaf
-    ) external {
-        _bindContract(target, pk, E, isPublicIdentity_, isCarrying_, identityLeaf);
+    ) external virtual {
+        require(identityLeaf == 0, "unchecked identity leaf");
+        _bindCertifiedOperator(target, pk, E, isPublicIdentity_, isCarrying_);
     }
 
-    function _bindContract(
+    /// @notice Bind `target` under a fresh credential.  Fiat-Shamir registrant
+    ///         is uint160(target), so a proof valid for an EOA (or another
+    ///         contract) cannot be replayed here. Certification is the
+    ///         credential itself; target authorization is still mandatory.
+    function bindContract(
+        address target,
+        address issuer,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        PSSig calldata sigma,
+        RegistrationProof calldata proof,
+        ContractBindingProof calldata bindingProof,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external {
+        require(target.code.length > 0, "target not a deployed contract");
+        require(!_isRegistered(target), "already bound");
+        _verifyCredential(issuer, pk, E, sigma, proof, target);
+        _verifyContractBindingProof(
+            target, msg.sender, pk, bindingProof,
+            isPublicIdentity_, isCarrying_
+        );
+        _consumeBindingControl(
+            target, msg.sender, pk, E, isPublicIdentity_, isCarrying_
+        );
+        _storeBinding(target, pk, E, isPublicIdentity_, isCarrying_, msg.sender, issuer);
+    }
+
+    /// @notice Bind a known-provenance contract through an audited adapter.
+    /// @dev The adapter authenticates `operator` against its immutable
+    ///      provenance contract. The registry copies only the operator's
+    ///      already-certified identity, so the adapter cannot inject keys,
+    ///      ciphertext, or issuer data. Each adapter must constrain policy
+    ///      flags to the values appropriate for its target type.
+    function bindContractFromAdapter(
+        address target,
+        address operator,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external {
+        require(isBindingAdapter[msg.sender], "not binding adapter");
+        require(target.code.length > 0, "target not a deployed contract");
+        require(!_isRegistered(target), "already bound");
+        require(_isRegistered(operator), "operator not registered");
+
+        BN254.G1Point memory pk = _pk[operator];
+        ElGamalCT memory E = _E_addr[operator];
+        _storeBinding(
+            target, pk, E, isPublicIdentity_, isCarrying_,
+            operator, issuerOf[operator]
+        );
+    }
+
+    function contractBindingChallenge(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        BN254.G1Point calldata T,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external view returns (uint256) {
+        return _fsContractBinding(
+            target, binder, pk, T, isPublicIdentity_, isCarrying_
+        );
+    }
+
+    function _verifyContractBindingProof(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        ContractBindingProof calldata proof,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) internal view {
+        require(_canonical(proof.e) && _canonical(proof.s), "bad binding scalar");
+        require(!BN254.isInfinity(proof.T), "binding T=O");
+        require(proof.e == _fsContractBinding(
+            target, binder, pk, proof.T, isPublicIdentity_, isCarrying_
+        ), "bad binding challenge");
+        require(BN254.eq(
+            BN254.mul(BN254.g1(), proof.s),
+            BN254.add(proof.T, BN254.mul(pk, proof.e))
+        ), "bad binding authorization");
+    }
+
+    function _fsContractBinding(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        BN254.G1Point calldata T,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) internal view returns (uint256) {
+        BN254.G1Point[] memory pts = new BN254.G1Point[](2);
+        pts[0] = pk;
+        pts[1] = T;
+        uint256[] memory scl = new uint256[](7);
+        scl[0] = CONTRACT_BINDING_DOMAIN;
+        scl[1] = uint256(uint160(address(this)));
+        scl[2] = block.chainid;
+        scl[3] = uint256(uint160(target));
+        scl[4] = uint256(uint160(binder));
+        scl[5] = isPublicIdentity_ ? 1 : 0;
+        scl[6] = isCarrying_ ? 1 : 0;
+        return BN254.fsChallenge(pts, scl);
+    }
+
+    /// @dev Already-certified operator exception: binder is registered and
+    ///      the supplied (pk, E) match that binder's stored identity.
+    function _bindCertifiedOperator(
         address target,
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
         bool isPublicIdentity_,
-        bool isCarrying_,
-        uint256 identityLeaf
+        bool isCarrying_
     ) internal {
-        require(target.code.length > 0,  "target not a deployed contract");
-        require(!_isRegistered(target),  "already bound");
+        require(target.code.length > 0,     "target not a deployed contract");
+        require(!_isRegistered(target),     "already bound");
+        require(_isRegistered(msg.sender),  "binder not registered");
+        require(_samePkE(msg.sender, pk, E), "uncertified identity");
+        _consumeBindingControl(
+            target, msg.sender, pk, E, isPublicIdentity_, isCarrying_
+        );
+        _storeBinding(
+            target, pk, E, isPublicIdentity_, isCarrying_,
+            msg.sender, issuerOf[msg.sender]
+        );
+    }
 
+    function _consumeBindingControl(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) internal {
+        bytes32 expected = _bindingAuthorizationHash(
+            target, binder, pk, E, isPublicIdentity_, isCarrying_
+        );
+        require(
+            pendingBindingAuthorization[target] == expected,
+            "target did not authorize binding"
+        );
+        delete pendingBindingAuthorization[target];
+    }
+
+    function _bindingAuthorizationHash(
+        address target,
+        address binder,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) internal view returns (bytes32) {
+        return keccak256(abi.encode(
+            keccak256("AlbertaBuck:ContractBindingControl:v1"),
+            address(this), block.chainid, target, binder,
+            pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y,
+            isPublicIdentity_, isCarrying_
+        ));
+    }
+
+    function _samePkE(
+        address a,
+        BN254.G1Point calldata pk,
+        ElGamalCT calldata E
+    ) internal view returns (bool) {
+        BN254.G1Point storage p = _pk[a];
+        ElGamalCT storage e = _E_addr[a];
+        return p.X == pk.X && p.Y == pk.Y
+            && e.R.X == E.R.X && e.R.Y == E.R.Y
+            && e.C.X == E.C.X && e.C.Y == E.C.Y;
+    }
+
+    function _storeBinding(
+        address target,
+        BN254.G1Point memory pk,
+        ElGamalCT memory E,
+        bool isPublicIdentity_,
+        bool isCarrying_,
+        address binder,
+        address issuer
+    ) internal {
         _pk[target]              = pk;
         _E_addr[target]          = E;
         isPublicIdentity[target] = isPublicIdentity_;
         isCarrying[target]       = isCarrying_;
-        binderOf[target]         = msg.sender;
-        emit ContractBound(target, msg.sender, isPublicIdentity_);
+        binderOf[target]         = binder;
+        issuerOf[target]         = issuer;
+        emit ContractBound(target, binder, isPublicIdentity_);
         emit CarryingFlagSet(target, isCarrying_);
-
-        if (identityLeaf != 0 && identityPoseidon != address(0)) {
-            uint256 newRoot = _insertIdentityLeaf(identityLeaf);
-            emit IdentityRootUpdated(identityRoot, newRoot);
-            identityRoot = newRoot;
-        }
     }
 
     /// @notice Pre-approval reconfiguration of the carrying flag.  Only the

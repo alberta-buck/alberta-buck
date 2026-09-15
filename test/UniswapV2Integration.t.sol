@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
@@ -64,8 +65,9 @@ interface IUniswapV2Pair {
 ///        deployed Uniswap V2 stack.
 ///
 /// @notice Validates that BUCK's identity-bound transfer rules co-exist with
-///         a stock Uniswap V2 deployment: the pair and router are bound under
-///         a Public Identity via `IdentityRegistry.bindContract`, which
+///         a stock Uniswap V2 deployment: the fixture pair and router are bound
+///         under a Public Identity via the test-only IdentityRegistryHarness,
+///         which
 ///         (a) waives the receipt-fragment requirement on pair->user payouts
 ///         (Public-sender fallback inside `_identityCheckedTransfer`), and
 ///         (b) lets the user-side `transferFrom(alice, pair, ...)` succeed
@@ -80,6 +82,11 @@ interface IUniswapV2Pair {
 ///         seed BUCK allowances directly via `vm.store`, exercising the
 ///         AMM swap mechanics without bypassing CP enforcement in the
 ///         production approve() path (covered separately in Buck.t.sol).
+///
+///         Production pool admission is covered by
+///         UniswapBindingAdapters.t.sol. A stock router has no owner/governance
+///         identity and therefore requires a separately justified deployment
+///         adapter or a BUCK-aware wrapper; the pool adapters do not bind it.
 contract UniswapV2IntegrationTest is Test {
 
     Buck                  internal buck;
@@ -112,7 +119,7 @@ contract UniswapV2IntegrationTest is Test {
 
         // Identity layer + register Alice and Bob.
         deployCodeTo(
-            "IdentityRegistry.sol:IdentityRegistry",
+            "test/harness/IdentityRegistryHarness.sol:IdentityRegistryHarness",
             abi.encode(GOV),
             REGISTRY_ADDR
         );

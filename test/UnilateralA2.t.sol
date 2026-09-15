@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 
 /// @notice Cross-artifact parity for the identity-targeted unilateral-A2 deposit
@@ -25,7 +26,7 @@ contract UnilateralA2DepositTest is Test {
     function setUp() public {
         vm.chainId(1);                          // wallet transcripts use chainid = 1
         vj  = vm.readFile("test/vectors/unilateral_a2.json");
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         // The depositor is *any* registered Fountain account bound to the
         // recipient's identity M_rec; verifyDepositCoupling reads its

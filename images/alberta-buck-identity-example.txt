@@ -1231,13 +1231,13 @@ Table of Contents
 
   Bob operates a Uniswap-style AMM liquidity pool.  Bob himself is a
   registered EOA, but the /pool contract/ is the entity that holds and
-  moves BUCK on his behalf.  At deployment time Bob (or the
-  `BuckAwareDeployer.deployAndBind' helper, atomically) calls
-  `IdentityRegistry.bindContract(pool, pk_bob, E_bob,
-  isPublicIdentity_=true)', publishing Bob's `(pk, E)' against the
-  pool's address and marking the pool `isPublicIdentity = true'.  Bob's
-  `identity_data' remains world-readable in the IdentityRegistry under
-  his own EOA.
+  moves BUCK on his behalf.  The governance-approved adapter for the
+  particular Uniswap factory checks that Bob is its registered
+  `feeToSetter' (V2) or `owner' (V3), creates or locates the canonical
+  pool, and calls `IdentityRegistry.bindContractFromAdapter' atomically,
+  publishing Bob's `(pk, E)' against the pool's address and marking the
+  pool `isPublicIdentity = true'.  Bob's `identity_data' remains
+  world-readable in the IdentityRegistry under his own EOA.
 
   Counterparties of the pool need not wait for the pool to call
   `approve' back: when no per-pair receipt fragment exists for the pool
@@ -1277,9 +1277,8 @@ Table of Contents
   │ E_bob_reg = (R_bob, C_bob)
   │ 
   │ # Bob registers as an EOA (same PS+NIZK verification as Alice -- omitted for brevity)
-  │ # His pool is then bound under a Public Identity at deployment via
-  │ #   IdentityRegistry.bindContract(pool, pk_bob, E_bob, isPublicIdentity_=true)
-  │ # (or atomically via BuckAwareDeployer.deployAndBind).
+  │ # His pool is then bound under a Public Identity through the audited
+  │ # adapter for its canonical Uniswap factory.
   │ POOL_ADDR = 0xa11ce0fa11ce0fa11ce0fa11ce0fa11ce0fa1100  # illustrative
   │ print("Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:")
   │ print(f"  pk_bob = {pt(pk_bob)}")
