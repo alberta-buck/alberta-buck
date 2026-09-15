@@ -244,7 +244,6 @@ fn receipts_replay() {
                 txn["txhash"].as_str().unwrap(),
                 txn["block"].as_u64().unwrap(),
                 txn["logindex"].as_u64().unwrap(),
-                &jw(&row["approve_nonce"]),
                 None,
                 &jw(&nonces["t_vd_payer"]),
                 &jw(&nonces["t_self"]),

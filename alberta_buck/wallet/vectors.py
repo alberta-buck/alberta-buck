@@ -111,7 +111,6 @@ BOB_ADDR   = 0x0b0b000000000000000000000000000000000b0b
 SPEND_RECIPIENT = BOB_ADDR
 CHAINID    = 1
 REGISTRY_ADDR = int("1d" * 20, 16)
-APPROVE_NONCE = 0
 
 # Public-issuer Schnorr binding (Notes mutual-decryptability, Phase 1).  A
 # distinct address so the Solidity parity test can bind it as an
@@ -207,7 +206,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         alice.E, E_for_bob, alice.kp.pk, bob.kp.pk,
         alice.kp.sk, r_prime,
         ALICE_ADDR, BOB_ADDR, CHAINID, rng=rng,
-        registry=REGISTRY_ADDR, nonce=APPROVE_NONCE,
+        registry=REGISTRY_ADDR,
     )
 
     # Stream-preservation: the legacy Phase-8 A-spend vectors (spend_cp +
@@ -339,7 +338,6 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_pk=bob.kp.pk, payee_sk=bob.kp.sk, payee_E_addr=bob.E,
         value=500_000000, block_time=RCPT_TIME,
         txhash="0x" + "ee" * 32, block=1234567, logindex=2,
-        approve_nonce=APPROVE_NONCE,
         rng=rng,
     )
 
@@ -510,7 +508,6 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             "spender":  scalar_to_hex(BOB_ADDR),
             "chainid":  scalar_to_hex(CHAINID),
             "registry": scalar_to_hex(REGISTRY_ADDR),
-            "nonce":    scalar_to_hex(APPROVE_NONCE),
             "E_alice":   {"R": _g1(alice.E.R),  "C": _g1(alice.E.C)},
             "E_for_bob": {"R": _g1(E_for_bob.R), "C": _g1(E_for_bob.C)},
             "r_prime":  scalar_to_hex(r_prime),
@@ -565,7 +562,6 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             "spender":       scalar_to_hex(BOB_ADDR),     # recipient assembling it
             "chainid":       scalar_to_hex(CHAINID),
             "registry":      scalar_to_hex(REGISTRY_ADDR),
-            "nonce":         scalar_to_hex(APPROVE_NONCE),
             "sender_pk":     _g1(alice.kp.pk),            # registry _pk[sender]
             "sender_E_addr": {"R": _g1(alice.E.R), "C": _g1(alice.E.C)},  # _E_addr[sender]
             "spender_pk":    _g1(bob.kp.pk),              # registry _pk[spender]

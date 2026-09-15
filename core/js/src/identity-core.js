@@ -149,22 +149,21 @@ export function wrapIdentity(wasm) {
 
     // ---- Chaum-Pedersen approve --------------------------------------------
     chaumPedersenProve(eAlice, eBob, pkA, pkB, skA, rPrime,
-                       sender, spender, chainid, registry, nonce, k1, k2) {
+                       sender, spender, chainid, registry, k1, k2) {
       const o = wasm.chaum_pedersen_prove(
         flatCT(eAlice), flatCT(eBob), ...flatP(pkA), ...flatP(pkB),
         hex(skA), hex(rPrime), hex(sender), hex(spender), hex(chainid),
-        hex(registry), hex(nonce),
-        hex(k1), hex(k2));
+        hex(registry), hex(k1), hex(k2));
       return { e: big(o[0]), s1: big(o[1]), s2: big(o[2]),
                T1: P(o, 3), T2: P(o, 5), T3: P(o, 7) };
     },
     chaumPedersenVerify: (eAlice, eBob, pkA, pkB, proof, sender, spender,
-                           chainid, registry, nonce) =>
+                           chainid, registry) =>
       wasm.chaum_pedersen_verify(
         flatCT(eAlice), flatCT(eBob), ...flatP(pkA), ...flatP(pkB),
         [hex(proof.e), hex(proof.s1), hex(proof.s2),
          ...flatP(proof.T1), ...flatP(proof.T2), ...flatP(proof.T3)],
-        hex(sender), hex(spender), hex(chainid), hex(registry), hex(nonce)),
+        hex(sender), hex(spender), hex(chainid), hex(registry)),
 
     // ---- Verifiable decryption ---------------------------------------------
     verifiableDecryptProve(E, sk, M, account, chainid, t) {

@@ -1,4 +1,4 @@
-"""Nonce-inclusive cross-language WALLET kernel vectors.
+"""Cross-language WALLET kernel vectors.
 
 Emits ``core/vectors/wallet-kernel-vectors.json`` from the pure-Python
 reference path (``BUCK_IDENTITY_BACKEND=py``) so the Rust (``cargo``),
@@ -265,7 +265,7 @@ def _build(seed: int) -> Dict[str, Any]:
                               alice["sk"], r_prime,
                               alice["addr"], bob["addr"], CHAINID,
                               rng=_replay([k1, k2]),
-                              registry=REGISTRY, nonce=0)
+                              registry=REGISTRY)
     t_vd_payer, t_self = draw(), draw()
     core = build_eoa_priv(
         chainid=CHAINID, contracts=CONTRACTS,
@@ -277,13 +277,11 @@ def _build(seed: int) -> Dict[str, Any]:
         payee_sk=bob["sk"], payee_E_addr=bob["E"],
         value=500_000000, block_time=1779999000,
         txhash="0x" + "ee" * 32, block=1234567, logindex=2,
-        approve_nonce=0,
         rng=_replay([t_vd_payer, t_self]))
     receipts.append({
         "kind": "eoa-priv", "role": "recipient",
         "payer": "alice", "payee": "bob",
         "E_for_payee": _ct(E_for_bob),
-        "approve_nonce": scalar_to_hex(0),
         "cp_proof": {"e": scalar_to_hex(cp.e), "s1": scalar_to_hex(cp.s1),
                      "s2": scalar_to_hex(cp.s2), "T1": _g1(cp.T1),
                      "T2": _g1(cp.T2), "T3": _g1(cp.T3)},
@@ -476,16 +474,6 @@ def _build(seed: int) -> Dict[str, Any]:
     def _wrong_value(d):
         d["txn"]["value"] = d["txn"]["value"] + 1
     _tamper(b1_rec, _wrong_value, "b1 txn value != face")
-
-    eoa_priv = next(r for r in receipts if r["kind"] == "eoa-priv")
-
-    def _legacy_approve(d):
-        del d["proof"]["approve"]["protocol"]
-    _tamper(eoa_priv, _legacy_approve, "legacy approve proof version")
-
-    def _wrong_approve_nonce(d):
-        d["proof"]["approve"]["nonce"] = scalar_to_hex(1)
-    _tamper(eoa_priv, _wrong_approve_nonce, "approve nonce changed")
 
     out["tampered"] = tampered
 

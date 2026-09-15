@@ -214,7 +214,6 @@ class ApproveReceipt:
     M_named:       Tuple              # the revealed Identity point of `sender`
     vd_proof:      VDProof            # spender's verifiable decryption -> M_named
     registry_addr: int                 # registry domain used by the approve proof
-    approve_nonce: int                 # per-sender approve nonce
 
 
 def approve_receipt_verify(
@@ -242,7 +241,7 @@ def approve_receipt_verify(
     if not chaum_pedersen_verify(
         snd.E_addr, receipt.E_for_spender, snd.pk, spn.pk,
         receipt.cp_proof, receipt.sender, receipt.spender, receipt.chainid,
-        receipt.registry_addr, receipt.approve_nonce,
+        receipt.registry_addr,
     ):
         return RcptResult(False, None, None, "(soundness) approve handshake fails")
 

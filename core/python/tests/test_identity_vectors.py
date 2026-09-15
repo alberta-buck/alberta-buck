@@ -155,7 +155,7 @@ def test_chaum_pedersen(kv):
     pk_a, pk_b = _pt(c["pk_a"]), _pt(c["pk_b"])
     args = (
         _i(c["sender"]), _i(c["spender"]), _i(c["chainid"]),
-        _i(c["registry"]), _i(c["nonce"]),
+        _i(c["registry"]),
     )
     proof = bi.chaum_pedersen_prove(
         e_a, e_b, pk_a, pk_b, _i(c["sk_a"]), _i(c["r_prime"]),
@@ -333,7 +333,7 @@ def test_identity_fixture(iv):
         _pt(iv["alice"]["elgamal_kp"]["pk"]), _pt(iv["bob"]["elgamal_kp"]["pk"]),
         (_i(cp["e"]), _i(cp["s1"]), _i(cp["s2"]), _pt(cp["T1"]), _pt(cp["T2"]), _pt(cp["T3"])),
         _i(ap["sender"]), _i(ap["spender"]), chainid,
-        _i(ap["registry"]), _i(ap["nonce"]),
+        _i(ap["registry"]),
     )
 
     isch = iv["issuer_schnorr"]

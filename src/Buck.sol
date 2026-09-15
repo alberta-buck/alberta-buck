@@ -324,12 +324,7 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 buckKValue,
         uint256 newLimit
     );
-    event ApproveReceipt(
-        address indexed owner,
-        address indexed spender,
-        uint256 indexed nonce,
-        bytes32 receiptHash
-    );
+    event ApproveReceipt(address indexed owner, address indexed spender, bytes32 receiptHash);
     event BuckTransferReceipt(
         address indexed from,
         address indexed to,
@@ -465,14 +460,13 @@ contract Buck is IERC20, IERC20Metadata {
     ) external nonReentrant returns (bool) {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
         require(identity.isVerified(spender),    "BUCK: spender not verified");
-        uint256 nonce = identity.approveNonces(msg.sender);
         require(
-            identity.verifyAndConsumeApprove(msg.sender, spender, E_bob, pi_CP),
+            identity.verifyApprove(msg.sender, spender, E_bob, pi_CP),
             "BUCK: bad CP proof"
         );
         bytes32 receipt = _ciphertextHash(E_bob);
         _receiptFragments[msg.sender][spender] = receipt;
-        emit ApproveReceipt(msg.sender, spender, nonce, receipt);
+        emit ApproveReceipt(msg.sender, spender, receipt);
         identity.markApproved(spender);
         _approve(msg.sender, spender, amount);
         return true;

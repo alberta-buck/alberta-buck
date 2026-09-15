@@ -57,8 +57,7 @@ def harvested_registration(registrant=0xBAD, registry=0):
     return issuer, owner, published, attacker, sigma, proof
 
 
-def false_identity_approval(sender=0xA, spender=0xB, chainid=1,
-                            registry=0, nonce=0):
+def false_identity_approval(sender=0xA, spender=0xB, chainid=1, registry=0):
     """§3: sender knowingly substitutes a third party's identity with a new proof."""
     alice, bob = Account(12345, 45678, 98765), Account(67890, 22222, 77777)
     victim_m, r_prime = 54321, 33333
@@ -66,7 +65,7 @@ def false_identity_approval(sender=0xA, spender=0xB, chainid=1,
     forged = elgamal_encrypt(mul(G1, victim_m), bob.pk, r_prime)
     proof = chaum_pedersen_prove(alice.E, forged, alice.pk, bob.pk, fake_sk,
                                  r_prime, sender, spender, chainid, seeded(5),
-                                 registry=registry, nonce=nonce)
+                                 registry=registry)
     return alice, bob, victim_m, fake_sk, r_prime, forged, proof
 
 

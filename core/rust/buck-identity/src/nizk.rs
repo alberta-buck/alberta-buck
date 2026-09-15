@@ -4,7 +4,7 @@
 //! the registrant holds `sk` for `pk`: (a) `sigma'` is a valid PS signature
 //! on `m`, (b) `E = (r*G, m*G + r*pk)` encrypts the same `m`, (k) `pk = sk*G`.
 //! Fiat-Shamir binds chainid, the registry contract address, and domain
-//! `AlbertaBuck:Register:v3`.
+//! `AlbertaBuck:Register:v2`.
 //! Verified on-chain by `IdentityRegistry.register`.
 
 use ark_bn254::{G1Affine, G2Affine};
@@ -17,11 +17,11 @@ use crate::{
     W256,
 };
 
-/// Full keccak word of `AlbertaBuck:Register:v3` -- not reduced mod ORDER.
+/// Full keccak word of `AlbertaBuck:Register:v2` -- not reduced mod ORDER.
 /// Mirrors `alberta_buck.wallet.nizk.REGISTER_DOMAIN` and
 /// `IdentityRegistry.REGISTER_DOMAIN`.
 fn register_domain() -> W256 {
-    keccak_raw(b"AlbertaBuck:Register:v3")
+    keccak_raw(b"AlbertaBuck:Register:v2")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

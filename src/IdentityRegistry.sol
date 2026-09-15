@@ -145,11 +145,10 @@ contract IdentityRegistry {
     uint256 internal constant H_Y =
         3372178911466361414640845512261989709787490420390555908180501907382229222644;
 
-    /// @notice Fiat-Shamir domains; full keccak words, not reduced mod R.
+    /// @notice Fiat-Shamir domain for registration; a full keccak word, not
+    ///         reduced mod R.  Mirrors alberta_buck.wallet.nizk.REGISTER_DOMAIN.
     uint256 public constant REGISTER_DOMAIN =
-        uint256(keccak256("AlbertaBuck:Register:v3"));
-    uint256 public constant APPROVE_DOMAIN =
-        uint256(keccak256("AlbertaBuck:Approve:v3"));
+        uint256(keccak256("AlbertaBuck:Register:v2"));
 
     /// @notice Depth of the registry-Identity Merkle accumulator.
     ///
@@ -270,11 +269,6 @@ contract IdentityRegistry {
     ///         call markApproved() to freeze the carrying flag.  Set once
     ///         by governance via setBuck() after Buck is deployed.
     address                           public  buck;
-
-    /// @notice Next nonce accepted by Buck's identity-bound approve path.
-    ///         The registry consumes it only for the authorised Buck contract;
-    ///         the read-only verifier remains available for receipt checking.
-    mapping(address => uint256)       public  approveNonces;
 
     /// @notice Registry-Identity Merkle accumulator root.  Updated on each
     ///         registration when the incremental accumulator is active
@@ -636,50 +630,21 @@ contract IdentityRegistry {
     /// @notice Verify Alice's Chaum-Pedersen proof of equal-plaintext re-encryption
     ///         that ``E_bob`` encrypts the same M as ``E_addr[sender]``.
     /// @dev    Reads E_alice from storage (caller cannot substitute), and binds
-    ///         the action/version domain, registry, parties, chain and current
-    ///         per-sender nonce into the transcript.
+    ///         the registry deployment, parties and chain into the transcript.
     function verifyApprove(
         address sender,
         address spender,
         ElGamalCT calldata E_bob,
         CPProof calldata pi
     ) external view returns (bool) {
-        return _verifyApprove(sender, spender, E_bob, pi, approveNonces[sender]);
-    }
-
-    /// @notice Verify a historical approval at its recorded nonce without
-    ///         consulting or changing the registry's current nonce.
-    function verifyApproveAtNonce(
-        address sender,
-        address spender,
-        ElGamalCT calldata E_bob,
-        CPProof calldata pi,
-        uint256 nonce
-    ) external view returns (bool) {
-        return _verifyApprove(sender, spender, E_bob, pi, nonce);
-    }
-
-    /// @notice Verify and consume the current approval nonce.  Only Buck may
-    ///         call this stateful path, preventing third-party nonce griefing.
-    function verifyAndConsumeApprove(
-        address sender,
-        address spender,
-        ElGamalCT calldata E_bob,
-        CPProof calldata pi
-    ) external returns (bool) {
-        require(msg.sender == buck, "only Buck");
-        uint256 nonce = approveNonces[sender];
-        if (!_verifyApprove(sender, spender, E_bob, pi, nonce)) return false;
-        approveNonces[sender] = nonce + 1;
-        return true;
+        return _verifyApprove(sender, spender, E_bob, pi);
     }
 
     function _verifyApprove(
         address sender,
         address spender,
         ElGamalCT calldata E_bob,
-        CPProof calldata pi,
-        uint256 nonce
+        CPProof calldata pi
     ) internal view returns (bool) {
         if (!_isRegistered(sender) || !_isRegistered(spender)) return false;
         if (!_canonical(pi.e) || !_canonical(pi.s1) || !_canonical(pi.s2)) return false;
@@ -716,7 +681,7 @@ contract IdentityRegistry {
 
         // Check 4: Fiat-Shamir
         return pi.e == _fsApprove(
-            E_a, E_bob, pkA, pkB, pi, sender, spender, block.chainid, nonce
+            E_a, E_bob, pkA, pkB, pi, sender, spender, block.chainid
         );
     }
 
@@ -1037,8 +1002,7 @@ contract IdentityRegistry {
         CPProof calldata pi,
         address sender,
         address spender,
-        uint256 chainid,
-        uint256 nonce
+        uint256 chainid
     ) internal view returns (uint256) {
         BN254.G1Point[] memory pts = new BN254.G1Point[](9);
         pts[0] = E_a.R;
@@ -1050,13 +1014,11 @@ contract IdentityRegistry {
         pts[6] = pi.T1;
         pts[7] = pi.T2;
         pts[8] = pi.T3;
-        uint256[] memory scl = new uint256[](6);
+        uint256[] memory scl = new uint256[](4);
         scl[0] = uint256(uint160(sender));
         scl[1] = uint256(uint160(spender));
         scl[2] = chainid;
         scl[3] = uint256(uint160(address(this)));
-        scl[4] = nonce;
-        scl[5] = APPROVE_DOMAIN;
         return BN254.fsChallenge(pts, scl);
     }
 

@@ -15,7 +15,7 @@ It is a Schnorr-family sigma protocol with four commitments:
 
 Fiat-Shamir challenge e binds (sigma', E, pk, A_ps, T_C, T_R, T_key), the
 registrant's Ethereum address, chainid, IdentityRegistry address, and domain
-`AlbertaBuck:Register:v3`.
+`AlbertaBuck:Register:v2`.
 
 Responses: s_m = m_tilde + e*m,  s_r = r_tilde + e*r,  s_sk = sk_tilde + e*sk
 (mod ORDER).
@@ -54,7 +54,7 @@ from alberta_buck.wallet.transcript import keccak_raw, keccak_scalar
 # Domain separator, a full keccak word (not reduced mod ORDER), hashed into
 # the Fiat-Shamir transcript so a registration proof cannot be replayed under
 # a different protocol version.  Mirrors IdentityRegistry.REGISTER_DOMAIN.
-REGISTER_DOMAIN = int.from_bytes(keccak_raw(b"AlbertaBuck:Register:v3"), "big")
+REGISTER_DOMAIN = int.from_bytes(keccak_raw(b"AlbertaBuck:Register:v2"), "big")
 
 
 @dataclass(frozen=True)

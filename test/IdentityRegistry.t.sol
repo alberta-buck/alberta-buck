@@ -326,36 +326,6 @@ contract IdentityRegistryTest is Test {
         assertTrue(reg.verifyApprove(alice, bob, E_b, _cpProof()));
     }
 
-    function test_verifyAndConsumeApprove_rejectsReplay_andKeepsHistoricalCheck() public {
-        _registerAlice();
-        _registerBob();
-        vm.prank(GOV);
-        reg.setBuck(address(this));
-
-        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
-        IdentityRegistry.CPProof memory pi = _cpProof();
-        assertTrue(reg.verifyApproveAtNonce(alice, bob, E_b, pi, 0));
-        assertTrue(reg.verifyAndConsumeApprove(alice, bob, E_b, pi));
-        assertEq(reg.approveNonces(alice), 1);
-        assertFalse(reg.verifyApprove(alice, bob, E_b, pi));
-        assertTrue(reg.verifyApproveAtNonce(alice, bob, E_b, pi, 0));
-        assertFalse(reg.verifyAndConsumeApprove(alice, bob, E_b, pi));
-        assertEq(reg.approveNonces(alice), 1);
-    }
-
-    function test_verifyAndConsumeApprove_onlyBuck() public {
-        _registerAlice();
-        _registerBob();
-        vm.prank(GOV);
-        reg.setBuck(address(this));
-
-        vm.prank(alice);
-        vm.expectRevert(bytes("only Buck"));
-        reg.verifyAndConsumeApprove(
-            alice, bob, _ct(".approve.E_for_bob"), _cpProof()
-        );
-    }
-
     function test_verifyApprove_rejects_unregistered_sender() public {
         _registerBob();
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
@@ -383,6 +353,33 @@ contract IdentityRegistryTest is Test {
         vm.chainId(2);
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         assertFalse(reg.verifyApprove(alice, bob, E_b, _cpProof()));
+    }
+
+    function test_verifyApprove_rejects_otherRegistry() public {
+        IdentityRegistry other = new IdentityRegistry(GOV);
+
+        // Give the second registry identical public records.  With every
+        // other transcript input held constant, only its address differs.
+        vm.etch(alice, hex"60006000fd");
+        vm.etch(bob, hex"60006000fd");
+        other.bindContract(
+            alice,
+            _g1(".alice.elgamal_kp.pk"),
+            _ct(".alice.ciphertext"),
+            false,
+            false
+        );
+        other.bindContract(
+            bob,
+            _g1(".bob.elgamal_kp.pk"),
+            _ct(".bob.ciphertext"),
+            false,
+            false
+        );
+
+        assertFalse(other.verifyApprove(
+            alice, bob, _ct(".approve.E_for_bob"), _cpProof()
+        ));
     }
 
     function test_verifyApprove_rejects_tampered_e() public {

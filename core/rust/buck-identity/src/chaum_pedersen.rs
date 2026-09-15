@@ -5,18 +5,13 @@
 //! Three-relation statement (ABI-stable 6-field proof):
 //! `T1 = T_key = a*G`, `T3 = T_R = b*G`, `T2 = T_diff = a*R_a - b*pk_b`;
 //! challenge binds `(E_alice, E_bob, pk_alice, pk_bob, T1, T2, T3, sender,
-//! spender, chainid, registry, nonce, APPROVE_DOMAIN)`; responses
+//! spender, chainid, registry)`; responses
 //! `s1 = a + e*sk`, `s2 = b + e*r'`.
 
 use ark_bn254::{G1Affine, G1Projective};
 use ark_ec::{AffineRepr, CurveGroup};
 
-use crate::keccak::keccak_raw;
 use crate::{fr_mod, g1_from_w, w_from_fr, w_from_g1, w_lt_order, G1w, Result, Transcript, W256};
-
-fn approve_domain() -> W256 {
-    keccak_raw(b"AlbertaBuck:Approve:v3")
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CpProof {
@@ -41,9 +36,7 @@ fn transcript(
     spender: &W256,
     chainid: &W256,
     registry: &W256,
-    nonce: &W256,
 ) -> Transcript {
-    let domain = approve_domain();
     let mut t = Transcript::new();
     t.p(&e_alice.0)
         .p(&e_alice.1)
@@ -57,9 +50,7 @@ fn transcript(
         .w(sender)
         .w(spender)
         .w(chainid)
-        .w(registry)
-        .w(nonce)
-        .w(&domain);
+        .w(registry);
     t
 }
 
@@ -75,7 +66,6 @@ pub fn chaum_pedersen_prove(
     spender: &W256,
     chainid: &W256,
     registry: &W256,
-    nonce: &W256,
     k1: &W256,
     k2: &W256,
 ) -> Result<CpProof> {
@@ -92,7 +82,7 @@ pub fn chaum_pedersen_prove(
 
     let e = transcript(
         &ea, &eb, &pka, &pkb, &t1, &t2, &t3,
-        sender, spender, chainid, registry, nonce,
+        sender, spender, chainid, registry,
     ).e();
     let s1 = a + e * fr_mod(sk_alice);
     let s2 = b + e * fr_mod(r_prime);
@@ -118,7 +108,6 @@ pub fn chaum_pedersen_verify(
     spender: &W256,
     chainid: &W256,
     registry: &W256,
-    nonce: &W256,
 ) -> Result<bool> {
     if !w_lt_order(&proof.e) || !w_lt_order(&proof.s1) || !w_lt_order(&proof.s2) {
         return Ok(false);
@@ -160,7 +149,7 @@ pub fn chaum_pedersen_verify(
 
     let e_check = transcript(
         &ea, &eb, &pka, &pkb, &t1, &t2, &t3,
-        sender, spender, chainid, registry, nonce,
+        sender, spender, chainid, registry,
     ).e();
     Ok(w_from_fr(&e_check) == proof.e)
 }

@@ -350,7 +350,6 @@ fn chaum_pedersen_prove(
     spender: BigUint,
     chainid: BigUint,
     registry: BigUint,
-    nonce: BigUint,
     k1: BigUint,
     k2: BigUint,
 ) -> PyResult<PyCp> {
@@ -365,7 +364,6 @@ fn chaum_pedersen_prove(
         &w(&spender)?,
         &w(&chainid)?,
         &w(&registry)?,
-        &w(&nonce)?,
         &w(&k1)?,
         &w(&k2)?,
     )
@@ -392,7 +390,6 @@ fn chaum_pedersen_verify(
     spender: BigUint,
     chainid: BigUint,
     registry: BigUint,
-    nonce: BigUint,
 ) -> PyResult<bool> {
     let p = kernel::chaum_pedersen::CpProof {
         e: w(&proof.0)?,
@@ -412,7 +409,6 @@ fn chaum_pedersen_verify(
         &w(&spender)?,
         &w(&chainid)?,
         &w(&registry)?,
-        &w(&nonce)?,
     )
     .map_err(err)
 }

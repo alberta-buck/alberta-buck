@@ -128,7 +128,7 @@ test("chaum-pedersen approve", { skip }, () => {
   const c = KV.chaum_pedersen;
   const proof = id.chaumPedersenProve(
     ct(c.E_a), ct(c.E_b), pt(c.pk_a), pt(c.pk_b), B(c.sk_a), B(c.r_prime),
-    B(c.sender), B(c.spender), B(c.chainid), B(c.registry), B(c.nonce),
+    B(c.sender), B(c.spender), B(c.chainid), B(c.registry),
     B(c.k1), B(c.k2));
   assert.equal(proof.e, B(c.proof.e));
   assert.equal(proof.s1, B(c.proof.s1));
@@ -138,7 +138,7 @@ test("chaum-pedersen approve", { skip }, () => {
   assert.deepEqual(proof.T3, pt(c.proof.T3));
   assert.ok(id.chaumPedersenVerify(
     ct(c.E_a), ct(c.E_b), pt(c.pk_a), pt(c.pk_b), proof,
-    B(c.sender), B(c.spender), B(c.chainid), B(c.registry), B(c.nonce)));
+    B(c.sender), B(c.spender), B(c.chainid), B(c.registry)));
 });
 
 test("verifiable decryption", { skip }, () => {
@@ -293,7 +293,7 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
     ct(ap.E_alice), ct(ap.E_for_bob),
     pt(IV.alice.elgamal_kp.pk), pt(IV.bob.elgamal_kp.pk),
     cpp, B(ap.sender), B(ap.spender), chainid,
-    B(ap.registry), B(ap.nonce)));
+    B(ap.registry)));
 
   // issuer schnorr (hBatch stored raw: what the chain computes and signs)
   const is = IV.issuer_schnorr;

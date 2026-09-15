@@ -310,13 +310,13 @@ fn golden_identity_fixture() {
     };
     assert!(chaum_pedersen::chaum_pedersen_verify(
         &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &sender, &spender,
-        &chainid, &jw(&ap["registry"]), &jw(&ap["nonce"])
+        &chainid, &jw(&ap["registry"])
     )
     .unwrap());
     // swapped sender/spender must fail
     assert!(!chaum_pedersen::chaum_pedersen_verify(
         &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &spender, &sender,
-        &chainid, &jw(&ap["registry"]), &jw(&ap["nonce"])
+        &chainid, &jw(&ap["registry"])
     )
     .unwrap());
 
@@ -640,7 +640,6 @@ fn kernel_vectors_replay() {
         &jw(&cp["spender"]),
         &jw(&cp["chainid"]),
         &jw(&cp["registry"]),
-        &jw(&cp["nonce"]),
         &jw(&cp["k1"]),
         &jw(&cp["k2"]),
     )
@@ -661,7 +660,6 @@ fn kernel_vectors_replay() {
         &jw(&cp["spender"]),
         &jw(&cp["chainid"]),
         &jw(&cp["registry"]),
-        &jw(&cp["nonce"]),
     )
     .unwrap());
 

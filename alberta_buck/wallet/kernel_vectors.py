@@ -1,4 +1,4 @@
-"""Nonce-inclusive cross-language kernel vectors.
+"""Cross-language kernel vectors.
 
 Emits ``core/vectors/identity-kernel-vectors.json`` from the pure-Python
 py_ecc REFERENCE path -- the executable spec -- so the Rust (`cargo`),
@@ -265,16 +265,15 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     r_prime = draw()
     E_b = elgamal_encrypt(M, pk_b, r_prime)
     sender, spender = registrant, 0x0B0B % (1 << 160)
-    approve_nonce = 0
     k1, k2 = draw(), draw()
     cp = chaum_pedersen_prove(E, E_b, pk_e, pk_b, sk_e, r_prime,
                               sender, spender, chainid, rng=_replay([k1, k2]),
-                              registry=registry, nonce=approve_nonce)
+                              registry=registry)
     out["chaum_pedersen"] = {
         "E_a": _ct(E), "E_b": _ct(E_b), "pk_a": _g1(pk_e), "pk_b": _g1(pk_b),
         "sk_a": scalar_to_hex(sk_e), "r_prime": scalar_to_hex(r_prime),
         "sender": _hx(sender), "spender": _hx(spender), "chainid": _hx(chainid),
-        "registry": _hx(registry), "nonce": _hx(approve_nonce),
+        "registry": _hx(registry),
         "k1": scalar_to_hex(k1), "k2": scalar_to_hex(k2),
         "proof": {
             "e": scalar_to_hex(cp.e), "s1": scalar_to_hex(cp.s1),

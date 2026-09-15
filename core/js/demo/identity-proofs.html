@@ -155,13 +155,14 @@
       const EB = step("E_for_bob = (r'*G, M + r'*pk_bob)",
         () => wasm.elgamal_encrypt(...M, ...pkB, hex(rP)));
       const spender = "0x" + "b0b".padStart(40, "0");
+      const registry = "0x0";
       const cp = step("Chaum-Pedersen proof (IdentityRegistry.verifyApprove calldata)",
         () => wasm.chaum_pedersen_prove(E, EB, ...pk, ...pkB, hex(sk), hex(rP),
                                         registrant, spender, "0x1",
-                                        hex(rand()), hex(rand())));
+                                        registry, hex(rand()), hex(rand())));
       const cpOk = step("Chaum-Pedersen verify (3 checks)",
         () => wasm.chaum_pedersen_verify(E, EB, ...pk, ...pkB, cp,
-                                         registrant, spender, "0x1"));
+                                         registrant, spender, "0x1", registry));
       if (!cpOk) throw new Error("approve handshake rejected");
       const dec = step("Bob decrypts: M = C - sk_bob*R  (recovers Alice's M)",
         () => wasm.elgamal_decrypt(...EB, hex(skB)));

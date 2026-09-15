@@ -54,9 +54,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     bob_addr   = _W3.to_checksum_address("0x000000000000000000000000000000000000b0b0")
     A, B = int(alice_addr, 16), int(bob_addr, 16)
     registry = int(reg.address, 16)
-    nonce = reg.functions.approveNonces(alice_addr).call()
     alice, bob, victim, fake_sk, rp, forged, forged_cp = false_identity_approval(
-        A, B, 1, registry, nonce,
+        A, B, 1, registry,
     )
 
     register(chain, reg, iss_addr, alice, alice_addr, seeded(1))
@@ -80,7 +79,7 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     honest_ct = elgamal_encrypt(alice.M, bob.pk, rp)
     hp = chaum_pedersen_prove(alice.E, honest_ct, alice.pk, bob.pk,
                               alice.sk, rp, A, B, 1, rng=seeded(7),
-                              registry=registry, nonce=nonce)
+                              registry=registry)
     he_t = (g1(honest_ct.R), g1(honest_ct.C))
     hcp_t = (hp.e, hp.s1, hp.s2, g1(hp.T1), g1(hp.T2), g1(hp.T3))
     honest_ok = reg.functions.verifyApprove(alice_addr, bob_addr, he_t, hcp_t).call()

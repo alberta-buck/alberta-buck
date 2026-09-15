@@ -219,7 +219,7 @@ def _eoa_priv_core(vectors, alice, bob, rng):
         payee_sk=bob["sk"], payee_E_addr=bob["E"],
         value=500_000000, block_time=1779999000,
         txhash="0x" + "ee" * 32, block=1234567, logindex=2,
-        approve_nonce=_h(ap["nonce"]), rng=rng)
+        rng=rng)
 
 
 def _make(kind, vectors, alice, bob, seed=0x5eed):

@@ -200,7 +200,6 @@ def build_eoa_priv(
     # Transaction anchor
     value: int, block_time: int,
     txhash: str, block: int, logindex: int,
-    approve_nonce: int,
     # Optional
     notes: Optional[List[str]] = None,
     rng=None,
@@ -225,7 +224,6 @@ def build_eoa_priv(
                                  E=payee_E_addr, sk=payee_sk),
             "E_for_payee": _ct_hex(E_for_payee),
             "cp_proof": _args_cp(cp_proof),
-            "approve_nonce": scalar_to_hex(approve_nonce),
             "txn": {"value": value, "block_time": block_time, "txhash": txhash,
                     "block": block, "logindex": logindex},
             "notes": notes,
@@ -240,7 +238,7 @@ def build_eoa_priv(
     vd_payer_rec = vd_proof_record(E_for_payee, payer_M, payee_addr, chainid, vd_payer)
     ap_rec = cp_proof_record(
         payer_E_addr, E_for_payee, payer_pk, payee_pk,
-        payer_addr, payee_addr, chainid, approve_nonce, cp_proof,
+        payer_addr, payee_addr, chainid, cp_proof,
     )
 
     vd_self_rec = _self_vd(payee_E_addr, payee_sk, payee_M, payee_addr, chainid, rng)

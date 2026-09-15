@@ -395,8 +395,8 @@ Four on-chain verifications, all reducible to BN254 precompile calls:
    =(sigma', E_new, pk_new, registrant_address)=, chain ID, and registry deployment.
    ~30K gas on top of step 1.  Total registration ~235K, paid once per address.
 3. *Chaum-Pedersen NIZK at =approve=*: proves the recipient's identity ciphertext re-encrypts the
-   same M registered in =E_alice=.  Fiat-Shamir binds the v3 action domain, registry deployment,
-   =msg.sender=, =spender=, =chainid=, and a one-shot per-sender approval nonce.
+   same M registered in =E_alice= and that the sender holds the registered account key.
+   Fiat-Shamir binds the registry deployment, =msg.sender=, =spender=, and =chainid=.
    ~29K gas per counterparty pair.
 4. *Chaum-Pedersen DLEQ at A-flavor spend* (=verifySpendCP=): proves the spender holds a single
    =sk_dep= that opens both the note's =E_n= and the registered =E_reg=.  ~36K gas via EIP-196.
@@ -424,11 +424,6 @@ function bindContract(address target, G1Point pk, ElGamalCT E,
 function trustIssuer(address issuer, PSPubKey ipk);                 // governance
 function verifyApprove(address sender, address spender,
                        ElGamalCT E_bob, CPProof pi) view returns (bool);
-function verifyApproveAtNonce(address sender, address spender,
-                              ElGamalCT E_bob, CPProof pi,
-                              uint256 nonce) view returns (bool);
-function verifyAndConsumeApprove(address sender, address spender,
-                                 ElGamalCT E_bob, CPProof pi) returns (bool);
 function verifySpendCP(address spender, address recipient,
                        ElGamalCT E_n, SpendCPProof cpProof) view returns (bool);
 function markApproved(address spender);                              // Buck-only
@@ -438,8 +433,13 @@ function setBuck(address buck);                                      // governan
 A few non-obvious points:
 
 - =verifyApprove= reads =E_alice= from registry storage so the caller cannot substitute a fake
-  credential.  =Buck.approve= uses =verifyAndConsumeApprove= so a valid proof is single-use;
-  receipts retain the emitted nonce and use =verifyApproveAtNonce= for historical checks.
+  credential.  Its transcript binds the verifying registry address, so a proof prepared for a
+  different registry deployment is rejected.  Here "registry" means =address(this)= while the
+  proof is verified: for a Diamond facet that is the stable Diamond proxy, not the replaceable
+  facet implementation.  Replacing a facet therefore does not invalidate proofs.  Moving the
+  registry to a different proxy requires unsubmitted registration/approve proofs to be regenerated
+  (and registry state to be migrated), but does not alter already minted Notes or their receipts;
+  those artifacts do not contain either proof.
 - =bindContract= is permissioned by deployment pattern, not governance: any caller may bind any
   yet-unbound deployed contract.  The intended discipline is operator OPSEC -- either the operator
   is the deployer and uses =BuckAwareDeployer.deployAndBind= for atomic deploy+bind, or the

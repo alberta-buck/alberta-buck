@@ -184,8 +184,6 @@ class CpProofRecord:
     sender:   str                          # 0x...
     spender:  str
     chainid:  int
-    protocol: str                          # "AlbertaBuck:Approve:v3"
-    nonce:    str                          # sender's consumed approve nonce
     proof:    Dict[str, Any]               # {"e": "0x..", "s1": "0x..", "s2": .., "T1": .., "T2": .., "T3": ..}
 
 
@@ -445,7 +443,7 @@ def vd_proof_record(E_ct: ElGamalCiphertext, M, account: int,
 def cp_proof_record(E_sender: ElGamalCiphertext, E_spender: ElGamalCiphertext,
                     pk_sender, pk_spender,
                     sender: int, spender: int, chainid: int,
-                    nonce: int, proof: CPProof) -> Dict[str, Any]:
+                    proof: CPProof) -> Dict[str, Any]:
     return {
         "E_a":     _ct_hex(E_sender),
         "E_b":     _ct_hex(E_spender),
@@ -454,8 +452,6 @@ def cp_proof_record(E_sender: ElGamalCiphertext, E_spender: ElGamalCiphertext,
         "sender":  scalar_to_hex(sender),
         "spender": scalar_to_hex(spender),
         "chainid": chainid,
-        "protocol": "AlbertaBuck:Approve:v3",
-        "nonce": scalar_to_hex(nonce),
         "proof": {
             "e":  scalar_to_hex(proof.e),
             "s1": scalar_to_hex(proof.s1),

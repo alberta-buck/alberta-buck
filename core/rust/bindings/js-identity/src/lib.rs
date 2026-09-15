@@ -433,7 +433,6 @@ pub fn chaum_pedersen_prove(
     spender: &str,
     chainid: &str,
     registry: &str,
-    nonce: &str,
     k1: &str,
     k2: &str,
 ) -> Result<Vec<String>, JsError> {
@@ -451,7 +450,6 @@ pub fn chaum_pedersen_prove(
         &w(spender)?,
         &w(chainid)?,
         &w(registry)?,
-        &w(nonce)?,
         &w(k1)?,
         &w(k2)?,
     )
@@ -484,7 +482,6 @@ pub fn chaum_pedersen_verify(
     spender: &str,
     chainid: &str,
     registry: &str,
-    nonce: &str,
 ) -> Result<bool, JsError> {
     if e_alice.len() != 4 || e_bob.len() != 4 || proof.len() != 9 {
         return Err(JsError::new("bad word counts"));
@@ -507,7 +504,6 @@ pub fn chaum_pedersen_verify(
         &w(spender)?,
         &w(chainid)?,
         &w(registry)?,
-        &w(nonce)?,
     )
     .map_err(err)
 }
