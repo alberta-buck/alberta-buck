@@ -90,6 +90,21 @@ contract NotesIssuerBindingTest is Test {
         vm.prank(issuer);
         notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode(), sig);
         assertEq(notes.nextLeafIndex(), 1, "bound mint must append the leaf");
+        assertEq(notes.publicIssuerOfCommitment(cms[0]), issuer,
+                 "mint attribution must bind the exact commitment");
+    }
+
+    function test_publicIssuer_duplicateCommitment_reverts() public {
+        uint256[] memory cms = _cms();
+        IdentityRegistry.SchnorrProof memory sig = _sign(SK, K, cms, issuer);
+        uint256 firstRoot = notes.noteRoot();
+        vm.prank(issuer);
+        notes.mint(hex"00", firstRoot, 12345, 0, 0, cms, _mode(), sig);
+
+        uint256 oldRoot = notes.noteRoot();
+        vm.prank(issuer);
+        vm.expectRevert("Notes: duplicate public commitment");
+        notes.mint(hex"00", oldRoot, 12346, 1, 0, cms, _mode(), sig);
     }
 
     function test_publicIssuer_badBinding_reverts() public {

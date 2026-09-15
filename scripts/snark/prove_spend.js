@@ -9,7 +9,8 @@
  *     mintFixture: { ... copy of the mint fixture for re-minting ... },
  *     spend: {
  *       leafIndex,                       // which of the two minted leaves
- *       public: { noteRoot, nullifier, face, recipient, chainId },
+ *       public: { noteRoot, nullifier, face, recipient, chainId, flavor,
+ *                 issuanceCommitment },
  *       proof:  { pA, pB, pC },
  *       proofBytes: "0x..."              // ABI-encoded for the adapter
  *     }
@@ -143,6 +144,7 @@ async function main() {
     const predicate = toBig(w.predicate[LEAF_INDEX]);
     const face      = v;
     const nullifier = H3(rho, idHash, NULLIFIER_TAG);
+    const issuanceCommitment = flavor === 3n ? cms[LEAF_INDEX] : 0n;
 
     const recipient = BigInt(RECIPIENT);
     const input = {
@@ -153,6 +155,7 @@ async function main() {
         chainId:       CHAIN_ID.toString(),
 
         flavor:        flavor.toString(),
+        issuanceCommitment: issuanceCommitment.toString(),
         v:             v.toString(),
         rho:           rho.toString(),
         idHash:        idHash.toString(),
@@ -164,11 +167,13 @@ async function main() {
     const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY);
 
     // Public-signal order matches `component main { public [...] }`:
-    //   [ noteRoot, nullifier, face, recipient, chainId ]
+    //   [ noteRoot, nullifier, face, recipient, chainId, flavor,
+    //     issuanceCommitment ]
     const expectPub = [
-        input.noteRoot, input.nullifier, input.face, input.recipient, input.chainId,
+        input.noteRoot, input.nullifier, input.face, input.recipient,
+        input.chainId, input.flavor, input.issuanceCommitment,
     ];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
         if (publicSignals[i] !== expectPub[i]) {
             throw new Error(`publicSignals[${i}] mismatch: ${publicSignals[i]} vs ${expectPub[i]}`);
         }
@@ -195,6 +200,7 @@ async function main() {
                 face:      input.face,
                 recipient: RECIPIENT,
                 chainId:   input.chainId,
+                flavor:    input.flavor,
             },
             witness: input,
             proof:   { pA, pB, pC },
@@ -210,6 +216,7 @@ async function main() {
     console.log(`  face      = ${input.face}`);
     console.log(`  recipient = ${RECIPIENT}`);
     console.log(`  chainId   = ${input.chainId}`);
+    console.log(`  flavor    = ${input.flavor}`);
 
     const vk = JSON.parse(fs.readFileSync(VKEY, "utf8"));
     const ok = await snarkjs.groth16.verify(vk, publicSignals, proof);

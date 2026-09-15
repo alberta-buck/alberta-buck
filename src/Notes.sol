@@ -25,9 +25,11 @@ import {BN254}                         from "./BN254.sol";
 ///         SNARK-attested `newRoot`, advances `nextLeafIndex`, and pulls
 ///         BUCK from the issuer.
 ///
-///         Spend is unchanged from Phase 7: the spender supplies a Groth16
-///         proof binding (noteRoot, nullifier, face, recipient, chainId) to
-///         a Poseidon opening + Merkle membership under a recent root.
+///         Spend: the spender supplies a Groth16 proof binding
+///         (noteRoot, nullifier, face, recipient, chainId, flavor) to a
+///         Poseidon opening + Merkle membership under a recent root.  Each
+///         spendCoupled* entry point passes its flavor constant so an
+///         A-opening cannot redeem through the B1 path.
 ///
 /// @dev    Tree shape: depth 20 (max 2^20 = ~1M notes), leaf hash is
 ///         Poseidon-5(flavor, v, rho, idHash, predicate).  Internal nodes
@@ -88,6 +90,13 @@ contract Notes {
     ///         PUBLIC-mode mint path -- the "bearer => public issuer" invariant.
     uint256 public constant MODE_PUBLIC  = 1;
     uint256 public constant MODE_PRIVATE = 2;
+
+    /// @notice Note flavor labels, mirrored from `circuits/spend.circom` and
+    ///         `alberta_buck.wallet.notes`.  Each spendCoupled* entry point
+    ///         passes its constant into the spend SNARK as a public input.
+    uint256 public constant FLAVOR_A1 = 1;
+    uint256 public constant FLAVOR_A2 = 2;
+    uint256 public constant FLAVOR_B1 = 3;
 
     // ---- governance + verifier --------------------------------------------
 
@@ -161,7 +170,7 @@ contract Notes {
     ///         ciphertext `eEnc` to the SPECIFIC addressed (A1/A2) note being
     ///         spent, so a depositor cannot substitute a self-addressed
     ///         ciphertext for the note's committed one.  This closes the two
-    ///         gaps the flavor-agnostic spend proof leaves open:
+    ///         gaps the spend proof (which binds flavor but not eEnc) leaves open:
     ///           * addressed-binding — "only the recipient Identity M_rec can
     ///             spend an A1/A2 note"; and
     ///           * A2 collusion — "an un-nameable note is un-spendable".
@@ -246,6 +255,10 @@ contract Notes {
     ///         recipient-blinded re-encryption bindings (Notes
     ///         mutual-decryptability, Phase 2; see verifyIssuerReenc).
     event IssuerReencBound(address indexed issuer, uint256 indexed newRoot, uint256 count);
+
+    /// @notice Authenticated public-mint issuer for an exact note commitment.
+    ///         The spend circuit reveals this handle only for B1 notes.
+    mapping(uint256 => address) public publicIssuerOfCommitment;
 
     // ---- constructor / governance -----------------------------------------
 
@@ -429,6 +442,14 @@ contract Notes {
                 msg.sender, keccak256(abi.encodePacked(cms)), issuerSig),
             "Notes: bad issuer binding"
         );
+        // Persist the issuer authenticated by the batch Schnorr for every
+        // exact commitment.  Refuse duplicates so a later public issuer cannot
+        // overwrite the first note's issuance attribution.
+        for (uint256 i = 0; i < cms.length; i++) {
+            require(publicIssuerOfCommitment[cms[i]] == address(0),
+                    "Notes: duplicate public commitment");
+            publicIssuerOfCommitment[cms[i]] = msg.sender;
+        }
         uint256 startIndex =
             _advanceAndPull(newRoot, nextLeafIndex_, totalFace, cms.length);
         emit Minted(msg.sender, totalFace, startIndex, cms.length, newRoot);
@@ -749,12 +770,13 @@ contract Notes {
     ///         depositor-substituted one.
     ///
     ///      The note's commitment + nullifier are proven by the generic spend
-    ///      SNARK (cm in the pool tree, nullifier well-formed).
+    ///      SNARK (cm in the pool tree, nullifier well-formed, flavor bound
+    ///      to this entry point).
     ///
     ///      CAVEAT.  Steps 1-2 establish that `eEnc` decrypts (under the
     ///      depositor's authenticated m_rec) to a registered member — but NOT
-    ///      that `eEnc` is the note's committed ciphertext: the spend SNARK is
-    ///      flavor-agnostic and exposes no idHash.  Step 3 is what makes the
+    ///      that `eEnc` is the note's committed ciphertext: the spend SNARK
+    ///      binds flavor and exposes no idHash.  Step 3 is what makes the
     ///      addressed-binding ("only M_rec can spend") and A2-collusion
     ///      ("un-nameable note un-spendable") guarantees hold.  Coupled spends
     ///      require both verifiers to be wired and reject empty proofs, so
@@ -770,6 +792,7 @@ contract Notes {
         IdentityRegistry.DepositCouplingProof calldata dc,
         bytes   calldata membershipProof,
         bytes   calldata noteBindingProof,
+        uint256          flavor,
         bool             a1Layout
     ) internal {
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
@@ -785,7 +808,7 @@ contract Notes {
         // Note commitment + nullifier: cm in the pool tree, nullifier well-formed.
         require(
             spendVerifier.verifySpend(
-                proof, root, nullifier, face, recipient, block.chainid
+                proof, root, nullifier, face, recipient, block.chainid, flavor, 0
             ),
             "Notes: bad spend proof"
         );
@@ -832,7 +855,7 @@ contract Notes {
         bytes   calldata noteBindingProof
     ) external {
         _spendCoupled(proof, root, nullifier, face, recipient, eIss, dc,
-                      membershipProof, noteBindingProof, false);
+                      membershipProof, noteBindingProof, FLAVOR_A2, false);
         emit SpentCoupledA2(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
     }
 
@@ -859,13 +882,19 @@ contract Notes {
         bytes   calldata noteBindingProof
     ) external {
         _spendCoupled(proof, root, nullifier, face, recipient, eRec, dc,
-                      membershipProof, noteBindingProof, true);
+                      membershipProof, noteBindingProof, FLAVOR_A1, true);
         emit SpentCoupledA1(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
     }
 
     // ---- Identity-M-bound B1 spend (bearer, public issuer) ---------------
 
     /// @notice Redeem an identity-M-bound B1 note -- bearer, *public* issuer.
+    ///         `issuanceCommitment` is the exact note commitment opened by the
+    ///         spend SNARK.  Its mint-time issuer was recorded only after the
+    ///         registered-key batch Schnorr passed; the supplied `issuer` must
+    ///         match that immutable attribution.  This deliberately reveals a
+    ///         B1 spend-to-mint handle: bearer issuers are public, while A1/A2
+    ///         keep the corresponding circuit signal zero.
     ///         The depositor (= `recipient`, the payout account) re-encrypts its
     ///         own registered Identity M_dep under the public issuer's key
     ///         (`eDepForIss`) and proves, hiding every Identity, that the
@@ -891,6 +920,7 @@ contract Notes {
         uint256          nullifier,
         uint256          face,
         address          recipient,
+        uint256          issuanceCommitment,
         address          issuer,
         IdentityRegistry.ElGamalCT            calldata eDepForIss,
         IdentityRegistry.DepositorBindingProof calldata b1Proof,
@@ -905,13 +935,20 @@ contract Notes {
         require(_isAcceptedRoot(root),    "Notes: unknown root");
         require(!nullifiers[nullifier],   "Notes: already spent");
 
-        // Note commitment + nullifier.
+        // Note commitment + nullifier.  Flavor 3 (B1) is a public input, so
+        // an A1/A2 opening cannot verify here even with a nonempty membership.
         require(
             spendVerifier.verifySpend(
-                proof, root, nullifier, face, recipient, block.chainid
+                proof, root, nullifier, face, recipient, block.chainid, FLAVOR_B1,
+                issuanceCommitment
             ),
             "Notes: bad spend proof"
         );
+
+        // The proof above opens this exact B1 commitment.  Its issuer was
+        // recorded only after the mint batch's registered-key Schnorr passed.
+        require(publicIssuerOfCommitment[issuanceCommitment] == issuer,
+                "Notes: wrong B1 issuer");
 
         // Identity-M binding, half 1: the depositor binding sigma (incl. the
         // P_dep commitment).

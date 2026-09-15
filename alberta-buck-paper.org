@@ -173,7 +173,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
      gap between an anonymous payer and an anonymous payee.
    - *A complete, shipped construction* of all three realisable flavours
      -- addressed/public (A1), addressed/private (A2), bearer/public (B1)
-     -- on Ethereum: Groth16 batch mint, flavour-agnostic spend, and
+     -- on Ethereum: Groth16 batch mint, shared flavour-bound spend, and
      spend-time composition of a deposit sigma, a bound set-membership
      proof, and a note-to-ciphertext tie, every verifier real and
      measured (Sec. [[#sec:eval]]).
@@ -802,10 +802,13 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    The contract escrows exactly the proven total in the same atomic
    call.
 
-   Spends are proven by a single flavour-agnostic circuit: the prover
+   Spends are proven by a single shared, flavour-bound circuit: the prover
    shows knowledge of an opening of /some/ tree leaf under a recent root,
    with public \( (\mathsf{root},\ nf,\ \mathrm{face},\ \mathrm{recipient},\
-   \mathrm{chainid}) \), where the nullifier
+   \mathrm{chainid},\ \mathrm{flavor},\ \mathrm{issuanceCommitment}) \).
+   The entrypoint supplies its flavor, the circuit requires it to match the
+   committed opening, and the current predicate is constrained to zero.  For
+   B1 only, \(\mathrm{issuanceCommitment}=cm\); A1/A2 expose zero.  The nullifier
 
    \[ nf = \mathrm{Poseidon}_3(\rho,\ idHash,\ 4242) \]
 
@@ -852,12 +855,16 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
      spend the depositor encrypts their own identity under the public
      issuer's key, \( eDepForIss = (rG,\ M_{\mathrm{dep}} + r\,pk_{\mathrm{iss}}) \),
      and proves it carries the same identity their payout account is
-     bound to.
+     bound to.  The public-mint batch Schnorr authenticates the issuer and
+     =Notes= records every exact commitment under that issuer.  At spend the
+     circuit-revealed B1 commitment must map to the issuer used by this
+     depositor-binding proof, so an otherwise-valid substitute issuer cannot
+     compose with the note.
 
 ** The spend-side composition
 
    Every addressed deposit (=spendCoupledA1=, =spendCoupledA2=) verifies,
-   in one transaction, the flavour-agnostic note proof plus three
+   in one transaction, the shared flavour-bound note proof plus three
    mutually-bound gates:
 
    1. *The deposit-coupling sigma* (=verifyDepositCoupling=; EIP-196[fn:EIP-196]
@@ -1319,7 +1326,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    |--------------------+-------------------------------------------------------------------------------------------------------------------------|
    | Identity substrate | =IdentityRegistry=: ElGamal credentials, PS verification, incremental Poseidon identity accumulator (commit-before-use) |
    | Batch mint         | =mint_batch[_a2].circom= per pinned N; issuer Schnorr (public) / blinded re-encryption binding + leaf-tie (private)     |
-   | Spend              | =spend.circom= (flavour-agnostic, depth 20); nullifier =Poseidon3(rho, idHash, 4242)=                                   |
+   | Spend              | =spend.circom= (shared, public flavour + B1 issuance commitment, depth 20); nullifier =Poseidon3(rho, idHash, 4242)=      |
    | Deposit sigmas     | =verifyDepositCoupling= (A1/A2), =verifyDepositorBinding= (B1); EIP-196                                                 |
    | Bound membership   | =identity_membership_g1tie.circom=; public inputs derived from the sigma's P                                            |
    | Note tie           | =note_binding.circom= (A2, 25 public inputs), =note_binding_a1.circom= (A1, 26: face at index 1)                        |
@@ -1416,9 +1423,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+LATEX: {\scriptsize
    | Flavour                 | =mint=  | =spendCoupled*= |
    |-------------------------+---------+-----------------|
-   | A1 (addressed, public)  | 487,875 | 1,035,486       |
-   | A2 (addressed, private) | 607,639 | 1,029,100       |
-   | B1 (bearer, public)     | 487,875 | 701,474         |
+   | A1 (addressed, public)  | 509,081 | 1,049,704       |
+   | A2 (addressed, private) | 606,220 | 1,043,321       |
+   | B1 (bearer, public)     | 509,081 | 808,373         |
    #+LATEX: }
 
    Isolated per-phase verification gas:
@@ -1426,7 +1433,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+LATEX: {\scriptsize
    | Verification phase                  | A1      | A2      | B1      |
    |-------------------------------------+---------+---------+---------|
-   | note proof (=spend.circom=, shared) | 227,256 | 227,256 | 227,256 |
+   | note proof (=spend.circom=, shared) | 241,265 | 241,282 | 333,386 |
    | bound membership (=g1tie=)          | 253,120 | 253,120 | 253,120 |
    | deposit sigma (EIP-196)             | 89,866  | 89,866  | 128,734 |
    | note tie (=note_binding[_a1]=)      | 377,257 | 368,457 | --      |
@@ -1434,9 +1441,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
 
    The cost structure tells the paper's story in numbers.  Both
    /addressed/ flavours pay the tie -- the price of "only
-   \( M_{\mathrm{rec}} \) can spend", about 330K over bearer -- while
-   issuer /anonymity/ costs only the mint-side delta (~120K, the blinded
-   re-encryption binding): A2's spend is within half a percent of A1's.
+   \( M_{\mathrm{rec}} \) can spend", about 240K over bearer -- while
+   issuer /anonymity/ costs only the mint-side delta (~100K, the blinded
+   re-encryption binding): A2's spend is within one percent of A1's.
    Set-membership, the provably necessary ingredient, is one constant
    253K Groth16 verify regardless of registry size.  Prover side: the
    tie circuits are 2.4M (A2) and 2.86M (A1) non-linear R1CS

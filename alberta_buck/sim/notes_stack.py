@@ -475,7 +475,8 @@ class NotesStack:
                    _g1_tuple(db["A2"]), _g1_tuple(db["A4"]), _g1_tuple(db["B1"]),
                    _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
             fn = self.notes.functions.spendCoupledB1(
-                proof, root, nf, face, rec, self._addr(self.fx.issuer.addr),
+                proof, root, nf, face, rec, int(d["opening"]["cm"]),
+                self._addr(self.fx.issuer.addr),
                 _ct_tuple(d["sigma"]["eDepForIss"]), b1p, mem)
         else:
             dc = d["sigma"]["dc"]

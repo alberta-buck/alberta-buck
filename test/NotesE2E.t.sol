@@ -255,6 +255,39 @@ abstract contract NotesE2EBase is Test {
         _spend();
     }
 
+    /// @dev An honest proof of this flavor must not redeem through any other
+    ///      spendCoupled* entry point: the spend SNARK's public flavor is
+    ///      the rejecting check (finding 7), even with nonempty membership.
+    function test_e2e_wrongFlavorEntryPoint_reverts() public {
+        _mint();
+        bytes memory proof = _b(".spend.proofBytes");
+        uint256 root = _u(".spend.public.noteRoot");
+        uint256 nf   = _u(".spend.public.nullifier");
+        bytes memory memProof = _b(".membership.proofBytes");
+        IdentityRegistry.ElGamalCT memory zct;
+        IdentityRegistry.DepositCouplingProof memory zdc;
+        IdentityRegistry.DepositorBindingProof memory zdb;
+        bytes memory nb = hex"00";
+
+        vm.startPrank(depositor);
+        if (_flavorCode() != 3) {
+            vm.expectRevert(bytes("Notes: bad spend proof"));
+            notes.spendCoupledB1(
+                proof, root, nf, face, payout, _u(".opening.cm"), issuer,
+                zct, zdb, memProof
+            );
+        }
+        if (_flavorCode() != 1) {
+            vm.expectRevert(bytes("Notes: bad spend proof"));
+            notes.spendCoupledA1(proof, root, nf, face, payout, zct, zdc, memProof, nb);
+        }
+        if (_flavorCode() != 2) {
+            vm.expectRevert(bytes("Notes: bad spend proof"));
+            notes.spendCoupledA2(proof, root, nf, face, payout, zct, zdc, memProof, nb);
+        }
+        vm.stopPrank();
+    }
+
     /// @dev Call-level gas of each verification phase in isolation -- the
     ///      numbers the docs' per-flavor cost table quotes.  All JSON parsing
     ///      is hoisted OUT of the gas windows (cheatcode calls cost gas).
@@ -273,9 +306,11 @@ abstract contract NotesE2EBase is Test {
         uint256 px = _u(string.concat(pkey, ".x"));
         uint256 py = _u(string.concat(pkey, ".y"));
 
-        // Note proof (shared by all flavors).
+        // Note proof (shared by all flavors; public flavor matches the entry point).
         uint256 g0 = gasleft();
-        bool okSpend = spendAdapter.verifySpend(spendProof, noteRoot, nf, spendFace, spendRec, 1);
+        bool okSpend = spendAdapter.verifySpend(
+            spendProof, noteRoot, nf, spendFace, spendRec, 1, _flavorCode(),
+            _isBearer() ? _u(".opening.cm") : 0);
         uint256 spendGas = g0 - gasleft();
         assertTrue(okSpend, "spend proof must verify");
         console2.log(string.concat("[gas:", _flavor(), "] spend proof:"), spendGas);
@@ -331,6 +366,12 @@ abstract contract NotesE2EBase is Test {
         return keccak256(bytes(_flavorPure())) == keccak256("b1");
     }
     function _flavorPure() internal pure virtual returns (string memory);
+    function _flavorCode() internal pure returns (uint256) {
+        bytes32 h = keccak256(bytes(_flavorPure()));
+        if (h == keccak256("a1")) return 1;
+        if (h == keccak256("a2")) return 2;
+        return 3;
+    }
 }
 
 contract NotesE2E_B1 is NotesE2EBase {
@@ -359,7 +400,10 @@ contract NotesE2E_B1 is NotesE2EBase {
         bytes memory memProof = _b(".membership.proofBytes");
         vm.prank(depositor);
         uint256 g = gasleft();
-        notes.spendCoupledB1(proof, root, nf, face, payout, issuer, eDep, db, memProof);
+        notes.spendCoupledB1(
+            proof, root, nf, face, payout, _u(".opening.cm"), issuer,
+            eDep, db, memProof
+        );
         gasUsed = g - gasleft();
     }
 }

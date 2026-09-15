@@ -1,7 +1,7 @@
 """BUCK Notes commitment / nullifier construction (Phase 7+ corrected design).
 
 Hash family: circomlib Poseidon over BN254 (matches the shipped
-=spend.circom= and the planned =spend_a.circom=).  The Python implementation
+=spend.circom=).  The Python implementation
 in :mod:`alberta_buck.wallet.poseidon` agrees with circomlibjs's unoptimized
 variant, which is the same hash the optimized circuit Poseidon computes (just
 via different but equivalent constants).  See :file:`scripts/snark/poseidon_t3_code.js`
@@ -9,14 +9,19 @@ for the on-chain bytecode story.
 
 Wire formats::
 
-    cm    = Poseidon([flavor, v, rho, id_hash, predicate])    # spend.circom L90
-    nf_b  = Poseidon([rho, id_hash, 4242])                    # spend.circom L113-117
+    cm    = Poseidon([flavor, v, rho, id_hash, predicate])    # spend.circom (C)
+    nf_b  = Poseidon([rho, id_hash, 4242])                    # spend.circom (N)
     nf_a  = Poseidon([rho, id_hash, 4243])                    # reserved; unused on chain
 
 The shipped unified ``spend.circom`` derives the 4242-tagged nullifier for
 EVERY flavor; the 4243 tag is reserved in case a future flavor-split
 derivation is wanted (it would keep the namespaces disjoint for the same
 ``(rho, id_hash)`` pair).
+
+For B1 only, the spend circuit also exposes the recomputed note commitment as
+``issuanceCommitment``.  ``Notes`` records that commitment under the public
+issuer whose registered-key batch Schnorr authorized its mint, and requires
+the spend-time issuer to match.  A1/A2 keep this public signal at zero.
 
 A-flavor identity binding: the spend circuit does **not** learn the
 recipient from ``id_hash`` -- it is opaque to the circuit.  The addressed
@@ -51,7 +56,7 @@ from alberta_buck.wallet.poseidon import F_R, poseidon
 NULLIFIER_TAG_B = 4242
 NULLIFIER_TAG_A = 4243
 
-# Flavor labels -- match the circuit's `flavor` private input.
+# Flavor labels -- match the circuit's public `flavor` input.
 FLAVOR_A1 = 1
 FLAVOR_A2 = 2
 FLAVOR_B1 = 3
@@ -64,8 +69,9 @@ class NoteOpening:
     """The witness a wallet stores for one outstanding note.
 
     Mirrors the SNARK opening tuple ``(flavor, v, rho, id_hash, predicate)``
-    -- exactly the five private inputs to ``Poseidon(5)`` in
-    :file:`circuits/spend.circom`.  The wallet is responsible for computing
+    -- the five Poseidon-5 words in :file:`circuits/spend.circom` (``flavor``
+    is also a public input bound to the entry-point mode).  The wallet is
+    responsible for computing
     ``id_hash`` from the appropriate identity material via the
     :func:`id_hash_a1` / :func:`id_hash_a2` / :func:`id_hash_b1` helpers
     below; the dataclass treats it as an opaque field element.
@@ -94,7 +100,7 @@ class NoteOpening:
 def note_commitment(opening: NoteOpening) -> int:
     """``cm = Poseidon([flavor, v, rho, id_hash, predicate])``.
 
-    Matches :file:`circuits/spend.circom` line 90 byte-for-byte.
+    Matches :file:`circuits/spend.circom` constraint (C) byte-for-byte.
     """
     return poseidon([
         opening.flavor,
@@ -110,7 +116,7 @@ def note_commitment(opening: NoteOpening) -> int:
 def nullifier_b(rho: int, id_hash: int) -> int:
     """B-spend nullifier: ``Poseidon([rho, id_hash, 4242])``.
 
-    Matches :file:`circuits/spend.circom` lines 113-117.  For B-flavor
+    Matches :file:`circuits/spend.circom` constraint (N).  For B-flavor
     (bearer) notes the spend authorization is knowledge of ``rho``; the
     contract simply checks that the nullifier hasn't been seen before.
     """
