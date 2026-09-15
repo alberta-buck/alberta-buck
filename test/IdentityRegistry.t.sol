@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {BN254} from "../src/BN254.sol";
 import {IContractBindingAdapter} from "../src/IContractBindingAdapter.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 
 contract BindingAdapterMetadataStub is IContractBindingAdapter {
     address public immutable override registry;
@@ -658,7 +659,7 @@ contract IdentityRegistryTest is Test {
     }
 
     function test_verifyApprove_rejects_otherRegistry() public {
-        IdentityRegistry other = new IdentityRegistry(GOV);
+        IdentityRegistryHarness other = new IdentityRegistryHarness(GOV);
 
         // Give the second registry identical public records.  With every
         // other transcript input held constant, only its address differs.
