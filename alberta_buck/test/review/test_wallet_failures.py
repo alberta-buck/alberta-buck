@@ -137,7 +137,7 @@ def test_09_registration_accepts_a_public_key_with_no_known_secret(backend):
     )
 
 
-def test_07_a1_spend_public_inputs_omit_flavor(backend):
+def test_07_a1_spend_public_inputs_bind_flavor(backend):
     from pathlib import Path
     import json
     path = Path(__file__).resolve().parents[1] / "vectors" / "e2e" / "a1.json"
@@ -146,7 +146,8 @@ def test_07_a1_spend_public_inputs_omit_flavor(backend):
     d = json.loads(path.read_text())
     assert int(d["opening"]["flavor"]) == 1
     pub = d["spend"]["public"]
-    assert "flavor" not in pub and int(d["spend"]["witness"]["flavor"]) == 1
+    assert int(pub["flavor"]) == int(d["spend"]["witness"]["flavor"]) == 1
+    assert int(pub["issuanceCommitment"]) == 0
     # Same opening, different payout account: the circuit still has a witness.
     w = d["spend"]["witness"]
     assert int(w["recipient"]) != 0xBAD

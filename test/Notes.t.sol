@@ -480,31 +480,23 @@ contract NotesTest is Test {
         assertEq(notes.noteRoot(),      EMPTY_ROOT_);
     }
 
-    /// @notice Phase 7-bis duplicate-self-punishment economic test.  In the
-    ///         shipped per-leaf design, minting a duplicate `cm` reverted
-    ///         outright (the contract maintained `commitmentExists`).  The
-    ///         pivot drops that on-chain check -- the prover can publish a
-    ///         duplicate `cm` (paying totalFace twice for the same opening),
-    ///         the chain accepts it, but the deterministic nullifier
-    ///         Poseidon3(rho, idHash, 4242) collapses both notes to one
-    ///         spend.  The duplicate is unspendable forever; the issuer
-    ///         loses money but no other party is harmed.
-    ///
-    /// @dev We exercise the *first half* of that statement here: the chain
-    ///      no longer reverts on duplicate cm.  The "second half" (only one
-    ///      copy is spendable) belongs in the spend test suite.
-    function test_mint_acceptsDuplicateCommitmentInBatch() public {
+    /// @notice Public commitments carry immutable mint-time issuer attribution
+    ///         for B1 spends.  A duplicate within one batch must therefore
+    ///         revert atomically: neither the attribution written by the first
+    ///         loop iteration nor the note-tree/accounting update may survive.
+    function test_mint_rejectsDuplicateCommitmentInBatch() public {
         _approveNotes(alice, 200e18);
         uint256[] memory dup = _cms(CM1, CM1);
         uint256 newRoot = uint256(keccak256("dup")) % notes.FIELD_R();
-        _stubMint(alice, dup, 200e18, newRoot);
+        vm.expectRevert(bytes("Notes: duplicate public commitment"));
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, newRoot, 0, 200e18, dup);
 
-        // Both leaves accepted; nextLeafIndex advanced; tx did NOT revert.
-        assertEq(notes.nextLeafIndex(), 2);
-        assertEq(notes.noteFaceSum(),   200e18);
+        assertEq(notes.nextLeafIndex(), 0);
+        assertEq(notes.noteFaceSum(),   0);
+        assertEq(notes.publicIssuerOfCommitment(CM1), address(0));
     }
 
-    function test_mint_acceptsDuplicateAcrossBatches() public {
+    function test_mint_rejectsDuplicateAcrossBatches() public {
         _approveNotes(alice, 200e18);
         uint256[] memory first = new uint256[](1);
         first[0] = CM1;
@@ -514,10 +506,12 @@ contract NotesTest is Test {
         uint256[] memory second = new uint256[](1);
         second[0] = CM1; // same cm again
         uint256 r2 = uint256(keccak256("b")) % notes.FIELD_R();
-        _stubMint(alice, second, 100e18, r2);
+        vm.expectRevert(bytes("Notes: duplicate public commitment"));
+        _pubMint(alice, DUMMY_PROOF, r1, r2, 1, 100e18, second);
 
-        assertEq(notes.nextLeafIndex(), 2);
-        assertEq(notes.noteFaceSum(),   200e18);
+        assertEq(notes.nextLeafIndex(), 1);
+        assertEq(notes.noteFaceSum(),   100e18);
+        assertEq(notes.publicIssuerOfCommitment(CM1), alice);
     }
 
     // ---- root window -------------------------------------------------------
