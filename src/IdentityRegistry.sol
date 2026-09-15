@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {BN254} from "./BN254.sol";
+import {IContractBindingAdapter} from "./IContractBindingAdapter.sol";
 import {IPoseidonT3} from "./IPoseidonT3.sol";
 
 /// @title IdentityRegistry — on-chain registry of identity-bound public keys.
@@ -271,11 +272,12 @@ contract IdentityRegistry {
     ///         freeze is one-way; there is no unfreeze.
     mapping(address => bool)          public  carryingFrozen;
 
-    /// @notice The msg.sender of the bindContract() call that bound this
-    ///         address.  Only the binder may call setIsCarrying() before
-    ///         the flag is frozen by a counterparty's approve.  EOAs are
-    ///         self-registered and have no binder (binderOf[eoa] == 0),
-    ///         so setIsCarrying() can never target an EOA.
+    /// @notice The certified operator responsible for this binding. This is
+    ///         msg.sender on direct binds and the adapter-authenticated
+    ///         operator on adapter binds. Only that operator may call
+    ///         setIsCarrying() before the flag is frozen by a counterparty's
+    ///         approve. EOAs are self-registered and have no binder
+    ///         (binderOf[eoa] == 0), so setIsCarrying() cannot target an EOA.
     mapping(address => address)       public  binderOf;
 
     /// @notice Exact, one-shot binding authorization recorded by a target
@@ -283,11 +285,11 @@ contract IdentityRegistry {
     ///         must publish this commitment before bindContract can consume it.
     mapping(address => bytes32)       public  pendingBindingAuthorization;
 
-    /// @notice Deployment helpers approved by governance to perform an atomic
-    ///         deploy + credential bind. An approved helper is the control
-    ///         boundary for newly-created targets; existing targets use
-    ///         pendingBindingAuthorization instead.
-    mapping(address => bool)          public  isBindingFactory;
+    /// @notice Narrow, governance-audited adapters permitted to bind contracts
+    ///         whose provenance and authority semantics they validate.
+    mapping(address => bool)          public  isBindingAdapter;
+    /// @notice Provenance address recorded when an adapter is approved.
+    mapping(address => address)       public  bindingAdapterProvenance;
 
     /// @notice Authorised Buck contract -- the only address permitted to
     ///         call markApproved() to freeze the carrying flag.  Set once
@@ -329,7 +331,11 @@ contract IdentityRegistry {
     event CarryingFrozen(address indexed target);
     event IdentityRootUpdated(uint256 indexed previous, uint256 indexed next);
     event IdentityPoseidonSet(address indexed previous, address indexed next);
-    event BindingFactorySet(address indexed factory, bool approved);
+    event BindingAdapterSet(
+        address indexed adapter,
+        address indexed provenance,
+        bool approved
+    );
     event ContractBindingAuthorized(
         address indexed target,
         address indexed binder,
@@ -383,13 +389,23 @@ contract IdentityRegistry {
         emit BuckSet(_buck);
     }
 
-    /// @notice Approve or revoke an atomic deployment helper. The helper's
-    ///         implementation must deploy and bind in one transaction.
-    function setBindingFactory(address factory, bool approved) external {
+    /// @notice Approve or revoke a narrowly audited binding adapter.
+    /// @dev Approval is meaningful only together with review of the adapter's
+    ///      provenance checks and binding-authority semantics. Revocation does
+    ///      not call adapter code, so governance can always remove approval.
+    function setBindingAdapter(address adapter, bool approved) external {
         require(msg.sender == governance, "not governance");
-        require(factory.code.length > 0, "factory not a contract");
-        isBindingFactory[factory] = approved;
-        emit BindingFactorySet(factory, approved);
+        address provenance = bindingAdapterProvenance[adapter];
+        if (approved) {
+            require(adapter.code.length > 0, "adapter not a contract");
+            IContractBindingAdapter bindingAdapter = IContractBindingAdapter(adapter);
+            require(bindingAdapter.registry() == address(this), "adapter registry mismatch");
+            provenance = bindingAdapter.provenance();
+            require(provenance.code.length > 0, "provenance not a contract");
+            bindingAdapterProvenance[adapter] = provenance;
+        }
+        isBindingAdapter[adapter] = approved;
+        emit BindingAdapterSet(adapter, provenance, approved);
     }
 
     /// @notice Post the current registry-Identity Merkle accumulator root.
@@ -621,10 +637,9 @@ contract IdentityRegistry {
     /// @notice Bind a (pk, E_addr) Identity to a deployed contract address.
     ///
     ///         Three independent checks:
-    ///         1. Control: `target` is a deployed contract and unbound.
-    ///            Atomic deploy+bind (BuckAwareDeployer) is the anti-front-run
-    ///            for new contracts; this 5-arg path is the already-certified
-    ///            operator exception (see below).
+    ///         1. Control: `target` is a deployed contract and unbound. The
+    ///            target authorizes the exact proposed binding. Contracts with
+    ///            known external provenance use a separately audited adapter.
     ///         2. Certification: either (a) this exception -- msg.sender is a
     ///            registered account and the supplied (pk, E) equal that
     ///            account's stored identity -- or (b) the credential overload,
@@ -637,8 +652,8 @@ contract IdentityRegistry {
     ///         their registered identity onto `target`.  An unregistered
     ///         caller cannot bind a fabricated identity.  Existing contracts
     ///         must first authorize the exact binder, identity, and policy via
-    ///         authorizeContractBinding; approved factories instead perform
-    ///         deployment and binding atomically.
+    ///         authorizeContractBinding. Known-provenance contracts instead
+    ///         use bindContractFromAdapter.
     ///
     ///         `isPublicIdentity_` records that the operator discloses m
     ///         off-chain (AMM pools, BUCK-unaware contracts).  `isCarrying_`
@@ -668,9 +683,8 @@ contract IdentityRegistry {
 
     /// @notice Bind `target` under a fresh credential.  Fiat-Shamir registrant
     ///         is uint160(target), so a proof valid for an EOA (or another
-    ///         contract) cannot be replayed here.  The binder (msg.sender)
-    ///         need not be registered: atomic deploy+bind calls this from
-    ///         BuckAwareDeployer.  Certification is the credential itself.
+    ///         contract) cannot be replayed here. Certification is the
+    ///         credential itself; target authorization is still mandatory.
     function bindContract(
         address target,
         address issuer,
@@ -690,10 +704,34 @@ contract IdentityRegistry {
             isPublicIdentity_, isCarrying_
         );
         _consumeBindingControl(
-            target, msg.sender, pk, E, isPublicIdentity_, isCarrying_,
-            isBindingFactory[msg.sender]
+            target, msg.sender, pk, E, isPublicIdentity_, isCarrying_
         );
         _storeBinding(target, pk, E, isPublicIdentity_, isCarrying_, msg.sender, issuer);
+    }
+
+    /// @notice Bind a known-provenance contract through an audited adapter.
+    /// @dev The adapter authenticates `operator` against its immutable
+    ///      provenance contract. The registry copies only the operator's
+    ///      already-certified identity, so the adapter cannot inject keys,
+    ///      ciphertext, or issuer data. Each adapter must constrain policy
+    ///      flags to the values appropriate for its target type.
+    function bindContractFromAdapter(
+        address target,
+        address operator,
+        bool isPublicIdentity_,
+        bool isCarrying_
+    ) external {
+        require(isBindingAdapter[msg.sender], "not binding adapter");
+        require(target.code.length > 0, "target not a deployed contract");
+        require(!_isRegistered(target), "already bound");
+        require(_isRegistered(operator), "operator not registered");
+
+        BN254.G1Point memory pk = _pk[operator];
+        ElGamalCT memory E = _E_addr[operator];
+        _storeBinding(
+            target, pk, E, isPublicIdentity_, isCarrying_,
+            operator, issuerOf[operator]
+        );
     }
 
     function contractBindingChallenge(
@@ -764,7 +802,7 @@ contract IdentityRegistry {
         require(_isRegistered(msg.sender),  "binder not registered");
         require(_samePkE(msg.sender, pk, E), "uncertified identity");
         _consumeBindingControl(
-            target, msg.sender, pk, E, isPublicIdentity_, isCarrying_, false
+            target, msg.sender, pk, E, isPublicIdentity_, isCarrying_
         );
         _storeBinding(
             target, pk, E, isPublicIdentity_, isCarrying_,
@@ -778,10 +816,8 @@ contract IdentityRegistry {
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
         bool isPublicIdentity_,
-        bool isCarrying_,
-        bool atomicFactory
+        bool isCarrying_
     ) internal {
-        if (atomicFactory) return;
         bytes32 expected = _bindingAuthorizationHash(
             target, binder, pk, E, isPublicIdentity_, isCarrying_
         );
@@ -822,8 +858,8 @@ contract IdentityRegistry {
 
     function _storeBinding(
         address target,
-        BN254.G1Point calldata pk,
-        ElGamalCT calldata E,
+        BN254.G1Point memory pk,
+        ElGamalCT memory E,
         bool isPublicIdentity_,
         bool isCarrying_,
         address binder,

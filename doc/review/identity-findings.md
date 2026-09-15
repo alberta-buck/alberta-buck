@@ -321,10 +321,12 @@ records a policy assertion; it does not publish or authenticate a human name.
 
 These are three independent checks:
 
-1. **Control:** the target contract authorizes the binding. An atomic factory
-   flow can bind a newly deployed instance through its authenticated deployment
-   request. An existing contract needs an explicit controller/contract
-   authorization mechanism. Do not assume every contract has an `owner()`.
+1. **Control:** the target contract authorizes the binding. A contract whose
+   authority is external may instead use a narrow, governance-audited adapter
+   that verifies canonical provenance and the protocol's actual governance
+   identity. An existing contract otherwise needs an explicit
+   controller/contract authorization mechanism. Do not assume every contract
+   has an `owner()` or grant arbitrary-call deployment helpers this privilege.
 2. **Certification:** the supplied identity and key are covered by the same
    credential presentation required for an ordinary account, or by an explicit
    certified service-operator policy. Deployed code alone supplies no identity

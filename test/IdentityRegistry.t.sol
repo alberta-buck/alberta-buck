@@ -3,7 +3,24 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {BN254} from "../src/BN254.sol";
+import {IContractBindingAdapter} from "../src/IContractBindingAdapter.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+
+contract BindingAdapterMetadataStub is IContractBindingAdapter {
+    address public immutable override registry;
+
+    constructor(address registry_) {
+        registry = registry_;
+    }
+
+    function provenance() external view returns (address) {
+        return address(this);
+    }
+
+    function bindingAuthority() external pure returns (address) {
+        return address(0xA11CE);
+    }
+}
 
 /// @title IdentityRegistry.t.sol — register / verifyApprove parity tests.
 /// @notice Replays the JSON vectors emitted by alberta_buck.wallet.cli through
@@ -406,21 +423,34 @@ contract IdentityRegistryTest is Test {
         assertEq(reg.pendingBindingAuthorization(pool), bytes32(0));
     }
 
-    function test_setBindingFactory_isGovernedAndRequiresContract() public {
-        address factory = address(0xFAC7);
-        _planAt(factory);
+    function test_setBindingAdapter_isGovernedAndChecksMetadata() public {
+        BindingAdapterMetadataStub adapter = new BindingAdapterMetadataStub(address(reg));
 
         vm.prank(alice);
         vm.expectRevert(bytes("not governance"));
-        reg.setBindingFactory(factory, true);
+        reg.setBindingAdapter(address(adapter), true);
 
         vm.prank(GOV);
-        reg.setBindingFactory(factory, true);
-        assertTrue(reg.isBindingFactory(factory));
+        reg.setBindingAdapter(address(adapter), true);
+        assertTrue(reg.isBindingAdapter(address(adapter)));
+        assertEq(reg.bindingAdapterProvenance(address(adapter)), address(adapter));
 
         vm.prank(GOV);
-        vm.expectRevert(bytes("factory not a contract"));
-        reg.setBindingFactory(address(0xE0A), true);
+        vm.expectRevert(bytes("adapter not a contract"));
+        reg.setBindingAdapter(address(0xE0A), true);
+
+        BindingAdapterMetadataStub wrongRegistry =
+            new BindingAdapterMetadataStub(address(0xBAD));
+        vm.prank(GOV);
+        vm.expectRevert(bytes("adapter registry mismatch"));
+        reg.setBindingAdapter(address(wrongRegistry), true);
+
+        // Revocation never calls untrusted adapter code and therefore also
+        // works if code at the approved address is later unavailable.
+        vm.etch(address(adapter), bytes(""));
+        vm.prank(GOV);
+        reg.setBindingAdapter(address(adapter), false);
+        assertFalse(reg.isBindingAdapter(address(adapter)));
     }
 
     function test_bindContract_succeedsForDeployedContract_public() public {
@@ -526,8 +556,9 @@ contract IdentityRegistryTest is Test {
         address factory = address(0xFAC7);
         _planAt(pool);
         _planAt(factory);
-        vm.prank(GOV);
-        reg.setBindingFactory(factory, true);
+        _authorizeBinding(
+            pool, factory, _bg1(".pool.pk"), _bct(".pool.ciphertext"), true, true
+        );
 
         IdentityRegistry.ContractBindingProof memory authorization = _bindingProof(
             pool, factory, _bg1(".pool.pk"), _u(".alice.elgamal_kp.sk"), true, true
@@ -551,6 +582,28 @@ contract IdentityRegistryTest is Test {
         assertEq(reg.binderOf(pool), factory);
         assertTrue(reg.isPublicIdentity(pool));
         assertTrue(reg.isCarrying(pool));
+    }
+
+    function test_bindingAdapterCannotBypassCredentialTargetAuthorization() public {
+        address pool = address(uint160(_bu(".pool.target")));
+        _planAt(pool);
+        BindingAdapterMetadataStub adapter = new BindingAdapterMetadataStub(address(reg));
+        vm.prank(GOV);
+        reg.setBindingAdapter(address(adapter), true);
+
+        IdentityRegistry.ContractBindingProof memory authorization = _bindingProof(
+            pool, address(adapter), _bg1(".pool.pk"),
+            _u(".alice.elgamal_kp.sk"), true, true
+        );
+        vm.prank(address(adapter));
+        vm.expectRevert(bytes("target did not authorize binding"));
+        reg.bindContract(
+            pool, ISSUER,
+            _bg1(".pool.pk"), _bct(".pool.ciphertext"),
+            _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
+            authorization, true, true
+        );
+        assertFalse(reg.isVerified(pool));
     }
 
     function test_register_rejectsUncheckedLeaf() public {

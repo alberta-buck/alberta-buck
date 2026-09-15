@@ -509,19 +509,21 @@ Table of Contents
 4.1 Cryptographic Surface
 ─────────────────────────
 
-  Three on-chain verifications, all reducible to BN254 precompile calls:
+  Four on-chain verifications, all reducible to BN254 precompile calls:
 
   1. *PS signature at registration*: `e(sigma'_1, X + m * Y) =
      e(sigma'_2, g_2)', with `m' reconstructed linearly via the binding
      NIZK in step 2.  ~147K gas.
   2. *Schnorr-family NIZK* binding the rerandomized PS signature to the
      ElGamal ciphertext.  Three response scalars, Fiat-Shamir bound to
-     `(sigma', E_new, pk_new, registrant_address)'.  ~30K gas on top of
-     step 1.  Total registration ~235K, paid once per address.
+     the action/version domain, `(sigma', E_new, pk_new,
+     registrant_address)', chain ID, and registry deployment.  ~30K gas
+     on top of step 1.  Total registration ~235K, paid once per address.
   3. *Chaum-Pedersen NIZK at `approve'*: proves the recipient's identity
      ciphertext re-encrypts the same M registered in `E_alice'.
-     Fiat-Shamir binds `msg.sender', `spender', and `chainid'.  ~29K gas
-     per counterparty pair.
+     Fiat-Shamir binds the v3 action domain, registry deployment,
+     `msg.sender', `spender', `chainid', and a one-shot per-sender
+     approval nonce.  ~29K gas per counterparty pair.
   4. *Chaum-Pedersen DLEQ at A-flavor spend* (`verifySpendCP'): proves
      the spender holds a single `sk_dep' that opens both the note's
      `E_n' and the registered `E_reg'.  ~36K gas via EIP-196.
@@ -540,17 +542,32 @@ Table of Contents
   │ struct PSSig     { G1Point sigma_1; G1Point sigma_2; }
   │ struct PSPubKey  { G2Point X; G2Point Y; }
   │ 
-  │ struct RegistrationProof { uint256 e, s_m, s_r; G1Point A_ps, T_C, T_R; }
+  │ struct RegistrationProof { uint256 e, s_m, s_r, s_sk; G1Point A_ps, T_C, T_R, T_key; }
   │ struct CPProof           { uint256 e, s1, s2;   G1Point T1, T2, T3;     }
   │ struct SpendCPProof      { uint256 e, s;        G1Point T1, T2;         }
+  │ struct ContractBindingProof { uint256 e, s;     G1Point T;              }
   │ 
   │ function register(address issuer, G1Point pk, ElGamalCT E,
   │                   PSSig sigma, RegistrationProof proof);
+  │ function authorizeContractBinding(address binder, G1Point pk, ElGamalCT E,
+  │                                   bool isPublicIdentity_, bool isCarrying_);
   │ function bindContract(address target, G1Point pk, ElGamalCT E,
   │                       bool isPublicIdentity_, bool isCarrying);
+  │ function bindContract(address target, address issuer, G1Point pk, ElGamalCT E,
+  │                       PSSig sigma, RegistrationProof credential,
+  │                       ContractBindingProof holderAuthorization,
+  │                       bool isPublicIdentity_, bool isCarrying);
+  │ function bindContractFromAdapter(address target, address operator,
+  │                                  bool isPublicIdentity_, bool isCarrying);
+  │ function setBindingAdapter(address adapter, bool approved);        // governance
   │ function trustIssuer(address issuer, PSPubKey ipk);                 // governance
   │ function verifyApprove(address sender, address spender,
   │                        ElGamalCT E_bob, CPProof pi) view returns (bool);
+  │ function verifyApproveAtNonce(address sender, address spender,
+  │                               ElGamalCT E_bob, CPProof pi,
+  │                               uint256 nonce) view returns (bool);
+  │ function verifyAndConsumeApprove(address sender, address spender,
+  │                                  ElGamalCT E_bob, CPProof pi) returns (bool);
   │ function verifySpendCP(address spender, address recipient,
   │                        ElGamalCT E_n, SpendCPProof cpProof) view returns (bool);
   │ function markApproved(address spender);                              // Buck-only
@@ -560,13 +577,20 @@ Table of Contents
   A few non-obvious points:
 
   • `verifyApprove' reads `E_alice' from registry storage so the caller
-    cannot substitute a fake credential.
-  • `bindContract' is permissioned by deployment pattern, not
-    governance: any caller may bind any yet-unbound deployed contract.
-    The intended discipline is operator OPSEC – either the operator is
-    the deployer and uses `BuckAwareDeployer.deployAndBind' for atomic
-    deploy+bind, or the operator races to bind a pre-existing contract
-    before anyone else.  Once bound, immutable.
+    cannot substitute a fake credential.  `Buck.approve' uses
+    `verifyAndConsumeApprove' so a valid proof is single-use; receipts
+    retain the emitted nonce and use `verifyApproveAtNonce' for
+    historical checks.
+  • `bindContract' requires both certification and target control.  The
+    compact overload copies a registered caller's exact stored identity
+    after the target authorizes the full binder/identity/ policy tuple.
+    The credential overload verifies PS certification plus holder
+    authorization; target authorization remains mandatory on that path.
+    Contracts with known provenance use a governance-approved,
+    contract-specific adapter.  The adapter proves canonical provenance
+    and authority, while the registry copies the named operator's stored
+    identity rather than accepting adapter-supplied keys.  The first
+    authorized binding is immutable.
   • `markApproved' (called by Buck inside `approve') freezes the
     spender's `isCarrying' flag the first time anyone successfully
     approves them, so the carrying flavor a sender consents to cannot be
@@ -580,9 +604,10 @@ Table of Contents
 
   DeFi infrastructure – AMM pools, vaults, oracles, the Notes pool –
   can't generate Chaum-Pedersen proofs at `approve' time because the
-  contract has no private key.  Such contracts bind via
-  `bindContract(target, pk, E, isPublicIdentity_=true,
-  isCarrying=true)'.  Counterparties of a Public-Identity contract still
+  contract has no private key.  Such contracts authorize and bind a
+  certified operator identity, or use an approved adapter with audited
+  provenance and authority semantics, with `isPublicIdentity_=true,
+  isCarrying=true'.  Counterparties of a Public-Identity contract still
   call the identity-bound `approve' (the always-CP rule applies
   regardless of spender flavor), but the receipt-fragment check on the
   contract side is satisfied by the deterministic `_identityHash' rather

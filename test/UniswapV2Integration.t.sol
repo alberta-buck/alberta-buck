@@ -65,8 +65,9 @@ interface IUniswapV2Pair {
 ///        deployed Uniswap V2 stack.
 ///
 /// @notice Validates that BUCK's identity-bound transfer rules co-exist with
-///         a stock Uniswap V2 deployment: the pair and router are bound under
-///         a Public Identity via `IdentityRegistry.bindContract`, which
+///         a stock Uniswap V2 deployment: the fixture pair and router are bound
+///         under a Public Identity via the test-only IdentityRegistryHarness,
+///         which
 ///         (a) waives the receipt-fragment requirement on pair->user payouts
 ///         (Public-sender fallback inside `_identityCheckedTransfer`), and
 ///         (b) lets the user-side `transferFrom(alice, pair, ...)` succeed
@@ -81,6 +82,11 @@ interface IUniswapV2Pair {
 ///         seed BUCK allowances directly via `vm.store`, exercising the
 ///         AMM swap mechanics without bypassing CP enforcement in the
 ///         production approve() path (covered separately in Buck.t.sol).
+///
+///         Production pool admission is covered by
+///         UniswapBindingAdapters.t.sol. A stock router has no owner/governance
+///         identity and therefore requires a separately justified deployment
+///         adapter or a BUCK-aware wrapper; the pool adapters do not bind it.
 contract UniswapV2IntegrationTest is Test {
 
     Buck                  internal buck;

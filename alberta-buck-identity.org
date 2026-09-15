@@ -1416,12 +1416,13 @@ secret key and an archival node -- without any counterparty's cooperation.
 
   Smart contracts can't do KYC, yet every BUCK transfer requires both
   parties to be /identifiable/.  The solution is *bindContract*: at
-  deployment time the operator uses one of two certified paths.  An existing
-  contract first calls ~authorizeContractBinding~ through its controller and
-  commits the exact binder, ~(pk,E)~, and policy flags; the binder then calls
-  ~bindContract~.  A new contract may instead be deployed and bound atomically
-  by a governance-approved ~BuckAwareDeployer~, using a fresh PS credential
-  whose registration proof is bound to the predicted target and registry.
+  deployment time the operator uses one of two certified paths.  A contract
+  with its own controller first calls ~authorizeContractBinding~ and commits
+  the exact binder, ~(pk,E)~, and policy flags; the binder then calls
+  ~bindContract~.  A contract whose authority lives in another protocol uses
+  a narrowly audited, governance-approved adapter.  The supplied Uniswap V2
+  and V3 adapters accept only canonical pools from one immutable factory and
+  only its current registered =feeToSetter= or =owner=, respectively.
   The bound contract is marked
   ~isVerified[target] = true~, and the boolean ~isPublicIdentity[target]~
   is set per the binding.  When the spender or a transfer endpoint is
@@ -1466,14 +1467,20 @@ secret key and an archival node -- without any counterparty's cooperation.
        require(_isRegistered(msg.sender), "binder not registered");
        require(_samePkE(msg.sender, pk, E), "uncertified identity");
        _consumeBindingControl(target, msg.sender, pk, E,
-                              isPublicIdentity_, isCarrying_, false);
+                              isPublicIdentity_, isCarrying_);
        _storeBinding(target, pk, E, isPublicIdentity_, isCarrying_,
                      msg.sender, issuerOf[msg.sender]);
    }
 
-   /// A second overload verifies a target-bound PS credential, its account-key
-   /// ownership/policy authorization, and either target control or an approved
-   /// atomic factory before storing the same binding.
+   /// A second overload verifies a target-bound PS credential and its
+   /// account-key ownership/policy authorization. Target control remains
+   /// mandatory.
+
+   /// A governance-approved adapter may bind a known-provenance contract.
+   /// The adapter supplies only the operator address; the registry copies
+   /// that registered operator's pk, E, and issuer from storage.
+   function bindContractFromAdapter(address target, address operator,
+                                    bool isPublicIdentity_, bool isCarrying_);
    #+end_example
 
    (=isVerified(target)= is a view returning true once =pk= is written --
@@ -1482,8 +1489,9 @@ secret key and an archival node -- without any counterparty's cooperation.
    names used elsewhere in this document.)
 
    No separate ~register~ transaction is needed for the contract address.
-   The certified-operator path republishes an already-registered ~(pk,E)~;
-   the fresh-credential path verifies a PS credential directly during bind.
+   The certified-operator and adapter paths republish an already-registered
+   ~(pk,E)~; the fresh-credential path verifies a PS credential directly
+   during an explicitly target-authorized bind.
    Whoever holds the certified identity's secret key
    ~sk~ can decrypt every receipt that uses the bound ciphertext.
 
@@ -1516,24 +1524,32 @@ secret key and an archival node -- without any counterparty's cooperation.
 
 ** Step-by-step: bringing up a BUCK/USDC AMM
 
-   Concrete deployment sequence as exercised by the integration test:
+   Production pool-admission sequence (the adapter suite exercises admission;
+   the separate V2 integration test exercises AMM transfer mechanics):
 
-   1. Operator calls =UniswapV2Factory.createPair(BUCK, USDC)=.  The
-      factory deploys a new ~UniswapV2Pair~ at a CREATE2-deterministic
-      address.
+   1. Governance deploys and approves an =UniswapV2BindingAdapter= fixed to
+      the registry and the intended Uniswap V2 factory.  Approval is an audit
+      decision about that exact adapter and factory, not a generic factory-call
+      privilege.
 
-   2. Operator has each existing target authorize the exact operator identity
-      and policy, then calls =reg.bindContract(...)= as that registered
-      operator.  For a new CREATE2 target, an approved
-      =BuckAwareDeployer.deployAndBind= verifies a target-bound credential and
-      performs deployment plus binding atomically.  ~pk_op~ and ~E_op~ are
-      therefore certified identity material, not caller-selected placeholders.
+   2. The factory's registered =feeToSetter= calls
+      =adapter.createPairAndBind(BUCK, USDC)=.  The adapter requires that no
+      pair exists, calls =createPair=, verifies both-order =getPair= lookup and
+      deployed code, then binds the pair Public/Carrying in the same transaction.
+      The registry copies ~pk_op~, ~E_op~, and issuer from the registered
+      =feeToSetter=; the adapter cannot substitute identity material.
 
-      That's the entire administrative step.  The pair and the router
-      are now valid Public-Identity BUCK counterparties; their
-      ~_identityHash~ is the operator's bound hash.
+      An already-created canonical pair uses =bindExistingPair=.  V3 follows
+      the same pattern with =owner=, =getPool=, and =createPool=.
 
-   3. A verified user (Alice) approves the router for BUCK using the
+      Stock routers do not expose an owner or governance identity and are not
+      covered by these pool adapters.  A deployment-specific router adapter
+      would need to prove creation and bind in the same invocation; absent
+      that, production must use a BUCK-aware wrapper/controller rather than
+      attributing a router to the factory's governance by assumption.
+
+   3. If a separately justified deployment adapter has admitted an exact
+      router, a verified user (Alice) approves that router for BUCK using the
       identity-bound ~approve~ overload.  Alice's wallet reads
       ~pk_router~ from ~IdentityRegistry~ (which is ~pk_op~), decrypts
       her own stored ciphertext to recover ~M~, re-encrypts under
@@ -2304,18 +2320,13 @@ secret key and an archival node -- without any counterparty's cooperation.
    Pool operator Bob:
      1. Completed KYC (same ceremony as Alice).  His EOA is registered
         in IdentityRegistry with credential (pk_bob, E_bob).
-     2. Deploys the BUCK/USDT pool atomically with bindContract:
-        BuckAwareDeployer.deployAndBind(
-            UniswapV2Factory.createPair.selector(BUCK, USDT),
-            pk_bob, E_bob,
-            isPublicIdentity_=true
-        )
+     2. As the factory's registered feeToSetter, creates and binds the pair:
+        uniswapV2BindingAdapter.createPairAndBind(BUCK, USDT)
         -> pair at address 0xPOOL bound under Bob's published (pk, E),
            with isPublicIdentity[0xPOOL] = true and
            isVerified[0xPOOL]       = true.
-        Atomic deploy+bind leaves no interval for a competing binding; the
-        registry accepts this target-control exception only from an approved factory.
-     3. Same atomic pattern for the router 0xROUTER.
+        Atomic create+bind leaves no interval for a competing binding; the
+        registry accepts it only from the audited adapter approved for that factory.
 
    After binding:
      isVerified(0xPOOL)       == true
@@ -2614,18 +2625,18 @@ secret key and an archival node -- without any counterparty's cooperation.
 
    Under ~bindContract~, the pool's identity is the operator's
    identity.  ~isVerified(0xPOOL) == true~ and
-   ~isPublicIdentity(0xPOOL) == true~ once the operator (or
-   ~BuckAwareDeployer.deployAndBind~ atomically) has bound the pool to
+   ~isPublicIdentity(0xPOOL) == true~ once the factory-specific adapter has
+   bound the canonical pool to
    the operator's published ~(pk, E)~.  The pool itself holds no
    decryption key; the operator does, and the operator's ~sk~ decrypts
    every receipt that uses ~_identityHash(pool)~.
 
-   *Target control and one-shot binding.*  An existing pool must authorize the
-   exact binder, certified identity, and policy flags before ~bindContract~;
-   consuming that authorization and binding are one transaction.  A
-   governance-approved ~BuckAwareDeployer~ may use the atomic exception for a
-   contract it creates and binds in the same call.  The first /authorized/
-   binding remains final, but an unrelated caller cannot win a race.
+   *Provenance, authority, and one-shot binding.*  The Uniswap adapters verify
+   the pool against the immutable factory's canonical mapping and require the
+   invocation from its current registered governance identity (=feeToSetter=
+   for V2, =owner= for V3).  They can create and bind atomically or bind an
+   existing canonical pool.  The first authorized binding remains final, but
+   neither an unrelated caller nor a generic factory can select the target.
 
    The registry records ~binderOf~ and the credential issuer.  Once bound, the
    certified operator identity behind ~(pk_op,E_op)~ is the pool's

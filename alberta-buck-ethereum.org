@@ -428,6 +428,9 @@ function bindContract(address target, address issuer, G1Point pk, ElGamalCT E,
                       PSSig sigma, RegistrationProof credential,
                       ContractBindingProof holderAuthorization,
                       bool isPublicIdentity_, bool isCarrying);
+function bindContractFromAdapter(address target, address operator,
+                                 bool isPublicIdentity_, bool isCarrying);
+function setBindingAdapter(address adapter, bool approved);        // governance
 function trustIssuer(address issuer, PSPubKey ipk);                 // governance
 function verifyApprove(address sender, address spender,
                        ElGamalCT E_bob, CPProof pi) view returns (bool);
@@ -450,8 +453,10 @@ A few non-obvious points:
 - =bindContract= requires both certification and target control.  The compact overload copies a
   registered caller's exact stored identity after the target authorizes the full binder/identity/
   policy tuple.  The credential overload verifies PS certification plus holder authorization;
-  existing targets authorize it explicitly, while governance-approved factories may deploy and
-  bind a new target atomically.  The first authorized binding is immutable.
+  target authorization remains mandatory on that path.  Contracts with known provenance use a
+  governance-approved, contract-specific adapter.  The adapter proves canonical provenance and
+  authority, while the registry copies the named operator's stored identity rather than accepting
+  adapter-supplied keys.  The first authorized binding is immutable.
 - =markApproved= (called by Buck inside =approve=) freezes the spender's =isCarrying= flag the
   first time anyone successfully approves them, so the carrying flavor a sender consents to cannot
   be retroactively flipped.
@@ -462,7 +467,8 @@ A few non-obvious points:
 
 DeFi infrastructure -- AMM pools, vaults, oracles, the Notes pool -- can't generate Chaum-Pedersen
 proofs at =approve= time because the contract has no private key.  Such contracts authorize and
-bind a certified operator identity, or use an approved atomic deployer, with
+bind a certified operator identity, or use an approved adapter with audited provenance and
+authority semantics, with
 ~isPublicIdentity_=true, isCarrying=true~.  Counterparties of a
 Public-Identity contract still call the identity-bound =approve= (the always-CP rule applies
 regardless of spender flavor), but the receipt-fragment check on the contract side is satisfied by
