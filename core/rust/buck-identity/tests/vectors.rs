@@ -198,6 +198,7 @@ fn golden_identity_fixture() {
     let v = fixture();
     assert_eq!(v["$schema_version"], 1);
     let chainid = jw(&v["chainid"]);
+    let registry = jw(&v["registry"]);
 
     let iss_x = jg2(&v["issuer"]["pk_X"]);
     let iss_y = jg2(&v["issuer"]["pk_Y"]);
@@ -244,22 +245,26 @@ fn golden_identity_fixture() {
             e: jw(&pf["e"]),
             s_m: jw(&pf["s_m"]),
             s_r: jw(&pf["s_r"]),
+            s_sk: jw(&pf["s_sk"]),
             a_ps: jg1(&pf["A_ps"]),
             t_c: jg1(&pf["T_C"]),
             t_r: jg1(&pf["T_R"]),
+            t_key: jg1(&pf["T_key"]),
         };
         let sig_p = (
             jg1(&p["ps_sig_rerand"]["sigma_1"]),
             jg1(&p["ps_sig_rerand"]["sigma_2"]),
         );
         assert!(nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &registrant
+            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
+            &registrant, &chainid, &registry
         )
         .unwrap());
         let mut wrong = registrant;
         wrong[31] ^= 1;
         assert!(!nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &wrong
+            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
+            &wrong, &chainid, &registry
         )
         .unwrap());
     }
@@ -304,12 +309,14 @@ fn golden_identity_fixture() {
         t3: jg1(&cp["T3"]),
     };
     assert!(chaum_pedersen::chaum_pedersen_verify(
-        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &sender, &spender, &chainid
+        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &sender, &spender,
+        &chainid, &jw(&ap["registry"])
     )
     .unwrap());
     // swapped sender/spender must fail
     assert!(!chaum_pedersen::chaum_pedersen_verify(
-        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &spender, &sender, &chainid
+        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &spender, &sender,
+        &chainid, &jw(&ap["registry"])
     )
     .unwrap());
 
@@ -469,8 +476,6 @@ fn kernel_vectors_replay() {
     let v = kernel_fixture();
     assert_eq!(v["$schema_version"], 1);
     assert_eq!(v["backend"], "py", "vectors must come from the py reference");
-    let chainid = jw(&v["schnorr"]["chainid"]);
-
     // ---- g1 / g2 ops ----------------------------------------------------
     for row in v["g1_ops"].as_array().unwrap() {
         let a = jg1(&row["A"]);
@@ -592,16 +597,22 @@ fn kernel_vectors_replay() {
         &jg1(&rg["pk"]),
         &jct(&rg["E"]),
         &jw(&rg["registrant"]),
+        &jw(&rg["sk"]),
+        &jw(&rg["chainid"]),
+        &jw(&rg["registry"]),
         &jw(&rg["m_tilde"]),
         &jw(&rg["r_tilde"]),
+        &jw(&rg["sk_tilde"]),
     )
     .unwrap();
     assert_eq!(proof.e, jw(&rg["proof"]["e"]));
     assert_eq!(proof.s_m, jw(&rg["proof"]["s_m"]));
     assert_eq!(proof.s_r, jw(&rg["proof"]["s_r"]));
+    assert_eq!(proof.s_sk, jw(&rg["proof"]["s_sk"]));
     assert_eq!(proof.a_ps, jg1(&rg["proof"]["A_ps"]));
     assert_eq!(proof.t_c, jg1(&rg["proof"]["T_C"]));
     assert_eq!(proof.t_r, jg1(&rg["proof"]["T_R"]));
+    assert_eq!(proof.t_key, jg1(&rg["proof"]["T_key"]));
     assert!(nizk::registration_verify(
         &jg1(&rg["sigma_1"]),
         &jg1(&rg["sigma_2"]),
@@ -611,6 +622,8 @@ fn kernel_vectors_replay() {
         &jg2(&v["ps"]["pk_Y"]),
         &proof,
         &jw(&rg["registrant"]),
+        &jw(&rg["chainid"]),
+        &jw(&rg["registry"]),
     )
     .unwrap());
 
@@ -626,6 +639,7 @@ fn kernel_vectors_replay() {
         &jw(&cp["sender"]),
         &jw(&cp["spender"]),
         &jw(&cp["chainid"]),
+        &jw(&cp["registry"]),
         &jw(&cp["k1"]),
         &jw(&cp["k2"]),
     )
@@ -645,6 +659,7 @@ fn kernel_vectors_replay() {
         &jw(&cp["sender"]),
         &jw(&cp["spender"]),
         &jw(&cp["chainid"]),
+        &jw(&cp["registry"]),
     )
     .unwrap());
 

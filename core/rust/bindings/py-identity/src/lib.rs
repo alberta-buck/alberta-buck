@@ -20,7 +20,7 @@ use kernel::{G1w, G2w, IdError, W256};
 type PyG1 = (BigUint, BigUint);
 type PyG2 = ((BigUint, BigUint), (BigUint, BigUint));
 type PyCt = (PyG1, PyG1);
-type PyReg = (BigUint, BigUint, BigUint, PyG1, PyG1, PyG1);
+type PyReg = (BigUint, BigUint, BigUint, BigUint, PyG1, PyG1, PyG1, PyG1);
 type PyCp = (BigUint, BigUint, BigUint, PyG1, PyG1, PyG1);
 type PyVd = (BigUint, BigUint, PyG1, PyG1);
 // PyO3 tuples cap at 12 elements; the 13-field issuer-reenc proof nests as
@@ -259,8 +259,12 @@ fn registration_prove(
     pk: PyG1,
     e_ct: PyCt,
     registrant: BigUint,
+    sk: BigUint,
+    chainid: BigUint,
+    registry: BigUint,
     m_tilde: BigUint,
     r_tilde: BigUint,
+    sk_tilde: BigUint,
 ) -> PyResult<PyReg> {
     let p = kernel::nizk::registration_prove(
         &wg1(&sigma_1)?,
@@ -270,17 +274,23 @@ fn registration_prove(
         &wg1(&pk)?,
         &wct(&e_ct)?,
         &w(&registrant)?,
+        &w(&sk)?,
+        &w(&chainid)?,
+        &w(&registry)?,
         &w(&m_tilde)?,
         &w(&r_tilde)?,
+        &w(&sk_tilde)?,
     )
     .map_err(err)?;
     Ok((
         big(&p.e),
         big(&p.s_m),
         big(&p.s_r),
+        big(&p.s_sk),
         pyg1(&p.a_ps),
         pyg1(&p.t_c),
         pyg1(&p.t_r),
+        pyg1(&p.t_key),
     ))
 }
 
@@ -295,14 +305,18 @@ fn registration_verify(
     issuer_y: PyG2,
     proof: PyReg,
     registrant: BigUint,
+    chainid: BigUint,
+    registry: BigUint,
 ) -> PyResult<bool> {
     let p = kernel::nizk::RegistrationProof {
         e: w(&proof.0)?,
         s_m: w(&proof.1)?,
         s_r: w(&proof.2)?,
-        a_ps: wg1(&proof.3)?,
-        t_c: wg1(&proof.4)?,
-        t_r: wg1(&proof.5)?,
+        s_sk: w(&proof.3)?,
+        a_ps: wg1(&proof.4)?,
+        t_c: wg1(&proof.5)?,
+        t_r: wg1(&proof.6)?,
+        t_key: wg1(&proof.7)?,
     };
     kernel::nizk::registration_verify(
         &wg1(&sigma_1)?,
@@ -313,6 +327,8 @@ fn registration_verify(
         &wg2(&issuer_y)?,
         &p,
         &w(&registrant)?,
+        &w(&chainid)?,
+        &w(&registry)?,
     )
     .map_err(err)
 }
@@ -333,6 +349,7 @@ fn chaum_pedersen_prove(
     sender: BigUint,
     spender: BigUint,
     chainid: BigUint,
+    registry: BigUint,
     k1: BigUint,
     k2: BigUint,
 ) -> PyResult<PyCp> {
@@ -346,6 +363,7 @@ fn chaum_pedersen_prove(
         &w(&sender)?,
         &w(&spender)?,
         &w(&chainid)?,
+        &w(&registry)?,
         &w(&k1)?,
         &w(&k2)?,
     )
@@ -371,6 +389,7 @@ fn chaum_pedersen_verify(
     sender: BigUint,
     spender: BigUint,
     chainid: BigUint,
+    registry: BigUint,
 ) -> PyResult<bool> {
     let p = kernel::chaum_pedersen::CpProof {
         e: w(&proof.0)?,
@@ -389,6 +408,7 @@ fn chaum_pedersen_verify(
         &w(&sender)?,
         &w(&spender)?,
         &w(&chainid)?,
+        &w(&registry)?,
     )
     .map_err(err)
 }

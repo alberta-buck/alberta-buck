@@ -245,9 +245,10 @@ secret key and an archival node -- without any counterparty's cooperation.
 
      #+begin_example
      // Real entry point: register(issuer, pk, E, sigma, proof).  The
-     // registrant is msg.sender (NOT a passed address) -- it is folded into
-     // the proof's Fiat-Shamir challenge, so a proof valid for one address
-     // cannot be replayed under another.  (A 6-arg overload also takes a
+     // registrant is msg.sender (NOT a passed address) -- it, the chain, the
+     // registry deployment, and the action/version domain are folded into the
+     // proof's Fiat-Shamir challenge, so a proof cannot be replayed across
+     // addresses, chains, or registries.  (A 6-arg overload also takes a
      // uint256 identityLeaf for the registry-Identity accumulator.)
      identityRegistry.register(
          issuer,          // trusted issuer whose PS key signed the credential
@@ -1771,7 +1772,8 @@ secret key and an archival node -- without any counterparty's cooperation.
        // Read the caller's registered credential from the registry
        // CRITICAL: read from storage, never from calldata.  (Real names:
        // ciphertextOf(msg.sender) / pkOf(spender); verifyApprove reads
-       // E_alice itself from storage and binds (sender, spender, chainid).)
+       // E_alice itself from storage and binds the registry, sender, spender,
+       // and chainid.)
        require(identityRegistry.verifyApprove(
                    msg.sender, spender, E_spender, chaumPedersen),
                "BUCK: bad CP proof");
@@ -2591,7 +2593,7 @@ secret key and an archival node -- without any counterparty's cooperation.
    |------------------------------------------+--------------+------------------|
    | ~registerCredential~ with PS verify      | ~235,000 gas | Once per account |
    | (PS pairing: ~181K + NIZK: ~44K)         |              |                  |
-   | ~approve~ with Chaum-Pedersen verify     | ~75,000 gas  | Once per pair    |
+   | ~approve~ with Chaum-Pedersen verify     | ~75,000 gas  | Per approval     |
    | (proof verify: ~29K + std approve: ~46K) |              |                  |
    | ~BuckTransferReceipt~ event              | ~2,000 gas   | Per transfer     |
    | (2 indexed addresses + 3 uint256)        |              |                  |

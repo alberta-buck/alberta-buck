@@ -1,4 +1,4 @@
-"""Nonce-inclusive cross-language kernel vectors.
+"""Cross-language kernel vectors.
 
 Emits ``core/vectors/identity-kernel-vectors.json`` from the pure-Python
 py_ecc REFERENCE path -- the executable spec -- so the Rust (`cargo`),
@@ -95,6 +95,7 @@ def build_kernel_vectors(seed: int = 0x1DE47B0CA) -> Dict[str, Any]:
 def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     rng = _seeded_rng(seed)
     draw = lambda: rand_scalar(rng)
+    registry = int("1d" * 20, 16)
 
     out: Dict[str, Any] = {
         "$schema_version": 1,
@@ -235,19 +236,26 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     t_re = draw()
     sigma_p, _ = ps_rerandomize(sigma, rng=_replay([t_re]))
     registrant = 0xA11CE % (1 << 160)
-    m_tilde, r_tilde = draw(), draw()
-    proof = registration_prove(sigma_p, m, r, pk_e, E, registrant,
-                               rng=_replay([m_tilde, r_tilde]))
+    m_tilde, r_tilde, sk_tilde = draw(), draw(), draw()
+    proof = registration_prove(
+        sigma_p, m, r, pk_e, E, registrant, sk_e, chainid,
+        rng=_replay([m_tilde, r_tilde, sk_tilde]), registry=registry,
+    )
     out["registration"] = {
         "m": scalar_to_hex(m), "r": scalar_to_hex(r),
+        "sk": scalar_to_hex(sk_e),
         "pk": _g1(pk_e), "E": _ct(E),
         "sigma_1": _g1(sigma_p.sigma_1), "sigma_2": _g1(sigma_p.sigma_2),
-        "registrant": _hx(registrant),
+        "registrant": _hx(registrant), "chainid": _hx(chainid),
+        "registry": _hx(registry),
         "m_tilde": scalar_to_hex(m_tilde), "r_tilde": scalar_to_hex(r_tilde),
+        "sk_tilde": scalar_to_hex(sk_tilde),
         "proof": {
             "e": scalar_to_hex(proof.e), "s_m": scalar_to_hex(proof.s_m),
-            "s_r": scalar_to_hex(proof.s_r), "A_ps": _g1(proof.A_ps),
+            "s_r": scalar_to_hex(proof.s_r), "s_sk": scalar_to_hex(proof.s_sk),
+            "A_ps": _g1(proof.A_ps),
             "T_C": _g1(proof.T_C), "T_R": _g1(proof.T_R),
+            "T_key": _g1(proof.T_key),
         },
     }
 
@@ -259,11 +267,13 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     sender, spender = registrant, 0x0B0B % (1 << 160)
     k1, k2 = draw(), draw()
     cp = chaum_pedersen_prove(E, E_b, pk_e, pk_b, sk_e, r_prime,
-                              sender, spender, chainid, rng=_replay([k1, k2]))
+                              sender, spender, chainid, rng=_replay([k1, k2]),
+                              registry=registry)
     out["chaum_pedersen"] = {
         "E_a": _ct(E), "E_b": _ct(E_b), "pk_a": _g1(pk_e), "pk_b": _g1(pk_b),
         "sk_a": scalar_to_hex(sk_e), "r_prime": scalar_to_hex(r_prime),
         "sender": _hx(sender), "spender": _hx(spender), "chainid": _hx(chainid),
+        "registry": _hx(registry),
         "k1": scalar_to_hex(k1), "k2": scalar_to_hex(k2),
         "proof": {
             "e": scalar_to_hex(cp.e), "s1": scalar_to_hex(cp.s1),

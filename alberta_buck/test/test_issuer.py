@@ -207,7 +207,7 @@ def test_end_to_end_issuance_through_registration_nizk():
     E = elgamal_encrypt(mul(G1, cred.m), applicant_kp.pk, r)
 
     proof = registration_prove(
-        sigma_p, cred.m, r, applicant_kp.pk, E, ALICE_ADDR, rng=rng,
+        sigma_p, cred.m, r, applicant_kp.pk, E, ALICE_ADDR, applicant_kp.sk, rng=rng,
     )
     assert registration_verify(
         sigma_p, E, applicant_kp.pk, issuer.pk_X, issuer.pk_Y, proof, ALICE_ADDR,
@@ -225,7 +225,7 @@ def test_end_to_end_with_wrong_issuer_keypair_fails():
     r = rand_scalar(rng)
     E = elgamal_encrypt(mul(G1, cred.m), applicant_kp.pk, r)
     proof = registration_prove(
-        sigma_p, cred.m, r, applicant_kp.pk, E, ALICE_ADDR, rng=rng,
+        sigma_p, cred.m, r, applicant_kp.pk, E, ALICE_ADDR, applicant_kp.sk, rng=rng,
     )
     # Verifier checks against the rotated key -> should fail.
     assert not registration_verify(

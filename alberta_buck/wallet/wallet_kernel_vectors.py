@@ -1,4 +1,4 @@
-"""Nonce-inclusive cross-language WALLET kernel vectors.
+"""Cross-language WALLET kernel vectors.
 
 Emits ``core/vectors/wallet-kernel-vectors.json`` from the pure-Python
 reference path (``BUCK_IDENTITY_BACKEND=py``) so the Rust (``cargo``),
@@ -90,6 +90,7 @@ def _rcpt(res) -> Dict[str, Any]:
 CHAINID = 1
 CONTRACTS = {"registry": "0x" + "1d" * 20, "buck": "0x" + "b0" * 20,
              "notes": "0x" + "70" * 20}
+REGISTRY = int(CONTRACTS["registry"], 16)
 FACE = 250
 
 
@@ -263,7 +264,8 @@ def _build(seed: int) -> Dict[str, Any]:
     cp = chaum_pedersen_prove(alice["E"], E_for_bob, alice["pk"], bob["pk"],
                               alice["sk"], r_prime,
                               alice["addr"], bob["addr"], CHAINID,
-                              rng=_replay([k1, k2]))
+                              rng=_replay([k1, k2]),
+                              registry=REGISTRY)
     t_vd_payer, t_self = draw(), draw()
     core = build_eoa_priv(
         chainid=CHAINID, contracts=CONTRACTS,

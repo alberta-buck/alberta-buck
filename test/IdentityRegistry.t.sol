@@ -13,6 +13,8 @@ contract IdentityRegistryTest is Test {
     IdentityRegistry internal reg;
     address internal constant GOV = address(0xA0);
     address internal constant ISSUER = address(0x1551E1);
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     address internal alice;
     address internal bob;
@@ -23,7 +25,12 @@ contract IdentityRegistryTest is Test {
         // The wallet's transcripts use chainid = 1.
         vm.chainId(1);
         vj = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
 
         alice = address(uint160(_u(".alice.registrant")));
         bob   = address(uint160(_u(".bob.registrant")));
@@ -68,9 +75,11 @@ contract IdentityRegistryTest is Test {
         p.e    = _u(string.concat(base, ".e"));
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
+        p.s_sk = _u(string.concat(base, ".s_sk"));
         p.A_ps = _g1(string.concat(base, ".A_ps"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
+        p.T_key = _g1(string.concat(base, ".T_key"));
     }
 
     function _cpProof() internal view returns (IdentityRegistry.CPProof memory p) {
@@ -190,6 +199,66 @@ contract IdentityRegistryTest is Test {
         reg.register(ISSUER, pk, E, bad, _regProof("alice"));
     }
 
+    function test_register_rejects_zero_pk() public {
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        vm.prank(alice);
+        vm.expectRevert(bytes("pk=O"));
+        reg.register(ISSUER, BN254.zeroG1(), E, _ps("alice"), _regProof("alice"));
+    }
+
+    function test_register_rejects_zero_R() public {
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        E.R = BN254.zeroG1();
+        vm.prank(alice);
+        vm.expectRevert(bytes("R=O"));
+        reg.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
+    }
+
+    function test_register_rejects_noncanonical_scalar() public {
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        IdentityRegistry.RegistrationProof memory p = _regProof("alice");
+        p.s_sk = p.s_sk + BN254.R;
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad scalar"));
+        reg.register(ISSUER, pk, E, _ps("alice"), p);
+    }
+
+    function test_register_rejects_wrong_chainid() public {
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        vm.chainId(2);
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad FS challenge"));
+        reg.register(ISSUER, pk, E, _ps("alice"), _regProof("alice"));
+    }
+
+    function test_register_rejects_otherRegistry() public {
+        IdentityRegistry other = new IdentityRegistry(GOV);
+        IdentityRegistry.PSPubKey memory ipk;
+        ipk.X.X[0] = _u(".issuer.pk_X.x[0]");
+        ipk.X.X[1] = _u(".issuer.pk_X.x[1]");
+        ipk.X.Y[0] = _u(".issuer.pk_X.y[0]");
+        ipk.X.Y[1] = _u(".issuer.pk_X.y[1]");
+        ipk.Y.X[0] = _u(".issuer.pk_Y.x[0]");
+        ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
+        ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
+        ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        vm.prank(GOV);
+        other.trustIssuer(ISSUER, ipk);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad FS challenge"));
+        other.register(
+            ISSUER,
+            _g1(".alice.elgamal_kp.pk"),
+            _ct(".alice.ciphertext"),
+            _ps("alice"),
+            _regProof("alice")
+        );
+    }
+
     // ---- bindContract ------------------------------------------------------
 
     function test_bindContract_rejectsEOA() public {
@@ -286,6 +355,33 @@ contract IdentityRegistryTest is Test {
         assertFalse(reg.verifyApprove(alice, bob, E_b, _cpProof()));
     }
 
+    function test_verifyApprove_rejects_otherRegistry() public {
+        IdentityRegistry other = new IdentityRegistry(GOV);
+
+        // Give the second registry identical public records.  With every
+        // other transcript input held constant, only its address differs.
+        vm.etch(alice, hex"60006000fd");
+        vm.etch(bob, hex"60006000fd");
+        other.bindContract(
+            alice,
+            _g1(".alice.elgamal_kp.pk"),
+            _ct(".alice.ciphertext"),
+            false,
+            false
+        );
+        other.bindContract(
+            bob,
+            _g1(".bob.elgamal_kp.pk"),
+            _ct(".bob.ciphertext"),
+            false,
+            false
+        );
+
+        assertFalse(other.verifyApprove(
+            alice, bob, _ct(".approve.E_for_bob"), _cpProof()
+        ));
+    }
+
     function test_verifyApprove_rejects_tampered_e() public {
         _registerAlice();
         _registerBob();
@@ -293,6 +389,23 @@ contract IdentityRegistryTest is Test {
         IdentityRegistry.CPProof memory bad = _cpProof();
         bad.e = (bad.e + 1) % BN254.R;
         assertFalse(reg.verifyApprove(alice, bob, E_b, bad));
+    }
+
+    function test_verifyApprove_rejects_noncanonical_scalar() public {
+        _registerAlice();
+        _registerBob();
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        IdentityRegistry.CPProof memory bad = _cpProof();
+        bad.s1 = bad.s1 + BN254.R;
+        assertFalse(reg.verifyApprove(alice, bob, E_b, bad));
+    }
+
+    function test_verifyApprove_rejects_zero_R() public {
+        _registerAlice();
+        _registerBob();
+        IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
+        E_b.R = BN254.zeroG1();
+        assertFalse(reg.verifyApprove(alice, bob, E_b, _cpProof()));
     }
 
     // ---- setBuck -----------------------------------------------------------

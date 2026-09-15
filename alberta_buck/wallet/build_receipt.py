@@ -236,8 +236,10 @@ def build_eoa_priv(
     vd_payer = verifiable_decrypt_prove(E_for_payee, payee_sk, payer_M,
                                         payee_addr, chainid, rng=rng)
     vd_payer_rec = vd_proof_record(E_for_payee, payer_M, payee_addr, chainid, vd_payer)
-    ap_rec = cp_proof_record(payer_E_addr, E_for_payee, payer_pk, payee_pk,
-                             payer_addr, payee_addr, chainid, cp_proof)
+    ap_rec = cp_proof_record(
+        payer_E_addr, E_for_payee, payer_pk, payee_pk,
+        payer_addr, payee_addr, chainid, cp_proof,
+    )
 
     vd_self_rec = _self_vd(payee_E_addr, payee_sk, payee_M, payee_addr, chainid, rng)
 

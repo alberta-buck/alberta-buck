@@ -188,12 +188,14 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
         sender = _h(ap["sender"])
         spender = _h(ap["spender"])
         cid_ap = ap["chainid"]
+        registry = _h(core.contracts["registry"])
         p = ap["proof"]
         cp = CPProof(e=_h(p["e"]), s1=_h(p["s1"]), s2=_h(p["s2"]),
                      T1=_g1_from_hex(p["T1"]), T2=_g1_from_hex(p["T2"]),
                      T3=_g1_from_hex(p["T3"]))
         if not chaum_pedersen_verify(E_payer, E_spender, pk_payer, pk_spender,
-                                      cp, sender, spender, cid_ap):
+                                      cp, sender, spender, cid_ap,
+                                      registry):
             return RcptResult(False, None, None, "eoa-priv: approve handshake fails")
         # Verifiable decryption (recovery + provability)
         E_vd, M_vd, acct_vd, cid_vd, vd = _vd_from_record(vp)

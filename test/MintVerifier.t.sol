@@ -44,6 +44,8 @@ contract MintVerifierTest is Test {
     address internal constant GOV    = address(0xA0);
     address internal constant ISSUER = address(0x1551E1);
     address internal constant POOL   = address(0xBA51C);
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     // Gated-only mint: alice is a bound PUBLIC issuer with a known key, so the
     // batch mints carry a valid issuer Schnorr over keccak256(cms).
@@ -67,7 +69,12 @@ contract MintVerifierTest is Test {
         vm.chainId(1);
 
         string memory ij = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
         _trustIssuer(ij);
         alice = address(uint160(vm.parseJsonUint(ij, ".alice.registrant")));
         bob   = address(uint160(vm.parseJsonUint(ij, ".bob.registrant")));
@@ -190,9 +197,11 @@ contract MintVerifierTest is Test {
         p.e    = _u(j, string.concat(base, ".e"));
         p.s_m  = _u(j, string.concat(base, ".s_m"));
         p.s_r  = _u(j, string.concat(base, ".s_r"));
+        p.s_sk = _u(j, string.concat(base, ".s_sk"));
         p.A_ps = _g1(j, string.concat(base, ".A_ps"));
         p.T_C  = _g1(j, string.concat(base, ".T_C"));
         p.T_R  = _g1(j, string.concat(base, ".T_R"));
+        p.T_key = _g1(j, string.concat(base, ".T_key"));
         vm.prank(acct);
         reg.register(ISSUER, pk, E, sigma, p);
     }

@@ -90,6 +90,8 @@ contract UniswapV2IntegrationTest is Test {
     address internal constant GOV     = address(0xA0);
     address internal constant POOL    = address(0xBA51C);
     address internal constant CAROL   = address(0xCABE1);  // unverified outsider
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     address internal alice;     // verified LP / swapper
     address internal bob;       // verified swapper
@@ -109,7 +111,12 @@ contract UniswapV2IntegrationTest is Test {
         vj = vm.readFile("test/vectors/identity.json");
 
         // Identity layer + register Alice and Bob.
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
         bob   = address(uint160(_u(".bob.registrant")));
@@ -520,9 +527,11 @@ contract UniswapV2IntegrationTest is Test {
         p.e    = _u(string.concat(base, ".e"));
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
+        p.s_sk = _u(string.concat(base, ".s_sk"));
         p.A_ps = _g1(string.concat(base, ".A_ps"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
+        p.T_key = _g1(string.concat(base, ".T_key"));
     }
 
     function _trustIssuer() internal {

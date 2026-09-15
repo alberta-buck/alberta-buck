@@ -15,11 +15,14 @@ kernel port must preserve is:
    ``IdentityRegistry.register`` and ``isVerified()`` holds.
 
 Skips cleanly if anvil/web3 or the kernel binding is unavailable.
+
+Registration Fiat-Shamir binds block.chainid.  Sim Anvil/PyrevmAnvil
+default to 31337; issuance must use that live chain id (not a hardcoded 1)
+or on-chain register reverts `bad FS challenge`.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import shutil
 from pathlib import Path
@@ -39,27 +42,103 @@ _REPO = Path(__file__).resolve().parents[2]
 
 
 def _cold_run(tmp_path: Path, monkeypatch, backend: str) -> dict:
-    """One cold-cache routing run under `backend`; returns the cache dict."""
+    """Cold-cache two accounts and register both on the current contract."""
     from alberta_buck.sim import identity as idmod
     from alberta_buck.sim.anvil import Anvil
-    from alberta_buck.sim.loop import run
-    from alberta_buck.sim.scenario import SCENARIOS
+    from alberta_buck.sim.chain import Chain
 
     tmp_cache = tmp_path / f"identity-cache-{backend}.json"
     monkeypatch.setattr(idmod, "_CACHE_PATH", tmp_cache)
     monkeypatch.setenv("BUCK_IDENTITY_BACKEND", backend)
     idmod.reset_sim_registry()
     try:
-        sc = dataclasses.replace(SCENARIOS["routing"], days=1, ticks_per_day=1)
         with Anvil() as anvil:
-            s = run(sc, anvil, verbose=False)
-        assert s["all_eoa_verified"], (
-            f"[{backend}] an EOA agent failed on-chain registration with"
-            " freshly regenerated args"
-        )
+            gov, issuer_addr = anvil.w3.eth.accounts[:2]
+            chain = Chain(anvil.w3, gov)
+            registry = chain.deploy("IdentityRegistry", gov)
+            sim_registry = idmod.get_sim_registry(7)
+            chain.send(
+                registry.functions.trustIssuer(
+                    issuer_addr, idmod.pspubkey_arg(sim_registry.ps_keypair)
+                ),
+                sender=gov,
+            )
+
+            rng = idmod.seeded_rng(7)
+            for idx in range(2):
+                account, args = idmod.cached_eoa_setup(
+                    7, "CacheGate", idx, sim_registry.ps_keypair, rng,
+                    int(anvil.w3.eth.chain_id), int(registry.address, 16),
+                )
+                anvil.set_balance(account.address, 10**18)
+                chain.send(
+                    registry.functions.register(issuer_addr, *args),
+                    sender=account,
+                )
+                assert registry.functions.isVerified(account.address).call(), (
+                    f"[{backend}] freshly generated registration did not verify"
+                )
     finally:
         idmod.reset_sim_registry()
     return json.loads(tmp_cache.read_text())
+
+
+def test_sim_issue_binds_anvil_default_chainid():
+    """Cheap gate: sim issuance must Fiat-Shamir at Anvil's default 31337.
+
+    test_identity_cache_regeneration_backend_invariant is the full on-chain
+    check (skipped without anvil).  This test does not need a node.
+    """
+    from alberta_buck.sim.identity import SimRegistry, reset_sim_registry
+    from alberta_buck.sim.identity import seeded_rng
+    from alberta_buck.wallet.nizk import registration_verify
+
+    reset_sim_registry()
+    try:
+        rng = seeded_rng(1)
+        sim = SimRegistry(1)
+        rec = sim.issue("Farmer", 0, 0xA11CE, rng, chainid=31337,
+                        registry=0x1D1D)
+        assert registration_verify(
+            rec.ps_sigma_rerand, rec.E_addr, rec.client_kp.pk,
+            sim.ps_keypair.pk_X, sim.ps_keypair.pk_Y,
+            rec.registration_proof, 0xA11CE, 31337, 0x1D1D,
+        )
+        assert not registration_verify(
+            rec.ps_sigma_rerand, rec.E_addr, rec.client_kp.pk,
+            sim.ps_keypair.pk_X, sim.ps_keypair.pk_Y,
+            rec.registration_proof, 0xA11CE, 1, 0x1D1D,
+        )
+    finally:
+        reset_sim_registry()
+
+
+def test_legacy_registration_proof_is_not_a_cache_hit(monkeypatch):
+    """A six-field proof must be regenerated, never sent to the v3 ABI."""
+    from alberta_buck.sim import identity as idmod
+
+    key = idmod._cache_key(7, "TestAgent", 0, 31337, 0x1D1D)
+    legacy = [
+        [1, 2],
+        [[1, 2], [1, 2]],
+        [[1, 2], [1, 2]],
+        [1, 2, 3, [1, 2], [1, 2], [1, 2]],
+    ]
+
+    monkeypatch.setattr(idmod, "_load_cache", lambda: {key: legacy})
+
+    class RegenerateSentinel(Exception):
+        pass
+
+    def regenerate(_seed):
+        raise RegenerateSentinel
+
+    monkeypatch.setattr(idmod, "get_sim_registry", regenerate)
+    with pytest.raises(RegenerateSentinel):
+        idmod.cached_eoa_setup(
+            7, "TestAgent", 0, issuer=None,
+            rng=idmod.seeded_rng(7), chainid=31337, registry=0x1D1D,
+        )
 
 
 @pytest.mark.skipif(anvil_missing or web3_missing,

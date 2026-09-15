@@ -249,7 +249,10 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
 
    The =ApproveReceipt= half: at approve time the payer re-encrypted their M for
    the payee (=E_for_spender=) and proved it (=cp_proof= = =verifyApprove=); the
-   payee verifiably decrypts it to =payer.M= (=vd_proof=).  Payload = both
+   repaired transcript binds the registry, chain, sender, and spender.  The
+   receipt retains that historical registry address, rather than consulting a
+   later system-wide default.  The payee verifiably decrypts the ciphertext to
+   =payer.M= (=vd_proof=).  Payload = both
    Parties (private) + =ApproveReceipt= proofs + payee self =vd_proof= +
    =Transfer= anchor + registry =pk= / =E_addr= for both (tier 2).
 

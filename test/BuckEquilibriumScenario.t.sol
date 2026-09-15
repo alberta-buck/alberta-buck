@@ -110,6 +110,8 @@ contract BuckEquilibriumScenarioTest is Test {
     address internal constant GOV    = address(0xA0);
     address internal constant POOL   = address(0xBA51C);  // insurancePool sink
     address internal constant ISSUER = address(0x1551E1);
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     Buck                internal buck;
     BuckCreditHarness          internal credit;
@@ -176,7 +178,12 @@ contract BuckEquilibriumScenarioTest is Test {
         vm.chainId(1);
         vj = vm.readFile("test/vectors/identity.json");
 
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
         _trustIssuer();
 
         alice = address(uint160(_u(".alice.registrant")));
@@ -789,9 +796,11 @@ contract BuckEquilibriumScenarioTest is Test {
         p.e    = _u(string.concat(base, ".e"));
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
+        p.s_sk = _u(string.concat(base, ".s_sk"));
         p.A_ps = _g1(string.concat(base, ".A_ps"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
+        p.T_key = _g1(string.concat(base, ".T_key"));
     }
     function _trustIssuer() internal {
         IdentityRegistry.PSPubKey memory ipk;

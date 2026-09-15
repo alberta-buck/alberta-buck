@@ -412,6 +412,7 @@ class NotesStack:
             party.sk, r_prime,
             party.addr, int(self.notes.address, 16), self.fx.chainid,
             rng=self.rng,
+            registry=int(self.reg.address, 16),
         )
         approve4 = self.buck.get_function_by_signature(
             "approve(address,uint256,((uint256,uint256),(uint256,uint256)),"

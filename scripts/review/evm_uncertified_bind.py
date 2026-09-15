@@ -72,18 +72,21 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     alice = Account(12345, 45678, 98765)
     sigma, _ = ps_rerandomize(ps_sign(iss, alice.m, rng=rng), rng=rng)
     pf = registration_prove(sigma, alice.m, alice.r, alice.pk, alice.E,
-                            int(alice_addr, 16), rng=rng)
+                            int(alice_addr, 16), alice.sk, rng=rng,
+                            registry=int(reg.address, 16))
     honest_leaf = identity_leaf(alice.M)
     fake_leaf = honest_leaf ^ 1
     reg6 = reg.get_function_by_signature(
         "register(address,(uint256,uint256),((uint256,uint256),(uint256,uint256)),"
         "((uint256,uint256),(uint256,uint256)),"
-        "(uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),(uint256,uint256)),"
+        "(uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
+        "(uint256,uint256),(uint256,uint256)),"
         "uint256)")
     chain.send(reg6(
         iss_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
         (g1(sigma.sigma_1), g1(sigma.sigma_2)),
-        (pf.e, pf.s_m, pf.s_r, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R)),
+        (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R),
+         g1(pf.T_key)),
         fake_leaf), sender=alice_addr)
     assert reg.functions.isVerified(alice_addr).call()
     print("register() accepted a real credential with leaf != Poseidon(M)")

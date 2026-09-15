@@ -10,10 +10,12 @@ import {IPoseidonT3} from "./IPoseidonT3.sol";
 ///         * E_addr = (R, C) = ElGamal ciphertext of the identity point M = m*G,
 ///                    encrypted under pk and witnessed by an issuer-signed
 ///                    Pointcheval-Sanders credential.
-///         A registration NIZK proves -- without revealing m or r -- that the
-///         credential is valid and that E_addr really encrypts m.
+///         A registration NIZK proves -- without revealing m, r or sk -- that
+///         the credential is valid, that E_addr really encrypts m, and that
+///         the registrant holds sk for pk.
 ///         A Chaum-Pedersen NIZK proves a re-encryption sends the same M to a
-///         second registered recipient (used by Buck.approve()).
+///         second registered recipient AND that the sender holds the registered
+///         account key (used by Buck.approve()).
 contract IdentityRegistry {
 
     // ---- types --------------------------------------------------------------
@@ -33,24 +35,30 @@ contract IdentityRegistry {
         BN254.G1Point sigma_2;
     }
 
-    /// @notice 6-element registration NIZK proof (matches alberta_buck.wallet.nizk).
+    /// @notice Registration NIZK proof (matches alberta_buck.wallet.nizk).
+    ///         Adds the account-key relation pk = sk*G (T_key / s_sk) so a
+    ///         NUMS public key cannot register.
     struct RegistrationProof {
         uint256 e;
         uint256 s_m;
         uint256 s_r;
+        uint256 s_sk;         // response for sk: sk_tilde + e*sk
         BN254.G1Point A_ps;   // PS-side commitment: m_tilde * sigma'_1
         BN254.G1Point T_C;    // ElGamal C commitment: m_tilde*G + r_tilde*pk
         BN254.G1Point T_R;    // ElGamal R commitment: r_tilde * G
+        BN254.G1Point T_key;  // account-key commitment: sk_tilde * G
     }
 
     /// @notice 6-element Chaum-Pedersen proof (matches alberta_buck.wallet.chaum_pedersen).
+    ///         ABI is unchanged; the three T fields are reinterpreted as the
+    ///         three-relation commitments T_key, T_diff, T_R (see _verifyApprove).
     struct CPProof {
         uint256 e;
-        uint256 s1;
-        uint256 s2;
-        BN254.G1Point T1;
-        BN254.G1Point T2;
-        BN254.G1Point T3;
+        uint256 s1;           // u = a + e*sk
+        uint256 s2;           // v = b + e*r'
+        BN254.G1Point T1;     // T_key  = a*G
+        BN254.G1Point T2;     // T_diff = a*R_a - b*pk_b
+        BN254.G1Point T3;     // T_R    = b*G
     }
 
     /// @notice Schnorr signature over a note-batch commitment by an issuer's
@@ -136,6 +144,12 @@ contract IdentityRegistry {
         6790145969673496972519463000972766565107694238233578011858059027187477289586;
     uint256 internal constant H_Y =
         3372178911466361414640845512261989709787490420390555908180501907382229222644;
+
+    /// @dev Fiat-Shamir protocol domain for registration; a full keccak word,
+    ///      not reduced mod R.  This is transcript metadata, not contract API.
+    uint256 internal constant REGISTER_DOMAIN = uint256(
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2")
+    );
 
     /// @notice Depth of the registry-Identity Merkle accumulator.
     ///
@@ -474,15 +488,28 @@ contract IdentityRegistry {
         require(!_isRegistered(registrant), "already registered");
         require(isTrustedIssuer[issuer],    "untrusted issuer");
         require(!BN254.isInfinity(sigma.sigma_1), "sigma_1=O");
+        require(!BN254.isInfinity(pk),      "pk=O");
+        require(!BN254.isInfinity(E.R),     "R=O");
+        require(
+            _canonical(proof.e) && _canonical(proof.s_m)
+            && _canonical(proof.s_r) && _canonical(proof.s_sk),
+            "bad scalar"
+        );
 
         // (d) Fiat-Shamir
-        require(proof.e == _fsRegister(sigma, E, pk, proof, registrant), "bad FS challenge");
+        require(
+            proof.e == _fsRegister(sigma, E, pk, proof, registrant, block.chainid),
+            "bad FS challenge"
+        );
 
         // (b) ElGamal C consistency: s_m*G + s_r*pk == e*C + T_C
         require(_checkElGamalC(proof.s_m, proof.s_r, pk, E.C, proof.T_C, proof.e), "bad NIZK C");
 
         // (c) ElGamal R consistency: s_r*G == e*R + T_R
         require(_checkElGamalR(proof.s_r, E.R, proof.T_R, proof.e), "bad NIZK R");
+
+        // (k) Account-key ownership: s_sk*G == T_key + e*pk
+        require(_checkKeyOwnership(proof.s_sk, pk, proof.T_key, proof.e), "bad NIZK key");
 
         // (a) PS pairing product
         require(_checkPSPairing(sigma, proof, _trustedIssuers[issuer]), "bad PS sig");
@@ -604,7 +631,7 @@ contract IdentityRegistry {
     /// @notice Verify Alice's Chaum-Pedersen proof of equal-plaintext re-encryption
     ///         that ``E_bob`` encrypts the same M as ``E_addr[sender]``.
     /// @dev    Reads E_alice from storage (caller cannot substitute), and binds
-    ///         (sender, spender, chainid) into the transcript.
+    ///         the registry deployment, parties and chain into the transcript.
     function verifyApprove(
         address sender,
         address spender,
@@ -621,30 +648,42 @@ contract IdentityRegistry {
         CPProof calldata pi
     ) internal view returns (bool) {
         if (!_isRegistered(sender) || !_isRegistered(spender)) return false;
+        if (!_canonical(pi.e) || !_canonical(pi.s1) || !_canonical(pi.s2)) return false;
 
         ElGamalCT memory E_a = _E_addr[sender];
         BN254.G1Point memory pkA = _pk[sender];
         BN254.G1Point memory pkB = _pk[spender];
 
-        // Check 1: s2*G == T3 + e*R_b
+        if (BN254.isInfinity(pkA) || BN254.isInfinity(pkB)) return false;
+        if (BN254.isInfinity(E_a.R) || BN254.isInfinity(E_bob.R)) return false;
+
+        // Check 1: s1*G == T1 + e*pk_a  (key ownership; T1 = T_key)
+        if (!BN254.eq(
+            BN254.mul(BN254.g1(), pi.s1),
+            BN254.add(pi.T1, BN254.mul(pkA, pi.e))
+        )) return false;
+
+        // Check 2: s2*G == T3 + e*R_b  (T3 = T_R)
         if (!BN254.eq(
             BN254.mul(BN254.g1(), pi.s2),
             BN254.add(pi.T3, BN254.mul(E_bob.R, pi.e))
         )) return false;
 
-        // Check 2: s1*R_a - s2*pk_b == (T1 - T2) + e*(C_a - C_b)
+        // Check 3: s1*R_a - s2*pk_b == T2 + e*(C_a - C_b)  (T2 = T_diff)
         BN254.G1Point memory lhs2 = BN254.add(
             BN254.mul(E_a.R, pi.s1),
             BN254.neg(BN254.mul(pkB, pi.s2))
         );
         BN254.G1Point memory rhs2 = BN254.add(
-            BN254.add(pi.T1, BN254.neg(pi.T2)),
+            pi.T2,
             BN254.mul(BN254.add(E_a.C, BN254.neg(E_bob.C)), pi.e)
         );
         if (!BN254.eq(lhs2, rhs2)) return false;
 
-        // Check 3: Fiat-Shamir
-        return pi.e == _fsApprove(E_a, E_bob, pkA, pkB, pi, sender, spender, block.chainid);
+        // Check 4: Fiat-Shamir
+        return pi.e == _fsApprove(
+            E_a, E_bob, pkA, pkB, pi, sender, spender, block.chainid
+        );
     }
 
     // ---- public-issuer note binding (Notes mutual-decryptability, Phase 1) --
@@ -935,9 +974,10 @@ contract IdentityRegistry {
         ElGamalCT calldata E,
         BN254.G1Point calldata pk,
         RegistrationProof calldata proof,
-        address registrant
-    ) internal pure returns (uint256) {
-        BN254.G1Point[] memory pts = new BN254.G1Point[](8);
+        address registrant,
+        uint256 chainid
+    ) internal view returns (uint256) {
+        BN254.G1Point[] memory pts = new BN254.G1Point[](9);
         pts[0] = sigma.sigma_1;
         pts[1] = sigma.sigma_2;
         pts[2] = E.R;
@@ -946,8 +986,12 @@ contract IdentityRegistry {
         pts[5] = proof.A_ps;
         pts[6] = proof.T_C;
         pts[7] = proof.T_R;
-        uint256[] memory scl = new uint256[](1);
+        pts[8] = proof.T_key;
+        uint256[] memory scl = new uint256[](4);
         scl[0] = uint256(uint160(registrant));
+        scl[1] = chainid;
+        scl[2] = uint256(uint160(address(this)));
+        scl[3] = REGISTER_DOMAIN;
         return BN254.fsChallenge(pts, scl);
     }
 
@@ -960,7 +1004,7 @@ contract IdentityRegistry {
         address sender,
         address spender,
         uint256 chainid
-    ) internal pure returns (uint256) {
+    ) internal view returns (uint256) {
         BN254.G1Point[] memory pts = new BN254.G1Point[](9);
         pts[0] = E_a.R;
         pts[1] = E_a.C;
@@ -971,10 +1015,11 @@ contract IdentityRegistry {
         pts[6] = pi.T1;
         pts[7] = pi.T2;
         pts[8] = pi.T3;
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](4);
         scl[0] = uint256(uint160(sender));
         scl[1] = uint256(uint160(spender));
         scl[2] = chainid;
+        scl[3] = uint256(uint160(address(this)));
         return BN254.fsChallenge(pts, scl);
     }
 
@@ -996,6 +1041,22 @@ contract IdentityRegistry {
         scl[1] = uint256(uint160(issuer));
         scl[2] = chainid;
         return BN254.fsChallenge(pts, scl);
+    }
+
+    function _canonical(uint256 s) internal pure returns (bool) {
+        return s < BN254.R;
+    }
+
+    function _checkKeyOwnership(
+        uint256 s_sk,
+        BN254.G1Point calldata pk,
+        BN254.G1Point calldata T_key,
+        uint256 e
+    ) internal view returns (bool) {
+        return BN254.eq(
+            BN254.mul(BN254.g1(), s_sk),
+            BN254.add(T_key, BN254.mul(pk, e))
+        );
     }
 
     function _checkElGamalC(

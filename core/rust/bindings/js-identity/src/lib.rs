@@ -313,7 +313,7 @@ pub fn issuer_schnorr_verify(
 // ---------------------------------------------------------------------------
 
 /// `sigma`/`e_ct` flattened (4 words each).  Returns
-/// `[e, s_m, s_r, A_ps x, y, T_C x, y, T_R x, y]` (9 words).
+/// `[e, s_m, s_r, s_sk, A_ps x, y, T_C x, y, T_R x, y, T_key x, y]` (12 words).
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn registration_prove(
@@ -324,8 +324,12 @@ pub fn registration_prove(
     pky: &str,
     e_ct: Vec<String>,
     registrant: &str,
+    sk: &str,
+    chainid: &str,
+    registry: &str,
     m_tilde: &str,
     r_tilde: &str,
+    sk_tilde: &str,
 ) -> Result<Vec<String>, JsError> {
     if sigma.len() != 4 || e_ct.len() != 4 {
         return Err(JsError::new("sigma/e_ct need 4 words each"));
@@ -338,24 +342,31 @@ pub fn registration_prove(
         &g1(pkx, pky)?,
         &ct(&e_ct[0], &e_ct[1], &e_ct[2], &e_ct[3])?,
         &w(registrant)?,
+        &w(sk)?,
+        &w(chainid)?,
+        &w(registry)?,
         &w(m_tilde)?,
         &w(r_tilde)?,
+        &w(sk_tilde)?,
     )
     .map_err(err)?;
     Ok(vec![
         hx(&p.e),
         hx(&p.s_m),
         hx(&p.s_r),
+        hx(&p.s_sk),
         hx(&p.a_ps.0),
         hx(&p.a_ps.1),
         hx(&p.t_c.0),
         hx(&p.t_c.1),
         hx(&p.t_r.0),
         hx(&p.t_r.1),
+        hx(&p.t_key.0),
+        hx(&p.t_key.1),
     ])
 }
 
-/// `proof` = the 9 words `registration_prove` returns; `issuer_x`/`issuer_y`
+/// `proof` = the 12 words `registration_prove` returns; `issuer_x`/`issuer_y`
 /// are G2 (4 words each).
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
@@ -368,20 +379,24 @@ pub fn registration_verify(
     issuer_y: Vec<String>,
     proof: Vec<String>,
     registrant: &str,
+    chainid: &str,
+    registry: &str,
 ) -> Result<bool, JsError> {
     if sigma.len() != 4 || e_ct.len() != 4 || issuer_x.len() != 4 || issuer_y.len() != 4 {
         return Err(JsError::new("sigma/e_ct/issuer_x/issuer_y need 4 words each"));
     }
-    if proof.len() != 9 {
-        return Err(JsError::new("registration proof needs 9 words"));
+    if proof.len() != 12 {
+        return Err(JsError::new("registration proof needs 12 words"));
     }
     let p = kernel::nizk::RegistrationProof {
         e: w(&proof[0])?,
         s_m: w(&proof[1])?,
         s_r: w(&proof[2])?,
-        a_ps: g1(&proof[3], &proof[4])?,
-        t_c: g1(&proof[5], &proof[6])?,
-        t_r: g1(&proof[7], &proof[8])?,
+        s_sk: w(&proof[3])?,
+        a_ps: g1(&proof[4], &proof[5])?,
+        t_c: g1(&proof[6], &proof[7])?,
+        t_r: g1(&proof[8], &proof[9])?,
+        t_key: g1(&proof[10], &proof[11])?,
     };
     kernel::nizk::registration_verify(
         &g1(&sigma[0], &sigma[1])?,
@@ -392,6 +407,8 @@ pub fn registration_verify(
         &g2(&issuer_y[0], &issuer_y[1], &issuer_y[2], &issuer_y[3])?,
         &p,
         &w(registrant)?,
+        &w(chainid)?,
+        &w(registry)?,
     )
     .map_err(err)
 }
@@ -415,6 +432,7 @@ pub fn chaum_pedersen_prove(
     sender: &str,
     spender: &str,
     chainid: &str,
+    registry: &str,
     k1: &str,
     k2: &str,
 ) -> Result<Vec<String>, JsError> {
@@ -431,6 +449,7 @@ pub fn chaum_pedersen_prove(
         &w(sender)?,
         &w(spender)?,
         &w(chainid)?,
+        &w(registry)?,
         &w(k1)?,
         &w(k2)?,
     )
@@ -462,6 +481,7 @@ pub fn chaum_pedersen_verify(
     sender: &str,
     spender: &str,
     chainid: &str,
+    registry: &str,
 ) -> Result<bool, JsError> {
     if e_alice.len() != 4 || e_bob.len() != 4 || proof.len() != 9 {
         return Err(JsError::new("bad word counts"));
@@ -483,6 +503,7 @@ pub fn chaum_pedersen_verify(
         &w(sender)?,
         &w(spender)?,
         &w(chainid)?,
+        &w(registry)?,
     )
     .map_err(err)
 }

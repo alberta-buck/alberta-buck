@@ -132,6 +132,7 @@ pub struct ApproveReceipt {
     pub sender: W256,
     pub spender: W256,
     pub chainid: W256,
+    pub registry: W256,
     pub e_for_spender: Ctw,
     pub cp_proof: CpProof,
     pub m_named: G1w,
@@ -165,6 +166,7 @@ pub fn approve_receipt_verify(
         &receipt.sender,
         &receipt.spender,
         &receipt.chainid,
+        &receipt.registry,
     )? {
         return Ok(RcptResult::fail("(soundness) approve handshake fails"));
     }

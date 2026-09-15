@@ -386,15 +386,17 @@ bound with the public-disclosure flag).  Trusted-issuer PS public keys live in
 
 ** Cryptographic Surface
 
-Three on-chain verifications, all reducible to BN254 precompile calls:
+Four on-chain verifications, all reducible to BN254 precompile calls:
 
 1. *PS signature at registration*: ~e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)~, with =m=
    reconstructed linearly via the binding NIZK in step 2.  ~147K gas.
 2. *Schnorr-family NIZK* binding the rerandomized PS signature to the ElGamal ciphertext.  Three
-   response scalars, Fiat-Shamir bound to =(sigma', E_new, pk_new, registrant_address)=.
+   response scalars, Fiat-Shamir bound to the action/version domain,
+   =(sigma', E_new, pk_new, registrant_address)=, chain ID, and registry deployment.
    ~30K gas on top of step 1.  Total registration ~235K, paid once per address.
 3. *Chaum-Pedersen NIZK at =approve=*: proves the recipient's identity ciphertext re-encrypts the
-   same M registered in =E_alice=.  Fiat-Shamir binds =msg.sender=, =spender=, and =chainid=.
+   same M registered in =E_alice= and that the sender holds the registered account key.
+   Fiat-Shamir binds the registry deployment, =msg.sender=, =spender=, and =chainid=.
    ~29K gas per counterparty pair.
 4. *Chaum-Pedersen DLEQ at A-flavor spend* (=verifySpendCP=): proves the spender holds a single
    =sk_dep= that opens both the note's =E_n= and the registered =E_reg=.  ~36K gas via EIP-196.
@@ -411,7 +413,7 @@ struct ElGamalCT { G1Point R; G1Point C; }      // (R, C) = (r*G, r*pk + M)
 struct PSSig     { G1Point sigma_1; G1Point sigma_2; }
 struct PSPubKey  { G2Point X; G2Point Y; }
 
-struct RegistrationProof { uint256 e, s_m, s_r; G1Point A_ps, T_C, T_R; }
+struct RegistrationProof { uint256 e, s_m, s_r, s_sk; G1Point A_ps, T_C, T_R, T_key; }
 struct CPProof           { uint256 e, s1, s2;   G1Point T1, T2, T3;     }
 struct SpendCPProof      { uint256 e, s;        G1Point T1, T2;         }
 
@@ -431,7 +433,13 @@ function setBuck(address buck);                                      // governan
 A few non-obvious points:
 
 - =verifyApprove= reads =E_alice= from registry storage so the caller cannot substitute a fake
-  credential.
+  credential.  Its transcript binds the verifying registry address, so a proof prepared for a
+  different registry deployment is rejected.  Here "registry" means =address(this)= while the
+  proof is verified: for a Diamond facet that is the stable Diamond proxy, not the replaceable
+  facet implementation.  Replacing a facet therefore does not invalidate proofs.  Moving the
+  registry to a different proxy requires unsubmitted registration/approve proofs to be regenerated
+  (and registry state to be migrated), but does not alter already minted Notes or their receipts;
+  those artifacts do not contain either proof.
 - =bindContract= is permissioned by deployment pattern, not governance: any caller may bind any
   yet-unbound deployed contract.  The intended discipline is operator OPSEC -- either the operator
   is the deployer and uses =BuckAwareDeployer.deployAndBind= for atomic deploy+bind, or the

@@ -210,6 +210,7 @@ def _approve_receipt(vectors) -> ApproveReceipt:
         sender=_h(r["sender"]),
         spender=_h(r["spender"]),
         chainid=_h(r["chainid"]),
+        registry_addr=_h(r["registry"]),
         E_for_spender=_ct(r["E_for_spender"]),
         cp_proof=CPProof(
             e=_h(cp["e"]), s1=_h(cp["s1"]), s2=_h(cp["s2"]),
