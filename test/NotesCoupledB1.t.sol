@@ -215,7 +215,7 @@ contract NotesCoupledB1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: empty identity membership proof"));
-        notes.spendCoupledB1(hex"00", root, 0xB16, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, 0xB16, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), "");
     }
 
@@ -225,7 +225,7 @@ contract NotesCoupledB1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: membership verifier not set"));
-        notes.spendCoupledB1(hex"00", root, 0xB17, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, 0xB17, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
     }
 }
