@@ -173,7 +173,11 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     erc20_abi = _erc20_abi()
 
     # --- identity layer ---------------------------------------------- #
-    reg = chain.deploy("IdentityRegistry", gov)
+    # The simulation deploys synthetic infrastructure (SimLP, routers, and
+    # basket variants) that has no production binding-authorizer surface.
+    # Use the explicitly test-only registry harness for those fixture binds;
+    # production deployments use IdentityRegistry plus target-specific adapters.
+    reg = chain.deploy("IdentityRegistryHarness", gov)
     issuer_kp = idmod.make_issuer(rng)
     chain.send(reg.functions.trustIssuer(issuer_addr, idmod.pspubkey_arg(issuer_kp)),
                sender=gov)

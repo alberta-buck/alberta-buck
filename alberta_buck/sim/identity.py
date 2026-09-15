@@ -324,7 +324,7 @@ def register_deployer(chain, reg, issuer_addr, issuer, rng, chainid: int,
     sender = sender if sender is not None else chain.deployer
     addr = sender.address if hasattr(sender, "address") else sender
     args = register_args(issuer, int(addr, 16), fields_for(class_name, 0),
-                         rng, chainid)
+                         rng, chainid, int(reg.address, 16))
     chain.send(reg.functions.register(issuer_addr, *args), sender=sender)
     return args[0], args[1]
 
