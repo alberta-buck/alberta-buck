@@ -196,12 +196,13 @@ mod num_dec {
 #[test]
 fn golden_identity_fixture() {
     let v = fixture();
-    assert_eq!(v["$schema_version"], 1);
+    assert_eq!(v["$schema_version"], 2);
     let chainid = jw(&v["chainid"]);
     let registry = jw(&v["registry"]);
 
     let iss_x = jg2(&v["issuer"]["pk_X"]);
     let iss_y = jg2(&v["issuer"]["pk_Y"]);
+    assert!(ps::ps_key_consistent(&iss_y, &jg1(&v["issuer"]["pk_Y1"])).unwrap(), "issuer Y1");
 
     for who in ["alice", "bob"] {
         let p = &v[who];
@@ -224,15 +225,23 @@ fn golden_identity_fixture() {
             "{who} ciphertext"
         );
 
-        // PS signatures (raw + rerandomized) verify under the issuer key
-        for sig in ["ps_sig_raw", "ps_sig_rerand"] {
-            let s1 = jg1(&p[sig]["sigma_1"]);
-            let s2 = jg1(&p[sig]["sigma_2"]);
-            assert!(
-                ps::ps_verify(&iss_x, &iss_y, &s1, &s2, &m).unwrap(),
-                "{who} {sig}"
-            );
+        // The RAW credential verifies under the issuer key ...
+        {
+            let s1 = jg1(&p["ps_sig_raw"]["sigma_1"]);
+            let s2 = jg1(&p["ps_sig_raw"]["sigma_2"]);
+            assert!(ps::ps_verify(&iss_x, &iss_y, &s1, &s2, &m).unwrap(), "{who} raw");
         }
+        // ... and the PUBLISHED presentation (A, B) does not: it is not a
+        // signature on m (review finding R1 closed).
+        let pres = (jg1(&p["ps_presentation"]["A"]), jg1(&p["ps_presentation"]["B"]));
+        assert!(!ps::ps_verify(&iss_x, &iss_y, &pres.0, &pres.1, &m).unwrap(), "{who} presentation");
+        assert_eq!(
+            ps::ps_present(
+                &jg1(&p["ps_sig_raw"]["sigma_1"]), &jg1(&p["ps_sig_raw"]["sigma_2"]),
+                &jg1(&v["issuer"]["pk_Y1"]), &jw(&p["a"]), &jw(&p["b"])
+            ).unwrap(),
+            pres, "{who} presentation replay"
+        );
         // ... and not for a different message
         let m_bad = jw(&v[if who == "alice" { "bob" } else { "alice" }]["m"]);
         let s1 = jg1(&p["ps_sig_raw"]["sigma_1"]);
@@ -244,26 +253,23 @@ fn golden_identity_fixture() {
         let proof = nizk::RegistrationProof {
             e: jw(&pf["e"]),
             s_m: jw(&pf["s_m"]),
+            s_b: jw(&pf["s_b"]),
             s_r: jw(&pf["s_r"]),
             s_sk: jw(&pf["s_sk"]),
-            a_ps: jg1(&pf["A_ps"]),
+            c1: jg1(&pf["C1"]),
             t_c: jg1(&pf["T_C"]),
             t_r: jg1(&pf["T_R"]),
             t_key: jg1(&pf["T_key"]),
         };
-        let sig_p = (
-            jg1(&p["ps_sig_rerand"]["sigma_1"]),
-            jg1(&p["ps_sig_rerand"]["sigma_2"]),
-        );
         assert!(nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
+            &pres.0, &pres.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
             &registrant, &chainid, &registry
         )
         .unwrap());
         let mut wrong = registrant;
         wrong[31] ^= 1;
         assert!(!nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
+            &pres.0, &pres.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
             &wrong, &chainid, &registry
         )
         .unwrap());
@@ -474,7 +480,7 @@ fn kernel_fixture() -> serde_json::Value {
 #[test]
 fn kernel_vectors_replay() {
     let v = kernel_fixture();
-    assert_eq!(v["$schema_version"], 1);
+    assert_eq!(v["$schema_version"], 2);
     assert_eq!(v["backend"], "py", "vectors must come from the py reference");
     // ---- g1 / g2 ops ----------------------------------------------------
     for row in v["g1_ops"].as_array().unwrap() {
@@ -560,7 +566,13 @@ fn kernel_vectors_replay() {
         let rr = ps::ps_rerandomize(&sig.0, &sig.1, &jw(&row["rerand_t"])).unwrap();
         assert_eq!(rr.0, jg1(&row["rerand_sigma_1"]));
         assert_eq!(rr.1, jg1(&row["rerand_sigma_2"]));
+        let pres = ps::ps_present(&sig.0, &sig.1, &jg1(&ps_v["pk_Y1"]),
+                                  &jw(&row["present_a"]), &jw(&row["present_b"])).unwrap();
+        assert_eq!(pres.0, jg1(&row["present_A"]));
+        assert_eq!(pres.1, jg1(&row["present_B"]));
+        assert!(!ps::ps_verify(&jg2(&ps_v["pk_X"]), &jg2(&ps_v["pk_Y"]), &pres.0, &pres.1, &m).unwrap());
     }
+    assert!(ps::ps_key_consistent(&jg2(&ps_v["pk_Y"]), &jg1(&ps_v["pk_Y1"])).unwrap());
 
     // ---- schnorr -----------------------------------------------------------------
     let sc = &v["schnorr"];
@@ -589,9 +601,17 @@ fn kernel_vectors_replay() {
 
     // ---- registration NIZK -------------------------------------------------
     let rg = &v["registration"];
+    let pres = ps::ps_present(
+        &jg1(&rg["sigma_1"]), &jg1(&rg["sigma_2"]), &jg1(&rg["Y1"]),
+        &jw(&rg["a"]), &jw(&rg["b"]),
+    )
+    .unwrap();
+    assert_eq!(pres.0, jg1(&rg["A"]));
+    assert_eq!(pres.1, jg1(&rg["B"]));
     let proof = nizk::registration_prove(
-        &jg1(&rg["sigma_1"]),
-        &jg1(&rg["sigma_2"]),
+        &pres.0,
+        &pres.1,
+        &jw(&rg["b"]),
         &jw(&rg["m"]),
         &jw(&rg["r"]),
         &jg1(&rg["pk"]),
@@ -601,21 +621,23 @@ fn kernel_vectors_replay() {
         &jw(&rg["chainid"]),
         &jw(&rg["registry"]),
         &jw(&rg["m_tilde"]),
+        &jw(&rg["b_tilde"]),
         &jw(&rg["r_tilde"]),
         &jw(&rg["sk_tilde"]),
     )
     .unwrap();
     assert_eq!(proof.e, jw(&rg["proof"]["e"]));
     assert_eq!(proof.s_m, jw(&rg["proof"]["s_m"]));
+    assert_eq!(proof.s_b, jw(&rg["proof"]["s_b"]));
     assert_eq!(proof.s_r, jw(&rg["proof"]["s_r"]));
     assert_eq!(proof.s_sk, jw(&rg["proof"]["s_sk"]));
-    assert_eq!(proof.a_ps, jg1(&rg["proof"]["A_ps"]));
+    assert_eq!(proof.c1, jg1(&rg["proof"]["C1"]));
     assert_eq!(proof.t_c, jg1(&rg["proof"]["T_C"]));
     assert_eq!(proof.t_r, jg1(&rg["proof"]["T_R"]));
     assert_eq!(proof.t_key, jg1(&rg["proof"]["T_key"]));
     assert!(nizk::registration_verify(
-        &jg1(&rg["sigma_1"]),
-        &jg1(&rg["sigma_2"]),
+        &pres.0,
+        &pres.1,
         &jct(&rg["E"]),
         &jg1(&rg["pk"]),
         &jg2(&v["ps"]["pk_X"]),

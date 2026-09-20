@@ -67,8 +67,10 @@ contract BN254Test is Test {
     // ---- pairing parity: PS verification using emitted Alice signature ------
 
     function test_pairing_verifies_alice_ps_signature() public view {
-        BN254.G1Point memory s1 = _g1At(".alice.ps_sig_rerand.sigma_1");
-        BN254.G1Point memory s2 = _g1At(".alice.ps_sig_rerand.sigma_2");
+        // The RAW credential (wallet-private) still satisfies the PS relation;
+        // the published presentation does not (see IdentityRegistry.t.sol).
+        BN254.G1Point memory s1 = _g1At(".alice.ps_sig_raw.sigma_1");
+        BN254.G1Point memory s2 = _g1At(".alice.ps_sig_raw.sigma_2");
         uint256 m = _scalarAt(".alice.m");
 
         // pk_X, pk_Y are G2 points stored as { x:[c0,c1], y:[c0,c1] } -- read each coord.
@@ -113,12 +115,12 @@ contract BN254Test is Test {
 
     function test_fsChallenge_matches_alice_registration_e() public view {
         BN254.G1Point[] memory pts = new BN254.G1Point[](9);
-        pts[0] = _g1At(".alice.ps_sig_rerand.sigma_1");
-        pts[1] = _g1At(".alice.ps_sig_rerand.sigma_2");
+        pts[0] = _g1At(".alice.ps_presentation.A");
+        pts[1] = _g1At(".alice.ps_presentation.B");
         pts[2] = _g1At(".alice.ciphertext.R");
         pts[3] = _g1At(".alice.ciphertext.C");
         pts[4] = _g1At(".alice.elgamal_kp.pk");
-        pts[5] = _g1At(".alice.registration_proof.A_ps");
+        pts[5] = _g1At(".alice.registration_proof.C1");
         pts[6] = _g1At(".alice.registration_proof.T_C");
         pts[7] = _g1At(".alice.registration_proof.T_R");
         pts[8] = _g1At(".alice.registration_proof.T_key");
@@ -128,7 +130,7 @@ contract BN254Test is Test {
         scl[1] = _scalarAt(".chainid");
         scl[2] = _scalarAt(".registry");
         scl[3] = uint256(keccak256(
-            "AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2"
+            "AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3"
         ));
 
         uint256 e = BN254.fsChallenge(pts, scl);

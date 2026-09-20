@@ -87,6 +87,7 @@ contract IdentityRegistryV2Test is Test {
             [_u(rj, ".ps_issuer.pk_Y.x[0]"), _u(rj, ".ps_issuer.pk_Y.x[1]")],
             [_u(rj, ".ps_issuer.pk_Y.y[0]"), _u(rj, ".ps_issuer.pk_Y.y[1]")]
         );
+        ipk.Y1 = _g1j(rj, ".ps_issuer.pk_Y1");
         vm.prank(GOV);
         reg.trustIssuer(ISSUER_ADDR, ipk);
         assertTrue(reg.isTrustedIssuer(ISSUER_ADDR));
@@ -98,16 +99,17 @@ contract IdentityRegistryV2Test is Test {
             _g1j(j, ".ciphertext.R"),
             _g1j(j, ".ciphertext.C")
         );
-        IdentityRegistry.PSSig memory sigma = IdentityRegistry.PSSig(
-            _g1j(j, ".ps_sig_rerand.sigma_1"),
-            _g1j(j, ".ps_sig_rerand.sigma_2")
+        IdentityRegistry.PSPresentation memory sigma = IdentityRegistry.PSPresentation(
+            _g1j(j, ".ps_presentation.A"),
+            _g1j(j, ".ps_presentation.B")
         );
         IdentityRegistry.RegistrationProof memory proof;
         proof.e    = _u(j, ".registration_proof.e");
         proof.s_m  = _u(j, ".registration_proof.s_m");
         proof.s_r  = _u(j, ".registration_proof.s_r");
         proof.s_sk = _u(j, ".registration_proof.s_sk");
-        proof.A_ps = _g1j(j, ".registration_proof.A_ps");
+        proof.s_b = _u(j, ".registration_proof.s_b");
+        proof.C1 = _g1j(j, ".registration_proof.C1");
         proof.T_C  = _g1j(j, ".registration_proof.T_C");
         proof.T_R  = _g1j(j, ".registration_proof.T_R");
         proof.T_key = _g1j(j, ".registration_proof.T_key");
@@ -246,16 +248,17 @@ contract IdentityRegistryV2Test is Test {
             _g1j(j, ".ciphertext.R"),
             _g1j(j, ".ciphertext.C")
         );
-        IdentityRegistry.PSSig memory sigma = IdentityRegistry.PSSig(
-            _g1j(j, ".ps_sig_rerand.sigma_1"),
-            _g1j(j, ".ps_sig_rerand.sigma_2")
+        IdentityRegistry.PSPresentation memory sigma = IdentityRegistry.PSPresentation(
+            _g1j(j, ".ps_presentation.A"),
+            _g1j(j, ".ps_presentation.B")
         );
         IdentityRegistry.RegistrationProof memory proof;
         proof.e    = _u(j, ".registration_proof.e");
         proof.s_m  = _u(j, ".registration_proof.s_m");
         proof.s_r  = _u(j, ".registration_proof.s_r");
         proof.s_sk = _u(j, ".registration_proof.s_sk");
-        proof.A_ps = _g1j(j, ".registration_proof.A_ps");
+        proof.s_b = _u(j, ".registration_proof.s_b");
+        proof.C1 = _g1j(j, ".registration_proof.C1");
         proof.T_C  = _g1j(j, ".registration_proof.T_C");
         proof.T_R  = _g1j(j, ".registration_proof.T_R");
         proof.T_key = _g1j(j, ".registration_proof.T_key");

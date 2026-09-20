@@ -154,9 +154,10 @@ The flow is:
    activated only inside =Buck.mint=, atomically with the insurance principal that funds it --
    see [[#activation][Activation = Mint, Deactivation = Burn]].  While coverage is live the credit
    cannot change hands.
-3. Before touching BUCK, the client =registers= with =IdentityRegistry=, posting a rerandomized PS
-   credential and ElGamal-encrypted identity point.  The registry verifies both via BN254
-   pairings (~235K gas, paid once per address).
+3. Before touching BUCK, the client =registers= with =IdentityRegistry=, posting a blinded
+   presentation =(A, B)= of its PS credential, an ElGamal-encrypted identity point and a proof
+   tying the two to the account key.  The registry verifies the proof via BN254 pairings
+   (443,892 gas measured, paid once per address).
 4. =BUCK.mint(amount[, tokenIds])= draws coverage cheapest-first across the client's NFTs,
    activates it, and debits the mutual-insurance pool principal -- 10x the annual premium on the
    coverage -- from the client's /signed/ raw balance into =insurancePool=.  No BUCK is delivered
@@ -388,12 +389,20 @@ bound with the public-disclosure flag).  Trusted-issuer PS public keys live in
 
 Four on-chain verifications, all reducible to BN254 precompile calls:
 
-1. *PS signature at registration*: ~e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)~, with =m=
-   reconstructed linearly via the binding NIZK in step 2.  ~147K gas.
-2. *Schnorr-family NIZK* binding the rerandomized PS signature to the ElGamal ciphertext.  Three
-   response scalars, Fiat-Shamir bound to the action/version domain,
-   =(sigma', E_new, pk_new, registrant_address)=, chain ID, and registry deployment.
-   ~30K gas on top of step 1.  Total registration ~235K, paid once per address.
+1. *PS credential presentation at registration*: the holder publishes
+   ~(A, B) = (a * sigma_1, a * sigma_2 + b * Y1)~ for fresh ~a, b~, with ~Y1 = y * G~ the issuer's
+   G1 key component, and the registry checks the masked relation
+   ~e(B, g_2) = e(A, X) * e(m * A + b * G, Y)~ through the proof in step 2 -- one three-pair
+   pairing product.  The published pair is uniform whatever the identity, so no holder of ~m~
+   (the issuer included) can test it; a rerandomized signature, which an earlier design
+   published, would be a valid signature on ~m~ and testable by anyone holding it.
+2. *Schnorr-family NIZK* binding the presentation to the ElGamal ciphertext and the account
+   key.  Four response scalars over one credential commitment ~C1 = m~ * A + b~ * G~ (so no
+   field exposes ~m * A~ alone), Fiat-Shamir bound to the action/version domain
+   (=AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3=),
+   =((A, B), E_new, pk_new, registrant_address)=, chain ID, and registry deployment.
+   Total registration 443,892 gas measured (472,630 before the presentation), paid once per
+   address; =trustIssuer= additionally checks ~e(Y1, g_2) = e(G, Y)~ once per issuer.
 3. *Chaum-Pedersen NIZK at =approve=*: proves the recipient's identity ciphertext re-encrypts the
    same M registered in =E_alice= and that the sender holds the registered account key.
    Fiat-Shamir binds the registry deployment, =msg.sender=, =spender=, and =chainid=.
@@ -410,22 +419,22 @@ struct G1Point  { uint256 X; uint256 Y; }
 struct G2Point  { uint256[2] X; uint256[2] Y; }
 
 struct ElGamalCT { G1Point R; G1Point C; }      // (R, C) = (r*G, r*pk + M)
-struct PSSig     { G1Point sigma_1; G1Point sigma_2; }
-struct PSPubKey  { G2Point X; G2Point Y; }
+struct PSPresentation { G1Point A; G1Point B; }   // (a*sigma_1, a*sigma_2 + b*Y1)
+struct PSPubKey  { G2Point X; G2Point Y; G1Point Y1; }   // Y1 = y*G, checked at trustIssuer
 
-struct RegistrationProof { uint256 e, s_m, s_r, s_sk; G1Point A_ps, T_C, T_R, T_key; }
+struct RegistrationProof { uint256 e, s_m, s_b, s_r, s_sk; G1Point C1, T_C, T_R, T_key; }
 struct CPProof           { uint256 e, s1, s2;   G1Point T1, T2, T3;     }
 struct SpendCPProof      { uint256 e, s;        G1Point T1, T2;         }
 struct ContractBindingProof { uint256 e, s;     G1Point T;              }
 
 function register(address issuer, G1Point pk, ElGamalCT E,
-                  PSSig sigma, RegistrationProof proof);
+                  PSPresentation pres, RegistrationProof proof);
 function authorizeContractBinding(address binder, G1Point pk, ElGamalCT E,
                                   bool isPublicIdentity_, bool isCarrying_);
 function bindContract(address target, G1Point pk, ElGamalCT E,
                       bool isPublicIdentity_, bool isCarrying);
 function bindContract(address target, address issuer, G1Point pk, ElGamalCT E,
-                      PSSig sigma, RegistrationProof credential,
+                      PSPresentation pres, RegistrationProof credential,
                       ContractBindingProof holderAuthorization,
                       bool isPublicIdentity_, bool isCarrying);
 function bindContractFromAdapter(address target, address operator,
@@ -1618,10 +1627,11 @@ coverage for".  Her *capacity* to mint is bounded per credit by ~faceValue - min
 ** Step 0: Identity Registration (One-Time)
 
 Alice obtains a PS-signed credential off-chain from a trusted issuer (the Alberta government, ATB
-Financial, etc.), rerandomizes it, generates a fresh ElGamal key pair, encrypts her identity point
-~M = m·G~ under her public key, and produces the Schnorr-family NIZK binding the rerandomized
-sigma to the ciphertext.  =IdentityRegistry.register(issuer, pk, E, sigma', proof)= verifies both
-via BN254 precompiles in about 235K gas.  After this call ~isVerified[alice] = true~ and Alice can
+Financial, etc.), blinds it into a presentation ~(A, B)~, generates a fresh ElGamal key pair,
+encrypts her identity point ~M = m·G~ under her public key, and produces the Schnorr-family NIZK
+binding the presentation to the ciphertext and the key.
+=IdentityRegistry.register(issuer, pk, E, (A, B), proof)= verifies the proof via BN254
+precompiles in 443,892 gas (measured).  After this call ~isVerified[alice] = true~ and Alice can
 touch BUCK.  She repeats steps 2-3 for every Ethereum account she controls; the issuer never sees
 those accounts.
 
@@ -1739,7 +1749,7 @@ at 200 runs).  PID and oracle figures are estimates against unwritten oracle wir
 | Operation                                      | Gas (approx) | At 30 gwei | Notes                                    |
 |------------------------------------------------+--------------+------------+------------------------------------------|
 | BUCK_CREDIT.updateCredit()                     | ~80K         | ~$6        | Multiple SSTOREs (insurer pays)          |
-| IdentityRegistry.register()                    | ~235K        | ~$19       | PS pairing + NIZK (one-time)             |
+| IdentityRegistry.register()                    | ~444K        | ~$36       | credential proof, 3 pairings (measured)  |
 | IdentityRegistry.verifyApprove                 | ~29K         | ~$2        | CP proof, per counterparty pair          |
 | IdentityRegistry.verifySpendCP                 | ~36K         | ~$3        | CP-DLEQ via EIP-196 (A-flavor spend)     |
 | BUCK.approve() (identity)                      | ~97K         | ~$8        | 29K CP + 46K allowance + 22K SSTORE      |

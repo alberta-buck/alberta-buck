@@ -5,7 +5,7 @@ Mirrors the issuance ceremony described in alberta-buck-identity.org sec
 out-of-band, canonicalizes them, computes m = H(canonical_identity_data),
 produces the PS signature sigma = (h, (x + m*y)*h), and hands the applicant
 back (m, sigma, identity_data) for storage in their wallet's Holochain
-Private entry.  All wallet-side derivation steps (rerandomization, fresh
+Private entry.  All wallet-side derivation steps (hiding presentation, fresh
 identity key pair, ElGamal encryption under that key, registration NIZK)
 happen later, in the wallet -- not here.
 
@@ -40,7 +40,8 @@ from alberta_buck.wallet.bn254 import G1, mul, rand_scalar
 from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_encrypt
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
 from alberta_buck.wallet.ps import (
-    PSKeyPair, PSSignature, ps_keygen, ps_rerandomize, ps_sign, ps_verify,
+    PSKeyPair, PSPresentation, PSSignature, ps_keygen, ps_present, ps_sign,
+    ps_verify,
 )
 
 
@@ -60,6 +61,7 @@ class IssuedCredential:
     issuer_id:  str
     issuer_addr: int
     delivery:   Optional[ElGamalCiphertext] = None
+    issuer_pk_Y1: Optional[Tuple] = None   # y*G, the presentation base (A')
 
 
 @dataclass
@@ -108,6 +110,10 @@ class Issuer:
     def pk_Y(self):
         return self.keypair.pk_Y
 
+    @property
+    def pk_Y1(self):
+        return self.keypair.pk_Y1
+
     def issue(
         self,
         identity_fields: Mapping,
@@ -154,6 +160,7 @@ class Issuer:
             issuer_id=self.issuer_id,
             issuer_addr=self.issuer_addr,
             delivery=delivery,
+            issuer_pk_Y1=self.keypair.pk_Y1,
         )
 
     def revoke(self, applicant_addr: int) -> None:
@@ -186,19 +193,23 @@ class Issuer:
         return ps_verify(self.pk_X, self.pk_Y, cred.sigma, cred.m)
 
 
-def rerandomize_for_registration(
+def present_for_registration(
     cred: IssuedCredential, rng=None
-) -> Tuple[PSSignature, int]:
-    """Convenience: wallet-side rerandomization step.
+) -> Tuple[PSPresentation, int, int]:
+    """Convenience: wallet-side presentation step (A').
 
-    Returns (sigma_p, t).  The rerandomized sigma_p is what gets sent to
-    IdentityRegistry.register; the unblinded sigma is never published.
+    Returns (presentation, a, b).  The presentation (A, B) is what gets sent
+    to IdentityRegistry.register together with the NIZK that uses b as a
+    witness; the raw sigma is never published, and neither is any
+    rerandomization of it (a rerandomized pair is still a testable signature).
     """
-    return ps_rerandomize(cred.sigma, rng=rng)
+    if cred.issuer_pk_Y1 is None:
+        raise ValueError("credential carries no issuer Y1; cannot present")
+    return ps_present(cred.sigma, cred.issuer_pk_Y1, rng=rng)
 
 
 __all__ = [
     "IssuedCredential",
     "Issuer",
-    "rerandomize_for_registration",
+    "present_for_registration",
 ]

@@ -46,16 +46,18 @@ demonstrating what each verification check looks like when it fails.
 
 The scenario is a transfer from Private Alice to Public Bob (an AMM pool).
 Alice obtains a Pointcheval-Sanders signed identity from an issuer, derives a
-fresh unlinkable credential via the Identity Fountain, registers it on-chain
-(~235K gas NIZK verification), and re-encrypts her identity for Bob with a
-Chaum-Pedersen proof of correct re-encryption (~29K gas).  Bob verifies
+hiding presentation of it via the Identity Fountain, registers it on-chain
+(443,892 gas measured for the NIZK verification), and re-encrypts her identity
+for Bob with a Chaum-Pedersen proof of correct re-encryption.  Bob verifies
 Alice's identity using the two-channel design: the on-chain ElGamal ciphertext
 provides cryptographic binding, while Holochain delivers the plaintext
 =identity_data=.  The AMM pool scenario demonstrates how this proof chain
 protects Bob under subpoena -- even 18 months and 500,000 transactions
 later -- and why Alice cannot hide
-from regulatory recovery despite the Identity Fountain's unlinkability
-guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-identity-example.txt][Text]])
+from regulatory recovery despite the presentation's hiding of her identity
+from everyone but her counterparties.  The presentation is the A' design
+implemented on branch =feature/a-prime=; its security argument awaits
+independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-identity-example.txt][Text]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -83,9 +85,10 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    |------------------------------+--------------------------+-------------------+--------------------------------------|
    | identity_data = plaintext    | Holochain Private entry  | Owner only        | Approve (sent to counterparty)       |
    | =m = H(identity_data)=       | Holochain Private entry  | Owner only        | Registration, Approve                |
-   | PS signature =sigma=         | Holochain Private entry  | Owner only        | Registration (rerandomized)          |
+   | PS signature =sigma=         | Holochain Private entry  | Owner only        | Registration (blinded into (A, B))   |
+   | Blinding =b= (per account)   | Wallet memory            | Owner only        | Registration proof, then discarded   |
    | Secret key =sk=              | Holochain Private entry  | Owner only        | Approve (decrypt + re-encrypt)       |
-   | Rerandomized =sigma'=        | IdentityRegistry         | Public (on-chain) | Registration verification            |
+   | Presentation =(A, B)=        | IdentityRegistry (tx)    | Public (on-chain) | Registration verification            |
    | Public key =pk=              | IdentityRegistry         | Public (on-chain) | Approve, Transfer                    |
    | ElGamal ciphertext =E_alice= | IdentityRegistry         | Public (on-chain) | Approve (read by contract)           |
    | NIZK proof =pi=              | IdentityRegistry (tx)    | Public (on-chain) | Registration verification            |
@@ -97,14 +100,23 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    | Holochain Warrants           | Holochain DHT            | Public            | Malfeasance detection                |
    | Canonical receipt            | Holochain Private entry  | Each party only   | Dispute resolution                   |
    #+TBLFM: $1=identity_data= (plaintext)
+
+   This table says where each item lives.  What the public items can
+   /reveal/ -- why a permanently archived registration transaction
+   discloses no identity to any node -- is set out item by item in
+   [[#what-the-chain-sees][What the Chain Sees, and What It Can Learn]].
 #+LATEX: }
 
 ** Registration: Credential Goes On-Chain
 
-   Alice's wallet reads her Private entries, derives a credential entirely
-   offline, then submits it to the IdentityRegistry.  The contract verifies
-   the NIZK proof (~235K gas) and stores the public artifacts.  The secret
-   key and plaintext identity /never/ touch Ethereum.
+   Alice's wallet reads her Private entries, derives a /presentation/ of
+   her credential entirely offline, then submits it to the
+   IdentityRegistry.  The contract verifies the NIZK proof (443,892 gas
+   measured on the A' branch with an in-process EVM) and stores the
+   public artifacts.  The secret key, the raw PS signature and the
+   plaintext identity /never/ touch Ethereum; the presentation
+   \( (A, B) \) that does is a uniform pair of points that no holder of
+   the identity -- the issuer included -- can test.
 
    #+BEGIN_SRC mermaid :file ./images/registration-flow.png
    sequenceDiagram
@@ -117,18 +129,18 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
        rect rgb(240, 248, 255)
        Note over W: Identity Fountain (offline)
-       W->>W: Rerandomize: sigma' = t * sigma
+       W->>W: Present: A = a*sigma_1, B = a*sigma_2 + b*Y1
        W->>W: Fresh key pair: (sk, pk)
        W->>W: ElGamal encrypt: E = (r*G, m*G + r*pk)
-       W->>W: NIZK proof pi (Schnorr sigma protocol)
+       W->>W: NIZK proof pi over (m, b, r, sk)
        end
 
-       W->>IR: register(pk, E_alice, sigma', pi)
-       IR->>IR: Verify NIZK (5 checks, ~235K gas)
+       W->>IR: register(issuer, pk, E_alice, (A, B), pi)
+       IR->>IR: Verify NIZK (6 checks, 444K gas)
        IR->>IR: Store pk, E_alice
        IR->>IR: isVerified[alice] = true
 
-       W->>P: Store credential (sk, pk, sigma', E)
+       W->>P: Store account (sk, pk, E) and discard a, b
    #+END_SRC
 
    #+RESULTS:
@@ -181,10 +193,10 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
        B->>IR: Read E_alice
        IR-->>B: E_alice=(R,C)
 
-       B->>B: Verify Chaum-Pedersen<br/>(3 checks, ~29K gas)
+       B->>B: Verify Chaum-Pedersen<br/>(4 checks)
        B->>B: _receiptFragments[alice][bob] = H(E_bob)
        B->>B: _allowances[alice][bob] = amount
-       B-->>W: IdentityExchange event
+       B-->>W: ApproveReceipt event
    #+END_SRC
 
    #+RESULTS:
@@ -253,7 +265,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
        participant BW as Bob's Wallet
        participant ETH as Ethereum
 
-       BW->>ETH: Read E_bob from<br/>IdentityExchange event
+       BW->>ETH: Read E_bob from<br/>ApproveReceipt event
        ETH-->>BW: E_bob = (R', C')
        BW->>BW: Decrypt: M = C' - sk_bob * R'
 
@@ -315,7 +327,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
     The chain of cryptographic commitments is:
 
-    1. *Issuance:* A trusted issuer (in TrustedIssuersRegistry) signed
+    1. *Issuance:* A trusted issuer (trusted by the IdentityRegistry) signed
        Alice's identity scalar \( m \) with a PS signature \( \sigma \).
        The issuer's public key was on-chain and valid at that epoch.
 
@@ -355,7 +367,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
         rect rgb(240, 248, 255)
         Note over BW,ETH: Step 1: Locate the proof chain
-        BW->>ETH: Query IdentityExchange events<br/>where spender=pool, owner=0xAlice
+        BW->>ETH: Query ApproveReceipt events<br/>where spender=pool, owner=0xAlice
         ETH-->>BW: E_pool = (R', C') at block B_approve
         BW->>ETH: Query registration tx for 0xAlice
         ETH-->>BW: sigma', E_alice, NIZK pi at block B_reg
@@ -412,7 +424,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
     |                                      | the issuer's PS signature was valid at that epoch.           |
     |                                      | Liability falls on the issuer's KYC process.                 |
     | Alice's issuer key was later revoked | The registration tx is timestamped.  The issuer key          |
-    |                                      | was in TrustedIssuersRegistry at block \( B_{\text{reg}} \). |
+    |                                      | was trusted by the IdentityRegistry at block \( B_{\text{reg}} \). |
     | Alice's identity epoch expired       | Epoch expiry is enforced at registration time.               |
     |                                      | If the epoch was valid then, the proof stands.               |
     | Alice's Holochain agent is offline   | Bob needs only \( E_{\text{pool}} \) (on-chain) and          |
@@ -428,14 +440,14 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
     | Data                          | Availability                          | Notes                          |
     |-------------------------------+---------------------------------------+--------------------------------|
-    | \( E_{\text{pool}} \) (R',C') | Permanent (Ethereum event log)        | IdentityExchange event         |
+    | \( E_{\text{pool}} \) (R',C') | Permanent (Ethereum event log)        | ApproveReceipt event         |
     | \( E_{\text{alice}} \)        | Permanent (IdentityRegistry storage)  | Until account is closed        |
     | \( \sigma' \), NIZK \( \pi \) | Permanent (registration tx calldata)  | Archival node required         |
     | Chaum-Pedersen proof          | Permanent (approve tx calldata)       | Archival node required         |
     | =sk_pool= (Bob's secret key)  | Bob's custody                         | Standard key management        |
     | =identity_data= (plaintext)   | Holochain DHT (if agent is online)    | May require issuer             |
     |                               | or Bob's Private store (if he cached) | cooperation as fallback        |
-    | Issuer public key history     | TrustedIssuersRegistry (on-chain)     | Includes revocation timestamps |
+    | Issuer public key history     | IdentityRegistry trusted-issuer table | Includes revocation timestamps |
 
     Everything except the plaintext =identity_data= is permanently on-chain.
     The plaintext is the one piece that lives off-chain -- but Bob only needs
@@ -530,8 +542,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
      1. Alice calls =approve(pool, amount, E_pool, proof)= on Ethereum.
      2. Alice's wallet publishes a DHT entry containing her
         =identity_data=, encrypted for Bob's Holochain agent, and
-        keyed by the =IdentityExchange= event hash.
-     3. Bob's wallet watches for the =IdentityExchange= event and
+        keyed by the =ApproveReceipt= event hash.
+     3. Bob's wallet watches for the =ApproveReceipt= event and
         looks up the corresponding DHT entry within a grace period.
 
      If step 2 never happens -- the on-chain =approve= succeeded but no
@@ -547,7 +559,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
        Alice completes the full protocol.
 
      The warrant is independently verifiable: any Holochain agent can
-     check that the =IdentityExchange= event exists on Ethereum but the
+     check that the =ApproveReceipt= event exists on Ethereum but the
      corresponding DHT entry does not.  Multiple independent warrants
      produce DHT-level consensus that Alice's agent is non-compliant.
 
@@ -635,8 +647,10 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
   The identity issuer (e.g., ATB Financial acting as Alberta's KYC
   authority) generates a Pointcheval-Sanders key pair: secret key
-  \( (x, y) \) (two scalars), public key \( (X, Y) \) (two points in
-  \( G_2 \), published on-chain in the =TrustedIssuersRegistry=).  This
+  \( (x, y) \) (two scalars), public key \( (X, Y, Y_1) \) (two points in
+  \( G_2 \) plus the \( G_1 \) image \( Y_1 = y \cdot G \) that holders
+  blind with, stored on-chain by =IdentityRegistry.trustIssuer=, which
+  checks \( e(Y_1, g_2) = e(G, Y) \) once).  This
   key pair is the root of trust for all identities the issuer certifies;
   every credential in the system traces back to a PS signature under
   this key.
@@ -647,19 +661,23 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
     isk_x = rand()
     isk_y = rand()
 
-    # Issuer's PS public key (in G_2, published on-chain in TrustedIssuersRegistry)
-    IPK_X = mul(G2, isk_x)
-    IPK_Y = mul(G2, isk_y)
+    # Issuer's PS public key: (X, Y) in G_2 plus Y1 = y*G in G_1, the base
+    # holders blind with.  IdentityRegistry.trustIssuer stores all three and
+    # checks e(Y1, g_2) == e(G, Y) once.
+    IPK_X  = mul(G2, isk_x)
+    IPK_Y  = mul(G2, isk_y)
+    IPK_Y1 = mul(G1, isk_y)
+    assert pairing(G2, IPK_Y1) == pairing(IPK_Y, G1)
 
     print("Issuer PS key pair generated.")
     print(f"  sk = (x, y)             -- two secret scalars")
-    print(f"  PK = (X, Y) in G_2      -- published in TrustedIssuersRegistry")
+    print(f"  PK = (X, Y, Y1)         -- X, Y in G_2; Y1 = y*G in G_1 (trustIssuer checks it against Y)")
   #+END_SRC
 
   #+RESULTS:
   : Issuer PS key pair generated.
   :   sk = (x, y)             -- two secret scalars
-  :   PK = (X, Y) in G_2      -- published in TrustedIssuersRegistry
+  :   PK = (X, Y, Y1)         -- X, Y in G_2; Y1 = y*G in G_1 (trustIssuer checks it against Y)
 
   #+LATEX: }
 
@@ -679,15 +697,17 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
      issuer_obj = Issuer(
          issuer_id="atb-financial-ca",
          issuer_addr=ATB_ADDR,
-         keypair=PSKeyPair(sk_x=isk_x, sk_y=isk_y, pk_X=IPK_X, pk_Y=IPK_Y),
+         keypair=PSKeyPair(sk_x=isk_x, sk_y=isk_y, pk_X=IPK_X, pk_Y=IPK_Y, pk_Y1=IPK_Y1),
      )
+     from alberta_buck.wallet import ps_key_consistent
+     assert ps_key_consistent(issuer_obj.pk_X, issuer_obj.pk_Y, issuer_obj.pk_Y1)
      print(f"Wallet API: {issuer_obj.issuer_id!r} @ 0x{issuer_obj.issuer_addr:040x}")
-     print(f"  pk_X, pk_Y match the raw G_2 points above.")
+     print(f"  pk_X, pk_Y, pk_Y1 match the raw points above; ps_key_consistent: True")
    #+END_SRC
 
    #+RESULTS:
    : Wallet API: 'atb-financial-ca' @ 0xa7b00000000000000000000000000000000a7b00
-   :   pk_X, pk_Y match the raw G_2 points above.
+   :   pk_X, pk_Y, pk_Y1 match the raw points above; ps_key_consistent: True
 
    #+LATEX: }
 
@@ -859,7 +879,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
          "issued_at":     "2026-01-20T14:30:00Z",
          "epoch":         42,
      }
-     cred = issuer_obj.issue(alice_fields, ALICE_ADDR)
+     cred = issuer_obj.issue(alice_fields, ALICE_ADDR, rng=rand)   # seeded: the transcript reproduces
      # Wallet computes m the same way: m = keccak256(canonical) mod ORDER
      assert cred.m == identity_scalar(cred.canonical) == m_alice
      # PS verification, same pairing equation as the raw block:
@@ -877,69 +897,85 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    #+LATEX: }
 
-* The Identity Fountain -- Alice Derives a Fresh Credential
+* The Identity Fountain -- Alice Derives a Fresh Account
 
   Alice wants to create a new Ethereum account.  Her Holochain wallet
   runs the Identity Fountain entirely offline, producing four artifacts:
-  a rerandomized PS signature \( \sigma' \) (statistically unlinkable to
-  the original), a fresh key pair \( (sk, pk) \), an ElGamal encryption
-  of \( m \) under \( pk \), and a NIZK sigma-protocol proof binding the
-  PS signature to the ciphertext.  Each step is demonstrated below:
-  rerandomization preserves signature validity while destroying
-  correlation, and ElGamal decryption recovers the correct message
-  point.  A counter-example confirms that the wrong secret key yields
-  an unrelated random point.
+  a /presentation/ \( (A, B) \) of her PS credential that hides which
+  credential -- and which identity -- it presents, a fresh key pair
+  \( (sk, pk) \), an ElGamal encryption of \( m \) under \( pk \), and a
+  NIZK proof binding the presentation to the ciphertext and to the key.
+  Each step is demonstrated below.  The first block shows why the wallet
+  publishes a presentation and not a rerandomized signature: a
+  rerandomized signature is still a signature on \( m \), so anyone
+  holding \( m \) -- the issuer, or any past counterparty -- can test
+  it; the presentation fails that test.
 
-** Rerandomize the PS Signature
+** Present the Credential: \( (A, B) \) Hides \( m \)
 
-   Alice picks a random scalar \( t \) and computes
-   \( \sigma' = (t \cdot \sigma_1, t \cdot \sigma_2) \).  This is a valid PS
-   signature on the same \( m \) -- but /statistically unlinkable/ to the
-   original \( \sigma \).
+   Rerandomization, \( \sigma' = (t \sigma_1, t \sigma_2) \), yields a
+   fresh valid signature on the same \( m \).  It is the wallet's
+   internal re-issuance step and nothing more: the pairing test
+   \( e(\sigma'_1, X + m Y) = e(\sigma'_2, g_2) \) identifies it to
+   anyone who knows \( m \).  What the wallet publishes is the
+   presentation
 
-   *What this proves:* Rerandomization produces a fresh, valid PS signature
-   that cannot be correlated with the original -- even by the issuer.
+   \[
+   A = a \cdot \sigma_1, \qquad
+   B = a \cdot \sigma_2 + b \cdot Y_1 = (x + m y) \cdot A + b \cdot Y_1,
+   \]
+
+   for fresh nonzero \( a, b \), where \( Y_1 = y \cdot G \) is the
+   issuer's published \( G_1 \) key component.  \( (A, B) \) satisfies
+   the /masked/ equation \( e(B, g_2) = e(A, X) \cdot e(mA + bG, Y) \)
+   and no other: without \( b \) it is a uniform pair of points, the
+   same distribution for every credential on every identity.
+
+   *What this proves:* the raw test succeeds on the rerandomized pair
+   and fails on the presentation, for the true \( m \); the masked
+   equation, which needs \( b \), holds for the presentation.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
-     # Rerandomize: sigma' = (t * sigma_1, t * sigma_2)
-     t_rerand  = rand()
-     sigma_p_1 = mul(sigma[0], t_rerand)
-     sigma_p_2 = mul(sigma[1], t_rerand)
-     sigma_p   = (sigma_p_1, sigma_p_2)
+     from alberta_buck.wallet import ps_present
 
-     # Verify sigma' is still a valid PS signature on m
-     lhs = pairing(add(IPK_X, mul(IPK_Y, m_alice)), sigma_p[0])
-     rhs = pairing(G2, sigma_p[1])
-     assert lhs == rhs, "Rerandomized PS signature FAILED"
-     assert not is_inf(sigma_p[0]), "sigma'_1 must not be point at infinity"
-     print("Rerandomized PS signature verified.")
-     print(f"  sigma'_1 = {pt(sigma_p[0])}")
-     print(f"  sigma'_2 = {pt(sigma_p[1])}")
-     print(f"\nOriginal and rerandomized signatures are unlinkable:")
-     print(f"  sigma_1  = {pt(sigma[0])}")
-     print(f"  sigma'_1 = {pt(sigma_p[0])}")
-     print(f"  (No algorithm can correlate them.)")
+     # The raw test any holder of m can run on a published pair
+     def raw_test(S1, S2, m):
+         return pairing(add(IPK_X, mul(IPK_Y, m)), S1) == pairing(G2, S2)
+
+     # Rerandomize (wallet-internal): still a signature on m_alice
+     t_rerand = rand()
+     sigma_p  = (mul(sigma[0], t_rerand), mul(sigma[1], t_rerand))
+     print(f"Rerandomized pair: raw PS test with m_alice -> {raw_test(sigma_p[0], sigma_p[1], m_alice)}")
+     print( "  (a candidate test for anyone holding m: never published)")
+
+     # Present (published): (A, B) = (a*sigma_1, a*sigma_2 + b*Y1), fresh a, b
+     pres_alice, a_alice, b_alice = ps_present(cred.sigma, issuer_obj.pk_Y1, rng=rand)
+     A_alice, B_alice = pres_alice.A, pres_alice.B
+     print(f"Presentation A = {pt(A_alice)}  B = {pt(B_alice)}")
+     print(f"Presentation:      raw PS test with m_alice -> {raw_test(A_alice, B_alice, m_alice)}")
+
+     # The masked equation holds -- but only with the blinding b
+     P_alice = add(mul(A_alice, m_alice), mul(G1, b_alice))
+     masked  = pairing(G2, B_alice) == pairing(IPK_X, A_alice) * pairing(IPK_Y, P_alice)
+     print(f"Presentation:      masked equation with (m_alice, b) -> {masked}")
    #+END_SRC
 
    #+RESULTS:
-   : Rerandomized PS signature verified.
-   :   sigma'_1 = (535940..., 905792...)
-   :   sigma'_2 = (910155..., 120231...)
-   : 
-   : Original and rerandomized signatures are unlinkable:
-   :   sigma_1  = (194876..., 629808...)
-   :   sigma'_1 = (535940..., 905792...)
-   :   (No algorithm can correlate them.)
+   : Rerandomized pair: raw PS test with m_alice -> True
+   :   (a candidate test for anyone holding m: never published)
+   : Presentation A = (554544..., 429626...)  B = (622938..., 732521...)
+   : Presentation:      raw PS test with m_alice -> False
+   : Presentation:      masked equation with (m_alice, b) -> True
 
    #+LATEX: }
 
-   *How to read the output:* Two things to check: (1) "Rerandomized PS
-   signature verified" confirms \( \sigma' \) still satisfies the pairing
-   equation.  (2) Compare the coordinate fragments of =sigma_1= vs.
-   =sigma'_1= -- they share no visible pattern.  This isn't coincidence:
-   the rerandomization is /statistical/ (information-theoretic), not merely
-   computational.
+   *How to read the output:* Three lines to check.  The rerandomized
+   pair passes the raw test with Alice's \( m \): whoever holds \( m \)
+   can identify it, which is why it stays in the wallet.  The
+   presentation fails the same test.  The masked equation passes, but
+   it needs \( b \), which only Alice's wallet holds for the instant of
+   registration; the registration NIZK proves it without revealing it.
 
 ** Generate Fresh Identity Key Pair and ElGamal Encryption
 
@@ -983,12 +1019,12 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    #+begin_example
    Fresh key pair for this Ethereum account:
-     sk_alice = 5853602929117522300044283728179877301168089966161974641852420948211988999617
-     pk_alice = (768650..., 708008...)
+     sk_alice = 15971810906457614992647467534080057746179739969695951946612261292369424414341
+     pk_alice = (528456..., 822195...)
 
    ElGamal ciphertext E_alice = (R, C):
-     R = r*G    = (541750..., 964600...)
-     C = m*G+r*pk = (839900..., 618183...)
+     R = r*G    = (888939..., 711304...)
+     C = m*G+r*pk = (  8230..., 734858...)
 
    Message point M = m*G:
      M = (739132..., 937433...)
@@ -1022,300 +1058,262 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
     #+RESULTS:
     : Eve decrypts with wrong key:
-    :   M_wrong = (974635..., 723566...)
+    :   M_wrong = (452219...,  77982...)
     :   M_real  = (739132..., 937433...)
     :   Match: False
     :   (Completely different point -- no information about m is leaked.)
 
     #+LATEX: }
 
-** NIZK Proof: Binding PS Signature to ElGamal Ciphertext
+** NIZK Proof: Binding the Presentation to the ElGamal Ciphertext
 
-   Alice must prove (without revealing \( m \) or \( r \)) that:
+   Alice must prove, without revealing \( m \), \( b \), \( r \) or
+   \( sk \), that:
 
-   - (a) \( \sigma' \) is a valid PS signature on \( m \)
+   - (a') \( (A, B) \) presents a valid PS credential on \( m \):
+     \( e(B, g_2) = e(A, X) \cdot e(mA + bG, Y) \)
    - (b) \( E_{\text{alice}} \) encrypts the same \( m \)
+   - (k) she holds \( sk \) for \( pk \)
 
-   This is a Schnorr-family sigma protocol.  The PS relation is /linear/ in
-   \( m \), so no Groth-Sahai proofs or SNARKs are needed.
+   This is a Schnorr-family sigma protocol with four nonces
+   \( (\tilde m, \tilde b, \tilde r, \tilde{sk}) \) and four commitments:
+   \( C_1 = \tilde m A + \tilde b G \) (one commitment for both credential
+   exponents, so no proof field ever carries \( \tilde m A \) alone),
+   \( T_C = \tilde m G + \tilde r\,pk \), \( T_R = \tilde r G \) and
+   \( T_{key} = \tilde{sk}\,G \); the shared \( \tilde m \) is what joins
+   the credential to the ciphertext.  The Fiat-Shamir challenge binds the
+   registrant address, the chain id, the registry address and the domain
+   =AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3=, so a proof
+   cannot be replayed to another account, chain, registry or protocol
+   version.  The wallet's =registration_prove= is the executable
+   specification -- the Solidity, Rust and JavaScript verifiers are
+   checked against its vectors -- and it is the single registration path
+   in this document.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
-     # === PROVER (Alice, offline) ===
-     # Commit: pick random blinding scalars
-     m_tilde = rand()    # blinding for m
-     r_tilde = rand()    # blinding for r
+     from alberta_buck.wallet import ElGamalCiphertext, registration_prove
 
-     # Commitment for PS equation (a): A_ps = m_tilde * sigma'_1
-     #   (This will be checked against the pairing equation)
-     A_ps = mul(sigma_p[0], m_tilde)
-
-     # Commitments for ElGamal equations (b) and (c):
-     T_C = add(mul(G1, m_tilde), mul(pk_alice, r_tilde))  # m~*G + r~*pk
-     T_R = mul(G1, r_tilde)                                # r~*G
-
-     # Fiat-Shamir challenge: hash all public inputs + commitments
-     # (In Ethereum: includes registrant_address for domain separation)
-     e = keccak(
-         sigma_p[0][0], sigma_p[0][1],   # sigma'_1
-         sigma_p[1][0], sigma_p[1][1],   # sigma'_2
-         R_alice[0], R_alice[1],          # E_alice.R
-         C_alice[0], C_alice[1],          # E_alice.C
-         pk_alice[0], pk_alice[1],        # pk_alice
-         A_ps[0], A_ps[1],               # PS commitment
-         T_C[0], T_C[1],                 # ElGamal C commitment
-         T_R[0], T_R[1],                 # ElGamal R commitment
+     E_alice_w = ElGamalCiphertext(R=R_alice, C=C_alice)
+     proof_w = registration_prove(
+         pres_alice, b_alice, cred.m, r_enc, pk_alice, E_alice_w,
+         ALICE_ADDR, sk_alice, rng=rand,
      )
-
-     # Responses
-     s_m = (m_tilde + e * m_alice) % ORDER
-     s_r = (r_tilde + e * r_enc)   % ORDER
-
-     pi = (e, s_m, s_r, A_ps, T_C, T_R)
-     print("NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)")
-     print(f"  challenge e = {e}")
-     print(f"  response s_m = {s_m}")
-     print(f"  response s_r = {s_r}")
+     print("Registration proof pi = (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)")
+     print(f"  e   = {proof_w.e}")
+     print(f"  s_m = {proof_w.s_m}")
+     print(f"  s_b = {proof_w.s_b}")
+     print(f"  C1  = {pt(proof_w.C1)}   (m~*A + b~*G -- never m~*A on its own)")
    #+END_SRC
 
    #+RESULTS:
-   : NIZK proof pi = (e, s_m, s_r, A_ps, T_C, T_R)
-   :   challenge e = 12615994228586388765523545681733720930989366795720612968293977787490490112203
-   :   response s_m = 4217153474935780478390783944691099623562767229827754028263164365552340570794
-   :   response s_r = 4236353551663949048403459822365234084964300001236929881682317196053395211750
+   : Registration proof pi = (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
+   :   e   = 1167746862054078205881369054665722870883503658613180445115672387539759578632
+   :   s_m = 1207819567465839872297250109885096115057131536627177472776646978059733573980
+   :   s_b = 3934063700890374532688957826652229484565895692061300361369211223870013398415
+   :   C1  = (752165..., 546410...)   (m~*A + b~*G -- never m~*A on its own)
 
    #+LATEX: }
 
-
 * Registration -- On-Chain Verification
 
-  Alice submits \( (pk, E_{\text{alice}}, \sigma', \pi) \) to the
-  IdentityRegistry contract.  The contract runs five verification checks
-  using the =ecPairing=, =ecMul=, and =ecAdd= precompiles (~235K gas
-  total): two ElGamal consistency checks, one PS pairing product check,
-  a Fiat-Shamir challenge reconstruction, and a non-triviality guard.
-  All five must pass for =isVerified[alice]= to be set.  The full
-  verification runs below, followed by a counter-example where Alice
-  tries to register an ElGamal ciphertext containing a different
-  \( m \) than her PS signature -- the ElGamal consistency check catches
-  the mismatch.
+  Alice submits \( (\text{issuer}, pk, E_{\text{alice}}, (A, B), \pi) \)
+  to the IdentityRegistry contract.  The contract runs six checks using
+  the =ecPairing=, =ecMul= and =ecAdd= precompiles (443,892 gas measured
+  on the A' branch with an in-process EVM, against 472,630 for the
+  pre-A' verifier): a guard on the points and scalars, a Fiat-Shamir
+  reconstruction, two ElGamal consistency checks, the account-key check,
+  and one three-pair pairing product.  All six must pass for
+  =isVerified[alice]= to be set.  The full verification runs below,
+  followed by two counter-examples: a ciphertext containing a different
+  \( m \) than the presented credential, and a replay of the proof to
+  another address.
+
+** What the Chain Sees, and What It Can Learn
+   :PROPERTIES:
+   :CUSTOM_ID: what-the-chain-sees
+   :END:
+
+   Calldata is permanent and visible to every node, so the security of
+   the identity layer rests on one principle: nothing submitted to the
+   EVM is identity data, or a value that anyone -- the issuer included
+   -- can test against identity data.  The plaintext =identity_data=,
+   the scalar \( m \), the point \( M = mG \), the raw credential
+   \( \sigma \), the account secret \( sk \) and the blinding \( b \)
+   never leave the wallet.  Each of the five arguments of =register= is
+   a public key, a ciphertext, a blinded pair or a masked scalar, and
+   the contract only checks relations among them with pairings and
+   scalar multiplications; it holds no key and decrypts nothing.
+
+   #+LATEX: {\scriptsize
+   | Argument                                        | What it is                           | What the EVM (and every archive node) can learn from it                         |
+   |-------------------------------------------------+--------------------------------------+---------------------------------------------------------------------------------|
+   | =issuer=                                        | The issuer's Ethereum address        | Which trust anchor certified the holder.  Public by design; it                  |
+   |                                                 |                                      | narrows the anonymity set to that issuer's clients, nothing more.               |
+   | =pk=                                            | A fresh account key \( sk \cdot G \) | Nothing about the identity: it is independent of \( m \).                       |
+   | =E_alice= \( = (rG, mG + r\,pk) \)              | ElGamal ciphertext of the identity   | The plaintext needs \( sk \), never sent.  Testing whether it encrypts          |
+   |                                                 | point under the account's own key    | a candidate \( M_i \) is the DDH plaintext-checking problem.                    |
+   | =(A, B)= \( = (a\sigma_1,\ a\sigma_2 + bY_1) \) | The blinded presentation of the      | A uniform pair of points, the same distribution for every identity.             |
+   |                                                 | credential                           | Not a signature anyone can verify; \( \sigma \) itself is never published.      |
+   | =pi= \( = (e, s_m, s_b, s_r, s_{sk}, \)         | The zero-knowledge proof             | Each response is a secret one-time nonce plus a multiple of the                 |
+   | \( C_1, T_C, T_R, T_{key}) \)                   |                                      | witness (\( s_m = \tilde m + e m \)), so it is uniform whatever \( m \) is; the |
+   |                                                 |                                      | commitments are simulatable from public values; the only                        |
+   |                                                 |                                      | credential-side point derivable is \( P = mA + bG \), which every               |
+   |                                                 |                                      | candidate identity explains equally well.                                       |
+   #+LATEX: }
+
+   Two distinctions matter.  The pre-A' design also kept =identity_data=
+   off chain, but it published a rerandomized signature and a commitment
+   \( \tilde m \sigma'_1 \) that were /testable/ against a known \( m \);
+   for anyone holding a candidate list, above all the issuer, a testable
+   function of the identity is as revealing as the identity itself
+   (review findings R1 and R2).  The presentation and the single
+   commitment \( C_1 \) remove that test; the appendix runs it both ways.
+   And the guarantees differ in kind: the presentation and the proof hide
+   \( m \) information-theoretically, while the ciphertext hides \( M \)
+   only computationally, under DDH -- the harvest-now-decrypt-later
+   caveat the papers carry.  The hiding of \( s_m \) also depends on the
+   nonce \( \tilde m \) being fresh for every proof, which the wallet's
+   sampler is responsible for; two proofs sharing a nonce would open
+   \( m \) by one subtraction.
 
 ** Verify the NIZK Proof (What the Contract Computes)
 
-   *What this proves:* The same \( m \) appears in both the PS signature
-   and the ElGamal ciphertext, without revealing \( m \) or \( r \).  Five
-   checks run:
+   *What this proves:* the same \( m \) is presented in \( (A, B) \) and
+   encrypted in \( E_{\text{alice}} \), and the registrant holds
+   \( sk \) -- without revealing \( m \), \( b \), \( r \) or \( sk \).
+   Six checks run:
 
+   - *(g)* Guards: \( A \neq O \), \( B \neq O \), \( pk \neq O \),
+     \( R \neq O \); all points on the curve; scalars canonical.
+     \( A \neq O \) is security critical: at \( A = O \) the pairing
+     product below holds for every \( m \).
+   - *(fs)* Fiat-Shamir: the challenge was honestly derived over
+     \( (A, B, R, C, pk, C_1, T_C, T_R, T_{key}) \), the registrant, the
+     chain id, the registry and the domain
    - *(b)* ElGamal C consistency: the committed \( m \) is inside \( C \)
    - *(c)* ElGamal R consistency: the committed \( r \) is inside \( R \)
-   - *(a)* PS pairing product: the same \( m \) satisfies the PS equation
-   - *(d)* Fiat-Shamir: the challenge was honestly derived (not chosen after the fact)
-   - *(e)* Non-triviality: \( \sigma'_1 \neq \mathcal{O} \) (prevents trivial forgery)
+   - *(k)* Account key: the committed \( sk \) is the logarithm of \( pk \)
+   - *(a')* Pairing product:
+     \( e(s_m A + s_b G - C_1, Y) \cdot e(eA, X) \cdot e(-eB, g_2) = 1 \)
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
+     from alberta_buck.wallet.bn254 import point_to_words
+     from alberta_buck.wallet.nizk import REGISTER_DOMAIN
+     from alberta_buck.wallet.transcript import keccak_scalar
+
      # === VERIFIER (IdentityRegistry contract, on-chain) ===
-     # Unpack proof
-     e_v, s_m_v, s_r_v, A_ps_v, T_C_v, T_R_v = pi
+     e_v, s_m_v, s_b_v, s_r_v, s_sk_v = (proof_w.e, proof_w.s_m, proof_w.s_b,
+                                         proof_w.s_r, proof_w.s_sk)
+     C1_v, T_C_v, T_R_v, T_key_v = proof_w.C1, proof_w.T_C, proof_w.T_R, proof_w.T_key
+     CHAINID, REGISTRY = 1, 0     # the wallet's defaults; the contract uses its own
 
-     # --- Check (b): ElGamal consistency ---
-     # Verify: s_m*G + s_r*pk_alice == e*C + T_C
-     lhs_C = add(mul(G1, s_m_v), mul(pk_alice, s_r_v))
-     rhs_C = add(mul(C_alice, e_v), T_C_v)
-     assert eq(lhs_C, rhs_C), "ElGamal C check FAILED"
-     print("(b) ElGamal C check passed: s_m*G + s_r*pk == e*C + T_C")
+     # --- (g) guards ---
+     assert not any(is_inf(P) for P in (A_alice, B_alice, pk_alice, R_alice))
+     assert all(0 <= s_ < ORDER for s_ in (e_v, s_m_v, s_b_v, s_r_v, s_sk_v))
+     print("(g)  guards passed: A, B, pk, R != O; scalars canonical")
 
-     # Verify: s_r*G == e*R + T_R
-     lhs_R = mul(G1, s_r_v)
-     rhs_R = add(mul(R_alice, e_v), T_R_v)
-     assert eq(lhs_R, rhs_R), "ElGamal R check FAILED"
-     print("(c) ElGamal R check passed: s_r*G == e*R + T_R")
+     # --- (fs) Fiat-Shamir over the same words the contract hashes ---
+     words = []
+     for P in (A_alice, B_alice, R_alice, C_alice, pk_alice, C1_v, T_C_v, T_R_v, T_key_v):
+         words += list(point_to_words(P))
+     e_recomputed = keccak_scalar(*words, ALICE_ADDR, CHAINID, REGISTRY, REGISTER_DOMAIN)
+     assert e_recomputed == e_v, "Fiat-Shamir challenge mismatch"
+     print("(fs) Fiat-Shamir challenge verified (A, B, E, pk, commitments, registrant, chain, registry, domain)")
 
-     # --- Check (a): PS signature via pairing ---
-     # Reconstruct PS commitment: s_m * sigma'_1 should equal A_ps + e * sigma'_2
-     # relative to the pairing equation.
-     # Verify pairing product:
-     #   e(s_m * sigma'_1, Y) * e(-A_ps, Y) * e(e * sigma'_1, X)
-     #     * e(-e * sigma'_2, g_2)  == 1
-     # Which simplifies to:
-     #   e(s_m*sigma'_1 - A_ps, Y) * e(e*sigma'_1, X) * e(-e*sigma'_2, g_2) == 1
-     #
-     # This is equivalent to checking:
-     #   e(A_ps, Y) * e(e*sigma'_2, g_2) == e(s_m*sigma'_1, Y) * e(e*sigma'_1, X)
+     # --- (b) ElGamal C consistency: s_m*G + s_r*pk == e*C + T_C ---
+     assert eq(add(mul(G1, s_m_v), mul(pk_alice, s_r_v)), add(mul(C_alice, e_v), T_C_v))
+     print("(b)  ElGamal C check passed: s_m*G + s_r*pk == e*C + T_C")
 
-     P1 = mul(sigma_p[0], s_m_v)                    # s_m * sigma'_1
-     P2 = add(A_ps_v, mul(sigma_p[1], e_v))          # A_ps + e * sigma'_2
-     P3 = mul(sigma_p[0], e_v)                       # e * sigma'_1
+     # --- (c) ElGamal R consistency: s_r*G == e*R + T_R ---
+     assert eq(mul(G1, s_r_v), add(mul(R_alice, e_v), T_R_v))
+     print("(c)  ElGamal R check passed: s_r*G == e*R + T_R")
 
-     # Pairing check: e(P1, Y) == e(P2, Y) * e(P3, X) / e(P3, X)
-     # More directly: verify the original PS equation holds through the proof
-     # e(s_m*sigma'_1 - e*sigma'_2, Y) == e(A_ps + e*sigma'_1, X) ... etc.
-     #
-     # Simplified: check that the reconstructed pairing equation holds:
-     # e(sigma'_1, X + m*Y) = e(sigma'_2, g_2)  via the proof responses
-     #
-     # The verifier checks: e(s_m*s'_1, Y) * e(e*s'_1, X) == e(A_ps, Y) * e(e*s'_2, g2)
-     lhs_pair = pairing(IPK_Y, P1) * pairing(IPK_X, P3)
-     rhs_pair = pairing(IPK_Y, P2) * pairing(G2,    mul(sigma_p[1], e_v))
-     # Actually let's use the direct verification approach:
-     # We know s_m = m~ + e*m.  The commitment A_ps = m~*sigma'_1.
-     # So s_m*sigma'_1 = m~*sigma'_1 + e*m*sigma'_1 = A_ps + e*m*sigma'_1
-     # The verifier doesn't know m, but can check via pairing:
-     # e(s_m*sigma'_1, Y) * e(e*sigma'_1, X) * e(-e*sigma'_2 - A_ps, g_2_placeholder)
-     # This gets complex in code.  Let's use the direct pairing product check.
+     # --- (k) account key: s_sk*G == T_key + e*pk ---
+     assert eq(mul(G1, s_sk_v), add(T_key_v, mul(pk_alice, e_v)))
+     print("(k)  account-key check passed: s_sk*G == T_key + e*pk")
 
-     # Direct approach: verify e(sigma'_1, X + m*Y) = e(sigma'_2, g_2)
-     # by extracting m from the sigma protocol responses:
-     # The key insight: the SAME s_m that satisfies (b) must also satisfy (a).
-     # If checks (b) and (c) pass, we know s_m = m~ + e*m for the m in E_alice.
-     # Now check (a): does this same m satisfy the PS equation?
-     #
-     # Reconstruct: m * sigma'_1 = (s_m * sigma'_1 - A_ps) / e
-     # But we avoid division.  Instead verify the pairing product equation:
-     #   e(s_m * sigma'_1 - A_ps, Y) == e(e * sigma'_2, g_2) * e(-e * sigma'_1, X)
-     #   (rearranging e(sigma'_1, X + m*Y) = e(sigma'_2, g_2) with substitution)
-
-     LHS_point = add(mul(sigma_p[0], s_m_v), neg(A_ps_v))   # s_m*s'_1 - A_ps = e*m*s'_1
-     RHS_neg   = add(mul(sigma_p[1], e_v), neg(mul(sigma_p[0], e_v)))  # e*s'_2 - e*s'_1
-     # not quite right -- use the clean verification instead
-
-     # Clean pairing product check (what ecPairing precompile computes):
-     # e(s_m*sigma'_1, Y) * e(-A_ps, Y) * e(e*sigma'_1, X) * e(-e*sigma'_2, g_2) == 1
+     # --- (a') pairing product (what ecPairing computes: three pairs) ---
+     lhs = add(add(mul(A_alice, s_m_v), mul(G1, s_b_v)), neg(C1_v))   # = e*(m*A + b*G)
      check = (
-         pairing(IPK_Y, mul(sigma_p[0], s_m_v))       # e(s_m*s'_1, Y)
-       * pairing(IPK_Y, neg(A_ps_v))                  # e(-A_ps, Y)
-       * pairing(IPK_X, mul(sigma_p[0], e_v))         # e(e*s'_1, X)
-       * pairing(G2,    neg(mul(sigma_p[1], e_v)))    # e(-e*s'_2, g_2)
+         pairing(IPK_Y, lhs)                       # e(s_m*A + s_b*G - C1, Y)
+       * pairing(IPK_X, mul(A_alice, e_v))         # e(e*A, X)
+       * pairing(G2,    neg(mul(B_alice, e_v)))    # e(-e*B, g_2)
      )
-     assert check == FQ12_one(), "PS pairing check FAILED"
-     print("(a) PS pairing check passed:")
-     print("    e(s_m*s'_1, Y) * e(-A_ps, Y) * e(e*s'_1, X) * e(-e*s'_2, g_2) == 1")
+     assert check == FQ12_one(), "presentation pairing check FAILED"
+     print("(a') pairing product passed:")
+     print("     e(s_m*A + s_b*G - C1, Y) * e(e*A, X) * e(-e*B, g_2) == 1")
 
-     # --- Fiat-Shamir challenge reconstruction ---
-     e_reconstructed = keccak(
-         sigma_p[0][0], sigma_p[0][1],
-         sigma_p[1][0], sigma_p[1][1],
-         R_alice[0], R_alice[1],
-         C_alice[0], C_alice[1],
-         pk_alice[0], pk_alice[1],
-         A_ps_v[0], A_ps_v[1],
-         T_C_v[0], T_C_v[1],
-         T_R_v[0], T_R_v[1],
-     )
-     assert e_reconstructed == e_v, "Fiat-Shamir challenge mismatch"
-     print("(d) Fiat-Shamir challenge verified (binds all public inputs)")
-
-     # --- sigma'_1 != O check ---
-     assert not is_inf(sigma_p[0]), "sigma'_1 is point at infinity (trivial forgery)"
-     print("(e) sigma'_1 != O (non-trivial signature)")
-
+     # The only credential-side point anyone can derive from the proof:
+     P_derived = mul(lhs, pow(e_v, -1, ORDER))
+     assert eq(P_derived, P_alice)
+     print("     derivable point P = m*A + b*G: uniform, and the same for every candidate m")
      print("\n==> Registration PASSED. isVerified(alice) = true")
    #+END_SRC
 
    #+RESULTS:
-   : (b) ElGamal C check passed: s_m*G + s_r*pk == e*C + T_C
-   : (c) ElGamal R check passed: s_r*G == e*R + T_R
-   : (a) PS pairing check passed:
-   :     e(s_m*s'_1, Y) * e(-A_ps, Y) * e(e*s'_1, X) * e(-e*s'_2, g_2) == 1
-   : (d) Fiat-Shamir challenge verified (binds all public inputs)
-   : (e) sigma'_1 != O (non-trivial signature)
-   : 
-   : ==> Registration PASSED. isVerified(alice) = true
+   #+begin_example
+   (g)  guards passed: A, B, pk, R != O; scalars canonical
+   (fs) Fiat-Shamir challenge verified (A, B, E, pk, commitments, registrant, chain, registry, domain)
+   (b)  ElGamal C check passed: s_m*G + s_r*pk == e*C + T_C
+   (c)  ElGamal R check passed: s_r*G == e*R + T_R
+   (k)  account-key check passed: s_sk*G == T_key + e*pk
+   (a') pairing product passed:
+	e(s_m*A + s_b*G - C1, Y) * e(e*A, X) * e(-e*B, g_2) == 1
+	derivable point P = m*A + b*G: uniform, and the same for every candidate m
+
+   ==> Registration PASSED. isVerified(alice) = true
+   #+end_example
 
    #+LATEX: }
 
-   *How to read the output:* All five checks must print "passed".  If any
-   prints "FAILED", the proof is invalid.  A counter-example follows showing
-   what happens when Alice tries to register a ciphertext containing a
-   /different/ \( m \) than the one in her PS signature.
+   *How to read the output:* All six checks must print "passed".  If
+   any assertion fires, the proof is invalid.  The last line before the
+   verdict names the one credential-side value an observer can compute
+   from the proof: \( P = mA + bG \), which every candidate \( m_i \)
+   explains equally well (as \( m_i A + (P - m_i A) \)), so the proof
+   fields support no test on the identity.  The pre-A' proof published
+   \( \tilde m A \) as a separate commitment, from which \( mA \)
+   followed by one subtraction.
 
 *** Counter-example: ElGamal Encrypts a Different \( m \)
 
-    If Alice (or an attacker) tries to encrypt one \( m \) in ElGamal but
-    prove a PS signature on a /different/ \( m \), the ElGamal consistency
-    check detects the mismatch:
+    If Alice (or an attacker) encrypts one \( m \) in ElGamal but
+    presents a credential on a /different/ \( m \), the shared nonce
+    \( \tilde m \) forces the two relations apart and the ElGamal
+    consistency check fails.  The wallet's =registration_verify= runs
+    the same six checks as the contract (on the compiled kernel), and
+    also rejects a replay of the honest proof to another registrant.
 
     #+LATEX: {\scriptsize
     #+BEGIN_SRC python :session abid :results output
-      # Forge: encrypt a fake m_fake in ElGamal, but use the real PS sigma
-      m_fake  = rand()
+      from alberta_buck.wallet import registration_verify
+
+      # Forge: encrypt a fake m in ElGamal, but present the real credential
       r_fake  = rand()
-      R_fake  = mul(G1, r_fake)
-      C_fake  = add(mul(G1, m_fake), mul(pk_alice, r_fake))
-
-      # Try to build a NIZK proof binding sigma' (real m) to E_fake (fake m)
-      m_t = rand(); r_t = rand()
-      A_fake  = mul(sigma_p[0], m_t)
-      T_C_f   = add(mul(G1, m_t), mul(pk_alice, r_t))
-      T_R_f   = mul(G1, r_t)
-      e_f     = keccak(
-          sigma_p[0][0], sigma_p[0][1], sigma_p[1][0], sigma_p[1][1],
-          R_fake[0], R_fake[1], C_fake[0], C_fake[1],
-          pk_alice[0], pk_alice[1],
-          A_fake[0], A_fake[1], T_C_f[0], T_C_f[1], T_R_f[0], T_R_f[1])
-      s_m_f = (m_t + e_f * m_alice) % ORDER   # uses real m for PS...
-      s_r_f = (r_t + e_f * r_fake) % ORDER    # ...but fake r for ElGamal
-
-      # Check (b): s_m*G + s_r*pk == e*C_fake + T_C?
-      lhs = add(mul(G1, s_m_f), mul(pk_alice, s_r_f))
-      rhs = add(mul(C_fake, e_f), T_C_f)
-      ok  = eq(lhs, rhs)
-      print(f"Forged proof -- ElGamal C check: {ok}")
-      print(f"  (The check FAILS because s_m encodes m_real but C_fake")
-      print(f"   encrypts m_fake.  The NIZK forces both to be identical.)")
+      E_fake  = ElGamalCiphertext(R=mul(G1, r_fake),
+                                  C=add(mul(G1, m_fake), mul(pk_alice, r_fake)))
+      proof_f = registration_prove(pres_alice, b_alice, cred.m, r_fake, pk_alice,
+                                   E_fake, ALICE_ADDR, sk_alice, rng=rand)
+      ok_honest = registration_verify(pres_alice, E_alice_w, pk_alice,
+                                      issuer_obj.pk_X, issuer_obj.pk_Y, proof_w, ALICE_ADDR)
+      ok_forged = registration_verify(pres_alice, E_fake, pk_alice,
+                                      issuer_obj.pk_X, issuer_obj.pk_Y, proof_f, ALICE_ADDR)
+      # Replay of the honest proof to a different registrant address
+      ok_replay = registration_verify(pres_alice, E_alice_w, pk_alice,
+                                      issuer_obj.pk_X, issuer_obj.pk_Y, proof_w, ALICE_ADDR ^ 1)
+      print(f"registration_verify(honest E_alice)             : {ok_honest}")
+      print(f"registration_verify(E_fake encrypts m_fake)     : {ok_forged}")
+      print(f"registration_verify(replayed to another address): {ok_replay}")
     #+END_SRC
 
     #+RESULTS:
-    : Forged proof -- ElGamal C check: False
-    :   (The check FAILS because s_m encodes m_real but C_fake
-    :    encrypts m_fake.  The NIZK forces both to be identical.)
+    : registration_verify(honest E_alice)             : True
+    : registration_verify(E_fake encrypts m_fake)     : False
+    : registration_verify(replayed to another address): False
 
     #+LATEX: }
-
-** Same Operation via the Wallet API
-
-   The wallet's Identity Fountain is three calls
-   (=rerandomize_for_registration=, =identity_keygen=, =elgamal_encrypt=)
-   plus a registration NIZK round-trip (=registration_prove= /
-   =registration_verify=).  The wallet's Fiat-Shamir transcript binds the
-   registrant Ethereum address for replay protection -- the only
-   substantive difference from the raw NIZK above.
-
-   #+LATEX: {\scriptsize
-   #+BEGIN_SRC python :session abid :results output
-     from alberta_buck.wallet import (
-         rerandomize_for_registration, identity_keygen, elgamal_encrypt,
-         registration_prove, registration_verify,
-     )
-     from alberta_buck.wallet.bn254 import rand_scalar
-
-     sigma_w_p, _   = rerandomize_for_registration(cred)
-     wallet_kp      = identity_keygen()
-     r_w            = rand_scalar()
-     E_w            = elgamal_encrypt(mul(G1, cred.m), wallet_kp.pk, r_w)
-
-     proof_w = registration_prove(
-         sigma_w_p, cred.m, r_w, wallet_kp.pk, E_w, ALICE_ADDR,
-     )
-     ok = registration_verify(
-         sigma_w_p, E_w, wallet_kp.pk,
-         issuer_obj.pk_X, issuer_obj.pk_Y, proof_w, ALICE_ADDR,
-     )
-     # Replay to a different registrant address must be rejected.
-     ok_replay = registration_verify(
-         sigma_w_p, E_w, wallet_kp.pk,
-         issuer_obj.pk_X, issuer_obj.pk_Y, proof_w, ALICE_ADDR ^ 1,
-     )
-     print(f"Wallet API: registration_verify (correct registrant)  : {ok}")
-     print(f"            registration_verify (replayed registrant) : {ok_replay}")
-   #+END_SRC
-
-   #+RESULTS:
-   : Wallet API: registration_verify (correct registrant)  : True
-   :             registration_verify (replayed registrant) : False
-
-   #+LATEX: }
-
 
 * Bob Binds His Pool as a Public-Identity Contract
 
@@ -1385,7 +1383,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   #+RESULTS:
   #+begin_example
   Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:
-    pk_bob = (526409..., 440871...)
+    pk_bob = (957915..., 428654...)
     E_bob  = (R, C) -- ElGamal ciphertext on-chain
     identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
     isVerified(bob)             = true
@@ -1420,7 +1418,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
          "issued_at":     "2026-02-01T09:00:00Z",
          "epoch":         42,
      }
-     cred_bob = issuer_obj.issue(bob_fields, BOB_ADDR)
+     cred_bob = issuer_obj.issue(bob_fields, BOB_ADDR, rng=rand)
      assert cred_bob.m == m_bob
      assert ps_verify(issuer_obj.pk_X, issuer_obj.pk_Y, cred_bob.sigma, cred_bob.m)
      print(f"Wallet API: cred_bob.m == m_bob    : {cred_bob.m == m_bob}")
@@ -1440,7 +1438,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   Alice wants to swap BUCK for USDT on Bob's pool.  She calls
   =approve(pool, amount, E_pool, proof)= to re-encrypt her identity
   under the pool's bound public key (Bob's =pk_bob=) and prove the
-  re-encryption is correct via a Chaum-Pedersen proof (~29K gas).
+  re-encryption is correct via a Chaum-Pedersen proof.
   Approve always requires CP, even though the pool is a Public-Identity
   contract -- this captures Alice's per-pair consent, not just the
   registry-derivable identity hash; see [[https://perry.kundert.ca/range/finance/alberta-buck-identity/#always-cp-rationale][/Why approve Is Always
@@ -1449,9 +1447,10 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   =transfer= passes both guards because ~isPublicIdentity(pool) == true~
   satisfies the public-side fallback, and the receipt carries Alice's
   per-pair CP fragment alongside the deterministic identity hashes.
-  Below: the re-encryption, the three-check Chaum-Pedersen
-  verification, and a counter-example showing that re-encrypting a
-  /different/ message point causes Check 2 to fail.
+  Below: the re-encryption, the four-check Chaum-Pedersen
+  verification, a counter-example showing that re-encrypting a
+  /different/ message point causes Check 3 to fail, and the
+  false-identity forgery that only the key-binding Check 1 stops.
 
 ** Re-Encrypt Alice's Identity for Bob
 
@@ -1489,8 +1488,8 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
    #+RESULTS:
    : Alice re-encrypts her identity for Bob:
    :   E_bob = (R', C') where:
-   :     R' = r'*G     = (267498..., 938054...)
-   :     C' = M+r'*pk  = (800475..., 323191...)
+   :     R' = r'*G     = (550025..., 305708...)
+   :     C' = M+r'*pk  = (701809..., 308467...)
    : 
    : Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
    : Matches Alice's M:             (739132..., 937433...)
@@ -1505,141 +1504,104 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
    Alice proves that \( E_{\text{bob}} \) encrypts the same message point
    \( M \) as her registered \( E_{\text{alice}} \) -- without revealing
-   \( m \) or any private key.
+   \( m \), \( sk_{\text{alice}} \) or the re-encryption randomness
+   \( r' \).  The statement has three relations, and all three are
+   load-bearing:
 
-   The proof demonstrates knowledge of the re-encryption randomness \( r' \)
-   and the difference between the two ElGamal randomness values, such that
-   both ciphertexts decrypt to the same \( M \).
+   \[
+   pk_{\text{alice}} = sk \cdot G, \qquad
+   R_{\text{bob}} = r' \cdot G, \qquad
+   C_{\text{alice}} - C_{\text{bob}} = sk \cdot R_{\text{alice}} - r' \cdot pk_{\text{bob}} .
+   \]
+
+   The first binds the witness to Alice's /registered/ key.  Without it
+   (the two-relation form an earlier version of this document showed)
+   a sender who knows her own \( sk \) and \( r \) can choose a fake
+   \( sk^\ast \) that makes \( C_{\text{alice}} - sk^\ast R_{\text{alice}} \)
+   equal a /third party's/ identity point, and hand Bob a ciphertext of
+   that identity with an accepting proof (review finding 3).  The
+   wallet's =chaum_pedersen_prove= is the executable specification; its
+   transcript binds =(sender, spender, chainid, registry)=.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
-     # Chaum-Pedersen proof that E_alice and E_bob encrypt the same M.
-     #
-     # The key relation: C_alice - sk_alice * R_alice = M = C_bob - r' * pk_bob
-     # Equivalently: C_alice - sk_alice * R_alice = C_bob - r' * pk_bob
-     #
-     # Alice proves she knows (sk_alice, r') such that:
-     #   sk_alice * R_alice = C_alice - M   (she can decrypt E_alice)
-     #   r' * pk_bob        = C_bob   - M   (she created E_bob correctly)
-     #   r' * G             = R_bob         (consistent randomness)
+     from alberta_buck.wallet import chaum_pedersen_prove, chaum_pedersen_verify
 
-     # Commit: random blinders
-     k1 = rand()   # blinder for sk_alice
-     k2 = rand()   # blinder for r'
-
-     T1 = mul(R_alice, k1)              # k1 * R_alice
-     T2 = mul(pk_bob, k2)               # k2 * pk_bob
-     T3 = mul(G1, k2)                   # k2 * G
-
-     # Fiat-Shamir challenge (binds all public inputs + Ethereum context)
-     e_cp = keccak(
-         R_alice[0], R_alice[1], C_alice[0], C_alice[1],      # E_alice
-         R_for_bob[0], R_for_bob[1], C_for_bob[0], C_for_bob[1],  # E_bob
-         pk_alice[0], pk_alice[1],                              # pk_alice
-         pk_bob[0], pk_bob[1],                                  # pk_bob
-         T1[0], T1[1], T2[0], T2[1], T3[0], T3[1],            # commitments
-         42, 1337,                                              # msg.sender, spender (stand-ins)
+     E_for_bob_w = ElGamalCiphertext(R=R_for_bob, C=C_for_bob)
+     proof_cp = chaum_pedersen_prove(
+         E_alice_w, E_for_bob_w, pk_alice, pk_bob,
+         sk_alice, r_prime, ALICE_ADDR, BOB_ADDR, 1, rng=rand,
      )
-
-     # Responses
-     s1_cp = (k1 + e_cp * sk_alice) % ORDER
-     s2_cp = (k2 + e_cp * r_prime)  % ORDER
-
-     proof_cp = (e_cp, s1_cp, s2_cp)
-     print("Chaum-Pedersen proof:")
-     print(f"  e  = {e_cp}")
-     print(f"  s1 = {s1_cp}")
-     print(f"  s2 = {s2_cp}")
+     print("Chaum-Pedersen proof (e, s1, s2, T1, T2, T3):")
+     print(f"  e  = {proof_cp.e}")
+     print(f"  s1 = {proof_cp.s1}   (= a + e*sk)")
+     print(f"  s2 = {proof_cp.s2}   (= b + e*r')")
    #+END_SRC
 
    #+RESULTS:
-   : Chaum-Pedersen proof:
-   :   e  = 14378772904067346594783517297323694132494991636875492543911908544441565839885
-   :   s1 = 2860978974404099266579051656691559822630565129132352136033122135978334130412
-   :   s2 = 9187154717567526848339382794930799696889831885288870801048333603562597232786
+   : Chaum-Pedersen proof (e, s1, s2, T1, T2, T3):
+   :   e  = 19760152061181174133268171620776428857915021793359791016974955809430153285266
+   :   s1 = 19027816694018415018414729725601647850693237880448832633085064984320434557538   (= a + e*sk)
+   :   s2 = 12896613016389275445990147178333144828356344382050962542604063507793369347515   (= b + e*r')
 
    #+LATEX: }
 
 ** Verify Chaum-Pedersen Proof (What the Contract Computes)
 
-   The BUCK contract reads \( E_{\text{alice}} \) from the IdentityRegistry
-   (never from calldata), then verifies the proof.  Cost: ~29,000 gas.
+   The BUCK contract reads \( E_{\text{alice}} \) and \( pk_{\text{alice}} \)
+   from the IdentityRegistry (never from calldata), then verifies the
+   proof.  (Its gas is not re-measured on this branch; the identity
+   paper's figure of roughly 29K predates the three-relation repair.)
 
-   *What this proves:* \( E_{\text{alice}} \) and \( E_{\text{bob}} \) encrypt
-   the same message point \( M \) -- without revealing \( M \), =sk_alice=,
-   or the re-encryption randomness \( r' \).  Three checks:
+   *What this proves:* \( E_{\text{alice}} \) and \( E_{\text{bob}} \)
+   encrypt the same \( M \), and the prover holds the key registered as
+   \( pk_{\text{alice}} \).  Four checks:
 
-   - *Check 1:* \( r' \) is consistent with \( R_{\text{bob}} \)
-   - *Check 2:* Both ciphertexts decrypt to the same \( M \)
-   - *Check 3:* Fiat-Shamir challenge was honestly derived
+   - *Check 1:* \( s_1 G = T_1 + e\,pk_{\text{alice}} \) -- the witness is Alice's registered key
+   - *Check 2:* \( s_2 G = T_3 + e\,R_{\text{bob}} \) -- \( r' \) is consistent with \( R_{\text{bob}} \)
+   - *Check 3:* \( s_1 R_{\text{alice}} - s_2 pk_{\text{bob}} = T_2 + e (C_{\text{alice}} - C_{\text{bob}}) \) -- same \( M \)
+   - *Check 4:* the Fiat-Shamir challenge was honestly derived
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
-     # === VERIFIER (BUCK contract, on-chain, ~29K gas) ===
-     e_v, s1_v, s2_v = proof_cp
+     # === VERIFIER (BUCK contract, on-chain) ===
+     e_v, s1_v, s2_v = proof_cp.e, proof_cp.s1, proof_cp.s2
+     T1, T2, T3 = proof_cp.T1, proof_cp.T2, proof_cp.T3
 
-     # The verifier knows: E_alice (from registry), E_bob (from calldata),
-     # pk_alice (from registry), pk_bob (from registry).
-
-     # Reconstruct commitments from responses and challenge:
-     #   T1' = s1 * R_alice - e * (C_alice - C_bob + r'*pk_bob - sk*R_alice)
-     # Simplified verification equations:
-     #   s1 * R_alice == T1 + e * sk_alice * R_alice
-     #                == T1 + e * (C_alice - M)
-     # But verifier doesn't know M.  Use the relation C_alice - sk*R = C_bob - r'*pk_bob = M:
-     #   s1 * R_alice - s2 * pk_bob == T1 - T2 + e*(C_alice - C_bob)
-     # And: s2 * G == T3 + e * R_bob
-
-     # Check 1: s2 * G == T3 + e * R_for_bob
-     lhs1 = mul(G1, s2_v)
-     rhs1 = add(T3, mul(R_for_bob, e_v))
-     assert eq(lhs1, rhs1), "Chaum-Pedersen check 1 FAILED"
-     print("Check 1 passed: s2*G == T3 + e*R_bob")
-     print("  (Proves r' is consistent with R_bob)")
-
-     # Check 2: s1*R_alice - s2*pk_bob == (T1 - T2) + e*(C_alice - C_bob)
-     lhs2 = add(mul(R_alice, s1_v), neg(mul(pk_bob, s2_v)))
-     rhs2 = add(add(T1, neg(T2)), mul(add(C_alice, neg(C_for_bob)), e_v))
-     assert eq(lhs2, rhs2), "Chaum-Pedersen check 2 FAILED"
-     print("Check 2 passed: s1*R_a - s2*pk_b == (T1-T2) + e*(C_a - C_b)")
-     print("  (Proves both ciphertexts encrypt the same M)")
-
-     # Check 3: Fiat-Shamir challenge
-     e_recon = keccak(
-         R_alice[0], R_alice[1], C_alice[0], C_alice[1],
-         R_for_bob[0], R_for_bob[1], C_for_bob[0], C_for_bob[1],
-         pk_alice[0], pk_alice[1],
-         pk_bob[0], pk_bob[1],
-         T1[0], T1[1], T2[0], T2[1], T3[0], T3[1],
-         42, 1337,
-     )
-     assert e_recon == e_v, "Fiat-Shamir challenge mismatch"
-     print("Check 3 passed: Fiat-Shamir challenge verified")
-
+     assert eq(mul(G1, s1_v), add(T1, mul(pk_alice, e_v))), "check 1 FAILED"
+     print("Check 1 passed: s1*G == T1 + e*pk_alice          (witness is the registered key)")
+     assert eq(mul(G1, s2_v), add(T3, mul(R_for_bob, e_v))), "check 2 FAILED"
+     print("Check 2 passed: s2*G == T3 + e*R_bob              (r' consistent with R_bob)")
+     lhs = add(mul(R_alice, s1_v), neg(mul(pk_bob, s2_v)))
+     rhs = add(T2, mul(add(C_alice, neg(C_for_bob)), e_v))
+     assert eq(lhs, rhs), "check 3 FAILED"
+     print("Check 3 passed: s1*R_a - s2*pk_b == T2 + e*(C_a - C_b)   (same M)")
+     ok = chaum_pedersen_verify(E_alice_w, E_for_bob_w, pk_alice, pk_bob,
+                                proof_cp, ALICE_ADDR, BOB_ADDR, 1)
+     assert ok
+     print(f"Check 4 passed: Fiat-Shamir challenge verified (wallet verifier agrees: {ok})")
      print("\n==> approve() PASSED. Alice's re-encrypted identity stored for Bob.")
      print("    _receiptFragments[alice][bob] = keccak256(E_bob)")
    #+END_SRC
 
    #+RESULTS:
-   : Check 1 passed: s2*G == T3 + e*R_bob
-   :   (Proves r' is consistent with R_bob)
-   : Check 2 passed: s1*R_a - s2*pk_b == (T1-T2) + e*(C_a - C_b)
-   :   (Proves both ciphertexts encrypt the same M)
-   : Check 3 passed: Fiat-Shamir challenge verified
+   : Check 1 passed: s1*G == T1 + e*pk_alice          (witness is the registered key)
+   : Check 2 passed: s2*G == T3 + e*R_bob              (r' consistent with R_bob)
+   : Check 3 passed: s1*R_a - s2*pk_b == T2 + e*(C_a - C_b)   (same M)
+   : Check 4 passed: Fiat-Shamir challenge verified (wallet verifier agrees: True)
    : 
    : ==> approve() PASSED. Alice's re-encrypted identity stored for Bob.
    :     _receiptFragments[alice][bob] = keccak256(E_bob)
 
    #+LATEX: }
 
-   *How to read the output:* All three "passed" lines must appear.  If
-   Alice re-encrypted for a /different/ public key or used a different
-   \( M \), Check 2 would fail.  A counter-example follows.
+   *How to read the output:* All four "passed" lines must appear.  The
+   two counter-examples below each break exactly one of them.
 
 *** Counter-example: Re-Encryption with Wrong Message
 
     If Alice tries to pass off a different identity point in the
-    re-encrypted ciphertext, Check 2 catches the discrepancy:
+    re-encrypted ciphertext, Check 3 catches the discrepancy:
 
     #+LATEX: {\scriptsize
     #+BEGIN_SRC python :session abid :results output
@@ -1648,77 +1610,66 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
       M_other = mul(G1, m_other)
       r_bad   = rand()
       R_bad   = mul(G1, r_bad)
-      C_bad   = add(M_other, mul(pk_bob, r_bad))  # encrypts M_other, not M_alice
-
-      # Build Chaum-Pedersen proof (Alice tries to cheat)
-      k1b = rand(); k2b = rand()
-      T1b = mul(R_alice, k1b); T2b = mul(pk_bob, k2b); T3b = mul(G1, k2b)
-      e_bad = keccak(
-          R_alice[0], R_alice[1], C_alice[0], C_alice[1],
-          R_bad[0], R_bad[1], C_bad[0], C_bad[1],
-          pk_alice[0], pk_alice[1], pk_bob[0], pk_bob[1],
-          T1b[0], T1b[1], T2b[0], T2b[1], T3b[0], T3b[1], 42, 1337)
-      s1b = (k1b + e_bad * sk_alice) % ORDER
-      s2b = (k2b + e_bad * r_bad)    % ORDER
-
-      # Check 2: s1*R_a - s2*pk_b == (T1-T2) + e*(C_alice - C_bad)?
-      lhs = add(mul(R_alice, s1b), neg(mul(pk_bob, s2b)))
-      rhs = add(add(T1b, neg(T2b)), mul(add(C_alice, neg(C_bad)), e_bad))
-      ok  = eq(lhs, rhs)
-      print(f"Forged re-encryption -- Check 2: {ok}")
-      print(f"  (FAILS: C_bad encrypts a different M than C_alice.)")
-      print(f"  (The contract rejects the approve() call.)")
+      C_bad   = add(M_other, mul(pk_bob, r_bad))     # encrypts M_other, not M_alice
+      E_bad_w = ElGamalCiphertext(R=R_bad, C=C_bad)
+      proof_bad = chaum_pedersen_prove(E_alice_w, E_bad_w, pk_alice, pk_bob,
+                                       sk_alice, r_bad, ALICE_ADDR, BOB_ADDR, 1, rng=rand)
+      lhs = add(mul(R_alice, proof_bad.s1), neg(mul(pk_bob, proof_bad.s2)))
+      rhs = add(proof_bad.T2, mul(add(C_alice, neg(C_bad)), proof_bad.e))
+      print(f"Forged re-encryption -- Check 3 (same M)   : {eq(lhs, rhs)}")
+      ok_bad = chaum_pedersen_verify(E_alice_w, E_bad_w, pk_alice, pk_bob,
+                                     proof_bad, ALICE_ADDR, BOB_ADDR, 1)
+      print(f"Forged re-encryption -- wallet verifier    : {ok_bad}")
+      print( "  (FAILS: C_bad encrypts a different M than C_alice; approve() reverts.)")
     #+END_SRC
 
     #+RESULTS:
-    : Forged re-encryption -- Check 2: False
-    :   (FAILS: C_bad encrypts a different M than C_alice.)
-    :   (The contract rejects the approve() call.)
+    : Forged re-encryption -- Check 3 (same M)   : False
+    : Forged re-encryption -- wallet verifier    : False
+    :   (FAILS: C_bad encrypts a different M than C_alice; approve() reverts.)
 
     #+LATEX: }
 
-** Same Operation via the Wallet API
+*** Counter-example: A Third Party's Identity Under a Fake Key
 
-   The wallet's =chaum_pedersen_prove= / =chaum_pedersen_verify= run the
-   same three checks as the on-chain verifier, with the Fiat-Shamir
-   transcript binding =(sender, spender, chainid)= for replay protection
-   across addresses and chains.  A wrong-=M= ciphertext (the same forgery
-   as the counter-example above) fails Check 2.
+    The forgery the three-relation statement exists to stop.  Alice
+    knows her own \( sk \) and \( r \), so she can solve for a fake key
+    \( sk^\ast \) with \( C_{\text{alice}} - sk^\ast R_{\text{alice}} = M_{\text{victim}} \)
+    and encrypt the victim's point for Bob.  Checks 2 and 3 pass -- the
+    prover is honest about /its/ witnesses -- and only Check 1, the
+    binding to her registered key, rejects it.  The counter-example is
+    the review suite's own (=alberta_buck.review.examples=).
 
-   #+LATEX: {\scriptsize
-   #+BEGIN_SRC python :session abid :results output
-     from alberta_buck.wallet import (
-         ElGamalCiphertext, chaum_pedersen_prove, chaum_pedersen_verify,
-     )
-     E_alice_w   = ElGamalCiphertext(R=R_alice,   C=C_alice)
-     E_for_bob_w = ElGamalCiphertext(R=R_for_bob, C=C_for_bob)
-     proof_cp_w  = chaum_pedersen_prove(
-         E_alice_w, E_for_bob_w, pk_alice, pk_bob,
-         sk_alice, r_prime, ALICE_ADDR, BOB_ADDR, 1,
-     )
-     ok_good = chaum_pedersen_verify(
-         E_alice_w, E_for_bob_w, pk_alice, pk_bob,
-         proof_cp_w, ALICE_ADDR, BOB_ADDR, 1,
-     )
-     # Same forgery as the counter-example: re-encrypt a different M.
-     E_bad_w = ElGamalCiphertext(R=R_bad, C=C_bad)
-     proof_bad_w = chaum_pedersen_prove(
-         E_alice_w, E_bad_w, pk_alice, pk_bob,
-         sk_alice, r_bad, ALICE_ADDR, BOB_ADDR, 1,
-     )
-     ok_bad = chaum_pedersen_verify(
-         E_alice_w, E_bad_w, pk_alice, pk_bob,
-         proof_bad_w, ALICE_ADDR, BOB_ADDR, 1,
-     )
-     print(f"Wallet API: chaum_pedersen_verify(honest E_for_bob)  : {ok_good}")
-     print(f"            chaum_pedersen_verify(forged wrong-M)    : {ok_bad}")
-   #+END_SRC
+    #+LATEX: {\scriptsize
+    #+BEGIN_SRC python :session abid :results output
+      from alberta_buck.review.examples import false_identity_approval
+      from alberta_buck.wallet import elgamal_decrypt
 
-   #+RESULTS:
-   : Wallet API: chaum_pedersen_verify(honest E_for_bob)  : True
-   :             chaum_pedersen_verify(forged wrong-M)    : False
+      alice_r, bob_r, victim_m, fake_sk, r_star, forged, proof_x = false_identity_approval(
+          ALICE_ADDR, BOB_ADDR, 1)
+      # Bob would decrypt the forged ciphertext to the VICTIM's identity point
+      print(f"forged E decrypts (under sk_bob) to victim's M : "
+            f"{eq(elgamal_decrypt(forged, bob_r.sk), mul(G1, victim_m))}")
+      print(f"fake witness sk* is Alice's registered key     : {eq(mul(G1, fake_sk), alice_r.pk)}")
+      c2 = eq(mul(G1, proof_x.s2), add(proof_x.T3, mul(forged.R, proof_x.e)))
+      c3 = eq(add(mul(alice_r.E.R, proof_x.s1), neg(mul(bob_r.pk, proof_x.s2))),
+              add(proof_x.T2, mul(add(alice_r.E.C, neg(forged.C)), proof_x.e)))
+      c1 = eq(mul(G1, proof_x.s1), add(proof_x.T1, mul(alice_r.pk, proof_x.e)))
+      print(f"Checks 2 and 3 (the two-relation protocol)     : {c2 and c3}")
+      print(f"Check 1 (witness == registered key)            : {c1}")
+      ok_x = chaum_pedersen_verify(alice_r.E, forged, alice_r.pk, bob_r.pk, proof_x,
+                                   ALICE_ADDR, BOB_ADDR, 1)
+      print(f"wallet verifier (three relations)              : {ok_x}")
+    #+END_SRC
 
-   #+LATEX: }
+    #+RESULTS:
+    : forged E decrypts (under sk_bob) to victim's M : True
+    : fake witness sk* is Alice's registered key     : False
+    : Checks 2 and 3 (the two-relation protocol)     : True
+    : Check 1 (witness == registered key)            : False
+    : wallet verifier (three relations)              : False
+
+    #+LATEX: }
 
 * Transfer -- Bilateral Identity Check
 
@@ -1801,7 +1752,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
     # Channel 1 (Ethereum proof chain): Bob decrypts E_bob
     M_from_bob = add(C_for_bob, neg(mul(R_for_bob, sk_bob)))
-    print("Bob decrypts E_bob from on-chain IdentityExchange event:")
+    print("Bob decrypts E_bob from on-chain ApproveReceipt event:")
     print(f"  M = C' - sk_bob * R' = {pt(M_from_bob)}")
 
     # Channel 2 (Holochain data channel): Bob receives identity_data
@@ -1826,7 +1777,7 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
 
   #+RESULTS:
   #+begin_example
-  Bob decrypts E_bob from on-chain IdentityExchange event:
+  Bob decrypts E_bob from on-chain ApproveReceipt event:
     M = C' - sk_bob * R' = (739132..., 937433...)
 
   Bob receives identity_data via Holochain:
@@ -1946,10 +1897,15 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
   landscape is sharply partitioned.  Eve (a passive on-chain observer)
   learns nothing about Alice's identity from any public artifact.  Bob
   learns Alice's identity only because Alice explicitly authorized it
-  via =approve=.  The issuer can identify Alice given \( M \), but
-  cannot link Alice's accounts from on-chain data alone.  No party --
-  not even the issuer -- can link Alice's rerandomized signature
-  \( \sigma' \) back to the original \( \sigma \).
+  via =approve=.  The issuer, and Bob once he has learned \( m \), hold
+  a candidate they could test against public transcripts -- and the
+  presentation \( (A, B) \) is built so that the test fails: it is a
+  uniform pair, the same distribution for every identity, and the only
+  point derivable from its proof is explained by every candidate.  What
+  remains is the ElGamal ciphertext, whose lock is computational (DDH),
+  and the credential itself, which Bob never sees: knowing \( m \) does
+  not let him register under it (that needs \( \sigma \) and a fresh
+  \( b \)), only the issuer can certify it again.
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results value
@@ -1959,131 +1915,132 @@ guarantees. ([[https://perry.kundert.ca/images/alberta-buck-identity-example.pdf
         ["identity_data (Alice)", "YES (owns it)", "YES (Holochain)", "NO", "YES (issued it)"],
         ["identity_data (Bob)",   "YES (public)",  "YES (owns it)",   "YES (public)", "YES (issued it)"],
         ["m = H(identity_data)",  "YES",           "YES (computes)",  "NO", "YES"],
-        ["M = m*G",               "YES",           "YES (decrypts)",  "NO", "NO"],
-        ["E_alice (registered)",  "YES",           "sees on-chain",   "sees on-chain", "NO"],
-        ["E_bob (re-encrypted)",  "YES (created)",  "YES (decrypts)", "sees on-chain", "NO"],
+        ["M = m*G",               "YES",           "YES (decrypts)",  "NO", "YES (computes)"],
+        ["E_alice (registered)",  "YES",           "sees on-chain",   "sees on-chain", "sees on-chain"],
+        ["E_bob (re-encrypted)",  "YES (created)",  "YES (decrypts)", "sees on-chain", "sees on-chain"],
         ["sk_alice",              "YES",           "NO",              "NO", "NO"],
         ["sk_bob",                "NO",            "YES",             "NO", "NO"],
-        ["PS signature sigma",    "YES",           "NO",              "NO", "YES (created)"],
-        ["sigma' (rerandomized)", "YES",           "sees on-chain",   "sees on-chain", "UNLINKABLE"],
+        ["PS credential sigma",   "YES",           "NO",              "NO", "YES (created)"],
+        ["Presentation (A, B)",   "YES (created)",  "sees on-chain",  "sees on-chain", "sees on-chain"],
+        ["Blinding b",            "YES (then discards)", "NO",        "NO", "NO"],
+        ["Registration proof",    "YES (created)",  "sees on-chain",  "sees on-chain", "sees on-chain"],
         ["Chaum-Pedersen proof",  "YES (created)",  "verified on-chain", "sees on-chain", "N/A"],
         ["Full receipt",          "YES",           "YES",             "NO", "NO"],
-        ["Link sigma to sigma'",  "NO (stat. unlinkable)", "NO", "NO", "NO"],
+        ["Test (A, B) against m", "trivially",     "NO (fails for every m)", "NO", "NO (fails for every m)"],
+        ["Test E against m*G",    "trivially",     "NO (DDH)",        "NO (DDH)", "NO (DDH)"],
+        ["Register under m",      "YES (holds sigma)", "NO (needs sigma, b)", "NO", "YES (may re-certify)"],
     ]
   #+END_SRC
 
   #+RESULTS:
-  | Artifact              | Alice                 | Bob               | Eve           | Issuer          |
-  |-----------------------+-----------------------+-------------------+---------------+-----------------|
-  | identity_data (Alice) | YES (owns it)         | YES (Holochain)   | NO            | YES (issued it) |
-  | identity_data (Bob)   | YES (public)          | YES (owns it)     | YES (public)  | YES (issued it) |
-  | m = H(identity_data)  | YES                   | YES (computes)    | NO            | YES             |
-  | M = m*G               | YES                   | YES (decrypts)    | NO            | NO              |
-  | E_alice (registered)  | YES                   | sees on-chain     | sees on-chain | NO              |
-  | E_bob (re-encrypted)  | YES (created)         | YES (decrypts)    | sees on-chain | NO              |
-  | sk_alice              | YES                   | NO                | NO            | NO              |
-  | sk_bob                | NO                    | YES               | NO            | NO              |
-  | PS signature sigma    | YES                   | NO                | NO            | YES (created)   |
-  | sigma' (rerandomized) | YES                   | sees on-chain     | sees on-chain | UNLINKABLE      |
-  | Chaum-Pedersen proof  | YES (created)         | verified on-chain | sees on-chain | N/A             |
-  | Full receipt          | YES                   | YES               | NO            | NO              |
-  | Link sigma to sigma'  | NO (stat. unlinkable) | NO                | NO            | NO              |
+  | Artifact              | Alice               | Bob                    | Eve           | Issuer                 |
+  |-----------------------+---------------------+------------------------+---------------+------------------------|
+  | identity_data (Alice) | YES (owns it)       | YES (Holochain)        | NO            | YES (issued it)        |
+  | identity_data (Bob)   | YES (public)        | YES (owns it)          | YES (public)  | YES (issued it)        |
+  | m = H(identity_data)  | YES                 | YES (computes)         | NO            | YES                    |
+  | M = m*G               | YES                 | YES (decrypts)         | NO            | YES (computes)         |
+  | E_alice (registered)  | YES                 | sees on-chain          | sees on-chain | sees on-chain          |
+  | E_bob (re-encrypted)  | YES (created)       | YES (decrypts)         | sees on-chain | sees on-chain          |
+  | sk_alice              | YES                 | NO                     | NO            | NO                     |
+  | sk_bob                | NO                  | YES                    | NO            | NO                     |
+  | PS credential sigma   | YES                 | NO                     | NO            | YES (created)          |
+  | Presentation (A, B)   | YES (created)       | sees on-chain          | sees on-chain | sees on-chain          |
+  | Blinding b            | YES (then discards) | NO                     | NO            | NO                     |
+  | Registration proof    | YES (created)       | sees on-chain          | sees on-chain | sees on-chain          |
+  | Chaum-Pedersen proof  | YES (created)       | verified on-chain      | sees on-chain | N/A                    |
+  | Full receipt          | YES                 | YES                    | NO            | NO                     |
+  | Test (A, B) against m | trivially           | NO (fails for every m) | NO            | NO (fails for every m) |
+  | Test E against m*G    | trivially           | NO (DDH)               | NO (DDH)      | NO (DDH)               |
+  | Register under m      | YES (holds sigma)   | NO (needs sigma, b)    | NO            | YES (may re-certify)   |
 
   #+LATEX: }
 
+* Appendix: The Identity Fountain -- The Two-Sided Linkability Test
 
-* Appendix: The Identity Fountain -- Unlinkability Demonstration
-
-  Alice derives a second credential from the same PS signature --
-  simulating a "savings" account alongside her "checking" account.  We
-  verify that the second credential is a valid PS signature on the same
-  \( m \), then compare all public artifacts (rerandomized signature,
-  public key, ElGamal ciphertext) between the two accounts.  Every
-  coordinate fragment is completely different: no shared structure, no
-  correlation.  This is /statistical/ unlinkability
-  (information-theoretic, not merely computational) -- meaning no
-  algorithm, regardless of computing power, can determine that these
-  two accounts belong to the same person from on-chain data alone.
-  Both credentials verify under the same issuer public key, confirming
-  they represent certified identities, but the issuer itself cannot
-  link them without access to a counterparty's decrypted \( M \).
+  Alice derives a second account from the same credential.  The question
+  is not whether the two accounts' public artifacts "look different"
+  (any two random points do) but whether a party holding the identity
+  scalar \( m \) -- the issuer, or a past counterparty -- can /test/
+  them.  The block runs that test both ways.  On what the pre-A'
+  protocol published (a rerandomized signature) it identifies both
+  accounts as Alice's.  On what the A' protocol publishes (the
+  presentations, and the one point derivable from their proofs) it
+  identifies nothing, because every candidate explains every account
+  equally well.  The remaining lock, on the ElGamal ciphertexts, is
+  computational (DDH), as the identity paper's privacy-boundary table
+  states; the credential lock is information-theoretic.
 
   #+LATEX: {\scriptsize
   #+BEGIN_SRC python :session abid :results output
-    # === Alice creates a SECOND account (e.g., "savings") ===
-    # Same m, same sigma, but fresh rerandomization and fresh keys
+    from alberta_buck.wallet.nizk import presentation_point
 
-    t_rerand_2  = rand()
-    sigma_p2_1  = mul(sigma[0], t_rerand_2)
-    sigma_p2_2  = mul(sigma[1], t_rerand_2)
-    sigma_p2    = (sigma_p2_1, sigma_p2_2)
+    # === Alice creates a SECOND account: same credential, fresh (a, b, sk, r) ===
+    pres_2, a_2, b_2 = ps_present(cred.sigma, issuer_obj.pk_Y1, rng=rand)
+    sk_2 = rand(); pk_2 = mul(G1, sk_2); r_2 = rand()
+    E_2  = ElGamalCiphertext(R=mul(G1, r_2), C=add(M_alice, mul(pk_2, r_2)))
+    proof_2 = registration_prove(pres_2, b_2, cred.m, r_2, pk_2, E_2,
+                                 ALICE_ADDR ^ 2, sk_2, rng=rand)
+    assert registration_verify(pres_2, E_2, pk_2, issuer_obj.pk_X, issuer_obj.pk_Y,
+                               proof_2, ALICE_ADDR ^ 2)
+    print("Second account registered (same identity, fresh presentation and keys).\n")
 
-    sk_alice_2  = rand()
-    pk_alice_2  = mul(G1, sk_alice_2)
+    # The candidate list an issuer (or a counterparty who learned m) holds
+    candidates = {"alice": m_alice, "bob": m_bob, "stranger": m_fake}
 
-    r_enc_2     = rand()
-    R_alice_2   = mul(G1, r_enc_2)
-    C_alice_2   = add(M_alice, mul(pk_alice_2, r_enc_2))
-    E_alice_2   = (R_alice_2, C_alice_2)
+    # Side 1: what the pre-A' protocol published -- rerandomized signatures
+    t_2 = rand(); sigma_p2 = (mul(sigma[0], t_2), mul(sigma[1], t_2))
+    print("Pre-A' publication (rerandomized signatures): raw PS test per candidate")
+    for name, m_i in candidates.items():
+        hit = [raw_test(S[0], S[1], m_i) for S in (sigma_p, sigma_p2)]
+        print(f"  {name:9s}: account 1 {str(hit[0]):5s}  account 2 {str(hit[1]):5s}")
 
-    # Verify: sigma_p2 is a valid PS signature on the same m
-    lhs2 = pairing(add(IPK_X, mul(IPK_Y, m_alice)), sigma_p2[0])
-    rhs2 = pairing(G2, sigma_p2[1])
-    assert lhs2 == rhs2, "Second credential PS check FAILED"
+    # Side 2: what the A' protocol publishes -- presentations
+    print("A' publication (presentations): raw PS test per candidate")
+    for name, m_i in candidates.items():
+        hit = [raw_test(p.A, p.B, m_i) for p in (pres_alice, pres_2)]
+        print(f"  {name:9s}: account 1 {str(hit[0]):5s}  account 2 {str(hit[1]):5s}")
 
-    print("Second credential derived (same identity, fresh account):")
-    print(f"  pk_alice_2 = {pt(pk_alice_2)}")
-    print(f"  E_alice_2  = (R, C) -- independent ciphertext")
-    print(f"  sigma'_2   = {pt(sigma_p2[0])}")
-    print()
-    print("Unlinkability check:")
-    print(f"  sigma'_1 (acct 1) = {pt(sigma_p[0])}")
-    print(f"  sigma'_1 (acct 2) = {pt(sigma_p2[0])}")
-    print(f"  pk (acct 1)       = {pt(pk_alice)}")
-    print(f"  pk (acct 2)       = {pt(pk_alice_2)}")
-    print(f"  E.R (acct 1)      = {pt(R_alice)}")
-    print(f"  E.R (acct 2)      = {pt(R_alice_2)}")
-    print()
-    print("  All values are independent.  No shared structure.")
-    print("  PS rerandomization is STATISTICALLY unlinkable --")
-    print("  not merely computationally hard, but information-")
-    print("  theoretically impossible to correlate.")
-    print()
-    print("  Both credentials verify under the same issuer public key,")
-    print("  but zero bits of mutual information exist between them.")
+    # The proof fields: the derivable point P = m*A + b*G satisfies the
+    # masked equation on its own, and P - m_i*A is a well-formed b_i*G
+    # for EVERY candidate m_i -- the relation discriminates nothing.
+    print("A' proof fields: the derivable point P explains every candidate")
+    for k, (p, pf) in enumerate(((pres_alice, proof_w), (pres_2, proof_2)), 1):
+        P = presentation_point(p, pf)
+        masked = pairing(G2, p.B) == pairing(IPK_X, p.A) * pairing(IPK_Y, P)
+        print(f"  account {k}: masked equation with derived P -> {masked}; "
+              f"P - m_i*A is a point for all {len(candidates)} candidates")
+    assert not eq(pres_alice.A, pres_2.A) and not eq(pres_alice.B, pres_2.B)
+    print("Two presentations of one credential share no point.")
   #+END_SRC
 
   #+RESULTS:
   #+begin_example
-  Second credential derived (same identity, fresh account):
-    pk_alice_2 = (612024..., 269464...)
-    E_alice_2  = (R, C) -- independent ciphertext
-    sigma'_2   = (305680..., 907120...)
+  Second account registered (same identity, fresh presentation and keys).
 
-  Unlinkability check:
-    sigma'_1 (acct 1) = (535940..., 905792...)
-    sigma'_1 (acct 2) = (305680..., 907120...)
-    pk (acct 1)       = (768650..., 708008...)
-    pk (acct 2)       = (612024..., 269464...)
-    E.R (acct 1)      = (541750..., 964600...)
-    E.R (acct 2)      = (419877..., 391978...)
-
-    All values are independent.  No shared structure.
-    PS rerandomization is STATISTICALLY unlinkable --
-    not merely computationally hard, but information-
-    theoretically impossible to correlate.
-
-    Both credentials verify under the same issuer public key,
-    but zero bits of mutual information exist between them.
+  Pre-A' publication (rerandomized signatures): raw PS test per candidate
+    alice    : account 1 True   account 2 True 
+    bob      : account 1 False  account 2 False
+    stranger : account 1 False  account 2 False
+  A' publication (presentations): raw PS test per candidate
+    alice    : account 1 False  account 2 False
+    bob      : account 1 False  account 2 False
+    stranger : account 1 False  account 2 False
+  A' proof fields: the derivable point P explains every candidate
+    account 1: masked equation with derived P -> True; P - m_i*A is a point for all 3 candidates
+    account 2: masked equation with derived P -> True; P - m_i*A is a point for all 3 candidates
+  Two presentations of one credential share no point.
   #+end_example
 
   #+LATEX: }
 
-  *How to read the output:* Compare the coordinate fragments between
-  "acct 1" and "acct 2" for =sigma'_1=, =pk=, and =E.R=.  They must
-  all be completely different (random-looking).  If any pair matched,
-  the unlinkability property would be broken.
-
+  *How to read the output:* In the first table every account lights up
+  under Alice's \( m \) and no other: the pre-A' pair was a candidate
+  test, which is exactly review finding R1.  In the second table no
+  account lights up under any candidate, including the true one.  The
+  proof fields then confirm that the point they expose is consistent
+  with every candidate.  This is the two-sided witness the A' plan asks
+  for; the hiding argument behind it is Theorem 2' of the proofs
+  document, and its independent review is still outstanding.
 
 * Appendix: Small-Group Proofs
 

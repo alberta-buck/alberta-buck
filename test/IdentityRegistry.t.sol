@@ -68,6 +68,7 @@ contract IdentityRegistryTest is Test {
         ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
         ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
         ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        ipk.Y1 = _g1(".issuer.pk_Y1");
 
         vm.prank(GOV);
         reg.trustIssuer(ISSUER, ipk);
@@ -83,9 +84,9 @@ contract IdentityRegistryTest is Test {
         return BN254.G1Point(_u(string.concat(key, ".x")), _u(string.concat(key, ".y")));
     }
 
-    function _ps(string memory who) internal view returns (IdentityRegistry.PSSig memory s) {
-        s.sigma_1 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_1"));
-        s.sigma_2 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_2"));
+    function _ps(string memory who) internal view returns (IdentityRegistry.PSPresentation memory s) {
+        s.A = _g1(string.concat(".", who, ".ps_presentation.A"));
+        s.B = _g1(string.concat(".", who, ".ps_presentation.B"));
     }
 
     function _ct(string memory key) internal view returns (IdentityRegistry.ElGamalCT memory c) {
@@ -106,9 +107,9 @@ contract IdentityRegistryTest is Test {
         c.C = _bg1(string.concat(key, ".C"));
     }
 
-    function _bps(string memory key) internal view returns (IdentityRegistry.PSSig memory s) {
-        s.sigma_1 = _bg1(string.concat(key, ".sigma_1"));
-        s.sigma_2 = _bg1(string.concat(key, ".sigma_2"));
+    function _bps(string memory key) internal view returns (IdentityRegistry.PSPresentation memory s) {
+        s.A = _bg1(string.concat(key, ".A"));
+        s.B = _bg1(string.concat(key, ".B"));
     }
 
     function _bproof(string memory key) internal view returns (IdentityRegistry.RegistrationProof memory p) {
@@ -116,7 +117,8 @@ contract IdentityRegistryTest is Test {
         p.s_m  = _bu(string.concat(key, ".s_m"));
         p.s_r  = _bu(string.concat(key, ".s_r"));
         p.s_sk = _bu(string.concat(key, ".s_sk"));
-        p.A_ps = _bg1(string.concat(key, ".A_ps"));
+        p.s_b = _bu(string.concat(key, ".s_b"));
+        p.C1 = _bg1(string.concat(key, ".C1"));
         p.T_C  = _bg1(string.concat(key, ".T_C"));
         p.T_R  = _bg1(string.concat(key, ".T_R"));
         p.T_key = _bg1(string.concat(key, ".T_key"));
@@ -128,7 +130,8 @@ contract IdentityRegistryTest is Test {
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
         p.s_sk = _u(string.concat(base, ".s_sk"));
-        p.A_ps = _g1(string.concat(base, ".A_ps"));
+        p.s_b = _u(string.concat(base, ".s_b"));
+        p.C1 = _g1(string.concat(base, ".C1"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
         p.T_key = _g1(string.concat(base, ".T_key"));
@@ -257,14 +260,74 @@ contract IdentityRegistryTest is Test {
         reg.register(ISSUER, pk, E, _ps("alice"), p);
     }
 
-    function test_register_rejects_zero_sigma1() public {
+    function test_register_rejects_zero_A() public {
         BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
         IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
-        IdentityRegistry.PSSig memory bad = _ps("alice");
-        bad.sigma_1 = BN254.zeroG1();
+        IdentityRegistry.PSPresentation memory bad = _ps("alice");
+        bad.A = BN254.zeroG1();
         vm.prank(alice);
-        vm.expectRevert(bytes("sigma_1=O"));
+        vm.expectRevert(bytes("A=O"));
         reg.register(ISSUER, pk, E, bad, _regProof("alice"));
+    }
+
+    function test_register_rejects_zero_B() public {
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        IdentityRegistry.PSPresentation memory bad = _ps("alice");
+        bad.B = BN254.zeroG1();
+        vm.prank(alice);
+        vm.expectRevert(bytes("B=O"));
+        reg.register(ISSUER, pk, E, bad, _regProof("alice"));
+    }
+
+    function test_register_rejects_tampered_s_b() public {
+        // s_b is not hashed into the transcript, so tampering it reaches the
+        // pairing product and must fail THERE (finding R4 style stripping).
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        IdentityRegistry.RegistrationProof memory bad = _regProof("alice");
+        bad.s_b = addmod(bad.s_b, 1, BN254.R);
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad presentation"));
+        reg.register(ISSUER, pk, E, _ps("alice"), bad);
+    }
+
+    function test_register_rejects_swapped_presentation() public {
+        // Bob's presentation with Alice's proof: transcript mismatch.
+        BN254.G1Point memory pk = _g1(".alice.elgamal_kp.pk");
+        IdentityRegistry.ElGamalCT memory E = _ct(".alice.ciphertext");
+        vm.prank(alice);
+        vm.expectRevert(bytes("bad FS challenge"));
+        reg.register(ISSUER, pk, E, _ps("bob"), _regProof("alice"));
+    }
+
+    function test_trustIssuer_rejects_zero_Y1() public {
+        IdentityRegistry.PSPubKey memory ipk = reg.trustedIssuerKey(ISSUER);
+        ipk.Y1 = BN254.zeroG1();
+        vm.prank(GOV);
+        vm.expectRevert(bytes("Y1=O"));
+        reg.trustIssuer(address(0xB0B5), ipk);
+    }
+
+    function test_trustIssuer_rejects_inconsistent_Y1() public {
+        IdentityRegistry.PSPubKey memory ipk = reg.trustedIssuerKey(ISSUER);
+        ipk.Y1 = BN254.add(ipk.Y1, BN254.g1());
+        vm.prank(GOV);
+        vm.expectRevert(bytes("Y1 inconsistent"));
+        reg.trustIssuer(address(0xB0B5), ipk);
+    }
+
+    function test_presentation_is_not_a_signature_on_m() public view {
+        // Finding R1 closed: the published pair fails the raw PS relation
+        // e(m*A, Y) * e(A, X) * e(-B, g_2) == 1 for the true m.
+        IdentityRegistry.PSPresentation memory pres = _ps("alice");
+        IdentityRegistry.PSPubKey memory ipk = reg.trustedIssuerKey(ISSUER);
+        BN254.G1Point[] memory a = new BN254.G1Point[](3);
+        BN254.G2Point[] memory b = new BN254.G2Point[](3);
+        a[0] = BN254.mul(pres.A, _u(".alice.m")); b[0] = ipk.Y;
+        a[1] = pres.A;                              b[1] = ipk.X;
+        a[2] = BN254.neg(pres.B);                   b[2] = BN254.g2();
+        assertFalse(BN254.pairingCheck(a, b), "presentation must not verify as a signature");
     }
 
     function test_register_rejects_zero_pk() public {
@@ -313,6 +376,7 @@ contract IdentityRegistryTest is Test {
         ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
         ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
         ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        ipk.Y1 = _g1(".issuer.pk_Y1");
         vm.prank(GOV);
         other.trustIssuer(ISSUER, ipk);
 
@@ -538,7 +602,7 @@ contract IdentityRegistryTest is Test {
         reg.bindContract(
             pool, ISSUER,
             _bg1(".pool.pk"), _bct(".pool.ciphertext"),
-            _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
+            _bps(".pool.ps_presentation"), _bproof(".pool.registration_proof"),
             authorization, true, true
         );
         assertTrue(reg.isVerified(pool));
@@ -569,7 +633,7 @@ contract IdentityRegistryTest is Test {
         reg.bindContract(
             pool, ISSUER,
             _bg1(".pool.pk"), _bct(".pool.ciphertext"),
-            _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
+            _bps(".pool.ps_presentation"), _bproof(".pool.registration_proof"),
             authorization, false, false
         );
 
@@ -577,7 +641,7 @@ contract IdentityRegistryTest is Test {
         reg.bindContract(
             pool, ISSUER,
             _bg1(".pool.pk"), _bct(".pool.ciphertext"),
-            _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
+            _bps(".pool.ps_presentation"), _bproof(".pool.registration_proof"),
             authorization, true, true
         );
         assertEq(reg.binderOf(pool), factory);
@@ -601,7 +665,7 @@ contract IdentityRegistryTest is Test {
         reg.bindContract(
             pool, ISSUER,
             _bg1(".pool.pk"), _bct(".pool.ciphertext"),
-            _bps(".pool.ps_sig_rerand"), _bproof(".pool.registration_proof"),
+            _bps(".pool.ps_presentation"), _bproof(".pool.registration_proof"),
             authorization, true, true
         );
         assertFalse(reg.isVerified(pool));

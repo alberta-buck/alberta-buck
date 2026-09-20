@@ -28,7 +28,7 @@
 
 import { encodeFunctionData, keccak256, toBytes } from "viem";
 
-import { advanceTime, buildBuckWorld, DAY } from "../buckworld.js";
+import { advanceTime, buildBuckWorld, DAY, onboard } from "../buckworld.js";
 import { deployUniversalRouter, encodePath, urExecArgs } from "../router.js";
 import { Q96, fullRangeTicks, sqrtPriceX96, spotFromSqrtPriceX96 } from "../v3.js";
 import { seededWalk } from "../prices.js";
@@ -39,10 +39,18 @@ const E18 = 10n ** 18n;
 const DEPOSITED_TOPIC = keccak256(toBytes(
   "Deposited(address,uint256,address,uint256,uint256,uint128)"));
 
-// The public bind identity (sim/identity.py BIND_PK/BIND_E: the G1
-// generator); BN254.sol ABI struct components are UPPERCASE.
-const G = { X: 1n, Y: 2n };
-const BIND_E = { R: G, C: G };
+// Contract identities are bound by a REGISTERED operator (the certified
+// binding repair of 2026-09-15): the deployer onboards first and every
+// public contract copies its (pk, E), exactly as sim/identity.py's
+// bind_as_operator does.  BN254.sol ABI struct components are UPPERCASE.
+const g = (p) => ({ X: p.x, Y: p.y });
+const ct = (E) => ({ R: g(E.R), C: g(E.C) });
+const OPERATOR_FIELDS = {
+  given_name: "Equilibrium", family_name: "Operator",
+  jurisdiction: "Alberta, Canada", id_type: "Operator",
+  id_number: "OP-0000001", date_of_birth: "1990-01-01",
+  issued_at: "2026-01-01T00:00:00Z", epoch: 42,
+};
 
 const DEFAULT_TOKENS = [
   { sym: "CNST", name: "Construction", dec: 18, p0: 2_500_000n },
@@ -77,11 +85,21 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const targetBuck = opts.targetBuck ?? 10n ** 13n;
 
   const world = await buildBuckWorld(session, artifacts,
-    { identity: opts.identity, rng: opts.rng });
+    { identity: opts.identity, rng: opts.rng,
+      // Synthetic infrastructure: the harnesses the Python sim deploys
+      // (deploy.py / notes_stack.py) -- uncertified binds of SimLP and
+      // the routers, credits to proxies that never opt in.
+      registryArtifact: "IdentityRegistryHarness",
+      creditArtifact: "BuckCreditHarness" });
   const { reg, credit, kctrl, buck } = world;
   const me = session.account.address;
+  // The deployer registers a real identity, then binds contracts as the
+  // certified operator with its own registered (pk, E).
+  const operator = await onboard(world, session.account, OPERATOR_FIELDS,
+    { rng: opts.rng });
   const bind = (addr, carrying, tag) =>
-    session.send(reg, "bindContract", [addr, G, BIND_E, true, carrying], { tag });
+    session.send(reg, "bindContract",
+      [addr, g(operator.kp.pk), ct(operator.E), true, carrying], { tag });
 
   // --- factory, basket + venue, wiring (deploy.py order) --------------
   const v3f = await session.deploy(artifacts("UniswapV3Factory"), [],

@@ -100,6 +100,10 @@
     "0x13605a6dfe2138c92ff84030d1be80252f1382dbba0a9cb69f9eb678497ebc1d"
    ]
   },
+  "pk_Y1": {
+   "x": "0x1247546a87c9b74eae3fd8e4c2ccc37aaa4b5c57413001f936c2bb0e7f2ee81c",
+   "y": "0x1a00c3c0472b605b7242fdb815bf247d6e27c7fff4d11ae7dc7facdd96f0cc85"
+  },
   "r_delivery": "0x2bb37b82b74bd5a1b5f7ba2c7eceafb2bf4382fd0110adde7b67b7bd1b547540",
   "sigma_1": {
    "x": "0x0bd682f772a88afc1ab80134c07a3cb1460549b2b9afe58b53c459d8197a447b",

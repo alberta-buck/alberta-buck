@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Tests PASS when the documented current failure is reproduced.
+"""Review tests: each names a finding of doc/review/identity-findings*.
 
-When production changes, intentionally revisit these assertions and the review;
-do not weaken them to accept either outcome.
+Tests 1, 2, 3 and 9 are INVERTED: they now assert the production verifier
+rejects the attack the review demonstrated (registration presentation A' on
+branch feature/a-prime; approval and account-key repairs earlier).  The
+remaining tests still PASS BY REPRODUCING an unresolved finding.  When
+production changes again, revisit the assertions deliberately; never weaken
+one to accept either outcome.
 """
 from dataclasses import replace
 import json
@@ -17,33 +21,103 @@ from alberta_buck.review.mitigations import (
     credential_leaf, prove_key_ownership, verify_key_ownership,
     membership_proof_required, APPROVE_DOMAIN,
 )
-from alberta_buck.wallet.bn254 import G1, ORDER, Z1, add, mul, neg, eq
-from alberta_buck.wallet.ps import ps_verify
-from alberta_buck.wallet.nizk import registration_prove, registration_verify
+from alberta_buck.wallet.bn254 import G1, G2, ORDER, Z1, add, mul, neg, eq, pairing
+from alberta_buck.wallet.ps import ps_verify, ps_keygen, ps_sign, ps_present, PSSignature
+from alberta_buck.wallet.nizk import registration_prove, registration_verify, presentation_point
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove, chaum_pedersen_verify
-from alberta_buck.wallet.ps import ps_sign, ps_rerandomize
 from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
 from alberta_buck.wallet.issuer_reenc import H_POINT, H_SCALAR
 from alberta_buck.registry.tree import identity_leaf
 import pytest
 
 
-def test_01_published_signature_tests_identity_and_issuer_can_link(backend):
-    issuer, owner, public, *_ = harvested_registration()
-    assert ps_verify(issuer.pk_X, issuer.pk_Y, public, owner.m)
-    assert not ps_verify(issuer.pk_X, issuer.pk_Y, public, owner.m+1)
-    # Stronger issuer view needs only a G1 operation, not pairings.
-    assert eq(public.sigma_2, mul(public.sigma_1,
-              (issuer.sk_x+owner.m*issuer.sk_y) % ORDER))
+def test_01_published_presentation_is_not_a_testable_signature(backend):
+    """Findings 1 and R2 inverted under A': the published pair (A, B) and the
+    proof fields give the issuer and any m-holder no candidate test."""
+    issuer, owner, pres, proof, *_ = harvested_registration()
+    assert registration_verify(pres, owner.E, owner.pk, issuer.pk_X, issuer.pk_Y,
+                               proof, 0xA11CE)
+    # R1, public key: the pair is not a signature on the true m (or any other).
+    assert not ps_verify(issuer.pk_X, issuer.pk_Y, PSSignature(pres.A, pres.B), owner.m)
+    # R1, issuer secret: one G1 multiplication no longer identifies it either.
+    assert not eq(pres.B, mul(pres.A, (issuer.sk_x + owner.m * issuer.sk_y) % ORDER))
+    # R2: the commitment C1 no longer exposes m*A up to the challenge.
+    assert not eq(mul(pres.A, proof.s_m),
+                  add(proof.C1, mul(pres.A, (proof.e * owner.m) % ORDER)))
+    # The only derivable point is P = m*A + b*G; every candidate m_i implies its
+    # own b_i*G = P - m_i*A, so the pairing relation holds for all of them.
+    P = presentation_point(pres, proof)
+    for cand in (owner.m, owner.m + 1):
+        bG = add(P, neg(mul(pres.A, cand)))
+        assert pairing(G2, pres.B) == pairing(issuer.pk_X, pres.A) * pairing(
+            issuer.pk_Y, add(mul(pres.A, cand), bG))
 
 
-def test_02_public_credential_and_disclosed_record_register_attacker(backend):
-    issuer, owner, public, attacker, sigma, proof = harvested_registration()
-    assert attacker.sk != owner.sk and not eq(public.sigma_1, sigma.sigma_1)
-    assert registration_verify(sigma, attacker.E, attacker.pk, issuer.pk_X,
-                               issuer.pk_Y, proof, 0xBAD)
-    assert not registration_verify(sigma, attacker.E, attacker.pk, issuer.pk_X,
-                                   issuer.pk_Y, proof, 0xBAE)
+def test_02_disclosed_record_and_public_presentation_do_not_register_attacker(backend):
+    """Finding 2 inverted under A': m plus the public transcript is not a
+    credential.  Re-presenting (A, B) with a fresh blinding cannot be proven
+    without the original b; the legitimate holder still registers."""
+    issuer, owner, pres, owner_proof, attacker, att_pres, att_proof = harvested_registration()
+    assert attacker.sk != owner.sk and not eq(pres.A, att_pres.A)
+    assert not registration_verify(att_pres, attacker.E, attacker.pk, issuer.pk_X,
+                                   issuer.pk_Y, att_proof, 0xBAD)
+    assert registration_verify(pres, owner.E, owner.pk, issuer.pk_X, issuer.pk_Y,
+                               owner_proof, 0xA11CE)
+    assert not registration_verify(pres, owner.E, owner.pk, issuer.pk_X, issuer.pk_Y,
+                                   owner_proof, 0xA11CF)
+
+
+def test_10_fresh_blinding_is_security_critical(backend):
+    """Reusing b across two presentations of one credential is a candidate
+    test: P_1 - P_2 = m*(A_1 - A_2).  Fresh b removes it."""
+    issuer = ps_keygen(seeded(21))
+    owner = Account(12345, 45678, 98765)
+    sigma = ps_sign(issuer, owner.m, seeded(22))
+    p1, _, b1 = ps_present(sigma, issuer.pk_Y1, seeded(23))
+    p2, _, _ = ps_present(sigma, issuer.pk_Y1, b=b1, a=777)   # same b, fresh a
+    k1 = registration_prove(p1, b1, owner.m, owner.r, owner.pk, owner.E, 1, owner.sk, 1, seeded(24))
+    k2 = registration_prove(p2, b1, owner.m, owner.r, owner.pk, owner.E, 2, owner.sk, 1, seeded(25))
+    P1, P2 = presentation_point(p1, k1), presentation_point(p2, k2)
+    assert eq(add(P1, neg(P2)), mul(add(p1.A, neg(p2.A)), owner.m))          # linkable
+    p3, _, b3 = ps_present(sigma, issuer.pk_Y1, seeded(26))                   # fresh b
+    k3 = registration_prove(p3, b3, owner.m, owner.r, owner.pk, owner.E, 3, owner.sk, 1, seeded(27))
+    P3 = presentation_point(p3, k3)
+    assert not eq(add(P1, neg(P3)), mul(add(p1.A, neg(p3.A)), owner.m))
+
+
+def test_11_infinity_presentation_and_inconsistent_key_are_rejected(backend):
+    """A = O makes the credential term vanish, so the verifier must refuse it;
+    a Y1 that does not match Y must be refused when the key is trusted."""
+    from alberta_buck.wallet.ps import PSPresentation, ps_key_consistent
+    issuer = ps_keygen(seeded(31))
+    owner = Account(12345, 45678, 98765)
+    pres, _, b = ps_present(ps_sign(issuer, owner.m, seeded(32)), issuer.pk_Y1, seeded(33))
+    proof = registration_prove(pres, b, owner.m, owner.r, owner.pk, owner.E, 1, owner.sk, 1, seeded(34))
+    assert registration_verify(pres, owner.E, owner.pk, issuer.pk_X, issuer.pk_Y, proof, 1)
+    dead = PSPresentation(Z1, pres.B)
+    bad = registration_prove(dead, b, 0, owner.r, owner.pk, owner.E, 1, owner.sk, 1, seeded(35))
+    assert not registration_verify(dead, owner.E, owner.pk, issuer.pk_X, issuer.pk_Y, bad, 1)
+    with pytest.raises(ValueError):
+        ps_present(ps_sign(issuer, owner.m, seeded(36)), issuer.pk_Y1, a=0)
+    assert ps_key_consistent(issuer.pk_X, issuer.pk_Y, issuer.pk_Y1)
+    assert not ps_key_consistent(issuer.pk_X, issuer.pk_Y, mul(G1, issuer.sk_y + 1))
+    assert not ps_key_consistent(issuer.pk_X, issuer.pk_Y, Z1)
+
+
+def test_12_two_presentations_share_no_point_and_only_the_holder_can_extract(backend):
+    """Cross-account: two showings of one credential share no public point.
+    Stripping the blinding needs y*(b*G); subtracting b*G itself does not
+    yield a signature."""
+    issuer = ps_keygen(seeded(41))
+    owner = Account(12345, 45678, 98765)
+    sigma = ps_sign(issuer, owner.m, seeded(42))
+    p1, _, b1 = ps_present(sigma, issuer.pk_Y1, seeded(43))
+    p2, _, b2 = ps_present(sigma, issuer.pk_Y1, seeded(44))
+    assert not eq(p1.A, p2.A) and not eq(p1.B, p2.B)
+    naive = PSSignature(p1.A, add(p1.B, neg(mul(G1, b1))))
+    assert not ps_verify(issuer.pk_X, issuer.pk_Y, naive, owner.m)
+    stripped = PSSignature(p1.A, add(p1.B, neg(mul(issuer.pk_Y1, b1))))   # needs b (holder only)
+    assert ps_verify(issuer.pk_X, issuer.pk_Y, stripped, owner.m)
 
 
 def test_03_fresh_false_identity_approval_and_compact_repair(backend):
@@ -111,9 +185,9 @@ def test_08_empty_membership_proof_is_not_a_proof(backend):
 
 
 def test_09_registration_accepts_a_public_key_with_no_known_secret(backend):
-    issuer, owner, pk, E, sigma, proof = uncontrolled_registration()
+    issuer, owner, pk, E, pres, proof = uncontrolled_registration()
     # Production verifier rejects a NUMS pk (finding 9 inverted).
-    assert not registration_verify(sigma, E, pk, issuer.pk_X, issuer.pk_Y, proof, 0xBAD)
+    assert not registration_verify(pres, E, pk, issuer.pk_X, issuer.pk_Y, proof, 0xBAD)
     # No scalar we have satisfies pk = sk*G.
     assert not eq(pk, mul(G1, owner.sk))
     domain = APPROVE_DOMAIN
@@ -125,15 +199,15 @@ def test_09_registration_accepts_a_public_key_with_no_known_secret(backend):
     assert verify_key_ownership(honest_pk, good, domain)
     # Honest key still registers.
     honest = Account(12345, 45678, 98765)
-    sig_h, _ = ps_rerandomize(ps_sign(issuer, honest.m, seeded(11)), seeded(12))
+    pres_h, _, b_h = ps_present(ps_sign(issuer, honest.m, seeded(11)), issuer.pk_Y1, seeded(12))
     pf = registration_prove(
-        sig_h, honest.m, honest.r, honest.pk, honest.E, 0xA11C, honest.sk, 1, seeded(13),
+        pres_h, b_h, honest.m, honest.r, honest.pk, honest.E, 0xA11C, honest.sk, 1, seeded(13),
     )
     assert registration_verify(
-        sig_h, honest.E, honest.pk, issuer.pk_X, issuer.pk_Y, pf, 0xA11C, 1,
+        pres_h, honest.E, honest.pk, issuer.pk_X, issuer.pk_Y, pf, 0xA11C, 1,
     )
     assert not registration_verify(
-        sig_h, honest.E, honest.pk, issuer.pk_X, issuer.pk_Y, pf, 0xA11C, 2,
+        pres_h, honest.E, honest.pk, issuer.pk_X, issuer.pk_Y, pf, 0xA11C, 2,
     )
 
 

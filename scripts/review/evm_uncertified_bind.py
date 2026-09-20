@@ -21,7 +21,7 @@ from alberta_buck.sim.pyrevm_backend import PyrevmAnvil, DEV_ACCOUNTS
 from alberta_buck.sim.chain import Chain, Expect
 from alberta_buck.review.examples import Account, seeded
 from alberta_buck.wallet.bn254 import point_to_words
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present
 from alberta_buck.wallet.nizk import registration_prove, bind_contract_prove
 from alberta_buck.wallet.contract_binding import contract_binding_prove
 from alberta_buck.registry.tree import identity_leaf
@@ -46,8 +46,8 @@ def deploy_poseidon(chain):
 
 
 def _proof_arg(pf):
-    return (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R),
-            g1(pf.T_key))
+    return (pf.e, pf.s_m, pf.s_b, pf.s_r, pf.s_sk, g1(pf.C1), g1(pf.T_C),
+            g1(pf.T_R), g1(pf.T_key))
 
 
 def _binding_arg(pf):
@@ -93,13 +93,14 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     rng = seeded(9)
     iss = ps_keygen(rng=rng)
     iss_addr = Web3.to_checksum_address("0x00000000000000000000000000000000000000aa")
-    chain.send(reg.functions.trustIssuer(iss_addr, (g2(iss.pk_X), g2(iss.pk_Y))),
+    chain.send(reg.functions.trustIssuer(
+        iss_addr, (g2(iss.pk_X), g2(iss.pk_Y), g1(iss.pk_Y1))),
                sender=gov)
     alice_addr = Web3.to_checksum_address("0x000000000000000000000000000000000000a11c")
     anvil.set_balance(alice_addr, 10**18)
     alice = Account(12345, 45678, 98765)
-    sigma, _ = ps_rerandomize(ps_sign(iss, alice.m, rng=rng), rng=rng)
-    pf = registration_prove(sigma, alice.m, alice.r, alice.pk, alice.E,
+    pres, _a, b = ps_present(ps_sign(iss, alice.m, rng=rng), iss.pk_Y1, rng=rng)
+    pf = registration_prove(pres, b, alice.m, alice.r, alice.pk, alice.E,
                             int(alice_addr, 16), alice.sk, rng=rng,
                             registry=int(reg.address, 16))
     honest_leaf = identity_leaf(alice.M)
@@ -107,12 +108,12 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     reg6 = reg.get_function_by_signature(
         "register(address,(uint256,uint256),((uint256,uint256),(uint256,uint256)),"
         "((uint256,uint256),(uint256,uint256)),"
-        "(uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
+        "(uint256,uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
         "(uint256,uint256),(uint256,uint256)),"
         "uint256)")
     chain.send(reg6(
         iss_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
-        (g1(sigma.sigma_1), g1(sigma.sigma_2)),
+        (g1(pres.A), g1(pres.B)),
         _proof_arg(pf),
         fake_leaf), sender=alice_addr, expect=Expect.REVERT)
     assert "unchecked identity leaf" in (chain.last_revert_reason or "")
@@ -124,7 +125,7 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     # Honest register with leaf=0.
     chain.send(reg6(
         iss_addr, g1(alice.pk), (g1(alice.E.R), g1(alice.E.C)),
-        (g1(sigma.sigma_1), g1(sigma.sigma_2)),
+        (g1(pres.A), g1(pres.B)),
         _proof_arg(pf),
         0), sender=alice_addr)
     assert reg.functions.isVerified(alice_addr).call()
@@ -156,9 +157,9 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     vault_target = chain.deploy("BindingTargetHarness", sol_file="BindingTargetHarness")
     vault = vault_target.address
     vault_acct = Account(22222, 33333, 44444)
-    sigma_v, _ = ps_rerandomize(ps_sign(iss, vault_acct.m, rng=rng), rng=rng)
+    pres_v, _a, b_v = ps_present(ps_sign(iss, vault_acct.m, rng=rng), iss.pk_Y1, rng=rng)
     pf_v = bind_contract_prove(
-        sigma_v, vault_acct.m, vault_acct.r, vault_acct.pk, vault_acct.E,
+        pres_v, b_v, vault_acct.m, vault_acct.r, vault_acct.pk, vault_acct.E,
         int(vault, 16), vault_acct.sk, rng=rng,
         registry=int(reg.address, 16))
     bind_auth_v = contract_binding_prove(
@@ -172,14 +173,14 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
         "bindContract(address,address,(uint256,uint256),"
         "((uint256,uint256),(uint256,uint256)),"
         "((uint256,uint256),(uint256,uint256)),"
-        "(uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
+        "(uint256,uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
         "(uint256,uint256),(uint256,uint256)),"
         "(uint256,uint256,(uint256,uint256)),"
         "bool,bool)")
     chain.send(bind_cred(
         vault, iss_addr, g1(vault_acct.pk),
         (g1(vault_acct.E.R), g1(vault_acct.E.C)),
-        (g1(sigma_v.sigma_1), g1(sigma_v.sigma_2)),
+        (g1(pres_v.A), g1(pres_v.B)),
         _proof_arg(pf_v),
         _binding_arg(bind_auth_v),
         False, False), sender=alice_addr)

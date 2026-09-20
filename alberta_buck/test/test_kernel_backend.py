@@ -76,7 +76,7 @@ def test_spot_parity_same_draws_same_proofs(monkeypatch):
     """The same seeded rng through py and kernel backends yields identical
     keypairs, signatures, proofs, and hashes."""
     from alberta_buck.wallet import (
-        ps_keygen, ps_sign, ps_rerandomize,
+        ps_keygen, ps_sign, ps_present,
         identity_keygen, elgamal_encrypt,
         registration_prove, registration_verify,
         chaum_pedersen_prove, poseidon,
@@ -88,11 +88,11 @@ def test_spot_parity_same_draws_same_proofs(monkeypatch):
         issuer = ps_keygen(rng=rng)
         m = rand_scalar(rng)
         sigma = ps_sign(issuer, m, rng=rng)
-        sigma_p, _ = ps_rerandomize(sigma, rng=rng)
+        sigma_p, _, b = ps_present(sigma, issuer.pk_Y1, rng=rng)
         kp = identity_keygen(rng=rng)
         r = rand_scalar(rng)
         E = elgamal_encrypt(mul(G1, m), kp.pk, r)
-        proof = registration_prove(sigma_p, m, r, kp.pk, E, 0xA11CE, kp.sk, rng=rng)
+        proof = registration_prove(sigma_p, b, m, r, kp.pk, E, 0xA11CE, kp.sk, rng=rng)
         ok = registration_verify(sigma_p, E, kp.pk, issuer.pk_X, issuer.pk_Y,
                                  proof, 0xA11CE)
         E2 = elgamal_encrypt(mul(G1, m), kp.pk, rand_scalar(rng))

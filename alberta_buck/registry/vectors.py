@@ -33,7 +33,7 @@ from alberta_buck.wallet.bn254 import (
     G1, G2, ORDER, mul, point_to_words, point_to_hex, scalar_to_hex,
 )
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.ps import PSKeyPair, PSSignature, ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import PSKeyPair, PSPresentation, PSSignature, ps_keygen, ps_sign, ps_present
 from alberta_buck.wallet.elgamal import (
     ElGamalCiphertext, IdentityKeyPair, identity_keygen, elgamal_encrypt,
 )
@@ -107,8 +107,9 @@ class FullRegistration:
     # On-chain registration (IdentityRegistry.register)
     pk: Any                          # G1 point -- client ElGamal public key
     E_addr: ElGamalCiphertext        # ElGamal ciphertext of M under pk
-    ps_sigma_rerand: PSSignature     # rerandomized PS credential
+    ps_presentation: PSPresentation  # hiding presentation (A, B), published
     registration_proof: RegistrationProof
+    ps_blind: int = 0                # presentation blinding b (NIZK witness)
 
     # Raw PS data (for reference, not on-chain)
     ps_sigma_raw: Optional[PSSignature] = None
@@ -135,16 +136,18 @@ def _party_to_json(party: FullRegistration) -> Dict[str, Any]:
             "sigma_1": _g1(party.ps_sigma_raw.sigma_1),
             "sigma_2": _g1(party.ps_sigma_raw.sigma_2),
         } if party.ps_sigma_raw else None,
-        "ps_sig_rerand": {
-            "sigma_1": _g1(party.ps_sigma_rerand.sigma_1),
-            "sigma_2": _g1(party.ps_sigma_rerand.sigma_2),
+        "ps_presentation": {
+            "A": _g1(party.ps_presentation.A),
+            "B": _g1(party.ps_presentation.B),
         },
+        "b": scalar_to_hex(party.ps_blind),
         "registration_proof": {
             "e":     scalar_to_hex(party.registration_proof.e),
             "s_m":   scalar_to_hex(party.registration_proof.s_m),
+            "s_b":   scalar_to_hex(party.registration_proof.s_b),
             "s_r":   scalar_to_hex(party.registration_proof.s_r),
             "s_sk":  scalar_to_hex(party.registration_proof.s_sk),
-            "A_ps":  _g1(party.registration_proof.A_ps),
+            "C1":    _g1(party.registration_proof.C1),
             "T_C":   _g1(party.registration_proof.T_C),
             "T_R":   _g1(party.registration_proof.T_R),
             "T_key": _g1(party.registration_proof.T_key),
@@ -224,6 +227,7 @@ class RegistryVectors:
                 "sk_y": scalar_to_hex(self.ps_issuer.sk_y),
                 "pk_X": _g2(self.ps_issuer.pk_X),
                 "pk_Y": _g2(self.ps_issuer.pk_Y),
+                "pk_Y1": _g1(self.ps_issuer.pk_Y1),
             },
             "sub_trees": {},
             "identities": {},
@@ -395,7 +399,8 @@ def build_registry_vectors(
             sealed_envelope=full.sealed.envelope,
             pk=full.client_kp.pk,
             E_addr=full.E_addr,
-            ps_sigma_rerand=full.ps_sigma_rerand,
+            ps_presentation=full.ps_presentation,
+            ps_blind=full.ps_blind,
             registration_proof=full.registration_proof,
         )
         identities[label] = party

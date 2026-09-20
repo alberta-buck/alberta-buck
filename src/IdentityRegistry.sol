@@ -10,10 +10,14 @@ import {IPoseidonT3} from "./IPoseidonT3.sol";
 ///         * pk     = ElGamal recipient public key (G1)
 ///         * E_addr = (R, C) = ElGamal ciphertext of the identity point M = m*G,
 ///                    encrypted under pk and witnessed by an issuer-signed
-///                    Pointcheval-Sanders credential.
-///         A registration NIZK proves -- without revealing m, r or sk -- that
-///         the credential is valid, that E_addr really encrypts m, and that
-///         the registrant holds sk for pk.
+///                    Pointcheval-Sanders credential shown in HIDING form.
+///         The registrant publishes a presentation (A, B) = (a*sigma_1,
+///         a*sigma_2 + b*Y1) of its credential -- a uniform G1 pair that is not
+///         a signature anyone can verify or re-present -- and a registration
+///         NIZK proving, without revealing m, b, r or sk, that (A, B) presents
+///         a valid credential on m, that E_addr really encrypts m, and that
+///         the registrant holds sk for pk.  (A rerandomized signature, the
+///         previous design, was candidate-testable by anyone knowing m.)
 ///         A Chaum-Pedersen NIZK proves a re-encryption sends the same M to a
 ///         second registered recipient AND that the sender holds the registered
 ///         account key (used by Buck.approve()).
@@ -21,9 +25,12 @@ contract IdentityRegistry {
 
     // ---- types --------------------------------------------------------------
 
+    /// @notice Issuer key: (X, Y) = (x*G2, y*G2) plus the G1 image Y1 = y*G that
+    ///         holders blind with.  trustIssuer checks e(Y1, g_2) == e(G, Y).
     struct PSPubKey {
         BN254.G2Point X;
         BN254.G2Point Y;
+        BN254.G1Point Y1;
     }
 
     struct ElGamalCT {
@@ -31,20 +38,25 @@ contract IdentityRegistry {
         BN254.G1Point C;
     }
 
-    struct PSSig {
-        BN254.G1Point sigma_1;
-        BN254.G1Point sigma_2;
+    /// @notice Hiding presentation of a PS credential (matches
+    ///         alberta_buck.wallet.ps.PSPresentation): A = a*sigma_1,
+    ///         B = (x + m*y)*A + b*Y1 for fresh secret a, b.
+    struct PSPresentation {
+        BN254.G1Point A;
+        BN254.G1Point B;
     }
 
     /// @notice Registration NIZK proof (matches alberta_buck.wallet.nizk).
-    ///         Adds the account-key relation pk = sk*G (T_key / s_sk) so a
-    ///         NUMS public key cannot register.
+    ///         One commitment C1 covers both credential exponents (m, b); the
+    ///         account-key relation pk = sk*G (T_key / s_sk) stops a NUMS
+    ///         public key from registering.
     struct RegistrationProof {
         uint256 e;
-        uint256 s_m;
-        uint256 s_r;
+        uint256 s_m;          // response for m:  m_tilde + e*m
+        uint256 s_b;          // response for b:  b_tilde + e*b
+        uint256 s_r;          // response for r:  r_tilde + e*r
         uint256 s_sk;         // response for sk: sk_tilde + e*sk
-        BN254.G1Point A_ps;   // PS-side commitment: m_tilde * sigma'_1
+        BN254.G1Point C1;     // credential commitment: m_tilde*A + b_tilde*G
         BN254.G1Point T_C;    // ElGamal C commitment: m_tilde*G + r_tilde*pk
         BN254.G1Point T_R;    // ElGamal R commitment: r_tilde * G
         BN254.G1Point T_key;  // account-key commitment: sk_tilde * G
@@ -158,7 +170,7 @@ contract IdentityRegistry {
     /// @dev Fiat-Shamir protocol domain for registration; a full keccak word,
     ///      not reduced mod R.  This is transcript metadata, not contract API.
     uint256 internal constant REGISTER_DOMAIN = uint256(
-        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2")
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3")
     );
 
     uint256 public constant CONTRACT_BINDING_DOMAIN =
@@ -365,6 +377,19 @@ contract IdentityRegistry {
     function trustIssuer(address issuer, PSPubKey calldata pk) external {
         require(msg.sender == governance, "not governance");
         require(issuer != address(0),     "issuer=0");
+        require(!BN254.isInfinity(pk.Y1), "Y1=O");
+        // e(Y1, g_2) * e(-G, Y) == 1  <=>  Y1 = y*G for the same y as Y = y*G2.
+        // A wrong Y1 cannot help a forger (the verifier never uses it); it
+        // would only make every honest presentation fail, so refuse it here.
+        {
+            BN254.G1Point[] memory a = new BN254.G1Point[](2);
+            BN254.G2Point[] memory b = new BN254.G2Point[](2);
+            a[0] = pk.Y1;
+            b[0] = BN254.g2();
+            a[1] = BN254.neg(BN254.g1());
+            b[1] = pk.Y;
+            require(BN254.pairingCheck(a, b), "Y1 inconsistent");
+        }
         _trustedIssuers[issuer] = pk;
         isTrustedIssuer[issuer] = true;
         emit IssuerTrusted(issuer);
@@ -510,10 +535,10 @@ contract IdentityRegistry {
         address issuer,
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
-        PSSig calldata sigma,
+        PSPresentation calldata pres,
         RegistrationProof calldata proof
     ) external {
-        _register(issuer, pk, E, sigma, proof, msg.sender, 0);
+        _register(issuer, pk, E, pres, proof, msg.sender, 0);
     }
 
     /// @notice Register.  identityLeaf must be 0: a caller-supplied leaf is
@@ -523,11 +548,11 @@ contract IdentityRegistry {
         address issuer,
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
-        PSSig calldata sigma,
+        PSPresentation calldata pres,
         RegistrationProof calldata proof,
         uint256 identityLeaf
     ) external {
-        _register(issuer, pk, E, sigma, proof, msg.sender, identityLeaf);
+        _register(issuer, pk, E, pres, proof, msg.sender, identityLeaf);
     }
 
     /// @dev Shared registration logic.  identityLeaf != 0 is refused: there
@@ -536,14 +561,14 @@ contract IdentityRegistry {
         address issuer,
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
-        PSSig calldata sigma,
+        PSPresentation calldata pres,
         RegistrationProof calldata proof,
         address registrant,
         uint256 identityLeaf
     ) internal {
         require(!_isRegistered(registrant), "already registered");
         require(identityLeaf == 0,          "unchecked identity leaf");
-        _verifyCredential(issuer, pk, E, sigma, proof, registrant);
+        _verifyCredential(issuer, pk, E, pres, proof, registrant);
 
         _pk[registrant]     = pk;
         _E_addr[registrant] = E;
@@ -558,23 +583,26 @@ contract IdentityRegistry {
         address issuer,
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
-        PSSig calldata sigma,
+        PSPresentation calldata pres,
         RegistrationProof calldata proof,
         address registrant
     ) internal view {
         require(isTrustedIssuer[issuer],    "untrusted issuer");
-        require(!BN254.isInfinity(sigma.sigma_1), "sigma_1=O");
+        // A = O makes the credential term vanish and (a') holds for every m:
+        // this check is security critical, not hygiene.
+        require(!BN254.isInfinity(pres.A),  "A=O");
+        require(!BN254.isInfinity(pres.B),  "B=O");
         require(!BN254.isInfinity(pk),      "pk=O");
         require(!BN254.isInfinity(E.R),     "R=O");
         require(
-            _canonical(proof.e) && _canonical(proof.s_m)
+            _canonical(proof.e) && _canonical(proof.s_m) && _canonical(proof.s_b)
             && _canonical(proof.s_r) && _canonical(proof.s_sk),
             "bad scalar"
         );
 
-        // (d) Fiat-Shamir
+        // (fs) Fiat-Shamir
         require(
-            proof.e == _fsRegister(sigma, E, pk, proof, registrant, block.chainid),
+            proof.e == _fsRegister(pres, E, pk, proof, registrant, block.chainid),
             "bad FS challenge"
         );
 
@@ -587,8 +615,8 @@ contract IdentityRegistry {
         // (k) Account-key ownership: s_sk*G == T_key + e*pk
         require(_checkKeyOwnership(proof.s_sk, pk, proof.T_key, proof.e), "bad NIZK key");
 
-        // (a) PS pairing product
-        require(_checkPSPairing(sigma, proof, _trustedIssuers[issuer]), "bad PS sig");
+        // (a') presentation pairing product
+        require(_checkPresentation(pres, proof, _trustedIssuers[issuer]), "bad presentation");
     }
 
     // ---- contract identity binding -----------------------------------------
@@ -690,7 +718,7 @@ contract IdentityRegistry {
         address issuer,
         BN254.G1Point calldata pk,
         ElGamalCT calldata E,
-        PSSig calldata sigma,
+        PSPresentation calldata pres,
         RegistrationProof calldata proof,
         ContractBindingProof calldata bindingProof,
         bool isPublicIdentity_,
@@ -698,7 +726,7 @@ contract IdentityRegistry {
     ) external {
         require(target.code.length > 0, "target not a deployed contract");
         require(!_isRegistered(target), "already bound");
-        _verifyCredential(issuer, pk, E, sigma, proof, target);
+        _verifyCredential(issuer, pk, E, pres, proof, target);
         _verifyContractBindingProof(
             target, msg.sender, pk, bindingProof,
             isPublicIdentity_, isCarrying_
@@ -1240,7 +1268,7 @@ contract IdentityRegistry {
     }
 
     function _fsRegister(
-        PSSig calldata sigma,
+        PSPresentation calldata pres,
         ElGamalCT calldata E,
         BN254.G1Point calldata pk,
         RegistrationProof calldata proof,
@@ -1248,12 +1276,12 @@ contract IdentityRegistry {
         uint256 chainid
     ) internal view returns (uint256) {
         BN254.G1Point[] memory pts = new BN254.G1Point[](9);
-        pts[0] = sigma.sigma_1;
-        pts[1] = sigma.sigma_2;
+        pts[0] = pres.A;
+        pts[1] = pres.B;
         pts[2] = E.R;
         pts[3] = E.C;
         pts[4] = pk;
-        pts[5] = proof.A_ps;
+        pts[5] = proof.C1;
         pts[6] = proof.T_C;
         pts[7] = proof.T_R;
         pts[8] = proof.T_key;
@@ -1354,22 +1382,27 @@ contract IdentityRegistry {
     }
 
     /// @dev PS pairing product:
-    ///   e(s_m*sigma_1, Y) * e(-A_ps, Y) * e(e*sigma_1, X) * e(-e*sigma_2, g_2) == 1
-    function _checkPSPairing(
-        PSSig calldata sigma,
+    ///   e(s_m*A + s_b*G - C1, Y) * e(e*A, X) * e(-e*B, g_2) == 1
+    /// @dev (a')  e(s_m*A + s_b*G - C1, Y) * e(e*A, X) * e(-e*B, g_2) == 1.
+    ///      Three pairs: the message and blinding exponents share the G2 base
+    ///      Y, so one G1 commitment C1 serves both and no proof field reveals
+    ///      m*A on its own.
+    function _checkPresentation(
+        PSPresentation calldata pres,
         RegistrationProof calldata proof,
         PSPubKey storage ipk
     ) internal view returns (bool) {
-        BN254.G1Point[] memory a = new BN254.G1Point[](4);
-        BN254.G2Point[] memory b = new BN254.G2Point[](4);
-        a[0] = BN254.mul(sigma.sigma_1, proof.s_m);
+        BN254.G1Point[] memory a = new BN254.G1Point[](3);
+        BN254.G2Point[] memory b = new BN254.G2Point[](3);
+        a[0] = BN254.add(
+            BN254.add(BN254.mul(pres.A, proof.s_m), BN254.mul(BN254.g1(), proof.s_b)),
+            BN254.neg(proof.C1)
+        );
         b[0] = ipk.Y;
-        a[1] = BN254.neg(proof.A_ps);
-        b[1] = ipk.Y;
-        a[2] = BN254.mul(sigma.sigma_1, proof.e);
-        b[2] = ipk.X;
-        a[3] = BN254.neg(BN254.mul(sigma.sigma_2, proof.e));
-        b[3] = BN254.g2();
+        a[1] = BN254.mul(pres.A, proof.e);
+        b[1] = ipk.X;
+        a[2] = BN254.neg(BN254.mul(pres.B, proof.e));
+        b[2] = BN254.g2();
         return BN254.pairingCheck(a, b);
     }
 }

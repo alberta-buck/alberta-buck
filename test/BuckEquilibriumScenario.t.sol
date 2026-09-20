@@ -784,9 +784,9 @@ contract BuckEquilibriumScenarioTest is Test {
     function _g1(string memory key) internal view returns (BN254.G1Point memory) {
         return BN254.G1Point(_u(string.concat(key, ".x")), _u(string.concat(key, ".y")));
     }
-    function _ps(string memory who) internal view returns (IdentityRegistry.PSSig memory s) {
-        s.sigma_1 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_1"));
-        s.sigma_2 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_2"));
+    function _ps(string memory who) internal view returns (IdentityRegistry.PSPresentation memory s) {
+        s.A = _g1(string.concat(".", who, ".ps_presentation.A"));
+        s.B = _g1(string.concat(".", who, ".ps_presentation.B"));
     }
     function _ct(string memory key) internal view returns (IdentityRegistry.ElGamalCT memory c) {
         c.R = _g1(string.concat(key, ".R"));
@@ -798,7 +798,8 @@ contract BuckEquilibriumScenarioTest is Test {
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
         p.s_sk = _u(string.concat(base, ".s_sk"));
-        p.A_ps = _g1(string.concat(base, ".A_ps"));
+        p.s_b = _u(string.concat(base, ".s_b"));
+        p.C1 = _g1(string.concat(base, ".C1"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
         p.T_key = _g1(string.concat(base, ".T_key"));
@@ -809,6 +810,7 @@ contract BuckEquilibriumScenarioTest is Test {
         ipk.X.Y[0] = _u(".issuer.pk_X.y[0]"); ipk.X.Y[1] = _u(".issuer.pk_X.y[1]");
         ipk.Y.X[0] = _u(".issuer.pk_Y.x[0]"); ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
         ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]"); ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        ipk.Y1 = _g1(".issuer.pk_Y1");
         vm.prank(GOV);
         reg.trustIssuer(ISSUER, ipk);
     }

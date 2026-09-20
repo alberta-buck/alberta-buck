@@ -112,6 +112,15 @@ export function wrapIdentity(wasm) {
       const r = wasm.ps_rerandomize(...flatP(sig.sigma_1), ...flatP(sig.sigma_2), hex(t));
       return { sigma_1: P(r, 0), sigma_2: P(r, 2) };
     },
+    /** The A' hiding presentation (A, B) = (a*sigma_1, a*sigma_2 + b*Y1); b is
+     *  the registration NIZK witness.  Both scalars must be fresh per use. */
+    psPresent(sig, Y1, a, b) {
+      const r = wasm.ps_present(...flatP(sig.sigma_1), ...flatP(sig.sigma_2),
+        ...flatP(Y1), hex(a), hex(b));
+      return { A: P(r, 0), B: P(r, 2) };
+    },
+    /** e(Y1, g2) == e(G, Y): the issuer's G1 key image matches its G2 key. */
+    psKeyConsistent: (pkY, Y1) => wasm.ps_key_consistent(flatG2(pkY), ...flatP(Y1)),
 
     // ---- Schnorr batch binding ---------------------------------------------
     /** Raw UNREDUCED keccak word (what the Schnorr transcript signs). */
@@ -128,22 +137,22 @@ export function wrapIdentity(wasm) {
         hex(hBatch), hex(issuer), hex(chainid)),
 
     // ---- Registration NIZK -------------------------------------------------
-    registrationProve(sig, m, r, pk, E, registrant, sk, chainid, registry,
-                      mTilde, rTilde, skTilde) {
+    registrationProve(pres, blind, m, r, pk, E, registrant, sk, chainid, registry,
+                      mTilde, bTilde, rTilde, skTilde) {
       const o = wasm.registration_prove(
-        [...flatP(sig.sigma_1), ...flatP(sig.sigma_2)],
-        hex(m), hex(r), ...flatP(pk), flatCT(E),
+        [...flatP(pres.A), ...flatP(pres.B)],
+        hex(blind), hex(m), hex(r), ...flatP(pk), flatCT(E),
         hex(registrant), hex(sk), hex(chainid), hex(registry),
-        hex(mTilde), hex(rTilde), hex(skTilde));
-      return { e: big(o[0]), s_m: big(o[1]), s_r: big(o[2]), s_sk: big(o[3]),
-               A_ps: P(o, 4), T_C: P(o, 6), T_R: P(o, 8), T_key: P(o, 10) };
+        hex(mTilde), hex(bTilde), hex(rTilde), hex(skTilde));
+      return { e: big(o[0]), s_m: big(o[1]), s_b: big(o[2]), s_r: big(o[3]), s_sk: big(o[4]),
+               C1: P(o, 5), T_C: P(o, 7), T_R: P(o, 9), T_key: P(o, 11) };
     },
-    registrationVerify: (sig, E, pk, issuerX, issuerY, proof, registrant, chainid, registry) =>
+    registrationVerify: (pres, E, pk, issuerX, issuerY, proof, registrant, chainid, registry) =>
       wasm.registration_verify(
-        [...flatP(sig.sigma_1), ...flatP(sig.sigma_2)],
+        [...flatP(pres.A), ...flatP(pres.B)],
         flatCT(E), ...flatP(pk), flatG2(issuerX), flatG2(issuerY),
-        [hex(proof.e), hex(proof.s_m), hex(proof.s_r), hex(proof.s_sk),
-         ...flatP(proof.A_ps), ...flatP(proof.T_C), ...flatP(proof.T_R),
+        [hex(proof.e), hex(proof.s_m), hex(proof.s_b), hex(proof.s_r), hex(proof.s_sk),
+         ...flatP(proof.C1), ...flatP(proof.T_C), ...flatP(proof.T_R),
          ...flatP(proof.T_key)],
         hex(registrant), hex(chainid), hex(registry)),
 

@@ -183,6 +183,7 @@ contract MintVerifierTest is Test {
         ipk.Y.X[1] = _u(j, ".issuer.pk_Y.x[1]");
         ipk.Y.Y[0] = _u(j, ".issuer.pk_Y.y[0]");
         ipk.Y.Y[1] = _u(j, ".issuer.pk_Y.y[1]");
+        ipk.Y1 = _g1(j, ".issuer.pk_Y1");
         vm.prank(GOV);
         reg.trustIssuer(ISSUER, ipk);
     }
@@ -190,16 +191,17 @@ contract MintVerifierTest is Test {
     function _registerFrom(string memory j, string memory who, address acct) internal {
         BN254.G1Point memory pk = _g1(j, string.concat(".", who, ".elgamal_kp.pk"));
         IdentityRegistry.ElGamalCT memory E = _ct(j, string.concat(".", who, ".ciphertext"));
-        IdentityRegistry.PSSig memory sigma;
-        sigma.sigma_1 = _g1(j, string.concat(".", who, ".ps_sig_rerand.sigma_1"));
-        sigma.sigma_2 = _g1(j, string.concat(".", who, ".ps_sig_rerand.sigma_2"));
+        IdentityRegistry.PSPresentation memory sigma;
+        sigma.A = _g1(j, string.concat(".", who, ".ps_presentation.A"));
+        sigma.B = _g1(j, string.concat(".", who, ".ps_presentation.B"));
         IdentityRegistry.RegistrationProof memory p;
         string memory base = string.concat(".", who, ".registration_proof");
         p.e    = _u(j, string.concat(base, ".e"));
         p.s_m  = _u(j, string.concat(base, ".s_m"));
         p.s_r  = _u(j, string.concat(base, ".s_r"));
         p.s_sk = _u(j, string.concat(base, ".s_sk"));
-        p.A_ps = _g1(j, string.concat(base, ".A_ps"));
+        p.s_b = _u(j, string.concat(base, ".s_b"));
+        p.C1 = _g1(j, string.concat(base, ".C1"));
         p.T_C  = _g1(j, string.concat(base, ".T_C"));
         p.T_R  = _g1(j, string.concat(base, ".T_R"));
         p.T_key = _g1(j, string.concat(base, ".T_key"));

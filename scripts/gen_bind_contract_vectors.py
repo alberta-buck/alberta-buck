@@ -11,7 +11,7 @@ import random
 from alberta_buck.wallet.bn254 import point_to_words, words_to_point
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.nizk import bind_contract_prove
-from alberta_buck.wallet.ps import PSSignature
+from alberta_buck.wallet.ps import PSPresentation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,9 +40,10 @@ def _proof_json(proof) -> dict:
     return {
         "e": _scalar(proof.e),
         "s_m": _scalar(proof.s_m),
+        "s_b": _scalar(proof.s_b),
         "s_r": _scalar(proof.s_r),
         "s_sk": _scalar(proof.s_sk),
-        "A_ps": _point_json(proof.A_ps),
+        "C1": _point_json(proof.C1),
         "T_C": _point_json(proof.T_C),
         "T_R": _point_json(proof.T_R),
         "T_key": _point_json(proof.T_key),
@@ -53,10 +54,11 @@ def main() -> None:
     identity = json.loads(IDENTITY.read_text())
     binding = json.loads(BINDING.read_text())
     row = identity["alice"]
-    sigma = PSSignature(
-        _point(row["ps_sig_rerand"]["sigma_1"]),
-        _point(row["ps_sig_rerand"]["sigma_2"]),
+    pres = PSPresentation(
+        _point(row["ps_presentation"]["A"]),
+        _point(row["ps_presentation"]["B"]),
     )
+    blind = _integer(row["b"])
     pk = _point(row["elgamal_kp"]["pk"])
     ciphertext = ElGamalCiphertext(
         _point(row["ciphertext"]["R"]), _point(row["ciphertext"]["C"])
@@ -66,7 +68,7 @@ def main() -> None:
     target = _integer(pool["target"])
     pool_seeded = random.Random(0xB10D)
     pool_proof = bind_contract_prove(
-        sigma, _integer(row["m"]), _integer(row["r"]), pk, ciphertext,
+        pres, blind, _integer(row["m"]), _integer(row["r"]), pk, ciphertext,
         target, _integer(row["elgamal_kp"]["sk"]),
         chainid=1, rng=lambda: pool_seeded.getrandbits(256),
         registry=pool_registry,
@@ -76,9 +78,10 @@ def main() -> None:
     pool["ciphertext"] = {
         "R": _point_json(ciphertext.R), "C": _point_json(ciphertext.C)
     }
-    pool["ps_sig_rerand"] = {
-        "sigma_1": _point_json(sigma.sigma_1),
-        "sigma_2": _point_json(sigma.sigma_2),
+    pool.pop("ps_sig_rerand", None)
+    pool["ps_presentation"] = {
+        "A": _point_json(pres.A),
+        "B": _point_json(pres.B),
     }
     pool["registration_proof"] = _proof_json(pool_proof)
     BINDING.write_text(json.dumps({"pool": pool}, indent=2) + "\n")

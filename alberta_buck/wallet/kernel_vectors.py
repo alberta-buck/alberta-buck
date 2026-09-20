@@ -28,7 +28,7 @@ from alberta_buck.wallet.poseidon import F_R, poseidon
 from alberta_buck.wallet.transcript import keccak_scalar
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
 from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_verify, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_verify, ps_rerandomize, ps_present
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.nizk import registration_prove
@@ -47,6 +47,9 @@ from alberta_buck.registry.tree import identity_leaf
 def _seeded_rng(seed: int) -> Callable[[], int]:
     rnd = random.Random(seed)
     return lambda: rnd.getrandbits(256)
+
+
+from alberta_buck.wallet.ps import PSSignature as PSSignatureLike  # noqa: E402
 
 
 def _replay(vals: List[int]) -> Callable[[], int]:
@@ -98,7 +101,7 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     registry = int("1d" * 20, 16)
 
     out: Dict[str, Any] = {
-        "$schema_version": 1,
+        "$schema_version": 2,   # A': ps.pk_Y1/present_*, registration Y1/a/b/A/B/b_tilde, proof s_b/C1
         "backend": "py",
         "seed": _hx(seed),
         "ORDER": _hx(ORDER),
@@ -195,7 +198,7 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     kp = ps_keygen(rng=_replay([draw(), draw()]))
     out["ps"] = {
         "sk_x": scalar_to_hex(kp.sk_x), "sk_y": scalar_to_hex(kp.sk_y),
-        "pk_X": _g2(kp.pk_X), "pk_Y": _g2(kp.pk_Y),
+        "pk_X": _g2(kp.pk_X), "pk_Y": _g2(kp.pk_Y), "pk_Y1": _g1(kp.pk_Y1),
         "signs": [],
     }
     for _ in range(2):
@@ -204,11 +207,17 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
         assert ps_verify(kp.pk_X, kp.pk_Y, sig, m)
         t2 = draw()
         rr, _t = ps_rerandomize(sig, rng=_replay([t2]))
+        a, b = draw(), draw()
+        pres, _, _ = ps_present(sig, kp.pk_Y1, a=a, b=b)
+        # The presentation is NOT a signature on m (review finding R1 closed).
+        assert not ps_verify(kp.pk_X, kp.pk_Y, PSSignatureLike(pres.A, pres.B), m)
         out["ps"]["signs"].append({
             "m": scalar_to_hex(m), "t": scalar_to_hex(t),
             "sigma_1": _g1(sig.sigma_1), "sigma_2": _g1(sig.sigma_2),
             "rerand_t": scalar_to_hex(t2),
             "rerand_sigma_1": _g1(rr.sigma_1), "rerand_sigma_2": _g1(rr.sigma_2),
+            "present_a": scalar_to_hex(a), "present_b": scalar_to_hex(b),
+            "present_A": _g1(pres.A), "present_B": _g1(pres.B),
         })
 
     # ---- schnorr ---------------------------------------------------------------
@@ -233,27 +242,34 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     E = elgamal_encrypt(M, pk_e, r)
     t = draw()
     sigma = ps_sign(kp, m, rng=_replay([t]))
-    t_re = draw()
-    sigma_p, _ = ps_rerandomize(sigma, rng=_replay([t_re]))
+    a, b = draw(), draw()
+    pres, _, _ = ps_present(sigma, kp.pk_Y1, a=a, b=b)
     registrant = 0xA11CE % (1 << 160)
-    m_tilde, r_tilde, sk_tilde = draw(), draw(), draw()
+    m_tilde, b_tilde, r_tilde, sk_tilde = draw(), draw(), draw(), draw()
     proof = registration_prove(
-        sigma_p, m, r, pk_e, E, registrant, sk_e, chainid,
-        rng=_replay([m_tilde, r_tilde, sk_tilde]), registry=registry,
+        pres, b, m, r, pk_e, E, registrant, sk_e, chainid,
+        rng=_replay([m_tilde, b_tilde, r_tilde, sk_tilde]), registry=registry,
     )
+    from alberta_buck.wallet.nizk import registration_verify
+    assert registration_verify(pres, E, pk_e, kp.pk_X, kp.pk_Y, proof, registrant,
+                               chainid, registry)
     out["registration"] = {
         "m": scalar_to_hex(m), "r": scalar_to_hex(r),
         "sk": scalar_to_hex(sk_e),
         "pk": _g1(pk_e), "E": _ct(E),
-        "sigma_1": _g1(sigma_p.sigma_1), "sigma_2": _g1(sigma_p.sigma_2),
+        "sigma_1": _g1(sigma.sigma_1), "sigma_2": _g1(sigma.sigma_2),
+        "Y1": _g1(kp.pk_Y1),
+        "a": scalar_to_hex(a), "b": scalar_to_hex(b),
+        "A": _g1(pres.A), "B": _g1(pres.B),
         "registrant": _hx(registrant), "chainid": _hx(chainid),
         "registry": _hx(registry),
-        "m_tilde": scalar_to_hex(m_tilde), "r_tilde": scalar_to_hex(r_tilde),
-        "sk_tilde": scalar_to_hex(sk_tilde),
+        "m_tilde": scalar_to_hex(m_tilde), "b_tilde": scalar_to_hex(b_tilde),
+        "r_tilde": scalar_to_hex(r_tilde), "sk_tilde": scalar_to_hex(sk_tilde),
         "proof": {
             "e": scalar_to_hex(proof.e), "s_m": scalar_to_hex(proof.s_m),
+            "s_b": scalar_to_hex(proof.s_b),
             "s_r": scalar_to_hex(proof.s_r), "s_sk": scalar_to_hex(proof.s_sk),
-            "A_ps": _g1(proof.A_ps),
+            "C1": _g1(proof.C1),
             "T_C": _g1(proof.T_C), "T_R": _g1(proof.T_R),
             "T_key": _g1(proof.T_key),
         },

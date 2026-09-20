@@ -107,6 +107,11 @@ def test_ps(kv):
         assert not bi.ps_verify(pk_x, pk_y, sig[0], sig[1], m + 1)
         rr = bi.ps_rerandomize(sig[0], sig[1], _i(row["rerand_t"]))
         assert rr == (_pt(row["rerand_sigma_1"]), _pt(row["rerand_sigma_2"]))
+        pres = bi.ps_present(sig[0], sig[1], _pt(p["pk_Y1"]),
+                             _i(row["present_a"]), _i(row["present_b"]))
+        assert pres == (_pt(row["present_A"]), _pt(row["present_B"]))
+        assert not bi.ps_verify(pk_x, pk_y, pres[0], pres[1], m)
+    assert bi.ps_key_consistent(pk_y, _pt(p["pk_Y1"]))
 
 
 def test_schnorr(kv):
@@ -124,29 +129,32 @@ def test_schnorr(kv):
 def test_registration(kv):
     r = kv["registration"]
     sigma = (_pt(r["sigma_1"]), _pt(r["sigma_2"]))
+    pres = bi.ps_present(sigma[0], sigma[1], _pt(r["Y1"]), _i(r["a"]), _i(r["b"]))
+    assert pres == (_pt(r["A"]), _pt(r["B"]))
     e_ct = _ct(r["E"])
     proof = bi.registration_prove(
-        sigma[0], sigma[1], _i(r["m"]), _i(r["r"]), _pt(r["pk"]), e_ct,
+        pres[0], pres[1], _i(r["b"]), _i(r["m"]), _i(r["r"]), _pt(r["pk"]), e_ct,
         _i(r["registrant"]), _i(r["sk"]), _i(r["chainid"]),
         _i(r["registry"]),
-        _i(r["m_tilde"]), _i(r["r_tilde"]), _i(r["sk_tilde"]),
+        _i(r["m_tilde"]), _i(r["b_tilde"]), _i(r["r_tilde"]), _i(r["sk_tilde"]),
     )
     pf = r["proof"]
     assert proof == (
-        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_r"]), _i(pf["s_sk"]),
-        _pt(pf["A_ps"]), _pt(pf["T_C"]), _pt(pf["T_R"]), _pt(pf["T_key"]),
+        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_b"]), _i(pf["s_r"]), _i(pf["s_sk"]),
+        _pt(pf["C1"]), _pt(pf["T_C"]), _pt(pf["T_R"]), _pt(pf["T_key"]),
     )
     ps = kv["ps"]
-    assert bi.registration_verify(
-        sigma[0], sigma[1], e_ct, _pt(r["pk"]),
-        _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]),
-        _i(r["chainid"]), _i(r["registry"]),
-    )
-    assert not bi.registration_verify(
-        sigma[0], sigma[1], e_ct, _pt(r["pk"]),
-        _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]) ^ 1,
-        _i(r["chainid"]), _i(r["registry"]),
-    )
+    for verify in (bi.registration_verify, bi.registration_verify_v3):
+        assert verify(
+            pres[0], pres[1], e_ct, _pt(r["pk"]),
+            _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]),
+            _i(r["chainid"]), _i(r["registry"]),
+        )
+        assert not verify(
+            pres[0], pres[1], e_ct, _pt(r["pk"]),
+            _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]) ^ 1,
+            _i(r["chainid"]), _i(r["registry"]),
+        )
 
 
 def test_chaum_pedersen(kv):
@@ -303,18 +311,19 @@ def test_identity_fixture(iv):
         assert bi.identity_scalar(p["canonical_identity_data"]) == m
         assert bi.g1_mul(bi.G1, m) == _pt(p["M"])
         assert bi.elgamal_encrypt(_pt(p["M"]), _pt(p["elgamal_kp"]["pk"]), _i(p["r"])) == _ct(p["ciphertext"])
-        for sig in ("ps_sig_raw", "ps_sig_rerand"):
-            assert bi.ps_verify(iss_x, iss_y, _pt(p[sig]["sigma_1"]), _pt(p[sig]["sigma_2"]), m)
+        assert bi.ps_verify(iss_x, iss_y, _pt(p["ps_sig_raw"]["sigma_1"]), _pt(p["ps_sig_raw"]["sigma_2"]), m)
+        A, B = _pt(p["ps_presentation"]["A"]), _pt(p["ps_presentation"]["B"])
+        assert not bi.ps_verify(iss_x, iss_y, A, B, m), "presentation is not a signature"
         pf = p["registration_proof"]
         proof = (
-            _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_r"]), _i(pf["s_sk"]),
-            _pt(pf["A_ps"]), _pt(pf["T_C"]), _pt(pf["T_R"]), _pt(pf["T_key"]),
+            _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_b"]), _i(pf["s_r"]), _i(pf["s_sk"]),
+            _pt(pf["C1"]), _pt(pf["T_C"]), _pt(pf["T_R"]), _pt(pf["T_key"]),
         )
-        assert bi.registration_verify(
-            _pt(p["ps_sig_rerand"]["sigma_1"]), _pt(p["ps_sig_rerand"]["sigma_2"]),
-            _ct(p["ciphertext"]), _pt(p["elgamal_kp"]["pk"]),
+        assert bi.registration_verify_v3(
+            A, B, _ct(p["ciphertext"]), _pt(p["elgamal_kp"]["pk"]),
             iss_x, iss_y, proof, _i(p["registrant"]), chainid, registry,
         )
+    assert bi.ps_key_consistent(iss_y, _pt(iv["issuer"]["pk_Y1"]))
 
     # Unicode canonical-dialect pin: raw UTF-8 (accents + CJK) hashes to m.
     up = iv["unicode_party"]
