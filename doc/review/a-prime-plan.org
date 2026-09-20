@@ -56,11 +56,12 @@ carry the detail.
 - Phases 0 to 5 are committed (=d0ed54d= phase 3, =c825104= phase 4,
   =4a83b04= the evidence scripts, =0e076ee= the review documents,
   =0152b6a= proofs, =43576ba= identity-example, =433a47e= identity,
-  =dbbf6a4= paper, =a1580ad= ethereum; the identity-example commit
-  after =a1580ad= adds the "What the Chain Sees" section). Every render
-  is regenerated and committed with its source. Phase 6 (security
-  argument and independent review) is the only open phase; the
-  branch is not merged.
+  =dbbf6a4= paper, =a1580ad= ethereum, =eb3f4c7= the "What the Chain
+  Sees" section, =e713398= the seeded issuer). Every render is
+  regenerated and committed with its source; the example transcript
+  re-executes byte-identical. Phase 6: the security argument is
+  written (=a-prime-security-argument.org=); the independent review is
+  the only open item. The branch is not merged.
 - Green on the branch: Rust kernel tests 3/3; =core/python= vector tests
   39/39; the review suite 33/33 on both backends; the identity Python
   suites (wallet, vectors, issuer, registry, kernel backend, cache regen)
@@ -828,6 +829,15 @@ identity unlinkability, and every issuer-blindness claim is conditioned on
 DDH and on the review gate.
 
 ** Phase 6: security argument and independent review
+
+*Status (2026-09-20): the argument is written
+([[file:a-prime-security-argument.org][a-prime-security-argument.org]]:
+assumptions with the PS 2016 Section 6.1 key-form comparison, the HIDE,
+RU and IB games, Theorems 1 to 6 with proofs, the fresh-randomness
+breaks, the verifier-check rationale, and an eleven-item review
+checklist). Its Theorem 5 reduces registration forgery, including the
+harvest case of R3, to PS-CM directly, superseding the CDH sketch. The
+independent review has not happened; the branch stays a candidate.*
 
 Runs in parallel from phase 1. Write the four theorems in full, state the
 assumption set (DLog, DDH in G1, PS unforgeability in the committed-message

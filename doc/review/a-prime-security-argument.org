@@ -1,0 +1,491 @@
+#+TITLE: A' registration presentation: security argument and review checklist
+#+DATE: 2026-09-20
+#+OPTIONS: toc:3 num:t
+#+PROPERTY: header-args :eval never-export
+
+* Purpose and status
+:PROPERTIES:
+:CUSTOM_ID: purpose
+:END:
+
+This document is the internal half of phase 6 of
+[[file:a-prime-plan.org][the A' plan]]: the security argument for the hiding
+registration presentation implemented on branch =feature/a-prime=, written
+in full so that an independent reviewer can confirm or refute it. The
+external half, the review itself, has not happened. Until it has, every
+result below is a claim of this branch, not a property of the system, and
+the four papers say so.
+
+What is claimed, in one paragraph. A holder of a Pointcheval--Sanders
+credential on an identity scalar =m= registers an account by publishing a
+blinded pair =(A, B)= and a Schnorr-family proof. The pair and the proof
+together reveal nothing about =m= beyond what the account's ElGamal
+ciphertext reveals, unconditionally on the credential side and under DDH
+on the ciphertext side (Theorems 2, 3, 6). An accepting registration
+implies possession of a credential on the encrypted =m=, and neither a
+party who has seen any number of the holder's registrations nor one who
+has learned =m= can produce one: registration forgery reduces to PS
+unforgeability in the committed-message key form, in the random-oracle
+model, with the usual forking loss (Theorems 4, 5). Fresh randomness per
+registration is security critical (Section [[#fresh]]).
+
+What the reviewer is asked to do is in Section [[#checklist]].
+
+* The scheme as implemented
+:PROPERTIES:
+:CUSTOM_ID: scheme
+:END:
+
+Groups: BN254, =G1= of prime order =q= with generator =G=, =G2= with
+generator =g2=, pairing =e=. Additive notation. Executable references:
+=alberta_buck/wallet/ps.py=, =alberta_buck/wallet/nizk.py= (the executable
+specification), =src/IdentityRegistry.sol= (=trustIssuer=,
+=_verifyCredential=, =_fsRegister=, =_checkPresentation=),
+=core/rust/buck-identity/src/{ps,nizk}.rs= and =core/js/src/identity-core.js=
+(ports checked against the specification's vectors).
+
+** Keys and issuance
+
+Issuer secret =(x, y)=, public key
+
+#+begin_example
+X = x*g2,   Y = y*g2,   Y1 = y*G
+#+end_example
+
+The registry accepts a key only if =Y1 != O= and =e(Y1, g2) = e(G, Y)=
+(=trustIssuer=). Issuance is unchanged from the plain scheme: on identity
+scalar =m= the issuer samples =h = t*G= for uniform nonzero =t= it does not
+disclose and returns =sigma = (h, (x + m*y)*h)=. The credential never leaves
+the wallet.
+
+** Presentation
+
+For each account the wallet samples independent uniform nonzero =a, b, sk, r=
+and publishes
+
+#+begin_example
+A  = a*sigma_1
+B  = a*sigma_2 + b*Y1        = x*A + y*(m*A + b*G)
+pk = sk*G
+E  = (R, C) = (r*G, m*G + r*pk)
+#+end_example
+
+and discards =a, b= after proving. Write =P = m*A + b*G=; then
+=B = x*A + y*P=.
+
+** Registration proof
+
+Witness =(m, b, r, sk)=, nonces =(m_t, b_t, r_t, sk_t)= uniform in =Z_q=,
+context =ctx = (registrant, chainid, registry, DOMAIN)= with
+=DOMAIN = keccak("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3")=:
+
+#+begin_example
+C1    = m_t*A + b_t*G
+T_C   = m_t*G + r_t*pk
+T_R   = r_t*G
+T_key = sk_t*G
+e     = H(A, B, R, C, pk, C1, T_C, T_R, T_key, ctx) mod q
+s_m   = m_t + e*m,   s_b = b_t + e*b,   s_r = r_t + e*r,   s_sk = sk_t + e*sk
+#+end_example
+
+Published: =(A, B), pk, E, (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)=,
+plus the issuer's address, which selects the key.
+
+** Verifier
+
+#+begin_example
+(g)   reject unless A, B, pk, R are not O; all points on the curve;
+      e, s_m, s_b, s_r, s_sk canonical (< q); registrant unregistered;
+      issuer trusted
+(fs)  e == H(A, B, R, C, pk, C1, T_C, T_R, T_key, ctx) mod q
+(b)   s_m*G + s_r*pk == e*C + T_C
+(c)   s_r*G          == e*R + T_R
+(k)   s_sk*G         == T_key + e*pk
+(a')  e(s_m*A + s_b*G - C1, Y) * e(e*A, X) * e(-e*B, g2) == 1
+#+end_example
+
+Credential-based contract binding uses the identical proof with the target
+contract as =registrant=.
+
+* Assumptions
+:PROPERTIES:
+:CUSTOM_ID: assumptions
+:END:
+
+- *DLog on G1.* Standard.
+- *DDH on G1.* Distinguishing =(G, uG, vG, uvG)= from =(G, uG, vG, wG)=.
+  Used only for the ciphertext lock (Theorem 6).
+- *PS-CM: EUF-CMA of the Pointcheval--Sanders single-message scheme with
+  the committed-message public key.* Pointcheval and Sanders, "Short
+  Randomizable Signatures", CT-RSA 2016, Section 6.1, publish
+  =(G, Y = y*G; g2, X = x*g2, Y~ = y*g2)= and let the signer sign
+  commitments =C = t*G + m*Y=; the user unblinds to =(h, (x + m*y)*h)=. A
+  plain-message signing oracle is the special case =t = 0=, so an
+  adversary against our scheme, whose oracle signs plain messages under the
+  same public-key distribution, is weaker than the Section 6.1 adversary.
+  The paper proves Section 6.1 EUF-CMA under its Assumption 2, an
+  interactive assumption in type-3 groups. The 2018 reassessment (CT-RSA
+  2018) gives non-interactive q-type assumptions for modified variants;
+  whether one of them covers this exact key form is a question for the
+  reviewer (checklist item 1). Nothing below depends on q-SDH.
+- *Random-oracle model* for =H= (keccak256 over the transcript words),
+  including the programming used by the simulator.
+
+No assumption is made about the issuer beyond honesty of issuance: the
+issuer holds =(x, y)= and can forge signatures at will, so registration
+unforgeability is stated against every party /except/ the issuer, and
+issuer-blindness is stated against the issuer.
+
+* Definitions
+:PROPERTIES:
+:CUSTOM_ID: definitions
+:END:
+
+** Presentation hiding (game HIDE)
+
+The adversary chooses the issuer key =(x, y)= (it may be the issuer), two
+scalars =m_0, m_1=, and valid credentials =sigma^0, sigma^1= on them. The
+challenger samples uniform nonzero =a, b=, a bit =beta=, and returns
+=(A, B) = (a*sigma^beta_1, a*sigma^beta_2 + b*Y1)= together with
+=P = m_beta*A + b*G=. The adversary outputs a guess. Advantage
+=|Pr[guess = beta] - 1/2|=.
+
+Returning =P= makes the game at least as strong as anything the
+transcript reveals (Theorem 3 shows the transcript is a function of
+=(A, B, P)= plus the ciphertext).
+
+** Registration unforgeability (game RU)
+
+Challenger samples =(x, y)=, publishes =(X, Y, Y1)=. The adversary =A= has:
+
+- =Sign(m)=: a credential on =m= of its choice; the set of queried messages
+  is =Q=.
+- =Present(m, ctx)= for any =m=, including ones not in =Q=: a complete
+  honest registration transcript of =m= with fresh =(a, b, sk, r)= and the
+  given context, i.e. =(pk, E, A, B, pi)=. The adversary also receives
+  =m= itself. This models a party who has seen the target's registrations
+  and has learned the target's identity scalar (every counterparty does).
+- The random oracle.
+
+=A= wins if it outputs an accepting transcript
+=(ctx*, pk*, E*, A*, B*, pi*)= whose extracted witness (Theorem 4) has
+=m* not in Q=. Note that =m*= may be a message it obtained /presentations/
+of; only credentials count as queries.
+
+This single game covers both "registration soundness" (no credential on
+the encrypted identity) and the review's R3 (harvesting: =m= known,
+transcripts seen).
+
+** Issuer-blindness (game IB)
+
+The adversary is the issuer: it holds =(x, y)= and chooses two certified
+identities =m_0, m_1= with their credentials. The challenger registers one
+of them at random with fresh =(a, b, sk, r)= and honest randomness,
+returning the full public transcript =(pk, E, A, B, pi)= with a context of
+the adversary's choice. Advantage as in HIDE. Many registrations are
+handled by a hybrid over them.
+
+* Theorems
+:PROPERTIES:
+:CUSTOM_ID: theorems
+:END:
+
+** Theorem 1 (completeness)
+
+For every valid credential, every nonzero =a, b= and every =sk, r=, the
+honest transcript is accepted. Proof: =s_m*A + s_b*G - C1 = e*(m*A + b*G)
+= e*P=, and by bilinearity =e(B, g2) = e(a*sigma_2, g2) * e(b*Y1, g2) =
+e(A, X + m*Y) * e(b*G, Y) = e(A, X) * e(P, Y)=; raising to =e= gives (a').
+(b), (c), (k) are the Schnorr identities. =A != O= because =sigma_1 != O=
+and =a != 0=.
+
+** Theorem 2 (hiding)
+
+Every adversary in HIDE, unbounded, has advantage at most =1/q=.
+
+/Proof./ Fix =beta=. =A = a*sigma^beta_1= is uniform on =G1 \ {O}= because
+=t -> t*sigma_1= is a bijection of =Z_q^*= onto =G1 \ {O}=. Conditioned on
+=A=, the map =b -> m_beta*A + b*G= is a bijection =Z_q -> G1=, so for =b=
+uniform on =Z_q^*= the point =P= is uniform on =G1 \ {m_beta*A}=. Finally
+=B = x*A + y*P= is a function of =(A, P)= (Theorem 1's identity). So the
+distribution of =(A, B, P)= for =beta = 0= and for =beta = 1= differ only
+in which single point =P= avoids; their statistical distance is at most
+=1/q=. Nothing else in the challenger's output depends on =beta=.
+=QED=
+
+/Remarks./ (i) The adversary knows =x, y=: the result is unconditional
+and holds against the issuer. (ii) The exclusion =b != 0= is deliberate;
+=b = 0= would publish a rerandomized signature, which is verifiable on
+=m= by anyone holding =m=. (iii) For every candidate =m_i= the point
+=P - m_i*A= is a well-formed =b_i*G=, so no candidate is distinguished by
+any relation among public values.
+
+** Theorem 3 (zero knowledge)
+
+Given =(A, B, P, pk, E, ctx)= and a challenge =e=, the simulator draws
+=s_m, s_b, s_r, s_sk= uniform in =Z_q= and sets
+
+#+begin_example
+C1 = s_m*A + s_b*G - e*P,   T_C = s_m*G + s_r*pk - e*C,
+T_R = s_r*G - e*R,          T_key = s_sk*G - e*pk.
+#+end_example
+
+The simulated transcript is distributed identically to an honest transcript
+with the same challenge. In the random-oracle model the NIZK is
+zero-knowledge: the simulator programs =H= at the transcript to =e=,
+aborting if that point was queried before, which happens with probability
+at most =q_H / q= because =C1= is uniform and fresh.
+
+/Proof./ In an honest transcript with fixed witness and challenge, each
+response is a uniform nonce plus a constant, hence uniform and independent
+of the others, and each commitment is the unique point solving its
+verification equation for those responses. The simulator samples the same
+response distribution and solves the same equations. =QED=
+
+/Remark (what the transcript reveals)./ =P= is public:
+=P = e^-1 * (s_m*A + s_b*G - C1)=. The transcript is therefore a
+deterministic function of =(A, B, P, pk, E, ctx)= and simulator
+randomness; combined with Theorem 2, the credential side of a registration
+carries no information about =m=.
+
+** Theorem 4 (special soundness and composition)
+
+From two accepting transcripts with the same
+=(A, B, pk, E, C1, T_C, T_R, T_key, ctx)= and challenges =e != e'= one
+computes =m* = (s_m - s'_m)/(e - e')= and likewise =b*, r*, sk*= such that
+
+#+begin_example
+pk = sk* * G,   R = r* * G,   C = m* * G + r* * pk,
+e(A, X + m* * Y) = e(B - b* * Y1, g2).
+#+end_example
+
+/Proof./ Divide the two instances of (a') and raise to =(e - e')^-1=:
+=e(m* * A + b* * G, Y) * e(A, X) = e(B, g2)=. Since =Y1 = y*G= (enforced at
+=trustIssuer=), =e(b* * G, Y) = e(b* * Y1, g2)=, which rearranges to the
+stated equation; =A != O= by (g). Relations (b), (c), (k) extract =r*,
+sk*= and the /same/ =m*= because the nonce =m_t= is shared between =C1= and
+=T_C= and =r_t= between =T_C= and =T_R=. =QED=
+
+Consequently =(A, B - b* * Y1)= is a plain PS signature on the =m*=
+encrypted in =E= under a key whose secret is =sk*=.
+
+** Theorem 5 (registration unforgeability, from PS-CM)
+
+Let =A= be an adversary in RU making =q_H= random-oracle queries and =q_P=
+presentation queries, whose accepting output has extracted =m* not in Q=
+with probability =eps=. There is a PS-CM forger =B= with success
+probability at least =eps^2 / q_H - (q_P + q_H + 1)/q - negl=.
+
+/Proof./ =B= receives the PS-CM public key =(X, Y, Y1)= and a signing
+oracle =S=, and forwards the key to =A=.
+
+- /Sign queries./ =B= forwards them to =S= and records =Q=.
+- /Presentation queries./ =B= must simulate registrations of identities
+  it holds no credential for. It queries =S= once, on a message =m_d=
+  chosen uniformly at random, obtaining =sigma_d = (h_d, (x + m_d*y)*h_d)=.
+  For =Present(m, ctx)= it samples fresh =a, b, sk, r=, sets
+  =A = a*h_d=, =B = a*sigma_{d,2} + b*Y1 = x*A + y*(m_d*A + b*G)=,
+  =P := m_d*A + b*G=, =pk = sk*G=, =E = (r*G, m*G + r*pk)= using the real
+  =m= (which is public to =A= anyway), and simulates =pi= with the
+  simulator of Theorem 3, programming =H= at the transcript.
+- /Forgery./ When =A= outputs an accepting transcript whose challenge was
+  the =i=-th oracle query, =B= rewinds =A= to that query with a fresh
+  answer (the forking lemma); with probability about =eps^2 / q_H= it
+  obtains a second accepting transcript with the same commitments and a
+  different challenge, extracts =(m*, b*)= by Theorem 4, and outputs
+  =(m*, (A*, B* - b* * Y1))=.
+
+/Indistinguishability of the simulation./ In a real =Present= answer,
+=(A, B, P)= has =A= uniform nonzero, =P= uniform on =G1 \ {m*A}=, and
+=B = x*A + y*P=. In the simulation =A= is again uniform nonzero (a
+rerandomization of =h_d=), =P= is uniform on =G1 \ {m_d*A}=, and
+=B = x*A + y*P=. The two differ by at most =1/q= per query (Theorem 2's
+argument). The ciphertext =E= is formed identically. The proof is
+simulated, which by Theorem 3 is exact given =(A, B, P, pk, E, ctx)= up to
+the oracle-programming abort. The relation "=P = m*A + b*G= for the =m=
+inside =E=" is not checkable by anyone without =b=, since every =m=
+admits some =b=; so nothing in =A='s view distinguishes the simulated
+world from the real one beyond =q_P/q + q_H/q=.
+
+/Validity of the forgery./ By Theorem 4 the pair verifies as a PS signature
+on =m*=. =A= wins only if =m* not in Q=. The one message =B= queried that
+=A= does not see is =m_d=; since =A='s view is independent of =m_d= up to
+the statistical distance above, =Pr[m* = m_d] <= 1/q + q_P/q=. Hence the
+output is a forgery on a message never queried to =S=. =QED=
+
+/What this closes./ A party that has learned =m= from a receipt and holds
+every registration of the target (review finding R3), a party that copies
+a registration to another address or chain (=ctx= is in the transcript,
+and the proof needs =sk= and =b= anyway), and a party with no credential
+at all (soundness) are all instances of =A=. The earlier corollary in the
+proofs document that argued non-reusability through a CDH instance is
+superseded by this reduction; the CDH remark remains true but is no longer
+load-bearing.
+
+/What it does not close./ The issuer, who can sign. Two credentials on the
+same identity issued to different people (duplicate issuance) are a
+certification-policy problem, not a cryptographic one.
+
+** Theorem 6 (issuer-blindness, from hiding, zero knowledge and DDH)
+
+Every PPT adversary in IB has advantage at most =Adv_DDH + 1/q + q_H/q=
+per registration.
+
+/Proof (hybrids)./ =H_0=: the real game with =beta=. =H_1=: replace =pi= by
+the simulated proof from =(A, B, P, pk, E, ctx)=; identical up to the
+programming abort (Theorem 3). =H_2=: replace =(A, B, P)= by
+=(U_1, x*U_1 + y*U_2, U_2)= with =U_1= uniform nonzero and =U_2= uniform;
+statistical distance at most =1/q= (Theorem 2), and computable by the
+challenger since the adversary supplied =(x, y)=. In =H_2= the only object
+that depends on =beta= is =E = (r*G, m_beta*G + r*pk)= with =pk = sk*G=
+for secret =sk, r=: the ElGamal encryption of a known plaintext under a
+fresh key, whose indistinguishability is the plaintext-checking problem,
+i.e. deciding whether =(G, pk, R, C - m_beta*G)= is a DDH tuple. =QED=
+
+/Scope./ The theorem is about the registration transcript. It says nothing
+about the issuer's address (which identifies the anonymity set), about
+timing or gas, or about identity-derived Note keys (review findings R5,
+R6).
+
+* Fresh randomness is security critical
+:PROPERTIES:
+:CUSTOM_ID: fresh
+:END:
+
+Each of the following is an explicit break if the wallet reuses a value:
+
+- *=b= reused across two registrations of one identity:*
+  =P_1 - P_2 = m*(A_1 - A_2)=, so a holder of a candidate =m_i= tests
+  =P_1 - P_2 - m_i*(A_1 - A_2) == O=. Links the accounts and identifies the
+  identity.
+- *=a= reused with the same credential:* =A_1 = A_2=; links the accounts.
+- *=m_t= reused across two proofs:* =s_m - s'_m = (e - e')*m= reveals =m=
+  to everyone.
+- *=b_t= reused:* reveals =b=, after which =B - b*Y1= is a verifiable
+  signature on =m=, i.e. the credential is published.
+- *=r_t=, =sk_t= reused:* reveal =r= (hence =M= from =C - r*pk=) and =sk=.
+
+The wallet draws all six from the platform CSPRNG (=rand_scalar=). A
+reviewer may prefer deterministic derivation of the nonces from the
+witness and the transcript in the style of RFC 6979, which removes the
+RNG from the trusted base for =m_t, b_t, r_t, sk_t=; =a= and =b= must
+still be fresh per registration.
+
+* Verifier-level checks and why each exists
+:PROPERTIES:
+:CUSTOM_ID: checks
+:END:
+
+- *=A != O=* (critical). With =A = O= the term =e(e*A, X)= vanishes and
+  (a') reduces to =e(s_b*G - C1, Y) = e(e*B, g2)=, which =B = b*Y1=,
+  =C1 = b_t*G= satisfy for every =m=: a registration with no credential.
+  Reachable by choosing =a = 0=.
+- *=B != O=* (defensive). =B = O= means =x*A = -y*P=; producing such a pair
+  needs =x/y=. Rejected anyway so that no degenerate encoding is accepted.
+- *=pk != O=* (critical). Relation (k) is vacuous at =pk = O=: no account
+  key ownership.
+- *=R != O=* (critical). =r = 0= makes =C = m*G=, publishing the identity
+  point.
+- *Canonical scalars.* Two encodings of one proof would otherwise be
+  accepted; hygiene, since =ctx= already prevents replay.
+- *On-curve and subgroup.* =G1= has prime order on BN254, so on-curve
+  suffices for =G1= inputs; the pairing precompile rejects =G2= points
+  outside the subgroup. =X, Y= are governance-set.
+- *=Y1= consistency at =trustIssuer=.* Theorem 4's last step needs
+  =Y1 = y*G=. A wrong =Y1= cannot help a forger because the verifier never
+  multiplies by =Y1=; it would only make honest presentations fail, and
+  the check prevents that.
+- *Fiat--Shamir coverage.* The transcript hashes every public point of the
+  statement, all four commitments, the registrant, the chain id, the
+  registry address and the versioned domain. The issuer address is /not/
+  hashed: the proof is bound to the issuer's key through equation (a')
+  itself, so a proof cannot verify under a different key, and two issuers
+  publishing the same key are indistinguishable by construction.
+- *Registrant = =msg.sender= (or the target contract for binding).* The
+  proof is useless to any other address.
+- *Storage, not calldata, for later use of =E= and =pk=.* Downstream
+  proofs (approve, spend) read the registered values.
+
+* What this argument does not cover
+:PROPERTIES:
+:CUSTOM_ID: scope
+:END:
+
+- The identity-derived A1/A2 Note receiving keys (R5) and the issuance,
+  policy and accumulator metadata (R6) of the follow-up review.
+- Duplicate issuance by a corrupt issuer; the optional holder secret =u=.
+- Wallet-side leakage: RNG quality, side channels, backup formats that
+  might export =sigma= (any such export reintroduces R3).
+- The pre-launch launch gate is unaffected: nothing is on chain to
+  migrate, and nothing should be until the review closes.
+- Post-quantum: the ciphertext lock is DDH; the credential lock is
+  information-theoretic but the signature scheme is pairing-based.
+
+* Review checklist
+:PROPERTIES:
+:CUSTOM_ID: checklist
+:END:
+
+For the independent reviewer, in the order that matters.
+
+1. *Assumption.* Confirm that the key form =(G, Y1; g2, X, Y)= with plain
+   signing is the Section 6.1 scheme of PS 2016 with =t = 0=, and that
+   its EUF-CMA proof under Assumption 2 applies; say whether a
+   non-interactive assumption from PS 2018 covers it.
+2. *Theorem 2.* Check the bijection argument and the =1/q= accounting;
+   confirm that returning =P= to the adversary makes the game at least as
+   strong as the real transcript (Theorem 3's remark).
+3. *Theorem 3.* Check that the four verification equations determine the
+   four commitments from the responses, and the ROM programming abort
+   bound.
+4. *Theorem 4.* Check the division step and that =Y1 = y*G= is the only
+   place =Y1= enters; check the shared-nonce composition.
+5. *Theorem 5.* This is the load-bearing reduction. Check the simulation
+   of presentations from a signature on an unrelated message, the
+   statistical-distance accounting, the treatment of =m_d=, and the
+   forking-lemma application (which query index is forked; the
+   commitments are fixed before the challenge).
+6. *Theorem 6.* Check the hybrid order and that the final hybrid is
+   exactly ElGamal plaintext-checking under a fresh key.
+7. *Code against specification.* =src/IdentityRegistry.sol=:
+   =_verifyCredential= (guards, canonical scalars, revert strings),
+   =_fsRegister= (word order and count against =nizk.py=),
+   =_checkPresentation= (the three pairs, the negations, the =-e*B=
+   term), =trustIssuer= (=Y1 != O= and the consistency pairing). Confirm
+   the =pk != O= and =R != O= rejections are present in the Solidity path,
+   not only in the Python verifier. Confirm the 6-argument =register=
+   overload still rejects nonzero leaves.
+8. *Ports.* =core/rust/buck-identity/src/nizk.rs= and
+   =core/js/src/identity-core.js= against =nizk.py=; the kernel is what
+   wallets run. Vectors: =test/vectors/identity.json= (schema 2),
+   =core/vectors/identity-kernel-vectors.json= (schema 2).
+9. *Tests to run.* =make nix-test= (Foundry; the rejection tests in
+   =test/IdentityRegistry.t.sol=: zero =A=, zero =B=, tampered =s_b=,
+   swapped presentation, zero and inconsistent =Y1=, presentation is not
+   a signature); the review suite
+   =alberta_buck/test/review/test_wallet_failures.py= tests 01, 02, 10,
+   11, 12 on both backends; =make nix-core-test-rust=,
+   =nix-core-test-py=, =nix-core-test-js=; the two-sided witness in
+   =alberta-buck-identity-example.org= (regenerate with
+   =make nix-venv-doc-identity-example=).
+10. *Randomness.* Read =alberta_buck/wallet/bn254.py:rand_scalar= and the
+    JS/wasm samplers; decide whether RFC 6979-style nonces should be
+    required.
+11. *Papers.* Confirm that the conditional phrasing in
+    =alberta-buck-proofs.org= Part I, =alberta-buck-paper.org=
+    (issuer-blindness, non-frameability) and =alberta-buck-identity.org=
+    matches what this document proves and no more.
+
+* Consequences for the other documents
+:PROPERTIES:
+:CUSTOM_ID: consequences
+:END:
+
+- =alberta-buck-proofs.org=, Theorem R-sound's non-reusability corollary:
+  its CDH sketch is superseded by Theorem 5 here; the corollary should
+  cite the reduction and drop "a full reduction is a phase-6 obligation".
+- =alberta-buck-paper.org=: the premise "registration is unforgeable
+  without the credential" used by the read/write separation, the
+  deposit-gate theorem and the deny-never-frame corollary is Theorem 5.
+- =a-prime-plan.org=: phase 6 status becomes "argument written, review
+  outstanding".
