@@ -1688,10 +1688,10 @@ Merkle membership.
 
    *Mint: encrypt the issuer's own Identity under the recipient's point.*
    The issuer addresses the note to /the Identity/ \( M_{\text{rec}} \), not an
-   account.  (That is the shipped design, and it is the one thing in this
-   document that is changing: see /The Receiving Key/ below, where addressing
-   the Identity itself turns out to hand every past counterparty a decryption
-   key.  The cycle here is the code as it stands.)  It encrypts its /own/ registered \( M_I \) under \( M_{\text{rec}} \)
+   account, and keys it to that Identity's registered receiving key
+   \( pk_{\text{recv}} \) -- the distinction /The Receiving Key/ below makes
+   precise, and the reason a counterparty who learns
+   \( m_{\text{rec}} \) learns nothing it can decrypt.  It encrypts its /own/ registered \( M_I \) under \( M_{\text{rec}} \)
    used as a public key; the anti-framing binding (=verifyIssuerReenc=) proves
    \( eIss \) re-encrypts the issuer's OWN registered \( M_I \) -- it cannot
    name a victim.
@@ -1906,33 +1906,32 @@ Merkle membership.
 
 ** The Receiving Key: Your Identity Is Not Your Mailbox Key
 
-   Everything above addresses a note to \( M_{\text{rec}} \), the recipient's
-   Identity point, and the recipient reads it with \( m_{\text{rec}} \), the
-   Identity scalar.  That is elegant: one secret, any account, no coordination.
-   It is also, on reflection, a mistake -- and an instructive one, because the
-   system already told us so.
+   An addressed note names an Identity and is keyed to that Identity's
+   /receiving key/.  Those are two different objects doing two different jobs,
+   and it is worth being clear why, because collapsing them into one is the
+   most natural design in the world and it does not work.
 
-   The read/write split says \( m \) is a /read capability/, handed to every
-   counterparty by design: Bob learns Alice's \( m \) when she pays him.  The
-   note layer then used that same \( m \) as a /decryption key/.  A value you
-   hand to everyone you transact with cannot also be the thing that opens your
-   future mail.  Disclosure would run both ways in time.
+   The read/write split makes \( m \) a /read capability/: the design hands it
+   to every counterparty, because that is how a receipt names a person.  So it
+   cannot also be the thing that opens the recipient's mail.  One disclosure
+   would read every note that person ever receives, in both directions in
+   time.  A read capability you give away cannot be a decryption key you keep.
 
-   The defect is sharper than the principle.  An A1 leaf encrypts the
-   recipient's Identity /under itself/:
+   The arithmetic is even less forgiving than the principle.  Suppose a leaf
+   encrypted the recipient's Identity /under itself/:
    \[
      eRec = (r'G,\; M_{\text{rec}} + r'M_{\text{rec}})
           = (r'G,\; m_{\text{rec}}(G + R)).
    \]
-   Message and key share one secret, so the Diffie-Hellman hardness that
-   protects every other ciphertext here simply is not present.  A candidate
-   Identity is tested with /one/ scalar multiplication.  No proof, no key, no
-   issuer secret.  An issuer holding its whole client list can ask "is any
+   Message and key would share one secret, so the Diffie-Hellman hardness
+   protecting every other ciphertext here would simply be absent.  A candidate
+   Identity tests with /one/ scalar multiplication -- no proof, no key, no
+   issuer secret -- and an issuer holding its client list could ask "is any
    note in existence addressed to anyone I certified?" and get answers.
 
-   Address the same plaintext to a key that is /not/ the Identity and the
-   question becomes a decisional Diffie-Hellman decision, which is the lock
-   the rest of this design already rests on:
+   Keying the same plaintext to \( pk_{\text{recv}} \) instead turns that
+   question into a decisional Diffie-Hellman decision, which is the lock the
+   rest of this design already rests on.  Run both and watch the difference:
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
@@ -1977,17 +1976,16 @@ Merkle membership.
    :          the Identity scalar no longer does: False
    #+LATEX: }
 
-   Nine candidates, one hit, then zero.  The recipient still reads its mail;
-   it reads it with \( k \), a secret it never hands to anyone.
+   Nine candidates, one hit under the collapsed design, zero under the real
+   one.  The recipient still reads its mail; it reads it with \( k \), a
+   secret it hands to nobody.
 
-   *The trap: separating the two jobs breaks the deposit gate.*
-   Look again at what =deposit_couple_prove= actually proves.  One witness
-   \( m_{\text{rec}} \) does two jobs: it decrypts the note, /and/ it is the
-   Identity inside the deposit account's registered credential.  The shared
-   Fiat-Shamir nonce across those two relations is not an implementation
-   detail -- it /is/ the sentence "the account cashing this note belongs to
-   the person the note was addressed to".  Split the jobs naively and that
-   sentence disappears:
+   *Two secrets need a gate that joins them.*  Separating reading from
+   Identity buys the privacy above and creates an obligation: the deposit gate
+   must say something a single-secret design would get for free.  "I can read
+   this note" and "I am this registered Identity" are facts about two different
+   secrets, and a gate that proved them side by side would say nothing at all
+   about their owner:
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
@@ -2024,17 +2022,16 @@ Merkle membership.
    :   -> both halves pass.  The note is spendable by the wrong person.
    #+LATEX: }
 
-   A thief holding a stolen payload proves the half about reading with the
-   stolen \( k \), and the half about Identity with its /own/ registered
-   Identity.  Both halves are true.  Neither says they belong together.
+   A thief holding a stolen payload proves the reading half with the stolen
+   \( k \) and the Identity half with its /own/ registered Identity.  Both
+   halves are true.  Neither says they belong together.
 
-   This is finding 5 wearing a different hat: /do not infer equality from two
-   proofs that happen to share a public point/.  The remedy there is the
-   remedy here.  One witness, one circuit, four relations, and the tie stated
-   rather than assumed -- with the accumulator leaf, which commits the
-   \( (\text{Identity},\ \text{receiving key}) \) pair under the holder's own
-   salt, carrying the step that used to be free because the two scalars were
-   the same:
+   So the gate states the tie instead of assuming it -- the same discipline
+   the membership and note-binding relations follow, and for the same reason:
+   /never infer equality from two proofs that happen to share a public point/.
+   One witness, one circuit, four relations, with the accumulator leaf
+   committing the \( (\text{Identity},\ \text{receiving key}) \) pair under
+   the holder's own salt:
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
@@ -2085,35 +2082,35 @@ Merkle membership.
    : rotated key:   spends, under an unlinkable leaf = True
    #+LATEX: }
 
-   The thief now fails on relation (3): there is no registered leaf pairing
-   /its/ Identity with the key it stole.  And rotation works -- a fresh
-   receiving key, a fresh salt, a leaf that links to nothing -- because
-   rotation is the accumulator's re-association, already specified.
+   The thief fails on relation (3): no registered leaf pairs /its/ Identity
+   with the key it stole.  Rotation works -- a fresh receiving key, a fresh
+   salt, a leaf that links to nothing -- because rotation is the accumulator's
+   re-association.
 
-   *What this costs, plainly.*  Today, losing your wallet does not lose your
-   notes: \( m \) is recoverable from your certified record, and \( m \) is the
-   key.  That convenience and the harvest are one fact viewed twice.  A key
-   recoverable from a record you have disclosed is a key everyone holding that
-   record already has.  You cannot keep both, so keep the privacy: recovery
-   moves to your seed phrase, which is where every other wallet has always
-   kept it, and the guardian mechanism can wrap a copy for the cases that
-   warrant it.
+   *Where each secret lives, and why that is the right place.*  Authority is
+   the Identity, so losing an account key strands nothing: register another
+   account on the same Identity and deposit.  Reading is a key, so it lives in
+   the wallet seed, which is where every wallet has always kept reading keys,
+   with guardian-wrapped copies for the cases that warrant more.  What the
+   Identity scalar deliberately cannot do is reconstruct the reading key,
+   because a key derivable from a record you have disclosed is a key held by
+   everyone who has the record.  The cost of naming yourself to a counterparty
+   is that they can name you back.  It stops there.
 
-   *What it does not cost.*  Addressing stays unilateral: the payer needs
-   \( pk_{\text{recv}} \), learned on the same out-of-band channel that carries
-   \( M_{\text{rec}} \) today, and nothing from the recipient at payment time.
-   Receipts still name both parties.  The note-binding relation keeps its
-   shape, because it witnesses a product of the randomness and the recipient's
-   scalar and computes it fixed-base; \( r \cdot k \) is as fixed-base as
-   \( r \cdot m_{\text{rec}} \).  And B1 needs no change at all: it always
-   encrypted to a registered /account/ key rather than to an Identity, so the
-   odd flavour out turns out to have been right from the start.
+   *What the separation does not cost.*  Addressing stays unilateral: the
+   payer needs \( pk_{\text{recv}} \), learned on the same out-of-band
+   channel that carries \( M_{\text{rec}} \), and needs nothing from the
+   recipient at payment time.  Receipts still name both parties.  The
+   note-binding relation keeps its shape, since it witnesses a product of the
+   randomness and the recipient's scalar and computes it fixed-base, and
+   \( r \cdot k \) is as fixed-base as anything else.  And B1 needs none of
+   this: a bearer note is keyed to the /issuer's/ registered account key, so
+   the question never arises.
 
-   *Status.*  Prototyped here and in =scripts/review/receiving_key_proto.py=,
-   not shipped.  The architecture of record is
-   =doc/review/notes-receiving-key.org=.  The folded deposit gate is the same
-   circuit work finding 5 already requires, so the two land together, in one
-   trusted setup, with the aggregator depth raise.
+   *Where to read further.*  The architecture of record, with the blast radius
+   and the open questions, is =doc/review/notes-receiving-key.org=; the same
+   checks run standalone in =scripts/review/receiving_key_proto.py=,
+   =deposit_gate_split.py= and =deposit_gate_folded.py=.
 
 ** A1 in Code: The Public-Issuer Addressed Cycle
 
@@ -2121,9 +2118,10 @@ Merkle membership.
    public Identity and batch Schnorr instead of an encrypted \( eIss \), and
    the leaf ciphertext =eRec= encrypts \( M_{\text{rec}} \) /under itself/ --
    so the deposit coupling commits the /recipient's/ Identity and the
-   membership certifies /them/.  Encrypting a point under itself is also
-   precisely where the harvest lives (/The Receiving Key/, above): it is the
-   one ciphertext in the design with no Diffie-Hellman hardness left in it.  (The batch Schnorr is checked at the mint
+   membership certifies /them/.  As everywhere in the design, the ciphertext
+   is keyed to the recipient's receiving key rather than to the Identity
+   point: encrypting a point under itself would leave no Diffie-Hellman
+   hardness in it at all (/The Receiving Key/, above).  (The batch Schnorr is checked at the mint
    transaction level -- =verifyIssuerSchnorr=; here it is a synthetic
    signature, since the session has no chain.)
 
@@ -2956,19 +2954,17 @@ Additional items tracked across the series:
    mitigated by fixed denominations and relayed payouts, orthogonal to this
    document.
 
-   *The adversary this subsection did not model: someone who already holds an
-   Identity.*  Everything above is stated against Mallory, who holds no
-   secrets.  Against her it holds.  But the addressed flavours hand a third
-   party something better than a guess: an A1 leaf encrypts
-   \( M_{\text{rec}} \) under itself and an A2 leaf encrypts \( M_I \) under
-   \( M_{\text{rec}} \), so anyone holding a list of Identity scalars -- an
-   issuer holds every one it certified, and every past counterparty holds one
-   -- can test candidates against public spend calldata directly.  That is
-   review finding R5, it is real today, and it is not a linkage this
-   subsection's arguments address.  /The Receiving Key/ above is the fix and
-   its prototype; until it ships, read "third-party privacy" here as "privacy
-   from parties who hold no Identity", which is a weaker and more honest
-   sentence.
+   *The stronger adversary: someone who already holds an Identity.*  The
+   arguments above are stated against Mallory, who holds no secrets.  The
+   interesting adversary holds several: an issuer knows every Identity scalar
+   it certified, and every past counterparty knows one.  Their scan is
+   "is any note in existence addressed to anyone on my list?", and it is
+   defeated by /where the addressing key comes from/ rather than by any of the
+   arguments above.  Because a note is keyed to \( pk_{\text{recv}} \) and
+   never to the Identity point, a candidate Identity tests nothing: the
+   residual question is a decisional Diffie-Hellman decision under a key the
+   holder has disclosed to nobody.  /The Receiving Key/ above shows the scan
+   running, and finding nothing.
 
    *Identities never appear on chain -- the load-bearing check.*  A registered
    \( E_{addr} \) is an ElGamal /ciphertext/ of \( M \); reading it yields

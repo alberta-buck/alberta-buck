@@ -290,6 +290,80 @@ by its own applicability table, and B1 does not address notes to identities.
 7. Rewrite the flow document's cycles, and the addressing passages of
    =alberta-buck-notes.org=.
 
+* 8 Reading plan: coming back to this cold
+:PROPERTIES:
+:CUSTOM_ID: reading-plan
+:END:
+
+Read in this order.  Each step exists because skipping it leads somewhere
+wrong, and the note says where.
+
+1. *This document, sections 2 and 3.* The contradiction and the four parts
+   of the architecture.  Without section 3.3a you will believe the change is
+   a substitution and design a split deposit gate that a payload thief walks
+   through.
+2. *=scripts/review/receiving_key_proto.py=*, then =deposit_gate_split.py=,
+   then =deposit_gate_folded.py=.  Run them; 11, 9 and 3 checks.  They are
+   the fastest way to reload what is true, and the split one shows the trap
+   as a passing test rather than a warning.
+3. *=alberta-buck-notes-flow.org=, section /The Receiving Key/.*  The same
+   three arguments as executable blocks with their output, in the document's
+   voice.  Its A2, A1 and B1 cycles above it are the mechanics the change
+   does /not/ alter.
+4. *=doc/review/accumulator-spec.org=, sections 3, 4, 7 and 8.3.*  The
+   salted leaf, the private and public tree classes, salt derivation, and
+   re-association.  The receiving key's binding lives in that leaf, and
+   rotation is that re-association; do not invent a second mechanism.
+5. *=doc/review/accumulator-plan.org=, phases and the blast radius.*  Phase
+   2 is done in Python, phase 3 has the salted leaf in the native membership
+   circuit, and everything else in the circuit list is gathered into one
+   rebuild.
+6. *=alberta-buck-notes.org=*, the flavor axes, the A2 gadget, /A-Flavors
+   (Addressed)/ and /Identity-Pinning and Recovery/.  The normative
+   statements the code must match.
+7. *=alberta-buck-proofs.org=, Part I.*  Not because it changes, but because
+   the reasoning style there -- state the game, prove the theorem, say what
+   is not covered -- is what this architecture still owes.
+
+Then, to implement, in this order:
+
+1. *The receiving key in the wallet*: generation, seed derivation, and
+   registration bound to the Identity.  The salt derivation of
+   =wallet/salt.py= is the model.
+2. *The four mint call sites*: =unilateral_a1.py= lines 99 and 102,
+   =unilateral_a2.py= lines 182 and 185.  The shipped mint functions already
+   accept any public key at that position, so this is the encryption key
+   argument and nothing else.
+3. *=make_receipt=*: it currently derives the recipient's Identity from the
+   secret it decrypts with.  Those are now two values, so it needs the
+   Identity passed in.  This is the only wallet function whose /signature/
+   must change, and it is the reason the flow document's cycles are not yet
+   rewired onto receiving keys.
+4. *=deposit_couple_prove=*: gains the receiving secret as a witness, and
+   the folded relations of section 3.3a.  Do not ship it as a sigma plus a
+   separate membership proof.
+5. *The leaf*: extend =registry/tree.py= to commit the pair, and extend the
+   accumulator conformance tests to it.
+6. *The circuits*: the note-binding substitution and the folded gate, with
+   the finding-5 repairs and the aggregator depth raise, in one trusted
+   setup and one matched set.
+7. *Regeneration order*: the A1 and A2 wallet vectors, then the Notes
+   end-to-end fixtures, then the mint fixtures pinned to them.  This is what
+   makes the depth raise expensive, so do it once.
+8. *Rewire the flow document's cycles* onto receiving keys and regenerate
+   the transcript.  The prover-timing block shells out to rapidsnark, so
+   budget for it.
+
+Three traps worth naming, because each cost time to find:
+
+- The coupling sigma's shared nonce is load-bearing.  It looks like an
+  optimisation.
+- Raising the aggregator depth re-folds every identity root, including the
+  one committed in the Notes end-to-end fixtures.
+- =IdentityTree= in =wallet/unilateral_a2.py= subclasses the registry tree
+  and overrides =contains= to take a /point/, not a leaf.  Passing a leaf
+  fails obscurely.
+
 * 8 Open questions
 :PROPERTIES:
 :CUSTOM_ID: open

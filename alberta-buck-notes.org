@@ -553,10 +553,9 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    this gadget with \( (K,\ \text{who proves},\ \text{when}) \) fixed:
 
    - *A2* (private issuer, addressed): the issuer encrypts its /own/
-     \( M_{\text{issuer}} \) under the recipient's Identity point
-     \( M_{\text{rec}} \) at mint; the recipient decrypts with
-     \( m_{\text{rec}} \) and /alone/ produces a receipt naming both
-     parties.
+     \( M_{\text{issuer}} \) under the recipient's receiving key
+     \( pk_{\text{recv}} \) at mint; the recipient decrypts with its
+     receiving secret and /alone/ produces a receipt naming both parties.
    - *A1* (public issuer, addressed): the same, but \( M_{\text{issuer}} \)
      is in the clear with a signature -- the gadget with the encryption
      dropped.
@@ -798,13 +797,29 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
   - *Depositor binding* -- /addressed/ (A) or /bearer/ (B).  An
     addressed note names the recipient Identity \( M_{\text{rec}} \) at
-    mint, so only that Identity may redeem -- from /any/ of its Fountain
-    accounts.  A bearer note names no recipient, so any registered
-    Identity holding the opening secret \( \rho \) may redeem.
+    mint and is /keyed/ to that Identity's registered receiving key
+    \( pk_{\text{recv}} \), so only that Identity may redeem -- from /any/
+    of its Fountain accounts.  A bearer note names no recipient, so any
+    registered Identity holding the opening secret \( \rho \) may redeem.
   - *Issuer visibility* -- /public/ or /private/.  The issuer's Identity
     \( M_{\text{issuer}} \) is either attached in the clear (with a
-    Schnorr signature) or encrypted under the recipient's Identity point
-    \( M_{\text{rec}} \) so only the counterparty recovers it.
+    Schnorr signature) or encrypted under the recipient's receiving key
+    \( pk_{\text{recv}} \) so only the counterparty recovers it.
+
+  *Why a receiving key and not the Identity point.*  The Identity scalar is a
+  /read capability/: the design hands it to every counterparty, because that
+  is how a receipt names a person.  So it cannot also be what opens the
+  recipient's mail -- one disclosure would read every note the recipient ever
+  receives, past and future.  Worse, encrypting a point under itself leaves
+  \( C = m(G + R) \), where message and key share a secret and the
+  Diffie-Hellman hardness protecting every other ciphertext here is simply
+  absent: one scalar multiplication per candidate would identify a recipient
+  from public calldata.  Notes are therefore keyed to
+  \( pk_{\text{recv}} = k G \), a secret the recipient hands to nobody, and
+  the registry's accumulator commits the pair
+  \( (M_{\text{rec}},\ pk_{\text{recv}}) \) in one leaf so the spend can
+  prove they belong together.  Authority remains the Identity; only the
+  mailbox key is separate.
 
   Crossing the two axes nominally produces four cells, but the /mutual
   decryptability/ invariant of the previous section immediately rules
@@ -854,13 +869,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    and that names its writer only to them.
 
    The issuer encrypts its /own/ registered Identity under the recipient's
-   Identity /point/:
+   receiving key:
    \[
-     eIss = (R_e, C_e) = \bigl(r'G,\ M_{\text{issuer}} + r'\,M_{\text{rec}}\bigr),
+     eIss = (R_e, C_e) = \bigl(r'G,\ M_{\text{issuer}} + r'\,pk_{\text{recv}}\bigr),
    \]
-   decryptable by the identity scalar \( m_{\text{rec}} \) that every
-   recipient account shares -- so the issuer needs only \( M_{\text{rec}} \)
-   and /any/ recipient account can redeem.  A blinded re-encryption proof
+   decryptable by the receiving secret \( k \) -- so the issuer needs only
+   \( (M_{\text{rec}},\ pk_{\text{recv}}) \), learned out of band, and /any/
+   recipient account can redeem, because redemption authority is the Identity
+   and the accumulator leaf pairs the two.  A blinded re-encryption proof
    (=verifyIssuerReenc=) binds \( eIss \) to the issuer's /own/ registered
    Identity, so the recovered issuer is the true minter, never a framed
    victim.  At deposit the recipient proves eligibility with the
@@ -868,7 +884,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    and the membership of the decrypted issuer Identity in
    \( \mathsf{rt_{id}} \) gates the spend: a bogus \( eIss \) decrypts to a
    non-member and reverts, so a colluding pair cannot leave the issuer
-   un-nameable.  From \( m_{\text{rec}} \) /alone/ the recipient decrypts
+   un-nameable.  From its own secrets /alone/ the recipient decrypts
    \( M_{\text{issuer}} \) and produces a plaintext receipt naming /both/
    parties -- the *unilateral receipt*.  Full construction, proofs, and
    tests in the flow document under "A2 Identity-Targeted Spend" and "unilateral".
@@ -878,10 +894,10 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    The same addressed shape as A2, but the issuer's \( M_{\text{issuer}} \)
    is in the clear with a Schnorr signature -- /the gadget with the
    encryption dropped/.  The recipient reads the issuer directly (no
-   decryption); the issuer chose \( M_{\text{rec}} \) at mint, so it
-   already knows the recipient.  Eligibility and redemption are A2's: any
-   account bound to \( m_{\text{rec}} \) may deposit, gated by the same
-   membership check.  Public issuers are institutional (employers,
+   decryption); the issuer chose the recipient at mint, so it already knows
+   them.  Eligibility and redemption are A2's: any account bound to
+   \( M_{\text{rec}} \) may deposit, gated by the same membership check over
+   the leaf that pairs the Identity with its receiving key.  Public issuers are institutional (employers,
    charities, payroll processors) whose Identity is already public, so
    naming it in the clear adds audit value at no privacy cost to the
    recipient (whose account and amount are the only on-chain signals,
@@ -929,10 +945,10 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    | Property                        | A2 private issuer                        | A1 public issuer            | B1 bearer, public issuer                   |
    |---------------------------------+------------------------------------------+-----------------------------+--------------------------------------------|
    | Primary use                     | Private remittances; self-wormhole       | Payroll; charity; B2C       | Cashier's cheques; pre-printed bearer      |
-   | Target key \(K\) of the gadget  | recipient Identity point \(M_{\text{rec}}\) | -- (issuer in the clear) | public issuer key \(pk_{\text{iss}}\)      |
+   | Target key \(K\) of the gadget  | recipient receiving key \(pk_{\text{recv}}\) | -- (issuer in the clear) | public issuer key \(pk_{\text{iss}}\)      |
    | Who encrypts, when              | issuer, at mint                          | -- (plaintext + sig)        | depositor, at spend                        |
-   | Recipient names issuer via      | decrypt \(eIss\) under \(m_{\text{rec}}\) | plaintext \(M_{\text{iss}}\) | plaintext \(M_{\text{iss}}\)              |
-   | Issuer names depositor via      | chose \(M_{\text{rec}}\) at mint         | chose \(M_{\text{rec}}\) at mint | decrypt event under \(sk_{\text{iss}}\) |
+   | Recipient names issuer via      | decrypt \(eIss\) under \(k\)            | plaintext \(M_{\text{iss}}\) | plaintext \(M_{\text{iss}}\)              |
+   | Issuer names depositor via      | chose the recipient at mint              | chose the recipient at mint      | decrypt event under \(sk_{\text{iss}}\) |
    | Who can redeem                  | any account bound to \(M_{\text{rec}}\)  | any account bound to \(M_{\text{rec}}\) | any registered holder of \(\rho\)   |
    | Receipt producible by           | recipient /alone/                        | either party                | issuer /alone/                             |
    | Collusion-resistant naming      | yes (membership)                         | yes                         | yes (membership)                           |
@@ -1203,10 +1219,9 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
    - /Identity Fountain re-issuance/ applies to Note mints and
      deposits identically to regular transfers.  *A-flavor notes are
-     recoverable under re-issuance:* the issuer addresses the recipient's
-     Identity /point/ \( M_{\text{rec}} \), whose decryption secret is the
-     identity scalar \( m_{\text{rec}} \) shared by /every/ Fountain account
-     of that Identity -- so a lost account key is recovered by re-registering
+     recoverable under re-issuance:* redemption authority is the Identity
+     \( M_{\text{rec}} \), shared by /every/ Fountain account of that
+     Identity -- so a lost account key is recovered by re-registering
      a fresh account on the same \( M_{\text{rec}} \) and depositing (see
      /Long-Term Holding Safety: Identity-Pinning and Recovery/).  Only an
      explicit account-pinned opt-in treats key loss as terminal.
@@ -1555,7 +1570,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    At mint time the issuer holds the full commitment preimage
    \( (v, \rho, \text{id-payload}, \text{predicate}) \) including, for
    addressed notes, any randomness \( r' \) it used to encrypt the issuer
-   payload under the recipient's Identity point \( M_{\text{rec}} \).  The
+   payload under the recipient's receiving key \( pk_{\text{recv}} \).  The
    question is whether that knowledge, by
    itself or combined with any later-acquired secret, lets anyone
    other than the intended recipient spend the note.
@@ -1563,16 +1578,36 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 ** A-Flavors (Addressed): Cryptographically Safe, and Recoverable
 
    Both A1 and A2 address a specific recipient /Identity/
-   \( M_{\text{rec}} \) at mint.  The spend gate requires the depositor to
-   prove -- via the deposit coupling plus the accumulator membership --
-   that it controls a /registered account bound to \( M_{\text{rec}} \)/,
-   i.e. that it /is/ the addressed Identity.  No mint-time knowledge helps
-   a non-recipient:
-   - The issuer knows its own randomness but cannot prove control of
-     \( M_{\text{rec}} \): that needs a registered account bound to it,
-     which only the real recipient has (KYC-gated).
+   \( M_{\text{rec}} \) at mint and key the note to that Identity's
+   registered receiving key.  The spend gate is /one/ proof over /one/
+   witness, carrying four relations:
+
+   1. the receiving secret \( k \) decrypts the note's ciphertext to the
+      point the gate commits;
+   2. the depositor's registered account credential decrypts, under its own
+      account key, to the Identity \( M_{\text{rec}} \);
+   3. a registered accumulator leaf commits the pair
+      \( (M_{\text{rec}},\ kG) \) under the holder's own salt;
+   4. that leaf's path folds to a posted identity root.
+
+   Relation (3) is what makes the other three add up.  Reading a note and
+   being an Identity are two facts about two different secrets, and a gate
+   that proved them separately would say nothing about their owner: a thief
+   holding a stolen payload could supply the reading half with the stolen key
+   and the Identity half with its own registered Identity, both true, neither
+   joining them.  Stating the tie as a relation over shared private witnesses,
+   rather than inferring it from two proofs that happen to share a public
+   point, is what closes that gap -- the same discipline the membership and
+   note-binding relations follow.
+
+   No mint-time knowledge helps a non-recipient:
+   - The issuer knows its own randomness but cannot satisfy (2): that needs a
+     registered account bound to \( M_{\text{rec}} \), which only the real
+     recipient has (KYC-gated).
    - An attacker who copies \( \rho \) cannot spend either; the gate binds
-     to the recipient /Identity/, not to \( \rho \).
+     to the recipient /Identity/ and its registered key, not to \( \rho \).
+   - A thief holding the whole payload, and so \( k \), still fails (2)
+     and (3).
 
    A1 and A2 differ only in whether \( M_{\text{issuer}} \) is in the clear
    (A1) or encrypted for the recipient (A2).  Neither affects who can
@@ -1580,31 +1615,39 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 *** Identity-Pinning and Recovery
 
-    Authority is the /Identity/, not one account key.  Spending an
-    addressed note requires the recipient's identity scalar
-    \( m_{\text{rec}} \) (which both decrypts the issuer payload and
-    authenticates the Identity) /and/ any registered account bound to
-    \( M_{\text{rec}} = m_{\text{rec}} G \).  Two consequences:
+    Authority is the /Identity/; the mailbox key is separate.  Spending an
+    addressed note requires the receiving secret \( k \) that opens the note
+    /and/ any registered account bound to \( M_{\text{rec}} \).  Three
+    consequences, and the first two are why the separation earns its keep:
+
+    - *Disclosure is not a key.*  A counterparty learns
+      \( m_{\text{rec}} \) whenever a receipt names the recipient, by
+      design.  It buys them nothing further: the Identity scalar decrypts
+      nothing anywhere in the system, so it cannot read the recipient's notes
+      and cannot test public calldata for them.  The cost of naming someone
+      is naming them, and it stops there.
 
     - *Lost account keys are recoverable.*  Because /any/ Fountain account
       bound to \( M_{\text{rec}} \) can redeem, losing one account's
       \( sk \) does not strand the note: re-register a fresh account on the
       same Identity (the KYC issuer re-certifies the real person) and
-      deposit.  The durable secret is the identity scalar
-      \( m_{\text{rec}} = H(\text{identity\_data}) \), recoverable from the
-      holder's backed-up =identity_data=.  So a note survives key rotation
+      deposit.  Authority never lived in an account key, and still does not.
+      The reading key \( k \) is derived from the wallet's seed material, so
+      it survives device loss as every wallet secret does, and
+      guardian-wrapped payload copies cover the cases that warrant more.  So
+      a note survives key rotation
       and device loss.
-    - *No PII-grind shortcut.*  Although \( m_{\text{rec}} \) is
-      recoverable from =identity_data=, /guessing/ it does not enable
-      theft: spending also requires a /registered/ account bound to
-      \( M_{\text{rec}} \), and an attacker cannot make the KYC issuer
-      certify someone else's Identity.  The non-grindable-identities
-      assumption (\( H \) a random oracle) plus the KYC gate close the
-      shortcut.
+    - *No PII-grind shortcut.*  Guessing \( m_{\text{rec}} \) from a
+      person's details enables nothing.  Spending needs the receiving secret,
+      a /registered/ account bound to \( M_{\text{rec}} \), and a leaf
+      pairing the two, and an attacker cannot make the KYC issuer certify
+      someone else's Identity.  The non-grindable-identities assumption
+      (\( H \) a random oracle) and the KYC gate close the shortcut twice
+      over.
 
-    So the recovery anchor shifts from "preserve one mint-time key forever"
-    (self-custody finality) to "prove your KYC Identity again"
-    (issuer-anchored recovery).  A deployment may offer both: an
+    So the recovery anchor for /authority/ is "prove your KYC Identity again"
+    rather than "preserve one mint-time account key forever", while the
+    anchor for /reading/ is the wallet seed, where reading keys belong.  A deployment may offer both: an
     identity-pinned note (recoverable, the default) and an account-pinned
     opt-in (terminal, for maximal self-custody).  At the system level
     demurrage is the final backstop -- value in genuinely-lost notes
@@ -1696,7 +1739,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    |-------------------------+--------------------------------------------------+-----------------------------------------------------------------|
    | Inner: secret           | The cryptographic ability to spend               | QR code containing \( \rho \)                                   |
    | Middle: physical seal   | Bearer (B1) publication-exclusivity              | Hologram, scratch-off, laminate sleeve                          |
-   | Outer: identity binding | Addressed (A1/A2) targeting (only named spender) | Encryption under the recipient Identity point \( M_{\text{rec}} \); deposit-coupling at spend |
+   | Outer: identity binding | Addressed (A1/A2) targeting (only named spender) | Encryption under the recipient's receiving kentity point \( M_{\text{rec}} \); deposit-coupling at spend |
    #+LATEX: }
 
    The /inner/ layer is the cryptographic core: as long as \( \rho \) (and
@@ -2372,9 +2415,10 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    2. *ElGamal registered credential*
       \( E = (R, C) = (r G, M + r \cdot pk) \) where
       \( M = m \cdot G \).  Continues to be the on-chain identity
-      witness.  At mint the issuer now /addresses the recipient Identity
-      point/ \( M_{\text{rec}} \) -- encrypting its own \( M_{\text{iss}} \)
-      under \( M_{\text{rec}} \) (A2), or naming it in the clear (A1) --
+      witness.  At mint the issuer /addresses the recipient Identity/
+      \( M_{\text{rec}} \) and keys the payload to that Identity's
+      registered receiving key -- encrypting its own \( M_{\text{iss}} \)
+      under \( pk_{\text{recv}} \) (A2), or naming it in the clear (A1) --
       rather than re-randomising the recipient's account credential.
    3. *Chaum-Pedersen equality of discrete logs (Theorem 6).*  Used
       verbatim by the A-spend predicate to prove that the depositor's
@@ -2520,8 +2564,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    No novel hardness assumption is introduced.  The membership plus the
    binding sigmas are the /one gadget/; the receipts compose a blinded
    re-encryption (or the public issuer's signature) with a verifiable
-   decryption.  Full proofs in alberta-buck-proofs.org; the identity-axis unification in the "one gadget" and Mutual Decryptability sections here,
-   /alberta-buck-notes-unilateral/, and the companion /Proofs/.
+   decryption.  Full proofs in alberta-buck-proofs.org; the identity-axis unification in the "one gadget" and Mutual Decryptability sections here and the companion /Proofs/.
 
 #+LATEX: \clearpage
 * The SNARK Circuits
@@ -2547,8 +2590,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    input, folds N commitments onto it using witness sibling paths, and
    exposes the resulting =newRoot= as a public output.  On-chain mint
    cost becomes essentially constant in N -- ~380K + ~500 gas/leaf of
-   calldata.  The design memo is
-   [[https://perry.kundert.ca/images/finance/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint]].
+   calldata.
 
    *Public inputs (5 entries, N-independent).*
    - =oldRoot= -- the live note root the prover read from chain
@@ -2967,7 +3009,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    The closing piece is the /in-SNARK tie/ (=INoteBindingVerifier=), one
    circuit per addressed payload layout:
    - *A2* (=circuits/note_binding.circom=): a Groth16 proof that \( eEnc \)
-     /re-encrypts/, under \( M_{\text{rec}} \), the ciphertext the note
+     /re-encrypts/, under \( pk_{\text{recv}} \), the ciphertext the note
      committed in its \( idHash \) -- *re-encryption equivalence*, not
      equality, because re-using the exact committed \( eIss \) (which
      =Notes.mint= exposes as a public input) would link spend to mint and
@@ -3041,19 +3083,14 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    - /alberta-buck-identity/ -- the Fountain, registration, ElGamal / CP
      primitives.
    - /alberta-buck-ethereum/ -- the Solidity surface.
-   - /alberta-buck-verifier-implementation/ -- (moved to doc/historical/) SNARK toolchain engineering status.
 
    /Forward design (not yet implemented):/
    - /alberta-buck-notes-serialized/ -- serialized B1 sub-notes: N
      micro-denomination bearer notes per leaf.
 
    /Historical memos (superseded; retained for provenance):/
-   - [[file:doc/historical/alberta-buck-notes-unilateral.org][alberta-buck-notes-unilateral]] -- the A2 corner as first built; now
-     flow's "A2 Identity-Targeted Spend" + Proofs Theorems 7-8.
    - The identity-axis / "one gadget" / Registry-Identity accumulator unification is now fully described in the "Mutual Decryptability" and "one gadget" sections above, and in notes-flow.org "The Identity-M Spend Path" + accumulator explanations. (Original memo was superseded by these integrations.)
    - The non-deniable-receipt invariant (including issuer binding "Required Mint SNARK Signal" at mint, EOA Transfer Mirror, receipt proofs, A2 coupling gaps) is now covered in "The Non-Deniable-Receipt Invariant" section here, the privacy audit and detailed bindings in notes-flow.org, and theorems in Proofs. The note <-> eEnc tie is implemented in =note_binding*.circom=.
-   - [[file:doc/historical/alberta-buck-notes-rollup-mint.org][alberta-buck-notes-rollup-mint]] -- the batch-mint design memo; shipped
-     as =mint_batch.circom=, hostile-issuer ledger promoted into flow.
 
 ** Regulatory and Legal Engagement
 
@@ -3106,12 +3143,6 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    on their next outgoing transfers.  At 1%/yr loss and 2%/yr
    demurrage, the long-term tendency is that the pool absorbs the
    lost-note demurrage as a small pool-wide overhead.
-
-   A reclaim path is possible: after a very long period (say 99
-   years), the contract could allow the issuer to submit a
-   zero-knowledge proof that a specific note commitment remains
-   unspent, and reclaim the residual principal less accrued
-   demurrage.  Requires issuer-side recordkeeping; deferred.
 
 ** Integer-Arithmetic Rounding
 
