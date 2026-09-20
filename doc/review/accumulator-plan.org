@@ -22,9 +22,14 @@ accumulator section; it is restated here with the decisions taken since,
 and extended with the blast radius the change carries.
 
 Deferred behind this program, deliberately: R5, the identity-derived A1 and
-A2 receiving keys, and the Notes design decision it forces. The circuit
-work of finding 5 is not deferred; it shares a trusted setup with the leaf
-change and is sequenced with it.
+A2 receiving keys. Its architecture is now settled and prototyped in
+[[file:notes-receiving-key.org][the receiving-key architecture]] -- notes
+addressed to an independent receiving key, bound to the identity inside
+this program's salted leaf so the binding is never public -- and it is the
+implementation that waits, because the leaf it binds into is built here.
+The circuit work of finding 5 is not deferred; it shares a trusted setup
+with the leaf change and is sequenced with it, and the note-binding
+substitution R5 needs belongs in that same rebuild.
 
 * Design of record
 :PROPERTIES:
