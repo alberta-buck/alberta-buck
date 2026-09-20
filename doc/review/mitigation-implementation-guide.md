@@ -376,9 +376,14 @@ harvester without a new holder secret `u`. If `u` is added for other purposes,
 specify its issuance and recovery semantics; it does not by itself prevent
 an issuer certifying the same identity again with a different secret.
 
-Identity-derived A1/A2 encryption keys, policy metadata, receipt-disclosure
-scope and historical credential migration are separate remaining problems.
-The follow-up document distinguishes each from registration presentation.
+Identity-derived A1/A2 encryption keys, policy metadata and receipt-disclosure
+scope are separate remaining problems. The follow-up document distinguishes
+each from registration presentation. Pathway A' there is a single-commitment
+presentation mappable to the pairing precompile that passes the review's
+adversarial battery (`scripts/review/hiding_presentation_probe.py`); it is
+unreviewed, unadopted, and publishes a G1 image of the issuer's second secret,
+which changes the issuer-key assumption. Treat it as a candidate input to
+step 1, not as the specification.
 
 **Sequencing.**
 1. Write the complete showing/issuance specification and an issuer-view
@@ -388,8 +393,10 @@ The follow-up document distinguishes each from registration presentation.
 2. Reproduce the response/commitment and credential-recovery attacks against
    candidate designs; obtain a security argument and cryptographic review.
 3. Implement the reviewed relation across all four backends with new vectors
-   and explicit versioning/migration. Invert the legacy failure tests only
-   when their complete attacks have been mitigated.
+   and explicit versioning. The system is pre-launch, so there is nothing to
+   migrate; the constraint is that the presentation is right before the first
+   production registration. Invert the failure tests only when their complete
+   attacks have been mitigated.
 
 Until the spec exists, the correct interim action is documentation: withdraw
 the issuer-blindness and statistical-unlinkability claims for the current
@@ -399,7 +406,9 @@ and mark the registration transcript as candidate-testable.
 **Cost.** Not established for a secure repair. The previous +96-byte,
 three-pairing estimate describes the insufficient prototype, not a validated
 mitigation. Benchmark the reviewed full transcript and any separate Note
-circuit/key-distribution changes. No repair makes historical calldata private.
+circuit/key-distribution changes. Pre-launch there is no historical calldata
+to protect; a transcript published on a public chain can never be made
+private afterwards, which is why this is a launch gate.
 
 ---
 

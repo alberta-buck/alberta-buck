@@ -41,6 +41,20 @@ previous draft's claim that the existing additive-blinding prototype was a
 small, verified fix is withdrawn. Blinding the signature pair alone is not
 enough: its proof must not reveal the hidden message or remove the blinding.
 
+Revision (2026-09-19, later): the reproduction recipes below were re-executed
+independently (the mined-calldata recipe on a local Anvil, the prototype
+counterexample, and a new probe); the native kernel was rebuilt and the review
+suite passes on both backends; the system's pre-launch status was recorded;
+and a single-commitment presentation candidate that avoids the structural
+R2/R4 leak while mapping to the EVM pairing precompile was added as
+Pathway A' with its adversarial battery. It is a candidate for review, not a
+repair, and it changes the issuer-key form.
+
+*Development status:* there are no production on-chain registrations. Every
+statement below about permanent calldata is therefore a launch gate on the
+registration presentation, not a migration problem for existing accounts.
+Local and test deployments are disposable.
+
 The intended target remains *certified identity without general surveillance*:
 counterparties obtain verifiable evidence of their own relationship, while an
 Identity Issuer or past counterparty cannot identify unrelated accounts just
@@ -373,6 +387,13 @@ does not consider recovery of =bA= from the accompanying proof.
 The source prototype is retained as review evidence. Its optimistic printed
 messages must be read with these counterexamples, not as security assertions.
 
+The leak is structural: any presentation that publishes a separate G1
+commitment =k*A= with a public scalar response for a hidden exponent reveals
+that exponent's multiple of =A= up to the challenge, whatever the blinding
+scalar is called. A repair must either commit in the target group, which the
+EVM pairing precompile cannot consume, or fold the hidden message and the
+blinding into one commitment; see Pathway A'.
+
 * R5: identity-addressed Note keys permit additional tests
 :PROPERTIES:
 :CUSTOM_ID: r5-note-keys
@@ -521,12 +542,13 @@ nix develop -c env PYTHONPATH=.:core/python python -m pytest -q \
   'alberta_buck/test/review/test_wallet_failures.py::test_02_public_credential_and_disclosed_record_register_attacker[py]'
 #+end_src
 
-In the 2026-09-19 review these two Python cases passed. The native signature
-case also passed; native registration verification encountered an installed
-extension accepting eight arguments while the current binding requires ten.
-That stale-ABI error was not rejection of the attack. Rebuild the native
-extension before making cross-backend conformance claims. No complete test
-suite or replacement protocol audit is claimed here.
+In the 2026-09-19 review these two Python cases passed. The native
+registration case initially failed with a stale installed extension (eight
+arguments where the current binding takes ten); that ABI error was not a
+rejection of the attack. After =make nix-core-build-py= the full review file
+passed 27 of 27 cases on both backends, so the native and Python paths agree
+that tests 1 and 2 reproduce the attacks. No complete test suite or
+replacement protocol audit is claimed here.
 
 ** Current Solidity: registration matching, harvesting and Note equations
 
@@ -682,6 +704,29 @@ This is a wallet-level prototype check, not deployment of a replacement
 Solidity verifier. The demo's deterministic randomness is for synthetic
 review only.
 
+** R2 on the production proof and the single-commitment candidate
+
+The [[file:../../scripts/review/hiding_presentation_probe.py][probe]] first runs the R2 predicate against transcripts produced by the
+production prover with no signature second point and no issuer key, then
+builds the Pathway A' candidate and runs this document's complete battery
+against it: raw-pair scans with the secret and public keys, the R2 proof-field
+scan, candidate-adapted relation and issuer-strip tests, plain-signature
+extraction, harvesting, cross-account comparison and context binding.
+
+#+name: reproduce-single-commitment-candidate
+#+begin_src sh
+nix develop -c env PYTHONPATH=.:core/python BUCK_IDENTITY_BACKEND=py \
+  python -u scripts/review/hiding_presentation_probe.py
+#+end_src
+
+Executed on 2026-09-19: R2 identified 4 of 4 production transcripts from proof
+fields alone; for the candidate, honest showings verified, the wrong registrant
+was rejected, every candidate scan found 0 matches, the candidate-adapted
+checks held for every candidate (uninformative), extraction without =y= failed,
+the harvester was rejected, the legitimate holder was accepted, and two
+showings of one credential shared no point. These are wallet-level checks on a
+synthetic prototype, not a reviewed protocol or a deployed verifier.
+
 * Mitigation pathways, not a selected implementation
 :PROPERTIES:
 :CUSTOM_ID: mitigation-pathways
@@ -710,14 +755,85 @@ transcript, including Fiat--Shamir derivation and auxiliary inputs.
 
 This pathway can retain the one-message PS credential concept. R1--R3 do not
 by themselves require changing issuance to multiple attributes, introducing
-=u=, adding an accumulator or using a general-purpose SNARK. They do require
-fresh authority for credentials whose reusable presentations are already
-public; see migration below.
+=u=, adding an accumulator or using a general-purpose SNARK. Pre-launch, no
+credential's reusable presentation is public in production, so no fresh
+credential authority is required; see the launch gate below.
 
 Evaluate how a secure presentation maps to available Ethereum precompiles.
 Do not infer a deployable G1-only transcript or gas cost from the abstract
 pairing equation. Measure encoding, commitments, transcript hashing, subgroup
 and infinity handling, verifier work and cross-backend consistency.
+
+The textbook showing commits in the target group: the prover's commitment is
+=pairing(A, Y)^m_tilde * pairing(A, G2)^b_tilde=, one G_T element mixing both
+hidden exponents. The EVM pairing precompile only decides whether a product of
+pairings equals one; it cannot take a prover-supplied G_T element as input. A
+direct port therefore has to supply commitments as G1 points, and separate G1
+commitments are exactly R2/R4. This is the concrete obstacle for any
+precompile-based deployment of Pathway A.
+
+** A': single-commitment presentation mappable to the pairing precompile
+
+*Status:* candidate with an executable adversarial battery
+([[file:../../scripts/review/hiding_presentation_probe.py][probe]]); not a repair, not reviewed, not selected.
+
+Place the blinding on the =Y= base instead of the =G2= base, using a G1 image
+=Y1 = y*G= of the issuer's second secret, published alongside =(X, Y)=:
+
+#+begin_example
+A  = a*sigma_1
+B  = (x + m*y)*A + b*Y1                   # uniform given A for uniform b
+statement:  pairing(B, G2) = pairing(A, X) * pairing(m*A + b*G, Y)
+commitment: C1 = m_tilde*A + b_tilde*G    # ONE G1 point for both hidden exponents
+responses:  s_m = m_tilde + e*m,  s_b = b_tilde + e*b
+verifier:   pairing(s_m*A + s_b*G - C1, Y) * pairing(e*A, X) * pairing(-e*B, G2) == 1
+            plus the unchanged ElGamal (b), (c) and account-key (k) checks,
+            with the same m_tilde joining C1 and T_C
+#+end_example
+
+Why R2/R4 do not apply: the only point derivable from the proof fields is
+=P = e^(-1)*(s_m*A + s_b*G - C1) = m*A + b*G=, which is uniform and the same
+for every candidate =m_i= (each candidate implies its own =b_i*G = P - m_i*A=).
+The verification relation then holds for every candidate, so it discriminates
+nothing; stripping =B= needs =b*Y1 = y*(b*G)=, a CDH instance; and a harvester
+who learns =m= cannot answer for a blinding it does not know. The triple
+=(A, B, P)= is distributed as =(uniform, x*A + y*P, uniform)= independently of
+=m=, and the rest of the transcript is Schnorr-simulatable given =P=.
+
+Battery results (2026-09-19, four synthetic identities):
+
+| Check | Result |
+|-------+--------|
+| Honest showings verify; wrong registrant rejected | yes; yes |
+| R1 secret-key and public-key pair scans | 0 matches |
+| R2 proof-field scan with =C1= in the role of =A_ps= | 0 matches |
+| Candidate-adapted relation; issuer strip with =y= | hold for every candidate (uninformative) |
+| Plain-signature extraction without =y= | fails |
+| Harvester knowing =m= re-blinds the public pair | rejected |
+| Legitimate holder registers a further account | accepted |
+| Two showings of one credential share a point | no |
+
+Cost relative to today's verifier: =C1= replaces =A_ps= at the same size, one
+extra scalar =s_b= in calldata, one extra G1 multiplication, and a pairing
+product of three pairs where today's has four. The issuer key gains one G1
+point.
+
+What this changes and does not settle:
+
+- Publishing =Y1 = y*G= moves the issuer key to the committed-message form of
+  Pointcheval--Sanders Section 6.1, whose unforgeability rests on the stronger
+  assumption used there rather than the plain scheme's. The issuer must keep
+  =h= with unknown discrete log, as =ps_sign= already does. Adopt this
+  deliberately, with a written argument.
+- The privacy argument above is a sketch, not a proof. Fiat--Shamir
+  derivation, encodings, subgroup/infinity handling and composition with the
+  ElGamal side need the review this document demands elsewhere.
+- It leaves R5 (identity-derived Note keys) and R6 (metadata, enrollment logs,
+  accumulator admission) untouched, and does not by itself decide the
+  holder-secret question of Pathway C.
+- It must be ported under the four-backend rule with a new registration domain
+  and vectors; tests 1 and 2 are inverted only when the production transcript
+  changes.
 
 ** B: hidden membership in certified randomized commitments
 
@@ -783,7 +899,9 @@ not remove R1/R2. A blinding value known to the observer, an exposed =bA=, or
 a proof exposing =mA= does not repair the full presentation. Changing the
 registry implementation or proxy pattern does not erase historical calldata.
 
-No secure gas/proving-size delta is established. Compare candidate protocols
+No reviewed gas/proving-size delta is established. Pathway A' supplies a
+first measurable candidate at the wallet level; treat its figures as a
+benchmark input, not a deployment cost. Compare candidate protocols
 only after their statements, encodings and threat models are fixed. Measure
 issuance, wallet/WASM proving, registration gas/calldata/storage, Note circuit
 changes where needed, witness maintenance, revocation and recovery costs.
@@ -826,7 +944,7 @@ defined observer. Sound equations alone do not supply this property.
 
 ** Tests and proof obligations
 
-- [ ] Reproduce R1--R5 on the legacy paths before changing them.
+- [ ] Reproduce R1--R5 on the current paths before changing them.
 - [ ] Test the *whole* new transcript, not only the modified signature pair:
   raw-signature scans, R2-style response/commitment scans, and extraction of
   blinding multiples or reusable credentials.
@@ -861,33 +979,34 @@ defined observer. Sound equations alone do not supply this property.
    before promising issuer privacy for A1/A2.
 4. Implement a synthetic executable specification and hostile full-transcript
    tests, then have the construction reviewed.
-5. Port the reviewed relation across backends, benchmark it, and specify
-   migration before changing production acceptance rules.
+5. Port the reviewed relation across backends, benchmark it, and fix the
+   credential/proof version and domain before the first production
+   registration.
 
-* Migration, compatibility and unresolved choices
+* Launch gate, compatibility and unresolved choices
 
-Historical public signatures and proof fields remain testable. A Diamond
-upgrade, new verifier or new ciphertext randomness cannot make that history
-private. Already exposed reusable credentials remain authorization material
-unless the repaired acceptance policy excludes them.
+The system is pre-launch: no production on-chain registrations exist, so there
+are no legacy accounts to migrate and no conversion ceremony is needed. What
+the permanence of calldata implies instead is a launch gate: the registration
+presentation must be repaired before any credential is presented on a public
+chain, because a registry upgrade, new verifier or new ciphertext randomness
+cannot make an already-published transcript private, and an already-exposed
+reusable credential would remain authorization material unless the acceptance
+policy excluded it. Local and test deployments are disposable and carry none
+of these obligations.
 
-Issuing another signature on the same =m= under the same accepted key is not
-enough to distinguish a legitimate holder from an attacker holding a harvested
-signature. Consider a new accepted key/credential epoch, additional certified
-holder binding, or another reviewed re-enrollment/conversion rule. The rule
-must authenticate the holder independently of already-public capabilities.
-
-Avoid publishing a direct old-account/new-account migration link when new
-account privacy is required. Individually timed conversion can still link
-accounts operationally; batching and broad eligible sets may be needed.
-Document coexistence and retirement of legacy accounts honestly.
+Should any credential nevertheless be presented publicly under the current
+transcript before the repair ships, the contingency is a new accepted
+key/credential epoch or another reviewed re-enrollment rule that authenticates
+the holder independently of already-public capabilities and publishes no
+old-account/new-account link. Treat this as a contingency, not a plan.
 
 Credential/proof version changes must be distinguished from ordinary
 API-compatible registry upgrades. Nothing in these attacks establishes a need
 for existing Notes to fail merely because an IdentityRegistry implementation
-is updated behind a stable interface. Specify historical verification and
-legacy Note redemption behavior explicitly, alongside any intentionally new
-credential policy or proof domain.
+is updated behind a stable interface. Specify verification and Note
+redemption behavior across credential/proof versions explicitly, alongside any
+intentionally new credential policy or proof domain.
 
 Open decisions include the threat model for duplicate issuance/tagging,
 credential loss and recovery, unilateral/offline receiving-key discovery,
@@ -903,6 +1022,7 @@ These are not settled by the prototype or by this review.
 - [[file:../../src/IdentityRegistry.sol][IdentityRegistry]]: public inputs, acceptance checks and corrected approval relations.
 - [[file:../../alberta_buck/test/review/test_wallet_failures.py][Wallet review tests]] and [[file:../../alberta_buck/review/examples.py][synthetic witnesses]]: current attacks and repaired-test history.
 - [[file:../../scripts/review/issuer_linking_demo.py][Existing showing prototype]]: R4, not a verified repair.
+- [[file:../../scripts/review/hiding_presentation_probe.py][Single-commitment probe]]: R2 on the production proof; Pathway A' candidate battery, not a verified repair.
 - [[file:../../alberta_buck/wallet/unilateral_a1.py][A1]], [[file:../../alberta_buck/wallet/unilateral_a2.py][A2]] and [[file:../../src/Notes.sol][Notes]]: R5 ciphertexts and public spend inputs.
 - [[file:../../alberta_buck/wallet/issuer.py][Reference issuer]] and [[file:../../alberta_buck/wallet/identity.py][canonical identity hashing]]: issuance visibility.
 - [[file:../../alberta-buck-proofs.org][Formal rerandomization theorem]] and [[file:../../alberta-buck-paper.org][paper claims]]: fixed-message versus identity-message unlinkability.
@@ -916,6 +1036,9 @@ candidate-testable by parties knowing identity records, and exposes reusable
 credentials enabling unauthorized fresh registration after identity
 disclosure. Identity-derived A1/A2 receiving keys create additional disclosure
 paths. Issuer-view unlinkability requires a reviewed, fully hiding credential
-presentation and a separate treatment of Note keys, metadata and migration;
-the existing blinding prototype does not establish that guarantee.
+presentation and a separate treatment of Note keys and metadata; the existing
+blinding prototype does not establish that guarantee. A single-commitment
+candidate compatible with the pairing precompile passes this review's
+adversarial checks but is unreviewed and unadopted. The system is pre-launch,
+so the repair is a launch gate rather than a migration.
 #+end_quote
