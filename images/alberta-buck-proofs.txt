@@ -570,8 +570,14 @@ Table of Contents
   unknown.  Identity disclosure therefore stops conferring registration
   authority under an honest issuer (review finding R3).  It does not
   stop the issuer itself from certifying the same identity twice; that
-  remains a policy question.  A full reduction is a phase-6 obligation
-  of the A' plan and is not claimed here.
+  remains a policy question.  The CDH remark is not the load-bearing
+  argument: the security-argument document
+  (`doc/review/a-prime-security-argument.org', Theorem 5) reduces
+  registration forgery – by a party with no credential, or with any
+  number of the holder's transcripts and \( m \) itself – directly to
+  PS-CM unforgeability, simulating the holder's presentations from a
+  signature on an unrelated message, which Theorem 2' makes exact up to
+  \( 1/q \).  That reduction awaits independent review.
 
 
 2.8 Theorem R-comp (Composition of the Credential, Ciphertext and Key Relations)
