@@ -101,7 +101,7 @@ key added. The binding is provable in zero knowledge, and the prototype
 confirms the leaf stays unscannable against a party holding every certified
 identity, the whole published subtree, and =pk_recv= itself.
 
-** 3.3 The circuits keep their shape
+** 3.3 The note-binding relation keeps its shape
 
 The note-binding circuits avoid variable-base scalar multiplication by
 witnessing the product of the randomness and the recipient's scalar and
@@ -112,10 +112,51 @@ witness becomes =r*k= instead of =r*m_rec= and the shape is identical:
 R = r*G           C = M + (r*k)*G
 #+end_example
 
-So this is a substitution of which scalar the recipient proves knowledge of,
-not a redesign. The prototype checks both the identity and the value
-ciphertext in this form. Constraint counts should be close to unchanged, which
-=MUST= be measured rather than assumed.
+For that relation this is a substitution of which scalar the recipient proves
+knowledge of, not a redesign, and the prototype checks it for both the
+identity and the value ciphertext. Constraint counts should be close to
+unchanged, which =MUST= be measured rather than assumed.
+
+** 3.3a The deposit gate does NOT keep its shape, and must be folded
+
+Corrected 2026-09-20 after prototyping; the earlier draft of this document
+overstated 3.3 as covering the whole spend path.
+
+=deposit_couple_prove= uses one witness =m_rec= for two jobs: it decrypts the
+note's ciphertext, and it is the identity inside the deposit account's
+registered credential. The Fiat-Shamir nonce shared across those two relations
+is not an implementation detail. It /is/ the statement "the account cashing
+this note belongs to the person the note was addressed to".
+
+Separating the two jobs deletes that statement. =deposit_gate_split.py=
+demonstrates the consequence: a thief holding a stolen payload proves the
+reading half with the stolen =k= and the identity half with its /own/
+registered identity, both halves are true, and nothing says they belong
+together. The note becomes spendable by the wrong person. The sigma also
+accepts any receiving key at all, because "P commits whatever this scalar
+decrypts to" is satisfied by every scalar.
+
+This is finding 5 in a new place: an equality inferred from two proofs that
+share a public point. The remedy is the same. One witness, one circuit, and
+the tie stated rather than assumed:
+
+#+begin_example
+(1) k decrypts the note ciphertext to the point committed in P
+(2) the account credential decrypts under sk to the identity M
+(3) a registered leaf commits the pair (M, k*G) under the holder's salt
+(4) that leaf's path folds to a posted root
+#+end_example
+
+Relation (3) is the step that used to be free, because the two scalars were
+the same value. =deposit_gate_folded.py= builds this witness, refuses the
+thief on relation (3), and shows a rotated receiving key spending under an
+unlinkable leaf.
+
+*Consequence for sequencing.* The receiving-key change and the finding-5 fold
+are the same piece of circuit work, not two adjacent ones. Both replace a
+public-point equality with a shared private witness, both need the
+accumulator leaf, and both land in one trusted setup together with the
+aggregator depth raise.
 
 ** 3.4 Rotation and succession
 
@@ -152,6 +193,8 @@ correct one usually already contains its own answer.
 | The receiving key itself | generation, seed-derived recovery, and its place in the wallet's key material |
 | =registry/tree.py= | a leaf variant committing the receiving key alongside the identity |
 | =circuits/note_binding.circom=, =note_binding_a1.circom= | the witnessed product becomes =r*k=; one private input renamed, the relation unchanged |
+| the deposit gate | folded into one circuit carrying relations (1) to (4) of section 3.3a; this is the finding-5 fold, not an addition to it |
+| =wallet/unilateral_a2.py= =deposit_couple_prove= | gains the receiving secret as a witness and loses the shared nonce as the tie |
 | =circuits/spend.circom= | unchanged: it never sees the identity |
 | The registry | registration of a receiving key bound to the identity, and its rotation |
 | Receipts | capture of the binding proof, additive |
@@ -204,6 +247,18 @@ decryptability results, membership proofs, and the circuits' structure.
 | Identity and receiving key commit in one salted leaf | path verifies |
 | The leaf is unscannable given every identity, the tree, and the key | 0 hits |
 | Rotation yields an unlinkable leaf | yes |
+
+=scripts/review/deposit_gate_split.py=, nine checks: the split sigma is
+complete, a wrong identity or account key is refused, any receiving key is
+accepted because the tie has left the sigma, and a thief with its own identity
+and a stolen key passes.
+
+=scripts/review/deposit_gate_folded.py=, three checks: the folded witness
+exists for the honest spender, the thief is refused on the leaf relation, and a
+rotated receiving key spends under an unlinkable leaf.
+
+All three scripts also run inside =alberta-buck-notes-flow.org=, section /The
+Receiving Key/, as executable blocks with their output in the document.
 
 * 7 Implementation plan
 :PROPERTIES:

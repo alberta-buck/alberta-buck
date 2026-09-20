@@ -1688,7 +1688,10 @@ Merkle membership.
 
    *Mint: encrypt the issuer's own Identity under the recipient's point.*
    The issuer addresses the note to /the Identity/ \( M_{\text{rec}} \), not an
-   account.  It encrypts its /own/ registered \( M_I \) under \( M_{\text{rec}} \)
+   account.  (That is the shipped design, and it is the one thing in this
+   document that is changing: see /The Receiving Key/ below, where addressing
+   the Identity itself turns out to hand every past counterparty a decryption
+   key.  The cycle here is the code as it stands.)  It encrypts its /own/ registered \( M_I \) under \( M_{\text{rec}} \)
    used as a public key; the anti-framing binding (=verifyIssuerReenc=) proves
    \( eIss \) re-encrypts the issuer's OWN registered \( M_I \) -- it cannot
    name a victim.
@@ -1901,13 +1904,226 @@ Merkle membership.
    that the recipient is unable to name -- nor can any holder bind a different
    ciphertext to it/.
 
+** The Receiving Key: Your Identity Is Not Your Mailbox Key
+
+   Everything above addresses a note to \( M_{\text{rec}} \), the recipient's
+   Identity point, and the recipient reads it with \( m_{\text{rec}} \), the
+   Identity scalar.  That is elegant: one secret, any account, no coordination.
+   It is also, on reflection, a mistake -- and an instructive one, because the
+   system already told us so.
+
+   The read/write split says \( m \) is a /read capability/, handed to every
+   counterparty by design: Bob learns Alice's \( m \) when she pays him.  The
+   note layer then used that same \( m \) as a /decryption key/.  A value you
+   hand to everyone you transact with cannot also be the thing that opens your
+   future mail.  Disclosure would run both ways in time.
+
+   The defect is sharper than the principle.  An A1 leaf encrypts the
+   recipient's Identity /under itself/:
+   \[
+     eRec = (r'G,\; M_{\text{rec}} + r'M_{\text{rec}})
+          = (r'G,\; m_{\text{rec}}(G + R)).
+   \]
+   Message and key share one secret, so the Diffie-Hellman hardness that
+   protects every other ciphertext here simply is not present.  A candidate
+   Identity is tested with /one/ scalar multiplication.  No proof, no key, no
+   issuer secret.  An issuer holding its whole client list can ask "is any
+   note in existence addressed to anyone I certified?" and get answers.
+
+   Address the same plaintext to a key that is /not/ the Identity and the
+   question becomes a decisional Diffie-Hellman decision, which is the lock
+   the rest of this design already rests on:
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session notesflow :results output
+   import random
+   from alberta_buck.wallet.bn254 import point_to_words
+   from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
+   from alberta_buck.wallet.issuer_reenc import H_POINT as H_RK
+   from alberta_buck.wallet.poseidon import F_R, poseidon
+   from alberta_buck.wallet.salt import derive_salt
+   from alberta_buck.registry.tree import IdentityMerkleTree
+
+   _seed_rk = random.Random(0xBADDECAF)      # local; the shared transcript is untouched
+   rng_rk   = lambda: _seed_rk.getrandbits(256)
+
+   m_rec_rk = rand_scalar(rng_rk)                       # the recipient's Identity
+   M_rec_rk = mul(G1, m_rec_rk)
+   k_rk     = rand_scalar(rng_rk)                       # the recipient's RECEIVING key
+   pk_recv  = mul(G1, k_rk)
+
+   # A harvester's candidate list: every Identity it ever certified, plus the one
+   # it is hunting.  It holds no keys and needs none.
+   cands = [rand_scalar(rng_rk) for _ in range(8)] + [m_rec_rk]
+
+   # Today's A1 leaf ciphertext: the Identity encrypted under ITSELF.
+   eRec_today = elgamal_encrypt(M_rec_rk, M_rec_rk, rand_scalar(rng_rk))
+   hit = [c for c in cands if eq(eRec_today.C, mul(add(G1, eRec_today.R), c))]
+   print(f"today:   C == m*(G+R) over {len(cands)} candidates -> {len(hit)} hit"
+         f"  ({'IDENTIFIED' if hit == [m_rec_rk] else 'no'})")
+
+   # The same plaintext under a key that is not the Identity.
+   eRec_new = elgamal_encrypt(M_rec_rk, pk_recv, rand_scalar(rng_rk))
+   hit2 = [c for c in cands if eq(eRec_new.C, mul(add(G1, eRec_new.R), c))]
+   print(f"fixed:   the same scan over the same candidates  -> {len(hit2)} hit")
+   print(f"         recipient still reads it with k:  {eq(elgamal_decrypt(eRec_new, k_rk), M_rec_rk)}")
+   print(f"         the Identity scalar no longer does: {eq(elgamal_decrypt(eRec_new, m_rec_rk), M_rec_rk)}")
+   #+END_SRC
+
+   #+RESULTS:
+   : today:   C == m*(G+R) over 9 candidates -> 1 hit  (IDENTIFIED)
+   : fixed:   the same scan over the same candidates  -> 0 hit
+   :          recipient still reads it with k:  True
+   :          the Identity scalar no longer does: False
+   #+LATEX: }
+
+   Nine candidates, one hit, then zero.  The recipient still reads its mail;
+   it reads it with \( k \), a secret it never hands to anyone.
+
+   *The trap: separating the two jobs breaks the deposit gate.*
+   Look again at what =deposit_couple_prove= actually proves.  One witness
+   \( m_{\text{rec}} \) does two jobs: it decrypts the note, /and/ it is the
+   Identity inside the deposit account's registered credential.  The shared
+   Fiat-Shamir nonce across those two relations is not an implementation
+   detail -- it /is/ the sentence "the account cashing this note belongs to
+   the person the note was addressed to".  Split the jobs naively and that
+   sentence disappears:
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session notesflow :results output
+   sk_rk = rand_scalar(rng_rk); pk_rk = mul(G1, sk_rk)
+   E_dep_rk = elgamal_encrypt(M_rec_rk, pk_rk, rand_scalar(rng_rk))     # registered account
+   m_iss_rk = rand_scalar(rng_rk); M_I_rk = mul(G1, m_iss_rk)
+   eIss_rk = elgamal_encrypt(M_I_rk, pk_recv, rand_scalar(rng_rk))      # A2 note, to pk_recv
+
+   def split_gate(m_id, k_read, sk_acct, E_acct, ct):
+       """The deposit gate with the two jobs merely separated: prove the account
+       holds m_id, and prove k_read decrypts the note.  Nothing joins them."""
+       holds = eq(E_acct.C, add(mul(G1, m_id), mul(E_acct.R, sk_acct)))
+       M = add(ct.C, neg(mul(ct.R, k_read)))                   # whatever k decrypts to
+       return holds, M
+
+   holds, M = split_gate(m_rec_rk, k_rk, sk_rk, E_dep_rk, eIss_rk)
+   print(f"honest deposit: account holds the Identity = {holds}, "
+         f"decrypts to M_I = {eq(M, M_I_rk)}")
+
+   m_thief = rand_scalar(rng_rk); sk_thief = rand_scalar(rng_rk)
+   E_thief = elgamal_encrypt(mul(G1, m_thief), mul(G1, sk_thief), rand_scalar(rng_rk))
+   holds_t, M_t = split_gate(m_thief, k_rk, sk_thief, E_thief, eIss_rk)
+   print(f"thief with a stolen payload and its OWN Identity:")
+   print(f"  its account holds its own Identity = {holds_t}")
+   print(f"  the stolen k decrypts to M_I       = {eq(M_t, M_I_rk)}")
+   print(f"  -> both halves pass.  The note is spendable by the wrong person.")
+   #+END_SRC
+
+   #+RESULTS:
+   : honest deposit: account holds the Identity = True, decrypts to M_I = True
+   : thief with a stolen payload and its OWN Identity:
+   :   its account holds its own Identity = True
+   :   the stolen k decrypts to M_I       = True
+   :   -> both halves pass.  The note is spendable by the wrong person.
+   #+LATEX: }
+
+   A thief holding a stolen payload proves the half about reading with the
+   stolen \( k \), and the half about Identity with its /own/ registered
+   Identity.  Both halves are true.  Neither says they belong together.
+
+   This is finding 5 wearing a different hat: /do not infer equality from two
+   proofs that happen to share a public point/.  The remedy there is the
+   remedy here.  One witness, one circuit, four relations, and the tie stated
+   rather than assumed -- with the accumulator leaf, which commits the
+   \( (\text{Identity},\ \text{receiving key}) \) pair under the holder's own
+   salt, carrying the step that used to be free because the two scalars were
+   the same:
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session notesflow :results output
+   def recv_leaf(M, pk_r, salt):
+       mx, my = point_to_words(M); kx, ky = point_to_words(pk_r)
+       return poseidon([mx % F_R, my % F_R, kx % F_R, ky % F_R, salt])
+
+   def deposit_witness(*, m_id, k_read, sk_acct, b, salt, E_acct, ct, tree):
+       """One witness, four relations, no equality inferred across proofs."""
+       M_id, pk_r = mul(G1, m_id), mul(G1, k_read)
+       M = add(ct.C, neg(mul(ct.R, k_read)))                              # (1)
+       assert eq(E_acct.C, add(M_id, mul(E_acct.R, sk_acct))), \
+           "account credential does not hold this Identity"                # (2)
+       leaf = recv_leaf(M_id, pk_r, salt)
+       assert tree.contains(leaf), \
+           "no registered leaf commits this (Identity, receiving key) pair"  # (3)
+       proof = tree.path(tree.index_of_leaf(leaf))
+       assert proof.verify(), "membership path does not fold to the root"   # (4)
+       return dict(P=add(M, mul(H_RK, b)), M=M, leaf=leaf)
+
+   secret_rk = rand_scalar(rng_rk)
+   salt_rk = derive_salt(secret_rk, "kyc:ca-ab-2026")
+   tree_rk = IdentityMerkleTree(depth=10, private=True)
+   tree_rk.insert_leaf(recv_leaf(M_rec_rk, pk_recv, salt_rk))
+   tree_rk.insert_leaf(recv_leaf(mul(G1, m_thief), mul(G1, rand_scalar(rng_rk)),
+                                 derive_salt(rand_scalar(rng_rk), "kyc:ca-ab-2026")))
+
+   w = deposit_witness(m_id=m_rec_rk, k_read=k_rk, sk_acct=sk_rk, b=rand_scalar(rng_rk),
+                       salt=salt_rk, E_acct=E_dep_rk, ct=eIss_rk, tree=tree_rk)
+   print(f"honest witness: exists, P commits M_I = {eq(w['M'], M_I_rk)}")
+   try:
+       deposit_witness(m_id=m_thief, k_read=k_rk, sk_acct=sk_thief, b=rand_scalar(rng_rk),
+                       salt=salt_rk, E_acct=E_thief, ct=eIss_rk, tree=tree_rk)
+       print("thief witness: BUILT (must not happen!)")
+   except AssertionError as exc:
+       print(f"thief witness: REFUSED ({exc})")
+   k2 = rand_scalar(rng_rk); salt2 = derive_salt(secret_rk, "kyc:ca-ab-2026", 1)
+   tree_rk.insert_leaf(recv_leaf(M_rec_rk, mul(G1, k2), salt2))
+   w2 = deposit_witness(m_id=m_rec_rk, k_read=k2, sk_acct=sk_rk, b=rand_scalar(rng_rk),
+                        salt=salt2, E_acct=E_dep_rk,
+                        ct=elgamal_encrypt(M_I_rk, mul(G1, k2), rand_scalar(rng_rk)), tree=tree_rk)
+   print(f"rotated key:   spends, under an unlinkable leaf = {w2['leaf'] != w['leaf']}")
+   #+END_SRC
+
+   #+RESULTS:
+   : honest witness: exists, P commits M_I = True
+   : thief witness: REFUSED (no registered leaf commits this (Identity, receiving key) pair)
+   : rotated key:   spends, under an unlinkable leaf = True
+   #+LATEX: }
+
+   The thief now fails on relation (3): there is no registered leaf pairing
+   /its/ Identity with the key it stole.  And rotation works -- a fresh
+   receiving key, a fresh salt, a leaf that links to nothing -- because
+   rotation is the accumulator's re-association, already specified.
+
+   *What this costs, plainly.*  Today, losing your wallet does not lose your
+   notes: \( m \) is recoverable from your certified record, and \( m \) is the
+   key.  That convenience and the harvest are one fact viewed twice.  A key
+   recoverable from a record you have disclosed is a key everyone holding that
+   record already has.  You cannot keep both, so keep the privacy: recovery
+   moves to your seed phrase, which is where every other wallet has always
+   kept it, and the guardian mechanism can wrap a copy for the cases that
+   warrant it.
+
+   *What it does not cost.*  Addressing stays unilateral: the payer needs
+   \( pk_{\text{recv}} \), learned on the same out-of-band channel that carries
+   \( M_{\text{rec}} \) today, and nothing from the recipient at payment time.
+   Receipts still name both parties.  The note-binding relation keeps its
+   shape, because it witnesses a product of the randomness and the recipient's
+   scalar and computes it fixed-base; \( r \cdot k \) is as fixed-base as
+   \( r \cdot m_{\text{rec}} \).  And B1 needs no change at all: it always
+   encrypted to a registered /account/ key rather than to an Identity, so the
+   odd flavour out turns out to have been right from the start.
+
+   *Status.*  Prototyped here and in =scripts/review/receiving_key_proto.py=,
+   not shipped.  The architecture of record is
+   =doc/review/notes-receiving-key.org=.  The folded deposit gate is the same
+   circuit work finding 5 already requires, so the two land together, in one
+   trusted setup, with the aggregator depth raise.
+
 ** A1 in Code: The Public-Issuer Addressed Cycle
 
    A1 is A2 with the issuer in the clear: \( idHash \) commits the issuer's
    public Identity and batch Schnorr instead of an encrypted \( eIss \), and
    the leaf ciphertext =eRec= encrypts \( M_{\text{rec}} \) /under itself/ --
    so the deposit coupling commits the /recipient's/ Identity and the
-   membership certifies /them/.  (The batch Schnorr is checked at the mint
+   membership certifies /them/.  Encrypting a point under itself is also
+   precisely where the harvest lives (/The Receiving Key/, above): it is the
+   one ciphertext in the design with no Diffie-Hellman hardness left in it.  (The batch Schnorr is checked at the mint
    transaction level -- =verifyIssuerSchnorr=; here it is a synthetic
    signature, since the session has no chain.)
 
@@ -2739,6 +2955,20 @@ Additional items tracked across the series:
    /must/ be public for the ERC-20 to pay out -- =face= and =recipient= --
    mitigated by fixed denominations and relayed payouts, orthogonal to this
    document.
+
+   *The adversary this subsection did not model: someone who already holds an
+   Identity.*  Everything above is stated against Mallory, who holds no
+   secrets.  Against her it holds.  But the addressed flavours hand a third
+   party something better than a guess: an A1 leaf encrypts
+   \( M_{\text{rec}} \) under itself and an A2 leaf encrypts \( M_I \) under
+   \( M_{\text{rec}} \), so anyone holding a list of Identity scalars -- an
+   issuer holds every one it certified, and every past counterparty holds one
+   -- can test candidates against public spend calldata directly.  That is
+   review finding R5, it is real today, and it is not a linkage this
+   subsection's arguments address.  /The Receiving Key/ above is the fix and
+   its prototype; until it ships, read "third-party privacy" here as "privacy
+   from parties who hold no Identity", which is a weaker and more honest
+   sentence.
 
    *Identities never appear on chain -- the load-bearing check.*  A registered
    \( E_{addr} \) is an ElGamal /ciphertext/ of \( M \); reading it yields
