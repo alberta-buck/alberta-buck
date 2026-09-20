@@ -39,6 +39,7 @@ Accumulator".
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -193,6 +194,25 @@ class ComposedMembershipProof:
 # Central Merkle Service
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class RootRecord:
+    """A posted aggregator root, with the time it was posted.
+
+    Accumulator specification, section 5.  A count of postings is not a bound
+    in time: with periodic attestation an authority may post monthly, so a
+    ring of thirty postings could be years.  Each record therefore carries its
+    timestamp, and each consumer enforces its own maximum age.
+
+    Attributes:
+        root: The aggregator root (= the on-chain identityRoot) as posted.
+        sequence: Monotonic posting sequence, from 0.
+        posted_at: POSIX timestamp of the posting.
+    """
+    root: int
+    sequence: int
+    posted_at: float
+
+
 class CentralMerkleService:
     """Aggregates sub-roots from registries and feature authorities into a single
     on-chain root.
@@ -209,6 +229,9 @@ class CentralMerkleService:
     def __init__(self, depth: int = AGGREGATOR_DEPTH) -> None:
         self._tree = IdentityMerkleTree(depth=depth)
         self._sub_trees: Dict[str, SubTreeRecord] = {}
+        self._root_ring: List[RootRecord] = []
+        self._root_index: Dict[int, RootRecord] = {}
+        self._root_sequence: int = 0
 
     # -- properties ----------------------------------------------------------
 
@@ -216,6 +239,65 @@ class CentralMerkleService:
     def identity_root(self) -> int:
         """The current aggregator root (= on-chain identityRoot)."""
         return self._tree.root()
+
+    # -- posted roots --------------------------------------------------------
+
+    #: Storage only, once the bound is an age: ten days at an hourly posting,
+    #: which covers the longest maximum age any consumer declares.
+    ROOT_RING_SIZE: int = 256
+
+    def post(self, timestamp: Optional[float] = None) -> RootRecord:
+        """Post the current aggregator root, recording when.
+
+        Authorities push sub-roots; the aggregator posts.  The posting is what
+        a membership proof is checked against, and its age is what a consumer
+        bounds.
+        """
+        ts = time.time() if timestamp is None else timestamp
+        rec = RootRecord(root=self.identity_root,
+                         sequence=self._root_sequence,
+                         posted_at=ts)
+        self._root_sequence += 1
+        self._root_ring.append(rec)
+        if len(self._root_ring) > self.ROOT_RING_SIZE:
+            evicted = self._root_ring.pop(0)
+            if self._root_index.get(evicted.root) is evicted:
+                del self._root_index[evicted.root]
+        self._root_index[rec.root] = rec
+        return rec
+
+    def root_record(self, root: int) -> Optional[RootRecord]:
+        """The record for a retained root, or None if never posted or evicted."""
+        return self._root_index.get(root)
+
+    def accepts(self, root: int, max_age: float,
+                now: Optional[float] = None) -> bool:
+        """Whether a consumer with this maximum age accepts a proof against `root`.
+
+        Rejects the zero root, a root never posted or evicted from the ring,
+        and a root older than the consumer's bound.  A consumer for which
+        revocation is the point of the check declares a short maximum age; one
+        that merely asks whether a counterparty is registered declares a
+        generous one, since an authority that batches late would otherwise
+        fail honest members.
+        """
+        if root == 0:
+            return False
+        rec = self._root_index.get(root)
+        if rec is None:
+            return False
+        ts = time.time() if now is None else now
+        return (ts - rec.posted_at) <= max_age
+
+    def max_retained_age(self, now: Optional[float] = None) -> float:
+        """Age of the oldest retained record: the longest maximum age the ring
+        can honour at the current posting rate.  A consumer declaring more than
+        this has its window silently truncated, which the caller MUST refuse
+        rather than allow."""
+        if not self._root_ring:
+            return 0.0
+        ts = time.time() if now is None else now
+        return ts - self._root_ring[0].posted_at
 
     @property
     def sub_tree_count(self) -> int:

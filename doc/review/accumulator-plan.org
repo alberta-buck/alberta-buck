@@ -339,9 +339,21 @@ Five things the survey had left open, each of which reduces the work.
    and rules that are contractual; deployment isolation and recognition;
    and the statement that the protocol enforces the consistency of the
    attestation chain but not its accuracy.
-2. *Python.* Salted leaf, salt storage in the wallet, attribute proofs, the
-   regulator and its envelope, and a scan test per tree: a party holding
-   every certified identity finds nothing.
+2. *Python.* Done. The salted leaf, the private-tree flag and the
+   clearance primitive in =registry/tree.py=; holder-derived salts in
+   =wallet/salt.py=, recoverable from seed material and not derivable
+   from the identity; the salt carried through attestation, revocation
+   and lookup in =registry/feature_authority.py=; posted root records
+   with timestamps and a per-consumer maximum age in
+   =registry/merkle_service.py=; holder-produced attribute proofs in
+   =wallet/attributes.py=; and the insurance regulator, its envelope and
+   the issuance gate in =registry/regulator.py=, which is the executable
+   specification the Solidity port of phase 4 is checked against.
+   =alberta_buck/test/test_accumulator.py= carries the conformance
+   tests, including the scan: a party holding every certified scalar and
+   the whole published subtree decides no membership. 165 passed across
+   the accumulator, registry, unilateral-A2, wallet, vectors,
+   kernel-backend, issuer and review suites.
 3. *Circuits.* The leaf change folded into the finding-5 repairs, with the
    B1 path given a sound circuit, one trusted setup, one matched set.
 4. *Solidity.* The root authority and policy, the permanent caller-leaf

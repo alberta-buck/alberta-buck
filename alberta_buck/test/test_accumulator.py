@@ -194,3 +194,173 @@ def test_private_authority_requires_a_salt_and_public_refuses_one():
     with pytest.raises(ValueError, match="public subtree"):
         pub.attest(M, salt=derive_salt(SECRETS[0], AGE))
     assert pub.attest(M).leaf == identity_leaf(M)
+
+
+# --- posted roots, attribute proofs, and the regulator ----------------------
+
+from alberta_buck.registry.feature_authority import FeatureAuthority
+from alberta_buck.registry.merkle_service import CentralMerkleService, SubTreeKind
+from alberta_buck.registry.regulator import (
+    DepreciationType, FACE_BAND_MAX, InsuranceRegulator, InsurerEnvelope,
+    IssuanceRefused, band_ceiling, band_for_face, check_issuance, scope_id,
+)
+from alberta_buck.wallet.attributes import prove_attributes, verify_attributes
+from alberta_buck.wallet.bn254 import point_to_words
+
+T0 = 1_000_000.0
+DAY = 86_400.0
+
+
+def _live_world():
+    """A registry and an age authority, aggregated and posted at T0."""
+    kyc = FeatureAuthority("feature:kyc-live", tree_depth=10, private=True)
+    age = FeatureAuthority(AGE, tree_depth=10, private=True)
+    M, secret = mul(G1, SCALARS[0]), SECRETS[0]
+    kr = kyc.attest(M, salt=derive_salt(secret, KYC))
+    ar = age.attest(M, salt=derive_salt(secret, AGE))
+    svc = CentralMerkleService(depth=10)
+    svc.enroll(KYC, SubTreeKind.KYC, kyc.sub_root, timestamp=T0)
+    svc.enroll(AGE, SubTreeKind.FEATURE, age.sub_root, timestamp=T0)
+    svc.post(timestamp=T0)
+    x, y = point_to_words(M)
+    proof = prove_attributes(
+        svc,
+        [(KYC, kyc.membership_proof(kr.leaf_index)),
+         (AGE, age.membership_proof(ar.leaf_index))],
+        x, y)
+    return svc, kyc, age, M, secret, proof
+
+
+def test_root_records_carry_a_timestamp_and_bound_by_age():
+    """Conformance 6: the bound is an age, not a count of postings."""
+    svc, *_ = _live_world()
+    root = svc.identity_root
+    assert svc.root_record(root) is not None
+    assert svc.accepts(root, max_age=7 * DAY, now=T0)
+    assert not svc.accepts(root, max_age=3600, now=T0 + 2 * 3600)
+    assert not svc.accepts(0, max_age=1e9, now=T0)
+    assert not svc.accepts(root ^ 1, max_age=1e9, now=T0)
+
+
+def test_attribute_proof_requires_named_subtrees_and_a_fresh_root():
+    svc, _kyc, _age, _M, _s, proof = _live_world()
+    assert proof.verify_paths()
+    assert verify_attributes(svc, proof, [KYC, AGE], max_age=7 * DAY, now=T0)
+    # A verifier that requires something not claimed refuses.
+    assert not verify_attributes(svc, proof, [KYC, REGION_A],
+                                 max_age=7 * DAY, now=T0)
+    # A verifier for which revocation is the point declares a short age.
+    assert not verify_attributes(svc, proof, [KYC], max_age=60, now=T0 + 3600)
+    with pytest.raises(ValueError):
+        verify_attributes(svc, proof, [], max_age=DAY, now=T0)
+
+
+def test_revocation_is_visible_once_the_authority_reposts():
+    """Sections 8.2 and 5: clearance plus a fresh posting ends membership, and
+    the maximum age bounds how long the stale proof is still accepted."""
+    svc, kyc, _age, M, _s, proof = _live_world()
+    assert verify_attributes(svc, proof, [KYC], max_age=7 * DAY, now=T0)
+
+    kyc.revoke(M)
+    svc.update_sub_root(KYC, kyc.sub_root, timestamp=T0 + DAY)
+    svc.post(timestamp=T0 + DAY)
+
+    # The old proof is against the old root: still accepted inside the window,
+    # refused by a consumer whose window has passed.
+    assert verify_attributes(svc, proof, [KYC], max_age=7 * DAY, now=T0 + DAY)
+    assert not verify_attributes(svc, proof, [KYC], max_age=3600, now=T0 + DAY)
+    # And no fresh proof exists.
+    assert kyc.membership_proof_for_identity(M) is None
+
+
+# --- the regulator ----------------------------------------------------------
+
+def _child_insurer():
+    reg = InsuranceRegulator("ca-ab")
+    child = mul(G1, 777)
+    env = reg.attest(
+        child,
+        InsurerEnvelope(standing=True, face_band=2,
+                        dep_types=frozenset({DepreciationType.LINEAR}),
+                        max_dep_rate=2000, max_premium_rate=500,
+                        expires_at=T0 + 90 * DAY),
+        scope_names=["asset:toy", "asset:bicycle"])
+    return reg, child, env
+
+
+def test_face_bands_are_powers_of_ten_and_cumulative():
+    assert band_ceiling(1) == 10 * 10**6            # ten BUCK, six decimals
+    assert band_ceiling(FACE_BAND_MAX) == 10**8 * 10**6
+    assert band_for_face(9_990_000) == 1            # just under ten BUCK
+    assert band_for_face(10_000_000) == 2           # ten BUCK needs band 2
+    assert band_for_face(10**9 * 10**6) == FACE_BAND_MAX + 1   # above the ladder
+    with pytest.raises(ValueError):
+        band_ceiling(0)
+
+
+def test_the_child_insures_a_bicycle_and_nothing_else():
+    """Specification 12.2, worked example: a class project attested for toys
+    and bicycles at band 2 with linear depreciation."""
+    reg, _child, env = _child_insurer()
+    bicycle = scope_id(reg.scope_name("asset:bicycle"))
+    car = scope_id(reg.scope_name("asset:vehicle:car"))
+
+    check_issuance(env, scope=bicycle, face_units=80_000_000, dep_type=1,
+                   dep_rate=1500, premium_rate=300, now=T0)
+
+    with pytest.raises(IssuanceRefused, match="scope not attested"):
+        check_issuance(env, scope=car, face_units=80_000_000, dep_type=1,
+                       dep_rate=1500, premium_rate=300, now=T0)
+    with pytest.raises(IssuanceRefused, match="face above attested band"):
+        check_issuance(env, scope=bicycle, face_units=5_000_000_000,
+                       dep_type=1, dep_rate=1500, premium_rate=300, now=T0)
+    with pytest.raises(IssuanceRefused, match="depreciation model"):
+        check_issuance(env, scope=bicycle, face_units=80_000_000, dep_type=2,
+                       dep_rate=1500, premium_rate=300, now=T0)
+    with pytest.raises(IssuanceRefused, match="premium rate"):
+        check_issuance(env, scope=bicycle, face_units=80_000_000, dep_type=1,
+                       dep_rate=1500, premium_rate=9999, now=T0)
+    with pytest.raises(IssuanceRefused, match="attestation expired"):
+        check_issuance(env, scope=bicycle, face_units=80_000_000, dep_type=1,
+                       dep_rate=1500, premium_rate=300, now=T0 + 365 * DAY)
+
+
+def test_a_fine_scope_does_not_admit_the_coarse_one():
+    """Specification 12.2: narrower is not broader, which is what lets the
+    contract avoid prefix matching."""
+    reg = InsuranceRegulator("ca-ab")
+    collector = mul(G1, 888)
+    env = reg.attest(
+        collector,
+        InsurerEnvelope(standing=True, face_band=5,
+                        dep_types=frozenset({DepreciationType.DECLINING_BALANCE}),
+                        max_dep_rate=800, max_premium_rate=400,
+                        expires_at=T0 + 90 * DAY),
+        scope_names=["asset:vehicle:car:ford:pre-1995"])
+    fine = scope_id(reg.scope_name("asset:vehicle:car:ford:pre-1995"))
+    coarse = scope_id(reg.scope_name("asset:vehicle"))
+
+    check_issuance(env, scope=fine, face_units=50_000_000_000, dep_type=2,
+                   dep_rate=700, premium_rate=350, now=T0)
+    with pytest.raises(IssuanceRefused, match="scope not attested"):
+        check_issuance(env, scope=coarse, face_units=50_000_000_000,
+                       dep_type=2, dep_rate=700, premium_rate=350, now=T0)
+
+
+def test_regulator_subtrees_are_public_and_provable_without_a_salt():
+    """Section 4: an insurer advertises its standing, so the leaf is unsalted
+    and the path needs no circuit."""
+    reg, child, _env = _child_insurer()
+    proof = reg.membership_proof(child, "insurer")
+    assert proof is not None and proof.verify()
+    assert proof.leaf == identity_leaf(child)
+    assert reg.membership_proof(mul(G1, 999), "insurer") is None
+
+
+def test_revoking_an_insurer_clears_every_subtree():
+    reg, child, _env = _child_insurer()
+    assert reg.envelope_of(child) is not None
+    cleared = reg.revoke(child)
+    assert cleared == len(reg.sub_roots())
+    assert reg.envelope_of(child) is None
+    assert reg.membership_proof(child, "insurer") is None

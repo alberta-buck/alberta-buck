@@ -72,9 +72,13 @@ from alberta_buck.wallet.issuer import (
     Issuer, IssuedCredential, present_for_registration,
 )
 from alberta_buck.wallet.salt import derive_salt, tree_tag, SALT_DOMAIN
+from alberta_buck.wallet.attributes import (
+    AttributeProof, prove_attributes, verify_attributes,
+)
 
 __all__ = [
     "derive_salt", "tree_tag", "SALT_DOMAIN",
+    "AttributeProof", "prove_attributes", "verify_attributes",
     "kernel_active", "backend",
     "G1", "G2", "ORDER", "add", "mul", "neg", "eq", "pairing", "is_inf",
     "point_to_words", "words_to_point", "scalar_to_word", "word_to_scalar",
