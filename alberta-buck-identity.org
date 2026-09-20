@@ -36,16 +36,20 @@
 Alberta Buck transactions carry provably authentic identity -- without
 exposing it.  Every participant holds an ElGamal ciphertext[fn:9] of their
 identity, backed by a Pointcheval-Sanders rerandomizable signature[fn:10].  A
-citizen with multiple accounts derives an independent, unlinkable credential
-for each -- rerandomizing the signature offline -- yet every credential is
-verifiable as issued by the same authority.  At transaction time, the
+citizen with multiple accounts derives an independent credential presentation
+for each -- blinding the signature offline into a pair that no holder of the
+identity, the issuer included, can test -- yet every presentation is
+verifiable as issued by the same authority.  (That presentation is the A'
+design implemented on branch =feature/a-prime=; its security argument
+awaits independent review, and claims that depend on it are marked so.)  At transaction time, the
 participant re-encrypts under the counterparty's key and produces a
 Chaum-Pedersen proof[fn:7] that the re-encrypted ciphertext contains the same
 identity as the registered credential.  No one sees the plaintext.
 
 Per-transaction verification costs ~29,000 gas (alt_bn128 scalar
 multiplications, no pairings).  One-time credential registration costs
-~235,000 gas (pairing-based PS signature check).  No trusted setup.
+443,892 gas measured (a three-pair pairing product over the credential
+presentation).  No trusted setup.
 
 Identity data resides in three layers: Ethereum contract storage (proof
 chain), the local Holochain wallet (plaintext identity, secret keys), and the
@@ -65,8 +69,9 @@ secret key and an archival node -- without any counterparty's cooperation.
   Every Alberta Buck account holds a cryptographically certified
   identity that is invisible to observers but provably genuine to
   authorized counterparties.  The core design rests on three pillars:
-  the Identity Fountain (offline credential derivation with statistical
-  unlinkability), the two-channel architecture (Ethereum proof chain
+  the Identity Fountain (offline credential derivation whose published
+  presentation hides the identity; the ciphertext lock is computational,
+  under DDH), the two-channel architecture (Ethereum proof chain
   plus Holochain data channel), and the agent-per-account isolation
   model.  Together with the bilateral =approve= / =transfer= flow,
   these give citizens free transactions with verified counterparties,
@@ -95,8 +100,9 @@ secret key and an archival node -- without any counterparty's cooperation.
 
   The Alberta Buck enforces /these/ principles:
   - The freedom to /transact in privacy and peace/ by keeping your identity private between only you
-    and your counterparties (no third party is able to correlate activity between any of your
-    accounts), and
+    and your counterparties (no third party, the identity issuer included, is able to correlate
+    activity between any of your accounts from chain data -- achieved by the A' registration
+    presentation, pending its review), and
   - The confidence that someone /really is who they say they are/ by proving their identity has not
     been forged (you have the ability to vet every counterparty's identity before transacting with
     them).
@@ -118,7 +124,9 @@ secret key and an archival node -- without any counterparty's cooperation.
    operator, no Holochain node, no subpoena served on anyone other than a direct participant can
    break this.  A court must compel a /specific participant/ to decrypt a /specific transaction's
    counterparties'/ identity data.  Every individual's credential must be attacked separately.  The
-   cost to surveil is O(N), not O(1).
+   cost to surveil is O(N), not O(1).  For the registration transcript this holds only with
+   the A' presentation: the earlier published rerandomized signature let anyone holding an
+   identity scalar test every registration against it at no cost.
 
 *** The Identity Fountain
 
@@ -129,8 +137,9 @@ secret key and an archival node -- without any counterparty's cooperation.
     exposed to anyone who notices the link.
 
     The identity fountain solves this.  It gives every citizen the ability to
-    derive unlimited, unlinkable identity credentials -- each independently
-    verifiable as issued by the same authority -- from a single KYC ceremony.
+    derive unlimited account credentials from a single KYC ceremony, each
+    presented in a form that is verifiable as issued by the same authority
+    yet testable by no one -- not even the issuer.
     The construction uses Pointcheval-Sanders (PS) rerandomizable
     signatures[fn:10] over the alt_bn128 curve.
 
@@ -149,9 +158,13 @@ secret key and an archival node -- without any counterparty's cooperation.
      4. Gives Alice the identity scalar ~m~ and signature ~(sigma_1, sigma_2)~.
      5. Publishes the issuance event to the issuer's Holochain source chain.
 
-     The issuer's public key ~(X, Y) = (x * g_2, y * g_2)~ in ~G_2~ is
-     registered in the TrustedIssuersRegistry on Ethereum.  The issuer is now
-     done -- permanently, if desired.
+     The issuer's public key ~(X, Y, Y1) = (x * g_2, y * g_2, y * G)~ -- two
+     points in ~G_2~ plus the ~G_1~ image of ~y~ that holders blind with -- is
+     registered on Ethereum by ~IdentityRegistry.trustIssuer~, which checks
+     ~e(Y1, g_2) = e(G, Y)~ once.  Publishing ~y * G~ places the key in the
+     committed-message form of Pointcheval-Sanders (their Section 6.1); the
+     issuer keeps the signature base ~h~ with unknown discrete logarithm.
+     The issuer is now done -- permanently, if desired.
 
 **** What ~identity_data~ Contains
 
@@ -195,14 +208,14 @@ secret key and an archival node -- without any counterparty's cooperation.
 
      For each new Ethereum account, Alice's Holochain wallet:
 
-     1. Picks a random scalar ~t~ and rerandomizes the PS signature:
-
-        ~sigma' = (t * sigma_1,  t * sigma_2)~
-
-        This ~sigma'~ is a valid PS signature on the same ~m~ under the same
-        issuer public key -- but is /statistically unlinkable/ to ~sigma~ or
-        to any other rerandomization.  No algorithm can correlate ~sigma'~
-        back to ~sigma~.
+     1. Picks fresh random scalars ~a, b~ and /presents/ the PS signature:
+        ~A = a * sigma_1,   B = a * sigma_2 + b * Y1~
+        This ~(A, B)~ presents the same credential on the same ~m~ under the
+        same issuer key, but it is a uniform pair of points: it carries no
+        test that anyone holding ~m~ -- the issuer, a past counterparty --
+        can run.  Rerandomizing alone (~sigma' = t * sigma~) would not do:
+        ~sigma'~ is still a signature on ~m~, and the pairing check
+        identifies it to anyone who knows ~m~ (review finding R1).
 
      2. Generates a fresh identity key pair ~(sk_new, pk_new)~ on alt_bn128.
 
@@ -211,16 +224,19 @@ secret key and an archival node -- without any counterparty's cooperation.
         ~E_new = (r * G,  m * G + r * pk_new)~
 
      4. Computes a non-interactive zero-knowledge proof ~pi~ that ~E_new~
-        encrypts the same ~m~ that ~sigma'~ signs:
-
+        encrypts the same ~m~ that ~(A, B)~ presents, and that she holds the
+        account key:
         #+begin_example
-        "I know (m, t, r) such that:
-          a) e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)   -- valid PS signature
-          b) C = m * G + r * pk_new                       -- ElGamal encryption of m
-          c) R = r * G                                    -- consistent randomness"
+        "I know (m, b, r, sk) such that:
+          a') e(B, g_2) = e(A, X) * e(m * A + b * G, Y)   -- (A, B) presents a credential on m
+          b)  C = m * G + r * pk_new                       -- ElGamal encryption of m
+          c)  R = r * G                                    -- consistent randomness
+          k)  pk_new = sk * G                              -- account key ownership"
         #+end_example
-
-     5. Packages ~(pk_new, E_new, sigma', pi)~ for registration.
+        One commitment covers both hidden credential exponents ~(m, b)~, so
+        no proof field exposes ~m * A~ on its own (review finding R2).
+     5. Packages ~(pk_new, E_new, (A, B), pi)~ for registration and
+        discards ~a~ and ~b~.
 
      This derivation runs entirely on Alice's device.  She can pre-generate a
      hundred credentials in a batch and store them in her Holochain wallet,
@@ -235,34 +251,38 @@ secret key and an archival node -- without any counterparty's cooperation.
      artifact shared across agents is Alice's ~identity_data~ (and
      therefore ~m = H(identity_data)~), which is copied into each new
      agent's Private entry store.  Since ~m~ is committed only inside
-     ElGamal ciphertexts (IND-CPA secure) and PS signatures
-     (statistically rerandomized), no observer on either network can
-     detect that two agents share the same ~m~.
+     ElGamal ciphertexts (IND-CPA secure) and credential presentations
+     (uniform pairs, whatever the identity), no observer on either network
+     can detect that two agents share the same ~m~ -- under DDH for the
+     ciphertexts, unconditionally for the presentations.
 
 **** Registration: One-Time On-Chain Verification
 
      Alice registers the derived credential in the IdentityRegistry:
 
      #+begin_example
-     // Real entry point: register(issuer, pk, E, sigma, proof).  The
+     // Real entry point: register(issuer, pk, E, presentation, proof).  The
      // registrant is msg.sender (NOT a passed address) -- it, the chain, the
-     // registry deployment, and the action/version domain are folded into the
-     // proof's Fiat-Shamir challenge, so a proof cannot be replayed across
-     // addresses, chains, or registries.  A compatibility overload accepts
-     // identityLeaf only when it is zero; callers cannot insert an
-     // unconstrained accumulator leaf.)
+     // registry deployment, and the action/version domain
+     // (AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3) are folded into
+     // the proof's Fiat-Shamir challenge, so a proof cannot be replayed across
+     // addresses, chains, registries or protocol versions.  A compatibility
+     // overload accepts identityLeaf only when it is zero; callers cannot
+     // insert an unconstrained accumulator leaf.
      identityRegistry.register(
          issuer,          // trusted issuer whose PS key signed the credential
-         pk_new,          // identity public key
-         E_new,           // ElGamal ciphertext (4 uint256)
-         sigma_prime,     // rerandomized PS signature (2 G_1 points)
-         pi               // NIZK proof linking sigma' to E_new
+         pk_new,          // identity public key (G_1)
+         E_new,           // ElGamal ciphertext (2 G_1 points)
+         presentation,    // (A, B): the blinded credential (2 G_1 points)
+         pi               // (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
      )                    // (msg.sender == the new account being registered)
      #+end_example
 
-     The contract verifies the PS signature and NIZK proof using the
-     ~ecPairing~ precompile (address ~0x08~), ~ecMul~, and ~ecAdd~.  Gas
-     cost: ~235,000 gas, paid once per account.
+     The contract verifies the credential proof (one three-pair pairing
+     product), the ElGamal and account-key relations and the Fiat-Shamir
+     challenge using the ~ecPairing~ precompile (address ~0x08~), ~ecMul~,
+     and ~ecAdd~.  Gas cost: 443,892 gas measured on the A' branch with an
+     in-process EVM (472,630 before it), paid once per account.
 
      After registration, ~isVerified(alice_new_address) == true~.  The
      credential is stored on-chain as an ElGamal ciphertext and an identity
@@ -272,17 +292,22 @@ secret key and an archival node -- without any counterparty's cooperation.
 **** What the World Sees
 
      Alice creates five accounts over two years.  Each registers a credential
-     ~(pk_i, E_i, sigma'_i, pi_i)~.  An observer can verify:
+     ~(pk_i, E_i, (A_i, B_i), pi_i)~.  An observer can verify:
 
-     - Each ~sigma'_i~ was produced by the known issuer -- the pairing check
-       passes.
-     - Each ~E_i~ encrypts the identity that ~sigma'_i~ signs -- the proof
-       ~pi_i~ confirms it.
-     - Whether any two credentials belong to the same person -- *no*.
+     - Each ~(A_i, B_i)~ presents a credential from the known issuer -- the
+       proof's pairing product passes.
+     - Each ~E_i~ encrypts the identity that ~(A_i, B_i)~ presents -- the
+       same proof confirms it.
+     - Whether any two registrations belong to the same person -- *no*.
 
-     PS rerandomization is /statistically/ unlinkable -- not merely
-     computationally hard to correlate, but information-theoretically
-     impossible.  The credentials contain zero bits of mutual information.
+     Nor can a party who /knows/ Alice's identity scalar do better.  The
+     presentation, and the one point derivable from its proof, are uniform
+     -- the same distribution for every identity, information-theoretically
+     -- and the ElGamal ciphertexts are testable only by breaking DDH.  The
+     earlier design published a rerandomized signature instead, which
+     verified against a known ~m~: a candidate test the issuer and every
+     past counterparty could run over all registrations.  The A'
+     presentation removes it; its review is outstanding.
      Alice's inheritance account, her walking-around-money account, her savings
      account -- each carries the issuer's stamp of authenticity, each is
      cryptographically invisible to the others.
@@ -356,15 +381,16 @@ secret key and an archival node -- without any counterparty's cooperation.
       Holochain wallet.  (See [[*The Identity Fountain][The Identity Fountain]]
       for the full PS construction.)
 
-   2. *Derivation*: For each Ethereum account, Alice's wallet rerandomizes the
-      PS signature, generates a fresh identity key pair, encrypts her identity
-      under the new key using ElGamal, and produces a NIZK proof linking the
-      rerandomized signature to the ciphertext.  This runs entirely offline.
+   2. *Derivation*: For each Ethereum account, Alice's wallet blinds the PS
+      signature into a presentation ~(A, B)~, generates a fresh identity key
+      pair, encrypts her identity under the new key using ElGamal, and
+      produces a NIZK proof linking the presentation to the ciphertext and
+      to the account key.  This runs entirely offline.
 
    3. *Registration*: Alice registers the derived credential
-      ~(pk, E_alice, sigma', pi)~ in the on-chain IdentityRegistry.  The
-      contract verifies the PS signature and NIZK proof via the ~ecPairing~
-      precompile (~235,000 gas, one-time).  After registration,
+      ~(pk, E_alice, (A, B), pi)~ in the on-chain IdentityRegistry.  The
+      contract verifies the credential proof via the ~ecPairing~
+      precompile (443,892 gas measured, one-time).  After registration,
       ~isVerified(alice) == true~.
 
    4. *Re-encryption*: When Alice must identify herself to counterparty Bob
@@ -439,7 +465,7 @@ secret key and an archival node -- without any counterparty's cooperation.
      a single on-chain verifier handles all identity operations.
    - *Precompile efficiency*: per-transaction Chaum-Pedersen verification
      uses ~ecMul~ / ~ecAdd~ (~29,000 gas).  One-time credential registration
-     uses ~ecPairing~ for PS signature verification (~235,000 gas).
+     uses ~ecPairing~ for the credential proof (443,892 gas measured).
    - *No cross-group compatibility issues*: since all participants, issuers,
      and credentials use the same curve, re-encryption between any two
      participants is always algebraically compatible.
@@ -472,7 +498,7 @@ secret key and an archival node -- without any counterparty's cooperation.
     Registered credential (verified at registration via PS signature + NIZK):
       E_alice = (R_a, C_a) = (r_a * G,  r_a * pk_alice + M)
       where M = m * G  (identity encoded as a curve point, m = H(identity_data))
-      Rerandomized PS signature sigma' verified at registration (not consulted again)
+      Credential presentation (A, B) proven at registration (not consulted again)
 
     Alice's re-encryption for Bob:
       E_bob = (R_b, C_b) = (r_b * G,  r_b * pk_bob + M)
@@ -559,22 +585,20 @@ secret key and an archival node -- without any counterparty's cooperation.
 
 **** One-Time (PS Signature + NIZK Verification at Registration)
 
-     | Operation                   | Count | Gas each | Total          |
-     |-----------------------------+-------+----------+----------------|
-     | ~ecPairing~ (precompile)    |   3-4 | 34,000   | 147,000        |
-     | ~ecPairing~ base cost       |     1 | 45,000   | 45,000         |
-     | ~ecMul~ (NIZK verification) |   3-4 | 6,000    | 24,000         |
-     | ~ecAdd~ (NIZK verification) |   3-4 | 150      | 600            |
-     | Calldata + SSTORE overhead  |       |          | ~10,000        |
-     | *Total*                     |       |          | *~235,000 gas* |
+     | Operation (measured, in-process EVM)                      | Gas     |
+     |-----------------------------------------------------------+---------|
+     | ~register~, A' verifier (three pairings, 772 B calldata)  | 443,892 |
+     | ~register~, pre-A' verifier (four pairings, 740 B)        | 472,630 |
+     | ~trustIssuer~ with the ~Y1~ consistency check, once per issuer | 394,115 |
 
-     The NIZK proof linking the PS signature to the ElGamal ciphertext is
+     The NIZK proof linking the presentation to the ElGamal ciphertext is
      a standard Schnorr-family sigma protocol -- /not/ a Groth-Sahai proof.
-     The PS verification relation ~e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)~
-     is /linear/ in ~m~: the public inputs ~sigma'_1, sigma'_2, X, Y, g_2~
-     are fixed curve points, and the secret ~m~ enters linearly via ~m * Y~.
-     A single challenge-response pair binds ~m~ to both the pairing equation
-     and the ElGamal ciphertext.  The pairing is computed by the /verifier/
+     The presentation relation ~e(B, g_2) = e(A, X) * e(m * A + b * G, Y)~
+     is /linear/ in the hidden exponents ~(m, b)~: the public inputs
+     ~A, B, X, Y, g_2~ are fixed curve points, and the secrets enter
+     linearly in the ~G_1~ argument paired with ~Y~.  A single response
+     ~s_m~ binds ~m~ to both the pairing equation and the ElGamal
+     ciphertext.  The pairing is computed by the /verifier/
      on public inputs; the prover demonstrates knowledge of ~m~ via scalar
      responses.  No bilinear-map proof system is needed.
 
@@ -582,34 +606,38 @@ secret key and an archival node -- without any counterparty's cooperation.
 
      #+begin_example
      Public inputs:
-       sigma' = (sigma'_1, sigma'_2)  -- rerandomized PS signature (G_1)
+       (A, B)                         -- credential presentation (G_1)
        E_new  = (R, C)                -- ElGamal ciphertext (G_1)
        pk_new                         -- identity public key (G_1)
-       (X, Y)                         -- issuer public key (G_2)
+       (X, Y)                         -- issuer public key (G_2); Y1 = y*G is used by the holder only
        g_2                            -- generator (G_2)
 
-     Proof:  pi = (e, s_m, s_r)
+     Proof:  pi = (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
 
      Verifier computes:
-       // (a) PS signature check via ecPairing precompile:
-       //     Reconstruct the commitment A = s_m * sigma'_1 - e * sigma'_2
-       //     in G_1, then verify the pairing product equation:
-       A_ps = ecMul(sigma'_1, s_m) + ecMul(sigma'_2, -e)    // 2 ecMul + 1 ecAdd
-       ecPairing([A_ps, Y], [ecMul(sigma'_1, e), X],
-                 [ecMul(sigma'_2, -e), g_2]) == 1            // 3 pairings
-
-       // (b) ElGamal consistency check (pure G_1 arithmetic):
-       //     s_m * G + s_r * pk_new  ==  e * C + T_b
-       //     s_r * G                 ==  e * R + T_r
-       //     where T_b, T_r are the prover's commitments (included in proof)
-
-       // (c) Fiat-Shamir challenge reconstruction:
-       e' = H(sigma', E_new, pk_new, A_ps, T_b, T_r, registrant_address)
+       // (g) guards: A != O, B != O, pk_new != O, R != O; scalars canonical.
+       //     A = O is security critical: the pairing product below then holds for every m.
+       // (fs) Fiat-Shamir challenge reconstruction:
+       e' = H(A, B, R, C, pk_new, C1, T_C, T_R, T_key,
+              msg.sender, chainid, address(this), DOMAIN_v3)
        require(e' == e)
+       // (b), (c) ElGamal consistency (pure G_1 arithmetic):
+       //     s_m * G + s_r * pk_new  ==  e * C + T_C
+       //     s_r * G                 ==  e * R + T_R
+       // (k) account key:
+       //     s_sk * G                ==  T_key + e * pk_new
+       // (a') credential presentation via the ecPairing precompile, three pairs.
+       //     The one commitment C1 = m~*A + b~*G covers both hidden exponents,
+       //     so no proof field reveals m*A on its own; the only derivable
+       //     point is L/e = m*A + b*G, uniform and the same for every m.
+       L = ecMul(A, s_m) + ecMul(G, s_b) - C1                 // 2 ecMul + 2 ecAdd
+       ecPairing([L, Y], [ecMul(A, e), X], [ecMul(B, -e), g_2]) == 1
      #+end_example
 
-     Part (a) uses the ~ecPairing~ precompile (3 pairs: ~147K gas).
-     Parts (b) and (c) use ~ecMul~ / ~ecAdd~ (~30K gas).  Total: ~235K gas.
+     Part (a') is one three-pair pairing product (the pre-A' verifier spent
+     four pairs on an unmerged ~Y~ term).  Parts (b), (c) and (k) use
+     ~ecMul~ / ~ecAdd~.  Total: 443,892 gas measured, including calldata,
+     hashing and storage.
      This is a standard Schnorr-family sigma protocol applied to a linear
      pairing relation -- the same class of proof used in BLS signature
      verification and PS credential presentation protocols.
@@ -636,18 +664,19 @@ secret key and an archival node -- without any counterparty's cooperation.
 
   #+begin_example
   Issuer PS-signs identity m              --> identity is genuine
-  Alice derives (E_alice, sigma', pi)     --> credential is unlinkable
-  PS + NIZK verified at registration      --> credential is issuer-authorized
+  Alice derives (E_alice, (A, B), pi)     --> presentation hides the credential
+  credential proof verified at registration --> credential is issuer-authorized
   E_alice stored in registry              --> contract reads the genuine credential
   Chaum-Pedersen proof verified           --> E_bob encrypts same identity as E_alice
   Only Bob can decrypt E_bob              --> identity revealed only to counterparty
   #+end_example
 
-  Breaking any link requires breaking either the q-SDH assumption (PS
-  signature unforgeability), the discrete logarithm assumption on alt_bn128
-  (Chaum-Pedersen soundness, ElGamal security), or ECDSA (Ethereum
-  transaction authenticity) -- all standard hardness assumptions underpinning
-  Ethereum's own security.
+  Breaking any link requires breaking either PS signature unforgeability in
+  the committed-message key form (the issuer publishes ~y * G~), the
+  discrete logarithm assumption on alt_bn128 (Chaum-Pedersen soundness,
+  ElGamal security; DDH for unlinkability of the ciphertexts), or ECDSA
+  (Ethereum transaction authenticity).  All but the PS assumption underpin
+  Ethereum's own security; the PS assumption is the credential scheme's own.
 
 
 ** Attack 1: Alice Substitutes a False Identity for Bob
@@ -731,19 +760,21 @@ secret key and an archival node -- without any counterparty's cooperation.
 
 *** Why It Fails
 
-    The IdentityRegistry verifies the Pointcheval-Sanders signature against
-    trusted issuer public keys registered in the TrustedIssuersRegistry (part
-    of the ERC-3643 framework[fn:8]).  Registration checks the pairing
-    equation:
+    The IdentityRegistry verifies the Pointcheval-Sanders credential proof
+    against trusted issuer public keys it stores itself (~trustIssuer~; the
+    ERC-3643 framework[fn:8] names the same role TrustedIssuersRegistry).
+    Registration checks the pairing equation:
 
     #+begin_example
-    e(sigma'_1, X + m * Y) == e(sigma'_2, g_2)
+    e(B, g_2) == e(A, X) * e(m * A + b * G, Y)
     #+end_example
 
-    where ~(X, Y)~ is the trusted issuer's public key in ~G_2~.  Alice does
-    not know the issuer's secret key ~(x, y)~, so she cannot produce a
-    ~sigma'~ that satisfies this equation for any ~m~ -- let alone for
-    ~m_fake~.  The PS signature is unforgeable under the q-SDH assumption.
+    where ~(X, Y)~ is the trusted issuer's public key in ~G_2~.  An accepting
+    proof extracts ~(m, b)~ with ~(A, B - b * Y1)~ a plain PS signature on
+    ~m~.  Alice does not know the issuer's secret key ~(x, y)~, so she cannot
+    produce a presentation with an accepting proof for any ~m~ she was not
+    issued -- let alone for ~m_fake~.  The PS signature is unforgeable in the
+    committed-message key form.
 
     Even if Alice could somehow produce a valid-looking PS signature (she
     cannot), the NIZK proof ~pi~ must prove that the ElGamal ciphertext
@@ -755,7 +786,7 @@ secret key and an archival node -- without any counterparty's cooperation.
 
 *** What the Contract Sees
 
-    ~registerCredential()~ reverts: "Invalid issuer signature."  Alice is not
+    ~register()~ reverts: "bad presentation".  Alice is not
     registered; ~isVerified(alice) == false~.  She cannot participate in any
     BUCK operation requiring identity.
 
@@ -957,11 +988,12 @@ secret key and an archival node -- without any counterparty's cooperation.
     registered credential in the IdentityRegistry.
 
     Each credential was derived independently through the Identity Fountain:
-    different rerandomized PS signatures, different identity key pairs,
-    different ElGamal ciphertexts with independent randomness.  PS
-    rerandomization is /statistically/ unlinkable -- not merely
-    computationally hard to correlate, but information-theoretically
-    impossible.  The credentials contain zero bits of mutual information.
+    different credential presentations, different identity key pairs,
+    different ElGamal ciphertexts with independent randomness.  The
+    presentations are uniform pairs whatever the identity --
+    information-theoretically independent of it -- and the ciphertexts are
+    unlinkable under DDH.  Knowing Alice's identity scalar does not help:
+    the presentation fails the signature test for every candidate.
 
     Eve's only path to linking accounts is off-chain analysis: timing, amounts,
     behavioral patterns.  The cryptographic identity layer gives her nothing.
@@ -999,7 +1031,7 @@ secret key and an archival node -- without any counterparty's cooperation.
     account used a different \( m \), the two-channel verification
     would break: Bob couldn't verify that the =identity_data= he
     received matches what the issuer certified.  The Identity Fountain
-    protects the /credential wrapping/ (\( \sigma' \), \( pk \),
+    protects the /credential wrapping/ (\( (A, B) \), \( pk \),
     \( E \)), not the identity scalar itself.
 
     The privacy boundary is:
@@ -1007,14 +1039,21 @@ secret key and an archival node -- without any counterparty's cooperation.
     | Observer                | Can link accounts? | Why?                                           |
     |-------------------------+--------------------+------------------------------------------------|
     | Eve (passive, on-chain) | NO                 | All public artifacts are independent random    |
-    |                         |                    | values (statistical unlinkability)              |
+    |                         |                    | values (presentation: information-theoretic;   |
+    |                         |                    | ciphertext: DDH)                               |
     | Bob (authorized)        | Learns one account | By design -- the purpose of ~approve~          |
     | Bob + Carol (colluding) | Yes, via \( M \)   | But both already know Alice's name from        |
     |                         |                    | =identity_data= exchange                       |
     | Issuer (on-chain only)  | NO                 | Knows every \( M \) it issued, yet cannot      |
     |                         |                    | plaintext-check \( M \) against any on-chain   |
     |                         |                    | \( E \) (IND-CPA / DDH) nor recognise its      |
-    |                         |                    | rerandomised PS credential (statistical)       |
+    |                         |                    | test its credential presentation, which is     |
+    |                         |                    | uniform for every identity (A'; the pre-A'     |
+    |                         |                    | rerandomised signature was testable)          |
+    | Counterparty who learned| NO (other accounts)| Knowing \( m \) tests neither a presentation   |
+    | \( m \) (Bob, later)     |                    | nor, under DDH, a ciphertext; nor does it let  |
+    |                         |                    | him register under \( m \) (needs \( \sigma \), |
+    |                         |                    | fresh \( b \))                                 |
     | Issuer (given a receipt)| Names the person   | A surrendered receipt carries account \(       |
     |                         |                    | \leftrightarrow M \); the issuer maps \( M \)  |
     |                         |                    | to the real person -- it /verifies/ a link     |
@@ -1055,6 +1094,12 @@ secret key and an archival node -- without any counterparty's cooperation.
     cryptography is eternal), but the contract refuses to accept them because
     her registration is no longer active.  The revocation is a separate on-chain
     state, controlled by the trusted issuer.
+
+    Per-address revocation needs an address the issuer has learned
+    legitimately -- a surrendered receipt, a disclosure.  Under the A'
+    presentation the issuer cannot find a holder's addresses from chain
+    data, so the route that invalidates every derived account without
+    linking them is the epoch expiry described above.
 
 *** What the Contract Sees
 
@@ -1118,54 +1163,51 @@ secret key and an archival node -- without any counterparty's cooperation.
 
 *** Link 1: PS Signature (Issuer Authority)
 
-    Alice has ~(m, sigma_1, sigma_2)~ from the issuer.  She produces
-    ~sigma' = (t * sigma_1, t * sigma_2)~.
+    Alice has ~(m, sigma_1, sigma_2)~ from the issuer.  She produces the
+    presentation ~(A, B) = (a * sigma_1, a * sigma_2 + b * Y1)~.
 
-    *Can she produce a ~sigma'~ that signs a different ~m_fake~?*
+    *Can she produce a presentation, with an accepting proof, for a
+    different ~m_fake~?*
 
-    PS verification checks:
-
-    #+begin_example
-    e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)
-    #+end_example
-
-    Rearranging:
+    The registration proof is specially sound: two accepting transcripts
+    extract ~(m*, b*)~ such that
 
     #+begin_example
-    e(sigma'_1, Y)^m  =  e(sigma'_2, g_2) * e(sigma'_1, X)^(-1)
+    e(A, X + m* * Y) = e(B - b* * Y1, g_2)
     #+end_example
 
-    The right side is fixed by ~sigma'~ (which Alice chose).  The left side is
-    determined by ~m~.  For ~sigma'~ derived from the issuer's signature on
-    ~m~, this equation holds only for the real ~m~.  Alice cannot produce a
-    valid PS signature on any ~m_fake~ without the issuer's secret key
-    ~(x, y)~.  *Blocked by q-SDH unforgeability.*
+    i.e. ~(A, B - b* * Y1)~ is a plain PS signature on ~m*~.  A presentation
+    accepted for ~m_fake~ is therefore a PS forgery on ~m_fake~ under the
+    issuer's key.  Alice cannot produce one without the issuer's secret key
+    ~(x, y)~.  *Blocked by PS unforgeability (committed-message key form).*
 
 *** Link 2: NIZK Proof (Binding PS Signature to ElGamal Ciphertext)
 
-    Alice provides ~(sigma', E_new, pk_new, pi)~.  The NIZK proof proves
-    knowledge of ~(m, r)~ satisfying:
+    Alice provides ~((A, B), E_new, pk_new, pi)~.  The NIZK proof proves
+    knowledge of ~(m, b, r, sk)~ satisfying:
 
     #+begin_example
-    a) e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)   -- sigma' signs m
-    b) C = m * G + r * pk_new                       -- E_new encrypts m
-    c) R = r * G                                    -- consistent randomness
+    a') e(B, g_2) = e(A, X) * e(m * A + b * G, Y)   -- (A, B) presents m
+    b)  C = m * G + r * pk_new                       -- E_new encrypts m
+    c)  R = r * G                                    -- consistent randomness
+    k)  pk_new = sk * G                              -- account key ownership
     #+end_example
 
-    *Can she use a valid ~sigma'~ (signing ~m~) but create ~E_new~ encrypting
+    *Can she use a valid presentation (of ~m~) but create ~E_new~ encrypting
     ~m_fake~?*
 
     The sigma protocol uses a single response scalar ~s_m~ that must
     simultaneously satisfy conditions (a) and (b):
 
-    - For condition (a): ~s_m~ encodes the real ~m~ (the value ~sigma'~ signs)
+    - For condition (a'): ~s_m~ encodes the real ~m~ (the value the presentation carries)
     - For condition (b): ~s_m~ encodes whatever is in ~E_new~
 
     If ~E_new~ encrypts ~m_fake != m~, no single ~s_m~ satisfies both checks.
     *Blocked by sigma protocol soundness.*
 
     *Can she forge the Fiat-Shamir challenge?*  The challenge
-    ~e = H(sigma', E_new, pk_new, commitments)~ depends on all public inputs.
+    ~e = H((A, B), E_new, pk_new, commitments, registrant, chainid, registry,
+    domain)~ depends on all public inputs and the context.
     Finding inputs that yield a favorable challenge requires a keccak256
     preimage attack.  *Blocked by random oracle assumption.*
 
@@ -1189,31 +1231,32 @@ secret key and an archival node -- without any counterparty's cooperation.
 
 *** Critical Edge Case: The Trivial Signature
 
-    If Alice sets ~sigma' = (O, O)~ where ~O~ is the point at infinity:
+    If Alice sets ~A = O~, the point at infinity, the credential term of the
+    proof's pairing product vanishes:
 
     #+begin_example
-    e(O, X + m * Y) = 1   (pairing with identity is trivial)
-    e(O, g_2)       = 1   (same)
+    e(s_m * O + s_b * G - C1, Y) * e(e * O, X) * e(-e * B, g_2)
+      = e(s_b * G - C1, Y) * e(-e * B, g_2)
     #+end_example
 
-    The pairing equation ~1 = 1~ holds *for any ~m~*.  Alice could register a
-    credential encrypting any ~m_fake~ she wants, produce a valid-looking NIZK
-    proof (because condition (a) is trivially satisfied), and the verification
-    would pass.
+    which ~B = b * Y1~ and ~C1 = b~ * G~ satisfy *for any ~m~*.  Alice could
+    register a credential encrypting any ~m_fake~ she wants, produce a
+    valid-looking NIZK proof (because condition (a') is trivially
+    satisfied), and the verification would pass.
 
-    She achieves this by picking ~t = 0~ in the rerandomization:
-    ~sigma' = (0 * sigma_1, 0 * sigma_2) = (O, O)~.
+    She achieves this by picking ~a = 0~ in the presentation:
+    ~A = 0 * sigma_1 = O~.  (The earlier published form met the same case as
+    ~t = 0~, ~sigma' = (O, O)~.)
 
-    *The fix is standard*: the PS signature specification requires
-    ~sigma'_1 != O~.  The registration contract must check this before
-    evaluating the pairing:
+    *The fix is standard*: the registration contract must reject ~A = O~
+    (and ~B = O~) before evaluating the pairing:
 
     #+begin_example
-    require(sigma_prime[0] != 0 || sigma_prime[1] != 0, "Degenerate signature");
+    require(!isInfinity(A) && !isInfinity(B), "Degenerate presentation");
     #+end_example
 
     On BN254, ~G_1~ has prime order (cofactor 1), so there are no small-order
-    points.  The identity check ~sigma'_1 != O~ is the /only/ degenerate case.
+    points.  The identity check ~A != O~ is the /only/ degenerate case.
 
     *Without this check, the entire fountain is broken.  With it, the system
     is sound.*
@@ -1229,10 +1272,13 @@ secret key and an archival node -- without any counterparty's cooperation.
     the twist curve.
 
     *Eve copies Alice's registered credential*: Eve can read
-    ~(pk, E, sigma', pi)~ from the chain and re-register it for her own
-    address.  But Eve cannot /use/ it -- the Chaum-Pedersen proof requires
-    knowledge of ~sk_alice~ (condition 1: ~pk_alice = sk_alice * G~).  A
-    stolen credential is useless without the corresponding secret key.
+    ~(pk, E, (A, B), pi)~ from the chain.  She cannot re-register it: the
+    proof is bound to Alice's address, chain and registry, and a fresh proof
+    needs ~sk~ (condition k) and the blinding ~b~, which never left Alice's
+    wallet.  Nor can a counterparty who has learned ~m~ from a receipt
+    register under it: knowing ~m~ gives neither ~sigma~ nor ~b~ (review
+    finding R3, closed by the A' presentation under an honest issuer).  A
+    copied credential is useless without the corresponding secrets.
 
     *Alice shares raw credential material*: Alice can give ~(m, sigma)~ to
     an accomplice, who can then derive valid credentials containing Alice's
@@ -1248,9 +1294,9 @@ secret key and an archival node -- without any counterparty's cooperation.
     unforgeability, NIZK soundness, Chaum-Pedersen soundness -- chain together
     so that breaking any link requires breaking a standard hardness assumption.
 
-    One critical implementation requirement: ~sigma'_1 != O~ must be checked
-    at credential registration.  This is a standard requirement of the
-    Pointcheval-Sanders scheme and costs negligible gas.
+    One critical implementation requirement: ~A != O~ (and ~B != O~) must be
+    checked at credential registration; at ~A = O~ the credential relation
+    holds for every ~m~.  The check costs negligible gas.
 
 
 ** Summary: Why the Scheme Defeats All Attacks
@@ -1265,23 +1311,27 @@ secret key and an archival node -- without any counterparty's cooperation.
    Therefore:          E_bob must encrypt Alice's real identity
    Alice cannot:       supply a different E_alice (contract reads from storage)
    Alice cannot:       produce a valid proof for different M (soundness)
-   Alice cannot:       forge the issuer's PS signature (q-SDH unforgeability)
-   Alice cannot:       link her accounts to each other (PS rerandomization)
+   Alice cannot:       forge the issuer's PS signature (PS unforgeability, committed-message key)
+   Alice cannot:       link her accounts to each other (hiding presentation; DDH for the ciphertexts)
+   Issuer cannot:      test a registration against an identity it certified (presentation is uniform)
    Bob cannot:         produce a different plaintext (ElGamal decryption is deterministic)
    Eve cannot:         decrypt E_bob (she lacks sk_bob)
-   Eve cannot:         link Alice's accounts (statistical unlinkability)
+   Eve cannot:         link Alice's accounts (presentation: information-theoretic; ciphertext: DDH)
    #+end_example
 
    Three independent hardness assumptions protect the system:
-   1. *PS signature unforgeability* (q-SDH assumption): prevents forged
-      credentials
-   2. *Discrete logarithm hardness* (alt_bn128): prevents false
-      Chaum-Pedersen proofs and unauthorized ElGamal decryption
+   1. *PS signature unforgeability* in the committed-message key form
+      (Pointcheval-Sanders 2016, Section 6.1; the issuer publishes ~y * G~):
+      prevents forged credentials and forged registrations
+   2. *Discrete logarithm hardness* (alt_bn128), with DDH for the
+      unlinkability of ciphertexts: prevents false Chaum-Pedersen proofs
+      and unauthorized ElGamal decryption
    3. *ECDSA unforgeability* (secp256k1): authenticates Ethereum transactions
 
-   All three assumptions also underpin Ethereum itself.  If any breaks,
-   Ethereum's own security fails first -- the Alberta Buck identity system
-   does not introduce any novel cryptographic assumptions.
+   DLog, DDH and ECDSA also underpin Ethereum itself.  The PS assumption is
+   the credential scheme's own, in the key form that publishing ~y * G~
+   requires; the A' presentation that rests on it is implemented on branch
+   =feature/a-prime= and awaits independent review.
 
 
 * Identity Visibility Modes
@@ -1997,8 +2047,8 @@ secret key and an archival node -- without any counterparty's cooperation.
    transaction preparation:
 
    - *Credential derivation*: Alice's PS-signed identity ~(m, sigma)~ lives on
-     her Holochain source chain.  For each new account, the hApp rerandomizes
-     the PS signature, generates a fresh key pair, creates an ElGamal
+     her Holochain source chain.  For each new account, the hApp blinds the
+     PS signature into a presentation, generates a fresh key pair, creates an ElGamal
      encryption, and computes the NIZK proof.  This runs entirely offline and
      can be batched -- Alice can pre-generate credentials for future accounts.
 
@@ -2008,7 +2058,7 @@ secret key and an archival node -- without any counterparty's cooperation.
      read it.  This is the master copy from which ~m = H(identity_data)~ can
      always be recomputed.
 
-   - *Credential storage*: Each derived credential ~(pk, E_alice, sigma', pi,
+   - *Credential storage*: Each derived credential ~(pk, E_alice, (A, B), pi,
      sk)~ is also stored as a Private entry on the agent's source chain.  The
      identity private key ~sk~ (an alt_bn128 scalar) is stored alongside the
      credential.  The ElGamal ciphertext binds ~m~ to the credential; the
@@ -2064,7 +2114,7 @@ secret key and an archival node -- without any counterparty's cooperation.
     - The hApp DNA is the same (same code, same hash), but the agent
       identity is distinct.
     - Alice copies her ~identity_data~ into the new agent's Private store
-      and derives a credential from it (rerandomizing her PS signature,
+      and derives a credential from it (blinding her PS signature into a presentation,
       generating a fresh alt_bn128 key pair, encrypting via ElGamal,
       computing the NIZK proof).
 
@@ -2086,7 +2136,7 @@ secret key and an archival node -- without any counterparty's cooperation.
 
     *What is NOT shared across agents*: Holochain key pairs, source chain
     entries, Ethereum addresses, alt_bn128 identity key pairs, ElGamal
-    ciphertexts, PS signature rerandomizations, NIZK proofs.  *What IS
+    ciphertexts, PS credential presentations, NIZK proofs.  *What IS
     shared* (locally, within Alice's wallet, never on any network): Alice's
     plaintext ~identity_data~ and the master PS signature ~(m, sigma)~ from
     the issuer.
@@ -2117,7 +2167,7 @@ secret key and an archival node -- without any counterparty's cooperation.
    |                       | Constructs full receipt on Holochain                     |
    | Sender (Alice)        | Knows her own identity, knows Bob's (from his approve)   |
    |                       | Constructs full receipt on Holochain                     |
-   | Holochain hApp        | Derives credentials (PS rerandomization + NIZK)          |
+   | Holochain hApp        | Derives credentials (PS presentation + NIZK)             |
    |                       | Re-encrypts credential + generates proof locally         |
    |                       | Stores encrypted receipts on source chains               |
    |                       | Code identified by DNA hash (auditable)                  |
@@ -2308,13 +2358,13 @@ secret key and an archival node -- without any counterparty's cooperation.
         where m = H(identity_data)
      3. Alice receives (m, sigma) and stores in Holochain wallet
      4. Alice's wallet derives a credential for this account (offline):
-        - Rerandomizes PS signature: sigma' = (t * sigma_1, t * sigma_2)
+        - Presents the PS signature: (A, B) = (a * sigma_1, a * sigma_2 + b * Y1)
         - Generates fresh identity key pair (sk_alice, pk_alice)
         - Encrypts: E_alice = (r * G,  m * G + r * pk_alice)
-        - Computes NIZK proof pi linking sigma' to E_alice
-     5. Registers on-chain (~235K gas):
-        identityRegistry.registerCredential(
-            alice_wallet, pk_alice, E_alice, sigma', pi)
+        - Computes NIZK proof pi linking (A, B) to E_alice and pk_alice
+     5. Registers on-chain (443,892 gas measured):
+        identityRegistry.register(
+            issuer, pk_alice, E_alice, (A, B), pi)   // msg.sender = alice_wallet
      6. identityRegistry.isVerified(alice_wallet) == true
 
    Pool operator Bob:
@@ -2603,16 +2653,16 @@ secret key and an archival node -- without any counterparty's cooperation.
 
    | Operation                                | Cost (~gas)  | When             |
    |------------------------------------------+--------------+------------------|
-   | ~registerCredential~ with PS verify      | ~235,000 gas | Once per account |
-   | (PS pairing: ~181K + NIZK: ~44K)         |              |                  |
+   | ~register~ with the credential proof     | 443,892 gas  | Once per account |
+   | (three pairings + relations, measured)   |              |                  |
    | ~approve~ with Chaum-Pedersen verify     | ~75,000 gas  | Per approval     |
    | (proof verify: ~29K + std approve: ~46K) |              |                  |
    | ~BuckTransferReceipt~ event              | ~2,000 gas   | Per transfer     |
    | (2 indexed addresses + 3 uint256)        |              |                  |
 
    Credential registration uses the ~ecPairing~ precompile to verify the
-   Pointcheval-Sanders signature and NIZK proof (~235,000 gas, once per
-   account).  The Chaum-Pedersen proof verification uses ~ecMul~ / ~ecAdd~
+   Pointcheval-Sanders credential proof (443,892 gas measured on the A'
+   branch, once per account).  The Chaum-Pedersen proof verification uses ~ecMul~ / ~ecAdd~
    (~29,000 gas per counterparty pair).  Subsequent transfers emit only the
    minimal receipt event (~2,000 gas) with no additional proof work.
 
@@ -2685,7 +2735,7 @@ secret key and an archival node -- without any counterparty's cooperation.
       Chaum-Pedersen layer continues on alt_bn128 (or also migrates).
       The architecture's separation of registration-time pairings from
       transaction-time scalar multiplications makes this migration
-      straightforward -- only the ~registerCredential~ function changes.
+      straightforward -- only the ~register~ verifier changes.
 
    The ~100-bit pairing security is adequate for the current threat model.
    The practical cost of a tower-NFS attack on BN254 pairings remains far
@@ -2706,8 +2756,8 @@ secret key and an archival node -- without any counterparty's cooperation.
   complexity.  The comparison table shows ElGamal Chaum-Pedersen wins
   on per-transaction gas (~29K vs. ~200K+ for SNARK-based
   alternatives), requires no trusted setup, and generates proofs
-  instantaneously.  Combined with PS rerandomizable signatures for
-  one-time credential registration (~235K gas), the system achieves
+  instantaneously.  Combined with the PS credential presentation for
+  one-time registration (443,892 gas measured), the system achieves
   both cross-account unlinkability and per-transaction re-encryption
   correctness without the gas burden or trusted setup of alternatives.
 
@@ -2806,9 +2856,11 @@ secret key and an archival node -- without any counterparty's cooperation.
      these properties."  Alberta Buck needs "this ciphertext contains my
      specific issuer-certified identity."  The latter is a re-encryption
      correctness proof, not a selective disclosure proof.
-   - *Cross-account unlinkability is already solved*: Pointcheval-Sanders
-     rerandomizable signatures provide unlinkable credential derivation for
-     different accounts.  Within a single account, re-encryptions share a
+   - *Cross-account unlinkability is addressed by the A' presentation*:
+     Pointcheval-Sanders signatures, blinded into a presentation, provide
+     unlinkable credential derivation for different accounts (rerandomization
+     alone does not: a rerandomized signature is testable by anyone holding
+     the identity scalar).  Within a single account, re-encryptions share a
      common Ethereum address regardless of the credential scheme, so BBS+
      presentation unlinkability adds nothing.
    - BBS+ could complement Chaum-Pedersen in the future -- e.g., for
@@ -2869,9 +2921,9 @@ secret key and an archival node -- without any counterparty's cooperation.
 
    ElGamal Chaum-Pedersen wins on per-transaction gas cost, has zero setup
    requirements, generates proofs instantly, supports targeted decryption, and
-   requires minimal implementation.  Combined with Pointcheval-Sanders
-   rerandomizable signatures for credential derivation (one-time ~235K gas at
-   registration), the system achieves both cross-account unlinkability and
+   requires minimal implementation.  Combined with the Pointcheval-Sanders
+   credential presentation for credential derivation (443,892 gas measured,
+   once at registration), the system achieves both cross-account unlinkability and
    per-transaction re-encryption correctness -- without the gas burden or
    trusted setup of SNARK-based alternatives.
 
@@ -2928,8 +2980,12 @@ https://eips.ethereum.org/EIPS/eip-3643
 Pointcheval, D. and Sanders, O. "Short Randomizable Signatures."
 CT-RSA 2016, LNCS 9610, pp. 111-126.
 Rerandomizable signatures: given a valid signature sigma on message m,
-anyone can compute sigma' = (t * sigma_1, t * sigma_2) that is a valid,
-statistically unlinkable signature on the same m.  Verification uses
+anyone can compute sigma' = (t * sigma_1, t * sigma_2) that is a valid
+signature on the same m, distributed as a fresh one.  It is not hidden
+from anyone who holds m, which is why Alberta Buck publishes the blinded
+presentation (A, B) = (a * sigma_1, a * sigma_2 + b * y * G) with a proof
+instead; Section 6.1 of the paper (signatures on committed messages)
+publishes y * G as that design does.  Verification uses
 a bilinear pairing equation, compatible with Ethereum's alt_bn128 (BN254)
 ecPairing precompile.
 
