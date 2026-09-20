@@ -539,13 +539,6 @@ Table of Contents
   │ print(f"G_2 generator:     (pair of FQ2 elements)")
   └────
 
-  ┌────
-  │ wallet crypto backend: kernel (buck_core.buck_identity)
-  │ BN254 curve order: 21888242871839275222246405745257275088548364400416034343698204186575808495617
-  │ G_1 generator:     (     1...,      2...)
-  │ G_2 generator:     (pair of FQ2 elements)
-  └────
-
 
 3 Issuer Key Generation
 ═══════════════════════
@@ -577,12 +570,6 @@ Table of Contents
   │ print(f"  PK = (X, Y, Y1)         -- X, Y in G_2; Y1 = y*G in G_1 (trustIssuer checks it against Y)")
   └────
 
-  ┌────
-  │ Issuer PS key pair generated.
-  │   sk = (x, y)             -- two secret scalars
-  │   PK = (X, Y, Y1)         -- X, Y in G_2; Y1 = y*G in G_1 (trustIssuer checks it against Y)
-  └────
-
 
 3.1 Same Operation via the Wallet API
 ─────────────────────────────────────
@@ -606,11 +593,6 @@ Table of Contents
   │ assert ps_key_consistent(issuer_obj.pk_X, issuer_obj.pk_Y, issuer_obj.pk_Y1)
   │ print(f"Wallet API: {issuer_obj.issuer_id!r} @ 0x{issuer_obj.issuer_addr:040x}")
   │ print(f"  pk_X, pk_Y, pk_Y1 match the raw points above; ps_key_consistent: True")
-  └────
-
-  ┌────
-  │ Wallet API: 'atb-financial-ca' @ 0xa7b00000000000000000000000000000000a7b00
-  │   pk_X, pk_Y, pk_Y1 match the raw points above; ps_key_consistent: True
   └────
 
 
@@ -681,14 +663,6 @@ Table of Contents
   │ print(f"  sigma_2 = {pt(sigma[1])}")
   └────
 
-  ┌────
-  │ Identity scalar m = H(identity_data):
-  │   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
-  │ PS signature sigma:
-  │   sigma_1 = (194876..., 629808...)
-  │   sigma_2 = (359670..., 936863...)
-  └────
-
 
 4.3 Verify the PS Signature (Issuer Self-Check)
 ───────────────────────────────────────────────
@@ -717,16 +691,6 @@ Table of Contents
   │ print(f"  identity_data  = '{alice_identity_data[:40]}...'")
   └────
 
-  ┌────
-  │ PS signature verified: e(sigma_1, X + m*Y) == e(sigma_2, g_2)
-  │ 
-  │ Issuer gives Alice:
-  │   m              = 6446313962173165014188361468977035479170665192834402473818305319846425860127
-  │   sigma          = (sigma_1, sigma_2)  -- PS signature
-  │   identity_data  = '{"date_of_birth":"1992-03-15","epoch":42...'
-  └────
-
-
   *How to read the output:* "PS signature verified" means both sides of
   the pairing equation produce the same element in \( G_T \).  If \( m
   \) were wrong (e.g., tampered identity data), the two pairings would
@@ -751,13 +715,6 @@ Table of Contents
   │ print(f"  (The two G_T elements differ -- the pairing detects the mismatch.)")
   │ print(f"  Any change to identity_data produces a different m, which")
   │ print(f"  makes the pairing equation fail.  The signature is unforgeable.")
-  └────
-
-  ┌────
-  │ PS verify with wrong m: False
-  │   (The two G_T elements differ -- the pairing detects the mismatch.)
-  │   Any change to identity_data produces a different m, which
-  │   makes the pairing equation fail.  The signature is unforgeable.
   └────
 
 
@@ -793,12 +750,6 @@ Table of Contents
   │ print(f"Wallet API: cred.m == m_alice : {cred.m == m_alice}")
   │ print(f"  ps_verify(sigma, m_alice)   : {ok}")
   │ print(f"  ps_verify(sigma, m_fake)    : {ok_bad}")
-  └────
-
-  ┌────
-  │ Wallet API: cred.m == m_alice : True
-  │   ps_verify(sigma, m_alice)   : True
-  │   ps_verify(sigma, m_fake)    : False
   └────
 
 
@@ -865,15 +816,6 @@ Table of Contents
   │ print(f"Presentation:      masked equation with (m_alice, b) -> {masked}")
   └────
 
-  ┌────
-  │ Rerandomized pair: raw PS test with m_alice -> True
-  │   (a candidate test for anyone holding m: never published)
-  │ Presentation A = (554544..., 429626...)  B = (622938..., 732521...)
-  │ Presentation:      raw PS test with m_alice -> False
-  │ Presentation:      masked equation with (m_alice, b) -> True
-  └────
-
-
   *How to read the output:* Three lines to check.  The rerandomized pair
   passes the raw test with Alice's \( m \): whoever holds \( m \) can
   identify it, which is why it stays in the wallet.  The presentation
@@ -923,21 +865,6 @@ Table of Contents
   │ print(f"\nAlice decrypts: C - sk*R = {pt(M_check)}  (matches M)")
   └────
 
-  ┌────
-  │ Fresh key pair for this Ethereum account:
-  │   sk_alice = 15971810906457614992647467534080057746179739969695951946612261292369424414341
-  │   pk_alice = (528456..., 822195...)
-  │ 
-  │ ElGamal ciphertext E_alice = (R, C):
-  │   R = r*G    = (888939..., 711304...)
-  │   C = m*G+r*pk = (  8230..., 734858...)
-  │ 
-  │ Message point M = m*G:
-  │   M = (739132..., 937433...)
-  │ 
-  │ Alice decrypts: C - sk*R = (739132..., 937433...)  (matches M)
-  └────
-
   *How to read the output:* The last two lines show the decrypted point
   \( C - sk \cdot R \) and the original \( M \).  Their coordinate
   fragments must match – this confirms the ciphertext is well-formed.
@@ -959,14 +886,6 @@ Table of Contents
   │ print(f"  M_real  = {pt(M_alice)}")
   │ print(f"  Match: {eq(M_wrong, M_alice)}")
   │ print(f"  (Completely different point -- no information about m is leaked.)")
-  └────
-
-  ┌────
-  │ Eve decrypts with wrong key:
-  │   M_wrong = (452219...,  77982...)
-  │   M_real  = (739132..., 937433...)
-  │   Match: False
-  │   (Completely different point -- no information about m is leaked.)
   └────
 
 
@@ -1011,14 +930,6 @@ Table of Contents
   │ print(f"  C1  = {pt(proof_w.C1)}   (m~*A + b~*G -- never m~*A on its own)")
   └────
 
-  ┌────
-  │ Registration proof pi = (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
-  │   e   = 1167746862054078205881369054665722870883503658613180445115672387539759578632
-  │   s_m = 1207819567465839872297250109885096115057131536627177472776646978059733573980
-  │   s_b = 3934063700890374532688957826652229484565895692061300361369211223870013398415
-  │   C1  = (752165..., 546410...)   (m~*A + b~*G -- never m~*A on its own)
-  └────
-
 
 6 Registration – On-Chain Verification
 ══════════════════════════════════════
@@ -1050,15 +961,22 @@ Table of Contents
   checks relations among them with pairings and scalar multiplications;
   it holds no key and decrypts nothing.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Argument                                                         What it is                                                            What the EVM (and every archive node) can learn from it                                                                                                                                                                                                                                                              
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   `issuer'                                                         The issuer's Ethereum address                                         Which trust anchor certified the holder.  Public by design; it narrows the anonymity set to that issuer's clients, nothing more.                                                                                                                                                                                     
-   `pk'                                                             A fresh account key \( sk \cdot G \), sampled per account             Nothing about the identity: it is independent of \( m \).                                                                                                                                                                                                                                                            
-   `E_alice' \( = (rG, mG + r\,pk) \)                               ElGamal ciphertext of the identity point under the account's own key  The plaintext needs \( sk \), never sent.  Testing whether it encrypts a candidate \( M_i \) is the DDH plaintext-checking problem.                                                                                                                                                                                  
-   `(A, B)' \( = (a\sigma_1,\ a\sigma_2 + bY_1) \)                  The blinded presentation of the credential                            A uniform pair of points, the same distribution for every identity.  Not a signature anyone can verify; \( \sigma \) itself is never published.                                                                                                                                                                      
-   `pi' \( = (e, s_m, s_b, s_r, s_{sk}, C_1, T_C, T_R, T_{key}) \)  The zero-knowledge proof                                              Each response is a secret one-time nonce plus a multiple of the witness (\( s_m = \tilde m + e m \)), so it is uniform whatever \( m \) is; the commitments are simulatable from public values; the only credential-side point derivable is \( P = mA + bG \), which every candidate identity explains equally well. 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Argument                                         What it is                            What the EVM (and every archive node) can learn from it                         
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `issuer'                                         The issuer's Ethereum address         Which trust anchor certified the holder.  Public by design; it                  
+                                                                                          narrows the anonymity set to that issuer's clients, nothing more.               
+   `pk'                                             A fresh account key \( sk \cdot G \)  Nothing about the identity: it is independent of \( m \).                       
+   `E_alice' \( = (rG, mG + r\,pk) \)               ElGamal ciphertext of the identity    The plaintext needs \( sk \), never sent.  Testing whether it encrypts          
+                                                    point under the account's own key     a candidate \( M_i \) is the DDH plaintext-checking problem.                    
+   `(A, B)' \( = (a\sigma_1,\ a\sigma_2 + bY_1) \)  The blinded presentation of the       A uniform pair of points, the same distribution for every identity.             
+                                                    credential                            Not a signature anyone can verify; \( \sigma \) itself is never published.      
+   `pi' \( = (e, s_m, s_b, s_r, s_{sk}, \)          The zero-knowledge proof              Each response is a secret one-time nonce plus a multiple of the                 
+   \( C_1, T_C, T_R, T_{key}) \)                                                          witness (\( s_m = \tilde m + e m \)), so it is uniform whatever \( m \) is; the 
+                                                                                          commitments are simulatable from public values; the only                        
+                                                                                          credential-side point derivable is \( P = mA + bG \), which every               
+                                                                                          candidate identity explains equally well.                                       
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Two distinctions matter.  The pre-A' design also kept `identity_data'
   off chain, but it published a rerandomized signature and a commitment
   \( \tilde m \sigma'_1 \) that were /testable/ against a known \( m \);
@@ -1151,19 +1069,6 @@ Table of Contents
   │ print("\n==> Registration PASSED. isVerified(alice) = true")
   └────
 
-  ┌────
-  │ (g)  guards passed: A, B, pk, R != O; scalars canonical
-  │ (fs) Fiat-Shamir challenge verified (A, B, E, pk, commitments, registrant, chain, registry, domain)
-  │ (b)  ElGamal C check passed: s_m*G + s_r*pk == e*C + T_C
-  │ (c)  ElGamal R check passed: s_r*G == e*R + T_R
-  │ (k)  account-key check passed: s_sk*G == T_key + e*pk
-  │ (a') pairing product passed:
-  │ 	e(s_m*A + s_b*G - C1, Y) * e(e*A, X) * e(-e*B, g_2) == 1
-  │ 	derivable point P = m*A + b*G: uniform, and the same for every candidate m
-  │ 
-  │ ==> Registration PASSED. isVerified(alice) = true
-  └────
-
   *How to read the output:* All six checks must print "passed".  If any
   assertion fires, the proof is invalid.  The last line before the
   verdict names the one credential-side value an observer can compute
@@ -1203,12 +1108,6 @@ Table of Contents
   │ print(f"registration_verify(honest E_alice)             : {ok_honest}")
   │ print(f"registration_verify(E_fake encrypts m_fake)     : {ok_forged}")
   │ print(f"registration_verify(replayed to another address): {ok_replay}")
-  └────
-
-  ┌────
-  │ registration_verify(honest E_alice)             : True
-  │ registration_verify(E_fake encrypts m_fake)     : False
-  │ registration_verify(replayed to another address): False
   └────
 
 
@@ -1277,19 +1176,6 @@ Table of Contents
   │ print(f"fragment exists.  Bob himself never needs to approve his own pool.")
   └────
 
-  ┌────
-  │ Bob registered (EOA), pool bound as PUBLIC-IDENTITY contract:
-  │   pk_bob = (957915..., 428654...)
-  │   E_bob  = (R, C) -- ElGamal ciphertext on-chain
-  │   identity_data = '{"date_of_birth":"1985-07-22","epoch":42,"family_n...'
-  │   isVerified(bob)             = true
-  │   isVerified(pool)            = true   (set by bindContract)
-  │   isPublicIdentity(pool)      = true   (set by bindContract)
-  │ 
-  │ The pool's identity hash falls back into receipts when no per-pair
-  │ fragment exists.  Bob himself never needs to approve his own pool.
-  └────
-
 
 7.1 Same Operation via the Wallet API
 ─────────────────────────────────────
@@ -1319,12 +1205,6 @@ Table of Contents
   │ print(f"Wallet API: cred_bob.m == m_bob    : {cred_bob.m == m_bob}")
   │ print(f"  ps_verify(cred_bob.sigma, m_bob) : True")
   │ print(f"  Issuer log now has 2 entries: {len(issuer_obj.issuance_log())}")
-  └────
-
-  ┌────
-  │ Wallet API: cred_bob.m == m_bob    : True
-  │   ps_verify(cred_bob.sigma, m_bob) : True
-  │   Issuer log now has 2 entries: 2
   └────
 
 
@@ -1385,17 +1265,6 @@ Table of Contents
   │ print(f"Matches Alice's M:             {pt(M_alice)}")
   └────
 
-  ┌────
-  │ Alice re-encrypts her identity for Bob:
-  │   E_bob = (R', C') where:
-  │     R' = r'*G     = (550025..., 305708...)
-  │     C' = M+r'*pk  = (701809..., 308467...)
-  │ 
-  │ Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
-  │ Matches Alice's M:             (739132..., 937433...)
-  └────
-
-
   *How to read the output:* The last two lines show Bob's decrypted
   point and Alice's original \( M \).  The coordinate fragments must be
   identical – same point, different ciphertext wrapping it.
@@ -1435,13 +1304,6 @@ Table of Contents
   │ print(f"  e  = {proof_cp.e}")
   │ print(f"  s1 = {proof_cp.s1}   (= a + e*sk)")
   │ print(f"  s2 = {proof_cp.s2}   (= b + e*r')")
-  └────
-
-  ┌────
-  │ Chaum-Pedersen proof (e, s1, s2, T1, T2, T3):
-  │   e  = 19760152061181174133268171620776428857915021793359791016974955809430153285266
-  │   s1 = 19027816694018415018414729725601647850693237880448832633085064984320434557538   (= a + e*sk)
-  │   s2 = 12896613016389275445990147178333144828356344382050962542604063507793369347515   (= b + e*r')
   └────
 
 
@@ -1487,17 +1349,6 @@ Table of Contents
   │ print("    _receiptFragments[alice][bob] = keccak256(E_bob)")
   └────
 
-  ┌────
-  │ Check 1 passed: s1*G == T1 + e*pk_alice          (witness is the registered key)
-  │ Check 2 passed: s2*G == T3 + e*R_bob              (r' consistent with R_bob)
-  │ Check 3 passed: s1*R_a - s2*pk_b == T2 + e*(C_a - C_b)   (same M)
-  │ Check 4 passed: Fiat-Shamir challenge verified (wallet verifier agrees: True)
-  │ 
-  │ ==> approve() PASSED. Alice's re-encrypted identity stored for Bob.
-  │     _receiptFragments[alice][bob] = keccak256(E_bob)
-  └────
-
-
   *How to read the output:* All four "passed" lines must appear.  The
   two counter-examples below each break exactly one of them.
 
@@ -1525,12 +1376,6 @@ Table of Contents
   │                                proof_bad, ALICE_ADDR, BOB_ADDR, 1)
   │ print(f"Forged re-encryption -- wallet verifier    : {ok_bad}")
   │ print( "  (FAILS: C_bad encrypts a different M than C_alice; approve() reverts.)")
-  └────
-
-  ┌────
-  │ Forged re-encryption -- Check 3 (same M)   : False
-  │ Forged re-encryption -- wallet verifier    : False
-  │   (FAILS: C_bad encrypts a different M than C_alice; approve() reverts.)
   └────
 
 
@@ -1678,24 +1523,6 @@ Table of Contents
   │ print(f"    and Alice registered on-chain.")
   └────
 
-  ┌────
-  │ Bob decrypts E_bob from on-chain ApproveReceipt event:
-  │   M = C' - sk_bob * R' = (739132..., 937433...)
-  │ 
-  │ Bob receives identity_data via Holochain:
-  │   '{"date_of_birth":"1992-03-15","epoch":42,"family_name":"John...'
-  │ 
-  │ Two-channel verification:
-  │   m = H(identity_data) = 6446313962173165014188361468977035479170665192834402473818305319846425860127
-  │   m * G = (739132..., 937433...)
-  │   M     = (739132..., 937433...)
-  │   H(identity_data) * G == M : True
-  │ 
-  │ ==> Bob has cryptographic proof that the identity_data
-  │     he received is the same identity the issuer certified
-  │     and Alice registered on-chain.
-  └────
-
   *How to read the output:* The coordinate fragments of `m * G' and `M'
   (decrypted from on-chain) must be identical.  A counter-example
   follows showing what Bob sees if the Holochain data is tampered.
@@ -1719,14 +1546,6 @@ Table of Contents
   │ print(f"  M (from chain)  = {pt(M_from_bob)}")
   │ print(f"  Match: {eq(M_tampered, M_from_bob)}")
   │ print(f"  (Bob rejects: the off-chain data doesn't match the on-chain point.)")
-  └────
-
-  ┌────
-  │ Tampered identity_data: ...given_name: 'Mallory'...
-  │   H(tampered) * G = (722726..., 633711...)
-  │   M (from chain)  = (739132..., 937433...)
-  │   Match: False
-  │   (Bob rejects: the off-chain data doesn't match the on-chain point.)
   └────
 
 
@@ -1777,16 +1596,6 @@ Table of Contents
   │ print(f"  Match: {h_alice == h_bob}")
   │ print(f"\nReceipt stored (encrypted) on each party's Holochain source chain.")
   │ print(f"The receipt hash anchors the off-chain record to the on-chain transfer.")
-  └────
-
-  ┌────
-  │ Receipt construction (independent, canonical):
-  │   Alice's H(receipt) = 21535858141339728776948445993719093154923735092821067258494283187515610795617
-  │   Bob's   H(receipt) = 21535858141339728776948445993719093154923735092821067258494283187515610795617
-  │   Match: True
-  │ 
-  │ Receipt stored (encrypted) on each party's Holochain source chain.
-  │ The receipt hash anchors the off-chain record to the on-chain transfer.
   └────
 
 
@@ -1910,23 +1719,6 @@ Table of Contents
   │           f"P - m_i*A is a point for all {len(candidates)} candidates")
   │ assert not eq(pres_alice.A, pres_2.A) and not eq(pres_alice.B, pres_2.B)
   │ print("Two presentations of one credential share no point.")
-  └────
-
-  ┌────
-  │ Second account registered (same identity, fresh presentation and keys).
-  │ 
-  │ Pre-A' publication (rerandomized signatures): raw PS test per candidate
-  │   alice    : account 1 True   account 2 True 
-  │   bob      : account 1 False  account 2 False
-  │   stranger : account 1 False  account 2 False
-  │ A' publication (presentations): raw PS test per candidate
-  │   alice    : account 1 False  account 2 False
-  │   bob      : account 1 False  account 2 False
-  │   stranger : account 1 False  account 2 False
-  │ A' proof fields: the derivable point P explains every candidate
-  │   account 1: masked equation with derived P -> True; P - m_i*A is a point for all 3 candidates
-  │   account 2: masked equation with derived P -> True; P - m_i*A is a point for all 3 candidates
-  │ Two presentations of one credential share no point.
   └────
 
   *How to read the output:* In the first table every account lights up

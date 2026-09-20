@@ -1146,13 +1146,20 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    scalar multiplications; it holds no key and decrypts nothing.
 
    #+LATEX: {\scriptsize
-   | Argument                | What it is                                                        | What the EVM (and every archive node) can learn from it                                                                 |
-   |-------------------------+-------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------|
-   | =issuer=                | The issuer's Ethereum address                                     | Which trust anchor certified the holder.  Public by design; it narrows the anonymity set to that issuer's clients, nothing more. |
-   | =pk=                    | A fresh account key \( sk \cdot G \), sampled per account          | Nothing about the identity: it is independent of \( m \).                                                                |
-   | =E_alice= \( = (rG, mG + r\,pk) \) | ElGamal ciphertext of the identity point under the account's own key | The plaintext needs \( sk \), never sent.  Testing whether it encrypts a candidate \( M_i \) is the DDH plaintext-checking problem. |
-   | =(A, B)= \( = (a\sigma_1,\ a\sigma_2 + bY_1) \) | The blinded presentation of the credential                 | A uniform pair of points, the same distribution for every identity.  Not a signature anyone can verify; \( \sigma \) itself is never published. |
-   | =pi= \( = (e, s_m, s_b, s_r, s_{sk}, C_1, T_C, T_R, T_{key}) \) | The zero-knowledge proof                          | Each response is a secret one-time nonce plus a multiple of the witness (\( s_m = \tilde m + e m \)), so it is uniform whatever \( m \) is; the commitments are simulatable from public values; the only credential-side point derivable is \( P = mA + bG \), which every candidate identity explains equally well. |
+   | Argument                                        | What it is                           | What the EVM (and every archive node) can learn from it                         |
+   |-------------------------------------------------+--------------------------------------+---------------------------------------------------------------------------------|
+   | =issuer=                                        | The issuer's Ethereum address        | Which trust anchor certified the holder.  Public by design; it                  |
+   |                                                 |                                      | narrows the anonymity set to that issuer's clients, nothing more.               |
+   | =pk=                                            | A fresh account key \( sk \cdot G \) | Nothing about the identity: it is independent of \( m \).                       |
+   | =E_alice= \( = (rG, mG + r\,pk) \)              | ElGamal ciphertext of the identity   | The plaintext needs \( sk \), never sent.  Testing whether it encrypts          |
+   |                                                 | point under the account's own key    | a candidate \( M_i \) is the DDH plaintext-checking problem.                    |
+   | =(A, B)= \( = (a\sigma_1,\ a\sigma_2 + bY_1) \) | The blinded presentation of the      | A uniform pair of points, the same distribution for every identity.             |
+   |                                                 | credential                           | Not a signature anyone can verify; \( \sigma \) itself is never published.      |
+   | =pi= \( = (e, s_m, s_b, s_r, s_{sk}, \)         | The zero-knowledge proof             | Each response is a secret one-time nonce plus a multiple of the                 |
+   | \( C_1, T_C, T_R, T_{key}) \)                   |                                      | witness (\( s_m = \tilde m + e m \)), so it is uniform whatever \( m \) is; the |
+   |                                                 |                                      | commitments are simulatable from public values; the only                        |
+   |                                                 |                                      | credential-side point derivable is \( P = mA + bG \), which every               |
+   |                                                 |                                      | candidate identity explains equally well.                                       |
    #+LATEX: }
 
    Two distinctions matter.  The pre-A' design also kept =identity_data=
