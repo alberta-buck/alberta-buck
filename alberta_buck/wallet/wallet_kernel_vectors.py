@@ -581,6 +581,7 @@ def _build(seed: int) -> Dict[str, Any]:
     out["issuer"] = {
         "sk_x": scalar_to_hex(kx), "sk_y": scalar_to_hex(ky),
         "pk_X": _g2j(issuer.pk_X), "pk_Y": _g2j(issuer.pk_Y),
+        "pk_Y1": _g1(issuer.pk_Y1),
         "issuer_id": "atb-financial-ca",
         "fields": {"given_name": "Carol", "surname": "Mill",
                    "issuer_id": "IGNORED-overwritten"},

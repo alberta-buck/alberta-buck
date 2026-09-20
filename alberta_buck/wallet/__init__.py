@@ -17,13 +17,15 @@ from alberta_buck.wallet.identity import (
     canonical_json, canonical_identity_data, identity_scalar,
 )
 from alberta_buck.wallet.ps import (
-    PSKeyPair, PSSignature, ps_keygen, ps_sign, ps_verify, ps_rerandomize,
+    PSKeyPair, PSSignature, PSPresentation,
+    ps_keygen, ps_key_consistent, ps_sign, ps_verify, ps_rerandomize, ps_present,
 )
 from alberta_buck.wallet.elgamal import (
     ElGamalCiphertext, IdentityKeyPair, identity_keygen, elgamal_encrypt, elgamal_decrypt,
 )
 from alberta_buck.wallet.nizk import (
     RegistrationProof, registration_prove, registration_verify,
+    bind_contract_prove, presentation_point,
 )
 from alberta_buck.wallet.contract_binding import (
     ContractBindingProof, contract_binding_prove, contract_binding_verify,
@@ -67,7 +69,7 @@ from alberta_buck.wallet.render import (
     Driver, TextDriver, render_receipt,
 )
 from alberta_buck.wallet.issuer import (
-    Issuer, IssuedCredential, rerandomize_for_registration,
+    Issuer, IssuedCredential, present_for_registration,
 )
 
 __all__ = [
@@ -76,10 +78,12 @@ __all__ = [
     "point_to_words", "words_to_point", "scalar_to_word", "word_to_scalar",
     "keccak_scalar", "keccak_bytes",
     "canonical_json", "canonical_identity_data", "identity_scalar",
-    "PSKeyPair", "PSSignature", "ps_keygen", "ps_sign", "ps_verify", "ps_rerandomize",
+    "PSKeyPair", "PSSignature", "PSPresentation",
+    "ps_keygen", "ps_key_consistent", "ps_sign", "ps_verify", "ps_rerandomize", "ps_present",
     "ElGamalCiphertext", "IdentityKeyPair", "identity_keygen",
     "elgamal_encrypt", "elgamal_decrypt",
     "RegistrationProof", "registration_prove", "registration_verify",
+    "bind_contract_prove", "presentation_point",
     "ContractBindingProof", "contract_binding_prove", "contract_binding_verify",
     "CPProof", "chaum_pedersen_prove", "chaum_pedersen_verify",
     "poseidon", "F_R",
@@ -101,5 +105,5 @@ __all__ = [
     "verify_receipt_core",
     "Detail", "StyledLine", "ReceiptSection", "ReceiptDoc",
     "Driver", "TextDriver", "render_receipt",
-    "Issuer", "IssuedCredential", "rerandomize_for_registration",
+    "Issuer", "IssuedCredential", "present_for_registration",
 ]

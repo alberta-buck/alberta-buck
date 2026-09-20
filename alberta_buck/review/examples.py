@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import random
 
 from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, neg, point_to_words
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present, PSSignature
 from alberta_buck.wallet.elgamal import elgamal_encrypt
 from alberta_buck.wallet.nizk import registration_prove
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
@@ -44,17 +44,26 @@ class Account:
 
 
 def harvested_registration(registrant=0xBAD, registry=0):
-    """§1–2: the attacker receives only the published signature and disclosed m."""
+    """§1–2 under A': the attacker receives only the PUBLISHED presentation
+    (A, B), its proof, and the disclosed m -- never the raw credential or b.
+
+    Returns the owner's honest registration (presentation, proof) as the
+    control, and the attacker's best attempt: treat (A, B) as if it were a
+    plain signature, re-present it with its own blinding and prove with the
+    witnesses it knows.  Under A' that proof must be rejected.
+    """
     issuer = ps_keygen(seeded())
     owner = Account(12345, 45678, 98765)
-    published, _ = ps_rerandomize(ps_sign(issuer, owner.m, seeded(1)), seeded(2))
-    # No use of issuer signing keys or owner's sk/r below this boundary.
-    sigma, _ = ps_rerandomize(published, seeded(3))
+    pres, _a, b = ps_present(ps_sign(issuer, owner.m, seeded(1)), issuer.pk_Y1, seeded(2))
+    owner_proof = registration_prove(pres, b, owner.m, owner.r, owner.pk, owner.E,
+                                     0xA11CE, owner.sk, 1, seeded(3), registry=registry)
+    # No use of issuer signing keys, owner's sk/r, or the blinding b below.
     attacker = Account(owner.m, 22222, 33333)
-    proof = registration_prove(sigma, owner.m, attacker.r, attacker.pk,
-                               attacker.E, registrant, attacker.sk, 1, seeded(4),
-                               registry=registry)
-    return issuer, owner, published, attacker, sigma, proof
+    att_pres, _a2, b2 = ps_present(PSSignature(pres.A, pres.B), issuer.pk_Y1, seeded(4))
+    att_proof = registration_prove(att_pres, b2, owner.m, attacker.r, attacker.pk,
+                                   attacker.E, registrant, attacker.sk, 1, seeded(5),
+                                   registry=registry)
+    return issuer, owner, pres, owner_proof, attacker, att_pres, att_proof
 
 
 def false_identity_approval(sender=0xA, spender=0xB, chainid=1, registry=0):
@@ -126,12 +135,11 @@ def uncontrolled_registration(registrant=0xBAD, registry=0):
     from alberta_buck.review.mitigations import independent_generator
     issuer = ps_keygen(seeded())
     owner = Account(12345, 45678, 98765)
-    published, _ = ps_rerandomize(ps_sign(issuer, owner.m, seeded(1)), seeded(2))
-    sigma, _ = ps_rerandomize(published, seeded(3))
+    pres, _a, b = ps_present(ps_sign(issuer, owner.m, seeded(1)), issuer.pk_Y1, seeded(2))
     # pk is a NUMS point: there is no exported scalar sk with pk = sk*G.
     pk = independent_generator()
     r = 33333
     E = elgamal_encrypt(owner.M, pk, r)
-    proof = registration_prove(sigma, owner.m, r, pk, E, registrant, owner.sk,
+    proof = registration_prove(pres, b, owner.m, r, pk, E, registrant, owner.sk,
                                1, seeded(4), registry=registry)
-    return issuer, owner, pk, E, sigma, proof
+    return issuer, owner, pk, E, pres, proof

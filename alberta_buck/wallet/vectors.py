@@ -5,7 +5,7 @@ exercise the IdentityRegistry verifier paths against the Python reference:
 
 * PS keypair (issuer)
 * Identity records (Alice, Bob): canonical_data, m, ElGamal keypair, ciphertext
-* PS signatures (raw and rerandomized)
+* PS signatures (raw) and the published A' presentations (A, B)
 * Registration NIZK proofs (with negative variants the Solidity tests should reject)
 * Chaum-Pedersen re-encryption proof (Alice -> Bob)
 
@@ -26,7 +26,7 @@ from alberta_buck.wallet.bn254 import (
 )
 from alberta_buck.wallet.poseidon import F_R
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present
 from alberta_buck.wallet.elgamal import identity_keygen, elgamal_encrypt
 from alberta_buck.wallet.nizk import registration_prove, RegistrationProof
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
@@ -74,6 +74,20 @@ def _g2(P) -> Dict[str, Any]:
 def _seeded_rng(seed: int):
     rnd = random.Random(seed)
     return lambda: rnd.getrandbits(256)
+
+
+def _fork_rng(seed: int):
+    """A second seeded stream for the draws A' added (the presentation
+    blinding b and its nonce b_tilde).  The main stream's draw POSITIONS are
+    pinned by committed SNARK fixtures (the a2b section feeds
+    test/NotesA2Tie.t.sol), so new draws must not be inserted into it."""
+    rnd = random.Random((seed << 8) ^ 0xA9)
+    return lambda: rnd.getrandbits(256)
+
+
+def _replay(vals):
+    it = iter(vals)
+    return lambda: next(it)
 
 
 ALICE_FIELDS = {
@@ -143,27 +157,36 @@ class _Party:
     m: int
     M: Any
     sigma: Any
-    sigma_p: Any
+    pres: Any
+    a: int
+    b: int
     kp: Any
     r: int
     E: Any
     proof: RegistrationProof
 
 
-def _build_party(rng, issuer, fields, addr) -> _Party:
+def _build_party(rng, fork, issuer, fields, addr) -> _Party:
     canonical = canonical_identity_data(fields)
     m = identity_scalar(canonical)
+    # Main-stream draws, in the exact positions the pre-A' emitter used:
+    # sign (1), the presentation scalar a (formerly the rerandomization t),
+    # keygen (1), r (1), then the three nonces m_t, r_t, sk_t.  The A'
+    # additions (b, b_t) come from the fork so nothing downstream moves.
     sigma = ps_sign(issuer, m, rng=rng)
-    sigma_p, _ = ps_rerandomize(sigma, rng=rng)
+    a = rand_scalar(rng)
     kp = identity_keygen(rng=rng)
     r = rand_scalar(rng)
+    m_t, r_t, sk_t = rand_scalar(rng), rand_scalar(rng), rand_scalar(rng)
+    b, b_t = rand_scalar(fork), rand_scalar(fork)
     M = mul(G1, m)
     E = elgamal_encrypt(M, kp.pk, r)
+    pres, _, _ = ps_present(sigma, issuer.pk_Y1, a=a, b=b)
     proof = registration_prove(
-        sigma_p, m, r, kp.pk, E, addr, kp.sk, CHAINID, rng=rng,
-        registry=REGISTRY_ADDR,
+        pres, b, m, r, kp.pk, E, addr, kp.sk, CHAINID,
+        rng=_replay([m_t, b_t, r_t, sk_t]), registry=REGISTRY_ADDR,
     )
-    return _Party(fields, addr, canonical, m, M, sigma, sigma_p, kp, r, E, proof)
+    return _Party(fields, addr, canonical, m, M, sigma, pres, a, b, kp, r, E, proof)
 
 
 def _party_to_json(p: _Party) -> Dict[str, Any]:
@@ -173,7 +196,9 @@ def _party_to_json(p: _Party) -> Dict[str, Any]:
         "m": scalar_to_hex(p.m),
         "M": _g1(p.M),
         "ps_sig_raw":    {"sigma_1": _g1(p.sigma.sigma_1),   "sigma_2": _g1(p.sigma.sigma_2)},
-        "ps_sig_rerand": {"sigma_1": _g1(p.sigma_p.sigma_1), "sigma_2": _g1(p.sigma_p.sigma_2)},
+        "ps_presentation": {"A": _g1(p.pres.A), "B": _g1(p.pres.B)},
+        "a":             scalar_to_hex(p.a),
+        "b":             scalar_to_hex(p.b),
         "elgamal_kp":    {"sk": scalar_to_hex(p.kp.sk), "pk": _g1(p.kp.pk)},
         "r":             scalar_to_hex(p.r),
         "ciphertext":    {"R": _g1(p.E.R), "C": _g1(p.E.C)},
@@ -181,9 +206,10 @@ def _party_to_json(p: _Party) -> Dict[str, Any]:
         "registration_proof": {
             "e":     scalar_to_hex(p.proof.e),
             "s_m":   scalar_to_hex(p.proof.s_m),
+            "s_b":   scalar_to_hex(p.proof.s_b),
             "s_r":   scalar_to_hex(p.proof.s_r),
             "s_sk":  scalar_to_hex(p.proof.s_sk),
-            "A_ps":  _g1(p.proof.A_ps),
+            "C1":    _g1(p.proof.C1),
             "T_C":   _g1(p.proof.T_C),
             "T_R":   _g1(p.proof.T_R),
             "T_key": _g1(p.proof.T_key),
@@ -194,10 +220,11 @@ def _party_to_json(p: _Party) -> Dict[str, Any]:
 def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     """Deterministic vector set keyed by `seed`."""
     rng = _seeded_rng(seed)
+    fork = _fork_rng(seed)
 
     issuer = ps_keygen(rng=rng)
-    alice  = _build_party(rng, issuer, ALICE_FIELDS, ALICE_ADDR)
-    bob    = _build_party(rng, issuer, BOB_FIELDS,   BOB_ADDR)
+    alice  = _build_party(rng, fork, issuer, ALICE_FIELDS, ALICE_ADDR)
+    bob    = _build_party(rng, fork, issuer, BOB_FIELDS,   BOB_ADDR)
 
     # Approve flow: Alice re-encrypts her M for Bob.
     r_prime = rand_scalar(rng)
@@ -482,7 +509,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         }
 
     return {
-        "$schema_version": 1,
+        "$schema_version": 2,
         "seed":    f"0x{seed:064x}",
         "ORDER":   f"0x{ORDER:064x}",
         "chainid": scalar_to_hex(CHAINID),
@@ -492,6 +519,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             "sk_y": scalar_to_hex(issuer.sk_y),
             "pk_X": _g2(issuer.pk_X),
             "pk_Y": _g2(issuer.pk_Y),
+            "pk_Y1": _g1(issuer.pk_Y1),
         },
         "alice": _party_to_json(alice),
         "bob":   _party_to_json(bob),

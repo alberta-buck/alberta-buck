@@ -26,7 +26,7 @@ from eth_account.signers.local import LocalAccount
 
 from alberta_buck.wallet.bn254 import G1, mul, point_to_words, rand_scalar
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present
 from alberta_buck.wallet.elgamal import identity_keygen, elgamal_encrypt
 from alberta_buck.wallet.nizk import registration_prove
 from alberta_buck.registry.certificate import registry_keygen
@@ -40,7 +40,7 @@ BIND_PK = _G
 BIND_E = (_G, _G)                              # ElGamalCT (R, C)
 
 _CACHE_PATH = Path(__file__).resolve().parents[2] / "test" / "vectors" / "identity-cache.json"
-_CACHE_SCHEMA = 4
+_CACHE_SCHEMA = 5
 
 # ---------------------------------------------------------------------------
 # Cache management
@@ -58,7 +58,8 @@ def _load_cache() -> dict:
 def _valid_cache_entry(data: Any) -> bool:
     """Return whether ``data`` matches the current registration ABI.
 
-    RegistrationProof grew from six to eight fields in schema 3.  Treat old
+    RegistrationProof grew from six to eight fields in schema 3 and to nine
+    (A' presentation: C1 replaces A_ps, s_b added) in schema 5.  Treat old
     or partially-written entries as cache misses instead of handing a stale
     tuple to web3's ABI encoder.
     """
@@ -66,7 +67,7 @@ def _valid_cache_entry(data: Any) -> bool:
         isinstance(data, list)
         and len(data) in (4, 5)
         and isinstance(data[3], list)
-        and len(data[3]) == 8
+        and len(data[3]) == 9
     )
 
 
@@ -196,11 +197,12 @@ def _to_serializable(rec: FullRegistrationRecord) -> list:
     g1 = lambda P: tuple(point_to_words(P))
     pk = g1(rec.client_kp.pk)
     E_arg = (g1(rec.E_addr.R), g1(rec.E_addr.C))
-    sig_arg = (g1(rec.ps_sigma_rerand.sigma_1), g1(rec.ps_sigma_rerand.sigma_2))
+    sig_arg = (g1(rec.ps_presentation.A), g1(rec.ps_presentation.B))
     proof_arg = (
         rec.registration_proof.e, rec.registration_proof.s_m,
+        rec.registration_proof.s_b,
         rec.registration_proof.s_r, rec.registration_proof.s_sk,
-        g1(rec.registration_proof.A_ps),
+        g1(rec.registration_proof.C1),
         g1(rec.registration_proof.T_C),
         g1(rec.registration_proof.T_R),
         g1(rec.registration_proof.T_key),
@@ -282,14 +284,14 @@ def _g2(P) -> tuple:
 
 
 def pspubkey_arg(issuer) -> tuple:
-    """PSPubKey{ G2 X; G2 Y } for IdentityRegistry.trustIssuer."""
-    return (_g2(issuer.pk_X), _g2(issuer.pk_Y))
+    """PSPubKey{ G2 X; G2 Y; G1 Y1 } for IdentityRegistry.trustIssuer."""
+    return (_g2(issuer.pk_X), _g2(issuer.pk_Y), tuple(point_to_words(issuer.pk_Y1)))
 
 
 def register_args(issuer, eoa_addr: int, fields: dict,
                    rng: Callable[[], int], chainid: int,
                    registry: int) -> tuple:
-    """Args for IdentityRegistry.register(issuer, pk, E, sigma, proof),
+    """Args for IdentityRegistry.register(issuer, pk, E, presentation, proof),
     bound to eoa_addr (must equal the tx sender).
 
     This is the legacy standalone path — use cached_eoa_setup() which now
@@ -299,18 +301,18 @@ def register_args(issuer, eoa_addr: int, fields: dict,
     canonical = canonical_identity_data(fields)
     m = identity_scalar(canonical)
     sigma = ps_sign(issuer, m, rng=rng)
-    sigma_p, _ = ps_rerandomize(sigma, rng=rng)
+    pres, _a, b = ps_present(sigma, issuer.pk_Y1, rng=rng)
     kp = identity_keygen(rng=rng)
     r = rand_scalar(rng)
     E = elgamal_encrypt(mul(G1, m), kp.pk, r)
-    pf = registration_prove(sigma_p, m, r, kp.pk, E, eoa_addr, kp.sk,
+    pf = registration_prove(pres, b, m, r, kp.pk, E, eoa_addr, kp.sk,
                             chainid, rng=rng, registry=registry)
 
     g1 = lambda P: tuple(point_to_words(P))
     pk = g1(kp.pk)
     E_arg = (g1(E.R), g1(E.C))
-    sig_arg = (g1(sigma_p.sigma_1), g1(sigma_p.sigma_2))
-    proof_arg = (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C),
+    sig_arg = (g1(pres.A), g1(pres.B))
+    proof_arg = (pf.e, pf.s_m, pf.s_b, pf.s_r, pf.s_sk, g1(pf.C1), g1(pf.T_C),
                  g1(pf.T_R), g1(pf.T_key))
     return pk, E_arg, sig_arg, proof_arg
 

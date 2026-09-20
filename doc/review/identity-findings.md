@@ -4,6 +4,12 @@ Review date: 2026-09-12. Checkout HEAD:
 `3a9e170047ade21355a95661d2cd68e2a02fe9ea`.
 This is a working review, not a complete cryptographic audit.
 
+Follow-up: [`identity-findings-2.org`](identity-findings-2.org) gives the focused
+issuer-view analysis for findings 1, 2 and 6, reconciles it with the merged
+proof repairs, and includes public-transcript and local-chain reproductions.
+It also explains why the review-only blinding prototype is not a repair and
+separates remaining problems from candidate mitigation designs.
+
 The repair objective is **certified identity without general surveillance**:
 participants can retain evidence of their own transactions; learning an
 identity does not confer its owner's authority; unrelated users, the credential

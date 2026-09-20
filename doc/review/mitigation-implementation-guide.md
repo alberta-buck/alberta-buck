@@ -357,27 +357,49 @@ salted-commitment leaf design belongs to the credential redesign.
 
 ### P2-A. Credential harvesting and read/write separation (findings 1 and 2)
 
-**Design-gated. Do not implement ad hoc.** The fix is a different protocol, not
-a patch: stop publishing the raw rerandomized PS signature in registration
-calldata, and instead publish a zero-knowledge proof of possession of a valid
-credential on hidden attributes, bound to a wallet-generated holder secret
-`u`. Registration must also prove control of the advertised encryption key.
+**Design-gated; the partial blinding prototype is not a repair.** See
+[`identity-findings-2.org`](identity-findings-2.org), especially R2--R4 and the
+executable counterexamples. The current public proof satisfies
+`s_m*A - A_ps = e*m*A`, which tests candidate identities independently of the
+signature's second point. Part B of `scripts/review/issuer_linking_demo.py`
+retains this leak and additionally exposes `t*A = (s_t*A - A_t)/e`. Subtracting
+that point from its blinded signature recovers a reusable credential. The
+full-transcript attack identifies all four prototype identities, recovers
+their credentials, and creates an accepted fresh attacker presentation.
+
+**Mitigation direction.** Specify a complete hidden credential presentation
+joined to the account encryption and key-control relations. A standard PS
+showing is one candidate, but its full proof must preserve hiding; adding a
+blinding scalar to the signature while exposing these separate commitments
+does not. A hidden nonextractable credential may suffice against the specific
+harvester without a new holder secret `u`. If `u` is added for other purposes,
+specify its issuance and recovery semantics; it does not by itself prevent
+an issuer certifying the same identity again with a different secret.
+
+Identity-derived A1/A2 encryption keys, policy metadata, receipt-disclosure
+scope and historical credential migration are separate remaining problems.
+The follow-up document distinguishes each from registration presentation.
 
 **Sequencing.**
-1. First write the specification: the show-proof relation, the issuance
-   relation (blind issuance on `m` and a commitment to `u`), and an
-   issuer-view unlinkability game covering issuance, all public registration
-   inputs, repeated presentations, and later disclosures.
-2. Only then implement, across all four backends, with new vectors.
+1. Write the complete showing/issuance specification and an issuer-view
+   unlinkability game covering the full public transcript, repeated
+   presentations and permitted later disclosures. Decide whether additional
+   holder attributes or blind issuance are needed rather than presuming them.
+2. Reproduce the response/commitment and credential-recovery attacks against
+   candidate designs; obtain a security argument and cryptographic review.
+3. Implement the reviewed relation across all four backends with new vectors
+   and explicit versioning/migration. Invert the legacy failure tests only
+   when their complete attacks have been mitigated.
 
 Until the spec exists, the correct interim action is documentation: withdraw
 the issuer-blindness and statistical-unlinkability claims for the current
 registration protocol in `alberta-buck-paper.org` and `alberta-buck-identity.org`,
 and mark the registration transcript as candidate-testable.
 
-**Cost.** New presentation verifier or circuit; cost not yet measured. High,
-and spec-first. This is where a less-capable implementer is most likely to ship
-something unsound; keep it gated behind a written, reviewed protocol.
+**Cost.** Not established for a secure repair. The previous +96-byte,
+three-pairing estimate describes the insufficient prototype, not a validated
+mitigation. Benchmark the reviewed full transcript and any separate Note
+circuit/key-distribution changes. No repair makes historical calldata private.
 
 ---
 

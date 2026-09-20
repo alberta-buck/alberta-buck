@@ -826,14 +826,15 @@ class TestFullIdentityIssuance:
         unsealed = unseal_certificate(rec.sealed, client_keypair.sk)
         assert unsealed.verify()
 
-        # PS credential should verify.
-        from alberta_buck.wallet.ps import ps_verify
-        assert ps_verify(ps_kp.pk_X, ps_kp.pk_Y, rec.ps_sigma_rerand, rec.m)
+        # The published presentation is NOT a verifiable signature on m (A').
+        from alberta_buck.wallet.ps import ps_verify, PSSignature
+        assert not ps_verify(ps_kp.pk_X, ps_kp.pk_Y,
+                             PSSignature(rec.ps_presentation.A, rec.ps_presentation.B), rec.m)
 
         # Registration NIZK should verify.
         from alberta_buck.wallet.nizk import registration_verify
         assert registration_verify(
-            rec.ps_sigma_rerand, rec.E_addr, rec.client_kp.pk,
+            rec.ps_presentation, rec.E_addr, rec.client_kp.pk,
             ps_kp.pk_X, ps_kp.pk_Y,
             rec.registration_proof, 0x411ce00000000000000000000000000000411ce,
         )

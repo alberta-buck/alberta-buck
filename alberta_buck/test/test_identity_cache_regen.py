@@ -100,12 +100,12 @@ def test_sim_issue_binds_anvil_default_chainid():
         rec = sim.issue("Farmer", 0, 0xA11CE, rng, chainid=31337,
                         registry=0x1D1D)
         assert registration_verify(
-            rec.ps_sigma_rerand, rec.E_addr, rec.client_kp.pk,
+            rec.ps_presentation, rec.E_addr, rec.client_kp.pk,
             sim.ps_keypair.pk_X, sim.ps_keypair.pk_Y,
             rec.registration_proof, 0xA11CE, 31337, 0x1D1D,
         )
         assert not registration_verify(
-            rec.ps_sigma_rerand, rec.E_addr, rec.client_kp.pk,
+            rec.ps_presentation, rec.E_addr, rec.client_kp.pk,
             sim.ps_keypair.pk_X, sim.ps_keypair.pk_Y,
             rec.registration_proof, 0xA11CE, 1, 0x1D1D,
         )
@@ -114,7 +114,7 @@ def test_sim_issue_binds_anvil_default_chainid():
 
 
 def test_legacy_registration_proof_is_not_a_cache_hit(monkeypatch):
-    """A six-field proof must be regenerated, never sent to the v3 ABI."""
+    """A six-field proof must be regenerated, never sent to the current ABI."""
     from alberta_buck.sim import identity as idmod
 
     key = idmod._cache_key(7, "TestAgent", 0, 31337, 0x1D1D)

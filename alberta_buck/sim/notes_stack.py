@@ -42,7 +42,7 @@ from alberta_buck.wallet.notes import NoteOpening
 from alberta_buck.wallet.build_receipt import (
     build_note_b1, build_note_a1, build_note_a2,
 )
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present
 from alberta_buck.wallet.nizk import bind_contract_prove
 from alberta_buck.wallet.contract_binding import contract_binding_prove
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
@@ -360,7 +360,7 @@ class NotesStack:
             "bindContract(address,address,(uint256,uint256),"
             "((uint256,uint256),(uint256,uint256)),"
             "((uint256,uint256),(uint256,uint256)),"
-            "(uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
+            "(uint256,uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
             "(uint256,uint256),(uint256,uint256)),"
             "(uint256,uint256,(uint256,uint256)),"
             "bool,bool)")
@@ -372,7 +372,8 @@ class NotesStack:
         g2 = lambda P: ((int(P[0].coeffs[0]), int(P[0].coeffs[1])),
                         (int(P[1].coeffs[0]), int(P[1].coeffs[1])))
         ch.send(self.reg.functions.trustIssuer(
-            self._iss_addr, (g2(self._iss_kp.pk_X), g2(self._iss_kp.pk_Y))))
+            self._iss_addr, (g2(self._iss_kp.pk_X), g2(self._iss_kp.pk_Y),
+                             _xy(self._iss_kp.pk_Y1))))
         ch.send(self.notes.functions.authorizeIdentityBinding(
             self.reg.address, self.gov, _xy(self.pool_pk),
             (_xy(self.pool_E.R), _xy(self.pool_E.C)),
@@ -388,7 +389,7 @@ class NotesStack:
         }
 
     def _proof_arg(self, pf):
-        return (pf.e, pf.s_m, pf.s_r, pf.s_sk, _xy(pf.A_ps), _xy(pf.T_C),
+        return (pf.e, pf.s_m, pf.s_b, pf.s_r, pf.s_sk, _xy(pf.C1), _xy(pf.T_C),
                 _xy(pf.T_R), _xy(pf.T_key))
 
     def _binding_arg(self, pf):
@@ -403,10 +404,10 @@ class NotesStack:
             r = rand_scalar(self.rng)
         if E is None:
             E = elgamal_encrypt(mul(G1, m), pk, r)
-        sigma, _ = ps_rerandomize(ps_sign(self._iss_kp, m, rng=self.rng),
-                                  rng=self.rng)
+        pres, _a, b = ps_present(ps_sign(self._iss_kp, m, rng=self.rng),
+                                 self._iss_kp.pk_Y1, rng=self.rng)
         pf = bind_contract_prove(
-            sigma, m, r, pk, E, int(target, 16), sk,
+            pres, b, m, r, pk, E, int(target, 16), sk,
             chainid=self.fx.chainid, rng=self.rng,
             registry=int(self.reg.address, 16))
         binder = self.gov
@@ -415,7 +416,7 @@ class NotesStack:
             is_public, is_carrying, chainid=self.fx.chainid, rng=self.rng)
         return self._bind_cred(
             target, self._iss_addr, _xy(pk), (_xy(E.R), _xy(E.C)),
-            (_xy(sigma.sigma_1), _xy(sigma.sigma_2)),
+            (_xy(pres.A), _xy(pres.B)),
             self._proof_arg(pf), self._binding_arg(bind_auth), is_public, is_carrying)
 
     def _replay_fixture_accounts(self):
