@@ -1,0 +1,298 @@
+#+TITLE: Identity accumulator: certified-attribute trees, plan of record
+#+DATE: 2026-09-20
+#+OPTIONS: toc:3 num:t
+#+PROPERTY: header-args :eval never-export
+
+* Purpose and status
+:PROPERTIES:
+:CUSTOM_ID: purpose
+:END:
+
+Branch =feature/identity-accumulator=, cut from the merge of
+=feature/a-prime= into =feature/paper-editing=. The A' registration
+presentation is done and merged; its plan and security argument are
+[[file:a-prime-plan.org][the A' plan]] and Part I of
+=alberta-buck-proofs.org=. This document is the plan of record for the
+program that follows: how a certified identity enters the accumulator that
+Notes membership proofs and credit issuance are checked against, without
+handing anyone a test for an identity scalar.
+
+The design was decided on 2026-09-20 and is recorded in the A' plan's
+accumulator section; it is restated here with the decisions taken since,
+and extended with the blast radius the change carries.
+
+Deferred behind this program, deliberately: R5, the identity-derived A1 and
+A2 receiving keys, and the Notes design decision it forces. The circuit
+work of finding 5 is not deferred; it shares a trusted setup with the leaf
+change and is sequenced with it.
+
+* Design of record
+:PROPERTIES:
+:CUSTOM_ID: design
+:END:
+
+Four decisions, whose reasoning is in the A' plan and is not repeated:
+
+1. *Salted leaves where membership is private.* The leaf becomes
+   =Poseidon(M.x, M.y, salt)=, one salt per identity per tree, exchanged in
+   the attestation the authority already performs. Admission needs no proof
+   and no gas. No authority can scan another's tree, and a party holding
+   identity scalars can scan none.
+2. *Admission stays off the registration path, permanently.* =register= and
+   =bindContract= keep refusing a nonzero caller-supplied leaf. The leaf is
+   the authority's attestation and the authority is the certifier.
+3. *Feature checks are proofs the holder produces, not lookups*, captured
+   in the receipt at the time of the payment where a counterparty needs
+   durable evidence.
+4. *One hiding generator everywhere*, with no known logarithm, retiring
+   =H_SCALAR=.
+
+Two decisions taken since, each of which changes the work materially.
+
+** Salt only where membership is private
+
+The privacy constraint applies to persons, not to institutions whose
+membership is a fact they advertise. An insurer's standing, its permitted
+asset classes and its limit band are public claims it wants counterparties
+to verify. A deterministic leaf in a regulator's subtree is therefore
+correct rather than a leak: the only thing it lets an observer test is a
+fact the insurer publishes.
+
+The rule: *salt where membership is private, do not where it is
+advertised.* Consequences:
+
+- Person-facing subtrees (identity registries, age, residence) carry salted
+  leaves and are proven in zero knowledge.
+- Institutional subtrees (insurance regulators, and any future public-role
+  authority) carry deterministic leaves and can be proven with a plain
+  Poseidon Merkle proof, which the registry can already verify on chain
+  through =identityPoseidon=. No circuit, no trusted setup, no salt
+  plumbing on that path.
+
+** Lifetime-stable identity without regenerating every vector
+
+The naive reading of "the identity scalar must be stable for life" is to
+remove =epoch= from the certified record. That would change every
+identity scalar in the repository, hence every identity point, leaf,
+ciphertext, proof and fixture: ten vector files pin a scalar directly, and
+the Notes end-to-end and mint fixtures are pinned to wallet-generated notes
+derived from them.
+
+It is unnecessary. Nothing validates =epoch=: =canonical_identity_data=
+canonicalizes whatever mapping it is given and imposes no schema, and the
+only code that mentions epochs is issuer documentation describing renewal
+as a policy. So the field stays where it is and its meaning changes:
+
+| Field | Meaning today | Meaning under this design |
+|-------+---------------+---------------------------|
+| =epoch= in the certified record | the credential's validity window, bumped at renewal, so the scalar changes | the epoch of first certification, never bumped, so the scalar is stable for life |
+| validity, liveness, revocation | implied by the record's epoch | membership in the current-epoch registry subtree |
+
+Renewal stops being a re-issuance and becomes a subtree update. Revocation
+is removal from the current-epoch subtree, which
+=registry/feature_authority.py= already implements by clearing the leaf and
+pushing a fresh subtree root. Vector churn: none. Work: the renewal and
+revocation ceremonies, and the passages in =alberta-buck-identity.org= that
+describe epoch expiry.
+
+Every other mutable fact follows the same pattern. Addresses, contact
+points and anything else the holder can change live in external records
+under the holder's control, and the registry's response to a change is
+*re-association, not re-issuance*: the same identity is inserted into the
+subtree for the new value and cleared from the old. One consequence to
+record in the specification: the authority that attests a mutable fact
+accumulates a change history for every identity it attests, which the
+identity issuer never sees. A fresh salt on each re-association unlinks the
+old and new leaves for anyone who later obtains tree contents but not that
+authority's own records.
+
+* The insurance regulator as a periodic attestor
+:PROPERTIES:
+:CUSTOM_ID: regulator
+:END:
+
+Decided 2026-09-20: *a periodic attestor with coarse bands*, not live
+infrastructure in the issuance path.
+
+Insurer oversight is already a periodic review of underwriting quality,
+portfolio risk, reserves attestation and reinsurance levels, and it already
+concludes with an estimate of the size and risk of the new contracts the
+insurer may write. None of that is novel to this system. What the
+accumulator adds is making the conclusion available to contracts: an
+insurer in current good standing may issue credits consistent with the
+constraints of its current identity, and =BuckCredit= validates that
+against the regulator's subtree before instantiating.
+
+The authority envelope an attestation carries:
+
+- standing: the insurer is licensed and currently in good standing;
+- asset classes it may underwrite;
+- a per-contract face band and an underwriter risk estimate, coarse by
+  decision, so that the on-chain check is a bound rather than a balance.
+
+Out of scope for this design, by decision: the assumption of existing asset
+pools, contracts and company assets on the failure of an insurer by its
+upstream reinsurers. The design assumes instead that an insurer's soundness
+includes pools that will safely pay the expected rate of underwritten
+payouts with a buffer, and that reinsurance triggered by an insurer's
+failure, together with its removal from the regulator's subtree as an
+issuer, includes topping those pools up where necessary to maintain future
+payouts.
+
+** Why this makes the credit gate cheap
+
+=createCredit= has 89 call sites across 38 files, including twenty Foundry
+suites, four simulation modules, five JavaScript files and seven design
+documents. Adding a proof argument to its signature would touch all of
+them.
+
+The periodic-attestor decision removes the need. The insurer proves its
+envelope once per review period through a separate entry point, which
+verifies a Poseidon Merkle proof against the regulator's subtree root and
+caches the envelope with an expiry. =createCredit= then performs a storage
+read against the credit's own asset class, face and premium, with an
+unchanged signature. Per-credit cost is a handful of SLOADs rather than ten
+Poseidon calls or a pairing, the 89 call sites are untouched, and the
+fixtures gain one authorization line in =setUp=, exactly as they already
+gain the client's =setCreditIssuer= opt-in.
+
+* Blast radius
+:PROPERTIES:
+:CUSTOM_ID: blast-radius
+:END:
+
+Seven interfaces, surveyed on 2026-09-20 at the merge commit. The summary:
+the leaf function is the expensive one, the record schema is the one that
+looked expensive and is not, registration does not move at all, and credit
+issuance is cheap only because of the periodic-attestor decision.
+
+** Interface 1: the leaf function
+
+The widest surface, because it is implemented four times and pinned by
+every vector that records a tree.
+
+| Layer | Location |
+|-------+----------|
+| Python | =alberta_buck/registry/tree.py=, =identity_leaf=; =wallet/unilateral_a2.py= subclasses the tree, so there is one definition, not two |
+| Rust | =core/rust/buck-identity/src/notes.rs=, re-exported by =core/rust/buck-registry/src/tree.rs= |
+| Bindings | =bindings/py-identity=, =bindings/js-identity=, surfaced as =identityLeaf= in =core/js/src/identity-core.js= |
+| Circuits | the leaf hasher inlined in =circuits/identity_membership.circom= and =identity_membership_g1tie.circom= |
+
+Consumers: the registry package throughout (=registry.py=,
+=feature_authority.py=, =client.py=, =merkle_service.py=, =vectors.py=,
+=kernel_vectors.py=), =wallet/unilateral_a2.py=, =wallet/kernel_vectors.py=,
+=sim/identity.py=, the review suite, four SNARK input generators under
+=scripts/snark/=, and two review scripts.
+
+Vectors that pin a leaf or a tree: =core/vectors/identity-kernel-vectors.json=,
+=registry-kernel-vectors.json=, =wallet-kernel-vectors.json=,
+=test/vectors/registry/registry_vectors.json=, =identity_root.json=, and the
+three Notes end-to-end fixtures.
+
+Change: one salt argument, Poseidon-2 becomes Poseidon-3, four
+implementations, every listed vector regenerated, and the four-backend
+parity re-established.
+
+** Interface 2: the root
+
+| Direction | Consumers |
+|-----------+-----------|
+| On chain, readers | =src/Notes.sol= membership helper, =IdentityMembershipG1TieVerifierAdapter.sol=, =IIdentityMembershipVerifier.sol=, =test/IdentityRegistryV2.t.sol=, =test/NotesE2E.t.sol= |
+| On chain, writer | =IdentityRegistry.setIdentityRoot=, governance only |
+| Off chain | =registry/merkle_service.py= (the aggregator), =core/rust/buck-registry/src/aggregator.rs=, =sim/identity.py=, the g1tie and end-to-end input generators, =core/js/test/registry.vectors.test.js= |
+
+Change: a documented admission authority and update policy, and a root
+history if proofs in flight must survive an update. Notes currently reads
+only the current root and rejects zero, so a history is an additive
+mapping plus one changed check. The code change is small; the policy is the
+work.
+
+** Interface 3: the membership proof
+
+Two circuits, one deployed verifier and adapter, the Notes helper, and the
+wallet-side producers. The leaf salt is a new private input, and finding
+5's three defects (the free tie point, the known generator logarithm, the
+unchecked limbs and incomplete addition) are repaired in the same pass so
+that one trusted setup covers both. The two circuits should collapse into
+one, with the B1 path given a sound circuit of its own before the g1-tie
+circuit is retired.
+
+Matched set per rebuild: circuit, proving key, verification key, Solidity
+verifier, fixtures.
+
+** Interface 4: registration and binding, which does not move
+
+=register=, =bindContract=, their credential overloads, the A' presentation
+and proof, =trustIssuer= and the issuer key format are all unchanged. The
+caller-supplied-leaf refusal becomes permanent and is documented as a
+decision rather than a stopgap. This is the most useful line in the survey:
+the identity layer A' just landed is not disturbed.
+
+** Interface 5: credit issuance
+
+=BuckCredit.createCredit=, 89 call sites in 38 files. Unchanged signature
+under the periodic-attestor decision. New surface: a regulator attestation
+entry point, the cached envelope and its expiry, and the per-credit check
+against asset class, face band and premium. =BuckCredit= gains its first
+dependency on the registry, which today it has none of.
+
+** Interface 6: receipts
+
+Capturing an attribute proof at payment time touches
+=wallet/envelope.py=, =build_receipt.py=, =verify_receipt.py=, their
+JavaScript counterparts, the receipt vectors, and
+=alberta-buck-receipt.org=. Additive: a receipt without an attribute proof
+stays valid.
+
+** Interface 7: the certified record
+
+Would have been the largest surface and is now documentation only, per
+[[#design]]: the =epoch= field stays and is reinterpreted, so no identity
+scalar changes and no vector is regenerated on this account. The passages
+to revise are the epoch-expiry and renewal sections of
+=alberta-buck-identity.org= and the issuer docstrings that describe renewal
+as re-issuance.
+
+** Summary
+
+| Interface | Blast radius | Driver |
+|-----------+--------------+--------|
+| Leaf function | four implementations, eight vector files, four-backend parity | the salt |
+| Membership proof | two circuits, one verifier, fresh trusted setup | the salt plus finding 5 |
+| Root | five on-chain readers, five off-chain, one writer | authority and policy |
+| Credit issuance | one contract, one new entry point, fixtures only | periodic attestor |
+| Receipts | wallet and vectors, additive | attribute capture |
+| Certified record | documentation only | epoch reinterpreted |
+| Registration and binding | none | deliberate |
+
+* Phases and acceptance
+:PROPERTIES:
+:CUSTOM_ID: phases
+:END:
+
+1. *Specification.* The leaf and its salt, the salt exchange, which
+   subtrees are salted and which are public, the admission authority and
+   update policy, accepted historical roots, revocation and witness
+   updates, the attribute vocabulary, and the insurer envelope. Written
+   before any code, as the A' program's phase 0 was.
+2. *Python.* Salted leaf, salt storage in the wallet, attribute proofs, the
+   regulator and its envelope, and a scan test per tree: a party holding
+   every certified identity finds nothing.
+3. *Circuits.* The leaf change folded into the finding-5 repairs, with the
+   B1 path given a sound circuit, one trusted setup, one matched set.
+4. *Solidity.* The root authority and policy, the permanent caller-leaf
+   refusal documented as such, and =BuckCredit='s attestation entry point
+   and per-credit check.
+5. *Rust, bindings and JavaScript*, with regenerated vectors, as every
+   identity change requires.
+6. *Documents.* The epoch reinterpretation, the accumulator sections of the
+   identity and Notes papers, and the insurer path in the credit
+   documentation.
+
+Acceptance: a party holding every certified identity finds no private tree
+it can scan; a holder proves each of its own memberships and a revoked
+holder cannot; an insurer outside the regulator's subtree cannot create a
+credit, one inside it can within its envelope and not outside it; the Notes
+membership path still verifies on the repaired circuit with the salted
+leaf; four-backend parity holds; and no identity scalar in any vector has
+changed.
