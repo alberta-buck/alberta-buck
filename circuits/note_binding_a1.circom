@@ -2,25 +2,40 @@
 // (verifyNoteBindingA1) circuit.
 //
 // Proves that the deposit-coupling ciphertext eEnc supplied at an A1 spend
-// is keyed to the SAME recipient Identity M_rec the spent note's eNote was
-// encrypted under — the A1 counterpart of note_binding.circom (whose
-// idHash opens the A2 layout Poseidon8(eNote, eIss)).
+// NAMES the same recipient Identity M_rec, and is KEYED to the same receiving
+// key pk_recv, as the spent note's eNote — the A1 counterpart of
+// note_binding.circom (whose idHash opens the A2 layout Poseidon8(eNote, eIss)).
 //
 // Public:  nullifier, v, eEncRx[4], eEncRy[4], eEncCx[4], eEncCy[4],
 //          piX[4], piY[4]                                       (26 signals)
 // Private: rho, idHash, eNote[4], mIss, sigR[2], sigS,
-//          rn[4], m_rec[4], u[4], t[4], tm[4], b[4]             (27 signals)
+//          rn[4], m_rec[4], k_recv[4], u[4], t[4], tm[4], b[4]  (31 signals)
+//
+// TWO SCALARS HERE, UNLIKE A2, AND WHY.
+//
+// An addressed note NAMES an Identity and is KEYED to that Identity's
+// receiving key (doc/review/notes-receiving-key.org).  A1 carries both facts
+// in one ciphertext -- eRec's plaintext is M_rec and its key is pk_recv -- so
+// this circuit needs both scalars: m_rec appears as a BASE MULTIPLE (M_rec =
+// m_rec*G in relations (6) and (7)) and k_recv appears only inside the
+// witnessed PRODUCTS (u = v + rn*k, tm = t*k).
+//
+// That is the asymmetry the substitution creates: note_binding.circom (A2)
+// uses its scalar as a product factor alone, so there the change renames a
+// private input and leaves the r1cs untouched.  Here it ADDS one, so this
+// circuit needs a fresh trusted setup while A2's does not.
 //
 // DESIGN — everything is a known multiple of G.
 //
 // An A1 note commits, in its idHash, the value ciphertext
-//   eNote = (rn*G, v*G + rn*M_rec)
+//   eNote = (rn*G, v*G + rn*pk_recv)
 // alongside the PUBLIC issuer's identity material (m_issuer, sigma).  The
 // spend-side coupling ciphertext is a re-randomized encryption of the
-// recipient identity under itself,
-//   eEnc = (t*G, M_rec + t*M_rec)        (t = r' + s, the total randomness)
+// recipient Identity to that recipient's mailbox,
+//   eEnc = (t*G, M_rec + t*pk_recv)      (t = r' + s, the total randomness)
 // and the coupling sigma's committed point is P_I = M_rec + b*H.  With
-// M_rec = m_rec*G every curve point above is a *fixed-base* multiple of G,
+// M_rec = m_rec*G and pk_recv = k*G every curve point above is a *fixed-base*
+// multiple of G,
 // so the circuit needs no variable-base scalar multiplication and no
 // witnessed point limbs: it recomputes each point from witnessed scalars
 // and equates coordinates (mod F_R against the Poseidon words for eNote;
@@ -32,23 +47,23 @@
 // plaintext V.  Pinning the plaintext to v*G with v a PUBLIC input — which
 // Notes.spendCoupledA1 sets to the spend's `face`, itself bound to the
 // note's committed value by the spend SNARK over the same nullifier —
-// makes m_rec = (dlog(eNote.C) - v)/rn unique: only the identity the note
-// was addressed to can satisfy the relation.
+// makes k = (dlog(eNote.C) - v)/rn unique: only the mailbox the note was
+// addressed to can satisfy the relation.
 //
 // Constraints:
 //   (1) nullifier = Poseidon3(rho, idHash, 4242)
 //   (2) idHash    = Poseidon8(eNote, mIss, sigR, sigS)   (the A1 layout)
 //   (3) eNote.R = rn*G                  (mod-F_R words match eNote[0..1])
-//   (4) eNote.C = u*G,  u = v + rn*m_rec   (words match eNote[2..3])
+//   (4) eNote.C = u*G,  u = v + rn*k_recv  (words match eNote[2..3])
 //   (5) eEnc.R  = t*G
-//   (6) eEnc.C  = m_rec*G + tm*G,  tm = t*m_rec
+//   (6) eEnc.C  = m_rec*G + tm*G,  tm = t*k_recv
 //   (7) P_I     = m_rec*G + b*H
 //
 // (1) reuses the nullifier the spend SNARK already attests, tying the proof
 // to the SPECIFIC spent note without revealing idHash; (6)+(7) share m_rec /
-// P_I with IdentityRegistry.verifyDepositCoupling, so the coupling and the
-// tie cannot be answered with different identities.  The scalar products
-// u = v + rn*m_rec and tm = t*m_rec are witnessed in 4-limb form and
+// P_I with the deposit gate, so the gate and the tie cannot be answered with
+// different identities.  The scalar products
+// u = v + rn*k_recv and tm = t*k_recv are witnessed in 4-limb form and
 // constrained against the native-field products (sound because BN254's G1
 // group order equals the circuit's native field).
 //
@@ -83,10 +98,11 @@ template NoteBindingA1() {
     signal input sigR[2];                       // issuer Schnorr nonce coords (mod F_R)
     signal input sigS;                          // issuer Schnorr response word
     signal input rn[4];                         // eNote randomness (4 limbs)
-    signal input m_rec[4];                      // recipient identity scalar (4 limbs)
-    signal input u[4];                          // v + rn * m_rec (4 limbs, witnessed)
+    signal input m_rec[4];                      // recipient IDENTITY scalar (4 limbs)
+    signal input k_recv[4];                     // recipient RECEIVING secret (4 limbs)
+    signal input u[4];                          // v + rn * k_recv (4 limbs, witnessed)
     signal input t[4];                          // eEnc total randomness (4 limbs)
-    signal input tm[4];                         // t * m_rec (4 limbs, witnessed)
+    signal input tm[4];                         // t * k_recv (4 limbs, witnessed)
     signal input b[4];                          // P_I blind (4 limbs)
 
     signal dummy;
@@ -113,24 +129,28 @@ template NoteBindingA1() {
     idH.inputs[7] <== sigS;
     idHash === idH.out;
 
-    // ---- Witnessed scalar products: u = v + rn*m_rec, tm = t*m_rec ---------
+    // ---- Witnessed scalar products: u = v + rn*k_recv, tm = t*k_recv -------
+    // The products use the RECEIVING secret, because the ciphertexts are keyed
+    // to pk_recv.  The IDENTITY scalar m_rec needs no single-field
+    // recomposition: it enters only as a base multiple, through its limbs, in
+    // (6) and (7).  Keeping the two apart is the whole point.
     signal rn_val;
     rn_val <== rn[0] + rn[1] * (1 << 64) + rn[2] * (1 << 128) + rn[3] * (1 << 192);
-    signal m_rec_val;
-    m_rec_val <== m_rec[0] + m_rec[1] * (1 << 64)
-               + m_rec[2] * (1 << 128) + m_rec[3] * (1 << 192);
+    signal k_recv_val;
+    k_recv_val <== k_recv[0] + k_recv[1] * (1 << 64)
+                + k_recv[2] * (1 << 128) + k_recv[3] * (1 << 192);
     signal t_val;
     t_val <== t[0] + t[1] * (1 << 64) + t[2] * (1 << 128) + t[3] * (1 << 192);
 
     signal rnm_val;
-    rnm_val <== rn_val * m_rec_val;
+    rnm_val <== rn_val * k_recv_val;
     signal u_check;
     u_check <== u[0] + u[1] * (1 << 64) + u[2] * (1 << 128) + u[3] * (1 << 192);
     u_check === v + rnm_val;
 
     signal tm_check;
     tm_check <== tm[0] + tm[1] * (1 << 64) + tm[2] * (1 << 128) + tm[3] * (1 << 192);
-    tm_check === t_val * m_rec_val;
+    tm_check === t_val * k_recv_val;
 
     // ===== (3) eNote.R = rn*G ================================================
     // The scalar-mul output is the canonical 4-limb point; its mod-F_R
@@ -148,7 +168,7 @@ template NoteBindingA1() {
                     + rnG.out[1][2] * (1 << 128) + rnG.out[1][3] * (1 << 192);
     eNoteRy_single === eNote[1];
 
-    // ===== (4) eNote.C = u*G  (u = v + rn*m_rec, constrained above) ==========
+    // ===== (4) eNote.C = u*G  (u = v + rn*k_recv, constrained above) =========
     component uG = ScalarMulG();
     uG.b <== u;
 
@@ -171,7 +191,7 @@ template NoteBindingA1() {
     tG.out[1][0] === eEncRy[0]; tG.out[1][1] === eEncRy[1];
     tG.out[1][2] === eEncRy[2]; tG.out[1][3] === eEncRy[3];
 
-    // ===== (6) eEnc.C = m_rec*G + tm*G  (tm = t*m_rec, constrained above) ====
+    // ===== (6) eEnc.C = m_rec*G + tm*G  (tm = t*k_recv, constrained above) ===
     component mG = ScalarMulG();
     mG.b <== m_rec;
 

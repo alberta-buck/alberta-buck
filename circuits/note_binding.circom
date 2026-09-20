@@ -1,36 +1,51 @@
 // Note<->eEnc re-encryption tie — INoteBindingVerifier circuit.
 //
 // Proves that the deposit-coupling ciphertext eEnc supplied at spend is a
-// re-encryption, under the recipient Identity point M_rec, of the
+// re-encryption, under the recipient's receiving key pk_recv, of the
 // issuer/recipient ciphertext that the spent note committed in its idHash.
 //
 // Public:  nullifier, eEncRx[4], eEncRy[4], eEncCx[4], eEncCy[4],
 //          piX[4], piY[4]                                          (25 signals)
-// Private: rho, idHash, eNote[4], eIss0[4], s[4], m_rec[4],
+// Private: rho, idHash, eNote[4], eIss0[4], s[4], k_recv[4],
 //          sm[4], r[4], rm[4], b[4], MI[2][4]                      (38 signals)
+//
+// WHICH SCALAR THIS IS, AND WHY IT CHANGED MEANING BUT NOT SHAPE.
+//
+// An addressed note is keyed to the recipient's receiving key pk_recv = k*G,
+// not to its Identity point: an identity scalar is a read capability the
+// design discloses to every counterparty, so it cannot also be a decryption
+// key (doc/review/notes-receiving-key.org).  The scalar the spender proves
+// knowledge of here is therefore k, the receiving secret.
+//
+// The arithmetic is untouched.  This circuit never multiplies by the scalar
+// at a variable base; it witnesses the products and checks them fixed-base,
+// so substituting k for the identity scalar renames a private input and
+// changes nothing else.  The r1cs, the proving key and the deployed verifier
+// are unaffected -- only the witness differs.  (The Identity is NOT proven
+// here: tying pk_recv to it is the folded deposit gate's job, section 3.3a.)
 //
 // DESIGN — ElGamal structure exploitation.
 //
 // The committed ciphertext eIssCommitted = (R0, C0) is an ElGamal encryption:
-//   R0 = r*G,  C0 = M_I + r*M_rec
+//   R0 = r*G,  C0 = M_I + r*pk_recv
 // where M_I is the issuer identity and r is the encryption randomness.
-// Decryption recovers M_I = C0 - m_rec*R0.
+// Decryption recovers M_I = C0 - k*R0.
 //
-// Instead of computing m_rec*R0 (variable-base, ~5M constraints), we witness
+// Instead of computing k*R0 (variable-base, ~5M constraints), we witness
 // the decrypted M_I and the randomness r, and verify the ElGamal structure
-// using only fixed-base scalar multiplications (r*G and (r·m_rec)*G).
+// using only fixed-base scalar multiplications (r*G and (r·k)*G).
 // This reduces the constraint count from ~6.3M to ~2.8M.
 //
 // Constraints:
 //   (1) nullifier = Poseidon3(rho, idHash, 4242)
 //   (2) idHash     = Poseidon8(eNote, eIss0)
 //   (3a) eEnc.R = R0 + s*G       (re-encryption of R)
-//   (3b) eEnc.C = C0 + sm*G      (re-encryption of C, sm = s·m_rec)
+//   (3b) eEnc.C = C0 + sm*G      (re-encryption of C, sm = s·k)
 //   (4a) R0 = r*G                 (ElGamal structure — randomness commitment)
-//   (4b) C0 = M_I + rm*G          (ElGamal structure — rm = r·m_rec)
+//   (4b) C0 = M_I + rm*G          (ElGamal structure — rm = r·k)
 //   (4c) P_I = M_I + b*H          (committed/blinded identity)
 //
-// The scalar products sm = s·m_rec and rm = r·m_rec are witnessed in 4-limb
+// The scalar products sm = s·k and rm = r·k are witnessed in 4-limb
 // form; the circuit constrains them against the native-field products.
 //
 // CIRCUIT DESIGN NOTE — circomlib vs circom-lib.  This circuit includes
@@ -61,10 +76,10 @@ template NoteBinding() {
     signal input eNote[4];                      // eNote coords (mod F_R)
     signal input eIss0[4];                      // eIssCommitted coords (mod F_R)
     signal input s[4];                          // re-rand scalar (4 limbs)
-    signal input m_rec[4];                      // identity scalar (4 limbs)
-    signal input sm[4];                         // s * m_rec (4 limbs, witnessed)
+    signal input k_recv[4];                     // RECEIVING secret k (4 limbs)
+    signal input sm[4];                         // s * k (4 limbs, witnessed)
     signal input r[4];                          // ElGamal randomness (4 limbs)
-    signal input rm[4];                         // r * m_rec (4 limbs, witnessed)
+    signal input rm[4];                         // r * k (4 limbs, witnessed)
     signal input b[4];                          // P_I blind (4 limbs)
     signal input MI[2][4];                      // decrypted identity M_I (4-limb)
 
@@ -91,24 +106,24 @@ template NoteBinding() {
     idH.inputs[6] <== eIss0[2];  idH.inputs[7] <== eIss0[3];
     idHash === idH.out;
 
-    // ---- Witnessed scalar products: constrain sm = s * m_rec, rm = r * m_rec
+    // ---- Witnessed scalar products: constrain sm = s * k, rm = r * k
     signal s_val;
     s_val <== s[0] + s[1] * (1 << 64) + s[2] * (1 << 128) + s[3] * (1 << 192);
     signal r_val;
     r_val <== r[0] + r[1] * (1 << 64) + r[2] * (1 << 128) + r[3] * (1 << 192);
-    signal m_rec_val;
-    m_rec_val <== m_rec[0] + m_rec[1] * (1 << 64)
-               + m_rec[2] * (1 << 128) + m_rec[3] * (1 << 192);
+    signal k_recv_val;
+    k_recv_val <== k_recv[0] + k_recv[1] * (1 << 64)
+               + k_recv[2] * (1 << 128) + k_recv[3] * (1 << 192);
 
     signal sm_val;
-    sm_val <== s_val * m_rec_val;
+    sm_val <== s_val * k_recv_val;
     signal sm_check;
     sm_check <== sm[0] + sm[1] * (1 << 64)
               + sm[2] * (1 << 128) + sm[3] * (1 << 192);
     sm_check === sm_val;
 
     signal rm_val;
-    rm_val <== r_val * m_rec_val;
+    rm_val <== r_val * k_recv_val;
     signal rm_check;
     rm_check <== rm[0] + rm[1] * (1 << 64)
               + rm[2] * (1 << 128) + rm[3] * (1 << 192);

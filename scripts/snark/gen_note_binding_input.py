@@ -3,7 +3,7 @@
 Public:  nullifier, eEncRx[4], eEncRy[4], eEncCx[4], eEncCy[4],
          piX[4], piY[4]                                          (25 signals)
 
-Private: rho, idHash, eNote[4], eIss0[4], s[4], m_rec[4],
+Private: rho, idHash, eNote[4], eIss0[4], s[4], k_recv[4],
          sm[4], r[4], rm[4], b[4], MI[2][4],
          R0_limb[2][4], C0_limb[2][4]                            (58 signals)
 
@@ -11,9 +11,9 @@ Constraints:
   (1) nullifier = Poseidon3(rho, idHash, 4242)
   (2) idHash = Poseidon8(eNote, eIss0)
   (3a) eEnc.R = R0 + s*G      (re-encryption of R)
-  (3b) eEnc.C = C0 + sm*G     (re-encryption of C, sm = s*m_rec)
+  (3b) eEnc.C = C0 + sm*G     (re-encryption of C, sm = s*k)
   (4a) R0 = r*G               (ElGamal structure — randomness commitment)
-  (4b) C0 = M_I + rm*G        (ElGamal structure — rm = r*m_rec)
+  (4b) C0 = M_I + rm*G        (ElGamal structure — rm = r*k)
   (4c) P_I = M_I + b*H        (committed/blinded identity)
 """
 
@@ -45,23 +45,26 @@ def main():
     seed = 0xCAFE10AD
     rng = random.Random(seed)
 
-    # ---- Identity keys ----
-    m_rec = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
-    M_rec = mul(G1, m_rec)
+    # ---- The recipient's MAILBOX key, not its Identity ----
+    # The note is keyed to pk_recv = k*G, so k is the scalar the spender proves
+    # knowledge of here.  The Identity is not in this circuit at all: tying
+    # pk_recv to it is the folded deposit gate's relation (3).
+    k_recv = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
+    pk_recv = mul(G1, k_recv)
 
     # ---- Issuer identity M_I and ElGamal encryption eIssCommitted = (R0, C0) ----
     m_iss = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
     M_I = mul(G1, m_iss)
     r_iss = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
     R0 = mul(G1, r_iss)                     # R0 = r * G
-    C0 = add(M_I, mul(M_rec, r_iss))        # C0 = M_I + r * M_rec
+    C0 = add(M_I, mul(pk_recv, r_iss))      # C0 = M_I + r * pk_recv
     R0x, R0y = point_to_words(R0)
     C0x, C0y = point_to_words(C0)
 
     # ---- Note ciphertext eNote ----
     v_note = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
     r_note = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
-    eNote_pt = elgamal_encrypt(mul(G1, v_note), M_rec, r_note)
+    eNote_pt = elgamal_encrypt(mul(G1, v_note), pk_recv, r_note)
     eNoteRx, eNoteRy = point_to_words(eNote_pt.R)
     eNoteCx, eNoteCy = point_to_words(eNote_pt.C)
     eNote = [eNoteRx % F_R, eNoteRy % F_R, eNoteCx % F_R, eNoteCy % F_R]
@@ -74,9 +77,9 @@ def main():
     rho = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
     nullifier = poseidon([rho, idHash, NULLIFIER_TAG_B]) % F_R
 
-    # ---- Re-encryption: eEnc = re-encrypt(eIssCommitted, s, M_rec) ----
+    # ---- Re-encryption: eEnc = re-encrypt(eIssCommitted, s, pk_recv) ----
     s = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
-    sm_val = (s * m_rec) % ORDER
+    sm_val = (s * k_recv) % ORDER
 
     eEnc_R = add(R0, mul(G1, s))            # eEnc.R = R0 + s*G
     eEnc_C = add(C0, mul(G1, sm_val))       # eEnc.C = C0 + sm*G
@@ -84,7 +87,7 @@ def main():
     eEncCx, eEncCy = point_to_words(eEnc_C)
 
     # ---- ElGamal structure verification values ----
-    rm_val = (r_iss * m_rec) % ORDER        # r * m_rec
+    rm_val = (r_iss * k_recv) % ORDER       # r * k
 
     # ---- P_I = M_I + b*H ----
     b = rand_scalar(lambda: rng.getrandbits(256)) % ORDER
@@ -98,7 +101,7 @@ def main():
     assert eEnc_R == add(R0, mul(G1, s)), "eEnc.R != R0 + s*G"
     assert eEnc_C == add(C0, mul(G1, sm_val)), "eEnc.C != C0 + sm*G"
     assert R0 == mul(G1, r_iss), "R0 != r*G"
-    assert C0 == add(M_I, mul(M_rec, r_iss)), "C0 != M_I + r*M_rec"
+    assert C0 == add(M_I, mul(pk_recv, r_iss)), "C0 != M_I + r*pk_recv"
     assert P_I == add(M_I, bH), "P_I != M_I + b*H"
     assert nullifier == poseidon([rho, idHash, NULLIFIER_TAG_B]) % F_R
     assert idHash == poseidon(eNote + eIss0_mod) % F_R
@@ -120,7 +123,7 @@ def main():
         "eNote":     [str(v) for v in eNote],
         "eIss0":     [str(v) for v in eIss0_mod],
         "s":         [str(v) for v in to_limbs_signed(s)],
-        "m_rec":     [str(v) for v in to_limbs_signed(m_rec)],
+        "k_recv":    [str(v) for v in to_limbs_signed(k_recv)],
         "sm":        [str(v) for v in to_limbs_signed(sm_val)],
         "r":         [str(v) for v in to_limbs_signed(r_iss)],
         "rm":        [str(v) for v in to_limbs_signed(rm_val)],
@@ -139,7 +142,7 @@ def main():
         ],
     }
 
-    sys.stderr.write(f"m_rec   = {hex(m_rec)}\n")
+    sys.stderr.write(f"k_recv  = {hex(k_recv)}\n")
     sys.stderr.write(f"s       = {hex(s)}\n")
     sys.stderr.write(f"r       = {hex(r_iss)}\n")
     sys.stderr.write(f"b       = {hex(b)}\n")

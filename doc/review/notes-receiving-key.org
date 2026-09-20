@@ -251,7 +251,8 @@ for it twice as the mistake to avoid: the Notes end-to-end fixtures embed an
 identity root, so regenerating them runs the note-binding prover over a
 2.4M-constraint circuit. The aggregator depth raise, the finding-5 repairs,
 the folded gate and this substitution all force it. They go together or they
-go three times.
+go three times. How much of that is a /trusted setup/ rather than a re-prove
+turned out to be less than assumed; see [[#circuit-cost]].
 
 *A1 gains an argument; A2 gains none.* The earlier reading of "four call
 sites, the encryption key argument and nothing else" holds for A2 and not
@@ -269,6 +270,62 @@ Carrying =pk_recv= in a plaintext receipt costs nothing: the receipt already
 names both parties, and the key alone decides no addressing, which is the
 =receiving_key_proto= check that hands the adversary =pk_recv= and watches it
 find nothing.
+
+** 4.2 What the circuits actually cost, measured
+:PROPERTIES:
+:CUSTOM_ID: circuit-cost
+:END:
+
+Measured on 2026-09-20 against the deployed build, because the plan had
+assumed the note-binding substitution forces a rebuild and it does not.
+
+*A2's note-binding circuit does not change at all.* It never multiplies by
+the recipient's scalar at a variable base -- it witnesses the products
+=sm = s*k=, =rm = r*k= and checks them fixed-base -- so substituting the
+receiving secret for the identity scalar renames a private input and leaves
+the arithmetic alone. Compiled both ways, the =r1cs= is byte-identical, and
+identical to the one the deployed proving key was generated from:
+
+#+begin_example
+750a1f46...eca9b   circuits/note_binding.circom, before the rename
+750a1f46...eca9b   circuits/note_binding.circom, after
+750a1f46...eca9b   build/snark/note_binding/note_binding.r1cs (deployed)
+#+end_example
+
+So the 3.3 GB proving key, the verification key and
+=NoteBindingVerifier.sol= all survive untouched. A receiving-key witness
+proves against them in 5.2 seconds and verifies: =WITNESS IS CORRECT= over
+2,416,748 constraints, then =OK!=. No trusted setup, no verifier
+redeployment, no ceremony.
+
+One wrinkle worth recording, because it looks like a contradiction and is
+not: the =circom= C++ witness calculator embeds input signal /names/, so it
+refuses a renamed input with =Signal not found= even though the =r1cs= is
+identical. Recompiling the calculator is minutes; it is not a setup.
+
+*A1's does change, and needs a fresh setup.* A1 carries both facts in one
+ciphertext, so its circuit needs both scalars: the identity as a /base
+multiple/ (=M_rec = m_rec*G= in the =eEnc= and =P_I= relations) and the
+receiving secret as a /product factor/ (=u = v + rn*k=, =tm = t*k=). That
+adds a private input, so the =r1cs= differs and the proving key must be
+regenerated:
+
+| Circuit | =r1cs= | Setup |
+|---------+--------+-------|
+| =note_binding.circom= (A2) | byte-identical | none |
+| =note_binding_a1.circom= | =371041e7= vs deployed =02f70e06=, 2,859,018 constraints | required |
+
+The same asymmetry as the mint, from the same cause: A1 names and keys in
+one object, A2 only keys. Where that asymmetry appears, A1 pays.
+
+*What still gates the fixtures.* The end-to-end world cannot be regenerated
+yet, and the reason is not cost. =gen_e2e_world.py= asserts that the
+sigma's committed point opens as the named identity plus the blind, and
+with the note keyed to =pk_recv= the legacy sigma's decryption relation no
+longer lands there -- which is the defect, seen from the fixture side. The
+fixtures need the folded gate to exist as a circuit /and/ an on-chain
+verifier first. That is the remaining circuit work, together with the
+finding-5 repairs, the aggregator depth raise and the B1 circuit.
 
 * 5 What it costs
 :PROPERTIES:

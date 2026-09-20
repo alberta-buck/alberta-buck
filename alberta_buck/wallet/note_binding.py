@@ -226,7 +226,8 @@ def make_note_binding_a1_witness(
     sigma_R,        # issuer Schnorr signature nonce point
     sigma_s: int,
     r_note: int,    # eNote ElGamal randomness (travels with the opening)
-    m_rec: int,
+    m_rec: int,     # the recipient's IDENTITY scalar (a base multiple)
+    k_recv: int,    # the recipient's RECEIVING secret (a product factor)
     t: int,         # eEnc total randomness (r' + s for a re-encrypted eRec)
     b: int,
 ) -> dict:
@@ -235,11 +236,17 @@ def make_note_binding_a1_witness(
     The caller supplies ALL private values; this function computes the
     public outputs (nullifier, eEnc, P_I) and returns the complete witness
     dictionary ready for the C++ witness calculator.  ``eEnc`` is the fresh
-    encryption ``(t*G, M_rec + t*M_rec)`` of the recipient identity under
-    itself — exactly a re-encryption, with total randomness ``t``, of the
-    note's ``eRec``.
+    encryption ``(t*G, M_rec + t*pk_recv)``: the recipient Identity NAMED in
+    the plaintext, KEYED to that Identity's receiving key — exactly a
+    re-encryption, with total randomness ``t``, of the note's ``eRec``.
+
+    A1 needs BOTH scalars, unlike A2.  ``m_rec`` enters as a base multiple
+    (``M_rec = m_rec*G`` in the eEnc and P_I relations) and ``k_recv`` only
+    inside the witnessed products (``u = v + rn*k``, ``tm = t*k``).  That is
+    why this circuit gained a private input where A2's merely renamed one.
     """
     M_rec = mul(G1, m_rec % ORDER)
+    pk_recv = mul(G1, k_recv % ORDER)
 
     # ---- eNote coordinates reduced mod F_R for Poseidon ----
     eNoteRx, eNoteRy = point_to_words(eNote.R)
@@ -252,8 +259,8 @@ def make_note_binding_a1_witness(
     nullifier = poseidon([rho, idHash, NULLIFIER_TAG_B]) % F_R
 
     # ---- Witnessed scalars ----
-    u_val = (v + r_note * m_rec) % ORDER          # eNote.C = u*G
-    tm_val = (t * m_rec) % ORDER                  # eEnc.C = M_rec + tm*G
+    u_val = (v + r_note * k_recv) % ORDER         # eNote.C = u*G
+    tm_val = (t * k_recv) % ORDER                 # eEnc.C = M_rec + tm*G
 
     # ---- eEnc = (t*G, M_rec + tm*G) ----
     eEnc_R = mul(G1, t % ORDER)
@@ -267,8 +274,8 @@ def make_note_binding_a1_witness(
 
     # ---- Verify off-chain ----
     assert eNote.R == mul(G1, r_note % ORDER), "eNote.R != rn*G"
-    assert eNote.C == add(mul(G1, v % ORDER), mul(M_rec, r_note)), \
-        "eNote.C != v*G + rn*M_rec"
+    assert eNote.C == add(mul(G1, v % ORDER), mul(pk_recv, r_note)), \
+        "eNote.C != v*G + rn*pk_recv"
     assert eNote.C == mul(G1, u_val), "eNote.C != u*G"
     assert eEnc_C == mul(G1, (m_rec + tm_val) % ORDER)
     assert nullifier == poseidon([rho, idHash, NULLIFIER_TAG_B]) % F_R
@@ -290,6 +297,7 @@ def make_note_binding_a1_witness(
         "sigS": str(sigma_s % F_R),
         "rn": [str(x) for x in to_limbs(r_note % ORDER)],
         "m_rec": [str(x) for x in to_limbs(m_rec % ORDER)],
+        "k_recv": [str(x) for x in to_limbs(k_recv % ORDER)],
         "u": [str(x) for x in to_limbs(u_val)],
         "t": [str(x) for x in to_limbs(t % ORDER)],
         "tm": [str(x) for x in to_limbs(tm_val)],
@@ -306,6 +314,7 @@ def prove_note_binding_a1(
     sigma_s: int,
     r_note: int,
     m_rec: int,
+    k_recv: int,
     t: int,
     b: int,
 ) -> bytes:
@@ -329,7 +338,7 @@ def prove_note_binding_a1(
         )
 
     witness = make_note_binding_a1_witness(
-        rho, eNote, v, m_issuer, sigma_R, sigma_s, r_note, m_rec, t, b)
+        rho, eNote, v, m_issuer, sigma_R, sigma_s, r_note, m_rec, k_recv, t, b)
     return _groth16_prove(_BUILD_A1, witness_gen, zkey, witness)
 
 
