@@ -17,7 +17,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: Formal correctness proofs for the cryptographic transformations at the heart of Alberta Buck's identity system and BUCK Notes pool: Pointcheval-Sanders credentials (rerandomization completeness, the fresh-signature lemma, and the A' hiding presentation: masked completeness, perfect hiding, and the registration NIZK's zero-knowledge, special soundness and composition), Chaum-Pedersen re-encryption (completeness, special soundness, honest-verifier zero-knowledge, and NIZK via Fiat-Shamir in the random oracle model), and the BUCK Notes spend predicates under the Identity-M model (mint addressing + anti-framing; deposit-coupling and depositor-binding soundness; the flavor-agnostic nullifier and double-spend prevention; mutual decryptability and transaction-graph privacy).  Every Notes spend Identity-binds /both/ counterparties -- the issuer at mint, the depositor at spend -- via an EIP-196 sigma plus a registry-membership proof bound to the same committed point, so an un-nameable counterparty is un-spendable.  Each theorem is accompanied by a compact py_ecc sanity check on BN254.  The end-to-end correctness corollary chains the identity results together: an accepted Chaum-Pedersen proof against a registry-stored ElGamal ciphertext implies the re-encrypted ciphertext encrypts the same issuer-certified identity -- the EOA/contract <-> Identity binding on which every downstream protocol (approve, transfer, Notes spend, guardian authorization) depends.
+#+description: Formal correctness proofs for the cryptographic transformations at the heart of Alberta Buck's identity system and BUCK Notes pool: Pointcheval-Sanders credentials (rerandomization completeness, the fresh-signature lemma, and the A' hiding presentation: masked completeness, perfect hiding, and the registration NIZK's zero-knowledge, special soundness and composition; registration unforgeability from PS-CM; issuer-blindness of the registration transcript), Chaum-Pedersen re-encryption (completeness, special soundness, honest-verifier zero-knowledge, and NIZK via Fiat-Shamir in the random oracle model), and the BUCK Notes spend predicates under the Identity-M model (mint addressing + anti-framing; deposit-coupling and depositor-binding soundness; the flavor-agnostic nullifier and double-spend prevention; mutual decryptability and transaction-graph privacy).  Every Notes spend Identity-binds /both/ counterparties -- the issuer at mint, the depositor at spend -- via an EIP-196 sigma plus a registry-membership proof bound to the same committed point, so an un-nameable counterparty is un-spendable.  Each theorem is accompanied by a compact py_ecc sanity check on BN254.  The end-to-end correctness corollary chains the identity results together: an accepted Chaum-Pedersen proof against a registry-stored ElGamal ciphertext implies the re-encrypted ciphertext encrypts the same issuer-certified identity -- the EOA/contract <-> Identity binding on which every downstream protocol (approve, transfer, Notes spend, guardian authorization) depends.
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 #+LATEX_HEADER: \usepackage{draftwatermark}
@@ -65,10 +65,15 @@ rest of the series relies on:
   independent of \( m \) up to \( 1/q \) (perfect hiding).
 - *Theorems R-HVZK, R-sound, R-comp*: the registration NIZK is
   honest-verifier zero-knowledge given \( P \), specially sound
-  (extracting a plain PS signature, so registration forgery reduces
-  to PS unforgeability in the committed-message key form), and
-  composes the credential, ciphertext and key relations on one
-  \( m \).
+  (extracting a plain PS signature), and composes the credential,
+  ciphertext and key relations on one \( m \).
+- *Theorem R-unforge*: registration forgery -- by a party with no
+  credential, or with every registration of the target and its
+  identity scalar in hand -- reduces to PS unforgeability in the
+  committed-message key form, in the random-oracle model.
+- *Theorem R-blind*: the registration transcript gives even the
+  issuer, holding its own key and every certified identity, no
+  advantage beyond DDH in telling which identity registered.
 - *Theorem 3*: an honest Chaum-Pedersen prover always verifies
   (completeness).
 - *Theorem 4*: from two accepting transcripts with distinct
@@ -143,17 +148,17 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    | \( e : G_1 \times G_2 \to G_T \)              | Bilinear, non-degenerate pairing (type-3)                                                                                                                                                                                                                               |
    | \( O \)                                       | Point at infinity (group identity)                                                                                                                                                                                                                                      |
    | \( \mathbb{Z}_q^\ast \)                       | Non-zero scalars mod \( q \)                                                                                                                                                                                                                                            |
-   | \( (x, y) / (X, Y, Y_1) \)                    | Issuer secret / public key: \( X = x g_2,\ Y = y g_2,\ Y_1 = y G \); the registry checks \( e(Y_1, g_2) = e(G, Y) \) at trust time                                                                                                                                                                                                                 |
+   | \( (x, y) / (X, Y, Y_1) \)                    | Issuer secret / public key: \( X = x g_2,\ Y = y g_2,\ Y_1 = y G \); the registry checks \( e(Y_1, g_2) = e(G, Y) \) at trust time                                                                                                                                      |
    | \( m \in \mathbb{Z}_q \)                      | Identity scalar: \( m = H(\text{identity\_data}) \bmod q \) [fn::Read-capability secret: decrypts ciphertexts under \( M = mG \), verifies receipts.  Disclosed to counterparties by design; insufficient for registration or spend authorization without \( \sigma \)] |
    | \( M = m \cdot G \in G_1 \)                   | Identity point: the value every ElGamal ciphertext encrypts [fn::Public (recoverable from \( m \)); the KYC-registered anchor]                                                                                                                                          |
-   | \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \) | PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)   [fn::Write-capability secret: authorizes account registration.  Held only by the Identity owner; never disclosed to counterparties and never published: the holder publishes the presentation \( (A, B) \)]                                                                         |
+   | \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \) | PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)   [fn::Write-capability secret: authorizes account registration.  Held only by the Identity owner; never disclosed to counterparties and never published: the holder publishes the presentation \( (A, B) \)] |
    | \( (sk, pk) \)                                | Identity key pair on \( G_1 \): \( pk = sk \cdot G \)                                                                                                                                                                                                                   |
    | \( E = (R, C) \in G_1^2 \)                    | ElGamal ciphertext: \( R = r G,\ C = M + r \cdot pk \)                                                                                                                                                                                                                  |
    | \( H(\cdot) \)                                | Cryptographic hash modelled as a random oracle (Fiat-Shamir)                                                                                                                                                                                                            |
-   | \( a, b \in \mathbb{Z}_q^\ast \) | Presentation scalars, fresh per account: \( a \) rerandomizes, \( b \) blinds on the \( Y \) base |
-   | \( (A, B) \in G_1^2 \) | The published presentation \( A = a \sigma_1,\ B = a \sigma_2 + b Y_1 = (x + m y) A + b Y_1 \) |
-   | \( P = m A + b G \) | The one credential-side point derivable from a registration transcript; \( B = x A + y P \) |
-   | \( m_t, b_t, r_t, sk_t \) | Registration NIZK nonces; \( C_1 = m_t A + b_t G,\ T_C,\ T_R,\ T_{key} \) its commitments; \( s_m, s_b, s_r, s_{sk} \) its responses |
+   | \( a, b \in \mathbb{Z}_q^\ast \)              | Presentation scalars, fresh per account: \( a \) rerandomizes, \( b \) blinds on the \( Y \) base                                                                                                                                                                       |
+   | \( (A, B) \in G_1^2 \)                        | The published presentation \( A = a \sigma_1,\ B = a \sigma_2 + b Y_1 = (x + m y) A + b Y_1 \)                                                                                                                                                                          |
+   | \( P = m A + b G \)                           | The one credential-side point derivable from a registration transcript; \( B = x A + y P \)                                                                                                                                                                             |
+   | \( m_t, b_t, r_t, sk_t \)                     | Registration NIZK nonces; \( C_1 = m_t A + b_t G,\ T_C,\ T_R,\ T_{key} \) its commitments; \( s_m, s_b, s_r, s_{sk} \) its responses                                                                                                                                    |
    #+LATEX: }
 
    Response convention: Part I-bis (Theorems R-*) writes responses as
@@ -190,13 +195,22 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
       only computational lock left on a registration after Theorem
       2' (the issuer-blindness theorem of the main paper and the
       long-horizon section below).
+
    3. *PS unforgeability, committed-message key form (PS-CM)*: the
       Pointcheval-Sanders single-message scheme is EUF-CMA when the
-      public key also exposes \( Y_1 = y G \) in \( G_1 \), under
-      Assumption 2 of their 2016 paper[fn:ps].  Theorem R-sound's
-      corollary reduces registration soundness to it directly; the
-      issuer keeps the signature base \( h \) with unknown discrete
-      logarithm, which =ps_sign= does by sampling it.
+      public key also exposes \( Y_1 = y G \) in \( G_1 \).  Section
+      6.1 of their 2016 paper[fn:ps] publishes exactly
+      \( (G, Y_1;\ g_2, X, Y) \) and lets the signer sign commitments
+      \( t G + m Y_1 \), which the user unblinds to
+      \( (h, (x + m y) h) \); a plain-message signing oracle is the
+      special case \( t = 0 \), so an adversary against our scheme is
+      weaker than the Section 6.1 adversary, whose scheme is proved
+      EUF-CMA under that paper's Assumption 2, an interactive
+      assumption in type-3 groups.  Theorem R-unforge reduces
+      registration forgery to it directly.  The issuer keeps the
+      signature base \( h \) with unknown discrete logarithm, which
+      =ps_sign= does by sampling it.  Nothing in this document depends
+      on q-SDH.
 
    4. *Random Oracle Model (ROM)*: the Fiat-Shamir transform is applied
       to sigma protocols whose security is proved in the ROM, with the
@@ -215,9 +229,13 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
 
    In Part I, Theorems 1 and 1' follow from bilinearity alone, Lemma 2
    and Theorem 2' are information-theoretic, and Theorem R-HVZK is a
-   perfect simulation; Theorem R-sound's extractor is unconditional,
-   and its reduction of registration forgery to PS-CM and of
-   non-reusability to CDH is computational.  The Chaum-Pedersen
+   perfect simulation (the NIZK invokes the ROM); Theorem R-sound's
+   extractor is unconditional; Theorem R-unforge is computational
+   (PS-CM, ROM) and Theorem R-blind is computational (DDH, ROM).  No
+   assumption is made about the issuer beyond honest issuance: it
+   holds \( (x, y) \) and can sign at will, so unforgeability is
+   stated against every party except the issuer, and issuer-blindness
+   against the issuer.  The Chaum-Pedersen
    proofs (Part II) are interactive-sigma-protocol facts; the NIZK
    corollary (Part II, end) invokes the ROM.  Part IV (Notes spend
    predicates) additionally invokes assumption (5) --
@@ -226,6 +244,45 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
 
 #+LATEX: \clearpage
 * Part I: Pointcheval-Sanders Credentials and the Hiding Presentation
+
+** Status and Scope of This Part
+
+   The registration presentation proved here (the "A'" design) is
+   implemented on branch =feature/a-prime= across the Python executable
+   specification (=alberta_buck/wallet/ps.py=, =nizk.py=), the Solidity
+   verifier (=src/IdentityRegistry.sol=: =trustIssuer=,
+   =_verifyCredential=, =_fsRegister=, =_checkPresentation=), the Rust
+   kernel (=core/rust/buck-identity/src/{ps,nizk}.rs=) with its PyO3 and
+   wasm bindings, and the JavaScript wrapper
+   (=core/js/src/identity-core.js=), all checked against one set of
+   vectors.  This part is the security argument for it, written in full
+   so that an independent reviewer can confirm or refute each step; the
+   review itself has not happened, and until it has every result below is
+   a claim of that branch, not a property of the system.  Section
+   [[#review-status]] lists what the reviewer is asked to check and what
+   would strengthen the argument further.
+
+   What is claimed.  A holder of a PS credential on an identity scalar
+   \( m \) registers an account by publishing a blinded pair \( (A, B) \)
+   and a Schnorr-family proof.  The pair and the proof together reveal
+   nothing about \( m \) beyond what the account's ElGamal ciphertext
+   reveals: unconditionally on the credential side (Theorems 2', R-HVZK)
+   and under DDH on the ciphertext side (Theorem R-blind).  An accepting
+   registration implies possession of a credential on the encrypted
+   \( m \), and neither a party who has seen any number of the holder's
+   registrations nor one who has learned \( m \) can produce one:
+   registration forgery reduces to PS unforgeability in the
+   committed-message key form, in the random-oracle model, with the usual
+   forking loss (Theorems R-sound, R-unforge).  Fresh randomness per
+   registration is security critical (Proposition R-fresh).
+
+   What is not covered here: the identity-derived A1/A2 Note receiving
+   keys and the issuance, policy and accumulator metadata of the review's
+   findings R5 and R6; duplicate issuance by a corrupt issuer and the
+   optional holder secret; wallet-side leakage (RNG quality, side
+   channels, backup formats that might export \( \sigma \), any of which
+   reintroduces credential harvesting); and post-quantum security, for
+   which see the long-horizon section.
 
 ** The Construction
 
@@ -237,38 +294,106 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    e(\sigma_1,\; X + m \cdot Y) \;=\; e(\sigma_2,\; g_2).
    \]
 
-   The issuer produces \( \sigma \) by choosing a fresh \( h \in G_1 \setminus \{O\} \)
-   and setting \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \).
-   /Rerandomization/ is the operation
+   *Keys and issuance.*  The issuer holds \( (x, y) \) and publishes
 
    \[
-   \sigma' \;=\; (t \cdot \sigma_1,\; t \cdot \sigma_2) \qquad t \in \mathbb{Z}_q^\ast.
+   X = x \cdot g_2, \qquad Y = y \cdot g_2, \qquad Y_1 = y \cdot G .
    \]
 
-   It is a wallet-internal step.  The issuer additionally publishes the
-   \( G_1 \) image \( Y_1 = y \cdot G \) of its second secret, and the
-   registry checks \( e(Y_1, g_2) = e(G, Y) \) once, when it trusts the
-   key.  To register an account the holder samples fresh, independent
-   \( a, b \in \mathbb{Z}_q^\ast \) and publishes the /presentation/
+   The registry accepts a key only if \( Y_1 \neq O \) and
+   \( e(Y_1, g_2) = e(G, Y) \) (=trustIssuer=).  Issuance is the plain
+   scheme's: on \( m \) the issuer samples \( h = t \cdot G \) for uniform
+   nonzero \( t \) it does not disclose and returns
+   \( \sigma = (h,\ (x + m y) h) \).  The credential never leaves the
+   wallet.  /Rerandomization/,
+   \( \sigma' = (t \cdot \sigma_1,\; t \cdot \sigma_2) \) for
+   \( t \in \mathbb{Z}_q^\ast \), is a wallet-internal step.
+
+   *Presentation.*  For each account the wallet samples independent
+   uniform nonzero \( a, b, sk, r \) and publishes
 
    \[
-   A \;=\; a \cdot \sigma_1, \qquad
-   B \;=\; a \cdot \sigma_2 + b \cdot Y_1 \;=\; (x + m y) \cdot A + b \cdot Y_1,
+   A = a \cdot \sigma_1, \qquad
+   B = a \cdot \sigma_2 + b \cdot Y_1 = (x + m y) \cdot A + b \cdot Y_1, \qquad
+   pk = sk \cdot G, \qquad
+   E = (R, C) = (r G,\ m G + r\,pk),
    \]
 
-   together with the registration NIZK of Theorem R-HVZK below, which
-   proves that \( (A, B) \) presents a credential on the \( m \)
-   encrypted in the account's ElGamal ciphertext.  The raw \( \sigma \)
-   and its rerandomizations never leave the wallet: a rerandomized pair
-   is still a verifiable signature on \( m \), so any party holding a
-   candidate \( m \) can test it (Lemma 2, remark).  The point
+   and discards \( a, b \) after proving.  Write \( P = m A + b G \); then
+   \( B = x A + y P \).  \( P \) is the one credential-side value a
+   verifier can derive from the transcript, and the results below are
+   stated in terms of it.
 
-   \[
-   P \;=\; m \cdot A + b \cdot G
-   \]
+   *Registration proof.*  Witness \( (m, b, r, sk) \); nonces
+   \( (m_t, b_t, r_t, sk_t) \) uniform in \( \mathbb{Z}_q \); context
+   \( \mathrm{ctx} = (\text{registrant}, \text{chainid}, \text{registry}, \mathrm{DOMAIN}) \)
+   with \( \mathrm{DOMAIN} = \mathrm{keccak}(\texttt{AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3}) \):
 
-   is the one credential-side value a verifier can derive from the
-   transcript; the results below are stated in terms of it.
+   \begin{align*}
+   C_1 &= m_t A + b_t G,  & T_C &= m_t G + r_t\,pk, & T_R &= r_t G, & T_{key} &= sk_t\,G, \\
+   e &= H(A, B, R, C, pk, C_1, T_C, T_R, T_{key}, \mathrm{ctx}) \bmod q, \\
+   s_m &= m_t + e m, & s_b &= b_t + e b, & s_r &= r_t + e r, & s_{sk} &= sk_t + e\,sk.
+   \end{align*}
+
+   Published: \( (A, B),\ pk,\ E,\ (e, s_m, s_b, s_r, s_{sk}, C_1, T_C, T_R, T_{key}) \),
+   plus the issuer's address, which selects the key.  Credential-based
+   contract binding uses the identical proof with the target contract as
+   registrant.
+
+   *Verifier.*
+
+   \begin{align*}
+   \text{(g)}\quad  & A, B, pk, R \neq O;\ \text{all points on the curve};\
+                      e, s_m, s_b, s_r, s_{sk} < q;\ \text{registrant unregistered};\ \text{issuer trusted} \\
+   \text{(fs)}\quad & e = H(A, B, R, C, pk, C_1, T_C, T_R, T_{key}, \mathrm{ctx}) \bmod q \\
+   \text{(b)}\quad  & s_m G + s_r\,pk = e C + T_C \\
+   \text{(c)}\quad  & s_r G = e R + T_R \\
+   \text{(k)}\quad  & s_{sk} G = T_{key} + e\,pk \\
+   \text{(a')}\quad & e(s_m A + s_b G - C_1,\; Y)\cdot e(e A,\; X)\cdot e(-e B,\; g_2) = 1
+   \end{align*}
+
+   One commitment \( C_1 \) carries both credential exponents; the nonce
+   \( m_t \) is shared between \( C_1 \) and \( T_C \), and \( r_t \)
+   between \( T_C \) and \( T_R \).
+
+** Security Definitions
+
+   Three games.  Advantage is \( |\Pr[\text{guess} = \beta] - 1/2| \)
+   for the distinguishing games and the success probability for the
+   forgery game.
+
+   *Presentation hiding (HIDE).*  The adversary chooses the issuer key
+   \( (x, y) \) -- it may /be/ the issuer -- two scalars \( m_0, m_1 \)
+   and valid credentials \( \sigma^0, \sigma^1 \) on them.  The challenger
+   samples uniform nonzero \( a, b \) and a bit \( \beta \) and returns
+   \( (A, B) = (a \sigma^\beta_1,\ a \sigma^\beta_2 + b Y_1) \) together
+   with \( P = m_\beta A + b G \).  The adversary guesses \( \beta \).
+   Returning \( P \) makes the game at least as strong as anything the
+   real transcript reveals (Theorem R-HVZK's remark).
+
+   *Registration unforgeability (RU).*  The challenger samples
+   \( (x, y) \) and publishes \( (X, Y, Y_1) \).  The adversary has a
+   random oracle and two oracles: \( \mathsf{Sign}(m) \) returns a
+   credential on \( m \) of its choice, and the set of queried messages
+   is \( Q \); \( \mathsf{Present}(m, \mathrm{ctx}) \), for /any/
+   \( m \) including ones not in \( Q \), returns a complete honest
+   registration transcript \( (pk, E, A, B, \pi) \) of \( m \) with
+   fresh \( (a, b, sk, r) \) and the given context, and the adversary is
+   also given \( m \) itself.  This models a party who has seen the
+   target's registrations and has learned the target's identity scalar,
+   as every counterparty does.  The adversary wins if it outputs an
+   accepting transcript whose extracted witness (Theorem R-sound) has
+   \( m^\ast \notin Q \); \( m^\ast \) may well be a message it obtained
+   presentations of, since only credentials count as queries.  One game
+   therefore covers both "no credential on the encrypted identity"
+   (soundness) and the review's R3 (harvesting).
+
+   *Issuer-blindness (IB).*  The adversary is the issuer: it holds
+   \( (x, y) \) and chooses two certified identities \( m_0, m_1 \) with
+   their credentials.  The challenger registers one at random with fresh
+   \( (a, b, sk, r) \) and honest randomness and returns the full public
+   transcript \( (pk, E, A, B, \pi) \) with a context of the adversary's
+   choice.  Many registrations are handled by a hybrid over them.
 
 ** Theorem 1 (Completeness of Rerandomization)
 
@@ -290,9 +415,7 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
 
    Non-degeneracy: \( G_1 \) has prime order \( q \), so \( t \sigma_1 = O \)
    iff \( t \equiv 0 \pmod q \) or \( \sigma_1 = O \).  Both are excluded
-   by hypothesis (\( t \in \mathbb{Z}_q^\ast \) and \( \sigma_1 \neq O \) by
-   PS validity).  Therefore \( \sigma'_1 \neq O \) and the pair satisfies
-   the full PS validity predicate.  \( \blacksquare \)
+   by hypothesis.  \( \blacksquare \)
 
    *Scope.*  The wallet uses this step to re-issue the credential to
    itself; nothing produced by it is published.  The published object
@@ -300,16 +423,15 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
 
 ** Theorem 1' (Completeness of the Masked Verifier)
 
-   *Statement.*  For every valid PS signature \( \sigma \) on \( m \)
-   under \( (X, Y) \), with \( Y_1 = y G \), and for every
-   \( a, b \in \mathbb{Z}_q^\ast \), the presentation
-   \( (A, B) = (a \sigma_1,\ a \sigma_2 + b Y_1) \) satisfies
+   *Statement.*  For every valid credential, every
+   \( a, b \in \mathbb{Z}_q^\ast \) and every \( sk, r \), the honest
+   transcript is accepted; in particular the presentation satisfies
 
    \[
    e(B,\; g_2) \;=\; e(A,\; X) \cdot e(m A + b G,\; Y),
    \]
 
-   equivalently \( B = x A + y P \) with \( P = m A + b G \).
+   equivalently \( B = x A + y P \).
 
    *Proof.*  Split \( B \):
 
@@ -325,9 +447,11 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
       = e(b G,\; Y).
    \end{align*}
 
-   Multiplying, \( e(B, g_2) = e(A, X) \cdot e(m A + b G, Y) \).  Since
-   \( \sigma_1 \neq O \) and \( a \neq 0 \), \( A \neq O \).
-   \( \blacksquare \)
+   Multiplying, \( e(B, g_2) = e(A, X) \cdot e(m A + b G, Y) \).  Then
+   \( s_m A + s_b G - C_1 = e (m A + b G) = e P \), so (a') is
+   \( [e(P, Y)\, e(A, X) / e(B, g_2)]^{e} = 1 \); (b), (c), (k) are the
+   Schnorr identities; and \( A \neq O \) since \( \sigma_1 \neq O \) and
+   \( a \neq 0 \).  \( \blacksquare \)
 
    *Implementation guard.*  With \( A = O \) the masked equation reads
    \( e(B, g_2) = e(b G, Y) \), which \( B = b Y_1 \) satisfies /for
@@ -336,9 +460,8 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    \( A = O \) (and \( B = O \)).  This is the same degenerate case that
    the earlier published form met as \( \sigma'_1 = O \) (from
    \( t = 0 \)); under the presentation it is \( a = 0 \).  Theorem 1'
-   depends on \( a \neq 0 \); the contract's guard is the runtime
-   witness of that hypothesis, and it is security critical rather than
-   hygienic.
+   depends on \( a \neq 0 \); the contract's guard is the runtime witness
+   of that hypothesis, and it is security critical rather than hygienic.
 
 ** Lemma 2 (Fresh-Signature Distribution for a Fixed Message)
 
@@ -351,20 +474,13 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
 
    *Proof.*  Since \( G_1 \) is cyclic of prime order \( q \) and
    \( \sigma_1 \neq O \), the map
-
-   \[
-   \varphi_\sigma : \mathbb{Z}_q^\ast \to G_1 \setminus \{O\}, \qquad t \mapsto t \sigma_1
-   \]
-
-   is a bijection (it is the restriction to non-zero scalars of the
-   group isomorphism \( \mathbb{Z}_q \to \langle \sigma_1 \rangle = G_1 \)).
-   Hence \( \sigma'_1 \) is uniform on \( G_1 \setminus \{O\} \) regardless
-   of the specific \( \sigma_1 \) we started with.
-
-   Given \( \sigma'_1 = h' \), the second component is forced:
-   \( \sigma'_2 = t \sigma_2 = t (x + m y) \sigma_1 = (x + m y) (t \sigma_1) = (x + m y) h' \).
-   That is exactly what a fresh \( \text{PS.Sign} \) with random \( h' \)
-   would output.  \( \blacksquare \)
+   \( \varphi_\sigma : \mathbb{Z}_q^\ast \to G_1 \setminus \{O\},\ t \mapsto t \sigma_1 \)
+   is a bijection.  Hence \( \sigma'_1 \) is uniform on
+   \( G_1 \setminus \{O\} \) regardless of \( \sigma_1 \).  Given
+   \( \sigma'_1 = h' \), the second component is forced:
+   \( \sigma'_2 = (x + m y) h' \), exactly what a fresh
+   \( \text{PS.Sign} \) with random \( h' \) would output.
+   \( \blacksquare \)
 
    *What this lemma does not say.*  The rerandomized pair is a valid
    signature on \( m \): any party holding a candidate \( m_i \) decides
@@ -381,83 +497,44 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
 
 ** Theorem 2' (Perfect Hiding of the Presentation)
 
-   *Statement.*  Fix the issuer secret \( (x, y) \) and a valid
-   \( \sigma \) on \( m \).  Let \( a, b \) be independent and uniform on
-   \( \mathbb{Z}_q^\ast \), \( (A, B) \) the presentation and
-   \( P = m A + b G \).  Then the distribution of \( (A, B, P) \) is
+   *Statement.*  Every adversary in HIDE, computationally unbounded and
+   holding the issuer key, has advantage at most \( 1/q \).  More
+   precisely: for a fixed credential on \( m \) and independent uniform
+   \( a, b \in \mathbb{Z}_q^\ast \), the distribution of \( (A, B, P) \) is
    within statistical distance \( 1/q \) of
    \( (U_1,\ x U_1 + y U_2,\ U_2) \), where \( U_1 \) is uniform on
    \( G_1 \setminus \{O\} \), \( U_2 \) is uniform on \( G_1 \), and the
-   two are independent.  In particular the distribution of
-   \( (A, B, P) \) is independent of \( m \) up to that negligible
-   distance, and it is the same for every credential on every message
-   under the key.
+   two are independent; this reference distribution does not depend on
+   \( m \).
 
-   *Proof.*  \( A = a \sigma_1 \) is uniform on \( G_1 \setminus \{O\} \)
-   by the bijection of Lemma 2.  Conditioned on \( A \), the map
-   \( b \mapsto m A + b G \) is a bijection \( \mathbb{Z}_q \to G_1 \), so
-   for \( b \) uniform on \( \mathbb{Z}_q^\ast \) the point \( P \) is
-   uniform on \( G_1 \setminus \{m A\} \), independent of \( A \); the
-   one excluded point accounts for the \( 1/q \).  By Theorem 1',
-   \( B = x A + y P \) is a function of \( (A, P) \).  \( \blacksquare \)
+   *Proof.*  Fix \( \beta \).  \( A = a \sigma^\beta_1 \) is uniform on
+   \( G_1 \setminus \{O\} \) by the bijection of Lemma 2.  Conditioned
+   on \( A \), the map \( b \mapsto m_\beta A + b G \) is a bijection
+   \( \mathbb{Z}_q \to G_1 \), so for \( b \) uniform on
+   \( \mathbb{Z}_q^\ast \) the point \( P \) is uniform on
+   \( G_1 \setminus \{m_\beta A\} \), independent of \( A \).  By
+   Theorem 1', \( B = x A + y P \) is a function of \( (A, P) \).  The
+   distributions for \( \beta = 0 \) and \( \beta = 1 \) therefore differ
+   only in which single point \( P \) avoids, at statistical distance at
+   most \( 1/q \), and nothing else the challenger outputs depends on
+   \( \beta \).  \( \blacksquare \)
 
-   *Remark (why \( b \neq 0 \)).*  Allowing \( b = 0 \) would make the
-   distribution exactly independent of \( m \), but \( b = 0 \) publishes
-   \( (A, B) = (a \sigma_1, a \sigma_2) \), a rerandomized signature that
-   Lemma 2's remark shows is testable.  Excluding it costs \( 1/q \).
-
-   *Corollary (issuer view).*  A party holding \( (x, y) \) and every
-   certified \( m_i \) learns nothing from \( (A, B, P) \) about which
-   \( m_i \) is presented: \( B = x A + y P \) holds for every pair
-   \( (A, P) \), and for every candidate \( m_i \) the point
-   \( b_i G = P - m_i A \) is a well-formed blinding.  Whatever the
-   registration transcript reveals about \( m \) beyond \( (A, B, P) \)
-   is what the ElGamal ciphertext \( (pk, R, C) \) reveals (Theorem
-   R-HVZK), which is the plaintext-checking problem under DDH on
-   \( G_1 \); this is the credential lock the main paper's
-   issuer-blindness theorem needs.
-
-   *Corollary (fresh randomness).*  Reusing \( b \) across two accounts
-   gives \( P_1 - P_2 = m (A_1 - A_2) \), a candidate test; reusing
-   \( a \) repeats \( A \).  The wallet must treat \( a, b \) exactly as
-   it treats ElGamal randomness.
+   *Remarks.*  (i) The adversary knows \( x, y \): the result is
+   unconditional and holds against the issuer.  (ii) Allowing
+   \( b = 0 \) would make the distribution exactly independent of
+   \( m \), but \( b = 0 \) publishes a rerandomized signature, which
+   Lemma 2's remark shows is testable; excluding it costs \( 1/q \).
+   (iii) For every candidate \( m_i \) the point \( P - m_i A \) is a
+   well-formed \( b_i G \), so no candidate is distinguished by any
+   relation among public values.  (iv) Whatever the registration
+   transcript reveals about \( m \) beyond \( (A, B, P) \) is what the
+   ElGamal ciphertext \( (pk, R, C) \) reveals (Theorem R-HVZK), which is
+   the plaintext-checking problem under DDH (Theorem R-blind).
 
 ** Theorem R-HVZK (Zero-Knowledge of the Registration Transcript)
 
-   *The registration NIZK.*  Public: \( (A, B) \), the account key
-   \( pk = sk \cdot G \), the ciphertext \( E = (R, C) = (r G,\ m G + r\,pk) \),
-   and the context \( \mathrm{ctx} \) (registrant address, chain id,
-   registry address, domain).  Witness: \( (m, b, r, sk) \).  Nonces:
-   \( (m_t, b_t, r_t, sk_t) \), uniform on \( \mathbb{Z}_q \).
-
-   \begin{align*}
-   C_1 &= m_t A + b_t G,  & T_C &= m_t G + r_t\,pk, & T_R &= r_t G, & T_{key} &= sk_t\,G, \\
-   e &= H(A, B, R, C, pk, C_1, T_C, T_R, T_{key}, \mathrm{ctx}), \\
-   s_m &= m_t + e m, & s_b &= b_t + e b, & s_r &= r_t + e r, & s_{sk} &= sk_t + e\,sk.
-   \end{align*}
-
-   The verifier recomputes \( e \) and checks
-
-   \begin{align*}
-   \text{(b)}\quad  & s_m G + s_r\,pk = e C + T_C, &
-   \text{(c)}\quad  & s_r G = e R + T_R, \\
-   \text{(k)}\quad  & s_{sk} G = T_{key} + e\,pk, &
-   \text{(a')}\quad & e(s_m A + s_b G - C_1,\; Y)\cdot e(e A,\; X)\cdot e(-e B,\; g_2) = 1,
-   \end{align*}
-
-   after rejecting non-canonical scalars, off-curve points, and
-   \( A = O \), \( B = O \), \( pk = O \), \( R = O \).  One commitment
-   \( C_1 \) carries both credential exponents; the nonce \( m_t \) is
-   shared between \( C_1 \) and \( T_C \), and \( r_t \) between
-   \( T_C \) and \( T_R \).
-
-   *Completeness.*  \( s_m A + s_b G - C_1 = e (m A + b G) = e P \), so
-   (a') is \( \big[ e(P, Y)\, e(A, X) / e(B, g_2) \big]^{e} = 1 \) by
-   Theorem 1'.  Relations (b), (c), (k) are the standard Schnorr
-   identities.
-
-   *Statement (HVZK).*  Given \( (A, B, P, pk, R, C, \mathrm{ctx}) \) and
-   a challenge \( e \), the simulator draws \( s_m, s_b, s_r, s_{sk} \)
+   *Statement.*  Given \( (A, B, P, pk, R, C, \mathrm{ctx}) \) and a
+   challenge \( e \), the simulator draws \( s_m, s_b, s_r, s_{sk} \)
    uniform on \( \mathbb{Z}_q \) and sets
 
    \[
@@ -468,7 +545,12 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    \]
 
    The simulated transcript is distributed identically to an honest
-   transcript with the same challenge.
+   transcript with the same challenge.  In the random-oracle model the
+   NIZK is zero-knowledge: the simulator programs \( H \) at the
+   transcript to \( e \), aborting if that input was queried before,
+   which happens with probability at most \( q_H / q \) over the
+   adversary's \( q_H \) oracle queries because \( C_1 \) is uniform and
+   fresh.
 
    *Proof.*  In an honest transcript with fixed witness and challenge,
    each response is a uniform nonce plus a constant, so the four
@@ -476,28 +558,24 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    the unique points satisfying the verification equations for those
    responses.  The simulator samples responses from the same
    distribution and solves the same equations.  \( \blacksquare \)
-   The NIZK in the random-oracle model follows exactly as in the
-   corollary at the end of Part II, with \( e \) programmed on the
-   transcript.
 
    *Remark (what the simulator needs, and what the old proof leaked).*
    The simulator needs \( P \), which is public:
-   \( P = e^{-1}(s_m A + s_b G - C_1) \).  The transcript therefore
-   reveals exactly \( (A, B, P, pk, R, C) \) and nothing else, and
-   Theorem 2' says \( (A, B, P) \) is independent of \( m \).  The
-   pre-A' proof published a separate commitment \( A_{ps} = m_t A \)
-   with the response \( s_m \), from which any observer computes
-   \( m A = e^{-1}(s_m A - A_{ps}) \), a candidate test on \( m \) needing
-   neither the second signature point nor any issuer key (review finding
-   R2).  Folding \( b_t G \) into the same commitment is what removes
-   the test: the only derivable point is \( P \), which every candidate
-   explains.
+   \( P = e^{-1}(s_m A + s_b G - C_1) \).  The transcript is therefore a
+   deterministic function of \( (A, B, P, pk, E, \mathrm{ctx}) \) and
+   simulator randomness, and Theorem 2' says \( (A, B, P) \) is
+   independent of \( m \).  The pre-A' proof published a separate
+   commitment \( A_{ps} = m_t A \) with the response \( s_m \), from which
+   any observer computes \( m A = e^{-1}(s_m A - A_{ps}) \), a candidate
+   test on \( m \) needing neither the second signature point nor any
+   issuer key (review finding R2).  Folding \( b_t G \) into the same
+   commitment is what removes the test.
 
-** Theorem R-sound (Special Soundness and Non-Reusability)
+** Theorem R-sound (Special Soundness)
 
    *Statement.*  From two accepting transcripts with the same
-   \( (A, B, pk, R, C, C_1, T_C, T_R, T_{key}) \) and challenges
-   \( e \neq e' \), the extractor computes
+   \( (A, B, pk, R, C, C_1, T_C, T_R, T_{key}, \mathrm{ctx}) \) and
+   challenges \( e \neq e' \), one computes
 
    \[
    m^\ast = \frac{s_m - s'_m}{e - e'}, \quad
@@ -509,53 +587,20 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    such that \( pk = sk^\ast G \), \( (R, C) = (r^\ast G,\ m^\ast G + r^\ast pk) \),
    and \( e(A,\; X + m^\ast Y) = e(B - b^\ast Y_1,\; g_2) \).  Hence
    \( (A,\ B - b^\ast Y_1) \) is a plain PS signature on the \( m^\ast \)
-   encrypted in \( E \).
+   encrypted in \( E \), under a key whose secret is \( sk^\ast \).
 
-   *Proof.*  Dividing the two instances of (a'):
-
-   \[
-   e\big((s_m - s'_m) A + (s_b - s'_b) G,\; Y\big)\cdot
-   e\big((e - e') A,\; X\big)\cdot
-   e\big(-(e - e') B,\; g_2\big) = 1 .
-   \]
-
-   Raising to the power \( (e - e')^{-1} \):
+   *Proof.*  Dividing the two instances of (a') and raising to the power
+   \( (e - e')^{-1} \):
    \( e(m^\ast A + b^\ast G, Y)\, e(A, X) = e(B, g_2) \), i.e.
    \( e(A, X + m^\ast Y)\, e(b^\ast G, Y) = e(B, g_2) \).  Since
-   \( e(b^\ast G, Y) = e(b^\ast Y_1, g_2) \), this is
-   \( e(A, X + m^\ast Y) = e(B - b^\ast Y_1, g_2) \), and \( A \neq O \) by
-   the guard.  Relations (b), (c), (k) extract \( r^\ast, sk^\ast \) and
-   the same \( m^\ast \) exactly as in Theorem 4.  \( \blacksquare \)
+   \( Y_1 = y G \) (enforced at =trustIssuer=),
+   \( e(b^\ast G, Y) = e(b^\ast Y_1, g_2) \), which rearranges to the
+   stated equation; \( A \neq O \) by (g).  Relations (b), (c), (k)
+   extract \( r^\ast, sk^\ast \) and the same \( m^\ast \) exactly as in
+   Theorem 4 of Part II.  \( \blacksquare \)
 
-   *Corollary (registration soundness).*  An adversary that produces an
-   accepting registration without holding a credential on the encrypted
-   identity yields, through the forking lemma[fn:forklemma], a PS
-   forgery \( (A, B - b^\ast Y_1) \) on \( m^\ast \) under the published
-   key \( (X, Y, Y_1) \).  Registration soundness therefore reduces to PS
-   unforgeability for a key that includes \( y G \), the
-   committed-message key form of Pointcheval--Sanders (Section 6.1 of
-   the 2016 paper, under its Assumption 2), not to the plain scheme's
-   assumption.
-
-   *Corollary (non-reusability, sketch).*  A party that has learned
-   \( m \) and sees a registration holds \( (A, B, P) \) and hence
-   \( b G = P - m A \).  Producing a fresh accepting registration on
-   \( m \) requires, by special soundness, knowledge of a blinding
-   \( b' \) for some pair \( (A', B') \) with \( (A', B' - b' Y_1) \) a PS
-   signature on \( m \).  Stripping \( B \) needs \( b Y_1 = y (b G) \)
-   from \( b G \) and \( Y_1 = y G \), a computational Diffie--Hellman
-   instance; rerandomizing \( (A, B) \) by \( a' \) leaves the blinding
-   \( a' b \) unknown.  Identity disclosure therefore stops conferring
-   registration authority under an honest issuer (review finding R3).
-   It does not stop the issuer itself from certifying the same identity
-   twice; that remains a policy question.  The CDH remark is not the
-   load-bearing argument: the security-argument document
-   (=doc/review/a-prime-security-argument.org=, Theorem 5) reduces
-   registration forgery -- by a party with no credential, or with any
-   number of the holder's transcripts and \( m \) itself -- directly
-   to PS-CM unforgeability, simulating the holder's presentations from
-   a signature on an unrelated message, which Theorem 2' makes exact
-   up to \( 1/q \).  That reduction awaits independent review.
+   This is the only place \( Y_1 \) enters the argument; the verifier
+   never multiplies by it.
 
 ** Theorem R-comp (Composition of the Credential, Ciphertext and Key Relations)
 
@@ -582,12 +627,188 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    simulates all four commitments from the same responses.
    \( \blacksquare \)
 
+** Theorem R-unforge (Registration Unforgeability, from PS-CM)
+
+   *Statement.*  Let \( \mathcal{A} \) be an adversary in RU making
+   \( q_H \) random-oracle queries and \( q_P \) presentation queries,
+   whose accepting output has extracted \( m^\ast \notin Q \) with
+   probability \( \varepsilon \).  There is a PS-CM forger
+   \( \mathcal{B} \) with success probability at least
+   \( \varepsilon^2 / q_H - (q_P + q_H + 1)/q \), up to the forking
+   lemma's constants.
+
+   *Proof.*  \( \mathcal{B} \) receives the PS-CM public key
+   \( (X, Y, Y_1) \) and a signing oracle \( \mathcal{S} \), and forwards
+   the key to \( \mathcal{A} \).
+
+   /Sign queries./  Forwarded to \( \mathcal{S} \); \( \mathcal{B} \)
+   records \( Q \).
+
+   /Presentation queries./  \( \mathcal{B} \) must answer
+   \( \mathsf{Present}(m, \mathrm{ctx}) \) for identities it holds no
+   credential on.  It queries \( \mathcal{S} \) once, on a message
+   \( m_d \) chosen uniformly at random, obtaining
+   \( \sigma_d = (h_d,\ (x + m_d y) h_d) \).  For each query it samples
+   fresh \( a, b, sk, r \) and sets
+
+   \[
+   A = a h_d, \quad
+   B = a \sigma_{d,2} + b Y_1 = x A + y (m_d A + b G), \quad
+   P := m_d A + b G, \quad
+   pk = sk G, \quad
+   E = (r G,\ m G + r\,pk),
+   \]
+
+   using the real \( m \), which the adversary holds anyway, and
+   simulates \( \pi \) with the simulator of Theorem R-HVZK, programming
+   \( H \) at the transcript.
+
+   /Forgery./  When \( \mathcal{A} \) outputs an accepting transcript
+   whose challenge was the \( i \)-th oracle query, \( \mathcal{B} \)
+   rewinds \( \mathcal{A} \) to that query with a fresh answer (the
+   forking lemma[fn:forklemma]); with probability about
+   \( \varepsilon^2 / q_H \) it obtains a second accepting transcript
+   with the same commitments and a different challenge, extracts
+   \( (m^\ast, b^\ast) \) by Theorem R-sound, and outputs
+   \( (m^\ast,\ (A^\ast,\ B^\ast - b^\ast Y_1)) \).
+
+   /Indistinguishability of the simulation./  In a real
+   \( \mathsf{Present} \) answer, \( A \) is uniform nonzero, \( P \) is
+   uniform on \( G_1 \setminus \{m A\} \), and \( B = x A + y P \).  In
+   the simulation \( A \) is again uniform nonzero (a rerandomization of
+   \( h_d \)), \( P \) is uniform on \( G_1 \setminus \{m_d A\} \), and
+   \( B = x A + y P \).  The two differ by at most \( 1/q \) per query
+   (Theorem 2').  The ciphertext is formed identically.  The proof is
+   simulated, which by Theorem R-HVZK is exact given
+   \( (A, B, P, pk, E, \mathrm{ctx}) \) up to the programming abort.  The
+   relation "\( P = m A + b G \) for the \( m \) inside \( E \)" is not
+   checkable by anyone without \( b \), since every \( m \) admits some
+   \( b \).  So nothing in \( \mathcal{A} \)'s view distinguishes the
+   simulated world from the real one beyond \( q_P/q + q_H/q \).
+
+   /Validity of the forgery./  By Theorem R-sound the pair verifies as a
+   PS signature on \( m^\ast \).  \( \mathcal{A} \) wins only if
+   \( m^\ast \notin Q \).  The one message \( \mathcal{B} \) queried that
+   \( \mathcal{A} \) does not see is \( m_d \); since
+   \( \mathcal{A} \)'s view is independent of \( m_d \) up to the
+   statistical distance above, \( \Pr[m^\ast = m_d] \le (1 + q_P)/q \).
+   Hence the output is a forgery on a message never queried to
+   \( \mathcal{S} \).  \( \blacksquare \)
+
+   *What this closes.*  A party that has learned \( m \) from a receipt
+   and holds every registration of the target (review finding R3); a
+   party that copies a registration to another address or chain
+   (\( \mathrm{ctx} \) is in the transcript, and a fresh proof needs
+   \( sk \) and \( b \) anyway); and a party with no credential at all.
+   Identity disclosure therefore stops conferring registration authority
+   under an honest issuer.  The observation that stripping \( B \) needs
+   \( b Y_1 = y (b G) \) from \( b G \) and \( Y_1 \), a CDH instance,
+   remains true but is not load-bearing.
+
+   *What it does not close.*  The issuer, who can sign.  Two credentials
+   on the same identity issued to different people are a
+   certification-policy problem, not a cryptographic one.
+
+** Theorem R-blind (Issuer-Blindness of the Registration Transcript)
+
+   *Statement.*  Every PPT adversary in IB has advantage at most
+   \( \mathrm{Adv}_{\mathrm{DDH}} + 1/q + q_H/q \) per registration.
+   This is the credential lock the main paper's issuer-blindness theorem
+   needs; its plaintext lock is the DDH term.
+
+   *Proof (hybrids).*  \( H_0 \): the real game with bit \( \beta \).
+   \( H_1 \): replace \( \pi \) by the simulated proof from
+   \( (A, B, P, pk, E, \mathrm{ctx}) \); identical up to the programming
+   abort (Theorem R-HVZK).  \( H_2 \): replace \( (A, B, P) \) by
+   \( (U_1,\ x U_1 + y U_2,\ U_2) \) with \( U_1 \) uniform nonzero and
+   \( U_2 \) uniform, at statistical distance at most \( 1/q \)
+   (Theorem 2'), computable by the challenger since the adversary
+   supplied \( (x, y) \).  In \( H_2 \) the only object that depends on
+   \( \beta \) is \( E = (r G,\ m_\beta G + r\,pk) \) with
+   \( pk = sk\,G \) for secret \( sk, r \): the ElGamal encryption of a
+   known plaintext under a fresh key, whose indistinguishability is the
+   plaintext-checking problem, i.e. deciding whether
+   \( (G, pk, R, C - m_\beta G) \) is a DDH tuple.  \( \blacksquare \)
+
+   *Scope.*  The theorem is about the registration transcript.  It says
+   nothing about the issuer's address (which identifies the anonymity
+   set), about timing or gas, or about identity-derived Note keys.
+
+** Proposition R-fresh (Randomness Reuse Is a Break)
+
+   Each of the following is an explicit break if the wallet reuses a
+   value:
+
+   - \( b \) reused across two registrations of one identity:
+     \( P_1 - P_2 = m (A_1 - A_2) \), so a holder of a candidate
+     \( m_i \) tests \( P_1 - P_2 - m_i (A_1 - A_2) = O \).  Links the
+     accounts and identifies the identity (sanity check, step 8).
+   - \( a \) reused with the same credential: \( A_1 = A_2 \); links the
+     accounts.
+   - \( m_t \) reused across two proofs: \( s_m - s'_m = (e - e') m \)
+     reveals \( m \) to everyone.
+   - \( b_t \) reused: reveals \( b \), after which \( B - b Y_1 \) is a
+     verifiable signature on \( m \), i.e. the credential is published.
+   - \( r_t \) or \( sk_t \) reused: reveal \( r \) (hence \( M \) from
+     \( C - r\,pk \)) and \( sk \).
+
+   The wallet draws all six from the platform CSPRNG (=rand_scalar=).
+   Deriving the four nonces deterministically from the witness and the
+   transcript, in the style of RFC 6979, would remove the RNG from the
+   trusted base for \( m_t, b_t, r_t, sk_t \); \( a \) and \( b \) must
+   still be fresh per registration.
+
+** What the Verifier Checks, and Why
+
+   Each item is present in =src/IdentityRegistry.sol= with the revert
+   string given.
+
+   - \( A \neq O \) (=A=O=; critical).  With \( A = O \) the term
+     \( e(eA, X) \) vanishes and (a') reduces to
+     \( e(s_b G - C_1, Y) = e(eB, g_2) \), which \( B = b Y_1 \),
+     \( C_1 = b_t G \) satisfy for every \( m \): a registration with no
+     credential.  Reachable by choosing \( a = 0 \).
+   - \( B \neq O \) (=B=O=; defensive).  \( B = O \) means
+     \( x A = -y P \); producing such a pair needs \( x/y \).  Rejected
+     so that no degenerate encoding is accepted.
+   - \( pk \neq O \) (=pk=O=; critical).  Relation (k) is vacuous at
+     \( pk = O \): no account-key ownership.
+   - \( R \neq O \) (=R=O=; critical).  \( r = 0 \) makes \( C = m G \),
+     publishing the identity point.
+   - Canonical scalars (=bad scalar=).  Two encodings of one proof would
+     otherwise be accepted; hygiene, since \( \mathrm{ctx} \) already
+     prevents replay.
+   - On-curve and subgroup.  \( G_1 \) has prime order on BN254, so
+     on-curve suffices for \( G_1 \) inputs; the pairing precompile
+     rejects \( G_2 \) points outside the subgroup, and \( X, Y \) are
+     governance-set.
+   - \( Y_1 \) consistency at =trustIssuer= (=Y1=O=, =Y1 inconsistent=).
+     Theorem R-sound's last step needs \( Y_1 = y G \).  A wrong
+     \( Y_1 \) cannot help a forger, because the verifier never
+     multiplies by \( Y_1 \); it would only make honest presentations
+     fail, which the check prevents.
+   - Fiat-Shamir coverage (=bad FS challenge=).  The transcript hashes
+     every public point of the statement, all four commitments, the
+     registrant, the chain id, the registry address and the versioned
+     domain.  The issuer address is /not/ hashed: the proof is bound to
+     the issuer's key through equation (a') itself, so it cannot verify
+     under a different key, and two issuers publishing the same key are
+     indistinguishable by construction.
+   - Registrant \( = \) =msg.sender= (or the target contract for
+     binding).  The proof is useless to any other address.
+   - Nonzero caller-supplied accumulator leaves are rejected
+     (=unchecked identity leaf=); see the accumulator note in Part IV.
+   - Storage, not calldata, for later use of \( E \) and \( pk \).
+     Downstream proofs (approve, spend) read the registered values.
+
 ** Sanity Check (py_ecc on BN254)
 
    The block keeps \( m, x, y, X, Y, G_1, G_2 \) and =rand= defined for
    the later blocks.  It samples \( h \) as a known multiple of \( G \)
    so that step 3 can exhibit the second opening of Theorem 2'; a real
-   issuer never reveals that logarithm.
+   issuer never reveals that logarithm.  Step 7 uses SHA-256 as a
+   stand-in random oracle; the point is only that the simulated
+   challenge is not the hash of the simulated commitments.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session proofs :results output
@@ -673,6 +894,44 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
      prod = pairing(Y, lhs) * pairing(X, multiply(A, e_s)) * pairing(G2, neg(multiply(B, e_s)))
      assert prod == FQ12.one(), "R-HVZK: simulated transcript must verify"
      print("Theorem R-HVZK (simulator):          PASS  (accepting transcript from (A, B, P) alone)")
+
+     # --- 7. Theorem R-unforge's simulation: a transcript for E(m) built from a
+     #        credential on an UNRELATED m_d passes every algebraic check for its
+     #        chosen challenge; only the hash check tells it apart, and that is
+     #        what the reduction programs in the random-oracle model ---
+     m_d = rand()                                                 # the dummy message
+     sigma_d = (h, multiply(h, (x + m_d * y) % ORDER))            # a credential on m_d, not m
+     a_s, b_s, sk_s, r_s = rand(), rand(), rand(), rand()
+     A_s, B_s = present(sigma_d, a_s, b_s)                        # (A, B) from sigma_d
+     P_s = add(multiply(A_s, m_d), multiply(G1, b_s))             # P := m_d*A + b*G
+     pk_s = multiply(G1, sk_s)
+     R_s, C_s = multiply(G1, r_s), add(multiply(G1, m), multiply(pk_s, r_s))   # E encrypts the TARGET m
+     e_x, s_m_x, s_b_x, s_r_x, s_sk_x = rand(), rand(), rand(), rand(), rand()
+     C1_x  = add(add(multiply(A_s, s_m_x), multiply(G1, s_b_x)), neg(multiply(P_s, e_x)))
+     T_C_x = add(add(multiply(G1, s_m_x), multiply(pk_s, s_r_x)), neg(multiply(C_s, e_x)))
+     T_R_x = add(multiply(G1, s_r_x), neg(multiply(R_s, e_x)))
+     T_k_x = add(multiply(G1, s_sk_x), neg(multiply(pk_s, e_x)))
+     ok_b = eq(add(multiply(G1, s_m_x), multiply(pk_s, s_r_x)), add(multiply(C_s, e_x), T_C_x))
+     ok_c = eq(multiply(G1, s_r_x), add(multiply(R_s, e_x), T_R_x))
+     ok_k = eq(multiply(G1, s_sk_x), add(T_k_x, multiply(pk_s, e_x)))
+     lhs_x = add(add(multiply(A_s, s_m_x), multiply(G1, s_b_x)), neg(C1_x))
+     ok_a = (pairing(Y, lhs_x) * pairing(X, multiply(A_s, e_x))
+             * pairing(G2, neg(multiply(B_s, e_x)))) == FQ12.one()
+     assert ok_b and ok_c and ok_k and ok_a
+     hash_matches = (int(hashlib.sha256(repr((A_s, B_s, R_s, C_s, pk_s, C1_x, T_C_x, T_R_x, T_k_x)).encode()).hexdigest(), 16) % ORDER) == e_x
+     assert not hash_matches                                     # the FS check is the only failing check
+     print("Theorem R-unforge (simulation):      PASS  (transcript from a credential on m_d != m passes (a'),(b),(c),(k); only the hash differs)")
+
+     # --- 8. Proposition R-fresh: reusing b across two presentations identifies m ---
+     a1, a2 = rand(), rand()
+     A1, B1 = present(sigma, a1, b)                               # same b as step 1
+     A2, B2 = present(sigma, a2, b)
+     P1 = add(multiply(A1, m), multiply(G1, b))
+     P2 = add(multiply(A2, m), multiply(G1, b))
+     D_P, D_A = add(P1, neg(P2)), add(A1, neg(A2))
+     hits = [cand for cand in (m, m_prime, m_d) if eq(add(D_P, neg(multiply(D_A, cand))), bc.Z1)]
+     assert hits == [m]
+     print("Proposition R-fresh (b reused):      PASS  (P1 - P2 = m*(A1 - A2) singles out the true m among 3 candidates)")
    #+END_SRC
 
    #+RESULTS:
@@ -682,23 +941,27 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    : Theorem R-sound (extraction):        PASS  ((A, B - b* Y1) is a PS signature on m*)
    : Guard (A != O):                      PASS  (A = O verifies for every m; rejected)
    : Theorem R-HVZK (simulator):          PASS  (accepting transcript from (A, B, P) alone)
+   : Theorem R-unforge (simulation):      PASS  (transcript from a credential on m_d != m passes (a'),(b),(c),(k); only the hash differs)
+   : Proposition R-fresh (b reused):      PASS  (P1 - P2 = m*(A1 - A2) singles out the true m among 3 candidates)
 
    #+LATEX: }
 
-   *How to read the output:* Six PASS lines.  The first is Theorem 1'
-   on an honest presentation.  The second is the R1 witness: the raw
-   PS test identifies a rerandomized pair from \( m \) alone and fails
-   on the presentation.  The third is Theorem 2' made concrete: a
-   second identity \( m' \) with blinding \( b' = b + (m - m')\log_G A \)
-   opens the /same/ \( (A, B, P) \) and passes the masked equation, so
-   the triple carries no information about which identity was
-   presented.  The fourth extracts \( (m^\ast, b^\ast) \) from two
-   transcripts sharing \( C_1 \) and verifies \( (A, B - b^\ast Y_1) \)
-   as a plain PS signature (Theorem R-sound).  The fifth shows why the
-   \( A \neq O \) guard is mandatory: the masked equation holds for
-   every \( m \) at \( A = O \).  The sixth runs the Theorem R-HVZK
-   simulator from \( (A, B, P) \) and a challenge alone and checks that
-   its transcript verifies.
+   *How to read the output:* Eight PASS lines.  (1) Theorem 1' on an
+   honest presentation.  (2) The R1 witness: the raw PS test identifies
+   a rerandomized pair from \( m \) alone and fails on the presentation.
+   (3) Theorem 2' made concrete: a second identity \( m' \) with blinding
+   \( b' = b + (m - m')\log_G A \) opens the /same/ \( (A, B, P) \) and
+   passes the masked equation.  (4) Two transcripts sharing \( C_1 \)
+   extract \( (m^\ast, b^\ast) \) and \( (A, B - b^\ast Y_1) \) verifies
+   as a plain PS signature (Theorem R-sound).  (5) The \( A \neq O \)
+   guard: the masked equation holds for every \( m \) at \( A = O \).
+   (6) The Theorem R-HVZK simulator, from \( (A, B, P) \) and a challenge
+   alone.  (7) Theorem R-unforge's simulation: from a credential on an
+   unrelated \( m_d \), a transcript whose ciphertext encrypts the target
+   \( m \) passes every algebraic check for its chosen challenge; only
+   the hash check tells it apart, which is exactly what the reduction
+   programs in the random-oracle model.  (8) Proposition R-fresh: a
+   reused \( b \) singles out the true \( m \) among candidates.
 
 #+LATEX: \clearpage
 * Part II: Chaum-Pedersen Re-Encryption Correctness
@@ -1753,8 +2016,10 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
   | Lemma 2 (fresh-signature distribution) | PS        | prime-order \( G_1 \), uniform \( t \)  | *no*; hides nothing about \( m \) |
   | Theorem 2' (presentation hiding)    | PS + \( Y_1 \) | prime-order \( G_1 \), uniform \( a, b \) | *no* (statistical, \( 1/q \)) |
   | Theorem R-HVZK (registration ZK)    | masked PS + FS | uniform nonces; ROM for NIZK          | ROM                          |
-  | Theorem R-sound (registration soundness) | masked PS | none for extractor; PS-CM for forgery, CDH for non-reuse | PS-CM, CDH (reductions) |
+  | Theorem R-sound (special soundness) | masked PS    | none for extractor                      | *no* (unconditional)         |
   | Theorem R-comp (composition)        | masked PS + CP | shared nonces                          | as R-HVZK, R-sound           |
+  | Theorem R-unforge (registration unforgeability) | masked PS + FS | PS-CM (PS 2016 Sec. 6.1, Assumption 2), ROM, forking lemma | PS-CM, ROM |
+  | Theorem R-blind (issuer-blindness of registration) | masked PS + ElGamal | Theorems 2', R-HVZK; DDH on \( G_1 \) | DDH, ROM |
   | Theorem 3 (CP completeness)         | CP           | group axioms                            | *no* (unconditional)         |
   | Theorem 4 (CP special soundness)    | CP           | none for extractor; DLog for            | DLog (only for reduction)    |
   |                                     |              | cheating-prover reduction               |                              |
@@ -1787,11 +2052,16 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    The theorems assume a well-formed verifier.  Three conditions on
    the on-chain code are load-bearing:
 
-   1. *Registration: \( A \neq O \) and \( B \neq O \).*  Required by
-      Theorem 1's argument: at \( A = O \) the masked equation holds
-      for every \( m \).  A missing check admits the trivial
-      presentation attack (the Identity doc's Attack 9 / Link 1, with
-      \( a = 0 \) in place of \( t = 0 \)).
+   1. *Registration: the guards of Part I.*  \( A \neq O \) is
+      critical (at \( A = O \) the masked equation holds for every
+      \( m \): the trivial presentation attack, the Identity doc's
+      Attack 9 / Link 1 with \( a = 0 \) in place of \( t = 0 \));
+      \( pk \neq O \) and \( R \neq O \) are critical (no key
+      ownership; \( C = mG \) published); \( B \neq O \) is
+      defensive; the \( Y_1 \) consistency check at =trustIssuer=
+      is what Theorem R-sound's extraction needs.  Part I's
+      "What the Verifier Checks, and Why" gives each with its revert
+      string.
 
    2. *Registration: \( G_2 \) subgroup check.*  The =ecPairing=
       precompile (post-EIP-197) validates that \( X, Y \) lie in the
@@ -1811,10 +2081,12 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    - *Uniform, fresh randomness for \( a, b, m_t, b_t, r_t, sk_t, k_1, k_2, r_b \).*
      Theorems 2', R-HVZK and 5 depend on uniform distributions, and
      Theorem 2' additionally on \( b \) never being reused across
-     accounts (a reused \( b \) gives \( P_1 - P_2 = m(A_1 - A_2) \), a
-     candidate test).  A biased RNG converts the hiding into a
-     detectable correlation and converts perfect HVZK into approximate
-     HVZK with an adversarial advantage proportional to the bias.
+     accounts.  Proposition R-fresh lists the explicit breaks for each
+     reused value; RFC 6979-style derivation of the four proof nonces
+     is the recommended hardening.  A biased RNG converts the hiding
+     into a detectable correlation and converts perfect HVZK into
+     approximate HVZK with an adversarial advantage proportional to
+     the bias.
    - *Never publish \( \sigma \) or a rerandomization of it.*  Lemma 2's
      remark: any such pair is a candidate test on \( m \).  Backups,
      receipts and demos must carry the presentation or nothing.
@@ -1910,6 +2182,91 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    issuer-breach corpus makes the harvest concrete and names the one party
    whose compromise hands an adversary the full plaintext set
    \( \{M_i\} \).
+
+#+LATEX: \clearpage
+* Review Status and Remaining Work for Part I
+:PROPERTIES:
+:CUSTOM_ID: review-status
+:END:
+
+  Part I is implemented and argued but not independently reviewed.  This
+  section is the reviewer's brief and the list of what would strengthen
+  the argument; it is kept in this document so that the proofs and the
+  obligations on them travel together.
+
+** What the Reviewer Is Asked to Check
+
+   In the order that matters.
+
+   1. *The assumption.*  Confirm that the key form \( (G, Y_1;\ g_2, X, Y) \)
+      with plain signing is the Section 6.1 scheme of Pointcheval and
+      Sanders (2016) with \( t = 0 \), and that its EUF-CMA proof under
+      that paper's Assumption 2 applies; say whether a non-interactive
+      assumption from the 2018 reassessment covers it.
+   2. *Theorem 2'.*  The bijection argument and the \( 1/q \)
+      accounting; that returning \( P \) to the HIDE adversary makes the
+      game at least as strong as the real transcript.
+   3. *Theorem R-HVZK.*  That the four verification equations determine
+      the four commitments from the responses, and the programming-abort
+      bound.
+   4. *Theorem R-sound.*  The division step; that \( Y_1 = y G \) is the
+      only place \( Y_1 \) enters; the shared-nonce composition
+      (Theorem R-comp).
+   5. *Theorem R-unforge.*  The load-bearing reduction.  The simulation
+      of presentations from a signature on an unrelated message, the
+      statistical-distance accounting, the treatment of \( m_d \), and
+      the forking-lemma application (which query index is forked; that
+      the commitments are fixed before the challenge).
+   6. *Theorem R-blind.*  The hybrid order and that the final hybrid is
+      exactly ElGamal plaintext-checking under a fresh key.
+   7. *Code against specification.*  =_verifyCredential= (guards,
+      canonical scalars, revert strings), =_fsRegister= (word order and
+      count against =nizk.py=), =_checkPresentation= (the three pairs,
+      the negations, the \( -eB \) term), =trustIssuer= (\( Y_1 \neq O \)
+      and the consistency pairing).  The presence of the \( pk \neq O \),
+      \( R \neq O \) and nonzero-leaf rejections in the Solidity path was
+      confirmed while writing Part I; the reviewer should confirm it
+      again against the commit under review.
+   8. *Ports.*  =core/rust/buck-identity/src/nizk.rs= and
+      =core/js/src/identity-core.js= against =nizk.py=; the kernel is
+      what wallets run.  Vectors: =test/vectors/identity.json= and
+      =core/vectors/identity-kernel-vectors.json=, both schema 2.
+   9. *Tests.*  =make nix-test= (Foundry: the rejection tests in
+      =test/IdentityRegistry.t.sol= for zero \( A \), zero \( B \), a
+      tampered \( s_b \), a swapped presentation, a zero and an
+      inconsistent \( Y_1 \), and "presentation is not a signature");
+      =alberta_buck/test/review/test_wallet_failures.py= tests 01, 02,
+      10, 11, 12 on both backends; =make nix-core-test-rust=,
+      =nix-core-test-py=, =nix-core-test-js=; the two-sided witness in
+      =alberta-buck-identity-example.org=
+      (=make nix-venv-doc-identity-example=).
+   10. *Randomness.*  =alberta_buck/wallet/bn254.py:rand_scalar= and the
+       JS and wasm samplers, against Proposition R-fresh.
+   11. *The papers.*  That the conditional phrasing in this Part, in
+       =alberta-buck-paper.org= (issuer-blindness, non-frameability, the
+       read/write separation) and in =alberta-buck-identity.org= matches
+       what Part I proves and no more.
+
+** What Would Strengthen the Argument
+
+   - *Independent review* of items 1--6 by a cryptographer who did not
+     write them; this is the gate on any production registration.
+   - *A settled assumption.*  Item 1 decides whether Part I rests on an
+     interactive assumption (PS 2016, Assumption 2) or a non-interactive
+     one (PS 2018); the summary table should then name it.
+   - *Deterministic nonces.*  RFC 6979-style derivation of
+     \( m_t, b_t, r_t, sk_t \) from the witness and the transcript
+     removes the RNG from the trusted base for the proof; \( a \) and
+     \( b \) remain fresh per registration.  A wallet change with new
+     vectors.
+   - *Tighter or mechanized checks.*  The sanity block exercises each
+     step algebraically on random instances; a proof assistant or a
+     symbolic check of the reduction would replace "on random instances"
+     by "for all".
+   - *The two open findings.*  R5 (identity-derived Note receiving keys)
+     and R6 (issuance, policy and accumulator metadata) are outside
+     Part I and remain to be designed; nothing in Part I is made worse
+     or better by them.
 
 * Footnotes
 

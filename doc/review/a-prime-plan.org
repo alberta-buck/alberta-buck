@@ -60,8 +60,9 @@ carry the detail.
   Sees" section, =e713398= the seeded issuer). Every render is
   regenerated and committed with its source; the example transcript
   re-executes byte-identical. Phase 6: the security argument is
-  written (=a-prime-security-argument.org=); the independent review is
-  the only open item. The branch is not merged.
+  written into =alberta-buck-proofs.org= (Part I and the closing
+  review section); the independent review is the only open item. The
+  branch is not merged.
 - Green on the branch: Rust kernel tests 3/3; =core/python= vector tests
   39/39; the review suite 33/33 on both backends; the identity Python
   suites (wallet, vectors, issuer, registry, kernel backend, cache regen)
@@ -830,14 +831,20 @@ DDH and on the review gate.
 
 ** Phase 6: security argument and independent review
 
-*Status (2026-09-20): the argument is written
-([[file:a-prime-security-argument.org][a-prime-security-argument.org]]:
-assumptions with the PS 2016 Section 6.1 key-form comparison, the HIDE,
-RU and IB games, Theorems 1 to 6 with proofs, the fresh-randomness
-breaks, the verifier-check rationale, and an eleven-item review
-checklist). Its Theorem 5 reduces registration forgery, including the
-harvest case of R3, to PS-CM directly, superseding the CDH sketch. The
-independent review has not happened; the branch stays a candidate.*
+*Status (2026-09-20): the argument is written and lives in
+=alberta-buck-proofs.org= itself, so that the proofs and the obligations
+on them travel together: Part I carries the scheme as implemented, the
+HIDE, RU and IB games, Theorems 1, 1', 2', R-HVZK, R-sound, R-comp,
+R-unforge and R-blind with proofs, Proposition R-fresh (the randomness
+breaks), "What the Verifier Checks, and Why" (each guard with its
+revert string, confirmed in the Solidity), and an eight-step sanity
+block; the closing section "Review Status and Remaining Work for
+Part I" is the reviewer's brief and the list of what would strengthen
+the argument. Theorem R-unforge reduces registration forgery, including
+the harvest case of R3, to PS-CM directly, superseding the CDH sketch.
+The interim =doc/review/a-prime-security-argument.org= was merged into
+the paper and removed. The independent review has not happened; the
+branch stays a candidate.*
 
 Runs in parallel from phase 1. Write the four theorems in full, state the
 assumption set (DLog, DDH in G1, PS unforgeability in the committed-message
