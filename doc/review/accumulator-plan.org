@@ -354,8 +354,27 @@ Five things the survey had left open, each of which reduces the work.
    the whole published subtree decides no membership. 165 passed across
    the accumulator, registry, unilateral-A2, wallet, vectors,
    kernel-backend, issuer and review suites.
-3. *Circuits.* The leaf change folded into the finding-5 repairs, with the
-   B1 path given a sound circuit, one trusted setup, one matched set.
+3. *Circuits.* Started. =circuits/identity_membership.circom= now hashes
+   the salt into the leaf as a private input, so the native membership
+   circuit proves membership of a hiding commitment; it is rebuilt as a
+   matched set (circuit, proving key, verification key,
+   =IdentityMembershipVerifier.sol=, proof vector) and a real proof of a
+   Python-tree member verifies on chain, with a wrong root and a wrong
+   salt each refused at witness generation. =IdentityRegistry= carries
+   =ZERO_11..ZERO_20= so the contract side is ready for the depth raise.
+
+   Remaining, and deliberately sequenced together because they share one
+   regeneration: the finding-5 repairs to the G1-tie circuit (prove
+   =T = b*H= with the existing fixed-base gadget rather than witnessing
+   =T=; range-check the 64-bit limbs; complete the addition), the
+   hash-to-curve generator that retires =H_SCALAR=, the mitigation-B fold
+   of membership into the note-binding circuits, the B1 circuit, and the
+   aggregator depth raise from 10 to 20. The depth was raised and backed
+   out on 2026-09-20: it re-folds every identity root, including the one
+   committed in the Notes end-to-end fixtures, and regenerating those
+   runs the note-binding prover over a 2.4M-constraint circuit. The
+   finding-5 work forces that same regeneration, so the depth rises with
+   it rather than paying for it twice.
 4. *Solidity.* The root authority and policy, the permanent caller-leaf
    refusal documented as such, and =BuckCredit='s attestation entry point
    and per-credit check.

@@ -54,13 +54,27 @@ template IdentityMembership(depth) {
     signal input identityRoot;            // public: registry-Identity accumulator root
     signal input Mx;                      // private: M.x mod field
     signal input My;                      // private: M.y mod field
+    signal input salt;                    // private: this holder's blinding for THIS subtree
     signal input pathElements[depth];     // private: sibling hashes
     signal input pathIndices[depth];      // private: path bits
 
-    // leaf = Poseidon(2)(Mx, My) == identity_leaf(M)
-    component leafH = Poseidon(2);
+    // leaf = Poseidon(3)(Mx, My, salt) == identity_leaf_salted(M, salt).
+    //
+    // The leaf of a PRIVATE subtree.  An unsalted Poseidon(2)(Mx, My) would be
+    // a deterministic function of the identity, so any party holding a set of
+    // identity scalars -- a registry holds every scalar it ever certified --
+    // could decide membership of the published subtree by recomputing leaves.
+    // The salt is the holder's, derived from a wallet secret and never from
+    // the identity, so an authority that learns one salt cannot derive
+    // another (accumulator specification, sections 3, 4 and 7).
+    //
+    // PUBLIC subtrees -- a regulator's insurers, whose membership they
+    // advertise -- keep the unsalted leaf and need no circuit at all: their
+    // paths verify as plain Poseidon Merkle proofs.
+    component leafH = Poseidon(3);
     leafH.inputs[0] <== Mx;
     leafH.inputs[1] <== My;
+    leafH.inputs[2] <== salt;
 
     component mp = MerkleProof(depth);
     mp.leaf <== leafH.out;
@@ -73,8 +87,19 @@ template IdentityMembership(depth) {
     identityRoot === mp.root;
 }
 
-// Depth pinned to 10 to match the reference IdentityTree(depth=10) used by the
-// wallet vectors; production pins this to the registry accumulator's depth.
+// Depth is the AGGREGATOR depth.  The accumulator specification raises it
+// from 10 to 20, so that authorities are a population rather than a roster:
+// clubs, community boards, congregations and delegated sub-regulators are all
+// attribute authorities, and 2**10 = 1024 sub-trees is the wrong order of
+// magnitude.  Ten extra levels cost ten Poseidon-2 hashes here and about two
+// thousand constraints.
+//
+// It is still 10 because raising it re-folds every identity root, including
+// the one committed in the Notes end-to-end fixtures, and regenerating those
+// runs the note-binding prover.  The finding-5 circuit repairs force that
+// same regeneration, so the depth rises with them rather than paying for it
+// twice.  IdentityRegistry already carries ZERO_11..ZERO_20, so the contract
+// side is ready.
 // The 10 here is the AGGREGATOR depth -- the tree whose root is the
 // on-chain `identityRoot`.  Named elsewhere as:
 //   Solidity  IdentityRegistry.IDENTITY_TREE_DEPTH

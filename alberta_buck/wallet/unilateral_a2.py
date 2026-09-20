@@ -95,8 +95,9 @@ class IdentityTree(IdentityMerkleTree):
     on-chain depth (10).
     """
 
-    def __init__(self, depth: int = IDENTITY_TREE_DEPTH) -> None:
-        super().__init__(depth=depth)
+    def __init__(self, depth: int = IDENTITY_TREE_DEPTH,
+                 private: bool = False) -> None:
+        super().__init__(depth=depth, private=private)
 
     def insert(self, M) -> int:
         """Append a registered identity *point*; returns its leaf index."""
