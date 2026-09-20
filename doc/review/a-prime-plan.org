@@ -53,13 +53,17 @@ and a measured gas baseline on the committed artifact (below).
 This subsection is the resume point; the per-phase status paragraphs below
 carry the detail.
 
-- Phases 0 to 3 are committed (phase 3 is the commit after =7190c37=).
-  The phase 4 code changes were absorbed into phase 1; its runs have not
-  been made. Phases 5 and 6 are not started.
+- Phases 0 to 4 are committed (=d0ed54d= is phase 3; phase 4 and the
+  evidence-script commit follow it). Phase 5 has started with the
+  evidence scripts; the four documents are untouched. Phase 6 is not
+  started.
 - Green on the branch: Rust kernel tests 3/3; =core/python= vector tests
   39/39; the review suite 33/33 on both backends; the identity Python
   suites (wallet, vectors, issuer, registry, kernel backend, cache regen)
-  100 passed; Foundry 594 passed, 1 skipped; JavaScript 51 of 51.
+  100 passed; Foundry 594 passed, 1 skipped; JavaScript 51 of 51; the
+  Notes end-to-end fixtures A1, A2 and B1 through the live anvil tier
+  (16 passed); the routing simulation smoke on pyrevm (1 passed, 61 s,
+  19 A' registrations); the three EVM evidence scripts.
 - Commit discipline: commit by explicit path. Another session shares this
   working tree; its files (=alberta-buck-notes.org=, the truthstake PNGs,
   the untracked =images/= and rebalancing vectors) must not be swept in.
@@ -71,8 +75,10 @@ carry the detail.
   =doc/review/mitigation-implementation-guide.md= (Pathway A' as a
   candidate input; pre-launch, nothing to migrate). Commit them in phase 5
   step 6 together with the status update, or earlier if a compaction is
-  near. =test/vectors/identity-cache.json= carries a two-line change of
-  unknown origin; phase 4 regenerates it under schema 5 regardless.
+  near. =test/vectors/identity-cache.json= is committed with this
+  program's 19 schema-5 registration entries; the working tree also
+  carries 16 plain EOA entries another session's rebalancing runs added,
+  left for that session to commit.
 - Build and test commands (all through the Makefile's =nix-= wrappers):
   =make nix-core-build-py nix-core-build-wasm nix-core-build-wasm-web=
   after any kernel change (macOS: remove the old =.so= before copying);
@@ -80,8 +86,12 @@ carry the detail.
   shipped bundles the JS tests load; =make nix-core-test-rust=,
   =nix-core-test-py=, =nix-core-test-js=; =make nix-test= for Foundry;
   =nix develop -c env PYTHONPATH=.:core/python python -m pytest -q
-  alberta_buck/test/review= for the review suite. There is no =timeout=
-  binary on this macOS; bound long runs from the tool instead.
+  alberta_buck/test/review= for the review suite. Targets that import
+  =buck_core= or =pyrevm= need the repo venv: =make nix-venv-sim-test=,
+  and the evidence scripts run with the venv interpreter
+  (=PYTHONPATH=.:core/python <venv>/bin/python scripts/review/<name>.py=).
+  There is no =timeout= binary on this macOS; bound long runs from the
+  tool instead.
 - =make nix-snapshot= is blocked by missing =build/snark/mint_batch_a2_*=
   fixtures (an environment gap unrelated to A'); =.gas-snapshot= stays
   stale until they are rebuilt.
@@ -703,15 +713,19 @@ on both backends; =make nix-core-test= green.
 
 ** Phase 4: simulation and end to end
 
-*Status (2026-09-20): the code changes in the table were made in phase 1
-(cache schema 5, nine-field validation, =pspubkey_arg= with =Y1=,
-=register_args=, the =bindContract= ABI string, =_credential_bind_fn=
-presenting with =ps_present=); none of the runs has been made.* Remaining:
-the Notes end-to-end fixtures A1, A2 and B1 (=nix develop= with an =anvil=
-on the path; =test_receipt_e2e=), the simulation smoke tests
-(=make nix-sim-test=), the lazy regeneration of
-=test/vectors/identity-cache.json= under schema 5 (commit the result), and
-a buckworld demo onboarding in the browser bundle.
+*Status (2026-09-20): done on =feature/a-prime=.* The code changes in the
+table were made in phase 1 (cache schema 5, nine-field validation,
+=pspubkey_arg= with =Y1=, =register_args=, the =bindContract= ABI string,
+=_credential_bind_fn= presenting with =ps_present=). The runs:
+=test_receipt_e2e= including the live anvil tier, which deploys the real
+verifier stack and binds the A1, A2 and B1 fixture parties through the
+A' credential bind (16 passed, no skips); =test_identity_cache_regen=
+with anvil; =make nix-venv-sim-test= (the routing scenario on pyrevm,
+19 EOA identities registered through =SimRegistry=, 1 passed in 61 s);
+the shipped buckworld bundle's opening story in the JavaScript suite.
+=identity-cache.json= gained the 19 schema-5 registration entries and is
+committed. The fixtures themselves carry no registration transcript
+(registration happens live), so A1, A2 and B1 ran unchanged.
 
 | Location | Lines | Change |
 |----------+-------+--------|
@@ -726,14 +740,18 @@ onboards.
 
 ** Phase 5: documents
 
-Note for this phase: the review evidence scripts under =scripts/review/=
-(=issuer_linking_demo.py=, =hiding_presentation_probe.py=,
-=evm_approval_forgery.py=, =evm_uncertified_bind.py=,
-=evm_uncontrolled_register.py=) and the org recipes in
-=identity-findings-2.org= call the pre-A' wallet API and reproduce the
-pre-A' transcript. They remain valid evidence for the findings at =75104a8=;
-either pin them to that commit in their headers or port the ones the
-documents still cite.
+Evidence scripts (done 2026-09-20): =evm_approval_forgery.py=,
+=evm_uncertified_bind.py= and =evm_uncontrolled_register.py= invert
+findings against the current registry, so they were ported (present with
+=ps_present=, nine-field proof, =Y1= in =trustIssuer=) and all three
+print their RESULT line on the branch. =issuer_linking_demo.py= and
+=hiding_presentation_probe.py= reproduce the pre-A' transcript and are
+pinned: a header note and a guard stop them on a post-A' checkout with a
+pointer to =75104a8= (=--force= overrides). The org recipes in
+=identity-findings-2.org= (the R2 recipe with =A_ps=) describe the same
+pre-A' transcript; step 6 below labels them as evidence at =75104a8=
+rather than porting them, since the branch's executable counterpart is
+the review suite.
 
 
 Executed after the code is green so that every regenerated block reflects the
