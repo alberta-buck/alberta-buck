@@ -996,6 +996,32 @@ pub fn identity_leaf(mx: &str, my: &str) -> Result<String, JsError> {
     Ok(hx(&kernel::notes::identity_leaf(&g1(mx, my)?).map_err(err)?))
 }
 
+/// `identity_leaf_salted(M, salt)` -- the hiding leaf of a private subtree.
+#[wasm_bindgen]
+pub fn identity_leaf_salted(mx: &str, my: &str, salt: &str) -> Result<String, JsError> {
+    Ok(hx(
+        &kernel::notes::identity_leaf_salted(&g1(mx, my)?, &w(salt)?).map_err(err)?,
+    ))
+}
+
+/// `receiving_leaf(M, pk_recv, salt)` -- the hiding leaf binding an Identity
+/// to the receiving key its Notes are addressed to.
+#[wasm_bindgen]
+pub fn receiving_leaf(
+    mx: &str,
+    my: &str,
+    kx: &str,
+    ky: &str,
+    salt: &str,
+) -> Result<String, JsError> {
+    Ok(hx(&kernel::notes::receiving_leaf(
+        &g1(mx, my)?,
+        &g1(kx, ky)?,
+        &w(salt)?,
+    )
+    .map_err(err)?))
+}
+
 // ---------------------------------------------------------------------------
 // buck-wallet: canonical dialect, AB-RCPT/1 envelope, receipt build /
 // verify, unilateral flows, issuer ceremony.  Structured inputs cross as

@@ -398,7 +398,7 @@ fn unilateral_a2_replay() {
     let minted = mint_unilateral_a2(
         &jw(&u["sk_iss"]),
         &jct(&u["E_reg"]),
-        &jg1(&u["M_rec"]),
+        &jg1(&u["pk_recv"]),
         &jw(&u["v"]),
         &jw(&u["rho"]),
         &jw(&u["issuer"]),
@@ -433,7 +433,8 @@ fn unilateral_a2_replay() {
     assert_eq!(tree.root().unwrap(), jw(&u["tree"]["root"]));
 
     let rcpt = make_receipt_a2(
-        &jw(&u["m_rec"]),
+        &jw(&u["k_recv"]),
+        &jg1(&u["M_rec"]),
         &minted,
         &jw(&u["issuer"]),
         &jw(&u["chainid"]),
@@ -444,6 +445,7 @@ fn unilateral_a2_replay() {
     let r = &u["receipt"];
     assert_eq!(rcpt.m_i, jg1(&r["M_I"]));
     assert_eq!(rcpt.m_rec, jg1(&r["M_rec"]));
+    assert_eq!(rcpt.pk_recv, jg1(&r["pk_recv"]));
     assert_eq!(rcpt.value, jw(&r["value"]));
     assert_eq!(rcpt.vd.e, jw(&r["vd"]["e"]));
     assert_eq!(rcpt.vd.s, jw(&r["vd"]["s"]));
@@ -493,6 +495,7 @@ fn unilateral_a1_replay() {
     let u = &v["unilateral_a1"];
     let minted = mint_unilateral_a1(
         &jg1(&u["M_rec"]),
+        &jg1(&u["pk_recv"]),
         &jw(&u["v"]),
         &jw(&u["rho"]),
         &jw(&u["m_issuer"]),
@@ -520,7 +523,8 @@ fn unilateral_a1_replay() {
     let tree = IdentityMerkleTree::from_leaves(&leaves, 10).unwrap();
 
     let rcpt = make_receipt_a1(
-        &jw(&u["m_rec"]),
+        &jw(&u["k_recv"]),
+        &jg1(&u["M_rec"]),
         &minted,
         &jg1(&u["M_iss"]),
         &jw(&u["issuer"]),
@@ -532,6 +536,7 @@ fn unilateral_a1_replay() {
     let r = &u["receipt"];
     assert_eq!(rcpt.m_iss, jg1(&r["M_iss"]));
     assert_eq!(rcpt.m_rec, jg1(&r["M_rec"]));
+    assert_eq!(rcpt.pk_recv, jg1(&r["pk_recv"]));
     assert_eq!(rcpt.value, jw(&r["value"]));
     assert_eq!(rcpt.vd.e, jw(&r["vd"]["e"]));
     assert_eq!(rcpt.vd.s, jw(&r["vd"]["s"]));

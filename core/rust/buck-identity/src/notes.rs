@@ -128,3 +128,51 @@ pub fn id_hash_a2(e_note: &(G1w, G1w), e_iss: &(G1w, G1w)) -> Result<W256> {
 pub fn identity_leaf(m_point: &G1w) -> Result<W256> {
     poseidon(&[m_point.0, m_point.1])
 }
+
+/// Hiding leaf of a PRIVATE subtree: `Poseidon([M.x, M.y, salt])`.
+///
+/// Membership in a private subtree is a fact about a person who did not
+/// publish it, so the leaf must not be a deterministic function of the
+/// identity: a registry holding every scalar it ever certified would
+/// otherwise decide membership at will.  `salt` MUST lie in `[1, F_R)`;
+/// zero is refused because it makes the leaf deterministic.
+///
+/// Mirrors `alberta_buck/registry/tree.py::identity_leaf_salted`.
+pub fn identity_leaf_salted(m_point: &G1w, salt: &W256) -> Result<W256> {
+    if !salt_in_range(salt) {
+        return Err(IdError(
+            "salt must be in [1, F_R); 0 makes the leaf deterministic",
+        ));
+    }
+    poseidon(&[m_point.0, m_point.1, *salt])
+}
+
+/// Hiding leaf of a private IDENTITY-REGISTRY subtree, binding the pair:
+/// `Poseidon([M.x, M.y, K.x, K.y, salt])`.
+///
+/// Addressed Notes are keyed to the receiving key `K = k*G` rather than to
+/// the identity point, because an identity scalar is a read capability the
+/// design discloses to every counterparty and so cannot also be a
+/// decryption key.  That separation obliges the spend to prove the mailbox
+/// belongs to the Identity, and this leaf is where the binding lives --
+/// committed, never published, because a public binding would deanonymise
+/// the recipient at spend.
+///
+/// Mirrors `alberta_buck/registry/tree.py::receiving_leaf`.
+pub fn receiving_leaf(m_point: &G1w, pk_recv: &G1w, salt: &W256) -> Result<W256> {
+    if !salt_in_range(salt) {
+        return Err(IdError(
+            "salt must be in [1, F_R); 0 makes the leaf deterministic",
+        ));
+    }
+    poseidon(&[m_point.0, m_point.1, pk_recv.0, pk_recv.1, *salt])
+}
+
+/// `salt` is a field element in `[1, F_R)`.  Poseidon reduces its inputs
+/// mod `F_R`, so an out-of-range salt would alias onto an in-range one;
+/// refusing it here keeps the Python and Rust leaves byte-identical.
+fn salt_in_range(salt: &W256) -> bool {
+    use ark_ff::Zero;
+    let s = crate::fr_mod(salt);
+    !s.is_zero() && crate::w_from_fr(&s) == *salt
+}

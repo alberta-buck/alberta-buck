@@ -12,34 +12,45 @@ membership check rather than by an expensive account-pinning SNARK.
 
 The three moving parts:
 
-1. *Mint.*  The issuer encrypts its **own registered identity** ``M_I`` under the
-   recipient's identity **point** ``M_rec`` (not an account key)::
+1. *Mint.*  The issuer encrypts its **own registered identity** ``M_I`` to the
+   recipient's registered **receiving key** ``pk_recv`` (not an account key, and
+   deliberately not the Identity point)::
 
-       eIss = (R_e, C_e) = (r'*G,  M_I + r'*M_rec),   M_rec = m_rec*G
+       eIss = (R_e, C_e) = (r'*G,  M_I + r'*pk_recv),   pk_recv = k*G
 
-   The decryption secret is therefore ``m_rec`` -- the identity scalar that
-   *every* Fountain account of the recipient shares -- so the issuer needs only
-   ``M_rec``, never an account, and any account the depositor later uses can open
-   ``eIss``.  Anti-framing rides on the shipped :mod:`issuer_reenc` binding (with
-   ``pk_rec := M_rec``): it forces ``eIss`` to re-encrypt the issuer's *own*
-   registered ``M_I``, so the recovered issuer is the true minter, never a victim.
+   The decryption secret is therefore ``k``, a value the recipient hands to
+   nobody -- unlike the identity scalar, which the design discloses to every
+   counterparty because that is how a receipt names a person
+   (:mod:`alberta_buck.wallet.recvkey`).  The issuer needs only ``pk_recv``,
+   never an account, and any account the depositor later uses can spend, because
+   authority remains the Identity even though reading does not.  Anti-framing
+   rides on the shipped :mod:`issuer_reenc` binding (with ``pk_rec :=
+   pk_recv``): it forces ``eIss`` to re-encrypt the issuer's *own* registered
+   ``M_I``, so the recovered issuer is the true minter, never a victim.
 
-2. *Deposit coupling* (the on-chain, EVM-cheap gate, all identities hidden).  The
-   depositor proves -- via a multi-witness Okamoto sigma over EIP-196 -- knowledge
-   of ``(m_rec, sk_dep, b)`` such that the chosen deposit account is bound to the
-   identity ``m_rec`` and ``eIss`` decrypts under that same ``m_rec`` to a point
-   committed (hidden) in ``P_I``.  A companion membership proof of ``P_I``'s point
-   in the identity tree (the SNARK piece) makes a bogus ``eIss`` un-spendable.
+2. *Deposit gate* (the on-chain gate, all identities hidden).  Reading the note
+   and being the Identity are now facts about two different secrets, so the gate
+   must state the tie rather than infer it: one witness carrying
+   ``(m_rec, k, sk_dep, b, salt)`` and four relations -- ``k`` decrypts ``eIss``
+   to the point committed in ``P_I``, the deposit account's credential holds
+   ``M_rec``, a registered accumulator leaf commits the pair ``(M_rec, k*G)``,
+   and that leaf's path folds to a posted root.  See
+   :mod:`alberta_buck.wallet.deposit_fold`; the third relation is what a
+   single-secret design got for free, and without it a payload thief spends with
+   its own Identity.
 
-3. *Receipt* (off-chain, unilateral).  The recipient holds the one secret
-   ``m_rec`` that names *both* parties: their own ``M_rec = m_rec*G`` trivially,
-   and the issuer's ``M_I = C_e - m_rec*R_e`` by decryption.  A
-   :mod:`verifiable_decrypt` proof + the mint binding + tree membership of both
-   points make the plaintext receipt third-party-checkable with no secret.
+3. *Receipt* (off-chain, unilateral).  The recipient holds the secrets that name
+   *both* parties: its own ``M_rec`` (which it knows, and which the note names),
+   and the issuer's ``M_I = C_e - k*R_e`` by decryption under the receiving
+   secret.  A :mod:`verifiable_decrypt` proof + the mint binding + tree
+   membership of both points make the plaintext receipt third-party-checkable
+   with no secret.
 
 Privacy invariant throughout: a passive observer (Mallory) learns neither
 ``m_rec``, ``M_rec`` (the recipient identity), nor ``M_I`` (the issuer identity)
--- so it cannot link the issuer's mint to the depositor's account.
+-- so it cannot link the issuer's mint to the depositor's account.  Nor can a
+party holding every certified identity scalar test the calldata for a
+recipient, which is precisely what keying to ``pk_recv`` buys.
 """
 
 from __future__ import annotations
@@ -125,14 +136,14 @@ class IdentityTree(IdentityMerkleTree):
 class MintedA2:
     """Everything the issuer produces for one identity-targeted A2 note.
 
-    ``eNote`` encrypts the note value ``v`` under ``M_rec``; ``eIss`` encrypts the
-    issuer identity ``M_I`` under ``M_rec``.  Both are committed in ``idHash``
+    ``eNote`` encrypts the note value ``v`` and ``eIss`` the issuer identity
+    ``M_I``, both to the recipient's receiving key ``pk_recv``.  Both are committed in ``idHash``
     (Poseidon8, matching ``mint_batch_a2.circom``).  ``eIss``/``binding`` go on
     chain (the binding anchors anti-framing at mint); the full ``opening`` +
     ``eNote`` + ``eIss`` travel to the recipient off chain.
     """
-    eNote:   ElGamalCiphertext   # (r_n*G, v*G + r_n*M_rec) -- note value under recipient identity point
-    eIss:    ElGamalCiphertext   # (r'*G, M_I + r'*M_rec)    -- issuer M under recipient identity point
+    eNote:   ElGamalCiphertext   # (r_n*G, v*G + r_n*pk_recv) -- value, to the mailbox
+    eIss:    ElGamalCiphertext   # (r'*G, M_I + r'*pk_recv)   -- issuer M, to the mailbox
     M_I:     Tuple               # issuer's registered identity (issuer-side only)
     idHash:  int
     cm:      int
@@ -157,7 +168,7 @@ def a2_id_hash(eNote: ElGamalCiphertext, eIss: ElGamalCiphertext) -> int:
 def mint_unilateral_a2(
     sk_iss:  int,
     E_reg:   ElGamalCiphertext,   # issuer's registered credential (R_reg, C_reg)
-    M_rec,                        # recipient's identity POINT (revealed off chain)
+    pk_recv,                      # recipient's RECEIVING key (learned out of band)
     v:       int,
     rho:     int,
     issuer:  int,                 # issuer account address (msg.sender at mint)
@@ -166,29 +177,36 @@ def mint_unilateral_a2(
     predicate: int = 0,
     rng=None,
 ) -> MintedA2:
-    """Issuer mints an identity-targeted A2 note addressed to identity ``M_rec``.
+    """Issuer mints an A2 note keyed to the recipient's receiving key.
 
-    Encrypts the issuer's *own registered* identity ``M_I`` under the recipient
-    identity point, and proves (issuer_reenc, ``pk_rec := M_rec``) that the
-    ciphertext re-encrypts ``M_I`` -- the anti-framing binding.
+    Encrypts the issuer's *own registered* identity ``M_I`` to ``pk_recv``, and
+    proves (issuer_reenc, ``pk_rec := pk_recv``) that the ciphertext
+    re-encrypts ``M_I`` -- the anti-framing binding.
+
+    A2 needs no Identity point at mint: the note names its recipient by being
+    keyed to that recipient's registered mailbox, and the accumulator leaf
+    binding ``pk_recv`` to ``M_rec`` is what the spend proves.  The payer SHOULD
+    check that binding
+    (:func:`alberta_buck.wallet.recvkey.verify_receiving_binding`) before
+    minting, which is what assures it whom it is paying.
     """
     r_prime = rand_scalar(rng) if r_prime is None else (r_prime % ORDER)
 
     # Issuer's registered identity, recovered from its own credential.
     M_I = elgamal_decrypt(E_reg, sk_iss)
 
-    # eNote = (r_n*G, v*G + r_n*M_rec): note value encrypted for the recipient.
+    # eNote = (r_n*G, v*G + r_n*pk_recv): the value, keyed to the mailbox.
     r_note = rand_scalar(rng)
-    eNote = elgamal_encrypt(mul(G1, v), M_rec, r_note)
+    eNote = elgamal_encrypt(mul(G1, v), pk_recv, r_note)
 
-    # eIss = (r'*G, M_I + r'*M_rec): issuer identity under the recipient point.
-    eIss = elgamal_encrypt(M_I, M_rec, r_prime)
+    # eIss = (r'*G, M_I + r'*pk_recv): the issuer Identity, keyed to the mailbox.
+    eIss = elgamal_encrypt(M_I, pk_recv, r_prime)
 
     # Anti-framing binding: eIss re-encrypts the issuer's registered M_I under the
-    # (blinded) point committed in Q.  issuer_reenc treats the second slot as the
-    # "recipient key"; here we feed the identity point M_rec.
+    # (blinded) point committed in Q.  issuer_reenc's second slot IS the
+    # recipient key, and now genuinely is one.
     binding = issuer_reenc_prove(
-        sk_iss, r_prime, M_rec, E_reg, eIss, issuer, chainid, rng=rng,
+        sk_iss, r_prime, pk_recv, E_reg, eIss, issuer, chainid, rng=rng,
     )
 
     idHash = a2_id_hash(eNote, eIss)
@@ -201,17 +219,27 @@ def mint_unilateral_a2(
 
 # ========================== Deposit coupling ================================
 #
-# The depositor proves eligibility without revealing any identity.  Public:
-# G, H, the deposit account's registered (pk_dep, E_dep=(R_d,C_d)) read from the
-# registry, the leaf's eIss=(R_e,C_e), and the published P_I = M_I + b*H.  The
-# depositor proves knowledge of (m_rec, sk_dep, b):
+# LEGACY SIGMA -- superseded by the folded gate, retained only for the vectors
+# and contracts that still replay it.  New code MUST use
+# :mod:`alberta_buck.wallet.deposit_fold`.
+#
+# This sigma proves knowledge of (m_rec, sk_dep, b) with:
 #
 #   E4:  pk_dep         = sk_dep * G                 (the real account key)
 #   E2:  C_d            = m_rec  * G + sk_dep * R_d   (account bound to M_rec=m_rec*G)
 #   E3:  C_e - P_I      = m_rec  * R_e - b * H        (eIss decrypts under m_rec to P_I-b*H)
 #
-# E4 pins sk_dep, so E2 pins m_rec*G = M_dep (the account's identity); E3 ties that
-# same m_rec to eIss's decryption.  P_I hides M_I (the issuer identity) from chain.
+# and it works only while ONE secret does both jobs.  Under the receiving key
+# the note decrypts under k and the account credential holds m_rec, so E3 and
+# E2 speak about different scalars and the shared Fiat-Shamir nonce no longer
+# ties them: E3 becomes "P commits whatever this scalar decrypts to", which
+# every scalar satisfies.  A thief holding a stolen payload then proves the
+# reading half with the stolen k and the Identity half with its OWN registered
+# Identity -- both true, neither joining them.
+#
+# The remedy is not a patch to this sigma.  It is one witness, one circuit, and
+# the tie stated as a relation over a registered accumulator leaf; see
+# deposit_fold and doc/review/notes-receiving-key.org section 3.3a.
 
 @dataclass(frozen=True)
 class DepositCouplingProof:
@@ -319,11 +347,12 @@ class UnilateralReceipt:
     anti-framing binding, the recipient's verifiable decryption of ``eIss``, and
     the membership of both points in the identity tree.
     """
-    M_I:        Tuple            # issuer identity (decrypted)
-    M_rec:      Tuple            # recipient identity (= m_rec*G)
+    M_I:        Tuple            # issuer identity (decrypted under k)
+    M_rec:      Tuple            # recipient identity (= m_rec*G), NAMED
+    pk_recv:    Tuple            # recipient receiving key (= k*G), the VD key
     value:      int
     eIss:       ElGamalCiphertext
-    vd:         VDProof          # eIss decrypts under M_rec to M_I
+    vd:         VDProof          # eIss decrypts under pk_recv to M_I
     binding:    IssuerReencProof # mint anti-framing (eIss over issuer's registered M_I)
     issuer:     int              # issuer account (msg.sender at mint)
     chainid:    int
@@ -341,20 +370,26 @@ class RcptResult:
 
 
 def make_receipt(
-    m_rec:    int,
+    k_recv:   int,                # the RECEIVING secret: what decrypts eIss
+    M_rec,                        # the recipient's Identity POINT: what is named
     minted:   MintedA2,
     issuer:   int,
     chainid:  int,
     tree:     IdentityTree,
     rng=None,
 ) -> UnilateralReceipt:
-    """Recipient produces the receipt unilaterally from ``m_rec`` and the note."""
-    M_rec = mul(G1, m_rec % ORDER)
+    """Recipient produces the receipt unilaterally from ``k_recv`` and the note.
+
+    Takes the Identity separately from the secret it decrypts with, because
+    those are now two values.  The recipient still names both parties alone:
+    its own Identity it knows, and the issuer's it decrypts.
+    """
     eIss = minted.eIss
-    M_I = elgamal_decrypt(eIss, m_rec)             # the issuer identity, named
-    vd = verifiable_decrypt_prove(eIss, m_rec, M_I, issuer, chainid, rng=rng)
+    M_I = elgamal_decrypt(eIss, k_recv)           # the issuer identity, named
+    vd = verifiable_decrypt_prove(eIss, k_recv, M_I, issuer, chainid, rng=rng)
     return UnilateralReceipt(
-        M_I=M_I, M_rec=M_rec, value=minted.opening.v, eIss=eIss, vd=vd,
+        M_I=M_I, M_rec=M_rec, pk_recv=mul(G1, k_recv % ORDER),
+        value=minted.opening.v, eIss=eIss, vd=vd,
         binding=minted.binding, issuer=issuer, chainid=chainid,
         M_I_member=tree.contains(M_I), M_rec_member=tree.contains(M_rec),
     )
@@ -372,13 +407,14 @@ def verify_receipt(
     is exactly what forces it to be the issuer's *registered* identity."""
     eIss = receipt.eIss
 
-    # (1) Mint anti-framing: eIss re-encrypts the issuer account's registered M.
+    # (1) Mint anti-framing: eIss re-encrypts the issuer account's registered M,
+    #     keyed to the recipient's receiving key.
     if not issuer_reenc_verify(pk_iss, E_reg_iss, eIss, receipt.binding,
                                receipt.issuer, receipt.chainid):
         return RcptResult(False, None, None, receipt.value, "issuer binding invalid")
 
-    # (2) Recipient's verifiable decryption: eIss decrypts under M_rec to M_I.
-    if not verifiable_decrypt_verify(eIss, receipt.M_rec, receipt.M_I, receipt.vd,
+    # (2) Recipient's verifiable decryption: eIss decrypts under pk_recv to M_I.
+    if not verifiable_decrypt_verify(eIss, receipt.pk_recv, receipt.M_I, receipt.vd,
                                      receipt.issuer, receipt.chainid):
         return RcptResult(False, None, None, receipt.value, "verifiable decryption invalid")
 

@@ -257,5 +257,11 @@ export function wrapIdentity(wasm) {
       big(wasm.id_hash_a1(flatCT(eNote), hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
     idHashA2: (eNote, eIss) => big(wasm.id_hash_a2(flatCT(eNote), flatCT(eIss))),
     identityLeaf: (M) => big(wasm.identity_leaf(...flatP(M))),
+    // The hiding leaf of a private subtree, and the one that binds an
+    // Identity to the receiving key its Notes are addressed to.
+    identityLeafSalted: (M, salt) =>
+      big(wasm.identity_leaf_salted(...flatP(M), hex(salt))),
+    receivingLeaf: (M, pkRecv, salt) =>
+      big(wasm.receiving_leaf(...flatP(M), ...flatP(pkRecv), hex(salt))),
   };
 }

@@ -823,6 +823,30 @@ fn identity_leaf(m_point: PyG1) -> PyResult<BigUint> {
     Ok(big(&kernel::notes::identity_leaf(&wg1(&m_point)?).map_err(err)?))
 }
 
+/// `identity_leaf_salted(M, salt)` -- the hiding leaf of a private subtree.
+#[pyfunction]
+fn identity_leaf_salted(m_point: PyG1, salt: BigUint) -> PyResult<BigUint> {
+    Ok(big(
+        &kernel::notes::identity_leaf_salted(&wg1(&m_point)?, &w(&salt)?).map_err(err)?,
+    ))
+}
+
+/// `receiving_leaf(M, pk_recv, salt)` -- the hiding leaf binding an Identity
+/// to the receiving key its Notes are addressed to.
+#[pyfunction]
+fn receiving_leaf(
+    m_point: PyG1,
+    pk_recv: PyG1,
+    salt: BigUint,
+) -> PyResult<BigUint> {
+    Ok(big(&kernel::notes::receiving_leaf(
+        &wg1(&m_point)?,
+        &wg1(&pk_recv)?,
+        &w(&salt)?,
+    )
+    .map_err(err)?))
+}
+
 // ---------------------------------------------------------------------------
 // buck_wallet: canonical dialect, AB-RCPT/1 envelope, receipt build /
 // verify and the unilateral flows.  Structured inputs cross as ONE JSON
@@ -1129,5 +1153,7 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(id_hash_a1, m)?)?;
     m.add_function(wrap_pyfunction!(id_hash_a2, m)?)?;
     m.add_function(wrap_pyfunction!(identity_leaf, m)?)?;
+    m.add_function(wrap_pyfunction!(identity_leaf_salted, m)?)?;
+    m.add_function(wrap_pyfunction!(receiving_leaf, m)?)?;
     Ok(())
 }

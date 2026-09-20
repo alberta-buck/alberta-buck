@@ -47,6 +47,8 @@ from alberta_buck.wallet.envelope import (
 )
 from alberta_buck.wallet.verify_receipt import verify_receipt
 from alberta_buck.wallet.issuer import Issuer
+from alberta_buck.wallet.recvkey import receiving_key
+from alberta_buck.wallet.transcript import keccak_raw
 from alberta_buck.wallet.unilateral_a2 import (
     IdentityTree, mint_unilateral_a2, make_receipt, verify_receipt as verify_ua2,
 )
@@ -114,9 +116,19 @@ def _party(name: str, fields: Dict[str, Any], addr: int, draw) -> Dict[str, Any]
     pk = mul(G1, sk)
     r = draw()
     E = elgamal_encrypt(M, pk, r)
+    # The party's wallet seed, and the Notes receiving key derived from it.
+    # Derived from the party NAME rather than from the draw stream, so adding
+    # it shifts no existing vector value, and -- more importantly -- never from
+    # the identity: a reading key recoverable from a disclosed record is a
+    # reading key everyone holding the record already has.
+    wallet_seed = int.from_bytes(
+        keccak_raw(b"AlbertaBuck/Vectors/WalletSeed/v1:" + name.encode()), "big"
+    ) % ORDER or 1
+    k_recv, pk_recv = receiving_key(wallet_seed)
     return {
         "name": name, "addr": addr, "identity": canonical, "m": m, "M": M,
         "sk": sk, "pk": pk, "r_E": r, "E": E,
+        "wallet_seed": wallet_seed, "k_recv": k_recv, "pk_recv": pk_recv,
     }
 
 
@@ -126,6 +138,8 @@ def _party_json(p: Dict[str, Any]) -> Dict[str, Any]:
         "m": scalar_to_hex(p["m"]), "M": _g1(p["M"]),
         "sk": scalar_to_hex(p["sk"]), "pk": _g1(p["pk"]),
         "r_E": scalar_to_hex(p["r_E"]), "E": _ct(p["E"]),
+        "wallet_seed": scalar_to_hex(p["wallet_seed"]),
+        "k_recv": scalar_to_hex(p["k_recv"]), "pk_recv": _g1(p["pk_recv"]),
     }
 
 
@@ -483,15 +497,15 @@ def _build(seed: int) -> Dict[str, Any]:
     r_prime = draw()
     ua_nonces = [draw() for _ in range(7)]     # r_note, beta, gamma, k_r, k_b, k_s, k_g
     minted = mint_unilateral_a2(
-        bob["sk"], bob["E"], alice["M"], v_note, rho, bob["addr"], CHAINID,
+        bob["sk"], bob["E"], alice["pk_recv"], v_note, rho, bob["addr"], CHAINID,
         r_prime=r_prime, rng=_replay(list(ua_nonces)))
     tree = IdentityTree()
     extra_M = mul(G1, draw())
     for P in (bob["M"], alice["M"], extra_M):
         tree.insert(P)
     t_vd = draw()
-    rcpt = make_receipt(alice["m"], minted, bob["addr"], CHAINID, tree,
-                        rng=_replay([t_vd]))
+    rcpt = make_receipt(alice["k_recv"], alice["M"], minted, bob["addr"],
+                        CHAINID, tree, rng=_replay([t_vd]))
     res = verify_ua2(rcpt, bob["pk"], bob["E"], tree.root(), tree)
     assert res.valid and res.reason == "VALID"
     empty_tree = IdentityTree()
@@ -500,6 +514,7 @@ def _build(seed: int) -> Dict[str, Any]:
     out["unilateral_a2"] = {
         "sk_iss": scalar_to_hex(bob["sk"]), "E_reg": _ct(bob["E"]),
         "M_rec": _g1(alice["M"]), "m_rec": scalar_to_hex(alice["m"]),
+        "pk_recv": _g1(alice["pk_recv"]), "k_recv": scalar_to_hex(alice["k_recv"]),
         "v": _hx(v_note), "rho": scalar_to_hex(rho),
         "issuer": _hx(bob["addr"]), "chainid": _hx(CHAINID),
         "predicate": _hx(0),
@@ -519,6 +534,7 @@ def _build(seed: int) -> Dict[str, Any]:
                  "root": _hx(tree.root())},
         "t_vd": scalar_to_hex(t_vd),
         "receipt": {"M_I": _g1(rcpt.M_I), "M_rec": _g1(rcpt.M_rec),
+                    "pk_recv": _g1(rcpt.pk_recv),
                     "value": _hx(rcpt.value), "vd": _vd_json(rcpt.vd),
                     "M_I_member": rcpt.M_I_member,
                     "M_rec_member": rcpt.M_rec_member},
@@ -533,16 +549,17 @@ def _build(seed: int) -> Dict[str, Any]:
     sigma_R = mul(G1, sigma_R_k)
     rho = draw()
     r_prime, r_note = draw(), draw()
-    minted1 = mint_unilateral_a1(alice["M"], v_note, rho, bob["m"],
-                                 sigma_R, sigma_s, r_prime=r_prime,
+    minted1 = mint_unilateral_a1(alice["M"], alice["pk_recv"], v_note, rho,
+                                 bob["m"], sigma_R, sigma_s, r_prime=r_prime,
                                  rng=_replay([r_note]))
     t_vd = draw()
-    rcpt1 = make_receipt_a1(alice["m"], minted1, bob["M"], bob["addr"],
-                            CHAINID, tree, rng=_replay([t_vd]))
+    rcpt1 = make_receipt_a1(alice["k_recv"], alice["M"], minted1, bob["M"],
+                            bob["addr"], CHAINID, tree, rng=_replay([t_vd]))
     res1 = verify_receipt_a1(rcpt1, tree.root(), tree)
     assert res1.valid
     out["unilateral_a1"] = {
         "M_rec": _g1(alice["M"]), "m_rec": scalar_to_hex(alice["m"]),
+        "pk_recv": _g1(alice["pk_recv"]), "k_recv": scalar_to_hex(alice["k_recv"]),
         "v": _hx(v_note), "rho": scalar_to_hex(rho),
         "m_issuer": scalar_to_hex(bob["m"]), "M_iss": _g1(bob["M"]),
         "sigma_R": _g1(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
@@ -556,6 +573,7 @@ def _build(seed: int) -> Dict[str, Any]:
         },
         "t_vd": scalar_to_hex(t_vd),
         "receipt": {"M_iss": _g1(rcpt1.M_iss), "M_rec": _g1(rcpt1.M_rec),
+                    "pk_recv": _g1(rcpt1.pk_recv),
                     "value": _hx(rcpt1.value), "vd": _vd_json(rcpt1.vd),
                     "M_iss_member": rcpt1.M_iss_member,
                     "M_rec_member": rcpt1.M_rec_member},

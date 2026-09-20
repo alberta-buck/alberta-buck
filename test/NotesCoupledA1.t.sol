@@ -113,8 +113,16 @@ contract NotesCoupledA1Test is Test {
         c.R = _g1(string.concat(key, ".R"));
         c.C = _g1(string.concat(key, ".C"));
     }
+    // The ciphertext the deployed sigma is pinned over.  Since Notes moved to
+    // receiving-key addressing, the note's own ciphertext is keyed to pk_recv
+    // and the sigma can no longer tie reading it to being the Identity (see
+    // doc/review/notes-receiving-key.org section 3.3a).  The vector therefore
+    // carries `eSigma`, an identity-keyed ciphertext where the sigma's relation
+    // is meaningful, and these tests pin the sigma PRIMITIVE.  The A1/A2 spend
+    // gate itself is the folded circuit, whose public inputs the vector's
+    // `fold` section carries.
     function _eRec() internal view returns (IdentityRegistry.ElGamalCT memory) {
-        return _ct(".eRec");
+        return _ct(".eSigma");
     }
     function _dc() internal view returns (IdentityRegistry.DepositCouplingProof memory p) {
         p.e   = _u(".deposit_coupling.e");

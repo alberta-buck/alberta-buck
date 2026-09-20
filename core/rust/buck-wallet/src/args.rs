@@ -371,7 +371,7 @@ pub fn mint_unilateral_a2_args(args: &Value) -> Result<String> {
     let minted = mint_unilateral_a2(
         &get_w(args, "sk_iss")?,
         &get_ct(args, "E_reg")?,
-        &get_g1(args, "M_rec")?,
+        &get_g1(args, "pk_recv")?,
         &get_w(args, "v")?,
         &get_w(args, "rho")?,
         &get_w(args, "issuer")?,
@@ -418,7 +418,8 @@ pub fn make_receipt_a2_args(args: &Value) -> Result<String> {
     };
     let tree = tree_from(get(args, "tree")?)?;
     let rcpt = make_receipt_a2(
-        &get_w(args, "m_rec")?,
+        &get_w(args, "k_recv")?,
+        &get_g1(args, "M_rec")?,
         &minted,
         &get_w(args, "issuer")?,
         &get_w(args, "chainid")?,
@@ -428,6 +429,7 @@ pub fn make_receipt_a2_args(args: &Value) -> Result<String> {
     Ok(json!({
         "M_I": g1_hex(&rcpt.m_i),
         "M_rec": g1_hex(&rcpt.m_rec),
+        "pk_recv": g1_hex(&rcpt.pk_recv),
         "value": scalar_hex(&rcpt.value),
         "eIss": ct_hex(&rcpt.e_iss),
         "vd": vd_json(&rcpt.vd),
@@ -446,6 +448,7 @@ pub fn verify_receipt_a2_args(args: &Value) -> Result<String> {
     let rcpt = UnilateralReceipt {
         m_i: get_g1(r, "M_I")?,
         m_rec: get_g1(r, "M_rec")?,
+        pk_recv: get_g1(r, "pk_recv")?,
         value: get_w(r, "value")?,
         e_iss: get_ct(r, "eIss")?,
         vd: buck_identity::verifiable_decrypt::VdProof {
@@ -483,6 +486,7 @@ pub fn mint_unilateral_a1_args(args: &Value) -> Result<String> {
     let n = get(args, "nonces")?;
     let minted = mint_unilateral_a1(
         &get_g1(args, "M_rec")?,
+        &get_g1(args, "pk_recv")?,
         &get_w(args, "v")?,
         &get_w(args, "rho")?,
         &get_w(args, "m_issuer")?,
@@ -518,7 +522,8 @@ pub fn make_receipt_a1_args(args: &Value) -> Result<String> {
     };
     let tree = tree_from(get(args, "tree")?)?;
     let rcpt = make_receipt_a1(
-        &get_w(args, "m_rec")?,
+        &get_w(args, "k_recv")?,
+        &get_g1(args, "M_rec")?,
         &minted,
         &get_g1(args, "M_iss")?,
         &get_w(args, "issuer")?,
@@ -529,6 +534,7 @@ pub fn make_receipt_a1_args(args: &Value) -> Result<String> {
     Ok(json!({
         "M_iss": g1_hex(&rcpt.m_iss),
         "M_rec": g1_hex(&rcpt.m_rec),
+        "pk_recv": g1_hex(&rcpt.pk_recv),
         "value": scalar_hex(&rcpt.value),
         "eRec": ct_hex(&rcpt.e_rec),
         "vd": vd_json(&rcpt.vd),
@@ -546,6 +552,7 @@ pub fn verify_receipt_a1_args(args: &Value) -> Result<String> {
     let rcpt = A1Receipt {
         m_iss: get_g1(r, "M_iss")?,
         m_rec: get_g1(r, "M_rec")?,
+        pk_recv: get_g1(r, "pk_recv")?,
         value: get_w(r, "value")?,
         e_rec: get_ct(r, "eRec")?,
         vd: buck_identity::verifiable_decrypt::VdProof {

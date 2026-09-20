@@ -125,7 +125,7 @@ def test_tampered(wv):
 def test_unilateral_a2(wv):
     u = wv["unilateral_a2"]
     mint_args = {
-        "sk_iss": u["sk_iss"], "E_reg": u["E_reg"], "M_rec": u["M_rec"],
+        "sk_iss": u["sk_iss"], "E_reg": u["E_reg"], "pk_recv": u["pk_recv"],
         "v": u["v"], "rho": u["rho"], "issuer": u["issuer"],
         "chainid": u["chainid"], "predicate": u["predicate"],
         "nonces": {k: u[k] for k in
@@ -137,13 +137,15 @@ def test_unilateral_a2(wv):
         assert minted[key] == u["minted"][key], key
 
     rcpt = json.loads(bw.make_receipt_a2(json.dumps({
-        "m_rec": u["m_rec"], "minted": minted, "issuer": u["issuer"],
+        "k_recv": u["k_recv"], "M_rec": u["M_rec"],
+        "minted": minted, "issuer": u["issuer"],
         "chainid": u["chainid"], "tree": {"depth": u["tree"]["depth"],
                                           "leaves": u["tree"]["leaves"]},
         "t_vd": u["t_vd"],
     })))
     assert rcpt["M_I"] == u["receipt"]["M_I"]
     assert rcpt["M_rec"] == u["receipt"]["M_rec"]
+    assert rcpt["pk_recv"] == u["receipt"]["pk_recv"]
     assert rcpt["vd"] == u["receipt"]["vd"]
     assert rcpt["M_I_member"] == u["receipt"]["M_I_member"]
     assert rcpt["M_rec_member"] == u["receipt"]["M_rec_member"]
@@ -170,7 +172,8 @@ def test_unilateral_a1(wv):
     tree = {"depth": wv["unilateral_a2"]["tree"]["depth"],
             "leaves": wv["unilateral_a2"]["tree"]["leaves"]}
     minted = json.loads(bw.mint_unilateral_a1(json.dumps({
-        "M_rec": u["M_rec"], "v": u["v"], "rho": u["rho"],
+        "M_rec": u["M_rec"], "pk_recv": u["pk_recv"],
+        "v": u["v"], "rho": u["rho"],
         "m_issuer": u["m_issuer"], "sigma_R": u["sigma_R"],
         "sigma_s": u["sigma_s"], "predicate": u["predicate"],
         "nonces": {"r_prime": u["r_prime"], "r_note": u["r_note"]},
@@ -179,12 +182,14 @@ def test_unilateral_a1(wv):
         assert minted[key] == u["minted"][key], key
 
     rcpt = json.loads(bw.make_receipt_a1(json.dumps({
-        "m_rec": u["m_rec"], "minted": minted, "M_iss": u["M_iss"],
+        "k_recv": u["k_recv"], "M_rec": u["M_rec"],
+        "minted": minted, "M_iss": u["M_iss"],
         "issuer": u["issuer"], "chainid": u["chainid"], "tree": tree,
         "t_vd": u["t_vd"],
     })))
     assert rcpt["M_iss"] == u["receipt"]["M_iss"]
     assert rcpt["M_rec"] == u["receipt"]["M_rec"]
+    assert rcpt["pk_recv"] == u["receipt"]["pk_recv"]
     assert rcpt["vd"] == u["receipt"]["vd"]
 
     res = json.loads(bw.verify_receipt_a1(json.dumps({

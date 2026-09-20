@@ -40,7 +40,11 @@ pub struct MintedA2 {
     pub r_note: W256,
 }
 
-/// Issuer mints an A2 note addressed to identity point `m_rec_pt`.
+/// Issuer mints an A2 note keyed to the recipient's receiving key `pk_recv`.
+///
+/// Deliberately not the identity point: an identity scalar is a read
+/// capability the design discloses to every counterparty, so it cannot also
+/// be a decryption key.  Mirrors `alberta_buck/wallet/unilateral_a2.py`.
 ///
 /// Nonce order (the Python draw order with no defaults supplied):
 /// `r_prime, r_note, beta, gamma, k_r, k_b, k_s, k_g`.
@@ -48,7 +52,7 @@ pub struct MintedA2 {
 pub fn mint_unilateral_a2(
     sk_iss: &W256,
     e_reg: &Ctw,
-    m_rec_pt: &G1w,
+    pk_recv: &G1w,
     v: &W256,
     rho: &W256,
     issuer: &W256,
@@ -68,16 +72,17 @@ pub fn mint_unilateral_a2(
     // The issuer's registered identity, recovered from its credential.
     let m_i = elgamal_decrypt(&e_reg.0, &e_reg.1, sk_iss)?;
 
-    // eNote = (r_n*G, v*G + r_n*M_rec).
+    // eNote = (r_n*G, v*G + r_n*pk_recv).
     let v_pt = g1_mul(&g1_generator(), v)?;
-    let e_note = elgamal_encrypt(&v_pt, m_rec_pt, r_note)?;
+    let e_note = elgamal_encrypt(&v_pt, pk_recv, r_note)?;
 
-    // eIss = (r'*G, M_I + r'*M_rec).
-    let e_iss = elgamal_encrypt(&m_i, m_rec_pt, &r_prime)?;
+    // eIss = (r'*G, M_I + r'*pk_recv).
+    let e_iss = elgamal_encrypt(&m_i, pk_recv, &r_prime)?;
 
-    // Anti-framing binding, with pk_rec := the identity point M_rec.
+    // Anti-framing binding; issuer_reenc's recipient-key slot now genuinely
+    // holds a recipient key.
     let binding = issuer_reenc_prove(
-        sk_iss, &r_prime, m_rec_pt, e_reg, &e_iss, issuer, chainid, beta, gamma, k_r, k_b, k_s,
+        sk_iss, &r_prime, pk_recv, e_reg, &e_iss, issuer, chainid, beta, gamma, k_r, k_b, k_s,
         k_g,
     )?;
 
@@ -113,6 +118,7 @@ pub fn mint_unilateral_a2(
 pub struct UnilateralReceipt {
     pub m_i: G1w,
     pub m_rec: G1w,
+    pub pk_recv: G1w,
     pub value: W256,
     pub e_iss: Ctw,
     pub vd: VdProof,
@@ -133,23 +139,28 @@ pub struct UaRcptResult {
     pub reason: String,
 }
 
-/// Recipient produces the A2 receipt from `m_rec` and the note.  One
-/// nonce: the verifiable-decryption `t_vd`.
+/// Recipient produces the A2 receipt from its receiving secret `k_recv` and
+/// the note, with the Identity `m_rec_pt` passed separately -- those are two
+/// values now, and deriving one from the other is the collapse the receiving
+/// key exists to prevent.  One nonce: the verifiable-decryption `t_vd`.
+#[allow(clippy::too_many_arguments)]
 pub fn make_receipt_a2(
-    m_rec: &W256,
+    k_recv: &W256,
+    m_rec_pt: &G1w,
     minted: &MintedA2,
     issuer: &W256,
     chainid: &W256,
     tree: &IdentityMerkleTree,
     t_vd: &W256,
 ) -> Result<UnilateralReceipt> {
-    let m_rec_pt = g1_mul(&g1_generator(), m_rec)?;
+    let pk_recv = g1_mul(&g1_generator(), k_recv)?;
     let e_iss = minted.e_iss;
-    let m_i = elgamal_decrypt(&e_iss.0, &e_iss.1, m_rec)?;
-    let vd = verifiable_decrypt_prove(&e_iss, m_rec, &m_i, issuer, chainid, t_vd)?;
+    let m_i = elgamal_decrypt(&e_iss.0, &e_iss.1, k_recv)?;
+    let vd = verifiable_decrypt_prove(&e_iss, k_recv, &m_i, issuer, chainid, t_vd)?;
     Ok(UnilateralReceipt {
         m_i,
-        m_rec: m_rec_pt,
+        m_rec: *m_rec_pt,
+        pk_recv,
         value: minted.opening.v,
         e_iss,
         vd,
@@ -157,7 +168,7 @@ pub fn make_receipt_a2(
         issuer: *issuer,
         chainid: *chainid,
         m_i_member: tree.contains_identity(&m_i, None)?,
-        m_rec_member: tree.contains_identity(&m_rec_pt, None)?,
+        m_rec_member: tree.contains_identity(m_rec_pt, None)?,
     })
 }
 
@@ -190,10 +201,10 @@ pub fn verify_receipt_a2(
         return Ok(fail("issuer binding invalid"));
     }
 
-    // (2) Recipient's verifiable decryption (key = the identity point).
+    // (2) Recipient's verifiable decryption (key = the receiving key).
     if !verifiable_decrypt_verify(
         e_iss,
-        &receipt.m_rec,
+        &receipt.pk_recv,
         &receipt.m_i,
         &receipt.vd,
         &receipt.issuer,
@@ -237,11 +248,16 @@ pub struct MintedA1 {
     pub r_note: W256,
 }
 
-/// Public issuer mints an A1 note addressed to `m_rec_pt`.  Nonce order:
-/// `r_prime, r_note`.
+/// Public issuer mints an A1 note NAMING `m_rec_pt` and KEYED to `pk_recv`.
+///
+/// Two points, two jobs: `m_rec_pt` is the plaintext of `eRec`, and `pk_recv`
+/// is what both ciphertexts are encrypted to.  Collapsing them would leave
+/// `C = m(G+R)`, testable with one scalar multiplication per candidate.
+/// Nonce order: `r_prime, r_note`.
 #[allow(clippy::too_many_arguments)]
 pub fn mint_unilateral_a1(
     m_rec_pt: &G1w,
+    pk_recv: &G1w,
     v: &W256,
     rho: &W256,
     m_issuer: &W256,
@@ -254,10 +270,11 @@ pub fn mint_unilateral_a1(
     let r_prime = reduce_mod_order(r_prime);
 
     let v_pt = g1_mul(&g1_generator(), v)?;
-    let e_note = elgamal_encrypt(&v_pt, m_rec_pt, r_note)?;
+    let e_note = elgamal_encrypt(&v_pt, pk_recv, r_note)?;
 
-    // eRec = (r'*G, M_rec + r'*M_rec): the recipient identity under itself.
-    let e_rec = elgamal_encrypt(m_rec_pt, m_rec_pt, &r_prime)?;
+    // eRec = (r'*G, M_rec + r'*pk_recv): the Identity NAMED in the plaintext,
+    // keyed to the receiving key.
+    let e_rec = elgamal_encrypt(m_rec_pt, pk_recv, &r_prime)?;
 
     let id_hash = id_hash_a1(&e_note, m_issuer, sigma_r, sigma_s)?;
     let opening = NoteOpening {
@@ -284,6 +301,7 @@ pub fn mint_unilateral_a1(
 pub struct A1Receipt {
     pub m_iss: G1w,
     pub m_rec: G1w,
+    pub pk_recv: G1w,
     pub value: W256,
     pub e_rec: Ctw,
     pub vd: VdProof,
@@ -293,9 +311,12 @@ pub struct A1Receipt {
     pub m_rec_member: bool,
 }
 
-/// Recipient produces the A1 receipt.  One nonce: `t_vd`.
+/// Recipient produces the A1 receipt from its receiving secret `k_recv`, with
+/// the Identity `m_rec_pt` passed separately.  One nonce: `t_vd`.
+#[allow(clippy::too_many_arguments)]
 pub fn make_receipt_a1(
-    m_rec: &W256,
+    k_recv: &W256,
+    m_rec_pt: &G1w,
     minted: &MintedA1,
     m_iss_pt: &G1w,
     issuer: &W256,
@@ -303,19 +324,20 @@ pub fn make_receipt_a1(
     tree: &IdentityMerkleTree,
     t_vd: &W256,
 ) -> Result<A1Receipt> {
-    let m_rec_pt = g1_mul(&g1_generator(), m_rec)?;
+    let pk_recv = g1_mul(&g1_generator(), k_recv)?;
     let e_rec = minted.e_rec;
-    let vd = verifiable_decrypt_prove(&e_rec, m_rec, &m_rec_pt, issuer, chainid, t_vd)?;
+    let vd = verifiable_decrypt_prove(&e_rec, k_recv, m_rec_pt, issuer, chainid, t_vd)?;
     Ok(A1Receipt {
         m_iss: *m_iss_pt,
-        m_rec: m_rec_pt,
+        m_rec: *m_rec_pt,
+        pk_recv,
         value: minted.opening.v,
         e_rec,
         vd,
         issuer: *issuer,
         chainid: *chainid,
         m_iss_member: tree.contains_identity(m_iss_pt, None)?,
-        m_rec_member: tree.contains_identity(&m_rec_pt, None)?,
+        m_rec_member: tree.contains_identity(m_rec_pt, None)?,
     })
 }
 
@@ -333,11 +355,12 @@ pub fn verify_receipt_a1(
         reason: reason.to_string(),
     };
 
-    // (1) eRec decrypts under M_rec to M_rec: the note addressed this
-    //     recipient's identity.
+    // (1) eRec decrypts under pk_recv to M_rec: the note named this
+    //     recipient's Identity, and only the holder of the receiving secret
+    //     can say so.
     if !verifiable_decrypt_verify(
         &receipt.e_rec,
-        &receipt.m_rec,
+        &receipt.pk_recv,
         &receipt.m_rec,
         &receipt.vd,
         &receipt.issuer,

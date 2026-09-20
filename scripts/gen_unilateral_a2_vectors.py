@@ -3,6 +3,22 @@ deposit coupling, so test/UnilateralA2.t.sol can pin the on-chain
 IdentityRegistry.verifyDepositCoupling to the Python reference
 (alberta_buck.wallet.unilateral_a2) byte-for-byte.
 
+An A2 note is KEYED to the recipient's registered receiving key, so this vector
+carries `pk_recv` and the receipt's verifiable decryption is under it.
+
+WHAT THE `deposit_coupling` SECTION PINS, AND WHAT IT NO LONGER IS.  It pins the
+deployed sigma as a PRIMITIVE -- "some scalar binds the deposit account and
+decrypts this ciphertext to the point committed in P_I" -- over `eSigma`, an
+identity-keyed ciphertext where that relation is meaningful.  The sigma itself is
+unchanged and still sound for that statement.
+
+It is NOT the A2 spend gate any more.  With the note keyed to pk_recv, reading it
+and being the Identity are facts about two different secrets, and the sigma's
+shared Fiat-Shamir nonce no longer ties them: a payload thief would satisfy both
+halves with its own Identity and the stolen key.  The spend gate is the folded
+circuit of doc/review/notes-receiving-key.org section 3.3a, whose public inputs
+this vector carries in the `fold` section.
+
 Run:  nix develop --command python scripts/gen_unilateral_a2_vectors.py
 Out:  test/vectors/unilateral_a2.json
 """
@@ -23,6 +39,12 @@ from alberta_buck.wallet.unilateral_a2 import (
     make_receipt, verify_receipt,
 )
 from alberta_buck.wallet.issuer_reenc import issuer_reenc_verify
+from alberta_buck.registry.tree import IdentityMerkleTree
+from alberta_buck.wallet.deposit_fold import deposit_fold_check, deposit_fold_witness
+from alberta_buck.wallet.recvkey import receiving_key
+from alberta_buck.wallet.salt import derive_salt
+
+KYC = "kyc:ca-ab-2026"
 
 CHAINID = 1
 ISSUER_ADDR = 0xA11CE
@@ -77,25 +99,42 @@ def build():
     tree.insert(M_iss)
     tree.insert(M_rec)
 
-    # --- mint (issuer) ---
+    # --- the recipient's mailbox: a receiving key from its own wallet seed ---
+    seed_rec = rng()
+    k_recv, pk_recv = receiving_key(seed_rec)
+    salt_rec = derive_salt(seed_rec, KYC)
+    priv = IdentityMerkleTree(depth=10, private=True)
+    priv.insert_receiving(M_rec, pk_recv, salt_rec)
+
+    # --- mint: keyed to the recipient's mailbox ---
     rho = rng()
-    minted = mint_unilateral_a2(sk_iss, E_reg_iss, M_rec, v=1000, rho=rho,
+    minted = mint_unilateral_a2(sk_iss, E_reg_iss, pk_recv, v=1000, rho=rho,
                                 issuer=ISSUER_ADDR, chainid=CHAINID, rng=rng)
     assert issuer_reenc_verify(pk_iss, E_reg_iss, minted.eIss, minted.binding,
                                ISSUER_ADDR, CHAINID), "mint binding must verify"
 
-    # --- deposit coupling (depositor) ---
-    proof = deposit_couple_prove(m_rec, sk_dep, E_dep, minted.eIss,
+    # --- the sigma PRIMITIVE, over an identity-keyed ciphertext ---
+    eSigma = elgamal_encrypt(M_iss, M_rec, rng())
+    proof = deposit_couple_prove(m_rec, sk_dep, E_dep, eSigma,
                                  DEPOSIT_ADDR, CHAINID, rng=rng)
-    assert deposit_couple_verify(pk_dep, E_dep, minted.eIss, proof,
+    assert deposit_couple_verify(pk_dep, E_dep, eSigma, proof,
                                  DEPOSIT_ADDR, CHAINID), "python self-check must pass"
 
+    # --- the SPEND GATE: one witness, four relations ---
+    fold = deposit_fold_witness(m_rec=m_rec, k=k_recv, sk_dep=sk_dep,
+                                salt=salt_rec, E_dep=E_dep,
+                                note_ct=minted.eIss, tree=priv, rng=rng)
+    assert deposit_fold_check(fold, pk_dep=pk_dep, E_dep=E_dep,
+                              note_ct=minted.eIss, root=priv.root()), \
+        "the folded gate must accept the honest spender"
+
     # --- receipt (recipient, unilateral) ---
-    receipt = make_receipt(m_rec, minted, ISSUER_ADDR, CHAINID, tree, rng=rng)
+    receipt = make_receipt(k_recv, M_rec, minted, ISSUER_ADDR, CHAINID, tree, rng=rng)
     res = verify_receipt(receipt, pk_iss, E_reg_iss, tree.root(), tree)
     assert res.valid, f"receipt must be VALID, got: {res.reason}"
 
-    M_I = elgamal_decrypt(minted.eIss, m_rec)
+    M_I = elgamal_decrypt(minted.eIss, k_recv)
+    assert elgamal_decrypt(minted.eIss, m_rec) != M_I
 
     return {
         "$schema_version": 1,
@@ -110,7 +149,20 @@ def build():
             "pk":   _g1(pk_dep),
             "E":    _ct(E_dep),
         },
+        "recipient": {
+            "M":       _g1(M_rec),
+            "pk_recv": _g1(pk_recv),
+        },
+        # The note's real ciphertext: the issuer Identity, keyed to the mailbox.
         "eIss": _ct(minted.eIss),
+        # The ciphertext the deployed SIGMA is pinned over; see the docstring.
+        "eSigma": _ct(eSigma),
+        # The folded spend gate's public inputs.
+        "fold": {
+            "P":    _g1(fold.P),
+            "root": scalar_to_hex(fold.root),
+            "leaf": scalar_to_hex(fold.leaf),
+        },
         "deposit_coupling": {
             "e":   scalar_to_hex(proof.e),
             "s_m": scalar_to_hex(proof.s_m),
