@@ -1,4 +1,4 @@
-#+TITLE: Identity accumulator specification, v0.4
+#+TITLE: Identity accumulator specification, v0.5
 #+DATE: 2026-09-20
 #+OPTIONS: toc:3 num:t
 #+PROPERTY: header-args :eval never-export
@@ -21,7 +21,9 @@ ladder made unavoidable. Both are in [[#decisions]]. v0.4 adds deployment
 and governance ([[#governance]]): one root authority per deployment, on-chain
 enrollment, an accountable rather than trustless aggregator, which rules
 bind a delegate and which do not, and the line between the consistency the
-protocol enforces and the accuracy it cannot. =MUST=, =MUST NOT=,
+protocol enforces and the accuracy it cannot. v0.5 settles the last three
+items: scope without an asset taxonomy ([[#scope]]), the retention window,
+and the aggregator's publication format. =MUST=, =MUST NOT=,
 =SHOULD= and =MAY= are normative. Constants are given as the names already
 in the source, with their current values, so that a conformance test can
 compare rather than guess.
@@ -353,9 +355,12 @@ its salt and its leaf index, in order to clear and re-insert. It does not
 need history. An authority =MUST= discard a superseded salt and its
 association once the re-association is posted, including from operational
 logs and backups, so that it cannot reconstruct a holder's change history.
-This is a retention obligation on the authority rather than a property the
-protocol enforces, and it is auditable by policy review rather than by
-code. A construction in which the holder proves a re-association in zero
+An authority =MAY= retain a cleared association for up to 90 days, so that
+an erroneous revocation can be reversed, and =MUST= discard it after that.
+Ninety days covers an administrative appeal and nothing longer justifies
+keeping a link that exists only to be undone. This is a retention
+obligation on the authority rather than a property the protocol enforces,
+and it is auditable by policy review rather than by code. A construction in which the holder proves a re-association in zero
 knowledge, so the receiving authority never learns which prior leaf was
 cleared, would enforce it cryptographically; it conflicts with admission
 needing no proof ([[#admission]]) and is left to a later version.
@@ -509,6 +514,91 @@ insurer may write this asset class at this face, and premium adequacy is
 the insurer's own business. The risk estimate is therefore =NOT= part of
 the on-chain envelope, and =MUST NOT= be added unless a consumer is shown
 to gate on it. Bands =MUST= stay coarse for the same reason.
+
+** 12.2 Scope, and why there is no asset taxonomy
+:PROPERTIES:
+:CUSTOM_ID: scope
+:END:
+
+An asset taxonomy on chain would have to be global, versioned and endlessly
+refined: land becomes farmland and city lot, vehicle becomes car and truck
+and then Ford and pre-1995 and Mustang, across every class at once. The
+specification does not have one, for a reason that also makes the gate
+simpler.
+
+*What underwriting actually produces* is not a classification. It is a risk
+rating per unit time, a scale in BUCK, and a depreciation model chosen to
+represent that specific asset. =BuckCredit= already stores exactly those:
+=premiumRate=, =faceValue=, and =depType= with =depRate= and
+=depreciationFloor=. The asset's identity is a detail of the insurance
+contract, held by the insurer and its client, not a protocol object.
+
+The depreciation model carries more of the asset's nature than a class code
+would. A bicycle is linear to a floor over a few years, a building is
+declining balance at a low rate, land does not depreciate at all. Bounding
+an insurer's permitted models therefore bounds the economic shape of what
+it can insure, without naming a single asset kind.
+
+*Two restrictions, one checkable and one attributable.*
+
+1. *The parameter envelope*, fully checkable on chain because every value
+   is in the credit itself: the face band ([[#insurer]]), the permitted
+   depreciation types, a bound on =depRate=, and a bound on =premiumRate=.
+2. *The scope*, a =bytes32= identifier the insurer declares when it creates
+   a credit. The chain cannot verify what the asset is, so the scope is the
+   insurer's public claim about what it is writing. The gate checks that
+   the insurer's envelope covers that scope. A false claim is then evidence
+   rather than an inference, and the regulator's remedy is clearance.
+
+*Scope identifiers are names, not codes.* A scope is the hash of a
+namespaced string owned by the authority that granted it:
+
+#+begin_example
+regulator:<jurisdiction>:scope:asset:vehicle
+regulator:<jurisdiction>:scope:asset:vehicle:car:ford:pre-1995
+regulator:<jurisdiction>:scope:asset:toy
+community-board:<id>:scope:asset:bicycle
+#+end_example
+
+This gives refinement for free. A new distinction is a new name, granted by
+attesting insurers into the subtree for it; no existing name changes, no
+version is bumped, and the contract never parses a hierarchy. Two
+regulators' =vehicle= scopes are different identifiers, which is correct,
+because they are different judgements.
+
+*Narrower is not broader.* Membership in a fine scope does not imply the
+coarse one. An insurer attested only for pre-1995 Fords is a member of that
+subtree alone, and a credit declaring the broader vehicle scope fails
+because the insurer is not attested for it. A regulator that intends an
+insurer to write both attests it into both. The contract therefore needs no
+prefix matching, which is what makes names affordable.
+
+*The worked examples.* A child running an enterprise as a class project is
+attested into =scope:asset:toy= and =scope:asset:bicycle=, at face band 2,
+permitted =LINEAR= only. They may insure a neighbour's bicycle for eighty
+BUCK and cannot insure a car, because the car's credit declares a scope
+they do not hold, and a building's credit exceeds their band and their
+model. A car collector is attested into
+=scope:asset:vehicle:car:ford:pre-1995= at a higher band with
+=DECLINING_BALANCE= permitted, and cannot write a toy.
+
+*The cached envelope* therefore holds, per insurer: standing, the face
+band, a mask of permitted depreciation types, a maximum =depRate=, a
+maximum =premiumRate=, an expiry, and the set of scopes it may declare. The
+scope set is one storage write per scope at attestation, which is periodic,
+and one lookup per credit.
+
+*=createCredit= gains an overload*, not a changed signature. The existing
+eight-argument form declares the zero scope, which a regulator grants to a
+general insurer and withholds from a scoped one; the nine-argument form
+takes the scope explicitly. The existing call sites compile and run
+unchanged, needing only the fixture line that grants their test insurer an
+envelope. The scope is emitted with =CreditCreated= rather than stored, so
+=CreditParams= keeps its three-slot packing.
+
+The existing =uint8 assetClass= keeps its current status, which is an
+insurer's own coarse tag with no protocol meaning. The gated field is the
+scope.
 
 ** 12.1 Delegated authority
 :PROPERTIES:
@@ -669,6 +759,11 @@ mode of [[#publication]] removes it.
 11. *Bands.* An insurer attested at a band writes a face below that band's
     ceiling and is refused one above it; a lower band is implied by a
     higher one; the smallest band admits a face of ten BUCK.
+11a. *Scope.* An insurer writes a credit declaring a scope it holds and is
+     refused one it does not; a fine scope does not admit a credit
+     declaring the coarse one; a permitted depreciation type is accepted
+     and an unpermitted one refused; the eight-argument overload declares
+     the zero scope and the existing call sites are unchanged.
 12. *Delegation.* A verifier requiring only the state regulator refuses a
     delegate's attestation; one requiring the delegation edge accepts it
     while the edge holds and refuses it once the parent clears the
@@ -739,15 +834,17 @@ authority becomes part of the specification ([[#delegation]]).
 
 ** 16.3 What remains open
 
-1. *The retention correction window*, in days.
-2. *Whether asset classes need a vocabulary of their own*, or whether
-   =BuckCredit='s existing =uint8 assetClass= is the vocabulary.
-3. *The aggregator's publication format*, since accountability
-   ([[#aggregator-trust]]) depends on the leaf list and its signatures
-   being published in a form anyone can recompute against.
+Nothing of substance. The three items v0.4 listed are settled in v0.5:
+the retention window is 90 days ([[#renewal]]), the aggregator publishes
+its leaf list as canonical JSON with the document hash emitted beside the
+root ([[#aggregator-trust]]), and asset classes need no vocabulary because
+the gate checks a declared scope and the credit's own parameters rather
+than a taxonomy ([[#scope]]).
 
-Who operates the aggregator, resolved in [[#governance]], was the first
-item here in v0.3.
+What remains is implementation, and the security argument for the whole
+accumulator, which has not been written and which phase 6 of
+[[file:accumulator-plan.org][the plan]] owes in the same form Part I of
+=alberta-buck-proofs.org= owes for A'.
 
 * 17 Deployment, authority and governance
 :PROPERTIES:
@@ -795,8 +892,14 @@ the achievable property:
 
 1. An authority =MUST= sign =(sub_root, sequence, posted_at)= with its
    enrolled posting key, and the sequence =MUST= increase.
-2. The aggregator =MUST= publish the full list of leaves it combined,
-   each with the signature that authorized it.
+2. The aggregator =MUST= publish the full list of leaves it combined, each
+   with the signature that authorized it, as a document in the canonical
+   JSON dialect the receipt envelope already uses: the posting sequence and
+   timestamp, then one entry per enrolled authority giving its identifier,
+   subtree root, sequence and signature. The posting =MUST= emit the hash
+   of that document beside the root, so the aggregator cannot show
+   different lists to different readers, and the enrollment record =MUST=
+   name where it is published.
 3. Enrollment being on chain, anyone can recompute the posted root from
    that list, verify every signature, and check that every enrolled
    authority's latest signed root was included.
