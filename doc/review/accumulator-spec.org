@@ -1,4 +1,4 @@
-#+TITLE: Identity accumulator specification, v0.2
+#+TITLE: Identity accumulator specification, v0.3
 #+DATE: 2026-09-20
 #+OPTIONS: toc:3 num:t
 #+PROPERTY: header-args :eval never-export
@@ -14,9 +14,10 @@ membership proofs and credit issuance are checked against, and how a party
 holding an identity establishes facts about it, without handing anyone a
 test for an identity scalar.
 
-Status: written before implementation, unreviewed. v0.2 resolves the five
-questions v0.1 left open; the resolutions and their rationale are in
-[[#decisions]], along with the parameters still to set. =MUST=, =MUST NOT=,
+Status: written before implementation, unreviewed. v0.2 resolved the five
+design questions v0.1 left open. v0.3 sets the parameters from the expected
+posting cadences, and adds delegated authority, which the insurer band
+ladder made unavoidable. Both are in [[#decisions]]. =MUST=, =MUST NOT=,
 =SHOULD= and =MAY= are normative. Constants are given as the names already
 in the source, with their current values, so that a conformance test can
 compare rather than guess.
@@ -78,9 +79,19 @@ Depths, which differ deliberately and are already named in
 
 | Name | Value | Constraint |
 |------+-------+------------|
-| =AGGREGATOR_DEPTH= | 10 | =MUST= equal Solidity =IDENTITY_TREE_DEPTH= and both membership circuits' main depth |
+| =AGGREGATOR_DEPTH= | 20, raised from 10 | =MUST= equal Solidity =IDENTITY_TREE_DEPTH= and both membership circuits' main depth |
 | =KYC_SUBTREE_DEPTH= | 12 | capacity of one registry organization; changing it changes subtree roots and the committed kernel vectors |
 | =FEATURE_SUBTREE_DEPTH= | 10 | capacity of one attribute authority |
+
+=AGGREGATOR_DEPTH= is raised from 10 to 20, which is 1,048,576 authorities
+rather than 1,024. The design admits clubs, community boards, congregations
+and individuals as attribute authorities, and delegated sub-regulators as
+insurance authorities ([[#delegation]]), so authorities are a population
+rather than a roster. Ten extra levels cost ten Poseidon-2 hashes in the
+membership circuit, which is on the order of two thousand constraints
+against the millions the note-binding circuits already carry. The change
+=MUST= be made in the same trusted setup as the salted leaf and the
+finding-5 repairs, because all three touch the same circuits.
 
 * 3 Leaf functions
 :PROPERTIES:
@@ -172,6 +183,40 @@ eventually ages out every proof its members can make. Maximum ages
 =SHOULD= therefore be generous wherever revocation is not the point of the
 check.
 
+*Storage shape.* A root record =SHOULD= be a mapping from root to the time
+it was posted, plus a ring of roots for eviction, so that checking a
+proof's root is one lookup and eviction is one deletion.
+
+*Ring size: 256 records.* Sized from the fastest cadence the design
+expects. Private records resolve at the resolution of a day, so a registry
+posts daily; institutional records weekly; regulators quarterly now and
+weekly later. An aggregator batching many authorities may therefore post as
+often as hourly, and 256 hourly postings is ten days, which covers the
+longest maximum age below. The contract =MUST= refuse a maximum age longer
+than the ring can cover at the current posting rate, rather than silently
+truncating that consumer's window.
+
+*Maximum ages.* Governance-settable per consumer, with these defaults:
+
+| Consumer | Default | Why |
+|----------+---------+-----|
+| Notes membership gate | 7 days | the gate asks whether a counterparty is a registered identity, not whether it was revoked this morning; a spend that fails because a registry batched late is worse than a spend by someone revoked three days ago |
+| Insurer attestation ([[#insurer]]) | 1 day | the insurer proves against a root when it attests, and the aggregator posts at least daily |
+| Anything else | 7 days | until that consumer states a reason to differ |
+
+Credit issuance declares no maximum age, because it reads the cached
+envelope and its expiry rather than a root ([[#insurer]]).
+
+*Public subtree roots.* For a public subtree ([[#classes]]) the registry
+=MAY= additionally store the subtree's own root, posted by the aggregator
+service under the same record shape. A public membership proof then walks
+the subtree only, at =FEATURE_SUBTREE_DEPTH= hashes, instead of the subtree
+and the aggregator at =FEATURE_SUBTREE_DEPTH= plus =AGGREGATOR_DEPTH=. On
+chain that is the difference between ten Poseidon calls and thirty, which
+at tens of thousands of gas each is the difference between a few hundred
+thousand gas and most of a million. There is no privacy cost, because the
+subtree is public by construction. Phase 4 =MUST= measure both.
+
 * 6 Admission
 :PROPERTIES:
 :CUSTOM_ID: admission
@@ -227,6 +272,18 @@ Requirements:
   across trees.
 
 No key-derivation helper exists in the wallet today; one is part of phase 2.
+
+*Re-salting cadence: never on a timer.* A salt =MUST= change only on an
+event the holder takes part in: a re-association ([[#renewal]]), or a
+renewal the registry chooses to make interactive. Timer-driven re-salting
+would force either the holder to be online on the registry's schedule, or
+the authority to choose salts itself, which would break recovery from seed
+material and make a dormant holder's ability to prove membership depend on
+fetching from its authority. The cost of not re-salting is that a leaf's
+tenure is visible in the published tree ([[#renewal]]); that is weak
+information about an anonymous member, and it matters only where the
+anonymity set is small, which is a condition the earlier review already
+names.
 
 * 8 Revocation, renewal and re-association
 :PROPERTIES:
@@ -336,7 +393,10 @@ feature:age-over-18                 private
 feature:region:<code>               private   one subtree per region value
 regulator:<jurisdiction>:insurer    public    licensed, in good standing
 regulator:<jurisdiction>:insurer:class:<n>   public   may underwrite asset class n
-regulator:<jurisdiction>:insurer:face:<band> public   per-contract face band
+regulator:<jurisdiction>:insurer:face:<band> public   per-contract face band, cumulative
+regulator:<jurisdiction>:delegates           public   authorities this regulator has delegated to
+regulator:<jurisdiction>:delegates:class:<n> public   the scope a delegate was granted
+regulator:<jurisdiction>:delegates:face:<b>  public   the band ceiling a delegate was granted
 #+end_example
 
 Rules:
@@ -399,6 +459,32 @@ the ring. It verifies the paths, then caches:
 | face band | the maximum per-contract face |
 | expires at | the end of the attestation period |
 
+*The band ladder.* Bands are powers of ten of face, denominated in BUCK
+rather than in a fiat unit so that the check needs no oracle:
+
+| Band | Ceiling, BUCK |
+|------+---------------|
+| 1 | 10 |
+| 2 | 100 |
+| 3 | 1,000 |
+| 4 | 10,000 |
+| 5 | 100,000 |
+| 6 | 1,000,000 |
+| 7 | 10,000,000 |
+| 8 | 100,000,000 |
+
+Bands are cumulative: an insurer attested at band =n= may write any face
+below the band =n= ceiling, so the envelope stores one integer rather than
+a set, and membership in =face:<n>= implies every lower band. Faces are
+compared in =BuckCredit='s own units, which carry six decimals, so band
+=n= is a ceiling of =10^n * 10^6= in those units.
+
+The ladder starts at ten BUCK deliberately. An insurer underwriting a
+neighbour's bicycle is the same shape of actor as one underwriting a
+building, and the design supports individuals, families and communities
+underwriting things they understand. Nothing in the gate distinguishes a
+person from an institution except the envelope its regulator attested.
+
 *Issuance.* =BuckCredit.createCredit= keeps its signature. Before creating
 a credit it =MUST= require that the caller's cached envelope is unexpired,
 covers =assetClass=, and admits =faceValue= within its band. The check is a
@@ -419,6 +505,53 @@ insurer may write this asset class at this face, and premium adequacy is
 the insurer's own business. The risk estimate is therefore =NOT= part of
 the on-chain envelope, and =MUST NOT= be added unless a consumer is shown
 to gate on it. Bands =MUST= stay coarse for the same reason.
+
+** 12.1 Delegated authority
+:PROPERTIES:
+:CUSTOM_ID: delegation
+:END:
+
+A regulator delegates parts of its remit to sub-regulators: community
+boards for local mutual insurance, trade bodies for a class of equipment,
+and so on. The same holds outside insurance, where the authority to attest
+that an identity belongs to a club, a congregation or a professional body
+is the club's, not the state's. Delegation is therefore a first-class
+object, and it is *public*: an authority's right to attest is not a secret
+of the authority.
+
+A delegate is an ordinary authority with its own subtree. What makes it a
+delegate is membership in its parent's public delegates subtree, scoped by
+the same machinery insurers are scoped by:
+
+- =regulator:<j>:delegates= holds the delegate authorities' identities;
+- =regulator:<j>:delegates:class:<n>= and =:face:<b>= hold the scope each
+  delegate was granted.
+
+A verifier decides how much delegation it trusts by naming the subtrees it
+requires ([[#vocabulary]]). One that trusts only the state requires
+membership in the state regulator's own subtree. One that accepts a
+delegate requires membership in the delegate's subtree *and* the delegate's
+membership in the parent's delegates subtree, both against the same root.
+Both are public proofs, so neither needs a circuit.
+
+Rules:
+
+- A delegate =MUST NOT= attest outside the scope its parent granted. The
+  protocol cannot enforce this, since the delegate owns its own subtree; a
+  verifier enforces it by checking the scope subtrees, and a parent
+  enforces it by clearing the delegate.
+- Delegation =MUST NOT= nest beyond the depth a verifier is willing to
+  walk. Each level is another public proof the verifier must name and
+  check, so a chain is self-limiting rather than bounded by the protocol.
+- Revoking a delegate is clearing it from the delegates subtree. Its own
+  attestations remain in its own subtree until it or the aggregator stops
+  posting them, so a verifier that checks the delegation edge sees the
+  revocation immediately and one that does not, never does. That is the
+  argument for checking the edge.
+
+This is why =AGGREGATOR_DEPTH= is raised: a roster of a thousand national
+authorities is one design, and a population of community authorities is
+another.
 
 *Out of scope, by decision.* The assumption of asset pools, contracts and
 company assets on an insurer's failure by its upstream reinsurers. This
@@ -452,6 +585,11 @@ Each is a claim an implementation =MUST= be testable against.
 - *A-noleak.* Nothing a verifier sees on chain is a deterministic function
   of an identity: not the leaf, not the path, not the subtree identifier.
   The one exception is a public subtree, where it is intended.
+- *A-scope.* A delegate's attestation carries no more authority than the
+  scope its parent granted, for a verifier that checks the delegation edge
+  and the scope subtrees. For one that does not, the delegate's own subtree
+  is the whole of its authority, which is the verifier's choice and =MUST=
+  be stated as such rather than treated as a protocol guarantee.
 
 *Assumption accounting.* Leaf hiding rests on Poseidon as a random oracle.
 The Notes nullifier already rests on exactly that, so the accumulator
@@ -524,6 +662,14 @@ mode of [[#publication]] removes it.
 10. *No epoch dimension.* A registry's live set is one subtree whose
     membership changes by inclusion and clearance, and no identity scalar
     or certified record changes at renewal.
+11. *Bands.* An insurer attested at a band writes a face below that band's
+    ceiling and is refused one above it; a lower band is implied by a
+    higher one; the smallest band admits a face of ten BUCK.
+12. *Delegation.* A verifier requiring only the state regulator refuses a
+    delegate's attestation; one requiring the delegation edge accepts it
+    while the edge holds and refuses it once the parent clears the
+    delegate; a delegate attesting outside its granted scope is refused by
+    a verifier that checks the scope subtrees.
 
 * 16 Decisions taken, and the parameters that remain
 :PROPERTIES:
@@ -558,25 +704,35 @@ mode of [[#publication]] removes it.
    dropping the underwriter risk estimate from the envelope and keeping
    bands coarse ([[#insurer]]).
 
-** 16.2 Parameters that remain
+** 16.2 Parameters, set in v0.3
 
-Each is a number or a scope, not a design choice. They are the phase-1
-residue and =MUST= be set before phase 2 writes the code that reads them.
+From the expected posting cadences: private records resolve at the
+resolution of a day, institutional records weekly, insurance regulators
+quarterly now and weekly later.
 
-1. *Maximum root age, per consumer.* A value for the Notes membership gate,
-   a value for credit issuance, and whether any other consumer declares one.
-   Revocation urgency sets the short end; authority posting cadence and the
-   tolerance for a stalled authority set the long end.
-2. *Ring size.* Storage only, once the bound is an age. It =MUST= be large
-   enough that the oldest retained record is older than the largest maximum
-   age any consumer declares, or that consumer's window is silently
-   truncated.
-3. *Re-salting cadence for live sets.* Never, which lets an observer see a
-   leaf's tenure, or every so many postings, which costs every member a
-   witness refresh.
-4. *Retention scope.* Whether the obligation names a maximum retention
-   period for the current association after clearance, and what evidence an
-   authority is expected to be able to produce at audit.
-5. *Envelope fields and the face-band ladder.* The final field set, and how
-   many face bands with what boundaries, coarse enough not to disclose an
-   insurer's book and fine enough to be a useful gate.
+| Parameter | Value | Basis |
+|-----------+-------+-------|
+| Ring size | 256 records | ten days at an hourly aggregator posting, which covers the longest maximum age |
+| Maximum age, Notes membership | 7 days | the gate is a registration check, not a revocation check |
+| Maximum age, insurer attestation | 1 day | the aggregator posts at least daily |
+| Maximum age, default | 7 days | until a consumer states a reason |
+| Re-salting cadence | never on a timer | a timer forces the holder online on the registry's schedule or hands salt choice to the authority, which breaks recovery from seed material |
+| Face bands | powers of ten, 1 to 8, cumulative, in BUCK | supports a neighbour underwriting a bicycle and an insurer underwriting a building with one ladder |
+| Envelope fields | standing, asset classes, face band, expiry | the underwriter risk estimate is not gated on and stays off chain |
+| Retention after clearance | a short correction window, then discard | long enough to reverse an erroneous revocation and no longer |
+
+Two things followed from setting them rather than being parameters:
+=AGGREGATOR_DEPTH= rises from 10 to 20 ([[#objects]]), and delegated
+authority becomes part of the specification ([[#delegation]]).
+
+** 16.3 What remains open
+
+1. *Who operates the aggregator.* With community authorities it is no longer
+   plausibly a single institution, and the specification does not say who
+   runs it, how an authority is enrolled or evicted, or what recourse an
+   authority has if it is not included in a posting. This is a governance
+   question with a protocol consequence: the aggregator operator can censor
+   an authority by omission.
+2. *The retention correction window*, in days.
+3. *Whether asset classes need a vocabulary of their own*, or whether
+   =BuckCredit='s existing =uint8 assetClass= is the vocabulary.

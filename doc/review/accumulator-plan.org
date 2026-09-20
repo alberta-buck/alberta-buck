@@ -127,8 +127,10 @@ The authority envelope an attestation carries:
 
 - standing: the insurer is licensed and currently in good standing;
 - asset classes it may underwrite;
-- a per-contract face band and an underwriter risk estimate, coarse by
-  decision, so that the on-chain check is a bound rather than a balance.
+- a per-contract face band, coarse by decision, so the on-chain check is a
+  bound rather than a balance, on a ladder of powers of ten from ten BUCK
+  to a hundred million, cumulative, so that a neighbour underwriting a
+  bicycle and an insurer underwriting a building sit on one scale.
 
 Out of scope for this design, by decision: the assumption of existing asset
 pools, contracts and company assets on the failure of an insurer by its
@@ -321,6 +323,12 @@ Five things the survey had left open, each of which reduces the work.
    acknowledgement; and insurer enumeration is accepted with the
    underwriter risk estimate dropped from the on-chain envelope. Five
    parameters remain to be set before phase 2.
+   v0.3 sets them from the expected posting cadences, and two things
+   followed rather than being parameters: the aggregator depth rises from
+   10 to 20, because community authorities are a population rather than a
+   roster, and delegated authority becomes part of the specification,
+   because a regulator delegates to community sub-regulators exactly as
+   attribute authority is delegated to clubs and congregations.
 2. *Python.* Salted leaf, salt storage in the wallet, attribute proofs, the
    regulator and its envelope, and a scan test per tree: a party holding
    every certified identity finds nothing.
