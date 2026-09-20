@@ -22,7 +22,9 @@ export const NEEDED = [
   "UniswapV3Pool",
   "SimLP",
   "IdentityRegistry",
+  "IdentityRegistryHarness",   // eq world: uncertified binds of synthetic infra
   "BuckCredit",
+  "BuckCreditHarness",         // eq world: credits to proxies that never opt in
   "BuckKControllerDirect",
   "Buck",
   "WETH9",

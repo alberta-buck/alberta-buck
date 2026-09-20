@@ -248,6 +248,35 @@ pub fn ps_rerandomize(
     Ok(vec![hx(&r1.0), hx(&r1.1), hx(&r2.0), hx(&r2.1)])
 }
 
+/// The hiding presentation `(A, B) = (a*sigma_1, a*sigma_2 + b*Y1)`.
+/// Returns `[Ax, Ay, Bx, By]`.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn ps_present(
+    s1x: &str,
+    s1y: &str,
+    s2x: &str,
+    s2y: &str,
+    y1x: &str,
+    y1y: &str,
+    a: &str,
+    b: &str,
+) -> Result<Vec<String>, JsError> {
+    let (pa, pb) = kernel::ps::ps_present(&g1(s1x, s1y)?, &g1(s2x, s2y)?, &g1(y1x, y1y)?, &w(a)?, &w(b)?)
+        .map_err(err)?;
+    Ok(vec![hx(&pa.0), hx(&pa.1), hx(&pb.0), hx(&pb.1)])
+}
+
+/// `e(Y1, g_2) == e(G, Y)`; `pk_y` is G2 (4 words).
+#[wasm_bindgen]
+pub fn ps_key_consistent(pk_y: Vec<String>, y1x: &str, y1y: &str) -> Result<bool, JsError> {
+    if pk_y.len() != 4 {
+        return Err(JsError::new("G2 point needs 4 words"));
+    }
+    kernel::ps::ps_key_consistent(&g2(&pk_y[0], &pk_y[1], &pk_y[2], &pk_y[3])?, &g1(y1x, y1y)?)
+        .map_err(err)
+}
+
 // ---------------------------------------------------------------------------
 // Schnorr
 // ---------------------------------------------------------------------------
@@ -309,15 +338,17 @@ pub fn issuer_schnorr_verify(
 }
 
 // ---------------------------------------------------------------------------
-// Registration NIZK
+// Registration NIZK (A')
 // ---------------------------------------------------------------------------
 
-/// `sigma`/`e_ct` flattened (4 words each).  Returns
-/// `[e, s_m, s_r, s_sk, A_ps x, y, T_C x, y, T_R x, y, T_key x, y]` (12 words).
+/// `pres` = `[Ax, Ay, Bx, By]`, `e_ct` flattened (4 words).  Nonces in the
+/// Python draw order.  Returns the 13 words
+/// `[e, s_m, s_b, s_r, s_sk, C1 x, y, T_C x, y, T_R x, y, T_key x, y]`.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn registration_prove(
-    sigma: Vec<String>,
+    pres: Vec<String>,
+    blind: &str,
     m: &str,
     r: &str,
     pkx: &str,
@@ -328,15 +359,17 @@ pub fn registration_prove(
     chainid: &str,
     registry: &str,
     m_tilde: &str,
+    b_tilde: &str,
     r_tilde: &str,
     sk_tilde: &str,
 ) -> Result<Vec<String>, JsError> {
-    if sigma.len() != 4 || e_ct.len() != 4 {
-        return Err(JsError::new("sigma/e_ct need 4 words each"));
+    if pres.len() != 4 || e_ct.len() != 4 {
+        return Err(JsError::new("pres/e_ct need 4 words each"));
     }
     let p = kernel::nizk::registration_prove(
-        &g1(&sigma[0], &sigma[1])?,
-        &g1(&sigma[2], &sigma[3])?,
+        &g1(&pres[0], &pres[1])?,
+        &g1(&pres[2], &pres[3])?,
+        &w(blind)?,
         &w(m)?,
         &w(r)?,
         &g1(pkx, pky)?,
@@ -346,6 +379,7 @@ pub fn registration_prove(
         &w(chainid)?,
         &w(registry)?,
         &w(m_tilde)?,
+        &w(b_tilde)?,
         &w(r_tilde)?,
         &w(sk_tilde)?,
     )
@@ -353,10 +387,11 @@ pub fn registration_prove(
     Ok(vec![
         hx(&p.e),
         hx(&p.s_m),
+        hx(&p.s_b),
         hx(&p.s_r),
         hx(&p.s_sk),
-        hx(&p.a_ps.0),
-        hx(&p.a_ps.1),
+        hx(&p.c1.0),
+        hx(&p.c1.1),
         hx(&p.t_c.0),
         hx(&p.t_c.1),
         hx(&p.t_r.0),
@@ -366,12 +401,12 @@ pub fn registration_prove(
     ])
 }
 
-/// `proof` = the 12 words `registration_prove` returns; `issuer_x`/`issuer_y`
+/// `proof` = the 13 words `registration_prove` returns; `issuer_x`/`issuer_y`
 /// are G2 (4 words each).
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn registration_verify(
-    sigma: Vec<String>,
+    pres: Vec<String>,
     e_ct: Vec<String>,
     pkx: &str,
     pky: &str,
@@ -382,25 +417,26 @@ pub fn registration_verify(
     chainid: &str,
     registry: &str,
 ) -> Result<bool, JsError> {
-    if sigma.len() != 4 || e_ct.len() != 4 || issuer_x.len() != 4 || issuer_y.len() != 4 {
-        return Err(JsError::new("sigma/e_ct/issuer_x/issuer_y need 4 words each"));
+    if pres.len() != 4 || e_ct.len() != 4 || issuer_x.len() != 4 || issuer_y.len() != 4 {
+        return Err(JsError::new("pres/e_ct/issuer_x/issuer_y need 4 words each"));
     }
-    if proof.len() != 12 {
-        return Err(JsError::new("registration proof needs 12 words"));
+    if proof.len() != 13 {
+        return Err(JsError::new("registration proof needs 13 words"));
     }
     let p = kernel::nizk::RegistrationProof {
         e: w(&proof[0])?,
         s_m: w(&proof[1])?,
-        s_r: w(&proof[2])?,
-        s_sk: w(&proof[3])?,
-        a_ps: g1(&proof[4], &proof[5])?,
-        t_c: g1(&proof[6], &proof[7])?,
-        t_r: g1(&proof[8], &proof[9])?,
-        t_key: g1(&proof[10], &proof[11])?,
+        s_b: w(&proof[2])?,
+        s_r: w(&proof[3])?,
+        s_sk: w(&proof[4])?,
+        c1: g1(&proof[5], &proof[6])?,
+        t_c: g1(&proof[7], &proof[8])?,
+        t_r: g1(&proof[9], &proof[10])?,
+        t_key: g1(&proof[11], &proof[12])?,
     };
     kernel::nizk::registration_verify(
-        &g1(&sigma[0], &sigma[1])?,
-        &g1(&sigma[2], &sigma[3])?,
+        &g1(&pres[0], &pres[1])?,
+        &g1(&pres[2], &pres[3])?,
         &ct(&e_ct[0], &e_ct[1], &e_ct[2], &e_ct[3])?,
         &g1(pkx, pky)?,
         &g2(&issuer_x[0], &issuer_x[1], &issuer_x[2], &issuer_x[3])?,

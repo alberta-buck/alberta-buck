@@ -87,7 +87,13 @@ test("ps sign / verify / rerandomize", { skip }, () => {
     const rr = id.psRerandomize(sig, B(r.rerand_t));
     assert.deepEqual(rr.sigma_1, pt(r.rerand_sigma_1));
     assert.deepEqual(rr.sigma_2, pt(r.rerand_sigma_2));
+    const pres = id.psPresent(sig, pt(p.pk_Y1), B(r.present_a), B(r.present_b));
+    assert.deepEqual(pres.A, pt(r.present_A));
+    assert.deepEqual(pres.B, pt(r.present_B));
+    // the presentation is NOT a signature on m
+    assert.ok(!id.psVerify(g2(p.pk_X), g2(p.pk_Y), { sigma_1: pres.A, sigma_2: pres.B }, B(r.m)));
   }
+  assert.ok(id.psKeyConsistent(g2(p.pk_Y), pt(p.pk_Y1)));
 });
 
 test("schnorr batch binding", { skip }, () => {
@@ -105,22 +111,25 @@ test("schnorr batch binding", { skip }, () => {
 test("registration NIZK", { skip }, () => {
   const r = KV.registration;
   const sig = { sigma_1: pt(r.sigma_1), sigma_2: pt(r.sigma_2) };
+  const pres = id.psPresent(sig, pt(r.Y1), B(r.a), B(r.b));
+  assert.deepEqual(pres, { A: pt(r.A), B: pt(r.B) });
   const proof = id.registrationProve(
-    sig, B(r.m), B(r.r), pt(r.pk), ct(r.E), B(r.registrant), B(r.sk), B(r.chainid),
-    B(r.registry), B(r.m_tilde), B(r.r_tilde), B(r.sk_tilde));
+    pres, B(r.b), B(r.m), B(r.r), pt(r.pk), ct(r.E), B(r.registrant), B(r.sk), B(r.chainid),
+    B(r.registry), B(r.m_tilde), B(r.b_tilde), B(r.r_tilde), B(r.sk_tilde));
   assert.equal(proof.e, B(r.proof.e));
   assert.equal(proof.s_m, B(r.proof.s_m));
+  assert.equal(proof.s_b, B(r.proof.s_b));
   assert.equal(proof.s_r, B(r.proof.s_r));
   assert.equal(proof.s_sk, B(r.proof.s_sk));
-  assert.deepEqual(proof.A_ps, pt(r.proof.A_ps));
+  assert.deepEqual(proof.C1, pt(r.proof.C1));
   assert.deepEqual(proof.T_C, pt(r.proof.T_C));
   assert.deepEqual(proof.T_R, pt(r.proof.T_R));
   assert.deepEqual(proof.T_key, pt(r.proof.T_key));
   assert.ok(id.registrationVerify(
-    sig, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof,
+    pres, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof,
     B(r.registrant), B(r.chainid), B(r.registry)));
   assert.ok(!id.registrationVerify(
-    sig, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof,
+    pres, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof,
     B(r.registrant) + 1n, B(r.chainid), B(r.registry)));
 });
 
@@ -255,18 +264,18 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
     // recorded-randomness encryption replay
     assert.deepEqual(
       id.elgamalEncrypt(pt(p.M), pt(p.elgamal_kp.pk), B(p.r)), ct(p.ciphertext));
-    // PS + registration verify
-    const sigR = { sigma_1: pt(p.ps_sig_rerand.sigma_1), sigma_2: pt(p.ps_sig_rerand.sigma_2) };
+    // raw credential verifies; the published presentation does not (A')
     assert.ok(id.psVerify(issX, issY,
       { sigma_1: pt(p.ps_sig_raw.sigma_1), sigma_2: pt(p.ps_sig_raw.sigma_2) }, m));
-    assert.ok(id.psVerify(issX, issY, sigR, m));
+    const pres = { A: pt(p.ps_presentation.A), B: pt(p.ps_presentation.B) };
+    assert.ok(!id.psVerify(issX, issY, { sigma_1: pres.A, sigma_2: pres.B }, m));
     const pf = p.registration_proof;
     const proof = {
-      e: B(pf.e), s_m: B(pf.s_m), s_r: B(pf.s_r), s_sk: B(pf.s_sk),
-      A_ps: pt(pf.A_ps), T_C: pt(pf.T_C), T_R: pt(pf.T_R), T_key: pt(pf.T_key),
+      e: B(pf.e), s_m: B(pf.s_m), s_b: B(pf.s_b), s_r: B(pf.s_r), s_sk: B(pf.s_sk),
+      C1: pt(pf.C1), T_C: pt(pf.T_C), T_R: pt(pf.T_R), T_key: pt(pf.T_key),
     };
     assert.ok(id.registrationVerify(
-      sigR, ct(p.ciphertext), pt(p.elgamal_kp.pk), issX, issY, proof,
+      pres, ct(p.ciphertext), pt(p.elgamal_kp.pk), issX, issY, proof,
       B(p.registrant), chainid, registry));
   }
 

@@ -121,9 +121,15 @@
       if (!psOk) throw new Error("PS verification failed");
 
       // ---- wallet-side derivation ---------------------------------------
-      line("step", "2. Identity Fountain: rerandomize; fresh account; encrypt M under it");
-      const sigmaP = step("sigma' = (t*sigma_1, t*sigma_2)  (unlinkable credential)",
-        () => wasm.ps_rerandomize(...sigma, hex(rand())));
+      line("step", "2. Identity Fountain: hiding presentation; fresh account; encrypt M under it");
+      const pkY1 = step("issuer G1 key image Y1 = y*G  (published beside X, Y)",
+        () => wasm.g1_mul("0x1", "0x2", hex(skY)));
+      const blind = rand();
+      const pres = step("presentation (A, B) = (a*sigma_1, a*sigma_2 + b*Y1)  (not a signature anyone can test)",
+        () => wasm.ps_present(...sigma, ...pkY1, hex(rand()), hex(blind)));
+      const presNotSig = step("counter-example: the pair fails PS verification for the true m",
+        () => !wasm.ps_verify(pkX, pkY, ...pres, hex(m)));
+      if (!presNotSig) throw new Error("presentation verified as a signature!");
       const sk = rand();
       const pk = step("account key pk = sk*G",
         () => wasm.g1_mul("0x1", "0x2", hex(sk)));
@@ -134,17 +140,20 @@
         () => wasm.elgamal_encrypt(...M, ...pk, hex(r)));
 
       // ---- registration NIZK ---------------------------------------------
-      line("step", "3. Registration: prove sigma' signs the SAME m that E encrypts");
+      line("step", "3. Registration: prove (A, B) presents a credential on the SAME m that E encrypts");
       const registrant = "0x" + "a11ce".padStart(40, "0");
-      const proof = step("registration NIZK (IdentityRegistry.register calldata)",
-        () => wasm.registration_prove(sigmaP, hex(m), hex(r), ...pk, E,
-                                      registrant, hex(rand()), hex(rand())));
-      const regOk = step("registration verify: 2 ElGamal checks + 4-term pairing product",
-        () => wasm.registration_verify(sigmaP, E, ...pk, pkX, pkY, proof, registrant));
+      const chainid = "0x1";
+      const registry = "0x" + "1d".repeat(20);
+      const proof = step("registration NIZK (IdentityRegistry.register calldata, 13 words)",
+        () => wasm.registration_prove(pres, hex(blind), hex(m), hex(r), ...pk, E,
+                                      registrant, hex(sk), chainid, registry,
+                                      hex(rand()), hex(rand()), hex(rand()), hex(rand())));
+      const regOk = step("registration verify: ElGamal + key checks + 3-term pairing product",
+        () => wasm.registration_verify(pres, E, ...pk, pkX, pkY, proof, registrant, chainid, registry));
       if (!regOk) throw new Error("registration NIZK rejected");
       const regBad = step("counter-example: same proof, different registrant -> rejected",
-        () => !wasm.registration_verify(sigmaP, E, ...pk, pkX, pkY, proof,
-                                        "0x" + "bad".padStart(40, "0")));
+        () => !wasm.registration_verify(pres, E, ...pk, pkX, pkY, proof,
+                                        "0x" + "bad".padStart(40, "0"), chainid, registry));
       if (!regBad) throw new Error("tampered registrant accepted!");
 
       // ---- approve handshake ---------------------------------------------

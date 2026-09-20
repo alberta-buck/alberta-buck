@@ -101,7 +101,7 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     registry = int("1d" * 20, 16)
 
     out: Dict[str, Any] = {
-        "$schema_version": 1,
+        "$schema_version": 2,   # A': ps.pk_Y1/present_*, registration Y1/a/b/A/B/b_tilde, proof s_b/C1
         "backend": "py",
         "seed": _hx(seed),
         "ORDER": _hx(ORDER),

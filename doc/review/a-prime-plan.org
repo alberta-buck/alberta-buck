@@ -45,6 +45,47 @@ counterexample to the earlier partial prototype in =identity-findings-2.org=;
 the single-commitment battery in =scripts/review/hiding_presentation_probe.py=;
 and a measured gas baseline on the committed artifact (below).
 
+** Where the branch stands (2026-09-20)
+:PROPERTIES:
+:CUSTOM_ID: status
+:END:
+
+This subsection is the resume point; the per-phase status paragraphs below
+carry the detail.
+
+- Phases 0 to 3 are committed (phase 3 is the commit after =7190c37=).
+  The phase 4 code changes were absorbed into phase 1; its runs have not
+  been made. Phases 5 and 6 are not started.
+- Green on the branch: Rust kernel tests 3/3; =core/python= vector tests
+  39/39; the review suite 33/33 on both backends; the identity Python
+  suites (wallet, vectors, issuer, registry, kernel backend, cache regen)
+  100 passed; Foundry 594 passed, 1 skipped; JavaScript 51 of 51.
+- Commit discipline: commit by explicit path. Another session shares this
+  working tree; its files (=alberta-buck-notes.org=, the truthstake PNGs,
+  the untracked =images/= and rebalancing vectors) must not be swept in.
+  Commit messages are ASCII, concise, with no attribution lines.
+- Uncommitted review-document edits belonging to this program (not to the
+  other session): =doc/review/identity-findings-2.org= (revision note,
+  development-status paragraph, the structural-leak paragraph under R4,
+  the kernel-parity result, the R2-on-production recipe) and
+  =doc/review/mitigation-implementation-guide.md= (Pathway A' as a
+  candidate input; pre-launch, nothing to migrate). Commit them in phase 5
+  step 6 together with the status update, or earlier if a compaction is
+  near. =test/vectors/identity-cache.json= carries a two-line change of
+  unknown origin; phase 4 regenerates it under schema 5 regardless.
+- Build and test commands (all through the Makefile's =nix-= wrappers):
+  =make nix-core-build-py nix-core-build-wasm nix-core-build-wasm-web=
+  after any kernel change (macOS: remove the old =.so= before copying);
+  =make nix-core-demo-buckworld nix-core-demo-eqworld= to refresh the
+  shipped bundles the JS tests load; =make nix-core-test-rust=,
+  =nix-core-test-py=, =nix-core-test-js=; =make nix-test= for Foundry;
+  =nix develop -c env PYTHONPATH=.:core/python python -m pytest -q
+  alberta_buck/test/review= for the review suite. There is no =timeout=
+  binary on this macOS; bound long runs from the tool instead.
+- =make nix-snapshot= is blocked by missing =build/snark/mint_batch_a2_*=
+  fixtures (an environment gap unrelated to A'); =.gas-snapshot= stays
+  stale until they are rebuilt.
+
 * A' refined: the hiding registration presentation
 :PROPERTIES:
 :CUSTOM_ID: spec
@@ -462,8 +503,10 @@ whole program is a reviewed security argument, not a green test run.
 
 - Adopt the specification section of this document as the design of record.
   Decisions taken: =Y1= is stored on chain and checked for consistency at
-  =trustIssuer=; the Fiat--Shamir transcript includes the issuer address; the
-  domain string becomes =AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3=;
+  =trustIssuer=; the Fiat--Shamir transcript does *not* include the issuer
+  address (reversed in phase 1: the registry keys the issuer lookup, see the
+  specification); the domain string becomes
+  =AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3=;
   =A = O= and =B = O= are rejected; the raw credential never leaves the wallet.
 - Adopt the security experiments and the test obligations of
   =identity-findings-2.org= as the acceptance list, with the additions in the
@@ -578,6 +621,67 @@ baseline and recorded in the specification's cost table.
 
 ** Phase 3: Rust kernel, bindings, JavaScript, parity
 
+*Status (2026-09-20): done on =feature/a-prime=; JavaScript 51 of 51.*
+Done:
+
+- Kernel: =ps.rs= gains =ps_present(sigma_1, sigma_2, y1, a, b)= (errors on
+  a zero scalar) and =ps_key_consistent(pk_y, y1)=; =nizk.rs= carries the
+  nine-field =RegistrationProof= (=c1=, =s_b=), the fifteen-argument
+  =registration_prove= taking the four nonces in the Python draw order
+  (=m_tilde, b_tilde, r_tilde, sk_tilde=), the verifier with the
+  =A = O=, =B = O=, =pk = O=, =R = O= rejections and the three-pair
+  product, and the v3 domain.
+- Bindings: PyO3 exposes =ps_present=, =ps_key_consistent=, the
+  fifteen-argument =registration_prove=, and =registration_verify_v3= (the
+  export the Python wallet's dispatch keys on) with =registration_verify=
+  as an alias; wasm exposes the same with the thirteen-word proof
+  (=e, s_m, s_b, s_r, s_sk= then =C1, T_C, T_R, T_key= as coordinate pairs,
+  so =C1= starts at word 5).
+- Vectors: =kernel_vectors.py= is at =$schema_version= 2 with per-signature
+  =present_a/b/A/B= rows and registration rows carrying =Y1, a, b, A, B,
+  b_tilde=; both kernel-vector files are regenerated and the crate copy
+  synced; =vectors.rs= golden and replay tests ported (raw =ps_sig_raw=
+  verifies, the presentation does not, key consistency holds): 3 of 3.
+- JavaScript: =identity-core.js= gains =psPresent=, =psKeyConsistent=, the
+  thirteen-word =registrationProve= and =registrationVerify=;
+  =identity.js= exports them; =buckworld.js= gives the issuer =pkY1=,
+  trusts it with =Y1=, onboards with fresh =a, b= and four nonces, and
+  accepts =opts.registryArtifact=; =identity-proofs.html= is rewritten;
+  the three identity test files and =core/python/tests/test_identity_vectors.py=
+  are ported (39 passed).
+- Builds done: =nix-core-build-py=, =nix-core-build-wasm=,
+  =nix-core-build-wasm-web=, both demo bundles. The shipped-bundle tests
+  fail with "table index is out of bounds" whenever the bundles lag the
+  wasm, so rebuild them after every kernel change.
+
+Four JavaScript equilibrium-world tests (=eqapp=, =shipped eq bundle=,
+=eqsim=, =eqworld=) were red when phase 3 started and were not an A'
+regression: the equilibrium world predates two merged repairs. It bound
+synthetic infrastructure (SimLP, routers, basket variants) with the
+placeholder generator identity through the five-argument =bindContract=,
+which the certified-binding repair of 2026-09-15 (=d218679=) rejects
+("binder not registered", "target did not authorize binding"), and it
+issued credits to proxies that never call =setCreditIssuer=, which the
+recipient opt-in gate rejects ("insurer not accepted by client"). The
+Python simulation deploys =IdentityRegistryHarness= (=deploy.py=) and
+=BuckCreditHarness= (=notes_stack.py=) for exactly these two reasons. The
+JavaScript world now does the same: =buildBuckWorld= takes
+=registryArtifact= and =creditArtifact= (defaults =IdentityRegistry= and
+=BuckCredit=), =scenarios/eqworld.js= and =eqworld.tevm.test.js= pass both
+harnesses, the scenario onboards the deployer and binds with its registered
+=(pk, E)= as =sim/identity.py='s =bind_as_operator= does, and
+=bin/bundle-artifacts.mjs= ships both harnesses in the browser artifact
+bundle (thirteen contracts). Production worlds (=buckworld.js= demo, the
+identity ceremony test) keep the real contracts and the opt-in call in
+=createCredit()=.
+
+Acceptance met: the Python vectors verify under Rust and JavaScript (golden
+and replay); the presentation fails the raw PS relation on every backend;
+the review battery passes on both Python backends; the identity ceremony
+verifies a wasm-built proof on the tevm-deployed registry; canonical
+scalars, points and challenges match across the four backends through the
+pinned vectors.
+
 | Location | Lines | Change |
 |----------+-------+--------|
 | =core/rust/buck-identity/src/ps.rs= | 16--44 | presentation function taking =Y1= and =b= |
@@ -598,6 +702,16 @@ scalars, points and challenges match across backends; the review suite passes
 on both backends; =make nix-core-test= green.
 
 ** Phase 4: simulation and end to end
+
+*Status (2026-09-20): the code changes in the table were made in phase 1
+(cache schema 5, nine-field validation, =pspubkey_arg= with =Y1=,
+=register_args=, the =bindContract= ABI string, =_credential_bind_fn=
+presenting with =ps_present=); none of the runs has been made.* Remaining:
+the Notes end-to-end fixtures A1, A2 and B1 (=nix develop= with an =anvil=
+on the path; =test_receipt_e2e=), the simulation smoke tests
+(=make nix-sim-test=), the lazy regeneration of
+=test/vectors/identity-cache.json= under schema 5 (commit the result), and
+a buckworld demo onboarding in the browser bundle.
 
 | Location | Lines | Change |
 |----------+-------+--------|

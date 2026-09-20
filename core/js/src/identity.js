@@ -19,7 +19,7 @@ export const {
   g1Add, g1Mul, g1Neg, g2Mul, pairingCheck,
   keccakScalar, identityScalar, reduceModOrder, poseidon,
   elgamalEncrypt, elgamalDecrypt,
-  psSign, psVerify, psRerandomize,
+  psSign, psVerify, psRerandomize, psPresent, psKeyConsistent,
   batchCommitment, issuerSchnorrSign, issuerSchnorrVerify,
   registrationProve, registrationVerify,
   chaumPedersenProve, chaumPedersenVerify,

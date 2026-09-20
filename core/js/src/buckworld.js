@@ -48,6 +48,9 @@ export const DAY = 86_400;
  * @param opts.poolAcct funding-pool address  (default: deployer)
  * @param opts.params   controller overrides over DEPLOY_DEFAULTS
  * @param opts.rng      scalar drawer for the issuer PS keypair
+ * @param opts.registryArtifact "IdentityRegistry" (default) or the test
+ *                  harness for synthetic worlds
+ * @param opts.creditArtifact   "BuckCredit" (default) or the test harness
  * @returns world {session, artifacts, id, reg, credit, kctrl, buck, gov,
  *                 poolAcct, issuer:{addr, skX, skY, pkX, pkY}}
  */
@@ -65,22 +68,34 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   const rng = opts.rng ?? id.randScalar;
 
   // --- identity layer (deploy.py order) ---------------------------------
-  const reg = await session.deploy(artifacts("IdentityRegistry"), [gov],
-    { name: "IdentityRegistry", gas });
+  // Production worlds deploy IdentityRegistry.  Simulation worlds that bind
+  // synthetic infrastructure (SimLP, routers, basket variants) with no
+  // production binding-authorizer surface pass registryArtifact =
+  // "IdentityRegistryHarness", exactly as alberta_buck/sim/deploy.py does.
+  const regName = opts.registryArtifact ?? "IdentityRegistry";
+  const reg = await session.deploy(artifacts(regName), [gov],
+    { name: regName, gas });
   const [skX, skY] = [rng(), rng()];
   const issuer = {
     addr: "0x" + "15".repeat(20),   // the trust-anchor address
     skX, skY,
     pkX: id.g2Mul(id.G2, skX),
     pkY: id.g2Mul(id.G2, skY),
+    pkY1: id.g1Mul(id.G1, skY),     // G1 image of y: the A' blinding base
   };
   await session.send(reg, "trustIssuer",
-    [issuer.addr, { X: g2(issuer.pkX), Y: g2(issuer.pkY) }],
+    [issuer.addr, { X: g2(issuer.pkX), Y: g2(issuer.pkY), Y1: g(issuer.pkY1) }],
     { tag: "world:trustIssuer" });
 
   // --- Direct BUCK stack -------------------------------------------------
-  const credit = await session.deploy(artifacts("BuckCredit"), [],
-    { name: "BuckCredit", gas });
+  // Production worlds deploy BuckCredit, whose recipient opt-in gate
+  // (setCreditIssuer) every holder passes through createCredit() below.
+  // Simulation worlds that hand credits to proxies which never send a
+  // transaction of their own pass creditArtifact = "BuckCreditHarness",
+  // exactly as alberta_buck/sim/notes_stack.py does.
+  const creditName = opts.creditArtifact ?? "BuckCredit";
+  const credit = await session.deploy(artifacts(creditName), [],
+    { name: creditName, gas });
   const kctrl = await session.deploy(artifacts("BuckKControllerDirect"),
     [p.kp, p.ki, p.kd, p.dt, p.kmin, p.kmax, p.k0, gov],
     { name: "BuckKControllerDirect", gas });
@@ -111,7 +126,9 @@ export async function onboard(world, account, fields, opts = {}) {
   const m = id.identityScalar(canonical);
 
   const sigma = id.psSign(world.issuer.skX, world.issuer.skY, m, rng());
-  const sigmaP = id.psRerandomize(sigma, rng());
+  // A' hiding presentation: fresh a, b per account; b is a NIZK witness.
+  const [a, b] = [rng(), rng()];
+  const pres = id.psPresent(sigma, world.issuer.pkY1, a, b);
   const sk = rng();
   const pk = id.g1Mul(id.G1, sk);
   const M = id.g1Mul(id.G1, m);
@@ -120,15 +137,15 @@ export async function onboard(world, account, fields, opts = {}) {
   const chainid = BigInt(await world.session.client.getChainId());
   const registry = BigInt(world.reg.address);
   const proof = id.registrationProve(
-    sigmaP, m, r, pk, E, BigInt(account.address), sk, chainid,
+    pres, b, m, r, pk, E, BigInt(account.address), sk, chainid,
     registry,
-    rng(), rng(), rng());
+    rng(), rng(), rng(), rng());
 
   await world.session.send(world.reg, "register", [
     world.issuer.addr, g(pk), ct(E),
-    { sigma_1: g(sigmaP.sigma_1), sigma_2: g(sigmaP.sigma_2) },
-    { e: proof.e, s_m: proof.s_m, s_r: proof.s_r, s_sk: proof.s_sk,
-      A_ps: g(proof.A_ps), T_C: g(proof.T_C), T_R: g(proof.T_R),
+    { A: g(pres.A), B: g(pres.B) },
+    { e: proof.e, s_m: proof.s_m, s_b: proof.s_b, s_r: proof.s_r, s_sk: proof.s_sk,
+      C1: g(proof.C1), T_C: g(proof.T_C), T_R: g(proof.T_R),
       T_key: g(proof.T_key) },
   ], { tag: `onboard:${full.given_name ?? account.address}`, gas: 3_000_000n,
        account });

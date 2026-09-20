@@ -20,7 +20,7 @@ use kernel::{G1w, G2w, IdError, W256};
 type PyG1 = (BigUint, BigUint);
 type PyG2 = ((BigUint, BigUint), (BigUint, BigUint));
 type PyCt = (PyG1, PyG1);
-type PyReg = (BigUint, BigUint, BigUint, BigUint, PyG1, PyG1, PyG1, PyG1);
+type PyReg = (BigUint, BigUint, BigUint, BigUint, BigUint, PyG1, PyG1, PyG1, PyG1);
 type PyCp = (BigUint, BigUint, BigUint, PyG1, PyG1, PyG1);
 type PyVd = (BigUint, BigUint, PyG1, PyG1);
 // PyO3 tuples cap at 12 elements; the 13-field issuer-reenc proof nests as
@@ -192,6 +192,20 @@ fn ps_rerandomize(sigma_1: PyG1, sigma_2: PyG1, t: BigUint) -> PyResult<(PyG1, P
     Ok((pyg1(&s1), pyg1(&s2)))
 }
 
+/// `(A, B) = (a*sigma_1, a*sigma_2 + b*Y1)`: the hiding presentation.
+#[pyfunction]
+fn ps_present(sigma_1: PyG1, sigma_2: PyG1, y1: PyG1, a: BigUint, b: BigUint) -> PyResult<(PyG1, PyG1)> {
+    let (pa, pb) = kernel::ps::ps_present(&wg1(&sigma_1)?, &wg1(&sigma_2)?, &wg1(&y1)?, &w(&a)?, &w(&b)?)
+        .map_err(err)?;
+    Ok((pyg1(&pa), pyg1(&pb)))
+}
+
+/// `e(Y1, g_2) == e(G, Y)`.
+#[pyfunction]
+fn ps_key_consistent(pk_y: PyG2, y1: PyG1) -> PyResult<bool> {
+    kernel::ps::ps_key_consistent(&wg2(&pk_y)?, &wg1(&y1)?).map_err(err)
+}
+
 // ---------------------------------------------------------------------------
 // Schnorr batch binding
 // ---------------------------------------------------------------------------
@@ -246,14 +260,18 @@ fn issuer_schnorr_verify(
 }
 
 // ---------------------------------------------------------------------------
-// Registration NIZK
+// Registration NIZK (A')
 // ---------------------------------------------------------------------------
 
+/// Prove for the presentation `(A, B)` with blinding `blind`; nonces in the
+/// Python draw order `m_tilde, b_tilde, r_tilde, sk_tilde`.  Returns the
+/// nine-field proof `(e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)`.
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 fn registration_prove(
-    sigma_1: PyG1,
-    sigma_2: PyG1,
+    a: PyG1,
+    b: PyG1,
+    blind: BigUint,
     m: BigUint,
     r: BigUint,
     pk: PyG1,
@@ -263,12 +281,14 @@ fn registration_prove(
     chainid: BigUint,
     registry: BigUint,
     m_tilde: BigUint,
+    b_tilde: BigUint,
     r_tilde: BigUint,
     sk_tilde: BigUint,
 ) -> PyResult<PyReg> {
     let p = kernel::nizk::registration_prove(
-        &wg1(&sigma_1)?,
-        &wg1(&sigma_2)?,
+        &wg1(&a)?,
+        &wg1(&b)?,
+        &w(&blind)?,
         &w(&m)?,
         &w(&r)?,
         &wg1(&pk)?,
@@ -278,6 +298,7 @@ fn registration_prove(
         &w(&chainid)?,
         &w(&registry)?,
         &w(&m_tilde)?,
+        &w(&b_tilde)?,
         &w(&r_tilde)?,
         &w(&sk_tilde)?,
     )
@@ -285,20 +306,24 @@ fn registration_prove(
     Ok((
         big(&p.e),
         big(&p.s_m),
+        big(&p.s_b),
         big(&p.s_r),
         big(&p.s_sk),
-        pyg1(&p.a_ps),
+        pyg1(&p.c1),
         pyg1(&p.t_c),
         pyg1(&p.t_r),
         pyg1(&p.t_key),
     ))
 }
 
+/// The A' verifier.  Exported as `registration_verify_v3`; the Python wallet
+/// dispatches to the kernel only when this name exists, so a stale build
+/// falls back to the pure-Python path instead of verifying the wrong relation.
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-fn registration_verify(
-    sigma_1: PyG1,
-    sigma_2: PyG1,
+fn registration_verify_v3(
+    a: PyG1,
+    b: PyG1,
     e_ct: PyCt,
     pk: PyG1,
     issuer_x: PyG2,
@@ -311,16 +336,17 @@ fn registration_verify(
     let p = kernel::nizk::RegistrationProof {
         e: w(&proof.0)?,
         s_m: w(&proof.1)?,
-        s_r: w(&proof.2)?,
-        s_sk: w(&proof.3)?,
-        a_ps: wg1(&proof.4)?,
-        t_c: wg1(&proof.5)?,
-        t_r: wg1(&proof.6)?,
-        t_key: wg1(&proof.7)?,
+        s_b: w(&proof.2)?,
+        s_r: w(&proof.3)?,
+        s_sk: w(&proof.4)?,
+        c1: wg1(&proof.5)?,
+        t_c: wg1(&proof.6)?,
+        t_r: wg1(&proof.7)?,
+        t_key: wg1(&proof.8)?,
     };
     kernel::nizk::registration_verify(
-        &wg1(&sigma_1)?,
-        &wg1(&sigma_2)?,
+        &wg1(&a)?,
+        &wg1(&b)?,
         &wct(&e_ct)?,
         &wg1(&pk)?,
         &wg2(&issuer_x)?,
@@ -331,6 +357,24 @@ fn registration_verify(
         &w(&registry)?,
     )
     .map_err(err)
+}
+
+/// Same verifier under the historical name (the relation is A').
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn registration_verify(
+    a: PyG1,
+    b: PyG1,
+    e_ct: PyCt,
+    pk: PyG1,
+    issuer_x: PyG2,
+    issuer_y: PyG2,
+    proof: PyReg,
+    registrant: BigUint,
+    chainid: BigUint,
+    registry: BigUint,
+) -> PyResult<bool> {
+    registration_verify_v3(a, b, e_ct, pk, issuer_x, issuer_y, proof, registrant, chainid, registry)
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,11 +1103,14 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ps_sign, m)?)?;
     m.add_function(wrap_pyfunction!(ps_verify, m)?)?;
     m.add_function(wrap_pyfunction!(ps_rerandomize, m)?)?;
+    m.add_function(wrap_pyfunction!(ps_present, m)?)?;
+    m.add_function(wrap_pyfunction!(ps_key_consistent, m)?)?;
     m.add_function(wrap_pyfunction!(batch_commitment, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_schnorr_sign, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_schnorr_verify, m)?)?;
     m.add_function(wrap_pyfunction!(registration_prove, m)?)?;
     m.add_function(wrap_pyfunction!(registration_verify, m)?)?;
+    m.add_function(wrap_pyfunction!(registration_verify_v3, m)?)?;
     m.add_function(wrap_pyfunction!(chaum_pedersen_prove, m)?)?;
     m.add_function(wrap_pyfunction!(chaum_pedersen_verify, m)?)?;
     m.add_function(wrap_pyfunction!(verifiable_decrypt_prove, m)?)?;

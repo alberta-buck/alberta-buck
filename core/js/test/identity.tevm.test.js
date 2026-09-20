@@ -49,9 +49,10 @@ test("identity ceremony: wasm NIZK verified by IdentityRegistry on tevm", { skip
   const [skX, skY] = [rand(), rand()];
   const pkX = id.g2Mul(id.G2, skX);
   const pkY = id.g2Mul(id.G2, skY);
+  const pkY1 = id.g1Mul(id.G1, skY);
   const issuerAddr = "0x" + "15".repeat(20);
   await session.send(reg, "trustIssuer",
-    [issuerAddr, { X: g2(pkX), Y: g2(pkY) }], { tag: "trustIssuer" });
+    [issuerAddr, { X: g2(pkX), Y: g2(pkY), Y1: g(pkY1) }], { tag: "trustIssuer" });
 
   // Wallet-side ceremony, unicode identity (the canonical-dialect pin).
   const fields = {
@@ -61,7 +62,8 @@ test("identity ceremony: wasm NIZK verified by IdentityRegistry on tevm", { skip
     issuer_id: "atb-financial-ca", issued_at: "2026-07-03T00:00:00Z", epoch: 42,
   };
   const m = id.identityScalar(id.canonicalIdentity(fields));
-  const sigmaP = id.psRerandomize(id.psSign(skX, skY, m, rand()), rand());
+  const b = rand();
+  const pres = id.psPresent(id.psSign(skX, skY, m, rand()), pkY1, rand(), b);
   const sk = rand();
   const pk = id.g1Mul(id.G1, sk);
   const r = rand();
@@ -70,17 +72,17 @@ test("identity ceremony: wasm NIZK verified by IdentityRegistry on tevm", { skip
   const chainid = BigInt(await session.client.getChainId());
   const registry = BigInt(reg.address);
   const proof = id.registrationProve(
-    sigmaP, m, r, pk, E, registrant, sk, chainid, registry,
-    rand(), rand(), rand());
+    pres, b, m, r, pk, E, registrant, sk, chainid, registry,
+    rand(), rand(), rand(), rand());
   assert.ok(id.registrationVerify(
-    sigmaP, E, pk, pkX, pkY, proof, registrant, chainid, registry),
+    pres, E, pk, pkX, pkY, proof, registrant, chainid, registry),
     "kernel-side verify");
 
   const args = [
     issuerAddr, g(pk), ct(E),
-    { sigma_1: g(sigmaP.sigma_1), sigma_2: g(sigmaP.sigma_2) },
-    { e: proof.e, s_m: proof.s_m, s_r: proof.s_r, s_sk: proof.s_sk,
-      A_ps: g(proof.A_ps), T_C: g(proof.T_C), T_R: g(proof.T_R),
+    { A: g(pres.A), B: g(pres.B) },
+    { e: proof.e, s_m: proof.s_m, s_b: proof.s_b, s_r: proof.s_r, s_sk: proof.s_sk,
+      C1: g(proof.C1), T_C: g(proof.T_C), T_R: g(proof.T_R),
       T_key: g(proof.T_key) },
   ];
 
