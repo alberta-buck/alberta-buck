@@ -85,9 +85,10 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    |------------------------------+--------------------------+-------------------+--------------------------------------|
    | identity_data = plaintext    | Holochain Private entry  | Owner only        | Approve (sent to counterparty)       |
    | =m = H(identity_data)=       | Holochain Private entry  | Owner only        | Registration, Approve                |
-   | PS signature =sigma=         | Holochain Private entry  | Owner only        | Registration (rerandomized)          |
+   | PS signature =sigma=         | Holochain Private entry  | Owner only        | Registration (blinded into (A, B))   |
+   | Blinding =b= (per account)   | Wallet memory            | Owner only        | Registration proof, then discarded   |
    | Secret key =sk=              | Holochain Private entry  | Owner only        | Approve (decrypt + re-encrypt)       |
-   | Rerandomized =sigma'=        | IdentityRegistry         | Public (on-chain) | Registration verification            |
+   | Presentation =(A, B)=        | IdentityRegistry (tx)    | Public (on-chain) | Registration verification            |
    | Public key =pk=              | IdentityRegistry         | Public (on-chain) | Approve, Transfer                    |
    | ElGamal ciphertext =E_alice= | IdentityRegistry         | Public (on-chain) | Approve (read by contract)           |
    | NIZK proof =pi=              | IdentityRegistry (tx)    | Public (on-chain) | Registration verification            |
@@ -99,6 +100,11 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    | Holochain Warrants           | Holochain DHT            | Public            | Malfeasance detection                |
    | Canonical receipt            | Holochain Private entry  | Each party only   | Dispute resolution                   |
    #+TBLFM: $1=identity_data= (plaintext)
+
+   This table says where each item lives.  What the public items can
+   /reveal/ -- why a permanently archived registration transaction
+   discloses no identity to any node -- is set out item by item in
+   [[#what-the-chain-sees][What the Chain Sees, and What It Can Learn]].
 #+LATEX: }
 
 ** Registration: Credential Goes On-Chain
@@ -958,7 +964,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    #+RESULTS:
    : Rerandomized pair: raw PS test with m_alice -> True
    :   (a candidate test for anyone holding m: never published)
-   : Presentation A = (  5399..., 353694...)  B = (581716..., 863944...)
+   : Presentation A = (485461..., 111020...)  B = (253223..., 755830...)
    : Presentation:      raw PS test with m_alice -> False
    : Presentation:      masked equation with (m_alice, b) -> True
 
@@ -1102,10 +1108,10 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
    #+RESULTS:
    : Registration proof pi = (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
-   :   e   = 8392993156875490341827894963691970818959972981163743472346798659884976038089
-   :   s_m = 911862633325020095910105680775245642528088662979583177621132188906243056195
-   :   s_b = 18556345997981989815062243002908872820497682000928921341402449019890060626160
-   :   C1  = (791940..., 667571...)   (m~*A + b~*G -- never m~*A on its own)
+   :   e   = 2196105830779341400115271719164972253823094019654493230426931174336795509538
+   :   s_m = 6670275942612455194244009072870801823375301143762049327183362284812340203481
+   :   s_b = 7870632443180219884413884192094052420735536483374068380012512981984363321718
+   :   C1  = (121690..., 974841...)   (m~*A + b~*G -- never m~*A on its own)
 
    #+LATEX: }
 
@@ -1122,6 +1128,47 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
   followed by two counter-examples: a ciphertext containing a different
   \( m \) than the presented credential, and a replay of the proof to
   another address.
+
+** What the Chain Sees, and What It Can Learn
+   :PROPERTIES:
+   :CUSTOM_ID: what-the-chain-sees
+   :END:
+
+   Calldata is permanent and visible to every node, so the security of
+   the identity layer rests on one principle: nothing submitted to the
+   EVM is identity data, or a value that anyone -- the issuer included
+   -- can test against identity data.  The plaintext =identity_data=,
+   the scalar \( m \), the point \( M = mG \), the raw credential
+   \( \sigma \), the account secret \( sk \) and the blinding \( b \)
+   never leave the wallet.  Each of the five arguments of =register= is
+   a public key, a ciphertext, a blinded pair or a masked scalar, and
+   the contract only checks relations among them with pairings and
+   scalar multiplications; it holds no key and decrypts nothing.
+
+   #+LATEX: {\scriptsize
+   | Argument                | What it is                                                        | What the EVM (and every archive node) can learn from it                                                                 |
+   |-------------------------+-------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------|
+   | =issuer=                | The issuer's Ethereum address                                     | Which trust anchor certified the holder.  Public by design; it narrows the anonymity set to that issuer's clients, nothing more. |
+   | =pk=                    | A fresh account key \( sk \cdot G \), sampled per account          | Nothing about the identity: it is independent of \( m \).                                                                |
+   | =E_alice= \( = (rG, mG + r\,pk) \) | ElGamal ciphertext of the identity point under the account's own key | The plaintext needs \( sk \), never sent.  Testing whether it encrypts a candidate \( M_i \) is the DDH plaintext-checking problem. |
+   | =(A, B)= \( = (a\sigma_1,\ a\sigma_2 + bY_1) \) | The blinded presentation of the credential                 | A uniform pair of points, the same distribution for every identity.  Not a signature anyone can verify; \( \sigma \) itself is never published. |
+   | =pi= \( = (e, s_m, s_b, s_r, s_{sk}, C_1, T_C, T_R, T_{key}) \) | The zero-knowledge proof                          | Each response is a secret one-time nonce plus a multiple of the witness (\( s_m = \tilde m + e m \)), so it is uniform whatever \( m \) is; the commitments are simulatable from public values; the only credential-side point derivable is \( P = mA + bG \), which every candidate identity explains equally well. |
+   #+LATEX: }
+
+   Two distinctions matter.  The pre-A' design also kept =identity_data=
+   off chain, but it published a rerandomized signature and a commitment
+   \( \tilde m \sigma'_1 \) that were /testable/ against a known \( m \);
+   for anyone holding a candidate list, above all the issuer, a testable
+   function of the identity is as revealing as the identity itself
+   (review findings R1 and R2).  The presentation and the single
+   commitment \( C_1 \) remove that test; the appendix runs it both ways.
+   And the guarantees differ in kind: the presentation and the proof hide
+   \( m \) information-theoretically, while the ciphertext hides \( M \)
+   only computationally, under DDH -- the harvest-now-decrypt-later
+   caveat the papers carry.  The hiding of \( s_m \) also depends on the
+   nonce \( \tilde m \) being fresh for every proof, which the wallet's
+   sampler is responsible for; two proofs sharing a nonce would open
+   \( m \) by one subtraction.
 
 ** Verify the NIZK Proof (What the Contract Computes)
 

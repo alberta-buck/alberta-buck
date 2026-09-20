@@ -53,10 +53,14 @@ and a measured gas baseline on the committed artifact (below).
 This subsection is the resume point; the per-phase status paragraphs below
 carry the detail.
 
-- Phases 0 to 4 are committed (=d0ed54d= is phase 3, =c825104= phase 4,
-  =4a83b04= the evidence scripts). Phase 5: the review documents (item
-  6) are updated and committed; the four papers and the ethereum
-  mentions (items 1 to 5) are untouched. Phase 6 is not started.
+- Phases 0 to 5 are committed (=d0ed54d= phase 3, =c825104= phase 4,
+  =4a83b04= the evidence scripts, =0e076ee= the review documents,
+  =0152b6a= proofs, =43576ba= identity-example, =433a47e= identity,
+  =dbbf6a4= paper, =a1580ad= ethereum; the identity-example commit
+  after =a1580ad= adds the "What the Chain Sees" section). Every render
+  is regenerated and committed with its source. Phase 6 (security
+  argument and independent review) is the only open phase; the
+  branch is not merged.
 - Green on the branch: Rust kernel tests 3/3; =core/python= vector tests
   39/39; the review suite 33/33 on both backends; the identity Python
   suites (wallet, vectors, issuer, registry, kernel backend, cache regen)
@@ -754,12 +758,50 @@ rather than porting them, since the branch's executable counterpart is
 the review suite.
 
 
-*Status (2026-09-20): items 6 and the evidence scripts done (commits after
-=c825104=); items 1 to 5, the four papers and the ethereum mentions, not
-started.* Work them in the listed order; each is committed on its own,
-by explicit path, with its render (=make nix-doc-<name>=, or
-=make nix-venv-doc-identity-example= for the executable one) checked
-before the commit.
+*Status (2026-09-20): done.* Each document was committed on its own
+with its render. What was done, against the catalogues above:
+
+1. =alberta-buck-proofs.org= (=0152b6a=): Part I is "Pointcheval-Sanders
+   Credentials and the Hiding Presentation": Theorem 1 (wallet-internal),
+   Theorem 1', Lemma 2 with its "what this does not say" remark,
+   Theorem 2' (hiding up to =1/q=, with the =b != 0= remark and the
+   issuer-view and fresh-randomness corollaries), R-HVZK (with the
+   R2 remark), R-sound (with the registration-soundness and
+   non-reusability corollaries, the latter marked a phase-6
+   obligation), R-comp, and the six-step sanity block. Notation,
+   assumptions (DDH and PS-CM added; the q-SDH attribution corrected in
+   =fn:ps=; the "no novel assumption" claim withdrawn), Theorem 6, the
+   chain of trust, the summary table, the enforcement lists, the
+   accumulator-leaf note and the long-horizon section follow. The
+   LaTeX export's only errors are the pre-existing =ABSTRACT=
+   environment; PDF and text are produced.
+2. =alberta-buck-identity-example.org= (=43576ba= and the follow-up):
+   the wallet API is the single registration path; the presentation
+   block, the contract-side six checks, the wrong-=m= and replay
+   counter-examples, the three-relation approve with the
+   false-identity forgery, the who-knows-what table and the two-sided
+   appendix; issuer keys gain =Y1=; stale names and gas figures fixed;
+   four mermaid diagrams re-rendered with =mmdc=; every drawer
+   regenerated on the kernel backend. The follow-up adds "What the
+   Chain Sees, and What It Can Learn" at the registration step (each
+   =register= argument and what an archive node learns from it) and
+   points the data-residency table at it.
+3. =alberta-buck-identity.org= (=433a47e=): the four code-derived blocks
+   regenerated, the key format, the =A = O= attack, the R3 paragraph,
+   the privacy-boundary table (new counterparty row), the revocation
+   note, the assumption lists, and the rewording along the four axes.
+4. =alberta-buck-paper.org= (=dbbf6a4=): per the catalogue; the
+   executable transcript re-ran byte-identical.
+5. =alberta-buck-ethereum.org= (=a1580ad=): surface, Solidity structs,
+   step 0 and the gas row. =alberta-buck-ethereum-routing.org= needed
+   nothing (its one =trustIssuer= mention is argument-free).
+6. =doc/review/= (=0e076ee=): as recorded above.
+
+Not done, deliberately: the paper's suggested A' appendix witness (the
+two-sided test lives in the examples document and is cited from the
+paper instead); a small-group blinded showing in the examples
+appendix; re-measuring =approve= gas (the identity documents now say
+the 29K figure predates the three-relation repair).
 
 Executed after the code is green so that every regenerated block reflects the
 branch. Details per document are in the review sections above.

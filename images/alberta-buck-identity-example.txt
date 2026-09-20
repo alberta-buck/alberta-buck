@@ -63,7 +63,8 @@ Table of Contents
 .. 2. Generate Fresh Identity Key Pair and ElGamal Encryption
 .. 3. NIZK Proof: Binding the Presentation to the ElGamal Ciphertext
 6. Registration – On-Chain Verification
-.. 1. Verify the NIZK Proof (What the Contract Computes)
+.. 1. What the Chain Sees, and What It Can Learn
+.. 2. Verify the NIZK Proof (What the Contract Computes)
 7. Bob Binds His Pool as a Public-Identity Contract
 .. 1. Same Operation via the Wallet API
 8. Alice Approves Bob – Re-Encryption + Chaum-Pedersen Proof
@@ -113,9 +114,10 @@ Table of Contents
   ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
    identity_data = plaintext     Holochain Private entry   Owner only         Approve (sent to counterparty)       
    `m = H(identity_data)'        Holochain Private entry   Owner only         Registration, Approve                
-   PS signature `sigma'          Holochain Private entry   Owner only         Registration (rerandomized)          
+   PS signature `sigma'          Holochain Private entry   Owner only         Registration (blinded into (A, B))   
+   Blinding `b' (per account)    Wallet memory             Owner only         Registration proof, then discarded   
    Secret key `sk'               Holochain Private entry   Owner only         Approve (decrypt + re-encrypt)       
-   Rerandomized `sigma''         IdentityRegistry          Public (on-chain)  Registration verification            
+   Presentation `(A, B)'         IdentityRegistry (tx)     Public (on-chain)  Registration verification            
    Public key `pk'               IdentityRegistry          Public (on-chain)  Approve, Transfer                    
    ElGamal ciphertext `E_alice'  IdentityRegistry          Public (on-chain)  Approve (read by contract)           
    NIZK proof `pi'               IdentityRegistry (tx)     Public (on-chain)  Registration verification            
@@ -127,6 +129,14 @@ Table of Contents
    Holochain Warrants            Holochain DHT             Public             Malfeasance detection                
    Canonical receipt             Holochain Private entry   Each party only    Dispute resolution                   
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  This table says where each item lives.  What the public items can
+  /reveal/ – why a permanently archived registration transaction
+  discloses no identity to any node – is set out item by item in [What
+  the Chain Sees, and What It Can Learn].
+
+
+[What the Chain Sees, and What It Can Learn] See section 6.1
 
 
 1.2 Registration: Credential Goes On-Chain
@@ -858,7 +868,7 @@ Table of Contents
   ┌────
   │ Rerandomized pair: raw PS test with m_alice -> True
   │   (a candidate test for anyone holding m: never published)
-  │ Presentation A = (524787..., 952018...)  B = (235604..., 323600...)
+  │ Presentation A = (407798..., 800605...)  B = (698646..., 537563...)
   │ Presentation:      raw PS test with m_alice -> False
   │ Presentation:      masked equation with (m_alice, b) -> True
   └────
@@ -1003,10 +1013,10 @@ Table of Contents
 
   ┌────
   │ Registration proof pi = (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
-  │   e   = 9684585952257455155405135757560594111189325092946024545025279237192808755
-  │   s_m = 571856678030749533112600320570738524461659977874299868329143362050938037285
-  │   s_b = 14969516721371820497336265337043280791885813875520977750477379454165519607162
-  │   C1  = (371197..., 220868...)   (m~*A + b~*G -- never m~*A on its own)
+  │   e   = 4532528920410939808168646879268384736865642080703227718492284675247529640555
+  │   s_m = 16456229297959193534301902148966829290536166113257398904414956964890615548005
+  │   s_b = 20078131879954358239710807896151275591273878825348562170216214971300202815642
+  │   C1  = (258763..., 527512...)   (m~*A + b~*G -- never m~*A on its own)
   └────
 
 
@@ -1026,7 +1036,46 @@ Table of Contents
   another address.
 
 
-6.1 Verify the NIZK Proof (What the Contract Computes)
+6.1 What the Chain Sees, and What It Can Learn
+──────────────────────────────────────────────
+
+  Calldata is permanent and visible to every node, so the security of
+  the identity layer rests on one principle: nothing submitted to the
+  EVM is identity data, or a value that anyone – the issuer included –
+  can test against identity data.  The plaintext `identity_data', the
+  scalar \( m \), the point \( M = mG \), the raw credential \( \sigma
+  \), the account secret \( sk \) and the blinding \( b \) never leave
+  the wallet.  Each of the five arguments of `register' is a public key,
+  a ciphertext, a blinded pair or a masked scalar, and the contract only
+  checks relations among them with pairings and scalar multiplications;
+  it holds no key and decrypts nothing.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Argument                                                         What it is                                                            What the EVM (and every archive node) can learn from it                                                                                                                                                                                                                                                              
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `issuer'                                                         The issuer's Ethereum address                                         Which trust anchor certified the holder.  Public by design; it narrows the anonymity set to that issuer's clients, nothing more.                                                                                                                                                                                     
+   `pk'                                                             A fresh account key \( sk \cdot G \), sampled per account             Nothing about the identity: it is independent of \( m \).                                                                                                                                                                                                                                                            
+   `E_alice' \( = (rG, mG + r\,pk) \)                               ElGamal ciphertext of the identity point under the account's own key  The plaintext needs \( sk \), never sent.  Testing whether it encrypts a candidate \( M_i \) is the DDH plaintext-checking problem.                                                                                                                                                                                  
+   `(A, B)' \( = (a\sigma_1,\ a\sigma_2 + bY_1) \)                  The blinded presentation of the credential                            A uniform pair of points, the same distribution for every identity.  Not a signature anyone can verify; \( \sigma \) itself is never published.                                                                                                                                                                      
+   `pi' \( = (e, s_m, s_b, s_r, s_{sk}, C_1, T_C, T_R, T_{key}) \)  The zero-knowledge proof                                              Each response is a secret one-time nonce plus a multiple of the witness (\( s_m = \tilde m + e m \)), so it is uniform whatever \( m \) is; the commitments are simulatable from public values; the only credential-side point derivable is \( P = mA + bG \), which every candidate identity explains equally well. 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Two distinctions matter.  The pre-A' design also kept `identity_data'
+  off chain, but it published a rerandomized signature and a commitment
+  \( \tilde m \sigma'_1 \) that were /testable/ against a known \( m \);
+  for anyone holding a candidate list, above all the issuer, a testable
+  function of the identity is as revealing as the identity itself
+  (review findings R1 and R2).  The presentation and the single
+  commitment \( C_1 \) remove that test; the appendix runs it both ways.
+  And the guarantees differ in kind: the presentation and the proof hide
+  \( m \) information-theoretically, while the ciphertext hides \( M \)
+  only computationally, under DDH – the harvest-now-decrypt-later caveat
+  the papers carry.  The hiding of \( s_m \) also depends on the nonce
+  \( \tilde m \) being fresh for every proof, which the wallet's sampler
+  is responsible for; two proofs sharing a nonce would open \( m \) by
+  one subtraction.
+
+
+6.2 Verify the NIZK Proof (What the Contract Computes)
 ──────────────────────────────────────────────────────
 
   *What this proves:* the same \( m \) is presented in \( (A, B) \) and
@@ -1125,7 +1174,7 @@ Table of Contents
   by one subtraction.
 
 
-6.1.1 Counter-example: ElGamal Encrypts a Different \( m \)
+6.2.1 Counter-example: ElGamal Encrypts a Different \( m \)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   If Alice (or an attacker) encrypts one \( m \) in ElGamal but presents
