@@ -13,7 +13,7 @@ from alberta_buck.sim.pyrevm_backend import PyrevmAnvil, DEV_ACCOUNTS
 from alberta_buck.sim.chain import Chain
 from alberta_buck.review.examples import Account, false_identity_approval, seeded
 from alberta_buck.wallet.bn254 import G1, mul, point_to_words
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present
 from alberta_buck.wallet.nizk import registration_prove
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
@@ -26,13 +26,13 @@ g2 = lambda P: ((int(P[0].coeffs[0]), int(P[0].coeffs[1])),
 
 def register(chain, reg, issuer_addr, acct, eoa, rng):
     sigma = ps_sign(ISS, acct.m, rng=rng)
-    sig_p, _ = ps_rerandomize(sigma, rng=rng)
-    pf = registration_prove(sig_p, acct.m, acct.r, acct.pk, acct.E, int(eoa, 16),
+    pres, _a, b = ps_present(sigma, ISS.pk_Y1, rng=rng)
+    pf = registration_prove(pres, b, acct.m, acct.r, acct.pk, acct.E, int(eoa, 16),
                             acct.sk, rng=rng, registry=int(reg.address, 16))
     fn = reg.functions.register(
         issuer_addr, g1(acct.pk), (g1(acct.E.R), g1(acct.E.C)),
-        (g1(sig_p.sigma_1), g1(sig_p.sigma_2)),
-        (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R),
+        (g1(pres.A), g1(pres.B)),
+        (pf.e, pf.s_m, pf.s_b, pf.s_r, pf.s_sk, g1(pf.C1), g1(pf.T_C), g1(pf.T_R),
          g1(pf.T_key)))
     chain.send(fn, sender=eoa)
 
@@ -47,7 +47,8 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True) as anvil:
     ISS = ps_keygen(rng=rng)
     from web3 import Web3 as _W3
     iss_addr = _W3.to_checksum_address("0x00000000000000000000000000000000000000aa")
-    chain.send(reg.functions.trustIssuer(iss_addr, (g2(ISS.pk_X), g2(ISS.pk_Y))), sender=gov)
+    chain.send(reg.functions.trustIssuer(
+        iss_addr, (g2(ISS.pk_X), g2(ISS.pk_Y), g1(ISS.pk_Y1))), sender=gov)
 
     # Rebuild the counterexample bound to THIS chain's ids/addresses.
     alice_addr = _W3.to_checksum_address("0x000000000000000000000000000000000000a11c")
