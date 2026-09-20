@@ -113,6 +113,7 @@ contract UniswapBindingAdaptersTest is Test {
         issuerPk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
         issuerPk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
         issuerPk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        issuerPk.Y1 = _g1(".issuer.pk_Y1");
         vm.prank(GOV);
         reg.trustIssuer(ISSUER, issuerPk);
         _register("alice", alice);
@@ -140,9 +141,9 @@ contract UniswapBindingAdaptersTest is Test {
         value.C = _g1(string.concat(".", who, ".ciphertext.C"));
     }
 
-    function _sig(string memory who) internal view returns (IdentityRegistry.PSSig memory value) {
-        value.sigma_1 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_1"));
-        value.sigma_2 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_2"));
+    function _sig(string memory who) internal view returns (IdentityRegistry.PSPresentation memory value) {
+        value.A = _g1(string.concat(".", who, ".ps_presentation.A"));
+        value.B = _g1(string.concat(".", who, ".ps_presentation.B"));
     }
 
     function _proof(string memory who) internal view returns (IdentityRegistry.RegistrationProof memory value) {
@@ -151,7 +152,8 @@ contract UniswapBindingAdaptersTest is Test {
         value.s_m = _u(string.concat(base, ".s_m"));
         value.s_r = _u(string.concat(base, ".s_r"));
         value.s_sk = _u(string.concat(base, ".s_sk"));
-        value.A_ps = _g1(string.concat(base, ".A_ps"));
+        value.s_b = _u(string.concat(base, ".s_b"));
+        value.C1 = _g1(string.concat(base, ".C1"));
         value.T_C = _g1(string.concat(base, ".T_C"));
         value.T_R = _g1(string.concat(base, ".T_R"));
         value.T_key = _g1(string.concat(base, ".T_key"));

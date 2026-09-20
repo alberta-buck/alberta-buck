@@ -32,9 +32,9 @@ contract BindNotesIdentity is Script {
             R: _point(data, ".ciphertext.R"),
             C: _point(data, ".ciphertext.C")
         });
-        IdentityRegistry.PSSig memory sigma = IdentityRegistry.PSSig({
-            sigma_1: _point(data, ".ps_sig_rerand.sigma_1"),
-            sigma_2: _point(data, ".ps_sig_rerand.sigma_2")
+        IdentityRegistry.PSPresentation memory sigma = IdentityRegistry.PSPresentation({
+            A: _point(data, ".ps_presentation.A"),
+            B: _point(data, ".ps_presentation.B")
         });
         IdentityRegistry.RegistrationProof memory registration = _registration(data);
 
@@ -77,7 +77,8 @@ contract BindNotesIdentity is Script {
         proof.s_m = vm.parseJsonUint(data, string.concat(path, ".s_m"));
         proof.s_r = vm.parseJsonUint(data, string.concat(path, ".s_r"));
         proof.s_sk = vm.parseJsonUint(data, string.concat(path, ".s_sk"));
-        proof.A_ps = _point(data, string.concat(path, ".A_ps"));
+        proof.s_b = vm.parseJsonUint(data, string.concat(path, ".s_b"));
+        proof.C1 = _point(data, string.concat(path, ".C1"));
         proof.T_C = _point(data, string.concat(path, ".T_C"));
         proof.T_R = _point(data, string.concat(path, ".T_R"));
         proof.T_key = _point(data, string.concat(path, ".T_key"));

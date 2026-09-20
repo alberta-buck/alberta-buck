@@ -208,19 +208,27 @@ honest registrations:
 | =trustIssuer= | 227,278 |
 | =register= (5-argument overload, about 740 calldata bytes) | 472,630 |
 
-Expected deltas for A', to be measured on the branch:
+Measured on the branch (phase 2, same in-process EVM, rebuilt artifact):
+
+| Operation | Today | A' | Change |
+|-----------+-------+----+--------|
+| =register= (5-argument overload) | 472,630 | 443,892 | -28,738 |
+| =register= calldata | 740 B | 772 B | +32 B |
+| =trustIssuer= | 227,278 | 394,115 | +166,837 once per issuer |
+
+The =register= saving is the fourth pairing that the old verifier spent on
+an unmerged =Y= term, less one extra G1 multiplication and one scalar of
+calldata. The =trustIssuer= increase is the one-time =Y1= consistency check
+(two pairings) plus storing the extra G1 point. Approval, Notes mint and
+spend, receipts and all circuits are untouched, so ongoing costs do not move.
+
+Component expectations that the measurement confirms:
 
 | Component | Today | A' | Change |
 |-----------+-------+----+--------|
 | Pairings in the credential check | 4 | 3 | -34,000 (EIP-1108) |
 | G1 multiplications, credential side | 3 | 4 | +6,000 |
 | ElGamal and key relations | 7 mul | 7 mul | 0 |
-| Calldata | 740 B | 772 B | +512 |
-| =trustIssuer= | 4 G2 words | +2 G1 words, +1 pairing check | about +113,000 once per issuer |
-
-Net expectation for =register=: roughly 445,000, a small saving, because the
-current verifier does not merge its two =Y= pairings. Approval, Notes mint and
-spend, receipts and all circuits are untouched, so ongoing costs do not move.
 
 ** Drawbacks and open items, stated plainly
 
@@ -532,6 +540,17 @@ stated results; =identity.json=, =bind_contract.json= and the registry
 vectors are regenerated.
 
 ** Phase 2: Solidity
+
+*Status (2026-09-19): done on =feature/a-prime=.* =IdentityRegistry.sol=
+carries =PSPubKey.Y1= with the consistency check at =trustIssuer= (revert
+=Y1=O= / =Y1 inconsistent=), the =PSPresentation= struct, the nine-field
+=RegistrationProof=, the v3 domain, the =A=O= and =B=O= guards and the
+three-pair =_checkPresentation=. The deploy script and all sixteen Foundry
+suites decode the new vectors; =IdentityRegistry.t.sol= gains rejection
+tests for =B = O=, a tampered =s_b=, a swapped presentation, a zero and an
+inconsistent =Y1=, and a check that the published pair fails the raw PS
+relation. =make nix-test=: 594 passed, 0 failed, 1 skipped. Measured gas is
+in the specification's cost table.
 
 | Location | Lines | Change |
 |----------+-------+--------|
