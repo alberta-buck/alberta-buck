@@ -14,9 +14,10 @@
 <https://perry.kundert.ca/images/dominion-logo.png>
 
 The Alberta Buck identity system ([Identity], [Examples]) rests on two
-cryptographic transformations: the /Identity Fountain/ rerandomizes a
-Pointcheval-Sanders signature to produce an unlinkable credential, and
-the `approve' handshake re-encrypts the credential's ElGamal ciphertext
+cryptographic transformations: the /Identity Fountain/ blinds a
+Pointcheval-Sanders credential into a hiding presentation \( (A, B) \)
+that no holder of the identity, the issuer included, can test, and the
+`approve' handshake re-encrypts the credential's ElGamal ciphertext
 under the counterparty's public key with a Chaum-Pedersen proof of
 equality.  Everything downstream – bilateral transfers, the BUCK Notes
 spend circuits ([Notes]), Identity Guardian authorizations, regulatory
@@ -25,10 +26,22 @@ recovery – inherits its correctness from these two primitives.
 This document states and proves the correctness properties that the rest
 of the series relies on:
 • *Theorem 1*: rerandomization preserves PS signature validity
+  (completeness; a wallet-internal step).
+• *Lemma 2*: a uniform random rerandomization scalar yields a signature
+  distributed as a fresh one on the same message.  It does not hide the
+  message: a rerandomized pair is a candidate test for anyone holding \(
+  m \), so the wallet never publishes one.
+• *Theorem 1'*: the published presentation \( (A, B) = (a \sigma_1,\ a
+  \sigma_2 + b Y_1) \) satisfies the masked verifier equation
   (completeness).
-• *Theorem 2*: a uniform random rerandomization scalar yields a
-  signature statistically identical to a fresh one, independent of the
-  original (unlinkability).
+• *Theorem 2'*: for fresh uniform \( (a, b) \) the triple \( (A, B, P)
+  \) that the registration transcript reveals is independent of \( m \)
+  up to \( 1/q \) (perfect hiding).
+• *Theorems R-HVZK, R-sound, R-comp*: the registration NIZK is
+  honest-verifier zero-knowledge given \( P \), specially sound
+  (extracting a plain PS signature, so registration forgery reduces to
+  PS unforgeability in the committed-message key form), and composes the
+  credential, ciphertext and key relations on one \( m \).
 • *Theorem 3*: an honest Chaum-Pedersen prover always verifies
   (completeness).
 • *Theorem 4*: from two accepting transcripts with distinct challenges
@@ -75,13 +88,16 @@ of the series relies on:
   substitution.
 
 Every theorem is accompanied by an executable `py_ecc' sanity check on
-BN254.  The proofs assume only the q-SDH assumption (for PS signature
-unforgeability), the discrete logarithm assumption on \(
-\text{alt\_bn128}\ G_1 \), the random oracle model (for the Fiat-Shamir
-transform and Poseidon hashing), and knowledge soundness of the
-underlying SNARK proof system (for Theorems 8-9 and 12) – all standard
-assumptions that Ethereum's security or any zk-SNARK rollup already
-requires. ([PDF], [Text])
+BN254.  The proofs assume PS unforgeability in the committed-message key
+form (Pointcheval–Sanders 2016, Section 6.1), the discrete logarithm and
+decisional Diffie–Hellman assumptions on \( \text{alt\_bn128}\ G_1 \),
+the random oracle model (for the Fiat-Shamir transform and Poseidon
+hashing), and knowledge soundness of the underlying SNARK proof system
+(for Theorems 8-9 and 12).  The presentation results (Theorems 1', 2',
+R-HVZK, R-sound, R-comp) describe the A' registration implemented on
+branch `feature/a-prime'; they are stated with proofs here but await
+independent review, and that branch is not a production release. ([PDF],
+[Text])
 
 Table of Contents
 ─────────────────
@@ -89,11 +105,16 @@ Table of Contents
 1. Preliminaries
 .. 1. Notation
 .. 2. Hardness Assumptions
-2. Part I: Pointcheval-Sanders Signature Rerandomization
+2. Part I: Pointcheval-Sanders Credentials and the Hiding Presentation
 .. 1. The Construction
 .. 2. Theorem 1 (Completeness of Rerandomization)
-.. 3. Theorem 2 (Statistical Unlinkability)
-.. 4. Sanity Check (py_ecc on BN254)
+.. 3. Theorem 1' (Completeness of the Masked Verifier)
+.. 4. Lemma 2 (Fresh-Signature Distribution for a Fixed Message)
+.. 5. Theorem 2' (Perfect Hiding of the Presentation)
+.. 6. Theorem R-HVZK (Zero-Knowledge of the Registration Transcript)
+.. 7. Theorem R-sound (Special Soundness and Non-Reusability)
+.. 8. Theorem R-comp (Composition of the Credential, Ciphertext and Key Relations)
+.. 9. Sanity Check (py_ecc on BN254)
 3. Part II: Chaum-Pedersen Re-Encryption Correctness
 .. 1. Setup
 .. 2. The Statement
@@ -149,22 +170,36 @@ Table of Contents
 1.1 Notation
 ────────────
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Symbol                                         Meaning                                                         
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   \( q \)                                        Prime order of \( G_1, G_2, G_T \) on BN254                     
-   \( G, g_2 \)                                   Generators of \( G_1 \) and \( G_2 \)                           
-   \( e : G_1 \times G_2 \to G_T \)               Bilinear, non-degenerate pairing (type-3)                       
-   \( O \)                                        Point at infinity (group identity)                              
-   \( \mathbb{Z}_q^\ast \)                        Non-zero scalars mod \( q \)                                    
-   \( (x, y) / (X, Y) \)                          Issuer secret / public key: \( X = x g_2,\ Y = y g_2 \)         
-   \( m \in \mathbb{Z}_q \)                       Identity scalar: \( m = H(\text{identity\_data}) \bmod q \) [1] 
-   \( M = m \cdot G \in G_1 \)                    Identity point: the value every ElGamal ciphertext encrypts [2] 
-   \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \)  PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)   [3] 
-   \( (sk, pk) \)                                 Identity key pair on \( G_1 \): \( pk = sk \cdot G \)           
-   \( E = (R, C) \in G_1^2 \)                     ElGamal ciphertext: \( R = r G,\ C = M + r \cdot pk \)          
-   \( H(\cdot) \)                                 Cryptographic hash modelled as a random oracle (Fiat-Shamir)    
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Symbol                                         Meaning                                                                                                                              
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   \( q \)                                        Prime order of \( G_1, G_2, G_T \) on BN254                                                                                          
+   \( G, g_2 \)                                   Generators of \( G_1 \) and \( G_2 \)                                                                                                
+   \( e : G_1 \times G_2 \to G_T \)               Bilinear, non-degenerate pairing (type-3)                                                                                            
+   \( O \)                                        Point at infinity (group identity)                                                                                                   
+   \( \mathbb{Z}_q^\ast \)                        Non-zero scalars mod \( q \)                                                                                                         
+   \( (x, y) / (X, Y, Y_1) \)                     Issuer secret / public key: \( X = x g_2,\ Y = y g_2,\ Y_1 = y G \); the registry checks \( e(Y_1, g_2) = e(G, Y) \) at trust time   
+   \( m \in \mathbb{Z}_q \)                       Identity scalar: \( m = H(\text{identity\_data}) \bmod q \) [1]                                                                      
+   \( M = m \cdot G \in G_1 \)                    Identity point: the value every ElGamal ciphertext encrypts [2]                                                                      
+   \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \)  PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)   [3]                                                                      
+   \( (sk, pk) \)                                 Identity key pair on \( G_1 \): \( pk = sk \cdot G \)                                                                                
+   \( E = (R, C) \in G_1^2 \)                     ElGamal ciphertext: \( R = r G,\ C = M + r \cdot pk \)                                                                               
+   \( H(\cdot) \)                                 Cryptographic hash modelled as a random oracle (Fiat-Shamir)                                                                         
+   \( a, b \in \mathbb{Z}_q^\ast \)               Presentation scalars, fresh per account: \( a \) rerandomizes, \( b \) blinds on the \( Y \) base                                    
+   \( (A, B) \in G_1^2 \)                         The published presentation \( A = a \sigma_1,\ B = a \sigma_2 + b Y_1 = (x + m y) A + b Y_1 \)                                       
+   \( P = m A + b G \)                            The one credential-side point derivable from a registration transcript; \( B = x A + y P \)                                          
+   \( m_t, b_t, r_t, sk_t \)                      Registration NIZK nonces; \( C_1 = m_t A + b_t G,\ T_C,\ T_R,\ T_{key} \) its commitments; \( s_m, s_b, s_r, s_{sk} \) its responses 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Response convention: Part I-bis (Theorems R-*) writes responses as \(
+  s = w_t + e w \), matching the wallet and the Solidity verifier; Part
+  II writes the Chaum-Pedersen responses as \( s = k - e w \).  The two
+  are equivalent up to the sign of \( e \) in the verification
+  equations.  Part IV reuses \( b \) and \( P_I \) with their own
+  meanings (a commitment opening and a blinded Identity point); the
+  presentation's \( b \) and \( P \) are local to Part I.  Where \( e \)
+  appears as a Fiat-Shamir challenge it is a scalar; as \( e(\cdot,
+  \cdot) \) it is the pairing.
+
   All group operations in this document are written additively.  BN254
   has cofactor 1 on \( G_1 \), so every non-identity \( P \in G_1 \) has
   order \( q \); there are no small-subgroup elements.
@@ -173,47 +208,60 @@ Table of Contents
 1.2 Hardness Assumptions
 ────────────────────────
 
-  Four standard assumptions underpin the theorems in this document.
-  None is specific to Alberta Buck – each one is already required by
-  Ethereum's own security model or by any pairing-based / zk-SNARK
-  construction built on the `ecPairing' precompile.
+  Five assumptions underpin the theorems in this document.  Four are
+  already required by Ethereum's own security model or by any
+  pairing-based / zk-SNARK construction built on the `ecPairing'
+  precompile; the PS assumption is specific to the credential scheme
+  and, since the issuer key now includes \( y G \), it is the
+  committed-message form of that assumption.
 
   1. *Discrete Logarithm (DLog) on \( G_1 \)*: given \( P, Q \in G_1 \),
      finding \( \alpha \in \mathbb{Z}_q \) with \( Q = \alpha P \) is
      infeasible.  Protects ElGamal IND-CPA security, Schnorr
      unforgeability, and Chaum-Pedersen soundness.
 
-  2. *q-Strong Diffie-Hellman (q-SDH)*: the PS signature scheme is
-     existentially unforgeable under chosen-message attack (EUF-CMA)
-     assuming q-SDH[4].  We use this only as a *stated* assumption about
-     the PS primitive; none of our proofs below reduce to it directly.
+  2. *Decisional Diffie-Hellman (DDH) on \( G_1 \)*: distinguishing \(
+     (G, \alpha G, \beta G, \alpha\beta G) \) from a random tuple is
+     infeasible.  Protects ElGamal plaintext hiding, which is the only
+     computational lock left on a registration after Theorem 2' (the
+     issuer-blindness theorem of the main paper and the long-horizon
+     section below).
+  3. *PS unforgeability, committed-message key form (PS-CM)*: the
+     Pointcheval-Sanders single-message scheme is EUF-CMA when the
+     public key also exposes \( Y_1 = y G \) in \( G_1 \), under
+     Assumption 2 of their 2016 paper[4].  Theorem R-sound's corollary
+     reduces registration soundness to it directly; the issuer keeps the
+     signature base \( h \) with unknown discrete logarithm, which
+     `ps_sign' does by sampling it.
 
-  3. *Random Oracle Model (ROM)*: the Fiat-Shamir transform is applied
+  4. *Random Oracle Model (ROM)*: the Fiat-Shamir transform is applied
      to sigma protocols whose security is proved in the ROM, with the
      hash function \( H \) modelled as a random oracle bound to all
      public inputs and context (caller address, chain id, etc.).
      Poseidon (commitment hash and nullifier PRF) is also modelled as a
      random oracle for the BUCK Notes proofs in Part IV.
 
-  4. *Knowledge soundness of the underlying zk-SNARK proof system* (Part
+  5. *Knowledge soundness of the underlying zk-SNARK proof system* (Part
      IV only): the SNARK system used for BUCK Notes spend circuits
      (Groth16, PLONK, or any knowledge-sound construction over BN254)
      admits a polynomial-time witness extractor on every accepting
      proof.  This is a system-specific assumption depending on the
      chosen scheme's trusted setup or universal setup.
 
-  The rerandomization proofs (Part I) are /unconditional/: Theorem 1
-  follows from bilinearity alone, and Theorem 2 is
-  information-theoretic.  The Chaum-Pedersen proofs (Part II) are
+  In Part I, Theorems 1 and 1' follow from bilinearity alone, Lemma 2
+  and Theorem 2' are information-theoretic, and Theorem R-HVZK is a
+  perfect simulation; Theorem R-sound's extractor is unconditional, and
+  its reduction of registration forgery to PS-CM and of non-reusability
+  to CDH is computational.  The Chaum-Pedersen proofs (Part II) are
   interactive-sigma-protocol facts; the NIZK corollary (Part II, end)
   invokes the ROM.  Part IV (Notes spend predicates) additionally
-  invokes assumption (4) – knowledge soundness of the underlying SNARK
+  invokes assumption (5) – knowledge soundness of the underlying SNARK
   system – to lift the sigma-protocol guarantees of Theorems 4-5 into
   the SNARK setting.
 
 
-2 Part I: Pointcheval-Sanders Signature Rerandomization
-═══════════════════════════════════════════════════════
+2 Part I: Pointcheval-Sanders Credentials and the Hiding Presentation
+═════════════════════════════════════════════════════════════════════
 
 2.1 The Construction
 ────────────────────
@@ -230,6 +278,27 @@ Table of Contents
 
   \[ \sigma' \;=\; (t \cdot \sigma_1,\; t \cdot \sigma_2) \qquad t \in
      \mathbb{Z}_q^\ast.  \]
+
+  It is a wallet-internal step.  The issuer additionally publishes the
+  \( G_1 \) image \( Y_1 = y \cdot G \) of its second secret, and the
+  registry checks \( e(Y_1, g_2) = e(G, Y) \) once, when it trusts the
+  key.  To register an account the holder samples fresh, independent \(
+  a, b \in \mathbb{Z}_q^\ast \) and publishes the /presentation/
+
+  \[ A \;=\; a \cdot \sigma_1, \qquad B \;=\; a \cdot \sigma_2 + b \cdot
+     Y_1 \;=\; (x + m y) \cdot A + b \cdot Y_1, \]
+
+  together with the registration NIZK of Theorem R-HVZK below, which
+  proves that \( (A, B) \) presents a credential on the \( m \)
+  encrypted in the account's ElGamal ciphertext.  The raw \( \sigma \)
+  and its rerandomizations never leave the wallet: a rerandomized pair
+  is still a verifiable signature on \( m \), so any party holding a
+  candidate \( m \) can test it (Lemma 2, remark).  The point
+
+  \[ P \;=\; m \cdot A + b \cdot G \]
+
+  is the one credential-side value a verifier can derive from the
+  transcript; the results below are stated in terms of it.
 
 
 2.2 Theorem 1 (Completeness of Rerandomization)
@@ -257,17 +326,54 @@ Table of Contents
   \neq O \) by PS validity).  Therefore \( \sigma'_1 \neq O \) and the
   pair satisfies the full PS validity predicate.  \( \blacksquare \)
 
-  *Implementation guard.* The registration contract MUST enforce \(
-  \sigma'_1 \neq O \).  Without this check, a prover can submit \(
-  \sigma' = (O, O) \) (obtainable by picking \( t = 0 \)); the pairing
-  equation then reduces to \( 1 = 1 \) in \( G_T \) /for every/ \( m \),
-  allowing a fabricated credential to pass registration.  Theorem 1's
-  completeness argument explicitly depends on \( t \neq 0 \); the
-  contract's guard is the runtime witness of this hypothesis.
+  *Scope.* The wallet uses this step to re-issue the credential to
+  itself; nothing produced by it is published.  The published object is
+  the presentation, whose completeness is Theorem 1'.
 
 
-2.3 Theorem 2 (Statistical Unlinkability)
-─────────────────────────────────────────
+2.3 Theorem 1' (Completeness of the Masked Verifier)
+────────────────────────────────────────────────────
+
+  *Statement.* For every valid PS signature \( \sigma \) on \( m \)
+  under \( (X, Y) \), with \( Y_1 = y G \), and for every \( a, b \in
+  \mathbb{Z}_q^\ast \), the presentation \( (A, B) = (a \sigma_1,\ a
+  \sigma_2 + b Y_1) \) satisfies
+
+  \[ e(B,\; g_2) \;=\; e(A,\; X) \cdot e(m A + b G,\; Y), \]
+
+  equivalently \( B = x A + y P \) with \( P = m A + b G \).
+
+  *Proof.* Split \( B \):
+
+  \begin{align*}
+  e(a \sigma_2,\; g_2)
+    &= e(\sigma_2,\; g_2)^a
+     = e(\sigma_1,\; X + m Y)^a
+     = e(A,\; X + m Y)
+     = e(A,\; X) \cdot e(m A,\; Y),                  \\
+  e(b Y_1,\; g_2)
+    &= e(b y G,\; g_2)
+     = e(b G,\; g_2)^{y}
+     = e(b G,\; Y).
+  \end{align*}
+
+  Multiplying, \( e(B, g_2) = e(A, X) \cdot e(m A + b G, Y) \).  Since
+  \( \sigma_1 \neq O \) and \( a \neq 0 \), \( A \neq O \).  \(
+  \blacksquare \)
+
+  *Implementation guard.* With \( A = O \) the masked equation reads \(
+  e(B, g_2) = e(b G, Y) \), which \( B = b Y_1 \) satisfies /for every/
+  \( m \): the credential term vanishes and the relation says nothing
+  about the identity.  The registration contract MUST reject \( A = O \)
+  (and \( B = O \)).  This is the same degenerate case that the earlier
+  published form met as \( \sigma'_1 = O \) (from \( t = 0 \)); under
+  the presentation it is \( a = 0 \).  Theorem 1' depends on \( a \neq 0
+  \); the contract's guard is the runtime witness of that hypothesis,
+  and it is security critical rather than hygienic.
+
+
+2.4 Lemma 2 (Fresh-Signature Distribution for a Fixed Message)
+──────────────────────────────────────────────────────────────
 
   *Statement.* Let \( \sigma \) be any fixed valid PS signature on \( m
   \).  If \( t \) is sampled uniformly from \( \mathbb{Z}_q^\ast \),
@@ -290,27 +396,218 @@ Table of Contents
   Given \( \sigma'_1 = h' \), the second component is forced: \(
   \sigma'_2 = t \sigma_2 = t (x + m y) \sigma_1 = (x + m y) (t \sigma_1)
   = (x + m y) h' \).  That is exactly what a fresh \( \text{PS.Sign} \)
-  with random \( h' \) would output.
+  with random \( h' \) would output.  \( \blacksquare \)
 
-  So the joint distribution of \( \sigma' \) matches the fresh-signature
-  distribution, and the map \( \sigma \mapsto \sigma' \) destroys all
-  information about \( \sigma \) beyond the fact that both sign the same
-  \( m \).  This is /statistical/ (information-theoretic) unlinkability,
-  not merely computational.  \( \blacksquare \)
+  *What this lemma does not say.* The rerandomized pair is a valid
+  signature on \( m \): any party holding a candidate \( m_i \) decides
+  whether \( e(\sigma'_1, X + m_i Y) = e(\sigma'_2, g_2) \).  The issuer
+  holds every \( m \) it has certified, and every counterparty learns \(
+  m \) by design, so a /published/ rerandomized pair is a candidate test
+  on the identity, not an unlinkable credential (review finding R1 in
+  `doc/review/identity-findings-2.org').  The lemma is a statement about
+  the wallet's internal step; the privacy property of the published
+  object is Theorem 2'.  Earlier versions of this document called this
+  result "statistical unlinkability" and drew the issuer-blindness of
+  the identity layer from it; that reading is withdrawn.
 
-  *Remark.* The argument uses only that \( G_1 \) has prime order; no
-  cryptographic assumption is invoked.  A cofactor \( > 1 \) would leak
-  subgroup membership of \( \sigma_1 \); the prime-order property of
-  BN254 \( G_1 \) is therefore load-bearing.
+
+2.5 Theorem 2' (Perfect Hiding of the Presentation)
+───────────────────────────────────────────────────
+
+  *Statement.* Fix the issuer secret \( (x, y) \) and a valid \( \sigma
+  \) on \( m \).  Let \( a, b \) be independent and uniform on \(
+  \mathbb{Z}_q^\ast \), \( (A, B) \) the presentation and \( P = m A + b
+  G \).  Then the distribution of \( (A, B, P) \) is within statistical
+  distance \( 1/q \) of \( (U_1,\ x U_1 + y U_2,\ U_2) \), where \( U_1
+  \) is uniform on \( G_1 \setminus \{O\} \), \( U_2 \) is uniform on \(
+  G_1 \), and the two are independent.  In particular the distribution
+  of \( (A, B, P) \) is independent of \( m \) up to that negligible
+  distance, and it is the same for every credential on every message
+  under the key.
+
+  *Proof.* \( A = a \sigma_1 \) is uniform on \( G_1 \setminus \{O\} \)
+  by the bijection of Lemma 2.  Conditioned on \( A \), the map \( b
+  \mapsto m A + b G \) is a bijection \( \mathbb{Z}_q \to G_1 \), so for
+  \( b \) uniform on \( \mathbb{Z}_q^\ast \) the point \( P \) is
+  uniform on \( G_1 \setminus \{m A\} \), independent of \( A \); the
+  one excluded point accounts for the \( 1/q \).  By Theorem 1', \( B =
+  x A + y P \) is a function of \( (A, P) \).  \( \blacksquare \)
+
+  *Remark (why \( b \neq 0 \)).* Allowing \( b = 0 \) would make the
+  distribution exactly independent of \( m \), but \( b = 0 \) publishes
+  \( (A, B) = (a \sigma_1, a \sigma_2) \), a rerandomized signature that
+  Lemma 2's remark shows is testable.  Excluding it costs \( 1/q \).
+
+  *Corollary (issuer view).* A party holding \( (x, y) \) and every
+  certified \( m_i \) learns nothing from \( (A, B, P) \) about which \(
+  m_i \) is presented: \( B = x A + y P \) holds for every pair \( (A,
+  P) \), and for every candidate \( m_i \) the point \( b_i G = P - m_i
+  A \) is a well-formed blinding.  Whatever the registration transcript
+  reveals about \( m \) beyond \( (A, B, P) \) is what the ElGamal
+  ciphertext \( (pk, R, C) \) reveals (Theorem R-HVZK), which is the
+  plaintext-checking problem under DDH on \( G_1 \); this is the
+  credential lock the main paper's issuer-blindness theorem needs.
+
+  *Corollary (fresh randomness).* Reusing \( b \) across two accounts
+  gives \( P_1 - P_2 = m (A_1 - A_2) \), a candidate test; reusing \( a
+  \) repeats \( A \).  The wallet must treat \( a, b \) exactly as it
+  treats ElGamal randomness.
 
 
-2.4 Sanity Check (py_ecc on BN254)
+2.6 Theorem R-HVZK (Zero-Knowledge of the Registration Transcript)
+──────────────────────────────────────────────────────────────────
+
+  *The registration NIZK.* Public: \( (A, B) \), the account key \( pk =
+  sk \cdot G \), the ciphertext \( E = (R, C) = (r G,\ m G + r\,pk) \),
+  and the context \( \mathrm{ctx} \) (registrant address, chain id,
+  registry address, domain).  Witness: \( (m, b, r, sk) \).  Nonces: \(
+  (m_t, b_t, r_t, sk_t) \), uniform on \( \mathbb{Z}_q \).
+
+  \begin{align*}
+  C_1 &= m_t A + b_t G,  & T_C &= m_t G + r_t\,pk, & T_R &= r_t G, & T_{key} &= sk_t\,G, \\
+  e &= H(A, B, R, C, pk, C_1, T_C, T_R, T_{key}, \mathrm{ctx}), \\
+  s_m &= m_t + e m, & s_b &= b_t + e b, & s_r &= r_t + e r, & s_{sk} &= sk_t + e\,sk.
+  \end{align*}
+
+  The verifier recomputes \( e \) and checks
+
+  \begin{align*}
+  \text{(b)}\quad  & s_m G + s_r\,pk = e C + T_C, &
+  \text{(c)}\quad  & s_r G = e R + T_R, \\
+  \text{(k)}\quad  & s_{sk} G = T_{key} + e\,pk, &
+  \text{(a')}\quad & e(s_m A + s_b G - C_1,\; Y)\cdot e(e A,\; X)\cdot e(-e B,\; g_2) = 1,
+  \end{align*}
+
+  after rejecting non-canonical scalars, off-curve points, and \( A = O
+  \), \( B = O \), \( pk = O \), \( R = O \).  One commitment \( C_1 \)
+  carries both credential exponents; the nonce \( m_t \) is shared
+  between \( C_1 \) and \( T_C \), and \( r_t \) between \( T_C \) and
+  \( T_R \).
+
+  *Completeness.* \( s_m A + s_b G - C_1 = e (m A + b G) = e P \), so
+  (a') is \( \big[ e(P, Y)\, e(A, X) / e(B, g_2) \big]^{e} = 1 \) by
+  Theorem 1'.  Relations (b), (c), (k) are the standard Schnorr
+  identities.
+
+  *Statement (HVZK).* Given \( (A, B, P, pk, R, C, \mathrm{ctx}) \) and
+  a challenge \( e \), the simulator draws \( s_m, s_b, s_r, s_{sk} \)
+  uniform on \( \mathbb{Z}_q \) and sets
+
+  \[ C_1 = s_m A + s_b G - e P, \quad T_C = s_m G + s_r\,pk - e C, \quad
+     T_R = s_r G - e R, \quad T_{key} = s_{sk} G - e\,pk.  \]
+
+  The simulated transcript is distributed identically to an honest
+  transcript with the same challenge.
+
+  *Proof.* In an honest transcript with fixed witness and challenge,
+  each response is a uniform nonce plus a constant, so the four
+  responses are uniform and independent, and the four commitments are
+  the unique points satisfying the verification equations for those
+  responses.  The simulator samples responses from the same distribution
+  and solves the same equations.  \( \blacksquare \) The NIZK in the
+  random-oracle model follows exactly as in the corollary at the end of
+  Part II, with \( e \) programmed on the transcript.
+
+  *Remark (what the simulator needs, and what the old proof leaked).*
+  The simulator needs \( P \), which is public: \( P = e^{-1}(s_m A +
+  s_b G - C_1) \).  The transcript therefore reveals exactly \( (A, B,
+  P, pk, R, C) \) and nothing else, and Theorem 2' says \( (A, B, P) \)
+  is independent of \( m \).  The pre-A' proof published a separate
+  commitment \( A_{ps} = m_t A \) with the response \( s_m \), from
+  which any observer computes \( m A = e^{-1}(s_m A - A_{ps}) \), a
+  candidate test on \( m \) needing neither the second signature point
+  nor any issuer key (review finding R2).  Folding \( b_t G \) into the
+  same commitment is what removes the test: the only derivable point is
+  \( P \), which every candidate explains.
+
+
+2.7 Theorem R-sound (Special Soundness and Non-Reusability)
+───────────────────────────────────────────────────────────
+
+  *Statement.* From two accepting transcripts with the same \( (A, B,
+  pk, R, C, C_1, T_C, T_R, T_{key}) \) and challenges \( e \neq e' \),
+  the extractor computes
+
+  \[ m^\ast = \frac{s_m - s'_m}{e - e'}, \quad b^\ast = \frac{s_b -
+     s'_b}{e - e'}, \quad r^\ast = \frac{s_r - s'_r}{e - e'}, \quad
+     sk^\ast = \frac{s_{sk} - s'_{sk}}{e - e'} \]
+
+  such that \( pk = sk^\ast G \), \( (R, C) = (r^\ast G,\ m^\ast G +
+  r^\ast pk) \), and \( e(A,\; X + m^\ast Y) = e(B - b^\ast Y_1,\; g_2)
+  \).  Hence \( (A,\ B - b^\ast Y_1) \) is a plain PS signature on the
+  \( m^\ast \) encrypted in \( E \).
+
+  *Proof.* Dividing the two instances of (a'):
+
+  \[ e\big((s_m - s'_m) A + (s_b - s'_b) G,\; Y\big)\cdot e\big((e - e')
+     A,\; X\big)\cdot e\big(-(e - e') B,\; g_2\big) = 1 .  \]
+
+  Raising to the power \( (e - e')^{-1} \): \( e(m^\ast A + b^\ast G,
+  Y)\, e(A, X) = e(B, g_2) \), i.e.  \( e(A, X + m^\ast Y)\, e(b^\ast G,
+  Y) = e(B, g_2) \).  Since \( e(b^\ast G, Y) = e(b^\ast Y_1, g_2) \),
+  this is \( e(A, X + m^\ast Y) = e(B - b^\ast Y_1, g_2) \), and \( A
+  \neq O \) by the guard.  Relations (b), (c), (k) extract \( r^\ast,
+  sk^\ast \) and the same \( m^\ast \) exactly as in Theorem 4.  \(
+  \blacksquare \)
+
+  *Corollary (registration soundness).* An adversary that produces an
+  accepting registration without holding a credential on the encrypted
+  identity yields, through the forking lemma[5], a PS forgery \( (A, B -
+  b^\ast Y_1) \) on \( m^\ast \) under the published key \( (X, Y, Y_1)
+  \).  Registration soundness therefore reduces to PS unforgeability for
+  a key that includes \( y G \), the committed-message key form of
+  Pointcheval–Sanders (Section 6.1 of the 2016 paper, under its
+  Assumption 2), not to the plain scheme's assumption.
+
+  *Corollary (non-reusability, sketch).* A party that has learned \( m
+  \) and sees a registration holds \( (A, B, P) \) and hence \( b G = P
+  - m A \).  Producing a fresh accepting registration on \( m \)
+  requires, by special soundness, knowledge of a blinding \( b' \) for
+  some pair \( (A', B') \) with \( (A', B' - b' Y_1) \) a PS signature
+  on \( m \).  Stripping \( B \) needs \( b Y_1 = y (b G) \) from \( b G
+  \) and \( Y_1 = y G \), a computational Diffie–Hellman instance;
+  rerandomizing \( (A, B) \) by \( a' \) leaves the blinding \( a' b \)
+  unknown.  Identity disclosure therefore stops conferring registration
+  authority under an honest issuer (review finding R3).  It does not
+  stop the issuer itself from certifying the same identity twice; that
+  remains a policy question.  A full reduction is a phase-6 obligation
+  of the A' plan and is not claimed here.
+
+
+2.8 Theorem R-comp (Composition of the Credential, Ciphertext and Key Relations)
+────────────────────────────────────────────────────────────────────────────────
+
+  *Statement.* Relations (a'), (b), (c), (k) under one challenge form a
+  sigma protocol for the conjunction
+
+  \[ \exists\, (m, b, r, sk):\quad B = xA + y(mA + bG),\quad (R, C) =
+     (rG,\ mG + r\,pk),\quad pk = sk\,G, \]
+
+  with special soundness and honest-verifier zero-knowledge.  In
+  particular an accepting registration proves that the /same/ \( m \) is
+  certified by the presentation and encrypted in \( E \), and that the
+  registrant holds \( sk \) for \( pk \).
+
+  *Proof.* AND-composition of sigma protocols under a common challenge
+  preserves both properties.  The shared nonce \( m_t \) makes the \( m
+  \) extracted from (a') and from (b) the same scalar \( (s_m - s'_m)/(e
+  - e') \); the shared \( r_t \) does the same for \( r \) between (b)
+  and (c).  The simulator of Theorem R-HVZK already simulates all four
+  commitments from the same responses.  \( \blacksquare \)
+
+
+2.9 Sanity Check (py_ecc on BN254)
 ──────────────────────────────────
+
+  The block keeps \( m, x, y, X, Y, G_1, G_2 \) and `rand' defined for
+  the later blocks.  It samples \( h \) as a known multiple of \( G \)
+  so that step 3 can exhibit the second opening of Theorem 2'; a real
+  issuer never reveals that logarithm.
 
   ┌────
   │ import secrets, hashlib
   │ from py_ecc.bn128 import bn128_curve as bc
-  │ from py_ecc.bn128 import pairing
+  │ from py_ecc.bn128 import pairing, FQ12
   │ 
   │ ORDER = bc.curve_order
   │ G1, G2 = bc.G1, bc.G2
@@ -319,65 +616,102 @@ Table of Contents
   │ def rand():
   │     return secrets.randbelow(ORDER - 1) + 1
   │ 
-  │ # Issuer key pair
+  │ # Issuer key pair: (X, Y) in G2 as before, plus the G1 image Y1 = y G
   │ x, y = rand(), rand()
   │ X, Y = multiply(G2, x), multiply(G2, y)
+  │ Y1 = multiply(G1, y)
   │ 
-  │ # Alice's identity and PS signature sigma = (h, (x + m y) h)
+  │ # Alice's identity and PS credential sigma = (h, (x + m y) h).  This check
+  │ # knows log_G h (it samples h as a multiple of G) and uses it only for the
+  │ # perfect-hiding witness in step 3; a real issuer keeps that log secret.
   │ m = int(hashlib.sha256(b"Alice Johnson | Alberta | AIC-2026").hexdigest(), 16) % ORDER
-  │ h = multiply(G1, rand())
+  │ log_h = rand()
+  │ h = multiply(G1, log_h)
   │ sigma = (h, multiply(h, (x + m * y) % ORDER))
   │ 
-  │ # Rerandomize with t != 0
+  │ def present(sigma, a, b):                 # (A, B) = (a sigma_1, a sigma_2 + b Y1)
+  │     return (multiply(sigma[0], a), add(multiply(sigma[1], a), multiply(Y1, b)))
+  │ 
+  │ def masked_verify(A, B, m, b):            # Theorem 1': e(B, g2) == e(A, X) e(mA + bG, Y)
+  │     P = add(multiply(A, m), multiply(G1, b))
+  │     return pairing(G2, B) == pairing(X, A) * pairing(Y, P)
+  │ 
+  │ def raw_verify(S1, S2, m):                # the pre-A' candidate test: e(S1, X + mY) == e(S2, g2)
+  │     return pairing(add(X, multiply(Y, m)), S1) == pairing(G2, S2)
+  │ 
+  │ # --- 1. Theorem 1': the honest presentation satisfies the masked equation ---
+  │ a, b = rand(), rand()
+  │ A, B = present(sigma, a, b)
+  │ assert not eq(A, bc.Z1) and not eq(B, bc.Z1)
+  │ assert masked_verify(A, B, m, b), "Theorem 1' FAILED"
+  │ print("Theorem 1' (masked completeness):    PASS")
+  │ 
+  │ # --- 2. Lemma 2 and R1: the raw test identifies t*sigma but not (A, B) ---
   │ t = rand()
   │ sigma_p = (multiply(sigma[0], t), multiply(sigma[1], t))
+  │ assert raw_verify(sigma_p[0], sigma_p[1], m), "Lemma 2: rerandomized pair must verify"
+  │ assert not raw_verify(A, B, m), "R1: the presentation must NOT verify as a signature on m"
+  │ print("Lemma 2 + R1 (raw candidate test):   PASS  (t*sigma identified; (A, B) not)")
   │ 
-  │ # --- Theorem 1: completeness ---
-  │ lhs = pairing(add(X, multiply(Y, m)), sigma_p[0])
-  │ rhs = pairing(G2, sigma_p[1])
-  │ assert lhs == rhs, "Theorem 1 FAILED: rerandomized signature does not verify"
-  │ assert not eq(sigma_p[0], bc.Z1), "Theorem 1 guard: sigma'_1 == O"
-  │ print("Theorem 1 (completeness):            PASS")
+  │ # --- 3. Theorem 2': another identity m' opens the SAME (A, B, P) ---
+  │ m_prime = rand()
+  │ log_A = (a * log_h) % ORDER
+  │ b_prime = (b + (m - m_prime) * log_A) % ORDER
+  │ P = add(multiply(A, m), multiply(G1, b))
+  │ assert eq(P, add(multiply(A, m_prime), multiply(G1, b_prime))), "Theorem 2': P differs"
+  │ assert masked_verify(A, B, m_prime, b_prime), "Theorem 2': (A, B) must verify for m' too"
+  │ print("Theorem 2' (perfect hiding):         PASS  (same (A, B, P) opens to m and m')")
   │ 
-  │ # --- Theorem 2: fresh rerandomization looks like a fresh signing ---
-  │ # Two independent rerandomizations should be indistinguishable from two
-  │ # independent fresh signings.  We check both give valid signatures on m
-  │ # whose sigma_1 components are independent uniform-looking elements.
-  │ t2 = rand()
-  │ sigma_p2 = (multiply(sigma[0], t2), multiply(sigma[1], t2))
-  │ assert not eq(sigma_p[0], sigma_p2[0]), "distinct rerandomizations collide"
-  │ lhs2 = pairing(add(X, multiply(Y, m)), sigma_p2[0])
-  │ rhs2 = pairing(G2, sigma_p2[1])
-  │ assert lhs2 == rhs2
-  │ print("Theorem 2 (unlinkability):           PASS  (two rerandomizations both verify, distinct)")
+  │ # --- 4. Theorem R-sound: two transcripts sharing C1 extract (m*, b*) ---
+  │ m_t, b_t = rand(), rand()
+  │ C1 = add(multiply(A, m_t), multiply(G1, b_t))
+  │ e1, e2 = rand(), rand()
+  │ s_m1, s_b1 = (m_t + e1 * m) % ORDER, (b_t + e1 * b) % ORDER
+  │ s_m2, s_b2 = (m_t + e2 * m) % ORDER, (b_t + e2 * b) % ORDER
+  │ inv = pow((e1 - e2) % ORDER, -1, ORDER)
+  │ m_star, b_star = ((s_m1 - s_m2) * inv) % ORDER, ((s_b1 - s_b2) * inv) % ORDER
+  │ assert m_star == m and b_star == b
+  │ assert raw_verify(A, add(B, neg(multiply(Y1, b_star))), m_star), "R-sound: not a PS signature"
+  │ print("Theorem R-sound (extraction):        PASS  ((A, B - b* Y1) is a PS signature on m*)")
   │ 
-  │ # --- Theorem 1 guard: the trivial signature (t = 0) is degenerate ---
-  │ zero_sig = (bc.Z1, bc.Z1)
-  │ lhs0 = pairing(add(X, multiply(Y, m)), zero_sig[0])   # pairing with O -> 1_GT
-  │ rhs0 = pairing(G2, zero_sig[1])                       # pairing with O -> 1_GT
-  │ # The pairing equation holds for ANY m -- this is why the guard matters
-  │ assert lhs0 == rhs0
-  │ # But the registration contract rejects it because sigma'_1 == O:
-  │ rejected = eq(zero_sig[0], bc.Z1)
-  │ assert rejected
-  │ print("Theorem 1 guard (sigma'_1 != O):     PASS  (trivial signature rejected by guard)")
+  │ # --- 5. The guard: with A = O the masked equation holds for EVERY m ---
+  │ A0, B0 = bc.Z1, multiply(Y1, b)          # what a = 0 would publish
+  │ assert masked_verify(A0, B0, m, b) and masked_verify(A0, B0, m_prime, b)
+  │ assert eq(A0, bc.Z1)                     # ... which is why the contract rejects A = O
+  │ print("Guard (A != O):                      PASS  (A = O verifies for every m; rejected)")
+  │ 
+  │ # --- 6. Theorem R-HVZK: the simulator needs only (A, B, P) and e ---
+  │ e_s, s_m_s, s_b_s = rand(), rand(), rand()
+  │ C1_s = add(add(multiply(A, s_m_s), multiply(G1, s_b_s)), neg(multiply(P, e_s)))
+  │ lhs = add(add(multiply(A, s_m_s), multiply(G1, s_b_s)), neg(C1_s))     # == e_s * P
+  │ prod = pairing(Y, lhs) * pairing(X, multiply(A, e_s)) * pairing(G2, neg(multiply(B, e_s)))
+  │ assert prod == FQ12.one(), "R-HVZK: simulated transcript must verify"
+  │ print("Theorem R-HVZK (simulator):          PASS  (accepting transcript from (A, B, P) alone)")
   └────
 
   ┌────
-  │ Theorem 1 (completeness):            PASS
-  │ Theorem 2 (unlinkability):           PASS  (two rerandomizations both verify, distinct)
-  │ Theorem 1 guard (sigma'_1 != O):     PASS  (trivial signature rejected by guard)
+  │ Theorem 1' (masked completeness):    PASS
+  │ Lemma 2 + R1 (raw candidate test):   PASS  (t*sigma identified; (A, B) not)
+  │ Theorem 2' (perfect hiding):         PASS  (same (A, B, P) opens to m and m')
+  │ Theorem R-sound (extraction):        PASS  ((A, B - b* Y1) is a PS signature on m*)
+  │ Guard (A != O):                      PASS  (A = O verifies for every m; rejected)
+  │ Theorem R-HVZK (simulator):          PASS  (accepting transcript from (A, B, P) alone)
   └────
 
 
-  *How to read the output:* Three PASS lines.  The first confirms
-  Theorem 1's pairing identity on a random rerandomization.  The second
-  confirms two fresh rerandomizations are distinct and both verify (a
-  minimal demonstration of the unlinkable-yet-valid property).  The
-  third demonstrates /why/ the \( \sigma'_1 \neq O \) check is
-  mandatory: the pairing equation is trivially satisfied by \( (O, O) \)
-  for any \( m \), so only the explicit guard prevents this degenerate
-  signature from passing.
+  *How to read the output:* Six PASS lines.  The first is Theorem 1' on
+  an honest presentation.  The second is the R1 witness: the raw PS test
+  identifies a rerandomized pair from \( m \) alone and fails on the
+  presentation.  The third is Theorem 2' made concrete: a second
+  identity \( m' \) with blinding \( b' = b + (m - m')\log_G A \) opens
+  the /same/ \( (A, B, P) \) and passes the masked equation, so the
+  triple carries no information about which identity was presented.  The
+  fourth extracts \( (m^\ast, b^\ast) \) from two transcripts sharing \(
+  C_1 \) and verifies \( (A, B - b^\ast Y_1) \) as a plain PS signature
+  (Theorem R-sound).  The fifth shows why the \( A \neq O \) guard is
+  mandatory: the masked equation holds for every \( m \) at \( A = O \).
+  The sixth runs the Theorem R-HVZK simulator from \( (A, B, P) \) and a
+  challenge alone and checks that its transcript verifies.
 
 
 3 Part II: Chaum-Pedersen Re-Encryption Correctness
@@ -725,9 +1059,9 @@ Table of Contents
   proved above:
 
   ┌────
-  │ KYC ceremony:   issuer signs m     -->  sigma on m                 (q-SDH)
-  │ Fountain:       rerandomize sigma  -->  sigma' on same m           (Theorem 1, 2)
-  │ Registration:   PS + NIZK check    -->  E_alice bound to same m    (PS verify + NIZK soundness)
+  │ KYC ceremony:   issuer signs m     -->  sigma on m                 (PS-CM unforgeability)
+  │ Fountain:       present sigma      -->  (A, B) hiding m            (Theorems 1', 2')
+  │ Registration:   masked-PS NIZK     -->  E_alice bound to same m    (Theorems R-sound, R-comp)
   │ approve(Bob):   Alice re-encrypts  -->  E_bob                      (Theorem 3)
   │                 Chaum-Pedersen     -->  verified on chain          (Theorems 3, 4, 5)
   │ Decryption:     Bob computes M     -->  M = C_b - sk_bob * R_b     (ElGamal correctness)
@@ -740,9 +1074,9 @@ Table of Contents
 
   *Statement.* Suppose the BUCK contract:
   1. holds a registered credential \( E_{\text{alice}} = (R_a, C_a) \)
-     together with \( pk_{\text{alice}} \) and a PS signature \( \sigma'
-     \) that verified at registration time against a trusted issuer
-     public key \( (X, Y) \);
+     together with \( pk_{\text{alice}} \), accepted at registration
+     time with a presentation \( (A, B) \) and a registration NIZK that
+     verified against a trusted issuer public key \( (X, Y, Y_1) \);
   2. accepts a Chaum-Pedersen proof \( \pi \) supplied by \(
      \texttt{msg.sender} = \) Alice, with spender \( pk_{\text{bob}} \)
      and submitted ciphertext \( E_{\text{bob}} = (R_b, C_b) \).
@@ -750,16 +1084,17 @@ Table of Contents
   Then, under the DLog assumption on \( G_1 \) and in the ROM, there
   exists \( M = m \cdot G \) such that \[ C_a - sk_{\text{alice}} \cdot
   R_a \;=\; M \;=\; C_b - sk_{\text{bob}} \cdot R_b, \] and the scalar
-  \( m \) is the issuer-certified identity scalar covered by \( \sigma'
-  \).
+  \( m \) is an identity scalar the issuer certified.
 
-  *Proof sketch.* The registration check evaluates \( e(\sigma'_1, X + m
-  Y) = e(\sigma'_2, g_2) \) together with a NIZK that binds the same \(
-  m \) to \( E_{\text{alice}} \) (so \( C_a - sk_{\text{alice}} R_a = m
-  \cdot G \)); existential unforgeability of PS under q-SDH ensures \( m
-  \) is the scalar the issuer signed.  The contract reads \(
-  E_{\text{alice}} \) from storage, not calldata, so the value is
-  frozen.
+  *Proof sketch.* By Theorems R-sound and R-comp, an accepting
+  registration yields (through the forking lemma) a single witness \(
+  (m, b, r, sk) \) with \( C_a - sk_{\text{alice}} R_a = m \cdot G \)
+  and \( (A, B - b Y_1) \) a plain PS signature on \( m \) under \( (X,
+  Y) \); PS-CM unforgeability ensures \( m \) is a scalar the issuer
+  signed.  The verifier never sees \( m \): it checks the masked
+  equation (a'), not a signature against a visible message.  The
+  contract reads \( E_{\text{alice}} \) from storage, not calldata, so
+  the value is frozen.
 
   Theorem 4 (special soundness) plus the forking lemma reduction to DLog
   gives: from any adversary producing an accepting \( \pi \) with
@@ -908,7 +1243,12 @@ Table of Contents
   Membership of \( M \) is the statement "\( M \) is a genuine
   KYC-registered Identity" – the load-bearing addition over the earlier
   account-pinned spend, and the half that makes a colluding counterparty
-  /un-spendable/ rather than merely un-nameable.
+  /un-spendable/ rather than merely un-nameable.  A leaf computed from
+  \( M \) at `register' would reveal \( M \) to whoever computes it,
+  reintroducing the candidate test of Lemma 2's remark one layer up;
+  registration therefore rejects a nonzero caller-supplied leaf, and
+  admission to the accumulator is a separate certification step, not a
+  by-product of the hiding presentation.
 
   *Identity primitives (recap, Parts I-III).* A registered account is \(
   (\text{addr},\ pk = sk\,G,\ E_{\text{addr}} = (rG,\ M + r\,pk)) \): an
@@ -1501,30 +1841,38 @@ Table of Contents
 6 Security Assumptions Summary
 ══════════════════════════════
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Theorem                                     Primitive                      Assumption needed                        Conditional on crypto?       
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   Theorem 1 (PS completeness)                 PS                             bilinearity of \( e \)                   *no* (unconditional)         
-   Theorem 2 (PS unlinkability)                PS                             prime-order \( G_1 \), uniform \( t \)   *no* (information-theoretic) 
-   Theorem 3 (CP completeness)                 CP                             group axioms                             *no* (unconditional)         
-   Theorem 4 (CP special soundness)            CP                             none for extractor; DLog for             DLog (only for reduction)    
-                                                                              cheating-prover reduction                                             
-   Theorem 5 (CP HVZK)                         CP                             uniform \( k_1, k_2 \)                   *no* (perfect simulation)    
-   NIZK corollary                              CP + FS                        ROM                                      ROM                          
-   Theorem 6 (end-to-end)                      PS + CP                        q-SDH (PS unforgeability), DLog, ROM     yes                          
-   Transfer mutual-decryptability (cor.)       ElGamal + CP                   ElGamal correctness; Theorem 6           DLog, ROM                    
-   Theorem 7 (mint addressing + anti-framing)  ElGamal + Okamoto              group axioms; Schnorr/Okamoto soundness  yes (binding only)           
-   Theorem 8 (deposit-coupling soundness)      Okamoto-in-SNARK + membership  SNARK knowledge soundness, DLog, ROM     yes                          
-   Theorem 9 (depositor-binding soundness)     Okamoto + membership           SNARK knowledge soundness,               yes                          
-                                               + Schnorr                      Schnorr EUF-CMA (DLog + ROM)                                          
-   Theorem 10 (nullifier + graph privacy)      Poseidon-PRF                   ROM (Poseidon pre-image)                 ROM                          
-   Theorem 11 (mutual decryptability)          ElGamal                        ElGamal correctness; Schnorr EUF-CMA     DLog, ROM                    
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Every assumption on the "yes" rows is already load-bearing for
-  Ethereum itself (ECDSA on secp256k1 assumes DLog; every pairing-based
-  SNARK verifier on L1 uses the same ROM reductions; every existing
-  BLS-based rollup assumes q-SDH-class primitives).  Alberta Buck
-  introduces /no novel/ cryptographic assumption.
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Theorem                                       Primitive                      Assumption needed                                         Conditional on crypto?            
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Theorem 1 (PS completeness, wallet-internal)  PS                             bilinearity of \( e \)                                    *no* (unconditional)              
+   Theorem 1' (masked completeness)              PS + \( Y_1 \)                 bilinearity of \( e \); \( A \neq O \)                    *no* (unconditional)              
+   Lemma 2 (fresh-signature distribution)        PS                             prime-order \( G_1 \), uniform \( t \)                    *no*; hides nothing about \( m \) 
+   Theorem 2' (presentation hiding)              PS + \( Y_1 \)                 prime-order \( G_1 \), uniform \( a, b \)                 *no* (statistical, \( 1/q \))     
+   Theorem R-HVZK (registration ZK)              masked PS + FS                 uniform nonces; ROM for NIZK                              ROM                               
+   Theorem R-sound (registration soundness)      masked PS                      none for extractor; PS-CM for forgery, CDH for non-reuse  PS-CM, CDH (reductions)           
+   Theorem R-comp (composition)                  masked PS + CP                 shared nonces                                             as R-HVZK, R-sound                
+   Theorem 3 (CP completeness)                   CP                             group axioms                                              *no* (unconditional)              
+   Theorem 4 (CP special soundness)              CP                             none for extractor; DLog for                              DLog (only for reduction)         
+                                                                                cheating-prover reduction                                                                   
+   Theorem 5 (CP HVZK)                           CP                             uniform \( k_1, k_2 \)                                    *no* (perfect simulation)         
+   NIZK corollary                                CP + FS                        ROM                                                       ROM                               
+   Theorem 6 (end-to-end)                        masked PS + CP                 PS-CM (PS unforgeability), DLog, ROM                      yes                               
+   Transfer mutual-decryptability (cor.)         ElGamal + CP                   ElGamal correctness; Theorem 6                            DLog, ROM                         
+   Theorem 7 (mint addressing + anti-framing)    ElGamal + Okamoto              group axioms; Schnorr/Okamoto soundness                   yes (binding only)                
+   Theorem 8 (deposit-coupling soundness)        Okamoto-in-SNARK + membership  SNARK knowledge soundness, DLog, ROM                      yes                               
+   Theorem 9 (depositor-binding soundness)       Okamoto + membership           SNARK knowledge soundness,                                yes                               
+                                                 + Schnorr                      Schnorr EUF-CMA (DLog + ROM)                                                                
+   Theorem 10 (nullifier + graph privacy)        Poseidon-PRF                   ROM (Poseidon pre-image)                                  ROM                               
+   Theorem 11 (mutual decryptability)            ElGamal                        ElGamal correctness; Schnorr EUF-CMA                      DLog, ROM                         
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  DLog, DDH, the ROM and SNARK knowledge soundness are already
+  load-bearing for Ethereum itself (ECDSA on secp256k1 assumes DLog;
+  every pairing-based SNARK verifier on L1 uses the same ROM
+  reductions).  PS-CM is not: it is the credential scheme's own
+  assumption, in the committed-message key form that publishing \( Y_1
+  \) requires, and adopting it is a decision recorded in the A' plan.
+  The earlier statement that Alberta Buck introduces no novel
+  cryptographic assumption is withdrawn.
 
 
 7 Implementation Notes
@@ -1536,9 +1884,11 @@ Table of Contents
   The theorems assume a well-formed verifier.  Three conditions on the
   on-chain code are load-bearing:
 
-  1. *Registration: \( \sigma'_1 \neq O \).* Required by Theorem 1's
-     non-degeneracy argument.  A missing check admits the trivial
-     signature attack (see Identity doc, Attack 9 / Link 1).
+  1. *Registration: \( A \neq O \) and \( B \neq O \).* Required by
+     Theorem 1's argument: at \( A = O \) the masked equation holds for
+     every \( m \).  A missing check admits the trivial presentation
+     attack (the Identity doc's Attack 9 / Link 1, with \( a = 0 \) in
+     place of \( t = 0 \)).
 
   2. *Registration: \( G_2 \) subgroup check.* The `ecPairing'
      precompile (post-EIP-197) validates that \( X, Y \) lie in the
@@ -1557,11 +1907,16 @@ Table of Contents
 7.2 What the Prover Must Enforce
 ────────────────────────────────
 
-  • *Uniform randomness for \( t, k_1, k_2, r_b \).* Theorems 2 and 5
-    depend on uniform distributions.  A biased RNG converts statistical
-    unlinkability into a detectable correlation and converts perfect
-    HVZK into approximate HVZK with an adversarial advantage
-    proportional to the bias.
+  • *Uniform, fresh randomness for \( a, b, m_t, b_t, r_t, sk_t, k_1,
+    k_2, r_b \).* Theorems 2', R-HVZK and 5 depend on uniform
+    distributions, and Theorem 2' additionally on \( b \) never being
+    reused across accounts (a reused \( b \) gives \( P_1 - P_2 = m(A_1
+    - A_2) \), a candidate test).  A biased RNG converts the hiding into
+    a detectable correlation and converts perfect HVZK into approximate
+    HVZK with an adversarial advantage proportional to the bias.
+  • *Never publish \( \sigma \) or a rerandomization of it.* Lemma 2's
+    remark: any such pair is a candidate test on \( m \).  Backups,
+    receipts and demos must carry the presentation or nothing.
 
   • *Fiat-Shamir domain separation.* The hash input must include all
     public inputs and context (\( \texttt{msg.sender}, \texttt{spender},
@@ -1607,10 +1962,12 @@ Table of Contents
   layer (a compelled or breached issuer cannot map its issued identities
   to chain accounts), and the third-party non-disclosure of A2 Notes –
   is /computational/, reducing to DDH (hence DLog) on \( \mathbb{G}_1
-  \).  Only Theorem 2 (PS rerandomization unlinkability) is
-  information-theoretic and survives unconditionally.  This asymmetry
-  has a sharp consequence against a powerful, patient adversary (a state
-  or military actor with archival access).
+  \).  Only Theorem 2' (the hiding of the presentation) is
+  information-theoretic and survives unconditionally; the pre-A'
+  published pair was candidate-testable classically, by anyone holding
+  \( m \), with no break at all.  This asymmetry has a sharp consequence
+  against a powerful, patient adversary (a state or military actor with
+  archival access).
 
   The on-chain credentials \( E_{\text{addr}} = (rG,\ M + r\,pk) \) are
   permanent public history.  An adversary who learns the /plaintext/
@@ -1626,9 +1983,9 @@ Table of Contents
   against \( \mathbb{G}_1 \) – collapses that DDH decision into a cheap
   test, retroactively de-anonymising /all past/ identity and A2-Note
   traffic from the harvested \( \{M_i\} \) plus the archived chain.  The
-  PS layer's statistical unlinkability is unaffected, but PS
-  unlinkability does not hide the \( M \leftrightarrow E_{\text{addr}}
-  \) relation; only the ElGamal layer does, and only computationally.
+  presentation's hiding is unaffected, but it does not hide the \( M
+  \leftrightarrow E_{\text{addr}} \) relation; only the ElGamal layer
+  does, and only computationally.
 
   Two points are worth recording for the threat model:
 
@@ -1668,11 +2025,20 @@ for registration or spend authorization without \( \sigma \)
 [2] Public (recoverable from \( m \)); the KYC-registered anchor
 
 [3] Write-capability secret: authorizes account registration.  Held only
-by the Identity owner; never disclosed to counterparties
+by the Identity owner; never disclosed to counterparties and never
+published: the holder publishes the presentation \( (A, B) \)
 
 [4] Pointcheval, D. and Sanders, O.  "Short Randomizable Signatures."
-CT-RSA 2016, LNCS 9610, pp. 111-126.  Theorem 4.2 establishes EUF-CMA
-security under the q-SDH assumption in bilinear groups.
+CT-RSA 2016, LNCS 9610, pp. 111-126.  The single-message scheme is
+proved EUF-CMA under that paper's Assumption 1, an interactive
+LRSW-style assumption in type-3 bilinear groups (v1.0 of this document
+attributed it to q-SDH; that was wrong).  Section 6.1 (signatures on
+committed messages) publishes \( y G \) in \( G_1 \) as the A' key
+does and proves security under the stronger Assumption 2.
+Pointcheval, D. and Sanders, O.  "Reassessing Security of Randomizable
+Signatures."  CT-RSA 2018, gives non-interactive q-type formulations
+for modified variants; whether the key form used here is covered by
+one of them is part of the phase-6 review.
 
 [5] Pointcheval, D. and Stern, J.  "Security Arguments for Digital
 Signatures and Blind Signatures."  Journal of Cryptology 13(3),
