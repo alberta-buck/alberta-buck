@@ -161,8 +161,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
      properties we believe are jointly new for a payment system:
      evidence /exists/ for every payment; /only/ the direct participants
      hold it; and it is /refusable/: without a participant's keys,
-     surrendered or compelled, the ledger is computationally silent
-     forever.  We argue this is the right cryptographic substrate for
+     surrendered or compelled, the ledger is computationally silent,
+     under DDH, for as long as that assumption stands.  We argue this
+     is the right cryptographic substrate for
      due process, and the right failure mode under unjust process.
    - *Identity-M binding* (Sec. [[#sec:identity-m]]): the inversion that
      makes the rest practical.  One gadget (prove a re-encryption of a
@@ -239,8 +240,8 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   KYC office that once certified Alice's identity cannot reconstruct her
   payments; we prove (Theorem [[thm:issuer-blind]]) that even a /fully
   breached/ identity office, holding every certificate it ever issued
-  plus the entire blockchain, learns nothing about who transacted with
-  whom.  A court that needs the receipt has exactly one place to get it:
+  plus the entire blockchain, gains only a negligible advantage, under
+  DDH, in learning who transacted with whom.  A court that needs the receipt has exactly one place to get it:
   from Alice, or from Bob, by lawful order directed at that person.
 
   *Third, the seal answers to its holders---and only its holders.*
@@ -328,16 +329,26 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   - A new key pair \((sk, pk)\).
   - A fresh ElGamal[fn:ElGamal] encryption \( E = (rG, M + r \cdot pk) \)
     of the same \( M = mG \).
-  - A statistically unlinkable rerandomization of the PS signature.
+  - A blinded /presentation/ \( (A, B) = (a\sigma_1,\ a\sigma_2 + b\,yG) \)
+    of the PS signature, with a proof that it presents a credential on
+    the same \( m \) the ciphertext encrypts.
 
-  The rerandomized credential is independently verifiable as having come
-  from the same issuer, yet carries no information linking it to any
-  other derived credential or to the original KYC record.  Even the
-  issuer itself, holding every signature it ever issued plus the entire
-  blockchain, cannot cluster the on-chain accounts back to the same
-  person.  The only people who can recover \( M \) are those to whom it
-  is deliberately disclosed (via the bilateral approve handshake or a
-  note payload); they also receive the off-chain plaintext
+  The presentation is verifiable as a credential from the same issuer,
+  yet it is a uniform pair of points whatever the identity: it carries no
+  information linking it to any other derived account or to the original
+  KYC record, even to a party holding the identity scalar.  (A
+  rerandomised signature alone would not do: it remains a valid signature
+  on \( m \), which the issuer, or any past counterparty, verifies
+  directly.  The presentation is the A' design of the /Proofs/ document,
+  Theorems 1'--2'; an executable two-sided witness -- the old pair
+  identified under the true \( m \), the presentation under none -- is in
+  the /Examples/ document.)  Even the issuer itself, holding every
+  signature it ever issued plus the entire blockchain, cannot cluster the
+  on-chain accounts back to the same person: the credential side is
+  hidden unconditionally, the ciphertext side under DDH (Theorem
+  [[thm:issuer-blind]]).  The only people who can recover \( M \) are
+  those to whom it is deliberately disclosed (via the bilateral approve
+  handshake or a note payload); they also receive the off-chain plaintext
   \( \mathrm{id} \) so they can confirm it matches the issuer's
   certification.
 
@@ -346,7 +357,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   the mint-to-spend time gap without forcing all of a person's activity
   to be linkable.  It is the mechanism that makes issuer-blindness
   (Theorem [[thm:issuer-blind]]) and the targeted nature of compulsion
-  practical.
+  practical.  The presentation's security argument is stated in the
+  /Proofs/ document and awaits independent review; the results below
+  that rest on it are conditional on that review.
 
 #+LATEX: \clearpage
 * Related Work
@@ -415,9 +428,12 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   accounts.  Each account \( X \) stores its owner's Identity
   ElGamal-encrypted under its own key as
   \( E_{\mathrm{addr}}[X] = (R_X, C_X) = (r_X G,\ M_X + r_X\, pk_X) \)
-  with \( pk_X = sk_X G \).  Alongside it sits a Pointcheval-Sanders
-  (PS) credential over \( m \), rerandomised by the client so that not
-  even the issuer can recognise it.  The registry stores a governance-posted
+  with \( pk_X = sk_X G \).  Its registration transcript carries a
+  blinded presentation \( (A, B) \) of the client's Pointcheval-Sanders
+  (PS) credential over \( m \), with a proof of validity: a pair that no
+  holder of \( m \), the issuer included, can test (the rerandomised
+  signature an earlier design published was recognisable to anyone
+  holding \( m \)).  The registry stores a governance-posted
   Merkle root over identity points (\( \mathsf{rt_{id}} \)), with membership
   provable in zero knowledge and updated commit-before-use.  Automatic
   per-registration admission remains pending a proof that the inserted leaf
@@ -432,7 +448,14 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   spends) and is held only by its owner.  The system's security rests
   on the fact that \( m \) alone, without \( \sigma \), is insufficient
   for any mutating operation: an adversary who knows \( m \) can name the
-  Identity but cannot impersonate it.  A /payment/ moves
+  Identity but cannot impersonate it.  This separation is only as good
+  as the registration verifier's refusal to accept a proof from a party
+  holding \( m \) but not \( \sigma \).  The A' registration proof
+  extracts a plain PS signature on \( m \) from any accepting transcript
+  (/Proofs/, Theorem R-sound), so registering without the credential is a
+  PS forgery; the earlier verifier accepted a copied public credential
+  with a fresh proof from anyone who knew \( m \), which would have let a
+  prior counterparty register, deposit and mint in another person's name.  A /payment/ moves
   value \( v \) from payer \( P \) to recipient \( D \).
 
 ** Adversaries and privacy goals
@@ -446,7 +469,8 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+begin_definition
    Three properties, held against adversaries of increasing power:
    - *(Bulk-tracing resistance.)*  /Mallory/, a passive observer with full
-     chain history and unbounded compute but no party's secrets, cannot
+     chain history and polynomial-time computation but no party's secrets,
+     cannot
      reconstruct who paid whom, how much, or link a mint to its spend(s).
    - *(Third-party non-disclosure.)*  Nothing on chain reveals either
      party's Identity point \( M \) to a non-participant, even in
@@ -510,32 +534,41 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    \( m = H(\mathrm{id}) \) once (a PS credential over \( m \) alone)
    and is thereafter done.  The client derives each on-chain account
    /offline/ (a fresh key pair \( (sk, pk) \), a self-formed ElGamal
-   credential \( E_{\mathrm{addr}} = (rG,\ M + r\,pk) \), and a
-   /rerandomised/ credential \( \sigma' \)), without the issuer ever
-   seeing \( pk \).  The issuer's view is therefore, per certified
+   credential \( E_{\mathrm{addr}} = (rG,\ M + r\,pk) \), and a blinded
+   /presentation/ \( (A, B) \) of the credential with its proof
+   \( \pi \)), without the issuer ever seeing \( pk \).  The issuer's view is therefore, per certified
    client \( i \), the tuple \( (\mathrm{id}_i, m_i, M_i, \sigma_i) \)
    (the plaintext identity) plus public chain state.  It holds /no/
    chain addresses.
 
    #+begin_theorem
    <<thm:issuer-blind>>
-   /(Issuer-blindness.)/  Under statistical unlinkability of PS
-   rerandomisation and IND-CPA security of ElGamal on \( \mathbb{G}_1 \)
-   (equivalently DDH), an issuer (even one compelled or wholly
-   breached, in possession of
+   /(Issuer-blindness.)/  Under the hiding of the A' registration
+   presentation (/Proofs/, Theorem 2': for fresh uniform \( (a, b) \) the
+   published \( (A, B) \) and the point \( P \) its proof reveals are
+   independent of \( m \)), zero knowledge of the registration NIZK in the
+   random-oracle model, and IND-CPA security of ElGamal on
+   \( \mathbb{G}_1 \) (equivalently DDH), an issuer (even one compelled or
+   wholly breached, in possession of
    \( \{(\mathrm{id}_i, m_i, M_i, \sigma_i)\}_i \) and the entire chain) 
    has negligible advantage in matching any issued identity \( M_i \) to
-   its on-chain registration \( (pk_j, E_j, \sigma'_j) \).  Compulsion or
+   its on-chain registration \( (pk_j, E_j, A_j, B_j, \pi_j) \).  Compulsion or
    breach yields the /set/ of certified identities but no /map/ to chain
    accounts; deanonymisation remains per-account, requiring that account's
    \( sk \) or a counterparty receipt.
    #+end_theorem
 
    #+begin_proof
-   Two locks.  /Credential lock./  \( \sigma'_j \) is a rerandomisation of
-   some issued \( \sigma_i \); by statistical unlinkability the two carry
-   zero mutual information, so even an unbounded issuer cannot recognise
-   its own signature.  /Plaintext lock./  The issuer /knows/ \( M_i \), so
+   Two locks.  /Credential lock./  The transcript \( (A_j, B_j, \pi_j) \)
+   is simulatable in the random-oracle model from
+   \( (A_j, B_j, P_j, pk_j, E_j) \) alone, and \( (A_j, B_j, P_j) \) is
+   distributed as \( (U_1,\ xU_1 + yU_2,\ U_2) \) whatever \( m \) is
+   (/Proofs/, Theorems 2' and R-HVZK); so it carries no information about
+   which certified \( m_i \) it presents, even to a party holding
+   \( (x, y) \) and every \( m_i \).  (The earlier form of this lock,
+   "statistical unlinkability of PS rerandomisation", was wrong: a
+   rerandomised signature is a valid signature on \( m \), which an issuer
+   holding every \( m_i \) verifies directly.)  /Plaintext lock./  The issuer /knows/ \( M_i \), so
    its task is not decryption but /plaintext-checking/: does
    \( E_j = (R, C) \) encrypt \( M_i \)?  That is deciding whether
    \( (G, pk_j, R, C - M_i) \) is a DDH tuple, and an algorithm answering
@@ -545,14 +578,15 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    an independent DDH decision per (identity, account) pair.
    #+end_proof
 
-   This is what /no trusted opener/ means here: the closest
-   thing to an authority cannot open transactions in bulk, even against
-   itself.  Under compulsion it can only /verify/ a link some party
+   This is what /no trusted opener/ means here, with the A' presentation
+   in place: the closest thing to an authority cannot open transactions
+   in bulk, even against itself.  Under compulsion it can only /verify/ a link some party
    surrenders -- map a receipt-disclosed \( M \) to the real person --
    never /produce/ one.  Two caveats bound the theorem:
 
    - *Computational, not information-theoretic.*  The plaintext lock is
-     DDH; only the credential lock is statistical.  A discrete-log break
+     DDH; only the credential lock is information-theoretic (and its
+     argument is pending independent review).  A discrete-log break
      -- in particular a quantum computer running Shor against
      \( \mathbb{G}_1 \) -- turns the harvested \( \{M_i\} \) plus the
      archived chain into a wholesale, retroactive deanonymisation of
@@ -561,7 +595,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
      identity substrate ahead of cryptanalytic risk is a deployment
      obligation, not an afterthought (Sec. [[#sec:discussion]]).
    - *Retroactive, not prospective.*  Address-blind issuance protects
-     /past/ registrations unconditionally against /future/ issuer
+     /past/ registrations, under DDH, against /future/ issuer
      compromise; but a coerced issuer can change the protocol going
      forward (demand \( pk \) at KYC, record addresses, backdoor
      credentials).  Issuer-blindness is a statement about issuances
@@ -600,7 +634,8 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    an identity point \( M \) /already disclosed/ by a participant's
    receipt, it maps \( M \) to the certified legal person.  It cannot --
    even fully breached -- enumerate, sample, or statistically approximate
-   the payments of any person (Theorem [[thm:issuer-blind]]).  No other
+   the payments of any person (Theorem [[thm:issuer-blind]]; computational,
+   and conditional on the A' presentation's review).  No other
    system component (contracts, verifiers, provers, relayers) holds any
    secret at all.
    #+end_proposition
@@ -612,8 +647,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    all remaining actors -- the compelled issuer with its full KYC corpus,
    all chain history, all registry state -- gains non-negligible
    advantage in identifying either party or linking the payment's mint to
-   its spend.  Destruction is irreversible: the opening material is the
-   /only/ trapdoor, and it never existed anywhere but in the
+   its spend.  Destruction is irreversible: the opening material, the
+   account secrets \( sk \) and the presentation blindings \( b \) are
+   the /only/ trapdoors, and none ever existed anywhere but in the
    participants' custody.
    #+end_proposition
 
@@ -634,7 +670,8 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
      more citizen is coercing one more citizen: publicly, individually,
      through legal process directed at a person who can see it
      happening.  The system makes population-scale financial monitoring
-     not illegal but /unimplementable/.
+     not illegal but /unimplementable/ -- a claim that rests on Theorem
+     [[thm:issuer-blind]], hence on the A' presentation and on DDH.
    - *The last word belongs to the citizen.*  Refusal has personal legal
      cost (contempt, adverse inference), as it should, under
      legitimate process.  But it is /effective/: a citizen facing an
@@ -702,6 +739,15 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
     \( \delta \neq 0 \).
     #+end_definition
 
+    The assumption forbids registering a point of the adversary's
+    choosing; it does not by itself forbid registering under an
+    /existing/ \( M \) whose scalar the adversary has learned, and every
+    counterparty learns \( m \).  That is prevented by the credential:
+    registration requires the A' presentation with its proof, which
+    extracts a PS signature on \( m \) (/Proofs/, Theorem R-sound), and
+    identity disclosure confers no such signature (Sec.
+    [[#sec:identity-m]]).
+
   - *Accounts are envelopes; the identity is the addressee.*  A note
     addressed to \( M_{\mathrm{rec}} \) is spendable from /any/ account
     whose registration binds it to \( m_{\mathrm{rec}} \) -- including
@@ -752,9 +798,10 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   proof, constant cost to verify) that the whole gate is about /this/
   note.  Authorization keys on the identity; the account merely
   carries it.  And because the identity scalar \( m \) conveys no write
-  authority -- only the PS credential \( \sigma \) can authorize account
-  registration or spend -- \( m \) is safe to disclose to every
-  counterparty: the receipt names a person, not a capability.
+  authority -- only the PS credential \( \sigma \), presented under the
+  A' proof, can authorize account registration or spend -- \( m \) is
+  safe to disclose to every counterparty: the receipt names a person, not
+  a capability.
 
 #+LATEX: \clearpage
 * Construction
@@ -1043,7 +1090,8 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   /(Deposit gate soundness.)/  If a coupled spend is accepted, then
   except with negligible probability there exist extractable
   \( (m, sk_{\mathrm{dep}}, b) \) such that: the depositing account is
-  registered with credential binding it to identity scalar \( m \); the
+  registered, under the A' proof, with a credential binding it to
+  identity scalar \( m \); the
   supplied \( eEnc \) decrypts under \( m \) to the point \( M^\ast \)
   committed in \( P = M^\ast + bH \); and \( M^\ast \) is a member of
   the registry accumulator \( \mathsf{rt_{id}} \).  The same \( P \)
@@ -1087,7 +1135,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   decrypt \( eIss \) under \( m_{\mathrm{rec}} \), with the mint binding
   and membership certifying it is the registered minter; A1/A2 issuers
   hold the addressed \( M_{\mathrm{rec}} \) from mint; B1 issuers
-  decrypt \( eDepForIss \).  All receipts are third-party checkable.
+  decrypt \( eDepForIss \).  All receipts are third-party checkable.  A
+  receipt names a /person/ only given unforgeable registration (Sec.
+  [[#sec:identity-m]]).
   #+end_theorem
 
   #+begin_theorem
@@ -1110,9 +1160,12 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   to render a note un-nameable -- in which case it cannot be spent --
   never to make a receipt name an innocent third party: every binding is
   proven over =msg.sender='s /own/ registered credential (mint) or the
-  depositor's /own/ account binding (spend), and Assumption
-  [[asm:grind]] denies the coalition any registered identity at an
-  offset of its choosing.  Receipts are therefore evidence-grade: an
+  depositor's /own/ account binding (spend); registration itself is
+  unforgeable without the credential (the A' proof extracts a PS
+  signature on \( m \), so a prior counterparty who learned an innocent
+  party's \( m \) cannot register in their name -- without this premise
+  the corollary would be vacuous); and Assumption [[asm:grind]] denies
+  the coalition any registered identity at an offset of its choosing.  Receipts are therefore evidence-grade: an
   accepting receipt names a party that actually acted.
   #+end_corollary
 
@@ -1138,8 +1191,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   [[thm:tie]] is Groth16 knowledge-soundness over the two binding
   relations; the A1 uniqueness clause is the face-pinning argument.
   Theorems [[thm:mutual]]--[[thm:privacy]] and the corollary compose
-  these with the mint bindings and the identity-layer results (PS
-  unlinkability, ElGamal IND-CPA, Theorem [[thm:issuer-blind]]).  Full
+  these with the mint bindings and the identity-layer results (the
+  hiding of the registration presentation, /Proofs/ Theorem 2'; ElGamal
+  IND-CPA; Theorem [[thm:issuer-blind]]).  Full
   statements: /Proofs/ Theorems 7--12.
 
 #+LATEX: \clearpage
@@ -1325,7 +1379,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+LATEX: {\scriptsize
    | Component          | Realisation                                                                                                             |
    |--------------------+-------------------------------------------------------------------------------------------------------------------------|
-   | Identity substrate | =IdentityRegistry=: ElGamal credentials, PS verification, governance-posted Poseidon identity root (commit-before-use; automatic certified admission pending) |
+   | Identity substrate | =IdentityRegistry=: ElGamal credentials, blinded PS presentation proofs (A'), governance-posted Poseidon identity root (commit-before-use; automatic certified admission pending) |
    | Batch mint         | =mint_batch[_a2].circom= per pinned N; issuer Schnorr (public) / blinded re-encryption binding + leaf-tie (private)     |
    | Spend              | =spend.circom= (shared, public flavour + B1 issuance commitment, depth 20); nullifier =Poseidon3(rho, idHash, 4242)=      |
    | Deposit sigmas     | =verifyDepositCoupling= (A1/A2), =verifyDepositorBinding= (B1); EIP-196                                                 |
@@ -1506,6 +1560,12 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   - The spend's =face= and recipient account are public (an ERC-20 must
     pay someone a known amount); mitigations are operational (fixed
     denominations, relayed payouts), not cryptographic.
+  - The registration presentation (A') on which issuer-blindness,
+    non-frameability and the read/write separation now rest is
+    implemented across the four backends but its security argument
+    (/Proofs/, Part I) has not been independently reviewed; until it is,
+    those results are conditional.  Its cost is measured: 443,892 gas per
+    registration against 472,630 before it.
   - Refusal-resilience and issuer-blindness are computational (DDH);
     archived ciphertexts are exposed to future cryptanalysis, and the
     KYC corpus is a harvest-now-decrypt-later target.  A
@@ -1793,8 +1853,10 @@ rather than to disposable account keys.
 
 [fn:Pointcheval-Sanders] Pointcheval-Sanders (PS) signatures: a type of
 structure-preserving signature that supports efficient rerandomization, allowing
-the holder to produce unlinkable fresh versions of the credential without the
-issuer's involvement.
+the holder to produce fresh versions of the credential without the issuer's
+involvement.  On their own such versions remain recognisable to anyone holding
+the signed message, so Alberta Buck publishes a blinded presentation with a
+proof (the A' design, /Proofs/ Part I) rather than a rerandomised signature.
 
 [fn:ElGamal] ElGamal encryption: a public-key encryption scheme over elliptic
 curve points that supports re-randomization and is semantically secure under the
