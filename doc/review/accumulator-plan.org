@@ -265,16 +265,53 @@ as re-issuance.
 | Certified record | documentation only | epoch reinterpreted |
 | Registration and binding | none | deliberate |
 
+* What writing the specification settled
+:PROPERTIES:
+:CUSTOM_ID: spec-findings
+:END:
+
+Five things the survey had left open, each of which reduces the work.
+
+1. *Two leaf functions, not one changed function.* Keeping
+   =identity_leaf= exactly as it is for public trees and adding
+   =identity_leaf_salted= alongside it means every committed vector that
+   records the unsalted leaf stays valid. Interface 1's blast radius
+   shrinks from "every vector that records a tree" to the vectors for
+   private trees only.
+2. *No new cryptographic assumption.* Leaf hiding rests on Poseidon as a
+   random oracle, which the Notes nullifier already rests on. The
+   accumulator therefore adds nothing to the assumption set, though it
+   does make the leaf's hiding computational where A's credential lock is
+   information-theoretic. That asymmetry is open question 3.
+3. *No witness service.* Because the leaves are hiding commitments, a
+   private subtree can be published in full. Holders compute their own
+   paths, and the witness-service privacy question the earlier review
+   listed as open does not arise.
+4. *The salt must not derive from the identity.* Deriving it from =m=
+   would let any authority, which knows =m=, recompute every salt and
+   scan. It derives from a wallet secret instead, which also makes it
+   recoverable from seed material. The wallet has no key-derivation
+   helper today, so that is new work in phase 2.
+5. *A root ring is needed, not merely nice.* With periodic attestation,
+   root updates are routine, and a single current root invalidates every
+   proof in flight at each update. The ring size doubles as the
+   protocol's statement of how long a revoked holder can still prove
+   membership, which is open question 1.
+
 * Phases and acceptance
 :PROPERTIES:
 :CUSTOM_ID: phases
 :END:
 
-1. *Specification.* The leaf and its salt, the salt exchange, which
-   subtrees are salted and which are public, the admission authority and
-   update policy, accepted historical roots, revocation and witness
-   updates, the attribute vocabulary, and the insurer envelope. Written
-   before any code, as the A' program's phase 0 was.
+1. *Specification.* Done: [[file:accumulator-spec.org][the accumulator
+   specification]], v0.1, unreviewed. It covers the two leaf functions,
+   the private and public tree classes, the aggregator and the root ring,
+   admission, salt derivation and recovery, revocation, renewal and
+   re-association, publication and witness updates, the attribute
+   vocabulary, both proof statements, the insurer envelope and the credit
+   gate, six security requirements with their assumption accounting, nine
+   conformance tests, and five open questions for the reviewer. Five
+   findings from writing it are recorded below.
 2. *Python.* Salted leaf, salt storage in the wallet, attribute proofs, the
    regulator and its envelope, and a scan test per tree: a party holding
    every certified identity finds nothing.
