@@ -329,6 +329,16 @@ Five things the survey had left open, each of which reduces the work.
    roster, and delegated authority becomes part of the specification,
    because a regulator delegates to community sub-regulators exactly as
    attribute authority is delegated to clubs and congregations.
+   v0.4 adds deployment and governance: one root authority per
+   deployment, which for Alberta Buck is the provincial identity
+   authority and which is as decentralized as whoever holds its key;
+   on-chain enrollment of authorities; an aggregator that is accountable
+   rather than trustless, with omission and forgery made provable by
+   signed subtree roots and a published leaf list; the distinction
+   between delegation rules that bind because they are scope subtrees
+   and rules that are contractual; deployment isolation and recognition;
+   and the statement that the protocol enforces the consistency of the
+   attestation chain but not its accuracy.
 2. *Python.* Salted leaf, salt storage in the wallet, attribute proofs, the
    regulator and its envelope, and a scan test per tree: a party holding
    every certified identity finds nothing.

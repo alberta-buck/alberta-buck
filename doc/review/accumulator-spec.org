@@ -1,4 +1,4 @@
-#+TITLE: Identity accumulator specification, v0.3
+#+TITLE: Identity accumulator specification, v0.4
 #+DATE: 2026-09-20
 #+OPTIONS: toc:3 num:t
 #+PROPERTY: header-args :eval never-export
@@ -17,7 +17,11 @@ test for an identity scalar.
 Status: written before implementation, unreviewed. v0.2 resolved the five
 design questions v0.1 left open. v0.3 sets the parameters from the expected
 posting cadences, and adds delegated authority, which the insurer band
-ladder made unavoidable. Both are in [[#decisions]]. =MUST=, =MUST NOT=,
+ladder made unavoidable. Both are in [[#decisions]]. v0.4 adds deployment
+and governance ([[#governance]]): one root authority per deployment, on-chain
+enrollment, an accountable rather than trustless aggregator, which rules
+bind a delegate and which do not, and the line between the consistency the
+protocol enforces and the accuracy it cannot. =MUST=, =MUST NOT=,
 =SHOULD= and =MAY= are normative. Constants are given as the names already
 in the source, with their current values, so that a conformance test can
 compare rather than guess.
@@ -670,6 +674,14 @@ mode of [[#publication]] removes it.
     while the edge holds and refuses it once the parent clears the
     delegate; a delegate attesting outside its granted scope is refused by
     a verifier that checks the scope subtrees.
+13. *Aggregation is auditable.* Recomputing the posted root from the
+    published leaf list reproduces it; every leaf carries a valid signature
+    from its enrolled authority under an increasing sequence; an omitted
+    enrolled authority and a fabricated subtree root are each detected by
+    comparing that list against the on-chain enrollment set.
+14. *Deployment isolation.* A registration proof made for one registry
+    address or chain id verifies in no other, and the same certified person
+    in two deployments yields two unrelated identity scalars.
 
 * 16 Decisions taken, and the parameters that remain
 :PROPERTIES:
@@ -727,12 +739,151 @@ authority becomes part of the specification ([[#delegation]]).
 
 ** 16.3 What remains open
 
-1. *Who operates the aggregator.* With community authorities it is no longer
-   plausibly a single institution, and the specification does not say who
-   runs it, how an authority is enrolled or evicted, or what recourse an
-   authority has if it is not included in a posting. This is a governance
-   question with a protocol consequence: the aggregator operator can censor
-   an authority by omission.
-2. *The retention correction window*, in days.
-3. *Whether asset classes need a vocabulary of their own*, or whether
+1. *The retention correction window*, in days.
+2. *Whether asset classes need a vocabulary of their own*, or whether
    =BuckCredit='s existing =uint8 assetClass= is the vocabulary.
+3. *The aggregator's publication format*, since accountability
+   ([[#aggregator-trust]]) depends on the leaf list and its signatures
+   being published in a form anyone can recompute against.
+
+Who operates the aggregator, resolved in [[#governance]], was the first
+item here in v0.3.
+
+* 17 Deployment, authority and governance
+:PROPERTIES:
+:CUSTOM_ID: governance
+:END:
+
+** 17.1 One root authority per deployment
+
+A deployment has exactly one root authority. For Alberta Buck that is the
+provincial identity authority, which exists because the deployment is
+provincial. The protocol treats the root as a single address. Whether that
+address is an institution, a multi-signature of several, or a governance
+contract is a property of who holds the key, not of the protocol, and this
+specification =MUST NOT= be read as claiming the root is decentralized. It
+is as decentralized as its holder.
+
+** 17.2 Enrollment is on chain
+
+The root authority enrolls the authorities that may own a subtree, and
+=MUST= record on chain, per authority: its identifier, its posting key, its
+class (private or public, [[#classes]]), and the scope it may attest.
+Eviction =MUST= likewise be on chain.
+
+This is not bureaucracy. An enrollment set that only the aggregator knows
+makes the aggregator unaccountable; an on-chain set is what makes omission
+provable ([[#aggregator-trust]]).
+
+** 17.3 The aggregator, and what it can do
+:PROPERTIES:
+:CUSTOM_ID: aggregator-trust
+:END:
+
+The aggregator combines subtree roots into the root that is posted. It is a
+role, appointed by the root authority, and it has exactly two powers worth
+naming:
+
+- *Censorship by omission.* Leaving an enrolled authority's latest root out
+  of a posting. That authority's members cannot prove membership against
+  any fresh root, so their proofs age out and they stop transacting.
+- *Forgery by inclusion.* Posting a root built over a subtree root its
+  authority never produced, fabricating members of that authority.
+
+Neither is prevented by the structure. Both are made *provable*, which is
+the achievable property:
+
+1. An authority =MUST= sign =(sub_root, sequence, posted_at)= with its
+   enrolled posting key, and the sequence =MUST= increase.
+2. The aggregator =MUST= publish the full list of leaves it combined,
+   each with the signature that authorized it.
+3. Enrollment being on chain, anyone can recompute the posted root from
+   that list, verify every signature, and check that every enrolled
+   authority's latest signed root was included.
+
+A mismatch is then evidence, and the remedy is governance replacing the
+aggregator rather than anything the protocol does by itself. The
+specification =MUST= state this plainly rather than imply the aggregator is
+trustless.
+
+*Alternative considered and rejected.* Each authority posts its own root on
+chain, and the registry keeps a root per authority with no aggregator at
+all. That removes the trusted role entirely and shortens a membership proof
+to the subtree path. It was rejected on two grounds. It costs a transaction
+per authority per posting, which does not scale to community authorities
+posting daily. More importantly it reveals which authority a member belongs
+to, because the verifier must name the root it checks, and authority-hiding
+matters most exactly where the anonymity set is smallest, which is a small
+community. Aggregation buys that hiding, so the aggregator is retained and
+accountability replaces removal.
+
+** 17.4 Delegation rules, and which of them bind
+
+The root authority sets the rules a sub-registry follows, and a
+sub-registry sets the rules its own delegates follow ([[#delegation]]).
+Rules divide into two kinds, and the specification =MUST= keep them
+distinct:
+
+- *Enforceable.* Any rule expressible as membership in a scope subtree:
+  the asset classes a delegate may attest, the face band ceiling it may
+  grant, and any other predicate of the same shape. A verifier that checks
+  the scope subtrees enforces these, and no cooperation from the delegate
+  is required.
+- *Contractual.* Everything else, such as "attest only members of your own
+  community" or "review reserves quarterly". The protocol cannot check
+  them, because the delegate owns its own subtree and may insert what it
+  likes. The parent's remedy is clearing the delegate; a verifier's remedy
+  is declining to accept that delegate at all.
+
+Scope =MUST= live in the parent's subtree, never in the delegate's, so a
+delegate cannot widen its own authority.
+
+** 17.5 Many deployments
+
+The same implementation is deployable by any group that wants its own
+identity authority and its own money: another province, a nation, or a
+community that prefers to define value through the insured assets its own
+members are willing to underwrite.
+
+- *Isolation is automatic.* A registration proof already binds the chain
+  id and the registry address, so a proof made for one deployment verifies
+  in no other. The identity scalar hashes a record that names its issuer,
+  so the same person certified by two deployments holds two unrelated
+  identities, and there is no cross-deployment linkage to remove because
+  none exists.
+- *Recognition is policy.* Deployment B accepts deployment A's identities
+  only if B's root authority enrolls A's authority, which is the delegation
+  mechanism of [[#delegation]] applied at the top. Nothing obliges B to,
+  and nothing prevents it.
+- *A deployment profile* is what a new deployment =MUST= choose: the root
+  authority, the aggregator operator, the depths, the maximum ages per
+  consumer, the face-band ladder, the asset-class vocabulary, the attribute
+  vocabulary, and the class of every subtree.
+
+** 17.6 What the protocol enforces, and what it does not
+
+The backing of the money is a chain of attestations. A credit's face is an
+insurer's claim about an asset; the insurer's authority to make that claim
+is a regulator's attestation; the regulator's authority is the root
+authority's delegation. The chain is explicit, attributable, and rooted in
+one authority per deployment.
+
+The protocol enforces *consistency*:
+
+- an insurer cannot write a credit outside the envelope its regulator
+  attested;
+- a delegate cannot claim scope its parent did not grant;
+- an identity cannot register without a credential it holds;
+- no party can test another's identity against public data.
+
+The protocol does not enforce *accuracy*. Nothing in it makes an insurer's
+reserves real, a regulator's review diligent, or an attestation honest. A
+group whose attestations are accurate ends with a currency backed by assets
+that exist. A group whose attestations are not ends with one backed by
+claims that do not, and the difference appears as a monetary outcome rather
+than as a protocol failure.
+
+That division is deliberate and =MUST NOT= be papered over. The protocol's
+job is to make the chain of claims explicit, attributable and internally
+consistent, so that the consequences of a group's trustworthiness, or its
+absence, fall on the group that chose them.
