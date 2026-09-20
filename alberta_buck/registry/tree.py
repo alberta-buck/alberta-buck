@@ -46,6 +46,37 @@ def identity_leaf(M) -> int:
     return poseidon([x % F_R, y % F_R])
 
 
+def identity_leaf_salted(M, salt: int) -> int:
+    """Compute the hiding leaf commitment Poseidon(M.x, M.y, salt).
+
+    The leaf of a PRIVATE subtree (accumulator specification, section 4):
+    membership is a fact about a person who did not publish it, so the leaf
+    must not be a deterministic function of the identity.  A party holding
+    any set of identity scalars -- including a registry holding every scalar
+    it ever certified -- cannot decide membership without the salt.
+
+    Rationale for a second function rather than a changed one: the unsalted
+    identity_leaf is retained unchanged for PUBLIC subtrees (a regulator's
+    insurers, whose membership they advertise), so every committed vector
+    that records it stays valid.
+
+    Args:
+        M: A BN254 G1 point.
+        salt: A blinding value in [1, F_R).  Zero is refused: it would make
+            the leaf deterministic in a tree declared private.
+
+    Returns:
+        Poseidon hash as a field element in [0, F_R).
+
+    Raises:
+        ValueError: if salt is outside [1, F_R).
+    """
+    if not isinstance(salt, int) or not (1 <= salt < F_R):
+        raise ValueError("salt must be in [1, F_R); 0 makes the leaf deterministic")
+    x, y = point_to_words(M)
+    return poseidon([x % F_R, y % F_R, salt])
+
+
 # --- Tree depths ---------------------------------------------------------- #
 #
 # THREE depths, and they are meant to differ.  This has been mistaken for an
@@ -144,10 +175,11 @@ class IdentityMerkleTree:
             kernel vectors that Rust, Python and JS all replay.
     """
 
-    def __init__(self, depth: int = KYC_SUBTREE_DEPTH) -> None:
+    def __init__(self, depth: int = KYC_SUBTREE_DEPTH, private: bool = False) -> None:
         if depth < 1 or depth > 32:
             raise ValueError(f"depth must be in [1, 32], got {depth}")
         self.depth = depth
+        self.private = private
         self.leaves: List[int] = []
 
         # zeros[d] = root of an all-empty subtree of height d
@@ -198,15 +230,72 @@ class IdentityMerkleTree:
         return idx
 
     def insert_identity(self, M) -> int:
-        """Insert an identity point.
+        """Insert an identity point under the UNSALTED leaf.
+
+        Only valid on a public subtree.  On a private one the leaf would be
+        a deterministic function of the identity, which is the scan the
+        accumulator exists to prevent, so this raises.
 
         Args:
             M: A BN254 G1 point representing the identity.
 
         Returns:
             The leaf's index in the tree.
+
+        Raises:
+            ValueError: if the tree was declared private.
         """
+        if self.private:
+            raise ValueError(
+                "private subtree: use insert_identity_salted; an unsalted leaf "
+                "is a deterministic function of the identity")
         return self.insert_leaf(identity_leaf(M))
+
+    def insert_identity_salted(self, M, salt: int) -> int:
+        """Insert an identity point under the hiding leaf commitment.
+
+        The insertion an authority performs for a private subtree: the holder
+        derives the salt (alberta_buck.wallet.salt) and sends (M, salt); the
+        authority, which knows M already, computes the leaf and inserts it.
+        No proof is required or useful at admission.
+
+        Args:
+            M: A BN254 G1 point representing the identity.
+            salt: The holder's blinding value for THIS subtree.
+
+        Returns:
+            The leaf's index in the tree.
+        """
+        return self.insert_leaf(identity_leaf_salted(M, salt))
+
+    def clear_leaf(self, index: int) -> int:
+        """Clear a leaf to EMPTY_LEAF: the revocation primitive.
+
+        The incremental tree supports no removal, so a revoked member's leaf
+        is set to the empty sentinel and the root recomputed.  The authority
+        must then push the fresh sub-root; until it does, the member can
+        still prove membership against the previously posted root, which is
+        what a consumer's maximum root age bounds.
+
+        Clearing is visible in a published subtree.  It reveals that a
+        member was removed, not which, because the leaf it replaced was a
+        hiding commitment.
+
+        Args:
+            index: Position of the leaf to clear.
+
+        Returns:
+            The leaf value that was cleared.
+
+        Raises:
+            IndexError: if there is no leaf at `index`.
+        """
+        if not 0 <= index < len(self.leaves):
+            raise IndexError(f"no leaf at index {index}")
+        old = self.leaves[index]
+        self.leaves[index] = EMPTY_LEAF
+        self._root_dirty = True
+        return old
 
     def insert_batch(self, leaves: List[int]) -> int:
         """Insert multiple pre-computed leaves atomically.
@@ -372,5 +461,6 @@ __all__ = [
     "IdentityMerkleTree",
     "MembershipProof",
     "identity_leaf",
+    "identity_leaf_salted",
     "EMPTY_LEAF",
 ]

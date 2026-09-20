@@ -28,7 +28,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
 from alberta_buck.registry.tree import (
-    IdentityMerkleTree, MembershipProof, identity_leaf, FEATURE_SUBTREE_DEPTH,
+    IdentityMerkleTree, MembershipProof, identity_leaf, identity_leaf_salted,
+    FEATURE_SUBTREE_DEPTH,
 )
 from alberta_buck.wallet.bn254 import G1, mul, eq
 
@@ -54,6 +55,14 @@ class FeatureRecord:
     leaf_index: int
     attested_at: float
     evidence_hash: Optional[bytes]
+    salt: Optional[int] = None
+
+
+def _key(M) -> Tuple[int, int]:
+    """Hashable key for an identity point, for the authority's own books."""
+    from alberta_buck.wallet.bn254 import point_to_words
+    x, y = point_to_words(M)
+    return (x, y)
 
 
 # ---------------------------------------------------------------------------
@@ -74,11 +83,18 @@ class FeatureAuthority:
     """
 
     def __init__(self, feature_id: str,
-                 tree_depth: int = FEATURE_SUBTREE_DEPTH) -> None:
+                 tree_depth: int = FEATURE_SUBTREE_DEPTH,
+                 private: bool = False) -> None:
         if not feature_id.startswith("feature:"):
             raise ValueError("feature_id must use the 'feature:' prefix convention")
         self.feature_id = feature_id
-        self._tree = IdentityMerkleTree(depth=tree_depth)
+        self.private = private
+        self._tree = IdentityMerkleTree(depth=tree_depth, private=private)
+        # Private subtrees are keyed by a hiding leaf, so the authority keeps
+        # the current association -- identity, salt, leaf index -- in order to
+        # clear and re-insert.  It keeps no history: a superseded salt is
+        # discarded on re-association (accumulator specification, section 8.3).
+        self._by_identity: Dict[Tuple, int] = {}
         self._records: Dict[int, FeatureRecord] = {}  # leaf_index -> record
 
     # -- properties ----------------------------------------------------------
@@ -98,6 +114,7 @@ class FeatureAuthority:
     def attest(
         self,
         M,                              # BN254 G1 point
+        salt: Optional[int] = None,     # required iff this subtree is private
         evidence_hash: Optional[bytes] = None,
     ) -> FeatureRecord:
         """Attest that identity point M possesses this feature.
@@ -117,15 +134,16 @@ class FeatureAuthority:
         Raises:
             ValueError: If M is already in the tree (duplicate attestation).
         """
-        leaf = identity_leaf(M)
+        leaf = self._leaf_for(M, salt)
         if self._tree.contains(leaf):
             raise ValueError(f"identity already attested for feature {self.feature_id}")
         leaf_index = self._tree.insert_leaf(leaf)
         rec = FeatureRecord(
-            M=M, leaf=leaf, leaf_index=leaf_index,
+            M=M, leaf=leaf, leaf_index=leaf_index, salt=salt,
             attested_at=time.time(), evidence_hash=evidence_hash,
         )
         self._records[leaf_index] = rec
+        self._by_identity[_key(M)] = leaf_index
         return rec
 
     def attest_batch(
@@ -167,13 +185,37 @@ class FeatureAuthority:
         Returns:
             The leaf index that was cleared, or None if not found.
         """
-        leaf = identity_leaf(M)
-        if not self._tree.contains(leaf):
-            return None
-        idx = self._tree.index_of_leaf(leaf)
-        self._tree.leaves[idx] = 0  # EMPTY_LEAF
-        self._tree._root_dirty = True
+        idx = self._by_identity.get(_key(M))
+        if idx is None:
+            leaf = identity_leaf(M)
+            if self.private or not self._tree.contains(leaf):
+                return None
+            idx = self._tree.index_of_leaf(leaf)
+        self._tree.clear_leaf(idx)
+        rec = self._records.pop(idx, None)
+        self._by_identity.pop(_key(M), None)
+        if rec is not None and rec.salt is not None:
+            # Retention: the superseded salt is discarded with the association.
+            self._records[idx] = None
+            del self._records[idx]
         return idx
+
+    def _leaf_for(self, M, salt: Optional[int]) -> int:
+        """The leaf this subtree's class requires.
+
+        Private: the hiding commitment, so the salt is mandatory.  Public: the
+        unsalted leaf, unchanged, so every committed vector stays valid.
+        """
+        if self.private:
+            if salt is None:
+                raise ValueError(
+                    f"{self.feature_id} is a private subtree: attestation needs "
+                    "the holder's salt")
+            return identity_leaf_salted(M, salt)
+        if salt is not None:
+            raise ValueError(
+                f"{self.feature_id} is a public subtree: it takes no salt")
+        return identity_leaf(M)
 
     # -- membership proofs ---------------------------------------------------
 
@@ -197,16 +239,20 @@ class FeatureAuthority:
         Returns:
             MembershipProof or None if M is not in the tree.
         """
-        leaf = identity_leaf(M)
-        if not self._tree.contains(leaf):
-            return None
-        idx = self._tree.index_of_leaf(leaf)
+        idx = self._by_identity.get(_key(M))
+        if idx is None:
+            leaf = identity_leaf(M)
+            if self.private or not self._tree.contains(leaf):
+                return None
+            idx = self._tree.index_of_leaf(leaf)
         return self._tree.path(idx)
 
     # -- lookup --------------------------------------------------------------
 
     def has_identity(self, M) -> bool:
         """True if M is attested for this feature."""
+        if self.private:
+            return _key(M) in self._by_identity
         return self._tree.contains(identity_leaf(M))
 
     def get_record(self, leaf_index: int) -> Optional[FeatureRecord]:
