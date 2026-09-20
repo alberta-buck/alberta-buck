@@ -380,12 +380,19 @@ Identity-derived A1/A2 encryption keys, policy metadata and receipt-disclosure
 scope are separate remaining problems. The follow-up document distinguishes
 each from registration presentation. Pathway A' there is a single-commitment
 presentation mappable to the pairing precompile that passes the review's
-adversarial battery (`scripts/review/hiding_presentation_probe.py`); it is
-unreviewed, unadopted, and publishes a G1 image of the issuer's second secret,
-which changes the issuer-key assumption. Treat it as a candidate input to
-step 1, not as the specification.
+adversarial battery (`scripts/review/hiding_presentation_probe.py`, pinned to
+`75104a8`); it publishes a G1 image of the issuer's second secret, which
+changes the issuer-key assumption. As of 2026-09-20 it is implemented on
+branch `feature/a-prime` across the four backends with regenerated vectors,
+the `.../Register/v3` domain and the review tests 1 and 2 inverted; the plan
+of record is [`a-prime-plan.org`](a-prime-plan.org). It remains unreviewed
+and unmerged: treat the branch as the candidate's executable specification,
+and its phase 6 (security argument and independent review) as the gate.
 
-**Sequencing.**
+**Sequencing.** Status for A' on `feature/a-prime`: step 1 is the plan's
+specification section; step 2's reproductions are the review suite and the
+Foundry rejection tests, while its security argument and review are open;
+step 3 is done on the branch.
 1. Write the complete showing/issuance specification and an issuer-view
    unlinkability game covering the full public transcript, repeated
    presentations and permitted later disclosures. Decide whether additional
@@ -403,12 +410,16 @@ the issuer-blindness and statistical-unlinkability claims for the current
 registration protocol in `alberta-buck-paper.org` and `alberta-buck-identity.org`,
 and mark the registration transcript as candidate-testable.
 
-**Cost.** Not established for a secure repair. The previous +96-byte,
-three-pairing estimate describes the insufficient prototype, not a validated
-mitigation. Benchmark the reviewed full transcript and any separate Note
-circuit/key-distribution changes. Pre-launch there is no historical calldata
-to protect; a transcript published on a public chain can never be made
-private afterwards, which is why this is a launch gate.
+**Cost.** Measured for A' on the branch with an in-process EVM: `register`
+443,892 gas against 472,630 at `75104a8` (-28,738: three pairings instead
+of four), calldata +32 bytes (the extra scalar `s_b`), `trustIssuer`
+394,115 against 227,278 (+166,837 once per issuer: the `Y1` consistency
+check and one stored G1 point). Approval, Notes and receipts are untouched.
+The previous +96-byte, three-pairing estimate described the insufficient
+prototype. Any separate Note circuit/key-distribution changes (R5) remain to
+be benchmarked. Pre-launch there is no historical calldata to protect; a
+transcript published on a public chain can never be made private
+afterwards, which is why this is a launch gate.
 
 ---
 

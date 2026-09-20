@@ -50,6 +50,18 @@ R2/R4 leak while mapping to the EVM pairing precompile was added as
 Pathway A' with its adversarial battery. It is a candidate for review, not a
 repair, and it changes the issuer-key form.
 
+*Implementation status (2026-09-20):* Pathway A' is implemented on branch
+=feature/a-prime= across the four backends (Python executable specification
+=99abb00=, Solidity =7190c37=, Rust kernel with the PyO3 and wasm bindings
+and the JavaScript wrapper =d0ed54d=, simulation and end to end =c825104=)
+with regenerated vectors (=identity.json= schema 2, kernel vectors schema
+2), the Fiat--Shamir domain =.../Register/v3=, and review tests 1 and 2
+inverted in the same commit as the wallet change. The plan of record with
+the refined specification, the per-document revision catalogues and the
+measured gas is [[file:a-prime-plan.org][the A' plan]]. Implemented is not
+reviewed: the hiding and soundness arguments remain sketches until the
+plan's phase 6 closes, and the branch is not merged to a production path.
+
 *Development status:* there are no production on-chain registrations. Every
 statement below about permanent calldata is therefore a launch gate on the
 registration presentation, not a migration problem for existing accounts.
@@ -552,6 +564,15 @@ replacement protocol audit is claimed here.
 
 ** Current Solidity: registration matching, harvesting and Note equations
 
+Evidence at =75104a8=. The recipe below publishes the rerandomized pair and
+reads =A_ps= from the proof; on =feature/a-prime= neither exists (the wallet
+publishes =(A, B)= and the proof carries =C1= and =s_b=), so run it from a
+checkout of that commit. The branch's executable counterpart is the review
+suite: tests 1 and 2 of =alberta_buck/test/review/test_wallet_failures.py=
+now assert that the published pair fails the raw PS relation for the true
+identity and that the harvested registration is rejected, and
+=presentation_point= in =nizk.py= exhibits the only derivable point.
+
 Build the current registry, then run the named shell block below. It generates
 full-width synthetic identity scalars and fresh keys, submits four accepted
 registrations, fetches their mined calldata, and scans only those public fields.
@@ -656,6 +677,10 @@ temporary script.
 
 ** Counterexample to the existing blinded-show prototype
 
+Evidence at =75104a8=: =issuer_linking_demo.py= now stops on a post-A'
+checkout with a pointer to that commit (=--force= overrides), because the
+pre-A' wallet API it drives no longer exists on the branch.
+
 The existing demo creates four identities, eight ordinary registrations and
 four blinded prototype presentations. It reports that raw signature scans
 miss the blinded pairs. Run it with these additional checks: the first scan
@@ -719,6 +744,12 @@ nix develop -c env PYTHONPATH=.:core/python BUCK_IDENTITY_BACKEND=py \
   python -u scripts/review/hiding_presentation_probe.py
 #+end_src
 
+The probe is likewise evidence at =75104a8= and stops on a post-A' checkout.
+On the branch its battery is carried by the review suite (tests 01, 02, 10,
+11 and 12 of =test_wallet_failures.py=, on both backends) against the
+wallet's real prover and verifier, and by the Foundry rejection tests in
+=test/IdentityRegistry.t.sol=.
+
 Executed on 2026-09-19: R2 identified 4 of 4 production transcripts from proof
 fields alone; for the candidate, honest showings verified, the wrong registrant
 was rejected, every candidate scan found 0 matches, the candidate-adapted
@@ -775,7 +806,11 @@ precompile-based deployment of Pathway A.
 ** A': single-commitment presentation mappable to the pairing precompile
 
 *Status:* candidate with an executable adversarial battery
-([[file:../../scripts/review/hiding_presentation_probe.py][probe]]); not a repair, not reviewed, not selected.
+([[file:../../scripts/review/hiding_presentation_probe.py][probe]]), implemented on =feature/a-prime= (2026-09-20,
+see the implementation status above); not reviewed, not merged to a
+production path. The refined specification, including the =Y1=
+consistency check at =trustIssuer= and the =A = O= guard's role, is in
+[[file:a-prime-plan.org][the A' plan]].
 
 Place the blinding on the =Y= base instead of the =G2= base, using a G1 image
 =Y1 = y*G= of the issuer's second secret, published alongside =(X, Y)=:
@@ -816,7 +851,14 @@ Battery results (2026-09-19, four synthetic identities):
 Cost relative to today's verifier: =C1= replaces =A_ps= at the same size, one
 extra scalar =s_b= in calldata, one extra G1 multiplication, and a pairing
 product of three pairs where today's has four. The issuer key gains one G1
-point.
+point. Measured on the branch with an in-process EVM (one issuer, two
+honest registrations):
+
+| Operation | =75104a8= | A' | Change |
+|-----------+-----------+----+--------|
+| =register= (5-argument overload) | 472,630 | 443,892 | -28,738 |
+| =register= calldata | 740 B | 772 B | +32 B |
+| =trustIssuer= | 227,278 | 394,115 | +166,837 once per issuer |
 
 What this changes and does not settle:
 
@@ -831,9 +873,9 @@ What this changes and does not settle:
 - It leaves R5 (identity-derived Note keys) and R6 (metadata, enrollment logs,
   accumulator admission) untouched, and does not by itself decide the
   holder-secret question of Pathway C.
-- It must be ported under the four-backend rule with a new registration domain
-  and vectors; tests 1 and 2 are inverted only when the production transcript
-  changes.
+- Ported under the four-backend rule with the =.../Register/v3= domain and
+  regenerated vectors on =feature/a-prime=; tests 1 and 2 were inverted in
+  the commit that changed the wallet's published transcript.
 
 ** B: hidden membership in certified randomized commitments
 
@@ -994,6 +1036,12 @@ cannot make an already-published transcript private, and an already-exposed
 reusable credential would remain authorization material unless the acceptance
 policy excluded it. Local and test deployments are disposable and carry none
 of these obligations.
+
+The gate's technical precondition, a registration presentation that a
+holder of the identity cannot test, is implemented on =feature/a-prime=;
+what still stands between the branch and a launch is the written security
+argument and independent review the A' plan schedules as phase 6, and the
+R5 and R6 decisions below, which A' does not touch.
 
 Should any credential nevertheless be presented publicly under the current
 transcript before the repair ships, the contingency is a new accepted

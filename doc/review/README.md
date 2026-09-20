@@ -8,8 +8,8 @@ It is ongoing; the papers themselves have not yet been revised.
 - [Audience map and editing decisions](editorial-map.md)
 - [Mitigation implementation and testing guide](mitigation-implementation-guide.md) -- costed, prioritized handoff for landing the repairs
 - [Issuer-view follow-up (org)](identity-findings-2.org) -- R1-R6 with executable recipes, the launch-gate framing (pre-launch, nothing to migrate), and the unreviewed Pathway A' candidate
-- [A' plan (org)](a-prime-plan.org) -- refined hiding-presentation design, per-document revision catalogues (paper, identity, identity-example, proofs), phased implementation plan with acceptance tests; branch feature/a-prime
-- [Executed reproductions](../../scripts/review/) -- EVM approval forgery, real-Groth16 membership mismatch, SILMARILS model, issuer-linking demo (Part B refuted by R4), hiding-presentation probe (R2 on production; Pathway A' battery)
+- [A' plan (org)](a-prime-plan.org) -- refined hiding-presentation design, per-document revision catalogues (paper, identity, identity-example, proofs), phased implementation plan with acceptance tests; branch feature/a-prime: phases 1-4 (Python, Solidity, Rust/wasm/JS, simulation) implemented and green as of 2026-09-20, phase 5 (documents) in progress, phase 6 (security argument, independent review) outstanding
+- [Executed reproductions](../../scripts/review/) -- EVM approval forgery, uncertified bind and uncontrolled registration (ported to the A' registry, still inverting their findings), real-Groth16 membership mismatch, SILMARILS model, issuer-linking demo (Part B refuted by R4) and hiding-presentation probe (R2 on production; Pathway A' battery), both pinned to 75104a8
   uncertified bind, uncontrolled registration, A1-via-B1 spend (flavor +
   fail-open), real-Groth16 membership mismatch and limb-carry alias,
   SILMARILS model

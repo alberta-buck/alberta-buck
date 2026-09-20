@@ -53,10 +53,10 @@ and a measured gas baseline on the committed artifact (below).
 This subsection is the resume point; the per-phase status paragraphs below
 carry the detail.
 
-- Phases 0 to 4 are committed (=d0ed54d= is phase 3; phase 4 and the
-  evidence-script commit follow it). Phase 5 has started with the
-  evidence scripts; the four documents are untouched. Phase 6 is not
-  started.
+- Phases 0 to 4 are committed (=d0ed54d= is phase 3, =c825104= phase 4,
+  =4a83b04= the evidence scripts). Phase 5: the review documents (item
+  6) are updated and committed; the four papers and the ethereum
+  mentions (items 1 to 5) are untouched. Phase 6 is not started.
 - Green on the branch: Rust kernel tests 3/3; =core/python= vector tests
   39/39; the review suite 33/33 on both backends; the identity Python
   suites (wallet, vectors, issuer, registry, kernel backend, cache regen)
@@ -753,6 +753,13 @@ pre-A' transcript; step 6 below labels them as evidence at =75104a8=
 rather than porting them, since the branch's executable counterpart is
 the review suite.
 
+
+*Status (2026-09-20): items 6 and the evidence scripts done (commits after
+=c825104=); items 1 to 5, the four papers and the ethereum mentions, not
+started.* Work them in the listed order; each is committed on its own,
+by explicit path, with its render (=make nix-doc-<name>=, or
+=make nix-venv-doc-identity-example= for the executable one) checked
+before the commit.
 
 Executed after the code is green so that every regenerated block reflects the
 branch. Details per document are in the review sections above.
