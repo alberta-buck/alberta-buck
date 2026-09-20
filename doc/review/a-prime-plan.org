@@ -63,6 +63,14 @@ carry the detail.
   written into =alberta-buck-proofs.org= (Part I and the closing
   review section); the independent review is the only open item. The
   branch is not merged.
+- The next program is decided and specified in section
+  [[#accumulator][The certified-attribute accumulator]]: salted per-tree
+  leaves, authority-side admission that stays off the registration
+  path, holder-produced attribute proofs captured in receipts, a
+  lifetime-stable identity scalar with every mutable fact outsourced
+  to tree membership, and insurer authorization for =BuckCredit= as
+  its second consumer. R5 and the Notes receiving-key decision are
+  deferred behind it.
 - Green on the branch: Rust kernel tests 3/3; =core/python= vector tests
   39/39; the review suite 33/33 on both backends; the identity Python
   suites (wallet, vectors, issuer, registry, kernel backend, cache regen)
@@ -896,7 +904,224 @@ phase 1 and gates any production use.
 
 ** What this plan deliberately leaves out
 
-R5 (identity-derived Note receiving keys), R6 (issuance logs, policy metadata,
-accumulator admission), the optional holder secret =u=, and malicious
-duplicate issuance. Each has its own section in =identity-findings-2.org= and
-none is made worse or better by A'.
+The optional holder secret =u=, malicious duplicate issuance, and R6's
+issuance-log and policy-metadata halves. Each has its own section in
+=identity-findings-2.org= and none is made worse or better by A'.
+
+Two items that were listed here have moved rather than stayed out.
+R6's accumulator-admission half is now the next program, section
+[[#accumulator]]. R5, the identity-derived Note receiving keys, is
+deferred until that program is implemented and tested, for the reasons
+in [[#deferred]].
+
+* The certified-attribute accumulator: the next program
+:PROPERTIES:
+:CUSTOM_ID: accumulator
+:END:
+
+Decided 2026-09-20, after phases 1 to 5 landed. This program is a
+prerequisite for the Notes identity work, and R5 is deferred behind it
+(section [[#deferred]]).
+
+** What it decides
+
+The registration presentation hides which identity registered an account.
+It says nothing about how an identity enters the accumulator that Notes
+membership proofs are checked against, nor how a party that legitimately
+holds an identity establishes anything about it. Three requirements pull
+against each other:
+
+- Notes membership proves "this counterparty identity is registered".
+  Today the root is governance-posted and registration refuses every
+  caller-supplied leaf, so that claim rests on an off-chain process with no
+  written specification, and the paper's deposit-gate and
+  depositor-binding theorems lean on it.
+- A counterparty that legitimately holds an identity should be able to
+  establish features of it: registered, live, not revoked, over eighteen,
+  resident in a region, authorized to insure a given asset class.
+- Nothing may hand a party holding many identities a test against any
+  public object, which is the issuer-view scan A' exists to prevent.
+
+** The constraint that shapes it
+
+The issuer and a counterparty hold the same secret. The identity scalar is
+a hash of the certified record, so every function of the scalar a
+counterparty can compute, the issuer can compute too. A leaf derived from
+the identity alone is therefore computable by both, and "a counterparty may
+query, an issuer may not scan" is unachievable for such a leaf: whatever
+admits the one admits the other.
+
+The deterministic leaf =Poseidon(M.x, M.y)= that =registry/tree.py= builds
+today therefore buys self-service queries at the price of an offline test,
+for anyone holding a list of identities, of which are registered, live, and
+in which attribute buckets. That is neither the account map nor a note
+link, but under address-blind issuance the issuer does not otherwise learn
+whether a client ever came on chain, and one attribute authority does not
+otherwise learn what another holds.
+
+*The accumulator is not the note-linking vector, and salting it does not
+close the one that exists.* A spend publishes the root and the coupling's
+committed point and nothing else identity-derived: the membership circuit
+declares only =identityRoot= and that point's coordinates public, so the
+leaf, the path and which subtrees were walked all stay private, and the
+point is an identity plus a fresh blinding, so a candidate test needs a
+discrete logarithm. What does answer "is any note associated with anyone in
+my list" is the addressed note payload of R5, today, in public calldata.
+The two problems are independent; this one is scheduled first because the
+Notes design cannot be settled underneath a moving identity layer.
+
+** What the registry layer already provides
+
+The Python registry is already three-tiered; the on-chain consumer is the
+missing half.
+
+- One subtree per identity registry organization and one per attribute
+  authority (=registry/feature_authority.py=, whose worked example in the
+  kernel vectors is an age-over-eighteen authority).
+- A central service aggregating subtree roots into the single root posted
+  on chain (=registry/merkle_service.py=), with the three intentionally
+  different depths documented in =registry/tree.py=.
+- Attestation and revocation performed off chain at the authority, never in
+  a registration transaction; revocation clears a leaf and the authority
+  pushes a fresh subtree root.
+- A holder composing "my identity is in the registry tree and in the age
+  tree" against one public root by different aggregator paths, with the
+  proof hiding which trees were walked.
+
+Missing: the leaf is deterministic, and the only on-chain consumer is the
+membership circuit with the three defects of finding 5.
+
+** Design of record
+
+1. *Salted leaves, one salt per identity per tree.* The leaf becomes a
+   commitment, =Poseidon(M.x, M.y, salt)=, not a hash of the identity. The
+   salt is exchanged in the attestation the authority already performs, so
+   admission needs no proof and no gas: the authority knows the identity,
+   receives the salt, computes the leaf and inserts it. Each authority
+   knows its own tree and can scan no other; a party holding identities
+   alone can scan none; the holder holds every salt it needs and can prove
+   any of its own memberships. The membership circuit gains one Poseidon
+   input and one private witness, which is nothing against its current
+   cost.
+2. *Admission stays off the registration path, permanently.* =register= and
+   =bindContract= keep refusing a nonzero caller-supplied leaf. Batched
+   authority-side admission is cheaper and more private than
+   per-registration insertion, and the authority is already the party that
+   decides who is certified. This supersedes the earlier reading of finding
+   4, which asked for an on-chain proof that the leaf hashes the certified
+   identity: the leaf is the authority's attestation, and the authority is
+   the certifier.
+3. *Feature checks are proofs the holder produces, not lookups.* Every
+   predicate above gates an action, and a gate is satisfied by the party
+   that must pass it. Producing no proof is failing the gate, so a revoked
+   holder's refusal is the answer rather than an obstacle. The one case a
+   lookup would serve, a counterparty checking after the fact without
+   cooperation, is covered by capturing the attribute proof in the receipt
+   at the time of the payment, which is where the receipt architecture
+   already puts evidence.
+4. *One hiding generator everywhere.* The salted leaf and the coupling's
+   blinded point are the identity layer's two Pedersen-style commitments,
+   and both need a generator with no known logarithm. This program retires
+   =H_SCALAR= (finding 5b) rather than leaving it to the circuit work.
+
+** Lifetime-stable identity, mutable facts outsourced
+
+The identity scalar must be stable for the holder's lifetime. Today the
+certified record carries an =epoch=, so the scalar changes at renewal and
+every note addressed to the old identity would strand. Every mutable fact
+moves out of the hashed record and becomes tree membership instead.
+
+| Fact | Today | Under this design |
+|------+-------+-------------------|
+| The person's certified identity | in the hashed record | unchanged, and now invariant for life |
+| Epoch, liveness, revocation | =epoch= inside the record | membership in the current-epoch registry subtree |
+| Residence, region | in the hashed record | membership in a region authority's subtree |
+| Address, contact, anything the holder can change | in the hashed record | an external record under the holder's control, attested by membership in the subtree for its current value |
+| Age, licences, insurer authority | not represented | attribute authority subtrees |
+
+The registry's response to a change is *re-association, not re-issuance*:
+the same identity is inserted into the subtree for the new value and
+cleared from the old, and the authority pushes both fresh subtree roots.
+No new credential, no new scalar, and no public link between the old and
+new state beyond what that authority already holds.
+
+This settles the inconsistency the review flagged in
+=alberta-buck-identity.org=, where one passage treats the identity point as
+invariant across a holder's accounts and another has it changing at
+renewal, in favour of invariance. Renewal becomes a subtree update.
+
+** Second consumer: insurer authorization for BuckCredit
+
+=src/BuckCredit.sol= has no knowledge of the identity registry. An insurer
+is whatever address calls =createCredit=, choosing the asset class, face
+value, depreciation schedule and premium rate freely; the only gate is the
+client's opt-in through =setCreditIssuer=. The solvency of the monetary
+layer therefore rests on insurers being insurers, which nothing checks.
+
+The same machinery answers it. An insurance regulator is an attribute
+authority, and its subtrees carry the predicates a credit must satisfy
+before it exists:
+
+- the caller is a licensed insurer, currently in good standing;
+- for the asset class of this credit;
+- within a liability limit, as a band per limit or as a committed value the
+  insurer proves a bound on.
+
+=createCredit= then requires a membership proof from the caller against the
+regulator's subtree for the credit's own asset class, alongside the
+client's opt-in, so the credit validates its own authority to exist rather
+than trusting an address. Two things to work through: the proof is per
+credit, so its gas lands in the issuance path and should be measured
+against a cached authorization with an expiry; and a liability limit is
+cumulative across a regulator's insurers, which a membership proof alone
+cannot enforce, so either the bands stay coarse with the accounting off
+chain, or the regulator updates its subtree as capacity is consumed.
+
+** What changes where
+
+| Location | Change |
+|----------+--------|
+| =alberta_buck/registry/tree.py= | =identity_leaf= gains a salt; the three depths are unchanged |
+| =registry/feature_authority.py=, =registry/registry.py= | attestation records and exchanges the salt; revocation unchanged |
+| =registry/merkle_service.py= | unchanged in shape; the aggregation is already right |
+| =circuits/identity_membership.circom= | the leaf becomes Poseidon-3 over the coordinates and the salt |
+| =circuits/identity_membership_g1tie.circom= or its replacement | the same leaf change, folded into the finding-5 circuit work |
+| =src/IdentityRegistry.sol= | =setIdentityRoot= gains a documented authority and update policy; the caller-leaf refusal becomes permanent and says so; a root history if in-flight proofs must survive an update |
+| =src/BuckCredit.sol= | =createCredit= requires the insurer's attribute membership for the credit's asset class |
+| =alberta_buck/wallet/= | holder-side salt storage, the attribute-proof producer, receipt capture of attribute proofs |
+| =alberta_buck/review/= | a scan test per tree: a party holding every certified identity finds nothing |
+
+** Phases and acceptance
+
+1. Specification: the leaf, the salt exchange, the admission authority and
+   its update policy, accepted historical roots, revocation and witness
+   updates, and the attribute vocabulary. Written before any code.
+2. Python: salted leaf, salt storage, attribute proofs, the scan test.
+3. Circuits: the leaf change, folded into the finding-5 work so there is
+   one trusted setup rather than two.
+4. Solidity: the root authority and policy, the permanent caller-leaf
+   refusal, and =BuckCredit='s insurer gate.
+5. The four-backend port with regenerated vectors, as every identity change
+   requires.
+
+Acceptance: a party holding every certified identity finds no tree it can
+scan; a holder proves each of its own memberships and a revoked holder
+cannot; =createCredit= refuses an uncredentialed insurer and accepts a
+credentialed one for its asset class; the Notes membership path still
+verifies, on the repaired circuit, with the salted leaf.
+
+** Deferred until this lands
+:PROPERTIES:
+:CUSTOM_ID: deferred
+:END:
+
+R5, the identity-derived A1 and A2 receiving keys, and the Notes design
+decision it forces are deferred until the accumulator design is
+crystallized, implemented and tested. That decision is a registered
+long-lived receiving key against stealth addressing, and with it the fate
+of "any account bound to this identity can spend", which is what makes key
+loss a recovery problem rather than a loss. R5 changes the note payloads,
+the note-binding circuits and the mint API, so it should not be settled
+while the identity layer underneath it is still moving. The circuit work of
+finding 5 is not deferred: it shares a trusted setup with the leaf change
+and is sequenced with it.
