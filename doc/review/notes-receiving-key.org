@@ -14,10 +14,29 @@ key, and every party that legitimately holds it can read that recipient's
 note traffic. The finding was deferred behind the accumulator; this document
 records the approach, the prototype that establishes it, and what it costs.
 
-Status: prototyped, not implemented. The prototype is
-=scripts/review/receiving_key_proto.py=, which runs against the real wallet
-primitives and passes eleven checks. Nothing in the wallet, the circuits or
-the contracts has been changed.
+Status: the architecture's own surface is implemented and tested; the
+payload substitution is sequenced behind one regeneration ([[#sequencing]]).
+
+Implemented on 2026-09-20, with =alberta_buck/test/test_receiving_key.py=
+carrying twenty-six conformance tests:
+
+- =wallet/recvkey.py=: the receiving key, derived from wallet seed material
+  and not from the identity, with rotation indexed by the same counter the
+  accumulator's salt uses; and the holder-produced binding evidence of
+  [[#architecture][section 3.5]].
+- =registry/tree.py=: =receiving_leaf=, the third leaf function, committing
+  =(M, pk_recv, salt)=; and =insert_receiving=, the admission.
+- =wallet/deposit_fold.py=: the folded gate of [[#fold][section 3.3a]] -- one
+  witness, four relations, the payload theft refused on relation (3) -- as
+  the reference the circuit is checked against.
+
+Still to come, and deliberately together: the A1 and A2 payload
+substitution, =make_receipt=, the circuits, and the one regeneration they
+share ([[#sequencing]]).
+
+The prototypes remain as the standalone argument:
+=scripts/review/receiving_key_proto.py= (eleven checks),
+=deposit_gate_split.py= (nine) and =deposit_gate_folded.py= (three).
 
 Dependency: the salted accumulator leaf of
 [[file:accumulator-spec.org][the accumulator specification]], because the
@@ -118,9 +137,9 @@ identity and the value ciphertext. Constraint counts should be close to
 unchanged, which =MUST= be measured rather than assumed.
 
 ** 3.3a The deposit gate does NOT keep its shape, and must be folded
-
-Corrected 2026-09-20 after prototyping; the earlier draft of this document
-overstated 3.3 as covering the whole spend path.
+:PROPERTIES:
+:CUSTOM_ID: fold
+:END:
 
 =deposit_couple_prove= uses one witness =m_rec= for two jobs: it decrypts the
 note's ciphertext, and it is the identity inside the deposit account's
@@ -204,6 +223,52 @@ Four wallet call sites carry the defect. That is the whole of it on the
 addressing side, which is the strongest argument that the architecture is
 right: a defect that takes four arguments to fix was a mistake about which
 key to use, not a mistake about structure.
+
+** 4.1 Why the payload substitution cannot land alone
+:PROPERTIES:
+:CUSTOM_ID: sequencing
+:END:
+
+Surveyed against the source on 2026-09-20, after the architecture's own
+surface was implemented. Two facts constrain the order, and neither was
+visible from the design.
+
+*The mint is ported four times, and the vectors are asserted current.* The
+A1 payload is built in Rust as well as Python --
+=core/rust/buck-wallet/src/flows.rs= computes
+=elgamal_encrypt(m_rec_pt, m_rec_pt, r_prime)= for =eRec=, with both
+bindings and =core/js/src/wallet-core.js= on top of it. And
+=test_wallet_vectors_current= asserts that freshly built vectors equal
+=core/vectors/wallet-kernel-vectors.json= byte for byte. So changing the
+Python mint alone does not leave a passing suite with a documented gap: it
+leaves either a stale committed vector or a Rust kernel computing a
+different note. The substitution is a four-backend change with one
+regeneration, which is the shape every identity change in this repository
+has.
+
+That regeneration is the expensive one, and the plan already records paying
+for it twice as the mistake to avoid: the Notes end-to-end fixtures embed an
+identity root, so regenerating them runs the note-binding prover over a
+2.4M-constraint circuit. The aggregator depth raise, the finding-5 repairs,
+the folded gate and this substitution all force it. They go together or they
+go three times.
+
+*A1 gains an argument; A2 gains none.* The earlier reading of "four call
+sites, the encryption key argument and nothing else" holds for A2 and not
+for A1, and the difference is worth stating because it sets which signatures
+move:
+
+| Function | Change | Why |
+|----------+--------+-----|
+| =mint_unilateral_a2= | rename only | =M_rec= appears three times and every one is the key role: =eNote=, =eIss=, and the =issuer_reenc= anti-framing slot. Nothing else reads it, so the parameter becomes =pk_recv= and no signature moves. |
+| =mint_unilateral_a1= | one new argument | =eRec= encrypts =M_rec= /under/ =M_rec=: the identity is the plaintext as well as the key. Only the key becomes =pk_recv=, so the mint needs both points. |
+| =make_receipt=, =make_receipt_a1= | signature changes | each derives the recipient's identity from the secret it decrypts with, and those are now two values. |
+| =verify_receipt=, =verify_receipt_a1= | additive | the verifiable decryption is checked under =pk_recv=, so the receipt carries it, plus the binding of [[#architecture][3.5]]. |
+
+Carrying =pk_recv= in a plaintext receipt costs nothing: the receipt already
+names both parties, and the key alone decides no addressing, which is the
+=receiving_key_proto= check that hands the adversary =pk_recv= and watches it
+find nothing.
 
 * 5 What it costs
 :PROPERTIES:
@@ -327,32 +392,35 @@ wrong, and the note says where.
 
 Then, to implement, in this order:
 
-1. *The receiving key in the wallet*: generation, seed derivation, and
-   registration bound to the Identity.  The salt derivation of
-   =wallet/salt.py= is the model.
-2. *The four mint call sites*: =unilateral_a1.py= lines 99 and 102,
-   =unilateral_a2.py= lines 182 and 185.  The shipped mint functions already
-   accept any public key at that position, so this is the encryption key
-   argument and nothing else.
-3. *=make_receipt=*: it currently derives the recipient's Identity from the
-   secret it decrypts with.  Those are now two values, so it needs the
-   Identity passed in.  This is the only wallet function whose /signature/
-   must change, and it is the reason the flow document's cycles are not yet
-   rewired onto receiving keys.
-4. *=deposit_couple_prove=*: gains the receiving secret as a witness, and
-   the folded relations of section 3.3a.  Do not ship it as a sigma plus a
-   separate membership proof.
-5. *The leaf*: extend =registry/tree.py= to commit the pair, and extend the
-   accumulator conformance tests to it.
+1. DONE *The receiving key in the wallet*: =wallet/recvkey.py=, modelled on
+   =wallet/salt.py= -- derived from seed material, never from the identity,
+   rotation indexed by the salt's own counter, plus the holder-produced
+   binding evidence.
+2. DONE *The leaf*: =receiving_leaf= and =insert_receiving= in
+   =registry/tree.py=, with the specification's third leaf function and its
+   two new conformance tests.
+3. DONE *The folded gate*: =wallet/deposit_fold.py=, the four relations of
+   section 3.3a over one witness, refusing the payload thief on relation
+   (3).  It is the reference the circuit is checked against, not a
+   replacement for it; do not ship the gate as a sigma plus a separate
+   membership proof.
+4. *The mint call sites and the receipts*, as [[#sequencing]] sets out: a
+   rename in A2, one new argument in A1, and =make_receipt= taking the
+   Identity separately from the secret it decrypts with.  This is the step
+   that makes the flow document's cycles rewirable.
+5. *The Rust kernel, both bindings and the JavaScript*, in the same change,
+   because =flows.rs= builds the same payload and the committed vectors are
+   asserted current.
 6. *The circuits*: the note-binding substitution and the folded gate, with
    the finding-5 repairs and the aggregator depth raise, in one trusted
    setup and one matched set.
-7. *Regeneration order*: the A1 and A2 wallet vectors, then the Notes
-   end-to-end fixtures, then the mint fixtures pinned to them.  This is what
-   makes the depth raise expensive, so do it once.
+7. *Regeneration order*, once: the A1 and A2 wallet vectors, then the Notes
+   end-to-end fixtures, then the mint fixtures pinned to them.
 8. *Rewire the flow document's cycles* onto receiving keys and regenerate
    the transcript.  The prover-timing block shells out to rapidsnark, so
    budget for it.
+
+Steps 4 through 7 are one landing, for the reason [[#sequencing]] gives.
 
 Three traps worth naming, because each cost time to find:
 
@@ -364,7 +432,7 @@ Three traps worth naming, because each cost time to find:
   and overrides =contains= to take a /point/, not a leaf.  Passing a leaf
   fails obscurely.
 
-* 8 Open questions
+* 9 Open questions
 :PROPERTIES:
 :CUSTOM_ID: open
 :END:

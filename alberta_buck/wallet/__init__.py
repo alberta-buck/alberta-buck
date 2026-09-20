@@ -75,10 +75,24 @@ from alberta_buck.wallet.salt import derive_salt, tree_tag, SALT_DOMAIN
 from alberta_buck.wallet.attributes import (
     AttributeProof, prove_attributes, verify_attributes,
 )
+from alberta_buck.wallet.recvkey import (
+    RECV_DOMAIN, ReceivingBinding,
+    derive_receiving_secret, receiving_key, receiving_public,
+    prove_receiving_binding, verify_receiving_binding,
+)
+from alberta_buck.wallet.deposit_fold import (
+    DepositFoldRefused, DepositFoldWitness,
+    deposit_fold_witness, deposit_fold_check,
+)
 
 __all__ = [
     "derive_salt", "tree_tag", "SALT_DOMAIN",
     "AttributeProof", "prove_attributes", "verify_attributes",
+    "RECV_DOMAIN", "ReceivingBinding",
+    "derive_receiving_secret", "receiving_key", "receiving_public",
+    "prove_receiving_binding", "verify_receiving_binding",
+    "DepositFoldRefused", "DepositFoldWitness",
+    "deposit_fold_witness", "deposit_fold_check",
     "kernel_active", "backend",
     "G1", "G2", "ORDER", "add", "mul", "neg", "eq", "pairing", "is_inf",
     "point_to_words", "words_to_point", "scalar_to_word", "word_to_scalar",

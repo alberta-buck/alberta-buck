@@ -1,4 +1,4 @@
-#+TITLE: Identity accumulator specification, v0.5
+#+TITLE: Identity accumulator specification, v0.6
 #+DATE: 2026-09-20
 #+OPTIONS: toc:3 num:t
 #+PROPERTY: header-args :eval never-export
@@ -23,7 +23,12 @@ enrollment, an accountable rather than trustless aggregator, which rules
 bind a delegate and which do not, and the line between the consistency the
 protocol enforces and the accuracy it cannot. v0.5 settles the last three
 items: scope without an asset taxonomy ([[#scope]]), the retention window,
-and the aggregator's publication format. =MUST=, =MUST NOT=,
+and the aggregator's publication format. v0.6 adds the third leaf function,
+which binds an identity to the receiving key its Notes are addressed to
+([[#leaves]]), and the two conformance tests that hold it in place; the
+receiving key itself is specified in
+[[file:notes-receiving-key.org][its own document]], and phase 2 of the plan
+implements both. =MUST=, =MUST NOT=,
 =SHOULD= and =MAY= are normative. Constants are given as the names already
 in the source, with their current values, so that a conformance test can
 compare rather than guess.
@@ -36,9 +41,11 @@ unchanged and out of scope; see Part I of =alberta-buck-proofs.org=.
 
 Listed for a reviewer who wants the choices without the prose.
 
-1. Two leaf functions, not one. The existing unsalted leaf is retained for
-   trees whose membership is advertised; a salted leaf is added for trees
-   whose membership is private ([[#leaves]]).
+1. Three leaf functions, not one. The existing unsalted leaf is retained
+   for trees whose membership is advertised; a salted leaf is added for
+   trees whose membership is private; and a salted leaf over the pair
+   =(identity, receiving key)= is added for identity registries, whose
+   members address Notes ([[#leaves]]).
 2. Leaf hiding rests on Poseidon modelled as a random oracle, which the
    system already assumes for the Notes nullifier, so the accumulator adds
    no assumption. No cheaper construction gives an information-theoretically
@@ -104,12 +111,14 @@ finding-5 repairs, because all three touch the same circuits.
 :CUSTOM_ID: leaves
 :END:
 
-Two functions. Implementations =MUST= provide both and =MUST NOT= change
-the first.
+Three functions. Implementations =MUST= provide all three and =MUST NOT=
+change the first two.
 
 #+begin_example
 identity_leaf(M)              = Poseidon([M.x mod F_R, M.y mod F_R])
 identity_leaf_salted(M, salt) = Poseidon([M.x mod F_R, M.y mod F_R, salt])
+receiving_leaf(M, K, salt)    = Poseidon([M.x mod F_R, M.y mod F_R,
+                                          K.x mod F_R, K.y mod F_R, salt])
 #+end_example
 
 - =identity_leaf= is the function in the source today. It is retained
@@ -118,10 +127,29 @@ identity_leaf_salted(M, salt) = Poseidon([M.x mod F_R, M.y mod F_R, salt])
 - =identity_leaf_salted= is new. =salt= =MUST= lie in =[1, F_R)=;
   implementations =MUST= reject =0=, which would make the leaf a
   deterministic function of the identity in a tree declared private.
+- =receiving_leaf= is the leaf of an identity-registry subtree, and binds
+  two things rather than one: the identity =M= a Note names, and the
+  receiving key =K = k*G= a Note is encrypted to
+  ([[file:notes-receiving-key.org][the receiving-key architecture]]). The
+  same =salt= rules apply. It is a third function rather than a widened
+  second one because attribute subtrees bind no receiving key and their
+  leaves =MUST NOT= change.
 - Coordinates are reduced mod =F_R= exactly as today, because circom
   reduces its Poseidon inputs the same way.
 
-The two functions =MUST= be implemented identically in Python, in the Rust
+*Why the binding is committed and not published.* Notes are keyed to =K=
+rather than to =M= because an identity scalar is a read capability the
+system discloses to every counterparty, and so cannot also be a decryption
+key. A note addressed to a key of the payer's choosing would break mutual
+decryptability and the receipt, so =K= =MUST= be bound to =M= -- and that
+binding =MUST NOT= be public, because a spend proving against a public
+binding would reveal the recipient's registered key and deanonymise them to
+everyone. Inside the leaf it is provable in zero knowledge and unscannable
+to a party holding every certified identity, the whole published subtree,
+and =K= itself, the last because deciding a ciphertext's addressee from the
+key alone is a DDH decision.
+
+All three =MUST= be implemented identically in Python, in the Rust
 kernel, in both bindings and in the circuits, and pinned by vectors, as
 every identity primitive is.
 
@@ -133,8 +161,9 @@ every identity primitive is.
 Every subtree =MUST= be declared, at enrollment, as exactly one of:
 
 - *private*: membership is a fact about a person that the person did not
-  publish. Leaves =MUST= use =identity_leaf_salted=. Membership =MUST= be
-  proven in zero knowledge.
+  publish. Leaves =MUST= use =identity_leaf_salted=, or =receiving_leaf=
+  where the subtree is an identity registry whose members address Notes.
+  Membership =MUST= be proven in zero knowledge.
 - *public*: membership is a fact the member advertises, for an institution
   acting in a public role. Leaves =MAY= use =identity_leaf=. Membership
   =MAY= be proven by a plain Merkle path, on chain or off.
@@ -733,6 +762,21 @@ mode of [[#publication]] removes it.
 2. *Leaf parity.* =identity_leaf= agrees with every committed vector that
    records it, unchanged. =identity_leaf_salted= agrees across Python, the
    Rust kernel, both bindings and the circuit.
+2a. *Receiving-key leaf.* The collapsed design -- an identity point
+    encrypted under itself -- is scannable with one scalar multiplication
+    per candidate, and keying the same plaintext to =K= is not; a party
+    holding every certified scalar, the whole published subtree and =K=
+    itself decides no membership of a =receiving_leaf=; the holder's
+    binding proof verifies for its own pair and for no other identity;
+    a rotated key yields an unlinkable leaf; and =receiving_leaf= agrees
+    across Python, the Rust kernel, both bindings and the circuit.
+2b. *The folded deposit gate.* A witness exists for the honest spender;
+    a payload thief supplying the stolen receiving key with its own
+    registered identity and account is refused, and refused specifically
+    on the leaf relation; a wrong account key is refused on the credential
+    relation; an unregistered account and a stale root are each refused.
+    Both halves the thief would have passed =MUST= be shown individually
+    true, since that is why the tie cannot be left to inference.
 3. *Salt rules.* Zero salt rejected; the same identity in two subtrees
    yields different leaves; a wallet restored from seed material recomputes
    every salt it used.

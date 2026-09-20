@@ -1936,11 +1936,11 @@ Merkle membership.
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
    import random
-   from alberta_buck.wallet.bn254 import point_to_words
    from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
-   from alberta_buck.wallet.issuer_reenc import H_POINT as H_RK
-   from alberta_buck.wallet.poseidon import F_R, poseidon
    from alberta_buck.wallet.salt import derive_salt
+   from alberta_buck.wallet.deposit_fold import (
+       DepositFoldRefused, deposit_fold_witness,
+   )
    from alberta_buck.registry.tree import IdentityMerkleTree
 
    _seed_rk = random.Random(0xBADDECAF)      # local; the shared transcript is untouched
@@ -2035,50 +2035,39 @@ Merkle membership.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
-   def recv_leaf(M, pk_r, salt):
-       mx, my = point_to_words(M); kx, ky = point_to_words(pk_r)
-       return poseidon([mx % F_R, my % F_R, kx % F_R, ky % F_R, salt])
-
-   def deposit_witness(*, m_id, k_read, sk_acct, b, salt, E_acct, ct, tree):
-       """One witness, four relations, no equality inferred across proofs."""
-       M_id, pk_r = mul(G1, m_id), mul(G1, k_read)
-       M = add(ct.C, neg(mul(ct.R, k_read)))                              # (1)
-       assert eq(E_acct.C, add(M_id, mul(E_acct.R, sk_acct))), \
-           "account credential does not hold this Identity"                # (2)
-       leaf = recv_leaf(M_id, pk_r, salt)
-       assert tree.contains(leaf), \
-           "no registered leaf commits this (Identity, receiving key) pair"  # (3)
-       proof = tree.path(tree.index_of_leaf(leaf))
-       assert proof.verify(), "membership path does not fold to the root"   # (4)
-       return dict(P=add(M, mul(H_RK, b)), M=M, leaf=leaf)
-
    secret_rk = rand_scalar(rng_rk)
    salt_rk = derive_salt(secret_rk, "kyc:ca-ab-2026")
    tree_rk = IdentityMerkleTree(depth=10, private=True)
-   tree_rk.insert_leaf(recv_leaf(M_rec_rk, pk_recv, salt_rk))
-   tree_rk.insert_leaf(recv_leaf(mul(G1, m_thief), mul(G1, rand_scalar(rng_rk)),
-                                 derive_salt(rand_scalar(rng_rk), "kyc:ca-ab-2026")))
+   tree_rk.insert_receiving(M_rec_rk, pk_recv, salt_rk)        # the recipient
+   tree_rk.insert_receiving(mul(G1, m_thief), mul(G1, rand_scalar(rng_rk)),
+                            derive_salt(rand_scalar(rng_rk), "kyc:ca-ab-2026"))
 
-   w = deposit_witness(m_id=m_rec_rk, k_read=k_rk, sk_acct=sk_rk, b=rand_scalar(rng_rk),
-                       salt=salt_rk, E_acct=E_dep_rk, ct=eIss_rk, tree=tree_rk)
-   print(f"honest witness: exists, P commits M_I = {eq(w['M'], M_I_rk)}")
+   # deposit_fold_witness carries the four relations over ONE witness and
+   # refuses on the one that fails.  It is the reference the circuit is
+   # checked against, so this block runs the shipped gate, not a sketch.
+   w = deposit_fold_witness(m_rec=m_rec_rk, k=k_rk, sk_dep=sk_rk, salt=salt_rk,
+                            E_dep=E_dep_rk, note_ct=eIss_rk, tree=tree_rk,
+                            b=rand_scalar(rng_rk))
+   print(f"honest witness: exists, P commits M_I = {eq(w.M, M_I_rk)}")
    try:
-       deposit_witness(m_id=m_thief, k_read=k_rk, sk_acct=sk_thief, b=rand_scalar(rng_rk),
-                       salt=salt_rk, E_acct=E_thief, ct=eIss_rk, tree=tree_rk)
+       deposit_fold_witness(m_rec=m_thief, k=k_rk, sk_dep=sk_thief, salt=salt_rk,
+                            E_dep=E_thief, note_ct=eIss_rk, tree=tree_rk,
+                            b=rand_scalar(rng_rk))
        print("thief witness: BUILT (must not happen!)")
-   except AssertionError as exc:
-       print(f"thief witness: REFUSED ({exc})")
+   except DepositFoldRefused as exc:
+       print(f"thief witness: REFUSED on relation {exc.relation}")
    k2 = rand_scalar(rng_rk); salt2 = derive_salt(secret_rk, "kyc:ca-ab-2026", 1)
-   tree_rk.insert_leaf(recv_leaf(M_rec_rk, mul(G1, k2), salt2))
-   w2 = deposit_witness(m_id=m_rec_rk, k_read=k2, sk_acct=sk_rk, b=rand_scalar(rng_rk),
-                        salt=salt2, E_acct=E_dep_rk,
-                        ct=elgamal_encrypt(M_I_rk, mul(G1, k2), rand_scalar(rng_rk)), tree=tree_rk)
-   print(f"rotated key:   spends, under an unlinkable leaf = {w2['leaf'] != w['leaf']}")
+   tree_rk.insert_receiving(M_rec_rk, mul(G1, k2), salt2)
+   w2 = deposit_fold_witness(m_rec=m_rec_rk, k=k2, sk_dep=sk_rk, salt=salt2,
+                             E_dep=E_dep_rk, tree=tree_rk, b=rand_scalar(rng_rk),
+                             note_ct=elgamal_encrypt(M_I_rk, mul(G1, k2),
+                                                     rand_scalar(rng_rk)))
+   print(f"rotated key:   spends, under an unlinkable leaf = {w2.leaf != w.leaf}")
    #+END_SRC
 
    #+RESULTS:
    : honest witness: exists, P commits M_I = True
-   : thief witness: REFUSED (no registered leaf commits this (Identity, receiving key) pair)
+   : thief witness: REFUSED on relation 3
    : rotated key:   spends, under an unlinkable leaf = True
    #+LATEX: }
 
@@ -2108,8 +2097,12 @@ Merkle membership.
    the question never arises.
 
    *Where to read further.*  The architecture of record, with the blast radius
-   and the open questions, is =doc/review/notes-receiving-key.org=; the same
-   checks run standalone in =scripts/review/receiving_key_proto.py=,
+   and the open questions, is =doc/review/notes-receiving-key.org=.  The
+   shipped surface is =wallet/recvkey.py= (the key, its seed derivation and
+   its binding evidence), =registry/tree.py= =receiving_leaf= (the leaf that
+   commits the pair) and =wallet/deposit_fold.py= (the gate above), with
+   twenty-six tests in =alberta_buck/test/test_receiving_key.py=.  The same
+   arguments also run standalone in =scripts/review/receiving_key_proto.py=,
    =deposit_gate_split.py= and =deposit_gate_folded.py=.
 
 ** A1 in Code: The Public-Issuer Addressed Cycle

@@ -359,6 +359,17 @@ Five things the survey had left open, each of which reduces the work.
    the whole published subtree decides no membership. 165 passed across
    the accumulator, registry, unilateral-A2, wallet, vectors,
    kernel-backend, issuer and review suites.
+
+   Extended on 2026-09-20 with the receiving-key architecture that
+   settled finding R5 ([[file:notes-receiving-key.org][its own document]]):
+   =receiving_leaf= and =insert_receiving= in =registry/tree.py=, the
+   third leaf function of the specification; =wallet/recvkey.py=, the
+   receiving key derived from seed material rather than from the identity,
+   with its holder-produced binding evidence; and
+   =wallet/deposit_fold.py=, the folded deposit gate whose four relations
+   over one witness refuse a payload thief that a split gate admits.
+   =alberta_buck/test/test_receiving_key.py= carries twenty-six tests,
+   including the theft as a test rather than a warning.
 3. *Circuits.* Started. =circuits/identity_membership.circom= now hashes
    the salt into the leaf as a private input, so the native membership
    circuit proves membership of a hiding commitment; it is rebuilt as a
@@ -373,8 +384,10 @@ Five things the survey had left open, each of which reduces the work.
    =T = b*H= with the existing fixed-base gadget rather than witnessing
    =T=; range-check the 64-bit limbs; complete the addition), the
    hash-to-curve generator that retires =H_SCALAR=, the mitigation-B fold
-   of membership into the note-binding circuits, the B1 circuit, and the
-   aggregator depth raise from 10 to 20. The depth was raised and backed
+   of membership into the note-binding circuits, the B1 circuit, the
+   folded deposit gate and the A1/A2 payload substitution it belongs with
+   ([[file:notes-receiving-key.org::#sequencing][why those cannot land
+   alone]]), and the aggregator depth raise from 10 to 20. The depth was raised and backed
    out on 2026-09-20: it re-folds every identity root, including the one
    committed in the Notes end-to-end fixtures, and regenerating those
    runs the note-binding prover over a 2.4M-constraint circuit. The

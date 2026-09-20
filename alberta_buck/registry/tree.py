@@ -77,6 +77,56 @@ def identity_leaf_salted(M, salt: int) -> int:
     return poseidon([x % F_R, y % F_R, salt])
 
 
+def receiving_leaf(M, pk_recv, salt: int) -> int:
+    """Compute the hiding leaf commitment Poseidon(M.x, M.y, pk.x, pk.y, salt).
+
+    The leaf of a private IDENTITY-REGISTRY subtree, which must bind two
+    things rather than one: the Identity that a note names, and the receiving
+    key that a note is encrypted to.
+
+    Why the pair belongs in one leaf.  Addressed Notes are keyed to
+    ``pk_recv``, not to the identity point, because an identity scalar is a
+    read capability the design discloses to every counterparty and so cannot
+    also be a decryption key (alberta_buck.wallet.recvkey).  That separation
+    buys the privacy and creates an obligation: a note addressed to a key of
+    the payer's choosing would break mutual decryptability and the receipt, so
+    the receiving key MUST be bound to the Identity -- and the spend gate must
+    prove that binding rather than assume it.
+
+    Why it is committed rather than published.  A spend proving against a
+    PUBLIC binding would reveal the recipient's registered receiving key and
+    deanonymise them to everyone, which is worse than the problem being
+    solved.  Under the holder's own salt the leaf is provable in zero
+    knowledge and unscannable to a party holding every certified identity, the
+    whole published subtree, and ``pk_recv`` itself -- the last because
+    deciding a ciphertext's addressee from the public key alone is DDH.
+
+    What it prevents.  A gate that proved "I can read this note" and "I am
+    this registered Identity" side by side would state nothing about their
+    owner: a thief holding a stolen payload supplies the reading half with the
+    stolen key and the Identity half with its OWN registered Identity, both
+    true, neither joining them.  This leaf is the relation that joins them,
+    and it is finding 5's lesson in a second place -- never infer equality
+    from two proofs that merely share a public point.
+
+    Args:
+        M: A BN254 G1 point, the holder's Identity.
+        pk_recv: A BN254 G1 point, the holder's receiving key (= k*G).
+        salt: The holder's blinding value for THIS subtree, in [1, F_R).
+
+    Returns:
+        Poseidon hash as a field element in [0, F_R).
+
+    Raises:
+        ValueError: if salt is outside [1, F_R).
+    """
+    if not isinstance(salt, int) or not (1 <= salt < F_R):
+        raise ValueError("salt must be in [1, F_R); 0 makes the leaf deterministic")
+    x, y = point_to_words(M)
+    kx, ky = point_to_words(pk_recv)
+    return poseidon([x % F_R, y % F_R, kx % F_R, ky % F_R, salt])
+
+
 # --- Tree depths ---------------------------------------------------------- #
 #
 # THREE depths, and they are meant to differ.  This has been mistaken for an
@@ -267,6 +317,31 @@ class IdentityMerkleTree:
             The leaf's index in the tree.
         """
         return self.insert_leaf(identity_leaf_salted(M, salt))
+
+    def insert_receiving(self, M, pk_recv, salt: int) -> int:
+        """Insert the (Identity, receiving key) pair under the hiding leaf.
+
+        The admission an identity registry performs: the holder derives the
+        salt and the receiving key from its own seed material
+        (alberta_buck.wallet.salt, alberta_buck.wallet.recvkey) and sends
+        ``(M, pk_recv, salt)``; the authority, which knows ``M`` already,
+        computes the leaf and inserts it.  No proof is required or useful at
+        admission -- the authority is certifying ``M``, and a holder who lies
+        about its own receiving key only makes its own notes unspendable.
+
+        Rotation is a re-association: insert at an incremented counter and
+        clear the old leaf (accumulator specification, section 8.3).  The two
+        leaves share no salt, so they do not link.
+
+        Args:
+            M: A BN254 G1 point representing the identity.
+            pk_recv: The holder's receiving key for addressed Notes.
+            salt: The holder's blinding value for THIS subtree.
+
+        Returns:
+            The leaf's index in the tree.
+        """
+        return self.insert_leaf(receiving_leaf(M, pk_recv, salt))
 
     def clear_leaf(self, index: int) -> int:
         """Clear a leaf to EMPTY_LEAF: the revocation primitive.
@@ -462,5 +537,6 @@ __all__ = [
     "MembershipProof",
     "identity_leaf",
     "identity_leaf_salted",
+    "receiving_leaf",
     "EMPTY_LEAF",
 ]
